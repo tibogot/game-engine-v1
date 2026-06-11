@@ -118,10 +118,16 @@ function buildUniforms(rp) {
     uPlayerShadowEnabled: uniform(rp.playerShadowEnabled !== false ? 1 : 0),
     uExclusionEnabled: uniform(rp.exclusionEnabled ? 1 : 0),
     uExclusionThreshold: uniform(rp.exclusionThreshold ?? 0.25),
+    // Slope rejection (same semantics as Gemini/Hybrid): grass fades out as
+    // terrainNormal.y drops through [uSlopeMax .. uSlopeMin]. Stochastic keep
+    // because revo visibility is binary.
+    uSlopeEnabled: uniform(rp.slopeEnabled !== false ? 1 : 0),
+    uSlopeMin: uniform(rp.slopeMin ?? 0.65),
+    uSlopeMax: uniform(rp.slopeMax ?? 0.85),
   };
 }
 
-function createSsbo(config, uniforms, { heightTex, windTex, exclusionTex }) {
+function createSsbo(config, uniforms, { heightTex, windTex, exclusionTex, terrainNormalTex }) {
   const buffer1 = instancedArray(config.count, "vec4");
   const buffer2 = instancedArray(config.count, "vec4");
   /** Packed per-blade scratch — .x = visibility, .y = shadow, .z = wind noise,
@@ -296,9 +302,21 @@ function createSsbo(config, uniforms, { heightTex, windTex, exclusionTex }) {
       step(uniforms.uExclusionThreshold, texture(exclusionTex, terrainUV).g),
       uniforms.uExclusionEnabled,
     );
+
+    /** Slope rejection — keep-probability from the precomputed terrain normal
+     *  (same texture Gemini/Hybrid use, rebuilt on sculpt). Stochastic step
+     *  keeps revo's binary visibility model. */
+    const slopeProb = mix(
+      float(1),
+      smoothstep(uniforms.uSlopeMin, uniforms.uSlopeMax, texture(terrainNormalTex, terrainUV).y),
+      uniforms.uSlopeEnabled,
+    );
+    const slopeKeep = step(hash(instanceIndex.add(60493)), slopeProb);
+
     const isVisible = stochasticKeep
       .mul(frustumVis)
       .mul(exclAlpha)
+      .mul(slopeKeep)
       .mul(step(float(-500), yOffset));
 
     /** Write defaults so culled blades skip the expensive trail/wind/shadow work.
@@ -509,6 +527,15 @@ export class RevoGrassSystem {
     this._renderer = renderer;
     this._heightTex = heightTex;
     this._geminiDensityTex = opts.geminiDensityTex ?? null;
+    this._terrainNormalTex = opts.terrainNormalTex ?? null;
+    if (!this._terrainNormalTex) {
+      // fallback: flat up-normal → slope rejection becomes a no-op
+      const d = new Float32Array([0, 1, 0, 1]);
+      this._terrainNormalTex = new THREE.DataTexture(
+        d, 1, 1, THREE.RGBAFormat, THREE.FloatType,
+      );
+      this._terrainNormalTex.needsUpdate = true;
+    }
     this._exclusionTex = this.resolveExclusionTexture(
       toolState.revoGrass,
       this._geminiDensityTex,
@@ -567,6 +594,7 @@ export class RevoGrassSystem {
       heightTex: this._heightTex,
       windTex: this._windTex,
       exclusionTex: this._exclusionTex,
+      terrainNormalTex: this._terrainNormalTex,
     });
     const geom = createRevoBladeGeometry(cfg);
     const mat = createMaterial(this._ssbo, u);
@@ -652,6 +680,9 @@ export class RevoGrassSystem {
     u.uPlayerShadowEnabled.value = rp.playerShadowEnabled !== false ? 1 : 0;
     u.uExclusionEnabled.value = rp.exclusionEnabled ? 1 : 0;
     u.uExclusionThreshold.value = rp.exclusionThreshold ?? 0.25;
+    u.uSlopeEnabled.value = rp.slopeEnabled !== false ? 1 : 0;
+    u.uSlopeMin.value = rp.slopeMin ?? 0.65;
+    u.uSlopeMax.value = rp.slopeMax ?? 0.85;
     if (sunDir) u.uSunDir.value.copy(sunDir);
     this.setEnabled(rp.enabled);
   }
@@ -677,6 +708,11 @@ export class RevoGrassSystem {
       }
     }
     u.uWindIntensity.value = (rp.windIntensity ?? 1) * _intensityMul;
+    if (opts.slopeWindow) {
+      // linked to auto-cliff: caller supplies converted normal.y thresholds
+      u.uSlopeMin.value = opts.slopeWindow.min;
+      u.uSlopeMax.value = opts.slopeWindow.max;
+    }
 
     const dx = anchorPos.x - this._lastAnchor.x;
     const dz = anchorPos.z - this._lastAnchor.z;

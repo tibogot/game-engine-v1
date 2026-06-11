@@ -72,6 +72,49 @@ export class GrassManager {
     this._cliffOccupancy = new Uint8Array(32 * 32);
   }
 
+  /**
+   * Serialize the painted grass density (main + cliff) for the project file.
+   * Same base64 scheme the paint masks use. Returns null-able B64 strings so an
+   * unpainted cliff layer costs nothing.
+   */
+  exportDensity() {
+    const enc = (bytes) => {
+      let binary = "";
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      return btoa(binary);
+    };
+    return {
+      res: this.densityRes,
+      densityB64: enc(this.densityTex.image.data),
+      cliffDensityB64: this._hasCliffData
+        ? enc(this.cliffDensityTex.image.data)
+        : null,
+    };
+  }
+
+  /** Restore painted density saved by exportDensity(). */
+  importDensity(payload) {
+    if (!payload?.densityB64) return false;
+    const dec = (b64, target) => {
+      const binary = atob(b64);
+      if (binary.length !== target.length) return false;
+      for (let i = 0; i < binary.length; i++) target[i] = binary.charCodeAt(i);
+      return true;
+    };
+    const okMain = dec(payload.densityB64, this.densityTex.image.data);
+    if (okMain) this.densityTex.needsUpdate = true;
+    if (payload.cliffDensityB64) {
+      if (dec(payload.cliffDensityB64, this.cliffDensityTex.image.data)) {
+        this.cliffDensityTex.needsUpdate = true;
+        this._hasCliffData = true;
+      }
+    }
+    return okMain;
+  }
+
   init(heightTex, sunDir, grassState, { groundColorAtWorldXZ } = {}) {
     if (this._initialized) return;
     this._initialized = true;

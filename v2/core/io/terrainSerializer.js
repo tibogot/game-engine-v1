@@ -503,6 +503,11 @@ function extractSerializableSettings(toolState) {
     }),
     treeSlots: toolState.treeSlots.map((s) => ({ ...s, foliage: { ...s.foliage } })),
     grass: { ...toolState.grass },
+    // Gemini/hybrid grass placement (the painted density map). Only stored when
+    // grass is enabled, so projects that don't use it stay small.
+    grassDensity: toolState.grass?.enabled
+      ? (toolState._grassDensityExportData?.() ?? null)
+      : null,
     revoGrass: { ...toolState.revoGrass },
     revoGrassMask: toolState._revoGrassMaskExportData?.() ?? null,
     snow: { ...toolState.snow },

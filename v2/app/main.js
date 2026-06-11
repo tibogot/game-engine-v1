@@ -3608,6 +3608,7 @@ export async function startV2App(opts = {}) {
       toolState._splineExportData = () => splineSystem.exportData();
       toolState._decalExportData = () => decalSystem.exportData();
       toolState._billboardGrassExportData = () => billboardGrassStore.toJSON();
+      toolState._grassDensityExportData = () => grassManager.exportDensity();
       toolState._revoGrassMaskExportData = () =>
         revoGrassSystem.mask.exportData();
       toolState._snowMaskExportData = () => snowSystem.mask.exportData();
@@ -3639,6 +3640,7 @@ export async function startV2App(opts = {}) {
       delete toolState._splineExportData;
       delete toolState._decalExportData;
       delete toolState._billboardGrassExportData;
+      delete toolState._grassDensityExportData;
       delete toolState._revoGrassMaskExportData;
       delete toolState._snowMaskExportData;
       delete toolState._cliffPaintMaskExportData;
@@ -3686,6 +3688,19 @@ export async function startV2App(opts = {}) {
         }
         // Restore settings
         applySettings(toolState, project.settings);
+        // Gemini/hybrid grass: restore the painted density map, then rebuild
+        // blade geometry + visibility from the restored params. (applySettings
+        // already put the params back into toolState.grass.)
+        if (project.settings?.grassDensity) {
+          grassManager.importDensity(project.settings.grassDensity);
+        }
+        if (toolState.grass?.enabled) {
+          grassManager.syncUniforms(toolState.grass, sunDir);
+          grassManager.rebuildGeometries(toolState.grass);
+          if (hybridGrassRings) {
+            rebuildHybridGrassGeometries(hybridGrassRings, toolState.grass);
+          }
+        }
         if (project.settings?.revoGrassMask) {
           revoGrassSystem.mask.importData(project.settings.revoGrassMask);
         }
@@ -4277,6 +4292,7 @@ export async function startV2App(opts = {}) {
 
   await revoGrassSystem.init(renderer, globalHeightTex, sunDir, toolState, {
     geminiDensityTex: grassManager.densityTex,
+    terrainNormalTex: grassManager.terrainNormalTex,
   });
   if (toolState.revoGrass.enabled) {
     await revoGrassSystem.precompile(renderer, camera);
@@ -5904,10 +5920,27 @@ export async function startV2App(opts = {}) {
     // grass still sways gently between gusts.
     const _gustI = windGust.update();
     const _gustStrengthMul = 0.45 + 0.55 * _gustI;
+    /** Auto-cliff link: convert the cliff shader's flatness thresholds
+     *  (flatness = 1/(1+|∇h|)) into the grass systems' normal.y metric
+     *  (n.y = 1/√(1+|∇h|²)) so "rock fades in" === "grass fades out".
+     *  bias > 0 → grass tolerates steeper ground (clings onto rock). */
+    const _flatToNy = (f) => {
+      const st = 1 / Math.max(f, 1e-3) - 1;
+      return 1 / Math.sqrt(1 + st * st);
+    };
+    const _linkedSlope = (bias = 0) => ({
+      min: _flatToNy(toolState.autoCliff.slopeStart) - bias,
+      max: _flatToNy(toolState.autoCliff.slopeEnd) - bias,
+    });
     if (grassManager.uniforms) {
       grassManager.uniforms.uPlayerPos.value.copy(focusPos);
       grassManager.uniforms.uWindStrength.value =
         (toolState.grass.windStrength ?? 1.4) * _gustStrengthMul;
+      if (toolState.grass.slopeLinkToCliff) {
+        const w = _linkedSlope(toolState.grass.slopeBias ?? 0);
+        grassManager.uniforms.uSlopeMin.value = w.min;
+        grassManager.uniforms.uSlopeMax.value = w.max;
+      }
     }
     const _gpGrass = toolState.grass;
     const _hybridGrassOn = _gpGrass.renderMode === "hybrid" && _gpGrass.enabled;
@@ -5938,6 +5971,11 @@ export async function startV2App(opts = {}) {
         if (_ringOn) {
           ring.syncFromState(_gpGrass, _hybridSun);
           ring.u.uWindStrength.value *= _gustStrengthMul; // gust cycle
+          if (_gpGrass.slopeLinkToCliff) {
+            const w = _linkedSlope(_gpGrass.slopeBias ?? 0);
+            ring.u.uSlopeMin.value = w.min;
+            ring.u.uSlopeMax.value = w.max;
+          }
           ring.update(focusPos, camera);
         }
       }
@@ -5952,6 +5990,9 @@ export async function startV2App(opts = {}) {
       revoGrassSystem.update(toolState.revoGrass, focusPos, camera, {
         playMode: playMode.active,
         gustMul: _gustI,
+        slopeWindow: toolState.revoGrass.slopeLinkToCliff
+          ? _linkedSlope(toolState.revoGrass.slopeBias ?? 0)
+          : null,
       });
     }
     const _pGrass = performance.now();

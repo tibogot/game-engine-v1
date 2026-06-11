@@ -11073,6 +11073,39 @@
           onClick: () => app.revoGrassMaskLoad(),
         });
 
+        const revoSlopeBody = _section(panel, "Slope rejection", false);
+        _toggle(revoSlopeBody, rp, "slopeEnabled", {
+          label: "Enabled",
+          onChange: rCh,
+        });
+        _toggle(revoSlopeBody, rp, "slopeLinkToCliff", {
+          label: "Link to auto-cliff",
+          hint: "Thresholds follow the auto-cliff sliders — grass fades exactly where rock paints in. Manual min/max below apply when off.",
+          onChange: rCh,
+        });
+        _slider(revoSlopeBody, rp, "slopeBias", {
+          label: "Bias (linked)",
+          hint: "+ grass climbs onto rock, − grass retreats earlier",
+          min: -0.15,
+          max: 0.15,
+          step: 0.005,
+          onChange: rCh,
+        });
+        _slider(revoSlopeBody, rp, "slopeMin", {
+          label: "Fade end (steep)",
+          min: 0.0,
+          max: 1.0,
+          step: 0.01,
+          onChange: rCh,
+        });
+        _slider(revoSlopeBody, rp, "slopeMax", {
+          label: "Fade start (gentle)",
+          min: 0.0,
+          max: 1.0,
+          step: 0.01,
+          onChange: rCh,
+        });
+
         const perfBody = _section(panel, "Perf / wind", false);
         // (compute interval slider removed — the wind sim now runs every
         // frame like the original revo-realms; throttling caused stepped
@@ -11571,6 +11604,19 @@
         const slopeBody = _section(panel, "Slope rejection", false);
         _toggle(slopeBody, gp, "slopeEnabled", {
           label: "Enabled",
+          onChange: gCh,
+        });
+        _toggle(slopeBody, gp, "slopeLinkToCliff", {
+          label: "Link to auto-cliff",
+          hint: "Thresholds follow the auto-cliff sliders — grass fades exactly where rock paints in. Manual min/max below apply when off.",
+          onChange: gCh,
+        });
+        _slider(slopeBody, gp, "slopeBias", {
+          label: "Bias (linked)",
+          hint: "+ grass climbs onto rock, − grass retreats earlier",
+          min: -0.15,
+          max: 0.15,
+          step: 0.005,
           onChange: gCh,
         });
         _slider(slopeBody, gp, "slopeMin", {

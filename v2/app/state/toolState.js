@@ -1370,6 +1370,13 @@ export function createToolState() {
       bladesPerSide: 512,
       segments: 3,
       receiveShadow: false,
+      // Slope rejection (same semantics as Gemini/Hybrid grass): linked to
+      // autoCliff by default, slopeBias fine-tunes, manual window when off.
+      slopeEnabled: true,
+      slopeLinkToCliff: true,
+      slopeBias: 0,
+      slopeMin: 0.65,
+      slopeMax: 0.85,
       bladeHeight: 1.75,
       bladeWidth: 0.06,
       bladeMinScale: 0.75,
@@ -1575,6 +1582,12 @@ export function createToolState() {
       terrainTintManualMode: 1,
       terrainTintRootBias: 0.35,
       slopeEnabled: true,
+      // Linked mode: thresholds derive from autoCliff.slopeStart/End (one
+      // global "too steep" line); slopeBias shifts them per-system
+      // (+ = grass climbs steeper / clings onto rock). Manual min/max used
+      // when the link is off.
+      slopeLinkToCliff: true,
+      slopeBias: 0,
       slopeMin: 0.65,
       slopeMax: 0.85,
     },
