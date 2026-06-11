@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Editor UI Mockup</title>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+  }
+}
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg-darkest: #1a1a1a;
+    --bg-dark: #222222;
+    --bg-panel: #2a2a2a;
+    --bg-item: #333333;
+    --bg-hover: #3a3a3a;
+    --bg-selected: #264f78;
+    --bg-input: #1e1e1e;
+    --border: #3c3c3c;
+    --border-light: #4a4a4a;
+    --text: #cccccc;
+    --text-dim: #888888;
+    --text-bright: #e0e0e0;
+    --accent: #4a9eff;
+    --accent-dim: #2a6fbb;
+    --accent-glow: rgba(74, 158, 255, 0.15);
+    --green: #5cb85c;
+    --orange: #e8912d;
+    --red: #d9534f;
+    --yellow: #f0c040;
+    --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    --radius: 4px;
+    --left-w: 260px;
+    --right-w: 320px;
+    --bottom-h: 220px;
+    --toolbar-h: 36px;
+  }
+
+  html, body { height: 100%; overflow: hidden; font-family: var(--font); font-size: 13px; color: var(--text); background: var(--bg-darkest); user-select: none; }
+
+  /* === MAIN GRID === */
+  #app {
+    display: grid;
+    grid-template-columns: var(--left-w) 4px 1fr 4px var(--right-w);
+    grid-template-rows: var(--toolbar-h) 1fr 4px var(--bottom-h);
+    height: 100%;
+    width: 100%;
+  }
+
+  /* === SPLITTERS === */
+  .splitter { background: var(--bg-darkest); position: relative; z-index: 20; }
+  .splitter::after { content: ''; position: absolute; transition: background 0.15s; }
+  .splitter:hover::after, .splitter.active::after { background: var(--accent); }
+  .splitter-h { cursor: col-resize; }
+  .splitter-h::after { top: 0; bottom: 0; left: 1px; width: 2px; }
+  .splitter-v { cursor: row-resize; }
+  .splitter-v::after { left: 0; right: 0; top: 1px; height: 2px; }
+  #splitter-left  { grid-column: 2; grid-row: 2 / -1; }
+  #splitter-right { grid-column: 4; grid-row: 2 / -1; }
+  #splitter-bottom { grid-column: 3; grid-row: 3; }
+
+  /* === TOP TOOLBAR === */
+  #toolbar {
+    grid-column: 1 / -1; grid-row: 1;
+    background: var(--bg-dark); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 8px; gap: 2px;
+  }
+  .toolbar-group { display: flex; align-items: center; gap: 2px; padding: 0 6px; border-right: 1px solid var(--border); height: 100%; }
+  .toolbar-group:last-child { border-right: none; }
+  .toolbar-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; background: none; border: none; border-radius: var(--radius);
+    color: var(--text-dim); cursor: pointer;
+  }
+  .toolbar-btn:hover { background: var(--bg-hover); color: var(--text-bright); }
+  .toolbar-btn.active { background: var(--bg-selected); color: var(--accent); }
+  .toolbar-btn i { width: 16px; height: 16px; }
+  .toolbar-title { font-weight: 600; font-size: 12px; color: var(--text-dim); letter-spacing: 0.5px; margin-right: auto; padding-left: 4px; }
+  .toolbar-btn-text {
+    display: flex; align-items: center; gap: 4px; padding: 4px 10px; height: 28px;
+    background: none; border: none; border-radius: var(--radius);
+    color: var(--text-dim); cursor: pointer; font-size: 12px; font-family: var(--font); white-space: nowrap;
+  }
+  .toolbar-btn-text:hover { background: var(--bg-hover); color: var(--text-bright); }
+
+  /* === LEFT: SCENE HIERARCHY === */
+  #hierarchy {
+    grid-column: 1; grid-row: 2 / -1;
+    background: var(--bg-panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; height: 32px; min-height: 32px;
+    background: var(--bg-dark); border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-dim);
+  }
+  .panel-header-actions { display: flex; gap: 2px; }
+  .panel-header-actions button {
+    display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; background: none; border: none; border-radius: var(--radius);
+    color: var(--text-dim); cursor: pointer;
+  }
+  .panel-header-actions button:hover { background: var(--bg-hover); color: var(--text-bright); }
+  .panel-search {
+    display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--border);
+  }
+  .panel-search input {
+    flex: 1; height: 24px; background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 0 8px; color: var(--text); font-size: 12px; font-family: var(--font); outline: none;
+  }
+  .panel-search input:focus { border-color: var(--accent); }
+  .panel-search i { color: var(--text-dim); width: 14px; height: 14px; }
+
+  .tree-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+  .tree-item {
+    display: flex; align-items: center; gap: 4px;
+    padding: 3px 8px 3px calc(8px + var(--depth, 0) * 16px);
+    cursor: pointer; white-space: nowrap; height: 26px; border-left: 2px solid transparent;
+  }
+  .tree-item:hover { background: var(--bg-hover); }
+  .tree-item.selected { background: var(--bg-selected); border-left-color: var(--accent); }
+  .tree-item .tree-icon { width: 16px; height: 16px; flex-shrink: 0; }
+  .tree-item .tree-icon.folder-icon { color: var(--yellow); }
+  .tree-item .tree-icon.mesh-icon { color: var(--accent); }
+  .tree-item .tree-icon.light-icon { color: var(--yellow); }
+  .tree-item .tree-icon.camera-icon { color: var(--green); }
+  .tree-item .tree-icon.terrain-icon { color: var(--green); }
+  .tree-item .tree-icon.water-icon { color: #4fc3f7; }
+  .tree-item .tree-icon.road-icon { color: var(--text-dim); }
+  .tree-item .tree-label { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .tree-item .tree-vis {
+    width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim); opacity: 0; transition: opacity 0.1s;
+  }
+  .tree-item:hover .tree-vis { opacity: 1; }
+  .tree-expand {
+    width: 16px; height: 16px; display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim); flex-shrink: 0; transition: transform 0.15s;
+  }
+  .tree-expand.collapsed { transform: rotate(-90deg); }
+  .tree-expand.empty { visibility: hidden; }
+
+  /* === CENTER: VIEWPORT === */
+  #viewport {
+    grid-column: 3; grid-row: 2; background: var(--bg-darkest);
+    display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;
+  }
+  #viewport canvas#viewCanvas {
+    position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+    z-index: 2; outline: none;
+  }
+  .viewport-grid {
+    position: absolute; inset: 0; z-index: 1;
+    background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+  .viewport-label {
+    color: var(--text-dim); font-size: 14px; z-index: 1;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+  }
+  .viewport-label i { width: 48px; height: 48px; opacity: 0.3; }
+
+  /* === BOTTOM: FILE BROWSER === */
+  #assets {
+    grid-column: 3; grid-row: 4; background: var(--bg-panel); border-top: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .asset-toolbar {
+    display: flex; align-items: center; gap: 4px; padding: 0 8px; height: 32px; min-height: 32px;
+    background: var(--bg-dark); border-bottom: 1px solid var(--border);
+  }
+  .asset-toolbar .breadcrumb {
+    display: flex; align-items: center; gap: 2px; flex: 1; font-size: 12px; color: var(--text-dim);
+  }
+  .breadcrumb span { cursor: pointer; padding: 2px 4px; border-radius: var(--radius); }
+  .breadcrumb span:hover { background: var(--bg-hover); color: var(--text); }
+  .breadcrumb .sep { color: var(--border-light); cursor: default; }
+  .breadcrumb .sep:hover { background: none; }
+  .breadcrumb .current { color: var(--text); }
+  .asset-body { display: flex; flex: 1; overflow: hidden; }
+  .asset-sidebar { width: 160px; min-width: 160px; border-right: 1px solid var(--border); overflow-y: auto; padding: 4px 0; }
+  .asset-folder {
+    display: flex; align-items: center; gap: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; white-space: nowrap;
+  }
+  .asset-folder:hover { background: var(--bg-hover); }
+  .asset-folder.selected { background: var(--bg-selected); }
+  .asset-folder i { width: 14px; height: 14px; color: var(--yellow); flex-shrink: 0; }
+  .asset-grid-wrap { flex: 1; overflow-y: auto; padding: 8px; }
+  .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; }
+  .asset-card {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 6px; border-radius: var(--radius); cursor: grab; border: 1px solid transparent;
+  }
+  .asset-card:hover { background: var(--bg-hover); border-color: var(--border); }
+  .asset-card.selected { background: var(--accent-glow); border-color: var(--accent); }
+  .asset-card.dragging { opacity: 0.4; }
+  .asset-thumb {
+    width: 64px; height: 64px; border-radius: var(--radius);
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .asset-thumb.texture { border: 1px solid var(--border); }
+  .asset-thumb.mesh, .asset-thumb.file-icon { background: var(--bg-dark); border: 1px solid var(--border); }
+  .asset-thumb.mesh i, .asset-thumb.file-icon i { width: 28px; height: 28px; color: var(--accent); }
+  .asset-name {
+    font-size: 10px; color: var(--text-dim); text-align: center;
+    max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .fs-empty {
+    grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 30px; color: var(--text-dim); gap: 10px; text-align: center;
+  }
+  .fs-empty i { width: 32px; height: 32px; opacity: 0.3; }
+  .fs-open-btn {
+    margin-top: 6px; padding: 6px 16px; background: var(--accent); color: white; border: none;
+    border-radius: var(--radius); font-size: 12px; font-family: var(--font); cursor: pointer; font-weight: 600;
+  }
+  .fs-open-btn:hover { background: var(--accent-dim); }
+
+  /* === RIGHT PANEL (TABBED) === */
+  #right-panel {
+    grid-column: 5; grid-row: 2 / -1; background: var(--bg-panel); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .tab-bar {
+    display: flex; background: var(--bg-dark); border-bottom: 1px solid var(--border); min-height: 32px;
+  }
+  .tab-btn {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+    padding: 0 10px; height: 32px; background: none; border: none;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase;
+    color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--text); background: var(--bg-hover); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-btn i { width: 14px; height: 14px; }
+  .tab-content { flex: 1; overflow-y: auto; display: none; }
+  .tab-content.active { display: block; }
+
+  /* shared section / prop styles */
+  .inspector-section { border-bottom: 1px solid var(--border); }
+  .section-header {
+    display: flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer;
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-dim);
+  }
+  .section-header:hover { background: var(--bg-hover); }
+  .section-header .section-arrow { width: 14px; height: 14px; transition: transform 0.15s; }
+  .section-header.collapsed .section-arrow { transform: rotate(-90deg); }
+  .section-body { padding: 6px 12px 10px; }
+  .section-body.hidden { display: none; }
+  .prop-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; min-height: 26px; }
+  .prop-label { width: 80px; min-width: 80px; font-size: 11px; color: var(--text-dim); text-align: right; padding-right: 4px; }
+  .prop-value { flex: 1; display: flex; gap: 4px; }
+  .prop-input {
+    flex: 1; height: 22px; background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 0 6px; color: var(--text); font-size: 12px; font-family: var(--font-mono); outline: none; min-width: 0;
+  }
+  .prop-input:focus { border-color: var(--accent); }
+  .prop-input.x { border-left: 2px solid var(--red); }
+  .prop-input.y { border-left: 2px solid var(--green); }
+  .prop-input.z { border-left: 2px solid var(--accent); }
+  .prop-color { width: 22px; height: 22px; border-radius: var(--radius); border: 1px solid var(--border); cursor: pointer; flex-shrink: 0; }
+  .prop-slider-wrap { flex: 1; display: flex; align-items: center; gap: 6px; }
+  .prop-slider {
+    flex: 1; height: 4px; -webkit-appearance: none; appearance: none;
+    background: var(--bg-input); border-radius: 2px; outline: none;
+  }
+  .prop-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); cursor: pointer; }
+  .prop-slider-val { width: 36px; font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); text-align: right; }
+  .prop-dropdown {
+    flex: 1; height: 22px; background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 0 6px; color: var(--text); font-size: 12px; font-family: var(--font); outline: none; cursor: pointer;
+  }
+  .toggle-check {
+    width: 14px; height: 14px; border: 1px solid var(--border-light); border-radius: 3px;
+    background: var(--bg-input); cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .toggle-check.checked { background: var(--accent); border-color: var(--accent); }
+  .toggle-check.checked i { width: 10px; height: 10px; color: white; }
+
+  .inspector-object-header {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    background: var(--bg-dark); border-bottom: 1px solid var(--border);
+  }
+  .inspector-object-header i { width: 18px; height: 18px; color: var(--accent); }
+  .inspector-object-name {
+    font-size: 13px; font-weight: 600; color: var(--text-bright);
+    background: none; border: none; outline: none; font-family: var(--font); flex: 1;
+  }
+  .inspector-object-toggle { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-dim); }
+
+  .texture-slot {
+    display: flex; align-items: center; gap: 8px; padding: 4px;
+    border: 1px dashed var(--border); border-radius: var(--radius); min-height: 48px; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .texture-slot:hover { border-color: var(--border-light); }
+  .texture-slot.drag-over { border-color: var(--accent); border-style: solid; background: var(--accent-glow); }
+  .texture-slot .slot-preview {
+    width: 40px; height: 40px; border-radius: var(--radius); background: var(--bg-dark);
+    border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;
+  }
+  .texture-slot .slot-preview i { width: 18px; height: 18px; color: var(--text-dim); }
+  .texture-slot .slot-info { flex: 1; }
+  .texture-slot .slot-label { font-size: 11px; color: var(--text-dim); }
+  .texture-slot .slot-name { font-size: 12px; color: var(--text); margin-top: 2px; }
+  .texture-slot .slot-clear {
+    width: 20px; height: 20px; background: none; border: none; border-radius: var(--radius);
+    color: var(--text-dim); cursor: pointer; display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.1s;
+  }
+  .texture-slot:hover .slot-clear { opacity: 1; }
+  .texture-slot .slot-clear:hover { color: var(--red); background: var(--bg-hover); }
+
+  .empty-inspector {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    flex: 1; color: var(--text-dim); gap: 8px; padding: 40px; text-align: center; min-height: 200px;
+  }
+  .empty-inspector i { width: 32px; height: 32px; opacity: 0.3; }
+  .empty-inspector p { font-size: 12px; line-height: 1.5; }
+
+  /* Tool mode selector in Tools tab */
+  .tool-mode-bar {
+    display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border);
+  }
+  .tool-mode-btn {
+    display: flex; align-items: center; gap: 4px; padding: 4px 10px; height: 26px;
+    background: var(--bg-item); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text-dim); cursor: pointer; font-size: 11px; font-family: var(--font);
+  }
+  .tool-mode-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-light); }
+  .tool-mode-btn.active { background: var(--bg-selected); color: var(--accent); border-color: var(--accent-dim); }
+  .tool-mode-btn i { width: 13px; height: 13px; }
+
+  .drop-feedback {
+    position: fixed; pointer-events: none; z-index: 1000;
+    padding: 4px 10px; border-radius: var(--radius);
+    background: var(--accent); color: white; font-size: 11px; font-weight: 600;
+    opacity: 0; transition: opacity 0.15s;
+  }
+  .drop-feedback.visible { opacity: 1; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+  .status-bar-fake {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 22px;
+    background: var(--bg-dark); border-top: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 10px; gap: 16px;
+    font-size: 11px; color: var(--text-dim); z-index: 100;
+  }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- TOOLBAR -->
+  <div id="toolbar">
+    <div class="toolbar-group"><span class="toolbar-title">TERRAIN ENGINE</span></div>
+    <div class="toolbar-group">
+      <button class="toolbar-btn" title="Save"><i data-lucide="save"></i></button>
+      <button class="toolbar-btn" title="Load"><i data-lucide="folder-open"></i></button>
+      <button class="toolbar-btn" title="Undo"><i data-lucide="undo-2"></i></button>
+      <button class="toolbar-btn" title="Redo"><i data-lucide="redo-2"></i></button>
+    </div>
+    <div class="toolbar-group">
+      <button class="toolbar-btn active" id="tb-move" title="Move (W)"><i data-lucide="move"></i></button>
+      <button class="toolbar-btn" id="tb-rotate" title="Rotate (E)"><i data-lucide="rotate-cw"></i></button>
+      <button class="toolbar-btn" id="tb-scale" title="Scale (R)"><i data-lucide="maximize-2"></i></button>
+    </div>
+    <div class="toolbar-group">
+      <button class="toolbar-btn" title="Sculpt"><i data-lucide="mountain"></i></button>
+      <button class="toolbar-btn" title="Paint"><i data-lucide="paintbrush"></i></button>
+      <button class="toolbar-btn" title="Props"><i data-lucide="box"></i></button>
+      <button class="toolbar-btn" title="Trees"><i data-lucide="tree-pine"></i></button>
+      <button class="toolbar-btn" title="Water"><i data-lucide="waves"></i></button>
+      <button class="toolbar-btn" title="Roads"><i data-lucide="route"></i></button>
+    </div>
+    <div class="toolbar-group" style="margin-left:auto">
+      <button class="toolbar-btn-text" title="Play"><i data-lucide="play" style="width:14px;height:14px;color:var(--green)"></i> Play</button>
+    </div>
+  </div>
+
+  <!-- LEFT: SCENE HIERARCHY -->
+  <div id="hierarchy">
+    <div class="panel-header">
+      <span>Scene Hierarchy</span>
+      <div class="panel-header-actions">
+        <button title="Add object"><i data-lucide="plus" style="width:14px;height:14px"></i></button>
+        <button title="Filter"><i data-lucide="filter" style="width:14px;height:14px"></i></button>
+      </div>
+    </div>
+    <div class="panel-search"><i data-lucide="search"></i><input type="text" placeholder="Search scene..."></div>
+    <div class="tree-list" id="sceneTree"></div>
+  </div>
+
+  <!-- SPLITTERS -->
+  <div id="splitter-left" class="splitter splitter-h"></div>
+  <div id="splitter-right" class="splitter splitter-h"></div>
+  <div id="splitter-bottom" class="splitter splitter-v"></div>
+
+  <!-- CENTER: VIEWPORT -->
+  <div id="viewport">
+    <div class="viewport-grid"></div>
+    <canvas id="viewCanvas" tabindex="0"></canvas>
+    <div class="viewport-label" id="viewportFallback" style="z-index:0">
+      <i data-lucide="monitor"></i>
+      <span>3D Viewport</span>
+      <span style="font-size:11px;opacity:0.5">WebGPU initializing…</span>
+    </div>
+  </div>
+
+  <!-- BOTTOM: FILE BROWSER -->
+  <div id="assets">
+    <div class="asset-toolbar">
+      <div class="breadcrumb" id="fsBreadcrumb">
+        <span class="current">File Browser</span>
+      </div>
+      <div class="panel-header-actions">
+        <button title="Open folder from disk" id="fsOpenBtn"><i data-lucide="hard-drive" style="width:14px;height:14px"></i></button>
+        <button title="Import file" id="fsImportBtn"><i data-lucide="upload" style="width:14px;height:14px"></i></button>
+        <button title="Grid view"><i data-lucide="layout-grid" style="width:14px;height:14px"></i></button>
+        <button title="List view"><i data-lucide="list" style="width:14px;height:14px"></i></button>
+      </div>
+    </div>
+    <div class="asset-body">
+      <div class="asset-sidebar" id="assetFolders"></div>
+      <div class="asset-grid-wrap">
+        <div class="asset-grid" id="assetGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: TABBED PANEL -->
+  <div id="right-panel">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="inspector"><i data-lucide="scan-search"></i> Inspector</button>
+      <button class="tab-btn" data-tab="tools"><i data-lucide="wrench"></i> Tools</button>
+      <button class="tab-btn" data-tab="environment"><i data-lucide="sun-moon"></i> World</button>
+    </div>
+    <div class="tab-content active" id="tab-inspector"></div>
+    <div class="tab-content" id="tab-tools"></div>
+    <div class="tab-content" id="tab-environment"></div>
+  </div>
+
+</div>
+
+<div class="status-bar-fake">
+  <div class="status-dot"></div>
+  <span>Ready</span>
+  <span style="margin-left:auto" id="statFps">FPS: —</span>
+  <span id="statTris">Tris: —</span>
+  <span id="statObjs">Objects: —</span>
+</div>
+<div class="drop-feedback" id="dropFeedback"></div>
+
+<script type="module">
+import * as THREE from 'three/webgpu';
+import { color, oscSine, time } from 'three/tsl';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ===================== DATA (matches WebGPU scene) =====================
+
+const sceneData = [
+  { id: 'scene', label: 'Scene', icon: 'globe', iconClass: 'folder-icon', children: [
+    { id: 'lights', label: 'Lights', icon: 'folder', iconClass: 'folder-icon', children: [
+      { id: 'dirlight', label: 'DirectionalLight', icon: 'sun', iconClass: 'light-icon', children: [] },
+      { id: 'ambient', label: 'AmbientLight', icon: 'lightbulb', iconClass: 'light-icon', children: [] },
+    ]},
+    { id: 'camera', label: 'MainCamera', icon: 'camera', iconClass: 'camera-icon', children: [] },
+    { id: 'props', label: 'Props', icon: 'folder', iconClass: 'folder-icon', children: [
+      { id: 'cube1', label: 'Cube_001', icon: 'box', iconClass: 'mesh-icon', children: [] },
+      { id: 'sphere1', label: 'Sphere_004', icon: 'circle', iconClass: 'mesh-icon', children: [] },
+      { id: 'torus1', label: 'Torus_001', icon: 'donut', iconClass: 'mesh-icon', children: [] },
+    ]},
+  ]},
+];
+
+const inspectorData = {
+  cube1: { name: 'Cube_001', icon: 'box',
+    transform: { px:'0',py:'0.5',pz:'0',rx:'0',ry:'0',rz:'0',sx:'1.5',sy:'1.5',sz:'1.5' },
+    material: { color:'#cccccc',roughness:0.55,metalness:0.15,albedo:null,normal:null } },
+  sphere1: { name: 'Sphere_004', icon: 'circle',
+    transform: { px:'2.5',py:'0.6',pz:'0',rx:'0',ry:'0',rz:'0',sx:'1.0',sy:'1.0',sz:'1.0' },
+    material: { color:'#5588cc',roughness:0.35,metalness:0.65,albedo:null,normal:null } },
+  torus1: { name: 'Torus_001', icon: 'donut',
+    transform: { px:'-2.2',py:'0.55',pz:'0.4',rx:'0',ry:'25',rz:'0',sx:'1',sy:'1',sz:'1' },
+    material: { color:'#8866cc',roughness:0.4,metalness:0.5,albedo:null,normal:null } },
+  dirlight: { name: 'DirectionalLight', icon: 'sun', type: 'light',
+    light: { color:'#fff5e6',intensity:1.35,castShadow:false },
+    transform: { px:'8',py:'12',pz:'6',rx:'-35',ry:'35',rz:'0',sx:'1',sy:'1',sz:'1' } },
+  ambient: { name: 'AmbientLight', icon: 'lightbulb', type: 'light',
+    light: { color:'#3a4055',intensity:0.45,castShadow:false }, transform:null },
+  camera: { name: 'MainCamera', icon: 'camera', type: 'camera',
+    camera: { fov:50,near:0.1,far:200 },
+    transform: { px:'0',py:'4',pz:'9',rx:'-12',ry:'0',rz:'0',sx:'1',sy:'1',sz:'1' } },
+};
+
+/** Maps hierarchy node id → Three.js object (meshes, lights, editor camera) */
+const objectById = new Map();
+let viewportRenderer = null;
+let viewportScene = null;
+let viewportCamera = null;
+
+// ===================== SCENE TREE =====================
+
+let selectedId = null;
+const expandedSet = new Set(['scene','lights','props']);
+
+function deg(n) { return THREE.MathUtils.radToDeg(n); }
+function rad(n) { return THREE.MathUtils.degToRad(n); }
+
+function cloneInspector(id) {
+  const raw = inspectorData[id];
+  if (!raw) return null;
+  return JSON.parse(JSON.stringify(raw));
+}
+
+/** Inspector template + live transform from the WebGPU scene when available */
+function getLiveInspectorData(id) {
+  const data = cloneInspector(id);
+  if (!data) return null;
+  const obj = objectById.get(id);
+  if (!obj) return data;
+  if (data.camera && obj.isPerspectiveCamera) {
+    data.camera.fov = Math.round(obj.fov);
+    data.camera.near = obj.near;
+    data.camera.far = obj.far;
+  }
+  if (data.light && obj.isLight) {
+    data.light.intensity = obj.intensity;
+    data.light.color = '#' + obj.color.getHexString();
+  }
+  if (data.transform) {
+    data.transform.px = obj.position.x.toFixed(2);
+    data.transform.py = obj.position.y.toFixed(2);
+    data.transform.pz = obj.position.z.toFixed(2);
+    data.transform.rx = deg(obj.rotation.x).toFixed(1);
+    data.transform.ry = deg(obj.rotation.y).toFixed(1);
+    data.transform.rz = deg(obj.rotation.z).toFixed(1);
+    data.transform.sx = obj.scale.x.toFixed(2);
+    data.transform.sy = obj.scale.y.toFixed(2);
+    data.transform.sz = obj.scale.z.toFixed(2);
+  }
+  return data;
+}
+
+function countTrianglesInScene(scene) {
+  let t = 0;
+  scene.traverse((o) => {
+    if (!o.isMesh || !o.geometry) return;
+    const g = o.geometry;
+    if (g.index) t += g.index.count / 3;
+    else if (g.attributes.position) t += g.attributes.position.count / 3;
+  });
+  return Math.floor(t);
+}
+
+async function initViewport() {
+  const canvas = document.getElementById('viewCanvas');
+  const container = document.getElementById('viewport');
+  const fallback = document.getElementById('viewportFallback');
+
+  viewportRenderer = new THREE.WebGPURenderer({ canvas, antialias: true, alpha: false });
+  viewportRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  viewportRenderer.setSize(container.clientWidth, container.clientHeight, false);
+  await viewportRenderer.init();
+
+  viewportScene = new THREE.Scene();
+  viewportScene.background = new THREE.Color(0x1a1a1e);
+
+  viewportCamera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 200);
+  viewportCamera.position.set(0, 4, 9);
+  viewportCamera.lookAt(0, 0.3, 0);
+  objectById.set('camera', viewportCamera);
+
+  const ambient = new THREE.AmbientLight(0x3a4055, 0.45);
+  ambient.name = 'AmbientLight';
+  objectById.set('ambient', ambient);
+
+  const dir = new THREE.DirectionalLight(0xfff5e6, 1.35);
+  dir.name = 'DirectionalLight';
+  dir.position.set(8, 12, 6);
+  objectById.set('dirlight', dir);
+
+  const groundMat = new THREE.MeshStandardNodeMaterial();
+  groundMat.roughness = 0.85;
+  groundMat.metalness = 0.05;
+  groundMat.colorNode = color(0x2a2d33);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  ground.name = 'Ground';
+  ground.receiveShadow = false;
+
+  const cubeMat = new THREE.MeshStandardNodeMaterial();
+  cubeMat.roughness = 0.55;
+  cubeMat.metalness = 0.15;
+  cubeMat.colorNode = color(0xcccccc);
+
+  const cube = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), cubeMat);
+  cube.name = 'Cube_001';
+  cube.position.set(0, 0.5, 0);
+  cube.scale.setScalar(1.5);
+  objectById.set('cube1', cube);
+
+  const sphereMat = new THREE.MeshStandardNodeMaterial();
+  sphereMat.roughness = 0.35;
+  sphereMat.metalness = 0.65;
+  sphereMat.colorNode = color(0x5588cc);
+
+  const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.65, 48, 32), sphereMat);
+  sphere.name = 'Sphere_004';
+  sphere.position.set(2.5, 0.6, 0);
+  objectById.set('sphere1', sphere);
+
+  const torusMat = new THREE.MeshStandardNodeMaterial();
+  torusMat.roughness = 0.4;
+  torusMat.metalness = 0.5;
+  torusMat.colorNode = color(0x8866cc).mul(oscSine(time.mul(0.9)).mul(0.12).add(0.88));
+
+  const torus = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.2, 24, 48), torusMat);
+  torus.name = 'Torus_001';
+  torus.position.set(-2.2, 0.55, 0.4);
+  torus.rotation.y = rad(25);
+  objectById.set('torus1', torus);
+
+  viewportScene.add(ambient, dir, ground, cube, sphere, torus);
+
+  const controls = new OrbitControls(viewportCamera, canvas);
+  controls.target.set(0, 0.35, 0);
+  controls.enableDamping = true;
+  controls.update();
+
+  let last = performance.now();
+  let frames = 0;
+  let fps = 0;
+
+  viewportRenderer.setAnimationLoop(() => {
+    controls.update();
+    viewportRenderer.render(viewportScene, viewportCamera);
+    frames++;
+    const now = performance.now();
+    if (now - last >= 500) {
+      fps = Math.round((frames * 1000) / (now - last));
+      frames = 0;
+      last = now;
+      const elFps = document.getElementById('statFps');
+      const elTris = document.getElementById('statTris');
+      const elObjs = document.getElementById('statObjs');
+      if (elFps) elFps.textContent = 'FPS: ' + fps;
+      if (elTris) elTris.textContent = 'Tris: ' + countTrianglesInScene(viewportScene).toLocaleString();
+      if (elObjs) elObjs.textContent = 'Objects: ' + objectById.size;
+    }
+  });
+
+  const ro = new ResizeObserver(() => {
+    if (!viewportRenderer || !viewportCamera || !container) return;
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    viewportCamera.aspect = w / Math.max(h, 1);
+    viewportCamera.updateProjectionMatrix();
+    viewportRenderer.setSize(w, h, false);
+  });
+  ro.observe(container);
+
+  fallback.style.display = 'none';
+}
+
+function renderTree(container, items, depth = 0) {
+  for (const item of items) {
+    const hasChildren = item.children && item.children.length > 0;
+    const isExpanded = expandedSet.has(item.id);
+    const row = document.createElement('div');
+    row.className = 'tree-item' + (selectedId === item.id ? ' selected' : '');
+    row.style.setProperty('--depth', depth);
+
+    const expand = document.createElement('div');
+    expand.className = 'tree-expand' + (!hasChildren ? ' empty' : '') + (!isExpanded && hasChildren ? ' collapsed' : '');
+    expand.innerHTML = '<i data-lucide="chevron-down" style="width:12px;height:12px"></i>';
+    row.appendChild(expand);
+
+    const icon = document.createElement('i');
+    icon.setAttribute('data-lucide', item.icon);
+    icon.className = 'tree-icon ' + (item.iconClass || '');
+    row.appendChild(icon);
+
+    const label = document.createElement('span');
+    label.className = 'tree-label';
+    label.textContent = item.label;
+    row.appendChild(label);
+
+    const vis = document.createElement('div');
+    vis.className = 'tree-vis';
+    vis.innerHTML = '<i data-lucide="eye" style="width:14px;height:14px"></i>';
+    row.appendChild(vis);
+
+    expand.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!hasChildren) return;
+      if (expandedSet.has(item.id)) expandedSet.delete(item.id); else expandedSet.add(item.id);
+      rebuildTree();
+    });
+    row.addEventListener('click', () => { selectedId = item.id; rebuildTree(); renderInspector(item.id); });
+    container.appendChild(row);
+    if (hasChildren && isExpanded) renderTree(container, item.children, depth + 1);
+  }
+}
+
+function rebuildTree() {
+  const c = document.getElementById('sceneTree');
+  c.innerHTML = '';
+  renderTree(c, sceneData);
+  lucide.createIcons({ nameAttr: 'data-lucide', attrs: {} });
+}
+
+// ===================== RIGHT PANEL TABS =====================
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ===================== INSPECTOR TAB =====================
+
+function renderInspector(id) {
+  const container = document.getElementById('tab-inspector');
+  const data = getLiveInspectorData(id);
+  if (!data) {
+    container.innerHTML = `<div class="empty-inspector"><i data-lucide="mouse-pointer-click"></i><p>Select an object in the hierarchy to inspect it</p></div>`;
+    lucide.createIcons({ nameAttr: 'data-lucide', attrs: {} });
+    return;
+  }
+  let h = '';
+  h += `<div class="inspector-object-header"><i data-lucide="${data.icon}"></i><input class="inspector-object-name" value="${data.name}"><div class="inspector-object-toggle"><div class="toggle-check checked"><i data-lucide="check"></i></div> Active</div></div>`;
+
+  if (data.transform) { const t=data.transform;
+    h += `<div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="move" style="width:14px;height:14px;color:var(--text-dim)"></i> Transform</div><div class="section-body">
+      <div class="prop-row"><span class="prop-label">Position</span><div class="prop-value"><input class="prop-input x" value="${t.px}"><input class="prop-input y" value="${t.py}"><input class="prop-input z" value="${t.pz}"></div></div>
+      <div class="prop-row"><span class="prop-label">Rotation</span><div class="prop-value"><input class="prop-input x" value="${t.rx}"><input class="prop-input y" value="${t.ry}"><input class="prop-input z" value="${t.rz}"></div></div>
+      <div class="prop-row"><span class="prop-label">Scale</span><div class="prop-value"><input class="prop-input x" value="${t.sx}"><input class="prop-input y" value="${t.sy}"><input class="prop-input z" value="${t.sz}"></div></div>
+    </div></div>`;
+  }
+  if (data.material) { const m=data.material;
+    h += `<div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="palette" style="width:14px;height:14px;color:var(--text-dim)"></i> Material</div><div class="section-body">
+      <div class="prop-row"><span class="prop-label">Color</span><div class="prop-value"><div class="prop-color" style="background:${m.color}"></div><input class="prop-input" value="${m.color}"></div></div>
+      <div class="prop-row"><span class="prop-label">Roughness</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="1" step="0.01" value="${m.roughness}"><span class="prop-slider-val">${m.roughness}</span></div></div></div>
+      <div class="prop-row"><span class="prop-label">Metalness</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="1" step="0.01" value="${m.metalness}"><span class="prop-slider-val">${m.metalness}</span></div></div></div>
+      <div style="margin-top:8px"><div class="texture-slot" data-slot="albedo"><div class="slot-preview"><i data-lucide="image"></i></div><div class="slot-info"><div class="slot-label">Albedo Map</div><div class="slot-name">${m.albedo||'Drag texture here...'}</div></div><button class="slot-clear"><i data-lucide="x" style="width:12px;height:12px"></i></button></div></div>
+      <div style="margin-top:4px"><div class="texture-slot" data-slot="normal"><div class="slot-preview"><i data-lucide="image"></i></div><div class="slot-info"><div class="slot-label">Normal Map</div><div class="slot-name">${m.normal||'Drag texture here...'}</div></div><button class="slot-clear"><i data-lucide="x" style="width:12px;height:12px"></i></button></div></div>
+    </div></div>`;
+  }
+  if (data.light) { const l=data.light;
+    h += `<div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="sun" style="width:14px;height:14px;color:var(--yellow)"></i> Light</div><div class="section-body">
+      <div class="prop-row"><span class="prop-label">Color</span><div class="prop-value"><div class="prop-color" style="background:${l.color}"></div><input class="prop-input" value="${l.color}"></div></div>
+      <div class="prop-row"><span class="prop-label">Intensity</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="5" step="0.1" value="${l.intensity}"><span class="prop-slider-val">${l.intensity}</span></div></div></div>
+      <div class="prop-row"><span class="prop-label">Shadows</span><div class="prop-value"><div class="toggle-check ${l.castShadow?'checked':''}"><i data-lucide="check"></i></div></div></div>
+    </div></div>`;
+  }
+  if (data.camera) { const c=data.camera;
+    h += `<div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="camera" style="width:14px;height:14px;color:var(--green)"></i> Camera</div><div class="section-body">
+      <div class="prop-row"><span class="prop-label">FOV</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="30" max="120" step="1" value="${c.fov}"><span class="prop-slider-val">${c.fov}</span></div></div></div>
+      <div class="prop-row"><span class="prop-label">Near</span><div class="prop-value"><input class="prop-input" value="${c.near}"></div></div>
+      <div class="prop-row"><span class="prop-label">Far</span><div class="prop-value"><input class="prop-input" value="${c.far}"></div></div>
+    </div></div>`;
+  }
+  if (data.terrain) { const te=data.terrain;
+    h += `<div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="mountain" style="width:14px;height:14px;color:var(--green)"></i> Terrain</div><div class="section-body">
+      <div class="prop-row"><span class="prop-label">Size</span><div class="prop-value"><input class="prop-input" value="${te.size}"></div></div>
+      <div class="prop-row"><span class="prop-label">Resolution</span><div class="prop-value"><input class="prop-input" value="${te.resolution}"></div></div>
+      <div class="prop-row"><span class="prop-label">Max Height</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="10" max="200" step="1" value="${te.maxHeight}"><span class="prop-slider-val">${te.maxHeight}</span></div></div></div>
+    </div></div>`;
+  }
+  if (data.water) { const w=data.water;
+    h += `<div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="waves" style="width:14px;height:14px;color:#4fc3f7"></i> Water</div><div class="section-body">
+      <div class="prop-row"><span class="prop-label">Depth</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0.5" max="20" step="0.5" value="${w.depth}"><span class="prop-slider-val">${w.depth}</span></div></div></div>
+      <div class="prop-row"><span class="prop-label">Color</span><div class="prop-value"><div class="prop-color" style="background:${w.color}"></div><input class="prop-input" value="${w.color}"></div></div>
+      <div class="prop-row"><span class="prop-label">Opacity</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="1" step="0.05" value="${w.opacity}"><span class="prop-slider-val">${w.opacity}</span></div></div></div>
+    </div></div>`;
+  }
+  if (data.road) { const r=data.road;
+    h += `<div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="route" style="width:14px;height:14px;color:var(--text-dim)"></i> Road</div><div class="section-body">
+      <div class="prop-row"><span class="prop-label">Width</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="2" max="20" step="0.5" value="${r.width}"><span class="prop-slider-val">${r.width}</span></div></div></div>
+      <div class="prop-row"><span class="prop-label">Lanes</span><div class="prop-value"><input class="prop-input" value="${r.lanes}"></div></div>
+      <div class="prop-row"><span class="prop-label">Surface</span><div class="prop-value"><select class="prop-dropdown"><option ${r.surface==='Asphalt'?'selected':''}>Asphalt</option><option ${r.surface==='Dirt'?'selected':''}>Dirt</option><option ${r.surface==='Cobblestone'?'selected':''}>Cobblestone</option></select></div></div>
+    </div></div>`;
+  }
+  container.innerHTML = h;
+  bindSectionEvents(container);
+}
+
+function bindSectionEvents(container) {
+  container.querySelectorAll('.section-header').forEach(hdr => {
+    hdr.addEventListener('click', () => { hdr.classList.toggle('collapsed'); hdr.nextElementSibling.classList.toggle('hidden'); });
+  });
+  container.querySelectorAll('.prop-slider').forEach(s => {
+    s.addEventListener('input', () => { s.parentElement.querySelector('.prop-slider-val').textContent = parseFloat(s.value).toFixed(s.step < 1 ? 2 : 0); });
+  });
+  container.querySelectorAll('.texture-slot').forEach(slot => {
+    slot.addEventListener('dragover', e => { e.preventDefault(); slot.classList.add('drag-over'); });
+    slot.addEventListener('dragleave', () => slot.classList.remove('drag-over'));
+    slot.addEventListener('drop', e => {
+      e.preventDefault(); slot.classList.remove('drag-over');
+      const name = e.dataTransfer.getData('text/plain'), color = e.dataTransfer.getData('application/color');
+      if (name) { slot.querySelector('.slot-name').textContent = name; if (color) { const p = slot.querySelector('.slot-preview'); p.innerHTML=''; p.style.background=color; } showDropFeedback(e.clientX,e.clientY,`Applied: ${name}`); }
+    });
+  });
+  lucide.createIcons({ nameAttr: 'data-lucide', attrs: {} });
+}
+
+// ===================== TOOLS TAB =====================
+
+let activeToolMode = 'sculpt';
+
+function renderToolsTab() {
+  const c = document.getElementById('tab-tools');
+  const modes = [
+    { id:'sculpt', icon:'mountain', label:'Sculpt' },
+    { id:'paint', icon:'paintbrush', label:'Paint' },
+    { id:'props', icon:'box', label:'Props' },
+    { id:'trees', icon:'tree-pine', label:'Trees' },
+    { id:'foliage', icon:'leaf', label:'Foliage' },
+    { id:'grass', icon:'sprout', label:'Grass' },
+    { id:'road', icon:'route', label:'Road' },
+    { id:'water', icon:'waves', label:'Water' },
+    { id:'river', icon:'ship', label:'River' },
+    { id:'cliffs', icon:'triangle', label:'Cliffs' },
+  ];
+
+  let h = '<div class="tool-mode-bar">';
+  for (const m of modes) h += `<button class="tool-mode-btn ${m.id===activeToolMode?'active':''}" data-mode="${m.id}"><i data-lucide="${m.icon}"></i>${m.label}</button>`;
+  h += '</div><div id="toolContent"></div>';
+  c.innerHTML = h;
+
+  c.querySelectorAll('.tool-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => { activeToolMode = btn.dataset.mode; renderToolsTab(); });
+  });
+
+  const tc = document.getElementById('toolContent');
+  if (activeToolMode === 'sculpt') tc.innerHTML = renderSculptTool();
+  else if (activeToolMode === 'paint') tc.innerHTML = renderPaintTool();
+  else if (activeToolMode === 'props') tc.innerHTML = renderPropsTool();
+  else if (activeToolMode === 'trees') tc.innerHTML = renderTreesTool();
+  else tc.innerHTML = renderGenericTool(activeToolMode);
+
+  bindSectionEvents(tc);
+}
+
+function renderSculptTool() {
+  return `
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="circle" style="width:14px;height:14px;color:var(--text-dim)"></i> Brush</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Mode</span><div class="prop-value"><select class="prop-dropdown"><option selected>Raise / Lower</option><option>Flatten</option><option>Smooth</option><option>Noise</option><option>Erosion</option></select></div></div>
+    <div class="prop-row"><span class="prop-label">Radius</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="1" max="100" step="1" value="28"><span class="prop-slider-val">28</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Strength</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0.01" max="1" step="0.01" value="0.55"><span class="prop-slider-val">0.55</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Shape</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="3" step="0.1" value="1.8"><span class="prop-slider-val">1.80</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Falloff</span><div class="prop-value"><select class="prop-dropdown"><option selected>Smooth</option><option>Plateau</option><option>Crater</option></select></div></div>
+  </div></div>
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="grid-3x3" style="width:14px;height:14px;color:var(--text-dim)"></i> Brush Mask</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Mask</span><div class="prop-value"><select class="prop-dropdown"><option selected>None</option><option>Soft</option><option>Hard</option><option>Splatter</option><option>Grunge</option></select></div></div>
+  </div></div>`;
+}
+
+function renderPaintTool() {
+  return `
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="layers" style="width:14px;height:14px;color:var(--text-dim)"></i> Layer</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Active</span><div class="prop-value"><select class="prop-dropdown"><option>Eraser</option><option selected>Layer 1</option><option>Layer 2</option><option>Layer 3</option><option>Layer 4</option><option>Meadow (TSL)</option></select></div></div>
+    <div class="prop-row"><span class="prop-label">Opacity</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="1" step="0.01" value="1"><span class="prop-slider-val">1.00</span></div></div></div>
+  </div></div>
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="circle" style="width:14px;height:14px;color:var(--text-dim)"></i> Brush</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Radius</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="1" max="100" step="1" value="20"><span class="prop-slider-val">20</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Strength</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0.01" max="1" step="0.01" value="0.8"><span class="prop-slider-val">0.80</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Height blend</span><div class="prop-value"><div class="toggle-check"><i data-lucide="check"></i></div></div></div>
+  </div></div>
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="image" style="width:14px;height:14px;color:var(--text-dim)"></i> Layer Textures</div><div class="section-body">
+    <div style="margin-top:4px"><div class="texture-slot" data-slot="layer-tex"><div class="slot-preview" style="background:#4a7a3a"></div><div class="slot-info"><div class="slot-label">Layer 1 Albedo</div><div class="slot-name">Grass_01</div></div><button class="slot-clear"><i data-lucide="x" style="width:12px;height:12px"></i></button></div></div>
+    <div style="margin-top:4px"><div class="texture-slot" data-slot="layer-normal"><div class="slot-preview"><i data-lucide="image"></i></div><div class="slot-info"><div class="slot-label">Layer 1 Normal</div><div class="slot-name">Drag texture here...</div></div><button class="slot-clear"><i data-lucide="x" style="width:12px;height:12px"></i></button></div></div>
+  </div></div>`;
+}
+
+function renderPropsTool() {
+  return `
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="mouse-pointer" style="width:14px;height:14px;color:var(--text-dim)"></i> Placement</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Mode</span><div class="prop-value"><select class="prop-dropdown"><option selected>Place (click)</option><option>Paint (brush)</option></select></div></div>
+    <div class="prop-row"><span class="prop-label">Active type</span><div class="prop-value"><select class="prop-dropdown"><option selected>Cube</option><option>Sphere</option><option>Tree_Pine</option><option>Rock_01</option></select></div></div>
+    <div class="prop-row"><span class="prop-label">Sink offset</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="10" step="0.1" value="0"><span class="prop-slider-val">0.00</span></div></div></div>
+  </div></div>
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="plus-circle" style="width:14px;height:14px;color:var(--text-dim)"></i> Add Primitive</div><div class="section-body">
+    <div style="display:flex;flex-wrap:wrap;gap:4px">
+      <button class="tool-mode-btn"><i data-lucide="box"></i> Cube</button>
+      <button class="tool-mode-btn"><i data-lucide="circle"></i> Sphere</button>
+      <button class="tool-mode-btn"><i data-lucide="cylinder"></i> Cylinder</button>
+      <button class="tool-mode-btn"><i data-lucide="square"></i> Plane</button>
+      <button class="tool-mode-btn"><i data-lucide="triangle"></i> Cone</button>
+      <button class="tool-mode-btn"><i data-lucide="donut"></i> Torus</button>
+    </div>
+  </div></div>
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="spray-can" style="width:14px;height:14px;color:var(--text-dim)"></i> Paint Settings</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Density</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0.05" max="5" step="0.05" value="0.5"><span class="prop-slider-val">0.50</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Min spacing</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0.5" max="20" step="0.5" value="3"><span class="prop-slider-val">3.0</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Scale min</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0.1" max="5" step="0.05" value="0.8"><span class="prop-slider-val">0.80</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Scale max</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0.1" max="5" step="0.05" value="1.2"><span class="prop-slider-val">1.20</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Random rot</span><div class="prop-value"><div class="toggle-check checked"><i data-lucide="check"></i></div></div></div>
+  </div></div>`;
+}
+
+function renderTreesTool() {
+  return `
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="circle" style="width:14px;height:14px;color:var(--text-dim)"></i> Tree Brush</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Active slot</span><div class="prop-value"><select class="prop-dropdown"><option selected>Slot 1 — Pine</option><option>Slot 2 — Oak</option><option>Slot 3 — Birch</option></select></div></div>
+    <div class="prop-row"><span class="prop-label">Density</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0.1" max="5" step="0.1" value="1"><span class="prop-slider-val">1.0</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Min spacing</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="1" max="30" step="1" value="8"><span class="prop-slider-val">8</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Scale range</span><div class="prop-value"><input class="prop-input" value="0.8" style="max-width:50px"><input class="prop-input" value="1.3" style="max-width:50px"></div></div>
+  </div></div>
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="settings" style="width:14px;height:14px;color:var(--text-dim)"></i> LOD</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">LOD 1 dist</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="20" max="200" step="5" value="80"><span class="prop-slider-val">80</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">LOD 2 dist</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="50" max="500" step="10" value="200"><span class="prop-slider-val">200</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Cast shadow</span><div class="prop-value"><div class="toggle-check checked"><i data-lucide="check"></i></div></div></div>
+  </div></div>`;
+}
+
+function renderGenericTool(mode) {
+  const labels = { foliage:'Foliage',grass:'Grass',road:'Road',water:'Water',river:'River',cliffs:'Cliffs' };
+  return `<div class="empty-inspector"><i data-lucide="wrench"></i><p>${labels[mode]||mode} tool settings would appear here</p></div>`;
+}
+
+// ===================== ENVIRONMENT TAB =====================
+
+function renderEnvironmentTab() {
+  const c = document.getElementById('tab-environment');
+  c.innerHTML = `
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="sun" style="width:14px;height:14px;color:var(--yellow)"></i> Sun &amp; Exposure</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Sun color</span><div class="prop-value"><div class="prop-color" style="background:#fff5e6"></div><input class="prop-input" value="#fff5e6"></div></div>
+    <div class="prop-row"><span class="prop-label">Intensity</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="5" step="0.1" value="1.5"><span class="prop-slider-val">1.50</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Azimuth</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="360" step="1" value="180"><span class="prop-slider-val">180</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Elevation</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="90" step="1" value="45"><span class="prop-slider-val">45</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Exposure</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="3" step="0.05" value="1"><span class="prop-slider-val">1.00</span></div></div></div>
+  </div></div>
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="eclipse" style="width:14px;height:14px;color:var(--text-dim)"></i> Shadows (CSM)</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Enabled</span><div class="prop-value"><div class="toggle-check checked"><i data-lucide="check"></i></div></div></div>
+    <div class="prop-row"><span class="prop-label">Cascades</span><div class="prop-value"><select class="prop-dropdown"><option>2</option><option selected>3</option><option>4</option></select></div></div>
+    <div class="prop-row"><span class="prop-label">Max distance</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="50" max="500" step="10" value="200"><span class="prop-slider-val">200</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Shadow bias</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="0.01" step="0.0001" value="0.0005"><span class="prop-slider-val">0.0005</span></div></div></div>
+  </div></div>
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="sparkles" style="width:14px;height:14px;color:var(--text-dim)"></i> Lens Flare</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Enabled</span><div class="prop-value"><div class="toggle-check checked"><i data-lucide="check"></i></div></div></div>
+    <div class="prop-row"><span class="prop-label">Intensity</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="2" step="0.05" value="0.6"><span class="prop-slider-val">0.60</span></div></div></div>
+  </div></div>
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="cloud" style="width:14px;height:14px;color:var(--text-dim)"></i> Sky</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Mode</span><div class="prop-value"><select class="prop-dropdown"><option selected>Physical</option><option>HDR Import</option></select></div></div>
+    <div class="prop-row"><span class="prop-label">Turbidity</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="1" max="20" step="0.5" value="4"><span class="prop-slider-val">4.0</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Rayleigh</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="4" step="0.1" value="1.5"><span class="prop-slider-val">1.50</span></div></div></div>
+  </div></div>
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="haze" style="width:14px;height:14px;color:var(--text-dim)"></i> Fog</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Enabled</span><div class="prop-value"><div class="toggle-check checked"><i data-lucide="check"></i></div></div></div>
+    <div class="prop-row"><span class="prop-label">Color</span><div class="prop-value"><div class="prop-color" style="background:#8899aa"></div><input class="prop-input" value="#8899aa"></div></div>
+    <div class="prop-row"><span class="prop-label">Near</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="200" step="5" value="50"><span class="prop-slider-val">50</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Far</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="100" max="2000" step="50" value="800"><span class="prop-slider-val">800</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Density</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="0.01" step="0.0001" value="0.002"><span class="prop-slider-val">0.002</span></div></div></div>
+  </div></div>
+  <div class="inspector-section"><div class="section-header"><i data-lucide="chevron-down" class="section-arrow"></i><i data-lucide="sliders-horizontal" style="width:14px;height:14px;color:var(--text-dim)"></i> Post Processing</div><div class="section-body">
+    <div class="prop-row"><span class="prop-label">Tone map</span><div class="prop-value"><select class="prop-dropdown"><option selected>ACES</option><option>Reinhard</option><option>Linear</option><option>Cineon</option></select></div></div>
+    <div class="prop-row"><span class="prop-label">Bloom</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="2" step="0.05" value="0.3"><span class="prop-slider-val">0.30</span></div></div></div>
+    <div class="prop-row"><span class="prop-label">Saturation</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="0" max="2" step="0.05" value="1"><span class="prop-slider-val">1.00</span></div></div></div>
+  </div></div>`;
+  bindSectionEvents(c);
+}
+
+// ===================== FILE BROWSER (File System Access API) =====================
+
+let fsRootHandle = null;
+let fsCurrentHandle = null;
+let fsPathStack = [];
+
+const EXT_ICONS = {
+  png:'image', jpg:'image', jpeg:'image', webp:'image', bmp:'image', tga:'image',
+  glb:'box', gltf:'box', fbx:'box', obj:'box',
+  mp3:'volume-2', ogg:'volume-2', wav:'volume-2',
+  json:'file-json', js:'file-code', ts:'file-code', html:'file-code',
+};
+const IMG_EXTS = new Set(['png','jpg','jpeg','webp','bmp']);
+
+async function openFolder() {
+  try {
+    fsRootHandle = await window.showDirectoryPicker();
+    fsCurrentHandle = fsRootHandle;
+    fsPathStack = [{ name: fsRootHandle.name, handle: fsRootHandle }];
+    await renderFileSystem();
+  } catch (e) { /* user cancelled */ }
+}
+
+async function navigateToFolder(dirHandle, name) {
+  fsCurrentHandle = dirHandle;
+  fsPathStack.push({ name, handle: dirHandle });
+  await renderFileSystem();
+}
+
+async function navigateBreadcrumb(idx) {
+  fsPathStack = fsPathStack.slice(0, idx + 1);
+  fsCurrentHandle = fsPathStack[idx].handle;
+  await renderFileSystem();
+}
+
+async function renderFileSystem() {
+  const breadcrumb = document.getElementById('fsBreadcrumb');
+  let bc = '';
+  for (let i = 0; i < fsPathStack.length; i++) {
+    if (i > 0) bc += '<span class="sep">/</span>';
+    const cls = i === fsPathStack.length - 1 ? 'current' : '';
+    bc += `<span class="${cls}" data-bc="${i}">${fsPathStack[i].name}</span>`;
+  }
+  breadcrumb.innerHTML = bc;
+  breadcrumb.querySelectorAll('span[data-bc]').forEach(s => {
+    s.addEventListener('click', () => navigateBreadcrumb(parseInt(s.dataset.bc)));
+  });
+
+  const dirs = [], files = [];
+  for await (const [name, handle] of fsCurrentHandle.entries()) {
+    if (handle.kind === 'directory') dirs.push({ name, handle });
+    else files.push({ name, handle });
+  }
+  dirs.sort((a,b) => a.name.localeCompare(b.name));
+  files.sort((a,b) => a.name.localeCompare(b.name));
+
+  // sidebar: dirs only
+  const sidebar = document.getElementById('assetFolders');
+  let sh = '';
+  for (const d of dirs) {
+    sh += `<div class="asset-folder" data-dir="${d.name}"><i data-lucide="folder"></i><span>${d.name}</span></div>`;
+  }
+  if (dirs.length === 0) sh = '<div style="padding:10px;color:var(--text-dim);font-size:11px">No subfolders</div>';
+  sidebar.innerHTML = sh;
+  sidebar.querySelectorAll('.asset-folder').forEach(el => {
+    el.addEventListener('click', async () => {
+      const d = dirs.find(x => x.name === el.dataset.dir);
+      if (d) await navigateToFolder(d.handle, d.name);
+    });
+  });
+  sidebar.querySelectorAll('.asset-folder').forEach(el => {
+    el.addEventListener('dblclick', async () => {
+      const d = dirs.find(x => x.name === el.dataset.dir);
+      if (d) await navigateToFolder(d.handle, d.name);
+    });
+  });
+
+  // grid: files + dirs
+  const grid = document.getElementById('assetGrid');
+  let gh = '';
+  for (const d of dirs) {
+    gh += `<div class="asset-card" data-dir="${d.name}"><div class="asset-thumb file-icon"><i data-lucide="folder" style="color:var(--yellow)"></i></div><span class="asset-name">${d.name}</span></div>`;
+  }
+  for (const f of files) {
+    const ext = f.name.split('.').pop().toLowerCase();
+    const icon = EXT_ICONS[ext] || 'file';
+    const isImg = IMG_EXTS.has(ext);
+    if (isImg) {
+      try {
+        const file = await f.handle.getFile();
+        const url = URL.createObjectURL(file);
+        gh += `<div class="asset-card" draggable="true" data-name="${f.name}" data-type="texture"><div class="asset-thumb texture" style="background:url(${url}) center/cover"></div><span class="asset-name">${f.name}</span></div>`;
+      } catch {
+        gh += `<div class="asset-card" draggable="true" data-name="${f.name}" data-type="file"><div class="asset-thumb file-icon"><i data-lucide="${icon}"></i></div><span class="asset-name">${f.name}</span></div>`;
+      }
+    } else {
+      gh += `<div class="asset-card" draggable="true" data-name="${f.name}" data-type="file"><div class="asset-thumb file-icon"><i data-lucide="${icon}"></i></div><span class="asset-name">${f.name}</span></div>`;
+    }
+  }
+  if (dirs.length === 0 && files.length === 0) {
+    gh = '<div class="fs-empty"><i data-lucide="folder-open"></i><span style="font-size:12px">This folder is empty</span></div>';
+  }
+  grid.innerHTML = gh;
+
+  // double-click dirs in grid
+  grid.querySelectorAll('.asset-card[data-dir]').forEach(card => {
+    card.addEventListener('dblclick', async () => {
+      const d = dirs.find(x => x.name === card.dataset.dir);
+      if (d) await navigateToFolder(d.handle, d.name);
+    });
+  });
+  // drag files
+  grid.querySelectorAll('.asset-card[draggable]').forEach(card => {
+    card.addEventListener('dragstart', e => {
+      card.classList.add('dragging');
+      e.dataTransfer.setData('text/plain', card.dataset.name);
+      e.dataTransfer.effectAllowed = 'copy';
+    });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+    card.addEventListener('click', () => {
+      grid.querySelectorAll('.asset-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+    });
+  });
+
+  lucide.createIcons({ nameAttr: 'data-lucide', attrs: {} });
+}
+
+function renderFallbackBrowser() {
+  const sidebar = document.getElementById('assetFolders');
+  sidebar.innerHTML = '';
+  const grid = document.getElementById('assetGrid');
+  grid.innerHTML = `<div class="fs-empty">
+    <i data-lucide="hard-drive"></i>
+    <span style="font-size:12px">Browse files from your drive</span>
+    <span style="font-size:11px;color:var(--text-dim)">Click the drive icon or the button below to open a folder</span>
+    <button class="fs-open-btn" id="fsOpenBtn2">Open Folder</button>
+  </div>`;
+  document.getElementById('fsBreadcrumb').innerHTML = '<span class="current">File Browser</span>';
+  lucide.createIcons({ nameAttr: 'data-lucide', attrs: {} });
+  document.getElementById('fsOpenBtn2')?.addEventListener('click', openFolder);
+}
+
+// ===================== DROP FEEDBACK =====================
+
+function showDropFeedback(x, y, text) {
+  const el = document.getElementById('dropFeedback');
+  el.textContent = text; el.style.left = x+'px'; el.style.top = (y-30)+'px';
+  el.classList.add('visible');
+  setTimeout(() => el.classList.remove('visible'), 1200);
+}
+
+// ===================== TOOLBAR =====================
+
+document.querySelectorAll('#tb-move, #tb-rotate, #tb-scale').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#tb-move, #tb-rotate, #tb-scale').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+// ===================== RESIZABLE SPLITTERS =====================
+
+function initSplitter(id, cssVar, axis, invert = false) {
+  const el = document.getElementById(id);
+  const root = document.documentElement;
+  el.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    el.classList.add('active');
+    const startPos = axis === 'x' ? e.clientX : e.clientY;
+    const startSize = parseFloat(getComputedStyle(root).getPropertyValue(cssVar));
+    document.body.style.cursor = axis === 'x' ? 'col-resize' : 'row-resize';
+    const onMove = (e) => {
+      const delta = (axis === 'x' ? e.clientX : e.clientY) - startPos;
+      const maxPx = (axis === 'x' ? window.innerWidth : window.innerHeight) * 0.45;
+      root.style.setProperty(cssVar, Math.max(180, Math.min(maxPx, startSize + delta * (invert ? -1 : 1))) + 'px');
+    };
+    const onUp = () => { el.classList.remove('active'); document.body.style.cursor = ''; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+}
+initSplitter('splitter-left', '--left-w', 'x');
+initSplitter('splitter-right', '--right-w', 'x', true);
+initSplitter('splitter-bottom', '--bottom-h', 'y', true);
+
+// ===================== INIT =====================
+
+document.getElementById('fsOpenBtn').addEventListener('click', openFolder);
+
+try {
+  await initViewport();
+} catch (err) {
+  console.error(err);
+  const fb = document.getElementById('viewportFallback');
+  if (fb) {
+    const lines = fb.querySelectorAll('span');
+    if (lines[1]) lines[1].textContent = 'WebGPU unavailable';
+    if (lines[2]) lines[2].textContent = String(err && err.message ? err.message : err);
+    fb.style.display = '';
+    fb.style.zIndex = '4';
+  }
+}
+
+rebuildTree();
+renderFallbackBrowser();
+renderInspector(null);
+renderToolsTab();
+renderEnvironmentTab();
+lucide.createIcons({ nameAttr: 'data-lucide', attrs: {} });
+</script>
+</body>
+</html>

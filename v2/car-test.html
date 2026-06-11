@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Modular-road car — v2 terrain validation</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
+          "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.9/build/index.module.js"
+        }
+      }
+    </script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #11151c; }
+      #hud {
+        position: fixed; left: 12px; top: 12px; z-index: 10;
+        font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+        color: #cfe8ff; background: rgba(10, 16, 24, 0.6);
+        padding: 10px 12px; border-radius: 8px; pointer-events: none;
+        white-space: pre;
+      }
+      #hud b { color: #7fd1ff; }
+      #panel {
+        position: fixed; top: 12px; right: 12px; z-index: 20;
+        width: min(300px, calc(100vw - 24px)); max-height: calc(100vh - 24px);
+        overflow: auto; padding: 12px 14px;
+        font: 11px/1.5 ui-monospace, Menlo, Consolas, monospace;
+        color: #d8d8de; background: rgba(8, 10, 16, 0.88);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 10px; backdrop-filter: blur(8px);
+      }
+      #panel h2 {
+        font-size: 12px; font-weight: 600; color: #7fd1ff;
+        margin-bottom: 8px; letter-spacing: 0.04em; text-transform: uppercase;
+      }
+      #panel details { margin-bottom: 8px; }
+      #panel summary {
+        cursor: pointer; color: #7fd1ff; font-weight: 600;
+        margin-bottom: 6px; user-select: none;
+      }
+      #panel .row {
+        display: grid; grid-template-columns: 1fr 52px;
+        align-items: center; gap: 8px; margin-bottom: 4px;
+      }
+      #panel .row span:first-child { color: #b8b8c2; }
+      #panel .row output { text-align: right; color: #7fd1ff; font-variant-numeric: tabular-nums; }
+      #panel .row input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: #7fd1ff; }
+      #panel .inline-row {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 6px; gap: 8px;
+      }
+      #panel .inline-row span { color: #b8b8c2; }
+      #panel select, #panel button {
+        font: inherit; color: #d8d8de; background: #1a2230;
+        border: 1px solid rgba(255,255,255,0.15); border-radius: 5px;
+        padding: 3px 6px; cursor: pointer;
+      }
+      #panel button { width: 100%; margin-bottom: 6px; }
+      #panel input[type="checkbox"] { accent-color: #7fd1ff; }
+      #panel input[type="color"] {
+        width: 52px; height: 20px; padding: 0; border: none;
+        background: none; cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">loading…</div>
+    <aside id="panel"></aside>
+    <script type="module">
+      import * as THREE from "three";
+      import { Vehicle } from "./play/modularRoadVehicle.js";
+      import { createVehicleGround } from "./play/modularRoadGround.js";
+      import { DriftSmokeLab, DRIFT_SMOKE_LAB_DEFAULTS } from "./play/driftSmokeLab.js";
+
+      // ── Analytic terrain: gentle rolling hills, flatter near the spawn ──────
+      function getTerrainHeight(x, z) {
+        const r = Math.hypot(x, z);
+        const flatten = THREE.MathUtils.clamp((r - 14) / 22, 0, 1); // small calm pad to spawn on
+        // Big, smooth rolling hills — long wavelengths keep slopes climbable
+        // (~15-20°) while making terrain-follow obvious. Layered octaves add
+        // variety without sharp lips.
+        const h =
+          7.0 * Math.sin(x * 0.018) * Math.cos(z * 0.020) +
+          3.5 * Math.sin(x * 0.045 + z * 0.030) +
+          1.5 * Math.cos(z * 0.06 - x * 0.04);
+        // A smooth launch ramp ~40m north of spawn (Gaussian ridge → jump).
+        const ramp = 6.5 * Math.exp(-(((z - 42) / 10) ** 2) - ((x / 16) ** 2));
+        return h * flatten + ramp;
+      }
+      window.__terr = getTerrainHeight; // diagnostics
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x8fb7e8);
+      scene.fog = new THREE.Fog(0x8fb7e8, 120, 360);
+
+      const camera = new THREE.PerspectiveCamera(
+        62, window.innerWidth / window.innerHeight, 0.1, 1200,
+      );
+      camera.position.set(0, 12, -16);
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      // ── Lights ──────────────────────────────────────────────────────────────
+      scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x4a5240, 1.0));
+      const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+      sun.position.set(60, 90, 40);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.camera.left = -120; sun.shadow.camera.right = 120;
+      sun.shadow.camera.top = 120; sun.shadow.camera.bottom = -120;
+      sun.shadow.camera.far = 400;
+      scene.add(sun);
+
+      // ── Visual terrain mesh (same sampler as the physics ground) ────────────
+      const SIZE = 400, SEG = 240;
+      const terrainGeo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
+      terrainGeo.rotateX(-Math.PI / 2);
+      {
+        const pos = terrainGeo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          pos.setY(i, getTerrainHeight(pos.getX(i), pos.getZ(i)));
+        }
+        pos.needsUpdate = true;
+        terrainGeo.computeVertexNormals();
+      }
+      const terrain = new THREE.Mesh(
+        terrainGeo,
+        new THREE.MeshStandardMaterial({ color: 0x6f8f5a, roughness: 0.95, metalness: 0.0 }),
+      );
+      terrain.receiveShadow = true;
+      scene.add(terrain);
+
+      // grid overlay so motion/scale is readable
+      const grid = new THREE.GridHelper(SIZE, 80, 0x223018, 0x33401f);
+      grid.position.y = 0.02;
+      grid.material.transparent = true;
+      grid.material.opacity = 0.25;
+      scene.add(grid);
+
+      // ── Vehicle + ground adapter (the things under test) ────────────────────
+      const vehicle = new Vehicle({ scene });
+      vehicle.enabled = true;
+      vehicle.group.visible = true;
+      // v2 terrain dips below world y=0, so point the chassis safety-floor at the
+      // heightfield instead of the hardcoded y=0 (which would pin the car).
+      vehicle.getFloorY = getTerrainHeight;
+
+      const groundRig = createVehicleGround({ getTerrainHeight });
+      vehicle.setBvh(groundRig.ground, groundRig.solids);
+      window.__veh = vehicle; // diagnostics handle
+      window.__ground = groundRig; // diagnostics handle
+
+      let smoke = null;
+      function spawnCar() {
+        const sx = 0, sz = 0;
+        const sy = getTerrainHeight(sx, sz) + 2.2;
+        vehicle.setSpawn(new THREE.Vector3(sx, sy, sz), new THREE.Quaternion());
+        vehicle.respawn();
+        smoke?.reset();
+      }
+      spawnCar();
+
+      // ── Drift smoke lab (A/B/C renderer comparison) ─────────────────────────
+      const SMOKE_LS_KEY = "v2.driftSmokeLab";
+      let storedSmoke = {};
+      try { storedSmoke = JSON.parse(localStorage.getItem(SMOKE_LS_KEY) || "{}"); } catch {}
+      const smokeSettings = { ...structuredClone(DRIFT_SMOKE_LAB_DEFAULTS), ...storedSmoke };
+      const saveSmoke = () => localStorage.setItem(SMOKE_LS_KEY, JSON.stringify(smokeSettings));
+
+      smoke = new DriftSmokeLab({
+        scene,
+        lightDir: sun.position.clone().normalize(),
+        spriteUrl: "../Starter-Kit-Racing-master/sprites/smoke.png",
+        voronoiUrl: "../textures/particles/T_Voronoi01.png",
+        atlasUrl: "../textures/alberto-restrepo-smokeatlas.jpg",
+        cloudUrl: "../textures/particles/cloud.webp",
+        settings: smokeSettings,
+      });
+
+      // Sim presets — look params stay as tweaked, these set the motion feel.
+      const SMOKE_PRESET_REAL = {
+        mode: "real", emitRate: 90, lifeMin: 1.0, lifeMax: 2.0,
+        sizeMin: 0.5, sizeMax: 0.9, sizeGrowth: 3.5, rise: 0.6,
+        spread: 0.7, drag: 0.18, spinSpeed: 0.5, opacity: 0.55, turbulence: 0.8,
+      };
+      const SMOKE_PRESET_STYLIZED = {
+        mode: "mesh", emitRate: 60, lifeMin: 0.45, lifeMax: 1.0,
+        sizeMin: 0.6, sizeMax: 1.0, sizeGrowth: 2.2, rise: 0.9,
+        spread: 0.55, drag: 0.12, spinSpeed: 1.2, opacity: 1.0, turbulence: 0.15,
+      };
+
+      // ── Tweak panel ──────────────────────────────────────────────────────────
+      function buildSmokePanel() {
+        const panel = document.getElementById("panel");
+        panel.innerHTML = "<h2>Drift smoke lab</h2>";
+        const onChange = () => { smoke.applyLook(); saveSmoke(); };
+        const applyPreset = (preset) => {
+          Object.assign(smokeSettings, preset);
+          smoke.applyLook();
+          saveSmoke();
+          buildSmokePanel();
+        };
+
+        const section = (title, open = true) => {
+          const d = document.createElement("details");
+          d.open = open;
+          const s = document.createElement("summary");
+          s.textContent = title;
+          d.appendChild(s);
+          panel.appendChild(d);
+          return d;
+        };
+        const slider = (parent, key, label, min, max, step) => {
+          const row = document.createElement("div");
+          row.className = "row";
+          const name = document.createElement("span");
+          name.textContent = label;
+          const out = document.createElement("output");
+          out.textContent = (+smokeSettings[key]).toFixed(2);
+          const input = document.createElement("input");
+          input.type = "range";
+          input.min = min; input.max = max; input.step = step;
+          input.value = smokeSettings[key];
+          input.addEventListener("input", () => {
+            smokeSettings[key] = parseFloat(input.value);
+            out.textContent = smokeSettings[key].toFixed(2);
+            onChange();
+          });
+          row.append(name, out, input);
+          parent.appendChild(row);
+        };
+        const toggle = (parent, key, label) => {
+          const row = document.createElement("div");
+          row.className = "inline-row";
+          const name = document.createElement("span");
+          name.textContent = label;
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = !!smokeSettings[key];
+          input.addEventListener("change", () => {
+            smokeSettings[key] = input.checked;
+            onChange();
+          });
+          row.append(name, input);
+          parent.appendChild(row);
+        };
+        const colorInput = (parent, key, label) => {
+          const row = document.createElement("div");
+          row.className = "inline-row";
+          const name = document.createElement("span");
+          name.textContent = label;
+          const input = document.createElement("input");
+          input.type = "color";
+          input.value = smokeSettings[key];
+          input.addEventListener("input", () => {
+            smokeSettings[key] = input.value;
+            onChange();
+          });
+          row.append(name, input);
+          parent.appendChild(row);
+        };
+        const button = (parent, label, onClick) => {
+          const b = document.createElement("button");
+          b.textContent = label;
+          b.addEventListener("click", onClick);
+          parent.appendChild(b);
+        };
+        const dropdown = (parent, key, label, options) => {
+          const row = document.createElement("div");
+          row.className = "inline-row";
+          const name = document.createElement("span");
+          name.textContent = label;
+          const sel = document.createElement("select");
+          for (const [v, t] of options) {
+            const o = document.createElement("option");
+            o.value = v; o.textContent = t;
+            sel.appendChild(o);
+          }
+          sel.value = smokeSettings[key];
+          sel.addEventListener("change", () => {
+            smokeSettings[key] = sel.value;
+            onChange();
+          });
+          row.append(name, sel);
+          parent.appendChild(row);
+        };
+
+        const modeSec = section("Mode");
+        {
+          const row = document.createElement("div");
+          row.className = "inline-row";
+          const name = document.createElement("span");
+          name.textContent = "Renderer";
+          const sel = document.createElement("select");
+          for (const [v, t] of [
+            ["billboard", "A — billboard (current)"],
+            ["mesh", "B — zelda mesh smoke"],
+            ["hybrid", "C — hybrid erosion quad"],
+            ["real", "D — realistic flipbook"],
+          ]) {
+            const o = document.createElement("option");
+            o.value = v; o.textContent = t;
+            sel.appendChild(o);
+          }
+          sel.value = smokeSettings.mode;
+          sel.addEventListener("change", () => {
+            smokeSettings.mode = sel.value;
+            onChange();
+          });
+          row.append(name, sel);
+          modeSec.appendChild(row);
+        }
+        toggle(modeSec, "enabled", "Enabled");
+        toggle(modeSec, "alwaysEmit", "Always emit (tuning)");
+        button(modeSec, "Preset: realistic sim", () => applyPreset(SMOKE_PRESET_REAL));
+        button(modeSec, "Preset: stylized sim", () => applyPreset(SMOKE_PRESET_STYLIZED));
+
+        const emitSec = section("Emitter / sim");
+        slider(emitSec, "emitRate", "Emit rate", 4, 140, 1);
+        slider(emitSec, "trigger", "Drift trigger", 0, 0.5, 0.01);
+        slider(emitSec, "lifeMin", "Life min", 0.1, 3, 0.05);
+        slider(emitSec, "lifeMax", "Life max", 0.1, 3, 0.05);
+        slider(emitSec, "sizeMin", "Size min", 0.1, 2, 0.05);
+        slider(emitSec, "sizeMax", "Size max", 0.1, 3, 0.05);
+        slider(emitSec, "sizeGrowth", "Size growth", 0, 6, 0.1);
+        slider(emitSec, "rise", "Rise", 0, 3, 0.05);
+        slider(emitSec, "spread", "Spread", 0, 2, 0.05);
+        slider(emitSec, "drag", "Speed drag", 0, 0.5, 0.01);
+        slider(emitSec, "spinSpeed", "Spin", 0, 3, 0.05);
+        slider(emitSec, "turbulence", "Turbulence", 0, 3, 0.05);
+        slider(emitSec, "opacity", "Opacity (B/C/D)", 0, 1, 0.01);
+
+        const realSec = section("Realistic (D)");
+        dropdown(realSec, "realTexture", "Texture", [
+          ["cloud", "cloud sprite (soft)"],
+          ["atlas", "8x8 flipbook (boil)"],
+        ]);
+        slider(realSec, "realBoil", "Frame boil (atlas)", 0, 30, 0.5);
+        slider(realSec, "realFadeIn", "Fade in", 0, 0.4, 0.01);
+        slider(realSec, "realHold", "Hold (full density)", 0, 0.9, 0.01);
+        slider(realSec, "realFadeOutPow", "Fade-out shape", 0.5, 3, 0.05);
+        slider(realSec, "realThin", "Thin as expands", 0, 4, 0.05);
+        slider(realSec, "realLight", "Sun shading", 0, 1, 0.01);
+        slider(realSec, "realGroundFade", "Ground fade", 0.02, 1, 0.01);
+        colorInput(realSec, "realColShadow", "Shadow color");
+        colorInput(realSec, "realColLit", "Lit color");
+
+        const lookSec = section("Zelda look (B/C)", false);
+        slider(lookSec, "tiling", "Voronoi tiling", 0.1, 2, 0.01);
+        slider(lookSec, "panSpeed", "Pan speed", 0, 0.5, 0.01);
+        slider(lookSec, "holeDepth", "Hole depth", 0, 1, 0.01);
+        slider(lookSec, "edgeNoise", "Edge noise", 0, 1.2, 0.01);
+        slider(lookSec, "cutoff", "Cutoff", 0, 0.5, 0.01);
+        slider(lookSec, "dissolveSoft", "Dissolve soft", 0.02, 0.5, 0.01);
+        slider(lookSec, "erode", "Age erosion", 0, 2, 0.01);
+        slider(lookSec, "fadeIn", "Fade in", 0, 0.4, 0.01);
+        slider(lookSec, "endFade", "End fade tail", 0.02, 0.5, 0.01);
+        slider(lookSec, "lightStrength", "Light strength", 0, 1, 0.01);
+        slider(lookSec, "rimStrength", "Rim light", 0, 1, 0.01);
+        slider(lookSec, "rimPow", "Rim tightness", 1, 6, 0.1);
+        toggle(lookSec, "posterize", "Posterize");
+        slider(lookSec, "steps", "Posterize steps", 2, 8, 1);
+        slider(lookSec, "normalRound", "Round shading", 0, 1, 0.01);
+        slider(lookSec, "meshScale", "Blob scale (B)", 0.1, 1, 0.01);
+        slider(lookSec, "alphaTest", "Alpha test (B)", 0, 0.6, 0.01);
+        slider(lookSec, "hybridTiling", "Quad tiling (C)", 0.2, 3, 0.05);
+        colorInput(lookSec, "colShadow", "Shadow color");
+        colorInput(lookSec, "colLit", "Lit color");
+
+        const bbSec = section("Billboard (A)", false);
+        slider(bbSec, "billboardOpacity", "Opacity (A)", 0, 1, 0.01);
+        colorInput(bbSec, "billboardColor", "Tint (A)");
+
+        const actSec = section("Actions");
+        button(actSec, "Copy settings JSON", () => {
+          navigator.clipboard?.writeText(JSON.stringify(smokeSettings, null, 2));
+        });
+        button(actSec, "Reset to defaults", () => {
+          localStorage.removeItem(SMOKE_LS_KEY);
+          location.reload();
+        });
+      }
+      buildSmokePanel();
+
+      // ── Input (identical mapping to modular-road readControls) ──────────────
+      const keys = {};
+      addEventListener("keydown", (e) => {
+        keys[e.code] = true;
+        if (e.code === "KeyR") spawnCar();
+        if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].includes(e.code)) e.preventDefault();
+      });
+      addEventListener("keyup", (e) => { keys[e.code] = false; });
+
+      function readControls() {
+        const left = keys.KeyA || keys.ArrowLeft ? 1 : 0;
+        const right = keys.KeyD || keys.ArrowRight ? 1 : 0;
+        const fwd = keys.KeyW || keys.ArrowUp ? 1 : 0;
+        const back = keys.KeyS || keys.ArrowDown ? 1 : 0;
+        const spinR = keys.KeyE ? 1 : 0;
+        const spinL = keys.KeyQ ? 1 : 0;
+        return {
+          steerTarget: left - right,
+          throttle: fwd - back,
+          handbrake: !!keys.Space,
+          yaw: spinR - spinL,
+        };
+      }
+
+      // ── Chase camera ────────────────────────────────────────────────────────
+      const _fwd = new THREE.Vector3();
+      const _camTarget = new THREE.Vector3();
+      const _camPos = new THREE.Vector3();
+      const _desired = new THREE.Vector3();
+      function updateCamera(dt) {
+        const p = vehicle.body.pos;
+        _fwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat);
+        _fwd.y = 0;
+        if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, 1);
+        _fwd.normalize();
+        _desired.set(
+          p.x - _fwd.x * 9,
+          p.y + 4.2,
+          p.z - _fwd.z * 9,
+        );
+        const groundCam = getTerrainHeight(_desired.x, _desired.z) + 1.5;
+        if (_desired.y < groundCam) _desired.y = groundCam;
+        const k = 1 - Math.exp(-6 * dt);
+        _camPos.copy(camera.position).lerp(_desired, k);
+        camera.position.copy(_camPos);
+        _camTarget.set(p.x, p.y + 1.0, p.z);
+        camera.lookAt(_camTarget);
+      }
+
+      const hud = document.getElementById("hud");
+      const clock = new THREE.Clock();
+
+      await renderer.init();
+
+      renderer.setAnimationLoop(() => {
+        const dt = Math.min(clock.getDelta(), 1 / 30);
+        const controls = readControls();
+        vehicle.update(dt, controls);
+        smoke.update(vehicle, camera, dt, keys);
+        updateCamera(dt);
+
+        const p = vehicle.body.pos;
+        const v = vehicle.body.vel;
+        const grounded = vehicle.groundedCount ?? "?";
+        const nan = [p.x, p.y, p.z, v.x, v.y, v.z].some((n) => !isFinite(n));
+        hud.textContent =
+          `WASD/arrows: drive   Space: handbrake   Q/E: air-yaw   R: reset\n` +
+          `smoke mode: ${smokeSettings.mode}   (tweak panel →)\n` +
+          `speed:  ${vehicle.speedKmh.toFixed(1)} km/h\n` +
+          `grounded wheels: ${grounded}/4\n` +
+          `pos: ${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}\n` +
+          `vel: ${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)}\n` +
+          `terrainY here: ${getTerrainHeight(p.x, p.z).toFixed(2)}` +
+          (nan ? `\n*** NaN in body state ***` : ``);
+
+        renderer.render(scene, camera);
+      });
+
+      addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    </script>
+  </body>
+</html>

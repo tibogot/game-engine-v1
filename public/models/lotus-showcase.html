@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lotus preview — V2 Bruno pipeline (single file)</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #0e1218;
+        color: #c8d4e0;
+        font-family: system-ui, sans-serif;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #ui {
+        position: fixed;
+        bottom: 14px;
+        left: 14px;
+        right: 14px;
+        max-width: 560px;
+        font-size: 12px;
+        line-height: 1.45;
+        background: rgba(0, 0, 0, 0.65);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 10px 14px;
+        pointer-events: none;
+      }
+      #ui kbd {
+        background: rgba(255, 255, 255, 0.08);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/",
+          "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.20.0/dist/lil-gui.esm.min.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="ui">
+      <strong>lotusclaude2.glb</strong> — V2 arcade / camera / chassis lean match <code>playMode.js</code>;
+      Lotus mesh: wheels from chassis bbox (folder in GUI), car scaled to ~<span style="opacity: 0.85">4.35 m</span> footprint ×
+      <code>CAR_MODEL_SCALE</code>, ground snap via full AABB. Chase yaw = Bruno <code>carHeading</code>; root <code>Ry(carHeading − CAR_MODEL_YAW)</code> aligns Lotus visuals to that heading. Flat <code>getTerrainHeight</code> = 0.<br />
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows · <kbd>Shift</kbd> boost · <kbd>N</kbd> nitro · <kbd>Space</kbd> handbrake ·
+      <kbd>O</kbd> / <kbd>Tab</kbd> orbit · <span id="hud-line"></span><br />
+      Serve over HTTP (e.g. <code>/models/lotus-showcase.html</code>), not <code>file://</code>.
+    </div>
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+      import GUI from "lil-gui";
+
+      // ── Mirrored from v2/play/playMode.js (Bruno / car) ─────────────────────
+      const CAR_MODEL_YAW = Math.PI / 2;
+      const CAR_MODEL_SCALE = 1.6;
+      const CAR_ACCEL = 26;
+      const CAR_ACCEL_BOOST = 52;
+      const CAR_BRAKE = 35;
+      const CAR_REVERSE_ACCEL = 12;
+      const CAR_MAX_SPEED = 45;
+      const CAR_MAX_SPEED_BOOST = 72;
+      const CAR_MAX_REVERSE = 10;
+      const CAR_COAST = 1.35;
+      const CAR_DRAG = 0.0042;
+      const CAR_TURN_RATE = 1.0;
+      const CAR_TURN_RATE_DRIFT = 2.0;
+      const CAR_GRIP_NORMAL = 12;
+      const CAR_GRIP_DRIFT = 0.8;
+      const CAR_GRIP_BRAKE_TURN = 2.0;
+      const CAR_DRIFT_ENTRY_SPEED = 8;
+      const CAR_RIDE_HEIGHT = 0.35;
+      const CAR_WHEEL_RADIUS = 0.42;
+      const CAR_DRIFT_ANGLE_MIN = 0.1;
+      const CAR_CAM_DIST = 10;
+      const CAR_CAM_HEIGHT = 3.5;
+      const CAR_CAM_CHASE_SPEED = 3.5;
+      const CAR_CAM_DRIFT_LAG = 1.8;
+      const CAR_HANDBRAKE_DECEL = 3;
+      const CAR_BODY_ROLL_MAX = 0.2;
+      const CAR_BODY_PITCH_MAX = 0.14;
+      const CAR_GRAVITY = 28;
+      const CAR_EDGE_DROP_THRESHOLD = 0.45;
+      const CAR_MAX_SLOPE_COS = 0.5;
+      const CAR_SLOPE_SAMPLE_EPS = 0.5;
+      const CAR_NITRO_KEY = "KeyN";
+      const CAR_NITRO_ACCEL_BONUS = 22;
+      const CAR_NITRO_MAX_SPEED_BONUS = 26;
+      const CAR_NITRO_DRAIN_PER_SEC = 0.32;
+      const CAR_NITRO_REGEN_PER_SEC = 0.14;
+      const CAR_NITRO_MIN_TO_USE = 0.05;
+      const CAR_BASE_ACCEL_LOW_SPEED_MUL = 0.52;
+      const CAR_BASE_ACCEL_RAMP_TO_KMH = 100;
+      const CAR_BODY_TERRAIN_ROLL_MAX = 0.16;
+      const CAR_BODY_TERRAIN_PITCH_MAX = 0.14;
+      const CAR_BODY_SMOOTH = 14;
+      const CAR_TERRAIN_BODY_SMOOTH = 9;
+      const CAR_WHEEL_BASE = 1.9;
+      const CAR_TRACK = 1.1;
+      const DRIFT_MARK_Y_OFFSET = 0.045;
+
+      /** Match prior Lotus preview: normalize GLB footprint, then apply V2 <code>CAR_MODEL_SCALE</code> on top. */
+      const SHOWCASE_TARGET_WIDTH_M = 4.35;
+
+      const WORLD_HALF = 800;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x4a5d73);
+
+      const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 5000);
+      camera.position.set(8, 4.5, 12);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.9;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
+      document.body.appendChild(renderer.domElement);
+
+      const pmremGenerator = new THREE.PMREMGenerator(renderer);
+      scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+      pmremGenerator.dispose();
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 0.9, 0);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.maxPolarAngle = Math.PI * 0.495;
+      let orbitInspect = false;
+      controls.update();
+      controls.enabled = false;
+
+      function setOrbitInspect(on) {
+        orbitInspect = !!on;
+        controls.enabled = orbitInspect;
+        if (carRoot) {
+          const lookY = carRoot.position.y + 1.2;
+          controls.target.set(playerPos.x, lookY, playerPos.z);
+          if (!orbitInspect) carCamYaw = carHeading;
+        }
+        controls.update();
+      }
+
+      function toggleOrbitInspect() {
+        setOrbitInspect(!orbitInspect);
+      }
+
+      const keysHeld = Object.create(null);
+      window.addEventListener(
+        "keydown",
+        (e) => {
+          keysHeld[e.code] = true;
+          if (!orbitInspect && carRoot && /^Arrow/.test(e.code)) e.preventDefault();
+          if (e.code === "Tab" || e.code === "KeyO") {
+            if (document.activeElement?.closest?.(".lil-gui")) return;
+            e.preventDefault();
+            toggleOrbitInspect();
+          }
+        },
+        { passive: false },
+      );
+      window.addEventListener("keyup", (e) => {
+        keysHeld[e.code] = false;
+      });
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.15));
+      scene.add(new THREE.HemisphereLight(0xe8f0ff, 0x3a4556, 0.3));
+      const sun = new THREE.DirectionalLight(0xfff5e8, 1.6);
+      sun.position.set(10, 22, 8);
+      sun.castShadow = true;
+      sun.shadow.mapSize.setScalar(2048);
+      sun.shadow.bias = -0.00025;
+      sun.shadow.camera.near = 0.5;
+      sun.shadow.camera.far = 120;
+      sun.shadow.camera.left = sun.shadow.camera.bottom = -18;
+      sun.shadow.camera.right = sun.shadow.camera.top = 18;
+      scene.add(sun);
+
+      scene.add(new THREE.GridHelper(60, 60, 0x8899aa, 0x5c6b7a));
+
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(240, 240),
+        new THREE.MeshStandardMaterial({ color: 0x5a6a78, roughness: 0.92, metalness: 0.04 }),
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      function applyShadows(root) {
+        root.traverse((o) => {
+          if (o.isMesh || o.isSkinnedMesh) {
+            o.castShadow = true;
+            o.receiveShadow = true;
+          }
+        });
+      }
+
+      const wheelParams = {
+        trackWidth: 0.459,
+        wheelbase: 0.287,
+        wheelY: 0.23,
+        wbShift: -0.024,
+        scale: 1,
+      };
+
+      /** Same naming as toolState.playCar defaults (v2/app/state/toolState.js). */
+      const playCar = {
+        accelScale: 1.0,
+        maxSpeedScale: 1.0,
+        speedometerScale: 1.0,
+        cameraDistance: 10,
+        cameraHeight: 3.5,
+        cameraChaseSpeed: 3.5,
+        cameraDriftLag: 1.8,
+      };
+
+      /** Flat terrain sample (tunnel-free); swap to heightfield later for parity testing. */
+      function getTerrainHeight(x, z) {
+        void x;
+        void z;
+        return 0;
+      }
+
+      const playerPos = new THREE.Vector3(0, 0, 0);
+      let carVx = 0;
+      let carVz = 0;
+      let carHeading = 0;
+      let carWheelSpin = 0;
+      let carDrifting = false;
+      let carDriftAngle = 0;
+      let carBodyRoll = 0;
+      let carBodyPitch = 0;
+      let carTerrainRoll = 0;
+      let carTerrainPitch = 0;
+      let carInAir = false;
+      let carVelY = 0;
+      let carOnSteepSlope = false;
+      let carNitro = 1;
+
+      let carWheels = [];
+      let carRoot = null;
+      let carChassis = null;
+      let carCamYaw = 0;
+      let chassisMetrics = null;
+
+      let _rearContactPts = []; // placeholders for symmetry with playMode drift call sites (unused here)
+
+      function placeWheelMeshes() {
+        if (!chassisMetrics || carWheels.length !== 4) return;
+        const { cSize, cCenter, cMinY, wbOnX } = chassisMetrics;
+        const yOff = cMinY + cSize.y * wheelParams.wheelY;
+
+        let offsets;
+        if (wbOnX) {
+          const halfWB = cSize.x * wheelParams.wheelbase;
+          const halfTrack = cSize.z * wheelParams.trackWidth;
+          const xShift = cSize.x * wheelParams.wbShift;
+          offsets = [
+            { x: halfWB + xShift, z: -halfTrack },
+            { x: halfWB + xShift, z: halfTrack },
+            { x: -halfWB + xShift, z: -halfTrack },
+            { x: -halfWB + xShift, z: halfTrack },
+          ];
+        } else {
+          const halfTrack = cSize.x * wheelParams.trackWidth;
+          const halfWB = cSize.z * wheelParams.wheelbase;
+          const zShift = cSize.z * wheelParams.wbShift;
+          offsets = [
+            { x: -halfTrack, z: halfWB + zShift },
+            { x: halfTrack, z: halfWB + zShift },
+            { x: -halfTrack, z: -halfWB + zShift },
+            { x: halfTrack, z: -halfWB + zShift },
+          ];
+        }
+
+        for (let i = 0; i < 4; i++) {
+          const w = carWheels[i];
+          const o = offsets[i];
+          w.container.position.set(cCenter.x + o.x, yOff, cCenter.z + o.z);
+          w.container.scale.setScalar(wheelParams.scale);
+          w.offset.set(w.container.position.x, 0, w.container.position.z);
+        }
+
+        const fl = carWheels[0].offset;
+        const fr = carWheels[1].offset;
+        const rl = carWheels[2].offset;
+        if (wbOnX) {
+          chassisMetrics.terrainTrackSpan = Math.abs(fr.z - fl.z);
+          chassisMetrics.terrainWBSpan = Math.abs(rl.x - fl.x);
+        } else {
+          chassisMetrics.terrainTrackSpan = Math.abs(fr.x - fl.x);
+          chassisMetrics.terrainWBSpan = Math.abs(rl.z - fl.z);
+        }
+      }
+
+      function buildCarFromGltf(gltf) {
+        const src = gltf.scene;
+        let chassisSrc = null;
+        let wheelSrc = null;
+        src.traverse((o) => {
+          if (!chassisSrc && /^chassis(\.|\d|$)/.test(o.name)) chassisSrc = o;
+          if (!wheelSrc && /^wheelContainer(\.|\d|$)/.test(o.name)) wheelSrc = o;
+        });
+        if (!chassisSrc || !wheelSrc) {
+          console.warn("[showcase] Missing chassis/wheelContainer — fallback.");
+          if (!chassisSrc) chassisSrc = src;
+          if (!wheelSrc) wheelSrc = src.clone(true);
+        }
+
+        const chassisVisual = chassisSrc.clone(true);
+        chassisVisual.position.set(0, 0, 0);
+        chassisVisual.rotation.set(0, CAR_MODEL_YAW, 0);
+        chassisVisual.scale.setScalar(1);
+        const strays = [];
+        chassisVisual.traverse((o) => {
+          if (/^wheelContainer(\.|\d|$)/.test(o.name)) strays.push(o);
+        });
+        strays.forEach((s) => s.parent?.remove(s));
+        applyShadows(chassisVisual);
+
+        const body = new THREE.Group();
+        body.rotation.order = "YXZ";
+        body.add(chassisVisual);
+
+        chassisVisual.updateMatrixWorld(true);
+        const cBox = new THREE.Box3().setFromObject(chassisVisual);
+        const cSize = new THREE.Vector3();
+        const cCenter = new THREE.Vector3();
+        cBox.getSize(cSize);
+        cBox.getCenter(cCenter);
+        const wbOnX = cSize.x >= cSize.z;
+        chassisMetrics = { cSize, cCenter, cMinY: cBox.min.y, wbOnX };
+
+        const layout = [
+          { steer: true, isLeft: true, name: "FL" },
+          { steer: true, isLeft: false, name: "FR" },
+          { steer: false, isLeft: true, name: "RL" },
+          { steer: false, isLeft: false, name: "RR" },
+        ];
+
+        carWheels = layout.map((L) => {
+          const container = wheelSrc.clone(true);
+          container.rotation.set(0, CAR_MODEL_YAW + (L.isLeft ? 0 : Math.PI), 0);
+          let suspension = null;
+          let cylinder = null;
+          container.traverse((c) => {
+            if (!suspension && /^wheelSuspension(\.|\d|$)/.test(c.name)) suspension = c;
+            if (!cylinder && /^wheelCylinder(\.|\d|$)/.test(c.name)) cylinder = c;
+          });
+          applyShadows(container);
+          body.add(container);
+          return {
+            container,
+            suspension: suspension || container,
+            cylinder: cylinder || container,
+            offset: new THREE.Vector3(),
+            steer: L.steer,
+            isLeft: L.isLeft,
+            name: L.name,
+            contactWorld: new THREE.Vector3(),
+          };
+        });
+
+        placeWheelMeshes();
+
+        const root = new THREE.Group();
+        root.rotation.order = "YXZ";
+        root.scale.setScalar(CAR_MODEL_SCALE);
+        root.add(body);
+        carChassis = body;
+
+        _rearContactPts = [new THREE.Vector3(), new THREE.Vector3()];
+        return root;
+      }
+
+      /** PlayMode car physics + integration order (minus BVH/barrier/capsule smoke). */
+      function stepCar(dtSec, keys, prevPlayerY) {
+        const accelScale = playCar.accelScale ?? 1;
+        const maxSpeedScale = playCar.maxSpeedScale ?? 1;
+        const forward = keys.KeyW || keys.ArrowUp;
+        const backward = keys.KeyS || keys.ArrowDown;
+        const leftKey = keys.KeyA || keys.ArrowLeft;
+        const rightKey = keys.KeyD || keys.ArrowRight;
+        const handbrake = keys.Space;
+        const nitroHeld = !!keys[CAR_NITRO_KEY];
+
+        const curSpeed = Math.sqrt(carVx * carVx + carVz * carVz);
+        const hx = -Math.sin(carHeading);
+        const hz = -Math.cos(carHeading);
+
+        const boost = keys.ShiftLeft || keys.ShiftRight;
+        const nitroActive = nitroHeld && carNitro > CAR_NITRO_MIN_TO_USE && !backward;
+        let accel = ((boost ? CAR_ACCEL_BOOST : CAR_ACCEL) + (nitroActive ? CAR_NITRO_ACCEL_BONUS : 0)) * accelScale;
+        if (!boost && !nitroActive) {
+          const speedKmh = curSpeed * 3.6;
+          const rampT = THREE.MathUtils.smoothstep(speedKmh, 0, CAR_BASE_ACCEL_RAMP_TO_KMH);
+          const accelMul = THREE.MathUtils.lerp(CAR_BASE_ACCEL_LOW_SPEED_MUL, 1.0, rampT);
+          accel *= accelMul;
+        }
+        if (carOnSteepSlope) accel *= 0.1;
+
+        if (forward) {
+          carVx += hx * accel * dtSec;
+          carVz += hz * accel * dtSec;
+        } else if (backward) {
+          if (curSpeed > 1) {
+            carVx -= hx * CAR_BRAKE * accelScale * dtSec;
+            carVz -= hz * CAR_BRAKE * accelScale * dtSec;
+          } else {
+            carVx -= hx * CAR_REVERSE_ACCEL * accelScale * dtSec;
+            carVz -= hz * CAR_REVERSE_ACCEL * accelScale * dtSec;
+          }
+        } else if (curSpeed > 0.05) {
+          const decel = CAR_COAST / curSpeed;
+          carVx -= carVx * decel * dtSec;
+          carVz -= carVz * decel * dtSec;
+        } else {
+          carVx = 0;
+          carVz = 0;
+        }
+
+        if (handbrake && curSpeed > 0.1) {
+          const decel = CAR_HANDBRAKE_DECEL / curSpeed;
+          carVx -= carVx * decel * dtSec;
+          carVz -= carVz * decel * dtSec;
+        }
+
+        const speed2 = carVx * carVx + carVz * carVz;
+        if (speed2 > 0.01) {
+          const spd = Math.sqrt(speed2);
+          const dragForce = CAR_DRAG * spd;
+          const factor = Math.max(0, 1 - dragForce * dtSec);
+          carVx *= factor;
+          carVz *= factor;
+        }
+
+        const maxSpd =
+          ((boost ? CAR_MAX_SPEED_BOOST : CAR_MAX_SPEED) + (nitroActive ? CAR_NITRO_MAX_SPEED_BONUS : 0)) * maxSpeedScale;
+        const newSpeed = Math.sqrt(carVx * carVx + carVz * carVz);
+        if (newSpeed > maxSpd) {
+          const s = maxSpd / newSpeed;
+          carVx *= s;
+          carVz *= s;
+        }
+
+        if (nitroActive && curSpeed > 1) {
+          carNitro = Math.max(0, carNitro - CAR_NITRO_DRAIN_PER_SEC * dtSec);
+        } else {
+          carNitro = Math.min(1, carNitro + CAR_NITRO_REGEN_PER_SEC * dtSec);
+        }
+
+        let steerInput = 0;
+        if (leftKey) steerInput = 1;
+        if (rightKey) steerInput = -1;
+        if (steerInput !== 0 && curSpeed > 0.5) {
+          const turnRate = carDrifting ? CAR_TURN_RATE_DRIFT : CAR_TURN_RATE;
+          carHeading += steerInput * turnRate * dtSec;
+        }
+
+        const fwdDot = carVx * hx + carVz * hz;
+        const rx = Math.cos(carHeading);
+        const rz = -Math.sin(carHeading);
+        const latDot = carVx * rx + carVz * rz;
+
+        let grip;
+        if (handbrake && curSpeed > CAR_DRIFT_ENTRY_SPEED && steerInput !== 0) grip = CAR_GRIP_DRIFT;
+        else if (backward && steerInput !== 0 && curSpeed > 3) grip = CAR_GRIP_BRAKE_TURN;
+        else grip = CAR_GRIP_NORMAL;
+
+        const lateralKill = 1 - Math.exp(-grip * dtSec);
+        carVx -= rx * latDot * lateralKill;
+        carVz -= rz * latDot * lateralKill;
+
+        carDriftAngle = curSpeed > 1 ? Math.abs(Math.atan2(latDot, Math.abs(fwdDot))) : 0;
+        carDrifting = carDriftAngle > CAR_DRIFT_ANGLE_MIN && curSpeed > CAR_DRIFT_ENTRY_SPEED;
+
+        const latSign = Math.sign(latDot);
+        const speedForRoll = Math.sqrt(carVx * carVx + carVz * carVz);
+        const driftRollSpeedGain = THREE.MathUtils.smoothstep(speedForRoll, 8, 24);
+        const driftRoll = -latSign * Math.min(CAR_BODY_ROLL_MAX, carDriftAngle * 0.85) * driftRollSpeedGain;
+        const throttlePitch = forward ? 0.055 : backward ? -0.08 : 0;
+        const speedNorm = Math.min(1, curSpeed / Math.max(1, CAR_MAX_SPEED));
+        const dynamicPitch = -speedNorm * 0.05;
+        const targetDynRoll = carDrifting ? driftRoll : 0;
+        const targetDynPitch = dynamicPitch + throttlePitch;
+        const smooth = 1 - Math.exp(-CAR_BODY_SMOOTH * dtSec);
+        carBodyRoll = THREE.MathUtils.lerp(carBodyRoll, targetDynRoll, smooth);
+        carBodyPitch = THREE.MathUtils.lerp(carBodyPitch, targetDynPitch, smooth);
+
+        carWheelSpin -= (fwdDot / CAR_WHEEL_RADIUS) * dtSec;
+
+        const mx = carVx;
+        const mz = carVz;
+        let stepX = mx * dtSec;
+        let stepZ = mz * dtSec;
+
+        playerPos.x = THREE.MathUtils.clamp(playerPos.x + stepX, -WORLD_HALF, WORLD_HALF);
+        playerPos.z = THREE.MathUtils.clamp(playerPos.z + stepZ, -WORLD_HALF, WORLD_HALF);
+
+        const terrainY = getTerrainHeight(playerPos.x, playerPos.z);
+        const groundY = terrainY;
+
+        const eps = CAR_SLOPE_SAMPLE_EPS;
+        const px = playerPos.x;
+        const pz = playerPos.z;
+        const hL = getTerrainHeight(px - eps, pz);
+        const hR = getTerrainHeight(px + eps, pz);
+        const hD = getTerrainHeight(px, pz - eps);
+        const hU = getTerrainHeight(px, pz + eps);
+        const inv2eps = 1 / (2 * eps);
+        const nx = (hL - hR) * inv2eps;
+        const nz = (hD - hU) * inv2eps;
+        const nLen = Math.sqrt(nx * nx + 1 + nz * nz);
+        const normalY = 1 / nLen;
+        const tooSteep = normalY < CAR_MAX_SLOPE_COS;
+        carOnSteepSlope = tooSteep && !carInAir;
+
+        if (carInAir) {
+          carVelY -= CAR_GRAVITY * dtSec;
+          playerPos.y += carVelY * dtSec;
+          if (playerPos.y <= groundY) {
+            playerPos.y = groundY;
+            carVelY = 0;
+            carInAir = false;
+          }
+        } else {
+          const drop = prevPlayerY - groundY;
+          if (drop > CAR_EDGE_DROP_THRESHOLD) {
+            carInAir = true;
+            carVelY = 0;
+            playerPos.y = prevPlayerY;
+          } else if (tooSteep) {
+            const slideX = (nx / nLen) * CAR_GRAVITY * 0.5 * dtSec;
+            const slideZ = (nz / nLen) * CAR_GRAVITY * 0.5 * dtSec;
+            carVx += slideX;
+            carVz += slideZ;
+            const upDot = carVx * (nx / nLen) + carVz * (nz / nLen);
+            if (upDot < 0) {
+              carVx -= (nx / nLen) * upDot * 0.8;
+              carVz -= (nz / nLen) * upDot * 0.8;
+            }
+            playerPos.y = groundY;
+          } else {
+            playerPos.y = groundY;
+          }
+        }
+
+        syncCarVisuals(dtSec);
+      }
+
+      function syncCarVisuals(dtSec) {
+        if (!carRoot || !carWheels.length || !carChassis) return;
+
+        const scaleFactor = carRoot.scale.x || CAR_MODEL_SCALE;
+        /* Snap full car AABB to player ground (Lotus wheel Y from mesh bbox; Bruno uses fixed ride height). */
+        carRoot.position.set(playerPos.x, playerPos.y, playerPos.z);
+        carRoot.updateMatrixWorld(true);
+        const fitBox = new THREE.Box3().setFromObject(carRoot, true);
+        if (!fitBox.isEmpty() && Number.isFinite(fitBox.min.y)) {
+          const lift = playerPos.y - fitBox.min.y;
+          if (Math.abs(fitBox.min.y) < 400 && Math.abs(lift) < 400) carRoot.position.y += lift;
+        }
+        carRoot.rotation.y = carHeading - CAR_MODEL_YAW + Math.PI;
+
+        let frontY = 0;
+        let rearY = 0;
+        let leftY = 0;
+        let rightY = 0;
+        let rearIdx = 0;
+        const hyWheel = carHeading - CAR_MODEL_YAW + Math.PI;
+
+        for (const w of carWheels) {
+          const lx = w.offset.x * scaleFactor;
+          const lz = w.offset.z * scaleFactor;
+          const wx = playerPos.x + lx * Math.cos(hyWheel) + lz * Math.sin(hyWheel);
+          const wz = playerPos.z - lx * Math.sin(hyWheel) + lz * Math.cos(hyWheel);
+          const h = getTerrainHeight(wx, wz);
+          w.contactWorld.set(wx, h + DRIFT_MARK_Y_OFFSET, wz);
+          if (w.steer) frontY += h;
+          else {
+            rearY += h;
+            if (rearIdx < _rearContactPts.length) _rearContactPts[rearIdx++].copy(w.contactWorld);
+          }
+          if (w.isLeft) leftY += h;
+          else rightY += h;
+        }
+
+        const leftAvg = leftY * 0.5;
+        const rightAvg = rightY * 0.5;
+        const frontAvg = frontY * 0.5;
+        const rearAvg = rearY * 0.5;
+        const trackSpan = Math.max(1e-4, (chassisMetrics?.terrainTrackSpan ?? CAR_TRACK) * scaleFactor);
+        const wbSpan = Math.max(1e-4, (chassisMetrics?.terrainWBSpan ?? CAR_WHEEL_BASE) * scaleFactor);
+        const terrainRollRaw = Math.atan2(rightAvg - leftAvg, trackSpan);
+        const terrainPitchRaw = Math.atan2(frontAvg - rearAvg, wbSpan);
+        const terrainSmooth = 1 - Math.exp(-CAR_TERRAIN_BODY_SMOOTH * dtSec);
+
+        if (carInAir) {
+          carTerrainRoll = THREE.MathUtils.lerp(carTerrainRoll, 0, terrainSmooth);
+          carTerrainPitch = THREE.MathUtils.lerp(carTerrainPitch, 0, terrainSmooth);
+        } else {
+          const terrainRollTarget = THREE.MathUtils.clamp(terrainRollRaw, -CAR_BODY_TERRAIN_ROLL_MAX, CAR_BODY_TERRAIN_ROLL_MAX);
+          const terrainPitchTarget = THREE.MathUtils.clamp(terrainPitchRaw, -CAR_BODY_TERRAIN_PITCH_MAX, CAR_BODY_TERRAIN_PITCH_MAX);
+          carTerrainRoll = THREE.MathUtils.lerp(carTerrainRoll, terrainRollTarget, terrainSmooth);
+          carTerrainPitch = THREE.MathUtils.lerp(carTerrainPitch, terrainPitchTarget, terrainSmooth);
+        }
+        const finalPitch = THREE.MathUtils.clamp(carTerrainPitch + carBodyPitch, -CAR_BODY_PITCH_MAX, CAR_BODY_PITCH_MAX);
+        const finalRoll = THREE.MathUtils.clamp(carTerrainRoll + carBodyRoll, -CAR_BODY_ROLL_MAX, CAR_BODY_ROLL_MAX);
+        carChassis.rotation.set(-finalRoll, 0, finalPitch);
+
+        const kh = keysHeld;
+        const _steerVis = orbitInspect
+          ? 0
+          : (kh.KeyA || kh.ArrowLeft ? 0.4 : 0) + (kh.KeyD || kh.ArrowRight ? -0.4 : 0);
+        for (const w of carWheels) {
+          const baseYaw = CAR_MODEL_YAW + (w.isLeft ? 0 : Math.PI);
+          w.container.rotation.y = baseYaw + (w.steer ? _steerVis : 0);
+          if (w.cylinder) {
+            w.cylinder.rotation.x = (w.isLeft ? 1 : -1) * carWheelSpin;
+            w.cylinder.rotation.z = 0;
+          }
+        }
+      }
+
+      function setupGUI() {
+        const gui = new GUI({ title: "V2 playCar + Lotus mesh" });
+        const d = gui.addFolder("Lotus wheels (body bbox)");
+        d.add(wheelParams, "trackWidth", 0.1, 0.6, 0.001).name("Track Width").onChange(placeWheelMeshes);
+        d.add(wheelParams, "wheelbase", 0.1, 0.6, 0.001).name("Wheelbase").onChange(placeWheelMeshes);
+        d.add(wheelParams, "wbShift", -0.3, 0.3, 0.001).name("WB Shift F/R").onChange(placeWheelMeshes);
+        d.add(wheelParams, "wheelY", -0.5, 0.5, 0.001).name("Wheel Height").onChange(placeWheelMeshes);
+        d.add(wheelParams, "scale", 0.5, 2.0, 0.01).name("Wheel Scale").onChange(placeWheelMeshes);
+
+        gui.add(playCar, "accelScale", 0.25, 2, 0.01).name("accelScale");
+        gui.add(playCar, "maxSpeedScale", 0.25, 2, 0.01).name("maxSpeedScale");
+        gui.add(playCar, "cameraDistance", 4, 24, 0.25).name("cam distance");
+        gui.add(playCar, "cameraHeight", 1, 10, 0.1).name("cam height");
+        gui.add(playCar, "cameraChaseSpeed", 0.5, 12, 0.05).name("cam chase spd");
+        gui.add(playCar, "cameraDriftLag", 0, 4, 0.05).name("cam drift lag");
+        gui.add(playCar, "speedometerScale", 0.5, 2, 0.01).name("speedo scale");
+      }
+
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      const frameTimer = new THREE.Timer();
+      frameTimer.connect(document);
+
+      const loader = new GLTFLoader();
+      loader.load(
+        new URL("./lotusclaude2.glb", import.meta.url).href,
+        (gltf) => {
+          const car = buildCarFromGltf(gltf);
+          carRoot = car;
+          scene.add(car);
+
+          car.updateMatrixWorld(true);
+          const fit = new THREE.Box3().setFromObject(car, true);
+          const sz = new THREE.Vector3();
+          fit.getSize(sz);
+          const footprint = Math.max(sz.x, sz.z, 0.001);
+          const normalize = SHOWCASE_TARGET_WIDTH_M / footprint;
+          if (Number.isFinite(normalize) && normalize > 0.08 && normalize < 200) {
+            car.scale.multiplyScalar(normalize);
+          }
+          placeWheelMeshes();
+
+          car.updateMatrixWorld(true);
+          const box = new THREE.Box3().setFromObject(car, true);
+          const sphere = new THREE.Sphere();
+          box.getBoundingSphere(sphere);
+          if (!box.isEmpty() && sphere.radius > 1e-6 && Number.isFinite(sphere.radius)) {
+            controls.target.copy(sphere.center);
+            const dist = sphere.radius * 2.85;
+            camera.position.set(sphere.center.x + dist * 0.85, sphere.center.y + dist * 0.42, sphere.center.z + dist * 0.9);
+            camera.lookAt(controls.target);
+            carCamYaw = carHeading;
+          }
+          setupGUI();
+        },
+        undefined,
+        (err) => console.error("[showcase] GLB load failed:", err),
+      );
+
+      renderer.setAnimationLoop(() => {
+        frameTimer.update();
+        const dtSecRaw = frameTimer.getDelta() || 1 / 60;
+        const dtSec = Math.min(dtSecRaw, 0.05);
+
+        const hud = document.getElementById("hud-line");
+
+        if (!orbitInspect && carRoot && carWheels.length) {
+          const prevPlayerY = playerPos.y;
+          stepCar(dtSec, keysHeld, prevPlayerY);
+        } else if (carRoot && carWheels.length) {
+          syncCarVisuals(dtSec);
+        }
+
+        if (orbitInspect) controls.update();
+        else if (carRoot) {
+          const dist = playCar.cameraDistance ?? CAR_CAM_DIST;
+          const height = playCar.cameraHeight ?? CAR_CAM_HEIGHT;
+          const chaseSpd = playCar.cameraChaseSpeed ?? CAR_CAM_CHASE_SPEED;
+          const driftLag = playCar.cameraDriftLag ?? CAR_CAM_DRIFT_LAG;
+
+          let chaseTarget = carHeading;
+          if (carDrifting) {
+            const rx = Math.cos(carHeading);
+            const rz = -Math.sin(carHeading);
+            const latSign = Math.sign(carVx * rx + carVz * rz);
+            chaseTarget += latSign * carDriftAngle * driftLag;
+          }
+          let camDelta = chaseTarget - carCamYaw;
+          while (camDelta > Math.PI) camDelta -= 2 * Math.PI;
+          while (camDelta < -Math.PI) camDelta += 2 * Math.PI;
+          carCamYaw += camDelta * (1 - Math.exp(-chaseSpd * dtSec));
+
+          const camBehindX = playerPos.x + Math.sin(carCamYaw) * dist;
+          const camBehindZ = playerPos.z + Math.cos(carCamYaw) * dist;
+          const carLookY = carRoot.position.y + 1.2;
+          const camY = carLookY + height;
+          camera.position.set(camBehindX, camY, camBehindZ);
+          camera.lookAt(playerPos.x, carLookY, playerPos.z);
+          controls.target.set(playerPos.x, carLookY, playerPos.z);
+        }
+
+        if (hud) {
+          const spd = Math.sqrt(carVx * carVx + carVz * carVz);
+          const kmh = Math.round(spd * 3.6 * (playCar.speedometerScale ?? 1));
+          hud.textContent = `Speed ~${kmh} km/h · nitro ${Math.round(carNitro * 100)}%`;
+        }
+
+        renderer.render(scene, camera);
+      });
+    </script>
+  </body>
+</html>

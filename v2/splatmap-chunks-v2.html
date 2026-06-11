@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Splatmap Chunks V2 - Terrain Core</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #0b0f13;
+        color: #d7e4ef;
+        font-family: "SF Mono", Consolas, monospace;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 5;
+        pointer-events: none;
+        background: rgba(0, 0, 0, 0.58);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 8px;
+        padding: 9px 11px;
+        white-space: pre-wrap;
+        line-height: 1.35;
+        font-size: 12px;
+        min-width: 290px;
+      }
+      .tp-dfwv {
+        position: fixed !important;
+        top: 16px !important;
+        right: 16px !important;
+        width: 300px !important;
+        z-index: 10;
+        max-height: calc(100vh - 32px) !important;
+        overflow-y: auto !important;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/",
+          "tweakpane": "https://esm.sh/tweakpane@4.0.4",
+          "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.9/build/index.module.js",
+          "howler": "https://esm.sh/howler@2.2.4"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="hud">booting V2 terrain core...</div>
+    <script type="module">
+      import { startV2App } from "./app/main.js";
+
+      startV2App().catch((err) => {
+        console.error("[V2] failed to start", err);
+        const hud = document.getElementById("hud");
+        if (hud) hud.textContent = `V2 startup error: ${err?.message || err}`;
+      });
+    </script>
+  </body>
+</html>
+

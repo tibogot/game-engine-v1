@@ -1,0 +1,4541 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Profiles & physical pieces — road lab</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000000;
+        color: #d8e2ef;
+        font-family:
+          Inter,
+          Segoe UI,
+          Arial,
+          sans-serif;
+      }
+      #root {
+        position: fixed;
+        inset: 0;
+      }
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        cursor: crosshair;
+      }
+      #hud {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        min-width: 390px;
+        max-width: 520px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(0, 0, 0, 0.52);
+        backdrop-filter: blur(4px);
+        z-index: 10;
+      }
+      #hud h3 {
+        margin: 0 0 8px;
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 132px 1fr auto;
+        align-items: center;
+        gap: 8px;
+        margin: 6px 0;
+        font-size: 12px;
+      }
+      .row input[type="range"] {
+        width: 100%;
+      }
+      .row output {
+        min-width: 46px;
+        text-align: right;
+        opacity: 0.95;
+      }
+      .buttons {
+        display: flex;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      button {
+        color: #d8e2ef;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 6px;
+        padding: 5px 8px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      #networkJson {
+        width: 100%;
+        min-height: 54px;
+        margin-top: 6px;
+        resize: vertical;
+        color: #d8e2ef;
+        background: rgba(0, 0, 0, 0.36);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 6px;
+        padding: 6px;
+        font:
+          11px Consolas,
+          monospace;
+      }
+      .line {
+        height: 1px;
+        background: rgba(255, 255, 255, 0.12);
+        margin: 8px 0;
+      }
+      #tips {
+        margin-top: 8px;
+        font-size: 11px;
+        opacity: 0.82;
+        line-height: 1.35;
+      }
+      #status {
+        font-size: 11px;
+        margin-top: 6px;
+        opacity: 0.95;
+      }
+      a {
+        color: #8cc8ff;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <canvas id="c"></canvas>
+      <div id="hud">
+        <h3>Profiles & physical pieces</h3>
+        <div
+          style="font-size: 11px; opacity: 0.78; margin: -4px 0 6px"
+        >
+          Graph edges = <strong>profiles</strong> (cross-sections). Graph nodes =
+          <strong>physical pieces</strong> (segments &amp; intersections).
+        </div>
+        <div class="row">
+          <label for="width">Road width</label>
+          <input
+            id="width"
+            type="range"
+            min="20"
+            max="170"
+            step="1"
+            value="74"
+          />
+          <output id="widthOut">74</output>
+        </div>
+        <div class="row">
+          <label for="lanesPerDir">Lanes per direction</label>
+          <input
+            id="lanesPerDir"
+            type="range"
+            min="1"
+            max="3"
+            step="1"
+            value="1"
+          />
+          <output id="lanesOut">1</output>
+        </div>
+        <div class="row">
+          <label for="junctionRadius">Junction radius</label>
+          <input
+            id="junctionRadius"
+            type="range"
+            min="20"
+            max="220"
+            step="1"
+            value="90"
+          />
+          <output id="junctionOut">90</output>
+        </div>
+        <div class="row">
+          <label for="curveSegments">Curve segments</label>
+          <input
+            id="curveSegments"
+            type="range"
+            min="8"
+            max="96"
+            step="2"
+            value="34"
+          />
+          <output id="curveSegmentsOut">34</output>
+        </div>
+        <div class="row">
+          <label for="junctionSegments">Junction segments</label>
+          <input
+            id="junctionSegments"
+            type="range"
+            min="4"
+            max="40"
+            step="1"
+            value="14"
+          />
+          <output id="junctionSegmentsOut">14</output>
+        </div>
+        <div class="row">
+          <label for="debug">Show debug</label>
+          <input id="debug" type="checkbox" />
+          <span></span>
+        </div>
+        <div class="row">
+          <label for="hideJunctionSeams">Hide junction seams</label>
+          <input id="hideJunctionSeams" type="checkbox" checked />
+          <span></span>
+        </div>
+        <div class="row">
+          <label for="blendJunctionFill">Blend junction fill</label>
+          <input id="blendJunctionFill" type="checkbox" checked />
+          <span></span>
+        </div>
+        <div class="row">
+          <label for="twoRoadNodes">2-road nodes</label>
+          <select id="twoRoadNodes">
+            <option value="smooth">Curve (default clips)</option>
+            <option value="junction">Curve (wider clips)</option>
+          </select>
+          <span></span>
+        </div>
+        <div class="row">
+          <label for="junctionTypeSelect">3+ node junction</label>
+          <select id="junctionTypeSelect">
+            <option value="default">Merge (polygon fill)</option>
+            <option value="tee">T-junction (yield on branch)</option>
+            <option value="fork">Lane fork (3 roads: 1 band peels)</option>
+            <option value="roundabout">Roundabout (merged hub + ring dashes)</option>
+          </select>
+          <span></span>
+        </div>
+        <div
+          class="buttons"
+          id="forkRoleRow"
+          style="margin-top: 4px; display: none; flex-wrap: wrap; gap: 6px"
+        >
+          <button id="forkIncomingBtn" type="button">Fork incoming = selected edge</button>
+          <button id="forkExitBtn" type="button">Fork exit = selected edge</button>
+        </div>
+        <div class="line"></div>
+        <div class="row">
+          <span style="grid-column: 1 / -1; font-size: 11px; opacity: 0.88"
+            >Selected edge (click segment)</span
+          >
+        </div>
+        <div class="row">
+          <label for="edgeOneWay">One-way a→b</label>
+          <input id="edgeOneWay" type="checkbox" disabled />
+          <span></span>
+        </div>
+        <div class="row">
+          <label for="lanePresetSelect">Lane strip preset</label>
+          <select id="lanePresetSelect" disabled>
+            <option value="">Use network / edge JSON</option>
+            <option value="equal">Equal (per network)</option>
+            <option value="exit_split">Exit / merge split (4 strips)</option>
+            <option value="fork_profiles">Article fork (profile chain on edge)</option>
+            <option value="bus_outer">Wider outer lane</option>
+          </select>
+          <span></span>
+        </div>
+        <div class="buttons" style="margin-top: 4px">
+          <button id="reverseEdge" type="button" disabled>Swap a↔b</button>
+        </div>
+        <div class="row">
+          <label for="endCapStyle">Road ends</label>
+          <select id="endCapStyle">
+            <option value="flat">Flat</option>
+            <option value="round">Round</option>
+          </select>
+          <span></span>
+        </div>
+        <div class="row">
+          <label for="snapGrid">Grid snap</label>
+          <input id="snapGrid" type="checkbox" />
+          <span></span>
+        </div>
+        <div class="row">
+          <label for="gridSize">Grid size</label>
+          <input
+            id="gridSize"
+            type="range"
+            min="8"
+            max="96"
+            step="4"
+            value="24"
+          />
+          <output id="gridSizeOut">24</output>
+        </div>
+        <div class="row">
+          <label for="snapAngle">Angle snap</label>
+          <input id="snapAngle" type="checkbox" />
+          <span></span>
+        </div>
+        <div class="row">
+          <label for="angleStep">Angle step</label>
+          <input
+            id="angleStep"
+            type="range"
+            min="5"
+            max="90"
+            step="5"
+            value="15"
+          />
+          <output id="angleStepOut">15</output>
+        </div>
+        <div class="row">
+          <label for="networkPresetSelect">Network preset</label>
+          <select id="networkPresetSelect">
+            <option value="debug_fork_3_2_1_only">
+              Debug: 3→2+1 fork island (junction shape only)
+            </option>
+            <option value="lane_fork_3_2_1">
+              Article diagram (simple): 3→2+1 lane fork
+            </option>
+            <option value="default">Default (4-way demo)</option>
+            <option value="article_profile_3_2_1">
+              Article diagram (taper): 3→2 on approach, then fork
+            </option>
+          </select>
+          <span></span>
+        </div>
+        <textarea
+          id="networkJson"
+          placeholder="Road network JSON export/import"
+        ></textarea>
+        <div class="buttons">
+          <button id="exportNetwork" type="button">Export</button>
+          <button id="importNetwork" type="button">Import</button>
+          <button
+            id="splitEdge"
+            type="button"
+            title="Inserts a graph node on the selected road (article: a physical segment boundary where you can branch or refine cross-section). Alt-click an edge does the same."
+          >
+            Insert knot (split edge)
+          </button>
+          <button id="clearNetwork" type="button">Clear</button>
+        </div>
+        <div id="status"></div>
+        <div class="line"></div>
+        <div id="tips">
+          In the article, a <strong>profile</strong> is the cross-section at a
+          connection (lanes, widths, types) — not the same word as these
+          <em>Network presets</em>, but each preset here fixes the graph
+          <em>and</em> those cross-sections for you.<br />
+          <strong>Debug fork island:</strong> first preset — same fork as the
+          article, but <em>only the merged junction polygon + fork markings</em>
+          are drawn (no road runs, no dead-end caps). Edges stay in the graph so
+          mouths/clips still define the shape; export JSON includes
+          <code>junctionIslandOnly</code> when on.<br />
+          <strong>Article fork (long arms):</strong> second preset — three strips
+          on the approach, two on the through leg, one narrow exit; no
+          <code>profiles[]</code> on the approach.<br />
+          Network mode: click a node to continue, click a segment to select it,
+          <strong>Insert knot (split edge)</strong> or Alt-click inserts a
+          <strong>graph node on that road</strong> — this is the practical
+          equivalent of the article’s <em>segment break / place to attach
+          another profile</em>: use it where a branch or exit will meet the
+          corridor, then draw a third road from that node for a junction.
+          Sandbox Spirit’s article inverts names: there, physical pavement
+          pieces are &quot;nodes&quot; and cross-section connectors are
+          &quot;edges&quot;; <strong>this lab keeps the usual graph</strong>
+          (node = point, edge = road run) and stores cross-sections in
+          <code>laneLayers</code> plus optional <code>profiles[]</code> along
+          each run (see
+          <a
+            href="https://sandboxspirit.com/blog/data-structures-of-roads"
+            target="_blank"
+            rel="noreferrer"
+            >Data Structures of Roads</a
+          >). Split-created nodes export as <code>profileBoundary: true</code>
+          and show a green cross-section tick while the node is degree-2.<br />
+          Spans, bends, and junction outlines share one mouth clip rule
+          (<code>mouthClipAlongNode</code>) so corners do not leave straight
+          stubs. Dashed guides use the same clipped segment. 3+ legs
+          use merge fill. Roundabout: merged hub, dark island, one dashed
+          circulation ring inboard of mouths, and per-lane spokes into the ring.
+          Road outlines are solid. On multi-strip runs, <strong>strip–strip
+          dividers</strong> are white <strong>dashes</strong> (two on a 3-strip
+          highway). At a lane fork, the <strong>rightmost</strong> divider splits:
+          one Hermite continues onto the through leg; a second branch (solid)
+          follows the ramp outer edge.           Widen the approach with edge
+          <code>widthMul</code> (simple preset uses <code>1.45</code>; through leg
+          <code>0.967</code> ≈ ⅔ of that; exit <code>0.483</code> ≈ ⅓ for one lane).
+          <strong>Profiles along a run</strong>: optional per-edge
+          <code>profiles</code> — each <code>{ u, laneLayers, widthScale? }</code>
+          with <code>u</code> in <code>[0,1]</code> along the clipped run; the
+          lab interpolates lane stacks and width between keyframes. After a
+          split with no prior profiles, both new runs get explicit
+          <code>u:0</code>/<code>u:1</code> keyframes so each piece is a clear
+          &quot;segment between profiles&quot;. Use preset &quot;Article fork&quot;
+          on a long selected edge, or JSON.
+          <strong>Lane fork (article 3→2+1)</strong>: at a degree-3 node choose
+          junction <em>Lane fork</em>. Put <strong>three strips</strong> on the
+          incoming highway (<code>laneLayers</code>), <strong>two</strong> on
+          the through leg, <strong>one</strong> on the exit ramp; narrow the
+          ramp with edge JSON <code>widthMul</code> (e.g. one-lane ≈
+          <code>0.48</code> when incoming is <code>1.45</code> wide).
+          Lane guides: inner strips stay tangent to the straight run;
+          <strong>rightmost incoming strip peels</strong> to the exit. Use the two
+          buttons to set
+          <code>forkIncomingKey</code> / <code>forkExitKey</code> (else arms are
+          inferred from <strong>strip counts</strong> at the fork: widest profile
+          = incoming, narrowest = exit; edge length is only a tie-break).
+          <strong>Network preset</strong> replaces the whole graph with a
+          built-in demo (add more presets in <code>NETWORK_PRESET_LIST</code>
+          in the script).<br />
+          Optional per-edge <code>headingA</code>/<code>headingB</code>,
+          <code>oneWay</code>, <code>laneLayers</code> in JSON. T-junction mode
+          adds a yield line on the branch arm (exactly 3 roads).<br />
+          Light edges show piece outlines; green tick =
+          <strong>profile knot</strong> (<code>profileBoundary</code>).<br />
+          Companion read:
+          <a
+            href="https://sandboxspirit.com/blog/art-of-roads-in-games"
+            target="_blank"
+            rel="noreferrer"
+            >Art of Roads in games</a
+          >.
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const canvas = document.getElementById("c");
+      const ctx = canvas.getContext("2d");
+      const widthEl = document.getElementById("width");
+      const widthOut = document.getElementById("widthOut");
+      const lanesPerDirEl = document.getElementById("lanesPerDir");
+      const lanesOut = document.getElementById("lanesOut");
+      const junctionRadiusEl = document.getElementById("junctionRadius");
+      const junctionOut = document.getElementById("junctionOut");
+      const curveSegmentsEl = document.getElementById("curveSegments");
+      const curveSegmentsOut = document.getElementById("curveSegmentsOut");
+      const junctionSegmentsEl = document.getElementById("junctionSegments");
+      const junctionSegmentsOut = document.getElementById(
+        "junctionSegmentsOut",
+      );
+      const debugEl = document.getElementById("debug");
+      const hideJunctionSeamsEl = document.getElementById("hideJunctionSeams");
+      const blendJunctionFillEl = document.getElementById("blendJunctionFill");
+      const twoRoadNodesEl = document.getElementById("twoRoadNodes");
+      const endCapStyleEl = document.getElementById("endCapStyle");
+      const snapGridEl = document.getElementById("snapGrid");
+      const gridSizeEl = document.getElementById("gridSize");
+      const gridSizeOut = document.getElementById("gridSizeOut");
+      const snapAngleEl = document.getElementById("snapAngle");
+      const angleStepEl = document.getElementById("angleStep");
+      const angleStepOut = document.getElementById("angleStepOut");
+      const networkJsonEl = document.getElementById("networkJson");
+      const exportNetworkEl = document.getElementById("exportNetwork");
+      const importNetworkEl = document.getElementById("importNetwork");
+      const splitEdgeEl = document.getElementById("splitEdge");
+      const clearNetworkEl = document.getElementById("clearNetwork");
+      const junctionTypeSelectEl = document.getElementById("junctionTypeSelect");
+      const forkRoleRowEl = document.getElementById("forkRoleRow");
+      const forkIncomingBtnEl = document.getElementById("forkIncomingBtn");
+      const forkExitBtnEl = document.getElementById("forkExitBtn");
+      const networkPresetSelectEl = document.getElementById(
+        "networkPresetSelect",
+      );
+      const edgeOneWayEl = document.getElementById("edgeOneWay");
+      const lanePresetSelectEl = document.getElementById("lanePresetSelect");
+      const reverseEdgeEl = document.getElementById("reverseEdge");
+      const statusEl = document.getElementById("status");
+      /** Article-style palette (Sandbox Spirit diagrams: dark road, white dashed lanes). */
+      const ARTICLE_BG = "#000000";
+      const ARTICLE_GRID = "rgba(255,255,255,0.055)";
+      const ROAD_SURFACE = "#2a2a2a";
+      const JUNCTION_SURFACE = ROAD_SURFACE;
+      const ARTICLE_ROAD_EDGE = "rgba(255,255,255,0.16)";
+      /** True pavement outline — always drawn so the corridor edge reads clearly. */
+      const ARTICLE_PURPLE_EDGE = "#c278ff";
+      /** Solid white “fog” / shoulder line — parallel copy of purple edge, inset toward traffic. */
+      const ARTICLE_SHOULDER_WHITE = "rgba(255,255,255,0.98)";
+      /** Matched width so purple + white share the same centerline (inset is purely lateral). */
+      const ARTICLE_CURB_EDGE_W = 1.42;
+      const ARTICLE_SPAN_CAP_EDGE = "rgba(255,255,255,0.1)";
+      const ARTICLE_LANE = "rgba(255,255,255,0.88)";
+      const ARTICLE_LANE_DASH = [7, 11];
+      const ARTICLE_LANE_WIDE = 1.35;
+      const ARTICLE_LANE_THIN = 0.95;
+      /** Undivided road: center between opposing traffic (solid, not dashed lane dividers). */
+      const ARTICLE_CENTER_LINE = "rgba(255,214,96,0.92)";
+
+      const state = {
+        layout: "network",
+        profileA: { c: { x: 270, y: 210 }, heading: 0.64 },
+        profileB: { c: { x: 660, y: 360 }, heading: -1.42 },
+        profileC: { c: { x: 670, y: 190 }, heading: Math.PI },
+        width: Number(widthEl.value),
+        lanesPerDir: Number(lanesPerDirEl.value),
+        junctionRadius: Number(junctionRadiusEl.value),
+        curveSegments: Number(curveSegmentsEl.value),
+        junctionSegments: Number(junctionSegmentsEl.value),
+        hideJunctionSeams: hideJunctionSeamsEl.checked,
+        blendJunctionFill: blendJunctionFillEl.checked,
+        twoRoadNodes: twoRoadNodesEl.value,
+        endCapStyle: endCapStyleEl.value,
+        snapGrid: snapGridEl.checked,
+        gridSize: Number(gridSizeEl.value),
+        snapAngle: snapAngleEl.checked,
+        angleStep: Number(angleStepEl.value),
+        view: { x: 0, y: 0, zoom: 1 },
+        drag: null,
+        panning: false,
+        panStart: null,
+        network: {
+          nextId: 1,
+          activeNodeId: null,
+          selectedEdgeKey: null,
+          selectedEdgeSplitPoint: null,
+          nodes: [],
+          edges: [],
+          laneLayers: null,
+        },
+      };
+
+      function resize() {
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        canvas.width = Math.floor(w * dpr);
+        canvas.height = Math.floor(h * dpr);
+        canvas.style.width = w + "px";
+        canvas.style.height = h + "px";
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function vec(x = 0, y = 0) {
+        return { x, y };
+      }
+      function add(a, b) {
+        return vec(a.x + b.x, a.y + b.y);
+      }
+      function sub(a, b) {
+        return vec(a.x - b.x, a.y - b.y);
+      }
+      function mul(a, s) {
+        return vec(a.x * s, a.y * s);
+      }
+      function dot(a, b) {
+        return a.x * b.x + a.y * b.y;
+      }
+      function cross(a, b) {
+        return a.x * b.y - a.y * b.x;
+      }
+      function len(a) {
+        return Math.hypot(a.x, a.y);
+      }
+      function norm(a) {
+        const l = len(a);
+        return l < 1e-6 ? vec(1, 0) : vec(a.x / l, a.y / l);
+      }
+      function perpLeft(a) {
+        return vec(-a.y, a.x);
+      }
+      function dist(a, b) {
+        return len(sub(a, b));
+      }
+      function lerp(a, b, t) {
+        return vec(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+      }
+      function clamp(v, lo, hi) {
+        return Math.max(lo, Math.min(hi, v));
+      }
+      function edgeKey(a, b) {
+        return a < b ? `${a}:${b}` : `${b}:${a}`;
+      }
+
+      function sanitizeLaneLayersInput(rawLayers) {
+        if (!Array.isArray(rawLayers) || rawLayers.length === 0) return null;
+        const out = [];
+        for (const L of rawLayers) {
+          const w = Number(L.w ?? L.width);
+          if (!Number.isFinite(w) || w <= 0) return null;
+          out.push({
+            w,
+            kind: typeof L.kind === "string" ? L.kind : "car",
+          });
+        }
+        return out;
+      }
+
+      function normalizeEdge(raw) {
+        const a = Number(raw.a);
+        const b = Number(raw.b);
+        if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) return null;
+        const headingA =
+          raw.headingA != null && Number.isFinite(Number(raw.headingA))
+            ? Number(raw.headingA)
+            : null;
+        const headingB =
+          raw.headingB != null && Number.isFinite(Number(raw.headingB))
+            ? Number(raw.headingB)
+            : null;
+        const wm = Number(raw.widthMul);
+        const widthMul =
+          Number.isFinite(wm) && wm > 0 ? clamp(wm, 0.3, 1.65) : 1;
+        return {
+          a,
+          b,
+          headingA,
+          headingB,
+          oneWay: !!raw.oneWay,
+          laneLayers: sanitizeLaneLayersInput(raw.laneLayers),
+          profiles: sanitizeProfilesPartial(raw.profiles),
+          widthMul,
+        };
+      }
+
+      function edgeRoadWidth(edge) {
+        const m = edge && Number(edge.widthMul);
+        const mul = Number.isFinite(m) && m > 0 ? edge.widthMul : 1;
+        return state.width * mul;
+      }
+
+      function scaleLayoutToRoadWidth(layout, targetSum) {
+        const s = layoutSumPhysical(layout);
+        if (s < 1e-6) return layout;
+        const sc = targetSum / s;
+        return layout.map((L) => ({
+          width: L.width * sc,
+          kind: L.kind || "car",
+        }));
+      }
+
+      const NETWORK_PRESET_LIST = [
+        {
+          id: "debug_fork_3_2_1_only",
+          label: "Debug: 3→2+1 fork island (junction shape only)",
+          network: {
+            nextId: 5,
+            activeNodeId: 2,
+            nodes: [
+              { id: 1, p: { x: 320, y: 384 } },
+              {
+                id: 2,
+                p: { x: 440, y: 384 },
+                junctionType: "fork",
+                forkIncomingKey: "1:2",
+                forkExitKey: "2:4",
+              },
+              { id: 3, p: { x: 580, y: 384 } },
+              { id: 4, p: { x: 500, y: 500 } },
+            ],
+            edges: [
+              {
+                a: 1,
+                b: 2,
+                widthMul: 1.45,
+                laneLayers: [
+                  { w: 34, kind: "car" },
+                  { w: 33, kind: "car" },
+                  { w: 33, kind: "car" },
+                ],
+              },
+              {
+                a: 2,
+                b: 3,
+                widthMul: 0.967,
+                laneLayers: [
+                  { w: 50, kind: "car" },
+                  { w: 50, kind: "car" },
+                ],
+              },
+              {
+                a: 2,
+                b: 4,
+                widthMul: 0.483,
+                laneLayers: [{ w: 100, kind: "car" }],
+              },
+            ],
+            laneLayers: null,
+            junctionIslandOnly: true,
+          },
+        },
+        {
+          id: "lane_fork_3_2_1",
+          label: "Article diagram (simple): 3→2+1 lane fork",
+          network: {
+            nextId: 5,
+            activeNodeId: 2,
+            nodes: [
+              { id: 1, p: { x: 72, y: 384 } },
+              {
+                id: 2,
+                p: { x: 418, y: 384 },
+                junctionType: "fork",
+                forkIncomingKey: "1:2",
+                forkExitKey: "2:4",
+              },
+              { id: 3, p: { x: 828, y: 384 } },
+              { id: 4, p: { x: 548, y: 556 } },
+            ],
+            edges: [
+              {
+                a: 1,
+                b: 2,
+                widthMul: 1.45,
+                laneLayers: [
+                  { w: 34, kind: "car" },
+                  { w: 33, kind: "car" },
+                  { w: 33, kind: "car" },
+                ],
+              },
+              {
+                a: 2,
+                b: 3,
+                widthMul: 0.967,
+                laneLayers: [
+                  { w: 50, kind: "car" },
+                  { w: 50, kind: "car" },
+                ],
+              },
+              {
+                a: 2,
+                b: 4,
+                widthMul: 0.483,
+                laneLayers: [{ w: 100, kind: "car" }],
+              },
+            ],
+            laneLayers: null,
+          },
+        },
+        {
+          id: "default",
+          label: "Default (4-way demo)",
+          network: {
+            nextId: 6,
+            activeNodeId: 2,
+            nodes: [
+              { id: 1, p: { x: 150, y: 330 } },
+              { id: 2, p: { x: 360, y: 330 }, junctionType: "default" },
+              { id: 3, p: { x: 610, y: 330 } },
+              { id: 4, p: { x: 360, y: 150 } },
+              { id: 5, p: { x: 500, y: 500 } },
+            ],
+            edges: [
+              { a: 1, b: 2 },
+              { a: 2, b: 3 },
+              { a: 2, b: 4 },
+              { a: 2, b: 5 },
+            ],
+            laneLayers: null,
+          },
+        },
+        {
+          id: "article_profile_3_2_1",
+          label: "Article diagram (taper): 3→2 on approach, then 2+1 fork",
+          network: {
+            nextId: 6,
+            activeNodeId: 3,
+            nodes: [
+              { id: 1, p: { x: 64, y: 384 } },
+              { id: 2, p: { x: 248, y: 384 }, profileBoundary: true },
+              {
+                id: 3,
+                p: { x: 448, y: 384 },
+                junctionType: "fork",
+                forkIncomingKey: "2:3",
+                forkExitKey: "3:5",
+              },
+              { id: 4, p: { x: 836, y: 384 } },
+              { id: 5, p: { x: 532, y: 568 } },
+            ],
+            edges: [
+              {
+                a: 1,
+                b: 2,
+                widthMul: 1.45,
+                laneLayers: [
+                  { w: 34, kind: "car" },
+                  { w: 33, kind: "car" },
+                  { w: 33, kind: "car" },
+                ],
+              },
+              {
+                a: 2,
+                b: 3,
+                widthMul: 1.45,
+                laneLayers: [
+                  { w: 34, kind: "car" },
+                  { w: 33, kind: "car" },
+                  { w: 33, kind: "car" },
+                ],
+                profiles: [
+                  {
+                    u: 0,
+                    widthScale: 1,
+                    laneLayers: [
+                      { w: 34, kind: "car" },
+                      { w: 33, kind: "car" },
+                      { w: 33, kind: "car" },
+                    ],
+                  },
+                  {
+                    u: 1,
+                    widthScale: 2 / 3,
+                    laneLayers: [
+                      { w: 50, kind: "car" },
+                      { w: 50, kind: "car" },
+                    ],
+                  },
+                ],
+              },
+              {
+                a: 3,
+                b: 4,
+                widthMul: 0.967,
+                laneLayers: [
+                  { w: 50, kind: "car" },
+                  { w: 50, kind: "car" },
+                ],
+              },
+              {
+                a: 3,
+                b: 5,
+                widthMul: 0.483,
+                laneLayers: [{ w: 100, kind: "car" }],
+              },
+            ],
+            laneLayers: null,
+          },
+        },
+      ];
+
+      function cloneNetworkBundle(src) {
+        const n = JSON.parse(JSON.stringify(src));
+        const edges = [];
+        for (const e of n.edges || []) {
+          const ne = normalizeEdge(e);
+          if (ne) edges.push(ne);
+        }
+        return {
+          nextId: n.nextId,
+          activeNodeId:
+            n.activeNodeId != null
+              ? n.activeNodeId
+              : n.nodes && n.nodes[0]
+                ? n.nodes[0].id
+                : null,
+          selectedEdgeKey: null,
+          selectedEdgeSplitPoint: null,
+          nodes: (n.nodes || []).map((node) => {
+            const o = {
+              id: node.id,
+              p: { x: node.p.x, y: node.p.y },
+              junctionType: node.junctionType || "default",
+            };
+            if (node.profileBoundary) o.profileBoundary = true;
+            if (node.forkIncomingKey) o.forkIncomingKey = node.forkIncomingKey;
+            if (node.forkExitKey) o.forkExitKey = node.forkExitKey;
+            return o;
+          }),
+          edges,
+          laneLayers: n.laneLayers || null,
+          ...(n.junctionIslandOnly ? { junctionIslandOnly: true } : {}),
+        };
+      }
+
+      function applyNetworkPreset(presetId) {
+        const spec = NETWORK_PRESET_LIST.find((p) => p.id === presetId);
+        if (!spec) return;
+        state.network = cloneNetworkBundle(spec.network);
+        if (networkPresetSelectEl) networkPresetSelectEl.value = presetId;
+        if (networkJsonEl) networkJsonEl.value = "";
+        syncJunctionTypeUi();
+        syncForkRoleRow();
+        syncEdgeToolsUi();
+        render();
+      }
+
+      /** Tangent leaving `atNodeId` along the edge toward the other endpoint. */
+      function edgeOutwardTangent(edge, atNodeId, selfP, otherP) {
+        if (edge.a === atNodeId) {
+          let t = norm(sub(otherP, selfP));
+          if (edge.headingA != null)
+            t = vec(Math.cos(edge.headingA), Math.sin(edge.headingA));
+          return norm(t);
+        }
+        if (edge.b === atNodeId) {
+          let t = norm(sub(otherP, selfP));
+          if (edge.headingB != null)
+            t = vec(Math.cos(edge.headingB), Math.sin(edge.headingB));
+          return norm(t);
+        }
+        return norm(sub(otherP, selfP));
+      }
+
+      function laneLayoutFromState() {
+        const layers = state.network.laneLayers;
+        if (Array.isArray(layers) && layers.length > 0) {
+          let sum = 0;
+          for (const L of layers) {
+            const w = Number(L.w ?? L.width);
+            if (Number.isFinite(w) && w > 0) sum += w;
+          }
+          if (sum > 1e-6) {
+            const scale = state.width / sum;
+            return layers.map((L) => {
+              const w = Math.max(0, Number(L.w ?? L.width) || 0) * scale;
+              return { width: w, kind: L.kind || "car" };
+            });
+          }
+        }
+        const n = Math.max(2, state.lanesPerDir * 2);
+        const w = state.width / n;
+        return Array.from({ length: n }, () => ({ width: w, kind: "car" }));
+      }
+
+      function getEdgeLaneLayout(edge) {
+        const custom = edge.laneLayers;
+        if (Array.isArray(custom) && custom.length > 0) {
+          let sum = 0;
+          for (const L of custom) {
+            const w = Number(L.w ?? L.width);
+            if (!Number.isFinite(w) || w <= 0) return laneLayoutFromState();
+            sum += w;
+          }
+          if (sum < 1e-6) return laneLayoutFromState();
+          const scale = state.width / sum;
+          return custom.map((L) => ({
+            width: Math.max(0, Number(L.w ?? L.width) || 0) * scale,
+            kind: L.kind || "car",
+          }));
+        }
+        return laneLayoutFromState();
+      }
+
+      function classifyTeeTrunk(roads) {
+        let bestDev = Infinity;
+        let pair = [0, 1];
+        for (let i = 0; i < 3; i++) {
+          for (let j = i + 1; j < 3; j++) {
+            const ai = Math.atan2(roads[i].dir.y, roads[i].dir.x);
+            const aj = Math.atan2(roads[j].dir.y, roads[j].dir.x);
+            let d = Math.abs(ai - aj);
+            while (d > Math.PI) d -= Math.PI * 2;
+            d = Math.abs(d);
+            const dev = Math.abs(d - Math.PI);
+            if (dev < bestDev) {
+              bestDev = dev;
+              pair = [i, j];
+            }
+          }
+        }
+        const branch = [0, 1, 2].find((k) => k !== pair[0] && k !== pair[1]);
+        return { trunk: pair, branch };
+      }
+
+      function addTeeYieldMarkings(node, roads, clipCtx, hw, markings) {
+        const { branch } = classifyTeeTrunk(roads);
+        const br = roads[branch];
+        const clip = mouthClipAlongNode(
+          node.id,
+          br.edge,
+          br.other.id,
+          clipCtx,
+        );
+        const mouth = add(node.p, mul(br.dir, clip));
+        const side = perpLeft(br.dir);
+        const w = hw * 0.72;
+        markings.push({
+          path: [add(mouth, mul(side, w)), add(mouth, mul(side, -w))],
+          type: "yield",
+        });
+      }
+
+      function mouthStripCentersAtNode(edge, atNodeId, clipCtx, inward) {
+        const m = edgeMouthFromNode(edge, atNodeId, clipCtx);
+        if (!m) return null;
+        const w = edgeRoadWidth(edge);
+        const tan = inward ? mul(m.dir, -1) : m.dir;
+        const h = Math.atan2(tan.y, tan.x);
+        let layout = edgeLayoutNearNode(edge, atNodeId, clipCtx);
+        layout = scaleLayoutToRoadWidth(layout, w);
+        const proj = projectProfile({ c: m.point, heading: h }, w);
+        return laneStripCenterOffsets(layout).map((off) =>
+          offsetPoint(proj, off),
+        );
+      }
+
+      /** Strip–strip divider points at a mouth (same frame as strip centers). */
+      function mouthDividerPointsAtNode(edge, atNodeId, clipCtx, inward) {
+        const m = edgeMouthFromNode(edge, atNodeId, clipCtx);
+        if (!m) return [];
+        const w = edgeRoadWidth(edge);
+        const tan = inward ? mul(m.dir, -1) : m.dir;
+        const h = Math.atan2(tan.y, tan.x);
+        let layout = edgeLayoutNearNode(edge, atNodeId, clipCtx);
+        layout = scaleLayoutToRoadWidth(layout, w);
+        const offs = laneStripDividerOffsets(layout);
+        if (!offs.length) return [];
+        const proj = projectProfile({ c: m.point, heading: h }, w);
+        return offs.map((off) => offsetPoint(proj, off));
+      }
+
+      /** Same as mouthDividerPointsAtNode but lateral order matches `refLat` (fixes inc/thru mirroring). */
+      function mouthDividerPointsAtNodeLateral(
+        edge,
+        atNodeId,
+        clipCtx,
+        inward,
+        refLat,
+      ) {
+        const pts = mouthDividerPointsAtNode(edge, atNodeId, clipCtx, inward);
+        if (pts.length <= 1 || !refLat) return pts;
+        return pts.slice().sort((a, b) => dot(a, refLat) - dot(b, refLat));
+      }
+
+      function mouthStripCentersAtNodeLateral(
+        edge,
+        atNodeId,
+        clipCtx,
+        inward,
+        refLat,
+      ) {
+        const pts = mouthStripCentersAtNode(edge, atNodeId, clipCtx, inward);
+        if (!pts || pts.length <= 1 || !refLat) return pts;
+        return pts.slice().sort((a, b) => dot(a, refLat) - dot(b, refLat));
+      }
+
+      function classifyForkArms(node, roads, clipCtx) {
+        if (roads.length !== 3) return null;
+        const kOf = (r) => edgeKey(r.edge.a, r.edge.b);
+        const keys = new Set(roads.map(kOf));
+        const nAt = (r) =>
+          edgeLayoutNearNode(r.edge, node.id, clipCtx).length;
+
+        const candInc = roads.find((r) => kOf(r) === node.forkIncomingKey);
+        const candEx = roads.find((r) => kOf(r) === node.forkExitKey);
+        const keyValid =
+          candInc &&
+          candEx &&
+          kOf(candInc) !== kOf(candEx) &&
+          keys.has(node.forkIncomingKey) &&
+          keys.has(node.forkExitKey);
+
+        const maxN = Math.max(nAt(roads[0]), nAt(roads[1]), nAt(roads[2]));
+        const minN = Math.min(nAt(roads[0]), nAt(roads[1]), nAt(roads[2]));
+
+        let inc;
+        let ex;
+        let thru;
+        if (
+          keyValid &&
+          nAt(candInc) === maxN &&
+          nAt(candEx) === minN &&
+          nAt(candInc) >= nAt(candEx)
+        ) {
+          inc = candInc;
+          ex = candEx;
+          thru = roads.find(
+            (r) => kOf(r) !== kOf(inc) && kOf(r) !== kOf(ex),
+          );
+        } else {
+          const sorted = [...roads].sort((a, b) => {
+            const dn = nAt(b) - nAt(a);
+            if (dn !== 0) return dn;
+            return b.length - a.length;
+          });
+          inc = sorted[0];
+          thru = sorted[1];
+          ex = sorted[2];
+        }
+        if (!inc || !ex || !thru) return null;
+        return { inc, exit: ex, thru };
+      }
+
+      /**
+       * Lateral axis for sorting fork mouths — matches `sideStraight` in
+       * `computeForkAsymmetricGeometry` (not raw `perpLeft(inc)`), so lane indices
+       * align with pavement corners and strip order cannot mirror vs. the fork fill.
+       */
+      function forkLaneLateralSortKey(arms) {
+        if (!arms) return null;
+        const tinI = norm(mul(arms.inc.dir, -1));
+        const sideL = perpLeft(tinI);
+        const exo = norm(arms.exit.dir);
+        const dotL = dot(exo, sideL);
+        const dotR = dot(exo, mul(sideL, -1));
+        return dotL <= dotR ? sideL : mul(sideL, -1);
+      }
+
+      /**
+       * When `edge` is the through arm of a lane fork, keep the straight-side outer
+       * curb flush with the incoming half-width at the fork mouth, then blend back
+       * to symmetric width along the edge (deformation only on the peel side).
+       */
+      function forkThruWideStraightContext(edge, clipCtx) {
+        const { nodeById, adjacency } = clipCtx;
+        for (const nid of [edge.a, edge.b]) {
+          const node = nodeById.get(nid);
+          if (!node || (node.junctionType || "") !== "fork") continue;
+          const roads = adjacency.get(nid);
+          if (!roads || roads.length !== 3) continue;
+          const arms = classifyForkArms(node, roads, clipCtx);
+          if (!arms) continue;
+          if (edgeKey(arms.thru.edge.a, arms.thru.edge.b) !== edgeKey(edge.a, edge.b))
+            continue;
+          const tinI = norm(mul(arms.inc.dir, -1));
+          const sideL = perpLeft(tinI);
+          const exo = norm(arms.exit.dir);
+          const dotL = dot(exo, sideL);
+          const dotR = dot(exo, mul(sideL, -1));
+          const sideStraight = dotL <= dotR ? sideL : mul(sideL, -1);
+          return {
+            forkNodeId: nid,
+            hwIncConst: edgeRoadWidth(arms.inc.edge) * 0.5,
+            sideStraight,
+            forkAtStart: nid === edge.a,
+          };
+        }
+        return null;
+      }
+
+      /** True when `edge` is the wide incoming arm of a lane fork (profile taper markings stay straight chords). */
+      function edgeIsForkIncomingArm(edge, clipCtx) {
+        return !!forkIncomingMouthContext(edge, clipCtx);
+      }
+
+      /** Fork node + lateral frame when `edge` is the incoming arm of a lane fork (for mouth-snapped markings). */
+      function forkIncomingMouthContext(edge, clipCtx) {
+        const { nodeById, adjacency } = clipCtx;
+        if (!edge || !nodeById || !adjacency) return null;
+        const ek = edgeKey(edge.a, edge.b);
+        for (const nid of [edge.a, edge.b]) {
+          const node = nodeById.get(nid);
+          if (!node || (node.junctionType || "") !== "fork") continue;
+          const roads = adjacency.get(nid);
+          if (!roads || roads.length !== 3) continue;
+          const arms = classifyForkArms(node, roads, clipCtx);
+          if (!arms) continue;
+          if (edgeKey(arms.inc.edge.a, arms.inc.edge.b) !== ek) continue;
+          const refInto = norm(mul(arms.inc.dir, -1));
+          const refLat = forkLaneLateralSortKey(arms);
+          return { forkNodeId: nid, refLat, refInto };
+        }
+        return null;
+      }
+
+      function forkThruBlendedOuterScalars(uAlong, hwSym, side, forkThru) {
+        if (!forkThru) return { lo: -hwSym, hi: hwSym };
+        const distFork = forkThru.forkAtStart ? uAlong : 1 - uAlong;
+        const blend = Math.min(1, distFork / 0.34);
+        const hwHold = forkThru.hwIncConst * (1 - blend) + hwSym * blend;
+        const uStr = dot(side, forkThru.sideStraight);
+        const straightScalar = uStr * hwHold;
+        const splitScalar = -uStr * (2 * hwSym - hwHold);
+        return {
+          lo: Math.min(straightScalar, splitScalar),
+          hi: Math.max(straightScalar, splitScalar),
+        };
+      }
+
+      /** Peel strip centerline — disabled: exit path is carried by the split outer divider + pavement edge. */
+      function addForkLaneGuides(node, roads, clipCtx, markings) {
+        void node;
+        void roads;
+        void clipCtx;
+        void markings;
+      }
+
+      /** Dashed strip–strip dividers across the fork (rightmost peels to ramp outer). */
+      function addForkDividerGuides(node, roads, clipCtx, markings) {
+        const arms = classifyForkArms(node, roads, clipCtx);
+        if (!arms) return;
+        const { inc, exit, thru } = arms;
+        const refInto = norm(mul(inc.dir, -1));
+        const latKey = forkLaneLateralSortKey(arms);
+        const divIn = mouthDividerPointsAtNodeLateral(
+          inc.edge,
+          node.id,
+          clipCtx,
+          true,
+          latKey,
+        );
+        const divThru = mouthDividerPointsAtNodeLateral(
+          thru.edge,
+          node.id,
+          clipCtx,
+          true,
+          latKey,
+        );
+        if (!divIn.length || !divThru.length) return;
+        const tin = refInto;
+
+        const halfW = (r) => edgeRoadWidth(r.edge) * 0.5;
+        const forkG = computeForkAsymmetricGeometry(
+          node,
+          roads,
+          clipCtx,
+          halfW,
+        );
+        const FM = forkG && forkG.forkMarkingGeom;
+
+        const nMap = Math.min(divIn.length, divThru.length);
+        for (let i = 0; i < nMap; i++) {
+          const P0 = divIn[i];
+          const P1 = divThru[i];
+          markings.push({
+            path: [P0, P1],
+            type: "laneCenter",
+            laneLineKind: "interior",
+            laneLineRole: "lane",
+            interiorRef: node.p,
+          });
+        }
+
+        if (divIn.length > divThru.length) {
+          const P0 = divIn[divIn.length - 1];
+          const clipT = mouthClipAlongNode(
+            node.id,
+            thru.edge,
+            thru.other.id,
+            clipCtx,
+          );
+          const Mt = add(node.p, mul(thru.dir, clipT));
+          const csT = FM && FM.CsT ? FM.CsT : Mt;
+          /** Apex on incoming divider line toward through split corner (matches profile / pavement). */
+          const uApex = dot(sub(csT, P0), tin);
+          const stub = clamp(dist(P0, Mt) * 0.4, 12, 68);
+          const Kiss = add(
+            P0,
+            mul(
+              tin,
+              clamp(
+                uApex > 6 ? uApex - 0.5 : stub,
+                6,
+                Math.max(uApex + 40, stub + 24, 120),
+              ),
+            ),
+          );
+          /** Reference diagram: dashed on approach, then two solids — straight to `CsT`,
+           *  curved leg reuses the same **innerArc** as the pavement gore (no separate Hermite). */
+          markings.push({
+            path: [P0, Kiss],
+            type: "laneCenter",
+            laneLineKind: "interior",
+            laneLineRole: "lane",
+            interiorRef: node.p,
+          });
+          markings.push({
+            path: [Kiss, csT],
+            type: "laneCenter",
+            laneLineKind: "interior",
+            laneLineRole: "forkCarrySolid",
+            interiorRef: node.p,
+          });
+          const ia = FM && FM.innerArc && FM.innerArc.length >= 2 ? FM.innerArc : null;
+          if (ia) {
+            markings.push({
+              path: ia,
+              type: "laneCenter",
+              laneLineKind: "interior",
+              laneLineRole: "forkCarrySolid",
+              interiorRef: node.p,
+            });
+          } else if (FM && FM.mergeCorner) {
+            const P1 = FM.mergeCorner;
+            const chord = dist(Kiss, P1);
+            const s0 = clamp(chord * 0.28, 8, chord * 0.42);
+            const exoF = FM.exo ? FM.exo : norm(exit.dir);
+            const tan1 =
+              FM.tangentExitGore &&
+              dot(FM.tangentExitGore, exoF) >= 0
+                ? FM.tangentExitGore
+                : FM.tangentExitGore
+                  ? mul(FM.tangentExitGore, -1)
+                  : exoF;
+            markings.push({
+              path: sampleHermiteLane(
+                Kiss,
+                P1,
+                mul(tin, s0),
+                mul(tan1, clamp(chord * 0.32, 10, chord * 0.48)),
+                Math.max(18, (state.curveSegments | 0) + 6),
+              ),
+              type: "laneCenter",
+              laneLineKind: "interior",
+              laneLineRole: "forkCarrySolid",
+              interiorRef: node.p,
+            });
+          }
+        }
+      }
+
+      function drawOnewayChevrons(a, b, color, alpha) {
+        const L = dist(a, b);
+        if (L < 20) return;
+        const fwd = norm(sub(b, a));
+        const side = perpLeft(fwd);
+        const step = 38 / Math.max(0.15, state.view.zoom);
+        const n = Math.floor(L / step);
+        const chev = 11 / Math.max(0.15, state.view.zoom);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = color;
+        for (let i = 1; i <= n; i++) {
+          const t = (i / (n + 1)) * L;
+          const c = add(a, mul(fwd, t));
+          const p0 = add(c, mul(fwd, chev * 0.55));
+          const p1 = add(c, mul(side, chev * 0.35));
+          const p2 = add(c, mul(side, -chev * 0.35));
+          const s0 = worldToScreen(p0);
+          const s1 = worldToScreen(p1);
+          const s2 = worldToScreen(p2);
+          ctx.beginPath();
+          ctx.moveTo(s0.x, s0.y);
+          ctx.lineTo(s1.x, s1.y);
+          ctx.lineTo(s2.x, s2.y);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      /** Index of the strip boundary between opposing flows (0-based among dividers), or -1. */
+      function medianDividerIndex(numStrips) {
+        const n = numStrips | 0;
+        return n >= 4 && (n & 1) === 0 ? n / 2 - 1 : -1;
+      }
+
+      /** Lateral offset of each lane strip midpoint (article-style lanes, not only dividers). */
+      function laneStripCenterOffsets(layout) {
+        const sum = layoutSumPhysical(layout);
+        if (sum < 1e-6) return [];
+        let left = -sum * 0.5;
+        const centers = [];
+        for (const L of layout) {
+          const w = Math.max(0, L.width || 0);
+          centers.push(left + w * 0.5);
+          left += w;
+        }
+        return centers;
+      }
+
+      /** Lateral offsets of strip boundaries (K−1 dividers for K strips). */
+      function laneStripDividerOffsets(layout) {
+        const sum = layoutSumPhysical(layout);
+        if (sum < 1e-6 || layout.length < 2) return [];
+        let left = -sum * 0.5;
+        const offs = [];
+        for (let i = 0; i < layout.length - 1; i++) {
+          const w = Math.max(0, layout[i].width || 0);
+          left += w;
+          offs.push(left);
+        }
+        return offs;
+      }
+
+      function layoutSumPhysical(layout) {
+        return layout.reduce((s, L) => s + Math.max(0, L.width || 0), 0);
+      }
+
+      function defaultRelativeLaneLayersFromNetwork() {
+        const n = Math.max(2, state.lanesPerDir * 2);
+        return Array.from({ length: n }, () => ({ w: 1, kind: "car" }));
+      }
+
+      function edgeDefaultRelativeLaneLayers(edge) {
+        const ll = edge.laneLayers && sanitizeLaneLayersInput(edge.laneLayers);
+        if (ll && ll.length) return ll.map((L) => ({ w: L.w, kind: L.kind }));
+        const net = state.network.laneLayers;
+        if (Array.isArray(net) && net.length) {
+          const s = net.reduce(
+            (x, L) => x + (Number(L.w ?? L.width) || 0),
+            0,
+          );
+          if (s > 1e-6)
+            return net.map((L) => ({
+              w: Math.max(1e-3, Number(L.w ?? L.width) || 0),
+              kind: L.kind || "car",
+            }));
+        }
+        return defaultRelativeLaneLayersFromNetwork();
+      }
+
+      function physicalLayoutFromRelative(rel, targetSum) {
+        let s = 0;
+        for (const L of rel) s += Math.max(0, L.w || 0);
+        if (s < 1e-8) {
+          const fb = laneLayoutFromState();
+          const fs = layoutSumPhysical(fb);
+          const sc = fs > 1e-8 ? targetSum / fs : 1;
+          return fb.map((L) => ({
+            width: L.width * sc,
+            kind: L.kind || "car",
+          }));
+        }
+        const scale = targetSum / s;
+        return rel.map((L) => ({
+          width: Math.max(0, L.w || 0) * scale,
+          kind: L.kind || "car",
+        }));
+      }
+
+      function physicalLayoutToRelativeWeights(layout) {
+        const s = layoutSumPhysical(layout);
+        if (s < 1e-8) return defaultRelativeLaneLayersFromNetwork();
+        return layout.map((L) => ({
+          w: Math.max(1e-3, (L.width / s) * 100),
+          kind: L.kind || "car",
+        }));
+      }
+
+      function padRelativeLaneLayers(ll, count) {
+        const out = ll.map((x) => ({
+          w: Math.max(1e-4, x.w),
+          kind: x.kind || "car",
+        }));
+        while (out.length < count) out.push({ w: 0, kind: "car" });
+        return out.slice(0, count);
+      }
+
+      function interpolateRelativeLaneLayers(a, b, t) {
+        const n = Math.max(a.length, b.length);
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          const wA = i < a.length ? a[i].w : 0;
+          const wB = i < b.length ? b[i].w : 0;
+          const w = wA * (1 - t) + wB * t;
+          const kindA = i < a.length ? a[i].kind : null;
+          const kindB = i < b.length ? b[i].kind : null;
+          out.push({
+            w,
+            kind: (t < 0.5 ? kindA : kindB) || kindA || kindB || "car",
+          });
+        }
+        return out;
+      }
+
+      function sanitizeProfilesPartial(raw) {
+        if (!Array.isArray(raw)) return null;
+        const out = [];
+        for (const P of raw) {
+          const u = Number(P.u);
+          const ll = sanitizeLaneLayersInput(P.laneLayers);
+          if (!Number.isFinite(u) || !ll) continue;
+          const ws = Number(P.widthScale);
+          out.push({
+            u: clamp(u, 0, 1),
+            laneLayers: ll,
+            widthScale:
+              Number.isFinite(ws) && ws > 0 ? clamp(ws, 0.82, 1.45) : 1,
+          });
+        }
+        if (!out.length) return null;
+        out.sort((a, b) => a.u - b.u);
+        const dedup = new Map();
+        for (const p of out)
+          dedup.set(Math.round(p.u * 1e6) / 1e6, p);
+        return [...dedup.values()].sort((a, b) => a.u - b.u);
+      }
+
+      function resolvedProfileKeyframes(edge) {
+        if (edge.oneWay) return null;
+        const mid = edge.profiles;
+        if (!Array.isArray(mid) || !mid.length) return null;
+        const sanitized = sanitizeProfilesPartial(mid);
+        if (!sanitized) return null;
+        const base = edgeDefaultRelativeLaneLayers(edge);
+        const cloneRel = (ll) => ll.map((x) => ({ w: x.w, kind: x.kind }));
+        const byU = new Map();
+        for (const p of sanitized)
+          byU.set(p.u, {
+            u: p.u,
+            laneLayers: cloneRel(p.laneLayers),
+            widthScale: p.widthScale,
+          });
+        if (!byU.has(0))
+          byU.set(0, { u: 0, laneLayers: cloneRel(base), widthScale: 1 });
+        if (!byU.has(1))
+          byU.set(1, { u: 1, laneLayers: cloneRel(base), widthScale: 1 });
+        const arr = [...byU.values()].sort((a, b) => a.u - b.u);
+        return arr.length >= 2 ? arr : null;
+      }
+
+      function interpolatePhysicalLayoutAtU(keyframes, u, baseWidth) {
+        const bw =
+          baseWidth != null && Number(baseWidth) > 0 ? baseWidth : state.width;
+        const uu = clamp(u, 0, 1);
+        const kf = keyframes;
+        if (uu <= kf[0].u + 1e-9) {
+          const p = kf[0];
+          return {
+            layout: physicalLayoutFromRelative(
+              p.laneLayers,
+              bw * p.widthScale,
+            ),
+            widthScale: p.widthScale,
+          };
+        }
+        const last = kf[kf.length - 1];
+        if (uu >= last.u - 1e-9) {
+          return {
+            layout: physicalLayoutFromRelative(
+              last.laneLayers,
+              bw * last.widthScale,
+            ),
+            widthScale: last.widthScale,
+          };
+        }
+        let i = 0;
+        while (i < kf.length - 1 && kf[i + 1].u < uu) i++;
+        const p0 = kf[i];
+        const p1 = kf[i + 1];
+        const span = Math.max(1e-8, p1.u - p0.u);
+        const t = (uu - p0.u) / span;
+        const rel = interpolateRelativeLaneLayers(
+          p0.laneLayers,
+          p1.laneLayers,
+          t,
+        );
+        const ws = p0.widthScale * (1 - t) + p1.widthScale * t;
+        return {
+          layout: physicalLayoutFromRelative(rel, bw * ws),
+          widthScale: ws,
+        };
+      }
+
+      function maxStripCountInKeyframes(keyframes) {
+        let m = 2;
+        for (const p of keyframes)
+          m = Math.max(m, p.laneLayers.length);
+        return m;
+      }
+
+      function padPhysicalLayout(layout, count) {
+        const out = layout.map((L) => ({
+          width: L.width,
+          kind: L.kind || "car",
+        }));
+        while (out.length < count) out.push({ width: 0, kind: "car" });
+        return out.slice(0, count);
+      }
+
+      function buildProfiledNetworkSpan(
+        edge,
+        start,
+        end,
+        hF,
+        forkThruCtx,
+        clipCtx,
+      ) {
+        const kf = resolvedProfileKeyframes(edge);
+        if (!kf) return null;
+        const K = maxStripCountInKeyframes(kf);
+        const nS = Math.max(16, (state.curveSegments | 0) + 8);
+        const fwd = vec(Math.cos(hF), Math.sin(hF));
+        const side = perpLeft(fwd);
+        const leftPts = [];
+        const rightPts = [];
+        const bw = edgeRoadWidth(edge);
+        const hw0 = bw * kf[0].widthScale * 0.5;
+        const boundaryPolys = Array.from({ length: K + 1 }, () => []);
+        let forkThruStraightPlaneD = null;
+        let forkThruStraightUsesHi = null;
+        const forkIncStraight =
+          clipCtx && forkIncomingMouthContext(edge, clipCtx);
+        for (let i = 0; i <= nS; i++) {
+          const u = i / nS;
+          const { layout, widthScale } = interpolatePhysicalLayoutAtU(
+            kf,
+            u,
+            bw,
+          );
+          const W = bw * widthScale;
+          const hw = W * 0.5;
+          const centerShift =
+            forkThruCtx || forkIncStraight ? 0 : hw - hw0;
+          const c = add(lerp(start, end, u), mul(side, centerShift));
+          const { lo, hi } = forkThruBlendedOuterScalars(
+            u,
+            hw,
+            side,
+            forkThruCtx,
+          );
+          const pLoCand = add(c, mul(side, lo));
+          const pHiCand = add(c, mul(side, hi));
+          let pLo = pLoCand;
+          let pHi = pHiCand;
+          if (forkThruCtx) {
+            if (forkThruStraightPlaneD === null) {
+              forkThruStraightUsesHi =
+                dot(pHiCand, forkThruCtx.sideStraight) >=
+                dot(pLoCand, forkThruCtx.sideStraight);
+              forkThruStraightPlaneD = dot(
+                forkThruStraightUsesHi ? pHiCand : pLoCand,
+                forkThruCtx.sideStraight,
+              );
+            }
+            if (forkThruStraightUsesHi) {
+              const err =
+                dot(pHiCand, forkThruCtx.sideStraight) - forkThruStraightPlaneD;
+              pHi = sub(pHiCand, mul(forkThruCtx.sideStraight, err));
+            } else {
+              const err =
+                dot(pLoCand, forkThruCtx.sideStraight) - forkThruStraightPlaneD;
+              pLo = sub(pLoCand, mul(forkThruCtx.sideStraight, err));
+            }
+          }
+          leftPts.push(pLo);
+          rightPts.push(pHi);
+          const extended = padPhysicalLayout(layout, K);
+          let off = -hw;
+          for (let b = 0; b <= K; b++) {
+            if (forkThruCtx) {
+              const t = (off + hw) / Math.max(1e-6, 2 * hw);
+              boundaryPolys[b].push(lerp(pLo, pHi, t));
+            } else {
+              const lat = lo + ((off + hw) / Math.max(1e-6, 2 * hw)) * (hi - lo);
+              boundaryPolys[b].push(add(c, mul(side, lat)));
+            }
+            if (b < K) off += Math.max(0, extended[b].width);
+          }
+        }
+        const polygon = [...leftPts, ...rightPts.slice().reverse()];
+        const midRef = lerp(start, end, 0.5);
+        const markings = [];
+        const medIdx = medianDividerIndex(K);
+        const chordMarkings =
+          clipCtx &&
+          edgeIsForkIncomingArm(edge, clipCtx) &&
+          !forkThruCtx;
+        const forkMouth =
+          chordMarkings && clipCtx
+            ? forkIncomingMouthContext(edge, clipCtx)
+            : null;
+        const farNodeId = forkMouth
+          ? edge.a === forkMouth.forkNodeId
+            ? edge.b
+            : edge.a
+          : null;
+        const divFarSnap =
+          forkMouth &&
+          mouthDividerPointsAtNodeLateral(
+            edge,
+            farNodeId,
+            clipCtx,
+            true,
+            forkMouth.refLat,
+          );
+        const divForkSnap =
+          forkMouth &&
+          mouthDividerPointsAtNodeLateral(
+            edge,
+            forkMouth.forkNodeId,
+            clipCtx,
+            true,
+            forkMouth.refLat,
+          );
+        for (let b = 1; b < K; b++) {
+          const polyB = boundaryPolys[b];
+          const di = b - 1;
+          let path;
+          if (
+            forkMouth &&
+            divFarSnap &&
+            divForkSnap &&
+            divFarSnap.length > di &&
+            divForkSnap.length > di
+          ) {
+            path = [divFarSnap[di], divForkSnap[di]];
+          } else {
+            path =
+              chordMarkings && polyB.length >= 2
+                ? [polyB[0], polyB[polyB.length - 1]]
+                : polyB;
+          }
+          markings.push({
+            path,
+            type: "laneCenter",
+            laneLineKind: "interior",
+            laneLineRole: b - 1 === medIdx ? "median" : "lane",
+            interiorRef: midRef,
+          });
+        }
+        return {
+          polygon,
+          left: { type: "linear", path: leftPts, debug: [] },
+          right: { type: "linear", path: rightPts, debug: [] },
+          markings,
+        };
+      }
+
+      function edgeLayoutNearNode(edge, nodeId, clipCtx) {
+        const kf = resolvedProfileKeyframes(edge);
+        if (!kf || edge.oneWay) return getEdgeLaneLayout(edge);
+        const { nodeById } = clipCtx;
+        const self = nodeById.get(nodeId);
+        const otherId = edge.a === nodeId ? edge.b : edge.a;
+        const other = nodeById.get(otherId);
+        if (!self || !other) return getEdgeLaneLayout(edge);
+        const m = edgeMouthFromNode(edge, nodeId, clipCtx);
+        if (!m) return getEdgeLaneLayout(edge);
+        const fullLen = dist(self.p, other.p);
+        if (fullLen < 1e-3) return getEdgeLaneLayout(edge);
+        let frac = dist(self.p, m.point) / fullLen;
+        if (edge.b === nodeId) frac = 1 - frac;
+        const raw = interpolatePhysicalLayoutAtU(
+          kf,
+          clamp(frac, 0, 1),
+          edgeRoadWidth(edge),
+        ).layout;
+        return raw.filter((L) => L.width > 0.5);
+      }
+
+      function remapProfileChainForSplit(keyframes, uSplit, baseWidth) {
+        const bw =
+          baseWidth != null && baseWidth > 0 ? baseWidth : state.width;
+        const uu = clamp(uSplit, 1e-6, 1 - 1e-6);
+        const mid = interpolatePhysicalLayoutAtU(keyframes, uu, bw);
+        const relMid = physicalLayoutToRelativeWeights(mid.layout);
+        const wsMid = mid.widthScale;
+        const first = [];
+        for (const p of keyframes) {
+          if (p.u < uu - 1e-8)
+            first.push({
+              u: p.u / uu,
+              laneLayers: p.laneLayers.map((x) => ({ w: x.w, kind: x.kind })),
+              widthScale: p.widthScale,
+            });
+        }
+        first.push({
+          u: 1,
+          laneLayers: relMid,
+          widthScale: wsMid,
+        });
+        const second = [
+          {
+            u: 0,
+            laneLayers: relMid.map((x) => ({ w: x.w, kind: x.kind })),
+            widthScale: wsMid,
+          },
+        ];
+        for (const p of keyframes) {
+          if (p.u > uu + 1e-8)
+            second.push({
+              u: (p.u - uu) / (1 - uu),
+              laneLayers: p.laneLayers.map((x) => ({ w: x.w, kind: x.kind })),
+              widthScale: p.widthScale,
+            });
+        }
+        return [sanitizeProfilesPartial(first), sanitizeProfilesPartial(second)];
+      }
+
+      function autoCornerScale() {
+        return clamp(state.junctionRadius / 100, 0.28, 1.25);
+      }
+
+      function worldToScreen(p) {
+        return vec(
+          p.x * state.view.zoom + state.view.x,
+          p.y * state.view.zoom + state.view.y,
+        );
+      }
+
+      function screenToWorld(p) {
+        return vec(
+          (p.x - state.view.x) / state.view.zoom,
+          (p.y - state.view.y) / state.view.zoom,
+        );
+      }
+
+      function pointSegmentDistance(p, a, b) {
+        const ab = sub(b, a);
+        const l2 = dot(ab, ab);
+        const t = l2 > 1e-8 ? clamp(dot(sub(p, a), ab) / l2, 0, 1) : 0;
+        const q = add(a, mul(ab, t));
+        return { d: dist(p, q), t, p: q };
+      }
+
+      function snapPoint(p, origin = null) {
+        let out = vec(p.x, p.y);
+        if (origin && state.snapAngle) {
+          const delta = sub(out, origin);
+          const l = len(delta);
+          if (l > 1e-5) {
+            const step = (Math.PI / 180) * Math.max(1, state.angleStep);
+            const a = Math.round(Math.atan2(delta.y, delta.x) / step) * step;
+            out = add(origin, vec(Math.cos(a) * l, Math.sin(a) * l));
+          }
+        }
+        if (state.snapGrid) {
+          const g = Math.max(1, state.gridSize);
+          out = vec(Math.round(out.x / g) * g, Math.round(out.y / g) * g);
+        }
+        return out;
+      }
+
+      function lineIntersection(p, d, q, e) {
+        const den = cross(d, e);
+        if (Math.abs(den) < 1e-6) return null;
+        const qp = sub(q, p);
+        const t = cross(qp, e) / den;
+        const u = cross(qp, d) / den;
+        return { p: add(p, mul(d, t)), t, u };
+      }
+
+      function projectProfile(profile, width) {
+        const fwd = vec(Math.cos(profile.heading), Math.sin(profile.heading));
+        const side = perpLeft(fwd);
+        const hw = width * 0.5;
+        return {
+          c: profile.c,
+          heading: profile.heading,
+          fwd,
+          side,
+          left: add(profile.c, mul(side, hw)),
+          right: add(profile.c, mul(side, -hw)),
+        };
+      }
+
+      function offsetPoint(profileProjected, offset) {
+        return add(profileProjected.c, mul(profileProjected.side, offset));
+      }
+
+      function solveFillet(A, B, dA, dB) {
+        const inter = lineIntersection(A, dA, B, dB);
+        if (!inter) return null;
+        const C = inter.p;
+        const CA = dist(C, A);
+        const CB = dist(C, B);
+        if (CA < 1e-4 || CB < 1e-4) return null;
+
+        let fixed = A,
+          moving = B,
+          dFixed = dA,
+          dMoving = dB,
+          shortLen = CA,
+          movedFromB = true;
+        if (CA > CB) {
+          fixed = B;
+          moving = A;
+          dFixed = dB;
+          dMoving = dA;
+          shortLen = CB;
+          movedFromB = false;
+        }
+
+        const CtoMoving = norm(sub(moving, C));
+        const M = add(C, mul(CtoMoving, shortLen));
+        const nFixed = perpLeft(dFixed);
+        const nMoving = perpLeft(dMoving);
+        const centerHit = lineIntersection(fixed, nFixed, M, nMoving);
+        if (!centerHit) return null;
+
+        const O = centerHit.p;
+        const r = dist(O, fixed);
+        if (r < 1e-4 || !Number.isFinite(r)) return null;
+
+        const from = sub(fixed, O);
+        const to = sub(M, O);
+        let a0 = Math.atan2(from.y, from.x);
+        let a1 = Math.atan2(to.y, to.x);
+        let delta = a1 - a0;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        if (Math.abs(delta) < 1e-3) return null;
+
+        const samples = Math.max(12, Math.floor(Math.abs(delta) * 26));
+        const arcPts = [];
+        for (let i = 0; i <= samples; i++) {
+          const t = i / samples;
+          const a = a0 + delta * t;
+          arcPts.push(add(O, vec(Math.cos(a) * r, Math.sin(a) * r)));
+        }
+
+        const path = movedFromB
+          ? [...arcPts, B]
+          : [A, ...arcPts.slice(1).reverse()];
+
+        return { C, O, M, path, direct: { A, B, dA, dB } };
+      }
+
+      function hermitePoint(P0, P1, T0, T1, t) {
+        const t2 = t * t,
+          t3 = t2 * t;
+        const h00 = 2 * t3 - 3 * t2 + 1;
+        const h10 = t3 - 2 * t2 + t;
+        const h01 = -2 * t3 + 3 * t2;
+        const h11 = t3 - t2;
+        return add(
+          add(mul(P0, h00), mul(T0, h10)),
+          add(mul(P1, h01), mul(T1, h11)),
+        );
+      }
+
+      function hermiteDeriv(P0, P1, T0, T1, t) {
+        const t2 = t * t;
+        const h00 = 6 * t2 - 6 * t;
+        const h10 = 3 * t2 - 4 * t + 1;
+        const h01 = -6 * t2 + 6 * t;
+        const h11 = 3 * t2 - 2 * t;
+        return add(
+          add(mul(P0, h00), mul(T0, h10)),
+          add(mul(P1, h01), mul(T1, h11)),
+        );
+      }
+
+      /** Endpoints P0→P1 with Hermite tangents (matches straight strip until the junction). */
+      function sampleHermiteLane(P0, P1, T0, T1, samples) {
+        const n = Math.max(2, samples | 0);
+        const out = [];
+        for (let i = 0; i <= n; i++) {
+          out.push(hermitePoint(P0, P1, T0, T1, i / n));
+        }
+        return out;
+      }
+
+      function solveBoundary(A, B, dA, dB, strategy, scale) {
+        if (strategy !== "mid") {
+          const direct = solveFillet(A, B, dA, dB);
+          if (direct && strategy === "direct")
+            return { type: "direct", path: direct.path, debug: [direct] };
+          if (direct && strategy === "auto")
+            return { type: "direct", path: direct.path, debug: [direct] };
+        }
+
+        const chord = dist(A, B);
+        const mag = Math.max(1, chord * scale);
+        const T0 = mul(dA, mag);
+        const T1 = mul(dB, mag);
+        const mid = hermitePoint(A, B, T0, T1, 0.5);
+        const der = norm(hermiteDeriv(A, B, T0, T1, 0.5));
+        const first = solveFillet(A, mid, dA, der);
+        const second = solveFillet(mid, B, der, dB);
+        if (!first || !second) return null;
+        return {
+          type: "mid",
+          path: [...first.path, ...second.path.slice(1)],
+          debug: [first, second],
+          mid: { p: mid, d: der },
+        };
+      }
+
+      function samplePolyline(points, n = 64) {
+        if (!points || points.length < 2) return points ? points.slice() : [];
+        const segLens = [];
+        let total = 0;
+        for (let i = 1; i < points.length; i++) {
+          const l = dist(points[i - 1], points[i]);
+          segLens.push(l);
+          total += l;
+        }
+        if (total < 1e-6) return points.slice();
+        const out = [];
+        for (let i = 0; i <= n; i++) {
+          const t = i / n;
+          const target = t * total;
+          let acc = 0;
+          let idx = 0;
+          while (idx < segLens.length && acc + segLens[idx] < target) {
+            acc += segLens[idx];
+            idx++;
+          }
+          if (idx >= segLens.length) {
+            out.push(points[points.length - 1]);
+            continue;
+          }
+          const local = segLens[idx] > 1e-6 ? (target - acc) / segLens[idx] : 0;
+          out.push(lerp(points[idx], points[idx + 1], local));
+        }
+        return out;
+      }
+
+      function averagePolylines(a, b, samples = 64) {
+        const sa = samplePolyline(a, samples);
+        const sb = samplePolyline(b, samples);
+        const out = [];
+        const n = Math.min(sa.length, sb.length);
+        for (let i = 0; i < n; i++) out.push(lerp(sa[i], sb[i], 0.5));
+        return out;
+      }
+
+      function solveConnectionPair(
+        pFrom,
+        pTo,
+        fromOffset,
+        toOffset,
+        strategy,
+        scale,
+      ) {
+        const A = offsetPoint(pFrom, fromOffset);
+        const B = offsetPoint(pTo, toOffset);
+        return solveBoundary(A, B, pFrom.fwd, pTo.fwd, strategy, scale);
+      }
+
+      function angleLerp(a0, a1, t) {
+        let d = a1 - a0;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        return a0 + d * t;
+      }
+
+      function roundedCornerPolygon(points, radius = 18, samples = 6) {
+        if (!points || points.length < 3 || radius <= 0)
+          return points ? points.slice() : [];
+        const out = [];
+        for (let i = 0; i < points.length; i++) {
+          const prev = points[(i - 1 + points.length) % points.length];
+          const cur = points[i];
+          const next = points[(i + 1) % points.length];
+          const toPrev = sub(prev, cur);
+          const toNext = sub(next, cur);
+          const lp = len(toPrev);
+          const ln = len(toNext);
+          if (lp < 1e-5 || ln < 1e-5) continue;
+          const cut = Math.min(radius, lp * 0.42, ln * 0.42);
+          const p0 = add(cur, mul(norm(toPrev), cut));
+          const p1 = add(cur, mul(norm(toNext), cut));
+          if (out.length === 0) out.push(p0);
+          else out.push(p0);
+          for (let s = 1; s <= samples; s++) {
+            const t = s / samples;
+            const a = lerp(p0, cur, t);
+            const b = lerp(cur, p1, t);
+            out.push(lerp(a, b, t));
+          }
+        }
+        return out;
+      }
+
+      function smoothClosedPolygon(points, samples = 8, tension = 0.42) {
+        if (!points || points.length < 3) return points ? points.slice() : [];
+        const out = [];
+        for (let i = 0; i < points.length; i++) {
+          const p0 = points[(i - 1 + points.length) % points.length];
+          const p1 = points[i];
+          const p2 = points[(i + 1) % points.length];
+          const p3 = points[(i + 2) % points.length];
+          const m1 = mul(sub(p2, p0), tension);
+          const m2 = mul(sub(p3, p1), tension);
+          for (let s = 0; s < samples; s++) {
+            out.push(hermitePoint(p1, p2, m1, m2, s / samples));
+          }
+        }
+        return out;
+      }
+
+      function quadraticPoint(P0, P1, P2, t) {
+        const u = 1 - t;
+        return add(add(mul(P0, u * u), mul(P1, 2 * u * t)), mul(P2, t * t));
+      }
+
+      function quadraticDeriv(P0, P1, P2, t) {
+        return add(mul(sub(P1, P0), 2 * (1 - t)), mul(sub(P2, P1), 2 * t));
+      }
+
+      function sampleQuadraticOffset(
+        P0,
+        P1,
+        P2,
+        offset,
+        samples = state.curveSegments,
+      ) {
+        const out = [];
+        for (let i = 0; i <= samples; i++) {
+          const t = i / samples;
+          const p = quadraticPoint(P0, P1, P2, t);
+          const side = perpLeft(norm(quadraticDeriv(P0, P1, P2, t)));
+          out.push(add(p, mul(side, offset)));
+        }
+        return out;
+      }
+
+      function buildNetworkBend(start, control, end) {
+        const hw = state.width * 0.5;
+        const samples = Math.max(4, state.curveSegments | 0);
+        const left = sampleQuadraticOffset(start, control, end, hw, samples);
+        const right = sampleQuadraticOffset(start, control, end, -hw, samples);
+        const center = sampleQuadraticOffset(start, control, end, 0, samples);
+        return {
+          polygon: [...left, ...right.slice().reverse()],
+          left: { path: left, debug: [] },
+          right: { path: right, debug: [] },
+          center,
+          networkBend: true,
+        };
+      }
+
+      function junctionBoundary(node, roads, clipCtx, hw, halfWidthForRoad) {
+        const hwFn =
+          typeof halfWidthForRoad === "function" ? halfWidthForRoad : null;
+        const entries = roads
+          .map((road) => {
+            const clip = mouthClipAlongNode(
+              node.id,
+              road.edge,
+              road.other.id,
+              clipCtx,
+            );
+            const mouth = add(node.p, mul(road.dir, clip));
+            const side = perpLeft(road.dir);
+            const rhw = hwFn ? hwFn(road) : hw;
+            return {
+              angle: Math.atan2(road.dir.y, road.dir.x),
+              dir: road.dir,
+              side,
+              rhw,
+              left: add(mouth, mul(side, rhw)),
+              right: add(mouth, mul(side, -rhw)),
+            };
+          })
+          .sort((a, b) => a.angle - b.angle);
+
+        const fillPath = [];
+        const segments = [];
+        for (let i = 0; i < entries.length; i++) {
+          const current = entries[i];
+          const next = entries[(i + 1) % entries.length];
+          if (fillPath.length === 0) fillPath.push(current.right);
+          fillPath.push(current.left);
+
+          const start = current.left;
+          const end = next.right;
+          const cornerHit = lineIntersection(start, current.dir, end, next.dir);
+          const fallbackMid = lerp(start, end, 0.5);
+          const fallbackOut = norm(sub(fallbackMid, node.p));
+          const hwPair = Math.max(current.rhw, next.rhw);
+          let corner = cornerHit
+            ? cornerHit.p
+            : add(fallbackMid, mul(fallbackOut, hwPair));
+          const maxCornerReach = Math.max(
+            hwPair * 2.35,
+            state.junctionRadius * 1.25,
+          );
+          if (
+            dist(corner, start) > maxCornerReach ||
+            dist(corner, end) > maxCornerReach
+          ) {
+            corner = add(fallbackMid, mul(fallbackOut, hwPair * 0.65));
+          }
+
+          const segment = [];
+          const segmentCount = Math.max(3, state.junctionSegments | 0);
+          for (let s = 0; s <= segmentCount; s++) {
+            const t = s / segmentCount;
+            const a = lerp(start, corner, t);
+            const b = lerp(corner, end, t);
+            segment.push(lerp(a, b, t));
+          }
+          fillPath.push(...segment.slice(1));
+          segments.push(segment);
+        }
+        return { polygon: fillPath, outlineSegments: segments };
+      }
+
+      /** Tight merge for lane fork: hull of mouth corners (avoids asymmetric fillet “bubble”). */
+      function junctionBoundaryForkConvex(
+        node,
+        roads,
+        clipCtx,
+        halfWidthForRoad,
+      ) {
+        const corners = [];
+        for (const road of roads) {
+          const clip = mouthClipAlongNode(
+            node.id,
+            road.edge,
+            road.other.id,
+            clipCtx,
+          );
+          const mouth = add(node.p, mul(road.dir, clip));
+          const side = perpLeft(road.dir);
+          const rhw = halfWidthForRoad(road);
+          corners.push(add(mouth, mul(side, rhw)));
+          corners.push(add(mouth, mul(side, -rhw)));
+        }
+        const hull = convexHull(corners);
+        if (!hull || hull.length < 3) {
+          const maxHalf = Math.max(
+            state.width * 0.5,
+            ...roads.map((r) => halfWidthForRoad(r)),
+          );
+          return junctionBoundary(node, roads, clipCtx, maxHalf, null);
+        }
+        const segments = [];
+        for (let i = 0; i < hull.length; i++) {
+          const a = hull[i];
+          const b = hull[(i + 1) % hull.length];
+          segments.push([a, b]);
+        }
+        return { polygon: hull.slice(), outlineSegments: segments };
+      }
+
+      /**
+       * Shared fork outline math for pavement polygon + shoulder polylines that follow the
+       * same outer curves as the purple stroke through the merge.
+       */
+      function computeForkAsymmetricGeometry(node, roads, clipCtx, halfWidthForRoad) {
+        const arms = classifyForkArms(node, roads, clipCtx);
+        if (!arms) return null;
+        const { inc, exit, thru } = arms;
+        const hwI = halfWidthForRoad(inc);
+        const hwT = halfWidthForRoad(thru);
+        const hwE = halfWidthForRoad(exit);
+
+        const clipI = mouthClipAlongNode(
+          node.id,
+          inc.edge,
+          inc.other.id,
+          clipCtx,
+        );
+        const clipT = mouthClipAlongNode(
+          node.id,
+          thru.edge,
+          thru.other.id,
+          clipCtx,
+        );
+        const clipE = mouthClipAlongNode(
+          node.id,
+          exit.edge,
+          exit.other.id,
+          clipCtx,
+        );
+        const Mi = add(node.p, mul(inc.dir, clipI));
+        const Mt = add(node.p, mul(thru.dir, clipT));
+        const Me = add(node.p, mul(exit.dir, clipE));
+
+        const tinI = norm(mul(inc.dir, -1));
+        const sideL = perpLeft(tinI);
+        const exo = norm(exit.dir);
+        const dotL = dot(exo, sideL);
+        const dotR = dot(exo, mul(sideL, -1));
+        const sideStraight = dotL <= dotR ? sideL : mul(sideL, -1);
+        const sideSplit = mul(sideStraight, -1);
+
+        const CnI = add(Mi, mul(sideStraight, hwI));
+        const CsI = add(Mi, mul(sideSplit, hwI));
+        /** Straight curb must use incoming half-width at the through mouth too, so
+         *  CnT−CnI stays parallel to traffic when hwI≠hwT (otherwise the “straight”
+         *  side kinks / pinches). */
+        const CnT = add(Mt, mul(sideStraight, hwI));
+        const CsT = add(Mt, mul(sideSplit, hwT));
+
+        const eSide = perpLeft(exo);
+        const R0 = add(Me, mul(eSide, hwE));
+        const R1 = add(Me, mul(eSide, -hwE));
+        const mergeCorner = dist(R0, CsT) < dist(R1, CsT) ? R0 : R1;
+        const outerCorner = dist(R0, CsT) < dist(R1, CsT) ? R1 : R0;
+
+        const samples = Math.max(14, (state.junctionSegments | 0) + 6);
+        const dOuter = dist(outerCorner, CsI);
+
+        const innerSteps = Math.max(24, samples);
+        const midC = lerp(CsT, mergeCorner, 0.5);
+        /** Inner gore CsT→mergeCorner: quadratic control pulled toward open space (near
+         *  `outerCorner`) for a tight, **rounded** crotch like the reference — not only
+         *  a perpendicular bump, which can read as a flat or wrong-sided bend. */
+        const chordTC = sub(mergeCorner, CsT);
+        const chordLen = len(chordTC);
+        const innerCtrl =
+          chordLen > 1e-4
+            ? (() => {
+                const vOpen = sub(outerCorner, midC);
+                const lo = len(vOpen);
+                if (lo < 1e-4) {
+                  const perp = perpLeft(norm(chordTC));
+                  const bulge = 0.36 * Math.min(chordLen, dOuter * 0.98);
+                  let ctrl = add(midC, mul(perp, bulge));
+                  const sideRef = cross(chordTC, sub(outerCorner, CsT));
+                  const sideCtrl = cross(chordTC, sub(ctrl, CsT));
+                  if (sideRef * sideCtrl < 0) ctrl = sub(midC, mul(perp, bulge));
+                  return ctrl;
+                }
+                return add(
+                  midC,
+                  mul(
+                    norm(vOpen),
+                    0.46 * Math.min(chordLen, dOuter * 1.02),
+                  ),
+                );
+              })()
+            : midC;
+        const innerArc = sampleQuadraticOffset(
+          CsT,
+          innerCtrl,
+          mergeCorner,
+          0,
+          innerSteps,
+        );
+
+        /** Outer curb outerCorner→CsI: pick quadratic control *farther* from fork node (bulge outward). */
+        const chordOI = sub(CsI, outerCorner);
+        const chordLenO = len(chordOI);
+        const midOI = lerp(outerCorner, CsI, 0.5);
+        const outerCtl =
+          chordLenO > 1e-4
+            ? (() => {
+                const perpO = perpLeft(norm(chordOI));
+                const bulgeO = 0.34 * chordLenO;
+                const cPlus = add(midOI, mul(perpO, bulgeO));
+                const cMinus = sub(midOI, mul(perpO, bulgeO));
+                return dist(cPlus, node.p) >= dist(cMinus, node.p) ? cPlus : cMinus;
+              })()
+            : midOI;
+        const outerArc = sampleQuadraticOffset(
+          outerCorner,
+          outerCtl,
+          CsI,
+          0,
+          samples,
+        );
+
+        const tanAtMerge =
+          innerArc.length >= 2
+            ? norm(sub(mergeCorner, innerArc[innerArc.length - 2]))
+            : norm(sub(mergeCorner, CsT));
+        const poly = [CnI, CnT, ...innerArc];
+        if (dist(mergeCorner, outerCorner) > 0.4) poly.push(outerCorner);
+        for (let i = 1; i < outerArc.length - 1; i++) poly.push(outerArc[i]);
+        poly.push(CsI);
+
+        const outlineSegments = [];
+        for (let i = 0; i < poly.length; i++) {
+          const a = poly[i];
+          const b = poly[(i + 1) % poly.length];
+          outlineSegments.push([a, b]);
+        }
+
+        const purpleRimOpenPaths = [
+          [CnI, CnT],
+          outerArc.slice(),
+          [CsI, CnI],
+        ];
+
+        return {
+          polygon: poly,
+          outlineSegments,
+          purpleRimOpenPaths,
+          /** Peel divider / ramp edge targets (shared with fork lane markings). */
+          forkMarkingGeom: {
+            Mi,
+            Mt,
+            Me,
+            tinI,
+            exo,
+            eSide,
+            outerCorner,
+            mergeCorner,
+            CsI,
+            CsT,
+            hwE,
+            /** Tangent of inner gore arc at exit mouth (1-lane gore edge direction). */
+            tangentExitGore: tanAtMerge,
+            /** Pavement inner gore (CsT→mergeCorner); peel marking reuses this polyline. */
+            innerArc: innerArc.slice(),
+          },
+        };
+      }
+
+      /**
+       * Article-style fork pavement: one long side stays straight (incoming → through),
+       * the opposite side curves from the through corner to the ramp outer edge and back
+       * to the incoming split-side corner (no symmetric convex hull “bubble”).
+       */
+      function junctionBoundaryForkAsymmetric(
+        node,
+        roads,
+        clipCtx,
+        halfWidthForRoad,
+      ) {
+        const g = computeForkAsymmetricGeometry(
+          node,
+          roads,
+          clipCtx,
+          halfWidthForRoad,
+        );
+        if (!g) {
+          return junctionBoundaryForkConvex(
+            node,
+            roads,
+            clipCtx,
+            halfWidthForRoad,
+          );
+        }
+        return {
+          polygon: g.polygon,
+          outlineSegments: g.outlineSegments,
+          purpleRimOpenPaths: g.purpleRimOpenPaths,
+        };
+      }
+
+      function buildRoundaboutJunction(node, roads, clipCtx, hw) {
+        const C = node.p;
+        const pieces = [];
+        const markings = [];
+        const armed = roads
+          .map((road) => {
+            const clip0 = mouthClipAlongNode(
+              node.id,
+              road.edge,
+              road.other.id,
+              clipCtx,
+            );
+            const clip = Math.max(clip0, hw * 1.05);
+            const mouth = add(node.p, mul(road.dir, clip));
+            const ang = Math.atan2(road.dir.y, road.dir.x);
+            return { ...road, clip, mouth, ang };
+          })
+          .sort((u, v) => u.ang - v.ang);
+
+        const n = armed.length;
+        if (n < 3) return { pieces, markings };
+
+        /** One merged hub (same as default junction) so pavement meets mouths. */
+        const boundary = junctionBoundary(node, roads, clipCtx, hw);
+        const mouthR =
+          armed.reduce((s, r) => s + dist(C, r.mouth), 0) / Math.max(1, n);
+        /** Ring slightly *inboard* of mouths so spokes meet it (was mouthR+ε → gap). */
+        const circR = clamp(
+          mouthR - hw * 0.22,
+          hw * 0.82,
+          mouthR + hw * 0.04,
+        );
+        const islandR = clamp(circR - hw * 0.78, hw * 0.22, circR * 0.62);
+
+        pieces.push({
+          polygon: boundary.polygon,
+          left: { path: [] },
+          right: { path: [] },
+          center: [],
+          isJunctionCore: true,
+          roundaboutHub: true,
+          networkNode: node,
+          roundaboutIslandR: islandR,
+          mouths: roads.map((road) => {
+            const m = edgeMouthFromNode(road.edge, node.id, clipCtx);
+            return { c: m ? m.point : node.p };
+          }),
+          outlineSegments: boundary.outlineSegments,
+        });
+
+        const ringSteps = clamp(Math.floor(n * 22), 48, 120);
+        const ringPath = [];
+        for (let s = 0; s <= ringSteps; s++) {
+          const t = (s / ringSteps) * Math.PI * 2;
+          ringPath.push(
+            vec(C.x + Math.cos(t) * circR, C.y + Math.sin(t) * circR),
+          );
+        }
+        markings.push({
+          path: ringPath,
+          type: "roundaboutRing",
+          closed: true,
+          dash: [11, 9],
+        });
+
+        for (const arm of armed) {
+          const layout = edgeLayoutNearNode(arm.edge, node.id, clipCtx);
+          for (const off of laneStripCenterOffsets(layout)) {
+            const baseMouth = add(C, mul(arm.dir, arm.clip));
+            const stripMouth = add(baseMouth, mul(perpLeft(arm.dir), off));
+            const radial = norm(sub(stripMouth, C));
+            const ringHit = add(C, mul(radial, circR));
+            if (dist(stripMouth, ringHit) > 1.2) {
+              markings.push({
+                path: [stripMouth, ringHit],
+                type: "roundaboutSpoke",
+              });
+            }
+          }
+        }
+
+        return { pieces, markings };
+      }
+
+      function buildRoadPiece(pFrom, pTo, strategy, scale) {
+        const half = state.width * 0.5;
+        const left = solveConnectionPair(
+          pFrom,
+          pTo,
+          half,
+          half,
+          strategy,
+          scale,
+        );
+        const right = solveConnectionPair(
+          pFrom,
+          pTo,
+          -half,
+          -half,
+          strategy,
+          scale,
+        );
+        if (!left || !right) return null;
+        return {
+          from: pFrom,
+          to: pTo,
+          left,
+          right,
+          polygon: [...left.path, ...right.path.slice().reverse()],
+          center: averagePolylines(left.path, right.path, 76),
+        };
+      }
+
+      function buildLinearPiece(pFrom, pTo) {
+        const left = {
+          type: "linear",
+          path: [pFrom.left, pTo.left],
+          debug: [],
+        };
+        const right = {
+          type: "linear",
+          path: [pFrom.right, pTo.right],
+          debug: [],
+        };
+        return {
+          from: pFrom,
+          to: pTo,
+          left,
+          right,
+          polygon: [pFrom.left, pTo.left, pTo.right, pFrom.right],
+          center: [pFrom.c, pTo.c],
+          linear: true,
+        };
+      }
+
+      function buildLaneMarks(pFrom, pTo, strategy, scale) {
+        const count = state.lanesPerDir * 2;
+        const laneW = state.width / count;
+        const out = [];
+        for (let i = 1; i < count; i++) {
+          const off = -state.width * 0.5 + i * laneW;
+          const mark = solveConnectionPair(
+            pFrom,
+            pTo,
+            off,
+            off,
+            strategy,
+            scale,
+          );
+          if (mark) {
+            out.push({
+              path: mark.path,
+              type: i === state.lanesPerDir ? "center" : "divider",
+            });
+          }
+        }
+        return out;
+      }
+
+      function buildLinearLaneMarks(pFrom, pTo) {
+        const count = state.lanesPerDir * 2;
+        const laneW = state.width / count;
+        const out = [];
+        for (let i = 1; i < count; i++) {
+          const off = -state.width * 0.5 + i * laneW;
+          const fromPt = offsetPoint(pFrom, off);
+          const toPt = offsetPoint(pTo, off);
+          out.push({
+            path: [fromPt, toPt],
+            type: i === state.lanesPerDir ? "center" : "divider",
+          });
+        }
+        return out;
+      }
+
+      function buildLaneMarksFromOffsets(pFrom, pTo, offsets, strategy, scale) {
+        const out = [];
+        if (!offsets.length) return out;
+        const nearest = offsets.reduce((best, off) =>
+          Math.abs(off) < Math.abs(best) ? off : best,
+        );
+        for (const off of offsets) {
+          const mark = solveConnectionPair(
+            pFrom,
+            pTo,
+            off,
+            off,
+            strategy,
+            scale,
+          );
+          if (mark) {
+            out.push({
+              path: mark.path,
+              type: Math.abs(off - nearest) < 0.02 ? "center" : "divider",
+            });
+          }
+        }
+        return out;
+      }
+
+      /** Straight strip markings (parallel offsets); use for linear road spans. */
+      function buildStraightLaneMarksFromOffsets(pFrom, pTo, offsets) {
+        if (!offsets.length) return [];
+        const nearest = offsets.reduce((best, off) =>
+          Math.abs(off) < Math.abs(best) ? off : best,
+        );
+        return offsets.map((off) => ({
+          path: [offsetPoint(pFrom, off), offsetPoint(pTo, off)],
+          type: Math.abs(off - nearest) < 0.02 ? "center" : "divider",
+        }));
+      }
+
+      function buildRoadSystem() {
+        const a = projectProfile(state.profileA, state.width);
+        const b = projectProfile(state.profileB, state.width);
+        const c = projectProfile(state.profileC, state.width);
+        const result = buildNetworkRoadSystem();
+        if (!result.ok) return { a, b, c, ok: false, reason: result.reason };
+        return {
+          a,
+          b,
+          c,
+          ok: true,
+          network: true,
+          pieces: result.pieces,
+          markings: result.markings,
+          nodes: result.nodes,
+        };
+      }
+
+      function buildNetworkRoadSystem() {
+        const nodes = state.network.nodes;
+        const edges = state.network.edges;
+        return buildNetworkGeometry(nodes, edges);
+      }
+
+      function buildNetworkClipContext(nodes, edges) {
+        const nodeById = new Map(nodes.map((n) => [n.id, n]));
+        const adjacency = new Map(nodes.map((n) => [n.id, []]));
+        const hw = state.width * 0.5;
+        const safeEdges = [];
+        for (const raw of edges) {
+          const ne = normalizeEdge(raw);
+          if (ne) safeEdges.push(ne);
+        }
+        for (const edge of safeEdges) {
+          const a = nodeById.get(edge.a);
+          const b = nodeById.get(edge.b);
+          const minLen = Math.max(state.width * 0.72, edgeRoadWidth(edge) * 0.72);
+          if (!a || !b || dist(a.p, b.p) < minLen) continue;
+          const dirFromA = edgeOutwardTangent(edge, a.id, a.p, b.p);
+          const dirFromB = edgeOutwardTangent(edge, b.id, b.p, a.p);
+          adjacency.get(a.id).push({
+            edge,
+            other: b,
+            dir: dirFromA,
+            length: dist(a.p, b.p),
+          });
+          adjacency.get(b.id).push({
+            edge,
+            other: a,
+            dir: dirFromB,
+            length: dist(a.p, b.p),
+          });
+        }
+        const clipDistance = (nodeId, length) => {
+          const degree = adjacency.get(nodeId).length;
+          if (degree <= 1) return 0;
+          const radiusCap = state.junctionRadius * (degree === 2 ? 1 : 0.62);
+          const lengthScale = degree === 2 ? 0.32 : 0.24;
+          return Math.min(radiusCap, Math.max(hw * 1.15, length * lengthScale));
+        };
+        return { nodeById, adjacency, clipDistance, safeEdges, hw };
+      }
+
+      const MOUTH_MAX_RATIO = 0.48;
+
+      function twoRoadClipBoost(nodeId, adjacency) {
+        return adjacency.get(nodeId).length === 2 &&
+          state.twoRoadNodes === "junction"
+          ? 1.38
+          : 1;
+      }
+
+      function mouthClipAlongNode(nodeId, edge, otherNodeId, clipCtx) {
+        const { nodeById, clipDistance, adjacency } = clipCtx;
+        const self = nodeById.get(nodeId);
+        const other = nodeById.get(otherNodeId);
+        if (!self || !other) return 0;
+        const len = dist(self.p, other.p);
+        if (len < 1e-6) return 0;
+        const boost = twoRoadClipBoost(nodeId, adjacency);
+        return Math.min(
+          clipDistance(nodeId, len) * boost,
+          len * MOUTH_MAX_RATIO,
+        );
+      }
+
+      function edgeMouthFromNode(edge, atNodeId, clipCtx) {
+        const { nodeById } = clipCtx;
+        const self = nodeById.get(atNodeId);
+        const otherId = edge.a === atNodeId ? edge.b : edge.a;
+        const other = nodeById.get(otherId);
+        if (!self || !other) return null;
+        const len = dist(self.p, other.p);
+        const ew = edgeRoadWidth(edge);
+        if (len < Math.max(state.width * 0.55, ew * 0.72)) return null;
+        const c = mouthClipAlongNode(atNodeId, edge, otherId, clipCtx);
+        const dir = edgeOutwardTangent(edge, atNodeId, self.p, other.p);
+        return { point: add(self.p, mul(dir, c)), dir, len, otherId };
+      }
+
+      function edgeClippedEndpoints(edge, clipCtx) {
+        const ma = edgeMouthFromNode(edge, edge.a, clipCtx);
+        const mb = edgeMouthFromNode(edge, edge.b, clipCtx);
+        if (!ma || !mb) return null;
+        if (dist(ma.point, mb.point) < 1) return null;
+        return { start: ma.point, end: mb.point };
+      }
+
+      function buildNetworkGeometry(nodes, edges) {
+        const clipCtx = buildNetworkClipContext(nodes, edges);
+        const { nodeById, adjacency, safeEdges, hw } = clipCtx;
+        const pieces = [];
+        const markings = [];
+        const junctionIslandOnly = !!state.network.junctionIslandOnly;
+
+        for (const edge of safeEdges) {
+          if (junctionIslandOnly) continue;
+          const a = nodeById.get(edge.a);
+          const b = nodeById.get(edge.b);
+          if (!a || !b) continue;
+          const seg = edgeClippedEndpoints(edge, clipCtx);
+          if (!seg) continue;
+          const { start, end } = seg;
+          const dirA = edgeOutwardTangent(edge, a.id, a.p, b.p);
+          const hF = Math.atan2(dirA.y, dirA.x);
+          const wRoad = edgeRoadWidth(edge);
+          const pS = projectProfile({ c: start, heading: hF }, wRoad);
+          const pE = projectProfile({ c: end, heading: hF }, wRoad);
+          let layoutE = getEdgeLaneLayout(edge);
+          if (edge.oneWay) {
+            layoutE = [
+              { width: wRoad * 0.22, kind: "shoulder" },
+              { width: wRoad * 0.78, kind: "car" },
+            ];
+          } else {
+            layoutE = scaleLayoutToRoadWidth(layoutE, wRoad);
+          }
+          const kf = resolvedProfileKeyframes(edge);
+          const forkThruCtx = forkThruWideStraightContext(edge, clipCtx);
+          const prof =
+            !edge.oneWay &&
+            kf &&
+            buildProfiledNetworkSpan(
+              edge,
+              start,
+              end,
+              hF,
+              forkThruCtx,
+              clipCtx,
+            );
+          let span;
+          let spanMarkings;
+          if (prof) {
+            span = {
+              from: null,
+              to: null,
+              polygon: prof.polygon,
+              left: prof.left,
+              right: prof.right,
+              center: [],
+              linear: true,
+              networkSpan: true,
+              profiledSpan: true,
+              edgeKey: edgeKey(edge.a, edge.b),
+              oneWayEdge: !!edge.oneWay,
+              oneWayFrom: { x: start.x, y: start.y },
+              oneWayTo: { x: end.x, y: end.y },
+            };
+            spanMarkings = prof.markings;
+          } else if (!edge.oneWay && forkThruCtx) {
+            const nSeg = Math.max(14, (state.curveSegments | 0) + 8);
+            const fwd = vec(Math.cos(hF), Math.sin(hF));
+            const side = perpLeft(fwd);
+            const leftPts = [];
+            const rightPts = [];
+            let forkThruStraightPlaneD = null;
+            let forkThruStraightUsesHi = null;
+            for (let i = 0; i <= nSeg; i++) {
+              const u = i / nSeg;
+              const c = lerp(pS.c, pE.c, u);
+              const hw = wRoad * 0.5;
+              const { lo, hi } = forkThruBlendedOuterScalars(
+                u,
+                hw,
+                side,
+                forkThruCtx,
+              );
+              const pLoCand = add(c, mul(side, lo));
+              const pHiCand = add(c, mul(side, hi));
+              let pLo = pLoCand;
+              let pHi = pHiCand;
+              if (forkThruCtx) {
+                if (forkThruStraightPlaneD === null) {
+                  forkThruStraightUsesHi =
+                    dot(pHiCand, forkThruCtx.sideStraight) >=
+                    dot(pLoCand, forkThruCtx.sideStraight);
+                  forkThruStraightPlaneD = dot(
+                    forkThruStraightUsesHi ? pHiCand : pLoCand,
+                    forkThruCtx.sideStraight,
+                  );
+                }
+                if (forkThruStraightUsesHi) {
+                  const err =
+                    dot(pHiCand, forkThruCtx.sideStraight) -
+                    forkThruStraightPlaneD;
+                  pHi = sub(pHiCand, mul(forkThruCtx.sideStraight, err));
+                } else {
+                  const err =
+                    dot(pLoCand, forkThruCtx.sideStraight) -
+                    forkThruStraightPlaneD;
+                  pLo = sub(pLoCand, mul(forkThruCtx.sideStraight, err));
+                }
+              }
+              leftPts.push(pLo);
+              rightPts.push(pHi);
+            }
+            span = {
+              from: null,
+              to: null,
+              polygon: [...leftPts, ...rightPts.slice().reverse()],
+              left: { type: "linear", path: leftPts, debug: [] },
+              right: { type: "linear", path: rightPts, debug: [] },
+              center: [],
+              linear: true,
+              networkSpan: true,
+              profiledSpan: false,
+              edgeKey: edgeKey(edge.a, edge.b),
+              oneWayEdge: !!edge.oneWay,
+              oneWayFrom: { x: start.x, y: start.y },
+              oneWayTo: { x: end.x, y: end.y },
+            };
+            const divs = laneStripDividerOffsets(layoutE);
+            const midRef = lerp(pS.c, pE.c, 0.5);
+            const medIdx = medianDividerIndex(layoutE.length);
+            spanMarkings = divs.map((off, i) => ({
+              path: [offsetPoint(pS, off), offsetPoint(pE, off)],
+              type: "laneCenter",
+              laneLineKind: "interior",
+              laneLineRole: i === medIdx ? "median" : "lane",
+              interiorRef: midRef,
+            }));
+          } else {
+            span = buildLinearPiece(pS, pE);
+            span.networkSpan = true;
+            span.edgeKey = edgeKey(edge.a, edge.b);
+            span.oneWayEdge = !!edge.oneWay;
+            span.oneWayFrom = { x: start.x, y: start.y };
+            span.oneWayTo = { x: end.x, y: end.y };
+            const divs = laneStripDividerOffsets(layoutE);
+            const midRef = lerp(pS.c, pE.c, 0.5);
+            const medIdx = medianDividerIndex(layoutE.length);
+            spanMarkings = divs.map((off, i) => ({
+              path: [offsetPoint(pS, off), offsetPoint(pE, off)],
+              type: "laneCenter",
+              laneLineKind: "interior",
+              laneLineRole: i === medIdx ? "median" : "lane",
+              interiorRef: midRef,
+            }));
+          }
+          pieces.push(span);
+          markings.push(...spanMarkings);
+        }
+
+        for (const node of nodes) {
+          const roads = adjacency.get(node.id);
+          if (!roads || roads.length === 0) continue;
+          if (
+            junctionIslandOnly &&
+            (roads.length !== 3 ||
+              (node.junctionType || "default") !== "fork")
+          )
+            continue;
+
+          if (roads.length === 1) {
+            const road = roads[0];
+            const side = perpLeft(road.dir);
+            const pts =
+              state.endCapStyle === "flat"
+                ? [add(node.p, mul(side, -hw)), add(node.p, mul(side, hw))]
+                : (() => {
+                    const out = [];
+                    const back = mul(road.dir, -1);
+                    const base = Math.atan2(back.y, back.x);
+                    const a0 = base - Math.PI * 0.5;
+                    const a1 = base + Math.PI * 0.5;
+                    const segmentCount = Math.max(
+                      6,
+                      state.junctionSegments | 0,
+                    );
+                    for (let i = 0; i <= segmentCount; i++) {
+                      const ang = angleLerp(a0, a1, i / segmentCount);
+                      out.push(
+                        add(node.p, vec(Math.cos(ang) * hw, Math.sin(ang) * hw)),
+                      );
+                    }
+                    return out;
+                  })();
+            pieces.push({
+              polygon: pts,
+              left: { path: [] },
+              right: { path: [] },
+              center: [],
+              isJunctionCore: true,
+              networkNode: node,
+              mouths: [],
+            });
+            continue;
+          }
+
+          if (roads.length === 2) {
+            const m0 = edgeMouthFromNode(roads[0].edge, node.id, clipCtx);
+            const m1 = edgeMouthFromNode(roads[1].edge, node.id, clipCtx);
+            if (!m0 || !m1) continue;
+            const mouthA = m0.point;
+            const mouthB = m1.point;
+            const bendPiece = buildNetworkBend(mouthA, node.p, mouthB);
+            bendPiece.networkBend = true;
+            pieces.push(bendPiece);
+            const samples = Math.max(4, state.curveSegments | 0);
+            const bendLayout = getEdgeLaneLayout(roads[0].edge);
+            const bendRef = node.p;
+            const medB = medianDividerIndex(bendLayout.length);
+            laneStripDividerOffsets(bendLayout).forEach((off, i) => {
+              markings.push({
+                path: sampleQuadraticOffset(mouthA, node.p, mouthB, off, samples),
+                type: "laneCenter",
+                laneLineKind: "interior",
+                laneLineRole: i === medB ? "median" : "lane",
+                interiorRef: bendRef,
+              });
+            });
+            continue;
+          }
+
+          const jt = node.junctionType || "default";
+          if (jt === "tee" && roads.length === 3) {
+            const boundary = junctionBoundary(node, roads, clipCtx, hw);
+            pieces.push({
+              polygon: boundary.polygon,
+              left: { path: [] },
+              right: { path: [] },
+              center: [],
+              isJunctionCore: true,
+              networkNode: node,
+              junctionKind: "tee",
+              mouths: roads.map((road) => {
+                const m = edgeMouthFromNode(road.edge, node.id, clipCtx);
+                return { c: m ? m.point : node.p };
+              }),
+              outlineSegments: boundary.outlineSegments,
+            });
+            addTeeYieldMarkings(node, roads, clipCtx, hw, markings);
+            continue;
+          }
+
+          if (jt === "fork" && roads.length === 3) {
+            const boundary = junctionBoundaryForkAsymmetric(
+              node,
+              roads,
+              clipCtx,
+              (arm) => edgeRoadWidth(arm.edge) * 0.5,
+            );
+            pieces.push({
+              polygon: boundary.polygon,
+              left: { path: [] },
+              right: { path: [] },
+              center: [],
+              isJunctionCore: true,
+              networkNode: node,
+              junctionKind: "fork",
+              mouths: roads.map((road) => {
+                const m = edgeMouthFromNode(road.edge, node.id, clipCtx);
+                return { c: m ? m.point : node.p };
+              }),
+              outlineSegments: boundary.outlineSegments,
+              purpleRimOpenPaths: boundary.purpleRimOpenPaths || null,
+            });
+            addForkLaneGuides(node, roads, clipCtx, markings);
+            addForkDividerGuides(node, roads, clipCtx, markings);
+            continue;
+          }
+
+          if (jt === "roundabout" && roads.length >= 3) {
+            const rb = buildRoundaboutJunction(node, roads, clipCtx, hw);
+            pieces.push(...rb.pieces);
+            markings.push(...rb.markings);
+            continue;
+          }
+
+          const boundary = junctionBoundary(node, roads, clipCtx, hw);
+          pieces.push({
+            polygon: boundary.polygon,
+            left: { path: [] },
+            right: { path: [] },
+            center: [],
+            isJunctionCore: true,
+            networkNode: node,
+            mouths: roads.map((road) => {
+              const m = edgeMouthFromNode(road.edge, node.id, clipCtx);
+              return { c: m ? m.point : node.p };
+            }),
+            outlineSegments: boundary.outlineSegments,
+          });
+        }
+
+        return { ok: true, pieces, markings, nodes };
+      }
+
+      function buildCleanTJunction(profileA, profileB, profileC) {
+        const trunkDir = norm(sub(profileB.c, profileA.c));
+        const ac = sub(profileC.c, profileA.c);
+        const tOnTrunk = dot(ac, trunkDir);
+        const J = add(profileA.c, mul(trunkDir, tOnTrunk));
+        const minLeg = Math.max(state.width * 0.9, 6);
+        if (
+          dist(profileA.c, J) < minLeg ||
+          dist(profileB.c, J) < minLeg ||
+          dist(profileC.c, J) < minLeg
+        ) {
+          return {
+            ok: false,
+            reason:
+              "Move the profiles farther apart so the junction has room to solve.",
+          };
+        }
+
+        const nodes = [
+          { id: 1, p: profileA.c },
+          { id: 2, p: J },
+          { id: 3, p: profileB.c },
+          { id: 4, p: profileC.c },
+        ];
+        const edges = [
+          { a: 1, b: 2 },
+          { a: 2, b: 3 },
+          { a: 2, b: 4 },
+        ];
+        const graph = buildNetworkGeometry(nodes, edges);
+        return { ok: graph.ok, pieces: graph.pieces, markings: graph.markings };
+      }
+
+      // Generate arc points from angle a1 to a2 around center c with radius r
+      function arcPoints(c, r, a1, a2, segments = 8) {
+        const pts = [];
+        for (let i = 0; i <= segments; i++) {
+          const t = i / segments;
+          const a = a1 + (a2 - a1) * t;
+          pts.push(vec(c.x + r * Math.cos(a), c.y + r * Math.sin(a)));
+        }
+        return pts;
+      }
+
+      function buildRoundedTJunction(
+        mouthA,
+        mouthB,
+        mouthC,
+        trunkDir,
+        trunkPerp,
+        branchSide,
+        radius,
+        J,
+      ) {
+        const poly = [];
+        const hw = state.width * 0.5;
+        const r = Math.min(radius, hw * 0.9); // Don't let radius exceed road width
+
+        // Compute corners where roads meet
+        // The inner corners are where branch edges meet trunk edges
+        const branchDir = mul(trunkPerp, branchSide); // Direction from J toward branch
+
+        // Trunk edge on branch side (where corners will be)
+        const trunkEdgeY = branchSide > 0 ? 1 : -1; // Which trunk edge
+
+        // Corner points (before filleting)
+        // Right corner: where trunk right edge meets branch right edge
+        const cornerR = add(J, add(mul(trunkDir, hw), mul(branchDir, hw)));
+        // Left corner: where trunk left edge meets branch left edge
+        const cornerL = add(J, add(mul(trunkDir, -hw), mul(branchDir, hw)));
+
+        // Arc centers are inset from corners
+        const arcCenterR = add(
+          cornerR,
+          add(mul(trunkDir, -r), mul(branchDir, -r)),
+        );
+        const arcCenterL = add(
+          cornerL,
+          add(mul(trunkDir, r), mul(branchDir, -r)),
+        );
+
+        if (branchSide > 0) {
+          // Branch goes UP
+          // Start from mouthA bottom (away from branch)
+          poly.push(mouthA.right);
+          poly.push(mouthB.right);
+
+          // Up along trunk right edge to arc start
+          poly.push(add(arcCenterR, mul(trunkPerp, -r))); // tangent point on trunk edge
+
+          // Right arc (from trunk to branch)
+          const arcR = arcPoints(arcCenterR, r, -Math.PI / 2, 0, 8);
+          poly.push(...arcR);
+
+          // Along branch to mouthC
+          poly.push(mouthC.right);
+          poly.push(mouthC.left);
+
+          // Left arc (from branch to trunk)
+          const arcL = arcPoints(arcCenterL, r, Math.PI, Math.PI / 2, 8);
+          poly.push(...arcL);
+
+          // tangent point on trunk left edge
+          poly.push(add(arcCenterL, mul(trunkPerp, -r)));
+
+          // Back to mouthA
+          poly.push(mouthA.left);
+        } else {
+          // Branch goes DOWN
+          poly.push(mouthA.left);
+          poly.push(mouthB.left);
+
+          // Down along trunk right edge to arc start
+          poly.push(add(arcCenterR, mul(trunkPerp, r)));
+
+          // Right arc
+          const arcR = arcPoints(arcCenterR, r, Math.PI / 2, 0, 8);
+          poly.push(...arcR);
+
+          poly.push(mouthC.right);
+          poly.push(mouthC.left);
+
+          // Left arc
+          const arcL = arcPoints(arcCenterL, r, Math.PI, (3 * Math.PI) / 2, 8);
+          poly.push(...arcL);
+
+          poly.push(add(arcCenterL, mul(trunkPerp, r)));
+          poly.push(mouthA.right);
+        }
+
+        return poly;
+      }
+
+      function convexHull(points) {
+        if (!points || points.length < 3) return points ? points.slice() : [];
+        const pts = points
+          .slice()
+          .sort((p, q) => (p.x === q.x ? p.y - q.y : p.x - q.x));
+        const cr = (o, a, b) =>
+          (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+        const lower = [];
+        for (const p of pts) {
+          while (
+            lower.length >= 2 &&
+            cr(lower[lower.length - 2], lower[lower.length - 1], p) <= 0
+          )
+            lower.pop();
+          lower.push(p);
+        }
+        const upper = [];
+        for (let i = pts.length - 1; i >= 0; i--) {
+          const p = pts[i];
+          while (
+            upper.length >= 2 &&
+            cr(upper[upper.length - 2], upper[upper.length - 1], p) <= 0
+          )
+            upper.pop();
+          upper.push(p);
+        }
+        lower.pop();
+        upper.pop();
+        return lower.concat(upper);
+      }
+
+      /** Lateral gap (world units): purple edge → white shoulder line (parallel offset). */
+      function shoulderInsetWorld() {
+        return clamp(state.width * 0.072, 3.2, 11);
+      }
+
+      function polylineMeanPoint(path) {
+        if (!path || !path.length) return null;
+        let sx = 0;
+        let sy = 0;
+        for (const p of path) {
+          sx += p.x;
+          sy += p.y;
+        }
+        return vec(sx / path.length, sy / path.length);
+      }
+
+      /**
+       * Offsets each vertex along the local normal toward `ref` by fixed distance — a true
+       * parallel inset of the edge polyline (unlike pulling every point toward one point).
+       */
+      function offsetPolylineNormalTowardRef(path, ref, distance) {
+        if (!path || path.length < 2 || !ref) return path ? path.slice() : [];
+        const d = clamp(distance, 0.4, 48);
+        const out = [];
+        for (let i = 0; i < path.length; i++) {
+          let t;
+          if (i === 0) t = norm(sub(path[1], path[0]));
+          else if (i === path.length - 1)
+            t = norm(sub(path[i], path[i - 1]));
+          else {
+            const t0 = norm(sub(path[i], path[i - 1]));
+            const t1 = norm(sub(path[i + 1], path[i]));
+            const sum = add(t0, t1);
+            t = len(sum) > 1e-5 ? norm(sum) : t0;
+          }
+          let n = perpLeft(t);
+          const toIn = sub(ref, path[i]);
+          if (len(toIn) > 1e-4 && dot(n, toIn) < 0) n = mul(n, -1);
+          out.push(add(path[i], mul(n, d)));
+        }
+        return out;
+      }
+
+      /** Inset reference for each curb: mean of the opposite edge (stable on bends vs band midpoint). */
+      function curbInteriorRefsForBand(leftPath, rightPath) {
+        const rMean = polylineMeanPoint(rightPath);
+        const lMean = polylineMeanPoint(leftPath);
+        return {
+          left: rMean || lMean,
+          right: lMean || rMean,
+        };
+      }
+
+      /** Same polyline as the purple curb: purple stroke, then white inset toward road interior. */
+      function strokePurpleNetCurbThenWhiteInset(path, interiorRef) {
+        if (!path || path.length < 2 || !interiorRef) return;
+        const w = ARTICLE_CURB_EDGE_W;
+        drawPath(path, ARTICLE_PURPLE_EDGE, w, false, null, 1);
+        const fog = offsetPolylineNormalTowardRef(
+          path,
+          interiorRef,
+          shoulderInsetWorld(),
+        );
+        drawPath(fog, ARTICLE_SHOULDER_WHITE, w, false, null, 1, null);
+      }
+
+      /** Closed polygon boundary as short edges — same model as segment outlines (node ref = hub). */
+      function strokePolygonCurbRing(poly, ref) {
+        if (!poly || poly.length < 2 || !ref) return;
+        const n = poly.length;
+        if (n < 3) {
+          strokePurpleNetCurbThenWhiteInset(poly, ref);
+          return;
+        }
+        for (let i = 0; i < n; i++) {
+          const a = poly[i];
+          const b = poly[(i + 1) % n];
+          if (dist(a, b) > 0.08) {
+            strokePurpleNetCurbThenWhiteInset([a, b], ref);
+          }
+        }
+      }
+
+      function drawLine(a, b, color, w = 1, dash = null, alpha = 1) {
+        const sa = worldToScreen(a);
+        const sb = worldToScreen(b);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = w;
+        const z = state.view.zoom;
+        ctx.setLineDash((dash || []).map((d) => d * z));
+        ctx.beginPath();
+        ctx.moveTo(sa.x, sa.y);
+        ctx.lineTo(sb.x, sb.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawCircle(p, r, color, fill = null, alpha = 1) {
+        const s = worldToScreen(p);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        if (fill) ctx.fillStyle = fill;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, r * state.view.zoom, 0, Math.PI * 2);
+        if (fill) ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function drawPath(
+        points,
+        color,
+        w,
+        closed = false,
+        fill = null,
+        alpha = 1,
+        dash = null,
+      ) {
+        if (!points || points.length < 2) return;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        const z = state.view.zoom;
+        if (dash && dash.length) {
+          ctx.setLineDash(dash.map((d) => d * z));
+        } else {
+          ctx.setLineDash([]);
+        }
+        if (color) ctx.strokeStyle = color;
+        ctx.lineWidth = w || 0;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        if (fill) ctx.fillStyle = fill;
+        ctx.beginPath();
+        const p0 = worldToScreen(points[0]);
+        ctx.moveTo(p0.x, p0.y);
+        for (let i = 1; i < points.length; i++) {
+          const pi = worldToScreen(points[i]);
+          ctx.lineTo(pi.x, pi.y);
+        }
+        if (closed) ctx.closePath();
+        if (fill) ctx.fill();
+        if (color && w > 0) ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
+      function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = ARTICLE_BG;
+        ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+
+        const grid = 48;
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = ARTICLE_GRID;
+        ctx.lineWidth = 1;
+        const leftW = (0 - state.view.x) / state.view.zoom;
+        const rightW = (window.innerWidth - state.view.x) / state.view.zoom;
+        const topW = (0 - state.view.y) / state.view.zoom;
+        const botW = (window.innerHeight - state.view.y) / state.view.zoom;
+        const x0 = Math.floor(leftW / grid) * grid;
+        const x1 = Math.ceil(rightW / grid) * grid;
+        const y0 = Math.floor(topW / grid) * grid;
+        const y1 = Math.ceil(botW / grid) * grid;
+        for (let x = x0; x <= x1; x += grid) {
+          const sx = worldToScreen(vec(x, 0)).x;
+          ctx.beginPath();
+          ctx.moveTo(sx, 0);
+          ctx.lineTo(sx, window.innerHeight);
+          ctx.stroke();
+        }
+        for (let y = y0; y <= y1; y += grid) {
+          const sy = worldToScreen(vec(0, y)).y;
+          ctx.beginPath();
+          ctx.moveTo(0, sy);
+          ctx.lineTo(window.innerWidth, sy);
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        const road = buildRoadSystem();
+        if (road.ok) {
+          for (const piece of road.pieces) {
+            if (piece.isJunctionCore) {
+              const hideNetworkSeams =
+                state.hideJunctionSeams && piece.networkNode;
+              const fill = state.blendJunctionFill
+                ? ROAD_SURFACE
+                : JUNCTION_SURFACE;
+              const nodeRef = piece.networkNode ? piece.networkNode.p : null;
+              const pr = piece.purpleRimOpenPaths;
+              const isForkRim =
+                piece.junctionKind === "fork" && pr && pr.length > 0;
+              const segList = piece.outlineSegments || [];
+              const hasOutlineChain =
+                !!nodeRef &&
+                !isForkRim &&
+                segList.some((s) => s && s.length >= 2);
+              const hasPolyOnlyRing =
+                !!nodeRef &&
+                !isForkRim &&
+                segList.length === 0 &&
+                piece.polygon &&
+                piece.polygon.length >= 3;
+              const useNetworkCurb =
+                !!nodeRef &&
+                (isForkRim || hasOutlineChain || hasPolyOnlyRing);
+
+              if (useNetworkCurb) {
+                drawPath(piece.polygon, null, 0, true, fill, 1);
+              } else {
+                const edgeColor = hideNetworkSeams
+                  ? null
+                  : piece.networkNode
+                    ? ARTICLE_PURPLE_EDGE
+                    : "rgba(255,255,255,0.22)";
+                const polyStrokeW = hideNetworkSeams ? 0 : 1.45;
+                drawPath(
+                  piece.polygon,
+                  edgeColor,
+                  polyStrokeW,
+                  true,
+                  fill,
+                  1,
+                );
+              }
+              if (
+                piece.roundaboutIslandR &&
+                piece.networkNode &&
+                piece.roundaboutHub
+              ) {
+                const c = piece.networkNode.p;
+                const r = piece.roundaboutIslandR;
+                const s = worldToScreen(c);
+                const rz = r * state.view.zoom;
+                ctx.save();
+                ctx.globalAlpha = 0.94;
+                ctx.fillStyle = "#141820";
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, rz, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = "rgba(255,255,255,0.22)";
+                ctx.lineWidth = 1.1;
+                ctx.stroke();
+                ctx.restore();
+              }
+              if (useNetworkCurb && nodeRef) {
+                if (isForkRim) {
+                  for (const path of pr) {
+                    if (path && path.length >= 2) {
+                      strokePurpleNetCurbThenWhiteInset(path, nodeRef);
+                    }
+                  }
+                } else if (hasOutlineChain) {
+                  for (const seg of segList) {
+                    if (seg && seg.length >= 2) {
+                      strokePurpleNetCurbThenWhiteInset(seg, nodeRef);
+                    }
+                  }
+                } else if (hasPolyOnlyRing) {
+                  strokePolygonCurbRing(piece.polygon, nodeRef);
+                }
+              } else if (hideNetworkSeams && segList.length) {
+                for (const segment of segList) {
+                  if (segment && segment.length >= 2) {
+                    drawPath(segment, ARTICLE_PURPLE_EDGE, 1.45, false, null, 1);
+                  }
+                }
+              }
+              continue;
+            }
+            const isNetSpan = piece.networkSpan || piece.networkBend;
+            const hideSpanCaps = state.hideJunctionSeams && isNetSpan;
+            const spanPolyStroke =
+              isNetSpan ? null : hideSpanCaps ? null : ARTICLE_SPAN_CAP_EDGE;
+            const spanPolyStrokeW = isNetSpan ? 0 : hideSpanCaps ? 0 : 1.05;
+            drawPath(
+              piece.polygon,
+              spanPolyStroke,
+              spanPolyStrokeW,
+              true,
+              ROAD_SURFACE,
+              1,
+            );
+            if (isNetSpan && piece.left?.path?.length && piece.right?.path?.length) {
+              const { left: refL, right: refR } = curbInteriorRefsForBand(
+                piece.left.path,
+                piece.right.path,
+              );
+              strokePurpleNetCurbThenWhiteInset(piece.left.path, refL);
+              strokePurpleNetCurbThenWhiteInset(piece.right.path, refR);
+            } else {
+              const edgeCol = ARTICLE_ROAD_EDGE;
+              const edgeW = 1.35;
+              const edgeA = 0.9;
+              drawPath(piece.left.path, edgeCol, edgeW, false, null, edgeA);
+              drawPath(piece.right.path, edgeCol, edgeW, false, null, edgeA);
+            }
+          }
+
+          for (const m of road.markings) {
+            if (m.type === "roundaboutRing") {
+              drawPath(
+                m.path,
+                ARTICLE_LANE,
+                1.55,
+                !!m.closed,
+                null,
+                0.82,
+                m.dash || ARTICLE_LANE_DASH,
+              );
+            } else if (
+              m.type === "center" ||
+              m.type === "junctionCenter" ||
+              m.type === "roundaboutSpoke"
+            ) {
+              drawPath(
+                m.path,
+                ARTICLE_LANE,
+                ARTICLE_LANE_WIDE,
+                false,
+                null,
+                0.88,
+                ARTICLE_LANE_DASH,
+              );
+              drawPath(
+                m.path,
+                ARTICLE_LANE,
+                ARTICLE_LANE_THIN,
+                false,
+                null,
+                0.9,
+                ARTICLE_LANE_DASH,
+              );
+            } else if (m.type === "laneCenter") {
+              const basePath = m.path;
+              if (m.laneLineRole === "median") {
+                drawPath(
+                  basePath,
+                  ARTICLE_CENTER_LINE,
+                  1.55,
+                  false,
+                  null,
+                  0.96,
+                  null,
+                );
+              } else if (m.laneLineRole === "forkCarrySolid") {
+                drawPath(
+                  basePath,
+                  ARTICLE_LANE,
+                  1.48,
+                  false,
+                  null,
+                  0.94,
+                  null,
+                );
+              } else {
+                drawPath(
+                  basePath,
+                  ARTICLE_LANE,
+                  ARTICLE_LANE_WIDE,
+                  false,
+                  null,
+                  0.86,
+                  ARTICLE_LANE_DASH,
+                );
+                drawPath(
+                  basePath,
+                  ARTICLE_LANE,
+                  ARTICLE_LANE_THIN,
+                  false,
+                  null,
+                  0.9,
+                  ARTICLE_LANE_DASH,
+                );
+              }
+            } else if (m.type === "yield" && m.path.length >= 2) {
+              drawLine(
+                m.path[0],
+                m.path[1],
+                ARTICLE_LANE,
+                2.2,
+                [7, 9],
+                0.88,
+              );
+            } else {
+              drawPath(
+                m.path,
+                ARTICLE_LANE,
+                1.2,
+                false,
+                null,
+                0.72,
+                ARTICLE_LANE_DASH,
+              );
+            }
+          }
+
+          for (const piece of road.pieces) {
+            if (
+              piece.networkSpan &&
+              piece.oneWayEdge &&
+              piece.oneWayFrom &&
+              piece.oneWayTo
+            ) {
+              drawOnewayChevrons(
+                piece.oneWayFrom,
+                piece.oneWayTo,
+                "rgba(255,255,255,0.55)",
+                0.62,
+              );
+            }
+          }
+        }
+
+        drawNetworkEditor(road);
+
+        if (debugEl.checked && road.ok) {
+          for (const piece of road.pieces) {
+            if (piece.isJunctionCore) {
+              const center =
+                piece.junctionCenter ||
+                (piece.networkNode && piece.networkNode.p);
+              if (center) drawCircle(center, 5, "#ffffff", "#05070a", 0.9);
+              if (center)
+                for (const m of piece.mouths || [])
+                  drawLine(center, m.c, "#7fffd4", 1, [5, 5], 0.7);
+              continue;
+            }
+            if (piece.networkSpan || piece.networkBend) continue;
+            drawDebug(piece.left, "#65d5ff");
+            drawDebug(piece.right, "#ffbe68");
+          }
+        }
+
+        statusEl.textContent = road.ok
+          ? (() => {
+              let tail = state.network.selectedEdgeKey
+                ? ", profile selected"
+                : state.network.activeNodeId
+                  ? ", physical piece selected"
+                  : "";
+              const aid = state.network.activeNodeId;
+              if (aid) {
+                const an = state.network.nodes.find((n) => n.id === aid);
+                if (
+                  an &&
+                  an.profileBoundary &&
+                  incidentEdgeCount(aid) === 2
+                )
+                  tail += " · profile knot (attach another road for a junction)";
+              }
+              return `Status: ${state.network.nodes.length} physical pieces, ${state.network.edges.length} profiles, ${laneLayoutFromState().length} lanes${tail}`;
+            })()
+          : `Status: ${road.reason}`;
+        syncJunctionTypeUi();
+        syncForkRoleRow();
+        syncEdgeToolsUi();
+      }
+
+      function drawNetworkEditor(road) {
+        const clipCtx = buildNetworkClipContext(
+          state.network.nodes,
+          state.network.edges,
+        );
+        for (const edge of state.network.edges) {
+          const ne = normalizeEdge(edge);
+          if (!ne) continue;
+          const seg = edgeClippedEndpoints(ne, clipCtx);
+          if (!seg) continue;
+          const selected =
+            edgeKey(edge.a, edge.b) === state.network.selectedEdgeKey;
+          drawLine(
+            seg.start,
+            seg.end,
+            selected
+              ? "rgba(57,255,159,0.78)"
+              : "rgba(255,255,255,0.16)",
+            selected ? 2.2 : 0.85,
+            null,
+            selected ? 0.95 : 0.35,
+          );
+        }
+        for (const node of state.network.nodes) {
+          const active = node.id === state.network.activeNodeId;
+          drawCircle(
+            node.p,
+            active ? 7 : 5.5,
+            active ? "#ffffff" : "rgba(255,255,255,0.82)",
+            ARTICLE_BG,
+            0.98,
+          );
+        }
+        for (const node of state.network.nodes) {
+          drawProfileKnotMarker(node, clipCtx);
+        }
+      }
+
+      function incidentEdgeCount(nodeId) {
+        let n = 0;
+        for (const e of state.network.edges) {
+          if (e.a === nodeId || e.b === nodeId) n++;
+        }
+        return n;
+      }
+
+      function drawProfileKnotMarker(node, clipCtx) {
+        if (!node.profileBoundary) return;
+        const roads = clipCtx.adjacency.get(node.id);
+        if (!roads || roads.length !== 2) return;
+        const d0 = roads[0].dir;
+        const d1 = roads[1].dir;
+        const sum = add(d0, d1);
+        const along = len(sum) > 1e-5 ? norm(sum) : norm(d0);
+        const cross = perpLeft(along);
+        const hw = state.width * 0.52;
+        drawLine(
+          add(node.p, mul(cross, hw)),
+          add(node.p, mul(cross, -hw)),
+          "#39ff9f",
+          2,
+          null,
+          0.82,
+        );
+      }
+
+      function drawDebug(boundary, color) {
+        for (const chunk of boundary.debug || []) {
+          drawCircle(chunk.C, 4, "#f2f2f2", "#05070a", 0.9);
+          drawCircle(chunk.O, 4, "#9cf7b2", "#05070a", 0.95);
+          drawCircle(chunk.M, 3.5, "#ffd07f", "#05070a", 0.95);
+          drawLine(
+            chunk.direct.A,
+            add(chunk.direct.A, mul(chunk.direct.dA, 130)),
+            color,
+            1.2,
+            [7, 4],
+            0.8,
+          );
+          drawLine(
+            chunk.direct.B,
+            add(chunk.direct.B, mul(chunk.direct.dB, 130)),
+            color,
+            1.2,
+            [7, 4],
+            0.8,
+          );
+          drawLine(chunk.O, chunk.direct.A, "#9cf7b2", 1, null, 0.75);
+          drawLine(chunk.O, chunk.M, "#9cf7b2", 1, null, 0.75);
+        }
+        if (boundary.mid) {
+          drawCircle(boundary.mid.p, 5.5, "#ffff8a", "#05070a", 0.95);
+          drawLine(
+            boundary.mid.p,
+            add(boundary.mid.p, mul(boundary.mid.d, 95)),
+            "#ffff8a",
+            1.5,
+            [4, 4],
+            0.95,
+          );
+        }
+      }
+
+      function nearestNetworkEdge(x, y) {
+        const worldP = screenToWorld(vec(x, y));
+        const clipCtx = buildNetworkClipContext(
+          state.network.nodes,
+          state.network.edges,
+        );
+        let best = null;
+        let bestD = 12 / Math.max(0.001, state.view.zoom);
+        for (const edge of state.network.edges) {
+          const ne = normalizeEdge(edge);
+          if (!ne) continue;
+          const seg = edgeClippedEndpoints(ne, clipCtx);
+          if (!seg) continue;
+          const hit = pointSegmentDistance(worldP, seg.start, seg.end);
+          if (hit.d < bestD && hit.t > 0.04 && hit.t < 0.96) {
+            bestD = hit.d;
+            best = { edge, hit };
+          }
+        }
+        return best;
+      }
+
+      function nearestNetworkNode(x, y) {
+        const worldP = screenToWorld(vec(x, y));
+        let best = null;
+        let bestD = 16 / Math.max(0.001, state.view.zoom);
+        for (const node of state.network.nodes) {
+          const d = dist(node.p, worldP);
+          if (d < bestD) {
+            bestD = d;
+            best = node.id;
+          }
+        }
+        return best;
+      }
+
+      function connectNetworkNodes(a, b) {
+        if (!a || !b || a === b) return;
+        const exists = state.network.edges.some(
+          (edge) =>
+            (edge.a === a && edge.b === b) || (edge.a === b && edge.b === a),
+        );
+        if (!exists) {
+          const ne = normalizeEdge({ a, b });
+          if (ne) state.network.edges.push(ne);
+        }
+      }
+
+      function activateNetworkNode(id) {
+        state.network.activeNodeId = id;
+        state.network.selectedEdgeKey = null;
+        state.network.selectedEdgeSplitPoint = null;
+      }
+
+      function addNetworkNode(p) {
+        const active = state.network.nodes.find(
+          (node) => node.id === state.network.activeNodeId,
+        );
+        const snapped = snapPoint(p, active ? active.p : null);
+        const node = {
+          id: state.network.nextId++,
+          p: snapped,
+          junctionType: "default",
+        };
+        state.network.nodes.push(node);
+        if (state.network.activeNodeId)
+          connectNetworkNodes(state.network.activeNodeId, node.id);
+        activateNetworkNode(node.id);
+        return node;
+      }
+
+      function deleteNetworkNode(id) {
+        if (!id) return;
+        state.network.nodes = state.network.nodes.filter(
+          (node) => node.id !== id,
+        );
+        state.network.edges = state.network.edges.filter(
+          (edge) => edge.a !== id && edge.b !== id,
+        );
+        if (state.network.activeNodeId === id)
+          state.network.activeNodeId = null;
+        if (
+          state.drag &&
+          state.drag.type === "network_node" &&
+          state.drag.id === id
+        )
+          state.drag = null;
+      }
+
+      function deleteNetworkEdge(key) {
+        if (!key) return;
+        state.network.edges = state.network.edges.filter(
+          (edge) => edgeKey(edge.a, edge.b) !== key,
+        );
+        if (state.network.selectedEdgeKey === key)
+          state.network.selectedEdgeKey = null;
+        if (state.network.selectedEdgeKey === null)
+          state.network.selectedEdgeSplitPoint = null;
+      }
+
+      function splitNetworkEdge(edge, point) {
+        if (!edge) return null;
+        const key = edgeKey(edge.a, edge.b);
+        const nodeById = new Map(
+          state.network.nodes.map((node) => [node.id, node]),
+        );
+        const a = nodeById.get(edge.a);
+        const b = nodeById.get(edge.b);
+        if (!a || !b) return null;
+        const p = point || lerp(a.p, b.p, 0.5);
+        const snapped = snapPoint(p);
+        if (dist(snapped, a.p) < 4 || dist(snapped, b.p) < 4) return null;
+        const frac = dist(a.p, snapped) / dist(a.p, b.p);
+        const kfOld = resolvedProfileKeyframes(edge);
+        let profilesA = null;
+        let profilesB = null;
+        if (kfOld) {
+          const [pa, pb] = remapProfileChainForSplit(
+            kfOld,
+            frac,
+            edgeRoadWidth(edge),
+          );
+          profilesA = pa;
+          profilesB = pb;
+        } else if (!edge.oneWay) {
+          const rel = edgeDefaultRelativeLaneLayers(edge).map((x) => ({
+            w: x.w,
+            kind: x.kind || "car",
+          }));
+          const twoKeyframeProfiles = () =>
+            sanitizeProfilesPartial([
+              {
+                u: 0,
+                laneLayers: rel.map((x) => ({ w: x.w, kind: x.kind })),
+                widthScale: 1,
+              },
+              {
+                u: 1,
+                laneLayers: rel.map((x) => ({ w: x.w, kind: x.kind })),
+                widthScale: 1,
+              },
+            ]);
+          profilesA = twoKeyframeProfiles();
+          profilesB = twoKeyframeProfiles();
+        }
+        const node = {
+          id: state.network.nextId++,
+          p: snapped,
+          junctionType: "default",
+          profileBoundary: true,
+        };
+        state.network.nodes.push(node);
+        state.network.edges = state.network.edges.filter(
+          (candidate) => edgeKey(candidate.a, candidate.b) !== key,
+        );
+        const ea = normalizeEdge({
+          a: edge.a,
+          b: node.id,
+          headingA: edge.headingA,
+          headingB: null,
+          oneWay: edge.oneWay,
+          laneLayers: edge.laneLayers,
+          profiles: profilesA,
+        });
+        const eb = normalizeEdge({
+          a: node.id,
+          b: edge.b,
+          headingA: null,
+          headingB: edge.headingB,
+          oneWay: edge.oneWay,
+          laneLayers: edge.laneLayers,
+          profiles: profilesB,
+        });
+        if (ea) state.network.edges.push(ea);
+        if (eb) state.network.edges.push(eb);
+        state.network.activeNodeId = node.id;
+        state.network.selectedEdgeKey = null;
+        state.network.selectedEdgeSplitPoint = null;
+        render();
+        return node;
+      }
+
+      function splitSelectedEdge() {
+        if (!state.network.selectedEdgeKey) return null;
+        const edge = state.network.edges.find(
+          (candidate) =>
+            edgeKey(candidate.a, candidate.b) === state.network.selectedEdgeKey,
+        );
+        return splitNetworkEdge(edge, state.network.selectedEdgeSplitPoint);
+      }
+
+      function exportNetworkJson() {
+        const data = {
+          version: 3,
+          width: state.width,
+          lanesPerDir: state.lanesPerDir,
+          laneLayers: state.network.laneLayers,
+          junctionRadius: state.junctionRadius,
+          curveSegments: state.curveSegments,
+          junctionSegments: state.junctionSegments,
+          twoRoadNodes: state.twoRoadNodes,
+          endCapStyle: state.endCapStyle,
+          nodes: state.network.nodes.map((node) => {
+            const o = {
+              id: node.id,
+              x: Math.round(node.p.x * 1000) / 1000,
+              y: Math.round(node.p.y * 1000) / 1000,
+              junctionType: node.junctionType || "default",
+            };
+            if (node.profileBoundary) o.profileBoundary = true;
+            if (node.forkIncomingKey) o.forkIncomingKey = node.forkIncomingKey;
+            if (node.forkExitKey) o.forkExitKey = node.forkExitKey;
+            return o;
+          }),
+          edges: state.network.edges.map((edge) => {
+            const o = { a: edge.a, b: edge.b };
+            if (edge.headingA != null) o.headingA = edge.headingA;
+            if (edge.headingB != null) o.headingB = edge.headingB;
+            if (edge.oneWay) o.oneWay = true;
+            if (Array.isArray(edge.laneLayers) && edge.laneLayers.length)
+              o.laneLayers = edge.laneLayers.map((L) => ({
+                w: L.w,
+                kind: L.kind || "car",
+              }));
+            if (Array.isArray(edge.profiles) && edge.profiles.length)
+              o.profiles = edge.profiles.map((P) => {
+                const row = {
+                  u: P.u,
+                  laneLayers: P.laneLayers.map((L) => ({
+                    w: L.w,
+                    kind: L.kind || "car",
+                  })),
+                };
+                if (P.widthScale != null && P.widthScale !== 1)
+                  row.widthScale = P.widthScale;
+                return row;
+              });
+            if (edge.widthMul != null && edge.widthMul !== 1)
+              o.widthMul = edge.widthMul;
+            return o;
+          }),
+        };
+        if (state.network.junctionIslandOnly) data.junctionIslandOnly = true;
+        networkJsonEl.value = JSON.stringify(data, null, 2);
+      }
+
+      function importNetworkJson() {
+        let data;
+        try {
+          data = JSON.parse(networkJsonEl.value);
+        } catch (err) {
+          statusEl.textContent = `Import failed: ${err.message}`;
+          return false;
+        }
+        if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
+          statusEl.textContent =
+            "Import failed: JSON needs nodes and edges arrays.";
+          return false;
+        }
+
+        const nodes = [];
+        const seen = new Set();
+        for (const raw of data.nodes) {
+          const id = Number(raw.id);
+          const x = Number(raw.x);
+          const y = Number(raw.y);
+          if (
+            !Number.isFinite(id) ||
+            !Number.isFinite(x) ||
+            !Number.isFinite(y) ||
+            seen.has(id)
+          )
+            continue;
+          seen.add(id);
+          const jt = raw.junctionType;
+          nodes.push({
+            id,
+            p: { x, y },
+            junctionType:
+              jt === "roundabout" ||
+              jt === "default" ||
+              jt === "tee" ||
+              jt === "fork"
+                ? jt
+                : "default",
+            ...(raw.profileBoundary ? { profileBoundary: true } : {}),
+            ...(typeof raw.forkIncomingKey === "string"
+              ? { forkIncomingKey: raw.forkIncomingKey }
+              : {}),
+            ...(typeof raw.forkExitKey === "string"
+              ? { forkExitKey: raw.forkExitKey }
+              : {}),
+          });
+        }
+        const edges = [];
+        const edgeSeen = new Set();
+        for (const raw of data.edges) {
+          const ne = normalizeEdge(raw);
+          if (!ne) continue;
+          const key = edgeKey(ne.a, ne.b);
+          if (
+            !seen.has(ne.a) ||
+            !seen.has(ne.b) ||
+            ne.a === ne.b ||
+            edgeSeen.has(key)
+          )
+            continue;
+          edgeSeen.add(key);
+          edges.push(ne);
+        }
+        state.network.nodes = nodes;
+        state.network.edges = edges;
+        if (data.junctionIslandOnly === true)
+          state.network.junctionIslandOnly = true;
+        else delete state.network.junctionIslandOnly;
+        if (Array.isArray(data.laneLayers) && data.laneLayers.length > 0) {
+          state.network.laneLayers = data.laneLayers.map((L) => ({
+            w: Number(L.w ?? L.width),
+            width: Number(L.w ?? L.width),
+            kind: L.kind,
+          }));
+        } else {
+          state.network.laneLayers = null;
+        }
+        state.network.nextId = Math.max(0, ...nodes.map((node) => node.id)) + 1;
+        state.network.activeNodeId = nodes[0] ? nodes[0].id : null;
+        state.network.selectedEdgeKey = null;
+        state.network.selectedEdgeSplitPoint = null;
+        if (Number.isFinite(Number(data.width))) {
+          state.width = clamp(
+            Number(data.width),
+            Number(widthEl.min),
+            Number(widthEl.max),
+          );
+          widthEl.value = String(state.width);
+          widthOut.value = String(state.width);
+        }
+        if (Number.isFinite(Number(data.lanesPerDir))) {
+          state.lanesPerDir = clamp(
+            Math.round(Number(data.lanesPerDir)),
+            Number(lanesPerDirEl.min),
+            Number(lanesPerDirEl.max),
+          );
+          lanesPerDirEl.value = String(state.lanesPerDir);
+          lanesOut.value = String(state.lanesPerDir);
+        }
+        if (Number.isFinite(Number(data.junctionRadius))) {
+          state.junctionRadius = clamp(
+            Number(data.junctionRadius),
+            Number(junctionRadiusEl.min),
+            Number(junctionRadiusEl.max),
+          );
+          junctionRadiusEl.value = String(state.junctionRadius);
+          junctionOut.value = String(state.junctionRadius);
+        }
+        if (Number.isFinite(Number(data.curveSegments))) {
+          state.curveSegments = clamp(
+            Math.round(Number(data.curveSegments)),
+            Number(curveSegmentsEl.min),
+            Number(curveSegmentsEl.max),
+          );
+          curveSegmentsEl.value = String(state.curveSegments);
+          curveSegmentsOut.value = String(state.curveSegments);
+        }
+        if (Number.isFinite(Number(data.junctionSegments))) {
+          state.junctionSegments = clamp(
+            Math.round(Number(data.junctionSegments)),
+            Number(junctionSegmentsEl.min),
+            Number(junctionSegmentsEl.max),
+          );
+          junctionSegmentsEl.value = String(state.junctionSegments);
+          junctionSegmentsOut.value = String(state.junctionSegments);
+        }
+        if (
+          data.twoRoadNodes === "smooth" ||
+          data.twoRoadNodes === "junction"
+        ) {
+          state.twoRoadNodes = data.twoRoadNodes;
+          twoRoadNodesEl.value = data.twoRoadNodes;
+        }
+        if (data.endCapStyle === "flat" || data.endCapStyle === "round") {
+          state.endCapStyle = data.endCapStyle;
+          endCapStyleEl.value = data.endCapStyle;
+        }
+        syncJunctionTypeUi();
+        syncForkRoleRow();
+        syncEdgeToolsUi();
+        render();
+        return true;
+      }
+
+      function syncJunctionTypeUi() {
+        if (!junctionTypeSelectEl) return;
+        const id = state.network.activeNodeId;
+        const node = id
+          ? state.network.nodes.find((n) => n.id === id)
+          : null;
+        junctionTypeSelectEl.disabled = !node;
+        const jt = node ? node.junctionType || "default" : "default";
+        junctionTypeSelectEl.value =
+          jt === "roundabout" || jt === "tee" || jt === "fork"
+            ? jt
+            : "default";
+      }
+
+      function syncForkRoleRow() {
+        if (!forkRoleRowEl) return;
+        const nid = state.network.activeNodeId;
+        const node = nid
+          ? state.network.nodes.find((n) => n.id === nid)
+          : null;
+        const deg = nid ? incidentEdgeCount(nid) : 0;
+        forkRoleRowEl.style.display =
+          node && (node.junctionType || "") === "fork" && deg === 3
+            ? "flex"
+            : "none";
+      }
+
+      function syncEdgeToolsUi() {
+        const key = state.network.selectedEdgeKey;
+        const edge = key
+          ? state.network.edges.find((e) => edgeKey(e.a, e.b) === key)
+          : null;
+        if (edgeOneWayEl) {
+          edgeOneWayEl.disabled = !edge;
+          edgeOneWayEl.checked = !!(edge && edge.oneWay);
+        }
+        if (lanePresetSelectEl) {
+          lanePresetSelectEl.disabled = !edge;
+        }
+        if (reverseEdgeEl) reverseEdgeEl.disabled = !edge;
+      }
+
+      function reverseSelectedEdge() {
+        const key = state.network.selectedEdgeKey;
+        if (!key) return;
+        const e = state.network.edges.find((x) => edgeKey(x.a, x.b) === key);
+        if (!e) return;
+        const ha = e.headingA;
+        e.headingA = e.headingB;
+        e.headingB = ha;
+        const t = e.a;
+        e.a = e.b;
+        e.b = t;
+        if (Array.isArray(e.profiles) && e.profiles.length) {
+          const flipped = e.profiles.map((p) => ({
+            u: 1 - p.u,
+            laneLayers: p.laneLayers.map((L) => ({ w: L.w, kind: L.kind })),
+            widthScale: p.widthScale,
+          }));
+          e.profiles = sanitizeProfilesPartial(flipped);
+        }
+        render();
+      }
+
+      function clearNetwork() {
+        state.network.nodes = [];
+        state.network.edges = [];
+        state.network.laneLayers = null;
+        state.network.nextId = 1;
+        state.network.activeNodeId = null;
+        state.network.selectedEdgeKey = null;
+        state.network.selectedEdgeSplitPoint = null;
+        delete state.network.junctionIslandOnly;
+        render();
+      }
+
+      function pointerPos(evt) {
+        const r = canvas.getBoundingClientRect();
+        return { x: evt.clientX - r.left, y: evt.clientY - r.top };
+      }
+
+      function onDown(evt) {
+        const p = pointerPos(evt);
+        if (evt.button === 1 || evt.button === 2 || evt.shiftKey) {
+          state.panning = true;
+          state.panStart = {
+            x: p.x,
+            y: p.y,
+            vx: state.view.x,
+            vy: state.view.y,
+          };
+          return;
+        }
+        const nodeId = nearestNetworkNode(p.x, p.y);
+        if (nodeId) {
+          const node = state.network.nodes.find((n) => n.id === nodeId);
+          state.network.selectedEdgeKey = null;
+          state.drag = {
+            type: "network_node",
+            id: nodeId,
+            start: p,
+            startWorld: node ? { x: node.p.x, y: node.p.y } : null,
+            moved: false,
+            connectOnClick: evt.ctrlKey || evt.metaKey,
+          };
+        } else {
+          const edgeHit = nearestNetworkEdge(p.x, p.y);
+          if (edgeHit) {
+            if (evt.altKey) {
+              splitNetworkEdge(edgeHit.edge, edgeHit.hit.p);
+              return;
+            }
+            state.network.selectedEdgeKey = edgeKey(
+              edgeHit.edge.a,
+              edgeHit.edge.b,
+            );
+            state.network.selectedEdgeSplitPoint = edgeHit.hit.p;
+            state.network.activeNodeId = null;
+          } else {
+            addNetworkNode(screenToWorld(p));
+          }
+          render();
+        }
+      }
+
+      function onMove(evt) {
+        const p = pointerPos(evt);
+        if (state.panning && state.panStart) {
+          state.view.x = state.panStart.vx + (p.x - state.panStart.x);
+          state.view.y = state.panStart.vy + (p.y - state.panStart.y);
+          render();
+          return;
+        }
+        if (!state.drag) return;
+        const w = screenToWorld(p);
+        if (state.drag && state.drag.type === "network_node") {
+          const node = state.network.nodes.find((n) => n.id === state.drag.id);
+          if (!node || !state.drag.startWorld) return;
+          const movedPx = Math.hypot(
+            p.x - state.drag.start.x,
+            p.y - state.drag.start.y,
+          );
+          if (movedPx > 3) state.drag.moved = true;
+          node.p = snapPoint(w);
+          render();
+          return;
+        }
+        if (state.drag === "A_center") state.profileA.c = w;
+        else if (state.drag === "B_center") state.profileB.c = w;
+        else if (state.drag === "C_center") state.profileC.c = w;
+        else if (state.drag === "A_heading")
+          state.profileA.heading = Math.atan2(
+            w.y - state.profileA.c.y,
+            w.x - state.profileA.c.x,
+          );
+        else if (state.drag === "B_heading")
+          state.profileB.heading = Math.atan2(
+            w.y - state.profileB.c.y,
+            w.x - state.profileB.c.x,
+          );
+        else if (state.drag === "C_heading")
+          state.profileC.heading = Math.atan2(
+            w.y - state.profileC.c.y,
+            w.x - state.profileC.c.x,
+          );
+        render();
+      }
+
+      function onUp() {
+        if (
+          state.drag &&
+          state.drag.type === "network_node" &&
+          !state.drag.moved
+        ) {
+          if (state.drag.connectOnClick && state.network.activeNodeId) {
+            connectNetworkNodes(state.network.activeNodeId, state.drag.id);
+          }
+          activateNetworkNode(state.drag.id);
+          render();
+        }
+        state.drag = null;
+        state.panning = false;
+        state.panStart = null;
+      }
+
+      function onWheel(evt) {
+        evt.preventDefault();
+        const mouse = pointerPos(evt);
+        const before = screenToWorld(mouse);
+        const zoomFactor = evt.deltaY < 0 ? 1.1 : 1 / 1.1;
+        state.view.zoom = clamp(state.view.zoom * zoomFactor, 0.25, 4.5);
+        const after = worldToScreen(before);
+        state.view.x += mouse.x - after.x;
+        state.view.y += mouse.y - after.y;
+        render();
+      }
+
+      widthEl.addEventListener("input", () => {
+        state.width = Number(widthEl.value);
+        widthOut.value = String(state.width);
+        render();
+      });
+      lanesPerDirEl.addEventListener("input", () => {
+        state.lanesPerDir = Number(lanesPerDirEl.value);
+        lanesOut.value = String(state.lanesPerDir);
+        render();
+      });
+      junctionRadiusEl.addEventListener("input", () => {
+        state.junctionRadius = Number(junctionRadiusEl.value);
+        junctionOut.value = String(state.junctionRadius);
+        render();
+      });
+      curveSegmentsEl.addEventListener("input", () => {
+        state.curveSegments = Number(curveSegmentsEl.value);
+        curveSegmentsOut.value = String(state.curveSegments);
+        render();
+      });
+      junctionSegmentsEl.addEventListener("input", () => {
+        state.junctionSegments = Number(junctionSegmentsEl.value);
+        junctionSegmentsOut.value = String(state.junctionSegments);
+        render();
+      });
+      debugEl.addEventListener("change", render);
+      hideJunctionSeamsEl.addEventListener("change", () => {
+        state.hideJunctionSeams = hideJunctionSeamsEl.checked;
+        render();
+      });
+      blendJunctionFillEl.addEventListener("change", () => {
+        state.blendJunctionFill = blendJunctionFillEl.checked;
+        render();
+      });
+      twoRoadNodesEl.addEventListener("change", () => {
+        state.twoRoadNodes = twoRoadNodesEl.value;
+        render();
+      });
+      junctionTypeSelectEl.addEventListener("change", () => {
+        const id = state.network.activeNodeId;
+        const node = id
+          ? state.network.nodes.find((n) => n.id === id)
+          : null;
+        if (!node) return;
+        node.junctionType = junctionTypeSelectEl.value;
+        render();
+      });
+      networkPresetSelectEl?.addEventListener("change", () => {
+        applyNetworkPreset(networkPresetSelectEl.value);
+      });
+      if (forkIncomingBtnEl) {
+        forkIncomingBtnEl.addEventListener("click", () => {
+          const nid = state.network.activeNodeId;
+          const key = state.network.selectedEdgeKey;
+          if (!nid || !key) return;
+          const node = state.network.nodes.find((n) => n.id === nid);
+          if (!node || (node.junctionType || "") !== "fork") return;
+          const touches = state.network.edges.some(
+            (e) => edgeKey(e.a, e.b) === key && (e.a === nid || e.b === nid),
+          );
+          if (!touches) return;
+          node.forkIncomingKey = key;
+          render();
+        });
+      }
+      if (forkExitBtnEl) {
+        forkExitBtnEl.addEventListener("click", () => {
+          const nid = state.network.activeNodeId;
+          const key = state.network.selectedEdgeKey;
+          if (!nid || !key) return;
+          const node = state.network.nodes.find((n) => n.id === nid);
+          if (!node || (node.junctionType || "") !== "fork") return;
+          const touches = state.network.edges.some(
+            (e) => edgeKey(e.a, e.b) === key && (e.a === nid || e.b === nid),
+          );
+          if (!touches) return;
+          node.forkExitKey = key;
+          render();
+        });
+      }
+      edgeOneWayEl.addEventListener("change", () => {
+        const key = state.network.selectedEdgeKey;
+        const edge = key
+          ? state.network.edges.find((e) => edgeKey(e.a, e.b) === key)
+          : null;
+        if (!edge) return;
+        edge.oneWay = edgeOneWayEl.checked;
+        render();
+      });
+      lanePresetSelectEl.addEventListener("change", () => {
+        const key = state.network.selectedEdgeKey;
+        const edge = key
+          ? state.network.edges.find((e) => edgeKey(e.a, e.b) === key)
+          : null;
+        if (!edge) return;
+        const v = lanePresetSelectEl.value;
+        if (v === "" || v === "equal") {
+          edge.laneLayers = null;
+          edge.profiles = null;
+        } else if (v === "exit_split") {
+          edge.profiles = null;
+          edge.laneLayers = [
+            { w: 22, kind: "car" },
+            { w: 7, kind: "merge" },
+            { w: 22, kind: "car" },
+            { w: 22, kind: "car" },
+          ];
+        } else if (v === "fork_profiles") {
+          edge.laneLayers = null;
+          edge.profiles = [
+            {
+              u: 0,
+              widthScale: 1,
+              laneLayers: [
+                { w: 50, kind: "car" },
+                { w: 50, kind: "car" },
+              ],
+            },
+            {
+              u: 0.38,
+              widthScale: 1.08,
+              laneLayers: [
+                { w: 48, kind: "car" },
+                { w: 26, kind: "merge" },
+                { w: 26, kind: "car" },
+              ],
+            },
+            {
+              u: 1,
+              widthScale: 1,
+              laneLayers: [
+                { w: 34, kind: "car" },
+                { w: 33, kind: "car" },
+                { w: 33, kind: "car" },
+              ],
+            },
+          ];
+        } else if (v === "bus_outer") {
+          edge.profiles = null;
+          edge.laneLayers = [
+            { w: 16, kind: "car" },
+            { w: 18, kind: "car" },
+            { w: 28, kind: "bus" },
+            { w: 16, kind: "car" },
+          ];
+        }
+        lanePresetSelectEl.value = "";
+        render();
+      });
+      reverseEdgeEl.addEventListener("click", reverseSelectedEdge);
+      endCapStyleEl.addEventListener("change", () => {
+        state.endCapStyle = endCapStyleEl.value;
+        render();
+      });
+      snapGridEl.addEventListener("change", () => {
+        state.snapGrid = snapGridEl.checked;
+        render();
+      });
+      gridSizeEl.addEventListener("input", () => {
+        state.gridSize = Number(gridSizeEl.value);
+        gridSizeOut.value = String(state.gridSize);
+        render();
+      });
+      snapAngleEl.addEventListener("change", () => {
+        state.snapAngle = snapAngleEl.checked;
+        render();
+      });
+      angleStepEl.addEventListener("input", () => {
+        state.angleStep = Number(angleStepEl.value);
+        angleStepOut.value = String(state.angleStep);
+        render();
+      });
+      exportNetworkEl.addEventListener("click", exportNetworkJson);
+      importNetworkEl.addEventListener("click", importNetworkJson);
+      splitEdgeEl.addEventListener("click", splitSelectedEdge);
+      clearNetworkEl.addEventListener("click", clearNetwork);
+      window.addEventListener("keydown", (evt) => {
+        if (evt.key === "Delete" || evt.key === "Backspace") {
+          if (document.activeElement === networkJsonEl) return;
+          if (state.network.selectedEdgeKey) {
+            evt.preventDefault();
+            deleteNetworkEdge(state.network.selectedEdgeKey);
+            render();
+          } else if (state.network.activeNodeId) {
+            evt.preventDefault();
+            deleteNetworkNode(state.network.activeNodeId);
+            render();
+          }
+          return;
+        }
+        if (evt.key === "Escape") {
+          state.network.activeNodeId = null;
+          state.network.selectedEdgeKey = null;
+          state.drag = null;
+          render();
+        }
+      });
+
+      canvas.addEventListener("pointerdown", onDown);
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      canvas.addEventListener("wheel", onWheel, { passive: false });
+      canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+      window.addEventListener("resize", () => {
+        resize();
+        render();
+      });
+
+      widthOut.value = widthEl.value;
+      lanesOut.value = lanesPerDirEl.value;
+      junctionOut.value = junctionRadiusEl.value;
+      curveSegmentsOut.value = curveSegmentsEl.value;
+      junctionSegmentsOut.value = junctionSegmentsEl.value;
+      gridSizeOut.value = gridSizeEl.value;
+      angleStepOut.value = angleStepEl.value;
+      state.view.x = window.innerWidth * 0.08;
+      state.view.y = window.innerHeight * 0.08;
+      resize();
+      applyNetworkPreset("debug_fork_3_2_1_only");
+    </script>
+  </body>
+</html>

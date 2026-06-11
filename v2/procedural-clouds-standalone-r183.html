@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+    Standalone page only — same technique as ../procedural-clouds-three-r183.html.
+    Module URLs and `import "three"` match v2/editor.html so this file can move into the editor later
+    without import churn. GPU contract: one device from WebGPURenderer; raw compute + fullscreen pass.
+    Inspect handles on globalThis.__V2PortableProceduralClouds after load.
+  -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Procedural clouds — v2-editor portable (r183 WebGPU)</title>
+  <style>
+    body { margin: 0; overflow: hidden; font-family: system-ui, sans-serif; }
+    #info {
+      position: absolute; left: 0; right: 0; top: 8px; text-align: center;
+      color: #e8f0ff; text-shadow: 0 1px 2px #000; font-size: 13px; pointer-events: none; z-index: 10;
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+      "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+      "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/",
+      "tweakpane": "https://esm.sh/tweakpane@4.0.4",
+      "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.9/build/index.module.js",
+      "howler": "https://esm.sh/howler@2.2.4"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="info">
+    <code>v2/procedural-clouds-standalone-r183.html</code> — reference WGSL embedded; import map matches <code>v2/editor.html</code>.<br />
+    <code>import * as THREE from "three"</code> + raw WebGPU pipelines on <code>renderer.backend.device</code> (no second GPUDevice).<br />
+    For a later editor merge: mount <code>renderer.domElement</code>, reuse buffers/bind groups; see <code>__V2PortableProceduralClouds</code> in devtools.
+  </div>
+  <script type="module">
+
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import GUI from "three/addons/libs/lil-gui.module.min.js";
+import Stats from "three/addons/libs/stats.module.js";
+
+/**
+ * v2/editor porting contract (WGSL + JS):
+ * - Camera uniform: 80 bytes — mat4 invViewProj (column-major, Matrix4.elements) then vec3 position + pad.
+ * - Params uniform: 96 bytes — Float32Array layout from buildParams() = six vec4 rows in WGSL Params struct.
+ * - @group(0): camera + params | @group(1): linear sampler + 3D density tex0/tex1 | @group(2): storage write for compute.
+ * - 3D cache: two rgba16float textures, double-buffered; compute dispatch 8×8×4 workgroups.
+ */
+const WGSL_SOURCE = "// ============================================================\n// Blender-Compatible 4D Noise & Voronoi (WGSL Port)\n// Based on Blender GPU shader sources in ref/\n// ============================================================\n\n// ------------------------------------------------------------\n// HASH FUNCTIONS (Jenkins Lookup3 - for Noise Texture)\n// ------------------------------------------------------------\n\nfn rot_u32(x: u32, k: u32) -> u32 {\n    return (x << k) | (x >> (32u - k));\n}\n\nfn hash_uint(kx: u32) -> u32 {\n    var a = 0xdeadbeefu + (1u << 2u) + 13u;\n    var b = a;\n    var c = a;\n    a += kx;\n    c ^= b; c -= rot_u32(b, 14u);\n    a ^= c; a -= rot_u32(c, 11u);\n    b ^= a; b -= rot_u32(a, 25u);\n    c ^= b; c -= rot_u32(b, 16u);\n    a ^= c; a -= rot_u32(c, 4u);\n    b ^= a; b -= rot_u32(a, 14u);\n    c ^= b; c -= rot_u32(b, 24u);\n    return c;\n}\n\nfn hash_uint2(kx: u32, ky: u32) -> u32 {\n    var a = 0xdeadbeefu + (2u << 2u) + 13u;\n    var b = a;\n    var c = a;\n    a += kx;\n    b += ky;\n    c ^= b; c -= rot_u32(b, 14u);\n    a ^= c; a -= rot_u32(c, 11u);\n    b ^= a; b -= rot_u32(a, 25u);\n    c ^= b; c -= rot_u32(b, 16u);\n    a ^= c; a -= rot_u32(c, 4u);\n    b ^= a; b -= rot_u32(a, 14u);\n    c ^= b; c -= rot_u32(b, 24u);\n    return c;\n}\n\nfn hash_uint3(kx: u32, ky: u32, kz: u32) -> u32 {\n    var a = 0xdeadbeefu + (3u << 2u) + 13u;\n    var b = a;\n    var c = a;\n    a += kx;\n    b += ky;\n    c += kz;\n    c ^= b; c -= rot_u32(b, 14u);\n    a ^= c; a -= rot_u32(c, 11u);\n    b ^= a; b -= rot_u32(a, 25u);\n    c ^= b; c -= rot_u32(b, 16u);\n    a ^= c; a -= rot_u32(c, 4u);\n    b ^= a; b -= rot_u32(a, 14u);\n    c ^= b; c -= rot_u32(b, 24u);\n    return c;\n}\n\nfn hash_uint4(kx: u32, ky: u32, kz: u32, kw: u32) -> u32 {\n    var a = 0xdeadbeefu + (4u << 2u) + 13u;\n    var b = a;\n    var c = a;\n    a += kx;\n    b += ky;\n    a -= c; a ^= rot_u32(c, 4u);  c += b;\n    b -= a; b ^= rot_u32(a, 6u);  a += c;\n    c -= b; c ^= rot_u32(b, 8u);  b += a;\n    a -= c; a ^= rot_u32(c, 16u); c += b;\n    b -= a; b ^= rot_u32(a, 19u); a += c;\n    c -= b; c ^= rot_u32(b, 4u);  b += a;\n    a += kz;\n    b += kw;\n    c ^= b; c -= rot_u32(b, 14u);\n    a ^= c; a -= rot_u32(c, 11u);\n    b ^= a; b -= rot_u32(a, 25u);\n    c ^= b; c -= rot_u32(b, 16u);\n    a ^= c; a -= rot_u32(c, 4u);\n    b ^= a; b -= rot_u32(a, 14u);\n    c ^= b; c -= rot_u32(b, 24u);\n    return c;\n}\n\nfn hash_uint4_to_float(kx: u32, ky: u32, kz: u32, kw: u32) -> f32 {\n    return f32(hash_uint4(kx, ky, kz, kw)) / f32(0xFFFFFFFFu);\n}\n\nfn hash_vec4_to_vec4(k: vec4f) -> vec4f {\n    return vec4f(\n        hash_uint4_to_float(bitcast<u32>(k.x), bitcast<u32>(k.y), bitcast<u32>(k.z), bitcast<u32>(k.w)),\n        hash_uint4_to_float(bitcast<u32>(k.w), bitcast<u32>(k.x), bitcast<u32>(k.y), bitcast<u32>(k.z)),\n        hash_uint4_to_float(bitcast<u32>(k.z), bitcast<u32>(k.w), bitcast<u32>(k.x), bitcast<u32>(k.y)),\n        hash_uint4_to_float(bitcast<u32>(k.y), bitcast<u32>(k.z), bitcast<u32>(k.w), bitcast<u32>(k.x))\n    );\n}\n\n// ------------------------------------------------------------\n// PERLIN NOISE HELPERS\n// ------------------------------------------------------------\n\nfn noise_fade(t: f32) -> f32 {\n    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);\n}\n\nfn tri_mix(v0: f32, v1: f32, v2: f32, v3: f32,\n           v4: f32, v5: f32, v6: f32, v7: f32,\n           x: f32, y: f32, z: f32) -> f32 {\n    let x1 = 1.0 - x;\n    let y1 = 1.0 - y;\n    let z1 = 1.0 - z;\n    return z1 * (y1 * (v0 * x1 + v1 * x) + y * (v2 * x1 + v3 * x)) +\n           z * (y1 * (v4 * x1 + v5 * x) + y * (v6 * x1 + v7 * x));\n}\n\nfn quad_mix(v0: f32, v1: f32, v2: f32, v3: f32,\n            v4: f32, v5: f32, v6: f32, v7: f32,\n            v8: f32, v9: f32, v10: f32, v11: f32,\n            v12: f32, v13: f32, v14: f32, v15: f32,\n            x: f32, y: f32, z: f32, w: f32) -> f32 {\n    return mix(tri_mix(v0, v1, v2, v3, v4, v5, v6, v7, x, y, z),\n               tri_mix(v8, v9, v10, v11, v12, v13, v14, v15, x, y, z),\n               w);\n}\n\nfn noiseg_4d(hash: u32, x: f32, y: f32, z: f32, w: f32) -> f32 {\n    let h = hash & 31u;\n    let u = select(x, y, h >= 24u);\n    let v = select(y, z, h >= 16u);\n    let s = select(z, w, h >= 8u);\n    let res = select(u, -u, (h & 1u) != 0u);\n    let res_v = select(v, -v, (h & 2u) != 0u);\n    let res_s = select(s, -s, (h & 4u) != 0u);\n    return res + res_v + res_s;\n}\n\nfn perlin_noise_4d(position: vec4f) -> f32 {\n    let pf = floor(position);\n    let X = i32(pf.x);\n    let Y = i32(pf.y);\n    let Z = i32(pf.z);\n    let W = i32(pf.w);\n\n    let fx = position.x - pf.x;\n    let fy = position.y - pf.y;\n    let fz = position.z - pf.z;\n    let fw = position.w - pf.w;\n\n    let u = noise_fade(fx);\n    let v = noise_fade(fy);\n    let t = noise_fade(fz);\n    let s = noise_fade(fw);\n\n    return quad_mix(\n        noiseg_4d(hash_uint4(u32(X),   u32(Y),   u32(Z),   u32(W)),   fx,       fy,       fz,       fw),\n        noiseg_4d(hash_uint4(u32(X+1), u32(Y),   u32(Z),   u32(W)),   fx-1.0,   fy,       fz,       fw),\n        noiseg_4d(hash_uint4(u32(X),   u32(Y+1), u32(Z),   u32(W)),   fx,       fy-1.0,   fz,       fw),\n        noiseg_4d(hash_uint4(u32(X+1), u32(Y+1), u32(Z),   u32(W)),   fx-1.0,   fy-1.0,   fz,       fw),\n        noiseg_4d(hash_uint4(u32(X),   u32(Y),   u32(Z+1), u32(W)),   fx,       fy,       fz-1.0,   fw),\n        noiseg_4d(hash_uint4(u32(X+1), u32(Y),   u32(Z+1), u32(W)),   fx-1.0,   fy,       fz-1.0,   fw),\n        noiseg_4d(hash_uint4(u32(X),   u32(Y+1), u32(Z+1), u32(W)),   fx,       fy-1.0,   fz-1.0,   fw),\n        noiseg_4d(hash_uint4(u32(X+1), u32(Y+1), u32(Z+1), u32(W)),   fx-1.0,   fy-1.0,   fz-1.0,   fw),\n        noiseg_4d(hash_uint4(u32(X),   u32(Y),   u32(Z),   u32(W+1)), fx,       fy,       fz,       fw-1.0),\n        noiseg_4d(hash_uint4(u32(X+1), u32(Y),   u32(Z),   u32(W+1)), fx-1.0,   fy,       fz,       fw-1.0),\n        noiseg_4d(hash_uint4(u32(X),   u32(Y+1), u32(Z),   u32(W+1)), fx,       fy-1.0,   fz,       fw-1.0),\n        noiseg_4d(hash_uint4(u32(X+1), u32(Y+1), u32(Z),   u32(W+1)), fx-1.0,   fy-1.0,   fz,       fw-1.0),\n        noiseg_4d(hash_uint4(u32(X),   u32(Y),   u32(Z+1), u32(W+1)), fx,       fy,       fz-1.0,   fw-1.0),\n        noiseg_4d(hash_uint4(u32(X+1), u32(Y),   u32(Z+1), u32(W+1)), fx-1.0,   fy,       fz-1.0,   fw-1.0),\n        noiseg_4d(hash_uint4(u32(X),   u32(Y+1), u32(Z+1), u32(W+1)), fx,       fy-1.0,   fz-1.0,   fw-1.0),\n        noiseg_4d(hash_uint4(u32(X+1), u32(Y+1), u32(Z+1), u32(W+1)), fx-1.0,   fy-1.0,   fz-1.0,   fw-1.0),\n        u, v, t, s);\n}\n\nfn noise_fbm(p: vec4f, detail: f32, roughness: f32, lacunarity: f32, normalize: bool) -> f32 {\n    var fscale = 1.0;\n    var amp = 1.0;\n    var maxamp = 0.0;\n    var sum = 0.0;\n\n    let d_int = i32(detail);\n    for (var i = 0; i <= d_int; i++) {\n        let t = perlin_noise_4d(fscale * p);\n        sum += t * amp;\n        maxamp += amp;\n        amp *= roughness;\n        fscale *= lacunarity;\n    }\n\n    let rmd = detail - floor(detail);\n    if (rmd != 0.0) {\n        let t = perlin_noise_4d(fscale * p);\n        let sum2 = sum + t * amp;\n        return select(\n            mix(sum, sum2, rmd),\n            mix(0.5 + 0.5 * (sum / maxamp), 0.5 + 0.5 * (sum2 / (maxamp + amp)), rmd),\n            normalize\n        );\n    }\n\n    return select(sum, 0.5 + 0.5 * (sum / maxamp), normalize);\n}\n\nfn random_vec4_offset(seed: f32) -> vec4f {\n    return hash_vec4_to_vec4(vec4f(seed, seed * 1.37, seed * 2.23, seed * 3.11));\n}\n\nfn node_noise_texture_4d_value(\n    co: vec3f,\n    w: f32,\n    scale: f32,\n    detail: f32,\n    roughness: f32,\n    lacunarity: f32,\n    distortion: f32,\n    normalize: f32\n) -> f32 {\n    var p = vec4f(co, w) * scale;\n    if (distortion != 0.0) {\n        p += vec4f(\n            perlin_noise_4d(p + random_vec4_offset(0.0)) * distortion,\n            perlin_noise_4d(p + random_vec4_offset(1.0)) * distortion,\n            perlin_noise_4d(p + random_vec4_offset(2.0)) * distortion,\n            perlin_noise_4d(p + random_vec4_offset(3.0)) * distortion\n        );\n    }\n    return noise_fbm(p, detail, roughness, lacunarity, normalize != 0.0);\n}\n\n// ------------------------------------------------------------\n// VORONOI (Blender exact path for F1)\n// ------------------------------------------------------------\n\nfn hash_pcg4d_i(v_in: vec4i) -> vec4i {\n    var v = v_in * 1664525 + 1013904223;\n    v.x += v.y * v.w;\n    v.y += v.z * v.x;\n    v.z += v.x * v.y;\n    v.w += v.y * v.z;\n    v = v ^ (v >> vec4u(16u));\n    v.x += v.y * v.w;\n    v.y += v.z * v.x;\n    v.z += v.x * v.y;\n    v.w += v.y * v.z;\n    return v;\n}\n\nfn hash_int4_to_vec4(k: vec4i) -> vec4f {\n    let h = hash_pcg4d_i(k);\n    return vec4f(h & vec4i(0x7fffffff)) * (1.0 / f32(0x7fffffff));\n}\n\nfn hash_int4_to_vec3(k: vec4i) -> vec3f {\n    return hash_int4_to_vec4(k).xyz;\n}\n\nconst SHD_VORONOI_EUCLIDEAN = 0;\nconst SHD_VORONOI_MANHATTAN = 1;\nconst SHD_VORONOI_CHEBYCHEV = 2;\nconst SHD_VORONOI_MINKOWSKI = 3;\n\nconst SHD_VORONOI_F1 = 0;\n\nstruct VoronoiParams {\n    scale: f32,\n    detail: f32,\n    roughness: f32,\n    lacunarity: f32,\n    smoothness: f32,\n    exponent: f32,\n    randomness: f32,\n    max_distance: f32,\n    normalize: bool,\n    feature: i32,\n    metric: i32,\n};\n\nstruct VoronoiOutput {\n    Distance: f32,\n    Color: vec3f,\n    Position: vec4f,\n};\n\nfn voronoi_distance(a: vec4f, b: vec4f, params: VoronoiParams) -> f32 {\n    if (params.metric == SHD_VORONOI_EUCLIDEAN) {\n        return distance(a, b);\n    } else if (params.metric == SHD_VORONOI_MANHATTAN) {\n        return abs(a.x - b.x) + abs(a.y - b.y) + abs(a.z - b.z) + abs(a.w - b.w);\n    } else if (params.metric == SHD_VORONOI_CHEBYCHEV) {\n        return max(abs(a.x - b.x), max(abs(a.y - b.y), max(abs(a.z - b.z), abs(a.w - b.w))));\n    } else if (params.metric == SHD_VORONOI_MINKOWSKI) {\n        return pow(\n            pow(abs(a.x - b.x), params.exponent) +\n            pow(abs(a.y - b.y), params.exponent) +\n            pow(abs(a.z - b.z), params.exponent) +\n            pow(abs(a.w - b.w), params.exponent),\n            1.0 / params.exponent\n        );\n    }\n    return 0.0;\n}\n\nfn voronoi_f1(params: VoronoiParams, coord: vec4f) -> VoronoiOutput {\n    let cellPosition_f = floor(coord);\n    let localPosition = coord - cellPosition_f;\n    let cellPosition = vec4i(cellPosition_f);\n\n    var minDistance = 3.402823466e+38;\n    var targetOffset = vec4i(0);\n    var targetPosition = vec4f(0.0);\n\n    for (var u = -1; u <= 1; u++) {\n        for (var k = -1; k <= 1; k++) {\n            for (var j = -1; j <= 1; j++) {\n                for (var i = -1; i <= 1; i++) {\n                    let cellOffset = vec4i(i, j, k, u);\n                    let pointPosition = vec4f(cellOffset) + hash_int4_to_vec4(cellPosition + cellOffset) * params.randomness;\n                    let distanceToPoint = voronoi_distance(pointPosition, localPosition, params);\n                    if (distanceToPoint < minDistance) {\n                        targetOffset = cellOffset;\n                        minDistance = distanceToPoint;\n                        targetPosition = pointPosition;\n                    }\n                }\n            }\n        }\n    }\n\n    var octave: VoronoiOutput;\n    octave.Distance = minDistance;\n    octave.Color = hash_int4_to_vec3(cellPosition + targetOffset);\n    octave.Position = targetPosition + cellPosition_f;\n    return octave;\n}\n\nfn fractal_voronoi_x_fx(params: VoronoiParams, coord: vec4f) -> VoronoiOutput {\n    var amplitude = 1.0;\n    var max_amplitude = 0.0;\n    var scale = 1.0;\n\n    var Output: VoronoiOutput;\n    Output.Distance = 0.0;\n    Output.Color = vec3f(0.0);\n    Output.Position = vec4f(0.0);\n\n    let zero_input = params.detail == 0.0 || params.roughness == 0.0;\n    let max_i = i32(ceil(params.detail));\n\n    for (var i = 0; i <= max_i; i++) {\n        let octave = voronoi_f1(params, coord * scale);\n        if (zero_input) {\n            max_amplitude = 1.0;\n            Output = octave;\n            break;\n        } else if (f32(i) <= params.detail) {\n            max_amplitude += amplitude;\n            Output.Distance += octave.Distance * amplitude;\n            Output.Color += octave.Color * amplitude;\n            Output.Position = mix(Output.Position, octave.Position / scale, amplitude);\n            scale *= params.lacunarity;\n            amplitude *= params.roughness;\n        } else {\n            let remainder = params.detail - floor(params.detail);\n            if (remainder != 0.0) {\n                max_amplitude = mix(max_amplitude, max_amplitude + amplitude, remainder);\n                Output.Distance = mix(Output.Distance, Output.Distance + octave.Distance * amplitude, remainder);\n                Output.Color = mix(Output.Color, Output.Color + octave.Color * amplitude, remainder);\n                Output.Position = mix(Output.Position, mix(Output.Position, octave.Position / scale, amplitude), remainder);\n            }\n        }\n    }\n\n    if (params.normalize) {\n        Output.Distance /= max_amplitude * params.max_distance;\n        Output.Color /= max_amplitude;\n    }\n\n    Output.Position = Output.Position / params.scale;\n    return Output;\n}\n\nfn node_tex_voronoi_f1_4d_distance(\n    coord: vec3f,\n    w: f32,\n    scale: f32,\n    detail: f32,\n    roughness: f32,\n    lacunarity: f32,\n    smoothness: f32,\n    exponent: f32,\n    randomness: f32,\n    metric: f32,\n    normalize: f32\n) -> f32 {\n    var params: VoronoiParams;\n    params.feature = SHD_VORONOI_F1;\n    params.metric = i32(metric);\n    params.scale = scale;\n    params.detail = clamp(detail, 0.0, 15.0);\n    params.roughness = clamp(roughness, 0.0, 1.0);\n    params.lacunarity = lacunarity;\n    params.smoothness = clamp(smoothness / 2.0, 0.0, 0.5);\n    params.exponent = exponent;\n    params.randomness = clamp(randomness, 0.0, 1.0);\n    params.max_distance = 0.0;\n    params.normalize = normalize != 0.0;\n\n    let w_scaled = w * scale;\n    let coord_scaled = coord * scale;\n    params.max_distance = voronoi_distance(vec4f(0.0), vec4f(0.5 + 0.5 * params.randomness), params);\n    let Output = fractal_voronoi_x_fx(params, vec4f(coord_scaled, w_scaled));\n    return Output.Distance;\n}\n\n// ============================================================\n// Uniforms\n// ============================================================\n\nstruct Camera {\n  invViewProj : mat4x4f,\n  position    : vec3f,\n  _pad        : f32,\n};\n\nstruct Params {\n  time_pack   : vec4f, // timeNoise, timeVoronoi1, timeVoronoi2, density\n  alt_pack    : vec4f, // lowAltDensity, altitude, factorMacro, factorDetail\n  scale_pack  : vec4f, // factorShaper, scaleAlt, scaleNoise, scaleVoronoi1\n  extra_pack  : vec4f, // scaleVoronoi2, detail, rayMarchSteps, skipLight\n  cache_pack  : vec4f, // cacheBlend, lightMarchSteps, shadowDarkness, sunIntensity\n  bounds_pack : vec4f, // cloudHeight, _pad1, _pad2, _pad3\n};\n\n@group(0) @binding(0) var<uniform> camera : Camera;\n@group(0) @binding(1) var<uniform> params : Params;\n@group(1) @binding(0) var densitySampler : sampler;\n@group(1) @binding(1) var densityTex0 : texture_3d<f32>;\n@group(1) @binding(2) var densityTex1 : texture_3d<f32>;\n@group(2) @binding(0) var densityStore : texture_storage_3d<rgba16float, write>;\n\n// ============================================================\n// Vertex\n// ============================================================\n\nstruct VSOut {\n  @builtin(position) pos : vec4f,\n  @location(0)       uv  : vec2f,\n};\n\n@vertex\nfn vs(@builtin(vertex_index) vi : u32) -> VSOut {\n  let pos = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));\n  var out : VSOut;\n  out.pos = vec4f(pos[vi], 0.0, 1.0);\n  out.uv  = pos[vi];\n  return out;\n}\n\n// ============================================================\n// Helpers\n// ============================================================\n\nfn mapRange(value : f32, fromMin : f32, fromMax : f32, toMin : f32, toMax : f32) -> f32 {\n  if (abs(fromMax - fromMin) < 1e-5) { return toMin; }\n  let t = (value - fromMin) / (fromMax - fromMin);\n  return clamp(mix(toMin, toMax, t), min(toMin, toMax), max(toMin, toMax));\n}\n\nfn clamp01(v: f32) -> f32 {\n  return clamp(v, 0.0, 1.0);\n}\n\nfn sampleDensity(pos: vec3f) -> f32 {\n  let uvw = (pos - BOX_MIN) / (getBoxMax() - BOX_MIN);\n  if (any(uvw < vec3f(0.0)) || any(uvw > vec3f(1.0))) {\n    return 0.0;\n  }\n  let a = textureSampleLevel(densityTex0, densitySampler, uvw, 0.0).r;\n  let b = textureSampleLevel(densityTex1, densitySampler, uvw, 0.0).r;\n  let blend = clamp(params.cache_pack.x, 0.0, 1.0);\n  let density = mix(a, b, blend);\n  return density;\n}\n\n// ------------------------------------------------------------\n// Cloud Density (100% Blender Node Graph Match)\n// ------------------------------------------------------------\n\nfn cloudDensity(pos : vec3f) -> f32 {\n  let timeNoise     = params.time_pack.x;\n  let timeVoronoi1  = params.time_pack.y;\n  let timeVoronoi2  = params.time_pack.z;\n  let densityParam  = params.time_pack.w;\n\n  let lowAltDens    = params.alt_pack.x;\n  let altitude      = params.alt_pack.y;\n  let factorMacro   = params.alt_pack.z;\n  let factorDetail  = params.alt_pack.w;\n\n  let factorShaper  = params.scale_pack.x;\n  let scaleAlt      = params.scale_pack.y;\n  let scaleNoise    = params.scale_pack.z;\n  let scaleVoronoi1 = params.scale_pack.w;\n\n  let scaleVoronoi2 = params.extra_pack.x;\n  let detail        = params.extra_pack.y;\n\n  // Blender \"Object\" coordinates for a cloud layer (Z-up).\n  // World Y is treated as Blender Z.\n  let objPos = vec3f(pos.x, pos.z, pos.y);\n  let zNorm = (pos.y - BOX_MIN.y) / (getBoxMax().y - BOX_MIN.y);\n  let Z = 1.0 - clamp(zNorm, 0.0, 1.0);\n\n  // --- STAGE 1: Altitude Mask ---\n  // Map Range.010: Z from [0, Altitude/5] -> [1 - LowAlt, 1]\n  let altFromMax = altitude / 5.0;\n  let altToMin = 1.0 - lowAltDens;\n  let altMaskRamp = mapRange(Z, 0.0, altFromMax, altToMin, 1.0);\n  // Noise Texture: 4D, Scale 2.0, Detail 0.0 (FBM normalized)\n  let noiseCoord = objPos / scaleNoise;\n  let stage1Noise = node_noise_texture_4d_value(\n    noiseCoord, timeNoise, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0);\n  // Math.008: Multiply (clamped)\n  let altitudeMask = clamp01(altMaskRamp * stage1Noise);\n\n  // --- STAGE 2: Macro Voronoi ---\n  let v1Coord = objPos / scaleVoronoi1;\n  let v1dist = node_tex_voronoi_f1_4d_distance(v1Coord, timeVoronoi1, 5.0, detail, 0.5, 3.0, 1.0, 0.5, 1.0, 0.0, 1.0);\n  let v1mapped = mapRange(v1dist, 0.0, 0.75, factorMacro * -0.4, factorMacro);\n  let v1scaled = clamp01(v1mapped * 0.5); // Math.012\n  let stage2 = clamp01(altitudeMask + v1scaled); // Math.003\n\n  // --- STAGE 3: Medium Voronoi Detail ---\n  let v2Coord = objPos / scaleVoronoi2;\n  let v2dist = node_tex_voronoi_f1_4d_distance(v2Coord, timeVoronoi2, 2.0, detail * 5.0, 0.75, 2.5, 1.0, 0.5, 1.0, 0.0, 1.0);\n  let v2mapped = mapRange(v2dist, 0.0, 1.0, factorDetail * -0.25, factorDetail);\n  let stage3 = clamp01(stage2 + v2mapped); // Math.004\n\n  // --- STAGE 4: Upper Altitude Cutoff ---\n  let cutoffFromMin = altitude * scaleAlt;\n  let cutoff = mapRange(Z, cutoffFromMin, 0.0, 0.0, 1.0); // Map Range.008 (Blender)\n  let shaped = clamp01(stage3 - cutoff); // Math.020\n  let finalShaped = clamp01(shaped - (1.0 - factorShaper)); // Math.005\n\n  // --- STAGE 5: Final Multipliers ---\n  let falloff = mapRange(Z, 0.0, altitude, 0.0, 1.0); // Map Range.009\n  let densityScale = densityParam * 5.0; // Tune for WebGPU raymarching\n  return finalShaped * falloff * densityScale; // Math.016\n}\n\n// ============================================================\n// Ray Marching\n// ============================================================\n\nconst BOX_MIN = vec3f(-4.5, 0.0, -4.5); // Reduced bounds\nconst BOX_MAX_XZ = 4.5;\n\nfn getBoxMax() -> vec3f {\n  return vec3f(BOX_MAX_XZ, params.bounds_pack.x, BOX_MAX_XZ);\n}\n\nstruct HitInfo {\n  hit   : bool,\n  tNear : f32,\n  tFar  : f32,\n};\n\nfn intersectBox(ro : vec3f, rd : vec3f) -> HitInfo {\n  let invRd = 1.0 / rd;\n  let t0 = (BOX_MIN - ro) * invRd;\n  let t1 = (getBoxMax() - ro) * invRd;\n  let tmin = min(t0, t1);\n  let tmax = max(t0, t1);\n  let tNear = max(tmin.x, max(tmin.y, tmin.z));\n  let tFar  = min(tmax.x, min(tmax.y, tmax.z));\n  return HitInfo(tFar >= max(tNear, 0.0), tNear, tFar);\n}\n\nconst SUN_DIR   = vec3f(0.189, 0.943, 0.283); \nconst SUN_COLOR = vec3f(1.0, 1.0, 1.0);\nconst AMBIENT   = vec3f(0.26, 0.30, 0.42);\nconst BG_COLOR  = vec3f(0.045, 0.10, 0.18);\n\nfn hgPhase(cosTheta: f32, g: f32) -> f32 {\n    let g2 = g * g;\n    return (1.0 - g2) / (4.0 * 3.14159 * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5));\n}\n\nfn lightMarch(pos : vec3f) -> f32 {\n  var shadow = 0.0;\n  let steps = i32(params.cache_pack.y);\n  let stepSize = 0.15;\n  for (var i = 1; i <= steps; i++) {\n    let p = pos + SUN_DIR * (f32(i) * stepSize);\n    shadow += sampleDensity(p) * stepSize;\n  }\n  return exp(-shadow * params.cache_pack.z); \n}\n\nfn interleavedGradientNoise(uv: vec2f) -> f32 {\n    let magic = vec3f(0.06711056, 0.00583715, 52.9829189);\n    return fract(magic.z * fract(dot(uv, magic.xy)));\n}\n\n@fragment\nfn fs(@builtin(position) fragCoord : vec4f, @location(0) uv : vec2f) -> @location(0) vec4f {\n  let skipLight = params.extra_pack.w > 0.5;\n  let numSteps = i32(params.extra_pack.z);\n  let world_near = camera.invViewProj * vec4f(uv, vec2f(0.0, 1.0));\n  let world_far  = camera.invViewProj * vec4f(uv, vec2f(1.0, 1.0));\n  let ro = camera.position;\n  let rd = normalize(world_far.xyz/world_far.w - world_near.xyz/world_near.w);\n\n  let hit = intersectBox(ro, rd);\n\n  let sky = mix(BG_COLOR, vec3f(0.1, 0.2, 0.4), clamp(rd.y * 0.5 + 0.5, 0.0, 1.0));\n  let sunTheta = dot(rd, SUN_DIR);\n  let finalSky = sky + pow(max(sunTheta, 0.0), 64.0) * SUN_COLOR * 0.8;\n\n  var outColor = finalSky;\n\n  if (hit.hit) {\n    let tEntry = max(hit.tNear, 0.0);\n    let tExit  = hit.tFar;\n    let stepSize = (tExit - tEntry) / f32(numSteps);\n    let dither = interleavedGradientNoise(fragCoord.xy);\n    \n    var pos = ro + rd * (tEntry + stepSize * dither);\n    var transmittance = 1.0;\n    var color = vec3f(0.0);\n    let phase = mix(1.0, hgPhase(sunTheta, 0.45), 0.6);\n\n    for (var i = 0; i < numSteps; i++) {\n      let d = sampleDensity(pos);\n      if (d > 0.01) {\n        let step_trans = exp(-d * stepSize);\n        let shadow = select(lightMarch(pos), 1.0, skipLight);\n        let scattering = shadow * phase * (1.0 - exp(-d * 1.0));\n        let litColor = SUN_COLOR * scattering * params.cache_pack.w + AMBIENT * 0.5;\n\n        color += transmittance * (1.0 - step_trans) * litColor;\n        transmittance *= step_trans;\n        let cutoff = 0.01;\n        if (transmittance < cutoff) { break; }\n      }\n      pos += rd * stepSize;\n    }\n    outColor = color + transmittance * finalSky;\n  }\n    \n  outColor = outColor / (outColor + vec3f(1.0));\n  outColor = pow(outColor, vec3f(1.0 / 2.2));\n  return vec4f(outColor, 1.0);\n}\n\n// ============================================================\n// Density Cache Compute\n// ============================================================\n\n@compute @workgroup_size(8, 8, 4)\nfn cs(@builtin(global_invocation_id) gid : vec3u) {\n  let dims = textureDimensions(densityStore);\n  if (gid.x >= dims.x || gid.y >= dims.y || gid.z >= dims.z) { return; }\n\n  let uvw = (vec3f(gid) + 0.5) / vec3f(dims);\n  let pos = mix(BOX_MIN, getBoxMax(), uvw);\n  let d = cloudDensity(pos);\n  textureStore(densityStore, vec3i(gid), vec4f(d, 0.0, 0.0, 1.0));\n}\n";
+
+if (!navigator.gpu) {
+  document.body.innerHTML = "<p style=color:white;padding:2rem>WebGPU not supported.</p>";
+  throw new Error("WebGPU not supported");
+}
+
+const _invProjView = new THREE.Matrix4();
+const _viewProj = new THREE.Matrix4();
+const _cameraData = new Float32Array(20);
+const _paramsData = new Float32Array(24);
+
+function buildParams(time, cacheBlend, params) {
+  const density = params.density;
+  const altitude = params.altitude;
+  const factorMacro = params.coverage;
+  const scale = params.scale;
+  const detail = params.detail;
+  _paramsData[0] = time;
+  _paramsData[1] = time;
+  _paramsData[2] = time;
+  _paramsData[3] = density;
+  _paramsData[4] = 0.2;
+  _paramsData[5] = altitude;
+  _paramsData[6] = factorMacro;
+  _paramsData[7] = 1.0;
+  _paramsData[8] = 1.0;
+  _paramsData[9] = scale;
+  _paramsData[10] = scale;
+  _paramsData[11] = scale;
+  _paramsData[12] = scale;
+  _paramsData[13] = detail;
+  _paramsData[14] = params.rayMarchSteps;
+  _paramsData[15] = params.skipLight ? 1.0 : 0.0;
+  _paramsData[16] = cacheBlend;
+  _paramsData[17] = params.lightMarchSteps;
+  _paramsData[18] = params.shadowDarkness;
+  _paramsData[19] = params.sunIntensity;
+  _paramsData[20] = params.cloudHeight;
+  _paramsData[21] = 1.0;
+  _paramsData[22] = 0.0;
+  _paramsData[23] = 0.0;
+  return _paramsData;
+}
+
+const renderer = new THREE.WebGPURenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setAnimationLoop(null);
+document.body.appendChild(renderer.domElement);
+
+await renderer.init();
+
+const device = renderer.backend.device;
+const context = renderer.backend.getContext();
+const format = navigator.gpu.getPreferredCanvasFormat();
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(5, 2, 5);
+camera.lookAt(0, 0.5, 0);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.5, 0);
+controls.enableDamping = true;
+controls.update();
+
+const shaderModule = device.createShaderModule({ code: WGSL_SOURCE, label: "procedural-clouds" });
+
+const pipeline = device.createRenderPipeline({
+  layout: "auto",
+  vertex: { module: shaderModule, entryPoint: "vs" },
+  fragment: { module: shaderModule, entryPoint: "fs", targets: [{ format }] },
+  primitive: { topology: "triangle-list" },
+});
+
+const computePipeline = device.createComputePipeline({
+  layout: "auto",
+  compute: { module: shaderModule, entryPoint: "cs" },
+});
+
+const cameraBuffer = device.createBuffer({
+  size: 80,
+  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  label: "pc-camera",
+});
+
+const paramsBuffer = device.createBuffer({
+  size: 96,
+  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  label: "pc-params",
+});
+
+const bindGroup = device.createBindGroup({
+  layout: pipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: cameraBuffer } },
+    { binding: 1, resource: { buffer: paramsBuffer } },
+  ],
+});
+
+const linearSampler = device.createSampler({
+  magFilter: "linear",
+  minFilter: "linear",
+  addressModeU: "clamp-to-edge",
+  addressModeV: "clamp-to-edge",
+  addressModeW: "clamp-to-edge",
+});
+
+let densityRes = 96;
+let densityTextures = [null, null];
+let densitySampleBindGroup = null;
+let densityStoreBindGroup = null;
+
+function createDensityResources(res) {
+  for (const t of densityTextures) {
+    if (t) t.destroy();
+  }
+  densityTextures = [0, 1].map(() =>
+    device.createTexture({
+      size: [res, res, res],
+      dimension: "3d",
+      format: "rgba16float",
+      usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+      label: "pc-density",
+    }),
+  );
+
+  densityStoreBindGroup = device.createBindGroup({
+    layout: computePipeline.getBindGroupLayout(2),
+    entries: [{ binding: 0, resource: densityTextures[0].createView({ dimension: "3d" }) }],
+  });
+
+  densitySampleBindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(1),
+    entries: [
+      { binding: 0, resource: linearSampler },
+      { binding: 1, resource: densityTextures[0].createView({ dimension: "3d" }) },
+      { binding: 2, resource: densityTextures[1].createView({ dimension: "3d" }) },
+    ],
+  });
+}
+
+createDensityResources(densityRes);
+
+const computeBindGroup = device.createBindGroup({
+  layout: computePipeline.getBindGroupLayout(0),
+  entries: [{ binding: 1, resource: { buffer: paramsBuffer } }],
+});
+
+const params = {
+  density: 1.0,
+  coverage: 0.8,
+  scale: 3.75,
+  altitude: 0.5,
+  detail: 1.0,
+  windSpeed: 0.05,
+  skipLight: false,
+  rayMarchSteps: 48,
+  lightMarchSteps: 4,
+  shadowDarkness: 5,
+  sunIntensity: 17,
+  cloudHeight: 1.5,
+  cacheResolution: 96,
+  cacheUpdateRate: 2,
+  cacheSmooth: 0,
+};
+
+const gui = new GUI({ title: "Cloud parameters (editor-portable standalone, r183)" });
+gui.add(params, "density", 0.1, 4.0, 0.05);
+gui.add(params, "coverage", 0.0, 1.0, 0.01);
+gui.add(params, "scale", 0.2, 15.0, 0.05);
+gui.add(params, "altitude", 0.1, 1.0, 0.01);
+gui.add(params, "detail", 0.0, 15.0, 0.5);
+gui.add(params, "windSpeed", 0.0, 2.0, 0.05);
+gui.add(params, "skipLight").name("Skip Light March");
+gui.add(params, "rayMarchSteps", 16, 64, 1).name("Ray Steps");
+gui.add(params, "lightMarchSteps", 1, 8, 1).name("Light Steps");
+gui.add(params, "shadowDarkness", 0.5, 20.0, 0.1).name("Shadow Dark");
+gui.add(params, "sunIntensity", 0.5, 20.0, 0.1).name("Sun Intensity");
+gui.add(params, "cloudHeight", 0.5, 5.0, 0.1).name("Cloud Height");
+gui
+  .add(params, "cacheResolution", 32, 128, 1)
+  .name("Cache Res")
+  .onFinishChange((v) => {
+    const next = Math.max(32, Math.min(128, Math.round(v)));
+    params.cacheResolution = next;
+    densityRes = next;
+    createDensityResources(densityRes);
+  });
+gui.add(params, "cacheUpdateRate", 1, 4, 1).name("Cache Update");
+gui.add(params, "cacheSmooth", 0.0, 0.95, 0.01).name("Cache Smooth");
+
+const stats = new Stats();
+stats.showPanel(0);
+document.body.appendChild(stats.dom);
+
+const startTime = performance.now();
+let frameIndex = 0;
+let cacheIndex = 0;
+let prevCacheTime = 0.0;
+let nextCacheTime = 0.0;
+
+function onResize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera.aspect = w / Math.max(h, 1);
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener("resize", onResize);
+
+function frame() {
+  stats.begin();
+  frameIndex++;
+
+  const elapsed = (performance.now() - startTime) / 1000.0;
+  const windSpeed = params.windSpeed;
+
+  controls.update();
+  camera.updateMatrixWorld();
+
+  _viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  _invProjView.copy(_viewProj).invert();
+  _cameraData.set(_invProjView.elements, 0);
+  _cameraData[16] = camera.position.x;
+  _cameraData[17] = camera.position.y;
+  _cameraData[18] = camera.position.z;
+  device.queue.writeBuffer(cameraBuffer, 0, _cameraData);
+
+  const time = elapsed * windSpeed;
+  const blendDenom = Math.max(1e-5, nextCacheTime - prevCacheTime);
+  let linearBlend = Math.min(1.0, Math.max(0.0, (time - prevCacheTime) / blendDenom));
+  let cacheBlend = linearBlend;
+  if (params.cacheSmooth > 0.0) {
+    cacheBlend = Math.pow(linearBlend, 1.0 / (1.0 + params.cacheSmooth * 4.0));
+  }
+
+  device.queue.writeBuffer(paramsBuffer, 0, buildParams(time, cacheBlend, params));
+
+  const commandEncoder = device.createCommandEncoder({ label: "procedural-clouds-frame" });
+
+  if (frameIndex % params.cacheUpdateRate === 0) {
+    prevCacheTime = nextCacheTime;
+    nextCacheTime = time;
+    cacheIndex = 1 - cacheIndex;
+
+    densityStoreBindGroup = device.createBindGroup({
+      layout: computePipeline.getBindGroupLayout(2),
+      entries: [
+        {
+          binding: 0,
+          resource: densityTextures[cacheIndex].createView({ dimension: "3d" }),
+        },
+      ],
+    });
+
+    const pass = commandEncoder.beginComputePass();
+    pass.setPipeline(computePipeline);
+    pass.setBindGroup(0, computeBindGroup);
+    pass.setBindGroup(2, densityStoreBindGroup);
+    pass.dispatchWorkgroups(
+      Math.ceil(densityRes / 8),
+      Math.ceil(densityRes / 8),
+      Math.ceil(densityRes / 4),
+    );
+    pass.end();
+  }
+
+  const textureView = context.getCurrentTexture().createView();
+  const renderPass = commandEncoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view: textureView,
+        loadOp: "clear",
+        clearValue: { r: 0.075, g: 0.145, b: 0.25, a: 1 },
+        storeOp: "store",
+      },
+    ],
+  });
+
+  renderPass.setPipeline(pipeline);
+  renderPass.setBindGroup(0, bindGroup);
+  renderPass.setBindGroup(1, densitySampleBindGroup);
+  renderPass.draw(3);
+  renderPass.end();
+
+  device.queue.submit([commandEncoder.finish()]);
+  stats.end();
+  requestAnimationFrame(frame);
+}
+
+globalThis.__V2PortableProceduralClouds = {
+  version: "r183-standalone-1",
+  renderer,
+  device,
+  context,
+  preferredCanvasFormat: format,
+  camera,
+  controls,
+  paramsState: params,
+  WGSL_SOURCE,
+  pipelines: { fullscreen: pipeline, densityCompute: computePipeline },
+  buffers: { camera: cameraBuffer, params: paramsBuffer },
+  stagingFloat32: { camera: _cameraData, paramsScratch: _paramsData },
+  buildParams,
+  getDensityTextures: () => densityTextures,
+  getDensityResolution: () => densityRes,
+  recreateDensityTextures: createDensityResources,
+};
+
+requestAnimationFrame(frame);
+
+  </script>
+</body>
+</html>

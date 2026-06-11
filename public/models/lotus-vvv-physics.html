@@ -1,0 +1,1375 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lotus VVV physics — rigid body + wheel probes</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #0c1018;
+        color: #c8d8e8;
+        font-family: system-ui, sans-serif;
+      }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      #hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+        background: rgba(0, 0, 0, 0.65);
+        border: 1px solid rgba(120, 255, 180, 0.35);
+        border-radius: 8px;
+        padding: 8px 12px;
+        pointer-events: none;
+        line-height: 1.55;
+      }
+      #ui {
+        position: fixed;
+        bottom: 12px;
+        left: 12px;
+        max-width: 680px;
+        font-size: 12px;
+        line-height: 1.5;
+        background: rgba(0, 0, 0, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 10px 14px;
+        pointer-events: none;
+      }
+      #ui kbd {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      #badge {
+        position: fixed;
+        bottom: 12px;
+        right: 12px;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        background: rgba(80, 40, 100, 0.85);
+        border: 1px solid rgba(200, 160, 255, 0.45);
+        border-radius: 6px;
+        padding: 6px 10px;
+        pointer-events: none;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/",
+          "tweakpane": "https://esm.sh/tweakpane@4.0.5"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="badge">VVV pattern · rigid body</div>
+    <div id="hud">Loading…</div>
+    <div id="ui">
+      <strong>VVV physics test track</strong> — rigid body + 4 wheel probes.<br />
+      <strong>N</strong>orth: slope lab (10°→55°) · <strong>S</strong>outh: steps + jump kicker + bump strip ·
+      <strong>E</strong>ast: banked turn · <strong>W</strong>est: wall corridor<br />
+      <kbd>WASD</kbd> drive · <kbd>Space</kbd> handbrake · <kbd>R</kbd> respawn ·
+      <kbd>Tab</kbd> orbit camera · <kbd>F</kbd> force arrows
+    </div>
+    <script type="module">
+      import * as THREE from "three/webgpu";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+      import { Pane } from "tweakpane";
+
+      // ============================================================
+      // === TUNING CONSTANTS — tweak freely
+      // ============================================================
+      const CHASSIS = {
+        width:  1.8,
+        height: 0.6,    // shortened so wheels visibly sit *beside* the chassis
+        length: 3.6,
+        mass:   1400,   // kg
+        /** Visual-only Y offset of the chassis mesh above the body. Pure visual
+         *  lift — physics CoM, collision corners, and wall probes stay anchored
+         *  to body.pos. Use to raise the box clear of the wheels without
+         *  affecting how the car drives. */
+        visualLift: 0,
+      };
+      const GRAVITY = 9.81;
+
+      /** Wheel positions in chassis-LOCAL space. y is the hub Y offset relative
+       *  to the chassis CoM. z>0 = front. x outside ±chassis.width/2 = wheels
+       *  stick out the sides (open-wheel / buggy look). */
+      const WHEEL_LOCAL = [
+        { name: "FL", pos: new THREE.Vector3(-1.05, -0.10,  1.40), steer: true,  drive: true  },
+        { name: "FR", pos: new THREE.Vector3( 1.05, -0.10,  1.40), steer: true,  drive: true  },
+        { name: "RL", pos: new THREE.Vector3(-1.05, -0.10, -1.40), steer: false, drive: true  },
+        { name: "RR", pos: new THREE.Vector3( 1.05, -0.10, -1.40), steer: false, drive: true  },
+      ];
+
+      const TIRE = {
+        /** Probe ray length: how far below the hub we look for ground.
+         *  Must exceed restLength + expected suspension droop in air. */
+        rayLength:       1.0,
+        /** Distance the ray STARTS above the hub. Catches ramp surfaces that
+         *  end up above the hub when the chassis tunnels into geometry at
+         *  high speed — `hit.distance < padAbove` means body is below surface,
+         *  spring fires very hard to snap it back up. */
+        rayPadAbove:     0.6,
+        /** Forward/rear ray bias as a multiplier of wheel radius. We cast 3
+         *  parallel down-rays (center, +fwd*bias, −fwd*bias) and use the
+         *  closest hit. Lets the wheel "see" the leading edge of a ramp or
+         *  step before the hub physically reaches it — kills the clip-into-
+         *  ramp-face artifact a single down-ray produces. 0 = single ray. */
+        rayForwardBias:  0.6,
+        /** Left/right ray bias as a multiplier of HALF tire thickness. Adds
+         *  2 more parallel down-rays at ±latBias along the wheel's lateral
+         *  axis, sampling the tire's contact-patch *width*. Catches kerbs and
+         *  surface edges that only one side of the tire touches. 0 = disabled. */
+        rayLateralBias:  1.0,
+        /** Visual smoothing rate (1/s) for the wheel's vertical position. Eases
+         *  the transition between grounded distance and full droop, killing the
+         *  takeoff/landing "snap". Higher = snappier. 0 = no smoothing. */
+        suspVisSmooth:   12,
+        /** Rest length of the suspension spring (= wheel radius + travel). */
+        restLength:      0.55,
+        /** Spring stiffness (N/m). Higher = stiffer ride + faster recovery at
+         *  speed transitions (ramp landings, sudden surface changes). */
+        springStrength:  65000,
+        /** Damper coefficient (N·s/m). Roughly critical-damping for the new k. */
+        damper:          6500,
+        /** Bottom-out threshold as a fraction of restLength. When compression
+         *  exceeds this, a strong QUADRATIC spring augmentation kicks in to
+         *  simulate the suspension hitting its hard stop. This is what stops
+         *  the chassis tunneling deep into ramps at high speed. */
+        bottomOutThresh: 0.7,
+        /** Bottom-out quadratic stiffness multiplier (× springStrength). */
+        bottomOutMult:   8,
+        /** Lateral grip: 1 = perfect grip (kills all lateral velocity in 1 step),
+         *  0 = ice. Handbrake drops rear to gripHandbrake. */
+        gripFront:       1.0,
+        gripRear:        1.0,
+        gripHandbrake:   0.08,
+        /** Peak acceleration force per driven wheel at zero speed (N). The
+         *  effective force falls off with speed via the power curve (see
+         *  Tire.apply) so the car has a real top-speed cap. */
+        accelForce:      4000,
+        /** Top speed in m/s. Power curve drops linearly toward 0 as the car's
+         *  forward speed approaches this. 30 m/s ≈ 108 km/h. */
+        topSpeed:        30,
+        /** Power curve exponent. 1 = linear falloff, 2 = quadratic (pulls hard
+         *  off the line, falls off near top — feels closer to a torque curve). */
+        powerCurveExp:   2.0,
+        /** Brake force per wheel when input opposes motion direction (N).
+         *  Real cars brake harder than they accelerate; default ~2× accelForce. */
+        brakeForce:      8000,
+        /** Reverse acceleration per wheel (N). Much weaker than forward accel —
+         *  real cars are slow in reverse. */
+        reverseAccel:    2000,
+        /** Forward speed (m/s) below which S becomes reverse instead of brake,
+         *  and W becomes accel instead of brake. Prevents jitter near zero. */
+        brakeReverseThreshold: 0.5,
+        /** Engine brake when throttle = 0 (N). */
+        engineBrake:     800,
+        /** Max steer angle (rad). */
+        maxSteerAngle:   0.55,
+        steerSmooth:     8.0,
+        /** Friction circle: max lateral force per wheel = frictionCoeff × Fn
+         *  (suspension normal force). High default = clamp only fires during
+         *  extreme transients (slams, glitches) — under normal driving the
+         *  full Unity-style "cancel sideways velocity" force passes through. */
+        frictionCoeff:   5.0,
+        /** Hard cap on body angular velocity (rad/s). Defensive — stops
+         *  numerical runaway when forces spike (e.g. corner contact). */
+        maxAngVel:       9.0,
+        /** Anti-roll / anti-pitch torque magnitude (N·m per rad of tilt).
+         *  Applied only while at least one wheel is grounded AND chassis still
+         *  mostly upright — keeps the car planted in turns without auto-
+         *  righting it after a crash. 0 = disabled. */
+        stabilizerStrength: 8000,
+      };
+
+      /** Visual wheel (cylinder tire + rim). Purely cosmetic — physics uses
+       *  the raycast probe, not the wheel mesh. */
+      const WHEEL = {
+        radius:     0.36,
+        thickness:  0.24,
+        rimRadius:  0.22,
+        rimWidth:   0.26,
+      };
+
+      const visParams = {
+        arrowScale: 0.0008, // m per N — visual length of force arrows
+        showArrows: true,
+      };
+
+      // ============================================================
+      // === RIGID BODY — 6-DOF dynamics, force/torque accumulators
+      // ============================================================
+      class RigidBody {
+        constructor({ mass, size }) {
+          this.mass = mass;
+          this.invMass = 1 / mass;
+
+          // Box inertia tensor (local, diagonal). For a solid box centered at CoM:
+          //   I_xx = m/12 · (H² + L²)
+          //   I_yy = m/12 · (W² + L²)
+          //   I_zz = m/12 · (W² + H²)
+          const { width: w, height: h, length: l } = size;
+          const Ixx = (mass / 12) * (h * h + l * l);
+          const Iyy = (mass / 12) * (w * w + l * l);
+          const Izz = (mass / 12) * (w * w + h * h);
+          this.localInvInertia = new THREE.Matrix3().set(
+            1 / Ixx, 0, 0,
+            0, 1 / Iyy, 0,
+            0, 0, 1 / Izz,
+          );
+
+          this.pos = new THREE.Vector3();
+          this.vel = new THREE.Vector3();
+          this.quat = new THREE.Quaternion();
+          this.angVel = new THREE.Vector3();   // world space
+
+          this.forceAccum = new THREE.Vector3();
+          this.torqueAccum = new THREE.Vector3();
+
+          // Scratch
+          this._r = new THREE.Vector3();
+          this._tau = new THREE.Vector3();
+          this._rotVel = new THREE.Vector3();
+          this._R3 = new THREE.Matrix3();
+          this._R3t = new THREE.Matrix3();
+          this._mat = new THREE.Matrix4();
+          this._worldInvI = new THREE.Matrix3();
+        }
+
+        /** Force at the CoM. No torque contribution. */
+        addForce(F) {
+          this.forceAccum.add(F);
+        }
+
+        /** Force at a world-space point. Generates both linear acceleration AND
+         *  torque around the CoM = (worldPoint − pos) × F. */
+        addForceAtPoint(F, worldPoint) {
+          this.forceAccum.add(F);
+          this._r.subVectors(worldPoint, this.pos);
+          this._tau.crossVectors(this._r, F);
+          this.torqueAccum.add(this._tau);
+        }
+
+        /** Velocity of a body-fixed point: v + ω × r. */
+        getVelocityAtPoint(worldPoint, out) {
+          this._r.subVectors(worldPoint, this.pos);
+          this._rotVel.crossVectors(this.angVel, this._r);
+          return out.addVectors(this.vel, this._rotVel);
+        }
+
+        /** Semi-implicit Euler step. Call after all forces applied. Clears accums. */
+        integrate(dt) {
+          // Linear: a = F/m
+          this.vel.x += this.forceAccum.x * this.invMass * dt;
+          this.vel.y += this.forceAccum.y * this.invMass * dt;
+          this.vel.z += this.forceAccum.z * this.invMass * dt;
+          this.pos.x += this.vel.x * dt;
+          this.pos.y += this.vel.y * dt;
+          this.pos.z += this.vel.z * dt;
+
+          // Angular: world-space inverse inertia = R · I_local⁻¹ · Rᵀ
+          this._mat.makeRotationFromQuaternion(this.quat);
+          this._R3.setFromMatrix4(this._mat);
+          this._R3t.copy(this._R3).transpose();
+          this._worldInvI
+            .copy(this._R3)
+            .multiply(this.localInvInertia)
+            .multiply(this._R3t);
+
+          // α = I_world⁻¹ · τ
+          this._tau.copy(this.torqueAccum).applyMatrix3(this._worldInvI);
+          this.angVel.x += this._tau.x * dt;
+          this.angVel.y += this._tau.y * dt;
+          this.angVel.z += this._tau.z * dt;
+
+          // Quaternion: q̇ = 0.5 · ω_quat · q  (ω_quat = (ωx, ωy, ωz, 0))
+          const wx = this.angVel.x, wy = this.angVel.y, wz = this.angVel.z;
+          const qx = this.quat.x, qy = this.quat.y, qz = this.quat.z, qw = this.quat.w;
+          const dqx = 0.5 * ( wx * qw + wy * qz - wz * qy);
+          const dqy = 0.5 * (-wx * qz + wy * qw + wz * qx);
+          const dqz = 0.5 * ( wx * qy - wy * qx + wz * qw);
+          const dqw = 0.5 * (-wx * qx - wy * qy - wz * qz);
+          this.quat.set(qx + dqx * dt, qy + dqy * dt, qz + dqz * dt, qw + dqw * dt);
+          this.quat.normalize();
+
+          this.forceAccum.set(0, 0, 0);
+          this.torqueAccum.set(0, 0, 0);
+        }
+      }
+
+      // ============================================================
+      // === TIRE — raycast probe + 3 forces (VVV pattern)
+      // ============================================================
+      class Tire {
+        constructor({ name, localPos, steer, drive }) {
+          this.name = name;
+          this.localPos = localPos.clone();
+          this.canSteer = steer;
+          this.canDrive = drive;
+
+          this.grounded = false;
+          this.compression = 0;
+          this.hitDistance = TIRE.rayLength;
+          this.hitPoint = new THREE.Vector3();
+          this.worldPos = new THREE.Vector3();
+          this.lastSuspension = new THREE.Vector3();
+          this.lastSteering = new THREE.Vector3();
+          this.lastAccel = new THREE.Vector3();
+
+          // Scratch
+          this._tireVel = new THREE.Vector3();
+          this._up = new THREE.Vector3();
+          this._fwd = new THREE.Vector3();
+          this._right = new THREE.Vector3();
+          this._wheelFwd = new THREE.Vector3();
+          this._wheelRight = new THREE.Vector3();
+          this._steerQuat = new THREE.Quaternion();
+          this._F = new THREE.Vector3();
+        }
+
+        apply(body, dt, steerAngle, throttle, handbrake, raycaster, collidables) {
+          // World-space hub position
+          this.worldPos.copy(this.localPos).applyQuaternion(body.quat).add(body.pos);
+
+          // Body basis vectors in world space
+          this._up.set(0, 1, 0).applyQuaternion(body.quat);
+          this._fwd.set(0, 0, 1).applyQuaternion(body.quat);
+          this._right.set(1, 0, 0).applyQuaternion(body.quat);
+
+          // Apply steer to front wheels: rotate forward/right around up
+          this._wheelFwd.copy(this._fwd);
+          this._wheelRight.copy(this._right);
+          if (this.canSteer && steerAngle !== 0) {
+            this._steerQuat.setFromAxisAngle(this._up, steerAngle);
+            this._wheelFwd.applyQuaternion(this._steerQuat);
+            this._wheelRight.applyQuaternion(this._steerQuat);
+          }
+
+          // Cast 3 rays: center, forward-offset, rear-offset. All start
+          // `rayPadAbove` above the hub and shoot DOWN (−chassis up). Take the
+          // hit with the smallest distance = highest surface seen by any
+          // sample. This treats the wheel as a forward-aft segment instead of
+          // a point, so the leading edge of the wheel catches ramps/steps
+          // before the hub gets there.
+          const pad = TIRE.rayPadAbove;
+          const fwdBias = TIRE.rayForwardBias * WHEEL.radius;
+          raycaster.ray.direction.copy(this._up).multiplyScalar(-1);
+          raycaster.far = TIRE.rayLength + pad;
+
+          let bestDist = Infinity;
+          let bestPoint = null;
+
+          // Center
+          raycaster.ray.origin.copy(this.worldPos).addScaledVector(this._up, pad);
+          const hitsC = raycaster.intersectObjects(collidables, false);
+          if (hitsC.length > 0 && hitsC[0].distance < bestDist) {
+            bestDist = hitsC[0].distance;
+            bestPoint = hitsC[0].point;
+          }
+
+          if (fwdBias > 1e-4) {
+            // Forward
+            raycaster.ray.origin.copy(this.worldPos)
+              .addScaledVector(this._up, pad)
+              .addScaledVector(this._wheelFwd,  fwdBias);
+            const hitsF = raycaster.intersectObjects(collidables, false);
+            if (hitsF.length > 0 && hitsF[0].distance < bestDist) {
+              bestDist = hitsF[0].distance;
+              bestPoint = hitsF[0].point;
+            }
+            // Rear
+            raycaster.ray.origin.copy(this.worldPos)
+              .addScaledVector(this._up, pad)
+              .addScaledVector(this._wheelFwd, -fwdBias);
+            const hitsR = raycaster.intersectObjects(collidables, false);
+            if (hitsR.length > 0 && hitsR[0].distance < bestDist) {
+              bestDist = hitsR[0].distance;
+              bestPoint = hitsR[0].point;
+            }
+          }
+
+          // Lateral samples: ±latBias along the wheel's right axis. Catches
+          // kerbs/edges that only the left or right side of the tire touches
+          // (the "5-ray contact patch" model from AAA racing engines).
+          const latBias = TIRE.rayLateralBias * WHEEL.thickness * 0.5;
+          if (latBias > 1e-4) {
+            // Right side
+            raycaster.ray.origin.copy(this.worldPos)
+              .addScaledVector(this._up, pad)
+              .addScaledVector(this._wheelRight,  latBias);
+            const hitsRt = raycaster.intersectObjects(collidables, false);
+            if (hitsRt.length > 0 && hitsRt[0].distance < bestDist) {
+              bestDist = hitsRt[0].distance;
+              bestPoint = hitsRt[0].point;
+            }
+            // Left side
+            raycaster.ray.origin.copy(this.worldPos)
+              .addScaledVector(this._up, pad)
+              .addScaledVector(this._wheelRight, -latBias);
+            const hitsLt = raycaster.intersectObjects(collidables, false);
+            if (hitsLt.length > 0 && hitsLt[0].distance < bestDist) {
+              bestDist = hitsLt[0].distance;
+              bestPoint = hitsLt[0].point;
+            }
+          }
+
+          this.lastSuspension.set(0, 0, 0);
+          this.lastSteering.set(0, 0, 0);
+          this.lastAccel.set(0, 0, 0);
+
+          if (bestDist === Infinity) {
+            this.grounded = false;
+            this.compression = 0;
+            this.hitDistance = TIRE.rayLength;
+            return;
+          }
+
+          this.grounded = true;
+          this.hitPoint.copy(bestPoint);
+          // distFromHub: signed distance from hub down to surface.
+          //   + = surface below hub (normal driving)
+          //   − = surface above hub (chassis has tunneled — spring snap-out)
+          const distFromHub = bestDist - pad;
+          this.hitDistance = distFromHub;
+          this.compression = TIRE.restLength - distFromHub;
+
+          // Velocity of the contact point (body-fixed)
+          body.getVelocityAtPoint(this.worldPos, this._tireVel);
+
+          // ---- 1) SUSPENSION FORCE (vertical) ----
+          // F_susp = (offset · k − v·up · c) · up   (clamped ≥ 0 = no pull)
+          //   + quadratic bottom-out when compression > bottomOutThresh × restLength.
+          // The quadratic term is what stops the chassis tunneling through ramps
+          // at high speed: when penetration grows, force grows quadratically, so
+          // the chassis snaps back to the surface within a few substeps.
+          const upVel = this._tireVel.dot(this._up);
+          let springMag = this.compression * TIRE.springStrength;
+          const ovr = this.compression - TIRE.restLength * TIRE.bottomOutThresh;
+          if (ovr > 0) {
+            springMag += ovr * ovr * TIRE.springStrength * TIRE.bottomOutMult;
+          }
+          const dampMag = upVel * TIRE.damper;
+          const suspMag = Math.max(0, springMag - dampMag);
+          this._F.copy(this._up).multiplyScalar(suspMag);
+          body.addForceAtPoint(this._F, this.worldPos);
+          this.lastSuspension.copy(this._F);
+
+          // ---- 2) STEERING FORCE (lateral — kills sideways tire velocity) ----
+          // Treat each tire as having mass = chassis/4. Compute the force needed
+          // to cancel `gripFactor` of its lateral velocity in this step, then
+          // clamp by the friction circle: |F_lat| ≤ μ × Fn. This is THE missing
+          // piece that makes the car saturate (drift) instead of snap-flipping.
+          const sideVel = this._tireVel.dot(this._wheelRight);
+          const grip = this.canSteer
+            ? TIRE.gripFront
+            : (handbrake ? TIRE.gripHandbrake : TIRE.gripRear);
+          const desiredVelChange = -sideVel * grip;
+          const tireMass = body.mass / 4;
+          let steerMag = tireMass * (desiredVelChange / dt);
+          const maxLat = TIRE.frictionCoeff * suspMag;
+          if (steerMag > maxLat) steerMag = maxLat;
+          else if (steerMag < -maxLat) steerMag = -maxLat;
+          this._F.copy(this._wheelRight).multiplyScalar(steerMag);
+          body.addForceAtPoint(this._F, this.worldPos);
+          this.lastSteering.copy(this._F);
+
+          // ---- 3) LONGITUDINAL FORCE — accel / brake / reverse / engine brake ----
+          // Branch on the SIGN of throttle vs the SIGN of forward velocity:
+          //   W + going forward (or stopped)  → accel (power-curve)
+          //   W + going backward              → BRAKE (decelerate reverse motion)
+          //   S + going forward               → BRAKE (decelerate forward motion)
+          //   S + going backward (or stopped) → reverse (power-curve, weaker)
+          //   no input                        → engine brake
+          // Threshold prevents brake/reverse oscillation near 0 m/s.
+          if (this.canDrive) {
+            let accelMag = 0;
+            const carSpeed = body.vel.dot(this._fwd);    // signed chassis-forward speed
+            const thr = TIRE.brakeReverseThreshold;
+
+            if (throttle > 0) {
+              if (carSpeed < -thr) {
+                // Going backward, W pressed → brake the reverse motion
+                accelMag = TIRE.brakeForce;
+              } else {
+                const normSpeed = Math.min(1, Math.abs(carSpeed) / TIRE.topSpeed);
+                const power = Math.max(0, 1 - Math.pow(normSpeed, TIRE.powerCurveExp));
+                accelMag = TIRE.accelForce * power;
+              }
+            } else if (throttle < 0) {
+              if (carSpeed > thr) {
+                // Going forward, S pressed → brake the forward motion
+                accelMag = -TIRE.brakeForce;
+              } else {
+                const normSpeed = Math.min(1, Math.abs(carSpeed) / TIRE.topSpeed);
+                const power = Math.max(0, 1 - Math.pow(normSpeed, TIRE.powerCurveExp));
+                accelMag = -TIRE.reverseAccel * power;
+              }
+            } else {
+              // Engine brake when neither W nor S held
+              const fwdVel = this._tireVel.dot(this._wheelFwd);
+              accelMag = -Math.sign(fwdVel) * Math.min(
+                Math.abs(fwdVel) * 200,
+                TIRE.engineBrake,
+              );
+            }
+
+            // Friction circle on longitudinal force: same physics as the
+            // lateral clamp — tires can only generate up to μ·Fn of force in
+            // any horizontal direction. This is what makes hard braking lock
+            // wheels (no more deceleration past the limit) and hard accel
+            // produce wheelspin (force capped, body doesn't actually accel
+            // faster). On unloaded wheels (Fn≈0) the wheel does nothing.
+            const maxLong = TIRE.frictionCoeff * suspMag;
+            if (accelMag >  maxLong) accelMag =  maxLong;
+            if (accelMag < -maxLong) accelMag = -maxLong;
+
+            this._F.copy(this._wheelFwd).multiplyScalar(accelMag);
+            body.addForceAtPoint(this._F, this.worldPos);
+            this.lastAccel.copy(this._F);
+          }
+        }
+      }
+
+      // ============================================================
+      // === SCENE / RENDERER
+      // ============================================================
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x4a5e7a);
+      scene.fog = new THREE.Fog(0x4a5e7a, 80, 260);
+
+      const camera = new THREE.PerspectiveCamera(
+        60, window.innerWidth / window.innerHeight, 0.1, 500,
+      );
+      camera.position.set(-8, 5, -10);
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.4;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.body.appendChild(renderer.domElement);
+
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // PMREM env for PBR reflections on the chassis/rims. WebGPU needs the
+      // backend initialized before PMREM can render to a cubemap, so we await
+      // renderer.init() (top-level await is fine inside a <script type=module>).
+      await renderer.init();
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      scene.environmentIntensity = 0.6;
+
+      // Lights — strong key + warm fill so the box reads pitch/roll clearly.
+      const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x4a3e30, 1.3);
+      scene.add(hemi);
+      const sun = new THREE.DirectionalLight(0xfff5d8, 3.0);
+      sun.position.set(50, 70, 30);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.camera.left = -50;
+      sun.shadow.camera.right = 50;
+      sun.shadow.camera.top = 50;
+      sun.shadow.camera.bottom = -50;
+      sun.shadow.camera.near = 0.5;
+      sun.shadow.camera.far = 220;
+      sun.shadow.bias = -0.0005;
+      scene.add(sun);
+      // Soft side fill so shadowed flank isn't black on the chassis.
+      const fill = new THREE.DirectionalLight(0xa8c0e0, 0.7);
+      fill.position.set(-30, 25, -20);
+      scene.add(fill);
+
+      // ============================================================
+      // === ENVIRONMENT — ground + test track
+      // ============================================================
+      /** Meshes the WHEEL probes treat as ground (drive on top). */
+      const collidables = [];
+      /** Meshes the CHASSIS lateral probes treat as walls. Kept separate so
+       *  wheels don't try to ride up the sides of walls. */
+      const wallColliders = [];
+
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(400, 400),
+        new THREE.MeshStandardMaterial({ color: 0x6a8060, roughness: 0.95 }),
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+      collidables.push(ground);
+
+      // Grid overlay for spatial sense
+      const grid = new THREE.GridHelper(200, 40, 0x8aa088, 0x506850);
+      grid.position.y = 0.01;
+      scene.add(grid);
+
+      // ---- Track-piece helpers ----
+      // Every collidable surface uses DoubleSide so chassis probes still detect
+      // a wall surface from inside (after a tunneling frame).
+      const _matRamp = (color) => new THREE.MeshStandardMaterial({
+        color, roughness: 0.85, side: THREE.DoubleSide,
+      });
+      const _matWall = (color) => new THREE.MeshStandardMaterial({
+        color, roughness: 0.7, side: THREE.DoubleSide,
+      });
+
+      /** Pitched ramp. Low edge sits at (x, 0, z); ramp tilts up in +Z. */
+      function addRamp({ x, z, w = 5, l = 8, angleDeg = 20, yawDeg = 0, color = 0x6a5436 }) {
+        const angle = THREE.MathUtils.degToRad(angleDeg);
+        const yaw = THREE.MathUtils.degToRad(yawDeg);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.4, l), _matRamp(color));
+        m.rotation.order = "YXZ";
+        m.rotation.y = yaw;
+        m.rotation.x = -angle;
+        // After tilting, the box center is sin(a)·l/2 higher and cos(a)·l/2 forward
+        // of the low edge.
+        m.position.set(x, Math.sin(angle) * l / 2, z + Math.cos(angle) * l / 2);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        scene.add(m);
+        collidables.push(m);
+        return m;
+      }
+
+      /** Axis-aligned rectangular slab sitting on the ground. */
+      function addStep({ x, z, w, h, l, color = 0x5e7a48 }) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), _matRamp(color));
+        m.position.set(x, h / 2, z);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        scene.add(m);
+        collidables.push(m);
+        return m;
+      }
+
+      /** Vertical wall — chassis probes only (not in `collidables`). */
+      function addWall({ x, z, w, h, l, color = 0x803a3a }) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), _matWall(color));
+        m.position.set(x, h / 2, z);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        scene.add(m);
+        wallColliders.push(m);
+        return m;
+      }
+
+      /** Laterally-tilted slope (banked turn). +X side is the low edge at y=0. */
+      function addBank({ x, z, w, l, bankDeg, color = 0x3a5060 }) {
+        const bank = THREE.MathUtils.degToRad(bankDeg);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.4, l), _matRamp(color));
+        m.rotation.z = -bank;
+        // Low edge (+X side) at world y=0 → mesh center at y = sin(bank)·w/2.
+        m.position.set(x, Math.sin(bank) * w / 2, z);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        scene.add(m);
+        collidables.push(m);
+        return m;
+      }
+
+      // ---- Build the test track ----
+      // === SLOPE LAB (N) — 5 ramps at 10°/20°/30°/40°/55°, lighter→darker ===
+      const slopeAngles = [10, 20, 30, 40, 55];
+      for (let i = 0; i < slopeAngles.length; i++) {
+        const tint = 0.50 - i * 0.06;
+        const color = new THREE.Color().setHSL(0.085, 0.40, tint).getHex();
+        addRamp({ x: -10 + i * 5, z: 8, w: 4, l: 8, angleDeg: slopeAngles[i], color });
+      }
+
+      // === STEPS / CURBS (S, easy) ===
+      addStep({ x: 0, z: -10, w: 8, h: 0.18, l: 1.2, color: 0x4a6038 });
+      addStep({ x: 0, z: -13, w: 8, h: 0.35, l: 1.5, color: 0x3a5028 });
+
+      // === JUMP KICKER (S, dramatic) ===
+      addRamp({ x: 0, z: -20, w: 5, l: 5, angleDeg: 35, color: 0xd97a3a });
+
+      // === BUMPY STRIP (far S) — high-frequency suspension chatter ===
+      for (let i = 0; i < 6; i++) {
+        addStep({ x: 0, z: -30 - i * 1.4, w: 6, h: 0.14, l: 0.55, color: 0x6e8050 });
+      }
+
+      // === BANKED TURN (E) — lateral grip + friction circle ===
+      addBank({ x: 20, z: 0, w: 10, l: 16, bankDeg: 25, color: 0x3a5060 });
+
+      // === WALL CORRIDOR (W) — drive between two walls, dead-end at the north ===
+      addWall({ x: -22, z: 0, w: 0.5, h: 2.5, l: 12, color: 0x803a3a }); // outer
+      addWall({ x: -16, z: 0, w: 0.5, h: 2.5, l: 12, color: 0x803a3a }); // inner
+      addWall({ x: -19, z: 6.5, w: 6.5, h: 2.5, l: 0.5, color: 0xc04444 }); // dead-end
+
+      // === SINGLE WALL near spawn — quick collision sanity check ===
+      addWall({ x: 6, z: 5, w: 0.5, h: 2, l: 4, color: 0xa05030 });
+
+      // ============================================================
+      // === CHASSIS (visible box) + RIGID BODY
+      // ============================================================
+      const SPAWN = { x: 0, y: 0.65, z: 0 };
+
+      const chassisMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(CHASSIS.width, CHASSIS.height, CHASSIS.length),
+        new THREE.MeshStandardMaterial({
+          color: 0x5b6cd6,
+          roughness: 0.55,
+          metalness: 0.3,
+        }),
+      );
+      chassisMesh.castShadow = true;
+      chassisMesh.receiveShadow = true;
+      scene.add(chassisMesh);
+
+      // Local-frame axis gizmo on the chassis — clarifies forward (blue) and
+      // right (red) at a glance.
+      const chassisAxes = new THREE.AxesHelper(1.2);
+      chassisMesh.add(chassisAxes);
+
+      const body = new RigidBody({ mass: CHASSIS.mass, size: CHASSIS });
+
+      const tires = WHEEL_LOCAL.map(
+        (w) => new Tire({ name: w.name, localPos: w.pos, steer: w.steer, drive: w.drive }),
+      );
+
+      // Cylinder tire + rim meshes. Cylinder default axis is +Y; rotate Z by 90°
+      // so the axis points along chassis +X (sideways).
+      const tireGeo = new THREE.CylinderGeometry(WHEEL.radius, WHEEL.radius, WHEEL.thickness, 28);
+      tireGeo.rotateZ(Math.PI / 2);
+      const tireMat = new THREE.MeshStandardMaterial({
+        color: 0x141414, roughness: 0.85, metalness: 0.0,
+      });
+      const rimGeo = new THREE.CylinderGeometry(WHEEL.rimRadius, WHEEL.rimRadius, WHEEL.rimWidth, 18);
+      rimGeo.rotateZ(Math.PI / 2);
+      const rimMat = new THREE.MeshStandardMaterial({
+        color: 0xb0b8c0, roughness: 0.35, metalness: 0.85,
+      });
+      // Spoke disc — flat ring with a 4-spoke look (just a darker disc inside rim).
+      const spokeGeo = new THREE.CircleGeometry(WHEEL.rimRadius * 0.92, 6);
+      const spokeMat = new THREE.MeshStandardMaterial({
+        color: 0x2a3038, roughness: 0.5, metalness: 0.6, side: THREE.DoubleSide,
+      });
+
+      const tireGroups = tires.map(() => {
+        const g = new THREE.Group();
+        const tire = new THREE.Mesh(tireGeo, tireMat);
+        const rim = new THREE.Mesh(rimGeo, rimMat);
+        tire.castShadow = true;
+        rim.castShadow = true;
+        g.add(tire, rim);
+        // Spoke discs on both outer faces of the rim.
+        const spokeL = new THREE.Mesh(spokeGeo, spokeMat);
+        const spokeR = new THREE.Mesh(spokeGeo, spokeMat);
+        spokeL.position.x = -WHEEL.rimWidth / 2 - 0.001;
+        spokeR.position.x =  WHEEL.rimWidth / 2 + 0.001;
+        spokeL.rotation.y = Math.PI / 2;
+        spokeR.rotation.y = -Math.PI / 2;
+        g.add(spokeL, spokeR);
+        scene.add(g);
+        return g;
+      });
+
+      // Force arrows — 3 per tire (suspension green, steering blue, accel red).
+      const arrowGroup = new THREE.Group();
+      scene.add(arrowGroup);
+      const arrows = tires.map(() => {
+        const up   = new THREE.ArrowHelper(new THREE.Vector3(0,1,0), new THREE.Vector3(), 0.1, 0x60ff80, 0.18, 0.10);
+        const side = new THREE.ArrowHelper(new THREE.Vector3(1,0,0), new THREE.Vector3(), 0.1, 0x4090ff, 0.18, 0.10);
+        const fwd  = new THREE.ArrowHelper(new THREE.Vector3(0,0,1), new THREE.Vector3(), 0.1, 0xff5060, 0.18, 0.10);
+        arrowGroup.add(up, side, fwd);
+        return { up, side, fwd };
+      });
+
+      // ============================================================
+      // === INPUT
+      // ============================================================
+      const keys = {};
+      window.addEventListener("keydown", (e) => {
+        keys[e.code] = true;
+        if (e.code === "KeyR") respawn();
+        if (e.code === "KeyF") {
+          visParams.showArrows = !visParams.showArrows;
+          arrowGroup.visible = visParams.showArrows;
+          pane.refresh();
+        }
+        if (e.code === "Tab") {
+          e.preventDefault();
+          orbitControls.enabled = !orbitControls.enabled;
+        }
+      });
+      window.addEventListener("keyup", (e) => {
+        keys[e.code] = false;
+      });
+
+      const input = {
+        steer: 0,         // smoothed −1..+1
+        steerTarget: 0,
+        throttle: 0,      // −1..+1
+        handbrake: false,
+      };
+
+      function readInput(dt) {
+        const left = (keys.KeyA || keys.ArrowLeft) ? 1 : 0;
+        const right = (keys.KeyD || keys.ArrowRight) ? 1 : 0;
+        input.steerTarget = left - right;
+        // Exponential smoothing
+        const k = 1 - Math.exp(-TIRE.steerSmooth * dt);
+        input.steer += (input.steerTarget - input.steer) * k;
+
+        const fwd = (keys.KeyW || keys.ArrowUp) ? 1 : 0;
+        const back = (keys.KeyS || keys.ArrowDown) ? 1 : 0;
+        input.throttle = fwd - back;
+
+        input.handbrake = !!keys.Space;
+      }
+
+      // ============================================================
+      // === CHASE CAMERA + ORBIT TOGGLE
+      // ============================================================
+      const orbitControls = new OrbitControls(camera, renderer.domElement);
+      orbitControls.enabled = false;
+      orbitControls.target.set(0, 1, 0);
+
+      const camTarget = new THREE.Vector3();
+      const camDesired = new THREE.Vector3();
+      const camLookAt = new THREE.Vector3();
+      const CAM_OFFSET = new THREE.Vector3(0, 3.2, -7.5); // behind + above
+      const CAM_LERP = 6;
+
+      function updateCamera(dt) {
+        if (orbitControls.enabled) {
+          orbitControls.target.copy(body.pos);
+          orbitControls.update();
+          return;
+        }
+        // Chase: offset in body frame, then lerp camera toward it
+        camTarget.copy(CAM_OFFSET).applyQuaternion(
+          new THREE.Quaternion().setFromEuler(new THREE.Euler(0, _yawOnly(body.quat), 0, "YXZ")),
+        );
+        camDesired.copy(body.pos).add(camTarget);
+        const k = 1 - Math.exp(-CAM_LERP * dt);
+        camera.position.lerp(camDesired, k);
+        camLookAt.copy(body.pos).add(new THREE.Vector3(0, 0.8, 0));
+        camera.lookAt(camLookAt);
+      }
+
+      /** Extract yaw-only from a quaternion (ignores pitch/roll for camera). */
+      function _yawOnly(q) {
+        // yaw around Y from quaternion
+        const siny_cosp = 2 * (q.w * q.y + q.z * q.x);
+        const cosy_cosp = 1 - 2 * (q.y * q.y + q.x * q.x);
+        return Math.atan2(siny_cosp, cosy_cosp);
+      }
+
+      // ============================================================
+      // === RESPAWN
+      // ============================================================
+      function respawn() {
+        body.pos.set(SPAWN.x, SPAWN.y, SPAWN.z);
+        body.vel.set(0, 0, 0);
+        body.quat.identity();
+        body.angVel.set(0, 0, 0);
+      }
+      respawn();
+
+      // ============================================================
+      // === PHYSICS STEP (substepped)
+      // ============================================================
+      const raycaster = new THREE.Raycaster();
+      const SUBSTEPS = 4;
+      const _gravityF = new THREE.Vector3();
+
+      // 8 corners of the chassis in local space — used for box-vs-ground
+      // contact so the body can't fall through when wheels lose contact
+      // (e.g. after a flip). When the box rolls, side corners become bottom
+      // corners; we check all 8 every step.
+      const _hw = CHASSIS.width  / 2;
+      const _hh = CHASSIS.height / 2;
+      const _hl = CHASSIS.length / 2;
+      const CHASSIS_CORNERS = [
+        new THREE.Vector3(-_hw, -_hh, -_hl), new THREE.Vector3( _hw, -_hh, -_hl),
+        new THREE.Vector3(-_hw,  _hh, -_hl), new THREE.Vector3( _hw,  _hh, -_hl),
+        new THREE.Vector3(-_hw, -_hh,  _hl), new THREE.Vector3( _hw, -_hh,  _hl),
+        new THREE.Vector3(-_hw,  _hh,  _hl), new THREE.Vector3( _hw,  _hh,  _hl),
+      ];
+      const CORNER_SPRING = 180000;   // stiff contact
+      const CORNER_DAMPER = 6000;
+      const CORNER_FRICTION = 0.6;    // sliding friction when corner is on ground
+
+      const _cWorld = new THREE.Vector3();
+      const _cVel = new THREE.Vector3();
+      const _cF = new THREE.Vector3();
+      const _cVelHoriz = new THREE.Vector3();
+      const _stabUp = new THREE.Vector3();
+      const _stabTorque = new THREE.Vector3();
+
+      /** Anti-roll / anti-pitch torque. Pulls chassis-up toward world-up
+       *  whenever at least one wheel is grounded and the chassis hasn't tipped
+       *  past sideways. Keeps the car planted in hard turns but DOESN'T auto-
+       *  right after a full crash — that needs a respawn. */
+      function applyStabilizer(body, tires) {
+        if (TIRE.stabilizerStrength <= 0) return;
+        let grounded = 0;
+        for (let i = 0; i < tires.length; i++) if (tires[i].grounded) grounded++;
+        if (grounded === 0) return;
+
+        _stabUp.set(0, 1, 0).applyQuaternion(body.quat);
+        const cosT = _stabUp.y;          // 1 upright, 0 sideways, -1 inverted
+        if (cosT < 0.3) return;           // tipped past stabilization threshold
+
+        // Torque axis = chassisUp × worldUp = (-up.z, 0, up.x).
+        // Magnitude scales with (1 − cos θ) ≈ ½θ² for small angles, but using
+        // the linear form here is the same effect at small tilts and cheaper.
+        const tilt = 1 - cosT;
+        const k = TIRE.stabilizerStrength * tilt;
+        _stabTorque.set(-_stabUp.z * k, 0, _stabUp.x * k);
+        body.torqueAccum.add(_stabTorque);
+      }
+
+      /** Apply spring-damper force at every chassis corner that's below y=0.
+       *  Lets the box land on its side and slide instead of falling through. */
+      function applyChassisGroundContact(body) {
+        for (let i = 0; i < CHASSIS_CORNERS.length; i++) {
+          _cWorld.copy(CHASSIS_CORNERS[i]).applyQuaternion(body.quat).add(body.pos);
+          if (_cWorld.y >= 0) continue;
+
+          const pen = -_cWorld.y;
+          body.getVelocityAtPoint(_cWorld, _cVel);
+
+          // Vertical: spring up + damper opposing downward motion
+          const dampMag = Math.max(0, -_cVel.y) * CORNER_DAMPER;
+          const upMag = pen * CORNER_SPRING + dampMag;
+          _cF.set(0, upMag, 0);
+          body.addForceAtPoint(_cF, _cWorld);
+
+          // Horizontal: kinetic friction proportional to normal force
+          _cVelHoriz.set(_cVel.x, 0, _cVel.z);
+          const horizSpeed = _cVelHoriz.length();
+          if (horizSpeed > 0.01) {
+            _cVelHoriz.multiplyScalar(1 / horizSpeed);
+            const fricMag = -CORNER_FRICTION * upMag;
+            _cF.set(_cVelHoriz.x * fricMag, 0, _cVelHoriz.z * fricMag);
+            body.addForceAtPoint(_cF, _cWorld);
+          }
+        }
+      }
+
+      // ============================================================
+      // === CHASSIS LATERAL PROBES — wall collision
+      // ============================================================
+      /** Probe positions/directions in chassis-LOCAL space. Each probe shoots
+       *  a ray outward from the corresponding chassis face center, looking for
+       *  walls within `range`. Same "feeler + spring push-back" pattern as the
+       *  wheel suspension, but lateral. 4 probes is enough for axis-aligned
+       *  walls; for fully realistic off-center hits you'd add probes at corner
+       *  positions too. */
+      const PROBE_LOCALS = [
+        { name: "front", pos: new THREE.Vector3( 0,  0,  _hl), dir: new THREE.Vector3( 0, 0,  1) },
+        { name: "rear",  pos: new THREE.Vector3( 0,  0, -_hl), dir: new THREE.Vector3( 0, 0, -1) },
+        { name: "right", pos: new THREE.Vector3( _hw, 0,   0), dir: new THREE.Vector3( 1, 0,  0) },
+        { name: "left",  pos: new THREE.Vector3(-_hw, 0,   0), dir: new THREE.Vector3(-1, 0,  0) },
+      ];
+      const WALL = {
+        /** Feeler reach beyond the chassis face (m). Must exceed expected
+         *  wall thickness so a probe inside the wall can still reach the far
+         *  face (with DoubleSide material). */
+        probeRange: 0.9,
+        /** Repulsion spring stiffness (N/m). High enough to actually stop a
+         *  1400kg car at moderate speed within a few cm of penetration. */
+        stiffness:  300000,
+        /** Damper coefficient — opposes inward velocity (N·s/m). */
+        damper:     14000,
+        /** Penetration fraction (0..1) above which we hard-clamp the body's
+         *  velocity toward the wall to zero. Keeps things stable when the
+         *  spring alone can't stop the car. */
+        clampPenFrac: 0.4,
+      };
+
+      const _probeOrigin = new THREE.Vector3();
+      const _probeDirW = new THREE.Vector3();
+      const _probeVel = new THREE.Vector3();
+      const _probeF = new THREE.Vector3();
+      /** Last-hit info per probe for debug visualization. */
+      const probeHits = PROBE_LOCALS.map(() => ({ hit: false, point: new THREE.Vector3() }));
+
+      function applyChassisWallProbes(body) {
+        for (let i = 0; i < PROBE_LOCALS.length; i++) {
+          const p = PROBE_LOCALS[i];
+          probeHits[i].hit = false;
+
+          _probeOrigin.copy(p.pos).applyQuaternion(body.quat).add(body.pos);
+          _probeDirW.copy(p.dir).applyQuaternion(body.quat);
+
+          raycaster.ray.origin.copy(_probeOrigin);
+          raycaster.ray.direction.copy(_probeDirW);
+          raycaster.far = WALL.probeRange;
+
+          const hits = raycaster.intersectObjects(wallColliders, false);
+          if (hits.length === 0) continue;
+
+          const hit = hits[0];
+          const pen = WALL.probeRange - hit.distance;
+          if (pen <= 0) continue;
+
+          // Velocity of the chassis point AT the contact location.
+          body.getVelocityAtPoint(hit.point, _probeVel);
+          const inwardVel = _probeVel.dot(_probeDirW); // + = moving into wall
+          const dampMag = Math.max(0, inwardVel) * WALL.damper;
+          const forceMag = pen * WALL.stiffness + dampMag;
+
+          // Force points BACK along probe direction (away from wall).
+          _probeF.copy(_probeDirW).multiplyScalar(-forceMag);
+          body.addForceAtPoint(_probeF, hit.point);
+
+          // Hard velocity clamp when penetration is deep — kills the inward
+          // velocity component directly so the spring force doesn't have to
+          // overpower fast incoming momentum.
+          if (pen > WALL.probeRange * WALL.clampPenFrac) {
+            const vInto = body.vel.dot(_probeDirW);
+            if (vInto > 0) {
+              body.vel.addScaledVector(_probeDirW, -vInto);
+            }
+          }
+
+          probeHits[i].hit = true;
+          probeHits[i].point.copy(hit.point);
+        }
+      }
+
+      // ============================================================
+      // === AABB DEPENETRATION — last-resort wall fallback
+      // ============================================================
+      /** Pre-computed world AABBs of every wall (walls don't move so we
+       *  cache once). Saves a Box3.setFromObject call every frame. */
+      const wallBoxes = wallColliders.map((w) => {
+        const b = new THREE.Box3().setFromObject(w);
+        return b;
+      });
+      const _depenDir = new THREE.Vector3();
+
+      /** If the body CoM is inside any wall's AABB, teleport it out along
+       *  the shortest exit axis and kill velocity along that axis. This is
+       *  the "I tunneled fully through" recovery — probes can't help once
+       *  the body is past the wall, but AABB containment still catches it. */
+      function depenetrateFromWalls(body) {
+        const c = body.pos;
+        for (let i = 0; i < wallBoxes.length; i++) {
+          const box = wallBoxes[i];
+          if (c.x < box.min.x || c.x > box.max.x) continue;
+          if (c.y < box.min.y || c.y > box.max.y) continue;
+          if (c.z < box.min.z || c.z > box.max.z) continue;
+
+          // Find the smallest horizontal exit (skip Y — walls extend above
+          // ground and we'd otherwise pop the body straight up through them).
+          const dx_min = c.x - box.min.x;
+          const dx_max = box.max.x - c.x;
+          const dz_min = c.z - box.min.z;
+          const dz_max = box.max.z - c.z;
+
+          let minD = dx_min;
+          _depenDir.set(-1, 0, 0);
+          if (dx_max < minD) { minD = dx_max; _depenDir.set( 1, 0, 0); }
+          if (dz_min < minD) { minD = dz_min; _depenDir.set( 0, 0, -1); }
+          if (dz_max < minD) { minD = dz_max; _depenDir.set( 0, 0,  1); }
+
+          c.addScaledVector(_depenDir, minD + 0.05);
+          const vDot = body.vel.dot(_depenDir);
+          if (vDot < 0) body.vel.addScaledVector(_depenDir, -vDot);
+        }
+      }
+
+      function physicsStep(dt) {
+        const subDt = dt / SUBSTEPS;
+        const steerAngle = input.steer * TIRE.maxSteerAngle;
+
+        for (let s = 0; s < SUBSTEPS; s++) {
+          // Gravity at CoM
+          _gravityF.set(0, -GRAVITY * body.mass, 0);
+          body.addForce(_gravityF);
+
+          // Tire forces
+          for (const tire of tires) {
+            tire.apply(
+              body, subDt, steerAngle,
+              input.throttle, input.handbrake,
+              raycaster, collidables,
+            );
+          }
+
+          // Lateral wall probes (chassis-vs-wall collision response)
+          applyChassisWallProbes(body);
+
+          // Chassis corner contact (fallback ground for the box itself)
+          applyChassisGroundContact(body);
+
+          // Anti-roll / anti-pitch stabilizer (only while grounded + upright-ish)
+          applyStabilizer(body, tires);
+
+          // Integrate
+          body.integrate(subDt);
+
+          // Defensive angular velocity cap — prevents numerical runaway
+          // (e.g. when a corner contact spike coincides with a tire spike).
+          const wSq = body.angVel.lengthSq();
+          const wMax = TIRE.maxAngVel;
+          if (wSq > wMax * wMax) {
+            body.angVel.setLength(wMax);
+          }
+        }
+      }
+
+      // ============================================================
+      // === VISUAL SYNC + DEBUG ARROWS
+      // ============================================================
+      const _wheelUp = new THREE.Vector3();
+      const _wheelOffset = new THREE.Vector3();
+      const _steerLocalQ = new THREE.Quaternion();
+      const _spinLocalQ = new THREE.Quaternion();
+      const _wheelFwdWorld = new THREE.Vector3();
+      const _wheelTireVel = new THREE.Vector3();
+      const _yAxis = new THREE.Vector3(0, 1, 0);
+      const _xAxis = new THREE.Vector3(1, 0, 0);
+      const _zAxis = new THREE.Vector3(0, 0, 1);
+      /** Accumulated spin angle per wheel (rad). ω = forwardSpeed / radius. */
+      const wheelSpin = [0, 0, 0, 0];
+
+      function syncVisuals(dt) {
+        chassisMesh.position.copy(body.pos);
+        if (CHASSIS.visualLift !== 0) {
+          _wheelUp.set(0, 1, 0).applyQuaternion(body.quat);
+          chassisMesh.position.addScaledVector(_wheelUp, CHASSIS.visualLift);
+        }
+        chassisMesh.quaternion.copy(body.quat);
+
+        const steerAngle = input.steer * TIRE.maxSteerAngle;
+
+        for (let i = 0; i < tires.length; i++) {
+          const t = tires[i];
+          const cfg = WHEEL_LOCAL[i];
+
+          // --- POSITION ---
+          // Wheel center sits at (hub) − up_world · (suspension extension).
+          // Target distance: hit.distance when grounded, rayLength when airborne
+          // (full droop). Temporal lerp (`suspVisSmooth`) eases the transition
+          // between the two so the wheel doesn't snap on takeoff/landing.
+          // Clamp at 0 so a tunneling frame (hitDistance<0) doesn't pop the
+          // wheel above the hub.
+          _wheelUp.copy(_yAxis).applyQuaternion(body.quat);
+          const targetDist = t.grounded ? t.hitDistance : TIRE.rayLength;
+          if (t._smoothDist === undefined) t._smoothDist = targetDist;
+          const k = 1 - Math.exp(-TIRE.suspVisSmooth * dt);
+          t._smoothDist += (targetDist - t._smoothDist) * k;
+          const suspExt = Math.max(0, t._smoothDist - WHEEL.radius);
+          _wheelOffset.copy(_wheelUp).multiplyScalar(-suspExt);
+          tireGroups[i].position.copy(t.worldPos).add(_wheelOffset);
+
+          // --- SPIN RATE (axle rotation) ---
+          // Wheel forward in WORLD = chassis forward, rotated by steer angle
+          // around chassis-up. ω = (tireVel · wheelFwd) / radius.
+          _wheelFwdWorld.copy(_zAxis).applyQuaternion(body.quat);
+          if (cfg.steer && steerAngle !== 0) {
+            _steerLocalQ.setFromAxisAngle(_wheelUp, steerAngle);
+            _wheelFwdWorld.applyQuaternion(_steerLocalQ);
+          }
+          body.getVelocityAtPoint(t.worldPos, _wheelTireVel);
+          const fwdSpeed = _wheelTireVel.dot(_wheelFwdWorld);
+          const omega = fwdSpeed / WHEEL.radius;
+          wheelSpin[i] += omega * dt;
+          // Wrap to keep numbers bounded (avoids FP precision loss after long drives)
+          if (wheelSpin[i] > Math.PI * 2) wheelSpin[i] -= Math.PI * 2;
+          else if (wheelSpin[i] < -Math.PI * 2) wheelSpin[i] += Math.PI * 2;
+
+          // --- ORIENTATION: chassisQ × steerLocalQ × spinLocalQ ---
+          // Cylinder axis is local +X (geometry was rotated Z by π/2 at build
+          // time), so spin = rotation around local X. Apply order: spin first
+          // in wheel-local, then steer, then chassis.
+          _spinLocalQ.setFromAxisAngle(_xAxis, wheelSpin[i]);
+          if (cfg.steer) {
+            _steerLocalQ.setFromAxisAngle(_yAxis, steerAngle);
+            tireGroups[i].quaternion
+              .multiplyQuaternions(body.quat, _steerLocalQ)
+              .multiply(_spinLocalQ);
+          } else {
+            tireGroups[i].quaternion
+              .multiplyQuaternions(body.quat, _spinLocalQ);
+          }
+
+          // --- DEBUG ARROWS ---
+          const a = arrows[i];
+          _placeArrow(a.up,   t.worldPos, t.lastSuspension);
+          _placeArrow(a.side, t.worldPos, t.lastSteering);
+          _placeArrow(a.fwd,  t.worldPos, t.lastAccel);
+        }
+      }
+
+      const _arrowDir = new THREE.Vector3();
+      function _placeArrow(arrow, origin, force) {
+        const mag = force.length();
+        if (mag < 1e-3) {
+          arrow.setLength(0.001, 0.001, 0.001);
+          return;
+        }
+        _arrowDir.copy(force).normalize();
+        arrow.position.copy(origin);
+        arrow.setDirection(_arrowDir);
+        const visLen = Math.min(3.5, mag * visParams.arrowScale);
+        arrow.setLength(visLen, Math.min(0.25, visLen * 0.18), Math.min(0.16, visLen * 0.12));
+      }
+
+      // ============================================================
+      // === HUD
+      // ============================================================
+      const hudEl = document.getElementById("hud");
+      function updateHud() {
+        const speedKmh = body.vel.length() * 3.6;
+        const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(body.quat);
+        const fwdSpd = body.vel.dot(fwd);
+        const groundedCount = tires.reduce((n, t) => n + (t.grounded ? 1 : 0), 0);
+        const angSpeed = body.angVel.length();
+        hudEl.innerHTML = [
+          `<div><strong>Speed</strong> ${speedKmh.toFixed(0)} km/h · <strong>fwd</strong> ${fwdSpd.toFixed(1)} m/s</div>`,
+          `<div><strong>Contacts</strong> ${groundedCount}/4 · <strong>ω</strong> ${angSpeed.toFixed(2)} rad/s</div>`,
+          `<div style="opacity:0.7">Steer ${(input.steer * TIRE.maxSteerAngle * 57.3).toFixed(0)}° · Throttle ${input.throttle.toFixed(1)} ${input.handbrake ? "· HANDBRAKE" : ""}</div>`,
+        ].join("");
+      }
+
+      // ============================================================
+      // === TWEAKPANE — live tuning
+      // ============================================================
+      const pane = new Pane({ title: "VVV physics — tune" });
+      // Make the panel itself scrollable so we can reach controls below the
+      // viewport. The default Tweakpane wrapper is `position: fixed` with no
+      // overflow, so when the content grows past viewport height the bottom
+      // sliders are unreachable.
+      const _paneWrap = pane.element.parentElement;
+      _paneWrap.style.zIndex = "100";
+      _paneWrap.style.maxHeight = "calc(100vh - 24px)";
+      _paneWrap.style.overflowY = "auto";
+      _paneWrap.style.overflowX = "hidden";
+
+      const fSusp = pane.addFolder({ title: "Suspension" });
+      fSusp.addBinding(TIRE, "springStrength", { min: 5000, max: 150000, step: 500, label: "Spring k (N/m)" });
+      fSusp.addBinding(TIRE, "damper",         { min: 0,    max: 20000,  step: 50,  label: "Damper c" });
+      fSusp.addBinding(TIRE, "restLength",     { min: 0.2,  max: 1.5,    step: 0.01,label: "Rest length" });
+      fSusp.addBinding(TIRE, "rayLength",      { min: 0.3,  max: 2.0,    step: 0.01,label: "Ray length" });
+      fSusp.addBinding(TIRE, "rayPadAbove",    { min: 0,    max: 1.5,    step: 0.01,label: "Ray pad above" });
+      fSusp.addBinding(TIRE, "rayForwardBias", { min: 0,    max: 1.0,    step: 0.05,label: "Fwd/rear bias (×R)" });
+      fSusp.addBinding(TIRE, "rayLateralBias", { min: 0,    max: 1.5,    step: 0.05,label: "Lateral bias (×W/2)" });
+      fSusp.addBinding(TIRE, "bottomOutThresh",{ min: 0.3,  max: 1.0,    step: 0.05,label: "Bottom-out start" });
+      fSusp.addBinding(TIRE, "bottomOutMult",  { min: 0,    max: 30,     step: 0.5, label: "Bottom-out mult" });
+      fSusp.addBinding(TIRE, "suspVisSmooth",  { min: 0,    max: 40,     step: 0.5, label: "Susp visual smooth" });
+
+      const fSteer = pane.addFolder({ title: "Steering & grip" });
+      fSteer.addBinding(TIRE, "maxSteerAngle", { min: 0.1,  max: 1.2,  step: 0.01, label: "Max angle (rad)" });
+      fSteer.addBinding(TIRE, "steerSmooth",   { min: 1,    max: 30,   step: 0.5,  label: "Steer smooth" });
+      fSteer.addBinding(TIRE, "gripFront",     { min: 0,    max: 1,    step: 0.01, label: "Grip front" });
+      fSteer.addBinding(TIRE, "gripRear",      { min: 0,    max: 1,    step: 0.01, label: "Grip rear" });
+      fSteer.addBinding(TIRE, "gripHandbrake", { min: 0,    max: 1,    step: 0.01, label: "Grip handbrake" });
+      fSteer.addBinding(TIRE, "frictionCoeff",      { min: 0.3,  max: 12,   step: 0.1,  label: "Friction μ (cap)" });
+      fSteer.addBinding(TIRE, "maxAngVel",          { min: 3,    max: 20,   step: 0.5,  label: "Max ω (rad/s)" });
+      fSteer.addBinding(TIRE, "stabilizerStrength", { min: 0,    max: 30000,step: 200,  label: "Anti-roll torque" });
+
+      const fDrive = pane.addFolder({ title: "Drive" });
+      fDrive.addBinding(TIRE, "accelForce",            { min: 500,  max: 20000, step: 100,  label: "Accel force (N)" });
+      fDrive.addBinding(TIRE, "topSpeed",              { min: 5,    max: 80,    step: 1,    label: "Top speed (m/s)" });
+      fDrive.addBinding(TIRE, "powerCurveExp",         { min: 0.5,  max: 4,     step: 0.1,  label: "Power curve exp" });
+      fDrive.addBinding(TIRE, "brakeForce",            { min: 0,    max: 30000, step: 100,  label: "Brake force (N)" });
+      fDrive.addBinding(TIRE, "reverseAccel",          { min: 0,    max: 10000, step: 100,  label: "Reverse accel (N)" });
+      fDrive.addBinding(TIRE, "brakeReverseThreshold", { min: 0,    max: 5,     step: 0.05, label: "Brake/rev thresh" });
+      fDrive.addBinding(TIRE, "engineBrake",           { min: 0,    max: 5000,  step: 50,   label: "Engine brake (N)" });
+
+      const fVis = pane.addFolder({ title: "Visual" });
+      fVis.addBinding(visParams, "showArrows", { label: "Show force arrows" })
+        .on("change", (ev) => { arrowGroup.visible = ev.value; });
+      fVis.addBinding(visParams, "arrowScale", { min: 0.0001, max: 0.005, step: 0.0001, label: "Arrow scale" });
+      fVis.addBinding(renderer, "toneMappingExposure", { min: 0.3, max: 2.5, step: 0.05, label: "Exposure" });
+
+      const fWall = pane.addFolder({ title: "Wall collision (chassis probes)" });
+      fWall.addBinding(WALL, "probeRange",   { min: 0.05, max: 2.0,    step: 0.01, label: "Probe range (m)" });
+      fWall.addBinding(WALL, "stiffness",    { min: 5000, max: 800000, step: 5000, label: "Stiffness (N/m)" });
+      fWall.addBinding(WALL, "damper",       { min: 0,    max: 40000,  step: 200,  label: "Damper" });
+      fWall.addBinding(WALL, "clampPenFrac", { min: 0,    max: 1.0,    step: 0.05, label: "Vel-clamp pen frac" });
+
+      const fBody = pane.addFolder({ title: "Chassis" });
+      fBody.addBinding(CHASSIS, "mass",       { min: 400, max: 4000, step: 50,   label: "Mass (kg)" })
+        .on("change", rebuildBody);
+      fBody.addBinding(CHASSIS, "width",      { min: 0.8, max: 4.0,  step: 0.05, label: "Width (m)" })
+        .on("change", rebuildBody);
+      fBody.addBinding(CHASSIS, "height",     { min: 0.3, max: 2.5,  step: 0.05, label: "Height (m)" })
+        .on("change", rebuildBody);
+      fBody.addBinding(CHASSIS, "length",     { min: 1.5, max: 6.0,  step: 0.05, label: "Length (m)" })
+        .on("change", rebuildBody);
+      fBody.addBinding(CHASSIS, "visualLift", { min: -0.5, max: 2.0, step: 0.01, label: "Visual lift (m)" });
+
+      pane.addButton({ title: "Respawn (R)" }).on("click", respawn);
+
+      function rebuildBody() {
+        const { width: w, height: h, length: l } = CHASSIS;
+
+        // Inverse inertia tensor (depends on mass AND dimensions).
+        const Ixx = (CHASSIS.mass / 12) * (h * h + l * l);
+        const Iyy = (CHASSIS.mass / 12) * (w * w + l * l);
+        const Izz = (CHASSIS.mass / 12) * (w * w + h * h);
+        body.mass = CHASSIS.mass;
+        body.invMass = 1 / CHASSIS.mass;
+        body.localInvInertia.set(
+          1 / Ixx, 0, 0,
+          0, 1 / Iyy, 0,
+          0, 0, 1 / Izz,
+        );
+
+        // Re-place the 8 chassis corners (used by ground-contact fallback)
+        // and the 4 lateral wall probes — both live in the chassis-local
+        // frame and must follow the new box dimensions.
+        const hw = w * 0.5, hh = h * 0.5, hl = l * 0.5;
+        CHASSIS_CORNERS[0].set(-hw, -hh, -hl);
+        CHASSIS_CORNERS[1].set( hw, -hh, -hl);
+        CHASSIS_CORNERS[2].set(-hw,  hh, -hl);
+        CHASSIS_CORNERS[3].set( hw,  hh, -hl);
+        CHASSIS_CORNERS[4].set(-hw, -hh,  hl);
+        CHASSIS_CORNERS[5].set( hw, -hh,  hl);
+        CHASSIS_CORNERS[6].set(-hw,  hh,  hl);
+        CHASSIS_CORNERS[7].set( hw,  hh,  hl);
+
+        PROBE_LOCALS[0].pos.set(  0, 0,  hl); // front
+        PROBE_LOCALS[1].pos.set(  0, 0, -hl); // rear
+        PROBE_LOCALS[2].pos.set( hw, 0,   0); // right
+        PROBE_LOCALS[3].pos.set(-hw, 0,   0); // left
+
+        // Swap the visual BoxGeometry (dispose old to free GPU memory).
+        chassisMesh.geometry.dispose();
+        chassisMesh.geometry = new THREE.BoxGeometry(w, h, l);
+      }
+
+      // ============================================================
+      // === MAIN LOOP
+      // ============================================================
+      const timer = new THREE.Timer();
+      renderer.setAnimationLoop(() => {
+        timer.update();
+        const dt = Math.min(timer.getDelta(), 0.05);
+        readInput(dt);
+        physicsStep(dt);
+        depenetrateFromWalls(body);
+        syncVisuals(dt);
+        updateCamera(dt);
+        updateHud();
+        renderer.render(scene, camera);
+      });
+    </script>
+  </body>
+</html>

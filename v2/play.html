@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Game — Play</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0a0a0a;
+      }
+      canvas {
+        display: block;
+      }
+      /* Boot / loading + error overlay. Hidden once the world is playing. */
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        font-family: system-ui, -apple-system, sans-serif;
+        color: #cfcfcf;
+        background: #0a0a0a;
+        z-index: 9999;
+        transition: opacity 0.5s ease;
+      }
+      #boot.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #boot .spinner {
+        width: 34px;
+        height: 34px;
+        border: 3px solid #333;
+        border-top-color: #6ab0ff;
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      #boot .msg {
+        font-size: 14px;
+        letter-spacing: 0.02em;
+      }
+      #boot .err {
+        max-width: 640px;
+        padding: 12px 16px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #ff8c8c;
+        background: #1c0f0f;
+        border: 1px solid #532;
+        border-radius: 6px;
+        white-space: pre-wrap;
+        display: none;
+      }
+      /* "Click to Play" gate. A real user gesture is required before the
+         browser will grant Pointer Lock, so we can't auto-enter play. */
+      #play-btn {
+        display: none;
+        padding: 14px 34px;
+        font: 600 16px/1 system-ui, sans-serif;
+        letter-spacing: 0.04em;
+        color: #eee;
+        background: #2563aa;
+        border: 1px solid #6ab0ff;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      #play-btn:hover {
+        background: #2f74c8;
+      }
+      #boot .hint {
+        font-size: 12px;
+        color: #888;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="boot">
+      <div class="spinner" id="boot-spinner"></div>
+      <div class="msg" id="boot-msg">Loading engine…</div>
+      <button id="play-btn">▶ Click to Play</button>
+      <div class="hint" id="boot-hint" style="display: none">
+        Mouse to look · WASD to move · Esc to release the cursor
+      </div>
+      <div class="err" id="boot-err"></div>
+    </div>
+
+    <script type="module">
+      import { startV2App } from "./app/main.js";
+
+      // Which saved world to play. Copy your exported .v2terrain into the
+      // project's /public folder and point this at it (served at the web root).
+      // Override at runtime with ?scene=/my-other-world.v2terrain
+      const params = new URLSearchParams(location.search);
+      const SCENE_URL = params.get("scene") || "/scene.v2terrain";
+
+      const bootEl = document.getElementById("boot");
+      const msgEl = document.getElementById("boot-msg");
+      const errEl = document.getElementById("boot-err");
+      const spinnerEl = document.getElementById("boot-spinner");
+      const playBtn = document.getElementById("play-btn");
+      const hintEl = document.getElementById("boot-hint");
+
+      const setMsg = (t) => {
+        msgEl.textContent = t;
+      };
+      const fail = (label, e) => {
+        console.error(`[PLAY] ${label}`, e);
+        msgEl.textContent = label;
+        spinnerEl.style.display = "none";
+        errEl.style.display = "block";
+        errEl.textContent = `${label}\n\n${e?.stack || e?.message || e}`;
+      };
+
+      try {
+        setMsg("Starting renderer…");
+        const app = await startV2App();
+        // Expose for debugging in the console.
+        window.__app = app;
+
+        setMsg("Loading world…");
+        await app.loadProjectFromUrl(SCENE_URL);
+
+        // World is ready, but Pointer Lock needs a user gesture — show the
+        // "Click to Play" button and enter immersive play on click.
+        spinnerEl.style.display = "none";
+        setMsg("Ready");
+        playBtn.style.display = "inline-block";
+        hintEl.style.display = "block";
+
+        playBtn.addEventListener("click", () => {
+          // This click IS the user gesture that authorizes Pointer Lock.
+          app.setMode("play", { immersive: true });
+          bootEl.classList.add("hidden");
+          setTimeout(() => bootEl.remove(), 600);
+        });
+      } catch (e) {
+        fail("Failed to start the game.", e);
+      }
+    </script>
+  </body>
+</html>

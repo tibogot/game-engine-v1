@@ -1,0 +1,3500 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lotus — slope, jump &amp; wall test</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #0c1018;
+        color: #c8d8e8;
+        font-family: system-ui, sans-serif;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #ui {
+        position: fixed;
+        bottom: 12px;
+        left: 12px;
+        right: 12px;
+        max-width: 640px;
+        font-size: 12px;
+        line-height: 1.5;
+        background: rgba(0, 0, 0, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 10px 14px;
+        pointer-events: none;
+      }
+      #ui kbd {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      #ui a {
+        color: #8fd4ff;
+        pointer-events: auto;
+      }
+      #hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+        background: rgba(0, 0, 0, 0.65);
+        border: 1px solid rgba(120, 200, 255, 0.25);
+        border-radius: 8px;
+        padding: 8px 12px;
+        pointer-events: none;
+        line-height: 1.55;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/",
+          "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.9/build/index.module.js",
+          "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.20.0/dist/lil-gui.esm.min.js",
+          "howler": "https://esm.sh/howler@2.2.4"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="hud">Loading…</div>
+    <div id="ui">
+      <strong>lotusrealsize2.glb</strong> — BVH physics test track. Compare with
+      <a href="./lotus-circuit-parkour-rapier.html">Rapier version</a>.<br />
+      <kbd>WASD</kbd> drive · <kbd>Shift</kbd> boost ·
+      <kbd>Space</kbd> handbrake · <kbd>R</kbd> respawn · <kbd>L</kbd> rig log ·
+      <kbd>Tab</kbd> / <kbd>O</kbd> orbit<br />
+      <strong>Slope lab</strong> (north): 11 ramps 5°–55°.
+      <strong>Bridges</strong> (east/west): straight vs curved ramps. Jump ramp
+      south of spawn. Tall perimeter walls.
+    </div>
+    <script type="module">
+      import * as THREE from "three/webgpu";
+      import { acceleratedRaycast } from "three-mesh-bvh";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      import { SkyMesh } from "three/addons/objects/SkyMesh.js";
+      import GUI from "lil-gui";
+      import { Howl, Howler } from "howler";
+      import {
+        createTileMaterial,
+        setGridTextureUrl,
+      } from "../../v2/core/legacy/tileMaterial.js";
+      // v2 BVH + Lotus defaults — read-only. Parkour-specific physics overrides
+      // live in parkourCarPhysics.js (never modify v2/play/carPhysics.js).
+      import { CliffBvh } from "../v2/core/cliffs/cliffBvh.js";
+      import {
+        ParkourCarPhysics,
+        DEFAULT_LOTUS_COLLISION_HULL,
+        DEFAULT_LOTUS_CHASSIS,
+      } from "./parkourCarPhysics.js";
+
+      setGridTextureUrl(new URL("../textures/grid.png", import.meta.url).href);
+
+      THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
+      const DRIFT_ANGLE_MIN = 0.1;
+      let _handbrakeBlend = 0;
+      const DRIFT_MARK_MAX_SEGMENTS = 4096;
+      const DRIFT_MARK_VERTS_PER_SEGMENT = 6;
+      const DRIFT_MARK_FLOATS_PER_SEGMENT = DRIFT_MARK_VERTS_PER_SEGMENT * 3;
+      const DRIFT_MARK_COLOR_FLOATS_PER_SEGMENT =
+        DRIFT_MARK_VERTS_PER_SEGMENT * 4;
+      const DRIFT_MARK_WIDTH = 0.09;
+      const DRIFT_MARK_Y_OFFSET = 0.045;
+      const DRIFT_MARK_MIN_SEGMENT_LENGTH = 0.035;
+      const DRIFT_MARK_INTENSITY_MIN = 0.15;
+      const DRIFT_MARK_INTENSITY_MAX = 0.9;
+      const DRIFT_MARK_INV_INTENSITY_RANGE =
+        1 / (DRIFT_MARK_INTENSITY_MAX - DRIFT_MARK_INTENSITY_MIN);
+
+      const _dmDir = new THREE.Vector3();
+      const _dmSide = new THREE.Vector3();
+      const _dmPL = new THREE.Vector3();
+      const _dmPR = new THREE.Vector3();
+      const _dmCL = new THREE.Vector3();
+      const _dmCR = new THREE.Vector3();
+
+      class DriftMarks {
+        constructor(scene) {
+          const positions = new Float32Array(
+            DRIFT_MARK_MAX_SEGMENTS * DRIFT_MARK_FLOATS_PER_SEGMENT,
+          );
+          const colors = new Float32Array(
+            DRIFT_MARK_MAX_SEGMENTS * DRIFT_MARK_COLOR_FLOATS_PER_SEGMENT,
+          );
+          for (let i = 0; i < DRIFT_MARK_VERTS_PER_SEGMENT; i++) {
+            const o = i * 4;
+            colors[o] = colors[o + 1] = colors[o + 2] = 1;
+          }
+          const geometry = new THREE.BufferGeometry();
+          const posAttr = new THREE.BufferAttribute(positions, 3);
+          posAttr.setUsage(THREE.DynamicDrawUsage);
+          geometry.setAttribute("position", posAttr);
+          const colorAttr = new THREE.BufferAttribute(colors, 4);
+          colorAttr.setUsage(THREE.DynamicDrawUsage);
+          geometry.setAttribute("color", colorAttr);
+          geometry.setDrawRange(0, 0);
+          this.mesh = new THREE.Mesh(
+            geometry,
+            new THREE.MeshBasicMaterial({
+              color: 0x111111,
+              transparent: true,
+              vertexColors: true,
+              depthWrite: false,
+              side: THREE.DoubleSide,
+              polygonOffset: true,
+              polygonOffsetFactor: -4,
+              polygonOffsetUnits: -4,
+            }),
+          );
+          this.mesh.frustumCulled = false;
+          this.mesh.renderOrder = 20;
+          this.mesh.visible = false;
+          scene.add(this.mesh);
+          this.positions = positions;
+          this.colors = colors;
+          this.geometry = geometry;
+          this.segmentIndex = 0;
+          this.drawCount = 0;
+          this.states = [
+            { prev: new THREE.Vector3(), active: false },
+            { prev: new THREE.Vector3(), active: false },
+          ];
+        }
+        reset() {
+          this.segmentIndex = 0;
+          this.drawCount = 0;
+          this.geometry.setDrawRange(0, 0);
+          this.mesh.visible = false;
+          this.states[0].active = false;
+          this.states[1].active = false;
+        }
+        update(rearPoints, emit, intensity, rearGrounded = null) {
+          const e0 = emit && (!rearGrounded || rearGrounded[0]);
+          const e1 = emit && (!rearGrounded || rearGrounded[1]);
+          this._track(rearPoints[0], e0, intensity, this.states[0]);
+          this._track(rearPoints[1], e1, intensity, this.states[1]);
+        }
+        _track(point, emit, intensity, state) {
+          if (!point) {
+            state.active = false;
+            return;
+          }
+          if (emit && state.active)
+            this._addSegment(state.prev, point, intensity);
+          state.prev.copy(point);
+          state.active = emit;
+        }
+        _addSegment(prev, curr, intensity) {
+          _dmDir.subVectors(curr, prev);
+          _dmDir.y = 0;
+          const len = _dmDir.length();
+          if (len < DRIFT_MARK_MIN_SEGMENT_LENGTH) return;
+          _dmDir.divideScalar(len);
+          _dmSide.set(_dmDir.z, 0, -_dmDir.x).multiplyScalar(DRIFT_MARK_WIDTH);
+          _dmPL.copy(prev).add(_dmSide);
+          _dmPR.copy(prev).sub(_dmSide);
+          _dmCL.copy(curr).add(_dmSide);
+          _dmCR.copy(curr).sub(_dmSide);
+          const offset = this.segmentIndex * DRIFT_MARK_FLOATS_PER_SEGMENT;
+          const p = this.positions;
+          p[offset + 0] = _dmPL.x;
+          p[offset + 1] = _dmPL.y;
+          p[offset + 2] = _dmPL.z;
+          p[offset + 3] = _dmPR.x;
+          p[offset + 4] = _dmPR.y;
+          p[offset + 5] = _dmPR.z;
+          p[offset + 6] = _dmCL.x;
+          p[offset + 7] = _dmCL.y;
+          p[offset + 8] = _dmCL.z;
+          p[offset + 9] = _dmPR.x;
+          p[offset + 10] = _dmPR.y;
+          p[offset + 11] = _dmPR.z;
+          p[offset + 12] = _dmCR.x;
+          p[offset + 13] = _dmCR.y;
+          p[offset + 14] = _dmCR.z;
+          p[offset + 15] = _dmCL.x;
+          p[offset + 16] = _dmCL.y;
+          p[offset + 17] = _dmCL.z;
+          const alpha = THREE.MathUtils.clamp(
+            (intensity - DRIFT_MARK_INTENSITY_MIN) *
+              DRIFT_MARK_INV_INTENSITY_RANGE,
+            0,
+            1,
+          );
+          const colorOffset =
+            this.segmentIndex * DRIFT_MARK_COLOR_FLOATS_PER_SEGMENT;
+          for (let i = 0; i < DRIFT_MARK_VERTS_PER_SEGMENT; i++) {
+            this.colors[colorOffset + i * 4 + 3] = alpha;
+          }
+          const posAttr = this.geometry.attributes.position;
+          posAttr.addUpdateRange(offset, DRIFT_MARK_FLOATS_PER_SEGMENT);
+          posAttr.needsUpdate = true;
+          const colorAttr = this.geometry.attributes.color;
+          colorAttr.addUpdateRange(
+            colorOffset,
+            DRIFT_MARK_COLOR_FLOATS_PER_SEGMENT,
+          );
+          colorAttr.needsUpdate = true;
+          this.segmentIndex = (this.segmentIndex + 1) % DRIFT_MARK_MAX_SEGMENTS;
+          if (
+            this.drawCount <
+            DRIFT_MARK_MAX_SEGMENTS * DRIFT_MARK_VERTS_PER_SEGMENT
+          ) {
+            this.drawCount += DRIFT_MARK_VERTS_PER_SEGMENT;
+            this.geometry.setDrawRange(0, this.drawCount);
+          }
+          this.mesh.visible = this.drawCount > 0;
+        }
+      }
+
+      const AUDIO_URLS = {
+        engine: new URL(
+          "../v2/static/sounds/vehicle/joao_janz__synth-car-engine-loop.wav",
+          import.meta.url,
+        ).href,
+        wind: new URL(
+          "../v2/static/sounds/vehicle/wind-speed.mp3",
+          import.meta.url,
+        ).href,
+        driftBrake: new URL(
+          "../v2/static/sounds/vehicle/brak_SOUND.ogg",
+          import.meta.url,
+        ).href,
+        wheels: new URL(
+          "../v2/static/sounds/vehicle/wheels-surface.mp3",
+          import.meta.url,
+        ).href,
+      };
+
+      function setupParkourCarAudio(getDriveState) {
+        let unlocked = false;
+        const loops = [];
+
+        function tryPlay(h) {
+          if (unlocked && h.state() === "loaded") h.play();
+        }
+
+        function unlock() {
+          if (unlocked) return;
+          unlocked = true;
+          Howler.ctx?.resume?.();
+          for (const h of loops) tryPlay(h);
+        }
+
+        window.addEventListener("pointerdown", unlock, { once: true });
+        window.addEventListener("keydown", unlock, { once: true });
+
+        const engineHowl = new Howl({
+          src: [AUDIO_URLS.engine],
+          loop: true,
+          volume: 0,
+          html5: false,
+          onload: () => tryPlay(engineHowl),
+        });
+        const brakeHowl = new Howl({
+          src: [AUDIO_URLS.driftBrake],
+          loop: true,
+          volume: 0,
+          onload: () => tryPlay(brakeHowl),
+        });
+        const windHowl = new Howl({
+          src: [AUDIO_URLS.wind],
+          loop: true,
+          volume: 0,
+          onload: () => tryPlay(windHowl),
+        });
+        const wheelsHowl = new Howl({
+          src: [AUDIO_URLS.wheels],
+          loop: true,
+          volume: 0,
+          onload: () => tryPlay(wheelsHowl),
+        });
+        loops.push(engineHowl, windHowl, brakeHowl, wheelsHowl);
+
+        let engVol = 0;
+        let engRate = 1;
+        let windVol = 0;
+        let windRate = 1;
+        let brakeVol = 0;
+        let brakeRate = 1;
+        let wheelsVol = 0;
+
+        function enginePitchFromSpeed(st, speed, boost) {
+          const top = boost ? physParams.maxSpeedBoost : physParams.maxSpeed;
+          const idle = Math.max(0, st.enginePitchIdleSpeedMax ?? 0.35);
+          const pitchMin = st.enginePitchMin ?? 0.95;
+          const pitchMax = st.enginePitchMax ?? 2.65;
+          const pitchBoost = Math.max(pitchMax, st.enginePitchBoostMax ?? 3.2);
+          const pow = Math.max(0.25, st.enginePitchCurvePow ?? 1);
+          if (speed <= idle) return pitchMin;
+          if (speed <= top) {
+            const t = THREE.MathUtils.clamp(
+              (speed - idle) / (top - idle),
+              0,
+              1,
+            );
+            return THREE.MathUtils.lerp(pitchMin, pitchMax, Math.pow(t, pow));
+          }
+          const boostTop =
+            top * (physParams.maxSpeedBoost / physParams.maxSpeed);
+          const t = THREE.MathUtils.clamp(
+            (speed - top) / (boostTop - top),
+            0,
+            1,
+          );
+          return THREE.MathUtils.lerp(pitchMax, pitchBoost, Math.pow(t, pow));
+        }
+
+        return {
+          unlock,
+          update(dtSec) {
+            const s = getDriveState();
+            const st = s.audio || {};
+            const enabled = st.enabled !== false && s.active;
+
+            if (!enabled) {
+              engVol = windVol = brakeVol = wheelsVol = 0;
+            } else {
+              const gnd = s.grounded ? 1 : 0.12;
+              const engTarget = (st.engineVol ?? 1) * (st.engineMul ?? 1) * gnd;
+              const fadeUp = st.engineFadeEaseUp ?? 14;
+              engVol += (engTarget - engVol) * (1 - Math.exp(-fadeUp * dtSec));
+              const rateTarget = enginePitchFromSpeed(st, s.speed, s.boost);
+              const pitchEase = st.enginePitchEase ?? 10;
+              engRate +=
+                (rateTarget - engRate) * (1 - Math.exp(-pitchEase * dtSec));
+
+              const speedFx = THREE.MathUtils.clamp(s.speed * 0.1, 0, 1);
+              const windTarget =
+                speedFx * (s.grounded ? 1 : 0.35) * (st.windMul ?? 0);
+              windVol += (windTarget - windVol) * (1 - Math.exp(-8 * dtSec));
+              windRate = THREE.MathUtils.lerp(1, 1.85, speedFx);
+
+              const hbAmt = s.handbrake
+                ? THREE.MathUtils.smoothstep(s.speed, 2, 16)
+                : 0;
+              const driftAmt = s.drifting
+                ? THREE.MathUtils.clamp(
+                    (s.driftAngle - DRIFT_ANGLE_MIN) / 0.5,
+                    0,
+                    1,
+                  )
+                : 0;
+              let brakeDrive = 0;
+              if (s.drifting) {
+                brakeDrive = 0.78 + hbAmt * 0.24;
+              } else if (s.handbrake) {
+                brakeDrive = hbAmt * 0.85;
+              }
+              const brakeTarget = brakeDrive * (st.driftBrakeMul ?? 0.45);
+              brakeVol +=
+                (brakeTarget - brakeVol) * (1 - Math.exp(-12 * dtSec));
+              brakeRate = THREE.MathUtils.lerp(
+                0.94,
+                1.14,
+                THREE.MathUtils.smoothstep(s.speed, 4, 26),
+              );
+
+              const wheelsTarget =
+                THREE.MathUtils.clamp(s.speed * 0.1, 0, 1) *
+                gnd *
+                (st.wheelsMul ?? 0.35);
+              wheelsVol +=
+                (wheelsTarget - wheelsVol) * (1 - Math.exp(-8 * dtSec));
+            }
+
+            engineHowl.volume(engVol);
+            engineHowl.rate(engRate);
+            windHowl.volume(windVol);
+            windHowl.rate(windRate);
+            brakeHowl.volume(brakeVol);
+            brakeHowl.rate(brakeRate);
+            wheelsHowl.volume(wheelsVol);
+          },
+          dispose() {
+            engineHowl.unload();
+            windHowl.unload();
+            brakeHowl.unload();
+            wheelsHowl.unload();
+          },
+        };
+      }
+      // Self-contained sandbox: physics built inline below, no v2 import.
+
+      const GLB_URL = new URL("./lotusrealsize2.glb", import.meta.url).href;
+      const CAR_MODEL_YAW = Math.PI / 2;
+      const CAR_MODEL_SCALE = 1;
+      const NITRO_KEY = "KeyN";
+      const TERRAIN_SIZE = 400;
+      const TERRAIN_HALF = TERRAIN_SIZE / 2;
+      const WORLD_LIMIT = TERRAIN_HALF - 2;
+      // Spawn facing +Z toward slope lab (north of center).
+      const SPAWN = { x: 0, y: 0, z: -8, heading: 0 };
+
+      const scene = new THREE.Scene();
+
+      const camera = new THREE.PerspectiveCamera(
+        68,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        5000,
+      );
+      camera.position.set(-10, 5, 18);
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.3;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
+      document.body.appendChild(renderer.domElement);
+
+      // Atmospheric sky — also drives env reflections via PMREM, so the car's
+      // carbon fiber/paint reflects an actual sky instead of RoomEnvironment's
+      // hot studio panels (which were producing the white blobs on the roof).
+      const skyParams = {
+        elevation: 38,
+        azimuth: 145,
+        turbidity: 4,
+        rayleigh: 1.4,
+        mieCoefficient: 0.005,
+        mieDirectionalG: 0.85,
+        envBlur: 0.04,
+      };
+      const sky = new SkyMesh();
+      sky.scale.setScalar(4500);
+      if (sky.material) sky.material.fog = false;
+      const sunVec = new THREE.Vector3();
+      function applySkyParams() {
+        sky.turbidity.value = skyParams.turbidity;
+        sky.rayleigh.value = skyParams.rayleigh;
+        sky.mieCoefficient.value = skyParams.mieCoefficient;
+        sky.mieDirectionalG.value = skyParams.mieDirectionalG;
+        const phi = THREE.MathUtils.degToRad(90 - skyParams.elevation);
+        const theta = THREE.MathUtils.degToRad(skyParams.azimuth);
+        sunVec.setFromSphericalCoords(1, phi, theta);
+        sky.sunPosition.value.copy(sunVec);
+      }
+      applySkyParams();
+      scene.add(sky);
+
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      let envRT = null;
+      function rebuildEnvFromSky() {
+        const skyEnvScene = new THREE.Scene();
+        skyEnvScene.add(sky.clone());
+        if (envRT) envRT.dispose();
+        envRT = pmrem.fromScene(skyEnvScene, skyParams.envBlur);
+        scene.environment = envRT.texture;
+      }
+      // PMREM is a full multi-pass prefilter — running it on every slider tick
+      // (60×/sec while dragging) was stalling the renderer. Sky-mesh uniforms
+      // update live; only the env map rebuild is debounced.
+      let _envRebuildHandle = 0;
+      function rebuildEnvFromSkyDebounced() {
+        if (_envRebuildHandle) clearTimeout(_envRebuildHandle);
+        _envRebuildHandle = setTimeout(() => {
+          _envRebuildHandle = 0;
+          rebuildEnvFromSky();
+        }, 140);
+      }
+
+      // PMREM + env map built after WebGPU init in boot()
+      scene.fog = new THREE.Fog(0xb8c8d8, 140, 460);
+
+      const driftMarks = new DriftMarks(scene);
+      const _rearContactPts = [new THREE.Vector3(), new THREE.Vector3()];
+      const _rearContactGrounded = [false, false];
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.minDistance = 1.5;
+      controls.maxDistance = 60;
+      controls.enabled = false;
+      // Shift+LMB → pan (a la Blender/DCC tools). Right-click still pans too.
+      controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.PAN,
+      };
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "Shift") controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+      });
+      window.addEventListener("keyup", (e) => {
+        if (e.key === "Shift") controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+      });
+
+      const hemi = new THREE.HemisphereLight(0xc8dcff, 0x4a5468, 0.35);
+      scene.add(hemi);
+      const sun = new THREE.DirectionalLight(0xfff4e0, 1.5);
+      sun.position.copy(sunVec).multiplyScalar(80);
+      sun.castShadow = true;
+      sun.shadow.mapSize.setScalar(4096);
+      sun.shadow.bias = -0.0004;
+      sun.shadow.normalBias = 0.025;
+      sun.shadow.camera.near = 10;
+      sun.shadow.camera.far = 180;
+      // Tight frustum around the car — this is a showcase scene, not an open
+      // world, so a small frustum gives ~0.015 m/texel which is sharp enough
+      // to avoid the blocky self-shadow artifacts on the roof.
+      const sh = 38;
+      sun.shadow.camera.left = sun.shadow.camera.bottom = -sh;
+      sun.shadow.camera.right = sun.shadow.camera.top = sh;
+      scene.add(sun);
+      scene.add(sun.target);
+
+      const keysHeld = Object.create(null);
+      window.addEventListener(
+        "keydown",
+        (e) => {
+          keysHeld[e.code] = true;
+          if (e.code === "KeyR") respawn();
+          if (e.code === "KeyL" && !e.ctrlKey && !e.metaKey) {
+            if (document.activeElement?.closest?.(".lil-gui")) return;
+            logCarRigDiagnostics();
+          }
+          if (e.code === "Tab" || e.code === "KeyO") {
+            if (document.activeElement?.closest?.(".lil-gui")) return;
+            e.preventDefault();
+            orbitInspect = !orbitInspect;
+            controls.enabled = orbitInspect;
+            if (!orbitInspect) camYaw = carHeading;
+          }
+          if (carRoot && (/^Arrow/.test(e.code) || e.code === "Space"))
+            e.preventDefault();
+        },
+        { passive: false },
+      );
+      window.addEventListener("keyup", (e) => {
+        keysHeld[e.code] = false;
+      });
+
+      // ============================================================
+      // === COLLIDERS — tile ground + slope lab + walls
+      // ============================================================
+      const colliders = [];
+
+      /** Toggle parkour pieces on/off for debugging (visibility + BVH rebake). */
+      const parkourDebug = {
+        ground: true,
+        perimeterWalls: true,
+        testWalls: true,
+        slopeLab: true,
+        bridgeStraight: true,
+        bridgeCurved: true,
+        jumpRamp: true,
+      };
+
+      const parkourGroupMeta = {
+        ground: "Ground tile",
+        perimeterWalls: "Perimeter walls",
+        testWalls: "Test walls (near spawn)",
+        slopeLab: "Slope lab (5°–55°)",
+        bridgeStraight: "Bridge straight (west)",
+        bridgeCurved: "Bridge curved (east)",
+        jumpRamp: "Jump ramp (south)",
+      };
+
+      const parkourGroupObjects = Object.fromEntries(
+        Object.keys(parkourDebug).map((id) => [id, []]),
+      );
+      /** @type {import('lil-gui').Controller[]} */
+      const parkourGuiControllers = [];
+
+      function registerParkourObject(groupId, obj) {
+        if (!obj || !parkourGroupObjects[groupId]) return obj;
+        parkourGroupObjects[groupId].push(obj);
+        obj.userData.parkourGroup = groupId;
+        return obj;
+      }
+
+      function isParkourGroupEnabled(groupId) {
+        return parkourDebug[groupId] !== false;
+      }
+
+      function applyParkourGroupVisibility(groupId) {
+        const enabled = isParkourGroupEnabled(groupId);
+        for (const obj of parkourGroupObjects[groupId] || []) {
+          obj.visible = enabled;
+        }
+      }
+
+      function applyAllParkourGroups() {
+        for (const groupId of Object.keys(parkourGroupObjects)) {
+          applyParkourGroupVisibility(groupId);
+        }
+      }
+
+      function setParkourGroupEnabled(groupId, enabled) {
+        if (!(groupId in parkourDebug)) return;
+        parkourDebug[groupId] = enabled;
+        applyParkourGroupVisibility(groupId);
+        rebakePlayerBvh();
+      }
+
+      function setAllParkourGroupsEnabled(enabled) {
+        for (const groupId of Object.keys(parkourDebug)) {
+          parkourDebug[groupId] = enabled;
+        }
+        applyAllParkourGroups();
+        for (const ctrl of parkourGuiControllers) ctrl.updateDisplay();
+        rebakePlayerBvh();
+      }
+
+      /** Same defaults as v2 `sharedTileMaterial.js` — objectSpace per mesh. */
+      const TILE_SHARED = {
+        roughness: 0.95,
+        textureScale: 400,
+        tileColor: 0x9a9a9a,
+        gridColor: 0x444444,
+        gridLineColor: 0x111111,
+        objectSpace: true,
+      };
+      function createTileMat(seed = 0) {
+        const s = seed * 19.17;
+        return createTileMaterial({
+          ...TILE_SHARED,
+          uvOffset: [s * 1.31, 0, s * 0.97],
+        });
+      }
+
+      function addCollider(
+        mesh,
+        { collidable = true, doubleSided = false, group = null } = {},
+      ) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        if (doubleSided) mesh.userData.bvhDoubleSided = true;
+        if (group) registerParkourObject(group, mesh);
+        scene.add(mesh);
+        if (collidable) colliders.push(mesh);
+        return mesh;
+      }
+
+      function addParkourVisual(group, mesh) {
+        mesh.castShadow = mesh.castShadow ?? true;
+        mesh.receiveShadow = mesh.receiveShadow ?? true;
+        registerParkourObject(group, mesh);
+        scene.add(mesh);
+        return mesh;
+      }
+
+      /** Lift ramp footprints slightly so they don't z-fight the ground plane. */
+      const RAMP_GROUND_LIFT = 0.025;
+
+      /** Double-sided vertical end cap — replaces one-sided PlaneGeometry back walls. */
+      function addVisualEndCap(parent, mat, halfW, z, topY) {
+        if (topY < 0.02) return;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute(
+          "position",
+          new THREE.Float32BufferAttribute(
+            new Float32Array([
+              -halfW,
+              RAMP_GROUND_LIFT,
+              z,
+              halfW,
+              RAMP_GROUND_LIFT,
+              z,
+              halfW,
+              topY,
+              z,
+              -halfW,
+              topY,
+              z,
+            ]),
+            3,
+          ),
+        );
+        // Both windings so the cap reads from either side.
+        g.setIndex([0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2]);
+        g.computeVertexNormals();
+        const m = new THREE.Mesh(g, mat);
+        m.userData.bvhIgnore = true;
+        m.castShadow = true;
+        m.receiveShadow = true;
+        parent.add(m);
+      }
+
+      /** Readable angle label painted on the ground (non-collidable). */
+      function createFloorLabel(text, x, z, width = 4.2, group = null) {
+        const cw = 320;
+        const ch = 128;
+        const canvas = document.createElement("canvas");
+        canvas.width = cw;
+        canvas.height = ch;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "rgba(8, 10, 14, 0.88)";
+        ctx.fillRect(0, 0, cw, ch);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 5;
+        ctx.strokeRect(6, 6, cw - 12, ch - 12);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `bold ${width > 5 ? 52 : 64}px system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, cw / 2, ch / 2);
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(width, width * 0.393),
+          new THREE.MeshBasicMaterial({
+            map: tex,
+            transparent: true,
+            depthWrite: false,
+          }),
+        );
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(x, 0.04, z);
+        if (group) registerParkourObject(group, mesh);
+        scene.add(mesh);
+        return mesh;
+      }
+
+      function buildWedge(width, length, height, mat) {
+        const w2 = width / 2;
+        const y0 = RAMP_GROUND_LIFT;
+        // Collidable geometry: ground footprint + sloped driving surface only.
+        // Vertical sides are visual children (excluded from BVH bake).
+        const positions = new Float32Array([
+          -w2,
+          y0,
+          0,
+          w2,
+          y0,
+          0,
+          -w2,
+          y0,
+          length,
+          w2,
+          y0,
+          length,
+          -w2,
+          height,
+          length,
+          w2,
+          height,
+          length,
+        ]);
+        const indices = [0, 1, 2, 1, 3, 2, 0, 4, 1, 1, 4, 5];
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        g.setIndex(indices);
+        g.computeVertexNormals();
+        const ramp = new THREE.Mesh(g, mat);
+
+        function addVisualSide(a, b, c) {
+          const sg = new THREE.BufferGeometry();
+          sg.setAttribute(
+            "position",
+            new THREE.Float32BufferAttribute(
+              new Float32Array([
+                positions[a * 3],
+                positions[a * 3 + 1],
+                positions[a * 3 + 2],
+                positions[b * 3],
+                positions[b * 3 + 1],
+                positions[b * 3 + 2],
+                positions[c * 3],
+                positions[c * 3 + 1],
+                positions[c * 3 + 2],
+              ]),
+              3,
+            ),
+          );
+          sg.setIndex([0, 1, 2]);
+          sg.computeVertexNormals();
+          const m = new THREE.Mesh(sg, mat);
+          m.userData.bvhIgnore = true;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          ramp.add(m);
+        }
+        addVisualSide(0, 2, 4);
+        addVisualSide(1, 5, 3);
+        addVisualEndCap(ramp, mat, w2, length, height);
+        return ramp;
+      }
+
+      /**
+       * Curved launch ramp built from a Catmull-Rom spline — smooth ease-up
+       * starting flat and tangent-rising to ~30° at the tip. Only the top
+       * driving surface enters the BVH; visual side panels and tip wall are
+       * non-collidable children, mirroring the wedge back-wall trick.
+       */
+      function buildSplineRamp(
+        centerX,
+        centerZ,
+        length,
+        height,
+        width,
+        segments,
+        yaw,
+        mat,
+        descend = false,
+      ) {
+        const halfW = width / 2;
+        const curve = descend
+          ? new THREE.CatmullRomCurve3([
+              new THREE.Vector3(0, height, 0),
+              new THREE.Vector3(0, height * 0.96, length * 0.28),
+              new THREE.Vector3(0, height * 0.5, length * 0.72),
+              new THREE.Vector3(0, 0, length),
+            ])
+          : new THREE.CatmullRomCurve3([
+              new THREE.Vector3(0, 0, 0),
+              new THREE.Vector3(0, height * 0.04, length * 0.28),
+              new THREE.Vector3(0, height * 0.5, length * 0.72),
+              new THREE.Vector3(0, height, length),
+            ]);
+        const points = [];
+        for (let i = 0; i <= segments; i++) {
+          points.push(curve.getPoint(i / segments));
+        }
+
+        const topPos = [];
+        for (const p of points) {
+          topPos.push(p.x - halfW, p.y, p.z);
+          topPos.push(p.x + halfW, p.y, p.z);
+        }
+        const topIdx = [];
+        for (let i = 0; i < segments; i++) {
+          const a = i * 2,
+            b = a + 1,
+            c = a + 2,
+            d = a + 3;
+          topIdx.push(a, c, b, b, c, d);
+        }
+        const topGeo = new THREE.BufferGeometry();
+        topGeo.setAttribute(
+          "position",
+          new THREE.Float32BufferAttribute(topPos, 3),
+        );
+        topGeo.setIndex(topIdx);
+        topGeo.computeVertexNormals();
+        const ramp = new THREE.Mesh(topGeo, mat);
+
+        function makeSidePanel(sign) {
+          const pos = [];
+          for (const p of points) {
+            pos.push(p.x + sign * halfW, p.y, p.z);
+            pos.push(p.x + sign * halfW, RAMP_GROUND_LIFT, p.z);
+          }
+          const idx = [];
+          for (let i = 0; i < segments; i++) {
+            const a = i * 2,
+              b = a + 1,
+              c = a + 2,
+              d = a + 3;
+            if (sign < 0) idx.push(a, b, c, c, b, d);
+            else idx.push(a, c, b, b, c, d);
+          }
+          const g = new THREE.BufferGeometry();
+          g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+          g.setIndex(idx);
+          g.computeVertexNormals();
+          const m = new THREE.Mesh(g, mat);
+          m.userData.bvhIgnore = true;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        ramp.add(makeSidePanel(-1));
+        ramp.add(makeSidePanel(1));
+
+        const tip = points[points.length - 1];
+        const highZ = descend ? 0 : tip.z;
+        const highY = descend ? height : tip.y;
+        addVisualEndCap(ramp, mat, halfW, highZ, highY);
+
+        ramp.rotation.y = yaw;
+        ramp.position.set(centerX, 0, centerZ);
+        return ramp;
+      }
+
+      /** Wedge ramp descending from deck height at z=0 to ground at z=length. */
+      function buildWedgeDescent(width, length, height, mat) {
+        const w2 = width / 2;
+        const y0 = RAMP_GROUND_LIFT;
+        const positions = new Float32Array([
+          -w2,
+          y0,
+          length,
+          w2,
+          y0,
+          length,
+          -w2,
+          y0,
+          0,
+          w2,
+          y0,
+          0,
+          -w2,
+          height,
+          0,
+          w2,
+          height,
+          0,
+        ]);
+        const indices = [0, 1, 2, 1, 3, 2, 0, 4, 1, 1, 4, 5];
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        g.setIndex(indices);
+        g.computeVertexNormals();
+        const ramp = new THREE.Mesh(g, mat);
+
+        function addVisualSide(a, b, c) {
+          const sg = new THREE.BufferGeometry();
+          sg.setAttribute(
+            "position",
+            new THREE.Float32BufferAttribute(
+              new Float32Array([
+                positions[a * 3],
+                positions[a * 3 + 1],
+                positions[a * 3 + 2],
+                positions[b * 3],
+                positions[b * 3 + 1],
+                positions[b * 3 + 2],
+                positions[c * 3],
+                positions[c * 3 + 1],
+                positions[c * 3 + 2],
+              ]),
+              3,
+            ),
+          );
+          sg.setIndex([0, 1, 2]);
+          sg.computeVertexNormals();
+          const m = new THREE.Mesh(sg, mat);
+          m.userData.bvhIgnore = true;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          ramp.add(m);
+        }
+        addVisualSide(0, 2, 4);
+        addVisualSide(1, 5, 3);
+        addVisualEndCap(ramp, mat, w2, 0, height);
+        return ramp;
+      }
+
+      function placeBridgePart(
+        mesh,
+        centerX,
+        centerZ,
+        localX,
+        localZ,
+        yaw,
+        y = 0,
+        group = null,
+      ) {
+        const c = Math.cos(yaw);
+        const s = Math.sin(yaw);
+        mesh.position.set(
+          centerX + localX * c - localZ * s,
+          y,
+          centerZ + localX * s + localZ * c,
+        );
+        mesh.rotation.y = yaw;
+        addCollider(mesh, { group });
+      }
+
+      /** Collidable deck top only — box underside must not snag ground rays. */
+      function placeBridgeDeck(
+        centerX,
+        centerZ,
+        deckLen,
+        deckW,
+        deckHeight,
+        yaw,
+        mat,
+        group,
+      ) {
+        const deckTop = new THREE.Mesh(
+          new THREE.PlaneGeometry(deckW, deckLen),
+          mat,
+        );
+        deckTop.rotation.x = -Math.PI / 2;
+        placeBridgePart(
+          deckTop,
+          centerX,
+          centerZ,
+          0,
+          0,
+          yaw,
+          deckHeight,
+          group,
+        );
+
+        const deckVisual = new THREE.Mesh(
+          new THREE.BoxGeometry(deckW, 0.4, deckLen),
+          mat,
+        );
+        deckVisual.position.set(centerX, deckHeight - 0.2, centerZ);
+        deckVisual.rotation.y = yaw;
+        deckVisual.userData.bvhIgnore = true;
+        addParkourVisual(group, deckVisual);
+      }
+
+      /** Flat deck with linear wedge ramps on both ends. */
+      function buildStraightBridge(
+        centerX,
+        centerZ,
+        deckLen,
+        deckW,
+        rampLen,
+        deckHeight,
+        yaw,
+        mat,
+        group,
+      ) {
+        const rampUp = buildWedge(deckW, rampLen, deckHeight, mat);
+        placeBridgePart(
+          rampUp,
+          centerX,
+          centerZ,
+          0,
+          -(deckLen / 2 + rampLen / 2),
+          yaw,
+          0,
+          group,
+        );
+
+        placeBridgeDeck(
+          centerX,
+          centerZ,
+          deckLen,
+          deckW,
+          deckHeight,
+          yaw,
+          mat,
+          group,
+        );
+
+        const rampDown = buildWedgeDescent(deckW, rampLen, deckHeight, mat);
+        placeBridgePart(
+          rampDown,
+          centerX,
+          centerZ,
+          0,
+          deckLen / 2 + rampLen / 2,
+          yaw,
+          0,
+          group,
+        );
+      }
+
+      /** Flat deck with spline ramps on both ends. */
+      function buildCurvedBridge(
+        centerX,
+        centerZ,
+        deckLen,
+        deckW,
+        rampLen,
+        deckHeight,
+        yaw,
+        mat,
+        group,
+      ) {
+        const rampUp = buildSplineRamp(
+          0,
+          0,
+          rampLen,
+          deckHeight,
+          deckW,
+          48,
+          0,
+          mat,
+          false,
+        );
+        placeBridgePart(
+          rampUp,
+          centerX,
+          centerZ,
+          0,
+          -(deckLen / 2 + rampLen / 2),
+          yaw,
+          0,
+          group,
+        );
+
+        placeBridgeDeck(
+          centerX,
+          centerZ,
+          deckLen,
+          deckW,
+          deckHeight,
+          yaw,
+          mat,
+          group,
+        );
+
+        const rampDown = buildSplineRamp(
+          0,
+          0,
+          rampLen,
+          deckHeight,
+          deckW,
+          48,
+          0,
+          mat,
+          true,
+        );
+        placeBridgePart(
+          rampDown,
+          centerX,
+          centerZ,
+          0,
+          deckLen / 2 + rampLen / 2,
+          yaw,
+          0,
+          group,
+        );
+      }
+
+      /** Visible boundary walls — inner face sits just inside the tile edge. */
+      function buildPerimeterWalls(halfExtent, height, thickness, group) {
+        const y = height / 2;
+        const span = halfExtent * 2;
+        const walls = [
+          {
+            sx: span + thickness,
+            sy: height,
+            sz: thickness,
+            px: 0,
+            pz: halfExtent + thickness / 2,
+          },
+          {
+            sx: span + thickness,
+            sy: height,
+            sz: thickness,
+            px: 0,
+            pz: -(halfExtent + thickness / 2),
+          },
+          {
+            sx: thickness,
+            sy: height,
+            sz: span,
+            px: halfExtent + thickness / 2,
+            pz: 0,
+          },
+          {
+            sx: thickness,
+            sy: height,
+            sz: span,
+            px: -(halfExtent + thickness / 2),
+            pz: 0,
+          },
+        ];
+        walls.forEach((w, i) => {
+          const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(w.sx, w.sy, w.sz),
+            createTileMat(880 + i),
+          );
+          mesh.position.set(w.px, y, w.pz);
+          addCollider(mesh, { group });
+        });
+      }
+
+      function buildCircuit() {
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE),
+          createTileMat(0),
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        ground.userData.bvhDoubleSided = true;
+        addCollider(ground, { group: "ground" });
+
+        buildPerimeterWalls(TERRAIN_HALF - 3, 14, 1.1, "perimeterWalls");
+
+        createFloorLabel("SPAWN", 0, -14, 4.2, "ground");
+
+        const wallMat = createTileMat(42);
+        const wall = new THREE.Mesh(
+          new THREE.BoxGeometry(18, 2.6, 0.55),
+          wallMat,
+        );
+        wall.position.set(14, 1.3, 4);
+        addCollider(wall, { group: "testWalls" });
+
+        const wall2 = new THREE.Mesh(
+          new THREE.BoxGeometry(0.55, 2.6, 14),
+          createTileMat(43),
+        );
+        wall2.position.set(4, 1.3, -14);
+        addCollider(wall2, { group: "testWalls" });
+
+        createFloorLabel("WALL", 14, 8, 4.2, "testWalls");
+        createFloorLabel("WALL", 4, -10, 4.2, "testWalls");
+
+        buildSlopeTestGrid();
+        buildBridgeTests();
+
+        // Spline jump ramp — south of spawn; drive south into a 4 m launch.
+        const kickerMat = createTileMat(77);
+        const kicker = buildSplineRamp(0, -38, 16, 4.5, 11, 64, 0, kickerMat);
+        addCollider(kicker, { group: "jumpRamp" });
+        createFloorLabel("JUMP", -7, -52, 4.2, "jumpRamp");
+
+        applyAllParkourGroups();
+      }
+
+      /** East/west bridge pair — straight linear ramps vs curved spline ramps. */
+      function buildBridgeTests() {
+        const deckLen = 16;
+        const deckW = 10;
+        const rampLen = 14;
+        const deckHeight = 3.8;
+
+        buildStraightBridge(
+          -62,
+          6,
+          deckLen,
+          deckW,
+          rampLen,
+          deckHeight,
+          Math.PI / 2,
+          createTileMat(501),
+          "bridgeStraight",
+        );
+        createFloorLabel("BRIDGE STRAIGHT", -62, -16, 6.5, "bridgeStraight");
+
+        buildCurvedBridge(
+          62,
+          6,
+          deckLen,
+          deckW,
+          rampLen,
+          deckHeight,
+          -Math.PI / 2,
+          createTileMat(502),
+          "bridgeCurved",
+        );
+        createFloorLabel("BRIDGE CURVED", 62, -16, 6.5, "bridgeCurved");
+      }
+
+      /** North of center: 11 wedges 5°–55° in a row centered on X. */
+      function buildSlopeTestGrid() {
+        const baseZ = 52;
+        const rampLen = 20;
+        const rampW = 8;
+        const gap = rampW + 2.8;
+        const angles = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+        const startX = -((angles.length - 1) * gap) / 2;
+
+        angles.forEach((deg, i) => {
+          const rise = rampLen * Math.tan(THREE.MathUtils.degToRad(deg));
+          const x = startX + i * gap;
+          const mat = createTileMat(i + 1);
+
+          const approach = new THREE.Mesh(
+            new THREE.PlaneGeometry(rampW, 8),
+            createTileMat(i + 100),
+          );
+          approach.rotation.x = -Math.PI / 2;
+          approach.position.set(x, 0.012, baseZ - rampLen / 2 - 7);
+          addCollider(approach, { group: "slopeLab" });
+
+          const ramp = buildWedge(rampW, rampLen, rise, mat);
+          ramp.position.set(x, 0, baseZ - rampLen / 2);
+          ramp.userData.slopeDeg = deg;
+          addCollider(ramp, { group: "slopeLab" });
+
+          const topZ = baseZ + rampLen / 2;
+
+          if (deg >= 45) {
+            const barrier = new THREE.Mesh(
+              new THREE.BoxGeometry(rampW + 0.7, 4, 0.8),
+              createTileMat(i + 300),
+            );
+            barrier.position.set(x, rise + 2, topZ + 8.4);
+            addCollider(barrier, { group: "slopeLab" });
+          }
+
+          createFloorLabel(
+            `${deg}°`,
+            x,
+            baseZ - rampLen / 2 - 13,
+            4.2,
+            "slopeLab",
+          );
+        });
+      }
+
+      // ============================================================
+      // === CIRCUIT BVH — v2's CliffBvh (exactly the editor's playMode bake)
+      // ============================================================
+      /**
+       * Scene store for `cliffBvh.bake` — same rule as v2 playMode: only
+       * driving surfaces collide. Visual children (side panels, back walls,
+       * bridge box undersides) are tagged `userData.bvhIgnore`.
+       */
+      const sceneStore = {
+        forEachMeshInstance(cb) {
+          for (const root of colliders) {
+            const groupId = root.userData.parkourGroup;
+            if (groupId && !isParkourGroupEnabled(groupId)) continue;
+            root.updateMatrixWorld(true);
+            root.traverse((node) => {
+              if (!node.isMesh || node.userData.bvhIgnore) return;
+              cb(node.geometry, node.matrixWorld);
+            });
+          }
+        },
+      };
+
+      /** Flat-floor terrain — lotus circuit has no heightmap, ground sits at y=0. */
+      const terrainStore = {
+        getWorldHeight(_x, _z) {
+          return 0;
+        },
+      };
+
+      const circuitConfig = { world: { size: TERRAIN_SIZE } };
+
+      const cliffBvh = new CliffBvh(sceneStore);
+      function rebakePlayerBvh() {
+        cliffBvh.bake(terrainStore, circuitConfig);
+      }
+
+      /** Parkour fork of v2 CarPhysics — v2 file stays untouched. */
+      const carPhysics = new ParkourCarPhysics();
+
+      /** Debug draw for CarPhysics.lotusHull (spheres + depenetration probes). */
+      const hullDebug = {
+        enabled: false,
+        showSpheres: true,
+        showProbes: true,
+        showContacts: true,
+      };
+      let hullDebugRoot = null;
+      /** @type {THREE.Mesh[]} */
+      let hullDebugSphereMeshes = [];
+      /** @type {THREE.LineSegments[]} */
+      let hullDebugProbeBoxes = [];
+      /** @type {THREE.Mesh[]} */
+      let hullDebugContactDots = [];
+      let hullDebugSphereGeo = null;
+
+      function disposeHullDebugSphereMeshes() {
+        for (const mesh of hullDebugSphereMeshes) {
+          hullDebugRoot?.remove(mesh);
+          mesh.material?.dispose();
+        }
+        hullDebugSphereMeshes = [];
+      }
+
+      function rebuildHullDebugSphereMeshes() {
+        if (!hullDebugRoot || !carPhysics) return;
+        disposeHullDebugSphereMeshes();
+        if (!hullDebugSphereGeo) {
+          hullDebugSphereGeo = new THREE.IcosahedronGeometry(1, 1);
+        }
+        const lh = carPhysics.lotusHull;
+        for (let i = 0; i < lh.hullSpheres.length; i++) {
+          const hs = lh.hullSpheres[i];
+          const mat = new THREE.MeshBasicMaterial({
+            color: new THREE.Color().setHSL(0.38 + i * 0.04, 0.9, 0.55),
+            wireframe: true,
+            depthTest: true,
+          });
+          const mesh = new THREE.Mesh(hullDebugSphereGeo, mat);
+          mesh.name = `hullSphere:${hs.label || i}`;
+          hullDebugRoot.add(mesh);
+          hullDebugSphereMeshes.push(mesh);
+        }
+      }
+
+      function ensureHullDebugVisuals() {
+        if (hullDebugRoot) {
+          rebuildHullDebugSphereMeshes();
+          return;
+        }
+        hullDebugRoot = new THREE.Group();
+        hullDebugRoot.name = "lotusHullDebug";
+        scene.add(hullDebugRoot);
+
+        rebuildHullDebugSphereMeshes();
+
+        for (let i = 0; i < 2; i++) {
+          const mat = new THREE.LineBasicMaterial({
+            color: i === 0 ? 0xff8844 : 0xffaa66,
+            transparent: true,
+            opacity: 0.95,
+          });
+          const box = new THREE.LineSegments(new THREE.BufferGeometry(), mat);
+          box.name = i === 0 ? "probeBoxLow" : "probeBoxHigh";
+          hullDebugProbeBoxes.push(box);
+          hullDebugRoot.add(box);
+        }
+
+        const dotGeo = new THREE.SphereGeometry(0.07, 8, 6);
+        const dotMat = new THREE.MeshBasicMaterial({ color: 0xffff44 });
+        for (let i = 0; i < 4; i++) {
+          const dot = new THREE.Mesh(dotGeo, dotMat);
+          dot.name = `wheelContact:${i}`;
+          hullDebugContactDots.push(dot);
+          hullDebugRoot.add(dot);
+        }
+      }
+
+      const _hullDbgCorner = [
+        new THREE.Vector3(),
+        new THREE.Vector3(),
+        new THREE.Vector3(),
+        new THREE.Vector3(),
+      ];
+
+      function updateHullDebugProbeBox(
+        lines,
+        px,
+        py,
+        pz,
+        halfL,
+        halfW,
+        fwdX,
+        fwdZ,
+        rightX,
+        rightZ,
+      ) {
+        const corner = (fSign, rSign, idx) => {
+          _hullDbgCorner[idx].set(
+            px + fwdX * halfL * fSign + rightX * halfW * rSign,
+            py,
+            pz + fwdZ * halfL * fSign + rightZ * halfW * rSign,
+          );
+        };
+        corner(1, 1, 0);
+        corner(1, -1, 1);
+        corner(-1, -1, 2);
+        corner(-1, 1, 3);
+        const pts = [];
+        const ring = [
+          [0, 1],
+          [1, 2],
+          [2, 3],
+          [3, 0],
+        ];
+        for (const [a, b] of ring) {
+          const va = _hullDbgCorner[a];
+          const vb = _hullDbgCorner[b];
+          pts.push(va.x, va.y, va.z, vb.x, vb.y, vb.z);
+        }
+        lines.geometry.setAttribute(
+          "position",
+          new THREE.Float32BufferAttribute(pts, 3),
+        );
+        lines.geometry.computeBoundingSphere();
+      }
+
+      function updateHullDebugVisuals() {
+        if (!hullDebug.enabled || !carRoot || !carWheels.length) {
+          if (hullDebugRoot) hullDebugRoot.visible = false;
+          return;
+        }
+        ensureHullDebugVisuals();
+        hullDebugRoot.visible = true;
+
+        const lh = carPhysics.lotusHull;
+        const sf = CAR_MODEL_SCALE;
+        const px = state.pos.x;
+        const pz = state.pos.z;
+        const carY = state.pos.y;
+        const heading = state.yaw;
+        const fwdX = -Math.sin(heading);
+        const fwdZ = -Math.cos(heading);
+        const rightX = Math.cos(heading);
+        const rightZ = -Math.sin(heading);
+        const ride = lh.rideHeight * sf;
+        const halfL = lh.probeHalfLength * sf;
+        const halfW = lh.probeHalfWidth * sf;
+
+        if (hullDebug.showSpheres) {
+          for (let i = 0; i < hullDebugSphereMeshes.length; i++) {
+            const mesh = hullDebugSphereMeshes[i];
+            const h = lh.hullSpheres[i];
+            if (!h) {
+              mesh.visible = false;
+              continue;
+            }
+            mesh.visible = true;
+            const r = Math.max(0.05, h.r * sf);
+            mesh.position.set(
+              px + (fwdX * h.fwd + rightX * h.right) * sf,
+              carY + h.y * sf,
+              pz + (fwdZ * h.fwd + rightZ * h.right) * sf,
+            );
+            mesh.scale.setScalar(r);
+          }
+        } else {
+          for (const mesh of hullDebugSphereMeshes) mesh.visible = false;
+        }
+
+        if (hullDebug.showProbes && hullDebugProbeBoxes.length >= 2) {
+          const yLow = carY + ride + lh.probeYLow * sf;
+          const yHigh = carY + ride + lh.probeYHigh * sf;
+          hullDebugProbeBoxes[0].visible = true;
+          hullDebugProbeBoxes[1].visible = true;
+          updateHullDebugProbeBox(
+            hullDebugProbeBoxes[0],
+            px,
+            yLow,
+            pz,
+            halfL,
+            halfW,
+            fwdX,
+            fwdZ,
+            rightX,
+            rightZ,
+          );
+          updateHullDebugProbeBox(
+            hullDebugProbeBoxes[1],
+            px,
+            yHigh,
+            pz,
+            halfL,
+            halfW,
+            fwdX,
+            fwdZ,
+            rightX,
+            rightZ,
+          );
+        } else {
+          for (const box of hullDebugProbeBoxes) box.visible = false;
+        }
+
+        if (hullDebug.showContacts) {
+          const pitch = state.terrainPitch + state.dynPitch;
+          const roll = state.terrainRoll + state.dynRoll;
+          for (let i = 0; i < 4 && i < carWheels.length; i++) {
+            const dot = hullDebugContactDots[i];
+            const w = carWheels[i];
+            const hub = wheelHubWorldXZ(
+              px,
+              pz,
+              w.offset.x,
+              w.offset.z,
+              hubLocalY,
+              pitch,
+              roll,
+            );
+            dot.visible = true;
+            dot.position.set(hub.x, state.wheelContactY[i], hub.z);
+          }
+        } else {
+          for (const dot of hullDebugContactDots) dot.visible = false;
+        }
+      }
+      /** Push GUI-tunable dims into v2's chassis so hull matches the placed car. */
+      function syncCarPhysicsFromParams() {
+        const lh = carPhysics.lotusHull;
+        const lc = carPhysics.lotusChassis;
+        lc.rideHeight = physParams.rideHeight;
+        lc.wheelBase = physParams.wheelBase;
+        lc.track = physParams.track;
+        lh.rideHeight = physParams.rideHeight;
+        carPhysics.wallRestitution = physParams.wallRestitution;
+      }
+
+      // ============================================================
+      // === CAR PHYSICS — arcade Lotus drive layer (v2 hull + suspension below)
+      // ============================================================
+      /** Arcade Lotus — matches `v2/play/lotusPhysics.js` (heading steer + handbrake slip). */
+      const physParams = {
+        accel: 34,
+        accelBoost: 62,
+        brake: 30,
+        reverseAccel: 10,
+        maxSpeed: 58,
+        maxSpeedBoost: 88,
+        coast: 1.0,
+        drag: 0.0035,
+        handbrakeDecel: 4,
+        baseAccelLowSpeedMul: 0.55,
+        baseAccelRampToKmh: 120,
+
+        turnRate: 1.2,
+        turnRateDrift: 2.35,
+        turnRateCounter: 1.65,
+        steerVisualMax: 0.36,
+
+        gripBase: 11.5,
+        gripSpeedDecay: 0.1,
+        gripMinSpeed: 3.5,
+        gripHandbrake: 0.55,
+        gripCounterBonus: 3,
+        gripBrakeTurn: 1.8,
+        gripRecoveryRate: 8,
+        gripHandbrakeApplyRate: 7,
+        /** Per-wheel load coupling: 0 = body-level grip (old), 1 = grip scaled by
+         *  totalSpringForce/weight from suspension telemetry. Airborne → 0. */
+        gripLoadCoupling: 1.0,
+        /** Cap on load factor — allows brief grip bonus on hard landings. */
+        gripLoadMax: 1.3,
+
+        driftEntrySpeed: 10,
+        driftAngleMin: 0.1,
+        driftAngleExit: 0.05,
+        driftRequiresHandbrake: true,
+
+        // Horizontal air drag — gravity / suspension / wheel rays now live
+        // inside CarPhysics (gravity, ride, wheelBvhRayPad… are in
+        // carPhysics.lotusChassis; hull / probes / step-over in lotusHull).
+        airDrag: 0.15,
+
+        // Smoothing / visual
+        pitchSmooth: 10,
+        rollSmooth: 10,
+        /** Squat/dive smoothing — slower than terrain so accel tilt isn't bouncy. */
+        dynPitchSmooth: 5,
+        dynRollSmooth: 5,
+        dynRollMax: 0.12,
+        /** Max cosmetic squat/dive (rad) — matches v2 lotusPhysics.bodyPitchMax scale. */
+        dynPitchMax: 0.12,
+        cornerLeanMax: 0.035,
+        /** Cap visible chassis tilt — keeps the cosmetic dyn pitch/roll from
+         *  flipping the car on steep slopes; CarPhysics doesn't clamp pitch. */
+        chassisTiltMax: 0.55,
+
+        wheelBase: 1.9,
+        track: 1.1,
+        rideHeight: 0.35,
+        wheelRadius: 0.38,
+        /** Visual-only chassis lift above wheels (model-local units). Physics
+         *  rideHeight is hub-relative, so it has no visible effect on its own;
+         *  this offsets carChassisVisual.y so the body sits higher above wheels. */
+        chassisVisualLift: 0.18,
+        /** Velocity-Y deadband: when grounded and |velY| below this, snap to 0
+         *  to kill suspension ring at rest (underdamped relax + variable dt). */
+        velYRestSnap: 0.08,
+        /** Wall-hit restitution: 0 = stick (old), 1 = perfect bounce. */
+        wallRestitution: 0.4,
+      };
+
+      /** Lotus GLB + playMode: wheel XZ uses hy = yaw − CAR_MODEL_YAW + π (not raw yaw). */
+      const _lotusHy = { c: 1, s: 0 };
+      function updateLotusHy(yaw) {
+        const hy = yaw - CAR_MODEL_YAW + Math.PI;
+        _lotusHy.c = Math.cos(hy);
+        _lotusHy.s = Math.sin(hy);
+      }
+      function wheelHubWorldXZ(
+        px,
+        pz,
+        lx,
+        lz,
+        localHubY = 0,
+        pitch = 0,
+        roll = 0,
+      ) {
+        _hubLocal.set(lx, localHubY, lz);
+        _eulerChassis.set(-roll, 0, pitch);
+        _quatChassis.setFromEuler(_eulerChassis);
+        _hubLocal.applyQuaternion(_quatChassis);
+        return {
+          x: px + _hubLocal.x * _lotusHy.c + _hubLocal.z * _lotusHy.s,
+          z: pz - _hubLocal.x * _lotusHy.s + _hubLocal.z * _lotusHy.c,
+        };
+      }
+      /** Hub world Y with current chassis pitch/roll (wheel rays + visuals). */
+      function wheelHubWorldY(bodyY, lx, lz, localHubY, pitch, roll) {
+        _hubLocal.set(lx, localHubY, lz);
+        _eulerChassis.set(-roll, 0, pitch);
+        _quatChassis.setFromEuler(_eulerChassis);
+        _hubLocal.applyQuaternion(_quatChassis);
+        return bodyY + groundOffset + _hubLocal.y;
+      }
+      function lotusDriveBasis(yaw, outFwd, outRight) {
+        updateLotusHy(yaw);
+        outFwd.set(_lotusHy.c, 0, -_lotusHy.s);
+        outRight.set(_lotusHy.s, 0, _lotusHy.c);
+      }
+
+      /** Chassis-local hub offsets — must match placed GLB wheels (includes cCenter). */
+      function wheelLayoutLocal() {
+        if (carWheels.length === 4) {
+          return carWheels.map((w) => ({
+            x: w.offset.x,
+            z: w.offset.z,
+            steer: w.steer,
+            name: w.name,
+          }));
+        }
+        const halfWB = physParams.wheelBase * 0.5;
+        const halfT = physParams.track * 0.5;
+        return [
+          { x: halfWB, z: -halfT, steer: true, name: "FL" },
+          { x: halfWB, z: halfT, steer: true, name: "FR" },
+          { x: -halfWB, z: -halfT, steer: false, name: "RL" },
+          { x: -halfWB, z: halfT, steer: false, name: "RR" },
+        ];
+      }
+
+      const state = {
+        pos: new THREE.Vector3(), // pos.y = ground-contact altitude under car
+        vel: new THREE.Vector3(), // world velocity (includes Y for jumps)
+        yaw: 0,
+        yawRate: 0,
+        terrainPitch: 0,
+        terrainRoll: 0,
+        dynPitch: 0,
+        dynRoll: 0,
+        steerVisual: 0,
+        boostBlend: 0,
+        wheelSpin: 0,
+        grounded: true,
+        airTimer: 0,
+        wheelContactY: [0, 0, 0, 0],
+        wheelHit: [false, false, false, false],
+        driftAngle: 0,
+        carDrifting: false,
+      };
+
+      /** Mirrors v2 `toolState.playCarAudio` — all layers used by `setupParkourCarAudio`. */
+      const carAudioSettings = {
+        enabled: false,
+        engineMul: 1,
+        engineVol: 1,
+        enginePitchMin: 0.95,
+        enginePitchMax: 2.65,
+        enginePitchBoostMax: 3.2,
+        enginePitchIdleSpeedMax: 0.35,
+        enginePitchCurvePow: 1.05,
+        enginePitchEase: 10,
+        engineFadeEaseUp: 14,
+        windMul: 0.25,
+        driftBrakeMul: 0.55,
+        wheelsMul: 0.35,
+      };
+
+      let carAudio = null;
+      carAudio = setupParkourCarAudio(() => ({
+        active: !!carRoot && carWheels.length > 0 && !orbitInspect,
+        speed: Math.hypot(state.vel.x, state.vel.z),
+        grounded: state.grounded,
+        handbrake: !!keysHeld.Space,
+        drifting: state.carDrifting,
+        driftAngle: state.driftAngle,
+        boost: !!(keysHeld.ShiftLeft || keysHeld.ShiftRight),
+        audio: carAudioSettings,
+      }));
+
+      // Aliases — existing camera / GUI code references these
+      const playerPos = state.pos;
+      let carHeading = 0;
+      let camYaw = 0;
+      let orbitInspect = false;
+
+      let carWheels = [];
+      let carRoot = null;
+      let carChassis = null;
+      /** Cosmetic squat/dive — same axes as carChassis, wheels stay outside this. */
+      let carBodyPivot = null;
+      /** GLB body mesh group — sibling of wheel containers under carChassis. */
+      let carChassisVisual = null;
+      let chassisMetrics = null;
+      let hubLocalY = 0;
+      // wheelContainer source origin is not at the wheel hub — measure the
+      // wheelCylinder's offset in container-local space once at load time so
+      // we can counter-offset each placed container (otherwise mirroring the
+      // right-side containers 180° flips this offset and the wheels go
+      // asymmetric front-to-back).
+      const wheelContainerHubOffset = new THREE.Vector3();
+
+      const cam = {
+        distance: 5,
+        height: 0.2,
+        lookAtY: 2,
+        chaseSpeed: 7,
+        driftLag: 1.6,
+        fov: 72,
+      };
+
+      const hudEl = document.getElementById("hud");
+
+      function applyShadows(root) {
+        root.traverse((o) => {
+          if (o.isMesh || o.isSkinnedMesh) {
+            o.castShadow = true;
+            o.receiveShadow = true;
+          }
+        });
+      }
+
+      /** Same bbox ratios as v2/play/playMode.js `_loadLotus` (real-size: no footprint normalize). */
+      const lotusWheelLayout = {
+        trackWidth: 0.4,
+        wheelbase: 0.287,
+        wheelY: 0.23,
+        wbShift: -0.024,
+      };
+
+      let groundOffset = 0;
+
+      const _v3a = new THREE.Vector3();
+      const _v3b = new THREE.Vector3();
+      const _boxA = new THREE.Box3();
+
+      /** Mirror playMode `_loadLotus` hub XZ + Y on chassis bbox. */
+      function placeLotusWheelsFromPlayMode() {
+        if (!chassisMetrics || carWheels.length !== 4) return;
+        const { cSize, cCenter, cMinY } = chassisMetrics;
+        const lp = lotusWheelLayout;
+        const halfTrack = cSize.z * lp.trackWidth;
+        const halfWB = cSize.x * lp.wheelbase;
+        const wheelYOff = cMinY + cSize.y * lp.wheelY;
+        const wbShift = cSize.x * lp.wbShift;
+        hubLocalY = wheelYOff;
+
+        const layout = [
+          { x: halfWB + wbShift, z: -halfTrack, steer: true, name: "FL" },
+          { x: halfWB + wbShift, z: halfTrack, steer: true, name: "FR" },
+          { x: -halfWB + wbShift, z: -halfTrack, steer: false, name: "RL" },
+          { x: -halfWB + wbShift, z: halfTrack, steer: false, name: "RR" },
+        ];
+
+        for (let i = 0; i < 4; i++) {
+          const w = carWheels[i];
+          const L = layout[i];
+          w.steer = L.steer;
+          w.isLeft = L.z < 0;
+          w.name = L.name;
+          w.container.rotation.set(
+            0,
+            CAR_MODEL_YAW + (w.isLeft ? 0 : Math.PI),
+            0,
+          );
+          w.container.position.set(cCenter.x + L.x, wheelYOff, cCenter.z + L.z);
+          w.offset.set(cCenter.x + L.x, 0, cCenter.z + L.z);
+        }
+
+        const fl = carWheels[0].offset;
+        const fr = carWheels[1].offset;
+        const rl = carWheels[2].offset;
+        chassisMetrics.terrainTrackSpan = Math.abs(fr.z - fl.z);
+        chassisMetrics.terrainWBSpan = Math.abs(rl.x - fl.x);
+        applyMeasuredPhysicsFromWheels();
+        syncLotusHullFromCarBounds();
+      }
+
+      /**
+       * Fit v2 compound hull (spheres + corner probes) to the loaded Lotus mesh.
+       * Default lotusHull is narrower than lotusrealsize2.glb — corners clip through walls.
+       */
+      function syncLotusHullFromCarBounds() {
+        if (
+          !carRoot ||
+          !carPhysics ||
+          !chassisMetrics ||
+          carWheels.length !== 4
+        ) {
+          return;
+        }
+
+        carRoot.updateMatrixWorld(true);
+        _boxA.setFromObject(carRoot, true);
+
+        const lh = carPhysics.lotusHull;
+        const lc = carPhysics.lotusChassis;
+
+        let maxFwd = 0;
+        let maxRear = 0;
+        let maxRight = 0;
+        for (const w of carWheels) {
+          const fx = w.offset.x;
+          const fz = Math.abs(w.offset.z);
+          if (fx > maxFwd) maxFwd = fx;
+          if (-fx > maxRear) maxRear = -fx;
+          if (fz > maxRight) maxRight = fz;
+        }
+
+        maxFwd = Math.max(maxFwd, _boxA.max.x);
+        maxRear = Math.max(maxRear, -_boxA.min.x);
+        maxRight = Math.max(
+          maxRight,
+          Math.abs(_boxA.min.z),
+          Math.abs(_boxA.max.z),
+        );
+
+        lh.rideHeight = lc.rideHeight;
+        lh.probeHalfLength = Math.max(maxFwd, maxRear) + 0.05;
+        lh.probeHalfWidth = maxRight + 0.04;
+        lh.probePenetrationSlack = 0.05;
+        lh.collisionSkin = 0.03;
+        lh.probeSearchRadius = Math.min(0.72, lh.probeHalfWidth + 0.14);
+        lh.sweepFwdMargin = 0.22;
+
+        const hullY = 0.28;
+        const rMid = Math.min(0.42, lh.probeHalfLength * 0.22);
+        const rSide = Math.min(0.36, lh.probeHalfWidth * 0.44);
+
+        const spheres = [
+          {
+            fwd: maxFwd * 0.96,
+            right: 0,
+            y: hullY,
+            r: rMid * 0.88,
+            label: "front",
+          },
+          { fwd: 0, right: 0, y: hullY + 0.1, r: rMid, label: "cabin" },
+          {
+            fwd: -maxRear * 0.96,
+            right: 0,
+            y: hullY,
+            r: rMid * 0.82,
+            label: "rear",
+          },
+          {
+            fwd: maxFwd * 0.78,
+            right: maxRight * 0.94,
+            y: hullY,
+            r: rSide,
+            label: "front-L",
+          },
+          {
+            fwd: maxFwd * 0.78,
+            right: -maxRight * 0.94,
+            y: hullY,
+            r: rSide,
+            label: "front-R",
+          },
+          {
+            fwd: -maxRear * 0.72,
+            right: maxRight * 0.94,
+            y: hullY,
+            r: rSide * 0.95,
+            label: "rear-L",
+          },
+          {
+            fwd: -maxRear * 0.72,
+            right: -maxRight * 0.94,
+            y: hullY,
+            r: rSide * 0.95,
+            label: "rear-R",
+          },
+        ];
+        lh.hullSpheres.length = 0;
+        for (const s of spheres) lh.hullSpheres.push({ ...s });
+
+        console.log("[circuit] Lotus collision hull synced to mesh", {
+          probeHalfLength: lh.probeHalfLength.toFixed(3),
+          probeHalfWidth: lh.probeHalfWidth.toFixed(3),
+          maxFwd: maxFwd.toFixed(3),
+          maxRear: maxRear.toFixed(3),
+          maxRight: maxRight.toFixed(3),
+          spheres: lh.hullSpheres.length,
+        });
+        if (hullDebugRoot) rebuildHullDebugSphereMeshes();
+      }
+
+      /** Console + `window.__lotusRigReport` for physics tuning later. */
+      function logCarRigDiagnostics() {
+        if (!carRoot || !chassisMetrics) {
+          console.warn("[circuit] Rig log: car not loaded.");
+          return null;
+        }
+
+        carRoot.updateMatrixWorld(true);
+        const { cSize, cCenter, cMinY } = chassisMetrics;
+
+        const rootBox = new THREE.Box3().setFromObject(carRoot, true);
+        const rootSize = new THREE.Vector3();
+        const rootCenter = new THREE.Vector3();
+        rootBox.getSize(rootSize);
+        rootBox.getCenter(rootCenter);
+
+        const hy = carHeading - CAR_MODEL_YAW + Math.PI;
+        const c = Math.cos(hy);
+        const s = Math.sin(hy);
+
+        const wheels = carWheels.map((w) => {
+          w.container.updateMatrixWorld(true);
+          const hubWorld = w.container.getWorldPosition(_v3a.clone());
+          const spinBox = w.cylinder
+            ? (() => {
+                _boxA.setFromObject(w.cylinder, true);
+                const sz = new THREE.Vector3();
+                const cen = new THREE.Vector3();
+                _boxA.getSize(sz);
+                _boxA.getCenter(cen);
+                return {
+                  size: [sz.x, sz.y, sz.z],
+                  centerWorld: [cen.x, cen.y, cen.z],
+                };
+              })()
+            : null;
+
+          const meshes = [];
+          w.container.traverse((o) => {
+            if (!o.isMesh) return;
+            _boxA.setFromObject(o, true);
+            const sz = new THREE.Vector3();
+            const cen = new THREE.Vector3();
+            _boxA.getSize(sz);
+            _boxA.getCenter(cen);
+            meshes.push({
+              name: o.name,
+              size: [sz.x, sz.y, sz.z],
+              centerWorld: [cen.x, cen.y, cen.z],
+            });
+          });
+
+          const lx = w.offset.x;
+          const lz = w.offset.z;
+          const hubFromOffset = _v3b.set(
+            playerPos.x + lx * c + lz * s,
+            playerPos.y,
+            playerPos.z - lx * s + lz * c,
+          );
+
+          return {
+            name: w.name,
+            steer: w.steer,
+            isLeft: w.isLeft,
+            hubLocalY,
+            offset: [w.offset.x, w.offset.y, w.offset.z],
+            containerPos: [
+              w.container.position.x,
+              w.container.position.y,
+              w.container.position.z,
+            ],
+            containerRotY: w.container.rotation.y,
+            hubWorld: [hubWorld.x, hubWorld.y, hubWorld.z],
+            hubFromOffset: [hubFromOffset.x, hubFromOffset.y, hubFromOffset.z],
+            spinBox,
+            meshes,
+          };
+        });
+
+        const mp = applyMeasuredPhysicsFromWheels();
+        const physicsRecommendations = {
+          wheelBase: mp?.wheelBase ?? chassisMetrics.terrainWBSpan,
+          track: mp?.track ?? chassisMetrics.terrainTrackSpan,
+          rideHeight: mp?.rideHeight ?? physParams.rideHeight,
+          wheelRadius: mp?.wheelRadius ?? physParams.wheelRadius,
+          hubLocalY,
+          groundOffset,
+          hubs: Object.fromEntries(
+            wheels.map((w) => [
+              w.name,
+              { x: w.offset[0], z: w.offset[2], y: w.containerPos[1] },
+            ]),
+          ),
+        };
+
+        const report = {
+          glb: GLB_URL.split("/").pop(),
+          rig: "chassis+wheelContainer (playMode _loadLotus)",
+          lotusWheelLayout,
+          chassis: {
+            size: [cSize.x, cSize.y, cSize.z],
+            center: [cCenter.x, cCenter.y, cCenter.z],
+            minY: cMinY,
+            terrainTrackSpan: chassisMetrics.terrainTrackSpan,
+            terrainWBSpan: chassisMetrics.terrainWBSpan,
+          },
+          carRoot: {
+            size: [rootSize.x, rootSize.y, rootSize.z],
+            center: [rootCenter.x, rootCenter.y, rootCenter.z],
+            minY: rootBox.min.y,
+            position: [
+              carRoot.position.x,
+              carRoot.position.y,
+              carRoot.position.z,
+            ],
+          },
+          physicsRecommendations,
+          wheels,
+        };
+
+        console.group("[circuit] Car rig diagnostics (for physics)");
+        console.log("Full JSON: window.__lotusRigReport");
+        const cx = chassisMetrics.cCenter.x;
+        console.table(
+          wheels.map((w) => ({
+            wheel: w.name,
+            offsetX: w.offset[0].toFixed(3),
+            offsetZ: w.offset[2].toFixed(3),
+            "|X−center|": Math.abs(w.offset[0] - cx).toFixed(3),
+            hubY: w.containerPos[1].toFixed(3),
+            isLeft: w.isLeft ? "L" : "R",
+          })),
+        );
+        console.log(
+          "Measured physics (applied to LotusPhysics GUI):",
+          physicsRecommendations,
+        );
+        console.log(
+          "Copy into lotusPhysics.js when wiring playMode:\n" +
+            JSON.stringify(
+              {
+                wheelBase: physicsRecommendations.wheelBase,
+                track: physicsRecommendations.track,
+                rideHeight: physicsRecommendations.rideHeight,
+                wheelRadius: physicsRecommendations.wheelRadius,
+              },
+              null,
+              2,
+            ),
+        );
+        console.log(report);
+        console.groupEnd();
+
+        window.__lotusRigReport = report;
+        return report;
+      }
+
+      /** Derive wheelBase / track / rideHeight / radius from placed hubs (chassis-local). */
+      function applyMeasuredPhysicsFromWheels() {
+        const fl = carWheels.find((w) => w.name === "FL");
+        const fr = carWheels.find((w) => w.name === "FR");
+        const rl = carWheels.find((w) => w.name === "RL");
+        if (!fl || !fr || !rl || !chassisMetrics) return null;
+
+        const wheelBase = Math.hypot(
+          rl.offset.x - fl.offset.x,
+          rl.offset.z - fl.offset.z,
+        );
+        const track = Math.hypot(
+          fr.offset.x - fl.offset.x,
+          fr.offset.z - fl.offset.z,
+        );
+        const rideHeight = Math.max(0.05, hubLocalY - chassisMetrics.cMinY);
+
+        let wheelRadius = physParams.wheelRadius;
+        if (fl.cylinder) {
+          _boxA.setFromObject(fl.cylinder, true);
+          const sz = new THREE.Vector3();
+          _boxA.getSize(sz);
+          wheelRadius = Math.max(sz.y, sz.z) * 0.5;
+        }
+
+        physParams.wheelBase = wheelBase;
+        physParams.track = track;
+        physParams.rideHeight = rideHeight;
+        physParams.wheelRadius = wheelRadius;
+        syncCarPhysicsFromParams();
+
+        chassisMetrics.measuredPhysics = {
+          wheelBase,
+          track,
+          rideHeight,
+          wheelRadius,
+          hubLocalY,
+        };
+
+        return chassisMetrics.measuredPhysics;
+      }
+
+      /** Port of v2/play/playMode.js `_loadLotus` — real size (scale 1, no footprint normalize). */
+      function buildCarFromGltf(gltf) {
+        const src = gltf.scene;
+        let chassisSrc = null;
+        let wheelSrc = null;
+        src.traverse((o) => {
+          if (!chassisSrc && /^chassis(\.|\d|$)/.test(o.name)) chassisSrc = o;
+          if (!wheelSrc && /^wheelContainer(\.|\d|$)/.test(o.name))
+            wheelSrc = o;
+        });
+        if (!chassisSrc || !wheelSrc) {
+          console.warn("[circuit] Missing chassis/wheelContainer.");
+          if (!chassisSrc) chassisSrc = src;
+          if (!wheelSrc) wheelSrc = src.clone(true);
+        }
+
+        // Measure where the wheel mesh actually sits inside the wheelContainer
+        // (origin is not the hub center in lotusrealsize2.glb). Clone with an
+        // identity transform, then take the cylinder/tyre bbox center.
+        {
+          const probe = wheelSrc.clone(true);
+          probe.position.set(0, 0, 0);
+          probe.rotation.set(0, 0, 0);
+          probe.scale.set(1, 1, 1);
+          probe.updateMatrixWorld(true);
+          let cyl = null;
+          probe.traverse((c) => {
+            if (!cyl && /^wheelCylinder(\.|\d|$)/.test(c.name)) cyl = c;
+          });
+          if (!cyl) {
+            probe.traverse((c) => {
+              if (!cyl && c.isMesh && /TYRE|TIRE/i.test(c.name)) cyl = c;
+            });
+          }
+          if (cyl) {
+            const box = new THREE.Box3().setFromObject(cyl);
+            box.getCenter(wheelContainerHubOffset);
+          } else {
+            wheelContainerHubOffset.set(0, 0, 0);
+          }
+          console.log(
+            "[circuit] wheelContainer hub offset (container-local):",
+            wheelContainerHubOffset.toArray().map((n) => n.toFixed(4)),
+          );
+        }
+
+        const chassisVisual = chassisSrc.clone(true);
+        chassisVisual.position.set(0, 0, 0);
+        chassisVisual.rotation.set(0, CAR_MODEL_YAW, 0);
+        chassisVisual.scale.setScalar(1);
+        const strays = [];
+        chassisVisual.traverse((o) => {
+          if (/^wheelContainer(\.|\d|$)/.test(o.name)) strays.push(o);
+          if (o.isMesh || o.isSkinnedMesh) {
+            o.castShadow = true;
+            o.receiveShadow = true;
+          }
+        });
+        strays.forEach((s) => s.parent?.remove(s));
+
+        carChassis = new THREE.Group();
+        carChassis.rotation.order = "YXZ";
+        carBodyPivot = new THREE.Group();
+        carBodyPivot.rotation.order = "YXZ";
+        carChassisVisual = chassisVisual;
+        carBodyPivot.add(chassisVisual);
+        carChassis.add(carBodyPivot);
+
+        chassisVisual.updateMatrixWorld(true);
+        const cBox = new THREE.Box3().setFromObject(chassisVisual);
+        const cSize = new THREE.Vector3();
+        const cCenter = new THREE.Vector3();
+        cBox.getSize(cSize);
+        cBox.getCenter(cCenter);
+        chassisMetrics = {
+          cSize,
+          cCenter,
+          cMinY: cBox.min.y,
+        };
+
+        const layout = [
+          { steer: true, name: "FL" },
+          { steer: true, name: "FR" },
+          { steer: false, name: "RL" },
+          { steer: false, name: "RR" },
+        ];
+
+        carWheels = layout.map((w) => {
+          const container = wheelSrc.clone(true);
+          // The wheelContainer's Object3D hierarchy is all at (0,0,0); the
+          // wheel/tyre/rotor mesh GEOMETRIES are baked with their centers at
+          // +hubOffset from their parents' origins. That means container
+          // origin ≠ wheel hub AND wheelCylinder origin ≠ wheel center.
+          // Shifting every mesh.position by -hubOffset puts each mesh's
+          // geometry center at its parent's origin, which:
+          //   1. Places the wheel at the container origin (so steering
+          //      pivots around the actual wheel center)
+          //   2. Aligns wheelCylinder's spin axis with the wheel's geometric
+          //      center (so cylinder.rotation.x spins in place, not orbits)
+          //   3. Keeps the brake caliper at its correct offset relative to
+          //      the wheel (sibling shifts together)
+          let suspension = null;
+          let cylinder = null;
+          container.traverse((c) => {
+            if (!suspension && /^wheelSuspension(\.|\d|$)/.test(c.name))
+              suspension = c;
+            if (!cylinder && /^wheelCylinder(\.|\d|$)/.test(c.name))
+              cylinder = c;
+            if (c.isMesh || c.isSkinnedMesh) {
+              c.position.sub(wheelContainerHubOffset);
+              c.castShadow = true;
+              c.receiveShadow = true;
+            }
+          });
+          carChassis.add(container);
+          return {
+            container,
+            suspension: suspension || container,
+            cylinder: cylinder || container,
+            offset: new THREE.Vector3(),
+            steer: w.steer,
+            isLeft: false,
+            name: w.name,
+          };
+        });
+
+        placeLotusWheelsFromPlayMode();
+
+        carRoot = new THREE.Group();
+        carRoot.rotation.order = "YXZ";
+        carRoot.scale.setScalar(CAR_MODEL_SCALE);
+        carRoot.add(carChassis);
+
+        carRoot.updateMatrixWorld(true);
+        const groundBox = new THREE.Box3().setFromObject(carRoot, true);
+        groundOffset = -groundBox.min.y;
+
+        console.log(
+          "[circuit] Lotus loaded (playMode _loadLotus, scale",
+          CAR_MODEL_SCALE,
+          ") —",
+          cSize.x.toFixed(2),
+          "×",
+          cSize.z.toFixed(2),
+          "×",
+          cSize.y.toFixed(2),
+          "m",
+        );
+
+        requestAnimationFrame(() => logCarRigDiagnostics());
+        return carRoot;
+      }
+
+      /** Drop spawn onto ground below — bounded ray like v2 playMode (not Y=∞). */
+      function sampleSpawnFloorY(x, z) {
+        if (!cliffBvh.baked) return null;
+        const fromY = 2.5;
+        const bvhY = cliffBvh.raycastHeightFrom(x, fromY, z);
+        if (bvhY != null && bvhY <= fromY) return bvhY;
+        return terrainStore.getWorldHeight(x, z);
+      }
+
+      function respawn() {
+        let spawnY = SPAWN.y;
+        const floorY = sampleSpawnFloorY(SPAWN.x, SPAWN.z);
+        if (floorY != null) spawnY = floorY;
+        state.pos.set(SPAWN.x, spawnY, SPAWN.z);
+        state.vel.set(0, 0, 0);
+        state.yaw = SPAWN.heading;
+        state.yawRate = 0;
+        state.terrainPitch = state.terrainRoll = 0;
+        state._visTerrainPitch = state._visTerrainRoll = 0;
+        state.dynPitch = state.dynRoll = 0;
+        state.steerVisual = 0;
+        state.boostBlend = 0;
+        _handbrakeBlend = 0;
+        state.wheelSpin = 0;
+        state.grounded = true;
+        state.airTimer = 0;
+        state.driftAngle = 0;
+        state.carDrifting = false;
+        carPhysics.velY = 0;
+        carPhysics.inAir = false;
+        carPhysics._initialized = false;
+        driftMarks.reset();
+        carHeading = state.yaw;
+        camYaw = carHeading;
+      }
+
+      const _fwd = new THREE.Vector3();
+      const _right = new THREE.Vector3();
+      const _horizVel = new THREE.Vector3();
+      const _hubLocal = new THREE.Vector3();
+      const _quatChassis = new THREE.Quaternion();
+      const _eulerChassis = new THREE.Euler(0, 0, 0, "YXZ");
+      /** Flat [FLx,FLz, FRx,FRz, RLx,RLz, RRx,RRz] — fed to CarPhysics.updateSuspension. */
+      const _wheelWorldXZs = new Float32Array(8);
+
+      function stepSimulation(dtSec) {
+        // ---------- input ----------
+        const forward = !!(keysHeld.KeyW || keysHeld.ArrowUp);
+        const backward = !!(keysHeld.KeyS || keysHeld.ArrowDown);
+        const leftKey = !!(keysHeld.KeyA || keysHeld.ArrowLeft);
+        const rightKey = !!(keysHeld.KeyD || keysHeld.ArrowRight);
+        const handbrake = !!keysHeld.Space;
+        const boostKeys = !!(keysHeld.ShiftLeft || keysHeld.ShiftRight);
+
+        const layout = wheelLayoutLocal();
+        updateLotusHy(state.yaw);
+
+        // Arcade drive uses LAST FRAME's grounded — same as v2 playMode, where
+        // updateSuspension runs after movement and ground state lags one frame.
+        const grounded = state.grounded;
+
+        // ---------- arcade drive (v2 LotusPhysics — Space + steer = spin / 360) ----------
+        const steerInput = (leftKey ? 1 : 0) - (rightKey ? 1 : 0);
+        const hx = -Math.sin(state.yaw);
+        const hz = -Math.cos(state.yaw);
+        const rx = Math.cos(state.yaw);
+        const rz = -Math.sin(state.yaw);
+
+        let vx = state.vel.x;
+        let vz = state.vel.z;
+        let speed = Math.hypot(vx, vz);
+
+        state.boostBlend +=
+          (boostKeys ? 1 - state.boostBlend : -state.boostBlend) *
+          (1 - Math.exp(-12 * dtSec));
+        const accelBase = THREE.MathUtils.lerp(
+          physParams.accel,
+          physParams.accelBoost,
+          state.boostBlend,
+        );
+        let throttleAccel = 0;
+
+        if (grounded) {
+          let accel = accelBase;
+          if (!boostKeys) {
+            const speedKmh = speed * 3.6;
+            const rampT = THREE.MathUtils.smoothstep(
+              speedKmh,
+              0,
+              physParams.baseAccelRampToKmh,
+            );
+            accel *= THREE.MathUtils.lerp(
+              physParams.baseAccelLowSpeedMul,
+              1,
+              rampT,
+            );
+          }
+
+          if (forward) {
+            vx += hx * accel * dtSec;
+            vz += hz * accel * dtSec;
+            throttleAccel = accel;
+          } else if (backward) {
+            if (speed > 1) {
+              vx -= hx * physParams.brake * dtSec;
+              vz -= hz * physParams.brake * dtSec;
+              throttleAccel = -physParams.brake;
+            } else {
+              vx -= hx * physParams.reverseAccel * dtSec;
+              vz -= hz * physParams.reverseAccel * dtSec;
+              throttleAccel = -physParams.reverseAccel;
+            }
+          } else if (speed > 0.05) {
+            const decel = physParams.coast / speed;
+            vx -= vx * decel * dtSec;
+            vz -= vz * decel * dtSec;
+          } else {
+            vx = 0;
+            vz = 0;
+          }
+
+          if (handbrake && speed > 0.1) {
+            const hb = physParams.handbrakeDecel / speed;
+            vx -= vx * hb * dtSec;
+            vz -= vz * hb * dtSec;
+          }
+
+          const speed2 = vx * vx + vz * vz;
+          if (speed2 > 0.01) {
+            const spd = Math.sqrt(speed2);
+            const factor = Math.max(0, 1 - physParams.drag * spd * dtSec);
+            vx *= factor;
+            vz *= factor;
+          }
+
+          const maxSpd = THREE.MathUtils.lerp(
+            physParams.maxSpeed,
+            physParams.maxSpeedBoost,
+            state.boostBlend,
+          );
+          speed = Math.hypot(vx, vz);
+          if (speed > maxSpd) {
+            const s = maxSpd / speed;
+            vx *= s;
+            vz *= s;
+            speed = maxSpd;
+          }
+
+          const fwdDot = vx * hx + vz * hz;
+          let latDot = vx * rx + vz * rz;
+
+          let speedGrip = Math.max(
+            physParams.gripMinSpeed,
+            physParams.gripBase - speed * physParams.gripSpeedDecay,
+          );
+          if (
+            handbrake &&
+            speed > physParams.driftEntrySpeed &&
+            steerInput !== 0
+          ) {
+            _handbrakeBlend +=
+              (1 - _handbrakeBlend) *
+              (1 - Math.exp(-physParams.gripHandbrakeApplyRate * dtSec));
+          } else {
+            _handbrakeBlend +=
+              (0 - _handbrakeBlend) *
+              (1 - Math.exp(-physParams.gripRecoveryRate * dtSec));
+          }
+          let grip =
+            speedGrip +
+            (physParams.gripHandbrake - speedGrip) * _handbrakeBlend;
+
+          const driftDir = Math.sign(latDot);
+          const isCounterSteering =
+            state.carDrifting &&
+            driftDir !== 0 &&
+            steerInput !== 0 &&
+            Math.sign(steerInput) !== driftDir;
+          if (isCounterSteering) {
+            const counterStrength = Math.min(
+              1,
+              Math.abs(state.driftAngle) / 0.5,
+            );
+            grip += physParams.gripCounterBonus * counterStrength;
+          }
+          if (backward && steerInput !== 0 && speed > 3) {
+            grip = Math.min(grip, physParams.gripBrakeTurn);
+          }
+
+          // Load-modulated grip: real tire grip = μ·Fn. totalSpringForce/weight
+          // gives the actual normal-load fraction (≈1 at equilibrium, ≈0 mid-air,
+          // briefly >1 on landing). `gripLoadCoupling` lerps to old body-level
+          // behavior so the GUI slider gives an A/B compare.
+          const _w = carPhysics.telemetry.weight;
+          const _Ft = carPhysics.telemetry.totalSpringForce;
+          let _loadFactor;
+          if (!state.grounded) {
+            _loadFactor = 0;
+          } else if (_w > 1e-3) {
+            _loadFactor = Math.min(
+              physParams.gripLoadMax,
+              Math.max(0, _Ft / _w),
+            );
+          } else {
+            _loadFactor = 1;
+          }
+          const _loadMix = 1 + (_loadFactor - 1) * physParams.gripLoadCoupling;
+          grip *= _loadMix;
+
+          const lateralKill = 1 - Math.exp(-grip * dtSec);
+          vx -= rx * latDot * lateralKill;
+          vz -= rz * latDot * lateralKill;
+
+          if (steerInput !== 0 && speed > 0.5) {
+            let turnRate = physParams.turnRate;
+            if (_handbrakeBlend > 0.2) {
+              turnRate = THREE.MathUtils.lerp(
+                turnRate,
+                state.carDrifting && isCounterSteering
+                  ? physParams.turnRateCounter
+                  : physParams.turnRateDrift,
+                _handbrakeBlend,
+              );
+            }
+            state.yaw += steerInput * turnRate * dtSec;
+            state.yawRate = steerInput * turnRate;
+          } else {
+            state.yawRate = 0;
+          }
+          carHeading = state.yaw;
+
+          const updatedLatDot = vx * rx + vz * rz;
+          state.driftAngle =
+            speed > 1
+              ? Math.abs(Math.atan2(updatedLatDot, Math.abs(fwdDot)))
+              : 0;
+          const hbDrift =
+            handbrake && speed > physParams.driftEntrySpeed && steerInput !== 0;
+          const slipDrift =
+            state.driftAngle > physParams.driftAngleMin &&
+            speed > physParams.driftEntrySpeed;
+          if (physParams.driftRequiresHandbrake) {
+            if (!state.carDrifting) {
+              state.carDrifting =
+                hbDrift && slipDrift && _handbrakeBlend > 0.35;
+            } else {
+              state.carDrifting =
+                _handbrakeBlend > 0.12 &&
+                state.driftAngle > physParams.driftAngleExit &&
+                speed > physParams.driftEntrySpeed * 0.5;
+            }
+          } else if (!state.carDrifting) {
+            state.carDrifting = slipDrift;
+          } else {
+            state.carDrifting =
+              state.driftAngle > physParams.driftAngleExit &&
+              speed > physParams.driftEntrySpeed * 0.5;
+          }
+
+          state.vel.x = vx;
+          state.vel.z = vz;
+        } else {
+          const airDrag = physParams.airDrag;
+          if (speed > 0.01) {
+            const factor = Math.max(0, 1 - airDrag * dtSec);
+            state.vel.x *= factor;
+            state.vel.z *= factor;
+          }
+          state.driftAngle = 0;
+          state.carDrifting = false;
+          state.yawRate = 0;
+          _handbrakeBlend = 0;
+        }
+
+        state.steerVisual = THREE.MathUtils.lerp(
+          state.steerVisual,
+          steerInput * physParams.steerVisualMax,
+          1 - Math.exp(-14 * dtSec),
+        );
+
+        lotusDriveBasis(state.yaw, _fwd, _right);
+        _horizVel.set(state.vel.x, 0, state.vel.z);
+        const vF = _horizVel.dot(_fwd);
+        speed = _horizVel.length();
+
+        // ---------- horizontal motion + collision (v2 hull sweep + probes) ----------
+        const stepX = state.vel.x * dtSec;
+        const stepZ = state.vel.z * dtSec;
+        const resolved = carPhysics.resolveMovement(
+          state.pos.x,
+          state.pos.z,
+          stepX,
+          stepZ,
+          state.pos.y,
+          state.yaw,
+          state.vel.x,
+          state.vel.z,
+          cliffBvh,
+          CAR_MODEL_SCALE,
+          carPhysics.lotusHull,
+        );
+        state.pos.x = THREE.MathUtils.clamp(
+          resolved.x,
+          -WORLD_LIMIT,
+          WORLD_LIMIT,
+        );
+        state.pos.z = THREE.MathUtils.clamp(
+          resolved.z,
+          -WORLD_LIMIT,
+          WORLD_LIMIT,
+        );
+        state.vel.x = resolved.vx;
+        state.vel.z = resolved.vz;
+
+        // ---------- vertical motion + suspension + slope slide (v2 CarPhysics) ----------
+        // Wheel hub world XZ — chassis-local layout rotated by current pose,
+        // sampled at the post-move position so suspension sees the surface
+        // the car is actually about to land on.
+        for (let i = 0; i < 4; i++) {
+          const L = layout[i];
+          const hub = wheelHubWorldXZ(
+            state.pos.x,
+            state.pos.z,
+            L.x,
+            L.z,
+            hubLocalY,
+            state.terrainPitch,
+            state.terrainRoll,
+          );
+          _wheelWorldXZs[i * 2] = hub.x;
+          _wheelWorldXZs[i * 2 + 1] = hub.z;
+        }
+        carPhysics.inAir = !state.grounded;
+        carPhysics.velY = state.vel.y;
+        const vert = carPhysics.updateSuspension(
+          state.pos.y,
+          _wheelWorldXZs,
+          CAR_MODEL_SCALE,
+          state.yaw,
+          dtSec,
+          terrainStore.getWorldHeight,
+          cliffBvh,
+          state.vel.x,
+          state.vel.z,
+          false,
+          carPhysics.lotusChassis,
+        );
+        state.pos.y = vert.y;
+        state.vel.y = carPhysics.velY;
+        state.grounded = !carPhysics.inAir;
+        // Rest snap: kills underdamped suspension ring on flat ground. Only
+        // engages when fully grounded, no jump request, and velY tiny — so
+        // it never interferes with real motion (jumps, slopes, landings).
+        if (
+          state.grounded &&
+          carPhysics.telemetry.groundedCount === 4 &&
+          Math.abs(state.vel.y) < physParams.velYRestSnap
+        ) {
+          state.vel.y = 0;
+          carPhysics.velY = 0;
+        }
+        state.airTimer = state.grounded ? 0 : state.airTimer + dtSec;
+        for (let i = 0; i < 4; i++) {
+          state.wheelHit[i] = carPhysics.wheelGrounded[i];
+          state.wheelContactY[i] = carPhysics.wheelContactYs[i];
+        }
+        if (vert.slideVx || vert.slideVz) {
+          state.vel.x += vert.slideVx;
+          state.vel.z += vert.slideVz;
+        }
+
+        // Smooth chassis tilt — on ground follow surface; in air nose tracks velocity arc.
+        const terrainSm = 1 - Math.exp(-physParams.pitchSmooth * dtSec);
+        if (state.grounded) {
+          state.terrainPitch +=
+            (vert.terrainPitch - state.terrainPitch) * terrainSm;
+          state.terrainRoll +=
+            (vert.terrainRoll - state.terrainRoll) * terrainSm;
+        } else {
+          const airSm =
+            1 - Math.exp(-carPhysics.lotusChassis.airPitchSmooth * dtSec);
+          state.terrainPitch +=
+            (carPhysics.airPitch - state.terrainPitch) * airSm;
+          state.terrainRoll += (0 - state.terrainRoll) * terrainSm;
+        }
+
+        // ---------- dynamic chassis pitch (squat/dive) + roll (cornering lean) ----------
+        // v2 lotusPhysics-style cosmetic tilt — small fixed angles, not full accel scale.
+        const speedNorm = Math.min(1, speed / Math.max(1, physParams.maxSpeed));
+        const throttlePitch =
+          forward && !backward ? -0.035 : backward && !forward ? 0.045 : 0;
+        const speedPitch = -speedNorm * 0.028;
+        const dynPitchT = THREE.MathUtils.clamp(
+          speedPitch + throttlePitch,
+          -physParams.dynPitchMax,
+          physParams.dynPitchMax,
+        );
+        const latForRoll =
+          state.vel.x * Math.cos(state.yaw) +
+          state.vel.z * -Math.sin(state.yaw);
+        const driftRollSpeedGain = THREE.MathUtils.smoothstep(speed, 10, 24);
+        let dynRollT = 0;
+        if (state.carDrifting && _handbrakeBlend > 0.25) {
+          dynRollT =
+            -Math.sign(latForRoll) *
+            Math.min(physParams.dynRollMax, state.driftAngle * 0.7) *
+            driftRollSpeedGain *
+            _handbrakeBlend;
+        } else if (speed > 4 && Math.abs(latForRoll) > 0.5) {
+          dynRollT = THREE.MathUtils.clamp(
+            -Math.sign(latForRoll) *
+              Math.min(physParams.cornerLeanMax, Math.abs(latForRoll) * 0.012),
+            -physParams.cornerLeanMax,
+            physParams.cornerLeanMax,
+          );
+        }
+        const dynPitchSm = 1 - Math.exp(-physParams.dynPitchSmooth * dtSec);
+        const dynRollSm = 1 - Math.exp(-physParams.dynRollSmooth * dtSec);
+        state.dynPitch += (dynPitchT - state.dynPitch) * dynPitchSm;
+        state.dynRoll += (dynRollT - state.dynRoll) * dynRollSm;
+
+        // ---------- wheel spin (visual) ----------
+        state.wheelSpin += (vF / Math.max(physParams.wheelRadius, 0.1)) * dtSec;
+
+        syncCarVisuals(dtSec);
+      }
+
+      const _desiredHubWorld = new THREE.Vector3();
+      const _invChassisMat = new THREE.Matrix4();
+
+      /** Live pitch/roll from this frame's wheel contact Ys — matches wheel snap geometry. */
+      function instantTerrainPoseFromWheelContacts() {
+        const y = state.wheelContactY;
+        const wb = Math.max(0.5, physParams.wheelBase);
+        const tr = Math.max(0.3, physParams.track);
+        const frontAvg = (y[0] + y[1]) * 0.5;
+        const rearAvg = (y[2] + y[3]) * 0.5;
+        const leftAvg = (y[0] + y[2]) * 0.5;
+        const rightAvg = (y[1] + y[3]) * 0.5;
+        return {
+          pitch: Math.atan2(frontAvg - rearAvg, wb),
+          roll: Math.atan2(rightAvg - leftAvg, tr),
+        };
+      }
+
+      function resolveVisualTerrainPose(
+        dtSec,
+        inAir,
+        onRamp,
+        contactSpan,
+        speed,
+      ) {
+        const tiltMax = onRamp
+          ? Math.max(physParams.chassisTiltMax, 0.95)
+          : physParams.chassisTiltMax;
+        if (inAir) {
+          return {
+            pitch: THREE.MathUtils.clamp(state.terrainPitch, -tiltMax, tiltMax),
+            roll: THREE.MathUtils.clamp(state.terrainRoll, -tiltMax, tiltMax),
+          };
+        }
+        if (state._visTerrainPitch === undefined) {
+          state._visTerrainPitch = state.terrainPitch;
+          state._visTerrainRoll = state.terrainRoll;
+        }
+        const instant = instantTerrainPoseFromWheelContacts();
+        const fastRamp = onRamp && speed > 7;
+        if (fastRamp) {
+          state._visTerrainPitch = instant.pitch;
+          state._visTerrainRoll = instant.roll;
+        } else {
+          const pitchRate = onRamp
+            ? physParams.pitchSmooth * (contactSpan > 0.08 ? 6.5 : 4.5)
+            : physParams.pitchSmooth;
+          const targetP = onRamp ? instant.pitch : state.terrainPitch;
+          const targetR = onRamp ? instant.roll : state.terrainRoll;
+          if (onRamp && Math.abs(targetP - state._visTerrainPitch) > 0.02) {
+            state._visTerrainPitch = targetP;
+            state._visTerrainRoll = targetR;
+          } else {
+            const sm = 1 - Math.exp(-pitchRate * dtSec);
+            state._visTerrainPitch += (targetP - state._visTerrainPitch) * sm;
+            state._visTerrainRoll += (targetR - state._visTerrainRoll) * sm;
+          }
+        }
+        return {
+          pitch: THREE.MathUtils.clamp(
+            state._visTerrainPitch,
+            -tiltMax,
+            tiltMax,
+          ),
+          roll: THREE.MathUtils.clamp(state._visTerrainRoll, -tiltMax, tiltMax),
+        };
+      }
+
+      function syncCarVisuals(dtSec) {
+        if (!carRoot || !carChassis || !carWheels.length) return;
+
+        const hy = state.yaw - CAR_MODEL_YAW + Math.PI;
+        carRoot.rotation.y = hy;
+
+        const lc = carPhysics.lotusChassis;
+        const suspMax = lc.suspMaxTravel;
+        const hubRef = hubLocalY;
+        const wheelR = physParams.wheelRadius;
+        const inAir = !state.grounded;
+        const rootY = state.pos.y + groundOffset;
+        const speed = Math.hypot(state.vel.x, state.vel.z);
+
+        carRoot.position.set(state.pos.x, rootY, state.pos.z);
+
+        let contactMin = Infinity;
+        let contactMax = -Infinity;
+        for (let i = 0; i < 4; i++) {
+          const cy = state.wheelContactY[i];
+          if (cy < contactMin) contactMin = cy;
+          if (cy > contactMax) contactMax = cy;
+        }
+        const contactSpan =
+          contactMax > -Infinity ? contactMax - contactMin : 0;
+        const frontContactAvg =
+          (state.wheelContactY[0] + state.wheelContactY[1]) * 0.5;
+        const rearContactAvg =
+          (state.wheelContactY[2] + state.wheelContactY[3]) * 0.5;
+        const frontRise = frontContactAvg - rearContactAvg;
+        const onRamp = contactSpan > 0.035 || (!inAir && frontRise > 0.022);
+
+        const { pitch: terrainPitch, roll: terrainRoll } =
+          resolveVisualTerrainPose(dtSec, inAir, onRamp, contactSpan, speed);
+        const dynSuppress = inAir
+          ? 0
+          : THREE.MathUtils.clamp(contactSpan / 0.04 + frontRise / 0.05, 0, 1);
+        const dynPitch = THREE.MathUtils.clamp(
+          state.dynPitch * (1 - dynSuppress),
+          -physParams.dynPitchMax,
+          physParams.dynPitchMax,
+        );
+        const dynRoll = THREE.MathUtils.clamp(
+          state.dynRoll * (1 - dynSuppress * 0.85),
+          -physParams.dynRollMax,
+          physParams.dynRollMax,
+        );
+
+        // Terrain on chassis (wheels). Squat/dive on body pivot — same YXZ axes as terrain.
+        carChassis.rotation.set(-terrainRoll, 0, terrainPitch);
+        if (carBodyPivot) {
+          carBodyPivot.rotation.set(-dynRoll, 0, dynPitch);
+        }
+        if (carChassisVisual) {
+          carChassisVisual.rotation.set(0, CAR_MODEL_YAW, 0);
+        }
+
+        carChassis.updateMatrixWorld(true);
+
+        /** Contact-snapped hub local Y per wheel (clamped + unclamped for body drop). */
+        const rawWheelLocalY = new Array(carWheels.length);
+        const rawWheelSnapY = new Array(carWheels.length);
+        for (let i = 0; i < carWheels.length; i++) {
+          const w = carWheels[i];
+          if (inAir) {
+            rawWheelLocalY[i] = hubRef;
+            rawWheelSnapY[i] = hubRef;
+            continue;
+          }
+          const hubXZ = wheelHubWorldXZ(
+            state.pos.x,
+            state.pos.z,
+            w.offset.x,
+            w.offset.z,
+            hubRef,
+            terrainPitch,
+            terrainRoll,
+          );
+          _desiredHubWorld.set(
+            hubXZ.x,
+            state.wheelContactY[i] + wheelR,
+            hubXZ.z,
+          );
+          _invChassisMat.copy(carChassis.matrixWorld).invert();
+          _desiredHubWorld.applyMatrix4(_invChassisMat);
+          const snapLocalY = _desiredHubWorld.y;
+          rawWheelSnapY[i] = snapLocalY;
+          rawWheelLocalY[i] = THREE.MathUtils.clamp(
+            snapLocalY,
+            hubRef - suspMax,
+            hubRef + suspMax,
+          );
+        }
+
+        // Drop the body pivot (not wheels) to match how far wheels extended downward.
+        let bodyDropTarget = 0;
+        if (!inAir && onRamp && carBodyPivot) {
+          for (let i = 0; i < rawWheelSnapY.length; i++) {
+            bodyDropTarget = Math.min(
+              bodyDropTarget,
+              rawWheelSnapY[i] - hubRef,
+            );
+          }
+          bodyDropTarget = Math.max(bodyDropTarget, -suspMax * 1.15);
+        }
+        if (carBodyPivot) {
+          if (carBodyPivot._smoothBodyDrop === undefined) {
+            carBodyPivot._smoothBodyDrop = 0;
+          }
+          const bodyDropDelta = bodyDropTarget - carBodyPivot._smoothBodyDrop;
+          if (
+            onRamp &&
+            (Math.abs(bodyDropDelta) > suspMax * 0.06 || speed > 7)
+          ) {
+            carBodyPivot._smoothBodyDrop = bodyDropTarget;
+          } else {
+            const bodyDropSm = onRamp
+              ? Math.min(1, 55 * dtSec)
+              : Math.min(1, 25 * dtSec);
+            carBodyPivot._smoothBodyDrop += bodyDropDelta * bodyDropSm;
+          }
+          carBodyPivot.position.y = carBodyPivot._smoothBodyDrop;
+        }
+        if (carChassisVisual) {
+          carChassisVisual.position.y = physParams.chassisVisualLift;
+        }
+
+        for (let i = 0; i < carWheels.length; i++) {
+          const w = carWheels[i];
+          const targetLocalY = inAir ? hubRef : rawWheelLocalY[i];
+          if (w._smoothLocalY === undefined) w._smoothLocalY = hubRef;
+          const wheelSm =
+            onRamp && speed > 7
+              ? 1
+              : onRamp
+                ? Math.min(1, 42 * dtSec)
+                : Math.min(1, 25 * dtSec);
+          w._smoothLocalY += (targetLocalY - w._smoothLocalY) * wheelSm;
+          w.container.position.set(w.offset.x, w._smoothLocalY, w.offset.z);
+          w.container.rotation.y =
+            CAR_MODEL_YAW +
+            (w.isLeft ? 0 : Math.PI) +
+            (w.steer ? state.steerVisual : 0);
+          if (w.cylinder) {
+            w.cylinder.rotation.x = (w.isLeft ? 1 : -1) * state.wheelSpin;
+            w.cylinder.rotation.z = 0;
+          }
+        }
+      }
+
+      function updateDriftMarksAndAudio(dtSec) {
+        if (!carRoot || !carWheels.length) {
+          driftMarks.update(_rearContactPts, false, 0);
+          carAudio?.update(dtSec);
+          return;
+        }
+        updateLotusHy(state.yaw);
+        let rearIdx = 0;
+        for (let i = 0; i < carWheels.length; i++) {
+          const w = carWheels[i];
+          if (w.steer) continue;
+          const hub = wheelHubWorldXZ(
+            state.pos.x,
+            state.pos.z,
+            w.offset.x,
+            w.offset.z,
+            hubLocalY,
+            state.terrainPitch + state.dynPitch,
+            state.terrainRoll + state.dynRoll,
+          );
+          const y =
+            (state.wheelHit[i] ? state.wheelContactY[i] : state.pos.y) +
+            DRIFT_MARK_Y_OFFSET;
+          _rearContactPts[rearIdx].set(hub.x, y, hub.z);
+          _rearContactGrounded[rearIdx] = state.wheelHit[i];
+          rearIdx++;
+        }
+        const speed = Math.hypot(state.vel.x, state.vel.z);
+        const handbrake = !!keysHeld.Space;
+        const driftAmount = THREE.MathUtils.clamp(
+          (state.driftAngle - DRIFT_ANGLE_MIN) / 0.5,
+          0,
+          1,
+        );
+        const handbrakeAmount = handbrake
+          ? THREE.MathUtils.smoothstep(
+              speed,
+              physParams.driftEntrySpeed,
+              physParams.driftEntrySpeed * 2.2,
+            )
+          : 0;
+        const driftIntensity = Math.max(driftAmount, handbrakeAmount);
+        const emitMarks =
+          state.grounded &&
+          speed > physParams.driftEntrySpeed &&
+          driftIntensity > DRIFT_MARK_INTENSITY_MIN;
+        driftMarks.update(
+          _rearContactPts,
+          emitMarks,
+          driftIntensity,
+          _rearContactGrounded,
+        );
+        carAudio?.update(dtSec);
+      }
+
+      function updateHud() {
+        if (!carRoot) return;
+        const spdH = Math.hypot(state.vel.x, state.vel.z) * 3.6;
+        const vy = state.vel.y;
+        hudEl.innerHTML = [
+          `<div><strong>Speed</strong> ${spdH.toFixed(0)} km/h · <strong>vY</strong> ${vy.toFixed(1)} m/s</div>`,
+          `<div><strong>${state.grounded ? "GROUND" : "AIR"}</strong>${state.grounded ? "" : ` (${state.airTimer.toFixed(2)}s)`} · alt ${state.pos.y.toFixed(2)} m</div>`,
+          `<div style="opacity:0.75">Pitch ${(state.terrainPitch * 57.3).toFixed(1)}° · Roll ${(state.terrainRoll * 57.3).toFixed(1)}°${carPhysics.onSteepSlope ? " · STEEP" : ""}</div>`,
+        ].join("");
+      }
+
+      function updateCamera(dtSec) {
+        if (orbitInspect) {
+          controls.target.set(playerPos.x, playerPos.y + 1.2, playerPos.z);
+          controls.update();
+          return;
+        }
+
+        const chaseTarget = carHeading;
+        let d = chaseTarget - camYaw;
+        while (d > Math.PI) d -= 2 * Math.PI;
+        while (d < -Math.PI) d += 2 * Math.PI;
+        camYaw += d * (1 - Math.exp(-cam.chaseSpeed * dtSec));
+
+        const dist = cam.distance;
+        const lookY = playerPos.y + cam.lookAtY;
+        // Behind the car (same as playMode lotus / Bruno chase cam).
+        camera.position.set(
+          playerPos.x + Math.sin(camYaw) * dist,
+          lookY + cam.height,
+          playerPos.z + Math.cos(camYaw) * dist,
+        );
+        camera.lookAt(playerPos.x, lookY, playerPos.z);
+        camera.fov = cam.fov;
+        camera.updateProjectionMatrix();
+      }
+
+      function setupGui() {
+        const gui = new GUI({ title: "Lotus flat test" });
+        gui.domElement.style.position = "fixed";
+        gui.domElement.style.top = "10px";
+        gui.domElement.style.right = "10px";
+
+        const obst = gui.addFolder("Parkour obstacles");
+        obst.open();
+        for (const groupId of Object.keys(parkourDebug)) {
+          parkourGuiControllers.push(
+            obst
+              .add(parkourDebug, groupId)
+              .name(parkourGroupMeta[groupId])
+              .onChange((v) => setParkourGroupEnabled(groupId, v)),
+          );
+        }
+        obst
+          .add(
+            { enableAll: () => setAllParkourGroupsEnabled(true) },
+            "enableAll",
+          )
+          .name("Enable all");
+        obst
+          .add(
+            { disableAll: () => setAllParkourGroupsEnabled(false) },
+            "disableAll",
+          )
+          .name("Disable all");
+
+        const camF = gui.addFolder("Camera");
+        camF.add(cam, "distance", 3, 18, 0.1);
+        camF.add(cam, "height", 0.2, 6, 0.05);
+        camF.add(cam, "lookAtY", 0, 3, 0.05);
+        camF.add(cam, "chaseSpeed", 1, 14, 0.1);
+        camF.add(cam, "fov", 50, 100, 1);
+
+        const drv = gui.addFolder("Vehicle physics");
+        drv.add(physParams, "accel", 5, 80, 0.5).name("Engine accel");
+        drv.add(physParams, "accelBoost", 10, 120, 0.5).name("Boost accel");
+        drv.add(physParams, "maxSpeed", 20, 120, 1).name("Top speed (m/s)");
+        drv
+          .add(physParams, "maxSpeedBoost", 30, 150, 1)
+          .name("Top speed boost");
+        drv.add(physParams, "brake", 5, 80, 0.5).name("Brake");
+        drv.add(physParams, "reverseAccel", 2, 30, 0.5).name("Reverse accel");
+        drv.add(physParams, "coast", 0, 8, 0.05).name("Coast decel");
+        drv.add(physParams, "drag", 0, 0.02, 0.0001).name("Drag coeff");
+        drv.add(physParams, "airDrag", 0, 1, 0.01).name("Air horiz drag");
+
+        const steer = gui.addFolder("Steering, drift & handbrake");
+        steer.add(physParams, "turnRate", 0.3, 3, 0.05).name("Turn rate");
+        steer
+          .add(physParams, "turnRateDrift", 0.5, 5, 0.05)
+          .name("Turn rate (drift)");
+        steer
+          .add(physParams, "turnRateCounter", 0.5, 5, 0.05)
+          .name("Turn rate (counter)");
+        steer.add(physParams, "gripBase", 2, 40, 0.5).name("Grip base");
+        steer
+          .add(physParams, "gripHandbrake", 0.05, 3, 0.05)
+          .name("Grip (handbrake)");
+        steer.add(physParams, "gripMinSpeed", 0.5, 20, 0.5).name("Grip floor");
+        steer
+          .add(physParams, "gripSpeedDecay", 0, 0.5, 0.01)
+          .name("Grip −speed");
+        steer
+          .add(physParams, "gripHandbrakeApplyRate", 1, 20, 0.5)
+          .name("HB grip in");
+        steer
+          .add(physParams, "gripRecoveryRate", 1, 20, 0.5)
+          .name("HB grip out");
+        steer
+          .add(physParams, "gripLoadCoupling", 0, 1, 0.01)
+          .name("Load → grip (0=off)");
+        steer.add(physParams, "gripLoadMax", 1, 2, 0.05).name("Load grip cap");
+        steer
+          .add(physParams, "wallRestitution", 0, 1, 0.05)
+          .name("Wall bounce");
+        steer
+          .add(physParams, "velYRestSnap", 0, 0.5, 0.01)
+          .name("vY rest snap");
+        steer
+          .add(physParams, "chassisVisualLift", 0, 0.5, 0.01)
+          .name("Chassis lift (visual)");
+        steer
+          .add(physParams, "driftEntrySpeed", 4, 20, 0.5)
+          .name("Drift min speed");
+        steer
+          .add(physParams, "handbrakeDecel", 1, 14, 0.25)
+          .name("Handbrake decel");
+
+        // Same layout as v2 tweakpane: "Layer volumes" first (all 4 loops), pitch advanced below.
+        const snd = gui.addFolder("Vehicle audio");
+        snd.open();
+        snd.add(carAudioSettings, "enabled").name("Master enabled");
+        const sndLayers = snd.addFolder(
+          "Layer volumes — engine, wind, wheels, brake",
+        );
+        sndLayers.open();
+        sndLayers
+          .add(carAudioSettings, "engineMul", 0, 1.5, 0.02)
+          .name("Engine (synth loop)");
+        sndLayers
+          .add(carAudioSettings, "windMul", 0, 1.5, 0.02)
+          .name("Wind (speed rush)");
+        sndLayers
+          .add(carAudioSettings, "wheelsMul", 0, 1.5, 0.02)
+          .name("Wheels (road surface)");
+        sndLayers
+          .add(carAudioSettings, "driftBrakeMul", 0, 1.5, 0.02)
+          .name("Handbrake / drift (Space)");
+        const sndEng = snd.addFolder("Engine pitch & fade (advanced)");
+        sndEng
+          .add(carAudioSettings, "engineVol", 0, 1.5, 0.02)
+          .name("Steady volume");
+        sndEng
+          .add(carAudioSettings, "enginePitchMin", 0.5, 1.5, 0.02)
+          .name("Pitch min");
+        sndEng
+          .add(carAudioSettings, "enginePitchMax", 1, 4, 0.02)
+          .name("Pitch @ top speed");
+        sndEng
+          .add(carAudioSettings, "enginePitchBoostMax", 1, 5, 0.02)
+          .name("Pitch @ boost");
+        sndEng
+          .add(carAudioSettings, "enginePitchIdleSpeedMax", 0, 3, 0.05)
+          .name("Idle speed band (m/s)");
+        sndEng
+          .add(carAudioSettings, "enginePitchCurvePow", 0.25, 3, 0.05)
+          .name("Pitch curve pow");
+        sndEng
+          .add(carAudioSettings, "enginePitchEase", 1, 25, 0.5)
+          .name("Pitch smoothing");
+        snd
+          .add(carAudioSettings, "engineFadeEaseUp", 1, 30, 0.5)
+          .name("Engine fade-in speed");
+
+        const dims = gui.addFolder("Vehicle dimensions");
+        dims
+          .add(physParams, "wheelBase", 1.5, 4.0, 0.01)
+          .name("Wheelbase")
+          .onChange(syncCarPhysicsFromParams);
+        dims
+          .add(physParams, "track", 0.9, 2.5, 0.01)
+          .name("Track")
+          .onChange(syncCarPhysicsFromParams);
+        dims
+          .add(physParams, "wheelRadius", 0.2, 0.6, 0.005)
+          .name("Wheel radius");
+        dims
+          .add(physParams, "rideHeight", 0.05, 0.8, 0.01)
+          .name("Ride height")
+          .onChange(syncCarPhysicsFromParams);
+
+        // v2's CarPhysics hull + suspension knobs (same fields the editor exposes).
+        const hullF = gui.addFolder("Hull collision (v2 CarPhysics.lotusHull)");
+        hullF
+          .add(hullDebug, "enabled")
+          .name("Show hull wireframe")
+          .onChange((v) => {
+            if (v) ensureHullDebugVisuals();
+            else if (hullDebugRoot) hullDebugRoot.visible = false;
+          });
+        hullF.add(hullDebug, "showSpheres").name("Wire: hull spheres");
+        hullF.add(hullDebug, "showProbes").name("Wire: probe boxes");
+        hullF.add(hullDebug, "showContacts").name("Wire: wheel contacts");
+        hullF
+          .add({ resyncHull: () => syncLotusHullFromCarBounds() }, "resyncHull")
+          .name("Resync hull from mesh");
+        hullF
+          .add(carPhysics.lotusHull, "probeHalfLength", 0.3, 2.5, 0.02)
+          .name("Probe half-length");
+        hullF
+          .add(carPhysics.lotusHull, "probeHalfWidth", 0.12, 1.4, 0.02)
+          .name("Probe half-width");
+        hullF
+          .add(carPhysics.lotusHull, "stepOverHeight", 0.2, 2, 0.05)
+          .name("Step-over height");
+        hullF
+          .add(carPhysics.lotusHull, "collisionSkin", 0.01, 0.4, 0.005)
+          .name("Collision skin");
+        hullF
+          .add(carPhysics.lotusHull, "probeSearchRadius", 0.1, 1.0, 0.01)
+          .name("Probe search r");
+        hullF
+          .add(carPhysics.lotusHull, "probePenetrationSlack", 0.05, 0.6, 0.01)
+          .name("Probe pen slack");
+        hullF
+          .add(carPhysics.lotusHull, "sweepFwdMargin", 0.05, 1.0, 0.01)
+          .name("Sweep fwd margin");
+
+        const susp = gui.addFolder("Suspension (v2 CarPhysics.lotusChassis)");
+        susp
+          .add(carPhysics.lotusChassis, "suspStiffness", 20, 300, 1)
+          .name("Stiffness");
+        susp
+          .add(carPhysics.lotusChassis, "suspDampCompress", 0, 30, 0.25)
+          .name("Damp (compress)");
+        susp
+          .add(carPhysics.lotusChassis, "suspDampRelax", 0, 30, 0.25)
+          .name("Damp (relax)");
+        susp
+          .add(carPhysics.lotusChassis, "suspMaxTravel", 0.1, 1.5, 0.01)
+          .name("Max travel");
+        susp
+          .add(carPhysics.lotusChassis, "gravity", 5, 50, 0.5)
+          .name("Gravity");
+        susp
+          .add(carPhysics.lotusChassis, "airPitchSmooth", 1, 22, 0.5)
+          .name("Air pitch smooth");
+        susp
+          .add(carPhysics.lotusChassis, "jumpImpulse", 0, 20, 0.25)
+          .name("Jump impulse");
+        susp
+          .add(carPhysics.lotusChassis, "wheelBvhRayPadAboveHub", 0.2, 4, 0.05)
+          .name("Wheel ray pad");
+        susp
+          .add(carPhysics.lotusChassis, "wheelBvHMaxAboveHub", 0.5, 6, 0.05)
+          .name("Max hit above hub");
+        susp
+          .add(carPhysics.lotusChassis, "maxSlopeCos", 0.05, 0.95, 0.02)
+          .name("Max slope cos");
+
+        const dyn = gui.addFolder("Chassis dynamics (visual)");
+        dyn
+          .add(physParams, "pitchSmooth", 1, 25, 0.5)
+          .name("Terrain pitch smooth");
+        dyn
+          .add(physParams, "dynPitchSmooth", 1, 18, 0.5)
+          .name("Squat/dive smooth");
+        dyn
+          .add(physParams, "dynRollSmooth", 1, 18, 0.5)
+          .name("Corner lean smooth");
+        dyn
+          .add(physParams, "dynPitchMax", 0, 0.25, 0.005)
+          .name("Squat/dive max (rad)");
+        dyn.add(physParams, "dynRollMax", 0, 0.4, 0.01).name("Drift lean max");
+        dyn
+          .add(physParams, "cornerLeanMax", 0, 0.15, 0.005)
+          .name("Corner lean max");
+        dyn
+          .add(physParams, "chassisTiltMax", 0.15, 1.0, 0.01)
+          .name("Max chassis tilt (rad)");
+        const wb = gui.addFolder("Wheel hubs (playMode _loadLotus)");
+        wb.add(lotusWheelLayout, "trackWidth", 0.1, 0.6, 0.001)
+          .name("Track ratio")
+          .onChange(placeLotusWheelsFromPlayMode);
+        wb.add(lotusWheelLayout, "wheelbase", 0.1, 0.6, 0.001)
+          .name("Wheelbase ratio")
+          .onChange(placeLotusWheelsFromPlayMode);
+        wb.add(lotusWheelLayout, "wheelY", 0.05, 0.45, 0.001)
+          .name("Hub height ratio")
+          .onChange(placeLotusWheelsFromPlayMode);
+        wb.add(lotusWheelLayout, "wbShift", -0.15, 0.15, 0.001)
+          .name("WB shift")
+          .onChange(placeLotusWheelsFromPlayMode);
+
+        const lit = gui.addFolder("Lighting & Sky");
+        lit
+          .add(renderer, "toneMappingExposure", 0.05, 2.0, 0.01)
+          .name("Exposure");
+        lit.add(sun, "intensity", 0, 5, 0.05).name("Sun intensity");
+        lit.add(hemi, "intensity", 0, 2, 0.02).name("Hemi intensity");
+        lit
+          .add(skyParams, "elevation", -5, 90, 0.5)
+          .name("Sun elevation")
+          .onChange(() => {
+            applySkyParams();
+            rebuildEnvFromSkyDebounced();
+          });
+        lit
+          .add(skyParams, "azimuth", 0, 360, 1)
+          .name("Sun azimuth")
+          .onChange(() => {
+            applySkyParams();
+            rebuildEnvFromSkyDebounced();
+          });
+        lit
+          .add(skyParams, "turbidity", 0.5, 20, 0.1)
+          .name("Turbidity (haze)")
+          .onChange(() => {
+            applySkyParams();
+            rebuildEnvFromSkyDebounced();
+          });
+        lit
+          .add(skyParams, "rayleigh", 0, 4, 0.05)
+          .name("Rayleigh (blue)")
+          .onChange(() => {
+            applySkyParams();
+            rebuildEnvFromSkyDebounced();
+          });
+        lit
+          .add(skyParams, "mieCoefficient", 0, 0.1, 0.001)
+          .name("Mie coef")
+          .onChange(() => {
+            applySkyParams();
+            rebuildEnvFromSkyDebounced();
+          });
+        lit
+          .add(skyParams, "mieDirectionalG", 0, 0.999, 0.001)
+          .name("Mie directional")
+          .onChange(() => {
+            applySkyParams();
+            rebuildEnvFromSkyDebounced();
+          });
+        lit
+          .add(skyParams, "envBlur", 0, 0.045, 0.001)
+          .name("Env reflection blur")
+          .onChange(rebuildEnvFromSkyDebounced);
+
+        gui.add({ respawn }, "respawn").name("Respawn (R)");
+        gui
+          .add({ logRig: () => logCarRigDiagnostics() }, "logRig")
+          .name("Log rig (L)");
+      }
+
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      const timer = new THREE.Timer();
+      timer.connect(document);
+
+      const gltfLoader = new GLTFLoader();
+
+      async function boot() {
+        await renderer.init();
+        rebuildEnvFromSky();
+        buildCircuit();
+        rebakePlayerBvh();
+        console.log(
+          "[circuit] CliffBvh baked:",
+          cliffBvh.baked,
+          colliders.length,
+          "root colliders (children traversed recursively)",
+        );
+
+        gltfLoader.load(
+          GLB_URL,
+          (gltf) => {
+            carRoot = buildCarFromGltf(gltf);
+            scene.add(carRoot);
+            syncCarPhysicsFromParams();
+            respawn();
+            setupGui();
+            hudEl.textContent =
+              "North: slope lab · West/East: straight/curved bridges · South: jump ramp";
+            window.__lotusDbg = {
+              camera,
+              controls,
+              scene,
+              carRoot,
+              state,
+              physParams,
+              cliffBvh,
+              carPhysics,
+              rebakePlayerBvh,
+              parkourDebug,
+              setParkourGroupEnabled,
+              setAllParkourGroupsEnabled,
+              setOrbit: (v) => {
+                orbitInspect = v;
+                controls.enabled = v;
+              },
+            };
+          },
+          undefined,
+          (err) => {
+            console.error(err);
+            hudEl.textContent = "GLB load failed — use a local HTTP server";
+          },
+        );
+
+        renderer.setAnimationLoop(() => {
+          timer.update();
+          const dtSec = Math.min(timer.getDelta() || 1 / 60, 0.05);
+
+          sun.target.position.set(playerPos.x, 0, playerPos.z);
+          sun.position.copy(sunVec).multiplyScalar(80).add(sun.target.position);
+
+          if (carRoot && carWheels.length) {
+            stepSimulation(dtSec);
+          } else if (carRoot) {
+            syncCarVisuals(dtSec);
+          }
+
+          updateCamera(dtSec);
+          updateDriftMarksAndAudio(dtSec);
+          updateHullDebugVisuals();
+          updateHud();
+          renderer.render(scene, camera);
+        });
+      }
+
+      boot().catch((err) => {
+        console.error(err);
+        hudEl.textContent = "WebGPU init failed — use Chrome/Edge over HTTP";
+      });
+    </script>
+  </body>
+</html>

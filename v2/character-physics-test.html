@@ -1,0 +1,1339 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Physics character — full controller (Unity / VVV pattern)</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #0c1018;
+        color: #c8d8e8;
+        font-family: system-ui, sans-serif;
+      }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      #hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+        font-variant-numeric: tabular-nums;
+        background: rgba(0, 0, 0, 0.65);
+        border: 1px solid rgba(120, 200, 255, 0.35);
+        border-radius: 8px;
+        padding: 8px 12px;
+        pointer-events: none;
+        line-height: 1.55;
+        white-space: pre;
+      }
+      #ui {
+        position: fixed;
+        bottom: 12px;
+        left: 12px;
+        max-width: 640px;
+        font-size: 12px;
+        line-height: 1.5;
+        background: rgba(0, 0, 0, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 10px 14px;
+        pointer-events: none;
+      }
+      #ui kbd {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      #badge {
+        position: fixed;
+        bottom: 12px;
+        right: 12px;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        background: rgba(40, 80, 120, 0.85);
+        border: 1px solid rgba(120, 200, 255, 0.45);
+        border-radius: 6px;
+        padding: 6px 10px;
+        pointer-events: none;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
+          "tweakpane": "https://esm.sh/tweakpane@4.0.5"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="badge">VVV pattern · physics character</div>
+    <div id="hud">Loading…</div>
+    <div id="ui">
+      <strong>Physics character test</strong> — ride spring · upright joint · locomotion · jump.<br />
+      Parkour: stairs north · zigzag east · balance west · ramps south · colored pushable crates<br />
+      Click canvas · <b>mouse</b> steer · <kbd>W</kbd>/<kbd>S</kbd> forward/back · <kbd>Space</kbd> jump · <kbd>Esc</kbd> unlock mouse<br />
+      <kbd>R</kbd> respawn · <kbd>Tab</kbd> orbit cam · <kbd>F</kbd> toggle ride ray
+    </div>
+    <script type="module">
+      import * as THREE from "three/webgpu";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+      import { Pane } from "tweakpane";
+
+      // ============================================================
+      // === TUNING — Unity ride spring + upright joint (step 1)
+      // ============================================================
+      const GRAVITY = 9.81;
+
+      /** Capsule collider dimensions (cylinder + end caps). */
+      const CAP = {
+        radius: 0.35,
+        height: 1.0,
+        mass: 70,
+      };
+
+      /** CoM → bottom of capsule mesh (hemisphere + half cylinder). */
+      const CAP_BOTTOM_OFFSET = CAP.radius + CAP.height * 0.5;
+
+      /** Downward ray + spring hover (F = kx − cv along ray). */
+      const RIDE = {
+        rayLength: 3.0,
+        /** Start rays this far above CoM (world up) so we still hit when slightly below surface. */
+        rayCastLift: 1.25,
+        /**
+         * Air gap from ground to capsule bottom — tutorial "never touches" = this > 0.
+         * rideHeight = CAP_BOTTOM_OFFSET + hoverGap (CoM height above ground hit).
+         */
+        hoverGap: 0.28,
+        /** CoM height above ground = bottom offset + hover gap (synced each step). */
+        rideHeight: 0,
+        springStrength: 9000,
+        damper: 1400,
+        /** Multi-probe foot patch (VVV wheel pattern) — × capsule radius. */
+        rayForwardBias: 0.45,
+        rayLateralBias: 0.75,
+        /** Ignore steep/wall faces (step sides) as ground. */
+        minGroundNormalY: 0.45,
+      };
+
+      /** PD upright torque (τ = axis·angle·k − ω·c). */
+      const UPRIGHT = {
+        springStrength: 120,
+        damper: 18,
+      };
+
+      /** Locomotion — goal-velocity tracking via horizontal forces. */
+      const LOCO = {
+        maxSpeed: 8,
+        acceleration: 200,
+        maxAccelForce: 150,
+        forceScaleX: 1,
+        forceScaleY: 0,
+        forceScaleZ: 1,
+        airControl: 0.35,
+        /** Extra gravity multiplier while airborne and falling. */
+        gravityScaleDrop: 10,
+        groundedTolerance: 0.12,
+      };
+
+      /** Jumping — coyote time, buffering, variable height. */
+      const JUMP = {
+        jumpUpVel: 7.5,
+        jumpTerminalVelocity: 22.5,
+        jumpDuration: 0.6667,
+        coyoteTimeThreshold: 0.33,
+        autoJumpAfterLandThreshold: 0.33,
+        jumpFallFactor: 2,
+        jumpSkipGroundCheckDuration: 0.5,
+        /** Short-hop multiplier when Space is released while rising. */
+        analogReleaseCut: 0.45,
+        landingContextThreshold: 0.33,
+        minLandingContextDuration: 0.5,
+      };
+
+      const visParams = {
+        showRay: true,
+        showArrow: false,
+        arrowScale: 0.00025,
+      };
+
+      // ============================================================
+      // === CURVE HELPERS — Unity AnimationCurve approximations
+      // ============================================================
+      /** Dot-product curve: aligned (1) → full factor, opposed (−1) → min. */
+      function evalDotCurve(dot, min = 0.12, max = 1) {
+        const t = THREE.MathUtils.clamp((dot + 1) * 0.5, 0, 1);
+        return min + (max - min) * t;
+      }
+
+      function evalJumpUpVelFactor(existingY) {
+        if (existingY <= 0) return 1;
+        return THREE.MathUtils.clamp(1 - existingY * 0.06, 0.35, 1);
+      }
+
+      const _moveDir = new THREE.Vector3();
+
+      function moveTowardsVec3(current, target, maxDelta, out) {
+        _moveDir.copy(target).sub(current);
+        const dist = _moveDir.length();
+        if (dist <= maxDelta || dist < 1e-8) {
+          out.copy(target);
+          return out;
+        }
+        out.copy(current).addScaledVector(_moveDir.multiplyScalar(1 / dist), maxDelta);
+        return out;
+      }
+
+      function clampVec3Magnitude(v, max, out) {
+        const len = v.length();
+        if (len <= max || len < 1e-8) {
+          out.copy(v);
+          return out;
+        }
+        out.copy(v).multiplyScalar(max / len);
+        return out;
+      }
+
+      // ============================================================
+      // === RIGID BODY — 6-DOF, cylinder inertia for capsule
+      // ============================================================
+      class RigidBody {
+        constructor({ mass, radius, height, boxSize }) {
+          this.mass = mass;
+          this.invMass = 1 / mass;
+
+          let Ixx;
+          let Iyy;
+          let Izz;
+          if (boxSize) {
+            const w = boxSize.width;
+            const h = boxSize.height;
+            const l = boxSize.length;
+            Ixx = (mass / 12) * (h * h + l * l);
+            Iyy = (mass / 12) * (w * w + l * l);
+            Izz = (mass / 12) * (w * w + h * h);
+          } else {
+            const r = radius;
+            const h = height;
+            Ixx = (mass / 12) * (3 * r * r + h * h);
+            Iyy = 0.5 * mass * r * r;
+            Izz = Ixx;
+          }
+          this.localInvInertia = new THREE.Matrix3().set(
+            1 / Ixx, 0, 0,
+            0, 1 / Iyy, 0,
+            0, 0, 1 / Izz,
+          );
+
+          this.pos = new THREE.Vector3();
+          this.vel = new THREE.Vector3();
+          this.quat = new THREE.Quaternion();
+          this.angVel = new THREE.Vector3();
+
+          this.forceAccum = new THREE.Vector3();
+          this.torqueAccum = new THREE.Vector3();
+
+          this._r = new THREE.Vector3();
+          this._tau = new THREE.Vector3();
+          this._rotVel = new THREE.Vector3();
+          this._R3 = new THREE.Matrix3();
+          this._R3t = new THREE.Matrix3();
+          this._mat = new THREE.Matrix4();
+          this._worldInvI = new THREE.Matrix3();
+        }
+
+        addForce(F) {
+          this.forceAccum.add(F);
+        }
+
+        addForceAtPoint(F, worldPoint) {
+          this.forceAccum.add(F);
+          this._r.subVectors(worldPoint, this.pos);
+          this._tau.crossVectors(this._r, F);
+          this.torqueAccum.add(this._tau);
+        }
+
+        addTorque(T) {
+          this.torqueAccum.add(T);
+        }
+
+        getVelocityAtPoint(worldPoint, out) {
+          this._r.subVectors(worldPoint, this.pos);
+          this._rotVel.crossVectors(this.angVel, this._r);
+          return out.addVectors(this.vel, this._rotVel);
+        }
+
+        integrate(dt) {
+          this.vel.x += this.forceAccum.x * this.invMass * dt;
+          this.vel.y += this.forceAccum.y * this.invMass * dt;
+          this.vel.z += this.forceAccum.z * this.invMass * dt;
+          this.pos.x += this.vel.x * dt;
+          this.pos.y += this.vel.y * dt;
+          this.pos.z += this.vel.z * dt;
+
+          this._mat.makeRotationFromQuaternion(this.quat);
+          this._R3.setFromMatrix4(this._mat);
+          this._R3t.copy(this._R3).transpose();
+          this._worldInvI
+            .copy(this._R3)
+            .multiply(this.localInvInertia)
+            .multiply(this._R3t);
+
+          this._tau.copy(this.torqueAccum).applyMatrix3(this._worldInvI);
+          this.angVel.x += this._tau.x * dt;
+          this.angVel.y += this._tau.y * dt;
+          this.angVel.z += this._tau.z * dt;
+
+          const wx = this.angVel.x;
+          const wy = this.angVel.y;
+          const wz = this.angVel.z;
+          const qx = this.quat.x;
+          const qy = this.quat.y;
+          const qz = this.quat.z;
+          const qw = this.quat.w;
+          const dqx = 0.5 * (wx * qw + wy * qz - wz * qy);
+          const dqy = 0.5 * (-wx * qz + wy * qw + wz * qx);
+          const dqz = 0.5 * (wx * qy - wy * qx + wz * qw);
+          const dqw = 0.5 * (-wx * qx - wy * qy - wz * qz);
+          this.quat.set(qx + dqx * dt, qy + dqy * dt, qz + dqz * dt, qw + dqw * dt);
+          this.quat.normalize();
+
+          this.forceAccum.set(0, 0, 0);
+          this.torqueAccum.set(0, 0, 0);
+        }
+      }
+
+      // ============================================================
+      // === SCENE
+      // ============================================================
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x8fb7e8);
+      scene.fog = new THREE.Fog(0x8fb7e8, 60, 220);
+
+      const camera = new THREE.PerspectiveCamera(
+        55, window.innerWidth / window.innerHeight, 0.1, 600,
+      );
+      camera.position.set(0, 4, -8);
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x4a5240, 0.9));
+      const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+      sun.position.set(40, 70, 30);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.camera.left = -50;
+      sun.shadow.camera.right = 50;
+      sun.shadow.camera.top = 50;
+      sun.shadow.camera.bottom = -50;
+      sun.shadow.camera.far = 200;
+      scene.add(sun);
+
+      const collidables = [];
+      const groundMat = new THREE.MeshStandardMaterial({
+        color: 0x6f8f5a,
+        roughness: 0.95,
+        metalness: 0,
+      });
+
+      function addColliderMesh(mesh) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.updateMatrixWorld(true);
+        scene.add(mesh);
+        collidables.push(mesh);
+        return mesh;
+      }
+
+      function addGroundMesh(w, l, y, color = 0x6f8f5a) {
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(w, 0.2, l),
+          groundMat.clone(),
+        );
+        mesh.material.color.setHex(color);
+        mesh.position.set(0, y - 0.1, 0);
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+        collidables.push(mesh);
+        return mesh;
+      }
+
+      function addPlatform({ x, z, w, l, h = 0.25, y = 0, color = 0x6f8f5a }) {
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(w, h, l),
+          groundMat.clone(),
+        );
+        mesh.material.color.setHex(color);
+        mesh.position.set(x, y + h * 0.5, z);
+        return addColliderMesh(mesh);
+      }
+
+      function addStep({ x, z, w, h, l, color = 0x5a7048 }) {
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(w, h, l),
+          groundMat.clone(),
+        );
+        mesh.material.color.setHex(color);
+        mesh.position.set(x, h * 0.5, z);
+        return addColliderMesh(mesh);
+      }
+
+      function addRamp({ x, z, w, l, angleDeg, y = 0, color = 0x7a9060 }) {
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(w, 0.3, l),
+          groundMat.clone(),
+        );
+        mesh.material.color.setHex(color);
+        mesh.position.set(x, y, z);
+        mesh.rotation.x = -THREE.MathUtils.degToRad(angleDeg);
+        return addColliderMesh(mesh);
+      }
+
+      function addWall({ x, z, w, h, l, color = 0x804040 }) {
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(w, h, l),
+          new THREE.MeshStandardMaterial({ color, roughness: 0.8 }),
+        );
+        mesh.position.set(x, h * 0.5, z);
+        return addColliderMesh(mesh);
+      }
+
+      function buildParkourCourse() {
+        addGroundMesh(88, 88, 0, 0x4d5c44);
+
+        // Spawn plaza
+        addPlatform({ x: 0, z: 0, w: 18, l: 18, h: 0.15, color: 0x8a9a7a });
+
+        // North — wide stair climb
+        for (let i = 0; i < 10; i++) {
+          addStep({
+            x: 0,
+            z: 11 + i * 1.35,
+            w: 7,
+            h: 0.32 * (i + 1),
+            l: 1.15,
+            color: 0x4a6340 + (i * 0x020202),
+          });
+        }
+        addPlatform({ x: 0, z: 28, w: 10, l: 8, h: 0.35, y: 3.2, color: 0x6a7f58 });
+
+        // High north summit + ramp down east side
+        addPlatform({ x: 0, z: 36, w: 8, l: 6, h: 0.4, y: 4.8, color: 0x7a9068 });
+        addRamp({ x: 8, z: 32, w: 4, l: 10, angleDeg: 28, y: 2.2, color: 0x708060 });
+
+        // East — zigzag jump line
+        const eastPads = [
+          { x: 14, z: -4, y: 0, w: 3.5, l: 3.5 },
+          { x: 18, z: 2, y: 0.8, w: 3, l: 3 },
+          { x: 14, z: 8, y: 1.6, w: 3, l: 3 },
+          { x: 20, z: 14, y: 2.4, w: 2.8, l: 2.8 },
+          { x: 15, z: 20, y: 3.2, w: 2.6, l: 2.6 },
+          { x: 22, z: 26, y: 4, w: 2.5, l: 2.5 },
+        ];
+        for (const pad of eastPads) {
+          addPlatform({
+            x: pad.x,
+            z: pad.z,
+            w: pad.w,
+            l: pad.l,
+            h: 0.35,
+            y: pad.y,
+            color: 0x5c7a9a,
+          });
+        }
+
+        // West — balance beam + stepping stones
+        addPlatform({ x: -16, z: -2, w: 2, l: 14, h: 0.2, y: 1.2, color: 0x9a7a5c });
+        for (let i = 0; i < 6; i++) {
+          addPlatform({
+            x: -20 - (i % 2) * 2.5,
+            z: 4 + i * 3.5,
+            w: 2.2,
+            l: 2.2,
+            h: 0.3,
+            y: 0.4 + i * 0.55,
+            color: 0x8a6a4a,
+          });
+        }
+
+        // South — low ramps + wall weave
+        addRamp({ x: -6, z: -14, w: 5, l: 7, angleDeg: 18, color: 0x6a8060 });
+        addRamp({ x: 6, z: -16, w: 5, l: 8, angleDeg: 24, color: 0x6a8060 });
+        addWall({ x: -10, z: -10, w: 0.35, h: 2.5, l: 6, color: 0x705050 });
+        addWall({ x: 10, z: -12, w: 0.35, h: 3, l: 7, color: 0x705050 });
+
+        // Central north gap (pit floor below)
+        addPlatform({ x: 0, z: 22, w: 5, l: 2.5, h: 0.3, y: 2.8, color: 0x7a8a6a });
+        addPlatform({ x: 0, z: 31, w: 5, l: 2.5, h: 0.3, y: 2.8, color: 0x7a8a6a });
+        addPlatform({ x: 0, z: 26.5, w: 6, l: 4, h: 0.15, y: -1.2, color: 0x3a4038 });
+
+        // Far east arena wall
+        addWall({ x: 28, z: 8, w: 0.5, h: 4, l: 24, color: 0x604848 });
+      }
+
+      buildParkourCourse();
+
+      const dynamicProps = [];
+      const meshToBody = new Map();
+      const _dynamicMeshes = new Set();
+
+      const _propGravityF = new THREE.Vector3();
+
+      function createDynamicBox({ x, y, z, w, h, d, mass, color, labelColor = 0x111111 }) {
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(w, h, d),
+          new THREE.MeshStandardMaterial({
+            color,
+            roughness: 0.55,
+            metalness: 0.08,
+            emissive: new THREE.Color(color).multiplyScalar(0.12),
+          }),
+        );
+        mesh.position.set(x, y, z);
+        mesh.add(
+          new THREE.LineSegments(
+            new THREE.EdgesGeometry(mesh.geometry),
+            new THREE.LineBasicMaterial({ color: labelColor }),
+          ),
+        );
+        scene.add(mesh);
+        collidables.push(mesh);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+
+        const rb = new RigidBody({ mass, boxSize: { width: w, height: h, length: d } });
+        rb.pos.set(x, y, z);
+        dynamicProps.push({ mesh, body: rb, halfY: h * 0.5 });
+        meshToBody.set(mesh, rb);
+        _dynamicMeshes.add(mesh);
+        return { mesh, body: rb };
+      }
+
+      function placeCrateOnGround({ x, z, size, mass, color, labelColor }) {
+        const h = size;
+        const gy = sampleGroundY(x, z, _dynamicMeshes);
+        return createDynamicBox({
+          x,
+          y: gy + h * 0.5,
+          z,
+          w: size,
+          h: size,
+          d: size,
+          mass,
+          color,
+          labelColor,
+        });
+      }
+
+      function constrainPropToGround(prop) {
+        const gy = sampleSupportY(
+          prop.body.pos.x,
+          prop.body.pos.z,
+          prop.body.pos.y,
+          _dynamicMeshes,
+        );
+        const minY = gy + prop.halfY;
+        if (prop.body.pos.y < minY) {
+          prop.body.pos.y = minY;
+          if (prop.body.vel.y < 0) prop.body.vel.y = 0;
+        }
+      }
+
+      const grid = new THREE.GridHelper(88, 88, 0x223018, 0x33401f);
+      grid.position.y = 0.02;
+      grid.material.transparent = true;
+      grid.material.opacity = 0.22;
+      scene.add(grid);
+
+      // ============================================================
+      // === CAPSULE MESH + RIGID BODY
+      // ============================================================
+      const SPAWN = { x: 0, y: 2.2, z: 0 };
+
+      /** Visual root — physics body CoM sits at the group origin. */
+      const capsuleRoot = new THREE.Group();
+      scene.add(capsuleRoot);
+
+      const capsuleMesh = new THREE.Mesh(
+        new THREE.CapsuleGeometry(CAP.radius, CAP.height, 8, 16),
+        new THREE.MeshStandardMaterial({
+          color: 0x6eb5ff,
+          roughness: 0.45,
+          metalness: 0.08,
+        }),
+      );
+      capsuleMesh.castShadow = true;
+      capsuleMesh.receiveShadow = true;
+      capsuleRoot.add(capsuleMesh);
+
+      // Front "face" visor at eye height — mirrors the Unity tutorial marker so
+      // you can read which way the capsule is facing (+Z = forward).
+      const faceVisor = new THREE.Mesh(
+        new THREE.BoxGeometry(CAP.radius * 1.3, CAP.radius * 0.7, 0.05),
+        new THREE.MeshStandardMaterial({
+          color: 0xff2222,
+          roughness: 0.4,
+          metalness: 0.1,
+        }),
+      );
+      const eyeY = CAP.height * 0.35 + CAP.radius * 0.2;
+      faceVisor.position.set(0, eyeY, CAP.radius + 0.03);
+      faceVisor.castShadow = true;
+      capsuleRoot.add(faceVisor);
+
+      const body = new RigidBody({
+        mass: CAP.mass,
+        radius: CAP.radius,
+        height: CAP.height,
+      });
+
+      const uprightTarget = new THREE.Quaternion();
+
+      // Ride-spring debug arrow (green = hover force)
+      const rideArrow = new THREE.ArrowHelper(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(),
+        0.5,
+        0x60ff80,
+        0.2,
+        0.12,
+      );
+      scene.add(rideArrow);
+
+      const _rayCastStart = new THREE.Vector3();
+      const _rayCastEnd = new THREE.Vector3();
+      const _rayMid = new THREE.Vector3();
+      const _raySegDir = new THREE.Vector3();
+      const _reactionF = new THREE.Vector3();
+      const _cylUp = new THREE.Vector3(0, 1, 0);
+
+      const rideRayGeom = new THREE.CylinderGeometry(0.012, 0.012, 1, 6);
+      rideRayGeom.translate(0, 0.5, 0);
+      const rideRayLine = new THREE.Mesh(
+        rideRayGeom,
+        new THREE.MeshBasicMaterial({ color: 0xff2222 }),
+      );
+      rideRayLine.visible = visParams.showRay;
+      scene.add(rideRayLine);
+
+      const blobShadow = new THREE.Mesh(
+        new THREE.CircleGeometry(CAP.radius * 0.95, 24),
+        new THREE.MeshBasicMaterial({
+          color: 0x000000,
+          transparent: true,
+          opacity: 0.38,
+          depthWrite: false,
+        }),
+      );
+      blobShadow.rotation.x = -Math.PI / 2;
+      blobShadow.renderOrder = 1;
+      scene.add(blobShadow);
+
+      // ============================================================
+      // === PHYSICS HELPERS — shortest rotation + ride / upright
+      // ============================================================
+      const _rayDir = new THREE.Vector3();
+      const _rayOrigin = new THREE.Vector3();
+      const _springF = new THREE.Vector3();
+      const _gravityF = new THREE.Vector3();
+      const _arrowDir = new THREE.Vector3();
+      const _qErr = new THREE.Quaternion();
+      const _qInv = new THREE.Quaternion();
+      const _rotAxis = new THREE.Vector3();
+      const _uprightTau = new THREE.Vector3();
+      const _unitGoal = new THREE.Vector3();
+      const _goalVel = new THREE.Vector3();
+      const _goalVelTarget = new THREE.Vector3();
+      const _unitVel = new THREE.Vector3();
+      const _neededAccel = new THREE.Vector3();
+      const _locoForce = new THREE.Vector3();
+      const _groundVel = new THREE.Vector3();
+      const _yawQuat = new THREE.Quaternion();
+      const _bodyUp = new THREE.Vector3();
+      const _probeFwd = new THREE.Vector3();
+      const _probeRight = new THREE.Vector3();
+      const _toHit = new THREE.Vector3();
+      const _hitNormal = new THREE.Vector3();
+      const rayGroundNormal = new THREE.Vector3(0, 1, 0);
+
+      const RIDE_PROBE_LAYOUT = [
+        [0, 0],
+        [1, 0], [-1, 0],
+        [0, 1], [0, -1],
+      ];
+
+      const raycaster = new THREE.Raycaster();
+      let rayDidHit = false;
+      let rayHitDistance = 0;
+      let rayHitPoint = new THREE.Vector3();
+      let rayHitObject = null;
+      let rayHitBody = null;
+      let rideProbeHits = 0;
+      let lastSpringForce = 0;
+      let isGrounded = false;
+      let wasGrounded = false;
+      let lastLocoForceMag = 0;
+
+      const LOOK = {
+        sensX: 0.0022,
+      };
+
+      const ctrl = {
+        facingYaw: 0,
+        pointerLocked: false,
+        unitGoal: new THREE.Vector3(),
+        goalVel: new THREE.Vector3(),
+        coyoteTimer: 0,
+        jumpBufferTimer: 0,
+        jumpSkipGroundTimer: 0,
+        jumpTime: 0,
+        jumpHeld: false,
+        jumpPrevHeld: false,
+        movementDisabledTimer: 0,
+        landingContextTimer: 0,
+        lastLandingImpact: 0,
+      };
+
+      function shortestRotation(goalQuat, currentQuat, out) {
+        _qInv.copy(currentQuat).invert();
+        out.copy(goalQuat).multiply(_qInv);
+        if (out.w < 0) {
+          out.x = -out.x;
+          out.y = -out.y;
+          out.z = -out.z;
+          out.w = -out.w;
+        }
+        return out;
+      }
+
+      function quatToAxisAngle(q, axisOut) {
+        const angle = 2 * Math.acos(THREE.MathUtils.clamp(q.w, -1, 1));
+        const s = Math.sqrt(Math.max(0, 1 - q.w * q.w));
+        if (s < 1e-5) {
+          axisOut.set(1, 0, 0);
+          return 0;
+        }
+        axisOut.set(q.x / s, q.y / s, q.z / s);
+        return angle;
+      }
+
+      function resolveHitNormal(hit) {
+        if (hit.normal && hit.normal.lengthSq() > 1e-8) {
+          return _hitNormal.copy(hit.normal);
+        }
+        if (hit.face?.normal) {
+          hit.object.updateWorldMatrix(true, false);
+          return _hitNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
+        }
+        if (hit.point.y <= body.pos.y + 0.05) {
+          return _hitNormal.set(0, 1, 0);
+        }
+        return null;
+      }
+
+      let rideUseWorldDown = true;
+
+      function comDistToHit(hitPoint) {
+        if (rideUseWorldDown) return body.pos.y - hitPoint.y;
+        _toHit.subVectors(hitPoint, body.pos);
+        return -_toHit.dot(_rayDir);
+      }
+
+      function considerRideHit(hit, best) {
+        if (!resolveHitNormal(hit) || _hitNormal.y < RIDE.minGroundNormalY) return best;
+
+        const comDist = comDistToHit(hit.point);
+        if (comDist <= 0.02) return best;
+
+        rideProbeHits++;
+        if (!best || comDist < best.comDist) {
+          return {
+            comDist,
+            point: hit.point,
+            normal: _hitNormal.clone(),
+            object: hit.object,
+          };
+        }
+        return best;
+      }
+
+      function castRideRay() {
+        scene.updateMatrixWorld(true);
+
+        const bodyDown = _rayDir.set(0, -1, 0).applyQuaternion(body.quat).normalize();
+        rideUseWorldDown = bodyDown.y < -0.75;
+
+        if (rideUseWorldDown) {
+          _rayDir.set(0, -1, 0);
+          _bodyUp.set(0, 1, 0);
+        } else {
+          _bodyUp.copy(bodyDown).multiplyScalar(-1);
+        }
+
+        const sinY = Math.sin(ctrl.facingYaw);
+        const cosY = Math.cos(ctrl.facingYaw);
+        _probeFwd.set(sinY, 0, cosY);
+        _probeRight.set(cosY, 0, -sinY);
+
+        const fwdBias = CAP.radius * RIDE.rayForwardBias;
+        const latBias = CAP.radius * RIDE.rayLateralBias;
+
+        raycaster.ray.direction.copy(_rayDir);
+        raycaster.far = RIDE.rayLength + RIDE.rayCastLift;
+        raycaster.near = 0;
+
+        let best = null;
+        rideProbeHits = 0;
+
+        for (const [fSign, lSign] of RIDE_PROBE_LAYOUT) {
+          _rayOrigin
+            .copy(body.pos)
+            .addScaledVector(_bodyUp, RIDE.rayCastLift)
+            .addScaledVector(_probeFwd, fSign * fwdBias)
+            .addScaledVector(_probeRight, lSign * latBias);
+
+          raycaster.ray.origin.copy(_rayOrigin);
+          const hits = raycaster.intersectObjects(collidables, false);
+          for (let i = 0; i < hits.length; i++) {
+            best = considerRideHit(hits[i], best);
+          }
+        }
+
+        if (!best && body.pos.y < 6) {
+          const gy = sampleGroundY(body.pos.x, body.pos.z);
+          if (gy < body.pos.y - 0.02) {
+            rayHitPoint.set(body.pos.x, gy, body.pos.z);
+            best = {
+              comDist: body.pos.y - gy,
+              point: rayHitPoint.clone(),
+              normal: new THREE.Vector3(0, 1, 0),
+              object: null,
+            };
+          }
+        }
+
+        if (!best) {
+          rayDidHit = false;
+          rayHitObject = null;
+          rayHitBody = null;
+          return;
+        }
+
+        rayDidHit = true;
+        rayHitDistance = best.comDist;
+        rayHitPoint.copy(best.point);
+        rayGroundNormal.copy(best.normal);
+        rayHitObject = best.object ?? null;
+        rayHitBody = rayHitObject ? meshToBody.get(rayHitObject) ?? null : null;
+
+        _rayCastStart.copy(body.pos).addScaledVector(_bodyUp, -CAP_BOTTOM_OFFSET);
+      }
+
+      function applyRideSpring() {
+        if (!rayDidHit || ctrl.jumpSkipGroundTimer > 0) return;
+
+        _rayDir.set(0, -1, 0).applyQuaternion(body.quat).normalize();
+
+        const rayDirVel = _rayDir.dot(body.vel);
+        const x = rayHitDistance - RIDE.rideHeight;
+        const springForce = x * RIDE.springStrength - rayDirVel * RIDE.damper;
+        lastSpringForce = springForce;
+
+        _springF.copy(_rayDir).multiplyScalar(springForce);
+        body.addForce(_springF);
+
+        if (rayHitBody) {
+          _reactionF.copy(_springF).multiplyScalar(-1);
+          rayHitBody.addForceAtPoint(_reactionF, rayHitPoint);
+        }
+      }
+
+      function sampleGroundY(x, z, ignoreMeshes = null) {
+        scene.updateMatrixWorld(true);
+        raycaster.ray.direction.set(0, -1, 0);
+        raycaster.far = 12;
+        raycaster.near = 0;
+        raycaster.ray.origin.set(x, 8, z);
+        const hits = raycaster.intersectObjects(collidables, false);
+        for (let i = 0; i < hits.length; i++) {
+          const hit = hits[i];
+          if (ignoreMeshes?.has(hit.object)) continue;
+          if (resolveHitNormal(hit) && _hitNormal.y >= RIDE.minGroundNormalY) {
+            return hit.point.y;
+          }
+        }
+        return 0;
+      }
+
+      function sampleSupportY(x, z, belowY, ignoreMeshes) {
+        scene.updateMatrixWorld(true);
+        raycaster.ray.direction.set(0, -1, 0);
+        raycaster.far = 12;
+        raycaster.near = 0;
+        raycaster.ray.origin.set(x, belowY + 2, z);
+        const hits = raycaster.intersectObjects(collidables, false);
+        let bestY = null;
+        for (let i = 0; i < hits.length; i++) {
+          const hit = hits[i];
+          if (ignoreMeshes.has(hit.object)) continue;
+          if (resolveHitNormal(hit) && _hitNormal.y >= RIDE.minGroundNormalY) {
+            if (bestY === null || hit.point.y > bestY) bestY = hit.point.y;
+          }
+        }
+        return bestY ?? 0;
+      }
+
+      function spawnParkourCrates() {
+        // Large crates in front of spawn — visible immediately from default camera.
+        placeCrateOnGround({ x: 2.2, z: -3.5, size: 1.25, mass: 45, color: 0xff6b35, labelColor: 0x331100 });
+        placeCrateOnGround({ x: -2.2, z: -3.5, size: 1.25, mass: 45, color: 0x4cc9f0, labelColor: 0x002233 });
+        placeCrateOnGround({ x: 0, z: -5.5, size: 1.1, mass: 38, color: 0xffd166, labelColor: 0x332200 });
+
+        // Course props — push / ride spring demos
+        placeCrateOnGround({ x: 12, z: -2, size: 1.0, mass: 30, color: 0xf72585, labelColor: 0x330011 });
+        placeCrateOnGround({ x: -14, z: 6, size: 0.95, mass: 28, color: 0x7209b7, labelColor: 0x220033 });
+        placeCrateOnGround({ x: 0, z: 24.5, size: 1.05, mass: 34, color: 0x06d6a0, labelColor: 0x003322 });
+        placeCrateOnGround({ x: 18, z: 16, size: 0.9, mass: 26, color: 0xef476f, labelColor: 0x330011 });
+      }
+      spawnParkourCrates();
+
+      function applySafetyFloor() {
+        if (!rayDidHit || ctrl.jumpSkipGroundTimer > 0) return;
+        const minY = rayHitPoint.y + RIDE.rideHeight;
+        if (body.pos.y < minY - RIDE.hoverGap * 0.35) {
+          body.pos.y = minY;
+          if (body.vel.y < 0) body.vel.y = 0;
+        }
+      }
+
+      function applyUprightForce() {
+        shortestRotation(uprightTarget, body.quat, _qErr);
+        const rotRadians = quatToAxisAngle(_qErr, _rotAxis);
+        _uprightTau
+          .copy(_rotAxis)
+          .multiplyScalar(rotRadians * UPRIGHT.springStrength)
+          .addScaledVector(body.angVel, -UPRIGHT.damper);
+        body.addTorque(_uprightTau);
+      }
+
+      function updateGroundedState(trackLanding) {
+        wasGrounded = isGrounded;
+        const distErr = rayDidHit ? Math.abs(rayHitDistance - RIDE.rideHeight) : Infinity;
+        const enterTol = LOCO.groundedTolerance;
+        const exitTol = LOCO.groundedTolerance * 2.5;
+
+        if (!isGrounded) {
+          isGrounded =
+            ctrl.jumpSkipGroundTimer <= 0 &&
+            rayDidHit &&
+            distErr < enterTol &&
+            body.vel.y < 3.5;
+        } else {
+          isGrounded =
+            ctrl.jumpSkipGroundTimer <= 0 &&
+            rayDidHit &&
+            distErr < exitTol &&
+            body.vel.y < 5;
+        }
+
+        if (trackLanding && !wasGrounded && isGrounded) {
+          ctrl.lastLandingImpact = body.vel.y;
+        }
+      }
+
+      function applyFacingYaw() {
+        _yawQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ctrl.facingYaw);
+        uprightTarget.copy(_yawQuat);
+      }
+
+      function readMoveInput() {
+        const fwd =
+          keys.KeyW || keys.KeyZ || keys.ArrowUp ? 1 : 0;
+        const back = keys.KeyS || keys.ArrowDown ? 1 : 0;
+        const mz = fwd - back;
+
+        applyFacingYaw();
+
+        if (mz !== 0) {
+          ctrl.unitGoal.set(
+            Math.sin(ctrl.facingYaw) * mz,
+            0,
+            Math.cos(ctrl.facingYaw) * mz,
+          );
+        } else {
+          ctrl.unitGoal.set(0, 0, 0);
+        }
+      }
+
+      function updateJumpInput(dt) {
+        const jumpDown = !!keys.Space;
+        const jumpPressed = jumpDown && !ctrl.jumpPrevHeld;
+        const jumpReleased = !jumpDown && ctrl.jumpPrevHeld;
+
+        if (jumpPressed) {
+          ctrl.jumpBufferTimer = JUMP.autoJumpAfterLandThreshold;
+        }
+        if (ctrl.jumpBufferTimer > 0) ctrl.jumpBufferTimer -= dt;
+        if (ctrl.jumpSkipGroundTimer > 0) ctrl.jumpSkipGroundTimer -= dt;
+        if (ctrl.movementDisabledTimer > 0) ctrl.movementDisabledTimer -= dt;
+        if (ctrl.landingContextTimer > 0) ctrl.landingContextTimer -= dt;
+        if (ctrl.coyoteTimer > 0 && !isGrounded) ctrl.coyoteTimer -= dt;
+        if (isGrounded) ctrl.coyoteTimer = JUMP.coyoteTimeThreshold;
+
+        if (!wasGrounded && isGrounded) {
+          const impact = Math.abs(ctrl.lastLandingImpact);
+          if (impact >= JUMP.landingContextThreshold) {
+            ctrl.landingContextTimer = JUMP.minLandingContextDuration;
+          }
+        }
+
+        const canJump =
+          ctrl.jumpSkipGroundTimer <= 0 && (isGrounded || ctrl.coyoteTimer > 0);
+        const bufferTrigger = !wasGrounded && isGrounded && ctrl.jumpBufferTimer > 0;
+
+        if (canJump && (jumpPressed || bufferTrigger)) {
+          const upFactor = evalJumpUpVelFactor(body.vel.y);
+          body.vel.y = JUMP.jumpUpVel * upFactor;
+          ctrl.jumpSkipGroundTimer = JUMP.jumpSkipGroundCheckDuration;
+          ctrl.jumpTime = 0;
+          ctrl.coyoteTimer = 0;
+          ctrl.jumpBufferTimer = 0;
+        }
+
+        if (jumpDown) ctrl.jumpTime += dt;
+
+        if (jumpReleased && body.vel.y > 0.25) {
+          body.vel.y *= JUMP.analogReleaseCut;
+        }
+
+        if (jumpDown && ctrl.jumpTime >= JUMP.jumpDuration && body.vel.y > 0) {
+          body.vel.y -= JUMP.jumpUpVel * 2.2 * dt;
+        }
+
+        ctrl.jumpPrevHeld = jumpDown;
+      }
+
+      function updateGoalVelocity(dt) {
+        const speedFactor = isGrounded ? 1 : LOCO.airControl;
+        if (ctrl.movementDisabledTimer > 0) speedFactor *= 0.35;
+
+        _goalVelTarget.copy(ctrl.unitGoal).multiplyScalar(LOCO.maxSpeed * speedFactor);
+        _goalVelTarget.add(_groundVel);
+
+        _unitVel.copy(ctrl.goalVel);
+        if (_unitVel.lengthSq() > 1e-8) _unitVel.normalize();
+        else _unitVel.copy(ctrl.unitGoal);
+
+        const velDot = ctrl.unitGoal.lengthSq() > 1e-8
+          ? THREE.MathUtils.clamp(ctrl.unitGoal.dot(_unitVel), -1, 1)
+          : 1;
+
+        const accelRate = LOCO.acceleration * evalDotCurve(velDot, 0.12, 1);
+        moveTowardsVec3(ctrl.goalVel, _goalVelTarget, accelRate * dt, _goalVel);
+        ctrl.goalVel.copy(_goalVel);
+        ctrl.goalVel.y = 0;
+      }
+
+      function applyLocomotionForce(dt) {
+        _unitVel.copy(ctrl.goalVel);
+        if (_unitVel.lengthSq() > 1e-8) _unitVel.normalize();
+        else _unitVel.copy(ctrl.unitGoal);
+
+        const velDot = ctrl.unitGoal.lengthSq() > 1e-8
+          ? THREE.MathUtils.clamp(ctrl.unitGoal.dot(_unitVel), -1, 1)
+          : 1;
+
+        _neededAccel.set(
+          ctrl.goalVel.x - body.vel.x,
+          0,
+          ctrl.goalVel.z - body.vel.z,
+        ).divideScalar(Math.max(dt, 1e-6));
+
+        const maxAccel = LOCO.maxAccelForce * evalDotCurve(velDot, 0.2, 1);
+        clampVec3Magnitude(_neededAccel, maxAccel, _neededAccel);
+
+        _locoForce.set(
+          _neededAccel.x * body.mass * LOCO.forceScaleX,
+          0,
+          _neededAccel.z * body.mass * LOCO.forceScaleZ,
+        );
+        lastLocoForceMag = _locoForce.length();
+        body.addForce(_locoForce);
+      }
+
+      function applyGravity(dt) {
+        let g = GRAVITY;
+        if (!isGrounded) {
+          if (body.vel.y < 0) g *= JUMP.jumpFallFactor;
+          if (body.vel.y < -1) g *= 1 + (LOCO.gravityScaleDrop - 1) * 0.15;
+        }
+        _gravityF.set(0, -g * body.mass, 0);
+        body.addForce(_gravityF);
+
+        if (body.vel.y < -JUMP.jumpTerminalVelocity) {
+          body.vel.y = -JUMP.jumpTerminalVelocity;
+        }
+      }
+
+      // ============================================================
+      // === INPUT + CAMERA
+      // ============================================================
+      const keys = {};
+      const onKeyDown = (e) => {
+        keys[e.code] = true;
+        if (e.code === "KeyR") respawn();
+        if (e.code === "KeyF") {
+          visParams.showRay = !visParams.showRay;
+          rideRayLine.visible = visParams.showRay && rayDidHit;
+          pane.refresh();
+        }
+        if (e.code === "Tab") {
+          e.preventDefault();
+          orbitControls.enabled = !orbitControls.enabled;
+          if (orbitControls.enabled) document.exitPointerLock?.();
+        }
+        if (e.code === "Space") e.preventDefault();
+      };
+      const onKeyUp = (e) => {
+        keys[e.code] = false;
+      };
+      document.addEventListener("keydown", onKeyDown, { capture: true });
+      document.addEventListener("keyup", onKeyUp, { capture: true });
+
+      renderer.domElement.tabIndex = 0;
+      renderer.domElement.style.outline = "none";
+      renderer.domElement.style.cursor = "crosshair";
+
+      renderer.domElement.addEventListener("click", () => {
+        if (orbitControls.enabled) return;
+        renderer.domElement.requestPointerLock?.();
+      });
+
+      document.addEventListener("pointerlockchange", () => {
+        ctrl.pointerLocked = document.pointerLockElement === renderer.domElement;
+        renderer.domElement.style.cursor = ctrl.pointerLocked ? "none" : "crosshair";
+      });
+
+      document.addEventListener("mousemove", (e) => {
+        if (!ctrl.pointerLocked || orbitControls.enabled) return;
+        ctrl.facingYaw -= e.movementX * LOOK.sensX;
+      });
+
+      const orbitControls = new OrbitControls(camera, renderer.domElement);
+      orbitControls.enabled = false;
+      orbitControls.target.set(0, 1.2, 0);
+
+      const camDesired = new THREE.Vector3();
+      const camLookAt = new THREE.Vector3();
+      const CAM_OFFSET = new THREE.Vector3(0, 2.8, -6.5);
+
+      function updateCamera(dt) {
+        if (orbitControls.enabled) {
+          orbitControls.target.copy(body.pos);
+          orbitControls.update();
+          return;
+        }
+        const yawQ = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          ctrl.facingYaw,
+        );
+        camDesired.copy(CAM_OFFSET).applyQuaternion(yawQ).add(body.pos);
+        const k = 1 - Math.exp(-6 * dt);
+        camera.position.lerp(camDesired, k);
+        camLookAt.copy(body.pos).add(new THREE.Vector3(0, 0.6, 0));
+        camera.lookAt(camLookAt);
+      }
+
+      function respawn() {
+        RIDE.rideHeight = CAP_BOTTOM_OFFSET + RIDE.hoverGap;
+        const groundY = sampleGroundY(SPAWN.x, SPAWN.z);
+        body.pos.set(SPAWN.x, groundY + RIDE.rideHeight + 0.05, SPAWN.z);
+        body.vel.set(0, 0, 0);
+        body.quat.identity();
+        body.angVel.set(0, 0, 0);
+        ctrl.facingYaw = 0;
+        uprightTarget.identity();
+        ctrl.unitGoal.set(0, 0, 0);
+        ctrl.goalVel.set(0, 0, 0);
+        ctrl.coyoteTimer = 0;
+        ctrl.jumpBufferTimer = 0;
+        ctrl.jumpSkipGroundTimer = 0;
+        ctrl.jumpTime = 0;
+        ctrl.jumpPrevHeld = false;
+        ctrl.movementDisabledTimer = 0;
+        ctrl.landingContextTimer = 0;
+        isGrounded = false;
+        wasGrounded = false;
+      }
+      respawn();
+
+      // ============================================================
+      // === TWEAKPANE
+      // ============================================================
+      const pane = new Pane({ title: "Character physics" });
+      const fRide = pane.addFolder({ title: "Ride spring" });
+      fRide.addBinding(RIDE, "hoverGap", {
+        min: 0, max: 0.6, step: 0.02,
+        label: "hover gap (m)",
+      });
+      fRide.addBinding(RIDE, "rayCastLift", { min: 0.2, max: 3, step: 0.05 });
+      fRide.addBinding(RIDE, "springStrength", { min: 1000, max: 30000, step: 100 });
+      fRide.addBinding(RIDE, "damper", { min: 100, max: 8000, step: 50 });
+      fRide.addBinding(RIDE, "rayForwardBias", { min: 0, max: 1.2, step: 0.05 });
+      fRide.addBinding(RIDE, "rayLateralBias", { min: 0, max: 1.2, step: 0.05 });
+      fRide.addBinding(RIDE, "minGroundNormalY", { min: 0.2, max: 0.9, step: 0.05, label: "min ground Y" });
+      const fUp = pane.addFolder({ title: "Upright joint" });
+      fUp.addBinding(UPRIGHT, "springStrength", { min: 10, max: 400, step: 5 });
+      fUp.addBinding(UPRIGHT, "damper", { min: 1, max: 80, step: 1 });
+      const fLoco = pane.addFolder({ title: "Locomotion" });
+      fLoco.addBinding(LOCO, "maxSpeed", { min: 2, max: 16, step: 0.5 });
+      fLoco.addBinding(LOCO, "acceleration", { min: 20, max: 400, step: 10 });
+      fLoco.addBinding(LOCO, "maxAccelForce", { min: 20, max: 400, step: 10 });
+      fLoco.addBinding(LOCO, "airControl", { min: 0, max: 1, step: 0.05 });
+      fLoco.addBinding(LOOK, "sensX", { min: 0.0005, max: 0.01, step: 0.0001, label: "mouse sens" });
+      const fJump = pane.addFolder({ title: "Jump" });
+      fJump.addBinding(JUMP, "jumpUpVel", { min: 3, max: 14, step: 0.5 });
+      fJump.addBinding(JUMP, "coyoteTimeThreshold", { min: 0, max: 0.6, step: 0.05 });
+      fJump.addBinding(JUMP, "autoJumpAfterLandThreshold", { min: 0, max: 0.6, step: 0.05 });
+      fJump.addBinding(JUMP, "jumpFallFactor", { min: 1, max: 4, step: 0.1 });
+      pane.addBinding(visParams, "showRay", { label: "ride ray" });
+      pane.addBinding(visParams, "showArrow", { label: "force arrow" });
+
+      // ============================================================
+      // === MAIN LOOP
+      // ============================================================
+      const SUBSTEPS = 4;
+      const hud = document.getElementById("hud");
+      const timer = new THREE.Timer();
+      timer.connect(document);
+
+      function physicsStep(dt) {
+        RIDE.rideHeight = CAP_BOTTOM_OFFSET + RIDE.hoverGap;
+        readMoveInput();
+        castRideRay();
+        updateGroundedState(false);
+        updateGoalVelocity(dt);
+        updateJumpInput(dt);
+
+        if (rayHitBody) {
+          rayHitBody.getVelocityAtPoint(rayHitPoint, _groundVel);
+        } else {
+          _groundVel.set(0, 0, 0);
+        }
+
+        const h = dt / SUBSTEPS;
+        for (let i = 0; i < SUBSTEPS; i++) {
+          castRideRay();
+          updateGroundedState(false);
+          applyGravity(h);
+          applyLocomotionForce(h);
+          applyRideSpring();
+          applyUprightForce();
+          body.integrate(h);
+
+          for (const prop of dynamicProps) {
+            _propGravityF.set(0, -GRAVITY * prop.body.mass, 0);
+            prop.body.addForce(_propGravityF);
+            prop.body.integrate(h);
+            constrainPropToGround(prop);
+            prop.body.angVel.multiplyScalar(0.985);
+            prop.mesh.position.copy(prop.body.pos);
+            prop.mesh.quaternion.copy(prop.body.quat);
+          }
+        }
+
+        castRideRay();
+        updateGroundedState(true);
+        applySafetyFloor();
+      }
+
+      function syncVisuals() {
+        capsuleRoot.position.copy(body.pos);
+        capsuleRoot.quaternion.copy(body.quat);
+
+        rideRayLine.visible = visParams.showRay && rayDidHit;
+        if (rideRayLine.visible) {
+          _rayCastEnd.copy(rayHitPoint);
+          _raySegDir.subVectors(_rayCastEnd, _rayCastStart);
+          const rayLen = _raySegDir.length();
+          if (rayLen > 1e-4) {
+            _rayMid.copy(_rayCastStart).addScaledVector(_raySegDir, 0.5);
+            rideRayLine.position.copy(_rayMid);
+            rideRayLine.scale.set(1, rayLen, 1);
+            rideRayLine.quaternion.setFromUnitVectors(_cylUp, _raySegDir.normalize());
+          }
+        }
+
+        if (rayDidHit) {
+          blobShadow.position.set(rayHitPoint.x, rayHitPoint.y + 0.015, rayHitPoint.z);
+          const hoverT = THREE.MathUtils.clamp(
+            (rayHitDistance - RIDE.rideHeight) / Math.max(RIDE.hoverGap, 0.05),
+            0.55,
+            1.35,
+          );
+          blobShadow.scale.set(hoverT, hoverT, 1);
+          blobShadow.visible = true;
+        } else {
+          blobShadow.visible = false;
+        }
+
+        rideArrow.visible = visParams.showArrow && rayDidHit;
+        if (rideArrow.visible) {
+          _arrowDir
+            .set(0, -1, 0)
+            .applyQuaternion(body.quat)
+            .normalize()
+            .multiplyScalar(Math.sign(lastSpringForce) || 1);
+          const len = Math.max(0.05, Math.abs(lastSpringForce) * visParams.arrowScale);
+          rideArrow.position.copy(body.pos);
+          rideArrow.setDirection(_arrowDir);
+          rideArrow.setLength(len, len * 0.35, len * 0.2);
+        }
+      }
+
+      await renderer.init();
+
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      pmrem.dispose();
+
+      renderer.setAnimationLoop((time) => {
+        timer.update(time);
+        const dt = Math.min(timer.getDelta(), 1 / 30);
+        physicsStep(dt);
+        syncVisuals();
+        updateCamera(dt);
+
+        const horizSpd = Math.hypot(body.vel.x, body.vel.z);
+        const nan = [body.pos.x, body.pos.y, body.pos.z].some((n) => !isFinite(n));
+        hud.textContent =
+          `grounded: ${isGrounded ? "yes" : "no"}  mouse: ${ctrl.pointerLocked ? "locked" : "click canvas"}  yaw: ${(ctrl.facingYaw * 57.3).toFixed(0)}°\n` +
+          `input: ${ctrl.unitGoal.x.toFixed(2)}, ${ctrl.unitGoal.z.toFixed(2)}\n` +
+          `goal vel: ${ctrl.goalVel.x.toFixed(2)}, ${ctrl.goalVel.z.toFixed(2)}  speed: ${horizSpd.toFixed(2)} m/s  loco F: ${lastLocoForceMag.toFixed(0)} N\n` +
+          `ride: ${rayDidHit ? `HIT (${rideProbeHits})` : "miss"}  hover: ${RIDE.hoverGap.toFixed(2)}m  spring F: ${lastSpringForce.toFixed(0)} N\n` +
+          `pos: ${body.pos.x.toFixed(2)}, ${body.pos.y.toFixed(2)}, ${body.pos.z.toFixed(2)}\n` +
+          `vel: ${body.vel.x.toFixed(2)}, ${body.vel.y.toFixed(2)}, ${body.vel.z.toFixed(2)}` +
+          (nan ? `\n*** NaN in body state — press R ***` : "");
+
+        renderer.render(scene, camera);
+      });
+
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spline depth-road — geometry lab</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/"
+        }
+      }
+    </script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #0e1116; }
+      #hud {
+        position: fixed; left: 12px; top: 12px; z-index: 10;
+        font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
+        color: #cfe8ff; background: rgba(10,16,24,0.72);
+        padding: 10px 12px; border-radius: 8px; width: 230px;
+      }
+      #hud h1 { font-size: 13px; color: #7fd1ff; margin-bottom: 6px; }
+      #hud label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 3px 0; }
+      #hud input[type=range] { width: 120px; }
+      #hud .val { color: #9ee8ff; min-width: 38px; text-align: right; }
+      #hud .row { display:flex; gap:8px; margin-top:6px; }
+      #hud button { flex:1; background:#1d2b3a; color:#cfe8ff; border:1px solid #2c4257; border-radius:5px; padding:4px; cursor:pointer; font:inherit; }
+      #hud button.on { background:#28527a; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Spline depth-road lab</h1>
+      <label>Width <input id="width" type="range" min="3" max="20" step="0.5" value="9"><span class="val" id="widthv"></span></label>
+      <label>Thickness <input id="thickness" type="range" min="0.2" max="4" step="0.1" value="1.0"><span class="val" id="thicknessv"></span></label>
+      <label>Bank <input id="bank" type="range" min="0" max="1.5" step="0.05" value="0.6"><span class="val" id="bankv"></span></label>
+      <label>Bank smooth <input id="banksmooth" type="range" min="0" max="0.3" step="0.01" value="0.12"><span class="val" id="banksmoothv"></span></label>
+      <label>Segments <input id="segments" type="range" min="60" max="600" step="20" value="320"><span class="val" id="segmentsv"></span></label>
+      <div class="row">
+        <button id="track-a" class="on">Climb+Loop</button>
+        <button id="track-b">Sky coaster</button>
+      </div>
+      <div class="row">
+        <button id="wire">Wireframe</button>
+        <button id="frames">Frames</button>
+      </div>
+      <div style="margin-top:6px;color:#8aa;">LMB orbit · RMB pan · wheel zoom</div>
+    </div>
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+      // ── Scene ────────────────────────────────────────────────────────────────
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x8fb7e8);
+      scene.fog = new THREE.Fog(0x8fb7e8, 200, 700);
+
+      const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 2000);
+      camera.position.set(70, 55, 110);
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.shadowMap.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 25, 70);
+      controls.enableDamping = true;
+
+      scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x4a5240, 1.1));
+      const sun = new THREE.DirectionalLight(0xffffff, 2.6);
+      sun.position.set(80, 120, 40);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.camera.left = -200; sun.shadow.camera.right = 200;
+      sun.shadow.camera.top = 200; sun.shadow.camera.bottom = -200;
+      sun.shadow.camera.far = 600;
+      scene.add(sun);
+
+      const grid = new THREE.GridHelper(600, 60, 0x33401f, 0x2a3318);
+      grid.material.transparent = true; grid.material.opacity = 0.4;
+      scene.add(grid);
+      const groundPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: 0x5f7f4a, roughness: 1 }),
+      );
+      groundPlane.position.y = -0.05;
+      groundPlane.receiveShadow = true;
+      scene.add(groundPlane);
+
+      // ── Test tracks (control points) ─────────────────────────────────────────
+      function trackClimbLoop() {
+        const pts = [
+          [0, 0, -10], [0, 0, 20], [0, 0, 50],          // flat approach
+          [-6, 2, 78], [0, 6, 104], [8, 11, 128],        // banked rising S
+          [0, 18, 156], [0, 22, 184],                    // up ramp
+        ];
+        // vertical loop in the (Z,Y) plane, radius R, centred ahead
+        const R = 22, cz = 184 + R, cy = 22 + R;
+        for (let a = 1; a <= 11; a++) {
+          const ang = (a / 12) * Math.PI * 2;
+          pts.push([0, cy - Math.cos(ang) * R, cz + Math.sin(ang) * R]);
+        }
+        pts.push([0, 22, 184 + 2 * R + 14], [0, 18, 184 + 2 * R + 46]); // exit + descend
+        return pts.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
+      }
+      function trackSkyCoaster() {
+        const pts = [];
+        for (let i = 0; i <= 22; i++) {
+          const t = i / 22;
+          const z = -20 + t * 360;
+          const x = Math.sin(t * Math.PI * 3) * 40;
+          const y = 6 + Math.sin(t * Math.PI * 2.2) * 22 + t * 18;
+          pts.push(new THREE.Vector3(x, Math.max(0, y), z));
+        }
+        return pts;
+      }
+
+      // ── Rotation-minimizing frames + thick-profile sweep ──────────────────────
+      // RMF (double-reflection) keeps the road from twisting/pinching on vertical
+      // climbs and loops where Frenet frames would flip. Banking adds extra roll
+      // around the tangent, eased from horizontal curvature so turns lean in.
+      function buildSplineRoadGeometry(curve, opts) {
+        const segs = opts.segments | 0;
+        const halfW = opts.width * 0.5;
+        const thick = opts.thickness;
+        const bank = opts.bank;
+        const bankSmooth = opts.bankSmooth;
+
+        const P = [], T = [];
+        for (let i = 0; i <= segs; i++) {
+          const t = i / segs;
+          P.push(curve.getPointAt(t));
+          T.push(curve.getTangentAt(t).normalize());
+        }
+
+        // Initial up: world-up projected perpendicular to T0 (fallback if vertical).
+        const up0 = new THREE.Vector3(0, 1, 0);
+        if (Math.abs(up0.dot(T[0])) > 0.99) up0.set(1, 0, 0);
+        up0.addScaledVector(T[0], -up0.dot(T[0])).normalize();
+
+        // Rotation-minimizing frames via double reflection (Wang et al.).
+        const ups = [up0];
+        const tmp = new THREE.Vector3();
+        for (let i = 0; i < segs; i++) {
+          const r0 = ups[i];
+          const t0 = T[i], t1 = T[i + 1];
+          const v1 = tmp.copy(P[i + 1]).sub(P[i]);
+          const c1 = v1.dot(v1) || 1e-8;
+          // reflect r0 and t0 across v1
+          const rL = r0.clone().addScaledVector(v1, (-2 / c1) * v1.dot(r0));
+          const tL = t0.clone().addScaledVector(v1, (-2 / c1) * v1.dot(t0));
+          const v2 = t1.clone().sub(tL);
+          const c2 = v2.dot(v2) || 1e-8;
+          const r1 = rL.addScaledVector(v2, (-2 / c2) * v2.dot(rL));
+          // re-orthogonalise against t1
+          r1.addScaledVector(t1, -r1.dot(t1)).normalize();
+          ups.push(r1);
+        }
+
+        // Auto-bank roll per ring from signed horizontal curvature, then smooth.
+        const roll = new Float32Array(segs + 1);
+        const cross = new THREE.Vector3();
+        for (let i = 1; i < segs; i++) {
+          cross.crossVectors(T[i - 1], T[i]);
+          // component about the frame up = horizontal turn direction
+          const signed = cross.dot(ups[i]);
+          roll[i] = THREE.MathUtils.clamp(signed * 40 * bank, -1.2, 1.2);
+        }
+        // exponential smoothing both directions for a continuous bank
+        if (bankSmooth > 0) {
+          for (let pass = 0; pass < 2; pass++) {
+            for (let i = 1; i <= segs; i++) roll[i] += (roll[i - 1] - roll[i]) * bankSmooth;
+            for (let i = segs - 1; i >= 0; i--) roll[i] += (roll[i + 1] - roll[i]) * bankSmooth;
+          }
+        }
+
+        // Per-ring oriented profile corners.
+        const topL = [], topR = [], botL = [], botR = [];
+        const right = new THREE.Vector3(), upR = new THREE.Vector3(), q = new THREE.Quaternion();
+        for (let i = 0; i <= segs; i++) {
+          upR.copy(ups[i]);
+          right.crossVectors(T[i], upR).normalize();
+          if (roll[i] !== 0) {
+            q.setFromAxisAngle(T[i], roll[i]);
+            upR.applyQuaternion(q);
+            right.applyQuaternion(q);
+          }
+          const c = P[i];
+          topL.push(c.clone().addScaledVector(right, -halfW));
+          topR.push(c.clone().addScaledVector(right, halfW));
+          botL.push(topL[i].clone().addScaledVector(upR, -thick));
+          botR.push(topR[i].clone().addScaledVector(upR, -thick));
+        }
+
+        // Build 4 strips (top deck, right wall, underside, left wall) + end caps,
+        // each with its own vertices → crisp edges + per-strip vertex colors.
+        const pos = [], col = [], idx = [];
+        const ASPHALT = new THREE.Color(0x2c3138);
+        const SIDE = new THREE.Color(0x6f757c);
+        const KERB = new THREE.Color(0xd23b3b);
+        function strip(a, b, color, vSpan) {
+          const base = pos.length / 3;
+          for (let i = 0; i <= segs; i++) {
+            pos.push(a[i].x, a[i].y, a[i].z); col.push(color.r, color.g, color.b);
+            pos.push(b[i].x, b[i].y, b[i].z); col.push(color.r, color.g, color.b);
+          }
+          for (let i = 0; i < segs; i++) {
+            const r0 = base + i * 2, r1 = base + (i + 1) * 2;
+            idx.push(r0, r0 + 1, r1 + 1, r0, r1 + 1, r1);
+          }
+        }
+        strip(topL, topR, ASPHALT);   // drivable deck
+        strip(topR, botR, SIDE);      // right wall
+        strip(botR, botL, SIDE);      // underside
+        strip(botL, topL, SIDE);      // left wall
+        // thin kerb lips along both deck edges for readability
+        const lip = 0.12, lipUp = 0.18;
+        function kerb(edge, sign) {
+          const inner = [], outerTop = [];
+          for (let i = 0; i <= segs; i++) {
+            upR.copy(ups[i]); right.crossVectors(T[i], upR).normalize();
+            if (roll[i] !== 0) { q.setFromAxisAngle(T[i], roll[i]); upR.applyQuaternion(q); right.applyQuaternion(q); }
+            inner.push(edge[i].clone());
+            outerTop.push(edge[i].clone().addScaledVector(upR, lipUp).addScaledVector(right, sign * lip));
+          }
+          strip(inner, outerTop, KERB);
+        }
+        kerb(topR, 1);
+        kerb(topL, -1);
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+        geo.setIndex(idx);
+        geo.computeVertexNormals();
+        geo.computeBoundingSphere();
+        geo._frames = { P, T, ups }; // for debug viz
+        return geo;
+      }
+
+      // ── Build / rebuild ───────────────────────────────────────────────────────
+      const roadMat = new THREE.MeshStandardMaterial({
+        vertexColors: true, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide,
+      });
+      let roadMesh = null, frameHelper = null, curveLine = null;
+      let trackFn = trackClimbLoop;
+      let showFrames = false, wire = false;
+
+      function rebuild() {
+        const pts = trackFn();
+        const curve = new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.5);
+        const opts = {
+          width: +width.value, thickness: +thickness.value,
+          bank: +bank.value, bankSmooth: +banksmooth.value, segments: +segments.value,
+        };
+        const geo = buildSplineRoadGeometry(curve, opts);
+
+        if (roadMesh) { scene.remove(roadMesh); roadMesh.geometry.dispose(); }
+        roadMesh = new THREE.Mesh(geo, roadMat);
+        roadMesh.castShadow = true; roadMesh.receiveShadow = true;
+        roadMat.wireframe = wire;
+        scene.add(roadMesh);
+
+        // centre curve line
+        if (curveLine) { scene.remove(curveLine); curveLine.geometry.dispose(); }
+        const cp = curve.getPoints(400);
+        curveLine = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(cp),
+          new THREE.LineBasicMaterial({ color: 0x00ffaa }),
+        );
+        curveLine.visible = showFrames;
+        scene.add(curveLine);
+
+        // frame debug (up vectors)
+        if (frameHelper) { scene.remove(frameHelper); frameHelper.geometry.dispose(); }
+        const { P, ups } = geo._frames;
+        const framePts = [];
+        for (let i = 0; i < P.length; i += 6) {
+          framePts.push(P[i].clone());
+          framePts.push(P[i].clone().addScaledVector(ups[i], 3));
+        }
+        frameHelper = new THREE.LineSegments(
+          new THREE.BufferGeometry().setFromPoints(framePts),
+          new THREE.LineBasicMaterial({ color: 0xffcc00 }),
+        );
+        frameHelper.visible = showFrames;
+        scene.add(frameHelper);
+
+        document.getElementById("widthv").textContent = opts.width.toFixed(1);
+        document.getElementById("thicknessv").textContent = opts.thickness.toFixed(1);
+        document.getElementById("bankv").textContent = opts.bank.toFixed(2);
+        document.getElementById("banksmoothv").textContent = opts.bankSmooth.toFixed(2);
+        document.getElementById("segmentsv").textContent = opts.segments;
+      }
+
+      // ── UI ────────────────────────────────────────────────────────────────────
+      const width = document.getElementById("width");
+      const thickness = document.getElementById("thickness");
+      const bank = document.getElementById("bank");
+      const banksmooth = document.getElementById("banksmooth");
+      const segments = document.getElementById("segments");
+      for (const el of [width, thickness, bank, banksmooth, segments]) el.addEventListener("input", rebuild);
+      document.getElementById("track-a").addEventListener("click", (e) => {
+        trackFn = trackClimbLoop; e.target.classList.add("on"); document.getElementById("track-b").classList.remove("on"); rebuild();
+      });
+      document.getElementById("track-b").addEventListener("click", (e) => {
+        trackFn = trackSkyCoaster; e.target.classList.add("on"); document.getElementById("track-a").classList.remove("on"); rebuild();
+      });
+      document.getElementById("wire").addEventListener("click", (e) => {
+        wire = !wire; e.target.classList.toggle("on", wire); roadMat.wireframe = wire;
+      });
+      document.getElementById("frames").addEventListener("click", (e) => {
+        showFrames = !showFrames; e.target.classList.toggle("on", showFrames);
+        if (curveLine) curveLine.visible = showFrames;
+        if (frameHelper) frameHelper.visible = showFrames;
+      });
+
+      window.__lab = { camera, controls, scene, get road() { return roadMesh; } };
+      await renderer.init();
+      rebuild();
+      renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lotus parkour — Rapier comparison</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #0c1018;
+        color: #c8d8e8;
+        font-family: system-ui, sans-serif;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #ui {
+        position: fixed;
+        bottom: 12px;
+        left: 12px;
+        max-width: 680px;
+        font-size: 12px;
+        line-height: 1.5;
+        background: rgba(0, 0, 0, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 10px 14px;
+        pointer-events: none;
+      }
+      #ui kbd {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      #ui a {
+        color: #8fd4ff;
+        pointer-events: auto;
+      }
+      #hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+        background: rgba(0, 0, 0, 0.65);
+        border: 1px solid rgba(120, 255, 180, 0.35);
+        border-radius: 8px;
+        padding: 8px 12px;
+        pointer-events: none;
+        line-height: 1.55;
+      }
+      #badge {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        background: rgba(20, 80, 50, 0.85);
+        border: 1px solid rgba(120, 255, 180, 0.45);
+        border-radius: 6px;
+        padding: 6px 10px;
+        pointer-events: none;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/",
+          "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.20.0/dist/lil-gui.esm.min.js",
+          "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="badge">Physics: Rapier</div>
+    <div id="hud">Loading…</div>
+    <div id="ui">
+      <strong>Same track</strong> as BVH version —
+      <strong>Rapier</strong> raycast vehicle + trimesh colliders.<br />
+      Compare with
+      <a href="./lotus-circuit-parkour.html">lotus-circuit-parkour.html</a> (BVH
+      / CarPhysics).<br />
+      <kbd>WASD</kbd> drive · <kbd>Shift</kbd> boost ·
+      <kbd>Space</kbd> handbrake · <kbd>R</kbd> respawn · <kbd>Tab</kbd> /
+      <kbd>O</kbd> orbit
+    </div>
+    <script type="module">
+      import * as THREE from "three/webgpu";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      import { SkyMesh } from "three/addons/objects/SkyMesh.js";
+      import GUI from "lil-gui";
+      import RAPIER from "@dimforge/rapier3d-compat";
+      import {
+        createTileMaterial,
+        setGridTextureUrl,
+      } from "../../v2/core/legacy/tileMaterial.js";
+      import { createPhysicsDebug } from "../physics2.js";
+      import {
+        LOTUS_PARKOUR_CONSTANTS,
+        createLotusParkourTrack,
+      } from "./lotusParkourTrack.js";
+      import {
+        bakeRapierParkourColliders,
+        sampleGroundY,
+      } from "./rapierParkourColliders.js";
+      import {
+        createRapierLotusVehicle,
+        DEFAULT_RAPIER_DRIVE,
+        computeRapierSpawnY,
+        deriveSuspensionFromGeometry,
+      } from "./rapierLotusVehicle.js";
+
+      document.getElementById("badge").textContent = "Physics: Rapier";
+
+      setGridTextureUrl(new URL("../textures/grid.png", import.meta.url).href);
+
+      const { TERRAIN_SIZE, SPAWN } = LOTUS_PARKOUR_CONSTANTS;
+      const GLB_URL = new URL("./lotusrealsize2.glb", import.meta.url).href;
+      const CAR_MODEL_YAW = Math.PI / 2;
+      const CAR_MODEL_SCALE = 1;
+      /** Default GLB lift — also in driveParams.chassisVisualLift (GUI). */
+
+      const scene = new THREE.Scene();
+      scene.fog = new THREE.Fog(0xb8c8d8, 140, 460);
+
+      const camera = new THREE.PerspectiveCamera(
+        68,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        5000,
+      );
+      camera.position.set(-10, 5, 18);
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.3;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
+      document.body.appendChild(renderer.domElement);
+
+      const skyParams = {
+        elevation: 38,
+        azimuth: 145,
+        turbidity: 4,
+        rayleigh: 1.4,
+        mieCoefficient: 0.005,
+        mieDirectionalG: 0.85,
+        envBlur: 0.04,
+      };
+      const sky = new SkyMesh();
+      sky.scale.setScalar(4500);
+      if (sky.material) sky.material.fog = false;
+      const sunVec = new THREE.Vector3();
+      function applySkyParams() {
+        sky.turbidity.value = skyParams.turbidity;
+        sky.rayleigh.value = skyParams.rayleigh;
+        sky.mieCoefficient.value = skyParams.mieCoefficient;
+        sky.mieDirectionalG.value = skyParams.mieDirectionalG;
+        const phi = THREE.MathUtils.degToRad(90 - skyParams.elevation);
+        const theta = THREE.MathUtils.degToRad(skyParams.azimuth);
+        sunVec.setFromSphericalCoords(1, phi, theta);
+        sky.sunPosition.value.copy(sunVec);
+      }
+      applySkyParams();
+      scene.add(sky);
+
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      let envRT = null;
+      function rebuildEnvFromSky() {
+        const skyEnvScene = new THREE.Scene();
+        skyEnvScene.add(sky.clone());
+        if (envRT) envRT.dispose();
+        envRT = pmrem.fromScene(skyEnvScene, skyParams.envBlur);
+        scene.environment = envRT.texture;
+      }
+
+      const hemi = new THREE.HemisphereLight(0xc8dcff, 0x4a5468, 0.35);
+      scene.add(hemi);
+      const sun = new THREE.DirectionalLight(0xfff4e0, 1.5);
+      sun.position.copy(sunVec).multiplyScalar(80);
+      sun.castShadow = true;
+      sun.shadow.mapSize.setScalar(4096);
+      sun.shadow.bias = -0.0004;
+      sun.shadow.normalBias = 0.025;
+      sun.shadow.camera.near = 10;
+      sun.shadow.camera.far = 180;
+      const sh = 38;
+      sun.shadow.camera.left = sun.shadow.camera.bottom = -sh;
+      sun.shadow.camera.right = sun.shadow.camera.top = sh;
+      scene.add(sun);
+      scene.add(sun.target);
+
+      const TILE_SHARED = {
+        roughness: 0.95,
+        textureScale: 400,
+        tileColor: 0x9a9a9a,
+        gridColor: 0x444444,
+        gridLineColor: 0x111111,
+        objectSpace: true,
+      };
+      function createTileMat(seed = 0) {
+        const s = seed * 19.17;
+        return createTileMaterial({
+          ...TILE_SHARED,
+          uvOffset: [s * 1.31, 0, s * 0.97],
+        });
+      }
+
+      const track = createLotusParkourTrack(scene, createTileMat);
+      const {
+        colliders,
+        parkourDebug,
+        parkourGroupMeta,
+        buildCircuit,
+        isParkourGroupEnabled,
+        setParkourGroupEnabled: setTrackGroupEnabled,
+        setAllParkourGroupsEnabled: setAllTrackGroupsEnabled,
+      } = track;
+
+      let rapierColliderBake = null;
+      function rebakeRapierColliders() {
+        rapierColliderBake?.dispose();
+        rapierColliderBake = bakeRapierParkourColliders(
+          RAPIER,
+          physicsWorld,
+          colliders,
+          isParkourGroupEnabled,
+        );
+        if (rapierDebugBuilt) {
+          disposeRapierDebugMeshes();
+          buildRapierDebugMeshes();
+        }
+      }
+
+      function setParkourGroupEnabled(groupId, enabled) {
+        setTrackGroupEnabled(groupId, enabled, rebakeRapierColliders);
+      }
+      function setAllParkourGroupsEnabled(enabled) {
+        setAllTrackGroupsEnabled(enabled, rebakeRapierColliders);
+      }
+
+      const keysHeld = Object.create(null);
+      window.addEventListener("keydown", (e) => {
+        keysHeld[e.code] = true;
+        if (e.code === "KeyR") respawn();
+        if (e.code === "Tab" || e.code === "KeyO") {
+          if (document.activeElement?.closest?.(".lil-gui")) return;
+          e.preventDefault();
+          orbitInspect = !orbitInspect;
+          controls.enabled = orbitInspect;
+          if (!orbitInspect) camYaw = carHeading;
+        }
+      });
+      window.addEventListener("keyup", (e) => {
+        keysHeld[e.code] = false;
+      });
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.minDistance = 1.5;
+      controls.maxDistance = 60;
+      controls.enabled = false;
+
+      const debugParams = { rapierDebug: false };
+      let physicsWorld = null;
+      let vehicle = null;
+      let carRoot = null;
+      let carChassis = null;
+      let carChassisVisual = null;
+      let carWheels = [];
+      let chassisMetrics = null;
+      let hubLocalY = 0;
+      let measuredWheelRadius = DEFAULT_RAPIER_DRIVE.wheelRadius;
+      let carHeading = 0;
+      let camYaw = 0;
+      let orbitInspect = false;
+
+      const playerPos = new THREE.Vector3();
+      const carState = {
+        pos: new THREE.Vector3(),
+        quat: new THREE.Quaternion(),
+        vel: new THREE.Vector3(),
+        speed: 0,
+        grounded: true,
+      };
+
+      const cam = {
+        distance: 5,
+        height: 0.2,
+        lookAtY: 2,
+        chaseSpeed: 7,
+        fov: 72,
+      };
+      const hudEl = document.getElementById("hud");
+      const wheelContainerHubOffset = new THREE.Vector3();
+
+      const lotusWheelLayout = {
+        trackWidth: 0.4,
+        wheelbase: 0.287,
+        wheelY: 0.23,
+        wbShift: -0.024,
+      };
+
+      function placeLotusWheelsFromPlayMode() {
+        if (!chassisMetrics || carWheels.length !== 4) return;
+        const { cSize, cCenter, cMinY } = chassisMetrics;
+        const lp = lotusWheelLayout;
+        const halfTrack = cSize.z * lp.trackWidth;
+        const halfWB = cSize.x * lp.wheelbase;
+        const wheelYOff = cMinY + cSize.y * lp.wheelY;
+        const wbShift = cSize.x * lp.wbShift;
+        hubLocalY = wheelYOff;
+
+        const layout = [
+          { x: halfWB + wbShift, z: -halfTrack, steer: true, name: "FL" },
+          { x: halfWB + wbShift, z: halfTrack, steer: true, name: "FR" },
+          { x: -halfWB + wbShift, z: -halfTrack, steer: false, name: "RL" },
+          { x: -halfWB + wbShift, z: halfTrack, steer: false, name: "RR" },
+        ];
+
+        for (let i = 0; i < 4; i++) {
+          const w = carWheels[i];
+          const L = layout[i];
+          w.steer = L.steer;
+          w.isLeft = L.z < 0;
+          w.name = L.name;
+          w.container.rotation.set(
+            0,
+            CAR_MODEL_YAW + (w.isLeft ? 0 : Math.PI),
+            0,
+          );
+          w.container.position.set(cCenter.x + L.x, wheelYOff, cCenter.z + L.z);
+          w.offset.set(cCenter.x + L.x, 0, cCenter.z + L.z);
+        }
+      }
+
+      function buildCarFromGltf(gltf) {
+        const root = gltf.scene;
+        let chassisSrc = null;
+        let wheelSrc = null;
+        root.traverse((o) => {
+          if (/^chassis(\.|\d|$)/i.test(o.name)) chassisSrc = o;
+          if (/^wheelContainer(\.|\d|$)/i.test(o.name)) wheelSrc = o;
+        });
+        if (!chassisSrc || !wheelSrc)
+          throw new Error("Lotus GLB missing chassis/wheelContainer");
+
+        const probe = wheelSrc.clone(true);
+        probe.position.set(0, 0, 0);
+        probe.rotation.set(0, 0, 0);
+        probe.scale.set(1, 1, 1);
+        probe.updateMatrixWorld(true);
+        let cyl = null;
+        probe.traverse((c) => {
+          if (!cyl && /^wheelCylinder(\.|\d|$)/i.test(c.name)) cyl = c;
+        });
+        if (!cyl) {
+          probe.traverse((c) => {
+            if (!cyl && c.isMesh && /TYRE|TIRE/i.test(c.name)) cyl = c;
+          });
+        }
+        if (cyl) {
+          const box = new THREE.Box3().setFromObject(cyl);
+          box.getCenter(wheelContainerHubOffset);
+          const cylSize = new THREE.Vector3();
+          box.getSize(cylSize);
+          measuredWheelRadius = Math.max(cylSize.x, cylSize.y, cylSize.z) * 0.5;
+        } else {
+          wheelContainerHubOffset.set(0, 0, 0);
+        }
+
+        const chassisVisual = chassisSrc.clone(true);
+        chassisVisual.rotation.set(0, CAR_MODEL_YAW, 0);
+        chassisVisual.traverse((o) => {
+          if (/^wheelContainer(\.|\d|$)/.test(o.name)) o.parent?.remove(o);
+          if (o.isMesh || o.isSkinnedMesh) {
+            o.castShadow = true;
+            o.receiveShadow = true;
+          }
+        });
+
+        carChassis = new THREE.Group();
+        carChassis.rotation.order = "YXZ";
+        carChassisVisual = chassisVisual;
+        carChassis.add(chassisVisual);
+
+        chassisVisual.updateMatrixWorld(true);
+        const cBox = new THREE.Box3().setFromObject(chassisVisual);
+        const cSize = new THREE.Vector3();
+        const cCenter = new THREE.Vector3();
+        cBox.getSize(cSize);
+        cBox.getCenter(cCenter);
+        chassisMetrics = { cSize, cCenter, cMinY: cBox.min.y };
+
+        carWheels = ["FL", "FR", "RL", "RR"].map((name, i) => {
+          const container = wheelSrc.clone(true);
+          let cylinder = null;
+          container.traverse((c) => {
+            if (!cylinder && /^wheelCylinder(\.|\d|$)/.test(c.name))
+              cylinder = c;
+            if (c.isMesh || c.isSkinnedMesh) {
+              c.position.sub(wheelContainerHubOffset);
+              c.castShadow = true;
+              c.receiveShadow = true;
+            }
+          });
+          carChassis.add(container);
+          return {
+            container,
+            cylinder: cylinder || container,
+            offset: new THREE.Vector3(),
+            steer: i < 2,
+            isLeft: false,
+            name,
+          };
+        });
+
+        placeLotusWheelsFromPlayMode();
+
+        carRoot = new THREE.Group();
+        carRoot.scale.setScalar(CAR_MODEL_SCALE);
+        carRoot.add(carChassis);
+        return carRoot;
+      }
+
+      const driveParams = {
+        ...DEFAULT_RAPIER_DRIVE,
+        wheelRadius: measuredWheelRadius,
+      };
+
+      function applyChassisVisualLift() {
+        if (!carChassisVisual || !vehicle) return;
+        const tireContactY =
+          hubLocalY -
+          driveParams.suspensionRestLength -
+          driveParams.wheelRadius;
+        carChassisVisual.position.y =
+          tireContactY -
+          chassisMetrics.cMinY +
+          0.012 +
+          driveParams.chassisVisualLift;
+      }
+
+      function createVehicleFromCar() {
+        if (vehicle) {
+          physicsWorld.removeVehicleController(vehicle.controller);
+          physicsWorld.removeRigidBody(vehicle.chassisBody);
+        }
+
+        driveParams.wheelRadius = measuredWheelRadius;
+        Object.assign(
+          driveParams,
+          deriveSuspensionFromGeometry(
+            hubLocalY,
+            measuredWheelRadius,
+            chassisMetrics.cMinY,
+          ),
+        );
+
+        const half = new THREE.Vector3(
+          chassisMetrics.cSize.x * 0.42,
+          chassisMetrics.cSize.y * 0.28,
+          chassisMetrics.cSize.z * 0.46,
+        );
+
+        vehicle = createRapierLotusVehicle(RAPIER, physicsWorld, {
+          wheelConnections: carWheels.map((w) => w.container.position.clone()),
+          chassisCenter: chassisMetrics.cCenter.clone(),
+          chassisHalfExtents: half,
+          params: driveParams,
+        });
+
+        applyChassisVisualLift();
+        if (rapierDebugBuilt) {
+          disposeRapierDebugMeshes();
+          buildRapierDebugMeshes();
+        }
+      }
+
+      function respawn() {
+        if (!vehicle) return;
+        const floorY = sampleGroundY(physicsWorld, RAPIER, SPAWN.x, SPAWN.z);
+        const spawnY = computeRapierSpawnY(floorY, hubLocalY, driveParams);
+        vehicle.setSpawn(SPAWN.x, spawnY, SPAWN.z, SPAWN.heading);
+        for (const w of carWheels) {
+          w.container.position.y = hubLocalY - driveParams.suspensionRestLength;
+          w._smoothLocalY = w.container.position.y;
+        }
+        carHeading = SPAWN.heading;
+        camYaw = carHeading;
+      }
+
+      function stepSimulation(dtSec) {
+        const input = {
+          forward: !!(keysHeld.KeyW || keysHeld.ArrowUp),
+          backward: !!(keysHeld.KeyS || keysHeld.ArrowDown),
+          steer:
+            (keysHeld.KeyA || keysHeld.ArrowLeft ? 1 : 0) -
+            (keysHeld.KeyD || keysHeld.ArrowRight ? 1 : 0),
+          handbrake: !!keysHeld.Space,
+          boost: !!(keysHeld.ShiftLeft || keysHeld.ShiftRight),
+        };
+
+        vehicle.stepPrePhysics(dtSec, input);
+        physicsWorld.timestep = dtSec;
+        physicsWorld.step();
+        vehicle.stepPostPhysics(dtSec, input);
+
+        vehicle.readState(carState);
+        playerPos.copy(carState.pos);
+
+        carRoot.position.copy(carState.pos);
+        carRoot.quaternion.copy(carState.quat);
+
+        const euler = new THREE.Euler().setFromQuaternion(carState.quat, "YXZ");
+        carHeading = euler.y - Math.PI * 0.5;
+
+        vehicle.syncWheelVisuals(carWheels, CAR_MODEL_YAW, dtSec);
+      }
+
+      function updateHud() {
+        if (!vehicle) return;
+        const spdH = carState.speed * 3.6;
+        const wheelsDown = vehicle.countGroundedWheels();
+        hudEl.innerHTML = [
+          `<div><strong>Speed</strong> ${spdH.toFixed(0)} km/h · <strong>vY</strong> ${carState.vel.y.toFixed(1)} m/s</div>`,
+          `<div><strong>${carState.grounded ? "GROUND" : "AIR"}</strong> · ${wheelsDown}/4 wheels · alt ${carState.pos.y.toFixed(2)} m</div>`,
+          `<div style="opacity:0.75">Rapier raycast vehicle · trimesh track</div>`,
+        ].join("");
+      }
+
+      function updateCamera(dtSec) {
+        if (orbitInspect) {
+          controls.target.set(playerPos.x, playerPos.y + 1.2, playerPos.z);
+          controls.update();
+          return;
+        }
+        let d = carHeading - camYaw;
+        while (d > Math.PI) d -= 2 * Math.PI;
+        while (d < -Math.PI) d += 2 * Math.PI;
+        camYaw += d * (1 - Math.exp(-cam.chaseSpeed * dtSec));
+        const lookY = playerPos.y + cam.lookAtY;
+        camera.position.set(
+          playerPos.x + Math.sin(camYaw) * cam.distance,
+          lookY + cam.height,
+          playerPos.z + Math.cos(camYaw) * cam.distance,
+        );
+        camera.lookAt(playerPos.x, lookY, playerPos.z);
+        camera.fov = cam.fov;
+        camera.updateProjectionMatrix();
+      }
+
+      let physicsDebugGroup = null;
+      let buildRapierDebugMeshes = () => {};
+      let updateRapierDebugMeshes = () => {};
+      let disposeRapierDebugMeshes = () => {};
+      let rapierDebugBuilt = false;
+
+      function syncRapierDebugVisibility() {
+        if (!physicsDebugGroup) return;
+        physicsDebugGroup.visible = !!debugParams.rapierDebug;
+        if (debugParams.rapierDebug) {
+          if (!rapierDebugBuilt) {
+            buildRapierDebugMeshes();
+            rapierDebugBuilt = true;
+          }
+        } else if (rapierDebugBuilt) {
+          disposeRapierDebugMeshes();
+          rapierDebugBuilt = false;
+        }
+      }
+
+      function setupGui() {
+        const gui = new GUI({ title: "Lotus Rapier" });
+        gui.domElement.style.position = "fixed";
+        gui.domElement.style.top = "10px";
+        gui.domElement.style.right = "10px";
+
+        const obst = gui.addFolder("Parkour obstacles");
+        obst.open();
+        for (const groupId of Object.keys(parkourDebug)) {
+          obst
+            .add(parkourDebug, groupId)
+            .name(parkourGroupMeta[groupId])
+            .onChange((v) => setParkourGroupEnabled(groupId, v));
+        }
+
+        const drive = gui.addFolder("Rapier drive");
+        drive.add(driveParams, "engineForceAmplitude", 500, 6000, 50);
+        drive
+          .add(driveParams, "chassisVisualLift", 0, 0.2, 0.005)
+          .name("Body ride height")
+          .onChange(() => applyChassisVisualLift());
+        drive
+          .add(driveParams, "arcadeYawAssist", 0, 800, 20)
+          .name("Steer assist");
+        drive
+          .add(driveParams, "reverseForceScale", 0.2, 1, 0.05)
+          .name("Reverse force");
+        drive.add(driveParams, "boostMultiplier", 1, 4, 0.05);
+        drive.add(driveParams, "brakeAmplitude", 10, 120, 2);
+        drive.add(driveParams, "chassisMass", 150, 900, 10);
+        drive.add(driveParams, "steerAngle", 0.1, 0.8, 0.01);
+        drive.add(driveParams, "frictionSlip", 0.2, 2.5, 0.05);
+        drive.add(driveParams, "suspensionRestLength", 0.05, 0.35, 0.005);
+        drive.add(driveParams, "suspensionStiffness", 10, 120, 1);
+        drive.add(driveParams, "maxSuspensionTravel", 0.1, 0.8, 0.01);
+
+        gui
+          .add(debugParams, "rapierDebug")
+          .name("Rapier collider debug")
+          .onChange(() => syncRapierDebugVisibility());
+        gui.add({ respawn }, "respawn").name("Respawn (R)");
+      }
+
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      const timer = new THREE.Timer();
+      timer.connect(document);
+
+      async function boot() {
+        await RAPIER.init({});
+        await renderer.init();
+        rebuildEnvFromSky();
+
+        physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+        buildCircuit();
+        rebakeRapierColliders();
+
+        const dbg = createPhysicsDebug(RAPIER, scene, physicsWorld);
+        physicsDebugGroup = dbg.physicsDebugGroup;
+        buildRapierDebugMeshes = dbg.buildRapierDebugMeshes;
+        updateRapierDebugMeshes = dbg.updateRapierDebugMeshes;
+        disposeRapierDebugMeshes = dbg.disposeRapierDebugMeshes;
+
+        new GLTFLoader().load(
+          GLB_URL,
+          (gltf) => {
+            carRoot = buildCarFromGltf(gltf);
+            scene.add(carRoot);
+            createVehicleFromCar();
+            respawn();
+            setupGui();
+            hudEl.textContent = "Rapier — same track as BVH version";
+          },
+          undefined,
+          (err) => {
+            console.error(err);
+            hudEl.textContent = "GLB load failed";
+          },
+        );
+
+        renderer.setAnimationLoop(() => {
+          timer.update();
+          const dtSec = Math.min(timer.getDelta() || 1 / 60, 0.05);
+
+          sun.target.position.set(playerPos.x, 0, playerPos.z);
+          sun.position.copy(sunVec).multiplyScalar(80).add(sun.target.position);
+
+          if (vehicle && carRoot) stepSimulation(dtSec);
+          updateCamera(dtSec);
+          updateHud();
+
+          if (physicsDebugGroup && debugParams.rapierDebug) {
+            updateRapierDebugMeshes();
+          }
+
+          renderer.render(scene, camera);
+        });
+      }
+
+      boot().catch((err) => {
+        console.error(err);
+        hudEl.textContent = "Init failed — use Chrome/Edge over HTTP";
+      });
+    </script>
+  </body>
+</html>
