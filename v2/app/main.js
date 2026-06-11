@@ -6240,6 +6240,14 @@ export async function startV2App(opts = {}) {
       const buf = await res.arrayBuffer();
       await _loadProject(buf);
     },
+    /**
+     * Load a world directly from raw .v2terrain bytes (an ArrayBuffer) — e.g.
+     * a file the player drag-dropped or picked from disk in the player. Same
+     * full-world restore as loadProjectFromUrl, no network fetch.
+     */
+    async loadProjectBuffer(arrayBuffer) {
+      await _loadProject(arrayBuffer);
+    },
     config,
     syncFog,
     syncInteriorUniforms,

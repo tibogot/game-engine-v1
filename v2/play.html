@@ -91,6 +91,44 @@
         font-size: 12px;
         color: #888;
       }
+      /* Load-from-disk: pick or drag-drop a .v2terrain world. */
+      #loader {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+      }
+      #dropzone {
+        width: 340px;
+        padding: 26px 20px;
+        text-align: center;
+        font-size: 13px;
+        color: #9aa3b2;
+        background: #12161f;
+        border: 1.5px dashed #39435a;
+        border-radius: 10px;
+        cursor: pointer;
+        transition:
+          border-color 0.15s ease,
+          background 0.15s ease,
+          color 0.15s ease;
+      }
+      #dropzone:hover,
+      #dropzone.drag {
+        border-color: #6ab0ff;
+        background: #16202e;
+        color: #cfe2ff;
+      }
+      #dropzone b {
+        color: #cfe2ff;
+        font-weight: 600;
+      }
+      #loader .or {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        color: #5a6477;
+        text-transform: uppercase;
+      }
     </style>
   </head>
   <body>
@@ -101,17 +139,37 @@
       <div class="hint" id="boot-hint" style="display: none">
         Mouse to look · WASD to move · Esc to release the cursor
       </div>
+      <div id="loader">
+        <div id="dropzone">
+          <b>Drop a .v2terrain world here</b><br />or click to choose a file
+        </div>
+        <div class="or">or</div>
+        <button id="default-btn" class="play-btn-secondary" style="
+            padding: 9px 20px;
+            font: 600 13px/1 system-ui, sans-serif;
+            color: #cfe2ff;
+            background: transparent;
+            border: 1px solid #39435a;
+            border-radius: 7px;
+            cursor: pointer;
+          ">
+          Load the default world
+        </button>
+      </div>
+      <input id="file-input" type="file" accept=".v2terrain" hidden />
       <div class="err" id="boot-err"></div>
     </div>
 
     <script type="module">
       import { startV2App } from "./app/main.js";
 
-      // Which saved world to play. Copy your exported .v2terrain into the
-      // project's /public folder and point this at it (served at the web root).
-      // Override at runtime with ?scene=/my-other-world.v2terrain
+      // The world to play. Provide one explicitly with ?scene=/my-world.v2terrain
+      // (a file in /public, served at the web root). With no ?scene param, the
+      // player shows a loader so you can drop / pick a .v2terrain from disk or
+      // load the bundled default.
       const params = new URLSearchParams(location.search);
-      const SCENE_URL = params.get("scene") || "/scene.v2terrain";
+      const SCENE_URL = params.get("scene"); // null when not provided
+      const DEFAULT_SCENE = "/scene.v2terrain";
 
       const bootEl = document.getElementById("boot");
       const msgEl = document.getElementById("boot-msg");
@@ -119,42 +177,113 @@
       const spinnerEl = document.getElementById("boot-spinner");
       const playBtn = document.getElementById("play-btn");
       const hintEl = document.getElementById("boot-hint");
+      const loaderEl = document.getElementById("loader");
+      const dropzone = document.getElementById("dropzone");
+      const fileInput = document.getElementById("file-input");
+      const defaultBtn = document.getElementById("default-btn");
 
       const setMsg = (t) => {
         msgEl.textContent = t;
       };
-      const fail = (label, e) => {
+      const showErr = (label, e) => {
         console.error(`[PLAY] ${label}`, e);
-        msgEl.textContent = label;
-        spinnerEl.style.display = "none";
         errEl.style.display = "block";
         errEl.textContent = `${label}\n\n${e?.stack || e?.message || e}`;
       };
 
-      try {
-        setMsg("Starting renderer…");
-        const app = await startV2App();
-        // Expose for debugging in the console.
-        window.__app = app;
+      let app;
 
-        setMsg("Loading world…");
-        await app.loadProjectFromUrl(SCENE_URL);
-
-        // World is ready, but Pointer Lock needs a user gesture — show the
-        // "Click to Play" button and enter immersive play on click.
+      const showLoader = (msg = "Choose a world") => {
         spinnerEl.style.display = "none";
+        playBtn.style.display = "none";
+        hintEl.style.display = "none";
+        loaderEl.style.display = "flex";
+        setMsg(msg);
+      };
+
+      // World is ready → show "Click to Play" (Pointer Lock needs a gesture).
+      const showReady = () => {
+        spinnerEl.style.display = "none";
+        loaderEl.style.display = "none";
+        errEl.style.display = "none";
         setMsg("Ready");
         playBtn.style.display = "inline-block";
         hintEl.style.display = "block";
+      };
 
-        playBtn.addEventListener("click", () => {
-          // This click IS the user gesture that authorizes Pointer Lock.
-          app.setMode("play", { immersive: true });
-          bootEl.classList.add("hidden");
-          setTimeout(() => bootEl.remove(), 600);
+      // Run a world-load action with a spinner; fall back to the loader on error.
+      const withLoading = async (msg, fn) => {
+        errEl.style.display = "none";
+        loaderEl.style.display = "none";
+        spinnerEl.style.display = "block";
+        setMsg(msg);
+        try {
+          await fn();
+          showReady();
+        } catch (e) {
+          showErr("Couldn't load that world.", e);
+          showLoader("Choose a world");
+        }
+      };
+
+      const loadUrl = (url) =>
+        withLoading("Loading world…", () => app.loadProjectFromUrl(url));
+      const loadFile = (file) =>
+        withLoading("Loading world…", async () => {
+          const buf = await file.arrayBuffer();
+          await app.loadProjectBuffer(buf);
         });
+
+      // Entering immersive play must happen inside a user gesture (Pointer Lock).
+      playBtn.addEventListener("click", () => {
+        app.setMode("play", { immersive: true });
+        bootEl.classList.add("hidden");
+        setTimeout(() => bootEl.remove(), 600);
+      });
+
+      // --- Loader wiring (file picker + drag & drop) ---
+      dropzone.addEventListener("click", () => fileInput.click());
+      fileInput.addEventListener("change", () => {
+        const f = fileInput.files?.[0];
+        if (f) loadFile(f);
+      });
+      defaultBtn.addEventListener("click", () => loadUrl(DEFAULT_SCENE));
+      ["dragenter", "dragover"].forEach((ev) =>
+        dropzone.addEventListener(ev, (e) => {
+          e.preventDefault();
+          dropzone.classList.add("drag");
+        }),
+      );
+      ["dragleave", "drop"].forEach((ev) =>
+        dropzone.addEventListener(ev, (e) => {
+          e.preventDefault();
+          dropzone.classList.remove("drag");
+        }),
+      );
+      dropzone.addEventListener("drop", (e) => {
+        const f = e.dataTransfer?.files?.[0];
+        if (f) loadFile(f);
+      });
+      // Allow dropping a file anywhere on the boot overlay, not just the box.
+      ["dragover", "drop"].forEach((ev) =>
+        bootEl.addEventListener(ev, (e) => e.preventDefault()),
+      );
+
+      // --- Boot ---
+      try {
+        setMsg("Starting renderer…");
+        app = await startV2App();
+        window.__app = app; // for debugging in the console
+
+        if (SCENE_URL) {
+          await loadUrl(SCENE_URL); // explicit world → load straight in
+        } else {
+          showLoader(); // no world specified → let the player choose
+        }
       } catch (e) {
-        fail("Failed to start the game.", e);
+        showErr("Failed to start the renderer.", e);
+        setMsg("Failed to start.");
+        spinnerEl.style.display = "none";
       }
     </script>
   </body>
