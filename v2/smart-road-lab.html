@@ -1,0 +1,1018 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Smart Road 3D — terrain lab</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/"
+        }
+      }
+    </script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #0e1116; }
+      #hud {
+        position: fixed; left: 12px; top: 12px; z-index: 10;
+        font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
+        color: #cfe8ff; background: rgba(10,16,24,0.78);
+        padding: 10px 12px; border-radius: 8px; width: 252px;
+        max-height: calc(100vh - 24px); overflow-y: auto;
+      }
+      #hud h1 { font-size: 13px; color: #7fd1ff; margin-bottom: 6px; }
+      #hud h2 { font-size: 11px; color: #6fa8c9; margin: 8px 0 2px; text-transform: uppercase; letter-spacing: 0.06em; }
+      #hud label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 2px 0; }
+      #hud input[type=range] { width: 110px; }
+      #hud select { background:#1d2b3a; color:#cfe8ff; border:1px solid #2c4257; border-radius:4px; font:inherit; padding:1px 3px; max-width:130px; }
+      #hud .val { color: #9ee8ff; min-width: 36px; text-align: right; }
+      #hud .row { display:flex; gap:6px; margin-top:5px; }
+      #hud button { flex:1; background:#1d2b3a; color:#cfe8ff; border:1px solid #2c4257; border-radius:5px; padding:4px 2px; cursor:pointer; font:inherit; font-size:11px; }
+      #hud button.on { background:#28527a; }
+      #hud .help { margin-top:7px; color:#8aa3b8; font-size:11px; line-height:1.45; }
+      #hud .stats { margin-top:6px; color:#9ee8ff; font-size:11px; }
+      #hud input[type=checkbox] { accent-color:#2e7cc4; }
+    </style>
+  </head>
+  <body>
+    <div id="hud"><h1>Smart Road 3D lab</h1></div>
+    <input id="importFile" type="file" accept=".json" style="display:none" />
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      // Successor copy of core/road/roadNetworkLabGeometry.js — geometry evolves
+      // there (angle-aware junction clips, …); the editor's original stays untouched.
+      import { buildLabNetworkGeometry, ROAD_PROFILES } from "./smart-road-lab-geometry.js";
+
+      // ── Params ───────────────────────────────────────────────────────────────
+      const P = {
+        // road
+        width: 14,
+        lanesPerDir: 1,
+        junctionRadius: 14,
+        curveSegments: 34,
+        junctionSegments: 14,
+        twoRoadNodes: "smooth",
+        endCapStyle: "round",
+        profilePreset: "flat",
+        profileScale: 1,
+        spanLongStep: 2,
+        lateralCols: 5,
+        // markings
+        centerLine: true,
+        centerLineDashed: true,
+        doubleCenterLine: false,
+        laneLines: false,
+        lineWidth: 0.02,        // edge whites, normalized to road width
+        centerLineWidth: 0.022, // normalized
+        centerLineGap: 0.012,
+        dashScale: 0.08,
+        // terrain / drape
+        hillAmp: 9,
+        clearance: 0.1,
+        smoothRadius: 18,
+        flattenOn: true,
+        flattenDepth: 0.35,
+        shoulder: 6,
+        // view
+        topView: false,
+        wireframe: false,
+        showHandles: true,
+      };
+
+      // ── Scene rig ────────────────────────────────────────────────────────────
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x8fb7e8);
+      scene.fog = new THREE.Fog(0x8fb7e8, 320, 1100);
+
+      const persp = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 3000);
+      persp.position.set(150, 130, 220);
+      const orthoSpan = 260;
+      const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 3000);
+      ortho.position.set(0, 600, 0);
+      ortho.up.set(0, 0, -1);
+      ortho.lookAt(0, 0, 0);
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.shadowMap.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      const controls = new OrbitControls(persp, renderer.domElement);
+      controls.target.set(0, 0, 0);
+      controls.enableDamping = true;
+      const topControls = new OrbitControls(ortho, renderer.domElement);
+      topControls.enableRotate = false;
+      topControls.enabled = false;
+      topControls.target.set(0, 0, 0);
+
+      scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x4a5240, 1.1));
+      const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+      sun.position.set(160, 220, 90);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.camera.left = -320; sun.shadow.camera.right = 320;
+      sun.shadow.camera.top = 320; sun.shadow.camera.bottom = -320;
+      sun.shadow.camera.far = 900;
+      scene.add(sun);
+
+      // ── Terrain (deterministic value-noise fBm) ──────────────────────────────
+      const TERRAIN_SIZE = 640;
+      const TERRAIN_SEGS = 220;
+
+      function hash2(ix, iz) {
+        let h = (ix * 374761393 + iz * 668265263) | 0;
+        h = Math.imul(h ^ (h >>> 13), 1274126177);
+        h ^= h >>> 16;
+        return (h >>> 0) / 4294967295;
+      }
+      function vnoise(x, z) {
+        const ix = Math.floor(x), iz = Math.floor(z);
+        const fx = x - ix, fz = z - iz;
+        const sx = fx * fx * (3 - 2 * fx);
+        const sz = fz * fz * (3 - 2 * fz);
+        const a = hash2(ix, iz), b = hash2(ix + 1, iz);
+        const c = hash2(ix, iz + 1), d = hash2(ix + 1, iz + 1);
+        return a + (b - a) * sx + (c - a) * sz + (a - b - c + d) * sx * sz;
+      }
+      function fbm(x, z) {
+        let v = 0, amp = 0.5, fx = x, fz = z;
+        for (let o = 0; o < 4; o++) {
+          v += amp * vnoise(fx, fz);
+          fx *= 2.03; fz *= 2.03; amp *= 0.5;
+        }
+        return v; // ~[0,1)
+      }
+      /** World-space terrain height. Analytic — drape and mesh use the exact same field. */
+      function terrainH(x, z) {
+        const broad = fbm(x * 0.006 + 11.7, z * 0.006 + 5.3);
+        const detail = fbm(x * 0.02 + 71.1, z * 0.02 + 23.9);
+        return P.hillAmp * ((broad - 0.5) * 1.7 + (detail - 0.5) * 0.35);
+      }
+
+      // ── Road height field (vertical easing) ─────────────────────────────────
+      // The road does NOT ride the raw terrain: it follows a low-pass filtered
+      // version of it (disc-average over `smoothRadius`), so small wrinkles
+      // disappear and grades soften. Junction nodes contribute level "pads"
+      // blended in over their reach. Road verts, stripes and the terrain-flatten
+      // targets all sample this one function — continuity is by construction.
+      const FIELD_TAPS = (() => {
+        const taps = [];
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          taps.push([Math.cos(a) * 0.5, Math.sin(a) * 0.5]);
+        }
+        for (let i = 0; i < 6; i++) {
+          const a = ((i + 0.5) / 6) * Math.PI * 2;
+          taps.push([Math.cos(a), Math.sin(a)]);
+        }
+        return taps;
+      })();
+      function roadFieldH(x, z) {
+        const r = Math.max(0.5, P.smoothRadius);
+        let sum = terrainH(x, z);
+        for (const [ox, oz] of FIELD_TAPS) sum += terrainH(x + ox * r, z + oz * r);
+        return sum / (FIELD_TAPS.length + 1);
+      }
+      function smooth01(u) {
+        const t = Math.max(0, Math.min(1, u));
+        return t * t * (3 - 2 * t);
+      }
+      /** Junction pads for the current rebuild: { x, z, h, reach }. */
+      let pads = [];
+      function roadSurfaceH(x, z) {
+        let h = roadFieldH(x, z);
+        for (const pad of pads) {
+          const d = Math.hypot(x - pad.x, z - pad.z);
+          if (d < pad.reach) h = pad.h + (h - pad.h) * smooth01(d / pad.reach);
+        }
+        return h;
+      }
+
+      let terrainMesh = null;
+      let terrainBase = null; // analytic height per vertex, before road flattening
+      const terrainMat = new THREE.MeshStandardMaterial({ color: 0x5f7f4a, roughness: 1.0 });
+      function rebuildTerrain() {
+        if (terrainMesh) {
+          scene.remove(terrainMesh);
+          terrainMesh.geometry.dispose();
+        }
+        const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGS, TERRAIN_SEGS);
+        geo.rotateX(-Math.PI / 2);
+        const pos = geo.attributes.position;
+        terrainBase = new Float32Array(pos.count);
+        for (let i = 0; i < pos.count; i++) {
+          const h = terrainH(pos.getX(i), pos.getZ(i));
+          terrainBase[i] = h;
+          pos.setY(i, h);
+        }
+        geo.computeVertexNormals();
+        terrainMesh = new THREE.Mesh(geo, terrainMat);
+        terrainMesh.receiveShadow = true;
+        scene.add(terrainMesh);
+      }
+
+      // ── Terrain grade under road (cut/fill with shoulder blend) ──────────────
+      // Guarantees the deck always clears the terrain mesh: within the road
+      // footprint the terrain follows the road height minus `flattenDepth`
+      // (the deck sits `clearance` above it), blending back over `shoulder` m.
+      /**
+       * Grade the terrain to the ROAD's height: cut through bumps AND fill dips
+       * (embankments). footprints: { pts: [{x, y}…] (y = world Z, 1 pt = disc),
+       * hs: [target road height per pt], inner: full-grade radius }.
+       * Each vertex follows its nearest footprint's interpolated road height
+       * minus `flattenDepth`, blending back to natural ground over `shoulder`.
+       */
+      let flatDist = null, flatH = null; // per-terrain-vertex scratch
+      function flattenTerrain(footprints) {
+        const pos = terrainMesh.geometry.attributes.position;
+        for (let k = 0; k < pos.count; k++) pos.setY(k, terrainBase[k]);
+        if (P.flattenOn && footprints.length) {
+          if (!flatDist || flatDist.length !== pos.count) {
+            flatDist = new Float32Array(pos.count);
+            flatH = new Float32Array(pos.count);
+          }
+          flatDist.fill(Infinity);
+          const cell = TERRAIN_SIZE / TERRAIN_SEGS;
+          const half = TERRAIN_SIZE / 2;
+          const cols = TERRAIN_SEGS + 1;
+          const outer = Math.max(0.01, P.shoulder);
+          let inner = footprints[0].inner;
+          for (const fp of footprints) {
+            inner = fp.inner; // all footprints share the same inner in practice
+            let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+            for (const pt of fp.pts) {
+              if (pt.x < minX) minX = pt.x;
+              if (pt.x > maxX) maxX = pt.x;
+              if (pt.y < minZ) minZ = pt.y;
+              if (pt.y > maxZ) maxZ = pt.y;
+            }
+            const reach = fp.inner + outer + cell;
+            const c0 = Math.max(0, Math.floor((minX - reach + half) / cell));
+            const c1 = Math.min(TERRAIN_SEGS, Math.ceil((maxX + reach + half) / cell));
+            const r0 = Math.max(0, Math.floor((minZ - reach + half) / cell));
+            const r1 = Math.min(TERRAIN_SEGS, Math.ceil((maxZ + reach + half) / cell));
+            for (let r = r0; r <= r1; r++) {
+              for (let c = c0; c <= c1; c++) {
+                const k = r * cols + c;
+                const x = pos.getX(k), z = pos.getZ(k);
+                let dSq = Infinity;
+                let hAt = fp.hs[0];
+                if (fp.pts.length === 1) {
+                  const ex = x - fp.pts[0].x, ez = z - fp.pts[0].y;
+                  dSq = ex * ex + ez * ez;
+                } else {
+                  for (let s = 0; s < fp.pts.length - 1; s++) {
+                    const a = fp.pts[s], b = fp.pts[s + 1];
+                    const dx = b.x - a.x, dz = b.y - a.y;
+                    const lenSq = dx * dx + dz * dz;
+                    let t = 0;
+                    if (lenSq > 1e-8) {
+                      t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.y) * dz) / lenSq));
+                    }
+                    const ex = x - (a.x + dx * t), ez = z - (a.y + dz * t);
+                    const sq = ex * ex + ez * ez;
+                    if (sq < dSq) {
+                      dSq = sq;
+                      hAt = fp.hs[s] + (fp.hs[s + 1] - fp.hs[s]) * t;
+                    }
+                  }
+                }
+                const d = Math.sqrt(dSq);
+                if (d >= fp.inner + outer) continue;
+                if (d < flatDist[k]) {
+                  flatDist[k] = d;
+                  flatH[k] = hAt;
+                }
+              }
+            }
+          }
+          for (let k = 0; k < pos.count; k++) {
+            const d = flatDist[k];
+            if (d === Infinity) continue;
+            const target = flatH[k] - P.flattenDepth;
+            const s = d <= inner ? 0 : smooth01((d - inner) / outer);
+            pos.setY(k, target + (terrainBase[k] - target) * s);
+          }
+        }
+        pos.needsUpdate = true;
+        terrainMesh.geometry.computeVertexNormals();
+      }
+
+      // ── Network state ────────────────────────────────────────────────────────
+      const STORAGE_KEY = "smart-road-lab.v1";
+      let nodes = [];   // { id, x, z, forceJunction }
+      let edges = [];   // { a, b }
+      let nextNodeId = 1;
+      let selectedNodeId = null;
+
+      function demoNetwork() {
+        nodes = [
+          { id: 1, x: -250, z: -150, forceJunction: false },
+          { id: 2, x: -130, z: -90, forceJunction: false },
+          { id: 3, x: -20, z: -20, forceJunction: false },
+          { id: 4, x: 110, z: 30, forceJunction: false },
+          { id: 5, x: 230, z: 140, forceJunction: false },
+          { id: 6, x: 30, z: -190, forceJunction: false },
+          { id: 7, x: -60, z: 190, forceJunction: false },
+          { id: 8, x: 40, z: 110, forceJunction: false },
+        ];
+        edges = [
+          { a: 1, b: 2 }, { a: 2, b: 3 }, { a: 3, b: 4 }, { a: 4, b: 5 },
+          { a: 6, b: 3 }, { a: 4, b: 8 }, { a: 8, b: 7 },
+        ];
+        nextNodeId = 9;
+        selectedNodeId = null;
+      }
+      function saveNetwork() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ nodes, edges, nextNodeId }));
+        } catch (_) { /* private mode etc. */ }
+      }
+      function loadNetwork() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return false;
+          const data = JSON.parse(raw);
+          if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) return false;
+          nodes = data.nodes;
+          edges = data.edges;
+          nextNodeId = data.nextNodeId ?? (Math.max(0, ...nodes.map((n) => n.id)) + 1);
+          return nodes.length > 0;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      // ── Drape helpers (2D network plane → 3D road surface) ───────────────────
+      // Geometry module convention: internal {x, y} where y = world Z.
+      function drapeY(x, z) {
+        return roadSurfaceH(x, z) + P.clearance;
+      }
+
+      function disposeGroup(group) {
+        for (const child of [...group.children]) {
+          group.remove(child);
+          // Never dispose the shared handle sphere: destroying a geometry that
+          // gets reused next rebuild leaves destroyed GPU buffers in flight,
+          // which kills the WebGPU device ("external Instance" device lost).
+          if (child.geometry && child.geometry !== handleGeo) child.geometry.dispose();
+        }
+      }
+
+      /** rows×cols 2D grid → draped indexed BufferGeometry (+ optional lateral profile heights). */
+      function gridToGeometry(grid, gridProfile) {
+        const rows = grid.length;
+        const cols = grid[0].length;
+        const pos = new Float32Array(rows * cols * 3);
+        let k = 0;
+        for (let i = 0; i < rows; i++) {
+          for (let j = 0; j < cols; j++) {
+            const pt = grid[i][j];
+            const profY = gridProfile ? (gridProfile[j] || 0) : 0;
+            pos[k++] = pt.x;
+            pos[k++] = drapeY(pt.x, pt.y) + profY;
+            pos[k++] = pt.y;
+          }
+        }
+        const idx = [];
+        for (let i = 0; i < rows - 1; i++) {
+          for (let j = 0; j < cols - 1; j++) {
+            const a = i * cols + j, b = a + 1, c = a + cols, d = c + 1;
+            idx.push(a, c, b, b, c, d);
+          }
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        geo.setIndex(idx);
+        geo.computeVertexNormals();
+        return geo;
+      }
+
+      /**
+       * Junction-core polygon → draped BufferGeometry.
+       * Concentric rings toward the centroid (not a single fan) so the interior
+       * samples the height field too — a flat fan dips under terrain bulges.
+       */
+      function polygonToGeometry(poly) {
+        if (!poly || poly.length < 3) return null;
+        let cx = 0, cy = 0;
+        for (const pt of poly) { cx += pt.x; cy += pt.y; }
+        cx /= poly.length; cy /= poly.length;
+        const n = poly.length;
+        const RINGS = 3; // boundary + 2 interior rings, then centroid
+        const pos = new Float32Array((n * RINGS + 1) * 3);
+        let k = 0;
+        for (let r = 0; r < RINGS; r++) {
+          const t = r / RINGS;
+          for (let i = 0; i < n; i++) {
+            const x = poly[i].x + (cx - poly[i].x) * t;
+            const y = poly[i].y + (cy - poly[i].y) * t;
+            pos[k++] = x; pos[k++] = drapeY(x, y); pos[k++] = y;
+          }
+        }
+        pos[k++] = cx; pos[k++] = drapeY(cx, cy); pos[k++] = cy;
+        const centroidIdx = n * RINGS;
+        const idx = [];
+        for (let r = 0; r < RINGS - 1; r++) {
+          const a0 = r * n, b0 = (r + 1) * n;
+          for (let i = 0; i < n; i++) {
+            const i1 = (i + 1) % n;
+            // Winding must MATCH the centroid fan below — opposite windings make
+            // averaged vertex normals cancel on the inner rings, which shades a
+            // black diamond at the middle of every junction.
+            idx.push(a0 + i, a0 + i1, b0 + i, a0 + i1, b0 + i1, b0 + i);
+          }
+        }
+        const last = (RINGS - 1) * n;
+        for (let i = 0; i < n; i++) idx.push(centroidIdx, last + i, last + ((i + 1) % n));
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        geo.setIndex(idx);
+        geo.computeVertexNormals();
+        return geo;
+      }
+
+      /** Insert points so no 2D segment exceeds `step` — sparse paths (straight spans
+       *  are just [start, end]) must be densified or their draped ribbons tunnel through hills. */
+      function resamplePath2d(path, step) {
+        if (!path || path.length < 2) return path;
+        const out = [path[0]];
+        for (let i = 1; i < path.length; i++) {
+          const a = path[i - 1], b = path[i];
+          const len = Math.hypot(b.x - a.x, b.y - a.y);
+          const subdiv = Math.ceil(len / step);
+          for (let s = 1; s <= subdiv; s++) {
+            const t = s / subdiv;
+            out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+          }
+        }
+        return out;
+      }
+
+      /** Resample-free lateral offset of a 2D polyline (per-point central-difference normals). */
+      function offsetPath2d(path, off) {
+        const n = path.length;
+        const out = new Array(n);
+        for (let i = 0; i < n; i++) {
+          const p0 = path[Math.max(0, i - 1)];
+          const p1 = path[Math.min(n - 1, i + 1)];
+          let tx = p1.x - p0.x, ty = p1.y - p0.y;
+          const len = Math.hypot(tx, ty) || 1;
+          tx /= len; ty /= len;
+          out[i] = { x: path[i].x + -ty * off, y: path[i].y + tx * off };
+        }
+        return out;
+      }
+
+      /** Split a 2D polyline into dash fragments by arclength. */
+      function dashSplit(path, dashLen, gapLen) {
+        const frags = [];
+        let current = [path[0]];
+        let drawing = true;
+        let remaining = dashLen;
+        for (let i = 1; i < path.length; i++) {
+          let ax = path[i - 1].x, ay = path[i - 1].y;
+          const bx = path[i].x, by = path[i].y;
+          let segLen = Math.hypot(bx - ax, by - ay);
+          while (segLen > remaining) {
+            const t = remaining / segLen;
+            const mx = ax + (bx - ax) * t, my = ay + (by - ay) * t;
+            if (drawing) {
+              current.push({ x: mx, y: my });
+              if (current.length >= 2) frags.push(current);
+            }
+            current = [{ x: mx, y: my }];
+            drawing = !drawing;
+            ax = mx; ay = my;
+            segLen -= remaining;
+            remaining = drawing ? dashLen : gapLen;
+          }
+          remaining -= segLen;
+          if (drawing) current.push({ x: bx, y: by });
+          else current = [{ x: bx, y: by }];
+        }
+        if (drawing && current.length >= 2) frags.push(current);
+        return frags;
+      }
+
+      /** 2D polyline → draped ribbon mesh of half-width hw, lifted above the deck. */
+      function stripeMesh(rawPath, hw, mat, lift) {
+        if (!rawPath || rawPath.length < 2) return null;
+        const path = resamplePath2d(rawPath, 2.0);
+        const left = offsetPath2d(path, hw);
+        const right = offsetPath2d(path, -hw);
+        const n = path.length;
+        const pos = new Float32Array(n * 2 * 3);
+        let k = 0;
+        for (let i = 0; i < n; i++) {
+          pos[k++] = left[i].x; pos[k++] = drapeY(left[i].x, left[i].y) + lift; pos[k++] = left[i].y;
+          pos[k++] = right[i].x; pos[k++] = drapeY(right[i].x, right[i].y) + lift; pos[k++] = right[i].y;
+        }
+        const idx = [];
+        for (let i = 0; i < n - 1; i++) {
+          const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+          idx.push(a, c, b, b, c, d);
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        geo.setIndex(idx);
+        geo.computeVertexNormals();
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.renderOrder = 4;
+        return mesh;
+      }
+
+      // ── Materials ────────────────────────────────────────────────────────────
+      const matAsphalt = new THREE.MeshStandardMaterial({
+        color: 0x2c3138, roughness: 0.92, metalness: 0, side: THREE.DoubleSide,
+      });
+      const matJunction = new THREE.MeshStandardMaterial({
+        color: 0x282d33, roughness: 0.92, metalness: 0, side: THREE.DoubleSide,
+      });
+      const markingMatProps = {
+        roughness: 0.85, metalness: 0, side: THREE.DoubleSide,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      };
+      const matWhite = new THREE.MeshStandardMaterial({ color: 0xe9e9e9, ...markingMatProps });
+      const matYellow = new THREE.MeshStandardMaterial({ color: 0xe8c33c, ...markingMatProps });
+      const matHandle = new THREE.MeshBasicMaterial({ color: 0x62c4ff });
+      const matHandleSel = new THREE.MeshBasicMaterial({ color: 0xffd24a });
+      const matHandleJunc = new THREE.MeshBasicMaterial({ color: 0xff7a5c });
+
+      // ── Road rebuild ─────────────────────────────────────────────────────────
+      const roadGroup = new THREE.Group();
+      roadGroup.name = "SmartRoadLabRoad";
+      scene.add(roadGroup);
+      const handleGroup = new THREE.Group();
+      handleGroup.name = "SmartRoadLabHandles";
+      scene.add(handleGroup);
+      const handleGeo = new THREE.SphereGeometry(2.0, 16, 12);
+      let handleMeshes = [];
+      let lastStats = "";
+
+      /** Selection-only changes recolor handles in place — no GPU rebuild churn. */
+      function updateHandleColors() {
+        for (const mesh of handleMeshes) {
+          const n = nodes.find((nn) => nn.id === mesh.userData.nodeId);
+          mesh.material = n && n.id === selectedNodeId ? matHandleSel : (n?.forceJunction ? matHandleJunc : matHandle);
+        }
+      }
+
+      function markingMaterial(type) {
+        return type === "divider" ? matWhite : matYellow;
+      }
+      function markingDashed(m) {
+        if (m.dashed !== undefined) return m.dashed;
+        // Bend/junction markings carry no flag — fall back to global params by type.
+        if (m.type === "divider") return true;
+        return P.centerLineDashed;
+      }
+
+      function rebuildRoad() {
+        const t0 = performance.now();
+        disposeGroup(roadGroup);
+        disposeGroup(handleGroup);
+        handleMeshes = [];
+
+        const result = buildLabNetworkGeometry(
+          nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction })),
+          edges.map((e) => ({ a: e.a, b: e.b })),
+          {
+            width: P.width,
+            lanesPerDir: P.lanesPerDir,
+            junctionRadius: P.junctionRadius,
+            curveSegments: P.curveSegments,
+            junctionSegments: P.junctionSegments,
+            twoRoadNodes: P.twoRoadNodes,
+            endCapStyle: P.endCapStyle,
+            lateralCols: P.lateralCols,
+            spanLongStep: P.spanLongStep,
+            profilePreset: P.profilePreset,
+            profileScale: P.profileScale,
+            centerLine: P.centerLine,
+            centerLineDashed: P.centerLineDashed,
+            doubleCenterLine: P.doubleCenterLine,
+            centerLineGap: P.centerLineGap,
+            centerLineWidth: P.centerLineWidth,
+            laneLines: P.laneLines,
+            centerLineDashScale: P.dashScale,
+            laneDashScale: P.dashScale,
+          },
+        );
+
+        const hw = P.width * 0.5;
+        const insetDist = Math.min((0.055 + P.lineWidth * 0.5) * P.width, P.width * 0.42);
+        const edgeHalf = Math.max(0.004, P.lineWidth * P.width * 0.5);
+        const dashLen = Math.max(0.6, P.dashScale * P.width * 2.5);
+        const footprints = [];
+        const footInner = hw + 1.0; // full grade slightly past the deck edge
+
+        // Junction pads first: roadSurfaceH blends spans into these level areas,
+        // so they must exist before any piece is meshed or footprinted.
+        pads = [];
+        for (const piece of result.pieces) {
+          if (!piece.isJunctionCore || !piece.networkNode) continue;
+          const np = piece.networkNode.p;
+          const isCap = !piece.mouths?.length;
+          pads.push({
+            x: np.x,
+            z: np.y,
+            h: roadFieldH(np.x, np.y),
+            reach: isCap ? hw * 2.5 : P.junctionRadius * 1.5 + hw,
+          });
+        }
+
+        const footprint = (pts2d) => {
+          const pts = resamplePath2d(pts2d, 4);
+          footprints.push({ pts, hs: pts.map((pt) => roadSurfaceH(pt.x, pt.y)), inner: footInner });
+        };
+
+        for (const piece of result.pieces) {
+          // Terrain-grade footprints: span/bend spines, junction spokes, cap discs.
+          if (piece.center?.length >= 2) {
+            footprint(piece.center);
+          } else if (piece.isJunctionCore && piece.networkNode) {
+            const np = piece.networkNode.p;
+            if (piece.mouths?.length) {
+              for (const m of piece.mouths) footprint([np, m.c]);
+            } else {
+              footprints.push({ pts: [np], hs: [roadSurfaceH(np.x, np.y)], inner: footInner });
+            }
+          }
+          const surfGeo = piece.grid
+            ? gridToGeometry(piece.grid, piece.gridProfile)
+            : polygonToGeometry(piece.polygon);
+          if (surfGeo) {
+            const mesh = new THREE.Mesh(surfGeo, piece.isJunctionCore ? matJunction : matAsphalt);
+            mesh.receiveShadow = true;
+            roadGroup.add(mesh);
+          }
+
+          // Edge whites: offset inward from the spine for spans/bends; inset outline for junction cores.
+          if (P.lineWidth > 1e-6) {
+            if (piece.center?.length >= 2) {
+              for (const sign of [1, -1]) {
+                const path = offsetPath2d(piece.center, sign * (hw - insetDist));
+                const stripe = stripeMesh(path, edgeHalf, matWhite, 0.03);
+                if (stripe) roadGroup.add(stripe);
+              }
+            } else if (piece.isJunctionCore && Array.isArray(piece.outlineSegments)) {
+              // Inset along the LOCAL boundary normal by the same insetDist the
+              // spans use — centroid-direction insetting gives a varying edge
+              // distance, which is why junction lines never met the span lines.
+              let cx = 0, cy = 0;
+              for (const pt of piece.polygon) { cx += pt.x; cy += pt.y; }
+              cx /= piece.polygon.length; cy /= piece.polygon.length;
+              for (const seg of piece.outlineSegments) {
+                if (!seg || seg.length < 2) continue;
+                const plus = offsetPath2d(seg, insetDist);
+                const minus = offsetPath2d(seg, -insetDist);
+                const m = (seg.length / 2) | 0;
+                const dPlus = Math.hypot(plus[m].x - cx, plus[m].y - cy);
+                const dMinus = Math.hypot(minus[m].x - cx, minus[m].y - cy);
+                const inset = dPlus < dMinus ? plus : minus;
+                const stripe = stripeMesh(inset, edgeHalf, matWhite, 0.03);
+                if (stripe) roadGroup.add(stripe);
+              }
+            }
+          }
+        }
+
+        for (const m of result.markings || []) {
+          if (!m.path || m.path.length < 2) continue;
+          const mat = markingMaterial(m.type);
+          const half = (m.type === "divider" ? 0.015 : P.centerLineWidth) * P.width * 0.5;
+          const dl = Math.max(0.6, (m.dashScale ?? P.dashScale) * P.width * 2.5);
+          const paths = markingDashed(m) ? dashSplit(m.path, dl, dl * 1.6) : [m.path];
+          for (const path of paths) {
+            const stripe = stripeMesh(path, half, mat, 0.04);
+            if (stripe) roadGroup.add(stripe);
+          }
+        }
+
+        // Node handles + edge debug lines
+        if (P.showHandles) {
+          for (const n of nodes) {
+            const mat = n.id === selectedNodeId ? matHandleSel : (n.forceJunction ? matHandleJunc : matHandle);
+            const mesh = new THREE.Mesh(handleGeo, mat);
+            mesh.position.set(n.x, drapeY(n.x, n.z) + 1.2, n.z);
+            mesh.userData.nodeId = n.id;
+            handleGroup.add(mesh);
+            handleMeshes.push(mesh);
+          }
+          const linePts = [];
+          for (const e of edges) {
+            const a = nodes.find((n) => n.id === e.a);
+            const b = nodes.find((n) => n.id === e.b);
+            if (!a || !b) continue;
+            linePts.push(new THREE.Vector3(a.x, drapeY(a.x, a.z) + 1.0, a.z));
+            linePts.push(new THREE.Vector3(b.x, drapeY(b.x, b.z) + 1.0, b.z));
+          }
+          if (linePts.length) {
+            const lines = new THREE.LineSegments(
+              new THREE.BufferGeometry().setFromPoints(linePts),
+              new THREE.LineBasicMaterial({ color: 0x62c4ff, transparent: true, opacity: 0.55 }),
+            );
+            handleGroup.add(lines);
+          }
+        }
+
+        flattenTerrain(footprints);
+
+        matAsphalt.wireframe = P.wireframe;
+        matJunction.wireframe = P.wireframe;
+        const ms = performance.now() - t0;
+        lastStats = `${result.pieces.length} pieces · ${(result.markings || []).length} markings · ${ms.toFixed(1)} ms`;
+        statsEl.textContent = lastStats;
+        saveNetwork();
+      }
+
+      // ── Editing (raycast on terrain + handles) ───────────────────────────────
+      const raycaster = new THREE.Raycaster();
+      const ndc = new THREE.Vector2();
+      let dragNodeId = null;
+      let downPos = null;
+      let dragMoved = false;
+      let rebuildQueued = false;
+
+      function queueRebuild() { rebuildQueued = true; }
+      function activeCamera() { return P.topView ? ortho : persp; }
+
+      function pick(ev) {
+        ndc.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
+        raycaster.setFromCamera(ndc, activeCamera());
+        const handleHit = raycaster.intersectObjects(handleMeshes, false)[0];
+        const terrainHit = raycaster.intersectObject(terrainMesh, false)[0];
+        return { handleHit, terrainHit };
+      }
+
+      renderer.domElement.addEventListener("pointerdown", (ev) => {
+        if (ev.button !== 0) return;
+        downPos = { x: ev.clientX, y: ev.clientY };
+        dragMoved = false;
+        // With Shift/Ctrl held this click is a connect/add gesture — selection must
+        // NOT move yet or pointerup would compare the target against itself.
+        if (ev.shiftKey || ev.ctrlKey || ev.metaKey) return;
+        const { handleHit } = pick(ev);
+        if (handleHit) {
+          dragNodeId = handleHit.object.userData.nodeId;
+          selectedNodeId = dragNodeId;
+          controls.enabled = false;
+          topControls.enabled = false;
+          updateHandleColors();
+        }
+      });
+
+      renderer.domElement.addEventListener("pointermove", (ev) => {
+        if (dragNodeId === null || !downPos) return;
+        if (Math.hypot(ev.clientX - downPos.x, ev.clientY - downPos.y) > 3) dragMoved = true;
+        if (!dragMoved) return;
+        const { terrainHit } = pick(ev);
+        if (!terrainHit) return;
+        const node = nodes.find((n) => n.id === dragNodeId);
+        if (node) {
+          node.x = terrainHit.point.x;
+          node.z = terrainHit.point.z;
+          queueRebuild();
+        }
+      });
+
+      renderer.domElement.addEventListener("pointerup", (ev) => {
+        if (ev.button !== 0) return;
+        const wasDragging = dragNodeId !== null;
+        const moved = dragMoved;
+        dragNodeId = null;
+        controls.enabled = !P.topView;
+        topControls.enabled = P.topView;
+        if (wasDragging && moved) { queueRebuild(); downPos = null; return; }
+
+        const { handleHit, terrainHit } = pick(ev);
+        const connectKey = ev.ctrlKey || ev.metaKey || ev.shiftKey;
+        if (handleHit) {
+          const hitId = handleHit.object.userData.nodeId;
+          if (connectKey && selectedNodeId !== null && selectedNodeId !== hitId) {
+            // Ctrl/Shift+click another node: toggle edge between selection and it.
+            const idx = edges.findIndex(
+              (e) => (e.a === selectedNodeId && e.b === hitId) || (e.a === hitId && e.b === selectedNodeId),
+            );
+            if (idx >= 0) edges.splice(idx, 1);
+            else edges.push({ a: selectedNodeId, b: hitId });
+            // Selection moves to the target so you can chain A→B→C connects.
+            selectedNodeId = hitId;
+            queueRebuild();
+          } else {
+            selectedNodeId = hitId;
+            updateHandleColors();
+          }
+        } else if (terrainHit && ev.shiftKey) {
+          // Shift+click terrain: add node (connected to selection when one exists).
+          const node = { id: nextNodeId++, x: terrainHit.point.x, z: terrainHit.point.z, forceJunction: false };
+          nodes.push(node);
+          if (selectedNodeId !== null) edges.push({ a: selectedNodeId, b: node.id });
+          selectedNodeId = node.id;
+          queueRebuild();
+        } else if (terrainHit && !moved && downPos) {
+          selectedNodeId = null;
+          updateHandleColors();
+        }
+        downPos = null;
+      });
+
+      addEventListener("keydown", (ev) => {
+        if (ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") return;
+        if ((ev.key === "Delete" || ev.key === "x") && selectedNodeId !== null) {
+          nodes = nodes.filter((n) => n.id !== selectedNodeId);
+          edges = edges.filter((e) => e.a !== selectedNodeId && e.b !== selectedNodeId);
+          selectedNodeId = null;
+          queueRebuild();
+        } else if (ev.key === "j" && selectedNodeId !== null) {
+          const node = nodes.find((n) => n.id === selectedNodeId);
+          if (node) { node.forceJunction = !node.forceJunction; queueRebuild(); }
+        }
+      });
+
+      // ── HUD ──────────────────────────────────────────────────────────────────
+      const hud = document.getElementById("hud");
+      function section(title) {
+        const h = document.createElement("h2");
+        h.textContent = title;
+        hud.appendChild(h);
+      }
+      function slider(label, min, max, step, key, onChange, fmt = (v) => v) {
+        const row = document.createElement("label");
+        row.innerHTML = `${label} <input type="range" min="${min}" max="${max}" step="${step}" value="${P[key]}"><span class="val"></span>`;
+        const input = row.querySelector("input");
+        const val = row.querySelector(".val");
+        const sync = () => { val.textContent = fmt(P[key]); };
+        input.addEventListener("input", () => { P[key] = +input.value; sync(); onChange(); });
+        sync();
+        hud.appendChild(row);
+      }
+      function checkbox(label, key, onChange) {
+        const row = document.createElement("label");
+        row.innerHTML = `${label} <input type="checkbox" ${P[key] ? "checked" : ""}>`;
+        row.querySelector("input").addEventListener("change", (e) => { P[key] = e.target.checked; onChange(); });
+        hud.appendChild(row);
+      }
+      function dropdown(label, key, options, onChange) {
+        const row = document.createElement("label");
+        const opts = options.map(([v, t]) => `<option value="${v}" ${P[key] === v ? "selected" : ""}>${t}</option>`).join("");
+        row.innerHTML = `${label} <select>${opts}</select>`;
+        row.querySelector("select").addEventListener("change", (e) => { P[key] = e.target.value; onChange(); });
+        hud.appendChild(row);
+      }
+      function buttonRow(defs) {
+        const row = document.createElement("div");
+        row.className = "row";
+        for (const [text, fn, id] of defs) {
+          const b = document.createElement("button");
+          b.textContent = text;
+          if (id) b.id = id;
+          b.addEventListener("click", fn);
+          row.appendChild(b);
+        }
+        hud.appendChild(row);
+      }
+
+      section("Road");
+      slider("Width", 6, 26, 0.5, "width", queueRebuild, (v) => v.toFixed(1));
+      slider("Junction radius", 6, 28, 0.5, "junctionRadius", queueRebuild, (v) => v.toFixed(1));
+      slider("Curve segs", 8, 80, 2, "curveSegments", queueRebuild);
+      slider("Junction segs", 4, 28, 1, "junctionSegments", queueRebuild);
+      slider("Span step", 0.5, 8, 0.5, "spanLongStep", queueRebuild, (v) => v.toFixed(1));
+      dropdown("Bends", "twoRoadNodes", [["smooth", "Smooth"], ["junction", "Junction"]], queueRebuild);
+      dropdown("End caps", "endCapStyle", [["flat", "Flat"], ["round", "Round"]], queueRebuild);
+      dropdown("Profile", "profilePreset", Object.entries(ROAD_PROFILES).map(([k, v]) => [k, v.label]), queueRebuild);
+      slider("Profile scale", 0, 4, 0.1, "profileScale", queueRebuild, (v) => v.toFixed(1));
+
+      section("Markings");
+      slider("Lanes / dir", 1, 3, 1, "lanesPerDir", queueRebuild);
+      checkbox("Center line", "centerLine", queueRebuild);
+      checkbox("Center dashed", "centerLineDashed", queueRebuild);
+      checkbox("Double center", "doubleCenterLine", queueRebuild);
+      checkbox("Lane lines", "laneLines", queueRebuild);
+      slider("Edge width", 0, 0.05, 0.002, "lineWidth", queueRebuild, (v) => v.toFixed(3));
+      slider("Dash scale", 0.02, 0.3, 0.01, "dashScale", queueRebuild, (v) => v.toFixed(2));
+
+      section("Terrain");
+      slider("Hill height", 0, 30, 0.5, "hillAmp", () => { rebuildTerrain(); queueRebuild(); }, (v) => v.toFixed(1));
+      slider("Clearance", 0.02, 0.6, 0.02, "clearance", queueRebuild, (v) => v.toFixed(2));
+      slider("Profile smooth", 2, 48, 1, "smoothRadius", queueRebuild, (v) => v.toFixed(0));
+      checkbox("Flatten under road", "flattenOn", queueRebuild);
+      slider("Embed depth", 0, 1.5, 0.05, "flattenDepth", queueRebuild, (v) => v.toFixed(2));
+      slider("Shoulder", 0.5, 20, 0.5, "shoulder", queueRebuild, (v) => v.toFixed(1));
+
+      section("View");
+      buttonRow([
+        ["Top view", (e) => {
+          P.topView = !P.topView;
+          e.target.classList.toggle("on", P.topView);
+          controls.enabled = !P.topView;
+          topControls.enabled = P.topView;
+        }],
+        ["Wireframe", (e) => {
+          P.wireframe = !P.wireframe;
+          e.target.classList.toggle("on", P.wireframe);
+          matAsphalt.wireframe = P.wireframe;
+          matJunction.wireframe = P.wireframe;
+        }],
+        ["Handles", (e) => {
+          P.showHandles = !P.showHandles;
+          e.target.classList.toggle("on", P.showHandles);
+          queueRebuild();
+        }, "handlesBtn"],
+      ]);
+      document.getElementById("handlesBtn").classList.add("on");
+
+      section("Network");
+      buttonRow([
+        ["Demo", () => { demoNetwork(); queueRebuild(); }],
+        ["Clear", () => { nodes = []; edges = []; selectedNodeId = null; queueRebuild(); }],
+      ]);
+      buttonRow([
+        ["Export", () => {
+          const blob = new Blob(
+            [JSON.stringify({ nodes: nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction })), edges: edges.map((e) => ({ a: e.a, b: e.b })) }, null, 2)],
+            { type: "application/json" },
+          );
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "smart-road-network.json";
+          a.click();
+          URL.revokeObjectURL(a.href);
+        }],
+        ["Import", () => document.getElementById("importFile").click()],
+      ]);
+      document.getElementById("importFile").addEventListener("change", async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+          const data = JSON.parse(await file.text());
+          if (Array.isArray(data.nodes) && Array.isArray(data.edges)) {
+            nodes = data.nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction }));
+            edges = data.edges.map((ed) => ({ a: ed.a, b: ed.b }));
+            nextNodeId = Math.max(0, ...nodes.map((n) => n.id)) + 1;
+            selectedNodeId = null;
+            queueRebuild();
+          }
+        } catch (_) { /* bad file — ignore */ }
+        e.target.value = "";
+      });
+
+      const statsEl = document.createElement("div");
+      statsEl.className = "stats";
+      hud.appendChild(statsEl);
+      const help = document.createElement("div");
+      help.className = "help";
+      help.innerHTML =
+        "Click node = select · drag = move<br>" +
+        "Shift+click ground = add node (links to selection)<br>" +
+        "Ctrl+click node = connect to selection (chains)<br>" +
+        "X / Del = delete node · J = force junction<br>" +
+        "LMB orbit · RMB pan · wheel zoom";
+      hud.appendChild(help);
+
+      // ── Boot ─────────────────────────────────────────────────────────────────
+      function syncOrtho() {
+        const aspect = innerWidth / innerHeight;
+        ortho.left = -orthoSpan * aspect;
+        ortho.right = orthoSpan * aspect;
+        ortho.top = orthoSpan;
+        ortho.bottom = -orthoSpan;
+        ortho.updateProjectionMatrix();
+      }
+      syncOrtho();
+
+      rebuildTerrain();
+      if (!loadNetwork()) demoNetwork();
+
+      window.__lab = { scene, get nodes() { return nodes; }, get edges() { return edges; }, params: P };
+      await renderer.init();
+      rebuildRoad();
+      let lastRebuildAt = 0;
+      renderer.setAnimationLoop(() => {
+        // Throttle: each rebuild churns dozens of GPU buffers; doing it every
+        // frame during a drag can overwhelm the device (see device-lost note).
+        if (rebuildQueued && performance.now() - lastRebuildAt > 70) {
+          rebuildQueued = false;
+          lastRebuildAt = performance.now();
+          rebuildRoad();
+        }
+        controls.update();
+        renderer.render(scene, activeCamera());
+      });
+      addEventListener("resize", () => {
+        persp.aspect = innerWidth / innerHeight;
+        persp.updateProjectionMatrix();
+        syncOrtho();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+    </script>
+  </body>
+</html>
