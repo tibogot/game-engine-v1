@@ -323,8 +323,8 @@
           { id: 8, x: 40, z: 110, forceJunction: false },
         ];
         edges = [
-          { a: 1, b: 2 }, { a: 2, b: 3 }, { a: 3, b: 4 }, { a: 4, b: 5 },
-          { a: 6, b: 3 }, { a: 4, b: 8 }, { a: 8, b: 7 },
+          { a: 1, b: 2, bend: 0 }, { a: 2, b: 3, bend: 24 }, { a: 3, b: 4, bend: 0 }, { a: 4, b: 5, bend: -30 },
+          { a: 6, b: 3, bend: 0 }, { a: 4, b: 8, bend: 0 }, { a: 8, b: 7, bend: 28 },
         ];
         nextNodeId = 9;
         selectedNodeId = null;
@@ -341,7 +341,7 @@
           const data = JSON.parse(raw);
           if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) return false;
           nodes = data.nodes;
-          edges = data.edges;
+          edges = data.edges.map((e) => ({ a: e.a, b: e.b, bend: Number(e.bend) || 0 }));
           nextNodeId = data.nextNodeId ?? (Math.max(0, ...nodes.map((n) => n.id)) + 1);
           return nodes.length > 0;
         } catch (_) {
@@ -358,10 +358,12 @@
       function disposeGroup(group) {
         for (const child of [...group.children]) {
           group.remove(child);
-          // Never dispose the shared handle sphere: destroying a geometry that
+          // Never dispose the shared handle spheres: destroying a geometry that
           // gets reused next rebuild leaves destroyed GPU buffers in flight,
           // which kills the WebGPU device ("external Instance" device lost).
-          if (child.geometry && child.geometry !== handleGeo) child.geometry.dispose();
+          if (child.geometry && child.geometry !== handleGeo && child.geometry !== edgeHandleGeo) {
+            child.geometry.dispose();
+          }
         }
       }
 
@@ -544,6 +546,7 @@
       const matHandle = new THREE.MeshBasicMaterial({ color: 0x62c4ff });
       const matHandleSel = new THREE.MeshBasicMaterial({ color: 0xffd24a });
       const matHandleJunc = new THREE.MeshBasicMaterial({ color: 0xff7a5c });
+      const matHandleEdge = new THREE.MeshBasicMaterial({ color: 0xb98fff });
 
       // ── Road rebuild ─────────────────────────────────────────────────────────
       const roadGroup = new THREE.Group();
@@ -553,8 +556,24 @@
       handleGroup.name = "SmartRoadLabHandles";
       scene.add(handleGroup);
       const handleGeo = new THREE.SphereGeometry(2.0, 16, 12);
+      const edgeHandleGeo = new THREE.SphereGeometry(1.3, 12, 10);
       let handleMeshes = [];
+      let edgeHandleMeshes = [];
       let lastStats = "";
+
+      /** Chord midpoint + unit perpendicular for an edge (curve passes mid + perp·bend). */
+      function edgeMidFrame(e) {
+        const a = nodes.find((n) => n.id === e.a);
+        const b = nodes.find((n) => n.id === e.b);
+        if (!a || !b) return null;
+        const dx = b.x - a.x, dz = b.z - a.z;
+        const len = Math.hypot(dx, dz) || 1;
+        return {
+          mx: (a.x + b.x) / 2, mz: (a.z + b.z) / 2,
+          px: -dz / len, pz: dx / len,
+          chord: len,
+        };
+      }
 
       /** Selection-only changes recolor handles in place — no GPU rebuild churn. */
       function updateHandleColors() {
@@ -579,10 +598,11 @@
         disposeGroup(roadGroup);
         disposeGroup(handleGroup);
         handleMeshes = [];
+        edgeHandleMeshes = [];
 
         const result = buildLabNetworkGeometry(
           nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction })),
-          edges.map((e) => ({ a: e.a, b: e.b })),
+          edges.map((e) => ({ a: e.a, b: e.b, bend: e.bend || 0 })),
           {
             width: P.width,
             lanesPerDir: P.lanesPerDir,
@@ -696,7 +716,7 @@
           }
         }
 
-        // Node handles + edge debug lines
+        // Node handles + edge curve handles + edge debug lines
         if (P.showHandles) {
           for (const n of nodes) {
             const mat = n.id === selectedNodeId ? matHandleSel : (n.forceJunction ? matHandleJunc : matHandle);
@@ -705,6 +725,19 @@
             mesh.userData.nodeId = n.id;
             handleGroup.add(mesh);
             handleMeshes.push(mesh);
+          }
+          // Midpoint handle per edge: drag sideways to bow the road (bend).
+          for (const e of edges) {
+            const f = edgeMidFrame(e);
+            if (!f) continue;
+            const bend = e.bend || 0;
+            const hx = f.mx + f.px * bend;
+            const hz = f.mz + f.pz * bend;
+            const mesh = new THREE.Mesh(edgeHandleGeo, matHandleEdge);
+            mesh.position.set(hx, drapeY(hx, hz) + 1.0, hz);
+            mesh.userData.edge = e;
+            handleGroup.add(mesh);
+            edgeHandleMeshes.push(mesh);
           }
           const linePts = [];
           for (const e of edges) {
@@ -737,6 +770,7 @@
       const raycaster = new THREE.Raycaster();
       const ndc = new THREE.Vector2();
       let dragNodeId = null;
+      let dragEdge = null;
       let downPos = null;
       let dragMoved = false;
       let rebuildQueued = false;
@@ -748,8 +782,9 @@
         ndc.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
         raycaster.setFromCamera(ndc, activeCamera());
         const handleHit = raycaster.intersectObjects(handleMeshes, false)[0];
+        const edgeHit = raycaster.intersectObjects(edgeHandleMeshes, false)[0];
         const terrainHit = raycaster.intersectObject(terrainMesh, false)[0];
-        return { handleHit, terrainHit };
+        return { handleHit, edgeHit, terrainHit };
       }
 
       renderer.domElement.addEventListener("pointerdown", (ev) => {
@@ -759,35 +794,53 @@
         // With Shift/Ctrl held this click is a connect/add gesture — selection must
         // NOT move yet or pointerup would compare the target against itself.
         if (ev.shiftKey || ev.ctrlKey || ev.metaKey) return;
-        const { handleHit } = pick(ev);
+        const { handleHit, edgeHit } = pick(ev);
         if (handleHit) {
           dragNodeId = handleHit.object.userData.nodeId;
           selectedNodeId = dragNodeId;
           controls.enabled = false;
           topControls.enabled = false;
           updateHandleColors();
+        } else if (edgeHit) {
+          dragEdge = edgeHit.object.userData.edge;
+          controls.enabled = false;
+          topControls.enabled = false;
         }
       });
 
       renderer.domElement.addEventListener("pointermove", (ev) => {
-        if (dragNodeId === null || !downPos) return;
+        if ((dragNodeId === null && dragEdge === null) || !downPos) return;
         if (Math.hypot(ev.clientX - downPos.x, ev.clientY - downPos.y) > 3) dragMoved = true;
         if (!dragMoved) return;
         const { terrainHit } = pick(ev);
         if (!terrainHit) return;
-        const node = nodes.find((n) => n.id === dragNodeId);
-        if (node) {
-          node.x = terrainHit.point.x;
-          node.z = terrainHit.point.z;
+        if (dragNodeId !== null) {
+          const node = nodes.find((n) => n.id === dragNodeId);
+          if (node) {
+            node.x = terrainHit.point.x;
+            node.z = terrainHit.point.z;
+            queueRebuild();
+          }
+        } else if (dragEdge) {
+          // Pull the midpoint handle sideways: bend = signed distance from the
+          // chord midpoint along the chord perpendicular. Snaps straight near 0.
+          const f = edgeMidFrame(dragEdge);
+          if (!f) return;
+          let bend = (terrainHit.point.x - f.mx) * f.px + (terrainHit.point.z - f.mz) * f.pz;
+          const cap = f.chord * 0.45;
+          bend = Math.max(-cap, Math.min(cap, bend));
+          if (Math.abs(bend) < 1.5) bend = 0;
+          dragEdge.bend = bend;
           queueRebuild();
         }
       });
 
       renderer.domElement.addEventListener("pointerup", (ev) => {
         if (ev.button !== 0) return;
-        const wasDragging = dragNodeId !== null;
+        const wasDragging = dragNodeId !== null || dragEdge !== null;
         const moved = dragMoved;
         dragNodeId = null;
+        dragEdge = null;
         controls.enabled = !P.topView;
         topControls.enabled = P.topView;
         if (wasDragging && moved) { queueRebuild(); downPos = null; return; }
@@ -938,7 +991,7 @@
       buttonRow([
         ["Export", () => {
           const blob = new Blob(
-            [JSON.stringify({ nodes: nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction })), edges: edges.map((e) => ({ a: e.a, b: e.b })) }, null, 2)],
+            [JSON.stringify({ nodes: nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction })), edges: edges.map((e) => ({ a: e.a, b: e.b, bend: e.bend || 0 })) }, null, 2)],
             { type: "application/json" },
           );
           const a = document.createElement("a");
@@ -956,7 +1009,7 @@
           const data = JSON.parse(await file.text());
           if (Array.isArray(data.nodes) && Array.isArray(data.edges)) {
             nodes = data.nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction }));
-            edges = data.edges.map((ed) => ({ a: ed.a, b: ed.b }));
+            edges = data.edges.map((ed) => ({ a: ed.a, b: ed.b, bend: Number(ed.bend) || 0 }));
             nextNodeId = Math.max(0, ...nodes.map((n) => n.id)) + 1;
             selectedNodeId = null;
             queueRebuild();
@@ -972,6 +1025,7 @@
       help.className = "help";
       help.innerHTML =
         "Click node = select · drag = move<br>" +
+        "Drag violet mid-handle sideways = curve the road<br>" +
         "Shift+click ground = add node (links to selection)<br>" +
         "Ctrl+click node = connect to selection (chains)<br>" +
         "X / Del = delete node · J = force junction<br>" +

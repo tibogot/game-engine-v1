@@ -4,12 +4,17 @@
  * all geometry evolution happens here. Lab pages import THIS file.
  *
  * Changes over the original:
- *  - ANGLE-AWARE CLIP DISTANCES: roads meeting at acute angles overlap each other
- *    until hw / tan(gap/2) from the node; the original clipped by degree+length
- *    only, so sharp Y junctions folded through themselves (black slivers, hooked
- *    edge lines). Each road end is now clipped past its overlap with its angular
- *    neighbors, giving sharp junctions a longer asphalt wedge like real roads.
- *  - junction corner intersections are only accepted IN FRONT of both edge rays.
+ *  - PER-EDGE CURVES: `bend` (signed lateral bow, meters at the chord midpoint)
+ *    makes the edge a quadratic Bézier through the bow point. Junction mouths sit
+ *    ON the curve, road directions at a node are the curve's END TANGENTS, and
+ *    corners/clips use those tangents — curved roads enter junctions at their
+ *    natural angle.
+ *  - ANGLE-AWARE CLIP DISTANCES: roads meeting at angle θ (between their tangents
+ *    at the node) overlap until ~hw / tan(θ/2); each road end is clipped past its
+ *    overlap with its closest angular neighbor. This is what makes tangent-aware
+ *    junctions safe — the earlier failure was angle-blind clips, not the tangents.
+ *  - corner reach scales with the clips (fixed reach rejected legitimate corners
+ *    once clips grew, cutting junctions below their node).
  *
  * Internal plane: (x, y) where y maps to world Z in Three.js.
  */
@@ -102,9 +107,6 @@ function sub(a, b) {
 function mul(a, s) {
   return vec(a.x * s, a.y * s);
 }
-function dot(a, b) {
-  return a.x * b.x + a.y * b.y;
-}
 function cross(a, b) {
   return a.x * b.y - a.y * b.x;
 }
@@ -123,9 +125,6 @@ function dist(a, b) {
 }
 function lerp(a, b, t) {
   return vec(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
-}
-function clamp(v, lo, hi) {
-  return Math.max(lo, Math.min(hi, v));
 }
 
 function lineIntersection(p, d, q, e) {
@@ -162,6 +161,45 @@ function sampleQuadraticOffset(P0, P1, P2, offset, samples) {
     out.push(add(p, mul(side, offset)));
   }
   return out;
+}
+
+/** Sub-curve of a quadratic Bézier on [u, v] via the blossom — again a quadratic. */
+function quadraticSub(P0, P1, P2, u, v) {
+  const blossom = (s, t) =>
+    add(add(mul(P0, (1 - s) * (1 - t)), mul(P1, s * (1 - t) + t * (1 - s))), mul(P2, s * t));
+  return { Q0: blossom(u, u), Q1: blossom(u, v), Q2: blossom(v, v) };
+}
+
+/** Arc-length table for a quadratic: { ts, cum, total }. */
+function quadraticArcTable(P0, P1, P2, samples = 48) {
+  const ts = [0];
+  const cum = [0];
+  let prev = P0;
+  let total = 0;
+  for (let i = 1; i <= samples; i++) {
+    const t = i / samples;
+    const p = quadraticPoint(P0, P1, P2, t);
+    total += dist(prev, p);
+    ts.push(t);
+    cum.push(total);
+    prev = p;
+  }
+  return { ts, cum, total };
+}
+
+/** Invert arc length → t on the table (linear interp between samples). */
+function tAtArcLength(table, s) {
+  const { ts, cum, total } = table;
+  if (s <= 0) return 0;
+  if (s >= total) return 1;
+  for (let i = 1; i < cum.length; i++) {
+    if (cum[i] >= s) {
+      const span = cum[i] - cum[i - 1];
+      const f = span > 1e-8 ? (s - cum[i - 1]) / span : 0;
+      return ts[i - 1] + (ts[i] - ts[i - 1]) * f;
+    }
+  }
+  return 1;
 }
 
 function buildNetworkBend(start, control, end, width, curveSegments, lateralCols, profile) {
@@ -205,18 +243,22 @@ function buildNetworkBend(start, control, end, width, curveSegments, lateralCols
   };
 }
 
-function junctionBoundary(node, roads, clipFor, hw, junctionRadius, junctionSegments) {
-  const entries = roads
-    .map((road) => {
-      const clip = clipFor(road);
-      const mouth = add(node.p, mul(road.dir, clip));
-      const side = perpLeft(road.dir);
+/**
+ * Junction fill polygon from precomputed road ends.
+ * roadEnds: { mouth, away (unit tangent pointing OUT of the junction along the
+ * road), sortDir (unit, node → mouth, for angular ordering), clip }.
+ * Straight edges reproduce the original exactly (away == sortDir == road.dir).
+ */
+function junctionBoundary(node, roadEnds, hw, junctionRadius, junctionSegments) {
+  const entries = roadEnds
+    .map((re) => {
+      const side = perpLeft(re.away);
       return {
-        angle: Math.atan2(road.dir.y, road.dir.x),
-        dir: road.dir,
-        clip,
-        left: add(mouth, mul(side, hw)),
-        right: add(mouth, mul(side, -hw)),
+        angle: Math.atan2(re.sortDir.y, re.sortDir.x),
+        dir: re.away,
+        clip: re.clip,
+        left: add(re.mouth, mul(side, hw)),
+        right: add(re.mouth, mul(side, -hw)),
       };
     })
     .sort((a, b) => a.angle - b.angle);
@@ -259,10 +301,13 @@ function junctionBoundary(node, roads, clipFor, hw, junctionRadius, junctionSegm
 
 /**
  * @param nodes { id, x, z, forceJunction? }[]
- * @param edges { a, b, style? }[] — optional `style` overrides markings on **straight network spans** only (not smooth bends / junction cores).
- * @param params { width, lanesPerDir, junctionRadius, curveSegments, junctionSegments, twoRoadNodes, endCapStyle,
- *   centerLine?, laneLines?, doubleCenterLine?, centerLineGap?, centerLineWidth?, centerLeftEnabled?, centerRightEnabled?,
- *   centerLineDashed?, centerLeftDashed?, centerRightDashed?, centerLineDashScale?, laneDashScale? }
+ * @param edges { a, b, bend?, style? }[] — `bend` = signed lateral bow (m) at the chord
+ *   midpoint (0/absent = straight). `style` overrides markings on network spans only.
+ * @param params { width, lanesPerDir, junctionRadius, curveSegments, junctionSegments,
+ *   twoRoadNodes, endCapStyle, lateralCols, spanLongStep, profilePreset, profileScale,
+ *   centerLine?, laneLines?, doubleCenterLine?, centerLineGap?, centerLineWidth?,
+ *   centerLeftEnabled?, centerRightEnabled?, centerLineDashed?, centerLeftDashed?,
+ *   centerRightDashed?, centerLineDashScale?, laneDashScale? }
  */
 export function buildLabNetworkGeometry(nodes, edges, params) {
   const width = params.width;
@@ -293,19 +338,7 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
   const centerLineDashScale = params.centerLineDashScale ?? 0.08;
   const laneDashScale = params.laneDashScale ?? 0.08;
 
-  /** Physical lateral offsets along `side` from road spine (matches Full Road normalized gap/width). */
-  function centerStripeOffsets() {
-    if (!doubleCenterLine) return [{ off: 0, role: "center" }];
-    const halfGap = centerLineGap * 0.5;
-    const halfW = centerLineWidth * 0.5;
-    const d = (halfGap + halfW) * width;
-    const out = [];
-    if (centerLeftEnabled) out.push({ off: -d, role: "centerLeft" });
-    if (centerRightEnabled) out.push({ off: d, role: "centerRight" });
-    return out;
-  }
-
-  /** Per-edge effective marking flags for straight `networkSpan` pieces (merged with global `params`). */
+  /** Per-edge effective marking flags for `networkSpan` pieces (merged with globals). */
   function edgeSpanMarkingParams(edge) {
     const st = edge.style || {};
     const boolOr = (key, fallback) => (st[key] !== undefined ? !!st[key] : fallback);
@@ -353,19 +386,52 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
   const laneW = width / count;
   const minEdge = width * 0.75;
 
+  // ── Per-edge curve data ────────────────────────────────────────────────────
+  // bend ≠ 0 → quadratic Bézier a → b, control = chord midpoint + 2·bend·perp
+  // (the curve passes exactly `bend` meters beside the chord midpoint).
+  const edgeInfo = new Map();
   for (const edge of edges) {
     const a = nodeById.get(edge.a);
     const b = nodeById.get(edge.b);
-    if (!a || !b || dist(a.p, b.p) < minEdge) continue;
-    adjacency.get(a.id).push({ edge, other: b, dir: norm(sub(b.p, a.p)), length: dist(a.p, b.p) });
-    adjacency.get(b.id).push({ edge, other: a, dir: norm(sub(a.p, b.p)), length: dist(a.p, b.p) });
+    if (!a || !b) continue;
+    const chord = dist(a.p, b.p);
+    if (chord < 1e-3) continue;
+    const bend = Number(edge.bend) || 0;
+    const curved = Math.abs(bend) > 0.05;
+    if (!curved) {
+      edgeInfo.set(edge, { curved: false, length: chord, dir: norm(sub(b.p, a.p)) });
+      continue;
+    }
+    const chordDir = norm(sub(b.p, a.p));
+    const ctrl = add(lerp(a.p, b.p, 0.5), mul(perpLeft(chordDir), 2 * bend));
+    const table = quadraticArcTable(a.p, ctrl, b.p);
+    edgeInfo.set(edge, {
+      curved: true,
+      P0: a.p,
+      P1: ctrl,
+      P2: b.p,
+      table,
+      length: table.total,
+    });
+  }
+
+  for (const edge of edges) {
+    const info = edgeInfo.get(edge);
+    if (!info || info.length < minEdge) continue;
+    const a = nodeById.get(edge.a);
+    const b = nodeById.get(edge.b);
+    // Direction pointing away from each node into the edge (curve end tangent).
+    const dirFromA = info.curved ? norm(sub(info.P1, info.P0)) : info.dir;
+    const dirFromB = info.curved ? norm(sub(info.P1, info.P2)) : mul(info.dir, -1);
+    adjacency.get(a.id).push({ edge, info, other: b, atA: true, dir: dirFromA, length: info.length });
+    adjacency.get(b.id).push({ edge, info, other: a, atA: false, dir: dirFromB, length: info.length });
   }
 
   // ── Angle-aware clip distances ───────────────────────────────────────────
-  // Two roads meeting at angle θ overlap each other until hw / tan(θ/2) from
-  // the node. Each road end is clipped at least past its overlap with its
-  // closest angular neighbor (plus a margin), or the junction polygon folds
-  // through itself at sharp Y junctions. Base behavior matches the original.
+  // Two roads meeting at angle θ (between their node tangents) overlap until
+  // ~hw / tan(θ/2) from the node; clip each road end past that overlap or the
+  // junction polygon folds at sharp angles. Right-angle junctions keep the
+  // original clips (the margin lives inside the tan).
   const edgeClips = new Map(); // edge → { [nodeId]: clip }
   for (const [nodeId, roads] of adjacency) {
     const degree = roads.length;
@@ -379,7 +445,6 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
       let clip = 0;
       if (degree > 1) {
         clip = Math.min(radiusCap, Math.max(hw * 1.15, road.length * lengthScale));
-        // Smallest angular gap to a neighboring road at this node.
         let minGap = Math.PI * 2;
         for (let j = 0; j < sorted.length; j++) {
           if (j === i) continue;
@@ -389,8 +454,6 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
         }
         const halfGap = Math.max(0.06, minGap * 0.5);
         if (halfGap < Math.PI * 0.49) {
-          // Margin inside the tan: ~0 extra at right angles (normal junctions
-          // keep their original shape), grows naturally as the angle sharpens.
           const overlapNeed = (hw + width * 0.12) / Math.tan(halfGap);
           clip = Math.max(clip, Math.min(overlapNeed, junctionRadius * 3));
         }
@@ -406,20 +469,84 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
   }
   const clipAt = (edge, nodeId) => edgeClips.get(edge)?.[nodeId] ?? 0;
 
+  /** Mouth point + outward tangent where `road` (adjacency entry) leaves node `nodeId`. */
+  function mouthInfo(nodeId, road) {
+    const clip = clipAt(road.edge, nodeId);
+    const info = road.info;
+    if (!info.curved) {
+      const node = nodeById.get(nodeId);
+      return { mouth: add(node.p, mul(road.dir, clip)), away: road.dir, clip };
+    }
+    const s = road.atA ? clip : info.length - clip;
+    const t = tAtArcLength(info.table, s);
+    const tan = norm(quadraticDeriv(info.P0, info.P1, info.P2, t));
+    return {
+      mouth: quadraticPoint(info.P0, info.P1, info.P2, t),
+      away: road.atA ? tan : mul(tan, -1),
+      clip,
+    };
+  }
+
+  /** Span lane/center markings shared by straight and curved spans. pathAt(off) → polyline. */
+  function emitSpanMarkings(edge, pathAt) {
+    const em = edgeSpanMarkingParams(edge);
+    for (let i = 1; i < count; i++) {
+      if (i === lanesPerDir) {
+        if (!em.centerLine) continue;
+        for (const { off: cOff, role } of centerStripeOffsetsFor(em)) {
+          let dashed;
+          if (role === "center") dashed = em.centerLineDashed;
+          else if (role === "centerLeft") dashed = em.centerLeftDashed;
+          else dashed = em.centerRightDashed;
+          markings.push({
+            path: pathAt(cOff),
+            type: role,
+            dashed,
+            dashScale: centerLineDashScale,
+          });
+        }
+      } else {
+        if (!em.laneLines) continue;
+        markings.push({
+          path: pathAt(-hw + i * laneW),
+          type: "divider",
+          dashed: true,
+          dashScale: laneDashScale,
+        });
+      }
+    }
+  }
+
+  // ── Spans ──────────────────────────────────────────────────────────────────
   for (const edge of edges) {
+    const info = edgeInfo.get(edge);
+    if (!info || info.length < minEdge) continue;
     const a = nodeById.get(edge.a);
     const b = nodeById.get(edge.b);
-    if (!a || !b) continue;
-    const length = dist(a.p, b.p);
-    if (length < minEdge) continue;
-    const dir = norm(sub(b.p, a.p));
-    const side = perpLeft(dir);
+    const length = info.length;
     const ca = clipAt(edge, a.id);
     const cb = clipAt(edge, b.id);
+    const spanLen = length - ca - cb;
+    if (spanLen < 1) continue;
+
+    if (info.curved) {
+      // Clip by arc length, re-extract the clipped range as a true quadratic.
+      const u = tAtArcLength(info.table, ca);
+      const v = tAtArcLength(info.table, length - cb);
+      if (v - u < 1e-3) continue;
+      const { Q0, Q1, Q2 } = quadraticSub(info.P0, info.P1, info.P2, u, v);
+      const segs = Math.max(8, Math.min(240, Math.ceil(spanLen / spanLongStep)));
+      const piece = buildNetworkBend(Q0, Q1, Q2, width, segs, lateralCols, scaledProfile);
+      piece.networkSpan = true;
+      pieces.push(piece);
+      emitSpanMarkings(edge, (off) => sampleQuadraticOffset(Q0, Q1, Q2, off, segs));
+      continue;
+    }
+
+    const dir = info.dir;
+    const side = perpLeft(dir);
     const start = add(a.p, mul(dir, ca));
     const end = add(b.p, mul(dir, -cb));
-    const spanLen = dist(start, end);
-    if (spanLen < 1) continue;
     const longRows = Math.max(1, Math.ceil(spanLen / spanLongStep));
     const tCols = profileColumns(scaledProfile, lateralCols);
     const spanProfileYs = tCols.map(tv => sampleProfileY(scaledProfile, tv));
@@ -445,44 +572,16 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
       gridProfile: spanProfileYs,
       networkSpan: true,
     });
-
-    const em = edgeSpanMarkingParams(edge);
-    for (let i = 1; i < count; i++) {
-      if (i === lanesPerDir) {
-        if (!em.centerLine) continue;
-        for (const { off: cOff, role } of centerStripeOffsetsFor(em)) {
-          let dashed;
-          if (role === "center") dashed = em.centerLineDashed;
-          else if (role === "centerLeft") dashed = em.centerLeftDashed;
-          else dashed = em.centerRightDashed;
-          const mPath = [];
-          for (let mi = 0; mi <= longRows; mi++) {
-            mPath.push(add(lerp(start, end, mi / longRows), mul(side, cOff)));
-          }
-          markings.push({
-            path: mPath,
-            type: role,
-            dashed,
-            dashScale: centerLineDashScale,
-          });
-        }
-      } else {
-        if (!em.laneLines) continue;
-        const off = -hw + i * laneW;
-        const mPath = [];
-        for (let mi = 0; mi <= longRows; mi++) {
-          mPath.push(add(lerp(start, end, mi / longRows), mul(side, off)));
-        }
-        markings.push({
-          path: mPath,
-          type: "divider",
-          dashed: true,
-          dashScale: laneDashScale,
-        });
+    emitSpanMarkings(edge, (off) => {
+      const mPath = [];
+      for (let mi = 0; mi <= longRows; mi++) {
+        mPath.push(add(lerp(start, end, mi / longRows), mul(side, off)));
       }
-    }
+      return mPath;
+    });
   }
 
+  // ── Nodes: caps, smooth bends, junction cores ──────────────────────────────
   for (const node of nodeById.values()) {
     const roads = adjacency.get(node.id);
     if (!roads || roads.length === 0) continue;
@@ -521,29 +620,60 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
     }
 
     if (roads.length === 2 && twoRoadNodes === "smooth" && !node.forceJunction) {
-      const first = roads[0];
-      const second = roads[1];
-      const clipA = clipAt(first.edge, node.id);
-      const clipB = clipAt(second.edge, node.id);
-      const mouthA = add(node.p, mul(first.dir, clipA));
-      const mouthB = add(node.p, mul(second.dir, clipB));
-      pieces.push(buildNetworkBend(mouthA, node.p, mouthB, width, curveSegments, lateralCols, scaledProfile));
+      const mA = mouthInfo(node.id, roads[0]);
+      const mB = mouthInfo(node.id, roads[1]);
+      // Bend control = intersection of the mouth tangents pointing INTO the node
+      // (continues each span's direction → tangent-continuous with curved spans).
+      // Straight edges intersect exactly at node.p — identical to the original.
+      // Near straight-through nodes the rays are near-antiparallel and the
+      // intersection is numerically wild; node.p is always a safe control.
+      let control = node.p;
+      const dA = mul(mA.away, -1);
+      const dB = mul(mB.away, -1);
+      const mouthDist = dist(mA.mouth, mB.mouth);
+      if (dA.x * dB.x + dA.y * dB.y > -0.85) {
+        const hit = lineIntersection(mA.mouth, dA, mB.mouth, dB);
+        const reachCap = Math.max(mouthDist * 1.4, hw * 2.2);
+        if (
+          hit && hit.t > 0 && hit.u > 0 &&
+          dist(hit.p, mA.mouth) < reachCap && dist(hit.p, mB.mouth) < reachCap
+        ) {
+          control = hit.p;
+        }
+      }
+      pieces.push(buildNetworkBend(mA.mouth, control, mB.mouth, width, curveSegments, lateralCols, scaledProfile));
 
       const bendSamples = Math.max(4, curveSegments | 0);
       for (let i = 1; i < count; i++) {
         if (i === lanesPerDir) {
           if (!centerLine) continue;
-          for (const { off: cOff, role } of centerStripeOffsets()) {
+          if (!doubleCenterLine) {
             markings.push({
-              path: sampleQuadraticOffset(mouthA, node.p, mouthB, cOff, bendSamples),
-              type: role,
+              path: sampleQuadraticOffset(mA.mouth, control, mB.mouth, 0, bendSamples),
+              type: "center",
             });
+          } else {
+            const halfGap = centerLineGap * 0.5;
+            const halfW = centerLineWidth * 0.5;
+            const d = (halfGap + halfW) * width;
+            if (centerLeftEnabled) {
+              markings.push({
+                path: sampleQuadraticOffset(mA.mouth, control, mB.mouth, -d, bendSamples),
+                type: "centerLeft",
+              });
+            }
+            if (centerRightEnabled) {
+              markings.push({
+                path: sampleQuadraticOffset(mA.mouth, control, mB.mouth, d, bendSamples),
+                type: "centerRight",
+              });
+            }
           }
         } else {
           if (!laneLines) continue;
           const off = -hw + i * laneW;
           markings.push({
-            path: sampleQuadraticOffset(mouthA, node.p, mouthB, off, bendSamples),
+            path: sampleQuadraticOffset(mA.mouth, control, mB.mouth, off, bendSamples),
             type: "divider",
           });
         }
@@ -551,7 +681,17 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
       continue;
     }
 
-    const boundary = junctionBoundary(node, roads, (road) => clipAt(road.edge, node.id), hw, junctionRadius, junctionSegments);
+    const roadEnds = roads.map((road) => {
+      const m = mouthInfo(node.id, road);
+      const toMouth = sub(m.mouth, node.p);
+      return {
+        mouth: m.mouth,
+        away: m.away,
+        clip: m.clip,
+        sortDir: len(toMouth) > 1e-6 ? norm(toMouth) : road.dir,
+      };
+    });
+    const boundary = junctionBoundary(node, roadEnds, hw, junctionRadius, junctionSegments);
     pieces.push({
       polygon: boundary.polygon,
       left: { path: [] },
@@ -559,9 +699,7 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
       center: [],
       isJunctionCore: true,
       networkNode: node,
-      mouths: roads.map((road) => ({
-        c: add(node.p, mul(road.dir, clipAt(road.edge, node.id))),
-      })),
+      mouths: roadEnds.map((re) => ({ c: re.mouth })),
       outlineSegments: boundary.outlineSegments,
     });
   }
