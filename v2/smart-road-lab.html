@@ -47,6 +47,11 @@
       // Successor copy of core/road/roadNetworkLabGeometry.js — geometry evolves
       // there (angle-aware junction clips, …); the editor's original stays untouched.
       import { buildLabNetworkGeometry, ROAD_PROFILES } from "./smart-road-lab-geometry.js";
+      // Drive test: the stunt-car vehicle, read-only import. It only needs a scene
+      // plus a duck-typed ground ({ baked, raycastFirst }) — we feed it the lab's
+      // ANALYTIC drive surface, so there's no BVH and live road edits stay drivable.
+      import { Vehicle, DECK } from "./play/modularRoadVehicle.js";
+      DECK.enabled = false; // deck contact needs closestPointWithNormal — not needed on a heightfield
 
       // ── Params ───────────────────────────────────────────────────────────────
       const P = {
@@ -54,6 +59,7 @@
         width: 14,
         lanesPerDir: 1,
         junctionRadius: 14,
+        roundaboutRadius: 16,
         curveSegments: 34,
         junctionSegments: 14,
         twoRoadNodes: "smooth",
@@ -123,7 +129,15 @@
 
       // ── Terrain (deterministic value-noise fBm) ──────────────────────────────
       const TERRAIN_SIZE = 640;
-      const TERRAIN_SEGS = 220;
+      const TERRAIN_SEGS = 300;
+      const TERRAIN_CELL = TERRAIN_SIZE / TERRAIN_SEGS;
+      /** Full-flatten radius around road spines. Extends ONE TERRAIN CELL past the
+       *  deck so no terrain triangle can straddle the deck edge — a triangle with
+       *  one vertex in the trench and one up the raw hill cuts the corner and
+       *  leans over the road (the "clipping at high hills" bug). */
+      function footprintInner() {
+        return P.width * 0.5 + 1.0 + TERRAIN_CELL;
+      }
 
       function hash2(ix, iz) {
         let h = (ix * 374761393 + iz * 668265263) | 0;
@@ -228,23 +242,20 @@
        * Each vertex follows its nearest footprint's interpolated road height
        * minus `flattenDepth`, blending back to natural ground over `shoulder`.
        */
-      let flatDist = null, flatH = null; // per-terrain-vertex scratch
+      let flatDist = null; // per-terrain-vertex scratch (depth into flatten zone)
       function flattenTerrain(footprints) {
         const pos = terrainMesh.geometry.attributes.position;
         for (let k = 0; k < pos.count; k++) pos.setY(k, terrainBase[k]);
         if (P.flattenOn && footprints.length) {
           if (!flatDist || flatDist.length !== pos.count) {
             flatDist = new Float32Array(pos.count);
-            flatH = new Float32Array(pos.count);
           }
           flatDist.fill(Infinity);
           const cell = TERRAIN_SIZE / TERRAIN_SEGS;
           const half = TERRAIN_SIZE / 2;
           const cols = TERRAIN_SEGS + 1;
           const outer = Math.max(0.01, P.shoulder);
-          let inner = footprints[0].inner;
           for (const fp of footprints) {
-            inner = fp.inner; // all footprints share the same inner in practice
             let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
             for (const pt of fp.pts) {
               if (pt.x < minX) minX = pt.x;
@@ -262,7 +273,6 @@
                 const k = r * cols + c;
                 const x = pos.getX(k), z = pos.getZ(k);
                 let dSq = Infinity;
-                let hAt = fp.hs[0];
                 if (fp.pts.length === 1) {
                   const ex = x - fp.pts[0].x, ez = z - fp.pts[0].y;
                   dSq = ex * ex + ez * ez;
@@ -277,26 +287,25 @@
                     }
                     const ex = x - (a.x + dx * t), ez = z - (a.y + dz * t);
                     const sq = ex * ex + ez * ez;
-                    if (sq < dSq) {
-                      dSq = sq;
-                      hAt = fp.hs[s] + (fp.hs[s + 1] - fp.hs[s]) * t;
-                    }
+                    if (sq < dSq) dSq = sq;
                   }
                 }
                 const d = Math.sqrt(dSq);
                 if (d >= fp.inner + outer) continue;
-                if (d < flatDist[k]) {
-                  flatDist[k] = d;
-                  flatH[k] = hAt;
-                }
+                // Track the footprint whose full-flatten zone we're deepest in.
+                if (d - fp.inner < flatDist[k]) flatDist[k] = d - fp.inner;
               }
             }
           }
           for (let k = 0; k < pos.count; k++) {
-            const d = flatDist[k];
-            if (d === Infinity) continue;
-            const target = flatH[k] - P.flattenDepth;
-            const s = d <= inner ? 0 : smooth01((d - inner) / outer);
+            const dRel = flatDist[k]; // distance MINUS that footprint's inner
+            if (dRel === Infinity) continue;
+            // Height comes from the road surface AT THIS VERTEX, not from the
+            // nearest footprint spine — so deck-minus-terrain is a constant
+            // (clearance + flattenDepth) everywhere, including tilted junctions
+            // and connector corners where a single spine height would mismatch.
+            const target = roadSurfaceH(pos.getX(k), pos.getZ(k)) - P.flattenDepth;
+            const s = dRel <= 0 ? 0 : smooth01(dRel / outer);
             pos.setY(k, target + (terrainBase[k] - target) * s);
           }
         }
@@ -401,8 +410,18 @@
        * Concentric rings toward the centroid (not a single fan) so the interior
        * samples the height field too — a flat fan dips under terrain bulges.
        */
-      function polygonToGeometry(poly) {
-        if (!poly || poly.length < 3) return null;
+      function polygonToGeometry(rawPoly) {
+        if (!rawPoly || rawPoly.length < 3) return null;
+        // Resample the boundary (~1.5 m): a junction mouth is a single 14 m chord
+        // between two corners, but the adjoining span row is 5+ verts hugging the
+        // draped surface — the chord cuts across the curve and shows as a hairline
+        // seam. Fine subdivision makes both follow the same surface.
+        const poly = resamplePath2d([...rawPoly, rawPoly[0]], 1.5);
+        if (poly.length > 1) {
+          const f = poly[0], l = poly[poly.length - 1];
+          if (Math.hypot(l.x - f.x, l.y - f.y) < 1e-6) poly.pop();
+        }
+        if (poly.length < 3) return null;
         let cx = 0, cy = 0;
         for (const pt of poly) { cx += pt.x; cy += pt.y; }
         cx /= poly.length; cy /= poly.length;
@@ -534,8 +553,10 @@
       const matAsphalt = new THREE.MeshStandardMaterial({
         color: 0x2c3138, roughness: 0.92, metalness: 0, side: THREE.DoubleSide,
       });
+      // Same color as spans — v2 Smart Road tints junction cores ~6% darker on
+      // purpose, but at road scale it reads as a defect rather than a design.
       const matJunction = new THREE.MeshStandardMaterial({
-        color: 0x282d33, roughness: 0.92, metalness: 0, side: THREE.DoubleSide,
+        color: 0x2c3138, roughness: 0.92, metalness: 0, side: THREE.DoubleSide,
       });
       const markingMatProps = {
         roughness: 0.85, metalness: 0, side: THREE.DoubleSide,
@@ -547,6 +568,7 @@
       const matHandleSel = new THREE.MeshBasicMaterial({ color: 0xffd24a });
       const matHandleJunc = new THREE.MeshBasicMaterial({ color: 0xff7a5c });
       const matHandleEdge = new THREE.MeshBasicMaterial({ color: 0xb98fff });
+      const matHandleRound = new THREE.MeshBasicMaterial({ color: 0x4ad0a0 });
 
       // ── Road rebuild ─────────────────────────────────────────────────────────
       const roadGroup = new THREE.Group();
@@ -579,12 +601,12 @@
       function updateHandleColors() {
         for (const mesh of handleMeshes) {
           const n = nodes.find((nn) => nn.id === mesh.userData.nodeId);
-          mesh.material = n && n.id === selectedNodeId ? matHandleSel : (n?.forceJunction ? matHandleJunc : matHandle);
+          mesh.material = n && n.id === selectedNodeId ? matHandleSel : (n?.roundabout ? matHandleRound : n?.forceJunction ? matHandleJunc : matHandle);
         }
       }
 
       function markingMaterial(type) {
-        return type === "divider" ? matWhite : matYellow;
+        return type === "divider" || type === "edge" ? matWhite : matYellow;
       }
       function markingDashed(m) {
         if (m.dashed !== undefined) return m.dashed;
@@ -601,12 +623,14 @@
         edgeHandleMeshes = [];
 
         const result = buildLabNetworkGeometry(
-          nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction })),
+          nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction, roundabout: !!n.roundabout })),
           edges.map((e) => ({ a: e.a, b: e.b, bend: e.bend || 0 })),
           {
             width: P.width,
             lanesPerDir: P.lanesPerDir,
             junctionRadius: P.junctionRadius,
+            roundaboutRadius: P.roundaboutRadius,
+            edgeLineInset: Math.min((0.055 + P.lineWidth * 0.5) * P.width, P.width * 0.42),
             curveSegments: P.curveSegments,
             junctionSegments: P.junctionSegments,
             twoRoadNodes: P.twoRoadNodes,
@@ -631,7 +655,7 @@
         const edgeHalf = Math.max(0.004, P.lineWidth * P.width * 0.5);
         const dashLen = Math.max(0.6, P.dashScale * P.width * 2.5);
         const footprints = [];
-        const footInner = hw + 1.0; // full grade slightly past the deck edge
+        const footInner = footprintInner(); // full grade one terrain cell past the deck edge
 
         // Junction pads first: roadSurfaceH blends spans into these level areas,
         // so they must exist before any piece is meshed or footprinted.
@@ -639,30 +663,53 @@
         for (const piece of result.pieces) {
           if (!piece.isJunctionCore || !piece.networkNode) continue;
           const np = piece.networkNode.p;
-          const isCap = !piece.mouths?.length;
+          const isCap = !piece.mouths?.length && !piece.isRoundabout;
           pads.push({
             x: np.x,
             z: np.y,
             h: roadFieldH(np.x, np.y),
-            reach: isCap ? hw * 2.5 : P.junctionRadius * 1.5 + hw,
+            reach: piece.padReach ?? (isCap ? hw * 2.5 : P.junctionRadius * 1.5 + hw),
           });
         }
 
-        const footprint = (pts2d) => {
+        const footprint = (pts2d, opts = {}) => {
           const pts = resamplePath2d(pts2d, 4);
-          footprints.push({ pts, hs: pts.map((pt) => roadSurfaceH(pt.x, pt.y)), inner: footInner });
+          let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+          for (const pt of pts) {
+            if (pt.x < minX) minX = pt.x;
+            if (pt.x > maxX) maxX = pt.x;
+            if (pt.y < minZ) minZ = pt.y;
+            if (pt.y > maxZ) maxZ = pt.y;
+          }
+          footprints.push({
+            pts, hs: pts.map((pt) => roadSurfaceH(pt.x, pt.y)), inner: opts.inner ?? footInner,
+            noDeck: !!opts.noDeck,
+            minX, maxX, minZ, maxZ,
+          });
         };
 
         for (const piece of result.pieces) {
           // Terrain-grade footprints: span/bend spines, junction spokes, cap discs.
           if (piece.center?.length >= 2) {
             footprint(piece.center);
+            if (piece.islandRadius) {
+              // Roundabout island: flatten to grass level but NOT drivable deck.
+              const np = piece.networkNode.p;
+              footprints.push({
+                pts: [np], hs: [roadSurfaceH(np.x, np.y)], inner: piece.islandRadius,
+                noDeck: true,
+                minX: np.x, maxX: np.x, minZ: np.y, maxZ: np.y,
+              });
+            }
           } else if (piece.isJunctionCore && piece.networkNode) {
             const np = piece.networkNode.p;
             if (piece.mouths?.length) {
               for (const m of piece.mouths) footprint([np, m.c]);
             } else {
-              footprints.push({ pts: [np], hs: [roadSurfaceH(np.x, np.y)], inner: footInner });
+              footprints.push({
+                pts: [np], hs: [roadSurfaceH(np.x, np.y)], inner: footInner,
+                minX: np.x, maxX: np.x, minZ: np.y, maxZ: np.y,
+              });
             }
           }
           const surfGeo = piece.grid
@@ -675,8 +722,9 @@
           }
 
           // Edge whites: offset inward from the spine for spans/bends; inset outline for junction cores.
-          if (P.lineWidth > 1e-6) {
-            if (piece.center?.length >= 2) {
+          // Roundabout ring paints its own circle lines; connector flares get none (ring arcs cover them).
+          if (P.lineWidth > 1e-6 && !piece.suppressEdgeStripes && !piece.networkConnector) {
+            if (piece.center?.length >= 2 && !piece.isJunctionCore) {
               for (const sign of [1, -1]) {
                 const path = offsetPath2d(piece.center, sign * (hw - insetDist));
                 const stripe = stripeMesh(path, edgeHalf, matWhite, 0.03);
@@ -707,7 +755,7 @@
         for (const m of result.markings || []) {
           if (!m.path || m.path.length < 2) continue;
           const mat = markingMaterial(m.type);
-          const half = (m.type === "divider" ? 0.015 : P.centerLineWidth) * P.width * 0.5;
+          const half = (m.type === "divider" || m.type === "edge" ? 0.018 : P.centerLineWidth) * P.width * 0.5;
           const dl = Math.max(0.6, (m.dashScale ?? P.dashScale) * P.width * 2.5);
           const paths = markingDashed(m) ? dashSplit(m.path, dl, dl * 1.6) : [m.path];
           for (const path of paths) {
@@ -719,7 +767,7 @@
         // Node handles + edge curve handles + edge debug lines
         if (P.showHandles) {
           for (const n of nodes) {
-            const mat = n.id === selectedNodeId ? matHandleSel : (n.forceJunction ? matHandleJunc : matHandle);
+            const mat = n.id === selectedNodeId ? matHandleSel : (n.roundabout ? matHandleRound : n.forceJunction ? matHandleJunc : matHandle);
             const mesh = new THREE.Mesh(handleGeo, mat);
             mesh.position.set(n.x, drapeY(n.x, n.z) + 1.2, n.z);
             mesh.userData.nodeId = n.id;
@@ -757,6 +805,7 @@
         }
 
         flattenTerrain(footprints);
+        driveFootprints = footprints;
 
         matAsphalt.wireframe = P.wireframe;
         matJunction.wireframe = P.wireframe;
@@ -879,16 +928,212 @@
 
       addEventListener("keydown", (ev) => {
         if (ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") return;
+        if (driveMode) return; // editor keys off while driving (X would delete nodes)
         if ((ev.key === "Delete" || ev.key === "x") && selectedNodeId !== null) {
           nodes = nodes.filter((n) => n.id !== selectedNodeId);
           edges = edges.filter((e) => e.a !== selectedNodeId && e.b !== selectedNodeId);
           selectedNodeId = null;
           queueRebuild();
         } else if (ev.key === "j" && selectedNodeId !== null) {
+          // Cycle node type: normal → forced junction → roundabout → normal.
           const node = nodes.find((n) => n.id === selectedNodeId);
-          if (node) { node.forceJunction = !node.forceJunction; queueRebuild(); }
+          if (node) {
+            if (node.roundabout) { node.roundabout = false; node.forceJunction = false; }
+            else if (node.forceJunction) { node.forceJunction = false; node.roundabout = true; }
+            else { node.forceJunction = true; }
+            queueRebuild();
+          }
         }
       });
+
+      // ── Drive test (stunt-car vehicle on the analytic road surface) ──────────
+      let vehicle = null;
+      let driveMode = false;
+      let driveFootprints = [];
+      const driveCodes = {}; // keyed by e.code — identical mapping to v2/car-test
+
+      const driveHud = document.createElement("div");
+      driveHud.style.cssText =
+        "position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10;" +
+        "font:13px ui-monospace,Menlo,Consolas,monospace;color:#dff1ff;" +
+        "background:rgba(10,16,24,0.78);padding:8px 14px;border-radius:8px;display:none;";
+      document.body.appendChild(driveHud);
+
+      function nearestDriveFootprint(x, z) {
+        let bestDSq = Infinity;
+        let bestH = 0;
+        let bestNoDeck = false;
+        for (const fp of driveFootprints) {
+          const reach = fp.inner + P.shoulder + 2;
+          if (x < fp.minX - reach || x > fp.maxX + reach || z < fp.minZ - reach || z > fp.maxZ + reach) continue;
+          if (fp.pts.length === 1) {
+            const ex = x - fp.pts[0].x, ez = z - fp.pts[0].y;
+            const dSq = ex * ex + ez * ez;
+            if (dSq < bestDSq) { bestDSq = dSq; bestH = fp.hs[0]; bestNoDeck = !!fp.noDeck; }
+            continue;
+          }
+          for (let s = 0; s < fp.pts.length - 1; s++) {
+            const a = fp.pts[s], b = fp.pts[s + 1];
+            const dx = b.x - a.x, dz = b.y - a.y;
+            const lenSq = dx * dx + dz * dz;
+            let t = 0;
+            if (lenSq > 1e-8) t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.y) * dz) / lenSq));
+            const ex = x - (a.x + dx * t), ez = z - (a.y + dz * t);
+            const dSq = ex * ex + ez * ez;
+            if (dSq < bestDSq) { bestDSq = dSq; bestH = fp.hs[s] + (fp.hs[s + 1] - fp.hs[s]) * t; bestNoDeck = !!fp.noDeck; }
+          }
+        }
+        return { d: Math.sqrt(bestDSq), h: bestH, noDeck: bestNoDeck };
+      }
+
+      /** Drivable height: road deck on the network, graded shoulder, then terrain.
+       *  Mirrors the render-side drape + flatten math, so wheels ride what you see. */
+      function driveY(x, z) {
+        const base = terrainH(x, z);
+        if (!driveFootprints.length) return base;
+        const { d, noDeck } = nearestDriveFootprint(x, z);
+        if (!Number.isFinite(d)) return base;
+        const hw = P.width * 0.5;
+        const inner = footprintInner();
+        // Heights from the road surface AT THIS POINT — identical to the rendered
+        // deck (drapeY) and to flattenTerrain, so wheels ride exactly what's drawn.
+        const surf = roadSurfaceH(x, z);
+        let ground = base;
+        if (P.flattenOn && d < inner + P.shoulder) {
+          const target = surf - P.flattenDepth;
+          const s = d <= inner ? 0 : smooth01((d - inner) / P.shoulder);
+          ground = target + (base - target) * s;
+        }
+        if (noDeck) return ground; // roundabout island: graded grass, not drivable
+        const deck = surf + P.clearance;
+        if (d <= hw) {
+          if (deck > ground) return deck;
+        } else if (d < hw + 1.6 && deck > ground) {
+          // Beveled curb for the wheels: ramp from deck height down to the
+          // shoulder instead of a vertical step, so the car can climb back on.
+          const t = smooth01((d - hw) / 1.6);
+          return deck + (ground - deck) * t;
+        }
+        return ground;
+      }
+
+      function driveNormal(x, z, out) {
+        const e = 0.4;
+        const dx = (driveY(x + e, z) - driveY(x - e, z)) / (2 * e);
+        const dz = (driveY(x, z + e) - driveY(x, z - e)) / (2 * e);
+        return out.set(-dx, 1, -dz).normalize();
+      }
+
+      /** Duck-typed "BVH": ray-march the analytic heightfield. */
+      const driveGround = {
+        baked: true,
+        raycastFirst(origin, dir, far) {
+          let prevT = 0;
+          const f0 = origin.y - driveY(origin.x, origin.z);
+          if (f0 <= 0) {
+            return {
+              point: new THREE.Vector3(origin.x, origin.y, origin.z),
+              normal: driveNormal(origin.x, origin.z, new THREE.Vector3()),
+              distance: 0.0001,
+            };
+          }
+          const step = 0.22;
+          for (let t = step; ; t += step) {
+            const tc = Math.min(t, far);
+            const f = (origin.y + dir.y * tc) - driveY(origin.x + dir.x * tc, origin.z + dir.z * tc);
+            if (f <= 0) {
+              let lo = prevT, hi = tc;
+              for (let i = 0; i < 6; i++) {
+                const mid = (lo + hi) * 0.5;
+                const mf = (origin.y + dir.y * mid) - driveY(origin.x + dir.x * mid, origin.z + dir.z * mid);
+                if (mf <= 0) hi = mid; else lo = mid;
+              }
+              const tm = (lo + hi) * 0.5;
+              const point = new THREE.Vector3(origin.x + dir.x * tm, origin.y + dir.y * tm, origin.z + dir.z * tm);
+              return { point, normal: driveNormal(point.x, point.z, new THREE.Vector3()), distance: tm };
+            }
+            if (tc >= far) return null;
+            prevT = tc;
+          }
+        },
+        spherecast() { return null; },
+      };
+
+      function spawnVehicle() {
+        let px = 0, pz = 0, yaw = 0;
+        const edge = edges.find((e) => nodes.some((n) => n.id === e.a) && nodes.some((n) => n.id === e.b));
+        if (edge) {
+          const a = nodes.find((n) => n.id === edge.a);
+          const b = nodes.find((n) => n.id === edge.b);
+          const f = edgeMidFrame(edge);
+          const bend = edge.bend || 0;
+          // Mid-edge, on the road for straight and curved alike (curve passes mid + perp·bend).
+          px = f.mx + f.px * bend;
+          pz = f.mz + f.pz * bend;
+          yaw = Math.atan2(b.x - a.x, b.z - a.z);
+        } else if (nodes.length) {
+          px = nodes[0].x;
+          pz = nodes[0].z;
+        }
+        vehicle.setSpawn(
+          new THREE.Vector3(px, driveY(px, pz) + 1.0, pz),
+          new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
+        );
+        vehicle.respawn();
+      }
+
+      function setDriveMode(on) {
+        driveMode = on;
+        if (on) {
+          if (!vehicle) {
+            vehicle = new Vehicle({ scene });
+            vehicle.groundBvh = driveGround;
+            vehicle.getFloorY = (x, z) => driveY(x, z);
+            vehicle.setColliders([], []);
+          }
+          spawnVehicle();
+          vehicle.setEnabled(true);
+          controls.enabled = false;
+          topControls.enabled = false;
+        } else {
+          if (vehicle) vehicle.setEnabled(false);
+          controls.enabled = !P.topView;
+          topControls.enabled = P.topView;
+        }
+        for (const k in driveCodes) driveCodes[k] = false;
+        driveHud.style.display = on ? "block" : "none";
+      }
+
+      addEventListener("keydown", (ev) => {
+        if (!driveMode) return;
+        driveCodes[ev.code] = true;
+        if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(ev.code)) ev.preventDefault();
+        if (ev.code === "KeyR") vehicle.respawn();
+        if (ev.code === "KeyF") vehicle.flipUpright();
+      });
+      addEventListener("keyup", (ev) => { driveCodes[ev.code] = false; });
+
+      const _camFwd = new THREE.Vector3();
+      const _camTarget = new THREE.Vector3();
+      function stepVehicle(dt) {
+        // Identical mapping to v2/car-test readControls (WASD or arrows).
+        vehicle.update(Math.min(dt, 0.05), {
+          steerTarget: (driveCodes.KeyA || driveCodes.ArrowLeft ? 1 : 0) - (driveCodes.KeyD || driveCodes.ArrowRight ? 1 : 0),
+          throttle: (driveCodes.KeyW || driveCodes.ArrowUp ? 1 : 0) - (driveCodes.KeyS || driveCodes.ArrowDown ? 1 : 0),
+          handbrake: !!driveCodes.Space,
+          yaw: (driveCodes.KeyE ? 1 : 0) - (driveCodes.KeyQ ? 1 : 0),
+        });
+        const p = vehicle.body.pos;
+        _camFwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat);
+        _camFwd.y = 0;
+        if (_camFwd.lengthSq() < 1e-6) _camFwd.set(0, 0, 1);
+        else _camFwd.normalize();
+        _camTarget.set(p.x - _camFwd.x * 11, p.y + 4.5, p.z - _camFwd.z * 11);
+        persp.position.lerp(_camTarget, 1 - Math.exp(-4 * dt));
+        persp.lookAt(p.x, p.y + 1.2, p.z);
+        const kmh = vehicle.body.vel.length() * 3.6;
+        driveHud.textContent = `${kmh.toFixed(0).padStart(3)} km/h · WASD / arrows · Space handbrake · R respawn · F flip`;
+      }
 
       // ── HUD ──────────────────────────────────────────────────────────────────
       const hud = document.getElementById("hud");
@@ -936,6 +1181,7 @@
       section("Road");
       slider("Width", 6, 26, 0.5, "width", queueRebuild, (v) => v.toFixed(1));
       slider("Junction radius", 6, 28, 0.5, "junctionRadius", queueRebuild, (v) => v.toFixed(1));
+      slider("Roundabout radius", 8, 40, 1, "roundaboutRadius", queueRebuild, (v) => v.toFixed(0));
       slider("Curve segs", 8, 80, 2, "curveSegments", queueRebuild);
       slider("Junction segs", 4, 28, 1, "junctionSegments", queueRebuild);
       slider("Span step", 0.5, 8, 0.5, "spanLongStep", queueRebuild, (v) => v.toFixed(1));
@@ -983,6 +1229,15 @@
       ]);
       document.getElementById("handlesBtn").classList.add("on");
 
+      section("Drive");
+      buttonRow([
+        ["Drive mode", (e) => {
+          setDriveMode(!driveMode);
+          e.target.classList.toggle("on", driveMode);
+          e.target.blur(); // focused button would treat Space (handbrake) as a click
+        }],
+      ]);
+
       section("Network");
       buttonRow([
         ["Demo", () => { demoNetwork(); queueRebuild(); }],
@@ -991,7 +1246,7 @@
       buttonRow([
         ["Export", () => {
           const blob = new Blob(
-            [JSON.stringify({ nodes: nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction })), edges: edges.map((e) => ({ a: e.a, b: e.b, bend: e.bend || 0 })) }, null, 2)],
+            [JSON.stringify({ nodes: nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction, roundabout: !!n.roundabout })), edges: edges.map((e) => ({ a: e.a, b: e.b, bend: e.bend || 0 })) }, null, 2)],
             { type: "application/json" },
           );
           const a = document.createElement("a");
@@ -1008,7 +1263,7 @@
         try {
           const data = JSON.parse(await file.text());
           if (Array.isArray(data.nodes) && Array.isArray(data.edges)) {
-            nodes = data.nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction }));
+            nodes = data.nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction, roundabout: !!n.roundabout }));
             edges = data.edges.map((ed) => ({ a: ed.a, b: ed.b, bend: Number(ed.bend) || 0 }));
             nextNodeId = Math.max(0, ...nodes.map((n) => n.id)) + 1;
             selectedNodeId = null;
@@ -1028,7 +1283,7 @@
         "Drag violet mid-handle sideways = curve the road<br>" +
         "Shift+click ground = add node (links to selection)<br>" +
         "Ctrl+click node = connect to selection (chains)<br>" +
-        "X / Del = delete node · J = force junction<br>" +
+        "X / Del = delete node · J = junction → roundabout → normal<br>" +
         "LMB orbit · RMB pan · wheel zoom";
       hud.appendChild(help);
 
@@ -1050,16 +1305,24 @@
       await renderer.init();
       rebuildRoad();
       let lastRebuildAt = 0;
+      let lastFrameAt = performance.now();
       renderer.setAnimationLoop(() => {
+        const now = performance.now();
+        const dt = Math.min(0.05, (now - lastFrameAt) / 1000);
+        lastFrameAt = now;
         // Throttle: each rebuild churns dozens of GPU buffers; doing it every
         // frame during a drag can overwhelm the device (see device-lost note).
-        if (rebuildQueued && performance.now() - lastRebuildAt > 70) {
+        if (rebuildQueued && now - lastRebuildAt > 70) {
           rebuildQueued = false;
-          lastRebuildAt = performance.now();
+          lastRebuildAt = now;
           rebuildRoad();
         }
-        controls.update();
-        renderer.render(scene, activeCamera());
+        if (driveMode && vehicle) {
+          stepVehicle(dt);
+        } else {
+          controls.update();
+        }
+        renderer.render(scene, driveMode ? persp : activeCamera());
       });
       addEventListener("resize", () => {
         persp.aspect = innerWidth / innerHeight;

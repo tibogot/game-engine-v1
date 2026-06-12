@@ -300,7 +300,8 @@ function junctionBoundary(node, roadEnds, hw, junctionRadius, junctionSegments) 
 }
 
 /**
- * @param nodes { id, x, z, forceJunction? }[]
+ * @param nodes { id, x, z, forceJunction?, roundabout? }[] — `roundabout` turns the node into
+ *   a circulating ring (radius = params.roundaboutRadius) with connector flares per approach.
  * @param edges { a, b, bend?, style? }[] — `bend` = signed lateral bow (m) at the chord
  *   midpoint (0/absent = straight). `style` overrides markings on network spans only.
  * @param params { width, lanesPerDir, junctionRadius, curveSegments, junctionSegments,
@@ -313,6 +314,10 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
   const width = params.width;
   const lanesPerDir = params.lanesPerDir ?? 1;
   const junctionRadius = params.junctionRadius ?? 12;
+  /** Circulating-lane centerline radius for `roundabout` nodes. */
+  const roundaboutRadius = params.roundaboutRadius ?? 16;
+  /** World-space inset of painted edge lines from the road edge (lab passes its own). */
+  const edgeLineInset = params.edgeLineInset ?? width * 0.066;
   const curveSegments = Math.max(4, params.curveSegments ?? 34);
   const junctionSegments = Math.max(3, params.junctionSegments ?? 14);
   const twoRoadNodes = params.twoRoadNodes ?? "smooth";
@@ -375,6 +380,7 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
         id: n.id,
         p: vec(n.x, n.z),
         forceJunction: !!n.forceJunction,
+        roundabout: !!n.roundabout,
       },
     ]),
   );
@@ -440,9 +446,21 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
     const sorted = roads
       .map((road) => ({ road, angle: Math.atan2(road.dir.y, road.dir.x) }))
       .sort((a, b) => a.angle - b.angle);
+    const nodeIsRoundabout = nodeById.get(nodeId)?.roundabout;
     for (let i = 0; i < sorted.length; i++) {
       const { road, angle } = sorted[i];
       let clip = 0;
+      if (nodeIsRoundabout) {
+        // Roads must reach the ring's outer edge plus a short connector lead.
+        clip = Math.min(roundaboutRadius + hw * 1.9, road.length * 0.45);
+        let perNode = edgeClips.get(road.edge);
+        if (!perNode) {
+          perNode = {};
+          edgeClips.set(road.edge, perNode);
+        }
+        perNode[nodeId] = clip;
+        continue;
+      }
       if (degree > 1) {
         clip = Math.min(radiusCap, Math.max(hw * 1.15, road.length * lengthScale));
         let minGap = Math.PI * 2;
@@ -517,6 +535,119 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
     }
   }
 
+  /** Roundabout node: circulating ring + one connector flare per approach.
+   *  Ring centerline radius = roundaboutRadius; ring width = road width. */
+  function buildRoundaboutAt(node, roads) {
+    const R = roundaboutRadius;
+    const Ro = R + hw;
+    const Ri = R - hw;
+    const ringSegs = Math.max(48, Math.min(220, Math.ceil((Math.PI * 2 * R) / spanLongStep)));
+    const tCols = profileColumns(scaledProfile, lateralCols);
+    const ringProfileYs = tCols.map((tv) => sampleProfileY(scaledProfile, tv));
+
+    const grid = [];
+    const center = [];
+    const outer = [];
+    const inner = [];
+    for (let i = 0; i <= ringSegs; i++) {
+      const a = (i / ringSegs) * Math.PI * 2;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      const row = [];
+      for (let j = 0; j < tCols.length; j++) {
+        const radius = R + hw * (1 - 2 * tCols[j]);
+        row.push(vec(node.p.x + ca * radius, node.p.y + sa * radius));
+      }
+      grid.push(row);
+      center.push(vec(node.p.x + ca * R, node.p.y + sa * R));
+      outer.push(vec(node.p.x + ca * Ro, node.p.y + sa * Ro));
+      inner.push(vec(node.p.x + ca * Ri, node.p.y + sa * Ri));
+    }
+    pieces.push({
+      polygon: outer,
+      left: { path: outer },
+      right: { path: inner },
+      center,
+      grid,
+      gridProfile: ringProfileYs,
+      isJunctionCore: true,
+      networkNode: node,
+      mouths: [],
+      padReach: Ro + hw * 1.6,
+      islandRadius: Math.max(1, Ri - 0.5),
+      suppressEdgeStripes: true,
+      isRoundabout: true,
+    });
+
+    // Inner edge line: full circle around the island.
+    const lineSegs = Math.max(48, ringSegs);
+    const innerLine = [];
+    for (let i = 0; i <= lineSegs; i++) {
+      const a = (i / lineSegs) * Math.PI * 2;
+      innerLine.push(vec(node.p.x + Math.cos(a) * (Ri + edgeLineInset), node.p.y + Math.sin(a) * (Ri + edgeLineInset)));
+    }
+    markings.push({ path: innerLine, type: "edge", dashed: false });
+
+    // Connector flares + occupied angular intervals (for outer-line gaps).
+    // Each connector bridges the road mouth to the ring with a WIDTH-PRESERVING
+    // quad: cast each road-edge corner straight inward (-away) onto the ring
+    // outer circle, so the connector stays road-width instead of pinching to the
+    // narrow angular arc the corners subtend at the ring radius.
+    const intervals = [];
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    /** First forward hit of ray (o + t·d) with circle radius Rc at node center. */
+    function rayCircle(o, d, Rc) {
+      const fx = o.x - node.p.x, fy = o.y - node.p.y;
+      const fd = fx * d.x + fy * d.y;
+      const disc = fd * fd - (fx * fx + fy * fy - Rc * Rc);
+      if (disc < 0) return null;
+      const t = -fd - Math.sqrt(disc); // NEAR crossing (the far root exits the ring)
+      if (t < 0) return null;
+      return vec(o.x + d.x * t, o.y + d.y * t);
+    }
+    for (const road of roads) {
+      const m = mouthInfo(node.id, road);
+      const side = perpLeft(m.away);
+      const mouthL = add(m.mouth, mul(side, hw));
+      const mouthR = add(m.mouth, mul(side, -hw));
+      const inward = mul(m.away, -1);
+      const ringL = rayCircle(mouthL, inward, Ro) ?? mouthL;
+      const ringR = rayCircle(mouthR, inward, Ro) ?? mouthR;
+      pieces.push({
+        polygon: [mouthL, mouthR, ringR, ringL],
+        left: { path: [mouthL, ringL] },
+        right: { path: [mouthR, ringR] },
+        center: [m.mouth, lerp(ringL, ringR, 0.5)],
+        networkConnector: true,
+      });
+      // Angular interval the entry occupies on the ring (line-gap on either side).
+      const thL = Math.atan2(ringL.y - node.p.y, ringL.x - node.p.x);
+      const thR = Math.atan2(ringR.y - node.p.y, ringR.x - node.p.x);
+      const thM = Math.atan2(m.mouth.y - node.p.y, m.mouth.x - node.p.x);
+      const halfSpan = Math.max(Math.abs(wrap(thL - thM)), Math.abs(wrap(thR - thM))) + 0.04;
+      intervals.push({ mid: thM, half: halfSpan });
+    }
+
+    // Outer edge line: arcs of the ring between the connectors.
+    intervals.sort((a, b) => a.mid - b.mid);
+    const rOut = Ro - edgeLineInset;
+    for (let i = 0; i < intervals.length; i++) {
+      const cur = intervals[i];
+      const next = intervals[(i + 1) % intervals.length];
+      const start = cur.mid + cur.half;
+      let span = (i === intervals.length - 1 ? next.mid + Math.PI * 2 : next.mid) - next.half - start;
+      if (intervals.length === 1) span = Math.PI * 2 - cur.half * 2;
+      if (span <= 0.02) continue;
+      const segsN = Math.max(4, Math.ceil(span / (Math.PI / 60)));
+      const path = [];
+      for (let s = 0; s <= segsN; s++) {
+        const a = start + (span * s) / segsN;
+        path.push(vec(node.p.x + Math.cos(a) * rOut, node.p.y + Math.sin(a) * rOut));
+      }
+      markings.push({ path, type: "edge", dashed: false });
+    }
+  }
+
   // ── Spans ──────────────────────────────────────────────────────────────────
   for (const edge of edges) {
     const info = edgeInfo.get(edge);
@@ -585,6 +716,11 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
   for (const node of nodeById.values()) {
     const roads = adjacency.get(node.id);
     if (!roads || roads.length === 0) continue;
+
+    if (node.roundabout) {
+      buildRoundaboutAt(node, roads);
+      continue;
+    }
 
     if (roads.length === 1) {
       const road = roads[0];
