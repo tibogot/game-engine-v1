@@ -40,10 +40,22 @@ export const SMART_ROAD_DEFAULTS = {
   centerLineWidth: 0.022,
   centerLineGap: 0.012,
   dashScale: 0.08,
-  clearance: 0.1,
+  clearance: 0.06,
+  smoothRadius: 18,
+  skirtDepth: 0.7,
   showHandles: true,
   handleLift: 1.0,
 };
+
+// Disc taps for the road height field: inner ring at 0.5r, outer ring at r, plus
+// the center sample — a low-pass of the terrain so the road eases over wrinkles.
+const FIELD_TAPS = (() => {
+  const taps = [];
+  for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; taps.push([Math.cos(a) * 0.5, Math.sin(a) * 0.5]); }
+  for (let i = 0; i < 6; i++) { const a = ((i + 0.5) / 6) * Math.PI * 2; taps.push([Math.cos(a), Math.sin(a)]); }
+  return taps;
+})();
+function smooth01(u) { const t = Math.max(0, Math.min(1, u)); return t * t * (3 - 2 * t); }
 
 export class SmartRoadLabSystem {
   /**
@@ -72,6 +84,7 @@ export class SmartRoadLabSystem {
 
     this._handleMeshes = [];
     this._edgeHandleMeshes = [];
+    this._pads = []; // level junction areas, rebuilt each frame before meshing
     this._rebuildQueued = false;
     this._lastRebuildAt = 0;
     this._rebuildThrottleMs = 60;
@@ -88,6 +101,7 @@ export class SmartRoadLabSystem {
       junction: materials.junction || new THREE.MeshStandardMaterial({ color: 0x2c3138, roughness: 0.92, metalness: 0, side: THREE.DoubleSide }),
       white: materials.white || new THREE.MeshStandardMaterial({ color: 0xe9e9e9, ...lineProps }),
       yellow: materials.yellow || new THREE.MeshStandardMaterial({ color: 0xe8c33c, ...lineProps }),
+      side: materials.side || new THREE.MeshStandardMaterial({ color: 0x20242a, roughness: 0.95, metalness: 0, side: THREE.DoubleSide }),
     };
     this._matHandle = new THREE.MeshBasicMaterial({ color: 0x62c4ff });
     this._matHandleSel = new THREE.MeshBasicMaterial({ color: 0xffd24a });
@@ -205,6 +219,15 @@ export class SmartRoadLabSystem {
   get handleMeshes() { return this._handleMeshes; }
   get edgeHandleMeshes() { return this._edgeHandleMeshes; }
 
+  /** Road-spine footprints for terrain conform: [{ pts:[{x,z}…], heights:[y…] }].
+   *  Heights are the road surface (= deck minus clearance) so the host can bake. */
+  getFootprints() {
+    return (this._footprints || []).map((fp) => ({
+      pts: fp.pts,
+      heights: fp.pts.map((p) => this.roadSurfaceH(p.x, p.z)),
+    }));
+  }
+
   // ── Frame update / rebuild throttle ─────────────────────────────────────────
   queueRebuild() { this._rebuildQueued = true; }
   update() {
@@ -220,12 +243,38 @@ export class SmartRoadLabSystem {
     this.roadGroup.visible = on;
     this.handleGroup.visible = on;
   }
+  /** Road meshes are world geometry (visible in every mode); only the editing
+   *  handles are gated to the Smart Road 2 mode. */
+  setEditActive(on) {
+    this.roadGroup.visible = true;
+    this.handleGroup.visible = on && this.params.showHandles;
+  }
   setHandlesVisible(on) {
     this.params.showHandles = on;
     this.queueRebuild();
   }
 
-  _drapeY(x, z) { return this.getHeight(x, z) + this.params.clearance; }
+  /** Low-pass of the terrain over `smoothRadius` — the road eases over wrinkles
+   *  instead of tracking every bump (the lab's `roadFieldH`). */
+  roadFieldH(x, z) {
+    const r = Math.max(0.5, this.params.smoothRadius);
+    let sum = this.getHeight(x, z);
+    for (const [ox, oz] of FIELD_TAPS) sum += this.getHeight(x + ox * r, z + oz * r);
+    return sum / (FIELD_TAPS.length + 1);
+  }
+
+  /** Road surface height: the smoothed field blended toward level junction pads,
+   *  so spans flow into near-flat junctions. All road verts + handles use this. */
+  roadSurfaceH(x, z) {
+    let h = this.roadFieldH(x, z);
+    for (const pad of this._pads) {
+      const d = Math.hypot(x - pad.x, z - pad.z);
+      if (d < pad.reach) h = pad.h + (h - pad.h) * smooth01(d / pad.reach);
+    }
+    return h;
+  }
+
+  _drapeY(x, z) { return this.roadSurfaceH(x, z) + this.params.clearance; }
 
   _disposeGroup(group) {
     for (const child of [...group.children]) {
@@ -285,6 +334,35 @@ export class SmartRoadLabSystem {
     const insetDist = Math.min((0.055 + P.lineWidth * 0.5) * P.width, P.width * 0.42);
     const edgeHalf = Math.max(0.004, P.lineWidth * P.width * 0.5);
 
+    // Junction pads first — roadSurfaceH (used by every drape below) blends spans
+    // into these level areas, so they must exist before any piece is meshed.
+    this._pads = [];
+    for (const piece of result.pieces) {
+      if (!piece.isJunctionCore || !piece.networkNode) continue;
+      const np = piece.networkNode.p;
+      const isCap = !piece.mouths?.length && !piece.isRoundabout;
+      this._pads.push({
+        x: np.x,
+        z: np.y,
+        h: this.roadFieldH(np.x, np.y),
+        reach: piece.padReach ?? (isCap ? hw * 2.5 : P.junctionRadius * 1.5 + hw),
+      });
+    }
+
+    // Footprint spines for the terrain-flatten bake (span/bend centers + junction
+    // spokes). (x, z) in world; height filled on demand from roadSurfaceH.
+    this._footprints = [];
+    for (const piece of result.pieces) {
+      if (piece.center?.length >= 2) {
+        this._footprints.push({ pts: piece.center.map((p) => ({ x: p.x, z: p.y })) });
+      } else if (piece.isJunctionCore && piece.networkNode && piece.mouths?.length) {
+        const np = piece.networkNode.p;
+        for (const m of piece.mouths) {
+          this._footprints.push({ pts: [{ x: np.x, z: np.y }, { x: m.c.x, z: m.c.y }] });
+        }
+      }
+    }
+
     for (const piece of result.pieces) {
       const surfGeo = piece.grid
         ? this._gridToGeometry(piece.grid, piece.gridProfile)
@@ -293,6 +371,21 @@ export class SmartRoadLabSystem {
         const mesh = new THREE.Mesh(surfGeo, piece.isJunctionCore ? this._mat.junction : this._mat.asphalt);
         mesh.receiveShadow = true;
         this.roadGroup.add(mesh);
+      }
+
+      // Side-wall skirt at the true deck edge (hw from spine / outline boundary).
+      const skirt = P.skirtDepth > 1e-3;
+      if (skirt && piece.center?.length >= 2) {
+        for (const sign of [1, -1]) {
+          const edge = this._offsetPath2d(piece.center, sign * hw);
+          const wall = this._wallMesh(edge, P.skirtDepth, this._mat.side);
+          if (wall) this.roadGroup.add(wall);
+        }
+      } else if (skirt && piece.isJunctionCore && Array.isArray(piece.outlineSegments)) {
+        for (const seg of piece.outlineSegments) {
+          const wall = this._wallMesh(seg, P.skirtDepth, this._mat.side);
+          if (wall) this.roadGroup.add(wall);
+        }
       }
 
       if (P.lineWidth > 1e-6 && !piece.suppressEdgeStripes && !piece.networkConnector) {
@@ -503,6 +596,34 @@ export class SmartRoadLabSystem {
     }
     if (drawing && current.length >= 2) frags.push(current);
     return frags;
+  }
+
+  /** Vertical side wall (skirt) hanging from a draped 2D edge path down by `depth`.
+   *  Makes the road read as a solid slab sitting in the graded terrain instead of
+   *  a floating ribbon — the gap under the deck edge is hidden by the wall. */
+  _wallMesh(rawPath, depth, mat) {
+    if (!rawPath || rawPath.length < 2) return null;
+    const path = this._resamplePath2d(rawPath, 2.5);
+    const n = path.length;
+    const pos = new Float32Array(n * 2 * 3);
+    let k = 0;
+    for (let i = 0; i < n; i++) {
+      const top = this._drapeY(path[i].x, path[i].y);
+      pos[k++] = path[i].x; pos[k++] = top; pos[k++] = path[i].y;
+      pos[k++] = path[i].x; pos[k++] = top - depth; pos[k++] = path[i].y;
+    }
+    const idx = [];
+    for (let i = 0; i < n - 1; i++) {
+      const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+      idx.push(a, c, b, b, c, d);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 2;
+    return mesh;
   }
 
   _stripeMesh(rawPath, hw, mat, lift) {

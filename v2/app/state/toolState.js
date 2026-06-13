@@ -1104,7 +1104,11 @@ export function createToolState() {
       centerLineWidth: 0.022,
       centerLineGap: 0.012,
       dashScale: 0.08,
-      clearance: 0.1,
+      clearance: 0.06,
+      smoothRadius: 18,
+      flattenDepth: 0.2,
+      shoulder: 6,
+      skirtDepth: 0.7,
       showHandles: true,
     },
     smartRoad: {

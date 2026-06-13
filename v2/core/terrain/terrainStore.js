@@ -505,6 +505,126 @@ export class TerrainStore {
   }
 
   /**
+   * Conform terrain to a road's SURFACE height, vertex by vertex (Smart Road 2).
+   * Unlike `flattenUnderRoad` (which sets terrain to the spine centerline height),
+   * each heightmap vertex is set to `getSurfaceH(vertexX, vertexZ) - embedDepth`,
+   * so deck-minus-terrain is CONSTANT across the whole road and on slopes — no
+   * clip on the downhill edge, no float on the uphill side.
+   *
+   * @param footprints [{ pts:[{x,z}…] }]  road spines (centerlines / junction spokes)
+   * @param getSurfaceH (x,z)=>y           road surface height (deck minus clearance)
+   * @param halfW       road half width
+   * @param embedDepth  terrain sits this far below the surface under the road
+   * @param shoulder    blend distance from full-flatten edge back to terrain
+   * @param dirtyChunks Map filled with per-chunk dirty rects (for remeshing)
+   */
+  conformToRoadSurface(footprints, getSurfaceH, halfW, embedDepth, shoulder, dirtyChunks) {
+    if (!Array.isArray(footprints) || footprints.length === 0) return;
+    const res = this.config.world.dataResolution;
+    const stride = res + 1;
+    const cs = this.config.world.chunkSize;
+    const step = cs / res;
+    const half = this.config.world.size * 0.5;
+    const maxC = getChunkCountPerAxis(this.config) - 1;
+    // Full-flatten reach: one terrain cell past the deck edge so no terrain
+    // triangle can straddle the road edge (the lab's footprintInner rule).
+    const inner = halfW + 1 + step;
+    const outer = Math.max(0.01, shoulder);
+    const reach = inner + outer;
+
+    const segDistSq = (px, pz, ax, az, bx, bz) => {
+      const dx = bx - ax, dz = bz - az;
+      const lenSq = dx * dx + dz * dz;
+      let t = 0;
+      if (lenSq > 1e-8) t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / lenSq));
+      const ex = px - (ax + dx * t), ez = pz - (az + dz * t);
+      return ex * ex + ez * ez;
+    };
+    const nearestDist = (wx, wz) => {
+      let best = Infinity;
+      for (const fp of footprints) {
+        const pts = fp.pts;
+        for (let k = 0; k < pts.length - 1; k++) {
+          const d = segDistSq(wx, wz, pts[k].x, pts[k].z, pts[k + 1].x, pts[k + 1].z);
+          if (d < best) best = d;
+        }
+        if (pts.length === 1) {
+          const ex = wx - pts[0].x, ez = wz - pts[0].z;
+          const d = ex * ex + ez * ez;
+          if (d < best) best = d;
+        }
+      }
+      return Math.sqrt(best);
+    };
+
+    // Union bbox of all footprints.
+    let minWX = Infinity, maxWX = -Infinity, minWZ = Infinity, maxWZ = -Infinity;
+    for (const fp of footprints) {
+      for (const p of fp.pts) {
+        if (p.x < minWX) minWX = p.x;
+        if (p.x > maxWX) maxWX = p.x;
+        if (p.z < minWZ) minWZ = p.z;
+        if (p.z > maxWZ) maxWZ = p.z;
+      }
+    }
+    minWX -= reach; maxWX += reach; minWZ -= reach; maxWZ += reach;
+
+    const minCX = Math.max(0, Math.floor((minWX + half) / cs));
+    const maxCX = Math.min(maxC, Math.floor((maxWX + half) / cs));
+    const minCZ = Math.max(0, Math.floor((minWZ + half) / cs));
+    const maxCZ = Math.min(maxC, Math.floor((maxWZ + half) / cs));
+
+    // PASS 1 — compute target heights from the ORIGINAL terrain (getSurfaceH
+    // disc-samples getWorldHeight, so no writes may happen yet or it feeds back).
+    const targets = []; // { cx, cz, ix, iz, idx, d, target }
+    for (let cz = minCZ; cz <= maxCZ; cz++) {
+      for (let cx = minCX; cx <= maxCX; cx++) {
+        this.ensureChunkData(cx, cz);
+        const chunkMinX = chunkMinWorldX(cx, this.config);
+        const chunkMinZ = chunkMinWorldZ(cz, this.config);
+        const lMinX = Math.max(0, Math.floor((minWX - chunkMinX) / step));
+        const lMaxX = Math.min(res, Math.ceil((maxWX - chunkMinX) / step));
+        const lMinZ = Math.max(0, Math.floor((minWZ - chunkMinZ) / step));
+        const lMaxZ = Math.min(res, Math.ceil((maxWZ - chunkMinZ) / step));
+        if (lMinX > lMaxX || lMinZ > lMaxZ) continue;
+        for (let iz = lMinZ; iz <= lMaxZ; iz++) {
+          const wz = chunkMinZ + iz * step;
+          for (let ix = lMinX; ix <= lMaxX; ix++) {
+            const wx = chunkMinX + ix * step;
+            const d = nearestDist(wx, wz);
+            if (d >= reach) continue;
+            targets.push({ cx, cz, ix, iz, idx: iz * stride + ix, d, target: getSurfaceH(wx, wz) - embedDepth });
+          }
+        }
+      }
+    }
+
+    // PASS 2 — write blended heights + shared-edge propagation + dirty rects.
+    const bump = (key, ix, iz) => {
+      const e = dirtyChunks.get(key);
+      if (!e) dirtyChunks.set(key, { minIx: ix, maxIx: ix, minIz: iz, maxIz: iz });
+      else {
+        if (ix < e.minIx) e.minIx = ix; if (ix > e.maxIx) e.maxIx = ix;
+        if (iz < e.minIz) e.minIz = iz; if (iz > e.maxIz) e.maxIz = iz;
+      }
+    };
+    for (const tg of targets) {
+      const heights = this.ensureChunkData(tg.cx, tg.cz);
+      const current = heights[tg.idx];
+      const s = tg.d <= inner ? 0 : (() => { const u = (tg.d - inner) / outer; return u * u * (3 - 2 * u); })();
+      const next = tg.target + (current - tg.target) * s;
+      heights[tg.idx] = next;
+      bump(chunkKey(tg.cx, tg.cz), tg.ix, tg.iz);
+
+      const onL = tg.ix === 0, onR = tg.ix === res, onT = tg.iz === 0, onB = tg.iz === res;
+      if (onL && tg.cx > 0) { this.ensureChunkData(tg.cx - 1, tg.cz)[tg.iz * stride + res] = next; bump(chunkKey(tg.cx - 1, tg.cz), res, tg.iz); }
+      if (onR && tg.cx < maxC) { this.ensureChunkData(tg.cx + 1, tg.cz)[tg.iz * stride + 0] = next; bump(chunkKey(tg.cx + 1, tg.cz), 0, tg.iz); }
+      if (onT && tg.cz > 0) { this.ensureChunkData(tg.cx, tg.cz - 1)[res * stride + tg.ix] = next; bump(chunkKey(tg.cx, tg.cz - 1), tg.ix, res); }
+      if (onB && tg.cz < maxC) { this.ensureChunkData(tg.cx, tg.cz + 1)[0 * stride + tg.ix] = next; bump(chunkKey(tg.cx, tg.cz + 1), tg.ix, 0); }
+    }
+  }
+
+  /**
    * Lower-only carve along a pre-sampled polyline (tunnel-mouth trenches).
    * `pts` carry the desired floor Y in `.y`. Terrain inside `halfW` of the
    * polyline is pulled DOWN to that target (never raised); between `halfW`

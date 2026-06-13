@@ -1529,7 +1529,7 @@ export async function startV2App(opts = {}) {
     getHeight: (x, z) => terrainStore.getWorldHeight(x, z),
     params: toolState.smartRoad2,
   });
-  smartRoad2System.setVisible(false);
+  smartRoad2System.setEditActive(false); // roads visible everywhere; handles only in mode
   const sr2 = { dragNodeId: null, dragEdge: null };
 
   const riverSystem = new RiverSystem({
@@ -5815,7 +5815,7 @@ export async function startV2App(opts = {}) {
     if (!playMode.active) controls.update();
     const dtSec = dtMs * 0.001;
     playMode.update(dtSec);
-    smartRoad2System.setVisible(toolState.mode === "smartRoad2");
+    smartRoad2System.setEditActive(toolState.mode === "smartRoad2");
     smartRoad2System.update();
     // Pre-warm foliage/billboard pipelines once when entering play (re-arm on exit
     // so world edits are recompiled). Fire-and-forget: compiles behind the scene
@@ -6930,6 +6930,27 @@ export async function startV2App(opts = {}) {
     },
     smartRoad2ClearAll() {
       smartRoad2System.setNetwork([], []);
+    },
+    smartRoad2FlattenTerrain() {
+      // Persistent bake: conform the chunked heightmap to the road SURFACE at each
+      // terrain vertex (deck minus a constant embed depth) — vertex-height, not
+      // spine-height, so no clip on slopes and no float. Then remesh dirty chunks.
+      if (!terrainStore || !chunkStream) return;
+      const depth = toolState.smartRoad2.flattenDepth ?? 0.35;
+      const shoulder = toolState.smartRoad2.shoulder ?? 6;
+      const halfW = smartRoad2System.params.width * 0.5;
+      const footprints = smartRoad2System.getFootprints();
+      if (!footprints.length) return;
+      const dirtyChunks = new Map();
+      terrainStore.conformToRoadSurface(
+        footprints,
+        (x, z) => smartRoad2System.roadSurfaceH(x, z),
+        halfW,
+        depth,
+        shoulder,
+        dirtyChunks,
+      );
+      if (dirtyChunks.size > 0) chunkStream.markDirtyRects(dirtyChunks);
     },
     smartRoadStartBranch() {
       smartRoadSystem.startBranch();
