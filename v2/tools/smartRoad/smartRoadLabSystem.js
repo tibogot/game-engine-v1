@@ -219,6 +219,12 @@ export class SmartRoadLabSystem {
   get handleMeshes() { return this._handleMeshes; }
   get edgeHandleMeshes() { return this._edgeHandleMeshes; }
 
+  /** Drivable deck meshes (asphalt + junction surfaces only — not markings, walls
+   *  or handles) for baking into the stunt car's drive-surface BVH. */
+  getColliderMeshes() {
+    return this.roadGroup.children.filter((m) => m.isMesh && m.userData.isDeck);
+  }
+
   /** Road-spine footprints for terrain conform: [{ pts:[{x,z}…], heights:[y…] }].
    *  Heights are the road surface (= deck minus clearance) so the host can bake. */
   getFootprints() {
@@ -370,6 +376,7 @@ export class SmartRoadLabSystem {
       if (surfGeo) {
         const mesh = new THREE.Mesh(surfGeo, piece.isJunctionCore ? this._mat.junction : this._mat.asphalt);
         mesh.receiveShadow = true;
+        mesh.userData.isDeck = true; // drivable surface (baked into the car's BVH)
         this.roadGroup.add(mesh);
       }
 

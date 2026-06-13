@@ -2029,8 +2029,11 @@ export async function startV2App(opts = {}) {
     audioSystem,
     excludeFromReflection: (obj) => roadReflection.excludeFromReflection(obj),
     onSpawnChanged: () => _playSpawnChanged?.(),
-    // Spline Road meshes baked into the stunt car's drive-surface BVH.
-    getStuntRoadMeshes: () => splineRoadSystem.getColliderMeshes(),
+    // Spline Road + Smart Road 2 decks baked into the stunt car's drive-surface BVH.
+    getStuntRoadMeshes: () => [
+      ...splineRoadSystem.getColliderMeshes(),
+      ...smartRoad2System.getColliderMeshes(),
+    ],
     // Side barriers baked into the stunt car's chassis-collision solids BVH.
     getStuntRoadSolidMeshes: () => splineRoadSystem.getSolidMeshes(),
   });
