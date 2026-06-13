@@ -44,9 +44,9 @@
     <script type="module">
       import * as THREE from "three";
       import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-      // Successor copy of core/road/roadNetworkLabGeometry.js — geometry evolves
-      // there (angle-aware junction clips, …); the editor's original stays untouched.
-      import { buildLabNetworkGeometry, ROAD_PROFILES } from "./smart-road-lab-geometry.js";
+      // Canonical Smart Road geometry — shared with the v2 editor's smartRoadSystem.
+      // (The lab's successor copy was merged back here in the P1 port; one source now.)
+      import { buildLabNetworkGeometry, ROAD_PROFILES } from "./core/road/roadNetworkLabGeometry.js";
       // Drive test: the stunt-car vehicle, read-only import. It only needs a scene
       // plus a duck-typed ground ({ baked, raycastFirst }) — we feed it the lab's
       // ANALYTIC drive surface, so there's no BVH and live road edits stay drivable.
