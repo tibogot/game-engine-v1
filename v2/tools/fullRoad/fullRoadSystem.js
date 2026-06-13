@@ -1013,9 +1013,12 @@ export class FullRoadSystem {
       }
 
       // Edge stripes (white): inset + width match Full Road shader (lineInset / lineWidth × road width).
+      // Roundabout ring + connector flares paint their OWN broken-arc "edge" markings (so the line
+      // breaks at each entry); without this guard the ring's full outer circle is stroked straight
+      // across every entry mouth — a white band cutting the road.
       const ew = Math.max(0, p.lineWidth ?? 0);
       const insetNorm = Math.max(0, p.lineInset ?? 0.055);
-      if (ew > 1e-6 && piece.polygon?.length >= 3) {
+      if (ew > 1e-6 && piece.polygon?.length >= 3 && !piece.suppressEdgeStripes && !piece.networkConnector) {
         let insetDist = (insetNorm + ew * 0.5) * roadW;
         insetDist = Math.min(insetDist, roadW * 0.42);
         const halfEdge = Math.max(0.004, ew * roadW * 0.5);

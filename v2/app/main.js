@@ -110,6 +110,7 @@ import { createV2AudioSystem } from "../audio/createV2AudioSystem.js";
 import { createGroundTslBundle } from "../core/legacy/chunkGroundTsl.js";
 import { RoadSystem } from "../tools/road/roadSystem.js";
 import { FullRoadSystem } from "../tools/fullRoad/fullRoadSystem.js";
+import { SmartRoadLabSystem } from "../tools/smartRoad/smartRoadLabSystem.js";
 import { RoadPlanarReflection } from "../core/road/roadReflection.js";
 import { RiverSystem } from "../tools/river/riverSystem.js";
 import { SplineSystem } from "../tools/spline/splineSystem.js";
@@ -1520,6 +1521,16 @@ export async function startV2App(opts = {}) {
     useLabNetworkGeometry: true,
     graphMode: "smartRoad",
   });
+  // Smart Road 2 — the lab's proven system as a parallel editor mode. Drapes on
+  // raw terrain for now (vertical-easing/flatten conform is the next port stage).
+  // Built alongside the old `smartRoad`; that one gets retired once this reaches parity.
+  const smartRoad2System = new SmartRoadLabSystem({
+    scene,
+    getHeight: (x, z) => terrainStore.getWorldHeight(x, z),
+  });
+  smartRoad2System.setVisible(false);
+  const sr2 = { dragNodeId: null, dragEdge: null };
+
   const riverSystem = new RiverSystem({
     scene,
     toolState,
@@ -4709,6 +4720,40 @@ export async function startV2App(opts = {}) {
       }
       return;
     }
+    if (toolState.mode === "smartRoad2" && event.button === 0) {
+      updatePointer(event);
+      raycaster.setFromCamera(pointerNdc, camera);
+      const hit = smartRoad2System.pickHandle(raycaster);
+      const connectKey = event.ctrlKey || event.metaKey || event.shiftKey;
+      if (hit?.nodeId !== undefined) {
+        event.preventDefault();
+        const sel = smartRoad2System.selectedNodeId;
+        if (connectKey && sel !== null && sel !== hit.nodeId) {
+          smartRoad2System.toggleEdge(sel, hit.nodeId);
+          smartRoad2System.selectNode(hit.nodeId); // chain A→B→C
+        } else {
+          smartRoad2System.selectNode(hit.nodeId);
+          sr2.dragNodeId = hit.nodeId;
+          controls.enabled = false;
+        }
+        return;
+      }
+      if (hit?.edge) {
+        event.preventDefault();
+        sr2.dragEdge = hit.edge;
+        controls.enabled = false;
+        return;
+      }
+      if (event.shiftKey) {
+        const th = pickTerrain(event);
+        if (th) {
+          event.preventDefault();
+          smartRoad2System.addNode(th.point.x, th.point.z, true);
+        }
+      }
+      // Plain ground click falls through → camera orbit; selection persists.
+      return;
+    }
     if (
       (toolState.mode === "fullRoad" || toolState.mode === "smartRoad") &&
       event.button === 0
@@ -4930,6 +4975,23 @@ export async function startV2App(opts = {}) {
 
   renderer.domElement.addEventListener("pointermove", (event) => {
     if (toolState.mode === "play") return;
+    if (toolState.mode === "smartRoad2" && (sr2.dragNodeId !== null || sr2.dragEdge)) {
+      const hit = pickTerrain(event);
+      if (!hit) return;
+      if (sr2.dragNodeId !== null) {
+        smartRoad2System.moveNode(sr2.dragNodeId, hit.point.x, hit.point.z);
+      } else if (sr2.dragEdge) {
+        const f = smartRoad2System.edgeMidFrame(sr2.dragEdge);
+        if (f) {
+          let bend = (hit.point.x - f.mx) * f.px + (hit.point.z - f.mz) * f.pz;
+          const cap = f.chord * 0.45;
+          bend = Math.max(-cap, Math.min(cap, bend));
+          if (Math.abs(bend) < 1.5) bend = 0;
+          smartRoad2System.setEdgeBend(sr2.dragEdge, bend);
+        }
+      }
+      return;
+    }
     if (
       toolState.mode === "road" &&
       roadSystem.dragging &&
@@ -5109,6 +5171,11 @@ export async function startV2App(opts = {}) {
   });
 
   window.addEventListener("pointerup", () => {
+    if (sr2.dragNodeId !== null || sr2.dragEdge) {
+      sr2.dragNodeId = null;
+      sr2.dragEdge = null;
+      controls.enabled = true;
+    }
     if (roadSystem.dragging) {
       roadSystem.dragging = false;
       controls.enabled = true;
@@ -5252,6 +5319,19 @@ export async function startV2App(opts = {}) {
       event.preventDefault();
       activeGraphRoadSystem().deleteSelected();
       ui?.pane.refresh();
+    } else if (
+      (event.code === "Delete" || event.code === "KeyX") &&
+      toolState.mode === "smartRoad2"
+    ) {
+      event.preventDefault();
+      if (smartRoad2System.selectedNodeId !== null) {
+        smartRoad2System.deleteNode(smartRoad2System.selectedNodeId);
+      }
+    } else if (event.code === "KeyJ" && toolState.mode === "smartRoad2" && !ctrl) {
+      event.preventDefault();
+      if (smartRoad2System.selectedNodeId !== null) {
+        smartRoad2System.cycleNodeType(smartRoad2System.selectedNodeId);
+      }
     } else if (event.code === "Delete" && toolState.mode === "river") {
       event.preventDefault();
       riverSystem.deleteSelected();
@@ -5726,6 +5806,8 @@ export async function startV2App(opts = {}) {
     if (!playMode.active) controls.update();
     const dtSec = dtMs * 0.001;
     playMode.update(dtSec);
+    smartRoad2System.setVisible(toolState.mode === "smartRoad2");
+    smartRoad2System.update();
     // Pre-warm foliage/billboard pipelines once when entering play (re-arm on exit
     // so world edits are recompiled). Fire-and-forget: compiles behind the scene
     // so first-draw shader stalls don't hit during flight.
