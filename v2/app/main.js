@@ -1527,6 +1527,7 @@ export async function startV2App(opts = {}) {
   const smartRoad2System = new SmartRoadLabSystem({
     scene,
     getHeight: (x, z) => terrainStore.getWorldHeight(x, z),
+    params: toolState.smartRoad2,
   });
   smartRoad2System.setVisible(false);
   const sr2 = { dragNodeId: null, dragEdge: null };
@@ -3615,6 +3616,7 @@ export async function startV2App(opts = {}) {
       toolState._roadExportData = () => roadSystem.exportData();
       toolState._fullRoadExportData = () => fullRoadSystem.exportData();
       toolState._smartRoadExportData = () => smartRoadSystem.exportData();
+      toolState._smartRoad2ExportData = () => smartRoad2System.exportData();
       toolState._riverExportData = () => riverSystem.exportData();
       toolState._splineExportData = () => splineSystem.exportData();
       toolState._decalExportData = () => decalSystem.exportData();
@@ -3647,6 +3649,7 @@ export async function startV2App(opts = {}) {
       delete toolState._roadExportData;
       delete toolState._fullRoadExportData;
       delete toolState._smartRoadExportData;
+      delete toolState._smartRoad2ExportData;
       delete toolState._riverExportData;
       delete toolState._splineExportData;
       delete toolState._decalExportData;
@@ -3747,6 +3750,12 @@ export async function startV2App(opts = {}) {
         if (project.settings?.smartRoadNetwork)
           smartRoadSystem.importData(project.settings.smartRoadNetwork);
         else smartRoadSystem.importData(null);
+        if (project.settings?.smartRoad2Network)
+          smartRoad2System.importData(project.settings.smartRoad2Network);
+        else smartRoad2System.importData(null);
+        // applySettings already restored toolState.smartRoad2; sync into the system.
+        Object.assign(smartRoad2System.params, toolState.smartRoad2);
+        smartRoad2System.queueRebuild();
         if (project.settings?.rivers)
           riverSystem.importData(project.settings.rivers);
         else riverSystem.importData([]);
@@ -6912,6 +6921,15 @@ export async function startV2App(opts = {}) {
       smartRoadSystem.rebuildAllMeshes();
       smartRoadSystem._rebuildHandles();
       ui?.pane.refresh();
+    },
+    smartRoad2Changed() {
+      // Push the panel's params into the lab system (keeps merged defaults like
+      // handleLift) and rebuild.
+      Object.assign(smartRoad2System.params, toolState.smartRoad2);
+      smartRoad2System.queueRebuild();
+    },
+    smartRoad2ClearAll() {
+      smartRoad2System.setNetwork([], []);
     },
     smartRoadStartBranch() {
       smartRoadSystem.startBranch();

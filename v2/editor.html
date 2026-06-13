@@ -3019,6 +3019,9 @@
         const smartRoadPanel = document.getElementById("smartroad-panel");
         if (smartRoadPanel)
           smartRoadPanel.style.display = mode === "smartRoad" ? "" : "none";
+        const smartRoad2Panel = document.getElementById("smartroad2-panel");
+        if (smartRoad2Panel)
+          smartRoad2Panel.style.display = mode === "smartRoad2" ? "" : "none";
         const roadPanel = document.getElementById("road-panel");
         if (roadPanel) roadPanel.style.display = mode === "road" ? "" : "none";
         const fullRoadPanel = document.getElementById("fullroad-panel");
@@ -9232,6 +9235,55 @@
           onClick: () => app.fullRoadDecalClearAll(),
         });
 
+        return panel;
+      }
+
+      // === Smart Road 2 (lab system) panel — drives toolState.smartRoad2 ===
+      function buildSmartRoad2Panel(app) {
+        const panel = document.createElement("div");
+        panel.id = "smartroad2-panel";
+        const sr = app.toolState.smartRoad2;
+        const ch = () => app.smartRoad2Changed();
+
+        const main = _section(panel, "Smart Road 2 (lab)");
+        _toggle(main, sr, "showHandles", { label: "Show handles", onChange: ch });
+        _button(main, { title: "Clear network", onClick: () => app.smartRoad2ClearAll() });
+
+        const geo = _section(panel, "Geometry");
+        _slider(geo, sr, "width", { label: "Width", min: 4, max: 40, step: 0.5, onChange: ch });
+        _slider(geo, sr, "lanesPerDir", { label: "Lanes / dir", min: 1, max: 3, step: 1, onChange: ch });
+        _slider(geo, sr, "junctionRadius", { label: "Junction radius", min: 6, max: 40, step: 0.5, onChange: ch });
+        _slider(geo, sr, "roundaboutRadius", { label: "Roundabout radius", min: 8, max: 50, step: 1, onChange: ch });
+        _slider(geo, sr, "curveSegments", { label: "Curve segs", min: 8, max: 96, step: 2, onChange: ch });
+        _slider(geo, sr, "junctionSegments", { label: "Junction segs", min: 4, max: 32, step: 1, onChange: ch });
+        _slider(geo, sr, "spanLongStep", { label: "Span step", min: 0.5, max: 8, step: 0.5, onChange: ch });
+        _dropdown(geo, sr, "twoRoadNodes", { label: "2-way nodes", options: { "Smooth bend": "smooth", Junction: "junction" }, onChange: ch });
+        _dropdown(geo, sr, "endCapStyle", { label: "Road ends", options: { Flat: "flat", Round: "round" }, onChange: ch });
+        _dropdown(geo, sr, "profilePreset", {
+          label: "Profile",
+          options: { Flat: "flat", Crowned: "crowned", Curbed: "curbed", Highway: "highway", "Dirt path": "dirtPath" },
+          onChange: ch,
+        });
+        _slider(geo, sr, "profileScale", { label: "Profile scale", min: 0, max: 4, step: 0.1, onChange: ch });
+        _slider(geo, sr, "clearance", { label: "Clearance", min: 0.02, max: 0.6, step: 0.02, onChange: ch });
+
+        const mk = _section(panel, "Markings", false);
+        _toggle(mk, sr, "centerLine", { label: "Center line", onChange: ch });
+        _toggle(mk, sr, "centerLineDashed", { label: "Center dashed", onChange: ch });
+        _toggle(mk, sr, "doubleCenterLine", { label: "Double center", onChange: ch });
+        _toggle(mk, sr, "laneLines", { label: "Lane lines", onChange: ch });
+        _slider(mk, sr, "lineWidth", { label: "Edge width", min: 0, max: 0.05, step: 0.002, onChange: ch });
+        _slider(mk, sr, "centerLineWidth", { label: "Center width", min: 0.004, max: 0.05, step: 0.002, onChange: ch });
+        _slider(mk, sr, "dashScale", { label: "Dash scale", min: 0.02, max: 0.3, step: 0.01, onChange: ch });
+
+        const helpRow = document.createElement("div");
+        helpRow.style.cssText = "margin-top:8px;font-size:11px;line-height:1.5;color:#8aa3b8;";
+        helpRow.innerHTML =
+          "Shift+click ground = add node<br>" +
+          "Drag node = move · drag violet handle = curve<br>" +
+          "Ctrl+click node = connect (chains)<br>" +
+          "J = junction → roundabout → normal · X/Del = delete";
+        panel.appendChild(helpRow);
         return panel;
       }
 
@@ -15695,6 +15747,7 @@
           toolsTab.appendChild(buildRoadPanel(app));
           toolsTab.appendChild(buildFullRoadPanel(app));
           toolsTab.appendChild(buildSmartRoadPanel(app));
+          toolsTab.appendChild(buildSmartRoad2Panel(app));
 
           // Wire prop-slot rebuild callback (was set by Tweakpane's propFolder)
           // so that adding/removing/loading slots from app code rebuilds the custom props panel.

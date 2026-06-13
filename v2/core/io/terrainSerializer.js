@@ -530,8 +530,10 @@ function extractSerializableSettings(toolState) {
     roads: toolState._roadExportData?.() ?? null,
     fullRoad: { ...toolState.fullRoad },
     smartRoad: { ...toolState.smartRoad },
+    smartRoad2: { ...toolState.smartRoad2 },
     fullRoadNetwork: toolState._fullRoadExportData?.() ?? null,
     smartRoadNetwork: toolState._smartRoadExportData?.() ?? null,
+    smartRoad2Network: toolState._smartRoad2ExportData?.() ?? null,
     river: { ...toolState.river },
     rivers: toolState._riverExportData?.() ?? null,
     spline: { ...toolState.spline },
@@ -716,6 +718,7 @@ export function applySettings(toolState, settings) {
   if (settings.road) Object.assign(toolState.road, settings.road);
   if (settings.fullRoad) Object.assign(toolState.fullRoad, settings.fullRoad);
   if (settings.smartRoad) Object.assign(toolState.smartRoad, settings.smartRoad);
+  if (settings.smartRoad2) Object.assign(toolState.smartRoad2, settings.smartRoad2);
   if (settings.river) Object.assign(toolState.river, settings.river);
   if (settings.spline) Object.assign(toolState.spline, settings.spline);
   if (settings.splineRoad) Object.assign(toolState.splineRoad, settings.splineRoad);

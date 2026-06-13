@@ -119,7 +119,12 @@ export class SmartRoadLabSystem {
   }
 
   importData(data) {
-    if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) return;
+    // null / malformed → reset to empty (project load path passes null when the
+    // saved project has no smartRoad2 network).
+    if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
+      this.setNetwork([], []);
+      return;
+    }
     this.setNetwork(data.nodes, data.edges);
     if (Number.isFinite(data.nextNodeId)) this._nextNodeId = data.nextNodeId;
   }
