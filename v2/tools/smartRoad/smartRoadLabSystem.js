@@ -43,6 +43,10 @@ export const SMART_ROAD_DEFAULTS = {
   clearance: 0.06,
   smoothRadius: 18,
   skirtDepth: 0.7,
+  // Sidewalks (cross-section): raised walkable band + curb on each side of spans.
+  sidewalk: false,
+  sidewalkWidth: 2.5,
+  curbHeight: 0.18,
   showHandles: true,
   handleLift: 1.0,
 };
@@ -85,6 +89,7 @@ export class SmartRoadLabSystem {
     this._handleMeshes = [];
     this._edgeHandleMeshes = [];
     this._pads = []; // level junction areas, rebuilt each frame before meshing
+    this._dragging = false; // draft (deck+handles only) rebuilds while dragging
     this._rebuildQueued = false;
     this._lastRebuildAt = 0;
     this._rebuildThrottleMs = 60;
@@ -102,6 +107,7 @@ export class SmartRoadLabSystem {
       white: materials.white || new THREE.MeshStandardMaterial({ color: 0xe9e9e9, ...lineProps }),
       yellow: materials.yellow || new THREE.MeshStandardMaterial({ color: 0xe8c33c, ...lineProps }),
       side: materials.side || new THREE.MeshStandardMaterial({ color: 0x20242a, roughness: 0.95, metalness: 0, side: THREE.DoubleSide }),
+      sidewalk: materials.sidewalk || new THREE.MeshStandardMaterial({ color: 0x8d9199, roughness: 0.9, metalness: 0, side: THREE.DoubleSide }),
     };
     this._matHandle = new THREE.MeshBasicMaterial({ color: 0x62c4ff });
     this._matHandleSel = new THREE.MeshBasicMaterial({ color: 0xffd24a });
@@ -255,6 +261,15 @@ export class SmartRoadLabSystem {
     this.roadGroup.visible = true;
     this.handleGroup.visible = on && this.params.showHandles;
   }
+
+  /** During an active drag, rebuilds are DRAFT (deck + handles only) so we don't
+   *  dispose/recreate the full sidewalk/marking/wall geometry ~16×/s — that GPU
+   *  buffer churn loses the WebGPU device. Full rebuild fires once on drag end. */
+  setDragging(on) {
+    const was = this._dragging;
+    this._dragging = on;
+    if (was && !on) this.queueRebuild(); // commit full geometry on release
+  }
   setHandlesVisible(on) {
     this.params.showHandles = on;
     this.queueRebuild();
@@ -339,6 +354,9 @@ export class SmartRoadLabSystem {
     const hw = P.width * 0.5;
     const insetDist = Math.min((0.055 + P.lineWidth * 0.5) * P.width, P.width * 0.42);
     const edgeHalf = Math.max(0.004, P.lineWidth * P.width * 0.5);
+    // Draft rebuild (mid-drag): deck + handles only, skip sidewalks/walls/markings
+    // to avoid GPU buffer churn that loses the WebGPU device. Full build on release.
+    const draft = this._dragging;
 
     // Junction pads first — roadSurfaceH (used by every drape below) blends spans
     // into these level areas, so they must exist before any piece is meshed.
@@ -357,8 +375,9 @@ export class SmartRoadLabSystem {
 
     // Footprint spines for the terrain-flatten bake (span/bend centers + junction
     // spokes). (x, z) in world; height filled on demand from roadSurfaceH.
-    this._footprints = [];
+    if (!draft) this._footprints = [];
     for (const piece of result.pieces) {
+      if (draft) break;
       if (piece.center?.length >= 2) {
         this._footprints.push({ pts: piece.center.map((p) => ({ x: p.x, z: p.y })) });
       } else if (piece.isJunctionCore && piece.networkNode && piece.mouths?.length) {
@@ -381,8 +400,23 @@ export class SmartRoadLabSystem {
       }
 
       // Side-wall skirt at the true deck edge (hw from spine / outline boundary).
-      const skirt = P.skirtDepth > 1e-3;
-      if (skirt && piece.center?.length >= 2) {
+      const skirt = !draft && P.skirtDepth > 1e-3;
+      const isSpan = piece.center?.length >= 2 && !piece.isJunctionCore;
+      if (!draft && P.sidewalk && isSpan) {
+        // Curb (vertical, road→curb top) + raised walkable band + outer face.
+        const sw = P.sidewalkWidth;
+        const roadY = (x, z) => this.roadSurfaceH(x, z) + P.clearance;
+        const curbTopY = (x, z) => this.roadSurfaceH(x, z) + P.clearance + P.curbHeight;
+        const outerBotY = (x, z) => curbTopY(x, z) - Math.max(P.skirtDepth, P.curbHeight + 0.3);
+        for (const sign of [1, -1]) {
+          const curb = this._ribbonBetween(piece.center, sign * hw, sign * hw, roadY, curbTopY, this._mat.side);
+          if (curb) this.roadGroup.add(curb);
+          const top = this._ribbonBetween(piece.center, sign * hw, sign * (hw + sw), curbTopY, curbTopY, this._mat.sidewalk);
+          if (top) { top.userData.isWalkable = true; this.roadGroup.add(top); }
+          const outer = this._ribbonBetween(piece.center, sign * (hw + sw), sign * (hw + sw), curbTopY, outerBotY, this._mat.side);
+          if (outer) this.roadGroup.add(outer);
+        }
+      } else if (skirt && piece.center?.length >= 2) {
         for (const sign of [1, -1]) {
           const edge = this._offsetPath2d(piece.center, sign * hw);
           const wall = this._wallMesh(edge, P.skirtDepth, this._mat.side);
@@ -395,7 +429,7 @@ export class SmartRoadLabSystem {
         }
       }
 
-      if (P.lineWidth > 1e-6 && !piece.suppressEdgeStripes && !piece.networkConnector) {
+      if (!draft && P.lineWidth > 1e-6 && !piece.suppressEdgeStripes && !piece.networkConnector) {
         if (piece.center?.length >= 2 && !piece.isJunctionCore) {
           for (const sign of [1, -1]) {
             const path = this._offsetPath2d(piece.center, sign * (hw - insetDist));
@@ -421,7 +455,7 @@ export class SmartRoadLabSystem {
       }
     }
 
-    for (const mk of result.markings || []) {
+    for (const mk of draft ? [] : (result.markings || [])) {
       if (!mk.path || mk.path.length < 2) continue;
       const mat = mk.type === "divider" || mk.type === "edge" ? this._mat.white : this._mat.yellow;
       const half = (mk.type === "divider" || mk.type === "edge" ? 0.018 : P.centerLineWidth) * P.width * 0.5;
@@ -603,6 +637,36 @@ export class SmartRoadLabSystem {
     }
     if (drawing && current.length >= 2) frags.push(current);
     return frags;
+  }
+
+  /** Strip between two lateral offsets along a spine, heights from per-edge fns.
+   *  offA===offB → a vertical face (yA top, yB bottom); offA≠offB → a band (e.g.
+   *  the sidewalk top). yFn(x,z) is evaluated at each offset point so the strip
+   *  follows the road's cross-slope. Used for curbs + sidewalks. */
+  _ribbonBetween(spine, offA, offB, yFnA, yFnB, mat) {
+    if (!spine || spine.length < 2) return null;
+    const path = this._resamplePath2d(spine, 2.5);
+    const A = this._offsetPath2d(path, offA);
+    const B = this._offsetPath2d(path, offB);
+    const n = path.length;
+    const pos = new Float32Array(n * 2 * 3);
+    let k = 0;
+    for (let i = 0; i < n; i++) {
+      pos[k++] = A[i].x; pos[k++] = yFnA(A[i].x, A[i].y); pos[k++] = A[i].y;
+      pos[k++] = B[i].x; pos[k++] = yFnB(B[i].x, B[i].y); pos[k++] = B[i].y;
+    }
+    const idx = [];
+    for (let i = 0; i < n - 1; i++) {
+      const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+      idx.push(a, c, b, b, c, d);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 3;
+    return mesh;
   }
 
   /** Vertical side wall (skirt) hanging from a draped 2D edge path down by `depth`.

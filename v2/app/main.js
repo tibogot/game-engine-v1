@@ -4746,6 +4746,7 @@ export async function startV2App(opts = {}) {
         } else {
           smartRoad2System.selectNode(hit.nodeId);
           sr2.dragNodeId = hit.nodeId;
+          smartRoad2System.setDragging(true);
           controls.enabled = false;
         }
         return;
@@ -4753,6 +4754,7 @@ export async function startV2App(opts = {}) {
       if (hit?.edge) {
         event.preventDefault();
         sr2.dragEdge = hit.edge;
+        smartRoad2System.setDragging(true);
         controls.enabled = false;
         return;
       }
@@ -5186,6 +5188,7 @@ export async function startV2App(opts = {}) {
     if (sr2.dragNodeId !== null || sr2.dragEdge) {
       sr2.dragNodeId = null;
       sr2.dragEdge = null;
+      smartRoad2System.setDragging(false); // commit full geometry (sidewalks etc.)
       controls.enabled = true;
     }
     if (roadSystem.dragging) {
@@ -6941,7 +6944,9 @@ export async function startV2App(opts = {}) {
       if (!terrainStore || !chunkStream) return;
       const depth = toolState.smartRoad2.flattenDepth ?? 0.35;
       const shoulder = toolState.smartRoad2.shoulder ?? 6;
-      const halfW = smartRoad2System.params.width * 0.5;
+      // Extend the flattened band under the sidewalks so they sit on graded ground.
+      const sw = toolState.smartRoad2.sidewalk ? (toolState.smartRoad2.sidewalkWidth ?? 0) : 0;
+      const halfW = smartRoad2System.params.width * 0.5 + sw;
       const footprints = smartRoad2System.getFootprints();
       if (!footprints.length) return;
       const dirtyChunks = new Map();

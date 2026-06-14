@@ -1109,6 +1109,9 @@ export function createToolState() {
       flattenDepth: 0.2,
       shoulder: 6,
       skirtDepth: 0.7,
+      sidewalk: false,
+      sidewalkWidth: 2.5,
+      curbHeight: 0.18,
       showHandles: true,
     },
     smartRoad: {
