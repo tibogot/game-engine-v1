@@ -161,8 +161,12 @@ export function createFoliageMaterial(opts = {}) {
     const hueShift = h2.sub(0.5).mul(u.colorVar.mul(0.4));
     col = vec3(col.x.add(hueShift.mul(0.3)), col.y, col.z.sub(hueShift.mul(0.2)));
 
-    const treeOrigin = modelWorldMatrix.mul(vec4(0, 0, 0, 1)).xyz;
-    const treeSeed = fract(sin(dot(treeOrigin.xz, vec2(127.1, 311.7))).mul(43758.5453));
+    // Per-tree seed from the per-instance world canopy center (treeCenterW), NOT
+    // modelWorldMatrix * origin: in the chunked InstancedMesh every tree shares the
+    // same model matrix (sits at world origin), so the old origin hash gave every
+    // tree the SAME seed -> a uniform "clone-army" forest. aTreeCenter is distinct
+    // per tree, so this restores real per-tree colour variation.
+    const treeSeed = fract(sin(dot(treeCenterW.xz, vec2(127.1, 311.7))).mul(43758.5453));
     const treeBright = treeSeed.sub(0.5).mul(u.treeColorVar);
     const treeHue = fract(sin(treeSeed.mul(78.233)).mul(43758.5453)).sub(0.5).mul(u.treeColorVar.mul(0.6));
     col = vec3(

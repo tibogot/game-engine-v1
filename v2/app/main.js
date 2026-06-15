@@ -6304,6 +6304,7 @@ export async function startV2App(opts = {}) {
     scene,
     camera,
     renderer,
+    controls,
     audioSystem,
     toolState,
     ui,

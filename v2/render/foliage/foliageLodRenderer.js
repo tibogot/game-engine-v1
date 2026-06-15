@@ -136,7 +136,11 @@ export class FoliageLodRenderer {
 
     const im = new THREE.InstancedMesh(geo, preset.material, cappedTotal);
     im.count = cappedTotal;
-    im.castShadow = true;
+    // Shadow policy: only LOD0 (near) leaves cast shadows. Far tiers (1/2) are each
+    // tens of thousands of alpha-tested quads — re-rendering them into every CSM
+    // cascade is the biggest foliage GPU cost, and at distance the terrain shadow
+    // blend hides the missing detail.
+    im.castShadow = lodIdx === 0;
     im.receiveShadow = false;
     im.frustumCulled = false;
 
