@@ -87,7 +87,9 @@ export class TreeLodRenderer {
     const data = submeshes.map((sm) => {
       const im = new THREE.InstancedMesh(sm.geometry, sm.material, slot.cap);
       im.count = 0;
-      im.castShadow = castShadow;
+      // Shadow policy: only LOD0 (near) casts — a GLB tree's far LOD1, especially
+      // one with baked alpha-tested leaves, shouldn't re-render into every cascade.
+      im.castShadow = castShadow && lod === 0;
       im.receiveShadow = true;
       im.frustumCulled = false;
       this.scene.add(im);
@@ -114,10 +116,9 @@ export class TreeLodRenderer {
   setCastShadow(slotIdx, on) {
     const slot = this.slotRender[slotIdx];
     if (!slot) return;
-    for (const lodArr of [slot.lod0, slot.lod1]) {
-      if (!lodArr) continue;
-      for (const sm of lodArr) sm.instancedMesh.castShadow = on;
-    }
+    // LOD0 follows the toggle; LOD1 (far) never casts (shadow policy).
+    if (slot.lod0) for (const sm of slot.lod0) sm.instancedMesh.castShadow = on;
+    if (slot.lod1) for (const sm of slot.lod1) sm.instancedMesh.castShadow = false;
   }
 
   /** Rebuild cached world matrices for a single chunk. */

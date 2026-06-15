@@ -119,6 +119,7 @@ import { CliffStore } from "../core/cliffs/cliffStore.js";
 import { CliffInstancer } from "../core/cliffs/cliffInstancer.js";
 import { CliffSystem } from "../tools/cliffs/cliffSystem.js";
 import { CliffBvh } from "../core/cliffs/cliffBvh.js";
+import { TreeBvh } from "../core/foliage/treeBvh.js";
 import { createCliffInstancerBlendMaterial } from "../core/legacy/cliffInstancerBlendMaterial.js";
 import { CliffPaintMask } from "../core/cliffs/cliffPaintMask.js";
 import { CliffPaintSystem } from "../tools/cliffs/cliffPaintSystem.js";
@@ -1540,6 +1541,8 @@ export async function startV2App(opts = {}) {
   const cliffStore = new CliffStore();
   const cliffInstancer = new CliffInstancer(scene, cliffStore);
   const cliffBvh = new CliffBvh(cliffStore);
+  // Tree-trunk lateral-collision BVH (self-baking: rebuilds on treeStore gen change).
+  const treeBvh = new TreeBvh(treeStore);
   const cliffSystem = new CliffSystem({
     toolState,
     cliffStore,
@@ -2020,6 +2023,7 @@ export async function startV2App(opts = {}) {
         : terrainStore.getWorldHeight(x, z),
     worldHalf: config.world.size * 0.5,
     cliffBvh,
+    treeBvh,
     isBarrierBlocked: (wx, wz) => barrierStore.isBlocked(wx, wz),
     smokeSettings: toolState.playSmoke,
     carSettings: toolState.playCar,

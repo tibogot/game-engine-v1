@@ -239,20 +239,29 @@ export class FoliageLodRenderer {
 
     for (const si of slotsInChunk) {
       if (si >= this.slotPresets.length || !this.slotPresets[si]) continue;
-      const slotEntry = { lod0: null, lod1: null, lod2: null };
-      for (let li = 0; li < 3; li++) {
-        const mesh = this._buildChunkSlotLod(trees, si, li);
-        if (mesh) {
-          mesh.visible = false;
-          this.scene.add(mesh);
-          slotEntry[`lod${li}`] = mesh;
-        }
-      }
-      entry.slots.set(si, slotEntry);
+      // Lazy: tier meshes start null and are built on demand in update() — only
+      // the chunk's currently-visible tier, never all 3 (saves ~3x memory + the
+      // build hitch when a fresh chunk enters the frustum).
+      entry.slots.set(si, { lod0: null, lod1: null, lod2: null });
     }
 
     this._chunkMeshes.set(chunkKey, entry);
     return entry;
+  }
+
+  // Build one (chunk-slot-lod) mesh on demand and cache it. `false` = this tier
+  // genuinely has no leaves for this slot, so it isn't retried each frame.
+  _ensureTier(slotEntry, slotIdx, trees, lodIdx) {
+    const key = `lod${lodIdx}`;
+    if (slotEntry[key] !== null) return;
+    const mesh = this._buildChunkSlotLod(trees, slotIdx, lodIdx);
+    if (mesh) {
+      mesh.visible = false;
+      this.scene.add(mesh);
+      slotEntry[key] = mesh;
+    } else {
+      slotEntry[key] = false;
+    }
   }
 
   update(treeStore, camera, lodCfg) {
@@ -315,7 +324,9 @@ export class FoliageLodRenderer {
       }
       entry.tier = tier;
 
-      for (const [, se] of entry.slots) {
+      for (const [si, se] of entry.slots) {
+        // Lazily build only the tier we're about to show (not all 3).
+        if (tier < 3) this._ensureTier(se, si, trees, tier);
         if (se.lod0) se.lod0.visible = tier === 0;
         if (se.lod1) se.lod1.visible = tier === 1;
         if (se.lod2) se.lod2.visible = tier === 2;

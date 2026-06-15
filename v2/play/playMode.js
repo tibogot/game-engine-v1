@@ -871,6 +871,7 @@ export class PlayMode {
     getTerrainHeight,
     worldHalf,
     cliffBvh,
+    treeBvh,
     isBarrierBlocked,
     smokeSettings,
     carSettings,
@@ -895,6 +896,7 @@ export class PlayMode {
     this.getTerrainHeight = getTerrainHeight || getWorldHeight;
     this.worldHalf = worldHalf;
     this.cliffBvh = cliffBvh || null;
+    this.treeBvh = treeBvh || null;
     this.isBarrierBlocked = isBarrierBlocked || null;
     this.carSettings = carSettings || {};
     this.carAudioSettings = carAudioSettings || {};
@@ -5393,7 +5395,10 @@ export class PlayMode {
         stepZ = (mz / mlen) * moveSpeed * dtSec;
       }
 
-      if (this.cliffBvh?.baked && !flying) {
+      // Bake the tree BVH (cheap no-op unless trees changed) so wall collision
+      // runs even when there are no cliffs — otherwise trees would never block.
+      if (this.treeBvh) this.treeBvh.ensureBaked();
+      if (!flying && (this.cliffBvh?.baked || this.treeBvh?.baked)) {
         if (carDriving && !rigidDriving) {
           const _vehSf =
             this.moveMode === "lotus"
@@ -5429,7 +5434,7 @@ export class PlayMode {
           let blocked = false;
           const rayHeights = [footY, waistY, headY];
           for (let ri = 0; ri < 3; ri++) {
-            const hit = this.cliffBvh.raycastLateral(
+            const hit = this._wallLateral(
               px,
               rayHeights[ri],
               pz,
@@ -5449,7 +5454,7 @@ export class PlayMode {
                   stepX -= dot * nnx;
                   stepZ -= dot * nnz;
 
-                  const slideHit = this.cliffBvh.raycastLateral(
+                  const slideHit = this._wallLateral(
                     px,
                     rayHeights[ri],
                     pz,
@@ -6895,6 +6900,27 @@ export class PlayMode {
     } else {
       this._camCollisionDist = 1;
     }
+  }
+
+  // Combined wall ray: nearest hit of the cliff BVH and the tree-trunk BVH.
+  // treeBvh self-bakes (rebuilds only when treeStore changed). Same signature +
+  // return shape as cliffBvh.raycastLateral, so it's a drop-in at the call sites.
+  _wallLateral(px, py, pz, dx, dz, dist) {
+    const cliffHit =
+      this.cliffBvh && this.cliffBvh.baked
+        ? this.cliffBvh.raycastLateral(px, py, pz, dx, dz, dist)
+        : null;
+    let treeHit = null;
+    if (this.treeBvh) {
+      this.treeBvh.ensureBaked();
+      if (this.treeBvh.baked) {
+        treeHit = this.treeBvh.raycastLateral(px, py, pz, dx, dz, dist);
+      }
+    }
+    if (cliffHit && treeHit) {
+      return cliffHit.distance <= treeHit.distance ? cliffHit : treeHit;
+    }
+    return cliffHit || treeHit;
   }
 
   _currentYaw() {
