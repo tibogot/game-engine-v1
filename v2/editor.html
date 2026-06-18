@@ -4559,6 +4559,20 @@
             max: 5,
             step: 0.01,
           });
+          _slider(slBody, slot, "colliderRadius", {
+            label: "Collider radius",
+            min: 0,
+            max: 4,
+            step: 0.05,
+            onChange: () => app.treeColliderChanged(),
+          });
+          _slider(slBody, slot, "colliderHeight", {
+            label: "Collider height",
+            min: 0,
+            max: 30,
+            step: 0.5,
+            onChange: () => app.treeColliderChanged(),
+          });
           _toggle(slBody, slot, "enabled", { label: "Enabled" });
           const lod0Btn = _button(slBody, {
             title: "Import LOD0 (detail)",

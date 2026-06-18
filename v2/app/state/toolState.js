@@ -544,6 +544,10 @@ export function createToolState() {
       enabled: true,
       presetFile: null,
       baseScale: 1.0,
+      // Trunk collider proxy (TreeBvh), in local units x tree scale. Tune per
+      // type: thin radius = walk close to the trunk; height covers the player.
+      colliderRadius: 0.4,
+      colliderHeight: 6.0,
       foliage: {
         bottomColor: "#2d5a1b",
         topColor: "#5aaa2a",

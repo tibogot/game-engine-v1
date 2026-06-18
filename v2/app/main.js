@@ -1542,7 +1542,11 @@ export async function startV2App(opts = {}) {
   const cliffInstancer = new CliffInstancer(scene, cliffStore);
   const cliffBvh = new CliffBvh(cliffStore);
   // Tree-trunk lateral-collision BVH (self-baking: rebuilds on treeStore gen change).
-  const treeBvh = new TreeBvh(treeStore);
+  // Per-slot collider dims come from each treeSlot (tunable in the Tree panel).
+  const treeBvh = new TreeBvh(treeStore, (slotIdx) => {
+    const s = toolState.treeSlots[slotIdx];
+    return s ? { radius: s.colliderRadius, height: s.colliderHeight } : null;
+  });
   const cliffSystem = new CliffSystem({
     toolState,
     cliffStore,
@@ -6467,6 +6471,11 @@ export async function startV2App(opts = {}) {
     },
     foliageParamChanged(slotIdx) {
       _foliageParamChanged(slotIdx);
+    },
+    // Per-slot trunk collider dims changed — force the tree BVH to rebake
+    // (treeStore gen is unchanged, so ensureBaked() wouldn't otherwise notice).
+    treeColliderChanged() {
+      treeBvh.invalidate();
     },
     importPropGlb(file = null) {
       _importPropGlb(file);

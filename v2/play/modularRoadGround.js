@@ -21,6 +21,7 @@ import * as THREE from "three";
 
 const _tmpN = new THREE.Vector3();
 const _cliffN = new THREE.Vector3();
+const _treeN = new THREE.Vector3();
 const _terrN = new THREE.Vector3();
 
 /**
@@ -35,6 +36,7 @@ export function createVehicleGround({
   cliffBvh = null,
   roadBvh = null,
   roadSolidsBvh = null,
+  treeBvh = null,
 }) {
   const getTH = getTerrainHeight;
 
@@ -48,7 +50,7 @@ export function createVehicleGround({
     return out.normalize();
   }
 
-  const state = { cliffBvh, roadBvh, roadSolidsBvh };
+  const state = { cliffBvh, roadBvh, roadSolidsBvh, treeBvh };
 
   // ── GROUND (wheel probes + deck contact) ────────────────────────────────
   const ground = {
@@ -133,7 +135,11 @@ export function createVehicleGround({
   // ── SOLIDS (chassis collision vs walls: road barriers + cliffs) ──────────
   const solids = {
     get baked() {
-      return !!(state.roadSolidsBvh?.baked || state.cliffBvh?.baked);
+      return !!(
+        state.roadSolidsBvh?.baked ||
+        state.cliffBvh?.baked ||
+        state.treeBvh?.baked
+      );
     },
 
     closestPointWithNormal(px, py, pz, maxDist, outNormal) {
@@ -160,6 +166,20 @@ export function createVehicleGround({
         }
       }
 
+      // Tree trunks as walls — same surface->query outward-normal approximation,
+      // flattened to horizontal so the chassis is pushed sideways off the trunk
+      // (never lifted onto it). closestPointToPoint has no face normal.
+      if (state.treeBvh?.baked) {
+        const r = state.treeBvh.closestPointToPoint(px, py, pz, maxDist);
+        if (r && (!best || r.distance < best.distance)) {
+          _treeN.set(px - r.x, 0, pz - r.z);
+          if (_treeN.lengthSq() < 1e-10) _treeN.set(0, 1, 0);
+          else _treeN.normalize();
+          best = r;
+          outNormal.copy(_treeN);
+        }
+      }
+
       return best;
     },
   };
@@ -175,6 +195,9 @@ export function createVehicleGround({
     },
     setCliffBvh(bvh) {
       state.cliffBvh = bvh || null;
+    },
+    setTreeBvh(bvh) {
+      state.treeBvh = bvh || null;
     },
   };
 }

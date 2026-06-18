@@ -13,6 +13,12 @@ import { MeshBVH } from "three-mesh-bvh";
 
 const _latRay = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3());
 const _latHit = { point: new THREE.Vector3(), normal: new THREE.Vector3(), distance: 0 };
+const _sweepBox = new THREE.Box3();
+const _triA = new THREE.Vector3();
+const _triB = new THREE.Vector3();
+const _triC = new THREE.Vector3();
+const _queryPoint = new THREE.Vector3();
+const _closestTarget = { point: new THREE.Vector3(), distance: 0, faceIndex: 0 };
 
 // Collider proxy dims (multiplied by each tree's scale). Trunk-radius-ish + tall
 // enough to cover the player at any nearby ground height. Per-slot override later.
@@ -32,8 +38,15 @@ function makeRing(sides) {
 }
 
 export class TreeBvh {
-  constructor(treeStore) {
+  /**
+   * @param treeStore   the TreeStore (positions + slotIdx per tree)
+   * @param getSlotDims optional (slotIdx) => { radius, height } in local units
+   *                    (x tree scale at bake). Falls back to TRUNK_R/TRUNK_H.
+   *                    Call invalidate() when these change (gen won't bump).
+   */
+  constructor(treeStore, getSlotDims = null) {
     this.store = treeStore;
+    this._getSlotDims = getSlotDims;
     this.baked = false;
     this._bvh = null;
     this._ring = makeRing(SIDES);
@@ -57,10 +70,14 @@ export class TreeBvh {
     const sides = SIDES;
     let vo = 0;
 
+    const getDims = this._getSlotDims;
     for (const trees of this.store.chunks.values()) {
       for (const t of trees) {
-        const r = TRUNK_R * t.scale;
-        const h = TRUNK_H * t.scale;
+        const dims = getDims ? getDims(t.slotIdx) : null;
+        // dims present (incl. 0) => honor it; null/undefined => legacy default.
+        const r = (dims && dims.radius != null ? dims.radius : TRUNK_R) * t.scale;
+        const h = (dims && dims.height != null ? dims.height : TRUNK_H) * t.scale;
+        if (r <= 0 || h <= 0) continue; // collider disabled for this slot
         const bx = t.x;
         const by = t.y ?? 0;
         const bz = t.z;
@@ -129,6 +146,159 @@ export class TreeBvh {
       _latHit.distance = hit.distance;
       return _latHit;
     }
+    return null;
+  }
+
+  // Swept-sphere cast — mirror of CliffBvh.spherecast (the car sweeps its hull
+  // spheres against trunks; a thin ray would slip between thin trunks). Returns
+  // { distance, point, normal } where distance = sphere-CENTER travel to contact.
+  spherecast(ox, oy, oz, radius, dx, dy, dz, maxDist) {
+    if (!this.baked || !this._bvh) return null;
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 1e-8) return null;
+    const ndx = dx / len;
+    const ndy = dy / len;
+    const ndz = dz / len;
+
+    let minT = maxDist;
+    let hitPoint = null;
+    let hitNormal = null;
+
+    _sweepBox.min.set(
+      Math.min(ox, ox + ndx * maxDist) - radius,
+      Math.min(oy, oy + ndy * maxDist) - radius,
+      Math.min(oz, oz + ndz * maxDist) - radius,
+    );
+    _sweepBox.max.set(
+      Math.max(ox, ox + ndx * maxDist) + radius,
+      Math.max(oy, oy + ndy * maxDist) + radius,
+      Math.max(oz, oz + ndz * maxDist) + radius,
+    );
+
+    this._bvh.shapecast({
+      intersectsBounds: (box) => _sweepBox.intersectsBox(box),
+      intersectsTriangle: (tri) => {
+        const t = this._sphereTriSweep(
+          ox, oy, oz, radius, ndx, ndy, ndz, minT, tri.a, tri.b, tri.c,
+        );
+        if (t !== null && t < minT) {
+          minT = t;
+          hitPoint = { x: ox + ndx * t, y: oy + ndy * t, z: oz + ndz * t };
+          const e1 = _triA.copy(tri.b).sub(tri.a);
+          const e2 = _triB.copy(tri.c).sub(tri.a);
+          const n = _triC.crossVectors(e1, e2).normalize();
+          hitNormal = { x: n.x, y: n.y, z: n.z };
+        }
+        return false;
+      },
+    });
+
+    if (hitPoint) return { distance: minT, point: hitPoint, normal: hitNormal };
+    return null;
+  }
+
+  _sphereTriSweep(ox, oy, oz, r, dx, dy, dz, maxT, a, b, c) {
+    const ax = a.x, ay = a.y, az = a.z;
+    const bx = b.x, by = b.y, bz = b.z;
+    const cx = c.x, cy = c.y, cz = c.z;
+
+    const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+    const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+    let nx = e1y * e2z - e1z * e2y;
+    let ny = e1z * e2x - e1x * e2z;
+    let nz = e1x * e2y - e1y * e2x;
+    const nLen = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (nLen < 1e-10) return null;
+    nx /= nLen; ny /= nLen; nz /= nLen;
+
+    const dDotN = dx * nx + dy * ny + dz * nz;
+    const dist = (ox - ax) * nx + (oy - ay) * ny + (oz - az) * nz;
+
+    let t0, t1;
+    if (Math.abs(dDotN) < 1e-8) {
+      if (Math.abs(dist) > r) return null;
+      t0 = 0; t1 = maxT;
+    } else {
+      t0 = (r - dist) / dDotN;
+      t1 = (-r - dist) / dDotN;
+      if (t0 > t1) { const tmp = t0; t0 = t1; t1 = tmp; }
+      if (t0 > maxT || t1 < 0) return null;
+      t0 = Math.max(t0, 0);
+    }
+
+    const px = ox + dx * t0 - ax;
+    const py2 = oy + dy * t0 - ay;
+    const pz2 = oz + dz * t0 - az;
+    const d00 = e1x * e1x + e1y * e1y + e1z * e1z;
+    const d01 = e1x * e2x + e1y * e2y + e1z * e2z;
+    const d11 = e2x * e2x + e2y * e2y + e2z * e2z;
+    const d20 = px * e1x + py2 * e1y + pz2 * e1z;
+    const d21 = px * e2x + py2 * e2y + pz2 * e2z;
+    const denom = d00 * d11 - d01 * d01;
+    if (Math.abs(denom) > 1e-10) {
+      const v = (d11 * d20 - d01 * d21) / denom;
+      const w = (d00 * d21 - d01 * d20) / denom;
+      if (v >= 0 && w >= 0 && v + w <= 1) return t0;
+    }
+
+    let best = maxT + 1;
+    const edges = [[ax, ay, az, bx, by, bz], [bx, by, bz, cx, cy, cz], [cx, cy, cz, ax, ay, az]];
+    for (const [ex, ey, ez, fx, fy, fz] of edges) {
+      const t = this._sphereEdgeSweep(ox, oy, oz, r, dx, dy, dz, ex, ey, ez, fx, fy, fz, maxT);
+      if (t !== null && t < best) best = t;
+    }
+    const verts = [[ax, ay, az], [bx, by, bz], [cx, cy, cz]];
+    for (const [vx, vy, vz] of verts) {
+      const t = this._spherePointSweep(ox, oy, oz, r, dx, dy, dz, vx, vy, vz, maxT);
+      if (t !== null && t < best) best = t;
+    }
+    return best <= maxT ? best : null;
+  }
+
+  // Nearest trunk surface point (for the stunt vehicle's chassis-collision push,
+  // via the ground adapter). Same return shape as CliffBvh.closestPointToPoint.
+  closestPointToPoint(px, py, pz, maxDist) {
+    if (!this.baked || !this._bvh) return null;
+    _queryPoint.set(px, py, pz);
+    _closestTarget.distance = Infinity;
+    const result = this._bvh.closestPointToPoint(_queryPoint, _closestTarget, 0, maxDist);
+    if (!result || _closestTarget.distance > maxDist) return null;
+    return {
+      x: _closestTarget.point.x,
+      y: _closestTarget.point.y,
+      z: _closestTarget.point.z,
+      distance: _closestTarget.distance,
+    };
+  }
+
+  _spherePointSweep(ox, oy, oz, r, dx, dy, dz, px, py, pz, maxT) {
+    const lx = ox - px, ly = oy - py, lz = oz - pz;
+    const a = dx * dx + dy * dy + dz * dz;
+    const b = 2 * (lx * dx + ly * dy + lz * dz);
+    const c = lx * lx + ly * ly + lz * lz - r * r;
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) return null;
+    const t = (-b - Math.sqrt(disc)) / (2 * a);
+    return (t >= 0 && t <= maxT) ? t : null;
+  }
+
+  _sphereEdgeSweep(ox, oy, oz, r, dx, dy, dz, ex, ey, ez, fx, fy, fz, maxT) {
+    const segX = fx - ex, segY = fy - ey, segZ = fz - ez;
+    const lx = ox - ex, ly = oy - ey, lz = oz - ez;
+    const segLenSq = segX * segX + segY * segY + segZ * segZ;
+    const dDotSeg = dx * segX + dy * segY + dz * segZ;
+    const lDotSeg = lx * segX + ly * segY + lz * segZ;
+
+    const a = (dx * dx + dy * dy + dz * dz) - (dDotSeg * dDotSeg) / segLenSq;
+    const b = 2 * ((lx * dx + ly * dy + lz * dz) - (dDotSeg * lDotSeg) / segLenSq);
+    const c = (lx * lx + ly * ly + lz * lz) - (lDotSeg * lDotSeg) / segLenSq - r * r;
+
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) return null;
+    const t = (-b - Math.sqrt(disc)) / (2 * a);
+    if (t < 0 || t > maxT) return null;
+    const s = (lDotSeg + t * dDotSeg) / segLenSq;
+    if (s >= 0 && s <= 1) return t;
     return null;
   }
 }

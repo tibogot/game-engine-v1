@@ -1211,6 +1211,7 @@ export class PlayMode {
     this._stuntGround = createVehicleGround({
       getTerrainHeight: (x, z) => this.getTerrainHeight(x, z),
       cliffBvh: this.cliffBvh,
+      treeBvh: this.treeBvh,
     });
     this._stuntVehicle.enabled = false;
     this._stuntVehicle.group.visible = false;
@@ -3430,6 +3431,10 @@ export class PlayMode {
     };
     // cliffBvh may bake/rebake after construction — keep the adapter current.
     this._stuntGround.setCliffBvh(this.cliffBvh);
+    // Tree trunks block the stunt car too — bake on demand (cheap unless trees
+    // changed) and keep the adapter pointed at it.
+    if (this.treeBvh) this.treeBvh.ensureBaked();
+    this._stuntGround.setTreeBvh(this.treeBvh);
     v.setBvh(this._stuntGround.ground, this._stuntGround.solids);
     v.update(dtSec, controls);
 
@@ -5421,6 +5426,27 @@ export class PlayMode {
           stepZ = resolved.z - this.playerPos.z;
           this.carVx = resolved.vx;
           this.carVz = resolved.vz;
+          // Tree trunks block the car (always tall walls — no drive-over). Sweep
+          // the car's hull spheres against the tree BVH and clamp the step.
+          const tb = this._carTreeBlock(
+            this.playerPos.x,
+            this.playerPos.y,
+            this.playerPos.z,
+            stepX,
+            stepZ,
+            this.carHeading,
+            _vehSf,
+          );
+          if (tb) {
+            stepX = tb.stepX;
+            stepZ = tb.stepZ;
+            // Kill the velocity component driving into the trunk (keep slide).
+            const vDot = this.carVx * tb.dirX + this.carVz * tb.dirZ;
+            if (vDot > 0) {
+              this.carVx -= vDot * tb.dirX;
+              this.carVz -= vDot * tb.dirZ;
+            }
+          }
         } else {
           const margin = CAP_R + 0.05;
           const stepLen = Math.hypot(stepX, stepZ);
@@ -6921,6 +6947,52 @@ export class PlayMode {
       return cliffHit.distance <= treeHit.distance ? cliffHit : treeHit;
     }
     return cliffHit || treeHit;
+  }
+
+  // Sweep the car's hull spheres against the tree BVH along the motion and
+  // clamp the step so the car stops before a trunk. Returns the clamped step +
+  // motion dir, or null if no tree blocks. Trees are tall walls (no step-over),
+  // so a per-sphere lateral ray is enough — far cheaper than a real spherecast.
+  _carTreeBlock(px, carY, pz, stepX, stepZ, heading, sf) {
+    if (!this.treeBvh || !this.treeBvh.baked) return null;
+    const stepLen = Math.hypot(stepX, stepZ);
+    if (stepLen < 0.01) return null;
+    const dirX = stepX / stepLen;
+    const dirZ = stepZ / stepLen;
+    const fwdX = -Math.sin(heading);
+    const fwdZ = -Math.cos(heading);
+    const rightX = Math.cos(heading);
+    const rightZ = -Math.sin(heading);
+    const hull =
+      this.moveMode === "lotus"
+        ? this._carPhysics.lotusHull
+        : this._carPhysics.jeep;
+    const spheres = hull && hull.hullSpheres;
+    if (!spheres) return null;
+    let stepRatio = 1;
+    for (const h of spheres) {
+      const ox = px + (fwdX * h.fwd + rightX * h.right) * sf;
+      const oz = pz + (fwdZ * h.fwd + rightZ * h.right) * sf;
+      const oy = carY + h.y * sf;
+      const r = h.r * sf;
+      const hit = this.treeBvh.spherecast(
+        ox,
+        oy,
+        oz,
+        r,
+        dirX,
+        0,
+        dirZ,
+        stepLen + r,
+      );
+      if (hit) {
+        // hit.distance = sphere-center travel to contact; stop just shy of it.
+        const ratio = Math.max(0, hit.distance - 0.05) / stepLen;
+        if (ratio < stepRatio) stepRatio = ratio;
+      }
+    }
+    if (stepRatio >= 1) return null;
+    return { stepX: stepX * stepRatio, stepZ: stepZ * stepRatio, dirX, dirZ };
   }
 
   _currentYaw() {
