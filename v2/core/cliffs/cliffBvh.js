@@ -10,6 +10,11 @@ const _sweepBox = new THREE.Box3();
 const _triA = new THREE.Vector3();
 const _triB = new THREE.Vector3();
 const _triC = new THREE.Vector3();
+const _capSeg = new THREE.Line3();
+const _capBox = new THREE.Box3();
+const _capTriPt = new THREE.Vector3();
+const _capSegPt = new THREE.Vector3();
+const _capPush = new THREE.Vector3();
 
 export class CliffBvh {
   constructor(cliffStore) {
@@ -168,6 +173,61 @@ export class CliffBvh {
       return hit.point.y;
     }
     return null;
+  }
+
+  // Down ray for ground-stick: returns { y, ny } with the surface normal.y
+  // oriented up (geometry is double-sided so winding is arbitrary), or null.
+  raycastDown(ox, oy, oz, maxDist) {
+    if (!this.baked || !this._bvh) return null;
+    _ray.origin.set(ox, oy, oz);
+    _ray.direction.set(0, -1, 0);
+    const hit = this._bvh.raycastFirst(_ray);
+    if (hit && hit.distance <= maxDist) {
+      return { y: hit.point.y, ny: Math.abs(hit.face.normal.y) };
+    }
+    return null;
+  }
+
+  // Push a capsule (vertical segment + radius) out of the BVH. (sx,sy,sz)=bottom
+  // sphere centre, (ex,ey,ez)=top sphere centre. Returns the accumulated segment
+  // displacement + the most-upward contact normal.y, or null if not baked.
+  capsuleDepenetrate(sx, sy, sz, ex, ey, ez, radius) {
+    if (!this.baked || !this._bvh) return null;
+    _capSeg.start.set(sx, sy, sz);
+    _capSeg.end.set(ex, ey, ez);
+    _capBox.makeEmpty();
+    _capBox.expandByPoint(_capSeg.start);
+    _capBox.expandByPoint(_capSeg.end);
+    _capBox.min.addScalar(-radius);
+    _capBox.max.addScalar(radius);
+    let maxNY = -1;
+    let moved = false;
+    this._bvh.shapecast({
+      intersectsBounds: (box) => box.intersectsBox(_capBox),
+      intersectsTriangle: (tri) => {
+        const dist = tri.closestPointToSegment(_capSeg, _capTriPt, _capSegPt);
+        if (dist < radius) {
+          const depth = radius - dist;
+          _capPush.copy(_capSegPt).sub(_capTriPt);
+          const len = _capPush.length();
+          if (len > 1e-9) {
+            _capPush.multiplyScalar(1 / len);
+            _capSeg.start.addScaledVector(_capPush, depth);
+            _capSeg.end.addScaledVector(_capPush, depth);
+            if (_capPush.y > maxNY) maxNY = _capPush.y;
+            moved = true;
+          }
+        }
+        return false;
+      },
+    });
+    if (!moved) return { dx: 0, dy: 0, dz: 0, maxNY: -1 };
+    return {
+      dx: _capSeg.start.x - sx,
+      dy: _capSeg.start.y - sy,
+      dz: _capSeg.start.z - sz,
+      maxNY,
+    };
   }
 
   sampleHeight(wx, wz) {

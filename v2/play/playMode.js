@@ -41,6 +41,7 @@ import {
 import { Vehicle as ModularVehicle } from "./modularRoadVehicle.js";
 import { createVehicleGround } from "./modularRoadGround.js";
 import { RoadBvh } from "./modularRoadBvh.js";
+import { CapsuleController } from "./onFootCapsule.js";
 
 // ============================================================
 // === VVV CAR scratch (module-scope; reused across frames to avoid GC).
@@ -898,6 +899,69 @@ export class PlayMode {
     this.cliffBvh = cliffBvh || null;
     this.treeBvh = treeBvh || null;
     this.isBarrierBlocked = isBarrierBlocked || null;
+
+    // On-foot capsule physics (capsule + char modes). Collider aggregates the
+    // cliff + tree BVHs (read live so rebakes are picked up). Platforms reserved
+    // for moving-platform content (none yet).
+    this._onFoot = new CapsuleController();
+    this._onFootPlatforms = null;
+    this._onFootWire = null; // debug wireframe capsule (toggle in on-foot panel)
+    this._onFootWireOn = false;
+    this._onFootWireDims = { r: 0, h: 0 };
+    {
+      const self = this;
+      this._onFootCollider = {
+        get baked() {
+          return !!(self.cliffBvh?.baked || self.treeBvh?.baked);
+        },
+        capsuleDepenetrate(sx, sy, sz, ex, ey, ez, r) {
+          let ax = 0;
+          let ay = 0;
+          let az = 0;
+          let maxNY = -1;
+          let moved = false;
+          const run = (bvh) => {
+            if (!bvh?.baked || !bvh.capsuleDepenetrate) return;
+            const c = bvh.capsuleDepenetrate(
+              sx + ax, sy + ay, sz + az,
+              ex + ax, ey + ay, ez + az,
+              r,
+            );
+            if (!c) return;
+            ax += c.dx;
+            ay += c.dy;
+            az += c.dz;
+            if (c.maxNY > maxNY) maxNY = c.maxNY;
+            if (c.dx || c.dy || c.dz) moved = true;
+          };
+          run(self.cliffBvh);
+          run(self.treeBvh);
+          if (!moved) return { dx: 0, dy: 0, dz: 0, maxNY: -1 };
+          return { dx: ax, dy: ay, dz: az, maxNY };
+        },
+        raycastDown(ox, oy, oz, maxDist) {
+          let best = null;
+          const run = (bvh) => {
+            if (!bvh?.baked || !bvh.raycastDown) return;
+            const h = bvh.raycastDown(ox, oy, oz, maxDist);
+            if (h && (best === null || h.y > best.y)) best = h; // highest surface
+          };
+          run(self.cliffBvh);
+          run(self.treeBvh);
+          return best;
+        },
+        raycastUp(ox, oy, oz, maxDist) {
+          let best = null;
+          const run = (bvh) => {
+            if (!bvh?.baked || !bvh.raycastUp) return;
+            const y = bvh.raycastUp(ox, oy, oz, maxDist);
+            if (y != null && (best === null || y < best)) best = y; // lowest ceiling
+          };
+          run(self.cliffBvh);
+          return best;
+        },
+      };
+    }
     this.carSettings = carSettings || {};
     this.carAudioSettings = carAudioSettings || {};
     this._excludeFromReflection = excludeFromReflection || null;
@@ -1155,6 +1219,8 @@ export class PlayMode {
     this._initLotusCamGui();
     this._initVvvGui();
     this._initJeepTuningGui();
+    this._onFootGui = null;
+    this._initOnFootGui();
 
     // === VVV rigid-body car state (see v2/play/vvvCarPhysics.js) ===
     // Per-instance copies of the default tunings so tweakpane can mutate them
@@ -1781,6 +1847,98 @@ export class PlayMode {
     } catch (_) {
       /* offline / blocked */
     }
+  }
+
+  async _initOnFootGui() {
+    try {
+      const { GUI } =
+        await import("https://cdn.jsdelivr.net/npm/lil-gui@0.20.0/dist/lil-gui.esm.min.js");
+      const gui = new GUI({ title: "On-foot physics", width: 300 });
+      gui.domElement.style.position = "fixed";
+      gui.domElement.style.top = "10px";
+      gui.domElement.style.right = "10px";
+      gui.domElement.style.left = "auto";
+      gui.domElement.style.display = "none"; // shown in char/capsule while playing
+      const p = this._onFoot.params;
+
+      const move = gui.addFolder("Move");
+      move.add(p, "walkSpeed", 1, 12, 0.1).name("Walk");
+      move.add(p, "runSpeed", 2, 18, 0.1).name("Run");
+      move.add(p, "crouchSpeedMult", 0.2, 1, 0.02).name("Crouch ×");
+      move.open();
+
+      const jump = gui.addFolder("Jump / gravity");
+      jump.add(p, "jumpVel", 4, 18, 0.25).name("Jump vel");
+      jump.add(p, "gravity", 6, 45, 0.5).name("Gravity");
+      jump.add(p, "glideFallSpeed", 1, 12, 0.25).name("Glide fall");
+      jump.add(p, "coyoteTime", 0, 0.35, 0.01).name("Coyote s");
+      jump.add(p, "jumpBufferTime", 0, 0.35, 0.01).name("Buffer s");
+
+      const ground = gui.addFolder("Ground / slopes");
+      ground.add(p, "minGroundNormalY", 0.1, 0.95, 0.01).name("Slope limit N·Y");
+      ground.add(p, "groundStickDist", 0, 1, 0.05).name("Ground stick");
+      ground.add(p, "stepMaxHeight", 0, 0.9, 0.05).name("Autostep max");
+      ground.open();
+
+      const cap = gui.addFolder("Capsule");
+      cap.add(p, "capRadius", 0.2, 0.7, 0.01).name("Radius");
+      cap.add(p, "capHeight", 0.6, 2.0, 0.05).name("Height");
+      cap.add(p, "crouchHeightScale", 0.3, 1, 0.02).name("Crouch H×");
+
+      const solver = gui.addFolder("Solver");
+      solver.add(p, "iterations", 1, 8, 1).name("Depen. iters");
+      solver.add(p, "substepFraction", 0.2, 1, 0.05).name("Substep frac");
+      solver.close();
+
+      const dbg = { showCollider: this._onFootWireOn };
+      gui
+        .add(dbg, "showCollider")
+        .name("Show collider")
+        .onChange((v) => {
+          this._onFootWireOn = v;
+        });
+
+      this._onFootGui = gui;
+    } catch (_) {
+      /* offline / blocked */
+    }
+  }
+
+  // Debug wireframe capsule matching the controller's collider (toggle in the
+  // on-foot panel). Mirrors parkour-character-lab's wire capsule.
+  _updateOnFootWire(visible) {
+    if (!visible) {
+      if (this._onFootWire) this._onFootWire.visible = false;
+      return;
+    }
+    const p = this._onFoot.params;
+    const r = p.capRadius;
+    const h = this._onFoot.crouching
+      ? p.capHeight * p.crouchHeightScale
+      : p.capHeight;
+    if (!this._onFootWire) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x44ff88,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false,
+      });
+      this._onFootWire = new THREE.Mesh(new THREE.CapsuleGeometry(r, h, 6, 12), mat);
+      this._onFootWire.frustumCulled = false;
+      this.scene.add(this._onFootWire);
+      this._onFootWireDims = { r, h };
+    } else if (this._onFootWireDims.r !== r || this._onFootWireDims.h !== h) {
+      this._onFootWire.geometry.dispose();
+      this._onFootWire.geometry = new THREE.CapsuleGeometry(r, h, 6, 12);
+      this._onFootWireDims = { r, h };
+    }
+    this._onFootWire.visible = true;
+    this._onFootWire.position.set(
+      this.playerPos.x,
+      this.playerPos.y + r + h * 0.5,
+      this.playerPos.z,
+    );
   }
 
   _rebuildCameraTuningGui() {
@@ -4812,6 +4970,8 @@ export class PlayMode {
     if (this._vvvCamGui) this._vvvCamGui.domElement.style.display = "none";
     if (this._jeepTuningGui)
       this._jeepTuningGui.domElement.style.display = "none";
+    if (this._onFootGui) this._onFootGui.domElement.style.display = "none";
+    if (this._onFootWire) this._onFootWire.visible = false;
     this.planeSpeed = 0;
     this.planeNitro = PLANE_NITRO_FULL;
     this._planeHudSpdSmooth = 0;
@@ -5362,6 +5522,13 @@ export class PlayMode {
     const carDriving = this.carMode;
     const vvvDriving = this.vvvDriving;
     const rigidDriving = this.rigidDriving;
+    // On-foot (capsule + char) now runs the CapsuleController, which owns
+    // horizontal movement, collision, ground + vertical. The legacy inline
+    // step/wall/ground/jump code below is gated off for these modes.
+    const onFoot =
+      !flying &&
+      !carDriving &&
+      (this.moveMode === "char" || this.moveMode === "capsule");
 
     // Rigid-body cars (VVV + Stunt) run their own physics + sync playerPos /
     // carHeading BEFORE the kinematic carDriving paths below execute. Those
@@ -5390,7 +5557,7 @@ export class PlayMode {
           : MOVE_SPEED;
     const prevPosX = this.playerPos.x;
     const prevPosZ = this.playerPos.z;
-    if (mlen > 0) {
+    if (mlen > 0 && !onFoot) {
       let stepX, stepZ;
       if (carDriving) {
         stepX = mx * dtSec;
@@ -5636,90 +5803,120 @@ export class PlayMode {
         this.flyAileronAngle *= 1 - lvl;
         if (Math.abs(this.flyAileronAngle) < 0.01) this.flyAileronAngle = 0;
       }
-    } else if (charMode) {
+    } else if (onFoot) {
       this.flyHeight = 0;
 
-      // Glider toggle: rising-edge Space while airborne (checked BEFORE jump
-      // so holding Space from the jump press doesn't immediately open it)
-      const _charSpaceEdge = keys.Space && !this.charSpacePrev;
-      if (_charSpaceEdge && this.charInAir) {
-        this.charGliding = !this.charGliding;
-      }
+      // ── On-foot capsule physics (capsule + char modes) ──────────────────
+      // The CapsuleController owns horizontal movement, collision (cliff+tree
+      // depenetration), ground, vertical, jump (coyote+buffer), glide, crouch,
+      // autostep + ground-stick. The ability layer above (roll/slide/attack/
+      // crouch) feeds it via mx/mz + moveSpeedOverride + canJump.
+      const ctrl = this._onFoot;
+      // Push current external state in so respawns / mode switches are honored.
+      ctrl.position.set(this.playerPos.x, this.playerPos.y, this.playerPos.z);
+      ctrl.velY = this.charVelY;
+      ctrl.grounded = !this.charInAir;
+      ctrl.gliding = this.charGliding;
+      const _wasInAir = this.charInAir;
+      const _preX = this.playerPos.x;
+      const _preZ = this.playerPos.z;
 
-      // Character jump
-      if (
-        !this.charInAir &&
-        !this.charCrouching &&
-        !this.charRolling &&
-        !this.charAttacking &&
-        !inSlide &&
-        this.charJumpPhase !== "land" &&
-        keys.Space
-      ) {
-        this.charVelY = CHAR_JUMP_VEL;
-        this.charInAir = true;
-        if (this.charActions?.jumpStart) {
-          this.charJumpPhase = "start";
-          const js = this.charActions.jumpStart;
-          js.reset().enabled = true;
-          js.crossFadeFrom(this.charCurrentAction, 0.08, false).play();
-          this.charCurrentAction = js;
-        } else if (this.charActions?.jumpLoop) {
-          this.charJumpPhase = "loop";
-          const jl = this.charActions.jumpLoop;
-          jl.reset().enabled = true;
-          jl.crossFadeFrom(this.charCurrentAction, 0.08, false).play();
-          this.charCurrentAction = jl;
-        }
-      }
+      if (this.treeBvh) this.treeBvh.ensureBaked();
+
+      // Speed: only override for ability states (roll/slide) and the capsule
+      // debug mover; normal char walk/run/crouch uses the controller's own
+      // params so the on-foot panel sliders take effect.
+      let _speedOverride = null;
+      if (this.charRolling) _speedOverride = _charRollSpeed;
+      else if (inSlide) _speedOverride = CHAR_SLIDE_SPEED;
+      else if (this.moveMode === "capsule") _speedOverride = MOVE_SPEED;
+
+      const _ctrlHeld = !!(keys.ControlLeft || keys.ControlRight);
+      ctrl.update(dtSec, {
+        input: {
+          mx,
+          mz,
+          jump: !!keys.Space,
+          run: charRunning,
+          crouch:
+            _ctrlHeld && !this.charRolling && !inSlide && !this.charAttacking,
+        },
+        moveSpeedOverride: _speedOverride,
+        canJump:
+          !this.charRolling &&
+          !this.charAttacking &&
+          !inSlide &&
+          this.charJumpPhase !== "land",
+        collider: this._onFootCollider,
+        getTerrainHeight: (x, z) => this.getTerrainHeight(x, z),
+        worldHalf: this.worldHalf,
+        platforms: this._onFootPlatforms,
+      });
+
+      this.playerPos.x = ctrl.position.x;
+      this.playerPos.y = ctrl.position.y;
+      this.playerPos.z = ctrl.position.z;
+      this.charVelY = ctrl.velY;
+      this.charInAir = ctrl.inAir;
+      this.charGliding = ctrl.gliding;
+      this.charCrouching = ctrl.crouching;
       this.charSpacePrev = !!keys.Space;
+      this._updateOnFootWire(this._onFootWireOn);
 
-      if (this.charInAir) {
-        this.charVelY -= CHAR_GRAVITY * dtSec;
-        if (this.charGliding) {
-          this.charVelY = Math.max(this.charVelY, -CHAR_GLIDE_FALL_SPEED);
-        }
-        const prevY = this.charRoot ? this.charRoot.position.y : groundY;
-        this.playerPos.y = prevY + this.charVelY * dtSec;
-        if (this.charVelY > 0 && this.cliffBvh?.baked) {
-          const headTop = this.playerPos.y + CAP_R * 2 + CAP_H;
-          const ceilY = this.cliffBvh.raycastUp(
-            this.playerPos.x,
-            headTop,
-            this.playerPos.z,
-            this.charVelY * dtSec + 0.1,
-          );
-          if (ceilY != null) {
-            this.playerPos.y = ceilY - CAP_R * 2 - CAP_H;
-            this.charVelY = 0;
+      // Dialogue / zone barriers (legacy isBarrierBlocked) — re-clamp post-move.
+      if (this.isBarrierBlocked) {
+        const _nx = this.playerPos.x;
+        const _nz = this.playerPos.z;
+        if (this.isBarrierBlocked(_nx, _nz)) {
+          if (!this.isBarrierBlocked(_nx, _preZ)) this.playerPos.z = _preZ;
+          else if (!this.isBarrierBlocked(_preX, _nz)) this.playerPos.x = _preX;
+          else {
+            this.playerPos.x = _preX;
+            this.playerPos.z = _preZ;
           }
+          ctrl.position.set(this.playerPos.x, this.playerPos.y, this.playerPos.z);
         }
-        if (this.playerPos.y <= groundY) {
-          this.playerPos.y = groundY;
-          this.charVelY = 0;
-          this.charInAir = false;
-          this.charGliding = false;
-          const landInputHeld =
-            keys.KeyW ||
-            keys.KeyA ||
-            keys.KeyS ||
-            keys.KeyD ||
-            keys.ArrowUp ||
-            keys.ArrowDown ||
-            keys.ArrowLeft ||
-            keys.ArrowRight;
-          if (landInputHeld && this.charActions) {
+      }
+
+      // Jump / fall / land animation. Debounced against brief ground-state
+      // flicker on bumpy terrain: only enter the air pose after a short air time
+      // (real jumps trigger instantly via velY), so small hops over hill crests
+      // never thrash the walk↔fall poses. _wasInAir kept for clarity. (char only.)
+      void _wasInAir;
+      if (charMode && this.charActions) {
+        this._charAirTime = this.charInAir ? (this._charAirTime || 0) + dtSec : 0;
+        const _enterAir =
+          this.charInAir && (this.charVelY > 0.5 || this._charAirTime > 0.12);
+        if (_enterAir && !this._charAirAnimActive) {
+          this._charAirAnimActive = true;
+          if (this.charVelY > 0.5 && this.charActions.jumpStart) {
+            this.charJumpPhase = "start";
+            const js = this.charActions.jumpStart;
+            js.reset().enabled = true;
+            js.crossFadeFrom(this.charCurrentAction, 0.08, false).play();
+            this.charCurrentAction = js;
+          } else if (this.charActions.jumpLoop) {
+            this.charJumpPhase = "loop";
+            const jl = this.charActions.jumpLoop;
+            jl.reset().enabled = true;
+            jl.crossFadeFrom(this.charCurrentAction, 0.12, false).play();
+            this.charCurrentAction = jl;
+          }
+        } else if (!this.charInAir && this._charAirAnimActive) {
+          this._charAirAnimActive = false;
+          const _landInputHeld =
+            keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD ||
+            keys.ArrowUp || keys.ArrowDown || keys.ArrowLeft || keys.ArrowRight;
+          if (_landInputHeld) {
             this.charJumpPhase = "none";
-            const tgt = charRunning
-              ? this.charActions.run
-              : this.charActions.walk;
+            const tgt = charRunning ? this.charActions.run : this.charActions.walk;
             if (tgt) {
               tgt.enabled = true;
               tgt.reset();
               tgt.crossFadeFrom(this.charCurrentAction, 0.12, false).play();
               this.charCurrentAction = tgt;
             }
-          } else if (this.charActions?.jumpLand) {
+          } else if (this.charActions.jumpLand) {
             this.charJumpPhase = "land";
             const jl = this.charActions.jumpLand;
             jl.reset().enabled = true;
@@ -5728,22 +5925,6 @@ export class PlayMode {
           } else {
             this.charJumpPhase = "none";
           }
-        }
-      } else {
-        const drop = prevY - groundY;
-        if (drop > 0.4) {
-          this.charInAir = true;
-          this.charVelY = 0;
-          this.playerPos.y = prevY;
-          if (this.charActions?.jumpLoop && this.charJumpPhase !== "loop") {
-            this.charJumpPhase = "loop";
-            const jl = this.charActions.jumpLoop;
-            jl.reset().enabled = true;
-            jl.crossFadeFrom(this.charCurrentAction, 0.15, false).play();
-            this.charCurrentAction = jl;
-          }
-        } else {
-          this.playerPos.y = groundY;
         }
       }
 
@@ -6684,6 +6865,13 @@ export class PlayMode {
     if (this._jeepTuningGui) {
       const showJeep = this.active && this.moveMode === "car";
       this._jeepTuningGui.domElement.style.display = showJeep ? "" : "none";
+    }
+    if (this._onFootGui) {
+      const showFoot =
+        this.active &&
+        (this.moveMode === "char" || this.moveMode === "capsule");
+      this._onFootGui.domElement.style.display = showFoot ? "" : "none";
+      if (!showFoot && this._onFootWire) this._onFootWire.visible = false;
     }
     this._updateJeepGuiTelemetry();
 
@@ -7719,6 +7907,16 @@ export class PlayMode {
           o.material?.dispose();
         }
       });
+    }
+    if (this._onFootWire) {
+      this.scene.remove(this._onFootWire);
+      this._onFootWire.geometry?.dispose();
+      this._onFootWire.material?.dispose();
+      this._onFootWire = null;
+    }
+    if (this._onFootGui) {
+      this._onFootGui.destroy();
+      this._onFootGui = null;
     }
     if (this.carRoot) {
       this.scene.remove(this.carRoot);
