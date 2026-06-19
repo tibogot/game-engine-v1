@@ -83,6 +83,10 @@ const CHAR_HAT = "../models/asian_conical_hat_compressed.glb";
 const CHAR_HEIGHT = 2.5;
 const CHAR_WALK_SPEED = 4.0;
 const CHAR_RUN_SPEED = 8.0;
+// Speed (m/s) the walk/run animation clips were authored for.
+// Tune these until feet stop sliding: increase if feet slide forward, decrease if they skate backward.
+const WALK_ANIM_REF_SPEED = 2.0;
+const RUN_ANIM_REF_SPEED  = 5.5;
 const CHAR_ROLL_PEAK = 13.0;
 const CHAR_SLIDE_SPEED = 10.0;
 const CHAR_SLIDE_MAX_TIME = 1.2;
@@ -6253,6 +6257,22 @@ export class PlayMode {
           else target = this.charActions.idle;
           if (target) this._charSetAction(target);
         }
+
+        // Scale walk/run animation playback speed to match actual movement speed
+        // so feet don't slide relative to the ground.
+        if (this.charActions && this._onFoot) {
+          const actualSpeed = this._onFoot.debug.moveSpeed;
+          if (this.charActions.walk)
+            this.charActions.walk.timeScale = actualSpeed > 0
+              ? actualSpeed / WALK_ANIM_REF_SPEED : 1;
+          if (this.charActions.run)
+            this.charActions.run.timeScale = actualSpeed > 0
+              ? actualSpeed / RUN_ANIM_REF_SPEED : 1;
+          if (this.charActions.crouchWalk)
+            this.charActions.crouchWalk.timeScale = actualSpeed > 0
+              ? actualSpeed / (WALK_ANIM_REF_SPEED * 0.5) : 1;
+        }
+
         if (this.charMixer) this.charMixer.update(dtSec);
       }
     }
