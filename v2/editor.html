@@ -3211,8 +3211,20 @@
 
         // --- Ramp shape ---
         const rampBody = _section(panel, "Ramp Shape", false);
+        _slider(rampBody, ts.ramp, "angle", {
+          label: "Angle (°)",
+          min: -80,
+          max: 80,
+          step: 1,
+        });
+        _slider(rampBody, ts.ramp, "innerFraction", {
+          label: "Flat width",
+          min: 0,
+          max: 0.99,
+          step: 0.01,
+        });
         _slider(rampBody, ts.ramp, "crossExponent", {
-          label: "Corridor edge",
+          label: "Edge softness",
           min: 0.5,
           max: 10,
           step: 0.05,

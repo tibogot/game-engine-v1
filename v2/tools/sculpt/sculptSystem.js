@@ -54,11 +54,17 @@ export class SculptSystem {
   commitRampSecondClick(hitPoint) {
     if (!this.rampPointA) return;
     const ptA = this.rampPointA;
-    const ptB = {
-      x: hitPoint.x,
-      y: this.terrainStore.getWorldHeight(hitPoint.x, hitPoint.z),
-      z: hitPoint.z,
-    };
+    const angleDeg = this.toolState.ramp.angle ?? 0;
+    let ptBY;
+    if (angleDeg !== 0) {
+      const dx = hitPoint.x - ptA.x;
+      const dz = hitPoint.z - ptA.z;
+      const hDist = Math.sqrt(dx * dx + dz * dz);
+      ptBY = ptA.y + Math.tan((angleDeg * Math.PI) / 180) * hDist;
+    } else {
+      ptBY = this.terrainStore.getWorldHeight(hitPoint.x, hitPoint.z);
+    }
+    const ptB = { x: hitPoint.x, y: ptBY, z: hitPoint.z };
     const radius = this.toolState.brush.radius;
     const strength = THREE.MathUtils.clamp(this.toolState.brush.strength / 2.5, 0.02, 1);
 

@@ -145,6 +145,9 @@ export const V2_CONFIG = {
     ramp: {
       crossExponent: 2,
       alongExponent: 1,
+      innerFraction: 0.65,
+      /** Angle in degrees. 0 = use terrain height at B. Positive = ramp rises A→B. */
+      angle: 0,
     },
     /** v1 `PARAMS.erosion` — hydraulic brush + future global pass (`iterations` unused by brush). */
     erosion: {

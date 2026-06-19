@@ -858,6 +858,7 @@ export class TerrainStore {
 
     const crossExp = THREE.MathUtils.clamp(Number(rampOpts.crossExponent) || 2, 0.5, 12);
     const alongExp = THREE.MathUtils.clamp(Number(rampOpts.alongExponent) || 1, 0.2, 6);
+    const innerFraction = THREE.MathUtils.clamp(Number(rampOpts.innerFraction) ?? 0.65, 0, 0.99);
 
     const radiusSq = radius * radius;
     const res = this.config.world.dataResolution;
@@ -890,17 +891,16 @@ export class TerrainStore {
           const wz = chunkMinZ + iz * step;
           for (let ix = 0; ix <= res; ix++) {
             const wx = chunkMinX + ix * step;
-            const t = THREE.MathUtils.clamp(
-              ((wx - ptA.x) * dx + (wz - ptA.z) * dz) / lenSq,
-              0,
-              1,
-            );
+            const t = ((wx - ptA.x) * dx + (wz - ptA.z) * dz) / lenSq;
+            if (t < 0 || t > 1) continue;
             const perpX = ptA.x + t * dx - wx;
             const perpZ = ptA.z + t * dz - wz;
             const perpSq = perpX * perpX + perpZ * perpZ;
             if (perpSq > radiusSq) continue;
             const u = Math.sqrt(perpSq) / radius;
-            const falloff = Math.pow(Math.max(0, 1 - u), crossExp);
+            const falloff = u <= innerFraction
+              ? 1.0
+              : Math.pow(Math.max(0, 1 - (u - innerFraction) / (1 - innerFraction)), crossExp);
             const tH = Math.pow(t, alongExp);
             const targetY = ptA.y + tH * (ptB.y - ptA.y);
             const idx = iz * stride + ix;
