@@ -1503,6 +1503,9 @@
           <button class="toolbar-btn" data-mode="river" title="River (V)">
             <i data-lucide="droplets"></i>
           </button>
+          <button class="toolbar-btn" data-mode="river2" title="River+ (auto-carve)">
+            <i data-lucide="waves"></i>
+          </button>
           <button class="toolbar-btn" data-mode="actors" title="Actors (N)">
             <i data-lucide="users"></i>
           </button>
@@ -1624,6 +1627,7 @@
               <option value="smartRoad">Smart Road</option>
               <option value="smartRoad2">Smart Road 2 (lab)</option>
               <option value="river">River (V)</option>
+              <option value="river2">River+ (auto-carve)</option>
               <option value="spline">Spline (K)</option>
               <option value="splineRoad">Spline Road</option>
               <option value="cliffs">Cliffs (O)</option>
@@ -3020,6 +3024,9 @@
         const riverPanel = document.getElementById("river-panel");
         if (riverPanel)
           riverPanel.style.display = mode === "river" ? "" : "none";
+        const river2Panel = document.getElementById("river2-panel");
+        if (river2Panel)
+          river2Panel.style.display = mode === "river2" ? "" : "none";
         const splinePanel = document.getElementById("spline-panel");
         if (splinePanel)
           splinePanel.style.display = mode === "spline" ? "" : "none";
@@ -8180,6 +8187,134 @@
           max: 5,
           step: 0.01,
           onChange: () => app.riverChanged(),
+        });
+
+        return panel;
+      }
+
+      // === Build custom River+ (auto-carve) panel ===
+      function buildRiver2Panel(app) {
+        const panel = document.createElement("div");
+        panel.id = "river2-panel";
+        const rp = app.toolState.river2;
+
+        const body = _section(panel, "River+ (Auto-Carve)");
+        _toggle(body, rp, "showHandles", {
+          label: "Show handles",
+          onChange: () => app.river2Changed(),
+        });
+        _toggle(body, rp, "closed", {
+          label: "Close path (loop)",
+          onChange: () => app.river2Changed(),
+        });
+        _slider(body, rp, "activeRiverIndex", {
+          label: "Active river #",
+          min: 0,
+          max: 63,
+          step: 1,
+          onChange: () => app.river2ActiveIndexChanged(),
+        });
+        _button(body, {
+          title: "New river",
+          onClick: () => app.river2NewRiver(),
+        });
+        _button(body, {
+          title: "Delete active river",
+          onClick: () => app.river2DeleteActive(),
+        });
+        _button(body, {
+          title: "Delete selected point",
+          onClick: () => app.river2DeleteSelected(),
+        });
+        _slider(body, rp, "selectedPointY", {
+          label: "Point Y",
+          min: -50,
+          max: 200,
+          step: 0.1,
+          onChange: () => app.river2SelectedYChanged(),
+        });
+
+        const carveBody = _section(panel, "Terrain Carving");
+        _slider(carveBody, rp, "carveDepth", {
+          label: "Carve depth",
+          min: 0.1,
+          max: 10,
+          step: 0.1,
+          onChange: () => app.river2Changed(),
+        });
+        _slider(carveBody, rp, "carveShoulder", {
+          label: "Blend shoulder",
+          min: 0.5,
+          max: 20,
+          step: 0.5,
+          onChange: () => app.river2Changed(),
+        });
+
+        const geoBody = _section(panel, "Geometry");
+        _slider(geoBody, rp, "width", {
+          label: "Width",
+          min: 1,
+          max: 80,
+          step: 0.5,
+          onChange: () => app.river2Changed(),
+        });
+        _slider(geoBody, rp, "segments", {
+          label: "Segments",
+          min: 20,
+          max: 900,
+          step: 10,
+          onChange: () => app.river2Changed(),
+        });
+        _slider(geoBody, rp, "heightOffset", {
+          label: "Height offset",
+          min: 0,
+          max: 1,
+          step: 0.01,
+          onChange: () => app.river2Changed(),
+        });
+
+        const matBody = _section(panel, "Material");
+        _dropdown(matBody, rp, "shaderStyle", {
+          label: "Shader style",
+          options: { Basic: "Basic", "Stylized v1": "Stylized" },
+          onChange: () => app.river2Changed(),
+        });
+        _color(matBody, rp, "shallowColor", {
+          label: "Shallow",
+          onChange: () => app.river2Changed(),
+        });
+        _color(matBody, rp, "deepColor", {
+          label: "Deep",
+          onChange: () => app.river2Changed(),
+        });
+        _color(matBody, rp, "highlightColor", {
+          label: "Highlight",
+          onChange: () => app.river2Changed(),
+        });
+        _color(matBody, rp, "foamColor", {
+          label: "Foam",
+          onChange: () => app.river2Changed(),
+        });
+        _slider(matBody, rp, "foamWidth", {
+          label: "Foam width",
+          min: 0.01,
+          max: 0.6,
+          step: 0.01,
+          onChange: () => app.river2Changed(),
+        });
+        _slider(matBody, rp, "opacity", {
+          label: "Opacity",
+          min: 0.05,
+          max: 1,
+          step: 0.01,
+          onChange: () => app.river2Changed(),
+        });
+        _slider(matBody, rp, "flowSpeed", {
+          label: "Flow speed",
+          min: 0,
+          max: 5,
+          step: 0.01,
+          onChange: () => app.river2Changed(),
         });
 
         return panel;
@@ -15816,6 +15951,7 @@
           app.setActorsPanelRefresh(() => actorsPanel._refreshCounts?.());
           toolsTab.appendChild(buildDecalsPanel(app));
           toolsTab.appendChild(buildRiverPanel(app));
+          toolsTab.appendChild(buildRiver2Panel(app));
           toolsTab.appendChild(buildSplinePanel(app));
           toolsTab.appendChild(buildGrassPanel(app));
           toolsTab.appendChild(buildRevoGrassPanel(app));

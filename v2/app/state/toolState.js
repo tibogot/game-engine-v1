@@ -1287,6 +1287,25 @@ export function createToolState() {
       opacity: 0.88,
       flowSpeed: 0.15,
     },
+    river2: {
+      width: 8,
+      segments: 240,
+      heightOffset: 0.08,
+      carveDepth: 1.5,
+      carveShoulder: 5,
+      selectedPointY: 0,
+      showHandles: true,
+      activeRiverIndex: 0,
+      closed: false,
+      shaderStyle: "Basic",
+      shallowColor: "#5dbfaa",
+      deepColor: "#1a4a6a",
+      highlightColor: "#c8ecff",
+      foamColor: "#ffffff",
+      foamWidth: 0.18,
+      opacity: 0.88,
+      flowSpeed: 0.15,
+    },
     /** Spline Road — a dedicated solid "depth road" mode (separate from spline).
      *  Points + sweep params; serializes the road with the project. */
     splineRoad: {

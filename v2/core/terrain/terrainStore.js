@@ -739,6 +739,42 @@ export class TerrainStore {
     }
   }
 
+  /**
+   * Returns a Map<chunkKey, Float32Array> snapshot of all chunks whose AABB
+   * overlaps the bounding box of `pts` expanded by `halfW + margin`.
+   * Safe to call before any carve — reads current chunk data without writing.
+   */
+  snapshotChunksNearPath(pts, halfW, margin) {
+    const reach = halfW + margin;
+    const cs = this.config.world.chunkSize;
+    const half = this.config.world.size * 0.5;
+    const maxC = getChunkCountPerAxis(this.config) - 1;
+
+    let minWX = Infinity, maxWX = -Infinity, minWZ = Infinity, maxWZ = -Infinity;
+    for (const p of pts) {
+      if (p.x < minWX) minWX = p.x;
+      if (p.x > maxWX) maxWX = p.x;
+      if (p.z < minWZ) minWZ = p.z;
+      if (p.z > maxWZ) maxWZ = p.z;
+    }
+    minWX -= reach; maxWX += reach; minWZ -= reach; maxWZ += reach;
+
+    const minCX = Math.max(0, Math.floor((minWX + half) / cs));
+    const maxCX = Math.min(maxC, Math.floor((maxWX + half) / cs));
+    const minCZ = Math.max(0, Math.floor((minWZ + half) / cs));
+    const maxCZ = Math.min(maxC, Math.floor((maxWZ + half) / cs));
+
+    const snap = new Map();
+    for (let cz = minCZ; cz <= maxCZ; cz++) {
+      for (let cx = minCX; cx <= maxCX; cx++) {
+        const key = chunkKey(cx, cz);
+        const heights = this.ensureChunkData(cx, cz);
+        snap.set(key, new Float32Array(heights));
+      }
+    }
+    return snap;
+  }
+
   sampleNeighborhood(wx, wz, radius) {
     const taps = [
       [0, 0],

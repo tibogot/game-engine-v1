@@ -113,6 +113,7 @@ import { FullRoadSystem } from "../tools/fullRoad/fullRoadSystem.js";
 import { SmartRoadLabSystem } from "../tools/smartRoad/smartRoadLabSystem.js";
 import { RoadPlanarReflection } from "../core/road/roadReflection.js";
 import { RiverSystem } from "../tools/river/riverSystem.js";
+import { RiverCarvingSystem } from "../tools/river/riverCarvingSystem.js";
 import { SplineSystem } from "../tools/spline/splineSystem.js";
 import { SplineRoadSystem } from "../tools/splineRoad/splineRoadSystem.js";
 import { CliffStore } from "../core/cliffs/cliffStore.js";
@@ -1775,6 +1776,13 @@ export async function startV2App(opts = {}) {
     toolState,
     getWorldHeight: (x, z) => terrainStore.getWorldHeight(x, z),
   });
+  const river2System = new RiverCarvingSystem({
+    scene,
+    toolState,
+    getWorldHeight: (x, z) => terrainStore.getWorldHeight(x, z),
+    terrainStore,
+    markTerrainDirty: (dirtyChunks) => chunkStream.markDirtyRects(dirtyChunks),
+  });
   const cliffStore = new CliffStore();
   const cliffInstancer = new CliffInstancer(scene, cliffStore);
   const cliffBvh = new CliffBvh(cliffStore);
@@ -2396,6 +2404,8 @@ export async function startV2App(opts = {}) {
       toolState.mode === "smartRoad" && toolState.smartRoad.showHandles;
     riverSystem.handleGroup.visible =
       toolState.mode === "river" && toolState.river.showHandles;
+    river2System.handleGroup.visible =
+      toolState.mode === "river2" && toolState.river2.showHandles;
     splineSystem.handleGroup.visible =
       toolState.mode === "spline" && toolState.spline.showHandles;
     if (toolState.mode !== "spline") splineSystem.clearPreview();
@@ -2531,6 +2541,12 @@ export async function startV2App(opts = {}) {
     _riverDeleteSelected,
     _riverSelectedYChanged,
     _riverActiveIndexChanged;
+  let _river2Changed,
+    _river2NewRiver,
+    _river2DeleteActive,
+    _river2DeleteSelected,
+    _river2SelectedYChanged,
+    _river2ActiveIndexChanged;
   let _splineChanged,
     _splineDeleteSelected,
     _splineClearAll,
@@ -3284,6 +3300,28 @@ export async function startV2App(opts = {}) {
       riverSystem._rebuildVisual();
       ui?.pane.refresh();
     }),
+    onRiver2Changed: (_river2Changed = () => {
+      river2System.syncMaterial();
+      river2System.rebuildAllMeshes();
+      ui?.pane.refresh();
+    }),
+    onRiver2NewRiver: (_river2NewRiver = () => river2System.startNewRiver()),
+    onRiver2DeleteActive: (_river2DeleteActive = () => {
+      river2System.deleteActiveRiver();
+      ui?.pane.refresh();
+    }),
+    onRiver2DeleteSelected: (_river2DeleteSelected = () => {
+      river2System.deleteSelected();
+      ui?.pane.refresh();
+    }),
+    onRiver2SelectedYChanged: (_river2SelectedYChanged = () =>
+      river2System.setSelectedPointY(toolState.river2.selectedPointY)),
+    onRiver2ActiveIndexChanged: (_river2ActiveIndexChanged = () => {
+      river2System._clampActive();
+      river2System.selectedIdx = -1;
+      river2System._rebuildVisual();
+      ui?.pane.refresh();
+    }),
     onRoadSelectedYChanged: () =>
       roadSystem.setSelectedPointY(toolState.road.selectedPointY),
     onRoadStyleSectionChanged: () => {
@@ -3866,6 +3904,7 @@ export async function startV2App(opts = {}) {
       toolState._smartRoadExportData = () => smartRoadSystem.exportData();
       toolState._smartRoad2ExportData = () => smartRoad2System.exportData();
       toolState._riverExportData = () => riverSystem.exportData();
+      toolState._river2ExportData = () => river2System.exportData();
       toolState._splineExportData = () => splineSystem.exportData();
       toolState._decalExportData = () => decalSystem.exportData();
       toolState._billboardGrassExportData = () => billboardGrassStore.toJSON();
@@ -3899,6 +3938,7 @@ export async function startV2App(opts = {}) {
       delete toolState._smartRoadExportData;
       delete toolState._smartRoad2ExportData;
       delete toolState._riverExportData;
+      delete toolState._river2ExportData;
       delete toolState._splineExportData;
       delete toolState._decalExportData;
       delete toolState._billboardGrassExportData;
@@ -4008,6 +4048,9 @@ export async function startV2App(opts = {}) {
         if (project.settings?.rivers)
           riverSystem.importData(project.settings.rivers);
         else riverSystem.importData([]);
+        if (project.settings?.rivers2)
+          river2System.importData(project.settings.rivers2);
+        else river2System.importData([]);
         if (project.settings?.splinePath)
           splineSystem.importData(project.settings.splinePath);
         else splineSystem.importData({ points: [] });
@@ -4451,6 +4494,7 @@ export async function startV2App(opts = {}) {
   roadReflection.excludeFromReflection(fullRoadSystem.handleGroup);
   roadReflection.excludeFromReflection(smartRoadSystem.handleGroup);
   roadReflection.excludeFromReflection(riverSystem.handleGroup);
+  roadReflection.excludeFromReflection(river2System.handleGroup);
   roadReflection.excludeFromReflection(splineSystem.handleGroup);
   roadReflection.excludeFromReflection(splineSystem.previewGroup);
   roadReflection.excludeFromReflection(splineSystem.trainMesh);
@@ -5130,6 +5174,27 @@ export async function startV2App(opts = {}) {
       }
       return;
     }
+    if (toolState.mode === "river2" && event.button === 0) {
+      event.preventDefault();
+      updatePointer(event);
+      raycaster.setFromCamera(pointerNdc, camera);
+      const picked = river2System.pickPoint(raycaster);
+      if (picked >= 0) {
+        river2System.selectedIdx = picked;
+        river2System.dragging = true;
+        controls.enabled = false;
+        river2System._rebuildHandles();
+        river2System._updateSelectedY();
+        ui?.pane.refresh();
+      } else {
+        const hit = pickTerrain(event);
+        if (hit) {
+          river2System.addPoint(hit.point);
+          ui?.pane.refresh();
+        }
+      }
+      return;
+    }
     if (toolState.mode === "spline" && event.button === 0) {
       event.preventDefault();
       updatePointer(event);
@@ -5296,6 +5361,15 @@ export async function startV2App(opts = {}) {
     ) {
       const hit = pickTerrain(event);
       if (hit) riverSystem.moveSelected(hit.point);
+      return;
+    }
+    if (
+      toolState.mode === "river2" &&
+      river2System.dragging &&
+      river2System.selectedIdx >= 0
+    ) {
+      const hit = pickTerrain(event);
+      if (hit) river2System.moveSelected(hit.point);
       return;
     }
     if (
@@ -5466,6 +5540,10 @@ export async function startV2App(opts = {}) {
       riverSystem.dragging = false;
       controls.enabled = true;
     }
+    if (river2System.dragging) {
+      river2System.finalizeMove();
+      controls.enabled = true;
+    }
     if (splineSystem.dragging) {
       splineSystem.dragging = false;
       controls.enabled = true;
@@ -5521,6 +5599,7 @@ export async function startV2App(opts = {}) {
     if (toolState.mode === "fullRoad") return fullRoadSystem;
     if (toolState.mode === "smartRoad") return smartRoadSystem;
     if (toolState.mode === "river") return riverSystem;
+    if (toolState.mode === "river2") return river2System;
     if (toolState.mode === "spline") return splineSystem;
     if (toolState.mode === "splineRoad") return splineRoadSystem;
     if (toolState.mode === "cliffs") return cliffSystem;
@@ -5597,6 +5676,10 @@ export async function startV2App(opts = {}) {
     } else if (event.code === "Delete" && toolState.mode === "river") {
       event.preventDefault();
       riverSystem.deleteSelected();
+      ui?.pane.refresh();
+    } else if (event.code === "Delete" && toolState.mode === "river2") {
+      event.preventDefault();
+      river2System.deleteSelected();
       ui?.pane.refresh();
     } else if (event.code === "Delete" && toolState.mode === "splineRoad") {
       event.preventDefault();
@@ -6410,6 +6493,7 @@ export async function startV2App(opts = {}) {
     //   roadReflection.render(...);
     // }
     riverSystem.update(dtMs * 0.001);
+    river2System.update(dtMs * 0.001);
     splineSystem.update(dtMs * 0.001);
 
     // Daynight cloud deck — procedural sky only. Highest priority; owns the
@@ -6538,6 +6622,7 @@ export async function startV2App(opts = {}) {
     fullRoadSystem,
     smartRoadSystem,
     riverSystem,
+    river2System,
     splineSystem,
     splineRoadSystem,
     propStore,
@@ -6980,6 +7065,24 @@ export async function startV2App(opts = {}) {
     },
     riverActiveIndexChanged() {
       _riverActiveIndexChanged();
+    },
+    river2Changed() {
+      _river2Changed();
+    },
+    river2NewRiver() {
+      _river2NewRiver();
+    },
+    river2DeleteActive() {
+      _river2DeleteActive();
+    },
+    river2DeleteSelected() {
+      _river2DeleteSelected();
+    },
+    river2SelectedYChanged() {
+      _river2SelectedYChanged();
+    },
+    river2ActiveIndexChanged() {
+      _river2ActiveIndexChanged();
     },
     roadChanged() {
       roadSystem.saveActiveStyle();
@@ -7491,6 +7594,7 @@ export async function startV2App(opts = {}) {
       fullRoadSystem.dispose();
       smartRoadSystem.dispose();
       riverSystem.dispose();
+      river2System.dispose();
       splineSystem.dispose();
       roadReflection.dispose();
       waterMaterials.dispose();
