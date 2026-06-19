@@ -12615,6 +12615,7 @@
 
         // --- Shadows (CSM) ---
         const csmBody = _section(container, "Shadows (CSM)", false);
+        const syncCsm = () => app.syncCsm?.();
         _toggle(csmBody, ts.csm, "enabled", {
           label: "Enabled",
           onChange: () => {
@@ -12622,7 +12623,14 @@
             refreshTp();
           },
         });
-        _toggle(csmBody, ts.csm, "updateEveryFrame", { label: "Every frame" });
+        _toggle(csmBody, ts.csm, "updateEveryFrame", {
+          label: "Every frame",
+        });
+        _toggle(csmBody, ts.csm, "fade", {
+          label: "Cascade fade",
+          hint: "Soft blend between shadow cascades to hide split seams.",
+          onChange: syncCsm,
+        });
         _slider(csmBody, ts.light, "shadowBias", {
           label: "Bias",
           min: -0.01,
@@ -12640,24 +12648,36 @@
           min: 1,
           max: 4,
           step: 1,
+          onChange: syncCsm,
         });
         _slider(csmBody, ts.csm, "maxFar", {
           label: "Max far",
           min: 30,
           max: 600,
           step: 10,
+          onChange: syncCsm,
         });
         _slider(csmBody, ts.csm, "lightMargin", {
           label: "Light margin",
           min: 0,
           max: 400,
           step: 10,
+          onChange: syncCsm,
         });
         _slider(csmBody, ts.csm, "mapSize", {
           label: "Map size",
           min: 512,
           max: 4096,
           step: 512,
+          onChange: syncCsm,
+        });
+        _slider(csmBody, ts.csm, "shadowRadius", {
+          label: "PCF radius",
+          min: 1,
+          max: 12,
+          step: 0.5,
+          hint: "Shadow filter blur in texels (PCFShadowMap). Try 4–8 for soft edges.",
+          onChange: syncCsm,
         });
 
         // --- Lens Flare ---

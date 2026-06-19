@@ -312,6 +312,7 @@ export async function startV2App(opts = {}) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.shadowMap.transmitted = true;
   (_uiContainer || document.body).appendChild(renderer.domElement);
 
@@ -352,6 +353,28 @@ export async function startV2App(opts = {}) {
   // sky dome always needs as the true sun (for the sun disc). Used by the
   // directional light + grass/foliage/ocean lighting.
   const _effectiveLightDir = new THREE.Vector3();
+  const _shadowFocus = new THREE.Vector3();
+  const _shadowCamDist = new THREE.Vector3();
+
+  /** Tight ortho shadow frustum when CSM is off — avoids the old ±300 m mega-texels. */
+  function fitDirectionalShadowToView(cam, focus, maxFar, lightMargin) {
+    const shadowCam = sun.shadow.camera;
+    _shadowCamDist.subVectors(cam.position, focus);
+    const dist = _shadowCamDist.length();
+    const half = THREE.MathUtils.clamp(
+      Math.max(12, Math.min(maxFar * 0.4, dist * 0.55)),
+      12,
+      maxFar,
+    );
+    shadowCam.left = -half;
+    shadowCam.right = half;
+    shadowCam.top = half;
+    shadowCam.bottom = -half;
+    shadowCam.near = 0.5;
+    shadowCam.far = half * 2 + lightMargin + 50;
+    shadowCam.updateProjectionMatrix();
+    sun.shadow.needsUpdate = true;
+  }
   function sunDirectionFromAngles(azDeg, elDeg, target = new THREE.Vector3()) {
     const az = THREE.MathUtils.degToRad(azDeg);
     const el = THREE.MathUtils.degToRad(elDeg);
@@ -394,12 +417,13 @@ export async function startV2App(opts = {}) {
   scene.add(shadowTarget);
   sun.target = shadowTarget;
   sun.shadow.mapSize.set(toolState.csm.mapSize, toolState.csm.mapSize);
-  sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 300;
-  sun.shadow.camera.left = sun.shadow.camera.bottom = -300;
-  sun.shadow.camera.right = sun.shadow.camera.top = 300;
+  sun.shadow.camera.near = 0.5;
+  sun.shadow.camera.far = 400;
+  sun.shadow.camera.left = sun.shadow.camera.bottom = -80;
+  sun.shadow.camera.right = sun.shadow.camera.top = 80;
   sun.shadow.bias = L.shadowBias;
   sun.shadow.normalBias = L.shadowNormalBias;
+  sun.shadow.radius = toolState.csm.shadowRadius;
   scene.add(sun);
 
   /** splatmap-chunks.html: `CSMShadowNode` (WebGPU); falls back to plain shadow if init fails. */
@@ -408,33 +432,244 @@ export async function startV2App(opts = {}) {
   let _lastCsmMaxFar = toolState.csm.maxFar;
   let _lastCsmMargin = toolState.csm.lightMargin;
   let _lastCsmMapSize = toolState.csm.mapSize;
+  let _lastCsmFade = toolState.csm.fade;
+  let _lastCsmRadius = toolState.csm.shadowRadius ?? 4;
+  let _lastCsmEnabled = toolState.csm.enabled;
+  // Bumped each time the CSM node structure changes (cascade count, fade, enable/disable).
+  // Written into material.customProgramCacheKey so Three.js sees a different getMaterialCacheKey()
+  // and DISPOSES the old RenderObject instead of reusing its stale _nodeBuilderState (which still
+  // references the old, disposed CSM instance and its dead shadow nodes).
+  let _csmPipelineVersion = 0;
+
+  /** WebGPU caches the sun's shadow TSL graph on first compile — must bust on CSM toggle. */
+  function invalidateSunShadowPipeline() {
+    // Three.js WebGPU reuses a RenderObject's cached _nodeBuilderState (the compiled TSL graph)
+    // as long as getMaterialCacheKey() returns the same string. Setting needsUpdate=true only
+    // bumps material.version, which triggers a version-mismatch check in RenderObjects.get(),
+    // but if the cache key is unchanged the old RenderObject is just version-stamped and its
+    // stale _nodeBuilderState (built from the PREVIOUS CSM instance) is reused forever.
+    //
+    // Fix: bump _csmPipelineVersion and embed it in customProgramCacheKey() so the cache key
+    // actually changes. This forces dispose+recreate of the RenderObject → fresh TSL build
+    // → the new CSM's setup(builder) / _init() is called → cascade lights created.
+    _csmPipelineVersion++;
+    const ver = _csmPipelineVersion;
+    scene.traverse((obj) => {
+      if (!obj.isMesh) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const m of mats) {
+        if (!m?.isNodeMaterial) continue;
+        // Chain onto whatever customProgramCacheKey the material already has.
+        // Store original under _csmOrigCPCK (underscore prefix → excluded from getMaterialCacheKey).
+        if (!m._csmOrigCPCK) m._csmOrigCPCK = m.customProgramCacheKey.bind(m);
+        const orig = m._csmOrigCPCK;
+        m.customProgramCacheKey = () => orig() + `|csm${ver}`;
+        m.needsUpdate = true;
+      }
+    });
+  }
+
+  function setCsmCascadeLightsInScene(active) {
+    if (!csm) return;
+    const parent = sun.parent;
+    for (let i = 0; i < csm.lights.length; i++) {
+      const lw = csm.lights[i];
+      if (active) {
+        if (lw.parent === null) {
+          parent.add(lw.target);
+          parent.add(lw);
+        }
+      } else if (lw.parent) {
+        lw.parent.remove(lw.target);
+        lw.parent.remove(lw);
+      }
+    }
+  }
 
   function setCsmEnabled(on) {
     if (!sun.shadow) return;
-    sun.shadow.shadowNode = on && csm ? csm : null;
+    toolState.csm.enabled = on;
+    _shadowFocus.copy(
+      playMode.active ? playMode.playerPos : controls.target,
+    );
+    syncCsmFromToolState();
   }
 
-  try {
-    if (renderer.shadowMap) {
+  function syncCascadeShadowSettings() {
+    if (!csm) return;
+    const mapSize = Math.round(Number(toolState.csm.mapSize));
+    const shadowRadius = Number(toolState.csm.shadowRadius ?? 4);
+    const normalBias = sun.shadow.normalBias;
+    const baseBias = sun.shadow.bias;
+    // Far must cover lightMargin depth offset + scene height range.
+    // Without this, a high lightMargin pushes the back of the bbox past far=400.
+    const cascadeCamFar = Number(toolState.csm.lightMargin) + 500;
+    sun.shadow.mapSize.set(mapSize, mapSize);
+    sun.shadow.radius = shadowRadius;
+    sun.shadow.needsUpdate = true;
+    for (let i = 0; i < csm.lights.length; i++) {
+      const sh = csm.lights[i].shadow;
+      sh.mapSize.set(mapSize, mapSize);
+      sh.radius = shadowRadius;
+      // Scale normalBias with cascade index: far cascades have coarser texels
+      // and need more offset to prevent acne without over-biasing the near one.
+      sh.normalBias = normalBias * Math.sqrt(i + 1);
+      sh.bias = baseBias * (i + 1);
+      if (sh.camera) {
+        sh.camera.far = cascadeCamFar;
+        sh.camera.updateProjectionMatrix();
+      }
+      sh.needsUpdate = true;
+    }
+  }
+
+  function csmCfgNum(cfg) {
+    return {
+      cascades: Math.round(Number(cfg.cascades)),
+      fade: !!cfg.fade,
+      mapSize: Math.round(Number(cfg.mapSize)),
+      maxFar: Number(cfg.maxFar),
+      lightMargin: Number(cfg.lightMargin),
+      shadowRadius: Number(cfg.shadowRadius ?? 4),
+      enabled: !!cfg.enabled,
+    };
+  }
+
+  /** Push live `toolState.csm` into the CSMShadowNode (called every frame + from UI). */
+  function syncCsmFromToolState() {
+    const cfg = csmCfgNum(toolState.csm);
+    shadowTarget.position.set(_shadowFocus.x, 0, _shadowFocus.z);
+
+    if (!csm) {
+      if (!cfg.enabled) {
+        fitDirectionalShadowToView(
+          camera,
+          _shadowFocus,
+          cfg.maxFar,
+          cfg.lightMargin,
+        );
+      }
+      return;
+    }
+
+    sun.castShadow = true;
+    const prevEnabled = _lastCsmEnabled;
+    sun.shadow.shadowNode = cfg.enabled ? csm : null;
+
+    if (cfg.enabled !== prevEnabled) {
+      _lastCsmEnabled = cfg.enabled;
+      // Only sync scene membership on the actual state transition, not every
+      // frame.  CSMShadowNode.updateBefore() re-adds lights when parent===null,
+      // so calling this every frame while disabled creates an endless fight.
+      setCsmCascadeLightsInScene(cfg.enabled);
+      invalidateSunShadowPipeline();
+    }
+
+    if (!cfg.enabled) {
+      fitDirectionalShadowToView(
+        camera,
+        _shadowFocus,
+        cfg.maxFar,
+        cfg.lightMargin,
+      );
+      syncCascadeShadowSettings();
+      return;
+    }
+
+    // Only cascade count and fade mode require a full TSL graph rebuild (they change
+    // the number of shadow() nodes and/or the fade vs standard code path).
+    // mapSize, maxFar, lightMargin, and shadowRadius are all runtime-uniform changes
+    // handled by syncCascadeShadowSettings() / updateFrustums() below.
+    const recreateNeeded =
+      cfg.cascades !== _lastCsmCascades ||
+      cfg.fade !== _lastCsmFade;
+
+    if (recreateNeeded) {
+      _lastCsmCascades = cfg.cascades;
+      _lastCsmFade = cfg.fade;
+      _lastCsmMapSize = cfg.mapSize;
+      _lastCsmMaxFar = cfg.maxFar;
+      _lastCsmMargin = cfg.lightMargin;
+      _lastCsmRadius = cfg.shadowRadius;
+      recreateCsm();
+      sun.shadow.shadowNode = csm;
+      setCsmCascadeLightsInScene(true);
+      invalidateSunShadowPipeline();
+      return;
+    }
+
+    if (cfg.mapSize !== _lastCsmMapSize) {
+      _lastCsmMapSize = cfg.mapSize;
+      syncCascadeShadowSettings(); // resizes cascade shadow map textures via sh.needsUpdate
+    }
+
+    if (cfg.shadowRadius !== _lastCsmRadius) {
+      _lastCsmRadius = cfg.shadowRadius;
+      syncCascadeShadowSettings();
+    }
+
+    let needsFrustumUpdate = false;
+    if (cfg.maxFar !== _lastCsmMaxFar) {
+      csm.maxFar = cfg.maxFar;
+      needsFrustumUpdate = true;
+    }
+    if (cfg.lightMargin !== _lastCsmMargin) {
+      csm.lightMargin = cfg.lightMargin;
+      needsFrustumUpdate = true;
+    }
+
+    if (csm.mainFrustum) {
+      if (needsFrustumUpdate) {
+        _lastCsmMaxFar = cfg.maxFar;
+        _lastCsmMargin = cfg.lightMargin;
+      }
+      syncCascadeShadowSettings();
+      csm.updateFrustums();
+    }
+  }
+
+  function invalidateCsmSyncState() {
+    _lastCsmCascades = NaN;
+    _lastCsmFade = !toolState.csm.fade;
+    _lastCsmMapSize = -1;
+    _lastCsmMaxFar = NaN;
+    _lastCsmMargin = NaN;
+    _lastCsmRadius = NaN;
+    _lastCsmEnabled = !toolState.csm.enabled;
+  }
+
+  function recreateCsm() {
+    if (!renderer.shadowMap) return;
+    if (csm) {
+      sun.shadow.shadowNode = null;
+      csm.dispose();
+      csm = null;
+    }
+    try {
       csm = new CSMShadowNode(sun, {
         cascades: toolState.csm.cascades,
         maxFar: toolState.csm.maxFar,
         mode: "practical",
         lightMargin: toolState.csm.lightMargin,
       });
-      if (csm.lights.length > 2) {
-        csm.lights[2].shadow.mapSize.set(1024, 1024);
-      }
-      if (toolState.csm.enabled) {
-        sun.shadow.shadowNode = csm;
-      }
+      csm.fade = !!toolState.csm.fade;
+      syncCascadeShadowSettings();
+      if (toolState.csm.enabled) sun.shadow.shadowNode = csm;
+    } catch (err) {
+      console.warn(
+        "[V2] CSMShadowNode recreate failed; using non-CSM directional shadow.",
+        err,
+      );
+      csm = null;
     }
-  } catch (err) {
-    console.warn(
-      "[V2] CSMShadowNode init failed; using non-CSM directional shadow.",
-      err,
-    );
-    csm = null;
+  }
+
+  if (renderer.shadowMap) {
+    recreateCsm();
+    if (toolState.csm.enabled) {
+      sun.shadow.shadowNode = csm;
+      setCsmCascadeLightsInScene(true);
+    }
   }
 
   const sky = new SkyMesh();
@@ -750,9 +985,11 @@ export async function startV2App(opts = {}) {
     const domeClone = dayNightSky.mesh.clone();
     domeClone.position.set(0, 0, 0);
     _procEnvScene.add(domeClone);
-    // 64 (not 128): IBL is blurred by PMREM anyway, and a smaller cube quarters
-    // the per-face scattering-raymarch cost — the dominant per-bake GPU expense.
-    _procCubeRT = new THREE.CubeRenderTarget(64, { type: THREE.HalfFloatType });
+    // 128px: the physical SkyMesh path uses PMREMGenerator.fromScene() which bakes
+    // at ~256px.  At 64px the sun disc was blurred over too wide a solid angle after
+    // PMREM convolution, making the procedural IBL ~4× dimmer than physical at equal
+    // envIntensity.  128 halves that gap with a still-manageable per-face cost.
+    _procCubeRT = new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType });
     _procCubeCam = new THREE.CubeCamera(0.1, 20000, _procCubeRT);
     _procCubeCam.updateMatrixWorld(true);
     pmremGenerator = pmremGenerator ?? new THREE.PMREMGenerator(renderer);
@@ -3713,6 +3950,7 @@ export async function startV2App(opts = {}) {
         }
         // Restore settings
         applySettings(toolState, project.settings);
+        invalidateCsmSyncState();
         // Gemini/hybrid grass: restore the painted density map, then rebuild
         // blade geometry + visibility from the restored params. (applySettings
         // already put the params back into toolState.grass.)
@@ -4269,6 +4507,7 @@ export async function startV2App(opts = {}) {
     hemi.intensity = Li.hemiIntensity;
     sun.shadow.bias = Li.shadowBias;
     sun.shadow.normalBias = Li.shadowNormalBias;
+    syncCascadeShadowSettings();
     renderer.toneMappingExposure = Li.exposure;
     if (toolState.skyMode === "hdr") {
       scene.environmentIntensity = Li.hdrEnvIntensity ?? 1;
@@ -5934,32 +6173,8 @@ export async function startV2App(opts = {}) {
       scene.environmentIntensity = Li.hdrEnvIntensity * fillScale;
     }
 
-    shadowTarget.position.set(focusPos.x, 0, focusPos.z);
-    const csmCfg = toolState.csm;
-    const csmChanged =
-      csm &&
-      csmCfg.enabled &&
-      (csmCfg.cascades !== _lastCsmCascades ||
-        csmCfg.maxFar !== _lastCsmMaxFar ||
-        csmCfg.lightMargin !== _lastCsmMargin ||
-        csmCfg.mapSize !== _lastCsmMapSize);
-    if (csm?.mainFrustum && csmChanged) {
-      _lastCsmCascades = csmCfg.cascades;
-      _lastCsmMaxFar = csmCfg.maxFar;
-      _lastCsmMargin = csmCfg.lightMargin;
-      _lastCsmMapSize = csmCfg.mapSize;
-      csm.cascades = csmCfg.cascades;
-      csm.maxFar = csmCfg.maxFar;
-      csm.lightMargin = csmCfg.lightMargin;
-      sun.shadow.mapSize.set(csmCfg.mapSize, csmCfg.mapSize);
-      if (csm.lights.length > 2) {
-        csm.lights[2].shadow.mapSize.set(1024, 1024);
-      }
-      csm.updateFrustums();
-    }
-    if (csm?.mainFrustum && csmCfg.enabled && csmCfg.updateEveryFrame) {
-      csm.updateFrustums();
-    }
+    _shadowFocus.copy(cloudFollowAnchor);
+    syncCsmFromToolState();
 
     if (heightTexDirty && now - lastHeightTexSyncMs > 500) {
       rebuildGlobalHeightTexture();
@@ -6400,6 +6615,7 @@ export async function startV2App(opts = {}) {
     syncInteriorUniforms,
     rebuildInteriorVolumes,
     setCsmEnabled,
+    syncCsm: syncCsmFromToolState,
     rebuildSkyEnv,
     rebuildProceduralSkyEnv,
     setTimeOfDay,

@@ -435,11 +435,19 @@ export const V2_CONFIG = {
   /** `splatmap-chunks.html` PARAMS.csm — WebGPU `CSMShadowNode` on the sun. */
   csm: {
     enabled: true,
-    cascades: 2,
-    maxFar: 300,
-    lightMargin: 100,
+    // 4 cascades: with maxFar=80 and practical split (λ=0.5) the splits land at
+    // ~11m / ~24m / ~45m / 80m.  Character at 5-15m falls in cascade-0 whose
+    // ortho bounds are only ~14m wide → ~0.7 cm/texel at 2048 px.
+    // (3 cascades + maxFar=150 gave ~37m wide bounds → ~1.8 cm/texel — 2.5× coarser.)
+    cascades: 4,
+    maxFar: 80,
+    lightMargin: 200,
     mapSize: 2048,
-    updateEveryFrame: false,
+    /** PCF kernel radius in texels (PCFShadowMap — PCFSoft ignores this). */
+    shadowRadius: 4,
+    /** Cross-fade between cascades to hide split seams (requires CSM recreate). */
+    fade: true,
+    updateEveryFrame: true,
   },
   tree: {
     maxSlots: 8,

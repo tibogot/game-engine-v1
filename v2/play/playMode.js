@@ -42,6 +42,7 @@ import { Vehicle as ModularVehicle } from "./modularRoadVehicle.js";
 import { createVehicleGround } from "./modularRoadGround.js";
 import { RoadBvh } from "./modularRoadBvh.js";
 import { CapsuleController } from "./onFootCapsule.js";
+import { createMovingPlatforms } from "./movingPlatforms.js";
 
 // ============================================================
 // === VVV CAR scratch (module-scope; reused across frames to avoid GC).
@@ -82,10 +83,7 @@ const CHAR_HAT = "../models/asian_conical_hat_compressed.glb";
 const CHAR_HEIGHT = 2.5;
 const CHAR_WALK_SPEED = 4.0;
 const CHAR_RUN_SPEED = 8.0;
-const CHAR_JUMP_VEL = 11.0;
-const CHAR_GRAVITY = 20.0;
 const CHAR_ROLL_PEAK = 13.0;
-const CHAR_GLIDE_FALL_SPEED = 3.0;
 const CHAR_SLIDE_SPEED = 10.0;
 const CHAR_SLIDE_MAX_TIME = 1.2;
 const PI = Math.PI;
@@ -905,6 +903,8 @@ export class PlayMode {
     // for moving-platform content (none yet).
     this._onFoot = new CapsuleController();
     this._onFootPlatforms = null;
+    this._demoPlatformsOn = true; // demo elevator + slider (toggle in panel)
+    this._movers = null; // lazily created on first play (needs terrain)
     this._onFootWire = null; // debug wireframe capsule (toggle in on-foot panel)
     this._onFootWireOn = false;
     this._onFootWireDims = { r: 0, h: 0 };
@@ -1890,12 +1890,21 @@ export class PlayMode {
       solver.add(p, "substepFraction", 0.2, 1, 0.05).name("Substep frac");
       solver.close();
 
-      const dbg = { showCollider: this._onFootWireOn };
+      const dbg = {
+        showCollider: this._onFootWireOn,
+        demoPlatforms: this._demoPlatformsOn,
+      };
       gui
         .add(dbg, "showCollider")
         .name("Show collider")
         .onChange((v) => {
           this._onFootWireOn = v;
+        });
+      gui
+        .add(dbg, "demoPlatforms")
+        .name("Demo platforms")
+        .onChange((v) => {
+          this._demoPlatformsOn = v;
         });
 
       this._onFootGui = gui;
@@ -4972,6 +4981,8 @@ export class PlayMode {
       this._jeepTuningGui.domElement.style.display = "none";
     if (this._onFootGui) this._onFootGui.domElement.style.display = "none";
     if (this._onFootWire) this._onFootWire.visible = false;
+    if (this._movers) this._movers.setVisible(false);
+    this._onFootPlatforms = null;
     this.planeSpeed = 0;
     this.planeNitro = PLANE_NITRO_FULL;
     this._planeHudSpdSmooth = 0;
@@ -5529,6 +5540,22 @@ export class PlayMode {
       !flying &&
       !carDriving &&
       (this.moveMode === "char" || this.moveMode === "capsule");
+
+    // Demo moving platforms — created lazily once terrain is ready, advanced
+    // before the controller so carry + collision use this frame's box/delta.
+    if (this.active && this._demoPlatformsOn) {
+      if (!this._movers) {
+        this._movers = createMovingPlatforms(this.scene, (x, z) =>
+          this.getTerrainHeight(x, z),
+        );
+      }
+      this._movers.update(dtSec);
+      this._movers.setVisible(true);
+      this._onFootPlatforms = this._movers.platforms;
+    } else {
+      if (this._movers) this._movers.setVisible(false);
+      this._onFootPlatforms = null;
+    }
 
     // Rigid-body cars (VVV + Stunt) run their own physics + sync playerPos /
     // carHeading BEFORE the kinematic carDriving paths below execute. Those
@@ -7913,6 +7940,10 @@ export class PlayMode {
       this._onFootWire.geometry?.dispose();
       this._onFootWire.material?.dispose();
       this._onFootWire = null;
+    }
+    if (this._movers) {
+      this._movers.dispose();
+      this._movers = null;
     }
     if (this._onFootGui) {
       this._onFootGui.destroy();
