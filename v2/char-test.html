@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Character Physics Test</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+        "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
+        "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.tsl.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
+        "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.9/build/index.module.js"
+      }
+    }
+  </script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1117; }
+    canvas { display: block; }
+    #hud {
+      position: fixed; left: 12px; top: 12px; z-index: 10;
+      font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace;
+      color: #cfe8ff; background: rgba(8,14,22,0.72);
+      padding: 10px 14px; border-radius: 8px; pointer-events: none;
+      white-space: pre; border: 1px solid rgba(255,255,255,0.06);
+    }
+    #hud b { color: #7fd1ff; }
+    #panel {
+      position: fixed; top: 12px; right: 12px; z-index: 20;
+      width: 280px; max-height: calc(100vh - 24px); overflow-y: auto;
+      font: 11px/1.5 ui-monospace, Menlo, Consolas, monospace;
+      color: #d0d0d8; background: rgba(8,12,20,0.9);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+      padding: 12px; backdrop-filter: blur(8px);
+    }
+    #panel h2 {
+      font-size: 11px; font-weight: 700; color: #7fd1ff;
+      text-transform: uppercase; letter-spacing: .06em;
+      margin-bottom: 10px;
+    }
+    #panel details { margin-bottom: 6px; }
+    #panel summary {
+      cursor: pointer; color: #7fd1ff; font-weight: 600;
+      padding: 3px 0; user-select: none; list-style: none;
+    }
+    #panel summary::before { content: "▶ "; font-size: 9px; }
+    #panel details[open] summary::before { content: "▼ "; }
+    .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px; margin: 3px 0; }
+    .row span { color: #9898a8; }
+    .row output { color: #7fd1ff; font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+    .row input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: #7fd1ff; cursor: pointer; }
+    #panel hr { border: none; border-top: 1px solid rgba(255,255,255,0.07); margin: 8px 0; }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<div id="panel">
+  <h2>Character Physics Test</h2>
+  <details open>
+    <summary>Movement</summary>
+    <div class="row"><span>walkSpeed</span><output id="o-walkSpeed"></output></div>
+    <input type="range" id="s-walkSpeed" min="1" max="12" step="0.5">
+    <div class="row"><span>runSpeed</span><output id="o-runSpeed"></output></div>
+    <input type="range" id="s-runSpeed" min="2" max="20" step="0.5">
+    <div class="row"><span>crouchMult</span><output id="o-crouchMult"></output></div>
+    <input type="range" id="s-crouchMult" min="0.1" max="1" step="0.05">
+  </details>
+  <details open>
+    <summary>Jump / Air</summary>
+    <div class="row"><span>jumpVel</span><output id="o-jumpVel"></output></div>
+    <input type="range" id="s-jumpVel" min="3" max="20" step="0.5">
+    <div class="row"><span>gravity</span><output id="o-gravity"></output></div>
+    <input type="range" id="s-gravity" min="5" max="40" step="0.5">
+    <div class="row"><span>coyoteTime</span><output id="o-coyoteTime"></output></div>
+    <input type="range" id="s-coyoteTime" min="0" max="0.4" step="0.01">
+    <div class="row"><span>glideFallSpeed</span><output id="o-glideFallSpeed"></output></div>
+    <input type="range" id="s-glideFallSpeed" min="0.5" max="10" step="0.25">
+  </details>
+  <details>
+    <summary>Terrain / Collision</summary>
+    <div class="row"><span>stepMaxHeight</span><output id="o-stepMaxHeight"></output></div>
+    <input type="range" id="s-stepMaxHeight" min="0" max="1.2" step="0.05">
+    <div class="row"><span>groundStickDist</span><output id="o-groundStickDist"></output></div>
+    <input type="range" id="s-groundStickDist" min="0" max="1.5" step="0.05">
+    <div class="row"><span>groundSpringK</span><output id="o-groundSpringK"></output></div>
+    <input type="range" id="s-groundSpringK" min="5" max="60" step="1">
+    <div class="row"><span>groundSpringRange</span><output id="o-groundSpringRange"></output></div>
+    <input type="range" id="s-groundSpringRange" min="0.1" max="1.5" step="0.05">
+  </details>
+  <details>
+    <summary>Animation Sync</summary>
+    <div class="row"><span>walkAnimRef</span><output id="o-walkAnimRef"></output></div>
+    <input type="range" id="s-walkAnimRef" min="0.5" max="6" step="0.1">
+    <div class="row"><span>runAnimRef</span><output id="o-runAnimRef"></output></div>
+    <input type="range" id="s-runAnimRef" min="1" max="14" step="0.1">
+  </details>
+  <details>
+    <summary>Counter-Impulse</summary>
+    <div class="row"><span>charMass (kg)</span><output id="o-charMass"></output></div>
+    <input type="range" id="s-charMass" min="10" max="200" step="5">
+    <div class="row"><span>impulseScale</span><output id="o-impulseScale"></output></div>
+    <input type="range" id="s-impulseScale" min="0" max="2" step="0.05">
+  </details>
+  <hr>
+  <div style="color:#9898a8;font-size:10px;line-height:1.8">
+    <b style="color:#7fd1ff">WASD</b> move &nbsp; <b style="color:#7fd1ff">Shift</b> run<br>
+    <b style="color:#7fd1ff">Space</b> jump &nbsp; <b style="color:#7fd1ff">C</b> crouch<br>
+    <b style="color:#7fd1ff">G</b> toggle glide &nbsp; <b style="color:#7fd1ff">R</b> reset<br>
+    <b style="color:#7fd1ff">Mouse drag</b> orbit camera
+  </div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { MeshBVH } from 'three-mesh-bvh';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { CapsuleController, DEFAULT_CAPSULE_PARAMS } from './play/onFootCapsule.js';
+
+// ─── Tunable params (mirrored into GUI) ─────────────────────────────────────
+const tune = {
+  walkAnimRef:   2.0,
+  runAnimRef:    5.5,
+  charMass:      70,
+  impulseScale:  0.5,
+};
+
+// ─── Renderer ────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+await renderer.init();
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a2438);
+scene.fog = new THREE.Fog(0x1a2438, 40, 120);
+
+const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 500);
+
+function onResize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', onResize);
+onResize();
+
+// ─── Lights ──────────────────────────────────────────────────────────────────
+const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+sun.position.set(30, 60, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 0.5;
+sun.shadow.camera.far = 200;
+sun.shadow.camera.left = -60;
+sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 60;
+sun.shadow.camera.bottom = -60;
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0x8899bb, 0.6));
+const fill = new THREE.DirectionalLight(0x99aaff, 0.4);
+fill.position.set(-20, 10, -30);
+scene.add(fill);
+
+// ─── Static scene geometry ───────────────────────────────────────────────────
+const staticMeshes = [];
+
+function addStatic(geo, mat, pos, rot, name) {
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(pos);
+  if (rot) mesh.rotation.copy(rot);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.name = name || '';
+  scene.add(mesh);
+  staticMeshes.push(mesh);
+  return mesh;
+}
+
+const matGround  = new THREE.MeshStandardMaterial({ color: 0x3d5c3d, roughness: 0.9, metalness: 0 });
+const matConcrete= new THREE.MeshStandardMaterial({ color: 0x606070, roughness: 0.85, metalness: 0 });
+const matRamp    = new THREE.MeshStandardMaterial({ color: 0x7a5c3a, roughness: 0.8, metalness: 0 });
+const matPlatform= new THREE.MeshStandardMaterial({ color: 0x3a5c7a, roughness: 0.7, metalness: 0.1 });
+
+// Ground
+addStatic(new THREE.BoxGeometry(80, 0.4, 80), matGround,
+  new THREE.Vector3(0, -0.2, 0), null, 'ground');
+
+// Ramp (30° slope)
+{
+  const ramp = new THREE.BoxGeometry(6, 0.3, 10);
+  addStatic(ramp, matRamp,
+    new THREE.Vector3(-12, 1.45, 5),
+    new THREE.Euler(-Math.PI * 0.16, 0, 0), 'ramp');
+}
+
+// Stairs (6 steps, each 0.3m tall, 0.8m deep, 4m wide)
+for (let i = 0; i < 6; i++) {
+  addStatic(
+    new THREE.BoxGeometry(4, 0.3 + i * 0.3, 0.8),
+    matConcrete,
+    new THREE.Vector3(8, (0.3 + i * 0.3) * 0.5, -i * 0.8),
+    null, `stair_${i}`
+  );
+}
+
+// Elevated platform (reached by stairs)
+addStatic(new THREE.BoxGeometry(6, 0.3, 6), matPlatform,
+  new THREE.Vector3(8, 1.95, -5.5), null, 'platform_main');
+
+// Floating island
+addStatic(new THREE.BoxGeometry(5, 0.3, 5), matPlatform,
+  new THREE.Vector3(18, 3.0, 0), null, 'platform_float');
+
+// Small step series (parkour)
+for (let i = 0; i < 4; i++) {
+  addStatic(
+    new THREE.BoxGeometry(2, 0.3 + i * 0.4, 2),
+    matConcrete,
+    new THREE.Vector3(-8 - i * 2.2, (0.3 + i * 0.4) * 0.5, -6),
+    null, `parkour_${i}`
+  );
+}
+
+// Low wall (for testing autostep)
+addStatic(new THREE.BoxGeometry(8, 0.5, 0.4), matConcrete,
+  new THREE.Vector3(0, 0.25, -10), null, 'wall_low');
+
+// Tunnel-ish overhang (for crouch testing)
+addStatic(new THREE.BoxGeometry(4, 0.3, 6), matConcrete,
+  new THREE.Vector3(-18, 1.3, 0), null, 'overhang');
+addStatic(new THREE.BoxGeometry(0.4, 1.3, 6), matConcrete,
+  new THREE.Vector3(-16.2, 0.65, 0), null, 'overhang_wall_r');
+addStatic(new THREE.BoxGeometry(0.4, 1.3, 6), matConcrete,
+  new THREE.Vector3(-19.8, 0.65, 0), null, 'overhang_wall_l');
+
+// Grid lines on ground for visual reference
+{
+  const gridHelper = new THREE.GridHelper(80, 40, 0x334455, 0x1e2a36);
+  gridHelper.position.y = 0.01;
+  scene.add(gridHelper);
+}
+
+// ─── BVH Collider ────────────────────────────────────────────────────────────
+// Temporaries (same approach as cliffBvh.js)
+const _bvhRay   = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+const _capSeg   = new THREE.Line3();
+const _capBox   = new THREE.Box3();
+const _capTriPt = new THREE.Vector3();
+const _capSegPt = new THREE.Vector3();
+const _capPush  = new THREE.Vector3();
+
+function buildCollider(meshes) {
+  // Merge world-space triangles from all static meshes.
+  const positions = [];
+  const indices   = [];
+  let   voff      = 0;
+  const tmp = new THREE.Vector3();
+
+  for (const mesh of meshes) {
+    mesh.updateWorldMatrix(true, false);
+    const geo = mesh.geometry;
+    const pos = geo.getAttribute('position');
+    const idx = geo.getIndex();
+    for (let i = 0; i < pos.count; i++) {
+      tmp.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      positions.push(tmp.x, tmp.y, tmp.z);
+    }
+    if (idx) {
+      for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + voff);
+    } else {
+      for (let i = 0; i < pos.count; i++) indices.push(i + voff);
+    }
+    // Double-sided (flip winding)
+    const base = indices.length - (idx ? idx.count : pos.count);
+    const len  = indices.length - base;
+    for (let i = 0; i < len; i += 3)
+      indices.push(indices[base+i], indices[base+i+2], indices[base+i+1]);
+    voff += pos.count;
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  const bvh = new MeshBVH(geo);
+
+  return {
+    baked: true,
+    _bvh: bvh,
+    capsuleDepenetrate(sx, sy, sz, ex, ey, ez, radius) {
+      _capSeg.start.set(sx, sy, sz);
+      _capSeg.end.set(ex, ey, ez);
+      _capBox.makeEmpty();
+      _capBox.expandByPoint(_capSeg.start);
+      _capBox.expandByPoint(_capSeg.end);
+      _capBox.min.addScalar(-radius);
+      _capBox.max.addScalar(radius);
+      let maxNY = -1, moved = false;
+      bvh.shapecast({
+        intersectsBounds: b => b.intersectsBox(_capBox),
+        intersectsTriangle(tri) {
+          const dist = tri.closestPointToSegment(_capSeg, _capTriPt, _capSegPt);
+          if (dist < radius) {
+            const depth = radius - dist;
+            _capPush.copy(_capSegPt).sub(_capTriPt);
+            const len = _capPush.length();
+            if (len > 1e-9) {
+              _capPush.multiplyScalar(1 / len);
+              _capSeg.start.addScaledVector(_capPush, depth);
+              _capSeg.end.addScaledVector(_capPush, depth);
+              if (_capPush.y > maxNY) maxNY = _capPush.y;
+              moved = true;
+            }
+          }
+          return false;
+        },
+      });
+      if (!moved) return { dx:0, dy:0, dz:0, maxNY:-1 };
+      return { dx: _capSeg.start.x-sx, dy: _capSeg.start.y-sy, dz: _capSeg.start.z-sz, maxNY };
+    },
+    raycastDown(ox, oy, oz, maxDist) {
+      _bvhRay.origin.set(ox, oy, oz);
+      _bvhRay.direction.set(0, -1, 0);
+      const hit = bvh.raycastFirst(_bvhRay);
+      if (hit && hit.distance <= maxDist) {
+        const n = hit.face.normal;
+        const sign = n.y < 0 ? -1 : 1;
+        return { y: hit.point.y, ny: n.y * sign, nx: n.x * sign, nz: n.z * sign };
+      }
+      return null;
+    },
+    raycastUp(ox, oy, oz, maxDist) {
+      _bvhRay.origin.set(ox, oy, oz);
+      _bvhRay.direction.set(0, 1, 0);
+      const hit = bvh.raycastFirst(_bvhRay);
+      if (hit && hit.distance <= maxDist) return hit.point.y;
+      return null;
+    },
+  };
+}
+
+const collider = buildCollider(staticMeshes);
+
+// ─── Dynamic physics boxes ────────────────────────────────────────────────────
+const GRAVITY = 20;
+const BOX_FRICTION = 0.80; // horizontal velocity multiplier per frame when on ground
+
+class DynBox {
+  constructor(x, y, z, w, h, d, mass, color) {
+    this.pos     = new THREE.Vector3(x, y, z);
+    this.prevPos = new THREE.Vector3(x, y, z);
+    this.vel     = new THREE.Vector3();
+    this.size    = new THREE.Vector3(w, h, d);
+    this.mass    = mass;
+    const geo = new THREE.BoxGeometry(w, h, d);
+    const mat = new THREE.MeshStandardMaterial({ color, roughness:0.7, metalness:0.05 });
+    this.mesh = new THREE.Mesh(geo, mat);
+    this.mesh.castShadow = true;
+    this.mesh.receiveShadow = true;
+    scene.add(this.mesh);
+    this._onGround = false;
+    // Platform interface consumed by CapsuleController
+    this.box   = { minX:0, maxX:0, minY:0, maxY:0, minZ:0, maxZ:0 };
+    this.delta = { x:0, y:0, z:0 };
+    this._refreshBox();
+  }
+
+  _refreshBox() {
+    const hw = this.size.x * 0.5, hh = this.size.y * 0.5, hd = this.size.z * 0.5;
+    this.box.minX = this.pos.x - hw;  this.box.maxX = this.pos.x + hw;
+    this.box.minY = this.pos.y - hh;  this.box.maxY = this.pos.y + hh;
+    this.box.minZ = this.pos.z - hd;  this.box.maxZ = this.pos.z + hd;
+  }
+
+  applyImpulse(ix, iy, iz) {
+    this.vel.x += ix / this.mass;
+    this.vel.y += iy / this.mass;
+    this.vel.z += iz / this.mass;
+  }
+
+  update(dt) {
+    // Record start-of-frame position so delta is available for character carry.
+    this.prevPos.copy(this.pos);
+
+    this.vel.y -= GRAVITY * dt;
+    this.pos.x += this.vel.x * dt;
+    this.pos.y += this.vel.y * dt;
+    this.pos.z += this.vel.z * dt;
+
+    // Simple ground floor
+    const floorY = this.size.y * 0.5;
+    if (this.pos.y < floorY) {
+      this.pos.y = floorY;
+      if (this.vel.y < 0) this.vel.y = 0;
+      this._onGround = true;
+    } else {
+      this._onGround = false;
+    }
+    if (this._onGround) {
+      this.vel.x *= BOX_FRICTION;
+      this.vel.z *= BOX_FRICTION;
+    }
+
+    // Update platform interface
+    this.delta.x = this.pos.x - this.prevPos.x;
+    this.delta.y = this.pos.y - this.prevPos.y;
+    this.delta.z = this.pos.z - this.prevPos.z;
+    this._refreshBox();
+
+    this.mesh.position.copy(this.pos);
+  }
+}
+
+const dynBoxes = [
+  new DynBox(  2, 0.4, 4,  0.8, 0.8, 0.8,  20, 0xe06030),
+  new DynBox( -2, 0.4, 3,  1.0, 1.0, 1.0,  50, 0x30a0e0),
+  new DynBox(  4, 0.6, 2,  1.2, 1.2, 1.2, 100, 0x60c050),
+  new DynBox( -4, 0.4, 6,  0.7, 0.7, 0.7,  15, 0xe0c030),
+  new DynBox(  0, 0.5, 7,  0.9, 1.0, 0.9,  40, 0xc050a0),
+];
+
+// ─── Input ───────────────────────────────────────────────────────────────────
+const keys = {};
+addEventListener('keydown', e => { keys[e.code] = true;  });
+addEventListener('keyup',   e => { keys[e.code] = false; });
+
+// Camera orbit via mouse drag
+let camYaw = 0, camPitch = 0.28, camDist = 7;
+let dragging = false, lastMX = 0, lastMY = 0;
+canvas.addEventListener('mousedown', e => { if (e.button===2||e.button===0) { dragging=true; lastMX=e.clientX; lastMY=e.clientY; } });
+addEventListener('mouseup', () => { dragging = false; });
+addEventListener('mousemove', e => {
+  if (!dragging) return;
+  camYaw   -= (e.clientX - lastMX) * 0.004;
+  camPitch -= (e.clientY - lastMY) * 0.004;
+  camPitch  = Math.max(0.05, Math.min(Math.PI * 0.45, camPitch));
+  lastMX = e.clientX; lastMY = e.clientY;
+});
+canvas.addEventListener('wheel', e => {
+  camDist = Math.max(2, Math.min(20, camDist + e.deltaY * 0.01));
+}, { passive: true });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ─── Character setup ─────────────────────────────────────────────────────────
+const ctrl   = new CapsuleController({ ...DEFAULT_CAPSULE_PARAMS });
+ctrl.reset(0, 1, 0);
+
+let charRoot    = null;
+let charInner   = null;
+let charMixer   = null;
+let charActions = null;
+let currentAction = null;
+let charYaw     = 0;
+
+const CHAR_HEIGHT = 2.5;
+const draco = new DRACOLoader();
+draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/libs/draco/');
+const loader = new GLTFLoader();
+loader.setDRACOLoader(draco);
+
+loader.load('/models/UA1+UA2_compressed.glb', (gltf) => {
+  const model = gltf.scene;
+  model.traverse(o => {
+    if (o.isMesh || o.isSkinnedMesh) {
+      o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
+    }
+  });
+
+  // Normalise height
+  const box = new THREE.Box3().setFromObject(model);
+  const sz  = new THREE.Vector3(); box.getSize(sz);
+  const scale = CHAR_HEIGHT / (sz.y || 1);
+  model.scale.setScalar(scale);
+  box.setFromObject(model);
+  model.position.y -= box.min.y;
+
+  charInner = model;
+  charRoot  = new THREE.Group();
+  charRoot.add(model);
+  scene.add(charRoot);
+
+  // Animations
+  if (gltf.animations?.length) {
+    charMixer = new THREE.AnimationMixer(model);
+    const pick = (...names) => gltf.animations.find(
+      a => names.some(n => a.name === n || a.name === n + '_Armature')
+    ) ?? null;
+
+    const mk = (clip, once) => {
+      if (!clip) return null;
+      const a = charMixer.clipAction(clip)
+        .setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat);
+      if (once) a.clampWhenFinished = true;
+      return a;
+    };
+
+    charActions = {
+      idle:      mk(pick('Idle_Loop'), false),
+      walk:      mk(pick('Walk_Loop'), false),
+      run:       mk(pick('Sprint_Loop','Jog_Fwd_Loop'), false),
+      jumpStart: mk(pick('Jump_Start'), true),
+      jumpLoop:  mk(pick('Jump_Loop','NinjaJump_Idle_Loop'), false),
+      jumpLand:  mk(pick('Jump_Land'), true),
+      crouch:    mk(pick('Crouch_Idle_Loop'), false),
+      crouchWalk:mk(pick('Crouch_Fwd_Loop'), false),
+    };
+    if (charActions.jumpStart) charActions.jumpStart.timeScale = 1.4;
+    if (charActions.jumpLand)  charActions.jumpLand.timeScale  = 1.8;
+
+    // Reset jump phase when the land animation finishes so locomotion resumes.
+    charMixer.addEventListener('finished', e => {
+      if (e.action === charActions.jumpLand) jumpPhase = 'none';
+    });
+
+    currentAction = charActions.idle;
+    if (currentAction) currentAction.play();
+  }
+});
+
+function setAction(next, fade = 0.15) {
+  if (!next || next === currentAction) return;
+  next.reset().enabled = true;
+  next.crossFadeFrom(currentAction, fade, false).play();
+  currentAction = next;
+}
+
+// ─── Animation + jump state ───────────────────────────────────────────────────
+let airActive   = false;
+let jumpPhase   = 'none'; // 'start' | 'loop' | 'land' | 'none'
+let airTime     = 0;
+
+// ─── Counter-impulse helpers ─────────────────────────────────────────────────
+// Called when the character JUMPS — push nearby boxes down AND away.
+// Pure downward impulse is invisible when boxes rest on the floor, so we add
+// a horizontal scatter component so something always moves.
+function applyJumpImpulse() {
+  const { x, y, z } = ctrl.position;
+  const mag = tune.charMass * ctrl.params.jumpVel * tune.impulseScale;
+  for (const box of dynBoxes) {
+    const dx = box.pos.x - x;
+    const dz = box.pos.z - z;
+    const hd = Math.hypot(dx, dz);
+    const vd = y - box.pos.y; // + means box is below character feet
+    if (hd < 1.4 && vd > -0.4 && vd < 1.2) {
+      // Downward component (real counter-impulse)
+      box.applyImpulse(0, -mag, 0);
+      // Horizontal scatter: pushes box away so it visibly slides even on the floor
+      if (hd > 0.05) {
+        box.applyImpulse((dx / hd) * mag * 0.7, 0, (dz / hd) * mag * 0.7);
+      }
+    }
+  }
+}
+
+// Called when the character LANDS on a box — apply impact based on fall speed.
+function applyLandImpulse(landSpeed) {
+  const carrier = ctrl._carrier;
+  if (!carrier) return;
+  const box = dynBoxes.find(b => b === carrier);
+  if (!box) return;
+  const impact = tune.charMass * landSpeed * tune.impulseScale;
+  const { x, z } = ctrl.position;
+  const dx = box.pos.x - x, dz = box.pos.z - z;
+  const hd = Math.hypot(dx, dz);
+  box.applyImpulse(0, -impact, 0);
+  if (hd > 0.05) box.applyImpulse((dx / hd) * impact * 0.4, 0, (dz / hd) * impact * 0.4);
+}
+
+// ─── GUI wiring ──────────────────────────────────────────────────────────────
+function slider(id, get, set) {
+  const s = document.getElementById('s-' + id);
+  const o = document.getElementById('o-' + id);
+  if (!s || !o) return;
+  const fmt = v => (Math.round(v * 100) / 100).toFixed(v < 1 ? 2 : 1);
+  s.value = get();
+  o.value = fmt(get());
+  s.addEventListener('input', () => {
+    const v = parseFloat(s.value);
+    set(v);
+    o.value = fmt(v);
+  });
+}
+
+function wireParamSlider(key) {
+  slider(key, () => ctrl.params[key], v => ctrl.params[key] = v);
+}
+
+// After a short delay so ctrl.params is ready
+setTimeout(() => {
+  wireParamSlider('walkSpeed');
+  wireParamSlider('runSpeed');
+  slider('crouchMult', () => ctrl.params.crouchSpeedMult, v => ctrl.params.crouchSpeedMult = v);
+  wireParamSlider('jumpVel');
+  wireParamSlider('gravity');
+  wireParamSlider('coyoteTime');
+  wireParamSlider('glideFallSpeed');
+  wireParamSlider('stepMaxHeight');
+  wireParamSlider('groundStickDist');
+  wireParamSlider('groundSpringK');
+  wireParamSlider('groundSpringRange');
+  slider('walkAnimRef',   () => tune.walkAnimRef,   v => tune.walkAnimRef   = v);
+  slider('runAnimRef',    () => tune.runAnimRef,     v => tune.runAnimRef    = v);
+  slider('charMass',      () => tune.charMass,       v => tune.charMass      = v);
+  slider('impulseScale',  () => tune.impulseScale,   v => tune.impulseScale  = v);
+}, 100);
+
+// ─── HUD ─────────────────────────────────────────────────────────────────────
+const hud = document.getElementById('hud');
+
+// ─── Reset ───────────────────────────────────────────────────────────────────
+addEventListener('keydown', e => {
+  if (e.code === 'KeyR') {
+    ctrl.reset(0, 1, 0);
+    charYaw = 0;
+  }
+});
+
+// ─── Main loop ───────────────────────────────────────────────────────────────
+let lastT = 0;
+
+async function loop(t) {
+  renderer.setAnimationLoop(loop);
+  const dt = Math.min((t - lastT) / 1000, 0.05);
+  lastT = t;
+
+  // ── Input → controller ──────────────────────────────────────────────────
+  const fwd  = (keys.KeyW || keys.ArrowUp)    ? 1 : 0;
+  const back = (keys.KeyS || keys.ArrowDown)  ? 1 : 0;
+  const left = (keys.KeyA || keys.ArrowLeft)  ? 1 : 0;
+  const rgt  = (keys.KeyD || keys.ArrowRight) ? 1 : 0;
+  const run  = !!(keys.ShiftLeft || keys.ShiftRight);
+  const jump = !!(keys.Space);
+  const crouch = !!(keys.KeyC);
+
+  // Camera-relative movement
+  const cy = Math.cos(camYaw), sy = Math.sin(camYaw);
+  const mx = (rgt - left) * cy + (back - fwd) * sy;
+  const mz = (rgt - left) *-sy + (back - fwd) * cy;
+
+  // ── Dynamic boxes update FIRST so deltas are ready for character carry ──
+  for (const box of dynBoxes) box.update(dt);
+
+  const _wasInAir  = ctrl.inAir;
+  const _preVelY   = ctrl.velY;
+
+  ctrl.update(dt, {
+    input: { mx, mz, jump, run, crouch },
+    collider,
+    getTerrainHeight: () => 0,
+    worldHalf: 40,
+    platforms: dynBoxes,
+  });
+
+  // ── Counter-impulse on jump ──────────────────────────────────────────────
+  if (ctrl.justJumped) applyJumpImpulse();
+
+  // ── Landing impact ───────────────────────────────────────────────────────
+  if (_wasInAir && !ctrl.inAir) applyLandImpulse(Math.abs(_preVelY));
+
+  // ── Character root position ──────────────────────────────────────────────
+  if (charRoot) {
+    charRoot.position.set(ctrl.position.x, ctrl.position.y, ctrl.position.z);
+
+    // Yaw: smoothly face movement direction
+    if (Math.hypot(mx, mz) > 0.01) {
+      const targetYaw = Math.atan2(mx, mz);
+      let dYaw = targetYaw - charYaw;
+      while (dYaw > Math.PI)  dYaw -= 2 * Math.PI;
+      while (dYaw < -Math.PI) dYaw += 2 * Math.PI;
+      charYaw += dYaw * (1 - Math.exp(-14 * dt));
+    }
+    charRoot.rotation.y = charYaw;
+
+    // ── Animations ────────────────────────────────────────────────────────
+    if (charMixer && charActions) {
+      const inAir = ctrl.inAir;
+      const mlen  = Math.hypot(mx, mz);
+      airTime     = inAir ? airTime + dt : 0;
+
+      const enterAir = inAir && (ctrl.velY > 0.5 || airTime > 0.12);
+
+      if (enterAir && !airActive) {
+        airActive = true;
+        if (ctrl.velY > 0.5 && charActions.jumpStart) {
+          jumpPhase = 'start';
+          setAction(charActions.jumpStart, 0.08);
+        } else if (charActions.jumpLoop) {
+          jumpPhase = 'loop';
+          setAction(charActions.jumpLoop, 0.12);
+        }
+      } else if (!inAir && airActive) {
+        airActive = false;
+        const moving = keys.KeyW||keys.KeyS||keys.KeyA||keys.KeyD||
+                       keys.ArrowUp||keys.ArrowDown||keys.ArrowLeft||keys.ArrowRight;
+        if (moving) {
+          jumpPhase = 'none';
+          setAction(run ? charActions.run : charActions.walk, 0.12);
+        } else if (charActions.jumpLand) {
+          jumpPhase = 'land';
+          setAction(charActions.jumpLand, 0.1);
+        }
+      } else if (!inAir && jumpPhase === 'none') {
+        // Locomotion picker
+        let tgt;
+        if (crouch) tgt = mlen > 0 ? charActions.crouchWalk : charActions.crouch;
+        else if (mlen > 0) tgt = run ? charActions.run : charActions.walk;
+        else tgt = charActions.idle;
+        if (tgt) setAction(tgt, 0.15);
+      }
+
+      // Animation speed sync
+      const speed = ctrl.debug.moveSpeed;
+      if (charActions.walk && speed > 0)
+        charActions.walk.timeScale = speed / tune.walkAnimRef;
+      if (charActions.run  && speed > 0)
+        charActions.run.timeScale  = speed / tune.runAnimRef;
+
+      charMixer.update(dt);
+
+    }
+  }
+
+  // ── Camera: orbit behind character ───────────────────────────────────────
+  const charPos = ctrl.position;
+  const cx  = Math.sin(camYaw)   * Math.cos(camPitch) * camDist;
+  const cy2 = Math.sin(camPitch) * camDist;
+  const cz  = Math.cos(camYaw)   * Math.cos(camPitch) * camDist;
+  camera.position.set(charPos.x + cx, charPos.y + cy2 + 1.2, charPos.z + cz);
+  camera.lookAt(charPos.x, charPos.y + 1.0, charPos.z);
+
+  // ── HUD ──────────────────────────────────────────────────────────────────
+  const p = ctrl.position;
+  hud.innerHTML =
+    `<b>pos</b>  ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}\n` +
+    `<b>velY</b> ${ctrl.velY.toFixed(2)}  <b>grounded</b> ${ctrl.grounded}\n` +
+    `<b>speed</b> ${ctrl.debug.moveSpeed.toFixed(2)} m/s\n` +
+    `<b>substeps</b> ${ctrl.debug.substeps}  <b>platform</b> ${ctrl.debug.onPlatform}`;
+
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  renderer.render(scene, camera);
+}
+
+renderer.setAnimationLoop(loop);
+</script>
+</body>
+</html>

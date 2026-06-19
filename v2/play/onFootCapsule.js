@@ -42,6 +42,13 @@ export const DEFAULT_CAPSULE_PARAMS = {
   /** Stay stuck to ground that drops up to this far in a frame (stairs/ramps
    *  down). 0 disables (you launch off descending edges). */
   groundStickDist: 0.5,
+
+  /** Smoothing rate (s⁻¹) for terrain rise correction. Higher = snappier,
+   *  lower = more gradual absorption of bumps underfoot. */
+  groundSpringK: 25,
+  /** Terrain height deltas larger than this get hard-snapped (spawn, teleport). */
+  groundSpringRange: 0.5,
+
   yawLerpRate: 14,
 
   /** Depenetration passes per substep (higher = more stable in corners). */
@@ -102,6 +109,9 @@ export class CapsuleController {
     /** Platform we're standing on (for carry); null when not on one. */
     this._carrier = null;
 
+    /** True for exactly one frame when a jump fires — use to apply counter-impulse. */
+    this.justJumped = false;
+
     this.debug = {
       groundY: 0,
       moveSpeed: 0,
@@ -152,6 +162,8 @@ export class CapsuleController {
     const { input, collider, getTerrainHeight } = ctx;
     const worldHalf = ctx.worldHalf ?? Infinity;
     dtSec = Math.min(dtSec, 0.05);
+
+    this.justJumped = false; // reset each frame
 
     const platforms = ctx.platforms || null;
 
@@ -220,6 +232,7 @@ export class CapsuleController {
       this._coyoteTimer = 0;
       this._jumpBufferTimer = 0;
       jumpedThisFrame = true;
+      this.justJumped = true;
     }
     this._spacePrev = !!input.jump;
     this._jumpBufferTimer = Math.max(0, this._jumpBufferTimer - dtSec);
@@ -401,13 +414,21 @@ export class CapsuleController {
       }
     }
 
-    // ── Analytic terrain floor backstop (no BVH under the feet) ──────────────
+    // ── Analytic terrain floor backstop with smooth rise correction ──────────
+    // When terrain rises underfoot, exponentially smooth the correction so bumps
+    // feel weighted rather than jarring. Large gaps (spawn/teleport) hard-snap
+    // instantly. Only fires when below terrain so grounded detection, coyote
+    // timer, and jumping are completely unaffected.
     const tY = getTerrainHeight(this.position.x, this.position.z);
     if (this.position.y < tY) {
-      this.position.y = tY;
+      const err = tY - this.position.y;
+      this.position.y +=
+        err > p.groundSpringRange
+          ? err // hard snap — large step, spawn, or teleport
+          : err * (1 - Math.exp(-p.groundSpringK * dtSec)); // smooth rise
       if (this.velY < 0) this.velY = 0;
       grounded = true;
-      maxNY = 1;
+      if (maxNY < 1) maxNY = 1;
     }
 
     // ── Resolve vertical velocity against contacts ───────────────────────────
