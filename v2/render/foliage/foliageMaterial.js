@@ -7,7 +7,7 @@ import {
   Fn, float, vec2, vec3, vec4,
   uniform, attribute,
   texture, uv,
-  mix, step, smoothstep, clamp, fract,
+  mix, step, smoothstep, clamp, fract, floor,
   sin, cos, abs, max, pow, dot, cross, normalize, length, sub, negate,
   positionLocal, positionWorld,
   normalLocal, normalWorld,
@@ -48,10 +48,32 @@ export function createFoliageMaterial(opts = {}) {
     // Must match how the renderer composed the instance matrices for this preset.
     billboard:    uniform(opts.billboard ? 1.0 : 0.0),
     billboardYaw: uniform(opts.billboardYawOnly === false ? 0.0 : 1.0),
+    // Shared leaf-mask atlas: remap the leaf quad's uv into one cell. Math is
+    // byte-identical to arborist's (uUseAtlas / uAtlasGrid). Each v2 slot has ONE
+    // cell, so the cell index is a uniform here (arborist uses a per-instance
+    // attribute, but fills it with one constant per tree — same UV result).
+    useAtlas:     uniform(opts.useAtlas ? 1.0 : 0.0),
+    // (cols, cellStep = cellPx/size, gutterFrac = gutter/size, innerFrac = inner/size)
+    atlasGrid:    uniform(new THREE.Vector4(
+                    opts.atlasGrid?.[0] ?? 4,
+                    opts.atlasGrid?.[1] ?? 0.25,
+                    opts.atlasGrid?.[2] ?? 12 / 1024,
+                    opts.atlasGrid?.[3] ?? 232 / 1024,
+                  )),
+    atlasCell:    uniform(opts.atlasCell ?? 0),
   };
 
   const leafTex = new THREE.Texture();
-  const leafMapNode = texture(leafTex);
+  // Atlas cell-UV remap (identical math to arborist). useAtlas=0 leaves uv() as-is.
+  const _baseUv = uv();
+  const _agCols = u.atlasGrid.x;
+  const _agRow = floor(u.atlasCell.div(_agCols));
+  const _agCol = u.atlasCell.sub(_agRow.mul(_agCols));
+  const _agOx = _agCol.mul(u.atlasGrid.y).add(u.atlasGrid.z);
+  const _agOy = _agCols.sub(1).sub(_agRow).mul(u.atlasGrid.y).add(u.atlasGrid.z);
+  const _cellUv = _baseUv.mul(u.atlasGrid.w).add(vec2(_agOx, _agOy));
+  const _sampleUv = mix(_baseUv, _cellUv, u.useAtlas);
+  const leafMapNode = texture(leafTex, _sampleUv);
   // Selects mask channel based on the loaded texture's format.
   const leafMaskCh = mix(leafMapNode.r, leafMapNode.a, u.maskInAlpha);
 

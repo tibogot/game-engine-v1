@@ -10,25 +10,55 @@ function createLcg(seed) {
   return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 0xffffffff; };
 }
 
-function sampleCluster(c, seedOffset) {
+// Cluster shaping (mirror of arborist): independent Z radius, uniform scale,
+// canopy scale, and ellipsoid lean. RNG draw order (ux, uy, uz, then shell) is
+// UNCHANGED so the per-leaf aRand/jitter streams stay aligned with the editor.
+const _leanEuler = new THREE.Euler();
+const _leanQuat = new THREE.Quaternion();
+const _leanVec = new THREE.Vector3();
+const DEG2RAD = Math.PI / 180;
+
+function sampleCluster(c, seedOffset, canopyScale = 1) {
   const rng = createLcg(seedOffset);
   const positions = [];
   const maxTry = c.count * 12;
   let tries = 0;
 
+  const cs = (c.scale ?? 1) * canopyScale;
+  const effRx = c.rx * cs;
+  const effRy = c.ry * cs;
+  const effRz = (c.rz ?? c.rx) * cs;
+  const leanX = (c.leanX ?? 0) * DEG2RAD;
+  const leanZ = (c.leanZ ?? 0) * DEG2RAD;
+  const hasLean = leanX !== 0 || leanZ !== 0;
+  if (hasLean) {
+    _leanEuler.set(leanX, 0, leanZ, "XYZ");
+    _leanQuat.setFromEuler(_leanEuler);
+  }
+
   while (positions.length < c.count && tries++ < maxTry) {
-    const rx = rng() * 2 - 1;
-    const ry = rng() * 2 - 1;
-    const rz = rng() * 2 - 1;
-    const d = Math.sqrt(rx * rx + ry * ry + rz * rz);
+    const ux = rng() * 2 - 1;
+    const uy = rng() * 2 - 1;
+    const uz = rng() * 2 - 1;
+    const d = Math.sqrt(ux * ux + uy * uy + uz * uz);
     if (d > 1.0) continue;
     const innerR = 1.0 - c.shellThick;
     if (d < innerR && rng() < c.shell) continue;
 
+    let ox = ux * effRx;
+    let oy = uy * effRy;
+    let oz = uz * effRz;
+    if (hasLean) {
+      _leanVec.set(ox, oy, oz).applyQuaternion(_leanQuat);
+      ox = _leanVec.x;
+      oy = _leanVec.y;
+      oz = _leanVec.z;
+    }
+
     positions.push({
-      x: c.x + rx * c.rx,
-      y: c.y + ry * c.ry,
-      z: c.z + rz * c.rx,
+      x: c.x + ox,
+      y: c.y + oy,
+      z: c.z + oz,
       leafSize: c.leafSize,
       scaleVar: c.scaleVar,
       tiltMax: c.tiltMax,
@@ -45,14 +75,14 @@ function sampleCluster(c, seedOffset) {
  *   the tree instance's world matrix (which re-applies the scale) produces
  *   the correct final positions.
  */
-export function sampleAllClusters(clusters, trunkScale = 1) {
+export function sampleAllClusters(clusters, trunkScale = 1, canopyScale = 1) {
   const allPos = [];
   const allRands = [];
   const rng = createLcg(77777);
   const invS = trunkScale > 0.001 ? 1 / trunkScale : 1;
   clusters.forEach((c, ci) => {
     if (!c.enabled) return;
-    sampleCluster(c, ci * 999983 + 12345).forEach(p => {
+    sampleCluster(c, ci * 999983 + 12345, canopyScale).forEach(p => {
       p.x *= invS;
       p.y *= invS;
       p.z *= invS;
