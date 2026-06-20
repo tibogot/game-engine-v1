@@ -68,6 +68,8 @@ import {
   initGlbLoaderRenderer,
 } from "../core/foliage/glbLoader.js";
 import { FoliageLodRenderer } from "../render/foliage/foliageLodRenderer.js";
+import { bakeSlotImpostor, buildImpostorBillboard, IMPOSTOR_BAKE } from "../render/foliage/impostorBake.js";
+import { ImpostorRenderer } from "../render/foliage/impostorRenderer.js";
 import { FoliageStore } from "../core/foliage/foliageStore.js";
 import {
   FOLIAGE_TEXTURE_DIR,
@@ -1537,6 +1539,48 @@ export async function startV2App(opts = {}) {
     config,
   });
   const foliageLodRenderer = new FoliageLodRenderer(scene, config);
+  const impostorRenderer = new ImpostorRenderer(scene, config);
+
+  // --- Impostor LOD3 Phase-1 test: bake a loaded slot's tree into an octahedral
+  // atlas and drop ONE billboard next to the world origin. Console-triggered:
+  //   __bakeImpostor(slotIdx)   (load a tree preset into that slot first)
+  async function _bakeImpostorTest(slotIdx = 0, optsOverride = {}) {
+    const preset = foliageLodRenderer.slotPresets?.[slotIdx];
+    if (!preset) {
+      console.warn(`[Impostor] slot ${slotIdx} has no foliage preset — load a tree preset into it first`);
+      return;
+    }
+    // Console-tunable: __bakeImpostor(0, { grid, atlasSize, fullOctahedral, bakeLight })
+    const opts = { ...IMPOSTOR_BAKE, ...optsOverride };
+    const trunkScale = toolState.treeSlots[slotIdx]?.baseScale ?? 1;
+    // One tree at origin at the slot's base scale (so leaves align with trunk).
+    const leafMesh = foliageLodRenderer._buildChunkSlotLod(
+      [{ x: 0, y: 0, z: 0, rotY: 0, scale: trunkScale, slotIdx }],
+      slotIdx,
+      0,
+    );
+    if (!leafMesh) {
+      console.warn(`[Impostor] slot ${slotIdx}: could not build leaf mesh`);
+      return;
+    }
+    const trunkSubmeshes = treeLodRenderer.slotRender?.[slotIdx]?.lod0 || null;
+    console.log(`[Impostor] Baking slot ${slotIdx} (trunkScale ${trunkScale})…`);
+    const result = await bakeSlotImpostor(renderer, {
+      trunkSubmeshes,
+      leafMesh,
+      foliageUniforms: preset.uniforms,
+      trunkScale,
+    }, opts);
+    leafMesh.geometry.dispose(); // bake-only clone
+    // Register as the slot's LOD3 far tier — trees past fadeOutDistance now draw
+    // as instanced billboards (one draw call for the whole slot).
+    impostorRenderer.setSlot(slotIdx, result, trunkScale, opts);
+    const fade = toolState.foliageLod?.fadeOutDistance ?? 600;
+    console.log(
+      `[Impostor] Slot ${slotIdx} registered as LOD3 (radius ${result.radius.toFixed(2)}). Paint trees & move past ${fade}m to see billboards replace the geometry.`,
+    );
+  }
+  if (typeof window !== "undefined") window.__bakeImpostor = (i = 0, opts = {}) => _bakeImpostorTest(i, opts);
 
   const foliageStore = new FoliageStore(config);
   const billboardRenderer = new BillboardRenderer(scene, config);
@@ -6299,6 +6343,7 @@ export async function startV2App(opts = {}) {
     frameProbe.t.props += _pProps - _pStream;
     treeLodRenderer.update(treeStore, camera, toolState.treeLod);
     foliageLodRenderer.update(treeStore, camera, toolState.foliageLod);
+    impostorRenderer.update(treeStore, camera, toolState.foliageLod);
     foliageLodRenderer.updateTime(now * 0.001);
     billboardRenderer.update(
       foliageStore,
