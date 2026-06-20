@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Octahedral v3 — Impostor Editor</title>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+        }
+      }
+    </script>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      :root {
+        --bg-darkest: #1a1a1a;
+        --bg-dark: #222222;
+        --bg-panel: #2a2a2a;
+        --bg-item: #333333;
+        --bg-hover: #3a3a3a;
+        --bg-selected: #264f78;
+        --bg-input: #1e1e1e;
+        --border: #3c3c3c;
+        --border-light: #4a4a4a;
+        --text: #cccccc;
+        --text-dim: #888888;
+        --text-bright: #e0e0e0;
+        --accent: #4a9eff;
+        --accent-dim: #2a6fbb;
+        --accent-glow: rgba(74, 158, 255, 0.15);
+        --green: #5cb85c;
+        --orange: #e8912d;
+        --red: #d9534f;
+        --yellow: #f0c040;
+        --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+        --font-mono: "Cascadia Code", "Fira Code", "Consolas", monospace;
+        --radius: 4px;
+        --left-w: 200px;
+        --right-w: 300px;
+        --bottom-h: 72px;
+        --toolbar-h: 36px;
+        --status-h: 22px;
+      }
+
+      html, body {
+        height: 100%;
+        overflow: hidden;
+        font-family: var(--font);
+        font-size: 13px;
+        color: var(--text);
+        background: var(--bg-darkest);
+        user-select: none;
+      }
+
+      #app {
+        display: grid;
+        grid-template-columns: var(--left-w) 4px 1fr 4px var(--right-w);
+        grid-template-rows: var(--toolbar-h) 1fr 4px var(--bottom-h);
+        height: calc(100% - var(--status-h));
+        width: 100%;
+      }
+
+      .splitter { background: var(--bg-darkest); position: relative; z-index: 20; }
+      .splitter::after { content: ""; position: absolute; transition: background 0.15s; }
+      .splitter:hover::after, .splitter.active::after { background: var(--accent); }
+      .splitter-h { cursor: col-resize; }
+      .splitter-h::after { top: 0; bottom: 0; left: 1px; width: 2px; }
+      .splitter-v { cursor: row-resize; }
+      .splitter-v::after { left: 0; right: 0; top: 1px; height: 2px; }
+      #splitter-left { grid-column: 2; grid-row: 2 / -1; }
+      #splitter-right { grid-column: 4; grid-row: 2 / -1; }
+      #splitter-bottom { grid-column: 3; grid-row: 3; }
+
+      #toolbar {
+        grid-column: 1 / -1;
+        grid-row: 1;
+        background: var(--bg-dark);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 8px;
+        gap: 8px;
+      }
+      .toolbar-title {
+        font-weight: 700;
+        font-size: 12px;
+        color: var(--accent);
+        letter-spacing: 0.06em;
+        margin-right: 4px;
+      }
+      .toolbar-sep { color: var(--border-light); }
+      .toolbar-model {
+        font-weight: 600;
+        font-size: 12px;
+        color: var(--text-bright);
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .pill {
+        padding: 2px 8px;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-dim);
+        letter-spacing: 0.03em;
+      }
+      .pill.on { color: var(--green); border-color: rgba(92,184,92,0.35); background: rgba(92,184,92,0.1); }
+      .pill.warn { color: var(--orange); border-color: rgba(232,145,45,0.35); background: rgba(232,145,45,0.1); }
+      .pill.bad { color: var(--red); border-color: rgba(217,83,79,0.35); background: rgba(217,83,79,0.1); }
+      .toolbar-spacer { flex: 1; }
+      .toolbar-btn {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 10px;
+        height: 28px;
+        background: var(--bg-item);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 11px;
+        font-family: var(--font);
+      }
+      .toolbar-btn:hover { background: var(--bg-hover); color: var(--text-bright); border-color: var(--border-light); }
+      .toolbar-btn i { width: 14px; height: 14px; }
+      .toolbar-btn.primary { background: var(--accent-dim); border-color: var(--accent); color: #fff; }
+      .toolbar-btn.primary:hover { background: var(--accent); }
+
+      #atlas-panel {
+        grid-column: 1;
+        grid-row: 2 / -1;
+        background: var(--bg-panel);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        height: 32px;
+        min-height: 32px;
+        background: var(--bg-dark);
+        border-bottom: 1px solid var(--border);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+      #dock {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      #dock::-webkit-scrollbar { width: 6px; }
+      #dock::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+      .dock-row { display: flex; gap: 6px; align-items: center; }
+      .dock-axis {
+        writing-mode: vertical-lr;
+        text-orientation: mixed;
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        width: 14px;
+        flex-shrink: 0;
+      }
+      #dock canvas {
+        border-radius: 3px;
+        border: 1px solid var(--border);
+        width: 100%;
+        max-width: 148px;
+        height: auto;
+        aspect-ratio: 1;
+        image-rendering: auto;
+        cursor: zoom-in;
+      }
+      #dock-hint {
+        font-size: 9px;
+        color: var(--text-dim);
+        text-align: center;
+        margin-top: 4px;
+        line-height: 1.35;
+      }
+
+      #viewport {
+        grid-column: 3;
+        grid-row: 2;
+        background: var(--bg-darkest);
+        position: relative;
+        overflow: hidden;
+      }
+      #viewport canvas {
+        position: absolute;
+        inset: 0;
+        display: block;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+        outline: none;
+      }
+      .col-label {
+        position: absolute;
+        top: 10px;
+        z-index: 5;
+        font: 700 10px/1 var(--font-mono);
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        padding: 4px 10px;
+        border-radius: 3px;
+        pointer-events: none;
+      }
+      #lbl-ref {
+        left: 25%;
+        transform: translateX(-50%);
+        color: var(--green);
+        background: rgba(92,184,92,0.12);
+        border: 1px solid rgba(92,184,92,0.3);
+      }
+      #lbl-imp {
+        left: 75%;
+        transform: translateX(-50%);
+        color: var(--accent);
+        background: rgba(74,158,255,0.12);
+        border: 1px solid rgba(74,158,255,0.3);
+      }
+      #right-panel {
+        grid-column: 5;
+        grid-row: 2 / -1;
+        background: var(--bg-panel);
+        border-left: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      #inspector-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding-bottom: 16px;
+      }
+
+      #bottom-panel {
+        grid-column: 3;
+        grid-row: 4;
+        background: var(--bg-panel);
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        gap: 20px;
+        font-size: 11px;
+        overflow-x: auto;
+      }
+      .stat-group { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; }
+      .stat-lbl { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; font-size: 9px; }
+      .stat-val { color: var(--accent); font-weight: 600; font-family: var(--font-mono); }
+      .stat-val.g { color: var(--green); }
+      .stat-val.w { color: var(--orange); }
+
+      .status-bar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: var(--status-h);
+        background: var(--bg-dark);
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 10px;
+        gap: 16px;
+        font-size: 10px;
+        color: var(--text-dim);
+        z-index: 100;
+      }
+      .status-bar kbd {
+        display: inline-block;
+        padding: 0 4px;
+        background: var(--bg-input);
+        border: 1px solid var(--border-light);
+        border-radius: 2px;
+        font-family: var(--font-mono);
+        font-size: 9px;
+        color: var(--accent);
+        margin-right: 2px;
+      }
+
+      .inspector-section { border-bottom: 1px solid var(--border); }
+      .section-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--text-dim);
+      }
+      .section-header:hover { background: var(--bg-hover); }
+      .section-header .section-arrow { width: 14px; height: 14px; transition: transform 0.15s; flex-shrink: 0; }
+      .section-header.collapsed .section-arrow { transform: rotate(-90deg); }
+      .section-body { padding: 6px 12px 10px; }
+      .section-body.hidden { display: none; }
+      .prop-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; min-height: 26px; }
+      .prop-label { width: 90px; min-width: 90px; font-size: 11px; color: var(--text-dim); text-align: right; padding-right: 4px; }
+      .prop-value { flex: 1; display: flex; gap: 4px; align-items: center; min-width: 0; }
+      .prop-slider-wrap { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .prop-num-input {
+        width: 64px; height: 22px; flex-shrink: 0;
+        background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 0 5px; color: var(--text); font-size: 11px; font-family: var(--font-mono);
+        text-align: right; outline: none;
+      }
+      .prop-num-input:focus { border-color: var(--accent); }
+      .prop-slider {
+        flex: 1; height: 4px; -webkit-appearance: none; appearance: none;
+        background: var(--bg-input); border-radius: 2px; outline: none;
+      }
+      .prop-slider::-webkit-slider-thumb {
+        -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+        background: var(--accent); cursor: pointer;
+      }
+      .prop-dropdown {
+        flex: 1; height: 22px; background: var(--bg-input); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 0 6px; color: var(--text); font-size: 12px;
+        font-family: var(--font); outline: none; cursor: pointer; min-width: 0;
+      }
+      .prop-color-wrap { display: flex; align-items: center; gap: 6px; flex: 1; }
+      .prop-color {
+        width: 22px; height: 22px; border-radius: var(--radius); border: 1px solid var(--border);
+        cursor: pointer; padding: 0; -webkit-appearance: none; appearance: none;
+      }
+      .prop-color::-webkit-color-swatch-wrapper { padding: 0; }
+      .prop-color::-webkit-color-swatch { border: none; border-radius: 2px; }
+      .prop-slider-val { font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); }
+      .prop-toggle {
+        width: 14px; height: 14px; border: 1px solid var(--border-light); border-radius: 3px;
+        background: var(--bg-input); cursor: pointer; display: flex; align-items: center;
+        justify-content: center; padding: 0; color: transparent;
+      }
+      .prop-toggle.checked { background: var(--accent); border-color: var(--accent); color: white; }
+      .prop-toggle svg { width: 10px; height: 10px; }
+      .section-btn {
+        display: flex; align-items: center; justify-content: center; gap: 4px;
+        width: 100%; height: 26px; margin-top: 4px;
+        background: var(--bg-item); border: 1px solid var(--border); border-radius: var(--radius);
+        color: var(--text-dim); cursor: pointer; font-size: 11px; font-family: var(--font);
+      }
+      .section-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-light); }
+      .section-separator { height: 1px; background: var(--border); margin: 6px 0; }
+      .info-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; min-height: 26px; }
+      .info-label { width: 90px; min-width: 90px; font-size: 11px; color: var(--text-dim); text-align: right; padding-right: 4px; }
+      .info-value { flex: 1; font-size: 12px; color: var(--text); font-family: var(--font-mono); }
+
+      #loading {
+        position: absolute; inset: 0;
+        background: rgba(6, 6, 12, 0.88);
+        display: none; align-items: center; justify-content: center;
+        flex-direction: column; gap: 14px;
+        z-index: 50;
+        color: var(--accent);
+        font-size: 13px; font-weight: 500;
+        backdrop-filter: blur(4px);
+      }
+      #loading.show { display: flex; }
+      .spinner {
+        width: 32px; height: 32px;
+        border: 2px solid rgba(74,158,255,0.15);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      #loading-sub { font-size: 11px; color: var(--text-dim); max-width: 80%; text-align: center; }
+
+      #zoom {
+        position: fixed; z-index: 200;
+        background: var(--bg-dark);
+        border: 2px solid var(--accent);
+        border-radius: var(--radius);
+        padding: 4px;
+        display: none;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      }
+      #zoom canvas { width: 220px; height: 220px; image-rendering: pixelated; border-radius: 3px; }
+      #zoom-label { font-size: 9px; color: var(--accent); text-align: center; margin-top: 3px; font-weight: 600; }
+
+      #drop {
+        position: absolute; inset: 0; z-index: 60;
+        display: none; align-items: center; justify-content: center;
+        background: rgba(20, 60, 120, 0.55);
+        backdrop-filter: blur(6px);
+        border: 3px dashed rgba(74, 158, 255, 0.6);
+      }
+      #drop span {
+        color: #fff; font-size: 20px; font-weight: 700;
+        background: rgba(0,0,0,0.55);
+        padding: 14px 28px;
+        border-radius: 10px;
+      }
+
+      #app.ui-hidden #atlas-panel,
+      #app.ui-hidden #right-panel,
+      #app.ui-hidden #bottom-panel,
+      #app.ui-hidden .splitter,
+      #app.ui-hidden #toolbar .toolbar-extra { display: none !important; }
+      #app.ui-hidden #lbl-ref,
+      #app.ui-hidden #lbl-imp { display: none; }
+      #app.ui-hidden #viewport { grid-column: 1 / -1; grid-row: 1 / -1; }
+
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="toolbar">
+        <span class="toolbar-title">OCTA · v3</span>
+        <span class="toolbar-sep">│</span>
+        <span class="toolbar-model" id="tb-model">—</span>
+        <span class="toolbar-sep toolbar-extra">│</span>
+        <span class="pill toolbar-extra" id="tb-quality">High</span>
+        <span class="pill on toolbar-extra" id="tb-mode">PBR</span>
+        <span class="pill toolbar-extra" id="tb-freeze">Live</span>
+        <span class="pill toolbar-extra" id="tb-orbit">Manual</span>
+        <span class="pill toolbar-extra" id="tb-status">Initializing…</span>
+        <span class="toolbar-spacer"></span>
+        <button type="button" class="toolbar-btn toolbar-extra" id="btn-load" title="Load GLB">
+          <i data-lucide="folder-open"></i> Load GLB
+        </button>
+        <button type="button" class="toolbar-btn primary toolbar-extra" id="btn-rebake" title="Rebake atlas [B]">
+          <i data-lucide="refresh-cw"></i> Rebake
+        </button>
+        <button type="button" class="toolbar-btn toolbar-extra" id="btn-hide-ui" title="Hide UI [H]">
+          <i data-lucide="panel-right-close"></i>
+        </button>
+      </div>
+
+      <div id="atlas-panel">
+        <div class="panel-header"><span>Atlas Preview</span></div>
+        <div id="dock">
+          <div class="dock-row">
+            <span class="dock-axis">Color</span>
+            <canvas id="dock-color" width="148" height="148"></canvas>
+          </div>
+          <div class="dock-row">
+            <span class="dock-axis">Normal</span>
+            <canvas id="dock-normal" width="148" height="148"></canvas>
+          </div>
+          <div class="dock-row">
+            <span class="dock-axis">R/M</span>
+            <canvas id="dock-rm" width="148" height="148"></canvas>
+          </div>
+          <div class="dock-row">
+            <span class="dock-axis">Depth</span>
+            <canvas id="dock-depth" width="148" height="148"></canvas>
+          </div>
+          <div id="dock-hint">Click cell to zoom · Active triplet highlighted</div>
+        </div>
+      </div>
+
+      <div id="splitter-left" class="splitter splitter-h"></div>
+
+      <div id="viewport">
+        <div class="col-label" id="lbl-ref">Reference</div>
+        <div class="col-label" id="lbl-imp">Impostor</div>
+        <div id="loading" aria-live="polite">
+          <div class="spinner"></div>
+          <span id="loading-msg">Working…</span>
+          <div id="loading-sub"></div>
+        </div>
+        <div id="drop"><span>Drop .glb file to load</span></div>
+      </div>
+
+      <div id="splitter-right" class="splitter splitter-h"></div>
+
+      <div id="right-panel">
+        <div class="panel-header"><span>Inspector</span></div>
+        <div id="inspector-scroll"></div>
+      </div>
+
+      <div id="splitter-bottom" class="splitter splitter-v"></div>
+
+      <div id="bottom-panel">
+        <div class="stat-group"><span class="stat-lbl">FPS</span><span class="stat-val g" id="s-fps">—</span></div>
+        <div class="stat-group"><span class="stat-lbl">Atlas</span><span class="stat-val" id="s-atlas">—</span></div>
+        <div class="stat-group"><span class="stat-lbl">Grid</span><span class="stat-val" id="s-grid">—</span></div>
+        <div class="stat-group"><span class="stat-lbl">Cell</span><span class="stat-val" id="s-cell">—</span></div>
+        <div class="stat-group"><span class="stat-lbl">Tris</span><span class="stat-val w" id="s-tris">—</span></div>
+        <div class="stat-group"><span class="stat-lbl">Yaw</span><span class="stat-val" id="s-yaw">—</span></div>
+        <div class="stat-group"><span class="stat-lbl">Active</span><span class="stat-val" id="s-active">—</span></div>
+      </div>
+    </div>
+
+    <div id="zoom">
+      <canvas id="zoom-canvas" width="220" height="220"></canvas>
+      <div id="zoom-label">Cell</div>
+    </div>
+
+    <div class="status-bar">
+      <span><kbd>N</kbd>Normals</span>
+      <span><kbd>R</kbd>Raw</span>
+      <span><kbd>F</kbd>Freeze</span>
+      <span><kbd>O</kbd>Orbit</span>
+      <span><kbd>B</kbd>Rebake</span>
+      <span><kbd>Q</kbd>Quality</span>
+      <span><kbd>H</kbd>Hide UI</span>
+      <span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd>Cam</span>
+    </div>
+
+    <script type="module">
+      import { run } from "./octahedral-v3.js";
+      import { initSplitters } from "./custom-ui.js";
+      initSplitters();
+      if (window.lucide) lucide.createIcons();
+      run().catch((err) => {
+        const el = document.getElementById("tb-status");
+        if (el) { el.textContent = "Error: " + err.message; el.classList.add("bad"); }
+        console.error(err);
+      });
+    </script>
+  </body>
+</html>

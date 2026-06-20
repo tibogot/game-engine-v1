@@ -1,0 +1,5110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Tree Editor — Stylized Tree Builder for V2 Engine</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #1a3020;
+      }
+      canvas {
+        display: block;
+      }
+      :root {
+        --bg-darkest: #1a1a1a;
+        --bg-dark: #222222;
+        --bg-panel: #2a2a2a;
+        --bg-item: #333333;
+        --bg-hover: #3a3a3a;
+        --bg-input: #1e1e1e;
+        --border: #3c3c3c;
+        --border-light: #4a4a4a;
+        --text: #cccccc;
+        --text-dim: #888888;
+        --text-bright: #e0e0e0;
+        --accent: #4a9eff;
+        --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+        --font-mono: "Cascadia Code", "Fira Code", Consolas, monospace;
+        --radius: 4px;
+      }
+      #ui {
+        position: fixed;
+        top: 8px;
+        right: 8px;
+        z-index: 10;
+        width: 320px;
+        max-height: calc(100vh - 16px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-family: var(--font);
+        font-size: 13px;
+        color: var(--text);
+        user-select: none;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      }
+      #ui .panel-header {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        min-height: 36px;
+        background: var(--bg-dark);
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+        color: var(--text-bright);
+        flex-shrink: 0;
+      }
+      #ui-scroll {
+        flex: 1;
+        overflow-y: auto;
+        scrollbar-width: thin;
+      }
+      #ui-scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+      #ui-scroll::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 4px;
+      }
+      .inspector-section {
+        border-bottom: 1px solid var(--border);
+      }
+      .section-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--text-dim);
+      }
+      .section-header:hover {
+        background: var(--bg-hover);
+      }
+      .section-header .section-arrow {
+        width: 14px;
+        height: 14px;
+        transition: transform 0.15s;
+        flex-shrink: 0;
+      }
+      .section-header.collapsed .section-arrow {
+        transform: rotate(-90deg);
+      }
+      .section-body {
+        padding: 6px 12px 10px;
+      }
+      .section-body.hidden {
+        display: none;
+      }
+      .prop-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0;
+        min-height: 26px;
+      }
+      .prop-label {
+        width: 108px;
+        min-width: 108px;
+        font-size: 11px;
+        color: var(--text-dim);
+        text-align: right;
+        padding-right: 4px;
+        line-height: 1.2;
+      }
+      .prop-value {
+        flex: 1;
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        min-width: 0;
+      }
+      .prop-input {
+        flex: 1;
+        height: 22px;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 0 6px;
+        color: var(--text);
+        font-size: 12px;
+        font-family: var(--font-mono);
+        outline: none;
+        min-width: 0;
+      }
+      .prop-input:focus {
+        border-color: var(--accent);
+      }
+      .prop-color-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1;
+      }
+      .prop-color {
+        width: 22px;
+        height: 22px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        cursor: pointer;
+        flex-shrink: 0;
+        padding: 0;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .prop-color::-webkit-color-swatch-wrapper {
+        padding: 0;
+      }
+      .prop-color::-webkit-color-swatch {
+        border: none;
+        border-radius: 2px;
+      }
+      .prop-slider-wrap {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .prop-num-input {
+        width: 72px;
+        height: 22px;
+        flex-shrink: 0;
+        box-sizing: border-box;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 0 5px;
+        color: var(--text);
+        font-size: 11px;
+        font-family: var(--font-mono);
+        text-align: right;
+        outline: none;
+      }
+      .prop-num-input:focus {
+        border-color: var(--accent);
+      }
+      .prop-num-input::-webkit-outer-spin-button,
+      .prop-num-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .prop-num-input[type="number"] {
+        appearance: textfield;
+        -moz-appearance: textfield;
+      }
+      .prop-slider {
+        flex: 1;
+        height: 4px;
+        -webkit-appearance: none;
+        appearance: none;
+        background: var(--bg-input);
+        border-radius: 2px;
+        outline: none;
+        min-width: 0;
+      }
+      .prop-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+      }
+      .prop-toggle {
+        width: 14px;
+        height: 14px;
+        border: 1px solid var(--border-light);
+        border-radius: 3px;
+        background: var(--bg-input);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        padding: 0;
+        color: transparent;
+      }
+      .prop-toggle.checked {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: white;
+      }
+      .prop-toggle svg {
+        width: 10px;
+        height: 10px;
+      }
+      .section-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 26px;
+        margin-top: 4px;
+        background: var(--bg-item);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 11px;
+        font-family: var(--font);
+      }
+      .section-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+        border-color: var(--border-light);
+      }
+      .section-separator {
+        height: 1px;
+        background: var(--border);
+        margin: 6px 0;
+      }
+      .info-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0;
+        min-height: 26px;
+      }
+      .info-label {
+        width: 108px;
+        min-width: 108px;
+        font-size: 11px;
+        color: var(--text-dim);
+        text-align: right;
+        padding-right: 4px;
+      }
+      .info-value {
+        flex: 1;
+        font-size: 12px;
+        color: var(--text);
+        font-family: var(--font-mono);
+      }
+      #info {
+        position: fixed;
+        bottom: 8px;
+        left: 8px;
+        color: #ddd;
+        font: 11px/1.8 monospace;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 5px 10px;
+        border-radius: 4px;
+        pointer-events: none;
+      }
+      .tex-gallery-label {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.35px;
+        color: var(--text-dim);
+        padding: 2px 0 6px;
+      }
+      .tex-gallery {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 0 0 10px;
+      }
+      .tex-gallery .tex-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        width: 56px;
+      }
+      .tex-gallery img {
+        width: 52px;
+        height: 52px;
+        object-fit: cover;
+        border-radius: var(--radius);
+        border: 2px solid var(--border);
+        cursor: pointer;
+        opacity: 0.75;
+        background: var(--bg-input);
+        transition:
+          opacity 0.15s,
+          border-color 0.15s;
+      }
+      .tex-gallery img:hover {
+        opacity: 1;
+        border-color: var(--border-light);
+      }
+      .tex-gallery img.active {
+        border-color: var(--accent);
+        opacity: 1;
+        box-shadow: 0 0 0 1px var(--accent);
+      }
+      .tex-gallery .tex-label {
+        font-size: 9px;
+        line-height: 1.2;
+        font-family: var(--font-mono);
+        color: var(--text-dim);
+        text-align: center;
+        max-width: 56px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      .trunk-gallery {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 0 0 10px;
+      }
+      .trunk-gallery .tex-item {
+        width: 104px;
+      }
+      .trunk-gallery img {
+        width: 96px;
+        height: 112px;
+        object-fit: contain;
+        background-color: #2a2a2a;
+        background-image: repeating-conic-gradient(
+          #3a3a3a 0% 25%,
+          #2a2a2a 0% 50%
+        );
+        background-size: 12px 12px;
+      }
+      .trunk-gallery .tex-label {
+        max-width: 104px;
+        font-size: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ui">
+      <div class="panel-header">Tree Editor</div>
+      <div id="ui-scroll"></div>
+    </div>
+    <div id="info">
+      Drag to orbit · Scroll to zoom · Middle-drag to pan · Ctrl+Z undo · Ctrl+Y
+      redo
+    </div>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+      import {
+        Fn,
+        float,
+        vec2,
+        vec3,
+        vec4,
+        uniform,
+        attribute,
+        varying,
+        texture,
+        uv,
+        mix,
+        step,
+        smoothstep,
+        clamp,
+        sin,
+        cos,
+        abs,
+        fract,
+        floor,
+        dot,
+        normalize,
+        length,
+        add,
+        sub,
+        mul,
+        div,
+        max,
+        min,
+        pow,
+        positionLocal,
+        positionWorld,
+        normalLocal,
+        normalWorld,
+        cameraPosition,
+        modelWorldMatrix,
+        negate,
+        cross,
+        If,
+        Loop,
+        Break,
+        sqrt,
+        exp,
+      } from "three/tsl";
+      import { MeshStandardNodeMaterial } from "three";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import {
+        bakeColorAtlasFromObject,
+        makeFlatAuxTextures,
+        createImpostorMaterials,
+      } from "./octahedral-v3/octahedral-core.js";
+      import { bakeObjectThumbnails } from "./tools/objectThumbnails.js";
+
+      // ─── CUSTOM INSPECTOR (v2/editor-style) ─────────────────────────────────────
+      const _checkSvg =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      const _arrowSvg =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+      const _uiRefreshers = [];
+
+      function _fmt(v, step) {
+        if (step >= 1) return String(Math.round(v));
+        const d = Math.max(0, -Math.floor(Math.log10(step)));
+        return v.toFixed(d);
+      }
+
+      function _clampSnap(v, min, max, step) {
+        if (!Number.isFinite(v)) return min;
+        const n = Math.round((v - min) / step);
+        let out = min + n * step;
+        const stepStr = String(step);
+        let decimals = 0;
+        if (stepStr.includes(".")) {
+          decimals = stepStr.split(".")[1].length;
+        } else if (stepStr.includes("e-")) {
+          decimals = 8;
+        }
+        if (decimals > 0) out = Number(out.toFixed(decimals));
+        return Math.min(max, Math.max(min, out));
+      }
+
+      function _section(parent, title, expanded = true) {
+        const sec = document.createElement("div");
+        sec.className = "inspector-section";
+        const hdr = document.createElement("div");
+        hdr.className = "section-header" + (expanded ? "" : " collapsed");
+        hdr.innerHTML = _arrowSvg + " " + title;
+        const body = document.createElement("div");
+        body.className = "section-body" + (expanded ? "" : " hidden");
+        hdr.addEventListener("click", () => {
+          hdr.classList.toggle("collapsed");
+          body.classList.toggle("hidden");
+        });
+        sec.appendChild(hdr);
+        sec.appendChild(body);
+        parent.appendChild(sec);
+        return body;
+      }
+
+      function _slider(parent, obj, key, opts) {
+        const { label, min, max, step = 0.01, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        const cur = obj[key];
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="${min}" max="${max}" step="${step}" value="${cur}"><input type="number" class="prop-num-input" title="Type an exact value" min="${min}" max="${max}" step="${step}" value="${_fmt(cur, step)}"></div></div>`;
+        const sl = row.querySelector(".prop-slider");
+        const num = row.querySelector(".prop-num-input");
+        const syncNumDisplay = () => {
+          num.value = _fmt(obj[key], step);
+        };
+        const applyFromSlider = () => {
+          obj[key] = parseFloat(sl.value);
+          syncNumDisplay();
+          onChange?.({ value: obj[key] });
+        };
+        const commitFromNum = () => {
+          const raw = String(num.value).trim();
+          if (raw === "" || raw === "-" || raw === "." || raw === "-.") {
+            syncNumDisplay();
+            return;
+          }
+          let v = parseFloat(raw);
+          if (!Number.isFinite(v)) {
+            syncNumDisplay();
+            return;
+          }
+          v = _clampSnap(v, min, max, step);
+          obj[key] = v;
+          sl.value = String(v);
+          syncNumDisplay();
+          onChange?.({ value: obj[key] });
+        };
+        sl.addEventListener("input", applyFromSlider);
+        num.addEventListener("change", commitFromNum);
+        num.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") num.blur();
+        });
+        num.addEventListener(
+          "wheel",
+          (e) => {
+            if (document.activeElement === num) e.preventDefault();
+          },
+          { passive: false },
+        );
+        parent.appendChild(row);
+        const handle = {
+          refresh() {
+            sl.value = obj[key];
+            syncNumDisplay();
+          },
+        };
+        _uiRefreshers.push(handle);
+        return handle;
+      }
+
+      function _color(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-color-wrap"><input type="color" class="prop-color" value="${obj[key]}"><span class="prop-slider-val" style="width:auto;font-size:11px;color:var(--text-dim);font-family:var(--font-mono)">${obj[key]}</span></div></div>`;
+        const inp = row.querySelector(".prop-color");
+        const hex = row.querySelector(".prop-slider-val");
+        inp.addEventListener("input", () => {
+          obj[key] = inp.value;
+          hex.textContent = inp.value;
+          onChange?.({ value: obj[key] });
+        });
+        parent.appendChild(row);
+        const handle = {
+          refresh() {
+            inp.value = obj[key];
+            hex.textContent = obj[key];
+          },
+        };
+        _uiRefreshers.push(handle);
+        return handle;
+      }
+
+      function _toggle(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><button type="button" class="prop-toggle ${obj[key] ? "checked" : ""}">${_checkSvg}</button></div>`;
+        const btn = row.querySelector(".prop-toggle");
+        btn.addEventListener("click", () => {
+          obj[key] = !obj[key];
+          btn.classList.toggle("checked", obj[key]);
+          onChange?.({ value: obj[key] });
+        });
+        parent.appendChild(row);
+        const handle = {
+          refresh() {
+            btn.classList.toggle("checked", !!obj[key]);
+          },
+        };
+        _uiRefreshers.push(handle);
+        return handle;
+      }
+
+      function _text(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><input type="text" class="prop-input" value="${obj[key] ?? ""}"></div>`;
+        const inp = row.querySelector(".prop-input");
+        inp.addEventListener("change", () => {
+          obj[key] = inp.value;
+          onChange?.({ value: obj[key] });
+        });
+        parent.appendChild(row);
+        const handle = {
+          refresh() {
+            inp.value = obj[key] ?? "";
+          },
+        };
+        _uiRefreshers.push(handle);
+        return handle;
+      }
+
+      function _button(parent, opts) {
+        const { title, onClick } = opts;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "section-btn";
+        btn.textContent = title;
+        btn.addEventListener("click", onClick);
+        parent.appendChild(btn);
+      }
+
+      function _info(parent, label, getValue) {
+        const row = document.createElement("div");
+        row.className = "info-row";
+        const valSpan = document.createElement("span");
+        valSpan.className = "info-value";
+        valSpan.textContent = getValue();
+        row.innerHTML = `<span class="info-label">${label}</span>`;
+        row.appendChild(valSpan);
+        parent.appendChild(row);
+        const handle = {
+          refresh() {
+            valSpan.textContent = getValue();
+          },
+        };
+        _uiRefreshers.push(handle);
+        return handle;
+      }
+
+      function _separator(parent) {
+        const div = document.createElement("div");
+        div.className = "section-separator";
+        parent.appendChild(div);
+      }
+
+      function uiRefresh() {
+        _uiRefreshers.forEach((h) => h.refresh());
+      }
+
+      // Vite serves `public/` at the site root. From v2/arborist.html, bare
+      // `textures/...` resolves to /v2/textures/... (HTML fallback). Presets keep
+      // the canonical `textures/...` string; resolve to `/textures/...` at load time.
+      function resolvePublicPath(path) {
+        if (
+          !path ||
+          path.startsWith("data:") ||
+          path.startsWith("http") ||
+          path.startsWith("/")
+        )
+          return path;
+        return "/" + path.replace(/^\.\//, "");
+      }
+
+      // ─── BUILT-IN LEAF TEXTURES ─────────────────────────────────────────────────
+      // NEW set first (these feed the atlas/export — atlas bakes the first 16);
+      // OLD placeholders kept below ONLY for side-by-side comparison in the picker.
+      // When the new set is final, trim the OLD block so the exported atlas is clean.
+      const LEAF_TEXTURES = [
+        {
+          name: "Billboard 1",
+          path: "textures/leaves/Leaf-Billboard-Texture-1.png",
+        },
+        {
+          name: "Billboard 2",
+          path: "textures/leaves/Leaf-Billboard-Texture-2.png",
+        },
+        {
+          name: "Billboard 3",
+          path: "textures/leaves/Leaf-Billboard-Texture-3.png",
+        },
+        {
+          name: "Billboard 4",
+          path: "textures/leaves/Leaf-Billboard-Texture-4.png",
+        },
+        {
+          name: "Billboard 5",
+          path: "textures/leaves/Leaf-Billboard-Texture-5.png",
+        },
+        { name: "Frame 63", path: "textures/leaves/Frame 63.png" },
+        { name: "Frame 64", path: "textures/leaves/Frame 64.png" },
+        {
+          name: "Tree Opacity",
+          path: "textures/leaves/tree_Opacity-01 1 1.png",
+        },
+        // --- OLD placeholders (comparison only) ---
+        { name: "[old] Alpha 3", path: "textures/leaves/foliage_alpha3.png" },
+        { name: "[old] SDF", path: "textures/leaves/foliageSDF.png" },
+        { name: "[old] Frame 7", path: "textures/leaves/Frame 7.png" },
+        { name: "[old] Leaf 128", path: "textures/leaves/image 128.png" },
+        { name: "[old] Leaf 127", path: "textures/leaves/image 127.png" },
+        { name: "[old] Leafcard", path: "textures/leaves/leafcard.jpg" },
+      ];
+
+      const MAX_CLUSTERS = 6;
+      const LOD_SPACING = 12;
+      const LOD_LABEL_Z = 5.2;
+
+      // ─── RENDERER ────────────────────────────────────────────────────────────────
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.transmitted = true;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
+      document.body.appendChild(renderer.domElement);
+      await renderer.init();
+
+      // ─── SCENE / CAMERA ──────────────────────────────────────────────────────────
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color("#87ceeb");
+      scene.fog = null;
+
+      const camera = new THREE.PerspectiveCamera(
+        55,
+        innerWidth / innerHeight,
+        0.1,
+        3000,
+      );
+      camera.position.set(7, 5, 10);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 3, 0);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.update();
+
+      // ─── LIGHTING ────────────────────────────────────────────────────────────────
+      const hemi = new THREE.HemisphereLight("#b8dfff", "#3d6b20", 0.8);
+      scene.add(hemi);
+
+      const sun = new THREE.DirectionalLight("#fff8e8", 2.2);
+      sun.position.set(5, 12, 4);
+      sun.castShadow = true;
+      // Single-tree editor: tighten the shadow frustum to ~fit the tree + the
+      // -12/0/+12 LOD previews so the 4096 map isn't wasted on empty ground.
+      // 4096 / 40m ≈ 102 texels/m (vs the old 2048 / 60m ≈ 34) — ~3x crisper, so
+      // the thin trunk shadow stops looking blocky.
+      sun.shadow.mapSize.set(4096, 4096);
+      sun.shadow.camera.near = 0.5;
+      sun.shadow.camera.far = 200;
+      sun.shadow.camera.left = -20;
+      sun.shadow.camera.right = 20;
+      sun.shadow.camera.top = 20;
+      sun.shadow.camera.bottom = -20;
+      sun.shadow.bias = -0.0005;
+      sun.shadow.normalBias = 0.02;
+      scene.add(sun);
+
+      // ─── GROUND ──────────────────────────────────────────────────────────────────
+      const groundGeo = new THREE.CircleGeometry(40, 72);
+      const groundMat = new THREE.MeshStandardMaterial({
+        color: "#4a7c2a",
+        roughness: 0.92,
+        metalness: 0,
+      });
+      const ground = new THREE.Mesh(groundGeo, groundMat);
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      const pebbleGeo = new THREE.SphereGeometry(0.12, 5, 3);
+      const pebbleMat = new THREE.MeshStandardMaterial({
+        color: "#888",
+        roughness: 0.95,
+      });
+      [
+        [-1.8, 0, 1.4],
+        [2.2, 0, 0.9],
+        [-0.5, 0, 2.3],
+        [1.5, 0, -1.7],
+      ].forEach(([x, y, z]) => {
+        const p = new THREE.Mesh(pebbleGeo, pebbleMat);
+        p.position.set(x, 0.07, z);
+        p.scale.y = 0.5 + Math.random() * 0.5;
+        scene.add(p);
+      });
+
+      // ─── PROCEDURAL TRUNK MATERIAL (TSL) ─────────────────────────────────────────
+      // Shared by the default cylinder AND any imported GLB trunk, so trunks get a
+      // bark colour with NO texture needed. Cheap: a vertical 2-colour gradient
+      // (world-Y from the ground up) + roughness, metalness 0 (so it bakes the same
+      // colour it shows — no sky-reflection metal trap). Live-tunable via uniforms.
+      const uTrunkBot = uniform(new THREE.Color(0x4a2f17));
+      const uTrunkTop = uniform(new THREE.Color(0x6b4a2b));
+      const uTrunkGradH = uniform(6.0);
+      const uTrunkRough = uniform(0.9);
+      const trunkMat = new MeshStandardNodeMaterial({ metalness: 0 });
+      trunkMat.colorNode = mix(
+        uTrunkBot,
+        uTrunkTop,
+        smoothstep(
+          float(0.0),
+          float(1.0),
+          div(positionWorld.y, max(uTrunkGradH, float(0.001))),
+        ),
+      );
+      trunkMat.roughnessNode = uTrunkRough;
+
+      // ─── DEFAULT TRUNK PLACEHOLDER ───────────────────────────────────────────────
+      const defTrunkGeo = new THREE.CylinderGeometry(0.1, 0.3, 5.0, 10, 3);
+      const defaultTrunk = new THREE.Mesh(defTrunkGeo, trunkMat);
+      defaultTrunk.position.y = 2.5;
+      defaultTrunk.castShadow = true;
+      defaultTrunk.receiveShadow = true;
+      defaultTrunk.visible = false;
+      scene.add(defaultTrunk);
+
+      let trunkRoot = null;
+      let trunkLod1Root = null;
+
+      // ─── LEAF TEXTURE ────────────────────────────────────────────────────────────
+      // Atlas sampling. uUseAtlas=1 remaps the leaf quad uv into a cell; 0 leaves
+      // it unchanged (standalone rendering identical to before). The cell index is
+      // a PER-INSTANCE attribute (aAtlasIndex) — uniform across one arborist tree,
+      // but per-tree-type in v2's merged mesh. That per-instance index is what lets
+      // v2 batch every tree type on ONE material. Grid packed as
+      // (cols, cellStep=cellPx/size, gutterFrac, innerFrac); math is identical in
+      // arborist and v2 so the contract can't drift.
+      let atlasCellIndex = 0;
+      const uUseAtlas = uniform(0.0);
+      const uAtlasGrid = uniform(
+        new THREE.Vector4(4, 0.25, 12 / 1024, 232 / 1024),
+      );
+      const aAtlasIndex = attribute("aAtlasIndex", "float");
+      const _leafBaseUv = uv();
+      const _agCols = uAtlasGrid.x;
+      const _agRow = floor(aAtlasIndex.div(_agCols));
+      const _agCol = aAtlasIndex.sub(_agRow.mul(_agCols));
+      const _agOx = _agCol.mul(uAtlasGrid.y).add(uAtlasGrid.z);
+      const _agOy = _agCols
+        .sub(1)
+        .sub(_agRow)
+        .mul(uAtlasGrid.y)
+        .add(uAtlasGrid.z);
+      const _leafCellUv = _leafBaseUv.mul(uAtlasGrid.w).add(vec2(_agOx, _agOy));
+      const _leafSampleUv = mix(_leafBaseUv, _leafCellUv, uUseAtlas);
+      const leafMapNode = texture(new THREE.Texture(), _leafSampleUv);
+      // 0 = sample mask from .r (grayscale/RGB-only PNGs), 1 = sample from .a (RGBA PNGs).
+      // Set per-texture by detectAlphaChannel() after load.
+      const uMaskInAlpha = uniform(0.0);
+      // Built-in texture: activeLeafTexPath = "textures/leaves/...".
+      // User-loaded texture: activeLeafTexDataUrl = "data:image/...;base64,...".
+      // At most one is non-empty; both are serialized as `leafTexture` in the preset.
+      let activeLeafTexPath = "";
+      let activeLeafTexDataUrl = "";
+
+      // Detects whether an image's alpha channel carries meaningful (<255) data.
+      // Used to decide which channel holds the leaf mask.
+      function detectAlphaChannel(image) {
+        try {
+          const w = image.width || image.naturalWidth;
+          const h = image.height || image.naturalHeight;
+          if (!w || !h) return false;
+          const c = document.createElement("canvas");
+          c.width = w;
+          c.height = h;
+          const ctx = c.getContext("2d", { willReadFrequently: true });
+          ctx.drawImage(image, 0, 0);
+          const data = ctx.getImageData(0, 0, w, h).data;
+          // Sample every 4th pixel for speed; bail on first sub-opaque alpha.
+          for (let i = 3; i < data.length; i += 16) {
+            if (data[i] < 255) return true;
+          }
+          return false;
+        } catch (e) {
+          // Cross-origin tainted canvas etc. — fall back to red-channel.
+          return false;
+        }
+      }
+
+      function applyMaskChannelFor(tex) {
+        const img = tex.image;
+        uMaskInAlpha.value = detectAlphaChannel(img) ? 1.0 : 0.0;
+      }
+
+      function loadLeafTexFromPath(path) {
+        const url = resolvePublicPath(path);
+        const loader = new THREE.TextureLoader();
+        loader.load(
+          url,
+          (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.needsUpdate = true;
+            leafMapNode.value = tex;
+            applyMaskChannelFor(tex);
+            activeLeafTexPath = path;
+            activeLeafTexDataUrl = "";
+            params.leafTexFile = path;
+            updateGallerySelection();
+          },
+          undefined,
+          (err) => console.error("Leaf texture load failed:", url, err),
+        );
+      }
+
+      function loadLeafTexFromFile(file) {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const dataUrl = ev.target.result;
+          loadLeafTexFromDataUrl(dataUrl, file.name);
+        };
+        reader.readAsDataURL(file);
+      }
+
+      // Used both by file uploads and by preset loads that embedded the texture.
+      function loadLeafTexFromDataUrl(dataUrl, displayName) {
+        const img = new Image();
+        img.onload = () => {
+          const tex = new THREE.Texture(img);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.needsUpdate = true;
+          leafMapNode.value = tex;
+          applyMaskChannelFor(tex);
+          activeLeafTexPath = "";
+          activeLeafTexDataUrl = dataUrl;
+          params.leafTexFile = displayName || "(embedded)";
+          updateGallerySelection();
+        };
+        img.src = dataUrl;
+      }
+
+      // ─── TEXTURE GALLERY (mounted in Leaf Texture panel) ─────────────────────────
+      let galleryImgs = [];
+
+      function updateGallerySelection() {
+        galleryImgs.forEach((img, i) => {
+          img.classList.toggle(
+            "active",
+            LEAF_TEXTURES[i].path === activeLeafTexPath,
+          );
+        });
+      }
+
+      function buildTexGallery(parent) {
+        const label = document.createElement("div");
+        label.className = "tex-gallery-label";
+        label.textContent = "Built-in textures";
+        parent.appendChild(label);
+
+        const galleryEl = document.createElement("div");
+        galleryEl.className = "tex-gallery";
+        parent.appendChild(galleryEl);
+
+        galleryImgs = [];
+        LEAF_TEXTURES.forEach((t) => {
+          const wrap = document.createElement("div");
+          wrap.className = "tex-item";
+          const img = document.createElement("img");
+          img.src = resolvePublicPath(t.path);
+          img.title = t.name;
+          img.alt = t.name;
+          img.addEventListener("click", () => loadLeafTexFromPath(t.path));
+          wrap.appendChild(img);
+          const cap = document.createElement("div");
+          cap.className = "tex-label";
+          cap.textContent = t.name;
+          wrap.appendChild(cap);
+          galleryEl.appendChild(wrap);
+          galleryImgs.push(img);
+        });
+        updateGallerySelection();
+      }
+
+      // ─── MATERIAL UNIFORMS ───────────────────────────────────────────────────────
+      const uTime = uniform(0.0);
+      const uYMin = uniform(0.0);
+      const uYMax = uniform(8.0);
+      const uBottomColor = uniform(new THREE.Color("#2d5a1b"));
+      const uTopColor = uniform(new THREE.Color("#5aaa2a"));
+      const uColorVar = uniform(0.12);
+      const uAlphaCutoff = uniform(0.45);
+      const uSssColor = uniform(new THREE.Color("#c8e070"));
+      const uSssStr = uniform(0.0);
+      const uSssPow = uniform(2.0);
+      const uRimColor = uniform(new THREE.Color("#c8ffaa"));
+      const uRimStr = uniform(0.07);
+      const uRimPow = uniform(2.5);
+      const uAoStr = uniform(0.7);
+      const uSunDir = uniform(new THREE.Vector3(5, 12, 4).normalize());
+      const uWindSpeed = uniform(0.9);
+      const uWindStr = uniform(0.0);
+      const uWindMicro = uniform(0.0);
+      const uCanopyCenter = uniform(new THREE.Vector3(0, 4, 0));
+      const uAoRadius = uniform(6.0);
+      const uNormalBias = uniform(1.0);
+      const uLeafWarp = uniform(0.28);
+      const uBillboard = uniform(1.0);
+      const uBillboardYaw = uniform(0.0);
+
+      // ─── LEAF MATERIAL (TSL) ─────────────────────────────────────────────────────
+      const aRand = attribute("aRand", "vec2");
+      const aLeafScale = attribute("aLeafScale", "float");
+      const aLeafCenter = attribute("aLeafCenter", "vec3");
+      // Per-instance world-space center — instance-aware (modelWorldMatrix * leaf center)
+      const instanceCenterW = modelWorldMatrix.mul(vec4(aLeafCenter, 1)).xyz;
+
+      const leafWindOffset = Fn(() => {
+        const phase = aRand.x.mul(6.2832);
+        const tipFactor = positionLocal.y.add(0.5);
+        const sway = sin(uTime.mul(uWindSpeed).add(phase))
+          .mul(uWindStr)
+          .mul(tipFactor);
+        const micro = sin(uTime.mul(3.1).add(phase.mul(2.6)))
+          .mul(uWindMicro)
+          .mul(tipFactor);
+        const swayZ = cos(uTime.mul(uWindSpeed.mul(0.8)).add(phase.mul(1.3)))
+          .mul(uWindStr.mul(0.5))
+          .mul(tipFactor);
+        return vec3(sway.add(micro), float(0), swayZ);
+      });
+
+      const positionNode = Fn(() => {
+        // Wind is a world-space delta (sway along world X, swayZ along world Z).
+        // Must NOT be projected into the camera basis or it appears to rotate with the camera.
+        const wo = leafWindOffset();
+        const pivotW = instanceCenterW;
+        const toCam = normalize(sub(cameraPosition, pivotW));
+        const horiz = vec3(toCam.x, float(0), toCam.z);
+        const hLen = length(horiz);
+        const useH = step(float(0.0001), hLen);
+        const yawDir = normalize(
+          add(
+            mul(normalize(horiz), useH),
+            mul(vec3(0, 0, float(1)), sub(float(1), useH)),
+          ),
+        );
+        const face = normalize(mix(toCam, yawDir, uBillboardYaw));
+        const worldUp = vec3(0, 1, 0);
+        // NaN-safe basis: pick the non-degenerate cross BEFORE normalizing.
+        const cA = cross(worldUp, face);
+        const cB = cross(vec3(-1, 0, 0), face);
+        const right = normalize(mix(cA, cB, step(float(0.99), abs(face.y))));
+        const upv = normalize(cross(face, right));
+        // Per-leaf 2D rotation of the camera-aligned quad around the face axis.
+        // Breaks up the "all billboards point the same way" tell. Uses aRand.x
+        // (already deterministic per leaf and shared with v2).
+        const ang = aRand.x.mul(6.2831853);
+        const cosA = cos(ang);
+        const sinA = sin(ang);
+        const rRight = right.mul(cosA).add(upv.mul(sinA));
+        const rUp = upv.mul(cosA).sub(right.mul(sinA));
+        // Camera-aligned quad from positionLocal only (no wind in the basis).
+        const bbQuad = add(
+          mul(rRight, mul(positionLocal.x, aLeafScale)),
+          mul(rUp, mul(positionLocal.y, aLeafScale)),
+        );
+        // World-space wind, scaled with leaf size.
+        const windWorld = mul(wo, aLeafScale);
+        const bb3 = bbQuad.add(windWorld);
+        // Non-billboard branch: wind added in local space (rotates with the leaf — acceptable).
+        return mix(positionLocal.add(wo), bb3, uBillboard);
+      })();
+
+      // Stylized foliage lighting: every leaf uses world-up as its normal so the
+      // entire canopy lights as one uniform "puff." Per-leaf sphereDir variation
+      // produces visible per-leaf shading noise that swings as the camera orbits
+      // (different leaves come to the front). Uniform world-up gives a stable,
+      // angle-independent appearance; shape comes from AO and the height gradient,
+      // not from per-leaf normal variation. Matches the BotW/Genshin stylized look.
+      const sphereDir = vec3(0, 1, 0);
+      // SSS uses the per-leaf outward direction (not the uniform sphereDir) so
+      // backlit leaves on the anti-sun hemisphere still glow with the SSS color.
+      // Kept separate so Lambert stays uniform but SSS gives the stylized highlight.
+      const sphereDirForSSS = normalize(instanceCenterW.sub(uCanopyCenter));
+      const leafBillboardFace = Fn(() => {
+        const pivotW = instanceCenterW;
+        const toCam = normalize(sub(cameraPosition, pivotW));
+        const horiz = vec3(toCam.x, float(0), toCam.z);
+        const hLen = length(horiz);
+        const useH = step(float(0.0001), hLen);
+        const yawDir = normalize(
+          add(
+            mul(normalize(horiz), useH),
+            mul(vec3(0, 0, float(1)), sub(float(1), useH)),
+          ),
+        );
+        return normalize(mix(toCam, yawDir, uBillboardYaw));
+      })();
+      const warpedNormal = normalize(
+        normalLocal.add(sin(uv().x.mul(10)).mul(uLeafWarp)),
+      );
+      const geomForMix = normalize(
+        mix(warpedNormal, leafBillboardFace, uBillboard),
+      );
+      const finalNormal = normalize(mix(geomForMix, sphereDir, uNormalBias));
+
+      const colorNode = Fn(() => {
+        const h1 = aRand.x;
+        const h2 = aRand.y;
+        const heightFactor = clamp(
+          positionWorld.y.sub(uYMin).div(max(uYMax.sub(uYMin), float(0.001))),
+          float(0),
+          float(1),
+        );
+        let col = mix(uBottomColor, uTopColor, heightFactor);
+        const varMul = h1
+          .mul(uColorVar.mul(2.0))
+          .add(float(1.0).sub(uColorVar));
+        col = col.mul(varMul);
+        const hueShift = h2.sub(0.5).mul(uColorVar.mul(0.4));
+        col = vec3(
+          col.x.add(hueShift.mul(0.3)),
+          col.y,
+          col.z.sub(hueShift.mul(0.2)),
+        );
+        // Height-based AO
+        const aoHeight = mix(
+          float(1.0).sub(uAoStr),
+          float(1.0),
+          heightFactor.mul(0.8).add(0.2),
+        );
+        col = col.mul(aoHeight);
+        // Sphere-distance AO: inner leaves darker
+        const distC = clamp(
+          length(sub(positionWorld, uCanopyCenter)).div(
+            max(uAoRadius, float(0.001)),
+          ),
+          float(0),
+          float(1),
+        );
+        const aoSphere = mix(float(1.0).sub(uAoStr), float(1.0), distC);
+        col = col.mul(aoSphere);
+        const viewDir = normalize(cameraPosition.sub(positionWorld));
+        const n = normalWorld;
+        // SSS uses per-leaf sphere direction so backlit anti-sun leaves glow,
+        // while Lambert (via normalWorld = uniform world-up) stays stable.
+        const backDot = max(dot(negate(uSunDir), sphereDirForSSS), float(0));
+        const sss = pow(backDot, uSssPow).mul(uSssStr);
+        col = col.add(uSssColor.mul(sss));
+        // Rim uses per-leaf sphere direction (not the uniform up normal) so it
+        // activates on leaves whose outward direction is perpendicular to view —
+        // i.e. the canopy silhouette from any camera angle. Without this, rim
+        // would be a "horizon glow" tied to camera height and would only show
+        // up on the AO-darkened bottom, looking like SSS instead of edge rim.
+        const rimDot = float(1.0).sub(
+          max(dot(sphereDirForSSS, viewDir), float(0)),
+        );
+        const rim = pow(rimDot, uRimPow).mul(uRimStr);
+        col = col.add(uRimColor.mul(rim));
+        return clamp(col, float(0), float(2));
+      })();
+
+      // Selects the leaf mask channel based on the loaded texture format.
+      // uMaskInAlpha = 0 -> .r (grayscale / RGB-only PNGs), = 1 -> .a (RGBA PNGs).
+      const leafMaskCh = mix(leafMapNode.r, leafMapNode.a, uMaskInAlpha);
+
+      const opacityNode = Fn(() => {
+        const camDist = length(cameraPosition.sub(positionWorld));
+        const distFade = clamp(camDist.div(float(150.0)), float(0), float(1));
+        const adaptiveCutoff = mix(uAlphaCutoff, float(0.15), distFade);
+        return smoothstep(
+          adaptiveCutoff.sub(0.05),
+          adaptiveCutoff.add(0.05),
+          leafMaskCh,
+        );
+      })();
+
+      const leafMat = new MeshStandardNodeMaterial({
+        side: THREE.DoubleSide,
+        transparent: false,
+        alphaTest: 0.3,
+        roughness: 1.0,
+        metalness: 0.0,
+        depthWrite: true,
+      });
+      leafMat.positionNode = positionNode;
+      leafMat.normalNode = finalNormal;
+      leafMat.colorNode = colorNode;
+      leafMat.opacityNode = opacityNode;
+      leafMat.envMapIntensity = 0;
+      leafMat.castShadowNode = Fn(() => {
+        // Match the visible pass: same channel select and same alphaTest threshold (0.3),
+        // so the shadow silhouette aligns with the leaf silhouette.
+        const a = smoothstep(
+          uAlphaCutoff.sub(0.05),
+          uAlphaCutoff.add(0.05),
+          leafMaskCh,
+        );
+        a.lessThan(float(0.3)).discard();
+        return vec4(0, 0, 0, 1);
+      })();
+
+      // ─── CLUSTER DEFINITIONS (6 slots) ──────────────────────────────────────────
+      // --- DAY/NIGHT SKY (inlined verbatim copy of v2/render/sky/dayNightSky.js) ---
+      // Source of truth = v2 module (itself a copy of the daynight-sky lab).
+      // Only change vs source: SKY_RADIUS 4000 -> 1500 to fit this editor camera far.
+      const SKY_RADIUS = 1500;
+
+      function createDayNightSky() {
+        // ── Uniforms (driven from PARAMS each frame) ─────────────────────────────
+        const uSunDir = uniform(new THREE.Vector3(0, 1, 0));
+        const uMoonDir = uniform(new THREE.Vector3(0, -1, 0));
+        const uTime = uniform(0);
+
+        const uZenithDay = uniform(new THREE.Color(0x2a6bd8));
+        const uHorizonDay = uniform(new THREE.Color(0xbfe0ff));
+        const uZenithNight = uniform(new THREE.Color(0x05080f));
+        const uHorizonNight = uniform(new THREE.Color(0x1a2740));
+        const uSunsetColor = uniform(new THREE.Color(0xff7a33));
+        const uGroundColor = uniform(new THREE.Color(0x4a4a52));
+
+        // ── Atmospheric scattering (Nishita single-scattering) ───────────────────
+        // 0 = the analytic gradient above; 1 = a physically-based Rayleigh+Mie
+        // raymarch that gives the whole-sky sun glow, true horizon brightening, the
+        // belt of Venus and automatic sunset gradients. Drawn additively over the
+        // night gradient, so twilight carries itself as the sun drops.
+        const uScatterMix = uniform(1);
+        const uSunIntensity = uniform(22); // disc-of-the-sun radiance scale
+        const uRayleigh = uniform(1.0); // βR multiplier (sky blueness)
+        const uMie = uniform(1.0); // βM multiplier (haze / sun aureole)
+        const uMieG = uniform(0.76); // Mie anisotropy (aureole tightness)
+        const uAtmoAltitude = uniform(1500); // viewer height in the atmosphere (m)
+        const uHr = uniform(7994); // Rayleigh scale height (m)
+        const uHm = uniform(1200); // Mie scale height (m)
+        const uBetaR = uniform(new THREE.Vector3(5.5e-6, 13.0e-6, 22.4e-6));
+        const uBetaM = uniform(21e-6);
+        // Multiple-scattering approximation (no LUT): bounced light is ~isotropic and
+        // less path-extincted, so it fills the long-path horizon (bright glow) and
+        // shadowed twilight sky that single-scatter leaves dark. Gated by sun
+        // visibility so the night stays dark.
+        const uMsAmount = uniform(1.0); // strength of the multi-scatter fill
+        const uMsExtinct = uniform(0.3); // <1 = bounced light keeps more energy
+        const RG = 6360e3,
+          RT = 6420e3; // planet / atmosphere radii (m)
+
+        const uSunColor = uniform(new THREE.Color(0xfff3d8));
+        const uSunCos = uniform(Math.cos(THREE.MathUtils.degToRad(1.2)));
+        const uSunGlowPow = uniform(280);
+        const uSunGlowStrength = uniform(0.55);
+        const uSunDiscBright = uniform(8.0);
+
+        const uMoonColor = uniform(new THREE.Color(0xcdd9ff));
+        const uMoonCos = uniform(Math.cos(THREE.MathUtils.degToRad(1.6)));
+        const uMoonGlowPow = uniform(900);
+        const uMoonGlowStrength = uniform(0.25);
+        const uMoonDiscBright = uniform(3.0);
+        // Phase/surface (the moon is rendered as a reconstructed sphere in the disc).
+        const uMoonRight = uniform(new THREE.Vector3(1, 0, 0));
+        const uMoonUp = uniform(new THREE.Vector3(0, 1, 0));
+        const uMoonLightDir = uniform(new THREE.Vector3(0, 0, 1)); // phase illumination dir
+        const uMoonSinR = uniform(Math.sin(THREE.MathUtils.degToRad(1.6)));
+        const uMoonSurface = uniform(0.85); // maria/crater strength
+        const uMoonEarthshine = uniform(0.12); // ashen glow on the dark side
+        const uMoonTermSoft = uniform(0.06); // terminator softness
+        const uMoonEdgeSoft = uniform(0.04); // disc edge anti-alias
+
+        // Module-scratch vectors for the per-frame moon frame.
+        const _mRight = new THREE.Vector3();
+        const _mUp = new THREE.Vector3();
+        const _mL = new THREE.Vector3();
+        const _mUpRef = new THREE.Vector3();
+        const _mTmp = new THREE.Vector3();
+
+        const uStarDensity = uniform(220);
+        const uStarThreshold = uniform(0.92);
+        const uStarSize = uniform(0.08);
+        const uStarBrightness = uniform(1.0);
+        const uStarTwinkle = uniform(3.0);
+
+        // ── Milky Way band ────────────────────────────────────────────────────────
+        const uMilkyWayEnabled = uniform(1);
+        const uMilkyWayIntensity = uniform(1.0);
+        const uMilkyWayWidth = uniform(0.32); // half-width of the band (|latitude|)
+        const uMilkyWayScale = uniform(4.0); // noise feature scale
+        const uMilkyWayColor1 = uniform(new THREE.Color(0x5566a0)); // cool dust
+        const uMilkyWayColor2 = uniform(new THREE.Color(0xefe6cf)); // warm star clouds
+        const uGalacticPole = uniform(
+          new THREE.Vector3(0.34, 0.5, 0.8).normalize(),
+        );
+
+        // ── Shooting stars (procedural, stateless) ────────────────────────────────
+        const uMeteorEnabled = uniform(1);
+        const uMeteorIntensity = uniform(1.0);
+        const uMeteorRate = uniform(0.45); // fraction of epochs that spawn a meteor
+        const uMeteorSpeed = uniform(1.0);
+        const uMeteorWidth = uniform(0.006); // streak thickness (radians of arc)
+        const uMeteorLength = uniform(0.1); // trail length (radians of arc)
+
+        // ── High cirrus deck (2D analytic clouds painted on the dome) ─────────────
+        // Cheap fbm clouds projected onto a horizontal plane (so they converge to
+        // the horizon like a real high deck). Complements the volumetric cumulus and
+        // doubles as a perf fallback when the raymarch is off. Relit by sun/moon.
+        const uCloudEnabled = uniform(1);
+        const uCloudCoverage = uniform(0.5); // fraction of sky covered
+        const uCloudDensity = uniform(0.85); // per-cloud opacity
+        const uCloudOpacity = uniform(1.0); // master opacity
+        const uCloudScale = uniform(0.7); // feature scale (bigger = smaller clouds)
+        const uCloudStretch = uniform(2.5); // anisotropy → cirrus streaks
+        const uCloudSharpness = uniform(0.22); // coverage edge softness
+        const uCloudDetail = uniform(0.8); // fine-detail octave mix
+        const uCloudSunTint = uniform(1.0); // strength of warm sunset tint
+        const uCloudSpeed = uniform(0.01); // drift speed
+        const uCloudWind = uniform(new THREE.Vector2(1, 0.35)); // drift direction
+        const uCloudColor = uniform(new THREE.Color(0xffffff));
+        const uCloudAerial = uniform(0.8); // aerial perspective: low cirrus → sky behind it
+
+        const uFogEnabled = uniform(0);
+        const uFogColor = uniform(new THREE.Color(0x9fb8c4));
+        const uFogDensity = uniform(0.0003);
+        // How high up the sky the horizon haze climbs (in `up`, i.e. sin of elevation).
+        // Smaller = the haze hugs the waterline, leaving the scattering's bright
+        // horizon band visible instead of washing it out.
+        const uFogHazeHeight = uniform(0.12);
+
+        // ── Hash + star field ────────────────────────────────────────────────────
+        const hash33 = Fn(([p]) => {
+          const q = vec3(
+            dot(p, vec3(127.1, 311.7, 74.7)),
+            dot(p, vec3(269.5, 183.3, 246.1)),
+            dot(p, vec3(113.5, 271.9, 124.6)),
+          );
+          return fract(sin(q).mul(43758.5453123));
+        });
+
+        // Varied star field: per-cell hash drives presence, position, SIZE, magnitude
+        // and COLOR (cool blue-white → warm), so the field reads natural, not uniform.
+        const starField = Fn(([dir]) => {
+          const sp = dir.mul(uStarDensity);
+          const cell = floor(sp);
+          const f = fract(sp).sub(0.5);
+          const rnd = hash33(cell);
+          // Sparse: only cells whose hash clears the threshold hold a star.
+          const present = step(uStarThreshold, rnd.x);
+          const off = hash33(cell.add(vec3(1.7, 9.2, 3.3)))
+            .sub(0.5)
+            .mul(0.7);
+          const d = length(f.sub(off));
+          const size = uStarSize.mul(mix(float(0.45), float(1.7), rnd.z)); // a few bright, many faint
+          const core = smoothstep(size, float(0.0), d);
+          const mag = mix(float(0.3), float(1.0), rnd.y.mul(rnd.y)); // skew dim
+          const tw = sin(uTime.mul(uStarTwinkle).add(rnd.y.mul(6.2831)))
+            .mul(0.35)
+            .add(0.65);
+          const col = mix(
+            vec3(0.72, 0.82, 1.0),
+            vec3(1.0, 0.86, 0.66),
+            rnd.z.mul(rnd.z),
+          );
+          return col.mul(
+            present.mul(core).mul(mag).mul(tw).mul(uStarBrightness),
+          );
+        });
+
+        // Procedural shooting stars: a few stateless "slots", each cycling on its own
+        // period. A lucky epoch spawns a meteor that sweeps a SHORT arc; we light the
+        // thin line SEGMENT [tail→head] on the sphere (distance to the chord), bright
+        // at the head and fading to the tail. No buffers; gated by night at call site.
+        const shootingStars = Fn(([dir]) => {
+          const acc = vec3(0.0).toVar();
+          Loop(3, ({ i }) => {
+            const slot = float(i);
+            const period = float(5.0);
+            const tt = uTime.mul(uMeteorSpeed).div(period).add(slot.mul(0.41));
+            const epoch = floor(tt);
+            const p = fract(tt); // 0..1 within this slot's cycle
+            const h = hash33(
+              vec3(epoch.add(slot.mul(17.3)), slot.add(3.0), 5.1),
+            );
+            const lucky = step(uMeteorRate.oneMinus(), h.x);
+            // Brief visible burst within the cycle (fade in, fade out).
+            const win = smoothstep(float(0.0), float(0.05), p)
+              .mul(smoothstep(float(0.3), float(0.12), p))
+              .toVar();
+            // Random great circle: upward-biased anchor A + a perpendicular tangent T.
+            const A = normalize(
+              vec3(h.x.sub(0.5), h.y.mul(0.6).add(0.4), h.z.sub(0.5)),
+            ).toVar();
+            const h2 = hash33(vec3(epoch.add(11.0), slot.add(5.0), 2.2)).sub(
+              0.5,
+            );
+            const T = normalize(h2.sub(A.mul(dot(h2, A)))).toVar();
+            // Head sweeps the arc over the burst; tail trails behind by uMeteorLength.
+            const headAng = p.mul(0.55).toVar();
+            const tailAng = headAng.sub(uMeteorLength);
+            const headDir = A.mul(cos(headAng))
+              .add(T.mul(sin(headAng)))
+              .toVar();
+            const tailDir = A.mul(cos(tailAng))
+              .add(T.mul(sin(tailAng)))
+              .toVar();
+            // Closest point on the chord [tail→head]; chord ≈ arc for short segments.
+            const e = headDir.sub(tailDir);
+            const u = clamp(
+              dot(dir.sub(tailDir), e).div(dot(e, e).max(float(1e-5))),
+              float(0.0),
+              float(1.0),
+            );
+            const dist = length(dir.sub(tailDir.add(e.mul(u))));
+            const line = smoothstep(uMeteorWidth, float(0.0), dist).mul(
+              u.mul(u),
+            ); // taper to tail
+            const head = smoothstep(
+              uMeteorWidth.mul(2.5),
+              float(0.0),
+              length(dir.sub(headDir)),
+            ); // bright tip
+            const m = lucky.mul(win).mul(line.add(head));
+            acc.addAssign(vec3(0.85, 0.92, 1.0).mul(m));
+          });
+          return acc.mul(uMeteorIntensity);
+        });
+
+        // ── Procedural moon surface (value-noise fbm → maria + craters) ────────────
+        const hash13 = Fn(([p]) =>
+          fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))).mul(43758.5453)),
+        );
+        const vnoise = Fn(([p]) => {
+          const i = floor(p);
+          const f = fract(p);
+          const u = f.mul(f).mul(f.mul(-2.0).add(3.0));
+          const c000 = hash13(i.add(vec3(0, 0, 0)));
+          const c100 = hash13(i.add(vec3(1, 0, 0)));
+          const c010 = hash13(i.add(vec3(0, 1, 0)));
+          const c110 = hash13(i.add(vec3(1, 1, 0)));
+          const c001 = hash13(i.add(vec3(0, 0, 1)));
+          const c101 = hash13(i.add(vec3(1, 0, 1)));
+          const c011 = hash13(i.add(vec3(0, 1, 1)));
+          const c111 = hash13(i.add(vec3(1, 1, 1)));
+          const x00 = mix(c000, c100, u.x),
+            x10 = mix(c010, c110, u.x);
+          const x01 = mix(c001, c101, u.x),
+            x11 = mix(c011, c111, u.x);
+          return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
+        });
+        const fbm3 = Fn(([p]) =>
+          vnoise(p)
+            .add(vnoise(p.mul(2.03).add(11.5)).mul(0.5))
+            .add(vnoise(p.mul(4.01).add(31.7)).mul(0.25))
+            .div(1.75),
+        );
+
+        // ── Nishita single-scattering atmosphere ─────────────────────────────────
+        // Marches the view ray through the atmosphere shell; at each step a short
+        // light-march toward the sun gives the optical depth to space, and Rayleigh
+        // (molecular, blue) + Mie (aerosol, forward-peaked white) scattering are
+        // accumulated with their phase functions. Output is HDR radiance (tone-mapped
+        // into the sky RT with the rest of the scene).
+        const atmosphere = Fn(([dir, sunDir]) => {
+          const orig = vec3(0, float(RG).add(uAtmoAltitude), 0).toVar();
+          const b = dot(orig, dir).toVar();
+          const ococ = dot(orig, orig);
+          // Far intersection with the atmosphere top (origin is always inside).
+          const discA = b.mul(b).sub(ococ.sub(float(RT * RT)));
+          const tmax = b
+            .negate()
+            .add(sqrt(discA.max(0.0)))
+            .toVar();
+          // Clamp the march to the ground if the planet is hit ahead (bright horizon).
+          const discG = b.mul(b).sub(ococ.sub(float(RG * RG)));
+          const tg = b.negate().sub(sqrt(discG.max(0.0)));
+          If(discG.greaterThan(0.0).and(tg.greaterThan(0.0)), () => {
+            tmax.assign(min(tmax, tg));
+          });
+
+          const betaR = uBetaR.mul(uRayleigh);
+          const betaM = uBetaM.mul(uMie);
+          const NS = 16,
+            NL = 8;
+          const segLen = tmax.div(float(NS)).toVar();
+          const tCur = float(0.0).toVar();
+          const sumR = vec3(0.0).toVar();
+          const sumM = vec3(0.0).toVar();
+          const sumMS = vec3(0.0).toVar(); // isotropic multiple-scatter fill
+          const odR = float(0.0).toVar();
+          const odM = float(0.0).toVar();
+
+          Loop(NS, () => {
+            const sp = orig.add(dir.mul(tCur.add(segLen.mul(0.5))));
+            const h = length(sp).sub(float(RG));
+            const hr = exp(h.negate().div(uHr)).mul(segLen);
+            const hm = exp(h.negate().div(uHm)).mul(segLen);
+            odR.addAssign(hr);
+            odM.addAssign(hm);
+
+            // Light march toward the sun for the optical depth (extinction to space).
+            // No early-out on going underground: clamp the sample altitude at the ground
+            // so the march stays continuous; the shadow itself is the smooth analytic
+            // terminator below (replaces the old hard lit/shadow flip + Break).
+            const bl = dot(sp, sunDir);
+            const discL = bl.mul(bl).sub(dot(sp, sp).sub(float(RT * RT)));
+            const segL = bl
+              .negate()
+              .add(sqrt(discL.max(0.0)))
+              .div(float(NL))
+              .toVar();
+            const tCurL = float(0.0).toVar();
+            const odLR = float(0.0).toVar();
+            const odLM = float(0.0).toVar();
+            Loop(NL, () => {
+              const spl = sp.add(sunDir.mul(tCurL.add(segL.mul(0.5))));
+              const hl = length(spl).sub(float(RG)).max(0.0); // clamp at ground
+              odLR.addAssign(exp(hl.negate().div(uHr)).mul(segL));
+              odLM.addAssign(exp(hl.negate().div(uHm)).mul(segL));
+              tCurL.addAssign(segL);
+            });
+
+            // Soft analytic ground shadow: `m` is the sun's height above THIS sample's
+            // geometric horizon (m = bl + sqrt(|sp|²−RG²)) — >0 lit, <0 shadowed, 0 at
+            // the tangent terminator. Continuous & branchless, so single- and
+            // multi-scatter fade gradually across twilight instead of snapping per
+            // sample (the old hard `valid`/Break did).
+            const m = bl.add(
+              sqrt(
+                dot(sp, sp)
+                  .sub(float(RG * RG))
+                  .max(0.0),
+              ),
+            );
+            const litSoft = smoothstep(
+              float(-9000.0),
+              float(9000.0),
+              m,
+            ).toVar();
+
+            const tau = betaR
+              .mul(odR.add(odLR))
+              .add(betaM.mul(1.1).mul(odM.add(odLM)));
+            const att = vec3(
+              exp(tau.x.negate()),
+              exp(tau.y.negate()),
+              exp(tau.z.negate()),
+            );
+            sumR.addAssign(att.mul(hr).mul(litSoft));
+            sumM.addAssign(att.mul(hm).mul(litSoft));
+            // Multiple-scatter fill: extinct only by the (reduced) VIEW path — the
+            // bounced light is local, so it isn't dimmed by the long path to the sun.
+            // (OFF by default now — msAmount=0; kept here for when it's dialed back up.)
+            const tauV = betaR.mul(odR).add(betaM.mul(1.1).mul(odM));
+            const attMS = vec3(
+              exp(tauV.x.mul(uMsExtinct).negate()),
+              exp(tauV.y.mul(uMsExtinct).negate()),
+              exp(tauV.z.mul(uMsExtinct).negate()),
+            );
+            sumMS.addAssign(
+              attMS.mul(betaR.mul(hr).add(betaM.mul(hm))).mul(litSoft),
+            );
+            tCur.addAssign(segLen);
+          });
+
+          const mu = dot(dir, sunDir);
+          const phaseR = float(3 / (16 * Math.PI)).mul(
+            float(1.0).add(mu.mul(mu)),
+          );
+          const g = uMieG;
+          const g2 = g.mul(g);
+          const phaseM = float(3 / (8 * Math.PI))
+            .mul(
+              float(1.0)
+                .sub(g2)
+                .mul(float(1.0).add(mu.mul(mu))),
+            )
+            .div(
+              float(2.0)
+                .add(g2)
+                .mul(
+                  pow(
+                    float(1.0).add(g2).sub(g.mul(mu).mul(2.0)).max(0.0001),
+                    1.5,
+                  ),
+                ),
+            );
+
+          const single = sumR
+            .mul(betaR)
+            .mul(phaseR)
+            .add(sumM.mul(betaM).mul(phaseM));
+          // Isotropic phase (1/4π) for the bounced fill.
+          const multi = sumMS.mul(uMsAmount).mul(float(1 / (4 * Math.PI)));
+          return single.add(multi).mul(uSunIntensity);
+        });
+
+        // ── High cirrus deck (2D analytic clouds on the dome) ─────────────────────
+        // Returns vec4(rgb, alpha). Projects the view ray onto a horizontal plane so
+        // clouds converge toward the horizon, samples a stretched fbm for streaky
+        // cirrus, then relights by sun (silver lining), sunset (warm tint) and moon.
+        const cirrus = Fn(([dir, dayF, twilightF, bgCol]) => {
+          const y = dir.y.toVar();
+          // Floor yy so the near-horizon uv doesn't explode into noise aliasing
+          // (hidden by hMask anyway, but keeps the math finite).
+          const yy = max(y, float(0.08));
+          const proj = vec2(dir.x, dir.z).div(yy);
+          // Anisotropic stretch → streaky cirrus rather than round blobs; drift on wind.
+          const wind = uCloudWind.mul(uTime.mul(uCloudSpeed));
+          const uv = vec2(proj.x.div(uCloudStretch), proj.y)
+            .mul(uCloudScale)
+            .add(wind)
+            .toVar();
+
+          // Coverage field (slow morph on the 3rd axis) + a finer detail layer.
+          const n = fbm3(
+            vec3(uv.x, uv.y, uTime.mul(uCloudSpeed).mul(0.4)),
+          ).toVar();
+          const nHi = fbm3(vec3(uv.x.mul(2.7).add(19.0), uv.y.mul(2.7), 7.0));
+          n.assign(mix(n, n.mul(0.55).add(nHi.mul(0.45)), uCloudDetail));
+
+          // Threshold by coverage (higher coverage → lower threshold → more sky).
+          const edge = uCloudCoverage.oneMinus();
+          const cov = smoothstep(edge, edge.add(uCloudSharpness), n);
+          // Fade out at / below the horizon.
+          const hMask = smoothstep(float(0.02), float(0.2), y);
+          const alpha = cov.mul(uCloudDensity).mul(hMask).mul(uCloudOpacity);
+
+          // ── Lighting ──
+          const sunAmt = max(dot(dir, uSunDir), float(0.0));
+          const moonAmt = max(dot(dir, uMoonDir), float(0.0));
+          // Day: bright base with a silver lining toward the sun.
+          const dayBright = mix(
+            float(0.82),
+            float(1.3),
+            pow(sunAmt, float(2.5)),
+          );
+          const dayCol = uCloudColor.mul(dayBright).toVar();
+          // Sunset: clouds catch warm low light near the horizon (pink mackerel sky).
+          const warm = clamp(
+            twilightF
+              .mul(mix(float(0.35), float(1.0), sunAmt))
+              .mul(uCloudSunTint),
+            0.0,
+            1.0,
+          );
+          dayCol.assign(mix(dayCol, uSunsetColor.mul(1.15), warm));
+          // Night: dim, tinted by the moon.
+          const nightBright = mix(
+            float(0.08),
+            float(0.45),
+            pow(moonAmt, float(2.5)),
+          );
+          const nightCol = uCloudColor.mul(uMoonColor).mul(nightBright);
+
+          const col = mix(nightCol, dayCol, dayF).toVar();
+          // Aerial perspective: low (distant) cirrus recedes into the sky BEHIND it,
+          // so the deck dissolves toward the horizon instead of holding full contrast.
+          const aerial = smoothstep(float(0.5), float(0.05), y).mul(
+            uCloudAerial,
+          );
+          col.assign(mix(col, bgCol, aerial));
+          return vec4(col, alpha);
+        });
+
+        // ── Sky color node ───────────────────────────────────────────────────────
+        const skyColorNode = Fn(() => {
+          const dir = normalize(positionWorld.sub(cameraPosition)).toVar();
+          const up = dir.y.toVar();
+
+          const sunEl = uSunDir.y;
+          const dayF = smoothstep(-0.15, 0.25, sunEl).toVar(); // 0 night → 1 day
+          const nightF = dayF.oneMinus();
+          // Twilight band peaks while the sun grazes the horizon.
+          const twilightF = smoothstep(-0.3, 0.0, sunEl).mul(
+            smoothstep(0.4, 0.04, sunEl),
+          );
+
+          // Vertical gradient (day + night palettes).
+          const tGrad = pow(max(up, float(0.0)), float(0.45));
+          const analyticDay = mix(uHorizonDay, uZenithDay, tGrad);
+          const nightCol = mix(uHorizonNight, uZenithNight, tGrad);
+
+          // ── ANALYTIC sky: crossfade day↔night + warm sunset wash (the old look) ──
+          const analyticSky = mix(nightCol, analyticDay, dayF).toVar();
+          const sunAmt = max(dot(dir, uSunDir), float(0.0));
+          const horizonBand = smoothstep(0.4, 0.0, abs(up));
+          const sunset = twilightF
+            .mul(horizonBand)
+            .mul(mix(float(0.25), float(1.0), sunAmt));
+          analyticSky.assign(
+            mix(analyticSky, uSunsetColor, clamp(sunset.mul(0.8), 0.0, 1.0)),
+          );
+
+          // ── PHYSICAL sky: Nishita scattering ADDED over the dark night gradient,
+          //    so the blue overpowers it by day and twilight self-fades at night. ──
+          const physicalSky = nightCol.add(atmosphere(dir, uSunDir));
+
+          const skyCol = mix(analyticSky, physicalSky, uScatterMix).toVar();
+
+          // Below the horizon. In SCATTER mode the Nishita march already clamps to the
+          // planet ground, so it naturally fades from the bright horizon (long grazing
+          // path) down to dark (steep, short path) — exactly like SkyMesh. So let it
+          // show and only blend the explicit ground color in DEEP down (a floor instead
+          // of black). In ANALYTIC mode the gradient is flat below the horizon, so blend
+          // the ground in sooner. Either way the bottom follows the sky — no hard grey
+          // seam at the waterline (the old code cut to ground over just ~2°).
+          const groundDeep = smoothstep(-0.05, -0.6, up); // 0 at horizon → 1 far down
+          const groundNear = smoothstep(0.0, -0.15, up); // analytic floor (sooner)
+          const groundMix = mix(groundNear, groundDeep, uScatterMix);
+          skyCol.assign(
+            mix(
+              skyCol,
+              uGroundColor.mul(mix(float(0.12), float(1.0), dayF)),
+              groundMix,
+            ),
+          );
+
+          // Horizon + under-horizon haze (matches scene FogExp2 on terrain).
+          const fogHorizon = smoothstep(uFogHazeHeight, float(0.0), up);
+          const fogGround = smoothstep(float(0.06), float(-0.2), up);
+          const fogMask = max(fogHorizon, fogGround);
+          const fogDepth = fogMask.mul(float(SKY_RADIUS));
+          const fogFac = sub(
+            float(1),
+            exp(
+              fogDepth.mul(fogDepth).mul(uFogDensity).mul(uFogDensity).negate(),
+            ),
+          );
+          skyCol.assign(mix(skyCol, uFogColor, mul(fogFac, uFogEnabled)));
+
+          // ── Milky Way band (night only). Gated twice so only band pixels at night
+          //    ever evaluate the FBM — day and off-band sky pay nothing. ──
+          const aboveHorizon = smoothstep(float(-0.02), float(0.12), up);
+          If(
+            uMilkyWayEnabled
+              .greaterThan(0.5)
+              .and(nightF.greaterThan(0.02))
+              .and(up.greaterThan(-0.02)),
+            () => {
+              const lat = abs(dot(dir, uGalacticPole));
+              const band = smoothstep(uMilkyWayWidth, float(0.0), lat);
+              If(band.greaterThan(0.001), () => {
+                const n = fbm3(dir.mul(uMilkyWayScale));
+                const cloud = smoothstep(float(0.45), float(0.85), n); // bright star clouds
+                const dust = smoothstep(float(0.22), float(0.46), n); // dark dust lanes carve in
+                const bright = band
+                  .mul(mix(float(0.3), float(1.1), cloud))
+                  .mul(mix(float(0.35), float(1.0), dust));
+                const col = mix(uMilkyWayColor1, uMilkyWayColor2, n);
+                skyCol.addAssign(
+                  col
+                    .mul(bright)
+                    .mul(uMilkyWayIntensity)
+                    .mul(nightF)
+                    .mul(aboveHorizon),
+                );
+              });
+            },
+          );
+
+          // Stars (above the horizon, night only).
+          skyCol.addAssign(starField(dir).mul(nightF).mul(aboveHorizon));
+
+          // Shooting stars (gated to night so day pays nothing).
+          If(
+            uMeteorEnabled.greaterThan(0.5).and(nightF.greaterThan(0.02)),
+            () => {
+              skyCol.addAssign(
+                shootingStars(dir).mul(nightF).mul(aboveHorizon),
+              );
+            },
+          );
+
+          // High cirrus deck: sits OVER the sky + stars (occludes them) but UNDER the
+          // sun/moon discs below (thin clouds → the disc still shines through). Gated
+          // so a disabled deck pays nothing.
+          If(uCloudEnabled.greaterThan(0.5), () => {
+            const c = cirrus(dir, dayF, twilightF, skyCol);
+            skyCol.assign(mix(skyCol, c.xyz, c.w));
+          });
+
+          // Sun disc + glow (fades out below the horizon).
+          const sunDot = dot(dir, uSunDir);
+          const sunUpFade = smoothstep(-0.06, 0.05, uSunDir.y);
+          const sunDisc = smoothstep(uSunCos, float(1.0), sunDot).mul(
+            uSunDiscBright,
+          );
+          const sunGlow = pow(max(sunDot, float(0.0)), uSunGlowPow).mul(
+            uSunGlowStrength,
+          );
+          skyCol.addAssign(uSunColor.mul(sunDisc.add(sunGlow)).mul(sunUpFade));
+
+          // Moon — reconstructed as a lit sphere inside the disc (phase + surface).
+          const moonDot = dot(dir, uMoonDir);
+          const moonUpFade = smoothstep(-0.06, 0.05, uMoonDir.y).mul(
+            mix(float(0.25), float(1.0), nightF),
+          );
+
+          // Disc-local coords; reconstruct the near-hemisphere normal as a sphere.
+          const nuvx = dot(dir, uMoonRight).div(uMoonSinR);
+          const nuvy = dot(dir, uMoonUp).div(uMoonSinR);
+          const r2 = nuvx.mul(nuvx).add(nuvy.mul(nuvy));
+          const inside = r2.lessThan(1.0).and(moonDot.greaterThan(0.0));
+
+          const moonCol = vec3(0.0).toVar();
+          If(inside, () => {
+            const z = sqrt(max(float(1.0).sub(r2), float(0.0)));
+            const N = normalize(
+              uMoonRight
+                .mul(nuvx)
+                .add(uMoonUp.mul(nuvy))
+                .add(uMoonDir.negate().mul(z)),
+            );
+            // Phase: lit where the surface faces the phase-light direction.
+            const lit = dot(N, uMoonLightDir);
+            const litS = smoothstep(uMoonTermSoft.negate(), uMoonTermSoft, lit);
+            const limb = pow(z.add(0.06).clamp(0.0, 1.0), float(0.35)); // gentle limb darkening
+            // Surface: low-freq maria (dark seas) + higher-freq crater speckle.
+            const nLow = fbm3(N.mul(2.4));
+            const nHi = fbm3(N.mul(7.0).add(40.0));
+            const maria = smoothstep(0.58, 0.4, nLow);
+            const craters = smoothstep(0.62, 0.78, nHi);
+            const albedoRaw = float(1.0)
+              .sub(maria.mul(0.5))
+              .sub(craters.mul(0.22))
+              .max(0.25);
+            const albedo = mix(float(1.0), albedoRaw, uMoonSurface);
+
+            const dayCol = uMoonColor.mul(albedo).mul(litS).mul(limb);
+            // Earthshine: faint cool fill on the unlit side (the "ashen light").
+            const ashen = uMoonColor
+              .mul(vec3(0.55, 0.62, 0.9))
+              .mul(litS.oneMinus())
+              .mul(uMoonEarthshine)
+              .mul(albedo);
+            moonCol.assign(dayCol.add(ashen).mul(uMoonDiscBright));
+          });
+
+          const edge = smoothstep(
+            float(1.0),
+            float(1.0).sub(uMoonEdgeSoft),
+            sqrt(r2),
+          );
+          const moonGlow = pow(max(moonDot, float(0.0)), uMoonGlowPow).mul(
+            uMoonGlowStrength,
+          );
+          skyCol.addAssign(
+            moonCol.mul(edge).add(uMoonColor.mul(moonGlow)).mul(moonUpFade),
+          );
+
+          return vec4(max(skyCol, vec3(0.0)), 1.0);
+        });
+
+        const material = new THREE.MeshBasicNodeMaterial();
+        material.colorNode = skyColorNode();
+        material.side = THREE.BackSide;
+        material.depthWrite = false;
+        material.depthTest = false;
+        material.fog = false;
+
+        const mesh = new THREE.Mesh(
+          new THREE.SphereGeometry(SKY_RADIUS, 32, 16),
+          material,
+        );
+        mesh.renderOrder = -2;
+        mesh.frustumCulled = false;
+        mesh.name = "DayNightSkyDome";
+
+        /**
+         * @param {object} P    — PARAMS slice (sky.*)
+         * @param {object} frame — { time, sunDir, moonDir, camera }
+         */
+        function update(P, frame) {
+          mesh.position.copy(frame.camera.position);
+
+          uTime.value = frame.time;
+          uSunDir.value.copy(frame.sunDir);
+          uMoonDir.value.copy(frame.moonDir);
+
+          uZenithDay.value.set(P.zenithDay);
+          uHorizonDay.value.set(P.horizonDay);
+          uZenithNight.value.set(P.zenithNight);
+          uHorizonNight.value.set(P.horizonNight);
+          uSunsetColor.value.set(P.sunsetColor);
+          uGroundColor.value.set(P.groundColor);
+
+          uScatterMix.value = P.scatter ? 1 : 0;
+          uSunIntensity.value = P.sunIntensity;
+          uRayleigh.value = P.rayleigh;
+          uMie.value = P.mie;
+          uMieG.value = P.mieG;
+          uAtmoAltitude.value = P.atmoAltitude;
+          uMsAmount.value = P.msAmount;
+          uMsExtinct.value = P.msExtinct;
+
+          uSunColor.value.set(P.sunColor);
+          uSunCos.value = Math.cos(THREE.MathUtils.degToRad(P.sunSizeDeg));
+          uSunGlowPow.value = P.sunGlowPow;
+          uSunGlowStrength.value = P.sunGlowStrength;
+          uSunDiscBright.value = P.sunDiscBright;
+
+          uMoonColor.value.set(P.moonColor);
+          uMoonCos.value = Math.cos(THREE.MathUtils.degToRad(P.moonSizeDeg));
+          uMoonGlowStrength.value = P.moonGlowStrength;
+          uMoonDiscBright.value = P.moonDiscBright;
+
+          // Moon phase frame (right/up ⊥ moonDir) + the phase-light direction.
+          const md = frame.moonDir;
+          _mUpRef.set(0, 1, 0);
+          if (Math.abs(md.y) > 0.99) _mUpRef.set(0, 0, 1);
+          _mRight.crossVectors(_mUpRef, md).normalize();
+          _mUp.crossVectors(md, _mRight).normalize();
+          uMoonRight.value.copy(_mRight);
+          uMoonUp.value.copy(_mUp);
+          const ang = (1 - P.moonPhase) * Math.PI; // 0 = full, π = new
+          const orient = THREE.MathUtils.degToRad(P.moonPhaseOrient);
+          _mL.copy(md).multiplyScalar(-Math.cos(ang));
+          _mTmp.copy(_mRight).multiplyScalar(Math.sin(ang) * Math.cos(orient));
+          _mL.add(_mTmp);
+          _mTmp.copy(_mUp).multiplyScalar(Math.sin(ang) * Math.sin(orient));
+          _mL.add(_mTmp).normalize();
+          uMoonLightDir.value.copy(_mL);
+          uMoonSinR.value = Math.sin(THREE.MathUtils.degToRad(P.moonSizeDeg));
+          uMoonSurface.value = P.moonSurface;
+          uMoonEarthshine.value = P.moonEarthshine;
+          uMoonTermSoft.value = P.moonTermSoft;
+
+          uStarDensity.value = P.starDensity;
+          uStarThreshold.value = P.starThreshold;
+          uStarSize.value = P.starSize;
+          uStarBrightness.value = P.starBrightness;
+          uStarTwinkle.value = P.starTwinkle;
+
+          uMilkyWayEnabled.value = P.milkyWayEnabled ? 1 : 0;
+          uMilkyWayIntensity.value = P.milkyWayIntensity;
+          uMilkyWayWidth.value = P.milkyWayWidth;
+          uMilkyWayScale.value = P.milkyWayScale;
+          uMilkyWayColor1.value.set(P.milkyWayColor1);
+          uMilkyWayColor2.value.set(P.milkyWayColor2);
+          uMeteorEnabled.value = P.meteorEnabled ? 1 : 0;
+          uMeteorIntensity.value = P.meteorIntensity;
+          uMeteorRate.value = P.meteorRate;
+          uMeteorSpeed.value = P.meteorSpeed;
+          uMeteorWidth.value = P.meteorWidth;
+          uMeteorLength.value = P.meteorLength;
+
+          uCloudEnabled.value = P.cloudEnabled ? 1 : 0;
+          uCloudCoverage.value = P.cloudCoverage;
+          uCloudDensity.value = P.cloudDensity;
+          uCloudOpacity.value = P.cloudOpacity;
+          uCloudScale.value = P.cloudScale;
+          uCloudStretch.value = P.cloudStretch;
+          uCloudSharpness.value = P.cloudSharpness;
+          uCloudDetail.value = P.cloudDetail;
+          uCloudSunTint.value = P.cloudSunTint;
+          uCloudSpeed.value = P.cloudSpeed;
+          uCloudWind.value.set(
+            Math.cos(THREE.MathUtils.degToRad(P.cloudWindDeg)),
+            Math.sin(THREE.MathUtils.degToRad(P.cloudWindDeg)),
+          );
+          uCloudColor.value.set(P.cloudColor);
+          uCloudAerial.value = P.cloudAerial ?? 0.8;
+
+          if (frame.fog) {
+            uFogEnabled.value = frame.fog.enabled ? 1 : 0;
+            uFogColor.value.copy(frame.fog.color);
+            uFogDensity.value = frame.fog.density;
+            if (frame.fog.hazeHeight !== undefined)
+              uFogHazeHeight.value = frame.fog.hazeHeight;
+          }
+        }
+
+        function dispose() {
+          mesh.geometry.dispose();
+          material.dispose();
+        }
+
+        return { mesh, update, dispose };
+      }
+
+      const SKY_DEFAULTS = {
+        zenithDay: "#2a6bd8",
+        horizonDay: "#bfe0ff",
+        zenithNight: "#05080f",
+        horizonNight: "#1a2740",
+        sunsetColor: "#ff7a33",
+        groundColor: "#4a4a52",
+
+        // Atmospheric scattering (Nishita). scatter:true = physical sky.
+        scatter: true,
+        sunIntensity: 22,
+        rayleigh: 1.0,
+        mie: 1.0,
+        mieG: 0.76,
+        atmoAltitude: 1500,
+        msAmount: 1.0, // multiple-scattering fill strength (bright horizon glow)
+        msExtinct: 0.3, // <1 = bounced light keeps more energy
+
+        sunColor: "#fff3d8",
+        sunSizeDeg: 1.2,
+        sunGlowPow: 280,
+        sunGlowStrength: 0.55,
+        sunDiscBright: 8.0,
+
+        moonColor: "#cdd9ff",
+        moonSizeDeg: 1.6,
+        moonGlowStrength: 0.25,
+        moonDiscBright: 3.0,
+        moonPhase: 0.85, // 1 = full, 0.5 = quarter, 0 = new
+        moonPhaseOrient: 30, // which way the crescent points (deg)
+        moonSurface: 0.85, // maria / crater strength
+        moonEarthshine: 0.12, // ashen glow on the dark side
+        moonTermSoft: 0.06, // terminator softness
+
+        starDensity: 220,
+        starThreshold: 0.92,
+        starSize: 0.08,
+        starBrightness: 1.0,
+        starTwinkle: 3.0,
+
+        milkyWayEnabled: true,
+        milkyWayIntensity: 1.0,
+        milkyWayWidth: 0.32,
+        milkyWayScale: 4.0,
+        milkyWayColor1: "#5566a0",
+        milkyWayColor2: "#efe6cf",
+
+        meteorEnabled: false,
+        meteorIntensity: 1.0,
+        meteorRate: 0.45,
+        meteorSpeed: 1.0,
+        meteorWidth: 0.006,
+        meteorLength: 0.1,
+
+        // High cirrus deck (2D analytic clouds painted on the sky dome). Complements
+        // the volumetric cumulus and stands in as a cheap fallback when it's off.
+        cloudEnabled: true,
+        cloudCoverage: 0.5,
+        cloudDensity: 0.85,
+        cloudOpacity: 1.0,
+        cloudScale: 0.7,
+        cloudStretch: 2.5,
+        cloudSharpness: 0.22,
+        cloudDetail: 0.8,
+        cloudSunTint: 1.0,
+        cloudSpeed: 0.01,
+        cloudWindDeg: 20,
+        cloudColor: "#ffffff",
+        cloudAerial: 0.8,
+      };
+
+      function makeDefaultCluster(enabled, x, y, z) {
+        return {
+          enabled,
+          x,
+          y,
+          z,
+          rx: 2.0,
+          ry: 1.5,
+          rz: 2.0,
+          scale: 1.0,
+          leanX: 0,
+          leanZ: 0,
+          count: 300,
+          leafSize: 1.0,
+          scaleVar: 0.3,
+          shell: 0.5,
+          shellThick: 0.4,
+          tiltMax: 35,
+        };
+      }
+
+      const clusterDefs = [
+        {
+          enabled: true,
+          x: 0,
+          y: 4.2,
+          z: 0,
+          rx: 2.4,
+          ry: 1.6,
+          count: 500,
+          leafSize: 1.0,
+          scaleVar: 0.35,
+          shell: 0.5,
+          shellThick: 0.45,
+          tiltMax: 35,
+        },
+        {
+          enabled: false,
+          x: 1.1,
+          y: 2.8,
+          z: 0.4,
+          rx: 1.3,
+          ry: 0.9,
+          count: 200,
+          leafSize: 0.85,
+          scaleVar: 0.3,
+          shell: 0.45,
+          shellThick: 0.4,
+          tiltMax: 40,
+        },
+        {
+          enabled: false,
+          x: 0,
+          y: 5.6,
+          z: 0,
+          rx: 1.0,
+          ry: 0.7,
+          count: 140,
+          leafSize: 0.75,
+          scaleVar: 0.25,
+          shell: 0.55,
+          shellThick: 0.35,
+          tiltMax: 28,
+        },
+        makeDefaultCluster(false, -1.0, 3.0, -0.5),
+        makeDefaultCluster(false, 0.5, 2.0, 0.8),
+        makeDefaultCluster(false, 0, 1.5, 0),
+      ];
+
+      // Backfill shaping fields added later (independent Z radius, uniform scale,
+      // ellipsoid lean) so old presets / inline defs always have them defined.
+      function normalizeCluster(c) {
+        if (c.rz == null) c.rz = c.rx;
+        if (c.scale == null) c.scale = 1;
+        if (c.leanX == null) c.leanX = 0;
+        if (c.leanZ == null) c.leanZ = 0;
+      }
+      clusterDefs.forEach(normalizeCluster);
+
+      // ─── UNDO / REDO ─────────────────────────────────────────────────────────────
+      const undoStack = [];
+      const redoStack = [];
+      const MAX_UNDO = 40;
+
+      function captureState() {
+        return {
+          clusters: clusterDefs.map((c) => ({ ...c })),
+          material: {
+            bottomColor: params.bottomColor,
+            topColor: params.topColor,
+            colorVar: params.colorVar,
+            roughness: params.roughness,
+            alphaCutoff: params.alphaCutoff,
+            sssColor: params.sssColor,
+            sssStr: params.sssStr,
+            sssPow: params.sssPow,
+            rimColor: params.rimColor,
+            rimStr: params.rimStr,
+            rimPow: params.rimPow,
+            aoStr: params.aoStr,
+            normalBias: params.normalBias,
+            leafWarp: params.leafWarp,
+            billboardLeaves: params.billboardLeaves,
+            billboardYawOnly: params.billboardYawOnly,
+          },
+          wind: {
+            windSpeed: params.windSpeed,
+            windStr: params.windStr,
+            windMicro: params.windMicro,
+          },
+          trunkScale: params.trunkScale,
+          canopyScale: params.canopyScale,
+          trunkMaterial: {
+            botColor: params.trunkBotColor,
+            topColor: params.trunkTopColor,
+            gradHeight: params.trunkGradHeight,
+            roughness: params.trunkRoughness,
+            useGlb: params.useGlbTrunkMat,
+          },
+          bushMode: params.bushMode,
+        };
+      }
+
+      // Swap loaded trunks between the procedural bark material and their own GLB
+      // material, per params.useGlbTrunkMat. defaultTrunk has no GLB material, so it
+      // always keeps the procedural one.
+      function applyTrunkMatChoice() {
+        const useGlb = params.useGlbTrunkMat;
+        [trunkRoot, trunkLod1Root].forEach((root) => {
+          if (!root) return;
+          root.traverse((o) => {
+            if (o.isMesh) {
+              o.material =
+                useGlb && o.userData.origMat ? o.userData.origMat : trunkMat;
+            }
+          });
+        });
+      }
+
+      function applyTrunkMaterial(tm) {
+        if (!tm) return;
+        if (tm.useGlb != null) params.useGlbTrunkMat = tm.useGlb;
+        if (tm.botColor != null) {
+          params.trunkBotColor = tm.botColor;
+          uTrunkBot.value.set(tm.botColor);
+        }
+        if (tm.topColor != null) {
+          params.trunkTopColor = tm.topColor;
+          uTrunkTop.value.set(tm.topColor);
+        }
+        if (tm.gradHeight != null) {
+          params.trunkGradHeight = tm.gradHeight;
+          uTrunkGradH.value = tm.gradHeight;
+        }
+        if (tm.roughness != null) {
+          params.trunkRoughness = tm.roughness;
+          uTrunkRough.value = tm.roughness;
+        }
+        applyTrunkMatChoice();
+      }
+
+      function restoreState(state) {
+        state.clusters.forEach((c, i) => {
+          if (i < clusterDefs.length) {
+            Object.assign(clusterDefs[i], c);
+            normalizeCluster(clusterDefs[i]);
+          }
+        });
+        if (state.canopyScale != null) params.canopyScale = state.canopyScale;
+        applyTrunkMaterial(state.trunkMaterial);
+        if (state.material) {
+          const m = state.material;
+          params.bottomColor = m.bottomColor;
+          uBottomColor.value.set(m.bottomColor);
+          params.topColor = m.topColor;
+          uTopColor.value.set(m.topColor);
+          params.colorVar = m.colorVar;
+          uColorVar.value = m.colorVar;
+          params.roughness = m.roughness;
+          leafMat.roughness = m.roughness;
+          params.alphaCutoff = m.alphaCutoff;
+          uAlphaCutoff.value = m.alphaCutoff;
+          params.sssColor = m.sssColor;
+          uSssColor.value.set(m.sssColor);
+          params.sssStr = m.sssStr;
+          uSssStr.value = m.sssStr;
+          params.sssPow = m.sssPow;
+          uSssPow.value = m.sssPow;
+          params.rimColor = m.rimColor;
+          uRimColor.value.set(m.rimColor);
+          params.rimStr = m.rimStr;
+          uRimStr.value = m.rimStr;
+          params.rimPow = m.rimPow;
+          uRimPow.value = m.rimPow;
+          params.aoStr = m.aoStr;
+          uAoStr.value = m.aoStr;
+          if (m.normalBias != null) {
+            params.normalBias = m.normalBias;
+            uNormalBias.value = m.normalBias;
+          }
+          if (m.leafWarp != null) {
+            params.leafWarp = m.leafWarp;
+            uLeafWarp.value = m.leafWarp;
+          }
+          if (m.billboardLeaves != null) {
+            params.billboardLeaves = m.billboardLeaves;
+            uBillboard.value = m.billboardLeaves ? 1.0 : 0.0;
+          }
+          if (m.billboardYawOnly != null) {
+            params.billboardYawOnly = m.billboardYawOnly;
+            uBillboardYaw.value = m.billboardYawOnly ? 1.0 : 0.0;
+          }
+        }
+        if (state.wind) {
+          params.windSpeed = state.wind.windSpeed;
+          uWindSpeed.value = state.wind.windSpeed;
+          params.windStr = state.wind.windStr;
+          uWindStr.value = state.wind.windStr;
+          params.windMicro = state.wind.windMicro;
+          uWindMicro.value = state.wind.windMicro;
+        }
+        if (state.trunkScale != null) {
+          params.trunkScale = state.trunkScale;
+          trunkScale = state.trunkScale;
+          (trunkRoot || defaultTrunk).scale.setScalar(state.trunkScale);
+        }
+        if (state.bushMode != null) {
+          params.bushMode = state.bushMode;
+          defaultTrunk.visible = !state.bushMode && !trunkRoot;
+          if (trunkRoot) trunkRoot.visible = !state.bushMode;
+        }
+        uiRefresh();
+        buildFoliage(true);
+      }
+
+      function pushUndo() {
+        undoStack.push(captureState());
+        if (undoStack.length > MAX_UNDO) undoStack.shift();
+        redoStack.length = 0;
+      }
+
+      function undo() {
+        if (undoStack.length === 0) return;
+        redoStack.push(captureState());
+        restoreState(undoStack.pop());
+        infoEl.textContent = `Undo (${undoStack.length} left)`;
+      }
+
+      function redo() {
+        if (redoStack.length === 0) return;
+        undoStack.push(captureState());
+        restoreState(redoStack.pop());
+        infoEl.textContent = `Redo (${redoStack.length} left)`;
+      }
+
+      window.addEventListener("keydown", (e) => {
+        if (e.ctrlKey && e.key === "z") {
+          e.preventDefault();
+          undo();
+        }
+        if (e.ctrlKey && e.key === "y") {
+          e.preventDefault();
+          redo();
+        }
+      });
+
+      let _undoTimer = null;
+      function scheduleUndo() {
+        if (_undoTimer) clearTimeout(_undoTimer);
+        _undoTimer = setTimeout(() => {
+          pushUndo();
+          _undoTimer = null;
+        }, 400);
+      }
+
+      // ─── DETERMINISTIC RNG ──────────────────────────────────────────────────────
+      // LCG matching v2/core/foliage/foliageSampler.js exactly. The aRand and
+      // per-leaf jitter use the SAME fixed seeds as v2 (77777 and 42) so that
+      // the JSON preset reproduces the same tree in arborist and v2.
+      function createLcg(seed) {
+        let s = (seed * 1664525 + 1013904223) >>> 0;
+        return () => {
+          s = (s * 1664525 + 1013904223) >>> 0;
+          return s / 0xffffffff;
+        };
+      }
+
+      // ─── ELLIPSOID SAMPLER ───────────────────────────────────────────────────────
+      const _leanEuler = new THREE.Euler();
+      const _leanQuat = new THREE.Quaternion();
+      const _leanVec = new THREE.Vector3();
+      const SAMPLE_DEG2RAD = Math.PI / 180;
+
+      function sampleCluster(c, seedOffset) {
+        let lcg = (seedOffset * 1664525 + 1013904223) >>> 0;
+        const rng = () => {
+          lcg = (lcg * 1664525 + 1013904223) >>> 0;
+          return lcg / 0xffffffff;
+        };
+
+        // Uniform size multiplier: per-cluster scale x global canopy scale.
+        const cs = (c.scale ?? 1) * (params.canopyScale ?? 1);
+        const effRx = c.rx * cs;
+        const effRy = c.ry * cs;
+        const effRz = (c.rz ?? c.rx) * cs;
+        // Ellipsoid lean (orientation): rotate each sampled offset before adding
+        // the cluster center, so the whole blob tilts off vertical.
+        const leanX = (c.leanX ?? 0) * SAMPLE_DEG2RAD;
+        const leanZ = (c.leanZ ?? 0) * SAMPLE_DEG2RAD;
+        const hasLean = leanX !== 0 || leanZ !== 0;
+        if (hasLean) {
+          _leanEuler.set(leanX, 0, leanZ, "XYZ");
+          _leanQuat.setFromEuler(_leanEuler);
+        }
+
+        const positions = [];
+        const maxTry = c.count * 12;
+        let tries = 0;
+
+        // NOTE: rng() draw order (ux, uy, uz, then shell) is unchanged from the
+        // original so the per-leaf rand/jitter stream stays aligned with v2's
+        // foliageSampler. The new scale/rz/lean only transform the POSITION.
+        while (positions.length < c.count && tries++ < maxTry) {
+          const ux = rng() * 2 - 1;
+          const uy = rng() * 2 - 1;
+          const uz = rng() * 2 - 1;
+          const d = Math.sqrt(ux * ux + uy * uy + uz * uz);
+          if (d > 1.0) continue;
+          const innerR = 1.0 - c.shellThick;
+          if (d < innerR && rng() < c.shell) continue;
+
+          let ox = ux * effRx;
+          let oy = uy * effRy;
+          let oz = uz * effRz;
+          if (hasLean) {
+            _leanVec.set(ox, oy, oz).applyQuaternion(_leanQuat);
+            ox = _leanVec.x;
+            oy = _leanVec.y;
+            oz = _leanVec.z;
+          }
+
+          positions.push({
+            x: c.x + ox,
+            y: c.y + oy,
+            z: c.z + oz,
+            leafSize: c.leafSize,
+            scaleVar: c.scaleVar,
+            tiltMax: c.tiltMax,
+          });
+        }
+        return positions;
+      }
+
+      // ─── FOLIAGE MESH BUILDER ────────────────────────────────────────────────────
+      let leavesMesh = null;
+
+      function sampleAllPositions() {
+        const allPos = [];
+        const allRands = [];
+        // 4 jitter values per leaf, in v2's consumption order: [rotY01, tiltX01, tiltZ01, scale01].
+        // Pre-computed so LOD0/LOD1/LOD2 share identical per-leaf jitter for the same leaf index.
+        const allJitter = [];
+        // First pass: positions + aRand. Mirrors v2/foliageSampler.sampleAllClusters().
+        const randRng = createLcg(77777);
+        clusterDefs.forEach((c, ci) => {
+          if (!c.enabled) return;
+          sampleCluster(c, ci * 999983 + 12345).forEach((p) => {
+            allPos.push(p);
+            allRands.push(randRng(), randRng());
+          });
+        });
+        // Second pass: per-leaf jitter. Mirrors v2/foliageSampler.buildAllFoliageLods().
+        const jitterRng = createLcg(42);
+        for (let i = 0; i < allPos.length; i++) {
+          allJitter.push(jitterRng(), jitterRng(), jitterRng(), jitterRng());
+        }
+        return { allPos, allRands, allJitter };
+      }
+
+      function buildLeafMesh(positions, rands, jitter, scaleMul, xOffset) {
+        const n = positions.length;
+        if (n === 0) return null;
+
+        const useBillboard = params.billboardLeaves;
+
+        const geo = new THREE.PlaneGeometry(1, 1);
+        const randData = new Float32Array(rands);
+        geo.setAttribute(
+          "aRand",
+          new THREE.InstancedBufferAttribute(randData, 2),
+        );
+        const scaleData = new Float32Array(n);
+        for (let i = 0; i < n; i++) scaleData[i] = 1;
+        geo.setAttribute(
+          "aLeafScale",
+          new THREE.InstancedBufferAttribute(scaleData, 1),
+        );
+
+        const centerData = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          const p = positions[i];
+          centerData[i * 3] = p.x + xOffset;
+          centerData[i * 3 + 1] = p.y;
+          centerData[i * 3 + 2] = p.z;
+        }
+        geo.setAttribute(
+          "aLeafCenter",
+          new THREE.InstancedBufferAttribute(centerData, 3),
+        );
+
+        // Per-leaf atlas cell (one preset/tree = one cell here; per-tree-type in v2).
+        const idxData = new Float32Array(n).fill(atlasCellIndex);
+        geo.setAttribute(
+          "aAtlasIndex",
+          new THREE.InstancedBufferAttribute(idxData, 1),
+        );
+
+        const mesh = new THREE.InstancedMesh(geo, leafMat, n);
+        mesh.frustumCulled = false;
+        mesh.castShadow = true;
+        mesh.receiveShadow = false;
+
+        const dummy = new THREE.Object3D();
+        const DEG2RAD = Math.PI / 180;
+
+        positions.forEach((p, i) => {
+          // Jitter consumption order matches v2/foliageSampler.buildAllFoliageLods:
+          // j0 = rotY, j1 = tiltX, j2 = tiltZ, j3 = scale.
+          const j0 = jitter[i * 4];
+          const j1 = jitter[i * 4 + 1];
+          const j2 = jitter[i * 4 + 2];
+          const j3 = jitter[i * 4 + 3];
+          dummy.position.set(p.x + xOffset, p.y, p.z);
+          const s = Math.max(
+            0.05,
+            p.leafSize * scaleMul * (1 + (j3 - 0.5) * 2 * p.scaleVar),
+          );
+          if (useBillboard) {
+            dummy.rotation.set(0, 0, 0);
+            dummy.scale.set(1, 1, 1);
+            scaleData[i] = s;
+          } else {
+            dummy.rotation.order = "YXZ";
+            dummy.rotation.y = j0 * Math.PI * 2;
+            dummy.rotation.x = (j1 - 0.5) * p.tiltMax * DEG2RAD * 2;
+            dummy.rotation.z = (j2 - 0.5) * p.tiltMax * DEG2RAD * 2;
+            dummy.scale.setScalar(s);
+            scaleData[i] = 1;
+          }
+          dummy.updateMatrix();
+          mesh.setMatrixAt(i, dummy.matrix);
+        });
+
+        geo.attributes.aLeafScale.needsUpdate = true;
+        mesh.instanceMatrix.needsUpdate = true;
+        return mesh;
+      }
+
+      function buildFoliage(skipUndo) {
+        uBillboard.value = params.billboardLeaves ? 1.0 : 0.0;
+        uBillboardYaw.value = params.billboardYawOnly ? 1.0 : 0.0;
+
+        // Clean up main foliage
+        if (leavesMesh) {
+          scene.remove(leavesMesh);
+          leavesMesh.geometry.dispose();
+          leavesMesh = null;
+        }
+        // Clean up LOD previews
+        clearLodPreviews();
+
+        const { allPos, allRands, allJitter } = sampleAllPositions();
+        const n = allPos.length;
+
+        if (n > 0) {
+          // Compute bounds for shaders
+          let yMin = Infinity,
+            yMax = -Infinity;
+          let xMin = Infinity,
+            xMax = -Infinity,
+            zMin = Infinity,
+            zMax = -Infinity;
+          allPos.forEach((p) => {
+            if (p.y < yMin) yMin = p.y;
+            if (p.y > yMax) yMax = p.y;
+            if (p.x < xMin) xMin = p.x;
+            if (p.x > xMax) xMax = p.x;
+            if (p.z < zMin) zMin = p.z;
+            if (p.z > zMax) zMax = p.z;
+          });
+          uYMin.value = yMin - 0.3;
+          uYMax.value = yMax + 0.5;
+          // Canopy center + radius for sphere normals and sphere AO
+          const cx = (xMin + xMax) * 0.5;
+          const cy = (yMin + yMax) * 0.5;
+          const cz = (zMin + zMax) * 0.5;
+          uCanopyCenter.value.set(cx, cy, cz);
+          const ext = Math.max(xMax - xMin, yMax - yMin, zMax - zMin);
+          uAoRadius.value = ext * 0.62;
+
+          // Build main tree (LOD0) — at origin or offset if LOD preview
+          const xOff = lodPreview ? -LOD_SPACING : 0;
+          leavesMesh = buildLeafMesh(allPos, allRands, allJitter, 1.0, xOff);
+          if (leavesMesh) scene.add(leavesMesh);
+
+          // Build LOD previews if active
+          if (lodPreview) {
+            buildLodPreviews(allPos, allRands, allJitter);
+          }
+        }
+
+        updateStats();
+        updateClusterHelpers();
+        updateLodTrunkVisibility();
+      }
+
+      // ─── LOD PREVIEW SYSTEM ─────────────────────────────────────────────────────
+      let lodPreview = false;
+      let lodMesh1 = null;
+      let lodMesh2 = null;
+      let lodTrunk0Clone = null;
+      let lodTrunk1Clone = null;
+      let lodTrunk2Clone = null;
+
+      const lodGroundLabels = [];
+
+      function lodLabelRoundRect(ctx, x, y, w, h, r) {
+        const rr = Math.min(r, w / 2, h / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + rr, y);
+        ctx.arcTo(x + w, y, x + w, y + h, rr);
+        ctx.arcTo(x + w, y + h, x, y + h, rr);
+        ctx.arcTo(x, y + h, x, y, rr);
+        ctx.arcTo(x, y, x + w, y, rr);
+        ctx.closePath();
+      }
+
+      function createLodGroundLabel() {
+        const canvas = document.createElement("canvas");
+        const W = 640;
+        const H = 176;
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext("2d");
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const mat = new THREE.MeshBasicMaterial({
+          map: tex,
+          transparent: true,
+          depthWrite: false,
+          toneMapped: false,
+        });
+        const geo = new THREE.PlaneGeometry(5.8, 1.6);
+        geo.rotateX(-Math.PI / 2);
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.renderOrder = 25;
+        const label = { mesh, canvas, ctx, tex, W, H };
+        label.redraw = (title, sub) => {
+          const { ctx, tex, W, H } = label;
+          ctx.clearRect(0, 0, W, H);
+          lodLabelRoundRect(ctx, 8, 8, W - 16, H - 16, 14);
+          ctx.fillStyle = "rgba(12, 18, 12, 0.9)";
+          ctx.fill();
+          ctx.strokeStyle = "rgba(100, 160, 95, 0.5)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.fillStyle = "#e8f0e4";
+          ctx.font = "bold 26px Segoe UI, system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(title, W / 2, 56);
+          ctx.fillStyle = "#9cb090";
+          ctx.font = "17px Consolas, monospace";
+          ctx.fillText(sub, W / 2, 112);
+          tex.needsUpdate = true;
+        };
+        return label;
+      }
+
+      function ensureLodGroundLabels() {
+        if (lodGroundLabels.length) return;
+        for (let i = 0; i < 3; i++) {
+          const lb = createLodGroundLabel();
+          lodGroundLabels.push(lb);
+          scene.add(lb.mesh);
+          lb.mesh.visible = false;
+        }
+      }
+
+      function setLodGroundLabelsVisible(visible) {
+        ensureLodGroundLabels();
+        lodGroundLabels.forEach((lb) => {
+          lb.mesh.visible = visible;
+        });
+      }
+
+      function decimatePositions(allPos, allRands, allJitter, keep) {
+        const subPos = [];
+        const subRands = [];
+        const subJitter = [];
+        const step = Math.max(1, Math.round(1 / keep));
+        for (let i = 0; i < allPos.length; i += step) {
+          subPos.push(allPos[i]);
+          subRands.push(allRands[i * 2], allRands[i * 2 + 1]);
+          subJitter.push(
+            allJitter[i * 4],
+            allJitter[i * 4 + 1],
+            allJitter[i * 4 + 2],
+            allJitter[i * 4 + 3],
+          );
+        }
+        return { subPos, subRands, subJitter };
+      }
+
+      function buildLodPreviews(allPos, allRands, allJitter) {
+        // LOD1: 50% leaves, 1.414× bigger
+        const lod1 = decimatePositions(allPos, allRands, allJitter, 0.5);
+        lodMesh1 = buildLeafMesh(
+          lod1.subPos,
+          lod1.subRands,
+          lod1.subJitter,
+          1.414,
+          0,
+        );
+        if (lodMesh1) scene.add(lodMesh1);
+
+        // LOD2: 25% leaves, 2× bigger
+        const lod2 = decimatePositions(allPos, allRands, allJitter, 0.25);
+        lodMesh2 = buildLeafMesh(
+          lod2.subPos,
+          lod2.subRands,
+          lod2.subJitter,
+          2.0,
+          LOD_SPACING,
+        );
+        if (lodMesh2) scene.add(lodMesh2);
+
+        // Update stats
+        params.lod1Leaves = lod1.subPos.length;
+        params.lod2Leaves = lod2.subPos.length;
+
+        // Clone trunks for LOD preview columns
+        cloneTrunksForLod();
+
+        updateLodLabels();
+      }
+
+      function cloneTrunksForLod() {
+        clearLodTrunkClones();
+
+        const srcTrunk = trunkRoot || defaultTrunk;
+        const showTrunk = !params.bushMode;
+
+        // LOD0 trunk (left)
+        if (showTrunk) {
+          lodTrunk0Clone = srcTrunk.clone();
+          lodTrunk0Clone.visible = true;
+          lodTrunk0Clone.position.x = -LOD_SPACING;
+          if (srcTrunk === defaultTrunk) lodTrunk0Clone.position.y = 2.5;
+          lodTrunk0Clone.scale.setScalar(trunkScale);
+          scene.add(lodTrunk0Clone);
+        }
+
+        // LOD1 trunk (center) — use LOD1 trunk if loaded, else same as LOD0
+        if (showTrunk) {
+          const src1 = trunkLod1Root || srcTrunk;
+          lodTrunk1Clone = src1.clone();
+          lodTrunk1Clone.visible = true;
+          lodTrunk1Clone.position.x = 0;
+          if (src1 === defaultTrunk) lodTrunk1Clone.position.y = 2.5;
+          lodTrunk1Clone.scale.setScalar(trunkScale);
+          scene.add(lodTrunk1Clone);
+        }
+
+        // LOD2 trunk (right) — always use LOD1 trunk (lowest detail)
+        if (showTrunk) {
+          const src2 = trunkLod1Root || srcTrunk;
+          lodTrunk2Clone = src2.clone();
+          lodTrunk2Clone.visible = true;
+          lodTrunk2Clone.position.x = LOD_SPACING;
+          if (src2 === defaultTrunk) lodTrunk2Clone.position.y = 2.5;
+          lodTrunk2Clone.scale.setScalar(trunkScale);
+          scene.add(lodTrunk2Clone);
+        }
+      }
+
+      function clearLodTrunkClones() {
+        if (lodTrunk0Clone) {
+          scene.remove(lodTrunk0Clone);
+          lodTrunk0Clone = null;
+        }
+        if (lodTrunk1Clone) {
+          scene.remove(lodTrunk1Clone);
+          lodTrunk1Clone = null;
+        }
+        if (lodTrunk2Clone) {
+          scene.remove(lodTrunk2Clone);
+          lodTrunk2Clone = null;
+        }
+      }
+
+      function clearLodPreviews() {
+        if (lodMesh1) {
+          scene.remove(lodMesh1);
+          lodMesh1.geometry.dispose();
+          lodMesh1 = null;
+        }
+        if (lodMesh2) {
+          scene.remove(lodMesh2);
+          lodMesh2.geometry.dispose();
+          lodMesh2 = null;
+        }
+        clearLodTrunkClones();
+      }
+
+      function updateLodTrunkVisibility() {
+        if (lodPreview) {
+          // Hide main trunk in LOD preview (clones handle it)
+          defaultTrunk.visible = false;
+          if (trunkRoot) trunkRoot.visible = false;
+        } else {
+          defaultTrunk.visible = !params.bushMode && !trunkRoot;
+          if (trunkRoot) trunkRoot.visible = !params.bushMode;
+        }
+      }
+
+      function updateLodLabels() {
+        ensureLodGroundLabels();
+        if (!lodPreview) {
+          setLodGroundLabelsVisible(false);
+          return;
+        }
+
+        const offsets = [-LOD_SPACING, 0, LOD_SPACING];
+        const n0 = leavesMesh ? leavesMesh.count : 0;
+        const n1 = params.lod1Leaves || 0;
+        const n2 = params.lod2Leaves || 0;
+        const trunkLod1Str = trunkLod1Root ? "LOD1 trunk" : "same trunk";
+        const titles = [
+          "LOD 0 — Full Detail",
+          "LOD 1 — Half Density",
+          "LOD 2 — Quarter Density",
+        ];
+        const subs = [
+          `${n0} leaves · < ${params.lodDist1}m · full trunk`,
+          `${n1} leaves · 1.4× size · ${params.lodDist1}-${params.lodDist2}m · ${trunkLod1Str}`,
+          `${n2} leaves · 2× size · ${params.lodDist2}m+ · ${trunkLod1Str}`,
+        ];
+
+        offsets.forEach((xOff, i) => {
+          lodGroundLabels[i].mesh.position.set(xOff, 0.02, LOD_LABEL_Z);
+          lodGroundLabels[i].redraw(titles[i], subs[i]);
+        });
+        setLodGroundLabelsVisible(true);
+      }
+
+      function toggleLodPreview(on) {
+        lodPreview = on;
+        if (on) {
+          // Shift + back off when an impostor 4th column is present.
+          const cx = impostorMesh ? LOD_SPACING * 0.9 : 0;
+          controls.target.set(cx, 3, 0);
+          camera.position.set(cx, 6, impostorMesh ? 32 : 22);
+          controls.update();
+        } else {
+          controls.target.set(0, 3, 0);
+          camera.position.set(7, 5, 10);
+          controls.update();
+        }
+        buildFoliage(true);
+        updateLodLabels();
+      }
+
+      // ─── CLUSTER WIREFRAME HELPERS ───────────────────────────────────────────────
+      const HELPER_COLORS = [
+        0xffff00, 0x00ffff, 0xff8800, 0xff44ff, 0x44ff44, 0x4488ff,
+      ];
+      let showHelpers = false;
+
+      const clusterHelpers = clusterDefs.map((c, i) => {
+        const sGeo = new THREE.SphereGeometry(1, 14, 7);
+        const wfGeo = new THREE.WireframeGeometry(sGeo);
+        const line = new THREE.LineSegments(
+          wfGeo,
+          new THREE.LineBasicMaterial({
+            color: HELPER_COLORS[i % HELPER_COLORS.length],
+            transparent: true,
+            opacity: 0.22,
+          }),
+        );
+        scene.add(line);
+        return line;
+      });
+
+      const markerGeo = new THREE.SphereGeometry(0.18, 8, 6);
+      const clusterMarkers = clusterDefs.map((c, i) => {
+        const mat = new THREE.MeshBasicMaterial({
+          color: HELPER_COLORS[i % HELPER_COLORS.length],
+          transparent: true,
+          opacity: 0.6,
+        });
+        const mesh = new THREE.Mesh(markerGeo, mat);
+        mesh.userData.clusterIdx = i;
+        scene.add(mesh);
+        return mesh;
+      });
+
+      function updateClusterHelpers() {
+        const xOff = lodPreview ? -LOD_SPACING : 0;
+        const DEG2RAD = Math.PI / 180;
+        clusterDefs.forEach((c, i) => {
+          const cs = (c.scale ?? 1) * (params.canopyScale ?? 1);
+          clusterHelpers[i].position.set(c.x + xOff, c.y, c.z);
+          clusterHelpers[i].scale.set(
+            c.rx * cs,
+            c.ry * cs,
+            (c.rz ?? c.rx) * cs,
+          );
+          clusterHelpers[i].rotation.set(
+            (c.leanX ?? 0) * DEG2RAD,
+            0,
+            (c.leanZ ?? 0) * DEG2RAD,
+          );
+          clusterHelpers[i].visible = showHelpers && c.enabled;
+          clusterMarkers[i].position.set(c.x + xOff, c.y, c.z);
+          clusterMarkers[i].visible = showHelpers && c.enabled;
+        });
+      }
+      // NOTE: do NOT call updateClusterHelpers() here — it reads params.canopyScale,
+      // and `params` is a const declared further down (TDZ). The initial build runs
+      // it after params exists (buildFoliage -> updateClusterHelpers), and helpers
+      // are hidden by default, so positioning before then isn't needed.
+
+      // ─── DRAG CLUSTER MARKERS ────────────────────────────────────────────────────
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      let dragCluster = -1;
+      let dragPlane = new THREE.Plane();
+      let dragOffset = new THREE.Vector3();
+      const _intersect = new THREE.Vector3();
+
+      renderer.domElement.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0 || !showHelpers) return;
+        mouse.x = (e.clientX / innerWidth) * 2 - 1;
+        mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+
+        const hits = raycaster.intersectObjects(
+          clusterMarkers.filter((m, i) => clusterDefs[i].enabled),
+        );
+        if (hits.length > 0) {
+          const idx = hits[0].object.userData.clusterIdx;
+          dragCluster = idx;
+          pushUndo();
+          controls.enabled = false;
+          dragPlane.setFromNormalAndCoplanarPoint(
+            camera.getWorldDirection(new THREE.Vector3()).negate(),
+            hits[0].object.position,
+          );
+          raycaster.ray.intersectPlane(dragPlane, _intersect);
+          dragOffset.copy(hits[0].object.position).sub(_intersect);
+          e.stopPropagation();
+        }
+      });
+
+      renderer.domElement.addEventListener("pointermove", (e) => {
+        if (dragCluster < 0) return;
+        mouse.x = (e.clientX / innerWidth) * 2 - 1;
+        mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+
+        if (raycaster.ray.intersectPlane(dragPlane, _intersect)) {
+          _intersect.add(dragOffset);
+          const xOff = lodPreview ? -LOD_SPACING : 0;
+          const c = clusterDefs[dragCluster];
+          c.x = Math.round((_intersect.x - xOff) * 20) / 20;
+          c.y = Math.max(0, Math.round(_intersect.y * 20) / 20);
+          c.z = Math.round(_intersect.z * 20) / 20;
+          buildFoliage(true);
+          uiRefresh();
+        }
+      });
+
+      renderer.domElement.addEventListener("pointerup", () => {
+        if (dragCluster >= 0) {
+          dragCluster = -1;
+          controls.enabled = true;
+        }
+      });
+
+      // ─── TRUNK GLB LOADER ────────────────────────────────────────────────────────
+      // Add entries here when you drop new GLBs into public/models/trunks/.
+      const TRUNK_DIR = "models/trunks/";
+      const TRUNK_MODELS = [
+        { name: "Custom Tree 3", file: "customtree3_compressed.glb" },
+        { name: "Trees 6", file: "TREES6_compressed.glb" },
+        { name: "Seed 2279", file: "trunk_seed2279.glb" },
+      ];
+
+      function trunkUrl(fileName) {
+        return resolvePublicPath(TRUNK_DIR + fileName);
+      }
+
+      const dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath(
+        "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/libs/draco/",
+      );
+      const gltfLoader = new GLTFLoader();
+      gltfLoader.setDRACOLoader(dracoLoader);
+      let trunkScale = 1.0;
+      let trunkFileName = "";
+      let trunkLod1FileName = "";
+      let trunkPickerBtns = [];
+      const trunkGlbCache = new Map();
+      let _bushYShift = 0;
+
+      function cacheTrunkTemplate(file, scene) {
+        if (!trunkGlbCache.has(file)) trunkGlbCache.set(file, scene);
+      }
+
+      function cloneTrunkTemplate(file) {
+        const template = trunkGlbCache.get(file);
+        if (!template) return null;
+        const clone = template.clone(true);
+        applyTrunkMeshes(clone, false);
+        return clone;
+      }
+
+      function applyTrunkLod0(gltf, displayName) {
+        if (trunkRoot) scene.remove(trunkRoot);
+        defaultTrunk.visible = false;
+        trunkRoot = gltf.scene;
+        trunkRoot.scale.setScalar(trunkScale);
+        trunkRoot.visible = !params.bushMode && !lodPreview;
+        applyTrunkMeshes(trunkRoot, params.useGlbTrunkMat);
+        scene.add(trunkRoot);
+
+        trunkFileName = displayName;
+
+        const box = new THREE.Box3().setFromObject(trunkRoot);
+        const h = box.max.y - box.min.y;
+        let tris = 0;
+        trunkRoot.traverse((o) => {
+          if (o.isMesh && o.geometry.index)
+            tris += o.geometry.index.count / 3;
+        });
+        params.trunkTris = Math.round(tris);
+
+        infoEl.textContent =
+          `Trunk LOD0: ${displayName} — ${tris} tris, height: ${h.toFixed(2)}  |  ` +
+          `Tip Y ≈ ${box.max.y.toFixed(2)}  |  ` +
+          `Suggested Cluster 1 Y: ${(box.max.y * 0.85).toFixed(2)}`;
+
+        updateTrunkPickerSelection();
+        if (lodPreview) buildFoliage(true);
+        uiRefresh();
+      }
+
+      function applyTrunkLod1(gltf, displayName) {
+        if (trunkLod1Root) scene.remove(trunkLod1Root);
+        trunkLod1Root = gltf.scene;
+        trunkLod1Root.scale.setScalar(trunkScale);
+        trunkLod1Root.visible = false;
+        applyTrunkMeshes(trunkLod1Root, params.useGlbTrunkMat);
+
+        trunkLod1FileName = displayName;
+
+        let tris = 0;
+        trunkLod1Root.traverse((o) => {
+          if (o.isMesh && o.geometry.index)
+            tris += o.geometry.index.count / 3;
+        });
+        params.trunkLod1Tris = Math.round(tris);
+
+        infoEl.textContent = `Trunk LOD1: ${displayName} — ${tris} tris (${((tris / Math.max(1, params.trunkTris)) * 100).toFixed(0)}% of LOD0)`;
+
+        if (lodPreview) buildFoliage(true);
+        uiRefresh();
+      }
+
+      function applyTrunkMeshes(root, useGlbMat) {
+        root.traverse((o) => {
+          if (o.isMesh) {
+            o.castShadow = true;
+            o.receiveShadow = true;
+            o.userData.origMat = o.material;
+            o.material = useGlbMat ? o.userData.origMat : trunkMat;
+          }
+        });
+      }
+
+      function updateTrunkPickerSelection() {
+        trunkPickerBtns.forEach(({ file, img }) => {
+          const active = file
+            ? file === trunkFileName
+            : !trunkFileName && !trunkRoot;
+          img.classList.toggle("active", active);
+        });
+      }
+
+      function resetToDefaultTrunk() {
+        if (trunkRoot) {
+          scene.remove(trunkRoot);
+          trunkRoot = null;
+        }
+        if (trunkLod1Root) {
+          scene.remove(trunkLod1Root);
+          trunkLod1Root = null;
+        }
+        defaultTrunk.visible = !params.bushMode && !lodPreview;
+        trunkFileName = "";
+        trunkLod1FileName = "";
+        params.trunkTris = 0;
+        params.trunkLod1Tris = 0;
+        updateTrunkPickerSelection();
+        if (lodPreview) buildFoliage(true);
+        uiRefresh();
+        infoEl.textContent = "Trunk reset to default cylinder";
+      }
+
+      function loadBuiltInTrunk(model, { undo = true } = {}) {
+        if (undo) pushUndo();
+        const cached = trunkGlbCache.get(model.file);
+        if (cached) {
+          applyTrunkLod0({ scene: cached.clone(true) }, model.file);
+          return;
+        }
+        gltfLoader.load(
+          trunkUrl(model.file),
+          (gltf) => {
+            cacheTrunkTemplate(model.file, gltf.scene);
+            applyTrunkLod0({ scene: gltf.scene.clone(true) }, model.file);
+          },
+          undefined,
+          (err) => {
+            console.error("Built-in trunk load error:", model.file, err);
+            infoEl.textContent = `Could not load trunk: ${model.file}`;
+          },
+        );
+      }
+
+      function loadTrunkByFileName(fileName) {
+        const model = TRUNK_MODELS.find((m) => m.file === fileName);
+        if (model) {
+          loadBuiltInTrunk(model, { undo: false });
+          return;
+        }
+        if (trunkGlbCache.has(fileName)) {
+          applyTrunkLod0(
+            { scene: trunkGlbCache.get(fileName).clone(true) },
+            fileName,
+          );
+          return;
+        }
+        gltfLoader.load(
+          trunkUrl(fileName),
+          (gltf) => {
+            cacheTrunkTemplate(fileName, gltf.scene);
+            applyTrunkLod0({ scene: gltf.scene.clone(true) }, fileName);
+          },
+          undefined,
+          (err) => {
+            console.error("Trunk load error:", fileName, err);
+            infoEl.textContent = `Could not load trunk: ${fileName}`;
+          },
+        );
+      }
+
+      function loadTrunkLod1ByFileName(fileName) {
+        gltfLoader.load(
+          trunkUrl(fileName),
+          (gltf) => applyTrunkLod1(gltf, fileName),
+          undefined,
+          (err) => console.error("Trunk LOD1 load error:", fileName, err),
+        );
+      }
+
+      function buildTrunkPicker(parent) {
+        const label = document.createElement("div");
+        label.className = "tex-gallery-label";
+        label.textContent = "Built-in trunks";
+        parent.appendChild(label);
+
+        const gallery = document.createElement("div");
+        gallery.className = "tex-gallery trunk-gallery";
+        parent.appendChild(gallery);
+
+        trunkPickerBtns = [];
+
+        const addItem = (file, name, onClick) => {
+          const wrap = document.createElement("div");
+          wrap.className = "tex-item";
+          const img = document.createElement("img");
+          img.alt = name;
+          img.title = name;
+          img.draggable = false;
+          img.addEventListener("click", onClick);
+          wrap.appendChild(img);
+          const cap = document.createElement("div");
+          cap.className = "tex-label";
+          cap.textContent = name;
+          wrap.appendChild(cap);
+          gallery.appendChild(wrap);
+          trunkPickerBtns.push({ file, img, cap });
+        };
+
+        addItem("", "Cylinder", () => {
+          pushUndo();
+          resetToDefaultTrunk();
+        });
+
+        TRUNK_MODELS.forEach((model) => {
+          addItem(model.file, model.name, () => loadBuiltInTrunk(model));
+        });
+
+        updateTrunkPickerSelection();
+      }
+
+      async function preloadTrunkGlbs() {
+        await Promise.all(
+          TRUNK_MODELS.map(
+            (model) =>
+              new Promise((resolve) => {
+                if (trunkGlbCache.has(model.file)) {
+                  resolve();
+                  return;
+                }
+                gltfLoader.load(
+                  trunkUrl(model.file),
+                  (gltf) => {
+                    cacheTrunkTemplate(model.file, gltf.scene);
+                    resolve();
+                  },
+                  undefined,
+                  (err) => {
+                    console.warn("[Arborist] trunk preload failed:", model.file, err);
+                    resolve();
+                  },
+                );
+              }),
+          ),
+        );
+      }
+
+      async function bakeTrunkPickerThumbnails() {
+        const items = [
+          {
+            key: "",
+            make: () => {
+              const m = defaultTrunk.clone();
+              m.position.set(0, 0, 0);
+              return m;
+            },
+          },
+          ...TRUNK_MODELS.map((model) => ({
+            key: model.file,
+            make: () => cloneTrunkTemplate(model.file) ?? new THREE.Group(),
+          })),
+        ];
+
+        const thumbs = await bakeObjectThumbnails({
+          renderer,
+          items,
+          environment: scene.environment,
+          environmentIntensity: scene.environmentIntensity ?? 0.35,
+          size: 256,
+          fill: 0.9,
+        });
+
+        trunkPickerBtns.forEach(({ file, img }) => {
+          const url = thumbs.get(file);
+          if (url) img.src = url;
+        });
+      }
+
+      function loadTrunk(file) {
+        pushUndo();
+        const url = URL.createObjectURL(file);
+        gltfLoader.load(
+          url,
+          (gltf) => {
+            applyTrunkLod0(gltf, file.name);
+            URL.revokeObjectURL(url);
+          },
+          undefined,
+          (err) => {
+            URL.revokeObjectURL(url);
+            console.error("Trunk load error:", err);
+          },
+        );
+      }
+
+      function loadTrunkLod1(file) {
+        const url = URL.createObjectURL(file);
+        gltfLoader.load(
+          url,
+          (gltf) => {
+            applyTrunkLod1(gltf, file.name);
+            URL.revokeObjectURL(url);
+          },
+          undefined,
+          (err) => {
+            URL.revokeObjectURL(url);
+            console.error("Trunk LOD1 load error:", err);
+          },
+        );
+      }
+
+      // ─── PARAMS ──────────────────────────────────────────────────────────────────
+      const params = {
+        bgColor: "#87ceeb",
+        sunIntensity: 2.2,
+        ambientInt: 0.8,
+        sunX: 5,
+        sunY: 12,
+        sunZ: 4,
+        showGround: true,
+        showHelpers: false,
+        showFog: false,
+        bushMode: false,
+        trunkScale: 1.0,
+        canopyScale: 1.0,
+        trunkBotColor: "#4a2f17",
+        trunkTopColor: "#6b4a2b",
+        trunkGradHeight: 6.0,
+        trunkRoughness: 0.9,
+        useGlbTrunkMat: false,
+        bottomColor: "#2d5a1b",
+        topColor: "#5aaa2a",
+        colorVar: 0.12,
+        roughness: 1.0,
+        alphaCutoff: 0.45,
+        sssColor: "#c8e070",
+        sssStr: 0.0,
+        sssPow: 2.0,
+        rimColor: "#c8ffaa",
+        rimStr: 0.07,
+        rimPow: 2.5,
+        aoStr: 0.7,
+        normalBias: 1.0,
+        leafWarp: 0.28,
+        windSpeed: 0.9,
+        windStr: 0.0,
+        windMicro: 0.0,
+        presetName: "treetest1",
+        leafTexFile: "",
+        trunkTris: 0,
+        trunkLod1Tris: 0,
+        totalLeaves: 0,
+        totalLeafTris: 0,
+        lod1Leaves: 0,
+        lod2Leaves: 0,
+        activePreset: "",
+        lodPreview: false,
+        lodDist1: 80,
+        lodDist2: 200,
+        billboardLeaves: true,
+        billboardYawOnly: false,
+      };
+
+      // --- WORLD LIGHTING (procedural day/night sky, mirrors v2) ---
+      const PROC_SKY = {
+        ...SKY_DEFAULTS,
+        timeOfDay: 9.5,
+        hazeHeight: 0.12,
+        autoAdvance: false,
+        daySpeed: 0.5,
+      };
+      const worldLight = {
+        dirColor: "#fff5e0",
+        dirIntensity: 2.2,
+        moonIntensity: 0.3,
+        hemiSky: "#c8e0ff",
+        hemiGround: "#88aa55",
+        hemiIntensity: 0.4,
+        sunDistance: 20,
+        exposure: 1.0,
+        envIntensity: 0.4,
+      };
+      // Dome horizon haze (the visible "world fog" on the sky dome).
+      const worldFog = {
+        enabled: false,
+        density: 0.0006,
+        color: "#aebfc8",
+        hazeHeight: 0.12,
+      };
+      // "studio" = original neutral rig (best for authoring colour/shape);
+      // "world"  = v2 sky + sun + ACES tonemap (best for validating final look).
+      let lightingMode = "world";
+      let _todHandle = null;
+
+      const dayNightSky = createDayNightSky();
+      dayNightSky.mesh.visible = false;
+      scene.add(dayNightSky.mesh);
+
+      const _worldSunDir = new THREE.Vector3();
+      const _worldMoonDir = new THREE.Vector3();
+      const _worldEffDir = new THREE.Vector3();
+      const _worldFog = {
+        enabled: false,
+        color: new THREE.Color(),
+        density: 0.0003,
+        hazeHeight: 0.12,
+      };
+      const SKY_TILT = 0.28; // matches v2 setTimeOfDay / daynight-sky lab
+
+      function worldSunDirFromTime(t, out) {
+        const ang = (t / 24) * Math.PI * 2;
+        return out.set(Math.sin(ang), -Math.cos(ang), SKY_TILT).normalize();
+      }
+
+      function driveWorldLighting(timeSec, dt) {
+        if (PROC_SKY.autoAdvance) {
+          PROC_SKY.timeOfDay =
+            (PROC_SKY.timeOfDay + PROC_SKY.daySpeed * dt) % 24;
+          if (_todHandle) _todHandle.refresh();
+        }
+        worldSunDirFromTime(PROC_SKY.timeOfDay, _worldSunDir);
+        _worldMoonDir.copy(_worldSunDir).negate();
+        if (Math.abs(PROC_SKY.timeOfDay - _envLastTOD) > 0.15) {
+          _envLastTOD = PROC_SKY.timeOfDay;
+          _envNeeds = true; // sun moved -> sky IBL is stale
+        }
+        const sunUp = _worldSunDir.y;
+        if (sunUp < 0) {
+          // Night: relight by the moon (sun antipode); fade in near the horizon.
+          _worldEffDir.copy(_worldMoonDir);
+          sun.position
+            .copy(_worldEffDir)
+            .multiplyScalar(worldLight.sunDistance);
+          sun.color.set(PROC_SKY.moonColor);
+          sun.intensity =
+            worldLight.moonIntensity *
+            THREE.MathUtils.smoothstep(-sunUp, 0, 0.15);
+        } else {
+          _worldEffDir.copy(_worldSunDir);
+          sun.position
+            .copy(_worldSunDir)
+            .multiplyScalar(worldLight.sunDistance);
+          sun.color.set(worldLight.dirColor);
+          sun.intensity =
+            worldLight.dirIntensity *
+            THREE.MathUtils.smoothstep(sunUp, -0.05, 0.1);
+        }
+        hemi.color.set(worldLight.hemiSky);
+        hemi.groundColor.set(worldLight.hemiGround);
+        hemi.intensity = worldLight.hemiIntensity;
+        // Leaf SSS / rim track the dominant key light (sun by day, moon by night).
+        uSunDir.value.copy(_worldEffDir).normalize();
+        _worldFog.enabled = worldFog.enabled;
+        _worldFog.color.set(worldFog.color);
+        _worldFog.density = worldFog.density;
+        _worldFog.hazeHeight = worldFog.hazeHeight;
+        dayNightSky.update(PROC_SKY, {
+          time: timeSec,
+          sunDir: _worldSunDir,
+          moonDir: _worldMoonDir,
+          camera,
+          fog: _worldFog,
+        });
+      }
+
+      // --- Sky-derived IBL (PMREM from the dome) for the PBR trunk + ground ---
+      // Mirrors v2: clone the dome into an env scene at the origin, render a small
+      // cube, convolve to a REUSED PMREM RT (reuse avoids WebGPU device-loss while
+      // scrubbing). Leaves opt out (envMapIntensity = 0); trunk + ground pick it up.
+      let _envScene = null,
+        _envCubeRT = null,
+        _envCubeCam = null,
+        _envRT = null,
+        _pmrem = null;
+      let _envFace = -1,
+        _envIdle = 0,
+        _envNeeds = false,
+        _envLastTOD = -999;
+      const ENV_IDLE = 1.0; // seconds between re-bake cycles
+
+      function ensureEnvRig() {
+        if (_envCubeRT) return;
+        _envScene = new THREE.Scene();
+        const domeClone = dayNightSky.mesh.clone(); // shares the live material/uniforms
+        domeClone.position.set(0, 0, 0);
+        _envScene.add(domeClone);
+        _envCubeRT = new THREE.CubeRenderTarget(64, {
+          type: THREE.HalfFloatType,
+        });
+        _envCubeCam = new THREE.CubeCamera(0.1, 20000, _envCubeRT);
+        _envCubeCam.updateMatrixWorld(true);
+        _pmrem = _pmrem ?? new THREE.PMREMGenerator(renderer);
+      }
+      function renderEnvFace(face) {
+        ensureEnvRig();
+        const prev = renderer.getRenderTarget();
+        renderer.setRenderTarget(_envCubeRT, face);
+        renderer.render(_envScene, _envCubeCam.children[face]);
+        renderer.setRenderTarget(prev);
+      }
+      function convolveEnv() {
+        _envRT = _pmrem.fromCubemap(_envCubeRT.texture, _envRT); // REUSE the RT (no churn)
+        if (lightingMode === "world") scene.environment = _envRT.texture;
+      }
+      // Amortized: one cube face per frame, convolve on the 6th, then idle.
+      function updateEnvBake(dt) {
+        if (_envFace < 0) {
+          if (!_envNeeds && !PROC_SKY.autoAdvance) return;
+          _envIdle -= dt;
+          if (_envIdle > 0) return;
+          _envNeeds = false;
+          _envFace = 0;
+        }
+        renderEnvFace(_envFace);
+        _envFace++;
+        if (_envFace >= 6) {
+          convolveEnv();
+          _envFace = -1;
+          _envIdle = ENV_IDLE;
+        }
+      }
+
+      function applyLightingMode() {
+        const world = lightingMode === "world";
+        dayNightSky.mesh.visible = world;
+        if (world) {
+          scene.background = null; // the sky dome is the backdrop
+          renderer.toneMappingExposure = worldLight.exposure;
+          scene.environmentIntensity = worldLight.envIntensity;
+          scene.environment = _envRT ? _envRT.texture : null;
+          _envNeeds = true; // (re)bake the sky IBL on entering world mode
+        } else {
+          scene.background = new THREE.Color(params.bgColor);
+          renderer.toneMappingExposure = 1.0;
+          scene.environment = null; // no sky IBL in the neutral studio rig
+          // Restore the neutral studio rig.
+          hemi.color.set("#b8dfff");
+          hemi.groundColor.set("#3d6b20");
+          hemi.intensity = params.ambientInt;
+          sun.color.set("#fff8e8");
+          sun.intensity = params.sunIntensity;
+          sun.position.set(params.sunX, params.sunY, params.sunZ);
+          uSunDir.value.set(params.sunX, params.sunY, params.sunZ).normalize();
+        }
+      }
+      applyLightingMode();
+
+      function updateStats() {
+        const n = leavesMesh ? leavesMesh.count : 0;
+        params.totalLeaves = n;
+        params.totalLeafTris = n * 2;
+        params.lod1Leaves = lodMesh1 ? lodMesh1.count : 0;
+        params.lod2Leaves = lodMesh2 ? lodMesh2.count : 0;
+        uiRefresh();
+      }
+
+      function applyBushMode(enabled) {
+        defaultTrunk.visible = !enabled && !trunkRoot && !lodPreview;
+        if (trunkRoot) trunkRoot.visible = !enabled && !lodPreview;
+
+        if (enabled) {
+          const enabledClusters = clusterDefs.filter((c) => c.enabled);
+          const minBottom = enabledClusters.length
+            ? Math.min(...enabledClusters.map((c) => c.y - c.ry))
+            : 0;
+          _bushYShift = Math.max(0, minBottom);
+          if (_bushYShift > 0) {
+            clusterDefs.forEach((c) => {
+              c.y -= _bushYShift;
+            });
+            buildFoliage(true);
+            uiRefresh();
+          }
+        } else {
+          if (_bushYShift > 0) {
+            clusterDefs.forEach((c) => {
+              c.y += _bushYShift;
+            });
+            _bushYShift = 0;
+            buildFoliage(true);
+            uiRefresh();
+          }
+        }
+      }
+
+      // ─── PRESET SAVE / LOAD ──────────────────────────────────────────────────────
+      const DEFAULT_PRESET = "tree-presets/treetest1.json";
+      // Add entries when you save new JSON presets into public/tree-presets/.
+      const SAVED_TREE_PRESETS = [
+        { label: "Tree Test 1", file: "tree-presets/treetest1.json" },
+        { label: "Tree Test 2", file: "tree-presets/treetest2.json" },
+        { label: "Tree Test 3", file: "tree-presets/treetest3.json" },
+        { label: "Tree Test 4", file: "tree-presets/treetest4.json" },
+        { label: "Bush Test 1", file: "tree-presets/bushtest1.json" },
+        { label: "Bush Test 2", file: "tree-presets/bushtest2.json" },
+      ];
+
+      async function fetchPresetJson(relativePath) {
+        const resp = await fetch(resolvePublicPath(relativePath));
+        if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+        return resp.json();
+      }
+
+      async function loadSavedPreset(entry, { undo = true } = {}) {
+        if (undo) pushUndo();
+        const data = await fetchPresetJson(entry.file);
+        params.activePreset = entry.label;
+        if (data.presetName) params.presetName = data.presetName;
+        applyPresetData(data);
+        infoEl.textContent = `Loaded preset: ${entry.label}`;
+      }
+
+      async function loadStartupPreset() {
+        try {
+          applyPresetData(await fetchPresetJson(DEFAULT_PRESET));
+        } catch (err) {
+          console.warn(
+            "[Arborist] default preset load failed; using editor defaults.",
+            err,
+          );
+          loadLeafTexFromPath(LEAF_TEXTURES[0].path);
+          buildFoliage(true);
+        }
+      }
+
+      function buildPresetData() {
+        return {
+          presetName: params.presetName,
+          trunkFile: trunkFileName,
+          trunkLod1File: trunkLod1FileName,
+          // Either "textures/leaves/..." (built-in, light) or "data:image/...;base64,..." (embedded, self-contained).
+          leafTexture: activeLeafTexPath || activeLeafTexDataUrl || "",
+          atlas: {
+            enabled: uUseAtlas.value > 0.5,
+            cell: atlasCellIndex,
+            cols: ATLAS_COLS,
+            cellPx: ATLAS_CELLPX,
+            gutter: ATLAS_GUTTER,
+            size: ATLAS_SIZE,
+          },
+          leafTextureName: params.leafTexFile || "",
+          clusters: clusterDefs.map((c) => ({ ...c })),
+          material: {
+            bottomColor: params.bottomColor,
+            topColor: params.topColor,
+            colorVar: params.colorVar,
+            roughness: params.roughness,
+            alphaCutoff: params.alphaCutoff,
+            sssColor: params.sssColor,
+            sssStr: params.sssStr,
+            sssPow: params.sssPow,
+            rimColor: params.rimColor,
+            rimStr: params.rimStr,
+            rimPow: params.rimPow,
+            aoStr: params.aoStr,
+            normalBias: params.normalBias,
+            leafWarp: params.leafWarp,
+            billboardLeaves: params.billboardLeaves,
+            billboardYawOnly: params.billboardYawOnly,
+          },
+          wind: {
+            windSpeed: params.windSpeed,
+            windStr: params.windStr,
+            windMicro: params.windMicro,
+          },
+          trunkScale: params.trunkScale,
+          canopyScale: params.canopyScale,
+          trunkMaterial: {
+            botColor: params.trunkBotColor,
+            topColor: params.trunkTopColor,
+            gradHeight: params.trunkGradHeight,
+            roughness: params.trunkRoughness,
+            useGlb: params.useGlbTrunkMat,
+          },
+          bushMode: params.bushMode,
+          lodDistances: { lod1: params.lodDist1, lod2: params.lodDist2 },
+        };
+      }
+
+      async function savePreset() {
+        const json = JSON.stringify(buildPresetData(), null, 2);
+        const name = (params.presetName || "preset").replace(
+          /[^a-z0-9_\-]/gi,
+          "_",
+        );
+        if (window.showSaveFilePicker) {
+          try {
+            const handle = await showSaveFilePicker({
+              suggestedName: name + ".json",
+              types: [
+                {
+                  description: "Tree preset",
+                  accept: { "application/json": [".json"] },
+                },
+              ],
+            });
+            const writable = await handle.createWritable();
+            await writable.write(json);
+            await writable.close();
+            infoEl.textContent = `Preset saved: ${name}.json — trunk: ${trunkFileName || "(default)"}, texture: ${activeLeafTexPath || "(custom)"}`;
+          } catch (e) {
+            if (e.name !== "AbortError") console.error(e);
+          }
+        } else {
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(
+            new Blob([json], { type: "application/json" }),
+          );
+          a.download = name + ".json";
+          a.click();
+        }
+      }
+
+      function applyPresetData(data) {
+        if (data.clusters) {
+          data.clusters.forEach((c, i) => {
+            if (i < clusterDefs.length) {
+              const t = clusterDefs[i];
+              Object.assign(t, c);
+              // Backfill shaping fields from the LOADED data's presence, so a
+              // preset predating them loads clean (no stale rz/scale/lean leak).
+              if (c.rz == null) t.rz = t.rx;
+              if (c.scale == null) t.scale = 1;
+              if (c.leanX == null) t.leanX = 0;
+              if (c.leanZ == null) t.leanZ = 0;
+            }
+          });
+          for (let i = data.clusters.length; i < clusterDefs.length; i++) {
+            clusterDefs[i].enabled = false;
+          }
+        }
+        if (data.canopyScale != null) params.canopyScale = data.canopyScale;
+        applyTrunkMaterial(data.trunkMaterial);
+        if (data.material) {
+          const m = data.material;
+          if (m.bottomColor) {
+            params.bottomColor = m.bottomColor;
+            uBottomColor.value.set(m.bottomColor);
+          }
+          if (m.topColor) {
+            params.topColor = m.topColor;
+            uTopColor.value.set(m.topColor);
+          }
+          if (m.colorVar != null) {
+            params.colorVar = m.colorVar;
+            uColorVar.value = m.colorVar;
+          }
+          if (m.roughness != null) {
+            params.roughness = m.roughness;
+            leafMat.roughness = m.roughness;
+          }
+          if (m.alphaCutoff != null) {
+            params.alphaCutoff = m.alphaCutoff;
+            uAlphaCutoff.value = m.alphaCutoff;
+          }
+          if (m.sssColor) {
+            params.sssColor = m.sssColor;
+            uSssColor.value.set(m.sssColor);
+          }
+          if (m.sssStr != null) {
+            params.sssStr = m.sssStr;
+            uSssStr.value = m.sssStr;
+          }
+          if (m.sssPow != null) {
+            params.sssPow = m.sssPow;
+            uSssPow.value = m.sssPow;
+          }
+          if (m.rimColor) {
+            params.rimColor = m.rimColor;
+            uRimColor.value.set(m.rimColor);
+          }
+          if (m.rimStr != null) {
+            params.rimStr = m.rimStr;
+            uRimStr.value = m.rimStr;
+          }
+          if (m.rimPow != null) {
+            params.rimPow = m.rimPow;
+            uRimPow.value = m.rimPow;
+          }
+          if (m.aoStr != null) {
+            params.aoStr = m.aoStr;
+            uAoStr.value = m.aoStr;
+          }
+          if (m.normalBias != null) {
+            params.normalBias = m.normalBias;
+            uNormalBias.value = m.normalBias;
+          }
+          if (m.leafWarp != null) {
+            params.leafWarp = m.leafWarp;
+            uLeafWarp.value = m.leafWarp;
+          }
+          if (m.billboardLeaves != null) {
+            params.billboardLeaves = !!m.billboardLeaves;
+            uBillboard.value = params.billboardLeaves ? 1.0 : 0.0;
+          }
+          if (m.billboardYawOnly != null) {
+            params.billboardYawOnly = !!m.billboardYawOnly;
+            uBillboardYaw.value = params.billboardYawOnly ? 1.0 : 0.0;
+          }
+        }
+        if (data.wind) {
+          const w = data.wind;
+          if (w.windSpeed != null) {
+            params.windSpeed = w.windSpeed;
+            uWindSpeed.value = w.windSpeed;
+          }
+          if (w.windStr != null) {
+            params.windStr = w.windStr;
+            uWindStr.value = w.windStr;
+          }
+          if (w.windMicro != null) {
+            params.windMicro = w.windMicro;
+            uWindMicro.value = w.windMicro;
+          }
+        }
+        if (data.trunkScale != null) {
+          params.trunkScale = data.trunkScale;
+          trunkScale = data.trunkScale;
+          (trunkRoot || defaultTrunk).scale.setScalar(data.trunkScale);
+        }
+        if (data.lodDistances) {
+          if (data.lodDistances.lod1 != null)
+            params.lodDist1 = data.lodDistances.lod1;
+          if (data.lodDistances.lod2 != null)
+            params.lodDist2 = data.lodDistances.lod2;
+        }
+        if (data.presetName) params.presetName = data.presetName;
+        if (data.trunkFile) loadTrunkByFileName(data.trunkFile);
+        else resetToDefaultTrunk();
+        if (data.trunkLod1File) loadTrunkLod1ByFileName(data.trunkLod1File);
+        if (data.leafTexture) {
+          if (data.leafTexture.startsWith("data:")) {
+            loadLeafTexFromDataUrl(
+              data.leafTexture,
+              data.leafTextureName || "(embedded)",
+            );
+          } else if (data.leafTexture.startsWith("textures/")) {
+            loadLeafTexFromPath(data.leafTexture);
+          }
+        }
+        if (data.atlas && data.atlas.enabled && atlasTexture) {
+          setAtlasCell(data.atlas.cell ?? 0);
+          useAtlas(true);
+          atlasUi.use = true;
+          atlasUi.cell = data.atlas.cell ?? 0;
+        }
+        if (data.bushMode != null) {
+          params.bushMode = data.bushMode;
+          applyBushMode(data.bushMode);
+        }
+        uiRefresh();
+        buildFoliage(true);
+      }
+
+      function loadPresetFromFile(file) {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            pushUndo();
+            applyPresetData(JSON.parse(ev.target.result));
+            infoEl.textContent = `Preset loaded from ${file.name}`;
+          } catch (e) {
+            infoEl.textContent = "Invalid preset file: " + e.message;
+          }
+        };
+        reader.readAsText(file);
+      }
+
+      const infoEl = document.getElementById("info");
+
+      // --- LEAF MASK ATLAS (open-world batching: bake N leaf masks into one image) ---
+      // Arborist colours leaves procedurally (gradient + SSS/rim); the leaf PNG is
+      // used ONLY as a cutout mask. So the atlas carries MASKS: each cell = one
+      // leaf's mask (grayscale in RGB, A=255). v2 auto-detects channel -> reads .r.
+      // 1024 / 4x4 / 256px cells, 12px gutter + 10px alpha-dilation so mips don't
+      // bleed between cells. Up to 16 cells; bakes the 6 built-ins into 0..5.
+      const ATLAS_SIZE = 1024;
+      const ATLAS_COLS = 4;
+      const ATLAS_CELLPX = 256;
+      const ATLAS_GUTTER = 12;
+      const ATLAS_DILATE = 10;
+      const ATLAS_INNER = ATLAS_CELLPX - ATLAS_GUTTER * 2; // 232
+      let atlasTexture = null; // THREE.CanvasTexture once baked
+      let atlasCanvas = null; // source canvas (preview + download)
+      let atlasCellMap = []; // [{ index, name, uvRect:{ox,oy,sx,sy} }]
+      let _atlasPreviewImg = null;
+      let _atlasSavedTex = null,
+        _atlasSavedMaskInAlpha = 0;
+      const atlasUi = { use: false, cell: 0 };
+
+      function setAtlasCell(i) {
+        atlasCellIndex = i | 0;
+        // Per-instance now: rewrite the aAtlasIndex buffer on the live meshes.
+        for (const m of [leavesMesh, lodMesh1, lodMesh2]) {
+          const a = m && m.geometry.attributes.aAtlasIndex;
+          if (a) {
+            a.array.fill(atlasCellIndex);
+            a.needsUpdate = true;
+          }
+        }
+      }
+      // Switch the live tree between its standalone leaf texture and an atlas cell.
+      function useAtlas(on) {
+        if (on) {
+          if (!atlasTexture) {
+            infoEl.textContent = "Bake the atlas first.";
+            return false;
+          }
+          _atlasSavedTex = leafMapNode.value;
+          _atlasSavedMaskInAlpha = uMaskInAlpha.value;
+          leafMapNode.value = atlasTexture;
+          uMaskInAlpha.value = 0; // atlas stores the mask in red
+          uUseAtlas.value = 1;
+          setAtlasCell(atlasCellIndex);
+        } else {
+          if (_atlasSavedTex) leafMapNode.value = _atlasSavedTex;
+          uMaskInAlpha.value = _atlasSavedMaskInAlpha;
+          uUseAtlas.value = 0;
+        }
+        return true;
+      }
+
+      // uv sub-rect for cell i, accounting for CanvasTexture flipY = true.
+      function atlasCellRect(i) {
+        const c = i % ATLAS_COLS;
+        const r = (i / ATLAS_COLS) | 0;
+        const s = ATLAS_INNER / ATLAS_SIZE;
+        const ox = (c * ATLAS_CELLPX + ATLAS_GUTTER) / ATLAS_SIZE;
+        const oy =
+          ((ATLAS_COLS - 1 - r) * ATLAS_CELLPX + ATLAS_GUTTER) / ATLAS_SIZE;
+        return { ox, oy, sx: s, sy: s };
+      }
+
+      function _loadImg(src) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error("img load failed: " + src));
+          img.src = resolvePublicPath(src);
+        });
+      }
+
+      // 4-neighbour max-dilation by `iters` px, then restore the interior so only
+      // the gutter ring is filled (keeps the visible silhouette crisp).
+      function _dilateGutter(mask, w, h, iters, x0, y0, x1, y1) {
+        const orig = mask.slice();
+        for (let it = 0; it < iters; it++) {
+          const src = mask.slice();
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+              const idx = y * w + x;
+              if (src[idx] >= 250) continue;
+              let m = src[idx];
+              if (x > 0) m = Math.max(m, src[idx - 1]);
+              if (x < w - 1) m = Math.max(m, src[idx + 1]);
+              if (y > 0) m = Math.max(m, src[idx - w]);
+              if (y < h - 1) m = Math.max(m, src[idx + w]);
+              mask[idx] = m;
+            }
+          }
+        }
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            mask[y * w + x] = orig[y * w + x]; // restore crisp interior
+          }
+        }
+      }
+
+      async function bakeLeafAtlas() {
+        const sources = LEAF_TEXTURES.slice(0, ATLAS_COLS * ATLAS_COLS);
+        infoEl.textContent = "Baking leaf atlas...";
+        let imgs;
+        try {
+          imgs = await Promise.all(sources.map((t) => _loadImg(t.path)));
+        } catch (e) {
+          infoEl.textContent = "Atlas bake failed: " + e.message;
+          return;
+        }
+        const cv = document.createElement("canvas");
+        cv.width = ATLAS_SIZE;
+        cv.height = ATLAS_SIZE;
+        const ctx = cv.getContext("2d", { willReadFrequently: true });
+        ctx.clearRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
+        const tmp = document.createElement("canvas");
+        tmp.width = ATLAS_INNER;
+        tmp.height = ATLAS_INNER;
+        const tctx = tmp.getContext("2d", { willReadFrequently: true });
+
+        atlasCellMap = [];
+        imgs.forEach((img, i) => {
+          const c = i % ATLAS_COLS;
+          const r = (i / ATLAS_COLS) | 0;
+          const px0 = c * ATLAS_CELLPX;
+          const py0 = r * ATLAS_CELLPX;
+
+          // Channel choice = SAME as the live shader (detectAlphaChannel on the
+          // full source image) so the atlas mask matches non-atlas rendering.
+          const hasAlpha = detectAlphaChannel(img);
+          // Draw at interior resolution: NO transparent gutter to contaminate the
+          // read. (The gutter made every cell read alpha=255 -> solid 100%.)
+          tctx.clearRect(0, 0, ATLAS_INNER, ATLAS_INNER);
+          tctx.drawImage(img, 0, 0, ATLAS_INNER, ATLAS_INNER);
+          const d = tctx.getImageData(0, 0, ATLAS_INNER, ATLAS_INNER).data;
+          const mask = new Uint8ClampedArray(ATLAS_CELLPX * ATLAS_CELLPX);
+          for (let yy = 0; yy < ATLAS_INNER; yy++) {
+            for (let xx = 0; xx < ATLAS_INNER; xx++) {
+              const sp = (yy * ATLAS_INNER + xx) * 4;
+              mask[(yy + ATLAS_GUTTER) * ATLAS_CELLPX + (xx + ATLAS_GUTTER)] =
+                hasAlpha ? d[sp + 3] : d[sp];
+            }
+          }
+          _dilateGutter(
+            mask,
+            ATLAS_CELLPX,
+            ATLAS_CELLPX,
+            ATLAS_DILATE,
+            ATLAS_GUTTER,
+            ATLAS_GUTTER,
+            ATLAS_GUTTER + ATLAS_INNER,
+            ATLAS_GUTTER + ATLAS_INNER,
+          );
+          const out = ctx.createImageData(ATLAS_CELLPX, ATLAS_CELLPX);
+          const od = out.data;
+          for (let q = 0, p = 0; q < mask.length; q++, p += 4) {
+            od[p] = od[p + 1] = od[p + 2] = mask[q];
+            od[p + 3] = 255;
+          }
+          ctx.putImageData(out, px0, py0);
+          atlasCellMap.push({
+            index: i,
+            name: sources[i].name,
+            uvRect: atlasCellRect(i),
+          });
+        });
+
+        atlasCanvas = cv;
+        if (atlasTexture) atlasTexture.dispose();
+        atlasTexture = new THREE.CanvasTexture(cv);
+        atlasTexture.colorSpace = THREE.SRGBColorSpace;
+        atlasTexture.needsUpdate = true;
+
+        // Preview: mask drives ALPHA over a checkerboard so partial-coverage leaf
+        // shapes are visible (the atlas itself keeps the mask in RGB for the shader).
+        const full = ctx.getImageData(0, 0, ATLAS_SIZE, ATLAS_SIZE);
+        const fd = full.data;
+        const prev = document.createElement("canvas");
+        prev.width = ATLAS_SIZE;
+        prev.height = ATLAS_SIZE;
+        const pctx = prev.getContext("2d");
+        const pim = pctx.createImageData(ATLAS_SIZE, ATLAS_SIZE);
+        const pd = pim.data;
+        for (let p = 0; p < fd.length; p += 4) {
+          pd[p] = 120;
+          pd[p + 1] = 230;
+          pd[p + 2] = 90; // leaf green
+          pd[p + 3] = fd[p]; // alpha = mask (red channel)
+        }
+        pctx.putImageData(pim, 0, 0);
+        if (_atlasPreviewImg)
+          _atlasPreviewImg.src = prev.toDataURL("image/png");
+
+        // Per-cell coverage (% of interior texels with mask > 128).
+        const cov = atlasCellMap.map((cell) => {
+          const c = cell.index % ATLAS_COLS,
+            r = (cell.index / ATLAS_COLS) | 0;
+          let on = 0,
+            tot = 0;
+          for (
+            let y = r * ATLAS_CELLPX + ATLAS_GUTTER;
+            y < r * ATLAS_CELLPX + ATLAS_GUTTER + ATLAS_INNER;
+            y++
+          ) {
+            for (
+              let x = c * ATLAS_CELLPX + ATLAS_GUTTER;
+              x < c * ATLAS_CELLPX + ATLAS_GUTTER + ATLAS_INNER;
+              x++
+            ) {
+              tot++;
+              if (fd[(y * ATLAS_SIZE + x) * 4] > 128) on++;
+            }
+          }
+          return cell.name + ":" + Math.round((on / tot) * 100) + "%";
+        });
+        console.log("[atlas] per-cell coverage:", cov);
+        infoEl.textContent = "Leaf atlas baked. Coverage = " + cov.join("  ");
+      }
+
+      function downloadAtlasPng() {
+        if (!atlasCanvas) {
+          infoEl.textContent = "Bake the atlas first.";
+          return;
+        }
+        const a = document.createElement("a");
+        a.href = atlasCanvas.toDataURL("image/png");
+        a.download = "leaf_atlas.png";
+        a.click();
+      }
+      function downloadAtlasMap() {
+        if (!atlasCellMap.length) {
+          infoEl.textContent = "Bake the atlas first.";
+          return;
+        }
+        const map = {
+          size: ATLAS_SIZE,
+          cols: ATLAS_COLS,
+          cellPx: ATLAS_CELLPX,
+          gutter: ATLAS_GUTTER,
+          maskChannel: "r",
+          cells: atlasCellMap,
+        };
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(
+          new Blob([JSON.stringify(map, null, 2)], {
+            type: "application/json",
+          }),
+        );
+        a.download = "leaf_atlas_map.json";
+        a.click();
+      }
+
+      // --- OCTAHEDRAL IMPOSTOR (far-LOD): bake the whole tree into a color atlas ---
+      // Phase 1a: bake + preview only. Renders trunk + stylized billboard foliage
+      // with their REAL materials from grid² octahedral views. The lab does the
+      // heavy lifting (octahedral-v3/octahedral-core.js = single source of truth).
+      const IMP = {
+        grid: 8,
+        atlasSize: 4096,
+        cellPad: 6,
+        fullOctahedral: false,
+        bakeLight: 3.0,
+      };
+      let impostorResult = null;
+      let _impPreviewImg = null;
+
+      async function bakeTreeImpostor() {
+        const trunk = trunkRoot || (params.bushMode ? null : defaultTrunk);
+        const objs = [leavesMesh, trunk].filter(Boolean);
+        if (!objs.length) {
+          infoEl.textContent = "Nothing to bake (no foliage / trunk).";
+          return;
+        }
+        infoEl.textContent =
+          "Baking tree impostor — rendering the tree " +
+          IMP.grid * IMP.grid +
+          "x...";
+        await new Promise((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(r)),
+        );
+        // Force world-up leaf normals during the bake so lighting is VIEW-STABLE —
+        // normalBias<1 (presets use 0.75) makes leaves face the bake camera, so
+        // anti-sun views bake dark. Restored right after; live tree unchanged.
+        const _savedNB = uNormalBias.value;
+        const _savedAO = uAoStr.value;
+        const _savedRim = uRimStr.value;
+        const _savedSSS = uSssStr.value;
+        uNormalBias.value = 1.0; // world-up leaves
+        uAoStr.value = 0.0; // no AO darkening
+        uRimStr.value = 0.0; // no view-dependent rim glow
+        uSssStr.value = 0.0; // no view-dependent back-light SSS
+        // Flat AMBIENT bake light only — NO directional sun, so there's no
+        // lit/shadow side and every octahedral view is illuminated identically
+        // (the real cause of the bright/dark cells). View-stable atlas.
+        // Captures ~ALBEDO (not lit colour) so the impostor can be RELIT live by
+        // the scene sun (Phase 2 / day-night). Intensity is the brightness-match
+        // knob (three's ambient ~/π, so true albedo ≈ 3); tune via the UI slider.
+        const _bakeLight = new THREE.AmbientLight(0xffffff, IMP.bakeLight);
+        try {
+          impostorResult = await bakeColorAtlasFromObject(renderer, objs, {
+            grid: IMP.grid,
+            atlasSize: IMP.atlasSize,
+            cellPad: IMP.cellPad,
+            fullOctahedral: IMP.fullOctahedral,
+            maxAniso: 8,
+            lights: [_bakeLight],
+          });
+        } catch (e) {
+          uNormalBias.value = _savedNB;
+          uAoStr.value = _savedAO;
+          uRimStr.value = _savedRim;
+          uSssStr.value = _savedSSS;
+          console.error(e);
+          infoEl.textContent = "Impostor bake failed: " + e.message;
+          return;
+        }
+        uNormalBias.value = _savedNB;
+        uAoStr.value = _savedAO;
+        uRimStr.value = _savedRim;
+        uSssStr.value = _savedSSS;
+        const { colorPixels, atlasSize } = impostorResult;
+        const cv = document.createElement("canvas");
+        cv.width = atlasSize;
+        cv.height = atlasSize;
+        const ctx = cv.getContext("2d");
+        const im = ctx.createImageData(atlasSize, atlasSize);
+        im.data.set(colorPixels);
+        ctx.putImageData(im, 0, 0);
+        if (_impPreviewImg) _impPreviewImg.src = cv.toDataURL("image/png");
+        buildImpostorMesh();
+        infoEl.textContent =
+          "Tree impostor atlas baked: " +
+          IMP.grid * IMP.grid +
+          " views, " +
+          atlasSize +
+          "px (" +
+          Math.floor(atlasSize / IMP.grid) +
+          "px/cell)";
+      }
+
+      let impostorMesh = null;
+      let impUniforms = null;
+      let _impShow = true;
+      const IMPSWAP = { enabled: false, startDist: 40, endDist: 80 };
+
+      // Build the far-LOD billboard from the baked atlas, standing it beside the
+      // real tree for comparison. UNLIT (the stylized lighting is baked in).
+      function buildImpostorMesh() {
+        if (!impostorResult) return;
+        if (impostorMesh) {
+          scene.remove(impostorMesh);
+          impostorMesh.geometry.dispose();
+          impostorMesh = null;
+        }
+        const flats = makeFlatAuxTextures();
+        const built = createImpostorMaterials(
+          {
+            colorTex: impostorResult.colorTex,
+            normalTex: flats.normalTex,
+            rmTex: flats.rmTex,
+            depthTex: flats.depthTex,
+          },
+          {
+            impostorScale: impostorResult.radius,
+            gridVal: IMP.grid,
+            atlasSize: impostorResult.atlasSize,
+            cellPad: impostorResult.cellPad,
+            fullOctahedral: IMP.fullOctahedral,
+          },
+        );
+        impUniforms = built.uniforms;
+        impUniforms.uUnlit.value = 0; // RELIGHT: albedo lit live by the scene sun (day/night)
+        built.mainMat.envMapIntensity = 0; // match leaves (they ignore env) -> sun+hemi only, no double sky tint
+
+        const R = impostorResult.radius;
+        const gap = 2 * R + 4;
+        impostorMesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(1, 1),
+          built.mainMat,
+        );
+        impostorMesh.position.set(
+          impostorResult.center.x + gap,
+          impostorResult.center.y,
+          impostorResult.center.z,
+        );
+        impostorMesh.scale.setScalar(2 * R);
+        impostorMesh.frustumCulled = false;
+        impUniforms.uCenter.value.copy(impostorMesh.position);
+        scene.add(impostorMesh);
+        infoEl.textContent =
+          "Impostor placed beside the tree (orbit to compare).";
+      }
+
+      // Per-frame placement + LOD crossfade for the impostor billboard.
+      // Priority: LOD-preview 4th column > distance swap (overlay) > compare (beside).
+      function updateImpostorLod() {
+        if (!impostorMesh || !impostorResult) return;
+        const c = impostorResult.center;
+        const trunk = trunkRoot || defaultTrunk;
+        if (lodPreview) {
+          impostorMesh.position.set(LOD_SPACING * 2, c.y, c.z);
+          impUniforms.uCenter.value.copy(impostorMesh.position);
+          impUniforms.uFade.value = 1;
+          impostorMesh.visible = true;
+          return;
+        }
+        if (IMPSWAP.enabled) {
+          impostorMesh.position.set(c.x, c.y, c.z); // overlay the real tree
+          impUniforms.uCenter.value.copy(impostorMesh.position);
+          const dx = camera.position.x - c.x;
+          const dy = camera.position.y - c.y;
+          const dz = camera.position.z - c.z;
+          const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          const t = THREE.MathUtils.smoothstep(
+            d,
+            IMPSWAP.startDist,
+            IMPSWAP.endDist,
+          );
+          impUniforms.uFade.value = t; // impostor dithers in as you pull away
+          impostorMesh.visible = t > 0.001;
+          const nearOn = t < 0.999; // near tree hard-cut once impostor is solid
+          if (leavesMesh) leavesMesh.visible = nearOn;
+          if (trunk) trunk.visible = nearOn && !params.bushMode;
+          return;
+        }
+        // Compare mode: stand beside the tree, fully solid.
+        if (leavesMesh) leavesMesh.visible = true;
+        if (trunk) trunk.visible = !params.bushMode;
+        impostorMesh.position.set(
+          c.x + 2 * impostorResult.radius + 4,
+          c.y,
+          c.z,
+        );
+        impUniforms.uCenter.value.copy(impostorMesh.position);
+        impUniforms.uFade.value = 1;
+        impostorMesh.visible = _impShow;
+      }
+
+      // ─── UI ──────────────────────────────────────────────────────────────────────
+      const uiRoot = document.getElementById("ui-scroll");
+      const CLUSTER_COLORS = [
+        "yellow",
+        "cyan",
+        "orange",
+        "magenta",
+        "green",
+        "blue",
+      ];
+      const rebuildCluster = () => {
+        scheduleUndo();
+        buildFoliage(true);
+      };
+
+      const quickBody = _section(uiRoot, "Quick Presets", true);
+      SAVED_TREE_PRESETS.forEach((entry) => {
+        _button(quickBody, {
+          title: entry.label,
+          onClick: () => {
+            loadSavedPreset(entry).catch((err) => {
+              infoEl.textContent = `Failed to load ${entry.label}: ${err.message}`;
+            });
+          },
+        });
+      });
+
+      _separator(uiRoot);
+      const lodBody = _section(uiRoot, "LOD Preview", true);
+      _toggle(lodBody, params, "lodPreview", {
+        label: "Show LOD side-by-side",
+        onChange: (ev) => toggleLodPreview(ev.value),
+      });
+      _separator(lodBody);
+      _slider(lodBody, params, "lodDist1", {
+        label: "LOD0 → LOD1 dist",
+        min: 20,
+        max: 300,
+        step: 5,
+        onChange: () => updateLodLabels(),
+      });
+      _slider(lodBody, params, "lodDist2", {
+        label: "LOD1 → LOD2 dist",
+        min: 50,
+        max: 600,
+        step: 10,
+        onChange: () => updateLodLabels(),
+      });
+      _separator(lodBody);
+      _info(lodBody, "LOD1 leaves", () => String(params.lod1Leaves));
+      _info(lodBody, "LOD2 leaves", () => String(params.lod2Leaves));
+
+      const worldBody = _section(uiRoot, "World Lighting (v2 sky)", true);
+      const worldUi = { enabled: lightingMode === "world" };
+      _toggle(worldBody, worldUi, "enabled", {
+        label: "World preview",
+        onChange: (ev) => {
+          lightingMode = ev.value ? "world" : "studio";
+          applyLightingMode();
+        },
+      });
+      _separator(worldBody);
+      _todHandle = _slider(worldBody, PROC_SKY, "timeOfDay", {
+        label: "Time of day",
+        min: 0,
+        max: 24,
+        step: 0.1,
+      });
+      _toggle(worldBody, PROC_SKY, "autoAdvance", { label: "Auto day cycle" });
+      _slider(worldBody, PROC_SKY, "daySpeed", {
+        label: "Day speed (h/s)",
+        min: 0.05,
+        max: 4,
+        step: 0.05,
+      });
+      _separator(worldBody);
+      _slider(worldBody, worldLight, "exposure", {
+        label: "Exposure",
+        min: 0.1,
+        max: 2,
+        step: 0.01,
+        onChange: (ev) => {
+          if (lightingMode === "world") renderer.toneMappingExposure = ev.value;
+        },
+      });
+      _toggle(worldBody, PROC_SKY, "scatter", { label: "Atmospheric scatter" });
+      _slider(worldBody, worldLight, "dirIntensity", {
+        label: "Sun intensity",
+        min: 0,
+        max: 6,
+        step: 0.05,
+      });
+      _slider(worldBody, worldLight, "hemiIntensity", {
+        label: "Sky fill (ambient)",
+        min: 0,
+        max: 3,
+        step: 0.05,
+      });
+      _slider(worldBody, worldLight, "envIntensity", {
+        label: "Sky reflections",
+        min: 0,
+        max: 2,
+        step: 0.05,
+        onChange: () => {
+          if (lightingMode === "world")
+            scene.environmentIntensity = worldLight.envIntensity;
+        },
+      });
+      _separator(worldBody);
+      _toggle(worldBody, worldFog, "enabled", {
+        label: "World fog (dome haze)",
+      });
+      _slider(worldBody, worldFog, "density", {
+        label: "Fog density",
+        min: 0,
+        max: 0.003,
+        step: 0.0001,
+      });
+      _slider(worldBody, worldFog, "hazeHeight", {
+        label: "Fog height",
+        min: 0.02,
+        max: 0.6,
+        step: 0.01,
+      });
+      _color(worldBody, worldFog, "color", { label: "Fog colour" });
+
+      const trunkBody = _section(uiRoot, "Trunk", true);
+      _toggle(trunkBody, params, "bushMode", {
+        label: "Bush mode (no trunk)",
+        onChange: (ev) => {
+          pushUndo();
+          applyBushMode(ev.value);
+        },
+      });
+      _separator(trunkBody);
+      buildTrunkPicker(trunkBody);
+      _separator(trunkBody);
+      _button(trunkBody, {
+        title: "Load Custom Trunk GLB (LOD0)",
+        onClick: () => {
+          const i = document.createElement("input");
+          i.type = "file";
+          i.accept = ".glb,.gltf";
+          i.onchange = () => i.files[0] && loadTrunk(i.files[0]);
+          i.click();
+        },
+      });
+      _button(trunkBody, {
+        title: "Load Custom Trunk GLB (LOD1 — decimated)",
+        onClick: () => {
+          const i = document.createElement("input");
+          i.type = "file";
+          i.accept = ".glb,.gltf";
+          i.onchange = () => i.files[0] && loadTrunkLod1(i.files[0]);
+          i.click();
+        },
+      });
+      _slider(trunkBody, params, "trunkScale", {
+        label: "Trunk scale",
+        min: 0.01,
+        max: 8,
+        step: 0.01,
+        onChange: (ev) => {
+          trunkScale = ev.value;
+          (trunkRoot || defaultTrunk).scale.setScalar(ev.value);
+          if (trunkLod1Root) trunkLod1Root.scale.setScalar(ev.value);
+          if (lodPreview) buildFoliage(true);
+          scheduleUndo();
+        },
+      });
+      _info(trunkBody, "LOD0 triangles", () => String(params.trunkTris));
+      _info(trunkBody, "LOD1 triangles", () => String(params.trunkLod1Tris));
+
+      // Procedural bark material (no texture needed) — applied to default + GLB trunks.
+      const trunkMatBody = _section(trunkBody, "Trunk Material", false);
+      _toggle(trunkMatBody, params, "useGlbTrunkMat", {
+        label: "Use GLB material",
+        onChange: () => {
+          applyTrunkMatChoice();
+          if (lodPreview) buildFoliage(true);
+          scheduleUndo();
+        },
+      });
+      _color(trunkMatBody, params, "trunkBotColor", {
+        label: "Base (bottom)",
+        onChange: (ev) => {
+          uTrunkBot.value.set(ev.value);
+          scheduleUndo();
+        },
+      });
+      _color(trunkMatBody, params, "trunkTopColor", {
+        label: "Top",
+        onChange: (ev) => {
+          uTrunkTop.value.set(ev.value);
+          scheduleUndo();
+        },
+      });
+      _slider(trunkMatBody, params, "trunkGradHeight", {
+        label: "Gradient height",
+        min: 0.5,
+        max: 30,
+        step: 0.5,
+        onChange: (ev) => {
+          uTrunkGradH.value = ev.value;
+          scheduleUndo();
+        },
+      });
+      _slider(trunkMatBody, params, "trunkRoughness", {
+        label: "Roughness",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        onChange: (ev) => {
+          uTrunkRough.value = ev.value;
+          scheduleUndo();
+        },
+      });
+
+      const leafTexBody = _section(uiRoot, "Leaf Texture", true);
+      buildTexGallery(leafTexBody);
+      _button(leafTexBody, {
+        title: "Load Custom PNG / JPG",
+        onClick: () => {
+          const i = document.createElement("input");
+          i.type = "file";
+          i.accept = "image/*";
+          i.onchange = () => {
+            if (i.files[0]) loadLeafTexFromFile(i.files[0]);
+          };
+          i.click();
+        },
+      });
+      _button(leafTexBody, {
+        title: "Reset to solid (no texture)",
+        onClick: () => {
+          leafMapNode.value = new THREE.Texture();
+          activeLeafTexPath = "";
+          params.leafTexFile = "";
+          updateGallerySelection();
+        },
+      });
+      _slider(leafTexBody, params, "alphaCutoff", {
+        label: "Alpha cutoff",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        onChange: (ev) => {
+          uAlphaCutoff.value = ev.value;
+          scheduleUndo();
+        },
+      });
+
+      const atlasBody = _section(
+        uiRoot,
+        "Leaf Atlas (mask, for open world)",
+        true,
+      );
+      {
+        const note = document.createElement("div");
+        note.className = "tex-gallery-label";
+        note.textContent =
+          "Bakes the 6 built-in leaf masks into one 1024px atlas (4x4 / 256px cells, gutter + dilation).";
+        atlasBody.appendChild(note);
+        _atlasPreviewImg = document.createElement("img");
+        _atlasPreviewImg.style.cssText =
+          "width:100%;border:1px solid var(--border);border-radius:4px;margin:4px 0;image-rendering:pixelated;min-height:60px;background-color:#2a2a2a;background-image:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%);background-size:16px 16px;";
+        atlasBody.appendChild(_atlasPreviewImg);
+      }
+      _button(atlasBody, {
+        title: "Bake atlas (built-in masks)",
+        onClick: () => bakeLeafAtlas(),
+      });
+      _button(atlasBody, {
+        title: "Download atlas PNG",
+        onClick: downloadAtlasPng,
+      });
+      _button(atlasBody, {
+        title: "Download cell map JSON",
+        onClick: downloadAtlasMap,
+      });
+      _separator(atlasBody);
+      {
+        _toggle(atlasBody, atlasUi, "use", {
+          label: "Use atlas on tree",
+          onChange: (ev) => {
+            const ok = useAtlas(ev.value);
+            if (!ok) {
+              atlasUi.use = false;
+              uiRefresh();
+            }
+          },
+        });
+        _slider(atlasBody, atlasUi, "cell", {
+          label: "Cell index (0-5)",
+          min: 0,
+          max: 15,
+          step: 1,
+          onChange: (ev) => {
+            if (uUseAtlas.value > 0.5) setAtlasCell(ev.value | 0);
+          },
+        });
+      }
+
+      const impBody = _section(uiRoot, "Impostor (octahedral, far-LOD)", false);
+      {
+        const note = document.createElement("div");
+        note.className = "tex-gallery-label";
+        note.textContent =
+          "Bakes trunk + foliage into an octahedral color atlas (the far-LOD billboard source).";
+        impBody.appendChild(note);
+        _impPreviewImg = document.createElement("img");
+        _impPreviewImg.style.cssText =
+          "width:100%;border:1px solid var(--border);border-radius:4px;margin:4px 0;min-height:60px;background-color:#2a2a2a;background-image:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%);background-size:16px 16px;";
+        impBody.appendChild(_impPreviewImg);
+      }
+      _slider(impBody, IMP, "grid", {
+        label: "Views / side",
+        min: 4,
+        max: 16,
+        step: 1,
+      });
+      _slider(impBody, IMP, "atlasSize", {
+        label: "Atlas size",
+        min: 1024,
+        max: 8192,
+        step: 1024,
+      });
+      _toggle(impBody, IMP, "fullOctahedral", { label: "Full octahedral" });
+      _slider(impBody, IMP, "bakeLight", {
+        label: "Albedo brightness",
+        min: 0.5,
+        max: 6,
+        step: 0.1,
+      });
+      _button(impBody, {
+        title: "Bake tree impostor atlas",
+        onClick: () => bakeTreeImpostor(),
+      });
+      {
+        const impVis = { show: true };
+        _toggle(impBody, impVis, "show", {
+          label: "Show impostor",
+          onChange: (ev) => {
+            _impShow = ev.value;
+          },
+        });
+      }
+      _separator(impBody);
+      _toggle(impBody, IMPSWAP, "enabled", { label: "Distance LOD swap" });
+      _slider(impBody, IMPSWAP, "startDist", {
+        label: "Swap start dist",
+        min: 5,
+        max: 200,
+        step: 1,
+      });
+      _slider(impBody, IMPSWAP, "endDist", {
+        label: "Swap end dist",
+        min: 5,
+        max: 300,
+        step: 1,
+      });
+
+      const allBody = _section(uiRoot, "All Clusters", false);
+      _slider(allBody, params, "canopyScale", {
+        label: "Canopy scale",
+        min: 0.1,
+        max: 4,
+        step: 0.01,
+        onChange: rebuildCluster,
+      });
+
+      clusterDefs.forEach((c, ci) => {
+        const cBody = _section(
+          uiRoot,
+          `Cluster ${ci + 1} (${CLUSTER_COLORS[ci]})`,
+          ci === 0,
+        );
+        _toggle(cBody, c, "enabled", {
+          label: "Enabled",
+          onChange: () => {
+            scheduleUndo();
+            buildFoliage(true);
+          },
+        });
+        _button(cBody, {
+          title: "Duplicate to next empty slot",
+          onClick: () => {
+            const target = clusterDefs.findIndex(
+              (cc, ii) => ii > ci && !cc.enabled,
+            );
+            if (target < 0) {
+              infoEl.textContent = "No empty slot available";
+              return;
+            }
+            pushUndo();
+            Object.assign(clusterDefs[target], { ...c });
+            clusterDefs[target].x += 0.5;
+            clusterDefs[target].enabled = true;
+            buildFoliage(true);
+            uiRefresh();
+            infoEl.textContent = `Duplicated cluster ${ci + 1} → ${target + 1}`;
+          },
+        });
+        _separator(cBody);
+        _slider(cBody, c, "x", {
+          label: "X",
+          min: -10,
+          max: 10,
+          step: 0.05,
+          onChange: rebuildCluster,
+        });
+        _slider(cBody, c, "y", {
+          label: "Y",
+          min: 0,
+          max: 20,
+          step: 0.05,
+          onChange: rebuildCluster,
+        });
+        _slider(cBody, c, "z", {
+          label: "Z",
+          min: -10,
+          max: 10,
+          step: 0.05,
+          onChange: rebuildCluster,
+        });
+        _separator(cBody);
+        _slider(cBody, c, "rx", {
+          label: "Radius X",
+          min: 0.2,
+          max: 10,
+          step: 0.05,
+          onChange: rebuildCluster,
+        });
+        _slider(cBody, c, "rz", {
+          label: "Radius Z",
+          min: 0.2,
+          max: 10,
+          step: 0.05,
+          onChange: rebuildCluster,
+        });
+        _slider(cBody, c, "ry", {
+          label: "Radius Y",
+          min: 0.2,
+          max: 8,
+          step: 0.05,
+          onChange: rebuildCluster,
+        });
+        _slider(cBody, c, "scale", {
+          label: "Cluster scale",
+          min: 0.1,
+          max: 4,
+          step: 0.01,
+          onChange: rebuildCluster,
+        });
+        _slider(cBody, c, "leanX", {
+          label: "Lean X",
+          min: -60,
+          max: 60,
+          step: 1,
+          onChange: rebuildCluster,
+        });
+        _slider(cBody, c, "leanZ", {
+          label: "Lean Z",
+          min: -60,
+          max: 60,
+          step: 1,
+          onChange: rebuildCluster,
+        });
+        _separator(cBody);
+        _slider(cBody, c, "count", {
+          label: "Leaf count",
+          min: 10,
+          max: 2000,
+          step: 10,
+          onChange: rebuildCluster,
+        });
+        _slider(cBody, c, "leafSize", {
+          label: "Leaf size",
+          min: 0.05,
+          max: 4,
+          step: 0.05,
+          onChange: rebuildCluster,
+        });
+        _slider(cBody, c, "scaleVar", {
+          label: "Scale variation",
+          min: 0,
+          max: 0.9,
+          step: 0.01,
+          onChange: rebuildCluster,
+        });
+        _separator(cBody);
+        _slider(cBody, c, "shell", {
+          label: "Shell bias",
+          min: 0,
+          max: 1,
+          step: 0.01,
+          onChange: rebuildCluster,
+        });
+        _slider(cBody, c, "shellThick", {
+          label: "Shell thickness",
+          min: 0.05,
+          max: 0.98,
+          step: 0.01,
+          onChange: rebuildCluster,
+        });
+        _slider(cBody, c, "tiltMax", {
+          label: "Max tilt",
+          min: 0,
+          max: 90,
+          step: 1,
+          onChange: rebuildCluster,
+        });
+      });
+
+      const matBody = _section(uiRoot, "Leaf Colors", false);
+      _color(matBody, params, "bottomColor", {
+        label: "Base color",
+        onChange: (ev) => {
+          uBottomColor.value.set(ev.value);
+          scheduleUndo();
+        },
+      });
+      _color(matBody, params, "topColor", {
+        label: "Top color",
+        onChange: (ev) => {
+          uTopColor.value.set(ev.value);
+          scheduleUndo();
+        },
+      });
+      _slider(matBody, params, "colorVar", {
+        label: "Tint variation",
+        min: 0,
+        max: 0.6,
+        step: 0.01,
+        onChange: (ev) => {
+          uColorVar.value = ev.value;
+          scheduleUndo();
+        },
+      });
+      _slider(matBody, params, "roughness", {
+        label: "Roughness",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        onChange: (ev) => {
+          if (leavesMesh) leavesMesh.material.roughness = ev.value;
+          scheduleUndo();
+        },
+      });
+
+      const lightBody = _section(uiRoot, "SSS & Rim Light", false);
+      _color(lightBody, params, "sssColor", {
+        label: "SSS color",
+        onChange: (ev) => {
+          uSssColor.value.set(ev.value);
+          scheduleUndo();
+        },
+      });
+      _slider(lightBody, params, "sssStr", {
+        label: "SSS strength",
+        min: 0,
+        max: 2,
+        step: 0.01,
+        onChange: (ev) => {
+          uSssStr.value = ev.value;
+          scheduleUndo();
+        },
+      });
+      _slider(lightBody, params, "sssPow", {
+        label: "SSS falloff",
+        min: 0.5,
+        max: 10,
+        step: 0.1,
+        onChange: (ev) => {
+          uSssPow.value = ev.value;
+          scheduleUndo();
+        },
+      });
+      _separator(lightBody);
+      _color(lightBody, params, "rimColor", {
+        label: "Rim color",
+        onChange: (ev) => {
+          uRimColor.value.set(ev.value);
+          scheduleUndo();
+        },
+      });
+      _slider(lightBody, params, "rimStr", {
+        label: "Rim strength",
+        min: 0,
+        max: 2,
+        step: 0.01,
+        onChange: (ev) => {
+          uRimStr.value = ev.value;
+          scheduleUndo();
+        },
+      });
+      _slider(lightBody, params, "rimPow", {
+        label: "Rim sharpness",
+        min: 0.5,
+        max: 10,
+        step: 0.1,
+        onChange: (ev) => {
+          uRimPow.value = ev.value;
+          scheduleUndo();
+        },
+      });
+      _separator(lightBody);
+      _slider(lightBody, params, "aoStr", {
+        label: "AO strength",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        onChange: (ev) => {
+          uAoStr.value = ev.value;
+          scheduleUndo();
+        },
+      });
+      _separator(lightBody);
+      _slider(lightBody, params, "normalBias", {
+        label: "Normal bias (sphere)",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        onChange: (ev) => {
+          uNormalBias.value = ev.value;
+          scheduleUndo();
+        },
+      });
+      _slider(lightBody, params, "leafWarp", {
+        label: "Leaf warp",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        onChange: (ev) => {
+          uLeafWarp.value = ev.value;
+          scheduleUndo();
+        },
+      });
+
+      const windBody = _section(uiRoot, "Wind", false);
+      _slider(windBody, params, "windSpeed", {
+        label: "Speed",
+        min: 0,
+        max: 5,
+        step: 0.05,
+        onChange: (ev) => {
+          uWindSpeed.value = ev.value;
+          scheduleUndo();
+        },
+      });
+      _slider(windBody, params, "windStr", {
+        label: "Strength",
+        min: 0,
+        max: 0.8,
+        step: 0.005,
+        onChange: (ev) => {
+          uWindStr.value = ev.value;
+          scheduleUndo();
+        },
+      });
+      _slider(windBody, params, "windMicro", {
+        label: "Micro sway",
+        min: 0,
+        max: 0.3,
+        step: 0.005,
+        onChange: (ev) => {
+          uWindMicro.value = ev.value;
+          scheduleUndo();
+        },
+      });
+
+      const bbBody = _section(uiRoot, "Billboard foliage", false);
+      _toggle(bbBody, params, "billboardLeaves", {
+        label: "Face camera",
+        onChange: () => {
+          scheduleUndo();
+          buildFoliage(true);
+        },
+      });
+      _toggle(bbBody, params, "billboardYawOnly", {
+        label: "Yaw only (stable)",
+        onChange: () => {
+          uBillboardYaw.value = params.billboardYawOnly ? 1.0 : 0.0;
+          scheduleUndo();
+        },
+      });
+
+      const sceneBody = _section(uiRoot, "Scene", false);
+      _color(sceneBody, params, "bgColor", {
+        label: "Sky color",
+        onChange: (ev) => {
+          if (scene.background) scene.background.set(ev.value);
+          if (scene.fog) scene.fog.color.set(ev.value);
+        },
+      });
+      _slider(sceneBody, params, "sunIntensity", {
+        label: "Sun intensity",
+        min: 0,
+        max: 6,
+        step: 0.05,
+        onChange: (ev) => {
+          sun.intensity = ev.value;
+        },
+      });
+      _slider(sceneBody, params, "ambientInt", {
+        label: "Ambient light",
+        min: 0,
+        max: 3,
+        step: 0.05,
+        onChange: (ev) => {
+          hemi.intensity = ev.value;
+        },
+      });
+      _separator(sceneBody);
+      const syncSun = () => {
+        sun.position.set(params.sunX, params.sunY, params.sunZ);
+        uSunDir.value.set(params.sunX, params.sunY, params.sunZ);
+        uSunDir.value.normalize();
+      };
+      _slider(sceneBody, params, "sunX", {
+        label: "Sun X",
+        min: -20,
+        max: 20,
+        step: 0.5,
+        onChange: syncSun,
+      });
+      _slider(sceneBody, params, "sunY", {
+        label: "Sun Y",
+        min: 0.5,
+        max: 20,
+        step: 0.5,
+        onChange: syncSun,
+      });
+      _slider(sceneBody, params, "sunZ", {
+        label: "Sun Z",
+        min: -20,
+        max: 20,
+        step: 0.5,
+        onChange: syncSun,
+      });
+      _separator(sceneBody);
+      _toggle(sceneBody, params, "showFog", {
+        label: "Show fog",
+        onChange: (ev) => {
+          scene.fog = ev.value
+            ? new THREE.FogExp2(params.bgColor, 0.018)
+            : null;
+        },
+      });
+      _toggle(sceneBody, params, "showGround", {
+        label: "Show ground",
+        onChange: (ev) => {
+          ground.visible = ev.value;
+        },
+      });
+      _toggle(sceneBody, params, "showHelpers", {
+        label: "Show helpers (draggable)",
+        onChange: (ev) => {
+          showHelpers = ev.value;
+          updateClusterHelpers();
+        },
+      });
+
+      const statsBody = _section(uiRoot, "Stats", true);
+      _info(statsBody, "Trunk LOD0 tris", () => String(params.trunkTris));
+      _info(statsBody, "Trunk LOD1 tris", () => String(params.trunkLod1Tris));
+      _info(statsBody, "LOD0 leaves", () => String(params.totalLeaves));
+      _info(statsBody, "LOD0 leaf tris", () => String(params.totalLeafTris));
+
+      _separator(uiRoot);
+      _button(uiRoot, {
+        title: "Rebuild Foliage",
+        onClick: () => buildFoliage(true),
+      });
+
+      _separator(uiRoot);
+      const presetBody = _section(uiRoot, "Save / Load", true);
+      _text(presetBody, params, "presetName", { label: "Preset name" });
+      _button(presetBody, {
+        title: "Save Preset to File",
+        onClick: savePreset,
+      });
+      _button(presetBody, {
+        title: "Load Preset from File",
+        onClick: () => {
+          const i = document.createElement("input");
+          i.type = "file";
+          i.accept = ".json";
+          i.onchange = () => i.files[0] && loadPresetFromFile(i.files[0]);
+          i.click();
+        },
+      });
+      _separator(presetBody);
+      _button(presetBody, {
+        title: "Copy to Clipboard",
+        onClick: () => {
+          const json = JSON.stringify(buildPresetData(), null, 2);
+          navigator.clipboard
+            .writeText(json)
+            .then(() => (infoEl.textContent = "Settings copied to clipboard!"))
+            .catch(() => {
+              const ta = document.createElement("textarea");
+              ta.value = json;
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand("copy");
+              document.body.removeChild(ta);
+              infoEl.textContent = "Settings copied!";
+            });
+        },
+      });
+
+      // ─── INITIAL BUILD ───────────────────────────────────────────────────────────
+      await preloadTrunkGlbs();
+      try {
+        await bakeTrunkPickerThumbnails();
+      } catch (err) {
+        console.warn("[Arborist] trunk thumbnail bake skipped:", err);
+      }
+      await loadStartupPreset();
+
+      // ─── RENDER LOOP ─────────────────────────────────────────────────────────────
+      const timer = new THREE.Timer();
+      renderer.setAnimationLoop(() => {
+        timer.update();
+        const dt = timer.getDelta();
+        uTime.value = timer.getElapsed();
+        if (lightingMode === "world")
+          driveWorldLighting(timer.getElapsed(), dt);
+        if (lightingMode === "world") updateEnvBake(dt);
+        if (impUniforms) impUniforms.uTime.value = timer.getElapsed();
+        updateImpostorLod();
+        controls.update();
+        renderer.render(scene, camera);
+      });
+
+      // ─── RESIZE ──────────────────────────────────────────────────────────────────
+      window.addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+    </script>
+  </body>
+</html>
