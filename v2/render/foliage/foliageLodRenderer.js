@@ -132,7 +132,14 @@ export class FoliageLodRenderer {
     // Per-instance scale; consulted by the shader's billboard path
     // (in non-billboard mode the matrix already carries scale; we still
     // upload aLeafScale per-instance to keep attribute layout consistent).
-    const scaleData = new Float32Array(cappedTotal);
+    // aLeafScale is a vec2: [x] = leaf size, [y] = canopy height fraction (0=bottom,
+    // 1=top) in trunk-LOCAL space (correct regardless of world placement OR scale;
+    // fixes the old shader heightFactor that saturated for trees not at origin).
+    // Packed together because WebGPU caps vertex buffers at 8 — a separate height
+    // attribute would be the 9th and overflow the limit.
+    const scaleData = new Float32Array(cappedTotal * 2);
+    const _bYMin = (preset.bounds && preset.bounds.yMin) ?? 0;
+    const _bRange = Math.max(((preset.bounds && preset.bounds.yMax) ?? 8) - _bYMin, 0.001);
 
     const im = new THREE.InstancedMesh(geo, preset.material, cappedTotal);
     im.count = cappedTotal;
@@ -183,7 +190,7 @@ export class FoliageLodRenderer {
           centerData[idx * 3 + 1] = this._tmpCenter.y;
           centerData[idx * 3 + 2] = this._tmpCenter.z;
           // Effective size = tree scale × per-leaf base size.
-          scaleData[idx] = scaleSrc[li] * t.scale;
+          scaleData[idx * 2] = scaleSrc[li] * t.scale;
         } else {
           const off = li * 16;
           this._tmpMat.fromArray(localMats, off);
@@ -198,13 +205,17 @@ export class FoliageLodRenderer {
           centerData[idx * 3]     = this._tmpCenter.x;
           centerData[idx * 3 + 1] = this._tmpCenter.y;
           centerData[idx * 3 + 2] = this._tmpCenter.z;
-          scaleData[idx] = scaleSrc[li]; // not consulted by non-billboard shader
+          scaleData[idx * 2] = scaleSrc[li]; // size — not consulted by non-billboard shader
         }
         randData[idx * 2] = randSrc[li * 2];
         randData[idx * 2 + 1] = randSrc[li * 2 + 1];
         treeCenterData[idx * 3]     = tcx;
         treeCenterData[idx * 3 + 1] = tcy;
         treeCenterData[idx * 3 + 2] = tcz;
+        // centerSrc is the leaf's trunk-LOCAL centre -> stable height fraction,
+        // packed into aLeafScale.y (idx*2+1).
+        const _leafLocalY = centerSrc[li * 3 + 1];
+        scaleData[idx * 2 + 1] = Math.min(1, Math.max(0, (_leafLocalY - _bYMin) / _bRange));
       }
     }
 
@@ -213,7 +224,7 @@ export class FoliageLodRenderer {
     geo.setAttribute("aRand", new THREE.InstancedBufferAttribute(randData.slice(0, idx * 2), 2));
     geo.setAttribute("aLeafCenter", new THREE.InstancedBufferAttribute(centerData.slice(0, idx * 3), 3));
     geo.setAttribute("aTreeCenter", new THREE.InstancedBufferAttribute(treeCenterData.slice(0, idx * 3), 3));
-    geo.setAttribute("aLeafScale", new THREE.InstancedBufferAttribute(scaleData.slice(0, idx), 1));
+    geo.setAttribute("aLeafScale", new THREE.InstancedBufferAttribute(scaleData.slice(0, idx * 2), 2));
 
     return im;
   }

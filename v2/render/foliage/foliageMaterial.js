@@ -89,7 +89,13 @@ export function createFoliageMaterial(opts = {}) {
   const treeCenterW = modelWorldMatrix.mul(vec4(aTreeCenter, 1)).xyz;
   // Per-leaf size; only consulted in billboard mode (instance matrices are
   // pure translation there, so the size lives on the attribute instead).
-  const aLeafScale = attribute("aLeafScale", "float");
+  // x = per-leaf size (billboard mode); y = canopy height fraction (0=bottom,
+  // 1=top), computed in trunk-LOCAL space by the renderer so it's correct for
+  // trees placed at terrain height / any scale. Packed into ONE vec2 because
+  // WebGPU caps vertex buffers at 8 and the foliage geometry is already at the
+  // limit — a separate aHeightFactor attribute overflowed it (9 > 8).
+  const aLeafScale = attribute("aLeafScale", "vec2");
+  const aLeafSize = aLeafScale.x;
 
   const positionNode = Fn(() => {
     const phase     = aRand.x.mul(6.2832);
@@ -130,10 +136,10 @@ export function createFoliageMaterial(opts = {}) {
     // Camera-aligned quad from positionLocal; size comes from aLeafScale
     // (in billboard mode, instance matrices are pure translation so size
     // is NOT baked into the matrix).
-    const bbQuad = rRight.mul(positionLocal.x.mul(aLeafScale))
-      .add(rUp.mul(positionLocal.y.mul(aLeafScale)));
+    const bbQuad = rRight.mul(positionLocal.x.mul(aLeafSize))
+      .add(rUp.mul(positionLocal.y.mul(aLeafSize)));
     // World-space wind, scaled with leaf size.
-    const windWorld = wo.mul(aLeafScale);
+    const windWorld = wo.mul(aLeafSize);
     const bb3 = bbQuad.add(windWorld);
 
     // Non-billboard branch: keep wind in local space (existing v2 behavior).
@@ -173,10 +179,7 @@ export function createFoliageMaterial(opts = {}) {
   const colorNode = Fn(() => {
     const h1 = aRand.x;
     const h2 = aRand.y;
-    const heightFactor = clamp(
-      positionWorld.y.sub(u.yMin).div(max(u.yMax.sub(u.yMin), float(0.001))),
-      float(0), float(1)
-    );
+    const heightFactor = aLeafScale.y; // per-leaf, local-space (packed in aLeafScale.y)
     let col = mix(u.bottomColor, u.topColor, heightFactor);
     const varMul = h1.mul(u.colorVar.mul(2.0)).add(float(1.0).sub(u.colorVar));
     col = col.mul(varMul);

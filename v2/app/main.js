@@ -668,9 +668,9 @@ export async function startV2App(opts = {}) {
       if (needsFrustumUpdate) {
         _lastCsmMaxFar = cfg.maxFar;
         _lastCsmMargin = cfg.lightMargin;
+        csm.updateFrustums();
       }
       syncCascadeShadowSettings();
-      csm.updateFrustums();
     }
   }
 
@@ -6300,13 +6300,9 @@ export async function startV2App(opts = {}) {
     // Pre-warm foliage/billboard pipelines once when entering play (re-arm on exit
     // so world edits are recompiled). Fire-and-forget: compiles behind the scene
     // so first-draw shader stalls don't hit during flight.
-    if (playMode.active) {
-      if (!_prewarmedForPlay) {
-        _prewarmedForPlay = true;
-        prewarmLazyPipelines();
-      }
-    } else if (_prewarmedForPlay) {
-      _prewarmedForPlay = false;
+    if (playMode.active && !_prewarmedForPlay) {
+      _prewarmedForPlay = true;
+      prewarmLazyPipelines();
     }
     if (playMode.active) {
       actorSystem.updatePlay(dtSec, playMode.playerPos);
