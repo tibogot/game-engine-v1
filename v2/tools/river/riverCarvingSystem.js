@@ -308,17 +308,51 @@ export class RiverCarvingSystem {
   // Terrain carving
   // ---------------------------------------------------------------------------
 
-  /** Build the polyline that lowerTerrainAlongPoints will carve, with Y = carve floor. */
+  /**
+   * Build the XZ polyline for the river path. Y values are a linear slope
+   * between the first and last control point minus carveDepth — this gives a
+   * smooth, bump-free channel floor even when the terrain underneath is uneven.
+   */
   _getCarvePath(seg) {
     if (seg.points.length < 2) return null;
     const rp = this.toolState.river2;
     const curve = new THREE.CatmullRomCurve3(seg.points, !!rp.closed, "catmullrom", 0.5);
     const count = Math.max(60, rp.segments);
-    return curve.getSpacedPoints(count).map((p) => ({
+    const splinePts = curve.getSpacedPoints(count);
+    const startY = seg.points[0].y - rp.carveDepth;
+    const endY = seg.points[seg.points.length - 1].y - rp.carveDepth;
+    const last = splinePts.length - 1;
+    return splinePts.map((p, i) => ({
       x: p.x,
-      y: p.y - rp.carveDepth,
+      y: startY + (endY - startY) * (i / Math.max(1, last)),
       z: p.z,
     }));
+  }
+
+  /**
+   * For a given world XZ position, return the interpolated channel-floor Y
+   * from the nearest segment of `pts`.
+   */
+  _interpolatePathY(pts, wx, wz) {
+    let bestDist = Infinity;
+    let bestY = pts[0].y;
+    for (let k = 0; k < pts.length - 1; k++) {
+      const ax = pts[k].x, az = pts[k].z;
+      const bx = pts[k + 1].x, bz = pts[k + 1].z;
+      const dx = bx - ax, dz = bz - az;
+      const lenSq = dx * dx + dz * dz;
+      let t = 0;
+      if (lenSq > 1e-8) {
+        t = Math.max(0, Math.min(1, ((wx - ax) * dx + (wz - az) * dz) / lenSq));
+      }
+      const ex = wx - (ax + dx * t), ez = wz - (az + dz * t);
+      const d = Math.sqrt(ex * ex + ez * ez);
+      if (d < bestDist) {
+        bestDist = d;
+        bestY = pts[k].y * (1 - t) + pts[k + 1].y * t;
+      }
+    }
+    return bestY;
   }
 
   /**
@@ -344,7 +378,8 @@ export class RiverCarvingSystem {
 
   /**
    * Restore base terrain then re-apply every segment's carve in order.
-   * Also triggers terrain chunk re-meshing for all affected chunks.
+   * Uses conformToRoadSurface so the channel floor is fully flattened
+   * (both raised and lowered) to the smooth target height.
    */
   _reapplyAllCarves() {
     if (!this._baseTerrainSnapshot) return;
@@ -361,7 +396,17 @@ export class RiverCarvingSystem {
     for (const seg of this.segments) {
       const pts = this._getCarvePath(seg);
       if (!pts) continue;
-      this.terrainStore.lowerTerrainAlongPoints(pts, rp.width * 0.5, rp.carveShoulder, dirtyChunks);
+      // conformToRoadSurface flattens the channel floor exactly to the target
+      // height (raise + lower), then blends back to terrain in the shoulder.
+      const footprint = [{ pts }];
+      this.terrainStore.conformToRoadSurface(
+        footprint,
+        (x, z) => this._interpolatePathY(pts, x, z),
+        rp.width * 0.5,
+        0,              // embedDepth=0: Y already has carveDepth baked in
+        rp.carveShoulder,
+        dirtyChunks,
+      );
     }
 
     this.markTerrainDirty(dirtyChunks);
