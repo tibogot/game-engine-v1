@@ -259,7 +259,7 @@ function _snowWheelData(playMode) {
     };
   }
 
-  if (mode === "capsule" || mode === "char") {
+  if (mode === "capsule" || mode === "char" || mode === "husky") {
     /** Single foot stamp in slot 0; other slots inactive. */
     const grounded = playMode.inAir ? 0 : 1;
     _snowWheelXZs[0] = playMode.playerPos.x;
@@ -286,6 +286,45 @@ function _snowWheelData(playMode) {
   return null;
 }
 
+/** Request raised WebGPU limits (must match three.js adapter options). */
+async function createWebGpuDevice() {
+  if (!navigator.gpu) return null;
+  const adapter = await navigator.gpu.requestAdapter({
+    featureLevel: "compatibility",
+  });
+  if (!adapter) return null;
+
+  const requiredLimits = {};
+  for (const key of [
+    "maxSampledTexturesPerShaderStage",
+    "maxSamplersPerShaderStage",
+  ]) {
+    if (adapter.limits[key] > 16) requiredLimits[key] = adapter.limits[key];
+  }
+
+  const requiredFeatures = [...adapter.features];
+
+  try {
+    const device = await adapter.requestDevice({
+      requiredFeatures,
+      requiredLimits,
+    });
+    console.info(
+      "[V2] WebGPU device limits — samplers/stage:",
+      device.limits.maxSamplersPerShaderStage,
+      "textures/stage:",
+      device.limits.maxSampledTexturesPerShaderStage,
+    );
+    return device;
+  } catch (err) {
+    console.warn(
+      "[V2] WebGPU device with raised limits failed; using defaults.",
+      err,
+    );
+    return adapter.requestDevice({ requiredFeatures });
+  }
+}
+
 export async function startV2App(opts = {}) {
   const config = structuredClone(V2_CONFIG);
   if (opts.worldSize) config.world.size = opts.worldSize;
@@ -307,7 +346,11 @@ export async function startV2App(opts = {}) {
   );
   camera.position.set(160, 140, 180);
 
-  const renderer = new THREE.WebGPURenderer({ antialias: true });
+  const webGpuDevice = await createWebGpuDevice();
+  const renderer = new THREE.WebGPURenderer({
+    antialias: true,
+    ...(webGpuDevice ? { device: webGpuDevice } : {}),
+  });
   renderer.setPixelRatio(
     Math.min(window.devicePixelRatio, config.render.maxPixelRatio),
   );
@@ -1256,8 +1299,8 @@ export async function startV2App(opts = {}) {
     const d = new Uint8Array([0, 0, 0, 0]);
     const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
     t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
-    t.minFilter = THREE.LinearFilter;
-    t.magFilter = THREE.LinearFilter;
+    t.minFilter = THREE.NearestFilter;
+    t.magFilter = THREE.NearestFilter;
     t.needsUpdate = true;
     return t;
   })();
@@ -1541,44 +1584,77 @@ export async function startV2App(opts = {}) {
   const foliageLodRenderer = new FoliageLodRenderer(scene, config);
   const impostorRenderer = new ImpostorRenderer(scene, config);
 
-  // --- Impostor LOD3 Phase-1 test: bake a loaded slot's tree into an octahedral
-  // atlas and drop ONE billboard next to the world origin. Console-triggered:
-  //   __bakeImpostor(slotIdx)   (load a tree preset into that slot first)
-  async function _bakeImpostorTest(slotIdx = 0, optsOverride = {}) {
-    const preset = foliageLodRenderer.slotPresets?.[slotIdx];
-    if (!preset) {
-      console.warn(`[Impostor] slot ${slotIdx} has no foliage preset — load a tree preset into it first`);
-      return;
-    }
-    // Console-tunable: __bakeImpostor(0, { grid, atlasSize, fullOctahedral, bakeLight })
+  // --- Impostor LOD3: bake a loaded slot's tree into an octahedral atlas and
+  // register it as the far tier. Auto-baked when a preset loads (queued so a big
+  // restore doesn't freeze); also console-triggered: __bakeImpostor(slotIdx).
+  async function _bakeImpostorForSlot(slotIdx, optsOverride = {}) {
+    // Arborist tree = foliage preset (leaf cards) + trunk submeshes.
+    // Pure GLB tree = trunk submeshes ONLY (whole tree baked in one GLB, no
+    // separate leaves). Bush = foliage preset, no trunk. Bake whatever exists.
+    const preset = foliageLodRenderer.slotPresets?.[slotIdx] || null;
+    const trunkSubmeshes = treeLodRenderer.slotRender?.[slotIdx]?.lod0 || null;
+    if (!preset && !trunkSubmeshes) return false;
     const opts = { ...IMPOSTOR_BAKE, ...optsOverride };
     const trunkScale = toolState.treeSlots[slotIdx]?.baseScale ?? 1;
-    // One tree at origin at the slot's base scale (so leaves align with trunk).
-    const leafMesh = foliageLodRenderer._buildChunkSlotLod(
-      [{ x: 0, y: 0, z: 0, rotY: 0, scale: trunkScale, slotIdx }],
-      slotIdx,
-      0,
-    );
-    if (!leafMesh) {
-      console.warn(`[Impostor] slot ${slotIdx}: could not build leaf mesh`);
-      return;
+    let leafMesh = null;
+    let foliageUniforms = null;
+    if (preset) {
+      // One tree at origin at the slot's base scale (so leaves align with trunk).
+      leafMesh = foliageLodRenderer._buildChunkSlotLod(
+        [{ x: 0, y: 0, z: 0, rotY: 0, scale: trunkScale, slotIdx }],
+        slotIdx,
+        0,
+      );
+      foliageUniforms = preset.uniforms;
     }
-    const trunkSubmeshes = treeLodRenderer.slotRender?.[slotIdx]?.lod0 || null;
-    console.log(`[Impostor] Baking slot ${slotIdx} (trunkScale ${trunkScale})…`);
     const result = await bakeSlotImpostor(renderer, {
       trunkSubmeshes,
       leafMesh,
-      foliageUniforms: preset.uniforms,
+      foliageUniforms,
       trunkScale,
     }, opts);
-    leafMesh.geometry.dispose(); // bake-only clone
-    // Register as the slot's LOD3 far tier — trees past fadeOutDistance now draw
-    // as instanced billboards (one draw call for the whole slot).
+    if (leafMesh) leafMesh.geometry.dispose(); // bake-only clone
     impostorRenderer.setSlot(slotIdx, result, trunkScale, opts);
-    const fade = toolState.foliageLod?.fadeOutDistance ?? 600;
-    console.log(
-      `[Impostor] Slot ${slotIdx} registered as LOD3 (radius ${result.radius.toFixed(2)}). Paint trees & move past ${fade}m to see billboards replace the geometry.`,
-    );
+    return true;
+  }
+
+  // Deferred bake queue — one slot at a time, yielding a couple frames between,
+  // so loading/restoring several trees doesn't freeze on a burst of bakes.
+  const _impostorBakeQueue = [];
+  let _impostorBakeRunning = false;
+  async function _processImpostorBakeQueue() {
+    if (_impostorBakeRunning) return;
+    _impostorBakeRunning = true;
+    try {
+      while (_impostorBakeQueue.length) {
+        const slotIdx = _impostorBakeQueue.shift();
+        try {
+          const ok = await _bakeImpostorForSlot(slotIdx);
+          if (ok) console.log(`[Impostor] auto-baked LOD3 for slot ${slotIdx}`);
+        } catch (e) {
+          console.warn(`[Impostor] auto-bake slot ${slotIdx} failed:`, e);
+        }
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      }
+    } finally {
+      _impostorBakeRunning = false;
+      prewarmLazyPipelines(); // warm all the freshly-baked impostor pipelines once
+    }
+  }
+  function queueImpostorBake(slotIdx) {
+    if (!_impostorBakeQueue.includes(slotIdx)) _impostorBakeQueue.push(slotIdx);
+    _processImpostorBakeQueue();
+  }
+
+  // Manual re-bake from the console (with optional bake-option overrides).
+  async function _bakeImpostorTest(slotIdx = 0, optsOverride = {}) {
+    const ok = await _bakeImpostorForSlot(slotIdx, optsOverride);
+    if (!ok) {
+      console.warn(`[Impostor] slot ${slotIdx}: no foliage preset / leaf mesh — load a tree preset first`);
+      return;
+    }
+    prewarmLazyPipelines();
+    console.log(`[Impostor] Slot ${slotIdx} re-baked + registered as LOD3.`);
   }
   if (typeof window !== "undefined") window.__bakeImpostor = (i = 0, opts = {}) => _bakeImpostorTest(i, opts);
 
@@ -2648,7 +2724,7 @@ export async function startV2App(opts = {}) {
     onBorderMountainsRebuild: rebuildBorderMountains,
     onRampCleared: () => syncRampMarker(),
     onTerrainSurfaceChanged: (_terrainSurfaceChanged = () => {
-      applyTerrainSurfaceFromToolState();
+      invalidateSurfaceMaterials();
       rebuildCliffBlendMaterial();
       ui?.pane.refresh();
     }),
@@ -2708,7 +2784,10 @@ export async function startV2App(opts = {}) {
           submeshes,
           toolState.treeLod.castShadow,
         );
-        if (lod === 0) toolState.treeSlots[slotIdx].name = name;
+        if (lod === 0) {
+          toolState.treeSlots[slotIdx].name = name;
+          queueImpostorBake(slotIdx); // auto-bake LOD3 for the GLB tree
+        }
         const matchedUrl = await probeModelsForFile(file.name);
         if (matchedUrl) {
           const slot = toolState.treeSlots[slotIdx];
@@ -2762,6 +2841,7 @@ export async function startV2App(opts = {}) {
           }
 
           foliageLodRenderer.setSlotPreset(slotIdx, foliagePreset);
+          queueImpostorBake(slotIdx); // auto-bake the LOD3 far tier
 
           toolState.treeSlots[slotIdx].presetFile = file.name;
           toolState.treeSlots[slotIdx].name =
@@ -4332,6 +4412,7 @@ export async function startV2App(opts = {}) {
                     );
                   }
                   foliageLodRenderer.setSlotPreset(slotIdx, foliagePreset);
+                  queueImpostorBake(slotIdx); // auto-bake the LOD3 far tier on restore
                   console.log(
                     `[V2] Auto-loaded preset "${filename}" into slot ${slotIdx}`,
                   );
@@ -4368,6 +4449,7 @@ export async function startV2App(opts = {}) {
                     console.log(
                       `[V2] Restored tree slot ${slotIdx} LOD${l} from ${url}`,
                     );
+                    if (l === 0) queueImpostorBake(slotIdx); // auto-bake LOD3 (GLB)
                   } catch (err) {
                     console.error(
                       `[V2] Failed to restore tree slot ${slotIdx} LOD${l}:`,
@@ -6124,6 +6206,24 @@ export async function startV2App(opts = {}) {
           temp.push({ mesh: im, disposeGeo: false }); // shared geo — do NOT dispose
         }
       }
+      // Impostor LOD3: per-slot octahedral material; instanced PlaneGeometry that
+      // reads aImpCenter/aImpScale. Build a 1-instance off-screen proxy per baked
+      // slot so the impostor pipeline compiles here, not on first far-view.
+      for (let s = 0; s < impostorRenderer.slots.length; s++) {
+        const slot = impostorRenderer.slots[s];
+        if (!slot || !slot.material) continue;
+        const geo = new THREE.PlaneGeometry(1, 1);
+        geo.setAttribute("aImpCenter", new THREE.InstancedBufferAttribute(new Float32Array([0, -100000, 0]), 3));
+        geo.setAttribute("aImpScale", new THREE.InstancedBufferAttribute(new Float32Array([1]), 1));
+        const im = new THREE.InstancedMesh(geo, slot.material, 1);
+        im.frustumCulled = false;
+        im.castShadow = false;
+        im.setMatrixAt(0, _pwMat);
+        im.count = 1;
+        im.instanceMatrix.needsUpdate = true;
+        scene.add(im);
+        temp.push({ mesh: im, disposeGeo: true });
+      }
       camera.updateMatrixWorld();
       await renderer.compileAsync(scene, camera);
     } catch (e) {
@@ -6341,9 +6441,21 @@ export async function startV2App(opts = {}) {
     }
     const _pProps = performance.now();
     frameProbe.t.props += _pProps - _pStream;
-    treeLodRenderer.update(treeStore, camera, toolState.treeLod);
+    const _pTree0 = performance.now();
+    // Trunk + leaves + impostor all share the FOLIAGE LOD distances so the whole
+    // tree switches tiers together (the trunk's own lod0/lod1Distance are no
+    // longer used for distance — avoids the two-stage pop where the canopy
+    // changed LOD at 80m but the trunk held full detail to 120m).
+    treeLodRenderer.update(treeStore, camera, toolState.foliageLod);
+    const _pLeaf0 = performance.now();
     foliageLodRenderer.update(treeStore, camera, toolState.foliageLod);
+    const _pImp0 = performance.now();
     impostorRenderer.update(treeStore, camera, toolState.foliageLod);
+    const _pImp1 = performance.now();
+    impostorRenderer.setSunDir(sunDir.x, sunDir.y, sunDir.z); // relight match (day/night)
+    frameProbe.t.tree += _pLeaf0 - _pTree0;
+    frameProbe.t.leaf += _pImp0 - _pLeaf0;
+    frameProbe.t.impostor += _pImp1 - _pImp0;
     foliageLodRenderer.updateTime(now * 0.001);
     billboardRenderer.update(
       foliageStore,

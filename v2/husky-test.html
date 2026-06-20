@@ -10,8 +10,7 @@
         "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
         "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
         "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.tsl.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
-        "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.9/build/index.module.js"
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/"
       }
     }
   </script>
@@ -58,7 +57,7 @@
 <canvas id="c"></canvas>
 <div id="hud"></div>
 <div id="panel">
-  <h2>Husky — 1.2 m wolf</h2>
+  <h2>Husky — terrain lab</h2>
   <details open>
     <summary>Movement</summary>
     <div class="row"><span>walkSpeed</span><output id="o-walkSpeed"></output></div>
@@ -121,15 +120,16 @@
   <div style="color:#9898a8;font-size:10px;line-height:1.8">
     <b style="color:#7fd1ff">WASD</b> move &nbsp; <b style="color:#7fd1ff">Shift</b> gallop<br>
     <b style="color:#7fd1ff">Space</b> jump &nbsp; <b style="color:#7fd1ff">C</b> head low idle<br>
-    <b style="color:#7fd1ff">F</b> attack &nbsp; <b style="color:#7fd1ff">E</b> eat &nbsp; <b style="color:#7fd1ff">R</b> reset<br>
+    <b style="color:#7fd1ff">F</b> attack &nbsp; <b style="color:#7fd1ff">E</b> eat &nbsp; <b style="color:#7fd1ff">R</b> reset spawn<br>
+    Hills + cliff BVH props: ramp NW, stairs SE, cliff W<br>
     <b style="color:#7fd1ff">Mouse drag</b> orbit camera
   </div>
 </div>
 <script type="module">
 import * as THREE from 'three';
-import { MeshBVH } from 'three-mesh-bvh';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CapsuleController, DEFAULT_CAPSULE_PARAMS } from './play/onFootCapsule.js';
+import { createTerrainValidationLab } from './play/terrainValidationLab.js';
 
 /** Target shoulder height for wolf-scale husky (m). */
 const CHAR_HEIGHT = 1.2;
@@ -173,10 +173,10 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 await renderer.init();
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a2438);
-scene.fog = new THREE.Fog(0x1a2438, 40, 120);
+scene.background = new THREE.Color(0x8fb7e8);
+scene.fog = new THREE.Fog(0x8fb7e8, 80, 320);
 
-const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 500);
+const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 800);
 
 function onResize() {
   renderer.setSize(innerWidth, innerHeight);
@@ -192,178 +192,19 @@ sun.position.set(30, 60, 20);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 0.5;
-sun.shadow.camera.far = 200;
-sun.shadow.camera.left = -60;
-sun.shadow.camera.right = 60;
-sun.shadow.camera.top = 60;
-sun.shadow.camera.bottom = -60;
+sun.shadow.camera.far = 400;
+sun.shadow.camera.left = -120;
+sun.shadow.camera.right = 120;
+sun.shadow.camera.top = 120;
+sun.shadow.camera.bottom = -120;
 scene.add(sun);
-scene.add(new THREE.AmbientLight(0x8899bb, 0.6));
-const fill = new THREE.DirectionalLight(0x99aaff, 0.4);
-fill.position.set(-20, 10, -30);
-scene.add(fill);
+scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x4a5240, 0.85));
 
-// ─── Static scene geometry ───────────────────────────────────────────────────
-const staticMeshes = [];
+// ─── Terrain heightfield + cliff BVH (same stack as v2 play mode) ─────────────
+const terrainLab = createTerrainValidationLab(scene);
+const { getTerrainHeight, collider, worldHalf } = terrainLab;
 
-function addStatic(geo, mat, pos, rot, name) {
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.copy(pos);
-  if (rot) mesh.rotation.copy(rot);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.name = name || '';
-  scene.add(mesh);
-  staticMeshes.push(mesh);
-  return mesh;
-}
-
-const matGround  = new THREE.MeshStandardMaterial({ color: 0x3d5c3d, roughness: 0.9, metalness: 0 });
-const matConcrete= new THREE.MeshStandardMaterial({ color: 0x606070, roughness: 0.85, metalness: 0 });
-const matRamp    = new THREE.MeshStandardMaterial({ color: 0x7a5c3a, roughness: 0.8, metalness: 0 });
-const matPlatform= new THREE.MeshStandardMaterial({ color: 0x3a5c7a, roughness: 0.7, metalness: 0.1 });
-
-addStatic(new THREE.BoxGeometry(80, 0.4, 80), matGround,
-  new THREE.Vector3(0, -0.2, 0), null, 'ground');
-
-{
-  const ramp = new THREE.BoxGeometry(6, 0.3, 10);
-  addStatic(ramp, matRamp,
-    new THREE.Vector3(-12, 1.45, 5),
-    new THREE.Euler(-Math.PI * 0.16, 0, 0), 'ramp');
-}
-
-for (let i = 0; i < 6; i++) {
-  addStatic(
-    new THREE.BoxGeometry(4, 0.3 + i * 0.3, 0.8),
-    matConcrete,
-    new THREE.Vector3(8, (0.3 + i * 0.3) * 0.5, -i * 0.8),
-    null, `stair_${i}`
-  );
-}
-
-addStatic(new THREE.BoxGeometry(6, 0.3, 6), matPlatform,
-  new THREE.Vector3(8, 1.95, -5.5), null, 'platform_main');
-
-addStatic(new THREE.BoxGeometry(5, 0.3, 5), matPlatform,
-  new THREE.Vector3(18, 3.0, 0), null, 'platform_float');
-
-for (let i = 0; i < 4; i++) {
-  addStatic(
-    new THREE.BoxGeometry(2, 0.3 + i * 0.4, 2),
-    matConcrete,
-    new THREE.Vector3(-8 - i * 2.2, (0.3 + i * 0.4) * 0.5, -6),
-    null, `parkour_${i}`
-  );
-}
-
-addStatic(new THREE.BoxGeometry(8, 0.5, 0.4), matConcrete,
-  new THREE.Vector3(0, 0.25, -10), null, 'wall_low');
-
-{
-  const gridHelper = new THREE.GridHelper(80, 40, 0x334455, 0x1e2a36);
-  gridHelper.position.y = 0.01;
-  scene.add(gridHelper);
-}
-
-// ─── BVH Collider ────────────────────────────────────────────────────────────
-const _bvhRay   = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
-const _capSeg   = new THREE.Line3();
-const _capBox   = new THREE.Box3();
-const _capTriPt = new THREE.Vector3();
-const _capSegPt = new THREE.Vector3();
-const _capPush  = new THREE.Vector3();
-
-function buildCollider(meshes) {
-  const positions = [];
-  const indices   = [];
-  let   voff      = 0;
-  const tmp = new THREE.Vector3();
-
-  for (const mesh of meshes) {
-    mesh.updateWorldMatrix(true, false);
-    const geo = mesh.geometry;
-    const pos = geo.getAttribute('position');
-    const idx = geo.getIndex();
-    for (let i = 0; i < pos.count; i++) {
-      tmp.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
-      positions.push(tmp.x, tmp.y, tmp.z);
-    }
-    if (idx) {
-      for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + voff);
-    } else {
-      for (let i = 0; i < pos.count; i++) indices.push(i + voff);
-    }
-    const base = indices.length - (idx ? idx.count : pos.count);
-    const len  = indices.length - base;
-    for (let i = 0; i < len; i += 3)
-      indices.push(indices[base+i], indices[base+i+2], indices[base+i+1]);
-    voff += pos.count;
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setIndex(indices);
-  const bvh = new MeshBVH(geo);
-
-  return {
-    baked: true,
-    _bvh: bvh,
-    capsuleDepenetrate(sx, sy, sz, ex, ey, ez, radius) {
-      _capSeg.start.set(sx, sy, sz);
-      _capSeg.end.set(ex, ey, ez);
-      _capBox.makeEmpty();
-      _capBox.expandByPoint(_capSeg.start);
-      _capBox.expandByPoint(_capSeg.end);
-      _capBox.min.addScalar(-radius);
-      _capBox.max.addScalar(radius);
-      let maxNY = -1, moved = false;
-      bvh.shapecast({
-        intersectsBounds: b => b.intersectsBox(_capBox),
-        intersectsTriangle(tri) {
-          const dist = tri.closestPointToSegment(_capSeg, _capTriPt, _capSegPt);
-          if (dist < radius) {
-            const depth = radius - dist;
-            _capPush.copy(_capSegPt).sub(_capTriPt);
-            const len = _capPush.length();
-            if (len > 1e-9) {
-              _capPush.multiplyScalar(1 / len);
-              _capSeg.start.addScaledVector(_capPush, depth);
-              _capSeg.end.addScaledVector(_capPush, depth);
-              if (_capPush.y > maxNY) maxNY = _capPush.y;
-              moved = true;
-            }
-          }
-          return false;
-        },
-      });
-      if (!moved) return { dx:0, dy:0, dz:0, maxNY:-1 };
-      return { dx: _capSeg.start.x-sx, dy: _capSeg.start.y-sy, dz: _capSeg.start.z-sz, maxNY };
-    },
-    raycastDown(ox, oy, oz, maxDist) {
-      _bvhRay.origin.set(ox, oy, oz);
-      _bvhRay.direction.set(0, -1, 0);
-      const hit = bvh.raycastFirst(_bvhRay);
-      if (hit && hit.distance <= maxDist) {
-        const n = hit.face.normal;
-        const sign = n.y < 0 ? -1 : 1;
-        return { y: hit.point.y, ny: n.y * sign, nx: n.x * sign, nz: n.z * sign };
-      }
-      return null;
-    },
-    raycastUp(ox, oy, oz, maxDist) {
-      _bvhRay.origin.set(ox, oy, oz);
-      _bvhRay.direction.set(0, 1, 0);
-      const hit = bvh.raycastFirst(_bvhRay);
-      if (hit && hit.distance <= maxDist) return hit.point.y;
-      return null;
-    },
-  };
-}
-
-const collider = buildCollider(staticMeshes);
-
-// ─── Dynamic physics boxes ────────────────────────────────────────────────────
+// ─── Dynamic physics boxes (sit on terrain) ───────────────────────────────────
 const GRAVITY = 20;
 const BOX_FRICTION = 0.80;
 
@@ -406,7 +247,7 @@ class DynBox {
     this.pos.y += this.vel.y * dt;
     this.pos.z += this.vel.z * dt;
 
-    const floorY = this.size.y * 0.5;
+    const floorY = getTerrainHeight(this.pos.x, this.pos.z) + this.size.y * 0.5;
     if (this.pos.y < floorY) {
       this.pos.y = floorY;
       if (this.vel.y < 0) this.vel.y = 0;
@@ -428,19 +269,25 @@ class DynBox {
 }
 
 const dynBoxes = [
-  new DynBox(  2, 0.4, 4,  0.8, 0.8, 0.8,  20, 0xe06030),
-  new DynBox( -2, 0.4, 3,  1.0, 1.0, 1.0,  50, 0x30a0e0),
-  new DynBox(  4, 0.6, 2,  1.2, 1.2, 1.2, 100, 0x60c050),
-  new DynBox( -4, 0.4, 6,  0.7, 0.7, 0.7,  15, 0xe0c030),
-  new DynBox(  0, 0.5, 7,  0.9, 1.0, 0.9,  40, 0xc050a0),
+  new DynBox(  4, 0,  6,  0.8, 0.8, 0.8,  20, 0xe06030),
+  new DynBox( -3, 0,  8,  1.0, 1.0, 1.0,  50, 0x30a0e0),
+  new DynBox(  8, 0,  4,  1.2, 1.2, 1.2, 100, 0x60c050),
+  new DynBox( -6, 0, -4,  0.7, 0.7, 0.7,  15, 0xe0c030),
+  new DynBox(  2, 0, 14,  0.9, 1.0, 0.9,  40, 0xc050a0),
 ];
+for (const box of dynBoxes) {
+  box.pos.y = getTerrainHeight(box.pos.x, box.pos.z) + box.size.y * 0.5;
+  box.prevPos.copy(box.pos);
+  box.mesh.position.copy(box.pos);
+  box._refreshBox();
+}
 
 // ─── Input ───────────────────────────────────────────────────────────────────
 const keys = {};
 addEventListener('keydown', e => { keys[e.code] = true;  });
 addEventListener('keyup',   e => { keys[e.code] = false; });
 
-let camYaw = 0, camPitch = 0.28, camDist = 4.5;
+let camYaw = 0, camPitch = 0.28, camDist = 8;
 let dragging = false, lastMX = 0, lastMY = 0;
 canvas.addEventListener('mousedown', e => { if (e.button===2||e.button===0) { dragging=true; lastMX=e.clientX; lastMY=e.clientY; } });
 addEventListener('mouseup', () => { dragging = false; });
@@ -546,7 +393,8 @@ function refreshCapSliderDisplays() {
 // ─── Character setup ─────────────────────────────────────────────────────────
 const ctrl = new CapsuleController({ ...DEFAULT_CAPSULE_PARAMS, ...HUSKY_CAPSULE });
 applyEffectiveRadius();
-ctrl.reset(0, 0, 0);
+const SPAWN = { x: 0, z: 0 };
+ctrl.reset(SPAWN.x, getTerrainHeight(SPAWN.x, SPAWN.z), SPAWN.z);
 
 let charRoot      = null;
 let charMixer     = null;
@@ -562,7 +410,7 @@ const _smoothN  = new THREE.Vector3(0, 1, 0);
 const _flatUp   = new THREE.Vector3(0, 1, 0);
 let smoothPitch = 0;
 
-/** Raycast ground normal under the body (uses collider nx/ny/nz). */
+/** Raycast cliff BVH, else heightfield gradient for open hills. */
 function sampleGroundNormal(out, yaw) {
   const fwdOff = ctrl.params.capForwardOffset || 0;
   const sin = Math.sin(yaw);
@@ -571,11 +419,16 @@ function sampleGroundNormal(out, yaw) {
   const oz = ctrl.position.z + fwdOff * cos;
   const oy = ctrl.position.y + ctrl.params.capRadius + 0.2;
   const hit = collider.raycastDown(ox, oy, oz, ctrl.params.capRadius + 2.5);
-  if (hit && hit.ny >= ctrl.params.minGroundNormalY) {
+  if (hit && hit.nx !== undefined && hit.ny >= ctrl.params.minGroundNormalY) {
     out.set(hit.nx, hit.ny, hit.nz).normalize();
     return true;
   }
-  return false;
+  const d = 0.35;
+  const yC = getTerrainHeight(ox, oz);
+  const yX = getTerrainHeight(ox + d, oz);
+  const yZ = getTerrainHeight(ox, oz + d);
+  out.set(yC - yX, d, yC - yZ).normalize();
+  return out.y > 0.05;
 }
 
 /**
@@ -783,7 +636,7 @@ const hud = document.getElementById('hud');
 
 addEventListener('keydown', e => {
   if (e.code === 'KeyR') {
-    ctrl.reset(0, 0, 0);
+    ctrl.reset(SPAWN.x, getTerrainHeight(SPAWN.x, SPAWN.z), SPAWN.z);
     charYaw = 0;
     smoothPitch = 0;
     _smoothN.set(0, 1, 0);
@@ -823,8 +676,8 @@ async function loop(t) {
   ctrl.update(dt, {
     input: { mx, mz, jump, run: gallop, crouch: false },
     collider,
-    getTerrainHeight: () => 0,
-    worldHalf: 40,
+    getTerrainHeight,
+    worldHalf,
     platforms: dynBoxes,
   });
 
@@ -897,13 +750,14 @@ async function loop(t) {
   const p = ctrl.position;
   const clip = currentAction?.getClip()?.name ?? '—';
   const slopeDeg = (Math.acos(THREE.MathUtils.clamp(_smoothN.y, -1, 1)) * 180 / Math.PI).toFixed(0);
+  const terrainY = getTerrainHeight(p.x, p.z);
   hud.innerHTML =
-    `<b>Husky</b> 1.2 m wolf-scale\n` +
+    `<b>Husky</b> terrain + cliff BVH\n` +
     `<b>pos</b>  ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}\n` +
-    `<b>velY</b> ${ctrl.velY.toFixed(2)}  <b>grounded</b> ${ctrl.grounded}\n` +
+    `<b>terrainY</b> ${terrainY.toFixed(2)}  <b>velY</b> ${ctrl.velY.toFixed(2)}  <b>grounded</b> ${ctrl.grounded}\n` +
     `<b>speed</b> ${ctrl.debug.moveSpeed.toFixed(2)} m/s  <b>clip</b> ${clip}\n` +
     `<b>cap</b> r=${ctrl.params.capRadius.toFixed(2)} h=${ctrl.params.capHeight.toFixed(2)} fwd=${(ctrl.params.capForwardOffset||0).toFixed(2)}\n` +
-    `<b>slope</b> ${slopeDeg}° from flat  <b>substeps</b> ${ctrl.debug.substeps}`;
+    `<b>slope</b> ${slopeDeg}°  <b>cliffBVH</b> ${terrainLab.cliffBvh?.baked ? 'on' : 'off'}`;
 
   renderer.render(scene, camera);
 }

@@ -42,6 +42,8 @@ import { Vehicle as ModularVehicle } from "./modularRoadVehicle.js";
 import { createVehicleGround } from "./modularRoadGround.js";
 import { RoadBvh } from "./modularRoadBvh.js";
 import { CapsuleController } from "./onFootCapsule.js";
+import { createOnFootCollider } from "./onFootCollider.js";
+import { HuskyOnFoot, HUSKY_HEIGHT } from "./huskyOnFoot.js";
 import { createMovingPlatforms } from "./movingPlatforms.js";
 
 // ============================================================
@@ -852,6 +854,7 @@ const MODE_ORDER = [
   "vvv",
   "rts",
   "stunt",
+  "husky",
 ];
 const MODE_META = {
   capsule: { label: "Capsule", icon: "◉", digit: "1" },
@@ -862,6 +865,7 @@ const MODE_META = {
   vvv: { label: "VVV (rigid)", icon: "🚗", digit: "6" },
   rts: { label: "Director", icon: "🎬", digit: "7" },
   stunt: { label: "Stunt", icon: "🏁", digit: "8" },
+  husky: { label: "Husky", icon: "🐺", digit: "9" },
 };
 
 export class PlayMode {
@@ -914,57 +918,10 @@ export class PlayMode {
     this._onFootWireDims = { r: 0, h: 0 };
     {
       const self = this;
-      this._onFootCollider = {
-        get baked() {
-          return !!(self.cliffBvh?.baked || self.treeBvh?.baked);
-        },
-        capsuleDepenetrate(sx, sy, sz, ex, ey, ez, r) {
-          let ax = 0;
-          let ay = 0;
-          let az = 0;
-          let maxNY = -1;
-          let moved = false;
-          const run = (bvh) => {
-            if (!bvh?.baked || !bvh.capsuleDepenetrate) return;
-            const c = bvh.capsuleDepenetrate(
-              sx + ax, sy + ay, sz + az,
-              ex + ax, ey + ay, ez + az,
-              r,
-            );
-            if (!c) return;
-            ax += c.dx;
-            ay += c.dy;
-            az += c.dz;
-            if (c.maxNY > maxNY) maxNY = c.maxNY;
-            if (c.dx || c.dy || c.dz) moved = true;
-          };
-          run(self.cliffBvh);
-          run(self.treeBvh);
-          if (!moved) return { dx: 0, dy: 0, dz: 0, maxNY: -1 };
-          return { dx: ax, dy: ay, dz: az, maxNY };
-        },
-        raycastDown(ox, oy, oz, maxDist) {
-          let best = null;
-          const run = (bvh) => {
-            if (!bvh?.baked || !bvh.raycastDown) return;
-            const h = bvh.raycastDown(ox, oy, oz, maxDist);
-            if (h && (best === null || h.y > best.y)) best = h; // highest surface
-          };
-          run(self.cliffBvh);
-          run(self.treeBvh);
-          return best;
-        },
-        raycastUp(ox, oy, oz, maxDist) {
-          let best = null;
-          const run = (bvh) => {
-            if (!bvh?.baked || !bvh.raycastUp) return;
-            const y = bvh.raycastUp(ox, oy, oz, maxDist);
-            if (y != null && (best === null || y < best)) best = y; // lowest ceiling
-          };
-          run(self.cliffBvh);
-          return best;
-        },
-      };
+      this._onFootCollider = createOnFootCollider({
+        cliffBvh: () => self.cliffBvh,
+        treeBvh: () => self.treeBvh,
+      });
     }
     this.carSettings = carSettings || {};
     this.carAudioSettings = carAudioSettings || {};
@@ -1130,6 +1087,19 @@ export class PlayMode {
     this.charSpellPhase = "none";
     this.charSpellExitRequested = false;
     this._loadCharacter();
+
+    this._husky = new HuskyOnFoot({
+      scene: this.scene,
+      loader: getSharedGltfLoader(),
+      excludeFromReflection: this._excludeFromReflection,
+    });
+    this._husky.load(() => {
+      if (this.active && this.moveMode === "husky") {
+        this._husky.root.visible = true;
+        this.capsule.visible = false;
+        this._husky.applyCapsuleParams(this._onFoot);
+      }
+    });
 
     // Car drift state
     this.carRoot = null;
@@ -1341,6 +1311,12 @@ export class PlayMode {
         sensY: CAM_SENS_Y,
       },
       char: {
+        fov: 60,
+        distance: CAM_DIST,
+        sensX: CAM_SENS_X,
+        sensY: CAM_SENS_Y,
+      },
+      husky: {
         fov: 60,
         distance: CAM_DIST,
         sensX: CAM_SENS_X,
@@ -4798,6 +4774,7 @@ export class PlayMode {
     this.capsule.visible = true;
     if (this.planeRoot) this.planeRoot.visible = false;
     if (this.charRoot) this.charRoot.visible = false;
+    if (this._husky?.root) this._husky.root.visible = false;
     if (this.carRoot) this.carRoot.visible = false;
     if (this.lotusRoot) this.lotusRoot.visible = false;
     this.driftMarks.reset();
@@ -4959,6 +4936,7 @@ export class PlayMode {
     this.capsule.visible = false;
     if (this.planeRoot) this.planeRoot.visible = false;
     if (this.charRoot) this.charRoot.visible = false;
+    if (this._husky?.root) this._husky.root.visible = false;
     if (this.carRoot) this.carRoot.visible = false;
     if (this.lotusRoot) this.lotusRoot.visible = false;
     if (this.vvvRoot) this.vvvRoot.visible = false;
@@ -5443,7 +5421,9 @@ export class PlayMode {
     }
 
     const charMode = this.moveMode === "char" && this.charLoaded;
+    const huskyMode = this.moveMode === "husky" && this._husky?.loaded;
     const charRunning = charMode && (keys.ShiftLeft || keys.ShiftRight);
+    const huskyRunning = huskyMode && (keys.ShiftLeft || keys.ShiftRight);
     const inRoll = charMode && this.charRolling;
     const inSlide = charMode && this.charSlidePhase !== "none";
 
@@ -5543,7 +5523,9 @@ export class PlayMode {
     const onFoot =
       !flying &&
       !carDriving &&
-      (this.moveMode === "char" || this.moveMode === "capsule");
+      (this.moveMode === "char" ||
+        this.moveMode === "capsule" ||
+        this.moveMode === "husky");
 
     // Demo moving platforms — created lazily once terrain is ready, advanced
     // before the controller so carry + collision use this frame's box/delta.
@@ -5863,21 +5845,27 @@ export class PlayMode {
       else if (this.moveMode === "capsule") _speedOverride = MOVE_SPEED;
 
       const _ctrlHeld = !!(keys.ControlLeft || keys.ControlRight);
+      const _huskyFoot = huskyMode;
       ctrl.update(dtSec, {
         input: {
           mx,
           mz,
           jump: !!keys.Space,
-          run: charRunning,
+          run: _huskyFoot ? huskyRunning : charRunning,
           crouch:
-            _ctrlHeld && !this.charRolling && !inSlide && !this.charAttacking,
+            !_huskyFoot &&
+            _ctrlHeld &&
+            !this.charRolling &&
+            !inSlide &&
+            !this.charAttacking,
         },
         moveSpeedOverride: _speedOverride,
-        canJump:
-          !this.charRolling &&
-          !this.charAttacking &&
-          !inSlide &&
-          this.charJumpPhase !== "land",
+        canJump: _huskyFoot
+          ? true
+          : !this.charRolling &&
+            !this.charAttacking &&
+            !inSlide &&
+            this.charJumpPhase !== "land",
         collider: this._onFootCollider,
         getTerrainHeight: (x, z) => this.getTerrainHeight(x, z),
         worldHalf: this.worldHalf,
@@ -5892,6 +5880,7 @@ export class PlayMode {
       this.charGliding = ctrl.gliding;
       this.charCrouching = ctrl.crouching;
       this.charSpacePrev = !!keys.Space;
+      this.inAir = this.charInAir;
       this._updateOnFootWire(this._onFootWireOn);
 
       // Dialogue / zone barriers (legacy isBarrierBlocked) — re-clamp post-move.
@@ -5972,13 +5961,30 @@ export class PlayMode {
         mlen > 0 &&
         !this.charRolling &&
         !this.charAttacking &&
-        !inSlide
+        !inSlide &&
+        charMode
       ) {
         const targetYaw = Math.atan2(mx, mz);
         let dYaw = targetYaw - this.charYaw;
         while (dYaw > PI) dYaw -= 2 * PI;
         while (dYaw < -PI) dYaw += 2 * PI;
         this.charYaw += dYaw * (1 - Math.exp(-14 * dtSec));
+      }
+
+      if (huskyMode) {
+        this.charYaw = this._husky.updateFrame({
+          dtSec,
+          playerPos: this.playerPos,
+          charYaw: this.charYaw,
+          mx,
+          mz,
+          ctrl,
+          collider: this._onFootCollider,
+          getTerrainHeight: (x, z) => this.getTerrainHeight(x, z),
+          keys,
+          gallop: huskyRunning,
+          moveSpeed: ctrl.debug.moveSpeed,
+        });
       }
     } else if (carDriving && !rigidDriving) {
       // Rigid cars (VVV/Stunt) bypass this block entirely — their physics
@@ -6194,6 +6200,7 @@ export class PlayMode {
       this.moveMode === "capsule" ||
       (this.moveMode === "fly" && !this.planeLoaded) ||
       (this.moveMode === "char" && !this.charLoaded) ||
+      (this.moveMode === "husky" && !this._husky?.loaded) ||
       (this.moveMode === "car" && !this.carLoaded) ||
       (this.moveMode === "lotus" && !this.lotusLoaded) ||
       (this.moveMode === "vvv" && !this.vvvLoaded);
@@ -6275,6 +6282,10 @@ export class PlayMode {
 
         if (this.charMixer) this.charMixer.update(dtSec);
       }
+    }
+
+    if (this._husky?.root) {
+      if (!huskyMode) this._husky.root.visible = false;
     }
 
     // Plane visual
@@ -6885,6 +6896,7 @@ export class PlayMode {
 
     // Camera
     const charLookY = this.playerPos.y + CHAR_HEIGHT * 0.75;
+    const huskyLookY = this.playerPos.y + HUSKY_HEIGHT * 0.55;
     const isLotusMode = this.moveMode === "lotus";
     // Stunt reuses the VVV chase camera (both sync playerPos/carHeading/carVx/Vz).
     const isVvvMode = this.moveMode === "vvv";
@@ -6902,7 +6914,9 @@ export class PlayMode {
         ? carLookY
         : charMode
           ? charLookY
-          : capsuleCY + 0.6;
+          : huskyMode
+            ? huskyLookY
+            : capsuleCY + 0.6;
 
     // Lotus / Bruno tuning GUIs
     if (this._lotusCamGui)
@@ -6916,7 +6930,9 @@ export class PlayMode {
     if (this._onFootGui) {
       const showFoot =
         this.active &&
-        (this.moveMode === "char" || this.moveMode === "capsule");
+        (this.moveMode === "char" ||
+          this.moveMode === "capsule" ||
+          this.moveMode === "husky");
       this._onFootGui.domElement.style.display = showFoot ? "" : "none";
       if (!showFoot && this._onFootWire) this._onFootWire.visible = false;
     }
@@ -7233,6 +7249,7 @@ export class PlayMode {
   _currentYaw() {
     switch (this.moveMode) {
       case "char":
+      case "husky":
         return this.charYaw;
       case "fly":
         return this.flyHeading;
@@ -7258,6 +7275,9 @@ export class PlayMode {
     if (!MODE_META[target] || target === this.moveMode) return;
     const yaw = this._currentYaw();
     const wasRts = this.moveMode === "rts";
+    if (this.moveMode === "husky" && target !== "husky") {
+      this._husky.restoreHumanCapsuleParams(this._onFoot);
+    }
     this._moveTarget = null;
     this.isoHoverRing.visible = false;
     this.isoTargetRing.visible = false;
@@ -7277,6 +7297,21 @@ export class PlayMode {
       this.charSpellPhase = "none";
       this.charSpellExitRequested = false;
       if (this.charKite) this.charKite.visible = false;
+    } else if (target === "husky") {
+      this.moveMode = "husky";
+      this.charYaw = yaw;
+      this.charVelY = 0;
+      this.charInAir = false;
+      this.charGliding = false;
+      this.charSpacePrev = false;
+      this.charCrouching = false;
+      this._husky.resetAnimState();
+      this._husky.applyCapsuleParams(this._onFoot);
+      if (this.charRoot) this.charRoot.visible = false;
+      if (this._husky.root && this._husky.loaded) {
+        this._husky.root.visible = true;
+        this.capsule.visible = false;
+      }
     } else if (target === "fly") {
       this.moveMode = "fly";
       this.flyHeading = yaw;
@@ -7398,6 +7433,7 @@ export class PlayMode {
       // Hide all pawn visuals (per-frame visibility logic is skipped by the RTS early-return)
       if (this.capsule) this.capsule.visible = false;
       if (this.charRoot) this.charRoot.visible = false;
+      if (this._husky?.root) this._husky.root.visible = false;
       if (this.carRoot) this.carRoot.visible = false;
       if (this.lotusRoot) this.lotusRoot.visible = false;
       if (this.planeRoot) this.planeRoot.visible = false;
@@ -7538,6 +7574,14 @@ export class PlayMode {
     }
 
     // Character actions (matches v1 keybindings: R=attack, C=roll, X=slide)
+    const _huskyMode = this.moveMode === "husky" && this._husky?.loaded;
+    if (_huskyMode && !event.repeat) {
+      if (this._husky.onKeyDown(event.code)) {
+        event.preventDefault();
+        return;
+      }
+    }
+
     const _charMode = this.moveMode === "char" && this.charLoaded;
     if (_charMode && !event.repeat) {
       const inSlide = this.charSlidePhase !== "none";

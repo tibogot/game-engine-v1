@@ -23,6 +23,7 @@ import {
   vec2,
   vec3,
   texture,
+  textureLoad,
   positionLocal,
   positionWorld,
   mix,
@@ -49,8 +50,8 @@ function makePlaceholderHoleTex() {
   const d = new Uint8Array([0, 0, 0, 0]);
   const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
   t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
-  t.minFilter = THREE.LinearFilter;
-  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.magFilter = THREE.NearestFilter;
   t.needsUpdate = true;
   return t;
 }
@@ -74,12 +75,13 @@ export function createSplatOverlay(layerSlots, chunkSize, worldSize, albedoArray
   const invWorldSize = float(1.0 / worldSize);
 
   // ── splatmap reads (swapped per-chunk in onBeforeRender) ────────────────
-  // Both reads come from the same 2-layer DataArrayTexture but use different
-  // .depth() indices, which prevents TSL from deduplicating them.
+  // One DataArrayTexture, two depth slices — share the placeholder instance so
+  // TSL/WebGPU bind it once (two separate texture() calls would cost 2 slots).
   const splatUV = positionLocal.xz.div(cs).add(vec2(0.5, 0.5));
-  const splatTexNode = texture(makePlaceholderSplatArray(), splatUV).depth(int(0));
-  const splat1TexNode = texture(makePlaceholderSplatArray(), splatUV).depth(int(1));
-  const holeTexNode = texture(makePlaceholderHoleTex(), splatUV);
+  const splatArrayNode = texture(makePlaceholderSplatArray(), splatUV);
+  const splatTexNode = splatArrayNode.depth(int(0));
+  const splat1TexNode = splatArrayNode.depth(int(1));
+  const holeTexNode = textureLoad(makePlaceholderHoleTex(), splatUV);
 
   // ── uniforms ───────────────────────────────────────────────────────────
   const uSoloLayer = uniform(-1.0);
@@ -90,12 +92,17 @@ export function createSplatOverlay(layerSlots, chunkSize, worldSize, albedoArray
   const uChunkHasHole = uniform(0.0);
 
   // ── layer texture samples (from DataArrayTexture) ──────────────────────
+  // One TSL node per array — Three.js dedupes bindings by texture UUID, so
+  // all 7 depth slices share a single sampler (not 7). Linear + mips restored
+  // after the Nearest/textureLoad workaround caused blocky paint (see screenshot).
+  const albedoArrayNode = texture(albedoArrayTex);
+  const ormArrayNode = texture(ormArrayTex);
   const layerAlbedos = [];
   const layerOrms = [];
   for (let i = 0; i < NUM_LAYERS; i++) {
     const uv = positionWorld.xz.mul(invWorldSize).mul(layerSlots[i].uUVScale);
-    layerAlbedos.push(texture(albedoArrayTex, uv).depth(int(i)));
-    layerOrms.push(texture(ormArrayTex, uv).depth(int(i)));
+    layerAlbedos.push(albedoArrayNode.sample(uv).depth(int(i)));
+    layerOrms.push(ormArrayNode.sample(uv).depth(int(i)));
   }
 
   // ── raw splat weights (8 total: base + 7 overlays) ────────────────────

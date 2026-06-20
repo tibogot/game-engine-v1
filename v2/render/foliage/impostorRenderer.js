@@ -17,6 +17,7 @@ import { makeFlatAuxTextures, createImpostorMaterials } from "./octahedralCore.j
 
 const INITIAL_CAP = 16384;
 const CULL_MARGIN = 24;
+const FADE_BAND = 60; // metres of impostor↔geometry crossfade before fadeOutDistance
 
 export class ImpostorRenderer {
   constructor(scene, config) {
@@ -31,6 +32,16 @@ export class ImpostorRenderer {
     this._pos = new THREE.Vector3();
     this._scl = new THREE.Vector3();
     this._quat = new THREE.Quaternion();
+    // Coarse re-pack gate: the SET of far trees changes slowly (you must move/turn
+    // a lot at distance to cross a fade boundary), and the billboard FACING is
+    // per-frame on the GPU anyway. So only re-pack the instance buffers when the
+    // camera moved > REPACK_DIST or turned > REPACK_ANGLE, or trees/slots changed.
+    this._dirty = true;
+    this._lastGen = -1;
+    this._lastPackX = Infinity;
+    this._lastPackZ = Infinity;
+    this._lastFwd = new THREE.Vector3(0, 0, 1);
+    this._fwd = new THREE.Vector3();
   }
 
   /** Register (or replace) a slot's baked impostor and build its billboard mesh. */
@@ -67,6 +78,7 @@ export class ImpostorRenderer {
     im.receiveShadow = false;
     this.scene.add(im);
 
+    this._dirty = true; // force a re-pack now that a slot's impostor exists/changed
     while (this.slots.length <= slotIdx) this.slots.push(null);
     this.slots[slotIdx] = {
       mesh: im,
@@ -107,13 +119,31 @@ export class ImpostorRenderer {
     for (const s of this.slots) if (s) { any = true; break; }
     if (!any) return;
 
+    // Coarse re-pack gate — skip the rebuild when the view barely changed.
+    const gen = treeStore.globalGen;
+    camera.getWorldDirection(this._fwd);
+    const moved2 =
+      (camera.position.x - this._lastPackX) ** 2 +
+      (camera.position.z - this._lastPackZ) ** 2;
+    const fwdDot = this._fwd.dot(this._lastFwd);
+    if (!this._dirty && gen === this._lastGen && moved2 < 16 && fwdDot > 0.9986) {
+      return; // reuse last frame's instance buffers (billboards still face via GPU)
+    }
+    this._dirty = false;
+    this._lastGen = gen;
+    this._lastPackX = camera.position.x;
+    this._lastPackZ = camera.position.z;
+    this._lastFwd.copy(this._fwd);
+
     this._projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this._frustum.setFromProjectionMatrix(this._projScreen);
 
     const camX = camera.position.x;
     const camZ = camera.position.z;
     const fadeD = lodCfg.fadeOutDistance ?? 600;
-    const fadeD2 = fadeD * fadeD;
+    // Start impostors a band BEFORE the geometry hides, so they dither in over it.
+    const fadeStartD = Math.max(0, fadeD - FADE_BAND);
+    const fadeStartD2 = fadeStartD * fadeStartD;
     const maxD2 = this.maxDistance * this.maxDistance;
     const chunkSize = this.config.world.chunkSize;
     const half = this.config.world.size * 0.5;
@@ -138,7 +168,7 @@ export class ImpostorRenderer {
         const dx = t.x - camX;
         const dz = t.z - camZ;
         const dist2 = dx * dx + dz * dz;
-        if (dist2 <= fadeD2 || dist2 > maxD2) continue; // far band only
+        if (dist2 <= fadeStartD2 || dist2 > maxD2) continue; // far band (incl. crossfade)
 
         const idx = counts[si];
         if (idx >= slot.cap) continue;
@@ -163,6 +193,9 @@ export class ImpostorRenderer {
     for (let i = 0; i < this.slots.length; i++) {
       const slot = this.slots[i];
       if (!slot) continue;
+      // Feed the crossfade band to the shader (impostor dithers in fadeStart->fadeEnd).
+      slot.uniforms.uFadeStart.value = fadeStartD;
+      slot.uniforms.uFadeEnd.value = fadeD;
       slot.mesh.count = counts[i];
       slot.mesh.instanceMatrix.needsUpdate = true;
       slot.aCenter.needsUpdate = true;

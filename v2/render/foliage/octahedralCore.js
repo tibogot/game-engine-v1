@@ -441,6 +441,11 @@ function createImpostorMaterials(textures, opts) {
   const uDebugMode   = uniform(float(0)); // 0=PBR, 1=normals, 2=raw atlas
   const uUnlit       = uniform(float(0)); // 1 = show baked colour UNLIT (emissive), no relight
   const uFade        = uniform(float(1)); // LOD crossfade: screen-door dither, 1=solid 0=gone
+  // Instanced crossfade band (XZ distance from camera): impostor dithers in as it
+  // crosses fadeStart->fadeEnd, so it appears OVER the still-drawn geometry before
+  // the geometry hard-cuts at fadeEnd. Single-mesh path ignores these (uses uFade).
+  const uFadeStart   = uniform(float(0));
+  const uFadeEnd     = uniform(float(1));
 
   // Vertex→fragment varyings
   const vWeight = varying(vec4(0, 0, 0, 0), "vW");
@@ -450,6 +455,7 @@ function createImpostorMaterials(textures, opts) {
   const vUV1    = varying(vec2(0, 0), "vUV1");
   const vUV2    = varying(vec2(0, 0), "vUV2");
   const vUV3    = varying(vec2(0, 0), "vUV3");
+  const vFade   = varying(float(1), "vFade"); // per-instance LOD crossfade factor
 
   // ── Octa encode / decode (hemi or full) ──────────────────────────────────
   const encode = fullOctahedral
@@ -564,6 +570,13 @@ function createImpostorMaterials(textures, opts) {
     const swayX = mul(sin(phase), uWindAmp);
     const swayZ = mul(cos(phaseZ), mul(uWindAmp, float(0.4)));
     const windOffset = mul(vec3(swayX, float(0), swayZ), heightW);
+
+    // Per-instance LOD crossfade: dither in over the fadeStart->fadeEnd band
+    // (XZ distance). Single-mesh path just carries the uFade uniform through.
+    const _fadeDistXZ = length(sub(cameraPosition.xz, impCenter.xz));
+    vFade.assign(
+      instanced ? smoothstep(uFadeStart, uFadeEnd, _fadeDistXZ) : uFade,
+    );
 
     return add(bv, windOffset);
   });
@@ -706,7 +719,7 @@ function createImpostorMaterials(textures, opts) {
   mainMat.roughnessNode = finalRough;
   mainMat.metalnessNode = finalMetal;
   mainMat.aoNode        = ao;
-  mainMat.opacityNode   = mul(smoothAlpha, step(ign, uFade)); // × LOD crossfade dither
+  mainMat.opacityNode   = mul(smoothAlpha, step(ign, vFade)); // × LOD crossfade dither (per-instance)
   mainMat.emissiveNode  = mix(displayEmissive, finalAlbedo, uUnlit);
 
   // Shadow casting — Renderer._getShadowNodes() picks these up per-draw and
@@ -727,7 +740,7 @@ function createImpostorMaterials(textures, opts) {
       uWindAmp, uWindFreq,
       uTransAmt, uTransPow, uTransTint,
       uSunDir, uSunColor,
-      uDebugMode, uUnlit, uFade,
+      uDebugMode, uUnlit, uFade, uFadeStart, uFadeEnd,
     },
   };
 }

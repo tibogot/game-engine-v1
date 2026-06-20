@@ -137,19 +137,24 @@ export function createCliffShadingContext(
   const uHeightTexStep = float(4.0 / htexRes);
   const uHeightToWorld = float((4.0 * worldSize) / htexRes);
 
+  // Hoist texture nodes once — re-calling texture() inside helpers that run
+  // from separate material Fn blocks (color/roughness/normal) duplicated sampler
+  // bindings and broke image-texture mode on the 16-sampler WebGPU cap.
+  const heightTexNode = texture(heightTex);
+  const rockColorTexNode = texture(rockColorTex);
+  const rockDataTexNode = texture(rockDataTex);
+
   const getWorldHeightUV = () =>
     positionWorld.xz.add(uTerrainHalf).div(uTerrainSize);
 
   const getHeightTexFlatness = () => {
     const uv = getWorldHeightUV();
-    const hR = texture(heightTex, uv.add(vec2(uHeightTexStep, float(0)))).r;
-    const hL = texture(
-      heightTex,
+    const hR = heightTexNode.sample(uv.add(vec2(uHeightTexStep, float(0)))).r;
+    const hL = heightTexNode.sample(
       uv.add(vec2(uHeightTexStep.negate(), float(0))),
     ).r;
-    const hU = texture(heightTex, uv.add(vec2(float(0), uHeightTexStep))).r;
-    const hD = texture(
-      heightTex,
+    const hU = heightTexNode.sample(uv.add(vec2(float(0), uHeightTexStep))).r;
+    const hD = heightTexNode.sample(
       uv.add(vec2(float(0), uHeightTexStep.negate())),
     ).r;
     const dhdx = hR.sub(hL).div(uHeightToWorld.mul(float(2)));
@@ -171,10 +176,11 @@ export function createCliffShadingContext(
     const rockUV_XZ = positionWorld.xz.mul(cliffU.uRockScale);
     const rockUV_XY = positionWorld.xy.mul(cliffU.uRockScale);
     const rockUV_ZY = positionWorld.zy.mul(cliffU.uRockScale);
-    const rawRock = texture(rockColorTex, rockUV_XZ)
+    const rawRock = rockColorTexNode
+      .sample(rockUV_XZ)
       .rgb.mul(w.y)
-      .add(texture(rockColorTex, rockUV_XY).rgb.mul(w.z))
-      .add(texture(rockColorTex, rockUV_ZY).rgb.mul(w.x));
+      .add(rockColorTexNode.sample(rockUV_XY).rgb.mul(w.z))
+      .add(rockColorTexNode.sample(rockUV_ZY).rgb.mul(w.x));
     const contrastedRock = clamp(
       rawRock.sub(float(0.5)).mul(cliffU.uRockContrast).add(float(0.5)),
       float(0),
@@ -188,10 +194,11 @@ export function createCliffShadingContext(
     const rockUV_XZ = positionWorld.xz.mul(cliffU.uRockScale);
     const rockUV_XY = positionWorld.xy.mul(cliffU.uRockScale);
     const rockUV_ZY = positionWorld.zy.mul(cliffU.uRockScale);
-    return texture(rockDataTex, rockUV_XZ)
+    return rockDataTexNode
+      .sample(rockUV_XZ)
       .g.mul(w.y)
-      .add(texture(rockDataTex, rockUV_XY).g.mul(w.z))
-      .add(texture(rockDataTex, rockUV_ZY).g.mul(w.x));
+      .add(rockDataTexNode.sample(rockUV_XY).g.mul(w.z))
+      .add(rockDataTexNode.sample(rockUV_ZY).g.mul(w.x));
   };
 
   /** Call inside same Fn as terrain color; `col` = vec3 terrain (+ splat). */
@@ -209,9 +216,9 @@ export function createCliffShadingContext(
     const rockUV_XZ = positionWorld.xz.mul(cliffU.uRockScale);
     const rockUV_XY = positionWorld.xy.mul(cliffU.uRockScale);
     const rockUV_ZY = positionWorld.zy.mul(cliffU.uRockScale);
-    const _dXZ = texture(rockDataTex, rockUV_XZ);
-    const _dXY = texture(rockDataTex, rockUV_XY);
-    const _dZY = texture(rockDataTex, rockUV_ZY);
+    const _dXZ = rockDataTexNode.sample(rockUV_XZ);
+    const _dXY = rockDataTexNode.sample(rockUV_XY);
+    const _dZY = rockDataTexNode.sample(rockUV_ZY);
     const _nxXZ = _dXZ.b.mul(2.0).sub(1.0);
     const _nyXZ = _dXZ.a.mul(2.0).sub(1.0);
     const _nzXZ = sqrt(
@@ -255,9 +262,9 @@ export function createCliffShadingContext(
     const rockUV_XZ = positionWorld.xz.mul(cliffU.uRockScale);
     const rockUV_XY = positionWorld.xy.mul(cliffU.uRockScale);
     const rockUV_ZY = positionWorld.zy.mul(cliffU.uRockScale);
-    const _dXZ = texture(rockDataTex, rockUV_XZ);
-    const _dXY = texture(rockDataTex, rockUV_XY);
-    const _dZY = texture(rockDataTex, rockUV_ZY);
+    const _dXZ = rockDataTexNode.sample(rockUV_XZ);
+    const _dXY = rockDataTexNode.sample(rockUV_XY);
+    const _dZY = rockDataTexNode.sample(rockUV_ZY);
     const _nxXZ = _dXZ.b.mul(2.0).sub(1.0);
     const _nyXZ = _dXZ.a.mul(2.0).sub(1.0);
     const _nzXZ = sqrt(
@@ -293,10 +300,11 @@ export function createCliffShadingContext(
     const _rrXY = positionWorld.xy.mul(cliffU.uRockScale);
     const _rrZY = positionWorld.zy.mul(cliffU.uRockScale);
     return clamp(
-      texture(rockDataTex, _rrXZ)
+      rockDataTexNode
+        .sample(_rrXZ)
         .r.mul(w.y)
-        .add(texture(rockDataTex, _rrXY).r.mul(w.z))
-        .add(texture(rockDataTex, _rrZY).r.mul(w.x))
+        .add(rockDataTexNode.sample(_rrXY).r.mul(w.z))
+        .add(rockDataTexNode.sample(_rrZY).r.mul(w.x))
         .mul(cliffU.uRockRoughMul),
       float(0),
       float(1),

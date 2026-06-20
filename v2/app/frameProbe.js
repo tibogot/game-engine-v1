@@ -28,7 +28,12 @@ const HIST = 240; // frames kept for the running median (~4 s @ 60 fps)
 
 export const frameProbe = {
   // per-frame block timings (ms) — written by the render loop
-  t: { stream: 0, props: 0, foliage: 0, grass: 0, misc: 0, render: 0 },
+  t: { stream: 0, props: 0, foliage: 0, grass: 0, misc: 0, render: 0,
+       // granular tree-system sub-timers (subsets of the foliage stage)
+       tree: 0, leaf: 0, impostor: 0 },
+  // running sums for steady-state averages (frameProbe.avg())
+  _sum: { stream: 0, props: 0, foliage: 0, grass: 0, misc: 0, render: 0,
+          tree: 0, leaf: 0, impostor: 0 },
   // per-frame (re)build counters — incremented by the wrapped build methods
   c: {
     foliage: 0, foliageMs: 0,
@@ -48,6 +53,7 @@ export const frameProbe = {
   beginFrame() {
     const t = this.t;
     t.stream = t.props = t.foliage = t.grass = t.misc = t.render = 0;
+    t.tree = t.leaf = t.impostor = 0;
     const c = this.c;
     c.foliage = c.foliageMs = 0;
     c.billboard = c.billboardMs = 0;
@@ -61,6 +67,7 @@ export const frameProbe = {
     this.tris = tris;
     if (!this._capturing) return;
     this._frames++;
+    for (const k in this._sum) this._sum[k] += this.t[k];
     this._dt.push(dtMs);
     if (this._dt.length > HIST) this._dt.shift();
 
@@ -101,8 +108,26 @@ export const frameProbe = {
     return s[Math.floor(s.length / 2)];
   },
 
+  /** Steady-state per-block averages over the capture window (ms/frame). */
+  avg() {
+    const n = this._frames || 1;
+    const a = {};
+    for (const k in this._sum) a[k] = +(this._sum[k] / n).toFixed(2);
+    console.log(
+      `%c[frameProbe] ${this._frames} frames · avg ms/frame:`,
+      "font-weight:bold;color:#4ad",
+    );
+    console.table(a);
+    console.log(
+      `%c  tree-system total ≈ ${(a.tree + a.leaf + a.impostor).toFixed(2)} ms  (tree ${a.tree} · leaf ${a.leaf} · impostor ${a.impostor})`,
+      "color:#8c8",
+    );
+    return a;
+  },
+
   reset() {
     this._frames = 0;
+    for (const k in this._sum) this._sum[k] = 0;
     this._dt.length = 0;
     this._spikes.length = 0;
     this._capturing = true;

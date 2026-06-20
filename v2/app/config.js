@@ -438,11 +438,9 @@ export const V2_CONFIG = {
   /** `splatmap-chunks.html` PARAMS.csm — WebGPU `CSMShadowNode` on the sun. */
   csm: {
     enabled: true,
-    // 4 cascades: with maxFar=80 and practical split (λ=0.5) the splits land at
-    // ~11m / ~24m / ~45m / 80m.  Character at 5-15m falls in cascade-0 whose
-    // ortho bounds are only ~14m wide → ~0.7 cm/texel at 2048 px.
-    // (3 cascades + maxFar=150 gave ~37m wide bounds → ~1.8 cm/texel — 2.5× coarser.)
-    cascades: 4,
+    // 3 cascades (not 4): Windows WebGPU caps samplers/stage at 16; image-texture
+    // ground adds albedo+ORM samplers on top of CSM + cliff + paint overlay.
+    cascades: 3,
     maxFar: 80,
     lightMargin: 200,
     mapSize: 2048,

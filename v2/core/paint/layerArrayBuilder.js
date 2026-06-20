@@ -45,8 +45,8 @@ export function buildLayerArrayTextures(textureLibrary, slotIds) {
   albedoArrayTex.wrapS = albedoArrayTex.wrapT = THREE.RepeatWrapping;
   albedoArrayTex.minFilter = THREE.LinearMipMapLinearFilter;
   albedoArrayTex.magFilter = THREE.LinearFilter;
-  albedoArrayTex.colorSpace = THREE.SRGBColorSpace;
   albedoArrayTex.generateMipmaps = true;
+  albedoArrayTex.colorSpace = THREE.SRGBColorSpace;
   albedoArrayTex.needsUpdate = true;
 
   const ormArrayTex = new THREE.DataArrayTexture(ormData, TEX_RES, TEX_RES, count);
@@ -55,8 +55,8 @@ export function buildLayerArrayTextures(textureLibrary, slotIds) {
   ormArrayTex.wrapS = ormArrayTex.wrapT = THREE.RepeatWrapping;
   ormArrayTex.minFilter = THREE.LinearMipMapLinearFilter;
   ormArrayTex.magFilter = THREE.LinearFilter;
-  ormArrayTex.colorSpace = THREE.LinearSRGBColorSpace;
   ormArrayTex.generateMipmaps = true;
+  ormArrayTex.colorSpace = THREE.LinearSRGBColorSpace;
   ormArrayTex.needsUpdate = true;
 
   return { albedoArrayTex, ormArrayTex };
