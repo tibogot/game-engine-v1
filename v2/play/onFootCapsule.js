@@ -19,6 +19,8 @@ import * as THREE from "three";
 export const DEFAULT_CAPSULE_PARAMS = {
   capRadius: 0.4,
   capHeight: 1.2,
+  /** Shift capsule collision center along local +Z (m). Use for long quadrupeds. */
+  capForwardOffset: 0,
 
   walkSpeed: 4.0,
   runSpeed: 8.0,
@@ -134,6 +136,21 @@ export class CapsuleController {
   getCapsuleCenterY() {
     const { radius, height } = this.getCapsuleDims();
     return this.position.y + radius + height * 0.5;
+  }
+
+  /** Feet pivot in world XZ; collision capsule may be shifted forward (local +Z). */
+  _capsuleXZ(out = { x: 0, z: 0 }) {
+    const fwd = this.params.capForwardOffset || 0;
+    if (Math.abs(fwd) < 1e-6) {
+      out.x = this.position.x;
+      out.z = this.position.z;
+      return out;
+    }
+    const sin = Math.sin(this.yaw);
+    const cos = Math.cos(this.yaw);
+    out.x = this.position.x + fwd * sin;
+    out.z = this.position.z + fwd * cos;
+    return out;
   }
 
   reset(x, y, z) {
@@ -269,8 +286,9 @@ export class CapsuleController {
 
       if (canDepen) {
         for (let it = 0; it < p.iterations; it++) {
-          const sx = this.position.x;
-          const sz = this.position.z;
+          const capXZ = this._capsuleXZ();
+          const sx = capXZ.x;
+          const sz = capXZ.z;
           const sy = this.position.y + r; // bottom sphere centre
           const ey = this.position.y + r + h; // top sphere centre
           const corr = collider.capsuleDepenetrate(sx, sy, sz, sx, ey, sz, r);
@@ -309,8 +327,9 @@ export class CapsuleController {
         this.position.x = preX + moveX; // retry full horizontal at raised height
         this.position.z = preZ + moveZ;
         for (let it = 0; it < p.iterations; it++) {
-          const sx = this.position.x;
-          const sz = this.position.z;
+          const capXZ = this._capsuleXZ();
+          const sx = capXZ.x;
+          const sz = capXZ.z;
           const sy = this.position.y + r;
           const ey = this.position.y + r + h;
           const corr = collider.capsuleDepenetrate(sx, sy, sz, sx, ey, sz, r);
@@ -320,10 +339,11 @@ export class CapsuleController {
           this.position.z += corr.dz;
           if (Math.abs(corr.dx) + Math.abs(corr.dy) + Math.abs(corr.dz) < 1e-5) break;
         }
+        const capXZ = this._capsuleXZ();
         const hit = collider.raycastDown(
-          this.position.x,
+          capXZ.x,
           this.position.y + r,
-          this.position.z,
+          capXZ.z,
           r + p.stepMaxHeight + 0.02,
         );
         const landed =
@@ -348,9 +368,10 @@ export class CapsuleController {
         const plat = platforms[i];
         const segBotY = this.position.y + r;
         const segTopY = this.position.y + r + h;
+        const capXZ = this._capsuleXZ();
         const push = resolveCapsuleBox(
-          this.position.x,
-          this.position.z,
+          capXZ.x,
+          capXZ.z,
           segBotY,
           segTopY,
           r,
