@@ -385,6 +385,7 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
         p: vec(n.x, n.z),
         forceJunction: !!n.forceJunction,
         roundabout: !!n.roundabout,
+        lift: Number(n.lift) || 0,
       },
     ]),
   );
@@ -511,6 +512,9 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
 
   /** Span lane/center markings shared by straight and curved spans. pathAt(off) → polyline. */
   function emitSpanMarkings(edge, pathAt) {
+    // Bridges hold a height across the gap; their markings would dip with the
+    // terrain-draped global marking path, so skip them (MVP — bridge deck only).
+    if (edge.bridge) return;
     const em = edgeSpanMarkingParams(edge);
     for (let i = 1; i < count; i++) {
       if (i === lanesPerDir) {
@@ -673,6 +677,9 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
       const segs = Math.max(8, Math.min(240, Math.ceil(spanLen / spanLongStep)));
       const piece = buildNetworkBend(Q0, Q1, Q2, width, segs, lateralCols, scaledProfile);
       piece.networkSpan = true;
+      piece.bridge = !!edge.bridge;
+      piece.liftStart = a.lift;
+      piece.liftEnd = b.lift;
       pieces.push(piece);
       emitSpanMarkings(edge, (off) => sampleQuadraticOffset(Q0, Q1, Q2, off, segs));
       continue;
@@ -706,6 +713,9 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
       grid,
       gridProfile: spanProfileYs,
       networkSpan: true,
+      bridge: !!edge.bridge,
+      liftStart: a.lift,
+      liftEnd: b.lift,
     });
     emitSpanMarkings(edge, (off) => {
       const mPath = [];
@@ -781,7 +791,9 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
           control = hit.p;
         }
       }
-      pieces.push(buildNetworkBend(mA.mouth, control, mB.mouth, width, curveSegments, lateralCols, scaledProfile));
+      const bendPiece = buildNetworkBend(mA.mouth, control, mB.mouth, width, curveSegments, lateralCols, scaledProfile);
+      bendPiece.nodeLift = node.lift;
+      pieces.push(bendPiece);
 
       const bendSamples = Math.max(4, curveSegments | 0);
       for (let i = 1; i < count; i++) {
@@ -842,6 +854,13 @@ export function buildLabNetworkGeometry(nodes, edges, params) {
       mouths: roadEnds.map((re) => ({ c: re.mouth })),
       outlineSegments: boundary.outlineSegments,
     });
+  }
+
+  // Junction/cap/ring pieces inherit their node's lift (deck rises with the node).
+  for (const piece of pieces) {
+    if (piece.networkNode && piece.nodeLift === undefined) {
+      piece.nodeLift = piece.networkNode.lift || 0;
+    }
   }
 
   return { ok: true, pieces, markings, nodes };

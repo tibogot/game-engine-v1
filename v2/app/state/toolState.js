@@ -1677,6 +1677,7 @@ export function createPerfState() {
       remesh: 0,
       unload: 0,
     },
+    streamBackpressure: false,
     trisApprox: 0,
   };
 }

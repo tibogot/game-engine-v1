@@ -27,6 +27,7 @@ import {
 import { detectAlphaChannel } from "./foliageMaterial.js";
 
 const LOD_KEYS = ["lod0", "lod1", "lod2"];
+const DEFAULT_CHUNK_MESH_CACHE_EXTRA = 64;
 
 function stableHash01(i, seed) {
   const x = Math.sin(i * 12.9898 + seed * 78.233) * 43758.5453123;
@@ -197,6 +198,23 @@ export class BillboardRenderer {
     for (const k of LOD_KEYS) this._removeChunkMesh(slotMeshes[k]);
   }
 
+  _chunkMeshCacheExtra() {
+    return this.config.foliageLod?.chunkMeshCacheExtra ?? DEFAULT_CHUNK_MESH_CACHE_EXTRA;
+  }
+
+  _hideSlotMeshes(slotMeshes) {
+    if (!slotMeshes) return;
+    for (const k of LOD_KEYS) {
+      if (slotMeshes[k]) slotMeshes[k].visible = false;
+    }
+  }
+
+  _hideChunkEntry(key) {
+    const entry = this._chunkMeshes.get(key);
+    if (!entry) return;
+    for (const sm of entry.slots.values()) this._hideSlotMeshes(sm);
+  }
+
   _disposeChunkEntry(key) {
     const entry = this._chunkMeshes.get(key);
     if (!entry) return;
@@ -204,6 +222,15 @@ export class BillboardRenderer {
       this._disposeSlotMeshes(sm);
     }
     this._chunkMeshes.delete(key);
+  }
+
+  _trimChunkMeshCache(activeKeys) {
+    const maxSize = activeKeys.size + this._chunkMeshCacheExtra();
+    if (this._chunkMeshes.size <= maxSize) return;
+    for (const k of [...this._chunkMeshes.keys()]) {
+      if (this._chunkMeshes.size <= maxSize) break;
+      if (!activeKeys.has(k)) this._disposeChunkEntry(k);
+    }
   }
 
   _disposeChunkMeshesForSlot(slotIdx) {
@@ -417,13 +444,10 @@ export class BillboardRenderer {
       }
     }
 
-    if (this._chunkMeshes.size > activeKeys.size + 16) {
-      for (const key of [...this._chunkMeshes.keys()]) {
-        if (!activeKeys.has(key)) {
-          this._disposeChunkEntry(key);
-        }
-      }
+    for (const key of this._chunkMeshes.keys()) {
+      if (!activeKeys.has(key)) this._hideChunkEntry(key);
     }
+    this._trimChunkMeshCache(activeKeys);
   }
 
   updateTime(t) {

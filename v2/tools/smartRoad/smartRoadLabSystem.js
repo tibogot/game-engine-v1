@@ -93,6 +93,11 @@ export class SmartRoadLabSystem {
     this._rebuildQueued = false;
     this._lastRebuildAt = 0;
     this._rebuildThrottleMs = 60;
+    // Deferred geometry disposal: destroying a GPU buffer the same frame it was
+    // last rendered can lose the WebGPU device (the buffer may still be in flight).
+    // Retired geometries wait a few frames before .dispose() — bulletproofs drag.
+    this._retire = [];
+    this._frame = 0;
 
     this._handleGeo = new THREE.SphereGeometry(2.0, 16, 12);
     this._edgeHandleGeo = new THREE.SphereGeometry(1.3, 12, 10);
@@ -122,17 +127,19 @@ export class SmartRoadLabSystem {
     this.nodes = (nodes || []).map((n) => ({
       id: Number(n.id), x: +n.x, z: +n.z,
       forceJunction: !!n.forceJunction, roundabout: !!n.roundabout,
+      lift: Number(n.lift) || 0,
     }));
-    this.edges = (edges || []).map((e) => ({ a: Number(e.a), b: Number(e.b), bend: Number(e.bend) || 0 }));
+    this.edges = (edges || []).map((e) => ({ a: Number(e.a), b: Number(e.b), bend: Number(e.bend) || 0, bridge: !!e.bridge }));
     this._nextNodeId = Math.max(0, ...this.nodes.map((n) => n.id)) + 1;
     this.selectedNodeId = null;
+    this.selectedEdge = null;
     this.queueRebuild();
   }
 
   exportData() {
     return {
-      nodes: this.nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction, roundabout: !!n.roundabout })),
-      edges: this.edges.map((e) => ({ a: e.a, b: e.b, bend: e.bend || 0 })),
+      nodes: this.nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction, roundabout: !!n.roundabout, lift: n.lift || 0 })),
+      edges: this.edges.map((e) => ({ a: e.a, b: e.b, bend: e.bend || 0, bridge: !!e.bridge })),
       nextNodeId: this._nextNodeId,
       selectedNodeId: this.selectedNodeId,
     };
@@ -165,10 +172,10 @@ export class SmartRoadLabSystem {
     if (n) { n.x = x; n.z = z; this.queueRebuild(); }
   }
   addNode(x, z, connectToSelected = true) {
-    const node = { id: this._nextNodeId++, x, z, forceJunction: false, roundabout: false };
+    const node = { id: this._nextNodeId++, x, z, forceJunction: false, roundabout: false, lift: 0 };
     this.nodes.push(node);
     if (connectToSelected && this.selectedNodeId !== null) {
-      this.edges.push({ a: this.selectedNodeId, b: node.id, bend: 0 });
+      this.edges.push({ a: this.selectedNodeId, b: node.id, bend: 0, bridge: false });
     }
     this.selectedNodeId = node.id;
     this.queueRebuild();
@@ -179,12 +186,26 @@ export class SmartRoadLabSystem {
     if (a === b) return false;
     const idx = this.edges.findIndex((e) => (e.a === a && e.b === b) || (e.a === b && e.b === a));
     if (idx >= 0) { this.edges.splice(idx, 1); this.queueRebuild(); return false; }
-    this.edges.push({ a, b, bend: 0 });
+    this.edges.push({ a, b, bend: 0, bridge: false });
     this.queueRebuild();
     return true;
   }
   setEdgeBend(edge, bend) {
     edge.bend = bend;
+    this.queueRebuild();
+  }
+  selectEdge(edge) { this.selectedEdge = edge; }
+  /** Raise/lower the selected node's deck height (lift above terrain). */
+  adjustNodeLift(delta) {
+    const n = this._node(this.selectedNodeId);
+    if (!n) return;
+    n.lift = Math.max(0, (n.lift || 0) + delta);
+    this.queueRebuild();
+  }
+  /** Toggle the selected edge between road and bridge (elevated, spans the gap). */
+  toggleBridge() {
+    if (!this.selectedEdge) return;
+    this.selectedEdge.bridge = !this.selectedEdge.bridge;
     this.queueRebuild();
   }
   deleteNode(id) {
@@ -243,6 +264,17 @@ export class SmartRoadLabSystem {
   // ── Frame update / rebuild throttle ─────────────────────────────────────────
   queueRebuild() { this._rebuildQueued = true; }
   update() {
+    this._frame++;
+    // Dispose geometries retired ≥3 frames ago — the GPU is done with them, so
+    // destroying their buffers can't lose the device. Queue is FIFO by frame.
+    if (this._retire.length) {
+      let i = 0;
+      while (i < this._retire.length && this._frame - this._retire[i].f >= 3) {
+        this._retire[i].g.dispose();
+        i++;
+      }
+      if (i > 0) this._retire.splice(0, i);
+    }
     if (!this._rebuildQueued) return;
     const now = performance.now();
     if (now - this._lastRebuildAt < this._rebuildThrottleMs) return;
@@ -297,11 +329,70 @@ export class SmartRoadLabSystem {
 
   _drapeY(x, z) { return this.roadSurfaceH(x, z) + this.params.clearance; }
 
+  /** Returns (x,z) → t in [0,1] by arclength projection onto a spine polyline. */
+  _spineProjector(spine) {
+    const path = this._resamplePath2d(spine, 4);
+    const n = path.length;
+    const cum = [0];
+    for (let i = 1; i < n; i++) cum[i] = cum[i - 1] + Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+    const total = cum[n - 1] || 1;
+    const proj = (x, z) => {
+      let bestSq = Infinity, bestS = 0;
+      for (let i = 0; i < n - 1; i++) {
+        const ax = path[i].x, az = path[i].y, bx = path[i + 1].x, bz = path[i + 1].y;
+        const dx = bx - ax, dz = bz - az;
+        const lenSq = dx * dx + dz * dz;
+        let t = 0;
+        if (lenSq > 1e-8) t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lenSq));
+        const ex = x - (ax + dx * t), ez = z - (az + dz * t);
+        const sq = ex * ex + ez * ez;
+        if (sq < bestSq) { bestSq = sq; bestS = cum[i] + t * Math.sqrt(lenSq); }
+      }
+      return bestS / total;
+    };
+    proj.first = path[0];
+    proj.last = path[n - 1];
+    return proj;
+  }
+
+  /** Deck height function for a piece, incorporating node LIFT. Returns null for
+   *  a plain ground span (lift 0, not a bridge) → callers fall back to _drapeY.
+   *   - bridge span: absolute eased line between the two bank deck heights
+   *     (roadSurfaceH(bank)+lift), ignoring the carved terrain in between.
+   *   - lifted span: terrain-following + interpolated lift.
+   *   - junction/cap/bend: terrain + constant node lift. */
+  _pieceYAt(piece) {
+    const clr = this.params.clearance;
+    if (piece.bridge && piece.center?.length >= 2) {
+      const proj = this._spineProjector(piece.center);
+      const la = piece.liftStart || 0, lb = piece.liftEnd || 0;
+      const hA = this.roadSurfaceH(proj.first.x, proj.first.y) + la;
+      const hB = this.roadSurfaceH(proj.last.x, proj.last.y) + lb;
+      return (x, z) => hA + (hB - hA) * proj(x, z) + clr;
+    }
+    const la = piece.liftStart || 0, lb = piece.liftEnd || 0;
+    if (piece.center?.length >= 2 && (la || lb)) {
+      const proj = this._spineProjector(piece.center);
+      return (x, z) => this.roadSurfaceH(x, z) + (la + (lb - la) * proj(x, z)) + clr;
+    }
+    const nl = piece.nodeLift || 0;
+    if (nl) return (x, z) => this.roadSurfaceH(x, z) + nl + clr;
+    return null;
+  }
+
+  /** A span is "elevated" (gets a deck beam, no terrain flatten/skirt) when it's
+   *  a bridge or lifted more than ~1m off the ground — it becomes a viaduct. */
+  _isElevated(piece) {
+    if (piece.bridge) return true;
+    return Math.max(Math.abs(piece.liftStart || 0), Math.abs(piece.liftEnd || 0), Math.abs(piece.nodeLift || 0)) > 1.0;
+  }
+
   _disposeGroup(group) {
     for (const child of [...group.children]) {
       group.remove(child);
+      // Defer disposal — see _retire. Shared handle geos are never disposed.
       if (child.geometry && child.geometry !== this._handleGeo && child.geometry !== this._edgeHandleGeo) {
-        child.geometry.dispose();
+        this._retire.push({ g: child.geometry, f: this._frame });
       }
     }
   }
@@ -324,8 +415,8 @@ export class SmartRoadLabSystem {
     this._edgeHandleMeshes = [];
 
     const result = buildLabNetworkGeometry(
-      this.nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction, roundabout: !!n.roundabout })),
-      this.edges.map((e) => ({ a: e.a, b: e.b, bend: e.bend || 0 })),
+      this.nodes.map((n) => ({ id: n.id, x: n.x, z: n.z, forceJunction: !!n.forceJunction, roundabout: !!n.roundabout, lift: n.lift || 0 })),
+      this.edges.map((e) => ({ a: e.a, b: e.b, bend: e.bend || 0, bridge: !!e.bridge })),
       {
         width: P.width,
         lanesPerDir: P.lanesPerDir,
@@ -378,9 +469,10 @@ export class SmartRoadLabSystem {
     if (!draft) this._footprints = [];
     for (const piece of result.pieces) {
       if (draft) break;
-      if (piece.center?.length >= 2) {
+      // Elevated spans (bridges / high lift) span gaps — don't flatten under them.
+      if (piece.center?.length >= 2 && !this._isElevated(piece)) {
         this._footprints.push({ pts: piece.center.map((p) => ({ x: p.x, z: p.y })) });
-      } else if (piece.isJunctionCore && piece.networkNode && piece.mouths?.length) {
+      } else if (piece.isJunctionCore && piece.networkNode && piece.mouths?.length && (piece.nodeLift || 0) <= 1.0) {
         const np = piece.networkNode.p;
         for (const m of piece.mouths) {
           this._footprints.push({ pts: [{ x: np.x, z: np.y }, { x: m.c.x, z: m.c.y }] });
@@ -389,8 +481,10 @@ export class SmartRoadLabSystem {
     }
 
     for (const piece of result.pieces) {
+      // Per-piece deck height (terrain + node lift, or bridge absolute span).
+      const byAt = this._pieceYAt(piece);
       const surfGeo = piece.grid
-        ? this._gridToGeometry(piece.grid, piece.gridProfile)
+        ? this._gridToGeometry(piece.grid, piece.gridProfile, byAt)
         : this._polygonToGeometry(piece.polygon);
       if (surfGeo) {
         const mesh = new THREE.Mesh(surfGeo, piece.isJunctionCore ? this._mat.junction : this._mat.asphalt);
@@ -402,7 +496,16 @@ export class SmartRoadLabSystem {
       // Side-wall skirt at the true deck edge (hw from spine / outline boundary).
       const skirt = !draft && P.skirtDepth > 1e-3;
       const isSpan = piece.center?.length >= 2 && !piece.isJunctionCore;
-      if (!draft && P.sidewalk && isSpan) {
+      if (!draft && isSpan && this._isElevated(piece)) {
+        // Elevated deck beam: thicker side walls at the held deck height (ground
+        // shows underneath). No sidewalk, no terrain-reaching skirt. Piers = later.
+        const beam = Math.max(P.skirtDepth, 0.8);
+        for (const sign of [1, -1]) {
+          const edge = this._offsetPath2d(piece.center, sign * hw);
+          const wall = this._wallMesh(edge, beam, this._mat.side, byAt);
+          if (wall) this.roadGroup.add(wall);
+        }
+      } else if (!draft && P.sidewalk && isSpan) {
         // Curb (vertical, road→curb top) + raised walkable band + outer face.
         const sw = P.sidewalkWidth;
         const roadY = (x, z) => this.roadSurfaceH(x, z) + P.clearance;
@@ -433,7 +536,7 @@ export class SmartRoadLabSystem {
         if (piece.center?.length >= 2 && !piece.isJunctionCore) {
           for (const sign of [1, -1]) {
             const path = this._offsetPath2d(piece.center, sign * (hw - insetDist));
-            const stripe = this._stripeMesh(path, edgeHalf, this._mat.white, 0.03);
+            const stripe = this._stripeMesh(path, edgeHalf, this._mat.white, 0.03, byAt);
             if (stripe) this.roadGroup.add(stripe);
           }
         } else if (piece.isJunctionCore && Array.isArray(piece.outlineSegments)) {
@@ -478,7 +581,7 @@ export class SmartRoadLabSystem {
         ? this._matHandleSel
         : n.roundabout ? this._matHandleRound : n.forceJunction ? this._matHandleJunc : this._matHandle;
       const mesh = new THREE.Mesh(this._handleGeo, mat);
-      mesh.position.set(n.x, this._drapeY(n.x, n.z) + P.handleLift + 0.2, n.z);
+      mesh.position.set(n.x, this._drapeY(n.x, n.z) + (n.lift || 0) + P.handleLift + 0.2, n.z);
       mesh.userData.nodeId = n.id;
       this.handleGroup.add(mesh);
       this._handleMeshes.push(mesh);
@@ -489,8 +592,10 @@ export class SmartRoadLabSystem {
       const bend = e.bend || 0;
       const hx = f.mx + f.px * bend;
       const hz = f.mz + f.pz * bend;
+      const a = this._node(e.a), b = this._node(e.b);
+      const midLift = ((a?.lift || 0) + (b?.lift || 0)) * 0.5;
       const mesh = new THREE.Mesh(this._edgeHandleGeo, this._matHandleEdge);
-      mesh.position.set(hx, this._drapeY(hx, hz) + P.handleLift, hz);
+      mesh.position.set(hx, this._drapeY(hx, hz) + midLift + P.handleLift, hz);
       mesh.userData.edge = e;
       this.handleGroup.add(mesh);
       this._edgeHandleMeshes.push(mesh);
@@ -500,8 +605,8 @@ export class SmartRoadLabSystem {
       const a = this._node(e.a);
       const b = this._node(e.b);
       if (!a || !b) continue;
-      linePts.push(new THREE.Vector3(a.x, this._drapeY(a.x, a.z) + P.handleLift, a.z));
-      linePts.push(new THREE.Vector3(b.x, this._drapeY(b.x, b.z) + P.handleLift, b.z));
+      linePts.push(new THREE.Vector3(a.x, this._drapeY(a.x, a.z) + (a.lift || 0) + P.handleLift, a.z));
+      linePts.push(new THREE.Vector3(b.x, this._drapeY(b.x, b.z) + (b.lift || 0) + P.handleLift, b.z));
     }
     if (linePts.length) {
       const lines = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(linePts), this._matEdgeLine);
@@ -510,7 +615,8 @@ export class SmartRoadLabSystem {
   }
 
   // ── Geometry helpers (ported from the lab; (x,y) plane → world (x,z)) ────────
-  _gridToGeometry(grid, gridProfile) {
+  _gridToGeometry(grid, gridProfile, yAt) {
+    const Y = yAt || ((x, z) => this._drapeY(x, z));
     const rows = grid.length;
     const cols = grid[0].length;
     const pos = new Float32Array(rows * cols * 3);
@@ -520,7 +626,7 @@ export class SmartRoadLabSystem {
         const pt = grid[i][j];
         const profY = gridProfile ? (gridProfile[j] || 0) : 0;
         pos[k++] = pt.x;
-        pos[k++] = this._drapeY(pt.x, pt.y) + profY;
+        pos[k++] = Y(pt.x, pt.y) + profY;
         pos[k++] = pt.y;
       }
     }
@@ -672,14 +778,15 @@ export class SmartRoadLabSystem {
   /** Vertical side wall (skirt) hanging from a draped 2D edge path down by `depth`.
    *  Makes the road read as a solid slab sitting in the graded terrain instead of
    *  a floating ribbon — the gap under the deck edge is hidden by the wall. */
-  _wallMesh(rawPath, depth, mat) {
+  _wallMesh(rawPath, depth, mat, yAt) {
     if (!rawPath || rawPath.length < 2) return null;
+    const Y = yAt || ((x, z) => this._drapeY(x, z));
     const path = this._resamplePath2d(rawPath, 2.5);
     const n = path.length;
     const pos = new Float32Array(n * 2 * 3);
     let k = 0;
     for (let i = 0; i < n; i++) {
-      const top = this._drapeY(path[i].x, path[i].y);
+      const top = Y(path[i].x, path[i].y);
       pos[k++] = path[i].x; pos[k++] = top; pos[k++] = path[i].y;
       pos[k++] = path[i].x; pos[k++] = top - depth; pos[k++] = path[i].y;
     }
@@ -697,8 +804,9 @@ export class SmartRoadLabSystem {
     return mesh;
   }
 
-  _stripeMesh(rawPath, hw, mat, lift) {
+  _stripeMesh(rawPath, hw, mat, lift, yAt) {
     if (!rawPath || rawPath.length < 2) return null;
+    const Y = yAt || ((x, z) => this._drapeY(x, z));
     const path = this._resamplePath2d(rawPath, 2.0);
     const left = this._offsetPath2d(path, hw);
     const right = this._offsetPath2d(path, -hw);
@@ -706,8 +814,8 @@ export class SmartRoadLabSystem {
     const pos = new Float32Array(n * 2 * 3);
     let k = 0;
     for (let i = 0; i < n; i++) {
-      pos[k++] = left[i].x; pos[k++] = this._drapeY(left[i].x, left[i].y) + lift; pos[k++] = left[i].y;
-      pos[k++] = right[i].x; pos[k++] = this._drapeY(right[i].x, right[i].y) + lift; pos[k++] = right[i].y;
+      pos[k++] = left[i].x; pos[k++] = Y(left[i].x, left[i].y) + lift; pos[k++] = left[i].y;
+      pos[k++] = right[i].x; pos[k++] = Y(right[i].x, right[i].y) + lift; pos[k++] = right[i].y;
     }
     const idx = [];
     for (let i = 0; i < n - 1; i++) {
@@ -726,6 +834,8 @@ export class SmartRoadLabSystem {
   dispose() {
     this._disposeGroup(this.roadGroup);
     this._disposeGroup(this.handleGroup);
+    for (const e of this._retire) e.g.dispose(); // flush deferred queue
+    this._retire.length = 0;
     this.scene.remove(this.roadGroup);
     this.scene.remove(this.handleGroup);
     this._handleGeo.dispose();

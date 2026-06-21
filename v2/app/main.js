@@ -5171,6 +5171,7 @@ export async function startV2App(opts = {}) {
       if (hit?.edge) {
         event.preventDefault();
         sr2.dragEdge = hit.edge;
+        smartRoad2System.selectEdge(hit.edge); // B toggles bridge on it
         smartRoad2System.setDragging(true);
         controls.enabled = false;
         return;
@@ -5799,6 +5800,15 @@ export async function startV2App(opts = {}) {
       if (smartRoad2System.selectedNodeId !== null) {
         smartRoad2System.cycleNodeType(smartRoad2System.selectedNodeId);
       }
+    } else if (event.code === "KeyB" && toolState.mode === "smartRoad2" && !ctrl) {
+      event.preventDefault();
+      smartRoad2System.toggleBridge(); // toggle bridge on the last-grabbed edge
+    } else if (event.code === "BracketRight" && toolState.mode === "smartRoad2") {
+      event.preventDefault();
+      smartRoad2System.adjustNodeLift(event.shiftKey ? 0.1 : 0.5); // raise selected node
+    } else if (event.code === "BracketLeft" && toolState.mode === "smartRoad2") {
+      event.preventDefault();
+      smartRoad2System.adjustNodeLift(event.shiftKey ? -0.1 : -0.5); // lower selected node
     } else if (event.code === "Delete" && toolState.mode === "river") {
       event.preventDefault();
       riverSystem.deleteSelected();
@@ -6139,6 +6149,16 @@ export async function startV2App(opts = {}) {
   }
 
   let last = performance.now();
+  // Throttled chunk-stream anchor (play + view) — fast camera motion otherwise
+  // rescans the 33×33 chunk window every 0.5 m. Re-armed on play ↔ view switch.
+  const _streamAnchor = new THREE.Vector3();
+  let _streamAnchorInit = false;
+  let _streamAnchorLastMs = 0;
+  let _wasPlayActive = false;
+  const STREAM_ANCHOR_INTERVAL_MS = config.streaming?.anchorIntervalMs ?? 150;
+  const STREAM_ANCHOR_SNAP_DIST =
+    config.world.chunkSize * (config.streaming?.anchorSnapDistMul ?? 0.5);
+  const STREAM_QUEUE_PRESSURE = config.budgets?.streamQueuePressure ?? 20;
   let _lastLightSnap = "";
   let _lastProcSkySnap = "";
   let _lastInteriorSnap = "";
@@ -6150,9 +6170,8 @@ export async function startV2App(opts = {}) {
   worldOcean.syncParams(toolState.worldOcean);
 
   // --- Pipeline pre-warm for the lazily-built systems --------------------------
-  // Foliage (per-chunk, disposed on prune) and billboards are built/torn down at
-  // runtime, so their pipelines compile on FIRST DRAW during play — the orbit
-  // stutter. Trees/props/terrain create their meshes once and persist, so the
+  // Foliage/billboard tier meshes are built lazily per chunk; prewarm covers the
+  // shader pipelines so first-draw stalls don't hit during play. Trees/props/terrain
   // load-time compileAsync already covers them. Here we instantiate ONE
   // representative mesh per foliage/billboard slot (real geometry + shared
   // material → the exact pipeline), park it far below the world, compile, then
@@ -6161,6 +6180,35 @@ export async function startV2App(opts = {}) {
   const _pwMat = new THREE.Matrix4();
   let _prewarmRunning = false;
   let _prewarmedForPlay = false;
+
+  function _streamQueueDepth() {
+    return (
+      (perf.queues.create || 0) +
+      (perf.queues.remesh || 0) +
+      (perf.queues.unload || 0)
+    );
+  }
+
+  /** Chunk streaming anchor — throttled so flight / fast orbit don't rescan every frame. */
+  function _streamAnchorFor(focusPos, nowMs) {
+    if (!_streamAnchorInit) {
+      _streamAnchor.copy(focusPos);
+      _streamAnchorInit = true;
+      _streamAnchorLastMs = nowMs;
+      return _streamAnchor;
+    }
+    const elapsed = nowMs - _streamAnchorLastMs;
+    const snapSq = STREAM_ANCHOR_SNAP_DIST * STREAM_ANCHOR_SNAP_DIST;
+    if (
+      elapsed >= STREAM_ANCHOR_INTERVAL_MS ||
+      _streamAnchor.distanceToSquared(focusPos) >= snapSq
+    ) {
+      _streamAnchor.copy(focusPos);
+      _streamAnchorLastMs = nowMs;
+    }
+    return _streamAnchor;
+  }
+
   async function prewarmLazyPipelines() {
     if (_prewarmRunning) return;
     _prewarmRunning = true;
@@ -6292,15 +6340,26 @@ export async function startV2App(opts = {}) {
     tickPerf(perf, now, dtMs);
     frameProbe.beginFrame();
 
+    if (_wasPlayActive !== playMode.active) {
+      if (!playMode.active) _prewarmedForPlay = false;
+      _streamAnchorInit = false;
+    }
+    _wasPlayActive = playMode.active;
+
     if (!playMode.active) controls.update();
-    const dtSec = dtMs * 0.001;
+    const dtSec = Math.min(dtMs * 0.001, 0.05);
     playMode.update(dtSec);
     smartRoad2System.setEditActive(toolState.mode === "smartRoad2");
     smartRoad2System.update();
     // Pre-warm foliage/billboard pipelines once when entering play (re-arm on exit
-    // so world edits are recompiled). Fire-and-forget: compiles behind the scene
-    // so first-draw shader stalls don't hit during flight.
-    if (playMode.active && !_prewarmedForPlay) {
+    // so world edits are recompiled). Defer while stream queues are backed up so
+    // compileAsync doesn't fight chunk drain / GPU work.
+    if (
+      playMode.active &&
+      !_prewarmedForPlay &&
+      !_prewarmRunning &&
+      _streamQueueDepth() < STREAM_QUEUE_PRESSURE
+    ) {
       _prewarmedForPlay = true;
       prewarmLazyPipelines();
     }
@@ -6364,7 +6423,9 @@ export async function startV2App(opts = {}) {
       }
       // Amortized IBL bake: one cube face per frame, convolve on completion, then
       // idle — never a single-frame full bake, so no per-frame stutter.
-      updateProcEnvBake(procDt);
+      if (_streamQueueDepth() < STREAM_QUEUE_PRESSURE) {
+        updateProcEnvBake(procDt);
+      }
     }
 
     const Int = toolState.interior;
@@ -6408,7 +6469,8 @@ export async function startV2App(opts = {}) {
 
     const _pPreStream = performance.now();
     frameProbe.t.misc += _pPreStream - now; // frame head (sky/light/csm/interior)
-    chunkStream.update(focusPos);
+    chunkStream.update(_streamAnchorFor(focusPos, now));
+    perf.streamBackpressure = _streamQueueDepth() >= STREAM_QUEUE_PRESSURE;
     const _pStream = performance.now();
     frameProbe.t.stream += _pStream - _pPreStream;
     cliffInstancer.update();
@@ -6645,9 +6707,9 @@ export async function startV2App(opts = {}) {
     // if (roadSystem.hasReflectiveRoads() || fullRoadSystem.hasReflectiveRoads() || smartRoadSystem.hasReflectiveRoads()) {
     //   roadReflection.render(...);
     // }
-    riverSystem.update(dtMs * 0.001);
-    river2System.update(dtMs * 0.001);
-    splineSystem.update(dtMs * 0.001);
+    riverSystem.update(dtSec);
+    river2System.update(dtSec);
+    splineSystem.update(dtSec);
 
     // Daynight cloud deck — procedural sky only. Highest priority; owns the
     // frame (post-FX off path), like the lab. Gated so it can't fight the other

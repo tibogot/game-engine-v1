@@ -9473,7 +9473,9 @@
           "Shift+click ground = add node<br>" +
           "Drag node = move · drag violet handle = curve<br>" +
           "Ctrl+click node = connect (chains)<br>" +
-          "J = junction → roundabout → normal · X/Del = delete";
+          "J = junction → roundabout → normal · X/Del = delete<br>" +
+          "Grab an edge handle then B = toggle bridge (spans gaps)<br>" +
+          "[ / ] = lower / raise selected node height (Shift = fine)";
         panel.appendChild(helpRow);
         return panel;
       }
@@ -16099,7 +16101,17 @@
                 if (parseFloat(h._sl.value) !== h._obj[h._key]) h.refresh();
               }
               document.getElementById("playspawn-panel")?._updateCoords?.();
-              buildHierarchy(app);
+              const _qDepth =
+                (p.queues.create || 0) +
+                (p.queues.remesh || 0) +
+                (p.queues.unload || 0);
+              if (
+                app.toolState.mode !== "play" &&
+                !p.streamBackpressure &&
+                _qDepth < 20
+              ) {
+                buildHierarchy(app);
+              }
             }
             requestAnimationFrame(_poll);
           };

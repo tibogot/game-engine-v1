@@ -16,6 +16,7 @@ const CULL_MARGIN = 12;
 // LOD hysteresis band (±10%) so chunks sitting on a tier boundary can't flip
 // tiers every frame while the orbit camera damps.
 const LOD_HYST = 0.1;
+const DEFAULT_CHUNK_MESH_CACHE_EXTRA = 64;
 
 export class FoliageLodRenderer {
   constructor(scene, config) {
@@ -91,6 +92,44 @@ export class FoliageLodRenderer {
         }
       }
       entry.slots.delete(slotIdx);
+    }
+  }
+
+  _chunkMeshCacheExtra() {
+    return this.config.foliageLod?.chunkMeshCacheExtra ?? DEFAULT_CHUNK_MESH_CACHE_EXTRA;
+  }
+
+  _hideSlotMeshes(se) {
+    for (const lk of ["lod0", "lod1", "lod2"]) {
+      if (se[lk] && se[lk] !== false) se[lk].visible = false;
+    }
+  }
+
+  _hideEntry(entry) {
+    for (const [, se] of entry.slots) this._hideSlotMeshes(se);
+  }
+
+  _disposeEntry(key) {
+    const entry = this._chunkMeshes.get(key);
+    if (!entry) return;
+    for (const [, se] of entry.slots) {
+      for (const lk of ["lod0", "lod1", "lod2"]) {
+        if (se[lk] && se[lk] !== false) {
+          this.scene.remove(se[lk]);
+          se[lk].dispose();
+        }
+      }
+    }
+    this._chunkMeshes.delete(key);
+  }
+
+  /** Drop hidden orphan caches only when over the retention cap (LRU-ish: map order). */
+  _trimChunkMeshCache(activeKeys) {
+    const maxSize = activeKeys.size + this._chunkMeshCacheExtra();
+    if (this._chunkMeshes.size <= maxSize) return;
+    for (const k of [...this._chunkMeshes.keys()]) {
+      if (this._chunkMeshes.size <= maxSize) break;
+      if (!activeKeys.has(k)) this._disposeEntry(k);
     }
   }
 
@@ -344,19 +383,11 @@ export class FoliageLodRenderer {
       }
     }
 
-    // Prune stale chunks
-    if (this._chunkMeshes.size > activeChunks.size + 16) {
-      for (const [k, entry] of this._chunkMeshes) {
-        if (!activeChunks.has(k)) {
-          for (const [, se] of entry.slots) {
-            for (const lk of ["lod0", "lod1", "lod2"]) {
-              if (se[lk]) { this.scene.remove(se[lk]); se[lk].dispose(); }
-            }
-          }
-          this._chunkMeshes.delete(k);
-        }
-      }
+    // Orphan caches (chunk emptied in store): hide, keep GPU pipelines warm for re-orbit.
+    for (const [k, entry] of this._chunkMeshes) {
+      if (!activeChunks.has(k)) this._hideEntry(entry);
     }
+    this._trimChunkMeshCache(activeChunks);
   }
 
   updateTime(t) {

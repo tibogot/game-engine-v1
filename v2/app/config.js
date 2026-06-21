@@ -99,7 +99,19 @@ export const V2_CONFIG = {
       { maxDistance: Infinity, segments: 4, label: "L4" },
     ],
   },
+  /** Terrain chunk-stream anchor throttle (play + view) — limits 33×33 rescans while orbiting. */
+  streaming: {
+    anchorIntervalMs: 150,
+    /** Snap stream anchor when focus moves this many chunk widths (× chunkSize). */
+    anchorSnapDistMul: 0.5,
+  },
+  /** Instanced foliage/billboard chunk caches — keep hidden meshes instead of dispose on orbit. */
+  foliageLod: {
+    chunkMeshCacheExtra: 64,
+  },
   budgets: {
+    /** Sum of create+remesh+unload queues above this → defer prewarm / IBL / UI hierarchy. */
+    streamQueuePressure: 20,
     createPerFrame: 2,
     remeshPerFrame: 3,
     /** Incremental sculpt remeshes — far cheaper than full rebuilds, larger cap. */
