@@ -329,6 +329,7 @@ export class FoliageLodRenderer {
     const th = [lod0D, lod1D, fadeD];
 
     const activeChunks = new Set();
+    const frustumChunks = new Set();
 
     for (const [key, trees] of treeStore.chunks) {
       if (trees.length === 0) continue;
@@ -354,6 +355,7 @@ export class FoliageLodRenderer {
         continue;
       }
 
+      frustumChunks.add(key);
       const gen = treeStore.getGen(key);
       const entry = this._ensureChunkMeshes(key, trees, gen);
 
@@ -387,7 +389,7 @@ export class FoliageLodRenderer {
     for (const [k, entry] of this._chunkMeshes) {
       if (!activeChunks.has(k)) this._hideEntry(entry);
     }
-    this._trimChunkMeshCache(activeChunks);
+    this._trimChunkMeshCache(frustumChunks);
   }
 
   updateTime(t) {

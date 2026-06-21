@@ -511,14 +511,21 @@ export class TerrainStore {
    * so deck-minus-terrain is CONSTANT across the whole road and on slopes — no
    * clip on the downhill edge, no float on the uphill side.
    *
-   * @param footprints [{ pts:[{x,z}…] }]  road spines (centerlines / junction spokes)
-   * @param getSurfaceH (x,z)=>y           road surface height (deck minus clearance)
+   * PER-VERTEX HEIGHT-AWARE: each footprint point carries a `lift` (deck height
+   * above the terrain baseline). A vertex flattens to `roadSurfaceH+lift-embed`
+   * where the road is near the ground, but is SKIPPED where lift exceeds
+   * `liftSkip` (bridge / elevated viaduct) — so a ramp off a bridge reconnects to
+   * terrain cleanly and the river under a bridge is left carved.
+   *
+   * @param footprints [{ pts:[{x,z}…], lifts:[m…] }]  road spines + per-point lift
+   * @param getSurfaceH (x,z)=>y    terrain-baseline road surface (no lift)
    * @param halfW       road half width
-   * @param embedDepth  terrain sits this far below the surface under the road
+   * @param embedDepth  terrain sits this far below the deck under the road
    * @param shoulder    blend distance from full-flatten edge back to terrain
+   * @param liftSkip    skip flattening where deck lift exceeds this (elevated)
    * @param dirtyChunks Map filled with per-chunk dirty rects (for remeshing)
    */
-  conformToRoadSurface(footprints, getSurfaceH, halfW, embedDepth, shoulder, dirtyChunks) {
+  conformToRoadSurface(footprints, getSurfaceH, halfW, embedDepth, shoulder, liftSkip, dirtyChunks) {
     if (!Array.isArray(footprints) || footprints.length === 0) return;
     const res = this.config.world.dataResolution;
     const stride = res + 1;
@@ -532,29 +539,27 @@ export class TerrainStore {
     const outer = Math.max(0.01, shoulder);
     const reach = inner + outer;
 
-    const segDistSq = (px, pz, ax, az, bx, bz) => {
-      const dx = bx - ax, dz = bz - az;
-      const lenSq = dx * dx + dz * dz;
-      let t = 0;
-      if (lenSq > 1e-8) t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / lenSq));
-      const ex = px - (ax + dx * t), ez = pz - (az + dz * t);
-      return ex * ex + ez * ez;
-    };
-    const nearestDist = (wx, wz) => {
-      let best = Infinity;
+    // Nearest footprint point → { d, lift } (lift interpolated along the segment).
+    const nearest = (wx, wz) => {
+      let bestSq = Infinity, bestLift = 0;
       for (const fp of footprints) {
-        const pts = fp.pts;
-        for (let k = 0; k < pts.length - 1; k++) {
-          const d = segDistSq(wx, wz, pts[k].x, pts[k].z, pts[k + 1].x, pts[k + 1].z);
-          if (d < best) best = d;
-        }
+        const pts = fp.pts, lifts = fp.lifts;
         if (pts.length === 1) {
           const ex = wx - pts[0].x, ez = wz - pts[0].z;
           const d = ex * ex + ez * ez;
-          if (d < best) best = d;
+          if (d < bestSq) { bestSq = d; bestLift = lifts ? lifts[0] : 0; }
+          continue;
+        }
+        for (let k = 0; k < pts.length - 1; k++) {
+          const ax = pts[k].x, az = pts[k].z, bx = pts[k + 1].x, bz = pts[k + 1].z;
+          const dx = bx - ax, dz = bz - az, lenSq = dx * dx + dz * dz;
+          let t = 0;
+          if (lenSq > 1e-8) t = Math.max(0, Math.min(1, ((wx - ax) * dx + (wz - az) * dz) / lenSq));
+          const ex = wx - (ax + dx * t), ez = wz - (az + dz * t), sq = ex * ex + ez * ez;
+          if (sq < bestSq) { bestSq = sq; bestLift = lifts ? (lifts[k] + (lifts[k + 1] - lifts[k]) * t) : 0; }
         }
       }
-      return Math.sqrt(best);
+      return { d: Math.sqrt(bestSq), lift: bestLift };
     };
 
     // Union bbox of all footprints.
@@ -591,9 +596,10 @@ export class TerrainStore {
           const wz = chunkMinZ + iz * step;
           for (let ix = lMinX; ix <= lMaxX; ix++) {
             const wx = chunkMinX + ix * step;
-            const d = nearestDist(wx, wz);
+            const { d, lift } = nearest(wx, wz);
             if (d >= reach) continue;
-            targets.push({ cx, cz, ix, iz, idx: iz * stride + ix, d, target: getSurfaceH(wx, wz) - embedDepth });
+            if (lift > liftSkip) continue; // deck elevated here — leave terrain (bridge/viaduct)
+            targets.push({ cx, cz, ix, iz, idx: iz * stride + ix, d, target: getSurfaceH(wx, wz) + lift - embedDepth });
           }
         }
       }

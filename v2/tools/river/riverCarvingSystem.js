@@ -329,31 +329,6 @@ export class RiverCarvingSystem {
     }));
   }
 
-  /**
-   * For a given world XZ position, return the interpolated channel-floor Y
-   * from the nearest segment of `pts`.
-   */
-  _interpolatePathY(pts, wx, wz) {
-    let bestDist = Infinity;
-    let bestY = pts[0].y;
-    for (let k = 0; k < pts.length - 1; k++) {
-      const ax = pts[k].x, az = pts[k].z;
-      const bx = pts[k + 1].x, bz = pts[k + 1].z;
-      const dx = bx - ax, dz = bz - az;
-      const lenSq = dx * dx + dz * dz;
-      let t = 0;
-      if (lenSq > 1e-8) {
-        t = Math.max(0, Math.min(1, ((wx - ax) * dx + (wz - az) * dz) / lenSq));
-      }
-      const ex = wx - (ax + dx * t), ez = wz - (az + dz * t);
-      const d = Math.sqrt(ex * ex + ez * ez);
-      if (d < bestDist) {
-        bestDist = d;
-        bestY = pts[k].y * (1 - t) + pts[k + 1].y * t;
-      }
-    }
-    return bestY;
-  }
 
   /**
    * Expand the global base snapshot so it covers the footprint of `pts`.
@@ -378,8 +353,10 @@ export class RiverCarvingSystem {
 
   /**
    * Restore base terrain then re-apply every segment's carve in order.
-   * Uses conformToRoadSurface so the channel floor is fully flattened
-   * (both raised and lowered) to the smooth target height.
+   * lowerTerrainAlongPoints is lower-only so the terrain-mesh rebuild triggered
+   * by markDirtyRects never raises geometry that could cover the river surface.
+   * The smooth linear Y baked into pts (from _getCarvePath) keeps the channel
+   * floor flat regardless of terrain undulation.
    */
   _reapplyAllCarves() {
     if (!this._baseTerrainSnapshot) return;
@@ -396,17 +373,7 @@ export class RiverCarvingSystem {
     for (const seg of this.segments) {
       const pts = this._getCarvePath(seg);
       if (!pts) continue;
-      // conformToRoadSurface flattens the channel floor exactly to the target
-      // height (raise + lower), then blends back to terrain in the shoulder.
-      const footprint = [{ pts }];
-      this.terrainStore.conformToRoadSurface(
-        footprint,
-        (x, z) => this._interpolatePathY(pts, x, z),
-        rp.width * 0.5,
-        0,              // embedDepth=0: Y already has carveDepth baked in
-        rp.carveShoulder,
-        dirtyChunks,
-      );
+      this.terrainStore.lowerTerrainAlongPoints(pts, rp.width * 0.5, rp.carveShoulder, dirtyChunks);
     }
 
     this.markTerrainDirty(dirtyChunks);

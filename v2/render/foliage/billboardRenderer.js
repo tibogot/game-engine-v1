@@ -409,6 +409,7 @@ export class BillboardRenderer {
     const camX = camera.position.x;
     const camZ = camera.position.z;
     const activeKeys = new Set();
+    const frustumKeys = new Set();
 
     for (const [key, items] of foliageStore.chunks) {
       if (!items || items.length === 0) continue;
@@ -424,6 +425,25 @@ export class BillboardRenderer {
       const dcz = chunkCZ - camZ;
       const chunkDist = Math.sqrt(dcx * dcx + dcz * dcz);
 
+      this._box.min.set(minX, -100, minZ);
+      this._box.max.set(minX + chunkSize, 600, minZ + chunkSize);
+      const inFrustum = this._frustum.intersectsBox(this._box);
+
+      if (!inFrustum) {
+        // Hide cached mesh if it exists, but never rebuild for off-screen chunks.
+        // Rebuilding evicted out-of-frustum chunks every frame would create a
+        // build→evict→rebuild loop that pegs the CPU.
+        const entry = this._chunkMeshes.get(key);
+        if (entry) {
+          for (const sm of entry.slots.values()) {
+            this._applyChunkLodVisibility(sm, chunkDist, lodCfg, false);
+          }
+        }
+        continue;
+      }
+
+      frustumKeys.add(key);
+
       const gen = foliageStore.getGen(key);
       let entry = this._chunkMeshes.get(key);
       if (!entry || entry.gen !== gen) {
@@ -434,20 +454,15 @@ export class BillboardRenderer {
 
       if (!entry) continue;
 
-      this._box.min.set(minX, -100, minZ);
-      this._box.max.set(minX + chunkSize, 600, minZ + chunkSize);
-      const inFrustum = this._frustum.intersectsBox(this._box);
-      const showChunk = inFrustum;
-
       for (const sm of entry.slots.values()) {
-        this._applyChunkLodVisibility(sm, chunkDist, lodCfg, showChunk);
+        this._applyChunkLodVisibility(sm, chunkDist, lodCfg, true);
       }
     }
 
     for (const key of this._chunkMeshes.keys()) {
       if (!activeKeys.has(key)) this._hideChunkEntry(key);
     }
-    this._trimChunkMeshCache(activeKeys);
+    this._trimChunkMeshCache(frustumKeys);
   }
 
   updateTime(t) {

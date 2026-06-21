@@ -252,13 +252,11 @@ export class SmartRoadLabSystem {
     return this.roadGroup.children.filter((m) => m.isMesh && m.userData.isDeck);
   }
 
-  /** Road-spine footprints for terrain conform: [{ pts:[{x,z}…], heights:[y…] }].
-   *  Heights are the road surface (= deck minus clearance) so the host can bake. */
+  /** Road-spine footprints for terrain conform: [{ pts:[{x,z}…], lifts:[m…] }].
+   *  `lifts` = deck height above the terrain baseline per point (0 = on ground,
+   *  large = bridge/elevated) — drives the per-vertex height-aware flatten. */
   getFootprints() {
-    return (this._footprints || []).map((fp) => ({
-      pts: fp.pts,
-      heights: fp.pts.map((p) => this.roadSurfaceH(p.x, p.z)),
-    }));
+    return this._footprints || [];
   }
 
   // ── Frame update / rebuild throttle ─────────────────────────────────────────
@@ -464,25 +462,37 @@ export class SmartRoadLabSystem {
       });
     }
 
-    // Footprint spines for the terrain-flatten bake (span/bend centers + junction
-    // spokes). (x, z) in world; height filled on demand from roadSurfaceH.
+    // Per-piece deck-height fn (lift/bridge aware), reused by footprints + meshing.
+    for (const piece of result.pieces) piece._yAt = this._pieceYAt(piece);
+
+    // Footprint spines for the terrain-flatten bake. Each point carries its LIFT
+    // (deck surface minus terrain-following baseline) so the conform is per-vertex
+    // height-aware: it flattens where the road is near the ground and skips where
+    // it's elevated — so a ramp coming off a bridge reconnects to terrain cleanly.
     if (!draft) this._footprints = [];
     for (const piece of result.pieces) {
       if (draft) break;
-      // Elevated spans (bridges / high lift) span gaps — don't flatten under them.
-      if (piece.center?.length >= 2 && !this._isElevated(piece)) {
-        this._footprints.push({ pts: piece.center.map((p) => ({ x: p.x, z: p.y })) });
-      } else if (piece.isJunctionCore && piece.networkNode && piece.mouths?.length && (piece.nodeLift || 0) <= 1.0) {
+      const liftOf = (px, pz) =>
+        piece._yAt ? piece._yAt(px, pz) - P.clearance - this.roadSurfaceH(px, pz) : 0;
+      if (piece.center?.length >= 2) {
+        this._footprints.push({
+          pts: piece.center.map((p) => ({ x: p.x, z: p.y })),
+          lifts: piece.center.map((p) => liftOf(p.x, p.y)),
+        });
+      } else if (piece.isJunctionCore && piece.networkNode && piece.mouths?.length) {
         const np = piece.networkNode.p;
         for (const m of piece.mouths) {
-          this._footprints.push({ pts: [{ x: np.x, z: np.y }, { x: m.c.x, z: m.c.y }] });
+          this._footprints.push({
+            pts: [{ x: np.x, z: np.y }, { x: m.c.x, z: m.c.y }],
+            lifts: [liftOf(np.x, np.y), liftOf(m.c.x, m.c.y)],
+          });
         }
       }
     }
 
     for (const piece of result.pieces) {
       // Per-piece deck height (terrain + node lift, or bridge absolute span).
-      const byAt = this._pieceYAt(piece);
+      const byAt = piece._yAt;
       const surfGeo = piece.grid
         ? this._gridToGeometry(piece.grid, piece.gridProfile, byAt)
         : this._polygonToGeometry(piece.polygon);

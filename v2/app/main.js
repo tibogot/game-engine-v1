@@ -5833,12 +5833,18 @@ export async function startV2App(opts = {}) {
     } else if (event.code === "KeyB" && toolState.mode === "smartRoad2" && !ctrl) {
       event.preventDefault();
       smartRoad2System.toggleBridge(); // toggle bridge on the last-grabbed edge
-    } else if (event.code === "BracketRight" && toolState.mode === "smartRoad2") {
+    } else if (
+      (event.code === "Equal" || event.code === "NumpadAdd") &&
+      toolState.mode === "smartRoad2"
+    ) {
       event.preventDefault();
-      smartRoad2System.adjustNodeLift(event.shiftKey ? 0.1 : 0.5); // raise selected node
-    } else if (event.code === "BracketLeft" && toolState.mode === "smartRoad2") {
+      smartRoad2System.adjustNodeLift(event.shiftKey ? 0.1 : 0.5); // + raise selected node
+    } else if (
+      (event.code === "Minus" || event.code === "NumpadSubtract") &&
+      toolState.mode === "smartRoad2"
+    ) {
       event.preventDefault();
-      smartRoad2System.adjustNodeLift(event.shiftKey ? -0.1 : -0.5); // lower selected node
+      smartRoad2System.adjustNodeLift(event.shiftKey ? -0.1 : -0.5); // − lower selected node
     } else if (event.code === "Delete" && toolState.mode === "river") {
       event.preventDefault();
       riverSystem.deleteSelected();
@@ -7538,6 +7544,7 @@ export async function startV2App(opts = {}) {
         halfW,
         depth,
         shoulder,
+        1.5, // liftSkip: don't flatten where the deck is >1.5m above ground (bridges)
         dirtyChunks,
       );
       if (dirtyChunks.size > 0) chunkStream.markDirtyRects(dirtyChunks);
