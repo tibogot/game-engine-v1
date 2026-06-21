@@ -2,6 +2,24 @@ import * as THREE from "three";
 
 const DEG = Math.PI / 180;
 const _dummy = new THREE.Object3D();
+const _boxCenter = new THREE.Vector3();
+const _proxyMat = new THREE.Matrix4();
+const _centerMat = new THREE.Matrix4();
+
+/** One box (12 tris) per prop instance for BVH — not full render mesh × instance count. */
+function _proxyGeoFromMergedBox(mergedBox) {
+  const size = new THREE.Vector3();
+  mergedBox.getSize(size);
+  size.x = Math.max(size.x, 0.001);
+  size.y = Math.max(size.y, 0.001);
+  size.z = Math.max(size.z, 0.001);
+  return new THREE.BoxGeometry(size.x, size.y, size.z);
+}
+
+function _ensureProxyGeo(type) {
+  if (!type?.mergedBox || type.proxyGeo) return;
+  type.proxyGeo = _proxyGeoFromMergedBox(type.mergedBox);
+}
 
 export class PropStore {
   constructor() {
@@ -17,6 +35,7 @@ export class PropStore {
   registerLiveType(name, factoryId, defaultParams, mergedBox) {
     const idx = this.types.length;
     this.types.push({ name, live: true, factoryId, defaultParams, mergedBox, entries: [] });
+    _ensureProxyGeo(this.types[idx]);
     return idx;
   }
 
@@ -34,6 +53,7 @@ export class PropStore {
     const entries = [{ geometry, material, localMatrix }];
     const idx = this.types.length;
     this.types.push({ name, entries, mergedBox, builtin: true });
+    _ensureProxyGeo(this.types[idx]);
     return idx;
   }
 
@@ -57,6 +77,7 @@ export class PropStore {
 
     const idx = this.types.length;
     this.types.push({ name, entries, lod1Entries: null, lod2Entries: null, mergedBox });
+    _ensureProxyGeo(this.types[idx]);
     return idx;
   }
 
@@ -155,16 +176,22 @@ export class PropStore {
     return _dummy.matrix;
   }
 
+  /**
+   * BVH hook — one axis-aligned box proxy per static instance (12 tris), using
+   * each type's merged bounds. Matches propInstancer hitbox placement.
+   */
   forEachMeshInstance(cb) {
-    const mat = new THREE.Matrix4();
     for (const inst of this.instances) {
       const type = this.types[inst.typeIdx];
       if (!type || type.live) continue;
+      _ensureProxyGeo(type);
+      if (!type.proxyGeo) continue;
+
       const M = this.computeInstanceMatrix(inst);
-      for (const { geometry, localMatrix } of type.entries) {
-        mat.multiplyMatrices(M, localMatrix);
-        cb(geometry, mat);
-      }
+      type.mergedBox.getCenter(_boxCenter);
+      _centerMat.makeTranslation(_boxCenter.x, _boxCenter.y, _boxCenter.z);
+      _proxyMat.multiplyMatrices(M, _centerMat);
+      cb(type.proxyGeo, _proxyMat);
     }
   }
 

@@ -1,17 +1,23 @@
 import * as THREE from "three";
+import { chunkKey, worldToChunkIndex } from "../terrain/chunkMath.js";
 
 const _tmp = new THREE.Matrix4();
 const _hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
 const _boxColor = new THREE.Color(0xff8800);
 
 const MAX_INSTANCES = 4096;
+const CULL_MARGIN = 12;
+const LOD_HYST = 0.1;
+const TIER_UNSET = 255;
 
 export class PropInstancer {
-  constructor(scene, propStore, maxInstances = MAX_INSTANCES) {
+  constructor(scene, propStore, config, maxInstances = MAX_INSTANCES) {
     this.scene = scene;
     this.store = propStore;
+    this.config = config;
     this.MAX = maxInstances;
     this._lastGen = -1;
+    this._lodDirty = true;
 
     this._typeRender = [];
     this._selectedIdx = -1;
@@ -23,8 +29,19 @@ export class PropInstancer {
     this._cacheYs = null;
     this._cacheZs = null;
     this._cacheTypes = null;
+    this._cacheTiers = null;
+    /** @type {Map<string, Uint32Array>} */
+    this._chunkIndices = new Map();
 
+    this._frustum = new THREE.Frustum();
+    this._projScreen = new THREE.Matrix4();
+    this._box = new THREE.Box3();
     this._worldMat = new THREE.Matrix4();
+    this._lastCam = new Float32Array(16).fill(NaN);
+    this._lastProj = new Float32Array(16).fill(NaN);
+    this._lastLod0 = -1;
+    this._lastLod1 = -1;
+    this._lastFade = -1;
 
     this.proxyObject = new THREE.Object3D();
     scene.add(this.proxyObject);
@@ -47,9 +64,127 @@ export class PropInstancer {
       im.receiveShadow = true;
       im.frustumCulled = false;
       this.scene.add(im);
-      meshes.push({ im, localMatrix });
+      meshes.push({ im, localMatrix, _written: false });
     }
     return meshes;
+  }
+
+  _sameCamera(camera) {
+    const a = camera.matrixWorld.elements;
+    const p = camera.projectionMatrix.elements;
+    const b = this._lastCam;
+    const q = this._lastProj;
+    for (let i = 0; i < 16; i++) {
+      if (a[i] !== b[i] || p[i] !== q[i]) return false;
+    }
+    return true;
+  }
+
+  _sameLodCfg(lodCfg) {
+    return (
+      lodCfg.lod0Distance === this._lastLod0 &&
+      lodCfg.lod1Distance === this._lastLod1 &&
+      lodCfg.fadeOutDistance === this._lastFade
+    );
+  }
+
+  _markLodDirty() {
+    this._lodDirty = true;
+  }
+
+  _resetLodWriteFlags() {
+    for (const tr of this._typeRender) {
+      if (!tr) continue;
+      for (const lod of [tr.lod0, tr.lod1, tr.lod2]) {
+        if (!lod) continue;
+        for (const e of lod) e._written = false;
+      }
+    }
+  }
+
+  _commitLodCounts(typeCounts) {
+    for (let ti = 0; ti < this._typeRender.length; ti++) {
+      const tr = this._typeRender[ti];
+      if (!tr) continue;
+      const c = typeCounts[ti];
+      if (!c) continue;
+
+      for (const e of tr.lod0) {
+        const n = c.lod0;
+        if (e._written || e.im.count !== n) {
+          e.im.count = n;
+          if (e._written || n > 0) e.im.instanceMatrix.needsUpdate = true;
+        }
+      }
+      if (tr.lod1) {
+        for (const e of tr.lod1) {
+          const n = c.lod1;
+          if (e._written || e.im.count !== n) {
+            e.im.count = n;
+            if (e._written || n > 0) e.im.instanceMatrix.needsUpdate = true;
+          }
+        }
+      }
+      if (tr.lod2) {
+        for (const e of tr.lod2) {
+          const n = c.lod2;
+          if (e._written || e.im.count !== n) {
+            e.im.count = n;
+            if (e._written || n > 0) e.im.instanceMatrix.needsUpdate = true;
+          }
+        }
+      }
+    }
+  }
+
+  _pickLodTier(dist2, tier, lod0D2, lod1D2, fadeD2, out2, in2) {
+    const lod0OutD2 = lod0D2 * out2;
+    const lod0InD2 = lod0D2 * in2;
+    const lod1OutD2 = lod1D2 * out2;
+    const lod1InD2 = lod1D2 * in2;
+    const fadeOutD2 = fadeD2 * out2;
+    const fadeInD2 = fadeD2 * in2;
+
+    if (tier > 3 || tier === TIER_UNSET) {
+      if (dist2 > fadeD2) return 3;
+      if (dist2 > lod1D2) return 2;
+      if (dist2 > lod0D2) return 1;
+      return 0;
+    }
+    if (tier === 3) {
+      if (dist2 < fadeInD2) return dist2 < lod1InD2 ? (dist2 < lod0InD2 ? 0 : 1) : 2;
+      return 3;
+    }
+    if (tier === 2) {
+      if (dist2 > fadeOutD2) return 3;
+      if (dist2 < lod1InD2) return dist2 < lod0InD2 ? 0 : 1;
+      return 2;
+    }
+    if (tier === 1) {
+      if (dist2 > fadeOutD2) return 3;
+      if (dist2 > lod1OutD2) return 2;
+      if (dist2 < lod0InD2) return 0;
+      return 1;
+    }
+    if (dist2 > fadeOutD2) return 3;
+    if (dist2 > lod1OutD2) return 2;
+    if (dist2 > lod0OutD2) return 1;
+    return 0;
+  }
+
+  _lodForTier(tr, tier) {
+    if (tier === 0) return { lodArr: tr.lod0, lodKey: "lod0" };
+    if (tier === 1) {
+      return tr.lod1
+        ? { lodArr: tr.lod1, lodKey: "lod1" }
+        : { lodArr: tr.lod0, lodKey: "lod0" };
+    }
+    if (tier === 2) {
+      if (tr.lod2) return { lodArr: tr.lod2, lodKey: "lod2" };
+      if (tr.lod1) return { lodArr: tr.lod1, lodKey: "lod1" };
+      return { lodArr: tr.lod0, lodKey: "lod0" };
+    }
+    return null;
   }
 
   _disposeLodMeshes(meshes) {
@@ -154,9 +289,13 @@ export class PropInstancer {
       this._cacheYs = new Float32Array(cap);
       this._cacheZs = new Float32Array(cap);
       this._cacheTypes = new Uint16Array(cap);
+      this._cacheTiers = new Uint8Array(cap);
     }
     this._cacheCount = n;
+    this._cacheTiers.fill(TIER_UNSET, 0, n);
+    this._chunkIndices.clear();
 
+    const chunkBuckets = new Map();
     for (let i = 0; i < n; i++) {
       const inst = this.store.instances[i];
       this._cacheTypes[i] = inst.typeIdx;
@@ -164,11 +303,24 @@ export class PropInstancer {
       this._cacheYs[i] = inst.py;
       this._cacheZs[i] = inst.pz;
 
+      const { cx, cz } = worldToChunkIndex(inst.px, inst.pz, this.config);
+      const key = chunkKey(cx, cz);
+      let bucket = chunkBuckets.get(key);
+      if (!bucket) {
+        bucket = [];
+        chunkBuckets.set(key, bucket);
+      }
+      bucket.push(i);
+
       const M = this.store.computeInstanceMatrix(inst);
       const e = M.elements;
       const off = i * 16;
       for (let j = 0; j < 16; j++) this._cacheMats[off + j] = e[j];
     }
+    for (const [key, bucket] of chunkBuckets) {
+      this._chunkIndices.set(key, Uint32Array.from(bucket));
+    }
+    this._markLodDirty();
 
     // Rebuild hitboxes (always all instances for raycasting)
     const indicesByType = new Map();
@@ -211,112 +363,107 @@ export class PropInstancer {
       if (tr.lod1) for (const e of tr.lod1) e.im.count = 0;
       if (tr.lod2) for (const e of tr.lod2) e.im.count = 0;
     }
+    this._resetLodWriteFlags();
+
+    this._projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this._frustum.setFromProjectionMatrix(this._projScreen);
 
     const camX = camera.position.x;
-    const camY = camera.position.y;
     const camZ = camera.position.z;
     const lod0D2 = lodCfg.lod0Distance * lodCfg.lod0Distance;
     const lod1D2 = lodCfg.lod1Distance * lodCfg.lod1Distance;
     const fadeD2 = lodCfg.fadeOutDistance * lodCfg.fadeOutDistance;
+    const out2 = (1 + LOD_HYST) * (1 + LOD_HYST);
+    const in2 = (1 - LOD_HYST) * (1 - LOD_HYST);
+    const chunkSize = this.config.world.chunkSize;
+    const half = this.config.world.size * 0.5;
 
     const typeCounts = [];
     for (let i = 0; i < this._typeRender.length; i++) {
       typeCounts.push(this._typeRender[i] ? { lod0: 0, lod1: 0, lod2: 0 } : null);
     }
 
-    const n = this._cacheCount;
     const wm = this._worldMat;
+    const tiers = this._cacheTiers;
 
-    for (let i = 0; i < n; i++) {
-      const ti = this._cacheTypes[i];
-      if (ti >= this._typeRender.length) continue;
-      const tr = this._typeRender[ti];
-      if (!tr || tr.live) continue;
+    for (const [key, indices] of this._chunkIndices) {
+      const sep = key.indexOf(",");
+      const cx = +key.substring(0, sep);
+      const cz = +key.substring(sep + 1);
+      const minX = -half + cx * chunkSize;
+      const minZ = -half + cz * chunkSize;
+      this._box.min.set(minX - CULL_MARGIN, -100, minZ - CULL_MARGIN);
+      this._box.max.set(minX + chunkSize + CULL_MARGIN, 600, minZ + chunkSize + CULL_MARGIN);
+      if (!this._frustum.intersectsBox(this._box)) continue;
 
-      const dx = this._cacheXs[i] - camX;
-      const dy = this._cacheYs[i] - camY;
-      const dz = this._cacheZs[i] - camZ;
-      const dist2 = dx * dx + dy * dy + dz * dz;
+      for (let k = 0; k < indices.length; k++) {
+        const i = indices[k];
+        const ti = this._cacheTypes[i];
+        if (ti >= this._typeRender.length) continue;
+        const tr = this._typeRender[ti];
+        if (!tr || tr.live) continue;
 
-      if (dist2 > fadeD2) continue;
+        const dx = this._cacheXs[i] - camX;
+        const dz = this._cacheZs[i] - camZ;
+        const dist2 = dx * dx + dz * dz;
 
-      let lodArr, lodKey;
-      if (dist2 <= lod0D2) {
-        lodArr = tr.lod0;
-        lodKey = "lod0";
-      } else if (dist2 <= lod1D2) {
-        lodArr = tr.lod1 || tr.lod0;
-        lodKey = tr.lod1 ? "lod1" : "lod0";
-      } else {
-        lodArr = tr.lod2 || tr.lod1 || tr.lod0;
-        lodKey = tr.lod2 ? "lod2" : tr.lod1 ? "lod1" : "lod0";
+        let tier = tiers[i];
+        tier = this._pickLodTier(dist2, tier, lod0D2, lod1D2, fadeD2, out2, in2);
+        tiers[i] = tier;
+        if (tier === 3) continue;
+
+        const pick = this._lodForTier(tr, tier);
+        if (!pick) continue;
+        const { lodArr, lodKey } = pick;
+
+        const c = typeCounts[ti];
+        const idx = c[lodKey];
+        if (idx >= this.MAX) continue;
+
+        const off = i * 16;
+        const e = wm.elements;
+        for (let j = 0; j < 16; j++) e[j] = this._cacheMats[off + j];
+
+        for (const entry of lodArr) {
+          _tmp.multiplyMatrices(wm, entry.localMatrix);
+          entry.im.setMatrixAt(idx, _tmp);
+          entry._written = true;
+        }
+
+        c[lodKey]++;
       }
+    }
 
-      const c = typeCounts[ti];
-      const idx = c[lodKey];
-      if (idx >= this.MAX) continue;
+    this._commitLodCounts(typeCounts);
+  }
 
-      const off = i * 16;
-      const e = wm.elements;
-      for (let j = 0; j < 16; j++) e[j] = this._cacheMats[off + j];
-
-      for (const entry of lodArr) {
-        _tmp.multiplyMatrices(wm, entry.localMatrix);
-        entry.im.setMatrixAt(idx, _tmp);
-      }
-
-      c[lodKey]++;
+  _assignAllLod0() {
+    this._resetLodWriteFlags();
+    const typeCounts = [];
+    for (let ti = 0; ti < this._typeRender.length; ti++) {
+      typeCounts.push(this._typeRender[ti] ? { lod0: 0, lod1: 0, lod2: 0 } : null);
     }
 
     for (let ti = 0; ti < this._typeRender.length; ti++) {
       const tr = this._typeRender[ti];
-      if (!tr) continue;
-      const c = typeCounts[ti];
-      if (!c) continue;
-
-      for (const e of tr.lod0) {
-        if (e.im.count !== c.lod0 || c.lod0 > 0) {
-          e.im.count = c.lod0;
-          e.im.instanceMatrix.needsUpdate = true;
-        }
-      }
-      if (tr.lod1) {
-        for (const e of tr.lod1) {
-          if (e.im.count !== c.lod1 || c.lod1 > 0) {
-            e.im.count = c.lod1;
-            e.im.instanceMatrix.needsUpdate = true;
-          }
-        }
-      }
-      if (tr.lod2) {
-        for (const e of tr.lod2) {
-          if (e.im.count !== c.lod2 || c.lod2 > 0) {
-            e.im.count = c.lod2;
-            e.im.instanceMatrix.needsUpdate = true;
-          }
-        }
-      }
-    }
-  }
-
-  _assignAllLod0() {
-    for (const tr of this._typeRender) {
       if (!tr || tr.live) continue;
       const indices = tr._globalIndices;
       const n = indices.length;
-      for (const { im, localMatrix } of tr.lod0) {
-        im.count = n;
+      const c = typeCounts[ti];
+      for (const entry of tr.lod0) {
         const wm = this._worldMat;
         for (let j = 0; j < n; j++) {
           const off = indices[j] * 16;
           const e = wm.elements;
           for (let k = 0; k < 16; k++) e[k] = this._cacheMats[off + k];
-          _tmp.multiplyMatrices(wm, localMatrix);
-          im.setMatrixAt(j, _tmp);
+          _tmp.multiplyMatrices(wm, entry.localMatrix);
+          entry.im.setMatrixAt(j, _tmp);
+          entry._written = true;
         }
-        im.instanceMatrix.needsUpdate = true;
+        c.lod0 = n;
       }
     }
+    this._commitLodCounts(typeCounts);
   }
 
   // --- Public API ---
@@ -329,6 +476,20 @@ export class PropInstancer {
     }
 
     if (camera && lodCfg) {
+      if (
+        !this._lodDirty &&
+        !genChanged &&
+        this._sameLodCfg(lodCfg) &&
+        this._sameCamera(camera)
+      ) {
+        return;
+      }
+      this._lastLod0 = lodCfg.lod0Distance;
+      this._lastLod1 = lodCfg.lod1Distance;
+      this._lastFade = lodCfg.fadeOutDistance;
+      this._lastCam.set(camera.matrixWorld.elements);
+      this._lastProj.set(camera.projectionMatrix.elements);
+      this._lodDirty = false;
       this._assignLod(camera, lodCfg);
     } else if (genChanged) {
       this._assignAllLod0();

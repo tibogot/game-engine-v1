@@ -1927,7 +1927,7 @@ export async function startV2App(opts = {}) {
   const cliffSlotToType = {};
 
   const propStore = new PropStore();
-  const propInstancer = new PropInstancer(scene, propStore);
+  const propInstancer = new PropInstancer(scene, propStore, config);
   const propSystem = new PropSystem({
     toolState,
     propStore,

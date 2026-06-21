@@ -5345,6 +5345,12 @@
 
         // --- Actions ---
         _button(panel, { title: "Rebake BVH", onClick: () => app.rebakeBvh() });
+        const bvhHint = document.createElement("p");
+        bvhHint.style.cssText =
+          "margin:6px 0 0; font-size:11px; color:var(--text-dim); line-height:1.35;";
+        bvhHint.textContent =
+          "Props contribute one bounding box per instance to the player BVH (not full mesh geometry). Rebake after bulk edits.";
+        panel.appendChild(bvhHint);
         _separator(panel);
         _button(panel, {
           title: "Delete Selected [Del]",
