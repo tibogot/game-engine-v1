@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Snow Cap 2</title>
+    <style>
+      :root {
+        --bg-dark: #222222;
+        --bg-panel: #2a2a2a;
+        --bg-item: #333333;
+        --bg-hover: #3a3a3a;
+        --bg-input: #1e1e1e;
+        --border: #3c3c3c;
+        --border-light: #4a4a4a;
+        --text: #cccccc;
+        --text-dim: #888888;
+        --accent: #4a9eff;
+        --green: #5cb85c;
+        --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+        --font-mono: "Cascadia Code", "Fira Code", "Consolas", monospace;
+        --radius: 4px;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { overflow: hidden; background: #000; font-family: var(--font); color: var(--text); }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      #info {
+        position: fixed; bottom: 16px; left: 16px; z-index: 10;
+        font: 12px/1.5 "SF Mono", "Fira Code", monospace;
+        color: #b0d890; background: rgba(0,0,0,0.55);
+        padding: 8px 12px; border-radius: 6px;
+        pointer-events: none; user-select: none; backdrop-filter: blur(4px);
+      }
+      #info span { color: #e0f0c0; font-weight: 600; }
+      #lab-title {
+        position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+        z-index: 15; pointer-events: none; user-select: none;
+        font-size: 13px; font-weight: 600; letter-spacing: 0.28em;
+        text-transform: uppercase; color: var(--text);
+        padding: 8px 18px; border-radius: 6px;
+        background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.08);
+        backdrop-filter: blur(6px); box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+      }
+      #drop-overlay {
+        position: fixed; inset: 0; z-index: 50; display: none;
+        align-items: center; justify-content: center;
+        background: rgba(74, 158, 255, 0.12);
+        border: 3px dashed rgba(74, 158, 255, 0.55);
+        pointer-events: none;
+        font-size: 18px; font-weight: 600; letter-spacing: 0.12em;
+        color: #cfe8ff; text-transform: uppercase;
+        backdrop-filter: blur(2px);
+      }
+      body.drag-over #drop-overlay { display: flex; }
+      #inspector {
+        position: fixed; top: 0; right: 0;
+        width: var(--inspector-width, 320px); min-width: 260px; max-width: 70vw;
+        height: 100vh; background: var(--bg-panel); border-left: 1px solid var(--border);
+        display: flex; flex-direction: column; overflow: hidden;
+        z-index: 20; box-shadow: -2px 0 10px rgba(0,0,0,0.3);
+      }
+      #inspector-resize-handle {
+        position: absolute; top: 0; left: -3px; width: 8px; height: 100%;
+        cursor: ew-resize; z-index: 21; background: transparent; transition: background 0.15s;
+      }
+      #inspector-resize-handle:hover,
+      body.inspector-resizing #inspector-resize-handle { background: var(--accent); opacity: 0.6; }
+      body.inspector-resizing { cursor: ew-resize; user-select: none; }
+      #inspector-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0 12px; height: 32px; background: var(--bg-dark);
+        border-bottom: 1px solid var(--border);
+        font-size: 11px; font-weight: 600; letter-spacing: 0.4px;
+        text-transform: uppercase; color: var(--text-dim);
+      }
+      #inspector-toggle {
+        background: none; border: 1px solid var(--border-light);
+        border-radius: var(--radius); color: var(--text-dim);
+        cursor: pointer; padding: 2px 8px; font-size: 10px;
+      }
+      #inspector-toggle:hover { color: var(--text); background: var(--bg-hover); }
+      #inspector-body { flex: 1; overflow-y: auto; padding-bottom: 24px; }
+      body.inspector-hidden #inspector-body,
+      body.inspector-hidden #inspector-header span { display: none; }
+      body.inspector-hidden #inspector {
+        width: auto; height: auto; border-left: none;
+        background: transparent; box-shadow: none;
+      }
+      body.inspector-hidden #inspector-header { background: transparent; border: none; padding: 6px; }
+      .inspector-section { border-bottom: 1px solid var(--border); }
+      .section-header {
+        display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+        cursor: pointer; font-size: 11px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.4px;
+        color: var(--text-dim); user-select: none;
+      }
+      .section-header:hover { background: var(--bg-hover); }
+      .section-header .section-arrow { width: 14px; height: 14px; transition: transform 0.15s; flex-shrink: 0; }
+      .section-header.collapsed .section-arrow { transform: rotate(-90deg); }
+      .section-body { padding: 6px 12px 10px; }
+      .section-body.hidden { display: none; }
+      .prop-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; min-height: 26px; }
+      .prop-label { width: 96px; min-width: 96px; font-size: 11px; color: var(--text-dim); text-align: right; padding-right: 4px; }
+      .prop-value { flex: 1; display: flex; gap: 4px; align-items: center; }
+      .prop-slider-wrap { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .prop-num-input {
+        width: 72px; height: 22px; flex-shrink: 0; box-sizing: border-box;
+        background: var(--bg-input); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 0 5px; color: var(--text);
+        font-size: 11px; font-family: var(--font-mono); text-align: right; outline: none;
+      }
+      .prop-num-input:focus { border-color: var(--accent); }
+      .prop-num-input::-webkit-outer-spin-button,
+      .prop-num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+      .prop-num-input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+      .prop-slider {
+        flex: 1; height: 4px; -webkit-appearance: none; appearance: none;
+        background: var(--bg-input); border-radius: 2px; outline: none;
+      }
+      .prop-slider::-webkit-slider-thumb {
+        -webkit-appearance: none; width: 12px; height: 12px;
+        border-radius: 50%; background: var(--accent); cursor: pointer;
+      }
+      .prop-toggle {
+        width: 14px; height: 14px; border: 1px solid var(--border-light);
+        border-radius: 3px; background: var(--bg-input); cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0; padding: 0; color: transparent;
+      }
+      .prop-toggle.checked { background: var(--accent); border-color: var(--accent); color: white; }
+      .prop-toggle svg { width: 10px; height: 10px; }
+      .prop-info { font-size: 10px; color: var(--text-dim); padding: 4px 0 2px; line-height: 1.45; }
+      .section-btn {
+        display: flex; align-items: center; justify-content: center; gap: 4px;
+        width: 100%; height: 26px; margin-top: 4px;
+        background: var(--bg-item); border: 1px solid var(--border);
+        border-radius: var(--radius); color: var(--text-dim);
+        cursor: pointer; font-size: 11px; font-family: var(--font);
+      }
+      .section-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-light); }
+      .section-separator { height: 1px; background: var(--border); margin: 6px 0; }
+      #inspector-body::-webkit-scrollbar { width: 8px; }
+      #inspector-body::-webkit-scrollbar-track { background: transparent; }
+      #inspector-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/",
+          "stats-gl": "https://cdn.jsdelivr.net/npm/stats-gl/dist/main.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="lab-title">Snow Cap 2</div>
+    <div id="info">
+      <span id="backend">loading…</span> &bull;
+      Orbit &bull; Drop <span>.glb</span> to import
+    </div>
+    <div id="drop-overlay">Drop GLB / GLTF here</div>
+    <div id="inspector">
+      <div id="inspector-resize-handle" title="Drag to resize"></div>
+      <div id="inspector-header">
+        <span>Snow Cap Inspector</span>
+        <button id="inspector-toggle">Hide</button>
+      </div>
+      <div id="inspector-body"></div>
+    </div>
+
+    <script type="module">
+      import * as THREE from "three";
+      import Stats from "stats-gl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      import { SkyMesh } from "three/addons/objects/SkyMesh.js";
+      import {
+        createSnowCapMaterial,
+        createSnowCapUniforms,
+        syncSnowCapUniforms,
+        extractMeshBaseColor,
+      } from "./render/snow/snowCapMaterial.js";
+
+      // ── PARAMS ──────────────────────────────────────────────────────────────
+      const PARAMS = {
+        camera: { fov: 55 },
+        light: {
+          sunAzimuth: 155, sunElevation: 38,
+          dirIntensity: 3.0, hemiIntensity: 1.0,
+          exposure: 1.0, envIntensity: 0.5,
+        },
+        cap: {
+          amount: 1.0,
+          thickness: 0.28,
+          coverage: 0.52,
+          buildup: 1.55,
+          displaceEnabled: true,
+        },
+        mask: {
+          topMin: 0.08,
+          topMax: 0.88,
+          sideGather: 0.12,
+          useWorldUp: true,
+          useWorldUV: true,
+        },
+        noise: {
+          noiseScale: 0.35,
+          freq1: 0.18,
+          freq2: 0.42,
+          noiseAmp: 0.85,
+          microFreq: 1.6,
+          microAmp: 0.08,
+        },
+        look: {
+          roughnessSnow: 0.96,
+          roughnessBase: 0.62,
+          coldShadow: 0.55,
+          glitterIntensity: 2.2,
+          glitterScarcity: 220,
+          glitterFreq: 180,
+          shimmerAmp: 0.35,
+        },
+        import: {
+          targetHeight: 4.0,
+          subdivPass: 1,
+          posX: 11, posY: 0, posZ: 4,
+          scaleMul: 1.0,
+        },
+        scene: { showShowcase: true },
+      };
+
+      const SAMPLE_GLB = "/models/trunks/customtree3_compressed.glb";
+
+      let U = null;
+
+      // ── GEOMETRY HELPERS ────────────────────────────────────────────────────
+      function subdivideGeometry(geo, _passes) {
+        // three-subdivide not available via CDN importmap; snow cap is fragment-based so vertex density doesn't matter
+        return geo;
+      }
+
+      function meshFromGeo(geo, color, opts = {}) {
+        const g = opts.subdiv ? subdivideGeometry(geo, opts.subdiv) : geo;
+        const m = new THREE.Mesh(g, createSnowCapMaterial(color, U));
+        m.castShadow = true;
+        m.receiveShadow = true;
+        return m;
+      }
+
+      // ── SHOWCASE SCENE ──────────────────────────────────────────────────────
+      const showcaseGroup = new THREE.Group();
+      showcaseGroup.name = "Showcase";
+
+      function buildShowcase() {
+        while (showcaseGroup.children.length) showcaseGroup.remove(showcaseGroup.children[0]);
+
+        const subdiv = 0;
+
+        // House
+        const house = new THREE.Group();
+        const body = meshFromGeo(
+          new THREE.BoxGeometry(5, 3.2, 4.5, 32, 16, 28),
+          0x9a7058, { subdiv },
+        );
+        body.position.y = 1.6;
+        house.add(body);
+
+        const roof = meshFromGeo(
+          new THREE.ConeGeometry(4.2, 2.6, 4, 12),
+          0x5c3028, { subdiv },
+        );
+        roof.rotation.y = Math.PI * 0.25;
+        roof.position.y = 4.3;
+        house.add(roof);
+
+        const chimney = meshFromGeo(
+          new THREE.BoxGeometry(0.7, 1.8, 0.7, 8, 12, 8),
+          0x6a4030, { subdiv: 1 },
+        );
+        chimney.position.set(1.4, 4.8, 0.8);
+        house.add(chimney);
+
+        const porch = meshFromGeo(
+          new THREE.BoxGeometry(2.2, 0.25, 1.6, 12, 2, 8),
+          0x7a5840, { subdiv: 1 },
+        );
+        porch.position.set(0, 0.12, 3.05);
+        house.add(porch);
+
+        house.position.set(-13, 0, -6);
+        showcaseGroup.add(house);
+
+        // Pine tree
+        const tree = new THREE.Group();
+        const trunk = meshFromGeo(
+          new THREE.CylinderGeometry(0.35, 0.5, 2.8, 16, 8),
+          0x4a2e1a, { subdiv: 1 },
+        );
+        trunk.position.y = 1.4;
+        tree.add(trunk);
+        for (let i = 0; i < 4; i++) {
+          const r = 2.6 - i * 0.45;
+          const cone = meshFromGeo(
+            new THREE.ConeGeometry(r, 2.4, 24, 10),
+            0x2a5234, { subdiv: 1 },
+          );
+          cone.position.y = 2.8 + i * 1.35;
+          tree.add(cone);
+        }
+        tree.position.set(-5, 0, -9);
+        showcaseGroup.add(tree);
+
+        // Boulder cluster
+        const boulderGroup = new THREE.Group();
+        const boulder = meshFromGeo(
+          new THREE.IcosahedronGeometry(1.6, 3),
+          0x6a6660, { subdiv: 1 },
+        );
+        boulder.position.y = 1.2;
+        boulderGroup.add(boulder);
+        const b2 = meshFromGeo(new THREE.IcosahedronGeometry(0.9, 2), 0x5a5650, { subdiv: 1 });
+        b2.position.set(1.5, 0.55, 0.6);
+        boulderGroup.add(b2);
+        const b3 = meshFromGeo(new THREE.IcosahedronGeometry(0.55, 2), 0x706c66, { subdiv: 1 });
+        b3.position.set(-1.1, 0.35, 0.9);
+        boulderGroup.add(b3);
+        boulderGroup.position.set(1, 0, -8);
+        showcaseGroup.add(boulderGroup);
+
+        // Fence section
+        const fence = new THREE.Group();
+        for (let i = 0; i < 5; i++) {
+          const post = meshFromGeo(
+            new THREE.BoxGeometry(0.18, 1.4, 0.18, 4, 8, 4),
+            0x6b4a2e, { subdiv: 1 },
+          );
+          post.position.set(i * 1.1, 0.7, 0);
+          fence.add(post);
+        }
+        const railA = meshFromGeo(new THREE.BoxGeometry(4.6, 0.12, 0.12, 16, 2, 2), 0x5a3d24, { subdiv: 1 });
+        railA.position.set(2.2, 1.0, 0);
+        fence.add(railA);
+        const railB = railA.clone();
+        railB.position.y = 0.55;
+        fence.add(railB);
+        fence.position.set(8, 0, -7);
+        showcaseGroup.add(fence);
+
+        // Props: barrel + crate
+        const props = new THREE.Group();
+        const barrel = meshFromGeo(
+          new THREE.CylinderGeometry(0.55, 0.65, 1.3, 20, 6),
+          0x7a5030, { subdiv: 1 },
+        );
+        barrel.position.set(0, 0.65, 0);
+        props.add(barrel);
+        const crate = meshFromGeo(
+          new THREE.BoxGeometry(1.2, 1.2, 1.2, 12, 12, 12),
+          0x8a6840, { subdiv: 1 },
+        );
+        crate.position.set(1.8, 0.6, 0.3);
+        props.add(crate);
+        props.position.set(4, 0, 2);
+        showcaseGroup.add(props);
+
+        // Import pad marker
+        const pad = new THREE.Mesh(
+          new THREE.CylinderGeometry(2.8, 2.8, 0.06, 32),
+          new THREE.MeshStandardMaterial({ color: 0x2a3340, roughness: 0.95, metalness: 0 }),
+        );
+        pad.position.set(PARAMS.import.posX, 0.03, PARAMS.import.posZ);
+        pad.receiveShadow = true;
+        showcaseGroup.add(pad);
+      }
+
+      // ── GLB IMPORT ──────────────────────────────────────────────────────────
+      let importGroup = null;
+      let importMeta = { name: "—", tris: 0, meshes: 0 };
+      const gltfLoader = new GLTFLoader();
+      let importSource = null;
+
+      function countTris(root) {
+        let tris = 0, meshes = 0;
+        root.traverse((o) => {
+          if (!o.isMesh?.geometry) return;
+          meshes++;
+          const g = o.geometry;
+          tris += g.index ? g.index.count / 3 : g.attributes.position.count / 3;
+        });
+        return { tris: Math.round(tris), meshes };
+      }
+
+      function clearImport() {
+        if (importGroup) {
+          importGroup.traverse((o) => {
+            if (o.isMesh) {
+              o.geometry?.dispose();
+              o.material?.dispose?.();
+            }
+          });
+          scene.remove(importGroup);
+          importGroup = null;
+        }
+        importSource = null;
+        importMeta = { name: "—", tris: 0, meshes: 0 };
+        refreshImportInfo?.();
+      }
+
+      async function loadGlbFromUrl(url, label) {
+        clearImport();
+        importSource = { type: "url", url, label };
+        const gltf = await gltfLoader.loadAsync(url);
+        mountImport(gltf.scene, label || url.split("/").pop());
+      }
+
+      async function loadGlbFromFile(file) {
+        clearImport();
+        const url = URL.createObjectURL(file);
+        importSource = { type: "file", file, url };
+        try {
+          const gltf = await gltfLoader.loadAsync(url);
+          mountImport(gltf.scene, file.name);
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      }
+
+      function mountImport(sourceRoot, label) {
+        importGroup = new THREE.Group();
+        importGroup.name = "Import";
+
+        const root = sourceRoot.clone(true);
+        root.traverse((child) => {
+          if (!child.isMesh) return;
+          const baseColor = extractMeshBaseColor(child.material);
+          let geo = child.geometry.clone();
+          geo = subdivideGeometry(geo, PARAMS.import.subdivPass);
+
+          child.geometry = geo;
+          child.material = createSnowCapMaterial(baseColor, U);
+          child.castShadow = true;
+          child.receiveShadow = true;
+        });
+
+        importGroup.add(root);
+        root.updateMatrixWorld(true);
+
+        const box = new THREE.Box3().setFromObject(root);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        root.position.sub(center);
+
+        const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+        root.scale.setScalar((PARAMS.import.targetHeight / maxDim) * PARAMS.import.scaleMul);
+
+        root.updateMatrixWorld(true);
+        const floored = new THREE.Box3().setFromObject(root);
+        root.position.y -= floored.min.y;
+
+        importGroup.position.set(PARAMS.import.posX, PARAMS.import.posY, PARAMS.import.posZ);
+        scene.add(importGroup);
+
+        importMeta = { name: label, ...countTris(importGroup) };
+        refreshImportInfo?.();
+      }
+
+      function reapplyImport() {
+        if (!importSource) return;
+        if (importSource.type === "file") loadGlbFromFile(importSource.file);
+        else loadGlbFromUrl(importSource.url, importSource.label);
+      }
+
+      // ── SCENE / RENDER ──────────────────────────────────────────────────────
+      let scene, camera, renderer, controls, refreshImportInfo;
+
+      async function init() {
+        U = createSnowCapUniforms({
+          ...PARAMS.cap,
+          ...PARAMS.mask,
+          ...PARAMS.noise,
+          roughnessSnow: PARAMS.look.roughnessSnow,
+          roughnessBase: PARAMS.look.roughnessBase,
+          coldShadow: PARAMS.look.coldShadow,
+          glitterIntensity: PARAMS.look.glitterIntensity,
+          glitterScarcity: PARAMS.look.glitterScarcity,
+          glitterFreq: PARAMS.look.glitterFreq,
+          shimmerAmp: PARAMS.look.shimmerAmp,
+        });
+
+        renderer = new THREE.WebGPURenderer({ antialias: true });
+        const stats = new Stats({ trackGPU: true });
+        await stats.init(renderer);
+        await renderer.init();
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = PARAMS.light.exposure;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        document.body.appendChild(stats.dom);
+        document.getElementById("backend").textContent =
+          renderer.backend?.constructor?.name?.includes("WebGPU") ? "WebGPU ✓" : "WebGL fallback";
+
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(PARAMS.camera.fov, innerWidth / innerHeight, 0.2, 500);
+        camera.position.set(18, 10, 20);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(2, 2, -2);
+        controls.enableDamping = true;
+        controls.maxPolarAngle = Math.PI * 0.49;
+
+        // Sky + sun
+        const sky = new SkyMesh();
+        if (sky.material) sky.material.fog = false;
+        scene.add(sky);
+        const sunDir = new THREE.Vector3();
+        const hemi = new THREE.HemisphereLight(0xc8e8ff, 0x556633, 1);
+        scene.add(hemi);
+        const sun = new THREE.DirectionalLight(0xfff0dd, 1);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.camera.near = 1;
+        sun.shadow.camera.far = 120;
+        const sh = 35;
+        sun.shadow.camera.left = sun.shadow.camera.bottom = -sh;
+        sun.shadow.camera.right = sun.shadow.camera.top = sh;
+        sun.shadow.bias = -0.0004;
+        scene.add(sun);
+        const sunTarget = new THREE.Object3D();
+        scene.add(sunTarget);
+        sun.target = sunTarget;
+
+        let pmremGen = null, disposePmrem = null;
+        function applySky() {
+          sky.turbidity.value = 2.2;
+          sky.rayleigh.value = 1.15;
+          sky.mieCoefficient.value = 0.004;
+          sky.mieDirectionalG.value = 0.82;
+          sky.cloudCoverage.value = 0.28;
+          sky.cloudDensity.value = 0.35;
+          sky.scale.setScalar(8000);
+          if (sky.sunPosition?.value?.copy) sky.sunPosition.value.copy(sunDir);
+          else if (sky.sunPosition?.copy) sky.sunPosition.copy(sunDir);
+        }
+        function rebuildEnv() {
+          applySky();
+          disposePmrem?.();
+          pmremGen = pmremGen ?? new THREE.PMREMGenerator(renderer);
+          const envScene = new THREE.Scene();
+          envScene.add(sky.clone());
+          const rt = pmremGen.fromScene(envScene, 0.04);
+          scene.environment = rt.texture;
+          disposePmrem = () => rt.dispose();
+        }
+        function updateSun() {
+          const L = PARAMS.light;
+          const az = THREE.MathUtils.degToRad(L.sunAzimuth);
+          const el = THREE.MathUtils.degToRad(L.sunElevation);
+          sunDir.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).normalize();
+          U.sunDir.value.copy(sunDir);
+          sun.position.copy(sunDir).multiplyScalar(60);
+          sun.intensity = L.dirIntensity;
+          hemi.intensity = L.hemiIntensity;
+          renderer.toneMappingExposure = L.exposure;
+          scene.environmentIntensity = L.envIntensity;
+          applySky();
+        }
+        updateSun();
+        rebuildEnv();
+
+        // Ground
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(200, 200).rotateX(-Math.PI / 2),
+          new THREE.MeshStandardMaterial({ color: 0xe8eef5, roughness: 0.98, metalness: 0 }),
+        );
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        buildShowcase();
+        scene.add(showcaseGroup);
+
+        // Drag & drop
+        const dropOverlay = document.getElementById("drop-overlay");
+        window.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          document.body.classList.add("drag-over");
+        });
+        window.addEventListener("dragleave", () => document.body.classList.remove("drag-over"));
+        window.addEventListener("drop", async (e) => {
+          e.preventDefault();
+          document.body.classList.remove("drag-over");
+          const file = [...e.dataTransfer.files].find((f) =>
+            /\.(glb|gltf)$/i.test(f.name),
+          );
+          if (file) await loadGlbFromFile(file);
+        });
+
+        buildInspector({ camera, updateSun, rebuildEnv });
+
+        renderer.setAnimationLoop(() => {
+          controls.update();
+          renderer.render(scene, camera);
+          renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+          stats.update();
+        });
+
+        window.addEventListener("resize", () => {
+          camera.aspect = innerWidth / innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(innerWidth, innerHeight);
+        });
+      }
+
+      // ── INSPECTOR ───────────────────────────────────────────────────────────
+      const _checkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      const _arrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
+      function _fmt(v, step) {
+        if (step >= 1) return String(Math.round(v));
+        const d = Math.max(0, -Math.floor(Math.log10(step)));
+        return v.toFixed(d);
+      }
+      function _clampSnap(v, mn, mx, step) {
+        if (!Number.isFinite(v)) return mn;
+        const n = Math.round((v - mn) / step);
+        let out = mn + n * step;
+        const dec = step.toString().includes(".") ? step.toString().split(".")[1].length : 0;
+        if (dec > 0) out = Number(out.toFixed(dec));
+        return Math.min(mx, Math.max(mn, out));
+      }
+      function _section(parent, title, expanded = true) {
+        const sec = document.createElement("div");
+        sec.className = "inspector-section";
+        const hdr = document.createElement("div");
+        hdr.className = "section-header" + (expanded ? "" : " collapsed");
+        hdr.innerHTML = _arrowSvg + " " + title;
+        const body = document.createElement("div");
+        body.className = "section-body" + (expanded ? "" : " hidden");
+        hdr.addEventListener("click", () => {
+          hdr.classList.toggle("collapsed");
+          body.classList.toggle("hidden");
+        });
+        sec.appendChild(hdr);
+        sec.appendChild(body);
+        parent.appendChild(sec);
+        return body;
+      }
+      function _slider(parent, obj, key, opts) {
+        const { label, min, max, step = 0.01, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        const cur = obj[key];
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="${min}" max="${max}" step="${step}" value="${cur}"><input type="number" class="prop-num-input" min="${min}" max="${max}" step="${step}" value="${_fmt(cur, step)}"></div></div>`;
+        const sl = row.querySelector(".prop-slider");
+        const num = row.querySelector(".prop-num-input");
+        sl.addEventListener("input", () => {
+          const v = _clampSnap(parseFloat(sl.value), min, max, step);
+          obj[key] = v;
+          num.value = _fmt(v, step);
+          onChange?.(v);
+        });
+        num.addEventListener("change", () => {
+          let v = parseFloat(num.value);
+          if (!Number.isFinite(v)) { num.value = _fmt(obj[key], step); return; }
+          v = _clampSnap(v, min, max, step);
+          obj[key] = v;
+          sl.value = String(v);
+          num.value = _fmt(v, step);
+          onChange?.(v);
+        });
+        parent.appendChild(row);
+        return row;
+      }
+      function _toggle(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><button type="button" class="prop-toggle${obj[key] ? " checked" : ""}">${_checkSvg}</button></div>`;
+        const btn = row.querySelector(".prop-toggle");
+        btn.addEventListener("click", () => {
+          obj[key] = !obj[key];
+          btn.classList.toggle("checked", obj[key]);
+          onChange?.(obj[key]);
+        });
+        parent.appendChild(row);
+      }
+      function _info(parent, textFn) {
+        const el = document.createElement("div");
+        el.className = "prop-info";
+        parent.appendChild(el);
+        const refresh = () => { el.textContent = textFn(); };
+        refresh();
+        return refresh;
+      }
+      function _button(parent, opts) {
+        const btn = document.createElement("button");
+        btn.className = "section-btn";
+        btn.textContent = opts.title;
+        btn.addEventListener("click", opts.onClick);
+        parent.appendChild(btn);
+        return btn;
+      }
+      function _separator(parent) {
+        const div = document.createElement("div");
+        div.className = "section-separator";
+        parent.appendChild(div);
+      }
+
+      function syncUniforms() {
+        syncSnowCapUniforms(U, {
+          ...PARAMS.cap,
+          ...PARAMS.mask,
+          ...PARAMS.noise,
+          roughnessSnow: PARAMS.look.roughnessSnow,
+          roughnessBase: PARAMS.look.roughnessBase,
+          coldShadow: PARAMS.look.coldShadow,
+          glitterIntensity: PARAMS.look.glitterIntensity,
+          glitterScarcity: PARAMS.look.glitterScarcity,
+          glitterFreq: PARAMS.look.glitterFreq,
+          shimmerAmp: PARAMS.look.shimmerAmp,
+        });
+      }
+
+      function buildInspector({ camera, updateSun, rebuildEnv }) {
+        const body = document.getElementById("inspector-body");
+        document.getElementById("inspector-toggle").addEventListener("click", (e) => {
+          const hidden = document.body.classList.toggle("inspector-hidden");
+          e.target.textContent = hidden ? "Show" : "Hide";
+        });
+
+        // Resize handle
+        {
+          const inspEl = document.getElementById("inspector");
+          const handle = document.getElementById("inspector-resize-handle");
+          const KEY = "snowCap2InspectorWidth";
+          const clamp = (w) => Math.max(260, Math.min(window.innerWidth * 0.7, w));
+          const applyW = (w) => document.documentElement.style.setProperty("--inspector-width", clamp(w) + "px");
+          const saved = parseFloat(localStorage.getItem(KEY));
+          if (Number.isFinite(saved)) applyW(saved);
+          let dragging = false;
+          handle.addEventListener("pointerdown", (e) => {
+            dragging = true;
+            document.body.classList.add("inspector-resizing");
+            handle.setPointerCapture?.(e.pointerId);
+            e.preventDefault();
+          });
+          window.addEventListener("pointermove", (e) => {
+            if (!dragging) return;
+            applyW(window.innerWidth - e.clientX);
+          });
+          const stop = () => {
+            if (!dragging) return;
+            dragging = false;
+            document.body.classList.remove("inspector-resizing");
+            const w = parseFloat(getComputedStyle(inspEl).width || "320");
+            if (Number.isFinite(w)) localStorage.setItem(KEY, String(w));
+          };
+          window.addEventListener("pointerup", stop);
+          window.addEventListener("pointercancel", stop);
+        }
+
+        const onCap = () => syncUniforms();
+
+        {
+          const sec = _section(body, "Camera", false);
+          _slider(sec, PARAMS.camera, "fov", {
+            label: "FOV", min: 30, max: 90, step: 1,
+            onChange: (v) => { camera.fov = v; camera.updateProjectionMatrix(); },
+          });
+        }
+
+        {
+          const sec = _section(body, "Lighting", false);
+          _slider(sec, PARAMS.light, "sunAzimuth", { label: "Sun azimuth", min: 0, max: 360, step: 1, onChange: () => { updateSun(); rebuildEnv(); } });
+          _slider(sec, PARAMS.light, "sunElevation", { label: "Sun elev", min: 5, max: 80, step: 1, onChange: () => { updateSun(); rebuildEnv(); } });
+          _slider(sec, PARAMS.light, "dirIntensity", { label: "Sun int", min: 0, max: 6, step: 0.05, onChange: updateSun });
+          _slider(sec, PARAMS.light, "exposure", { label: "Exposure", min: 0.2, max: 1.5, step: 0.01, onChange: updateSun });
+        }
+
+        {
+          const sec = _section(body, "Snow Cap", true);
+          _slider(sec, PARAMS.cap, "amount", { label: "Amount", min: 0, max: 2, step: 0.01, onChange: onCap });
+          _slider(sec, PARAMS.cap, "thickness", { label: "Thickness", min: 0, max: 1.2, step: 0.01, onChange: onCap });
+          _slider(sec, PARAMS.cap, "coverage", { label: "Coverage", min: 0, max: 1, step: 0.01, onChange: onCap });
+          _slider(sec, PARAMS.cap, "buildup", { label: "Buildup pow", min: 0.5, max: 3, step: 0.05, onChange: onCap });
+          _toggle(sec, PARAMS.cap, "displaceEnabled", { label: "Displacement", onChange: onCap });
+        }
+
+        {
+          const sec = _section(body, "Mask", true);
+          _slider(sec, PARAMS.mask, "topMin", { label: "Top min", min: -0.2, max: 0.8, step: 0.01, onChange: onCap });
+          _slider(sec, PARAMS.mask, "topMax", { label: "Top max", min: 0.2, max: 1, step: 0.01, onChange: onCap });
+          _slider(sec, PARAMS.mask, "sideGather", { label: "Side gather", min: 0, max: 0.5, step: 0.01, onChange: onCap });
+          _toggle(sec, PARAMS.mask, "useWorldUp", { label: "World-up mask", onChange: onCap });
+          _toggle(sec, PARAMS.mask, "useWorldUV", { label: "World-space UV", onChange: onCap });
+        }
+
+        {
+          const sec = _section(body, "Displacement Noise", true);
+          _slider(sec, PARAMS.noise, "noiseScale", { label: "UV scale", min: 0.05, max: 2, step: 0.01, onChange: onCap });
+          _slider(sec, PARAMS.noise, "freq1", { label: "Freq 1", min: 0.02, max: 1, step: 0.01, onChange: onCap });
+          _slider(sec, PARAMS.noise, "freq2", { label: "Freq 2", min: 0.02, max: 2, step: 0.01, onChange: onCap });
+          _slider(sec, PARAMS.noise, "noiseAmp", { label: "Amp", min: 0, max: 1.5, step: 0.01, onChange: onCap });
+          _separator(sec);
+          _slider(sec, PARAMS.noise, "microFreq", { label: "Micro freq", min: 0.2, max: 5, step: 0.05, onChange: onCap });
+          _slider(sec, PARAMS.noise, "microAmp", { label: "Micro amp", min: 0, max: 0.3, step: 0.005, onChange: onCap });
+        }
+
+        {
+          const sec = _section(body, "Look", true);
+          _slider(sec, PARAMS.look, "roughnessSnow", { label: "Rough snow", min: 0.5, max: 1, step: 0.01, onChange: onCap });
+          _slider(sec, PARAMS.look, "roughnessBase", { label: "Rough base", min: 0.2, max: 1, step: 0.01, onChange: onCap });
+          _slider(sec, PARAMS.look, "coldShadow", { label: "Cold shadow", min: 0, max: 1, step: 0.01, onChange: onCap });
+          _separator(sec);
+          _slider(sec, PARAMS.look, "glitterIntensity", { label: "Glitter int", min: 0, max: 6, step: 0.1, onChange: onCap });
+          _slider(sec, PARAMS.look, "glitterScarcity", { label: "Scarcity", min: 20, max: 600, step: 5, onChange: onCap });
+          _slider(sec, PARAMS.look, "glitterFreq", { label: "Glitter freq", min: 20, max: 400, step: 5, onChange: onCap });
+          _slider(sec, PARAMS.look, "shimmerAmp", { label: "Shimmer", min: 0, max: 1, step: 0.01, onChange: onCap });
+        }
+
+        {
+          const sec = _section(body, "GLB Import", true);
+          const importInfoEl = document.createElement("div");
+          importInfoEl.className = "prop-info";
+          sec.appendChild(importInfoEl);
+          refreshImportInfo = () => {
+            importInfoEl.textContent =
+              `Model: ${importMeta.name}\nMeshes: ${importMeta.meshes} · Tris: ${importMeta.tris.toLocaleString()}`;
+          };
+          refreshImportInfo();
+
+          _slider(sec, PARAMS.import, "subdivPass", { label: "Subdiv pass", min: 0, max: 3, step: 1 });
+          _slider(sec, PARAMS.import, "targetHeight", { label: "Fit height", min: 0.5, max: 12, step: 0.25 });
+          _slider(sec, PARAMS.import, "scaleMul", { label: "Scale mul", min: 0.25, max: 3, step: 0.05 });
+          _slider(sec, PARAMS.import, "posX", { label: "Pos X", min: -20, max: 20, step: 0.5, onChange: () => { if (importGroup) importGroup.position.x = PARAMS.import.posX; } });
+          _slider(sec, PARAMS.import, "posZ", { label: "Pos Z", min: -20, max: 20, step: 0.5, onChange: () => { if (importGroup) importGroup.position.z = PARAMS.import.posZ; } });
+          _separator(sec);
+          _button(sec, { title: "Import GLB / GLTF…", onClick: () => {
+            const i = document.createElement("input");
+            i.type = "file";
+            i.accept = ".glb,.gltf";
+            i.onchange = () => i.files[0] && loadGlbFromFile(i.files[0]);
+            i.click();
+          }});
+          _button(sec, { title: "Load sample tree GLB", onClick: () => loadGlbFromUrl(SAMPLE_GLB, "customtree3_compressed.glb") });
+          _button(sec, { title: "Re-apply import settings", onClick: reapplyImport });
+          _button(sec, { title: "Clear import", onClick: clearImport });
+        }
+
+        {
+          const sec = _section(body, "Showcase", false);
+          _toggle(sec, PARAMS.scene, "showShowcase", {
+            label: "Show presets",
+            onChange: (v) => { showcaseGroup.visible = v; },
+          });
+        }
+
+        syncUniforms();
+      }
+
+      init().catch((e) => {
+        console.error("Init failed:", e);
+        document.getElementById("backend").textContent = "Error: " + e.message;
+      });
+    </script>
+  </body>
+</html>

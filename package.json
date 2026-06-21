@@ -16,6 +16,7 @@
     "n8ao-webgpu": "^0.1.0",
     "stats-gl": "^4.1.0",
     "three": "^0.184.0",
-    "three-mesh-bvh": "^0.9.10"
+    "three-mesh-bvh": "^0.9.10",
+    "three-subdivide": "^1.1.5"
   }
 }
