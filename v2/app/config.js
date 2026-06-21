@@ -251,7 +251,7 @@ export const V2_CONFIG = {
     hdrBackgroundIntensity: 0.7,
     exposure: 0.5,
     sunDistance: 600,
-    shadowBias: -0.0005,
+    shadowBias: 0,
     shadowNormalBias: 0.02,
   },
   /** `splatmap-chunks.html` PARAMS.lensFlare — sun-anchored screen-space flare. */

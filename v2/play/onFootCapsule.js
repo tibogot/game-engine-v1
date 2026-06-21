@@ -22,8 +22,8 @@ export const DEFAULT_CAPSULE_PARAMS = {
   /** Shift capsule collision center along local +Z (m). Use for long quadrupeds. */
   capForwardOffset: 0,
 
-  walkSpeed: 4.0,
-  runSpeed: 8.0,
+  walkSpeed: 3,
+  runSpeed: 6,
   crouchSpeedMult: 0.5,
   /** Cylinder height while crouched, as a fraction of capHeight. */
   crouchHeightScale: 0.5,
