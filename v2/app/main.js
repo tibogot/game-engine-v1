@@ -37,6 +37,7 @@ import { createSharedTileMaterial } from "../render/terrain/sharedTileMaterial.j
 import { createV2ProceduralGroundMaterial } from "../render/terrain/proceduralGroundMaterial.js";
 import { ChunkStreamManager } from "../core/streaming/chunkStreamManager.js";
 import { frameProbe } from "./frameProbe.js";
+import { createEditorCameraController } from "./editorCameraController.js";
 import { SculptSystem } from "../tools/sculpt/sculptSystem.js";
 import { createHud } from "../ui/hud.js";
 import { createLensFlareSystem } from "../effects/lensFlare.js";
@@ -441,8 +442,8 @@ export async function startV2App(opts = {}) {
   // well up into the sky while still stopping just short of flipping fully under
   // the world. Set to Math.PI for fully unconstrained.
   controls.maxPolarAngle = Math.PI * 0.92;
-  controls.minDistance = 15;
   controls.maxDistance = 1500;
+  // minDistance, zoom, and fly/focus are handled by editorCameraController.
   // Match splatmap-chunks.html interaction: LMB sculpt, MMB orbit, RMB pan.
   controls.mouseButtons = {
     MIDDLE: THREE.MOUSE.ROTATE,
@@ -2161,7 +2162,7 @@ export async function startV2App(opts = {}) {
     controls.enabled = false;
   });
   transformControls.addEventListener("mouseUp", () => {
-    controls.enabled = toolState.mode !== "play";
+    syncEditorOrbitEnabled();
     if (toolState.mode === "cliffs") cliffSystem.handleTransformEnd();
     if (toolState.mode === "props") propSystem.handleTransformEnd();
     if (toolState.mode === "decals") decalSystem.handleTransformEnd();
@@ -2540,6 +2541,7 @@ export async function startV2App(opts = {}) {
       leafFxStore.setRingsVisible(false);
     }
     if (toolState.mode === "play") {
+      editorCamera.onPlayEnter();
       const immersive = _pendingPlayImmersive === true;
       _pendingPlayImmersive = false;
       actorSystem.deselect();
@@ -4906,6 +4908,34 @@ export async function startV2App(opts = {}) {
     return brushPick;
   }
 
+  function pickWorldAtClient(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    const targets = chunkStream.raycastMeshes();
+    if (targets.length === 0) return null;
+    raycaster.setFromCamera(pointerNdc, camera);
+    const hits = raycaster.intersectObjects(targets, false);
+    if (hits.length === 0) return null;
+    return { point: hits[0].point.clone() };
+  }
+
+  const editorCamera = createEditorCameraController({
+    camera,
+    controls,
+    domElement: renderer.domElement,
+    isActive: () => !playMode.active && toolState.mode !== "play",
+    pickWorldAtClient,
+    getSelectionFocus: () => transformControls.object?.position ?? null,
+  });
+
+  function syncEditorOrbitEnabled() {
+    controls.enabled =
+      !playMode.active &&
+      toolState.mode !== "play" &&
+      !editorCamera.flyMode;
+  }
+
   function syncRampMarker() {
     if (
       toolState.mode !== "sculpt" ||
@@ -5637,51 +5667,51 @@ export async function startV2App(opts = {}) {
       sr2.dragNodeId = null;
       sr2.dragEdge = null;
       smartRoad2System.setDragging(false); // commit full geometry (sidewalks etc.)
-      controls.enabled = true;
+      syncEditorOrbitEnabled();
     }
     if (roadSystem.dragging) {
       roadSystem.dragging = false;
-      controls.enabled = true;
+      syncEditorOrbitEnabled();
     }
     if (fullRoadSystem.dragging) {
       fullRoadSystem.dragging = false;
-      controls.enabled = true;
+      syncEditorOrbitEnabled();
     }
     if (smartRoadSystem.dragging) {
       smartRoadSystem.dragging = false;
-      controls.enabled = true;
+      syncEditorOrbitEnabled();
     }
     if (fullRoadSystem._paintingAccessoryActive) {
       fullRoadSystem._paintingAccessoryActive = false;
       fullRoadSystem.endAccessoryPaint();
-      controls.enabled = true;
+      syncEditorOrbitEnabled();
       ui?.pane.refresh();
     }
     if (smartRoadSystem._paintingAccessoryActive) {
       smartRoadSystem._paintingAccessoryActive = false;
       smartRoadSystem.endAccessoryPaint();
-      controls.enabled = true;
+      syncEditorOrbitEnabled();
       ui?.pane.refresh();
     }
     if (riverSystem.dragging) {
       riverSystem.dragging = false;
-      controls.enabled = true;
+      syncEditorOrbitEnabled();
     }
     if (river2System.dragging) {
       river2System.finalizeMove();
-      controls.enabled = true;
+      syncEditorOrbitEnabled();
     }
     if (splineSystem.dragging) {
       splineSystem.dragging = false;
-      controls.enabled = true;
+      syncEditorOrbitEnabled();
     }
     if (splineRoadSystem.dragging) {
       splineRoadSystem.dragging = false;
-      controls.enabled = true;
+      syncEditorOrbitEnabled();
     }
     if (!pointerDown) return;
     pointerDown = false;
-    controls.enabled = true;
+    syncEditorOrbitEnabled();
     if (toolState.mode === "sculpt") {
       sculptSystem.endStroke();
     } else if (toolState.mode === "paint") {
@@ -6346,8 +6376,11 @@ export async function startV2App(opts = {}) {
     }
     _wasPlayActive = playMode.active;
 
-    if (!playMode.active) controls.update();
     const dtSec = Math.min(dtMs * 0.001, 0.05);
+    if (!playMode.active) {
+      editorCamera.update(dtSec);
+      if (!editorCamera.flyMode) controls.update();
+    }
     playMode.update(dtSec);
     smartRoad2System.setEditActive(toolState.mode === "smartRoad2");
     smartRoad2System.update();
@@ -6827,6 +6860,7 @@ export async function startV2App(opts = {}) {
     camera,
     renderer,
     controls,
+    editorCamera,
     audioSystem,
     toolState,
     ui,
@@ -7839,6 +7873,7 @@ export async function startV2App(opts = {}) {
       brushRing.material.dispose();
       rampMarkerA.geometry.dispose();
       rampMarkerA.material.dispose();
+      editorCamera.dispose();
       controls.dispose();
       renderer.dispose();
     },

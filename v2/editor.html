@@ -1681,6 +1681,10 @@
       <span id="statusText">Booting...</span>
       <span id="statusFps" style="font-family: var(--font-mono)"></span>
       <span id="statusCam" style="font-family: var(--font-mono)"></span>
+      <span id="statusCamHelp" style="font-size: 10px; color: var(--text-dim)"
+        >MMB orbit · RMB pan · Shift+MMB Y · scroll · dbl-click · . focus · `
+        fly</span
+      >
       <span id="statusChunks"></span>
       <span id="statusTris"></span>
     </div>
@@ -16082,7 +16086,9 @@
               const p = app.perf;
               const c = app.camera.position;
               _elFps.textContent = `${p.fps.toFixed(0)} fps  ${p.frameMs.toFixed(1)} ms`;
-              _elCam.textContent = `X ${c.x.toFixed(0)}  Y ${c.y.toFixed(0)}  Z ${c.z.toFixed(0)}`;
+              _elCam.textContent = app.editorCamera?.flyMode
+                ? `FLY  X ${c.x.toFixed(0)}  Y ${c.y.toFixed(0)}  Z ${c.z.toFixed(0)}`
+                : `X ${c.x.toFixed(0)}  Y ${c.y.toFixed(0)}  Z ${c.z.toFixed(0)}`;
               _elChunks.textContent = `${p.activeChunks} chunks`;
               _elTris.textContent = `${(p.trisApprox / 1000).toFixed(0)}k tris`;
               _elDot.style.background =
