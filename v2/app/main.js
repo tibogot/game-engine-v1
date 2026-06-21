@@ -131,6 +131,7 @@ import { getTileGridTexture } from "../core/legacy/tileMaterial.js";
 import { createJumpRampGeometry } from "../core/props/jumpRampGeometry.js";
 import { PropStore } from "../core/props/propStore.js";
 import { PropInstancer } from "../core/props/propInstancer.js";
+import { PropPlacementPreview } from "../core/props/propPlacementPreview.js";
 import { PropSystem } from "../tools/props/propSystem.js";
 import { LivePropManager } from "../core/props/livePropManager.js";
 import {
@@ -1932,6 +1933,8 @@ export async function startV2App(opts = {}) {
     terrainStore,
     config,
   });
+  const propPlacementPreview = new PropPlacementPreview(scene, propStore);
+  roadReflection.excludeFromReflection(propPlacementPreview.group);
 
   /**
    * Rebuild the material on a primitive slot from its current `materialId` + `triplanar` fields.
@@ -2477,6 +2480,7 @@ export async function startV2App(opts = {}) {
     }
     if (toolState.mode !== "props") {
       deactivatePropSelection();
+      propPlacementPreview.hide();
     }
     if (toolState.mode !== "water") {
       waterSystem.deselect();
@@ -5019,6 +5023,50 @@ export async function startV2App(opts = {}) {
     updateBrushPreviewFromPick(pickTerrain(event));
   }
 
+  let _propPreviewHitValid = false;
+
+  function updatePropPlacementPreview(hit) {
+    if (
+      toolState.mode !== "props" ||
+      toolState.props.placementMode !== "place" ||
+      playMode.active ||
+      transformControls.dragging
+    ) {
+      _propPreviewHitValid = false;
+      propPlacementPreview.hide();
+      return;
+    }
+    if (!hit) {
+      _propPreviewHitValid = false;
+      propPlacementPreview.hide();
+      return;
+    }
+    _propPreviewHitValid = true;
+
+    // Hide while a prop is selected so gizmo edits aren't cluttered by the
+    // next-placement ghost (stamp still updates for when selection clears).
+    if (propInstancer.hasSelection) {
+      propPlacementPreview.hide();
+      return;
+    }
+
+    const slot = toolState.propSlots[toolState.props.activeSlot];
+    if (!slot || slot.typeIdx == null) {
+      propPlacementPreview.hide();
+      return;
+    }
+    propPlacementPreview.showAt(
+      hit,
+      slot.typeIdx,
+      propSystem.stampForType(slot.typeIdx),
+      toolState.props.sinkOffset || 0,
+    );
+  }
+
+  function refreshPropPlacementPreview() {
+    if (_propPreviewHitValid) updatePropPlacementPreview(brushPick);
+  }
+
   function activateCliffSelection(instIdx) {
     cliffInstancer.select(instIdx);
     transformControls.attach(cliffInstancer.proxyObject);
@@ -5042,6 +5090,7 @@ export async function startV2App(opts = {}) {
     transformControls.setMode(toolState.props.transformMode);
     transformControls.enabled = true;
     transformControls.visible = true;
+    propSystem.recordStampFromInstance(instIdx);
     _onPropSelectionChanged?.(instIdx);
   }
 
@@ -5052,6 +5101,7 @@ export async function startV2App(opts = {}) {
     transformControls.visible = false;
     ui?.propFolder?.hideLiveParams();
     _onPropSelectionChanged?.(null);
+    refreshPropPlacementPreview();
   }
 
   renderer.domElement.addEventListener("pointerdown", (event) => {
@@ -5549,6 +5599,7 @@ export async function startV2App(opts = {}) {
     }
     const hit = pickTerrain(event);
     updateBrushPreviewFromPick(hit);
+    updatePropPlacementPreview(hit);
     if (!pointerDown || !isBrushMode() || !hit) return;
     if (toolState.mode === "sculpt") {
       sculptSystem.applyAt(hit.point, event);
@@ -7100,6 +7151,7 @@ export async function startV2App(opts = {}) {
       const inst = propStore.instances[instIdx];
       if (!inst) return;
       propStore._bump();
+      propSystem.recordStampFromInstance(instIdx);
       if (propInstancer.selectedIdx === instIdx) propInstancer.select(instIdx);
       if (cliffBvh) cliffBvh.invalidate();
     },
@@ -7839,6 +7891,7 @@ export async function startV2App(opts = {}) {
       treeLodRenderer.dispose();
       cliffInstancer.dispose();
       propInstancer.dispose();
+      propPlacementPreview.dispose();
       livePropManager.dispose();
       collectibleBurst.dispose();
       collectibleGizmo.dispose();

@@ -4840,6 +4840,12 @@
           label: "Mode",
           options: { "Place (click)": "place", "Paint (brush)": "paint" },
         });
+        const stampHint = document.createElement("p");
+        stampHint.style.cssText =
+          "margin:6px 0 0; font-size:11px; color:var(--text-dim); line-height:1.35;";
+        stampHint.textContent =
+          "Place mode reuses the last rotation + scale per prop type. The cyan ghost shows when nothing is selected — right-click empty space to deselect and preview the next placement.";
+        modeBody.appendChild(stampHint);
 
         // --- Active slot ---
         const slotBody = _section(panel, "Active Type");

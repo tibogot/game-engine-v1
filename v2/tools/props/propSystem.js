@@ -17,6 +17,36 @@ export class PropSystem {
     this._painting = false;
     this._lastStrokePoint = null;
     this._beforeSnap = null;
+
+    /** @type {Map<number, { rx: number, ry: number, rz: number, sx: number, sy: number, sz: number }>} */
+    this._lastStampByType = new Map();
+  }
+
+  _defaultStamp() {
+    return { rx: 0, ry: 0, rz: 0, sx: 1, sy: 1, sz: 1 };
+  }
+
+  _stampForType(typeIdx) {
+    return this._lastStampByType.get(typeIdx) ?? this._defaultStamp();
+  }
+
+  /** Rotation + scale used for click-place and the placement ghost. */
+  stampForType(typeIdx) {
+    return this._stampForType(typeIdx);
+  }
+
+  /** Remember rotation + scale for the next click-place of this prop type. */
+  recordStampFromInstance(instIdx) {
+    const inst = this.store.instances[instIdx];
+    if (!inst || this.store.isLiveType(inst.typeIdx)) return;
+    this._lastStampByType.set(inst.typeIdx, {
+      rx: inst.rx,
+      ry: inst.ry,
+      rz: inst.rz,
+      sx: inst.sx,
+      sy: inst.sy,
+      sz: inst.sz,
+    });
   }
 
   _pushUndo(before) {
@@ -32,8 +62,18 @@ export class PropSystem {
     const before = this.store.snapshot();
     const sinkOffset = this.toolState.props.sinkOffset || 0;
     const py = hitPoint.y - sinkOffset;
-    const instIdx = this.store.addInstance(typeIdx, hitPoint.x, py, hitPoint.z);
+    const stamp = this.store.isLiveType(typeIdx)
+      ? null
+      : this._stampForType(typeIdx);
+    const instIdx = this.store.addInstance(
+      typeIdx,
+      hitPoint.x,
+      py,
+      hitPoint.z,
+      stamp,
+    );
     this._pushUndo(before);
+    this.recordStampFromInstance(instIdx);
 
     this.instancer.select(instIdx);
     if (this.bvh) this.bvh.invalidate();
@@ -69,6 +109,7 @@ export class PropSystem {
     if (!src) return null;
     const before = this.store.snapshot();
     const newIdx = this.store.duplicateInstance(srcIdx);
+    this.recordStampFromInstance(newIdx);
     this._pushUndo(before);
     if (this.bvh) this.bvh.invalidate();
     return newIdx;
@@ -79,6 +120,10 @@ export class PropSystem {
   }
 
   handleTransformEnd() {
+    if (this.instancer.hasSelection) {
+      this.instancer.syncFromProxy();
+      this.recordStampFromInstance(this.instancer.selectedIdx);
+    }
     if (this.bvh) this.bvh.invalidate();
   }
 

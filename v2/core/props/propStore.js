@@ -80,13 +80,25 @@ export class PropStore {
     type[key] = entries;
   }
 
-  addInstance(typeIdx, px, py, pz) {
+  /**
+   * @param {number} typeIdx
+   * @param {number} px
+   * @param {number} py
+   * @param {number} pz
+   * @param {{ rx?: number, ry?: number, rz?: number, sx?: number, sy?: number, sz?: number }} [transform]
+   */
+  addInstance(typeIdx, px, py, pz, transform) {
     const type = this.types[typeIdx];
+    const t = transform ?? {};
     const inst = {
       typeIdx,
       px, py, pz,
-      rx: 0, ry: type?.live ? 0 : Math.round(Math.random() * 360), rz: 0,
-      sx: 1, sy: 1, sz: 1,
+      rx: t.rx ?? 0,
+      ry: t.ry ?? 0,
+      rz: t.rz ?? 0,
+      sx: t.sx ?? 1,
+      sy: t.sy ?? 1,
+      sz: t.sz ?? 1,
     };
     if (type?.live) inst.liveParams = { ...type.defaultParams };
     const idx = this.instances.length;
