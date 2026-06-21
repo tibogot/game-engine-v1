@@ -122,9 +122,10 @@ const FLY_MOUSE_SENS_X = 0.0022;
 const FLY_MOUSE_SENS_Y = 0.00235;
 const FLY_PITCH_MIN = -1.22;
 const FLY_PITCH_MAX = 0.9;
-const FLY_PITCH_CLIMB_SCALE = 26;
-const FLY_PITCH_DIVE_MULT = 1.82;
 const FLY_ROLL_MAX = 0.78;
+const FLY_ROLL_YAW_RATE = 0.9;
+const STALL_SPEED = 14;
+const STALL_SINK_RATE = 6;
 const FLY_ROLL_VEL_SCALE = 0.0042;
 const FLY_ROLL_SMOOTH = 10;
 const FLY_ROLL_TARGET_DECAY = 5;
@@ -5554,7 +5555,7 @@ export class PlayMode {
     }
 
     const moveSpeed = flying
-      ? Math.abs(this.planeSpeed)
+      ? Math.abs(this.planeSpeed) * Math.cos(this.flyPitch)
       : carDriving
         ? 1
         : charMode
@@ -5761,12 +5762,16 @@ export class PlayMode {
           1 - Math.exp(-9 * dtSec),
         );
       } else {
-        const diveMult = this.flyPitch < 0 ? FLY_PITCH_DIVE_MULT : 1;
         this.flyHeight = Math.max(
           groundY,
-          this.flyHeight +
-            this.flyPitch * FLY_PITCH_CLIMB_SCALE * diveMult * dtSec,
+          this.flyHeight + Math.sin(this.flyPitch) * this.planeSpeed * dtSec,
         );
+      }
+
+      // Stall: insufficient airspeed causes gradual altitude loss.
+      if (!onDeck) {
+        const stallFrac = THREE.MathUtils.clamp(1 - this.planeSpeed / STALL_SPEED, 0, 1);
+        this.flyHeight = Math.max(groundY, this.flyHeight - stallFrac * STALL_SINK_RATE * dtSec);
       }
 
       // Surface lock — taxi mode: decay pitch/roll/altitude toward ground when near surface at low speed
@@ -5806,6 +5811,11 @@ export class PlayMode {
         this.flyRollTarget,
         1 - Math.exp(-FLY_ROLL_SMOOTH * dtRoll),
       );
+
+      // Bank → yaw: a banked plane naturally curves its heading.
+      if (!onDeck) {
+        this.flyHeading += this.flyRoll * FLY_ROLL_YAW_RATE * dtSec;
+      }
 
       // Aileron roll (Z / C) — persistent, camera follows
       if (!onDeck) {
@@ -6189,6 +6199,7 @@ export class PlayMode {
             this.flyHeight -= r.dy * pushDist;
             this.playerPos.z -= r.dz * pushDist;
             if (this.flyHeight < groundY) this.flyHeight = groundY;
+            this.planeSpeed *= Math.max(0.3, 1 - pushDist * 0.4);
           }
         }
       }
