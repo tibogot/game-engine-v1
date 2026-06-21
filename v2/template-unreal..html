@@ -1,0 +1,1295 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Template</title>
+    <style>
+      :root {
+        --bg-dark: #222222;
+        --bg-panel: #2a2a2a;
+        --bg-item: #333333;
+        --bg-hover: #3a3a3a;
+        --bg-input: #1e1e1e;
+        --border: #3c3c3c;
+        --border-light: #4a4a4a;
+        --text: #cccccc;
+        --text-dim: #888888;
+        --accent: #4a9eff;
+        --green: #5cb85c;
+        --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+        --font-mono: "Cascadia Code", "Fira Code", "Consolas", monospace;
+        --radius: 4px;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        overflow: hidden;
+        background: #000;
+        font-family: var(--font);
+        color: var(--text);
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #info {
+        position: fixed;
+        bottom: 16px;
+        left: 16px;
+        z-index: 10;
+        font:
+          12px/1.5 "SF Mono",
+          "Fira Code",
+          monospace;
+        color: #b0d890;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 8px 12px;
+        border-radius: 6px;
+        pointer-events: none;
+        user-select: none;
+        backdrop-filter: blur(4px);
+      }
+      #info span {
+        color: #e0f0c0;
+        font-weight: 600;
+      }
+
+      #lab-title {
+        position: fixed;
+        top: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 15;
+        pointer-events: none;
+        user-select: none;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--text);
+        padding: 8px 18px;
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(6px);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+      }
+
+      /* === RIGHT PANEL (v2/editor.html inspector look) === */
+      #inspector {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: var(--inspector-width, 300px);
+        min-width: 240px;
+        max-width: 70vw;
+        height: 100vh;
+        background: var(--bg-panel);
+        border-left: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        z-index: 20;
+        box-shadow: -2px 0 10px rgba(0, 0, 0, 0.3);
+      }
+      /* Drag-to-resize strip on the inspector's left edge. Wider than the
+         visible border so it's easy to grab without obscuring panel chrome. */
+      #inspector-resize-handle {
+        position: absolute;
+        top: 0;
+        left: -3px;
+        width: 8px;
+        height: 100%;
+        cursor: ew-resize;
+        z-index: 21;
+        background: transparent;
+        transition: background 0.15s;
+      }
+      #inspector-resize-handle:hover,
+      body.inspector-resizing #inspector-resize-handle {
+        background: var(--accent);
+        opacity: 0.6;
+      }
+      body.inspector-resizing {
+        cursor: ew-resize;
+        user-select: none;
+      }
+      body.inspector-hidden #inspector-resize-handle,
+      body.immersive #inspector-resize-handle {
+        display: none;
+      }
+      #inspector-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 12px;
+        height: 32px;
+        background: var(--bg-dark);
+        border-bottom: 1px solid var(--border);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+      #inspector-toggle,
+      #immersive-toggle {
+        background: none;
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius);
+        color: var(--text-dim);
+        cursor: pointer;
+        padding: 2px 8px;
+        font-size: 10px;
+      }
+      #inspector-toggle:hover,
+      #immersive-toggle:hover {
+        color: var(--text);
+        background: var(--bg-hover);
+      }
+      #immersive-toggle.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: white;
+      }
+      body.immersive #inspector,
+      body.immersive #info,
+      body.immersive #lab-title {
+        display: none;
+      }
+      body.immersive canvas {
+        cursor: none;
+      }
+      #inspector-body {
+        flex: 1;
+        overflow-y: auto;
+        padding-bottom: 24px;
+      }
+      body.inspector-hidden #inspector-body,
+      body.inspector-hidden #inspector-header span {
+        display: none;
+      }
+      body.inspector-hidden #inspector {
+        width: auto;
+        height: auto;
+        border-left: none;
+        background: transparent;
+        box-shadow: none;
+      }
+      body.inspector-hidden #inspector-header {
+        background: transparent;
+        border: none;
+        padding: 6px;
+      }
+
+      .inspector-section {
+        border-bottom: 1px solid var(--border);
+      }
+      .section-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--text-dim);
+        user-select: none;
+      }
+      .section-header:hover {
+        background: var(--bg-hover);
+      }
+      .section-header .section-arrow {
+        width: 14px;
+        height: 14px;
+        transition: transform 0.15s;
+        flex-shrink: 0;
+      }
+      .section-header.collapsed .section-arrow {
+        transform: rotate(-90deg);
+      }
+      .section-body {
+        padding: 6px 12px 10px;
+      }
+      .section-body.hidden {
+        display: none;
+      }
+      .prop-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0;
+        min-height: 26px;
+      }
+      .prop-label {
+        width: 90px;
+        min-width: 90px;
+        font-size: 11px;
+        color: var(--text-dim);
+        text-align: right;
+        padding-right: 4px;
+      }
+      .prop-value {
+        flex: 1;
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+      .prop-color-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1;
+      }
+      .prop-color {
+        width: 22px;
+        height: 22px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        cursor: pointer;
+        flex-shrink: 0;
+        padding: 0;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .prop-color::-webkit-color-swatch-wrapper {
+        padding: 0;
+      }
+      .prop-color::-webkit-color-swatch {
+        border: none;
+        border-radius: 2px;
+      }
+      .prop-slider-wrap {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .prop-num-input {
+        width: 72px;
+        height: 22px;
+        flex-shrink: 0;
+        box-sizing: border-box;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 0 5px;
+        color: var(--text);
+        font-size: 11px;
+        font-family: var(--font-mono);
+        text-align: right;
+        outline: none;
+      }
+      .prop-num-input:focus {
+        border-color: var(--accent);
+      }
+      .prop-num-input::-webkit-outer-spin-button,
+      .prop-num-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .prop-num-input[type="number"] {
+        appearance: textfield;
+        -moz-appearance: textfield;
+      }
+      .prop-slider {
+        flex: 1;
+        height: 4px;
+        -webkit-appearance: none;
+        appearance: none;
+        background: var(--bg-input);
+        border-radius: 2px;
+        outline: none;
+      }
+      .prop-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+      }
+      .prop-slider-val {
+        width: 44px;
+        font-size: 11px;
+        color: var(--text-dim);
+        font-family: var(--font-mono);
+        text-align: right;
+      }
+      .prop-dropdown {
+        flex: 1;
+        height: 22px;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 0 6px;
+        color: var(--text);
+        font-size: 12px;
+        font-family: var(--font);
+        outline: none;
+        cursor: pointer;
+      }
+      .prop-toggle {
+        width: 14px;
+        height: 14px;
+        border: 1px solid var(--border-light);
+        border-radius: 3px;
+        background: var(--bg-input);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        padding: 0;
+        color: transparent;
+      }
+      .prop-toggle.checked {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: white;
+      }
+      .prop-toggle svg {
+        width: 10px;
+        height: 10px;
+      }
+      .section-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        width: 100%;
+        height: 26px;
+        margin-top: 4px;
+        background: var(--bg-item);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 11px;
+        font-family: var(--font);
+      }
+      .section-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+        border-color: var(--border-light);
+      }
+      .section-separator {
+        height: 1px;
+        background: var(--border);
+        margin: 6px 0;
+      }
+      /* Custom scrollbar */
+      #inspector-body::-webkit-scrollbar {
+        width: 8px;
+      }
+      #inspector-body::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      #inspector-body::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 4px;
+      }
+      #inspector-body::-webkit-scrollbar-thumb:hover {
+        background: var(--border-light);
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/",
+          "stats-gl": "https://cdn.jsdelivr.net/npm/stats-gl/dist/main.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="lab-title">Template</div>
+    <div id="info">
+      <span id="backend">loading…</span> &bull; WASD/Arrows move &bull; Space
+      jump &bull; RMB drag (or F immersive) to look &bull;
+      <span id="cammode">ORBIT</span> (Tab follow)
+    </div>
+    <div id="inspector">
+      <div id="inspector-resize-handle" title="Drag to resize"></div>
+      <div id="inspector-header">
+        <span>Inspector</span>
+        <div style="display: flex; gap: 4px">
+          <button id="immersive-toggle">Immersive</button>
+          <button id="inspector-toggle">Hide</button>
+        </div>
+      </div>
+      <div id="inspector-body"></div>
+    </div>
+    <script type="module">
+      import * as THREE from "three";
+      import Stats from "stats-gl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { SkyMesh } from "three/addons/objects/SkyMesh.js";
+      import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
+      import { createTileMaterial } from "./tileMaterial.js";
+
+      const PARAMS = {
+        camera: { fov: 60, followDist: 8 },
+        ground: { size: 800 },
+        tile: {
+          textureScale: 1500,
+          gradientIntensity: 0.5,
+          gradientBias: 0.1,
+          tileColor: "#d4d4d4",
+          gridColor: "#707070",
+          gridLineColor: "#404040",
+          roughness: 1,
+          metalness: 0,
+        },
+        // Same defaults as v2/editor (config.js light block).
+        light: {
+          sunAzimuth: 135,
+          sunElevation: 43,
+          dirColor: "#fff5e0",
+          dirIntensity: 2.2,
+          hemiSkyColor: "#c8e0ff",
+          hemiGroundColor: "#88aa55",
+          hemiIntensity: 0.4,
+          envIntensity: 0.2,
+          exposure: 0.5,
+          sunDistance: 600,
+          shadowBias: -0.0005,
+          shadowNormalBias: 0.02,
+        },
+        // Same defaults as v2/editor (config.js physicalSky block).
+        physicalSky: {
+          turbidity: 2,
+          rayleigh: 1.5,
+          mie: 0.005,
+          mieG: 0.8,
+          cloudCoverage: 0.4,
+          cloudDensity: 0.4,
+          cloudElevation: 0.5,
+          meshScale: 10000,
+        },
+        csm: {
+          cascades: 2,
+          maxFar: 300,
+          lightMargin: 100,
+          mapSize: 2048,
+        },
+      };
+
+      // Capsule + camera tuning — same constants as v2/play/playMode.js.
+      const CAP_R = 0.4;
+      const CAP_H = 1.2;
+      const GRAVITY = 20.0;
+      const JUMP_VEL = 11.0;
+      const MOVE_SPEED = 12;
+      const CAM_SENS_X = 0.002;
+      const CAM_SENS_Y = 0.002;
+
+      // Swap this for real terrain heightmap sampling when adding hills.
+      const sampleHeight = (_x, _z) => 0;
+
+      function sunDirectionFromAngles(
+        azDeg,
+        elDeg,
+        target = new THREE.Vector3(),
+      ) {
+        const az = THREE.MathUtils.degToRad(azDeg);
+        const el = THREE.MathUtils.degToRad(elDeg);
+        return target
+          .set(
+            Math.cos(el) * Math.cos(az),
+            Math.sin(el),
+            Math.cos(el) * Math.sin(az),
+          )
+          .normalize();
+      }
+
+      async function init() {
+        const renderer = new THREE.WebGPURenderer({ antialias: true });
+
+        const stats = new Stats({ trackGPU: true });
+        await stats.init(renderer);
+
+        await renderer.init();
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = PARAMS.light.exposure;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        document.body.appendChild(stats.dom);
+
+        document.getElementById("backend").textContent =
+          renderer.backend?.constructor?.name?.includes("WebGPU")
+            ? "WebGPU ✓"
+            : "WebGL fallback";
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(
+          PARAMS.camera.fov,
+          innerWidth / innerHeight,
+          0.5,
+          5000,
+        );
+        camera.position.set(0, 20, 60);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI * 0.49;
+        controls.enabled = true; // orbit is the default mode
+
+        // ── LIGHTS ──
+        const sunDir = new THREE.Vector3();
+        const hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 1);
+        scene.add(hemi);
+
+        const sun = new THREE.DirectionalLight(0xffffff, 1);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(PARAMS.csm.mapSize, PARAMS.csm.mapSize);
+        sun.shadow.camera.near = 1;
+        sun.shadow.camera.far = 300;
+        sun.shadow.camera.left = sun.shadow.camera.bottom = -300;
+        sun.shadow.camera.right = sun.shadow.camera.top = 300;
+        const shadowTarget = new THREE.Object3D();
+        scene.add(shadowTarget);
+        sun.target = shadowTarget;
+        scene.add(sun);
+
+        // CSM cascaded shadows — same setup as v2/editor.
+        let csm = null;
+        try {
+          csm = new CSMShadowNode(sun, {
+            cascades: PARAMS.csm.cascades,
+            maxFar: PARAMS.csm.maxFar,
+            mode: "practical",
+            lightMargin: PARAMS.csm.lightMargin,
+          });
+          sun.shadow.shadowNode = csm;
+        } catch (err) {
+          console.warn("[template] CSMShadowNode init failed.", err);
+        }
+
+        // ── SKY (SkyMesh physical sky + PMREM IBL) ──
+        const sky = new SkyMesh();
+        if (sky.material) sky.material.fog = false;
+        scene.add(sky);
+
+        let pmremGenerator = null;
+        let _disposePmrem = null;
+
+        function applySkyUniforms() {
+          const S = PARAMS.physicalSky;
+          sky.turbidity.value = S.turbidity;
+          sky.rayleigh.value = S.rayleigh;
+          sky.mieCoefficient.value = S.mie;
+          sky.mieDirectionalG.value = S.mieG;
+          sky.cloudCoverage.value = S.cloudCoverage;
+          sky.cloudDensity.value = S.cloudDensity;
+          sky.cloudElevation.value = S.cloudElevation;
+          sky.scale.setScalar(S.meshScale);
+          if (sky.sunPosition?.value?.copy) sky.sunPosition.value.copy(sunDir);
+          else if (sky.sunPosition?.copy) sky.sunPosition.copy(sunDir);
+        }
+
+        function rebuildSkyEnv() {
+          try {
+            applySkyUniforms();
+            if (_disposePmrem) {
+              _disposePmrem();
+              _disposePmrem = null;
+            }
+            pmremGenerator =
+              pmremGenerator ?? new THREE.PMREMGenerator(renderer);
+            const envScene = new THREE.Scene();
+            envScene.add(sky.clone());
+            const pmremRT = pmremGenerator.fromScene(envScene, 0.04);
+            scene.environment = pmremRT.texture;
+            _disposePmrem = () => pmremRT.dispose();
+          } catch (err) {
+            console.warn("[template] PMREM from SkyMesh failed.", err);
+          }
+        }
+
+        function updateSun() {
+          const L = PARAMS.light;
+          sunDirectionFromAngles(L.sunAzimuth, L.sunElevation, sunDir);
+          sun.position.copy(sunDir).multiplyScalar(L.sunDistance);
+          sun.color.set(L.dirColor);
+          sun.intensity = L.dirIntensity;
+          sun.shadow.bias = L.shadowBias;
+          sun.shadow.normalBias = L.shadowNormalBias;
+          hemi.color.set(L.hemiSkyColor);
+          hemi.groundColor.set(L.hemiGroundColor);
+          hemi.intensity = L.hemiIntensity;
+          renderer.toneMappingExposure = L.exposure;
+          scene.environmentIntensity = L.envIntensity;
+          applySkyUniforms();
+        }
+
+        updateSun();
+        rebuildSkyEnv();
+
+        // ── GROUND (tile material) ──
+        const floorGeo = new THREE.PlaneGeometry(
+          PARAMS.ground.size,
+          PARAMS.ground.size,
+        );
+        floorGeo.rotateX(-Math.PI / 2);
+        const floorMat = createTileMaterial({
+          textureScale: PARAMS.tile.textureScale,
+          gradientIntensity: PARAMS.tile.gradientIntensity,
+          gradientBias: PARAMS.tile.gradientBias,
+          tileColor: PARAMS.tile.tileColor,
+          gridColor: PARAMS.tile.gridColor,
+          gridLineColor: PARAMS.tile.gridLineColor,
+          roughness: PARAMS.tile.roughness,
+          metalness: PARAMS.tile.metalness,
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // ── CAPSULE PLAYER (same shape + colors as v2/play/playMode.js) ──
+        const capsuleGeo = new THREE.CapsuleGeometry(CAP_R, CAP_H, 4, 8);
+        const capsuleMat = new THREE.MeshStandardMaterial({
+          color: 0xff6633,
+          roughness: 0.7,
+        });
+        const capsule = new THREE.Mesh(capsuleGeo, capsuleMat);
+        capsule.castShadow = true;
+        scene.add(capsule);
+
+        // playerPos.y stores the ground surface under the capsule (foot).
+        // The mesh sits half a capsule above that — matches v2 convention.
+        const playerPos = new THREE.Vector3(0, sampleHeight(0, 0), 0);
+        const capsuleBase = CAP_R + CAP_H * 0.5;
+
+        const state = {
+          velY: 0,
+          inAir: false,
+          camYaw: 0,
+          camPitch: 0.35,
+          mode: "orbit", // "follow" | "orbit" — orbit is the default
+          immersive: false,
+          lastFacingX: 0,
+          lastFacingZ: -1,
+        };
+
+        // ── INPUT ──
+        const keys = Object.create(null);
+        let rmbLook = false;
+        window.addEventListener("keydown", (e) => {
+          if (e.code === "Tab") {
+            e.preventDefault();
+            setMode(state.mode === "follow" ? "orbit" : "follow");
+            return;
+          }
+          if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey) {
+            setImmersive(!state.immersive);
+            return;
+          }
+          keys[e.code] = true;
+        });
+        window.addEventListener("keyup", (e) => {
+          keys[e.code] = false;
+        });
+        renderer.domElement.addEventListener("contextmenu", (e) =>
+          e.preventDefault(),
+        );
+        renderer.domElement.addEventListener("pointerdown", (e) => {
+          if (e.button === 2 && state.mode === "follow") rmbLook = true;
+        });
+        window.addEventListener("pointerup", (e) => {
+          if (e.button === 2) rmbLook = false;
+        });
+        window.addEventListener("pointermove", (e) => {
+          // In immersive (pointer-locked) mode, mouse always rotates the
+          // camera. In windowed mode, only while RMB is held.
+          if (state.mode !== "follow") return;
+          if (!state.immersive && !rmbLook) return;
+          state.camYaw -= e.movementX * CAM_SENS_X;
+          state.camPitch += e.movementY * CAM_SENS_Y;
+          state.camPitch = Math.max(
+            0.05,
+            Math.min(Math.PI * 0.45, state.camPitch),
+          );
+        });
+
+        const cammodeEl = document.getElementById("cammode");
+        function setMode(next) {
+          state.mode = next;
+          controls.enabled = next === "orbit";
+          if (next === "orbit") {
+            // Orbit + pointer lock don't mix — exit immersive when switching.
+            if (state.immersive) setImmersive(false);
+            // Seed orbit target on the capsule so it orbits around the player.
+            controls.target.set(
+              playerPos.x,
+              playerPos.y + capsuleBase,
+              playerPos.z,
+            );
+            controls.update();
+          }
+          cammodeEl.textContent = next === "follow" ? "FOLLOW" : "ORBIT";
+        }
+
+        // ── IMMERSIVE MODE (pointer lock, hides UI) ──
+        const immersiveBtn = document.getElementById("immersive-toggle");
+        function setImmersive(on) {
+          if (on && state.mode !== "follow") setMode("follow");
+          state.immersive = on;
+          document.body.classList.toggle("immersive", on);
+          immersiveBtn.classList.toggle("active", on);
+          immersiveBtn.textContent = on ? "Windowed (Esc)" : "Immersive";
+          rmbLook = false;
+          if (on) {
+            renderer.domElement.requestPointerLock?.();
+          } else if (document.pointerLockElement) {
+            document.exitPointerLock();
+          }
+        }
+        immersiveBtn.addEventListener("click", () =>
+          setImmersive(!state.immersive),
+        );
+        // Browser releases pointer lock on Escape — keep state in sync.
+        document.addEventListener("pointerlockchange", () => {
+          if (!document.pointerLockElement && state.immersive) {
+            setImmersive(false);
+          }
+        });
+
+        // ── FRAME LOOP ──
+        let lastT = performance.now() / 1000;
+        renderer.setAnimationLoop(() => {
+          const now = performance.now() / 1000;
+          const dt = Math.min(now - lastT, 0.05);
+          lastT = now;
+
+          // Movement input is camera-relative. In orbit mode, derive a yaw
+          // from the camera → capsule vector so "forward" still feels right.
+          let moveYaw = state.camYaw;
+          if (state.mode === "orbit") {
+            moveYaw = Math.atan2(
+              camera.position.x - playerPos.x,
+              camera.position.z - playerPos.z,
+            );
+          }
+
+          let mx = 0,
+            mz = 0;
+          if (keys.KeyW || keys.ArrowUp) {
+            mx -= Math.sin(moveYaw);
+            mz -= Math.cos(moveYaw);
+          }
+          if (keys.KeyS || keys.ArrowDown) {
+            mx += Math.sin(moveYaw);
+            mz += Math.cos(moveYaw);
+          }
+          if (keys.KeyA || keys.ArrowLeft) {
+            mx -= Math.cos(moveYaw);
+            mz += Math.sin(moveYaw);
+          }
+          if (keys.KeyD || keys.ArrowRight) {
+            mx += Math.cos(moveYaw);
+            mz -= Math.sin(moveYaw);
+          }
+          const mlen = Math.hypot(mx, mz);
+          if (mlen > 0) {
+            mx = (mx / mlen) * MOVE_SPEED * dt;
+            mz = (mz / mlen) * MOVE_SPEED * dt;
+            playerPos.x += mx;
+            playerPos.z += mz;
+            state.lastFacingX = mx / Math.hypot(mx, mz);
+            state.lastFacingZ = mz / Math.hypot(mx, mz);
+          }
+
+          // Ground stick + gravity (v2 playMode capsule branch).
+          const groundY = sampleHeight(playerPos.x, playerPos.z);
+          const prevY = playerPos.y;
+          if (keys.Space && !state.inAir) {
+            state.velY = JUMP_VEL;
+            state.inAir = true;
+          }
+          if (state.inAir) {
+            state.velY -= GRAVITY * dt;
+            playerPos.y += state.velY * dt;
+            if (playerPos.y <= groundY) {
+              playerPos.y = groundY;
+              state.velY = 0;
+              state.inAir = false;
+            }
+          } else {
+            // 0.4 drop threshold lets the capsule walk off ledges without
+            // teleporting down on tiny dips — same as v2.
+            const drop = prevY - groundY;
+            if (drop > 0.4) {
+              state.inAir = true;
+              state.velY = 0;
+              playerPos.y = prevY;
+            } else {
+              playerPos.y = groundY;
+            }
+          }
+
+          // Visual: capsule mesh origin is its center, foot at playerPos.y.
+          const capsuleCY = playerPos.y + capsuleBase;
+          capsule.position.set(playerPos.x, capsuleCY, playerPos.z);
+          capsule.rotation.y =
+            Math.atan2(state.lastFacingX, state.lastFacingZ) + Math.PI;
+
+          // Camera.
+          if (state.mode === "follow") {
+            const followDist = PARAMS.camera.followDist;
+            const hDist = followDist * Math.cos(state.camPitch);
+            const vDist = followDist * Math.sin(state.camPitch);
+            const sinH = Math.sin(state.camYaw);
+            const cosH = Math.cos(state.camYaw);
+            const lookAtY = capsuleCY;
+            camera.position.set(
+              playerPos.x + sinH * hDist,
+              lookAtY + vDist,
+              playerPos.z + cosH * hDist,
+            );
+            camera.lookAt(playerPos.x, lookAtY, playerPos.z);
+          } else {
+            // Orbit: keep target glued to capsule so player stays in view.
+            controls.target.set(playerPos.x, capsuleCY, playerPos.z);
+            controls.update();
+          }
+
+          renderer.render(scene, camera);
+          renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+          stats.update();
+        });
+
+        window.addEventListener("resize", () => {
+          camera.aspect = innerWidth / innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(innerWidth, innerHeight);
+          if (csm?.mainFrustum) csm.updateFrustums();
+        });
+
+        // ── UI PANEL (v2/editor.html helpers) ──────────────────────────────
+        buildInspector({
+          camera,
+          floorMat,
+          updateSun,
+          rebuildSkyEnv,
+        });
+      }
+
+      // === Widget factory (mirrors v2/editor.html _section/_slider/etc.) ===
+      const _checkSvg =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      const _arrowSvg =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
+      function _fmt(v, step) {
+        if (step >= 1) return String(Math.round(v));
+        const d = Math.max(0, -Math.floor(Math.log10(step)));
+        return v.toFixed(d);
+      }
+      function _clampSnap(v, min, max, step) {
+        if (!Number.isFinite(v)) return min;
+        const n = Math.round((v - min) / step);
+        let out = min + n * step;
+        const stepStr = String(step);
+        let decimals = 0;
+        if (stepStr.includes(".")) decimals = stepStr.split(".")[1].length;
+        else if (stepStr.includes("e-")) decimals = 8;
+        if (decimals > 0) out = Number(out.toFixed(decimals));
+        return Math.min(max, Math.max(min, out));
+      }
+      function _section(parent, title, expanded = true) {
+        const sec = document.createElement("div");
+        sec.className = "inspector-section";
+        const hdr = document.createElement("div");
+        hdr.className = "section-header" + (expanded ? "" : " collapsed");
+        hdr.innerHTML = _arrowSvg + " " + title;
+        const body = document.createElement("div");
+        body.className = "section-body" + (expanded ? "" : " hidden");
+        hdr.addEventListener("click", () => {
+          hdr.classList.toggle("collapsed");
+          body.classList.toggle("hidden");
+        });
+        sec.appendChild(hdr);
+        sec.appendChild(body);
+        parent.appendChild(sec);
+        return body;
+      }
+      function _slider(parent, obj, key, opts) {
+        const { label, min, max, step = 0.01, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        const cur = obj[key];
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="${min}" max="${max}" step="${step}" value="${cur}"><input type="number" class="prop-num-input" min="${min}" max="${max}" step="${step}" value="${_fmt(cur, step)}"></div></div>`;
+        const sl = row.querySelector(".prop-slider");
+        const num = row.querySelector(".prop-num-input");
+        sl.addEventListener("input", () => {
+          const v = _clampSnap(parseFloat(sl.value), min, max, step);
+          obj[key] = v;
+          num.value = _fmt(v, step);
+          onChange?.(v);
+        });
+        num.addEventListener("change", () => {
+          const raw = String(num.value).trim();
+          if (raw === "" || raw === "-" || raw === "." || raw === "-.") {
+            num.value = _fmt(obj[key], step);
+            return;
+          }
+          let v = parseFloat(raw);
+          if (!Number.isFinite(v)) {
+            num.value = _fmt(obj[key], step);
+            return;
+          }
+          v = _clampSnap(v, min, max, step);
+          obj[key] = v;
+          sl.value = String(v);
+          num.value = _fmt(v, step);
+          onChange?.(v);
+        });
+        num.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") num.blur();
+        });
+        num.addEventListener(
+          "wheel",
+          (e) => {
+            if (document.activeElement === num) e.preventDefault();
+          },
+          { passive: false },
+        );
+        parent.appendChild(row);
+        return row;
+      }
+      function _color(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-color-wrap"><input type="color" class="prop-color" value="${obj[key]}"><span class="prop-slider-val" style="width:auto">${obj[key]}</span></div></div>`;
+        const inp = row.querySelector(".prop-color");
+        const hex = row.querySelector(".prop-slider-val");
+        inp.addEventListener("input", () => {
+          obj[key] = inp.value;
+          hex.textContent = inp.value;
+          onChange?.(inp.value);
+        });
+        parent.appendChild(row);
+        return row;
+      }
+      function _toggle(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><button class="prop-toggle ${obj[key] ? "checked" : ""}">${_checkSvg}</button></div>`;
+        const btn = row.querySelector(".prop-toggle");
+        btn.addEventListener("click", () => {
+          obj[key] = !obj[key];
+          btn.classList.toggle("checked", obj[key]);
+          onChange?.(obj[key]);
+        });
+        parent.appendChild(row);
+        return row;
+      }
+      function _button(parent, opts) {
+        const { title, onClick } = opts;
+        const btn = document.createElement("button");
+        btn.className = "section-btn";
+        btn.textContent = title;
+        btn.addEventListener("click", onClick);
+        parent.appendChild(btn);
+        return btn;
+      }
+      function _separator(parent) {
+        const div = document.createElement("div");
+        div.className = "section-separator";
+        parent.appendChild(div);
+      }
+
+      // === Build inspector panel ===
+      function buildInspector({ camera, floorMat, updateSun, rebuildSkyEnv }) {
+        const body = document.getElementById("inspector-body");
+
+        // Toggle show/hide.
+        document
+          .getElementById("inspector-toggle")
+          .addEventListener("click", (e) => {
+            const hidden = document.body.classList.toggle("inspector-hidden");
+            e.target.textContent = hidden ? "Show" : "Hide";
+          });
+
+        // ── Drag-to-resize the inspector panel ──
+        // Width persists in localStorage so it survives reloads. Double-
+        // click the handle to reset to the default 300px.
+        {
+          const inspectorEl = document.getElementById("inspector");
+          const handle = document.getElementById("inspector-resize-handle");
+          const KEY = "inspectorWidth";
+          const MIN = 240;
+          const MAX_VW = 0.7;
+          const clamp = (w) =>
+            Math.max(MIN, Math.min(window.innerWidth * MAX_VW, w));
+          const applyWidth = (w) => {
+            document.documentElement.style.setProperty(
+              "--inspector-width",
+              clamp(w) + "px",
+            );
+          };
+          const saved = parseFloat(localStorage.getItem(KEY));
+          if (Number.isFinite(saved)) applyWidth(saved);
+
+          let dragging = false;
+          handle.addEventListener("pointerdown", (e) => {
+            dragging = true;
+            document.body.classList.add("inspector-resizing");
+            handle.setPointerCapture?.(e.pointerId);
+            e.preventDefault();
+          });
+          window.addEventListener("pointermove", (e) => {
+            if (!dragging) return;
+            // Right-anchored panel: width = (viewport right edge) - mouseX.
+            applyWidth(window.innerWidth - e.clientX);
+          });
+          const stopDrag = (e) => {
+            if (!dragging) return;
+            dragging = false;
+            document.body.classList.remove("inspector-resizing");
+            handle.releasePointerCapture?.(e.pointerId);
+            const w = parseFloat(getComputedStyle(inspectorEl).width || "300");
+            if (Number.isFinite(w)) localStorage.setItem(KEY, String(w));
+          };
+          window.addEventListener("pointerup", stopDrag);
+          window.addEventListener("pointercancel", stopDrag);
+          handle.addEventListener("dblclick", () => {
+            document.documentElement.style.removeProperty("--inspector-width");
+            localStorage.removeItem(KEY);
+          });
+        }
+
+        // ── Camera ──
+        {
+          const sec = _section(body, "Camera", true);
+          _slider(sec, PARAMS.camera, "fov", {
+            label: "FOV",
+            min: 30,
+            max: 100,
+            step: 1,
+            onChange: (v) => {
+              camera.fov = v;
+              camera.updateProjectionMatrix();
+            },
+          });
+          _slider(sec, PARAMS.camera, "followDist", {
+            label: "Follow dist",
+            min: 3,
+            max: 25,
+            step: 0.25,
+          });
+        }
+
+        // ── Sun + Lights ──
+        {
+          const sec = _section(body, "Lights", true);
+          _slider(sec, PARAMS.light, "sunAzimuth", {
+            label: "Sun azimuth",
+            min: 0,
+            max: 360,
+            step: 1,
+            onChange: () => {
+              updateSun();
+              rebuildSkyEnv();
+            },
+          });
+          _slider(sec, PARAMS.light, "sunElevation", {
+            label: "Sun elev",
+            min: -10,
+            max: 90,
+            step: 1,
+            onChange: () => {
+              updateSun();
+              rebuildSkyEnv();
+            },
+          });
+          _color(sec, PARAMS.light, "dirColor", {
+            label: "Sun color",
+            onChange: () => updateSun(),
+          });
+          _slider(sec, PARAMS.light, "dirIntensity", {
+            label: "Sun int",
+            min: 0,
+            max: 10,
+            step: 0.05,
+            onChange: () => updateSun(),
+          });
+          _separator(sec);
+          _color(sec, PARAMS.light, "hemiSkyColor", {
+            label: "Hemi sky",
+            onChange: () => updateSun(),
+          });
+          _color(sec, PARAMS.light, "hemiGroundColor", {
+            label: "Hemi ground",
+            onChange: () => updateSun(),
+          });
+          _slider(sec, PARAMS.light, "hemiIntensity", {
+            label: "Hemi int",
+            min: 0,
+            max: 3,
+            step: 0.05,
+            onChange: () => updateSun(),
+          });
+          _separator(sec);
+          _slider(sec, PARAMS.light, "envIntensity", {
+            label: "Env int",
+            min: 0,
+            max: 3,
+            step: 0.05,
+            onChange: () => updateSun(),
+          });
+          _slider(sec, PARAMS.light, "exposure", {
+            label: "Exposure",
+            min: 0,
+            max: 3,
+            step: 0.05,
+            onChange: () => updateSun(),
+          });
+        }
+
+        // ── Sky (physical) ──
+        {
+          const sec = _section(body, "Sky", true);
+          const reb = () => rebuildSkyEnv();
+          _slider(sec, PARAMS.physicalSky, "turbidity", {
+            label: "Turbidity",
+            min: 0.1,
+            max: 20,
+            step: 0.1,
+            onChange: reb,
+          });
+          _slider(sec, PARAMS.physicalSky, "rayleigh", {
+            label: "Rayleigh",
+            min: 0,
+            max: 4,
+            step: 0.01,
+            onChange: reb,
+          });
+          _slider(sec, PARAMS.physicalSky, "mie", {
+            label: "Mie",
+            min: 0,
+            max: 0.1,
+            step: 0.0005,
+            onChange: reb,
+          });
+          _slider(sec, PARAMS.physicalSky, "mieG", {
+            label: "Mie G",
+            min: 0,
+            max: 0.999,
+            step: 0.001,
+            onChange: reb,
+          });
+          _slider(sec, PARAMS.physicalSky, "cloudCoverage", {
+            label: "Cloud cov",
+            min: 0,
+            max: 1,
+            step: 0.01,
+            onChange: reb,
+          });
+          _slider(sec, PARAMS.physicalSky, "cloudDensity", {
+            label: "Cloud dens",
+            min: 0,
+            max: 2,
+            step: 0.01,
+            onChange: reb,
+          });
+          _slider(sec, PARAMS.physicalSky, "cloudElevation", {
+            label: "Cloud elev",
+            min: 0,
+            max: 1,
+            step: 0.01,
+            onChange: reb,
+          });
+          _slider(sec, PARAMS.physicalSky, "meshScale", {
+            label: "Mesh scale",
+            min: 1000,
+            max: 50000,
+            step: 100,
+            onChange: () => {
+              rebuildSkyEnv();
+            },
+          });
+        }
+
+        // ── Ground (tile material) ──
+        {
+          const sec = _section(body, "Ground", true);
+          const U = floorMat._tileUniforms;
+          const toLinear = (hex) => new THREE.Color(hex).convertSRGBToLinear();
+
+          _color(sec, PARAMS.tile, "tileColor", {
+            label: "Tile color",
+            onChange: (hex) => U.tileColor.value.copy(toLinear(hex)),
+          });
+          _color(sec, PARAMS.tile, "gridColor", {
+            label: "Grid color",
+            onChange: (hex) => U.gridColor.value.copy(toLinear(hex)),
+          });
+          _color(sec, PARAMS.tile, "gridLineColor", {
+            label: "Grid line",
+            onChange: (hex) => U.gridLineColor.value.copy(toLinear(hex)),
+          });
+          _slider(sec, PARAMS.tile, "textureScale", {
+            label: "Tex scale",
+            min: 50,
+            max: 5000,
+            step: 10,
+            onChange: (v) => (U.textureScale.value = v),
+          });
+          _slider(sec, PARAMS.tile, "gradientIntensity", {
+            label: "Grad int",
+            min: 0,
+            max: 2,
+            step: 0.01,
+            onChange: (v) => (U.gradientIntensity.value = v),
+          });
+          _slider(sec, PARAMS.tile, "gradientBias", {
+            label: "Grad bias",
+            min: -1,
+            max: 1,
+            step: 0.01,
+            onChange: (v) => (U.gradientBias.value = v),
+          });
+          _slider(sec, PARAMS.tile, "roughness", {
+            label: "Roughness",
+            min: 0,
+            max: 1,
+            step: 0.01,
+            onChange: (v) => (floorMat.roughness = v),
+          });
+          _slider(sec, PARAMS.tile, "metalness", {
+            label: "Metalness",
+            min: 0,
+            max: 1,
+            step: 0.01,
+            onChange: (v) => (floorMat.metalness = v),
+          });
+        }
+      }
+
+      init().catch((e) => {
+        console.error("Init failed:", e);
+        document.getElementById("backend").textContent = "Error: " + e.message;
+      });
+    </script>
+  </body>
+</html>

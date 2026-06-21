@@ -124,6 +124,7 @@ const FLY_PITCH_MIN = -1.22;
 const FLY_PITCH_MAX = 0.9;
 const FLY_ROLL_MAX = 0.78;
 const FLY_ROLL_YAW_RATE = 0.9;
+const FLY_CAM_SPRING = 5;
 const STALL_SPEED = 14;
 const STALL_SINK_RATE = 6;
 const FLY_ROLL_VEL_SCALE = 0.0042;
@@ -981,6 +982,7 @@ export class PlayMode {
     this.flyBarrelDir = 1;
     this.flyGroundCamYawOff = 0;
     this.flyAileronAngle = 0;
+    this._flyCamYaw = null; // spring-chased camera yaw, null = uninitialized (snaps on first frame)
 
     // Capsule mesh
     const geo = new THREE.CapsuleGeometry(CAP_R, CAP_H, 4, 8);
@@ -7095,8 +7097,21 @@ export class PlayMode {
       );
       this.camera.lookAt(this.playerPos.x, lookAtY, this.playerPos.z);
     } else {
+      // Spring the camera yaw toward the desired heading so fast mouse sweeps
+      // produce a smooth arc instead of an instant snap.
+      if (flying) {
+        const desiredCamYaw = this.flyHeading + this.flyGroundCamYawOff;
+        if (this._flyCamYaw === null) {
+          this._flyCamYaw = desiredCamYaw;
+        } else {
+          let delta = desiredCamYaw - this._flyCamYaw;
+          while (delta > Math.PI) delta -= 2 * Math.PI;
+          while (delta < -Math.PI) delta += 2 * Math.PI;
+          this._flyCamYaw += delta * (1 - Math.exp(-FLY_CAM_SPRING * dtSec));
+        }
+      }
       const camOrbitYaw = flying
-        ? this.flyHeading + this.flyGroundCamYawOff
+        ? this._flyCamYaw
         : this.camYaw;
       const followDist = this.cameraTuning[this.moveMode]?.distance ?? CAM_DIST;
       const hDist = followDist * Math.cos(this.camPitch);
@@ -7115,39 +7130,29 @@ export class PlayMode {
       this.camera.lookAt(this.playerPos.x, lookAtY, this.playerPos.z);
     }
 
-    // Camera collision — raise camera above terrain/BVH surfaces, keep full distance.
-    // All knobs come from toolState.playCamera so the editor UI can tweak / disable live.
+    // Camera collision — pull camera in when walls block the view, clamp above terrain.
+    // Order matters: wall pull uses the IDEAL camera ray (before any lift), then the
+    // floor clamp lifts the already-pulled position. A single lookAt fires at the end.
     const camCfg = this.cameraCollisionSettings;
     const camColEnabled = !!(camCfg && camCfg.enabled === true);
     if (!camColEnabled) {
-      // Relax pulled-in distance back out so re-enabling doesn't snap.
       this._camCollisionDist = 1;
       return;
     }
     const camColOffset = camCfg?.offset ?? CAM_COLLISION_OFFSET;
     const camColEaseOut = camCfg?.easeOut ?? CAM_COLLISION_EASE_OUT;
-    const floorClampEnabled = camCfg
-      ? camCfg.floorClampEnabled !== false
-      : true;
+    const floorClampEnabled = camCfg ? camCfg.floorClampEnabled !== false : true;
     const wallPullEnabled = camCfg ? camCfg.wallPullEnabled !== false : true;
 
     const camTarget = _camColTarget;
     camTarget.set(this.playerPos.x, lookAtY, this.playerPos.z);
     const camPos = this.camera.position;
+    let needLookAt = false;
 
-    // Floor clamp: keep camera above terrain (not BVH — ramps/slopes are player surfaces, not camera barriers)
-    if (floorClampEnabled) {
-      const floorAtCam = this.getWorldHeight(camPos.x, camPos.z);
-      const minCamY = floorAtCam + camColOffset + 1.0;
-      if (camPos.y < minCamY) {
-        const targetCamY = minCamY;
-        const liftSmooth = 1 - Math.exp(-8 * dtSec);
-        camPos.y = camPos.y + (targetCamY - camPos.y) * liftSmooth;
-        this.camera.lookAt(camTarget.x, camTarget.y, camTarget.z);
-      }
-    }
-
-    // Wall pull-in: only for vertical surfaces (walls, not floors/ramps)
+    // ── 1. Wall pull-in ──────────────────────────────────────────────────────
+    // Ray is measured from look-at target along the IDEAL camera direction so the
+    // allowed-distance ratio correctly maps back to the same ray after the test.
+    // treeBvh is included so tree trunks also occlude the camera.
     if (wallPullEnabled) {
       _camColDir.subVectors(camPos, camTarget);
       const fullDist = _camColDir.length();
@@ -7157,21 +7162,36 @@ export class PlayMode {
 
         if (this.cliffBvh?.baked) {
           const hit = this.cliffBvh.raycast3D(
-            camTarget.x,
-            camTarget.y,
-            camTarget.z,
-            _camColDir.x,
-            _camColDir.y,
-            _camColDir.z,
+            camTarget.x, camTarget.y, camTarget.z,
+            _camColDir.x, _camColDir.y, _camColDir.z,
             fullDist,
           );
-          if (hit && Math.abs(hit.normal.y) < 0.3) {
+          // Widen the normal filter (0.5) to catch diagonal walls that the old
+          // 0.3 threshold missed while still ignoring nearly-flat ramps/floors.
+          if (hit && Math.abs(hit.normal.y) < 0.5) {
             const hitDist = hit.distance - camColOffset;
-            if (hitDist < allowedDist) allowedDist = hitDist;
+            if (hitDist < allowedDist) allowedDist = Math.max(0, hitDist);
+          }
+        }
+
+        if (this.treeBvh) {
+          this.treeBvh.ensureBaked();
+          if (this.treeBvh.baked) {
+            const hit = this.treeBvh.raycast3D(
+              camTarget.x, camTarget.y, camTarget.z,
+              _camColDir.x, _camColDir.y, _camColDir.z,
+              fullDist,
+            );
+            // Tree trunks are always valid blockers regardless of normal angle.
+            if (hit) {
+              const hitDist = hit.distance - camColOffset;
+              if (hitDist < allowedDist) allowedDist = Math.max(0, hitDist);
+            }
           }
         }
 
         const ratio = Math.max(0.1, allowedDist / fullDist);
+        // Instant pull-in to avoid a single frame of clipping; smooth push-out.
         if (ratio < this._camCollisionDist) {
           this._camCollisionDist = ratio;
         } else {
@@ -7181,12 +7201,31 @@ export class PlayMode {
         }
 
         if (this._camCollisionDist < 0.999) {
-          camPos.lerpVectors(camTarget, camPos, this._camCollisionDist);
-          this.camera.lookAt(camTarget.x, camTarget.y, camTarget.z);
+          // Reposition along the SAME ray that was tested, not a post-lift direction.
+          camPos.copy(camTarget).addScaledVector(_camColDir, fullDist * this._camCollisionDist);
+          needLookAt = true;
         }
       }
     } else {
       this._camCollisionDist = 1;
+    }
+
+    // ── 2. Floor clamp ───────────────────────────────────────────────────────
+    // Applied after wall pull so it operates on the final pulled-in position.
+    // Only lifts — never pushes down — so it never fights the wall pull.
+    if (floorClampEnabled) {
+      const floorAtCam = this.getWorldHeight(camPos.x, camPos.z);
+      const minCamY = floorAtCam + camColOffset + 1.0;
+      if (camPos.y < minCamY) {
+        const liftSmooth = 1 - Math.exp(-8 * dtSec);
+        camPos.y += (minCamY - camPos.y) * liftSmooth;
+        needLookAt = true;
+      }
+    }
+
+    // ── 3. Single lookAt ─────────────────────────────────────────────────────
+    if (needLookAt) {
+      this.camera.lookAt(camTarget.x, camTarget.y, camTarget.z);
     }
   }
 
@@ -7335,6 +7374,7 @@ export class PlayMode {
       this.flyGroundCamYawOff = 0;
       this.flyAileronAngle = 0;
       this.planeSpeed = 0;
+      this._flyCamYaw = null;
     } else if (target === "car") {
       this.moveMode = "car";
       this.carHeading = yaw;
