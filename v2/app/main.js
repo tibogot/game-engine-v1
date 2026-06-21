@@ -104,7 +104,8 @@ import {
 } from "../render/hybridGrass/hybridGrassSystem.js";
 import { WindGustManager } from "../core/wind/windGust.js";
 import { RevoGrassSystem } from "../render/revoGrass/revoGrassSystem.js";
-import { SnowSystem } from "../render/snow/snowSystem.js";
+import { SnowSystem  } from "../render/snow/snowSystem.js";
+import { SnowSystem2 } from "../render/snow/snowSystem2.js";
 import { GrassPaintSystem } from "../tools/foliage/grassPaintSystem.js";
 import { RevoGrassMaskPaintSystem } from "../tools/revoGrass/revoGrassMaskPaintSystem.js";
 import { SnowMaskPaintSystem } from "../tools/snow/snowMaskPaintSystem.js";
@@ -1823,7 +1824,8 @@ export async function startV2App(opts = {}) {
    *  drives Gemini, Hybrid and Revo grass so the whole world breathes
    *  together: ambient calm → gust ramps → holds → decays. */
   const windGust = new WindGustManager();
-  const snowSystem = new SnowSystem({ scene, config });
+  const snowSystem  = new SnowSystem({ scene, config });
+  const snowSystem2 = new SnowSystem2({ scene, config });
   const grassPaintSystem = new GrassPaintSystem({
     toolState,
     grassManager,
@@ -2475,6 +2477,9 @@ export async function startV2App(opts = {}) {
     if (toolState.mode === "snow" && toolState.snow.enabled) {
       snowSystem.syncFromState(toolState.snow);
     }
+    if (toolState.mode === "snow2" && toolState.snow2?.enabled) {
+      snowSystem2.syncFromState(toolState.snow2);
+    }
     if (toolState.mode !== "splineRoad") {
       splineRoadSystem.detachGizmo(transformControls);
     }
@@ -2700,7 +2705,7 @@ export async function startV2App(opts = {}) {
     _grassSaveDensity,
     _grassLoadDensity;
   let _revoGrassChanged, _revoGrassRebuild;
-  let _snowChanged, _snowRebuild;
+  let _snowChanged, _snowRebuild, _snow2Changed, _snow2Rebuild;
   let _terrainSurfaceChanged,
     _tslTerrainSync,
     _autoCliffEditorChanged,
@@ -3184,16 +3189,8 @@ export async function startV2App(opts = {}) {
       if (sp.enabled) {
         await snowSystem.ensureBuilt(sp);
         snowSystem.syncFromState(sp);
-        /**
-         * `syncFromState` leaves slopeMin/Max alone when the link is on, so
-         * push cliff values here to cover the link-toggle-on transition.
-         */
         const ac = toolState.autoCliff;
-        snowSystem.applyCliffSlope(
-          ac.slopeStart,
-          ac.slopeEnd,
-          !!sp.slopeLinkToCliff,
-        );
+        snowSystem.applyCliffSlope(ac.slopeStart, ac.slopeEnd, !!sp.slopeLinkToCliff);
         await snowSystem.precompile(renderer, camera);
       } else {
         snowSystem.setEnabled(false);
@@ -3205,6 +3202,24 @@ export async function startV2App(opts = {}) {
       await snowSystem.rebuild(sp);
       snowSystem.syncFromState(sp);
       await snowSystem.precompile(renderer, camera);
+    }),
+    onSnow2Changed: (_snow2Changed = async () => {
+      const sp = toolState.snow2;
+      if (sp.enabled) {
+        await snowSystem2.ensureBuilt(sp);
+        snowSystem2.syncFromState(sp);
+        snowSystem2.setEnabled(true);
+        await snowSystem2.precompile(renderer, camera);
+      } else {
+        snowSystem2.setEnabled(false);
+      }
+    }),
+    onSnow2Rebuild: (_snow2Rebuild = async () => {
+      const sp = toolState.snow2;
+      if (!sp.enabled) return;
+      await snowSystem2.rebuild(sp);
+      snowSystem2.syncFromState(sp);
+      await snowSystem2.precompile(renderer, camera);
     }),
     onTreeCastShadowChanged: (_treeCastShadowChanged = () => {
       for (let i = 0; i < toolState.treeSlots.length; i++) {
@@ -4160,6 +4175,14 @@ export async function startV2App(opts = {}) {
         } else {
           snowSystem.setEnabled(false);
         }
+        if (project.settings?.snow2 && toolState.snow2?.enabled) {
+          await snowSystem2.rebuild(toolState.snow2);
+          snowSystem2.syncFromState(toolState.snow2);
+          snowSystem2.setEnabled(true);
+          await snowSystem2.precompile(renderer, camera);
+        } else {
+          snowSystem2.setEnabled(false);
+        }
         propTextureLibrary.applyOverrides(toolState.propMaterialOverrides);
         riverSystem.syncMaterial();
         fullRoadSystem.syncMaterial();
@@ -4738,6 +4761,13 @@ export async function startV2App(opts = {}) {
   );
   if (toolState.snow?.enabled) {
     await snowSystem.precompile(renderer, camera);
+  }
+  // Always init snowSystem2 GPU trail buffers (cheap, just two 512² RTs)
+  await snowSystem2.init(renderer, globalHeightTex, grassManager.windTex, toolState, { htexRes: HTEX_RES });
+  if (toolState.snow2?.enabled) {
+    await snowSystem2.rebuild(toolState.snow2);
+    snowSystem2.setEnabled(true);
+    await snowSystem2.precompile(renderer, camera);
   }
 
   await revoGrassSystem.init(renderer, globalHeightTex, sunDir, toolState, {
@@ -6733,6 +6763,10 @@ export async function startV2App(opts = {}) {
       const _wd = playMode.active ? _snowWheelData(playMode) : null;
       snowSystem.update(toolState.snow, focusPos, _wd);
     }
+    if (toolState.snow2?.enabled) {
+      const _wd2 = playMode.active ? _snowWheelData(playMode) : null;
+      snowSystem2.update(toolState.snow2, focusPos, _wd2, sunDir);
+    }
 
     fleurSystem.update(
       playMode.active ? playMode.playerPos : focusPos,
@@ -7801,6 +7835,12 @@ export async function startV2App(opts = {}) {
     },
     snowRebuild() {
       return _snowRebuild?.();
+    },
+    snow2Changed() {
+      return _snow2Changed?.();
+    },
+    snow2Rebuild() {
+      return _snow2Rebuild?.();
     },
     snowMaskFill() {
       snowSystem.mask.fillAccum();

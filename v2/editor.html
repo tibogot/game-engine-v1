@@ -1620,6 +1620,7 @@
               <option value="grass">Grass (G)</option>
               <option value="revoGrass">Revo Grass (Y)</option>
               <option value="snow">Snow</option>
+              <option value="snow2">Snow V2</option>
               <option value="cliffGrass">Cliff Grass</option>
               <option value="cliffPaint">Cliff Paint</option>
               <option value="road">Road</option>
@@ -3045,6 +3046,8 @@
           revoGrassPanel.style.display = mode === "revoGrass" ? "" : "none";
         const snowPanel = document.getElementById("snow-panel");
         if (snowPanel) snowPanel.style.display = mode === "snow" ? "" : "none";
+        const snow2Panel = document.getElementById("snow2-panel");
+        if (snow2Panel) snow2Panel.style.display = mode === "snow2" ? "" : "none";
         const smartRoadPanel = document.getElementById("smartroad-panel");
         if (smartRoadPanel)
           smartRoadPanel.style.display = mode === "smartRoad" ? "" : "none";
@@ -11801,6 +11804,111 @@
         return panel;
       }
 
+      // === Snow V2 — separate editor mode ===
+      function buildSnow2Panel(app) {
+        const panel = document.createElement("div");
+        panel.id = "snow2-panel";
+        panel.style.display = "none";
+        const sp = app.toolState.snow2;
+        const sCh = () => app.snow2Changed();
+        const sRb = () => app.snow2Rebuild();
+
+        const mainBody = _section(panel, "Snow V2");
+        _toggle(mainBody, sp, "enabled", { label: "Enabled", onChange: sCh });
+
+        const tileBody = _section(panel, "Tile", false);
+        _slider(tileBody, sp, "tileSize", {
+          label: "Tile size (m)", min: 20, max: 120, step: 5, onChange: sRb,
+        });
+        _slider(tileBody, sp, "subdivisions", {
+          label: "Subdivisions", min: 128, max: 512, step: 32, onChange: sRb,
+        });
+
+        const surfaceBody = _section(panel, "Surface", false);
+        _slider(surfaceBody, sp, "baseDepth", {
+          label: "Snow depth (m)", min: 0.05, max: 1.0, step: 0.01, onChange: sCh,
+        });
+        _slider(surfaceBody, sp, "noiseAmp", {
+          label: "Surface noise", min: 0, max: 0.3, step: 0.005, onChange: sCh,
+        });
+        _slider(surfaceBody, sp, "noiseFreq1", {
+          label: "Noise freq 1", min: 0.01, max: 0.5, step: 0.005, onChange: sCh,
+        });
+        _slider(surfaceBody, sp, "noiseFreq2", {
+          label: "Noise freq 2", min: 0.01, max: 0.5, step: 0.005, onChange: sCh,
+        });
+        _slider(surfaceBody, sp, "normalNeighbourShift", {
+          label: "Normal quality", min: 0.1, max: 1.0, step: 0.05, onChange: sCh,
+        });
+
+        const grooveBody = _section(panel, "Groove / Trail", false);
+        _slider(grooveBody, sp, "grooveScale", {
+          label: "Groove depth", min: 0, max: 1, step: 0.01, onChange: sCh,
+        });
+        _slider(grooveBody, sp, "rimRidgeScale", {
+          label: "Rim ridge", min: 0, max: 0.5, step: 0.01, onChange: sCh,
+        });
+        _slider(grooveBody, sp, "trailWorldSize", {
+          label: "Trail window (m)", min: 20, max: 200, step: 5, onChange: sCh,
+        });
+        _slider(grooveBody, sp, "trailStampStep", {
+          label: "Stamp step (m)", min: 0.02, max: 0.5, step: 0.01, onChange: sCh,
+        });
+        _slider(grooveBody, sp, "trailRegrowPerFrame", {
+          label: "Regrow / frame", min: 0, max: 0.02, step: 0.0002, onChange: sCh,
+        });
+        _slider(grooveBody, sp, "trailAlbedoCavity", {
+          label: "Trail darkening", min: 0, max: 1, step: 0.01, onChange: sCh,
+        });
+        _slider(grooveBody, sp, "trailRoughnessBoost", {
+          label: "Trail roughness", min: 0, max: 1, step: 0.01, onChange: sCh,
+        });
+
+        const footBody = _section(panel, "Foot stamp", false);
+        _slider(footBody, sp, "v2FootRadius", {
+          label: "Foot radius (m)", min: 0.04, max: 0.4, step: 0.01, onChange: sCh,
+        });
+        _slider(footBody, sp, "v2FootDepth", {
+          label: "Foot depth", min: 0.1, max: 1.0, step: 0.01, onChange: sCh,
+        });
+
+        const wheelBody = _section(panel, "Wheel stamp", false);
+        _slider(wheelBody, sp, "wheelRadius", {
+          label: "Wheel radius (m)", min: 0.1, max: 1.5, step: 0.01, onChange: sCh,
+        });
+        _slider(wheelBody, sp, "wheelDepth", {
+          label: "Wheel depth", min: 0.1, max: 1.5, step: 0.01, onChange: sCh,
+        });
+        _slider(wheelBody, sp, "wheelPushScale", {
+          label: "Wheel push", min: 0.1, max: 2.0, step: 0.05, onChange: sCh,
+        });
+        _toggle(wheelBody, sp, "chassisStampEnabled", {
+          label: "Chassis drag", onChange: sCh,
+        });
+        _slider(wheelBody, sp, "chassisRadius", {
+          label: "Chassis radius", min: 0.5, max: 3.0, step: 0.05, onChange: sCh,
+        });
+        _slider(wheelBody, sp, "chassisDepth", {
+          label: "Chassis depth", min: 0, max: 1.0, step: 0.01, onChange: sCh,
+        });
+        _slider(wheelBody, sp, "chassisPushScale", {
+          label: "Chassis push", min: 0.1, max: 2.0, step: 0.05, onChange: sCh,
+        });
+
+        const sparkleBody = _section(panel, "Sparkle", false);
+        _slider(sparkleBody, sp, "glitterFreq", {
+          label: "Freq (cells/m)", min: 10, max: 500, step: 5, onChange: sCh,
+        });
+        _slider(sparkleBody, sp, "glitterIntensity", {
+          label: "Intensity", min: 0, max: 8, step: 0.1, onChange: sCh,
+        });
+        _slider(sparkleBody, sp, "glitterScarcity", {
+          label: "Scarcity", min: 10, max: 1000, step: 10, onChange: sCh,
+        });
+
+        return panel;
+      }
+
       // === Build custom Grass panel (parity with v2/ui/grassTweakpane.js + Brush) ===
       function buildGrassPanel(app) {
         const panel = document.createElement("div");
@@ -15974,6 +16082,7 @@
           toolsTab.appendChild(buildGrassPanel(app));
           toolsTab.appendChild(buildRevoGrassPanel(app));
           toolsTab.appendChild(buildSnowPanel(app));
+          toolsTab.appendChild(buildSnow2Panel(app));
           toolsTab.appendChild(buildRoadPanel(app));
           toolsTab.appendChild(buildFullRoadPanel(app));
           toolsTab.appendChild(buildSmartRoadPanel(app));
