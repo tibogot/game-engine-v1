@@ -1,0 +1,1144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Snow Lab</title>
+    <style>
+      :root {
+        --bg-dark: #222222;
+        --bg-panel: #2a2a2a;
+        --bg-item: #333333;
+        --bg-hover: #3a3a3a;
+        --bg-input: #1e1e1e;
+        --border: #3c3c3c;
+        --border-light: #4a4a4a;
+        --text: #cccccc;
+        --text-dim: #888888;
+        --accent: #4a9eff;
+        --green: #5cb85c;
+        --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+        --font-mono: "Cascadia Code", "Fira Code", "Consolas", monospace;
+        --radius: 4px;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { overflow: hidden; background: #000; font-family: var(--font); color: var(--text); }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      #info {
+        position: fixed; bottom: 16px; left: 16px; z-index: 10;
+        font: 12px/1.5 "SF Mono", "Fira Code", monospace;
+        color: #b0d890; background: rgba(0,0,0,0.55);
+        padding: 8px 12px; border-radius: 6px;
+        pointer-events: none; user-select: none; backdrop-filter: blur(4px);
+      }
+      #info span { color: #e0f0c0; font-weight: 600; }
+      #lab-title {
+        position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+        z-index: 15; pointer-events: none; user-select: none;
+        font-size: 13px; font-weight: 600; letter-spacing: 0.28em;
+        text-transform: uppercase; color: var(--text);
+        padding: 8px 18px; border-radius: 6px;
+        background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.08);
+        backdrop-filter: blur(6px); box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+      }
+      #inspector {
+        position: fixed; top: 0; right: 0;
+        width: var(--inspector-width, 300px); min-width: 240px; max-width: 70vw;
+        height: 100vh; background: var(--bg-panel); border-left: 1px solid var(--border);
+        display: flex; flex-direction: column; overflow: hidden;
+        z-index: 20; box-shadow: -2px 0 10px rgba(0,0,0,0.3);
+      }
+      #inspector-resize-handle {
+        position: absolute; top: 0; left: -3px; width: 8px; height: 100%;
+        cursor: ew-resize; z-index: 21; background: transparent; transition: background 0.15s;
+      }
+      #inspector-resize-handle:hover,
+      body.inspector-resizing #inspector-resize-handle { background: var(--accent); opacity: 0.6; }
+      body.inspector-resizing { cursor: ew-resize; user-select: none; }
+      body.inspector-hidden #inspector-resize-handle,
+      body.immersive #inspector-resize-handle { display: none; }
+      #inspector-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0 12px; height: 32px; background: var(--bg-dark);
+        border-bottom: 1px solid var(--border);
+        font-size: 11px; font-weight: 600; letter-spacing: 0.4px;
+        text-transform: uppercase; color: var(--text-dim);
+      }
+      #inspector-toggle, #immersive-toggle {
+        background: none; border: 1px solid var(--border-light);
+        border-radius: var(--radius); color: var(--text-dim);
+        cursor: pointer; padding: 2px 8px; font-size: 10px;
+      }
+      #inspector-toggle:hover, #immersive-toggle:hover { color: var(--text); background: var(--bg-hover); }
+      #immersive-toggle.active { background: var(--accent); border-color: var(--accent); color: white; }
+      body.immersive #inspector, body.immersive #info, body.immersive #lab-title { display: none; }
+      body.immersive canvas { cursor: none; }
+      #inspector-body { flex: 1; overflow-y: auto; padding-bottom: 24px; }
+      body.inspector-hidden #inspector-body,
+      body.inspector-hidden #inspector-header span { display: none; }
+      body.inspector-hidden #inspector {
+        width: auto; height: auto; border-left: none;
+        background: transparent; box-shadow: none;
+      }
+      body.inspector-hidden #inspector-header { background: transparent; border: none; padding: 6px; }
+      .inspector-section { border-bottom: 1px solid var(--border); }
+      .section-header {
+        display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+        cursor: pointer; font-size: 11px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.4px;
+        color: var(--text-dim); user-select: none;
+      }
+      .section-header:hover { background: var(--bg-hover); }
+      .section-header .section-arrow { width: 14px; height: 14px; transition: transform 0.15s; flex-shrink: 0; }
+      .section-header.collapsed .section-arrow { transform: rotate(-90deg); }
+      .section-body { padding: 6px 12px 10px; }
+      .section-body.hidden { display: none; }
+      .prop-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; min-height: 26px; }
+      .prop-label { width: 90px; min-width: 90px; font-size: 11px; color: var(--text-dim); text-align: right; padding-right: 4px; }
+      .prop-value { flex: 1; display: flex; gap: 4px; align-items: center; }
+      .prop-color-wrap { display: flex; align-items: center; gap: 6px; flex: 1; }
+      .prop-color {
+        width: 22px; height: 22px; border-radius: var(--radius);
+        border: 1px solid var(--border); cursor: pointer; flex-shrink: 0;
+        padding: 0; -webkit-appearance: none; appearance: none;
+      }
+      .prop-color::-webkit-color-swatch-wrapper { padding: 0; }
+      .prop-color::-webkit-color-swatch { border: none; border-radius: 2px; }
+      .prop-slider-wrap { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .prop-num-input {
+        width: 72px; height: 22px; flex-shrink: 0; box-sizing: border-box;
+        background: var(--bg-input); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 0 5px; color: var(--text);
+        font-size: 11px; font-family: var(--font-mono); text-align: right; outline: none;
+      }
+      .prop-num-input:focus { border-color: var(--accent); }
+      .prop-num-input::-webkit-outer-spin-button,
+      .prop-num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+      .prop-num-input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+      .prop-slider {
+        flex: 1; height: 4px; -webkit-appearance: none; appearance: none;
+        background: var(--bg-input); border-radius: 2px; outline: none;
+      }
+      .prop-slider::-webkit-slider-thumb {
+        -webkit-appearance: none; width: 12px; height: 12px;
+        border-radius: 50%; background: var(--accent); cursor: pointer;
+      }
+      .prop-slider-val { width: 44px; font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); text-align: right; }
+      .prop-dropdown {
+        flex: 1; height: 22px; background: var(--bg-input);
+        border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 0 6px; color: var(--text); font-size: 12px; font-family: var(--font);
+        outline: none; cursor: pointer;
+      }
+      .prop-toggle {
+        width: 14px; height: 14px; border: 1px solid var(--border-light);
+        border-radius: 3px; background: var(--bg-input); cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0; padding: 0; color: transparent;
+      }
+      .prop-toggle.checked { background: var(--accent); border-color: var(--accent); color: white; }
+      .prop-toggle svg { width: 10px; height: 10px; }
+      .section-btn {
+        display: flex; align-items: center; justify-content: center; gap: 4px;
+        width: 100%; height: 26px; margin-top: 4px;
+        background: var(--bg-item); border: 1px solid var(--border);
+        border-radius: var(--radius); color: var(--text-dim);
+        cursor: pointer; font-size: 11px; font-family: var(--font);
+      }
+      .section-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-light); }
+      .section-separator { height: 1px; background: var(--border); margin: 6px 0; }
+      #inspector-body::-webkit-scrollbar { width: 8px; }
+      #inspector-body::-webkit-scrollbar-track { background: transparent; }
+      #inspector-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+      #inspector-body::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/",
+          "stats-gl": "https://cdn.jsdelivr.net/npm/stats-gl/dist/main.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="lab-title">Snow Lab</div>
+    <div id="info">
+      <span id="backend">loading…</span> &bull;
+      WASD move &bull; RMB drag / <span>F</span> immersive &bull;
+      <span id="cammode">ORBIT</span> (Tab follow)
+    </div>
+    <div id="inspector">
+      <div id="inspector-resize-handle" title="Drag to resize"></div>
+      <div id="inspector-header">
+        <span>Snow Lab Inspector</span>
+        <div style="display:flex;gap:4px">
+          <button id="immersive-toggle">Immersive</button>
+          <button id="inspector-toggle">Hide</button>
+        </div>
+      </div>
+      <div id="inspector-body"></div>
+    </div>
+
+    <script type="module">
+      import * as THREE from "three";
+      import Stats from "stats-gl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { SkyMesh } from "three/addons/objects/SkyMesh.js";
+      import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
+      import { QuadMesh } from "three/webgpu";
+      import {
+        Fn, Loop,
+        cameraPosition,
+        cross, float, floor, int, max, min, mix,
+        modelViewMatrix, normalLocal,
+        positionGeometry, positionWorld,
+        reflect, step,
+        texture, uniform, uniformArray, uv,
+        varying, vec2, vec3, vec4,
+        mx_noise_float,
+      } from "three/tsl";
+
+      // ── CONSTANTS ───────────────────────────────────────────────────────────
+      const TRAIL_RES  = 512;
+      const TRAIL_NEUT = 0.5;   // neutral (untouched) value in the deformation RT
+      const MAX_STAMPS = 32;
+      const BALL_R     = 0.5;
+      const MOVE_SPEED = 5.0;
+      const CAM_SENS_X = 0.002;
+      const CAM_SENS_Y = 0.002;
+
+      // ── PARAMS ──────────────────────────────────────────────────────────────
+      const PARAMS = {
+        camera: { fov: 60, followDist: 10 },
+        light: {
+          sunAzimuth: 145, sunElevation: 42,
+          dirColor: "#fff5e0", dirIntensity: 2.2,
+          hemiSkyColor: "#c8e8ff", hemiGroundColor: "#88aa55", hemiIntensity: 0.5,
+          envIntensity: 0.3, exposure: 0.55,
+          sunDistance: 600, shadowBias: -0.0005, shadowNormalBias: 0.02,
+        },
+        physicalSky: {
+          turbidity: 2.5, rayleigh: 1.2, mie: 0.004, mieG: 0.8,
+          cloudCoverage: 0.3, cloudDensity: 0.4, cloudElevation: 0.5, meshScale: 10000,
+        },
+        csm: { cascades: 2, maxFar: 200, lightMargin: 100, mapSize: 2048 },
+        snow: {
+          // geometry — change these then hit "Rebuild Geometry"
+          tileSize: 30,
+          subdivisions: 512,
+          // surface noise
+          baseDepth:  0.30,
+          noiseFreq1: 0.06,
+          noiseFreq2: 0.14,
+          noiseAmp:   0.12,
+          // TBN normal sampling
+          normalShift: 0.35,
+          // edge fade
+          fadeEdgeLow:  0.01,
+          fadeEdgeHigh: 0.20,
+          // deformation (multiplicative: grooveScale 1.0 = compress fully to ground)
+          trailWorldSize:  50,
+          grooveScale:     1.0,
+          rimScale:        0.14,
+          rimOffset:       0.55,
+          // ball stamp
+          ballPushDepth:   0.5,
+          ballStampRadius: 0.42,
+          stampStepWorld:  0.10,
+          regrowRate:      0,
+          // look
+          cavityStrength:    0.55,
+          roughnessDip:      0.28,
+          glitterIntensity:  2.0,
+          glitterScarcity:   250,
+          glitterFreq:       200.0,
+        },
+      };
+
+      // ── TRAIL GPU STATE ─────────────────────────────────────────────────────
+      let _trailRTs     = [null, null];
+      let _trailIdx     = 0;
+      let _trailSrcNode = null;   // sampled inside the QuadMesh pass
+      let _trailDispNode = null;  // sampled by the snow material
+      let _trailPassQuad = null;
+      let _trailPassU    = null;
+      let _stampVecs     = Array.from({ length: MAX_STAMPS }, () => new THREE.Vector4());
+      let _stampCount    = 0;
+      let _trailCenter   = new THREE.Vector2(0, 0);
+      let _pendingShift  = new THREE.Vector2(0, 0);
+      let _shiftDirty    = false;
+      let _prevBallXZ    = new THREE.Vector2(NaN, NaN);
+
+      function _createTrailRT() {
+        const rt = new THREE.RenderTarget(TRAIL_RES, TRAIL_RES, {
+          format: THREE.RGBAFormat,
+          type: THREE.UnsignedByteType,
+          colorSpace: THREE.NoColorSpace,
+          minFilter: THREE.LinearFilter,
+          magFilter: THREE.LinearFilter,
+          generateMipmaps: false,
+          depthBuffer: false,
+        });
+        rt.texture.flipY = false;
+        return rt;
+      }
+
+      function _clearTrailRT(renderer, rt) {
+        const savedRT  = renderer.getRenderTarget();
+        const savedCol = new THREE.Color();
+        renderer.getClearColor(savedCol);
+        const savedA = renderer.getClearAlpha();
+        renderer.setClearColor(new THREE.Color(TRAIL_NEUT, TRAIL_NEUT, TRAIL_NEUT), 1);
+        renderer.setRenderTarget(rt);
+        renderer.clear(true, false, false);
+        renderer.setRenderTarget(savedRT);
+        renderer.setClearColor(savedCol, savedA);
+      }
+
+      function initTrailGPU(renderer) {
+        _trailRTs[0] = _createTrailRT();
+        _trailRTs[1] = _createTrailRT();
+        _clearTrailRT(renderer, _trailRTs[0]);
+        _clearTrailRT(renderer, _trailRTs[1]);
+
+        _trailSrcNode  = texture(_trailRTs[0].texture);
+        _trailDispNode = texture(_trailRTs[0].texture);
+
+        _trailPassU = {
+          uShiftUV:    uniform(new THREE.Vector2(0, 0)),
+          uRegrow:     uniform(0),
+          uStampCount: uniform(0),
+          uStamps:     uniformArray(_stampVecs, "vec4"),
+        };
+        const pu      = _trailPassU;
+        const neutral = float(TRAIL_NEUT);
+
+        const passMat = new THREE.MeshBasicNodeMaterial();
+        passMat.toneMapped = false;
+        passMat.fog        = false;
+        passMat.depthTest  = false;
+        passMat.depthWrite = false;
+
+        passMat.colorNode = Fn(() => {
+          const uvHere = uv();
+          // Resample previous frame at shifted UV (player movement)
+          const srcUV  = uvHere.add(pu.uShiftUV);
+          const inBnds = step(float(0), srcUV.x).mul(step(srcUV.x, float(1)))
+                         .mul(step(float(0), srcUV.y)).mul(step(srcUV.y, float(1)));
+          // 5-tap cross blur on the source: smooths deformation edges each frame
+          // so the trail looks soft/organic rather than polygon-shaped
+          const px = float(1.0 / TRAIL_RES);
+          const sC = texture(_trailSrcNode, srcUV.clamp(0, 1)).r;
+          const sR = texture(_trailSrcNode, srcUV.add(vec2(px,     float(0))).clamp(0,1)).r;
+          const sL = texture(_trailSrcNode, srcUV.sub(vec2(px,     float(0))).clamp(0,1)).r;
+          const sU = texture(_trailSrcNode, srcUV.add(vec2(float(0), px    )).clamp(0,1)).r;
+          const sD = texture(_trailSrcNode, srcUV.sub(vec2(float(0), px    )).clamp(0,1)).r;
+          const sampled = sC.mul(0.5).add(sR.add(sL).add(sU).add(sD).mul(0.125));
+          const carried = mix(neutral, sampled, inBnds);
+          // Additive regrow toward neutral
+          const regrown = min(neutral, carried.add(pu.uRegrow));
+
+          const val = regrown.toVar("val");
+          // Stamp quintic-falloff disks — smoother edges than cubic, fewer polygon steps
+          Loop({ start: int(0), end: int(MAX_STAMPS), type: "int", condition: "<" }, ({ i }) => {
+            const active = i.lessThan(pu.uStampCount).select(float(1), float(0));
+            const s      = pu.uStamps.element(i);
+            const ctr    = vec2(s.x, s.y);
+            const radius = s.z.max(float(1e-5));
+            const push   = s.w.mul(active);
+            const d      = uvHere.distance(ctr);
+            const t      = float(1).sub(d.div(radius)).clamp(0, 1);
+            // quintic: 6t⁵ - 15t⁴ + 10t³  (smooth 2nd derivative at 0 and 1)
+            const tq = t.mul(t).mul(t).mul(t.mul(t.mul(6).sub(15)).add(10));
+            val.assign(max(float(0), val.sub(tq.mul(push))));
+          });
+
+          return vec4(val, val, val, float(1));
+        })();
+
+        _trailPassQuad = new QuadMesh(passMat);
+      }
+
+      function _pushStamp(wx, wz, push, radius) {
+        if (_stampCount >= MAX_STAMPS) return;
+        const sz = PARAMS.snow.trailWorldSize;
+        const u  = (wx - _trailCenter.x) / sz + 0.5;
+        const v  = (wz - _trailCenter.y) / sz + 0.5;
+        const r  = radius / sz;
+        if (u < -r || u > 1 + r || v < -r || v > 1 + r) return;
+        _stampVecs[_stampCount].set(u, v, r, push);
+        _stampCount++;
+      }
+
+      function _pushSegment(ax, az, bx, bz, push, radius) {
+        const dx = bx - ax, dz = bz - az;
+        const len = Math.hypot(dx, dz);
+        if (len < 1e-3) { _pushStamp(bx, bz, push, radius); return; }
+        const steps = Math.max(1, Math.ceil(len / PARAMS.snow.stampStepWorld));
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          _pushStamp(ax + dx * t, az + dz * t, push, radius);
+          if (_stampCount >= MAX_STAMPS) break;
+        }
+      }
+
+      function _updateTrailCenter(bx, bz) {
+        const sz = PARAMS.snow.trailWorldSize;
+        const ts = sz / (TRAIL_RES - 1);
+        const nx = Math.round(bx / ts) * ts;
+        const nz = Math.round(bz / ts) * ts;
+        const dx = Math.round((nx - _trailCenter.x) / ts);
+        const dz = Math.round((nz - _trailCenter.y) / ts);
+        if (dx === 0 && dz === 0) { _pendingShift.set(0, 0); return; }
+        _pendingShift.set(dx, dz);
+        _shiftDirty = true;
+        _trailCenter.set(nx, nz);
+      }
+
+      function _renderTrailPass(renderer) {
+        const ri = _trailIdx;
+        const wi = 1 - ri;
+        _trailSrcNode.value = _trailRTs[ri].texture;
+        _trailPassU.uShiftUV.value.set(_pendingShift.x / TRAIL_RES, _pendingShift.y / TRAIL_RES);
+        _trailPassU.uRegrow.value     = Math.max(0, PARAMS.snow.regrowRate);
+        _trailPassU.uStampCount.value = _stampCount;
+
+        const savedRT  = renderer.getRenderTarget();
+        const savedCol = new THREE.Color();
+        renderer.getClearColor(savedCol);
+        const savedA = renderer.getClearAlpha();
+
+        renderer.setRenderTarget(_trailRTs[wi]);
+        _trailPassQuad.render(renderer);
+
+        renderer.setRenderTarget(savedRT);
+        renderer.setClearColor(savedCol, savedA);
+
+        _trailIdx = wi;
+        _trailDispNode.value = _trailRTs[wi].texture;
+        _pendingShift.set(0, 0);
+        _shiftDirty = false;
+      }
+
+      function updateTrail(renderer, bx, bz) {
+        const sp = PARAMS.snow;
+        _updateTrailCenter(bx, bz);
+        _stampCount = 0;
+        if (Number.isFinite(_prevBallXZ.x)) {
+          _pushSegment(_prevBallXZ.x, _prevBallXZ.y, bx, bz, sp.ballPushDepth, sp.ballStampRadius);
+        } else {
+          _pushStamp(bx, bz, sp.ballPushDepth, sp.ballStampRadius);
+        }
+        _prevBallXZ.set(bx, bz);
+        if (_shiftDirty || _stampCount > 0 || sp.regrowRate > 0) _renderTrailPass(renderer);
+      }
+
+      // ── SNOW MATERIAL (procedural TSL, no photo textures) ──────────────────
+      function buildSnowUniforms(sp) {
+        return {
+          uAnchor:          uniform(new THREE.Vector2(0, 0)),
+          uTileHalf:        uniform(sp.tileSize * 0.5),
+          uBaseDepth:       uniform(sp.baseDepth),
+          uNoiseFreq1:      uniform(sp.noiseFreq1),
+          uNoiseFreq2:      uniform(sp.noiseFreq2),
+          uNoiseAmp:        uniform(sp.noiseAmp),
+          uTrailCenter:     uniform(new THREE.Vector2(0, 0)),
+          uTrailWorldSize:  uniform(sp.trailWorldSize),
+          uGrooveScale:     uniform(sp.grooveScale),
+          uRimScale:        uniform(sp.rimScale),
+          uRimOffset:       uniform(sp.rimOffset),
+          uNormalShift:     uniform(sp.normalShift),
+          uFadeEdgeLow:     uniform(sp.fadeEdgeLow),
+          uFadeEdgeHigh:    uniform(sp.fadeEdgeHigh),
+          uCavityStrength:  uniform(sp.cavityStrength),
+          uRoughnessDip:    uniform(sp.roughnessDip),
+          uGlitterIntensity:uniform(sp.glitterIntensity),
+          uGlitterScarcity: uniform(sp.glitterScarcity),
+          uGlitterFreq:     uniform(sp.glitterFreq),
+          uSunDir:          uniform(new THREE.Vector3(0, 1, 0)),
+        };
+      }
+
+      function buildSnowMaterial(u, trailTexNode) {
+        const mat = new THREE.MeshStandardNodeMaterial({
+          transparent: true,
+          alphaTest: 0.05,
+          roughness: 0.93,
+          metalness: 0,
+        });
+        mat.envMapIntensity = 0.6;
+
+        const neutral = float(TRAIL_NEUT);
+
+        // ── Trail helpers (shared by vertex and fragment) ──
+        const trailUVfn = Fn(([wxz]) => {
+          return wxz.sub(u.uTrailCenter).div(u.uTrailWorldSize).add(0.5);
+        });
+
+        const fadeEdgeMask = Fn(([tuv]) => {
+          const fw  = float(0.04);
+          const fuX = min(tuv.x.div(fw).clamp(0, 1), float(1).sub(tuv.x).div(fw).clamp(0, 1));
+          const fuY = min(tuv.y.div(fw).clamp(0, 1), float(1).sub(tuv.y).div(fw).clamp(0, 1));
+          return fuX.mul(fuY);
+        });
+
+        // ── Base snow height at a world XZ (fast: no rim, for normal basis) ──
+        // Uses Bruno Simon's multiplicative approach: snow layer height × tracksHeight.
+        // tracksHeight goes from 1 (untouched) to 0 (fully compressed to ground).
+        // This means the groove is always bounded by the snow depth — never goes negative.
+        const snowHeightBase = Fn(([wxz]) => {
+          const p1    = vec3(wxz.x.mul(u.uNoiseFreq1), float(0), wxz.y.mul(u.uNoiseFreq1));
+          const p2    = vec3(wxz.x.mul(u.uNoiseFreq2), float(0), wxz.y.mul(u.uNoiseFreq2));
+          const n1    = mx_noise_float(p1).mul(0.5).add(0.5);
+          const n2    = mx_noise_float(p2).mul(0.5).add(0.5);
+          const noise = n1.mul(n2).mul(u.uNoiseAmp);
+
+          const tuv        = trailUVfn(wxz).clamp(0, 1);
+          const tMask      = fadeEdgeMask(trailUVfn(wxz));
+          const tR         = texture(trailTexNode, tuv).r;
+          // compression in [0,1]: 0 = untouched, 1 = fully pressed
+          const compression = neutral.sub(tR).max(0).mul(float(1.0 / TRAIL_NEUT));
+          // Bruno's multiply: snow layer × (1 - compression × grooveScale), clamped to [0,1]
+          const tracksHeight = float(1).sub(compression.mul(u.uGrooveScale).clamp(0, 1));
+          const snowFull     = u.uBaseDepth.add(noise);
+
+          // Clamp minimum to 1cm — prevents z-fighting with ground when fully compressed
+          return snowFull.mul(mix(float(1), tracksHeight, tMask)).max(float(0.01));
+        });
+
+        // ── Full snow height with rim ridge (for the actual displaced vertex) ──
+        // Rim is proportional to local snow height so it auto-scales with baseDepth.
+        const snowHeightFull = Fn(([wxz]) => {
+          const base   = snowHeightBase(wxz);
+          const tuv    = trailUVfn(wxz).clamp(0, 1);
+          const tMask  = fadeEdgeMask(trailUVfn(wxz));
+          const rimOff = u.uRimOffset.div(u.uTrailWorldSize);
+
+          // Compression factor at this point and its 4 neighbours
+          const compHere = neutral.sub(texture(trailTexNode, tuv).r).max(0).mul(float(1.0 / TRAIL_NEUT));
+          const compR    = neutral.sub(texture(trailTexNode, tuv.add(vec2(rimOff, float(0))).clamp(0,1)).r).max(0).mul(float(1.0 / TRAIL_NEUT));
+          const compL    = neutral.sub(texture(trailTexNode, tuv.sub(vec2(rimOff, float(0))).clamp(0,1)).r).max(0).mul(float(1.0 / TRAIL_NEUT));
+          const compU    = neutral.sub(texture(trailTexNode, tuv.add(vec2(float(0), rimOff)).clamp(0,1)).r).max(0).mul(float(1.0 / TRAIL_NEUT));
+          const compD    = neutral.sub(texture(trailTexNode, tuv.sub(vec2(float(0), rimOff)).clamp(0,1)).r).max(0).mul(float(1.0 / TRAIL_NEUT));
+          const compNbr  = compR.max(compL).max(compU).max(compD);
+          // Edge factor: where a neighbour is more compressed than here → rim
+          const edgeFactor = compNbr.sub(compHere).max(0);
+          // Rim height is a fraction of base snow depth — never exceeds the snow layer
+          const rim = edgeFactor.mul(u.uRimScale).mul(u.uBaseDepth).mul(tMask);
+
+          return base.add(rim);
+        });
+
+        // ── Varyings: TBN in view-space + snow depth for alpha ──
+        const vDepth = varying(float(0),       "v_d");
+        const vNorm  = varying(vec3(0, 1, 0),  "v_n");
+        const vTang  = varying(vec3(1, 0, 0),  "v_t");
+        const vBitn  = varying(vec3(0, 0, 1),  "v_b");
+
+        // ── Vertex: displace geometry and compute TBN from 3 surface samples ──
+        mat.positionNode = Fn(() => {
+          // positionGeometry.xz gives the flat plane coords after rotateX(-π/2)
+          const lxz   = positionGeometry.xz;
+          const wxz   = lxz.add(u.uAnchor);
+          const shift = u.uNormalShift;
+
+          // A = actual vertex, B/C = TBN basis neighbours (base only, no rim, cheaper)
+          const yA = snowHeightFull(wxz);
+          const yB = snowHeightBase(wxz.add(vec2(shift, float(0))));
+          const yC = snowHeightBase(wxz.add(vec2(float(0), shift.negate())));
+
+          vDepth.assign(yA);
+
+          // World-space TBN: tangent along +X, bitangent along -Z, normal up
+          const pA = vec3(wxz.x,            yA, wxz.y);
+          const pB = vec3(wxz.x.add(shift), yB, wxz.y);
+          const pC = vec3(wxz.x,            yC, wxz.y.sub(shift));
+          const dU = pB.sub(pA).normalize();
+          const dV = pC.sub(pA).normalize();
+          const N  = cross(dU, dV).normalize();
+
+          vNorm.assign(modelViewMatrix.mul(vec4(N,  float(0))).xyz.normalize());
+          vTang.assign(modelViewMatrix.mul(vec4(dU, float(0))).xyz.normalize());
+          vBitn.assign(modelViewMatrix.mul(vec4(dV, float(0))).xyz.normalize());
+
+          return vec3(lxz.x, yA, lxz.y);
+        })();
+
+        // ── Alpha: fade at tile edges only (not depth-based — avoids groove going transparent)
+        // positionWorld.xz - uAnchor = local XZ on the plane (−tileHalf … +tileHalf)
+        const _lxz    = positionWorld.xz.sub(u.uAnchor);
+        const _th     = u.uTileHalf;
+        const _margin = _th.mul(float(0.10)); // 10% of half-tile for the fade band
+        const _edgeX  = min(_lxz.x.add(_th), _th.sub(_lxz.x)).div(_margin).clamp(0, 1);
+        const _edgeZ  = min(_lxz.y.add(_th), _th.sub(_lxz.y)).div(_margin).clamp(0, 1);
+        mat.alphaNode = _edgeX.mul(_edgeZ);
+
+        // ── Normal: view-space surface normal (smooth, no micro detail yet) ──
+        mat.normalNode = vNorm;
+
+        // ── Fragment: color / roughness driven by compression factor ──
+        const fragTUV    = positionWorld.xz.sub(u.uTrailCenter).div(u.uTrailWorldSize).add(0.5).clamp(0, 1);
+        const fragTrail  = texture(trailTexNode, fragTUV).r;
+        const compression = neutral.sub(fragTrail).max(0).mul(float(1.0 / TRAIL_NEUT));
+
+        // Pristine snow: cool blue-white. Compressed (packed) area: slightly blue-grey
+        const snowBase    = vec3(float(0.88), float(0.93), float(0.98));
+        const packedSnow  = vec3(float(0.60), float(0.66), float(0.76));
+        const cavity      = float(1).sub(compression.mul(u.uCavityStrength));
+        const snowColor   = mix(snowBase, packedSnow, compression.mul(u.uCavityStrength).clamp(0, 1));
+
+        // ── Micro-facet hash sparkle ─────────────────────────────────────────
+        // Divide the surface into tiny random crystal cells. Each cell has a
+        // random normal. If that normal would mirror the sun toward the camera,
+        // fire a bright emissive spike — simulating real snow crystal flash.
+        const mfCell = floor(positionWorld.xz.mul(u.uGlitterFreq));
+        const h1 = mx_noise_float(vec3(mfCell.x, float(0),   mfCell.y).mul(float(0.193)));
+        const h2 = mx_noise_float(vec3(mfCell.x, float(17.3), mfCell.y).mul(float(0.251)));
+        // Random micro-facet normal — small tilt keeps sparks near the sun-reflection zone
+        const mfN    = vec3(h1.sub(0.5).mul(0.6), float(1.0), h2.sub(0.5).mul(0.6)).normalize();
+        // Ray from fragment to camera
+        const viewDir = cameraPosition.sub(positionWorld).normalize();
+        // Mirror sun direction off the micro-facet
+        const refl_    = reflect(u.uSunDir.negate(), mfN);
+        // How much does the reflected ray align with the view ray?
+        const specDot   = refl_.dot(viewDir).clamp(0, 1);
+        // Very tight lobe → sub-pixel crystal flash (1500 ≈ 0.5° half-angle)
+        const sparkle   = specDot.pow(float(1500.0)).mul(u.uGlitterIntensity)
+                               .mul(float(1).sub(compression)); // no sparkle in compressed zones
+
+        // Legacy noise-based glitter (softer, ambient shimmer)
+        const gp      = positionWorld.xz.mul(float(0.3));
+        const gn      = mx_noise_float(vec3(gp.x, float(0), gp.y)).mul(0.5).add(0.5);
+        const shimmer  = gn.pow(u.uGlitterScarcity).mul(u.uGlitterIntensity.mul(0.4));
+
+        mat.colorNode     = snowColor.mul(cavity);
+        mat.roughnessNode = float(0.93).sub(compression.mul(u.uRoughnessDip)).clamp(0.65, 1.0);
+        // Emissive carries the bright sparkle and shimmer — ACES tonemapping blooms them
+        mat.emissiveNode  = vec3(sparkle.add(shimmer), sparkle.add(shimmer), sparkle.add(shimmer.mul(0.8)));
+
+        return mat;
+      }
+
+      // ── SNOW GEOMETRY ───────────────────────────────────────────────────────
+      function buildSnowGeometry(tileSize, subdivisions) {
+        const g = new THREE.PlaneGeometry(tileSize, tileSize, subdivisions, subdivisions);
+        g.rotateX(-Math.PI * 0.5);
+        return g;
+      }
+
+      // ── MAIN INIT ───────────────────────────────────────────────────────────
+      // Module-level refs so buildInspector and rebuildSnow can access them
+      let uSnow, snowMesh, snowGeo, snowMat, scene_ref;
+
+      function rebuildSnow() {
+        if (!scene_ref || !uSnow) return;
+        if (snowMesh) { scene_ref.remove(snowMesh); snowMesh = null; }
+        snowGeo?.dispose();
+        snowMat?.dispose();
+        const sp = PARAMS.snow;
+        uSnow.uTileHalf.value = sp.tileSize * 0.5; // keep edge-alpha in sync with tile size
+        snowGeo  = buildSnowGeometry(sp.tileSize, sp.subdivisions);
+        snowMat  = buildSnowMaterial(uSnow, _trailDispNode);
+        snowMesh = new THREE.Mesh(snowGeo, snowMat);
+        snowMesh.frustumCulled = false;
+        snowMesh.receiveShadow = true;
+        scene_ref.add(snowMesh);
+      }
+
+      async function init() {
+        // ── Renderer ──
+        const renderer = new THREE.WebGPURenderer({ antialias: true });
+        const stats    = new Stats({ trackGPU: true });
+        await stats.init(renderer);
+        await renderer.init();
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = PARAMS.light.exposure;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        document.body.appendChild(stats.dom);
+
+        document.getElementById("backend").textContent =
+          renderer.backend?.constructor?.name?.includes("WebGPU") ? "WebGPU ✓" : "WebGL fallback";
+
+        const scene  = new THREE.Scene();
+        scene_ref = scene;
+        const camera = new THREE.PerspectiveCamera(PARAMS.camera.fov, innerWidth / innerHeight, 0.5, 5000);
+        camera.position.set(0, 12, 25);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0, 0);
+        controls.enableDamping  = true;
+        controls.dampingFactor  = 0.05;
+        controls.maxPolarAngle  = Math.PI * 0.49;
+        controls.enabled        = true;
+
+        // ── Lights ──
+        const sunDir = new THREE.Vector3();
+        const hemi   = new THREE.HemisphereLight(0xffffff, 0xffffff, 1);
+        scene.add(hemi);
+
+        const sun = new THREE.DirectionalLight(0xffffff, 1);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(PARAMS.csm.mapSize, PARAMS.csm.mapSize);
+        sun.shadow.camera.near = 1; sun.shadow.camera.far = 300;
+        sun.shadow.camera.left = sun.shadow.camera.bottom = -150;
+        sun.shadow.camera.right = sun.shadow.camera.top   =  150;
+        const shadowTarget = new THREE.Object3D();
+        scene.add(shadowTarget);
+        sun.target = shadowTarget;
+        scene.add(sun);
+
+        let csm = null;
+        try {
+          csm = new CSMShadowNode(sun, {
+            cascades: PARAMS.csm.cascades, maxFar: PARAMS.csm.maxFar,
+            mode: "practical", lightMargin: PARAMS.csm.lightMargin,
+          });
+          sun.shadow.shadowNode = csm;
+        } catch (e) { console.warn("[snow-lab] CSM init failed", e); }
+
+        // ── Sky ──
+        const sky = new SkyMesh();
+        if (sky.material) sky.material.fog = false;
+        scene.add(sky);
+        let pmremGenerator = null, _disposePmrem = null;
+
+        function applySkyUniforms() {
+          const S = PARAMS.physicalSky;
+          sky.turbidity.value      = S.turbidity;
+          sky.rayleigh.value       = S.rayleigh;
+          sky.mieCoefficient.value = S.mie;
+          sky.mieDirectionalG.value = S.mieG;
+          sky.cloudCoverage.value  = S.cloudCoverage;
+          sky.cloudDensity.value   = S.cloudDensity;
+          sky.cloudElevation.value = S.cloudElevation;
+          sky.scale.setScalar(S.meshScale);
+          if (sky.sunPosition?.value?.copy) sky.sunPosition.value.copy(sunDir);
+          else if (sky.sunPosition?.copy) sky.sunPosition.copy(sunDir);
+        }
+
+        function rebuildSkyEnv() {
+          try {
+            applySkyUniforms();
+            if (_disposePmrem) { _disposePmrem(); _disposePmrem = null; }
+            pmremGenerator = pmremGenerator ?? new THREE.PMREMGenerator(renderer);
+            const envScene = new THREE.Scene();
+            envScene.add(sky.clone());
+            const pmremRT = pmremGenerator.fromScene(envScene, 0.04);
+            scene.environment = pmremRT.texture;
+            _disposePmrem = () => pmremRT.dispose();
+          } catch (e) { console.warn("[snow-lab] PMREM failed", e); }
+        }
+
+        function updateSun() {
+          const L  = PARAMS.light;
+          const az = THREE.MathUtils.degToRad(L.sunAzimuth);
+          const el = THREE.MathUtils.degToRad(L.sunElevation);
+          sunDir.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).normalize();
+          if (uSnow) uSnow.uSunDir.value.copy(sunDir);
+          sun.position.copy(sunDir).multiplyScalar(L.sunDistance);
+          sun.color.set(L.dirColor);
+          sun.intensity          = L.dirIntensity;
+          sun.shadow.bias        = L.shadowBias;
+          sun.shadow.normalBias  = L.shadowNormalBias;
+          hemi.color.set(L.hemiSkyColor);
+          hemi.groundColor.set(L.hemiGroundColor);
+          hemi.intensity              = L.hemiIntensity;
+          renderer.toneMappingExposure = L.exposure;
+          scene.environmentIntensity  = L.envIntensity;
+          applySkyUniforms();
+        }
+        updateSun();
+        rebuildSkyEnv();
+
+        // ── Ground (shows at snow alpha edges) ──
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(2000, 2000).rotateX(-Math.PI / 2),
+          new THREE.MeshStandardMaterial({ color: 0x1c2030, roughness: 0.9, metalness: 0 })
+        );
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // ── Snow system ──
+        initTrailGPU(renderer);
+        uSnow   = buildSnowUniforms(PARAMS.snow);
+        snowGeo = buildSnowGeometry(PARAMS.snow.tileSize, PARAMS.snow.subdivisions);
+        snowMat = buildSnowMaterial(uSnow, _trailDispNode);
+        snowMesh = new THREE.Mesh(snowGeo, snowMat);
+        snowMesh.frustumCulled = false;
+        snowMesh.receiveShadow = true;
+        scene.add(snowMesh);
+
+        // ── Ball player — two-color so rotation is clearly visible ──
+        const ballGeo = new THREE.SphereGeometry(BALL_R, 32, 32);
+        const ballMat = new THREE.MeshStandardNodeMaterial({ roughness: 0.55, metalness: 0.05 });
+        // normalLocal.y in object space: +1 at top pole, -1 at bottom pole.
+        // As the ball rotates, this pattern rotates with it → visible roll direction.
+        const halfBand = normalLocal.y.mul(10.0).clamp(-1, 1).mul(0.5).add(0.5);
+        ballMat.colorNode = mix(
+          vec3(float(0.9), float(0.15), float(0.1)),  // deep red  — bottom half
+          vec3(float(0.1), float(0.35), float(0.95)), // bright blue — top half
+          halfBand
+        );
+        const ball = new THREE.Mesh(ballGeo, ballMat);
+        ball.castShadow = true;
+        scene.add(ball);
+
+        const playerPos = new THREE.Vector3(0, BALL_R, 0);
+        const ballQuaternion = new THREE.Quaternion(); // accumulated rolling rotation
+        const _rollAxis = new THREE.Vector3();
+        const _rollQ    = new THREE.Quaternion();
+        let jumpVY      = 0;   // vertical velocity (m/s)
+        let isOnGround  = true;
+        const state = {
+          camYaw: 0, camPitch: 0.4,
+          mode: "orbit",
+          immersive: false,
+          lastFX: 0, lastFZ: -1,
+        };
+
+        // ── Input ──
+        const keys = Object.create(null);
+        let rmbLook = false;
+
+        window.addEventListener("keydown", e => {
+          if (e.code === "Tab") { e.preventDefault(); setMode(state.mode === "follow" ? "orbit" : "follow"); return; }
+          if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey) { setImmersive(!state.immersive); return; }
+          if (e.code === "Space" && isOnGround) { e.preventDefault(); jumpVY = 7.5; isOnGround = false; }
+          keys[e.code] = true;
+        });
+        window.addEventListener("keyup", e => { keys[e.code] = false; });
+        renderer.domElement.addEventListener("contextmenu", e => e.preventDefault());
+        renderer.domElement.addEventListener("pointerdown", e => {
+          if (e.button === 2 && state.mode === "follow") rmbLook = true;
+        });
+        window.addEventListener("pointerup", e => { if (e.button === 2) rmbLook = false; });
+        window.addEventListener("pointermove", e => {
+          if (state.mode !== "follow") return;
+          if (!state.immersive && !rmbLook) return;
+          state.camYaw   -= e.movementX * CAM_SENS_X;
+          state.camPitch  = Math.max(0.05, Math.min(Math.PI * 0.45, state.camPitch + e.movementY * CAM_SENS_Y));
+        });
+
+        const cammodeEl = document.getElementById("cammode");
+        function setMode(next) {
+          state.mode    = next;
+          controls.enabled = next === "orbit";
+          if (next === "orbit") {
+            if (state.immersive) setImmersive(false);
+            controls.target.set(playerPos.x, playerPos.y, playerPos.z);
+            controls.update();
+          }
+          cammodeEl.textContent = next === "follow" ? "FOLLOW" : "ORBIT";
+        }
+
+        const immBtn = document.getElementById("immersive-toggle");
+        function setImmersive(on) {
+          if (on && state.mode !== "follow") setMode("follow");
+          state.immersive = on;
+          document.body.classList.toggle("immersive", on);
+          immBtn.classList.toggle("active", on);
+          immBtn.textContent = on ? "Windowed (Esc)" : "Immersive";
+          rmbLook = false;
+          if (on) renderer.domElement.requestPointerLock?.();
+          else if (document.pointerLockElement) document.exitPointerLock();
+        }
+        immBtn.addEventListener("click", () => setImmersive(!state.immersive));
+        document.addEventListener("pointerlockchange", () => {
+          if (!document.pointerLockElement && state.immersive) setImmersive(false);
+        });
+
+        // ── Frame loop ──
+        let lastT = performance.now() / 1000;
+        renderer.setAnimationLoop(() => {
+          const now = performance.now() / 1000;
+          const dt  = Math.min(now - lastT, 0.05);
+          lastT = now;
+
+          // ── Horizontal movement ──
+          let moveYaw = state.camYaw;
+          if (state.mode === "orbit") {
+            moveYaw = Math.atan2(camera.position.x - playerPos.x, camera.position.z - playerPos.z);
+          }
+          let mx = 0, mz = 0;
+          if (keys.KeyW || keys.ArrowUp)    { mx -= Math.sin(moveYaw); mz -= Math.cos(moveYaw); }
+          if (keys.KeyS || keys.ArrowDown)  { mx += Math.sin(moveYaw); mz += Math.cos(moveYaw); }
+          if (keys.KeyA || keys.ArrowLeft)  { mx -= Math.cos(moveYaw); mz += Math.sin(moveYaw); }
+          if (keys.KeyD || keys.ArrowRight) { mx += Math.cos(moveYaw); mz -= Math.sin(moveYaw); }
+          const mlen = Math.hypot(mx, mz);
+          if (mlen > 0) {
+            mx = (mx / mlen) * MOVE_SPEED * dt;
+            mz = (mz / mlen) * MOVE_SPEED * dt;
+            playerPos.x += mx;
+            playerPos.z += mz;
+            state.lastFX = mx / Math.hypot(mx, mz);
+            state.lastFZ = mz / Math.hypot(mx, mz);
+
+            // Rolling constraint: ω = (vz, 0, -vx) / R  (right-hand rule on flat surface)
+            const moveDist = Math.hypot(mx, mz);
+            _rollAxis.set(mz / moveDist, 0, -mx / moveDist).normalize();
+            _rollQ.setFromAxisAngle(_rollAxis, moveDist / BALL_R);
+            ballQuaternion.premultiply(_rollQ);
+          }
+
+          // ── Vertical physics (jump + gravity) ──
+          jumpVY -= 18.0 * dt; // gravity (slightly stronger than real for snappy feel)
+          playerPos.y += jumpVY * dt;
+          if (playerPos.y <= BALL_R) {
+            playerPos.y = BALL_R;
+            jumpVY      = 0;
+            isOnGround  = true;
+          }
+
+          ball.position.copy(playerPos);
+          ball.quaternion.copy(ballQuaternion);
+
+          // Snap snow anchor to subdivision grid for stable texture lookups
+          const sp   = PARAMS.snow;
+          const step = sp.tileSize / sp.subdivisions;
+          const ax   = Math.round(playerPos.x / step) * step;
+          const az   = Math.round(playerPos.z / step) * step;
+          uSnow.uAnchor.value.set(ax, az);
+          if (snowMesh) snowMesh.position.set(ax, 0, az);
+
+          // Only stamp when on the ground — no trail during jumps
+          if (isOnGround) updateTrail(renderer, playerPos.x, playerPos.z);
+          else _prevBallXZ.set(playerPos.x, playerPos.z); // keep prev fresh for landing
+          uSnow.uTrailCenter.value.copy(_trailCenter);
+
+          // Camera
+          if (state.mode === "follow") {
+            const fd = PARAMS.camera.followDist;
+            const hd = fd * Math.cos(state.camPitch);
+            const vd = fd * Math.sin(state.camPitch);
+            camera.position.set(
+              playerPos.x + Math.sin(state.camYaw) * hd,
+              playerPos.y + vd,
+              playerPos.z + Math.cos(state.camYaw) * hd,
+            );
+            camera.lookAt(playerPos.x, playerPos.y, playerPos.z);
+          } else {
+            controls.target.set(playerPos.x, playerPos.y, playerPos.z);
+            controls.update();
+          }
+
+          renderer.render(scene, camera);
+          renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+          stats.update();
+        });
+
+        window.addEventListener("resize", () => {
+          camera.aspect = innerWidth / innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(innerWidth, innerHeight);
+          if (csm?.mainFrustum) csm.updateFrustums();
+        });
+
+        buildInspector({ camera, updateSun, rebuildSkyEnv });
+      }
+
+      // ── INSPECTOR WIDGET HELPERS (same API as template) ─────────────────────
+      const _checkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      const _arrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
+      function _fmt(v, step) {
+        if (step >= 1) return String(Math.round(v));
+        const d = Math.max(0, -Math.floor(Math.log10(step)));
+        return v.toFixed(d);
+      }
+      function _clampSnap(v, mn, mx, step) {
+        if (!Number.isFinite(v)) return mn;
+        const n   = Math.round((v - mn) / step);
+        let   out = mn + n * step;
+        const dec = step.toString().includes(".") ? step.toString().split(".")[1].length : 0;
+        if (dec > 0) out = Number(out.toFixed(dec));
+        return Math.min(mx, Math.max(mn, out));
+      }
+      function _section(parent, title, expanded = true) {
+        const sec = document.createElement("div");
+        sec.className = "inspector-section";
+        const hdr  = document.createElement("div");
+        hdr.className = "section-header" + (expanded ? "" : " collapsed");
+        hdr.innerHTML = _arrowSvg + " " + title;
+        const body = document.createElement("div");
+        body.className = "section-body" + (expanded ? "" : " hidden");
+        hdr.addEventListener("click", () => { hdr.classList.toggle("collapsed"); body.classList.toggle("hidden"); });
+        sec.appendChild(hdr); sec.appendChild(body); parent.appendChild(sec);
+        return body;
+      }
+      function _slider(parent, obj, key, opts) {
+        const { label, min, max, step = 0.01, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        const cur = obj[key];
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="${min}" max="${max}" step="${step}" value="${cur}"><input type="number" class="prop-num-input" min="${min}" max="${max}" step="${step}" value="${_fmt(cur, step)}"></div></div>`;
+        const sl  = row.querySelector(".prop-slider");
+        const num = row.querySelector(".prop-num-input");
+        sl.addEventListener("input", () => {
+          const v = _clampSnap(parseFloat(sl.value), min, max, step);
+          obj[key] = v; num.value = _fmt(v, step); onChange?.(v);
+        });
+        num.addEventListener("change", () => {
+          const raw = String(num.value).trim();
+          if (!raw || raw === "-" || raw === ".") { num.value = _fmt(obj[key], step); return; }
+          let v = parseFloat(raw);
+          if (!Number.isFinite(v)) { num.value = _fmt(obj[key], step); return; }
+          v = _clampSnap(v, min, max, step);
+          obj[key] = v; sl.value = String(v); num.value = _fmt(v, step); onChange?.(v);
+        });
+        num.addEventListener("keydown", e => { if (e.key === "Enter") num.blur(); });
+        num.addEventListener("wheel", e => { if (document.activeElement === num) e.preventDefault(); }, { passive: false });
+        parent.appendChild(row);
+        return row;
+      }
+      function _color(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-color-wrap"><input type="color" class="prop-color" value="${obj[key]}"><span class="prop-slider-val" style="width:auto">${obj[key]}</span></div></div>`;
+        const inp = row.querySelector(".prop-color");
+        const hex = row.querySelector(".prop-slider-val");
+        inp.addEventListener("input", () => { obj[key] = inp.value; hex.textContent = inp.value; onChange?.(inp.value); });
+        parent.appendChild(row);
+        return row;
+      }
+      function _button(parent, opts) {
+        const { title, onClick } = opts;
+        const btn = document.createElement("button");
+        btn.className = "section-btn"; btn.textContent = title;
+        btn.addEventListener("click", onClick);
+        parent.appendChild(btn);
+        return btn;
+      }
+      function _separator(parent) {
+        const div = document.createElement("div");
+        div.className = "section-separator";
+        parent.appendChild(div);
+      }
+
+      // ── BUILD INSPECTOR ─────────────────────────────────────────────────────
+      function buildInspector({ camera, updateSun, rebuildSkyEnv }) {
+        const body = document.getElementById("inspector-body");
+
+        document.getElementById("inspector-toggle").addEventListener("click", e => {
+          const hidden = document.body.classList.toggle("inspector-hidden");
+          e.target.textContent = hidden ? "Show" : "Hide";
+        });
+
+        // Drag-to-resize
+        {
+          const inspEl  = document.getElementById("inspector");
+          const handle  = document.getElementById("inspector-resize-handle");
+          const KEY = "snowLabInspectorWidth";
+          const clamp = w => Math.max(240, Math.min(window.innerWidth * 0.7, w));
+          const applyW = w => document.documentElement.style.setProperty("--inspector-width", clamp(w) + "px");
+          const saved = parseFloat(localStorage.getItem(KEY));
+          if (Number.isFinite(saved)) applyW(saved);
+          let dragging = false;
+          handle.addEventListener("pointerdown", e => { dragging = true; document.body.classList.add("inspector-resizing"); handle.setPointerCapture?.(e.pointerId); e.preventDefault(); });
+          window.addEventListener("pointermove", e => { if (!dragging) return; applyW(window.innerWidth - e.clientX); });
+          const stopDrag = e => {
+            if (!dragging) return; dragging = false;
+            document.body.classList.remove("inspector-resizing");
+            handle.releasePointerCapture?.(e.pointerId);
+            const w = parseFloat(getComputedStyle(inspEl).width || "300");
+            if (Number.isFinite(w)) localStorage.setItem(KEY, String(w));
+          };
+          window.addEventListener("pointerup", stopDrag);
+          window.addEventListener("pointercancel", stopDrag);
+          handle.addEventListener("dblclick", () => { document.documentElement.style.removeProperty("--inspector-width"); localStorage.removeItem(KEY); });
+        }
+
+        // ── Camera ──
+        {
+          const sec = _section(body, "Camera", true);
+          _slider(sec, PARAMS.camera, "fov", { label: "FOV", min: 30, max: 100, step: 1, onChange: v => { camera.fov = v; camera.updateProjectionMatrix(); } });
+          _slider(sec, PARAMS.camera, "followDist", { label: "Follow dist", min: 3, max: 30, step: 0.25 });
+        }
+
+        // ── Lights ──
+        {
+          const sec = _section(body, "Lights", false);
+          _slider(sec, PARAMS.light, "sunAzimuth",   { label: "Sun azimuth", min: 0,   max: 360,  step: 1,    onChange: () => { updateSun(); rebuildSkyEnv(); } });
+          _slider(sec, PARAMS.light, "sunElevation", { label: "Sun elev",    min: -10, max: 90,   step: 1,    onChange: () => { updateSun(); rebuildSkyEnv(); } });
+          _color (sec, PARAMS.light, "dirColor",     { label: "Sun color",   onChange: () => updateSun() });
+          _slider(sec, PARAMS.light, "dirIntensity", { label: "Sun int",     min: 0,   max: 10,   step: 0.05, onChange: () => updateSun() });
+          _separator(sec);
+          _color (sec, PARAMS.light, "hemiSkyColor",    { label: "Hemi sky",    onChange: () => updateSun() });
+          _color (sec, PARAMS.light, "hemiGroundColor", { label: "Hemi ground", onChange: () => updateSun() });
+          _slider(sec, PARAMS.light, "hemiIntensity",   { label: "Hemi int",    min: 0, max: 3, step: 0.05, onChange: () => updateSun() });
+          _separator(sec);
+          _slider(sec, PARAMS.light, "envIntensity", { label: "Env int",  min: 0, max: 3, step: 0.05, onChange: () => updateSun() });
+          _slider(sec, PARAMS.light, "exposure",     { label: "Exposure", min: 0, max: 3, step: 0.05, onChange: () => updateSun() });
+        }
+
+        // ── Sky ──
+        {
+          const sec = _section(body, "Sky", false);
+          const reb = () => rebuildSkyEnv();
+          _slider(sec, PARAMS.physicalSky, "turbidity",    { label: "Turbidity", min: 0.1,  max: 20,    step: 0.1,    onChange: reb });
+          _slider(sec, PARAMS.physicalSky, "rayleigh",     { label: "Rayleigh",  min: 0,    max: 4,     step: 0.01,   onChange: reb });
+          _slider(sec, PARAMS.physicalSky, "mie",          { label: "Mie",       min: 0,    max: 0.1,   step: 0.0005, onChange: reb });
+          _slider(sec, PARAMS.physicalSky, "mieG",         { label: "Mie G",     min: 0,    max: 0.999, step: 0.001,  onChange: reb });
+          _slider(sec, PARAMS.physicalSky, "cloudCoverage",{ label: "Cloud cov", min: 0,    max: 1,     step: 0.01,   onChange: reb });
+          _slider(sec, PARAMS.physicalSky, "cloudDensity", { label: "Cloud den", min: 0,    max: 2,     step: 0.01,   onChange: reb });
+        }
+
+        // ── Snow Surface ──
+        {
+          const sec = _section(body, "Snow Surface", true);
+          _slider(sec, PARAMS.snow, "baseDepth",  { label: "Base depth",  min: 0,    max: 0.5,  step: 0.005, onChange: v => { uSnow.uBaseDepth.value = v; } });
+          _separator(sec);
+          _slider(sec, PARAMS.snow, "noiseFreq1", { label: "NoiseFreq1", min: 0.01, max: 0.5,  step: 0.005, onChange: v => { uSnow.uNoiseFreq1.value = v; } });
+          _slider(sec, PARAMS.snow, "noiseFreq2", { label: "NoiseFreq2", min: 0.01, max: 0.5,  step: 0.005, onChange: v => { uSnow.uNoiseFreq2.value = v; } });
+          _slider(sec, PARAMS.snow, "noiseAmp",   { label: "Noise amp",  min: 0,    max: 0.5,  step: 0.005, onChange: v => { uSnow.uNoiseAmp.value = v; } });
+          _separator(sec);
+          _slider(sec, PARAMS.snow, "normalShift",{ label: "Normal shift",min: 0.05, max: 1.0,  step: 0.01,  onChange: v => { uSnow.uNormalShift.value = v; } });
+        }
+
+        // ── Snow Look ──
+        {
+          const sec = _section(body, "Snow Look", true);
+          _slider(sec, PARAMS.snow, "cavityStrength",   { label: "Cavity",       min: 0, max: 1,   step: 0.01, onChange: v => { uSnow.uCavityStrength.value = v; } });
+          _slider(sec, PARAMS.snow, "roughnessDip",     { label: "Rough dip",    min: 0, max: 0.5, step: 0.01, onChange: v => { uSnow.uRoughnessDip.value = v; } });
+          _separator(sec);
+          _slider(sec, PARAMS.snow, "glitterIntensity", { label: "Glitter int",  min: 0, max: 6,   step: 0.1,  onChange: v => { uSnow.uGlitterIntensity.value = v; } });
+          _slider(sec, PARAMS.snow, "glitterScarcity",  { label: "Scarcity",     min: 10, max: 600, step: 5,   onChange: v => { uSnow.uGlitterScarcity.value = v; } });
+          _slider(sec, PARAMS.snow, "glitterFreq",      { label: "Glitter freq", min: 1, max: 500, step: 5, onChange: v => { uSnow.uGlitterFreq.value = v; } });
+        }
+
+        // ── Deformation ──
+        {
+          const sec = _section(body, "Deformation", true);
+          _slider(sec, PARAMS.snow, "grooveScale",     { label: "Compress (0-1)", min: 0, max: 1,   step: 0.01, onChange: v => { uSnow.uGrooveScale.value = v; } });
+          _slider(sec, PARAMS.snow, "rimScale",        { label: "Rim ridge",     min: 0, max: 2,   step: 0.05, onChange: v => { uSnow.uRimScale.value = v; } });
+          _slider(sec, PARAMS.snow, "rimOffset",       { label: "Rim offset (m)",min: 0.2, max: 5, step: 0.1,  onChange: v => { uSnow.uRimOffset.value = v; } });
+          _separator(sec);
+          _slider(sec, PARAMS.snow, "ballPushDepth",   { label: "Ball push",     min: 0, max: 0.5, step: 0.01 });
+          _slider(sec, PARAMS.snow, "ballStampRadius", { label: "Stamp radius",  min: 0.1, max: 3, step: 0.05 });
+          _slider(sec, PARAMS.snow, "regrowRate",      { label: "Regrow/frame",  min: 0, max: 0.01, step: 0.0002 });
+        }
+
+        // ── Geometry (needs rebuild) ──
+        {
+          const sec = _section(body, "Geometry (rebuild)", false);
+          _slider(sec, PARAMS.snow, "subdivisions", { label: "Subdivisions", min: 64, max: 320, step: 32 });
+          _slider(sec, PARAMS.snow, "tileSize",     { label: "Tile size (m)", min: 20, max: 120, step: 5 });
+          _button(sec, { title: "Rebuild Geometry", onClick: () => rebuildSnow() });
+        }
+      }
+
+      init().catch(e => {
+        console.error("Init failed:", e);
+        document.getElementById("backend").textContent = "Error: " + e.message;
+      });
+    </script>
+  </body>
+</html>
