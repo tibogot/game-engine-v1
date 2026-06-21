@@ -50,6 +50,7 @@ import { createSplatOverlay } from "../render/terrain/splatOverlayTsl.js";
 import { SplatStore } from "../core/paint/splatStore.js";
 import { PaintSystem } from "../tools/paint/paintSystem.js";
 import { BrushMask } from "../core/paint/brushMask.js";
+import { BrushMaskCursor } from "../core/paint/brushMaskCursor.js";
 import { buildLayerArrayTextures } from "../core/paint/layerArrayBuilder.js";
 import {
   serializeProject,
@@ -1543,6 +1544,8 @@ export async function startV2App(opts = {}) {
     config,
     brushMask,
   });
+  const brushMaskCursor = new BrushMaskCursor(scene);
+  brushMask.setOnChange(() => brushMaskCursor.syncFromMask(brushMask));
   const holeStore = new HoleStore(config);
   const holeSystem = new HoleSystem({ toolState, holeStore, chunkStream });
   const holeOverlay = new HoleOverlay(scene, config);
@@ -4621,6 +4624,7 @@ export async function startV2App(opts = {}) {
 
   roadReflection.excludeFromReflection(brushPreview);
   roadReflection.excludeFromReflection(brushRing);
+  roadReflection.excludeFromReflection(brushMaskCursor.mesh);
   roadReflection.excludeFromReflection(spawnMarker);
   roadReflection.excludeFromReflection(roadSystem.handleGroup);
   roadReflection.excludeFromReflection(fullRoadSystem.handleGroup);
@@ -4993,6 +4997,7 @@ export async function startV2App(opts = {}) {
     if (!hit || !isBrushMode()) {
       brushPreview.visible = false;
       brushRing.visible = false;
+      brushMaskCursor.hide();
       syncRampMarker();
       return;
     }
@@ -5000,6 +5005,18 @@ export async function startV2App(opts = {}) {
       toolState.mode === "ambientfx"
         ? toolState.ambientFx.emitterRadius
         : toolState.brush.radius;
+
+    if (toolState.mode === "paint") {
+      brushPreview.visible = false;
+      brushRing.visible = false;
+      const paint = toolState.paint;
+      const maskRotationRad = ((paint.maskRotation ?? 0) * Math.PI) / 180;
+      brushMaskCursor.update(hit, r, maskRotationRad);
+      syncRampMarker();
+      return;
+    }
+
+    brushMaskCursor.hide();
     const nudge = 0.012 + Math.min(0.08, r * 0.0004);
     const useCircle = toolState.brush.previewShape === "circle";
     if (useCircle) {
