@@ -2950,13 +2950,44 @@
       });
 
       // ─── TRUNK GLB LOADER ────────────────────────────────────────────────────────
-      // Add entries here when you drop new GLBs into public/models/trunks/.
+      // Drop GLBs into public/models/trunks/ — manifest.json is auto-generated from that folder.
       const TRUNK_DIR = "models/trunks/";
-      const TRUNK_MODELS = [
-        { name: "Custom Tree 3", file: "customtree3_compressed.glb" },
-        { name: "Trees 6", file: "TREES6_compressed.glb" },
-        { name: "Seed 2279", file: "trunk_seed2279.glb" },
-      ];
+      const TRUNK_NAME_OVERRIDES = {
+        "customtree3_compressed.glb": "Custom Tree 3",
+        "TREES6_compressed.glb": "Trees 6",
+        "newtrunk_compressed.glb": "New Trunk",
+        "trunk_seed2279.glb": "Seed 2279",
+      };
+      let trunkModels = [];
+
+      function trunkDisplayName(file) {
+        if (TRUNK_NAME_OVERRIDES[file]) return TRUNK_NAME_OVERRIDES[file];
+        return file
+          .replace(/_compressed\.glb$/i, "")
+          .replace(/\.(glb|gltf)$/i, "")
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (c) => c.toUpperCase());
+      }
+
+      async function loadTrunkCatalog() {
+        try {
+          const resp = await fetch(resolvePublicPath(TRUNK_DIR + "manifest.json"));
+          if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+          const data = await resp.json();
+          if (!Array.isArray(data)) throw new Error("manifest is not an array");
+          trunkModels = data.map((entry) =>
+            typeof entry === "string"
+              ? { file: entry, name: trunkDisplayName(entry) }
+              : {
+                  file: entry.file,
+                  name: entry.name || trunkDisplayName(entry.file),
+                },
+          );
+        } catch (err) {
+          console.warn("[Arborist] trunk manifest unavailable:", err);
+          trunkModels = [];
+        }
+      }
 
       function trunkUrl(fileName) {
         return resolvePublicPath(TRUNK_DIR + fileName);
@@ -3101,7 +3132,7 @@
       }
 
       function loadTrunkByFileName(fileName) {
-        const model = TRUNK_MODELS.find((m) => m.file === fileName);
+        const model = trunkModels.find((m) => m.file === fileName);
         if (model) {
           loadBuiltInTrunk(model, { undo: false });
           return;
@@ -3170,7 +3201,7 @@
           resetToDefaultTrunk();
         });
 
-        TRUNK_MODELS.forEach((model) => {
+        trunkModels.forEach((model) => {
           addItem(model.file, model.name, () => loadBuiltInTrunk(model));
         });
 
@@ -3179,7 +3210,7 @@
 
       async function preloadTrunkGlbs() {
         await Promise.all(
-          TRUNK_MODELS.map(
+          trunkModels.map(
             (model) =>
               new Promise((resolve) => {
                 if (trunkGlbCache.has(model.file)) {
@@ -3213,7 +3244,7 @@
               return m;
             },
           },
-          ...TRUNK_MODELS.map((model) => ({
+          ...trunkModels.map((model) => ({
             key: model.file,
             make: () => cloneTrunkTemplate(model.file) ?? new THREE.Group(),
           })),
@@ -4398,6 +4429,7 @@
         },
       });
       _separator(trunkBody);
+      await loadTrunkCatalog();
       buildTrunkPicker(trunkBody);
       _separator(trunkBody);
       _button(trunkBody, {
