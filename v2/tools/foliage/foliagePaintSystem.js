@@ -79,6 +79,19 @@ export class FoliagePaintSystem {
     return e2 / Math.sqrt(dx * dx + e2 * e2 + dz * dz);
   }
 
+  _terrainNormal(x, z) {
+    const e = this._slopeEps;
+    const hL = this.terrainStore.getWorldHeight(x - e, z);
+    const hR = this.terrainStore.getWorldHeight(x + e, z);
+    const hD = this.terrainStore.getWorldHeight(x, z - e);
+    const hU = this.terrainStore.getWorldHeight(x, z + e);
+    const dx = hL - hR;
+    const dz = hD - hU;
+    const e2 = e * 2;
+    const len = Math.sqrt(dx * dx + e2 * e2 + dz * dz);
+    return { nx: dx / len, nz: dz / len };
+  }
+
   _isTooSteep(x, z) {
     const fp = this.toolState.foliagePaint;
     if (!fp.slopeEnabled) return false;
@@ -113,7 +126,12 @@ export class FoliagePaintSystem {
       const scale =
         (fp.scaleMin + Math.random() * (fp.scaleMax - fp.scaleMin)) * baseScale;
       const y = this.terrainStore.getWorldHeight(tx, tz);
-      this.foliageStore.addFoliage(tx, tz, y, rotY, scale, slotIdx);
+      let nx = 0, nz = 0;
+      if (slot.alignToNormal) {
+        const n = this._terrainNormal(tx, tz);
+        nx = n.nx; nz = n.nz;
+      }
+      this.foliageStore.addFoliage(tx, tz, y, rotY, scale, slotIdx, nx, nz);
     }
   }
 
@@ -185,7 +203,12 @@ export class FoliagePaintSystem {
       const scale =
         (fp.scaleMin + Math.random() * (fp.scaleMax - fp.scaleMin)) * baseScale;
       const y = this.terrainStore.getWorldHeight(tx, tz);
-      this.foliageStore.addFoliage(tx, tz, y, rotY, scale, slotIdx);
+      let nx = 0, nz = 0;
+      if (slot.alignToNormal) {
+        const n = this._terrainNormal(tx, tz);
+        nx = n.nx; nz = n.nz;
+      }
+      this.foliageStore.addFoliage(tx, tz, y, rotY, scale, slotIdx, nx, nz);
       placed++;
     }
 

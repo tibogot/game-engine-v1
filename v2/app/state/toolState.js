@@ -523,6 +523,7 @@ export function createToolState() {
       enabled: true,
       textureUrl: null,
       baseScale: 1.0,
+      alignToNormal: false,
       planeCount: 3,
       planeSpread: "full",
       tilt: 0.28,

@@ -32,11 +32,11 @@ export class FoliageStore {
     return this._gen.get(key) ?? 0;
   }
 
-  addFoliage(wx, wz, y, rotY, scale, slotIdx) {
+  addFoliage(wx, wz, y, rotY, scale, slotIdx, nx = 0, nz = 0) {
     const { cx, cz } = worldToChunkIndex(wx, wz, this.config);
     const key = chunkKey(cx, cz);
     if (!this.chunks.has(key)) this.chunks.set(key, []);
-    this.chunks.get(key).push({ x: wx, z: wz, y, rotY, scale, slotIdx });
+    this.chunks.get(key).push({ x: wx, z: wz, y, rotY, scale, slotIdx, nx, nz });
     this._bumpGen(key);
   }
 

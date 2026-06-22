@@ -56,6 +56,9 @@ export class FoliageLodRenderer {
     this._yAxis = new THREE.Vector3(0, 1, 0);
     this._tmpCenter = new THREE.Vector3();
     this._tmpTreeCenter = new THREE.Vector3();
+    this._surfNorm = new THREE.Vector3();
+    this._quatNorm = new THREE.Quaternion();
+    this._quatSpin = new THREE.Quaternion();
   }
 
   setSlotPreset(slotIdx, preset) {
@@ -198,7 +201,17 @@ export class FoliageLodRenderer {
       if (idx >= cappedTotal) break;
 
       this._pos.set(t.x, t.y ?? 0, t.z);
-      this._quat.setFromAxisAngle(this._yAxis, t.rotY);
+      const _nx = t.nx ?? 0;
+      const _nz = t.nz ?? 0;
+      if (_nx !== 0 || _nz !== 0) {
+        const _ny = Math.sqrt(Math.max(0, 1 - _nx * _nx - _nz * _nz));
+        this._surfNorm.set(_nx, _ny, _nz);
+        this._quatNorm.setFromUnitVectors(this._yAxis, this._surfNorm);
+        this._quatSpin.setFromAxisAngle(this._yAxis, t.rotY);
+        this._quat.multiplyQuaternions(this._quatNorm, this._quatSpin);
+      } else {
+        this._quat.setFromAxisAngle(this._yAxis, t.rotY);
+      }
       this._scl.setScalar(t.scale);
       this._treeMat.compose(this._pos, this._quat, this._scl);
 
