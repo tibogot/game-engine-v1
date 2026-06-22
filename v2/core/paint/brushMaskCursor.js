@@ -25,6 +25,7 @@ export class BrushMaskCursor {
       map: this._texture,
       transparent: true,
       depthWrite: false,
+      depthTest: false,
       side: THREE.DoubleSide,
     });
     mat.fog = false;

@@ -1520,6 +1520,8 @@ export async function startV2App(opts = {}) {
   }
   const billboardGrassStore = new BillboardGrassStore(config);
   const sculptBrushMask = new BrushMask();
+  const sculptBrushMaskCursor = new BrushMaskCursor(scene);
+  sculptBrushMask.setOnChange(() => sculptBrushMaskCursor.syncFromMask(sculptBrushMask));
   const sculptSystem = new SculptSystem({
     toolState,
     terrainStore,
@@ -4648,6 +4650,7 @@ export async function startV2App(opts = {}) {
   roadReflection.excludeFromReflection(brushPreview);
   roadReflection.excludeFromReflection(brushRing);
   roadReflection.excludeFromReflection(brushMaskCursor.mesh);
+  roadReflection.excludeFromReflection(sculptBrushMaskCursor.mesh);
   roadReflection.excludeFromReflection(spawnMarker);
   roadReflection.excludeFromReflection(roadSystem.handleGroup);
   roadReflection.excludeFromReflection(fullRoadSystem.handleGroup);
@@ -5028,6 +5031,7 @@ export async function startV2App(opts = {}) {
       brushPreview.visible = false;
       brushRing.visible = false;
       brushMaskCursor.hide();
+      sculptBrushMaskCursor.hide();
       syncRampMarker();
       return;
     }
@@ -5039,14 +5043,25 @@ export async function startV2App(opts = {}) {
     if (toolState.mode === "paint") {
       brushPreview.visible = false;
       brushRing.visible = false;
-      const paint = toolState.paint;
-      const maskRotationRad = ((paint.maskRotation ?? 0) * Math.PI) / 180;
+      sculptBrushMaskCursor.hide();
+      const maskRotationRad = ((toolState.paint.maskRotation ?? 0) * Math.PI) / 180;
       brushMaskCursor.update(hit, r, maskRotationRad);
       syncRampMarker();
       return;
     }
 
+    if (toolState.mode === "sculpt") {
+      brushPreview.visible = false;
+      brushRing.visible = false;
+      brushMaskCursor.hide();
+      const maskRotationRad = ((toolState.sculptMask.rotation ?? 0) * Math.PI) / 180;
+      sculptBrushMaskCursor.update(hit, r, maskRotationRad);
+      syncRampMarker();
+      return;
+    }
+
     brushMaskCursor.hide();
+    sculptBrushMaskCursor.hide();
     const nudge = 0.012 + Math.min(0.08, r * 0.0004);
     const useCircle = toolState.brush.previewShape === "circle";
     if (useCircle) {
