@@ -14,5 +14,13 @@
   {
     "file": "trunk_seed2279.glb",
     "name": "Seed 2279"
+  },
+  {
+    "file": "trunkagain_compressed.glb",
+    "name": "Trunkagain"
+  },
+  {
+    "file": "trunkagain2_compressed.glb",
+    "name": "Trunkagain2"
   }
 ]

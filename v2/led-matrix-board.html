@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LED Matrix Board — Chevron / Image / Text — TSL</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 100%; height: 100%; overflow: hidden;
+        background: #07060a; font-family: "SF Mono", Consolas, ui-monospace, monospace;
+      }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      #hint {
+        position: fixed; left: 14px; bottom: 14px; z-index: 5;
+        font-size: 11px; line-height: 1.5; color: #888;
+        background: rgba(0, 0, 0, 0.55); padding: 8px 12px;
+        border-radius: 6px; pointer-events: none;
+      }
+      #hint b { color: #ff9a2e; }
+      #panel {
+        position: fixed; top: 12px; right: 12px; z-index: 20;
+        width: min(270px, calc(100vw - 24px)); max-height: calc(100vh - 24px);
+        overflow: auto; padding: 12px 14px;
+        font-size: 11px; line-height: 1.45; color: #d8d8de;
+        background: rgba(8, 10, 16, 0.9);
+        border: 1px solid rgba(255, 154, 46, 0.18);
+        border-radius: 10px; backdrop-filter: blur(8px);
+      }
+      #panel h2 {
+        font-size: 12px; font-weight: 600; color: #ff9a2e;
+        margin-bottom: 10px; letter-spacing: 0.05em; text-transform: uppercase;
+      }
+      #panel section { margin-bottom: 12px; }
+      #panel section > label {
+        display: block; font-size: 10px; color: #8a8a96;
+        text-transform: uppercase; letter-spacing: 0.06em;
+        margin-bottom: 6px; padding-bottom: 4px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .row {
+        display: grid; grid-template-columns: 1fr 52px;
+        align-items: center; gap: 8px; margin-bottom: 6px;
+      }
+      .row span:first-child { color: #b8b8c2; }
+      .row output {
+        text-align: right; color: #ff9a2e; font-variant-numeric: tabular-nums;
+      }
+      .row input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: #ff9a2e; }
+      .row input[type="color"] {
+        grid-column: 1 / -1; width: 100%; height: 26px; padding: 0;
+        border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px;
+        background: transparent; cursor: pointer;
+      }
+      .full { grid-column: 1 / -1; }
+      select, input[type="text"], input[type="file"], button {
+        width: 100%; font: inherit; font-size: 11px; color: #e8e8ee;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 5px; padding: 6px 8px;
+      }
+      select { background-color: #14161c; }
+      select option { background-color: #14161c; color: #e8e8ee; }
+      button {
+        cursor: pointer; color: #ff9a2e; border-color: rgba(255, 154, 46, 0.4);
+      }
+      button:hover { background: rgba(255, 154, 46, 0.12); }
+      .chk { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+      .chk input { accent-color: #ff9a2e; width: 14px; height: 14px; }
+      .hidden { display: none; }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="hint"><b>LED matrix board</b> — Source: Chevron · Image · Text · drag to orbit</div>
+    <aside id="panel"></aside>
+
+    <script type="module">
+      import * as THREE from "three/webgpu";
+      import {
+        clamp,
+        color,
+        float,
+        Fn,
+        mix,
+        pass,
+        select,
+        smoothstep,
+        texture,
+        time,
+        uniform,
+        uv,
+        vec2,
+      } from "three/tsl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { bloom } from "three/addons/tsl/display/BloomNode.js";
+
+      // Source modes
+      const MODE = { CHEVRON: 0, IMAGE: 1, TEXT: 2, VIDEO: 3 };
+
+      const params = {
+        source: MODE.CHEVRON,
+        rgb: 0, // 1 = show source colour per LED (video-wall), 0 = mono LED
+        boardW: 6.4, // physical board width
+        boardH: 1.9, // physical board height
+        panSpeed: 0.4, // chevron: cells/sec · image+text: uv/sec scroll
+        chevronCount: 6,
+        skew: 2.3,
+        duty: 0.5,
+        threshold: 0.5, // image/text: luminance cutoff for "lit"
+        cols: 78,
+        rows: 22,
+        dotRadius: 0.36,
+        emissive: 6.0,
+        offLevel: 0.04,
+        coreColor: "#ffe07a",
+        edgeColor: "#ff6a00",
+        bloomStrength: 1.45,
+        bloomRadius: 0.6,
+        text: "RACE  •  CHAMPIONS  •  ",
+      };
+
+      const u = {
+        mode: uniform(float(params.source)),
+        rgb: uniform(float(params.rgb)),
+        panSpeed: uniform(float(params.panSpeed)),
+        chevronCount: uniform(float(params.chevronCount)),
+        skew: uniform(float(params.skew)),
+        duty: uniform(float(params.duty)),
+        threshold: uniform(float(params.threshold)),
+        cols: uniform(float(params.cols)),
+        rows: uniform(float(params.rows)),
+        dotRadius: uniform(float(params.dotRadius)),
+        emissive: uniform(float(params.emissive)),
+        offLevel: uniform(float(params.offLevel)),
+        coreColor: uniform(color(params.coreColor)),
+        edgeColor: uniform(color(params.edgeColor)),
+        contentRepeat: uniform(float(1.0)), // texture widths across the board
+        cellAspect: uniform(float(1.0)), // (cellW/cellH) — keeps LED dots round
+      };
+
+      const boardAspect = () => params.boardW / params.boardH;
+      let sourceAspect = 1.0; // current content's own width/height
+
+      // ONE persistent content canvas + texture. We redraw into the canvas and
+      // flag needsUpdate — never swap the texture object — so the GPU binding
+      // stays valid when the image/text source changes.
+      const contentCanvas = document.createElement("canvas");
+      contentCanvas.width = 4;
+      contentCanvas.height = 4;
+      {
+        const c = contentCanvas.getContext("2d");
+        c.fillStyle = "#ffffff";
+        c.fillRect(0, 0, 4, 4);
+      }
+      const contentCanvasTex = new THREE.CanvasTexture(contentCanvas);
+      contentCanvasTex.colorSpace = THREE.SRGBColorSpace;
+      contentCanvasTex.wrapS = THREE.RepeatWrapping; // loop the marquee forever
+      contentCanvasTex.wrapT = THREE.ClampToEdgeWrapping;
+      contentCanvasTex.minFilter = THREE.LinearFilter;
+      contentCanvasTex.magFilter = THREE.LinearFilter;
+      contentCanvasTex.generateMipmaps = false;
+      const contentTex = texture(contentCanvasTex);
+
+      // Re-upload after drawing into the canvas. Pass resized=true when the
+      // canvas dimensions changed so the WebGPU backend recreates the GPU
+      // texture; per-frame video updates pass false (same size = cheap upload).
+      function commitContent(resized = true) {
+        if (resized) contentCanvasTex.dispose();
+        contentCanvasTex.needsUpdate = true;
+      }
+
+      // How many texture-widths span the board. Text shows at natural height
+      // (so it scrolls); image/video fills the board once (use Fit to source
+      // to match the board's aspect and avoid squeezing).
+      function updateContentMapping() {
+        u.contentRepeat.value =
+          params.source === MODE.TEXT ? boardAspect() / sourceAspect : 1.0;
+      }
+
+      // Offscreen <video> drawn into the content canvas each frame.
+      const video = document.createElement("video");
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.crossOrigin = "anonymous";
+
+      let camera, scene, renderer, controls, pipeline, bloomPass, boardMaterial;
+      let board, frame, legL, legR;
+
+      init().catch(console.error);
+
+      async function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x07060a);
+        scene.fog = new THREE.Fog(0x07060a, 16, 60);
+
+        camera = new THREE.PerspectiveCamera(
+          40,
+          window.innerWidth / window.innerHeight,
+          0.1,
+          120,
+        );
+        camera.position.set(0.4, 1.7, 6.6);
+
+        renderer = new THREE.WebGPURenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        document.body.appendChild(renderer.domElement);
+
+        await renderer.init();
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 1.15, 0);
+        controls.enableDamping = true;
+        controls.minDistance = 2.5;
+        controls.maxDistance = 16;
+        controls.maxPolarAngle = Math.PI * 0.5;
+        controls.update();
+
+        boardMaterial = createBoardMaterial();
+        buildScene();
+        buildPost();
+        buildPanel();
+
+        window.addEventListener("resize", onResize);
+        renderer.setAnimationLoop(animate);
+      }
+
+      // Generic LED matrix: sample a SOURCE at each dot centre, then light the dot.
+      function createBoardMaterial() {
+        const mat = new THREE.MeshBasicNodeMaterial();
+
+        mat.colorNode = Fn(() => {
+          const baseUV = uv();
+
+          // ── physical LED grid: which dot, and where inside its cell ──
+          const grid = vec2(baseUV.x.mul(u.cols), baseUV.y.mul(u.rows));
+          const cellCenter = grid.floor().add(0.5);
+          const local = grid.sub(cellCenter); // -0.5 .. 0.5
+          // correct for non-square cells so the LED stays a round dot
+          const shaped = vec2(local.x.mul(u.cellAspect), local.y);
+          // circular LED — soft edge gives the "clipping dots" look
+          const dot = smoothstep(u.dotRadius, u.dotRadius.sub(0.06), shaped.length());
+
+          const cuv = cellCenter.div(vec2(u.cols, u.rows)); // cell-centre uv 0..1
+          const scroll = time.mul(u.panSpeed);
+
+          // ── SOURCE A: procedural chevron (panned) ──
+          const cy = cuv.y.sub(0.5).abs();
+          const phase = cuv.x.mul(u.chevronCount).add(cy.mul(u.skew)).sub(scroll);
+          const chevLit = smoothstep(u.duty, u.duty.sub(0.04), phase.fract());
+
+          // ── SOURCE B: content texture (image / scrolling text) ──
+          const sampleUV = vec2(cuv.x.mul(u.contentRepeat).add(scroll), cuv.y);
+          const tex = contentTex.sample(sampleUV);
+          const lum = tex.r.mul(0.299).add(tex.g.mul(0.587)).add(tex.b.mul(0.114));
+          const texLit = smoothstep(
+            u.threshold.sub(0.05),
+            u.threshold.add(0.05),
+            lum,
+          );
+
+          // ── pick how bright this LED is ──
+          // chevron -> chevLit · texture+mono -> texLit · texture+rgb -> full
+          const isChevron = u.mode.lessThan(0.5);
+          const isRgb = u.rgb.greaterThan(0.5);
+          const lit = select(
+            isChevron,
+            chevLit,
+            select(isRgb, float(1.0), texLit),
+          );
+
+          // ── pick the LED colour ──
+          const monoColor = mix(u.edgeColor, u.coreColor, dot.mul(dot));
+          const ledColor = select(
+            isChevron,
+            monoColor,
+            select(isRgb, tex.rgb, monoColor),
+          );
+
+          const intensity = dot.mul(
+            clamp(lit.mul(u.emissive).add(u.offLevel), 0.0, u.emissive),
+          );
+          return ledColor.mul(intensity);
+        })();
+
+        return mat;
+      }
+
+      const STAND_TOP = 0.7; // board sits this high above the ground
+
+      function buildScene() {
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(60, 60),
+          new THREE.MeshStandardNodeMaterial({ color: 0x17120f, roughness: 0.9 }),
+        );
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // Unit-sized meshes; layoutBoard() scales/positions them to boardW/H.
+        frame = new THREE.Mesh(
+          new THREE.BoxGeometry(1, 1, 0.22),
+          new THREE.MeshStandardNodeMaterial({
+            color: 0x120708,
+            roughness: 0.55,
+            metalness: 0.3,
+          }),
+        );
+        scene.add(frame);
+
+        board = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), boardMaterial);
+        board.name = "ledBoard";
+        scene.add(board);
+
+        const legMat = new THREE.MeshStandardNodeMaterial({
+          color: 0x1a1a1f,
+          roughness: 0.6,
+          metalness: 0.4,
+        });
+        legL = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.07, 0.09, STAND_TOP, 12),
+          legMat,
+        );
+        legR = legL.clone();
+        scene.add(legL, legR);
+
+        const spill = new THREE.PointLight(0xff7a1e, 26, 14, 2);
+        spill.position.set(0, 1.4, 2.0);
+        scene.add(spill);
+        scene.add(new THREE.AmbientLight(0x20232e, 0.6));
+        const key = new THREE.DirectionalLight(0xffffff, 0.4);
+        key.position.set(3, 6, 4);
+        scene.add(key);
+
+        layoutBoard();
+      }
+
+      // (Re)position + size the board, frame and legs from boardW/boardH.
+      function layoutBoard() {
+        const w = params.boardW;
+        const h = params.boardH;
+        const pad = 0.16;
+        const cy = STAND_TOP + h / 2;
+        board.scale.set(w, h, 1);
+        board.position.set(0, cy, 0.04);
+        frame.scale.set(w + pad * 2, h + pad * 2, 1);
+        frame.position.set(0, cy, -0.08);
+        legL.position.set(-w * 0.35, STAND_TOP / 2, -0.05);
+        legR.position.set(w * 0.35, STAND_TOP / 2, -0.05);
+        updateCellAspect();
+        updateContentMapping();
+        controls.target.set(0, cy, 0);
+        controls.update();
+      }
+
+      // Keep LED dots round: cell world aspect = (boardW/cols)/(boardH/rows).
+      function updateCellAspect() {
+        u.cellAspect.value =
+          params.boardW / params.cols / (params.boardH / params.rows);
+      }
+
+      function buildPost() {
+        pipeline = new THREE.RenderPipeline(renderer);
+        const scenePass = pass(scene, camera);
+        const sceneColor = scenePass.getTextureNode("output");
+        bloomPass = bloom(
+          sceneColor,
+          params.bloomStrength,
+          params.bloomRadius,
+          params.bloomThreshold,
+        );
+        pipeline.outputNode = sceneColor.add(bloomPass);
+      }
+
+      // ── Content sources ─────────────────────────────────────────────────────
+
+      function applyText(str) {
+        const h = 160;
+        const font = `700 ${Math.floor(h * 0.62)}px Arial, sans-serif`;
+        const measure = contentCanvas.getContext("2d");
+        measure.font = font;
+        const textW = Math.ceil(measure.measureText(str || " ").width);
+        const padX = Math.floor(h * 0.4);
+
+        contentCanvas.width = Math.max(textW + padX * 2, 8);
+        contentCanvas.height = h;
+        const c = contentCanvas.getContext("2d");
+        c.fillStyle = "#000000";
+        c.fillRect(0, 0, contentCanvas.width, h);
+        c.fillStyle = "#ffffff";
+        c.textBaseline = "middle";
+        c.textAlign = "left";
+        c.font = font;
+        c.fillText(str, padX, h * 0.52);
+
+        // show the text at natural size (height fills board), let it scroll
+        sourceAspect = contentCanvas.width / contentCanvas.height;
+        commitContent(true);
+        updateContentMapping();
+      }
+
+      function applyImageFromURL(url) {
+        const img = new Image();
+        img.onload = () => {
+          contentCanvas.width = img.naturalWidth;
+          contentCanvas.height = img.naturalHeight;
+          const c = contentCanvas.getContext("2d");
+          c.clearRect(0, 0, contentCanvas.width, contentCanvas.height);
+          c.drawImage(img, 0, 0);
+          sourceAspect = img.naturalWidth / img.naturalHeight;
+          commitContent(true);
+          updateContentMapping();
+          URL.revokeObjectURL(url);
+        };
+        img.onerror = () => URL.revokeObjectURL(url);
+        img.src = url;
+      }
+
+      function applyVideoFromURL(url) {
+        // size the content canvas to the video (capped) once metadata is known
+        video.onloadedmetadata = () => {
+          const maxW = 640;
+          const scale = Math.min(1, maxW / video.videoWidth);
+          contentCanvas.width = Math.max(2, Math.round(video.videoWidth * scale));
+          contentCanvas.height = Math.max(2, Math.round(video.videoHeight * scale));
+          sourceAspect = video.videoWidth / video.videoHeight;
+          updateContentMapping();
+          commitContent(true);
+        };
+        video.src = url;
+        video.play().catch(() => {});
+      }
+
+      // Draw the current video frame into the content canvas (called per frame).
+      function pumpVideo() {
+        if (params.source !== MODE.VIDEO) return;
+        if (video.readyState < 2) return; // HAVE_CURRENT_DATA
+        const c = contentCanvas.getContext("2d");
+        c.drawImage(video, 0, 0, contentCanvas.width, contentCanvas.height);
+        commitContent(false); // same size every frame → cheap upload
+      }
+
+      function setSource(mode) {
+        params.source = mode;
+        u.mode.value = mode;
+        if (mode === MODE.TEXT) applyText(params.text);
+        if (mode === MODE.VIDEO) video.play().catch(() => {});
+        else video.pause();
+        // image/video content load on file pick; chevron ignores the texture
+        refreshSourceRows();
+      }
+
+      // ── Panel ─────────────────────────────────────────────────────────────
+
+      function buildPanel() {
+        const panel = document.getElementById("panel");
+        panel.innerHTML = `
+          <h2>LED Matrix Board</h2>
+          <section>
+            <label>Source</label>
+            <div class="row"><select id="source" class="full">
+              <option value="0">Chevron (procedural)</option>
+              <option value="1">Image</option>
+              <option value="2">Text marquee</option>
+              <option value="3">Video</option>
+            </select></div>
+            <div class="row" id="row-rgb"><label class="chk full">
+              <input type="checkbox" id="rgb" /> RGB colour (video-wall)
+            </label></div>
+            <div class="row hidden" id="row-image">
+              <input type="file" id="imageFile" class="full" accept="image/*" />
+            </div>
+            <div class="row hidden" id="row-video">
+              <input type="file" id="videoFile" class="full" accept="video/*" />
+            </div>
+            <div class="row hidden" id="row-text">
+              <input type="text" id="textInput" class="full" value="${params.text}" />
+            </div>
+            <div class="row hidden" id="row-textbtn">
+              <button id="textApply" class="full">Update text</button>
+            </div>
+            <div class="row hidden" id="row-threshold">
+              <span>Threshold</span><output id="o-threshold">${params.threshold.toFixed(2)}</output>
+              <input type="range" id="threshold" min="0.05" max="0.95" step="0.01" value="${params.threshold}" />
+            </div>
+          </section>
+          <section>
+            <label>Animation</label>
+            <div class="row">
+              <span>Pan speed</span><output id="o-panSpeed">${params.panSpeed.toFixed(2)}</output>
+              <input type="range" id="panSpeed" min="-1.5" max="1.5" step="0.01" value="${params.panSpeed}" />
+            </div>
+          </section>
+          <section>
+            <label>Board size</label>
+            <div class="row">
+              <span>Width</span><output id="o-boardW">${params.boardW.toFixed(1)}</output>
+              <input type="range" id="boardW" min="1" max="12" step="0.1" value="${params.boardW}" />
+            </div>
+            <div class="row">
+              <span>Height</span><output id="o-boardH">${params.boardH.toFixed(1)}</output>
+              <input type="range" id="boardH" min="0.6" max="8" step="0.1" value="${params.boardH}" />
+            </div>
+            <div class="row"><button id="fitBtn" class="full">Fit board to source</button></div>
+          </section>
+          <section id="sec-chevron">
+            <label>Chevron</label>
+            <div class="row">
+              <span>Count</span><output id="o-chevronCount">${params.chevronCount}</output>
+              <input type="range" id="chevronCount" min="3" max="12" step="1" value="${params.chevronCount}" />
+            </div>
+            <div class="row">
+              <span>Sharpness</span><output id="o-skew">${params.skew.toFixed(1)}</output>
+              <input type="range" id="skew" min="0" max="5" step="0.1" value="${params.skew}" />
+            </div>
+            <div class="row">
+              <span>Band width</span><output id="o-duty">${params.duty.toFixed(2)}</output>
+              <input type="range" id="duty" min="0.15" max="0.85" step="0.01" value="${params.duty}" />
+            </div>
+          </section>
+          <section>
+            <label>LED grid</label>
+            <div class="row">
+              <span>Columns</span><output id="o-cols">${params.cols}</output>
+              <input type="range" id="cols" min="20" max="160" step="1" value="${params.cols}" />
+            </div>
+            <div class="row">
+              <span>Rows</span><output id="o-rows">${params.rows}</output>
+              <input type="range" id="rows" min="8" max="48" step="1" value="${params.rows}" />
+            </div>
+            <div class="row">
+              <span>Dot size</span><output id="o-dotRadius">${params.dotRadius.toFixed(2)}</output>
+              <input type="range" id="dotRadius" min="0.12" max="0.5" step="0.01" value="${params.dotRadius}" />
+            </div>
+            <div class="row">
+              <span>Brightness</span><output id="o-emissive">${params.emissive.toFixed(1)}</output>
+              <input type="range" id="emissive" min="1" max="12" step="0.1" value="${params.emissive}" />
+            </div>
+          </section>
+          <section id="sec-color">
+            <label>LED colour (mono)</label>
+            <div class="row"><span>Core</span><input type="color" id="coreColor" value="${params.coreColor}" /></div>
+            <div class="row"><span>Rim</span><input type="color" id="edgeColor" value="${params.edgeColor}" /></div>
+          </section>
+          <section>
+            <label>Bloom</label>
+            <div class="row">
+              <span>Strength</span><output id="o-bloomStrength">${params.bloomStrength.toFixed(2)}</output>
+              <input type="range" id="bloomStrength" min="0" max="3" step="0.05" value="${params.bloomStrength}" />
+            </div>
+            <div class="row">
+              <span>Radius</span><output id="o-bloomRadius">${params.bloomRadius.toFixed(2)}</output>
+              <input type="range" id="bloomRadius" min="0" max="1" step="0.02" value="${params.bloomRadius}" />
+            </div>
+          </section>
+        `;
+
+        const slider = (id, dec, apply) => {
+          const el = document.getElementById(id);
+          const out = document.getElementById("o-" + id);
+          el.addEventListener("input", () => {
+            const v = Number(el.value);
+            params[id] = v;
+            if (out) out.textContent = v.toFixed(dec);
+            apply(v);
+          });
+        };
+        // push a params value back onto its slider + readout (after Fit button)
+        const syncSlider = (id, dec) => {
+          const el = document.getElementById(id);
+          const out = document.getElementById("o-" + id);
+          if (el) el.value = params[id];
+          if (out) out.textContent = params[id].toFixed(dec);
+        };
+        const clampNum = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+        slider("panSpeed", 2, (v) => (u.panSpeed.value = v));
+        slider("threshold", 2, (v) => (u.threshold.value = v));
+        slider("chevronCount", 0, (v) => (u.chevronCount.value = v));
+        slider("skew", 1, (v) => (u.skew.value = v));
+        slider("duty", 2, (v) => (u.duty.value = v));
+        slider("cols", 0, (v) => {
+          u.cols.value = v;
+          updateCellAspect();
+        });
+        slider("rows", 0, (v) => {
+          u.rows.value = v;
+          updateCellAspect();
+        });
+        slider("dotRadius", 2, (v) => (u.dotRadius.value = v));
+        slider("emissive", 1, (v) => (u.emissive.value = v));
+        slider("boardW", 1, layoutBoard);
+        slider("boardH", 1, layoutBoard);
+        slider("bloomStrength", 2, (v) => (bloomPass.strength.value = v));
+        slider("bloomRadius", 2, (v) => (bloomPass.radius.value = v));
+
+        document.getElementById("coreColor").addEventListener("input", (e) => {
+          u.coreColor.value.set(e.target.value);
+        });
+        document.getElementById("edgeColor").addEventListener("input", (e) => {
+          u.edgeColor.value.set(e.target.value);
+        });
+
+        document.getElementById("source").addEventListener("change", (e) => {
+          setSource(Number(e.target.value));
+        });
+        document.getElementById("rgb").addEventListener("change", (e) => {
+          params.rgb = e.target.checked ? 1 : 0;
+          u.rgb.value = params.rgb;
+          refreshSourceRows();
+        });
+        document.getElementById("imageFile").addEventListener("change", (e) => {
+          const file = e.target.files?.[0];
+          if (file) applyImageFromURL(URL.createObjectURL(file));
+        });
+        document.getElementById("videoFile").addEventListener("change", (e) => {
+          const file = e.target.files?.[0];
+          if (file) applyVideoFromURL(URL.createObjectURL(file));
+        });
+        document.getElementById("fitBtn").addEventListener("click", () => {
+          // match the board's aspect to the source so it isn't squeezed
+          params.boardH = clampNum(params.boardW / sourceAspect, 0.6, 8);
+          syncSlider("boardW", 1);
+          syncSlider("boardH", 1);
+          layoutBoard();
+        });
+        const applyTextFromInput = () => {
+          params.text = document.getElementById("textInput").value;
+          applyText(params.text);
+        };
+        document.getElementById("textApply").addEventListener("click", applyTextFromInput);
+        document.getElementById("textInput").addEventListener("keydown", (e) => {
+          if (e.key === "Enter") applyTextFromInput();
+        });
+
+        refreshSourceRows();
+      }
+
+      // Show only the controls relevant to the current source.
+      function refreshSourceRows() {
+        const isChevron = params.source === MODE.CHEVRON;
+        const isImage = params.source === MODE.IMAGE;
+        const isText = params.source === MODE.TEXT;
+        const isVideo = params.source === MODE.VIDEO;
+        const hasContent = isImage || isText || isVideo;
+        const show = (id, on) =>
+          document.getElementById(id).classList.toggle("hidden", !on);
+
+        show("row-image", isImage);
+        show("row-video", isVideo);
+        show("row-text", isText);
+        show("row-textbtn", isText);
+        show("row-threshold", hasContent && params.rgb === 0);
+        show("row-rgb", !isChevron);
+        document.getElementById("sec-chevron").classList.toggle("hidden", !isChevron);
+        // mono colour pickers only matter when not showing source RGB
+        const monoActive = isChevron || params.rgb === 0;
+        document.getElementById("sec-color").classList.toggle("hidden", !monoActive);
+      }
+
+      function onResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function animate() {
+        controls.update();
+        pumpVideo();
+        pipeline.render();
+      }
+    </script>
+  </body>
+</html>
