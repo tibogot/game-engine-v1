@@ -949,6 +949,8 @@ export class PlayMode {
     this.playerPos = new THREE.Vector3();
     this.velY = 0;
     this.inAir = false;
+    this.footBoneL = null;
+    this.footBoneR = null;
     this.camYaw = 0;
     this.camPitch = 0.35;
     this._camCollisionDist = 1;
@@ -4355,6 +4357,8 @@ export class PlayMode {
           "Head",
           "mixamorigHead",
         ]);
+        this.footBoneL = model.getObjectByName("foot_l") ?? null;
+        this.footBoneR = model.getObjectByName("foot_r") ?? null;
 
         // Katana
         if (rightHand) {
@@ -8050,6 +8054,8 @@ export class PlayMode {
         }
       });
     }
+    this.footBoneL = null;
+    this.footBoneR = null;
     if (this._onFootWire) {
       this.scene.remove(this._onFootWire);
       this._onFootWire.geometry?.dispose();

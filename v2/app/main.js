@@ -231,6 +231,8 @@ async function probeModelsForFile(filename) {
 const _snowWheelXZs = new Float32Array(8);
 const _snowWheelTouching = new Float32Array(4);
 const _snowChassisXZ = new THREE.Vector2();
+const _snowFootPosL = new THREE.Vector3();
+const _snowFootPosR = new THREE.Vector3();
 function _snowWheelData(playMode) {
   const mode = playMode.moveMode;
 
@@ -264,20 +266,45 @@ function _snowWheelData(playMode) {
   }
 
   if (mode === "capsule" || mode === "char" || mode === "husky") {
-    /** Single foot stamp in slot 0; other slots inactive. */
     const grounded = playMode.inAir ? 0 : 1;
-    _snowWheelXZs[0] = playMode.playerPos.x;
-    _snowWheelXZs[1] = playMode.playerPos.z;
-    _snowWheelXZs[2] = 0;
-    _snowWheelXZs[3] = 0;
-    _snowWheelXZs[4] = 0;
-    _snowWheelXZs[5] = 0;
-    _snowWheelXZs[6] = 0;
-    _snowWheelXZs[7] = 0;
-    _snowWheelTouching[0] = grounded;
-    _snowWheelTouching[1] = 0;
-    _snowWheelTouching[2] = 0;
-    _snowWheelTouching[3] = 0;
+    const bL = playMode.footBoneL;
+    const bR = playMode.footBoneR;
+
+    if (grounded && bL && bR && mode === "char") {
+      // Read foot bone world positions — getWorldPosition recomputes matrixWorld
+      // up the chain so we always get the current animated position.
+      bL.getWorldPosition(_snowFootPosL);
+      bR.getWorldPosition(_snowFootPosR);
+
+      // A foot is "touching" when its world Y is within 18 cm of the character's
+      // ground level. The walk/run cycle lifts feet ~30–50 cm, so this threshold
+      // cleanly separates planted from swinging without being too sensitive.
+      const groundY = playMode.playerPos.y;
+      const lTouching = (_snowFootPosL.y - groundY) < 0.18 ? 1 : 0;
+      const rTouching = (_snowFootPosR.y - groundY) < 0.18 ? 1 : 0;
+
+      _snowWheelXZs[0] = _snowFootPosL.x;
+      _snowWheelXZs[1] = _snowFootPosL.z;
+      _snowWheelXZs[2] = _snowFootPosR.x;
+      _snowWheelXZs[3] = _snowFootPosR.z;
+      _snowWheelXZs[4] = 0; _snowWheelXZs[5] = 0;
+      _snowWheelXZs[6] = 0; _snowWheelXZs[7] = 0;
+      _snowWheelTouching[0] = lTouching;
+      _snowWheelTouching[1] = rTouching;
+      _snowWheelTouching[2] = 0;
+      _snowWheelTouching[3] = 0;
+    } else {
+      // Fallback: single center stamp for capsule / husky / bones not loaded yet
+      _snowWheelXZs[0] = playMode.playerPos.x;
+      _snowWheelXZs[1] = playMode.playerPos.z;
+      _snowWheelXZs[2] = 0; _snowWheelXZs[3] = 0;
+      _snowWheelXZs[4] = 0; _snowWheelXZs[5] = 0;
+      _snowWheelXZs[6] = 0; _snowWheelXZs[7] = 0;
+      _snowWheelTouching[0] = grounded;
+      _snowWheelTouching[1] = 0;
+      _snowWheelTouching[2] = 0;
+      _snowWheelTouching[3] = 0;
+    }
     _snowChassisXZ.set(0, 0);
     return {
       wheelXZs: _snowWheelXZs,
