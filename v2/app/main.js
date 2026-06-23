@@ -137,6 +137,14 @@ import { PropPlacementPreview } from "../core/props/propPlacementPreview.js";
 import { PropSystem } from "../tools/props/propSystem.js";
 import { LivePropManager } from "../core/props/livePropManager.js";
 import {
+  registerProceduralObjectFactories,
+  proceduralThumbnailItems,
+  proceduralSchemaFor,
+  PROCEDURAL_PROP_DEFS,
+  PROCEDURAL_PROP_LABELS,
+} from "../core/props/proceduralObjectProps.js";
+import { bakeObjectThumbnails } from "../tools/objectThumbnails.js";
+import {
   createFlagProp,
   flagBoundingBox,
   FLAG_DEFAULTS,
@@ -1993,6 +2001,8 @@ export async function startV2App(opts = {}) {
   livePropManager.registerFactory("coin", (params) => createCoinProp(params));
   livePropManager.registerFactory("heart", (params) => createHeartProp(params));
   livePropManager.registerFactory("key", (params) => createKeyProp(params));
+  // procedural objects (objects/index.js registry) as live props
+  registerProceduralObjectFactories(livePropManager);
 
   const collectibleBurst = createCollectibleBurst(scene);
   const collectibleGizmo = createCollectibleGizmo(scene);
@@ -3721,6 +3731,7 @@ export async function startV2App(opts = {}) {
           bbox: heartBoundingBox,
         },
         Key: { factoryId: "key", defaults: KEY_DEFAULTS, bbox: keyBoundingBox },
+        ...PROCEDURAL_PROP_DEFS,
       };
       const def = defs[livePropName];
       if (!def) return;
@@ -7185,6 +7196,24 @@ export async function startV2App(opts = {}) {
     },
     addLiveProp(name) {
       _addLiveProp(name);
+    },
+    getProceduralPropLabels() {
+      return PROCEDURAL_PROP_LABELS;
+    },
+    getProceduralSchema(factoryId) {
+      return proceduralSchemaFor(factoryId);
+    },
+    async bakeProceduralThumbnails(size = 96) {
+      if (this._procThumbs) return this._procThumbs;
+      this._procThumbs = await bakeObjectThumbnails({
+        renderer,
+        items: proceduralThumbnailItems(),
+        environment: scene.environment,
+        environmentIntensity: scene.environmentIntensity ?? 0.35,
+        size,
+        fill: 0.85,
+      });
+      return this._procThumbs;
     },
     importGlbCollectible(file = null) {
       _importGlbCollectible(file);

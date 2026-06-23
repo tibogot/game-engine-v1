@@ -4974,6 +4974,47 @@
           },
         });
 
+        // Procedural objects (objects/index.js registry) — a thumbnail grid:
+        // each card is a big square preview + label (bake memoized on app).
+        const objBody = _section(panel, "Procedural Objects", false);
+        const grid = document.createElement("div");
+        grid.style.cssText =
+          "display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:4px 0;";
+        objBody.appendChild(grid);
+        const _procCards = [];
+        for (const label of app.getProceduralPropLabels?.() ?? []) {
+          const card = document.createElement("button");
+          card.className = "section-btn";
+          card.title = label;
+          card.style.cssText =
+            "display:flex;flex-direction:column;align-items:center;gap:4px;height:auto;padding:6px;";
+          const thumb = document.createElement("div");
+          thumb.style.cssText =
+            "width:100%;aspect-ratio:1/1;background:#1b1b1b;border:1px solid var(--border,#3c3c3c);border-radius:4px;background-size:contain;background-repeat:no-repeat;background-position:center;";
+          const cap = document.createElement("span");
+          cap.textContent = label;
+          cap.style.cssText =
+            "font-size:11px;line-height:1.15;text-align:center;white-space:normal;";
+          card.appendChild(thumb);
+          card.appendChild(cap);
+          card.addEventListener("click", () => {
+            app.addLiveProp(label);
+            rebuildAll();
+          });
+          grid.appendChild(card);
+          _procCards.push({ label, thumb });
+        }
+        app
+          .bakeProceduralThumbnails?.(192)
+          .then((thumbs) => {
+            if (!thumbs) return;
+            for (const { label, thumb } of _procCards) {
+              const url = thumbs.get(label);
+              if (url) thumb.style.backgroundImage = `url("${url}")`;
+            }
+          })
+          .catch(() => {});
+
         // --- Loaded Props ---
         const loadedBody = _section(panel, "Loaded Props", false);
         function rebuildLoadedSlots() {
@@ -5212,6 +5253,43 @@
               if (entry?.obj.setParam) entry.obj.setParam(key, p[key]);
               lpm.updateParamSnap(instIdx);
             }
+          }
+
+          // Procedural objects: build controls from the registry schema. Any
+          // change rebuilds the prop (geometry=true → _bump), so no setParam.
+          const objSchema = app.getProceduralSchema?.(type.factoryId);
+          if (objSchema) {
+            for (const e of objSchema) {
+              if (e.type === "sep") {
+                _separator(sec);
+              } else if (e.type === "slider") {
+                _slider(sec, p, e.key, {
+                  label: e.label,
+                  min: e.min,
+                  max: e.max,
+                  step: e.step,
+                  onChange: () => syncParam(e.key, true),
+                });
+              } else if (e.type === "color") {
+                _color(sec, p, e.key, {
+                  label: e.label,
+                  onChange: () => syncParam(e.key, true),
+                });
+              } else if (e.type === "toggle") {
+                _toggle(sec, p, e.key, {
+                  label: e.label,
+                  onChange: () => syncParam(e.key, true),
+                });
+              } else if (e.type === "select") {
+                _dropdown(sec, p, e.key, {
+                  label: e.label,
+                  options: e.options,
+                  onChange: () => syncParam(e.key, true),
+                });
+              }
+              // "file" (texture) params are skipped on placed props for now.
+            }
+            return;
           }
 
           if ("flagColor" in p) {
