@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
 /**
  * Procedural guardrail along a Catmull-Rom spline.
@@ -296,6 +297,8 @@ export function buildGuardrailMesh({
   );
   const tangent = new THREE.Vector3();
 
+  // Posts — variable height per post, same material → collect geos, applyMatrix4, merge → 1 draw call
+  const postGeos = [];
   for (let i = 0; i < postCount; i++) {
     const t = closed ? i / postCount : i / Math.max(1, postCount - 1);
     const pos = curve.getPointAt(t);
@@ -307,12 +310,22 @@ export function buildGuardrailMesh({
       railBottomY - groundY + thickness * 0.5,
     );
     const postGeo = new THREE.BoxGeometry(p.postWidth, postH, p.postDepth);
-    const post = new THREE.Mesh(postGeo, postMat);
-    post.position.set(pos.x, groundY + postH * 0.5, pos.z);
-    post.rotation.y = Math.atan2(tangent.x, tangent.z);
-    post.castShadow = true;
-    post.receiveShadow = true;
-    group.add(post);
+    const yaw = Math.atan2(tangent.x, tangent.z);
+    const mat4 = new THREE.Matrix4();
+    mat4.makeRotationY(yaw);
+    mat4.setPosition(pos.x, groundY + postH * 0.5, pos.z);
+    postGeo.applyMatrix4(mat4);
+    postGeos.push(postGeo);
+  }
+  if (postGeos.length) {
+    const merged = mergeGeometries(postGeos, false);
+    postGeos.forEach((g) => g.dispose());
+    if (merged) {
+      const postMesh = new THREE.Mesh(merged, postMat);
+      postMesh.castShadow = true;
+      postMesh.receiveShadow = true;
+      group.add(postMesh);
+    }
   }
 
   return group;

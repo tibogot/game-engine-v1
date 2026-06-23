@@ -1,4 +1,10 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import {
+  seededRand,
+  makeWoodMaterial,
+  pickWoodColor,
+} from "./woodUtils.js";
 
 /**
  * Stylized cartoon wood picket fence along a spline.
@@ -27,12 +33,7 @@ export const WOOD_FENCE_DEFAULTS = {
   flatShading: true,
 };
 
-import {
-  seededRand,
-  makeWoodMaterial,
-  pickWoodColor,
-} from "./woodUtils.js";
-
+// Reusable math objects (function-scope, not module-level, to stay per-call)
 /**
  * @param {object} opts
  * @param {THREE.Vector3[]|{x:number,y:number,z:number}[]} opts.points
@@ -80,10 +81,7 @@ export function buildWoodFenceMesh({
   const group = new THREE.Group();
   group.name = "WoodFence";
 
-  const postCount = Math.max(
-    2,
-    Math.floor(length / postSpacing) + 1,
-  );
+  const postCount = Math.max(2, Math.floor(length / postSpacing) + 1);
 
   const postTs = [];
   for (let i = 0; i < postCount; i++) {
@@ -92,9 +90,28 @@ export function buildWoodFenceMesh({
   }
 
   const spanCount = closed ? postCount : postCount - 1;
-  let picketIndex = 0;
 
+  // Shared math scratch space
+  const _m = new THREE.Matrix4();
+  const _qY = new THREE.Quaternion();
+  const _qZ = new THREE.Quaternion();
+  const _q = new THREE.Quaternion();
+  const _axY = new THREE.Vector3(0, 1, 0);
+  const _axZ = new THREE.Vector3(0, 0, 1);
+  const _pos3 = new THREE.Vector3();
+  const _scl3 = new THREE.Vector3();
+
+  // ── Posts — InstancedMesh with per-instance color → 1 draw call ──
   const postGeo = new THREE.BoxGeometry(postW, fenceHeight * 1.06, postD);
+  const postMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: p.roughness,
+    metalness: p.metalness,
+    flatShading: !!p.flatShading,
+  });
+  const postMesh = new THREE.InstancedMesh(postGeo, postMat, postCount);
+  postMesh.castShadow = true;
+  postMesh.receiveShadow = true;
 
   for (let i = 0; i < postCount; i++) {
     const t = postTs[i];
@@ -105,26 +122,30 @@ export function buildWoodFenceMesh({
     const r = seededRand(seed, i + 5000);
     const postLean =
       leanAmount > 0 && r < leanRatio * 0.35
-        ? THREE.MathUtils.degToRad((seededRand(seed, i + 6000) * 2 - 1) * leanAmount * 0.45)
+        ? THREE.MathUtils.degToRad(
+            (seededRand(seed, i + 6000) * 2 - 1) * leanAmount * 0.45,
+          )
         : 0;
 
-    const postPivot = new THREE.Group();
-    postPivot.position.set(pos.x, groundY, pos.z);
-    postPivot.rotation.y = yaw;
-
-    const post = new THREE.Mesh(
-      postGeo,
-      makeWoodMaterial(p, pickWoodColor(p, seededRand(seed, i + 7000))),
-    );
-    post.position.y = fenceHeight * 0.53;
-    post.rotation.z = postLean;
-    post.castShadow = true;
-    post.receiveShadow = true;
-    postPivot.add(post);
-    group.add(postPivot);
+    _qY.setFromAxisAngle(_axY, yaw);
+    _qZ.setFromAxisAngle(_axZ, postLean);
+    _q.multiplyQuaternions(_qY, _qZ);
+    _pos3.set(pos.x, groundY + fenceHeight * 0.53, pos.z);
+    _scl3.set(1, 1, 1); // geometry already sized correctly
+    _m.compose(_pos3, _q, _scl3);
+    postMesh.setMatrixAt(i, _m);
+    postMesh.setColorAt(i, pickWoodColor(p, seededRand(seed, i + 7000)));
   }
+  postMesh.instanceMatrix.needsUpdate = true;
+  if (postMesh.instanceColor) postMesh.instanceColor.needsUpdate = true;
+  group.add(postMesh);
 
+  // ── Pickets — pre-pass to collect data, then InstancedMesh → 1 draw call ──
+  // Two passes are needed because InstancedMesh requires a fixed count up front,
+  // and picket count per span depends on measured arc length.
   const picketPitch = picketW + picketGap;
+  const picketData = [];
+  let picketIndex = 0;
 
   for (let s = 0; s < spanCount; s++) {
     const t0 = postTs[s];
@@ -165,34 +186,59 @@ export function buildWoodFenceMesh({
       const r2 = seededRand(seed, picketIndex + 12000);
 
       const leanDeg =
-        leanAmount > 0 && r0 < leanRatio
-          ? (r1 * 2 - 1) * leanAmount
-          : 0;
-      const hMul = 1 + (r2 * 2 - 1) * heightVar;
-      const picketH = fenceHeight * hMul;
+        leanAmount > 0 && r0 < leanRatio ? (r1 * 2 - 1) * leanAmount : 0;
+      const picketH = fenceHeight * (1 + (r2 * 2 - 1) * heightVar);
 
-      const pivot = new THREE.Group();
-      pivot.position.set(pos.x, groundY, pos.z);
-      pivot.rotation.y = yaw;
-
-      const board = new THREE.Mesh(
-        new THREE.BoxGeometry(picketW, picketH, picketD),
-        makeWoodMaterial(p, pickWoodColor(p, r1)),
-      );
-      board.position.y = picketH * 0.5;
-      board.rotation.z = THREE.MathUtils.degToRad(leanDeg);
-      board.castShadow = true;
-      board.receiveShadow = true;
-      pivot.add(board);
-      group.add(pivot);
-
+      picketData.push({
+        x: pos.x,
+        y: groundY,
+        z: pos.z,
+        yaw,
+        leanRad: THREE.MathUtils.degToRad(leanDeg),
+        picketH,
+        color: pickWoodColor(p, r1),
+      });
       picketIndex++;
     }
   }
 
+  if (picketData.length > 0) {
+    const boardGeo = new THREE.BoxGeometry(1, 1, 1);
+    const boardMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: p.roughness,
+      metalness: p.metalness,
+      flatShading: !!p.flatShading,
+    });
+    const boardMesh = new THREE.InstancedMesh(
+      boardGeo,
+      boardMat,
+      picketData.length,
+    );
+    boardMesh.castShadow = true;
+    boardMesh.receiveShadow = true;
+
+    for (let i = 0; i < picketData.length; i++) {
+      const d = picketData[i];
+      _qY.setFromAxisAngle(_axY, d.yaw);
+      _qZ.setFromAxisAngle(_axZ, d.leanRad);
+      _q.multiplyQuaternions(_qY, _qZ);
+      _pos3.set(d.x, d.y + d.picketH * 0.5, d.z);
+      _scl3.set(picketW, d.picketH, picketD);
+      _m.compose(_pos3, _q, _scl3);
+      boardMesh.setMatrixAt(i, _m);
+      boardMesh.setColorAt(i, d.color);
+    }
+    boardMesh.instanceMatrix.needsUpdate = true;
+    if (boardMesh.instanceColor) boardMesh.instanceColor.needsUpdate = true;
+    group.add(boardMesh);
+  }
+
+  // ── Rails — single color, merge all tubes into 1 draw call ──
   if (railCount > 0) {
     const segCount = Math.max(16, Math.ceil(length * 0.8));
     const railMat = makeWoodMaterial(p, pickWoodColor(p, 0.42));
+    const railGeos = [];
 
     for (let r = 0; r < railCount; r++) {
       const frac =
@@ -212,17 +258,18 @@ export function buildWoodFenceMesh({
         "catmullrom",
         0.5,
       );
-      const tubeGeo = new THREE.TubeGeometry(
-        railCurve,
-        segCount,
-        railThick * 0.5,
-        5,
-        closed,
+      railGeos.push(
+        new THREE.TubeGeometry(railCurve, segCount, railThick * 0.5, 5, closed),
       );
-      const rail = new THREE.Mesh(tubeGeo, railMat);
-      rail.castShadow = true;
-      rail.receiveShadow = true;
-      group.add(rail);
+    }
+
+    const merged = mergeGeometries(railGeos, false);
+    railGeos.forEach((g) => g.dispose());
+    if (merged) {
+      const railMesh = new THREE.Mesh(merged, railMat);
+      railMesh.castShadow = true;
+      railMesh.receiveShadow = true;
+      group.add(railMesh);
     }
   }
 

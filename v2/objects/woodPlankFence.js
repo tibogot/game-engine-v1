@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import {
   seededRand,
-  makeWoodMaterial,
   pickWoodColor,
 } from "./woodUtils.js";
 
@@ -32,32 +31,17 @@ export const WOOD_PLANK_FENCE_DEFAULTS = {
   flatShading: true,
 };
 
+// Reusable scratch vectors (module-level, safe in single-threaded JS)
 const _xAxis = new THREE.Vector3(1, 0, 0);
 const _dir = new THREE.Vector3();
 const _mid = new THREE.Vector3();
 const _start = new THREE.Vector3();
 const _end = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
-
-function addRailPlank(group, start, end, thickness, depth, mat) {
-  _start.copy(start);
-  _end.copy(end);
-  _dir.copy(_end).sub(_start);
-  const len = _dir.length();
-  if (len < 0.05) return;
-
-  _dir.multiplyScalar(1 / len);
-  _mid.copy(_start).add(_end).multiplyScalar(0.5);
-
-  const geo = new THREE.BoxGeometry(len, thickness, depth);
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.copy(_mid);
-  _quat.setFromUnitVectors(_xAxis, _dir);
-  mesh.quaternion.copy(_quat);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  group.add(mesh);
-}
+const _m = new THREE.Matrix4();
+const _pp = new THREE.Vector3();
+const _ps = new THREE.Vector3();
+const _axY = new THREE.Vector3(0, 1, 0);
 
 /**
  * @param {object} opts
@@ -102,11 +86,10 @@ export function buildWoodPlankFenceMesh({
     0.5,
   );
 
-  const length = curve.getLength();
   const group = new THREE.Group();
   group.name = "WoodPlankFence";
 
-  const postCount = Math.max(2, Math.floor(length / postSpacing) + 1);
+  const postCount = Math.max(2, Math.floor(curve.getLength() / postSpacing) + 1);
   const postTs = [];
   for (let i = 0; i < postCount; i++) {
     const t = closed ? i / postCount : i / Math.max(1, postCount - 1);
@@ -114,31 +97,51 @@ export function buildWoodPlankFenceMesh({
   }
 
   const postHeight = fenceHeight + postOverhang;
+
+  // ── Posts — InstancedMesh with per-instance color → 1 draw call ──
   const postGeo = new THREE.BoxGeometry(postW, postHeight, postD);
+  const postMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: p.roughness,
+    metalness: p.metalness,
+    flatShading: !!p.flatShading,
+  });
+  const postMesh = new THREE.InstancedMesh(postGeo, postMat, postCount);
+  postMesh.castShadow = true;
+  postMesh.receiveShadow = true;
 
   for (let i = 0; i < postCount; i++) {
     const t = postTs[i];
     const pos = curve.getPointAt(t);
     const tangent = curve.getTangentAt(t);
     const groundY = getWorldHeight(pos.x, pos.z);
-    const yaw = Math.atan2(tangent.x, tangent.z);
-
-    const pivot = new THREE.Group();
-    pivot.position.set(pos.x, groundY, pos.z);
-    pivot.rotation.y = yaw;
-
-    const post = new THREE.Mesh(
-      postGeo,
-      makeWoodMaterial(p, pickWoodColor(p, seededRand(seed, i + 3000))),
-    );
-    post.position.y = postHeight * 0.5;
-    post.castShadow = true;
-    post.receiveShadow = true;
-    pivot.add(post);
-    group.add(pivot);
+    _quat.setFromAxisAngle(_axY, Math.atan2(tangent.x, tangent.z));
+    _pp.set(pos.x, groundY + postHeight * 0.5, pos.z);
+    _ps.set(1, 1, 1); // geometry already sized
+    _m.compose(_pp, _quat, _ps);
+    postMesh.setMatrixAt(i, _m);
+    postMesh.setColorAt(i, pickWoodColor(p, seededRand(seed, i + 3000)));
   }
+  postMesh.instanceMatrix.needsUpdate = true;
+  if (postMesh.instanceColor) postMesh.instanceColor.needsUpdate = true;
+  group.add(postMesh);
 
+  // ── Rail planks — InstancedMesh with unit box, per-instance scale+color → 1 draw call ──
   const spanCount = closed ? postCount : postCount - 1;
+  const maxPlanks = spanCount * railCount;
+
+  const plankGeo = new THREE.BoxGeometry(1, 1, 1);
+  const plankMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: p.roughness,
+    metalness: p.metalness,
+    flatShading: !!p.flatShading,
+  });
+  const plankMesh = new THREE.InstancedMesh(plankGeo, plankMat, maxPlanks);
+  plankMesh.castShadow = true;
+  plankMesh.receiveShadow = true;
+
+  let plankIdx = 0;
   let railIndex = 0;
 
   for (let s = 0; s < spanCount; s++) {
@@ -150,12 +153,12 @@ export function buildWoodPlankFenceMesh({
     const y0 = getWorldHeight(pos0.x, pos0.z);
     const y1 = getWorldHeight(pos1.x, pos1.z);
 
+    // XZ span direction for inset calculation
     _dir.set(pos1.x - pos0.x, 0, pos1.z - pos0.z);
     const spanXZ = _dir.length();
-    if (spanXZ < 1e-4) continue;
+    if (spanXZ < 1e-4) { railIndex += railCount; continue; }
     _dir.multiplyScalar(1 / spanXZ);
 
-    // Pull endpoints slightly into the post volume so planks meet the uprights.
     const railOverlap = postW * 0.14 + railDepth * 0.35;
     const endOffset = Math.max(0.02, postW * 0.5 - railOverlap - railInset);
     const ax = pos0.x + _dir.x * endOffset;
@@ -177,8 +180,7 @@ export function buildWoodPlankFenceMesh({
         (rY * 2 - 1) * railYOffset +
         (rRand < leanRatio * 0.25 ? (rLean - 0.5) * railYOffset * 0.5 : 0);
 
-      const baseLift0 = fenceHeight * frac + yOff;
-      const baseLift1 = fenceHeight * frac + yOff;
+      const baseLift = fenceHeight * frac + yOff;
 
       let endDrop0 = 0;
       let endDrop1 = 0;
@@ -192,21 +194,36 @@ export function buildWoodPlankFenceMesh({
         }
       }
 
-      _start.set(ax, y0 + baseLift0 + endDrop0, az);
-      _end.set(bx, y1 + baseLift1 + endDrop1, bz);
+      _start.set(ax, y0 + baseLift + endDrop0, az);
+      _end.set(bx, y1 + baseLift + endDrop1, bz);
 
-      addRailPlank(
-        group,
-        _start,
-        _end,
-        railThick,
-        railDepth,
-        makeWoodMaterial(p, pickWoodColor(p, seededRand(seed, railIndex + 9000))),
+      // Compute plank direction, length and midpoint
+      _dir.subVectors(_end, _start);
+      const len = _dir.length();
+      if (len < 0.05) { railIndex++; continue; }
+      _dir.multiplyScalar(1 / len);
+      _mid.addVectors(_start, _end).multiplyScalar(0.5);
+
+      // Orient unit box along plank direction, scale to actual dimensions
+      _quat.setFromUnitVectors(_xAxis, _dir);
+      _pp.copy(_mid);
+      _ps.set(len, railThick, railDepth);
+      _m.compose(_pp, _quat, _ps);
+      plankMesh.setMatrixAt(plankIdx, _m);
+      plankMesh.setColorAt(
+        plankIdx,
+        pickWoodColor(p, seededRand(seed, railIndex + 9000)),
       );
-
+      plankIdx++;
       railIndex++;
     }
   }
+
+  // Only render the instances we actually filled
+  plankMesh.count = plankIdx;
+  plankMesh.instanceMatrix.needsUpdate = true;
+  if (plankMesh.instanceColor) plankMesh.instanceColor.needsUpdate = true;
+  group.add(plankMesh);
 
   return group;
 }

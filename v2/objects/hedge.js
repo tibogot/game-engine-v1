@@ -178,7 +178,8 @@ export function buildHedgeMesh({
   if (count > 0) {
     const cardGeo = new THREE.PlaneGeometry(1, 1);
     const cardMat = new THREE.MeshStandardMaterial({
-      map: getLeafTexture(p.leafTexture),
+      color: 0xffffff,
+      alphaMap: getLeafTexture(p.leafTexture),
       alphaTest: 0.5,
       side: THREE.DoubleSide,
       roughness: p.roughness,

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
 /**
  * Procedural fence along a Catmull-Rom spline.
@@ -73,55 +74,56 @@ export function buildFenceMesh({
   const group = new THREE.Group();
   group.name = "Fence";
 
-  const postCount = Math.max(
-    2,
-    Math.floor(length / postSpacing) + 1,
-  );
+  const postCount = Math.max(2, Math.floor(length / postSpacing) + 1);
 
+  // Posts — InstancedMesh: all same geometry + material → 1 draw call
+  const postGeo = new THREE.BoxGeometry(postWidth, fenceHeight, postDepth);
+  const posts = new THREE.InstancedMesh(postGeo, mat, postCount);
+  posts.castShadow = true;
+  posts.receiveShadow = true;
+  const _im = new THREE.Matrix4();
   for (let i = 0; i < postCount; i++) {
     const t = closed ? i / postCount : i / Math.max(1, postCount - 1);
     const pos = fenceCurve.getPointAt(t);
     const tangent = fenceCurve.getTangentAt(t);
     const groundY = getWorldHeight(pos.x, pos.z);
-
-    const postGeo = new THREE.BoxGeometry(postWidth, fenceHeight, postDepth);
-    const post = new THREE.Mesh(postGeo, mat);
-    post.position.set(pos.x, groundY + fenceHeight * 0.5, pos.z);
-    post.rotation.y = Math.atan2(tangent.x, tangent.z);
-    post.castShadow = true;
-    post.receiveShadow = true;
-    group.add(post);
+    _im.makeRotationY(Math.atan2(tangent.x, tangent.z));
+    _im.setPosition(pos.x, groundY + fenceHeight * 0.5, pos.z);
+    posts.setMatrixAt(i, _im);
   }
+  posts.instanceMatrix.needsUpdate = true;
+  group.add(posts);
 
-  for (let r = 0; r < railCount; r++) {
-    const railY =
-      fenceHeight * (0.2 + (0.6 * r) / Math.max(1, railCount - 1));
-    const railPoints = [];
-
-    for (let i = 0; i <= segCount; i++) {
-      const t = i / segCount;
-      const pos = fenceCurve.getPointAt(t);
-      const groundY = getWorldHeight(pos.x, pos.z);
-      railPoints.push(new THREE.Vector3(pos.x, groundY + railY, pos.z));
+  // Rails — all share same material, merge all tube geometries → 1 draw call
+  if (railCount > 0) {
+    const railGeos = [];
+    for (let r = 0; r < railCount; r++) {
+      const railY = fenceHeight * (0.2 + (0.6 * r) / Math.max(1, railCount - 1));
+      const railPoints = [];
+      for (let i = 0; i <= segCount; i++) {
+        const t = i / segCount;
+        const pos = fenceCurve.getPointAt(t);
+        const groundY = getWorldHeight(pos.x, pos.z);
+        railPoints.push(new THREE.Vector3(pos.x, groundY + railY, pos.z));
+      }
+      const railCurve = new THREE.CatmullRomCurve3(
+        railPoints,
+        closed,
+        "catmullrom",
+        0.5,
+      );
+      railGeos.push(
+        new THREE.TubeGeometry(railCurve, segCount, railThick * 0.5, 6, closed),
+      );
     }
-
-    const railCurve = new THREE.CatmullRomCurve3(
-      railPoints,
-      closed,
-      "catmullrom",
-      0.5,
-    );
-    const tubeGeo = new THREE.TubeGeometry(
-      railCurve,
-      segCount,
-      railThick * 0.5,
-      6,
-      closed,
-    );
-    const rail = new THREE.Mesh(tubeGeo, mat);
-    rail.castShadow = true;
-    rail.receiveShadow = true;
-    group.add(rail);
+    const merged = mergeGeometries(railGeos, false);
+    railGeos.forEach((g) => g.dispose());
+    if (merged) {
+      const railMesh = new THREE.Mesh(merged, mat);
+      railMesh.castShadow = true;
+      railMesh.receiveShadow = true;
+      group.add(railMesh);
+    }
   }
 
   return group;
