@@ -36,6 +36,7 @@ import { TerrainMesher } from "../render/terrain/terrainMesher.js";
 import { createSharedTileMaterial } from "../render/terrain/sharedTileMaterial.js";
 import { createV2ProceduralGroundMaterial } from "../render/terrain/proceduralGroundMaterial.js";
 import { ChunkStreamManager } from "../core/streaming/chunkStreamManager.js";
+import { TerrainMerger } from "../render/terrain/terrainMerger.js";
 import { frameProbe } from "./frameProbe.js";
 import { createEditorCameraController } from "./editorCameraController.js";
 import { SculptSystem } from "../tools/sculpt/sculptSystem.js";
@@ -1455,6 +1456,42 @@ export async function startV2App(opts = {}) {
       setupSplatSwapFromStore(mesh);
     },
   });
+
+  const terrainMerger = new TerrainMerger({ scene });
+
+  // Auto-unmerge whenever terrain data changes so the merged snapshot never goes stale.
+  const _origMarkDirtyRects = chunkStream.markDirtyRects.bind(chunkStream);
+  chunkStream.markDirtyRects = (rects) => {
+    if (terrainMerger.isMerged) terrainMerger.unmerge();
+    _origMarkDirtyRects(rects);
+  };
+  const _origMarkAllDirty = chunkStream.markAllDirty.bind(chunkStream);
+  chunkStream.markAllDirty = () => {
+    if (terrainMerger.isMerged) terrainMerger.unmerge();
+    _origMarkAllDirty();
+  };
+  const _origCreateChunk = chunkStream.createChunk.bind(chunkStream);
+  chunkStream.createChunk = (item) => {
+    if (terrainMerger.isMerged) terrainMerger.unmerge();
+    _origCreateChunk(item);
+  };
+  const _origUnloadChunk = chunkStream.unloadChunk.bind(chunkStream);
+  chunkStream.unloadChunk = (key) => {
+    if (terrainMerger.isMerged) terrainMerger.unmerge();
+    _origUnloadChunk(key);
+  };
+
+  const getTerrainMeshes = () => terrainMerger.isMerged ? terrainMerger.raycastMeshes() : chunkStream.raycastMeshes();
+
+  window._terrainMergeAPI = {
+    merge() {
+      if (tileChunkHasHoleUniform) tileChunkHasHoleUniform.value = 0;
+      terrainMerger.merge(chunkStream, tileTerrainMaterial);
+      window.dispatchEvent(new CustomEvent("terrain-merge-changed", { detail: { merged: true } }));
+    },
+    unmerge() { terrainMerger.unmerge(); },
+    get isMerged() { return terrainMerger.isMerged; },
+  };
 
   const borderMountains = new BorderMountains(config);
   borderMountains.setMaterial(tileTerrainMaterial);
@@ -4915,7 +4952,7 @@ export async function startV2App(opts = {}) {
       getSunDir: () => sunDir,
       sun,
       hemi,
-      getOccluderMeshes: () => chunkStream.raycastMeshes(),
+      getOccluderMeshes: () => getTerrainMeshes(),
     })
       .then((sys) => {
         volumetricCloudSystem = sys;
@@ -4936,7 +4973,7 @@ export async function startV2App(opts = {}) {
       getSunDir: () => sunDir,
       sun,
       hemi,
-      getOccluderMeshes: () => chunkStream.raycastMeshes(),
+      getOccluderMeshes: () => getTerrainMeshes(),
     })
       .then((sys) => {
         volumetricCloudSystemOptimized = sys;
@@ -4956,7 +4993,7 @@ export async function startV2App(opts = {}) {
       getSunDir: () => sunDir,
       sun,
       hemi,
-      getOccluderMeshes: () => chunkStream.raycastMeshes(),
+      getOccluderMeshes: () => getTerrainMeshes(),
     })
       .then((sys) => {
         volumetricCloudSystemV3 = sys;
@@ -4975,7 +5012,7 @@ export async function startV2App(opts = {}) {
 
   function pickTerrain(event) {
     updatePointer(event);
-    const targets = chunkStream.raycastMeshes();
+    const targets = getTerrainMeshes();
     if (targets.length === 0) return null;
     raycaster.setFromCamera(pointerNdc, camera);
     const hits = raycaster.intersectObjects(targets, false);
@@ -4998,7 +5035,7 @@ export async function startV2App(opts = {}) {
     const rect = renderer.domElement.getBoundingClientRect();
     pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
-    const targets = chunkStream.raycastMeshes();
+    const targets = getTerrainMeshes();
     if (targets.length === 0) return null;
     raycaster.setFromCamera(pointerNdc, camera);
     const hits = raycaster.intersectObjects(targets, false);
@@ -6979,7 +7016,7 @@ export async function startV2App(opts = {}) {
         didCloudRt = dayNightCloudLayer.tryRenderFrame({
           godRays: toolState.cloudGodRays,
           frame: { camera, sunDir, lightColor: _cloudLightColor },
-          occluders: chunkStream.raycastMeshes(),
+          occluders: getTerrainMeshes(),
           skyMesh: dayNightSky.mesh,
         });
       }
@@ -8035,6 +8072,7 @@ export async function startV2App(opts = {}) {
         dayNightCloudLayer = null;
       }
       ui?.dispose?.();
+      terrainMerger.dispose();
       chunkStream.dispose();
       treeLodRenderer.dispose();
       cliffInstancer.dispose();

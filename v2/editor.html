@@ -3069,6 +3069,29 @@
         const cfg = app.config;
         const refreshTp = () => app.ui?.pane.refresh();
 
+        // --- Terrain Merge ---
+        const mergeBody = _section(panel, "Performance");
+        const mergeBtn = _button(mergeBody, {
+          title: "Merge Terrain",
+          hint: "Collapse all terrain chunks into one draw call. Auto-unmerges when sculpting.",
+          onClick: () => {
+            const api = window._terrainMergeAPI;
+            if (!api) return;
+            if (api.isMerged) {
+              api.unmerge();
+            } else {
+              api.merge();
+            }
+          },
+        });
+        const syncMergeBtn = () => {
+          const merged = window._terrainMergeAPI?.isMerged ?? false;
+          mergeBtn.textContent = merged ? "Unmerge Terrain" : "Merge Terrain";
+          mergeBtn.style.background = merged ? "var(--accent, #4a9)" : "";
+        };
+        window.addEventListener("terrain-merge-changed", syncMergeBtn);
+        _separator(mergeBody);
+
         // --- Brush ---
         const brushBody = _section(panel, "Brush");
         _slider(brushBody, ts.brush, "radius", {

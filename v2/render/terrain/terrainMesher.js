@@ -633,7 +633,7 @@ function syncSkirtRing({ pos, normal, segments, skirtDepth }) {
   }
 }
 
-function installTerrainSkirtSafeRaycast(mesh) {
+export function installTerrainSkirtSafeRaycast(mesh) {
   if (mesh.userData._terrainRaycastPatched) return;
   mesh.userData._terrainRaycastPatched = true;
   const baseRaycast = mesh.raycast.bind(mesh);
