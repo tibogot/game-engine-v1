@@ -12,7 +12,7 @@ export class PropPlacementPreview {
     this.store = propStore;
     // (factoryId) => THREE.Group | null — builds a ghost for LIVE prop types
     this._liveGhostBuilder = liveGhostBuilder;
-    this._liveGhostRoot = null;
+    this._liveCache = new Map(); // typeIdx → built ghost group (reused, not disposed mid-session)
 
     this.group = new THREE.Group();
     this.group.name = "PropPlacementPreview";
@@ -33,33 +33,37 @@ export class PropPlacementPreview {
   }
 
   _clearMeshes() {
-    if (this._liveGhostRoot) {
-      // live ghost geometries are freshly built here — dispose them
-      this._liveGhostRoot.traverse((o) => o.geometry?.dispose?.());
-      this._liveGhostRoot = null;
-    } else {
-      for (const child of this.group.children) child.geometry = null; // shared store geo
+    // Detach current children without disposing: live ghosts are cached; primitive
+    // meshes reference shared store geometry. (Disposal happens in dispose().)
+    for (const child of this.group.children) {
+      if (!child.isGroup) child.geometry = null;
     }
     this.group.clear();
   }
 
   _ensureMeshes(typeIdx) {
-    if (typeIdx === this._builtTypeIdx) return this.group.children.length > 0;
+    if (typeIdx === this._builtTypeIdx && this.group.children.length > 0) return true;
     this._clearMeshes();
     this._builtTypeIdx = typeIdx;
 
     const type = this.store.types[typeIdx];
     if (!type) return false;
 
-    // LIVE procedural prop → build the object once and ghost its materials
+    // LIVE procedural prop → build once, ghost materials, strip lights, cache.
     if (type.live) {
       if (!this._liveGhostBuilder || !type.factoryId) return false;
-      const g = this._liveGhostBuilder(type.factoryId);
-      if (!g) return false;
-      g.traverse((o) => {
-        if (o.isMesh) o.material = this._ghostMat;
-      });
-      this._liveGhostRoot = g;
+      let g = this._liveCache.get(typeIdx);
+      if (!g) {
+        g = this._liveGhostBuilder(type.factoryId);
+        if (!g) return false;
+        const lights = [];
+        g.traverse((o) => {
+          if (o.isMesh) o.material = this._ghostMat;
+          if (o.isLight) lights.push(o);
+        });
+        for (const l of lights) l.parent?.remove(l);
+        this._liveCache.set(typeIdx, g);
+      }
       this.group.add(g);
       return true;
     }
@@ -112,11 +116,20 @@ export class PropPlacementPreview {
   invalidateType() {
     this._builtTypeIdx = -1;
     this._clearMeshes();
+    // drop cached live ghosts so they rebuild with the latest geometry/params
+    for (const g of this._liveCache.values()) {
+      g.traverse((o) => o.geometry?.dispose?.());
+    }
+    this._liveCache.clear();
     this.hide();
   }
 
   dispose() {
     this._clearMeshes();
+    for (const g of this._liveCache.values()) {
+      g.traverse((o) => o.geometry?.dispose?.());
+    }
+    this._liveCache.clear();
     this._ghostMat.dispose();
     this.scene.remove(this.group);
   }

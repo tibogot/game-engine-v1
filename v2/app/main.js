@@ -5187,12 +5187,10 @@ export async function startV2App(opts = {}) {
     }
     _propPreviewHitValid = true;
 
-    // Hide while a prop is selected so gizmo edits aren't cluttered by the
-    // next-placement ghost (stamp still updates for when selection clears).
-    if (propInstancer.hasSelection) {
-      propPlacementPreview.hide();
-      return;
-    }
+    // (Previously hid the ghost whenever a prop was selected — but placing
+    // auto-selects, which then hid the ghost permanently in Place mode. We're
+    // already gated to Place mode here, and we still hide while actively
+    // dragging the gizmo, so just keep showing the next-placement ghost.)
 
     const slot = toolState.propSlots[toolState.props.activeSlot];
     if (!slot || slot.typeIdx == null) {
