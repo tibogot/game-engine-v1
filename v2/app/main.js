@@ -140,6 +140,7 @@ import {
   registerProceduralObjectFactories,
   proceduralThumbnailItems,
   proceduralSchemaFor,
+  buildProceduralPreviewGroup,
   PROCEDURAL_PROP_DEFS,
   PROCEDURAL_PROP_LABELS,
   PROCEDURAL_OBJECT_OPTIONS,
@@ -1976,7 +1977,11 @@ export async function startV2App(opts = {}) {
     terrainStore,
     config,
   });
-  const propPlacementPreview = new PropPlacementPreview(scene, propStore);
+  const propPlacementPreview = new PropPlacementPreview(
+    scene,
+    propStore,
+    buildProceduralPreviewGroup,
+  );
   roadReflection.excludeFromReflection(propPlacementPreview.group);
 
   /**
@@ -5510,15 +5515,24 @@ export async function startV2App(opts = {}) {
       raycaster.setFromCamera(pointerNdc, camera);
       const picked = splineSystem.pickPoint(raycaster);
       if (picked >= 0) {
+        splineSystem.clearFeatureSelection();
         splineSystem.selectedIdx = picked;
+        // clicking an endpoint chooses which end new points extend from
+        if (picked === 0) splineSystem.extendEnd = "start";
+        else if (picked === splineSystem.points.length - 1)
+          splineSystem.extendEnd = "end";
         splineSystem.dragging = true;
         controls.enabled = false;
         splineSystem._rebuildVisual();
         splineSystem._updateSelectedY();
         ui?.pane.refresh();
+      } else if (splineSystem.selectFeature(raycaster)) {
+        // clicked a placed object — highlighted, Delete removes it
+        ui?.pane.refresh();
       } else {
         const hit = pickTerrain(event);
         if (hit) {
+          splineSystem.clearFeatureSelection();
           splineSystem.addPoint(hit.point);
           ui?.pane.refresh();
         }
@@ -6012,7 +6026,8 @@ export async function startV2App(opts = {}) {
       ui?.pane.refresh();
     } else if (event.code === "Delete" && toolState.mode === "spline") {
       event.preventDefault();
-      splineSystem.deleteSelected();
+      if (splineSystem.selectedFeature) splineSystem.deleteSelectedFeature();
+      else splineSystem.deleteSelected();
       ui?.pane.refresh();
     } else if (
       (event.code === "Enter" || event.code === "NumpadEnter") &&

@@ -7,9 +7,12 @@ const DEG = Math.PI / 180;
  * Reuses type geometry + local submesh matrices; transform comes from PropSystem stamp.
  */
 export class PropPlacementPreview {
-  constructor(scene, propStore) {
+  constructor(scene, propStore, liveGhostBuilder = null) {
     this.scene = scene;
     this.store = propStore;
+    // (factoryId) => THREE.Group | null — builds a ghost for LIVE prop types
+    this._liveGhostBuilder = liveGhostBuilder;
+    this._liveGhostRoot = null;
 
     this.group = new THREE.Group();
     this.group.name = "PropPlacementPreview";
@@ -30,20 +33,38 @@ export class PropPlacementPreview {
   }
 
   _clearMeshes() {
-    for (const child of this.group.children) {
-      child.geometry = null;
+    if (this._liveGhostRoot) {
+      // live ghost geometries are freshly built here — dispose them
+      this._liveGhostRoot.traverse((o) => o.geometry?.dispose?.());
+      this._liveGhostRoot = null;
+    } else {
+      for (const child of this.group.children) child.geometry = null; // shared store geo
     }
     this.group.clear();
   }
 
   _ensureMeshes(typeIdx) {
-    if (typeIdx === this._builtTypeIdx) return true;
+    if (typeIdx === this._builtTypeIdx) return this.group.children.length > 0;
     this._clearMeshes();
     this._builtTypeIdx = typeIdx;
 
     const type = this.store.types[typeIdx];
-    if (!type || type.live || !type.entries?.length) return false;
+    if (!type) return false;
 
+    // LIVE procedural prop → build the object once and ghost its materials
+    if (type.live) {
+      if (!this._liveGhostBuilder || !type.factoryId) return false;
+      const g = this._liveGhostBuilder(type.factoryId);
+      if (!g) return false;
+      g.traverse((o) => {
+        if (o.isMesh) o.material = this._ghostMat;
+      });
+      this._liveGhostRoot = g;
+      this.group.add(g);
+      return true;
+    }
+
+    if (!type.entries?.length) return false;
     for (const { geometry, localMatrix } of type.entries) {
       const mesh = new THREE.Mesh(geometry, this._ghostMat);
       mesh.matrix.copy(localMatrix);
@@ -64,7 +85,6 @@ export class PropPlacementPreview {
       typeIdx == null ||
       typeIdx < 0 ||
       !hit?.point ||
-      this.store.isLiveType(typeIdx) ||
       !this._ensureMeshes(typeIdx)
     ) {
       this.hide();

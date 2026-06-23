@@ -99,6 +99,14 @@ export const PROCEDURAL_PROP_DEFS = Object.fromEntries(
   ]),
 );
 
+/** Freshly-built group for a placement-ghost preview, by factoryId ("obj:<id>"). */
+export function buildProceduralPreviewGroup(factoryId) {
+  if (typeof factoryId !== "string" || !factoryId.startsWith("obj:")) return null;
+  const o = OBJECT_MAP.get(factoryId.slice(4));
+  if (!o) return null;
+  return buildProp(o, {}).group;
+}
+
 /** Schema (param list) for a procedural prop, by its factoryId ("obj:<id>"). */
 export function proceduralSchemaFor(factoryId) {
   if (typeof factoryId !== "string" || !factoryId.startsWith("obj:")) return null;

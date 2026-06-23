@@ -71,6 +71,9 @@ export class SplineSystem {
     this.selectedIdx = -1;
     this.dragging = false;
     this.pointMeshes = [];
+    this.extendEnd = "end"; // "end" | "start" — which end new points extend
+    this.selectedFeature = null; // a placed feature selected for deletion
+    this._featureHelper = null; // BoxHelper around the selected feature
     this._curve = null;
     this._curveLength = 0;
     this._trainT = 0;
@@ -212,8 +215,13 @@ export class SplineSystem {
 
   addPoint(pos) {
     this._pushUndo();
-    this.points.push(pos.clone());
-    this.selectedIdx = this.points.length - 1;
+    if (this.extendEnd === "start") {
+      this.points.unshift(pos.clone());
+      this.selectedIdx = 0;
+    } else {
+      this.points.push(pos.clone());
+      this.selectedIdx = this.points.length - 1;
+    }
     this._rebuildVisual();
     this._updateSelectedY();
   }
@@ -236,6 +244,8 @@ export class SplineSystem {
   }
 
   clearAll() {
+    this.clearFeatureSelection();
+    this.extendEnd = "end";
     if (this.points.length === 0) return;
     this._pushUndo();
     this.points = [];
@@ -249,6 +259,74 @@ export class SplineSystem {
     const hits = raycaster.intersectObjects(this.pointMeshes, false);
     if (hits.length === 0) return -1;
     return this.pointMeshes.indexOf(hits[0].object);
+  }
+
+  // ── select / delete a PLACED feature (objects, guardrails, kerbs, tunnels) ──
+  _featureCandidates() {
+    const out = [];
+    for (const f of this.linearFeatures) if (f.mesh) out.push({ item: f, arr: this.linearFeatures, obj: f.mesh });
+    for (const g of this.guardrails) if (g.group) out.push({ item: g, arr: this.guardrails, obj: g.group });
+    for (const k of this.kerbs) if (k.mesh) out.push({ item: k, arr: this.kerbs, obj: k.mesh });
+    for (const t of this.tunnels) if (t.mesh) out.push({ item: t, arr: this.tunnels, obj: t.mesh });
+    return out;
+  }
+
+  /** Raycast placed features; returns the matched candidate or null. */
+  pickFeature(raycaster) {
+    let best = null;
+    let bestD = Infinity;
+    for (const c of this._featureCandidates()) {
+      const hits = raycaster.intersectObject(c.obj, true);
+      if (hits.length && hits[0].distance < bestD) {
+        bestD = hits[0].distance;
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  /** Select the placed feature under the ray (highlighted box). */
+  selectFeature(raycaster) {
+    const hit = this.pickFeature(raycaster);
+    this.clearFeatureSelection();
+    if (!hit) return false;
+    this.selectedFeature = hit;
+    const helper = new THREE.BoxHelper(hit.obj, 0xffcc33);
+    helper.name = "SplineFeatureHighlight";
+    this._featureHelper = helper;
+    this.scene.add(helper);
+    return true;
+  }
+
+  clearFeatureSelection() {
+    if (this._featureHelper) {
+      this.scene.remove(this._featureHelper);
+      this._featureHelper.geometry?.dispose?.();
+      this._featureHelper.material?.dispose?.();
+      this._featureHelper = null;
+    }
+    this.selectedFeature = null;
+  }
+
+  deleteSelectedFeature() {
+    const sel = this.selectedFeature;
+    if (!sel) return false;
+    this.scene.remove(sel.obj);
+    sel.obj.traverse?.((o) => {
+      o.geometry?.dispose?.();
+      o.material?.dispose?.();
+    });
+    sel.obj.geometry?.dispose?.();
+    sel.obj.material?.dispose?.();
+    if (sel.item.collisionMesh) {
+      this.scene.remove(sel.item.collisionMesh);
+      sel.item.collisionMesh.geometry?.dispose?.();
+      sel.item.collisionMesh.material?.dispose?.();
+    }
+    const idx = sel.arr.indexOf(sel.item);
+    if (idx >= 0) sel.arr.splice(idx, 1);
+    this.clearFeatureSelection();
+    return true;
   }
 
   _samples() {

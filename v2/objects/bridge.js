@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { seededRand } from "./woodUtils.js";
 
 /**
@@ -230,19 +231,20 @@ export function buildBridgeMesh({
     }
     return { centers, frames };
   };
-  const addSweep = (sign, rightOff, upOff, hr, hu, mat) => {
+  // collect swept geometries per material → merge into one mesh each at the end
+  // (keeps draw calls down: structure=1, rails=1, abutments=1).
+  const structGeos = [];
+  const railGeos = [];
+  const stoneGeos = [];
+  const addSweep = (sign, rightOff, upOff, hr, hu, arr) => {
     const { centers, frames } = sidePath(sign, rightOff, upOff);
-    const mesh = new THREE.Mesh(sweepRect(centers, frames, hr, hu), mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-    return mesh;
+    arr.push(sweepRect(centers, frames, hr, hu));
   };
 
   // ── stringers (under both deck edges) ──
   const stringerUp = -p.deckThickness * 0.5 - p.stringerH * 0.5;
   for (const s of [-1, 1]) {
-    addSweep(s, halfW - p.stringerInset, stringerUp, p.stringerW * 0.5, p.stringerH * 0.5, structMat);
+    addSweep(s, halfW - p.stringerInset, stringerUp, p.stringerW * 0.5, p.stringerH * 0.5, structGeos);
   }
 
   // ── arched truss (two side arches + cross-beams) ──
@@ -250,7 +252,7 @@ export function buildBridgeMesh({
     const trussUp =
       -p.deckThickness * 0.5 - p.trussGap - p.stringerH - p.trussH * 0.5;
     for (const s of [-1, 1]) {
-      addSweep(s, halfW - p.stringerInset, trussUp, p.trussW * 0.5, p.trussH * 0.5, structMat);
+      addSweep(s, halfW - p.stringerInset, trussUp, p.trussW * 0.5, p.trussH * 0.5, structGeos);
     }
     // cross-beams spanning between the two arches
     const cn = Math.max(2, p.trussCross | 0);
@@ -297,7 +299,7 @@ export function buildBridgeMesh({
   if (p.midRail) railOffsets.push(p.railHeight * 0.5);
   for (const s of [-1, 1]) {
     for (const ro of railOffsets) {
-      addSweep(s, halfW - 0.06, ro + p.deckThickness * 0.5, p.railRadius, p.railRadius, railMat);
+      addSweep(s, halfW - 0.06, ro + p.deckThickness * 0.5, p.railRadius, p.railRadius, railGeos);
     }
   }
 
@@ -309,14 +311,12 @@ export function buildBridgeMesh({
       const top = deckY(t) - p.deckThickness * 0.5;
       const h = Math.max(0.3, top - gY + 0.4);
       const cx = curve.getPointAt(t);
-      const ab = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), stoneMat);
+      const abGeo = new THREE.BoxGeometry(1, 1, 1);
       scl.set(p.width + 0.5, h, 0.9);
       const pos = new THREE.Vector3(cx.x, gY + h * 0.5 - 0.05, cx.z);
       m.makeBasis(f.right, f.up, f.fwd).scale(scl).setPosition(pos);
-      ab.applyMatrix4(m);
-      ab.castShadow = true;
-      ab.receiveShadow = true;
-      group.add(ab);
+      abGeo.applyMatrix4(m);
+      stoneGeos.push(abGeo);
     }
   }
 
@@ -332,6 +332,20 @@ export function buildBridgeMesh({
       metalness: 0,
     });
     const ls = p.lanternSize;
+    const n = count * 2;
+    const caps = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(ls * 0.6, ls * 0.18, ls * 0.6),
+      frameMat,
+      n,
+    );
+    caps.castShadow = true;
+    const papers = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(ls * 0.7, ls, ls * 0.7),
+      paperMat,
+      n,
+    );
+    const lm = new THREE.Matrix4();
+    let li = 0;
     for (let i = 0; i < count; i++) {
       const t = count === 1 ? 0.5 : i / (count - 1);
       const f = frameAt(t);
@@ -339,21 +353,36 @@ export function buildBridgeMesh({
         const top = deckPos(t)
           .addScaledVector(f.right, s * (halfW - 0.06))
           .addScaledVector(f.up, p.railHeight + p.deckThickness * 0.5 + ls * 0.6);
-        // little cap
-        const cap = new THREE.Mesh(new THREE.BoxGeometry(ls * 0.6, ls * 0.18, ls * 0.6), frameMat);
-        cap.position.copy(top).addScaledVector(f.up, ls * 0.6);
-        cap.castShadow = true;
-        group.add(cap);
-        // glowing paper body
-        const paper = new THREE.Mesh(
-          new THREE.BoxGeometry(ls * 0.7, ls, ls * 0.7),
-          paperMat,
+        lm.makeTranslation(
+          top.x + f.up.x * ls * 0.6,
+          top.y + f.up.y * ls * 0.6,
+          top.z + f.up.z * ls * 0.6,
         );
-        paper.position.copy(top);
-        group.add(paper);
+        caps.setMatrixAt(li, lm);
+        lm.makeTranslation(top.x, top.y, top.z);
+        papers.setMatrixAt(li, lm);
+        li++;
       }
     }
+    caps.instanceMatrix.needsUpdate = true;
+    papers.instanceMatrix.needsUpdate = true;
+    group.add(caps, papers);
   }
+
+  // ── merge collected sweeps into one mesh per material (fewer draw calls) ──
+  const addMerged = (geos, mat) => {
+    if (!geos.length) return;
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((g) => g.dispose());
+    if (!merged) return;
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  };
+  addMerged(structGeos, structMat);
+  addMerged(railGeos, railMat);
+  addMerged(stoneGeos, stoneMat);
 
   return group;
 }
