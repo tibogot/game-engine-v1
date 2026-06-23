@@ -82,6 +82,11 @@ function boundingBox(desc, params) {
 /** Object labels in registry order — for building the palette UI. */
 export const PROCEDURAL_PROP_LABELS = OBJECTS.map((o) => o.label);
 
+/** { Label: id } for dropdowns (e.g. the spline-mode object selector). */
+export const PROCEDURAL_OBJECT_OPTIONS = Object.fromEntries(
+  OBJECTS.map((o) => [o.label, o.id]),
+);
+
 /** Label → { factoryId, defaults, bbox } — merge into the editor's live-prop defs. */
 export const PROCEDURAL_PROP_DEFS = Object.fromEntries(
   OBJECTS.map((o) => [

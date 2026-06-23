@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { OBJECT_MAP } from "../../objects/index.js";
 import {
   chunkKey,
   chunkMinWorldX,
@@ -540,9 +541,32 @@ export class SplineSystem {
   _buildLinearFeatureMesh(item) {
     if (item.mesh) {
       this.scene.remove(item.mesh);
-      item.mesh.geometry.dispose();
-      item.mesh.material.dispose();
+      // group-aware dispose (procedural objects are Groups of meshes)
+      item.mesh.traverse((o) => {
+        o.geometry?.dispose?.();
+        o.material?.dispose?.();
+      });
       item.mesh = null;
+    }
+    // Procedural object: extrude the registry object along the spline points,
+    // exactly like the objects-lab (build() makes its own curve + conforms to
+    // getWorldHeight). Returns a Group; stored in item.mesh.
+    if (item.kind === "object") {
+      const desc = OBJECT_MAP.get(item.objectId);
+      if (!desc) return;
+      const base = { ...desc.defaults, ...(desc.initParams || {}), ...(item.params || {}) };
+      const params = desc.resolveParams ? desc.resolveParams(base) : base;
+      const group = desc.build({
+        points: item.points,
+        closed: item.closed,
+        params,
+        getWorldHeight: (x, z) => this.getWorldHeight(x, z),
+      });
+      if (group) {
+        item.mesh = group;
+        this.scene.add(group);
+      }
+      return;
     }
     const groundedPoints = item.points.map((p) => new THREE.Vector3(
       p.x,
@@ -658,12 +682,31 @@ export class SplineSystem {
     return true;
   }
 
+  _createObjectFromSpline(objectId, params = null) {
+    const desc = OBJECT_MAP.get(objectId);
+    if (!desc) return false;
+    if (this.points.length < (desc.minPoints ?? 2)) return false;
+    const item = {
+      kind: "object",
+      objectId,
+      points: this.points.map((p) => ({ x: p.x, y: p.y, z: p.z })),
+      closed: !!this.toolState.spline.closed,
+      params: params ? { ...params } : { ...desc.defaults, ...(desc.initParams || {}) },
+      mesh: null,
+    };
+    this._buildLinearFeatureMesh(item);
+    this.linearFeatures.push(item);
+    return true;
+  }
+
   clearLinearFeatures() {
     for (const item of this.linearFeatures) {
       if (!item.mesh) continue;
       this.scene.remove(item.mesh);
-      item.mesh.geometry.dispose();
-      item.mesh.material.dispose();
+      item.mesh.traverse((o) => {
+        o.geometry?.dispose?.();
+        o.material?.dispose?.();
+      });
       item.mesh = null;
     }
     this.linearFeatures.length = 0;
@@ -1571,6 +1614,9 @@ export class SplineSystem {
     } else if (s.objectType === "kerbFromRoad") {
       const ok = this._createKerbFromRoad();
       if (ok) placed = 1;
+    } else if (s.objectType === "object") {
+      const ok = this._createObjectFromSpline(s.objectId);
+      if (ok) placed = 1;
     }
 
     this.clearPreview();
@@ -1869,6 +1915,9 @@ export class SplineSystem {
           row.pathSegs = f.pathSegs;
           row.height = f.height;
           row.depth = f.depth;
+        } else if (f.kind === "object") {
+          row.objectId = f.objectId;
+          row.params = { ...f.params };
         }
         return row;
       }),
@@ -1975,8 +2024,21 @@ export class SplineSystem {
     const linearFeatures = Array.isArray(data?.linearFeatures) ? data.linearFeatures : [];
     for (const lf of linearFeatures) {
       const kind = lf.kind;
-      if (kind !== "wall" && kind !== "fence" && kind !== "barrier") continue;
+      if (kind !== "wall" && kind !== "fence" && kind !== "barrier" && kind !== "object") continue;
       if (!Array.isArray(lf.points) || lf.points.length < 2) continue;
+      if (kind === "object") {
+        const item = {
+          kind: "object",
+          objectId: lf.objectId,
+          points: lf.points.map((p) => ({ x: p.x, y: p.y, z: p.z })),
+          closed: !!lf.closed,
+          params: { ...(lf.params || {}) },
+          mesh: null,
+        };
+        this._buildLinearFeatureMesh(item);
+        this.linearFeatures.push(item);
+        continue;
+      }
       const base = {
         kind,
         points: lf.points.map((p) => ({ x: p.x, y: p.y, z: p.z })),
@@ -2099,11 +2161,27 @@ export class SplineSystem {
         cb(root.geometry, root.matrixWorld);
       }
     }
+    const _im = new THREE.Matrix4();
+    const _wm = new THREE.Matrix4();
     for (const f of this.linearFeatures) {
-      const mesh = f.mesh;
-      if (!mesh || !mesh.geometry) continue;
-      mesh.updateMatrixWorld(true);
-      cb(mesh.geometry, mesh.matrixWorld);
+      const root = f.mesh;
+      if (!root) continue;
+      root.updateMatrixWorld(true);
+      // Built-in features are single meshes; "object" features are Groups that
+      // may contain InstancedMeshes (planks, tyres, poles) — expand them so
+      // every instance bakes into the collision BVH.
+      root.traverse((obj) => {
+        if (!obj.isMesh || !obj.geometry) return;
+        if (obj.isInstancedMesh) {
+          for (let i = 0; i < obj.count; i++) {
+            obj.getMatrixAt(i, _im);
+            _wm.multiplyMatrices(obj.matrixWorld, _im);
+            cb(obj.geometry, _wm);
+          }
+        } else {
+          cb(obj.geometry, obj.matrixWorld);
+        }
+      });
     }
   }
 

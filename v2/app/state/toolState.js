@@ -1335,6 +1335,7 @@ export function createToolState() {
     },
     spline: {
       objectType: "trees",
+      objectId: "guardrail", // which registry object when objectType === "object"
       spacing: 4,
       scaleMin: 1.0,
       scaleMax: 1.0,

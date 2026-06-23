@@ -142,6 +142,7 @@ import {
   proceduralSchemaFor,
   PROCEDURAL_PROP_DEFS,
   PROCEDURAL_PROP_LABELS,
+  PROCEDURAL_OBJECT_OPTIONS,
 } from "../core/props/proceduralObjectProps.js";
 import { bakeObjectThumbnails } from "../tools/objectThumbnails.js";
 import {
@@ -2271,6 +2272,7 @@ export async function startV2App(opts = {}) {
   rebakePlayerBvh = () => {
     cliffBvh.bake(terrainStore, config, [
       propStore,
+      livePropManager,
       splineSystem,
       fullRoadSystem,
       smartRoadSystem,
@@ -7199,6 +7201,9 @@ export async function startV2App(opts = {}) {
     },
     getProceduralPropLabels() {
       return PROCEDURAL_PROP_LABELS;
+    },
+    getProceduralObjectOptions() {
+      return PROCEDURAL_OBJECT_OPTIONS;
     },
     getProceduralSchema(factoryId) {
       return proceduralSchemaFor(factoryId);

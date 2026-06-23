@@ -10574,6 +10574,7 @@
           options: {
             "Trees (active tree slot)": "trees",
             "Props (active prop slot)": "props",
+            "Procedural object (spline)": "object",
             "Procedural tunnel": "tunnel",
             "Guardrail (W profile)": "guardrail",
             "Guardrail From Road": "guardrailFromRoad",
@@ -10583,6 +10584,11 @@
             "Fence (spline path)": "fenceSpline",
             "Barrier (spline path)": "barrierSpline",
           },
+        });
+        // Which registry object to extrude along the spline (objectType "object")
+        _dropdown(placeBody, sp, "objectId", {
+          label: "↳ Object",
+          options: app.getProceduralObjectOptions?.() ?? {},
         });
         _slider(placeBody, sp, "spacing", {
           label: "Spacing",

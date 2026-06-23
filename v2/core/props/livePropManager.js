@@ -115,6 +115,35 @@ export class LivePropManager {
     return this._live.get(instIdx) ?? null;
   }
 
+  /**
+   * Player-BVH collision source. Emits geometry for SOLID live props
+   * (lamps, traffic lights, flag, procedural objects) — skips collectibles
+   * (coin/heart/key/glb), which are pass-through pickups, and expands
+   * InstancedMeshes so every instance bakes.
+   */
+  forEachMeshInstance(cb) {
+    const im = new THREE.Matrix4();
+    const wm = new THREE.Matrix4();
+    for (const entry of this._live.values()) {
+      if (entry.obj?.kind) continue; // collectibles are walk-through
+      const root = entry.obj?.group;
+      if (!root) continue;
+      root.updateMatrixWorld(true);
+      root.traverse((obj) => {
+        if (!obj.isMesh || !obj.geometry) return;
+        if (obj.isInstancedMesh) {
+          for (let i = 0; i < obj.count; i++) {
+            obj.getMatrixAt(i, im);
+            wm.multiplyMatrices(obj.matrixWorld, im);
+            cb(obj.geometry, wm);
+          }
+        } else {
+          cb(obj.geometry, obj.matrixWorld);
+        }
+      });
+    }
+  }
+
   /** Iterate every live entry whose factory result has `kind` matching the test. */
   forEachByKind(kindTest, cb) {
     for (const [instIdx, entry] of this._live) {
