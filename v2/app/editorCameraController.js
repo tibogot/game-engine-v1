@@ -11,14 +11,6 @@ export function createEditorCameraController({
   pickWorldAtClient,
   getSelectionFocus,
 }) {
-  const _ndc = new THREE.Vector2();
-  const _ray = new THREE.Raycaster();
-  const _plane = new THREE.Plane();
-  const _planeHit = new THREE.Vector3();
-  const _worldBefore = new THREE.Vector3();
-  _worldBefore.set(0, 0, 0);
-  const _worldAfter = new THREE.Vector3();
-  const _pan = new THREE.Vector3();
   const _offset = new THREE.Vector3();
   const _dir = new THREE.Vector3();
   const _focusDir = new THREE.Vector3();
@@ -142,53 +134,39 @@ export function createEditorCameraController({
     return false;
   }
 
-  function zoomToCursor(event) {
+  function zoom(event) {
     if (!isActive() || flyMode) return;
     if (event.shiftKey || event.altKey) return;
 
     event.preventDefault();
     event.stopPropagation();
 
-    const rect = domElement.getBoundingClientRect();
-    _ndc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    _ndc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    // Normalize scroll to pixels across deltaMode variants (pixel/line/page).
+    const pixels =
+      event.deltaMode === 1 ? event.deltaY * 32 :
+      event.deltaMode === 2 ? event.deltaY * 500 :
+      event.deltaY;
 
-    const hit = pickWorldAtClient?.(event.clientX, event.clientY);
-    if (hit?.point) {
-      _worldBefore.copy(hit.point);
-    } else {
-      _dir.subVectors(controls.target, camera.position).normalize();
-      _plane.setFromNormalAndCoplanarPoint(_dir, controls.target);
-      _ray.setFromCamera(_ndc, camera);
-      if (!_ray.ray.intersectPlane(_plane, _worldBefore)) return;
-    }
+    // Ignore near-zero ghost events fired by trackpads at gesture boundaries.
+    if (Math.abs(pixels) < 1) return;
 
     _offset.subVectors(camera.position, controls.target);
     const dist0 = _offset.length();
-    const sign = event.deltaY < 0 ? 1 : -1;
-    const scale = sign > 0 ? 0.9 : 1 / 0.9;
-    let dist1 = THREE.MathUtils.clamp(dist0 * scale, MIN_DIST, MAX_DIST);
+
+    // Smooth proportional dolly. ~100px (one mouse click) ≈ 13% closer/farther.
+    // Clamped so a single fast scroll can't jump more than 20%.
+    const scale = THREE.MathUtils.clamp(Math.pow(0.9985, -pixels), 0.8, 1.25);
+    const dist1 = THREE.MathUtils.clamp(dist0 * scale, MIN_DIST, MAX_DIST);
     if (Math.abs(dist1 - dist0) < 1e-6) return;
 
+    // Move camera along orbit radius. Target stays fixed — orbit pivot never drifts.
     _offset.setLength(dist1);
     camera.position.copy(controls.target).add(_offset);
-
-    _ray.setFromCamera(_ndc, camera);
-    _dir.subVectors(controls.target, camera.position).normalize();
-    _plane.setFromNormalAndCoplanarPoint(_dir, controls.target);
-    if (!_ray.ray.intersectPlane(_plane, _worldAfter)) {
-      controls.update();
-      return;
-    }
-
-    _pan.subVectors(_worldBefore, _worldAfter);
-    controls.target.add(_pan);
-    camera.position.add(_pan);
     controls.update();
   }
 
   function onWheel(event) {
-    zoomToCursor(event);
+    zoom(event);
   }
 
   function onPointerDown(event) {

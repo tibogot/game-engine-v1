@@ -11,46 +11,46 @@ export const STREET_LAMP_DEFAULTS = {
   sideOffset: 2.8,
   side: "right",
 
-  baseWidth: 0.42,
-  baseHeight: 0.14,
-  baseDepth: 0.42,
+  baseRadius: 0.26,
+  baseHeight: 0.34,
 
   poleHeight: 4.4,
-  poleRadiusTop: 0.065,
-  poleRadiusBase: 0.12,
-  poleSegments: 6,
+  poleRadiusTop: 0.05,
+  poleRadiusBase: 0.09,
+  poleSegments: 18,
 
-  collarHeight: 0.1,
-  collarScale: 1.4,
+  collarScale: 1.7,
 
-  armLength: 1.15,
-  armThickness: 0.085,
-  armMountHeight: 3.75,
-  armPitch: -6,
+  armLength: 1.2,
+  armMountHeight: 3.95,
+  armThickness: 0.055,
+  armCurve: 0.55, // gooseneck rise/arc
 
-  headWidth: 0.58,
-  headHeight: 0.38,
-  headDepth: 0.42,
-  headDrop: 0.06,
-  capHeight: 0.14,
+  lanternRadius: 0.26,
+  lanternHeight: 0.55,
+  shadeTaper: 0.5, // top radius / bottom radius of the shade
+  finialSize: 0.09,
+  bulbSize: 0.17,
 
-  bulbSize: 0.24,
-  emissiveColor: "#ffecc0",
-  emissiveIntensity: 2.8,
+  emissiveColor: "#ffe6b0",
+  glow: 7.0, // emissive intensity — high enough to bloom
 
-  colorMetal: "#4a5568",
-  colorPole: "#343d4a",
-  roughness: 0.78,
-  metalness: 0.42,
-  flatShading: true,
+  colorMetal: "#3a4350",
+  colorPole: "#2c333d",
+  roughness: 0.55,
+  metalness: 0.6,
 
   castLight: true,
-  lightIntensity: 1.4,
-  lightDistance: 22,
+  lightIntensity: 1.6,
+  lightDistance: 24,
   lightDecay: 1.8,
 
-  leanAmount: 2.5,
-  leanRatio: 0.18,
+  groundPool: true, // faked light pool on the ground under the lantern
+  poolRadius: 2.2,
+  poolStrength: 0.55,
+
+  leanAmount: 2.0,
+  leanRatio: 0.15,
   seed: 7,
 };
 
@@ -61,28 +61,47 @@ function sideSign(side) {
   return side === "left" ? 1 : -1;
 }
 
+// smooth (not flat) metal — rounded look
 function metalMat(p, colorHex) {
   return new THREE.MeshStandardMaterial({
     color: colorHex,
     roughness: p.roughness,
     metalness: p.metalness,
-    flatShading: !!p.flatShading,
   });
 }
 
 function emissiveMat(p) {
   return new THREE.MeshStandardMaterial({
-    color: p.emissiveColor,
+    color: new THREE.Color(p.emissiveColor).multiplyScalar(0.5),
     emissive: new THREE.Color(p.emissiveColor),
-    emissiveIntensity: p.emissiveIntensity,
-    roughness: 0.35,
+    emissiveIntensity: Math.max(0, p.glow),
+    roughness: 0.4,
     metalness: 0,
-    flatShading: !!p.flatShading,
   });
+}
+
+// cached radial-gradient texture for the faked ground light pool
+let _poolTex = null;
+function getPoolTexture() {
+  if (_poolTex) return _poolTex;
+  const s = 128;
+  const c = document.createElement("canvas");
+  c.width = c.height = s;
+  const ctx = c.getContext("2d");
+  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0, "#ffffff");
+  g.addColorStop(0.45, "#9a9a9a");
+  g.addColorStop(1, "#000000");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
+  _poolTex = new THREE.CanvasTexture(c);
+  _poolTex.colorSpace = THREE.SRGBColorSpace;
+  return _poolTex;
 }
 
 /**
  * Build one lamp at local origin (base at y=0). Caller sets world transform.
+ * Rounded post + gooseneck arm + flared lantern with a glowing bulb.
  * @returns {THREE.Group}
  */
 export function buildStreetLampUnit(params = {}, index = 0) {
@@ -91,11 +110,9 @@ export function buildStreetLampUnit(params = {}, index = 0) {
 
   const poleH = Math.max(1.5, p.poleHeight);
   const armLen = Math.max(0.2, p.armLength);
-  const armY = THREE.MathUtils.clamp(p.armMountHeight, p.baseHeight, poleH - 0.2);
-  const armThick = Math.max(0.04, p.armThickness);
-  const headW = Math.max(0.2, p.headWidth);
-  const headH = Math.max(0.12, p.headHeight);
-  const headD = Math.max(0.15, p.headDepth);
+  const baseH = Math.max(0.1, p.baseHeight);
+  const armY = THREE.MathUtils.clamp(p.armMountHeight, baseH, poleH - 0.1);
+  const armThick = Math.max(0.03, p.armThickness);
 
   const rLean = seededRand(seed, 1);
   const leanDeg =
@@ -109,106 +126,106 @@ export function buildStreetLampUnit(params = {}, index = 0) {
   const poleMat = metalMat(p, p.colorPole);
   const trimMat = metalMat(p, p.colorMetal);
 
-  const baseW = Math.max(0.2, p.baseWidth);
-  const baseH = Math.max(0.05, p.baseHeight);
-  const baseD = Math.max(0.2, p.baseDepth);
+  // ── base: tapered cylinder + foot ring ──
+  const baseR = Math.max(0.12, p.baseRadius);
   const base = new THREE.Mesh(
-    new THREE.BoxGeometry(baseW, baseH, baseD),
+    new THREE.CylinderGeometry(baseR * 0.62, baseR, baseH, 20),
     trimMat,
   );
   base.position.y = baseH * 0.5;
   base.castShadow = true;
   base.receiveShadow = true;
   unit.add(base);
-
-  const poleGeo = new THREE.CylinderGeometry(
-    Math.max(0.03, p.poleRadiusTop),
-    Math.max(0.04, p.poleRadiusBase),
-    poleH,
-    Math.max(3, p.poleSegments | 0),
+  const foot = new THREE.Mesh(
+    new THREE.TorusGeometry(baseR * 0.85, baseR * 0.16, 8, 22),
+    trimMat,
   );
-  const pole = new THREE.Mesh(poleGeo, poleMat);
+  foot.rotation.x = Math.PI / 2;
+  foot.position.y = baseR * 0.16;
+  foot.castShadow = true;
+  unit.add(foot);
+
+  // ── pole (smooth) ──
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(
+      Math.max(0.03, p.poleRadiusTop),
+      Math.max(0.04, p.poleRadiusBase),
+      poleH,
+      Math.max(8, p.poleSegments | 0),
+    ),
+    poleMat,
+  );
   pole.position.y = baseH + poleH * 0.5;
-  if (leanDeg !== 0) {
-    pole.rotation.z = THREE.MathUtils.degToRad(leanDeg * 0.35);
-  }
+  if (leanDeg !== 0) pole.rotation.z = THREE.MathUtils.degToRad(leanDeg * 0.35);
   pole.castShadow = true;
   pole.receiveShadow = true;
   unit.add(pole);
 
-  const collarH = Math.max(0, p.collarHeight);
-  if (collarH > 0.01) {
-    const collarScale = Math.max(1, p.collarScale);
-    const collar = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        p.poleRadiusTop * collarScale,
-        p.poleRadiusTop * collarScale * 1.05,
-        collarH,
-        Math.max(3, p.poleSegments | 0),
-      ),
-      trimMat,
-    );
-    collar.position.y = baseH + armY - collarH * 0.5;
-    collar.castShadow = true;
-    collar.receiveShadow = true;
-    unit.add(collar);
-  }
-
-  const armGroup = new THREE.Group();
-  armGroup.position.set(0, baseH + armY, 0);
-  // Arm runs local +X. Pitch around Z dips the head toward the ground — no roll.
-  armGroup.rotation.z = THREE.MathUtils.degToRad(p.armPitch);
-
-  const stub = new THREE.Mesh(
-    new THREE.BoxGeometry(armThick, armThick * 1.2, armThick),
+  // ── collar ring near the arm mount ──
+  const collar = new THREE.Mesh(
+    new THREE.TorusGeometry(
+      Math.max(0.04, p.poleRadiusTop * p.collarScale),
+      Math.max(0.02, p.poleRadiusTop * 0.6),
+      8,
+      20,
+    ),
     trimMat,
   );
-  stub.castShadow = true;
-  stub.receiveShadow = true;
-  armGroup.add(stub);
+  collar.rotation.x = Math.PI / 2;
+  collar.position.y = baseH + armY - 0.05;
+  collar.castShadow = true;
+  unit.add(collar);
 
+  // ── curved gooseneck arm (tube along a bezier), runs local +X ──
+  const ay = baseH + armY;
+  const start = new THREE.Vector3(0, ay, 0);
+  const ctrl = new THREE.Vector3(armLen * 0.4, ay + armLen * 0.5 * p.armCurve, 0);
+  const end = new THREE.Vector3(armLen, ay + armLen * 0.22 * p.armCurve, 0);
+  const armPath = new THREE.QuadraticBezierCurve3(start, ctrl, end);
   const arm = new THREE.Mesh(
-    new THREE.BoxGeometry(armLen, armThick * 0.85, armThick * 0.9),
+    new THREE.TubeGeometry(armPath, 24, armThick, 10, false),
     trimMat,
   );
-  arm.position.set(armLen * 0.5, 0, 0);
   arm.castShadow = true;
   arm.receiveShadow = true;
-  armGroup.add(arm);
+  unit.add(arm);
 
+  // ── lantern hanging from the arm end ──
   const headGroup = new THREE.Group();
-  headGroup.position.set(armLen, -p.headDrop, 0);
+  headGroup.position.copy(end);
+  unit.add(headGroup);
 
-  const housing = new THREE.Mesh(
-    new THREE.BoxGeometry(headW, headH, headD),
+  const lr = Math.max(0.1, p.lanternRadius);
+  const lh = Math.max(0.15, p.lanternHeight);
+  const taper = THREE.MathUtils.clamp(p.shadeTaper, 0.15, 1);
+
+  const knuckle = new THREE.Mesh(
+    new THREE.SphereGeometry(armThick * 1.7, 12, 10),
     trimMat,
   );
-  housing.castShadow = true;
-  housing.receiveShadow = true;
-  headGroup.add(housing);
+  headGroup.add(knuckle);
 
-  const capH = Math.max(0, p.capHeight);
-  if (capH > 0.01) {
-    const cap = new THREE.Mesh(
-      new THREE.BoxGeometry(headW * 1.04, capH, headD * 1.04),
-      poleMat,
-    );
-    cap.position.y = headH * 0.5 + capH * 0.5;
-    cap.castShadow = true;
-    cap.receiveShadow = true;
-    headGroup.add(cap);
-  }
-
-  const bulbSize = Math.max(0.08, p.bulbSize);
-  const bulb = new THREE.Mesh(
-    new THREE.BoxGeometry(headW * 0.72, bulbSize, headD * 0.72),
-    emissiveMat(p),
+  // flared shade (open-bottom cone frustum)
+  const shade = new THREE.Mesh(
+    new THREE.CylinderGeometry(lr * taper, lr, lh, 20, 1, true),
+    trimMat,
   );
-  bulb.position.y = -headH * 0.5 + bulbSize * 0.55;
-  headGroup.add(bulb);
+  shade.position.y = -lh * 0.5 - armThick;
+  shade.castShadow = true;
+  headGroup.add(shade);
 
-  armGroup.add(headGroup);
-  unit.add(armGroup);
+  // finial on top
+  const fin = Math.max(0.02, p.finialSize);
+  const finial = new THREE.Mesh(new THREE.SphereGeometry(fin, 12, 10), poleMat);
+  finial.position.y = fin * 0.6;
+  headGroup.add(finial);
+
+  // glowing bulb — hang it at the shade opening so it's clearly visible/blooms
+  const bs = Math.max(0.05, p.bulbSize);
+  const by = -lh - armThick + bs * 0.3;
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(bs, 18, 14), emissiveMat(p));
+  bulb.position.y = by;
+  headGroup.add(bulb);
 
   if (p.castLight) {
     const light = new THREE.PointLight(
@@ -217,8 +234,28 @@ export function buildStreetLampUnit(params = {}, index = 0) {
       p.lightDistance,
       p.lightDecay,
     );
-    light.position.set(0, -headH * 0.12, 0);
+    light.position.y = by;
     headGroup.add(light);
+  }
+
+  // faked light pool on the ground under the lantern (additive radial disc)
+  if (p.groundPool) {
+    const poolMat = new THREE.MeshBasicMaterial({
+      map: getPoolTexture(),
+      color: new THREE.Color(p.emissiveColor),
+      transparent: true,
+      opacity: THREE.MathUtils.clamp(p.poolStrength, 0, 1),
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const pool = new THREE.Mesh(
+      new THREE.CircleGeometry(Math.max(0.3, p.poolRadius), 40),
+      poolMat,
+    );
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.set(end.x, 0.03, end.z);
+    pool.renderOrder = 2;
+    unit.add(pool);
   }
 
   return unit;

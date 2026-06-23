@@ -131,6 +131,7 @@ export class LivePropManager {
       root.updateMatrixWorld(true);
       root.traverse((obj) => {
         if (!obj.isMesh || !obj.geometry) return;
+        if (obj.userData?.noCollision) return; // decoration (e.g. hedge leaves)
         if (obj.isInstancedMesh) {
           for (let i = 0; i < obj.count; i++) {
             obj.getMatrixAt(i, im);

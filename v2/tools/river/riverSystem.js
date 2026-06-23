@@ -433,7 +433,42 @@ export class RiverSystem {
     const currentY = pts[this.selectedIdx].y;
     pts[this.selectedIdx].copy(pos);
     pts[this.selectedIdx].y = currentY;
-    this._rebuildVisual();
+    this._rebuildActiveSegMesh();
+    this._updateDragHandles();
+  }
+
+  _rebuildActiveSegMesh() {
+    const ai = this._activeIdx();
+    if (ai < 0) return;
+    const seg = this.segments[ai];
+    const rp = this.toolState.river;
+    this._disposeSegMesh(seg);
+    if (seg.points.length < 2) return;
+    const curve = new THREE.CatmullRomCurve3(seg.points, !!rp.closed, "catmullrom", 0.5);
+    const geo = generateRiverGeometry(curve, rp.width, rp.segments, rp.heightOffset, this.getWorldHeight);
+    seg.mesh = new THREE.Mesh(geo, this._activeMaterial());
+    seg.mesh.renderOrder = 2;
+    this.scene.add(seg.mesh);
+  }
+
+  _updateDragHandles() {
+    const ai = this._activeIdx();
+    if (ai < 0) return;
+    const pts = this.segments[ai].points;
+    for (let i = 0; i < pts.length && i < this.handleMeshes.length; i++) {
+      const m = this.handleMeshes[i];
+      if (m.isMesh) m.position.copy(pts[i]);
+    }
+    const lastHandle = this.handleMeshes[this.handleMeshes.length - 1];
+    if (lastHandle && !lastHandle.isMesh && pts.length >= 2) {
+      const curve = new THREE.CatmullRomCurve3(pts, !!this.toolState.river.closed, "catmullrom", 0.5);
+      const posAttr = lastHandle.geometry.attributes.position;
+      const newPts = curve.getPoints(80);
+      for (let i = 0; i < newPts.length; i++) {
+        posAttr.setXYZ(i, newPts[i].x, newPts[i].y, newPts[i].z);
+      }
+      posAttr.needsUpdate = true;
+    }
   }
 
   setSelectedPointY(y) {

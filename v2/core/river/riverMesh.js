@@ -1,5 +1,8 @@
 import * as THREE from "three";
 
+const _tan = new THREE.Vector3();
+const _perp = new THREE.Vector3();
+
 export function generateRiverGeometry(curve, width, segments, heightOffset, getWorldHeight) {
   const pts = curve.getSpacedPoints(segments);
   const arcLen = [0];
@@ -17,13 +20,13 @@ export function generateRiverGeometry(curve, width, segments, heightOffset, getW
     const pos = pts[i];
     const prev = pts[Math.max(0, i - 1)];
     const next = pts[Math.min(segments, i + 1)];
-    const tan = next.clone().sub(prev).normalize();
-    const perp = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+    _tan.subVectors(next, prev).normalize();
+    _perp.set(-_tan.z, 0, _tan.x).normalize();
 
-    const lx = pos.x - perp.x * halfW;
-    const lz = pos.z - perp.z * halfW;
-    const rx = pos.x + perp.x * halfW;
-    const rz = pos.z + perp.z * halfW;
+    const lx = pos.x - _perp.x * halfW;
+    const lz = pos.z - _perp.z * halfW;
+    const rx = pos.x + _perp.x * halfW;
+    const rz = pos.z + _perp.z * halfW;
 
     positions.push(lx, getWorldHeight(lx, lz) + heightOffset, lz);
     positions.push(rx, getWorldHeight(rx, rz) + heightOffset, rz);

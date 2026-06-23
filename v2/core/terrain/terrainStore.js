@@ -647,10 +647,16 @@ export class TerrainStore {
     const half = this.config.world.size * 0.5;
     const maxC = getChunkCountPerAxis(this.config) - 1;
 
-    const minWX = Math.min(...pts.map((p) => p.x)) - margin;
-    const maxWX = Math.max(...pts.map((p) => p.x)) + margin;
-    const minWZ = Math.min(...pts.map((p) => p.z)) - margin;
-    const maxWZ = Math.max(...pts.map((p) => p.z)) + margin;
+    let minWX = Infinity, maxWX = -Infinity, minWZ = Infinity, maxWZ = -Infinity;
+    for (const p of pts) {
+      if (p.x < minWX) minWX = p.x;
+      if (p.x > maxWX) maxWX = p.x;
+      if (p.z < minWZ) minWZ = p.z;
+      if (p.z > maxWZ) maxWZ = p.z;
+    }
+    minWX -= margin; maxWX += margin; minWZ -= margin; maxWZ += margin;
+    const halfWSq = halfW * halfW;
+    const marginSq = margin * margin;
 
     const minCX = Math.max(0, Math.floor((minWX + half) / cs));
     const maxCX = Math.min(maxC, Math.floor((maxWX + half) / cs));
@@ -685,7 +691,7 @@ export class TerrainStore {
           for (let ix = lMinX; ix <= lMaxX; ix++) {
             const wx = chunkMinX + ix * step;
 
-            let bestDist = Infinity;
+            let bestDistSq = Infinity;
             let bestY = 0;
             for (let k = 0; k < pts.length - 1; k++) {
               const ax = pts[k].x, az = pts[k].z;
@@ -699,20 +705,21 @@ export class TerrainStore {
               }
               const px = ax + t * dx, pz = az + t * dz;
               const ex = wx - px, ez = wz - pz;
-              const d = Math.sqrt(ex * ex + ez * ez);
-              if (d < bestDist) {
-                bestDist = d;
+              const dSq = ex * ex + ez * ez;
+              if (dSq < bestDistSq) {
+                bestDistSq = dSq;
                 bestY = pts[k].y * (1 - t) + pts[k + 1].y * t;
               }
             }
-            if (bestDist > margin) continue;
+            if (bestDistSq > marginSq) continue;
 
             const idx = iz * stride + ix;
             const current = heights[idx];
             let next;
-            if (bestDist <= halfW) {
+            if (bestDistSq <= halfWSq) {
               next = Math.min(current, bestY);
             } else {
+              const bestDist = Math.sqrt(bestDistSq);
               let blend = 1 - (bestDist - halfW) / (margin - halfW);
               blend = blend * blend * (3 - 2 * blend);
               next = Math.min(current, current + (bestY - current) * blend);

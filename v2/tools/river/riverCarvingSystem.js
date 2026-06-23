@@ -384,19 +384,14 @@ export class RiverCarvingSystem {
    * new territory, then rebuilds all carves from the base.
    */
   _updateCarving() {
-    // Expand base snapshot to cover all current segment paths
+    // Restore once so all snapshot reads see uncarved terrain
+    if (this._baseTerrainSnapshot) {
+      this.terrainStore.restoreChunkHeightsFromMap(this._baseTerrainSnapshot);
+    }
     for (const seg of this.segments) {
       const pts = this._getCarvePath(seg);
       if (!pts) continue;
-      // Restore base first so the snapshot is taken from uncarved terrain
-      if (this._baseTerrainSnapshot) {
-        this.terrainStore.restoreChunkHeightsFromMap(this._baseTerrainSnapshot);
-      }
       this._expandBaseSnapshot(pts);
-      // Restore back immediately so next segment sees clean base
-      if (this._baseTerrainSnapshot) {
-        this.terrainStore.restoreChunkHeightsFromMap(this._baseTerrainSnapshot);
-      }
     }
     this._reapplyAllCarves();
   }
@@ -558,7 +553,7 @@ export class RiverCarvingSystem {
     this._updateSelectedY();
   }
 
-  /** Called during drag — only updates the visual mesh, not terrain (too expensive per frame). */
+  /** Called during drag — only updates the active segment mesh and handle positions, not terrain. */
   moveSelected(pos) {
     const ai = this._activeIdx();
     if (ai < 0 || this.selectedIdx < 0) return;
@@ -567,7 +562,42 @@ export class RiverCarvingSystem {
     const currentY = pts[this.selectedIdx].y;
     pts[this.selectedIdx].copy(pos);
     pts[this.selectedIdx].y = currentY;
-    this._rebuildVisual();
+    this._rebuildActiveSegMesh();
+    this._updateDragHandles();
+  }
+
+  _rebuildActiveSegMesh() {
+    const ai = this._activeIdx();
+    if (ai < 0) return;
+    const seg = this.segments[ai];
+    const rp = this.toolState.river2;
+    this._disposeSegMesh(seg);
+    if (seg.points.length < 2) return;
+    const curve = new THREE.CatmullRomCurve3(seg.points, !!rp.closed, "catmullrom", 0.5);
+    const geo = generateRiverGeometry(curve, rp.width, rp.segments, rp.heightOffset, this.getWorldHeight);
+    seg.mesh = new THREE.Mesh(geo, this._activeMaterial());
+    seg.mesh.renderOrder = 2;
+    this.scene.add(seg.mesh);
+  }
+
+  _updateDragHandles() {
+    const ai = this._activeIdx();
+    if (ai < 0) return;
+    const pts = this.segments[ai].points;
+    for (let i = 0; i < pts.length && i < this.handleMeshes.length; i++) {
+      const m = this.handleMeshes[i];
+      if (m.isMesh) m.position.copy(pts[i]);
+    }
+    const lastHandle = this.handleMeshes[this.handleMeshes.length - 1];
+    if (lastHandle && !lastHandle.isMesh && pts.length >= 2) {
+      const curve = new THREE.CatmullRomCurve3(pts, !!this.toolState.river2.closed, "catmullrom", 0.5);
+      const posAttr = lastHandle.geometry.attributes.position;
+      const newPts = curve.getPoints(80);
+      for (let i = 0; i < newPts.length; i++) {
+        posAttr.setXYZ(i, newPts[i].x, newPts[i].y, newPts[i].z);
+      }
+      posAttr.needsUpdate = true;
+    }
   }
 
   /** Called on mouseup after dragging to commit the carve. */
