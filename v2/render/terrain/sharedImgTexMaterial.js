@@ -24,6 +24,7 @@ import {
 } from "three/tsl";
 import { normalMap } from "three/tsl";
 import { createCliffShadingContext } from "../../core/legacy/chunkTerrainAutoCliff.js";
+import { stochasticSample } from "../../core/legacy/stochasticTex.js";
 import { createMeadowTslBundle } from "../../core/legacy/chunkMeadowTsl.js";
 
 /**
@@ -51,7 +52,7 @@ export function createV2ImageTexGroundMaterial(
   const invWorldSize = float(1.0 / worldSize);
   const tileUV = positionWorld.xz.mul(invWorldSize).mul(groundSlot.uUVScale);
 
-  const albedoTexNode = texture(groundSlot.albedoTex, tileUV);
+  const albedoTexNode = stochasticSample(groundSlot.albedoTex, tileUV);
   const ormTexNode = texture(groundSlot.ormTex, tileUV);
 
   const cliff =

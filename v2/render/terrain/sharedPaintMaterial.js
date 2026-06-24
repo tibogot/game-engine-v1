@@ -29,6 +29,7 @@ import {
 } from "three/tsl";
 import { normalMap } from "three/tsl";
 import { createCliffShadingContext } from "../../core/legacy/chunkTerrainAutoCliff.js";
+import { stochasticSample } from "../../core/legacy/stochasticTex.js";
 
 function makePlaceholderSplatTex() {
   const d = new Uint8Array([0, 0, 0, 0]);
@@ -74,7 +75,7 @@ export function createV2PaintMaterial(
     const uv = positionWorld.xz.mul(invWorldSize).mul(slot.uUVScale);
     return {
       slot,
-      albedo: texture(slot.albedoTex, uv),
+      albedo: stochasticSample(slot.albedoTex, uv),
       orm: texture(slot.ormTex, uv),
     };
   });

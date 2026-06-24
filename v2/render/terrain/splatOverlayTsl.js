@@ -16,6 +16,7 @@
  *   dominate at weight transitions (e.g. rocks push through grass at edges).
  */
 import * as THREE from "three";
+import { stochasticSampleArray } from "../../core/legacy/stochasticTex.js";
 import {
   Fn,
   float,
@@ -101,7 +102,7 @@ export function createSplatOverlay(layerSlots, chunkSize, worldSize, albedoArray
   const layerOrms = [];
   for (let i = 0; i < NUM_LAYERS; i++) {
     const uv = positionWorld.xz.mul(invWorldSize).mul(layerSlots[i].uUVScale);
-    layerAlbedos.push(albedoArrayNode.sample(uv).depth(int(i)));
+    layerAlbedos.push(stochasticSampleArray(albedoArrayNode, uv, int(i)));
     layerOrms.push(ormArrayNode.sample(uv).depth(int(i)));
   }
 

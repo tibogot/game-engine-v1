@@ -18,6 +18,7 @@ import {
   Fn,
 } from "three/tsl";
 import { normalMap } from "three/tsl";
+import { stochasticSample } from "./stochasticTex.js";
 
 export function applyImageSlotAlbedoAndAO(col, cs, worldSize, imgWeightTex, slots, imgWSample) {
   const ws = float(1.0).div(float(worldSize));
@@ -29,11 +30,11 @@ export function applyImageSlotAlbedoAndAO(col, cs, worldSize, imgWeightTex, slot
   const iuv1 = positionWorld.xz.mul(ws).mul(s1.uUVScale);
   const iuv2 = positionWorld.xz.mul(ws).mul(s2.uUVScale);
   let out = col;
-  out = mix(out, texture(s0.albedoTex, iuv0).rgb, imgW.r.mul(s0.uHasAlbedo));
+  out = mix(out, stochasticSample(s0.albedoTex, iuv0).rgb, imgW.r.mul(s0.uHasAlbedo));
   out = out.mul(mix(float(1), texture(s0.ormTex, iuv0).r, imgW.r.mul(s0.uHasAO).mul(s0.uAOStr)));
-  out = mix(out, texture(s1.albedoTex, iuv1).rgb, imgW.g.mul(s1.uHasAlbedo));
+  out = mix(out, stochasticSample(s1.albedoTex, iuv1).rgb, imgW.g.mul(s1.uHasAlbedo));
   out = out.mul(mix(float(1), texture(s1.ormTex, iuv1).r, imgW.g.mul(s1.uHasAO).mul(s1.uAOStr)));
-  out = mix(out, texture(s2.albedoTex, iuv2).rgb, imgW.b.mul(s2.uHasAlbedo));
+  out = mix(out, stochasticSample(s2.albedoTex, iuv2).rgb, imgW.b.mul(s2.uHasAlbedo));
   out = out.mul(mix(float(1), texture(s2.ormTex, iuv2).r, imgW.b.mul(s2.uHasAO).mul(s2.uAOStr)));
   return out;
 }
