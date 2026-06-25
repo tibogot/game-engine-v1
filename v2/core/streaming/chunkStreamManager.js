@@ -27,6 +27,7 @@ export class ChunkStreamManager {
     // Idle-skip state: last anchor position / LOD settings the grid was
     // scanned with. Seeded so the first update() always runs a full scan.
     this._lastAnchor = new THREE.Vector3(Infinity, Infinity, Infinity);
+    this._lastLodAnchor = new THREE.Vector3(Infinity, Infinity, Infinity);
     this._lastRadius = -1;
     this._lastLodEnabled = null;
   }
@@ -69,7 +70,7 @@ export class ChunkStreamManager {
     for (const key of this.activeChunks.keys()) this.dirtyChunks.set(key, null);
   }
 
-  update(anchorWorldPos) {
+  update(anchorWorldPos, lodAnchorPos = anchorWorldPos) {
     // Idle early-out: re-scanning the 33×33 chunk window is pointless unless
     // the anchor moved, something is dirty, LOD settings changed, or a
     // previous frame left budget-capped work in the queues.
@@ -80,7 +81,8 @@ export class ChunkStreamManager {
       this.unloadQueue.length === 0 &&
       this.config.lod.activeRadiusInChunks === this._lastRadius &&
       this.config.lod.enabled === this._lastLodEnabled &&
-      anchorWorldPos.distanceToSquared(this._lastAnchor) < 0.25
+      anchorWorldPos.distanceToSquared(this._lastAnchor) < 0.25 &&
+      lodAnchorPos.distanceToSquared(this._lastLodAnchor) < 0.25
     ) {
       this.perf.stream.created = 0;
       this.perf.stream.remeshed = 0;
@@ -88,6 +90,7 @@ export class ChunkStreamManager {
       return;
     }
     this._lastAnchor.copy(anchorWorldPos);
+    this._lastLodAnchor.copy(lodAnchorPos);
     this._lastRadius = this.config.lod.activeRadiusInChunks;
     this._lastLodEnabled = this.config.lod.enabled;
 
@@ -114,7 +117,7 @@ export class ChunkStreamManager {
         this.needed.add(key);
 
         const center = chunkCenterWorld(cx, cz, this._tmpCenter, this.config);
-        const dist = center.distanceTo(anchorWorldPos);
+        const dist = center.distanceTo(lodAnchorPos);
         const active = this.activeChunks.get(key);
         const targetLod = this.config.lod.enabled
           ? active

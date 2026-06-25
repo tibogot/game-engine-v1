@@ -6394,6 +6394,10 @@ export async function startV2App(opts = {}) {
   let _streamAnchorInit = false;
   let _streamAnchorLastMs = 0;
   let _wasPlayActive = false;
+  // Merged-terrain LOD staleness tracking: when active chunks transition to new
+  // LOD levels while merged, schedule a seamless remerge after the queue drains.
+  let _mergeRebuildPending = false;
+  let _mergeRebuildAt = 0; // performance.now() timestamp after which rebuild fires
   const STREAM_ANCHOR_INTERVAL_MS = config.streaming?.anchorIntervalMs ?? 150;
   const STREAM_ANCHOR_SNAP_DIST =
     config.world.chunkSize * (config.streaming?.anchorSnapDistMul ?? 0.5);
@@ -6612,6 +6616,9 @@ export async function startV2App(opts = {}) {
     audioSystem.update(dtSec);
     camera.updateMatrixWorld();
     const focusPos = playMode.active ? playMode.playerPos : camera.position;
+    // Use orbit target (not camera eye) as streaming anchor so zooming far out
+    // doesn't move the eye outside the world bounds and silently unload chunks.
+    const streamFocusPos = playMode.active ? playMode.playerPos : controls.target;
     /** Cloud volume follow anchor — same idea as superjet `playerPos`, not the orbit camera. */
     const cloudFollowAnchor = playMode.active
       ? playMode.playerPos
@@ -6711,7 +6718,24 @@ export async function startV2App(opts = {}) {
 
     const _pPreStream = performance.now();
     frameProbe.t.misc += _pPreStream - now; // frame head (sky/light/csm/interior)
-    chunkStream.update(_streamAnchorFor(focusPos, now));
+    chunkStream.update(_streamAnchorFor(streamFocusPos, now), focusPos);
+
+    // When merged, detect LOD transitions (camera moved to different detail zone)
+    // and seamlessly rebuild the merged geometry once the remesh queue drains.
+    if (terrainMerger.isMerged) {
+      if (terrainMerger.isLodStale(chunkStream.activeChunks) && !_mergeRebuildPending) {
+        _mergeRebuildPending = true;
+        _mergeRebuildAt = now + 400; // 400 ms debounce — let LOD transitions settle
+      }
+      if (_mergeRebuildPending && now >= _mergeRebuildAt &&
+          chunkStream.remeshQueue.length === 0 && chunkStream.createQueue.length === 0) {
+        _mergeRebuildPending = false;
+        terrainMerger.remerge();
+      }
+    } else {
+      _mergeRebuildPending = false;
+    }
+
     perf.streamBackpressure = _streamQueueDepth() >= STREAM_QUEUE_PRESSURE;
     const _pStream = performance.now();
     frameProbe.t.stream += _pStream - _pPreStream;

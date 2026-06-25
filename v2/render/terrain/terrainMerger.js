@@ -4,34 +4,104 @@ import { installTerrainSkirtSafeRaycast } from "./terrainMesher.js";
 export class TerrainMerger {
   constructor({ scene }) {
     this.scene = scene;
-    this._mergedMesh = null;
+    this._lodMeshes = new Map(); // segments -> THREE.Mesh
     this._chunkStream = null;
+    this._material = null;
+    this._mergedBucketSizes = new Map(); // segments -> chunk count at merge time
   }
 
-  get isMerged() { return this._mergedMesh !== null; }
+  get isMerged() { return this._lodMeshes.size > 0; }
 
   merge(chunkStream, material) {
-    if (this._mergedMesh) this.unmerge();
+    if (this.isMerged) this.unmerge();
     this._chunkStream = chunkStream;
+    this._material = material;
 
     const chunks = Array.from(chunkStream.activeChunks.values());
     if (chunks.length === 0) return;
 
-    const geo = _buildMergedGeometry(chunks);
-    if (!geo) return;
+    // Group chunks by LOD level so each bucket gets its own merged mesh with a
+    // tight bounding sphere — Three.js frustum culling then works per-bucket
+    // instead of being disabled across the whole terrain.
+    const byLod = new Map();
+    for (const ch of chunks) {
+      if (!byLod.has(ch.segments)) byLod.set(ch.segments, []);
+      byLod.get(ch.segments).push(ch);
+    }
 
-    this._mergedMesh = new THREE.Mesh(geo, material);
-    this._mergedMesh.receiveShadow = true;
-    this._mergedMesh.castShadow = false;
-    this._mergedMesh.frustumCulled = false;
-    installTerrainSkirtSafeRaycast(this._mergedMesh);
-    this.scene.add(this._mergedMesh);
+    this._mergedBucketSizes.clear();
+    for (const [segments, lodChunks] of byLod) {
+      const geo = _buildMergedGeometry(lodChunks);
+      if (!geo) continue;
+      const mesh = new THREE.Mesh(geo, material);
+      mesh.receiveShadow = true;
+      mesh.castShadow = false;
+      mesh.frustumCulled = true;
+      installTerrainSkirtSafeRaycast(mesh);
+      this.scene.add(mesh);
+      this._lodMeshes.set(segments, mesh);
+      this._mergedBucketSizes.set(segments, lodChunks.length);
+    }
 
     for (const ch of chunks) ch.mesh.visible = false;
   }
 
+  /**
+   * Returns true when any active chunk's LOD level differs from the snapshot
+   * taken at merge time, meaning the merged geometry is showing stale detail.
+   */
+  isLodStale(activeChunks) {
+    if (!this.isMerged) return false;
+    const current = new Map();
+    for (const ch of activeChunks.values()) {
+      current.set(ch.segments, (current.get(ch.segments) ?? 0) + 1);
+    }
+    if (current.size !== this._mergedBucketSizes.size) return true;
+    for (const [segs, count] of current) {
+      if (this._mergedBucketSizes.get(segs) !== count) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Rebuilds the merged geometry from the current LOD state of active chunks
+   * without making individual chunk meshes visible — no visible flash.
+   * Only call when the remesh queue is empty (all LOD transitions settled).
+   */
+  remerge() {
+    if (!this.isMerged || !this._chunkStream || !this._material) return;
+
+    for (const mesh of this._lodMeshes.values()) {
+      this.scene.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    this._lodMeshes.clear();
+    this._mergedBucketSizes.clear();
+
+    const chunks = Array.from(this._chunkStream.activeChunks.values());
+    const byLod = new Map();
+    for (const ch of chunks) {
+      if (!byLod.has(ch.segments)) byLod.set(ch.segments, []);
+      byLod.get(ch.segments).push(ch);
+    }
+
+    for (const [segments, lodChunks] of byLod) {
+      const geo = _buildMergedGeometry(lodChunks);
+      if (!geo) continue;
+      const mesh = new THREE.Mesh(geo, this._material);
+      mesh.receiveShadow = true;
+      mesh.castShadow = false;
+      mesh.frustumCulled = true;
+      installTerrainSkirtSafeRaycast(mesh);
+      this.scene.add(mesh);
+      this._lodMeshes.set(segments, mesh);
+      this._mergedBucketSizes.set(segments, lodChunks.length);
+    }
+    // Chunk meshes stay hidden — they were already hidden from the original merge.
+  }
+
   unmerge() {
-    if (!this._mergedMesh) return;
+    if (!this.isMerged) return;
 
     if (this._chunkStream) {
       for (const ch of this._chunkStream.activeChunks.values()) {
@@ -39,16 +109,20 @@ export class TerrainMerger {
       }
     }
 
-    this.scene.remove(this._mergedMesh);
-    this._mergedMesh.geometry.dispose();
-    this._mergedMesh = null;
+    for (const mesh of this._lodMeshes.values()) {
+      this.scene.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    this._lodMeshes.clear();
+    this._mergedBucketSizes.clear();
     this._chunkStream = null;
+    this._material = null;
 
     window.dispatchEvent(new CustomEvent("terrain-merge-changed", { detail: { merged: false } }));
   }
 
   raycastMeshes() {
-    if (this._mergedMesh) return [this._mergedMesh];
+    if (this.isMerged) return Array.from(this._lodMeshes.values());
     return this._chunkStream ? this._chunkStream.raycastMeshes() : [];
   }
 

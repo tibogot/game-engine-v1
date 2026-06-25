@@ -53,12 +53,28 @@ function addHeightDeltaGlobalVertex(terrainStore, igx, igz, delta, touchedKeys, 
   const locX = globalGridVertToChunk(igx, config);
   const locZ = globalGridVertToChunk(igz, config);
   if (!locX || !locZ) return;
-  const heights = terrainStore.ensureChunkData(locX.c, locZ.c);
-  const idx = getChunkDataIndex(locX.i, locZ.i, config);
+
+  const res = config.world.dataResolution;
   const cmin = config.sculpt.sculptClampMin;
   const cmax = config.sculpt.sculptClampMax;
-  heights[idx] = THREE.MathUtils.clamp(heights[idx] + delta, cmin, cmax);
-  touchedKeys.add(chunkKey(locX.c, locZ.c));
+
+  // A vertex at a chunk boundary is shared between up to 4 chunks — write all of
+  // them so erosion doesn't leave seams at chunk edges (same propagation pattern
+  // as applySculptStroke).
+  const xs = [[locX.c, locX.i]];
+  if (locX.i === 0 && locX.c > 0) xs.push([locX.c - 1, res]);
+
+  const zs = [[locZ.c, locZ.i]];
+  if (locZ.i === 0 && locZ.c > 0) zs.push([locZ.c - 1, res]);
+
+  for (const [cx, ix] of xs) {
+    for (const [cz, iz] of zs) {
+      const heights = terrainStore.ensureChunkData(cx, cz);
+      const idx = getChunkDataIndex(ix, iz, config);
+      heights[idx] = THREE.MathUtils.clamp(heights[idx] + delta, cmin, cmax);
+      touchedKeys.add(chunkKey(cx, cz));
+    }
+  }
 }
 
 function erosionSampleHG(terrainStore, px, pz, config) {
