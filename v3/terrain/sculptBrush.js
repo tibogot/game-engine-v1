@@ -81,11 +81,15 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
 
-    const hL = texture(srcNode, vec2(uvCoord.x.sub(texel), uvCoord.y)).r;
-    const hR = texture(srcNode, vec2(uvCoord.x.add(texel), uvCoord.y)).r;
-    const hD = texture(srcNode, vec2(uvCoord.x, uvCoord.y.sub(texel))).r;
-    const hU = texture(srcNode, vec2(uvCoord.x, uvCoord.y.add(texel))).r;
-    const avg = hL.add(hR).add(hD).add(hU).mul(0.25);
+    const hL  = texture(srcNode, vec2(uvCoord.x.sub(texel), uvCoord.y)).r;
+    const hR  = texture(srcNode, vec2(uvCoord.x.add(texel), uvCoord.y)).r;
+    const hD  = texture(srcNode, vec2(uvCoord.x, uvCoord.y.sub(texel))).r;
+    const hU  = texture(srcNode, vec2(uvCoord.x, uvCoord.y.add(texel))).r;
+    const hLD = texture(srcNode, vec2(uvCoord.x.sub(texel), uvCoord.y.sub(texel))).r;
+    const hRD = texture(srcNode, vec2(uvCoord.x.add(texel), uvCoord.y.sub(texel))).r;
+    const hLU = texture(srcNode, vec2(uvCoord.x.sub(texel), uvCoord.y.add(texel))).r;
+    const hRU = texture(srcNode, vec2(uvCoord.x.add(texel), uvCoord.y.add(texel))).r;
+    const avg = hL.add(hR).add(hD).add(hU).add(hLD).add(hRD).add(hLU).add(hRU).mul(0.125);
 
     const d       = length(uvCoord.sub(uBrushUV));
     const falloff = max(float(0), float(1).sub(d.div(uRadius)));
@@ -95,6 +99,60 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     return vec4(max(mix(currentH, avg, blendAmt), float(0)), float(0), float(0), float(1));
   })();
   const smoothQuad = new QuadMesh(smoothMat);
+
+  // ── Flatten brush ───────────────────────────────────────────────────────────
+  // Lerp toward height at brush center (v2: flatten to stroke-start sample).
+  const flattenMat = new THREE.MeshBasicNodeMaterial();
+  flattenMat.colorNode = Fn(() => {
+    const uvCoord  = uv();
+    const currentH = texture(srcNode, uvCoord).r;
+    const targetH  = texture(srcNode, uBrushUV).r;
+
+    const d       = length(uvCoord.sub(uBrushUV));
+    const falloff = max(float(0), float(1).sub(d.div(uRadius)));
+    const blendAmt = clamp(falloff.mul(uStrength).mul(float(20)), float(0), float(1));
+
+    return vec4(max(mix(currentH, targetH, blendAmt), float(0)), float(0), float(0), float(1));
+  })();
+  const flattenQuad = new QuadMesh(flattenMat);
+
+  // ── GPU copy (undo / redo snapshots) ────────────────────────────────────────
+  const copyMat = new THREE.MeshBasicNodeMaterial();
+  copyMat.colorNode = Fn(() =>
+    vec4(texture(srcNode, uv()).r, float(0), float(0), float(1)),
+  )();
+  const copyQuad = new QuadMesh(copyMat);
+
+  const MAX_HISTORY = 25;
+  const undoStack   = [];
+  const redoStack   = [];
+
+  function blitToRT(srcTexture, dstRT) {
+    srcNode.value = srcTexture;
+    renderer.setRenderTarget(dstRT);
+    copyQuad.render(renderer);
+    renderer.setRenderTarget(null);
+  }
+
+  function cloneCurrentHeight() {
+    const rt = makeHeightRT();
+    blitToRT(rts[readIdx].texture, rt);
+    return rt;
+  }
+
+  function restoreFrom(snapshotRT) {
+    blitToRT(snapshotRT.texture, rts[readIdx]);
+    heightTexNode.value = rts[readIdx].texture;
+  }
+
+  function trimStack(stack) {
+    while (stack.length >= MAX_HISTORY) stack.shift().dispose();
+  }
+
+  function disposeStack(stack) {
+    for (const rt of stack) rt.dispose();
+    stack.length = 0;
+  }
 
   // ── Internal ping-pong step ───────────────────────────────────────────────
   function _runPass(quad) {
@@ -121,5 +179,78 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     _runPass(smoothQuad);
   }
 
-  return { paint, smooth, uBrushUV, uRadius, uStrength, getCurrentRT: () => rts[readIdx] };
+  function flatten(brushUVx, brushUVy) {
+    uBrushUV.value.set(brushUVx, brushUVy);
+    _runPass(flattenQuad);
+  }
+
+  /** Push a GPU snapshot before the first dab of a stroke (one undo step per drag). */
+  function beginStroke() {
+    disposeStack(redoStack);
+    trimStack(undoStack);
+    undoStack.push(cloneCurrentHeight());
+  }
+
+  function undo() {
+    if (undoStack.length === 0) return false;
+    trimStack(redoStack);
+    redoStack.push(cloneCurrentHeight());
+    const prev = undoStack.pop();
+    restoreFrom(prev);
+    prev.dispose();
+    return true;
+  }
+
+  function redo() {
+    if (redoStack.length === 0) return false;
+    trimStack(undoStack);
+    undoStack.push(cloneCurrentHeight());
+    const next = redoStack.pop();
+    restoreFrom(next);
+    next.dispose();
+    return true;
+  }
+
+  /** Replace both ping-pong RTs from normalized height samples; clears undo history. */
+  function replaceHeightData(heights) {
+    const expected = HEIGHTMAP_SIZE * HEIGHTMAP_SIZE;
+    if (heights.length !== expected) {
+      throw new Error(`Expected ${expected} height samples, got ${heights.length}`);
+    }
+
+    disposeStack(undoStack);
+    disposeStack(redoStack);
+
+    const data = heights instanceof Float32Array ? heights : new Float32Array(heights);
+    const tex = new THREE.DataTexture(
+      data,
+      HEIGHTMAP_SIZE,
+      HEIGHTMAP_SIZE,
+      THREE.RedFormat,
+      THREE.FloatType,
+    );
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.minFilter = tex.magFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+
+    blitToRT(tex, rts[0]);
+    blitToRT(tex, rts[1]);
+    readIdx = 0;
+    heightTexNode.value = rts[0].texture;
+    tex.dispose();
+  }
+
+  return {
+    paint,
+    smooth,
+    flatten,
+    beginStroke,
+    undo,
+    redo,
+    replaceHeightData,
+    uBrushUV,
+    uRadius,
+    uStrength,
+    getCurrentRT: () => rts[readIdx],
+  };
 }

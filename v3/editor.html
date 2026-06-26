@@ -3,114 +3,202 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>V3 GPU Terrain</title>
-    <style>
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-      body { background: #000; overflow: hidden; }
-      canvas { display: block; }
-
-      /* ── Side panel ──────────────────────────────────────────────────────── */
-      #panel {
-        position: fixed;
-        top: 50%;
-        left: 10px;
-        transform: translateY(-50%);
-        background: rgba(8, 10, 18, 0.82);
-        border: 1px solid rgba(255,255,255,0.10);
-        border-radius: 10px;
-        padding: 14px 12px;
-        width: 168px;
-        color: #ddd;
-        font: 12px/1.5 monospace;
-        pointer-events: auto;
-        user-select: none;
-        backdrop-filter: blur(6px);
-        z-index: 10;
-      }
-      .p-title {
-        font-size: 10px;
-        letter-spacing: 1.5px;
-        text-transform: uppercase;
-        color: #6a9fff;
-        margin-bottom: 14px;
-        padding-bottom: 8px;
-        border-bottom: 1px solid rgba(255,255,255,0.08);
-      }
-      .p-label {
-        font-size: 10px;
-        color: #777;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        margin: 12px 0 5px;
-      }
-      .p-label:first-of-type { margin-top: 0; }
-
-      /* Mode buttons */
-      .btn-col { display: flex; flex-direction: column; gap: 5px; }
-      .mode-btn {
-        background: rgba(255,255,255,0.06);
-        border: 1px solid rgba(255,255,255,0.12);
-        border-radius: 5px;
-        color: #bbb;
-        padding: 7px 10px;
-        cursor: pointer;
-        font: 12px monospace;
-        text-align: left;
-        transition: background 0.1s, border-color 0.1s, color 0.1s;
-      }
-      .mode-btn:hover  { background: rgba(255,255,255,0.12); color: #fff; }
-      .mode-btn.active {
-        background: rgba(80, 140, 255, 0.22);
-        border-color: rgba(100,160,255,0.55);
-        color: #9dc4ff;
-      }
-
-      /* Sliders */
-      .sl-row { display: flex; align-items: center; gap: 7px; }
-      .sl-row input[type=range] {
-        flex: 1;
-        accent-color: #5a9fff;
-        cursor: pointer;
-      }
-      .sl-val { font-size: 11px; color: #999; width: 28px; text-align: right; }
-
-      /* Divider + help */
-      .p-div { border-top: 1px solid rgba(255,255,255,0.07); margin: 14px 0 10px; }
-      .p-help { font-size: 10px; color: #555; line-height: 2.0; }
-      .p-help b { color: #888; font-weight: normal; }
-    </style>
+    <title>V3 Terrain Editor</title>
+    <link rel="stylesheet" href="./styles/editor.css" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
   </head>
   <body>
-    <div id="panel">
-      <div class="p-title">V3 Terrain</div>
+    <div id="app">
+      <!-- Toolbar -->
+      <div id="toolbar">
+        <span class="toolbar-title">V3 Terrain Editor</span>
 
-      <div class="p-label">Tool</div>
-      <div class="btn-col">
-        <button id="btn-raise"  class="mode-btn active">▲ Raise</button>
-        <button id="btn-lower"  class="mode-btn">▼ Lower</button>
-        <button id="btn-smooth" class="mode-btn">〜 Smooth</button>
+        <div class="toolbar-group">
+          <button class="toolbar-btn active" id="tb-sculpt" title="Sculpt (S)">
+            <i data-lucide="mountain"></i>
+          </button>
+        </div>
+
+        <div class="toolbar-group">
+          <button class="toolbar-btn" id="tb-undo" title="Undo (Ctrl+Z)">
+            <i data-lucide="undo-2"></i>
+          </button>
+          <button class="toolbar-btn" id="tb-redo" title="Redo (Ctrl+Y)">
+            <i data-lucide="redo-2"></i>
+          </button>
+        </div>
+
+        <div class="toolbar-group">
+          <button class="toolbar-btn" id="tb-save" title="Save (Ctrl+S)">
+            <i data-lucide="save"></i>
+          </button>
+          <button class="toolbar-btn" id="tb-load" title="Load heightmap">
+            <i data-lucide="folder-open"></i>
+          </button>
+        </div>
+
+        <div class="toolbar-group spacer">
+          <span style="font-size:11px;color:var(--text-dim);padding-right:8px">
+            2048 m · 1024²
+          </span>
+        </div>
       </div>
 
-      <div class="p-label">Brush size</div>
-      <div class="sl-row">
-        <input type="range" id="sl-size" min="1" max="40" step="1" value="5">
-        <span class="sl-val" id="lbl-size">5%</span>
+      <!-- Left: scene -->
+      <div id="hierarchy">
+        <div class="panel-header"><span>Scene</span></div>
+        <div class="tree-list">
+          <div class="tree-item selected">
+            <i data-lucide="mountain"></i>
+            <span>Terrain</span>
+            <span class="tree-type">GPU</span>
+          </div>
+        </div>
       </div>
 
-      <div class="p-label">Strength</div>
-      <div class="sl-row">
-        <input type="range" id="sl-str" min="1" max="50" step="1" value="4">
-        <span class="sl-val" id="lbl-str">4</span>
-      </div>
+      <!-- Viewport (canvas injected by main.js) -->
+      <div id="viewport"></div>
 
-      <div class="p-div"></div>
-      <div class="p-help">
-        <b>LMB</b> sculpt<br>
-        <b>MMB</b> orbit<br>
-        <b>RMB</b> pan<br>
-        <b>Scroll</b> zoom<br>
-        <b>Shift+Scroll</b> size<br>
-        <b>Alt+Scroll</b> strength
+      <!-- Right: tools / world / shortcuts -->
+      <div id="right-panel">
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="tools">
+            <i data-lucide="wrench"></i> Tools
+          </button>
+          <button class="tab-btn" data-tab="world">
+            <i data-lucide="sun-moon"></i> World
+          </button>
+          <button class="tab-btn" data-tab="shortcuts">
+            <i data-lucide="keyboard"></i> Keys
+          </button>
+        </div>
+
+        <!-- Tools -->
+        <div class="tab-content active" id="tab-tools">
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Sculpt mode
+            </div>
+            <div class="section-body">
+              <p class="mode-hint">LMB raise · Shift lower · Ctrl smooth · Alt flatten</p>
+              <div class="chip-row">
+                <button id="btn-raise"   class="chip-btn active" type="button">Raise</button>
+                <button id="btn-lower"   class="chip-btn" type="button">Lower</button>
+                <button id="btn-smooth"  class="chip-btn" type="button">Smooth</button>
+                <button id="btn-flatten" class="chip-btn" type="button">Flatten</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Brush
+            </div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Size</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-size" min="1" max="40" step="1" value="5" />
+                  <span class="prop-num" id="lbl-size">5%</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Strength</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-str" min="1" max="50" step="1" value="4" />
+                  <span class="prop-num" id="lbl-str">4</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Procedural terrain
+            </div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Mode</span>
+                <div class="prop-value">
+                  <select class="prop-dropdown" id="gen-mode">
+                    <option value="ridge">Ridge</option>
+                    <option value="fbm">FBM</option>
+                  </select>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Seed</span>
+                <div class="prop-value">
+                  <input class="prop-input" type="number" id="gen-seed" value="42" step="1" />
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Scale</span>
+                <div class="prop-value">
+                  <input type="range" id="gen-scale" min="1" max="12" step="0.5" value="4" />
+                  <span class="prop-num" id="lbl-gen-scale">4</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Height</span>
+                <div class="prop-value">
+                  <input type="range" id="gen-height" min="20" max="300" step="5" value="120" />
+                  <span class="prop-num" id="lbl-gen-height">120</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Octaves</span>
+                <div class="prop-value">
+                  <input type="range" id="gen-octaves" min="2" max="8" step="1" value="6" />
+                  <span class="prop-num" id="lbl-gen-octaves">6</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Dropoff</span>
+                <div class="prop-value">
+                  <input type="range" id="gen-dropoff" min="5" max="30" step="1" value="12" />
+                  <span class="prop-num" id="lbl-gen-dropoff">1.2</span>
+                </div>
+              </div>
+              <button type="button" class="action-btn primary" id="btn-generate">
+                Generate terrain
+              </button>
+              <button type="button" class="action-btn" id="btn-random-seed" style="margin-top:6px">
+                Randomize seed
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- World (lighting, sky, sun — coming later) -->
+        <div class="tab-content" id="tab-world">
+          <div class="empty-panel">
+            <i data-lucide="sun"></i>
+            <p>Sun, sky, and lighting settings will live here.</p>
+          </div>
+        </div>
+
+        <!-- Shortcuts -->
+        <div class="tab-content" id="tab-shortcuts">
+          <div class="help-block">
+            <div><kbd>LMB</kbd> raise</div>
+            <div><kbd>Shift</kbd>+<kbd>LMB</kbd> lower</div>
+            <div><kbd>Ctrl</kbd>+<kbd>LMB</kbd> smooth</div>
+            <div><kbd>Alt</kbd>+<kbd>LMB</kbd> flatten</div>
+            <div><kbd>Alt</kbd>+<kbd>Scroll</kbd> strength</div>
+            <div><kbd>MMB</kbd> orbit camera</div>
+            <div><kbd>RMB</kbd> pan camera</div>
+            <div><kbd>Scroll</kbd> zoom</div>
+            <div><kbd>Shift</kbd>+<kbd>Scroll</kbd> brush size</div>
+            <div><kbd>Alt</kbd>+<kbd>Scroll</kbd> brush strength</div>
+            <div><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</div>
+            <div><kbd>Ctrl</kbd>+<kbd>Y</kbd> redo</div>
+            <div><kbd>Ctrl</kbd>+<kbd>S</kbd> save</div>
+          </div>
+        </div>
       </div>
     </div>
 
