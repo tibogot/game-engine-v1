@@ -60,10 +60,12 @@ export function pickHeightmapFile() {
     input.type = "file";
     input.accept = ".v3height,application/octet-stream";
     input.style.display = "none";
-    input.addEventListener("change", () => {
-      resolve(input.files?.[0] ?? null);
-      input.remove();
-    });
+
+    const cleanup = (file) => { resolve(file); input.remove(); };
+
+    input.addEventListener("change", () => cleanup(input.files?.[0] ?? null));
+    input.addEventListener("cancel", () => cleanup(null));
+
     document.body.appendChild(input);
     input.click();
   });

@@ -75,27 +75,10 @@
 
         <!-- Tools -->
         <div class="tab-content active" id="tab-tools">
-          <div class="inspector-section">
-            <div class="section-header" data-toggle>
-              <i data-lucide="chevron-down" class="section-arrow"></i>
-              Sculpt mode
-            </div>
-            <div class="section-body">
-              <p class="mode-hint">LMB raise · Shift lower · Ctrl smooth · Alt flatten</p>
-              <div class="chip-row">
-                <button id="btn-raise"   class="chip-btn active" type="button">Raise</button>
-                <button id="btn-lower"   class="chip-btn" type="button">Lower</button>
-                <button id="btn-smooth"  class="chip-btn" type="button">Smooth</button>
-                <button id="btn-flatten" class="chip-btn" type="button">Flatten</button>
-              </div>
-            </div>
-          </div>
 
+          <!-- BRUSH — global, always visible, no collapse -->
           <div class="inspector-section">
-            <div class="section-header" data-toggle>
-              <i data-lucide="chevron-down" class="section-arrow"></i>
-              Brush
-            </div>
+            <div class="section-header">Brush</div>
             <div class="section-body">
               <div class="prop-row">
                 <span class="prop-label">Size</span>
@@ -111,15 +94,170 @@
                   <span class="prop-num" id="lbl-str">4</span>
                 </div>
               </div>
+              <div class="prop-row">
+                <span class="prop-label">Falloff</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-falloff" min="5" max="40" step="1" value="20" />
+                  <span class="prop-num" id="lbl-falloff">2.0</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Spacing</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-spacing" min="5" max="100" step="1" value="22" />
+                  <span class="prop-num" id="lbl-spacing">22%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SCULPT — mode-specific tools -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Sculpt
+            </div>
+            <div class="section-body">
+              <div class="tool-grid">
+                <button id="btn-raise"   class="tool-btn active" type="button">
+                  <i data-lucide="chevron-up"></i><span>Raise</span>
+                </button>
+                <button id="btn-lower"   class="tool-btn" type="button">
+                  <i data-lucide="chevron-down"></i><span>Lower</span>
+                </button>
+                <button id="btn-smooth"  class="tool-btn" type="button">
+                  <i data-lucide="waves"></i><span>Smooth</span>
+                </button>
+                <button id="btn-flatten" class="tool-btn" type="button">
+                  <i data-lucide="minus"></i><span>Flatten</span>
+                </button>
+                <button id="btn-noise"   class="tool-btn" type="button">
+                  <i data-lucide="zap"></i><span>Noise</span>
+                </button>
+                <button id="btn-terrace" class="tool-btn" type="button">
+                  <i data-lucide="layers"></i><span>Terrace</span>
+                </button>
+                <button id="btn-erode"   class="tool-btn" type="button">
+                  <i data-lucide="wind"></i><span>Erode</span>
+                </button>
+                <button id="btn-ramp"    class="tool-btn" type="button">
+                  <i data-lucide="route"></i><span>Ramp</span>
+                </button>
+              </div>
+              <!-- Dynamic tool options zone — contents change per active tool -->
+              <div id="tool-options" style="margin-top:6px">
+                <div id="sub-raiselower" class="tool-sub">
+                  <div class="prop-row">
+                    <span class="prop-label">Stamp</span>
+                    <div class="prop-value">
+                      <div class="option-chips">
+                        <button id="btn-stamp-smooth"  class="option-chip active" type="button">Smooth</button>
+                        <button id="btn-stamp-plateau" class="option-chip"        type="button">Plateau</button>
+                        <button id="btn-stamp-crater"  class="option-chip"        type="button">Crater</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="sub-terrace" class="tool-sub" style="display:none">
+                  <div class="prop-row">
+                    <span class="prop-label">Step</span>
+                    <div class="prop-value">
+                      <input type="range" id="sl-terrace-step" min="2" max="100" step="2" value="20" />
+                      <span class="prop-num" id="lbl-terrace-step">20m</span>
+                    </div>
+                  </div>
+                  <div class="prop-row">
+                    <span class="prop-label">Sharpness</span>
+                    <div class="prop-value">
+                      <input type="range" id="sl-terrace-sharp" min="10" max="100" step="5" value="60" />
+                      <span class="prop-num" id="lbl-terrace-sharp">60%</span>
+                    </div>
+                  </div>
+                </div>
+                <div id="sub-noise" class="tool-sub" style="display:none">
+                  <div class="prop-row">
+                    <span class="prop-label">Scale</span>
+                    <div class="prop-value">
+                      <input type="range" id="sl-noise-scale" min="1" max="30" step="1" value="5" />
+                      <span class="prop-num" id="lbl-noise-scale">0.5</span>
+                    </div>
+                  </div>
+                  <div class="prop-row">
+                    <span class="prop-label">Octaves</span>
+                    <div class="prop-value">
+                      <input type="range" id="sl-noise-oct" min="1" max="4" step="1" value="3" />
+                      <span class="prop-num" id="lbl-noise-oct">3</span>
+                    </div>
+                  </div>
+                </div>
+                <div id="sub-erode" class="tool-sub" style="display:none">
+                  <div class="prop-row">
+                    <span class="prop-label">Talus</span>
+                    <div class="prop-value">
+                      <input type="range" id="sl-thermal-slope" min="5" max="60" step="1" value="30" />
+                      <span class="prop-num" id="lbl-thermal-slope">30°</span>
+                    </div>
+                  </div>
+                  <div class="prop-row">
+                    <span class="prop-label">Iterations</span>
+                    <div class="prop-value">
+                      <input type="range" id="sl-thermal-iter" min="1" max="20" step="1" value="5" />
+                      <span class="prop-num" id="lbl-thermal-iter">5</span>
+                    </div>
+                  </div>
+                </div>
+                <div id="sub-ramp" class="tool-sub" style="display:none">
+                  <div class="prop-row">
+                    <span class="prop-label">Width</span>
+                    <div class="prop-value">
+                      <input type="range" id="sl-ramp-width" min="5" max="200" step="5" value="40" />
+                      <span class="prop-num" id="lbl-ramp-width">40m</span>
+                    </div>
+                  </div>
+                  <p class="mode-hint" id="ramp-hint">Click start point...</p>
+                </div>
+              </div>
+
+              <div class="prop-separator" style="margin-top:8px"></div>
+
+              <div class="prop-row">
+                <span class="prop-label">Height min</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-clamp-min" min="0" max="490" step="5" value="0" />
+                  <span class="prop-num" id="lbl-clamp-min">0</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Height max</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-clamp-max" min="10" max="500" step="5" value="500" />
+                  <span class="prop-num" id="lbl-clamp-max">500</span>
+                </div>
+              </div>
+
+              <p class="mode-hint">Hold: Shift lower · Ctrl smooth · Alt flatten</p>
             </div>
           </div>
 
           <div class="inspector-section">
             <div class="section-header" data-toggle>
               <i data-lucide="chevron-down" class="section-arrow"></i>
-              Procedural terrain
+              Procedural
             </div>
             <div class="section-body">
+
+              <!-- Presets -->
+              <div class="preset-grid">
+                <button class="preset-btn" data-preset="alpine"   type="button">Alpine</button>
+                <button class="preset-btn" data-preset="badlands" type="button">Badlands</button>
+                <button class="preset-btn" data-preset="volcanic" type="button">Volcanic</button>
+                <button class="preset-btn" data-preset="highland" type="button">Highland</button>
+                <button class="preset-btn" data-preset="crater"   type="button">Crater</button>
+              </div>
+
+              <div class="prop-separator"></div>
+
+              <!-- Noise -->
               <div class="prop-row">
                 <span class="prop-label">Mode</span>
                 <div class="prop-value">
@@ -138,14 +276,14 @@
               <div class="prop-row">
                 <span class="prop-label">Scale</span>
                 <div class="prop-value">
-                  <input type="range" id="gen-scale" min="1" max="12" step="0.5" value="4" />
+                  <input type="range" id="gen-scale" min="1" max="12" step="1" value="4" />
                   <span class="prop-num" id="lbl-gen-scale">4</span>
                 </div>
               </div>
               <div class="prop-row">
                 <span class="prop-label">Height</span>
                 <div class="prop-value">
-                  <input type="range" id="gen-height" min="20" max="300" step="5" value="120" />
+                  <input type="range" id="gen-height" min="20" max="500" step="5" value="120" />
                   <span class="prop-num" id="lbl-gen-height">120</span>
                 </div>
               </div>
@@ -157,17 +295,67 @@
                 </div>
               </div>
               <div class="prop-row">
+                <span class="prop-label">Warp</span>
+                <div class="prop-value">
+                  <input type="range" id="gen-warp" min="0" max="30" step="1" value="0" />
+                  <span class="prop-num" id="lbl-gen-warp">0.0</span>
+                </div>
+              </div>
+
+              <div class="prop-separator"></div>
+
+              <!-- Shape -->
+              <div class="prop-row">
+                <span class="prop-label">Shape</span>
+                <div class="prop-value">
+                  <select class="prop-dropdown" id="gen-shape">
+                    <option value="circle">Circle</option>
+                    <option value="noise">Organic</option>
+                    <option value="box">Box</option>
+                    <option value="caldera">Caldera</option>
+                    <option value="ring">Ring (raw)</option>
+                    <option value="noiseRing">Noise ring (raw)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="prop-row">
                 <span class="prop-label">Dropoff</span>
                 <div class="prop-value">
-                  <input type="range" id="gen-dropoff" min="5" max="30" step="1" value="12" />
+                  <input type="range" id="gen-dropoff" min="5" max="40" step="1" value="12" />
                   <span class="prop-num" id="lbl-gen-dropoff">1.2</span>
                 </div>
               </div>
-              <button type="button" class="action-btn primary" id="btn-generate">
-                Generate terrain
-              </button>
+              <div class="prop-row">
+                <span class="prop-label">Plains</span>
+                <div class="prop-value">
+                  <input type="range" id="gen-plains" min="0" max="60" step="1" value="0" />
+                  <span class="prop-num" id="lbl-gen-plains">0%</span>
+                </div>
+              </div>
+
+              <div class="prop-separator"></div>
+
+              <!-- Offset -->
+              <div class="prop-row">
+                <span class="prop-label">Offset X</span>
+                <div class="prop-value">
+                  <input type="range" id="gen-offsetX" min="-30" max="30" step="1" value="0" />
+                  <span class="prop-num" id="lbl-gen-offsetX">0.0</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Offset Z</span>
+                <div class="prop-value">
+                  <input type="range" id="gen-offsetZ" min="-30" max="30" step="1" value="0" />
+                  <span class="prop-num" id="lbl-gen-offsetZ">0.0</span>
+                </div>
+              </div>
+
+              <div class="prop-separator"></div>
+
+              <button type="button" class="action-btn primary" id="btn-generate">Generate</button>
               <button type="button" class="action-btn" id="btn-random-seed" style="margin-top:6px">
-                Randomize seed
+                Randomize &amp; Generate
               </button>
             </div>
           </div>

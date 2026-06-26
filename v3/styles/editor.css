@@ -293,37 +293,98 @@ html, body {
 }
 .prop-input:focus, .prop-dropdown:focus { border-color: var(--accent); }
 
-/* Sculpt mode chips */
-.chip-row {
-  display: flex;
+/* Brush section header is static — no collapse */
+.section-header:not([data-toggle]) {
+  cursor: default;
+}
+.section-header:not([data-toggle]):hover { background: none; }
+
+/* Tool grid — 2-column icon+label cards (sculpt, paint, etc.) */
+.tool-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 4px;
-  flex-wrap: wrap;
 }
-.mode-hint {
-  font-size: 10px;
-  color: var(--text-dim);
-  line-height: 1.4;
-  margin-bottom: 8px;
-}
-.chip-btn {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 8px;
+.tool-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 4px 8px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-dim);
   font-size: 11px;
   font-family: var(--font);
-  text-align: center;
-  pointer-events: none;
-  cursor: default;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
 }
-.chip-btn:hover { background: var(--bg-input); color: var(--text-dim); }
-.chip-btn.active {
-  background: var(--accent-glow);
-  border-color: var(--accent);
-  color: var(--accent);
+.tool-btn:hover { background: var(--bg-hover); color: var(--text-bright); border-color: var(--border-light); }
+.tool-btn.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+.tool-btn i { width: 18px; height: 18px; }
+
+.mode-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 0;
+  margin-top: 8px;
+}
+
+/* Dynamic tool options zone */
+#tool-options { padding: 4px 0 0; }
+.tool-sub { padding: 2px 0; }
+
+/* Option chips: compact horizontal multi-choice row */
+.option-chips {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+}
+.option-chip {
+  flex: 1;
+  padding: 4px 2px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-family: var(--font);
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.option-chip:hover { background: var(--bg-hover); color: var(--text-bright); }
+.option-chip.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+
+/* Procedural preset buttons */
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.preset-btn {
+  padding: 6px 2px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-family: var(--font);
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.preset-btn:hover { background: var(--bg-hover); color: var(--text-bright); }
+.preset-btn.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+
+.prop-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
 }
 
 .action-btn {

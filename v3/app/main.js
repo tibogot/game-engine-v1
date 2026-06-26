@@ -45,7 +45,8 @@ async function main() {
   const genParams = { ...DEFAULT_GEN };
 
   // ── WebGPU device ─────────────────────────────────────────────────────────
-  const gpuDevice = await createWebGpuDevice();
+  const gpuDevice    = await createWebGpuDevice();
+  const hasTimestamps = Boolean(gpuDevice?.features?.has('timestamp-query'));
 
   // ── Renderer ───────────────────────────────────────────────────────────────
   const renderer = new THREE.WebGPURenderer({
@@ -56,7 +57,7 @@ async function main() {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   viewport.appendChild(renderer.domElement);
 
-  const stats = new Stats({ trackGPU: true, trackCPT: true });
+  const stats = new Stats({ trackGPU: hasTimestamps, trackCPT: true });
   await stats.init(renderer);
   stats.dom.id = "perf-stats";
 
@@ -151,8 +152,41 @@ async function main() {
   // ── UI wiring ──────────────────────────────────────────────────────────────
   const btnRaise  = document.getElementById("btn-raise");
   const btnLower  = document.getElementById("btn-lower");
-  const btnSmooth = document.getElementById("btn-smooth");
+  const btnSmooth  = document.getElementById("btn-smooth");
   const btnFlatten = document.getElementById("btn-flatten");
+  const btnNoise   = document.getElementById("btn-noise");
+  const btnTerrace = document.getElementById("btn-terrace");
+  const slSpacing       = document.getElementById("sl-spacing");
+  const lblSpacing      = document.getElementById("lbl-spacing");
+  const slClampMin  = document.getElementById("sl-clamp-min");
+  const lblClampMin = document.getElementById("lbl-clamp-min");
+  const slClampMax  = document.getElementById("sl-clamp-max");
+  const lblClampMax = document.getElementById("lbl-clamp-max");
+  const subRaiseLower   = document.getElementById("sub-raiselower");
+  const subTerrace      = document.getElementById("sub-terrace");
+  const subNoise        = document.getElementById("sub-noise");
+  const subErode        = document.getElementById("sub-erode");
+  const subRamp         = document.getElementById("sub-ramp");
+  const btnErode        = document.getElementById("btn-erode");
+  const btnRamp         = document.getElementById("btn-ramp");
+  const slNoiseOct      = document.getElementById("sl-noise-oct");
+  const lblNoiseOct     = document.getElementById("lbl-noise-oct");
+  const slThermalSlope  = document.getElementById("sl-thermal-slope");
+  const lblThermalSlope = document.getElementById("lbl-thermal-slope");
+  const slThermalIter   = document.getElementById("sl-thermal-iter");
+  const lblThermalIter  = document.getElementById("lbl-thermal-iter");
+  const slRampWidth     = document.getElementById("sl-ramp-width");
+  const lblRampWidth    = document.getElementById("lbl-ramp-width");
+  const rampHint        = document.getElementById("ramp-hint");
+  const btnStampSmooth  = document.getElementById("btn-stamp-smooth");
+  const btnStampPlateau = document.getElementById("btn-stamp-plateau");
+  const btnStampCrater  = document.getElementById("btn-stamp-crater");
+  const slTerraceStep   = document.getElementById("sl-terrace-step");
+  const lblTerraceStep  = document.getElementById("lbl-terrace-step");
+  const slTerraceSharp  = document.getElementById("sl-terrace-sharp");
+  const lblTerraceSharp = document.getElementById("lbl-terrace-sharp");
+  const slNoiseScale    = document.getElementById("sl-noise-scale");
+  const lblNoiseScale   = document.getElementById("lbl-noise-scale");
   const tbSave    = document.getElementById("tb-save");
   const tbLoad    = document.getElementById("tb-load");
   const tbUndo    = document.getElementById("tb-undo");
@@ -161,26 +195,96 @@ async function main() {
   const lblSize   = document.getElementById("lbl-size");
   const slStr     = document.getElementById("sl-str");
   const lblStr    = document.getElementById("lbl-str");
+  const slFalloff  = document.getElementById("sl-falloff");
+  const lblFalloff = document.getElementById("lbl-falloff");
 
-  const genMode    = document.getElementById("gen-mode");
-  const genSeed    = document.getElementById("gen-seed");
-  const genScale   = document.getElementById("gen-scale");
-  const lblGenScale  = document.getElementById("lbl-gen-scale");
-  const genHeight  = document.getElementById("gen-height");
-  const lblGenHeight = document.getElementById("lbl-gen-height");
-  const genOctaves = document.getElementById("gen-octaves");
+  const genMode       = document.getElementById("gen-mode");
+  const genSeed       = document.getElementById("gen-seed");
+  const genScale      = document.getElementById("gen-scale");
+  const lblGenScale   = document.getElementById("lbl-gen-scale");
+  const genHeight     = document.getElementById("gen-height");
+  const lblGenHeight  = document.getElementById("lbl-gen-height");
+  const genOctaves    = document.getElementById("gen-octaves");
   const lblGenOctaves = document.getElementById("lbl-gen-octaves");
-  const genDropoff = document.getElementById("gen-dropoff");
+  const genWarp       = document.getElementById("gen-warp");
+  const lblGenWarp    = document.getElementById("lbl-gen-warp");
+  const genShape      = document.getElementById("gen-shape");
+  const genDropoff    = document.getElementById("gen-dropoff");
   const lblGenDropoff = document.getElementById("lbl-gen-dropoff");
+  const genPlains     = document.getElementById("gen-plains");
+  const lblGenPlains  = document.getElementById("lbl-gen-plains");
+  const genOffsetX    = document.getElementById("gen-offsetX");
+  const lblGenOffsetX = document.getElementById("lbl-gen-offsetX");
+  const genOffsetZ    = document.getElementById("gen-offsetZ");
+  const lblGenOffsetZ = document.getElementById("lbl-gen-offsetZ");
   const btnGenerate   = document.getElementById("btn-generate");
   const btnRandomSeed = document.getElementById("btn-random-seed");
+
+  let stickyMode  = "raise";
+  let stickyStamp = "smooth";
+  let strokeSpacingFactor = 0.22;
+  let rampState   = "idle";  // "idle" | "waiting_end"
+  let rampStartUV = null;
 
   function setMode(m) {
     btnRaise  .classList.toggle("active", m === "raise");
     btnLower  .classList.toggle("active", m === "lower");
     btnSmooth .classList.toggle("active", m === "smooth");
     btnFlatten.classList.toggle("active", m === "flatten");
+    btnNoise  .classList.toggle("active", m === "noise");
+    btnTerrace.classList.toggle("active", m === "terrace");
+    btnErode  .classList.toggle("active", m === "erode");
+    btnRamp   .classList.toggle("active", m === "ramp");
+    // Tool options always track stickyMode so modifier-key overrides don't hide the zone.
+    subRaiseLower.style.display = (stickyMode === "raise" || stickyMode === "lower") ? "" : "none";
+    subTerrace   .style.display = stickyMode === "terrace" ? "" : "none";
+    subNoise     .style.display = stickyMode === "noise"   ? "" : "none";
+    subErode     .style.display = stickyMode === "erode"   ? "" : "none";
+    subRamp      .style.display = stickyMode === "ramp"    ? "" : "none";
   }
+
+  btnRaise  .addEventListener("click", () => { stickyMode = "raise";   refreshModeIndicator(); });
+  btnLower  .addEventListener("click", () => { stickyMode = "lower";   refreshModeIndicator(); });
+  btnSmooth .addEventListener("click", () => { stickyMode = "smooth";  refreshModeIndicator(); });
+  btnFlatten.addEventListener("click", () => { stickyMode = "flatten"; refreshModeIndicator(); });
+  btnNoise  .addEventListener("click", () => { stickyMode = "noise";   refreshModeIndicator(); });
+  btnTerrace.addEventListener("click", () => { stickyMode = "terrace"; refreshModeIndicator(); });
+  btnErode  .addEventListener("click", () => { stickyMode = "erode";   refreshModeIndicator(); });
+  btnRamp   .addEventListener("click", () => {
+    stickyMode = "ramp";
+    rampState = "idle";
+    rampHint.textContent = "Click start point...";
+    refreshModeIndicator();
+  });
+
+  function setStickyStamp(s) {
+    stickyStamp = s;
+    btnStampSmooth .classList.toggle("active", s === "smooth");
+    btnStampPlateau.classList.toggle("active", s === "plateau");
+    btnStampCrater .classList.toggle("active", s === "crater");
+  }
+  btnStampSmooth .addEventListener("click", () => setStickyStamp("smooth"));
+  btnStampPlateau.addEventListener("click", () => setStickyStamp("plateau"));
+  btnStampCrater .addEventListener("click", () => setStickyStamp("crater"));
+
+  function syncClampUI() {
+    lblClampMin.textContent = slClampMin.value + "m";
+    lblClampMax.textContent = slClampMax.value + "m";
+  }
+  slClampMin.addEventListener("input", () => {
+    // Keep min below max with at least 10m gap
+    if (Number(slClampMin.value) >= Number(slClampMax.value) - 10)
+      slClampMin.value = Number(slClampMax.value) - 10;
+    sculpt.uClampMin.value = Number(slClampMin.value) / MAX_HEIGHT;
+    syncClampUI();
+  });
+  slClampMax.addEventListener("input", () => {
+    if (Number(slClampMax.value) <= Number(slClampMin.value) + 10)
+      slClampMax.value = Number(slClampMin.value) + 10;
+    sculpt.uClampMax.value = Number(slClampMax.value) / MAX_HEIGHT;
+    syncClampUI();
+  });
+  syncClampUI();
 
   const pointerMods = { shift: false, ctrl: false, alt: false };
 
@@ -190,12 +294,12 @@ async function main() {
     pointerMods.alt   = e.altKey;
   }
 
-  /** Live each stamp — v2: Alt flatten · Ctrl smooth · Shift lower · else raise. */
+  /** Modifier keys temporarily override the sticky chip selection. */
   function getStrokeMode() {
     if (pointerMods.alt) return "flatten";
     if (pointerMods.ctrl) return "smooth";
     if (pointerMods.shift) return "lower";
-    return "raise";
+    return stickyMode;
   }
 
   function refreshModeIndicator() {
@@ -211,20 +315,38 @@ async function main() {
     refreshModeIndicator();
   });
 
+  // ── Terrain presets ────────────────────────────────────────────────────────
+  const TERRAIN_PRESETS = {
+    alpine:   { mode:"ridge", scale:5, octaves:7, height:220, seed:42,  domainWarp:1.2, dropoffShape:"circle",  dropoff:1.0, plains:0,    offsetX:0,   offsetZ:0   },
+    badlands: { mode:"ridge", scale:7, octaves:8, height:130, seed:77,  domainWarp:2.5, dropoffShape:"noise",   dropoff:0.6, plains:0,    offsetX:0,   offsetZ:0   },
+    volcanic: { mode:"ridge", scale:6, octaves:5, height:350, seed:7,   domainWarp:0.4, dropoffShape:"circle",  dropoff:3.0, plains:0,    offsetX:0,   offsetZ:0   },
+    highland: { mode:"fbm",   scale:3, octaves:5, height:80,  seed:123, domainWarp:1.8, dropoffShape:"noise",   dropoff:0.9, plains:0.15, offsetX:0,   offsetZ:0   },
+    crater:   { mode:"ridge", scale:5, octaves:7, height:200, seed:99,  domainWarp:0.8, dropoffShape:"caldera", dropoff:1.5, plains:0.05, offsetX:0,   offsetZ:0   },
+  };
+
   function readGenFromUI() {
-    genParams.mode = genMode.value === "fbm" ? "fbm" : "ridge";
-    genParams.seed = Number(genSeed.value) || 0;
-    genParams.scale = Number(genScale.value);
-    genParams.height = Number(genHeight.value);
-    genParams.octaves = Number(genOctaves.value);
-    genParams.dropoff = Number(genDropoff.value) / 10;
+    genParams.mode         = genMode.value;
+    genParams.seed         = Number(genSeed.value) || 0;
+    genParams.scale        = Number(genScale.value);
+    genParams.height       = Number(genHeight.value);
+    genParams.octaves      = Number(genOctaves.value);
+    genParams.domainWarp   = Number(genWarp.value)    / 10;
+    genParams.dropoffShape = genShape.value;
+    genParams.dropoff      = Number(genDropoff.value) / 10;
+    genParams.plains       = Number(genPlains.value)  / 100;
+    genParams.offsetX      = Number(genOffsetX.value) / 10;
+    genParams.offsetZ      = Number(genOffsetZ.value) / 10;
   }
 
   function syncGenUI() {
     lblGenScale.textContent   = genScale.value;
     lblGenHeight.textContent  = genHeight.value;
     lblGenOctaves.textContent = genOctaves.value;
+    lblGenWarp.textContent    = (Number(genWarp.value)    / 10).toFixed(1);
     lblGenDropoff.textContent = (Number(genDropoff.value) / 10).toFixed(1);
+    lblGenPlains.textContent  = genPlains.value + "%";
+    lblGenOffsetX.textContent = (Number(genOffsetX.value) / 10).toFixed(1);
+    lblGenOffsetZ.textContent = (Number(genOffsetZ.value) / 10).toFixed(1);
   }
 
   function applyProceduralTerrain() {
@@ -233,13 +355,40 @@ async function main() {
     onHistoryChange();
   }
 
-  genScale.addEventListener("input", syncGenUI);
-  genHeight.addEventListener("input", syncGenUI);
-  genOctaves.addEventListener("input", syncGenUI);
-  genDropoff.addEventListener("input", syncGenUI);
+  function pushPresetToUI(p) {
+    genMode.value     = p.mode;
+    genSeed.value     = p.seed;
+    genScale.value    = p.scale;
+    genHeight.value   = p.height;
+    genOctaves.value  = p.octaves;
+    genWarp.value     = Math.round(p.domainWarp * 10);
+    genShape.value    = p.dropoffShape;
+    genDropoff.value  = Math.round(p.dropoff    * 10);
+    genPlains.value   = Math.round(p.plains     * 100);
+    genOffsetX.value  = Math.round(p.offsetX    * 10);
+    genOffsetZ.value  = Math.round(p.offsetZ    * 10);
+    syncGenUI();
+  }
+
+  for (const btn of document.querySelectorAll(".preset-btn")) {
+    btn.addEventListener("click", () => {
+      const p = TERRAIN_PRESETS[btn.dataset.preset];
+      if (!p) return;
+      document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      pushPresetToUI(p);
+      applyProceduralTerrain();
+    });
+  }
+
+  for (const sl of [genScale, genHeight, genOctaves, genWarp, genDropoff, genPlains, genOffsetX, genOffsetZ]) {
+    sl.addEventListener("input", syncGenUI);
+  }
   btnGenerate.addEventListener("click", () => applyProceduralTerrain());
   btnRandomSeed.addEventListener("click", () => {
-    genSeed.value = Math.floor(Math.random() * 10000);
+    genSeed.value = Math.floor(Math.random() * 100000);
+    document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+    applyProceduralTerrain();
   });
   syncGenUI();
 
@@ -280,8 +429,9 @@ async function main() {
   tbUndo.addEventListener("click", () => { if (sculpt.undo()) onHistoryChange(); });
   tbRedo.addEventListener("click", () => { if (sculpt.redo()) onHistoryChange(); });
 
-  function syncSizeUI()  { lblSize.textContent = Math.round(sculpt.uRadius.value   * 100) + "%"; }
-  function syncStrUI()   { lblStr .textContent = Math.round(sculpt.uStrength.value * 1000); }
+  function syncSizeUI()    { lblSize   .textContent = Math.round(sculpt.uRadius.value   * 100) + "%"; }
+  function syncStrUI()     { lblStr    .textContent = Math.round(sculpt.uStrength.value * 1000); }
+  function syncFalloffUI() { lblFalloff.textContent = (slFalloff.value / 10).toFixed(1); }
 
   slSize.addEventListener("input", () => {
     sculpt.uRadius.value = slSize.value / 100;
@@ -291,6 +441,72 @@ async function main() {
     sculpt.uStrength.value = slStr.value / 1000;
     syncStrUI();
   });
+  slFalloff.addEventListener("input", () => {
+    sculpt.uFalloff.value = slFalloff.value / 10;
+    syncFalloffUI();
+  });
+
+  function syncSpacingUI() { lblSpacing.textContent = slSpacing.value + "%"; }
+  slSpacing.addEventListener("input", () => {
+    strokeSpacingFactor = Number(slSpacing.value) / 100;
+    syncSpacingUI();
+  });
+  syncSpacingUI();
+
+  function syncTerraceUI() {
+    lblTerraceStep .textContent = slTerraceStep.value + "m";
+    lblTerraceSharp.textContent = slTerraceSharp.value + "%";
+  }
+  slTerraceStep.addEventListener("input", () => {
+    sculpt.uTerraceStep.value = Number(slTerraceStep.value) / MAX_HEIGHT;
+    syncTerraceUI();
+  });
+  slTerraceSharp.addEventListener("input", () => {
+    sculpt.uTerraceSharpness.value = Number(slTerraceSharp.value) / 100;
+    syncTerraceUI();
+  });
+  syncTerraceUI();
+
+  function syncNoiseScaleUI() {
+    lblNoiseScale.textContent = (Number(slNoiseScale.value) / 10).toFixed(1);
+  }
+  slNoiseScale.addEventListener("input", () => {
+    sculpt.uNoiseScale.value = Number(slNoiseScale.value) / 10;
+    syncNoiseScaleUI();
+  });
+  syncNoiseScaleUI();
+
+  function syncNoiseOctUI() { lblNoiseOct.textContent = slNoiseOct.value; }
+  slNoiseOct.addEventListener("input", () => {
+    sculpt.uNoiseOctaves.value = Number(slNoiseOct.value);
+    syncNoiseOctUI();
+  });
+  syncNoiseOctUI();
+
+  function syncThermalUI() {
+    lblThermalSlope.textContent = slThermalSlope.value + "°";
+    lblThermalIter .textContent = slThermalIter.value;
+  }
+  slThermalSlope.addEventListener("input", () => {
+    const deg = Number(slThermalSlope.value);
+    sculpt.uThermalSlope.value = Math.tan(deg * Math.PI / 180) * WORLD_SIZE / HEIGHTMAP_SIZE / MAX_HEIGHT;
+    syncThermalUI();
+  });
+  slThermalIter.addEventListener("input", () => {
+    sculpt.thermalConfig.iterations = Number(slThermalIter.value);
+    syncThermalUI();
+  });
+  syncThermalUI();
+
+  function syncRampWidthUI() { lblRampWidth.textContent = slRampWidth.value + "m"; }
+  slRampWidth.addEventListener("input", () => {
+    sculpt.uRampWidth.value = Number(slRampWidth.value) / WORLD_SIZE;
+    syncRampWidthUI();
+  });
+  syncRampWidthUI();
+
+  // Initialize tool-options zone visibility for the default sticky mode.
+  setMode(stickyMode);
 
   // ── Input ──────────────────────────────────────────────────────────────────
   const mouse     = new THREE.Vector2();
@@ -351,19 +567,21 @@ async function main() {
 
   let isPainting = false;
   let lastPaintUV = null;
-  const STROKE_SPACING_FACTOR = 0.22;
   const MAX_STAMPS_PER_FRAME  = 12;
 
   function stampAt(u, v) {
     const mode = getStrokeMode();
-    if (mode === "smooth") sculpt.smooth(u, v);
+    if      (mode === "smooth")  sculpt.smooth(u, v);
     else if (mode === "flatten") sculpt.flatten(u, v);
-    else sculpt.paint(u, v, mode === "lower" ? -1 : 1);
+    else if (mode === "noise")   sculpt.noise(u, v);
+    else if (mode === "terrace") sculpt.terrace(u, v);
+    else if (mode === "erode")   sculpt.thermal(u, v);
+    else sculpt.paint(u, v, mode === "lower" ? -1 : 1, stickyStamp);
   }
 
   /** Interpolate stamps along the UV segment so fast drags don't leave gaps. */
   function applySculptStroke(u, v) {
-    const spacingUV = Math.max(0.6 / WORLD_SIZE, sculpt.uRadius.value * STROKE_SPACING_FACTOR);
+    const spacingUV = Math.max(0.6 / WORLD_SIZE, sculpt.uRadius.value * strokeSpacingFactor);
 
     if (!lastPaintUV) {
       stampAt(u, v);
@@ -440,6 +658,25 @@ async function main() {
     syncPointerMods(e);
     refreshModeIndicator();
     refreshMouse(e);
+
+    // Ramp: two-click workflow — first click sets A, second click bakes the ramp.
+    if (stickyMode === "ramp") {
+      const uvHit = getUV();
+      if (!uvHit) return;
+      if (rampState === "idle") {
+        rampStartUV = uvHit;
+        rampState = "waiting_end";
+        rampHint.textContent = "Click end point...";
+      } else {
+        sculpt.beginStroke();
+        sculpt.ramp(rampStartUV, uvHit);
+        onHistoryChange();
+        rampState = "idle";
+        rampHint.textContent = "Click start point...";
+      }
+      return;
+    }
+
     sculpt.beginStroke();
     isPainting = true;
     lastPaintUV = null;
@@ -527,8 +764,10 @@ async function main() {
     renderer.render(scene, camera);
 
     // Drain GPU timestamp pools so stats-gl's GPU/CPT panels get real values.
-    renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
-    renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE);
+    if (hasTimestamps) {
+      renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+      renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE);
+    }
 
     // Feed custom counter panels.
     const ri    = renderer.info.render;
