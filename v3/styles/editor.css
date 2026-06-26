@@ -387,6 +387,26 @@ html, body {
   margin: 6px 0;
 }
 
+/* Brush mask thumbnail preview */
+.mask-preview {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  image-rendering: pixelated;
+  background: var(--bg-input);
+  display: block;
+}
+
+/* Mask chip grid: 2 columns */
+.mask-chip-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  flex: 1;
+}
+
 .action-btn {
   width: 100%;
   height: 28px;
@@ -406,6 +426,39 @@ html, body {
   color: var(--text-bright);
 }
 .action-btn.primary:hover { filter: brightness(1.1); }
+
+/* Inspector tab — read-only property values */
+.insp-value {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+.insp-value.accent { color: var(--accent); }
+
+/* Floating help / shortcuts overlay */
+#help-overlay {
+  position: fixed;
+  top: calc(var(--toolbar-h) + 6px);
+  right: calc(var(--right-w) + 8px);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px 12px;
+  z-index: 500;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  display: none;
+  min-width: 240px;
+}
+#help-overlay.visible { display: block; }
+
+.help-overlay-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
 
 .help-block {
   padding: 12px 14px;

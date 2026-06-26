@@ -13,6 +13,7 @@ import {
 } from "../io/heightmapIO.js";
 import { buildProceduralHeightmap, DEFAULT_GEN } from "../terrain/proceduralGen.js";
 import { initEditorShell } from "../ui/editorShell.js";
+import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -140,11 +141,14 @@ async function main() {
   // uCursorUV starts at (-2,-2) so it's off the [0,1] heightmap and invisible.
   const uCursorUV = uniform(new THREE.Vector2(-2, -2));
 
-  // sculptBrush uploads the CPU heightmap to its RT and sets heightTexNode.value.
-  const sculpt = createSculptBrush(renderer, initialTex, heightTexNode);
+  // Create the default brush mask (soft circle = same as old radial falloff).
+  const defaultMaskTex = BRUSH_MASKS.soft();
 
-  // LOD meshes share the same heightTexNode and cursor uniforms.
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius);
+  // sculptBrush uploads the CPU heightmap to its RT and sets heightTexNode.value.
+  const sculpt = createSculptBrush(renderer, initialTex, heightTexNode, defaultMaskTex);
+
+  // LOD meshes share the same heightTexNode, cursor uniforms, brush mask, and rotation.
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation);
   scene.add(lod.group);
 
   sculpt.replaceHeightData(buildProceduralHeightmap(genParams));
@@ -169,6 +173,8 @@ async function main() {
   const subRamp         = document.getElementById("sub-ramp");
   const btnErode        = document.getElementById("btn-erode");
   const btnRamp         = document.getElementById("btn-ramp");
+  const btnSmudge       = document.getElementById("btn-smudge");
+  const btnContrast     = document.getElementById("btn-contrast");
   const slNoiseOct      = document.getElementById("sl-noise-oct");
   const lblNoiseOct     = document.getElementById("lbl-noise-oct");
   const slThermalSlope  = document.getElementById("sl-thermal-slope");
@@ -187,6 +193,7 @@ async function main() {
   const lblTerraceSharp = document.getElementById("lbl-terrace-sharp");
   const slNoiseScale    = document.getElementById("sl-noise-scale");
   const lblNoiseScale   = document.getElementById("lbl-noise-scale");
+  const tbHelp    = document.getElementById("tb-help");
   const tbSave    = document.getElementById("tb-save");
   const tbLoad    = document.getElementById("tb-load");
   const tbUndo    = document.getElementById("tb-undo");
@@ -235,6 +242,8 @@ async function main() {
     btnTerrace.classList.toggle("active", m === "terrace");
     btnErode  .classList.toggle("active", m === "erode");
     btnRamp   .classList.toggle("active", m === "ramp");
+    btnSmudge .classList.toggle("active", m === "smudge");
+    btnContrast.classList.toggle("active", m === "contrast");
     // Tool options always track stickyMode so modifier-key overrides don't hide the zone.
     subRaiseLower.style.display = (stickyMode === "raise" || stickyMode === "lower") ? "" : "none";
     subTerrace   .style.display = stickyMode === "terrace" ? "" : "none";
@@ -249,7 +258,9 @@ async function main() {
   btnFlatten.addEventListener("click", () => { stickyMode = "flatten"; refreshModeIndicator(); });
   btnNoise  .addEventListener("click", () => { stickyMode = "noise";   refreshModeIndicator(); });
   btnTerrace.addEventListener("click", () => { stickyMode = "terrace"; refreshModeIndicator(); });
-  btnErode  .addEventListener("click", () => { stickyMode = "erode";   refreshModeIndicator(); });
+  btnErode   .addEventListener("click", () => { stickyMode = "erode";    refreshModeIndicator(); });
+  btnSmudge  .addEventListener("click", () => { stickyMode = "smudge";   refreshModeIndicator(); });
+  btnContrast.addEventListener("click", () => { stickyMode = "contrast"; refreshModeIndicator(); });
   btnRamp   .addEventListener("click", () => {
     stickyMode = "ramp";
     rampState = "idle";
@@ -424,6 +435,68 @@ async function main() {
     }
   }
 
+  // ── Brush mask ─────────────────────────────────────────────────────────────
+  const maskChipsEl   = document.getElementById("mask-chips");
+  const btnMaskPNG    = document.getElementById("btn-mask-png");
+  const maskPreviewEl = document.getElementById("mask-preview");
+
+  function updateMaskPreview(tex) {
+    const ctx = maskPreviewEl.getContext("2d");
+    ctx.clearRect(0, 0, 48, 48);
+    if (tex?.image) ctx.drawImage(tex.image, 0, 0, 48, 48);
+  }
+
+  const slMaskRot  = document.getElementById("sl-mask-rot");
+  const lblMaskRot = document.getElementById("lbl-mask-rot");
+
+  function syncMaskRotUI() {
+    lblMaskRot.textContent = slMaskRot.value + "°";
+    maskPreviewEl.style.transform = `rotate(${slMaskRot.value}deg)`;
+  }
+
+  slMaskRot.addEventListener("input", () => {
+    sculpt.uMaskRotation.value = Number(slMaskRot.value) * Math.PI / 180;
+    syncMaskRotUI();
+  });
+
+  function setMask(name, tex) {
+    sculpt.maskNode.value = tex;
+    updateMaskPreview(tex);
+    for (const chip of maskChipsEl.querySelectorAll(".option-chip")) {
+      chip.classList.toggle("active", chip.dataset.mask === name);
+    }
+  }
+
+  // Pre-generate all preset textures lazily (only on first click to save startup time).
+  const maskCache = { soft: defaultMaskTex };
+
+  maskChipsEl.addEventListener("click", e => {
+    const chip = e.target.closest(".option-chip[data-mask]");
+    if (!chip) return;
+    const name = chip.dataset.mask;
+    if (!maskCache[name]) maskCache[name] = BRUSH_MASKS[name]();
+    setMask(name, maskCache[name]);
+  });
+
+  btnMaskPNG.addEventListener("click", async () => {
+    const tex = await loadMaskPNG();
+    if (tex) setMask("__custom", tex);
+  });
+
+  // Show soft circle preview immediately on startup.
+  updateMaskPreview(defaultMaskTex);
+
+  const helpOverlay = document.getElementById("help-overlay");
+  tbHelp.addEventListener("click", () => {
+    helpOverlay.classList.toggle("visible");
+    tbHelp.classList.toggle("active");
+  });
+  // Close overlay when clicking anywhere on the viewport
+  renderer.domElement.addEventListener("mousedown", () => {
+    helpOverlay.classList.remove("visible");
+    tbHelp.classList.remove("active");
+  }, { capture: true });
+
   tbSave.addEventListener("click", () => { saveHeightmap(); });
   tbLoad.addEventListener("click", () => { loadHeightmap(); });
   tbUndo.addEventListener("click", () => { if (sculpt.undo()) onHistoryChange(); });
@@ -575,7 +648,9 @@ async function main() {
     else if (mode === "flatten") sculpt.flatten(u, v);
     else if (mode === "noise")   sculpt.noise(u, v);
     else if (mode === "terrace") sculpt.terrace(u, v);
-    else if (mode === "erode")   sculpt.thermal(u, v);
+    else if (mode === "erode")    sculpt.thermal(u, v);
+    else if (mode === "smudge")   sculpt.smudge(u, v);
+    else if (mode === "contrast") sculpt.contrast(u, v);
     else sculpt.paint(u, v, mode === "lower" ? -1 : 1, stickyStamp);
   }
 
@@ -594,6 +669,9 @@ async function main() {
     const dv = v - lastPaintUV.v;
     const dist = Math.hypot(du, dv);
     if (dist < spacingUV) return;
+
+    // Keep smudge direction current so the brush always pulls in the stroke direction.
+    if (dist > 0) sculpt.uSmudgeDir.value.set(du / dist, dv / dist);
 
     const steps = Math.min(Math.ceil(dist / spacingUV), MAX_STAMPS_PER_FRAME);
     for (let i = 1; i <= steps; i++) {

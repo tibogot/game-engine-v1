@@ -39,8 +39,14 @@
 
         <div class="toolbar-group spacer">
           <span style="font-size:11px;color:var(--text-dim);padding-right:8px">
-            2048 m · 1024²
+            2048 m · 128²
           </span>
+        </div>
+
+        <div class="toolbar-group" style="border-left:1px solid var(--border);border-right:none">
+          <button class="toolbar-btn" id="tb-help" title="Shortcuts &amp; Docs">
+            <i data-lucide="help-circle"></i>
+          </button>
         </div>
       </div>
 
@@ -62,15 +68,48 @@
       <!-- Right: tools / world / shortcuts -->
       <div id="right-panel">
         <div class="tab-bar">
+          <button class="tab-btn" data-tab="inspector">
+            <i data-lucide="info"></i> Info
+          </button>
           <button class="tab-btn active" data-tab="tools">
             <i data-lucide="wrench"></i> Tools
           </button>
           <button class="tab-btn" data-tab="world">
             <i data-lucide="sun-moon"></i> World
           </button>
-          <button class="tab-btn" data-tab="shortcuts">
-            <i data-lucide="keyboard"></i> Keys
-          </button>
+        </div>
+
+        <!-- Inspector — selected object properties -->
+        <div class="tab-content" id="tab-inspector">
+          <div class="inspector-section">
+            <div class="section-header">Terrain</div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">World</span>
+                <span class="insp-value">2048 × 2048 m</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Heightmap</span>
+                <span class="insp-value">128 × 128</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Max height</span>
+                <span class="insp-value">500 m</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">LOD levels</span>
+                <span class="insp-value">5</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Undo steps</span>
+                <span class="insp-value">25</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Backend</span>
+                <span class="insp-value accent">WebGPU · TSL</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Tools -->
@@ -108,6 +147,31 @@
                   <span class="prop-num" id="lbl-spacing">22%</span>
                 </div>
               </div>
+
+              <div class="prop-separator"></div>
+              <div style="display:flex;align-items:center;gap:4px;margin-bottom:5px">
+                <span style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);font-weight:600">Mask</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <canvas id="mask-preview" class="mask-preview" width="48" height="48"></canvas>
+                <div style="flex:1;display:flex;flex-direction:column;gap:3px">
+                  <div class="mask-chip-grid" id="mask-chips">
+                    <button class="option-chip active" data-mask="soft"     type="button">Soft</button>
+                    <button class="option-chip"        data-mask="hard"     type="button">Hard</button>
+                    <button class="option-chip"        data-mask="square"   type="button">Square</button>
+                    <button class="option-chip"        data-mask="diamond"  type="button">Diamond</button>
+                    <button class="option-chip"        data-mask="splatter" type="button">Splatter</button>
+                    <button class="option-chip"        data-mask="grunge"   type="button">Grunge</button>
+                  </div>
+                  <button type="button" class="action-btn" id="btn-mask-png" style="margin-top:0;font-size:11px">Load PNG</button>
+                </div>
+              <div class="prop-row" style="margin-top:3px">
+                <span class="prop-label">Rotation</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-mask-rot" min="0" max="359" step="1" value="0" />
+                  <span class="prop-num" id="lbl-mask-rot">0°</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -137,11 +201,17 @@
                 <button id="btn-terrace" class="tool-btn" type="button">
                   <i data-lucide="layers"></i><span>Terrace</span>
                 </button>
-                <button id="btn-erode"   class="tool-btn" type="button">
+                <button id="btn-erode"    class="tool-btn" type="button">
                   <i data-lucide="wind"></i><span>Erode</span>
                 </button>
-                <button id="btn-ramp"    class="tool-btn" type="button">
+                <button id="btn-ramp"     class="tool-btn" type="button">
                   <i data-lucide="route"></i><span>Ramp</span>
+                </button>
+                <button id="btn-smudge"   class="tool-btn" type="button">
+                  <i data-lucide="move"></i><span>Smudge</span>
+                </button>
+                <button id="btn-contrast" class="tool-btn" type="button">
+                  <i data-lucide="contrast"></i><span>Contrast</span>
                 </button>
               </div>
               <!-- Dynamic tool options zone — contents change per active tool -->
@@ -369,24 +439,22 @@
           </div>
         </div>
 
-        <!-- Shortcuts -->
-        <div class="tab-content" id="tab-shortcuts">
-          <div class="help-block">
-            <div><kbd>LMB</kbd> raise</div>
-            <div><kbd>Shift</kbd>+<kbd>LMB</kbd> lower</div>
-            <div><kbd>Ctrl</kbd>+<kbd>LMB</kbd> smooth</div>
-            <div><kbd>Alt</kbd>+<kbd>LMB</kbd> flatten</div>
-            <div><kbd>Alt</kbd>+<kbd>Scroll</kbd> strength</div>
-            <div><kbd>MMB</kbd> orbit camera</div>
-            <div><kbd>RMB</kbd> pan camera</div>
-            <div><kbd>Scroll</kbd> zoom</div>
-            <div><kbd>Shift</kbd>+<kbd>Scroll</kbd> brush size</div>
-            <div><kbd>Alt</kbd>+<kbd>Scroll</kbd> brush strength</div>
-            <div><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</div>
-            <div><kbd>Ctrl</kbd>+<kbd>Y</kbd> redo</div>
-            <div><kbd>Ctrl</kbd>+<kbd>S</kbd> save</div>
-          </div>
-        </div>
+      </div>
+    </div>
+
+    <!-- Floating shortcuts / docs overlay (toggled by toolbar ? button) -->
+    <div id="help-overlay">
+      <div class="help-overlay-title">Shortcuts</div>
+      <div class="help-block" style="padding:0">
+        <div><kbd>LMB</kbd> sculpt (sticky tool)</div>
+        <div><kbd>Shift</kbd>+<kbd>LMB</kbd> lower</div>
+        <div><kbd>Ctrl</kbd>+<kbd>LMB</kbd> smooth</div>
+        <div><kbd>Alt</kbd>+<kbd>LMB</kbd> flatten</div>
+        <div><kbd>Shift</kbd>+<kbd>Scroll</kbd> brush size</div>
+        <div><kbd>Alt</kbd>+<kbd>Scroll</kbd> strength</div>
+        <div><kbd>MMB</kbd> orbit · <kbd>RMB</kbd> pan · <kbd>Scroll</kbd> zoom</div>
+        <div><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Ctrl</kbd>+<kbd>Y</kbd> redo</div>
+        <div><kbd>Ctrl</kbd>+<kbd>S</kbd> save</div>
       </div>
     </div>
 

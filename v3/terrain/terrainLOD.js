@@ -7,6 +7,8 @@ import {
   normalize,
   mul,
   mix,
+  sin,
+  cos,
   step,
   length,
   texture,
@@ -208,7 +210,7 @@ function buildRingGrid(N, step) {
 
 // ── Material ──────────────────────────────────────────────────────────────────
 
-function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius) {
+function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation) {
   const mat = createTileMaterial({
     roughness:     0.95,
     textureScale:  400,
@@ -241,14 +243,27 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius) {
   const worldNormal = normalize(vec3(hL.sub(hR), flatScale, hD.sub(hUp)));
   mat.normalNode = normalize(mul(cameraViewMatrix, vec4(worldNormal, 0)).xyz);
 
-  // Cursor ring
+  // Cursor ring (boundary) + mask projection (filled shape preview)
   const d    = length(hmUV.sub(uCursorUV));
   const ring = step(uCursorRadius.sub(float(0.003)), d)
              .mul(step(d, uCursorRadius.add(float(0.003))));
+
+  const brushLocalUV = hmUV.sub(uCursorUV).div(uCursorRadius.mul(float(2))).add(float(0.5));
+  const mc           = brushLocalUV.sub(float(0.5));
+  const cosR         = cos(uMaskRotation);
+  const sinR         = sin(uMaskRotation);
+  const rotBrushUV   = vec2(
+    mc.x.mul(cosR).sub(mc.y.mul(sinR)).add(float(0.5)),
+    mc.x.mul(sinR).add(mc.y.mul(cosR)).add(float(0.5)),
+  );
+  const inBoundsX    = step(float(0), rotBrushUV.x).mul(step(rotBrushUV.x, float(1)));
+  const inBoundsY    = step(float(0), rotBrushUV.y).mul(step(rotBrushUV.y, float(1)));
+  const maskOverlay  = texture(uBrushMaskNode, rotBrushUV).r.mul(inBoundsX).mul(inBoundsY);
+
   mat.colorNode = mix(
     mat.colorNode,
     vec3(float(1.0), float(0.95), float(0.2)),
-    ring.mul(float(0.9)),
+    ring.mul(float(0.9)).add(maskOverlay.mul(float(0.28))),
   );
   mat.needsUpdate = true;
 
@@ -257,7 +272,7 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius) {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius) {
+export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation) {
   const group  = new THREE.Group();
   const levels = [];
 
@@ -266,7 +281,7 @@ export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius) {
     // Level 0 = full grid; levels 1-4 = stitched rings (no overlap, no polygon offset needed).
     const geo     = lod === 0 ? buildFullGrid(GRID_N, step) : buildRingGrid(GRID_N, step);
     const uCenter = uniform(new THREE.Vector2(0, 0));
-    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius);
+    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation);
     const mesh    = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
     group.add(mesh);

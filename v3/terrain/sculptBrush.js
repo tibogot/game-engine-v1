@@ -14,6 +14,7 @@ import {
   floor,
   fract,
   sin,
+  cos,
   step,
   texture,
   uv,
@@ -35,7 +36,7 @@ function makeHeightRT() {
   return rt;
 }
 
-export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
+export function createSculptBrush(renderer, initialDataTex, heightTexNode, initialMaskTex) {
   const rts = [makeHeightRT(), makeHeightRT()];
   let readIdx = 0;
 
@@ -67,19 +68,22 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
   const uTerraceSharpness = uniform(0.6);   // terrace blend sharpness: 0=soft, 1=hard snap
   const uNoiseScale       = uniform(0.5);   // noise frequency multiplier
   const uNoiseOctaves     = uniform(3.0);   // FBM octave count (1-4)
+  const uSmudgeDir        = uniform(new THREE.Vector2(0, 1)); // normalized stroke direction in UV space
   const uThermalSlope     = uniform(0.018); // thermal erosion talus threshold (~30° default)
   const uRampA            = uniform(new THREE.Vector2(0.3, 0.5));
   const uRampB            = uniform(new THREE.Vector2(0.7, 0.5));
   const uRampWidth        = uniform(0.02);  // ramp half-width in UV space
+  const uMaskRotation     = uniform(0.0);   // brush mask rotation in radians
 
   // Ping-pong source node — .value is swapped per stroke.
   const srcNode = texture(rts[0].texture);
 
+  // Brush mask node — .value is swapped when the user changes the mask preset or loads a PNG.
+  const maskNode = texture(initialMaskTex);
+
   const texel = float(1.0 / HEIGHTMAP_SIZE);
 
   // ── Edge fade helper ──────────────────────────────────────────────────────
-  // Returns 0.0 at the heightmap boundary, ramping to 1.0 over EDGE_BORDER texels.
-  // Multiplied into every brush delta so sculpting near the edge can't create cliffs.
   const EDGE_BORDER = float(4.0 / HEIGHTMAP_SIZE);
   const edgeFade = Fn(([uvCoord]) => {
     const eu = min(uvCoord.x, float(1).sub(uvCoord.x));
@@ -87,21 +91,36 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     return clamp(min(eu, ev).div(EDGE_BORDER), float(0), float(1));
   });
 
+  // ── Brush falloff via mask texture ────────────────────────────────────────
+  // Replaces the old radial (1 - d/radius) falloff. The soft-circle mask preset
+  // reproduces identical behaviour; other presets give shaped brush footprints.
+  // Out-of-bounds brush UVs return 0 via the inBounds gate (ignoring clamp mode).
+  const getBrushFalloff = Fn(([uvCoord]) => {
+    const maskUV   = uvCoord.sub(uBrushUV).div(uRadius.mul(float(2))).add(float(0.5));
+    const c        = maskUV.sub(float(0.5));
+    const cosR     = cos(uMaskRotation);
+    const sinR     = sin(uMaskRotation);
+    const rotUV    = vec2(
+      c.x.mul(cosR).sub(c.y.mul(sinR)).add(float(0.5)),
+      c.x.mul(sinR).add(c.y.mul(cosR)).add(float(0.5)),
+    );
+    const inBoundsX = step(float(0), rotUV.x).mul(step(rotUV.x, float(1)));
+    const inBoundsY = step(float(0), rotUV.y).mul(step(rotUV.y, float(1)));
+    return texture(maskNode, rotUV).r.mul(inBoundsX).mul(inBoundsY);
+  });
+
   // ── Raise / lower brush ───────────────────────────────────────────────────
   const raiseMat = new THREE.MeshBasicNodeMaterial();
   raiseMat.colorNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
-    const d        = length(uvCoord.sub(uBrushUV));
-    const falloff  = max(float(0), float(1).sub(d.div(uRadius)));
+    const falloff  = getBrushFalloff(uvCoord);
     const delta    = pow(falloff, uFalloff).mul(uStrength).mul(uDir).mul(edgeFade(uvCoord));
     return vec4(clamp(currentH.add(delta), uClampMin, uClampMax), float(0), float(0), float(1));
   })();
   const raiseQuad = new QuadMesh(raiseMat);
 
   // ── Smooth brush ──────────────────────────────────────────────────────────
-  // Blends each texel toward its 4-neighbour average, weighted by the brush
-  // falloff. Strength controls the lerp amount per frame.
   const smoothMat = new THREE.MeshBasicNodeMaterial();
   smoothMat.colorNode = Fn(() => {
     const uvCoord  = uv();
@@ -117,35 +136,28 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     const hRU = texture(srcNode, vec2(uvCoord.x.add(texel), uvCoord.y.add(texel))).r;
     const avg = hL.add(hR).add(hD).add(hU).add(hLD).add(hRD).add(hLU).add(hRU).mul(0.125);
 
-    const d       = length(uvCoord.sub(uBrushUV));
-    const falloff = max(float(0), float(1).sub(d.div(uRadius)));
-    // uStrength * 20 maps the [0.001..0.05] raise range to [0.02..1.0] smooth range.
+    const falloff  = getBrushFalloff(uvCoord);
     const blendAmt = clamp(pow(falloff, uFalloff).mul(uStrength).mul(float(20)).mul(edgeFade(uvCoord)), float(0), float(1));
 
     return vec4(clamp(mix(currentH, avg, blendAmt), uClampMin, uClampMax), float(0), float(0), float(1));
   })();
   const smoothQuad = new QuadMesh(smoothMat);
 
-  // ── Flatten brush ───────────────────────────────────────────────────────────
-  // Lerp toward height at brush center (v2: flatten to stroke-start sample).
+  // ── Flatten brush ─────────────────────────────────────────────────────────
   const flattenMat = new THREE.MeshBasicNodeMaterial();
   flattenMat.colorNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
     const targetH  = texture(srcNode, uBrushUV).r;
 
-    const d       = length(uvCoord.sub(uBrushUV));
-    const falloff = max(float(0), float(1).sub(d.div(uRadius)));
+    const falloff  = getBrushFalloff(uvCoord);
     const blendAmt = clamp(pow(falloff, uFalloff).mul(uStrength).mul(float(20)).mul(edgeFade(uvCoord)), float(0), float(1));
 
     return vec4(clamp(mix(currentH, targetH, blendAmt), uClampMin, uClampMax), float(0), float(0), float(1));
   })();
   const flattenQuad = new QuadMesh(flattenMat);
 
-  // ── Noise brush (FBM) ────────────────────────────────────────────────────────
-  // 4-octave fractal Brownian motion. uNoiseOctaves gates contributions with step()
-  // so runtime octave count changes without recompiling. Each octave doubles the
-  // frequency and halves the amplitude; the sum is normalized to [-1,1].
+  // ── Noise brush (FBM) ─────────────────────────────────────────────────────
   const noiseMat = new THREE.MeshBasicNodeMaterial();
   noiseMat.colorNode = Fn(() => {
     const uvCoord  = uv();
@@ -155,27 +167,22 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     const sx   = uBrushUV.x.mul(float(973.1));
     const sy   = uBrushUV.y.mul(float(831.7));
 
-    // Octave 1 — base frequency
     const px1 = uvCoord.x.mul(freq).add(sx);
     const py1 = uvCoord.y.mul(freq).add(sy);
     const r1  = fract(sin(px1.mul(float(127.1)).add(py1.mul(float(311.7)))).mul(float(43758.5453)));
 
-    // Octave 2 — ×2 freq, different seed offset to break correlation
     const px2 = uvCoord.x.mul(freq.mul(float(2))).add(sx.mul(float(1.7))).add(float(100));
     const py2 = uvCoord.y.mul(freq.mul(float(2))).add(sy.mul(float(1.3))).add(float(200));
     const r2  = fract(sin(px2.mul(float(127.1)).add(py2.mul(float(311.7)))).mul(float(43758.5453)));
 
-    // Octave 3 — ×4 freq
     const px3 = uvCoord.x.mul(freq.mul(float(4))).add(sx.mul(float(2.3))).add(float(300));
     const py3 = uvCoord.y.mul(freq.mul(float(4))).add(sy.mul(float(1.9))).add(float(400));
     const r3  = fract(sin(px3.mul(float(127.1)).add(py3.mul(float(311.7)))).mul(float(43758.5453)));
 
-    // Octave 4 — ×8 freq
     const px4 = uvCoord.x.mul(freq.mul(float(8))).add(sx.mul(float(0.7))).add(float(500));
     const py4 = uvCoord.y.mul(freq.mul(float(8))).add(sy.mul(float(2.7))).add(float(600));
     const r4  = fract(sin(px4.mul(float(127.1)).add(py4.mul(float(311.7)))).mul(float(43758.5453)));
 
-    // Gate higher octaves with step() — step(edge, x) = 0 if x<edge else 1
     const use2 = step(float(1.5), uNoiseOctaves);
     const use3 = step(float(2.5), uNoiseOctaves);
     const use4 = step(float(3.5), uNoiseOctaves);
@@ -189,19 +196,15 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
       .add(float(0.125).mul(use3))
       .add(float(0.0625).mul(use4));
 
-    // Normalize to [-1, 1] regardless of active octave count, then scale
     const noiseVal = raw.div(maxRaw).mul(float(2)).sub(float(1));
-    const d        = length(uvCoord.sub(uBrushUV));
-    const falloff  = max(float(0), float(1).sub(d.div(uRadius)));
+    const falloff  = getBrushFalloff(uvCoord);
     const delta    = pow(falloff, uFalloff).mul(noiseVal).mul(uStrength).mul(float(6)).mul(edgeFade(uvCoord));
 
     return vec4(clamp(currentH.add(delta), uClampMin, uClampMax), float(0), float(0), float(1));
   })();
   const noiseQuad = new QuadMesh(noiseMat);
 
-  // ── Terrace brush ─────────────────────────────────────────────────────────────
-  // Snaps height to discrete steps (uTerraceStep) within the brush area.
-  // uTerraceSharpness controls how hard the snap is (0=soft blend, 1=instant).
+  // ── Terrace brush ─────────────────────────────────────────────────────────
   const terraceMat = new THREE.MeshBasicNodeMaterial();
   terraceMat.colorNode = Fn(() => {
     const uvCoord  = uv();
@@ -209,16 +212,16 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
 
     const stepped  = floor(currentH.div(uTerraceStep)).add(float(0.5)).mul(uTerraceStep);
 
-    const d        = length(uvCoord.sub(uBrushUV));
-    const falloff  = max(float(0), float(1).sub(d.div(uRadius)));
+    const falloff  = getBrushFalloff(uvCoord);
     const blendAmt = clamp(pow(falloff, uFalloff).mul(uTerraceSharpness).mul(float(8)).mul(edgeFade(uvCoord)), float(0), float(1));
 
     return vec4(clamp(mix(currentH, stepped, blendAmt), uClampMin, uClampMax), float(0), float(0), float(1));
   })();
   const terraceQuad = new QuadMesh(terraceMat);
 
-  // ── Plateau brush ─────────────────────────────────────────────────────────────
-  // Flat top across the inner 50% of the brush radius; drops off at the outer 50%.
+  // ── Plateau brush ─────────────────────────────────────────────────────────
+  // Stamp shape uses radial distance for the plateau profile; mask modulates
+  // the per-pixel influence so the shape clips to the current brush footprint.
   const plateauMat = new THREE.MeshBasicNodeMaterial();
   plateauMat.colorNode = Fn(() => {
     const uvCoord  = uv();
@@ -227,14 +230,13 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     const t        = clamp(d.div(uRadius), float(0), float(1));
     const tOuter   = clamp(t.sub(float(0.5)).div(float(0.5)), float(0), float(1));
     const plateauFalloff = float(1).sub(pow(tOuter, uFalloff));
-    const delta    = plateauFalloff.mul(uStrength).mul(uDir).mul(edgeFade(uvCoord));
+    const maskFactor = getBrushFalloff(uvCoord);
+    const delta    = plateauFalloff.mul(maskFactor).mul(uStrength).mul(uDir).mul(edgeFade(uvCoord));
     return vec4(clamp(currentH.add(delta), uClampMin, uClampMax), float(0), float(0), float(1));
   })();
   const plateauQuad = new QuadMesh(plateauMat);
 
-  // ── Crater brush ──────────────────────────────────────────────────────────────
-  // Depression at center with a small rim at ~70% radius; tapers to zero at edge.
-  // Formula: (2t²−1)·(1−t)^0.5 → negative at center, positive rim, zero at boundary.
+  // ── Crater brush ──────────────────────────────────────────────────────────
   const craterMat = new THREE.MeshBasicNodeMaterial();
   craterMat.colorNode = Fn(() => {
     const uvCoord  = uv();
@@ -243,16 +245,54 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     const t        = clamp(d.div(uRadius), float(0), float(1));
     const craterProfile = t.mul(t).mul(float(2)).sub(float(1))
       .mul(pow(max(float(0), float(1).sub(t)), float(0.5)));
-    const delta    = craterProfile.mul(uStrength).mul(float(5)).mul(uDir).mul(edgeFade(uvCoord));
+    const maskFactor = getBrushFalloff(uvCoord);
+    const delta    = craterProfile.mul(maskFactor).mul(uStrength).mul(float(5)).mul(uDir).mul(edgeFade(uvCoord));
     return vec4(clamp(currentH.add(delta), uClampMin, uClampMax), float(0), float(0), float(1));
   })();
   const craterQuad = new QuadMesh(craterMat);
 
-  // ── Thermal erosion brush ────────────────────────────────────────────────────
-  // Each pass: pixels steeper than uThermalSlope shed material to lower neighbors
-  // and gain material from steeper neighbors. Mass-approximate single-pass version —
-  // not perfectly conservative but visually accurate for sculpting purposes.
-  // Run multiple iterations per dab (thermalConfig.iterations) for visible effect.
+  // ── Smudge / Push brush ───────────────────────────────────────────────────
+  const smudgeMat = new THREE.MeshBasicNodeMaterial();
+  smudgeMat.colorNode = Fn(() => {
+    const uvCoord  = uv();
+    const currentH = texture(srcNode, uvCoord).r;
+
+    const falloff = getBrushFalloff(uvCoord);
+
+    const smearOffset = uRadius.mul(float(0.5)).mul(falloff);
+    const smearUV     = uvCoord.sub(vec2(uSmudgeDir.x.mul(smearOffset), uSmudgeDir.y.mul(smearOffset)));
+    const smearH      = texture(srcNode, smearUV).r;
+
+    const blendAmt = clamp(pow(falloff, uFalloff).mul(uStrength).mul(float(20)).mul(edgeFade(uvCoord)), float(0), float(1));
+    return vec4(clamp(mix(currentH, smearH, blendAmt), uClampMin, uClampMax), float(0), float(0), float(1));
+  })();
+  const smudgeQuad = new QuadMesh(smudgeMat);
+
+  // ── Contrast brush ────────────────────────────────────────────────────────
+  const contrastMat = new THREE.MeshBasicNodeMaterial();
+  contrastMat.colorNode = Fn(() => {
+    const uvCoord  = uv();
+    const currentH = texture(srcNode, uvCoord).r;
+
+    const hL  = texture(srcNode, vec2(uvCoord.x.sub(texel), uvCoord.y)).r;
+    const hR  = texture(srcNode, vec2(uvCoord.x.add(texel), uvCoord.y)).r;
+    const hD  = texture(srcNode, vec2(uvCoord.x, uvCoord.y.sub(texel))).r;
+    const hU  = texture(srcNode, vec2(uvCoord.x, uvCoord.y.add(texel))).r;
+    const hLD = texture(srcNode, vec2(uvCoord.x.sub(texel), uvCoord.y.sub(texel))).r;
+    const hRD = texture(srcNode, vec2(uvCoord.x.add(texel), uvCoord.y.sub(texel))).r;
+    const hLU = texture(srcNode, vec2(uvCoord.x.sub(texel), uvCoord.y.add(texel))).r;
+    const hRU = texture(srcNode, vec2(uvCoord.x.add(texel), uvCoord.y.add(texel))).r;
+    const avg  = hL.add(hR).add(hD).add(hU).add(hLD).add(hRD).add(hLU).add(hRU).mul(float(0.125));
+
+    const diff    = currentH.sub(avg);
+    const falloff = getBrushFalloff(uvCoord);
+    const amplify = clamp(pow(falloff, uFalloff).mul(uStrength).mul(float(40)).mul(edgeFade(uvCoord)), float(0), float(1));
+
+    return vec4(clamp(currentH.add(diff.mul(amplify)), uClampMin, uClampMax), float(0), float(0), float(1));
+  })();
+  const contrastQuad = new QuadMesh(contrastMat);
+
+  // ── Thermal erosion brush ─────────────────────────────────────────────────
   const thermalMat = new THREE.MeshBasicNodeMaterial();
   thermalMat.colorNode = Fn(() => {
     const uvCoord  = uv();
@@ -263,7 +303,6 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     const hD = texture(srcNode, vec2(uvCoord.x, uvCoord.y.sub(texel))).r;
     const hU = texture(srcNode, vec2(uvCoord.x, uvCoord.y.add(texel))).r;
 
-    // Material shed to lower neighbors (loss) and received from higher ones (gain)
     const lossL = max(float(0), currentH.sub(hL).sub(uThermalSlope)).mul(float(0.25));
     const lossR = max(float(0), currentH.sub(hR).sub(uThermalSlope)).mul(float(0.25));
     const lossD = max(float(0), currentH.sub(hD).sub(uThermalSlope)).mul(float(0.25));
@@ -276,27 +315,24 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     const totalDelta = gainL.add(gainR).add(gainD).add(gainU)
       .sub(lossL).sub(lossR).sub(lossD).sub(lossU);
 
-    const d       = length(uvCoord.sub(uBrushUV));
-    const falloff = max(float(0), float(1).sub(d.div(uRadius)));
+    const falloff  = getBrushFalloff(uvCoord);
     const brushAmt = pow(falloff, uFalloff).mul(edgeFade(uvCoord));
 
     return vec4(clamp(currentH.add(totalDelta.mul(brushAmt)), uClampMin, uClampMax), float(0), float(0), float(1));
   })();
   const thermalQuad = new QuadMesh(thermalMat);
 
-  // ── Ramp brush ────────────────────────────────────────────────────────────────
-  // Blends terrain toward a straight slope from uRampA to uRampB. Applied once
-  // on second click (not a drag stroke). uFalloff controls lateral blend hardness.
+  // ── Ramp brush ────────────────────────────────────────────────────────────
+  // Applied once on second click. Uses lateral distance from A→B segment rather
+  // than a brush-centered mask; mask does not apply to this tool.
   const rampMat = new THREE.MeshBasicNodeMaterial();
   rampMat.colorNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
 
-    // Sample height at both endpoints from the current terrain
     const hA = texture(srcNode, uRampA).r;
     const hB = texture(srcNode, uRampB).r;
 
-    // Project uvCoord onto A→B segment; manual dot product (no dot() import needed)
     const ABx = uRampB.x.sub(uRampA.x);
     const ABy = uRampB.y.sub(uRampA.y);
     const APx = uvCoord.x.sub(uRampA.x);
@@ -317,7 +353,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
   })();
   const rampQuad = new QuadMesh(rampMat);
 
-  // ── GPU copy (undo / redo snapshots) ────────────────────────────────────────
+  // ── GPU copy (undo / redo snapshots) ─────────────────────────────────────
   const copyMat = new THREE.MeshBasicNodeMaterial();
   copyMat.colorNode = Fn(() =>
     vec4(texture(srcNode, uv()).r, float(0), float(0), float(1)),
@@ -397,6 +433,16 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     _runPass(terraceQuad);
   }
 
+  function smudge(brushUVx, brushUVy) {
+    uBrushUV.value.set(brushUVx, brushUVy);
+    _runPass(smudgeQuad);
+  }
+
+  function contrast(brushUVx, brushUVy) {
+    uBrushUV.value.set(brushUVx, brushUVy);
+    _runPass(contrastQuad);
+  }
+
   const thermalConfig = { iterations: 5 };
 
   function thermal(brushUVx, brushUVy) {
@@ -410,7 +456,6 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     _runPass(rampQuad);
   }
 
-  /** Push a GPU snapshot before the first dab of a stroke (one undo step per drag). */
   function beginStroke() {
     disposeStack(redoStack);
     trimStack(undoStack);
@@ -437,7 +482,6 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     return true;
   }
 
-  /** Replace both ping-pong RTs from normalized height samples; clears undo history. */
   function replaceHeightData(heights) {
     const expected = HEIGHTMAP_SIZE * HEIGHTMAP_SIZE;
     if (heights.length !== expected) {
@@ -472,12 +516,16 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     flatten,
     noise,
     terrace,
+    smudge,
+    contrast,
     thermal,
     ramp,
     beginStroke,
     undo,
     redo,
     replaceHeightData,
+    maskNode,
+    uMaskRotation,
     uBrushUV,
     uRadius,
     uStrength,
@@ -488,6 +536,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode) {
     uTerraceSharpness,
     uNoiseScale,
     uNoiseOctaves,
+    uSmudgeDir,
     uThermalSlope,
     uRampWidth,
     thermalConfig,
