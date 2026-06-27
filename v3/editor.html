@@ -125,6 +125,7 @@
               <option value="view">View</option>
               <option value="sculpt">Sculpt</option>
               <option value="paint">Paint</option>
+              <option value="props">Props</option>
             </select>
           </div>
 
@@ -869,6 +870,322 @@
             </div>
 
         </div><!-- /#paint-panel -->
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- PROPS panel — shown only in props mode                     -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <div id="props-panel" style="display:none">
+
+          <!-- PRIMITIVES ----------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Primitives
+            </div>
+            <div class="section-body">
+              <div class="tool-grid" style="grid-template-columns:repeat(3,1fr)">
+                <button type="button" class="tool-btn" id="primbtn-cube">   <span>Cube</span></button>
+                <button type="button" class="tool-btn" id="primbtn-sphere"> <span>Sphere</span></button>
+                <button type="button" class="tool-btn" id="primbtn-cylinder"><span>Cylinder</span></button>
+                <button type="button" class="tool-btn" id="primbtn-plane">  <span>Plane</span></button>
+                <button type="button" class="tool-btn" id="primbtn-cone">   <span>Cone</span></button>
+                <button type="button" class="tool-btn" id="primbtn-torus">  <span>Torus</span></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- LIVE PROPS ------------------------------------------------ -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Live Props
+            </div>
+            <div class="section-body">
+              <div class="tool-grid" style="grid-template-columns:repeat(4,1fr)">
+                <button type="button" class="tool-btn" id="livebtn-flag"><span>Flag</span></button>
+                <button type="button" class="tool-btn" id="livebtn-coin"><span>Coin</span></button>
+                <button type="button" class="tool-btn" id="livebtn-heart"><span>Heart</span></button>
+                <button type="button" class="tool-btn" id="livebtn-key"><span>Key</span></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- SPLINE OBJECTS (v2 builders on v3 terrain) --------------- -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Spline Objects
+            </div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Type</span>
+                <select id="spline-type-select" class="prop-select" style="flex:1;min-width:0"></select>
+              </div>
+              <p class="mode-hint" style="margin:4px 0 2px">
+                Click terrain to place points · <kbd>Enter</kbd> commit · <kbd>Backspace</kbd> undo · <kbd>Esc</kbd> cancel
+              </p>
+              <div id="spline-status" style="font-size:11px;color:#888;padding:2px 0 4px">Not drawing</div>
+              <div style="display:flex;gap:4px">
+                <button type="button" class="action-btn" id="splinebtn-draw"   style="flex:1">Draw</button>
+                <button type="button" class="action-btn" id="splinebtn-commit" style="flex:1" disabled>Commit</button>
+                <button type="button" class="action-btn" id="splinebtn-cancel" style="flex:1" disabled>Cancel</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+                <button type="button" class="action-btn" id="splinebtn-undopt" style="flex:1" disabled>Undo point</button>
+                <label class="toggle-label" style="gap:4px;flex-shrink:0">
+                  <input type="checkbox" id="spline-closed" />
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  <span style="font-size:11px;color:#ccc">Closed</span>
+                </label>
+              </div>
+              <div id="spline-params" style="margin-top:6px"></div>
+              <div style="margin-top:6px">
+                <div style="font-size:10px;font-weight:600;color:#888;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">Placed</div>
+                <div id="spline-placed-list">
+                  <div class="prop-type-empty" id="spline-placed-empty">No objects placed yet.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ALL TYPES (active type selector) ------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header">Active Type</div>
+            <div class="section-body">
+              <div id="prop-type-list" class="prop-type-list">
+                <div class="prop-type-empty">Add a type above or load a GLB.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- LOAD GLB + loaded type management ----------------------- -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Loaded GLB Types
+            </div>
+            <div class="section-body">
+              <div id="prop-loaded-list" class="prop-type-list" style="margin-bottom:6px">
+                <div class="prop-type-empty" id="prop-loaded-empty">No GLBs loaded.</div>
+              </div>
+              <button type="button" class="action-btn" id="propbtn-load-glb" style="width:100%">Load GLB…</button>
+            </div>
+          </div>
+
+          <!-- TOOL ---------------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header">Tool</div>
+            <div class="section-body">
+              <div class="tool-grid">
+                <button id="proptool-place"   class="tool-btn active" type="button">
+                  <i data-lucide="mouse-pointer-2"></i><span>Place</span>
+                </button>
+                <button id="proptool-scatter" class="tool-btn" type="button">
+                  <i data-lucide="sprout"></i><span>Scatter</span>
+                </button>
+                <button id="proptool-erase"   class="tool-btn" type="button">
+                  <i data-lucide="eraser"></i><span>Erase</span>
+                </button>
+                <button id="proptool-select"  class="tool-btn" type="button">
+                  <i data-lucide="move"></i><span>Select</span>
+                </button>
+              </div>
+              <p id="props-gizmo-hint" class="mode-hint" style="display:none;margin-top:4px">
+                <kbd>W</kbd> Translate &nbsp;·&nbsp; <kbd>E</kbd> Rotate &nbsp;·&nbsp; <kbd>R</kbd> Scale<br>
+                <kbd>Del</kbd> Delete &nbsp;·&nbsp; <kbd>Ctrl+D</kbd> Duplicate
+              </p>
+            </div>
+          </div>
+
+          <!-- SCATTER OPTIONS ------------------------------------------ -->
+          <div class="inspector-section" id="props-scatter-opts">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Scatter
+            </div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Radius</span>
+                <div class="prop-value">
+                  <input type="range" id="prsl-radius" min="2" max="100" step="1" value="12" />
+                  <span class="prop-num" id="prlbl-radius">12m</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Count</span>
+                <div class="prop-value">
+                  <input type="range" id="prsl-count" min="1" max="30" step="1" value="5" />
+                  <span class="prop-num" id="prlbl-count">5</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Min sep.</span>
+                <div class="prop-value">
+                  <input type="range" id="prsl-minsep" min="1" max="30" step="1" value="3" />
+                  <span class="prop-num" id="prlbl-minsep">3m</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TRANSFORM OPTIONS --------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Transform
+            </div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Random Y rot.</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="prck-randrot" checked />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Align normal</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="prck-alignnormal" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Sink</span>
+                <div class="prop-value">
+                  <input type="range" id="prsl-sink" min="0" max="200" step="1" value="0" />
+                  <span class="prop-num" id="prlbl-sink">0cm</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Rand. scale</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="prck-randscale" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Scale min</span>
+                <div class="prop-value">
+                  <input type="range" id="prsl-scalemin" min="10" max="200" step="5" value="80" />
+                  <span class="prop-num" id="prlbl-scalemin">0.80</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Scale max</span>
+                <div class="prop-value">
+                  <input type="range" id="prsl-scalemax" min="10" max="200" step="5" value="120" />
+                  <span class="prop-num" id="prlbl-scalemax">1.20</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SELECTION INSPECTOR ------------------------------------- -->
+          <div class="inspector-section" id="props-select-insp" style="display:none">
+            <div class="section-header">Selection</div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Type</span>
+                <span class="insp-value" id="propsel-type">—</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Pos X</span>
+                <input type="number" class="prop-input" id="propsel-px" step="0.1" />
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Pos Y</span>
+                <input type="number" class="prop-input" id="propsel-py" step="0.1" />
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Pos Z</span>
+                <input type="number" class="prop-input" id="propsel-pz" step="0.1" />
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Rot Y</span>
+                <input type="number" class="prop-input" id="propsel-ry" step="1" />
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Scale</span>
+                <input type="number" class="prop-input" id="propsel-scale" step="0.01" min="0.01" />
+              </div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <button type="button" class="action-btn" id="propsel-delete" style="flex:1;color:#f66">Delete</button>
+                <button type="button" class="action-btn" id="propsel-dup"    style="flex:1">Duplicate</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- LIVE PROP PARAMS (shown when a live/procedural type is selected) -->
+          <div class="inspector-section" id="props-live-params" style="display:none">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Prop Params
+            </div>
+            <div class="section-body" id="props-live-params-body">
+              <!-- Filled dynamically by JS based on selected live prop's schema -->
+            </div>
+          </div>
+
+          <!-- LOD DISTANCES ------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              LOD Distances
+            </div>
+            <div class="section-body hidden">
+              <div class="prop-row">
+                <span class="prop-label">LOD0 → LOD1</span>
+                <div class="prop-value">
+                  <input type="range" id="prsl-lod0" min="10" max="300" step="5" value="60" />
+                  <span class="prop-num" id="prlbl-lod0">60m</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">LOD1 → LOD2</span>
+                <div class="prop-value">
+                  <input type="range" id="prsl-lod1" min="50" max="600" step="10" value="150" />
+                  <span class="prop-num" id="prlbl-lod1">150m</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Cull dist.</span>
+                <div class="prop-value">
+                  <input type="range" id="prsl-cull" min="100" max="1200" step="20" value="500" />
+                  <span class="prop-num" id="prlbl-cull">500m</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Cast shadow</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="prck-shadow" checked />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Footer -------------------------------------------------- -->
+          <div style="padding:6px 8px;display:flex;flex-direction:column;gap:4px">
+            <div class="prop-row">
+              <span class="prop-label">Total props</span>
+              <span class="insp-value" id="prop-total-count">0</span>
+            </div>
+            <div style="display:flex;gap:4px;margin-top:2px">
+              <button type="button" class="action-btn" id="propbtn-save" style="flex:1">Save props</button>
+              <button type="button" class="action-btn" id="propbtn-load" style="flex:1">Load props</button>
+            </div>
+            <button type="button" class="action-btn" id="propbtn-clear-all" style="color:#f66">Clear all props</button>
+          </div>
+
+        </div><!-- /#props-panel -->
 
         <!-- World (lighting, sky, sun — coming later) -->
         <div class="tab-content" id="tab-world">

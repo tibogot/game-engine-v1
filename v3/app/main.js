@@ -28,6 +28,14 @@ import {
   pickSplatmapFile,
 } from "../io/splatmapIO.js";
 import { SPLAT_RES } from "../terrain/splatMap.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { PropStore, PRIMITIVE_SHAPES } from "../tools/propStore.js";
+import { PropInstancer } from "../tools/propInstancer.js";
+import { PropSystem, PROP_TOOL } from "../tools/propSystem.js";
+import { LivePropManager } from "../tools/livePropManager.js";
+import { createFlag, createCoin, createHeart, createKey } from "../props/liveProps.js";
+import { SplineObjectSystem, OBJECTS as SPLINE_OBJECTS } from "../tools/splineObjectSystem.js";
+import { downloadProps, importPropsFromFile } from "../io/propsIO.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -214,6 +222,7 @@ async function main() {
   const playStopBar    = document.getElementById("play-stop-bar");
   const sculptPanel    = document.getElementById("sculpt-panel");
   const paintPanel     = document.getElementById("paint-panel");
+  const propsPanel     = document.getElementById("props-panel");
   const playStatPos    = document.getElementById("play-stat-pos");
   const playStatSpeed  = document.getElementById("play-stat-speed");
   const playStatGround = document.getElementById("play-stat-ground");
@@ -234,6 +243,7 @@ async function main() {
       playPanel.style.display = "none";
       syncSculptPanelVisibility();
       syncPaintPanelVisibility();
+      syncPropsPanelVisibility();
     },
   });
 
@@ -651,6 +661,10 @@ async function main() {
     paintPanel.style.display = (editorMode === "paint" && !playMode.active) ? "" : "none";
   }
 
+  function syncPropsPanelVisibility() {
+    propsPanel.style.display = (editorMode === "props" && !playMode.active) ? "" : "none";
+  }
+
   function setEditorMode(m) {
     editorMode = m;
     tbSculpt.classList.toggle("active", m === "sculpt");
@@ -661,13 +675,16 @@ async function main() {
       controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
     } else if (m === "paint") {
       controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
-      // Sync cursor radius to paint brush size
       sculpt.uRadius.value = paintState.brush.radius / WORLD_SIZE;
+    } else if (m === "props") {
+      uCursorUV.value.set(-2, -2);
+      controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
     } else {
       controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
     }
     syncSculptPanelVisibility();
     syncPaintPanelVisibility();
+    syncPropsPanelVisibility();
   }
 
   function enterPlay() {
@@ -679,6 +696,7 @@ async function main() {
     playPanel.style.display = "";
     sculptPanel.style.display = "none";
     paintPanel.style.display = "none";
+    propsPanel.style.display = "none";
     helpOverlay.classList.remove("visible");
     tbHelp.classList.remove("active");
   }
@@ -853,6 +871,19 @@ async function main() {
     return sampleHeightNormalized(u, v) * MAX_HEIGHT;
   }
 
+  const _normalVec = new THREE.Vector3();
+  function sampleTerrainNormal(wx, wz) {
+    const eps = WORLD_SIZE / HEIGHTMAP_SIZE;
+    const u   = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
+    const v   = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
+    const hR  = sampleHeightNormalized(u + eps / WORLD_SIZE, v) * MAX_HEIGHT;
+    const hL  = sampleHeightNormalized(u - eps / WORLD_SIZE, v) * MAX_HEIGHT;
+    const hF  = sampleHeightNormalized(u, v + eps / WORLD_SIZE) * MAX_HEIGHT;
+    const hB  = sampleHeightNormalized(u, v - eps / WORLD_SIZE) * MAX_HEIGHT;
+    _normalVec.set(hL - hR, 2 * eps, hB - hF).normalize();
+    return _normalVec;
+  }
+
   let isPainting = false;
   let lastPaintUV = null;
   const MAX_STAMPS_PER_FRAME  = 12;
@@ -1023,8 +1054,8 @@ async function main() {
   }
 
   window.addEventListener("keydown", e => {
-    if (e.code === "KeyV" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active
-        && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+    if (e.code === "KeyV" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
       setEditorMode("view"); return;
     }
     if (e.code === "KeyP" && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -1032,6 +1063,29 @@ async function main() {
       if (playMode.active) playMode.exit();
       else playMode.enter();
       return;
+    }
+    // Props mode shortcuts
+    if (editorMode === "props" && !playMode.active) {
+      if (splineSys.isDrafting) {
+        if (e.code === "Enter") { e.preventDefault(); splineSys.commit(); refreshSplinePlacedList(); return; }
+        if (e.code === "Escape") { e.preventDefault(); splineSys.cancelDraft(); return; }
+        if (e.code === "Backspace" || e.code === "Delete") { e.preventDefault(); splineSys.undoLastPoint(); return; }
+        return;
+      }
+      if (e.code === "Delete" || e.code === "Backspace") {
+        e.preventDefault();
+        propSys.deleteSelected();
+        refreshPropSelection();
+        propCountEl.textContent = propStore.totalCount;
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        propSys.duplicateSelected();
+        refreshPropSelection();
+        propCountEl.textContent = propStore.totalCount;
+        return;
+      }
     }
     if (e.ctrlKey || e.metaKey) {
       const key = e.key.toLowerCase();
@@ -1043,12 +1097,14 @@ async function main() {
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
         if (editorMode === "paint") paintSys.undo();
+        else if (editorMode === "props") propSys.undo();
         else if (sculpt.undo()) onHistoryChange();
         return;
       }
       if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
         if (editorMode === "paint") paintSys.redo();
+        else if (editorMode === "props") propSys.redo();
         else if (sculpt.redo()) onHistoryChange();
         return;
       }
@@ -1430,6 +1486,621 @@ async function main() {
   pbtnSaveSplat.addEventListener("click", () => saveSplatmap());
   pbtnLoadSplat.addEventListener("click", () => loadSplatmap());
 
+  // ── Props system ───────────────────────────────────────────────────────────
+  const propStore = new PropStore();
+  const propInstancer = new PropInstancer(scene, propStore);
+  const gltfLoader = new GLTFLoader();
+
+  // World-space hit on terrain surface for prop placement
+  const _propHitVec = new THREE.Vector3();
+  function getTerrainHitWorld(event) {
+    refreshMouse(event);
+    const uv = getUV();
+    if (!uv) return null;
+    const wx = uv.u * WORLD_SIZE - WORLD_SIZE / 2;
+    const wz = uv.v * WORLD_SIZE - WORLD_SIZE / 2;
+    return _propHitVec.set(wx, sampleTerrainHeight(uv.u, uv.v), wz);
+  }
+
+  // Live prop manager — handles animated THREE.Group props
+  const livePropManager = new LivePropManager(scene, propStore);
+  livePropManager.registerFactory("flag",  createFlag);
+  livePropManager.registerFactory("coin",  createCoin);
+  livePropManager.registerFactory("heart", createHeart);
+  livePropManager.registerFactory("key",   createKey);
+
+  // Register built-in live types in propStore so they appear in the type list
+  const _liveTypeDefaultParams = {
+    flag:  { windSpeed: 600, windIntensity: 250, poleHeight: 4, clothWidth: 1.5, clothHeight: 0.9, flagColor: "#dd2222" },
+    coin:  { spinSpeed: 2.0, bobSpeed: 1.8, bobAmp: 0.12 },
+    heart: { spinSpeed: 0.8, bobSpeed: 2.0, bobAmp: 0.15 },
+    key:   { spinSpeed: 1.5, bobSpeed: 1.2, bobAmp: 0.10 },
+  };
+
+  const propSys = new PropSystem(scene, propStore, propInstancer, getTerrainHitWorld, livePropManager);
+  propSys.sampleTerrainNormal = sampleTerrainNormal;
+
+  function getWorldHeight(wx, wz) {
+    const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
+    const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
+    return sampleTerrainHeight(u, v);
+  }
+  const splineSys = new SplineObjectSystem(scene, getWorldHeight);
+
+  // LOD config — driven by UI sliders
+  const propLodCfg = { lod0Distance: 60, lod1Distance: 150, fadeOutDistance: 500 };
+
+  // ── Props panel DOM refs ───────────────────────────────────────────────────
+  const propTypeList      = document.getElementById("prop-type-list");
+  const propCountEl       = document.getElementById("prop-total-count");
+  const propSelectInsp    = document.getElementById("props-select-insp");
+  const propSelType       = document.getElementById("propsel-type");
+  const propSelPx         = document.getElementById("propsel-px");
+  const propSelPy         = document.getElementById("propsel-py");
+  const propSelPz         = document.getElementById("propsel-pz");
+  const propSelRy         = document.getElementById("propsel-ry");
+  const propSelScale      = document.getElementById("propsel-scale");
+  const propSelDelete     = document.getElementById("propsel-delete");
+  const propSelDup        = document.getElementById("propsel-dup");
+  const prToolPlace       = document.getElementById("proptool-place");
+  const prToolScatter     = document.getElementById("proptool-scatter");
+  const prToolErase       = document.getElementById("proptool-erase");
+  const prToolSelect      = document.getElementById("proptool-select");
+  const prSlRadius        = document.getElementById("prsl-radius");
+  const prLblRadius       = document.getElementById("prlbl-radius");
+  const prSlCount         = document.getElementById("prsl-count");
+  const prLblCount        = document.getElementById("prlbl-count");
+  const prSlMinSep        = document.getElementById("prsl-minsep");
+  const prLblMinSep       = document.getElementById("prlbl-minsep");
+  const prCkRandRot       = document.getElementById("prck-randrot");
+  const prSlSink          = document.getElementById("prsl-sink");
+  const prLblSink         = document.getElementById("prlbl-sink");
+  const prCkRandScale     = document.getElementById("prck-randscale");
+  const prSlLod0          = document.getElementById("prsl-lod0");
+  const prLblLod0         = document.getElementById("prlbl-lod0");
+  const prSlLod1          = document.getElementById("prsl-lod1");
+  const prLblLod1         = document.getElementById("prlbl-lod1");
+  const prSlCull          = document.getElementById("prsl-cull");
+  const prLblCull         = document.getElementById("prlbl-cull");
+  const propBtnLoadGlb    = document.getElementById("propbtn-load-glb");
+  const propBtnSave       = document.getElementById("propbtn-save");
+  const propBtnLoad       = document.getElementById("propbtn-load");
+  const propBtnClearAll   = document.getElementById("propbtn-clear-all");
+  const propLoadedList    = document.getElementById("prop-loaded-list");
+  const propLoadedEmpty   = document.getElementById("prop-loaded-empty");
+  const propLiveParamsSec = document.getElementById("props-live-params");
+  const propLiveParamsBody= document.getElementById("props-live-params-body");
+  const propGizmoHint     = document.getElementById("props-gizmo-hint");
+  const prCkAlignNormal   = document.getElementById("prck-alignnormal");
+  const prSlScaleMin      = document.getElementById("prsl-scalemin");
+  const prLblScaleMin     = document.getElementById("prlbl-scalemin");
+  const prSlScaleMax      = document.getElementById("prsl-scalemax");
+  const prLblScaleMax     = document.getElementById("prlbl-scalemax");
+  const prCkShadow        = document.getElementById("prck-shadow");
+  const splineTypeSelect  = document.getElementById("spline-type-select");
+  const splineStatus      = document.getElementById("spline-status");
+  const splineBtnDraw     = document.getElementById("splinebtn-draw");
+  const splineBtnCommit   = document.getElementById("splinebtn-commit");
+  const splineBtnCancel   = document.getElementById("splinebtn-cancel");
+  const splineBtnUndoPt   = document.getElementById("splinebtn-undopt");
+  const splineClosed      = document.getElementById("spline-closed");
+  const splineParamsDiv   = document.getElementById("spline-params");
+  const splinePlacedList  = document.getElementById("spline-placed-list");
+  const splinePlacedEmpty = document.getElementById("spline-placed-empty");
+
+  function refreshPropTypeList() {
+    if (propStore.types.length === 0) {
+      propTypeList.innerHTML = '<div class="prop-type-empty">Add a type above or load a GLB.</div>';
+      return;
+    }
+    propTypeList.innerHTML = "";
+    propStore.types.forEach((type, idx) => {
+      const div = document.createElement("div");
+      div.className = "prop-type-item" + (propSys.activeTypeIdx === idx ? " active" : "");
+      const badge = type.live ? " [live]" : type.isPrimitive ? " [prim]" : "";
+      div.textContent = type.name + badge;
+      div.addEventListener("click", () => {
+        propSys.setActiveType(idx);
+        propTypeList.querySelectorAll(".prop-type-item").forEach((el, i) => el.classList.toggle("active", i === idx));
+      });
+      propTypeList.appendChild(div);
+    });
+  }
+
+  function refreshLoadedGlbList() {
+    const glbTypes = propStore.types
+      .map((t, i) => ({ t, i }))
+      .filter(({ t }) => !t.isPrimitive && !t.live);
+    propLoadedEmpty.style.display = glbTypes.length ? "none" : "";
+    // Remove old rows (keep the empty placeholder)
+    for (const child of [...propLoadedList.children]) {
+      if (child !== propLoadedEmpty) child.remove();
+    }
+    for (const { t, i } of glbTypes) {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;gap:4px;margin-bottom:3px";
+
+      const name = document.createElement("span");
+      name.textContent = t.name;
+      name.style.cssText = "flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+
+      const btnLod1 = document.createElement("button");
+      btnLod1.textContent = "LOD1";
+      btnLod1.className = "action-btn";
+      btnLod1.style.cssText = "padding:1px 5px;font-size:10px";
+      btnLod1.addEventListener("click", () => {
+        const inp = Object.assign(document.createElement("input"), { type: "file", accept: ".glb,.gltf" });
+        inp.onchange = () => {
+          if (!inp.files[0]) return;
+          const url = URL.createObjectURL(inp.files[0]);
+          gltfLoader.load(url, gltf => { URL.revokeObjectURL(url); propStore.registerTypeLod(i, 1, gltf.scene); propInstancer.onTypeRegistered(i); }, undefined, () => URL.revokeObjectURL(url));
+        };
+        inp.click();
+      });
+
+      const btnLod2 = document.createElement("button");
+      btnLod2.textContent = "LOD2";
+      btnLod2.className = "action-btn";
+      btnLod2.style.cssText = "padding:1px 5px;font-size:10px";
+      btnLod2.addEventListener("click", () => {
+        const inp = Object.assign(document.createElement("input"), { type: "file", accept: ".glb,.gltf" });
+        inp.onchange = () => {
+          if (!inp.files[0]) return;
+          const url = URL.createObjectURL(inp.files[0]);
+          gltfLoader.load(url, gltf => { URL.revokeObjectURL(url); propStore.registerTypeLod(i, 2, gltf.scene); propInstancer.onTypeRegistered(i); }, undefined, () => URL.revokeObjectURL(url));
+        };
+        inp.click();
+      });
+
+      const btnRm = document.createElement("button");
+      btnRm.textContent = "✕";
+      btnRm.className = "action-btn";
+      btnRm.style.cssText = "padding:1px 5px;font-size:10px;color:#f66";
+      btnRm.addEventListener("click", () => {
+        propInstancer.onTypeRemoved(i);
+        propStore.removeType(i);
+        refreshPropTypeList();
+        refreshLoadedGlbList();
+        propCountEl.textContent = propStore.totalCount;
+      });
+
+      row.appendChild(name);
+      row.appendChild(btnLod1);
+      row.appendChild(btnLod2);
+      row.appendChild(btnRm);
+      propLoadedList.appendChild(row);
+    }
+  }
+
+  // ── Spline Objects system wiring ─────────────────────────────────────────
+  // Populate type dropdown from v2 OBJECTS
+  for (const obj of SPLINE_OBJECTS) {
+    const opt = document.createElement("option");
+    opt.value = obj.id;
+    opt.textContent = obj.label + (obj.minPoints === 1 ? " (point)" : " (path)");
+    splineTypeSelect.appendChild(opt);
+  }
+
+  function refreshSplineUI() {
+    const drafting = splineSys.isDrafting;
+    const canCommit = splineSys.canCommit();
+    const pts = splineSys.draftPointCount;
+    const minPts = splineSys.activeMinPoints;
+
+    splineStatus.textContent = drafting
+      ? `${pts} point${pts !== 1 ? "s" : ""} placed (need ${minPts}+)`
+      : "Not drawing";
+    splineBtnDraw.disabled   = drafting;
+    splineBtnCommit.disabled = !canCommit;
+    splineBtnCancel.disabled = !drafting;
+    splineBtnUndoPt.disabled = !drafting || pts === 0;
+  }
+
+  function refreshSplinePlacedList() {
+    const rows = splinePlacedList.querySelectorAll(".spline-placed-row");
+    rows.forEach(r => r.remove());
+    splinePlacedEmpty.style.display = splineSys.objects.length ? "none" : "";
+    splineSys.objects.forEach((entry, idx) => {
+      const row = document.createElement("div");
+      row.className = "spline-placed-row";
+      row.style.cssText = "display:flex;align-items:center;gap:4px;margin-bottom:3px";
+      const name = document.createElement("span");
+      name.textContent = entry.label;
+      name.style.cssText = "flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+      const btnRm = document.createElement("button");
+      btnRm.textContent = "✕";
+      btnRm.className = "action-btn";
+      btnRm.style.cssText = "padding:1px 6px;font-size:10px;color:#f66";
+      btnRm.addEventListener("click", () => {
+        splineSys.removeObject(idx);
+        refreshSplinePlacedList();
+      });
+      row.appendChild(name);
+      row.appendChild(btnRm);
+      splinePlacedList.appendChild(row);
+    });
+  }
+
+  function buildSplineParamsUI(objDef) {
+    splineParamsDiv.innerHTML = "";
+    if (!objDef?.schema) return;
+    for (const field of objDef.schema) {
+      if (field.type === "sep") {
+        const hr = document.createElement("hr");
+        hr.style.cssText = "border:none;border-top:1px solid #333;margin:4px 0";
+        splineParamsDiv.appendChild(hr);
+        continue;
+      }
+      if (field.type === "file") continue; // skip file inputs (texture loader — future)
+      const row = document.createElement("div");
+      row.className = "prop-row";
+      const label = document.createElement("span");
+      label.className = "prop-label";
+      label.textContent = field.label;
+      row.appendChild(label);
+      const val = document.createElement("div");
+      val.className = "prop-value";
+      if (field.type === "color") {
+        const cur = splineSys.activeParams[field.key] ?? splineSys.activeObjDef?.defaults?.[field.key] ?? "#ffffff";
+        const inp = Object.assign(document.createElement("input"), { type: "color", value: cur });
+        inp.style.cssText = "width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none";
+        inp.addEventListener("input", () => splineSys.setParam(field.key, inp.value));
+        val.appendChild(inp);
+      } else if (field.type === "toggle") {
+        const cur = splineSys.activeParams[field.key] ?? splineSys.activeObjDef?.defaults?.[field.key] ?? false;
+        const lbl = document.createElement("label");
+        lbl.className = "toggle-label";
+        const inp = Object.assign(document.createElement("input"), { type: "checkbox", checked: cur });
+        inp.addEventListener("change", () => splineSys.setParam(field.key, inp.checked));
+        const track = document.createElement("span"); track.className = "toggle-track";
+        const thumb = document.createElement("span"); thumb.className = "toggle-thumb";
+        track.appendChild(thumb); lbl.appendChild(inp); lbl.appendChild(track);
+        val.appendChild(lbl);
+      } else if (field.type === "select") {
+        const cur = splineSys.activeParams[field.key] ?? splineSys.activeObjDef?.defaults?.[field.key];
+        const sel = document.createElement("select");
+        sel.className = "prop-select";
+        for (const [v, l] of Object.entries(field.options ?? {})) {
+          const opt = Object.assign(document.createElement("option"), { value: v, textContent: l, selected: v === String(cur) });
+          sel.appendChild(opt);
+        }
+        sel.addEventListener("change", () => splineSys.setParam(field.key, sel.value));
+        val.appendChild(sel);
+      } else {
+        const cur = splineSys.activeParams[field.key] ?? splineSys.activeObjDef?.defaults?.[field.key] ?? field.min;
+        const step = field.step ?? 1;
+        const inp = Object.assign(document.createElement("input"), { type: "range", min: field.min, max: field.max, step, value: cur });
+        const lbl = document.createElement("span");
+        lbl.className = "prop-num";
+        lbl.textContent = Number(cur).toFixed(step < 1 ? 2 : 0);
+        inp.addEventListener("input", () => {
+          const v = Number(inp.value);
+          lbl.textContent = v.toFixed(step < 1 ? 2 : 0);
+          splineSys.setParam(field.key, v);
+        });
+        val.appendChild(inp); val.appendChild(lbl);
+      }
+      row.appendChild(val);
+      splineParamsDiv.appendChild(row);
+    }
+  }
+
+  // Init type selector state
+  if (SPLINE_OBJECTS.length) {
+    splineSys.setActiveType(SPLINE_OBJECTS[0].id);
+    buildSplineParamsUI(SPLINE_OBJECTS[0]);
+  }
+
+  splineSys.onChange = () => { refreshSplineUI(); refreshSplinePlacedList(); };
+  refreshSplineUI();
+
+  splineTypeSelect.addEventListener("change", () => {
+    splineSys.setActiveType(splineTypeSelect.value);
+    buildSplineParamsUI(splineSys.activeObjDef);
+    refreshSplineUI();
+  });
+
+  splineBtnDraw.addEventListener("click", () => { splineSys.startDraft(); });
+  splineBtnCommit.addEventListener("click", () => {
+    splineSys.commit();
+    refreshSplinePlacedList();
+  });
+  splineBtnCancel.addEventListener("click", () => { splineSys.cancelDraft(); });
+  splineBtnUndoPt.addEventListener("click", () => { splineSys.undoLastPoint(); });
+  splineClosed.addEventListener("change", () => {
+    splineSys.draftClosed = splineClosed.checked;
+    if (splineSys.draftPointCount >= splineSys.activeMinPoints) splineSys.setParam("_closed", splineClosed.checked);
+  });
+
+  // Primitive buttons
+  for (const shape of PRIMITIVE_SHAPES) {
+    const btn = document.getElementById(`primbtn-${shape.toLowerCase()}`);
+    if (!btn) continue;
+    btn.addEventListener("click", () => {
+      const existing = propStore.types.findIndex(t => t.isPrimitive && t.primShape === shape);
+      if (existing >= 0) { propSys.setActiveType(existing); refreshPropTypeList(); return; }
+      const idx = propStore.registerPrimitive(shape);
+      if (idx < 0) return;
+      propInstancer.onTypeRegistered(idx);
+      refreshPropTypeList();
+      propSys.setActiveType(idx);
+    });
+  }
+
+  // Live prop buttons
+  const LIVE_BTN_MAP = [
+    { id: "livebtn-flag",  name: "Flag",  factoryId: "flag"  },
+    { id: "livebtn-coin",  name: "Coin",  factoryId: "coin"  },
+    { id: "livebtn-heart", name: "Heart", factoryId: "heart" },
+    { id: "livebtn-key",   name: "Key",   factoryId: "key"   },
+  ];
+  for (const { id, name, factoryId } of LIVE_BTN_MAP) {
+    const btn = document.getElementById(id);
+    if (!btn) continue;
+    btn.addEventListener("click", () => {
+      const existing = propStore.types.findIndex(t => t.live && t.factoryId === factoryId);
+      if (existing >= 0) { propSys.setActiveType(existing); refreshPropTypeList(); return; }
+      const idx = propStore.registerLiveType(name, factoryId, _liveTypeDefaultParams[factoryId] ?? {});
+      propInstancer.onTypeRegistered(idx);
+      refreshPropTypeList();
+      propSys.setActiveType(idx);
+    });
+  }
+
+  function refreshPropSelection() {
+    const idx  = propInstancer.selectedIdx;
+    const inst = propStore.instances[idx];
+    if (!inst || !propInstancer.hasSelection) {
+      propSelectInsp.style.display = "none";
+      propLiveParamsSec.style.display = "none";
+      return;
+    }
+    propSelectInsp.style.display = "";
+    const type = propStore.types[inst.typeIdx];
+    propSelType.textContent   = type?.name ?? "?";
+    propSelPx.value           = inst.px.toFixed(2);
+    propSelPy.value           = inst.py.toFixed(2);
+    propSelPz.value           = inst.pz.toFixed(2);
+    propSelRy.value           = inst.ry.toFixed(1);
+    propSelScale.value        = inst.sx.toFixed(3);
+
+    // Live prop params panel
+    if (type?.live && inst.liveParams) {
+      propLiveParamsSec.style.display = "";
+      _buildLiveParamsUI(idx, inst, type);
+    } else {
+      propLiveParamsSec.style.display = "none";
+    }
+  }
+
+  function _buildLiveParamsUI(storeIdx, inst, type) {
+    propLiveParamsBody.innerHTML = "";
+    const schema = _defaultLiveSchema(type.factoryId);
+    for (const field of schema) {
+      const row = document.createElement("div");
+      row.className = "prop-row";
+      const label = document.createElement("span");
+      label.className = "prop-label";
+      label.textContent = field.label;
+      row.appendChild(label);
+      if (field.type === "color") {
+        const inp = Object.assign(document.createElement("input"), { type: "color", value: inst.liveParams[field.key] ?? "#ffffff" });
+        inp.style.cssText = "width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none";
+        inp.addEventListener("input", () => { livePropManager.setParam(storeIdx, field.key, inp.value); });
+        const val = document.createElement("div");
+        val.className = "prop-value";
+        val.appendChild(inp);
+        row.appendChild(val);
+      } else {
+        const cur  = inst.liveParams[field.key] ?? field.min;
+        const inp  = Object.assign(document.createElement("input"), { type: "range", min: field.min, max: field.max, step: field.step ?? 1, value: cur });
+        const lbl  = document.createElement("span");
+        lbl.className = "prop-num";
+        lbl.textContent = Number(cur).toFixed(field.step < 1 ? 2 : 0);
+        inp.addEventListener("input", () => {
+          const v = Number(inp.value);
+          lbl.textContent = v.toFixed(field.step < 1 ? 2 : 0);
+          livePropManager.setParam(storeIdx, field.key, v);
+        });
+        const val = document.createElement("div");
+        val.className = "prop-value";
+        val.appendChild(inp);
+        val.appendChild(lbl);
+        row.appendChild(val);
+      }
+      propLiveParamsBody.appendChild(row);
+    }
+  }
+
+  function _defaultLiveSchema(factoryId) {
+    const schemas = {
+      flag:  [
+        { type: "slider", key: "windSpeed",     label: "Wind speed",  min: 0, max: 2000, step: 50 },
+        { type: "slider", key: "windIntensity",  label: "Wind str.",   min: 0, max: 800,  step: 10 },
+        { type: "color",  key: "flagColor",      label: "Flag color" },
+      ],
+      coin:  [{ type: "slider", key: "spinSpeed", label: "Spin speed", min: 0, max: 10, step: 0.1 }],
+      heart: [{ type: "slider", key: "spinSpeed", label: "Spin speed", min: 0, max: 10, step: 0.1 }],
+      key:   [{ type: "slider", key: "spinSpeed", label: "Spin speed", min: 0, max: 10, step: 0.1 }],
+    };
+    return schemas[factoryId] ?? [];
+  }
+
+  async function loadGltfAsType(file) {
+    const url    = URL.createObjectURL(file);
+    const name   = file.name.replace(/\.[^.]+$/, "");
+    return new Promise((resolve, reject) => {
+      gltfLoader.load(url, (gltf) => {
+        URL.revokeObjectURL(url);
+        const idx = propStore.registerType(gltf.scene, name);
+        if (idx < 0) { reject(new Error("No meshes in GLTF")); return; }
+        propInstancer.onTypeRegistered(idx);
+        refreshPropTypeList();
+        refreshLoadedGlbList();
+        propSys.setActiveType(idx);
+        resolve(idx);
+      }, undefined, (err) => { URL.revokeObjectURL(url); reject(err); });
+    });
+  }
+
+  propBtnLoadGlb.addEventListener("click", () => {
+    const inp = Object.assign(document.createElement("input"), { type: "file", accept: ".glb,.gltf", multiple: true });
+    inp.onchange = async () => {
+      for (const file of inp.files) {
+        try { await loadGltfAsType(file); } catch (err) { console.error("GLB load failed:", err); }
+      }
+    };
+    inp.click();
+  });
+
+  // Drag-and-drop GLBs onto the type list
+  propTypeList.addEventListener("dragover", e => e.preventDefault());
+  propTypeList.addEventListener("drop", async e => {
+    e.preventDefault();
+    for (const file of e.dataTransfer.files) {
+      if (file.name.match(/\.(glb|gltf)$/i)) {
+        try { await loadGltfAsType(file); } catch (err) { console.error("GLB load failed:", err); }
+      }
+    }
+  });
+
+  // Tool buttons
+  function setActivePropTool(tool) {
+    propSys.setTool(tool);
+    prToolPlace.classList.toggle("active",   tool === PROP_TOOL.PLACE);
+    prToolScatter.classList.toggle("active", tool === PROP_TOOL.SCATTER);
+    prToolErase.classList.toggle("active",   tool === PROP_TOOL.ERASE);
+    prToolSelect.classList.toggle("active",  tool === PROP_TOOL.SELECT);
+    propSelectInsp.style.display = "none";
+    propLiveParamsSec.style.display = "none";
+    if (propGizmoHint) propGizmoHint.style.display = tool === PROP_TOOL.SELECT ? "" : "none";
+  }
+  prToolPlace.addEventListener("click",   () => setActivePropTool(PROP_TOOL.PLACE));
+  prToolScatter.addEventListener("click", () => setActivePropTool(PROP_TOOL.SCATTER));
+  prToolErase.addEventListener("click",   () => setActivePropTool(PROP_TOOL.ERASE));
+  prToolSelect.addEventListener("click",  () => setActivePropTool(PROP_TOOL.SELECT));
+
+  // Scatter options
+  prSlRadius.addEventListener("input", () => {
+    propSys.scatterRadius = Number(prSlRadius.value);
+    prLblRadius.textContent = prSlRadius.value + "m";
+  });
+  prSlCount.addEventListener("input", () => {
+    propSys.scatterCount = Number(prSlCount.value);
+    prLblCount.textContent = prSlCount.value;
+  });
+  prSlMinSep.addEventListener("input", () => {
+    propSys.scatterMinSep = Number(prSlMinSep.value);
+    prLblMinSep.textContent = prSlMinSep.value + "m";
+  });
+
+  // Transform options
+  prCkRandRot.addEventListener("change", () => { propSys.randomYRot = prCkRandRot.checked; });
+  prCkAlignNormal?.addEventListener("change", () => { propSys.alignToNormal = prCkAlignNormal.checked; });
+  prSlSink.addEventListener("input", () => {
+    propSys.sinkAmount = Number(prSlSink.value) / 100;
+    prLblSink.textContent = prSlSink.value + "cm";
+  });
+  prCkRandScale.addEventListener("change", () => { propSys.randomScale = prCkRandScale.checked; });
+  prSlScaleMin?.addEventListener("input", () => {
+    propSys.scaleMin = Number(prSlScaleMin.value) / 100;
+    prLblScaleMin.textContent = propSys.scaleMin.toFixed(2);
+  });
+  prSlScaleMax?.addEventListener("input", () => {
+    propSys.scaleMax = Number(prSlScaleMax.value) / 100;
+    prLblScaleMax.textContent = propSys.scaleMax.toFixed(2);
+  });
+  prCkShadow?.addEventListener("change", () => { propInstancer.setCastShadow(prCkShadow.checked); });
+
+  // LOD distances
+  prSlLod0.addEventListener("input", () => {
+    propLodCfg.lod0Distance = Number(prSlLod0.value);
+    prLblLod0.textContent = prSlLod0.value + "m";
+  });
+  prSlLod1.addEventListener("input", () => {
+    propLodCfg.lod1Distance = Number(prSlLod1.value);
+    prLblLod1.textContent = prSlLod1.value + "m";
+  });
+  prSlCull.addEventListener("input", () => {
+    propLodCfg.fadeOutDistance = Number(prSlCull.value);
+    prLblCull.textContent = prSlCull.value + "m";
+  });
+
+  // Selection inspector
+  function _applySelectionEdit() {
+    const idx  = propInstancer.selectedIdx;
+    const inst = propStore.instances[idx];
+    if (!inst) return;
+    const scale = parseFloat(propSelScale.value) || 1;
+    propStore.updateInstance(idx, {
+      px: parseFloat(propSelPx.value)  || 0,
+      py: parseFloat(propSelPy.value)  || 0,
+      pz: parseFloat(propSelPz.value)  || 0,
+      ry: parseFloat(propSelRy.value)  || 0,
+      sx: scale, sy: scale, sz: scale,
+    });
+    propInstancer.select(idx);
+  }
+  for (const el of [propSelPx, propSelPy, propSelPz, propSelRy, propSelScale]) {
+    el.addEventListener("change", _applySelectionEdit);
+  }
+  propSelDelete.addEventListener("click", () => {
+    propSys.deleteSelected();
+    refreshPropSelection();
+    propCountEl.textContent = propStore.totalCount;
+  });
+  propSelDup.addEventListener("click", () => {
+    propSys.duplicateSelected();
+    refreshPropSelection();
+    propCountEl.textContent = propStore.totalCount;
+  });
+
+  // Save / Load / Clear
+  propBtnSave.addEventListener("click", () => downloadProps(propStore));
+  propBtnLoad.addEventListener("click", () => {
+    const inp = Object.assign(document.createElement("input"), { type: "file", accept: ".v3props" });
+    inp.onchange = async () => {
+      if (!inp.files[0]) return;
+      const nameToIdx = Object.fromEntries(propStore.types.map((t, i) => [t.name, i]));
+      await importPropsFromFile(inp.files[0], propStore, nameToIdx);
+      propCountEl.textContent = propStore.totalCount;
+    };
+    inp.click();
+  });
+  propBtnClearAll.addEventListener("click", () => {
+    if (!confirm("Clear all props?")) return;
+    propStore.clear();
+    propInstancer.clearSelection();
+    refreshPropSelection();
+    propCountEl.textContent = 0;
+  });
+
+  // ── Props mode mouse events ────────────────────────────────────────────────
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "props") return;
+    propSys.onMouseMove(e, camera);
+    propCountEl.textContent = propStore.totalCount;
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "props") return;
+    if (splineSys.isDrafting && e.button === 0) {
+      const hit = getTerrainHitWorld(e);
+      if (hit) splineSys.addPoint(hit.x, hit.z);
+      return;
+    }
+    propSys.onMouseDown(e, camera);
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (editorMode !== "props") return;
+    propSys.onMouseUp();
+    if (propSys.activeTool === PROP_TOOL.SELECT) {
+      refreshPropSelection();
+    }
+    propCountEl.textContent = propStore.totalCount;
+  });
+
   // ── Paint mode mouse events ────────────────────────────────────────────────
   renderer.domElement.addEventListener("mousemove", e => {
     if (playMode.active || editorMode !== "paint") return;
@@ -1527,6 +2198,10 @@ async function main() {
       lod.update(controls.target);
       controls.update();
     }
+
+    propInstancer.update(camera, propLodCfg);
+    livePropManager.update(dt);
+    splineSys.update(dt);
 
     if (csm?.mainFrustum) csm.updateFrustums();
     renderer.render(scene, camera);

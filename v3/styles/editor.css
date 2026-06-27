@@ -851,6 +851,44 @@ html, body {
   z-index: 200;
 }
 #play-hint.visible { display: block; }
+
+/* ── Props panel ─────────────────────────────────────────────────────────── */
+.prop-type-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 36px;
+  max-height: 140px;
+  overflow-y: auto;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+}
+
+.prop-type-empty {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+  padding: 10px 4px;
+  line-height: 1.5;
+}
+
+.prop-type-item {
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid transparent;
+}
+.prop-type-item:hover { background: var(--bg-hover); }
+.prop-type-item.active {
+  background: var(--bg-selected);
+  border-color: var(--accent);
+  color: var(--text-bright);
+}
 #play-hint kbd {
   display: inline-block;
   min-width: 1.4em;
