@@ -17,7 +17,7 @@ import * as THREE from "three";
 import { stochasticSampleArray } from "../../v2/core/legacy/stochasticTex.js";
 import {
   Fn, float, int, vec2, vec3,
-  texture, mix, max, clamp, sqrt, uniform, step,
+  texture, mix, max, clamp, sqrt, uniform, step, normalize,
   positionWorld,
 } from "three/tsl";
 import { WORLD_SIZE } from "./heightmapTexture.js";
@@ -136,10 +136,25 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
     return clamp(result, float(0.04), float(1));
   }
 
-  function blendNormalStrength(baseStr) {
-    let result = baseStr.mul(nw[0]);
-    for (let i = 0; i < NUM_LAYERS; i++) result = result.add(layerSlots[i].uNormalStr.mul(nw[i+1]));
-    return result;
+  /**
+   * Decode per-layer tangent-space normals from ORM.ba and blend with splatmap weights.
+   * Returns a world-space normalized direction — caller transforms to view space.
+   * Terrain TBN: T=(1,0,0)  B=(0,0,1)  N=geomWorldNormal  (XZ-plane world UV mapping).
+   */
+  function blendNormal(geomWorldNormal) {
+    let accumN = geomWorldNormal.mul(nw[0]);
+    for (let i = 0; i < NUM_LAYERS; i++) {
+      const orm = layerOrms[i];
+      const nx  = orm.b.mul(float(2.0)).sub(float(1.0));
+      const ny  = orm.a.mul(float(2.0)).sub(float(1.0));
+      const nz  = sqrt(max(float(0.0), float(1.0).sub(nx.mul(nx)).sub(ny.mul(ny))));
+      // TBN transform: T*nx + B*ny + N*nz  →  (nx, 0, ny) + geomN*nz
+      const worldN = normalize(vec3(nx, float(0), ny).add(geomWorldNormal.mul(nz)));
+      // Lerp between pure geometric normal and normal-mapped based on per-layer strength
+      const layerN = mix(geomWorldNormal, worldN, layerSlots[i].uNormalStr);
+      accumN = accumN.add(layerN.mul(nw[i + 1]));
+    }
+    return normalize(accumN);
   }
 
   function blendMeadow(col, meadowFn) {
@@ -152,7 +167,7 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
     uHeightContrast,
     blendColor,
     blendRoughness,
-    blendNormalStrength,
+    blendNormal,
     blendMeadow,
   };
 }

@@ -241,7 +241,9 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   const hUp = texture(heightTexNode, vec2(hmU, hmV.add(texel))).r;
   const flatScale   = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
   const worldNormal = normalize(vec3(hL.sub(hR), flatScale, hD.sub(hUp)));
-  mat.normalNode = normalize(mul(cameraViewMatrix, vec4(worldNormal, 0)).xyz);
+  const blendedWorldN = splatOverlay ? splatOverlay.blendNormal(worldNormal) : worldNormal;
+  mat.normalNode = normalize(mul(cameraViewMatrix, vec4(blendedWorldN, 0)).xyz);
+  if (splatOverlay) mat.roughnessNode = splatOverlay.blendRoughness(float(0.95));
 
   // Cursor ring (boundary) + mask projection (filled shape preview)
   const d    = length(hmUV.sub(uCursorUV));
