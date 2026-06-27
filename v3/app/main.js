@@ -16,6 +16,18 @@ import { initEditorShell } from "../ui/editorShell.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
 import { createPlayMode, LOD_SNAP } from "../play/playMode.js";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
+import { createHumanCharacter } from "../play/humanCharacter.js";
+import { SplatMap } from "../terrain/splatMap.js";
+import { createSplatOverlay } from "../terrain/splatOverlayTsl.js";
+import { TextureLibrary } from "../terrain/textureLibrary.js";
+import { PaintSystem } from "../tools/paintSystem.js";
+import { BrushMask } from "../../v2/core/paint/brushMask.js";
+import {
+  encodeSplatmapFile,
+  decodeSplatmapFile,
+  pickSplatmapFile,
+} from "../io/splatmapIO.js";
+import { SPLAT_RES } from "../terrain/splatMap.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -178,26 +190,30 @@ async function main() {
   // sculptBrush uploads the CPU heightmap to its RT and sets heightTexNode.value.
   const sculpt = createSculptBrush(renderer, initialTex, heightTexNode, defaultMaskTex);
 
+  // ── Paint system (splatmap + texture library + overlay) ───────────────────
+  const splatMap   = new SplatMap();
+  const textureLib = new TextureLibrary();
+  const splatOverlay = createSplatOverlay(
+    textureLib.getLayerUniforms(),
+    textureLib.albedoArrayTex,
+    textureLib.ormArrayTex,
+    splatMap.tex,
+  );
+
   // LOD meshes share the same heightTexNode, cursor uniforms, brush mask, and rotation.
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation);
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay);
   scene.add(lod.group);
 
   sculpt.replaceHeightData(buildProceduralHeightmap(genParams));
 
-  // ── Capsule preview mesh ───────────────────────────────────────────────────
-  const capsuleMesh = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.4, 1.2, 4, 8),
-    new THREE.MeshLambertMaterial({ color: 0x4a9eff }),
-  );
-  capsuleMesh.visible = false;
-  capsuleMesh.castShadow = true;
-  capsuleMesh.receiveShadow = true;
-  scene.add(capsuleMesh);
+  // ── Human character ────────────────────────────────────────────────────────
+  const character = createHumanCharacter(scene, renderer);
 
   // ── Play mode ──────────────────────────────────────────────────────────────
   const playPanel      = document.getElementById("play-panel");
   const playStopBar    = document.getElementById("play-stop-bar");
   const sculptPanel    = document.getElementById("sculpt-panel");
+  const paintPanel     = document.getElementById("paint-panel");
   const playStatPos    = document.getElementById("play-stat-pos");
   const playStatSpeed  = document.getElementById("play-stat-speed");
   const playStatGround = document.getElementById("play-stat-ground");
@@ -208,7 +224,7 @@ async function main() {
     controls,
     sampleTerrainHeight: (u, v) => sampleTerrainHeight(u, v),
     uCursorUV,
-    capsuleMesh,
+    character,
     onStartWalking: () => { playHint.classList.add("visible"); },
     onEnterMenu:    () => { playHint.classList.remove("visible"); },
     onExit: () => {
@@ -217,6 +233,7 @@ async function main() {
       playHint.classList.remove("visible");
       playPanel.style.display = "none";
       syncSculptPanelVisibility();
+      syncPaintPanelVisibility();
     },
   });
 
@@ -298,6 +315,71 @@ async function main() {
   const lblGenOffsetZ = document.getElementById("lbl-gen-offsetZ");
   const btnGenerate   = document.getElementById("btn-generate");
   const btnRandomSeed = document.getElementById("btn-random-seed");
+
+  // ── Paint panel DOM refs ───────────────────────────────────────────────────
+  const layerCardGrid  = document.getElementById("layer-card-grid");
+  const pslRadius      = document.getElementById("psl-radius");
+  const plblRadius     = document.getElementById("plbl-radius");
+  const pslStrength    = document.getElementById("psl-strength");
+  const plblStrength   = document.getElementById("plbl-strength");
+  const pslFalloff     = document.getElementById("psl-falloff");
+  const plblFalloff    = document.getElementById("plbl-falloff");
+  const pslSpacing     = document.getElementById("psl-spacing");
+  const plblSpacing    = document.getElementById("plbl-spacing");
+  const pslOpacity     = document.getElementById("psl-opacity");
+  const plblOpacity    = document.getElementById("plbl-opacity");
+  const pslSolo        = document.getElementById("psl-solo");
+  const pslHBlend      = document.getElementById("psl-hblend");
+  const plblHBlend     = document.getElementById("plbl-hblend");
+  const pslHContrast   = document.getElementById("psl-hcontrast");
+  const plblHContrast  = document.getElementById("plbl-hcontrast");
+  const pslNoise       = document.getElementById("psl-noise");
+  const plblNoise      = document.getElementById("plbl-noise");
+  const pslNScale      = document.getElementById("psl-nscale");
+  const plblNScale     = document.getElementById("plbl-nscale");
+  const pslNOct        = document.getElementById("psl-noct");
+  const plblNOct       = document.getElementById("plbl-noct");
+  const pckNEdge       = document.getElementById("pck-nedge");
+  const pmaskPreview   = document.getElementById("pmask-preview");
+  const pmaskChips     = document.getElementById("pmask-chips");
+  const pbtnMaskPng    = document.getElementById("pbtn-mask-png");
+  const pslMaskRot     = document.getElementById("psl-maskrot");
+  const plblMaskRot    = document.getElementById("plbl-maskrot");
+  const pckMaskRand    = document.getElementById("pck-maskrand");
+  const pckMaskFollow  = document.getElementById("pck-maskfollow");
+  const texlibTabsEl   = document.getElementById("texlib-tabs");
+  const texlibNameEl   = document.getElementById("texlib-name");
+  const pbtnFill          = document.getElementById("pbtn-fill");
+  const pbtnClear         = document.getElementById("pbtn-clear");
+  const pbtnSaveSplat     = document.getElementById("pbtn-save-splat");
+  const pbtnLoadSplat     = document.getElementById("pbtn-load-splat");
+  const pbtnAutoGenerate  = document.getElementById("pbtn-auto-generate");
+  const tautoEnabled      = document.getElementById("tauto-enabled");
+  const tautoHmin         = document.getElementById("tauto-hmin");
+  const tautoHmax         = document.getElementById("tauto-hmax");
+  const tautoSmin         = document.getElementById("tauto-smin");
+  const tautoSmax         = document.getElementById("tauto-smax");
+  const tautoBlend        = document.getElementById("tauto-blend");
+  const tautoStrength     = document.getElementById("tauto-strength");
+  const tautoLblHmin      = document.getElementById("tauto-lbl-hmin");
+  const tautoLblHmax      = document.getElementById("tauto-lbl-hmax");
+  const tautoLblSmin      = document.getElementById("tauto-lbl-smin");
+  const tautoLblSmax      = document.getElementById("tauto-lbl-smax");
+  const tautoLblBlend     = document.getElementById("tauto-lbl-blend");
+  const tautoLblStrength  = document.getElementById("tauto-lbl-strength");
+
+  // ── Paint state + system ───────────────────────────────────────────────────
+  const paintState = {
+    activeLayer: 1,
+    brushOpacity: 1.0,
+    brush: { radius: 80, strength: 0.50, falloff: 2.0, spacingFactor: 0.10 },
+    noiseMask: 0.0, noiseScale: 3.0, noiseOctaves: 3, noiseEdgeOnly: false,
+    maskRotation: 0, maskRandomRotation: false, maskFollowStroke: false,
+  };
+  const paintBrushMask = new BrushMask();
+  paintBrushMask.generateBuiltin("soft");
+  const paintSys = new PaintSystem({ paintState, splatMap, brushMask: paintBrushMask });
+  let   texlibActiveSlot = 0;
 
   let stickyMode  = "raise";
   let stickyStamp = "smooth";
@@ -565,6 +647,10 @@ async function main() {
     sculptPanel.style.display = (editorMode === "sculpt" && !playMode.active) ? "" : "none";
   }
 
+  function syncPaintPanelVisibility() {
+    paintPanel.style.display = (editorMode === "paint" && !playMode.active) ? "" : "none";
+  }
+
   function setEditorMode(m) {
     editorMode = m;
     tbSculpt.classList.toggle("active", m === "sculpt");
@@ -573,10 +659,15 @@ async function main() {
       uCursorUV.value.set(-2, -2);
       cancelStroke();
       controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+    } else if (m === "paint") {
+      controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+      // Sync cursor radius to paint brush size
+      sculpt.uRadius.value = paintState.brush.radius / WORLD_SIZE;
     } else {
       controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
     }
     syncSculptPanelVisibility();
+    syncPaintPanelVisibility();
   }
 
   function enterPlay() {
@@ -587,6 +678,7 @@ async function main() {
     playStopBar.classList.add("visible");
     playPanel.style.display = "";
     sculptPanel.style.display = "none";
+    paintPanel.style.display = "none";
     helpOverlay.classList.remove("visible");
     tbHelp.classList.remove("active");
   }
@@ -950,16 +1042,445 @@ async function main() {
       }
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
-        if (sculpt.undo()) onHistoryChange();
+        if (editorMode === "paint") paintSys.undo();
+        else if (sculpt.undo()) onHistoryChange();
         return;
       }
       if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
-        if (sculpt.redo()) onHistoryChange();
+        if (editorMode === "paint") paintSys.redo();
+        else if (sculpt.redo()) onHistoryChange();
         return;
       }
     }
   });
+
+  // Section collapse is handled by editorShell.initEditorShell() via classList.toggle("hidden").
+
+  // ── Paint panel wiring ────────────────────────────────────────────────────
+
+  function drawPaintMaskPreview() {
+    paintBrushMask.renderPreview(pmaskPreview);
+  }
+  drawPaintMaskPreview();
+
+  function refreshLayerThumb(slotIdx) {
+    const thumb = document.getElementById(`lthumb-${slotIdx + 1}`);
+    if (!thumb) return;
+    const url = textureLib.slots[slotIdx].albedoUrl;
+    if (url) {
+      thumb.style.backgroundImage = `url(${url})`;
+      thumb.style.backgroundColor = '';
+    } else {
+      const [r, g, b] = textureLib.getPreviewColor(slotIdx);
+      thumb.style.backgroundImage = '';
+      thumb.style.backgroundColor = `rgb(${r},${g},${b})`;
+    }
+  }
+
+  // Preload default PBR texture sets from /textures/pbr_materials/
+  textureLib.preloadDefaults().then(() => {
+    for (let i = 0; i < 7; i++) refreshLayerThumb(i);
+    syncTexlibEditor();
+  }).catch(err => console.warn("Default texture preload failed:", err));
+
+  // Brush sliders
+  pslRadius.addEventListener("input", () => {
+    paintState.brush.radius = Number(pslRadius.value);
+    plblRadius.textContent = pslRadius.value + "m";
+    if (editorMode === "paint") sculpt.uRadius.value = paintState.brush.radius / WORLD_SIZE;
+  });
+  pslStrength.addEventListener("input", () => {
+    paintState.brush.strength = Number(pslStrength.value) / 100;
+    plblStrength.textContent = paintState.brush.strength.toFixed(2);
+  });
+  pslFalloff.addEventListener("input", () => {
+    paintState.brush.falloff = Number(pslFalloff.value) / 10;
+    plblFalloff.textContent = paintState.brush.falloff.toFixed(1);
+  });
+  pslSpacing.addEventListener("input", () => {
+    paintState.brush.spacingFactor = Number(pslSpacing.value) / 100;
+    plblSpacing.textContent = pslSpacing.value + "%";
+  });
+  pslOpacity.addEventListener("input", () => {
+    paintState.brushOpacity = Number(pslOpacity.value) / 100;
+    plblOpacity.textContent = paintState.brushOpacity.toFixed(2);
+  });
+
+  // Solo & height blend
+  pslSolo.addEventListener("change", () => {
+    splatOverlay.uSoloLayer.value = Number(pslSolo.value);
+  });
+  pslHBlend.addEventListener("input", () => {
+    splatOverlay.uHeightBlend.value = Number(pslHBlend.value) / 100;
+    plblHBlend.textContent = splatOverlay.uHeightBlend.value.toFixed(2);
+  });
+  pslHContrast.addEventListener("input", () => {
+    splatOverlay.uHeightContrast.value = Number(pslHContrast.value) / 100;
+    plblHContrast.textContent = splatOverlay.uHeightContrast.value.toFixed(2);
+  });
+
+  // Noise mask
+  pslNoise.addEventListener("input", () => {
+    paintState.noiseMask = Number(pslNoise.value) / 100;
+    plblNoise.textContent = paintState.noiseMask.toFixed(2);
+  });
+  pslNScale.addEventListener("input", () => {
+    paintState.noiseScale = Number(pslNScale.value) / 10;
+    plblNScale.textContent = paintState.noiseScale.toFixed(1);
+  });
+  pslNOct.addEventListener("input", () => {
+    paintState.noiseOctaves = Number(pslNOct.value);
+    plblNOct.textContent = pslNOct.value;
+  });
+  pckNEdge.addEventListener("change", () => { paintState.noiseEdgeOnly = pckNEdge.checked; });
+
+  // Brush mask chips + PNG load
+  pmaskChips.addEventListener("click", e => {
+    const chip = e.target.closest(".option-chip[data-pmask]");
+    if (!chip) return;
+    const name = chip.dataset.pmask;
+    if (name === "none") paintBrushMask.clear();
+    else paintBrushMask.generateBuiltin(name);
+    pmaskChips.querySelectorAll(".option-chip").forEach(c => c.classList.toggle("active", c === chip));
+    drawPaintMaskPreview();
+  });
+  pbtnMaskPng.addEventListener("click", () => {
+    const inp = Object.assign(document.createElement("input"), { type: "file", accept: "image/*" });
+    inp.onchange = async () => {
+      if (!inp.files[0]) return;
+      await paintBrushMask.loadFromFile(inp.files[0]);
+      pmaskChips.querySelectorAll(".option-chip").forEach(c => c.classList.remove("active"));
+      drawPaintMaskPreview();
+    };
+    inp.click();
+  });
+  pslMaskRot.addEventListener("input", () => {
+    paintState.maskRotation = Number(pslMaskRot.value);
+    plblMaskRot.textContent = pslMaskRot.value + "°";
+    sculpt.uMaskRotation.value = paintState.maskRotation * Math.PI / 180;
+  });
+  pckMaskRand.addEventListener("change",   () => { paintState.maskRandomRotation = pckMaskRand.checked; });
+  pckMaskFollow.addEventListener("change", () => { paintState.maskFollowStroke   = pckMaskFollow.checked; });
+
+  // Layer cards
+  layerCardGrid.addEventListener("click", e => {
+    const card = e.target.closest(".layer-card");
+    if (!card) return;
+    const layer = Number(card.dataset.layer);
+    paintState.activeLayer = layer;
+    layerCardGrid.querySelectorAll(".layer-card").forEach(c => c.classList.toggle("active", c === card));
+
+    // If it's a real texture layer (1-7), jump to that slot in the Texture Library
+    if (layer >= 1 && layer <= 7) {
+      const slotIdx = layer - 1;
+      texlibActiveSlot = slotIdx;
+      texlibTabsEl.querySelectorAll(".texlib-tab").forEach((t, i) => t.classList.toggle("active", i === slotIdx));
+      texlibNameEl.value = textureLib.slots[slotIdx].name;
+      syncTexlibEditor();
+      // Expand Texture Library section if it's collapsed
+      const texlibSection = document.getElementById("texlib-body");
+      if (texlibSection && texlibSection.classList.contains("hidden")) {
+        texlibSection.classList.remove("hidden");
+        const hdr = texlibSection.previousElementSibling;
+        if (hdr) hdr.classList.remove("collapsed");
+      }
+      texlibSection?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  });
+  layerCardGrid.addEventListener("dragover", e => { e.preventDefault(); });
+  layerCardGrid.addEventListener("drop", e => {
+    e.preventDefault();
+    const card = e.target.closest(".layer-card[data-layer]");
+    if (!card) return;
+    const layer = Number(card.dataset.layer);
+    if (layer < 1 || layer > 7) return;
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const slotIdx = layer - 1;
+    textureLib.loadFileAutoDetect(slotIdx, file).then(() => refreshLayerThumb(slotIdx));
+  });
+
+  // Texture library slot tabs
+  texlibTabsEl.addEventListener("click", e => {
+    const tab = e.target.closest(".texlib-tab[data-slot]");
+    if (!tab) return;
+    texlibActiveSlot = Number(tab.dataset.slot);
+    texlibTabsEl.querySelectorAll(".texlib-tab").forEach(t => t.classList.toggle("active", t === tab));
+    texlibNameEl.value = textureLib.slots[texlibActiveSlot].name;
+    syncTexlibEditor();
+  });
+  texlibNameEl.addEventListener("input", () => {
+    textureLib.setSlotName(texlibActiveSlot, texlibNameEl.value);
+    const lbl = document.getElementById(`llabel-${texlibActiveSlot + 1}`);
+    if (lbl) lbl.textContent = texlibNameEl.value || `L${texlibActiveSlot + 1}`;
+  });
+
+  // Texture library UV/strength sliders — scoped to active slot
+  const tslUVScale = document.getElementById("tsl-uvscale");
+  const tlblUV     = document.getElementById("tlbl-uvscale");
+  const tslNStr    = document.getElementById("tsl-nstr");
+  const tlblNStr   = document.getElementById("tlbl-nstr");
+  const tslAOStr   = document.getElementById("tsl-aostr");
+  const tlblAO     = document.getElementById("tlbl-aostr");
+  const tslRStr    = document.getElementById("tsl-rstr");
+  const tlblRStr   = document.getElementById("tlbl-rstr");
+
+  tslUVScale.addEventListener("input", () => {
+    textureLib.setUVScale(texlibActiveSlot, Number(tslUVScale.value));
+    tlblUV.textContent = tslUVScale.value;
+  });
+  tslNStr.addEventListener("input", () => {
+    textureLib.setNormalStr(texlibActiveSlot, Number(tslNStr.value) / 10);
+    tlblNStr.textContent = (tslNStr.value / 10).toFixed(1);
+  });
+  tslAOStr.addEventListener("input", () => {
+    textureLib.setAOStr(texlibActiveSlot, Number(tslAOStr.value) / 10);
+    tlblAO.textContent = (tslAOStr.value / 10).toFixed(1);
+  });
+  tslRStr.addEventListener("input", () => {
+    textureLib.setRoughStr(texlibActiveSlot, Number(tslRStr.value) / 10);
+    tlblRStr.textContent = (tslRStr.value / 10).toFixed(1);
+  });
+
+  // 4-map grid cells — click or drop to load texture
+  const MAP_TYPES = ["albedo", "normal", "rough", "ao"];
+  const MAP_LOADERS = {
+    albedo: (i, f) => textureLib.loadAlbedo(i, f),
+    normal: (i, f) => textureLib.loadNormalMap(i, f),
+    rough:  (i, f) => textureLib.loadRoughness(i, f),
+    ao:     (i, f) => textureLib.loadAO(i, f),
+  };
+
+  async function loadMapFile(mapType, file) {
+    await MAP_LOADERS[mapType](texlibActiveSlot, file);
+    const urlProp = { albedo: "albedoUrl", normal: "normalUrl", rough: "roughUrl", ao: "aoUrl" }[mapType];
+    const url = textureLib.slots[texlibActiveSlot][urlProp];
+    const thumb = document.getElementById(`tmt-${mapType}`);
+    const cell  = document.getElementById(`tmc-${mapType}`);
+    if (thumb) thumb.style.backgroundImage = url ? `url(${url})` : "";
+    if (cell) cell.classList.toggle("has-texture", Boolean(url));
+    if (mapType === "albedo") refreshLayerThumb(texlibActiveSlot);
+  }
+
+  MAP_TYPES.forEach(mapType => {
+    const cell  = document.getElementById(`tmc-${mapType}`);
+    const clear = document.getElementById(`tmc-clear-${mapType}`);
+    if (!cell) return;
+    cell.addEventListener("click", e => {
+      if (e.target === clear) return;
+      const inp = Object.assign(document.createElement("input"), { type: "file", accept: "image/*" });
+      inp.onchange = () => { if (inp.files[0]) loadMapFile(mapType, inp.files[0]); };
+      inp.click();
+    });
+    cell.addEventListener("dragover", e => { e.preventDefault(); });
+    cell.addEventListener("drop", e => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (file) loadMapFile(mapType, file);
+    });
+    if (clear) {
+      clear.addEventListener("click", e => {
+        e.stopPropagation();
+        // Reset GPU texture data back to neutral defaults
+        if (mapType === "albedo")  textureLib.clearAlbedo(texlibActiveSlot);
+        else if (mapType === "normal") textureLib.clearNormal(texlibActiveSlot);
+        else if (mapType === "rough")  textureLib.clearRoughness(texlibActiveSlot);
+        else if (mapType === "ao")     textureLib.clearAO(texlibActiveSlot);
+        // Update UI
+        const thumb = document.getElementById(`tmt-${mapType}`);
+        if (thumb) thumb.style.backgroundImage = "";
+        cell.classList.remove("has-texture");
+        if (mapType === "albedo") refreshLayerThumb(texlibActiveSlot);
+      });
+    }
+  });
+
+  function syncTexlibEditor() {
+    const s = textureLib.slots[texlibActiveSlot];
+    const u = textureLib.slotUniforms[texlibActiveSlot];
+    tslUVScale.value = Math.round(u.uUVScale.value);
+    tlblUV.textContent = tslUVScale.value;
+    tslNStr.value = Math.round(u.uNormalStr.value * 10);
+    tlblNStr.textContent = u.uNormalStr.value.toFixed(1);
+    tslAOStr.value = Math.round(u.uAOStr.value * 10);
+    tlblAO.textContent = u.uAOStr.value.toFixed(1);
+    tslRStr.value = Math.round(u.uRoughStr.value * 10);
+    tlblRStr.textContent = u.uRoughStr.value.toFixed(1);
+    texlibNameEl.value = s.name;
+    // Sync map cell thumbnails for the active slot
+    for (const [mapType, urlProp] of [
+      ["albedo", "albedoUrl"], ["normal", "normalUrl"], ["rough", "roughUrl"], ["ao", "aoUrl"],
+    ]) {
+      const url = s[urlProp];
+      const thumb = document.getElementById(`tmt-${mapType}`);
+      const cell  = document.getElementById(`tmc-${mapType}`);
+      if (thumb) thumb.style.backgroundImage = url ? `url(${url})` : "";
+      if (cell) cell.classList.toggle("has-texture", Boolean(url));
+    }
+    // Sync auto-paint controls
+    tautoEnabled.checked         = s.autoEnabled;
+    tautoHmin.value              = s.autoHeightMin;
+    tautoHmax.value              = s.autoHeightMax;
+    tautoSmin.value              = s.autoSlopeMin;
+    tautoSmax.value              = s.autoSlopeMax;
+    tautoBlend.value             = s.autoBlend;
+    tautoStrength.value          = Math.round(s.autoStrength * 100);
+    tautoLblHmin.textContent     = s.autoHeightMin + "m";
+    tautoLblHmax.textContent     = s.autoHeightMax + "m";
+    tautoLblSmin.textContent     = s.autoSlopeMin  + "°";
+    tautoLblSmax.textContent     = s.autoSlopeMax  + "°";
+    tautoLblBlend.textContent    = s.autoBlend      + "%";
+    tautoLblStrength.textContent = s.autoStrength.toFixed(2);
+  }
+  syncTexlibEditor();
+
+  // Fill / Clear buttons
+  pbtnFill.addEventListener("click", () => { paintSys.fillWithActiveLayer(); splatMap.tex.needsUpdate = true; });
+  pbtnClear.addEventListener("click", () => { paintSys.clearAll(); splatMap.tex.needsUpdate = true; });
+
+  // Auto-paint slot controls — read/write textureLib.slots[texlibActiveSlot].auto*
+  function _autoSlot() { return textureLib.slots[texlibActiveSlot]; }
+
+  tautoEnabled.addEventListener("change", () => {
+    _autoSlot().autoEnabled = tautoEnabled.checked;
+  });
+  tautoHmin.addEventListener("input", () => {
+    const v = Number(tautoHmin.value);
+    if (v >= Number(tautoHmax.value)) { tautoHmin.value = Number(tautoHmax.value) - 5; return; }
+    _autoSlot().autoHeightMin = v;
+    tautoLblHmin.textContent = v + "m";
+  });
+  tautoHmax.addEventListener("input", () => {
+    const v = Number(tautoHmax.value);
+    if (v <= Number(tautoHmin.value)) { tautoHmax.value = Number(tautoHmin.value) + 5; return; }
+    _autoSlot().autoHeightMax = v;
+    tautoLblHmax.textContent = v + "m";
+  });
+  tautoSmin.addEventListener("input", () => {
+    const v = Number(tautoSmin.value);
+    if (v >= Number(tautoSmax.value)) { tautoSmin.value = Number(tautoSmax.value) - 1; return; }
+    _autoSlot().autoSlopeMin = v;
+    tautoLblSmin.textContent = v + "°";
+  });
+  tautoSmax.addEventListener("input", () => {
+    const v = Number(tautoSmax.value);
+    if (v <= Number(tautoSmin.value)) { tautoSmax.value = Number(tautoSmin.value) + 1; return; }
+    _autoSlot().autoSlopeMax = v;
+    tautoLblSmax.textContent = v + "°";
+  });
+  tautoBlend.addEventListener("input", () => {
+    const v = Number(tautoBlend.value);
+    _autoSlot().autoBlend = v;
+    tautoLblBlend.textContent = v + "%";
+  });
+  tautoStrength.addEventListener("input", () => {
+    const v = Number(tautoStrength.value) / 100;
+    _autoSlot().autoStrength = v;
+    tautoLblStrength.textContent = v.toFixed(2);
+  });
+
+  // Generate auto paint
+  pbtnAutoGenerate.addEventListener("click", () => {
+    const rules = textureLib.slots.map(s => ({
+      enabled:   s.autoEnabled,
+      heightMin: s.autoHeightMin,
+      heightMax: s.autoHeightMax,
+      slopeMin:  s.autoSlopeMin,
+      slopeMax:  s.autoSlopeMax,
+      blend:     s.autoBlend,
+      strength:  s.autoStrength,
+    }));
+    paintSys.applyAutoRules({
+      cpuHeightmap,
+      heightmapSize: HEIGHTMAP_SIZE,
+      worldSize:     WORLD_SIZE,
+      maxHeight:     MAX_HEIGHT,
+      rules,
+    });
+    splatMap.tex.needsUpdate = true;
+  });
+
+  // Splat save / load
+  function saveSplatmap() {
+    const buf = encodeSplatmapFile(splatMap._combined, { resolution: SPLAT_RES });
+    const ts  = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    downloadBuffer(buf, `splat-${ts}.v3splat`);
+  }
+
+  async function loadSplatmap() {
+    const file = await pickSplatmapFile();
+    if (!file) return;
+    try {
+      const decoded = decodeSplatmapFile(await file.arrayBuffer());
+      if (decoded.resolution !== SPLAT_RES) {
+        window.alert(
+          `This splatmap is ${decoded.resolution}²; expected ${SPLAT_RES}².`,
+        );
+        return;
+      }
+      splatMap._combined.set(decoded.data);
+      splatMap.tex.needsUpdate = true;
+    } catch (err) {
+      console.error(err);
+      window.alert(err instanceof Error ? err.message : "Failed to load splatmap.");
+    }
+  }
+
+  pbtnSaveSplat.addEventListener("click", () => saveSplatmap());
+  pbtnLoadSplat.addEventListener("click", () => loadSplatmap());
+
+  // ── Paint mode mouse events ────────────────────────────────────────────────
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "paint") return;
+    refreshMouse(e);
+    const hit = getUV();
+    uCursorUV.value.set(hit ? hit.u : -2, hit ? hit.v : -2);
+    if (hit && isPainting) {
+      const wx = hit.u * WORLD_SIZE - WORLD_SIZE / 2;
+      const wz = hit.v * WORLD_SIZE - WORLD_SIZE / 2;
+      paintSys.continueStroke(wx, wz, e.altKey);
+      splatMap.tex.needsUpdate = true;
+    }
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "paint") return;
+    if (e.button !== 0) return;
+    refreshMouse(e);
+    const hit = getUV();
+    if (!hit) return;
+    isPainting = true;
+    const wx = hit.u * WORLD_SIZE - WORLD_SIZE / 2;
+    const wz = hit.v * WORLD_SIZE - WORLD_SIZE / 2;
+    paintSys.beginStroke(wx, wz, e.altKey);
+    splatMap.tex.needsUpdate = true;
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (e.button !== 0 || editorMode !== "paint") return;
+    isPainting = false;
+    paintSys.endStroke();
+  });
+
+  // Scroll wheel in paint mode: Shift = radius, Alt = strength
+  renderer.domElement.addEventListener("wheel", e => {
+    if (playMode.active || editorMode !== "paint") return;
+    if (!e.shiftKey && !e.altKey) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.11;
+    if (e.shiftKey) {
+      paintState.brush.radius = Math.max(5, Math.min(400, paintState.brush.radius * factor));
+      pslRadius.value = Math.round(paintState.brush.radius);
+      plblRadius.textContent = pslRadius.value + "m";
+      sculpt.uRadius.value = paintState.brush.radius / WORLD_SIZE;
+    } else {
+      paintState.brush.strength = Math.max(0.01, Math.min(1.0, paintState.brush.strength * factor));
+      pslStrength.value = Math.round(paintState.brush.strength * 100);
+      plblStrength.textContent = paintState.brush.strength.toFixed(2);
+    }
+  }, { passive: false, capture: true });
 
   // ── Resize ─────────────────────────────────────────────────────────────────
   const ro = new ResizeObserver(() => resizeRenderer());
@@ -999,7 +1520,7 @@ async function main() {
       );
       lod.update(_lodSnapVec);
     } else {
-      if (isPainting) {
+      if (isPainting && editorMode === "sculpt") {
         const hit = getUV();
         if (hit) applySculptStroke(hit.u, hit.v);
       }

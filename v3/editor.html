@@ -124,6 +124,7 @@
             <select class="prop-dropdown" id="tools-mode-select">
               <option value="view">View</option>
               <option value="sculpt">Sculpt</option>
+              <option value="paint">Paint</option>
             </select>
           </div>
 
@@ -481,8 +482,393 @@
               </button>
             </div>
           </div>
-          </div><!-- /#sculpt-panel -->
-        </div>
+          </div><!-- /#sculpt-panel-inner -->
+
+        </div><!-- /#sculpt-panel -->
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- PAINT panel — shown only in paint mode                     -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+          <div id="paint-panel" style="display:none">
+
+            <!-- BRUSH -------------------------------------------------- -->
+            <div class="inspector-section">
+              <div class="section-header">Brush</div>
+              <div class="section-body">
+                <div class="prop-row">
+                  <span class="prop-label">Radius</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-radius" min="5" max="400" step="5" value="80" />
+                    <span class="prop-num" id="plbl-radius">80m</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Strength</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-strength" min="1" max="100" step="1" value="50" />
+                    <span class="prop-num" id="plbl-strength">0.50</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Shape</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-falloff" min="5" max="40" step="1" value="20" />
+                    <span class="prop-num" id="plbl-falloff">2.0</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Spacing</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-spacing" min="5" max="100" step="1" value="10" />
+                    <span class="prop-num" id="plbl-spacing">10%</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Opacity</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-opacity" min="2" max="100" step="1" value="100" />
+                    <span class="prop-num" id="plbl-opacity">1.00</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- LAYER CARDS -------------------------------------------- -->
+            <div class="inspector-section">
+              <div class="section-header">Layers</div>
+              <div class="section-body">
+                <div class="layer-card-grid" id="layer-card-grid">
+                  <!-- 0 = eraser -->
+                  <div class="layer-card active" data-layer="0" title="Eraser — removes all paint">
+                    <div class="layer-card-thumb layer-thumb-eraser">✕</div>
+                    <div class="layer-card-label">Erase</div>
+                  </div>
+                  <!-- layers 1-7 generated -->
+                  <div class="layer-card" data-layer="1" title="Layer 1 — drag image to assign">
+                    <div class="layer-card-thumb" id="lthumb-1" style="background:#b48250"></div>
+                    <div class="layer-card-label" id="llabel-1">L1</div>
+                  </div>
+                  <div class="layer-card" data-layer="2" title="Layer 2">
+                    <div class="layer-card-thumb" id="lthumb-2" style="background:#508c3c"></div>
+                    <div class="layer-card-label" id="llabel-2">L2</div>
+                  </div>
+                  <div class="layer-card" data-layer="3" title="Layer 3">
+                    <div class="layer-card-thumb" id="lthumb-3" style="background:#a09b91"></div>
+                    <div class="layer-card-label" id="llabel-3">L3</div>
+                  </div>
+                  <div class="layer-card" data-layer="4" title="Layer 4">
+                    <div class="layer-card-thumb" id="lthumb-4" style="background:#dccda8"></div>
+                    <div class="layer-card-label" id="llabel-4">L4</div>
+                  </div>
+                  <div class="layer-card" data-layer="5" title="Layer 5">
+                    <div class="layer-card-thumb" id="lthumb-5" style="background:#64503c"></div>
+                    <div class="layer-card-label" id="llabel-5">L5</div>
+                  </div>
+                  <div class="layer-card" data-layer="6" title="Layer 6">
+                    <div class="layer-card-thumb" id="lthumb-6" style="background:#c8bea0"></div>
+                    <div class="layer-card-label" id="llabel-6">L6</div>
+                  </div>
+                  <div class="layer-card" data-layer="7" title="Layer 7">
+                    <div class="layer-card-thumb" id="lthumb-7" style="background:#3c6432"></div>
+                    <div class="layer-card-label" id="llabel-7">L7</div>
+                  </div>
+                  <!-- 8 = meadow (procedural TSL) -->
+                  <div class="layer-card" data-layer="8" title="Meadow — TSL procedural blend">
+                    <div class="layer-card-thumb layer-thumb-meadow">TSL</div>
+                    <div class="layer-card-label">Meadow</div>
+                  </div>
+                </div>
+                <p class="mode-hint" style="margin-top:4px"><kbd>Alt</kbd>+paint = erase &nbsp;·&nbsp; Drop image onto layer card</p>
+              </div>
+            </div>
+
+            <!-- SOLO & OPACITY ----------------------------------------- -->
+            <div class="inspector-section">
+              <div class="section-header" data-toggle>
+                <i data-lucide="chevron-down" class="section-arrow"></i>
+                Solo &amp; Opacity
+              </div>
+              <div class="section-body hidden">
+                <div class="prop-row">
+                  <span class="prop-label">Solo layer</span>
+                  <div class="prop-value">
+                    <select class="prop-dropdown" id="psl-solo">
+                      <option value="-1">Off</option>
+                      <option value="0">Base (layer 0)</option>
+                      <option value="1">Layer 1</option>
+                      <option value="2">Layer 2</option>
+                      <option value="3">Layer 3</option>
+                      <option value="4">Layer 4</option>
+                      <option value="5">Layer 5</option>
+                      <option value="6">Layer 6</option>
+                      <option value="7">Layer 7</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- HEIGHT BLEND ------------------------------------------- -->
+            <div class="inspector-section">
+              <div class="section-header" data-toggle>
+                <i data-lucide="chevron-down" class="section-arrow"></i>
+                Height Blend
+              </div>
+              <div class="section-body hidden">
+                <div class="prop-row">
+                  <span class="prop-label">Strength</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-hblend" min="0" max="100" step="1" value="0" />
+                    <span class="prop-num" id="plbl-hblend">0.00</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Contrast</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-hcontrast" min="1" max="100" step="1" value="50" />
+                    <span class="prop-num" id="plbl-hcontrast">0.50</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- NOISE MASK --------------------------------------------- -->
+            <div class="inspector-section">
+              <div class="section-header" data-toggle>
+                <i data-lucide="chevron-down" class="section-arrow"></i>
+                Noise Mask
+              </div>
+              <div class="section-body hidden">
+                <div class="prop-row">
+                  <span class="prop-label">Amount</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-noise" min="0" max="100" step="1" value="0" />
+                    <span class="prop-num" id="plbl-noise">0.00</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Scale</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-nscale" min="5" max="200" step="5" value="30" />
+                    <span class="prop-num" id="plbl-nscale">3.0</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Detail</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-noct" min="1" max="6" step="1" value="3" />
+                    <span class="prop-num" id="plbl-noct">3</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Edge only</span>
+                  <div class="prop-value">
+                    <label class="toggle-label">
+                      <input type="checkbox" id="pck-nedge" />
+                      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- BRUSH MASK --------------------------------------------- -->
+            <div class="inspector-section">
+              <div class="section-header" data-toggle>
+                <i data-lucide="chevron-down" class="section-arrow"></i>
+                Brush Mask
+              </div>
+              <div class="section-body hidden">
+                <div style="display:flex;gap:8px;align-items:flex-start">
+                  <canvas id="pmask-preview" class="mask-preview" width="48" height="48"></canvas>
+                  <div style="flex:1;display:flex;flex-direction:column;gap:3px">
+                    <div class="mask-chip-grid" id="pmask-chips">
+                      <button class="option-chip active" data-pmask="soft"     type="button">Soft</button>
+                      <button class="option-chip"        data-pmask="hard"     type="button">Hard</button>
+                      <button class="option-chip"        data-pmask="none"     type="button">None</button>
+                      <button class="option-chip"        data-pmask="splatter" type="button">Splatter</button>
+                      <button class="option-chip"        data-pmask="grunge"   type="button">Grunge</button>
+                    </div>
+                    <button type="button" class="action-btn" id="pbtn-mask-png" style="font-size:11px">Load PNG</button>
+                  </div>
+                </div>
+                <div class="prop-row" style="margin-top:5px">
+                  <span class="prop-label">Rotation</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-maskrot" min="0" max="359" step="1" value="0" />
+                    <span class="prop-num" id="plbl-maskrot">0°</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Random rot.</span>
+                  <div class="prop-value">
+                    <label class="toggle-label">
+                      <input type="checkbox" id="pck-maskrand" />
+                      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Follow stroke</span>
+                  <div class="prop-value">
+                    <label class="toggle-label">
+                      <input type="checkbox" id="pck-maskfollow" />
+                      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TEXTURE LIBRARY ---------------------------------------- -->
+            <div class="inspector-section">
+              <div class="section-header" data-toggle>
+                <i data-lucide="chevron-down" class="section-arrow"></i>
+                Texture Library
+              </div>
+              <div class="section-body" id="texlib-body">
+                <!-- Slot tabs (L1-L7) -->
+                <div class="texlib-slot-tabs" id="texlib-tabs">
+                  <button class="texlib-tab active" data-slot="0">L1</button>
+                  <button class="texlib-tab" data-slot="1">L2</button>
+                  <button class="texlib-tab" data-slot="2">L3</button>
+                  <button class="texlib-tab" data-slot="3">L4</button>
+                  <button class="texlib-tab" data-slot="4">L5</button>
+                  <button class="texlib-tab" data-slot="5">L6</button>
+                  <button class="texlib-tab" data-slot="6">L7</button>
+                </div>
+                <!-- Slot editor — updated by JS when tab changes -->
+                <div id="texlib-editor">
+                  <!-- Name -->
+                  <div class="prop-row" style="margin-top:6px">
+                    <span class="prop-label">Name</span>
+                    <div class="prop-value">
+                      <input type="text" class="prop-input" id="texlib-name" placeholder="Layer name" />
+                    </div>
+                  </div>
+                  <!-- Map grid: 4 drop zones -->
+                  <div class="tex-map-grid" id="tex-map-grid">
+                    <div class="tex-map-cell" id="tmc-albedo" data-map="albedo">
+                      <div class="tex-map-thumb" id="tmt-albedo"></div>
+                      <div class="tex-map-label">Albedo</div>
+                      <button class="tex-map-clear" id="tmc-clear-albedo" type="button">✕</button>
+                    </div>
+                    <div class="tex-map-cell" id="tmc-normal" data-map="normal">
+                      <div class="tex-map-thumb" id="tmt-normal"></div>
+                      <div class="tex-map-label">Normal</div>
+                      <button class="tex-map-clear" id="tmc-clear-normal" type="button">✕</button>
+                    </div>
+                    <div class="tex-map-cell" id="tmc-rough" data-map="rough">
+                      <div class="tex-map-thumb" id="tmt-rough"></div>
+                      <div class="tex-map-label">Rough</div>
+                      <button class="tex-map-clear" id="tmc-clear-rough" type="button">✕</button>
+                    </div>
+                    <div class="tex-map-cell" id="tmc-ao" data-map="ao">
+                      <div class="tex-map-thumb" id="tmt-ao"></div>
+                      <div class="tex-map-label">AO</div>
+                      <button class="tex-map-clear" id="tmc-clear-ao" type="button">✕</button>
+                    </div>
+                  </div>
+                  <p class="mode-hint" style="margin-top:3px">Drop image or click cell to load. Filename with "normal"/"rough"/"ao" auto-routes.</p>
+                  <!-- Per-slot parameters -->
+                  <div class="prop-row">
+                    <span class="prop-label">UV tile</span>
+                    <div class="prop-value">
+                      <input type="range" id="tsl-uvscale" min="1" max="200" step="1" value="20" />
+                      <span class="prop-num" id="tlbl-uvscale">20</span>
+                    </div>
+                  </div>
+                  <div class="prop-row">
+                    <span class="prop-label">Normal str.</span>
+                    <div class="prop-value">
+                      <input type="range" id="tsl-nstr" min="0" max="30" step="1" value="10" />
+                      <span class="prop-num" id="tlbl-nstr">1.0</span>
+                    </div>
+                  </div>
+                  <div class="prop-row">
+                    <span class="prop-label">AO str.</span>
+                    <div class="prop-value">
+                      <input type="range" id="tsl-aostr" min="0" max="20" step="1" value="8" />
+                      <span class="prop-num" id="tlbl-aostr">0.8</span>
+                    </div>
+                  </div>
+                  <div class="prop-row">
+                    <span class="prop-label">Rough str.</span>
+                    <div class="prop-value">
+                      <input type="range" id="tsl-rstr" min="0" max="20" step="1" value="10" />
+                      <span class="prop-num" id="tlbl-rstr">1.0</span>
+                    </div>
+                  </div>
+
+                  <!-- Auto-paint rules for this slot -->
+                  <div class="prop-separator" style="margin-top:8px"></div>
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+                    <span style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);font-weight:600;flex:1">Auto Paint</span>
+                    <label class="toggle-label" style="margin:0">
+                      <input type="checkbox" id="tauto-enabled" />
+                      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    </label>
+                  </div>
+                  <div id="tauto-settings">
+                    <div class="prop-row">
+                      <span class="prop-label">H. min</span>
+                      <div class="prop-value">
+                        <input type="range" id="tauto-hmin" min="0" max="500" step="5" value="0" />
+                        <span class="prop-num" id="tauto-lbl-hmin">0m</span>
+                      </div>
+                    </div>
+                    <div class="prop-row">
+                      <span class="prop-label">H. max</span>
+                      <div class="prop-value">
+                        <input type="range" id="tauto-hmax" min="0" max="500" step="5" value="500" />
+                        <span class="prop-num" id="tauto-lbl-hmax">500m</span>
+                      </div>
+                    </div>
+                    <div class="prop-row">
+                      <span class="prop-label">Slope min</span>
+                      <div class="prop-value">
+                        <input type="range" id="tauto-smin" min="0" max="89" step="1" value="0" />
+                        <span class="prop-num" id="tauto-lbl-smin">0°</span>
+                      </div>
+                    </div>
+                    <div class="prop-row">
+                      <span class="prop-label">Slope max</span>
+                      <div class="prop-value">
+                        <input type="range" id="tauto-smax" min="1" max="90" step="1" value="90" />
+                        <span class="prop-num" id="tauto-lbl-smax">90°</span>
+                      </div>
+                    </div>
+                    <div class="prop-row">
+                      <span class="prop-label">Blend</span>
+                      <div class="prop-value">
+                        <input type="range" id="tauto-blend" min="0" max="50" step="1" value="15" />
+                        <span class="prop-num" id="tauto-lbl-blend">15%</span>
+                      </div>
+                    </div>
+                    <div class="prop-row">
+                      <span class="prop-label">Strength</span>
+                      <div class="prop-value">
+                        <input type="range" id="tauto-strength" min="0" max="100" step="1" value="100" />
+                        <span class="prop-num" id="tauto-lbl-strength">1.00</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Footer buttons ----------------------------------------- -->
+            <div style="padding:6px 8px;display:flex;flex-direction:column;gap:4px">
+              <button type="button" class="action-btn primary" id="pbtn-auto-generate">Generate auto paint</button>
+              <button type="button" class="action-btn" id="pbtn-fill">Fill world with active layer</button>
+              <button type="button" class="action-btn" id="pbtn-clear">Clear all paint</button>
+              <div style="display:flex;gap:4px;margin-top:2px">
+                <button type="button" class="action-btn" id="pbtn-save-splat" style="flex:1">Save splat</button>
+                <button type="button" class="action-btn" id="pbtn-load-splat" style="flex:1">Load splat</button>
+              </div>
+            </div>
+
+        </div><!-- /#paint-panel -->
 
         <!-- World (lighting, sky, sun — coming later) -->
         <div class="tab-content" id="tab-world">

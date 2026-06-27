@@ -15,13 +15,19 @@ export const LOD_SNAP = 16;
 export function createPlayMode({
   renderer, camera, controls,
   sampleTerrainHeight, uCursorUV,
-  capsuleMesh,
+  character,
   onEnterMenu, onStartWalking, onExit,
 }) {
   let active  = false; // true when in play mode (menu OR walking)
   let walking = false; // true only while pointer is locked
 
-  const capsule = new CapsuleController({ walkSpeed: 6, runSpeed: 14, jumpVel: 9, gravity: 20 });
+  const capsule = new CapsuleController({
+    walkSpeed:       3,
+    runSpeed:        6,
+    jumpVel:        11,
+    gravity:        20,
+    groundSpringK:  35,   // stiffer than default — tracks bumpy terrain tighter
+  });
 
   let savedCamPos   = null;
   let savedCamQuat  = null;
@@ -42,7 +48,7 @@ export function createPlayMode({
   }
 
   function positionCamera() {
-    const chestY = capsule.position.y + 1.2;
+    const chestY = capsule.position.y + 1.875; // CHAR_HEIGHT(2.5) * 0.75 — matches v2
     const cosP   = Math.cos(camPitch);
     const sinP   = Math.sin(camPitch);
 
@@ -54,12 +60,8 @@ export function createPlayMode({
     _lookAt.set(capsule.position.x, chestY, capsule.position.z);
     camera.lookAt(_lookAt);
 
-    if (capsuleMesh) {
-      // Physics capsule: position.y = feet, total visual centre = feet + r + halfH
-      const cy = capsule.position.y + capsule.params.capRadius + capsule.params.capHeight / 2;
-      capsuleMesh.position.set(capsule.position.x, cy, capsule.position.z);
-      capsuleMesh.rotation.y = capsule.yaw;
-    }
+    // character.update() handles its own position + animations
+
   }
 
   // ── Keyboard (only active while walking, not while menu is showing) ──────────
@@ -135,7 +137,7 @@ export function createPlayMode({
     const tz = controls.target.z;
     capsule.reset(tx, getTerrainHeight(tx, tz), tz);
 
-    if (capsuleMesh) capsuleMesh.visible = true;
+    character?.setVisible(true);
     positionCamera();
 
     onEnterMenu?.();
@@ -162,7 +164,8 @@ export function createPlayMode({
     controls.enabled = true;
     controls.update();
 
-    if (capsuleMesh) capsuleMesh.visible = false;
+    character?.setVisible(false);
+    character?.reset();
 
     Object.keys(keys).forEach(k => (keys[k] = false));
 
@@ -184,6 +187,8 @@ export function createPlayMode({
         getTerrainHeight,
         worldHalf: WORLD_SIZE / 2,
       });
+
+      character?.update(dt, capsule, { mx, mz, run: keys.shift, crouch: false });
     }
 
     positionCamera();

@@ -505,6 +505,199 @@ html, body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
 
+/* ── Paint panel ─────────────────────────────────────────────────────────── */
+
+/* 3-column layer card grid (Eraser + L1-L7 + Meadow = 9 cards) */
+.layer-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.layer-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 2px 5px;
+  background: var(--bg-input);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.1s, background 0.1s;
+  min-width: 0;
+}
+.layer-card:hover { border-color: var(--border-light); background: var(--bg-hover); }
+.layer-card.active {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.layer-card-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.7);
+  background-size: cover;
+  background-position: center;
+  overflow: hidden;
+}
+
+.layer-thumb-eraser {
+  background: repeating-conic-gradient(#444 0% 25%, #2a2a2a 0% 50%) 0 0 / 10px 10px;
+  font-size: 14px;
+  color: #aaa;
+}
+
+.layer-thumb-meadow {
+  background: linear-gradient(135deg, #2d5a1b 0%, #1a7a3c 50%, #4aaa32 100%);
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  color: rgba(255,255,255,0.9);
+}
+
+.layer-card-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  text-align: center;
+  padding: 0 2px;
+}
+.layer-card.active .layer-card-label { color: var(--accent); }
+
+/* Toggle switch (used in paint panel: edge-only, random rot, follow stroke) */
+.toggle-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+.toggle-track {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.toggle-label input { display: none; }
+.toggle-label input:checked + .toggle-track {
+  background: var(--bg-selected);
+  border-color: var(--accent);
+}
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  background: var(--text-dim);
+  border-radius: 50%;
+  transition: transform 0.15s, background 0.15s;
+}
+.toggle-label input:checked + .toggle-track .toggle-thumb {
+  transform: translateX(14px);
+  background: var(--accent);
+}
+
+/* Texture library slot tabs (L1-L7) */
+.texlib-slot-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.texlib-slot-tabs::-webkit-scrollbar { display: none; }
+.texlib-tab {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.texlib-tab:hover { background: var(--bg-hover); color: var(--text); }
+.texlib-tab.active {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 4-map grid (albedo, normal, rough, ao) inside texture library slot */
+.tex-map-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin: 6px 0 4px;
+}
+
+.tex-map-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  background: var(--bg-input);
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.tex-map-cell:hover { border-color: var(--accent); background: var(--bg-hover); border-style: solid; }
+.tex-map-cell.has-texture { border-style: solid; border-color: var(--border-light); }
+
+.tex-map-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  background: var(--bg-dark);
+  border-radius: 2px;
+  background-size: cover;
+  background-position: center;
+}
+
+.tex-map-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-dim);
+}
+
+.tex-map-clear {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.6);
+  border: none;
+  border-radius: 2px;
+  color: var(--text-dim);
+  font-size: 9px;
+  cursor: pointer;
+  padding: 0;
+}
+.tex-map-cell.has-texture .tex-map-clear { display: flex; }
+.tex-map-clear:hover { color: #e55; }
+
 /* Play button — green accent so it stands out */
 .tb-play-btn { color: #5cb85c !important; }
 .tb-play-btn:hover { background: rgba(92, 184, 92, 0.12) !important; }

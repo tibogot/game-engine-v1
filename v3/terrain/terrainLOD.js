@@ -210,7 +210,7 @@ function buildRingGrid(N, step) {
 
 // ── Material ──────────────────────────────────────────────────────────────────
 
-function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation) {
+function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay) {
   const mat = createTileMaterial({
     roughness:     0.95,
     textureScale:  400,
@@ -260,8 +260,10 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   const inBoundsY    = step(float(0), rotBrushUV.y).mul(step(rotBrushUV.y, float(1)));
   const maskOverlay  = texture(uBrushMaskNode, rotBrushUV).r.mul(inBoundsX).mul(inBoundsY);
 
+  // Splat overlay blends on top of base colour, below the cursor ring
+  const baseColor = splatOverlay ? splatOverlay.blendColor(mat.colorNode) : mat.colorNode;
   mat.colorNode = mix(
-    mat.colorNode,
+    baseColor,
     vec3(float(1.0), float(0.95), float(0.2)),
     ring.mul(float(0.9)).add(maskOverlay.mul(float(0.28))),
   );
@@ -272,7 +274,7 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation) {
+export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay) {
   const group  = new THREE.Group();
   const levels = [];
 
@@ -281,7 +283,7 @@ export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrush
     // Level 0 = full grid; levels 1-4 = stitched rings (no overlap, no polygon offset needed).
     const geo     = lod === 0 ? buildFullGrid(GRID_N, step) : buildRingGrid(GRID_N, step);
     const uCenter = uniform(new THREE.Vector2(0, 0));
-    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation);
+    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay);
     const mesh    = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
     mesh.receiveShadow = true;
