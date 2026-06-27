@@ -284,6 +284,7 @@ export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrush
     const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation);
     const mesh    = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
+    mesh.receiveShadow = true;
     group.add(mesh);
     levels.push({ mesh, uCenter });
   }

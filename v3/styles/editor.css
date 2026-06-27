@@ -504,3 +504,169 @@ html, body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+/* Play button — green accent so it stands out */
+.tb-play-btn { color: #5cb85c !important; }
+.tb-play-btn:hover { background: rgba(92, 184, 92, 0.12) !important; }
+.tb-play-btn.active { background: rgba(92, 184, 92, 0.2) !important; color: #5cb85c !important; }
+
+/* Mode bar — top of right-panel Tools tab, always visible when not playing */
+.tools-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-dark);
+  flex-shrink: 0;
+}
+.tools-mode-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  width: 36px;
+}
+
+/* Play stop bar — fixed top overlay while in play mode (mirrors v2) */
+#play-stop-bar {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--toolbar-h);
+  z-index: 600;
+  background: rgba(10, 10, 18, 0.88);
+  border-bottom: 2px solid #5cb85c;
+  backdrop-filter: blur(6px);
+  padding: 0 16px;
+  gap: 12px;
+}
+#play-stop-bar.visible { display: flex; align-items: center; }
+#play-stop-bar > span:first-child {
+  font-size: 11px;
+  font-weight: 700;
+  color: #5cb85c;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.play-stop-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  flex: 1;
+}
+.play-stop-hint kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text);
+}
+.play-stop-primary {
+  padding: 4px 14px;
+  height: 24px;
+  background: #c0392b;
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-family: var(--font);
+  font-weight: 600;
+  cursor: pointer;
+}
+.play-stop-primary:hover { filter: brightness(1.15); }
+
+/* Play panel — inside Tools tab, shown only in play mode */
+#play-panel {
+  flex-shrink: 0;
+}
+
+.play-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: #5cb85c;
+  background: rgba(92, 184, 92, 0.07);
+}
+.play-panel-header i { width: 15px; height: 15px; }
+
+.play-control-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.play-control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.play-control-row kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 1px 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text);
+  text-align: center;
+  flex-shrink: 0;
+}
+.play-control-row .ctrl-icon {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 1px 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text);
+  text-align: center;
+  flex-shrink: 0;
+}
+.play-control-row span:last-child { flex: 1; }
+
+/* Play mode hint bar (shows while pointer is locked) */
+#play-hint {
+  position: fixed;
+  bottom: 28px;
+  left: calc(var(--left-w) + 20px);
+  right: calc(var(--right-w) + 20px);
+  text-align: center;
+  background: rgba(10, 10, 18, 0.75);
+  backdrop-filter: blur(4px);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  pointer-events: none;
+  display: none;
+  z-index: 200;
+}
+#play-hint.visible { display: block; }
+#play-hint kbd {
+  display: inline-block;
+  min-width: 1.4em;
+  padding: 1px 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text);
+  text-align: center;
+}

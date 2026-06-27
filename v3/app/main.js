@@ -14,6 +14,8 @@ import {
 import { buildProceduralHeightmap, DEFAULT_GEN } from "../terrain/proceduralGen.js";
 import { initEditorShell } from "../ui/editorShell.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
+import { createPlayMode, LOD_SNAP } from "../play/playMode.js";
+import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -56,6 +58,8 @@ async function main() {
   });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   viewport.appendChild(renderer.domElement);
 
   const stats = new Stats({ trackGPU: hasTimestamps, trackCPT: true });
@@ -130,7 +134,34 @@ async function main() {
   scene.add(new THREE.AmbientLight(0xffffff, 0.5));
   const sun = new THREE.DirectionalLight(0xfff4e0, 2.0);
   sun.position.set(600, 800, 400);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.normalBias = 0.01;
+  sun.shadow.bias = -0.001;
+  sun.shadow.radius = 4;
   scene.add(sun);
+
+  // ── CSM shadows ────────────────────────────────────────────────────────────
+  // 3 cascades, 80m reach, "practical" split — same config as v2.
+  // lightMargin=200 keeps the shadow bbox from clipping the tall terrain.
+  let csm = null;
+  try {
+    csm = new CSMShadowNode(sun, { cascades: 3, maxFar: 80, mode: "practical", lightMargin: 200 });
+    csm.fade = true;
+    for (let i = 0; i < csm.lights.length; i++) {
+      const sh = csm.lights[i].shadow;
+      sh.mapSize.set(2048, 2048);
+      sh.radius = 4;
+      sh.normalBias = 0.01 * Math.sqrt(i + 1);
+      sh.bias = -0.001 * (i + 1);
+      scene.add(csm.lights[i].target);
+      scene.add(csm.lights[i]);
+    }
+    sun.shadow.shadowNode = csm;
+  } catch (err) {
+    console.warn("[V3] CSMShadowNode init failed; using plain directional shadow.", err);
+    csm = null;
+  }
 
   // ── Terrain + Sculpt ───────────────────────────────────────────────────────
   // heightTexNode is shared: sculptBrush swaps .value to the active ping-pong
@@ -152,6 +183,42 @@ async function main() {
   scene.add(lod.group);
 
   sculpt.replaceHeightData(buildProceduralHeightmap(genParams));
+
+  // ── Capsule preview mesh ───────────────────────────────────────────────────
+  const capsuleMesh = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.4, 1.2, 4, 8),
+    new THREE.MeshLambertMaterial({ color: 0x4a9eff }),
+  );
+  capsuleMesh.visible = false;
+  capsuleMesh.castShadow = true;
+  capsuleMesh.receiveShadow = true;
+  scene.add(capsuleMesh);
+
+  // ── Play mode ──────────────────────────────────────────────────────────────
+  const playPanel      = document.getElementById("play-panel");
+  const playStopBar    = document.getElementById("play-stop-bar");
+  const sculptPanel    = document.getElementById("sculpt-panel");
+  const playStatPos    = document.getElementById("play-stat-pos");
+  const playStatSpeed  = document.getElementById("play-stat-speed");
+  const playStatGround = document.getElementById("play-stat-ground");
+
+  const playMode = createPlayMode({
+    renderer,
+    camera,
+    controls,
+    sampleTerrainHeight: (u, v) => sampleTerrainHeight(u, v),
+    uCursorUV,
+    capsuleMesh,
+    onStartWalking: () => { playHint.classList.add("visible"); },
+    onEnterMenu:    () => { playHint.classList.remove("visible"); },
+    onExit: () => {
+      tbPlay.classList.remove("active");
+      playStopBar.classList.remove("visible");
+      playHint.classList.remove("visible");
+      playPanel.style.display = "none";
+      syncSculptPanelVisibility();
+    },
+  });
 
   // ── UI wiring ──────────────────────────────────────────────────────────────
   const btnRaise  = document.getElementById("btn-raise");
@@ -193,11 +260,16 @@ async function main() {
   const lblTerraceSharp = document.getElementById("lbl-terrace-sharp");
   const slNoiseScale    = document.getElementById("sl-noise-scale");
   const lblNoiseScale   = document.getElementById("lbl-noise-scale");
-  const tbHelp    = document.getElementById("tb-help");
+  const tbHelp          = document.getElementById("tb-help");
+  const tbSculpt        = document.getElementById("tb-sculpt");
+  const tbPlay          = document.getElementById("tb-play");
+  const toolsModeSelect = document.getElementById("tools-mode-select");
   const tbSave    = document.getElementById("tb-save");
   const tbLoad    = document.getElementById("tb-load");
   const tbUndo    = document.getElementById("tb-undo");
   const tbRedo    = document.getElementById("tb-redo");
+  const playHint  = document.getElementById("play-hint");
+  const helpOverlay = document.getElementById("help-overlay");
   const slSize    = document.getElementById("sl-size");
   const lblSize   = document.getElementById("lbl-size");
   const slStr     = document.getElementById("sl-str");
@@ -486,7 +558,58 @@ async function main() {
   // Show soft circle preview immediately on startup.
   updateMaskPreview(defaultMaskTex);
 
-  const helpOverlay = document.getElementById("help-overlay");
+  // ── Editor mode (view / sculpt) ────────────────────────────────────────────
+  let editorMode = "view";
+
+  function syncSculptPanelVisibility() {
+    sculptPanel.style.display = (editorMode === "sculpt" && !playMode.active) ? "" : "none";
+  }
+
+  function setEditorMode(m) {
+    editorMode = m;
+    tbSculpt.classList.toggle("active", m === "sculpt");
+    toolsModeSelect.value = m;
+    if (m === "view") {
+      uCursorUV.value.set(-2, -2);
+      cancelStroke();
+      controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+    } else {
+      controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+    }
+    syncSculptPanelVisibility();
+  }
+
+  function enterPlay() {
+    if (playMode.active) return;
+    playMode.enter();
+    playMode.startWalking(); // request pointer lock immediately (still in click handler)
+    tbPlay.classList.add("active");
+    playStopBar.classList.add("visible");
+    playPanel.style.display = "";
+    sculptPanel.style.display = "none";
+    helpOverlay.classList.remove("visible");
+    tbHelp.classList.remove("active");
+  }
+
+  // View-mode mouse buttons set directly at startup (TDZ guard — cancelStroke
+  // references isPainting declared later; setEditorMode is safe only after that).
+  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+
+  tbSculpt.addEventListener("click", () => setEditorMode("sculpt"));
+  toolsModeSelect.addEventListener("change", () => setEditorMode(toolsModeSelect.value));
+
+  tbPlay.addEventListener("click", () => {
+    if (playMode.active) playMode.exit();
+    else enterPlay();
+  });
+
+  // Click viewport while in play but pointer not locked → re-lock
+  renderer.domElement.addEventListener("click", () => {
+    if (playMode.active && !playMode.walking) playMode.startWalking();
+  });
+
+  document.getElementById("play-stop-btn").addEventListener("click", () => playMode.exit());
+
   tbHelp.addEventListener("click", () => {
     helpOverlay.classList.toggle("visible");
     tbHelp.classList.toggle("active");
@@ -714,6 +837,7 @@ async function main() {
 
   let lastReadbackMs = 0;
   renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "sculpt") return;
     syncPointerMods(e);
     refreshModeIndicator();
     refreshMouse(e);
@@ -732,6 +856,7 @@ async function main() {
 
   // LMB = sculpt. MMB/RMB handled by OrbitControls (orbit / pan).
   renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "sculpt") return;
     if (e.button !== 0) return;
     syncPointerMods(e);
     refreshModeIndicator();
@@ -768,9 +893,15 @@ async function main() {
 
   renderer.domElement.addEventListener("contextmenu", e => e.preventDefault());
 
+  // Clicking the viewport while in play menu state starts walking.
+  renderer.domElement.addEventListener("click", () => {
+    if (playMode.active && !playMode.walking) playMode.startWalking();
+  });
+
   // Use capture phase so our handler fires before OrbitControls' bubble listener.
   // Shift+Scroll = brush size  |  Alt+Scroll = strength  |  plain scroll = zoom (OrbitControls)
   renderer.domElement.addEventListener("wheel", e => {
+    if (playMode.active || editorMode !== "sculpt") return;
     if (!e.shiftKey && !e.altKey) return; // let OrbitControls handle plain scroll
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -800,6 +931,16 @@ async function main() {
   }
 
   window.addEventListener("keydown", e => {
+    if (e.code === "KeyV" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active
+        && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) {
+      setEditorMode("view"); return;
+    }
+    if (e.code === "KeyP" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      if (playMode.active) playMode.exit();
+      else playMode.enter();
+      return;
+    }
     if (e.ctrlKey || e.metaKey) {
       const key = e.key.toLowerCase();
       if (key === "s") {
@@ -826,19 +967,47 @@ async function main() {
   window.addEventListener("resize", () => resizeRenderer());
 
   // ── Loop ───────────────────────────────────────────────────────────────────
+  const _lodSnapVec = new THREE.Vector3();
+  let _lastFrameMs = performance.now();
   renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    const dt  = Math.min((now - _lastFrameMs) / 1000, 0.05);
+    _lastFrameMs = now;
+
     // Reset first — stats-gl patches this to mark the CPU profiling window start.
     renderer.info.reset();
 
-    if (isPainting) {
-      const hit = getUV();
-      if (hit) applySculptStroke(hit.u, hit.v);
+    if (playMode.active) {
+      playMode.update(dt);
+
+      // Live stats in the play panel (throttled — DOM writes are cheap but no need every ms)
+      if (playMode.walking) {
+        const s = playMode.getStats();
+        playStatPos  .textContent = `${s.x}, ${s.y}, ${s.z}`;
+        playStatSpeed.textContent = `${s.speed} m/s`;
+        playStatGround.textContent = s.grounded ? "Yes" : "No";
+      }
+
+      // Center LOD on the player's feet, snapped to the heightmap texel grid
+      // (16 m/texel = 2048 m / 128). Snapping prevents distant LOD rings from
+      // continuously resampling at sub-texel offsets, which causes visible morphing.
+      const pp = playMode.playerPosition;
+      _lodSnapVec.set(
+        Math.round(pp.x / LOD_SNAP) * LOD_SNAP,
+        0,
+        Math.round(pp.z / LOD_SNAP) * LOD_SNAP,
+      );
+      lod.update(_lodSnapVec);
+    } else {
+      if (isPainting) {
+        const hit = getUV();
+        if (hit) applySculptStroke(hit.u, hit.v);
+      }
+      lod.update(controls.target);
+      controls.update();
     }
 
-    // Center LOD on the orbit target, not the camera — terrain stays fixed
-    // while orbiting. Switch to camera.position for first-person play mode.
-    lod.update(controls.target);
-    controls.update();
+    if (csm?.mainFrustum) csm.updateFrustums();
     renderer.render(scene, camera);
 
     // Drain GPU timestamp pools so stats-gl's GPU/CPT panels get real values.
