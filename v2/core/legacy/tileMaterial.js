@@ -15,6 +15,9 @@ import {
   clamp,
   floor,
   abs,
+  max,
+  step,
+  float,
   texture,
   negate,
   positionWorld,
@@ -108,8 +111,12 @@ export function createTileMaterial(options = {}) {
     // objectSpace=true: each mesh has its own independent grid (no alignment across objects).
     // Use normalLocal with objectSpace so projection matches geometry orientation (fixes vertical walls showing lines instead of grid).
     const worldScale = mul(uTextureScale, 0.00125);
-    const n = abs(objectSpace ? normalLocal : normalWorld);
-    const weights = n.div(add(add(n.x, n.y), n.z));
+    const nRaw = abs(objectSpace ? normalLocal : normalWorld);
+    const nLen = add(add(nRaw.x, nRaw.y), nRaw.z);
+    // Vertex-displaced terrain (positionNode) can yield a degenerate normalWorld
+    // at steep orbit / top-down views → zero tri-planar weights → black albedo.
+    const n = mix(vec3(0, 1, 0), nRaw, step(float(1e-4), nLen));
+    const weights = n.div(max(nLen, float(1e-4)));
     const pos = objectSpace ? add(positionLocal, uUvOffset) : positionWorld;
     const uvXZ = pos.xz.mul(worldScale);
     const uvXY = pos.xy.mul(worldScale);

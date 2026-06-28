@@ -35,6 +35,8 @@ import {
   pickSplatmapFile,
 } from "../io/splatmapIO.js";
 import { SPLAT_RES } from "../terrain/splatMap.js";
+import { createSnowSystem } from "../terrain/snowSystem.js";
+import { SnowMap } from "../terrain/snowMap.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { PropStore } from "../tools/propStore.js";
 import { PropInstancer, MAX_PROP_INSTANCES_PER_MESH } from "../tools/propInstancer.js";
@@ -178,7 +180,7 @@ async function main() {
     60,
     viewport.clientWidth / Math.max(viewport.clientHeight, 1),
     0.5,
-    WORLD_SIZE * 4,
+    WORLD_SIZE * 4, // > maxCameraDistance(4000) + terrain LOD radius(4096) ≈ 8096
   );
   camera.position.set(0, 300, 600);
 
@@ -256,6 +258,12 @@ async function main() {
 
   // sculptBrush uploads the CPU heightmap to its RT and sets heightTexNode.value.
   const sculpt = createSculptBrush(renderer, initialTex, heightTexNode, defaultMaskTex);
+
+  // ── Snow system ────────────────────────────────────────────────────────────
+  // heightTexNode.value is now the live GPU RT set by sculptBrush above.
+  const snowSystem = createSnowSystem(renderer, scene, heightTexNode.value);
+  const snowMap    = new SnowMap();
+  snowSystem.setSnowMaskTex(snowMap.tex);
 
   // ── Paint system (splatmap + texture library + overlay) ───────────────────
   const splatMap   = new SplatMap();
@@ -1011,6 +1019,7 @@ async function main() {
 
   const grassPanel = document.getElementById("grass-panel");
   const treePanel  = document.getElementById("tree-panel");
+  const snowPanel  = document.getElementById("snow-panel");
 
   function syncSculptPanelVisibility() {
     sculptPanel.style.display = (editorMode === "sculpt" && !playMode.active) ? "" : "none";
@@ -1042,6 +1051,10 @@ async function main() {
 
   function syncRiver2PanelVisibility() {
     river2Panel.style.display = (editorMode === "river2" && !playMode.active) ? "" : "none";
+  }
+
+  function syncSnowPanelVisibility() {
+    snowPanel.style.display = (editorMode === "snow" && !playMode.active) ? "" : "none";
   }
 
   function applyRiverModeEffects() {
@@ -1097,12 +1110,15 @@ async function main() {
       ensureGrassBuilt();
     } else if (m === "treePaint") {
       sculpt.uRadius.value = treeToolState.brush.radius / WORLD_SIZE;
+    } else if (m === "snow") {
+      sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
     } else if (m === "props" || m === "spline" || m === "river" || m === "river2") {
       uCursorUV.value.set(-2, -2);
       if (m === "river" || m === "river2") void ensureCpuHeightmapFromGpu();
     }
     syncSculptPanelVisibility();
     syncPaintPanelVisibility();
+    syncSnowPanelVisibility();
     syncGrassPanelVisibility();
     syncTreePanelVisibility();
     syncPropsPanelVisibility();
@@ -1122,6 +1138,8 @@ async function main() {
     treeBvh?.ensureBaked();
     if (!cliffBvh.baked) rebakePlayerBvh();
     editorCamera?.onPlayEnter?.();
+    snowSystem.setHeightTex(heightTexNode.value);
+    snowSystem.setVisible(true);
     playMode.enter({ editorRelaxedPointer: !immersive });
     try { renderer.domElement.focus({ preventScroll: true }); } catch (_) { renderer.domElement.focus(); }
     syncPlayEditorChrome(immersive);
@@ -1131,6 +1149,7 @@ async function main() {
     playPanel.style.display = "";
     sculptPanel.style.display = "none";
     paintPanel.style.display = "none";
+    snowPanel.style.display  = "none";
     grassPanel.style.display = "none";
     treePanel.style.display = "none";
     propsPanel.style.display = "none";
@@ -1144,6 +1163,8 @@ async function main() {
 
   function exitPlay() {
     if (!playMode.active) return;
+    snowSystem.setVisible(false);
+    snowSystem.resetTrail();
     playMode.exit();
   }
 
@@ -1550,6 +1571,18 @@ async function main() {
           Math.round(pp.z / LOD_SNAP) * LOD_SNAP,
         );
         lod.update(_lodSnapVec);
+
+        // Snow deformation — update trail RT and anchor before the main render
+        snowSystem.updateAnchor(pp.x, pp.z);
+        const _snowStats    = playMode.getStats();
+        const _snowGrounded = !!_snowStats.grounded && _snowStats.grounded !== "fly";
+        // Stamp radius scales with agent footprint size
+        { const _mm = playMode.moveMode;
+          snowSystem.params.stampRadius =
+            (_mm === "car" || _mm === "stunt") ? 1.2 :
+            _mm === "ball" ? 0.5 : 0.3; }
+        snowSystem.tick(pp.x, pp.z, _snowGrounded);
+        snowSystem.updateSunDir(worldEnv?.getSunDir?.());
       } else {
         if (isPainting && editorMode === "sculpt") {
           const hit = getUV();

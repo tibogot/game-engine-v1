@@ -131,6 +131,7 @@
               <option value="spline">Spline</option>
               <option value="river">River</option>
               <option value="river2">River+ (carve)</option>
+              <option value="snow">Snow</option>
             </select>
             <p class="mode-hint" id="view-nav-hint" style="margin-top:6px">View: drag to orbit · scroll to zoom</p>
           </div>
@@ -903,6 +904,95 @@
             </div>
 
         </div><!-- /#paint-panel -->
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- SNOW panel — shown only in snow mode                       -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <div id="snow-panel" style="display:none">
+
+          <!-- BRUSH -------------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header">Brush</div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Radius</span>
+                <input type="range" class="prop-slider" id="snow-sl-radius" min="5" max="400" step="1" value="80">
+                <span class="prop-value" id="snow-lbl-radius">80m</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Strength</span>
+                <input type="range" class="prop-slider" id="snow-sl-strength" min="1" max="100" step="1" value="50">
+                <span class="prop-value" id="snow-lbl-strength">0.50</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Falloff</span>
+                <input type="range" class="prop-slider" id="snow-sl-falloff" min="5" max="40" step="1" value="20">
+                <span class="prop-value" id="snow-lbl-falloff">2.0</span>
+              </div>
+              <div style="display:flex;gap:4px;margin-top:4px">
+                <button type="button" class="action-btn" id="snow-btn-fill">Fill snow</button>
+                <button type="button" class="action-btn" id="snow-btn-clear">Clear snow</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- SURFACE ------------------------------------------------ -->
+          <div class="inspector-section">
+            <div class="section-header">Surface</div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Base depth</span>
+                <input type="range" class="prop-slider" id="snow-sl-base" min="0" max="80" step="1" value="30">
+                <span class="prop-value" id="snow-lbl-base">0.30m</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Noise amp</span>
+                <input type="range" class="prop-slider" id="snow-sl-noise" min="0" max="50" step="1" value="12">
+                <span class="prop-value" id="snow-lbl-noise">0.12m</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- DEFORMATION ------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header">Deformation</div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Groove</span>
+                <input type="range" class="prop-slider" id="snow-sl-groove" min="0" max="100" step="1" value="100">
+                <span class="prop-value" id="snow-lbl-groove">1.00</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Rim scale</span>
+                <input type="range" class="prop-slider" id="snow-sl-rim" min="0" max="50" step="1" value="14">
+                <span class="prop-value" id="snow-lbl-rim">0.14</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Regrow rate</span>
+                <input type="range" class="prop-slider" id="snow-sl-regrow" min="0" max="100" step="1" value="0">
+                <span class="prop-value" id="snow-lbl-regrow">0.000</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- LOOK --------------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header">Look</div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Glitter</span>
+                <input type="range" class="prop-slider" id="snow-sl-glitter" min="0" max="80" step="1" value="20">
+                <span class="prop-value" id="snow-lbl-glitter">2.0</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Sparkle freq</span>
+                <input type="range" class="prop-slider" id="snow-sl-freq" min="10" max="500" step="10" value="200">
+                <span class="prop-value" id="snow-lbl-freq">200</span>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /#snow-panel -->
 
         <!-- ═══════════════════════════════════════════════════════════ -->
         <!-- GRASS panel — shown only in grass mode                     -->

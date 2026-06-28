@@ -22,7 +22,7 @@ import {
   pow, sin, cos, atan, asin, sign, floor, fract, length, abs, exp, sub, mul,
 } from "three/tsl";
 
-// 4000 (not the lab's 9000): v3's camera far-plane is WORLD_SIZE*2 = 4096, and
+// 4000 (not the lab's 9000): v3's camera far-plane is WORLD_SIZE*4 = 8192, and
 // the dome follows the camera, so a 9000 radius is fully beyond far → clipped to
 // a black sky. Matches v2's proven value.
 const SKY_RADIUS = 4000;
@@ -588,14 +588,16 @@ export function createDayNightSky() {
   material.colorNode = skyColorNode();
   material.side = THREE.BackSide;
   material.depthWrite = false;
-  // depthTest ON + drawn AFTER the opaques: terrain/ocean already wrote depth,
-  // so early-Z kills the per-pixel atmosphere raymarch everywhere the sky is
-  // occluded — the dome only pays for visible sky pixels.
-  material.depthTest = true;
+  // Draw BEFORE terrain (renderOrder -2, depthTest off) — same as v2. Rendering
+  // the dome after opaques with depthTest ON breaks when zoomed out: max camera
+  // distance (4000) + LOD radius (4096) ≈ 8096 m, but SKY_RADIUS is only 4000,
+  // so the sky shell sits IN FRONT of distant terrain and paints it black with
+  // the below-horizon term. Terrain at renderOrder 0 always wins over the sky.
+  material.depthTest = false;
   material.fog = false;
 
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(SKY_RADIUS, 32, 16), material);
-  mesh.renderOrder = 10; // after the default-order opaques (before transparents)
+  mesh.renderOrder = -2;
   mesh.frustumCulled = false;
   mesh.name = "DayNightSkyDome";
 

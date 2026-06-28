@@ -365,13 +365,16 @@ export async function createWorldEnvironment({
 
   const _hfVec = positionWorld.sub(cameraPosition);
   const _hfDist = length(_hfVec);
-  const _hfRayY = _hfVec.y.div(_hfDist.max(1e-4));
+  // Height fog integrates along the view ray toward the sky. Downward rays (top-down
+  // orbit / zoom-out) made _hfK deeply negative → exp(+|k|) overflow → NaN fog factor
+  // → terrain washed to black even with height fog "disabled" (NaN * 0 = NaN in WGSL).
+  const _hfRayY = _hfVec.y.div(_hfDist.max(1e-4)).max(0);
   const _hfK = uHFogFalloff.mul(_hfDist).mul(_hfRayY);
   const _hfFlat = _hfK.abs().lessThan(1e-4);
   const _hfG = select(
     _hfFlat,
     float(1),
-    _hfK.negate().exp().oneMinus().div(select(_hfFlat, float(1), _hfK)),
+    _hfK.negate().min(float(50)).exp().oneMinus().div(_hfK.max(1e-4)),
   );
   const _hfCamTerm = uHFogFalloff
     .mul(cameraPosition.y.sub(uHFogHeight))
@@ -379,8 +382,10 @@ export async function createWorldEnvironment({
     .min(50)
     .exp();
   const _hfTau = uHFogDensity.mul(_hfCamTerm).mul(_hfDist).mul(_hfG);
-  const _hFactor = _hfTau.negate().exp().oneMinus().mul(uHFogEnabled);
-  const _dFactor = densityFogFactor(uDFogDensity).mul(uDFogEnabled);
+  const _hFactorRaw = _hfTau.negate().min(50).exp().oneMinus();
+  const _hFactor = select(uHFogEnabled.greaterThan(0.5), _hFactorRaw, float(0));
+  const _dFactorRaw = densityFogFactor(uDFogDensity);
+  const _dFactor = select(uDFogEnabled.greaterThan(0.5), _dFactorRaw, float(0));
 
   const interiorRegistry = new InteriorVolumeRegistry();
   const interiorNodes = createInteriorLightingNodes(interiorRegistry);
