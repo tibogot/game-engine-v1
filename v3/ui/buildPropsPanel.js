@@ -83,6 +83,7 @@ function _section(parent, title, expanded = true) {
   sec.className = "inspector-section";
   const hdr = document.createElement("div");
   hdr.className = "section-header" + (expanded ? "" : " collapsed");
+  hdr.setAttribute("data-toggle", "");
   hdr.innerHTML = _arrowSvg + " " + title;
   const body = document.createElement("div");
   body.className = "section-body" + (expanded ? "" : " hidden");
@@ -232,7 +233,7 @@ panel.innerHTML = "";
       stampHint.style.cssText =
         "margin:6px 0 0; font-size:11px; color:var(--text-dim); line-height:1.35;";
       stampHint.textContent =
-        "Place mode reuses the last rotation + scale per prop type. The cyan ghost shows when nothing is selected — right-click empty space to deselect and preview the next placement.";
+        "Place mode reuses the last rotation + scale per prop type. After placing, use W/E/R on the gizmo to move, rotate, or scale. Right-click empty space (or Esc) to deselect and preview the next placement. Hold Shift while clicking to place another copy without deselecting.";
       modeBody.appendChild(stampHint);
 
       // --- Active slot ---

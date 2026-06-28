@@ -17,7 +17,11 @@ import { initEditorShell } from "../ui/editorShell.js";
 import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
 import { createPlayMode, LOD_SNAP } from "../play/playMode.js";
-import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
+import { V2_CONFIG } from "../../v2/app/config.js";
+import { createPerfState, tickPerf } from "../../v2/app/state/toolState.js";
+import { createWorldToolState } from "./state/worldState.js";
+import { createWorldEnvironment } from "./worldEnvironment.js";
+import { buildWorldPanel } from "../ui/buildWorldPanel.js";
 import { createHumanCharacter } from "../play/humanCharacter.js";
 import { SplatMap } from "../terrain/splatMap.js";
 import { createSplatOverlay } from "../terrain/splatOverlayTsl.js";
@@ -156,12 +160,15 @@ async function main() {
   );
   camera.position.set(0, 300, 600);
 
+  let worldEnv = null;
+
   function resizeRenderer() {
     const w = viewport.clientWidth;
     const h = viewport.clientHeight;
     camera.aspect = w / Math.max(h, 1);
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    worldEnv?.setSize(w, h);
     layoutStatsOverlay();
   }
 
@@ -188,39 +195,6 @@ async function main() {
   tc.enabled = false;
   tc.visible = false;
   scene.add(tc.getHelper());
-
-  // ── Lights ─────────────────────────────────────────────────────────────────
-  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-  const sun = new THREE.DirectionalLight(0xfff4e0, 2.0);
-  sun.position.set(600, 800, 400);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.normalBias = 0.01;
-  sun.shadow.bias = -0.001;
-  sun.shadow.radius = 4;
-  scene.add(sun);
-
-  // ── CSM shadows ────────────────────────────────────────────────────────────
-  // 3 cascades, 80m reach, "practical" split — same config as v2.
-  // lightMargin=200 keeps the shadow bbox from clipping the tall terrain.
-  let csm = null;
-  try {
-    csm = new CSMShadowNode(sun, { cascades: 3, maxFar: 80, mode: "practical", lightMargin: 200 });
-    csm.fade = true;
-    for (let i = 0; i < csm.lights.length; i++) {
-      const sh = csm.lights[i].shadow;
-      sh.mapSize.set(2048, 2048);
-      sh.radius = 4;
-      sh.normalBias = 0.01 * Math.sqrt(i + 1);
-      sh.bias = -0.001 * (i + 1);
-      scene.add(csm.lights[i].target);
-      scene.add(csm.lights[i]);
-    }
-    sun.shadow.shadowNode = csm;
-  } catch (err) {
-    console.warn("[V3] CSMShadowNode init failed; using plain directional shadow.", err);
-    csm = null;
-  }
 
   // ── Terrain + Sculpt ───────────────────────────────────────────────────────
   // heightTexNode is shared: sculptBrush swaps .value to the active ping-pong
@@ -289,6 +263,60 @@ async function main() {
       syncEditorOrbitEnabled();
     },
   });
+
+  const worldToolState = createWorldToolState();
+  const editorConfig = {
+    world: { size: WORLD_SIZE },
+    lod: { ...V2_CONFIG.lod },
+  };
+  const perf = createPerfState();
+  let splineSys = null;
+
+  function getTerrainMeshesForWorld() {
+    const out = [];
+    lod.group.traverse((o) => { if (o.isMesh) out.push(o); });
+    return out;
+  }
+
+  worldEnv = await createWorldEnvironment({
+    scene,
+    renderer,
+    camera,
+    controls,
+    playMode,
+    toolState: worldToolState,
+    heightTex: initialTex,
+    terrainSize: WORLD_SIZE,
+    getSplineSystem: () => splineSys,
+    getTerrainMeshes: getTerrainMeshesForWorld,
+  });
+
+  function buildWorldPanelUi() {
+    buildWorldPanel({
+      toolState: worldToolState,
+      config: editorConfig,
+      perf,
+      syncCsm: () => worldEnv?.syncCsm(),
+      setCsmEnabled: (on) => worldEnv?.setCsmEnabled(on),
+      applyPostFxState: () => worldEnv?.applyPostFxState(),
+      syncFog: () => {
+        worldEnv?.syncFog();
+        worldEnv?.driveFogSun();
+      },
+      applySkyMode: (mode, prev) => worldEnv?.applySkyMode(mode, prev),
+      importHdr: () => worldEnv?.importHdr(),
+      setTimeOfDay: (t) => worldEnv?.setTimeOfDay(t),
+      rebuildProceduralSkyEnv: () => worldEnv?.rebuildProceduralSkyEnv(),
+      rebuildSkyEnv: () => worldEnv?.rebuildSkyEnv(),
+      syncInteriorUniforms: () => worldEnv?.syncInteriorUniforms(),
+      rebuildInteriorVolumes: () => worldEnv?.rebuildInteriorVolumes(),
+      worldOceanChanged: () => worldEnv?.worldOceanChanged(),
+      onConfigChanged: () => {},
+      ui: { refreshLiveSliders: () => {} },
+    });
+    if (typeof lucide !== "undefined") lucide.createIcons();
+  }
+  buildWorldPanelUi();
 
   // ── Grass system ───────────────────────────────────────────────────────────
   const grassTerrainData = new GrassTerrainData();
@@ -381,8 +409,8 @@ async function main() {
   }
 
   function syncGrassUniforms() {
-    if (!grassRings) return;
-    const sunDir = new THREE.Vector3().setFromMatrixColumn(sun.matrixWorld, 2).normalize();
+    if (!grassRings || !worldEnv) return;
+    const sunDir = worldEnv.getEffectiveLightDir();
     for (const r of grassRings) r.syncFromState(grassState, sunDir);
     syncHybridGrassLod(grassRings, grassState);
   }
@@ -1210,7 +1238,8 @@ async function main() {
   const _noopUpdate = { update() {} };
   let propInstancer = _noopUpdate;
   let livePropManager = _noopUpdate;
-  let splineSys = _noopUpdate;
+  // splineSys assigned below (SplineSystem); starts as noop until wired.
+  if (!splineSys) splineSys = _noopUpdate;
   let propLod = { lod0Distance: 60, lod1Distance: 150, fadeOutDistance: 500, castShadow: true };
 
   // True while thumbnail bake / readback owns the shared WebGPU renderer.
@@ -1245,7 +1274,7 @@ async function main() {
   // can show a black viewport until async compile finishes (or fail silently).
   try {
     await renderer.compileAsync(scene, camera);
-    renderer.render(scene, camera);
+    worldEnv.renderFrame(0);
   } catch (err) {
     console.warn("[V3] Pipeline precompile failed:", err);
   }
@@ -1299,15 +1328,21 @@ async function main() {
       propInstancer.update(camera, propLod);
       livePropManager.update(dt);
       splineSys.update(dt);
+
+      tickPerf(perf, now, dt * 1000);
+      perf.activeChunks = lod.group.children.length;
+      worldEnv?.updateFrame(dt);
     } catch (err) {
       if (++_loopErrors === 1) console.error("[V3] Frame update error:", err);
     }
 
     try {
-      if (csm?.mainFrustum) csm.updateFrustums();
-      // Thumbnail bake can leave a render target bound — always draw to the viewport.
       renderer.setRenderTarget(null);
-      if (!_rendererSideWork) renderer.render(scene, camera);
+      if (!_rendererSideWork && worldEnv) {
+        worldEnv.renderFrame(dt);
+      } else if (!_rendererSideWork) {
+        renderer.render(scene, camera);
+      }
     } catch (err) {
       if (++_loopErrors === 1) {
         console.error("[V3] Render error:", err);
@@ -2210,8 +2245,9 @@ async function main() {
     propStore,
     getWorldHeight,
     getRoadSegments: () => [],
-    onVolumesChange: () => {},
+    onVolumesChange: () => worldEnv?.rebuildInteriorVolumes(),
   });
+  worldEnv?.rebuildInteriorVolumes();
 
   _onLeaveSplineMode = () => {
     splineSys.dragging = false;
@@ -2237,6 +2273,7 @@ async function main() {
     _gizmoTarget = "prop";
     propSys.recordStampFromInstance(instIdx);
     _onPropSelectionChanged?.(instIdx);
+    propPlacementPreview.hide();
   }
 
   function deactivatePropSelection() {
@@ -2267,6 +2304,14 @@ async function main() {
       playMode.active ||
       tc.dragging
     ) {
+      _propPreviewHitValid = false;
+      propPlacementPreview.hide();
+      return;
+    }
+    // While a prop is selected (gizmo active), edit — don't show the next-placement ghost.
+    // Hold Shift to preview/place another copy (rapid placement).
+    const shiftPlace = !!_lastMouseEvent?.shiftKey;
+    if (propInstancer.hasSelection && !shiftPlace) {
       _propPreviewHitValid = false;
       propPlacementPreview.hide();
       return;
@@ -2483,7 +2528,7 @@ async function main() {
     toolState: splineToolState,
     splineSystem: splineSys,
     getProceduralObjectOptions: () => PROCEDURAL_OBJECT_OPTIONS,
-    rebuildInteriorVolumes: () => {},
+    rebuildInteriorVolumes: () => worldEnv?.rebuildInteriorVolumes(),
     splineChanged: () => {
       splineSys._rebuildVisual();
       if (editorMode === "spline") {
@@ -2558,10 +2603,12 @@ async function main() {
   renderer.domElement.addEventListener("mousedown", e => {
     if (playMode.active || editorMode !== "props") return;
     if (e.button !== 0 || tc.dragging) return;
-    // Don't steal LMB when the transform gizmo is active — user may be orbiting near the gizmo
-    if (_gizmoTarget === "prop" && tc.enabled) return;
 
     if (propState.placementMode === "place") {
+      const shiftPlace = e.shiftKey;
+      // Selected → transform with gizmo (W/E/R). LMB on terrain does not place another.
+      if (propInstancer.hasSelection && !shiftPlace) return;
+
       const hit = getTerrainHitWorld(e);
       if (!hit) return;
       const slot = propSlots[propState.activeSlot];

@@ -1398,15 +1398,11 @@
         <!-- SPLINE panel — built dynamically by buildSplinePanel() (v2 layout) -->
         <div id="spline-panel" style="display:none"></div>
 
-        <!-- World (lighting, sky, sun — coming later) -->
-        <div class="tab-content" id="tab-world">
-          <div class="empty-panel">
-            <i data-lucide="sun"></i>
-            <p>Sun, sky, and lighting settings will live here.</p>
-          </div>
-        </div>
+      </div><!-- /#tab-tools -->
 
-      </div>
+        <!-- World panel — sibling of tab-tools (must NOT nest inside tab-tools) -->
+        <div class="tab-content" id="tab-world"></div>
+
     </div>
 
     <!-- Play stop bar — fixed top overlay shown while in play mode (like v2) -->

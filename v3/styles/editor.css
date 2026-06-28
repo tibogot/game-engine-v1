@@ -243,6 +243,28 @@ html, body {
 .section-body { padding: 6px 12px 10px; }
 .section-body.hidden { display: none; }
 
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  min-height: 26px;
+}
+.info-label {
+  width: 90px;
+  min-width: 90px;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: right;
+  padding-right: 4px;
+}
+.info-value {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 .prop-row {
   display: flex;
   align-items: center;
@@ -324,8 +346,19 @@ html, body {
   font-family: var(--font-mono);
   text-align: right;
   outline: none;
+  cursor: text;
 }
 .prop-num-input:focus { border-color: var(--accent); }
+.prop-color-wrap { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.prop-color {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: none;
+  cursor: pointer;
+}
 .prop-num-input::-webkit-outer-spin-button,
 .prop-num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .prop-num-input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
