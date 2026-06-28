@@ -126,8 +126,11 @@
               <option value="sculpt">Sculpt</option>
               <option value="paint">Paint</option>
               <option value="grass">Grass</option>
+              <option value="treePaint">Trees (T)</option>
               <option value="props">Props</option>
               <option value="spline">Spline</option>
+              <option value="river">River</option>
+              <option value="river2">River+ (carve)</option>
             </select>
             <p class="mode-hint" id="view-nav-hint" style="margin-top:6px">View: drag to orbit · scroll to zoom</p>
           </div>
@@ -150,9 +153,29 @@
                   <span class="insp-value" id="play-stat-speed">—</span>
                 </div>
                 <div class="prop-row">
+                  <span class="prop-label">Mode</span>
+                  <span class="insp-value" id="play-stat-mode">—</span>
+                </div>
+                <div class="prop-row">
                   <span class="prop-label">Grounded</span>
                   <span class="insp-value" id="play-stat-ground">—</span>
                 </div>
+              </div>
+            </div>
+            <div class="inspector-section">
+              <div class="section-header">Debug</div>
+              <div class="section-body">
+                <div class="prop-row">
+                  <span class="prop-label">BVH collision</span>
+                  <div class="prop-value">
+                    <button type="button" class="prop-toggle" id="play-bvh-debug-toggle" data-bvh-debug-toggle aria-label="Show BVH collision wireframes">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    </button>
+                  </div>
+                </div>
+                <p style="margin:6px 0 0;font-size:11px;color:var(--text-dim);line-height:1.35">
+                  <span style="color:#44ff88">Green</span> props/cliffs · <span style="color:#ff8844">Orange</span> tree trunks
+                </p>
               </div>
             </div>
             <div class="inspector-section">
@@ -163,6 +186,8 @@
                   <div class="play-control-row"><kbd>Shift</kbd><span>Sprint</span></div>
                   <div class="play-control-row"><kbd>Space</kbd><span>Jump</span></div>
                   <div class="play-control-row"><span class="ctrl-icon">Mouse</span><span>Look / orbit</span></div>
+                  <div class="play-control-row"><kbd>G</kbd><span>Hold = mode wheel · tap = cycle</span></div>
+                  <div class="play-control-row"><kbd>1</kbd>–<kbd>4</kbd><span>Capsule / Character / Flight / Husky</span></div>
                   <div class="play-control-row"><kbd>Esc</kbd><span>Release cursor</span></div>
                 </div>
               </div>
@@ -1391,12 +1416,19 @@
 
         </div><!-- /#grass-panel -->
 
+        <!-- TREE panel — built dynamically by buildTreePanel() (v2 layout) -->
+        <div id="tree-panel" style="display:none"></div>
+
         <!-- ═══════════════════════════════════════════════════════════ -->
         <!-- PROPS panel — built dynamically by buildPropsPanel() (v2 layout) -->
         <div id="props-panel" style="display:none"></div>
 
         <!-- SPLINE panel — built dynamically by buildSplinePanel() (v2 layout) -->
         <div id="spline-panel" style="display:none"></div>
+
+        <!-- RIVER panels -->
+        <div id="river-panel" style="display:none"></div>
+        <div id="river2-panel" style="display:none"></div>
 
       </div><!-- /#tab-tools -->
 
@@ -1414,7 +1446,8 @@
 
     <!-- Walking HUD (minimal bar shown only while pointer is locked) -->
     <div id="play-hint">
-      <kbd>WASD</kbd> move &nbsp;·&nbsp; <kbd>Space</kbd> jump &nbsp;·&nbsp; <kbd>Shift</kbd> run &nbsp;·&nbsp; <kbd>Esc</kbd> release cursor
+      <kbd>WASD</kbd> move &nbsp;·&nbsp; <kbd>Space</kbd> jump &nbsp;·&nbsp; <kbd>Shift</kbd> run &nbsp;·&nbsp;
+      <kbd>G</kbd> modes &nbsp;·&nbsp; <kbd>1</kbd>–<kbd>4</kbd> switch &nbsp;·&nbsp; <kbd>Esc</kbd> release cursor
     </div>
 
     <!-- Floating shortcuts / docs overlay (toggled by toolbar ? button) -->

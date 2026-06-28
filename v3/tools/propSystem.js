@@ -5,7 +5,7 @@ import { shouldApplyStroke } from "../../v2/tools/sculpt/brushModel.js";
  * V2-compatible props tool: Place (click + stamp) and Paint (brush scatter + Alt erase).
  */
 export class PropSystem {
-  constructor({ propState, propSlots, propBrush, propStore, propInstancer, getWorldHeight, worldSize }) {
+  constructor({ propState, propSlots, propBrush, propStore, propInstancer, getWorldHeight, worldSize, cliffBvh = null }) {
     this.propState = propState;
     this.propSlots = propSlots;
     this.propBrush = propBrush;
@@ -13,6 +13,7 @@ export class PropSystem {
     this.instancer = propInstancer;
     this.getWorldHeight = getWorldHeight;
     this.worldSize = worldSize;
+    this.bvh = cliffBvh;
 
     this._undoStack = [];
     this._redoStack = [];
@@ -75,6 +76,7 @@ export class PropSystem {
     this._pushUndo(before);
     this.recordStampFromInstance(instIdx);
     this.instancer.select(instIdx);
+    if (this.bvh) this.bvh.invalidate();
     return instIdx;
   }
 
@@ -92,6 +94,7 @@ export class PropSystem {
     this.instancer.clearSelection();
     this.store.removeInstance(idx);
     this._pushUndo(before);
+    if (this.bvh) this.bvh.invalidate();
   }
 
   handleDuplicate() {
@@ -103,6 +106,7 @@ export class PropSystem {
     const newIdx = this.store.duplicateInstance(srcIdx);
     this.recordStampFromInstance(newIdx);
     this._pushUndo(before);
+    if (this.bvh) this.bvh.invalidate();
     return newIdx;
   }
 
@@ -115,6 +119,7 @@ export class PropSystem {
       this.instancer.syncFromProxy();
       this.recordStampFromInstance(this.instancer.selectedIdx);
     }
+    if (this.bvh) this.bvh.invalidate();
   }
 
   beginStroke(hitPoint, event = {}) {
@@ -188,6 +193,7 @@ export class PropSystem {
       this._pushUndo(this._beforeSnap);
       this._beforeSnap = null;
     }
+    if (this.bvh) this.bvh.invalidate();
   }
 
   clearAll() {
@@ -195,6 +201,7 @@ export class PropSystem {
     this.instancer.clearSelection();
     this.store.clear();
     this._pushUndo(before);
+    if (this.bvh) this.bvh.invalidate();
   }
 
   undo() {
@@ -203,6 +210,7 @@ export class PropSystem {
     this.instancer.clearSelection();
     this.store.restoreFromSnapshot(cmd.before);
     this._redoStack.push(cmd);
+    if (this.bvh) this.bvh.invalidate();
   }
 
   redo() {
@@ -211,6 +219,7 @@ export class PropSystem {
     this.instancer.clearSelection();
     this.store.restoreFromSnapshot(cmd.after);
     this._undoStack.push(cmd);
+    if (this.bvh) this.bvh.invalidate();
   }
 
   get canUndo() { return this._undoStack.length > 0; }

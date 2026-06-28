@@ -31,6 +31,11 @@ export class CliffBvh {
     this.baked = false;
   }
 
+  /** Merged collision mesh — for editor BVH debug wireframes only. */
+  getCollisionGeometry() {
+    return this.baked && this._bvh ? this._bvh.geometry : null;
+  }
+
   bake(terrainStore, config, extraStores) {
     const positions = [];
     const indices = [];

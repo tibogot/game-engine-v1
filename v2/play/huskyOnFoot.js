@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { DEFAULT_CAPSULE_PARAMS } from "./onFootCapsule.js";
 
-export const HUSKY_MODEL = "../models/Husky.gltf";
+export const HUSKY_MODEL = "../models/Husky_compressed.glb";
 export const HUSKY_HEIGHT = 1.2;
 
 export const HUSKY_CAPSULE_DEFAULTS = {
@@ -24,9 +24,10 @@ const _flatUp = new THREE.Vector3(0, 1, 0);
  * Physics live in PlayMode's shared CapsuleController; this class owns visuals + clips.
  */
 export class HuskyOnFoot {
-  constructor({ scene, loader, excludeFromReflection }) {
+  constructor({ scene, loader, excludeFromReflection, modelUrl = HUSKY_MODEL }) {
     this.scene = scene;
     this.loader = loader;
+    this._modelUrl = modelUrl;
     this._excludeFromReflection = excludeFromReflection;
 
     this.root = null;
@@ -58,7 +59,7 @@ export class HuskyOnFoot {
 
   load(onReady) {
     this.loader.load(
-      HUSKY_MODEL,
+      this._modelUrl,
       (gltf) => {
         const model = gltf.scene;
         model.traverse((o) => {
@@ -126,10 +127,10 @@ export class HuskyOnFoot {
 
         this.loaded = true;
         onReady?.();
-        console.log("[V2] Husky loaded");
+        console.log(`[Play] Husky loaded (${this._modelUrl})`);
       },
       undefined,
-      (err) => console.warn("[V2] Husky load failed:", err),
+      (err) => console.warn(`[Play] Husky load failed (${this._modelUrl}):`, err),
     );
   }
 

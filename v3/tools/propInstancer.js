@@ -6,6 +6,7 @@ const _hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
 const _boxColor  = new THREE.Color(0xff8800);
 
 const MAX_INSTANCES = 4096;
+export { MAX_INSTANCES as MAX_PROP_INSTANCES_PER_MESH };
 const CULL_MARGIN   = 12;
 const LOD_HYST      = 0.1;
 const TIER_UNSET    = 255;

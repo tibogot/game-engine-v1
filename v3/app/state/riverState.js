@@ -1,0 +1,41 @@
+/** River / River+ toolState slices — same defaults as v2 createToolState(). */
+export function createRiverToolState() {
+  return {
+    river: {
+      width: 8,
+      segments: 240,
+      heightOffset: 0.12,
+      selectedPointY: 0,
+      showHandles: true,
+      activeRiverIndex: 0,
+      closed: false,
+      shaderStyle: "Basic",
+      shallowColor: "#5dbfaa",
+      deepColor: "#1a4a6a",
+      highlightColor: "#c8ecff",
+      foamColor: "#ffffff",
+      foamWidth: 0.18,
+      opacity: 0.88,
+      flowSpeed: 0.15,
+    },
+    river2: {
+      width: 8,
+      segments: 240,
+      heightOffset: 0.08,
+      carveDepth: 1.5,
+      carveShoulder: 12,
+      selectedPointY: 0,
+      showHandles: true,
+      activeRiverIndex: 0,
+      closed: false,
+      shaderStyle: "Basic",
+      shallowColor: "#5dbfaa",
+      deepColor: "#1a4a6a",
+      highlightColor: "#c8ecff",
+      foamColor: "#ffffff",
+      foamWidth: 0.18,
+      opacity: 0.88,
+      flowSpeed: 0.15,
+    },
+  };
+}

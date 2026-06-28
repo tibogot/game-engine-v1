@@ -3,6 +3,24 @@ import { createJumpRampGeometry } from "../../v2/core/props/jumpRampGeometry.js"
 
 const DEG    = Math.PI / 180;
 const _dummy = new THREE.Object3D();
+const _boxCenter = new THREE.Vector3();
+const _proxyMat = new THREE.Matrix4();
+const _centerMat = new THREE.Matrix4();
+
+/** One box (12 tris) per prop instance for BVH — not full render mesh × instance count. */
+function _proxyGeoFromMergedBox(mergedBox) {
+  const size = new THREE.Vector3();
+  mergedBox.getSize(size);
+  size.x = Math.max(size.x, 0.001);
+  size.y = Math.max(size.y, 0.001);
+  size.z = Math.max(size.z, 0.001);
+  return new THREE.BoxGeometry(size.x, size.y, size.z);
+}
+
+function _ensureProxyGeo(type) {
+  if (!type?.mergedBox || type.proxyGeo) return;
+  type.proxyGeo = _proxyGeoFromMergedBox(type.mergedBox);
+}
 
 // ── Primitive geometry factory ────────────────────────────────────────────────
 const PRIMITIVE_SHAPES = ["Cube","Sphere","Cylinder","Plane","Cone","Torus","Jump ramp"];
@@ -56,6 +74,7 @@ export class PropStore {
     if (entries.length === 0) return -1;
     const idx = this.types.length;
     this.types.push({ name, entries, lod1Entries: null, lod2Entries: null, mergedBox, isPrimitive: false, live: false });
+    _ensureProxyGeo(this.types[idx]);
     return idx;
   }
 
@@ -110,6 +129,7 @@ export class PropStore {
       builtin: true,
       primShape: shapeName,
     });
+    _ensureProxyGeo(this.types[idx]);
     return idx;
   }
 
@@ -185,6 +205,25 @@ export class PropStore {
     _dummy.scale.set(inst.sx, inst.sy, inst.sz);
     _dummy.updateMatrix();
     return _dummy.matrix;
+  }
+
+  /**
+   * BVH hook — one axis-aligned box proxy per static instance (12 tris), using
+   * each type's merged bounds. Matches propInstancer hitbox placement.
+   */
+  forEachMeshInstance(cb) {
+    for (const inst of this.instances) {
+      const type = this.types[inst.typeIdx];
+      if (!type || type.live) continue;
+      _ensureProxyGeo(type);
+      if (!type.proxyGeo) continue;
+
+      const M = this.computeInstanceMatrix(inst);
+      type.mergedBox.getCenter(_boxCenter);
+      _centerMat.makeTranslation(_boxCenter.x, _boxCenter.y, _boxCenter.z);
+      _proxyMat.multiplyMatrices(M, _centerMat);
+      cb(type.proxyGeo, _proxyMat);
+    }
   }
 
   hasNearby(px, pz, minDist) {

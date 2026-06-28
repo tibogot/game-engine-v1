@@ -511,6 +511,48 @@ export function registerGlbCollectibleKind(name, gltfScene, opts = {}) {
 
 export const COLLECTIBLE_KINDS = new Set(["coin", "heart", "key"]);
 
+/** Shared mesh + material for GPU instancing (coin / heart / key). */
+export function getCollectibleInstancingAssets(kind) {
+  switch (kind) {
+    case "coin": {
+      const { geo, mat } = _coinAssets();
+      return {
+        geometry: geo,
+        material: mat,
+        kind: "coin",
+        defaults: COIN_DEFAULTS,
+        baseY: (p) => p.radius + 0.2,
+      };
+    }
+    case "heart": {
+      const { geo, mat } = _heartAssets();
+      return {
+        geometry: geo,
+        material: mat,
+        kind: "heart",
+        defaults: HEART_DEFAULTS,
+        baseY: (p) => p.size + 0.2,
+      };
+    }
+    case "key": {
+      const { geo, mat } = _keyAssets();
+      return {
+        geometry: geo,
+        material: mat,
+        kind: "key",
+        defaults: KEY_DEFAULTS,
+        baseY: (p) => p.size + 0.3,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+export function isInstancedCollectibleFactoryId(factoryId) {
+  return COLLECTIBLE_KINDS.has(factoryId);
+}
+
 /** Optional: dispose shared assets at app shutdown. Not strictly needed (browser cleans up). */
 export function disposeAllCollectibleAssets() {
   if (_coinShared)  { _coinShared.geo.dispose();  _coinShared.mat.dispose();  _coinShared = null; }

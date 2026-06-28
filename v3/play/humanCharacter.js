@@ -1,7 +1,5 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
-import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
+import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
 
 const CHAR_HEIGHT   = 2.5;
 const WALK_ANIM_REF = 2.0;
@@ -12,32 +10,6 @@ const FADE_TIME     = 0.18; // matches v2
 const MODEL_PATH = "/models/UA1+UA2_compressed.glb";
 const KATANA_PATH = "/models/katana.glb";
 const HAT_PATH    = "/models/asian_conical_hat_compressed.glb";
-
-let _loader = null;
-function getLoader(renderer) {
-  if (_loader) return _loader;
-  const draco = new DRACOLoader();
-  draco.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/libs/draco/");
-  const ktx2 = new KTX2Loader();
-  ktx2.setTranscoderPath("https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/libs/basis/");
-  ktx2.detectSupport(renderer);
-  _loader = new GLTFLoader();
-  _loader.setDRACOLoader(draco);
-  _loader.setKTX2Loader(ktx2);
-  return _loader;
-}
-
-// Find a bone by trying multiple naming conventions (Mixamo, Blender, etc.)
-function findBone(model, ...candidates) {
-  let found = null;
-  model.traverse(o => {
-    if (found) return;
-    if (o.isBone || o.isObject3D) {
-      if (candidates.includes(o.name)) found = o;
-    }
-  });
-  return found;
-}
 
 export function createHumanCharacter(scene, renderer) {
   let charRoot      = null;
@@ -51,7 +23,19 @@ export function createHumanCharacter(scene, renderer) {
   let airTime   = 0;
   let loaded    = false;
 
-  const loader = getLoader(renderer);
+  const loader = getSharedGltfLoader();
+
+  // Find a bone by trying multiple naming conventions (Mixamo, Blender, etc.)
+  function findBone(model, ...candidates) {
+    let found = null;
+    model.traverse(o => {
+      if (found) return;
+      if (o.isBone || o.isObject3D) {
+        if (candidates.includes(o.name)) found = o;
+      }
+    });
+    return found;
+  }
 
   // ── Load main character model ───────────────────────────────────────────────
   loader.load(MODEL_PATH, (gltf) => {
@@ -172,6 +156,11 @@ export function createHumanCharacter(scene, renderer) {
     get loaded() { return loaded; },
 
     setVisible(v) { if (charRoot) charRoot.visible = v; },
+
+    setYaw(y) {
+      charYaw = y;
+      if (charRoot) charRoot.rotation.y = y;
+    },
 
     /**
      * @param {number} dt    — delta seconds

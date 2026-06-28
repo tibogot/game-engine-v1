@@ -13,7 +13,7 @@ export function createWorldToolState() {
     cloudShadows: ts.cloudShadows,
     cloudGodRays: ts.cloudGodRays,
     cloudBloom: ts.cloudBloom,
-    lensFlare: ts.lensFlare,
+    lensFlare: { ...ts.lensFlare, enabled: false },
     postFx: ts.postFx,
     csm: ts.csm,
     fog: ts.fog,

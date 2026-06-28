@@ -23,6 +23,7 @@ import { createWorldToolState } from "./state/worldState.js";
 import { createWorldEnvironment } from "./worldEnvironment.js";
 import { buildWorldPanel } from "../ui/buildWorldPanel.js";
 import { createHumanCharacter } from "../play/humanCharacter.js";
+import { HuskyOnFoot } from "../../v2/play/huskyOnFoot.js";
 import { SplatMap } from "../terrain/splatMap.js";
 import { createSplatOverlay } from "../terrain/splatOverlayTsl.js";
 import { TextureLibrary } from "../terrain/textureLibrary.js";
@@ -34,9 +35,9 @@ import {
   pickSplatmapFile,
 } from "../io/splatmapIO.js";
 import { SPLAT_RES } from "../terrain/splatMap.js";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { PropStore } from "../tools/propStore.js";
-import { PropInstancer } from "../tools/propInstancer.js";
+import { PropInstancer, MAX_PROP_INSTANCES_PER_MESH } from "../tools/propInstancer.js";
 import { PropSystem } from "../tools/propSystem.js";
 import { PropPlacementPreview } from "../tools/propPlacementPreview.js";
 import { LivePropManager } from "../tools/livePropManager.js";
@@ -62,6 +63,22 @@ import { downloadProps, importPropsFromFile } from "../io/propsIO.js";
 import { HybridGrassSystem, syncHybridGrassLod, rebuildHybridGrassGeometries } from "../../v2/render/hybridGrass/hybridGrassSystem.js";
 import { createWindTexture, createSpecNoiseTexture } from "../../v2/core/foliage/windTexture.js";
 import { GrassTerrainData } from "../render/grass/grassTerrainData.js";
+import { CliffStore } from "../../v2/core/cliffs/cliffStore.js";
+import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
+import { TreeBvh } from "../../v2/core/foliage/treeBvh.js";
+import { createOnFootCollider } from "../../v2/play/onFootCollider.js";
+import { createBvhDebugVisualizer } from "../tools/bvhDebugVisualizer.js";
+import {
+  createV3TerrainStoreAdapter,
+  createV3SplineTerrainConfig,
+} from "../terrain/v3TerrainStoreAdapter.js";
+import { createTreeToolState } from "./state/treeState.js";
+import { createTreeEnvironment } from "./treeEnvironment.js";
+import { buildTreePanel } from "../ui/buildTreePanel.js";
+import { createRiverToolState } from "./state/riverState.js";
+import { buildRiverPanels } from "../ui/buildRiverPanel.js";
+import { RiverSystem } from "../../v2/tools/river/riverSystem.js";
+import { V3RiverCarvingSystem } from "../tools/v3RiverCarvingSystem.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -146,6 +163,7 @@ async function main() {
   layoutStatsOverlay();
 
   await renderer.init();
+  initGlbLoaderRenderer(renderer);
 
   // ── Scene ──────────────────────────────────────────────────────────────────
   const scene = new THREE.Scene();
@@ -196,6 +214,30 @@ async function main() {
   tc.visible = false;
   scene.add(tc.getHelper());
 
+  /** Matches v2 toolState.gizmo — Q toggles space; Shift enables rotation snap while dragging. */
+  const gizmoState = { space: "world", rotationSnapDeg: 15 };
+  let _gizmoShiftHeld = false;
+
+  function applyGizmoSettings() {
+    tc.setSpace(gizmoState.space === "local" ? "local" : "world");
+    const snapDeg = _gizmoShiftHeld ? gizmoState.rotationSnapDeg : 0;
+    tc.setRotationSnap(snapDeg > 0 ? (snapDeg * Math.PI) / 180 : null);
+  }
+  applyGizmoSettings();
+
+  function refreshGizmoHud() {
+    const el = document.getElementById("gizmo-space-hint");
+    if (!el) return;
+    const show = editorMode === "props" && !playMode.active;
+    el.style.display = show ? "" : "none";
+    if (!show) return;
+    const snap = gizmoState.rotationSnapDeg > 0
+      ? `Shift = snap ${gizmoState.rotationSnapDeg}°`
+      : "snap off";
+    el.textContent =
+      `Gizmo: ${gizmoState.space === "local" ? "LOCAL" : "WORLD"} · ${snap} · Q toggles space`;
+  }
+
   // ── Terrain + Sculpt ───────────────────────────────────────────────────────
   // heightTexNode is shared: sculptBrush swaps .value to the active ping-pong
   // RT, and all LOD level materials sample from it automatically.
@@ -227,8 +269,48 @@ async function main() {
   // Terrain starts flat (createHeightmapTexture initializes all-zeros).
   // User can generate terrain manually via the Procedural panel.
 
-  // ── Human character ────────────────────────────────────────────────────────
+  // ── Human character + husky ───────────────────────────────────────────────
   const character = createHumanCharacter(scene, renderer);
+  const husky = new HuskyOnFoot({
+    scene,
+    loader: getSharedGltfLoader(),
+    modelUrl: "/models/Husky_compressed.glb",
+  });
+  husky.load();
+
+  // Player BVH — same CliffBvh as v2; props/live props feed in via extra stores.
+  const cliffStore = new CliffStore();
+  const cliffBvh = new CliffBvh(cliffStore);
+  let treeBvh = null;
+  const onFootCollider = createOnFootCollider({
+    cliffBvh: () => cliffBvh,
+    treeBvh: () => treeBvh,
+  });
+  let rebakePlayerBvh = () => {};
+  let bvhDebug = null;
+  const bvhDebugUi = { enabled: false };
+  const syncBvhDebugToggles = () => {
+    for (const el of document.querySelectorAll("[data-bvh-debug-toggle]")) {
+      el.classList.toggle("checked", bvhDebugUi.enabled);
+    }
+    for (const el of document.querySelectorAll("[data-bvh-debug-cb]")) {
+      el.checked = bvhDebugUi.enabled;
+    }
+  };
+  const setBvhDebugEnabled = (on) => {
+    bvhDebugUi.enabled = !!on;
+    bvhDebug?.setEnabled(bvhDebugUi.enabled);
+    syncBvhDebugToggles();
+  };
+
+  const terrainStoreAdapter = {
+    getWorldHeight(wx, wz) {
+      const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
+      const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
+      if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+      return sampleTerrainHeight(u, v);
+    },
+  };
 
   // ── Play mode ──────────────────────────────────────────────────────────────
   const playPanel      = document.getElementById("play-panel");
@@ -237,19 +319,37 @@ async function main() {
   const paintPanel     = document.getElementById("paint-panel");
   const propsPanel     = document.getElementById("props-panel");
   const splinePanel    = document.getElementById("spline-panel");
+  const riverPanel     = document.getElementById("river-panel");
+  const river2Panel    = document.getElementById("river2-panel");
   const playStatPos    = document.getElementById("play-stat-pos");
   const playStatSpeed  = document.getElementById("play-stat-speed");
   const playStatGround = document.getElementById("play-stat-ground");
 
+  const playStatMode   = document.getElementById("play-stat-mode");
+
+  function refreshPlayStats() {
+    if (!playMode?.active) return;
+    const s = playMode.getStats();
+    playStatPos.textContent = `${s.x}, ${s.y}, ${s.z}`;
+    playStatSpeed.textContent = `${s.speed} m/s`;
+    playStatGround.textContent = s.grounded === "fly" ? "—" : (s.grounded ? "Yes" : "No");
+    if (playStatMode) playStatMode.textContent = s.mode ?? "—";
+  }
+
   const playMode = createPlayMode({
+    scene,
     renderer,
     camera,
     controls,
     sampleTerrainHeight: (u, v) => sampleTerrainHeight(u, v),
     uCursorUV,
     character,
+    husky,
+    getCollider: () => onFootCollider,
+    getCliffBvh: () => cliffBvh,
     onStartWalking: () => { playHint.classList.add("visible"); },
     onEnterMenu:    () => { playHint.classList.remove("visible"); },
+    onModeChange:   () => refreshPlayStats(),
     onExit: () => {
       tbPlay.classList.remove("active");
       playStopBar.classList.remove("visible");
@@ -258,17 +358,34 @@ async function main() {
       syncSculptPanelVisibility();
       syncPaintPanelVisibility();
       syncGrassPanelVisibility();
+      syncTreePanelVisibility();
       syncPropsPanelVisibility();
       syncSplinePanelVisibility();
+      syncRiverPanelVisibility();
+      syncRiver2PanelVisibility();
+      applyRiverModeEffects();
       syncEditorOrbitEnabled();
     },
   });
 
   const worldToolState = createWorldToolState();
+  const treeToolState = createTreeToolState();
   const editorConfig = {
-    world: { size: WORLD_SIZE },
+    world: { size: WORLD_SIZE, chunkSize: V2_CONFIG.world.chunkSize },
     lod: { ...V2_CONFIG.lod },
+    sculpt: { ...V2_CONFIG.sculpt },
   };
+  const treeEnv = createTreeEnvironment({
+    scene,
+    renderer,
+    config: editorConfig,
+    getWorldHeight: (wx, wz) => terrainStoreAdapter.getWorldHeight(wx, wz),
+    toolState: treeToolState,
+  });
+  treeBvh = new TreeBvh(treeEnv.treeStore, (slotIdx) => {
+    const s = treeToolState.treeSlots[slotIdx];
+    return s ? { radius: s.colliderRadius, height: s.colliderHeight } : null;
+  });
   const perf = createPerfState();
   let splineSys = null;
 
@@ -821,6 +938,14 @@ async function main() {
 
   // ── Editor mode (view / sculpt) ────────────────────────────────────────────
   let editorMode = "view";
+  const riverToolSlice = createRiverToolState();
+  const riverEditorToolState = {
+    get mode() { return editorMode; },
+    river: riverToolSlice.river,
+    river2: riverToolSlice.river2,
+  };
+  let riverSystem = null;
+  let river2System = null;
   const splineState = { ...DEFAULT_SPLINE_STATE };
   let splineToolState = {
     mode: "view",
@@ -831,10 +956,13 @@ async function main() {
   };
   let _onLeavePropsMode = () => {};
   let _onLeaveSplineMode = () => {};
+  let _onLeaveRiverMode = () => {};
+  let _onLeaveRiver2Mode = () => {};
   let _onGizmoDragEnd = () => {};
   let _gizmoTarget = null;
 
   const grassPanel = document.getElementById("grass-panel");
+  const treePanel  = document.getElementById("tree-panel");
 
   function syncSculptPanelVisibility() {
     sculptPanel.style.display = (editorMode === "sculpt" && !playMode.active) ? "" : "none";
@@ -848,12 +976,41 @@ async function main() {
     grassPanel.style.display = (editorMode === "grass" && !playMode.active) ? "" : "none";
   }
 
+  function syncTreePanelVisibility() {
+    treePanel.style.display = (editorMode === "treePaint" && !playMode.active) ? "" : "none";
+  }
+
   function syncPropsPanelVisibility() {
     propsPanel.style.display = (editorMode === "props" && !playMode.active) ? "" : "none";
   }
 
   function syncSplinePanelVisibility() {
     splinePanel.style.display = (editorMode === "spline" && !playMode.active) ? "" : "none";
+  }
+
+  function syncRiverPanelVisibility() {
+    riverPanel.style.display = (editorMode === "river" && !playMode.active) ? "" : "none";
+  }
+
+  function syncRiver2PanelVisibility() {
+    river2Panel.style.display = (editorMode === "river2" && !playMode.active) ? "" : "none";
+  }
+
+  function applyRiverModeEffects() {
+    if (editorMode !== "river" && !playMode.active) {
+      riverSystem?.dragging && (riverSystem.dragging = false);
+    }
+    if (editorMode !== "river2" && !playMode.active) {
+      river2System?.dragging && (river2System.dragging = false);
+    }
+    if (riverSystem?.handleGroup) {
+      riverSystem.handleGroup.visible =
+        editorMode === "river" && riverToolSlice.river.showHandles && !playMode.active;
+    }
+    if (river2System?.handleGroup) {
+      river2System.handleGroup.visible =
+        editorMode === "river2" && riverToolSlice.river2.showHandles && !playMode.active;
+    }
   }
 
   function applySplineModeEffects() {
@@ -871,6 +1028,8 @@ async function main() {
       return;
     }
     if (editorMode === "spline" && m !== "spline") _onLeaveSplineMode();
+    if (editorMode === "river" && m !== "river") _onLeaveRiverMode();
+    if (editorMode === "river2" && m !== "river2") _onLeaveRiver2Mode();
     if (editorMode === "props" && m !== "props") _onLeavePropsMode();
     editorMode = m;
     if (splineToolState) splineToolState.mode = m;
@@ -888,21 +1047,31 @@ async function main() {
     } else if (m === "grass") {
       uCursorUV.value.set(-2, -2);
       ensureGrassBuilt();
-    } else if (m === "props" || m === "spline") {
+    } else if (m === "treePaint") {
+      sculpt.uRadius.value = treeToolState.brush.radius / WORLD_SIZE;
+    } else if (m === "props" || m === "spline" || m === "river" || m === "river2") {
       uCursorUV.value.set(-2, -2);
+      if (m === "river" || m === "river2") void ensureCpuHeightmapFromGpu();
     }
     syncSculptPanelVisibility();
     syncPaintPanelVisibility();
     syncGrassPanelVisibility();
+    syncTreePanelVisibility();
     syncPropsPanelVisibility();
     syncSplinePanelVisibility();
+    syncRiverPanelVisibility();
+    syncRiver2PanelVisibility();
     applySplineModeEffects();
+    applyRiverModeEffects();
+    refreshGizmoHud();
     if (viewNavHint) viewNavHint.style.display = (m === "view" && !playMode.active) ? "" : "none";
     syncEditorOrbitEnabled();
   }
 
   function enterPlay() {
     if (playMode.active) return;
+    treeBvh?.ensureBaked();
+    if (!cliffBvh.baked) rebakePlayerBvh();
     editorCamera?.onPlayEnter?.();
     playMode.enter();
     playMode.startWalking(); // request pointer lock immediately (still in click handler)
@@ -912,8 +1081,11 @@ async function main() {
     sculptPanel.style.display = "none";
     paintPanel.style.display = "none";
     grassPanel.style.display = "none";
+    treePanel.style.display = "none";
     propsPanel.style.display = "none";
     splinePanel.style.display = "none";
+    riverPanel.style.display = "none";
+    river2Panel.style.display = "none";
     helpOverlay.classList.remove("visible");
     tbHelp.classList.remove("active");
   }
@@ -937,6 +1109,11 @@ async function main() {
   });
 
   document.getElementById("play-stop-btn").addEventListener("click", () => exitPlay());
+
+  const playBvhDebugToggle = document.getElementById("play-bvh-debug-toggle");
+  playBvhDebugToggle?.addEventListener("click", () => {
+    setBvhDebugEnabled(!bvhDebugUi.enabled);
+  });
 
   tbHelp.addEventListener("click", () => {
     helpOverlay.classList.toggle("visible");
@@ -1062,10 +1239,22 @@ async function main() {
         cpuHeightmap[i] = isHalf ? THREE.DataUtils.fromHalfFloat(r) : r;
       }
       grassTerrainData.rebuildFromHeightmap(cpuHeightmap, HEIGHTMAP_SIZE, MAX_HEIGHT, WORLD_SIZE);
+      treeEnv.syncTreeHeights();
     } finally {
       readbackInFlight = false;
       if (readbackPending) syncHeightmapToCPU();
     }
+  }
+
+  /** Push CPU height edits (plateau, carve, procedural) to GPU + dependent systems. */
+  function pushHeightmapEditsToGpu() {
+    sculpt.replaceHeightData(cpuHeightmap);
+    grassTerrainData.rebuildFromHeightmap(cpuHeightmap, HEIGHTMAP_SIZE, MAX_HEIGHT, WORLD_SIZE);
+    treeEnv.syncTreeHeights();
+  }
+
+  async function ensureCpuHeightmapFromGpu() {
+    await syncHeightmapToCPU();
   }
 
   function sampleHeightNormalized(u, v) {
@@ -1293,14 +1482,9 @@ async function main() {
 
     try {
       if (playMode.active) {
+        treeBvh?.ensureBaked();
         playMode.update(dt);
-
-        if (playMode.walking) {
-          const s = playMode.getStats();
-          playStatPos  .textContent = `${s.x}, ${s.y}, ${s.z}`;
-          playStatSpeed.textContent = `${s.speed} m/s`;
-          playStatGround.textContent = s.grounded ? "Yes" : "No";
-        }
+        refreshPlayStats();
 
         const pp = playMode.playerPosition;
         _lodSnapVec.set(
@@ -1328,10 +1512,14 @@ async function main() {
       propInstancer.update(camera, propLod);
       livePropManager.update(dt);
       splineSys.update(dt);
+      riverSystem?.update(dt);
+      river2System?.update(dt);
 
       tickPerf(perf, now, dt * 1000);
       perf.activeChunks = lod.group.children.length;
       worldEnv?.updateFrame(dt);
+      treeEnv.updateFrame(camera, worldEnv?.getSunDir?.(), now * 0.001);
+      bvhDebug?.update();
     } catch (err) {
       if (++_loopErrors === 1) console.error("[V3] Frame update error:", err);
     }
@@ -1461,12 +1649,14 @@ async function main() {
 
   function onHistoryChange() {
     cancelStroke();
+    treeEnv.syncTreeHeights();
     requestHeightmapReadback();
   }
 
   window.addEventListener("keydown", e => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
     if (e.code === "Escape" && playMode.active) {
+      if (playMode.wheelOpen || playMode.walking) return;
       exitPlay();
       return;
     }
@@ -1489,6 +1679,11 @@ async function main() {
       setEditorMode(editorMode === "spline" ? "view" : "spline");
       return;
     }
+    if (e.code === "KeyT" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "treePaint" ? "view" : "treePaint");
+      return;
+    }
     // Spline mode shortcuts (v2)
     if (editorMode === "spline" && !playMode.active) {
       if (e.code === "Delete" || e.code === "Backspace") {
@@ -1498,8 +1693,27 @@ async function main() {
         return;
       }
     }
+    if ((editorMode === "river" || editorMode === "river2") && !playMode.active) {
+      if (e.code === "Delete" || e.code === "Backspace") {
+        e.preventDefault();
+        if (editorMode === "river") riverSystem.deleteSelected();
+        else river2System.deleteSelected();
+        return;
+      }
+    }
     // Props mode shortcuts
     if (editorMode === "props" && !playMode.active) {
+      if ((e.code === "ShiftLeft" || e.code === "ShiftRight") && !e.repeat) {
+        _gizmoShiftHeld = true;
+        applyGizmoSettings();
+      }
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && e.code === "KeyQ") {
+        e.preventDefault();
+        gizmoState.space = gizmoState.space === "local" ? "world" : "local";
+        applyGizmoSettings();
+        refreshGizmoHud();
+        return;
+      }
       if (e.code === "Escape") {
         e.preventDefault();
         deactivatePropSelection();
@@ -1536,6 +1750,10 @@ async function main() {
         e.preventDefault();
         if (editorMode === "paint") paintSys.undo();
         else if (editorMode === "props") propSys.undo();
+        else if (editorMode === "treePaint") treeEnv.treeSystem.undo();
+        else if (editorMode === "river" && riverSystem?.undo()) { /* ok */ }
+        else if (editorMode === "river2" && river2System?.undo()) { /* ok */ }
+        else if (editorMode === "spline" && splineSys?.undo()) { /* ok */ }
         else if (sculpt.undo()) onHistoryChange();
         return;
       }
@@ -1543,9 +1761,28 @@ async function main() {
         e.preventDefault();
         if (editorMode === "paint") paintSys.redo();
         else if (editorMode === "props") propSys.redo();
+        else if (editorMode === "treePaint") treeEnv.treeSystem.redo();
+        else if (editorMode === "river" && riverSystem?.redo()) { /* ok */ }
+        else if (editorMode === "river2" && river2System?.redo()) { /* ok */ }
+        else if (editorMode === "spline" && splineSys?.redo()) { /* ok */ }
         else if (sculpt.redo()) onHistoryChange();
         return;
       }
+    }
+  });
+
+  window.addEventListener("keyup", (e) => {
+    if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+      if (_gizmoShiftHeld) {
+        _gizmoShiftHeld = false;
+        applyGizmoSettings();
+      }
+    }
+  });
+  window.addEventListener("blur", () => {
+    if (_gizmoShiftHeld) {
+      _gizmoShiftHeld = false;
+      applyGizmoSettings();
     }
   });
 
@@ -2125,7 +2362,7 @@ async function main() {
   const propStore = new PropStore();
   const propTextureLibrary = createPropTextureLibrary();
   propInstancer = new PropInstancer(scene, propStore);
-  const gltfLoader = new GLTFLoader();
+  const gltfLoader = getSharedGltfLoader();
 
   // World-space hit on terrain surface for prop placement
   const _propHitVec = new THREE.Vector3();
@@ -2147,6 +2384,20 @@ async function main() {
   livePropManager.registerFactory("key",   createKey);
 
   registerProceduralObjectFactories(livePropManager);
+
+  rebakePlayerBvh = () => {
+    livePropManager.update(0);
+    cliffBvh.bake(terrainStoreAdapter, editorConfig, [propStore, livePropManager]);
+    console.log("[V3] Player BVH rebaked:", cliffBvh.baked, "instances:", propStore.totalCount);
+    bvhDebug?.rebuild();
+  };
+
+  bvhDebug = createBvhDebugVisualizer(scene, {
+    getCliffBvh: () => cliffBvh,
+    getTreeBvh: () => treeBvh,
+    rebakeCliff: () => rebakePlayerBvh(),
+  });
+  if (bvhDebugUi.enabled) bvhDebug.setEnabled(true);
 
   const propState = {
     activeSlot: 0,
@@ -2171,12 +2422,9 @@ async function main() {
     propBrush,
     propStore,
     propInstancer,
-    getWorldHeight: (wx, wz) => {
-      const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
-      const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
-      return sampleTerrainHeight(u, v);
-    },
+    getWorldHeight: (wx, wz) => terrainStoreAdapter.getWorldHeight(wx, wz),
     worldSize: WORLD_SIZE,
+    cliffBvh,
   });
 
   function _rebuildPrimitiveMaterial(slotIdx) {
@@ -2224,22 +2472,59 @@ async function main() {
     return sampleTerrainHeight(u, v);
   }
 
-  const splineTerrainStoreStub = {
+  const splineTerrainConfig = createV3SplineTerrainConfig(WORLD_SIZE, HEIGHTMAP_SIZE, MAX_HEIGHT);
+  const v3TerrainStore = createV3TerrainStoreAdapter({
+    cpuHeightmap,
+    heightmapSize: HEIGHTMAP_SIZE,
+    worldSize: WORLD_SIZE,
+    maxHeight: MAX_HEIGHT,
+    config: splineTerrainConfig,
+  });
+  function commitTerrainCarve() {
+    const ok = v3TerrainStore.commit();
+    if (ok) pushHeightmapEditsToGpu();
+    bvhDebug?.update();
+    return ok;
+  }
+
+  riverSystem = new RiverSystem({
+    scene,
+    toolState: riverEditorToolState,
     getWorldHeight,
-    ensureChunkData() { return null; },
+  });
+  river2System = new V3RiverCarvingSystem({
+    scene,
+    toolState: riverEditorToolState,
+    getWorldHeight,
+    terrainStore: v3TerrainStore,
+    heightmapSize: HEIGHTMAP_SIZE,
+    worldSize: WORLD_SIZE,
+    markTerrainDirty: () => commitTerrainCarve(),
+    commitTerrain: () => commitTerrainCarve(),
+    ensureCpuHeightmap: ensureCpuHeightmapFromGpu,
+  });
+
+  _onLeaveRiverMode = () => {
+    if (riverSystem?.dragging) riverSystem.dragging = false;
+    syncEditorOrbitEnabled();
   };
+  _onLeaveRiver2Mode = () => {
+    if (river2System?.dragging) river2System.dragging = false;
+    syncEditorOrbitEnabled();
+  };
+
   const splineChunkStreamStub = { markDirtyRects() {} };
   const splineTreeStoreStub = {
-    addTree() {},
-    hasTreeNearby: () => false,
-    syncAllHeights: () => {},
+    addTree: (...args) => treeEnv.treeStore.addTree(...args),
+    hasTreeNearby: (...args) => treeEnv.treeStore.hasTreeNearby(...args),
+    syncAllHeights: () => treeEnv.syncTreeHeights(),
   };
 
   splineSys = new SplineSystem({
     scene,
     toolState: splineToolState,
-    config: { world: { size: WORLD_SIZE } },
-    terrainStore: splineTerrainStoreStub,
+    config: splineTerrainConfig,
+    terrainStore: v3TerrainStore,
     chunkStream: splineChunkStreamStub,
     treeStore: splineTreeStoreStub,
     propStore,
@@ -2259,13 +2544,56 @@ async function main() {
   const _propPickNdc = new THREE.Vector2();
   let _onPropSelectionChanged = null;
 
+  function getPropStats() {
+    let staticCount = 0;
+    let liveGroupCount = 0;
+    let liveInstancedCount = 0;
+    const perType = [];
+    const typeTotals = new Map();
+
+    for (const inst of propStore.instances) {
+      const type = propStore.types[inst.typeIdx];
+      if (!type) continue;
+      typeTotals.set(inst.typeIdx, (typeTotals.get(inst.typeIdx) ?? 0) + 1);
+      if (type.live) {
+        if (livePropManager.isInstancedCollectible?.(type.factoryId)) liveInstancedCount++;
+        else liveGroupCount++;
+      } else {
+        staticCount++;
+      }
+    }
+
+    for (const [typeIdx, count] of typeTotals) {
+      const type = propStore.types[typeIdx];
+      if (!type || type.live) continue;
+      if (count > MAX_PROP_INSTANCES_PER_MESH * 0.85) {
+        perType.push({
+          name: type.name,
+          count,
+          atCap: count >= MAX_PROP_INSTANCES_PER_MESH,
+        });
+      }
+    }
+
+    perType.sort((a, b) => b.count - a.count);
+
+    return {
+      total: propStore.totalCount,
+      staticCount,
+      liveGroupCount,
+      liveInstancedCount,
+      maxPerType: MAX_PROP_INSTANCES_PER_MESH,
+      nearCapTypes: perType,
+    };
+  }
+
   function refreshPropCount() {
-    const el = document.getElementById("prop-total-count");
-    if (el) el.textContent = propStore.totalCount;
+    document.getElementById("props-panel")?._refreshPropStats?.();
   }
 
   function activatePropSelection(instIdx) {
     propInstancer.select(instIdx);
+    applyGizmoSettings();
     tc.attach(propInstancer.proxyObject);
     tc.setMode(propState.transformMode);
     tc.enabled = true;
@@ -2484,6 +2812,25 @@ async function main() {
     inp.click();
   }
 
+  buildTreePanel({
+    toolState: treeToolState,
+    config: editorConfig,
+    importTreeGlb: (slotIdx, lod, file) => treeEnv.importTreeGlb(slotIdx, lod, file),
+    loadTreePreset: (slotIdx, file) => treeEnv.loadTreePreset(slotIdx, file),
+    foliageParamChanged: (slotIdx) => treeEnv.foliageParamChanged(slotIdx),
+    treeColliderChanged: () => {
+      treeBvh?.invalidate();
+      bvhDebug?.rebuild();
+    },
+    removeTreeSlot: (slotIdx) => treeEnv.removeTreeSlot(slotIdx),
+    massPlaceTrees: () => treeEnv.treeSystem.massPlace(treeToolState.treePaint.massPlaceCount),
+    clearAllTrees: () => treeEnv.treeSystem.clearAll(),
+    setBvhDebugEnabled,
+    getBvhDebugEnabled: () => bvhDebugUi.enabled,
+    syncBvhDebugToggles,
+    treeCastShadowChanged: () => treeEnv.setCastShadow(treeToolState.treeLod.castShadow),
+  });
+
   buildPropsPanel({
     toolState: { props: propState, propSlots, propLod },
     propTextureLibrary,
@@ -2499,9 +2846,10 @@ async function main() {
     },
     setPrimitiveMaterial,
     setPrimitiveTriplanar,
-    rebakeBvh: () => {
-      console.warn("[V3] Player BVH rebake not wired yet.");
-    },
+    rebakeBvh: () => rebakePlayerBvh(),
+    setBvhDebugEnabled,
+    getBvhDebugEnabled: () => bvhDebugUi.enabled,
+    syncBvhDebugToggles,
     deleteSelectedProp: () => {
       propSys.handleDelete();
       deactivatePropSelection();
@@ -2515,14 +2863,22 @@ async function main() {
       propSys.clearAll();
       deactivatePropSelection();
     },
-    propTransformModeChanged: () => { if (_gizmoTarget === "prop") tc.setMode(propState.transformMode); },
+    propTransformModeChanged: () => {
+      if (_gizmoTarget === "prop") {
+        applyGizmoSettings();
+        tc.setMode(propState.transformMode);
+      }
+    },
+    refreshGizmoHud,
     propCastShadowChanged: () => propInstancer.setCastShadow(propLod.castShadow),
+    getPropStats,
     getProceduralPropLabels: () => PROCEDURAL_PROP_LABELS,
     getProceduralSchema: (factoryId) => proceduralSchemaFor(factoryId),
     bakeProceduralThumbnails: (size) => withRendererSideWork(() => defaultBakeProceduralThumbnails(renderer, size)),
     set onPropSelectionChanged(fn) { _onPropSelectionChanged = fn; },
     get onPropSelectionChanged() { return _onPropSelectionChanged; },
   });
+  refreshPropCount();
 
   buildSplinePanel({
     toolState: splineToolState,
@@ -2546,15 +2902,19 @@ async function main() {
     },
     splineClearPreview: () => splineSys.clearPreview(),
     splineApplyPlateau: () => {
-      const changed = splineSys.applyPlateau();
-      if (!changed) {
-        console.warn("[V3] Plateau requires v2 terrainStore — not yet wired in v3.");
-        return;
-      }
-      requestHeightmapReadback();
-      splineSys.syncGuardrailsToGround();
-      splineSys.syncKerbsToGround();
-      splineSys.syncLinearFeaturesToGround();
+      void ensureCpuHeightmapFromGpu().then(() => {
+        v3TerrainStore.beginWrite();
+        const changed = splineSys.applyPlateau();
+        if (!changed) {
+          v3TerrainStore.cancelWrite();
+          return;
+        }
+        v3TerrainStore.commit();
+        pushHeightmapEditsToGpu();
+        splineSys.syncGuardrailsToGround();
+        splineSys.syncKerbsToGround();
+        splineSys.syncLinearFeaturesToGround();
+      });
     },
     splineClearTunnels: () => splineSys.clearTunnels(),
     splineClearLinearFeatures: () => splineSys.clearLinearFeatures(),
@@ -2574,6 +2934,45 @@ async function main() {
   });
 
   applySplineModeEffects();
+
+  buildRiverPanels({
+    toolState: riverToolSlice,
+    riverChanged: () => {
+      riverSystem.syncMaterial();
+      riverSystem.rebuildAllMeshes();
+      applyRiverModeEffects();
+    },
+    riverNewRiver: () => riverSystem.startNewRiver(),
+    riverDeleteActive: () => riverSystem.deleteActiveRiver(),
+    riverDeleteSelected: () => riverSystem.deleteSelected(),
+    riverSelectedYChanged: () => riverSystem.setSelectedPointY(riverToolSlice.river.selectedPointY),
+    riverActiveIndexChanged: () => {
+      riverSystem._clampActive();
+      riverSystem.selectedIdx = -1;
+      riverSystem._rebuildVisual();
+    },
+    river2Changed: () => {
+      river2System.syncMaterial();
+      river2System.rebuildAllMeshes();
+      applyRiverModeEffects();
+    },
+    river2CarveChanged: () => {
+      river2System.syncMaterial();
+      river2System.rebuildAllMeshes();
+      river2System.refreshCarving();
+    },
+    river2NewRiver: () => river2System.startNewRiver(),
+    river2DeleteActive: () => river2System.deleteActiveRiver(),
+    river2DeleteSelected: () => river2System.deleteSelected(),
+    river2SelectedYChanged: () => river2System.setSelectedPointY(riverToolSlice.river2.selectedPointY),
+    river2ActiveIndexChanged: () => {
+      river2System._clampActive();
+      river2System.selectedIdx = -1;
+      river2System._rebuildVisual();
+    },
+  });
+
+  applyRiverModeEffects();
 
   // Sync prop instance while gizmo is dragging.
   tc.addEventListener("change", () => {
@@ -2712,6 +3111,76 @@ async function main() {
     }
   });
 
+  // ── River mode mouse events ─────────────────────────────────────────────────
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "river") return;
+    if (riverSystem.dragging && riverSystem.selectedIdx >= 0) {
+      const hit = getTerrainHitWorld(e);
+      if (hit) riverSystem.moveSelected(hit);
+    }
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "river" || e.button !== 0) return;
+    e.preventDefault();
+    refreshMouse(e);
+    raycaster.setFromCamera(mouse, camera);
+    const picked = riverSystem.pickPoint(raycaster);
+    if (picked >= 0) {
+      riverSystem.selectedIdx = picked;
+      riverSystem.dragging = true;
+      controls.enabled = false;
+      riverSystem._rebuildHandles();
+      riverSystem._updateSelectedY();
+    } else {
+      const hit = getTerrainHitWorld(e);
+      if (hit) riverSystem.addPoint(hit);
+    }
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (editorMode !== "river") return;
+    if (riverSystem.dragging) {
+      riverSystem.dragging = false;
+      syncEditorOrbitEnabled();
+    }
+  });
+
+  // ── River+ mode mouse events ──────────────────────────────────────────────
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "river2") return;
+    if (river2System.dragging && river2System.selectedIdx >= 0) {
+      const hit = getTerrainHitWorld(e);
+      if (hit) river2System.moveSelected(hit);
+    }
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "river2" || e.button !== 0) return;
+    e.preventDefault();
+    refreshMouse(e);
+    raycaster.setFromCamera(mouse, camera);
+    const picked = river2System.pickPoint(raycaster);
+    if (picked >= 0) {
+      river2System.selectedIdx = picked;
+      river2System.dragging = true;
+      controls.enabled = false;
+      river2System._rebuildHandles();
+      river2System._updateSelectedY();
+    } else {
+      const hit = getTerrainHitWorld(e);
+      if (hit) river2System.addPoint(hit);
+    }
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (editorMode !== "river2") return;
+    if (river2System.dragging) {
+      river2System.finalizeMove();
+      syncEditorOrbitEnabled();
+    }
+  });
+
   // ── Paint mode mouse events ────────────────────────────────────────────────
   renderer.domElement.addEventListener("mousemove", e => {
     if (playMode.active || editorMode !== "paint") return;
@@ -2835,6 +3304,70 @@ async function main() {
       grassBrush.strength = Math.max(0.01, Math.min(1.0, grassBrush.strength * factor));
       gslStr.value = Math.round(grassBrush.strength * 100);
       glblStr.textContent = grassBrush.strength.toFixed(2);
+    }
+  }, { passive: false, capture: true });
+
+  // ── Tree mode mouse events (v2 treePaint) ─────────────────────────────────
+  let _treePainting = false;
+  const _treeHit = new THREE.Vector3();
+
+  function _treeHitFromEvent(e) {
+    refreshMouse(e);
+    const uv = getUV();
+    if (!uv) return null;
+    return _treeHit.set(
+      uv.u * WORLD_SIZE - WORLD_SIZE / 2,
+      sampleTerrainHeight(uv.u, uv.v),
+      uv.v * WORLD_SIZE - WORLD_SIZE / 2,
+    );
+  }
+
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "treePaint") return;
+    refreshMouse(e);
+    const uv = getUV();
+    uCursorUV.value.set(uv ? uv.u : -2, uv ? uv.v : -2);
+    if (uv) sculpt.uRadius.value = treeToolState.brush.radius / WORLD_SIZE;
+    const pt = _treeHitFromEvent(e);
+    if (pt && _treePainting) treeEnv.treeSystem.applyAt(pt, e);
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "treePaint") return;
+    if (e.button !== 0) return;
+    const pt = _treeHitFromEvent(e);
+    if (!pt) return;
+    e.preventDefault();
+    _treePainting = true;
+    controls.enabled = false;
+    treeEnv.treeSystem.beginStroke(pt, e);
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (e.button !== 0 || editorMode !== "treePaint") return;
+    if (!_treePainting) return;
+    _treePainting = false;
+    treeEnv.treeSystem.endStroke();
+    syncEditorOrbitEnabled();
+  });
+
+  renderer.domElement.addEventListener("wheel", e => {
+    if (playMode.active || editorMode !== "treePaint") return;
+    if (!e.shiftKey && !e.altKey) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.11;
+    if (e.shiftKey) {
+      treeToolState.brush.radius = Math.max(
+        editorConfig.sculpt.brushMin,
+        Math.min(editorConfig.sculpt.brushMax, treeToolState.brush.radius * factor),
+      );
+      sculpt.uRadius.value = treeToolState.brush.radius / WORLD_SIZE;
+    } else {
+      treeToolState.brush.strength = Math.max(
+        editorConfig.sculpt.strengthMin,
+        Math.min(editorConfig.sculpt.strengthMax, treeToolState.brush.strength * factor),
+      );
     }
   }, { passive: false, capture: true });
 

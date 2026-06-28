@@ -62,6 +62,11 @@ export class TreeBvh {
     this.baked = false;
   }
 
+  /** Merged trunk-proxy mesh — for editor BVH debug wireframes only. */
+  getCollisionGeometry() {
+    return this.baked && this._bvh ? this._bvh.geometry : null;
+  }
+
   /** Rebuild if tree data changed since last bake (cheap: no height grid). */
   ensureBaked() {
     if (this.baked && this._bakedGen === this.store.globalGen) return;

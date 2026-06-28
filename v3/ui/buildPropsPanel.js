@@ -217,6 +217,23 @@ export async function defaultBakeProceduralThumbnails(renderer, size = 192) {
 
 /** Build the v2 props panel into #props-panel. */
 
+function _installBvhDebugUi(parent, app) {
+  const dbgBody = _section(parent, "Collision Debug", false);
+  const row = document.createElement("div");
+  row.className = "prop-row";
+  row.innerHTML = `<span class="prop-label">Show BVH wireframes</span><div class="prop-value"><button type="button" class="prop-toggle" data-bvh-debug-toggle>${_checkSvg}</button></div>`;
+  const btn = row.querySelector(".prop-toggle");
+  btn.classList.toggle("checked", !!app.getBvhDebugEnabled?.());
+  btn.addEventListener("click", () => app.setBvhDebugEnabled?.(!app.getBvhDebugEnabled?.()));
+  dbgBody.appendChild(row);
+  const hint = document.createElement("p");
+  hint.style.cssText =
+    "margin:6px 0 0; font-size:11px; color:var(--text-dim); line-height:1.35;";
+  hint.innerHTML =
+    '<span style="color:#44ff88">Green</span> props/cliffs · <span style="color:#ff8844">Orange</span> tree trunks. Trees auto-rebake; props need Rebake BVH after bulk edits.';
+  dbgBody.appendChild(hint);
+}
+
 export function buildPropsPanel(app) {
 const panel = document.getElementById("props-panel");
 if (!panel) return null;
@@ -233,8 +250,50 @@ panel.innerHTML = "";
       stampHint.style.cssText =
         "margin:6px 0 0; font-size:11px; color:var(--text-dim); line-height:1.35;";
       stampHint.textContent =
-        "Place mode reuses the last rotation + scale per prop type. After placing, use W/E/R on the gizmo to move, rotate, or scale. Right-click empty space (or Esc) to deselect and preview the next placement. Hold Shift while clicking to place another copy without deselecting.";
+        "Place mode reuses the last rotation + scale per prop type. After placing, use W/E/R on the gizmo to move, rotate, or scale. Q toggles gizmo LOCAL/WORLD space. Right-click empty space (or Esc) to deselect. Hold Shift while clicking to place another copy without deselecting.";
       modeBody.appendChild(stampHint);
+
+      // --- Scene counts / caps ---
+      const statsBody = _section(panel, "Scene Count", false);
+      const statsEl = document.createElement("div");
+      statsEl.id = "prop-stats-display";
+      statsEl.style.cssText =
+        "font-size:11px; color:var(--text-dim); line-height:1.5; padding:2px 0 4px;";
+      statsBody.appendChild(statsEl);
+
+      function refreshPropStatsDisplay() {
+        const s = app.getPropStats?.();
+        if (!s) {
+          statsEl.textContent = "—";
+          return;
+        }
+        const lines = [
+          `Total: ${s.total}`,
+          `Static (instanced): ${s.staticCount}`,
+          `Live groups (flag, procedural…): ${s.liveGroupCount}`,
+          `Live instanced (coin/heart/key): ${s.liveInstancedCount}`,
+          `Cap: ${s.maxPerType} instances per static type / submesh`,
+        ];
+        if (s.nearCapTypes?.length) {
+          lines.push("");
+          lines.push("Near or at cap:");
+          for (const t of s.nearCapTypes.slice(0, 5)) {
+            const pct = Math.round((t.count / s.maxPerType) * 100);
+            lines.push(
+              `${t.atCap ? "⚠ " : "• "}${t.name}: ${t.count} / ${s.maxPerType} (${pct}%)`,
+            );
+          }
+          if (s.nearCapTypes.some((t) => t.atCap)) {
+            lines.push("At cap — new instances of that type will not render.");
+          }
+        }
+        statsEl.innerHTML = lines
+          .map((line) => (line === "" ? "<br>" : `<div>${line}</div>`))
+          .join("");
+      }
+
+      panel._refreshPropStats = refreshPropStatsDisplay;
+      refreshPropStatsDisplay();
 
       // --- Active slot ---
       const slotBody = _section(panel, "Active Type");
@@ -552,6 +611,13 @@ panel.innerHTML = "";
         },
         onChange: () => app.propTransformModeChanged(),
       });
+      const gizmoSpaceHint = document.createElement("p");
+      gizmoSpaceHint.id = "gizmo-space-hint";
+      gizmoSpaceHint.className = "mode-hint";
+      gizmoSpaceHint.style.cssText =
+        "margin:6px 0 0; font-size:11px; color:var(--text-dim); line-height:1.35;";
+      gizmoBody.appendChild(gizmoSpaceHint);
+      app.refreshGizmoHud?.();
 
       _separator(panel);
 
@@ -810,6 +876,9 @@ panel.innerHTML = "";
 
       _separator(panel);
 
+      _installBvhDebugUi(panel, app);
+      _separator(panel);
+
       // --- Actions ---
       _button(panel, { title: "Rebake BVH", onClick: () => app.rebakeBvh() });
       const bvhHint = document.createElement("p");
@@ -835,6 +904,7 @@ panel.innerHTML = "";
       function rebuildAll() {
         rebuildSlotPicker();
         rebuildLoadedSlots();
+        refreshPropStatsDisplay();
       }
 
       panel._rebuildPropUi = rebuildAll;
