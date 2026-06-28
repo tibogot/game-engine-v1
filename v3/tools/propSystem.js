@@ -1,241 +1,218 @@
 import * as THREE from "three";
-import { PropPlacementPreview } from "./propPlacementPreview.js";
+import { shouldApplyStroke } from "../../v2/tools/sculpt/brushModel.js";
 
-const MAX_UNDO = 64;
-
-export const PROP_TOOL = {
-  PLACE:  "place",
-  ERASE:  "erase",
-  SCATTER: "scatter",
-  SELECT: "select",
-};
-
+/**
+ * V2-compatible props tool: Place (click + stamp) and Paint (brush scatter + Alt erase).
+ */
 export class PropSystem {
-  constructor(scene, propStore, propInstancer, getTerrainHit, livePropManager) {
-    this.scene            = scene;
-    this.store            = propStore;
-    this.instancer        = propInstancer;
-    this.getTerrainHit    = getTerrainHit; // fn(mouseEvent) → THREE.Vector3 | null
-    this._livePropManager = livePropManager ?? null;
-
-    this.activeTool       = PROP_TOOL.PLACE;
-    this.activeTypeIdx    = 0;
-    this.scatterRadius    = 12;
-    this.scatterCount     = 5;
-    this.scatterMinSep    = 3;
-    this.sinkAmount       = 0;
-    this.randomYRot       = true;
-    this.randomScale      = false;
-    this.scaleMin         = 0.8;
-    this.scaleMax         = 1.2;
-    this.alignToNormal    = false;
-    this.sampleTerrainNormal = null; // fn(wx, wz) → THREE.Vector3 | null
+  constructor({ propState, propSlots, propBrush, propStore, propInstancer, getWorldHeight, worldSize }) {
+    this.propState = propState;
+    this.propSlots = propSlots;
+    this.propBrush = propBrush;
+    this.store = propStore;
+    this.instancer = propInstancer;
+    this.getWorldHeight = getWorldHeight;
+    this.worldSize = worldSize;
 
     this._undoStack = [];
     this._redoStack = [];
+    this._maxUndo = 64;
 
-    this._painting     = false;
-    this._stampPos     = null;
-    this._stampMinDist = 1.0;
-
-    this._preview = new PropPlacementPreview(scene, propStore);
-
-    this._raycaster = new THREE.Raycaster();
-    this._mouse     = new THREE.Vector2();
-  }
-
-  // ── Type selection ──────────────────────────────────────────────────────────
-
-  setActiveType(typeIdx) {
-    this.activeTypeIdx = typeIdx;
-    this._preview.hide();
-  }
-
-  // ── Tool selection ──────────────────────────────────────────────────────────
-
-  setTool(tool) {
-    this.activeTool = tool;
-    this._preview.hide();
-    if (tool !== PROP_TOOL.SELECT) this.instancer.clearSelection();
-  }
-
-  // ── Mouse event handlers (called from main.js) ──────────────────────────────
-
-  onMouseMove(event, camera) {
-    const hit = this.getTerrainHit(event);
-    if (!hit) { this._preview.hide(); return; }
-
-    if (this.activeTool === PROP_TOOL.PLACE || this.activeTool === PROP_TOOL.SCATTER) {
-      const ph = hit.clone();
-      ph.y -= this.sinkAmount;
-      this._preview.showAt(ph, this.activeTypeIdx);
-    } else {
-      this._preview.hide();
-    }
-
-    if (this._painting) {
-      this._continuePaint(hit, event, camera);
-    }
-  }
-
-  onMouseDown(event, camera) {
-    if (event.button !== 0) return;
-    const hit = this.getTerrainHit(event);
-    if (!hit) return;
-
-    if (this.activeTool === PROP_TOOL.SELECT) {
-      this._trySelect(event, camera);
-      return;
-    }
-
-    this._painting = true;
-    this._beginPaint();
-    this._stampPos  = null;
-    this._applyPaint(hit);
-  }
-
-  onMouseUp() {
     this._painting = false;
-    this._stampPos = null;
+    this._lastStrokePoint = null;
+    this._beforeSnap = null;
+
+    /** @type {Map<number, { rx: number, ry: number, rz: number, sx: number, sy: number, sz: number }>} */
+    this._lastStampByType = new Map();
   }
 
-  // ── Paint internals ─────────────────────────────────────────────────────────
+  _defaultStamp() {
+    return { rx: 0, ry: 0, rz: 0, sx: 1, sy: 1, sz: 1 };
+  }
 
-  _beginPaint() {
-    const snap = this.store.snapshot();
-    if (this._undoStack.length >= MAX_UNDO) this._undoStack.shift();
-    this._undoStack.push(snap);
+  _stampForType(typeIdx) {
+    return this._lastStampByType.get(typeIdx) ?? this._defaultStamp();
+  }
+
+  stampForType(typeIdx) {
+    return this._stampForType(typeIdx);
+  }
+
+  recordStampFromInstance(instIdx) {
+    const inst = this.store.instances[instIdx];
+    if (!inst || this.store.isLiveType(inst.typeIdx)) return;
+    this._lastStampByType.set(inst.typeIdx, {
+      rx: inst.rx,
+      ry: inst.ry,
+      rz: inst.rz,
+      sx: inst.sx,
+      sy: inst.sy,
+      sz: inst.sz,
+    });
+  }
+
+  _pushUndo(before) {
+    const after = this.store.snapshot();
+    this._undoStack.push({ before, after });
     this._redoStack.length = 0;
+    if (this._undoStack.length > this._maxUndo) this._undoStack.shift();
   }
 
-  _continuePaint(hit) {
-    if (!this._painting) return;
-    this._applyPaint(hit);
+  _getActiveTypeIdx() {
+    const slotIdx = this.propState.activeSlot;
+    const slot = this.propSlots[slotIdx];
+    return slot?.typeIdx ?? null;
   }
 
-  _applyPaint(hit) {
-    if (this.activeTool === PROP_TOOL.PLACE) {
-      if (this._stampPos) {
-        const dx = hit.x - this._stampPos.x;
-        const dz = hit.z - this._stampPos.z;
-        if (dx * dx + dz * dz < this._stampMinDist * this._stampMinDist) return;
-      }
-      this._stampPos = hit.clone();
-      this._placeOne(hit.x, hit.y - this.sinkAmount, hit.z);
-    } else if (this.activeTool === PROP_TOOL.SCATTER) {
-      this._scatter(hit.x, hit.y, hit.z);
-    } else if (this.activeTool === PROP_TOOL.ERASE) {
-      this.store.removeInRadius(hit.x, hit.z, this.scatterRadius);
-    }
+  handlePlace(hitPoint, typeIdx) {
+    if (typeIdx == null || typeIdx < 0 || typeIdx >= this.store.types.length) return null;
+
+    const before = this.store.snapshot();
+    const sinkOffset = this.propState.sinkOffset || 0;
+    const py = hitPoint.y - sinkOffset;
+    const stamp = this.store.isLiveType(typeIdx) ? null : this._stampForType(typeIdx);
+    const instIdx = this.store.addInstance(typeIdx, hitPoint.x, py, hitPoint.z, stamp);
+    this._pushUndo(before);
+    this.recordStampFromInstance(instIdx);
+    this.instancer.select(instIdx);
+    return instIdx;
   }
 
-  _placeOne(px, py, pz) {
-    const ry = this.randomYRot ? Math.random() * 360 : 0;
-    let sx = 1, sy = 1, sz = 1;
-    if (this.randomScale) {
-      const f = this.scaleMin + Math.random() * (this.scaleMax - this.scaleMin);
-      sx = sy = sz = Math.max(0.01, f);
-    }
-    let rx = 0, rz = 0;
-    if (this.alignToNormal && this.sampleTerrainNormal) {
-      const normal = this.sampleTerrainNormal(px, pz);
-      if (normal) {
-        const q = new THREE.Quaternion().setFromUnitVectors(
-          new THREE.Vector3(0, 1, 0), normal.normalize()
-        );
-        const e = new THREE.Euler().setFromQuaternion(q, "XYZ");
-        rx = e.x * (180 / Math.PI);
-        rz = e.z * (180 / Math.PI);
-      }
-    }
-    this.store.addInstance(this.activeTypeIdx, px, py, pz, { rx, ry, rz, sx, sy, sz });
-  }
-
-  _scatter(cx, cy, cz) {
-    const r = this.scatterRadius;
-    let placed = 0;
-    const attempts = this.scatterCount * 8;
-    for (let a = 0; a < attempts && placed < this.scatterCount; a++) {
-      const angle = Math.random() * Math.PI * 2;
-      const dist  = Math.sqrt(Math.random()) * r;
-      const wx    = cx + Math.cos(angle) * dist;
-      const wz    = cz + Math.sin(angle) * dist;
-      if (this.store.hasNearby(wx, wz, this.scatterMinSep)) continue;
-      this._placeOne(wx, cy, wz);
-      placed++;
-    }
-  }
-
-  // ── Selection ───────────────────────────────────────────────────────────────
-
-  _trySelect(event, camera) {
-    const rect = event.target.getBoundingClientRect?.() ?? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
-    this._mouse.x = ((event.clientX - rect.left) / rect.width)  * 2 - 1;
-    this._mouse.y = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
-    this._raycaster.setFromCamera(this._mouse, camera);
-
-    const instResult = this.instancer.raycast(this._raycaster);
-    const liveResult = this._livePropManager?.raycast(this._raycaster) ?? null;
-
-    let best = null;
-    if (instResult && (!liveResult || instResult.distance <= liveResult.distance)) best = instResult;
-    else if (liveResult) best = liveResult;
-
-    if (best) this.instancer.select(best.instIdx);
+  handleSelect(raycaster) {
+    const hit = this.instancer.raycast(raycaster);
+    if (hit) this.instancer.select(hit.instIdx);
     else this.instancer.clearSelection();
+    return hit;
   }
 
-  deleteSelected() {
+  handleDelete() {
     if (!this.instancer.hasSelection) return;
-    const snap = this.store.snapshot();
-    if (this._undoStack.length >= MAX_UNDO) this._undoStack.shift();
-    this._undoStack.push(snap);
-    this._redoStack.length = 0;
-
+    const before = this.store.snapshot();
     const idx = this.instancer.selectedIdx;
     this.instancer.clearSelection();
     this.store.removeInstance(idx);
+    this._pushUndo(before);
   }
 
-  duplicateSelected() {
-    if (!this.instancer.hasSelection) return;
-    const snap = this.store.snapshot();
-    if (this._undoStack.length >= MAX_UNDO) this._undoStack.shift();
-    this._undoStack.push(snap);
-    this._redoStack.length = 0;
-
-    const newIdx = this.store.duplicateInstance(this.instancer.selectedIdx);
-    this.instancer.select(newIdx);
+  handleDuplicate() {
+    if (!this.instancer.hasSelection) return null;
+    this.instancer.syncFromProxy();
+    const srcIdx = this.instancer.selectedIdx;
+    if (!this.store.instances[srcIdx]) return null;
+    const before = this.store.snapshot();
+    const newIdx = this.store.duplicateInstance(srcIdx);
+    this.recordStampFromInstance(newIdx);
+    this._pushUndo(before);
+    return newIdx;
   }
 
-  // ── Undo / redo ─────────────────────────────────────────────────────────────
+  handleTransformChange() {
+    this.instancer.syncFromProxy();
+  }
+
+  handleTransformEnd() {
+    if (this.instancer.hasSelection) {
+      this.instancer.syncFromProxy();
+      this.recordStampFromInstance(this.instancer.selectedIdx);
+    }
+  }
+
+  beginStroke(hitPoint, event = {}) {
+    this._painting = true;
+    this._lastStrokePoint = null;
+    this._beforeSnap = this.store.snapshot();
+    this.applyAt(hitPoint, event);
+  }
+
+  applyAt(hitPoint, event = {}) {
+    if (!this._painting) return;
+    const brush = this.propBrush;
+    if (!shouldApplyStroke(this._lastStrokePoint, hitPoint, brush.radius, brush.spacingFactor)) return;
+    this._lastStrokePoint = this._lastStrokePoint ?? new THREE.Vector3();
+    this._lastStrokePoint.copy(hitPoint);
+
+    const radius = brush.radius;
+    if (event.altKey) {
+      this.store.removeInRadius(hitPoint.x, hitPoint.z, radius);
+    } else {
+      this._scatter(hitPoint.x, hitPoint.z, radius);
+    }
+  }
+
+  _scatter(wx, wz, radius) {
+    const p = this.propState;
+    const typeIdx = this._getActiveTypeIdx();
+    if (typeIdx == null) return;
+
+    const spacing = p.minSpacing;
+    const area = Math.PI * radius * radius;
+    const attempts = Math.ceil(area * p.density * 0.01);
+    const sinkOffset = p.sinkOffset || 0;
+    const halfW = this.worldSize * 0.5;
+
+    for (let i = 0; i < attempts; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * radius;
+      const tx = wx + Math.cos(angle) * r;
+      const tz = wz + Math.sin(angle) * r;
+
+      if (tx < -halfW || tx > halfW || tz < -halfW || tz > halfW) continue;
+      if (this.store.hasNearby(tx, tz, spacing)) continue;
+
+      const rotY = p.randomRotation ? Math.random() * 360 : 0;
+      const scale = p.scaleMin + Math.random() * (p.scaleMax - p.scaleMin);
+      const y = this.getWorldHeight(tx, tz) - sinkOffset;
+      this.store.instances.push({
+        typeIdx,
+        px: tx,
+        py: y,
+        pz: tz,
+        rx: 0,
+        ry: rotY,
+        rz: 0,
+        sx: scale,
+        sy: scale,
+        sz: scale,
+        ...(this.store.isLiveType(typeIdx)
+          ? { liveParams: { ...this.store.types[typeIdx].defaultParams } }
+          : {}),
+      });
+    }
+    this.store._bump();
+  }
+
+  endStroke() {
+    if (!this._painting) return;
+    this._painting = false;
+    if (this._beforeSnap) {
+      this._pushUndo(this._beforeSnap);
+      this._beforeSnap = null;
+    }
+  }
+
+  clearAll() {
+    const before = this.store.snapshot();
+    this.instancer.clearSelection();
+    this.store.clear();
+    this._pushUndo(before);
+  }
 
   undo() {
-    if (!this._undoStack.length) return;
-    this._redoStack.push(this.store.snapshot());
-    this.store.restoreFromSnapshot(this._undoStack.pop());
+    const cmd = this._undoStack.pop();
+    if (!cmd) return;
     this.instancer.clearSelection();
+    this.store.restoreFromSnapshot(cmd.before);
+    this._redoStack.push(cmd);
   }
 
   redo() {
-    if (!this._redoStack.length) return;
-    this._undoStack.push(this.store.snapshot());
-    this.store.restoreFromSnapshot(this._redoStack.pop());
+    const cmd = this._redoStack.pop();
+    if (!cmd) return;
     this.instancer.clearSelection();
+    this.store.restoreFromSnapshot(cmd.after);
+    this._undoStack.push(cmd);
   }
 
-  // ── Terrain height injection ────────────────────────────────────────────────
-  // Call after scatter/place when you have a CPU heightmap to snap Y correctly.
-  snapInstancesToTerrain(sampleTerrainHeight) {
-    let any = false;
-    for (const inst of this.store.instances) {
-      const y = sampleTerrainHeight(inst.px, inst.pz);
-      if (y != null) { inst.py = y - this.sinkAmount; any = true; }
-    }
-    if (any) this.store._bump();
-  }
-
-  dispose() {
-    this._preview.dispose();
-  }
+  get canUndo() { return this._undoStack.length > 0; }
+  get canRedo() { return this._redoStack.length > 0; }
 }

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
 import Stats from "stats-gl";
 import { texture, uniform } from "three/tsl";
 import { createHeightmapTexture, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
@@ -13,6 +14,7 @@ import {
 } from "../io/heightmapIO.js";
 import { buildProceduralHeightmap, DEFAULT_GEN } from "../terrain/proceduralGen.js";
 import { initEditorShell } from "../ui/editorShell.js";
+import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
 import { createPlayMode, LOD_SNAP } from "../play/playMode.js";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
@@ -29,13 +31,30 @@ import {
 } from "../io/splatmapIO.js";
 import { SPLAT_RES } from "../terrain/splatMap.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { PropStore, PRIMITIVE_SHAPES } from "../tools/propStore.js";
+import { PropStore } from "../tools/propStore.js";
 import { PropInstancer } from "../tools/propInstancer.js";
-import { PropSystem, PROP_TOOL } from "../tools/propSystem.js";
+import { PropSystem } from "../tools/propSystem.js";
+import { PropPlacementPreview } from "../tools/propPlacementPreview.js";
 import { LivePropManager } from "../tools/livePropManager.js";
 import { createFlag, createCoin, createHeart, createKey } from "../props/liveProps.js";
-import { SplineObjectSystem, OBJECTS as SPLINE_OBJECTS } from "../tools/splineObjectSystem.js";
+import { FLAG_DEFAULTS } from "../../v2/core/props/flagFactory.js";
+import { COIN_DEFAULTS, HEART_DEFAULTS, KEY_DEFAULTS } from "../../v2/core/props/collectibleFactory.js";
+import {
+  PROCEDURAL_PROP_DEFS,
+  PROCEDURAL_PROP_LABELS,
+  proceduralSchemaFor,
+  buildProceduralPreviewGroup,
+  registerProceduralObjectFactories,
+} from "../../v2/core/props/proceduralObjectProps.js";
+import { buildPropsPanel, defaultBakeProceduralThumbnails } from "../ui/buildPropsPanel.js";
+import { buildSplinePanel } from "../ui/buildSplinePanel.js";
+import { DEFAULT_SPLINE_STATE } from "./state/splineState.js";
+import { SplineSystem } from "../../v2/tools/spline/splineSystem.js";
+import { PROCEDURAL_OBJECT_OPTIONS } from "../../v2/core/props/proceduralObjectProps.js";
 import { downloadProps, importPropsFromFile } from "../io/propsIO.js";
+import { HybridGrassSystem, syncHybridGrassLod, rebuildHybridGrassGeometries } from "../../v2/render/hybridGrass/hybridGrassSystem.js";
+import { createWindTexture, createSpecNoiseTexture } from "../../v2/core/foliage/windTexture.js";
+import { GrassTerrainData } from "../render/grass/grassTerrainData.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -83,7 +102,14 @@ async function main() {
   viewport.appendChild(renderer.domElement);
 
   const stats = new Stats({ trackGPU: hasTimestamps, trackCPT: true });
-  await stats.init(renderer);
+  try {
+    await Promise.race([
+      stats.init(renderer),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("stats init timeout")), 8000)),
+    ]);
+  } catch (err) {
+    console.warn("[V3] stats-gl init skipped:", err);
+  }
   stats.dom.id = "perf-stats";
 
   const drawPanel   = stats.addPanel(new Stats.Panel("DRAW", "#f0f", "#202"));
@@ -140,15 +166,25 @@ async function main() {
 
   // ── Controls ───────────────────────────────────────────────────────────────
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 0, 0);
-  controls.maxPolarAngle = Math.PI / 2 - 0.02;
-  controls.minDistance = 20;
-  controls.maxDistance = WORLD_SIZE;
+  controls.target.set(0, 10, 0);
   controls.enableDamping = true;
   controls.dampingFactor = 0.1;
-  // LMB → sculpt   MMB → orbit   RMB → pan  (matches v2 editor)
+  controls.maxPolarAngle = Math.PI * 0.92;
+  controls.maxDistance = 1500;
+  // minDistance + scroll zoom handled by editorCameraController (same as v2).
   controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
   controls.update();
+
+  // Orbit re-enable — wired fully after editorCameraController is created.
+  let syncEditorOrbitEnabled = () => { controls.enabled = true; };
+  let editorCamera = null;
+
+  // ── Transform gizmo (shared for prop instances + scene objects) ────────────
+  const tc = new TransformControls(camera, renderer.domElement);
+  tc.setMode("translate");
+  tc.enabled = false;
+  tc.visible = false;
+  scene.add(tc.getHelper());
 
   // ── Lights ─────────────────────────────────────────────────────────────────
   scene.add(new THREE.AmbientLight(0xffffff, 0.5));
@@ -211,8 +247,8 @@ async function main() {
   // LOD meshes share the same heightTexNode, cursor uniforms, brush mask, and rotation.
   const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay);
   scene.add(lod.group);
-
-  sculpt.replaceHeightData(buildProceduralHeightmap(genParams));
+  // Terrain starts flat (createHeightmapTexture initializes all-zeros).
+  // User can generate terrain manually via the Procedural panel.
 
   // ── Human character ────────────────────────────────────────────────────────
   const character = createHumanCharacter(scene, renderer);
@@ -223,6 +259,7 @@ async function main() {
   const sculptPanel    = document.getElementById("sculpt-panel");
   const paintPanel     = document.getElementById("paint-panel");
   const propsPanel     = document.getElementById("props-panel");
+  const splinePanel    = document.getElementById("spline-panel");
   const playStatPos    = document.getElementById("play-stat-pos");
   const playStatSpeed  = document.getElementById("play-stat-speed");
   const playStatGround = document.getElementById("play-stat-ground");
@@ -243,9 +280,109 @@ async function main() {
       playPanel.style.display = "none";
       syncSculptPanelVisibility();
       syncPaintPanelVisibility();
+      syncGrassPanelVisibility();
       syncPropsPanelVisibility();
+      syncSplinePanelVisibility();
+      syncEditorOrbitEnabled();
     },
   });
+
+  // ── Grass system ───────────────────────────────────────────────────────────
+  const grassTerrainData = new GrassTerrainData();
+  const grassWindTex      = createWindTexture();
+  const grassSpecNoiseTex = createSpecNoiseTexture();
+
+  const grassState = {
+    bladeHeight: 1, bladeWidth: 0.15, bladeYSegments: 7, tipTaperStart: 0.5,
+    crossed: true,
+    bendFocus: 0.5, stiffness: 0, maxAngle: 1.4, naturalLean: 0.9,
+    windSpeed: 0.2, windStrength: 1.4, windGust: 0.3, windWaveScale: 0.12, windAngle: 0,
+    clumpScale: 1.5, clumpStrength: 0.7,
+    grassDensity: 1,
+    bladeColor: "#0e300e", tipColor: "#004d05",
+    aoBase: 0.25, aoPower: 2,
+    colorVariation: true,
+    cvHueSpread: 0.08, cvSatSpread: 0.3, cvDryAmount: 0.15, cvDryColor: "#8a7a3a",
+    skyBlend: 0.8, cylindrical: 0.3, viewThicken: 0.45,
+    bssColor: "#2d7a2d", bssIntensity: 1.2, bssPower: 2,
+    frontScatter: 0.3, rimSSS: 0.25,
+    slopeEnabled: false, slopeMin: 0.65, slopeMax: 0.85,
+    terrainTintEnabled: false, terrainTintAutoSource: false,
+    terrainTintManualMode: 0, terrainTintStrength: 0.5, terrainTintRootBias: 0.35,
+    specV1Enabled: false, specV1Intensity: 1.5, specV1Color: "#ffffff",
+    specV1DirX: -1, specV1DirY: 1, specV1DirZ: 0.5, specV1Power: 25.6,
+    specV2Enabled: false, specV2Intensity: 1, specV2Color: "#ffffff",
+    specV2DirX: -1, specV2DirY: 0.45, specV2DirZ: 1,
+    specV2NoiseScale: 3, specV2NoiseStr: 0.6, specV2Power: 12, specV2TipBias: 0.5,
+    interactionRadius: 1.5, interactionStrength: 0.7, interactionMode: 0,
+    receiveShadow: true, lodDebug: false,
+    lodMidDistance: 40, lodFarDistance: 80, lodMaxDistance: 200, lodMegaMaxDistance: 400,
+    lodMidSegments: 3, lodFarSegments: 2, lodMegaSegments: 1,
+    lodFarBladeWidth: 0.45, lodMegaBladeWidth: 0.7,
+  };
+
+  const grassBrush = { radius: 60, strength: 0.7, falloff: 2.0, erase: false };
+
+  let grassRings = null;
+  let _grassBuilding = false;
+
+  async function ensureGrassBuilt() {
+    if (grassRings || _grassBuilding) return;
+    _grassBuilding = true;
+    try {
+      const shared = {
+        scene,
+        renderer,
+        heightTex:        grassTerrainData.grassHeightTex,
+        terrainNormalTex: grassTerrainData.terrainNormalTex,
+        densityTex:       grassTerrainData.densityTex,
+        windTex:          grassWindTex,
+        specNoiseTex:     grassSpecNoiseTex,
+        worldSize:        WORLD_SIZE,
+        gp:               grassState,
+      };
+      const rings = [
+        new HybridGrassSystem({ ...shared, name: "HybridNear",
+          tileSize: 130, bladesPerSide: 512,
+          outerR0: 36, outerR1: 62 }),
+        new HybridGrassSystem({ ...shared, name: "HybridMidThin",
+          tileSize: 180, bladesPerSide: 384, segments: 3,
+          innerR0: 36, innerR1: 56, outerR0: 70, outerR1: 88,
+          crossFadeR0: 70, crossFadeR1: 88 }),
+        new HybridGrassSystem({ ...shared, name: "HybridMid",
+          normalMode: "flat", crossed: false,
+          tileSize: 440, bladesPerSide: 576,
+          bladeWidth: 0.45, segments: 2, bladeHeightMul: 1.1,
+          innerR0: 64, innerR1: 88, outerR0: 180, outerR1: 218 }),
+        new HybridGrassSystem({ ...shared, name: "HybridFar",
+          normalMode: "flat", crossed: false,
+          tileSize: 800, bladesPerSide: 384,
+          bladeWidth: 0.7, segments: 1, bladeHeightMul: 1.2,
+          innerR0: 175, innerR1: 215, outerR0: 360, outerR1: 398 }),
+      ];
+      for (const r of rings) await r.init(camera);
+      for (const r of rings) {
+        r.setEnabled(true);
+        // Widen horizontal cull pad so fast camera rotation (play-mode mouse-look)
+        // doesn't pop blades in at screen edges. The VS clips properly regardless;
+        // off-screen blades in the compact buffer cost only VS invocations, no pixels.
+        r.u.uCullPadNdcX.value    = 0.45;
+        r.u.uCullPadNdcYFar.value = 0.45;
+      }
+      grassRings = rings;
+    } catch (err) {
+      console.error("[V3 Grass] build failed:", err);
+    } finally {
+      _grassBuilding = false;
+    }
+  }
+
+  function syncGrassUniforms() {
+    if (!grassRings) return;
+    const sunDir = new THREE.Vector3().setFromMatrixColumn(sun.matrixWorld, 2).normalize();
+    for (const r of grassRings) r.syncFromState(grassState, sunDir);
+    syncHybridGrassLod(grassRings, grassState);
+  }
 
   // ── UI wiring ──────────────────────────────────────────────────────────────
   const btnRaise  = document.getElementById("btn-raise");
@@ -291,6 +428,7 @@ async function main() {
   const tbSculpt        = document.getElementById("tb-sculpt");
   const tbPlay          = document.getElementById("tb-play");
   const toolsModeSelect = document.getElementById("tools-mode-select");
+  const viewNavHint     = document.getElementById("view-nav-hint");
   const tbSave    = document.getElementById("tb-save");
   const tbLoad    = document.getElementById("tb-load");
   const tbUndo    = document.getElementById("tb-undo");
@@ -652,6 +790,20 @@ async function main() {
 
   // ── Editor mode (view / sculpt) ────────────────────────────────────────────
   let editorMode = "view";
+  const splineState = { ...DEFAULT_SPLINE_STATE };
+  let splineToolState = {
+    mode: "view",
+    spline: splineState,
+    props: null,
+    propSlots: null,
+    treePaint: { activeSlot: 0, minSpacing: 3 },
+  };
+  let _onLeavePropsMode = () => {};
+  let _onLeaveSplineMode = () => {};
+  let _onGizmoDragEnd = () => {};
+  let _gizmoTarget = null;
+
+  const grassPanel = document.getElementById("grass-panel");
 
   function syncSculptPanelVisibility() {
     sculptPanel.style.display = (editorMode === "sculpt" && !playMode.active) ? "" : "none";
@@ -661,34 +813,66 @@ async function main() {
     paintPanel.style.display = (editorMode === "paint" && !playMode.active) ? "" : "none";
   }
 
+  function syncGrassPanelVisibility() {
+    grassPanel.style.display = (editorMode === "grass" && !playMode.active) ? "" : "none";
+  }
+
   function syncPropsPanelVisibility() {
     propsPanel.style.display = (editorMode === "props" && !playMode.active) ? "" : "none";
   }
 
-  function setEditorMode(m) {
+  function syncSplinePanelVisibility() {
+    splinePanel.style.display = (editorMode === "spline" && !playMode.active) ? "" : "none";
+  }
+
+  function applySplineModeEffects() {
+    if (!splineSys?.handleGroup) return;
+    if (editorMode !== "spline" && !playMode.active) {
+      splineSys.dragging = false;
+      splineSys.clearPreview?.();
+    }
+  }
+
+  function setEditorMode(m, { force = false } = {}) {
+    if (!force && m === editorMode) {
+      toolsModeSelect.value = m;
+      syncEditorOrbitEnabled();
+      return;
+    }
+    if (editorMode === "spline" && m !== "spline") _onLeaveSplineMode();
+    if (editorMode === "props" && m !== "props") _onLeavePropsMode();
     editorMode = m;
+    if (splineToolState) splineToolState.mode = m;
     tbSculpt.classList.toggle("active", m === "sculpt");
     toolsModeSelect.value = m;
     if (m === "view") {
       uCursorUV.value.set(-2, -2);
       cancelStroke();
-      controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+      tc.detach();
+      tc.enabled = false;
+      tc.visible = false;
+      _gizmoTarget = null;
     } else if (m === "paint") {
-      controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
       sculpt.uRadius.value = paintState.brush.radius / WORLD_SIZE;
-    } else if (m === "props") {
+    } else if (m === "grass") {
       uCursorUV.value.set(-2, -2);
-      controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
-    } else {
-      controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+      ensureGrassBuilt();
+    } else if (m === "props" || m === "spline") {
+      uCursorUV.value.set(-2, -2);
     }
     syncSculptPanelVisibility();
     syncPaintPanelVisibility();
+    syncGrassPanelVisibility();
     syncPropsPanelVisibility();
+    syncSplinePanelVisibility();
+    applySplineModeEffects();
+    if (viewNavHint) viewNavHint.style.display = (m === "view" && !playMode.active) ? "" : "none";
+    syncEditorOrbitEnabled();
   }
 
   function enterPlay() {
     if (playMode.active) return;
+    editorCamera?.onPlayEnter?.();
     playMode.enter();
     playMode.startWalking(); // request pointer lock immediately (still in click handler)
     tbPlay.classList.add("active");
@@ -696,20 +880,23 @@ async function main() {
     playPanel.style.display = "";
     sculptPanel.style.display = "none";
     paintPanel.style.display = "none";
+    grassPanel.style.display = "none";
     propsPanel.style.display = "none";
+    splinePanel.style.display = "none";
     helpOverlay.classList.remove("visible");
     tbHelp.classList.remove("active");
   }
 
-  // View-mode mouse buttons set directly at startup (TDZ guard — cancelStroke
-  // references isPainting declared later; setEditorMode is safe only after that).
-  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+  function exitPlay() {
+    if (!playMode.active) return;
+    playMode.exit();
+  }
 
   tbSculpt.addEventListener("click", () => setEditorMode("sculpt"));
   toolsModeSelect.addEventListener("change", () => setEditorMode(toolsModeSelect.value));
 
   tbPlay.addEventListener("click", () => {
-    if (playMode.active) playMode.exit();
+    if (playMode.active) exitPlay();
     else enterPlay();
   });
 
@@ -718,7 +905,7 @@ async function main() {
     if (playMode.active && !playMode.walking) playMode.startWalking();
   });
 
-  document.getElementById("play-stop-btn").addEventListener("click", () => playMode.exit());
+  document.getElementById("play-stop-btn").addEventListener("click", () => exitPlay());
 
   tbHelp.addEventListener("click", () => {
     helpOverlay.classList.toggle("visible");
@@ -843,6 +1030,7 @@ async function main() {
         const r = raw[i * 4];
         cpuHeightmap[i] = isHalf ? THREE.DataUtils.fromHalfFloat(r) : r;
       }
+      grassTerrainData.rebuildFromHeightmap(cpuHeightmap, HEIGHTMAP_SIZE, MAX_HEIGHT, WORLD_SIZE);
     } finally {
       readbackInFlight = false;
       if (readbackPending) syncHeightmapToCPU();
@@ -953,10 +1141,201 @@ async function main() {
   }
 
   function refreshMouse(e) {
+    if (!e) return;
     const rect = viewport.getBoundingClientRect();
     mouse.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
     mouse.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
   }
+
+  function pickWorldAtClient(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    const uv = getUV();
+    if (!uv) return null;
+    const wx = uv.u * WORLD_SIZE - WORLD_SIZE / 2;
+    const wz = uv.v * WORLD_SIZE - WORLD_SIZE / 2;
+    return { point: new THREE.Vector3(wx, sampleTerrainHeight(uv.u, uv.v), wz) };
+  }
+
+  editorCamera = createEditorCameraController({
+    camera,
+    controls,
+    domElement: renderer.domElement,
+    isActive: () => !playMode.active,
+    pickWorldAtClient,
+    getSelectionFocus: () => tc.object?.position ?? null,
+  });
+
+  /** Match v2 mouse map in tool modes; view mode also allows LMB drag (navigation). */
+  function syncOrbitMouseBindings() {
+    if (!editorCamera || playMode.active || editorCamera.flyMode) return;
+    const viewNav = editorMode === "view";
+    controls.mouseButtons.LEFT   = viewNav ? THREE.MOUSE.ROTATE : null;
+    controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
+    controls.mouseButtons.RIGHT  = THREE.MOUSE.PAN;
+  }
+
+  syncEditorOrbitEnabled = () => {
+    controls.enabled = !playMode.active && !editorCamera.flyMode;
+    syncOrbitMouseBindings();
+  };
+
+  // Same as v2: disable orbit only while actively dragging the gizmo.
+  tc.addEventListener("mouseDown", () => {
+    if (tc.enabled) controls.enabled = false;
+  });
+  tc.addEventListener("mouseUp", () => {
+    syncEditorOrbitEnabled();
+    _onGizmoDragEnd();
+  });
+
+  /** Reset camera/input/mode — call after editorCamera exists and again when late systems finish init. */
+  function bootstrapEditorInput() {
+    if (document.pointerLockElement) document.exitPointerLock();
+    tc.detach();
+    tc.enabled = false;
+    tc.visible = false;
+    _gizmoTarget = null;
+    exitPlay();
+    editorCamera.onPlayEnter();
+    setEditorMode("view", { force: true });
+  }
+
+  // Late-init systems — loop starts before these exist; noop until wired below.
+  const _noopUpdate = { update() {} };
+  let propInstancer = _noopUpdate;
+  let livePropManager = _noopUpdate;
+  let splineSys = _noopUpdate;
+  let propLod = { lod0Distance: 60, lod1Distance: 150, fadeOutDistance: 500, castShadow: true };
+
+  // True while thumbnail bake / readback owns the shared WebGPU renderer.
+  let _rendererSideWork = false;
+  async function withRendererSideWork(fn) {
+    _rendererSideWork = true;
+    try {
+      return await fn();
+    } finally {
+      _rendererSideWork = false;
+      renderer.setRenderTarget(null);
+    }
+  }
+
+  function recoverEditorInput() {
+    if (splineSys?.dragging) splineSys.dragging = false;
+    syncEditorOrbitEnabled();
+    if (controls.state !== -1) controls.state = -1;
+  }
+
+  // Recover orbit if a gizmo drag ends outside the canvas (v2 pattern).
+  window.addEventListener("pointerup", recoverEditorInput);
+  window.addEventListener("pointercancel", recoverEditorInput);
+
+  // Keep viewport sized before first draw (v2 ResizeObserver pattern).
+  const ro = new ResizeObserver(() => resizeRenderer());
+  ro.observe(viewport);
+  window.addEventListener("resize", () => resizeRenderer());
+  resizeRenderer();
+
+  // v2 precompiles terrain TSL pipelines before the loop — without this WebGPU
+  // can show a black viewport until async compile finishes (or fail silently).
+  try {
+    await renderer.compileAsync(scene, camera);
+    renderer.render(scene, camera);
+  } catch (err) {
+    console.warn("[V3] Pipeline precompile failed:", err);
+  }
+
+  bootstrapEditorInput();
+
+  const _lodSnapVec = new THREE.Vector3();
+  let _lastFrameMs = performance.now();
+  let _loopErrors = 0;
+  renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    const dt  = Math.min((now - _lastFrameMs) / 1000, 0.05);
+    _lastFrameMs = now;
+
+    renderer.info.reset();
+
+    try {
+      if (playMode.active) {
+        playMode.update(dt);
+
+        if (playMode.walking) {
+          const s = playMode.getStats();
+          playStatPos  .textContent = `${s.x}, ${s.y}, ${s.z}`;
+          playStatSpeed.textContent = `${s.speed} m/s`;
+          playStatGround.textContent = s.grounded ? "Yes" : "No";
+        }
+
+        const pp = playMode.playerPosition;
+        _lodSnapVec.set(
+          Math.round(pp.x / LOD_SNAP) * LOD_SNAP,
+          0,
+          Math.round(pp.z / LOD_SNAP) * LOD_SNAP,
+        );
+        lod.update(_lodSnapVec);
+      } else {
+        if (isPainting && editorMode === "sculpt") {
+          const hit = getUV();
+          if (hit) applySculptStroke(hit.u, hit.v);
+        }
+        editorCamera.update(dt);
+        lod.update(controls.target);
+        if (!editorCamera.flyMode) controls.update();
+        if (!editorCamera.flyMode && !controls.enabled) syncEditorOrbitEnabled();
+      }
+
+      if (grassRings) {
+        const _grassAnchor = playMode.active ? playMode.playerPosition : controls.target;
+        for (const r of grassRings) r.update(_grassAnchor, camera);
+      }
+
+      propInstancer.update(camera, propLod);
+      livePropManager.update(dt);
+      splineSys.update(dt);
+    } catch (err) {
+      if (++_loopErrors === 1) console.error("[V3] Frame update error:", err);
+    }
+
+    try {
+      if (csm?.mainFrustum) csm.updateFrustums();
+      // Thumbnail bake can leave a render target bound — always draw to the viewport.
+      renderer.setRenderTarget(null);
+      if (!_rendererSideWork) renderer.render(scene, camera);
+    } catch (err) {
+      if (++_loopErrors === 1) {
+        console.error("[V3] Render error:", err);
+        const vp = document.getElementById("viewport");
+        if (vp && !vp.querySelector("[data-v3-loop-error]")) {
+          const msg = document.createElement("div");
+          msg.dataset.v3LoopError = "1";
+          msg.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;color:#f66;font:14px/1.4 sans-serif;text-align:center;background:rgba(26,10,10,0.92);z-index:9999;pointer-events:none";
+          msg.textContent = `Render error: ${err?.message ?? err}`;
+          vp.appendChild(msg);
+        }
+      }
+    }
+
+    try {
+      if (hasTimestamps) {
+        renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+        renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE);
+      }
+
+      const ri    = renderer.info.render;
+      const draws = ri.drawCalls ?? ri.calls ?? 0;
+      const ktris = (ri.triangles ?? 0) / 1000;
+      _maxDraw = Math.max(_maxDraw, draws);
+      _maxTri  = Math.max(_maxTri,  ktris);
+      drawPanel.update(draws, _maxDraw, 0);
+      drawPanel.updateGraph(draws, _maxDraw);
+      triPanel.update(ktris, _maxTri, 0);
+      triPanel.updateGraph(ktris, _maxTri);
+      stats.update();
+    } catch (_) { /* stats overlay must never block the viewport */ }
+  });
 
   let lastReadbackMs = 0;
   renderer.domElement.addEventListener("mousemove", e => {
@@ -1014,13 +1393,6 @@ async function main() {
     lastPaintUV = null;
   });
 
-  renderer.domElement.addEventListener("contextmenu", e => e.preventDefault());
-
-  // Clicking the viewport while in play menu state starts walking.
-  renderer.domElement.addEventListener("click", () => {
-    if (playMode.active && !playMode.walking) playMode.startWalking();
-  });
-
   // Use capture phase so our handler fires before OrbitControls' bubble listener.
   // Shift+Scroll = brush size  |  Alt+Scroll = strength  |  plain scroll = zoom (OrbitControls)
   renderer.domElement.addEventListener("wheel", e => {
@@ -1040,8 +1412,8 @@ async function main() {
     }
   }, { passive: false, capture: true });
 
-  // Seed the CPU mirror so picking works before the first mouse move.
-  requestHeightmapReadback();
+  // Seed CPU heightmap mirror after boot — not during first user interaction.
+  setTimeout(() => requestHeightmapReadback(), 0);
 
   function cancelStroke() {
     isPainting = false;
@@ -1055,35 +1427,62 @@ async function main() {
 
   window.addEventListener("keydown", e => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+    if (e.code === "Escape" && playMode.active) {
+      exitPlay();
+      return;
+    }
     if (e.code === "KeyV" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
       setEditorMode("view"); return;
     }
+    if (e.code === "KeyI" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "props" ? "view" : "props");
+      return;
+    }
     if (e.code === "KeyP" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
-      if (playMode.active) playMode.exit();
-      else playMode.enter();
+      if (playMode.active) exitPlay();
+      else enterPlay();
       return;
+    }
+    if (e.code === "KeyK" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "spline" ? "view" : "spline");
+      return;
+    }
+    // Spline mode shortcuts (v2)
+    if (editorMode === "spline" && !playMode.active) {
+      if (e.code === "Delete" || e.code === "Backspace") {
+        e.preventDefault();
+        if (splineSys.selectedFeature) splineSys.deleteSelectedFeature();
+        else splineSys.deleteSelected();
+        return;
+      }
     }
     // Props mode shortcuts
     if (editorMode === "props" && !playMode.active) {
-      if (splineSys.isDrafting) {
-        if (e.code === "Enter") { e.preventDefault(); splineSys.commit(); refreshSplinePlacedList(); return; }
-        if (e.code === "Escape") { e.preventDefault(); splineSys.cancelDraft(); return; }
-        if (e.code === "Backspace" || e.code === "Delete") { e.preventDefault(); splineSys.undoLastPoint(); return; }
+      if (e.code === "Escape") {
+        e.preventDefault();
+        deactivatePropSelection();
         return;
+      }
+      if (_gizmoTarget && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.code === "KeyW") { e.preventDefault(); propState.transformMode = "translate"; tc.setMode("translate"); return; }
+        if (e.code === "KeyE") { e.preventDefault(); propState.transformMode = "rotate"; tc.setMode("rotate"); return; }
+        if (e.code === "KeyR") { e.preventDefault(); propState.transformMode = "scale"; tc.setMode("scale"); return; }
       }
       if (e.code === "Delete" || e.code === "Backspace") {
         e.preventDefault();
-        propSys.deleteSelected();
-        refreshPropSelection();
-        propCountEl.textContent = propStore.totalCount;
+        propSys.handleDelete();
+        deactivatePropSelection();
+        refreshPropCount();
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
         e.preventDefault();
-        propSys.duplicateSelected();
-        refreshPropSelection();
-        propCountEl.textContent = propStore.totalCount;
+        const idx = propSys.handleDuplicate();
+        if (idx != null) activatePropSelection(idx);
+        refreshPropCount();
         return;
       }
     }
@@ -1486,14 +1885,212 @@ async function main() {
   pbtnSaveSplat.addEventListener("click", () => saveSplatmap());
   pbtnLoadSplat.addEventListener("click", () => loadSplatmap());
 
+  // ── Grass panel wiring ─────────────────────────────────────────────────────
+
+  // Density brush
+  const gslRadius   = document.getElementById("gsl-radius");
+  const glblRadius  = document.getElementById("glbl-radius");
+  const gslStr      = document.getElementById("gsl-strength");
+  const glblStr     = document.getElementById("glbl-strength");
+  const gslFalloff  = document.getElementById("gsl-falloff");
+  const glblFalloff = document.getElementById("glbl-falloff");
+  const gckErase    = document.getElementById("gck-erase");
+  const gbtnFill    = document.getElementById("gbtn-fill");
+  const gbtnClear   = document.getElementById("gbtn-clear");
+
+  gslRadius.addEventListener("input", () => { grassBrush.radius = Number(gslRadius.value); glblRadius.textContent = gslRadius.value + "m"; });
+  gslStr.addEventListener("input", () => { grassBrush.strength = Number(gslStr.value) / 100; glblStr.textContent = grassBrush.strength.toFixed(2); });
+  gslFalloff.addEventListener("input", () => { grassBrush.falloff = Number(gslFalloff.value) / 10; glblFalloff.textContent = grassBrush.falloff.toFixed(1); });
+  gckErase.addEventListener("change", () => { grassBrush.erase = gckErase.checked; });
+  gbtnFill.addEventListener("click", () => grassTerrainData.fillDensity());
+  gbtnClear.addEventListener("click", () => { if (confirm("Clear all grass density?")) grassTerrainData.clearDensity(); });
+
+  // Appearance
+  const gcolBlade   = document.getElementById("gcol-blade");
+  const gcolTip     = document.getElementById("gcol-tip");
+  const gslAoBase   = document.getElementById("gsl-ao-base");
+  const glblAoBase  = document.getElementById("glbl-ao-base");
+  const gslAoPow    = document.getElementById("gsl-ao-power");
+  const glblAoPow   = document.getElementById("glbl-ao-power");
+  const gckColorVar = document.getElementById("gck-color-var");
+  const gslHue      = document.getElementById("gsl-hue");
+  const glblHue     = document.getElementById("glbl-hue");
+  const gslSat      = document.getElementById("gsl-sat");
+  const glblSat     = document.getElementById("glbl-sat");
+  const gslDry      = document.getElementById("gsl-dry");
+  const glblDry     = document.getElementById("glbl-dry");
+  const gcolDry     = document.getElementById("gcol-dry");
+  const gslBladeH   = document.getElementById("gsl-blade-height");
+  const glblBladeH  = document.getElementById("glbl-blade-height");
+
+  gslBladeH.addEventListener("input", () => {
+    grassState.bladeHeight = Number(gslBladeH.value) / 10;
+    glblBladeH.textContent = grassState.bladeHeight.toFixed(1) + "m";
+    syncGrassUniforms();
+  });
+  gcolBlade.addEventListener("input", () => { grassState.bladeColor = gcolBlade.value; syncGrassUniforms(); });
+  gcolTip.addEventListener("input",   () => { grassState.tipColor   = gcolTip.value;   syncGrassUniforms(); });
+  gslAoBase.addEventListener("input", () => { grassState.aoBase = Number(gslAoBase.value) / 100; glblAoBase.textContent = grassState.aoBase.toFixed(2); syncGrassUniforms(); });
+  gslAoPow.addEventListener("input",  () => { grassState.aoPower = Number(gslAoPow.value) / 10; glblAoPow.textContent = grassState.aoPower.toFixed(1); syncGrassUniforms(); });
+  gckColorVar.addEventListener("change", () => { grassState.colorVariation = gckColorVar.checked; syncGrassUniforms(); });
+  gslHue.addEventListener("input", () => { grassState.cvHueSpread = Number(gslHue.value) / 100; glblHue.textContent = grassState.cvHueSpread.toFixed(2); syncGrassUniforms(); });
+  gslSat.addEventListener("input", () => { grassState.cvSatSpread = Number(gslSat.value) / 100; glblSat.textContent = grassState.cvSatSpread.toFixed(2); syncGrassUniforms(); });
+  gslDry.addEventListener("input", () => { grassState.cvDryAmount = Number(gslDry.value) / 100; glblDry.textContent = grassState.cvDryAmount.toFixed(2); syncGrassUniforms(); });
+  gcolDry.addEventListener("input", () => { grassState.cvDryColor = gcolDry.value; syncGrassUniforms(); });
+
+  // Shape & Dynamics
+  const gslBladeW  = document.getElementById("gsl-blade-width");
+  const glblBladeW = document.getElementById("glbl-blade-width");
+  const gckCrossed = document.getElementById("gck-crossed");
+  const gslBend    = document.getElementById("gsl-bend");
+  const glblBend   = document.getElementById("glbl-bend");
+  const gslStiff   = document.getElementById("gsl-stiffness");
+  const glblStiff  = document.getElementById("glbl-stiffness");
+  const gslMaxAng  = document.getElementById("gsl-max-angle");
+  const glblMaxAng = document.getElementById("glbl-max-angle");
+  const gslLean    = document.getElementById("gsl-lean");
+  const glblLean   = document.getElementById("glbl-lean");
+  const gslSky     = document.getElementById("gsl-sky");
+  const glblSky    = document.getElementById("glbl-sky");
+  const gslCyl     = document.getElementById("gsl-cyl");
+  const glblCyl    = document.getElementById("glbl-cyl");
+  const gslThick   = document.getElementById("gsl-thick");
+  const glblThick  = document.getElementById("glbl-thick");
+  const gslDens    = document.getElementById("gsl-density");
+  const glblDens   = document.getElementById("glbl-density");
+  const gckShadow  = document.getElementById("gck-shadow");
+
+  gslBladeW.addEventListener("input", () => {
+    grassState.bladeWidth = Number(gslBladeW.value) / 100;
+    glblBladeW.textContent = grassState.bladeWidth.toFixed(2) + "m";
+    if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
+  });
+  gckCrossed.addEventListener("change", () => {
+    grassState.crossed = gckCrossed.checked;
+    if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
+  });
+  gslBend.addEventListener("input",   () => { grassState.bendFocus = Number(gslBend.value) / 10; glblBend.textContent = grassState.bendFocus.toFixed(1); syncGrassUniforms(); });
+  gslStiff.addEventListener("input",  () => { grassState.stiffness = Number(gslStiff.value) / 100; glblStiff.textContent = grassState.stiffness.toFixed(2); syncGrassUniforms(); });
+  gslMaxAng.addEventListener("input", () => { grassState.maxAngle = Number(gslMaxAng.value) / 100; glblMaxAng.textContent = grassState.maxAngle.toFixed(2); syncGrassUniforms(); });
+  gslLean.addEventListener("input",   () => { grassState.naturalLean = Number(gslLean.value) / 100; glblLean.textContent = grassState.naturalLean.toFixed(2); syncGrassUniforms(); });
+  gslSky.addEventListener("input",    () => { grassState.skyBlend = Number(gslSky.value) / 100; glblSky.textContent = grassState.skyBlend.toFixed(2); syncGrassUniforms(); });
+  gslCyl.addEventListener("input",    () => { grassState.cylindrical = Number(gslCyl.value) / 100; glblCyl.textContent = grassState.cylindrical.toFixed(2); syncGrassUniforms(); });
+  gslThick.addEventListener("input",  () => { grassState.viewThicken = Number(gslThick.value) / 100; glblThick.textContent = grassState.viewThicken.toFixed(2); syncGrassUniforms(); });
+  gslDens.addEventListener("input",   () => { grassState.grassDensity = Number(gslDens.value) / 100; glblDens.textContent = grassState.grassDensity.toFixed(2); syncGrassUniforms(); });
+  gckShadow.addEventListener("change", () => { grassState.receiveShadow = gckShadow.checked; syncGrassUniforms(); });
+
+  // Wind
+  const gslWindSpeed = document.getElementById("gsl-wind-speed");
+  const glblWindSpeed= document.getElementById("glbl-wind-speed");
+  const gslWindStr   = document.getElementById("gsl-wind-str");
+  const glblWindStr  = document.getElementById("glbl-wind-str");
+  const gslWindAngle = document.getElementById("gsl-wind-angle");
+  const glblWindAngle= document.getElementById("glbl-wind-angle");
+  const gslWindGust  = document.getElementById("gsl-wind-gust");
+  const glblWindGust = document.getElementById("glbl-wind-gust");
+  const gslWindWave  = document.getElementById("gsl-wind-wave");
+  const glblWindWave = document.getElementById("glbl-wind-wave");
+
+  gslWindSpeed.addEventListener("input", () => { grassState.windSpeed = Number(gslWindSpeed.value) / 100; glblWindSpeed.textContent = grassState.windSpeed.toFixed(2); syncGrassUniforms(); });
+  gslWindStr.addEventListener("input",   () => { grassState.windStrength = Number(gslWindStr.value) / 100; glblWindStr.textContent = grassState.windStrength.toFixed(2); syncGrassUniforms(); });
+  gslWindAngle.addEventListener("input", () => { grassState.windAngle = Number(gslWindAngle.value); glblWindAngle.textContent = grassState.windAngle + "°"; syncGrassUniforms(); });
+  gslWindGust.addEventListener("input",  () => { grassState.windGust = Number(gslWindGust.value) / 100; glblWindGust.textContent = grassState.windGust.toFixed(2); syncGrassUniforms(); });
+  gslWindWave.addEventListener("input",  () => { grassState.windWaveScale = Number(gslWindWave.value) / 100; glblWindWave.textContent = grassState.windWaveScale.toFixed(2); syncGrassUniforms(); });
+
+  // SSS
+  const gcolBss    = document.getElementById("gcol-bss");
+  const gslBssInt  = document.getElementById("gsl-bss-int");
+  const glblBssInt = document.getElementById("glbl-bss-int");
+  const gslBssPow  = document.getElementById("gsl-bss-pow");
+  const glblBssPow = document.getElementById("glbl-bss-pow");
+  const gslFront   = document.getElementById("gsl-front-scat");
+  const glblFront  = document.getElementById("glbl-front-scat");
+  const gslRim     = document.getElementById("gsl-rim");
+  const glblRim    = document.getElementById("glbl-rim");
+
+  gcolBss.addEventListener("input",   () => { grassState.bssColor = gcolBss.value; syncGrassUniforms(); });
+  gslBssInt.addEventListener("input", () => { grassState.bssIntensity = Number(gslBssInt.value) / 100; glblBssInt.textContent = grassState.bssIntensity.toFixed(2); syncGrassUniforms(); });
+  gslBssPow.addEventListener("input", () => { grassState.bssPower = Number(gslBssPow.value) / 10; glblBssPow.textContent = grassState.bssPower.toFixed(1); syncGrassUniforms(); });
+  gslFront.addEventListener("input",  () => { grassState.frontScatter = Number(gslFront.value) / 100; glblFront.textContent = grassState.frontScatter.toFixed(2); syncGrassUniforms(); });
+  gslRim.addEventListener("input",    () => { grassState.rimSSS = Number(gslRim.value) / 100; glblRim.textContent = grassState.rimSSS.toFixed(2); syncGrassUniforms(); });
+
+  // Specular
+  const gckSpec1   = document.getElementById("gck-spec1");
+  const gslS1Int   = document.getElementById("gsl-s1-int");
+  const glblS1Int  = document.getElementById("glbl-s1-int");
+  const gcolS1     = document.getElementById("gcol-s1");
+  const gslS1Pow   = document.getElementById("gsl-s1-pow");
+  const glblS1Pow  = document.getElementById("glbl-s1-pow");
+  const gckSpec2   = document.getElementById("gck-spec2");
+  const gslS2Int   = document.getElementById("gsl-s2-int");
+  const glblS2Int  = document.getElementById("glbl-s2-int");
+  const gcolS2     = document.getElementById("gcol-s2");
+  const gslS2Nscale= document.getElementById("gsl-s2-nscale");
+  const glblS2Nscale=document.getElementById("glbl-s2-nscale");
+  const gslS2Nstr  = document.getElementById("gsl-s2-nstr");
+  const glblS2Nstr = document.getElementById("glbl-s2-nstr");
+  const gslS2Pow   = document.getElementById("gsl-s2-pow");
+  const glblS2Pow  = document.getElementById("glbl-s2-pow");
+
+  gckSpec1.addEventListener("change",   () => { grassState.specV1Enabled = gckSpec1.checked; syncGrassUniforms(); });
+  gslS1Int.addEventListener("input",    () => { grassState.specV1Intensity = Number(gslS1Int.value) / 100; glblS1Int.textContent = grassState.specV1Intensity.toFixed(2); syncGrassUniforms(); });
+  gcolS1.addEventListener("input",      () => { grassState.specV1Color = gcolS1.value; syncGrassUniforms(); });
+  gslS1Pow.addEventListener("input",    () => { grassState.specV1Power = Number(gslS1Pow.value) / 10; glblS1Pow.textContent = grassState.specV1Power.toFixed(1); syncGrassUniforms(); });
+  gckSpec2.addEventListener("change",   () => { grassState.specV2Enabled = gckSpec2.checked; syncGrassUniforms(); });
+  gslS2Int.addEventListener("input",    () => { grassState.specV2Intensity = Number(gslS2Int.value) / 100; glblS2Int.textContent = grassState.specV2Intensity.toFixed(2); syncGrassUniforms(); });
+  gcolS2.addEventListener("input",      () => { grassState.specV2Color = gcolS2.value; syncGrassUniforms(); });
+  gslS2Nscale.addEventListener("input", () => { grassState.specV2NoiseScale = Number(gslS2Nscale.value) / 10; glblS2Nscale.textContent = grassState.specV2NoiseScale.toFixed(1); syncGrassUniforms(); });
+  gslS2Nstr.addEventListener("input",   () => { grassState.specV2NoiseStr = Number(gslS2Nstr.value) / 100; glblS2Nstr.textContent = grassState.specV2NoiseStr.toFixed(2); syncGrassUniforms(); });
+  gslS2Pow.addEventListener("input",    () => { grassState.specV2Power = Number(gslS2Pow.value); glblS2Pow.textContent = gslS2Pow.value; syncGrassUniforms(); });
+
+  // Terrain / slope
+  const gckSlope    = document.getElementById("gck-slope");
+  const gslSlopeMin = document.getElementById("gsl-slope-min");
+  const glblSlopeMin= document.getElementById("glbl-slope-min");
+  const gslSlopeMax = document.getElementById("gsl-slope-max");
+  const glblSlopeMax= document.getElementById("glbl-slope-max");
+
+  gckSlope.addEventListener("change",    () => { grassState.slopeEnabled = gckSlope.checked; syncGrassUniforms(); });
+  gslSlopeMin.addEventListener("input",  () => { grassState.slopeMin = Number(gslSlopeMin.value) / 100; glblSlopeMin.textContent = grassState.slopeMin.toFixed(2); syncGrassUniforms(); });
+  gslSlopeMax.addEventListener("input",  () => { grassState.slopeMax = Number(gslSlopeMax.value) / 100; glblSlopeMax.textContent = grassState.slopeMax.toFixed(2); syncGrassUniforms(); });
+
+  // LOD
+  const gslLodMid  = document.getElementById("gsl-lod-mid");
+  const glblLodMid = document.getElementById("glbl-lod-mid");
+  const gslLodFar  = document.getElementById("gsl-lod-far");
+  const glblLodFar = document.getElementById("glbl-lod-far");
+  const gslLodMax  = document.getElementById("gsl-lod-max");
+  const glblLodMax = document.getElementById("glbl-lod-max");
+  const gslLodMega = document.getElementById("gsl-lod-mega");
+  const glblLodMega= document.getElementById("glbl-lod-mega");
+  const gckLodDebug= document.getElementById("gck-lod-debug");
+
+  gslLodMid.addEventListener("input",  () => { grassState.lodMidDistance = Number(gslLodMid.value); glblLodMid.textContent = gslLodMid.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); });
+  gslLodFar.addEventListener("input",  () => { grassState.lodFarDistance = Number(gslLodFar.value); glblLodFar.textContent = gslLodFar.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); });
+  gslLodMax.addEventListener("input",  () => { grassState.lodMaxDistance = Number(gslLodMax.value); glblLodMax.textContent = gslLodMax.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); });
+  gslLodMega.addEventListener("input", () => { grassState.lodMegaMaxDistance = Number(gslLodMega.value); glblLodMega.textContent = gslLodMega.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); });
+  gckLodDebug.addEventListener("change", () => { grassState.lodDebug = gckLodDebug.checked; syncGrassUniforms(); });
+
+  // Interaction
+  const gslIntRad  = document.getElementById("gsl-int-rad");
+  const glblIntRad = document.getElementById("glbl-int-rad");
+  const gslIntStr  = document.getElementById("gsl-int-str");
+  const glblIntStr = document.getElementById("glbl-int-str");
+  const gselIntMode= document.getElementById("gsel-int-mode");
+
+  gslIntRad.addEventListener("input",  () => { grassState.interactionRadius = Number(gslIntRad.value) / 10; glblIntRad.textContent = grassState.interactionRadius.toFixed(1) + "m"; syncGrassUniforms(); });
+  gslIntStr.addEventListener("input",  () => { grassState.interactionStrength = Number(gslIntStr.value) / 100; glblIntStr.textContent = grassState.interactionStrength.toFixed(2); syncGrassUniforms(); });
+  gselIntMode.addEventListener("change", () => { grassState.interactionMode = Number(gselIntMode.value); syncGrassUniforms(); });
+
   // ── Props system ───────────────────────────────────────────────────────────
   const propStore = new PropStore();
-  const propInstancer = new PropInstancer(scene, propStore);
+  propInstancer = new PropInstancer(scene, propStore);
   const gltfLoader = new GLTFLoader();
 
   // World-space hit on terrain surface for prop placement
   const _propHitVec = new THREE.Vector3();
   function getTerrainHitWorld(event) {
+    if (!event) return null;
     refreshMouse(event);
     const uv = getUV();
     if (!uv) return null;
@@ -1503,602 +2100,507 @@ async function main() {
   }
 
   // Live prop manager — handles animated THREE.Group props
-  const livePropManager = new LivePropManager(scene, propStore);
+  livePropManager = new LivePropManager(scene, propStore);
   livePropManager.registerFactory("flag",  createFlag);
   livePropManager.registerFactory("coin",  createCoin);
   livePropManager.registerFactory("heart", createHeart);
   livePropManager.registerFactory("key",   createKey);
 
-  // Register built-in live types in propStore so they appear in the type list
-  const _liveTypeDefaultParams = {
-    flag:  { windSpeed: 600, windIntensity: 250, poleHeight: 4, clothWidth: 1.5, clothHeight: 0.9, flagColor: "#dd2222" },
-    coin:  { spinSpeed: 2.0, bobSpeed: 1.8, bobAmp: 0.12 },
-    heart: { spinSpeed: 0.8, bobSpeed: 2.0, bobAmp: 0.15 },
-    key:   { spinSpeed: 1.5, bobSpeed: 1.2, bobAmp: 0.10 },
-  };
+  registerProceduralObjectFactories(livePropManager);
 
-  const propSys = new PropSystem(scene, propStore, propInstancer, getTerrainHitWorld, livePropManager);
-  propSys.sampleTerrainNormal = sampleTerrainNormal;
+  const propState = {
+    activeSlot: 0,
+    sinkOffset: 0,
+    transformMode: "translate",
+    placementMode: "place",
+    density: 0.5,
+    minSpacing: 3,
+    scaleMin: 0.8,
+    scaleMax: 1.2,
+    randomRotation: true,
+  };
+  const propSlots = [];
+  splineToolState.props = propState;
+  splineToolState.propSlots = propSlots;
+  const propBrush = { radius: 12, spacingFactor: 0.22 };
+  propLod = { lod0Distance: 60, lod1Distance: 150, fadeOutDistance: 500, castShadow: true };
+
+  const propSys = new PropSystem({
+    propState,
+    propSlots,
+    propBrush,
+    propStore,
+    propInstancer,
+    getWorldHeight: (wx, wz) => {
+      const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
+      const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
+      return sampleTerrainHeight(u, v);
+    },
+    worldSize: WORLD_SIZE,
+  });
+
+  const propPlacementPreview = new PropPlacementPreview(scene, propStore, buildProceduralPreviewGroup);
+
+  let _lastMouseEvent = null;
+  let _propPainting = false;
+
+  function _detachGizmo() {
+    tc.detach();
+    tc.enabled = false;
+    tc.visible = false;
+    _gizmoTarget = null;
+    syncEditorOrbitEnabled();
+  }
 
   function getWorldHeight(wx, wz) {
     const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
     const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
     return sampleTerrainHeight(u, v);
   }
-  const splineSys = new SplineObjectSystem(scene, getWorldHeight);
 
-  // LOD config — driven by UI sliders
-  const propLodCfg = { lod0Distance: 60, lod1Distance: 150, fadeOutDistance: 500 };
+  const splineTerrainStoreStub = {
+    getWorldHeight,
+    ensureChunkData() { return null; },
+  };
+  const splineChunkStreamStub = { markDirtyRects() {} };
+  const splineTreeStoreStub = {
+    addTree() {},
+    hasTreeNearby: () => false,
+    syncAllHeights: () => {},
+  };
 
-  // ── Props panel DOM refs ───────────────────────────────────────────────────
-  const propTypeList      = document.getElementById("prop-type-list");
-  const propCountEl       = document.getElementById("prop-total-count");
-  const propSelectInsp    = document.getElementById("props-select-insp");
-  const propSelType       = document.getElementById("propsel-type");
-  const propSelPx         = document.getElementById("propsel-px");
-  const propSelPy         = document.getElementById("propsel-py");
-  const propSelPz         = document.getElementById("propsel-pz");
-  const propSelRy         = document.getElementById("propsel-ry");
-  const propSelScale      = document.getElementById("propsel-scale");
-  const propSelDelete     = document.getElementById("propsel-delete");
-  const propSelDup        = document.getElementById("propsel-dup");
-  const prToolPlace       = document.getElementById("proptool-place");
-  const prToolScatter     = document.getElementById("proptool-scatter");
-  const prToolErase       = document.getElementById("proptool-erase");
-  const prToolSelect      = document.getElementById("proptool-select");
-  const prSlRadius        = document.getElementById("prsl-radius");
-  const prLblRadius       = document.getElementById("prlbl-radius");
-  const prSlCount         = document.getElementById("prsl-count");
-  const prLblCount        = document.getElementById("prlbl-count");
-  const prSlMinSep        = document.getElementById("prsl-minsep");
-  const prLblMinSep       = document.getElementById("prlbl-minsep");
-  const prCkRandRot       = document.getElementById("prck-randrot");
-  const prSlSink          = document.getElementById("prsl-sink");
-  const prLblSink         = document.getElementById("prlbl-sink");
-  const prCkRandScale     = document.getElementById("prck-randscale");
-  const prSlLod0          = document.getElementById("prsl-lod0");
-  const prLblLod0         = document.getElementById("prlbl-lod0");
-  const prSlLod1          = document.getElementById("prsl-lod1");
-  const prLblLod1         = document.getElementById("prlbl-lod1");
-  const prSlCull          = document.getElementById("prsl-cull");
-  const prLblCull         = document.getElementById("prlbl-cull");
-  const propBtnLoadGlb    = document.getElementById("propbtn-load-glb");
-  const propBtnSave       = document.getElementById("propbtn-save");
-  const propBtnLoad       = document.getElementById("propbtn-load");
-  const propBtnClearAll   = document.getElementById("propbtn-clear-all");
-  const propLoadedList    = document.getElementById("prop-loaded-list");
-  const propLoadedEmpty   = document.getElementById("prop-loaded-empty");
-  const propLiveParamsSec = document.getElementById("props-live-params");
-  const propLiveParamsBody= document.getElementById("props-live-params-body");
-  const propGizmoHint     = document.getElementById("props-gizmo-hint");
-  const prCkAlignNormal   = document.getElementById("prck-alignnormal");
-  const prSlScaleMin      = document.getElementById("prsl-scalemin");
-  const prLblScaleMin     = document.getElementById("prlbl-scalemin");
-  const prSlScaleMax      = document.getElementById("prsl-scalemax");
-  const prLblScaleMax     = document.getElementById("prlbl-scalemax");
-  const prCkShadow        = document.getElementById("prck-shadow");
-  const splineTypeSelect  = document.getElementById("spline-type-select");
-  const splineStatus      = document.getElementById("spline-status");
-  const splineBtnDraw     = document.getElementById("splinebtn-draw");
-  const splineBtnCommit   = document.getElementById("splinebtn-commit");
-  const splineBtnCancel   = document.getElementById("splinebtn-cancel");
-  const splineBtnUndoPt   = document.getElementById("splinebtn-undopt");
-  const splineClosed      = document.getElementById("spline-closed");
-  const splineParamsDiv   = document.getElementById("spline-params");
-  const splinePlacedList  = document.getElementById("spline-placed-list");
-  const splinePlacedEmpty = document.getElementById("spline-placed-empty");
+  splineSys = new SplineSystem({
+    scene,
+    toolState: splineToolState,
+    config: { world: { size: WORLD_SIZE } },
+    terrainStore: splineTerrainStoreStub,
+    chunkStream: splineChunkStreamStub,
+    treeStore: splineTreeStoreStub,
+    propStore,
+    getWorldHeight,
+    getRoadSegments: () => [],
+    onVolumesChange: () => {},
+  });
 
-  function refreshPropTypeList() {
-    if (propStore.types.length === 0) {
-      propTypeList.innerHTML = '<div class="prop-type-empty">Add a type above or load a GLB.</div>';
+  _onLeaveSplineMode = () => {
+    splineSys.dragging = false;
+    splineSys.clearPreview();
+    syncEditorOrbitEnabled();
+  };
+
+  const _propPickRay = new THREE.Raycaster();
+  const _propPickNdc = new THREE.Vector2();
+  let _onPropSelectionChanged = null;
+
+  function refreshPropCount() {
+    const el = document.getElementById("prop-total-count");
+    if (el) el.textContent = propStore.totalCount;
+  }
+
+  function activatePropSelection(instIdx) {
+    propInstancer.select(instIdx);
+    tc.attach(propInstancer.proxyObject);
+    tc.setMode(propState.transformMode);
+    tc.enabled = true;
+    tc.visible = true;
+    _gizmoTarget = "prop";
+    propSys.recordStampFromInstance(instIdx);
+    _onPropSelectionChanged?.(instIdx);
+    propPlacementPreview.hide();
+  }
+
+  function deactivatePropSelection() {
+    propInstancer.clearSelection();
+    if (_gizmoTarget === "prop") _detachGizmo();
+    _onPropSelectionChanged?.(null);
+    propPlacementPreview.hide();
+    syncEditorOrbitEnabled();
+  }
+
+  _onLeavePropsMode = () => {
+    deactivatePropSelection();
+    propPlacementPreview.hide();
+    syncEditorOrbitEnabled();
+  };
+
+  _onGizmoDragEnd = () => {
+    if (_gizmoTarget === "prop") propSys.handleTransformEnd();
+  };
+
+  function updatePropPlacementPreview(hit) {
+    if (!hit) { propPlacementPreview.hide(); return; }
+    if (
+      editorMode !== "props" ||
+      playMode.active ||
+      propState.placementMode !== "place" ||
+      propInstancer.hasSelection ||
+      tc.dragging
+    ) {
+      propPlacementPreview.hide();
       return;
     }
-    propTypeList.innerHTML = "";
-    propStore.types.forEach((type, idx) => {
-      const div = document.createElement("div");
-      div.className = "prop-type-item" + (propSys.activeTypeIdx === idx ? " active" : "");
-      const badge = type.live ? " [live]" : type.isPrimitive ? " [prim]" : "";
-      div.textContent = type.name + badge;
-      div.addEventListener("click", () => {
-        propSys.setActiveType(idx);
-        propTypeList.querySelectorAll(".prop-type-item").forEach((el, i) => el.classList.toggle("active", i === idx));
-      });
-      propTypeList.appendChild(div);
-    });
+    const slot = propSlots[propState.activeSlot];
+    if (!slot || slot.typeIdx == null) { propPlacementPreview.hide(); return; }
+    propPlacementPreview.showAt(
+      { point: hit },
+      slot.typeIdx,
+      propSys.stampForType(slot.typeIdx),
+      propState.sinkOffset || 0,
+    );
   }
 
-  function refreshLoadedGlbList() {
-    const glbTypes = propStore.types
-      .map((t, i) => ({ t, i }))
-      .filter(({ t }) => !t.isPrimitive && !t.live);
-    propLoadedEmpty.style.display = glbTypes.length ? "none" : "";
-    // Remove old rows (keep the empty placeholder)
-    for (const child of [...propLoadedList.children]) {
-      if (child !== propLoadedEmpty) child.remove();
-    }
-    for (const { t, i } of glbTypes) {
-      const row = document.createElement("div");
-      row.style.cssText = "display:flex;align-items:center;gap:4px;margin-bottom:3px";
-
-      const name = document.createElement("span");
-      name.textContent = t.name;
-      name.style.cssText = "flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-
-      const btnLod1 = document.createElement("button");
-      btnLod1.textContent = "LOD1";
-      btnLod1.className = "action-btn";
-      btnLod1.style.cssText = "padding:1px 5px;font-size:10px";
-      btnLod1.addEventListener("click", () => {
-        const inp = Object.assign(document.createElement("input"), { type: "file", accept: ".glb,.gltf" });
-        inp.onchange = () => {
-          if (!inp.files[0]) return;
-          const url = URL.createObjectURL(inp.files[0]);
-          gltfLoader.load(url, gltf => { URL.revokeObjectURL(url); propStore.registerTypeLod(i, 1, gltf.scene); propInstancer.onTypeRegistered(i); }, undefined, () => URL.revokeObjectURL(url));
-        };
-        inp.click();
-      });
-
-      const btnLod2 = document.createElement("button");
-      btnLod2.textContent = "LOD2";
-      btnLod2.className = "action-btn";
-      btnLod2.style.cssText = "padding:1px 5px;font-size:10px";
-      btnLod2.addEventListener("click", () => {
-        const inp = Object.assign(document.createElement("input"), { type: "file", accept: ".glb,.gltf" });
-        inp.onchange = () => {
-          if (!inp.files[0]) return;
-          const url = URL.createObjectURL(inp.files[0]);
-          gltfLoader.load(url, gltf => { URL.revokeObjectURL(url); propStore.registerTypeLod(i, 2, gltf.scene); propInstancer.onTypeRegistered(i); }, undefined, () => URL.revokeObjectURL(url));
-        };
-        inp.click();
-      });
-
-      const btnRm = document.createElement("button");
-      btnRm.textContent = "✕";
-      btnRm.className = "action-btn";
-      btnRm.style.cssText = "padding:1px 5px;font-size:10px;color:#f66";
-      btnRm.addEventListener("click", () => {
-        propInstancer.onTypeRemoved(i);
-        propStore.removeType(i);
-        refreshPropTypeList();
-        refreshLoadedGlbList();
-        propCountEl.textContent = propStore.totalCount;
-      });
-
-      row.appendChild(name);
-      row.appendChild(btnLod1);
-      row.appendChild(btnLod2);
-      row.appendChild(btnRm);
-      propLoadedList.appendChild(row);
-    }
-  }
-
-  // ── Spline Objects system wiring ─────────────────────────────────────────
-  // Populate type dropdown from v2 OBJECTS
-  for (const obj of SPLINE_OBJECTS) {
-    const opt = document.createElement("option");
-    opt.value = obj.id;
-    opt.textContent = obj.label + (obj.minPoints === 1 ? " (point)" : " (path)");
-    splineTypeSelect.appendChild(opt);
-  }
-
-  function refreshSplineUI() {
-    const drafting = splineSys.isDrafting;
-    const canCommit = splineSys.canCommit();
-    const pts = splineSys.draftPointCount;
-    const minPts = splineSys.activeMinPoints;
-
-    splineStatus.textContent = drafting
-      ? `${pts} point${pts !== 1 ? "s" : ""} placed (need ${minPts}+)`
-      : "Not drawing";
-    splineBtnDraw.disabled   = drafting;
-    splineBtnCommit.disabled = !canCommit;
-    splineBtnCancel.disabled = !drafting;
-    splineBtnUndoPt.disabled = !drafting || pts === 0;
-  }
-
-  function refreshSplinePlacedList() {
-    const rows = splinePlacedList.querySelectorAll(".spline-placed-row");
-    rows.forEach(r => r.remove());
-    splinePlacedEmpty.style.display = splineSys.objects.length ? "none" : "";
-    splineSys.objects.forEach((entry, idx) => {
-      const row = document.createElement("div");
-      row.className = "spline-placed-row";
-      row.style.cssText = "display:flex;align-items:center;gap:4px;margin-bottom:3px";
-      const name = document.createElement("span");
-      name.textContent = entry.label;
-      name.style.cssText = "flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-      const btnRm = document.createElement("button");
-      btnRm.textContent = "✕";
-      btnRm.className = "action-btn";
-      btnRm.style.cssText = "padding:1px 6px;font-size:10px;color:#f66";
-      btnRm.addEventListener("click", () => {
-        splineSys.removeObject(idx);
-        refreshSplinePlacedList();
-      });
-      row.appendChild(name);
-      row.appendChild(btnRm);
-      splinePlacedList.appendChild(row);
-    });
-  }
-
-  function buildSplineParamsUI(objDef) {
-    splineParamsDiv.innerHTML = "";
-    if (!objDef?.schema) return;
-    for (const field of objDef.schema) {
-      if (field.type === "sep") {
-        const hr = document.createElement("hr");
-        hr.style.cssText = "border:none;border-top:1px solid #333;margin:4px 0";
-        splineParamsDiv.appendChild(hr);
-        continue;
-      }
-      if (field.type === "file") continue; // skip file inputs (texture loader — future)
-      const row = document.createElement("div");
-      row.className = "prop-row";
-      const label = document.createElement("span");
-      label.className = "prop-label";
-      label.textContent = field.label;
-      row.appendChild(label);
-      const val = document.createElement("div");
-      val.className = "prop-value";
-      if (field.type === "color") {
-        const cur = splineSys.activeParams[field.key] ?? splineSys.activeObjDef?.defaults?.[field.key] ?? "#ffffff";
-        const inp = Object.assign(document.createElement("input"), { type: "color", value: cur });
-        inp.style.cssText = "width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none";
-        inp.addEventListener("input", () => splineSys.setParam(field.key, inp.value));
-        val.appendChild(inp);
-      } else if (field.type === "toggle") {
-        const cur = splineSys.activeParams[field.key] ?? splineSys.activeObjDef?.defaults?.[field.key] ?? false;
-        const lbl = document.createElement("label");
-        lbl.className = "toggle-label";
-        const inp = Object.assign(document.createElement("input"), { type: "checkbox", checked: cur });
-        inp.addEventListener("change", () => splineSys.setParam(field.key, inp.checked));
-        const track = document.createElement("span"); track.className = "toggle-track";
-        const thumb = document.createElement("span"); thumb.className = "toggle-thumb";
-        track.appendChild(thumb); lbl.appendChild(inp); lbl.appendChild(track);
-        val.appendChild(lbl);
-      } else if (field.type === "select") {
-        const cur = splineSys.activeParams[field.key] ?? splineSys.activeObjDef?.defaults?.[field.key];
-        const sel = document.createElement("select");
-        sel.className = "prop-select";
-        for (const [v, l] of Object.entries(field.options ?? {})) {
-          const opt = Object.assign(document.createElement("option"), { value: v, textContent: l, selected: v === String(cur) });
-          sel.appendChild(opt);
-        }
-        sel.addEventListener("change", () => splineSys.setParam(field.key, sel.value));
-        val.appendChild(sel);
-      } else {
-        const cur = splineSys.activeParams[field.key] ?? splineSys.activeObjDef?.defaults?.[field.key] ?? field.min;
-        const step = field.step ?? 1;
-        const inp = Object.assign(document.createElement("input"), { type: "range", min: field.min, max: field.max, step, value: cur });
-        const lbl = document.createElement("span");
-        lbl.className = "prop-num";
-        lbl.textContent = Number(cur).toFixed(step < 1 ? 2 : 0);
-        inp.addEventListener("input", () => {
-          const v = Number(inp.value);
-          lbl.textContent = v.toFixed(step < 1 ? 2 : 0);
-          splineSys.setParam(field.key, v);
-        });
-        val.appendChild(inp); val.appendChild(lbl);
-      }
-      row.appendChild(val);
-      splineParamsDiv.appendChild(row);
-    }
-  }
-
-  // Init type selector state
-  if (SPLINE_OBJECTS.length) {
-    splineSys.setActiveType(SPLINE_OBJECTS[0].id);
-    buildSplineParamsUI(SPLINE_OBJECTS[0]);
-  }
-
-  splineSys.onChange = () => { refreshSplineUI(); refreshSplinePlacedList(); };
-  refreshSplineUI();
-
-  splineTypeSelect.addEventListener("change", () => {
-    splineSys.setActiveType(splineTypeSelect.value);
-    buildSplineParamsUI(splineSys.activeObjDef);
-    refreshSplineUI();
-  });
-
-  splineBtnDraw.addEventListener("click", () => { splineSys.startDraft(); });
-  splineBtnCommit.addEventListener("click", () => {
-    splineSys.commit();
-    refreshSplinePlacedList();
-  });
-  splineBtnCancel.addEventListener("click", () => { splineSys.cancelDraft(); });
-  splineBtnUndoPt.addEventListener("click", () => { splineSys.undoLastPoint(); });
-  splineClosed.addEventListener("change", () => {
-    splineSys.draftClosed = splineClosed.checked;
-    if (splineSys.draftPointCount >= splineSys.activeMinPoints) splineSys.setParam("_closed", splineClosed.checked);
-  });
-
-  // Primitive buttons
-  for (const shape of PRIMITIVE_SHAPES) {
-    const btn = document.getElementById(`primbtn-${shape.toLowerCase()}`);
-    if (!btn) continue;
-    btn.addEventListener("click", () => {
-      const existing = propStore.types.findIndex(t => t.isPrimitive && t.primShape === shape);
-      if (existing >= 0) { propSys.setActiveType(existing); refreshPropTypeList(); return; }
-      const idx = propStore.registerPrimitive(shape);
-      if (idx < 0) return;
-      propInstancer.onTypeRegistered(idx);
-      refreshPropTypeList();
-      propSys.setActiveType(idx);
-    });
-  }
-
-  // Live prop buttons
-  const LIVE_BTN_MAP = [
-    { id: "livebtn-flag",  name: "Flag",  factoryId: "flag"  },
-    { id: "livebtn-coin",  name: "Coin",  factoryId: "coin"  },
-    { id: "livebtn-heart", name: "Heart", factoryId: "heart" },
-    { id: "livebtn-key",   name: "Key",   factoryId: "key"   },
-  ];
-  for (const { id, name, factoryId } of LIVE_BTN_MAP) {
-    const btn = document.getElementById(id);
-    if (!btn) continue;
-    btn.addEventListener("click", () => {
-      const existing = propStore.types.findIndex(t => t.live && t.factoryId === factoryId);
-      if (existing >= 0) { propSys.setActiveType(existing); refreshPropTypeList(); return; }
-      const idx = propStore.registerLiveType(name, factoryId, _liveTypeDefaultParams[factoryId] ?? {});
-      propInstancer.onTypeRegistered(idx);
-      refreshPropTypeList();
-      propSys.setActiveType(idx);
-    });
-  }
-
-  function refreshPropSelection() {
-    const idx  = propInstancer.selectedIdx;
-    const inst = propStore.instances[idx];
-    if (!inst || !propInstancer.hasSelection) {
-      propSelectInsp.style.display = "none";
-      propLiveParamsSec.style.display = "none";
+  function refreshPropPlacementPreview() {
+    if (!_lastMouseEvent) {
+      propPlacementPreview.hide();
       return;
     }
-    propSelectInsp.style.display = "";
-    const type = propStore.types[inst.typeIdx];
-    propSelType.textContent   = type?.name ?? "?";
-    propSelPx.value           = inst.px.toFixed(2);
-    propSelPy.value           = inst.py.toFixed(2);
-    propSelPz.value           = inst.pz.toFixed(2);
-    propSelRy.value           = inst.ry.toFixed(1);
-    propSelScale.value        = inst.sx.toFixed(3);
+    const hit = getTerrainHitWorld(_lastMouseEvent);
+    updatePropPlacementPreview(hit ? { point: hit } : null);
+  }
 
-    // Live prop params panel
-    if (type?.live && inst.liveParams) {
-      propLiveParamsSec.style.display = "";
-      _buildLiveParamsUI(idx, inst, type);
+  function syncPropBrushRing(event) {
+    if (editorMode !== "props" || playMode.active || propState.placementMode !== "paint") {
+      return;
+    }
+    refreshMouse(event);
+    const uv = getUV();
+    if (uv) {
+      uCursorUV.value.set(uv.u, uv.v);
+      sculpt.uRadius.value = propBrush.radius / WORLD_SIZE;
     } else {
-      propLiveParamsSec.style.display = "none";
+      uCursorUV.value.set(-2, -2);
     }
-  }
-
-  function _buildLiveParamsUI(storeIdx, inst, type) {
-    propLiveParamsBody.innerHTML = "";
-    const schema = _defaultLiveSchema(type.factoryId);
-    for (const field of schema) {
-      const row = document.createElement("div");
-      row.className = "prop-row";
-      const label = document.createElement("span");
-      label.className = "prop-label";
-      label.textContent = field.label;
-      row.appendChild(label);
-      if (field.type === "color") {
-        const inp = Object.assign(document.createElement("input"), { type: "color", value: inst.liveParams[field.key] ?? "#ffffff" });
-        inp.style.cssText = "width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none";
-        inp.addEventListener("input", () => { livePropManager.setParam(storeIdx, field.key, inp.value); });
-        const val = document.createElement("div");
-        val.className = "prop-value";
-        val.appendChild(inp);
-        row.appendChild(val);
-      } else {
-        const cur  = inst.liveParams[field.key] ?? field.min;
-        const inp  = Object.assign(document.createElement("input"), { type: "range", min: field.min, max: field.max, step: field.step ?? 1, value: cur });
-        const lbl  = document.createElement("span");
-        lbl.className = "prop-num";
-        lbl.textContent = Number(cur).toFixed(field.step < 1 ? 2 : 0);
-        inp.addEventListener("input", () => {
-          const v = Number(inp.value);
-          lbl.textContent = v.toFixed(field.step < 1 ? 2 : 0);
-          livePropManager.setParam(storeIdx, field.key, v);
-        });
-        const val = document.createElement("div");
-        val.className = "prop-value";
-        val.appendChild(inp);
-        val.appendChild(lbl);
-        row.appendChild(val);
-      }
-      propLiveParamsBody.appendChild(row);
-    }
-  }
-
-  function _defaultLiveSchema(factoryId) {
-    const schemas = {
-      flag:  [
-        { type: "slider", key: "windSpeed",     label: "Wind speed",  min: 0, max: 2000, step: 50 },
-        { type: "slider", key: "windIntensity",  label: "Wind str.",   min: 0, max: 800,  step: 10 },
-        { type: "color",  key: "flagColor",      label: "Flag color" },
-      ],
-      coin:  [{ type: "slider", key: "spinSpeed", label: "Spin speed", min: 0, max: 10, step: 0.1 }],
-      heart: [{ type: "slider", key: "spinSpeed", label: "Spin speed", min: 0, max: 10, step: 0.1 }],
-      key:   [{ type: "slider", key: "spinSpeed", label: "Spin speed", min: 0, max: 10, step: 0.1 }],
-    };
-    return schemas[factoryId] ?? [];
   }
 
   async function loadGltfAsType(file) {
-    const url    = URL.createObjectURL(file);
-    const name   = file.name.replace(/\.[^.]+$/, "");
+    const url = URL.createObjectURL(file);
+    const name = file.name.replace(/\.[^.]+$/, "");
     return new Promise((resolve, reject) => {
       gltfLoader.load(url, (gltf) => {
         URL.revokeObjectURL(url);
-        const idx = propStore.registerType(gltf.scene, name);
-        if (idx < 0) { reject(new Error("No meshes in GLTF")); return; }
-        propInstancer.onTypeRegistered(idx);
-        refreshPropTypeList();
-        refreshLoadedGlbList();
-        propSys.setActiveType(idx);
-        resolve(idx);
+        const typeIdx = propStore.registerType(gltf.scene, name);
+        if (typeIdx < 0) { reject(new Error("No meshes in GLTF")); return; }
+        propInstancer.onTypeRegistered(typeIdx);
+        const slotIdx = propSlots.length;
+        propSlots.push({ name, loaded: true, typeIdx, builtin: false, live: false });
+        propState.activeSlot = slotIdx;
+        document.getElementById("props-panel")?._rebuildPropUi?.();
+        resolve(typeIdx);
       }, undefined, (err) => { URL.revokeObjectURL(url); reject(err); });
     });
   }
 
-  propBtnLoadGlb.addEventListener("click", () => {
+  function addPrimitive(primitiveName) {
+    const existing = propSlots.find((s) => s.name === primitiveName && s.builtin);
+    if (existing) {
+      propState.activeSlot = propSlots.indexOf(existing);
+      document.getElementById("props-panel")?._rebuildPropUi?.();
+      return;
+    }
+    const typeIdx = propStore.registerPrimitive(primitiveName);
+    if (typeIdx < 0) return;
+    propInstancer.onTypeRegistered(typeIdx);
+    const slotIdx = propSlots.length;
+    propSlots.push({ name: primitiveName, loaded: true, typeIdx, builtin: true, live: false });
+    propState.activeSlot = slotIdx;
+    document.getElementById("props-panel")?._rebuildPropUi?.();
+  }
+
+  function addLiveProp(livePropName) {
+    const defs = {
+      Flag:  { factoryId: "flag",  defaults: FLAG_DEFAULTS },
+      Coin:  { factoryId: "coin",  defaults: COIN_DEFAULTS },
+      Heart: { factoryId: "heart", defaults: HEART_DEFAULTS },
+      Key:   { factoryId: "key",   defaults: KEY_DEFAULTS },
+      ...PROCEDURAL_PROP_DEFS,
+    };
+    const def = defs[livePropName];
+    if (!def) return;
+    const existing = propSlots.find((s) => s.name === livePropName && s.live);
+    if (existing) {
+      propState.activeSlot = propSlots.indexOf(existing);
+      document.getElementById("props-panel")?._rebuildPropUi?.();
+      return;
+    }
+    const typeIdx = propStore.registerLiveType(livePropName, def.factoryId, def.defaults);
+    propInstancer.onTypeRegistered(typeIdx);
+    const slotIdx = propSlots.length;
+    propSlots.push({ name: livePropName, loaded: true, typeIdx, live: true, factoryId: def.factoryId });
+    propState.activeSlot = slotIdx;
+    document.getElementById("props-panel")?._rebuildPropUi?.();
+  }
+
+  function removePropSlot(slotIdx) {
+    const slot = propSlots[slotIdx];
+    if (!slot) return;
+    propInstancer.onTypeRemoved(slot.typeIdx);
+    propStore.removeType(slot.typeIdx);
+    propSlots.splice(slotIdx, 1);
+    for (const s of propSlots) {
+      if (s.typeIdx > slot.typeIdx) s.typeIdx--;
+    }
+    if (propState.activeSlot >= propSlots.length) {
+      propState.activeSlot = Math.max(0, propSlots.length - 1);
+    }
+    deactivatePropSelection();
+    document.getElementById("props-panel")?._rebuildPropUi?.();
+    refreshPropCount();
+  }
+
+  async function importPropGlb(preselectedFile = null) {
     const inp = Object.assign(document.createElement("input"), { type: "file", accept: ".glb,.gltf", multiple: true });
+    if (preselectedFile) {
+      try { await loadGltfAsType(preselectedFile); } catch (err) { console.error("[V3] GLB load failed:", err); }
+      return;
+    }
     inp.onchange = async () => {
-      for (const file of inp.files) {
-        try { await loadGltfAsType(file); } catch (err) { console.error("GLB load failed:", err); }
+      for (const file of inp.files ?? []) {
+        try { await loadGltfAsType(file); } catch (err) { console.error("[V3] GLB load failed:", err); }
       }
     };
     inp.click();
+  }
+
+  async function importPropLod(slotIdx, lod, preselectedFile = null) {
+    const slot = propSlots[slotIdx];
+    if (!slot) return;
+    const loadFile = (file) => new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      gltfLoader.load(url, (gltf) => {
+        URL.revokeObjectURL(url);
+        propStore.registerTypeLod(slot.typeIdx, lod, gltf.scene);
+        propInstancer.onTypeRegistered(slot.typeIdx);
+        resolve();
+      }, undefined, (err) => { URL.revokeObjectURL(url); reject(err); });
+    });
+    if (preselectedFile) return loadFile(preselectedFile);
+    const inp = Object.assign(document.createElement("input"), { type: "file", accept: ".glb,.gltf" });
+    inp.onchange = () => { if (inp.files?.[0]) loadFile(inp.files[0]).catch(console.error); };
+    inp.click();
+  }
+
+  buildPropsPanel({
+    runRendererSideWork: withRendererSideWork,
+    propState,
+    propSlots,
+    propLod,
+    propStore,
+    livePropManager,
+    importPropGlb,
+    addPrimitive,
+    addLiveProp,
+    removePropSlot,
+    importPropLod,
+    deleteSelectedProp: () => {
+      propSys.handleDelete();
+      deactivatePropSelection();
+      refreshPropCount();
+    },
+    duplicateSelectedProp: () => {
+      const idx = propSys.handleDuplicate();
+      if (idx != null) activatePropSelection(idx);
+      refreshPropCount();
+    },
+    clearAllProps: () => {
+      if (!confirm("Clear all props?")) return;
+      propSys.clearAll();
+      deactivatePropSelection();
+      refreshPropCount();
+    },
+    propTransformModeChanged: () => { if (_gizmoTarget === "prop") tc.setMode(propState.transformMode); },
+    propCastShadowChanged: () => propInstancer.setCastShadow(propLod.castShadow),
+    onPropLodChanged: () => {},
+    getProceduralPropLabels: () => PROCEDURAL_PROP_LABELS,
+    getProceduralSchema: (factoryId) => proceduralSchemaFor(factoryId),
+    bakeProceduralThumbnails: (size) => defaultBakeProceduralThumbnails(renderer, size),
+    refreshPropCount,
+    set onPropSelectionChanged(fn) { _onPropSelectionChanged = fn; },
+    get onPropSelectionChanged() { return _onPropSelectionChanged; },
   });
 
-  // Drag-and-drop GLBs onto the type list
-  propTypeList.addEventListener("dragover", e => e.preventDefault());
-  propTypeList.addEventListener("drop", async e => {
-    e.preventDefault();
-    for (const file of e.dataTransfer.files) {
-      if (file.name.match(/\.(glb|gltf)$/i)) {
-        try { await loadGltfAsType(file); } catch (err) { console.error("GLB load failed:", err); }
+  buildSplinePanel({
+    toolState: splineToolState,
+    splineSystem: splineSys,
+    getProceduralObjectOptions: () => PROCEDURAL_OBJECT_OPTIONS,
+    rebuildInteriorVolumes: () => {},
+    splineChanged: () => {
+      splineSys._rebuildVisual();
+      if (editorMode === "spline") {
+        splineSys.handleGroup.visible = !!splineState.showHandles;
       }
+    },
+    splineDeleteSelected: () => splineSys.deleteSelected(),
+    splineClearAll: () => splineSys.clearAll(),
+    splineSelectedYChanged: () => splineSys.setSelectedPointY(splineState.selectedPointY),
+    splineClosedChanged: () => splineSys.setClosed(splineState.closed),
+    splinePreview: () => splineSys.preview(),
+    splineBake: () => {
+      const { placed } = splineSys.bakePlacement();
+      if (placed > 0) refreshPropCount();
+    },
+    splineClearPreview: () => splineSys.clearPreview(),
+    splineApplyPlateau: () => {
+      const changed = splineSys.applyPlateau();
+      if (!changed) {
+        console.warn("[V3] Plateau requires v2 terrainStore — not yet wired in v3.");
+        return;
+      }
+      requestHeightmapReadback();
+      splineSys.syncGuardrailsToGround();
+      splineSys.syncKerbsToGround();
+      splineSys.syncLinearFeaturesToGround();
+    },
+    splineClearTunnels: () => splineSys.clearTunnels(),
+    splineClearLinearFeatures: () => splineSys.clearLinearFeatures(),
+    splineKerbSelect: () => splineSys.selectActiveKerb(),
+    splineKerbApply: () => splineSys.syncActiveKerbFromToolState(),
+    splineKerbDelete: () => splineSys.deleteActiveKerb(),
+    splineKerbDuplicate: () => splineSys.duplicateActiveKerb(),
+    splineKerbSuggestFromCurvature: () => splineSys.suggestKerbFromRoadCurvature(),
+    splineKerbLiveChanged: (changedKey) => {
+      if (changedKey === "activeKerbIndex") {
+        splineSys.selectActiveKerb();
+        return;
+      }
+      if (!splineState.kerbAutoApplyActive) return;
+      splineSys.syncActiveKerbFromToolState();
+    },
+  });
+
+  applySplineModeEffects();
+
+  // Sync prop instance while gizmo is dragging.
+  tc.addEventListener("change", () => {
+    if (_gizmoTarget === "prop" && propInstancer.hasSelection) {
+      propSys.handleTransformChange();
     }
   });
 
-  // Tool buttons
-  function setActivePropTool(tool) {
-    propSys.setTool(tool);
-    prToolPlace.classList.toggle("active",   tool === PROP_TOOL.PLACE);
-    prToolScatter.classList.toggle("active", tool === PROP_TOOL.SCATTER);
-    prToolErase.classList.toggle("active",   tool === PROP_TOOL.ERASE);
-    prToolSelect.classList.toggle("active",  tool === PROP_TOOL.SELECT);
-    propSelectInsp.style.display = "none";
-    propLiveParamsSec.style.display = "none";
-    if (propGizmoHint) propGizmoHint.style.display = tool === PROP_TOOL.SELECT ? "" : "none";
-  }
-  prToolPlace.addEventListener("click",   () => setActivePropTool(PROP_TOOL.PLACE));
-  prToolScatter.addEventListener("click", () => setActivePropTool(PROP_TOOL.SCATTER));
-  prToolErase.addEventListener("click",   () => setActivePropTool(PROP_TOOL.ERASE));
-  prToolSelect.addEventListener("click",  () => setActivePropTool(PROP_TOOL.SELECT));
-
-  // Scatter options
-  prSlRadius.addEventListener("input", () => {
-    propSys.scatterRadius = Number(prSlRadius.value);
-    prLblRadius.textContent = prSlRadius.value + "m";
-  });
-  prSlCount.addEventListener("input", () => {
-    propSys.scatterCount = Number(prSlCount.value);
-    prLblCount.textContent = prSlCount.value;
-  });
-  prSlMinSep.addEventListener("input", () => {
-    propSys.scatterMinSep = Number(prSlMinSep.value);
-    prLblMinSep.textContent = prSlMinSep.value + "m";
-  });
-
-  // Transform options
-  prCkRandRot.addEventListener("change", () => { propSys.randomYRot = prCkRandRot.checked; });
-  prCkAlignNormal?.addEventListener("change", () => { propSys.alignToNormal = prCkAlignNormal.checked; });
-  prSlSink.addEventListener("input", () => {
-    propSys.sinkAmount = Number(prSlSink.value) / 100;
-    prLblSink.textContent = prSlSink.value + "cm";
-  });
-  prCkRandScale.addEventListener("change", () => { propSys.randomScale = prCkRandScale.checked; });
-  prSlScaleMin?.addEventListener("input", () => {
-    propSys.scaleMin = Number(prSlScaleMin.value) / 100;
-    prLblScaleMin.textContent = propSys.scaleMin.toFixed(2);
-  });
-  prSlScaleMax?.addEventListener("input", () => {
-    propSys.scaleMax = Number(prSlScaleMax.value) / 100;
-    prLblScaleMax.textContent = propSys.scaleMax.toFixed(2);
-  });
-  prCkShadow?.addEventListener("change", () => { propInstancer.setCastShadow(prCkShadow.checked); });
-
-  // LOD distances
-  prSlLod0.addEventListener("input", () => {
-    propLodCfg.lod0Distance = Number(prSlLod0.value);
-    prLblLod0.textContent = prSlLod0.value + "m";
-  });
-  prSlLod1.addEventListener("input", () => {
-    propLodCfg.lod1Distance = Number(prSlLod1.value);
-    prLblLod1.textContent = prSlLod1.value + "m";
-  });
-  prSlCull.addEventListener("input", () => {
-    propLodCfg.fadeOutDistance = Number(prSlCull.value);
-    prLblCull.textContent = prSlCull.value + "m";
-  });
-
-  // Selection inspector
-  function _applySelectionEdit() {
-    const idx  = propInstancer.selectedIdx;
-    const inst = propStore.instances[idx];
-    if (!inst) return;
-    const scale = parseFloat(propSelScale.value) || 1;
-    propStore.updateInstance(idx, {
-      px: parseFloat(propSelPx.value)  || 0,
-      py: parseFloat(propSelPy.value)  || 0,
-      pz: parseFloat(propSelPz.value)  || 0,
-      ry: parseFloat(propSelRy.value)  || 0,
-      sx: scale, sy: scale, sz: scale,
-    });
-    propInstancer.select(idx);
-  }
-  for (const el of [propSelPx, propSelPy, propSelPz, propSelRy, propSelScale]) {
-    el.addEventListener("change", _applySelectionEdit);
-  }
-  propSelDelete.addEventListener("click", () => {
-    propSys.deleteSelected();
-    refreshPropSelection();
-    propCountEl.textContent = propStore.totalCount;
-  });
-  propSelDup.addEventListener("click", () => {
-    propSys.duplicateSelected();
-    refreshPropSelection();
-    propCountEl.textContent = propStore.totalCount;
-  });
-
-  // Save / Load / Clear
-  propBtnSave.addEventListener("click", () => downloadProps(propStore));
-  propBtnLoad.addEventListener("click", () => {
-    const inp = Object.assign(document.createElement("input"), { type: "file", accept: ".v3props" });
-    inp.onchange = async () => {
-      if (!inp.files[0]) return;
-      const nameToIdx = Object.fromEntries(propStore.types.map((t, i) => [t.name, i]));
-      await importPropsFromFile(inp.files[0], propStore, nameToIdx);
-      propCountEl.textContent = propStore.totalCount;
-    };
-    inp.click();
-  });
-  propBtnClearAll.addEventListener("click", () => {
-    if (!confirm("Clear all props?")) return;
-    propStore.clear();
-    propInstancer.clearSelection();
-    refreshPropSelection();
-    propCountEl.textContent = 0;
-  });
-
-  // ── Props mode mouse events ────────────────────────────────────────────────
+  // ── Props mode mouse events (v2: place click / paint brush / right-click select) ──
   renderer.domElement.addEventListener("mousemove", e => {
     if (playMode.active || editorMode !== "props") return;
-    propSys.onMouseMove(e, camera);
-    propCountEl.textContent = propStore.totalCount;
+    _lastMouseEvent = e;
+    const hit = getTerrainHitWorld(e);
+    if (propState.placementMode === "place") {
+      updatePropPlacementPreview(hit ? { point: hit } : null);
+    } else {
+      propPlacementPreview.hide();
+      syncPropBrushRing(e);
+    }
+    if (_propPainting && hit && propState.placementMode === "paint") {
+      propSys.applyAt(hit, e);
+      refreshPropCount();
+    }
   });
 
   renderer.domElement.addEventListener("mousedown", e => {
     if (playMode.active || editorMode !== "props") return;
-    if (splineSys.isDrafting && e.button === 0) {
+    if (e.button !== 0 || tc.dragging) return;
+    // Don't steal LMB when the transform gizmo is active — user may be orbiting near the gizmo
+    if (_gizmoTarget === "prop" && tc.enabled) return;
+
+    if (propState.placementMode === "place") {
       const hit = getTerrainHitWorld(e);
-      if (hit) splineSys.addPoint(hit.x, hit.z);
+      if (!hit) return;
+      const slot = propSlots[propState.activeSlot];
+      if (!slot || slot.typeIdx == null) return;
+      e.preventDefault();
+      const instIdx = propSys.handlePlace(hit, slot.typeIdx);
+      if (instIdx != null) activatePropSelection(instIdx);
+      refreshPropCount();
       return;
     }
-    propSys.onMouseDown(e, camera);
+
+    if (propState.placementMode === "paint") {
+      const hit = getTerrainHitWorld(e);
+      if (!hit) return;
+      e.preventDefault();
+      _propPainting = true;
+      propSys.beginStroke(hit, e);
+      refreshPropCount();
+    }
   }, { capture: true });
 
   renderer.domElement.addEventListener("mouseup", e => {
     if (editorMode !== "props") return;
-    propSys.onMouseUp();
-    if (propSys.activeTool === PROP_TOOL.SELECT) {
-      refreshPropSelection();
+    if (_propPainting) {
+      _propPainting = false;
+      propSys.endStroke();
+      refreshPropCount();
     }
-    propCountEl.textContent = propStore.totalCount;
+  });
+
+  renderer.domElement.addEventListener("contextmenu", e => {
+    if (editorMode !== "props" || playMode.active) return;
+    e.preventDefault();
+    const rect = renderer.domElement.getBoundingClientRect();
+    _propPickNdc.set(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    _propPickRay.setFromCamera(_propPickNdc, camera);
+    const hitStatic = propInstancer.raycast(_propPickRay);
+    const hitLive = livePropManager.raycast(_propPickRay);
+    const hit = !hitStatic && !hitLive ? null
+      : !hitStatic ? hitLive
+      : !hitLive ? hitStatic
+      : hitLive.distance < hitStatic.distance ? hitLive : hitStatic;
+    if (hit) activatePropSelection(hit.instIdx);
+    else deactivatePropSelection();
+  });
+
+  renderer.domElement.addEventListener("wheel", e => {
+    if (editorMode !== "props" || playMode.active || propState.placementMode !== "paint") return;
+    if (!e.shiftKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const dir = e.deltaY < 0 ? 1 : -1;
+    propBrush.radius = THREE.MathUtils.clamp(propBrush.radius + dir * 2, 5, 400);
+    syncPropBrushRing(e);
+  }, { passive: false, capture: true });
+
+  // ── Spline mode mouse events (v2 pattern) ───────────────────────────────────
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "spline") return;
+    if (splineSys.dragging && splineSys.selectedIdx >= 0) {
+      const hit = getTerrainHitWorld(e);
+      if (hit) splineSys.moveSelected(hit);
+    }
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "spline" || e.button !== 0) return;
+    if (tc.axis) return;
+    e.preventDefault();
+    refreshMouse(e);
+    raycaster.setFromCamera(mouse, camera);
+    const picked = splineSys.pickPoint(raycaster);
+    if (picked >= 0) {
+      splineSys.clearFeatureSelection();
+      splineSys.selectedIdx = picked;
+      if (picked === 0) splineSys.extendEnd = "start";
+      else if (picked === splineSys.points.length - 1) splineSys.extendEnd = "end";
+      splineSys.dragging = true;
+      controls.enabled = false;
+      splineSys._rebuildVisual();
+      splineSys._updateSelectedY();
+    } else if (splineSys.selectFeature(raycaster)) {
+      // placed feature selected — Delete removes it
+    } else {
+      const hit = getTerrainHitWorld(e);
+      if (hit) {
+        splineSys.clearFeatureSelection();
+        splineSys.addPoint(hit);
+      }
+    }
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (editorMode !== "spline") return;
+    if (splineSys.dragging) {
+      splineSys.dragging = false;
+      syncEditorOrbitEnabled();
+    }
   });
 
   // ── Paint mode mouse events ────────────────────────────────────────────────
@@ -2153,78 +2655,122 @@ async function main() {
     }
   }, { passive: false, capture: true });
 
-  // ── Resize ─────────────────────────────────────────────────────────────────
-  const ro = new ResizeObserver(() => resizeRenderer());
-  ro.observe(viewport);
-  window.addEventListener("resize", () => resizeRenderer());
+  // ── Grass mode mouse events ────────────────────────────────────────────────
+  let _grassUndoStack = [];
+  let _grassRedoStack = [];
+  let _grassPainting  = false;
 
-  // ── Loop ───────────────────────────────────────────────────────────────────
-  const _lodSnapVec = new THREE.Vector3();
-  let _lastFrameMs = performance.now();
-  renderer.setAnimationLoop(() => {
-    const now = performance.now();
-    const dt  = Math.min((now - _lastFrameMs) / 1000, 0.05);
-    _lastFrameMs = now;
+  function _pushGrassUndo() {
+    _grassUndoStack.push(grassTerrainData.getDensitySnapshot());
+    if (_grassUndoStack.length > 32) _grassUndoStack.shift();
+    _grassRedoStack = [];
+  }
 
-    // Reset first — stats-gl patches this to mark the CPU profiling window start.
-    renderer.info.reset();
-
-    if (playMode.active) {
-      playMode.update(dt);
-
-      // Live stats in the play panel (throttled — DOM writes are cheap but no need every ms)
-      if (playMode.walking) {
-        const s = playMode.getStats();
-        playStatPos  .textContent = `${s.x}, ${s.y}, ${s.z}`;
-        playStatSpeed.textContent = `${s.speed} m/s`;
-        playStatGround.textContent = s.grounded ? "Yes" : "No";
-      }
-
-      // Center LOD on the player's feet, snapped to the heightmap texel grid
-      // (16 m/texel = 2048 m / 128). Snapping prevents distant LOD rings from
-      // continuously resampling at sub-texel offsets, which causes visible morphing.
-      const pp = playMode.playerPosition;
-      _lodSnapVec.set(
-        Math.round(pp.x / LOD_SNAP) * LOD_SNAP,
-        0,
-        Math.round(pp.z / LOD_SNAP) * LOD_SNAP,
-      );
-      lod.update(_lodSnapVec);
-    } else {
-      if (isPainting && editorMode === "sculpt") {
-        const hit = getUV();
-        if (hit) applySculptStroke(hit.u, hit.v);
-      }
-      lod.update(controls.target);
-      controls.update();
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "grass") return;
+    refreshMouse(e);
+    const hit = getUV();
+    uCursorUV.value.set(hit ? hit.u : -2, hit ? hit.v : -2);
+    if (hit && _grassPainting) {
+      const wx = hit.u * WORLD_SIZE - WORLD_SIZE / 2;
+      const wz = hit.v * WORLD_SIZE - WORLD_SIZE / 2;
+      grassTerrainData.stampDensity({
+        cx: wx, cz: wz,
+        radius:   grassBrush.radius,
+        strength: grassBrush.strength,
+        falloff:  grassBrush.falloff,
+        worldSize: WORLD_SIZE,
+        erase:    grassBrush.erase,
+      });
     }
-
-    propInstancer.update(camera, propLodCfg);
-    livePropManager.update(dt);
-    splineSys.update(dt);
-
-    if (csm?.mainFrustum) csm.updateFrustums();
-    renderer.render(scene, camera);
-
-    // Drain GPU timestamp pools so stats-gl's GPU/CPT panels get real values.
-    if (hasTimestamps) {
-      renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
-      renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE);
-    }
-
-    // Feed custom counter panels.
-    const ri    = renderer.info.render;
-    const draws = ri.drawCalls ?? ri.calls ?? 0;
-    const ktris = (ri.triangles ?? 0) / 1000;
-    _maxDraw = Math.max(_maxDraw, draws);
-    _maxTri  = Math.max(_maxTri,  ktris);
-    drawPanel.update(draws, _maxDraw, 0);
-    drawPanel.updateGraph(draws, _maxDraw);
-    triPanel.update(ktris, _maxTri, 0);
-    triPanel.updateGraph(ktris, _maxTri);
-
-    stats.update();
   });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "grass") return;
+    if (e.button !== 0) return;
+    refreshMouse(e);
+    const hit = getUV();
+    if (!hit) return;
+    _pushGrassUndo();
+    _grassPainting = true;
+    const wx = hit.u * WORLD_SIZE - WORLD_SIZE / 2;
+    const wz = hit.v * WORLD_SIZE - WORLD_SIZE / 2;
+    grassTerrainData.stampDensity({
+      cx: wx, cz: wz,
+      radius:   grassBrush.radius,
+      strength: grassBrush.strength,
+      falloff:  grassBrush.falloff,
+      worldSize: WORLD_SIZE,
+      erase:    grassBrush.erase,
+    });
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (e.button !== 0) return;
+    _grassPainting = false;
+  });
+
+  // Scroll wheel in grass mode: Shift = radius, Alt = strength
+  renderer.domElement.addEventListener("wheel", e => {
+    if (playMode.active || editorMode !== "grass") return;
+    if (!e.shiftKey && !e.altKey) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.11;
+    if (e.shiftKey) {
+      grassBrush.radius = Math.max(5, Math.min(300, grassBrush.radius * factor));
+      gslRadius.value = Math.round(grassBrush.radius);
+      glblRadius.textContent = Math.round(grassBrush.radius) + "m";
+      sculpt.uRadius.value = grassBrush.radius / WORLD_SIZE;
+    } else {
+      grassBrush.strength = Math.max(0.01, Math.min(1.0, grassBrush.strength * factor));
+      gslStr.value = Math.round(grassBrush.strength * 100);
+      glblStr.textContent = grassBrush.strength.toFixed(2);
+    }
+  }, { passive: false, capture: true });
+
+  // Grass undo/redo — patch into existing Ctrl+Z/Y handler
+  window.addEventListener("keydown", e => {
+    if (editorMode !== "grass") return;
+    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "z") {
+      if (_grassUndoStack.length === 0) return;
+      _grassRedoStack.push(grassTerrainData.getDensitySnapshot());
+      grassTerrainData.restoreDensitySnapshot(_grassUndoStack.pop());
+      e.stopImmediatePropagation();
+    }
+    if (e.ctrlKey && (e.shiftKey && e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
+      if (_grassRedoStack.length === 0) return;
+      _grassUndoStack.push(grassTerrainData.getDensitySnapshot());
+      grassTerrainData.restoreDensitySnapshot(_grassRedoStack.pop());
+      e.stopImmediatePropagation();
+    }
+  }, { capture: true });
+
+  // Re-sync orbit after props/spline wiring (do not reset mode — that felt like a freeze).
+  syncEditorOrbitEnabled();
+
+  if (import.meta.env?.DEV) {
+    window.__V3_DEBUG = {
+      get editorMode() { return editorMode; },
+      get playActive() { return playMode.active; },
+      controls,
+      tc,
+      editorCamera,
+      syncEditorOrbitEnabled,
+      setEditorMode,
+      recoverEditorInput,
+      get rendererSideWork() { return _rendererSideWork; },
+    };
+  }
 }
 
-main();
+main().catch((err) => {
+  console.error("[V3] Editor failed to start:", err);
+  const vp = document.getElementById("viewport");
+  if (vp) {
+    const msg = document.createElement("div");
+    msg.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;color:#f66;font:14px/1.4 sans-serif;text-align:center;background:#1a0a0a;z-index:9999";
+    msg.textContent = `Editor failed to start: ${err?.message ?? err}`;
+    vp.appendChild(msg);
+  }
+});

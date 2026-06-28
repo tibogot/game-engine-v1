@@ -66,11 +66,17 @@ export class LivePropManager {
   }
 
   _destroyEntry(entry) {
-    if (entry.obj.dispose) entry.obj.dispose();
     this.scene.remove(entry.obj.group);
-    entry.obj.group.traverse(child => {
-      if (child.isMesh) { child.geometry?.dispose(); }
-    });
+    if (entry.obj.dispose) {
+      // Factory owns disposal (e.g. flag disposes its unique cloth geo;
+      // collectibles are a no-op because they share geometry across instances).
+      entry.obj.dispose();
+    } else {
+      // Fallback for factories that don't expose dispose().
+      entry.obj.group.traverse(child => {
+        if (child.isMesh) { child.geometry?.dispose(); }
+      });
+    }
   }
 
   _applyTransform(entry, inst) {

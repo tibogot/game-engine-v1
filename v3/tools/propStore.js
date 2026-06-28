@@ -1,19 +1,21 @@
 import * as THREE from "three";
+import { createJumpRampGeometry } from "../../v2/core/props/jumpRampGeometry.js";
 
 const DEG    = Math.PI / 180;
 const _dummy = new THREE.Object3D();
 
 // ── Primitive geometry factory ────────────────────────────────────────────────
-const PRIMITIVE_SHAPES = ["Cube","Sphere","Cylinder","Plane","Cone","Torus"];
+const PRIMITIVE_SHAPES = ["Cube","Sphere","Cylinder","Plane","Cone","Torus","Jump ramp"];
 
 function _makePrimitiveGeo(shape) {
   switch (shape) {
-    case "Cube":     return new THREE.BoxGeometry(1, 1, 1);
-    case "Sphere":   return new THREE.SphereGeometry(0.5, 16, 12);
-    case "Cylinder": return new THREE.CylinderGeometry(0.5, 0.5, 1, 16);
+    case "Cube":     return new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
+    case "Sphere":   return new THREE.SphereGeometry(0.5, 16, 12).translate(0, 0.5, 0);
+    case "Cylinder": return new THREE.CylinderGeometry(0.5, 0.5, 1, 16).translate(0, 0.5, 0);
     case "Plane":    return new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
-    case "Cone":     return new THREE.ConeGeometry(0.5, 1, 16);
-    case "Torus":    return new THREE.TorusGeometry(0.4, 0.12, 8, 24);
+    case "Cone":     return new THREE.ConeGeometry(0.5, 1, 16).translate(0, 0.5, 0);
+    case "Torus":    return new THREE.TorusGeometry(0.4, 0.12, 8, 24).translate(0, 0.52, 0);
+    case "Jump ramp": return createJumpRampGeometry();
     default:         return null;
   }
 }
@@ -29,6 +31,10 @@ export class PropStore {
 
   get gen() { return this._gen; }
   _bump()   { this._gen++; }
+
+  isLiveType(typeIdx) {
+    return !!this.types[typeIdx]?.live;
+  }
 
   // ── GLB type ────────────────────────────────────────────────────────────────
 

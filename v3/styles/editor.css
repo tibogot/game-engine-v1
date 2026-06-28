@@ -9,6 +9,7 @@
   --bg-hover: #3a3a3a;
   --bg-selected: #264f78;
   --bg-input: #1e1e1e;
+  --bg-item: #333333;
   --border: #3c3c3c;
   --border-light: #4a4a4a;
   --text: #cccccc;
@@ -157,7 +158,8 @@ html, body {
   display: block;
   width: 100% !important;
   height: 100% !important;
-  z-index: 1;
+  z-index: 2;
+  outline: none;
 }
 
 #perf-stats {
@@ -292,12 +294,145 @@ html, body {
   min-width: 0;
 }
 .prop-input:focus, .prop-dropdown:focus { border-color: var(--accent); }
+.prop-dropdown { cursor: pointer; }
 
-/* Brush section header is static — no collapse */
+/* Static section titles in editor.html (no collapse) — not props panel sections */
 .section-header:not([data-toggle]) {
   cursor: default;
 }
 .section-header:not([data-toggle]):hover { background: none; }
+
+/* V2 widget styles (props panel + shared inspector widgets) */
+.prop-slider-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.prop-num-input {
+  width: 72px;
+  height: 22px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 5px;
+  color: var(--text);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  text-align: right;
+  outline: none;
+}
+.prop-num-input:focus { border-color: var(--accent); }
+.prop-num-input::-webkit-outer-spin-button,
+.prop-num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.prop-num-input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+.prop-slider {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--bg-input);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.prop-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+.prop-toggle {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-light);
+  border-radius: 3px;
+  background: var(--bg-input);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  color: transparent;
+}
+.prop-toggle.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.prop-toggle svg { width: 10px; height: 10px; }
+.section-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 26px;
+  margin-top: 4px;
+  background: var(--bg-item);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: var(--font);
+}
+.section-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--border-light);
+}
+.prop-row-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: var(--bg-item);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.prop-row-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--border-light);
+}
+.section-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+.drop-zone { position: relative; }
+.drop-zone.drag-over {
+  outline: 2px dashed var(--green);
+  outline-offset: -2px;
+  background: rgba(92, 184, 92, 0.08);
+  border-radius: var(--radius);
+}
+.drop-zone.drag-over::after {
+  content: attr(data-drop-hint);
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 10px;
+  color: var(--green);
+  background: rgba(92, 184, 92, 0.18);
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.prop-row-btn.drag-over {
+  border-color: var(--green) !important;
+  background: rgba(92, 184, 92, 0.18) !important;
+  color: var(--green) !important;
+}
 
 /* Tool grid — 2-column icon+label cards (sculpt, paint, etc.) */
 .tool-grid {

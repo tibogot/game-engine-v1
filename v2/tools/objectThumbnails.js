@@ -25,13 +25,14 @@ export async function bakeObjectThumbnails({
   const out = new Map();
   if (!renderer || !Array.isArray(items)) return out;
 
+  // No MSAA (samples) here — readRenderTargetPixelsAsync on an MSAA target in WebGPU
+  // reads the raw multi-sample buffer before resolve, giving garbage pixel data.
   const rt = new THREE.RenderTarget(size, size, {
     type: THREE.UnsignedByteType,
     format: THREE.RGBAFormat,
     colorSpace: THREE.SRGBColorSpace,
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
-    samples: 4,
   });
 
   const scene = new THREE.Scene();
@@ -93,10 +94,9 @@ export async function bakeObjectThumbnails({
         size,
         size,
       );
-      out.set(
-        item.key,
-        pixelsToDataURL(new Uint8Array(buf.buffer ?? buf), size),
-      );
+      // Restore before the next await / animation frame — the editor loop shares this renderer.
+      renderer.setRenderTarget(prevTarget);
+      out.set(item.key, pixelsToDataURL(buf, size));
     }
   } catch (err) {
     console.warn("[Arborist] thumbnail bake failed:", err);
@@ -116,7 +116,24 @@ function pixelsToDataURL(buf, size) {
   canvas.height = size;
   const ctx = canvas.getContext("2d");
   const img = ctx.createImageData(size, size);
-  img.data.set(buf.subarray(0, size * size * 4));
+  const tightRow = size * 4;
+
+  if (buf instanceof Float32Array) {
+    // WebGPU can return float pixels even for UnsignedByteType targets — convert [0,1] → [0,255]
+    const n = tightRow * size;
+    for (let i = 0; i < n; i++) img.data[i] = Math.max(0, Math.min(255, buf[i] * 255 + 0.5)) | 0;
+  } else {
+    const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf.buffer ?? buf);
+    // WebGPU copyTextureToBuffer pads each row to a 256-byte boundary.
+    // If the buffer is larger than tightly packed size, strip the padding row by row.
+    const alignedRow = Math.ceil(tightRow / 256) * 256;
+    if (u8.length > tightRow * size) {
+      for (let y = 0; y < size; y++)
+        img.data.set(u8.subarray(y * alignedRow, y * alignedRow + tightRow), y * tightRow);
+    } else {
+      img.data.set(u8.subarray(0, tightRow * size));
+    }
+  }
   ctx.putImageData(img, 0, 0);
   return canvas.toDataURL("image/png");
 }

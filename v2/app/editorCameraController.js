@@ -302,6 +302,8 @@ export function createEditorCameraController({
   domElement.addEventListener("pointerdown", onPointerDown, { capture: true });
   domElement.addEventListener("pointermove", onPointerMove);
   domElement.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerUp);
   domElement.addEventListener("dblclick", onDblClick);
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
@@ -321,6 +323,8 @@ export function createEditorCameraController({
       domElement.removeEventListener("pointerdown", onPointerDown, { capture: true });
       domElement.removeEventListener("pointermove", onPointerMove);
       domElement.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
       domElement.removeEventListener("dblclick", onDblClick);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);

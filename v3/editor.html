@@ -125,8 +125,11 @@
               <option value="view">View</option>
               <option value="sculpt">Sculpt</option>
               <option value="paint">Paint</option>
+              <option value="grass">Grass</option>
               <option value="props">Props</option>
+              <option value="spline">Spline</option>
             </select>
+            <p class="mode-hint" id="view-nav-hint" style="margin-top:6px">View: drag to orbit · scroll to zoom</p>
           </div>
 
           <!-- PLAY panel — shown only while play mode is active -->
@@ -872,299 +875,480 @@
         </div><!-- /#paint-panel -->
 
         <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- PROPS panel — shown only in props mode                     -->
+        <!-- GRASS panel — shown only in grass mode                     -->
         <!-- ═══════════════════════════════════════════════════════════ -->
-        <div id="props-panel" style="display:none">
+        <div id="grass-panel" style="display:none">
 
-          <!-- PRIMITIVES ----------------------------------------------- -->
+          <!-- PAINT DENSITY ------------------------------------------ -->
           <div class="inspector-section">
-            <div class="section-header" data-toggle>
-              <i data-lucide="chevron-down" class="section-arrow"></i>
-              Primitives
-            </div>
-            <div class="section-body">
-              <div class="tool-grid" style="grid-template-columns:repeat(3,1fr)">
-                <button type="button" class="tool-btn" id="primbtn-cube">   <span>Cube</span></button>
-                <button type="button" class="tool-btn" id="primbtn-sphere"> <span>Sphere</span></button>
-                <button type="button" class="tool-btn" id="primbtn-cylinder"><span>Cylinder</span></button>
-                <button type="button" class="tool-btn" id="primbtn-plane">  <span>Plane</span></button>
-                <button type="button" class="tool-btn" id="primbtn-cone">   <span>Cone</span></button>
-                <button type="button" class="tool-btn" id="primbtn-torus">  <span>Torus</span></button>
-              </div>
-            </div>
-          </div>
-
-          <!-- LIVE PROPS ------------------------------------------------ -->
-          <div class="inspector-section">
-            <div class="section-header" data-toggle>
-              <i data-lucide="chevron-down" class="section-arrow"></i>
-              Live Props
-            </div>
-            <div class="section-body">
-              <div class="tool-grid" style="grid-template-columns:repeat(4,1fr)">
-                <button type="button" class="tool-btn" id="livebtn-flag"><span>Flag</span></button>
-                <button type="button" class="tool-btn" id="livebtn-coin"><span>Coin</span></button>
-                <button type="button" class="tool-btn" id="livebtn-heart"><span>Heart</span></button>
-                <button type="button" class="tool-btn" id="livebtn-key"><span>Key</span></button>
-              </div>
-            </div>
-          </div>
-
-          <!-- SPLINE OBJECTS (v2 builders on v3 terrain) --------------- -->
-          <div class="inspector-section">
-            <div class="section-header" data-toggle>
-              <i data-lucide="chevron-down" class="section-arrow"></i>
-              Spline Objects
-            </div>
-            <div class="section-body">
-              <div class="prop-row">
-                <span class="prop-label">Type</span>
-                <select id="spline-type-select" class="prop-select" style="flex:1;min-width:0"></select>
-              </div>
-              <p class="mode-hint" style="margin:4px 0 2px">
-                Click terrain to place points · <kbd>Enter</kbd> commit · <kbd>Backspace</kbd> undo · <kbd>Esc</kbd> cancel
-              </p>
-              <div id="spline-status" style="font-size:11px;color:#888;padding:2px 0 4px">Not drawing</div>
-              <div style="display:flex;gap:4px">
-                <button type="button" class="action-btn" id="splinebtn-draw"   style="flex:1">Draw</button>
-                <button type="button" class="action-btn" id="splinebtn-commit" style="flex:1" disabled>Commit</button>
-                <button type="button" class="action-btn" id="splinebtn-cancel" style="flex:1" disabled>Cancel</button>
-              </div>
-              <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
-                <button type="button" class="action-btn" id="splinebtn-undopt" style="flex:1" disabled>Undo point</button>
-                <label class="toggle-label" style="gap:4px;flex-shrink:0">
-                  <input type="checkbox" id="spline-closed" />
-                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                  <span style="font-size:11px;color:#ccc">Closed</span>
-                </label>
-              </div>
-              <div id="spline-params" style="margin-top:6px"></div>
-              <div style="margin-top:6px">
-                <div style="font-size:10px;font-weight:600;color:#888;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">Placed</div>
-                <div id="spline-placed-list">
-                  <div class="prop-type-empty" id="spline-placed-empty">No objects placed yet.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ALL TYPES (active type selector) ------------------------- -->
-          <div class="inspector-section">
-            <div class="section-header">Active Type</div>
-            <div class="section-body">
-              <div id="prop-type-list" class="prop-type-list">
-                <div class="prop-type-empty">Add a type above or load a GLB.</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- LOAD GLB + loaded type management ----------------------- -->
-          <div class="inspector-section">
-            <div class="section-header" data-toggle>
-              <i data-lucide="chevron-down" class="section-arrow"></i>
-              Loaded GLB Types
-            </div>
-            <div class="section-body">
-              <div id="prop-loaded-list" class="prop-type-list" style="margin-bottom:6px">
-                <div class="prop-type-empty" id="prop-loaded-empty">No GLBs loaded.</div>
-              </div>
-              <button type="button" class="action-btn" id="propbtn-load-glb" style="width:100%">Load GLB…</button>
-            </div>
-          </div>
-
-          <!-- TOOL ---------------------------------------------------- -->
-          <div class="inspector-section">
-            <div class="section-header">Tool</div>
-            <div class="section-body">
-              <div class="tool-grid">
-                <button id="proptool-place"   class="tool-btn active" type="button">
-                  <i data-lucide="mouse-pointer-2"></i><span>Place</span>
-                </button>
-                <button id="proptool-scatter" class="tool-btn" type="button">
-                  <i data-lucide="sprout"></i><span>Scatter</span>
-                </button>
-                <button id="proptool-erase"   class="tool-btn" type="button">
-                  <i data-lucide="eraser"></i><span>Erase</span>
-                </button>
-                <button id="proptool-select"  class="tool-btn" type="button">
-                  <i data-lucide="move"></i><span>Select</span>
-                </button>
-              </div>
-              <p id="props-gizmo-hint" class="mode-hint" style="display:none;margin-top:4px">
-                <kbd>W</kbd> Translate &nbsp;·&nbsp; <kbd>E</kbd> Rotate &nbsp;·&nbsp; <kbd>R</kbd> Scale<br>
-                <kbd>Del</kbd> Delete &nbsp;·&nbsp; <kbd>Ctrl+D</kbd> Duplicate
-              </p>
-            </div>
-          </div>
-
-          <!-- SCATTER OPTIONS ------------------------------------------ -->
-          <div class="inspector-section" id="props-scatter-opts">
-            <div class="section-header" data-toggle>
-              <i data-lucide="chevron-down" class="section-arrow"></i>
-              Scatter
-            </div>
+            <div class="section-header">Paint Density</div>
             <div class="section-body">
               <div class="prop-row">
                 <span class="prop-label">Radius</span>
                 <div class="prop-value">
-                  <input type="range" id="prsl-radius" min="2" max="100" step="1" value="12" />
-                  <span class="prop-num" id="prlbl-radius">12m</span>
+                  <input type="range" id="gsl-radius" min="5" max="300" step="5" value="60" />
+                  <span class="prop-num" id="glbl-radius">60m</span>
                 </div>
               </div>
               <div class="prop-row">
-                <span class="prop-label">Count</span>
+                <span class="prop-label">Strength</span>
                 <div class="prop-value">
-                  <input type="range" id="prsl-count" min="1" max="30" step="1" value="5" />
-                  <span class="prop-num" id="prlbl-count">5</span>
+                  <input type="range" id="gsl-strength" min="1" max="100" step="1" value="70" />
+                  <span class="prop-num" id="glbl-strength">0.70</span>
                 </div>
               </div>
               <div class="prop-row">
-                <span class="prop-label">Min sep.</span>
+                <span class="prop-label">Falloff</span>
                 <div class="prop-value">
-                  <input type="range" id="prsl-minsep" min="1" max="30" step="1" value="3" />
-                  <span class="prop-num" id="prlbl-minsep">3m</span>
+                  <input type="range" id="gsl-falloff" min="5" max="60" step="1" value="20" />
+                  <span class="prop-num" id="glbl-falloff">2.0</span>
                 </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Erase</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="gck-erase" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+              <p class="mode-hint"><kbd>Alt</kbd>+paint = erase</p>
+              <div style="display:flex;gap:4px;margin-top:4px">
+                <button type="button" class="action-btn primary" id="gbtn-fill" style="flex:1">Fill all</button>
+                <button type="button" class="action-btn" id="gbtn-clear" style="flex:1;color:#f66">Clear all</button>
               </div>
             </div>
           </div>
 
-          <!-- TRANSFORM OPTIONS --------------------------------------- -->
+          <!-- APPEARANCE --------------------------------------------- -->
           <div class="inspector-section">
             <div class="section-header" data-toggle>
               <i data-lucide="chevron-down" class="section-arrow"></i>
-              Transform
+              Appearance
             </div>
             <div class="section-body">
               <div class="prop-row">
-                <span class="prop-label">Random Y rot.</span>
+                <span class="prop-label">Blade height</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-blade-height" min="2" max="50" step="1" value="10" />
+                  <span class="prop-num" id="glbl-blade-height">1.0m</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Blade color</span>
+                <div class="prop-value">
+                  <input type="color" id="gcol-blade" value="#0e300e"
+                    style="width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none;border-radius:3px" />
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Tip color</span>
+                <div class="prop-value">
+                  <input type="color" id="gcol-tip" value="#004d05"
+                    style="width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none;border-radius:3px" />
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">AO base</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-ao-base" min="0" max="100" step="1" value="25" />
+                  <span class="prop-num" id="glbl-ao-base">0.25</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">AO power</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-ao-power" min="5" max="60" step="1" value="20" />
+                  <span class="prop-num" id="glbl-ao-power">2.0</span>
+                </div>
+              </div>
+              <div class="prop-separator"></div>
+              <div class="prop-row">
+                <span class="prop-label">Color variation</span>
                 <div class="prop-value">
                   <label class="toggle-label">
-                    <input type="checkbox" id="prck-randrot" checked />
+                    <input type="checkbox" id="gck-color-var" checked />
                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                   </label>
                 </div>
               </div>
               <div class="prop-row">
-                <span class="prop-label">Align normal</span>
+                <span class="prop-label">Hue spread</span>
                 <div class="prop-value">
-                  <label class="toggle-label">
-                    <input type="checkbox" id="prck-alignnormal" />
-                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                  </label>
+                  <input type="range" id="gsl-hue" min="0" max="40" step="1" value="8" />
+                  <span class="prop-num" id="glbl-hue">0.08</span>
                 </div>
               </div>
               <div class="prop-row">
-                <span class="prop-label">Sink</span>
+                <span class="prop-label">Sat. spread</span>
                 <div class="prop-value">
-                  <input type="range" id="prsl-sink" min="0" max="200" step="1" value="0" />
-                  <span class="prop-num" id="prlbl-sink">0cm</span>
+                  <input type="range" id="gsl-sat" min="0" max="100" step="1" value="30" />
+                  <span class="prop-num" id="glbl-sat">0.30</span>
                 </div>
               </div>
               <div class="prop-row">
-                <span class="prop-label">Rand. scale</span>
+                <span class="prop-label">Dry amount</span>
                 <div class="prop-value">
-                  <label class="toggle-label">
-                    <input type="checkbox" id="prck-randscale" />
-                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                  </label>
+                  <input type="range" id="gsl-dry" min="0" max="100" step="1" value="15" />
+                  <span class="prop-num" id="glbl-dry">0.15</span>
                 </div>
               </div>
               <div class="prop-row">
-                <span class="prop-label">Scale min</span>
+                <span class="prop-label">Dry color</span>
                 <div class="prop-value">
-                  <input type="range" id="prsl-scalemin" min="10" max="200" step="5" value="80" />
-                  <span class="prop-num" id="prlbl-scalemin">0.80</span>
-                </div>
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">Scale max</span>
-                <div class="prop-value">
-                  <input type="range" id="prsl-scalemax" min="10" max="200" step="5" value="120" />
-                  <span class="prop-num" id="prlbl-scalemax">1.20</span>
+                  <input type="color" id="gcol-dry" value="#8a7a3a"
+                    style="width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none;border-radius:3px" />
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- SELECTION INSPECTOR ------------------------------------- -->
-          <div class="inspector-section" id="props-select-insp" style="display:none">
-            <div class="section-header">Selection</div>
-            <div class="section-body">
-              <div class="prop-row">
-                <span class="prop-label">Type</span>
-                <span class="insp-value" id="propsel-type">—</span>
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">Pos X</span>
-                <input type="number" class="prop-input" id="propsel-px" step="0.1" />
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">Pos Y</span>
-                <input type="number" class="prop-input" id="propsel-py" step="0.1" />
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">Pos Z</span>
-                <input type="number" class="prop-input" id="propsel-pz" step="0.1" />
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">Rot Y</span>
-                <input type="number" class="prop-input" id="propsel-ry" step="1" />
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">Scale</span>
-                <input type="number" class="prop-input" id="propsel-scale" step="0.01" min="0.01" />
-              </div>
-              <div style="display:flex;gap:4px;margin-top:6px">
-                <button type="button" class="action-btn" id="propsel-delete" style="flex:1;color:#f66">Delete</button>
-                <button type="button" class="action-btn" id="propsel-dup"    style="flex:1">Duplicate</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- LIVE PROP PARAMS (shown when a live/procedural type is selected) -->
-          <div class="inspector-section" id="props-live-params" style="display:none">
-            <div class="section-header" data-toggle>
-              <i data-lucide="chevron-down" class="section-arrow"></i>
-              Prop Params
-            </div>
-            <div class="section-body" id="props-live-params-body">
-              <!-- Filled dynamically by JS based on selected live prop's schema -->
-            </div>
-          </div>
-
-          <!-- LOD DISTANCES ------------------------------------------- -->
+          <!-- SHAPE & DYNAMICS --------------------------------------- -->
           <div class="inspector-section">
             <div class="section-header" data-toggle>
               <i data-lucide="chevron-down" class="section-arrow"></i>
-              LOD Distances
+              Shape &amp; Dynamics
             </div>
             <div class="section-body hidden">
               <div class="prop-row">
-                <span class="prop-label">LOD0 → LOD1</span>
+                <span class="prop-label">Blade width</span>
                 <div class="prop-value">
-                  <input type="range" id="prsl-lod0" min="10" max="300" step="5" value="60" />
-                  <span class="prop-num" id="prlbl-lod0">60m</span>
+                  <input type="range" id="gsl-blade-width" min="2" max="60" step="1" value="15" />
+                  <span class="prop-num" id="glbl-blade-width">0.15m</span>
                 </div>
               </div>
               <div class="prop-row">
-                <span class="prop-label">LOD1 → LOD2</span>
+                <span class="prop-label">Crossed</span>
                 <div class="prop-value">
-                  <input type="range" id="prsl-lod1" min="50" max="600" step="10" value="150" />
-                  <span class="prop-num" id="prlbl-lod1">150m</span>
+                  <label class="toggle-label">
+                    <input type="checkbox" id="gck-crossed" checked />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Bend focus</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-bend" min="1" max="30" step="1" value="5" />
+                  <span class="prop-num" id="glbl-bend">0.5</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Stiffness</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-stiffness" min="0" max="100" step="1" value="0" />
+                  <span class="prop-num" id="glbl-stiffness">0.00</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Max angle</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-max-angle" min="10" max="200" step="1" value="140" />
+                  <span class="prop-num" id="glbl-max-angle">1.40</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Natural lean</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-lean" min="0" max="100" step="1" value="90" />
+                  <span class="prop-num" id="glbl-lean">0.90</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Sky blend</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-sky" min="0" max="100" step="1" value="80" />
+                  <span class="prop-num" id="glbl-sky">0.80</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Cylindrical</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-cyl" min="0" max="100" step="1" value="30" />
+                  <span class="prop-num" id="glbl-cyl">0.30</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">View thicken</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-thick" min="0" max="100" step="1" value="45" />
+                  <span class="prop-num" id="glbl-thick">0.45</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Density</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-density" min="10" max="100" step="1" value="100" />
+                  <span class="prop-num" id="glbl-density">1.00</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Recv. shadow</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="gck-shadow" checked />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- WIND --------------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Wind
+            </div>
+            <div class="section-body hidden">
+              <div class="prop-row">
+                <span class="prop-label">Speed</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-wind-speed" min="0" max="100" step="1" value="20" />
+                  <span class="prop-num" id="glbl-wind-speed">0.20</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Strength</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-wind-str" min="0" max="400" step="1" value="140" />
+                  <span class="prop-num" id="glbl-wind-str">1.40</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Angle</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-wind-angle" min="0" max="359" step="1" value="0" />
+                  <span class="prop-num" id="glbl-wind-angle">0°</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Gust</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-wind-gust" min="0" max="100" step="1" value="30" />
+                  <span class="prop-num" id="glbl-wind-gust">0.30</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Wave scale</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-wind-wave" min="1" max="50" step="1" value="12" />
+                  <span class="prop-num" id="glbl-wind-wave">0.12</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUBSURFACE SCATTER -------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Subsurface Scatter
+            </div>
+            <div class="section-body hidden">
+              <div class="prop-row">
+                <span class="prop-label">Color</span>
+                <div class="prop-value">
+                  <input type="color" id="gcol-bss" value="#2d7a2d"
+                    style="width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none;border-radius:3px" />
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Intensity</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-bss-int" min="0" max="400" step="1" value="120" />
+                  <span class="prop-num" id="glbl-bss-int">1.20</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Power</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-bss-pow" min="5" max="80" step="1" value="20" />
+                  <span class="prop-num" id="glbl-bss-pow">2.0</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Front scatter</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-front-scat" min="0" max="100" step="1" value="30" />
+                  <span class="prop-num" id="glbl-front-scat">0.30</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Rim SSS</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-rim" min="0" max="100" step="1" value="25" />
+                  <span class="prop-num" id="glbl-rim">0.25</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SPECULAR ------------------------------------------------ -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Specular
+            </div>
+            <div class="section-body hidden">
+              <div style="font-size:10px;font-weight:600;color:#888;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px">
+                Sharp highlight (V1)
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Enable V1</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="gck-spec1" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V1 intensity</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s1-int" min="0" max="400" step="1" value="150" />
+                  <span class="prop-num" id="glbl-s1-int">1.50</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V1 color</span>
+                <div class="prop-value">
+                  <input type="color" id="gcol-s1" value="#ffffff"
+                    style="width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none;border-radius:3px" />
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V1 power</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s1-pow" min="10" max="1000" step="5" value="256" />
+                  <span class="prop-num" id="glbl-s1-pow">25.6</span>
+                </div>
+              </div>
+              <div class="prop-separator"></div>
+              <div style="font-size:10px;font-weight:600;color:#888;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px">
+                Noisy highlight (V2)
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Enable V2</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="gck-spec2" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V2 intensity</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s2-int" min="0" max="400" step="1" value="100" />
+                  <span class="prop-num" id="glbl-s2-int">1.00</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V2 color</span>
+                <div class="prop-value">
+                  <input type="color" id="gcol-s2" value="#ffffff"
+                    style="width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none;border-radius:3px" />
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V2 noise scale</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s2-nscale" min="1" max="80" step="1" value="30" />
+                  <span class="prop-num" id="glbl-s2-nscale">3.0</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V2 noise str.</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s2-nstr" min="0" max="100" step="1" value="60" />
+                  <span class="prop-num" id="glbl-s2-nstr">0.60</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V2 power</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s2-pow" min="5" max="400" step="1" value="120" />
+                  <span class="prop-num" id="glbl-s2-pow">12</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TERRAIN ------------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Terrain
+            </div>
+            <div class="section-body hidden">
+              <div class="prop-row">
+                <span class="prop-label">Slope reject</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="gck-slope" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Slope min</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-slope-min" min="0" max="100" step="1" value="65" />
+                  <span class="prop-num" id="glbl-slope-min">0.65</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Slope max</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-slope-max" min="0" max="100" step="1" value="85" />
+                  <span class="prop-num" id="glbl-slope-max">0.85</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- LOD ----------------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              LOD
+            </div>
+            <div class="section-body hidden">
+              <div class="prop-row">
+                <span class="prop-label">Near → Mid</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-lod-mid" min="10" max="100" step="5" value="40" />
+                  <span class="prop-num" id="glbl-lod-mid">40m</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Mid → Far</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-lod-far" min="40" max="200" step="5" value="80" />
+                  <span class="prop-num" id="glbl-lod-far">80m</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Far → Mega</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-lod-max" min="100" max="400" step="10" value="200" />
+                  <span class="prop-num" id="glbl-lod-max">200m</span>
                 </div>
               </div>
               <div class="prop-row">
                 <span class="prop-label">Cull dist.</span>
                 <div class="prop-value">
-                  <input type="range" id="prsl-cull" min="100" max="1200" step="20" value="500" />
-                  <span class="prop-num" id="prlbl-cull">500m</span>
+                  <input type="range" id="gsl-lod-mega" min="200" max="600" step="20" value="400" />
+                  <span class="prop-num" id="glbl-lod-mega">400m</span>
                 </div>
               </div>
               <div class="prop-row">
-                <span class="prop-label">Cast shadow</span>
+                <span class="prop-label">LOD debug</span>
                 <div class="prop-value">
                   <label class="toggle-label">
-                    <input type="checkbox" id="prck-shadow" checked />
+                    <input type="checkbox" id="gck-lod-debug" />
                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                   </label>
                 </div>
@@ -1172,20 +1356,47 @@
             </div>
           </div>
 
-          <!-- Footer -------------------------------------------------- -->
-          <div style="padding:6px 8px;display:flex;flex-direction:column;gap:4px">
-            <div class="prop-row">
-              <span class="prop-label">Total props</span>
-              <span class="insp-value" id="prop-total-count">0</span>
+          <!-- INTERACTION --------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Interaction
             </div>
-            <div style="display:flex;gap:4px;margin-top:2px">
-              <button type="button" class="action-btn" id="propbtn-save" style="flex:1">Save props</button>
-              <button type="button" class="action-btn" id="propbtn-load" style="flex:1">Load props</button>
+            <div class="section-body hidden">
+              <div class="prop-row">
+                <span class="prop-label">Radius</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-int-rad" min="5" max="100" step="1" value="15" />
+                  <span class="prop-num" id="glbl-int-rad">1.5m</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Strength</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-int-str" min="0" max="100" step="1" value="70" />
+                  <span class="prop-num" id="glbl-int-str">0.70</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Mode</span>
+                <div class="prop-value">
+                  <select class="prop-dropdown" id="gsel-int-mode">
+                    <option value="0">Agitation</option>
+                    <option value="1">Radial part</option>
+                  </select>
+                </div>
+              </div>
             </div>
-            <button type="button" class="action-btn" id="propbtn-clear-all" style="color:#f66">Clear all props</button>
           </div>
 
-        </div><!-- /#props-panel -->
+        </div><!-- /#grass-panel -->
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- PROPS panel — built dynamically by buildPropsPanel() (v2 layout) -->
+        <div id="props-panel" style="display:none"></div>
+
+        <!-- SPLINE panel — built dynamically by buildSplinePanel() (v2 layout) -->
+        <div id="spline-panel" style="display:none"></div>
 
         <!-- World (lighting, sky, sun — coming later) -->
         <div class="tab-content" id="tab-world">
@@ -1220,7 +1431,7 @@
         <div><kbd>Alt</kbd>+<kbd>LMB</kbd> flatten</div>
         <div><kbd>Shift</kbd>+<kbd>Scroll</kbd> brush size</div>
         <div><kbd>Alt</kbd>+<kbd>Scroll</kbd> strength</div>
-        <div><kbd>MMB</kbd> orbit · <kbd>RMB</kbd> pan · <kbd>Scroll</kbd> zoom</div>
+        <div><kbd>LMB</kbd> / <kbd>MMB</kbd> orbit (view) · <kbd>RMB</kbd> pan · <kbd>Scroll</kbd> zoom</div>
         <div><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Ctrl</kbd>+<kbd>Y</kbd> redo</div>
         <div><kbd>Ctrl</kbd>+<kbd>S</kbd> save</div>
       </div>
