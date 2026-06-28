@@ -178,7 +178,7 @@ async function main() {
     60,
     viewport.clientWidth / Math.max(viewport.clientHeight, 1),
     0.5,
-    WORLD_SIZE * 2,
+    WORLD_SIZE * 4,
   );
   camera.position.set(0, 300, 600);
 
@@ -201,8 +201,8 @@ async function main() {
   controls.target.set(0, 10, 0);
   controls.enableDamping = true;
   controls.dampingFactor = 0.1;
-  controls.maxPolarAngle = Math.PI * 0.92;
-  controls.maxDistance = 1500;
+  controls.maxPolarAngle = Math.PI * 0.48; // ~86° — keeps camera above the terrain horizon
+  controls.maxDistance = 4000;
   // minDistance + scroll zoom handled by editorCameraController (same as v2).
   controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
   controls.update();
@@ -1123,6 +1123,7 @@ async function main() {
     if (!cliffBvh.baked) rebakePlayerBvh();
     editorCamera?.onPlayEnter?.();
     playMode.enter({ editorRelaxedPointer: !immersive });
+    try { renderer.domElement.focus({ preventScroll: true }); } catch (_) { renderer.domElement.focus(); }
     syncPlayEditorChrome(immersive);
     if (immersive) playMode.startWalking();
     tbPlay.classList.add("active");
@@ -1710,12 +1711,14 @@ async function main() {
   }
 
   window.addEventListener("keydown", e => {
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
-    if (e.code === "Escape" && playMode.active) {
-      if (playMode.wheelOpen || playMode.walking) return;
-      exitPlay();
+    if (playMode.active) {
+      if (e.code === "Escape") {
+        if (playMode.wheelOpen || playMode.walking) return;
+        exitPlay();
+      }
       return;
     }
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
     if (e.code === "KeyV" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
       setEditorMode("view"); return;
     }
@@ -3451,6 +3454,7 @@ async function main() {
     window.__V3_DEBUG = {
       get editorMode() { return editorMode; },
       get playActive() { return playMode.active; },
+      getFlightDebug: () => playMode.getFlightDebug?.(),
       controls,
       tc,
       editorCamera,

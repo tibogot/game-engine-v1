@@ -1,6 +1,6 @@
 /** Radial play-mode picker — hold G to open, release to confirm (v2-style). */
 
-export const V3_MODE_ORDER = ["capsule", "char", "fly", "husky", "car", "stunt"];
+export const V3_MODE_ORDER = ["capsule", "char", "fly", "husky", "car", "stunt", "ball"];
 
 export const V3_MODE_META = {
   capsule: { label: "Capsule", icon: "◉", digit: "1" },
@@ -9,6 +9,7 @@ export const V3_MODE_META = {
   husky:   { label: "Husky", icon: "🐺", digit: "4" },
   car:     { label: "Bruno", icon: "🚙", digit: "5" },
   stunt:   { label: "Stunt", icon: "🏁", digit: "6" },
+  ball:    { label: "Debug Ball", icon: "🔵", digit: "7" },
 };
 
 export function createModeWheel({ onPick, getCurrentMode }) {

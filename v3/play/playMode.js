@@ -5,6 +5,7 @@ import { createModeWheel, V3_MODE_ORDER, V3_MODE_META } from "./modeWheel.js";
 import { createFlightMode } from "./flightMode.js";
 import { createBrunoCarMode } from "./brunoCarMode.js";
 import { createStuntCarMode } from "./stuntCarMode.js";
+import { createBallDebugMode, BALL_R } from "./ballDebugMode.js";
 
 const MOUSE_SENSITIVITY = 0.003;
 const CAM_DIST          = 8;
@@ -70,8 +71,10 @@ export function createPlayMode({
     w: false, a: false, s: false, d: false,
     space: false, shift: false, q: false, e: false, z: false, c: false,
   };
+  // v2 playMode.js keysHeld — used for movement + barrel-roll edge detect
+  const keysHeld = Object.create(null);
+  let _keyQPrev = false;
   const _lookAt = new THREE.Vector3();
-  const _flyLook = new THREE.Vector3();
 
   const modeWheel = createModeWheel({
     getCurrentMode: () => moveMode,
@@ -117,6 +120,12 @@ export function createPlayMode({
     getStuntRoadSolidMeshes,
   });
 
+  const ballDebug = createBallDebugMode({
+    scene,
+    sampleGroundY,
+    getCollider,
+  });
+
   function isCarMode() {
     return moveMode === "car" || moveMode === "stunt";
   }
@@ -127,6 +136,10 @@ export function createPlayMode({
 
   function isStuntMode() {
     return moveMode === "stunt";
+  }
+
+  function isBallMode() {
+    return moveMode === "ball";
   }
 
   function isFlyMode() {
@@ -169,6 +182,7 @@ export function createPlayMode({
       case "fly": return flight.state.heading;
       case "car": return brunoCar.heading;
       case "stunt": return stuntCar.heading;
+      case "ball": return camYaw;
       default: return capsule.yaw;
     }
   }
@@ -184,10 +198,11 @@ export function createPlayMode({
     capMesh.visible = active && (capMode || (huskyMode && !husky?.loaded));
     character?.setVisible(active && charMode && character.loaded);
     if (husky?.root) husky.root.visible = active && huskyMode && husky.loaded;
-    flight.syncVisuals(capsule.position, flyMode && flight.loaded);
+    flight.syncVisuals(capsule.position, flyMode);
     if (!brunoMode) brunoCar.hide();
     if (stuntMode) stuntCar.syncVisuals(true);
     else stuntCar.hide();
+    ballDebug.syncVisuals(capsule.position, moveMode === "ball");
   }
 
   function setMoveMode(target) {
@@ -209,10 +224,12 @@ export function createPlayMode({
     }
 
     if (target === "fly") {
+      focusGameCanvas();
       if (editorRelaxedPointer) onRequestImmersive?.();
       else {
         try { renderer.domElement.requestPointerLock(); } catch (_) {}
       }
+      const p = capsule.position;
       const spawn = flight.resetFrom(
         p.x,
         Math.max(p.y + 2, sampleGroundY(p.x, p.z) + 3),
@@ -227,6 +244,13 @@ export function createPlayMode({
       capsule.reset(p.x, p.y, p.z);
       charYaw = yaw;
       capsule.yaw = yaw;
+    } else if (moveMode === "ball") {
+      const gy = sampleGroundY(p.x, p.z);
+      p.y = gy + BALL_R;
+      capsule.reset(p.x, p.y, p.z);
+      charYaw = yaw;
+      capsule.yaw = yaw;
+      ballDebug.hide();
     }
 
     if (target === "husky") {
@@ -252,6 +276,13 @@ export function createPlayMode({
       p.y = spawn.y;
       p.z = spawn.z;
       charYaw = yaw;
+    } else if (target === "ball") {
+      const gy = sampleGroundY(p.x, p.z);
+      const spawn = ballDebug.resetFrom(p.x, Math.max(p.y, gy + BALL_R), p.z);
+      p.x = spawn.x;
+      p.y = spawn.y;
+      p.z = spawn.z;
+      charYaw = yaw;
     }
 
     moveMode = target;
@@ -262,9 +293,11 @@ export function createPlayMode({
 
   function positionCameraOnFoot() {
     const capBase = CAP_R + CAP_H * 0.5;
-    const lookY = moveMode === "husky" && husky?.loaded
-      ? capsule.position.y + 0.66
-      : capsule.position.y + (moveMode === "capsule" ? capBase + 0.6 : 1.875);
+    const lookY = isBallMode()
+      ? capsule.position.y
+      : moveMode === "husky" && husky?.loaded
+        ? capsule.position.y + 0.66
+        : capsule.position.y + (moveMode === "capsule" ? capBase + 0.6 : 1.875);
     const cosP = Math.cos(camPitch);
     const sinP = Math.sin(camPitch);
 
@@ -280,8 +313,15 @@ export function createPlayMode({
 
   function positionCamera(dt = 0) {
     if (isFlyMode()) {
-      _flyLook.set(capsule.position.x, capsule.position.y + 0.45, capsule.position.z);
-      flight.positionCamera(camera, _flyLook, camPitch, CAM_DIST, dt);
+      flight.positionCamera(
+        camera,
+        capsule.position.x,
+        capsule.position.y + 0.45,
+        capsule.position.z,
+        camPitch,
+        CAM_DIST,
+        dt,
+      );
       return;
     }
     if (isBrunoMode()) {
@@ -365,20 +405,24 @@ export function createPlayMode({
     }
   }
 
-  function isFormField(target) {
-    return target instanceof HTMLInputElement
-      || target instanceof HTMLSelectElement
-      || target instanceof HTMLTextAreaElement;
+  function focusGameCanvas() {
+    const el = renderer.domElement;
+    if (document.activeElement !== el) {
+      try { el.focus({ preventScroll: true }); } catch (_) { el.focus(); }
+    }
+  }
+
+  function tryFlightBarrelRoll() {
+    if (!isFlyMode() || !flight.loaded || flight.state.barrelActive) return false;
+    flight.triggerBarrelRoll();
+    return true;
   }
 
   function onKeyDown(e) {
     if (!active) return;
+    keysHeld[e.code] = true;
 
     const modeFromDigit = !e.repeat ? parseModeDigit(e.code) : null;
-    const isModeKey = e.code === "KeyG" || !!modeFromDigit
-      || (e.code === "Escape" && modeWheel.open);
-
-    if (!isModeKey && isFormField(e.target)) return;
 
     if (!eventRepeatSafe(e) && e.code === "KeyG") {
       e.preventDefault();
@@ -401,10 +445,10 @@ export function createPlayMode({
       return;
     }
 
+    // v2/playMode.js _onKeyDown — barrel roll (KeyQ while flying)
     if (!eventRepeatSafe(e) && e.code === "KeyQ" && isFlyMode()) {
       e.preventDefault();
-      e.stopPropagation();
-      flight.triggerBarrelRoll();
+      tryFlightBarrelRoll();
       return;
     }
 
@@ -430,6 +474,7 @@ export function createPlayMode({
   }
 
   function onKeyUp(e) {
+    keysHeld[e.code] = false;
     if (e.code === "KeyG" && active) {
       e.preventDefault();
       e.stopPropagation();
@@ -461,9 +506,8 @@ export function createPlayMode({
     const relaxedLook = editorRelaxedPointer && rmbLookActive && !locked;
     if (!locked && !relaxedLook) return;
 
-    if (isCarMode()) return;
-
     if (isFlyMode()) {
+      if (!flight.loaded) return;
       flight.applyMouse(
         e.movementX || 0,
         e.movementY || 0,
@@ -473,6 +517,8 @@ export function createPlayMode({
       return;
     }
 
+    if (isCarMode()) return;
+
     camYaw   += e.movementX * MOUSE_SENSITIVITY;
     camPitch -= e.movementY * MOUSE_SENSITIVITY;
     camPitch  = Math.max(CAM_PITCH_MIN, Math.min(CAM_PITCH_MAX, camPitch));
@@ -480,6 +526,7 @@ export function createPlayMode({
 
   function onPointerLockChange() {
     const locked = document.pointerLockElement === renderer.domElement;
+    if (locked) focusGameCanvas();
     if (locked && active && !walking) {
       walking = true;
       onStartWalking?.();
@@ -500,15 +547,25 @@ export function createPlayMode({
     return V3_MODE_ORDER.find((name) => V3_MODE_META[name].digit === digit) ?? null;
   }
 
-  const KEY_OPTS = { capture: true };
-  document.addEventListener("keydown", onKeyDown, KEY_OPTS);
-  document.addEventListener("keyup", onKeyUp, KEY_OPTS);
-  renderer.domElement.addEventListener("keydown", onKeyDown, KEY_OPTS);
-  renderer.domElement.addEventListener("keyup", onKeyUp, KEY_OPTS);
-  document.addEventListener("mousemove", onMouseMove);
-  document.addEventListener("pointerlockchange", onPointerLockChange);
   if (!renderer.domElement.hasAttribute("tabindex")) {
     renderer.domElement.tabIndex = 0;
+  }
+
+  const PLAY_KEY_OPTS = { capture: true };
+
+  function attachPlayInput() {
+    // Window capture — runs before editor UI / gizmo handlers can swallow keys.
+    window.addEventListener("keydown", onKeyDown, PLAY_KEY_OPTS);
+    window.addEventListener("keyup", onKeyUp, PLAY_KEY_OPTS);
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("pointerlockchange", onPointerLockChange);
+  }
+
+  function detachPlayInput() {
+    window.removeEventListener("keydown", onKeyDown, PLAY_KEY_OPTS);
+    window.removeEventListener("keyup", onKeyUp, PLAY_KEY_OPTS);
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("pointerlockchange", onPointerLockChange);
   }
 
   function enter(opts = {}) {
@@ -539,8 +596,9 @@ export function createPlayMode({
     capsule.yaw = camYaw;
 
     applyModeVisuals();
-    positionCamera();
+    positionCamera(0);
 
+    focusGameCanvas();
     const el = renderer.domElement;
     document.body.classList.toggle("play-immersive-cursor", !editorRelaxedPointer);
     if (editorRelaxedPointer) {
@@ -552,6 +610,8 @@ export function createPlayMode({
       el.style.cursor = "none";
       onEnterMenu?.();
     }
+
+    attachPlayInput();
   }
 
   function startWalking() {
@@ -587,9 +647,13 @@ export function createPlayMode({
     flight.syncVisuals(capsule.position, false);
     brunoCar.hide();
     stuntCar.hide();
+    ballDebug.hide();
     capsule.setParams({ ...DEFAULT_CAPSULE_PARAMS });
 
     Object.keys(keys).forEach((k) => { keys[k] = false; });
+    for (const code of Object.keys(keysHeld)) delete keysHeld[code];
+    _keyQPrev = false;
+    detachPlayInput();
     onExit?.();
   }
 
@@ -638,13 +702,23 @@ export function createPlayMode({
     if (!active) return;
 
     if (isFlyMode()) {
+      const qDown = !!keysHeld.KeyQ;
+      if (qDown && !_keyQPrev) tryFlightBarrelRoll();
+      _keyQPrev = qDown;
+
       flight.update(dt, keys, capsule.position);
-    } else if (isOnFoot()) {
+    } else {
+      _keyQPrev = false;
+    }
+
+    if (isOnFoot()) {
       updateOnFoot(dt);
     } else if (isBrunoMode()) {
       brunoCar.update(dt, keys, capsule.position);
     } else if (isStuntMode()) {
       stuntCar.update(dt, keys, capsule.position);
+    } else if (isBallMode()) {
+      ballDebug.update(dt, keys, camYaw, capsule.position);
     }
 
     if (isBrunoMode() && brunoCar.loaded) {
@@ -653,6 +727,7 @@ export function createPlayMode({
 
     syncCapsuleMesh();
     applyModeVisuals();
+    if (isFlyMode()) flight.updateGun(dt, camera, keys.e);
     positionCamera(dt);
   }
 
@@ -674,7 +749,7 @@ export function createPlayMode({
       let speed = capsule.debug.moveSpeed;
       let grounded = capsule.grounded;
       if (isFlying()) {
-        speed = Math.abs(flight.state.speed);
+        speed = Math.abs(flight.speed);
         grounded = "fly";
       } else if (isBrunoMode()) {
         speed = brunoCar.getSpeed();
@@ -682,6 +757,9 @@ export function createPlayMode({
       } else if (isStuntMode()) {
         speed = stuntCar.getSpeed();
         grounded = stuntCar.grounded;
+      } else if (isBallMode()) {
+        speed = ballDebug.speed;
+        grounded = ballDebug.grounded;
       }
       return {
         x: p.x.toFixed(1),
@@ -690,6 +768,15 @@ export function createPlayMode({
         speed: speed.toFixed(1),
         grounded,
         mode: V3_MODE_META[moveMode]?.label ?? moveMode,
+      };
+    },
+    getFlightDebug() {
+      return {
+        moveMode,
+        loaded: flight.loaded,
+        barrelActive: flight.state.barrelActive,
+        barrelPhase: flight.state.barrelPhase,
+        keyQ: !!keysHeld.KeyQ,
       };
     },
   };

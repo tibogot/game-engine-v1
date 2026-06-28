@@ -49,7 +49,7 @@ export function createDayNightSky() {
   const uSunIntensity = uniform(22);   // disc-of-the-sun radiance scale
   const uRayleigh = uniform(1.0);      // βR multiplier (sky blueness)
   const uMie = uniform(1.0);           // βM multiplier (haze / sun aureole)
-  const uMieG = uniform(0.76);         // Mie anisotropy (aureole tightness)
+  const uMieG = uniform(0.82);         // Mie anisotropy (aureole tightness)
   const uAtmoAltitude = uniform(1500); // viewer height in the atmosphere (m)
   const uHr = uniform(7994);           // Rayleigh scale height (m)
   const uHm = uniform(1200);           // Mie scale height (m)
@@ -73,7 +73,7 @@ export function createDayNightSky() {
   const uSunTransmittance = uniform(new THREE.Vector3(1, 1, 1));
   const uSunCos = uniform(Math.cos(THREE.MathUtils.degToRad(1.2)));
   const uSunGlowPow = uniform(280);
-  const uSunGlowStrength = uniform(0.55);
+  const uSunGlowStrength = uniform(0.08);
   const uSunDiscBright = uniform(8.0);
 
   const uMoonColor = uniform(new THREE.Color(0xcdd9ff));
@@ -164,8 +164,10 @@ export function createDayNightSky() {
     const cell = floor(sp);
     const f = fract(sp).sub(0.5);
     const rnd = hash33(cell);
-    // Sparse: only cells whose hash clears the threshold hold a star.
-    const present = step(uStarThreshold, rnd.x);
+    // Sparse: threshold biased by galactic latitude — plane has ~2× star density.
+    const galLat = abs(dot(dir, uGalacticPole));
+    const adjThresh = mix(uStarThreshold.sub(float(0.07)), uStarThreshold.add(float(0.03)), galLat);
+    const present = step(adjThresh, rnd.x);
     const off = hash33(cell.add(vec3(1.7, 9.2, 3.3))).sub(0.5).mul(0.7);
     const d = length(f.sub(off));
     const size = uStarSize.mul(mix(float(0.45), float(1.7), rnd.z)); // a few bright, many faint
@@ -240,12 +242,34 @@ export function createDayNightSky() {
       .div(1.75),
   );
 
+  // ── Transmittance LUT ─────────────────────────────────────────────────────
+  // T(h, cosTheta): optical transmittance from altitude h (m above sea level)
+  // toward direction cosTheta (relative to local zenith) to the atmosphere top.
+  // Baked once at startup and re-baked only when atmosphere params change —
+  // never per sun move. The sky-view bake uses it to replace its 8-step inner
+  // light march with one texture fetch, freeing the budget to double NS.
+  const TLUT_W = 256, TLUT_H = 64;
+  const transLutRT = new THREE.RenderTarget(TLUT_W, TLUT_H, {
+    type: THREE.HalfFloatType,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    depthBuffer: false,
+  });
+  transLutRT.texture.generateMipmaps = false;
+  const transLutTex = texture(transLutRT.texture);
+
+  // Only upward-facing directions (cosTheta ∈ [0,1]) are stored. Downward sun
+  // paths are already gated to zero by shadowF inside the scatter march.
+  const sampleTransLut = Fn(([hArg, cosTArg]) => {
+    const uu = clamp(hArg.div(float(RT - RG)), 0.0, 1.0);
+    const vv = clamp(cosTArg, 0.0, 1.0);
+    return transLutTex.sample(vec2(uu, vv.oneMinus())).rgb;
+  });
+
   // ── Nishita single-scattering atmosphere ─────────────────────────────────
-  // Marches the view ray through the atmosphere shell; at each step a short
-  // light-march toward the sun gives the optical depth to space, and Rayleigh
-  // (molecular, blue) + Mie (aerosol, forward-peaked white) scattering are
-  // accumulated with their phase functions. Output is HDR radiance (tone-mapped
-  // into the sky RT with the rest of the scene).
+  // Marches the view ray through the atmosphere shell. The inner light-march
+  // (previously 8 steps per view sample) is now replaced by a single fetch
+  // from the transmittance LUT, halving ALU cost and allowing NS 16 → 32.
   const atmosphere = Fn(([dir, sunDir]) => {
     const orig = vec3(0, float(RG).add(uAtmoAltitude), 0).toVar();
     const b = dot(orig, dir).toVar();
@@ -262,7 +286,8 @@ export function createDayNightSky() {
 
     const betaR = uBetaR.mul(uRayleigh);
     const betaM = uBetaM.mul(uMie);
-    const NS = 16, NL = 8;
+    const betaOz = vec3(0.65e-6, 1.881e-6, 0.085e-6); // ozone absorption (m⁻¹ at peak density, ~25 km)
+    const NS = 32; // doubled from 16 — cost neutral: inner light march replaced by LUT
     const segLen = tmax.div(float(NS)).toVar();
     const tCur = float(0.0).toVar();
     const sumR = vec3(0.0).toVar();
@@ -270,6 +295,7 @@ export function createDayNightSky() {
     const sumMS = vec3(0.0).toVar(); // isotropic multiple-scatter fill
     const odR = float(0.0).toVar();
     const odM = float(0.0).toVar();
+    const odOz = float(0.0).toVar();
 
     Loop(NS, () => {
       const sp = orig.add(dir.mul(tCur.add(segLen.mul(0.5))));
@@ -278,39 +304,26 @@ export function createDayNightSky() {
       const hm = exp(h.negate().div(uHm)).mul(segLen);
       odR.addAssign(hr);
       odM.addAssign(hm);
+      // Ozone: Gaussian profile centred at 25 km, σ ≈ 8 km. Absorbs green most,
+      // which reddens near-horizon paths and produces the Belt of Venus at twilight.
+      const hOz = h.sub(25000.0);
+      odOz.addAssign(exp(hOz.mul(hOz).negate().div(float(1.28e8))).mul(segLen));
 
-      // Light march toward the sun (to the atmosphere top). Underground samples
-      // are clamped to h≥0 so the optical depth can't blow up to Inf below the
-      // planet — the smooth shadow below zeroes their contribution anyway.
-      const bl = dot(sp, sunDir);
-      const discL = bl.mul(bl).sub(dot(sp, sp).sub(float(RT * RT)));
-      const segL = bl.negate().add(sqrt(discL.max(0.0))).div(float(NL)).toVar();
-      const tCurL = float(0.0).toVar();
-      const odLR = float(0.0).toVar();
-      const odLM = float(0.0).toVar();
-      Loop(NL, () => {
-        const spl = sp.add(sunDir.mul(tCurL.add(segL.mul(0.5))));
-        const hl = length(spl).sub(float(RG)).max(0.0);
-        odLR.addAssign(exp(hl.negate().div(uHr)).mul(segL));
-        odLM.addAssign(exp(hl.negate().div(uHm)).mul(segL));
-        tCurL.addAssign(segL);
-      });
-      // SMOOTH horizon shadow (replaces the hard underground test). Whether the
-      // sun is up at THIS sample's location = dot(localUp, sunDir); smoothstep it
-      // so each sample fades in/out instead of switching on/off. The old binary
-      // test made the count of lit samples jump as the view swept the twilight
-      // sky → concentric bands, worst in the isotropic multi-scatter fill.
-      const shadowF = smoothstep(
-        uHorizonSoft.negate(), uHorizonSoft, dot(normalize(sp), sunDir),
-      );
-      const tau = betaR.mul(odR.add(odLR)).add(betaM.mul(1.1).mul(odM.add(odLM)));
-      const att = vec3(exp(tau.x.negate()), exp(tau.y.negate()), exp(tau.z.negate()));
+      // cos(sun angle) at this sample — shared by shadow and LUT lookup.
+      const cosSunSample = dot(normalize(sp), sunDir);
+      // Smooth horizon shadow: fades the sample's sun contribution across the
+      // terminator instead of a hard binary test (which caused banding).
+      const shadowF = smoothstep(uHorizonSoft.negate(), uHorizonSoft, cosSunSample);
+      // View-path transmittance accumulated along the view ray so far.
+      const tauV = betaR.mul(odR).add(betaM.mul(1.1).mul(odM)).add(betaOz.mul(odOz));
+      const attV = vec3(exp(tauV.x.negate()), exp(tauV.y.negate()), exp(tauV.z.negate()));
+      // Sun-path transmittance from this sample to the atmosphere top — single
+      // LUT fetch replaces the old 8-step inner light march per view sample.
+      const T_sun = sampleTransLut(h.max(0.0), cosSunSample);
+      const att = attV.mul(T_sun);
       sumR.addAssign(att.mul(hr).mul(shadowF));
       sumM.addAssign(att.mul(hm).mul(shadowF));
-      // Multiple-scatter fill: extinct only by the (reduced) VIEW path — the
-      // bounced light is local, so it isn't dimmed by the long path to the sun.
-      // This is what keeps the horizon bright where single-scatter dies.
-      const tauV = betaR.mul(odR).add(betaM.mul(1.1).mul(odM));
+      // Multiple-scatter fill: view path only, with reduced extinction.
       const attMS = vec3(
         exp(tauV.x.mul(uMsExtinct).negate()),
         exp(tauV.y.mul(uMsExtinct).negate()),
@@ -341,7 +354,7 @@ export function createDayNightSky() {
   // static sky bakes ONCE — and sample it per pixel instead of marching. Stars,
   // discs and cirrus stay live. uUseLut lets us A/B against the live march.
   const uUseLut = uniform(1);
-  const LUT_W = 256, LUT_H = 128;
+  const LUT_W = 256, LUT_H = 256;
   const skyLutRT = new THREE.RenderTarget(LUT_W, LUT_H, {
     type: THREE.HalfFloatType,           // holds HDR radiance (pre-tonemap)
     minFilter: THREE.LinearFilter,
@@ -461,11 +474,13 @@ export function createDayNightSky() {
       skyCol.assign(analyticSky);
     });
 
-    // Ground hemisphere (below the horizon line).
-    const groundMix = smoothstep(0.0, -0.04, up);
-    skyCol.assign(
-      mix(skyCol, uGroundColor.mul(mix(float(0.12), float(1.0), dayF)), groundMix),
-    );
+    // Below-horizon: dim the atmosphere rather than cutting to a flat colour.
+    // The Nishita scatter (or analytic gradient) already gives the correct bright
+    // horizon at up=0; squared curve keeps transition gentle at the waterline and
+    // accelerates toward near-black at the nadir, which reads as ground without
+    // adding any artificial colour.
+    const belowH = smoothstep(float(-0.8), float(0.02), up).oneMinus();
+    skyCol.assign(skyCol.mul(mix(float(1.0), float(0.05), belowH.mul(belowH))));
 
     // Horizon + under-horizon haze (matches scene FogExp2 on terrain).
     const fogHorizon = smoothstep(uFogHazeHeight, float(0.0), up);
@@ -476,7 +491,8 @@ export function createDayNightSky() {
       float(1),
       exp(fogDepth.mul(fogDepth).mul(uFogDensity).mul(uFogDensity).negate()),
     );
-    skyCol.assign(mix(skyCol, uFogColor, mul(fogFac, uFogEnabled)));
+    // Fog only in analytic mode — Nishita scatter already handles horizon brightening.
+    skyCol.assign(mix(skyCol, uFogColor, mul(fogFac, uFogEnabled.mul(uScatterMix.oneMinus()))));
 
     // ── Milky Way band (night only). Gated twice so only band pixels at night
     //    ever evaluate the FBM — day and off-band sky pay nothing. ──
@@ -596,8 +612,57 @@ export function createDayNightSky() {
   const lutCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   lutScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), lutMat));
 
-  // Re-bake gating: only when the sun moved (~0.5°) or an atmo param changed,
-  // so a paused sky bakes exactly once.
+  // ── Transmittance LUT bake ────────────────────────────────────────────────
+  // One 40-step march per texel (baked once; no sun direction dependency).
+  // UV.x → altitude h ∈ [0, RT-RG]; UV.y → cosTheta ∈ [0, 1].
+  const transBakeNode = Fn(() => {
+    const uvv = uv();
+    const h = uvv.x.mul(float(RT - RG));
+    const cosT = uvv.y;
+    const sinT = sqrt(float(1.0).sub(cosT.mul(cosT)).max(0.0));
+    const r = float(RG).add(h);
+    // t at atmosphere top: r²sin²T + (rcosT + t)² = RT²  →  t = -r·cosT + √(RT²-r²sin²T)
+    const discT = float(RT * RT).sub(r.mul(r).mul(sinT.mul(sinT)));
+    const tmax = r.mul(cosT).negate().add(sqrt(discT.max(0.0)));
+    const NT = 40;
+    const segT = tmax.div(float(NT));
+    const odRT2 = float(0.0).toVar();
+    const odMT2 = float(0.0).toVar();
+    const odOzT2 = float(0.0).toVar();
+    Loop(NT, ({ i }) => {
+      const t = float(i).add(0.5).mul(segT);
+      const px = sinT.mul(t);
+      const py = r.add(cosT.mul(t));
+      const hS = sqrt(px.mul(px).add(py.mul(py))).sub(float(RG)).max(0.0);
+      odRT2.addAssign(exp(hS.negate().div(uHr)).mul(segT));
+      odMT2.addAssign(exp(hS.negate().div(uHm)).mul(segT));
+      const hOzT = hS.sub(25000.0);
+      odOzT2.addAssign(exp(hOzT.mul(hOzT).negate().div(float(1.28e8))).mul(segT));
+    });
+    const betaOzT = vec3(0.65e-6, 1.881e-6, 0.085e-6);
+    const tauT = uBetaR.mul(uRayleigh).mul(odRT2)
+      .add(uBetaM.mul(uMie).mul(1.1).mul(odMT2))
+      .add(betaOzT.mul(odOzT2));
+    return vec4(exp(tauT.x.negate()), exp(tauT.y.negate()), exp(tauT.z.negate()), 1.0);
+  });
+  const transLutMat = new THREE.MeshBasicNodeMaterial();
+  transLutMat.colorNode = transBakeNode();
+  transLutMat.toneMapped = false;
+  transLutMat.depthTest = false;
+  transLutMat.depthWrite = false;
+  const transLutScene = new THREE.Scene();
+  transLutScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), transLutMat));
+
+  let _transBakeSig = '';
+  function bakeTransLut(renderer) {
+    const prevRT = renderer.getRenderTarget();
+    renderer.setRenderTarget(transLutRT);
+    renderer.render(transLutScene, lutCam);
+    renderer.setRenderTarget(prevRT);
+  }
+
+  // ── Sky-view LUT re-bake gating ──────────────────────────────────────────
+  // Re-baked when the sun moved (~0.5°) or an atmo param changed.
   const _lastBakeSun = new THREE.Vector3(0, -2, 0); // impossible dir → bakes frame 1
   let _bakeSig = "";
   function bakeSkyView(renderer) {
@@ -635,30 +700,32 @@ export function createDayNightSky() {
     uMsExtinct.value = P.msExtinct;
     uHorizonSoft.value = P.atmoHorizonSoft ?? 0.05;
 
-    // Sun-disc transmittance: a single 8-step optical-depth march toward the
-    // sun (same β / scale heights as the shader's atmosphere()). It's constant
-    // across the screen, so compute it here once per frame, not per pixel.
-    // Blue extincts most → the disc reddens and dims as it nears the horizon.
+    // Sun-disc transmittance: 16-step march toward the sun matching the GPU
+    // atmosphere (Rayleigh + Mie + ozone). Constant across the screen — computed
+    // here once per frame so the disc reddens/dims correctly as the sun sets.
     if (P.scatter) {
       const sd = frame.sunDir;
       const origY = RG + P.atmoAltitude;
       const b = origY * sd.y;
       const disc = b * b - (origY * origY - RT * RT);
       const tTop = -b + Math.sqrt(Math.max(disc, 0));
-      const NL = 8, segL = tTop / NL;
-      let odR = 0, odM = 0;
+      const NL = 16, segL = tTop / NL;
+      let odR = 0, odM = 0, odOz = 0;
       for (let i = 0; i < NL; i++) {
         const t = (i + 0.5) * segL;
         const sx = sd.x * t, sy = origY + sd.y * t, sz = sd.z * t;
-        const hh = Math.sqrt(sx * sx + sy * sy + sz * sz) - RG;
+        const hh = Math.max(0, Math.sqrt(sx * sx + sy * sy + sz * sz) - RG);
         odR += Math.exp(-hh / uHr.value) * segL;
         odM += Math.exp(-hh / uHm.value) * segL;
+        const hOz = hh - 25000;
+        odOz += Math.exp(-hOz * hOz / 1.28e8) * segL;
       }
-      const br = uBetaR.value, mAbs = uBetaM.value * P.mie * 1.1 * odM;
+      const br = uBetaR.value;
+      const mExt = uBetaM.value * P.mie * 1.1 * odM;
       uSunTransmittance.value.set(
-        Math.exp(-(br.x * P.rayleigh * odR + mAbs)),
-        Math.exp(-(br.y * P.rayleigh * odR + mAbs)),
-        Math.exp(-(br.z * P.rayleigh * odR + mAbs)),
+        Math.exp(-(br.x * P.rayleigh * odR + mExt + 0.65e-6 * odOz)),
+        Math.exp(-(br.y * P.rayleigh * odR + mExt + 1.881e-6 * odOz)),
+        Math.exp(-(br.z * P.rayleigh * odR + mExt + 0.085e-6 * odOz)),
       );
     } else {
       uSunTransmittance.value.set(1, 1, 1);
@@ -746,13 +813,20 @@ export function createDayNightSky() {
       if (frame.fog.hazeHeight !== undefined) uFogHazeHeight.value = frame.fog.hazeHeight;
     }
 
-    // ── Sky-view LUT re-bake (must run after the atmo uniforms above are set) ──
+    // ── LUT re-bakes (must run after atmo uniforms are set above) ────────────
     const useLut = P.useLut ?? true;
     uUseLut.value = useLut ? 1 : 0;
     if (frame.renderer && P.scatter && useLut) {
       const sd = frame.sunDir;
+      // Trans LUT: sun-direction independent, re-bake only when atmo params change.
+      // Must bake before the sky-view LUT (which samples it).
+      const transSig = `${P.rayleigh}|${P.mie}|${P.atmoAltitude}`;
+      if (transSig !== _transBakeSig) {
+        bakeTransLut(frame.renderer);
+        _transBakeSig = transSig;
+      }
+      // Sky-view LUT: re-bake when sun moved (~0.5°) or any atmo param changed.
       const sig = `${P.rayleigh}|${P.mie}|${P.mieG}|${P.atmoAltitude}|${P.msAmount}|${P.msExtinct}|${P.sunIntensity}|${P.atmoHorizonSoft}`;
-      // dot < cos(~0.5°): the sun moved enough to matter.
       if (_lastBakeSun.dot(sd) < 0.99996 || sig !== _bakeSig) {
         bakeSkyView(frame.renderer);
         _lastBakeSun.copy(sd);
@@ -764,6 +838,8 @@ export function createDayNightSky() {
   function dispose() {
     mesh.geometry.dispose();
     material.dispose();
+    transLutRT.dispose();
+    transLutMat.dispose();
     skyLutRT.dispose();
     lutMat.dispose();
   }
@@ -785,7 +861,7 @@ export const SKY_DEFAULTS = {
   sunIntensity: 22,
   rayleigh: 1.0,
   mie: 1.0,
-  mieG: 0.76,
+  mieG: 0.82,
   atmoAltitude: 1500,
   msAmount: 1.0,    // multiple-scattering fill strength (bright horizon glow)
   msExtinct: 0.3,   // <1 = bounced light keeps more energy
@@ -794,7 +870,7 @@ export const SKY_DEFAULTS = {
   sunColor: "#fff3d8",
   sunSizeDeg: 1.2,
   sunGlowPow: 280,
-  sunGlowStrength: 0.55,
+  sunGlowStrength: 0.08,
   sunDiscBright: 8.0,
 
   moonColor: "#cdd9ff",

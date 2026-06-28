@@ -21,7 +21,7 @@ export function createEditorCameraController({
   const _euler = new THREE.Euler(0, 0, 0, "YXZ");
 
   const MIN_DIST = 2;
-  const MAX_DIST = 1500;
+  const MAX_DIST = 4000;
   const FLY_BASE_SPEED = 48;
   const FLY_SPRINT = 2.4;
 
