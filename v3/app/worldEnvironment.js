@@ -24,8 +24,8 @@ import { SkyMesh } from "three/addons/objects/SkyMesh.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import { createLensFlareSystem } from "../../v2/effects/lensFlare.js";
 import { PostFxPipeline } from "../../v2/render/post/postFxPipeline.js";
-import { createDayNightSky } from "../../v2/render/sky/dayNightSky.js";
-import { createDayNightCloudLayer } from "../../v2/render/clouds/dayNightCloudLayer.js";
+import { createDayNightSky } from "../render/sky/dayNightSky.js";
+import { createDayNightCloudLayer } from "../render/clouds/dayNightCloudLayer.js";
 import { createWorldOcean } from "../../v2/render/water/worldOcean.js";
 import { InteriorVolumeRegistry } from "../../v2/render/lighting/interiorVolumeRegistry.js";
 import { createInteriorLightingNodes } from "../../v2/render/lighting/interiorLightingTsl.js";
@@ -50,6 +50,11 @@ export async function createWorldEnvironment({
   const _shadowFocus = new THREE.Vector3();
   const _shadowCamDist = new THREE.Vector3();
   const _moonDir = new THREE.Vector3();
+  // Realistic sky moon (own ecliptic track) + its sun-lit direction. Kept
+  // separate from _moonDir (the antipode used for cloud night-lighting) so the
+  // sky upgrade doesn't change cloud behavior.
+  const _skyMoonDir = new THREE.Vector3();
+  const _moonLightDir = new THREE.Vector3();
   const _procSkyFogColor = new THREE.Color();
   const _todSunDir = new THREE.Vector3();
   const _cloudLightColor = new THREE.Color();
@@ -75,6 +80,37 @@ export async function createWorldEnvironment({
         Math.cos(el) * Math.sin(az),
       )
       .normalize();
+  }
+
+  // Hour angle H + declination → world direction, in the same frame as
+  // sunDirectionFromAngles (X=east, Y=up, Z=south → azimuth = atan2(z,x)).
+  function equatorialToDir(H, decl, lat, out) {
+    const sinD = Math.sin(decl), cosD = Math.cos(decl);
+    const sinL = Math.sin(lat), cosL = Math.cos(lat);
+    const cosH = Math.cos(H), sinH = Math.sin(H);
+    return out
+      .set(
+        -cosD * sinH,
+        sinL * sinD + cosL * cosD * cosH,
+        cosD * sinL * cosH - sinD * cosL,
+      )
+      .normalize();
+  }
+
+  // Realistic moon direction: rides the ecliptic, shares the sun-implied
+  // sidereal time, and trails the sun by its synodic age (0=new .5=full 1=new).
+  // Cheap → recomputed every frame so it tracks latitude/day/age live.
+  function computeMoonDir(out) {
+    const ps = toolState.proceduralSky;
+    const DEG = Math.PI / 180, OB = 23.44 * DEG;
+    const lat = (ps.latitude ?? 45) * DEG;
+    const lamSun = ((360 * ((ps.dayOfYear ?? 172) - 80)) / 365.25) * DEG;
+    const raSun = Math.atan2(Math.cos(OB) * Math.sin(lamSun), Math.cos(lamSun));
+    const Hsun = ((ps.timeOfDay ?? 12) - 12) * 15 * DEG;
+    const lamMoon = lamSun + (ps.moonAge ?? 0.55) * 2 * Math.PI;
+    const declMoon = Math.asin(Math.sin(OB) * Math.sin(lamMoon));
+    const raMoon = Math.atan2(Math.cos(OB) * Math.sin(lamMoon), Math.cos(lamMoon));
+    return equatorialToDir(Hsun + raSun - raMoon, declMoon, lat, out);
   }
 
   function fitDirectionalShadowToView(cam, focus, maxFar, lightMargin) {
@@ -482,9 +518,16 @@ export async function createWorldEnvironment({
   }
 
   function setTimeOfDay(t) {
-    const SKY_TILT = 0.28;
-    const ang = (t / 24) * Math.PI * 2;
-    _todSunDir.set(Math.sin(ang), -Math.cos(ang), SKY_TILT).normalize();
+    // Astronomical sun: latitude + day-of-year (solar declination) + hour angle,
+    // so the daily arc TILTS with latitude/season instead of rising straight up.
+    const ps = toolState.proceduralSky;
+    const DEG = Math.PI / 180, OB = 23.44 * DEG;
+    const lat = (ps.latitude ?? 45) * DEG;
+    const lamSun = ((360 * ((ps.dayOfYear ?? 172) - 80)) / 365.25) * DEG;
+    const declSun = Math.asin(Math.sin(OB) * Math.sin(lamSun));
+    const Hsun = (t - 12) * 15 * DEG; // hour angle: 15°/h, 0 at solar noon
+    equatorialToDir(Hsun, declSun, lat, _todSunDir);
+    // Round-trip through angles so manual override + updateSunSky still apply.
     toolState.light.sunElevation = THREE.MathUtils.radToDeg(
       Math.asin(THREE.MathUtils.clamp(_todSunDir.y, -1, 1)),
     );
@@ -494,12 +537,16 @@ export async function createWorldEnvironment({
   }
 
   function driveProceduralSky() {
-    _moonDir.copy(sunDir).negate();
+    _moonDir.copy(sunDir).negate(); // antipode: cloud night-light dir (unchanged)
+    computeMoonDir(_skyMoonDir);    // realistic moon for the sky disc
+    _moonLightDir.copy(sunDir);     // moon lit by the real sun → phase from geometry
     const Df = toolState.fog.distance;
     dayNightSky.update(toolState.proceduralSky, {
       time: _appTimeSec,
+      renderer,                     // for the sky-view LUT bake
       sunDir,
-      moonDir: _moonDir,
+      moonDir: _skyMoonDir,
+      moonLightDir: _moonLightDir,
       camera,
       fog: {
         enabled: Df.enabled,

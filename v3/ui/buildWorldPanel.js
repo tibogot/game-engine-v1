@@ -254,6 +254,22 @@ function _buildProceduralSkyControls(parent, ts, app) {
     step: 0.05,
     hint: "Hours of time-of-day advanced per real second",
   });
+  _slider(tod, ps, "latitude", {
+    label: "Latitude °",
+    min: -66,
+    max: 66,
+    step: 1,
+    hint: "Tilts the sun/moon arc; higher = flatter arc + longer twilight.",
+    onChange: () => app.setTimeOfDay?.(ps.timeOfDay),
+  });
+  _slider(tod, ps, "dayOfYear", {
+    label: "Day of year",
+    min: 1,
+    max: 365,
+    step: 1,
+    hint: "Season → solar declination. 172 ≈ N summer solstice, 355 ≈ winter.",
+    onChange: () => app.setTimeOfDay?.(ps.timeOfDay),
+  });
 
   const atmo = _section(wrap, "Atmosphere (scattering)", true);
   _toggle(atmo, ps, "scatter", {
@@ -296,6 +312,17 @@ function _buildProceduralSkyControls(parent, ts, app) {
     min: 0,
     max: 1,
     step: 0.02,
+  });
+  _slider(atmo, ps, "atmoHorizonSoft", {
+    label: "Horizon soft",
+    min: 0.005,
+    max: 0.3,
+    step: 0.005,
+    hint: "Soft terminator width. Higher = smoother twilight; removes the dawn/dusk scattering bands.",
+  });
+  _toggle(atmo, ps, "useLut", {
+    label: "Sky-view LUT (perf)",
+    hint: "Sample the pre-baked atmosphere LUT instead of marching per pixel. Big GPU win; re-bakes only when the sun moves.",
   });
   // "Horizon haze" (hazeHeight) lives in the Distance Fog section now (it
   // reads with the rest of the haze/fog controls — matches the lab layout).
@@ -355,17 +382,12 @@ function _buildProceduralSkyControls(parent, ts, app) {
     max: 10,
     step: 0.1,
   });
-  _slider(moon, ps, "moonPhase", {
-    label: "Phase (1=full)",
+  _slider(moon, ps, "moonAge", {
+    label: "Age (new→full)",
     min: 0,
     max: 1,
     step: 0.01,
-  });
-  _slider(moon, ps, "moonPhaseOrient", {
-    label: "Phase orient",
-    min: 0,
-    max: 360,
-    step: 1,
+    hint: "Synodic age: 0/1 = new, 0.5 = full. Drives the moon's position AND phase (lit by the real sun).",
   });
   _slider(moon, ps, "moonSurface", {
     label: "Surface detail",

@@ -3,6 +3,8 @@ import { CapsuleController, DEFAULT_CAPSULE_PARAMS } from "./capsuleController.j
 import { WORLD_SIZE } from "../terrain/heightmapTexture.js";
 import { createModeWheel, V3_MODE_ORDER, V3_MODE_META } from "./modeWheel.js";
 import { createFlightMode } from "./flightMode.js";
+import { createBrunoCarMode } from "./brunoCarMode.js";
+import { createStuntCarMode } from "./stuntCarMode.js";
 
 const MOUSE_SENSITIVITY = 0.003;
 const CAM_DIST          = 8;
@@ -21,8 +23,13 @@ export function createPlayMode({
   sampleTerrainHeight, uCursorUV,
   character,
   husky = null,
+  bruno = null,
+  stunt = null,
   getCollider = () => null,
   getCliffBvh = () => null,
+  getTreeBvh = () => null,
+  getStuntRoadMeshes = () => [],
+  getStuntRoadSolidMeshes = () => [],
   onEnterMenu, onStartWalking, onExit,
   onModeChange,
 }) {
@@ -56,7 +63,7 @@ export function createPlayMode({
   let camYaw   = 0;
   let camPitch = CAM_PITCH_DEFAULT;
 
-  const keys = { w: false, a: false, s: false, d: false, space: false, shift: false };
+  const keys = { w: false, a: false, s: false, d: false, space: false, shift: false, q: false, e: false };
   const _lookAt = new THREE.Vector3();
   const _flyLook = new THREE.Vector3();
 
@@ -85,6 +92,35 @@ export function createPlayMode({
     scene,
     sampleGroundY,
   });
+
+  const brunoCar = bruno ?? createBrunoCarMode({
+    scene,
+    sampleGroundY,
+    getCliffBvh,
+    getTreeBvh,
+  });
+
+  const stuntCar = stunt ?? createStuntCarMode({
+    scene,
+    camera,
+    sampleGroundY,
+    getCliffBvh,
+    getTreeBvh,
+    getStuntRoadMeshes,
+    getStuntRoadSolidMeshes,
+  });
+
+  function isCarMode() {
+    return moveMode === "car" || moveMode === "stunt";
+  }
+
+  function isBrunoMode() {
+    return moveMode === "car";
+  }
+
+  function isStuntMode() {
+    return moveMode === "stunt";
+  }
 
   function isFlyMode() {
     return moveMode === "fly";
@@ -124,6 +160,8 @@ export function createPlayMode({
       case "char": return character?.yaw ?? charYaw;
       case "husky": return charYaw;
       case "fly": return flight.state.heading;
+      case "car": return brunoCar.heading;
+      case "stunt": return stuntCar.heading;
       default: return capsule.yaw;
     }
   }
@@ -133,11 +171,16 @@ export function createPlayMode({
     const huskyMode = moveMode === "husky" && husky?.loaded;
     const charMode = moveMode === "char";
     const capMode = moveMode === "capsule";
+    const brunoMode = isBrunoMode() && brunoCar.loaded;
+    const stuntMode = isStuntMode();
 
     capMesh.visible = active && (capMode || (huskyMode && !husky?.loaded));
     character?.setVisible(active && charMode && character.loaded);
     if (husky?.root) husky.root.visible = active && huskyMode && husky.loaded;
     flight.syncVisuals(capsule.position, flyMode && flight.loaded);
+    if (!brunoMode) brunoCar.hide();
+    if (stuntMode) stuntCar.syncVisuals(true);
+    else stuntCar.hide();
   }
 
   function setMoveMode(target) {
@@ -147,6 +190,15 @@ export function createPlayMode({
 
     if (moveMode === "husky" && target !== "husky") {
       husky?.restoreHumanCapsuleParams?.(capsule);
+    }
+
+    if (isCarMode() && target !== "car" && target !== "stunt") {
+      p.y = sampleGroundY(p.x, p.z);
+      capsule.reset(p.x, p.y, p.z);
+      charYaw = yaw;
+      capsule.yaw = yaw;
+      brunoCar.hide();
+      stuntCar.hide();
     }
 
     if (target === "fly") {
@@ -170,6 +222,18 @@ export function createPlayMode({
     } else if (target === "capsule") {
       capsule.setParams({ ...DEFAULT_CAPSULE_PARAMS });
       capsule.yaw = yaw;
+    } else if (target === "car") {
+      const spawn = brunoCar.resetFrom(p.x, p.y, p.z, yaw);
+      p.x = spawn.x;
+      p.y = spawn.y;
+      p.z = spawn.z;
+      charYaw = yaw;
+    } else if (target === "stunt") {
+      const spawn = stuntCar.resetFrom(p.x, p.y, p.z, yaw);
+      p.x = spawn.x;
+      p.y = spawn.y;
+      p.z = spawn.z;
+      charYaw = yaw;
     }
 
     moveMode = target;
@@ -196,10 +260,18 @@ export function createPlayMode({
     camera.lookAt(_lookAt);
   }
 
-  function positionCamera() {
+  function positionCamera(dt = 0) {
     if (isFlyMode()) {
       _flyLook.set(capsule.position.x, capsule.position.y, capsule.position.z);
       flight.positionCamera(camera, _flyLook, camPitch, CAM_DIST);
+      return;
+    }
+    if (isBrunoMode()) {
+      brunoCar.positionCamera(camera, capsule.position, dt);
+      return;
+    }
+    if (isStuntMode()) {
+      stuntCar.positionCamera(dt);
       return;
     }
     positionCameraOnFoot();
@@ -268,6 +340,8 @@ export function createPlayMode({
       case "KeyD": case "ArrowRight": keys.d = true; break;
       case "Space": e.preventDefault(); keys.space = true; break;
       case "ShiftLeft": case "ShiftRight": keys.shift = true; break;
+      case "KeyQ": keys.q = true; break;
+      case "KeyE": keys.e = true; break;
     }
   }
 
@@ -285,6 +359,8 @@ export function createPlayMode({
       case "KeyD": case "ArrowRight": keys.d = false; break;
       case "Space":                   keys.space = false; break;
       case "ShiftLeft": case "ShiftRight": keys.shift = false; break;
+      case "KeyQ": keys.q = false; break;
+      case "KeyE": keys.e = false; break;
     }
   }
 
@@ -294,6 +370,8 @@ export function createPlayMode({
       return;
     }
     if (!walking) return;
+
+    if (isCarMode()) return;
 
     if (isFlyMode()) {
       flight.applyMouse(
@@ -403,6 +481,8 @@ export function createPlayMode({
     if (husky?.root) husky.root.visible = false;
     capMesh.visible = false;
     flight.syncVisuals(capsule.position, false);
+    brunoCar.hide();
+    stuntCar.hide();
     capsule.setParams({ ...DEFAULT_CAPSULE_PARAMS });
 
     Object.keys(keys).forEach((k) => { keys[k] = false; });
@@ -458,12 +538,20 @@ export function createPlayMode({
         flight.update(dt, keys, capsule.position);
       } else if (isOnFoot()) {
         updateOnFoot(dt);
+      } else if (isBrunoMode()) {
+        brunoCar.update(dt, keys, capsule.position);
+      } else if (isStuntMode()) {
+        stuntCar.update(dt, keys, capsule.position);
       }
+    }
+
+    if (isBrunoMode() && brunoCar.loaded) {
+      brunoCar.syncVisuals(dt, keys, true, capsule.position);
     }
 
     syncCapsuleMesh();
     applyModeVisuals();
-    positionCamera();
+    positionCamera(dt);
   }
 
   return {
@@ -479,14 +567,24 @@ export function createPlayMode({
     get playerPosition() { return capsule.position; },
     getStats() {
       const p = capsule.position;
+      let speed = capsule.debug.moveSpeed;
+      let grounded = capsule.grounded;
+      if (isFlying()) {
+        speed = Math.abs(flight.state.speed);
+        grounded = "fly";
+      } else if (isBrunoMode()) {
+        speed = brunoCar.getSpeed();
+        grounded = brunoCar.grounded;
+      } else if (isStuntMode()) {
+        speed = stuntCar.getSpeed();
+        grounded = stuntCar.grounded;
+      }
       return {
         x: p.x.toFixed(1),
         y: p.y.toFixed(1),
         z: p.z.toFixed(1),
-        speed: isFlying()
-          ? Math.abs(flight.state.speed).toFixed(1)
-          : capsule.debug.moveSpeed.toFixed(1),
-        grounded: isFlying() ? "fly" : capsule.grounded,
+        speed: speed.toFixed(1),
+        grounded,
         mode: V3_MODE_META[moveMode]?.label ?? moveMode,
       };
     },
