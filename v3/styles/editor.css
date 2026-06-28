@@ -943,6 +943,41 @@ html, body {
 }
 .play-stop-primary:hover { filter: brightness(1.15); }
 
+.play-stop-secondary {
+  padding: 4px 12px;
+  height: 24px;
+  background: var(--bg-input);
+  color: var(--text-bright);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  font-size: 11px;
+  font-family: var(--font);
+  font-weight: 600;
+  cursor: pointer;
+}
+.play-stop-secondary:hover { background: var(--bg-hover); }
+
+/* Immersive play — fullscreen viewport, hide editor chrome */
+#app.play-fullscreen {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+#app.play-fullscreen #toolbar,
+#app.play-fullscreen #hierarchy,
+#app.play-fullscreen #right-panel {
+  display: none !important;
+}
+#app.play-fullscreen #viewport {
+  grid-column: 1;
+  grid-row: 1;
+}
+#app.play-fullscreen #play-stop-bar {
+  z-index: 9000;
+}
+body.play-immersive-cursor #viewport canvas {
+  cursor: none;
+}
+
 /* Play panel — inside Tools tab, shown only in play mode */
 #play-panel {
   flex-shrink: 0;

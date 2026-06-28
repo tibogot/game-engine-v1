@@ -47,7 +47,7 @@
           <button class="toolbar-btn" id="tb-help" title="Shortcuts &amp; Docs">
             <i data-lucide="help-circle"></i>
           </button>
-          <button class="toolbar-btn tb-play-btn" id="tb-play" title="Play / Walk mode (P)">
+          <button class="toolbar-btn tb-play-btn" id="tb-play" title="Play (P) — Shift+click for immersive fullscreen">
             <i data-lucide="play"></i>
           </button>
         </div>
@@ -188,6 +188,9 @@
                   <div class="play-control-row"><span class="ctrl-icon">Mouse</span><span>Look / orbit</span></div>
                   <div class="play-control-row"><kbd>G</kbd><span>Hold = mode wheel · tap = cycle</span></div>
                   <div class="play-control-row"><kbd>1</kbd>–<kbd>6</kbd><span>Capsule / Character / Flight / Husky / Bruno / Stunt</span></div>
+                  <div class="play-control-row"><kbd>Shift</kbd>+<kbd>P</kbd><span>Start in immersive fullscreen</span></div>
+                  <div class="play-control-row"><kbd>Q</kbd><span>Barrel roll (flight)</span></div>
+                  <div class="play-control-row"><kbd>Z</kbd><kbd>C</kbd><span>Aileron roll (flight)</span></div>
                   <div class="play-control-row"><kbd>Q</kbd><kbd>E</kbd><span>Stunt car roll (stunt mode)</span></div>
                   <div class="play-control-row"><kbd>Esc</kbd><span>Release cursor</span></div>
                 </div>
@@ -1441,14 +1444,15 @@
     <!-- Play stop bar — fixed top overlay shown while in play mode (like v2) -->
     <div id="play-stop-bar">
       <span>PLAYING</span>
-      <span class="play-stop-hint">Click viewport to lock cursor &nbsp;·&nbsp; <kbd>Esc</kbd> releases</span>
+      <span class="play-stop-hint" id="play-stop-hint">Click viewport to lock cursor &nbsp;·&nbsp; <kbd>Esc</kbd> releases</span>
+      <button type="button" class="play-stop-secondary" id="play-immersive-btn" title="Fullscreen viewport — hide side panels (or Shift+P when starting play)">Immersive</button>
       <button type="button" class="play-stop-primary" id="play-stop-btn">Stop</button>
     </div>
 
-    <!-- Walking HUD (minimal bar shown only while pointer is locked) -->
+    <!-- Walking HUD (shown while pointer is locked or in windowed play) -->
     <div id="play-hint">
       <kbd>WASD</kbd> move &nbsp;·&nbsp; <kbd>Space</kbd> jump &nbsp;·&nbsp; <kbd>Shift</kbd> run &nbsp;·&nbsp;
-      <kbd>G</kbd> modes &nbsp;·&nbsp; <kbd>1</kbd>–<kbd>4</kbd> switch &nbsp;·&nbsp; <kbd>Esc</kbd> release cursor
+      <kbd>G</kbd> modes &nbsp;·&nbsp; <kbd>1</kbd>–<kbd>6</kbd> switch &nbsp;·&nbsp; <kbd>Esc</kbd> release cursor
     </div>
 
     <!-- Floating shortcuts / docs overlay (toggled by toolbar ? button) -->

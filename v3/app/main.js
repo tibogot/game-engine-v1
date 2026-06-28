@@ -121,6 +121,10 @@ async function main() {
   });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // ACES filmic, matching v2 + the daynight-sky lab. Without it the renderer
+  // defaults to NoToneMapping, so the HDR sky renders uncompressed → too bright
+  // and too cyan. renderOutput()/material toneMapped both honor this operator.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   viewport.appendChild(renderer.domElement);
@@ -315,6 +319,8 @@ async function main() {
   // ── Play mode ──────────────────────────────────────────────────────────────
   const playPanel      = document.getElementById("play-panel");
   const playStopBar    = document.getElementById("play-stop-bar");
+  const playStopHint   = document.getElementById("play-stop-hint");
+  const playImmersiveBtn = document.getElementById("play-immersive-btn");
   const sculptPanel    = document.getElementById("sculpt-panel");
   const paintPanel     = document.getElementById("paint-panel");
   const propsPanel     = document.getElementById("props-panel");
@@ -353,7 +359,9 @@ async function main() {
     onStartWalking: () => { playHint.classList.add("visible"); },
     onEnterMenu:    () => { playHint.classList.remove("visible"); },
     onModeChange:   () => refreshPlayStats(),
+    onRequestImmersive: () => setPlayImmersive(true),
     onExit: () => {
+      syncPlayEditorChrome(false);
       tbPlay.classList.remove("active");
       playStopBar.classList.remove("visible");
       playHint.classList.remove("visible");
@@ -368,8 +376,45 @@ async function main() {
       syncRiver2PanelVisibility();
       applyRiverModeEffects();
       syncEditorOrbitEnabled();
+      syncPlayImmersiveButtonLabel();
     },
   });
+
+  function syncPlayEditorChrome(immersive) {
+    const appEl = document.getElementById("app");
+    if (immersive) appEl?.classList.add("play-fullscreen");
+    else appEl?.classList.remove("play-fullscreen");
+  }
+
+  function getPlayImmersive() {
+    return document.getElementById("app")?.classList.contains("play-fullscreen") ?? false;
+  }
+
+  function syncPlayStopHint() {
+    if (!playStopHint) return;
+    if (getPlayImmersive()) {
+      playStopHint.innerHTML = "Immersive &nbsp;·&nbsp; click viewport to lock cursor &nbsp;·&nbsp; <kbd>Esc</kbd> releases";
+    } else {
+      playStopHint.innerHTML = "Windowed &nbsp;·&nbsp; <kbd>RMB</kbd> drag to look &nbsp;·&nbsp; Flight auto-switches immersive";
+    }
+  }
+
+  function syncPlayImmersiveButtonLabel() {
+    if (!playImmersiveBtn) return;
+    const on = getPlayImmersive();
+    playImmersiveBtn.textContent = on ? "Windowed" : "Immersive";
+    playImmersiveBtn.title = on
+      ? "Show editor panels again"
+      : "Fullscreen viewport — hide side panels (or Shift+P when starting play)";
+    syncPlayStopHint();
+  }
+
+  function setPlayImmersive(on) {
+    if (!playMode.active) return;
+    syncPlayEditorChrome(!!on);
+    playMode.setEditorPointerMode(!on);
+    syncPlayImmersiveButtonLabel();
+  }
 
   const worldToolState = createWorldToolState();
   const treeToolState = createTreeToolState();
@@ -1071,13 +1116,15 @@ async function main() {
     syncEditorOrbitEnabled();
   }
 
-  function enterPlay() {
+  function enterPlay(opts = {}) {
     if (playMode.active) return;
+    const immersive = opts.immersive === true;
     treeBvh?.ensureBaked();
     if (!cliffBvh.baked) rebakePlayerBvh();
     editorCamera?.onPlayEnter?.();
-    playMode.enter();
-    playMode.startWalking(); // request pointer lock immediately (still in click handler)
+    playMode.enter({ editorRelaxedPointer: !immersive });
+    syncPlayEditorChrome(immersive);
+    if (immersive) playMode.startWalking();
     tbPlay.classList.add("active");
     playStopBar.classList.add("visible");
     playPanel.style.display = "";
@@ -1091,6 +1138,7 @@ async function main() {
     river2Panel.style.display = "none";
     helpOverlay.classList.remove("visible");
     tbHelp.classList.remove("active");
+    syncPlayImmersiveButtonLabel();
   }
 
   function exitPlay() {
@@ -1101,17 +1149,22 @@ async function main() {
   tbSculpt.addEventListener("click", () => setEditorMode("sculpt"));
   toolsModeSelect.addEventListener("change", () => setEditorMode(toolsModeSelect.value));
 
-  tbPlay.addEventListener("click", () => {
+  tbPlay.addEventListener("click", (e) => {
     if (playMode.active) exitPlay();
-    else enterPlay();
+    else enterPlay({ immersive: e.shiftKey });
   });
 
-  // Click viewport while in play but pointer not locked → re-lock
+  // Immersive: click viewport to (re)acquire pointer lock
   renderer.domElement.addEventListener("click", () => {
-    if (playMode.active && !playMode.walking) playMode.startWalking();
+    if (playMode.active && !playMode.walking && !playMode.relaxedPointer) {
+      playMode.startWalking();
+    }
   });
 
   document.getElementById("play-stop-btn").addEventListener("click", () => exitPlay());
+  playImmersiveBtn?.addEventListener("click", () => {
+    setPlayImmersive(!getPlayImmersive());
+  });
 
   const playBvhDebugToggle = document.getElementById("play-bvh-debug-toggle");
   playBvhDebugToggle?.addEventListener("click", () => {
@@ -1674,7 +1727,7 @@ async function main() {
     if (e.code === "KeyP" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       if (playMode.active) exitPlay();
-      else enterPlay();
+      else enterPlay({ immersive: e.shiftKey });
       return;
     }
     if (e.code === "KeyK" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {

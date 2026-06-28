@@ -13,22 +13,26 @@ const PLANE_DECK_ALT = 1.15;
 const PLANE_DECK_COAST_MULT = 2.1;
 const STALL_SPEED = 14;
 const STALL_SINK_RATE = 6;
-const FLY_MOUSE_SENS_X = 0.0022;
-const FLY_MOUSE_SENS_Y = 0.00235;
+export const FLY_MOUSE_SENS_X = 0.0022;
+export const FLY_MOUSE_SENS_Y = 0.00235;
 const FLY_PITCH_MIN = -1.22;
 const FLY_PITCH_MAX = 0.9;
 const FLY_ROLL_MAX = 0.78;
 const FLY_ROLL_YAW_RATE = 0.9;
 const FLY_ROLL_VEL_SCALE = 0.0042;
+const FLY_ROLL_SMOOTH = 10;
+const FLY_ROLL_TARGET_DECAY = 5;
 const FLY_SURFACE_ALT = 1.35;
-const FLY_SURFACE_SPEED = 8;
+const FLY_SURFACE_SPEED = 16;
+const FLY_AILERON_RATE = 2.8;
+const FLY_BARREL_DURATION = 0.88;
+const FLY_CAM_SPRING = 5;
 
 const PLANE_CANDIDATES = [
   "/models/heli5.glb",
   "/models/wenning_carsten_gameart_plane_compressed.glb",
 ];
 
-/** Simple placeholder if no GLB loads. */
 function makePlaceholderPlane(scene) {
   const root = new THREE.Group();
   const body = new THREE.Mesh(
@@ -56,7 +60,8 @@ function makePlaceholderPlane(scene) {
   return { root, loaded: true };
 }
 
-export function createFlightMode({ scene, sampleGroundY }) {
+/** Flight mode — v2 playMode fly physics port. */
+export function createFlightMode({ scene, sampleGroundY, getCliffBvh = () => null }) {
   const state = {
     heading: 0,
     pitch: 0,
@@ -67,11 +72,13 @@ export function createFlightMode({ scene, sampleGroundY }) {
     aileron: 0,
     groundCamYawOff: 0,
     camYaw: null,
+    barrelActive: false,
+    barrelPhase: 0,
+    barrelDir: 1,
   };
 
   let root = null;
   let loaded = false;
-
   const loader = getSharedGltfLoader();
 
   function tryLoad(idx = 0) {
@@ -79,6 +86,7 @@ export function createFlightMode({ scene, sampleGroundY }) {
       const ph = makePlaceholderPlane(scene);
       root = ph.root;
       loaded = ph.loaded;
+      console.log("[Play] Flight placeholder mesh");
       return;
     }
     loader.load(
@@ -112,6 +120,7 @@ export function createFlightMode({ scene, sampleGroundY }) {
         root.visible = false;
         scene.add(root);
         loaded = true;
+        console.log(`[Play] Flight loaded (${PLANE_CANDIDATES[idx]})`);
       },
       undefined,
       () => tryLoad(idx + 1),
@@ -129,7 +138,16 @@ export function createFlightMode({ scene, sampleGroundY }) {
     state.aileron = 0;
     state.groundCamYawOff = 0;
     state.camYaw = null;
+    state.barrelActive = false;
+    state.barrelPhase = 0;
     return { x, y: state.height, z };
+  }
+
+  function triggerBarrelRoll() {
+    if (state.barrelActive) return;
+    state.barrelActive = true;
+    state.barrelPhase = 0;
+    state.barrelDir = state.roll >= 0 ? 1 : -1;
   }
 
   function applyMouse(mx, my, wx, wz) {
@@ -154,7 +172,64 @@ export function createFlightMode({ scene, sampleGroundY }) {
     }
   }
 
+  function applyCliffCollision(pos, prevX, prevZ, groundY) {
+    const cliffBvh = getCliffBvh?.();
+    if (!cliffBvh?.baked) return;
+
+    const px = pos.x;
+    const py = state.height;
+    const pz = pos.z;
+    const cosP = Math.cos(state.pitch);
+    const sinP = Math.sin(state.pitch);
+    const sinH = Math.sin(state.heading);
+    const cosH = Math.cos(state.heading);
+    const fwdX = -sinH * cosP;
+    const fwdY = sinP;
+    const fwdZ = -cosH * cosP;
+    const rightX = cosH;
+    const rightZ = -sinH;
+    const planeRadius = 2.5;
+    const wingSpan = 3.0;
+
+    const moveDx = px - prevX;
+    const moveDz = pz - prevZ;
+    const moveLen = Math.hypot(moveDx, moveDz);
+    if (moveLen > 1e-5) {
+      const sweep = cliffBvh.raycast3D(prevX, py, prevZ, moveDx, 0, moveDz, moveLen + planeRadius);
+      if (sweep) {
+        const nx = moveDx / moveLen;
+        const nz = moveDz / moveLen;
+        const safeDist = Math.max(0, sweep.distance - planeRadius * 0.9);
+        pos.x = prevX + nx * safeDist;
+        pos.z = prevZ + nz * safeDist;
+        state.speed *= 0.75;
+      }
+    }
+
+    const probeDist = Math.max(planeRadius, planeRadius + moveLen);
+    const rays = [
+      { dx: fwdX, dy: fwdY, dz: fwdZ, dist: probeDist },
+      { dx: rightX, dy: 0, dz: rightZ, dist: wingSpan },
+      { dx: -rightX, dy: 0, dz: -rightZ, dist: wingSpan },
+      { dx: 0, dy: 1, dz: 0, dist: 1.5 },
+      { dx: 0, dy: -1, dz: 0, dist: 1.5 },
+    ];
+    for (const r of rays) {
+      const hit = cliffBvh.raycast3D(px, py, pz, r.dx, r.dy, r.dz, r.dist);
+      if (!hit) continue;
+      const pushDist = r.dist - hit.distance;
+      if (pushDist <= 0) continue;
+      pos.x -= r.dx * pushDist;
+      state.height -= r.dy * pushDist;
+      pos.z -= r.dz * pushDist;
+      if (state.height < groundY) state.height = groundY;
+      state.speed *= Math.max(0.3, 1 - pushDist * 0.4);
+    }
+  }
+
   function update(dt, keys, pos) {
+    const prevX = pos.x;
+    const prevZ = pos.z;
     const thr = keys.w ? 1 : keys.s ? -1 : 0;
     const groundY = sampleGroundY(pos.x, pos.z);
     const drag = PLANE_DRAG * state.speed * Math.abs(state.speed);
@@ -205,17 +280,33 @@ export function createFlightMode({ scene, sampleGroundY }) {
       state.height = THREE.MathUtils.lerp(state.height, groundY, deckRate);
     }
 
-    const dtRoll = Math.min(dt, 0.08);
-    state.rollTarget = THREE.MathUtils.lerp(state.rollTarget, 0, 1 - Math.exp(-6 * dtRoll));
-    state.roll = THREE.MathUtils.lerp(state.roll, state.rollTarget, 1 - Math.exp(-8 * dtRoll));
+    if (state.barrelActive) {
+      state.barrelPhase += dt / FLY_BARREL_DURATION;
+      if (state.barrelPhase >= 1) {
+        state.barrelActive = false;
+        state.barrelPhase = 0;
+      }
+    }
 
-    if (!onDeck) state.heading += state.roll * FLY_ROLL_YAW_RATE * dt;
-    else {
+    const dtRoll = Math.min(dt, 0.08);
+    state.rollTarget = THREE.MathUtils.lerp(
+      state.rollTarget, 0, 1 - Math.exp(-FLY_ROLL_TARGET_DECAY * dtRoll),
+    );
+    state.roll = THREE.MathUtils.lerp(
+      state.roll, state.rollTarget, 1 - Math.exp(-FLY_ROLL_SMOOTH * dtRoll),
+    );
+
+    if (!onDeck) {
+      state.heading += state.roll * FLY_ROLL_YAW_RATE * dt;
+      if (keys.z) state.aileron += FLY_AILERON_RATE * dt;
+      if (keys.c) state.aileron -= FLY_AILERON_RATE * dt;
+    } else {
       const lvl = 1 - Math.exp(-3 * dt);
       state.aileron *= 1 - lvl;
       if (Math.abs(state.aileron) < 0.01) state.aileron = 0;
     }
 
+    applyCliffCollision(pos, prevX, prevZ, groundY);
     pos.y = state.height;
     return pos;
   }
@@ -225,13 +316,23 @@ export function createFlightMode({ scene, sampleGroundY }) {
     root.visible = visible && loaded;
     if (!root.visible) return;
     root.position.set(pos.x, pos.y, pos.z);
-    root.rotation.set(state.pitch, state.heading, state.roll + state.aileron);
+    let barrelAdd = 0;
+    if (state.barrelActive) {
+      const t = Math.min(1, state.barrelPhase);
+      barrelAdd = t * t * (3 - 2 * t) * Math.PI * 2 * state.barrelDir;
+    }
+    root.rotation.set(state.pitch, state.heading, state.roll + barrelAdd + state.aileron);
   }
 
-  function positionCamera(camera, lookAt, camPitch, camDist) {
+  function positionCamera(camera, lookAt, camPitch, camDist, dt = 0.016) {
     const desiredCamYaw = state.heading + state.groundCamYawOff;
     if (state.camYaw == null) state.camYaw = desiredCamYaw;
-    state.camYaw += (desiredCamYaw - state.camYaw) * (1 - Math.exp(-5 * 0.016));
+    else {
+      let delta = desiredCamYaw - state.camYaw;
+      while (delta > Math.PI) delta -= 2 * Math.PI;
+      while (delta < -Math.PI) delta += 2 * Math.PI;
+      state.camYaw += delta * (1 - Math.exp(-FLY_CAM_SPRING * dt));
+    }
 
     const hDist = camDist * Math.cos(camPitch);
     const vDist = camDist * Math.sin(camPitch);
@@ -254,21 +355,21 @@ export function createFlightMode({ scene, sampleGroundY }) {
     get loaded() { return loaded; },
     get state() { return state; },
     resetFrom,
+    triggerBarrelRoll,
     applyMouse,
     update,
     syncVisuals,
     positionCamera,
     dispose() {
-      if (root) {
-        scene.remove(root);
-        root.traverse((o) => {
-          if (o.geometry) o.geometry.dispose();
-          if (o.material) {
-            if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
-            else o.material.dispose();
-          }
-        });
-      }
+      if (!root) return;
+      scene.remove(root);
+      root.traverse((o) => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+          if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
+          else o.material.dispose();
+        }
+      });
     },
   };
 }

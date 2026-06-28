@@ -32,9 +32,12 @@ export function createPlayMode({
   getStuntRoadSolidMeshes = () => [],
   onEnterMenu, onStartWalking, onExit,
   onModeChange,
+  onRequestImmersive,
 }) {
   let active  = false;
   let walking = false;
+  let editorRelaxedPointer = false;
+  let rmbLookActive = false;
   let moveMode = "char";
 
   const capsule = new CapsuleController({
@@ -63,7 +66,10 @@ export function createPlayMode({
   let camYaw   = 0;
   let camPitch = CAM_PITCH_DEFAULT;
 
-  const keys = { w: false, a: false, s: false, d: false, space: false, shift: false, q: false, e: false };
+  const keys = {
+    w: false, a: false, s: false, d: false,
+    space: false, shift: false, q: false, e: false, z: false, c: false,
+  };
   const _lookAt = new THREE.Vector3();
   const _flyLook = new THREE.Vector3();
 
@@ -91,6 +97,7 @@ export function createPlayMode({
   const flight = createFlightMode({
     scene,
     sampleGroundY,
+    getCliffBvh,
   });
 
   const brunoCar = bruno ?? createBrunoCarMode({
@@ -202,8 +209,19 @@ export function createPlayMode({
     }
 
     if (target === "fly") {
-      flight.resetFrom(p.x, Math.max(p.y + 2, sampleGroundY(p.x, p.z) + 3), p.z, yaw);
-      capsule.position.y = flight.state.height;
+      if (editorRelaxedPointer) onRequestImmersive?.();
+      else {
+        try { renderer.domElement.requestPointerLock(); } catch (_) {}
+      }
+      const spawn = flight.resetFrom(
+        p.x,
+        Math.max(p.y + 2, sampleGroundY(p.x, p.z) + 3),
+        p.z,
+        yaw,
+      );
+      p.x = spawn.x;
+      p.y = spawn.y;
+      p.z = spawn.z;
     } else if (moveMode === "fly") {
       p.y = sampleGroundY(p.x, p.z);
       capsule.reset(p.x, p.y, p.z);
@@ -262,8 +280,8 @@ export function createPlayMode({
 
   function positionCamera(dt = 0) {
     if (isFlyMode()) {
-      _flyLook.set(capsule.position.x, capsule.position.y, capsule.position.z);
-      flight.positionCamera(camera, _flyLook, camPitch, CAM_DIST);
+      _flyLook.set(capsule.position.x, capsule.position.y + 0.45, capsule.position.z);
+      flight.positionCamera(camera, _flyLook, camPitch, CAM_DIST, dt);
       return;
     }
     if (isBrunoMode()) {
@@ -286,6 +304,65 @@ export function createPlayMode({
       capsule.position.z,
     );
     capMesh.rotation.y = capsule.yaw;
+  }
+
+
+  function onRelaxedPointerDown(e) {
+    if (!active || !editorRelaxedPointer) return;
+    if (e.button === 2) {
+      e.preventDefault();
+      rmbLookActive = true;
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+  }
+
+  function onRelaxedPointerUp(e) {
+    if (!active || !editorRelaxedPointer) return;
+    if (e.button === 2) {
+      rmbLookActive = false;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+  }
+
+  function onRelaxedContextMenu(e) {
+    if (!active || !editorRelaxedPointer) return;
+    e.preventDefault();
+  }
+
+  function attachRelaxedPointerListeners() {
+    const el = renderer.domElement;
+    el.addEventListener("pointerdown", onRelaxedPointerDown);
+    el.addEventListener("pointerup", onRelaxedPointerUp);
+    el.addEventListener("contextmenu", onRelaxedContextMenu);
+  }
+
+  function detachRelaxedPointerListeners() {
+    const el = renderer.domElement;
+    el.removeEventListener("pointerdown", onRelaxedPointerDown);
+    el.removeEventListener("pointerup", onRelaxedPointerUp);
+    el.removeEventListener("contextmenu", onRelaxedContextMenu);
+  }
+
+  function setEditorPointerMode(relaxed) {
+    if (!active) return;
+    rmbLookActive = false;
+    detachRelaxedPointerListeners();
+    if (document.pointerLockElement) document.exitPointerLock();
+
+    editorRelaxedPointer = !!relaxed;
+    const el = renderer.domElement;
+    document.body.classList.toggle("play-immersive-cursor", active && !relaxed);
+
+    if (relaxed) {
+      el.style.cursor = "";
+      attachRelaxedPointerListeners();
+      walking = true;
+      onStartWalking?.();
+    } else {
+      walking = false;
+      el.style.cursor = "none";
+      try { el.requestPointerLock(); } catch (_) {}
+    }
   }
 
   function isFormField(target) {
@@ -324,7 +401,12 @@ export function createPlayMode({
       return;
     }
 
-    if (!walking) return;
+    if (!eventRepeatSafe(e) && e.code === "KeyQ" && isFlyMode()) {
+      e.preventDefault();
+      e.stopPropagation();
+      flight.triggerBarrelRoll();
+      return;
+    }
 
     if (moveMode === "husky" && husky?.loaded && !e.repeat) {
       if (husky.onKeyDown?.(e.code)) {
@@ -340,8 +422,10 @@ export function createPlayMode({
       case "KeyD": case "ArrowRight": keys.d = true; break;
       case "Space": e.preventDefault(); keys.space = true; break;
       case "ShiftLeft": case "ShiftRight": keys.shift = true; break;
-      case "KeyQ": keys.q = true; break;
+      case "KeyQ": if (!isFlyMode()) keys.q = true; break;
       case "KeyE": keys.e = true; break;
+      case "KeyZ": keys.z = true; break;
+      case "KeyC": keys.c = true; break;
     }
   }
 
@@ -361,6 +445,8 @@ export function createPlayMode({
       case "ShiftLeft": case "ShiftRight": keys.shift = false; break;
       case "KeyQ": keys.q = false; break;
       case "KeyE": keys.e = false; break;
+      case "KeyZ": keys.z = false; break;
+      case "KeyC": keys.c = false; break;
     }
   }
 
@@ -369,14 +455,18 @@ export function createPlayMode({
       modeWheel.feedMouse(e.movementX || 0, e.movementY || 0);
       return;
     }
-    if (!walking) return;
+    if (!active) return;
+
+    const locked = !!document.pointerLockElement;
+    const relaxedLook = editorRelaxedPointer && rmbLookActive && !locked;
+    if (!locked && !relaxedLook) return;
 
     if (isCarMode()) return;
 
     if (isFlyMode()) {
       flight.applyMouse(
-        e.movementX * MOUSE_SENSITIVITY / FLY_MOUSE_SCALE,
-        e.movementY * MOUSE_SENSITIVITY / FLY_MOUSE_SCALE,
+        e.movementX || 0,
+        e.movementY || 0,
         capsule.position.x,
         capsule.position.z,
       );
@@ -388,17 +478,14 @@ export function createPlayMode({
     camPitch  = Math.max(CAM_PITCH_MIN, Math.min(CAM_PITCH_MAX, camPitch));
   }
 
-  const FLY_MOUSE_SCALE = MOUSE_SENSITIVITY / 0.0022;
-
   function onPointerLockChange() {
     const locked = document.pointerLockElement === renderer.domElement;
     if (locked && active && !walking) {
       walking = true;
       onStartWalking?.();
     }
-    if (!locked && walking) {
+    if (!locked && walking && !editorRelaxedPointer) {
       walking = false;
-      Object.keys(keys).forEach((k) => { keys[k] = false; });
       onEnterMenu?.();
     }
   }
@@ -418,17 +505,19 @@ export function createPlayMode({
   document.addEventListener("keyup", onKeyUp, KEY_OPTS);
   renderer.domElement.addEventListener("keydown", onKeyDown, KEY_OPTS);
   renderer.domElement.addEventListener("keyup", onKeyUp, KEY_OPTS);
-  renderer.domElement.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mousemove", onMouseMove);
   document.addEventListener("pointerlockchange", onPointerLockChange);
   if (!renderer.domElement.hasAttribute("tabindex")) {
     renderer.domElement.tabIndex = 0;
   }
 
-  function enter() {
+  function enter(opts = {}) {
     if (active) return;
     active = true;
     walking = false;
     moveMode = "char";
+    editorRelaxedPointer = !!opts.editorRelaxedPointer;
+    rmbLookActive = false;
 
     savedCamPos   = camera.position.clone();
     savedCamQuat  = camera.quaternion.clone();
@@ -451,7 +540,18 @@ export function createPlayMode({
 
     applyModeVisuals();
     positionCamera();
-    onEnterMenu?.();
+
+    const el = renderer.domElement;
+    document.body.classList.toggle("play-immersive-cursor", !editorRelaxedPointer);
+    if (editorRelaxedPointer) {
+      el.style.cursor = "";
+      attachRelaxedPointerListeners();
+      walking = true;
+      onStartWalking?.();
+    } else {
+      el.style.cursor = "none";
+      onEnterMenu?.();
+    }
   }
 
   function startWalking() {
@@ -464,6 +564,10 @@ export function createPlayMode({
     active = false;
     walking = false;
     modeWheel.cancel();
+    rmbLookActive = false;
+    detachRelaxedPointerListeners();
+    document.body.classList.remove("play-immersive-cursor");
+    renderer.domElement.style.cursor = "";
 
     if (document.pointerLockElement) document.exitPointerLock();
 
@@ -533,16 +637,14 @@ export function createPlayMode({
   function update(dt) {
     if (!active) return;
 
-    if (walking) {
-      if (isFlyMode()) {
-        flight.update(dt, keys, capsule.position);
-      } else if (isOnFoot()) {
-        updateOnFoot(dt);
-      } else if (isBrunoMode()) {
-        brunoCar.update(dt, keys, capsule.position);
-      } else if (isStuntMode()) {
-        stuntCar.update(dt, keys, capsule.position);
-      }
+    if (isFlyMode()) {
+      flight.update(dt, keys, capsule.position);
+    } else if (isOnFoot()) {
+      updateOnFoot(dt);
+    } else if (isBrunoMode()) {
+      brunoCar.update(dt, keys, capsule.position);
+    } else if (isStuntMode()) {
+      stuntCar.update(dt, keys, capsule.position);
     }
 
     if (isBrunoMode() && brunoCar.loaded) {
@@ -560,8 +662,10 @@ export function createPlayMode({
     exit,
     update,
     setMoveMode,
+    setEditorPointerMode,
     get active() { return active; },
     get walking() { return walking; },
+    get relaxedPointer() { return editorRelaxedPointer; },
     get moveMode() { return moveMode; },
     get wheelOpen() { return modeWheel.open; },
     get playerPosition() { return capsule.position; },
