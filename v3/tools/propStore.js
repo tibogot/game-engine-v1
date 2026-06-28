@@ -78,15 +78,38 @@ export class PropStore {
 
   // ── Primitive type ──────────────────────────────────────────────────────────
 
-  registerPrimitive(shape) {
-    const geo = _makePrimitiveGeo(shape);
-    if (!geo) return -1;
-    geo.computeBoundingBox();
-    const mat   = new THREE.MeshStandardMaterial({ color: 0xb8b8b8, roughness: 0.6, metalness: 0.0 });
-    const entry = { geometry: geo, material: mat, localMatrix: new THREE.Matrix4() };
-    const box   = geo.boundingBox.clone();
-    const idx   = this.types.length;
-    this.types.push({ name: shape, entries: [entry], lod1Entries: null, lod2Entries: null, mergedBox: box, isPrimitive: true, live: false, primShape: shape });
+  registerPrimitive(name, geometryOrShape, material = null) {
+    let geometry;
+    let mat;
+    let shapeName = name;
+    if (geometryOrShape instanceof THREE.BufferGeometry) {
+      geometry = geometryOrShape;
+      mat = material;
+    } else {
+      shapeName = geometryOrShape ?? name;
+      geometry = _makePrimitiveGeo(shapeName);
+      if (!geometry) return -1;
+      mat = new THREE.MeshStandardMaterial({ color: 0xb8b8b8, roughness: 0.6, metalness: 0.0 });
+    }
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const yShift = -geometry.boundingBox.min.y;
+    if (yShift !== 0) geometry.translate(0, yShift, 0);
+    geometry.computeBoundingBox();
+    const localMatrix = new THREE.Matrix4();
+    const entry = { geometry, material: mat, localMatrix };
+    const box = geometry.boundingBox.clone();
+    const idx = this.types.length;
+    this.types.push({
+      name: shapeName,
+      entries: [entry],
+      lod1Entries: null,
+      lod2Entries: null,
+      mergedBox: box,
+      isPrimitive: true,
+      live: false,
+      builtin: true,
+      primShape: shapeName,
+    });
     return idx;
   }
 

@@ -1,0 +1,217 @@
+import { bakeObjectThumbnails } from "../../v2/tools/objectThumbnails.js";
+import { proceduralThumbnailItems } from "../../v2/core/props/proceduralObjectProps.js";
+
+const _arrowSvg =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+const _checkSvg =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+
+const GLB_EXTS = new Set(["glb", "gltf"]);
+
+function _extOf(name) {
+  return String(name || "").split(".").pop().toLowerCase();
+}
+
+function tryGetGlbFileFromAnyDrop(dataTransfer) {
+  if (!dataTransfer?.files?.length) return null;
+  for (const f of dataTransfer.files) {
+    if (GLB_EXTS.has(_extOf(f.name))) return f;
+  }
+  return null;
+}
+
+function installDropZone(el, { pickFile, onFile, hint = "Drop here" }) {
+  if (!el) return () => {};
+  el.classList.add("drop-zone");
+  el.dataset.dropHint = hint;
+  const onOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    el.classList.add("drag-over");
+  };
+  const onLeave = (e) => {
+    if (!el.contains(e.relatedTarget)) el.classList.remove("drag-over");
+  };
+  const onDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.remove("drag-over");
+    let file = null;
+    try {
+      file = await pickFile(e.dataTransfer);
+    } catch (err) {
+      console.warn("[V3] drop pickFile failed:", err);
+    }
+    if (!file) return;
+    try {
+      await onFile(file);
+    } catch (err) {
+      console.error("[V3] drop onFile failed:", err);
+    }
+  };
+  el.addEventListener("dragover", onOver);
+  el.addEventListener("dragleave", onLeave);
+  el.addEventListener("drop", onDrop);
+  return () => {
+    el.removeEventListener("dragover", onOver);
+    el.removeEventListener("dragleave", onLeave);
+    el.removeEventListener("drop", onDrop);
+    el.classList.remove("drop-zone", "drag-over");
+  };
+}
+
+function _fmt(v, step) {
+  if (step >= 1) return String(Math.round(v));
+  const d = Math.max(0, -Math.floor(Math.log10(step)));
+  return Number(v).toFixed(d);
+}
+
+function _clampSnap(v, min, max, step) {
+  if (!Number.isFinite(v)) return min;
+  const n = Math.round((v - min) / step);
+  let out = min + n * step;
+  const stepStr = String(step);
+  let decimals = 0;
+  if (stepStr.includes(".")) decimals = stepStr.split(".")[1].length;
+  else if (stepStr.includes("e-")) decimals = 8;
+  if (decimals > 0) out = Number(out.toFixed(decimals));
+  return Math.min(max, Math.max(min, out));
+}
+
+function _section(parent, title, expanded = true) {
+  const sec = document.createElement("div");
+  sec.className = "inspector-section";
+  const hdr = document.createElement("div");
+  hdr.className = "section-header" + (expanded ? "" : " collapsed");
+  hdr.innerHTML = _arrowSvg + " " + title;
+  const body = document.createElement("div");
+  body.className = "section-body" + (expanded ? "" : " hidden");
+  hdr.addEventListener("click", () => {
+    hdr.classList.toggle("collapsed");
+    body.classList.toggle("hidden");
+  });
+  sec.appendChild(hdr);
+  sec.appendChild(body);
+  parent.appendChild(sec);
+  return body;
+}
+
+function _separator(parent) {
+  const hr = document.createElement("div");
+  hr.className = "section-separator";
+  parent.appendChild(hr);
+}
+
+function _slider(parent, obj, key, opts) {
+  const { label, min, max, step = 0.01, curve, onChange, hint } = opts;
+  const isLog = curve === "log" && min > 0 && max > min;
+  const row = document.createElement("div");
+  row.className = "prop-row";
+  if (hint) row.title = hint;
+  const cur = obj[key];
+  const logK = isLog ? Math.log(max / min) : 0;
+  const valToSlider = (v) => (isLog ? Math.log(Math.max(v, min) / min) / logK : v);
+  const sliderToVal = (s) => (isLog ? min * Math.exp(s * logK) : s);
+  const sliderMin = isLog ? 0 : min;
+  const sliderMax = isLog ? 1 : max;
+  const sliderStep = isLog ? 0.0001 : step;
+  const sliderInit = valToSlider(cur);
+  row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="${sliderMin}" max="${sliderMax}" step="${sliderStep}" value="${sliderInit}"><input type="number" class="prop-num-input" title="Type an exact value" min="${min}" max="${max}" step="${step}" value="${_fmt(cur, step)}"></div></div>`;
+  const sl = row.querySelector(".prop-slider");
+  const num = row.querySelector(".prop-num-input");
+  const syncNumDisplay = () => { num.value = _fmt(obj[key], step); };
+  const syncSliderFromValue = () => { sl.value = String(valToSlider(obj[key])); };
+  const applyFromSlider = () => {
+    let v = sliderToVal(parseFloat(sl.value));
+    if (isLog) v = _clampSnap(v, min, max, step);
+    obj[key] = v;
+    syncNumDisplay();
+    onChange?.();
+  };
+  const commitFromNum = () => {
+    const raw = String(num.value).trim();
+    if (raw === "" || raw === "-" || raw === "." || raw === "-.") { syncNumDisplay(); return; }
+    let v = parseFloat(raw);
+    if (!Number.isFinite(v)) { syncNumDisplay(); return; }
+    v = _clampSnap(v, min, max, step);
+    obj[key] = v;
+    syncSliderFromValue();
+    syncNumDisplay();
+    onChange?.();
+  };
+  sl.addEventListener("input", applyFromSlider);
+  num.addEventListener("change", commitFromNum);
+  num.addEventListener("keydown", (e) => { if (e.key === "Enter") num.blur(); });
+  parent.appendChild(row);
+}
+
+function _color(parent, obj, key, opts) {
+  const { label, onChange, hint } = opts;
+  const row = document.createElement("div");
+  row.className = "prop-row";
+  if (hint) row.title = hint;
+  row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-color-wrap"><input type="color" class="prop-color" value="${obj[key]}"><span class="prop-slider-val" style="width:auto">${obj[key]}</span></div></div>`;
+  const inp = row.querySelector(".prop-color");
+  const hex = row.querySelector(".prop-slider-val");
+  inp.addEventListener("input", () => {
+    obj[key] = inp.value;
+    hex.textContent = inp.value;
+    onChange?.();
+  });
+  parent.appendChild(row);
+}
+
+function _toggle(parent, obj, key, opts) {
+  const { label, onChange, hint } = opts;
+  const row = document.createElement("div");
+  row.className = "prop-row";
+  if (hint) row.title = hint;
+  row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><button type="button" class="prop-toggle ${obj[key] ? "checked" : ""}">${_checkSvg}</button></div>`;
+  const btn = row.querySelector(".prop-toggle");
+  btn.addEventListener("click", () => {
+    obj[key] = !obj[key];
+    btn.classList.toggle("checked", obj[key]);
+    onChange?.(obj[key]);
+  });
+  parent.appendChild(row);
+}
+
+function _dropdown(parent, obj, key, opts) {
+  const { label, options, onChange, hint } = opts;
+  const row = document.createElement("div");
+  row.className = "prop-row";
+  if (hint) row.title = hint;
+  let optHtml = "";
+  for (const [text, val] of Object.entries(options)) {
+    optHtml += `<option value="${val}" ${obj[key] === val ? "selected" : ""}>${text}</option>`;
+  }
+  row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><select class="prop-dropdown">${optHtml}</select></div>`;
+  const sel = row.querySelector(".prop-dropdown");
+  const _isNum = typeof obj[key] === "number";
+  sel.addEventListener("change", () => {
+    obj[key] = _isNum ? Number(sel.value) : sel.value;
+    onChange?.();
+  });
+  parent.appendChild(row);
+}
+
+function _button(parent, opts) {
+  const { title, onClick, hint } = opts;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "section-btn";
+  btn.textContent = title;
+  if (hint) btn.title = hint;
+  btn.addEventListener("click", onClick);
+  parent.appendChild(btn);
+}
+
+export async function defaultBakeProceduralThumbnails(renderer, size = 192) {
+  return bakeObjectThumbnails({
+    renderer,
+    size,
+    items: proceduralThumbnailItems(),
+  });
+}
+
+/** Build the v2 props panel into #props-panel. */

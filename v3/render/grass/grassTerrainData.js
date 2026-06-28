@@ -1,13 +1,14 @@
 import * as THREE from "three";
 
 const DENSITY_RES = 512;
-const NORMAL_RES  = 128;
+const HEIGHT_RES  = 1024; // must match HEIGHTMAP_SIZE — 1:1 copy, no resampling artefacts
+const NORMAL_RES  = 512;  // normals can be half-res; still 4× better than before
 
 /**
  * Owns every CPU/GPU texture the hybrid grass rings need:
- *   densityTex      — 512² Uint8 RGBA; .r = painted coverage (0-255)
- *   grassHeightTex  — 128² Float32 RGBA; .r = world-space Y in metres
- *   terrainNormalTex— 128² Float32 RGBA; .rgb = FD terrain normal
+ *   densityTex      — 512²  Uint8  RGBA; .r = painted coverage (0-255)
+ *   grassHeightTex  — 1024² Float32 RGBA; .r = world-space Y in metres
+ *   terrainNormalTex— 512²  Float32 RGBA; .rgb = FD terrain normal
  *
  * Rebuilt from the CPU heightmap mirror after every sculpt readback.
  * stampDensity/fill/clear drive the grass-paint tool.
@@ -15,6 +16,7 @@ const NORMAL_RES  = 128;
 export class GrassTerrainData {
   constructor() {
     this.densityRes = DENSITY_RES;
+    this.heightRes  = HEIGHT_RES;
     this.normalRes  = NORMAL_RES;
 
     // ── Density ──────────────────────────────────────────────────────────
@@ -24,9 +26,9 @@ export class GrassTerrainData {
     this.densityTex.minFilter = this.densityTex.magFilter = THREE.LinearFilter;
     this.densityTex.needsUpdate = true;
 
-    // ── Height (world-space Y) ────────────────────────────────────────────
-    const hData = new Float32Array(NORMAL_RES * NORMAL_RES * 4);
-    this.grassHeightTex = new THREE.DataTexture(hData, NORMAL_RES, NORMAL_RES, THREE.RGBAFormat, THREE.FloatType);
+    // ── Height (world-space Y) — full terrain resolution ─────────────────
+    const hData = new Float32Array(HEIGHT_RES * HEIGHT_RES * 4);
+    this.grassHeightTex = new THREE.DataTexture(hData, HEIGHT_RES, HEIGHT_RES, THREE.RGBAFormat, THREE.FloatType);
     this.grassHeightTex.wrapS = this.grassHeightTex.wrapT = THREE.ClampToEdgeWrapping;
     this.grassHeightTex.minFilter = this.grassHeightTex.magFilter = THREE.LinearFilter;
     this.grassHeightTex.needsUpdate = true;
@@ -45,16 +47,47 @@ export class GrassTerrainData {
 
   /**
    * Recompute height + normal textures from the CPU heightmap mirror.
-   * @param {Float32Array} cpuHeightmap  normalized 0-1 heights (heightmapSize²)
-   * @param {number}       hmSize        heightmap texel edge (e.g. 128)
+   * @param {Float32Array} cpuHeightmap  normalized 0-1 heights (hmSize²)
+   * @param {number}       hmSize        heightmap texel edge (e.g. 1024)
    * @param {number}       maxHeight     metres at value 1.0
    * @param {number}       worldSize     terrain edge in metres (e.g. 2048)
    */
   rebuildFromHeightmap(cpuHeightmap, hmSize, maxHeight, worldSize) {
-    const res  = NORMAL_RES;
+    // ── Heights at full terrain resolution (1:1 copy when HEIGHT_RES === hmSize) ──
+    const hRes = HEIGHT_RES;
     const hOut = this.grassHeightTex.image.data;
+
+    if (hRes === hmSize) {
+      // Direct copy — no coordinate mapping, no rounding, no bilinear error.
+      for (let i = 0; i < hRes * hRes; i++) {
+        const i4 = i * 4;
+        hOut[i4]     = cpuHeightmap[i] * maxHeight;
+        hOut[i4 + 1] = 0;
+        hOut[i4 + 2] = 0;
+        hOut[i4 + 3] = 1;
+      }
+    } else {
+      for (let iz = 0; iz < hRes; iz++) {
+        for (let ix = 0; ix < hRes; ix++) {
+          const u  = ix / (hRes - 1);
+          const v  = iz / (hRes - 1);
+          const sx = Math.max(0, Math.min(hmSize - 1, Math.round(u * (hmSize - 1))));
+          const sz = Math.max(0, Math.min(hmSize - 1, Math.round(v * (hmSize - 1))));
+          const i4 = (iz * hRes + ix) * 4;
+          hOut[i4]     = cpuHeightmap[sz * hmSize + sx] * maxHeight;
+          hOut[i4 + 1] = 0;
+          hOut[i4 + 2] = 0;
+          hOut[i4 + 3] = 1;
+        }
+      }
+    }
+    this.grassHeightTex.needsUpdate = true;
+
+    // ── Normals at half resolution ────────────────────────────────────────
+    const nRes = NORMAL_RES;
     const nOut = this.terrainNormalTex.image.data;
-    const ws2  = (worldSize / res) * 2;
+    const ws2  = (worldSize / nRes) * 2;
+    const du   = 1 / (nRes - 1);
 
     const getH = (u, v) => {
       const x = Math.max(0, Math.min(hmSize - 1, Math.round(u * (hmSize - 1))));
@@ -62,17 +95,11 @@ export class GrassTerrainData {
       return cpuHeightmap[z * hmSize + x] * maxHeight;
     };
 
-    const du = 1 / (res - 1);
-    for (let iz = 0; iz < res; iz++) {
-      for (let ix = 0; ix < res; ix++) {
-        const u  = ix / (res - 1);
-        const v  = iz / (res - 1);
-        const i4 = (iz * res + ix) * 4;
-
-        hOut[i4]     = getH(u, v);
-        hOut[i4 + 1] = 0;
-        hOut[i4 + 2] = 0;
-        hOut[i4 + 3] = 1;
+    for (let iz = 0; iz < nRes; iz++) {
+      for (let ix = 0; ix < nRes; ix++) {
+        const u  = ix / (nRes - 1);
+        const v  = iz / (nRes - 1);
+        const i4 = (iz * nRes + ix) * 4;
 
         const nx  = getH(Math.max(0, u - du), v) - getH(Math.min(1, u + du), v);
         const nz  = getH(u, Math.max(0, v - du)) - getH(u, Math.min(1, v + du));
@@ -83,8 +110,6 @@ export class GrassTerrainData {
         nOut[i4 + 3] = 1;
       }
     }
-
-    this.grassHeightTex.needsUpdate   = true;
     this.terrainNormalTex.needsUpdate = true;
   }
 

@@ -51,6 +51,9 @@ import { buildSplinePanel } from "../ui/buildSplinePanel.js";
 import { DEFAULT_SPLINE_STATE } from "./state/splineState.js";
 import { SplineSystem } from "../../v2/tools/spline/splineSystem.js";
 import { PROCEDURAL_OBJECT_OPTIONS } from "../../v2/core/props/proceduralObjectProps.js";
+import { createPropTextureLibrary } from "../../v2/core/textures/propTextureLibrary.js";
+import { createMaterialForLibrary } from "../../v2/render/props/propMaterialFactory.js";
+import { createJumpRampGeometry } from "../../v2/core/props/jumpRampGeometry.js";
 import { downloadProps, importPropsFromFile } from "../io/propsIO.js";
 import { HybridGrassSystem, syncHybridGrassLod, rebuildHybridGrassGeometries } from "../../v2/render/hybridGrass/hybridGrassSystem.js";
 import { createWindTexture, createSpecNoiseTexture } from "../../v2/core/foliage/windTexture.js";
@@ -1188,6 +1191,7 @@ async function main() {
   tc.addEventListener("mouseUp", () => {
     syncEditorOrbitEnabled();
     _onGizmoDragEnd();
+    if (editorMode === "props") refreshPropPlacementPreview();
   });
 
   /** Reset camera/input/mode — call after editorCamera exists and again when late systems finish init. */
@@ -1288,7 +1292,7 @@ async function main() {
       }
 
       if (grassRings) {
-        const _grassAnchor = playMode.active ? playMode.playerPosition : controls.target;
+        const _grassAnchor = playMode.active ? playMode.playerPosition : camera.position;
         for (const r of grassRings) r.update(_grassAnchor, camera);
       }
 
@@ -2084,6 +2088,7 @@ async function main() {
 
   // ── Props system ───────────────────────────────────────────────────────────
   const propStore = new PropStore();
+  const propTextureLibrary = createPropTextureLibrary();
   propInstancer = new PropInstancer(scene, propStore);
   const gltfLoader = new GLTFLoader();
 
@@ -2138,6 +2143,32 @@ async function main() {
     },
     worldSize: WORLD_SIZE,
   });
+
+  function _rebuildPrimitiveMaterial(slotIdx) {
+    const slot = propSlots[slotIdx];
+    if (!slot?.builtin) return false;
+    const propMat = propTextureLibrary.getById(slot.materialId);
+    if (!propMat) return false;
+    const newMat = createMaterialForLibrary(propMat, { triplanar: !!slot.triplanar });
+    propInstancer.setTypeMaterial(slot.typeIdx, newMat);
+    const type = propStore.types[slot.typeIdx];
+    if (type) for (const e of type.entries) e.material = newMat;
+    return true;
+  }
+
+  function setPrimitiveMaterial(slotIdx, materialId) {
+    const slot = propSlots[slotIdx];
+    if (!slot?.builtin) return;
+    slot.materialId = materialId;
+    _rebuildPrimitiveMaterial(slotIdx);
+  }
+
+  function setPrimitiveTriplanar(slotIdx, enabled) {
+    const slot = propSlots[slotIdx];
+    if (!slot?.builtin || !slot.materialId) return;
+    slot.triplanar = !!enabled;
+    _rebuildPrimitiveMaterial(slotIdx);
+  }
 
   const propPlacementPreview = new PropPlacementPreview(scene, propStore, buildProceduralPreviewGroup);
 
@@ -2206,14 +2237,13 @@ async function main() {
     _gizmoTarget = "prop";
     propSys.recordStampFromInstance(instIdx);
     _onPropSelectionChanged?.(instIdx);
-    propPlacementPreview.hide();
   }
 
   function deactivatePropSelection() {
     propInstancer.clearSelection();
     if (_gizmoTarget === "prop") _detachGizmo();
     _onPropSelectionChanged?.(null);
-    propPlacementPreview.hide();
+    refreshPropPlacementPreview();
     syncEditorOrbitEnabled();
   }
 
@@ -2227,22 +2257,35 @@ async function main() {
     if (_gizmoTarget === "prop") propSys.handleTransformEnd();
   };
 
+  let _propPreviewHitValid = false;
+  const _propPreviewHit = { point: new THREE.Vector3() };
+
   function updatePropPlacementPreview(hit) {
-    if (!hit) { propPlacementPreview.hide(); return; }
     if (
       editorMode !== "props" ||
-      playMode.active ||
       propState.placementMode !== "place" ||
-      propInstancer.hasSelection ||
+      playMode.active ||
       tc.dragging
     ) {
+      _propPreviewHitValid = false;
       propPlacementPreview.hide();
       return;
     }
+    if (!hit?.point) {
+      _propPreviewHitValid = false;
+      propPlacementPreview.hide();
+      return;
+    }
+    _propPreviewHitValid = true;
+    _propPreviewHit.point.copy(hit.point);
+
     const slot = propSlots[propState.activeSlot];
-    if (!slot || slot.typeIdx == null) { propPlacementPreview.hide(); return; }
+    if (!slot || slot.typeIdx == null) {
+      propPlacementPreview.hide();
+      return;
+    }
     propPlacementPreview.showAt(
-      { point: hit },
+      hit,
       slot.typeIdx,
       propSys.stampForType(slot.typeIdx),
       propState.sinkOffset || 0,
@@ -2250,12 +2293,7 @@ async function main() {
   }
 
   function refreshPropPlacementPreview() {
-    if (!_lastMouseEvent) {
-      propPlacementPreview.hide();
-      return;
-    }
-    const hit = getTerrainHitWorld(_lastMouseEvent);
-    updatePropPlacementPreview(hit ? { point: hit } : null);
+    if (_propPreviewHitValid) updatePropPlacementPreview(_propPreviewHit);
   }
 
   function syncPropBrushRing(event) {
@@ -2297,11 +2335,33 @@ async function main() {
       document.getElementById("props-panel")?._rebuildPropUi?.();
       return;
     }
-    const typeIdx = propStore.registerPrimitive(primitiveName);
+    const defs = {
+      Cube: () => new THREE.BoxGeometry(1, 1, 1),
+      Sphere: () => new THREE.SphereGeometry(0.5, 32, 16),
+      Cylinder: () => new THREE.CylinderGeometry(0.5, 0.5, 1, 32),
+      Plane: () => new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+      Cone: () => new THREE.ConeGeometry(0.5, 1, 32),
+      Torus: () => new THREE.TorusGeometry(0.4, 0.15, 16, 32),
+      "Jump ramp": () => createJumpRampGeometry(),
+    };
+    const factory = defs[primitiveName];
+    if (!factory) return;
+    const geometry = factory();
+    const defaultPropMat =
+      propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
+    const material = createMaterialForLibrary(defaultPropMat, { triplanar: false });
+    const typeIdx = propStore.registerPrimitive(primitiveName, geometry, material);
     if (typeIdx < 0) return;
     propInstancer.onTypeRegistered(typeIdx);
     const slotIdx = propSlots.length;
-    propSlots.push({ name: primitiveName, loaded: true, typeIdx, builtin: true, live: false });
+    propSlots.push({
+      name: primitiveName,
+      loaded: true,
+      typeIdx,
+      builtin: true,
+      materialId: defaultPropMat?.id ?? "__none__",
+      triplanar: false,
+    });
     propState.activeSlot = slotIdx;
     document.getElementById("props-panel")?._rebuildPropUi?.();
   }
@@ -2369,7 +2429,7 @@ async function main() {
       gltfLoader.load(url, (gltf) => {
         URL.revokeObjectURL(url);
         propStore.registerTypeLod(slot.typeIdx, lod, gltf.scene);
-        propInstancer.onTypeRegistered(slot.typeIdx);
+        propInstancer.onTypeLodRegistered(slot.typeIdx, lod);
         resolve();
       }, undefined, (err) => { URL.revokeObjectURL(url); reject(err); });
     });
@@ -2380,10 +2440,8 @@ async function main() {
   }
 
   buildPropsPanel({
-    runRendererSideWork: withRendererSideWork,
-    propState,
-    propSlots,
-    propLod,
+    toolState: { props: propState, propSlots, propLod },
+    propTextureLibrary,
     propStore,
     livePropManager,
     importPropGlb,
@@ -2391,29 +2449,32 @@ async function main() {
     addLiveProp,
     removePropSlot,
     importPropLod,
+    importGlbCollectible: async () => {
+      console.warn("[V3] GLB collectibles not ported yet — use Flag/Coin/Heart/Key live props.");
+    },
+    setPrimitiveMaterial,
+    setPrimitiveTriplanar,
+    rebakeBvh: () => {
+      console.warn("[V3] Player BVH rebake not wired yet.");
+    },
     deleteSelectedProp: () => {
       propSys.handleDelete();
       deactivatePropSelection();
-      refreshPropCount();
     },
     duplicateSelectedProp: () => {
       const idx = propSys.handleDuplicate();
       if (idx != null) activatePropSelection(idx);
-      refreshPropCount();
     },
     clearAllProps: () => {
       if (!confirm("Clear all props?")) return;
       propSys.clearAll();
       deactivatePropSelection();
-      refreshPropCount();
     },
     propTransformModeChanged: () => { if (_gizmoTarget === "prop") tc.setMode(propState.transformMode); },
     propCastShadowChanged: () => propInstancer.setCastShadow(propLod.castShadow),
-    onPropLodChanged: () => {},
     getProceduralPropLabels: () => PROCEDURAL_PROP_LABELS,
     getProceduralSchema: (factoryId) => proceduralSchemaFor(factoryId),
-    bakeProceduralThumbnails: (size) => defaultBakeProceduralThumbnails(renderer, size),
-    refreshPropCount,
+    bakeProceduralThumbnails: (size) => withRendererSideWork(() => defaultBakeProceduralThumbnails(renderer, size)),
     set onPropSelectionChanged(fn) { _onPropSelectionChanged = fn; },
     get onPropSelectionChanged() { return _onPropSelectionChanged; },
   });
@@ -2482,7 +2543,8 @@ async function main() {
     _lastMouseEvent = e;
     const hit = getTerrainHitWorld(e);
     if (propState.placementMode === "place") {
-      updatePropPlacementPreview(hit ? { point: hit } : null);
+      const worldHit = getTerrainHitWorld(e);
+      updatePropPlacementPreview(worldHit ? { point: worldHit } : null);
     } else {
       propPlacementPreview.hide();
       syncPropBrushRing(e);
