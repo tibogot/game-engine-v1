@@ -86,6 +86,31 @@ export class SnowMap {
     this.tex.needsUpdate = true;
   }
 
+  hasSnowNear(cx, cz, radius, threshold = 2) {
+    const pxSize = WORLD_SIZE / SNOW_MAP_RES;
+    const half   = WORLD_SIZE * 0.5;
+    const r2     = radius * radius;
+
+    const u0 = Math.max(0,              Math.floor(((cx - radius) + half) / WORLD_SIZE * SNOW_MAP_RES));
+    const u1 = Math.min(SNOW_MAP_RES-1, Math.ceil( ((cx + radius) + half) / WORLD_SIZE * SNOW_MAP_RES));
+    const v0 = Math.max(0,              Math.floor(((cz - radius) + half) / WORLD_SIZE * SNOW_MAP_RES));
+    const v1 = Math.min(SNOW_MAP_RES-1, Math.ceil( ((cz + radius) + half) / WORLD_SIZE * SNOW_MAP_RES));
+
+    const data = this._data;
+    for (let pz = v0; pz <= v1; pz++) {
+      const wz = (pz + 0.5) * pxSize - half;
+      const dz = wz - cz;
+      for (let px = u0; px <= u1; px++) {
+        const wx = (px + 0.5) * pxSize - half;
+        const dx = wx - cx;
+        if (dx * dx + dz * dz <= r2 && data[pz * SNOW_MAP_RES + px] >= threshold) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   clearAll() {
     this._data.fill(0);
     this.tex.needsUpdate = true;

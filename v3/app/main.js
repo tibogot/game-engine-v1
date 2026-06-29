@@ -1142,6 +1142,7 @@ async function main() {
     editorCamera?.onPlayEnter?.();
     snowSystem.setHeightTex(heightTexNode.value);
     snowSystem.setPlayMode(true);
+    snowSystem.setDeformActive(false);
     playMode.enter({ editorRelaxedPointer: !immersive });
     try { renderer.domElement.focus({ preventScroll: true }); } catch (_) { renderer.domElement.focus(); }
     syncPlayEditorChrome(immersive);
@@ -1609,6 +1610,12 @@ async function main() {
 
         // Snow deformation — update trail RT and anchor before the main render
         snowSystem.updateAnchor(pp.x, pp.z);
+        const _hasLocalSnow = snowMap.hasSnowNear(
+          pp.x,
+          pp.z,
+          snowSystem.params.trailWorldSize * 0.5 + Math.max(2, snowSystem.params.stampRadius),
+        );
+        snowSystem.setDeformActive(_hasLocalSnow);
         const _snowStats    = playMode.getStats();
         const _snowGrounded = !!_snowStats.grounded && _snowStats.grounded !== "fly";
         const _snowContacts = playMode.getSnowContacts?.() ?? null;
@@ -1618,7 +1625,7 @@ async function main() {
             (_mm === "car" || _mm === "stunt") ? 1.2 :
             _mm === "ball" ? 0.5 : 0.3;
         }
-        snowSystem.tick(pp.x, pp.z, _snowGrounded, _snowContacts);
+        if (_hasLocalSnow) snowSystem.tick(pp.x, pp.z, _snowGrounded, _snowContacts);
         snowSystem.updateSunDir(worldEnv?.getSunDir?.());
       } else {
         if (isPainting && editorMode === "sculpt") {

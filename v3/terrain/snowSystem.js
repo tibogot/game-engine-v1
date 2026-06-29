@@ -467,6 +467,8 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
   mesh.renderOrder   = 1;    // renders above the terrain snow overlay
   mesh.visible       = false;
   scene.add(mesh);
+  let playModeActive = false;
+  let deformActive = false;
 
   // ── Grid snap step (matches terrain grid sub-division) ────────────────────
   const _gridStep = TILE_SIZE / SUBDIVISIONS;   // 0.25 m
@@ -488,8 +490,13 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
    * snow depth + grooves so the ball stays visible in trenches (lab-like).
    */
   function setPlayMode(on) {
-    const playing = !!on;
-    mesh.visible          = playing;
+    playModeActive = !!on;
+    mesh.visible = playModeActive && deformActive;
+  }
+
+  function setDeformActive(on) {
+    deformActive = !!on;
+    mesh.visible = playModeActive && deformActive;
   }
 
   /** @deprecated use setPlayMode */
@@ -572,6 +579,7 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     setHeightTex,
     setSnowMaskTex,
     setPlayMode,
+    setDeformActive,
     setVisible,
     updateSunDir,
     updateAnchor,
