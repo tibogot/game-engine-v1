@@ -1291,11 +1291,11 @@ async function main() {
   setMode(stickyMode);
 
   // ── Input ──────────────────────────────────────────────────────────────────
-  const mouse     = new THREE.Vector2();
-  const raycaster = new THREE.Raycaster();
-  const gndPlane  = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  const liftPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  const hitPoint  = new THREE.Vector3();
+  const mouse        = new THREE.Vector2();
+  const raycaster    = new THREE.Raycaster();
+  const gndPlane     = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const hitPoint     = new THREE.Vector3();
+  const _rayMarchPt  = new THREE.Vector3();
 
   // ── CPU heightmap mirror for accurate raycasting on tall terrain ────────────
   const cpuHeightmap    = new Float32Array(HEIGHTMAP_SIZE * HEIGHTMAP_SIZE);
@@ -1427,19 +1427,45 @@ async function main() {
     syncHeightmapToCPU();
   }
 
-  // Iterative ray-terrain intersection (bilinear height sampling).
+  // Ray-march terrain intersection: march from camera to ground plane, find
+  // the first ray-terrain crossing, then bisect for sub-step precision.
+  // The old iterative lift-plane approach diverged on steep slopes (the fixed-point
+  // derivative exceeded 1), causing the cursor to jitter or vanish.
   function getUV() {
     raycaster.setFromCamera(mouse, camera);
     if (!raycaster.ray.intersectPlane(gndPlane, hitPoint)) return null;
 
-    for (let i = 0; i < 5; i++) {
-      const u = (hitPoint.x + WORLD_SIZE / 2) / WORLD_SIZE;
-      const v = (hitPoint.z + WORLD_SIZE / 2) / WORLD_SIZE;
-      if (u < 0 || u > 1 || v < 0 || v > 1) return null;
-      const h = sampleTerrainHeight(u, v);
-      if (h < 0.01) break;          // flat terrain — no further refinement needed
-      liftPlane.constant = -h;       // plane equation: Y + (-h) = 0  →  Y = h
-      if (!raycaster.ray.intersectPlane(liftPlane, hitPoint)) return null;
+    const tMax  = raycaster.ray.origin.distanceTo(hitPoint);
+    const STEPS = Math.min(64, Math.ceil(tMax / (WORLD_SIZE / HEIGHTMAP_SIZE)));
+    const dt    = tMax / Math.max(STEPS, 1);
+
+    let prevT    = 0;
+    let prevAbove = true;
+
+    for (let i = 1; i <= STEPS; i++) {
+      const t = i * dt;
+      raycaster.ray.at(t, _rayMarchPt);
+      const u = (_rayMarchPt.x + WORLD_SIZE / 2) / WORLD_SIZE;
+      const v = (_rayMarchPt.z + WORLD_SIZE / 2) / WORLD_SIZE;
+      const terrainH = (u >= 0 && u <= 1 && v >= 0 && v <= 1)
+        ? sampleTerrainHeight(u, v) : 0;
+      const above = _rayMarchPt.y >= terrainH;
+
+      if (!above && prevAbove) {
+        // Bisect between prevT and t to refine the crossing point.
+        let lo = prevT, hi = t;
+        for (let j = 0; j < 6; j++) {
+          const mid = (lo + hi) * 0.5;
+          raycaster.ray.at(mid, _rayMarchPt);
+          const mu = (_rayMarchPt.x + WORLD_SIZE / 2) / WORLD_SIZE;
+          const mv = (_rayMarchPt.z + WORLD_SIZE / 2) / WORLD_SIZE;
+          if (_rayMarchPt.y >= sampleTerrainHeight(mu, mv)) lo = mid; else hi = mid;
+        }
+        raycaster.ray.at(lo, hitPoint);
+        break;
+      }
+      prevT    = t;
+      prevAbove = above;
     }
 
     const u = (hitPoint.x + WORLD_SIZE / 2) / WORLD_SIZE;

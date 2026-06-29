@@ -231,7 +231,14 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   // No CDLOD morphing: every vertex samples the heightmap at its exact world UV.
   // This guarantees that shared vertices between ring levels land at identical Y,
   // so the T-junction stitching stays crack-free even on sculpted terrain.
-  const h = texture(heightTexNode, hmUV).r;
+  //
+  // hmInBounds = 0 for any vertex whose world position lies outside the heightmap
+  // [0,1] UV range. Without this, ClampToEdgeWrapping would repeat the edge pixels
+  // of the heightmap onto the far LOD ring, making non-circle procedural shapes
+  // show terrain lines on the far flat terrain.
+  const hmInBounds = step(float(0), hmU).mul(step(hmU, float(1)))
+                    .mul(step(float(0), hmV)).mul(step(hmV, float(1)));
+  const h = texture(heightTexNode, hmUV).r.mul(hmInBounds);
 
   mat.positionNode = vec3(positionLocal.x, h.mul(MAX_HEIGHT), positionLocal.z);
 
@@ -261,7 +268,10 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   );
   const inBoundsX    = step(float(0), rotBrushUV.x).mul(step(rotBrushUV.x, float(1)));
   const inBoundsY    = step(float(0), rotBrushUV.y).mul(step(rotBrushUV.y, float(1)));
-  const maskOverlay  = texture(uBrushMaskNode, rotBrushUV).r.mul(inBoundsX).mul(inBoundsY);
+  // Soft radial fade: clips the overlay to a smooth circle so non-circle brushes
+  // (square, diamond, etc.) don't produce hard straight boundary lines on far LOD.
+  const radialFade   = smoothstep(uCursorRadius, uCursorRadius.mul(float(0.8)), d);
+  const maskOverlay  = texture(uBrushMaskNode, rotBrushUV).r.mul(inBoundsX).mul(inBoundsY).mul(radialFade);
 
   // Splat overlay blends on top of base colour; optional snow overlay sits above terrain.
   const baseColor = splatOverlay ? splatOverlay.blendColor(mat.colorNode) : mat.colorNode;
