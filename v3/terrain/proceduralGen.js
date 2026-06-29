@@ -54,6 +54,14 @@ export function buildProceduralHeightmap(gen = DEFAULT_GEN) {
       const nx = wx / WORLD_SIZE + 0.5;
       let h = terrainGenHeightAtWorld(wx, wz, baseGen, WORLD_SIZE);
       if (isCaldera) h *= calderaFalloff(nx, nz);
+      // Fade terrain to 0 at the inscribed-circle world boundary (rCircle = 1)
+      // so the far LOD ring stays flat for every dropoff shape, not just circle.
+      // The circle shape already produces h ≈ 0 at rCircle = 1 naturally; this
+      // catches box/noise/ring/etc. that can have nonzero height at the boundary.
+      const dx = (nx - 0.5) * 2;
+      const dz = (nz - 0.5) * 2;
+      const rC = Math.sqrt(dx * dx + dz * dz);
+      h *= Math.max(0, Math.min(1, (1 - rC) / 0.05));
       heights[iz * HEIGHTMAP_SIZE + ix] = h / MAX_HEIGHT;
     }
   }

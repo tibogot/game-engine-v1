@@ -115,11 +115,6 @@ export function terrainGenHeightAtWorld(wx, wz, g, worldSize) {
     falloff = Math.max(0, 1 - Math.pow(Math.max(0, rCircle), drop));
   }
 
-  // Clamp every shape to the inscribed-circle boundary so vertices outside
-  // rCircle = 1 always get zero height — this keeps the far LOD terrain flat
-  // regardless of which dropoff shape is chosen.
-  falloff = Math.min(falloff, Math.max(0, 1 - Math.pow(Math.max(0, rCircle), drop)));
-
   const tilt = g.tiltX * (nx - 0.5) * 2 + g.tiltZ * (nz - 0.5) * 2;
 
   let h = (raw + tilt * 0.5) * H * falloff;

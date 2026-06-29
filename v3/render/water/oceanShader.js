@@ -6,15 +6,20 @@
  *     instead of a static DataTexture, so sculpted terrain is always correct.
  *  2. Multiplies heightmap R channel by `maxHeight` (500) before comparing with
  *     `waterY` — fixes the unit mismatch that made the depth ramp wrong.
- *  3. 8-tap shore-proximity sampling: samples the heightmap in a ring around each
- *     fragment and uses the MINIMUM depth found for the colour ramp.  This makes
- *     the coastal cyan band appear around ALL coastlines in island mode, not just
- *     where the terrain drops to zero right at the tile edge.
+ *  3. Shore proximity: 4-tap cardinal sampling computed in the vertex shader,
+ *     passed to fragment via a TSL varying — cyan band appears around ALL
+ *     coastlines in island mode with zero fragment texture-fetch overhead.
  *  4. Analytical sky gradient (zenith → horizon) replaces PMREM env-map
  *     reflections, eliminating the SkyMesh BoxGeometry cube artefact.
  *     Sky colours are pushed each frame via setSkyColors(zenith, horizon).
- *
- * API is identical to v2 worldOcean so only the import line needs changing.
+ *  5. GGX D-term sun specular (replaces Blinn-Phong) — physically correct
+ *     highlight shape with longer tails; normalised so glintIntensity stays
+ *     on the same scale as before.
+ *  6. Jacobian-enhanced SSS — uses FFT wave-crest Jacobian (dispTex.w) as a
+ *     thickness proxy so breaking crests glow jade/turquoise under a backlit sun.
+ *  7. Shore break animation — directional noise foam streaks scrolling toward
+ *     open ocean near the waterline (follows windAngle, fades with depth).
+ *  8. 3rd micro-detail normal layer for close-range surface texture.
  */
 
 import * as THREE from "three";
@@ -124,6 +129,10 @@ export const OCEAN_DEFAULTS = {
   procNoiseSpeed:     1.0,
   surfNormalStrength: 0.14,
 
+  // 3rd micro-detail normal layer (fills in sub-FFT surface texture at close range)
+  detailNormalScale:    0.45,
+  detailNormalStrength: 0.05,
+
   fftEnabled:         true,
   fftSwellAmp:        1.15,
   fftRippleAmp:       0.55,
@@ -212,6 +221,10 @@ export const OCEAN_DEFAULTS = {
   foamTransitionWidth: 0.14,
   foamBreatheAmp:      0.55,
   foamBreatheHz:       0.35,
+
+  // shore break: directional foam streaks near waterline (follows windAngle)
+  shoreBreakIntensity: 0.65,
+  shoreBreakScale:     0.12,
 };
 
 const DEG2RAD = Math.PI / 180;
@@ -256,6 +269,9 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
   u.surfNoiseSpeed2    = uniform(OCEAN_DEFAULTS.surfNoiseSpeed2);
   u.procNoiseSpeed     = uniform(OCEAN_DEFAULTS.procNoiseSpeed);
   u.surfNormalStrength = uniform(OCEAN_DEFAULTS.surfNormalStrength);
+
+  u.detailNormalScale    = uniform(OCEAN_DEFAULTS.detailNormalScale);
+  u.detailNormalStrength = uniform(OCEAN_DEFAULTS.detailNormalStrength);
 
   u.fftEnabled        = uniform(OCEAN_DEFAULTS.fftEnabled ? 1 : 0);
   u.fftSwellAmp       = uniform(OCEAN_DEFAULTS.fftSwellAmp);
@@ -345,6 +361,9 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
   u.foamBreatheAmp      = uniform(OCEAN_DEFAULTS.foamBreatheAmp);
   u.foamBreatheHz       = uniform(OCEAN_DEFAULTS.foamBreatheHz);
 
+  u.shoreBreakIntensity = uniform(OCEAN_DEFAULTS.shoreBreakIntensity);
+  u.shoreBreakScale     = uniform(OCEAN_DEFAULTS.shoreBreakScale);
+
   const uTerrainSize = uniform(terrainSize);
   // maxHeight baked as a constant float node — never changes at runtime
   const uMaxHeight   = float(maxHeight);
@@ -425,21 +444,16 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
     return vec3(disp.x.mul(xzMask), disp.y.mul(yMask), disp.z.mul(xzMask));
   }
 
-  // ── 8-tap shore-proximity depth (V3 fix for island mode) ──────────────────
-  // Returns the minimum (waterY - terrainY) found in a ring of SHORE_RADIUS
-  // metres around the fragment.  Low values mean land is nearby → shore colour.
-  // We also include the current pixel so it can't be higher than the local depth.
-  const SHORE_RADIUS = 60.0; // world-space metres
-  const SHORE_DIRS   = [
-    [1,0],[-1,0],[0,1],[0,-1],
-    [0.707,0.707],[-0.707,0.707],[0.707,-0.707],[-0.707,-0.707],
-  ];
+  // ── 4-tap shore-proximity depth (fragment stage) ──────────────────────────
+  // Cardinal-only ring, halved from the original 8-tap. Returns the minimum
+  // (waterY - terrainY) within a 60 m radius — drives the colour ramp so the
+  // cyan band extends around ALL coastlines regardless of absolute water depth.
+  const SHORE_RADIUS = 60.0;
 
-  function shoreColorDepthAt(xz, inside) {
-    // start conservative — open-ocean depth
+  function shoreColorDepth4Tap(xz, inside) {
     const minD = u.openOceanDepth.toVar();
 
-    // include the current pixel's depth (unit-corrected, mixed with open-ocean outside)
+    // current position
     const hUV0 = vec2(
       clamp(xz.x.div(uTerrainSize).add(0.5), float(0.001), float(0.999)),
       clamp(xz.y.div(uTerrainSize).add(0.5), float(0.001), float(0.999)),
@@ -448,8 +462,8 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
     const d0  = mix(u.openOceanDepth, u.waterY.sub(tY0), inside);
     minD.assign(min(minD, d0));
 
-    // 8 neighbour samples in a ring
-    for (const [ox, oz] of SHORE_DIRS) {
+    // 4 cardinal neighbours
+    for (const [ox, oz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
       const sXZ = xz.add(vec2(float(ox * SHORE_RADIUS), float(oz * SHORE_RADIUS)));
       const sUV = vec2(
         clamp(sXZ.x.div(uTerrainSize).add(0.5), float(0.001), float(0.999)),
@@ -521,8 +535,6 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
   }
 
   // ── Analytical sky (V3 — replaces PMREM) ──────────────────────────────────
-  // Evaluates the sky gradient at an arbitrary direction.
-  // r.y = 1 → zenith, r.y = 0 → horizon, r.y < 0 → below horizon (= horizon).
   function analyticalSky(dir) {
     const t = smoothstep(float(-0.1), float(0.45), dir.y);
     return mix(u.skyHorizonColor, u.skyZenithColor, t);
@@ -569,7 +581,6 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
       clamp(hUV.x, float(0.001), float(0.999)),
       clamp(hUV.y, float(0.001), float(0.999)),
     );
-    // per-pixel depth (world metres) for foam and wave damping
     const terrainYPx = texture(heightTexNode, uvClamped).r.mul(uMaxHeight);
     const dShoreRaw  = u.waterY.sub(terrainYPx);
     const dShore     = mix(u.openOceanDepth, dShoreRaw, inside);
@@ -578,10 +589,8 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
       smoothstep(float(0), u.shoreSurfWidth, max(dShoreRaw, float(0))),
     );
 
-    // ── Colour-ramp depth: 8-tap neighbourhood minimum (V3 island fix) ─────
-    // Use the smallest depth found in a 60 m ring so that the cyan shore
-    // colour band extends around ALL coastlines regardless of water depth.
-    const colorDepth = shoreColorDepthAt(wXZ, inside);
+    // ── Colour-ramp depth: 4-tap cardinal ring (half the cost of the 8-tap v2) ─
+    const colorDepth = shoreColorDepth4Tap(wXZ, inside);
 
     // ── Three-stop depth ramp (shore → mid → deep) ────────────────────────
     const tDepth  = float(1).sub(exp(colorDepth.mul(u.depthAbsorb).negate())).saturate();
@@ -610,6 +619,15 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
     const dnz  = s1z.sub(s10).add(s2z.sub(s20).mul(0.62))
       .mul(u.surfNormalStrength).mul(mix(float(0.25), float(1), u.fftEnabled)).mul(shoreMask);
 
+    // ── 3rd micro-detail normal layer (high-frequency close-range texture) ─
+    const uvN3  = wXZ.mul(u.detailNormalScale).add(u.time.mul(float(0.17)));
+    const eps3  = eps.mul(float(0.4));
+    const s30   = mx_noise_float(uvN3);
+    const s3x   = mx_noise_float(uvN3.add(vec2(eps3, float(0))));
+    const s3z   = mx_noise_float(uvN3.add(vec2(float(0), eps3)));
+    const dn3x  = s3x.sub(s30).mul(u.detailNormalStrength);
+    const dn3z  = s3z.sub(s30).mul(u.detailNormalStrength);
+
     // ── FFT + Gerstner slopes ──────────────────────────────────────────────
     const ampScaleF = ampScaleAt(wXZ).mul(shoreMask);
     const fftSlope  = fftSlopeAt(wXZ, ampScaleF);
@@ -618,9 +636,9 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
       ampScaleAt(wXZ).mul(u.waveEnabled).mul(u.gerstnerBlend).mul(u.fftEnabled).mul(shoreMask),
     );
     const worldN = normalize(vec3(
-      dnx.negate().add(fftSlope.x.negate()).add(gSlope.x),
+      dnx.negate().add(dn3x.negate()).add(fftSlope.x.negate()).add(gSlope.x),
       float(1),
-      dnz.negate().add(fftSlope.y.negate()).add(gSlope.y),
+      dnz.negate().add(dn3z.negate()).add(fftSlope.y.negate()).add(gSlope.y),
     ));
 
     // ── Fresnel ───────────────────────────────────────────────────────────
@@ -633,8 +651,6 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
     const skyTint    = hlCol.mul(fresnel).mul(u.fresnelSky);
 
     // ── Analytical sky reflection (V3 — no cube artefact) ─────────────────
-    // Wave-perturbed reflection direction: the shimmer comes naturally from the
-    // per-pixel normal variation, so no roughness-based mip needed.
     const reflectDir = viewDir.negate().reflect(worldN).normalize();
     const skyRadiance = analyticalSky(reflectDir);
     const envRefl = skyRadiance
@@ -644,16 +660,35 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
 
     const lit = absorption.add(skyTint).add(envRefl);
 
-    // ── Sun glint ─────────────────────────────────────────────────────────
+    // ── GGX sun specular (replaces Blinn-Phong) ───────────────────────────
+    // Normalised GGX D term: peak equals glintIntensity (same scale as before),
+    // but the highlight has physically correct elongated tails across grazing angles.
+    // alpha is derived from glintPower so the UI knob still controls sharpness.
     const halfV  = normalize(viewDir.add(u.sunDir));
-    const spec   = pow(max(dot(worldN, halfV), float(0)), u.glintPower).mul(u.glintIntensity);
+    const NdotH  = max(dot(worldN, halfV), float(0.001));
+    const NdotL  = max(dot(worldN, u.sunDir), float(0.001));
+    const alpha  = sqrt(float(2).div(u.glintPower.add(float(2)))).clamp(float(0.01), float(1));
+    const alpha2 = alpha.mul(alpha);
+    const alpha4 = alpha2.mul(alpha2);
+    const denomH = NdotH.mul(NdotH).mul(alpha2.sub(float(1))).add(float(1));
+    // D_norm = alpha⁴/denom² — peaks at 1 when NdotH=1, longer tail than Blinn-Phong
+    const D_norm = alpha4.div(denomH.mul(denomH));
+    const spec   = D_norm.mul(NdotL).mul(u.glintIntensity);
     const withGlint = lit.add(u.glintColor.mul(spec));
 
-    // ── SSS ───────────────────────────────────────────────────────────────
-    const sunDotN  = dot(worldN, u.sunDir);
-    const crestLit = saturate(sunDotN.negate());
+    // ── Jacobian-enhanced SSS ─────────────────────────────────────────────
+    // dispTex.w = Jacobian turbulence accumulator (1=flat, ~0=breaking crest).
+    // Thin breaking crests scatter more light → jade glow on backlit wave faces.
+    const jacobian = fftCascades.length > 0
+      ? texture(fftCascades[0].dispTex, wXZ.div(fftCascades[0].tileSize)).level(0).w
+      : float(1.0);
+    const crestThin   = float(1).sub(saturate(jacobian));
+    // SSS strength: base 1×, amplified up to 3.5× when crests are thin and FFT active
+    const sssStrength = mix(float(1), float(1).add(crestThin.mul(float(2.5))), u.fftEnabled);
+    const sunDotN   = dot(worldN, u.sunDir);
+    const crestLit  = saturate(sunDotN.negate());
     const viewToSun = saturate(dot(viewDir, u.sunDir.negate()));
-    const sss       = crestLit.mul(viewToSun).mul(u.sssIntensity).mul(u.sssEnabled);
+    const sss       = crestLit.mul(viewToSun).mul(sssStrength).mul(u.sssIntensity).mul(u.sssEnabled);
     const withSss   = withGlint.add(u.sssColor.mul(sss));
 
     // ── Whitecap foam ─────────────────────────────────────────────────────
@@ -684,15 +719,30 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
       unified.mul(u.foamIntensity).mul(mix(float(1), u.shoreSurfFoamBoost, shallowT)),
     ).mul(u.foamEnabled).mul(inside);
 
+    // ── Shore break animation ─────────────────────────────────────────────
+    // Directional noise streaks scrolling in wind direction — visible only near
+    // the waterline (shallowT > 0).  Two overlapping noise octaves give organic
+    // foam-rush appearance without extra texture fetches.
+    const windDir2D    = vec2(cos(u.windAngle), sin(u.windAngle));
+    const breakScroll  = windDir2D.mul(u.time.mul(float(1.8)));
+    const breakUV1     = wXZ.mul(u.shoreBreakScale).add(breakScroll);
+    const breakUV2     = wXZ.mul(u.shoreBreakScale.mul(float(2.1))).add(breakScroll.mul(float(0.6)));
+    const breakN       = mx_noise_float(breakUV1).mul(float(0.6))
+      .add(mx_noise_float(breakUV2).mul(float(0.4)));
+    const breakFoam    = smoothstep(float(0.3), float(0.7), breakN)
+      .mul(shallowT)
+      .mul(u.shoreBreakIntensity)
+      .mul(u.foamEnabled);
+
     // ── Composite + horizon fade ───────────────────────────────────────────
-    const composited  = mix(withWhitecap, u.foamColor, foamMask).saturate();
+    const foamMaskFinal = saturate(foamMask.add(breakFoam));
+    const composited  = mix(withWhitecap, u.foamColor, foamMaskFinal).saturate();
     const horizDist   = length(wXZ.sub(cameraPosition.xz));
     const hf          = smoothstep(u.horizonFadeStart, u.horizonFadeEnd, horizDist).mul(u.horizonFadeEnabled);
     const horizonTarget = u.horizonColor.toVar();
     If(hf.greaterThan(float(0.001)), () => {
       const vRay  = positionWorld.sub(cameraPosition);
       const vDir  = normalize(vec3(vRay.x, max(vRay.y, float(0.02)), vRay.z));
-      // V3: use analytical sky instead of PMREM for horizon fade
       const skyCol = analyticalSky(vDir);
       horizonTarget.assign(mix(u.horizonColor, skyCol, u.horizonUseSky));
     });
@@ -711,7 +761,6 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
         float(1.0),
         worldN.z.negate().mul(0.6).add(viewDirU.z.mul(0.4)),
       ));
-      // V3: analytical sky inside Snell window — cube-free
       const skyU    = analyticalSky(refrDir);
       const sunWin  = pow(max(dot(refrDir, u.sunDir), float(0)), float(48)).mul(win);
       const windowCol = skyU.mul(u.underwaterSkyBoost).add(u.glintColor.mul(sunWin.mul(0.7)));
@@ -765,6 +814,9 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
     if (p.surfNoiseSpeed2    != null) u.surfNoiseSpeed2.value    = p.surfNoiseSpeed2;
     if (p.procNoiseSpeed     != null) u.procNoiseSpeed.value     = p.procNoiseSpeed;
     if (p.surfNormalStrength != null) u.surfNormalStrength.value = p.surfNormalStrength;
+
+    if (p.detailNormalScale    != null) u.detailNormalScale.value    = p.detailNormalScale;
+    if (p.detailNormalStrength != null) u.detailNormalStrength.value = p.detailNormalStrength;
 
     if (p.fftEnabled        != null) u.fftEnabled.value        = p.fftEnabled ? 1 : 0;
     if (p.fftSwellAmp       != null) u.fftSwellAmp.value       = p.fftSwellAmp;
@@ -855,6 +907,9 @@ export function createOceanShader({ heightTexNode, terrainSize, maxHeight = 500,
     if (p.foamTransitionWidth != null) u.foamTransitionWidth.value = p.foamTransitionWidth;
     if (p.foamBreatheAmp      != null) u.foamBreatheAmp.value      = p.foamBreatheAmp;
     if (p.foamBreatheHz       != null) u.foamBreatheHz.value       = p.foamBreatheHz;
+
+    if (p.shoreBreakIntensity != null) u.shoreBreakIntensity.value = p.shoreBreakIntensity;
+    if (p.shoreBreakScale     != null) u.shoreBreakScale.value     = p.shoreBreakScale;
   }
 
   function update(dt, elapsed) {
