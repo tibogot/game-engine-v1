@@ -36,12 +36,8 @@ const MAX_STAMPS = 48;    // max stamp disks per frame (cars need headroom)
 
 const TILE_SIZE    = 50;  // matches trailWorldSize — full RT window has vertices
 const TILE_HALF    = TILE_SIZE * 0.5;
-const SUBDIVISIONS = 512; // ~0.1 m/vertex — matches v2 snow-lab quality
+const SUBDIVISIONS = 256; // ~0.2 m/vertex — medium quality, ~75% fewer tris than 512
 const TILE_FEATHER = 10;  // metres — height blend at deform-tile border
-const TILE_INNER   = 6;   // static underlay ring (m from tile edge) — blocks terrain grid showing through
-
-// Hidden legacy static mesh placeholder; static snow is drawn by terrainLOD.
-const STATIC_SUBS  = 4;
 
 // ── Default parameters (all live-editable via system.params) ────────────────
 export const SNOW_PARAMS_DEFAULTS = {
@@ -50,7 +46,6 @@ export const SNOW_PARAMS_DEFAULTS = {
   noiseFreq1:       0.06,   // low-frequency surface variation
   noiseFreq2:       0.14,   // high-frequency surface variation
   noiseAmp:         0.12,   // noise amplitude (m)
-  normalShift:      0.35,   // TBN neighbour offset (m) — controls normal smoothness
   // deformation trail window
   trailWorldSize:   50,     // world-space diameter of the scrolling RT window (m)
   // deformation look
@@ -277,7 +272,6 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     uGrooveScale:     uniform(params.grooveScale),
     uRimScale:        uniform(params.rimScale),
     uRimOffset:       uniform(params.rimOffset),
-    uNormalShift:     uniform(params.normalShift),
     uCavityStrength:  uniform(params.cavityStrength),
     uRoughnessDip:    uniform(params.roughnessDip),
     uGlitterIntensity:uniform(params.glitterIntensity),
@@ -286,9 +280,7 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     uSunDir:          uniform(new THREE.Vector3(0, 1, 0)),
     uSlopeStartY:     uniform(params.slopeStartY),
     uSlopeRejectY:    uniform(params.slopeRejectY),
-    uPlayCutout:      uniform(0),   // 1 in play → static mesh skips deform-tile footprint
     uTileFeather:     uniform(TILE_FEATHER),
-    uTileInner:       uniform(TILE_INNER),
   };
 
   // Heightmap texture node — .value swappable via setHeightTex()
@@ -342,14 +334,6 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     const adz = wxz.y.sub(u.uAnchor.y).abs();
     const distToEdge = min(u.uTileHalf.sub(adx), u.uTileHalf.sub(adz));
     return smoothstep(float(0), u.uTileFeather, distToEdge);
-  });
-
-  // 0 near tile border (keep static underlay), 1 deep inside (hide static for grooves)
-  const staticHideMask = Fn(([wxz]) => {
-    const adx = wxz.x.sub(u.uAnchor.x).abs();
-    const adz = wxz.y.sub(u.uAnchor.y).abs();
-    const distToEdge = min(u.uTileHalf.sub(adx), u.uTileHalf.sub(adz));
-    return smoothstep(u.uTileInner, u.uTileFeather, distToEdge);
   });
 
   // Terrain height (metres) sampled from the GPU heightmap at world XZ
@@ -409,45 +393,26 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     return base.add(rim);
   });
 
-  // View-space surface normal, computed per-vertex and interpolated
-  const vNorm = varying(vec3(0, 1, 0), "snow_vn");
   const vTileBlend = varying(float(1), "snow_tb");
 
   // ── Vertex: terrain-conforming position + TBN normal ──────────────────────
   mat.positionNode = Fn(() => {
     const lxz   = positionGeometry.xz;
     const wxz   = lxz.add(u.uAnchor);
-    const shift = u.uNormalShift;
-    const wxzB  = wxz.add(vec2(shift, float(0)));
-    const wxzC  = wxz.add(vec2(float(0), shift.negate()));
 
     const tileBlend = deformTileBlend(wxz);
     vTileBlend.assign(tileBlend);
 
     const sA = mix(snowDepthUndisturbed(wxz),  snowDepthFull(wxz),  tileBlend);
-    const sB = mix(snowDepthUndisturbed(wxzB), snowDepthFull(wxzB), tileBlend);
-    const sC = mix(snowDepthUndisturbed(wxzC), snowDepthFull(wxzC), tileBlend);
-
     const yA = getTerrainH(wxz).add(sA);
-    const yB = getTerrainH(wxzB).add(sB);
-    const yC = getTerrainH(wxzC).add(sC);
-
-    const pA = vec3(wxz.x, yA, wxz.y);
-    const pB = vec3(wxzB.x, yB, wxzB.y);
-    const pC = vec3(wxzC.x, yC, wxzC.y);
-    const dU = pB.sub(pA).normalize();
-    const dV = pC.sub(pA).normalize();
-    const N  = cross(dU, dV).normalize();
-    vNorm.assign(modelViewMatrix.mul(vec4(N, float(0))).xyz.normalize());
 
     const maskUV = wxz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)).clamp(0, 1);
     const painted = step(float(0.02), texture(snowMaskNode, maskUV).r.mul(slopeMask(wxz)));
     return vec3(lxz.x, mix(float(-9999), yA, painted), lxz.y);
   })();
 
-  // Use the same per-pixel heightmap normal strategy as terrainLOD.  The vertex
-  // TBN above is useful for geometry, but on steep slopes its interpolated grid
-  // shows up as tiny snow "tiles" under grazing light.
+  // Use the same per-pixel heightmap normal strategy as terrainLOD. Interpolated
+  // geometry normals show the dense snow mesh as tiny tiles under grazing light.
   mat.normalNode = modelViewMatrix
     .mul(vec4(terrainNormal(positionWorld.xz, float(2.0)), float(0)))
     .xyz.normalize();
@@ -499,74 +464,9 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   mesh.receiveShadow = true;
-  mesh.renderOrder   = 1;    // renders on top of staticMesh
+  mesh.renderOrder   = 1;    // renders above the terrain snow overlay
   mesh.visible       = false;
   scene.add(mesh);
-
-  // ── Legacy static snow mesh ───────────────────────────────────────────────
-  // Static snow display now lives in terrainLOD as a terrain-material overlay.
-  // This hidden mesh is kept only as a disposable placeholder while the local
-  // deform tile handles actual trail geometry.
-
-  // Pure base snow depth (no trail influence) — alias for static mesh TBN samples
-  const _snowDepthStaticFn = snowDepthUndisturbed;
-
-  const _staticVNorm = varying(vec3(0, 1, 0), "static_vn");
-  const _staticShift = 2.0;   // smoother static normals on steep terrain
-
-  const staticMat = new THREE.MeshStandardNodeMaterial({
-    roughness:          0.93,
-    metalness:          0,
-    polygonOffset:      true,
-    polygonOffsetFactor:-1,   // above terrain, below deformation tile
-    polygonOffsetUnits: -1,
-  });
-  staticMat.envMapIntensity = 0.6;
-
-  // Vertex: terrain height + static snow depth, TBN normal.
-  // Vertices where the SnowMap coverage is zero are pushed far underground
-  // so their triangles are never visible — no alpha system needed.
-  staticMat.positionNode = Fn(() => {
-    const wxz    = positionGeometry.xz;
-    const maskUV = wxz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)).clamp(0, 1);
-    const maskV  = texture(snowMaskNode, maskUV).r.mul(slopeMask(wxz));
-    // step(edge, x) → 1 if x >= edge, else 0
-    const painted = step(float(0.02), maskV);
-
-    const sh  = float(_staticShift);
-    const wxzB = wxz.add(vec2(sh, float(0)));
-    const wxzC = wxz.add(vec2(float(0), sh.negate()));
-    const yA  = getTerrainH(wxz).add(_snowDepthStaticFn(wxz));
-    const yB  = getTerrainH(wxzB).add(_snowDepthStaticFn(wxzB));
-    const yC  = getTerrainH(wxzC).add(_snowDepthStaticFn(wxzC));
-    const pA  = vec3(wxz.x, yA, wxz.y);
-    const pB  = vec3(wxzB.x, yB, wxzB.y);
-    const pC  = vec3(wxzC.x, yC, wxzC.y);
-    const dU  = pB.sub(pA).normalize();
-    const dV  = pC.sub(pA).normalize();
-    const N   = cross(dU, dV).normalize();
-    _staticVNorm.assign(modelViewMatrix.mul(vec4(N, float(0))).xyz.normalize());
-    // Play mode: hide static only deep inside the tile (grooves). Near the rim
-    // keep an opaque static underlay so alpha holes never reveal the terrain grid.
-    const hideStatic = staticHideMask(wxz).mul(u.uPlayCutout);
-    const showStatic = painted.mul(float(1).sub(hideStatic));
-    return vec3(wxz.x, mix(float(-9999), yA, showStatic), wxz.y);
-  })();
-
-  staticMat.normalNode    = modelViewMatrix
-    .mul(vec4(terrainNormal(positionWorld.xz, float(2.0)), float(0)))
-    .xyz.normalize();
-  staticMat.colorNode     = vec3(float(0.88), float(0.93), float(0.98));
-  staticMat.roughnessNode = float(0.93);
-
-  const staticGeo  = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, STATIC_SUBS, STATIC_SUBS);
-  staticGeo.rotateX(-Math.PI * 0.5);
-  const staticMesh = new THREE.Mesh(staticGeo, staticMat);
-  staticMesh.frustumCulled = false;
-  staticMesh.receiveShadow = true;
-  staticMesh.renderOrder   = 0;
-  staticMesh.visible       = false;
-  scene.add(staticMesh);
 
   // ── Grid snap step (matches terrain grid sub-division) ────────────────────
   const _gridStep = TILE_SIZE / SUBDIVISIONS;   // 0.25 m
@@ -590,8 +490,6 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
   function setPlayMode(on) {
     const playing = !!on;
     mesh.visible          = playing;
-    staticMesh.visible    = false;
-    u.uPlayCutout.value   = playing ? 1 : 0;
   }
 
   /** @deprecated use setPlayMode */
@@ -662,9 +560,6 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     scene.remove(mesh);
     geo.dispose();
     mat.dispose();
-    scene.remove(staticMesh);
-    staticGeo.dispose();
-    staticMat.dispose();
     passMat.dispose();
     rts[0].dispose();
     rts[1].dispose();

@@ -26,7 +26,7 @@ import { createLensFlareSystem } from "../../v2/effects/lensFlare.js";
 import { PostFxPipeline } from "../../v2/render/post/postFxPipeline.js";
 import { createDayNightSky } from "../render/sky/dayNightSky.js";
 import { createDayNightCloudLayer } from "../render/clouds/dayNightCloudLayer.js";
-import { createWorldOcean } from "../../v2/render/water/worldOcean.js";
+import { createWorldOcean } from "../render/water/worldOcean.js";
 import { InteriorVolumeRegistry } from "../../v2/render/lighting/interiorVolumeRegistry.js";
 import { createInteriorLightingNodes } from "../../v2/render/lighting/interiorLightingTsl.js";
 
@@ -40,7 +40,7 @@ export async function createWorldEnvironment({
   controls,
   playMode,
   toolState,
-  heightTex,
+  heightTexNode,
   terrainSize,
   getSplineSystem = () => null,
   getTerrainMeshes = () => [],
@@ -69,6 +69,11 @@ export async function createWorldEnvironment({
   let _lastProcSkySnap = "";
   let _lastInteriorSnap = "";
   let _oceanEnvRef = null;
+
+  // Scratch colours for driving ocean sky reflection each frame.
+  const _oceanZenith  = new THREE.Color();
+  const _oceanHorizon = new THREE.Color();
+  const _tmpOceanC    = new THREE.Color();
 
   function sunDirectionFromAngles(azDeg, elDeg, target = new THREE.Vector3()) {
     const az = THREE.MathUtils.degToRad(azDeg);
@@ -781,12 +786,12 @@ export async function createWorldEnvironment({
   const worldOcean = createWorldOcean({
     renderer,
     scene,
-    heightTex,
+    heightTexNode,
     terrainSize,
+    maxHeight: 500,
   });
   worldOcean.syncParams(toolState.worldOcean);
   worldOcean.setSunDir(_effectiveLightDir);
-  if (scene.environment) worldOcean.setEnvMap(scene.environment);
 
   let dayNightCloudLayer = null;
   function ensureDayNightCloudLayer() {
@@ -902,10 +907,12 @@ export async function createWorldEnvironment({
     _shadowFocus.copy(cloudFollowAnchor);
     syncCsmFromToolState();
 
-    if (scene.environment !== _oceanEnvRef) {
-      _oceanEnvRef = scene.environment;
-      worldOcean.setEnvMap(scene.environment);
-    }
+    const ps   = toolState.proceduralSky;
+    const sunY = _effectiveLightDir.y;
+    const dayT = THREE.MathUtils.clamp((sunY + 0.1) / 0.35, 0, 1);
+    _oceanZenith.set(ps.zenithDay).lerp(_tmpOceanC.set(ps.zenithNight), 1 - dayT);
+    _oceanHorizon.set(ps.horizonDay).lerp(_tmpOceanC.set(ps.horizonNight), 1 - dayT);
+    worldOcean.setSkyColors(_oceanZenith, _oceanHorizon);
     worldOcean.update(dtSec, _appTimeSec, camera);
   }
 

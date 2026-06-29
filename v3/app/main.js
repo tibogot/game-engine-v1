@@ -460,7 +460,7 @@ async function main() {
     controls,
     playMode,
     toolState: worldToolState,
-    heightTex: initialTex,
+    heightTexNode: heightTexNode,
     terrainSize: WORLD_SIZE,
     getSplineSystem: () => splineSys,
     getTerrainMeshes: getTerrainMeshesForWorld,
