@@ -275,8 +275,10 @@ async function main() {
     splatMap.tex,
   );
 
-  // LOD meshes share the same heightTexNode, cursor uniforms, brush mask, and rotation.
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay);
+  // LOD meshes share the same heightTexNode, cursor uniforms, brush mask, rotation,
+  // and SnowMap.  Static snow is a terrain-material overlay; only local trails use
+  // the separate deform mesh.
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowMap.tex);
   scene.add(lod.group);
   // Terrain starts flat (createHeightmapTexture initializes all-zeros).
   // User can generate terrain manually via the Procedural panel.
@@ -1139,7 +1141,7 @@ async function main() {
     if (!cliffBvh.baked) rebakePlayerBvh();
     editorCamera?.onPlayEnter?.();
     snowSystem.setHeightTex(heightTexNode.value);
-    snowSystem.setVisible(true);
+    snowSystem.setPlayMode(true);
     playMode.enter({ editorRelaxedPointer: !immersive });
     try { renderer.domElement.focus({ preventScroll: true }); } catch (_) { renderer.domElement.focus(); }
     syncPlayEditorChrome(immersive);
@@ -1163,9 +1165,10 @@ async function main() {
 
   function exitPlay() {
     if (!playMode.active) return;
-    snowSystem.setVisible(false);
+    snowSystem.setPlayMode(false);
     snowSystem.resetTrail();
     playMode.exit();
+    setEditorMode(editorMode, { force: true });  // restore whatever panel was active
   }
 
   tbSculpt.addEventListener("click", () => setEditorMode("sculpt"));
@@ -1374,6 +1377,12 @@ async function main() {
   let lastPaintUV = null;
   const MAX_STAMPS_PER_FRAME  = 12;
 
+  // ── Snow paint state ───────────────────────────────────────────────────────
+  const snowBrushState = { radius: 80, strength: 0.5, falloff: 2 };
+  let _isSnowPainting  = false;
+  const _snowUndoStack = [];   // each entry is a Uint8Array snapshot
+  const _snowRedoStack = [];
+
   function stampAt(u, v) {
     const mode = getStrokeMode();
     if      (mode === "smooth")  sculpt.smooth(u, v);
@@ -1576,12 +1585,14 @@ async function main() {
         snowSystem.updateAnchor(pp.x, pp.z);
         const _snowStats    = playMode.getStats();
         const _snowGrounded = !!_snowStats.grounded && _snowStats.grounded !== "fly";
-        // Stamp radius scales with agent footprint size
-        { const _mm = playMode.moveMode;
+        const _snowContacts = playMode.getSnowContacts?.() ?? null;
+        const _mm = playMode.moveMode;
+        if (!_snowContacts) {
           snowSystem.params.stampRadius =
             (_mm === "car" || _mm === "stunt") ? 1.2 :
-            _mm === "ball" ? 0.5 : 0.3; }
-        snowSystem.tick(pp.x, pp.z, _snowGrounded);
+            _mm === "ball" ? 0.5 : 0.3;
+        }
+        snowSystem.tick(pp.x, pp.z, _snowGrounded, _snowContacts);
         snowSystem.updateSunDir(worldEnv?.getSunDir?.());
       } else {
         if (isPainting && editorMode === "sculpt") {
@@ -1841,6 +1852,10 @@ async function main() {
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
         if (editorMode === "paint") paintSys.undo();
+        else if (editorMode === "snow" && _snowUndoStack.length) {
+          _snowRedoStack.push(snowMap.snapshot());
+          snowMap.restoreSnapshot(_snowUndoStack.pop());
+        }
         else if (editorMode === "props") propSys.undo();
         else if (editorMode === "treePaint") treeEnv.treeSystem.undo();
         else if (editorMode === "river" && riverSystem?.undo()) { /* ok */ }
@@ -1852,6 +1867,10 @@ async function main() {
       if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
         if (editorMode === "paint") paintSys.redo();
+        else if (editorMode === "snow" && _snowRedoStack.length) {
+          _snowUndoStack.push(snowMap.snapshot());
+          snowMap.restoreSnapshot(_snowRedoStack.pop());
+        }
         else if (editorMode === "props") propSys.redo();
         else if (editorMode === "treePaint") treeEnv.treeSystem.redo();
         else if (editorMode === "river" && riverSystem?.redo()) { /* ok */ }
@@ -2161,6 +2180,92 @@ async function main() {
   // Fill / Clear buttons
   pbtnFill.addEventListener("click", () => { paintSys.fillWithActiveLayer(); splatMap.tex.needsUpdate = true; });
   pbtnClear.addEventListener("click", () => { paintSys.clearAll(); splatMap.tex.needsUpdate = true; });
+
+  // ── Snow panel controls ────────────────────────────────────────────────────
+  {
+    const slR = document.getElementById("snow-sl-radius");
+    const lbR = document.getElementById("snow-lbl-radius");
+    const slS = document.getElementById("snow-sl-strength");
+    const lbS = document.getElementById("snow-lbl-strength");
+    const slF = document.getElementById("snow-sl-falloff");
+    const lbF = document.getElementById("snow-lbl-falloff");
+    const slB = document.getElementById("snow-sl-base");
+    const lbB = document.getElementById("snow-lbl-base");
+    const slN = document.getElementById("snow-sl-noise");
+    const lbN = document.getElementById("snow-lbl-noise");
+    const slG = document.getElementById("snow-sl-groove");
+    const lbG = document.getElementById("snow-lbl-groove");
+    const slRm = document.getElementById("snow-sl-rim");
+    const lbRm = document.getElementById("snow-lbl-rim");
+    const slRw = document.getElementById("snow-sl-regrow");
+    const lbRw = document.getElementById("snow-lbl-regrow");
+    const slGl = document.getElementById("snow-sl-glitter");
+    const lbGl = document.getElementById("snow-lbl-glitter");
+    const slFq = document.getElementById("snow-sl-freq");
+    const lbFq = document.getElementById("snow-lbl-freq");
+    const btnFill  = document.getElementById("snow-btn-fill");
+    const btnClear = document.getElementById("snow-btn-clear");
+
+    slR.addEventListener("input", () => {
+      snowBrushState.radius = Number(slR.value);
+      lbR.textContent = slR.value + "m";
+      if (editorMode === "snow") sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
+    });
+    slS.addEventListener("input", () => {
+      snowBrushState.strength = Number(slS.value) / 100;
+      lbS.textContent = snowBrushState.strength.toFixed(2);
+    });
+    slF.addEventListener("input", () => {
+      snowBrushState.falloff = Number(slF.value) / 10;
+      lbF.textContent = snowBrushState.falloff.toFixed(1);
+    });
+    slB.addEventListener("input", () => {
+      snowSystem.params.baseDepth = Number(slB.value) / 100;
+      snowSystem.u.uBaseDepth.value = snowSystem.params.baseDepth;
+      lbB.textContent = snowSystem.params.baseDepth.toFixed(2) + "m";
+    });
+    slN.addEventListener("input", () => {
+      snowSystem.params.noiseAmp = Number(slN.value) / 100;
+      snowSystem.u.uNoiseAmp.value = snowSystem.params.noiseAmp;
+      lbN.textContent = snowSystem.params.noiseAmp.toFixed(2) + "m";
+    });
+    slG.addEventListener("input", () => {
+      snowSystem.params.grooveScale = Number(slG.value) / 100;
+      snowSystem.u.uGrooveScale.value = snowSystem.params.grooveScale;
+      lbG.textContent = snowSystem.params.grooveScale.toFixed(2);
+    });
+    slRm.addEventListener("input", () => {
+      snowSystem.params.rimScale = Number(slRm.value) / 100;
+      snowSystem.u.uRimScale.value = snowSystem.params.rimScale;
+      lbRm.textContent = snowSystem.params.rimScale.toFixed(2);
+    });
+    slRw.addEventListener("input", () => {
+      snowSystem.params.regrowRate = Number(slRw.value) / 10000;
+      lbRw.textContent = snowSystem.params.regrowRate.toFixed(4);
+    });
+    slGl.addEventListener("input", () => {
+      snowSystem.params.glitterIntensity = Number(slGl.value) / 10;
+      snowSystem.u.uGlitterIntensity.value = snowSystem.params.glitterIntensity;
+      lbGl.textContent = snowSystem.params.glitterIntensity.toFixed(1);
+    });
+    slFq.addEventListener("input", () => {
+      snowSystem.params.glitterFreq = Number(slFq.value);
+      snowSystem.u.uGlitterFreq.value = snowSystem.params.glitterFreq;
+      lbFq.textContent = slFq.value;
+    });
+    btnFill.addEventListener("click", () => {
+      _snowUndoStack.push(snowMap.snapshot());
+      if (_snowUndoStack.length > 32) _snowUndoStack.shift();
+      _snowRedoStack.length = 0;
+      snowMap.fillAll();
+    });
+    btnClear.addEventListener("click", () => {
+      _snowUndoStack.push(snowMap.snapshot());
+      if (_snowUndoStack.length > 32) _snowUndoStack.shift();
+      _snowRedoStack.length = 0;
+      snowMap.clearAll();
+    });
+  }
 
   // Auto-paint slot controls — read/write textureLib.slots[texlibActiveSlot].auto*
   function _autoSlot() { return textureLib.slots[texlibActiveSlot]; }
@@ -3322,6 +3427,67 @@ async function main() {
       paintState.brush.strength = Math.max(0.01, Math.min(1.0, paintState.brush.strength * factor));
       pslStrength.value = Math.round(paintState.brush.strength * 100);
       plblStrength.textContent = paintState.brush.strength.toFixed(2);
+    }
+  }, { passive: false, capture: true });
+
+  // ── Snow mode mouse events ─────────────────────────────────────────────────
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "snow") return;
+    refreshMouse(e);
+    const hit = getUV();
+    uCursorUV.value.set(hit ? hit.u : -2, hit ? hit.v : -2);
+    if (hit && _isSnowPainting) {
+      const wx = hit.u * WORLD_SIZE - WORLD_SIZE / 2;
+      const wz = hit.v * WORLD_SIZE - WORLD_SIZE / 2;
+      snowMap.paintAt({ cx: wx, cz: wz, radius: snowBrushState.radius,
+        strength: snowBrushState.strength, falloff: snowBrushState.falloff,
+        erase: e.altKey });
+    }
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "snow") return;
+    if (e.button !== 0) return;
+    refreshMouse(e);
+    const hit = getUV();
+    if (!hit) return;
+    // Snapshot for undo before first mark
+    _snowUndoStack.push(snowMap.snapshot());
+    if (_snowUndoStack.length > 32) _snowUndoStack.shift();
+    _snowRedoStack.length = 0;
+    _isSnowPainting = true;
+    const wx = hit.u * WORLD_SIZE - WORLD_SIZE / 2;
+    const wz = hit.v * WORLD_SIZE - WORLD_SIZE / 2;
+    snowMap.paintAt({ cx: wx, cz: wz, radius: snowBrushState.radius,
+      strength: snowBrushState.strength, falloff: snowBrushState.falloff,
+      erase: e.altKey });
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (e.button !== 0) return;
+    _isSnowPainting = false;
+  });
+
+  // Scroll wheel in snow mode: Shift = radius, Alt = strength
+  renderer.domElement.addEventListener("wheel", e => {
+    if (playMode.active || editorMode !== "snow") return;
+    if (!e.shiftKey && !e.altKey) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.11;
+    if (e.shiftKey) {
+      snowBrushState.radius = Math.max(5, Math.min(400, snowBrushState.radius * factor));
+      const slR = document.getElementById("snow-sl-radius");
+      const lbR = document.getElementById("snow-lbl-radius");
+      if (slR) slR.value = Math.round(snowBrushState.radius);
+      if (lbR) lbR.textContent = Math.round(snowBrushState.radius) + "m";
+      sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
+    } else {
+      snowBrushState.strength = Math.max(0.01, Math.min(1.0, snowBrushState.strength * factor));
+      const slS = document.getElementById("snow-sl-strength");
+      const lbS = document.getElementById("snow-lbl-strength");
+      if (slS) slS.value = Math.round(snowBrushState.strength * 100);
+      if (lbS) lbS.textContent = snowBrushState.strength.toFixed(2);
     }
   }, { passive: false, capture: true });
 

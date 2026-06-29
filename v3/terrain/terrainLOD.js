@@ -9,6 +9,7 @@ import {
   mix,
   sin,
   cos,
+  smoothstep,
   step,
   length,
   texture,
@@ -210,7 +211,7 @@ function buildRingGrid(N, step) {
 
 // ── Material ──────────────────────────────────────────────────────────────────
 
-function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay) {
+function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowMaskTex = null) {
   const mat = createTileMaterial({
     roughness:     0.95,
     textureScale:  400,
@@ -243,7 +244,7 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   const worldNormal = normalize(vec3(hL.sub(hR), flatScale, hD.sub(hUp)));
   const blendedWorldN = splatOverlay ? splatOverlay.blendNormal(worldNormal) : worldNormal;
   mat.normalNode = normalize(mul(cameraViewMatrix, vec4(blendedWorldN, 0)).xyz);
-  if (splatOverlay) mat.roughnessNode = splatOverlay.blendRoughness(float(0.95));
+  const baseRoughness = splatOverlay ? splatOverlay.blendRoughness(float(0.95)) : float(0.95);
 
   // Cursor ring (boundary) + mask projection (filled shape preview)
   const d    = length(hmUV.sub(uCursorUV));
@@ -262,13 +263,28 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   const inBoundsY    = step(float(0), rotBrushUV.y).mul(step(rotBrushUV.y, float(1)));
   const maskOverlay  = texture(uBrushMaskNode, rotBrushUV).r.mul(inBoundsX).mul(inBoundsY);
 
-  // Splat overlay blends on top of base colour, below the cursor ring
+  // Splat overlay blends on top of base colour; optional snow overlay sits above terrain.
   const baseColor = splatOverlay ? splatOverlay.blendColor(mat.colorNode) : mat.colorNode;
+  let finalColor = baseColor;
+  let finalRoughness = baseRoughness;
+  if (snowMaskTex) {
+    const snowMaskNode = texture(snowMaskTex);
+    const inWorld = step(float(0), hmU).mul(step(hmU, float(1)))
+      .mul(step(float(0), hmV)).mul(step(hmV, float(1)));
+    const paintedSnow = texture(snowMaskNode, hmUV.clamp(0, 1)).r.mul(inWorld);
+    // Terrain-material snow uses the same conservative slope rejection as SnowSystem.
+    const slopeSnow = smoothstep(float(0.55), float(0.78), worldNormal.y);
+    const snowCover = paintedSnow.mul(slopeSnow).clamp(0, 1);
+    finalColor = mix(baseColor, vec3(float(0.88), float(0.93), float(0.98)), snowCover);
+    finalRoughness = mix(baseRoughness, float(0.93), snowCover);
+  }
+
   mat.colorNode = mix(
-    baseColor,
+    finalColor,
     vec3(float(1.0), float(0.95), float(0.2)),
     ring.mul(float(0.9)).add(maskOverlay.mul(float(0.28))),
   );
+  mat.roughnessNode = finalRoughness;
   mat.needsUpdate = true;
 
   return mat;
@@ -276,7 +292,7 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay) {
+export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowMaskTex = null) {
   const group  = new THREE.Group();
   const levels = [];
 
@@ -285,7 +301,7 @@ export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrush
     // Level 0 = full grid; levels 1-4 = stitched rings (no overlap, no polygon offset needed).
     const geo     = lod === 0 ? buildFullGrid(GRID_N, step) : buildRingGrid(GRID_N, step);
     const uCenter = uniform(new THREE.Vector2(0, 0));
-    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay);
+    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowMaskTex);
     const mesh    = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
     mesh.receiveShadow = true;

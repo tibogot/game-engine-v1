@@ -8,10 +8,11 @@
  *
  * API:
  *   createSnowSystem(renderer, scene, initialHeightTex)
- *     → { tick, setHeightTex, setVisible, updateSunDir, updateAnchor, params, dispose }
+ *     → { tick, setHeightTex, setPlayMode, updateSunDir, updateAnchor, params, dispose }
  *
  * Call setHeightTex(heightTexNode.value) once after sculptBrush initialises,
- * then tick(px, pz, grounded) every frame while in play mode.
+ * then tick(px, pz, grounded, contacts?) every frame while in play mode.
+ * contacts: { xzs: Float32Array(8), touching: Float32Array(4), isVehicle? }
  */
 import * as THREE from "three";
 import { QuadMesh } from "three/webgpu";
@@ -21,7 +22,7 @@ import {
   cross, float, floor, int, max, min, mix,
   modelViewMatrix,
   positionGeometry, positionWorld,
-  reflect, step,
+  reflect, smoothstep, step,
   texture, uniform, uniformArray, uv,
   varying, vec2, vec3, vec4,
   mx_noise_float,
@@ -31,11 +32,16 @@ import { WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 // ── Constants ────────────────────────────────────────────────────────────────
 const TRAIL_RES  = 512;   // trail render-target resolution (px)
 const TRAIL_NEUT = 0.5;   // neutral (untouched) value in the RT
-const MAX_STAMPS = 32;    // max stamp disks per frame
+const MAX_STAMPS = 48;    // max stamp disks per frame (cars need headroom)
 
-const TILE_SIZE    = 64;  // snow mesh world footprint (m)
+const TILE_SIZE    = 50;  // matches trailWorldSize — full RT window has vertices
 const TILE_HALF    = TILE_SIZE * 0.5;
-const SUBDIVISIONS = 256; // mesh subdivisions → 0.25 m/vertex at 64 m tile
+const SUBDIVISIONS = 512; // ~0.1 m/vertex — matches v2 snow-lab quality
+const TILE_FEATHER = 10;  // metres — height blend at deform-tile border
+const TILE_INNER   = 6;   // static underlay ring (m from tile edge) — blocks terrain grid showing through
+
+// Hidden legacy static mesh placeholder; static snow is drawn by terrainLOD.
+const STATIC_SUBS  = 4;
 
 // ── Default parameters (all live-editable via system.params) ────────────────
 export const SNOW_PARAMS_DEFAULTS = {
@@ -46,15 +52,18 @@ export const SNOW_PARAMS_DEFAULTS = {
   noiseAmp:         0.12,   // noise amplitude (m)
   normalShift:      0.35,   // TBN neighbour offset (m) — controls normal smoothness
   // deformation trail window
-  trailWorldSize:   80,     // world-space diameter of the scrolling RT window (m)
+  trailWorldSize:   50,     // world-space diameter of the scrolling RT window (m)
   // deformation look
   grooveScale:      1.0,    // 0=no groove, 1=fully compress to ground
   rimScale:         0.14,   // height of the pushed-up rim ridge
   rimOffset:        0.55,   // world offset used to detect the rim gradient (m)
   // stamping (per-frame)
   stampPush:        0.5,    // how deep each stamp pushes (relative to trail neut)
-  stampRadius:      0.5,    // world radius of each stamp disk (m)
+  stampRadius:      0.42,   // world radius of each stamp disk (m) — snow-lab default
   stampStepWorld:   0.10,   // interpolation step along movement path (m)
+  footRadius:       0.14,   // human foot — discrete prints, not a body trail
+  footPush:         0.45,
+  footStepWorld:    0.06,   // short segments while planted (not a continuous rut)
   regrowRate:       0,      // per-frame regrow toward neutral (0 = permanent)
   // visual
   cavityStrength:   0.55,
@@ -62,6 +71,9 @@ export const SNOW_PARAMS_DEFAULTS = {
   glitterIntensity: 2.0,
   glitterScarcity:  250.0,
   glitterFreq:      200.0,
+  // slope coverage: normal.y >= start = full snow, <= reject = no snow
+  slopeStartY:      0.78,   // ~39 degrees
+  slopeRejectY:     0.55,   // ~57 degrees
 };
 
 // ── Main factory ─────────────────────────────────────────────────────────────
@@ -157,7 +169,8 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
   const trailCenter  = new THREE.Vector2(0, 0);
   const pendingShift = new THREE.Vector2(0, 0);
   let shiftDirty     = false;
-  const prevXZ       = new THREE.Vector2(NaN, NaN);
+  const prevXZ       = new THREE.Vector2(NaN, NaN);   // ball / body-centre trail
+  const prevSlotXZ   = new Float32Array(8).fill(NaN); // per-foot / per-wheel slots
 
   function _pushStamp(wx, wz, push, radius) {
     if (stampCount >= MAX_STAMPS) return;
@@ -170,11 +183,43 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     stampCount++;
   }
 
-  function _pushSegment(ax, az, bx, bz, push, radius) {
+  function _processContacts(contacts) {
+    const { xzs, touching, isVehicle } = contacts;
+    if (!xzs || !touching) return;
+
+    let activeCount = 0;
+    for (let i = 0; i < 4; i++) if (touching[i] > 0) activeCount++;
+
+    const vehicle = isVehicle ?? (activeCount > 1);
+    const radius  = vehicle ? params.stampRadius   : params.footRadius;
+    const push    = vehicle ? params.stampPush      : params.footPush;
+    const step    = vehicle ? params.stampStepWorld : params.footStepWorld;
+
+    for (let i = 0; i < 4; i++) {
+      if (!touching[i]) {
+        prevSlotXZ[i * 2]     = NaN;
+        prevSlotXZ[i * 2 + 1] = NaN;
+        continue;
+      }
+      const cx = xzs[i * 2];
+      const cz = xzs[i * 2 + 1];
+      const px = prevSlotXZ[i * 2];
+      const pz = prevSlotXZ[i * 2 + 1];
+      if (Number.isFinite(px)) {
+        _pushSegment(px, pz, cx, cz, push, radius, step);
+      } else {
+        _pushStamp(cx, cz, push, radius);
+      }
+      prevSlotXZ[i * 2]     = cx;
+      prevSlotXZ[i * 2 + 1] = cz;
+    }
+  }
+
+  function _pushSegment(ax, az, bx, bz, push, radius, stepWorld = params.stampStepWorld) {
     const dx = bx - ax, dz = bz - az;
     const len = Math.hypot(dx, dz);
     if (len < 1e-3) { _pushStamp(bx, bz, push, radius); return; }
-    const steps = Math.max(1, Math.ceil(len / params.stampStepWorld));
+    const steps = Math.max(1, Math.ceil(len / stepWorld));
     for (let i = 0; i <= steps; i++) {
       _pushStamp(ax + (bx - ax) * (i / steps), az + (bz - az) * (i / steps), push, radius);
       if (stampCount >= MAX_STAMPS) break;
@@ -239,6 +284,11 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     uGlitterScarcity: uniform(params.glitterScarcity),
     uGlitterFreq:     uniform(params.glitterFreq),
     uSunDir:          uniform(new THREE.Vector3(0, 1, 0)),
+    uSlopeStartY:     uniform(params.slopeStartY),
+    uSlopeRejectY:    uniform(params.slopeRejectY),
+    uPlayCutout:      uniform(0),   // 1 in play → static mesh skips deform-tile footprint
+    uTileFeather:     uniform(TILE_FEATHER),
+    uTileInner:       uniform(TILE_INNER),
   };
 
   // Heightmap texture node — .value swappable via setHeightTex()
@@ -246,17 +296,18 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
 
   // Snow coverage mask — single-channel [0,1].  Default 1×1 white → visible everywhere.
   // Call setSnowMaskTex(snowMap.tex) to restrict snow to painted areas.
-  const _defMaskData = new Uint8Array([255]);
+  const _defMaskData = new Uint8Array([0]);   // black = no snow until painted
   const _defMaskTex  = new THREE.DataTexture(_defMaskData, 1, 1, THREE.RedFormat);
   _defMaskTex.needsUpdate = true;
   const snowMaskNode = texture(_defMaskTex);
 
   // ── Snow TSL material ──────────────────────────────────────────────────────
   const mat = new THREE.MeshStandardNodeMaterial({
-    transparent: true,
-    alphaTest:   0.05,
-    roughness:   0.93,
-    metalness:   0,
+    roughness:          0.93,
+    metalness:          0,
+    polygonOffset:      true,
+    polygonOffsetFactor:-2,   // pulls deform tile in front of static layer
+    polygonOffsetUnits: -2,
   });
   mat.envMapIntensity = 0.6;
 
@@ -275,10 +326,52 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     return fuX.mul(fuY);
   });
 
+  // Undisturbed snow depth (no trail) — shared by static mesh and deform edge blend
+  const snowDepthUndisturbed = Fn(([wxz]) => {
+    const p1    = vec3(wxz.x.mul(u.uNoiseFreq1), float(0), wxz.y.mul(u.uNoiseFreq1));
+    const p2    = vec3(wxz.x.mul(u.uNoiseFreq2), float(0), wxz.y.mul(u.uNoiseFreq2));
+    const noise = mx_noise_float(p1).mul(0.5).add(0.5)
+                   .mul(mx_noise_float(p2).mul(0.5).add(0.5))
+                   .mul(u.uNoiseAmp);
+    return u.uBaseDepth.add(noise).max(float(0.01));
+  });
+
+  // 0 at deform-tile border, 1 deep inside — height blend (full feather width)
+  const deformTileBlend = Fn(([wxz]) => {
+    const adx = wxz.x.sub(u.uAnchor.x).abs();
+    const adz = wxz.y.sub(u.uAnchor.y).abs();
+    const distToEdge = min(u.uTileHalf.sub(adx), u.uTileHalf.sub(adz));
+    return smoothstep(float(0), u.uTileFeather, distToEdge);
+  });
+
+  // 0 near tile border (keep static underlay), 1 deep inside (hide static for grooves)
+  const staticHideMask = Fn(([wxz]) => {
+    const adx = wxz.x.sub(u.uAnchor.x).abs();
+    const adz = wxz.y.sub(u.uAnchor.y).abs();
+    const distToEdge = min(u.uTileHalf.sub(adx), u.uTileHalf.sub(adz));
+    return smoothstep(u.uTileInner, u.uTileFeather, distToEdge);
+  });
+
   // Terrain height (metres) sampled from the GPU heightmap at world XZ
   const getTerrainH = Fn(([wxz]) => {
     const hUV = wxz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)).clamp(0, 1);
     return texture(heightNode, hUV).r.mul(float(MAX_HEIGHT));
+  });
+
+  // Terrain-only normal for slope rejection.  Snow depth is intentionally excluded:
+  // steep cliffs reject snow even before any trail or rim deformation is applied.
+  const terrainNormal = Fn(([wxz, eps]) => {
+    const hA = getTerrainH(wxz);
+    const hX = getTerrainH(wxz.add(vec2(eps, float(0))));
+    const hZ = getTerrainH(wxz.add(vec2(float(0), eps.negate())));
+    const pA = vec3(wxz.x, hA, wxz.y);
+    const pX = vec3(wxz.x.add(eps), hX, wxz.y);
+    const pZ = vec3(wxz.x, hZ, wxz.y.sub(eps));
+    return cross(pX.sub(pA).normalize(), pZ.sub(pA).normalize()).normalize();
+  });
+
+  const slopeMask = Fn(([wxz]) => {
+    return smoothstep(u.uSlopeRejectY, u.uSlopeStartY, terrainNormal(wxz, float(2.0)).y);
   });
 
   // Snow depth at world XZ — base layer (no rim, used for TBN neighbour samples)
@@ -318,54 +411,46 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
 
   // View-space surface normal, computed per-vertex and interpolated
   const vNorm = varying(vec3(0, 1, 0), "snow_vn");
+  const vTileBlend = varying(float(1), "snow_tb");
 
   // ── Vertex: terrain-conforming position + TBN normal ──────────────────────
   mat.positionNode = Fn(() => {
-    // positionGeometry.xz = local plane XZ ∈ [−tileHalf, +tileHalf]
     const lxz   = positionGeometry.xz;
-    const wxz   = lxz.add(u.uAnchor);     // world XZ
+    const wxz   = lxz.add(u.uAnchor);
     const shift = u.uNormalShift;
+    const wxzB  = wxz.add(vec2(shift, float(0)));
+    const wxzC  = wxz.add(vec2(float(0), shift.negate()));
 
-    // Sample terrain and snow at vertex + two TBN neighbours
-    const tA = getTerrainH(wxz);
-    const tB = getTerrainH(wxz.add(vec2(shift,        float(0))));
-    const tC = getTerrainH(wxz.add(vec2(float(0),     shift.negate())));
+    const tileBlend = deformTileBlend(wxz);
+    vTileBlend.assign(tileBlend);
 
-    const sA = snowDepthFull(wxz);
-    const sB = snowDepthBase(wxz.add(vec2(shift,        float(0))));
-    const sC = snowDepthBase(wxz.add(vec2(float(0),     shift.negate())));
+    const sA = mix(snowDepthUndisturbed(wxz),  snowDepthFull(wxz),  tileBlend);
+    const sB = mix(snowDepthUndisturbed(wxzB), snowDepthFull(wxzB), tileBlend);
+    const sC = mix(snowDepthUndisturbed(wxzC), snowDepthFull(wxzC), tileBlend);
 
-    const yA = tA.add(sA);   // final vertex height (terrain + snow)
-    const yB = tB.add(sB);
-    const yC = tC.add(sC);
+    const yA = getTerrainH(wxz).add(sA);
+    const yB = getTerrainH(wxzB).add(sB);
+    const yC = getTerrainH(wxzC).add(sC);
 
-    // Surface-conforming TBN from 3 displaced points
-    const pA = vec3(wxz.x,            yA, wxz.y);
-    const pB = vec3(wxz.x.add(shift), yB, wxz.y);
-    const pC = vec3(wxz.x,            yC, wxz.y.sub(shift));
+    const pA = vec3(wxz.x, yA, wxz.y);
+    const pB = vec3(wxzB.x, yB, wxzB.y);
+    const pC = vec3(wxzC.x, yC, wxzC.y);
     const dU = pB.sub(pA).normalize();
     const dV = pC.sub(pA).normalize();
     const N  = cross(dU, dV).normalize();
-
     vNorm.assign(modelViewMatrix.mul(vec4(N, float(0))).xyz.normalize());
 
-    return vec3(lxz.x, yA, lxz.y);
+    const maskUV = wxz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)).clamp(0, 1);
+    const painted = step(float(0.02), texture(snowMaskNode, maskUV).r.mul(slopeMask(wxz)));
+    return vec3(lxz.x, mix(float(-9999), yA, painted), lxz.y);
   })();
 
-  // ── Alpha: tile-edge fade × painted snow coverage mask ───────────────────
-  {
-    const lxz    = positionGeometry.xz;
-    const th     = u.uTileHalf;
-    const margin = th.mul(float(0.10));
-    const edgeX  = min(lxz.x.add(th), th.sub(lxz.x)).div(margin).clamp(0, 1);
-    const edgeZ  = min(lxz.y.add(th), th.sub(lxz.y)).div(margin).clamp(0, 1);
-    // World XZ → normalised [0,1] UV into the snow coverage texture
-    const maskUV   = lxz.add(u.uAnchor).add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)).clamp(0, 1);
-    const snowMask = texture(snowMaskNode, maskUV).r;
-    mat.alphaNode  = edgeX.mul(edgeZ).mul(snowMask);
-  }
-
-  mat.normalNode = vNorm;
+  // Use the same per-pixel heightmap normal strategy as terrainLOD.  The vertex
+  // TBN above is useful for geometry, but on steep slopes its interpolated grid
+  // shows up as tiny snow "tiles" under grazing light.
+  mat.normalNode = modelViewMatrix
+    .mul(vec4(terrainNormal(positionWorld.xz, float(2.0)), float(0)))
+    .xyz.normalize();
 
   // ── Fragment: color / roughness / sparkle ─────────────────────────────────
   // positionWorld.xz in fragment = positionGeometry.xz + mesh.position.xz = world XZ
@@ -395,23 +480,93 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
   const gn      = mx_noise_float(vec3(gp.x, float(0), gp.y)).mul(0.5).add(0.5);
   const shimmer = gn.pow(u.uGlitterScarcity).mul(u.uGlitterIntensity.mul(0.4));
 
-  mat.colorNode     = snowColor.mul(cavity);
-  mat.roughnessNode = float(0.93).sub(compression.mul(u.uRoughnessDip)).clamp(0.65, 1.0);
-  mat.emissiveNode  = vec3(
+  const deformColor = snowColor.mul(cavity);
+  const deformRough = float(0.93).sub(compression.mul(u.uRoughnessDip)).clamp(0.65, 1.0);
+  const deformEmit  = vec3(
     sparkle.add(shimmer),
     sparkle.add(shimmer),
     sparkle.add(shimmer.mul(0.8)),
   );
 
-  // ── Snow mesh ─────────────────────────────────────────────────────────────
+  mat.colorNode     = mix(snowBase, deformColor, vTileBlend);
+  mat.roughnessNode = mix(float(0.93), deformRough, vTileBlend);
+  mat.emissiveNode  = deformEmit.mul(vTileBlend);
+
+  // ── Deformation tile mesh (50 m, high-res, play mode only) ──────────────
   const geo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE, SUBDIVISIONS, SUBDIVISIONS);
   geo.rotateX(-Math.PI * 0.5);
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   mesh.receiveShadow = true;
+  mesh.renderOrder   = 1;    // renders on top of staticMesh
   mesh.visible       = false;
   scene.add(mesh);
+
+  // ── Legacy static snow mesh ───────────────────────────────────────────────
+  // Static snow display now lives in terrainLOD as a terrain-material overlay.
+  // This hidden mesh is kept only as a disposable placeholder while the local
+  // deform tile handles actual trail geometry.
+
+  // Pure base snow depth (no trail influence) — alias for static mesh TBN samples
+  const _snowDepthStaticFn = snowDepthUndisturbed;
+
+  const _staticVNorm = varying(vec3(0, 1, 0), "static_vn");
+  const _staticShift = 2.0;   // smoother static normals on steep terrain
+
+  const staticMat = new THREE.MeshStandardNodeMaterial({
+    roughness:          0.93,
+    metalness:          0,
+    polygonOffset:      true,
+    polygonOffsetFactor:-1,   // above terrain, below deformation tile
+    polygonOffsetUnits: -1,
+  });
+  staticMat.envMapIntensity = 0.6;
+
+  // Vertex: terrain height + static snow depth, TBN normal.
+  // Vertices where the SnowMap coverage is zero are pushed far underground
+  // so their triangles are never visible — no alpha system needed.
+  staticMat.positionNode = Fn(() => {
+    const wxz    = positionGeometry.xz;
+    const maskUV = wxz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)).clamp(0, 1);
+    const maskV  = texture(snowMaskNode, maskUV).r.mul(slopeMask(wxz));
+    // step(edge, x) → 1 if x >= edge, else 0
+    const painted = step(float(0.02), maskV);
+
+    const sh  = float(_staticShift);
+    const wxzB = wxz.add(vec2(sh, float(0)));
+    const wxzC = wxz.add(vec2(float(0), sh.negate()));
+    const yA  = getTerrainH(wxz).add(_snowDepthStaticFn(wxz));
+    const yB  = getTerrainH(wxzB).add(_snowDepthStaticFn(wxzB));
+    const yC  = getTerrainH(wxzC).add(_snowDepthStaticFn(wxzC));
+    const pA  = vec3(wxz.x, yA, wxz.y);
+    const pB  = vec3(wxzB.x, yB, wxzB.y);
+    const pC  = vec3(wxzC.x, yC, wxzC.y);
+    const dU  = pB.sub(pA).normalize();
+    const dV  = pC.sub(pA).normalize();
+    const N   = cross(dU, dV).normalize();
+    _staticVNorm.assign(modelViewMatrix.mul(vec4(N, float(0))).xyz.normalize());
+    // Play mode: hide static only deep inside the tile (grooves). Near the rim
+    // keep an opaque static underlay so alpha holes never reveal the terrain grid.
+    const hideStatic = staticHideMask(wxz).mul(u.uPlayCutout);
+    const showStatic = painted.mul(float(1).sub(hideStatic));
+    return vec3(wxz.x, mix(float(-9999), yA, showStatic), wxz.y);
+  })();
+
+  staticMat.normalNode    = modelViewMatrix
+    .mul(vec4(terrainNormal(positionWorld.xz, float(2.0)), float(0)))
+    .xyz.normalize();
+  staticMat.colorNode     = vec3(float(0.88), float(0.93), float(0.98));
+  staticMat.roughnessNode = float(0.93);
+
+  const staticGeo  = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, STATIC_SUBS, STATIC_SUBS);
+  staticGeo.rotateX(-Math.PI * 0.5);
+  const staticMesh = new THREE.Mesh(staticGeo, staticMat);
+  staticMesh.frustumCulled = false;
+  staticMesh.receiveShadow = true;
+  staticMesh.renderOrder   = 0;
+  staticMesh.visible       = false;
+  scene.add(staticMesh);
 
   // ── Grid snap step (matches terrain grid sub-division) ────────────────────
   const _gridStep = TILE_SIZE / SUBDIVISIONS;   // 0.25 m
@@ -428,8 +583,20 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     snowMaskNode.value = tex;
   }
 
+  /**
+   * Play mode: terrain material shows static snow; deform tile handles only local
+   * snow depth + grooves so the ball stays visible in trenches (lab-like).
+   */
+  function setPlayMode(on) {
+    const playing = !!on;
+    mesh.visible          = playing;
+    staticMesh.visible    = false;
+    u.uPlayCutout.value   = playing ? 1 : 0;
+  }
+
+  /** @deprecated use setPlayMode */
   function setVisible(on) {
-    mesh.visible = !!on;
+    setPlayMode(on);
   }
 
   /** Call with worldEnv.getSunDir() each frame so sparkle tracks the sun. */
@@ -446,23 +613,29 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
   }
 
   /**
-   * Call once per frame while in play mode.
-   * @param {number}  px        player world X
-   * @param {number}  pz        player world Z
-   * @param {boolean} grounded  true when agent is on the ground
+   * @param {number} px
+   * @param {number} pz
+   * @param {boolean} grounded
+   * @param {{ xzs: Float32Array, touching: Float32Array, isVehicle?: boolean } | null} [contacts]
+   *   Per-slot ground contacts (feet / wheels). When set, no body-centre trail.
    */
-  function tick(px, pz, grounded) {
+  function tick(px, pz, grounded, contacts = null) {
     _shiftTrailCenter(px, pz);
     stampCount = 0;
 
-    if (grounded) {
+    if (contacts) {
+      if (grounded) _processContacts(contacts);
+      else prevSlotXZ.fill(NaN);
+    } else if (grounded) {
       if (Number.isFinite(prevXZ.x)) {
         _pushSegment(prevXZ.x, prevXZ.y, px, pz, params.stampPush, params.stampRadius);
       } else {
         _pushStamp(px, pz, params.stampPush, params.stampRadius);
       }
+      prevXZ.set(px, pz);
+    } else {
+      prevXZ.set(px, pz);
     }
-    prevXZ.set(px, pz);
 
     if (shiftDirty || stampCount > 0 || params.regrowRate > 0) {
       _runTrailPass();
@@ -481,6 +654,7 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     pendingShift.set(0, 0);
     shiftDirty = false;
     prevXZ.set(NaN, NaN);
+    prevSlotXZ.fill(NaN);
     stampCount = 0;
   }
 
@@ -488,6 +662,9 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     scene.remove(mesh);
     geo.dispose();
     mat.dispose();
+    scene.remove(staticMesh);
+    staticGeo.dispose();
+    staticMat.dispose();
     passMat.dispose();
     rts[0].dispose();
     rts[1].dispose();
@@ -499,6 +676,7 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     u,
     setHeightTex,
     setSnowMaskTex,
+    setPlayMode,
     setVisible,
     updateSunDir,
     updateAnchor,

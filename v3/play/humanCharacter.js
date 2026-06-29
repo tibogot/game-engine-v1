@@ -22,6 +22,11 @@ export function createHumanCharacter(scene, renderer) {
   let jumpPhase = "none"; // "start" | "loop" | "land" | "none"
   let airTime   = 0;
   let loaded    = false;
+  let footBoneL = null;
+  let footBoneR = null;
+
+  const _footPosL = new THREE.Vector3();
+  const _footPosR = new THREE.Vector3();
 
   const loader = getSharedGltfLoader();
 
@@ -66,6 +71,10 @@ export function createHumanCharacter(scene, renderer) {
       "DEF-handR", "hand.R", "mixamorigRightHand", "RightHand", "hand_r");
     const headBone  = findBone(model,
       "DEF-head", "head", "Head", "mixamorigHead", "head_01");
+    footBoneL = findBone(model,
+      "DEF-foot.L", "foot.L", "mixamorigLeftFoot", "LeftFoot", "foot_l");
+    footBoneR = findBone(model,
+      "DEF-foot.R", "foot.R", "mixamorigRightFoot", "RightFoot", "foot_r");
 
     // ── Katana ────────────────────────────────────────────────────────────────
     if (rightHand) {
@@ -154,6 +163,15 @@ export function createHumanCharacter(scene, renderer) {
   // ── Public API ──────────────────────────────────────────────────────────────
   return {
     get loaded() { return loaded; },
+    get footBoneL() { return footBoneL; },
+    get footBoneR() { return footBoneR; },
+
+    /** World positions of foot bones (after update). */
+    getFootWorldPositions(outL = _footPosL, outR = _footPosR) {
+      if (footBoneL) footBoneL.getWorldPosition(outL);
+      if (footBoneR) footBoneR.getWorldPosition(outR);
+      return { left: outL, right: outR };
+    },
 
     setVisible(v) { if (charRoot) charRoot.visible = v; },
 

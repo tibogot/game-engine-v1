@@ -75,6 +75,10 @@ export function createPlayMode({
   const keysHeld = Object.create(null);
   let _keyQPrev = false;
   const _lookAt = new THREE.Vector3();
+  const _snowXZs = new Float32Array(8);
+  const _snowTouch = new Float32Array(4);
+  const _footL = new THREE.Vector3();
+  const _footR = new THREE.Vector3();
 
   const modeWheel = createModeWheel({
     getCurrentMode: () => moveMode,
@@ -731,6 +735,48 @@ export function createPlayMode({
     positionCamera(dt);
   }
 
+  /** Ground contact points for snow stamping — feet, wheels, or body centre. */
+  function getSnowContacts() {
+    if (moveMode === "fly") return null;
+
+    // Ball uses a continuous centre trail (snow-lab style).
+    if (moveMode === "ball") return null;
+
+    _snowXZs.fill(0);
+    _snowTouch.fill(0);
+
+    if (moveMode === "char") {
+      const grounded = capsule.grounded;
+      const bL = character?.footBoneL;
+      const bR = character?.footBoneR;
+      if (grounded && bL && bR) {
+        bL.getWorldPosition(_footL);
+        bR.getWorldPosition(_footR);
+        const groundY = capsule.position.y;
+        const lTouch = (_footL.y - groundY) < 0.18 ? 1 : 0;
+        const rTouch = (_footR.y - groundY) < 0.18 ? 1 : 0;
+        _snowXZs[0] = _footL.x;
+        _snowXZs[1] = _footL.z;
+        _snowXZs[2] = _footR.x;
+        _snowXZs[3] = _footR.z;
+        _snowTouch[0] = lTouch;
+        _snowTouch[1] = rTouch;
+        return { xzs: _snowXZs, touching: _snowTouch, isVehicle: false };
+      }
+    }
+
+    // Capsule / husky / char before bones load — one small body stamp.
+    if (moveMode === "capsule" || moveMode === "husky" || moveMode === "char") {
+      const touch = capsule.grounded ? 1 : 0;
+      _snowXZs[0] = capsule.position.x;
+      _snowXZs[1] = capsule.position.z;
+      _snowTouch[0] = touch;
+      return { xzs: _snowXZs, touching: _snowTouch, isVehicle: false };
+    }
+
+    return null;
+  }
+
   return {
     enter,
     startWalking,
@@ -744,6 +790,7 @@ export function createPlayMode({
     get moveMode() { return moveMode; },
     get wheelOpen() { return modeWheel.open; },
     get playerPosition() { return capsule.position; },
+    getSnowContacts,
     getStats() {
       const p = capsule.position;
       let speed = capsule.debug.moveSpeed;
