@@ -295,6 +295,8 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
 
   // ── Snow TSL material ──────────────────────────────────────────────────────
   const mat = new THREE.MeshStandardNodeMaterial({
+    transparent:        true,
+    alphaTest:          0.02,
     roughness:          0.93,
     metalness:          0,
     polygonOffset:      true,
@@ -456,6 +458,7 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
   mat.colorNode     = mix(snowBase, deformColor, vTileBlend);
   mat.roughnessNode = mix(float(0.93), deformRough, vTileBlend);
   mat.emissiveNode  = deformEmit.mul(vTileBlend);
+  mat.alphaNode     = vTileBlend;
 
   // ── Deformation tile mesh (50 m, high-res, play mode only) ──────────────
   const geo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE, SUBDIVISIONS, SUBDIVISIONS);
