@@ -2,6 +2,7 @@
  * Racing-style kerb chunks (objects lab copy — same logic as v2/core/road/kerbChunkGeometry.js).
  */
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
 function normalizeXZ(v) {
   const len = Math.hypot(v.x, v.z);
@@ -13,8 +14,7 @@ function perpXZ(dir) {
   return new THREE.Vector3(-dir.z, 0, dir.x);
 }
 
-function buildKerbSquare(
-  group,
+function buildKerbSquareGeo(
   curve,
   startT,
   endT,
@@ -23,9 +23,7 @@ function buildKerbSquare(
   kerbHeight,
   lipHeight,
   sideSign,
-  color,
   getWorldHeight,
-  isPreview,
 ) {
   const segCount = Math.max(4, Math.ceil((endT - startT) * 40));
 
@@ -68,21 +66,7 @@ function buildKerbSquare(
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-
-  const mat = new THREE.MeshStandardMaterial({
-    color,
-    roughness: 0.6,
-    metalness: 0.0,
-    side: THREE.DoubleSide,
-    transparent: isPreview,
-    opacity: isPreview ? 0.6 : 1.0,
-    flatShading: true,
-  });
-
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  group.add(mesh);
+  return geo;
 }
 
 export function buildChunkedKerbGroup(opts) {
@@ -98,6 +82,8 @@ export function buildChunkedKerbGroup(opts) {
     squareSize,
     colorA,
     colorB,
+    roughness = 0.6,
+    metalness = 0.0,
     getWorldHeight,
     isPreview = false,
   } = opts;
@@ -134,6 +120,19 @@ export function buildChunkedKerbGroup(opts) {
 
   const group = new THREE.Group();
 
+  const matOpts = {
+    roughness,
+    metalness,
+    side: THREE.DoubleSide,
+    flatShading: true,
+    transparent: isPreview,
+    opacity: isPreview ? 0.6 : 1.0,
+  };
+
+  // Collect geos by color — merge into 2 meshes instead of N
+  const geosA = [];
+  const geosB = [];
+
   let currentLen = 0;
   let squareIdx = 0;
   let squareStartT = tMin;
@@ -151,42 +150,44 @@ export function buildChunkedKerbGroup(opts) {
         pathPoints[i - 1].t +
         (pathPoints[i].t - pathPoints[i - 1].t) * ratio;
 
-      const stripeColor = squareIdx % 2 === 0 ? colA : colB;
-
-      if (i === pathPoints.length - 1) {
-        buildKerbSquare(
-          group,
-          curve,
-          squareStartT,
-          tMax,
-          lateralDist,
-          kerbWidth,
-          kerbHeight,
-          lipHeight,
-          sideSign,
-          stripeColor,
-          getWorldHeight,
-          isPreview,
-        );
-      } else {
-        buildKerbSquare(
-          group,
-          curve,
-          squareStartT,
-          squareEndT,
-          lateralDist,
-          kerbWidth,
-          kerbHeight,
-          lipHeight,
-          sideSign,
-          stripeColor,
-          getWorldHeight,
-          isPreview,
-        );
-      }
+      const isA = squareIdx % 2 === 0;
+      const geo = buildKerbSquareGeo(
+        curve,
+        squareStartT,
+        i === pathPoints.length - 1 ? tMax : squareEndT,
+        lateralDist,
+        kerbWidth,
+        kerbHeight,
+        lipHeight,
+        sideSign,
+        getWorldHeight,
+      );
+      if (isA) geosA.push(geo); else geosB.push(geo);
 
       squareStartT = squareEndT;
       squareIdx++;
+    }
+  }
+
+  // Merge A and B into one mesh each → 2 draw calls total
+  if (geosA.length) {
+    const merged = mergeGeometries(geosA, false);
+    geosA.forEach((g) => g.dispose());
+    if (merged) {
+      const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ color: colA, ...matOpts }));
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+  }
+  if (geosB.length) {
+    const merged = mergeGeometries(geosB, false);
+    geosB.forEach((g) => g.dispose());
+    if (merged) {
+      const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ color: colB, ...matOpts }));
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
     }
   }
 

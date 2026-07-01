@@ -250,18 +250,15 @@ export function buildGuardrailMesh({
   const group = new THREE.Group();
   group.name = "Guardrail";
 
-  const railOuterGeo = buildGuardrailProfileGeometry(
-    curve,
-    pathSegs,
-    profile,
-    depth,
-    closed,
-    getWorldHeight,
-  );
+  // Bake Y offset into geo so no position.y transform is needed on the mesh
+  railOuterGeo.translate(0, p.railYOffset, 0);
   const railOuter = new THREE.Mesh(railOuterGeo, railMat);
   railOuter.castShadow = true;
   railOuter.receiveShadow = true;
   group.add(railOuter);
+
+  // All postMat geos (inner rail + posts) collected here → merged into 1 mesh
+  const postMatGeos = [];
 
   if (thickness > 0.002) {
     const innerDepth = Math.max(0.01, depth - thickness * 2);
@@ -281,14 +278,9 @@ export function buildGuardrailMesh({
       closed,
       getWorldHeight,
     );
-    const railInner = new THREE.Mesh(railInnerGeo, postMat);
-    railInner.castShadow = true;
-    railInner.receiveShadow = true;
-    group.add(railInner);
+    railInnerGeo.translate(0, p.railYOffset, 0);
+    postMatGeos.push(railInnerGeo);
   }
-
-  railOuter.position.y += p.railYOffset;
-  if (group.children[1]) group.children[1].position.y += p.railYOffset;
 
   const length = curve.getLength();
   const postCount = Math.max(
@@ -298,7 +290,6 @@ export function buildGuardrailMesh({
   const tangent = new THREE.Vector3();
 
   // Posts — variable height per post, same material → collect geos, applyMatrix4, merge → 1 draw call
-  const postGeos = [];
   for (let i = 0; i < postCount; i++) {
     const t = closed ? i / postCount : i / Math.max(1, postCount - 1);
     const pos = curve.getPointAt(t);
@@ -315,11 +306,11 @@ export function buildGuardrailMesh({
     mat4.makeRotationY(yaw);
     mat4.setPosition(pos.x, groundY + postH * 0.5, pos.z);
     postGeo.applyMatrix4(mat4);
-    postGeos.push(postGeo);
+    postMatGeos.push(postGeo);
   }
-  if (postGeos.length) {
-    const merged = mergeGeometries(postGeos, false);
-    postGeos.forEach((g) => g.dispose());
+  if (postMatGeos.length) {
+    const merged = mergeGeometries(postMatGeos, false);
+    postMatGeos.forEach((g) => g.dispose());
     if (merged) {
       const postMesh = new THREE.Mesh(merged, postMat);
       postMesh.castShadow = true;

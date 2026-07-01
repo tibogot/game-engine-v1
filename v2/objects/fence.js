@@ -76,54 +76,43 @@ export function buildFenceMesh({
 
   const postCount = Math.max(2, Math.floor(length / postSpacing) + 1);
 
-  // Posts — InstancedMesh: all same geometry + material → 1 draw call
-  const postGeo = new THREE.BoxGeometry(postWidth, fenceHeight, postDepth);
-  const posts = new THREE.InstancedMesh(postGeo, mat, postCount);
-  posts.castShadow = true;
-  posts.receiveShadow = true;
-  const _im = new THREE.Matrix4();
+  // All parts share the same mat — collect every geo into one array, merge → 1 draw call
+  const allGeos = [];
+  const _m4 = new THREE.Matrix4();
+  const postTemplate = new THREE.BoxGeometry(postWidth, fenceHeight, postDepth);
   for (let i = 0; i < postCount; i++) {
     const t = closed ? i / postCount : i / Math.max(1, postCount - 1);
     const pos = fenceCurve.getPointAt(t);
     const tangent = fenceCurve.getTangentAt(t);
     const groundY = getWorldHeight(pos.x, pos.z);
-    _im.makeRotationY(Math.atan2(tangent.x, tangent.z));
-    _im.setPosition(pos.x, groundY + fenceHeight * 0.5, pos.z);
-    posts.setMatrixAt(i, _im);
+    _m4.makeRotationY(Math.atan2(tangent.x, tangent.z));
+    _m4.setPosition(pos.x, groundY + fenceHeight * 0.5, pos.z);
+    const g = postTemplate.clone();
+    g.applyMatrix4(_m4);
+    allGeos.push(g);
   }
-  posts.instanceMatrix.needsUpdate = true;
-  group.add(posts);
+  postTemplate.dispose();
 
-  // Rails — all share same material, merge all tube geometries → 1 draw call
-  if (railCount > 0) {
-    const railGeos = [];
-    for (let r = 0; r < railCount; r++) {
-      const railY = fenceHeight * (0.2 + (0.6 * r) / Math.max(1, railCount - 1));
-      const railPoints = [];
-      for (let i = 0; i <= segCount; i++) {
-        const t = i / segCount;
-        const pos = fenceCurve.getPointAt(t);
-        const groundY = getWorldHeight(pos.x, pos.z);
-        railPoints.push(new THREE.Vector3(pos.x, groundY + railY, pos.z));
-      }
-      const railCurve = new THREE.CatmullRomCurve3(
-        railPoints,
-        closed,
-        "catmullrom",
-        0.5,
-      );
-      railGeos.push(
-        new THREE.TubeGeometry(railCurve, segCount, railThick * 0.5, 6, closed),
-      );
+  for (let r = 0; r < railCount; r++) {
+    const railY = fenceHeight * (0.2 + (0.6 * r) / Math.max(1, railCount - 1));
+    const railPoints = [];
+    for (let i = 0; i <= segCount; i++) {
+      const t = i / segCount;
+      const pos = fenceCurve.getPointAt(t);
+      const groundY = getWorldHeight(pos.x, pos.z);
+      railPoints.push(new THREE.Vector3(pos.x, groundY + railY, pos.z));
     }
-    const merged = mergeGeometries(railGeos, false);
-    railGeos.forEach((g) => g.dispose());
-    if (merged) {
-      const railMesh = new THREE.Mesh(merged, mat);
-      railMesh.castShadow = true;
-      railMesh.receiveShadow = true;
-      group.add(railMesh);
-    }
+    const railCurve = new THREE.CatmullRomCurve3(railPoints, closed, "catmullrom", 0.5);
+    allGeos.push(new THREE.TubeGeometry(railCurve, segCount, railThick * 0.5, 6, closed));
+  }
+
+  const merged = mergeGeometries(allGeos, false);
+  allGeos.forEach((g) => g.dispose());
+  if (merged) {
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
   }
 
   return group;

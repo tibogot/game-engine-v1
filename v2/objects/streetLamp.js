@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { seededRand } from "./woodUtils.js";
 
 /**
@@ -273,35 +274,6 @@ export function buildStreetLampMesh({
   const group = new THREE.Group();
   group.name = "StreetLamp";
 
-  // Single point: just place one unit, no instancing needed
-  if (points.length === 1) {
-    const pt = points[0];
-    const v = pt.isVector3 ? pt : new THREE.Vector3(pt.x, pt.y, pt.z);
-    const groundY = getWorldHeight(v.x, v.z);
-    const unit = buildStreetLampUnit(p, 0);
-    unit.position.set(v.x, groundY, v.z);
-    unit.rotation.y = Math.PI * 0.5;
-    group.add(unit);
-    return group;
-  }
-
-  // ── Spline case: one InstancedMesh per part type → ~9-10 draw calls total ──
-
-  const groundedPoints = points.map((pt) => {
-    const v = pt.isVector3 ? pt : new THREE.Vector3(pt.x, pt.y, pt.z);
-    return new THREE.Vector3(v.x, getWorldHeight(v.x, v.z), v.z);
-  });
-
-  const curve = new THREE.CatmullRomCurve3(
-    groundedPoints,
-    !!closed,
-    "catmullrom",
-    0.5,
-  );
-
-  const length = curve.getLength();
-  const lampCount = Math.max(1, Math.floor(length / spacing) + 1);
-
   // ── Shared geometry params ──
   const poleH = Math.max(1.5, p.poleHeight);
   const armLen = Math.max(0.2, p.armLength);
@@ -323,57 +295,83 @@ export function buildStreetLampMesh({
   const poleMat = metalMat(p, p.colorPole);
   const emMat = emissiveMat(p);
 
-  // ── Geometries (built once, shared across all instances) ──
-  const baseGeo = new THREE.CylinderGeometry(baseR * 0.62, baseR, baseH, 20);
-  const footGeo = new THREE.TorusGeometry(baseR * 0.85, baseR * 0.16, 8, 22);
-  const poleGeo = new THREE.CylinderGeometry(
-    Math.max(0.03, p.poleRadiusTop),
-    Math.max(0.04, p.poleRadiusBase),
-    poleH,
-    Math.max(8, p.poleSegments | 0),
-  );
-  const collarGeo = new THREE.TorusGeometry(
-    Math.max(0.04, p.poleRadiusTop * p.collarScale),
-    Math.max(0.02, p.poleRadiusTop * 0.6),
-    8,
-    20,
-  );
-  const armGeo = new THREE.TubeGeometry(
-    new THREE.QuadraticBezierCurve3(
-      new THREE.Vector3(0, ay, 0),
-      new THREE.Vector3(armLen * 0.4, ay + armLen * 0.5 * p.armCurve, 0),
-      armEnd,
-    ),
-    24,
-    armThick,
-    10,
-    false,
-  );
+  // ── Template geometries (built once, cloned per lamp) ──
+  const baseGeo    = new THREE.CylinderGeometry(baseR * 0.62, baseR, baseH, 20);
+  const footGeo    = new THREE.TorusGeometry(baseR * 0.85, baseR * 0.16, 8, 22);
+  const poleGeo    = new THREE.CylinderGeometry(Math.max(0.03, p.poleRadiusTop), Math.max(0.04, p.poleRadiusBase), poleH, Math.max(8, p.poleSegments | 0));
+  const collarGeo  = new THREE.TorusGeometry(Math.max(0.04, p.poleRadiusTop * p.collarScale), Math.max(0.02, p.poleRadiusTop * 0.6), 8, 20);
+  const armGeo     = new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, ay, 0), new THREE.Vector3(armLen * 0.4, ay + armLen * 0.5 * p.armCurve, 0), armEnd), 24, armThick, 10, false);
   const knuckleGeo = new THREE.SphereGeometry(armThick * 1.7, 12, 10);
-  const shadeGeo = new THREE.CylinderGeometry(lr * taper, lr, lh, 20, 1, true);
-  const finialGeo = new THREE.SphereGeometry(fin, 12, 10);
-  const bulbGeo = new THREE.SphereGeometry(bs, 18, 14);
+  const shadeGeo   = new THREE.CylinderGeometry(lr * taper, lr, lh, 20, 1, true);
+  const finialGeo  = new THREE.SphereGeometry(fin, 12, 10);
+  const bulbGeo    = new THREE.SphereGeometry(bs, 18, 14);
 
-  // ── InstancedMeshes ──
-  const baseMesh = new THREE.InstancedMesh(baseGeo, trimMat, lampCount);
-  const footMesh = new THREE.InstancedMesh(footGeo, trimMat, lampCount);
-  const poleMesh = new THREE.InstancedMesh(poleGeo, poleMat, lampCount);
-  const collarMesh = new THREE.InstancedMesh(collarGeo, trimMat, lampCount);
-  const armMesh = new THREE.InstancedMesh(armGeo, trimMat, lampCount);
-  const knuckleMesh = new THREE.InstancedMesh(knuckleGeo, trimMat, lampCount);
-  const shadeMesh = new THREE.InstancedMesh(shadeGeo, trimMat, lampCount);
-  const finialMesh = new THREE.InstancedMesh(finialGeo, poleMat, lampCount);
-  const bulbMesh = new THREE.InstancedMesh(bulbGeo, emMat, lampCount);
+  // ── Part-local matrices (constant per lamp) ──
+  const _unitScale  = new THREE.Vector3(1, 1, 1);
+  const _axX        = new THREE.Vector3(1, 0, 0);
+  const _axZ        = new THREE.Vector3(0, 0, 1);
+  const _rxPos      = new THREE.Quaternion().setFromAxisAngle(_axX,  Math.PI / 2);
+  const _rxNeg      = new THREE.Quaternion().setFromAxisAngle(_axX, -Math.PI / 2);
 
-  const shadowCasters = [baseMesh, footMesh, poleMesh, collarMesh, armMesh, knuckleMesh, shadeMesh, finialMesh, bulbMesh];
-  for (const m of shadowCasters) {
-    m.castShadow = true;
-    m.receiveShadow = true;
+  // trimParts: [templateGeo, partLocalMatrix]
+  const trimParts = [
+    [baseGeo,    new THREE.Matrix4().makeTranslation(0, baseH * 0.5, 0)],
+    [footGeo,    new THREE.Matrix4().compose(new THREE.Vector3(0, baseR * 0.16, 0), _rxPos, _unitScale)],
+    [collarGeo,  new THREE.Matrix4().compose(new THREE.Vector3(0, baseH + armY - 0.05, 0), _rxPos, _unitScale)],
+    [armGeo,     new THREE.Matrix4()],  // arm vertices are in lamp-local space → identity
+    [knuckleGeo, new THREE.Matrix4().makeTranslation(armEnd.x, armEnd.y, armEnd.z)],
+    [shadeGeo,   new THREE.Matrix4().makeTranslation(armEnd.x, armEnd.y - lh * 0.5 - armThick, armEnd.z)],
+  ];
+  const finialLocalM = new THREE.Matrix4().makeTranslation(armEnd.x, armEnd.y + fin * 0.6, armEnd.z);
+  const bulbLocalM   = new THREE.Matrix4().makeTranslation(armEnd.x, armEnd.y + by, armEnd.z);
+  const poolLocalM   = new THREE.Matrix4().compose(new THREE.Vector3(armEnd.x, 0.03, armEnd.z), _rxNeg, _unitScale);
+
+  // ── Collect lamp world transforms ──
+  const lampTransforms = []; // { lm: Matrix4, leanSeed: number }
+
+  if (points.length === 1) {
+    const pt = points[0];
+    const v  = pt.isVector3 ? pt : new THREE.Vector3(pt.x, pt.y, pt.z);
+    const gy = getWorldHeight(v.x, v.z);
+    const lm = new THREE.Matrix4().makeRotationY(Math.PI * 0.5);
+    lm.setPosition(v.x, gy, v.z);
+    lampTransforms.push({ lm, leanSeed: p.seed | 0 });
+  } else {
+    const groundedPts = points.map((pt) => {
+      const v = pt.isVector3 ? pt : new THREE.Vector3(pt.x, pt.y, pt.z);
+      return new THREE.Vector3(v.x, getWorldHeight(v.x, v.z), v.z);
+    });
+    const curve = new THREE.CatmullRomCurve3(groundedPts, !!closed, "catmullrom", 0.5);
+    const length = curve.getLength();
+    const lampCount = Math.max(1, Math.floor(length / spacing) + 1);
+
+    for (let i = 0; i < lampCount; i++) {
+      const t = closed ? i / lampCount : lampCount === 1 ? 0 : i / Math.max(1, lampCount - 1);
+      const pos = curve.getPointAt(t);
+      _tangent.copy(curve.getTangentAt(t));
+      if (_tangent.lengthSq() < 1e-10) _tangent.set(0, 0, 1);
+      _tangent.normalize();
+      _perp.set(-_tangent.z, 0, _tangent.x).normalize();
+
+      const groundY = getWorldHeight(pos.x, pos.z);
+      const wx  = pos.x + _perp.x * offset * sign;
+      const wz  = pos.z + _perp.z * offset * sign;
+      const yaw = Math.atan2(-_perp.x * sign, -_perp.z * sign);
+
+      const lm = new THREE.Matrix4().makeRotationY(yaw);
+      lm.setPosition(wx, groundY, wz);
+      lampTransforms.push({ lm, leanSeed: (p.seed | 0) + i * 17 });
+    }
   }
 
-  group.add(baseMesh, footMesh, poleMesh, collarMesh, armMesh, knuckleMesh, shadeMesh, finialMesh, bulbMesh);
+  const lampCount = lampTransforms.length;
 
-  // Pool — optional, one InstancedMesh
+  // ── Per-material geometry collectors → merge into 1 mesh each → 4 draw calls total ──
+  const trimGeos = [];
+  const poleGeos = [];
+  const bulbGeos = [];
+
+  // Pool keeps InstancedMesh (additive blending + depthWrite:false — can't merge)
   let poolMesh = null;
   if (p.groundPool) {
     const poolMat = new THREE.MeshBasicMaterial({
@@ -390,136 +388,81 @@ export function buildStreetLampMesh({
       lampCount,
     );
     poolMesh.renderOrder = 2;
-    group.add(poolMesh);
   }
 
-  // ── Pre-compute part-local matrices that are identical for every lamp ──
-  const _unitScale = new THREE.Vector3(1, 1, 1);
-  const _axX = new THREE.Vector3(1, 0, 0);
-  const _axZ = new THREE.Vector3(0, 0, 1);
-  const _pp = new THREE.Vector3();
-  const _pq = new THREE.Quaternion();
+  // ── Matrix scratch ──
+  const _pp          = new THREE.Vector3();
+  const _pq          = new THREE.Quaternion();
+  const _poleLocalM  = new THREE.Matrix4();
+  const _im          = new THREE.Matrix4();
 
-  const _rxPos = new THREE.Quaternion().setFromAxisAngle(_axX, Math.PI / 2);
-  const _rxNeg = new THREE.Quaternion().setFromAxisAngle(_axX, -Math.PI / 2);
-
-  const footLocalM = new THREE.Matrix4().compose(
-    new THREE.Vector3(0, baseR * 0.16, 0), _rxPos, _unitScale,
-  );
-  const collarLocalM = new THREE.Matrix4().compose(
-    new THREE.Vector3(0, baseH + armY - 0.05, 0), _rxPos, _unitScale,
-  );
-  const knuckleLocalM = new THREE.Matrix4().makeTranslation(armEnd.x, armEnd.y, armEnd.z);
-  const shadeLocalM = new THREE.Matrix4().makeTranslation(armEnd.x, armEnd.y - lh * 0.5 - armThick, armEnd.z);
-  const finialLocalM = new THREE.Matrix4().makeTranslation(armEnd.x, armEnd.y + fin * 0.6, armEnd.z);
-  const bulbLocalM = new THREE.Matrix4().makeTranslation(armEnd.x, armEnd.y + by, armEnd.z);
-
-  let poolLocalM = null;
-  if (poolMesh) {
-    poolLocalM = new THREE.Matrix4().compose(
-      new THREE.Vector3(armEnd.x, 0.03, armEnd.z), _rxNeg, _unitScale,
-    );
-  }
-
-  // ── Matrix scratch space ──
-  const _lm = new THREE.Matrix4(); // lamp world transform
-  const _pm = new THREE.Matrix4(); // part local transform
-  const _im = new THREE.Matrix4(); // _lm * _pm
-
-  // ── Fill instance matrices per lamp ──
   for (let i = 0; i < lampCount; i++) {
-    const t = closed
-      ? i / lampCount
-      : lampCount === 1
-        ? 0
-        : i / Math.max(1, lampCount - 1);
+    const { lm, leanSeed } = lampTransforms[i];
 
-    const pos = curve.getPointAt(t);
-    _tangent.copy(curve.getTangentAt(t));
-    if (_tangent.lengthSq() < 1e-10) _tangent.set(0, 0, 1);
-    _tangent.normalize();
-    _perp.set(-_tangent.z, 0, _tangent.x).normalize();
-
-    const groundY = getWorldHeight(pos.x, pos.z);
-    const wx = pos.x + _perp.x * offset * sign;
-    const wz = pos.z + _perp.z * offset * sign;
-    const yaw = Math.atan2(-_perp.x * sign, -_perp.z * sign);
-
-    // Lamp world transform
-    _lm.makeRotationY(yaw);
-    _lm.setPosition(wx, groundY, wz);
-
-    // Per-lamp lean (only affects pole)
-    const seed = (p.seed | 0) + i * 17;
-    const rLean = seededRand(seed, 1);
-    const leanRad =
-      p.leanAmount > 0 && rLean < p.leanRatio
-        ? THREE.MathUtils.degToRad((seededRand(seed, 2) * 2 - 1) * p.leanAmount * 0.35)
-        : 0;
-
-    // base
-    _pm.makeTranslation(0, baseH * 0.5, 0);
-    _im.multiplyMatrices(_lm, _pm);
-    baseMesh.setMatrixAt(i, _im);
-
-    // foot
-    _im.multiplyMatrices(_lm, footLocalM);
-    footMesh.setMatrixAt(i, _im);
-
-    // pole — lean baked per instance
-    _pp.set(0, baseH + poleH * 0.5, 0);
-    if (leanRad !== 0) {
-      _pq.setFromAxisAngle(_axZ, leanRad);
-    } else {
-      _pq.set(0, 0, 0, 1);
+    // trim parts (base, foot, collar, arm, knuckle, shade)
+    for (const [geo, localM] of trimParts) {
+      _im.multiplyMatrices(lm, localM);
+      const g = geo.clone();
+      g.applyMatrix4(_im);
+      trimGeos.push(g);
     }
-    _pm.compose(_pp, _pq, _unitScale);
-    _im.multiplyMatrices(_lm, _pm);
-    poleMesh.setMatrixAt(i, _im);
 
-    // collar
-    _im.multiplyMatrices(_lm, collarLocalM);
-    collarMesh.setMatrixAt(i, _im);
+    // pole — per-lamp lean baked into geometry
+    const rLean  = seededRand(leanSeed, 1);
+    const leanRad = p.leanAmount > 0 && rLean < p.leanRatio
+      ? THREE.MathUtils.degToRad((seededRand(leanSeed, 2) * 2 - 1) * p.leanAmount * 0.35)
+      : 0;
+    _pp.set(0, baseH + poleH * 0.5, 0);
+    if (leanRad !== 0) _pq.setFromAxisAngle(_axZ, leanRad); else _pq.set(0, 0, 0, 1);
+    _poleLocalM.compose(_pp, _pq, _unitScale);
+    _im.multiplyMatrices(lm, _poleLocalM);
+    const pg = poleGeo.clone(); pg.applyMatrix4(_im); poleGeos.push(pg);
 
-    // arm — geometry is in lamp local space, just apply lamp world transform
-    armMesh.setMatrixAt(i, _lm);
+    // finial
+    _im.multiplyMatrices(lm, finialLocalM);
+    const fg = finialGeo.clone(); fg.applyMatrix4(_im); poleGeos.push(fg);
 
-    // head parts
-    _im.multiplyMatrices(_lm, knuckleLocalM);
-    knuckleMesh.setMatrixAt(i, _im);
+    // bulb (emissive)
+    _im.multiplyMatrices(lm, bulbLocalM);
+    const bg = bulbGeo.clone(); bg.applyMatrix4(_im); bulbGeos.push(bg);
 
-    _im.multiplyMatrices(_lm, shadeLocalM);
-    shadeMesh.setMatrixAt(i, _im);
-
-    _im.multiplyMatrices(_lm, finialLocalM);
-    finialMesh.setMatrixAt(i, _im);
-
-    _im.multiplyMatrices(_lm, bulbLocalM);
-    bulbMesh.setMatrixAt(i, _im);
-
-    // pool
+    // pool instance matrix
     if (poolMesh) {
-      _im.multiplyMatrices(_lm, poolLocalM);
+      _im.multiplyMatrices(lm, poolLocalM);
       poolMesh.setMatrixAt(i, _im);
     }
 
-    // PointLight — not instanceable, add one per lamp (lights ≠ draw calls)
+    // PointLight — not instanceable, one per lamp (lights ≠ draw calls)
     if (p.castLight) {
-      const light = new THREE.PointLight(
-        p.emissiveColor,
-        p.lightIntensity,
-        p.lightDistance,
-        p.lightDecay,
-      );
-      // Bulb world position = lamp world transform applied to bulb local pos
+      const light = new THREE.PointLight(p.emissiveColor, p.lightIntensity, p.lightDistance, p.lightDecay);
       const bulbLocal = new THREE.Vector3(armEnd.x, armEnd.y + by, armEnd.z);
-      light.position.copy(bulbLocal.applyMatrix4(_lm));
+      light.position.copy(bulbLocal.applyMatrix4(lm));
       group.add(light);
     }
   }
 
-  for (const m of shadowCasters) m.instanceMatrix.needsUpdate = true;
-  if (poolMesh) poolMesh.instanceMatrix.needsUpdate = true;
+  // Dispose template geos (all vertices were already baked into clones)
+  for (const [geo] of trimParts) geo.dispose();
+  poleGeo.dispose(); finialGeo.dispose(); bulbGeo.dispose();
+
+  // Merge per material → add to group
+  const addMerged = (geos, mat, shadow = true) => {
+    if (!geos.length) return;
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((g) => g.dispose());
+    if (!merged) return;
+    const mesh = new THREE.Mesh(merged, mat);
+    if (shadow) { mesh.castShadow = true; mesh.receiveShadow = true; }
+    group.add(mesh);
+  };
+  addMerged(trimGeos, trimMat);
+  addMerged(poleGeos, poleMat);
+  addMerged(bulbGeos, emMat);
+
+  if (poolMesh) {
+    poolMesh.instanceMatrix.needsUpdate = true;
+    group.add(poolMesh);
+  }
 
   return group;
 }

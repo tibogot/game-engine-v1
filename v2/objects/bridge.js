@@ -254,29 +254,26 @@ export function buildBridgeMesh({
     for (const s of [-1, 1]) {
       addSweep(s, halfW - p.stringerInset, trussUp, p.trussW * 0.5, p.trussH * 0.5, structGeos);
     }
-    // cross-beams spanning between the two arches
+    // cross-beams — bake into structGeos (same mat) instead of a separate InstancedMesh
     const cn = Math.max(2, p.trussCross | 0);
-    const crossGeo = new THREE.BoxGeometry(1, 1, 1);
-    const cross = new THREE.InstancedMesh(crossGeo, structMat, cn);
-    cross.castShadow = true;
+    const unitCross = new THREE.BoxGeometry(1, 1, 1);
     for (let i = 0; i < cn; i++) {
       const t = (i + 0.5) / cn;
       const f = frameAt(t);
       const pos = deckPos(t).addScaledVector(f.up, trussUp);
       scl.set((halfW - p.stringerInset) * 2, p.trussH * 0.6, p.trussW * 0.8);
       m.makeBasis(f.right, f.up, f.fwd).scale(scl).setPosition(pos);
-      cross.setMatrixAt(i, m);
+      const g = unitCross.clone();
+      g.applyMatrix4(m);
+      structGeos.push(g);
     }
-    cross.instanceMatrix.needsUpdate = true;
-    group.add(cross);
+    unitCross.dispose();
   }
 
   // ── railings: posts + rails on both sides ──
+  // Posts baked into railGeos (same railMat) — no separate InstancedMesh needed
   const postCount = Math.max(2, Math.floor(length / Math.max(0.5, p.postSpacing)) + 1);
-  const postGeo = new THREE.BoxGeometry(1, 1, 1);
-  const posts = new THREE.InstancedMesh(postGeo, railMat, postCount * 2);
-  posts.castShadow = true;
-  let pi = 0;
+  const unitPost = new THREE.BoxGeometry(1, 1, 1);
   const postTops = []; // remember post-top transforms for lanterns
   for (let i = 0; i < postCount; i++) {
     const t = postCount === 1 ? 0 : i / (postCount - 1);
@@ -287,12 +284,13 @@ export function buildBridgeMesh({
         .addScaledVector(f.up, p.railHeight * 0.5 + p.deckThickness * 0.5);
       scl.set(p.postW, p.railHeight, p.postD);
       m.makeBasis(f.right, f.up, f.fwd).scale(scl).setPosition(baseP);
-      posts.setMatrixAt(pi++, m);
+      const g = unitPost.clone();
+      g.applyMatrix4(m);
+      railGeos.push(g);
       postTops.push({ t, s, f });
     }
   }
-  posts.instanceMatrix.needsUpdate = true;
-  group.add(posts);
+  unitPost.dispose();
 
   // horizontal rails (top + optional mid) swept along each side
   const railOffsets = [p.railHeight];

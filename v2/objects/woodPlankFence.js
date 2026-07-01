@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
   seededRand,
   pickWoodColor,
@@ -7,6 +8,7 @@ import {
 /**
  * Stylized cartoon horizontal-plank fence (ranch / farm style).
  * Thick posts + 2–3 slanted rails per bay, with optional lean per span.
+ * All parts merged into a single vertex-colored mesh → 1 draw call.
  */
 
 export const WOOD_PLANK_FENCE_DEFAULTS = {
@@ -30,6 +32,19 @@ export const WOOD_PLANK_FENCE_DEFAULTS = {
   metalness: 0,
   flatShading: true,
 };
+
+// Bake a solid color into every vertex of a geometry (in-place).
+function bakeColor(geo, color) {
+  const n = geo.attributes.position.count;
+  const buf = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    buf[i * 3]     = color.r;
+    buf[i * 3 + 1] = color.g;
+    buf[i * 3 + 2] = color.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(buf, 3));
+  return geo;
+}
 
 // Reusable scratch vectors (module-level, safe in single-threaded JS)
 const _xAxis = new THREE.Vector3(1, 0, 0);
@@ -98,18 +113,11 @@ export function buildWoodPlankFenceMesh({
 
   const postHeight = fenceHeight + postOverhang;
 
-  // ── Posts — InstancedMesh with per-instance color → 1 draw call ──
-  const postGeo = new THREE.BoxGeometry(postW, postHeight, postD);
-  const postMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    roughness: p.roughness,
-    metalness: p.metalness,
-    flatShading: !!p.flatShading,
-  });
-  const postMesh = new THREE.InstancedMesh(postGeo, postMat, postCount);
-  postMesh.castShadow = true;
-  postMesh.receiveShadow = true;
+  // All geometries go here — merged into one vertex-colored mesh at the end
+  const allGeos = [];
 
+  // ── Posts ──
+  const postTemplate = new THREE.BoxGeometry(postW, postHeight, postD);
   for (let i = 0; i < postCount; i++) {
     const t = postTs[i];
     const pos = curve.getPointAt(t);
@@ -117,31 +125,18 @@ export function buildWoodPlankFenceMesh({
     const groundY = getWorldHeight(pos.x, pos.z);
     _quat.setFromAxisAngle(_axY, Math.atan2(tangent.x, tangent.z));
     _pp.set(pos.x, groundY + postHeight * 0.5, pos.z);
-    _ps.set(1, 1, 1); // geometry already sized
+    _ps.set(1, 1, 1);
     _m.compose(_pp, _quat, _ps);
-    postMesh.setMatrixAt(i, _m);
-    postMesh.setColorAt(i, pickWoodColor(p, seededRand(seed, i + 3000)));
+    const g = postTemplate.clone();
+    g.applyMatrix4(_m);
+    bakeColor(g, pickWoodColor(p, seededRand(seed, i + 3000)));
+    allGeos.push(g);
   }
-  postMesh.instanceMatrix.needsUpdate = true;
-  if (postMesh.instanceColor) postMesh.instanceColor.needsUpdate = true;
-  group.add(postMesh);
+  postTemplate.dispose();
 
-  // ── Rail planks — InstancedMesh with unit box, per-instance scale+color → 1 draw call ──
+  // ── Rail planks ──
   const spanCount = closed ? postCount : postCount - 1;
-  const maxPlanks = spanCount * railCount;
-
-  const plankGeo = new THREE.BoxGeometry(1, 1, 1);
-  const plankMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    roughness: p.roughness,
-    metalness: p.metalness,
-    flatShading: !!p.flatShading,
-  });
-  const plankMesh = new THREE.InstancedMesh(plankGeo, plankMat, maxPlanks);
-  plankMesh.castShadow = true;
-  plankMesh.receiveShadow = true;
-
-  let plankIdx = 0;
+  const unitBox = new THREE.BoxGeometry(1, 1, 1);
   let railIndex = 0;
 
   for (let s = 0; s < spanCount; s++) {
@@ -153,7 +148,6 @@ export function buildWoodPlankFenceMesh({
     const y0 = getWorldHeight(pos0.x, pos0.z);
     const y1 = getWorldHeight(pos1.x, pos1.z);
 
-    // XZ span direction for inset calculation
     _dir.set(pos1.x - pos0.x, 0, pos1.z - pos0.z);
     const spanXZ = _dir.length();
     if (spanXZ < 1e-4) { railIndex += railCount; continue; }
@@ -197,33 +191,41 @@ export function buildWoodPlankFenceMesh({
       _start.set(ax, y0 + baseLift + endDrop0, az);
       _end.set(bx, y1 + baseLift + endDrop1, bz);
 
-      // Compute plank direction, length and midpoint
       _dir.subVectors(_end, _start);
       const len = _dir.length();
       if (len < 0.05) { railIndex++; continue; }
       _dir.multiplyScalar(1 / len);
       _mid.addVectors(_start, _end).multiplyScalar(0.5);
 
-      // Orient unit box along plank direction, scale to actual dimensions
       _quat.setFromUnitVectors(_xAxis, _dir);
       _pp.copy(_mid);
       _ps.set(len, railThick, railDepth);
       _m.compose(_pp, _quat, _ps);
-      plankMesh.setMatrixAt(plankIdx, _m);
-      plankMesh.setColorAt(
-        plankIdx,
-        pickWoodColor(p, seededRand(seed, railIndex + 9000)),
-      );
-      plankIdx++;
+
+      const g = unitBox.clone();
+      g.applyMatrix4(_m);
+      bakeColor(g, pickWoodColor(p, seededRand(seed, railIndex + 9000)));
+      allGeos.push(g);
       railIndex++;
     }
   }
+  unitBox.dispose();
 
-  // Only render the instances we actually filled
-  plankMesh.count = plankIdx;
-  plankMesh.instanceMatrix.needsUpdate = true;
-  if (plankMesh.instanceColor) plankMesh.instanceColor.needsUpdate = true;
-  group.add(plankMesh);
+  // ── Merge all → 1 draw call ──
+  const merged = mergeGeometries(allGeos, false);
+  allGeos.forEach((g) => g.dispose());
+  if (merged) {
+    const mat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: p.roughness,
+      metalness: p.metalness,
+      flatShading: !!p.flatShading,
+    });
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
 
   return group;
 }
