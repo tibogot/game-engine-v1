@@ -5,6 +5,7 @@ import {
   float,
   vec2,
   vec4,
+  vec3,
   min,
   max,
   mix,
@@ -12,18 +13,16 @@ import {
   length,
   pow,
   floor,
-  fract,
-  sin,
-  cos,
   step,
   texture,
   uv,
   uniform,
+  mx_noise_float,
 } from "three/tsl";
-import { HEIGHTMAP_SIZE } from "./heightmapTexture.js";
+import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 
-function makeHeightRT() {
-  const rt = new THREE.RenderTarget(HEIGHTMAP_SIZE, HEIGHTMAP_SIZE, {
+function makeHeightRT(w = HEIGHTMAP_SIZE, h = HEIGHTMAP_SIZE) {
+  const rt = new THREE.RenderTarget(w, h, {
     format:          THREE.RGBAFormat,
     type:            THREE.HalfFloatType,
     minFilter:       THREE.LinearFilter,
@@ -37,24 +36,18 @@ function makeHeightRT() {
 }
 
 export function createSculptBrush(renderer, initialDataTex, heightTexNode, initialMaskTex) {
-  const rts = [makeHeightRT(), makeHeightRT()];
-  let readIdx = 0;
-
-  // ── Upload CPU heightmap into rts[0] ──────────────────────────────────────
-  {
-    const initNode  = texture(initialDataTex);
-    const uploadMat = new THREE.MeshBasicNodeMaterial();
-    uploadMat.colorNode = Fn(() =>
-      vec4(texture(initNode, uv()).r, float(0), float(0), float(1)),
-    )();
-    const q = new QuadMesh(uploadMat);
-    renderer.setRenderTarget(rts[0]);
-    q.render(renderer);
-    renderer.setRenderTarget(null);
-    uploadMat.dispose();
-  }
-
-  heightTexNode.value = rts[0].texture;
+  // ── Render targets ─────────────────────────────────────────────────────────
+  // rtMain      — the one canonical heightmap. heightTexNode.value points here
+  //               permanently, so every consumer (terrain, ocean, snow, grass)
+  //               always samples live data — no ping-pong texture swaps.
+  // rtScratch   — read source for brush passes. Each stamp copies the brush
+  //               neighbourhood main→scratch, then the brush shader reads
+  //               scratch and writes main (both passes scissored to the rect).
+  // rtPreStroke — full copy taken at beginStroke(); endStroke() snapshots the
+  //               stroke's dirty rect out of it into a rect-sized undo entry.
+  const rtMain      = makeHeightRT();
+  const rtScratch   = makeHeightRT();
+  const rtPreStroke = makeHeightRT();
 
   // ── Shared brush uniforms ─────────────────────────────────────────────────
   const uBrushUV   = uniform(new THREE.Vector2(0.5, 0.5));
@@ -62,21 +55,23 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   const uStrength  = uniform(0.004);
   const uFalloff   = uniform(2.0);   // exponent: 0.5 feathered → 4.0 hard edge
   const uDir       = uniform(1.0);   // +1 raise, -1 lower
-  const uClampMin       = uniform(0.0);   // normalized minimum sculpt height
+  const uClampMin       = uniform(-2.0);  // normalized minimum (-2.0 = off — digging below 0 allowed)
   const uClampMax       = uniform(2.0);   // normalized maximum (2.0 = off by default)
   const uTerraceStep      = uniform(0.04);  // terrace step height in normalized units (~20 m)
   const uTerraceSharpness = uniform(0.6);   // terrace blend sharpness: 0=soft, 1=hard snap
   const uNoiseScale       = uniform(0.5);   // noise frequency multiplier
   const uNoiseOctaves     = uniform(3.0);   // FBM octave count (1-4)
   const uSmudgeDir        = uniform(new THREE.Vector2(0, 1)); // normalized stroke direction in UV space
-  const uThermalSlope     = uniform(0.018); // thermal erosion talus threshold (~30° default)
+  // Thermal talus threshold in normalized height units per texel; 30° default
+  // (matches the slider's HTML default — main.js re-syncs it on startup anyway).
+  const uThermalSlope     = uniform(Math.tan(30 * Math.PI / 180) * WORLD_SIZE / HEIGHTMAP_SIZE / MAX_HEIGHT);
   const uRampA            = uniform(new THREE.Vector2(0.3, 0.5));
   const uRampB            = uniform(new THREE.Vector2(0.7, 0.5));
   const uRampWidth        = uniform(0.02);  // ramp half-width in UV space
   const uMaskRotation     = uniform(0.0);   // brush mask rotation in radians
 
-  // Ping-pong source node — .value is swapped per stroke.
-  const srcNode = texture(rts[0].texture);
+  // Read source for all brush passes (scratch copy of the brush neighbourhood).
+  const srcNode = texture(rtMain.texture);
 
   // Brush mask node — .value is swapped when the user changes the mask preset or loads a PNG.
   const maskNode = texture(initialMaskTex);
@@ -98,8 +93,8 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   const getBrushFalloff = Fn(([uvCoord]) => {
     const maskUV   = uvCoord.sub(uBrushUV).div(uRadius.mul(float(2))).add(float(0.5));
     const c        = maskUV.sub(float(0.5));
-    const cosR     = cos(uMaskRotation);
-    const sinR     = sin(uMaskRotation);
+    const cosR     = uMaskRotation.cos();
+    const sinR     = uMaskRotation.sin();
     const rotUV    = vec2(
       c.x.mul(cosR).sub(c.y.mul(sinR)).add(float(0.5)),
       c.x.mul(sinR).add(c.y.mul(cosR)).add(float(0.5)),
@@ -111,7 +106,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
 
   // ── Raise / lower brush ───────────────────────────────────────────────────
   const raiseMat = new THREE.MeshBasicNodeMaterial();
-  raiseMat.colorNode = Fn(() => {
+  raiseMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
     const falloff  = getBrushFalloff(uvCoord);
@@ -122,7 +117,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
 
   // ── Smooth brush ──────────────────────────────────────────────────────────
   const smoothMat = new THREE.MeshBasicNodeMaterial();
-  smoothMat.colorNode = Fn(() => {
+  smoothMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
 
@@ -145,7 +140,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
 
   // ── Flatten brush ─────────────────────────────────────────────────────────
   const flattenMat = new THREE.MeshBasicNodeMaterial();
-  flattenMat.colorNode = Fn(() => {
+  flattenMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
     const targetH  = texture(srcNode, uBrushUV).r;
@@ -157,46 +152,39 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   })();
   const flattenQuad = new QuadMesh(flattenMat);
 
-  // ── Noise brush (FBM) ─────────────────────────────────────────────────────
+  // ── Noise brush (coherent Perlin FBM) ─────────────────────────────────────
+  // The FBM lattice lives in fixed UV space (not brush space) so overlapping
+  // stamps along a stroke reinforce the same bumps instead of averaging to mush.
   const noiseMat = new THREE.MeshBasicNodeMaterial();
-  noiseMat.colorNode = Fn(() => {
+  noiseMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
 
-    const freq = uNoiseScale.mul(float(HEIGHTMAP_SIZE));
-    const sx   = uBrushUV.x.mul(float(973.1));
-    const sy   = uBrushUV.y.mul(float(831.7));
-
-    const px1 = uvCoord.x.mul(freq).add(sx);
-    const py1 = uvCoord.y.mul(freq).add(sy);
-    const r1  = fract(sin(px1.mul(float(127.1)).add(py1.mul(float(311.7)))).mul(float(43758.5453)));
-
-    const px2 = uvCoord.x.mul(freq.mul(float(2))).add(sx.mul(float(1.7))).add(float(100));
-    const py2 = uvCoord.y.mul(freq.mul(float(2))).add(sy.mul(float(1.3))).add(float(200));
-    const r2  = fract(sin(px2.mul(float(127.1)).add(py2.mul(float(311.7)))).mul(float(43758.5453)));
-
-    const px3 = uvCoord.x.mul(freq.mul(float(4))).add(sx.mul(float(2.3))).add(float(300));
-    const py3 = uvCoord.y.mul(freq.mul(float(4))).add(sy.mul(float(1.9))).add(float(400));
-    const r3  = fract(sin(px3.mul(float(127.1)).add(py3.mul(float(311.7)))).mul(float(43758.5453)));
-
-    const px4 = uvCoord.x.mul(freq.mul(float(8))).add(sx.mul(float(0.7))).add(float(500));
-    const py4 = uvCoord.y.mul(freq.mul(float(8))).add(sy.mul(float(2.7))).add(float(600));
-    const r4  = fract(sin(px4.mul(float(127.1)).add(py4.mul(float(311.7)))).mul(float(43758.5453)));
+    // uNoiseScale 0.1..3.0 → 10..300 lattice cells across the map (205 m..7 m features).
+    const freq = uNoiseScale.mul(float(100));
+    const px   = uvCoord.x.mul(freq);
+    const py   = uvCoord.y.mul(freq);
 
     const use2 = step(float(1.5), uNoiseOctaves);
     const use3 = step(float(2.5), uNoiseOctaves);
     const use4 = step(float(3.5), uNoiseOctaves);
 
-    const raw    = r1.mul(float(0.5))
-      .add(r2.mul(float(0.25)).mul(use2))
-      .add(r3.mul(float(0.125)).mul(use3))
-      .add(r4.mul(float(0.0625)).mul(use4));
+    // Distinct z-slices decorrelate the octaves.
+    const n1 = mx_noise_float(vec3(px, py, float(7.3)));
+    const n2 = mx_noise_float(vec3(px.mul(float(2.02)), py.mul(float(2.02)), float(19.1)));
+    const n3 = mx_noise_float(vec3(px.mul(float(4.05)), py.mul(float(4.05)), float(31.7)));
+    const n4 = mx_noise_float(vec3(px.mul(float(8.11)), py.mul(float(8.11)), float(53.9)));
+
+    const raw = n1.mul(float(0.5))
+      .add(n2.mul(float(0.25)).mul(use2))
+      .add(n3.mul(float(0.125)).mul(use3))
+      .add(n4.mul(float(0.0625)).mul(use4));
     const maxRaw = float(0.5)
       .add(float(0.25).mul(use2))
       .add(float(0.125).mul(use3))
       .add(float(0.0625).mul(use4));
 
-    const noiseVal = raw.div(maxRaw).mul(float(2)).sub(float(1));
+    const noiseVal = raw.div(maxRaw); // ≈ [-1, 1]
     const falloff  = getBrushFalloff(uvCoord);
     const delta    = pow(falloff, uFalloff).mul(noiseVal).mul(uStrength).mul(float(6)).mul(edgeFade(uvCoord));
 
@@ -206,7 +194,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
 
   // ── Terrace brush ─────────────────────────────────────────────────────────
   const terraceMat = new THREE.MeshBasicNodeMaterial();
-  terraceMat.colorNode = Fn(() => {
+  terraceMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
 
@@ -223,7 +211,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   // Stamp shape uses radial distance for the plateau profile; mask modulates
   // the per-pixel influence so the shape clips to the current brush footprint.
   const plateauMat = new THREE.MeshBasicNodeMaterial();
-  plateauMat.colorNode = Fn(() => {
+  plateauMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
     const d        = length(uvCoord.sub(uBrushUV));
@@ -238,7 +226,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
 
   // ── Crater brush ──────────────────────────────────────────────────────────
   const craterMat = new THREE.MeshBasicNodeMaterial();
-  craterMat.colorNode = Fn(() => {
+  craterMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
     const d        = length(uvCoord.sub(uBrushUV));
@@ -253,7 +241,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
 
   // ── Smudge / Push brush ───────────────────────────────────────────────────
   const smudgeMat = new THREE.MeshBasicNodeMaterial();
-  smudgeMat.colorNode = Fn(() => {
+  smudgeMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
 
@@ -270,7 +258,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
 
   // ── Contrast brush ────────────────────────────────────────────────────────
   const contrastMat = new THREE.MeshBasicNodeMaterial();
-  contrastMat.colorNode = Fn(() => {
+  contrastMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
 
@@ -294,7 +282,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
 
   // ── Thermal erosion brush ─────────────────────────────────────────────────
   const thermalMat = new THREE.MeshBasicNodeMaterial();
-  thermalMat.colorNode = Fn(() => {
+  thermalMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
 
@@ -326,7 +314,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   // Applied once on second click. Uses lateral distance from A→B segment rather
   // than a brush-centered mask; mask does not apply to this tool.
   const rampMat = new THREE.MeshBasicNodeMaterial();
-  rampMat.colorNode = Fn(() => {
+  rampMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
 
@@ -353,132 +341,260 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   })();
   const rampQuad = new QuadMesh(rampMat);
 
-  // ── GPU copy (undo / redo snapshots) ─────────────────────────────────────
+  // ── Copy / snapshot / restore passes ──────────────────────────────────────
   const copyMat = new THREE.MeshBasicNodeMaterial();
-  copyMat.colorNode = Fn(() =>
+  copyMat.fragmentNode = Fn(() =>
     vec4(texture(srcNode, uv()).r, float(0), float(0), float(1)),
   )();
   const copyQuad = new QuadMesh(copyMat);
 
-  const MAX_HISTORY = 25;
-  const undoStack   = [];
-  const redoStack   = [];
+  // Snapshot: read a sub-rect of a big RT into a small rect-sized RT.
+  const snapSrcNode = texture(rtMain.texture);
+  const uSnapOffset = uniform(new THREE.Vector2(0, 0));
+  const uSnapScale  = uniform(new THREE.Vector2(1, 1));
+  const snapMat = new THREE.MeshBasicNodeMaterial();
+  snapMat.fragmentNode = Fn(() =>
+    vec4(texture(snapSrcNode, uv().mul(uSnapScale).add(uSnapOffset)).r, float(0), float(0), float(1)),
+  )();
+  const snapQuad = new QuadMesh(snapMat);
 
-  function blitToRT(srcTexture, dstRT) {
-    srcNode.value = srcTexture;
+  // Restore: write a small rect RT back into its sub-rect of rtMain (scissored).
+  const restSrcNode = texture(rtMain.texture);
+  const uRestOffset = uniform(new THREE.Vector2(0, 0));
+  const uRestScale  = uniform(new THREE.Vector2(1, 1));
+  const restMat = new THREE.MeshBasicNodeMaterial();
+  restMat.fragmentNode = Fn(() =>
+    vec4(texture(restSrcNode, uv().sub(uRestOffset).div(uRestScale)).r, float(0), float(0), float(1)),
+  )();
+  const restQuad = new QuadMesh(restMat);
+
+  // ── Render helpers ────────────────────────────────────────────────────────
+  // rect is in logical texel coords ({x, y, w, h}, y = row index in uv space).
+  // On WebGPU, QuadMesh uvs are pre-flipped (uv.y=0 at NDC top) and WGSL never
+  // flips sampling (isFlipY() === false), so logical v == storage row == the
+  // top-origin scissor y — the rect passes through unchanged. autoClear must be
+  // OFF for scissored passes: WebGPU's clear loadOp ignores scissor and would
+  // wipe the rest of the map.
+  function _render(quad, dstRT, rect) {
+    const prevAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    if (rect) {
+      dstRT.scissor.set(rect.x, rect.y, rect.w, rect.h);
+      renderer.setScissorTest(true);
+    }
     renderer.setRenderTarget(dstRT);
-    copyQuad.render(renderer);
+    quad.render(renderer);
     renderer.setRenderTarget(null);
+    if (rect) renderer.setScissorTest(false);
+    renderer.autoClear = prevAutoClear;
   }
 
-  function cloneCurrentHeight() {
-    const rt = makeHeightRT();
-    blitToRT(rts[readIdx].texture, rt);
-    return rt;
+  function _clampRect(x0, y0, x1, y1) {
+    const S = HEIGHTMAP_SIZE;
+    x0 = Math.max(0, Math.min(S, x0));
+    y0 = Math.max(0, Math.min(S, y0));
+    x1 = Math.max(0, Math.min(S, x1));
+    y1 = Math.max(0, Math.min(S, y1));
+    if (x1 - x0 < 1 || y1 - y0 < 1) return null;
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
 
-  function restoreFrom(snapshotRT) {
-    blitToRT(snapshotRT.texture, rts[readIdx]);
-    heightTexNode.value = rts[readIdx].texture;
+  function _rectFromUV(u0, v0, u1, v1, marginTexels = 2) {
+    const S = HEIGHTMAP_SIZE;
+    return _clampRect(
+      Math.floor(u0 * S) - marginTexels,
+      Math.floor(v0 * S) - marginTexels,
+      Math.ceil(u1 * S) + marginTexels,
+      Math.ceil(v1 * S) + marginTexels,
+    );
+  }
+
+  // Rotated square masks reach out to radius·√2; 1.45 covers all brush shapes.
+  const BRUSH_REACH = 1.45;
+
+  function _brushRect() {
+    const c = uBrushUV.value;
+    const r = uRadius.value * BRUSH_REACH;
+    return _rectFromUV(c.x - r, c.y - r, c.x + r, c.y + r);
+  }
+
+  function _expandRect(rect, m) {
+    return _clampRect(rect.x - m, rect.y - m, rect.x + rect.w + m, rect.y + rect.h + m);
+  }
+
+  function _unionRect(a, b) {
+    if (!a) return b ? { ...b } : null;
+    if (!b) return { ...a };
+    const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
+    const x1 = Math.max(a.x + a.w, b.x + b.w), y1 = Math.max(a.y + a.h, b.y + b.h);
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  const FULL_RECT = { x: 0, y: 0, w: HEIGHTMAP_SIZE, h: HEIGHTMAP_SIZE };
+
+  // ── Stroke + history state ────────────────────────────────────────────────
+  const MAX_HISTORY = 25;
+  const undoStack   = []; // entries: { rt, rect }
+  const redoStack   = [];
+  let strokeOpen  = false;
+  let strokeRect  = null;
+
+  function blitFull(srcTexture, dstRT) {
+    srcNode.value = srcTexture;
+    _render(copyQuad, dstRT, null);
+  }
+
+  function snapshotRect(srcRT, rect) {
+    const S  = HEIGHTMAP_SIZE;
+    const rt = makeHeightRT(rect.w, rect.h);
+    snapSrcNode.value = srcRT.texture;
+    uSnapOffset.value.set(rect.x / S, rect.y / S);
+    uSnapScale.value.set(rect.w / S, rect.h / S);
+    _render(snapQuad, rt, null);
+    return { rt, rect: { ...rect } };
+  }
+
+  function restoreRect(entry) {
+    const S = HEIGHTMAP_SIZE;
+    restSrcNode.value = entry.rt.texture;
+    uRestOffset.value.set(entry.rect.x / S, entry.rect.y / S);
+    uRestScale.value.set(entry.rect.w / S, entry.rect.h / S);
+    _render(restQuad, rtMain, entry.rect);
   }
 
   function trimStack(stack) {
-    while (stack.length >= MAX_HISTORY) stack.shift().dispose();
+    while (stack.length >= MAX_HISTORY) stack.shift().rt.dispose();
   }
 
   function disposeStack(stack) {
-    for (const rt of stack) rt.dispose();
+    for (const entry of stack) entry.rt.dispose();
     stack.length = 0;
   }
 
-  // ── Internal ping-pong step ───────────────────────────────────────────────
-  function _runPass(quad) {
-    const writeIdx = 1 - readIdx;
-    srcNode.value = rts[readIdx].texture;
-
-    renderer.setRenderTarget(rts[writeIdx]);
-    quad.render(renderer);
-    renderer.setRenderTarget(null);
-
-    readIdx = writeIdx;
-    heightTexNode.value = rts[readIdx].texture;
+  // ── Core stamp pass ───────────────────────────────────────────────────────
+  // 1. Copy the read neighbourhood (write rect + tap margin) main → scratch.
+  // 2. Run the brush shader reading scratch, writing main, scissored to the
+  //    write rect. Stamp cost scales with brush size, not map size.
+  function _applyBrush(quad, writeRect, readMarginTexels = 4) {
+    if (!writeRect) return;
+    if (!strokeOpen) beginStroke(); // defensive — callers should beginStroke first
+    const readRect = _expandRect(writeRect, readMarginTexels) ?? writeRect;
+    srcNode.value = rtMain.texture;
+    _render(copyQuad, rtScratch, readRect);
+    srcNode.value = rtScratch.texture;
+    _render(quad, rtMain, writeRect);
+    strokeRect = _unionRect(strokeRect, writeRect);
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
   function paint(brushUVx, brushUVy, direction, stamp = "smooth") {
     uBrushUV.value.set(brushUVx, brushUVy);
     uDir.value = direction;
-    if      (stamp === "plateau") _runPass(plateauQuad);
-    else if (stamp === "crater")  _runPass(craterQuad);
-    else                          _runPass(raiseQuad);
+    const quad = stamp === "plateau" ? plateauQuad
+               : stamp === "crater"  ? craterQuad
+               : raiseQuad;
+    _applyBrush(quad, _brushRect());
   }
 
   function smooth(brushUVx, brushUVy) {
     uBrushUV.value.set(brushUVx, brushUVy);
-    _runPass(smoothQuad);
+    _applyBrush(smoothQuad, _brushRect());
   }
 
   function flatten(brushUVx, brushUVy) {
     uBrushUV.value.set(brushUVx, brushUVy);
-    _runPass(flattenQuad);
+    _applyBrush(flattenQuad, _brushRect());
   }
 
   function noise(brushUVx, brushUVy) {
     uBrushUV.value.set(brushUVx, brushUVy);
-    _runPass(noiseQuad);
+    _applyBrush(noiseQuad, _brushRect());
   }
 
   function terrace(brushUVx, brushUVy) {
     uBrushUV.value.set(brushUVx, brushUVy);
-    _runPass(terraceQuad);
+    _applyBrush(terraceQuad, _brushRect());
   }
 
   function smudge(brushUVx, brushUVy) {
     uBrushUV.value.set(brushUVx, brushUVy);
-    _runPass(smudgeQuad);
+    // Smudge reads up to radius·0.5 behind the write rect.
+    const smearMargin = Math.ceil(uRadius.value * 0.5 * HEIGHTMAP_SIZE) + 2;
+    _applyBrush(smudgeQuad, _brushRect(), smearMargin);
   }
 
   function contrast(brushUVx, brushUVy) {
     uBrushUV.value.set(brushUVx, brushUVy);
-    _runPass(contrastQuad);
+    _applyBrush(contrastQuad, _brushRect());
   }
 
   const thermalConfig = { iterations: 5 };
 
   function thermal(brushUVx, brushUVy) {
     uBrushUV.value.set(brushUVx, brushUVy);
-    for (let i = 0; i < thermalConfig.iterations; i++) _runPass(thermalQuad);
+    const rect = _brushRect();
+    for (let i = 0; i < thermalConfig.iterations; i++) _applyBrush(thermalQuad, rect);
   }
 
   function ramp(aUV, bUV) {
     uRampA.value.set(aUV.u, aUV.v);
     uRampB.value.set(bUV.u, bUV.v);
-    _runPass(rampQuad);
+    const w = uRampWidth.value;
+    const rect = _rectFromUV(
+      Math.min(aUV.u, bUV.u) - w, Math.min(aUV.v, bUV.v) - w,
+      Math.max(aUV.u, bUV.u) + w, Math.max(aUV.v, bUV.v) + w,
+    );
+    _applyBrush(rampQuad, rect);
+  }
+
+  /**
+   * Run a full-map generator pass (e.g. GPU procedural terrain). The quad's
+   * material must not read srcNode. Caller manages begin/endStroke so a burst
+   * of live slider updates collapses into one undo entry.
+   */
+  function runGeneratorPass(quad) {
+    if (!strokeOpen) beginStroke();
+    _render(quad, rtMain, null);
+    strokeRect = _unionRect(strokeRect, FULL_RECT);
   }
 
   function beginStroke() {
+    if (strokeOpen) endStroke();
+    blitFull(rtMain.texture, rtPreStroke);
+    strokeRect = null;
+    strokeOpen = true;
+  }
+
+  /** Close the stroke and push its dirty rect (pre-stroke content) onto undo. */
+  function endStroke() {
+    if (!strokeOpen) return;
+    strokeOpen = false;
+    if (!strokeRect) return; // click without stamps — nothing to record
     disposeStack(redoStack);
     trimStack(undoStack);
-    undoStack.push(cloneCurrentHeight());
+    undoStack.push(snapshotRect(rtPreStroke, strokeRect));
+    strokeRect = null;
   }
 
   function undo() {
+    endStroke();
     if (undoStack.length === 0) return false;
     trimStack(redoStack);
-    redoStack.push(cloneCurrentHeight());
-    const prev = undoStack.pop();
-    restoreFrom(prev);
-    prev.dispose();
+    const entry = undoStack.pop();
+    redoStack.push(snapshotRect(rtMain, entry.rect));
+    restoreRect(entry);
+    entry.rt.dispose();
     return true;
   }
 
   function redo() {
+    endStroke();
     if (redoStack.length === 0) return false;
     trimStack(undoStack);
-    undoStack.push(cloneCurrentHeight());
-    const next = redoStack.pop();
-    restoreFrom(next);
-    next.dispose();
+    const entry = redoStack.pop();
+    undoStack.push(snapshotRect(rtMain, entry.rect));
+    restoreRect(entry);
+    entry.rt.dispose();
     return true;
   }
 
@@ -487,9 +603,6 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     if (heights.length !== expected) {
       throw new Error(`Expected ${expected} height samples, got ${heights.length}`);
     }
-
-    disposeStack(undoStack);
-    disposeStack(redoStack);
 
     const data = heights instanceof Float32Array ? heights : new Float32Array(heights);
     const tex = new THREE.DataTexture(
@@ -503,12 +616,30 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     tex.minFilter = tex.magFilter = THREE.LinearFilter;
     tex.needsUpdate = true;
 
-    blitToRT(tex, rts[0]);
-    blitToRT(tex, rts[1]);
-    readIdx = 0;
-    heightTexNode.value = rts[0].texture;
+    // Wrapped in a stroke so Generate / Load / carve commits are undoable
+    // instead of silently wiping the history like the old implementation.
+    beginStroke();
+    blitFull(tex, rtMain);
+    strokeRect = { ...FULL_RECT };
+    endStroke();
     tex.dispose();
   }
+
+  // ── Initial upload ────────────────────────────────────────────────────────
+  {
+    const initNode  = texture(initialDataTex);
+    const uploadMat = new THREE.MeshBasicNodeMaterial();
+    uploadMat.fragmentNode = Fn(() =>
+      vec4(texture(initNode, uv()).r, float(0), float(0), float(1)),
+    )();
+    const q = new QuadMesh(uploadMat);
+    _render(q, rtMain, null);
+    uploadMat.dispose();
+  }
+
+  // Permanent binding — rtMain never changes identity, so consumers that grab
+  // heightTexNode.value once (snow, ocean) stay valid forever.
+  heightTexNode.value = rtMain.texture;
 
   return {
     paint,
@@ -521,9 +652,11 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     thermal,
     ramp,
     beginStroke,
+    endStroke,
     undo,
     redo,
     replaceHeightData,
+    runGeneratorPass,
     maskNode,
     uMaskRotation,
     uBrushUV,
@@ -540,6 +673,6 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     uThermalSlope,
     uRampWidth,
     thermalConfig,
-    getCurrentRT: () => rts[readIdx],
+    getCurrentRT: () => rtMain,
   };
 }

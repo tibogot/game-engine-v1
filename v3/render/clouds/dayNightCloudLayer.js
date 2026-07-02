@@ -9,14 +9,17 @@
  * present-bloom and the terrain/ocean cloud-shadow composite are DEFERRED.
  * Do NOT edit the lab files from v2.
  *
- * Volumetric cloud LAYER — superjet-grade density, framed as a sky-wide slab.
+ * Volumetric cloud LAYER — Nubis/Horizon-grade density, framed as a sky-wide slab.
  *
- * This marches the SAME seamless 3D Perlin-FBM volume that makes
- * `clouds_terrain_1600-superjet-optimized.html` (and v3) look good — instead of
- * a cheap stretched 2D texture. The only thing that changes vs. the superjet box
- * is the SHAPE: rather than carving one spherical blob with an SDF mask, we tile
- * the noise horizontally and cut it with a vertical height gradient, so it reads
- * as a whole-sky cloud deck you view from below but never enter.
+ * Density field (the Nubis / GPU Pro 7 recipe, replacing the old Perlin-only
+ * volume): a 128³ PERLIN-WORLEY base volume (Perlin FBM dilated by inverted
+ * Worley → connected cauliflower masses instead of smooth blobs, then
+ * remap-eroded by higher-frequency Worley octaves) + a separate 64³ WORLEY-FBM
+ * detail volume that erodes cloud edges with a height-dependent inversion
+ * (wispy at the base, billowy at the top). Both are tileable: periodic Perlin
+ * lattice + wrapped Worley cell grids. The SHAPE stays a curved shell: noise
+ * tiled horizontally, cut by a vertical height gradient, so it reads as a
+ * whole-sky cloud deck.
  *
  * Why it's still cheap for a grounded game: the camera never approaches the
  * clouds, so each ray only marches the thin slab [base, base+thickness] between
@@ -34,7 +37,6 @@ import {
   normalize, dot, max, min, mix, smoothstep, pow, exp, sin, fract, abs,
   length, sqrt,
 } from "three/tsl";
-import { ImprovedNoise } from "three/addons/math/ImprovedNoise.js";
 import { createGodRaysPass } from "./godRaysPass.js";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
@@ -60,68 +62,187 @@ function seededRandom(seed) {
   };
 }
 
-function fbm(perlin, x, y, z, octaves, persistence, lacunarity) {
-  let total = 0, frequency = 1, amplitude = 1, maxValue = 0;
-  for (let i = 0; i < octaves; i++) {
-    total += perlin.noise(x * frequency, y * frequency, z * frequency) * amplitude;
-    maxValue += amplitude;
-    amplitude *= persistence;
-    frequency *= lacunarity;
+/**
+ * Periodic (tileable) improved Perlin noise. The lattice coordinates wrap at
+ * `period`, so an FBM whose octave frequency equals its period tiles seamlessly
+ * — no 8-corner blend needed (which both cost 8× and muddied the contrast).
+ * Returns values in roughly [-1, 1].
+ */
+function makePeriodicPerlin(rng) {
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = (rng() * (i + 1)) | 0;
+    const t = p[i]; p[i] = p[j]; p[j] = t;
   }
-  return total / Math.max(1e-6, maxValue);
+  const perm = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+
+  const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  function grad(hash, x, y, z) {
+    const h = hash & 15;
+    const u = h < 8 ? x : y;
+    const v = h < 4 ? y : h === 12 || h === 14 ? x : z;
+    return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+  }
+
+  return function noise(x, y, z, period) {
+    const Xf = Math.floor(x), Yf = Math.floor(y), Zf = Math.floor(z);
+    const xf = x - Xf, yf = y - Yf, zf = z - Zf;
+    const X0 = ((Xf % period) + period) % period;
+    const Y0 = ((Yf % period) + period) % period;
+    const Z0 = ((Zf % period) + period) % period;
+    const X1 = (X0 + 1) % period, Y1 = (Y0 + 1) % period, Z1 = (Z0 + 1) % period;
+    const u = fade(xf), v = fade(yf), w = fade(zf);
+    const h = (xi, yi, zi) => perm[perm[perm[xi] + yi] + zi];
+    return lerp(
+      lerp(
+        lerp(grad(h(X0, Y0, Z0), xf, yf, zf), grad(h(X1, Y0, Z0), xf - 1, yf, zf), u),
+        lerp(grad(h(X0, Y1, Z0), xf, yf - 1, zf), grad(h(X1, Y1, Z0), xf - 1, yf - 1, zf), u),
+        v,
+      ),
+      lerp(
+        lerp(grad(h(X0, Y0, Z1), xf, yf, zf - 1), grad(h(X1, Y0, Z1), xf - 1, yf, zf - 1), u),
+        lerp(grad(h(X0, Y1, Z1), xf, yf - 1, zf - 1), grad(h(X1, Y1, Z1), xf - 1, yf - 1, zf - 1), u),
+        v,
+      ),
+      w,
+    );
+  };
+}
+
+/** Tileable Perlin FBM over the unit cube; octave frequency = wrap period. */
+function perlinFbm(noise, x, y, z, baseFreq, octaves) {
+  let sum = 0, amp = 1, norm = 0, freq = baseFreq;
+  for (let o = 0; o < octaves; o++) {
+    sum += noise(x * freq, y * freq, z * freq, freq) * amp;
+    norm += amp;
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return sum / norm * 0.5 + 0.5; // → 0..1
 }
 
 /**
- * Seamless (tileable) 3D Perlin-FBM volume — same corner-blend trick as superjet
- * /v3: blends the 8 shifted copies so opposite faces match. Stores the raw 0..1
- * noise (NOT a thresholded mask) so coverage stays a live shader uniform.
+ * Tileable inverted Worley (cellular) noise: one feature point per cell on a
+ * `freq`³ grid that wraps, evaluated over the 27 neighbouring cells. Inverted
+ * (1 - distance) so cloud "cells" read as puffs, not veins.
  */
-function bakeNoiseVolume(size, opt) {
-  const { noiseScale, octaves, persistence, lacunarity, intensity, seed } = opt;
-  const data = new Uint8Array(size * size * size);
-  const perlin = new ImprovedNoise(seededRandom(seed >>> 0));
-  const s = noiseScale;
-  const args = [octaves, persistence, lacunarity];
-  let idx = 0;
-  for (let z = 0; z < size; z++) {
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const nx = x / (size - 1), ny = y / (size - 1), nz = z / (size - 1);
-        const bx = nx * s + seed, by = ny * s + seed, bz = nz * s + seed;
-        const n1 = fbm(perlin, bx, by, bz, ...args);
-        const n2 = fbm(perlin, bx - s, by, bz, ...args);
-        const n3 = fbm(perlin, bx, by - s, bz, ...args);
-        const n4 = fbm(perlin, bx, by, bz - s, ...args);
-        const n5 = fbm(perlin, bx - s, by - s, bz, ...args);
-        const n6 = fbm(perlin, bx - s, by, bz - s, ...args);
-        const n7 = fbm(perlin, bx, by - s, bz - s, ...args);
-        const n8 = fbm(perlin, bx - s, by - s, bz - s, ...args);
-        const wx = 1 - nx, wy = 1 - ny, wz = 1 - nz;
-        let v =
-          n1 * wx * wy * wz + n2 * nx * wy * wz + n3 * wx * ny * wz +
-          n4 * wx * wy * nz + n5 * nx * ny * wz + n6 * nx * wy * nz +
-          n7 * wx * ny * nz + n8 * nx * ny * nz;
-        v = (v + 1) / 2;
-        data[idx++] = Math.pow(Math.max(0, v), intensity) * 255;
+function makeWorley(freq, rng) {
+  const pts = new Float32Array(freq * freq * freq * 3);
+  for (let i = 0; i < freq * freq * freq; i++) {
+    pts[i * 3] = rng(); pts[i * 3 + 1] = rng(); pts[i * 3 + 2] = rng();
+  }
+  return function worley(x, y, z) {
+    const fx = x * freq, fy = y * freq, fz = z * freq;
+    const cx = Math.floor(fx), cy = Math.floor(fy), cz = Math.floor(fz);
+    let minD2 = 1e10;
+    for (let dz = -1; dz <= 1; dz++) {
+      const wz = (((cz + dz) % freq) + freq) % freq;
+      for (let dy = -1; dy <= 1; dy++) {
+        const wy = (((cy + dy) % freq) + freq) % freq;
+        for (let dx = -1; dx <= 1; dx++) {
+          const wx = (((cx + dx) % freq) + freq) % freq;
+          const idx = ((wz * freq + wy) * freq + wx) * 3;
+          const px = cx + dx + pts[idx] - fx;
+          const py = cy + dy + pts[idx + 1] - fy;
+          const pz = cz + dz + pts[idx + 2] - fz;
+          const d2 = px * px + py * py + pz * pz;
+          if (d2 < minD2) minD2 = d2;
+        }
+      }
+    }
+    return 1 - Math.min(1, Math.sqrt(minD2));
+  };
+}
+
+/**
+ * Bakes the two Nubis cloud volumes (GPU Pro 7 "The Real-Time Volumetric
+ * Cloudscapes of Horizon: Zero Dawn" layout):
+ *
+ *   BASE 128³ RGBA — R: Perlin-Worley (Perlin FBM dilated by low-freq Worley),
+ *                    G/B/A: Worley FBM at rising frequencies. The shader
+ *                    combines them: base = remap(R, worleyFbm(G,B,A)-1, 1, 0, 1),
+ *                    which carves cauliflower structure out of the Perlin mass.
+ *   DETAIL 64³ RGBA — Worley FBM at three frequencies for edge erosion
+ *                    (combined + height-inverted in the shader).
+ */
+function bakeCloudNoiseTextures(seed) {
+  const rng = seededRandom(seed >>> 0);
+  const perlin = makePeriodicPerlin(rng);
+  const w4 = makeWorley(4, rng);
+  const w8 = makeWorley(8, rng);
+  const w16 = makeWorley(16, rng);
+  const w32 = makeWorley(32, rng);
+
+  const BS = 128;
+  const base = new Uint8Array(BS * BS * BS * 4);
+  let i = 0;
+  for (let z = 0; z < BS; z++) {
+    const nz = z / BS; // divide by SIZE (not size-1) so texel 0 ≠ texel N-1 → seamless wrap
+    for (let y = 0; y < BS; y++) {
+      const ny = y / BS;
+      for (let x = 0; x < BS; x++) {
+        const nx = x / BS;
+        const pf = perlinFbm(perlin, nx, ny, nz, 4, 5);
+        const a4 = w4(nx, ny, nz);
+        const a8 = w8(nx, ny, nz);
+        const a16 = w16(nx, ny, nz);
+        const a32 = w32(nx, ny, nz);
+        const wf4 = a4 * 0.625 + a8 * 0.25 + a16 * 0.125;
+        const wf8 = a8 * 0.625 + a16 * 0.25 + a32 * 0.125;
+        const wf16 = a16 * 0.75 + a32 * 0.25;
+        // Perlin-Worley: remap(perlin, 0, 1, worley, 1) — Worley "inflates" the
+        // Perlin field from below, connecting it into rounded masses.
+        const pw = wf4 + pf * (1 - wf4);
+        base[i++] = pw * 255;
+        base[i++] = wf4 * 255;
+        base[i++] = wf8 * 255;
+        base[i++] = wf16 * 255;
       }
     }
   }
-  const tex = new THREE.Data3DTexture(data, size, size, size);
-  tex.format = THREE.RedFormat;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.wrapS = tex.wrapT = tex.wrapR = THREE.RepeatWrapping;
-  tex.unpackAlignment = 1;
-  tex.needsUpdate = true;
-  return tex;
+  const baseTexture = new THREE.Data3DTexture(base, BS, BS, BS);
+  baseTexture.format = THREE.RGBAFormat;
+  baseTexture.minFilter = THREE.LinearFilter;
+  baseTexture.magFilter = THREE.LinearFilter;
+  baseTexture.wrapS = baseTexture.wrapT = baseTexture.wrapR = THREE.RepeatWrapping;
+  baseTexture.needsUpdate = true;
+
+  const d8 = makeWorley(8, rng);
+  const d16 = makeWorley(16, rng);
+  const d32 = makeWorley(32, rng);
+  const DS = 64;
+  const detail = new Uint8Array(DS * DS * DS * 4);
+  i = 0;
+  for (let z = 0; z < DS; z++) {
+    const nz = z / DS;
+    for (let y = 0; y < DS; y++) {
+      const ny = y / DS;
+      for (let x = 0; x < DS; x++) {
+        const nx = x / DS;
+        detail[i++] = d8(nx, ny, nz) * 255;
+        detail[i++] = d16(nx, ny, nz) * 255;
+        detail[i++] = d32(nx, ny, nz) * 255;
+        detail[i++] = 255;
+      }
+    }
+  }
+  const detailTexture = new THREE.Data3DTexture(detail, DS, DS, DS);
+  detailTexture.format = THREE.RGBAFormat;
+  detailTexture.minFilter = THREE.LinearFilter;
+  detailTexture.magFilter = THREE.LinearFilter;
+  detailTexture.wrapS = detailTexture.wrapT = detailTexture.wrapR = THREE.RepeatWrapping;
+  detailTexture.needsUpdate = true;
+
+  return { baseTexture, detailTexture };
 }
 
 export function createDayNightCloudLayer({ scene, camera, renderer }) {
-  const volumeTexture = bakeNoiseVolume(96, {
-    noiseScale: 3.5, octaves: 5, persistence: 0.5,
-    lacunarity: 3.0, intensity: 1.0, seed: 137,
-  });
-  const volTex = texture3D(volumeTexture, null, 0);
+  const { baseTexture, detailTexture } = bakeCloudNoiseTextures(137);
+  const baseTex = texture3D(baseTexture, null, 0);
+  const detailTex = texture3D(detailTexture, null, 0);
 
   // ── Uniforms ─────────────────────────────────────────────────────────────
   const uBase = uniform(1800);
@@ -208,6 +329,16 @@ export function createDayNightCloudLayer({ scene, camera, renderer }) {
   // Planet center sits directly under the camera at depth R (ground ≈ y 0).
   const planetCenter = () => vec3(cameraPosition.x, uPlanetRadius.negate(), cameraPosition.z);
 
+  // Nubis base-shape combine: Perlin-Worley (R) remap-eroded from below by the
+  // Worley FBM octaves (G/B/A). This is what turns smooth Perlin blobs into
+  // connected cauliflower masses. Shared by the full + cheap samplers.
+  const baseShape = Fn(([coord]) => {
+    const b4 = baseTex.sample(coord);
+    const lowFbm = b4.g.mul(0.625).add(b4.b.mul(0.25)).add(b4.a.mul(0.125));
+    // remap(R, lowFbm-1, 1, 0, 1)
+    return b4.r.sub(lowFbm.sub(1.0)).div(lowFbm.oneMinus().add(1.0).max(0.05)).clamp(0.0, 1.0);
+  });
+
   const sampleDensity = Fn(([p]) => {
     // Height within the curved shell = radial distance from the planet center.
     const radial = length(p.sub(planetCenter()));
@@ -216,18 +347,24 @@ export function createDayNightCloudLayer({ scene, camera, renderer }) {
     const grad = smoothstep(0.0, uBaseSoft, h).mul(smoothstep(1.0, uTopSoft, h));
 
     const coord = p.mul(uScale).add(uWind);
-    const baseN = volTex.sample(coord).r;
-    const shaped = smoothstep(uCovLow, uCovHigh, baseN).mul(grad).toVar();
+    const shaped = smoothstep(uCovLow, uCovHigh, baseShape(coord)).mul(grad).toVar();
 
-    // Remap erosion (Horizon-style): SUBTRACT the detail from the density and
-    // renormalize, so the iso-surface itself MOVES and detail carves real shape
-    // out of the edges. The old `shaped *= 1-erode·(1-detail)` only ATTENUATED
-    // density — extinction saturated it away so the silhouette never changed.
-    // This is THE erosion difference vs the lab. (Worley A/B detail = later.)
-    const detailN = volTex.sample(coord.mul(uDetailMul).add(uWind.mul(2.0))).r;
-    const erodeAmt = detailN.oneMinus().mul(uErode);
-    shaped.assign(shaped.sub(erodeAmt).max(0.0).div(erodeAmt.oneMinus().max(0.05)));
-    return shaped.mul(uDensityMul);
+    // Detail erosion (Nubis): a separate Worley-FBM volume SUBTRACTS from the
+    // density and renormalizes, so the iso-surface itself moves and the detail
+    // carves real shape out of the edges. Height-dependent inversion makes the
+    // erosion wispy at the cloud base and billowy toward the top. Gated on
+    // shaped > 0 so empty-air samples (most of the march) skip the second fetch.
+    const result = float(0.0).toVar();
+    If(shaped.greaterThan(0.001), () => {
+      const d4 = detailTex.sample(coord.mul(uDetailMul).add(uWind.mul(2.0)));
+      const dFbm = d4.r.mul(0.625).add(d4.g.mul(0.25)).add(d4.b.mul(0.125));
+      const dMod = mix(dFbm, dFbm.oneMinus(), h.mul(8.0).clamp(0.0, 1.0));
+      const erodeAmt = dMod.mul(uErode);
+      result.assign(
+        shaped.sub(erodeAmt).max(0.0).div(erodeAmt.oneMinus().max(0.05)).mul(uDensityMul),
+      );
+    });
+    return result;
   });
 
   // Cheap density for the light march: skips the detail-erosion fetch (halves the
@@ -238,9 +375,8 @@ export function createDayNightCloudLayer({ scene, camera, renderer }) {
     const radial = length(p.sub(planetCenter()));
     const h = radial.sub(uPlanetRadius.add(uBase)).div(uThickness).clamp(0.0, 1.0);
     const grad = smoothstep(0.0, uBaseSoft, h).mul(smoothstep(1.0, uTopSoft, h));
-    const baseN = volTex.sample(p.mul(uScale).add(uWind)).r;
-    return smoothstep(uCovLow, uCovHigh, baseN).mul(grad)
-      .mul(uErode.mul(0.5).oneMinus()).mul(uDensityMul);
+    const shaped = smoothstep(uCovLow, uCovHigh, baseShape(p.mul(uScale).add(uWind)));
+    return shaped.mul(grad).mul(uErode.mul(0.5).oneMinus()).mul(uDensityMul);
   });
 
   const HG = Fn(([g, mu]) => {
@@ -853,7 +989,8 @@ export function createDayNightCloudLayer({ scene, camera, renderer }) {
   function dispose() {
     mesh.geometry.dispose();
     material.dispose();
-    volumeTexture.dispose();
+    baseTexture.dispose();
+    detailTexture.dispose();
     sceneRT.dispose();
     cloudRT.dispose();
     cloudOccMaterial.dispose();
@@ -911,7 +1048,7 @@ export const CLOUD_DEFAULTS = {
   detailMul: 4.0,
   coverage: 0.4,
   softness: 0.12,
-  erode: 0.15,
+  erode: 0.3,
   densityMul: 12.0,
   steps: 128,
   lightSteps: 8,

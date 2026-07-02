@@ -12,7 +12,8 @@ import {
   downloadBuffer,
   pickHeightmapFile,
 } from "../io/heightmapIO.js";
-import { buildProceduralHeightmap, DEFAULT_GEN } from "../terrain/proceduralGen.js";
+import { DEFAULT_GEN } from "../terrain/proceduralGen.js";
+import { createProceduralGenPass } from "../terrain/proceduralGenGpu.js";
 import { initEditorShell } from "../ui/editorShell.js";
 import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
@@ -258,6 +259,9 @@ async function main() {
 
   // sculptBrush uploads the CPU heightmap to its RT and sets heightTexNode.value.
   const sculpt = createSculptBrush(renderer, initialTex, heightTexNode, defaultMaskTex);
+
+  // GPU procedural terrain generator — full-map pass through sculpt.runGeneratorPass.
+  const genPass = createProceduralGenPass();
 
   // ── Snow system ────────────────────────────────────────────────────────────
   // heightTexNode.value is now the live GPU RT set by sculptBrush above.
@@ -787,20 +791,25 @@ async function main() {
   btnStampCrater .addEventListener("click", () => setStickyStamp("crater"));
 
   function syncClampUI() {
-    lblClampMin.textContent = slClampMin.value + "m";
-    lblClampMax.textContent = slClampMax.value + "m";
+    // Slider at either extreme = clamp off (dig below 0 / raise past MAX_HEIGHT).
+    lblClampMin.textContent =
+      Number(slClampMin.value) <= Number(slClampMin.min) ? "Off" : slClampMin.value + "m";
+    lblClampMax.textContent =
+      Number(slClampMax.value) >= Number(slClampMax.max) ? "Off" : slClampMax.value + "m";
   }
   slClampMin.addEventListener("input", () => {
     // Keep min below max with at least 10m gap
     if (Number(slClampMin.value) >= Number(slClampMax.value) - 10)
       slClampMin.value = Number(slClampMax.value) - 10;
-    sculpt.uClampMin.value = Number(slClampMin.value) / MAX_HEIGHT;
+    const v = Number(slClampMin.value);
+    sculpt.uClampMin.value = v <= Number(slClampMin.min) ? -2.0 : v / MAX_HEIGHT;
     syncClampUI();
   });
   slClampMax.addEventListener("input", () => {
     if (Number(slClampMax.value) <= Number(slClampMin.value) + 10)
       slClampMax.value = Number(slClampMin.value) + 10;
-    sculpt.uClampMax.value = Number(slClampMax.value) / MAX_HEIGHT;
+    const v = Number(slClampMax.value);
+    sculpt.uClampMax.value = v >= Number(slClampMax.max) ? 2.0 : v / MAX_HEIGHT;
     syncClampUI();
   });
   syncClampUI();
@@ -868,10 +877,17 @@ async function main() {
     lblGenOffsetZ.textContent = (Number(genOffsetZ.value) / 10).toFixed(1);
   }
 
+  // Live GPU regeneration: a burst of slider changes shares one undo entry
+  // (runGeneratorPass opens a stroke; the timer closes it once tweaking stops).
+  let _genBurstTimer = 0;
   function applyProceduralTerrain() {
     readGenFromUI();
-    sculpt.replaceHeightData(buildProceduralHeightmap(genParams));
-    onHistoryChange();
+    genPass.sync(genParams);
+    sculpt.runGeneratorPass(genPass.quad);
+    clearTimeout(_genBurstTimer);
+    _genBurstTimer = setTimeout(() => { if (!isPainting) sculpt.endStroke(); }, 800);
+    markHeightmapDirty();
+    scheduleHeightmapReadback();
   }
 
   function pushPresetToUI(p) {
@@ -900,9 +916,13 @@ async function main() {
     });
   }
 
+  // Sliders regenerate live (GPU pass — sub-millisecond per update).
   for (const sl of [genScale, genHeight, genOctaves, genWarp, genDropoff, genPlains, genOffsetX, genOffsetZ]) {
-    sl.addEventListener("input", syncGenUI);
+    sl.addEventListener("input", () => { syncGenUI(); applyProceduralTerrain(); });
   }
+  genMode.addEventListener("change", () => applyProceduralTerrain());
+  genShape.addEventListener("change", () => applyProceduralTerrain());
+  genSeed.addEventListener("input", () => applyProceduralTerrain());
   btnGenerate.addEventListener("click", () => applyProceduralTerrain());
   btnRandomSeed.addEventListener("click", () => {
     genSeed.value = Math.floor(Math.random() * 100000);
@@ -1288,6 +1308,15 @@ async function main() {
   });
   syncRampWidthUI();
 
+  // Fire every sculpt slider's input handler once so the GPU uniforms start in
+  // sync with the HTML defaults. The sync*UI helpers only refresh labels — the
+  // erode talus uniform used to sit at ~77° while the slider showed 30°.
+  for (const sl of [slSize, slStr, slFalloff, slTerraceStep, slTerraceSharp,
+                    slNoiseScale, slNoiseOct, slThermalSlope, slThermalIter,
+                    slRampWidth, slClampMin, slClampMax, slMaskRot]) {
+    sl.dispatchEvent(new Event("input"));
+  }
+
   // Initialize tool-options zone visibility for the default sticky mode.
   setMode(stickyMode);
 
@@ -1300,6 +1329,9 @@ async function main() {
 
   // ── CPU heightmap mirror for accurate raycasting on tall terrain ────────────
   const cpuHeightmap    = new Float32Array(HEIGHTMAP_SIZE * HEIGHTMAP_SIZE);
+  // Lowest terrain height in world metres (≤ 0). The cursor ray-march ends at
+  // this plane instead of y=0 so the brush still works inside dug-out pits.
+  let cpuHeightmapMinY  = 0;
   let readbackInFlight  = false;
   let readbackPending   = false;
 
@@ -1316,10 +1348,14 @@ async function main() {
         rt, 0, 0, HEIGHTMAP_SIZE, HEIGHTMAP_SIZE,
       );
       const isHalf = raw instanceof Uint16Array;
+      let minH = 0;
       for (let i = 0; i < HEIGHTMAP_SIZE * HEIGHTMAP_SIZE; i++) {
         const r = raw[i * 4];
-        cpuHeightmap[i] = isHalf ? THREE.DataUtils.fromHalfFloat(r) : r;
+        const v = isHalf ? THREE.DataUtils.fromHalfFloat(r) : r;
+        cpuHeightmap[i] = v;
+        if (v < minH) minH = v;
       }
+      cpuHeightmapMinY = minH * MAX_HEIGHT;
       grassTerrainData.rebuildFromHeightmap(cpuHeightmap, HEIGHTMAP_SIZE, MAX_HEIGHT, WORLD_SIZE);
       treeEnv.syncTreeHeights();
     } finally {
@@ -1331,6 +1367,11 @@ async function main() {
   /** Push CPU height edits (plateau, carve, procedural) to GPU + dependent systems. */
   function pushHeightmapEditsToGpu() {
     sculpt.replaceHeightData(cpuHeightmap);
+    let minH = 0;
+    for (let i = 0; i < cpuHeightmap.length; i++) {
+      if (cpuHeightmap[i] < minH) minH = cpuHeightmap[i];
+    }
+    cpuHeightmapMinY = minH * MAX_HEIGHT;
     grassTerrainData.rebuildFromHeightmap(cpuHeightmap, HEIGHTMAP_SIZE, MAX_HEIGHT, WORLD_SIZE);
     treeEnv.syncTreeHeights();
   }
@@ -1403,6 +1444,7 @@ async function main() {
     if (!lastPaintUV) {
       stampAt(u, v);
       lastPaintUV = { u, v };
+      markHeightmapDirty();
       requestHeightmapReadback();
       return;
     }
@@ -1421,11 +1463,24 @@ async function main() {
       stampAt(lastPaintUV.u + du * t, lastPaintUV.v + dv * t);
     }
     lastPaintUV = { u, v };
+    markHeightmapDirty();
     requestHeightmapReadback();
   }
 
+  // Dirty-flag gate: the hover handler polls this every 150 ms, but the full
+  // readback + grass rebuild + tree resync only runs when the terrain changed.
+  let heightmapDirty    = true; // seed the CPU mirror on boot
+  let _readbackDebounce = 0;
+  function markHeightmapDirty() { heightmapDirty = true; }
   function requestHeightmapReadback() {
+    if (!heightmapDirty) return;
+    heightmapDirty = false;
     syncHeightmapToCPU();
+  }
+  /** Debounced variant for bursty edits (live procedural sliders). */
+  function scheduleHeightmapReadback(delayMs = 120) {
+    clearTimeout(_readbackDebounce);
+    _readbackDebounce = setTimeout(() => requestHeightmapReadback(), delayMs);
   }
 
   // Ray-march terrain intersection: march from camera to ground plane, find
@@ -1434,6 +1489,9 @@ async function main() {
   // derivative exceeded 1), causing the cursor to jitter or vanish.
   function getUV() {
     raycaster.setFromCamera(mouse, camera);
+    // March down to the lowest sculpted level, not just y=0, so the cursor
+    // still lands on terrain inside pits dug below the base plane.
+    gndPlane.constant = Math.max(0, -cpuHeightmapMinY);
     if (!raycaster.ray.intersectPlane(gndPlane, hitPoint)) return null;
 
     const tMax  = raycaster.ray.origin.distanceTo(hitPoint);
@@ -1713,6 +1771,7 @@ async function main() {
 
   renderer.domElement.addEventListener("mouseleave", () => {
     uCursorUV.value.set(-2, -2);
+    if (isPainting) sculpt.endStroke();
     isPainting = false;
     lastPaintUV = null;
   });
@@ -1736,6 +1795,7 @@ async function main() {
       } else {
         sculpt.beginStroke();
         sculpt.ramp(rampStartUV, uvHit);
+        sculpt.endStroke();
         onHistoryChange();
         rampState = "idle";
         rampHint.textContent = "Click start point...";
@@ -1752,6 +1812,7 @@ async function main() {
     if (e.button !== 0) return;
     isPainting = false;
     lastPaintUV = null;
+    sculpt.endStroke(); // close the stroke → push its dirty-rect undo entry
   });
 
   // Use capture phase so our handler fires before OrbitControls' bubble listener.
@@ -1777,6 +1838,7 @@ async function main() {
   setTimeout(() => requestHeightmapReadback(), 0);
 
   function cancelStroke() {
+    if (isPainting) sculpt.endStroke();
     isPainting = false;
     lastPaintUV = null;
   }
@@ -1784,6 +1846,7 @@ async function main() {
   function onHistoryChange() {
     cancelStroke();
     treeEnv.syncTreeHeights();
+    markHeightmapDirty();
     requestHeightmapReadback();
   }
 
