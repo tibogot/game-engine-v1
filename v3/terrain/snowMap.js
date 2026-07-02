@@ -86,6 +86,27 @@ export class SnowMap {
     this.tex.needsUpdate = true;
   }
 
+  /**
+   * Bilinear coverage sample at normalized UV — CPU mirror of the shader's
+   * coverage(). Used to sink the character/vehicles into painted snow.
+   * @returns {number} 0..1
+   */
+  coverageAtUV(u, v) {
+    if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+    const fx = u * SNOW_MAP_RES - 0.5;
+    const fy = v * SNOW_MAP_RES - 0.5;
+    const x0 = Math.max(0, Math.floor(fx));
+    const y0 = Math.max(0, Math.floor(fy));
+    const x1 = Math.min(SNOW_MAP_RES - 1, x0 + 1);
+    const y1 = Math.min(SNOW_MAP_RES - 1, y0 + 1);
+    const tx = Math.min(1, Math.max(0, fx - x0));
+    const ty = Math.min(1, Math.max(0, fy - y0));
+    const d  = this._data;
+    const h0 = d[y0 * SNOW_MAP_RES + x0] * (1 - tx) + d[y0 * SNOW_MAP_RES + x1] * tx;
+    const h1 = d[y1 * SNOW_MAP_RES + x0] * (1 - tx) + d[y1 * SNOW_MAP_RES + x1] * tx;
+    return (h0 * (1 - ty) + h1 * ty) / 255;
+  }
+
   hasSnowNear(cx, cz, radius, threshold = 2) {
     const pxSize = WORLD_SIZE / SNOW_MAP_RES;
     const half   = WORLD_SIZE * 0.5;

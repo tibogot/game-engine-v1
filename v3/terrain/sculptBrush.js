@@ -21,10 +21,16 @@ import {
 } from "three/tsl";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 
+// Height RT precision: half-float quantizes stored heights into ~5-25 cm steps
+// (mantissa is only 10 bits), which reads as contour-line banding in anything
+// shaded from the heightmap — invisible on textured rock, glaring on snow.
+// Upgraded to full float in createSculptBrush when the GPU can filter it.
+let heightRTType = THREE.HalfFloatType;
+
 function makeHeightRT(w = HEIGHTMAP_SIZE, h = HEIGHTMAP_SIZE) {
   const rt = new THREE.RenderTarget(w, h, {
     format:          THREE.RGBAFormat,
-    type:            THREE.HalfFloatType,
+    type:            heightRTType,
     minFilter:       THREE.LinearFilter,
     magFilter:       THREE.LinearFilter,
     generateMipmaps: false,
@@ -36,6 +42,10 @@ function makeHeightRT(w = HEIGHTMAP_SIZE, h = HEIGHTMAP_SIZE) {
 }
 
 export function createSculptBrush(renderer, initialDataTex, heightTexNode, initialMaskTex) {
+  if (renderer?.backend?.device?.features?.has("float32-filterable")) {
+    heightRTType = THREE.FloatType;
+  }
+
   // ── Render targets ─────────────────────────────────────────────────────────
   // rtMain      — the one canonical heightmap. heightTexNode.value points here
   //               permanently, so every consumer (terrain, ocean, snow, grass)

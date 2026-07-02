@@ -211,7 +211,7 @@ function buildRingGrid(N, step) {
 
 // ── Material ──────────────────────────────────────────────────────────────────
 
-function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowMaskTex = null) {
+function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null) {
   const mat = createTileMaterial({
     roughness:     0.95,
     textureScale:  400,
@@ -240,7 +240,15 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
                     .mul(step(float(0), hmV)).mul(step(hmV, float(1)));
   const h = texture(heightTexNode, hmUV).r.mul(hmInBounds);
 
-  mat.positionNode = vec3(positionLocal.x, h.mul(MAX_HEIGHT), positionLocal.z);
+  // Painted snow displaces the terrain itself (snowShared.groundDepth is a
+  // pure function of world XZ, so shared ring-boundary vertices across LOD
+  // levels still land at identical Y — stitching stays crack-free). Inside
+  // the deform tile's footprint groundDepth hands the surface over to the
+  // high-res tile so footprint grooves are never covered by coarse terrain.
+  const wxz = vec2(worldX, worldZ);
+  const terrainY = h.mul(MAX_HEIGHT);
+  const displacedY = snowShared ? terrainY.add(snowShared.groundDepth(wxz)) : terrainY;
+  mat.positionNode = vec3(positionLocal.x, displacedY, positionLocal.z);
 
   // Per-pixel gradient normal (always from fine UV — stays smooth across levels)
   const hL  = texture(heightTexNode, vec2(hmU.sub(texel), hmV)).r;
@@ -250,7 +258,15 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   const flatScale   = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
   const worldNormal = normalize(vec3(hL.sub(hR), flatScale, hD.sub(hUp)));
   const blendedWorldN = splatOverlay ? splatOverlay.blendNormal(worldNormal) : worldNormal;
-  mat.normalNode = normalize(mul(cameraViewMatrix, vec4(blendedWorldN, 0)).xyz);
+  // Painted coverage × slope, from the same shared functions the deform tile
+  // uses — snow can never look different on the two surfaces. Node reused
+  // below for color/roughness/emissive, so it's evaluated once per pixel.
+  const snowCov = snowShared ? snowShared.covBlend(wxz) : null;
+  // Snow smooths the ground: ease the lighting normal toward up where covered.
+  const litWorldN = snowShared
+    ? normalize(mix(blendedWorldN, vec3(0, 1, 0), snowCov.mul(float(0.45))))
+    : blendedWorldN;
+  mat.normalNode = normalize(mul(cameraViewMatrix, vec4(litWorldN, 0)).xyz);
   const baseRoughness = splatOverlay ? splatOverlay.blendRoughness(float(0.95)) : float(0.95);
 
   // Cursor ring (boundary) + mask projection (filled shape preview)
@@ -273,20 +289,17 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   const radialFade   = smoothstep(uCursorRadius, uCursorRadius.mul(float(0.8)), d);
   const maskOverlay  = texture(uBrushMaskNode, rotBrushUV).r.mul(inBoundsX).mul(inBoundsY).mul(radialFade);
 
-  // Splat overlay blends on top of base colour; optional snow overlay sits above terrain.
+  // Splat overlay blends on top of base colour; painted snow shades on top
+  // with the shared snow functions (compression = 0: only the deform tile
+  // shows grooves; out here the trail RT doesn't exist).
   const baseColor = splatOverlay ? splatOverlay.blendColor(mat.colorNode) : mat.colorNode;
   let finalColor = baseColor;
   let finalRoughness = baseRoughness;
-  if (snowMaskTex) {
-    const snowMaskNode = texture(snowMaskTex);
-    const inWorld = step(float(0), hmU).mul(step(hmU, float(1)))
-      .mul(step(float(0), hmV)).mul(step(hmV, float(1)));
-    const paintedSnow = texture(snowMaskNode, hmUV.clamp(0, 1)).r.mul(inWorld);
-    // Terrain-material snow uses the same conservative slope rejection as SnowSystem.
-    const slopeSnow = smoothstep(float(0.55), float(0.78), worldNormal.y);
-    const snowCover = paintedSnow.mul(slopeSnow).clamp(0, 1);
-    finalColor = mix(baseColor, vec3(float(0.88), float(0.93), float(0.98)), snowCover);
-    finalRoughness = mix(baseRoughness, float(0.93), snowCover);
+  if (snowShared) {
+    const zeroComp = float(0);
+    finalColor     = mix(baseColor, snowShared.snowAlbedo(zeroComp), snowCov);
+    finalRoughness = mix(baseRoughness, snowShared.snowRoughness(zeroComp), snowCov);
+    mat.emissiveNode = snowShared.snowSparkle(wxz, zeroComp).mul(snowCov);
   }
 
   mat.colorNode = mix(
@@ -302,7 +315,7 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowMaskTex = null) {
+export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null) {
   const group  = new THREE.Group();
   const levels = [];
 
@@ -311,7 +324,7 @@ export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrush
     // Level 0 = full grid; levels 1-4 = stitched rings (no overlap, no polygon offset needed).
     const geo     = lod === 0 ? buildFullGrid(GRID_N, step) : buildRingGrid(GRID_N, step);
     const uCenter = uniform(new THREE.Vector2(0, 0));
-    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowMaskTex);
+    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared);
     const mesh    = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
     mesh.receiveShadow = true;

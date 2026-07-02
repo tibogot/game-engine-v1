@@ -1,0 +1,1104 @@
+import * as THREE from "three";
+import { QuadMesh, MeshBasicNodeMaterial } from "three/webgpu";
+import {
+  Fn,
+  If,
+  Break,
+  Loop,
+  abs,
+  attribute,
+  cameraPosition,
+  clamp,
+  dot,
+  exp,
+  float,
+  floor,
+  fract,
+  max,
+  min,
+  mix,
+  mx_noise_float,
+  positionWorld,
+  pow,
+  smoothstep,
+  sqrt,
+  texture,
+  uniform,
+  uv,
+  vec2,
+  vec4,
+} from "three/tsl";
+import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
+
+/**
+ * River+ for V3 — fully GPU-resident carve pipeline.
+ *
+ * Carving no longer round-trips the heightmap through the CPU. The spline is
+ * sampled into a small path texture and rasterized into the sculpt heightmap
+ * RT with scissored fragment passes (same pattern as sculptBrush), so a
+ * re-carve costs a fraction of a millisecond and runs live while dragging.
+ *
+ * Base management:
+ *  - rtBase holds the UNCARVED terrain, captured lazily at first carve.
+ *  - Every re-carve restores rtBase → rtMain, then re-rasterizes all rivers.
+ *  - Carve passes tag carved texels in the G channel of rtMain. When external
+ *    tools edit the terrain (sculpt stroke, procedural gen, load), main.js
+ *    calls notifyTerrainEdited(): a rebase pass folds rtMain back into rtBase,
+ *    using G to keep the uncarved base under untouched river channels.
+ *  - cpuBase mirrors rtBase for the water-level profile (smoothed + monotonic
+ *    downhill along the centerline, computed on the CPU — a few hundred taps).
+ *
+ * Water surface: flat across the width, follows the downhill profile along the
+ * length. U coordinate is arc-length in METRES so flow speed and foam features
+ * are world-scaled. Per-column slope drives rapids foam on steep drops.
+ */
+
+const MAX_PATH_POINTS = 384;   // path texture width (points per river)
+const CHUNK_SEGS      = 32;    // spline segments rasterized per scissored pass
+const MAX_UNDO        = 40;
+
+function makeHeightRT(w = HEIGHTMAP_SIZE, h = HEIGHTMAP_SIZE) {
+  const rt = new THREE.RenderTarget(w, h, {
+    format:          THREE.RGBAFormat,
+    type:            THREE.HalfFloatType,
+    minFilter:       THREE.LinearFilter,
+    magFilter:       THREE.LinearFilter,
+    generateMipmaps: false,
+    depthBuffer:     false,
+    colorSpace:      THREE.NoColorSpace,
+  });
+  rt.texture.flipY = false;
+  return rt;
+}
+
+/** Bilinear sample of a normalized height field at world coords → metres. */
+function sampleBaseWorld(heights, wx, wz) {
+  const S = HEIGHTMAP_SIZE;
+  const res = S - 1;
+  const u = (wx + WORLD_SIZE * 0.5) / WORLD_SIZE;
+  const v = (wz + WORLD_SIZE * 0.5) / WORLD_SIZE;
+  if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+  const fx = u * res;
+  const fz = v * res;
+  const ix0 = Math.floor(fx);
+  const iz0 = Math.floor(fz);
+  const ix1 = Math.min(ix0 + 1, res);
+  const iz1 = Math.min(iz0 + 1, res);
+  const tx = fx - ix0;
+  const tz = fz - iz0;
+  const h0 = heights[iz0 * S + ix0] * (1 - tx) + heights[iz0 * S + ix1] * tx;
+  const h1 = heights[iz1 * S + ix0] * (1 - tx) + heights[iz1 * S + ix1] * tx;
+  return (h0 * (1 - tz) + h1 * tz) * MAX_HEIGHT;
+}
+
+export class RiverSystemGPU {
+  /**
+   * @param {object} opts
+   * @param {THREE.Scene}    opts.scene
+   * @param {object}         opts.toolState          shared river/river2 slices
+   * @param {object}         opts.renderer           WebGPURenderer
+   * @param {function}       opts.getRT              () => rtMain (sculpt.getCurrentRT)
+   * @param {object}         opts.heightTexNode      live TSL TextureNode of rtMain
+   * @param {Float32Array}   opts.cpuHeightmap       main.js CPU mirror (normalized)
+   * @param {function}       opts.ensureCpuHeightmap async () => refresh cpuHeightmap from GPU
+   * @param {function}       opts.onCarveCommitted   () => sync grass/trees/bvh after a committed carve
+   */
+  constructor({ scene, toolState, renderer, getRT, heightTexNode, cpuHeightmap, ensureCpuHeightmap, onCarveCommitted }) {
+    this.scene = scene;
+    this.toolState = toolState;
+    this.renderer = renderer;
+    this.getRT = getRT;
+    this.heightTexNode = heightTexNode;
+    this.cpuHeightmap = cpuHeightmap;
+    this.ensureCpuHeightmap = ensureCpuHeightmap;
+    this.onCarveCommitted = onCarveCommitted;
+
+    // segments: { points: Vector3[], mesh: Mesh|null, profile: {pts,levels,arc,slopes}|null }
+    this.segments = [];
+    this.selectedIdx = -1;
+    this.dragging = false;
+
+    this.undoStack = [];
+    this.redoStack = [];
+    this._time = 0;
+
+    // ── GPU carve state ───────────────────────────────────────────────────────
+    this._rtBase = null;           // uncarved terrain (captured lazily)
+    this._rtBasePong = null;       // rebase ping-pong target
+    this._rtScratch = makeHeightRT();
+    this._cpuBase = null;          // Float32Array mirror of rtBase (normalized)
+    this._baseReady = false;
+    this._basePromise = null;      // in-flight first capture
+    this._rebaseTimer = 0;
+    this._baseReadbackInFlight = false;
+    this._baseReadbackPending = false;
+    this._liveCarveQueued = false;
+
+    // Path texture: MAX_PATH_POINTS × 1 RGBA32F — (u, v, levelNorm, 0)
+    this._pathData = new Float32Array(MAX_PATH_POINTS * 4);
+    this._pathTex = new THREE.DataTexture(
+      this._pathData, MAX_PATH_POINTS, 1, THREE.RGBAFormat, THREE.FloatType,
+    );
+    this._pathTex.minFilter = THREE.NearestFilter;
+    this._pathTex.magFilter = THREE.NearestFilter;
+    this._pathTex.needsUpdate = true;
+
+    this._initCarvePasses();
+    this._initWaterMaterials();
+
+    this.handleGroup = new THREE.Group();
+    this.handleGroup.name = "RiverGpuHandles";
+    this.scene.add(this.handleGroup);
+    this.handleMeshes = [];
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GPU passes
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _initCarvePasses() {
+    // Copy pass — preserves R (height) and G (carve flag). Used for
+    // main→scratch (carve read source), base→main (restore), main→base (capture).
+    this._copySrc = texture(this._pathTex); // placeholder; .value swapped per use
+    const copyMat = new MeshBasicNodeMaterial();
+    copyMat.fragmentNode = Fn(() => {
+      const s = texture(this._copySrc, uv());
+      return vec4(s.r, s.g, float(0), float(1));
+    })();
+    this._copyQuad = new QuadMesh(copyMat);
+
+    // Carve pass — reads scratch, writes main. Rasterizes CHUNK_SEGS spline
+    // segments: nearest-segment distance in UV space, bed level from the
+    // per-point water profile, lower-only min() so banks never rise.
+    this._uSegStart   = uniform(0);   // first point index of this chunk
+    this._uSegEnd     = uniform(0);   // exclusive segment end (last point index)
+    this._uHalfW      = uniform(0.01);   // channel half-width, UV units
+    this._uShoulder   = uniform(0.01);   // blend shoulder, UV units
+    this._uDepthN     = uniform(0.01);   // carve depth, normalized height
+    this._uBedCurveN  = uniform(0);      // extra center depth (U-shaped bed), normalized
+
+    const scratchTex = this._rtScratch.texture;
+    const pathTex = this._pathTex;
+
+    const carveMat = new MeshBasicNodeMaterial();
+    carveMat.fragmentNode = Fn(() => {
+      const uvC = uv();
+      const src = texture(scratchTex, uvC);
+      const h = src.r;
+
+      const bestD2 = float(1e9).toVar();
+      const bestLevel = float(0).toVar();
+
+      Loop(CHUNK_SEGS, ({ i }) => {
+        const idx = float(i).add(this._uSegStart);
+        If(idx.greaterThanEqual(this._uSegEnd), () => { Break(); });
+
+        const a = texture(pathTex, vec2(idx.add(0.5).div(MAX_PATH_POINTS), 0.5));
+        const b = texture(pathTex, vec2(idx.add(1.5).div(MAX_PATH_POINTS), 0.5));
+
+        const ab = b.xy.sub(a.xy);
+        const len2 = max(dot(ab, ab), float(1e-12));
+        const t = clamp(dot(uvC.sub(a.xy), ab).div(len2), float(0), float(1));
+        const p = a.xy.add(ab.mul(t));
+        const d = uvC.sub(p);
+        const d2 = dot(d, d);
+        If(d2.lessThan(bestD2), () => {
+          bestD2.assign(d2);
+          bestLevel.assign(mix(a.z, b.z, t));
+        });
+      });
+
+      const dist = sqrt(bestD2);
+      // U-shaped bed: deepest at the centerline, back to base depth at the banks.
+      const centerT = clamp(dist.div(this._uHalfW), float(0), float(1));
+      const bed = bestLevel.sub(this._uDepthN)
+        .sub(this._uBedCurveN.mul(float(1).sub(centerT.mul(centerT))));
+
+      // 1 inside the channel, smooth 1→0 across the shoulder.
+      const blend = float(1).sub(smoothstep(this._uHalfW, this._uHalfW.add(this._uShoulder), dist));
+      const target = mix(h, bed, blend);
+      const newH = min(h, target);
+
+      // Tag carved texels so notifyTerrainEdited() can rebase around them.
+      const carved = max(src.g, smoothstep(float(0), float(0.00002), h.sub(newH)));
+      return vec4(newH, carved, float(0), float(1));
+    })();
+    this._carveQuad = new QuadMesh(carveMat);
+
+    // Rebase pass — newBase = mix(main, oldBase, mainCarveFlag).
+    // Where the river carved (G=1) the old uncarved base survives; everywhere
+    // else the externally edited terrain becomes the new base.
+    this._rebaseMainSrc = texture(this._pathTex); // .value swapped per use
+    this._rebaseBaseSrc = texture(this._pathTex);
+    const rebaseMat = new MeshBasicNodeMaterial();
+    rebaseMat.fragmentNode = Fn(() => {
+      const m = texture(this._rebaseMainSrc, uv());
+      const b = texture(this._rebaseBaseSrc, uv());
+      return vec4(mix(m.r, b.r, clamp(m.g, float(0), float(1))), float(0), float(0), float(1));
+    })();
+    this._rebaseQuad = new QuadMesh(rebaseMat);
+  }
+
+  /** Scissored quad render into an RT (same contract as sculptBrush._render). */
+  _render(quad, dstRT, rect) {
+    const renderer = this.renderer;
+    const prevAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    if (rect) {
+      dstRT.scissor.set(rect.x, rect.y, rect.w, rect.h);
+      renderer.setScissorTest(true);
+    }
+    renderer.setRenderTarget(dstRT);
+    quad.render(renderer);
+    renderer.setRenderTarget(null);
+    if (rect) renderer.setScissorTest(false);
+    renderer.autoClear = prevAutoClear;
+  }
+
+  _blit(srcTexture, dstRT, rect = null) {
+    this._copySrc.value = srcTexture;
+    this._render(this._copyQuad, dstRT, rect);
+  }
+
+  _clampRect(x0, y0, x1, y1) {
+    const S = HEIGHTMAP_SIZE;
+    x0 = Math.max(0, Math.min(S, Math.floor(x0)));
+    y0 = Math.max(0, Math.min(S, Math.floor(y0)));
+    x1 = Math.max(0, Math.min(S, Math.ceil(x1)));
+    y1 = Math.max(0, Math.min(S, Math.ceil(y1)));
+    if (x1 - x0 < 1 || y1 - y0 < 1) return null;
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Base (uncarved terrain) lifecycle
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _hasCarvableSegment() {
+    return this.segments.some((s) => s.points.length >= 2);
+  }
+
+  /** Lazily capture rtMain + cpuHeightmap as the uncarved base. */
+  async _captureBase() {
+    if (this._baseReady) return;
+    if (this._basePromise) return this._basePromise;
+    this._basePromise = (async () => {
+      await this.ensureCpuHeightmap?.();
+      if (!this._rtBase) {
+        this._rtBase = makeHeightRT();
+        this._rtBasePong = makeHeightRT();
+      }
+      this._blit(this.getRT().texture, this._rtBase);
+      this._cpuBase = new Float32Array(this.cpuHeightmap);
+      this._baseReady = true;
+      this._basePromise = null;
+    })();
+    return this._basePromise;
+  }
+
+  _dropBase() {
+    this._baseReady = false;
+    this._cpuBase = null;
+    // Keep the RTs allocated — they're reused on the next capture.
+  }
+
+  /**
+   * External terrain edit (sculpt stroke, procedural gen, undo, load).
+   * Folds rtMain into rtBase around the tagged river channels, then refreshes
+   * the CPU base mirror. Debounced — bursty edits collapse into one rebase.
+   */
+  notifyTerrainEdited() {
+    if (!this._baseReady) return;
+    clearTimeout(this._rebaseTimer);
+    this._rebaseTimer = setTimeout(() => this._rebaseNow(), 150);
+  }
+
+  _rebaseNow() {
+    if (!this._baseReady) return;
+    this._rebaseMainSrc.value = this.getRT().texture;
+    this._rebaseBaseSrc.value = this._rtBase.texture;
+    this._render(this._rebaseQuad, this._rtBasePong, null);
+    const t = this._rtBase;
+    this._rtBase = this._rtBasePong;
+    this._rtBasePong = t;
+    void this._readbackBaseToCpu();
+  }
+
+  async _readbackBaseToCpu() {
+    if (this._baseReadbackInFlight) {
+      this._baseReadbackPending = true;
+      return;
+    }
+    this._baseReadbackInFlight = true;
+    this._baseReadbackPending = false;
+    try {
+      const raw = await this.renderer.readRenderTargetPixelsAsync(
+        this._rtBase, 0, 0, HEIGHTMAP_SIZE, HEIGHTMAP_SIZE,
+      );
+      if (!this._cpuBase) return;
+      const isHalf = raw instanceof Uint16Array;
+      for (let i = 0; i < HEIGHTMAP_SIZE * HEIGHTMAP_SIZE; i++) {
+        const r = raw[i * 4];
+        this._cpuBase[i] = isHalf ? THREE.DataUtils.fromHalfFloat(r) : r;
+      }
+    } finally {
+      this._baseReadbackInFlight = false;
+      if (this._baseReadbackPending) void this._readbackBaseToCpu();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Water-level profile (CPU — a few hundred taps into the base mirror)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _smoothInPlace(arr, passes) {
+    const n = arr.length;
+    for (let pass = 0; pass < passes; pass++) {
+      let prev = arr[0];
+      for (let i = 1; i < n - 1; i++) {
+        const cur = arr[i];
+        arr[i] = (prev + cur * 2 + arr[i + 1]) * 0.25;
+        prev = cur;
+      }
+    }
+  }
+
+  /** Force the profile to never flow uphill (descend from the higher endpoint). */
+  _enforceDownhill(arr) {
+    const n = arr.length;
+    if (n < 2) return;
+    if (arr[0] >= arr[n - 1]) {
+      for (let i = 1; i < n; i++) if (arr[i] > arr[i - 1]) arr[i] = arr[i - 1];
+    } else {
+      for (let i = n - 2; i >= 0; i--) if (arr[i] > arr[i + 1]) arr[i] = arr[i + 1];
+    }
+  }
+
+  _profilePointCount() {
+    const rp = this.toolState.river2;
+    return Math.min(MAX_PATH_POINTS - 2, Math.max(120, rp.segments | 0));
+  }
+
+  /**
+   * Sample the centerline into spaced points and build the smooth, strictly
+   * downhill water-level profile from the UNCARVED base, plus arc lengths
+   * (metres) and per-point downhill slopes for the rapids foam.
+   */
+  _computeProfile(seg) {
+    if (seg.points.length < 2 || !this._cpuBase) return null;
+    const rp = this.toolState.river2;
+    const curve = new THREE.CatmullRomCurve3(seg.points, !!rp.closed, "catmullrom", 0.5);
+    const pts = curve.getSpacedPoints(this._profilePointCount());
+    const n = pts.length;
+
+    const levels = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      levels[i] = sampleBaseWorld(this._cpuBase, pts[i].x, pts[i].z);
+    }
+    this._smoothInPlace(levels, 8);
+    this._enforceDownhill(levels);
+    this._smoothInPlace(levels, 3);
+    this._enforceDownhill(levels);
+
+    const arc = new Float32Array(n);
+    for (let i = 1; i < n; i++) arc[i] = arc[i - 1] + pts[i].distanceTo(pts[i - 1]);
+
+    const slopes = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const i0 = Math.max(0, i - 1);
+      const i1 = Math.min(n - 1, i + 1);
+      const run = Math.max(0.001, arc[i1] - arc[i0]);
+      slopes[i] = Math.max(0, Math.abs(levels[i0] - levels[i1]) / run);
+    }
+
+    return { pts, levels, arc, slopes };
+  }
+
+  _ensureProfile(seg) {
+    if (!seg.profile) seg.profile = this._computeProfile(seg);
+    return seg.profile;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Carving
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Upload one river's profile into the path texture (UV coords + normalized level). */
+  _uploadPath(profile) {
+    const { pts, levels } = profile;
+    const n = Math.min(pts.length, MAX_PATH_POINTS);
+    const d = this._pathData;
+    const half = WORLD_SIZE * 0.5;
+    for (let i = 0; i < n; i++) {
+      d[i * 4 + 0] = (pts[i].x + half) / WORLD_SIZE;
+      d[i * 4 + 1] = (pts[i].z + half) / WORLD_SIZE;
+      d[i * 4 + 2] = levels[i] / MAX_HEIGHT;
+      d[i * 4 + 3] = 0;
+    }
+    this._pathTex.needsUpdate = true;
+    return n;
+  }
+
+  /** Rasterize one river into rtMain with chunked scissored passes. */
+  _carveSegment(seg) {
+    const profile = this._ensureProfile(seg);
+    if (!profile) return;
+    const rp = this.toolState.river2;
+    const n = this._uploadPath(profile);
+    if (n < 2) return;
+
+    const halfW = rp.width * 0.5;
+    const reach = halfW + rp.carveShoulder;
+    const S = HEIGHTMAP_SIZE;
+    const half = WORLD_SIZE * 0.5;
+    const rtMain = this.getRT();
+
+    this._uHalfW.value = halfW / WORLD_SIZE;
+    this._uShoulder.value = Math.max(0.25, rp.carveShoulder) / WORLD_SIZE;
+    this._uDepthN.value = rp.carveDepth / MAX_HEIGHT;
+    this._uBedCurveN.value = (rp.bedCurve ?? 0) * rp.carveDepth / MAX_HEIGHT;
+
+    const { pts } = profile;
+    for (let s = 0; s < n - 1; s += CHUNK_SEGS) {
+      const e = Math.min(s + CHUNK_SEGS, n - 1); // exclusive segment end == last point idx
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (let i = s; i <= e; i++) {
+        const p = pts[i];
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.z < minZ) minZ = p.z;
+        if (p.z > maxZ) maxZ = p.z;
+      }
+      const rect = this._clampRect(
+        ((minX - reach + half) / WORLD_SIZE) * S - 2,
+        ((minZ - reach + half) / WORLD_SIZE) * S - 2,
+        ((maxX + reach + half) / WORLD_SIZE) * S + 2,
+        ((maxZ + reach + half) / WORLD_SIZE) * S + 2,
+      );
+      if (!rect) continue;
+
+      this._uSegStart.value = s;
+      this._uSegEnd.value = e;
+      this._blit(rtMain.texture, this._rtScratch, rect);
+      this._render(this._carveQuad, rtMain, rect);
+    }
+  }
+
+  /** Restore the uncarved base into rtMain, then re-rasterize every river. */
+  _recarveAllGpu() {
+    if (!this._baseReady) return false;
+    this._blit(this._rtBase.texture, this.getRT());
+    let any = false;
+    for (const seg of this.segments) {
+      if (seg.points.length < 2) continue;
+      this._carveSegment(seg);
+      any = true;
+    }
+    return any;
+  }
+
+  /**
+   * Full re-carve. `commit` also refreshes the CPU heightmap mirror and
+   * dependent systems (grass, trees, BVH) — call it on mouse-up, not per frame.
+   */
+  applyCarve({ rebuild = true, commit = true } = {}) {
+    if (!this._hasCarvableSegment()) {
+      if (this._baseReady) {
+        this._blit(this._rtBase.texture, this.getRT());
+        this._dropBase();
+        if (commit) this.onCarveCommitted?.();
+      }
+      if (rebuild) this._rebuildVisual();
+      return;
+    }
+
+    if (!this._baseReady) {
+      void this._captureBase().then(() => {
+        this._recarveAllGpu();
+        if (rebuild) this._rebuildVisual();
+        if (commit) this.onCarveCommitted?.();
+        this._updateSelectedY();
+      });
+      return;
+    }
+
+    this._recarveAllGpu();
+    if (rebuild) this._rebuildVisual();
+    if (commit) this.onCarveCommitted?.();
+  }
+
+  refreshCarving() {
+    this._invalidateProfiles();
+    this.applyCarve({ rebuild: true, commit: true });
+  }
+
+  _invalidateProfiles() {
+    for (const seg of this.segments) seg.profile = null;
+  }
+
+  /** Throttled live re-carve while dragging a handle (one per animation frame). */
+  _queueLiveCarve() {
+    if (this._liveCarveQueued) return;
+    this._liveCarveQueued = true;
+    requestAnimationFrame(() => {
+      this._liveCarveQueued = false;
+      if (!this.dragging) return; // finalizeMove already did the committed pass
+      const ai = this._activeIdx();
+      if (ai >= 0) this.segments[ai].profile = null;
+      this.applyCarve({ rebuild: false, commit: false });
+      this._rebuildActiveSegMesh();
+      this._updateDragHandles();
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Water surface geometry
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _buildRiverGeometry(seg) {
+    const profile = this._ensureProfile(seg);
+    if (!profile) return null;
+    const rp = this.toolState.river2;
+    const { pts, levels, arc, slopes } = profile;
+    const n = pts.length;
+    // Overhang into the carve shoulder so the water edge tucks under the
+    // rising bank instead of ending on the flat bed.
+    const halfW = rp.width * 0.5 + Math.min(rp.carveShoulder, rp.width) * 0.5;
+    const off = rp.heightOffset;
+
+    const positions = new Float32Array(n * 6);
+    const uvs = new Float32Array(n * 4);
+    const slopeAttr = new Float32Array(n * 2);
+    const indices = [];
+
+    const tan = new THREE.Vector3();
+    for (let i = 0; i < n; i++) {
+      const pos = pts[i];
+      const prev = pts[Math.max(0, i - 1)];
+      const next = pts[Math.min(n - 1, i + 1)];
+      tan.subVectors(next, prev);
+      tan.y = 0;
+      tan.normalize();
+      const px = -tan.z;
+      const pz = tan.x;
+
+      const y = levels[i] + off;
+      positions[i * 6 + 0] = pos.x - px * halfW;
+      positions[i * 6 + 1] = y;
+      positions[i * 6 + 2] = pos.z - pz * halfW;
+      positions[i * 6 + 3] = pos.x + px * halfW;
+      positions[i * 6 + 4] = y;
+      positions[i * 6 + 5] = pos.z + pz * halfW;
+
+      uvs[i * 4 + 0] = arc[i];
+      uvs[i * 4 + 1] = 0;
+      uvs[i * 4 + 2] = arc[i];
+      uvs[i * 4 + 3] = 1;
+
+      slopeAttr[i * 2 + 0] = slopes[i];
+      slopeAttr[i * 2 + 1] = slopes[i];
+
+      if (i < n - 1) {
+        const b = i * 2;
+        indices.push(b, b + 2, b + 1, b + 1, b + 2, b + 3);
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    geo.setAttribute("aSlope", new THREE.BufferAttribute(slopeAttr, 1));
+    geo.setIndex(indices);
+    return geo;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Water materials
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _initWaterMaterials() {
+    const rp = this.toolState.river2;
+    const u = this.wU = {
+      time:           uniform(0),
+      flowSpeed:      uniform(rp.flowSpeed ?? 2.5),          // m/s
+      opacity:        uniform(rp.opacity ?? 0.9),
+      shallowColor:   uniform(new THREE.Color(rp.shallowColor ?? "#4fd8c2")),
+      deepColor:      uniform(new THREE.Color(rp.deepColor ?? "#14526e")),
+      highlightColor: uniform(new THREE.Color(rp.highlightColor ?? "#cdf3ff")),
+      foamColor:      uniform(new THREE.Color(rp.foamColor ?? "#ffffff")),
+      bandCount:      uniform(rp.bandCount ?? 3),
+      depthAbsorb:    uniform(rp.depthAbsorb ?? 0.8),         // 1/m
+      foamDepth:      uniform(rp.foamDepth ?? 0.6),           // m
+      foamScale:      uniform(rp.foamScale ?? 1.5),           // features/m
+      streakScale:    uniform(rp.streakScale ?? 6),           // streak length, m
+      streakStrength: uniform(rp.streakStrength ?? 0.35),
+      rapidsSlope:    uniform(rp.rapidsSlope ?? 0.08),
+      rapidsBoost:    uniform(rp.rapidsBoost ?? 1.5),
+      sparkleStrength: uniform(rp.sparkleStrength ?? 0.25),
+      rimStrength:    uniform(rp.rimStrength ?? 0.25),
+      riverWidth:     uniform(rp.width ?? 8),
+      foamWidth:      uniform(rp.foamWidth ?? 0.18),          // legacy Basic bank foam
+    };
+
+    const heightTexNode = this.heightTexNode;
+
+    /** Water depth in metres under this fragment (live GPU heightmap). */
+    const waterDepth = Fn(() => {
+      const hUV = vec2(
+        clamp(positionWorld.x.div(WORLD_SIZE).add(0.5), float(0.001), float(0.999)),
+        clamp(positionWorld.z.div(WORLD_SIZE).add(0.5), float(0.001), float(0.999)),
+      );
+      const terrainY = texture(heightTexNode, hUV).r.mul(MAX_HEIGHT);
+      return positionWorld.y.sub(terrainY);
+    });
+
+    // ── Toon material — depth-banded color, wobbly edge foam, flow streaks ────
+    const toonFrag = Fn(() => {
+      const uvC = uv();                      // u = arc metres, v = 0..1 across
+      const slope = attribute("aSlope");
+      const depth = waterDepth();
+
+      const slopeT = smoothstep(u.rapidsSlope, u.rapidsSlope.mul(3), slope);
+      const flowPhase = u.time.mul(u.flowSpeed).mul(slopeT.mul(u.rapidsBoost).add(1));
+      const fu = uvC.x.sub(flowPhase);       // flow-space U, metres
+      const vM = uvC.y.sub(0.5).mul(u.riverWidth); // across, metres
+
+      // Posterized depth ramp (soft band edges).
+      const t = float(1).sub(exp(depth.max(0).mul(u.depthAbsorb).negate()));
+      const bands = u.bandCount.max(2);
+      const x = t.mul(bands);
+      const q = clamp(
+        floor(x).add(smoothstep(float(0.7), float(1), fract(x))).div(bands.sub(1)),
+        float(0), float(1),
+      );
+      const col = mix(u.shallowColor, u.deepColor, q).toVar();
+
+      // Flow streaks — long thin noise bands scrolling downstream.
+      const sn = mx_noise_float(vec2(fu.div(u.streakScale), vM.mul(1.2)));
+      const sn2 = mx_noise_float(vec2(fu.div(u.streakScale).mul(1.7).add(13.7), vM.mul(1.6).add(4.3)));
+      const streak = smoothstep(float(0.34), float(0.42), sn.mul(0.65).add(sn2.mul(0.35)));
+      col.assign(mix(col, u.highlightColor, streak.mul(u.streakStrength)));
+
+      // Edge foam — depth-driven with a noisy wobble + crisp inner rim.
+      const foamZone = smoothstep(u.foamDepth, float(0), depth);
+      const fn = mx_noise_float(vec2(
+        fu.mul(u.foamScale).mul(0.8),
+        vM.mul(u.foamScale),
+      )).mul(0.5).add(0.5);
+      const foam = smoothstep(fn.sub(0.08), fn.add(0.08), foamZone.mul(1.15));
+      const rim = smoothstep(u.foamDepth.mul(0.22), float(0), depth);
+
+      // Rapids foam — dense agitation on steep drops.
+      const rn = mx_noise_float(vec2(fu.mul(1.6), vM.mul(2.2).add(7.7))).mul(0.5).add(0.5);
+      const rapids = slopeT.mul(smoothstep(float(0.35), float(0.6), rn));
+
+      const foamTotal = clamp(max(max(foam.mul(0.9), rim), rapids), float(0), float(1));
+      col.assign(mix(col, u.foamColor, foamTotal));
+
+      // Sparkles — flickering glints drifting with the flow.
+      const sp = mx_noise_float(vec2(fu.mul(3.1), vM.mul(3.7)));
+      const spGate = mx_noise_float(vec2(vM.mul(0.9).add(u.time.mul(1.7)), uvC.x.mul(0.13)));
+      const sparkle = smoothstep(float(0.55), float(0.72), sp.mul(spGate.mul(0.5).add(0.5)));
+      col.assign(col.add(u.highlightColor.mul(sparkle).mul(u.sparkleStrength)));
+
+      // Grazing-angle sheen.
+      const viewY = clamp(cameraPosition.sub(positionWorld).normalize().y, float(0), float(1));
+      const fres = pow(float(1).sub(viewY), float(3)).mul(u.rimStrength);
+      col.assign(mix(col, u.highlightColor, fres));
+
+      // Soften the exact shoreline intersection; foam stays opaque.
+      const shoreFade = smoothstep(float(-0.08), float(0.18), depth);
+      const alpha = mix(u.opacity, float(1), foamTotal.mul(0.85)).mul(shoreFade);
+      return vec4(col, alpha);
+    });
+
+    // ── Basic material — flat two-tone with bank foam (cheap fallback) ────────
+    const basicFrag = Fn(() => {
+      const uvC = uv();
+      const fu = uvC.x.sub(u.time.mul(u.flowSpeed));
+      const wave = mx_noise_float(vec2(fu.mul(0.4), uvC.y.mul(3))).mul(0.5).add(0.5);
+      const centerDist = abs(uvC.y.sub(0.5)).mul(2);
+      const depthColor = mix(u.deepColor, u.shallowColor, pow(centerDist, float(0.6)));
+      const surface = mix(depthColor, u.highlightColor, wave.sub(0.5).mul(0.36).add(0.18).clamp(0, 1));
+      const bankFoam = max(
+        smoothstep(u.foamWidth, float(0), uvC.y),
+        smoothstep(float(1).sub(u.foamWidth), float(1), uvC.y),
+      );
+      return vec4(mix(surface, u.foamColor, bankFoam.mul(0.85)), u.opacity);
+    });
+
+    const mkMat = (frag) => {
+      const mat = new MeshBasicNodeMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      });
+      const f = frag();
+      mat.colorNode = f.rgb;
+      mat.opacityNode = f.a;
+      return mat;
+    };
+    this._toonMat = mkMat(toonFrag);
+    this._basicMat = mkMat(basicFrag);
+  }
+
+  _activeMaterial() {
+    return this.toolState.river2.shaderStyle === "Basic" ? this._basicMat : this._toonMat;
+  }
+
+  syncMaterial() {
+    const p = this.toolState.river2;
+    const u = this.wU;
+    u.flowSpeed.value = p.flowSpeed;
+    u.opacity.value = p.opacity;
+    u.shallowColor.value.set(p.shallowColor);
+    u.deepColor.value.set(p.deepColor);
+    u.highlightColor.value.set(p.highlightColor ?? "#cdf3ff");
+    u.foamColor.value.set(p.foamColor ?? "#ffffff");
+    u.bandCount.value = p.bandCount ?? 3;
+    u.depthAbsorb.value = p.depthAbsorb ?? 0.8;
+    u.foamDepth.value = p.foamDepth ?? 0.6;
+    u.foamScale.value = p.foamScale ?? 1.5;
+    u.streakScale.value = p.streakScale ?? 6;
+    u.streakStrength.value = p.streakStrength ?? 0.35;
+    u.rapidsSlope.value = p.rapidsSlope ?? 0.08;
+    u.rapidsBoost.value = p.rapidsBoost ?? 1.5;
+    u.sparkleStrength.value = p.sparkleStrength ?? 0.25;
+    u.rimStrength.value = p.rimStrength ?? 0.25;
+    u.riverWidth.value = p.width ?? 8;
+    u.foamWidth.value = p.foamWidth ?? 0.18;
+
+    const mat = this._activeMaterial();
+    for (const seg of this.segments) {
+      if (seg.mesh && seg.mesh.material !== mat) seg.mesh.material = mat;
+    }
+  }
+
+  update(dtSec) {
+    this._time += dtSec;
+    this.wU.time.value = this._time;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Segment management (same public surface as the old system)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _activeIdx() {
+    if (this.segments.length === 0) return -1;
+    return Math.max(0, Math.min(this.toolState.river2.activeRiverIndex | 0, this.segments.length - 1));
+  }
+
+  _clampActive() {
+    if (this.segments.length === 0) {
+      this.toolState.river2.activeRiverIndex = 0;
+      return;
+    }
+    this.toolState.river2.activeRiverIndex = Math.max(
+      0, Math.min(this.toolState.river2.activeRiverIndex | 0, this.segments.length - 1),
+    );
+  }
+
+  startNewRiver() {
+    this._pushUndo();
+    this.segments.push({ points: [], mesh: null, profile: null });
+    this.toolState.river2.activeRiverIndex = this.segments.length - 1;
+    this.selectedIdx = -1;
+    this._rebuildVisual();
+  }
+
+  addPoint(pos) {
+    this._pushUndo();
+    if (this.segments.length === 0) {
+      this.segments.push({ points: [], mesh: null, profile: null });
+      this.toolState.river2.activeRiverIndex = 0;
+    }
+    this._clampActive();
+    const seg = this.segments[this._activeIdx()];
+    seg.points.push(pos.clone());
+    seg.profile = null;
+    this.selectedIdx = seg.points.length - 1;
+    this.applyCarve({ rebuild: true, commit: true });
+    this._updateSelectedY();
+  }
+
+  deleteSelected() {
+    const ai = this._activeIdx();
+    if (ai < 0 || this.selectedIdx < 0) return;
+    const seg = this.segments[ai];
+    if (this.selectedIdx >= seg.points.length) return;
+    this._pushUndo();
+    seg.points.splice(this.selectedIdx, 1);
+    seg.profile = null;
+    this.selectedIdx = Math.min(this.selectedIdx, seg.points.length - 1);
+    this.applyCarve({ rebuild: true, commit: true });
+    this._updateSelectedY();
+  }
+
+  deleteActiveRiver() {
+    const ai = this._activeIdx();
+    if (ai < 0) return;
+    this._pushUndo();
+    this._disposeSegMesh(this.segments[ai]);
+    this.segments.splice(ai, 1);
+    this.selectedIdx = -1;
+    this.dragging = false;
+    this._clampActive();
+    this.applyCarve({ rebuild: true, commit: true });
+  }
+
+  /** Called during drag — live GPU re-carve, throttled to one per frame. */
+  moveSelected(pos) {
+    const ai = this._activeIdx();
+    if (ai < 0 || this.selectedIdx < 0) return;
+    const seg = this.segments[ai];
+    if (this.selectedIdx >= seg.points.length) return;
+    const currentY = seg.points[this.selectedIdx].y;
+    seg.points[this.selectedIdx].copy(pos);
+    seg.points[this.selectedIdx].y = currentY;
+    this._queueLiveCarve();
+  }
+
+  /** Mouse-up after dragging — committed carve (CPU mirror + grass/tree sync). */
+  finalizeMove() {
+    this.dragging = false;
+    const ai = this._activeIdx();
+    if (ai >= 0) this.segments[ai].profile = null;
+    this.applyCarve({ rebuild: true, commit: true });
+  }
+
+  setSelectedPointY(y) {
+    const ai = this._activeIdx();
+    if (ai < 0 || this.selectedIdx < 0) return;
+    const seg = this.segments[ai];
+    if (this.selectedIdx >= seg.points.length) return;
+    seg.points[this.selectedIdx].y = y;
+    this._rebuildHandles();
+  }
+
+  pickPoint(raycaster) {
+    const spheres = this.handleMeshes.filter((m) => m.isMesh);
+    if (spheres.length === 0) return -1;
+    const hits = raycaster.intersectObjects(spheres, false);
+    if (hits.length === 0) return -1;
+    return this.handleMeshes.indexOf(hits[0].object);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Undo / redo (spline snapshots — terrain re-derives from the base)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _snapshot() {
+    return {
+      segments: this.segments.map((s) => ({
+        points: s.points.map((p) => ({ x: p.x, y: p.y, z: p.z })),
+      })),
+      activeRiverIndex: this.toolState.river2.activeRiverIndex,
+      selectedIdx: this.selectedIdx,
+    };
+  }
+
+  _pushUndo() {
+    this.undoStack.push(this._snapshot());
+    this.redoStack.length = 0;
+    if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
+  }
+
+  _restore(snap) {
+    this._disposeAllMeshes();
+    this.segments = snap.segments.map((s) => ({
+      points: s.points.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
+      mesh: null,
+      profile: null,
+    }));
+    this.toolState.river2.activeRiverIndex = snap.activeRiverIndex;
+    this.selectedIdx = snap.selectedIdx;
+    this._clampActive();
+    this.applyCarve({ rebuild: true, commit: true });
+    this._updateSelectedY();
+  }
+
+  undo() {
+    const snap = this.undoStack.pop();
+    if (!snap) return false;
+    this.redoStack.push(this._snapshot());
+    this._restore(snap);
+    return true;
+  }
+
+  redo() {
+    const snap = this.redoStack.pop();
+    if (!snap) return false;
+    this.undoStack.push(this._snapshot());
+    this._restore(snap);
+    return true;
+  }
+
+  get canUndo() { return this.undoStack.length > 0; }
+  get canRedo() { return this.redoStack.length > 0; }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Visual rebuild (water meshes + handles)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  rebuildAllMeshes() {
+    for (const seg of this.segments) {
+      this._disposeSegMesh(seg);
+      if (seg.points.length < 2) continue;
+      const geo = this._buildRiverGeometry(seg);
+      if (!geo) continue;
+      seg.mesh = new THREE.Mesh(geo, this._activeMaterial());
+      seg.mesh.renderOrder = 2;
+      seg.mesh.frustumCulled = false;
+      this.scene.add(seg.mesh);
+    }
+  }
+
+  _rebuildActiveSegMesh() {
+    const ai = this._activeIdx();
+    if (ai < 0) return;
+    const seg = this.segments[ai];
+    this._disposeSegMesh(seg);
+    if (seg.points.length < 2) return;
+    const geo = this._buildRiverGeometry(seg);
+    if (!geo) return;
+    seg.mesh = new THREE.Mesh(geo, this._activeMaterial());
+    seg.mesh.renderOrder = 2;
+    seg.mesh.frustumCulled = false;
+    this.scene.add(seg.mesh);
+  }
+
+  _rebuildHandles() {
+    while (this.handleGroup.children.length) {
+      const child = this.handleGroup.children[0];
+      this.handleGroup.remove(child);
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) child.material.dispose();
+    }
+    this.handleMeshes = [];
+
+    const ai = this._activeIdx();
+    if (ai < 0) {
+      this._syncHandlesVisibility();
+      return;
+    }
+    const pts = this.segments[ai].points;
+    for (let i = 0; i < pts.length; i++) {
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.5, 8, 8),
+        new THREE.MeshBasicMaterial({ color: i === this.selectedIdx ? 0xffff00 : 0x00cc44 }),
+      );
+      sphere.position.copy(pts[i]);
+      this.handleGroup.add(sphere);
+      this.handleMeshes.push(sphere);
+    }
+
+    if (pts.length >= 2) {
+      const curve = new THREE.CatmullRomCurve3(pts, !!this.toolState.river2.closed, "catmullrom", 0.5);
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(80));
+      const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x44ff88 }));
+      this.handleGroup.add(line);
+      this.handleMeshes.push(line);
+    }
+    this._syncHandlesVisibility();
+  }
+
+  _updateDragHandles() {
+    const ai = this._activeIdx();
+    if (ai < 0) return;
+    const pts = this.segments[ai].points;
+    for (let i = 0; i < pts.length && i < this.handleMeshes.length; i++) {
+      const m = this.handleMeshes[i];
+      if (m.isMesh) m.position.copy(pts[i]);
+    }
+    const lastHandle = this.handleMeshes[this.handleMeshes.length - 1];
+    if (lastHandle && !lastHandle.isMesh && pts.length >= 2) {
+      const curve = new THREE.CatmullRomCurve3(pts, !!this.toolState.river2.closed, "catmullrom", 0.5);
+      const posAttr = lastHandle.geometry.attributes.position;
+      const newPts = curve.getPoints(80);
+      for (let i = 0; i < newPts.length; i++) {
+        posAttr.setXYZ(i, newPts[i].x, newPts[i].y, newPts[i].z);
+      }
+      posAttr.needsUpdate = true;
+    }
+  }
+
+  _syncHandlesVisibility() {
+    this.handleGroup.visible = this.toolState.mode === "river2" && this.toolState.river2.showHandles;
+  }
+
+  _rebuildVisual() {
+    this.rebuildAllMeshes();
+    this._rebuildHandles();
+  }
+
+  _updateSelectedY() {
+    const ai = this._activeIdx();
+    if (ai >= 0 && this.selectedIdx >= 0 && this.selectedIdx < this.segments[ai].points.length) {
+      this.toolState.river2.selectedPointY = this.segments[ai].points[this.selectedIdx].y;
+    }
+  }
+
+  _disposeSegMesh(seg) {
+    if (!seg.mesh) return;
+    this.scene.remove(seg.mesh);
+    seg.mesh.geometry.dispose();
+    seg.mesh = null;
+  }
+
+  _disposeAllMeshes() {
+    for (const seg of this.segments) this._disposeSegMesh(seg);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Serialization
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  exportData() {
+    return this.segments.map((s) => ({
+      points: s.points.map((p) => ({ x: p.x, y: p.y, z: p.z })),
+    }));
+  }
+
+  importData(data) {
+    this._disposeAllMeshes();
+    if (this._baseReady) {
+      this._blit(this._rtBase.texture, this.getRT());
+      this._dropBase();
+    }
+    this.segments = (Array.isArray(data) ? data : []).map((s) => ({
+      points: Array.isArray(s.points) ? s.points.map((p) => new THREE.Vector3(p.x, p.y, p.z)) : [],
+      mesh: null,
+      profile: null,
+    }));
+    this.selectedIdx = -1;
+    this.dragging = false;
+    this._clampActive();
+    this.applyCarve({ rebuild: true, commit: true });
+  }
+
+  dispose() {
+    clearTimeout(this._rebaseTimer);
+    if (this._baseReady) {
+      this._blit(this._rtBase.texture, this.getRT());
+      this._dropBase();
+      this.onCarveCommitted?.();
+    }
+    this._disposeAllMeshes();
+    while (this.handleGroup.children.length) {
+      const child = this.handleGroup.children[0];
+      this.handleGroup.remove(child);
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) child.material.dispose();
+    }
+    this.scene.remove(this.handleGroup);
+    this._rtBase?.dispose();
+    this._rtBasePong?.dispose();
+    this._rtScratch.dispose();
+    this._pathTex.dispose();
+    this._toonMat.dispose();
+    this._basicMat.dispose();
+  }
+}

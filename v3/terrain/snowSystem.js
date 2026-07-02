@@ -1,43 +1,57 @@
 /**
- * Snow deformation system for V3 — ported from v2/snow-lab.html.
+ * Snow deformation system for V3.
  *
- * Core idea: a small, high-subdivision plane mesh follows the player.
- * Its vertex shader lifts each vertex to terrain_height + snow_depth.
- * A GPU ping-pong render-target records deformation stamps (footprints,
- * wheel tracks) and blurs them every frame for an organic look.
+ * The snow surface itself is defined once in snowShared.js and rendered with
+ * real volume by the terrain LOD material everywhere it is painted. This
+ * system adds the *local* refinement: a high-subdivision tile follows the
+ * player and subtracts trail compression (footprints, wheel ruts) recorded in
+ * a GPU ping-pong render-target.
+ *
+ *   tile:    y = terrainH + snowDepth(wxz) × (1 − compression) + rim
+ *   terrain: y = terrainH + snowDepth(wxz) × (1 − tileMask)
+ *
+ * At the tile border compression and tileMask both reach 0, so tile and
+ * terrain evaluate the SAME function — the hand-off is invisible, with no
+ * alpha ring and no height band. Inside the tile the terrain drops to bare
+ * ground, so tile − terrain = depth·tileMask·(1−comp) ≥ 0 and the coarse
+ * terrain can never poke up through grooves.
+ *
+ * The trail render-target is half-float: an 8-bit target quantizes under the
+ * per-frame 5-tap blur and produces visible contour bands around prints.
  *
  * API:
  *   createSnowSystem(renderer, scene, initialHeightTex)
- *     → { tick, setHeightTex, setPlayMode, updateSunDir, updateAnchor, params, dispose }
+ *     → { shared, mesh, params, u, setHeightTex, setSnowMaskTex, setPlayMode,
+ *         setDeformActive, setVisible, updateSunDir, updateAnchor, tick,
+ *         resetTrail, dispose }
  *
- * Call setHeightTex(heightTexNode.value) once after sculptBrush initialises,
- * then tick(px, pz, grounded, contacts?) every frame while in play mode.
+ * Call tick(px, pz, grounded, contacts?) every frame while in play mode.
  * contacts: { xzs: Float32Array(8), touching: Float32Array(4), isVehicle? }
  */
 import * as THREE from "three";
 import { QuadMesh } from "three/webgpu";
 import {
   Fn, Loop,
-  cameraPosition,
-  cross, float, floor, int, max, min, mix,
+  float, int, max, min, mix,
   modelViewMatrix,
   positionGeometry, positionWorld,
-  reflect, smoothstep, step,
+  smoothstep, step,
   texture, uniform, uniformArray, uv,
-  varying, vec2, vec3, vec4,
+  vec2, vec3, vec4,
   mx_noise_float,
 } from "three/tsl";
-import { WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
+import { createSnowShared } from "./snowShared.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const TRAIL_RES  = 512;   // trail render-target resolution (px)
+const TRAIL_RES  = 1024;  // trail render-target resolution (~20 px/m — feet read as prints)
 const TRAIL_NEUT = 0.5;   // neutral (untouched) value in the RT
 const MAX_STAMPS = 48;    // max stamp disks per frame (cars need headroom)
 
-const TILE_SIZE    = 50;  // matches trailWorldSize — full RT window has vertices
-const TILE_HALF    = TILE_SIZE * 0.5;
-const SUBDIVISIONS = 256; // ~0.2 m/vertex — medium quality, ~75% fewer tris than 512
-const TILE_FEATHER = 10;  // metres — height blend at deform-tile border
+const TILE_SIZE      = 50;  // matches trailWorldSize — full RT window has vertices
+const TILE_HALF      = TILE_SIZE * 0.5;
+const SUBDIVISIONS   = 256; // ~0.2 m/vertex — medium quality, ~75% fewer tris than 512
+const TILE_FEATHER   = 10;  // metres — terrain↔tile displacement hand-off width
+const TILE_EDGE_FADE = 2;   // metres — opacity fade over the coincident border strip
 
 // ── Default parameters (all live-editable via system.params) ────────────────
 export const SNOW_PARAMS_DEFAULTS = {
@@ -75,11 +89,16 @@ export const SNOW_PARAMS_DEFAULTS = {
 export function createSnowSystem(renderer, scene, initialHeightTex) {
   const params = { ...SNOW_PARAMS_DEFAULTS };
 
+  // Shared surface definition — also handed to the terrain LOD material.
+  const shared = createSnowShared(initialHeightTex, params);
+  shared.u.uTileHalf.value    = TILE_HALF;
+  shared.u.uTileFeather.value = TILE_FEATHER;
+
   // ── Ping-pong trail render-targets ─────────────────────────────────────────
   function _makeRT() {
     const rt = new THREE.RenderTarget(TRAIL_RES, TRAIL_RES, {
       format:          THREE.RGBAFormat,
-      type:            THREE.UnsignedByteType,
+      type:            THREE.HalfFloatType,
       colorSpace:      THREE.NoColorSpace,
       minFilter:       THREE.LinearFilter,
       magFilter:       THREE.LinearFilter,
@@ -130,14 +149,14 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     const inBnds = step(float(0), srcUV.x).mul(step(srcUV.x, float(1)))
                    .mul(step(float(0), srcUV.y)).mul(step(srcUV.y, float(1)));
 
-    // 5-tap cross blur — smooths deformation edges, gives organic look
-    const px = float(1.0 / TRAIL_RES);
-    const sC = texture(trailSrcNode, srcUV.clamp(0, 1)).r;
-    const sR = texture(trailSrcNode, srcUV.add(vec2(px,       float(0))).clamp(0, 1)).r;
-    const sL = texture(trailSrcNode, srcUV.sub(vec2(px,       float(0))).clamp(0, 1)).r;
-    const sU = texture(trailSrcNode, srcUV.add(vec2(float(0), px      )).clamp(0, 1)).r;
-    const sD = texture(trailSrcNode, srcUV.sub(vec2(float(0), px      )).clamp(0, 1)).r;
-    const sampled = sC.mul(0.5).add(sR.add(sL).add(sU).add(sD).mul(0.125));
+    // Carry the previous frame as-is. No per-frame blur: this pass runs every
+    // frame while moving, so any diffusion here erases footprints (a foot is
+    // only a couple of texels) within seconds. The quintic stamp disks below
+    // are already soft-edged; softness belongs in the stamp, not the carry.
+    // .sample() (not texture(node, uv)) — the ping-pong swap changes
+    // trailSrcNode.value every frame, and texture(node, uv) would bake the
+    // build-time texture in, silently dropping all accumulated history.
+    const sampled = trailSrcNode.sample(srcUV.clamp(0, 1)).r;
     const carried = mix(neutral, sampled, inBnds);
     const regrown = min(neutral, carried.add(passU.uRegrow));
 
@@ -259,53 +278,33 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     shiftDirty = false;
   }
 
-  // ── Snow material uniforms ─────────────────────────────────────────────────
+  // ── Snow material uniforms (surface uniforms live in shared.u) ────────────
   const u = {
-    uAnchor:          uniform(new THREE.Vector2(0, 0)),
-    uTileHalf:        uniform(TILE_HALF),
-    uBaseDepth:       uniform(params.baseDepth),
-    uNoiseFreq1:      uniform(params.noiseFreq1),
-    uNoiseFreq2:      uniform(params.noiseFreq2),
-    uNoiseAmp:        uniform(params.noiseAmp),
-    uTrailCenter:     uniform(new THREE.Vector2(0, 0)),
-    uTrailWorldSize:  uniform(params.trailWorldSize),
-    uGrooveScale:     uniform(params.grooveScale),
-    uRimScale:        uniform(params.rimScale),
-    uRimOffset:       uniform(params.rimOffset),
-    uCavityStrength:  uniform(params.cavityStrength),
-    uRoughnessDip:    uniform(params.roughnessDip),
-    uGlitterIntensity:uniform(params.glitterIntensity),
-    uGlitterScarcity: uniform(params.glitterScarcity),
-    uGlitterFreq:     uniform(params.glitterFreq),
-    uSunDir:          uniform(new THREE.Vector3(0, 1, 0)),
-    uSlopeStartY:     uniform(params.slopeStartY),
-    uSlopeRejectY:    uniform(params.slopeRejectY),
-    uTileFeather:     uniform(TILE_FEATHER),
+    ...shared.u,
+    uTrailCenter:    uniform(new THREE.Vector2(0, 0)),
+    uTrailWorldSize: uniform(params.trailWorldSize),
+    uGrooveScale:    uniform(params.grooveScale),
+    uRimScale:       uniform(params.rimScale),
+    uRimOffset:      uniform(params.rimOffset),
   };
 
-  // Heightmap texture node — .value swappable via setHeightTex()
-  const heightNode = texture(initialHeightTex);
-
-  // Snow coverage mask — single-channel [0,1].  Default 1×1 white → visible everywhere.
-  // Call setSnowMaskTex(snowMap.tex) to restrict snow to painted areas.
-  const _defMaskData = new Uint8Array([0]);   // black = no snow until painted
-  const _defMaskTex  = new THREE.DataTexture(_defMaskData, 1, 1, THREE.RedFormat);
-  _defMaskTex.needsUpdate = true;
-  const snowMaskNode = texture(_defMaskTex);
-
   // ── Snow TSL material ──────────────────────────────────────────────────────
+  // Opaque over covered snow; opacity only fades where the painted coverage
+  // thins out (surface hugs the tinted terrain there) and over the 2 m border
+  // strip where tile and terrain are the same surface anyway.
   const mat = new THREE.MeshStandardNodeMaterial({
     transparent:        true,
+    depthWrite:         true,
     alphaTest:          0.02,
     roughness:          0.93,
     metalness:          0,
     polygonOffset:      true,
-    polygonOffsetFactor:-2,   // pulls deform tile in front of static layer
+    polygonOffsetFactor:-2,   // wins the depth test where tile ≈ coplanar with terrain
     polygonOffsetUnits: -2,
   });
   mat.envMapIntensity = 0.6;
 
-  // ── Shared TSL helpers ────────────────────────────────────────────────────
+  // ── TSL helpers ────────────────────────────────────────────────────────────
 
   // world XZ → [0,1] UV within the scrolling trail window
   const trailUVfn = Fn(([wxz]) =>
@@ -320,145 +319,85 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     return fuX.mul(fuY);
   });
 
-  // Undisturbed snow depth (no trail) — shared by static mesh and deform edge blend
-  const snowDepthUndisturbed = Fn(([wxz]) => {
-    const p1    = vec3(wxz.x.mul(u.uNoiseFreq1), float(0), wxz.y.mul(u.uNoiseFreq1));
-    const p2    = vec3(wxz.x.mul(u.uNoiseFreq2), float(0), wxz.y.mul(u.uNoiseFreq2));
-    const noise = mx_noise_float(p1).mul(0.5).add(0.5)
-                   .mul(mx_noise_float(p2).mul(0.5).add(0.5))
-                   .mul(u.uNoiseAmp);
-    return u.uBaseDepth.add(noise).max(float(0.01));
+  // Trail compression [0,1] at world XZ. Multiplied by tileMask so it reaches
+  // exactly 0 at the tile border — this is what guarantees the terrain
+  // hand-off is seamless AND that the tile never dips below the terrain.
+  const compressionAt = Fn(([wxz]) => {
+    const tuv = trailUVfn(wxz);
+    const raw = neutral.sub(trailDispNode.sample(tuv.clamp(0, 1)).r)
+      .max(0).mul(float(1.0 / TRAIL_NEUT));
+    return raw.mul(trailEdgeFade(tuv)).mul(shared.tileMask(wxz));
   });
 
-  // 0 at deform-tile border, 1 deep inside — height blend (full feather width)
-  const deformTileBlend = Fn(([wxz]) => {
-    const adx = wxz.x.sub(u.uAnchor.x).abs();
-    const adz = wxz.y.sub(u.uAnchor.y).abs();
-    const distToEdge = min(u.uTileHalf.sub(adx), u.uTileHalf.sub(adz));
-    return smoothstep(float(0), u.uTileFeather, distToEdge);
-  });
-
-  // Terrain height (metres) sampled from the GPU heightmap at world XZ
-  const getTerrainH = Fn(([wxz]) => {
-    const hUV = wxz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)).clamp(0, 1);
-    return texture(heightNode, hUV).r.mul(float(MAX_HEIGHT));
-  });
-
-  // Terrain-only normal for slope rejection.  Snow depth is intentionally excluded:
-  // steep cliffs reject snow even before any trail or rim deformation is applied.
-  const terrainNormal = Fn(([wxz, eps]) => {
-    const hA = getTerrainH(wxz);
-    const hX = getTerrainH(wxz.add(vec2(eps, float(0))));
-    const hZ = getTerrainH(wxz.add(vec2(float(0), eps.negate())));
-    const pA = vec3(wxz.x, hA, wxz.y);
-    const pX = vec3(wxz.x.add(eps), hX, wxz.y);
-    const pZ = vec3(wxz.x, hZ, wxz.y.sub(eps));
-    return cross(pX.sub(pA).normalize(), pZ.sub(pA).normalize()).normalize();
-  });
-
-  const slopeMask = Fn(([wxz]) => {
-    return smoothstep(u.uSlopeRejectY, u.uSlopeStartY, terrainNormal(wxz, float(2.0)).y);
-  });
-
-  // Snow depth at world XZ — base layer (no rim, used for TBN neighbour samples)
-  // Uses Bruno Simon's multiplicative approach: snow × (1 − compression).
-  const snowDepthBase = Fn(([wxz]) => {
-    const p1    = vec3(wxz.x.mul(u.uNoiseFreq1), float(0), wxz.y.mul(u.uNoiseFreq1));
-    const p2    = vec3(wxz.x.mul(u.uNoiseFreq2), float(0), wxz.y.mul(u.uNoiseFreq2));
-    const noise = mx_noise_float(p1).mul(0.5).add(0.5)
-                   .mul(mx_noise_float(p2).mul(0.5).add(0.5))
-                   .mul(u.uNoiseAmp);
-
-    const tuv    = trailUVfn(wxz).clamp(0, 1);
-    const tMask  = trailEdgeFade(trailUVfn(wxz));
-    const tR     = texture(trailDispNode, tuv).r;
-    const comp   = neutral.sub(tR).max(0).mul(float(1.0 / TRAIL_NEUT));
-    const trackH = float(1).sub(comp.mul(u.uGrooveScale).clamp(0, 1));
-    // Clamp 1 cm minimum — prevents z-fighting with terrain when fully pressed
-    return u.uBaseDepth.add(noise).mul(mix(float(1), trackH, tMask)).max(float(0.01));
-  });
-
-  // Snow depth with rim ridge pushed up around track edges
-  const snowDepthFull = Fn(([wxz]) => {
-    const base   = snowDepthBase(wxz);
-    const tuv    = trailUVfn(wxz).clamp(0, 1);
-    const tMask  = trailEdgeFade(trailUVfn(wxz));
-    const rimOff = u.uRimOffset.div(u.uTrailWorldSize);
-
-    const cH = neutral.sub(texture(trailDispNode, tuv).r).max(0).mul(float(1.0 / TRAIL_NEUT));
-    const cR = neutral.sub(texture(trailDispNode, tuv.add(vec2(rimOff,  float(0))).clamp(0, 1)).r).max(0).mul(float(1.0 / TRAIL_NEUT));
-    const cL = neutral.sub(texture(trailDispNode, tuv.sub(vec2(rimOff,  float(0))).clamp(0, 1)).r).max(0).mul(float(1.0 / TRAIL_NEUT));
-    const cU = neutral.sub(texture(trailDispNode, tuv.add(vec2(float(0), rimOff )).clamp(0, 1)).r).max(0).mul(float(1.0 / TRAIL_NEUT));
-    const cD = neutral.sub(texture(trailDispNode, tuv.sub(vec2(float(0), rimOff )).clamp(0, 1)).r).max(0).mul(float(1.0 / TRAIL_NEUT));
-    const edgeFactor = cR.max(cL).max(cU).max(cD).sub(cH).max(0);
-    const rim        = edgeFactor.mul(u.uRimScale).mul(u.uBaseDepth).mul(tMask);
-    return base.add(rim);
-  });
-
-  const vTileBlend = varying(float(1), "snow_tb");
-
-  // ── Vertex: terrain-conforming position + TBN normal ──────────────────────
+  // ── Vertex: shared snow surface minus compression, plus rim ridge ─────────
   mat.positionNode = Fn(() => {
     const lxz   = positionGeometry.xz;
     const wxz   = lxz.add(u.uAnchor);
+    const depth = shared.snowDepth(wxz);
 
-    const tileBlend = deformTileBlend(wxz);
-    vTileBlend.assign(tileBlend);
+    const cH   = compressionAt(wxz);
+    const comp = cH.mul(u.uGrooveScale).clamp(0, 1);
 
-    const sA = mix(snowDepthUndisturbed(wxz),  snowDepthFull(wxz),  tileBlend);
-    const yA = getTerrainH(wxz).add(sA);
+    // Rim ridge: pushed-up snow around track edges, from the compression
+    // gradient at ±rimOffset. Scales with local depth so thin snow at painted
+    // edges gets a proportionally small rim.
+    const cR = compressionAt(wxz.add(vec2(u.uRimOffset, float(0))));
+    const cL = compressionAt(wxz.sub(vec2(u.uRimOffset, float(0))));
+    const cU = compressionAt(wxz.add(vec2(float(0), u.uRimOffset)));
+    const cD = compressionAt(wxz.sub(vec2(float(0), u.uRimOffset)));
+    const edgeFactor = cR.max(cL).max(cU).max(cD).sub(cH).max(0);
+    const rim        = edgeFactor.mul(u.uRimScale).mul(depth);
 
-    const maskUV = wxz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)).clamp(0, 1);
-    const painted = step(float(0.02), texture(snowMaskNode, maskUV).r.mul(slopeMask(wxz)));
-    return vec3(lxz.x, mix(float(-9999), yA, painted), lxz.y);
+    const y = shared.getTerrainH(wxz)
+      .add(depth.mul(float(1).sub(comp)))
+      .add(rim);
+    return vec3(lxz.x, y, lxz.y);
   })();
 
-  // Use the same per-pixel heightmap normal strategy as terrainLOD. Interpolated
-  // geometry normals show the dense snow mesh as tiny tiles under grazing light.
-  mat.normalNode = modelViewMatrix
-    .mul(vec4(terrainNormal(positionWorld.xz, float(2.0)), float(0)))
-    .xyz.normalize();
+  // ── Fragment: per-pixel normal, shared shading, coverage opacity ──────────
+  const wXZ = positionWorld.xz;
 
-  // ── Fragment: color / roughness / sparkle ─────────────────────────────────
-  // positionWorld.xz in fragment = positionGeometry.xz + mesh.position.xz = world XZ
-  const wXZ         = positionWorld.xz;
-  const fragTUV     = wXZ.sub(u.uTrailCenter).div(u.uTrailWorldSize).add(0.5).clamp(0, 1);
-  const fragTrail   = texture(trailDispNode, fragTUV).r;
-  const compression = neutral.sub(fragTrail).max(0).mul(float(1.0 / TRAIL_NEUT));
+  const compRaw = compressionAt(wXZ);
+  const compF   = compRaw.mul(u.uGrooveScale).clamp(0, 1);
 
-  const snowBase   = vec3(float(0.88), float(0.93), float(0.98));   // pristine: cool blue-white
-  const packedSnow = vec3(float(0.60), float(0.66), float(0.76));   // packed: blue-grey
-  const cavity     = float(1).sub(compression.mul(u.uCavityStrength));
-  const snowColor  = mix(snowBase, packedSnow, compression.mul(u.uCavityStrength).clamp(0, 1));
+  // Normal = analytic terrain normal + compression-gradient perturb (makes
+  // prints read crisp and catch light even between vertices) + a small
+  // high-frequency noise perturb so undisturbed snow isn't mirror-flat.
+  const gEps = u.uTrailWorldSize.mul(float(1.5 / TRAIL_RES));
+  const cGR  = compressionAt(wXZ.add(vec2(gEps, float(0))));
+  const cGL  = compressionAt(wXZ.sub(vec2(gEps, float(0))));
+  const cGU  = compressionAt(wXZ.add(vec2(float(0), gEps)));
+  const cGD  = compressionAt(wXZ.sub(vec2(float(0), gEps)));
+  const dScale = u.uBaseDepth.mul(u.uGrooveScale).div(gEps.mul(2));
+  const gradX  = cGR.sub(cGL).mul(dScale);
+  const gradZ  = cGU.sub(cGD).mul(dScale);
 
-  // Micro-facet sparkle: hash each crystal cell, mirror sun direction into view
-  const mfCell  = floor(wXZ.mul(u.uGlitterFreq));
-  const h1      = mx_noise_float(vec3(mfCell.x, float(0),    mfCell.y).mul(float(0.193)));
-  const h2      = mx_noise_float(vec3(mfCell.x, float(17.3), mfCell.y).mul(float(0.251)));
-  const mfN     = vec3(h1.sub(0.5).mul(0.6), float(1.0), h2.sub(0.5).mul(0.6)).normalize();
-  const viewDir = cameraPosition.sub(positionWorld).normalize();
-  const refl    = reflect(u.uSunDir.negate(), mfN);
-  const specDot = refl.dot(viewDir).clamp(0, 1);
-  // Very tight lobe (pow 1500) → sub-pixel crystal flash; disabled in packed zones
-  const sparkle = specDot.pow(float(1500.0)).mul(u.uGlitterIntensity).mul(float(1).sub(compression));
+  const f2   = u.uNoiseFreq2;
+  const nEps = float(0.15);
+  const nsC  = mx_noise_float(vec3(wXZ.x.mul(f2),           float(0), wXZ.y.mul(f2)));
+  const nsX  = mx_noise_float(vec3(wXZ.x.add(nEps).mul(f2), float(0), wXZ.y.mul(f2)));
+  const nsZ  = mx_noise_float(vec3(wXZ.x.mul(f2),           float(0), wXZ.y.add(nEps).mul(f2)));
+  const nK   = u.uNoiseAmp.mul(0.5).div(nEps);
+  const npX  = nsC.sub(nsX).mul(nK);
+  const npZ  = nsC.sub(nsZ).mul(nK);
 
-  // Softer ambient shimmer (noise-based)
-  const gp      = wXZ.mul(float(0.3));
-  const gn      = mx_noise_float(vec3(gp.x, float(0), gp.y)).mul(0.5).add(0.5);
-  const shimmer = gn.pow(u.uGlitterScarcity).mul(u.uGlitterIntensity.mul(0.4));
+  const surfN = shared.terrainNormal(wXZ, float(2.0))
+    .add(vec3(gradX.add(npX), float(0), gradZ.add(npZ)))
+    .normalize();
+  mat.normalNode = modelViewMatrix.mul(vec4(surfN, float(0))).xyz.normalize();
 
-  const deformColor = snowColor.mul(cavity);
-  const deformRough = float(0.93).sub(compression.mul(u.uRoughnessDip)).clamp(0.65, 1.0);
-  const deformEmit  = vec3(
-    sparkle.add(shimmer),
-    sparkle.add(shimmer),
-    sparkle.add(shimmer.mul(0.8)),
-  );
+  mat.colorNode     = shared.snowAlbedo(compF);
+  mat.roughnessNode = shared.snowRoughness(compF);
+  mat.emissiveNode  = shared.snowSparkle(wXZ, compF);
 
-  mat.colorNode     = mix(snowBase, deformColor, vTileBlend);
-  mat.roughnessNode = mix(float(0.93), deformRough, vTileBlend);
-  mat.emissiveNode  = deformEmit.mul(vTileBlend);
-  mat.alphaNode     = vTileBlend;
+  // Opacity: fade where painted coverage thins (snow height → 0 there, so it
+  // dissolves onto the identically-tinted terrain), plus a short fade at the
+  // tile rim where tile and terrain interpolate the same surface.
+  const adxF     = wXZ.x.sub(u.uAnchor.x).abs();
+  const adzF     = wXZ.y.sub(u.uAnchor.y).abs();
+  const edgeDist = min(u.uTileHalf.sub(adxF), u.uTileHalf.sub(adzF));
+  const rimFade  = smoothstep(float(0), float(TILE_EDGE_FADE), edgeDist);
+  mat.opacityNode = smoothstep(float(0.05), float(0.5), shared.covBlend(wXZ)).mul(rimFade);
 
   // ── Deformation tile mesh (50 m, high-res, play mode only) ──────────────
   const geo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE, SUBDIVISIONS, SUBDIVISIONS);
@@ -467,39 +406,44 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   mesh.receiveShadow = true;
-  mesh.renderOrder   = 1;    // renders above the terrain snow overlay
+  mesh.renderOrder   = 1;    // renders above the terrain
   mesh.visible       = false;
   scene.add(mesh);
   let playModeActive = false;
   let deformActive = false;
 
+  function _syncTileOn() {
+    const on = playModeActive && deformActive;
+    mesh.visible = on;
+    // Terrain reads this: it renders the full snow surface wherever the tile
+    // is off, and hands the tile footprint over when it's on. Flipping both
+    // in the same call keeps the swap invisible.
+    shared.u.uTileOn.value = on ? 1 : 0;
+  }
+
   // ── Grid snap step (matches terrain grid sub-division) ────────────────────
-  const _gridStep = TILE_SIZE / SUBDIVISIONS;   // 0.25 m
+  const _gridStep = TILE_SIZE / SUBDIVISIONS;   // ~0.2 m
 
   // ── Public API ────────────────────────────────────────────────────────────
 
   /** Swap to a different heightmap GPU texture (e.g. after loading a save). */
   function setHeightTex(tex) {
-    heightNode.value = tex;
+    shared.setHeightTex(tex);
   }
 
   /** Set the painted snow coverage map.  Pass snowMap.tex from SnowMap. */
   function setSnowMaskTex(tex) {
-    snowMaskNode.value = tex;
+    shared.setMaskTex(tex);
   }
 
-  /**
-   * Play mode: terrain material shows static snow; deform tile handles only local
-   * snow depth + grooves so the ball stays visible in trenches (lab-like).
-   */
   function setPlayMode(on) {
     playModeActive = !!on;
-    mesh.visible = playModeActive && deformActive;
+    _syncTileOn();
   }
 
   function setDeformActive(on) {
     deformActive = !!on;
-    mesh.visible = playModeActive && deformActive;
+    _syncTileOn();
   }
 
   /** @deprecated use setPlayMode */
@@ -575,10 +519,17 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     rts[1].dispose();
   }
 
+  /** Debug: current trail RT (read side) — lets tools inspect stamp coverage. */
+  function getTrailRT() {
+    return rts[rtIdx];
+  }
+
   return {
+    shared,
     mesh,
     params,
     u,
+    getTrailRT,
     setHeightTex,
     setSnowMaskTex,
     setPlayMode,

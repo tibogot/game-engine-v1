@@ -133,6 +133,25 @@ export class PropInstancer {
     tr[key] = this._createLodMeshes(type[ek]);
   }
 
+  /**
+   * Re-read per-entry materials from the store after they were swapped in
+   * place (e.g. wrapping imported cliff GLB materials with the terrain
+   * blend). LOD0 only — LOD1/2 entries carry their own imported materials.
+   */
+  refreshTypeMaterials(typeIdx) {
+    const tr   = this._typeRender[typeIdx];
+    const type = this.store.types[typeIdx];
+    if (!tr?.lod0 || !type) return;
+    const seen = new Set();
+    tr.lod0.forEach((lodEntry, i) => {
+      const mat = type.entries[i]?.material;
+      if (!mat || lodEntry.im.material === mat) return;
+      seen.add(lodEntry.im.material);
+      lodEntry.im.material = mat;
+    });
+    for (const m of seen) m?.dispose?.();
+  }
+
   /** Swap material on every LOD InstancedMesh for this type. */
   setTypeMaterial(typeIdx, newMaterial) {
     const tr = this._typeRender[typeIdx];

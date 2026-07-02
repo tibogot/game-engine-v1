@@ -68,7 +68,13 @@ export async function bakeObjectThumbnails({
     for (const item of items) {
       if (!item?.make) continue;
       clearGroup();
-      group.add(item.make());
+      // One broken builder must not abort the whole bake — skip it and continue.
+      try {
+        group.add(item.make());
+      } catch (err) {
+        console.warn(`[Arborist] thumbnail build failed for "${item.key}":`, err);
+        continue;
+      }
 
       box.setFromObject(group);
       if (!box.isEmpty()) group.position.y -= box.min.y;

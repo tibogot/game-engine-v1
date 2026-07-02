@@ -250,6 +250,14 @@ export function buildGuardrailMesh({
   const group = new THREE.Group();
   group.name = "Guardrail";
 
+  const railOuterGeo = buildGuardrailProfileGeometry(
+    curve,
+    pathSegs,
+    profile,
+    depth,
+    closed,
+    getWorldHeight,
+  );
   // Bake Y offset into geo so no position.y transform is needed on the mesh
   railOuterGeo.translate(0, p.railYOffset, 0);
   const railOuter = new THREE.Mesh(railOuterGeo, railMat);

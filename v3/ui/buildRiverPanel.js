@@ -164,6 +164,14 @@ function _buildRiverControls(panel, rp, app, prefix) {
       step: 0.5,
       onChange: () => app.river2CarveChanged?.(),
     });
+    _slider(carveBody, rp, "bedCurve", {
+      label: "Bed curve",
+      hint: "0 = flat channel floor, 1 = U-shaped (deeper at the centerline)",
+      min: 0,
+      max: 1,
+      step: 0.05,
+      onChange: () => app.river2CarveChanged?.(),
+    });
   }
 
   const geoBody = _section(panel, "Geometry");
@@ -172,14 +180,15 @@ function _buildRiverControls(panel, rp, app, prefix) {
     min: 1,
     max: 80,
     step: 0.5,
-    onChange: () => app[`${prefix}Changed`]?.(),
+    // river2: width defines the carve channel too, so re-carve on change
+    onChange: () => (prefix === "river2" ? app.river2CarveChanged?.() : app[`${prefix}Changed`]?.()),
   });
   _slider(geoBody, rp, "segments", {
     label: "Segments",
     min: 20,
     max: 900,
     step: 10,
-    onChange: () => app[`${prefix}Changed`]?.(),
+    onChange: () => (prefix === "river2" ? app.river2CarveChanged?.() : app[`${prefix}Changed`]?.()),
   });
   _slider(geoBody, rp, "heightOffset", {
     label: "Height offset",
@@ -189,37 +198,127 @@ function _buildRiverControls(panel, rp, app, prefix) {
     onChange: () => app[`${prefix}Changed`]?.(),
   });
 
-  const matBody = _section(panel, "Material");
+  const matChanged = () =>
+    (prefix === "river2" ? (app.river2MaterialChanged ?? app.river2Changed) : app[`${prefix}Changed`])?.();
+
+  const matBody = _section(panel, prefix === "river2" ? "Water Style" : "Material");
   _dropdown(matBody, rp, "shaderStyle", {
     label: "Shader style",
-    options: { Basic: "Basic", "Stylized v1": "Stylized" },
+    options: prefix === "river2"
+      ? { "Toon (GPU)": "Toon", Basic: "Basic" }
+      : { Basic: "Basic", "Stylized v1": "Stylized" },
     onChange: () => app[`${prefix}Changed`]?.(),
   });
-  _color(matBody, rp, "shallowColor", { label: "Shallow", onChange: () => app[`${prefix}Changed`]?.() });
-  _color(matBody, rp, "deepColor", { label: "Deep", onChange: () => app[`${prefix}Changed`]?.() });
-  _color(matBody, rp, "highlightColor", { label: "Highlight", onChange: () => app[`${prefix}Changed`]?.() });
-  _color(matBody, rp, "foamColor", { label: "Foam", onChange: () => app[`${prefix}Changed`]?.() });
-  _slider(matBody, rp, "foamWidth", {
-    label: "Foam width",
-    min: 0.01,
-    max: 0.6,
-    step: 0.01,
-    onChange: () => app[`${prefix}Changed`]?.(),
-  });
+  _color(matBody, rp, "shallowColor", { label: "Shallow", onChange: matChanged });
+  _color(matBody, rp, "deepColor", { label: "Deep", onChange: matChanged });
+  _color(matBody, rp, "highlightColor", { label: "Highlight", onChange: matChanged });
+  _color(matBody, rp, "foamColor", { label: "Foam", onChange: matChanged });
   _slider(matBody, rp, "opacity", {
     label: "Opacity",
     min: 0.05,
     max: 1,
     step: 0.01,
-    onChange: () => app[`${prefix}Changed`]?.(),
+    onChange: matChanged,
   });
   _slider(matBody, rp, "flowSpeed", {
     label: "Flow speed",
+    hint: prefix === "river2" ? "Metres per second along the river" : undefined,
     min: 0,
-    max: 5,
+    max: prefix === "river2" ? 10 : 5,
     step: 0.01,
-    onChange: () => app[`${prefix}Changed`]?.(),
+    onChange: matChanged,
   });
+  if (prefix !== "river2") {
+    _slider(matBody, rp, "foamWidth", {
+      label: "Foam width",
+      min: 0.01,
+      max: 0.6,
+      step: 0.01,
+      onChange: matChanged,
+    });
+  }
+
+  if (prefix === "river2") {
+    const depthBody = _section(panel, "Depth Bands");
+    _slider(depthBody, rp, "bandCount", {
+      label: "Bands",
+      min: 2,
+      max: 6,
+      step: 1,
+      onChange: matChanged,
+    });
+    _slider(depthBody, rp, "depthAbsorb", {
+      label: "Depth contrast",
+      hint: "How fast color shifts from shallow to deep",
+      min: 0.05,
+      max: 3,
+      step: 0.05,
+      onChange: matChanged,
+    });
+
+    const foamBody = _section(panel, "Foam & Rapids");
+    _slider(foamBody, rp, "foamDepth", {
+      label: "Shore foam depth",
+      hint: "Water shallower than this (metres) grows edge foam",
+      min: 0.05,
+      max: 3,
+      step: 0.05,
+      onChange: matChanged,
+    });
+    _slider(foamBody, rp, "foamScale", {
+      label: "Foam scale",
+      min: 0.2,
+      max: 8,
+      step: 0.1,
+      onChange: matChanged,
+    });
+    _slider(foamBody, rp, "rapidsSlope", {
+      label: "Rapids slope",
+      hint: "Downhill grade where whitewater kicks in",
+      min: 0.01,
+      max: 0.5,
+      step: 0.01,
+      onChange: matChanged,
+    });
+    _slider(foamBody, rp, "rapidsBoost", {
+      label: "Rapids boost",
+      hint: "Extra flow speed on steep drops",
+      min: 0,
+      max: 4,
+      step: 0.1,
+      onChange: matChanged,
+    });
+
+    const detailBody = _section(panel, "Surface Detail", false);
+    _slider(detailBody, rp, "streakScale", {
+      label: "Streak length",
+      min: 1,
+      max: 30,
+      step: 0.5,
+      onChange: matChanged,
+    });
+    _slider(detailBody, rp, "streakStrength", {
+      label: "Streak strength",
+      min: 0,
+      max: 1,
+      step: 0.02,
+      onChange: matChanged,
+    });
+    _slider(detailBody, rp, "sparkleStrength", {
+      label: "Sparkle",
+      min: 0,
+      max: 1,
+      step: 0.02,
+      onChange: matChanged,
+    });
+    _slider(detailBody, rp, "rimStrength", {
+      label: "Glancing sheen",
+      min: 0,
+      max: 1,
+      step: 0.02,
+      onChange: matChanged,
+    });
+  }
 }
 
 export function buildRiverPanels(app) {

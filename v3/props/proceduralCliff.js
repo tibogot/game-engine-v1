@@ -122,8 +122,11 @@ export function createProceduralCliffGeometry(params = {}) {
   const a = [0, 0, 0], b = [0, 0, 0], c = [0, 0, 0], d = [0, 0, 0];
 
   function pushTri(v0, v1, v2, uv0, uv1, uv2) {
-    positions.push(v0[0], v0[1], v0[2], v1[0], v1[1], v1[2], v2[0], v2[1], v2[2]);
-    uvs.push(uv0[0], uv0[1], uv1[0], uv1[1], uv2[0], uv2[1]);
+    // Rings are enumerated CCW viewed from +Y, which winds every face inward
+    // as passed — emit (v0, v2, v1) so faces point outward (front-face culling
+    // otherwise shows the hollow interior).
+    positions.push(v0[0], v0[1], v0[2], v2[0], v2[1], v2[2], v1[0], v1[1], v1[2]);
+    uvs.push(uv0[0], uv0[1], uv2[0], uv2[1], uv1[0], uv1[1]);
   }
 
   function pushQuad(v00, v10, v11, v01, u0, u1, y0, y1) {

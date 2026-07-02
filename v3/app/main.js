@@ -71,6 +71,7 @@ import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
 import { createColliderGroup } from "../physics/colliderGroup.js";
 import { createProceduralCliffGeometry, CLIFF_PRESETS } from "../props/proceduralCliff.js";
+import { applyCliffTerrainBlend, createCliffGlbBlendMaterial } from "../props/cliffTerrainBlend.js";
 import { TreeBvh } from "../../v2/core/foliage/treeBvh.js";
 import { createOnFootCollider } from "../../v2/play/onFootCollider.js";
 import { createBvhDebugVisualizer } from "../tools/bvhDebugVisualizer.js";
@@ -84,7 +85,7 @@ import { buildTreePanel } from "../ui/buildTreePanel.js";
 import { createRiverToolState } from "./state/riverState.js";
 import { buildRiverPanels } from "../ui/buildRiverPanel.js";
 import { RiverSystem } from "../../v2/tools/river/riverSystem.js";
-import { V3RiverCarvingSystem } from "../tools/v3RiverCarvingSystem.js";
+import { RiverSystemGPU } from "../tools/riverSystemGpu.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -283,9 +284,10 @@ async function main() {
   );
 
   // LOD meshes share the same heightTexNode, cursor uniforms, brush mask, rotation,
-  // and SnowMap.  Static snow is a terrain-material overlay; only local trails use
-  // the separate deform mesh.
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowMap.tex);
+  // and the snow surface definition (snowSystem.shared): painted snow displaces
+  // the terrain itself with real volume; the deform tile only refines the same
+  // surface with trail compression near the player.
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared);
   scene.add(lod.group);
   // Terrain starts flat (createHeightmapTexture initializes all-zeros).
   // User can generate terrain manually via the Procedural panel.
@@ -363,12 +365,28 @@ async function main() {
     if (playStatMode) playStatMode.textContent = s.mode ?? "—";
   }
 
+  // Painted snow raises the play-mode ground so the character/vehicles ride
+  // *in* the snow rather than floating on bare terrain under it. SNOW_SINK is
+  // the fraction of the depth that stays under the feet (the rest is what the
+  // deform tile visually compresses away around them).
+  const SNOW_SINK = 0.4;
+  function snowGroundOffset(u, v) {
+    const cov = snowMap.coverageAtUV(u, v);
+    if (cov < 0.02) return 0;
+    const wx = u * WORLD_SIZE - WORLD_SIZE / 2;
+    const wz = v * WORLD_SIZE - WORLD_SIZE / 2;
+    // Same slope rejection as the shader, so no phantom step on cliffs
+    const ny = sampleTerrainNormal(wx, wz).y;
+    const slope = THREE.MathUtils.smoothstep(ny, 0.55, 0.78);
+    return cov * slope * snowSystem.params.baseDepth * SNOW_SINK;
+  }
+
   const playMode = createPlayMode({
     scene,
     renderer,
     camera,
     controls,
-    sampleTerrainHeight: (u, v) => sampleTerrainHeight(u, v),
+    sampleTerrainHeight: (u, v) => sampleTerrainHeight(u, v) + snowGroundOffset(u, v),
     uCursorUV,
     character,
     husky,
@@ -2738,6 +2756,8 @@ async function main() {
     const propMat = propTextureLibrary.getById(slot.materialId);
     if (!propMat) return false;
     const newMat = createMaterialForLibrary(propMat, { triplanar: !!slot.triplanar });
+    // Solid slots are cliffs — keep the terrain blend across material swaps.
+    if (slot.solid) applyCliffTerrainBlend(newMat, { heightTexNode, splatOverlay });
     propInstancer.setTypeMaterial(slot.typeIdx, newMat);
     const type = propStore.types[slot.typeIdx];
     if (type) for (const e of type.entries) e.material = newMat;
@@ -2785,29 +2805,41 @@ async function main() {
     maxHeight: MAX_HEIGHT,
     config: splineTerrainConfig,
   });
-  function commitTerrainCarve() {
-    const ok = v3TerrainStore.commit();
-    if (ok) pushHeightmapEditsToGpu();
-    bvhDebug?.update();
-    return ok;
-  }
-
   riverSystem = new RiverSystem({
     scene,
     toolState: riverEditorToolState,
     getWorldHeight,
   });
-  river2System = new V3RiverCarvingSystem({
+  river2System = new RiverSystemGPU({
     scene,
     toolState: riverEditorToolState,
-    getWorldHeight,
-    terrainStore: v3TerrainStore,
-    heightmapSize: HEIGHTMAP_SIZE,
-    worldSize: WORLD_SIZE,
-    markTerrainDirty: () => commitTerrainCarve(),
-    commitTerrain: () => commitTerrainCarve(),
+    renderer,
+    getRT: () => sculpt.getCurrentRT(),
+    heightTexNode,
+    cpuHeightmap,
     ensureCpuHeightmap: ensureCpuHeightmapFromGpu,
+    onCarveCommitted: () => {
+      markHeightmapDirty();
+      requestHeightmapReadback();
+      bvhDebug?.update();
+    },
   });
+
+  // Keep the river system's uncarved-base RT in sync with every non-river
+  // terrain edit (sculpt strokes, sculpt undo/redo, procedural gen, spline
+  // plateau, heightmap load — the last three all route through
+  // replaceHeightData). Internal sculptBrush calls bypass these wrappers, so
+  // only user-facing edit boundaries trigger a rebase.
+  {
+    const _endStroke = sculpt.endStroke;
+    const _undo = sculpt.undo;
+    const _redo = sculpt.redo;
+    const _replace = sculpt.replaceHeightData;
+    sculpt.endStroke = (...a) => { const r = _endStroke(...a); river2System.notifyTerrainEdited(); return r; };
+    sculpt.undo = (...a) => { const r = _undo(...a); if (r) river2System.notifyTerrainEdited(); return r; };
+    sculpt.redo = (...a) => { const r = _redo(...a); if (r) river2System.notifyTerrainEdited(); return r; };
+    sculpt.replaceHeightData = (...a) => { const r = _replace(...a); river2System.notifyTerrainEdited(); return r; };
+  }
 
   _onLeaveRiverMode = () => {
     if (riverSystem?.dragging) riverSystem.dragging = false;
@@ -3060,6 +3092,9 @@ async function main() {
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
     const material = createMaterialForLibrary(defaultPropMat, { triplanar: true });
+    // Genshin-style terrain integration: painted terrain color on up-facing
+    // tops + per-pixel contact band from the GPU heightmap hides the base seam.
+    applyCliffTerrainBlend(material, { heightTexNode, splatOverlay });
     const typeIdx = propStore.registerPrimitive(presetName, geometry, material);
     if (typeIdx < 0) return;
     propStore.types[typeIdx].solid = true;
@@ -3083,7 +3118,19 @@ async function main() {
   async function importCliffGlb(preselectedFile = null) {
     const handle = async (file) => {
       const typeIdx = await loadGltfAsType(file);
-      propStore.types[typeIdx].solid = true;
+      const type = propStore.types[typeIdx];
+      type.solid = true;
+      // v2-parity cliff look on imported GLBs: terrain color on tops + contact
+      // band, but keeping each submesh's own GLB textures as the rock look.
+      // GLB submeshes can share a material — wrap each source only once.
+      const wrapped = new Map();
+      for (const entry of type.entries) {
+        if (!wrapped.has(entry.material)) {
+          wrapped.set(entry.material, createCliffGlbBlendMaterial(entry.material, { heightTexNode, splatOverlay }));
+        }
+        entry.material = wrapped.get(entry.material);
+      }
+      propInstancer.refreshTypeMaterials(typeIdx);
       const slot = propSlots.find((s) => s.typeIdx === typeIdx);
       if (slot) slot.solid = true;
       document.getElementById("props-panel")?._rebuildPropUi?.();
@@ -3322,9 +3369,9 @@ async function main() {
       river2System.rebuildAllMeshes();
       applyRiverModeEffects();
     },
+    river2MaterialChanged: () => river2System.syncMaterial(),
     river2CarveChanged: () => {
       river2System.syncMaterial();
-      river2System.rebuildAllMeshes();
       river2System.refreshCarving();
     },
     river2NewRiver: () => river2System.startNewRiver(),

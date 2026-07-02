@@ -264,6 +264,8 @@ export function buildBridgeMesh({
       scl.set((halfW - p.stringerInset) * 2, p.trussH * 0.6, p.trussW * 0.8);
       m.makeBasis(f.right, f.up, f.fwd).scale(scl).setPosition(pos);
       const g = unitCross.clone();
+      // sweepRect geos have no uv — attribute sets must match or merge returns null
+      g.deleteAttribute("uv");
       g.applyMatrix4(m);
       structGeos.push(g);
     }
@@ -285,6 +287,8 @@ export function buildBridgeMesh({
       scl.set(p.postW, p.railHeight, p.postD);
       m.makeBasis(f.right, f.up, f.fwd).scale(scl).setPosition(baseP);
       const g = unitPost.clone();
+      // rail sweeps have no uv — attribute sets must match or merge returns null
+      g.deleteAttribute("uv");
       g.applyMatrix4(m);
       railGeos.push(g);
       postTops.push({ t, s, f });
