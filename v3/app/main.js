@@ -68,6 +68,9 @@ import { createWindTexture, createSpecNoiseTexture } from "../../v2/core/foliage
 import { GrassTerrainData } from "../render/grass/grassTerrainData.js";
 import { CliffStore } from "../../v2/core/cliffs/cliffStore.js";
 import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
+import { SolidCollider } from "../physics/solidCollider.js";
+import { createColliderGroup } from "../physics/colliderGroup.js";
+import { createProceduralCliffGeometry, CLIFF_PRESETS } from "../props/proceduralCliff.js";
 import { TreeBvh } from "../../v2/core/foliage/treeBvh.js";
 import { createOnFootCollider } from "../../v2/play/onFootCollider.js";
 import { createBvhDebugVisualizer } from "../tools/bvhDebugVisualizer.js";
@@ -296,12 +299,16 @@ async function main() {
   });
   husky.load();
 
-  // Player BVH — same CliffBvh as v2; props/live props feed in via extra stores.
+  // Player BVH — merged CliffBvh bake (prop box proxies / live props) plus the
+  // instanced SolidCollider (cliffs, real triangles, no rebake on edits),
+  // combined behind one CliffBvh-shaped API for all play-mode consumers.
   const cliffStore = new CliffStore();
   const cliffBvh = new CliffBvh(cliffStore);
+  const colliderSources = [cliffBvh]; // solidCollider pushed once propStore exists
+  const worldCollider = createColliderGroup(colliderSources);
   let treeBvh = null;
   const onFootCollider = createOnFootCollider({
-    cliffBvh: () => cliffBvh,
+    cliffBvh: () => worldCollider,
     treeBvh: () => treeBvh,
   });
   let rebakePlayerBvh = () => {};
@@ -366,7 +373,7 @@ async function main() {
     character,
     husky,
     getCollider: () => onFootCollider,
-    getCliffBvh: () => cliffBvh,
+    getCliffBvh: () => worldCollider,
     getTreeBvh: () => treeBvh,
     getStuntRoadMeshes: () => [],
     getStuntRoadSolidMeshes: () => [],
@@ -2657,6 +2664,11 @@ async function main() {
   propInstancer = new PropInstancer(scene, propStore);
   const gltfLoader = getSharedGltfLoader();
 
+  // Instanced cliff collision — one shared BVH per solid type, auto-syncs with
+  // propStore edits (place/move/delete never rebakes anything).
+  const solidCollider = new SolidCollider(propStore);
+  colliderSources.push(solidCollider);
+
   // World-space hit on terrain surface for prop placement
   const _propHitVec = new THREE.Vector3();
   function getTerrainHitWorld(event) {
@@ -2686,7 +2698,7 @@ async function main() {
   };
 
   bvhDebug = createBvhDebugVisualizer(scene, {
-    getCliffBvh: () => cliffBvh,
+    getCliffBvh: () => worldCollider,
     getTreeBvh: () => treeBvh,
     rebakeCliff: () => rebakePlayerBvh(),
   });
@@ -3032,6 +3044,64 @@ async function main() {
     document.getElementById("props-panel")?._rebuildPropUi?.();
   }
 
+  // Procedural strata cliff — placed/edited like any prop, but the type is
+  // flagged `solid` so SolidCollider gives it real-triangle collision and the
+  // box-proxy player bake skips it.
+  function addCliff(presetName) {
+    const preset = CLIFF_PRESETS.find((c) => c.name === presetName);
+    if (!preset) return;
+    const existing = propSlots.find((s) => s.name === presetName && s.builtin);
+    if (existing) {
+      propState.activeSlot = propSlots.indexOf(existing);
+      document.getElementById("props-panel")?._rebuildPropUi?.();
+      return;
+    }
+    const geometry = createProceduralCliffGeometry(preset.params);
+    const defaultPropMat =
+      propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
+    const material = createMaterialForLibrary(defaultPropMat, { triplanar: true });
+    const typeIdx = propStore.registerPrimitive(presetName, geometry, material);
+    if (typeIdx < 0) return;
+    propStore.types[typeIdx].solid = true;
+    propInstancer.onTypeRegistered(typeIdx);
+    const slotIdx = propSlots.length;
+    propSlots.push({
+      name: presetName,
+      loaded: true,
+      typeIdx,
+      builtin: true,
+      solid: true,
+      materialId: defaultPropMat?.id ?? "__none__",
+      triplanar: true,
+    });
+    propState.activeSlot = slotIdx;
+    document.getElementById("props-panel")?._rebuildPropUi?.();
+  }
+
+  // Import a GLB as a solid cliff type — real-triangle collision, same
+  // placement/gizmo/undo pipeline as props.
+  async function importCliffGlb(preselectedFile = null) {
+    const handle = async (file) => {
+      const typeIdx = await loadGltfAsType(file);
+      propStore.types[typeIdx].solid = true;
+      const slot = propSlots.find((s) => s.typeIdx === typeIdx);
+      if (slot) slot.solid = true;
+      document.getElementById("props-panel")?._rebuildPropUi?.();
+      return typeIdx;
+    };
+    if (preselectedFile) return handle(preselectedFile);
+    return new Promise((resolve) => {
+      const inp = document.createElement("input");
+      inp.type = "file";
+      inp.accept = ".glb,.gltf";
+      inp.addEventListener("change", async () => {
+        if (!inp.files || inp.files.length === 0) { resolve(null); return; }
+        resolve(await handle(inp.files[0]));
+      });
+      inp.click();
+    });
+  }
+
   function addLiveProp(livePropName) {
     const defs = {
       Flag:  { factoryId: "flag",  defaults: FLAG_DEFAULTS },
@@ -3131,6 +3201,9 @@ async function main() {
     livePropManager,
     importPropGlb,
     addPrimitive,
+    addCliff,
+    importCliffGlb,
+    getCliffPresetNames: () => CLIFF_PRESETS.map((c) => c.name),
     addLiveProp,
     removePropSlot,
     importPropLod,

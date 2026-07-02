@@ -672,11 +672,15 @@ export function createPlayMode({
     let speedOverride = null;
     if (moveMode === "capsule") speedOverride = CAPSULE_MOVE_SPEED;
 
+    // getTerrainHeight must be the PURE analytic terrain (not sampleGroundY):
+    // the capsule's floor backstop hard-snaps up to it, so feeding it the
+    // cliff-top raycast would teleport the player onto cliffs when walking
+    // under an overhang. Cliff/prop contact is fully handled by the BVH collider.
     capsule.update(dt, {
       input: { mx, mz, jump: keys.space, run: keys.shift, crouch: false },
       moveSpeedOverride: speedOverride,
       collider: getCollider(),
-      getTerrainHeight: sampleGroundY,
+      getTerrainHeight,
       worldHalf: WORLD_SIZE / 2,
     });
 
@@ -688,7 +692,7 @@ export function createPlayMode({
         mx, mz,
         ctrl: capsule,
         collider: getCollider(),
-        getTerrainHeight: sampleGroundY,
+        getTerrainHeight,
         keys: {
           ShiftLeft: keys.shift,
           ShiftRight: keys.shift,

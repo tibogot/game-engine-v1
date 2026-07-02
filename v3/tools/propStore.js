@@ -210,11 +210,13 @@ export class PropStore {
   /**
    * BVH hook — one axis-aligned box proxy per static instance (12 tris), using
    * each type's merged bounds. Matches propInstancer hitbox placement.
+   * Solid types (cliffs) are excluded — they collide with their real triangles
+   * via SolidCollider instead of a box proxy.
    */
   forEachMeshInstance(cb) {
     for (const inst of this.instances) {
       const type = this.types[inst.typeIdx];
-      if (!type || type.live) continue;
+      if (!type || type.live || type.solid) continue;
       _ensureProxyGeo(type);
       if (!type.proxyGeo) continue;
 
@@ -260,7 +262,7 @@ export class PropStore {
 
   exportData() {
     return {
-      types:     this.types.map(t => ({ name: t.name, live: t.live ?? false, factoryId: t.factoryId })),
+      types:     this.types.map(t => ({ name: t.name, live: t.live ?? false, solid: t.solid ?? false, factoryId: t.factoryId })),
       instances: this.instances.map(i => ({ ...i })),
     };
   }

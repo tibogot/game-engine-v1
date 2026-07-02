@@ -374,6 +374,39 @@ panel.innerHTML = "";
         });
       }
 
+      // --- Cliffs (solid: real-triangle collision, acts like terrain) ---
+      const cliffBody = _section(panel, "Add Cliff (solid)", false);
+      const cliffHint = document.createElement("p");
+      cliffHint.style.cssText =
+        "margin:2px 0 6px; font-size:11px; color:var(--text-dim); line-height:1.35;";
+      cliffHint.textContent =
+        "Procedural debug cliffs — walk, drive and land on their real shape (not a box). Rotate/scale/overlap freely; collision follows instantly, no rebake needed.";
+      cliffBody.appendChild(cliffHint);
+      for (const presetName of app.getCliffPresetNames?.() ?? []) {
+        _button(cliffBody, {
+          title: presetName.replace(/^Cliff: /, ""),
+          onClick: () => {
+            app.addCliff(presetName);
+            rebuildAll();
+          },
+        });
+      }
+      _button(cliffBody, {
+        title: "Import Cliff GLB...",
+        onClick: async () => {
+          await app.importCliffGlb?.();
+          rebuildAll();
+        },
+      });
+      installDropZone(cliffBody, {
+        hint: "Drop .glb as solid cliff",
+        pickFile: tryGetGlbFileFromAnyDrop,
+        onFile: async (file) => {
+          await app.importCliffGlb?.(file);
+          rebuildAll();
+        },
+      });
+
       const liveBody = _section(panel, "Add Live Prop", false);
       installDropZone(liveBody, {
         hint: "Drop .glb as collectible",
