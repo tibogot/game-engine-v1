@@ -72,6 +72,8 @@ import { SolidCollider } from "../physics/solidCollider.js";
 import { createColliderGroup } from "../physics/colliderGroup.js";
 import { createProceduralCliffGeometry, CLIFF_PRESETS } from "../props/proceduralCliff.js";
 import { applyCliffTerrainBlend, createCliffGlbBlendMaterial } from "../props/cliffTerrainBlend.js";
+import { CliffPaintMask } from "../../v2/core/cliffs/cliffPaintMask.js";
+import { CliffPaintSystem } from "../../v2/tools/cliffs/cliffPaintSystem.js";
 import { TreeBvh } from "../../v2/core/foliage/treeBvh.js";
 import { createOnFootCollider } from "../../v2/play/onFootCollider.js";
 import { createBvhDebugVisualizer } from "../tools/bvhDebugVisualizer.js";
@@ -283,6 +285,12 @@ async function main() {
     splatMap.tex,
   );
 
+  // Cliff paint mask (v2 parity) — world-XZ brush mask whose R channel forces
+  // the terrain look onto cliff surfaces. Shared deps for every cliff blend
+  // material (procedural presets, imported GLBs, their LODs).
+  const cliffPaintMask = new CliffPaintMask(512);
+  const cliffBlendDeps = { heightTexNode, splatOverlay, cliffPaintTex: cliffPaintMask.texture };
+
   // LOD meshes share the same heightTexNode, cursor uniforms, brush mask, rotation,
   // and the snow surface definition (snowSystem.shared): painted snow displaces
   // the terrain itself with real volume; the deform tile only refines the same
@@ -413,6 +421,7 @@ async function main() {
       syncSplinePanelVisibility();
       syncRiverPanelVisibility();
       syncRiver2PanelVisibility();
+      syncCliffPaintPanelVisibility();
       applyRiverModeEffects();
       syncEditorOrbitEnabled();
       syncPlayImmersiveButtonLabel();
@@ -1067,6 +1076,7 @@ async function main() {
   const grassPanel = document.getElementById("grass-panel");
   const treePanel  = document.getElementById("tree-panel");
   const snowPanel  = document.getElementById("snow-panel");
+  const cliffPaintPanel = document.getElementById("cliffpaint-panel");
 
   function syncSculptPanelVisibility() {
     sculptPanel.style.display = (editorMode === "sculpt" && !playMode.active) ? "" : "none";
@@ -1102,6 +1112,10 @@ async function main() {
 
   function syncSnowPanelVisibility() {
     snowPanel.style.display = (editorMode === "snow" && !playMode.active) ? "" : "none";
+  }
+
+  function syncCliffPaintPanelVisibility() {
+    cliffPaintPanel.style.display = (editorMode === "cliffPaint" && !playMode.active) ? "" : "none";
   }
 
   function applyRiverModeEffects() {
@@ -1159,6 +1173,8 @@ async function main() {
       sculpt.uRadius.value = treeToolState.brush.radius / WORLD_SIZE;
     } else if (m === "snow") {
       sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
+    } else if (m === "cliffPaint") {
+      sculpt.uRadius.value = cliffPaintBrush.radius / WORLD_SIZE;
     } else if (m === "props" || m === "spline" || m === "river" || m === "river2") {
       uCursorUV.value.set(-2, -2);
       if (m === "river" || m === "river2") void ensureCpuHeightmapFromGpu();
@@ -1166,6 +1182,7 @@ async function main() {
     syncSculptPanelVisibility();
     syncPaintPanelVisibility();
     syncSnowPanelVisibility();
+    syncCliffPaintPanelVisibility();
     syncGrassPanelVisibility();
     syncTreePanelVisibility();
     syncPropsPanelVisibility();
@@ -1443,6 +1460,17 @@ async function main() {
   let isPainting = false;
   let lastPaintUV = null;
   const MAX_STAMPS_PER_FRAME  = 12;
+
+  // ── Cliff paint state ──────────────────────────────────────────────────────
+  // Reuses v2's CliffPaintSystem (stroke spacing + snapshot undo) against the
+  // world-XZ mask; Alt while painting = erase.
+  const cliffPaintBrush = { radius: 30, strength: 0.5, falloff: 2, spacingFactor: 0.1 };
+  const cliffPaintSystem = new CliffPaintSystem({
+    toolState: { brush: cliffPaintBrush, cliffPaint: { erase: false } },
+    mask: cliffPaintMask,
+    config: { world: { size: WORLD_SIZE } },
+  });
+  let _isCliffPainting = false;
 
   // ── Snow paint state ───────────────────────────────────────────────────────
   const snowBrushState = { radius: 80, strength: 0.5, falloff: 2 };
@@ -1978,6 +2006,7 @@ async function main() {
           snowMap.restoreSnapshot(_snowUndoStack.pop());
         }
         else if (editorMode === "props") propSys.undo();
+        else if (editorMode === "cliffPaint") cliffPaintSystem.undo();
         else if (editorMode === "treePaint") treeEnv.treeSystem.undo();
         else if (editorMode === "river" && riverSystem?.undo()) { /* ok */ }
         else if (editorMode === "river2" && river2System?.undo()) { /* ok */ }
@@ -1993,6 +2022,7 @@ async function main() {
           snowMap.restoreSnapshot(_snowRedoStack.pop());
         }
         else if (editorMode === "props") propSys.redo();
+        else if (editorMode === "cliffPaint") cliffPaintSystem.redo();
         else if (editorMode === "treePaint") treeEnv.treeSystem.redo();
         else if (editorMode === "river" && riverSystem?.redo()) { /* ok */ }
         else if (editorMode === "river2" && river2System?.redo()) { /* ok */ }
@@ -2388,6 +2418,42 @@ async function main() {
     });
   }
 
+  // ── Cliff paint panel controls ─────────────────────────────────────────────
+  {
+    const slR = document.getElementById("cliffpaint-sl-radius");
+    const lbR = document.getElementById("cliffpaint-lbl-radius");
+    const slS = document.getElementById("cliffpaint-sl-strength");
+    const lbS = document.getElementById("cliffpaint-lbl-strength");
+    const slF = document.getElementById("cliffpaint-sl-falloff");
+    const lbF = document.getElementById("cliffpaint-lbl-falloff");
+    const btnFill  = document.getElementById("cliffpaint-btn-fill");
+    const btnClear = document.getElementById("cliffpaint-btn-clear");
+
+    slR.addEventListener("input", () => {
+      cliffPaintBrush.radius = Number(slR.value);
+      lbR.textContent = slR.value + "m";
+      if (editorMode === "cliffPaint") sculpt.uRadius.value = cliffPaintBrush.radius / WORLD_SIZE;
+    });
+    slS.addEventListener("input", () => {
+      cliffPaintBrush.strength = Number(slS.value) / 100;
+      lbS.textContent = cliffPaintBrush.strength.toFixed(2);
+    });
+    slF.addEventListener("input", () => {
+      cliffPaintBrush.falloff = Number(slF.value) / 10;
+      lbF.textContent = cliffPaintBrush.falloff.toFixed(1);
+    });
+    // Fill/Clear go through the paint system's snapshot undo stack.
+    const _cliffMaskBulk = (op) => {
+      const before = cliffPaintMask.getSnapshot();
+      op();
+      cliffPaintSystem.undoStack.push({ before, after: cliffPaintMask.getSnapshot() });
+      if (cliffPaintSystem.undoStack.length > 32) cliffPaintSystem.undoStack.shift();
+      cliffPaintSystem.redoStack.length = 0;
+    };
+    btnFill.addEventListener("click", () => _cliffMaskBulk(() => cliffPaintMask.fillAll()));
+    btnClear.addEventListener("click", () => _cliffMaskBulk(() => cliffPaintMask.clearAll()));
+  }
+
   // Auto-paint slot controls — read/write textureLib.slots[texlibActiveSlot].auto*
   function _autoSlot() { return textureLib.slots[texlibActiveSlot]; }
 
@@ -2757,7 +2823,7 @@ async function main() {
     if (!propMat) return false;
     const newMat = createMaterialForLibrary(propMat, { triplanar: !!slot.triplanar });
     // Solid slots are cliffs — keep the terrain blend across material swaps.
-    if (slot.solid) applyCliffTerrainBlend(newMat, { heightTexNode, splatOverlay });
+    if (slot.solid) applyCliffTerrainBlend(newMat, cliffBlendDeps);
     propInstancer.setTypeMaterial(slot.typeIdx, newMat);
     const type = propStore.types[slot.typeIdx];
     if (type) for (const e of type.entries) e.material = newMat;
@@ -3094,7 +3160,7 @@ async function main() {
     const material = createMaterialForLibrary(defaultPropMat, { triplanar: true });
     // Genshin-style terrain integration: painted terrain color on up-facing
     // tops + per-pixel contact band from the GPU heightmap hides the base seam.
-    applyCliffTerrainBlend(material, { heightTexNode, splatOverlay });
+    applyCliffTerrainBlend(material, cliffBlendDeps);
     const typeIdx = propStore.registerPrimitive(presetName, geometry, material);
     if (typeIdx < 0) return;
     propStore.types[typeIdx].solid = true;
@@ -3126,7 +3192,7 @@ async function main() {
       const wrapped = new Map();
       for (const entry of type.entries) {
         if (!wrapped.has(entry.material)) {
-          wrapped.set(entry.material, createCliffGlbBlendMaterial(entry.material, { heightTexNode, splatOverlay }));
+          wrapped.set(entry.material, createCliffGlbBlendMaterial(entry.material, cliffBlendDeps));
         }
         entry.material = wrapped.get(entry.material);
       }
@@ -3212,6 +3278,18 @@ async function main() {
       gltfLoader.load(url, (gltf) => {
         URL.revokeObjectURL(url);
         propStore.registerTypeLod(slot.typeIdx, lod, gltf.scene);
+        // Cliff LODs get the same terrain blend as LOD0, wrapped before the
+        // instancer builds the LOD meshes so they pick it up directly.
+        if (slot.solid) {
+          const lodEntries = propStore.types[slot.typeIdx]?.[lod === 1 ? "lod1Entries" : "lod2Entries"];
+          const wrapped = new Map();
+          for (const entry of lodEntries ?? []) {
+            if (!wrapped.has(entry.material)) {
+              wrapped.set(entry.material, createCliffGlbBlendMaterial(entry.material, cliffBlendDeps));
+            }
+            entry.material = wrapped.get(entry.material);
+          }
+        }
         propInstancer.onTypeLodRegistered(slot.typeIdx, lod);
         resolve();
       }, undefined, (err) => { URL.revokeObjectURL(url); reject(err); });
@@ -3704,6 +3782,63 @@ async function main() {
       const lbS = document.getElementById("snow-lbl-strength");
       if (slS) slS.value = Math.round(snowBrushState.strength * 100);
       if (lbS) lbS.textContent = snowBrushState.strength.toFixed(2);
+    }
+  }, { passive: false, capture: true });
+
+  // ── Cliff paint mode mouse events ─────────────────────────────────────────
+  // World-XZ projected mask (terrain hit under the cursor), Alt = erase.
+  const _cliffPaintHit = new THREE.Vector3();
+
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "cliffPaint") return;
+    refreshMouse(e);
+    const hit = getUV();
+    uCursorUV.value.set(hit ? hit.u : -2, hit ? hit.v : -2);
+    if (hit && _isCliffPainting) {
+      _cliffPaintHit.set(hit.u * WORLD_SIZE - WORLD_SIZE / 2, 0, hit.v * WORLD_SIZE - WORLD_SIZE / 2);
+      cliffPaintSystem.applyAt(_cliffPaintHit, e);
+    }
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "cliffPaint") return;
+    if (e.button !== 0) return;
+    refreshMouse(e);
+    const hit = getUV();
+    if (!hit) return;
+    _isCliffPainting = true;
+    _cliffPaintHit.set(hit.u * WORLD_SIZE - WORLD_SIZE / 2, 0, hit.v * WORLD_SIZE - WORLD_SIZE / 2);
+    cliffPaintSystem.beginStroke(_cliffPaintHit, e);
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (e.button !== 0) return;
+    if (_isCliffPainting) {
+      _isCliffPainting = false;
+      cliffPaintSystem.endStroke();
+    }
+  });
+
+  // Scroll wheel in cliff paint mode: Shift = radius, Alt = strength
+  renderer.domElement.addEventListener("wheel", e => {
+    if (playMode.active || editorMode !== "cliffPaint") return;
+    if (!e.shiftKey && !e.altKey) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.11;
+    if (e.shiftKey) {
+      cliffPaintBrush.radius = Math.max(2, Math.min(200, cliffPaintBrush.radius * factor));
+      const slR = document.getElementById("cliffpaint-sl-radius");
+      const lbR = document.getElementById("cliffpaint-lbl-radius");
+      if (slR) slR.value = Math.round(cliffPaintBrush.radius);
+      if (lbR) lbR.textContent = Math.round(cliffPaintBrush.radius) + "m";
+      sculpt.uRadius.value = cliffPaintBrush.radius / WORLD_SIZE;
+    } else {
+      cliffPaintBrush.strength = Math.max(0.01, Math.min(1.0, cliffPaintBrush.strength * factor));
+      const slS = document.getElementById("cliffpaint-sl-strength");
+      const lbS = document.getElementById("cliffpaint-lbl-strength");
+      if (slS) slS.value = Math.round(cliffPaintBrush.strength * 100);
+      if (lbS) lbS.textContent = cliffPaintBrush.strength.toFixed(2);
     }
   }, { passive: false, capture: true });
 

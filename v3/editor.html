@@ -132,6 +132,7 @@
               <option value="river">River</option>
               <option value="river2">River+ (carve)</option>
               <option value="snow">Snow</option>
+              <option value="cliffPaint">Cliff paint</option>
             </select>
             <p class="mode-hint" id="view-nav-hint" style="margin-top:6px">View: drag to orbit · scroll to zoom</p>
           </div>
@@ -993,6 +994,39 @@
           </div>
 
         </div><!-- /#snow-panel -->
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- CLIFF PAINT panel — shown only in cliff paint mode          -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <div id="cliffpaint-panel" style="display:none">
+
+          <div class="inspector-section">
+            <div class="section-header">Cliff paint</div>
+            <div class="section-body">
+              <p class="mode-hint" style="margin:0 0 6px">Paints terrain color onto cliffs (world-projected). Alt = erase.</p>
+              <div class="prop-row">
+                <span class="prop-label">Radius</span>
+                <input type="range" class="prop-slider" id="cliffpaint-sl-radius" min="2" max="200" step="1" value="30">
+                <span class="prop-value" id="cliffpaint-lbl-radius">30m</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Strength</span>
+                <input type="range" class="prop-slider" id="cliffpaint-sl-strength" min="1" max="100" step="1" value="50">
+                <span class="prop-value" id="cliffpaint-lbl-strength">0.50</span>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Falloff</span>
+                <input type="range" class="prop-slider" id="cliffpaint-sl-falloff" min="5" max="40" step="1" value="20">
+                <span class="prop-value" id="cliffpaint-lbl-falloff">2.0</span>
+              </div>
+              <div style="display:flex;gap:4px;margin-top:4px">
+                <button type="button" class="action-btn" id="cliffpaint-btn-fill">Fill all</button>
+                <button type="button" class="action-btn" id="cliffpaint-btn-clear">Clear all</button>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /#cliffpaint-panel -->
 
         <!-- ═══════════════════════════════════════════════════════════ -->
         <!-- GRASS panel — shown only in grass mode                     -->

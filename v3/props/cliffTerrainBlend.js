@@ -49,11 +49,13 @@ const LUM = vec3(0.299, 0.587, 0.114);
  * Tweakable uniforms land in `mat.userData.cliffBlend` for a future UI panel.
  *
  * @param {THREE.MeshStandardNodeMaterial} mat — from createMaterialForLibrary
- * @param {{ heightTexNode: object, splatOverlay: object }} deps
+ * @param {{ heightTexNode: object, splatOverlay: object, cliffPaintTex?: THREE.Texture }} deps
  *   heightTexNode — the shared TSL texture node whose .value sculptBrush swaps
  *   splatOverlay  — return of createSplatOverlay (blendColor/blendRoughness)
+ *   cliffPaintTex — optional CliffPaintMask texture (R = strength); painted
+ *                   areas force the terrain look regardless of slope/height
  */
-export function applyCliffTerrainBlend(mat, { heightTexNode, splatOverlay }) {
+export function applyCliffTerrainBlend(mat, { heightTexNode, splatOverlay, cliffPaintTex = null }) {
   const uTopStart     = uniform(0.6);  // normalWorld.y where grass starts
   const uTopFull      = uniform(0.85); // normalWorld.y where grass is full
   const uTopNoiseScale = uniform(0.06); // world-XZ noise frequency on the top edge (v2 parity)
@@ -103,7 +105,12 @@ export function applyCliffTerrainBlend(mat, { heightTexNode, splatOverlay }) {
   const contact     = float(1).sub(smoothstep(float(0), uContactBand, heightAbove))
                         .mul(inBounds);
 
-  const blend = clamp(max(topMask, contact), float(0), float(1)).mul(inBounds);
+  // Manual paint override (v2 CliffPaintMask parity) — world-XZ projected,
+  // R channel forces the terrain look wherever the user painted.
+  let blend = clamp(max(topMask, contact), float(0), float(1)).mul(inBounds);
+  if (cliffPaintTex) {
+    blend = max(blend, texture(cliffPaintTex, hmUV).r.mul(inBounds));
+  }
 
   mat.colorNode     = mix(rockColor, terrainColor, blend);
   mat.roughnessNode = mix(rockRough, terrainRough, blend);

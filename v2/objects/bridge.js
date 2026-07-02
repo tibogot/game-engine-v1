@@ -11,6 +11,10 @@ import { seededRand } from "./woodUtils.js";
  * planked deck, post-and-rail railings, an arched truss underneath, stone
  * abutments, and optional emissive lanterns (they bloom via the gallery's
  * selective-bloom pass).
+ *
+ * Every opaque part bakes its color into vertex colors and merges into ONE
+ * mesh (1 draw call, 1 shadow caster); the emissive lantern papers are the
+ * only second mesh. Cost: the stone abutments share the wood roughness.
  */
 
 export const BRIDGE_DEFAULTS = {
@@ -60,14 +64,6 @@ export const BRIDGE_DEFAULTS = {
 };
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
-
-function woodMat(hex, p) {
-  return new THREE.MeshStandardMaterial({
-    color: hex,
-    roughness: p.roughness,
-    metalness: p.metalness,
-  });
-}
 
 // ── geometry helpers ──────────────────────────────────────────────────────
 
@@ -120,6 +116,19 @@ function sweepRect(centers, frames, hr, hu) {
   geo.setIndex(idx);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
+  return geo;
+}
+
+// Bake a solid color into every vertex of a geometry (in-place).
+function bakeColor(geo, color) {
+  const n = geo.attributes.position.count;
+  const buf = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    buf[i * 3]     = color.r;
+    buf[i * 3 + 1] = color.g;
+    buf[i * 3 + 2] = color.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(buf, 3));
   return geo;
 }
 
@@ -179,27 +188,29 @@ export function buildBridgeMesh({
   const group = new THREE.Group();
   group.name = "Bridge";
 
-  const deckMat = woodMat(p.woodMain, p);
-  const structMat = woodMat(p.woodAlt, p);
-  const railMat = woodMat(p.woodRail, p);
-  const stoneMat = new THREE.MeshStandardMaterial({
-    color: p.stoneColor,
-    roughness: 0.95,
-    metalness: 0,
-  });
+  // Everything opaque collects here and merges into one vertex-colored mesh.
+  const allGeos = [];
+  const _c = new THREE.Color();
 
-  // ── deck planks (instanced, with tone + size jitter) ──
+  // Unit box template — uv stripped so clones merge with the uv-less sweepRect geos
+  const unitBox = new THREE.BoxGeometry(1, 1, 1);
+  unitBox.deleteAttribute("uv");
+
+  const m = new THREE.Matrix4();
+  const scl = new THREE.Vector3();
+
+  const pushBox = (matrix, color) => {
+    const g = unitBox.clone();
+    g.applyMatrix4(matrix);
+    bakeColor(g, color);
+    allGeos.push(g);
+  };
+
+  // ── deck planks (tone + size jitter baked into vertex colors) ──
   const segs = Math.max(20, p.pathSegments | 0);
   const plankPitch = Math.max(0.08, p.plankWidth + p.plankGap);
   const plankCount = Math.max(2, Math.floor(length / plankPitch));
-  const plankGeo = new THREE.BoxGeometry(1, 1, 1);
-  const planks = new THREE.InstancedMesh(plankGeo, deckMat, plankCount);
-  planks.castShadow = true;
-  planks.receiveShadow = true;
-  const m = new THREE.Matrix4();
-  const scl = new THREE.Vector3();
   const baseCol = new THREE.Color(p.woodMain);
-  const col = new THREE.Color();
   for (let i = 0; i < plankCount; i++) {
     const t = (i + 0.5) / plankCount;
     const f = frameAt(t);
@@ -207,14 +218,11 @@ export function buildBridgeMesh({
     const lenJit = 1 + (seededRand(p.seed, i * 3 + 1) - 0.5) * 0.06;
     scl.set(p.width * lenJit, p.deckThickness, p.plankWidth);
     m.makeBasis(f.right, f.up, f.fwd).scale(scl).setPosition(pos);
-    planks.setMatrixAt(i, m);
     const v = (seededRand(p.seed, i * 3 + 2) - 0.5) * 2 * p.plankToneVar;
-    col.copy(baseCol).offsetHSL(0, v * 0.15, v);
-    planks.setColorAt(i, col);
+    // instanceColor used to multiply the material color — bake the same product
+    _c.copy(baseCol).offsetHSL(0, v * 0.15, v).multiply(baseCol);
+    pushBox(m, _c);
   }
-  planks.instanceMatrix.needsUpdate = true;
-  if (planks.instanceColor) planks.instanceColor.needsUpdate = true;
-  group.add(planks);
 
   // helpers to sample a side path (offset on right + up) for sweeps
   const sidePath = (sign, rightOff, upOff) => {
@@ -231,20 +239,17 @@ export function buildBridgeMesh({
     }
     return { centers, frames };
   };
-  // collect swept geometries per material → merge into one mesh each at the end
-  // (keeps draw calls down: structure=1, rails=1, abutments=1).
-  const structGeos = [];
-  const railGeos = [];
-  const stoneGeos = [];
-  const addSweep = (sign, rightOff, upOff, hr, hu, arr) => {
+  const addSweep = (sign, rightOff, upOff, hr, hu, colorHex) => {
     const { centers, frames } = sidePath(sign, rightOff, upOff);
-    arr.push(sweepRect(centers, frames, hr, hu));
+    const g = sweepRect(centers, frames, hr, hu);
+    bakeColor(g, _c.set(colorHex));
+    allGeos.push(g);
   };
 
   // ── stringers (under both deck edges) ──
   const stringerUp = -p.deckThickness * 0.5 - p.stringerH * 0.5;
   for (const s of [-1, 1]) {
-    addSweep(s, halfW - p.stringerInset, stringerUp, p.stringerW * 0.5, p.stringerH * 0.5, structGeos);
+    addSweep(s, halfW - p.stringerInset, stringerUp, p.stringerW * 0.5, p.stringerH * 0.5, p.woodAlt);
   }
 
   // ── arched truss (two side arches + cross-beams) ──
@@ -252,31 +257,23 @@ export function buildBridgeMesh({
     const trussUp =
       -p.deckThickness * 0.5 - p.trussGap - p.stringerH - p.trussH * 0.5;
     for (const s of [-1, 1]) {
-      addSweep(s, halfW - p.stringerInset, trussUp, p.trussW * 0.5, p.trussH * 0.5, structGeos);
+      addSweep(s, halfW - p.stringerInset, trussUp, p.trussW * 0.5, p.trussH * 0.5, p.woodAlt);
     }
-    // cross-beams — bake into structGeos (same mat) instead of a separate InstancedMesh
     const cn = Math.max(2, p.trussCross | 0);
-    const unitCross = new THREE.BoxGeometry(1, 1, 1);
+    _c.set(p.woodAlt);
     for (let i = 0; i < cn; i++) {
       const t = (i + 0.5) / cn;
       const f = frameAt(t);
       const pos = deckPos(t).addScaledVector(f.up, trussUp);
       scl.set((halfW - p.stringerInset) * 2, p.trussH * 0.6, p.trussW * 0.8);
       m.makeBasis(f.right, f.up, f.fwd).scale(scl).setPosition(pos);
-      const g = unitCross.clone();
-      // sweepRect geos have no uv — attribute sets must match or merge returns null
-      g.deleteAttribute("uv");
-      g.applyMatrix4(m);
-      structGeos.push(g);
+      pushBox(m, _c);
     }
-    unitCross.dispose();
   }
 
   // ── railings: posts + rails on both sides ──
-  // Posts baked into railGeos (same railMat) — no separate InstancedMesh needed
   const postCount = Math.max(2, Math.floor(length / Math.max(0.5, p.postSpacing)) + 1);
-  const unitPost = new THREE.BoxGeometry(1, 1, 1);
-  const postTops = []; // remember post-top transforms for lanterns
+  _c.set(p.woodRail);
   for (let i = 0; i < postCount; i++) {
     const t = postCount === 1 ? 0 : i / (postCount - 1);
     const f = frameAt(t);
@@ -286,68 +283,42 @@ export function buildBridgeMesh({
         .addScaledVector(f.up, p.railHeight * 0.5 + p.deckThickness * 0.5);
       scl.set(p.postW, p.railHeight, p.postD);
       m.makeBasis(f.right, f.up, f.fwd).scale(scl).setPosition(baseP);
-      const g = unitPost.clone();
-      // rail sweeps have no uv — attribute sets must match or merge returns null
-      g.deleteAttribute("uv");
-      g.applyMatrix4(m);
-      railGeos.push(g);
-      postTops.push({ t, s, f });
+      pushBox(m, _c);
     }
   }
-  unitPost.dispose();
 
   // horizontal rails (top + optional mid) swept along each side
   const railOffsets = [p.railHeight];
   if (p.midRail) railOffsets.push(p.railHeight * 0.5);
   for (const s of [-1, 1]) {
     for (const ro of railOffsets) {
-      addSweep(s, halfW - 0.06, ro + p.deckThickness * 0.5, p.railRadius, p.railRadius, railGeos);
+      addSweep(s, halfW - 0.06, ro + p.deckThickness * 0.5, p.railRadius, p.railRadius, p.woodRail);
     }
   }
 
   // ── stone abutments at both ends ──
   if (p.abutments) {
+    _c.set(p.stoneColor);
     for (const t of [0, 1]) {
       const f = frameAt(t);
       const gY = t === 0 ? y0 : yN;
       const top = deckY(t) - p.deckThickness * 0.5;
       const h = Math.max(0.3, top - gY + 0.4);
       const cx = curve.getPointAt(t);
-      const abGeo = new THREE.BoxGeometry(1, 1, 1);
       scl.set(p.width + 0.5, h, 0.9);
       const pos = new THREE.Vector3(cx.x, gY + h * 0.5 - 0.05, cx.z);
       m.makeBasis(f.right, f.up, f.fwd).scale(scl).setPosition(pos);
-      abGeo.applyMatrix4(m);
-      stoneGeos.push(abGeo);
+      pushBox(m, _c);
     }
   }
 
-  // ── lanterns (emissive → bloom) ──
+  // ── lanterns (emissive papers → bloom; caps join the opaque merge) ──
   if (p.lanterns && length > 1) {
     const count = Math.max(2, Math.floor(length / Math.max(1, p.lanternSpacing)) + 1);
-    const frameMat = woodMat("#2a1c12", p);
-    const paperMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(p.lanternColor).multiplyScalar(0.4),
-      emissive: new THREE.Color(p.lanternColor),
-      emissiveIntensity: p.lanternIntensity,
-      roughness: 0.6,
-      metalness: 0,
-    });
     const ls = p.lanternSize;
-    const n = count * 2;
-    const caps = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(ls * 0.6, ls * 0.18, ls * 0.6),
-      frameMat,
-      n,
-    );
-    caps.castShadow = true;
-    const papers = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(ls * 0.7, ls, ls * 0.7),
-      paperMat,
-      n,
-    );
-    const lm = new THREE.Matrix4();
-    let li = 0;
+    const paperTemplate = new THREE.BoxGeometry(ls * 0.7, ls, ls * 0.7);
+    const paperGeos = [];
+    const capCol = new THREE.Color("#2a1c12");
     for (let i = 0; i < count; i++) {
       const t = count === 1 ? 0.5 : i / (count - 1);
       const f = frameAt(t);
@@ -355,36 +326,49 @@ export function buildBridgeMesh({
         const top = deckPos(t)
           .addScaledVector(f.right, s * (halfW - 0.06))
           .addScaledVector(f.up, p.railHeight + p.deckThickness * 0.5 + ls * 0.6);
-        lm.makeTranslation(
+        m.makeScale(ls * 0.6, ls * 0.18, ls * 0.6).setPosition(
           top.x + f.up.x * ls * 0.6,
           top.y + f.up.y * ls * 0.6,
           top.z + f.up.z * ls * 0.6,
         );
-        caps.setMatrixAt(li, lm);
-        lm.makeTranslation(top.x, top.y, top.z);
-        papers.setMatrixAt(li, lm);
-        li++;
+        pushBox(m, capCol);
+        const pg = paperTemplate.clone();
+        pg.translate(top.x, top.y, top.z);
+        paperGeos.push(pg);
       }
     }
-    caps.instanceMatrix.needsUpdate = true;
-    papers.instanceMatrix.needsUpdate = true;
-    group.add(caps, papers);
+    paperTemplate.dispose();
+    const mergedPapers = mergeGeometries(paperGeos, false);
+    paperGeos.forEach((g) => g.dispose());
+    if (mergedPapers) {
+      const paperMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(p.lanternColor).multiplyScalar(0.4),
+        emissive: new THREE.Color(p.lanternColor),
+        emissiveIntensity: p.lanternIntensity,
+        roughness: 0.6,
+        metalness: 0,
+      });
+      group.add(new THREE.Mesh(mergedPapers, paperMat));
+    }
   }
 
-  // ── merge collected sweeps into one mesh per material (fewer draw calls) ──
-  const addMerged = (geos, mat) => {
-    if (!geos.length) return;
-    const merged = mergeGeometries(geos, false);
-    geos.forEach((g) => g.dispose());
-    if (!merged) return;
-    const mesh = new THREE.Mesh(merged, mat);
+  // ── merge everything opaque into ONE vertex-colored mesh ──
+  unitBox.dispose();
+  const merged = mergeGeometries(allGeos, false);
+  allGeos.forEach((g) => g.dispose());
+  if (merged) {
+    const mesh = new THREE.Mesh(
+      merged,
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: p.roughness,
+        metalness: p.metalness,
+      }),
+    );
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);
-  };
-  addMerged(structGeos, structMat);
-  addMerged(railGeos, railMat);
-  addMerged(stoneGeos, stoneMat);
+  }
 
   return group;
 }
