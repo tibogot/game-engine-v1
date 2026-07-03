@@ -88,6 +88,11 @@ import { createRiverToolState } from "./state/riverState.js";
 import { buildRiverPanels } from "../ui/buildRiverPanel.js";
 import { RiverSystem } from "../../v2/tools/river/riverSystem.js";
 import { RiverSystemGPU } from "../tools/riverSystemGpu.js";
+import { SmartRoadLabSystem } from "../../v2/tools/smartRoad/smartRoadLabSystem.js";
+import { RoadConformSystem } from "../tools/roadConformSystem.js";
+import { mergeRoadDrawCalls } from "../tools/roadDrawCallMerge.js";
+import { DEFAULT_ROAD_STATE, ROAD_AUTOSAVE_KEY } from "./state/roadState.js";
+import { buildRoadPanel } from "../ui/buildRoadPanel.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -358,6 +363,7 @@ async function main() {
   const splinePanel    = document.getElementById("spline-panel");
   const riverPanel     = document.getElementById("river-panel");
   const river2Panel    = document.getElementById("river2-panel");
+  const roadPanel      = document.getElementById("road-panel");
   const playStatPos    = document.getElementById("play-stat-pos");
   const playStatSpeed  = document.getElementById("play-stat-speed");
   const playStatGround = document.getElementById("play-stat-ground");
@@ -401,7 +407,7 @@ async function main() {
     getCollider: () => onFootCollider,
     getCliffBvh: () => worldCollider,
     getTreeBvh: () => treeBvh,
-    getStuntRoadMeshes: () => [],
+    getStuntRoadMeshes: () => roadSystem?.getColliderMeshes() ?? [],
     getStuntRoadSolidMeshes: () => [],
     onStartWalking: () => { playHint.classList.add("visible"); },
     onEnterMenu:    () => { playHint.classList.remove("visible"); },
@@ -421,6 +427,7 @@ async function main() {
       syncSplinePanelVisibility();
       syncRiverPanelVisibility();
       syncRiver2PanelVisibility();
+      syncRoadPanelVisibility();
       syncCliffPaintPanelVisibility();
       applyRiverModeEffects();
       syncEditorOrbitEnabled();
@@ -1058,6 +1065,10 @@ async function main() {
   };
   let riverSystem = null;
   let river2System = null;
+  let roadSystem = null;
+  let roadConform = null;
+  const roadState = { ...DEFAULT_ROAD_STATE };
+  const _roadDrag = { nodeId: null, edge: null };
   const splineState = { ...DEFAULT_SPLINE_STATE };
   let splineToolState = {
     mode: "view",
@@ -1070,6 +1081,7 @@ async function main() {
   let _onLeaveSplineMode = () => {};
   let _onLeaveRiverMode = () => {};
   let _onLeaveRiver2Mode = () => {};
+  let _onLeaveRoadMode = () => {};
   let _onGizmoDragEnd = () => {};
   let _gizmoTarget = null;
 
@@ -1108,6 +1120,10 @@ async function main() {
 
   function syncRiver2PanelVisibility() {
     river2Panel.style.display = (editorMode === "river2" && !playMode.active) ? "" : "none";
+  }
+
+  function syncRoadPanelVisibility() {
+    roadPanel.style.display = (editorMode === "road" && !playMode.active) ? "" : "none";
   }
 
   function syncSnowPanelVisibility() {
@@ -1152,8 +1168,10 @@ async function main() {
     if (editorMode === "spline" && m !== "spline") _onLeaveSplineMode();
     if (editorMode === "river" && m !== "river") _onLeaveRiverMode();
     if (editorMode === "river2" && m !== "river2") _onLeaveRiver2Mode();
+    if (editorMode === "road" && m !== "road") _onLeaveRoadMode();
     if (editorMode === "props" && m !== "props") _onLeavePropsMode();
     editorMode = m;
+    roadSystem?.setEditActive(m === "road" && !playMode.active);
     if (splineToolState) splineToolState.mode = m;
     tbSculpt.classList.toggle("active", m === "sculpt");
     toolsModeSelect.value = m;
@@ -1175,9 +1193,16 @@ async function main() {
       sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
     } else if (m === "cliffPaint") {
       sculpt.uRadius.value = cliffPaintBrush.radius / WORLD_SIZE;
-    } else if (m === "props" || m === "spline" || m === "river" || m === "river2") {
+    } else if (m === "props" || m === "spline" || m === "river" || m === "river2" || m === "road") {
       uCursorUV.value.set(-2, -2);
       if (m === "river" || m === "river2") void ensureCpuHeightmapFromGpu();
+      if (m === "road") {
+        // Fresh CPU mirror → rebase the grade baseline → re-drape the network.
+        void ensureCpuHeightmapFromGpu().then(() => {
+          roadConform?.rebase();
+          roadSystem?.queueRebuild();
+        });
+      }
     }
     syncSculptPanelVisibility();
     syncPaintPanelVisibility();
@@ -1189,6 +1214,7 @@ async function main() {
     syncSplinePanelVisibility();
     syncRiverPanelVisibility();
     syncRiver2PanelVisibility();
+    syncRoadPanelVisibility();
     applySplineModeEffects();
     applyRiverModeEffects();
     refreshGizmoHud();
@@ -1221,6 +1247,8 @@ async function main() {
     splinePanel.style.display = "none";
     riverPanel.style.display = "none";
     river2Panel.style.display = "none";
+    roadPanel.style.display = "none";
+    roadSystem?.setEditActive(false);
     helpOverlay.classList.remove("visible");
     tbHelp.classList.remove("active");
     syncPlayImmersiveButtonLabel();
@@ -1759,6 +1787,7 @@ async function main() {
       splineSys.update(dt);
       riverSystem?.update(dt);
       river2System?.update(dt);
+      roadSystem?.update();
 
       tickPerf(perf, now, dt * 1000);
       perf.activeChunks = lod.group.children.length;
@@ -1950,6 +1979,34 @@ async function main() {
         e.preventDefault();
         if (editorMode === "river") riverSystem.deleteSelected();
         else river2System.deleteSelected();
+        return;
+      }
+    }
+    // Smart Road shortcuts (v2 Smart Road 2)
+    if (editorMode === "road" && !playMode.active && roadSystem) {
+      if (e.code === "Delete" || e.code === "Backspace") {
+        e.preventDefault();
+        if (roadSystem.selectedNodeId !== null) roadSystem.deleteNode(roadSystem.selectedNodeId);
+        return;
+      }
+      if (e.code === "KeyJ" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (roadSystem.selectedNodeId !== null) roadSystem.cycleNodeType(roadSystem.selectedNodeId);
+        return;
+      }
+      if (e.code === "KeyB" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        roadSystem.toggleBridge(); // bridge on the last-grabbed edge
+        return;
+      }
+      if (e.code === "Equal" || e.code === "NumpadAdd") {
+        e.preventDefault();
+        roadSystem.adjustNodeLift(e.shiftKey ? 0.1 : 0.5);
+        return;
+      }
+      if (e.code === "Minus" || e.code === "NumpadSubtract") {
+        e.preventDefault();
+        roadSystem.adjustNodeLift(e.shiftKey ? -0.1 : -0.5);
         return;
       }
     }
@@ -2907,6 +2964,80 @@ async function main() {
     sculpt.replaceHeightData = (...a) => { const r = _replace(...a); river2System.notifyTerrainEdited(); return r; };
   }
 
+  // ── Smart Road (v2 Smart Road 2 lab system + heightmap terrain conform) ─────
+  roadConform = new RoadConformSystem({
+    cpuHeightmap,
+    heightmapSize: HEIGHTMAP_SIZE,
+    worldSize: WORLD_SIZE,
+    maxHeight: MAX_HEIGHT,
+    terrainStore: v3TerrainStore,
+  });
+  roadSystem = new SmartRoadLabSystem({
+    scene,
+    // With live grading the road drapes on the pre-grade BASE terrain (the
+    // lab's terrainBase trick) so the flatten never feeds back into the drape.
+    getHeight: (x, z) =>
+      roadState.liveGrade && roadConform.hasBase
+        ? roadConform.sampleGround(x, z)
+        : v3TerrainStore.getWorldHeight(x, z),
+    params: roadState,
+  });
+  roadSystem.setEditActive(false); // roads are world geometry; handles gated to road mode
+
+  let _roadGradeTimer = 0;
+  let _roadSaveTimer = 0;
+  function applyRoadGradeNow() {
+    clearTimeout(_roadGradeTimer);
+    _roadGradeTimer = 0;
+    if (!roadState.liveGrade || !roadConform.hasBase) return;
+    if (roadConform.applyLive(roadSystem, roadState)) pushHeightmapEditsToGpu();
+  }
+  /** Debounced live grade — one undoable heightmap stroke per edit action, not
+   *  per throttled rebuild while a slider is moving. */
+  function scheduleRoadGrade() {
+    if (!roadState.liveGrade || editorMode !== "road" || !roadConform.hasBase) return;
+    clearTimeout(_roadGradeTimer);
+    _roadGradeTimer = setTimeout(applyRoadGradeNow, 250);
+  }
+  function scheduleRoadAutosave() {
+    clearTimeout(_roadSaveTimer);
+    _roadSaveTimer = setTimeout(() => {
+      try {
+        localStorage.setItem(ROAD_AUTOSAVE_KEY, JSON.stringify(roadSystem.exportData()));
+      } catch (_) { /* storage blocked/full — export button still works */ }
+    }, 500);
+  }
+  {
+    const _roadRebuild = roadSystem.rebuild.bind(roadSystem);
+    roadSystem.rebuild = () => {
+      _roadRebuild();
+      if (roadSystem._dragging) return; // draft rebuild — footprints are stale
+      mergeRoadDrawCalls(roadSystem.roadGroup); // ~140 piece meshes → 1 per material
+      scheduleRoadAutosave();
+      scheduleRoadGrade();
+    };
+  }
+  _onLeaveRoadMode = () => {
+    if (_roadDrag.nodeId !== null || _roadDrag.edge) {
+      _roadDrag.nodeId = null;
+      _roadDrag.edge = null;
+      roadSystem.setDragging(false);
+    }
+    // Flush a pending grade before another tool edits the terrain under us.
+    if (_roadGradeTimer) applyRoadGradeNow();
+    syncEditorOrbitEnabled();
+  };
+  // Restore the autosaved network once the CPU heightmap mirror is seeded, so
+  // the first drape lands on real terrain instead of a flat plane.
+  void ensureCpuHeightmapFromGpu().then(() => {
+    try {
+      const saved = localStorage.getItem(ROAD_AUTOSAVE_KEY);
+      if (saved) roadSystem.importData(JSON.parse(saved));
+    } catch (err) {
+      console.warn("[V3] Road autosave restore failed:", err);
+    }
+  });
+
   _onLeaveRiverMode = () => {
     if (riverSystem?.dragging) riverSystem.dragging = false;
     syncEditorOrbitEnabled();
@@ -3465,6 +3596,65 @@ async function main() {
 
   applyRiverModeEffects();
 
+  buildRoadPanel({
+    toolState: { road: roadState },
+    roadChanged: () => {
+      Object.assign(roadSystem.params, roadState);
+      roadSystem.queueRebuild();
+    },
+    roadHandlesChanged: () => {
+      Object.assign(roadSystem.params, roadState);
+      roadSystem.setEditActive(editorMode === "road" && !playMode.active);
+      roadSystem.queueRebuild();
+    },
+    roadClearAll: () => roadSystem.setNetwork([], []),
+    roadGradeParamsChanged: () => scheduleRoadGrade(),
+    roadLiveGradeChanged: () => {
+      if (roadState.liveGrade) {
+        void ensureCpuHeightmapFromGpu().then(() => {
+          roadConform.rebase();
+          roadSystem.queueRebuild(); // re-drape on base + apply the grade
+        });
+      } else if (roadConform.removeGrade()) {
+        pushHeightmapEditsToGpu();
+        roadSystem.queueRebuild(); // re-drape on the restored terrain
+      }
+    },
+    roadBakeGrade: () => {
+      void ensureCpuHeightmapFromGpu().then(() => {
+        if (roadConform.bake(roadSystem, roadState)) pushHeightmapEditsToGpu();
+      });
+    },
+    roadRemoveGrade: () => {
+      if (roadConform.removeGrade()) pushHeightmapEditsToGpu();
+    },
+    roadExport: () => {
+      const json = JSON.stringify({ version: 1, ...roadSystem.exportData() }, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "roads.v3roads.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    roadImport: () => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json,.v3roads";
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        try {
+          roadSystem.importData(JSON.parse(await file.text()));
+        } catch (err) {
+          console.warn("[V3] Road import failed:", err);
+        }
+      };
+      input.click();
+    },
+  });
+
   // Sync prop instance while gizmo is dragging.
   tc.addEventListener("change", () => {
     if (_gizmoTarget === "prop" && propInstancer.hasSelection) {
@@ -3670,6 +3860,74 @@ async function main() {
       river2System.finalizeMove();
       syncEditorOrbitEnabled();
     }
+  });
+
+  // ── Smart Road mode mouse events (v2 Smart Road 2 wiring) ──────────────────
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "road") return;
+    if (_roadDrag.nodeId === null && !_roadDrag.edge) return;
+    const hit = getTerrainHitWorld(e);
+    if (!hit) return;
+    if (_roadDrag.nodeId !== null) {
+      roadSystem.moveNode(_roadDrag.nodeId, hit.x, hit.z);
+    } else if (_roadDrag.edge) {
+      // Signed lateral offset from the chord midpoint = the edge's bend.
+      const f = roadSystem.edgeMidFrame(_roadDrag.edge);
+      if (f) {
+        let bend = (hit.x - f.mx) * f.px + (hit.z - f.mz) * f.pz;
+        const cap = f.chord * 0.45;
+        bend = Math.max(-cap, Math.min(cap, bend));
+        if (Math.abs(bend) < 1.5) bend = 0; // snap straight near the chord
+        roadSystem.setEdgeBend(_roadDrag.edge, bend);
+      }
+    }
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "road" || e.button !== 0) return;
+    refreshMouse(e);
+    raycaster.setFromCamera(mouse, camera);
+    const hit = roadSystem.pickHandle(raycaster);
+    const connectKey = e.ctrlKey || e.metaKey || e.shiftKey;
+    if (hit?.nodeId !== undefined) {
+      e.preventDefault();
+      const sel = roadSystem.selectedNodeId;
+      if (connectKey && sel !== null && sel !== hit.nodeId) {
+        roadSystem.toggleEdge(sel, hit.nodeId);
+        roadSystem.selectNode(hit.nodeId); // chain A→B→C
+      } else {
+        roadSystem.selectNode(hit.nodeId);
+        _roadDrag.nodeId = hit.nodeId;
+        roadSystem.setDragging(true);
+        controls.enabled = false;
+      }
+      return;
+    }
+    if (hit?.edge) {
+      e.preventDefault();
+      _roadDrag.edge = hit.edge;
+      roadSystem.selectEdge(hit.edge); // B toggles bridge on it
+      roadSystem.setDragging(true);
+      controls.enabled = false;
+      return;
+    }
+    if (e.shiftKey) {
+      const th = getTerrainHitWorld(e);
+      if (th) {
+        e.preventDefault();
+        roadSystem.addNode(th.x, th.z, true);
+      }
+      return;
+    }
+    // Plain ground click falls through → camera orbit; selection persists.
+  }, { capture: true });
+
+  window.addEventListener("mouseup", () => {
+    if (_roadDrag.nodeId === null && !_roadDrag.edge) return;
+    _roadDrag.nodeId = null;
+    _roadDrag.edge = null;
+    roadSystem.setDragging(false); // commit full geometry → live grade fires
+    syncEditorOrbitEnabled();
   });
 
   // ── Paint mode mouse events ────────────────────────────────────────────────

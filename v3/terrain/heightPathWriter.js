@@ -151,6 +151,159 @@ export function restoreHeightBox(heightsWorld, snap) {
   }
 }
 
+/**
+ * Conform terrain to the Smart Road surface (cut hills AND fill dips) along
+ * road-spine footprints. Port of v2 TerrainStore.conformToRoadSurface onto the
+ * flat heightmap. The guarantee: within the full-flatten zone the terrain is
+ * exactly `getSurfaceH(x,z) + lift − embedDepth` at every texel, so the deck
+ * (surface + clearance) clears it by a CONSTANT clearance + embedDepth — no
+ * clipping on slopes, tilted junctions, or connector corners.
+ *
+ * Three phases, because getSurfaceH low-pass-samples the SAME height field we
+ * write to: (1) per-texel nearest footprint distance + interpolated lift,
+ * (2) compute every target from the untouched field, (3) write blended heights.
+ *
+ * @param {Float32Array} heightsWorld heightmapSize², world metres (mutated)
+ * @param {Array<{pts:{x,z}[], lifts?:number[]}>} footprints road spines; lift =
+ *        deck height above terrain baseline (bridges skip the flatten)
+ * @param {(x:number,z:number)=>number} getSurfaceH road surface height (metres)
+ * @returns {{changed:boolean, rect:null|{minIx:number,maxIx:number,minIz:number,maxIz:number}}}
+ */
+export function conformToRoadSurface(heightsWorld, {
+  heightmapSize,
+  worldSize,
+  footprints,
+  getSurfaceH,
+  halfW,
+  embedDepth,
+  shoulder,
+  liftSkip = 1.5,
+}) {
+  const none = { changed: false, rect: null };
+  if (!Array.isArray(footprints) || footprints.length === 0) return none;
+
+  const dataResolution = heightmapSize - 1;
+  const step = worldSize / dataResolution;
+  const half = worldSize * 0.5;
+  // Full-flatten reach: one heightmap texel past the deck edge so no terrain
+  // triangle (at any clipmap LOD sampling this field) straddles the deck edge.
+  const inner = halfW + 1 + step;
+  const outer = Math.max(0.01, shoulder);
+  const reach = inner + outer;
+
+  // Union texel window over all footprints.
+  let minWX = Infinity, maxWX = -Infinity, minWZ = Infinity, maxWZ = -Infinity;
+  for (const fp of footprints) {
+    for (const p of fp.pts) {
+      if (p.x < minWX) minWX = p.x;
+      if (p.x > maxWX) maxWX = p.x;
+      if (p.z < minWZ) minWZ = p.z;
+      if (p.z > maxWZ) maxWZ = p.z;
+    }
+  }
+  const winMinIx = Math.max(0, Math.floor((minWX - reach + half) / step));
+  const winMaxIx = Math.min(dataResolution, Math.ceil((maxWX + reach + half) / step));
+  const winMinIz = Math.max(0, Math.floor((minWZ - reach + half) / step));
+  const winMaxIz = Math.min(dataResolution, Math.ceil((maxWZ + reach + half) / step));
+  if (winMinIx > winMaxIx || winMinIz > winMaxIz) return none;
+  const winW = winMaxIx - winMinIx + 1;
+  const winH = winMaxIz - winMinIz + 1;
+
+  // Phase 1 — per-texel distance to the nearest footprint segment (+ its
+  // interpolated lift). Each footprint only scans its own padded bbox.
+  const dist = new Float32Array(winW * winH).fill(Infinity);
+  const liftArr = new Float32Array(winW * winH);
+  for (const fp of footprints) {
+    const pts = fp.pts;
+    const lifts = fp.lifts;
+    if (!pts || pts.length === 0) continue;
+    let fMinX = Infinity, fMaxX = -Infinity, fMinZ = Infinity, fMaxZ = -Infinity;
+    for (const p of pts) {
+      if (p.x < fMinX) fMinX = p.x;
+      if (p.x > fMaxX) fMaxX = p.x;
+      if (p.z < fMinZ) fMinZ = p.z;
+      if (p.z > fMaxZ) fMaxZ = p.z;
+    }
+    const ix0 = Math.max(winMinIx, Math.floor((fMinX - reach + half) / step));
+    const ix1 = Math.min(winMaxIx, Math.ceil((fMaxX + reach + half) / step));
+    const iz0 = Math.max(winMinIz, Math.floor((fMinZ - reach + half) / step));
+    const iz1 = Math.min(winMaxIz, Math.ceil((fMaxZ + reach + half) / step));
+    for (let iz = iz0; iz <= iz1; iz++) {
+      const wz = -half + iz * step;
+      for (let ix = ix0; ix <= ix1; ix++) {
+        const wx = -half + ix * step;
+        let bestSq = Infinity;
+        let bestLift = 0;
+        if (pts.length === 1) {
+          const ex = wx - pts[0].x, ez = wz - pts[0].z;
+          bestSq = ex * ex + ez * ez;
+          bestLift = lifts ? lifts[0] : 0;
+        } else {
+          for (let k = 0; k < pts.length - 1; k++) {
+            const ax = pts[k].x, az = pts[k].z;
+            const dx = pts[k + 1].x - ax, dz = pts[k + 1].z - az;
+            const lenSq = dx * dx + dz * dz;
+            let t = 0;
+            if (lenSq > 1e-8) t = Math.max(0, Math.min(1, ((wx - ax) * dx + (wz - az) * dz) / lenSq));
+            const ex = wx - (ax + dx * t), ez = wz - (az + dz * t);
+            const sq = ex * ex + ez * ez;
+            if (sq < bestSq) {
+              bestSq = sq;
+              bestLift = lifts ? lifts[k] + (lifts[k + 1] - lifts[k]) * t : 0;
+            }
+          }
+        }
+        const w = (iz - winMinIz) * winW + (ix - winMinIx);
+        if (bestSq < dist[w] * dist[w]) {
+          dist[w] = Math.sqrt(bestSq);
+          liftArr[w] = bestLift;
+        }
+      }
+    }
+  }
+
+  // Phase 2 — all targets from the untouched field (getSurfaceH reads it).
+  const idxs = [];
+  const targets = [];
+  const blends = [];
+  for (let iz = winMinIz; iz <= winMaxIz; iz++) {
+    const wz = -half + iz * step;
+    for (let ix = winMinIx; ix <= winMaxIx; ix++) {
+      const w = (iz - winMinIz) * winW + (ix - winMinIx);
+      const d = dist[w];
+      if (d >= reach) continue;
+      if (liftArr[w] > liftSkip) continue; // deck is elevated here (bridge/viaduct)
+      const wx = -half + ix * step;
+      const s = d <= inner ? 0 : smoothstep(0, 1, (d - inner) / outer);
+      idxs.push(iz * heightmapSize + ix);
+      targets.push(getSurfaceH(wx, wz) + liftArr[w] - embedDepth);
+      blends.push(s);
+    }
+  }
+  if (idxs.length === 0) return none;
+
+  // Phase 3 — write, tracking the tight dirty rect.
+  let changed = false;
+  let rMinIx = Infinity, rMaxIx = -Infinity, rMinIz = Infinity, rMaxIz = -Infinity;
+  for (let i = 0; i < idxs.length; i++) {
+    const idx = idxs[i];
+    const current = heightsWorld[idx];
+    const next = targets[i] + (current - targets[i]) * blends[i];
+    if (next === current) continue;
+    heightsWorld[idx] = next;
+    changed = true;
+    const ix = idx % heightmapSize;
+    const iz = (idx - ix) / heightmapSize;
+    if (ix < rMinIx) rMinIx = ix;
+    if (ix > rMaxIx) rMaxIx = ix;
+    if (iz < rMinIz) rMinIz = iz;
+    if (iz > rMaxIz) rMaxIz = iz;
+  }
+  return changed
+    ? { changed, rect: { minIx: rMinIx, maxIx: rMaxIx, minIz: rMinIz, maxIz: rMaxIz } }
+    : none;
+}
+
 /** Bilinear world height sample from a metres height field. */
 export function sampleHeightWorld(heightsWorld, heightmapSize, worldSize, wx, wz) {
   const dataResolution = heightmapSize - 1;
