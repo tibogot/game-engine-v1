@@ -3,8 +3,9 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import Stats from "stats-gl";
 import { texture, uniform } from "three/tsl";
-import { createHeightmapTexture, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
-import { createTerrainLOD } from "../terrain/terrainLOD.js";
+import { createHeightmapTexture, saveTerrainConfig, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
+import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
+import { createTerrainLOD, LOD_LEVELS } from "../terrain/terrainLOD.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import {
   encodeHeightmapFile,
@@ -831,6 +832,15 @@ async function main() {
   btnStampPlateau.addEventListener("click", () => setStickyStamp("plateau"));
   btnStampCrater .addEventListener("click", () => setStickyStamp("crater"));
 
+  // Height-related slider ranges scale with the configured MAX_HEIGHT.
+  slClampMin.min = -MAX_HEIGHT;
+  slClampMin.max =  MAX_HEIGHT - 10;
+  slClampMin.value = -MAX_HEIGHT;
+  slClampMax.min = 10;
+  slClampMax.max = MAX_HEIGHT;
+  slClampMax.value = MAX_HEIGHT;
+  genHeight.max = MAX_HEIGHT;
+
   function syncClampUI() {
     // Slider at either extreme = clamp off (dig below 0 / raise past MAX_HEIGHT).
     lblClampMin.textContent =
@@ -988,12 +998,31 @@ async function main() {
     const file = await pickHeightmapFile();
     if (!file) return;
     try {
-      const decoded = decodeHeightmapFile(await file.arrayBuffer());
-      if (decoded.width !== HEIGHTMAP_SIZE || decoded.height !== HEIGHTMAP_SIZE) {
-        window.alert(
-          `This heightmap is ${decoded.width}×${decoded.height}; `
-          + `this editor expects ${HEIGHTMAP_SIZE}×${HEIGHTMAP_SIZE}.`,
+      const buf     = await file.arrayBuffer();
+      const decoded = decodeHeightmapFile(buf);
+      if (decoded.width !== decoded.height) {
+        window.alert(`Non-square heightmaps (${decoded.width}×${decoded.height}) are not supported.`);
+        return;
+      }
+      // Files are self-describing: a mismatched size/scale reconfigures the
+      // editor and reloads, with the file stashed to import after boot.
+      const mismatch = decoded.width !== HEIGHTMAP_SIZE
+        || Math.round(decoded.worldSize) !== WORLD_SIZE
+        || Math.round(decoded.maxHeight) !== MAX_HEIGHT;
+      if (mismatch) {
+        const ok = window.confirm(
+          `This heightmap is ${decoded.width}×${decoded.height} for a `
+          + `${Math.round(decoded.worldSize)} m world (max height ${Math.round(decoded.maxHeight)} m).\n`
+          + `Reload the editor at that terrain size to open it?`,
         );
+        if (!ok) return;
+        saveTerrainConfig({
+          worldSize:     decoded.worldSize,
+          heightmapSize: decoded.width,
+          maxHeight:     decoded.maxHeight,
+        });
+        await stashPendingHeightmap(buf);
+        location.reload();
         return;
       }
       sculpt.replaceHeightData(decoded.heights);
@@ -1175,6 +1204,8 @@ async function main() {
     if (splineToolState) splineToolState.mode = m;
     tbSculpt.classList.toggle("active", m === "sculpt");
     toolsModeSelect.value = m;
+    paintSys.endStroke(); // leaving paint mid-drag must close the stroke
+    if (rampState === "waiting_end") cancelRampPlacement();
     if (m === "view") {
       uCursorUV.value.set(-2, -2);
       cancelStroke();
@@ -1182,6 +1213,8 @@ async function main() {
       tc.enabled = false;
       tc.visible = false;
       _gizmoTarget = null;
+    } else if (m === "sculpt") {
+      sculpt.uRadius.value = slSize.value / WORLD_SIZE;
     } else if (m === "paint") {
       sculpt.uRadius.value = paintState.brush.radius / WORLD_SIZE;
     } else if (m === "grass") {
@@ -1302,12 +1335,69 @@ async function main() {
   tbUndo.addEventListener("click", () => { if (sculpt.undo()) onHistoryChange(); });
   tbRedo.addEventListener("click", () => { if (sculpt.redo()) onHistoryChange(); });
 
-  function syncSizeUI()    { lblSize   .textContent = Math.round(sculpt.uRadius.value   * 100) + "%"; }
+  // ── Terrain size: toolbar label, inspector values, New Terrain dialog ──────
+  const tbTerrainSize = document.getElementById("tb-terrain-size");
+  tbTerrainSize.textContent = `${WORLD_SIZE} m · ${HEIGHTMAP_SIZE}²`;
+  document.getElementById("insp-world").textContent = `${WORLD_SIZE} × ${WORLD_SIZE} m`;
+  document.getElementById("insp-hmap").textContent  = `${HEIGHTMAP_SIZE} × ${HEIGHTMAP_SIZE}`;
+  document.getElementById("insp-maxh").textContent  = `${MAX_HEIGHT} m`;
+  document.getElementById("insp-lod").textContent   = String(LOD_LEVELS);
+
+  const ntOverlay = document.getElementById("terrain-size-overlay");
+  const ntWorld   = document.getElementById("nt-world");
+  const ntDetail  = document.getElementById("nt-detail");
+  const ntHeight  = document.getElementById("nt-height");
+  const ntSummary = document.getElementById("nt-summary");
+
+  function ntComputedRes() {
+    return Math.min(4096, Math.max(256, Number(ntWorld.value) / Number(ntDetail.value)));
+  }
+  function syncNtSummary() {
+    const res = ntComputedRes();
+    const mb  = Math.round((res * res * 8 * 3) / 1e6); // 3 × RGBA16F height RTs
+    const eff = Number(ntWorld.value) / res;
+    ntSummary.textContent =
+      `Heightmap ${res} × ${res} (${eff} m/texel) · ~${mb} MB GPU height data`
+      + (res >= 4096 ? " — heavy: desktop GPU recommended" : "");
+  }
+  ntWorld .addEventListener("change", syncNtSummary);
+  ntDetail.addEventListener("change", syncNtSummary);
+  tbTerrainSize.addEventListener("click", () => {
+    ntWorld.value  = String(WORLD_SIZE);
+    ntHeight.value = String(MAX_HEIGHT);
+    syncNtSummary();
+    ntOverlay.style.display = "flex";
+  });
+  document.getElementById("nt-cancel").addEventListener("click", () => {
+    ntOverlay.style.display = "none";
+  });
+  ntOverlay.addEventListener("click", (e) => {
+    if (e.target === ntOverlay) ntOverlay.style.display = "none";
+  });
+  document.getElementById("nt-create").addEventListener("click", () => {
+    saveTerrainConfig({
+      worldSize:     Number(ntWorld.value),
+      heightmapSize: ntComputedRes(),
+      maxHeight:     Number(ntHeight.value),
+    });
+    location.reload();
+  });
+
+  // Brush size is expressed in METRES (like the paint/tree/snow brushes) so it
+  // stays intuitive at any terrain size; the slider range scales with the world.
+  const BRUSH_MIN_M = 2;
+  const BRUSH_MAX_M = Math.round(WORLD_SIZE / 4);
+  slSize.min   = BRUSH_MIN_M;
+  slSize.max   = BRUSH_MAX_M;
+  slSize.step  = 1;
+  slSize.value = Math.round(WORLD_SIZE * 0.05); // same default footprint as the old 5%
+
+  function syncSizeUI()    { lblSize   .textContent = Math.round(sculpt.uRadius.value * WORLD_SIZE) + "m"; }
   function syncStrUI()     { lblStr    .textContent = Math.round(sculpt.uStrength.value * 1000); }
   function syncFalloffUI() { lblFalloff.textContent = (slFalloff.value / 10).toFixed(1); }
 
   slSize.addEventListener("input", () => {
-    sculpt.uRadius.value = slSize.value / 100;
+    sculpt.uRadius.value = slSize.value / WORLD_SIZE;
     syncSizeUI();
   });
   slStr.addEventListener("input", () => {
@@ -1506,8 +1596,16 @@ async function main() {
   const _snowUndoStack = [];   // each entry is a Uint8Array snapshot
   const _snowRedoStack = [];
 
+  // Flatten target locks on the first flatten stamp of a stroke (Unreal-style)
+  // instead of chasing the terrain under the cursor while dragging.
+  let _flattenLocked = false;
+
   function stampAt(u, v) {
     const mode = getStrokeMode();
+    if (mode === "flatten" && !_flattenLocked) {
+      sculpt.uFlattenTarget.value = sampleHeightNormalized(u, v);
+      _flattenLocked = true;
+    }
     if      (mode === "smooth")  sculpt.smooth(u, v);
     else if (mode === "flatten") sculpt.flatten(u, v);
     else if (mode === "noise")   sculpt.noise(u, v);
@@ -1838,6 +1936,44 @@ async function main() {
     } catch (_) { /* stats overlay must never block the viewport */ }
   });
 
+  // ── Ramp preview: line from the placed start point to the cursor ───────────
+  const rampPreviewLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+    new THREE.LineBasicMaterial({ color: 0xffe066, depthTest: false, transparent: true, opacity: 0.9 }),
+  );
+  rampPreviewLine.renderOrder = 999;
+  rampPreviewLine.frustumCulled = false;
+  rampPreviewLine.visible = false;
+  scene.add(rampPreviewLine);
+
+  const _rampPtA = new THREE.Vector3();
+  const _rampPtB = new THREE.Vector3();
+  function updateRampPreview(endUV) {
+    if (rampState !== "waiting_end" || stickyMode !== "ramp" || !rampStartUV || !endUV) {
+      rampPreviewLine.visible = false;
+      return;
+    }
+    _rampPtA.set(
+      (rampStartUV.u - 0.5) * WORLD_SIZE,
+      sampleTerrainHeight(rampStartUV.u, rampStartUV.v) + 1.5,
+      (rampStartUV.v - 0.5) * WORLD_SIZE,
+    );
+    _rampPtB.set(
+      (endUV.u - 0.5) * WORLD_SIZE,
+      sampleTerrainHeight(endUV.u, endUV.v) + 1.5,
+      (endUV.v - 0.5) * WORLD_SIZE,
+    );
+    rampPreviewLine.geometry.setFromPoints([_rampPtA, _rampPtB]);
+    rampPreviewLine.visible = true;
+  }
+
+  function cancelRampPlacement() {
+    rampState = "idle";
+    rampStartUV = null;
+    rampPreviewLine.visible = false;
+    rampHint.textContent = "Click start point...";
+  }
+
   let lastReadbackMs = 0;
   renderer.domElement.addEventListener("mousemove", e => {
     if (playMode.active || editorMode !== "sculpt") return;
@@ -1846,6 +1982,7 @@ async function main() {
     refreshMouse(e);
     const hit = getUV();
     uCursorUV.value.set(hit ? hit.u : -2, hit ? hit.v : -2);
+    updateRampPreview(hit);
     // Throttled readback so the cursor ring stays accurate while hovering.
     const now = performance.now();
     if (now - lastReadbackMs > 150) { lastReadbackMs = now; requestHeightmapReadback(); }
@@ -1879,8 +2016,7 @@ async function main() {
         sculpt.ramp(rampStartUV, uvHit);
         sculpt.endStroke();
         onHistoryChange();
-        rampState = "idle";
-        rampHint.textContent = "Click start point...";
+        cancelRampPlacement();
       }
       return;
     }
@@ -1888,6 +2024,7 @@ async function main() {
     sculpt.beginStroke();
     isPainting = true;
     lastPaintUV = null;
+    _flattenLocked = false; // next flatten stamp re-captures its target height
   });
 
   renderer.domElement.addEventListener("mouseup", e => {
@@ -1906,8 +2043,8 @@ async function main() {
     e.stopImmediatePropagation();
     const factor = e.deltaY > 0 ? 0.9 : 1.11;
     if (e.shiftKey) {
-      sculpt.uRadius.value = Math.max(0.01, Math.min(0.4, sculpt.uRadius.value * factor));
-      slSize.value = Math.round(sculpt.uRadius.value * 100);
+      sculpt.uRadius.value = Math.max(BRUSH_MIN_M / WORLD_SIZE, Math.min(0.4, sculpt.uRadius.value * factor));
+      slSize.value = Math.round(sculpt.uRadius.value * WORLD_SIZE);
       syncSizeUI();
     } else {
       sculpt.uStrength.value = Math.max(0.001, Math.min(0.05, sculpt.uStrength.value * factor));
@@ -1918,6 +2055,20 @@ async function main() {
 
   // Seed CPU heightmap mirror after boot — not during first user interaction.
   setTimeout(() => requestHeightmapReadback(), 0);
+
+  // Import a heightmap stashed across a terrain-size reload (see loadHeightmap).
+  takePendingHeightmap().then((buf) => {
+    if (!buf) return;
+    try {
+      const decoded = decodeHeightmapFile(buf);
+      if (decoded.width === HEIGHTMAP_SIZE && decoded.height === HEIGHTMAP_SIZE) {
+        sculpt.replaceHeightData(decoded.heights);
+        onHistoryChange();
+      }
+    } catch (err) {
+      console.warn("[V3] Pending heightmap import failed:", err);
+    }
+  });
 
   function cancelStroke() {
     if (isPainting) sculpt.endStroke();
@@ -1941,6 +2092,12 @@ async function main() {
       return;
     }
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+    // Escape cancels a pending ramp start point (before mode-specific handlers).
+    if (e.code === "Escape" && editorMode === "sculpt" && rampState === "waiting_end") {
+      e.preventDefault();
+      cancelRampPlacement();
+      return;
+    }
     if (e.code === "KeyV" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
       setEditorMode("view"); return;
     }
@@ -2386,8 +2543,8 @@ async function main() {
   syncTexlibEditor();
 
   // Fill / Clear buttons
-  pbtnFill.addEventListener("click", () => { paintSys.fillWithActiveLayer(); splatMap.tex.needsUpdate = true; });
-  pbtnClear.addEventListener("click", () => { paintSys.clearAll(); splatMap.tex.needsUpdate = true; });
+  pbtnFill.addEventListener("click", () => { paintSys.fillWithActiveLayer(); });
+  pbtnClear.addEventListener("click", () => { paintSys.clearAll(); });
 
   // ── Snow panel controls ────────────────────────────────────────────────────
   {
@@ -3940,7 +4097,6 @@ async function main() {
       const wx = hit.u * WORLD_SIZE - WORLD_SIZE / 2;
       const wz = hit.v * WORLD_SIZE - WORLD_SIZE / 2;
       paintSys.continueStroke(wx, wz, e.altKey);
-      splatMap.tex.needsUpdate = true;
     }
   });
 
@@ -3954,13 +4110,19 @@ async function main() {
     const wx = hit.u * WORLD_SIZE - WORLD_SIZE / 2;
     const wz = hit.v * WORLD_SIZE - WORLD_SIZE / 2;
     paintSys.beginStroke(wx, wz, e.altKey);
-    splatMap.tex.needsUpdate = true;
   }, { capture: true });
 
   renderer.domElement.addEventListener("mouseup", e => {
     if (e.button !== 0 || editorMode !== "paint") return;
     isPainting = false;
     paintSys.endStroke();
+  });
+
+  // Safety nets: a release outside the canvas or leaving the viewport must
+  // still close the stroke, or its undo entry merges into the next one.
+  window.addEventListener("mouseup", () => { paintSys.endStroke(); });
+  renderer.domElement.addEventListener("mouseleave", () => {
+    if (editorMode === "paint") { isPainting = false; paintSys.endStroke(); }
   });
 
   // Scroll wheel in paint mode: Shift = radius, Alt = strength

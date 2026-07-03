@@ -1,9 +1,15 @@
 /**
  * PaintSystem — manages brush strokes into SplatMap with undo/redo.
  *
- * Adapted from V2's PaintSystem but simplified for V3's single-texture model:
- * each undo entry is a full snapshot of the two 512×512 RGBA slices (~2 MB/entry).
- * Up to 32 undo levels kept.
+ * Strokes are interpolated: fast mouse drags stamp along the segment at
+ * `radius × spacingFactor` intervals instead of once per mousemove, so
+ * strokes never leave gaps.
+ *
+ * Undo is rect-based (same pattern as the sculpt brush): beginStroke copies
+ * the splat data into a pre-stroke buffer, stamps accumulate a dirty rect,
+ * and endStroke stores only that rect's pre-stroke content (~KBs per brush
+ * stroke instead of the old ~8 MB full {before,after} snapshots). undo()
+ * captures the current rect for redo before restoring.
  *
  * paintState shape:
  *   { activeLayer, brushOpacity, brush:{radius,strength,falloff,spacingFactor},
@@ -13,114 +19,132 @@
  * brushMask is an instance of V2's BrushMask class (Float32Array CPU mask).
  */
 
+const MAX_HISTORY          = 32;
+const MAX_STAMPS_PER_EVENT = 16;
+
 export class PaintSystem {
   constructor({ paintState, splatMap, brushMask }) {
     this.paintState = paintState;
     this.splatMap   = splatMap;
     this.brushMask  = brushMask ?? null;
 
-    this.isPainting      = false;
-    this.lastPoint       = null;
-    this._strokeDir      = 0;
-    this._beforeSnap     = null;
+    this.isPainting = false;
+    this.lastPoint  = null;
+    this._strokeDir = 0;
+    this._strokeRect = null;
+    this._preD0 = null; // pre-stroke copies of the splat slices
+    this._preD1 = null;
 
-    /** @type {Array<{before, after}>} */
+    /** @type {Array<{x,y,w,h,d0,d1}>} rect patches of pre-edit content */
     this.undoStack = [];
     this.redoStack = [];
   }
 
-  // ── Stroke spacing check ───────────────────────────────────────────────────
-  _shouldApply(wx, wz) {
-    if (!this.lastPoint) return true;
-    const dx = wx - this.lastPoint.x;
-    const dz = wz - this.lastPoint.z;
-    const spacing = this.paintState.brush.radius * this.paintState.brush.spacingFactor;
-    return Math.sqrt(dx*dx + dz*dz) >= spacing;
-  }
-
-  // ── Public API ─────────────────────────────────────────────────────────────
+  // ── Stroke lifecycle ───────────────────────────────────────────────────────
 
   beginStroke(wx, wz, altKey = false) {
+    if (this.isPainting) this.endStroke();
+    if (!this._preD0) {
+      this._preD0 = new Uint8Array(this.splatMap.data0.length);
+      this._preD1 = new Uint8Array(this.splatMap.data1.length);
+    }
+    this._preD0.set(this.splatMap.data0);
+    this._preD1.set(this.splatMap.data1);
     this.isPainting  = true;
     this.lastPoint   = null;
     this._strokeDir  = 0;
-    this._beforeSnap = this.splatMap.snapshot();
-    this._applyAt(wx, wz, altKey);
+    this._strokeRect = null;
+    this._stampAt(wx, wz, altKey);
+    this.lastPoint = { x: wx, z: wz };
   }
 
   continueStroke(wx, wz, altKey = false) {
     if (!this.isPainting) return;
-    this._applyAt(wx, wz, altKey);
+    if (!this.lastPoint) {
+      this._stampAt(wx, wz, altKey);
+      this.lastPoint = { x: wx, z: wz };
+      return;
+    }
+
+    const dx = wx - this.lastPoint.x;
+    const dz = wz - this.lastPoint.z;
+    const dist = Math.hypot(dx, dz);
+    const spacing = Math.max(0.25, this.paintState.brush.radius * this.paintState.brush.spacingFactor);
+    if (dist < spacing) return;
+
+    if (dist > 0.1) this._strokeDir = Math.atan2(dz, dx);
+
+    // Interpolate stamps along the segment so fast drags don't leave gaps.
+    const steps = Math.min(Math.ceil(dist / spacing), MAX_STAMPS_PER_EVENT);
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      this._stampAt(this.lastPoint.x + dx * t, this.lastPoint.z + dz * t, altKey);
+    }
+    this.lastPoint = { x: wx, z: wz };
   }
 
   endStroke() {
     if (!this.isPainting) return;
     this.isPainting = false;
-    if (!this._beforeSnap) return;
-    const after = this.splatMap.snapshot();
-    this.undoStack.push({ before: this._beforeSnap, after });
+    if (!this._strokeRect) return; // click without effect — nothing to record
+    this._pushUndo(this.splatMap.copyRect(this._strokeRect, this._preD0, this._preD1));
+    this._strokeRect = null;
+  }
+
+  // ── History ────────────────────────────────────────────────────────────────
+
+  _pushUndo(patch) {
+    this.undoStack.push(patch);
     this.redoStack.length = 0;
-    if (this.undoStack.length > 32) this.undoStack.shift();
-    this._beforeSnap = null;
+    if (this.undoStack.length > MAX_HISTORY) this.undoStack.shift();
   }
 
   undo() {
-    const cmd = this.undoStack.pop();
-    if (!cmd) return false;
-    this.splatMap.restoreSnapshot(cmd.before);
-    this.redoStack.push(cmd);
+    this.endStroke();
+    const patch = this.undoStack.pop();
+    if (!patch) return false;
+    this.redoStack.push(this.splatMap.copyRect(patch)); // current content for redo
+    this.splatMap.pasteRect(patch);
     return true;
   }
 
   redo() {
-    const cmd = this.redoStack.pop();
-    if (!cmd) return false;
-    this.splatMap.restoreSnapshot(cmd.after);
-    this.undoStack.push(cmd);
+    this.endStroke();
+    const patch = this.redoStack.pop();
+    if (!patch) return false;
+    this.undoStack.push(this.splatMap.copyRect(patch));
+    this.splatMap.pasteRect(patch);
     return true;
-  }
-
-  fillWithActiveLayer() {
-    const before = this.splatMap.snapshot();
-    this.splatMap.fillAllWithLayer(this.paintState.activeLayer);
-    const after  = this.splatMap.snapshot();
-    this.undoStack.push({ before, after });
-    this.redoStack.length = 0;
-    if (this.undoStack.length > 32) this.undoStack.shift();
-  }
-
-  applyAutoRules(args) {
-    const before = this.splatMap.snapshot();
-    this.splatMap.applyAutoRules(args);
-    const after  = this.splatMap.snapshot();
-    this.undoStack.push({ before, after });
-    this.redoStack.length = 0;
-    if (this.undoStack.length > 32) this.undoStack.shift();
-  }
-
-  clearAll() {
-    const before = this.splatMap.snapshot();
-    this.splatMap.clearAll();
-    const after  = this.splatMap.snapshot();
-    this.undoStack.push({ before, after });
-    this.redoStack.length = 0;
-    if (this.undoStack.length > 32) this.undoStack.shift();
   }
 
   get canUndo() { return this.undoStack.length > 0; }
   get canRedo() { return this.redoStack.length > 0; }
 
+  // ── Whole-map operations (full-rect undo entries) ──────────────────────────
+
+  _fullRect() {
+    const size = Math.sqrt(this.splatMap.data0.length / 4);
+    return { x: 0, y: 0, w: size, h: size };
+  }
+
+  fillWithActiveLayer() {
+    this._pushUndo(this.splatMap.copyRect(this._fullRect()));
+    this.splatMap.fillAllWithLayer(this.paintState.activeLayer);
+  }
+
+  applyAutoRules(args) {
+    this._pushUndo(this.splatMap.copyRect(this._fullRect()));
+    this.splatMap.applyAutoRules(args);
+  }
+
+  clearAll() {
+    this._pushUndo(this.splatMap.copyRect(this._fullRect()));
+    this.splatMap.clearAll();
+  }
+
   // ── Internal stamp ─────────────────────────────────────────────────────────
-  _applyAt(wx, wz, altKey) {
-    if (!this._shouldApply(wx, wz)) return;
 
-    if (this.lastPoint) {
-      const dx = wx - this.lastPoint.x;
-      const dz = wz - this.lastPoint.z;
-      if (dx*dx + dz*dz > 0.01) this._strokeDir = Math.atan2(dz, dx);
-    }
-    this.lastPoint = { x: wx, z: wz };
-
+  _stampAt(wx, wz, altKey) {
     const s           = this.paintState;
     const activeLayer = altKey ? 0 : s.activeLayer;
 
@@ -130,12 +154,12 @@ export class PaintSystem {
       maskData = bm.data;
       maskSize = bm.size;
       const baseRad = (s.maskRotation ?? 0) * Math.PI / 180;
-      if (s.maskRandomRotation)   maskRotation = Math.random() * Math.PI * 2;
+      if (s.maskRandomRotation)    maskRotation = Math.random() * Math.PI * 2;
       else if (s.maskFollowStroke) maskRotation = this._strokeDir + baseRad;
       else                         maskRotation = baseRad;
     }
 
-    this.splatMap.applySplatStroke({
+    const rect = this.splatMap.applySplatStroke({
       cx:            wx,
       cz:            wz,
       radius:        s.brush.radius,
@@ -150,5 +174,13 @@ export class PaintSystem {
       maskSize,
       maskRotation,
     });
+    if (rect) this._strokeRect = this._unionRect(this._strokeRect, rect);
+  }
+
+  _unionRect(a, b) {
+    if (!a) return { ...b };
+    const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
+    const x1 = Math.max(a.x + a.w, b.x + b.w), y1 = Math.max(a.y + a.h, b.y + b.h);
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
 }

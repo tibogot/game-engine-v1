@@ -6,9 +6,10 @@
  * Independent of the SplatMap so it doesn't consume a paint layer.
  */
 import * as THREE from "three";
-import { WORLD_SIZE } from "./heightmapTexture.js";
+import { WORLD_SIZE, HEIGHTMAP_SIZE } from "./heightmapTexture.js";
 
-export const SNOW_MAP_RES = 512;   // same resolution as SplatMap
+// Tracks SplatMap: half the heightmap resolution, clamped, at any terrain size.
+export const SNOW_MAP_RES = Math.min(2048, Math.max(256, HEIGHTMAP_SIZE / 2));
 
 export class SnowMap {
   constructor() {

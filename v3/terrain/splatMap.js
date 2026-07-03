@@ -17,9 +17,11 @@
  * tiles for larger worlds without changing the shader or UI.
  */
 import * as THREE from "three";
-import { WORLD_SIZE } from "./heightmapTexture.js";
+import { WORLD_SIZE, HEIGHTMAP_SIZE } from "./heightmapTexture.js";
 
-export const SPLAT_RES = 512; // 4m / texel at 2048m world
+// Half the heightmap resolution → constant 2× the height texel size
+// (4 m/texel at the default 2048 m / 1024² config) at any terrain size.
+export const SPLAT_RES = Math.min(2048, Math.max(256, HEIGHTMAP_SIZE / 2));
 
 function _makeDataArrayTex(data) {
   const tex = new THREE.DataArrayTexture(data, SPLAT_RES, SPLAT_RES, 2);
@@ -155,8 +157,47 @@ export class SplatMap {
       }
     }
 
-    if (anyTouched) this.tex.needsUpdate = true;
-    return anyTouched;
+    if (anyTouched) {
+      // Upload only the touched slice(s) — the WebGPU backend honours
+      // layerUpdates, so single-layer painting uploads half the texture.
+      if (isEraser) {
+        this.tex.addLayerUpdate(0);
+        this.tex.addLayerUpdate(1);
+      } else {
+        this.tex.addLayerUpdate(targetBuf);
+      }
+      this.tex.needsUpdate = true;
+    }
+    // Touched rect in splat texel coords — used for rect-based undo entries.
+    return anyTouched ? { x: u0, y: v0, w: u1 - u0 + 1, h: v1 - v0 + 1 } : null;
+  }
+
+  /** Copy a sub-rect of both slices (undo storage — ~rect-sized, not map-sized). */
+  copyRect(rect, srcD0 = this.data0, srcD1 = this.data1) {
+    const { x, y, w, h } = rect;
+    const d0 = new Uint8Array(w * h * 4);
+    const d1 = new Uint8Array(w * h * 4);
+    for (let row = 0; row < h; row++) {
+      const src = ((y + row) * SPLAT_RES + x) * 4;
+      const dst = row * w * 4;
+      d0.set(srcD0.subarray(src, src + w * 4), dst);
+      d1.set(srcD1.subarray(src, src + w * 4), dst);
+    }
+    return { x, y, w, h, d0, d1 };
+  }
+
+  /** Write a copyRect() patch back into the live splat data. */
+  pasteRect(patch) {
+    const { x, y, w, h, d0, d1 } = patch;
+    for (let row = 0; row < h; row++) {
+      const dst = ((y + row) * SPLAT_RES + x) * 4;
+      const src = row * w * 4;
+      this.data0.set(d0.subarray(src, src + w * 4), dst);
+      this.data1.set(d1.subarray(src, src + w * 4), dst);
+    }
+    this.tex.addLayerUpdate(0);
+    this.tex.addLayerUpdate(1);
+    this.tex.needsUpdate = true;
   }
 
   snapshot() {

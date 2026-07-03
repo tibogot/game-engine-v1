@@ -67,8 +67,16 @@ _injectToggleButton();
 
 // ── distance fade node (created once, shared across all stochastic calls) ─────
 // Evaluates per-fragment at runtime; TSL deduplicates the shared node reference.
-const _FADE_START = 50.0;
-const _FADE_END   = 80.0;
+//
+// The fade is CAMERA-relative, so wherever it transitions, the ground texture
+// visibly slides/morphs as the camera moves. The original 50→80 m band put that
+// morph right where the player looks (glaring once anisotropic filtering made
+// mid-distance detail sharp). Pushed far out and stretched: at 300+ m ground
+// texels are small and mip-blurred, and a 900 m-wide ramp changes offsets so
+// slowly per frame that the transition is imperceptible. Tap count is
+// unchanged — the fade only collapses the 3 sample UVs, not the sampling.
+const _FADE_START = 300.0;
+const _FADE_END   = 1200.0;
 const _distFade = float(1).sub(
   smoothstep(_FADE_START, _FADE_END, length(positionWorld.sub(cameraPosition))),
 );

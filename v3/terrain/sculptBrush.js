@@ -72,6 +72,10 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   const uNoiseScale       = uniform(0.5);   // noise frequency multiplier
   const uNoiseOctaves     = uniform(3.0);   // FBM octave count (1-4)
   const uSmudgeDir        = uniform(new THREE.Vector2(0, 1)); // normalized stroke direction in UV space
+  // Flatten levels toward a target captured at stroke START (main.js samples the
+  // CPU mirror on mousedown) — resampling under the cursor per stamp made the
+  // target drift downhill/uphill during a drag.
+  const uFlattenTarget    = uniform(0.0);
   // Thermal talus threshold in normalized height units per texel; 30° default
   // (matches the slider's HTML default — main.js re-syncs it on startup anyway).
   const uThermalSlope     = uniform(Math.tan(30 * Math.PI / 180) * WORLD_SIZE / HEIGHTMAP_SIZE / MAX_HEIGHT);
@@ -153,7 +157,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   flattenMat.fragmentNode = Fn(() => {
     const uvCoord  = uv();
     const currentH = texture(srcNode, uvCoord).r;
-    const targetH  = texture(srcNode, uBrushUV).r;
+    const targetH  = uFlattenTarget;
 
     const falloff  = getBrushFalloff(uvCoord);
     const blendAmt = clamp(pow(falloff, uFalloff).mul(uStrength).mul(float(20)).mul(edgeFade(uvCoord)), float(0), float(1));
@@ -680,6 +684,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     uNoiseScale,
     uNoiseOctaves,
     uSmudgeDir,
+    uFlattenTarget,
     uThermalSlope,
     uRampWidth,
     thermalConfig,

@@ -35,6 +35,9 @@ function _makeArrayTex(data, colorSpace = THREE.NoColorSpace) {
   tex.minFilter        = THREE.LinearMipmapLinearFilter;
   tex.magFilter        = THREE.LinearFilter;
   tex.generateMipmaps  = true;
+  // Terrain is viewed at grazing angles almost everywhere — without anisotropy
+  // the mip chain smears ground detail into mush a few meters from the camera.
+  tex.anisotropy       = 8;
   tex.needsUpdate      = true;
   return tex;
 }

@@ -27,18 +27,27 @@ setGridTextureUrl("/textures/grid.png");
 
 // ── LOD constants ─────────────────────────────────────────────────────────────
 //
-// Level 0 : full 128×128 grid  @  2 m/quad →  256 m radius
-// Level 1 : ring               @  4 m/quad →  512 m radius
-// Level 2 : ring               @  8 m/quad → 1024 m radius
-// Level 3 : ring               @ 16 m/quad → 2048 m radius
-// Level 4 : ring               @ 32 m/quad → 4096 m radius
+// At the default 2048 m / 1024² config this reproduces the original layout:
+// Level 0 : full 128×128 grid  @  2 m/quad →  256 m span
+// Level 1 : ring               @  4 m/quad →  512 m span
+// Level 2 : ring               @  8 m/quad → 1024 m span
+// Level 3 : ring               @ 16 m/quad → 2048 m span
+// Level 4 : ring               @ 32 m/quad → 4096 m span
 //
 // Rings have NO overlap with adjacent levels — no polygon offset needed.
 // T-junction stitching on each ring's inner boundary eliminates cracks.
+//
+// BASE_STEP matches the heightmap texel size, so the finest ring always has
+// one quad per height texel. LOD_LEVELS grows with world size so the outermost
+// ring reaches past the world edge (~2× WORLD_SIZE span) at any config —
+// each extra level doubles coverage for a fixed ~16k verts.
 
-const LOD_LEVELS = 5;
 const GRID_N     = 128;
-const BASE_STEP  = 2;
+const BASE_STEP  = Math.max(1, WORLD_SIZE / HEIGHTMAP_SIZE);
+export const LOD_LEVELS = Math.max(
+  4,
+  Math.ceil(Math.log2((2 * WORLD_SIZE) / (GRID_N * BASE_STEP))) + 1,
+);
 
 // ── Full grid (level 0) ───────────────────────────────────────────────────────
 

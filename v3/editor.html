@@ -38,9 +38,10 @@
         </div>
 
         <div class="toolbar-group spacer">
-          <span style="font-size:11px;color:var(--text-dim);padding-right:8px">
-            2048 m · 128²
-          </span>
+          <button class="toolbar-btn" id="tb-terrain-size" title="Terrain size — create a new terrain"
+                  style="width:auto;padding:0 10px;font-size:11px;color:var(--text-dim)">
+            2048 m · 1024²
+          </button>
         </div>
 
         <div class="toolbar-group" style="border-right:none">
@@ -89,19 +90,19 @@
             <div class="section-body">
               <div class="prop-row">
                 <span class="prop-label">World</span>
-                <span class="insp-value">2048 × 2048 m</span>
+                <span class="insp-value" id="insp-world">2048 × 2048 m</span>
               </div>
               <div class="prop-row">
                 <span class="prop-label">Heightmap</span>
-                <span class="insp-value">128 × 128</span>
+                <span class="insp-value" id="insp-hmap">1024 × 1024</span>
               </div>
               <div class="prop-row">
                 <span class="prop-label">Max height</span>
-                <span class="insp-value">500 m</span>
+                <span class="insp-value" id="insp-maxh">500 m</span>
               </div>
               <div class="prop-row">
                 <span class="prop-label">LOD levels</span>
-                <span class="insp-value">5</span>
+                <span class="insp-value" id="insp-lod">5</span>
               </div>
               <div class="prop-row">
                 <span class="prop-label">Undo steps</span>
@@ -1582,6 +1583,53 @@
     <div id="play-hint">
       <kbd>WASD</kbd> move &nbsp;·&nbsp; <kbd>Space</kbd> jump &nbsp;·&nbsp; <kbd>Shift</kbd> run &nbsp;·&nbsp;
       <kbd>G</kbd> modes &nbsp;·&nbsp; <kbd>1</kbd>–<kbd>7</kbd> switch &nbsp;·&nbsp; <kbd>7</kbd> debug ball &nbsp;·&nbsp; flight: <kbd>Q</kbd> barrel <kbd>E</kbd> gun &nbsp;·&nbsp; <kbd>Esc</kbd> release cursor
+    </div>
+
+    <!-- New Terrain dialog (toggled by the toolbar size button) -->
+    <div id="terrain-size-overlay"
+         style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.55);z-index:200">
+      <div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;padding:20px 22px;width:340px;font-size:12px">
+        <h3 style="margin:0 0 4px;font-size:14px">New Terrain</h3>
+        <p style="margin:0 0 14px;color:var(--text-dim)">
+          Creates a fresh flat terrain at the chosen size — the current terrain is
+          <b>cleared</b> (save it first). The editor reloads to apply.
+        </p>
+        <div class="prop-row">
+          <span class="prop-label">World size</span>
+          <div class="prop-value">
+            <select id="nt-world" class="prop-dropdown">
+              <option value="1024">1 × 1 km</option>
+              <option value="2048" selected>2 × 2 km</option>
+              <option value="4096">4 × 4 km</option>
+              <option value="8192">8 × 8 km</option>
+            </select>
+          </div>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Detail</span>
+          <div class="prop-value">
+            <select id="nt-detail" class="prop-dropdown">
+              <option value="2" selected>2 m / texel</option>
+              <option value="1">1 m / texel</option>
+            </select>
+          </div>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Max height</span>
+          <div class="prop-value">
+            <select id="nt-height" class="prop-dropdown">
+              <option value="250">250 m</option>
+              <option value="500" selected>500 m</option>
+              <option value="1000">1000 m</option>
+            </select>
+          </div>
+        </div>
+        <p id="nt-summary" style="margin:12px 0 14px;color:var(--text-dim)"></p>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="toolbar-btn" id="nt-cancel" style="width:auto;padding:0 14px">Cancel</button>
+          <button class="toolbar-btn" id="nt-create" style="width:auto;padding:0 14px;background:var(--accent);color:#fff">Create</button>
+        </div>
+      </div>
     </div>
 
     <!-- Floating shortcuts / docs overlay (toggled by toolbar ? button) -->
