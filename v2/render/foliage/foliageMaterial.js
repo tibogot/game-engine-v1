@@ -134,16 +134,20 @@ export function createFoliageMaterial(opts = {}) {
     const rRight = right.mul(cosA).add(upv.mul(sinA));
     const rUp = upv.mul(cosA).sub(right.mul(sinA));
 
-    // Camera-aligned quad from positionLocal; size comes from aLeafScale
-    // (in billboard mode, instance matrices are pure translation so size
-    // is NOT baked into the matrix).
+    // Camera-aligned card from positionLocal; size comes from aLeafScale.
+    // MATRIX-LESS billboards: the chunked renderer draws billboard leaves as
+    // plain Meshes with InstancedBufferGeometry (no 64-byte instanceMatrix per
+    // leaf — the only data it carried was the translation, which aLeafCenter
+    // already holds). The billboard branch therefore outputs the final
+    // position itself: card offset + wind + per-instance world center.
     const bbQuad = rRight.mul(positionLocal.x.mul(aLeafSize))
       .add(rUp.mul(positionLocal.y.mul(aLeafSize)));
     // World-space wind, scaled with leaf size.
     const windWorld = wo.mul(aLeafSize);
-    const bb3 = bbQuad.add(windWorld);
+    const bb3 = bbQuad.add(windWorld).add(instanceCenterW);
 
-    // Non-billboard branch: keep wind in local space (existing v2 behavior).
+    // Non-billboard branch: instance matrices carry rotation/scale, so keep
+    // the local-space path (wind added locally — existing v2 behavior).
     const localWindy = positionLocal.add(wo);
     return mix(localWindy, bb3, u.billboard);
   })();

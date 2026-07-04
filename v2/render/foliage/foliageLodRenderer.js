@@ -127,6 +127,13 @@ export class FoliageLodRenderer {
     if (Array.isArray(v)) for (const m of v) fn(m);
   }
 
+  /** Instance count setter for both mesh kinds: InstancedMesh (non-billboard)
+   *  and matrix-less Mesh + InstancedBufferGeometry (billboard). */
+  _setCount(m, n) {
+    if (m.isInstancedMesh) m.count = n;
+    else m.geometry.instanceCount = n;
+  }
+
   /** Rough leaf-fill cost of building one chunk-slot-tier mesh. */
   _jobCost(job) {
     const preset = this.slotPresets[job.si];
@@ -159,14 +166,14 @@ export class FoliageLodRenderer {
       }
     }
     mesh.geometry.dispose();
-    mesh.dispose();
+    mesh.dispose?.();
   }
 
   /** Drop every pooled mesh for a slot (preset replaced — geometry/material stale). */
   _purgeSlotPool(slotIdx) {
     for (const [key, arr] of this._meshPool) {
       if (!key.startsWith(`${slotIdx}:`)) continue;
-      for (const m of arr) { m.geometry.dispose(); m.dispose(); }
+      for (const m of arr) { m.geometry.dispose(); m.dispose?.(); }
       this._meshPool.delete(key);
     }
   }
@@ -201,7 +208,7 @@ export class FoliageLodRenderer {
         this._eachMesh(slotEntry[key], (m) => {
           this.scene.remove(m);
           m.geometry.dispose();
-          m.dispose();
+          m.dispose?.();
         });
         slotEntry[key] = null;
       }
@@ -314,12 +321,29 @@ export class FoliageLodRenderer {
       treeCenterData = geo.getAttribute("aTreeCenter").array;
       scaleData      = geo.getAttribute("aLeafScale").array;
     } else {
-      geo            = lodData.geometry.clone();
+      if (billboard) {
+        // MATRIX-LESS billboards: a plain Mesh with InstancedBufferGeometry.
+        // Billboard instance matrices were pure translation — 64 bytes/leaf
+        // duplicating what aLeafCenter (12 bytes) already stores. The shader's
+        // billboard branch outputs card offset + aLeafCenter directly, so the
+        // matrix (and its per-rebuild compose loop) is dropped entirely:
+        // ~2.6× less instance memory/upload and faster cell rebuilds.
+        // Base card attributes are SHARED with the preset geometry (no copies).
+        const base = lodData.geometry;
+        geo = new THREE.InstancedBufferGeometry();
+        geo.setIndex(base.index);
+        geo.setAttribute("position", base.getAttribute("position"));
+        geo.setAttribute("normal", base.getAttribute("normal"));
+        geo.setAttribute("uv", base.getAttribute("uv"));
+        im = new THREE.Mesh(geo, preset.material);
+      } else {
+        geo = lodData.geometry.clone();
+        im = new THREE.InstancedMesh(geo, preset.material, cappedTotal);
+      }
       randData       = new Float32Array(cappedTotal * 2);
       centerData     = new Float32Array(cappedTotal * 3);
       treeCenterData = new Float32Array(cappedTotal * 3);
       scaleData      = new Float32Array(cappedTotal * 2);
-      im = new THREE.InstancedMesh(geo, preset.material, cappedTotal);
       // Shadow policy: LOD0 + LOD1 leaves cast shadows (measured ~free on the
       // shadow pass, and with big render cells a NEAR tree can live in a
       // tier-1 cell — LOD0-only left close canopies shadowless). LOD2 (far)
@@ -365,17 +389,14 @@ export class FoliageLodRenderer {
 
       for (let li = 0; li < leavesPerTree && idx < cappedTotal; li++, idx++) {
         if (billboard) {
-          // Leaf world center first (treeMat applied to trunk-local center).
+          // Leaf world center (treeMat applied to trunk-local center) goes
+          // ONLY into aLeafCenter — matrix-less meshes have no instanceMatrix;
+          // the shader's billboard branch positions the card from this.
           this._tmpCenter.set(
             centerSrc[li * 3],
             centerSrc[li * 3 + 1],
             centerSrc[li * 3 + 2],
           ).applyMatrix4(this._treeMat);
-          // Instance matrix = pure translation to that world center.
-          // No rotation (so the camera-aligned quad in the shader isn't
-          // re-rotated by tree rotation) and no scale (carried by aLeafScale).
-          this._tmpMat.makeTranslation(this._tmpCenter.x, this._tmpCenter.y, this._tmpCenter.z);
-          im.setMatrixAt(idx, this._tmpMat);
           centerData[idx * 3]     = this._tmpCenter.x;
           centerData[idx * 3 + 1] = this._tmpCenter.y;
           centerData[idx * 3 + 2] = this._tmpCenter.z;
@@ -409,9 +430,9 @@ export class FoliageLodRenderer {
       }
     }
 
-    im.count = idx;
+    this._setCount(im, idx);
     im._fullCount = idx; // tier cross-dissolve ramps count; this is "100%"
-    im.instanceMatrix.needsUpdate = true;
+    if (im.isInstancedMesh) im.instanceMatrix.needsUpdate = true;
     if (fromPool) {
       geo.getAttribute("aRand").needsUpdate = true;
       geo.getAttribute("aLeafCenter").needsUpdate = true;
@@ -662,15 +683,15 @@ export class FoliageLodRenderer {
           const isOld = fading && lk === se._fadeFrom;
           this._eachMesh(se[lk], (m) => {
             m.visible = isNew || isOld;
-            const full = m._fullCount ?? m.count;
+            const full = m._fullCount ?? 0;
             if (isNew) {
-              m.count = (fading && lk === se._fadeRamp)
+              this._setCount(m, (fading && lk === se._fadeRamp)
                 ? Math.max(1, Math.ceil(full * se._fadeT))
-                : full;
+                : full);
             } else if (isOld) {
-              m.count = (lk === se._fadeRamp)
+              this._setCount(m, (lk === se._fadeRamp)
                 ? Math.max(0, Math.floor(full * (1 - se._fadeT)))
-                : full;
+                : full);
             }
           });
         }
@@ -727,14 +748,14 @@ export class FoliageLodRenderer {
           this._eachMesh(se[lk], (m) => {
             this.scene.remove(m);
             m.geometry.dispose();
-            m.dispose();
+            m.dispose?.();
           });
         }
       }
     }
     this._chunkMeshes.clear();
     for (const [, arr] of this._meshPool) {
-      for (const m of arr) { m.geometry.dispose(); m.dispose(); }
+      for (const m of arr) { m.geometry.dispose(); m.dispose?.(); }
     }
     this._meshPool.clear();
   }

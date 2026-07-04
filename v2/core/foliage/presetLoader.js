@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { createFoliageMaterial, setFoliageTexture, applyPresetMaterial, updateFoliageBounds } from "../../render/foliage/foliageMaterial.js";
 import { createTrunkMaterial } from "../../render/foliage/trunkMaterial.js";
 import { sampleAllClusters, computeFoliageBounds, buildAllFoliageLods } from "./foliageSampler.js";
+import { computeLeafTrimPolygon, buildLeafCardGeometry } from "./leafCardTrim.js";
 import { loadTreeGlbFromUrl } from "./glbLoader.js";
 
 const TRUNK_SEARCH_PATHS = [
@@ -77,6 +78,34 @@ export async function loadFoliagePreset(presetJson) {
     }
   }
 
+  // Trimmed leaf cards: fit an octagon to the mask so cards rasterize far
+  // fewer alpha-discarded pixels. Atlas presets trim against their own cell.
+  let cardGeometry = null;
+  {
+    const img = foliageMat.leafMapNode.value?.image;
+    if (img) {
+      let cellRect = null;
+      if (useAtlas) {
+        const cols = atlasGrid[0];
+        const cellStep = atlasGrid[1];
+        const gutterFrac = atlasGrid[2];
+        const innerFrac = atlasGrid[3];
+        const cell = atlas.cell ?? 0;
+        const col = cell % cols;
+        const row = Math.floor(cell / cols);
+        const ox = col * cellStep + gutterFrac;             // uv space (v up)
+        const oy = (cols - 1 - row) * cellStep + gutterFrac;
+        // canvas space (y down):
+        cellRect = { x: ox, y: 1 - oy - innerFrac, w: innerFrac, h: innerFrac };
+      }
+      const poly = computeLeafTrimPolygon(img, {
+        maskInAlpha: foliageMat.uniforms.maskInAlpha.value > 0.5,
+        cellRect,
+      });
+      if (poly) cardGeometry = buildLeafCardGeometry(poly);
+    }
+  }
+
   const clusters = presetJson.clusters || [];
   const tScale = presetJson.trunkScale ?? 1;
   const canopyScale = presetJson.canopyScale ?? 1;
@@ -95,7 +124,8 @@ export async function loadFoliagePreset(presetJson) {
   const bounds = computeFoliageBounds(allPos);
   updateFoliageBounds(foliageMat, bounds.yMin, bounds.yMax, bounds.canopyCenter, bounds.aoRadius);
 
-  const lods = buildAllFoliageLods(allPos, allRands, { billboard });
+  const lods = buildAllFoliageLods(allPos, allRands, { billboard, cardGeometry });
+  cardGeometry?.dispose(); // LODs cloned it; the template is no longer needed
 
   return {
     material: foliageMat.material,

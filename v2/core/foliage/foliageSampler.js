@@ -182,7 +182,9 @@ export function buildAllFoliageLods(positions, rands, options = {}) {
     dummy.matrix.toArray(lod0Mats, i * 16);
   }
 
-  const geo0 = new THREE.PlaneGeometry(1, 1);
+  // Trimmed leaf card (octagon fitted to the mask) when provided — quad otherwise.
+  const cardGeo = options.cardGeometry ?? null;
+  const geo0 = cardGeo ? cardGeo.clone() : new THREE.PlaneGeometry(1, 1);
   geo0.setAttribute("aRand", new THREE.InstancedBufferAttribute(lod0Rands, 2));
   geo0.setAttribute("aLeafCenter", new THREE.InstancedBufferAttribute(lod0Centers, 3));
   geo0.setAttribute("aLeafScale", new THREE.InstancedBufferAttribute(lod0Scales, 1));
@@ -250,7 +252,7 @@ export function buildAllFoliageLods(positions, rands, options = {}) {
       cd[j * 3 + 2] = lod0Centers[srcIdx * 3 + 2];
     }
 
-    const geo = new THREE.PlaneGeometry(1, 1);
+    const geo = cardGeo ? cardGeo.clone() : new THREE.PlaneGeometry(1, 1);
     geo.setAttribute("aRand", new THREE.InstancedBufferAttribute(rd, 2));
     geo.setAttribute("aLeafCenter", new THREE.InstancedBufferAttribute(cd, 3));
     geo.setAttribute("aLeafScale", new THREE.InstancedBufferAttribute(sd, 1));
