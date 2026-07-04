@@ -10,6 +10,8 @@
  */
 import * as THREE from "three";
 
+const _viewInvShared = new THREE.Matrix4();
+
 // Initial InstancedMesh capacity per slot. THREE.InstancedMesh allocates its
 // GPU instance buffer at construction and cannot grow, so when a frame needs
 // more visible instances than this, the meshes are recreated with doubled
@@ -204,7 +206,11 @@ export class TreeLodRenderer {
       if (slot.lod1) for (const sm of slot.lod1) sm.instancedMesh.count = 0;
     }
 
-    this._projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    // Frustum from the camera's CURRENT transform — camera.matrixWorldInverse
+    // belongs to the render passes and can be stale here (one-frame tree flash).
+    camera.updateMatrixWorld();
+    _viewInvShared.copy(camera.matrixWorld).invert();
+    this._projScreen.multiplyMatrices(camera.projectionMatrix, _viewInvShared);
     this._frustum.setFromProjectionMatrix(this._projScreen);
 
     const camX = camera.position.x;

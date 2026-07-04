@@ -1,4 +1,6 @@
 import * as THREE from "three";
+
+const _viewInvShared = new THREE.Matrix4();
 import { WORLD_SIZE } from "../terrain/heightmapTexture.js";
 
 const _tmp       = new THREE.Matrix4();
@@ -355,7 +357,11 @@ export class PropInstancer {
     }
     this._resetWriteFlags();
 
-    this._projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    // Frustum from the camera's CURRENT transform — camera.matrixWorldInverse
+    // belongs to the render passes and can be stale here (one-frame tree flash).
+    camera.updateMatrixWorld();
+    _viewInvShared.copy(camera.matrixWorld).invert();
+    this._projScreen.multiplyMatrices(camera.projectionMatrix, _viewInvShared);
     this._frustum.setFromProjectionMatrix(this._projScreen);
 
     const camX = camera.position.x, camZ = camera.position.z;

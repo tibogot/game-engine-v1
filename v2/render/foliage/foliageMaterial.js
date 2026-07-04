@@ -9,6 +9,7 @@ import {
   texture, uv,
   mix, step, smoothstep, clamp, fract, floor,
   sin, cos, abs, max, pow, dot, cross, normalize, length, sub, negate,
+  mx_noise_float,
   positionLocal, positionWorld,
   normalLocal, normalWorld,
   cameraPosition, modelWorldMatrix,
@@ -191,9 +192,20 @@ export function createFoliageMaterial(opts = {}) {
     // same model matrix (sits at world origin), so the old origin hash gave every
     // tree the SAME seed -> a uniform "clone-army" forest. aTreeCenter is distinct
     // per tree, so this restores real per-tree colour variation.
-    const treeSeed = fract(sin(dot(treeCenterW.xz, vec2(127.1, 311.7))).mul(43758.5453));
+    //
+    // Gradient noise, NOT fract(sin(x)*43758): that hash overflows f32 for
+    // trees far from the origin AND is discontinuous — wind jiggles the
+    // interpolated varying by ±1 ulp per frame, which the hash amplified into
+    // full-canopy per-pixel shimmer ("white noise when wind is on"). mx_noise
+    // is smooth, so ulp jitter maps to invisible output jitter, and it's
+    // precision-safe at any world position.
+    const treeSeed = mx_noise_float(vec3(
+      treeCenterW.x.mul(0.031), treeCenterW.z.mul(0.031), float(7.7),
+    )).mul(0.5).add(0.5);
     const treeBright = treeSeed.sub(0.5).mul(u.treeColorVar);
-    const treeHue = fract(sin(treeSeed.mul(78.233)).mul(43758.5453)).sub(0.5).mul(u.treeColorVar.mul(0.6));
+    const treeHue = mx_noise_float(vec3(
+      treeCenterW.x.mul(0.047), treeCenterW.z.mul(0.047), float(19.3),
+    )).mul(0.5).mul(u.treeColorVar.mul(0.6));
     col = vec3(
       col.x.add(treeHue.mul(0.4)).add(treeBright),
       col.y.add(treeBright),

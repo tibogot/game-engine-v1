@@ -4,7 +4,7 @@
 import { TreeStore } from "../../v2/core/foliage/treeStore.js";
 import { TreeLodRenderer } from "../../v2/render/foliage/treeLodRenderer.js";
 import { FoliageLodRenderer } from "../../v2/render/foliage/foliageLodRenderer.js";
-import { ImpostorRenderer } from "../../v2/render/foliage/impostorRenderer.js";
+import { ImpostorFieldRenderer as ImpostorRenderer } from "../render/trees/impostorFieldRenderer.js";
 import { TreeSystem } from "../../v2/tools/foliage/treeSystem.js";
 import {
   loadTreeGlbFromFile,
@@ -58,11 +58,14 @@ export function createTreeEnvironment({
     let leafMesh = null;
     let foliageUniforms = null;
     if (preset) {
-      leafMesh = foliageLodRenderer._buildChunkSlotLod(
+      // _buildChunkSlotLod returns Mesh[] since cap-splitting; a single tree
+      // at origin always fits in one mesh.
+      const leafMeshes = foliageLodRenderer._buildChunkSlotLod(
         [{ x: 0, y: 0, z: 0, rotY: 0, scale: trunkScale, slotIdx }],
         slotIdx,
         0,
       );
+      leafMesh = leafMeshes?.[0] ?? null;
       foliageUniforms = preset.uniforms;
     }
     const result = await bakeSlotImpostor(renderer, {
@@ -104,6 +107,116 @@ export function createTreeEnvironment({
     window.__bakeImpostor = async (i = 0, opts = {}) => {
       const ok = await _bakeImpostorForSlot(i, opts);
       if (!ok) console.warn(`[V3] Impostor slot ${i}: load a tree preset or GLB first`);
+    };
+
+    // Diagnostic bisect kit for tree flashing — toggle each subsystem live:
+    //   __treeDebug.impostors(false)   hide the far-field impostor quads
+    //   __treeDebug.leaves(false)      hide all leaf tiers
+    //   __treeDebug.trunks(false)      hide all trunk meshes
+    //   __treeDebug.leafShadows(false) stop LOD0 leaves casting shadows
+    window.__treeDebug = {
+      impostors(v = false) {
+        for (const s of impostorRenderer.slots ?? []) {
+          if (s?.mesh) s.mesh.visible = v;
+        }
+        console.log(`[treeDebug] impostors ${v ? "shown" : "hidden"}`);
+      },
+      leaves(v = false) {
+        foliageLodRenderer.debugHide = !v;
+        console.log(`[treeDebug] leaves ${v ? "shown" : "hidden"}`);
+      },
+      trunks(v = false) {
+        for (const slot of treeLodRenderer.slotRender ?? []) {
+          if (!slot) continue;
+          for (const lod of [slot.lod0, slot.lod1]) {
+            if (lod) for (const sm of lod) sm.instancedMesh.visible = v;
+          }
+        }
+        console.log(`[treeDebug] trunks ${v ? "shown" : "hidden"}`);
+      },
+      leafShadows(v = false) {
+        foliageLodRenderer.debugNoLeafShadows = !v;
+        for (const [, entry] of foliageLodRenderer._chunkMeshes ?? []) {
+          for (const [, se] of entry.slots) {
+            if (Array.isArray(se.lod0)) for (const m of se.lod0) m.castShadow = v;
+          }
+        }
+        console.log(`[treeDebug] leaf shadows ${v ? "on" : "off"}`);
+      },
+      /** Freeze all tier changes + builds — warmed meshes only (diagnostic). */
+      freeze(v = true) {
+        foliageLodRenderer.debugFreeze = !!v;
+        console.log(`[treeDebug] foliage builds/tier-changes ${v ? "FROZEN" : "unfrozen"}`);
+      },
+      /** Self-serve repro: build a synthetic leaf preset + plant a forest. */
+      async spawnTestForest(n = 5000, radius = 700) {
+        const cv = document.createElement("canvas");
+        cv.width = cv.height = 64;
+        const c2 = cv.getContext("2d");
+        const g = c2.createRadialGradient(32, 32, 4, 32, 32, 30);
+        g.addColorStop(0, "rgba(255,255,255,1)");
+        g.addColorStop(0.8, "rgba(255,255,255,0.9)");
+        g.addColorStop(1, "rgba(255,255,255,0)");
+        c2.fillStyle = g;
+        c2.fillRect(0, 0, 64, 64);
+        const preset = {
+          presetName: "__test",
+          leafTexture: cv.toDataURL("image/png"),
+          clusters: [{
+            enabled: true, count: 240, x: 0, y: 4.2, z: 0,
+            rx: 2.6, ry: 2.0, rz: 2.6, scale: 1, shell: 0.65, shellThick: 0.35,
+            leafSize: 0.9, scaleVar: 0.35, tiltMax: 40,
+          }],
+          material: {
+            billboardLeaves: true, bottomColor: "#2d5a1b", topColor: "#5aaa2a",
+            alphaCutoff: 0.4, sssStr: 0.25,
+          },
+          wind: { windSpeed: 0.9, windStr: 0, windMicro: 0 },
+          trunkScale: 1,
+          canopyScale: 1,
+          lodDistances: { lod1: 60, lod2: 140 },
+        };
+        await loadTreePreset(0, new File([JSON.stringify(preset)], "__test-preset.json", { type: "application/json" }));
+        for (let i = 0; i < n; i++) {
+          const wx = (Math.random() * 2 - 1) * radius;
+          const wz = (Math.random() * 2 - 1) * radius;
+          treeStore.addTree(wx, wz, terrainStore.getWorldHeight(wx, wz), Math.random() * Math.PI * 2, 0.8 + Math.random() * 0.5, 0);
+        }
+        console.log(`[treeDebug] test forest planted: ${n} trees (slot 0, radius ${radius}m)`);
+      },
+      /** Dump per-cell LOD/fade state (diagnosing tier-transition bugs). */
+      cells() {
+        const out = [];
+        for (const [key, entry] of foliageLodRenderer._chunkMeshes ?? []) {
+          for (const [si, se] of entry.slots) {
+            const tierInfo = {};
+            for (const lk of ["lod0", "lod1", "lod2"]) {
+              const v = se[lk];
+              tierInfo[lk] = v === null ? "null" : v === false ? "false"
+                : v.map((m) => `${m.visible ? "V" : "h"}${m.count}/${m._fullCount}`).join("+");
+            }
+            out.push({
+              key, si, tier: entry.tier,
+              shown: se._shownKey ?? "-", fadeFrom: se._fadeFrom ?? "-",
+              fadeT: se._fadeT != null ? +se._fadeT.toFixed(2) : "-",
+              ...tierInfo,
+            });
+          }
+        }
+        console.table(out);
+        return out;
+      },
+      /** Fly ~10 s while flashing, then call this — prints blink counters. */
+      stats() {
+        const s = foliageLodRenderer.debugStats();
+        console.log(
+          `[treeDebug] frame ${s.frame} — blinks:${s.blinks} frustumHides:${s.frustumHides} `
+          + `genRebuilds:${s.genRebuilds} tierSwaps:${s.tierSwaps} builds:${s.builds} `
+          + `emergency:${s.emergency} orphanHides:${s.orphanHides} FIRSTDRAW-MISSES:${s.firstDrawMisses}`,
+        );
+        for (const n of s.notes) console.log("  " + n);
+        return s;
+      },
     };
   }
 

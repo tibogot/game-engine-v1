@@ -144,6 +144,9 @@ async function main() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
+  // The foliage material uses castShadowNode (alpha-tested leaf shadows);
+  // r184 requires this flag for that path (silences the boot warning too).
+  renderer.shadowMap.transmitted = true;
   viewport.appendChild(renderer.domElement);
 
   const stats = new Stats({ trackGPU: hasTimestamps, trackCPT: true });
@@ -1938,6 +1941,16 @@ async function main() {
       const ri    = renderer.info.render;
       const draws = ri.drawCalls ?? ri.calls ?? 0;
       const ktris = (ri.triangles ?? 0) / 1000;
+      // Dropout detector: a draw that silently skips a frame shows up as a
+      // one-frame triangle-count dip. window.__triWatch.dips collects them.
+      {
+        const w = (window.__triWatch ??= { prev: 0, dips: [] });
+        if (w.prev > 50 && ktris < w.prev * 0.85 && w.dips.length < 80) {
+          w.dips.push({ t: Math.round(now), prevK: Math.round(w.prev), curK: Math.round(ktris) });
+        }
+        w.prev = ktris;
+        w.draws = draws;
+      }
       _maxDraw = Math.max(_maxDraw, draws);
       _maxTri  = Math.max(_maxTri,  ktris);
       drawPanel.update(draws, _maxDraw, 0);

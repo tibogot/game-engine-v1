@@ -17,6 +17,29 @@ const CULL_MARGIN = 12;
 // tiers every frame while the orbit camera damps.
 const LOD_HYST = 0.1;
 const DEFAULT_CHUNK_MESH_CACHE_EXTRA = 64;
+// Time-slicing: cap the LEAF-FILL work per update() call — crossing a LOD
+// boundary or entering fresh chunks never spikes a single frame. Budgeting by
+// leaf count (not mesh count) lets many small far-tier meshes build in one
+// frame while a 65k-leaf near mesh takes a frame to itself.
+const DEFAULT_BUILD_LEAF_BUDGET = 48000;
+// Evicted meshes are pooled per (slot, lod) and refilled instead of
+// reallocated — kills the GC churn (and the old path leaked the cloned
+// geometry's GPU buffers on eviction; pooling reuses them instead).
+const POOL_MAX_PER_KEY = 24;
+// Cache thrash guard: never evict a chunk seen in-frustum within this many
+// frames. Orbit/fly sweeps chunks out of view for a few seconds — evicting
+// them meant a sparse/late canopy on re-entry (the "tree flash" bug).
+const RETAIN_FRAMES = 600;
+// Foliage draw-call reducer: group N×N store chunks into one render cell
+// (2 → 200 m cells at the default 100 m chunk ≈ 4× fewer draw calls).
+// Cells whose leaves exceed MAX_LEAVES_PER_CHUNK split into multiple meshes
+// (which also fixes the old silent truncation on dense 100 m chunks).
+const DEFAULT_CHUNK_GROUP = 2;
+// Tier transitions cross-dissolve over this many frames by ramping the
+// incoming mesh's instance count up while the outgoing ramps down —
+// scattered leaves stream in/out instead of the whole canopy popping
+// (and the LOD0 shadow grows in with the count instead of snapping on).
+const TIER_FADE_FRAMES = 16;
 
 export class FoliageLodRenderer {
   constructor(scene, config) {
@@ -47,6 +70,7 @@ export class FoliageLodRenderer {
 
     this._frustum = new THREE.Frustum();
     this._projScreen = new THREE.Matrix4();
+    this._viewInv = new THREE.Matrix4();
     this._box = new THREE.Box3();
     this._tmpMat = new THREE.Matrix4();
     this._treeMat = new THREE.Matrix4();
@@ -59,6 +83,92 @@ export class FoliageLodRenderer {
     this._surfNorm = new THREE.Vector3();
     this._quatNorm = new THREE.Quaternion();
     this._quatSpin = new THREE.Quaternion();
+
+    /** Evicted-mesh pool: "slot:lod" → InstancedMesh[] (reused on rebuild). */
+    this._meshPool = new Map();
+    /** Missing chunk-tier meshes wanted this frame; rebuilt every update(). */
+    this._pendingBuilds = [];
+
+    /** Blink detector — counts every path that hides a canopy that was
+     *  visible last frame. Read/reset via window.__treeDebug.stats(). */
+    this._dbg = {
+      frame: 0, blinks: 0, frustumHides: 0, genRebuilds: 0,
+      emergency: 0, builds: 0, tierSwaps: 0, orphanHides: 0,
+      firstDrawMisses: 0, notes: [],
+    };
+  }
+
+  _dbgNote(msg) {
+    if (this._dbg.notes.length < 12) this._dbg.notes.push(`[f${this._dbg.frame}] ${msg}`);
+  }
+
+  /** Snapshot + reset the blink counters. */
+  debugStats() {
+    const s = { ...this._dbg, notes: [...this._dbg.notes] };
+    const frame = this._dbg.frame;
+    this._dbg = {
+      frame, blinks: 0, frustumHides: 0, genRebuilds: 0,
+      emergency: 0, builds: 0, tierSwaps: 0, orphanHides: 0,
+      firstDrawMisses: 0, notes: [],
+    };
+    return s;
+  }
+
+  _buildBudget() {
+    return this.config.foliageLod?.buildLeafBudgetPerFrame ?? DEFAULT_BUILD_LEAF_BUDGET;
+  }
+
+  _chunkGroup() {
+    return this.config.foliageLod?.chunkGroup ?? DEFAULT_CHUNK_GROUP;
+  }
+
+  /** se[lodK] is null | false | Mesh[] — run fn over the meshes if present. */
+  _eachMesh(v, fn) {
+    if (Array.isArray(v)) for (const m of v) fn(m);
+  }
+
+  /** Rough leaf-fill cost of building one chunk-slot-tier mesh. */
+  _jobCost(job) {
+    const preset = this.slotPresets[job.si];
+    const perTree = preset?.lods?.[job.tier]?.count ?? 0;
+    return Math.min(job.trees.length * perTree, MAX_LEAVES_PER_CHUNK);
+  }
+
+  // ── Mesh pool ──────────────────────────────────────────────────────────────
+
+  _acquireFromPool(slotIdx, lodIdx, needed) {
+    const arr = this._meshPool.get(`${slotIdx}:${lodIdx}`);
+    if (!arr) return null;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (arr[i].userData._poolCap >= needed) return arr.splice(i, 1)[0];
+    }
+    return null;
+  }
+
+  /** Return an evicted mesh to the pool (or truly dispose past the cap). */
+  _releaseMesh(mesh) {
+    this.scene.remove(mesh);
+    const key = mesh.userData._poolKey;
+    if (key) {
+      let arr = this._meshPool.get(key);
+      if (!arr) this._meshPool.set(key, (arr = []));
+      if (arr.length < POOL_MAX_PER_KEY) {
+        mesh.visible = false;
+        arr.push(mesh);
+        return;
+      }
+    }
+    mesh.geometry.dispose();
+    mesh.dispose();
+  }
+
+  /** Drop every pooled mesh for a slot (preset replaced — geometry/material stale). */
+  _purgeSlotPool(slotIdx) {
+    for (const [key, arr] of this._meshPool) {
+      if (!key.startsWith(`${slotIdx}:`)) continue;
+      for (const m of arr) { m.geometry.dispose(); m.dispose(); }
+      this._meshPool.delete(key);
+    }
   }
 
   setSlotPreset(slotIdx, preset) {
@@ -88,14 +198,18 @@ export class FoliageLodRenderer {
       const slotEntry = entry.slots.get(slotIdx);
       if (!slotEntry) continue;
       for (const key of ["lod0", "lod1", "lod2"]) {
-        if (slotEntry[key]) {
-          this.scene.remove(slotEntry[key]);
-          slotEntry[key].dispose();
-          slotEntry[key] = null;
-        }
+        this._eachMesh(slotEntry[key], (m) => {
+          this.scene.remove(m);
+          m.geometry.dispose();
+          m.dispose();
+        });
+        slotEntry[key] = null;
       }
       entry.slots.delete(slotIdx);
     }
+    // The preset (geometry/material) is being replaced — pooled meshes built
+    // from it must not be reused.
+    this._purgeSlotPool(slotIdx);
   }
 
   _chunkMeshCacheExtra() {
@@ -104,7 +218,7 @@ export class FoliageLodRenderer {
 
   _hideSlotMeshes(se) {
     for (const lk of ["lod0", "lod1", "lod2"]) {
-      if (se[lk] && se[lk] !== false) se[lk].visible = false;
+      this._eachMesh(se[lk], (m) => { m.visible = false; });
     }
   }
 
@@ -117,28 +231,35 @@ export class FoliageLodRenderer {
     if (!entry) return;
     for (const [, se] of entry.slots) {
       for (const lk of ["lod0", "lod1", "lod2"]) {
-        if (se[lk] && se[lk] !== false) {
-          this.scene.remove(se[lk]);
-          se[lk].dispose();
-        }
+        this._eachMesh(se[lk], (m) => this._releaseMesh(m));
       }
     }
     this._chunkMeshes.delete(key);
   }
 
   /** Drop hidden orphan caches only when over the retention cap (LRU-ish: map order). */
-  _trimChunkMeshCache(activeKeys) {
+  _trimChunkMeshCache(activeKeys, frame) {
+    // A frame with an empty/near-empty frustum set is a glitch (bad camera
+    // matrices), not a real view change — trimming then would evict the whole
+    // cache and force a rebuild storm. Skip; a sane frame will trim shortly.
+    if (activeKeys.size === 0) return;
     const maxSize = activeKeys.size + this._chunkMeshCacheExtra();
     if (this._chunkMeshes.size <= maxSize) return;
-    for (const k of [...this._chunkMeshes.keys()]) {
+    for (const [k, entry] of this._chunkMeshes) {
       if (this._chunkMeshes.size <= maxSize) break;
-      if (!activeKeys.has(k)) this._disposeEntry(k);
+      if (activeKeys.has(k)) continue;
+      // Age gate: chunks recently in view WILL come back (orbit sweeps) —
+      // evicting them caused the re-entry canopy flash. Only evict cold ones.
+      if (frame - (entry._seen ?? 0) < RETAIN_FRAMES) continue;
+      this._disposeEntry(k);
     }
   }
 
   /**
-   * Build foliage InstancedMeshes for one chunk + one slot + one LOD tier.
-   * Each tree in the chunk gets its leaves placed at (treeWorldPos + leafLocalPos).
+   * Build the foliage meshes for one cell + slot + LOD tier. Cells whose leaf
+   * total exceeds MAX_LEAVES_PER_CHUNK split into multiple InstancedMeshes
+   * (the old single-mesh path silently TRUNCATED dense chunks instead).
+   * Returns Mesh[] or null.
    */
   _buildChunkSlotLod(trees, slotIdx, lodIdx) {
     const preset = this.slotPresets[slotIdx];
@@ -149,11 +270,20 @@ export class FoliageLodRenderer {
     const slotTrees = trees.filter(t => t.slotIdx === slotIdx);
     if (slotTrees.length === 0) return null;
 
-    const totalLeaves = slotTrees.length * lodData.count;
-    if (totalLeaves === 0) return null;
-    const cappedTotal = Math.min(totalLeaves, MAX_LEAVES_PER_CHUNK);
+    const maxTrees = Math.max(1, Math.floor(MAX_LEAVES_PER_CHUNK / lodData.count));
+    const out = [];
+    for (let s = 0; s < slotTrees.length; s += maxTrees) {
+      const mesh = this._buildLeafMesh(slotTrees.slice(s, s + maxTrees), preset, lodData, slotIdx, lodIdx);
+      if (mesh) out.push(mesh);
+    }
+    return out.length ? out : null;
+  }
 
-    const geo = lodData.geometry.clone();
+  /** Build ONE InstancedMesh (≤ MAX_LEAVES_PER_CHUNK leaves), pool-first. */
+  _buildLeafMesh(slotTrees, preset, lodData, slotIdx, lodIdx) {
+    const cappedTotal = slotTrees.length * lodData.count;
+    if (cappedTotal === 0) return null;
+
     const randSrc = lodData.randData;
     const centerSrc = lodData.centerData;
     const scaleSrc = lodData.scaleData;
@@ -161,37 +291,45 @@ export class FoliageLodRenderer {
     // Trunk-local canopy center for this preset (same for every tree of this slot).
     // Applied per-tree via treeMat below to get the world-space canopy center.
     const canopyLocal = (preset.bounds && preset.bounds.canopyCenter) || null;
-    const randData = new Float32Array(cappedTotal * 2);
-    // Per-instance world center for the per-instance sphere normal. Without this
-    // the chunked InstancedMesh would reuse aLeafCenter from the cloned geometry,
-    // which only has lodData.count entries — out-of-bounds for trees > 1 in chunk.
-    const centerData = new Float32Array(cappedTotal * 3);
-    // Per-instance world canopy center of the tree this leaf belongs to.
-    // sphereDir = leafCenter - treeCenter must use world-space endpoints; otherwise
-    // trees placed away from world origin get wrong outward directions and the
-    // whole canopy flat-shades + flickers as the camera orbits.
-    const treeCenterData = new Float32Array(cappedTotal * 3);
-    // Per-instance scale; consulted by the shader's billboard path
-    // (in non-billboard mode the matrix already carries scale; we still
-    // upload aLeafScale per-instance to keep attribute layout consistent).
-    // aLeafScale is a vec2: [x] = leaf size, [y] = canopy height fraction (0=bottom,
-    // 1=top) in trunk-LOCAL space (correct regardless of world placement OR scale;
-    // fixes the old shader heightFactor that saturated for trees not at origin).
-    // Packed together because WebGPU caps vertex buffers at 8 — a separate height
-    // attribute would be the 9th and overflow the limit.
-    const scaleData = new Float32Array(cappedTotal * 2);
     const _bYMin = (preset.bounds && preset.bounds.yMin) ?? 0;
     const _bRange = Math.max(((preset.bounds && preset.bounds.yMax) ?? 8) - _bYMin, 0.001);
 
-    const im = new THREE.InstancedMesh(geo, preset.material, cappedTotal);
-    im.count = cappedTotal;
-    // Shadow policy: only LOD0 (near) leaves cast shadows. Far tiers (1/2) are each
-    // tens of thousands of alpha-tested quads — re-rendering them into every CSM
-    // cascade is the biggest foliage GPU cost, and at distance the terrain shadow
-    // blend hides the missing detail.
-    im.castShadow = lodIdx === 0;
-    im.receiveShadow = false;
-    im.frustumCulled = false;
+    // Pool-first: refill an evicted mesh of this slot/lod in place instead of
+    // reallocating geometry + 4 instanced attributes (GC churn while travelling).
+    //
+    // Attribute semantics (unchanged from the original allocation path):
+    //  - aRand        per-leaf 2D random (wind phase / color variation)
+    //  - aLeafCenter  per-instance WORLD leaf center (sphere-normal math; the
+    //                 cloned source geometry only has lodData.count entries)
+    //  - aTreeCenter  per-instance WORLD canopy center of the owning tree
+    //  - aLeafScale   vec2 [leaf size, canopy height fraction 0..1] — packed
+    //                 because WebGPU caps vertex buffers at 8
+    let im = this._acquireFromPool(slotIdx, lodIdx, cappedTotal);
+    let geo, randData, centerData, treeCenterData, scaleData;
+    const fromPool = !!im;
+    if (fromPool) {
+      geo            = im.geometry;
+      randData       = geo.getAttribute("aRand").array;
+      centerData     = geo.getAttribute("aLeafCenter").array;
+      treeCenterData = geo.getAttribute("aTreeCenter").array;
+      scaleData      = geo.getAttribute("aLeafScale").array;
+    } else {
+      geo            = lodData.geometry.clone();
+      randData       = new Float32Array(cappedTotal * 2);
+      centerData     = new Float32Array(cappedTotal * 3);
+      treeCenterData = new Float32Array(cappedTotal * 3);
+      scaleData      = new Float32Array(cappedTotal * 2);
+      im = new THREE.InstancedMesh(geo, preset.material, cappedTotal);
+      // Shadow policy: LOD0 + LOD1 leaves cast shadows (measured ~free on the
+      // shadow pass, and with big render cells a NEAR tree can live in a
+      // tier-1 cell — LOD0-only left close canopies shadowless). LOD2 (far)
+      // stays off; the terrain shadow blend hides it at that distance.
+      im.castShadow = lodIdx <= 1 && !this.debugNoLeafShadows;
+      im.receiveShadow = false;
+      im.frustumCulled = false;
+      im.userData._poolKey = `${slotIdx}:${lodIdx}`;
+      im.userData._poolCap = cappedTotal;
+    }
 
     const leavesPerTree = lodData.count;
     const localMats = lodData.matrices;
@@ -272,30 +410,47 @@ export class FoliageLodRenderer {
     }
 
     im.count = idx;
+    im._fullCount = idx; // tier cross-dissolve ramps count; this is "100%"
     im.instanceMatrix.needsUpdate = true;
-    geo.setAttribute("aRand", new THREE.InstancedBufferAttribute(randData.slice(0, idx * 2), 2));
-    geo.setAttribute("aLeafCenter", new THREE.InstancedBufferAttribute(centerData.slice(0, idx * 3), 3));
-    geo.setAttribute("aTreeCenter", new THREE.InstancedBufferAttribute(treeCenterData.slice(0, idx * 3), 3));
-    geo.setAttribute("aLeafScale", new THREE.InstancedBufferAttribute(scaleData.slice(0, idx * 2), 2));
+    if (fromPool) {
+      geo.getAttribute("aRand").needsUpdate = true;
+      geo.getAttribute("aLeafCenter").needsUpdate = true;
+      geo.getAttribute("aTreeCenter").needsUpdate = true;
+      geo.getAttribute("aLeafScale").needsUpdate = true;
+    } else {
+      // Full-capacity arrays (no defensive .slice copies — idx === cappedTotal
+      // in practice, and im.count caps what draws).
+      geo.setAttribute("aRand", new THREE.InstancedBufferAttribute(randData, 2));
+      geo.setAttribute("aLeafCenter", new THREE.InstancedBufferAttribute(centerData, 3));
+      geo.setAttribute("aTreeCenter", new THREE.InstancedBufferAttribute(treeCenterData, 3));
+      geo.setAttribute("aLeafScale", new THREE.InstancedBufferAttribute(scaleData, 2));
+    }
 
     return im;
   }
 
-  _ensureChunkMeshes(chunkKey, trees, gen) {
+  _ensureChunkMeshes(chunkKey, members, gen) {
     let entry = this._chunkMeshes.get(chunkKey);
     if (entry && entry.gen === gen) return entry;
 
     if (entry) {
+      this._dbg.genRebuilds++;
+      this._dbgNote(`genRebuild ${chunkKey} (${entry.gen} → ${gen})`);
       for (const [, slotEntry] of entry.slots) {
         for (const k of ["lod0", "lod1", "lod2"]) {
-          if (slotEntry[k]) { this.scene.remove(slotEntry[k]); slotEntry[k].dispose(); }
+          this._eachMesh(slotEntry[k], (m) => this._releaseMesh(m));
         }
       }
     }
 
+    // Flatten the group's member chunks once per gen change; builds and the
+    // queue reuse entry.trees so the per-frame loop never re-flattens.
+    const trees = [];
+    for (const arr of members) for (const t of arr) trees.push(t);
+
     // Carry the LOD tier across rebuilds so painting into a chunk doesn't
     // reset its hysteresis state (-1 = unset, pick fresh from raw thresholds).
-    entry = { gen, slots: new Map(), tier: entry ? entry.tier : -1 };
+    entry = { gen, trees, slots: new Map(), tier: entry ? entry.tier : -1 };
 
     const slotsInChunk = new Set();
     for (const t of trees) slotsInChunk.add(t.slotIdx);
@@ -317,20 +472,36 @@ export class FoliageLodRenderer {
   _ensureTier(slotEntry, slotIdx, trees, lodIdx) {
     const key = `lod${lodIdx}`;
     if (slotEntry[key] !== null) return;
-    const mesh = this._buildChunkSlotLod(trees, slotIdx, lodIdx);
-    if (mesh) {
-      mesh.visible = false;
-      this.scene.add(mesh);
-      slotEntry[key] = mesh;
+    this._dbg.builds++;
+    const meshes = this._buildChunkSlotLod(trees, slotIdx, lodIdx);
+    if (meshes) {
+      for (const mesh of meshes) {
+        mesh.visible = false;
+        this.scene.add(mesh);
+      }
+      slotEntry[key] = meshes;
     } else {
       slotEntry[key] = false;
     }
   }
 
   update(treeStore, camera, lodCfg) {
-    this._projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    // Diagnostic kill-switch (window.__treeDebug) — hides all leaf tiers.
+    if (this.debugHide) {
+      for (const [, entry] of this._chunkMeshes) this._hideEntry(entry);
+      return;
+    }
+    // Build the frustum from the camera's CURRENT transform. Do NOT use
+    // camera.matrixWorldInverse — that's refreshed by render passes, so during
+    // this pre-render update it holds whatever the last pass left there;
+    // single stale/foreign frames culled every visible chunk at once (the
+    // "trees flash for one frame" bug — see 2026-07-04 blink-detector session).
+    camera.updateMatrixWorld();
+    this._viewInv.copy(camera.matrixWorld).invert();
+    this._projScreen.multiplyMatrices(camera.projectionMatrix, this._viewInv);
     this._frustum.setFromProjectionMatrix(this._projScreen);
 
+    const f = ++this._dbg.frame;
     const camX = camera.position.x;
     const camZ = camera.position.z;
     const chunkSize = this.config.world.chunkSize;
@@ -341,68 +512,200 @@ export class FoliageLodRenderer {
     const fadeD = lodCfg.fadeOutDistance ?? 600;
     const th = [lod0D, lod1D, fadeD];
 
-    const activeChunks = new Set();
-    const frustumChunks = new Set();
-
+    // ── Super-chunk grouping: N×N store chunks render as ONE cell ───────────
+    // (one InstancedMesh per cell-slot-tier instead of per chunk — the main
+    // draw-call reducer for big forests).
+    const GROUP = this._chunkGroup();
+    const cellSize = chunkSize * GROUP;
+    const groups = new Map(); // gKey -> { gen, members, gx, gz }
     for (const [key, trees] of treeStore.chunks) {
       if (trees.length === 0) continue;
-      activeChunks.add(key);
-
       const sep = key.indexOf(",");
       const cx = +key.substring(0, sep);
       const cz = +key.substring(sep + 1);
-      const minX = -half + cx * chunkSize;
-      const minZ = -half + cz * chunkSize;
+      const gx = Math.floor(cx / GROUP);
+      const gz = Math.floor(cz / GROUP);
+      const gKey = gx + "," + gz;
+      let g = groups.get(gKey);
+      if (!g) groups.set(gKey, (g = { gen: 0, members: [], gx, gz }));
+      // Sum of member gens: changes whenever ANY member chunk mutates.
+      g.gen += treeStore.getGen(key);
+      g.members.push(trees);
+    }
+
+    const activeChunks = new Set(groups.keys());
+    const frustumChunks = new Set();
+
+    for (const [key, g] of groups) {
+      const minX = -half + g.gx * cellSize;
+      const minZ = -half + g.gz * cellSize;
       this._box.min.set(minX - CULL_MARGIN, -100, minZ - CULL_MARGIN);
-      this._box.max.set(minX + chunkSize + CULL_MARGIN, 600, minZ + chunkSize + CULL_MARGIN);
+      this._box.max.set(minX + cellSize + CULL_MARGIN, 600, minZ + cellSize + CULL_MARGIN);
 
       if (!this._frustum.intersectsBox(this._box)) {
         const entry = this._chunkMeshes.get(key);
         if (entry) {
           for (const [, se] of entry.slots) {
-            if (se.lod0) se.lod0.visible = false;
-            if (se.lod1) se.lod1.visible = false;
-            if (se.lod2) se.lod2.visible = false;
+            if (se._shownFrame === f - 1) {
+              this._dbg.frustumHides++;
+              this._dbgNote(`frustumHide ${key} camDist=${Math.round(Math.hypot(minX + cellSize / 2 - camX, minZ + cellSize / 2 - camZ))}`);
+            }
+            this._hideSlotMeshes(se);
           }
         }
         continue;
       }
 
       frustumChunks.add(key);
-      const gen = treeStore.getGen(key);
-      const entry = this._ensureChunkMeshes(key, trees, gen);
+      const entry = this._ensureChunkMeshes(key, g.members, g.gen);
+      entry._seen = f; // age-based retention (anti-thrash)
+      const trees = entry.trees;
 
-      const chunkCX = minX + chunkSize * 0.5;
-      const chunkCZ = minZ + chunkSize * 0.5;
+      const chunkCX = minX + cellSize * 0.5;
+      const chunkCZ = minZ + cellSize * 0.5;
       const dx = chunkCX - camX;
       const dz = chunkCZ - camZ;
       const dist = Math.sqrt(dx * dx + dz * dz);
 
       // Tier with hysteresis: 0=lod0, 1=lod1, 2=lod2, 3=hidden.
       // Demote (further tier) past threshold*(1+H); promote back under *(1-H).
+      //
+      // The HIDE boundary (tier 3) uses the cell's NEAREST-corner distance,
+      // not its center: with big cells, a tree can sit ~cellRadius nearer
+      // than the center — hiding by center distance left bare trunks in the
+      // band before the impostors take over.
+      const cellRadius = cellSize * 0.7071;
+      const distFar = Math.max(0, dist - cellRadius);
+      const dFor = (i) => (i === 2 ? distFar : dist);
       let tier = entry.tier;
-      if (tier < 0) {
-        tier = dist > fadeD ? 3 : dist > lod1D ? 2 : dist > lod0D ? 1 : 0;
+      if (this.debugFreeze) {
+        // Diagnostic freeze: no tier changes, no builds — warmed meshes only.
+        tier = tier >= 0 ? tier : 3;
+      } else if (tier < 0) {
+        tier = distFar > fadeD ? 3 : dist > lod1D ? 2 : dist > lod0D ? 1 : 0;
+        entry.tier = tier;
       } else {
-        while (tier < 3 && dist > th[tier] * (1 + LOD_HYST)) tier++;
-        while (tier > 0 && dist < th[tier - 1] * (1 - LOD_HYST)) tier--;
+        while (tier < 3 && dFor(tier) > th[tier] * (1 + LOD_HYST)) tier++;
+        while (tier > 0 && dFor(tier - 1) < th[tier - 1] * (1 - LOD_HYST)) tier--;
+        entry.tier = tier;
       }
-      entry.tier = tier;
 
       for (const [si, se] of entry.slots) {
-        // Lazily build only the tier we're about to show (not all 3).
-        if (tier < 3) this._ensureTier(se, si, trees, tier);
-        if (se.lod0) se.lod0.visible = tier === 0;
-        if (se.lod1) se.lod1.visible = tier === 1;
-        if (se.lod2) se.lod2.visible = tier === 2;
+        // Time-sliced builds: queue missing tier meshes instead of building
+        // synchronously — at most _buildBudget() builds happen per frame,
+        // nearest chunks first. Until the wanted tier exists, show the best
+        // ALREADY-BUILT tier (prefer coarser) so the chunk never blinks.
+        let showTier = -1;
+        if (tier < 3) {
+          const wantedMissing = se[`lod${tier}`] === null;
+          // NEAR chunks build their wanted tier SYNCHRONOUSLY: a close canopy
+          // must never appear sparse or late — a pooled refill costs ~1-2 ms,
+          // a wrong-density canopy is a visible flash. Far chunks stream via
+          // the budgeted queue (a coarse stand-in is fine at distance).
+          if (wantedMissing && !this.debugFreeze) {
+            if (dist < lod1D) this._ensureTier(se, si, trees, tier);
+            else this._pendingBuilds.push({ se, si, trees, tier, dist });
+          }
+          if (se[`lod${tier}`]) showTier = tier;
+          else {
+            for (const alt of [tier + 1, tier + 2, tier - 1, tier - 2]) {
+              if (alt >= 0 && alt <= 2 && se[`lod${alt}`]) { showTier = alt; break; }
+            }
+          }
+          // Far-chunk fallback: LOD2 is tiny — build it synchronously so a
+          // canopy always exists while the wanted tier streams in.
+          if (showTier === -1 && se.lod2 === null && !this.debugFreeze) {
+            this._dbg.emergency++;
+            this._ensureTier(se, si, trees, 2);
+            if (se.lod2) showTier = 2;
+          }
+        }
+        // Blink detector: we're about to hide a canopy that was visible last
+        // frame while its chunk is still wanted (tier<3) — that's the flash.
+        if (showTier >= 0) {
+          if (se._lastTier != null && se._lastTier !== showTier && se._shownFrame === f - 1) this._dbg.tierSwaps++;
+          se._lastTier = showTier;
+          se._shownFrame = f;
+        } else if (tier < 3 && se._shownFrame === f - 1) {
+          this._dbg.blinks++;
+          this._dbgNote(`BLINK ${key}:${si} tier=${tier} lod0=${!!se.lod0} lod1=${!!se.lod1} lod2=${String(se.lod2)}`);
+        }
+
+        // Tier CROSS-DISSOLVE, density-safe: only the DENSER tier ramps its
+        // instance count (a free draw parameter); the sparser tier stays at
+        // FULL count throughout. Promoting (approach): sparse old holds while
+        // dense leaves stream in on top — the canopy only ever gains. Demoting:
+        // sparse target shows instantly while dense leaves stream out. Density
+        // never drops below what was already on screen (ramping the dense tier
+        // in from zero over a full old fade LOOKED like the canopy vanishing
+        // to bare trunks on approach). The LOD0 shadow still grows with count.
+        const newKey = showTier >= 0 ? `lod${showTier}` : null;
+        if (newKey !== se._shownKey) {
+          if (se._shownKey && se[se._shownKey] && newKey && se[newKey]) {
+            se._fadeFrom = se._shownKey;
+            // Lower lod index = denser. That one ramps; the other holds full.
+            se._fadeRamp = newKey < se._shownKey ? newKey : se._shownKey;
+            se._fadeT = 0;
+          } else {
+            se._fadeFrom = null;
+          }
+          se._shownKey = newKey;
+        }
+        let fading = false;
+        if (se._fadeFrom && se[se._fadeFrom] && se._shownKey) {
+          se._fadeT += 1 / TIER_FADE_FRAMES;
+          if (se._fadeT >= 1) se._fadeFrom = null;
+          else fading = true;
+        }
+        for (const lk of ["lod0", "lod1", "lod2"]) {
+          const isNew = lk === se._shownKey;
+          const isOld = fading && lk === se._fadeFrom;
+          this._eachMesh(se[lk], (m) => {
+            m.visible = isNew || isOld;
+            const full = m._fullCount ?? m.count;
+            if (isNew) {
+              m.count = (fading && lk === se._fadeRamp)
+                ? Math.max(1, Math.ceil(full * se._fadeT))
+                : full;
+            } else if (isOld) {
+              m.count = (lk === se._fadeRamp)
+                ? Math.max(0, Math.floor(full * (1 - se._fadeT)))
+                : full;
+            }
+          });
+        }
       }
+    }
+
+    // Process the build queue: nearest chunks first, leaf-count budget per
+    // frame (always at least one job so huge meshes can't stall the queue).
+    if (this._pendingBuilds.length > 0) {
+      this._pendingBuilds.sort((a, b) => a.dist - b.dist);
+      let remaining = this._buildBudget();
+      for (let i = 0; i < this._pendingBuilds.length; i++) {
+        const job = this._pendingBuilds[i];
+        if (job.se[`lod${job.tier}`] !== null) continue; // built as emergency LOD2 etc.
+        const cost = this._jobCost(job);
+        if (i > 0 && cost > remaining) break;
+        remaining -= cost;
+        this._ensureTier(job.se, job.si, job.trees, job.tier);
+        // No manual visibility here: next frame's pass sees the built tier
+        // and starts the cross-dissolve from whatever fallback was showing.
+        if (remaining <= 0) break;
+      }
+      this._pendingBuilds.length = 0;
     }
 
     // Orphan caches (chunk emptied in store): hide, keep GPU pipelines warm for re-orbit.
     for (const [k, entry] of this._chunkMeshes) {
-      if (!activeChunks.has(k)) this._hideEntry(entry);
+      if (!activeChunks.has(k)) {
+        for (const [, se] of entry.slots) {
+          if (se._shownFrame === f - 1) { this._dbg.orphanHides++; this._dbgNote(`orphanHide ${k}`); }
+        }
+        this._hideEntry(entry);
+      }
     }
-    this._trimChunkMeshCache(frustumChunks);
+    if (!this.debugFreeze) this._trimChunkMeshCache(frustumChunks, f);
   }
 
   updateTime(t) {
@@ -421,10 +724,18 @@ export class FoliageLodRenderer {
     for (const [, entry] of this._chunkMeshes) {
       for (const [, se] of entry.slots) {
         for (const lk of ["lod0", "lod1", "lod2"]) {
-          if (se[lk]) { this.scene.remove(se[lk]); se[lk].dispose(); }
+          this._eachMesh(se[lk], (m) => {
+            this.scene.remove(m);
+            m.geometry.dispose();
+            m.dispose();
+          });
         }
       }
     }
     this._chunkMeshes.clear();
+    for (const [, arr] of this._meshPool) {
+      for (const m of arr) { m.geometry.dispose(); m.dispose(); }
+    }
+    this._meshPool.clear();
   }
 }
