@@ -90,9 +90,11 @@ export class PropSystem {
   handleDelete() {
     if (!this.instancer.hasSelection) return;
     const before = this.store.snapshot();
-    const idx = this.instancer.selectedIdx;
+    // Descending order is required: removeInstance swap-removes with the last
+    // element, so deleting the largest remaining index first stays correct.
+    const indices = this.instancer.selectedIndices.sort((a, b) => b - a);
     this.instancer.clearSelection();
-    this.store.removeInstance(idx);
+    for (const idx of indices) this.store.removeInstance(idx);
     this._pushUndo(before);
     if (this.bvh) this.bvh.invalidate();
   }
@@ -100,14 +102,23 @@ export class PropSystem {
   handleDuplicate() {
     if (!this.instancer.hasSelection) return null;
     this.instancer.syncFromProxy();
-    const srcIdx = this.instancer.selectedIdx;
-    if (!this.store.instances[srcIdx]) return null;
+    const srcIndices = this.instancer.selectedIndices;
+    if (srcIndices.length === 0) return null;
     const before = this.store.snapshot();
-    const newIdx = this.store.duplicateInstance(srcIdx);
-    this.recordStampFromInstance(newIdx);
+    const newIndices = [];
+    for (const src of srcIndices) {
+      if (!this.store.instances[src]) continue;
+      newIndices.push(this.store.duplicateInstance(src));
+    }
+    if (newIndices.length === 0) return null;
     this._pushUndo(before);
+    const primary = newIndices[newIndices.length - 1];
+    this.recordStampFromInstance(primary);
+    // The copies become the new selection (single or group) so a duplicate can
+    // immediately be dragged into place.
+    this.instancer.setSelection(newIndices, primary);
     if (this.bvh) this.bvh.invalidate();
-    return newIdx;
+    return primary;
   }
 
   handleTransformChange() {

@@ -5,6 +5,7 @@ import Stats from "stats-gl";
 import { texture, uniform } from "three/tsl";
 import { createHeightmapTexture, saveTerrainConfig, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
+import { STOCHASTIC_ENABLED, toggleStochastic } from "../../v2/core/legacy/stochasticTex.js";
 import { createTerrainLOD, LOD_LEVELS } from "../terrain/terrainLOD.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import {
@@ -38,7 +39,8 @@ import {
 } from "../io/splatmapIO.js";
 import { SPLAT_RES } from "../terrain/splatMap.js";
 import { createSnowSystem } from "../terrain/snowSystem.js";
-import { SnowMap } from "../terrain/snowMap.js";
+import { SnowMap, SNOW_MAP_RES } from "../terrain/snowMap.js";
+import { encodeProjectFile, decodeProjectFile, isProjectFile, pickProjectFile } from "../io/projectIO.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { PropStore } from "../tools/propStore.js";
 import { PropInstancer, MAX_PROP_INSTANCES_PER_MESH } from "../tools/propInstancer.js";
@@ -92,7 +94,7 @@ import { RiverSystemGPU } from "../tools/riverSystemGpu.js";
 import { SmartRoadLabSystem } from "../../v2/tools/smartRoad/smartRoadLabSystem.js";
 import { RoadConformSystem } from "../tools/roadConformSystem.js";
 import { mergeRoadDrawCalls } from "../tools/roadDrawCallMerge.js";
-import { DEFAULT_ROAD_STATE, ROAD_AUTOSAVE_KEY } from "./state/roadState.js";
+import { DEFAULT_ROAD_STATE } from "./state/roadState.js";
 import { buildRoadPanel } from "../ui/buildRoadPanel.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
@@ -233,14 +235,17 @@ async function main() {
   tc.visible = false;
   scene.add(tc.getHelper());
 
-  /** Matches v2 toolState.gizmo — Q toggles space; Shift enables rotation snap while dragging. */
-  const gizmoState = { space: "world", rotationSnapDeg: 15 };
+  /** Matches v2 toolState.gizmo — Q toggles space; Shift enables snapping while dragging
+   *  (rotation 15°, translation 1 m grid, scale 0.25 steps — greybox-friendly). */
+  const gizmoState = { space: "world", rotationSnapDeg: 15, translateSnap: 1, scaleSnap: 0.25 };
   let _gizmoShiftHeld = false;
 
   function applyGizmoSettings() {
     tc.setSpace(gizmoState.space === "local" ? "local" : "world");
     const snapDeg = _gizmoShiftHeld ? gizmoState.rotationSnapDeg : 0;
     tc.setRotationSnap(snapDeg > 0 ? (snapDeg * Math.PI) / 180 : null);
+    tc.setTranslationSnap(_gizmoShiftHeld && gizmoState.translateSnap > 0 ? gizmoState.translateSnap : null);
+    tc.setScaleSnap(_gizmoShiftHeld && gizmoState.scaleSnap > 0 ? gizmoState.scaleSnap : null);
   }
   applyGizmoSettings();
 
@@ -251,10 +256,12 @@ async function main() {
     el.style.display = show ? "" : "none";
     if (!show) return;
     const snap = gizmoState.rotationSnapDeg > 0
-      ? `Shift = snap ${gizmoState.rotationSnapDeg}°`
+      ? `Shift = snap ${gizmoState.translateSnap}m · ${gizmoState.rotationSnapDeg}°`
       : "snap off";
+    const count = propInstancer?.selectionCount ?? 0;
     el.textContent =
-      `Gizmo: ${gizmoState.space === "local" ? "LOCAL" : "WORLD"} · ${snap} · Q toggles space`;
+      `Gizmo: ${gizmoState.space === "local" ? "LOCAL" : "WORLD"} · ${snap} · Q toggles space`
+      + ` · Shift+RMB multi${count > 1 ? ` (${count})` : ""}`;
   }
 
   // ── Terrain + Sculpt ───────────────────────────────────────────────────────
@@ -289,6 +296,7 @@ async function main() {
     textureLib.albedoArrayTex,
     textureLib.ormArrayTex,
     splatMap.tex,
+    heightTexNode, // live heights → slope/height auto-paint updates while sculpting
   );
 
   // Cliff paint mask (v2 parity) — world-XZ brush mask whose R channel forces
@@ -402,6 +410,7 @@ async function main() {
     camera,
     controls,
     sampleTerrainHeight: (u, v) => sampleTerrainHeight(u, v) + snowGroundOffset(u, v),
+    sampleTerrainNormal: (wx, wz) => sampleTerrainNormal(wx, wz),
     uCursorUV,
     character,
     husky,
@@ -753,20 +762,16 @@ async function main() {
   const pbtnClear         = document.getElementById("pbtn-clear");
   const pbtnSaveSplat     = document.getElementById("pbtn-save-splat");
   const pbtnLoadSplat     = document.getElementById("pbtn-load-splat");
-  const pbtnAutoGenerate  = document.getElementById("pbtn-auto-generate");
-  const tautoEnabled      = document.getElementById("tauto-enabled");
-  const tautoHmin         = document.getElementById("tauto-hmin");
-  const tautoHmax         = document.getElementById("tauto-hmax");
-  const tautoSmin         = document.getElementById("tauto-smin");
-  const tautoSmax         = document.getElementById("tauto-smax");
-  const tautoBlend        = document.getElementById("tauto-blend");
-  const tautoStrength     = document.getElementById("tauto-strength");
-  const tautoLblHmin      = document.getElementById("tauto-lbl-hmin");
-  const tautoLblHmax      = document.getElementById("tauto-lbl-hmax");
-  const tautoLblSmin      = document.getElementById("tauto-lbl-smin");
-  const tautoLblSmax      = document.getElementById("tauto-lbl-smax");
-  const tautoLblBlend     = document.getElementById("tauto-lbl-blend");
-  const tautoLblStrength  = document.getElementById("tauto-lbl-strength");
+  const aptEnabled      = document.getElementById("apt-enabled");
+  const aptFlat         = document.getElementById("apt-flat");
+  const aptCliff        = document.getElementById("apt-cliff");
+  const aptHigh         = document.getElementById("apt-high");
+  const aptSlopeStart   = document.getElementById("apt-slope-start");
+  const aptSlopeEnd     = document.getElementById("apt-slope-end");
+  const aptHighStart    = document.getElementById("apt-high-start");
+  const aptHighEnd      = document.getElementById("apt-high-end");
+  const aptNoise        = document.getElementById("apt-noise");
+  const aptBake         = document.getElementById("apt-bake");
 
   // ── Paint state + system ───────────────────────────────────────────────────
   const paintState = {
@@ -994,39 +999,43 @@ async function main() {
     downloadBuffer(buf, `terrain-${ts}.v3height`);
   }
 
+  /** Apply a .v3height buffer — reconfigures + reloads on size mismatch. */
+  async function loadHeightmapBuffer(buf) {
+    const decoded = decodeHeightmapFile(buf);
+    if (decoded.width !== decoded.height) {
+      window.alert(`Non-square heightmaps (${decoded.width}×${decoded.height}) are not supported.`);
+      return;
+    }
+    // Files are self-describing: a mismatched size/scale reconfigures the
+    // editor and reloads, with the file stashed to import after boot.
+    const mismatch = decoded.width !== HEIGHTMAP_SIZE
+      || Math.round(decoded.worldSize) !== WORLD_SIZE
+      || Math.round(decoded.maxHeight) !== MAX_HEIGHT;
+    if (mismatch) {
+      const ok = window.confirm(
+        `This heightmap is ${decoded.width}×${decoded.height} for a `
+        + `${Math.round(decoded.worldSize)} m world (max height ${Math.round(decoded.maxHeight)} m).\n`
+        + `Reload the editor at that terrain size to open it?`,
+      );
+      if (!ok) return;
+      saveTerrainConfig({
+        worldSize:     decoded.worldSize,
+        heightmapSize: decoded.width,
+        maxHeight:     decoded.maxHeight,
+      });
+      await stashPendingHeightmap(buf);
+      location.reload();
+      return;
+    }
+    sculpt.replaceHeightData(decoded.heights);
+    onHistoryChange();
+  }
+
   async function loadHeightmap() {
     const file = await pickHeightmapFile();
     if (!file) return;
     try {
-      const buf     = await file.arrayBuffer();
-      const decoded = decodeHeightmapFile(buf);
-      if (decoded.width !== decoded.height) {
-        window.alert(`Non-square heightmaps (${decoded.width}×${decoded.height}) are not supported.`);
-        return;
-      }
-      // Files are self-describing: a mismatched size/scale reconfigures the
-      // editor and reloads, with the file stashed to import after boot.
-      const mismatch = decoded.width !== HEIGHTMAP_SIZE
-        || Math.round(decoded.worldSize) !== WORLD_SIZE
-        || Math.round(decoded.maxHeight) !== MAX_HEIGHT;
-      if (mismatch) {
-        const ok = window.confirm(
-          `This heightmap is ${decoded.width}×${decoded.height} for a `
-          + `${Math.round(decoded.worldSize)} m world (max height ${Math.round(decoded.maxHeight)} m).\n`
-          + `Reload the editor at that terrain size to open it?`,
-        );
-        if (!ok) return;
-        saveTerrainConfig({
-          worldSize:     decoded.worldSize,
-          heightmapSize: decoded.width,
-          maxHeight:     decoded.maxHeight,
-        });
-        await stashPendingHeightmap(buf);
-        location.reload();
-        return;
-      }
-      sculpt.replaceHeightData(decoded.heights);
-      onHistoryChange();
+      await loadHeightmapBuffer(await file.arrayBuffer());
     } catch (err) {
       console.error(err);
       window.alert(err instanceof Error ? err.message : "Failed to load heightmap.");
@@ -1330,8 +1339,11 @@ async function main() {
     tbHelp.classList.remove("active");
   }, { capture: true });
 
-  tbSave.addEventListener("click", () => { saveHeightmap(); });
-  tbLoad.addEventListener("click", () => { loadHeightmap(); });
+  // Save = whole project (.v3proj); Shift+click = bare heightmap export.
+  tbSave.title = "Save project (Ctrl+S) · Shift+click: heightmap only";
+  tbSave.addEventListener("click", (e) => { e.shiftKey ? saveHeightmap() : saveProject(); });
+  tbLoad.title = "Load project / heightmap";
+  tbLoad.addEventListener("click", () => { loadAnyFile(); });
   tbUndo.addEventListener("click", () => { if (sculpt.undo()) onHistoryChange(); });
   tbRedo.addEventListener("click", () => { if (sculpt.redo()) onHistoryChange(); });
 
@@ -2056,19 +2068,8 @@ async function main() {
   // Seed CPU heightmap mirror after boot — not during first user interaction.
   setTimeout(() => requestHeightmapReadback(), 0);
 
-  // Import a heightmap stashed across a terrain-size reload (see loadHeightmap).
-  takePendingHeightmap().then((buf) => {
-    if (!buf) return;
-    try {
-      const decoded = decodeHeightmapFile(buf);
-      if (decoded.width === HEIGHTMAP_SIZE && decoded.height === HEIGHTMAP_SIZE) {
-        sculpt.replaceHeightData(decoded.heights);
-        onHistoryChange();
-      }
-    } catch (err) {
-      console.warn("[V3] Pending heightmap import failed:", err);
-    }
-  });
+  // (Pending cross-size imports are applied at the end of boot, once every
+  // system that a project file touches — trees, props, roads, splines — exists.)
 
   function cancelStroke() {
     if (isPainting) sculpt.endStroke();
@@ -2209,7 +2210,7 @@ async function main() {
       const key = e.key.toLowerCase();
       if (key === "s") {
         e.preventDefault();
-        saveHeightmap();
+        saveProject();
         return;
       }
       if (key === "z" && !e.shiftKey) {
@@ -2525,26 +2526,18 @@ async function main() {
       if (thumb) thumb.style.backgroundImage = url ? `url(${url})` : "";
       if (cell) cell.classList.toggle("has-texture", Boolean(url));
     }
-    // Sync auto-paint controls
-    tautoEnabled.checked         = s.autoEnabled;
-    tautoHmin.value              = s.autoHeightMin;
-    tautoHmax.value              = s.autoHeightMax;
-    tautoSmin.value              = s.autoSlopeMin;
-    tautoSmax.value              = s.autoSlopeMax;
-    tautoBlend.value             = s.autoBlend;
-    tautoStrength.value          = Math.round(s.autoStrength * 100);
-    tautoLblHmin.textContent     = s.autoHeightMin + "m";
-    tautoLblHmax.textContent     = s.autoHeightMax + "m";
-    tautoLblSmin.textContent     = s.autoSlopeMin  + "°";
-    tautoLblSmax.textContent     = s.autoSlopeMax  + "°";
-    tautoLblBlend.textContent    = s.autoBlend      + "%";
-    tautoLblStrength.textContent = s.autoStrength.toFixed(2);
   }
   syncTexlibEditor();
 
   // Fill / Clear buttons
   pbtnFill.addEventListener("click", () => { paintSys.fillWithActiveLayer(); });
   pbtnClear.addEventListener("click", () => { paintSys.clearAll(); });
+
+  // Stochastic (no-tile) sampling toggle — lives in the Paint panel now; the
+  // shared module's floating button is suppressed via <body data-stochastic-ui>.
+  const ckStochastic = document.getElementById("ck-stochastic");
+  ckStochastic.checked = STOCHASTIC_ENABLED;
+  ckStochastic.addEventListener("change", () => toggleStochastic());
 
   // ── Snow panel controls ────────────────────────────────────────────────────
   {
@@ -2668,66 +2661,67 @@ async function main() {
     btnClear.addEventListener("click", () => _cliffMaskBulk(() => cliffPaintMask.clearAll()));
   }
 
-  // Auto-paint slot controls — read/write textureLib.slots[texlibActiveSlot].auto*
-  function _autoSlot() { return textureLib.slots[texlibActiveSlot]; }
+  // ── Auto paint (live auto-material) ────────────────────────────────────────
+  // Slope/height rules texture the unpainted ground live in the shader; the
+  // Bake button freezes the same rules into the splatmap for hand-editing.
+  const AUTO = splatOverlay.auto;
 
-  tautoEnabled.addEventListener("change", () => {
-    _autoSlot().autoEnabled = tautoEnabled.checked;
-  });
-  tautoHmin.addEventListener("input", () => {
-    const v = Number(tautoHmin.value);
-    if (v >= Number(tautoHmax.value)) { tautoHmin.value = Number(tautoHmax.value) - 5; return; }
-    _autoSlot().autoHeightMin = v;
-    tautoLblHmin.textContent = v + "m";
-  });
-  tautoHmax.addEventListener("input", () => {
-    const v = Number(tautoHmax.value);
-    if (v <= Number(tautoHmin.value)) { tautoHmax.value = Number(tautoHmin.value) + 5; return; }
-    _autoSlot().autoHeightMax = v;
-    tautoLblHmax.textContent = v + "m";
-  });
-  tautoSmin.addEventListener("input", () => {
-    const v = Number(tautoSmin.value);
-    if (v >= Number(tautoSmax.value)) { tautoSmin.value = Number(tautoSmax.value) - 1; return; }
-    _autoSlot().autoSlopeMin = v;
-    tautoLblSmin.textContent = v + "°";
-  });
-  tautoSmax.addEventListener("input", () => {
-    const v = Number(tautoSmax.value);
-    if (v <= Number(tautoSmin.value)) { tautoSmax.value = Number(tautoSmin.value) + 1; return; }
-    _autoSlot().autoSlopeMax = v;
-    tautoLblSmax.textContent = v + "°";
-  });
-  tautoBlend.addEventListener("input", () => {
-    const v = Number(tautoBlend.value);
-    _autoSlot().autoBlend = v;
-    tautoLblBlend.textContent = v + "%";
-  });
-  tautoStrength.addEventListener("input", () => {
-    const v = Number(tautoStrength.value) / 100;
-    _autoSlot().autoStrength = v;
-    tautoLblStrength.textContent = v.toFixed(2);
-  });
+  // Height sliders scale with the configured terrain height.
+  aptHighStart.max = MAX_HEIGHT;
+  aptHighEnd.max   = MAX_HEIGHT;
 
-  // Generate auto paint
-  pbtnAutoGenerate.addEventListener("click", () => {
-    const rules = textureLib.slots.map(s => ({
-      enabled:   s.autoEnabled,
-      heightMin: s.autoHeightMin,
-      heightMax: s.autoHeightMax,
-      slopeMin:  s.autoSlopeMin,
-      slopeMax:  s.autoSlopeMax,
-      blend:     s.autoBlend,
-      strength:  s.autoStrength,
-    }));
+  function autoPaintParams() {
+    return {
+      flat:          Number(aptFlat.value),
+      cliff:         Number(aptCliff.value),
+      high:          Number(aptHigh.value),
+      slopeStartDeg: Number(aptSlopeStart.value),
+      slopeEndDeg:   Number(aptSlopeEnd.value),
+      highStart:     Number(aptHighStart.value),
+      highEnd:       Number(aptHighEnd.value),
+      noise:         Number(aptNoise.value) / 100,
+    };
+  }
+
+  function syncAutoPaint() {
+    // Keep the blend bands valid (start < end).
+    if (Number(aptSlopeEnd.value) <= Number(aptSlopeStart.value) + 1) {
+      aptSlopeEnd.value = Number(aptSlopeStart.value) + 2;
+    }
+    if (Number(aptHighEnd.value) <= Number(aptHighStart.value)) {
+      aptHighEnd.value = Number(aptHighStart.value) + 5;
+    }
+    const p = autoPaintParams();
+    AUTO.uAutoEnabled.value   = aptEnabled.checked ? 1 : 0;
+    AUTO.uAutoFlat.value      = p.flat;
+    AUTO.uAutoCliff.value     = p.cliff;
+    AUTO.uAutoHigh.value      = p.high;
+    AUTO.uAutoSlopeHiY.value  = Math.cos(p.slopeStartDeg * Math.PI / 180);
+    AUTO.uAutoSlopeLoY.value  = Math.cos(p.slopeEndDeg   * Math.PI / 180);
+    AUTO.uAutoHighStart.value = p.highStart;
+    AUTO.uAutoHighEnd.value   = p.highEnd;
+    AUTO.uAutoNoise.value     = p.noise;
+    document.getElementById("apt-lbl-slope-start").textContent = p.slopeStartDeg + "°";
+    document.getElementById("apt-lbl-slope-end").textContent   = p.slopeEndDeg + "°";
+    document.getElementById("apt-lbl-high-start").textContent  = p.highStart + "m";
+    document.getElementById("apt-lbl-high-end").textContent    = p.highEnd + "m";
+    document.getElementById("apt-lbl-noise").textContent       = Math.round(p.noise * 100) + "%";
+  }
+  for (const el of [aptEnabled, aptFlat, aptCliff, aptHigh, aptSlopeStart, aptSlopeEnd, aptHighStart, aptHighEnd, aptNoise]) {
+    el.addEventListener("input", syncAutoPaint);
+    el.addEventListener("change", syncAutoPaint);
+  }
+  syncAutoPaint();
+
+  aptBake.addEventListener("click", async () => {
+    await ensureCpuHeightmapFromGpu(); // bake from fresh heights, not a stale mirror
     paintSys.applyAutoRules({
       cpuHeightmap,
       heightmapSize: HEIGHTMAP_SIZE,
       worldSize:     WORLD_SIZE,
       maxHeight:     MAX_HEIGHT,
-      rules,
+      params:        autoPaintParams(),
     });
-    splatMap.tex.needsUpdate = true;
   });
 
   // Splat save / load
@@ -3142,7 +3136,6 @@ async function main() {
   roadSystem.setEditActive(false); // roads are world geometry; handles gated to road mode
 
   let _roadGradeTimer = 0;
-  let _roadSaveTimer = 0;
   function applyRoadGradeNow() {
     clearTimeout(_roadGradeTimer);
     _roadGradeTimer = 0;
@@ -3156,21 +3149,12 @@ async function main() {
     clearTimeout(_roadGradeTimer);
     _roadGradeTimer = setTimeout(applyRoadGradeNow, 250);
   }
-  function scheduleRoadAutosave() {
-    clearTimeout(_roadSaveTimer);
-    _roadSaveTimer = setTimeout(() => {
-      try {
-        localStorage.setItem(ROAD_AUTOSAVE_KEY, JSON.stringify(roadSystem.exportData()));
-      } catch (_) { /* storage blocked/full — export button still works */ }
-    }, 500);
-  }
   {
     const _roadRebuild = roadSystem.rebuild.bind(roadSystem);
     roadSystem.rebuild = () => {
       _roadRebuild();
       if (roadSystem._dragging) return; // draft rebuild — footprints are stale
       mergeRoadDrawCalls(roadSystem.roadGroup); // ~140 piece meshes → 1 per material
-      scheduleRoadAutosave();
       scheduleRoadGrade();
     };
   }
@@ -3184,16 +3168,9 @@ async function main() {
     if (_roadGradeTimer) applyRoadGradeNow();
     syncEditorOrbitEnabled();
   };
-  // Restore the autosaved network once the CPU heightmap mirror is seeded, so
-  // the first drape lands on real terrain instead of a flat plane.
-  void ensureCpuHeightmapFromGpu().then(() => {
-    try {
-      const saved = localStorage.getItem(ROAD_AUTOSAVE_KEY);
-      if (saved) roadSystem.importData(JSON.parse(saved));
-    } catch (err) {
-      console.warn("[V3] Road autosave restore failed:", err);
-    }
-  });
+  // Roads no longer autosave to localStorage — they live in the project file
+  // (.v3proj) like every other system, so refresh behaviour is consistent.
+  try { localStorage.removeItem("v3.smartRoad.network"); } catch (_) {}
 
   _onLeaveRiverMode = () => {
     if (riverSystem?.dragging) riverSystem.dragging = false;
@@ -3283,7 +3260,11 @@ async function main() {
   }
 
   function activatePropSelection(instIdx) {
-    propInstancer.select(instIdx);
+    // Keep an existing multi-selection intact when the primary is part of it
+    // (e.g. after a group duplicate) — otherwise collapse to single-select.
+    const groupHasIt = propInstancer.selectionCount > 1
+      && propInstancer.selectedIndices.includes(instIdx);
+    if (!groupHasIt) propInstancer.select(instIdx);
     applyGizmoSettings();
     tc.attach(propInstancer.proxyObject);
     tc.setMode(propState.transformMode);
@@ -3293,6 +3274,7 @@ async function main() {
     propSys.recordStampFromInstance(instIdx);
     _onPropSelectionChanged?.(instIdx);
     propPlacementPreview.hide();
+    refreshGizmoHud();
   }
 
   function deactivatePropSelection() {
@@ -3301,6 +3283,7 @@ async function main() {
     _onPropSelectionChanged?.(null);
     refreshPropPlacementPreview();
     syncEditorOrbitEnabled();
+    refreshGizmoHud();
   }
 
   _onLeavePropsMode = () => {
@@ -3659,6 +3642,160 @@ async function main() {
   });
   refreshPropCount();
 
+  // ── Project save / load (.v3proj) ──────────────────────────────────────────
+  // One file for everything: terrain config + heightmap + splat + snow + trees
+  // + props + roads + splines. This replaces the old road-only localStorage
+  // autosave, so refresh behaviour is consistent across all systems.
+
+  async function saveProject() {
+    await syncHeightmapToCPU();
+    const treeInstances = [];
+    for (const arr of treeEnv.treeStore.chunks.values()) {
+      for (const t of arr) treeInstances.push([t.x, t.z, t.y, t.rotY, t.scale, t.slotIdx]);
+    }
+    const buf = encodeProjectFile({
+      terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, maxHeight: MAX_HEIGHT },
+      heightmap: cpuHeightmap,
+      splat:     splatMap.combined,
+      splatRes:  SPLAT_RES,
+      snow:      snowMap.snapshot(),
+      snowRes:   SNOW_MAP_RES,
+      trees:     { slots: treeToolState.treeSlots, instances: treeInstances },
+      props:     propStore.exportData(),
+      roads:     roadSystem.exportData(),
+      splines:   splineSys.exportData(),
+    });
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    downloadBuffer(buf, `project-${ts}.v3proj`);
+  }
+
+  /** Best-effort reload of tree slot assets (presets/GLBs) from /models. */
+  async function restoreTreeSlotAssets(slots) {
+    const fetchModel = async (name) => {
+      for (const base of ["models/", "../models/"]) {
+        try {
+          const resp = await fetch(base + name);
+          if (resp.ok) return new File([await resp.blob()], name);
+        } catch (_) { /* try next */ }
+      }
+      console.warn(`[V3] Tree asset "${name}" not found in /models — reload it manually in the tree panel.`);
+      return null;
+    };
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      if (!s) continue;
+      try {
+        if (s.presetFile) {
+          const f = await fetchModel(s.presetFile);
+          if (f) await treeEnv.loadTreePreset(i, f);
+        } else if (s.glbFile?.lod0) {
+          const f0 = await fetchModel(s.glbFile.lod0);
+          if (f0) await treeEnv.importTreeGlb(i, 0, f0);
+          if (s.glbFile.lod1) {
+            const f1 = await fetchModel(s.glbFile.lod1);
+            if (f1) await treeEnv.importTreeGlb(i, 1, f1);
+          }
+        }
+      } catch (err) {
+        console.warn(`[V3] Tree slot ${i} asset restore failed:`, err);
+      }
+    }
+  }
+
+  async function applyProjectData(d) {
+    if (d.heightmap?.length === HEIGHTMAP_SIZE * HEIGHTMAP_SIZE) {
+      sculpt.replaceHeightData(d.heightmap);
+      markHeightmapDirty();
+    }
+    await ensureCpuHeightmapFromGpu(); // fresh mirror before draping trees/roads
+
+    if (d.splat && d.splatRes === SPLAT_RES) splatMap.setCombined(d.splat);
+    else if (d.splat) console.warn(`[V3] Project splatmap is ${d.splatRes}²; expected ${SPLAT_RES}² — skipped.`);
+
+    if (d.snow && d.snowRes === SNOW_MAP_RES) snowMap.restoreSnapshot(d.snow);
+
+    if (d.trees) {
+      treeEnv.treeStore.clear();
+      if (Array.isArray(d.trees.slots)) {
+        d.trees.slots.forEach((meta, i) => {
+          if (meta && treeToolState.treeSlots[i]) Object.assign(treeToolState.treeSlots[i], meta);
+        });
+        void restoreTreeSlotAssets(d.trees.slots);
+      }
+      for (const t of d.trees.instances ?? []) {
+        treeEnv.treeStore.addTree(t[0], t[1], t[2], t[3], t[4], t[5]);
+      }
+      treeEnv.syncTreeHeights();
+      document.getElementById("tree-panel")?._rebuildTreeUi?.();
+    }
+
+    if (d.props) {
+      deactivatePropSelection();
+      propStore.instances.length = 0;
+      const nameToIdx = Object.fromEntries(propStore.types.map((t, i) => [t.name, i]));
+      propStore.importData(d.props, nameToIdx);
+      refreshPropCount();
+    }
+
+    if (d.roads) roadSystem.importData(d.roads);
+    if (d.splines) splineSys.importData(d.splines);
+
+    onHistoryChange();
+    console.log("[V3] Project loaded.");
+  }
+
+  /** Toolbar Load — sniffs the file: whole project or bare heightmap. */
+  async function loadAnyFile() {
+    const file = await pickProjectFile();
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      if (!isProjectFile(buf)) {
+        // Bare heightmap path (handles its own size-mismatch reload+stash).
+        await loadHeightmapBuffer(buf);
+        return;
+      }
+      const d = decodeProjectFile(buf);
+      const t = d.terrain ?? {};
+      const mismatch = t.heightmapSize !== HEIGHTMAP_SIZE
+        || Math.round(t.worldSize) !== WORLD_SIZE
+        || Math.round(t.maxHeight) !== MAX_HEIGHT;
+      if (mismatch) {
+        const ok = window.confirm(
+          `This project is a ${Math.round(t.worldSize)} m world (${t.heightmapSize}², max ${Math.round(t.maxHeight)} m).\n`
+          + `Reload the editor at that terrain size to open it?`,
+        );
+        if (!ok) return;
+        saveTerrainConfig(t);
+        await stashPendingHeightmap(buf); // stash is format-agnostic — sniffed on boot
+        location.reload();
+        return;
+      }
+      await applyProjectData(d);
+    } catch (err) {
+      console.error(err);
+      window.alert(err instanceof Error ? err.message : "Failed to load file.");
+    }
+  }
+
+  // Import a file stashed across a terrain-size reload (project or heightmap).
+  takePendingHeightmap().then(async (buf) => {
+    if (!buf) return;
+    try {
+      if (isProjectFile(buf)) {
+        await applyProjectData(decodeProjectFile(buf));
+      } else {
+        const decoded = decodeHeightmapFile(buf);
+        if (decoded.width === HEIGHTMAP_SIZE && decoded.height === HEIGHTMAP_SIZE) {
+          sculpt.replaceHeightData(decoded.heights);
+          onHistoryChange();
+        }
+      }
+    } catch (err) {
+      console.warn("[V3] Pending import failed:", err);
+    }
+  });
+
   buildSplinePanel({
     toolState: splineToolState,
     splineSystem: splineSys,
@@ -3891,8 +4028,25 @@ async function main() {
       : !hitStatic ? hitLive
       : !hitLive ? hitStatic
       : hitLive.distance < hitStatic.distance ? hitLive : hitStatic;
-    if (hit) activatePropSelection(hit.instIdx);
-    else deactivatePropSelection();
+    if (!hit) { deactivatePropSelection(); return; }
+
+    // Shift+RMB on a static prop: add/remove it from the multi-selection.
+    // (Live props keep single-select — their transforms go through their own managers.)
+    if (e.shiftKey && hit === hitStatic && propInstancer.hasSelection) {
+      propInstancer.toggleSelect(hit.instIdx);
+      if (!propInstancer.hasSelection) { deactivatePropSelection(); return; }
+      applyGizmoSettings();
+      tc.attach(propInstancer.proxyObject);
+      tc.setMode(propState.transformMode);
+      tc.enabled = true;
+      tc.visible = true;
+      _gizmoTarget = "prop";
+      _onPropSelectionChanged?.(propInstancer.selectedIdx);
+      propPlacementPreview.hide();
+      refreshGizmoHud();
+      return;
+    }
+    activatePropSelection(hit.instIdx);
   });
 
   renderer.domElement.addEventListener("wheel", e => {

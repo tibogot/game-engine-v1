@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./styles/editor.css" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
   </head>
-  <body>
+  <body data-stochastic-ui="custom">
     <div id="app">
       <!-- Toolbar -->
       <div id="toolbar">
@@ -765,6 +765,12 @@
                 Texture Library
               </div>
               <div class="section-body" id="texlib-body">
+                <div class="prop-row">
+                  <span class="prop-label" title="Randomizes texture tiling so repeats aren't visible. Costs 2 extra albedo taps per painted layer. Toggling reloads the editor.">No-tile blending</span>
+                  <div class="prop-value">
+                    <input type="checkbox" id="ck-stochastic" />
+                  </div>
+                </div>
                 <!-- Slot tabs (L1-L7) -->
                 <div class="texlib-slot-tabs" id="texlib-tabs">
                   <button class="texlib-tab active" data-slot="0">L1</button>
@@ -838,66 +844,104 @@
                     </div>
                   </div>
 
-                  <!-- Auto-paint rules for this slot -->
-                  <div class="prop-separator" style="margin-top:8px"></div>
-                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-                    <span style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);font-weight:600;flex:1">Auto Paint</span>
-                    <label class="toggle-label" style="margin:0">
-                      <input type="checkbox" id="tauto-enabled" />
-                      <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                    </label>
-                  </div>
-                  <div id="tauto-settings">
-                    <div class="prop-row">
-                      <span class="prop-label">H. min</span>
-                      <div class="prop-value">
-                        <input type="range" id="tauto-hmin" min="0" max="500" step="5" value="0" />
-                        <span class="prop-num" id="tauto-lbl-hmin">0m</span>
-                      </div>
-                    </div>
-                    <div class="prop-row">
-                      <span class="prop-label">H. max</span>
-                      <div class="prop-value">
-                        <input type="range" id="tauto-hmax" min="0" max="500" step="5" value="500" />
-                        <span class="prop-num" id="tauto-lbl-hmax">500m</span>
-                      </div>
-                    </div>
-                    <div class="prop-row">
-                      <span class="prop-label">Slope min</span>
-                      <div class="prop-value">
-                        <input type="range" id="tauto-smin" min="0" max="89" step="1" value="0" />
-                        <span class="prop-num" id="tauto-lbl-smin">0°</span>
-                      </div>
-                    </div>
-                    <div class="prop-row">
-                      <span class="prop-label">Slope max</span>
-                      <div class="prop-value">
-                        <input type="range" id="tauto-smax" min="1" max="90" step="1" value="90" />
-                        <span class="prop-num" id="tauto-lbl-smax">90°</span>
-                      </div>
-                    </div>
-                    <div class="prop-row">
-                      <span class="prop-label">Blend</span>
-                      <div class="prop-value">
-                        <input type="range" id="tauto-blend" min="0" max="50" step="1" value="15" />
-                        <span class="prop-num" id="tauto-lbl-blend">15%</span>
-                      </div>
-                    </div>
-                    <div class="prop-row">
-                      <span class="prop-label">Strength</span>
-                      <div class="prop-value">
-                        <input type="range" id="tauto-strength" min="0" max="100" step="1" value="100" />
-                        <span class="prop-num" id="tauto-lbl-strength">1.00</span>
-                      </div>
-                    </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- AUTO PAINT (live auto-material) ------------------------- -->
+            <div class="inspector-section">
+              <div class="section-header" data-toggle>
+                <i data-lucide="chevron-down" class="section-arrow"></i>
+                Auto Paint
+              </div>
+              <div class="section-body">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+                  <span style="font-size:10px;color:var(--text-dim);flex:1">
+                    Textures the unpainted ground from slope &amp; height — live while sculpting. Brush paint always wins.
+                  </span>
+                  <label class="toggle-label" style="margin:0">
+                    <input type="checkbox" id="apt-enabled" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Flat layer</span>
+                  <div class="prop-value">
+                    <select id="apt-flat" class="prop-dropdown">
+                      <option value="0" selected>L1</option><option value="1">L2</option>
+                      <option value="2">L3</option><option value="3">L4</option>
+                      <option value="4">L5</option><option value="5">L6</option>
+                      <option value="6">L7</option>
+                    </select>
                   </div>
                 </div>
+                <div class="prop-row">
+                  <span class="prop-label">Cliff layer</span>
+                  <div class="prop-value">
+                    <select id="apt-cliff" class="prop-dropdown">
+                      <option value="0">L1</option><option value="1" selected>L2</option>
+                      <option value="2">L3</option><option value="3">L4</option>
+                      <option value="4">L5</option><option value="5">L6</option>
+                      <option value="6">L7</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Cliff from</span>
+                  <div class="prop-value">
+                    <input type="range" id="apt-slope-start" min="5" max="80" step="1" value="30" />
+                    <span class="prop-num" id="apt-lbl-slope-start">30°</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Full cliff</span>
+                  <div class="prop-value">
+                    <input type="range" id="apt-slope-end" min="10" max="88" step="1" value="45" />
+                    <span class="prop-num" id="apt-lbl-slope-end">45°</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">High layer</span>
+                  <div class="prop-value">
+                    <select id="apt-high" class="prop-dropdown">
+                      <option value="-1" selected>Off</option>
+                      <option value="0">L1</option><option value="1">L2</option>
+                      <option value="2">L3</option><option value="3">L4</option>
+                      <option value="4">L5</option><option value="5">L6</option>
+                      <option value="6">L7</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">High from</span>
+                  <div class="prop-value">
+                    <input type="range" id="apt-high-start" min="0" max="500" step="5" value="200" />
+                    <span class="prop-num" id="apt-lbl-high-start">200m</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Full high</span>
+                  <div class="prop-value">
+                    <input type="range" id="apt-high-end" min="0" max="500" step="5" value="280" />
+                    <span class="prop-num" id="apt-lbl-high-end">280m</span>
+                  </div>
+                </div>
+                <div class="prop-row">
+                  <span class="prop-label">Breakup</span>
+                  <div class="prop-value">
+                    <input type="range" id="apt-noise" min="0" max="100" step="1" value="25" />
+                    <span class="prop-num" id="apt-lbl-noise">25%</span>
+                  </div>
+                </div>
+                <button type="button" class="action-btn" id="apt-bake" style="width:100%;margin-top:4px"
+                        title="Writes the auto rules into the splatmap so you can hand-edit the result. Replaces current paint (undoable).">
+                  Bake to splatmap
+                </button>
               </div>
             </div>
 
             <!-- Footer buttons ----------------------------------------- -->
             <div style="padding:6px 8px;display:flex;flex-direction:column;gap:4px">
-              <button type="button" class="action-btn primary" id="pbtn-auto-generate">Generate auto paint</button>
               <button type="button" class="action-btn" id="pbtn-fill">Fill world with active layer</button>
               <button type="button" class="action-btn" id="pbtn-clear">Clear all paint</button>
               <div style="display:flex;gap:4px;margin-top:2px">

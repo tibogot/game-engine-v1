@@ -35,8 +35,17 @@ import { hash22 } from "./tsl-utils.js";
 const _LS_KEY = "terrain_stochastic";
 export const STOCHASTIC_ENABLED = localStorage.getItem(_LS_KEY) !== "false";
 
+/** Flip the persisted stochastic preference and reload (shader graph is built at load). */
+export function toggleStochastic() {
+  localStorage.setItem(_LS_KEY, STOCHASTIC_ENABLED ? "false" : "true");
+  location.reload();
+}
+
 // ── floating toggle button ─────────────────────────────────────────────────────
+// Pages with their own UI opt out via <body data-stochastic-ui="custom"> and
+// call toggleStochastic() from their own control (v3 editor does this).
 function _injectToggleButton() {
+  if (document.body?.dataset.stochasticUi === "custom") return;
   const btn = document.createElement("button");
   btn.textContent = `Stochastic tiling: ${STOCHASTIC_ENABLED ? "ON ✓" : "OFF ✗"}`;
   Object.assign(btn.style, {
@@ -60,7 +69,10 @@ function _injectToggleButton() {
   if (document.body) {
     document.body.appendChild(btn);
   } else {
-    document.addEventListener("DOMContentLoaded", () => document.body.appendChild(btn));
+    document.addEventListener("DOMContentLoaded", () => {
+      if (document.body.dataset.stochasticUi === "custom") return;
+      document.body.appendChild(btn);
+    });
   }
 }
 _injectToggleButton();

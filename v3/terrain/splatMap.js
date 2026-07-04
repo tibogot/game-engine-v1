@@ -149,22 +149,44 @@ export class SplatMap {
           d1[idx+1] = Math.max(0, d1[idx+1] - delta);
           d1[idx+2] = Math.max(0, d1[idx+2] - delta);
           d1[idx+3] = Math.max(0, d1[idx+3] - delta);
+        } else if (activeLayer === 8) {
+          // Meadow is an overlay mask, not part of the 7-weight blend —
+          // lerp it toward 1 without disturbing the paint layers.
+          const buf = d1;
+          const t   = buf[idx + targetChan] / 255;
+          buf[idx + targetChan] = Math.min(255, ((t + w * (1 - t)) * 255 + 0.5) | 0);
         } else {
-          const buf = targetBuf === 0 ? d0 : d1;
-          buf[idx + targetChan] = Math.min(255, buf[idx + targetChan] + delta);
+          // Unity/Unreal-style weight painting: lerp the target layer toward
+          // full weight and scale every other layer down to make room, so
+          // strength 1 fully REPLACES what's underneath instead of blending
+          // 50/50 forever (weights behave as if they always sum to 1).
+          const buf  = targetBuf === 0 ? d0 : d1;
+          const s    = Math.min(1, w);
+          const t    = buf[idx + targetChan] / 255;
+          const tNew = t + s * (1 - t);
+          const k    = (1 - t) > 1e-4 ? (1 - tNew) / (1 - t) : 0;
+          for (let c = 0; c < 4; c++) {
+            if (targetBuf === 0 && c === targetChan) continue;
+            d0[idx + c] = (d0[idx + c] * k + 0.5) | 0;
+          }
+          for (let c = 0; c < 3; c++) { // slice1 alpha (meadow) stays untouched
+            if (targetBuf === 1 && c === targetChan) continue;
+            d1[idx + c] = (d1[idx + c] * k + 0.5) | 0;
+          }
+          buf[idx + targetChan] = Math.min(255, (tNew * 255 + 0.5) | 0);
         }
         anyTouched = true;
       }
     }
 
     if (anyTouched) {
-      // Upload only the touched slice(s) — the WebGPU backend honours
-      // layerUpdates, so single-layer painting uploads half the texture.
-      if (isEraser) {
-        this.tex.addLayerUpdate(0);
+      // Weight painting rescales channels in BOTH slices; only the meadow
+      // overlay stays confined to slice 1.
+      if (activeLayer === 8) {
         this.tex.addLayerUpdate(1);
       } else {
-        this.tex.addLayerUpdate(targetBuf);
+        this.tex.addLayerUpdate(0);
+        this.tex.addLayerUpdate(1);
       }
       this.tex.needsUpdate = true;
     }
@@ -200,6 +222,17 @@ export class SplatMap {
     this.tex.needsUpdate = true;
   }
 
+  /** Both slices as one contiguous buffer (project save / splat export). */
+  get combined() { return this._combined; }
+
+  /** Replace all splat data (project load). */
+  setCombined(bytes) {
+    this._combined.set(bytes);
+    this.tex.addLayerUpdate(0);
+    this.tex.addLayerUpdate(1);
+    this.tex.needsUpdate = true;
+  }
+
   snapshot() {
     return { d0: new Uint8Array(this.data0), d1: new Uint8Array(this.data1) };
   }
@@ -228,58 +261,60 @@ export class SplatMap {
   }
 
   /**
-   * Bake slope/height rules into the splatmap.
-   * Clears all 7 layers then writes weights from per-layer rules.
+   * Bake the auto-paint rules into the splatmap (replaces all paint layers;
+   * meadow overlay untouched). Same model as the live shader auto-material:
+   * cliff layer past a slope band, optional high-altitude layer above a height
+   * band, flat layer as the remainder — with FBM threshold breakup.
    *
    * @param {{
-   *   cpuHeightmap: Float32Array,
-   *   heightmapSize: number,
-   *   worldSize: number,
-   *   maxHeight: number,
-   *   rules: Array<{ enabled:boolean, heightMin:number, heightMax:number,
-   *                  slopeMin:number, slopeMax:number, blend:number, strength:number }>
+   *   cpuHeightmap: Float32Array, heightmapSize: number,
+   *   worldSize: number, maxHeight: number,
+   *   params: { flat:number, cliff:number, high:number,
+   *             slopeStartDeg:number, slopeEndDeg:number,
+   *             highStart:number, highEnd:number, noise:number }
    * }} opts
    */
-  applyAutoRules({ cpuHeightmap, heightmapSize, worldSize, maxHeight, rules }) {
-    this.data0.fill(0);
-    this.data1.fill(0);
+  applyAutoRules({ cpuHeightmap, heightmapSize, worldSize, maxHeight, params }) {
+    const { flat, cliff, high, slopeStartDeg, slopeEndDeg, highStart, highEnd, noise } = params;
+    const d0 = this.data0, d1 = this.data1;
+    const half = worldSize * 0.5;
 
-    const weights = new Float32Array(7);
+    const write = (idx, layer, w) => {
+      if (layer < 0 || layer > 6 || w <= 0) return;
+      const b = layer < 4 ? d0 : d1;
+      const c = layer < 4 ? layer : layer - 4;
+      b[idx + c] = Math.min(255, b[idx + c] + ((w * 255 + 0.5) | 0));
+    };
 
     for (let pz = 0; pz < SPLAT_RES; pz++) {
       const sv = (pz + 0.5) / SPLAT_RES;
       for (let px = 0; px < SPLAT_RES; px++) {
-        const su = (px + 0.5) / SPLAT_RES;
-
-        const h      = _sampleHm(cpuHeightmap, heightmapSize, su, sv);
-        const hM     = h * maxHeight;
-        const slopeD = _slopeDegs(cpuHeightmap, heightmapSize, su, sv, worldSize, maxHeight);
-
-        let total = 0;
-        for (let li = 0; li < 7; li++) {
-          const r = rules[li];
-          if (!r?.enabled) { weights[li] = 0; continue; }
-          const hRange = Math.max(1,  r.heightMax - r.heightMin);
-          const sRange = Math.max(1,  r.slopeMax  - r.slopeMin);
-          const hBlend = r.blend / 100 * hRange;
-          const sBlend = r.blend / 100 * sRange;
-          weights[li] = _rangeWeight(hM,     r.heightMin, r.heightMax, Math.max(1,   hBlend))
-                      * _rangeWeight(slopeD, r.slopeMin,  r.slopeMax,  Math.max(0.5, sBlend))
-                      * r.strength;
-          total += weights[li];
-        }
-        if (total > 1) for (let li = 0; li < 7; li++) weights[li] /= total;
-
+        const su  = (px + 0.5) / SPLAT_RES;
         const idx = (pz * SPLAT_RES + px) * 4;
-        this.data0[idx]   = (weights[0] * 255 + 0.5) | 0;
-        this.data0[idx+1] = (weights[1] * 255 + 0.5) | 0;
-        this.data0[idx+2] = (weights[2] * 255 + 0.5) | 0;
-        this.data0[idx+3] = (weights[3] * 255 + 0.5) | 0;
-        this.data1[idx]   = (weights[4] * 255 + 0.5) | 0;
-        this.data1[idx+1] = (weights[5] * 255 + 0.5) | 0;
-        this.data1[idx+2] = (weights[6] * 255 + 0.5) | 0;
+
+        // Clear the 7 weight channels (keep meadow d1[idx+3]).
+        d0[idx] = d0[idx+1] = d0[idx+2] = d0[idx+3] = 0;
+        d1[idx] = d1[idx+1] = d1[idx+2] = 0;
+
+        const slopeD = _slopeDegs(cpuHeightmap, heightmapSize, su, sv, worldSize, maxHeight);
+        const hM     = _sampleHm(cpuHeightmap, heightmapSize, su, sv) * maxHeight;
+        const wx = su * worldSize - half;
+        const wz = sv * worldSize - half;
+        const br = (_fbmNoise(wx * 0.02, wz * 0.02, 3) - 0.5) * 2 * noise; // ≈ ±noise
+
+        const cliffW = _smoothstep(slopeStartDeg, slopeEndDeg, slopeD + br * 12);
+        const highW  = high >= 0
+          ? _smoothstep(highStart, highEnd, hM + br * 40) * (1 - cliffW)
+          : 0;
+        const flatW  = 1 - cliffW - highW;
+
+        write(idx, cliff, cliffW);
+        write(idx, high, highW);
+        write(idx, flat, flatW);
       }
     }
+    this.tex.addLayerUpdate(0);
+    this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
   }
 }
@@ -308,8 +343,4 @@ function _smoothstep(e0, e1, x) {
   if (e1 <= e0) return x >= e1 ? 1 : 0;
   const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
-}
-
-function _rangeWeight(val, lo, hi, blend) {
-  return _smoothstep(lo - blend, lo, val) * (1 - _smoothstep(hi, hi + blend, val));
 }

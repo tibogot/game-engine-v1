@@ -21,7 +21,7 @@ export const LOD_SNAP = 16;
 export function createPlayMode({
   scene,
   renderer, camera, controls,
-  sampleTerrainHeight, uCursorUV,
+  sampleTerrainHeight, sampleTerrainNormal = null, uCursorUV,
   character,
   husky = null,
   bruno = null,
@@ -41,13 +41,19 @@ export function createPlayMode({
   let rmbLookActive = false;
   let moveMode = "char";
 
-  const capsule = new CapsuleController({
+  // The tuned on-foot baseline. Every param reset below MUST restore these —
+  // resetting to bare DEFAULT_CAPSULE_PARAMS (walk 6 / run 14) is what made the
+  // character run 2× faster after exiting and re-entering play mode.
+  const HUMAN_CAPSULE_PARAMS = {
+    ...DEFAULT_CAPSULE_PARAMS,
     walkSpeed: 3,
     runSpeed: 6,
     jumpVel: 11,
     gravity: 20,
     groundSpringK: 35,
-  });
+  };
+
+  const capsule = new CapsuleController(HUMAN_CAPSULE_PARAMS);
 
   const capMesh = new THREE.Mesh(
     new THREE.CapsuleGeometry(CAP_R, CAP_H, 4, 8),
@@ -262,11 +268,11 @@ export function createPlayMode({
       husky?.applyCapsuleParams?.(capsule);
       charYaw = yaw;
     } else if (target === "char") {
-      capsule.setParams({ ...DEFAULT_CAPSULE_PARAMS });
+      capsule.setParams({ ...HUMAN_CAPSULE_PARAMS });
       charYaw = yaw;
       character?.setYaw?.(yaw);
     } else if (target === "capsule") {
-      capsule.setParams({ ...DEFAULT_CAPSULE_PARAMS });
+      capsule.setParams({ ...HUMAN_CAPSULE_PARAMS });
       capsule.yaw = yaw;
     } else if (target === "car") {
       const spawn = brunoCar.resetFrom(p.x, p.y, p.z, yaw);
@@ -652,7 +658,7 @@ export function createPlayMode({
     brunoCar.hide();
     stuntCar.hide();
     ballDebug.hide();
-    capsule.setParams({ ...DEFAULT_CAPSULE_PARAMS });
+    capsule.setParams({ ...HUMAN_CAPSULE_PARAMS });
 
     Object.keys(keys).forEach((k) => { keys[k] = false; });
     for (const code of Object.keys(keysHeld)) delete keysHeld[code];
@@ -681,6 +687,7 @@ export function createPlayMode({
       moveSpeedOverride: speedOverride,
       collider: getCollider(),
       getTerrainHeight,
+      getTerrainNormal: sampleTerrainNormal,
       worldHalf: WORLD_SIZE / 2,
     });
 

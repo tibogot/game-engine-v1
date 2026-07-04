@@ -18,9 +18,9 @@ import { stochasticSampleArray } from "../../v2/core/legacy/stochasticTex.js";
 import {
   Fn, float, int, vec2, vec3,
   texture, mix, max, clamp, sqrt, uniform, step, normalize,
-  positionWorld,
+  positionWorld, smoothstep, abs, length, mx_noise_float,
 } from "three/tsl";
-import { WORLD_SIZE } from "./heightmapTexture.js";
+import { WORLD_SIZE, HEIGHTMAP_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 
 const NUM_LAYERS = 7;
 const LUM        = vec3(0.299, 0.587, 0.114);
@@ -33,7 +33,7 @@ const LUM        = vec3(0.299, 0.587, 0.114);
  *   ORM packing: R=roughness, G=AO, B=normalX_encoded, A=normalY_encoded
  * @param {THREE.DataArrayTexture} splatTex       — SplatMap.tex (2-slice weight map)
  */
-export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, splatTex) {
+export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, splatTex, heightTexNode = null) {
   if (layerSlots.length !== NUM_LAYERS) {
     throw new Error(`createSplatOverlay: need ${NUM_LAYERS} layer slots, got ${layerSlots.length}`);
   }
@@ -84,6 +84,59 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
     rw1.div(totalW), rw2.div(totalW), rw3.div(totalW), rw4.div(totalW),
     rw5.div(totalW), rw6.div(totalW), rw7.div(totalW),
   ];
+
+  // ── Live auto-paint (Unreal-style auto-material) ─────────────────────────
+  // Slope/height rules texture the UNPAINTED remainder (the implicit base
+  // weight w0): flat layer on level ground, cliff layer past a slope band,
+  // optional high-altitude layer above a height band. Updates live while
+  // sculpting; hand-painted splat always wins because painting shrinks w0.
+  const uAutoEnabled   = uniform(0.0);
+  const uAutoFlat      = uniform(0.0);   // layer channel 0..6 (L1..L7)
+  const uAutoCliff     = uniform(1.0);
+  const uAutoHigh      = uniform(-1.0);  // -1 = high-altitude rule off
+  const uAutoSlopeHiY  = uniform(Math.cos(30 * Math.PI / 180)); // normal.y where cliff starts
+  const uAutoSlopeLoY  = uniform(Math.cos(45 * Math.PI / 180)); // normal.y at full cliff
+  const uAutoHighStart = uniform(200.0); // metres
+  const uAutoHighEnd   = uniform(280.0);
+  const uAutoNoise     = uniform(0.25);  // threshold breakup 0..1
+
+  if (heightTexNode) {
+    // Terrain normal.y from the same heightmap gradient the terrain mesh uses.
+    const texel = float(1.0 / HEIGHTMAP_SIZE);
+    const hC = texture(heightTexNode, splatUV).r;
+    const hL = texture(heightTexNode, vec2(splatUV.x.sub(texel), splatUV.y)).r;
+    const hR = texture(heightTexNode, vec2(splatUV.x.add(texel), splatUV.y)).r;
+    const hD = texture(heightTexNode, vec2(splatUV.x, splatUV.y.sub(texel))).r;
+    const hU = texture(heightTexNode, vec2(splatUV.x, splatUV.y.add(texel))).r;
+    const flatScale = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
+    const ny = flatScale.div(length(vec3(hL.sub(hR), flatScale, hD.sub(hU))));
+
+    // World-anchored FBM breakup so the slope/height thresholds meander
+    // organically instead of tracing clean contour lines.
+    const bp = positionWorld.xz.mul(float(0.02));
+    const breakup = mx_noise_float(vec3(bp.x, bp.y, float(7.7))).mul(uAutoNoise);
+
+    const cliffW = float(1).sub(
+      smoothstep(uAutoSlopeLoY, uAutoSlopeHiY, ny.add(breakup.mul(float(0.15)))),
+    );
+    const highOn = step(float(-0.5), uAutoHigh);
+    const hMet   = hC.mul(float(MAX_HEIGHT)).add(breakup.mul(float(40)));
+    const highW  = smoothstep(uAutoHighStart, uAutoHighEnd, hMet)
+      .mul(float(1).sub(cliffW)).mul(highOn);
+    const flatW  = float(1).sub(cliffW).sub(highW);
+
+    // Redistribute w0 to the chosen layers (gated to heightmap bounds so the
+    // far LOD ring keeps the base material instead of smearing edge texels).
+    const eq = (u, i) => step(abs(u.sub(float(i))), float(0.5));
+    const baseShare = nw[0].mul(uAutoEnabled).mul(inBounds);
+    for (let i = 0; i < NUM_LAYERS; i++) {
+      const autoW = cliffW.mul(eq(uAutoCliff, i))
+        .add(flatW.mul(eq(uAutoFlat, i)))
+        .add(highW.mul(eq(uAutoHigh, i)));
+      nw[i + 1] = nw[i + 1].add(baseShare.mul(autoW));
+    }
+    nw[0] = nw[0].sub(baseShare);
+  }
 
   // ── Layer colors (albedo × AO) ────────────────────────────────────────────────
   const layerColors = [];
@@ -169,5 +222,9 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
     blendRoughness,
     blendNormal,
     blendMeadow,
+    auto: {
+      uAutoEnabled, uAutoFlat, uAutoCliff, uAutoHigh,
+      uAutoSlopeHiY, uAutoSlopeLoY, uAutoHighStart, uAutoHighEnd, uAutoNoise,
+    },
   };
 }

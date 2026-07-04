@@ -10,6 +10,18 @@ export const DEFAULT_CAPSULE_PARAMS = {
   crouchSpeedMult: 0.5,
   crouchHeightScale: 0.5,
 
+  // Movement smoothing — velocity approaches the input target at these rates
+  // (m/s²) instead of snapping, so starts/stops/turns ramp and animations blend.
+  accelRate: 40,
+  decelRate: 50,
+  airControlMult: 0.4,
+
+  // Terrain slope limit (needs ctx.getTerrainNormal). Steeper than this can't
+  // be walked up; standing on it slides downhill instead of grounding.
+  maxWalkSlopeDeg: 50,
+  slideAccel: 20,
+  maxSlideSpeed: 10,
+
   jumpVel: 11.0,
   gravity: 20.0,
   glideFallSpeed: 3.0,
@@ -60,6 +72,9 @@ export class CapsuleController {
     this.params = mergeParams(params);
     this.position = new THREE.Vector3();
     this.velY = 0;
+    this.velX = 0;
+    this.velZ = 0;
+    this.sliding = false;
     this.yaw = 0;
     this.grounded = true;
     this.inAir = false;
@@ -97,6 +112,9 @@ export class CapsuleController {
   reset(x, y, z) {
     this.position.set(x, y, z);
     this.velY = 0;
+    this.velX = 0;
+    this.velZ = 0;
+    this.sliding = false;
     this.grounded = true;
     this.inAir = false;
     this.gliding = false;
@@ -164,12 +182,51 @@ export class CapsuleController {
     this.velY -= p.gravity * dtSec;
     if (this.gliding && this.velY < -p.glideFallSpeed) this.velY = -p.glideFallSpeed;
 
-    const vx = mlen > 0 ? (mx / mlen) * moveSpeed : 0;
-    const vz = mlen > 0 ? (mz / mlen) * moveSpeed : 0;
+    // ── Horizontal velocity: ramp toward the input target (accel/decel) ──────
+    const tvx = mlen > 0 ? (mx / mlen) * moveSpeed : 0;
+    const tvz = mlen > 0 ? (mz / mlen) * moveSpeed : 0;
+    let rate = (mlen > 0 ? p.accelRate : p.decelRate) ?? 0;
+    if (!wasGrounded) rate *= p.airControlMult ?? 1;
+    if (this.sliding) rate *= 0.25; // weak steering while sliding down a slope
+    if (rate > 0) {
+      const dvx = tvx - this.velX;
+      const dvz = tvz - this.velZ;
+      const dLen = Math.hypot(dvx, dvz);
+      const step = rate * dtSec;
+      if (dLen <= step) { this.velX = tvx; this.velZ = tvz; }
+      else { this.velX += (dvx / dLen) * step; this.velZ += (dvz / dLen) * step; }
+    } else {
+      this.velX = tvx;
+      this.velZ = tvz;
+    }
 
-    const moveX = vx * dtSec;
+    // ── Terrain slope gate: cancel the uphill velocity component when pushing
+    // into terrain steeper than maxWalkSlopeDeg (the floor backstop would
+    // otherwise ratchet the capsule up ANY slope). Only applies while in
+    // contact with the terrain surface — BVH props/cliffs handle their own
+    // normals via the collider.
+    const minWalkNY = Math.cos((p.maxWalkSlopeDeg ?? 90) * Math.PI / 180);
+    if (ctx.getTerrainNormal && (this.velX !== 0 || this.velZ !== 0)) {
+      const aheadX = this.position.x + this.velX * dtSec;
+      const aheadZ = this.position.z + this.velZ * dtSec;
+      const tHere = getTerrainHeight(this.position.x, this.position.z);
+      if (this.position.y <= tHere + 0.3) {
+        const n = ctx.getTerrainNormal(aheadX, aheadZ);
+        const tThere = getTerrainHeight(aheadX, aheadZ);
+        if (n && n.y < minWalkNY && tThere > tHere + 0.005) {
+          const gl = Math.hypot(n.x, n.z);
+          if (gl > 1e-5) {
+            const ux = -n.x / gl, uz = -n.z / gl; // uphill direction (XZ)
+            const d = this.velX * ux + this.velZ * uz;
+            if (d > 0) { this.velX -= ux * d; this.velZ -= uz * d; }
+          }
+        }
+      }
+    }
+
+    const moveX = this.velX * dtSec;
     const moveY = this.velY * dtSec;
-    const moveZ = vz * dtSec;
+    const moveZ = this.velZ * dtSec;
     const moveLen = Math.hypot(moveX, moveY, moveZ);
     const steps = Math.min(p.maxSubsteps, Math.max(1, Math.ceil(moveLen / (r * p.substepFraction + 1e-6))));
     this.debug.substeps = steps;
@@ -254,7 +311,10 @@ export class CapsuleController {
       let bestY = -Infinity, bestNY = 1;
       const stickTerrainY = getTerrainHeight(this.position.x, this.position.z);
       const dropT = this.position.y - stickTerrainY;
-      if (dropT >= -0.02 && dropT <= p.groundStickDist) bestY = stickTerrainY;
+      // Never stick to unwalkable terrain — that would re-ground on steep slopes.
+      const stickN = ctx.getTerrainNormal?.(this.position.x, this.position.z);
+      const stickWalkable = !stickN || stickN.y >= minWalkNY;
+      if (stickWalkable && dropT >= -0.02 && dropT <= p.groundStickDist) bestY = stickTerrainY;
       if (collider?.raycastDown) {
         const hit = collider.raycastDown(this.position.x, this.position.y + r, this.position.z, r + p.groundStickDist + 0.02);
         if (hit && hit.ny >= p.minGroundNormalY) {
@@ -266,13 +326,28 @@ export class CapsuleController {
     }
 
     const tY = getTerrainHeight(this.position.x, this.position.z);
+    let sliding = false;
     if (this.position.y < tY) {
       const err = tY - this.position.y;
       this.position.y += err > p.groundSpringRange ? err : err * (1 - Math.exp(-p.groundSpringK * dtSec));
       if (this.velY < 0) this.velY = 0;
-      grounded = true;
-      if (maxNY < 1) maxNY = 1;
+      const n = ctx.getTerrainNormal?.(this.position.x, this.position.z);
+      if (!n || n.y >= minWalkNY) {
+        grounded = true;
+        if (maxNY < 1) maxNY = 1;
+      } else {
+        // Too steep to stand on: surf the surface and accelerate downhill.
+        // grounded stays false → no jump reset, and coyote time runs out.
+        sliding = true;
+        const gl = Math.hypot(n.x, n.z) || 1;
+        this.velX += (n.x / gl) * (p.slideAccel ?? 0) * dtSec;
+        this.velZ += (n.z / gl) * (p.slideAccel ?? 0) * dtSec;
+        const sl = Math.hypot(this.velX, this.velZ);
+        const cap = p.maxSlideSpeed ?? Infinity;
+        if (sl > cap) { this.velX *= cap / sl; this.velZ *= cap / sl; }
+      }
     }
+    this.sliding = sliding;
 
     if (grounded && this.velY < 0) this.velY = 0;
     if (bonk && this.velY > 0) this.velY = 0;
@@ -295,7 +370,8 @@ export class CapsuleController {
     }
 
     this.debug.groundY = this.position.y;
-    this.debug.moveSpeed = mlen > 0 ? moveSpeed : 0;
+    // Actual smoothed speed — animation blending reads this, so ramps register.
+    this.debug.moveSpeed = Math.hypot(this.velX, this.velZ);
     this.debug.normalY = maxNY;
   }
 }

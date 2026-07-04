@@ -2,8 +2,15 @@ import * as THREE from "three";
 import { WORLD_SIZE } from "../terrain/heightmapTexture.js";
 
 const _tmp       = new THREE.Matrix4();
+const _tmpDelta  = new THREE.Matrix4();
+const _tmpMat    = new THREE.Matrix4();
+const _tmpPos    = new THREE.Vector3();
+const _tmpQuat   = new THREE.Quaternion();
+const _tmpScl    = new THREE.Vector3();
+const _tmpEul    = new THREE.Euler();
 const _hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
 const _boxColor  = new THREE.Color(0xff8800);
+const MAX_GROUP_BOXES = 128; // selection outline pool cap (selection can exceed this)
 
 const MAX_INSTANCES = 4096;
 export { MAX_INSTANCES as MAX_PROP_INSTANCES_PER_MESH };
@@ -33,6 +40,14 @@ export class PropInstancer {
 
     this._typeRender  = [];
     this._selectedIdx = -1;
+
+    // Multi-select: store indices; _selectedIdx stays the "primary" for
+    // single-instance UI (stamp memory, prop panel). Group transforms apply
+    // the proxy's delta matrix to base matrices captured at selection time.
+    this._selection      = new Set();
+    this._groupBaseMats  = null; // Map<storeIdx, Matrix4> at group setup
+    this._groupProxyInv  = null; // inverse of the proxy matrix at group setup
+    this._groupBoxPool   = [];   // extra selection outlines for group members
 
     this._cacheCount   = 0;
     this._cacheMats    = null;
@@ -431,9 +446,14 @@ export class PropInstancer {
   }
 
   select(instIdx) {
-    this._selectedIdx = instIdx;
     const inst = this.store.instances[instIdx];
     if (!inst) { this.clearSelection(); return; }
+    this._selection.clear();
+    this._selection.add(instIdx);
+    this._groupBaseMats = null;
+    this._groupProxyInv = null;
+    this._hideGroupBoxes();
+    this._selectedIdx = instIdx;
     const RAD_TO_DEG = Math.PI / 180;
     this.proxyObject.position.set(inst.px, inst.py, inst.pz);
     this.proxyObject.rotation.set(inst.rx * RAD_TO_DEG, inst.ry * RAD_TO_DEG, inst.rz * RAD_TO_DEG);
@@ -442,12 +462,67 @@ export class PropInstancer {
     this._updateSelectionBox(inst);
   }
 
+  /** Shift+click: add/remove an instance from the selection set. */
+  toggleSelect(instIdx) {
+    if (!this.store.instances[instIdx]) return;
+    if (this._selection.has(instIdx)) this._selection.delete(instIdx);
+    else this._selection.add(instIdx);
+    this._afterSelectionChange(instIdx);
+  }
+
+  /** Replace the whole selection (e.g. after group duplicate). */
+  setSelection(indices, primary = indices[indices.length - 1]) {
+    this._selection = new Set(indices.filter((i) => this.store.instances[i]));
+    this._afterSelectionChange(primary);
+  }
+
+  _afterSelectionChange(primary) {
+    if (this._selection.size === 0) { this.clearSelection(); return; }
+    if (this._selection.size === 1) { this.select([...this._selection][0]); return; }
+    this._selectedIdx = this._selection.has(primary) ? primary : [...this._selection][0];
+    this._setupGroupProxy();
+  }
+
+  /** Proxy at the selection centroid (identity rotation/scale); capture each
+   *  member's base matrix so drags apply a clean delta with no drift. */
+  _setupGroupProxy() {
+    const c = new THREE.Vector3();
+    for (const i of this._selection) {
+      const inst = this.store.instances[i];
+      c.x += inst.px; c.y += inst.py; c.z += inst.pz;
+    }
+    c.divideScalar(this._selection.size);
+    this.proxyObject.position.copy(c);
+    this.proxyObject.rotation.set(0, 0, 0);
+    this.proxyObject.scale.set(1, 1, 1);
+    this.proxyObject.updateMatrix();
+    this._groupProxyInv = this.proxyObject.matrix.clone().invert();
+
+    const DEG = Math.PI / 180;
+    this._groupBaseMats = new Map();
+    for (const i of this._selection) {
+      const inst = this.store.instances[i];
+      this._groupBaseMats.set(i, new THREE.Matrix4().compose(
+        new THREE.Vector3(inst.px, inst.py, inst.pz),
+        new THREE.Quaternion().setFromEuler(_tmpEul.set(inst.rx * DEG, inst.ry * DEG, inst.rz * DEG, "XYZ")),
+        new THREE.Vector3(inst.sx, inst.sy, inst.sz),
+      ));
+    }
+    this._selectionBox.visible = false;
+    this._updateGroupBoxes();
+  }
+
   clearSelection() {
     this._selectedIdx          = -1;
+    this._selection.clear();
+    this._groupBaseMats        = null;
+    this._groupProxyInv        = null;
     this._selectionBox.visible = false;
+    this._hideGroupBoxes();
   }
 
   syncFromProxy() {
+    if (this._selection.size > 1) { this._syncGroupFromProxy(); return; }
     if (this._selectedIdx < 0) return;
     const inst = this.store.instances[this._selectedIdx];
     if (!inst) return;
@@ -465,29 +540,80 @@ export class PropInstancer {
     this._updateSelectionBox(inst);
   }
 
-  _updateSelectionBox(inst) {
+  _syncGroupFromProxy() {
+    if (!this._groupBaseMats) return;
+    this.proxyObject.updateMatrix();
+    // Delta since group setup; recomputing from base matrices every change
+    // keeps repeated drags exact (no incremental drift).
+    _tmpDelta.multiplyMatrices(this.proxyObject.matrix, this._groupProxyInv);
+    const DEG = 180 / Math.PI;
+    for (const [i, base] of this._groupBaseMats) {
+      const inst = this.store.instances[i];
+      if (!inst) continue;
+      _tmpMat.multiplyMatrices(_tmpDelta, base).decompose(_tmpPos, _tmpQuat, _tmpScl);
+      _tmpEul.setFromQuaternion(_tmpQuat, "XYZ");
+      inst.px = _tmpPos.x; inst.py = _tmpPos.y; inst.pz = _tmpPos.z;
+      inst.rx = _tmpEul.x * DEG; inst.ry = _tmpEul.y * DEG; inst.rz = _tmpEul.z * DEG;
+      inst.sx = _tmpScl.x; inst.sy = _tmpScl.y; inst.sz = _tmpScl.z;
+    }
+    this.store._bump();
+    this._updateGroupBoxes();
+  }
+
+  _updateGroupBoxes() {
+    let n = 0;
+    for (const i of this._selection) {
+      if (n >= MAX_GROUP_BOXES) break;
+      const inst = this.store.instances[i];
+      if (!inst) continue;
+      let box = this._groupBoxPool[n];
+      if (!box) {
+        box = new THREE.LineSegments(this._selectionBox.geometry, this._selectionBox.material);
+        this.scene.add(box);
+        this._groupBoxPool[n] = box;
+      }
+      if (this._placeSelectionBox(box, inst)) n++;
+    }
+    for (let k = n; k < this._groupBoxPool.length; k++) this._groupBoxPool[k].visible = false;
+  }
+
+  _hideGroupBoxes() {
+    for (const box of this._groupBoxPool) box.visible = false;
+  }
+
+  /** Position a selection outline over an instance. Returns false for live types. */
+  _placeSelectionBox(box, inst) {
     const tr   = this._typeRender[inst.typeIdx];
     const type = this.store.types[inst.typeIdx];
-    if (!tr || !type || type.live) { this._selectionBox.visible = false; return; }
+    if (!tr || !type || type.live) { box.visible = false; return false; }
     const boxCenter = new THREE.Vector3();
     type.mergedBox.getCenter(boxCenter);
     const DEG = Math.PI / 180;
-    this._selectionBox.scale.set(tr.boxSize.x * inst.sx, tr.boxSize.y * inst.sy, tr.boxSize.z * inst.sz);
-    this._selectionBox.position.set(inst.px, inst.py, inst.pz);
-    this._selectionBox.rotation.set(inst.rx * DEG, inst.ry * DEG, inst.rz * DEG);
+    box.scale.set(tr.boxSize.x * inst.sx, tr.boxSize.y * inst.sy, tr.boxSize.z * inst.sz);
+    box.position.set(inst.px, inst.py, inst.pz);
+    box.rotation.set(inst.rx * DEG, inst.ry * DEG, inst.rz * DEG);
     const offset = boxCenter.clone().multiply(new THREE.Vector3(inst.sx, inst.sy, inst.sz));
-    offset.applyEuler(this._selectionBox.rotation);
-    this._selectionBox.position.add(offset);
-    this._selectionBox.visible = true;
+    offset.applyEuler(box.rotation);
+    box.position.add(offset);
+    box.visible = true;
+    return true;
   }
 
-  get selectedIdx()  { return this._selectedIdx; }
-  get hasSelection() { return this._selectedIdx >= 0; }
+  _updateSelectionBox(inst) {
+    this._placeSelectionBox(this._selectionBox, inst);
+  }
+
+  get selectedIdx()     { return this._selectedIdx; }
+  get hasSelection()    { return this._selectedIdx >= 0; }
+  get selectionCount()  { return this._selection.size; }
+  get selectedIndices() { return [...this._selection]; }
 
   dispose() {
     for (let ti = 0; ti < this._typeRender.length; ti++) this.unregisterType(ti);
     this.scene.remove(this.proxyObject);
     this.scene.remove(this._selectionBox);
+    for (const box of this._groupBoxPool) this.scene.remove(box);
+    this._groupBoxPool.length = 0;
     this._selectionBox.geometry.dispose();
     this._selectionBox.material.dispose();
   }
