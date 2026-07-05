@@ -20,7 +20,7 @@ export function createEditorCameraController({
   const _flyRight = new THREE.Vector3();
   const _euler = new THREE.Euler(0, 0, 0, "YXZ");
 
-  const MIN_DIST = 2;
+  const MIN_DIST = 0.5; // match camera near plane — close enough for prop/grass detail
   const MAX_DIST = 4000;
   const FLY_BASE_SPEED = 48;
   const FLY_SPRINT = 2.4;

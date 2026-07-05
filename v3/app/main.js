@@ -221,7 +221,9 @@ async function main() {
   controls.target.set(0, 10, 0);
   controls.enableDamping = true;
   controls.dampingFactor = 0.1;
-  controls.maxPolarAngle = Math.PI * 0.48; // ~86° — keeps camera above the terrain horizon
+  // Allow looking up at the sky / cloud deck (same as v2). 0.92π tilts well up
+  // while stopping just short of flipping under the world.
+  controls.maxPolarAngle = Math.PI * 0.92;
   controls.maxDistance = 4000;
   // minDistance + scroll zoom handled by editorCameraController (same as v2).
   controls.mouseButtons = { MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
