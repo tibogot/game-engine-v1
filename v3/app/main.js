@@ -3692,6 +3692,14 @@ async function main() {
     document.getElementById("props-panel")?._rebuildPropUi?.();
   }
 
+  function setPropSlotSolid(slotIdx, solid) {
+    const slot = propSlots[slotIdx];
+    if (!slot || slot.live) return;
+    if (!propStore.setTypeSolid(slot.typeIdx, solid)) return;
+    slot.solid = !!solid;
+    rebakePlayerBvh();
+  }
+
   function removePropSlot(slotIdx) {
     const slot = propSlots[slotIdx];
     if (!slot) return;
@@ -3784,6 +3792,7 @@ async function main() {
     getCliffPresetNames: () => CLIFF_PRESETS.map((c) => c.name),
     addLiveProp,
     removePropSlot,
+    setPropSlotSolid,
     importPropLod,
     importGlbCollectible: async () => {
       console.warn("[V3] GLB collectibles not ported yet — use Flag/Coin/Heart/Key live props.");

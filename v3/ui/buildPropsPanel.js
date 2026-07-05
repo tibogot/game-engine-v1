@@ -583,6 +583,13 @@ panel.innerHTML = "";
               }
             }
           }
+          if (!slot.live) {
+            const solidProxy = { meshCollision: !!slot.solid };
+            _toggle(row, solidProxy, "meshCollision", {
+              label: "Mesh collision",
+              onChange: () => app.setPropSlotSolid?.(i, solidProxy.meshCollision),
+            });
+          }
           if (!slot.builtin && !slot.live) {
             const lodRow = document.createElement("div");
             lodRow.style.cssText = "display:flex; gap:4px;";
@@ -918,7 +925,7 @@ panel.innerHTML = "";
       bvhHint.style.cssText =
         "margin:6px 0 0; font-size:11px; color:var(--text-dim); line-height:1.35;";
       bvhHint.textContent =
-        "Props contribute one bounding box per instance to the player BVH (not full mesh geometry). Rebake after bulk edits.";
+        "Default props use one bounding box per instance (holes are blocked). Enable Mesh collision on a loaded prop to use its real triangles — needed for parkour holes/arches. Rebake after bulk edits.";
       panel.appendChild(bvhHint);
       _separator(panel);
       _button(panel, {

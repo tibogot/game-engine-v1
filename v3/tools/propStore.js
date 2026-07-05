@@ -54,6 +54,15 @@ export class PropStore {
     return !!this.types[typeIdx]?.live;
   }
 
+  /** Toggle real-triangle collision (SolidCollider) vs bounding-box proxy (CliffBvh). */
+  setTypeSolid(typeIdx, solid) {
+    const type = this.types[typeIdx];
+    if (!type || type.live || !!type.solid === !!solid) return false;
+    type.solid = !!solid;
+    this._bump();
+    return true;
+  }
+
   // ── GLB type ────────────────────────────────────────────────────────────────
 
   registerType(gltfScene, name) {
