@@ -1,0 +1,5343 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pine editor — v2 tree preset authoring</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #87ceeb;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #hint {
+        position: fixed;
+        bottom: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 5;
+        font-size: 12px;
+        color: rgba(30, 50, 80, 0.75);
+        pointer-events: none;
+        text-align: center;
+        max-width: 92vw;
+      }
+      #title {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 5;
+        font-size: 14px;
+        font-weight: 600;
+        color: rgba(40, 60, 100, 0.85);
+        pointer-events: none;
+      }
+      :root {
+        --bg-dark: #222222;
+        --bg-panel: #2a2a2a;
+        --bg-item: #333333;
+        --bg-hover: #3a3a3a;
+        --bg-input: #1e1e1e;
+        --border: #3c3c3c;
+        --border-light: #4a4a4a;
+        --text: #cccccc;
+        --text-dim: #888888;
+        --text-bright: #e0e0e0;
+        --accent: #4a9eff;
+        --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+        --font-mono: "Cascadia Code", "Fira Code", Consolas, monospace;
+        --radius: 4px;
+      }
+      #ui {
+        position: fixed;
+        top: 8px;
+        right: 8px;
+        z-index: 20;
+        width: 320px;
+        max-height: calc(100vh - 16px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-family: var(--font);
+        font-size: 13px;
+        color: var(--text);
+        user-select: none;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      }
+      #ui .panel-header {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        min-height: 36px;
+        background: var(--bg-dark);
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+        color: var(--text-bright);
+        flex-shrink: 0;
+      }
+      #ui-scroll {
+        flex: 1;
+        overflow-y: auto;
+        scrollbar-width: thin;
+      }
+      #ui-scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+      #ui-scroll::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 4px;
+      }
+      .inspector-section {
+        border-bottom: 1px solid var(--border);
+      }
+      .section-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--text-dim);
+      }
+      .section-header:hover {
+        background: var(--bg-hover);
+      }
+      .section-header .section-arrow {
+        width: 14px;
+        height: 14px;
+        transition: transform 0.15s;
+        flex-shrink: 0;
+      }
+      .section-header.collapsed .section-arrow {
+        transform: rotate(-90deg);
+      }
+      .section-body {
+        padding: 6px 12px 10px;
+      }
+      .section-body.hidden {
+        display: none;
+      }
+      .prop-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0;
+        min-height: 26px;
+      }
+      .prop-label {
+        width: 108px;
+        min-width: 108px;
+        font-size: 11px;
+        color: var(--text-dim);
+        text-align: right;
+        padding-right: 4px;
+        line-height: 1.2;
+      }
+      .prop-value {
+        flex: 1;
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        min-width: 0;
+      }
+      .prop-color-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1;
+      }
+      .prop-color {
+        width: 22px;
+        height: 22px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        cursor: pointer;
+        padding: 0;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .prop-color::-webkit-color-swatch-wrapper {
+        padding: 0;
+      }
+      .prop-color::-webkit-color-swatch {
+        border: none;
+        border-radius: 2px;
+      }
+      .prop-slider-wrap {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .prop-num-input {
+        width: 72px;
+        height: 22px;
+        flex-shrink: 0;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 0 5px;
+        color: var(--text);
+        font-size: 11px;
+        font-family: var(--font-mono);
+        text-align: right;
+        outline: none;
+      }
+      .prop-num-input:focus {
+        border-color: var(--accent);
+      }
+      .prop-num-input::-webkit-outer-spin-button,
+      .prop-num-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .prop-num-input[type="number"] {
+        appearance: textfield;
+        -moz-appearance: textfield;
+      }
+      .prop-slider {
+        flex: 1;
+        height: 4px;
+        -webkit-appearance: none;
+        appearance: none;
+        background: var(--bg-input);
+        border-radius: 2px;
+        outline: none;
+        min-width: 0;
+      }
+      .prop-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+      }
+      .prop-dropdown {
+        flex: 1;
+        height: 22px;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 0 6px;
+        color: var(--text);
+        font-size: 12px;
+        font-family: var(--font);
+        outline: none;
+        cursor: pointer;
+        min-width: 0;
+      }
+      .prop-dropdown:focus {
+        border-color: var(--accent);
+      }
+      .prop-input {
+        flex: 1;
+        height: 22px;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 0 6px;
+        color: var(--text);
+        font-size: 12px;
+        font-family: var(--font-mono);
+        outline: none;
+        min-width: 0;
+      }
+      .prop-input:focus {
+        border-color: var(--accent);
+      }
+      .ui-separator {
+        height: 1px;
+        background: var(--border);
+        margin: 8px 0;
+      }
+      .tex-gallery-label {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.35px;
+        color: var(--text-dim);
+        padding: 2px 0 6px;
+      }
+      .tex-gallery {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 0 0 10px;
+      }
+      .tex-gallery .tex-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        width: 56px;
+      }
+      .tex-gallery img {
+        width: 52px;
+        height: 52px;
+        object-fit: cover;
+        border-radius: var(--radius);
+        border: 2px solid var(--border);
+        cursor: pointer;
+        opacity: 0.75;
+        background: var(--bg-input);
+        transition:
+          opacity 0.15s,
+          border-color 0.15s;
+      }
+      .tex-gallery img:hover {
+        opacity: 1;
+        border-color: var(--border-light);
+      }
+      .tex-gallery img.active {
+        border-color: var(--accent);
+        opacity: 1;
+        box-shadow: 0 0 0 1px var(--accent);
+      }
+      .tex-gallery .tex-label {
+        font-size: 9px;
+        line-height: 1.2;
+        font-family: var(--font-mono);
+        color: var(--text-dim);
+        text-align: center;
+        max-width: 56px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      .prop-toggle {
+        width: 14px;
+        height: 14px;
+        border: 1px solid var(--border-light);
+        border-radius: 3px;
+        background: var(--bg-input);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        padding: 0;
+        color: transparent;
+      }
+      .prop-toggle.checked {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: white;
+      }
+      .prop-toggle svg {
+        width: 10px;
+        height: 10px;
+      }
+      .section-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 26px;
+        margin-top: 4px;
+        background: var(--bg-item);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 11px;
+        font-family: var(--font);
+      }
+      .section-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+        border-color: var(--border-light);
+      }
+      .info-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0;
+        min-height: 26px;
+      }
+      .info-label {
+        width: 108px;
+        min-width: 108px;
+        font-size: 11px;
+        color: var(--text-dim);
+        text-align: right;
+        padding-right: 4px;
+      }
+      .info-value {
+        flex: 1;
+        font-size: 11px;
+        color: var(--text);
+        font-family: var(--font-mono);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="ui">
+      <div class="panel-header">Pine editor → v2 trees</div>
+      <div id="ui-scroll"></div>
+    </div>
+    <div id="title">Pine — top whorl at trunk tip · 7×7 cards</div>
+    <div id="hint">
+      Top ring is always on the trunk tip; lower rings spread from base Y
+      (height curve). v2 export in Save / Load.
+    </div>
+    <script type="module">
+      import * as THREE from "three";
+      import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+      import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+      import { SkyMesh } from "three/addons/objects/SkyMesh.js";
+      import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
+      import {
+        Fn,
+        float,
+        vec2,
+        vec3,
+        vec4,
+        uniform,
+        modelWorldMatrix,
+        modelWorldMatrixInverse,
+        texture,
+        uv,
+        mix,
+        smoothstep,
+        clamp,
+        sin,
+        cos,
+        positionLocal,
+        positionWorld,
+        normalLocal,
+        cameraPosition,
+        normalize,
+        length,
+        dot,
+        max,
+        pow,
+        negate,
+        mul,
+        add,
+        sub,
+        div,
+        floor,
+        instanceIndex,
+        hash,
+        rotateUV,
+        step,
+        abs,
+        normalWorld,
+        mx_atan2,
+        mx_noise_float,
+      } from "three/tsl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      const DEG = Math.PI / 180;
+      /** rebuildTrunk floor — slider can go lower; was 0.02 and looked too thick at the tip. */
+      const TRUNK_RADIUS_MIN = 0.003;
+
+      const _checkSvg =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      const _arrowSvg =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
+      function _fmt(v, step) {
+        if (step >= 1) return String(Math.round(v));
+        const d = Math.max(0, -Math.floor(Math.log10(step)));
+        return v.toFixed(d);
+      }
+
+      function _clampSnap(v, min, max, step) {
+        if (!Number.isFinite(v)) return min;
+        const n = Math.round((v - min) / step);
+        let out = min + n * step;
+        const stepStr = String(step);
+        let decimals = 0;
+        if (stepStr.includes(".")) {
+          decimals = stepStr.split(".")[1].length;
+        } else if (stepStr.includes("e-")) {
+          decimals = 8;
+        }
+        if (decimals > 0) out = Number(out.toFixed(decimals));
+        return Math.min(max, Math.max(min, out));
+      }
+
+      function _section(parent, title, expanded = true) {
+        const sec = document.createElement("div");
+        sec.className = "inspector-section";
+        const hdr = document.createElement("div");
+        hdr.className = "section-header" + (expanded ? "" : " collapsed");
+        hdr.innerHTML = _arrowSvg + " " + title;
+        const body = document.createElement("div");
+        body.className = "section-body" + (expanded ? "" : " hidden");
+        hdr.addEventListener("click", () => {
+          hdr.classList.toggle("collapsed");
+          body.classList.toggle("hidden");
+        });
+        sec.appendChild(hdr);
+        sec.appendChild(body);
+        parent.appendChild(sec);
+        return body;
+      }
+
+      function _slider(parent, obj, key, opts) {
+        const { label, min, max, step = 0.01, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        const cur = obj[key];
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="${min}" max="${max}" step="${step}" value="${cur}"><input type="number" class="prop-num-input" title="Type an exact value" min="${min}" max="${max}" step="${step}" value="${_fmt(cur, step)}"></div></div>`;
+        const sl = row.querySelector(".prop-slider");
+        const num = row.querySelector(".prop-num-input");
+        const syncNumDisplay = () => {
+          num.value = _fmt(obj[key], step);
+        };
+        const applyFromSlider = () => {
+          obj[key] = parseFloat(sl.value);
+          syncNumDisplay();
+          onChange?.();
+        };
+        const commitFromNum = () => {
+          const raw = String(num.value).trim();
+          if (raw === "" || raw === "-" || raw === "." || raw === "-.") {
+            syncNumDisplay();
+            return;
+          }
+          let v = parseFloat(raw);
+          if (!Number.isFinite(v)) {
+            syncNumDisplay();
+            return;
+          }
+          v = _clampSnap(v, min, max, step);
+          obj[key] = v;
+          sl.value = String(v);
+          syncNumDisplay();
+          onChange?.();
+        };
+        sl.addEventListener("input", applyFromSlider);
+        num.addEventListener("change", commitFromNum);
+        num.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") num.blur();
+        });
+        parent.appendChild(row);
+      }
+
+      function _color(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-color-wrap"><input type="color" class="prop-color" value="${obj[key]}"><span style="font-size:11px;color:var(--text-dim);font-family:var(--font-mono)">${obj[key]}</span></div></div>`;
+        const inp = row.querySelector(".prop-color");
+        const hex = row.querySelector("span");
+        inp.addEventListener("input", () => {
+          obj[key] = inp.value;
+          hex.textContent = inp.value;
+          onChange?.();
+        });
+        parent.appendChild(row);
+      }
+
+      function _toggle(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><button type="button" class="prop-toggle ${obj[key] ? "checked" : ""}">${_checkSvg}</button></div>`;
+        const btn = row.querySelector(".prop-toggle");
+        btn.addEventListener("click", () => {
+          obj[key] = !obj[key];
+          btn.classList.toggle("checked", obj[key]);
+          onChange?.();
+        });
+        parent.appendChild(row);
+      }
+
+      function _dropdown(parent, obj, key, opts) {
+        const { label, options, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        let optHtml = "";
+        for (const [text, val] of Object.entries(options)) {
+          optHtml += `<option value="${val}" ${obj[key] === val ? "selected" : ""}>${text}</option>`;
+        }
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><select class="prop-dropdown">${optHtml}</select></div>`;
+        const sel = row.querySelector(".prop-dropdown");
+        const isNum = typeof obj[key] === "number";
+        sel.addEventListener("change", () => {
+          obj[key] = isNum ? Number(sel.value) : sel.value;
+          onChange?.();
+        });
+        parent.appendChild(row);
+      }
+
+      function _button(parent, opts) {
+        const { title, onClick } = opts;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "section-btn";
+        btn.textContent = title;
+        btn.addEventListener("click", onClick);
+        parent.appendChild(btn);
+      }
+
+      function _separator(parent) {
+        const el = document.createElement("div");
+        el.className = "ui-separator";
+        parent.appendChild(el);
+      }
+
+      function _text(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><input type="text" class="prop-input" value="${obj[key] ?? ""}"></div>`;
+        const inp = row.querySelector(".prop-input");
+        inp.addEventListener("change", () => {
+          obj[key] = inp.value;
+          onChange?.();
+        });
+        parent.appendChild(row);
+        return {
+          refresh() {
+            inp.value = obj[key] ?? "";
+          },
+        };
+      }
+
+      function _info(parent, label, getValue) {
+        const row = document.createElement("div");
+        row.className = "info-row";
+        const valSpan = document.createElement("span");
+        valSpan.className = "info-value";
+        valSpan.textContent = getValue();
+        row.innerHTML = `<span class="info-label">${label}</span>`;
+        row.appendChild(valSpan);
+        parent.appendChild(row);
+        return {
+          update(v) {
+            valSpan.textContent = v;
+          },
+        };
+      }
+      const _v3 = new THREE.Vector3();
+      const _euler = new THREE.Euler();
+      const _qCard = new THREE.Quaternion();
+      const _qAz = new THREE.Quaternion();
+      const _qOut = new THREE.Quaternion();
+      const _dummy = new THREE.Object3D();
+      const _yAxis = new THREE.Vector3(0, 1, 0);
+      const _trunkP0 = new THREE.Vector3();
+      const _trunkP1 = new THREE.Vector3();
+      const _trunkP2 = new THREE.Vector3();
+      const _trunkTan = new THREE.Vector3();
+      const _trunkRight = new THREE.Vector3();
+      const _trunkFwd = new THREE.Vector3();
+      const _trunkOut = new THREE.Vector3();
+      const _trunkCenter = new THREE.Vector3();
+      const _qSeg = new THREE.Quaternion();
+      const _mSeg = new THREE.Matrix4();
+
+      function trunkHeightT(y, trunk) {
+        const H = Math.max(0.15, trunk.height);
+        const y0 = trunk.yOffset;
+        return THREE.MathUtils.clamp((y - y0) / H, 0, 1);
+      }
+
+      function trunkRadiusAtT(t, trunk) {
+        return THREE.MathUtils.lerp(
+          trunk.radiusBottom,
+          trunk.radiusTop,
+          THREE.MathUtils.clamp(t, 0, 1),
+        );
+      }
+
+      function trunkRadiusAtWorldY(y, trunk) {
+        return trunkRadiusAtT(trunkHeightT(y, trunk), trunk);
+      }
+
+      /** Lateral bow along trunk; base + tip stay on vertical axis (not tip-lean). */
+      function trunkSpineParams(trunk) {
+        let bend = trunk.curveBend ?? 0;
+        let s = trunk.curveS ?? 0;
+        let angleRad = (trunk.curveAngleDeg ?? 0) * DEG;
+        const lx = trunk.curveX ?? 0;
+        const lz = trunk.curveZ ?? 0;
+        if (
+          bend < 1e-6 &&
+          s < 1e-6 &&
+          (Math.abs(lx) > 1e-5 || Math.abs(lz) > 1e-5)
+        ) {
+          bend = Math.hypot(lx, lz) * 0.45;
+          angleRad = Math.atan2(lz, lx);
+        }
+        return { bend, s, angleRad };
+      }
+
+      function trunkHasSpineCurve(trunk) {
+        const { bend, s } = trunkSpineParams(trunk);
+        return bend > 1e-5 || Math.abs(s) > 1e-5;
+      }
+
+      function trunkCenterAtT(t, trunk, target) {
+        const H = Math.max(0.15, trunk.height);
+        const y0 = trunk.yOffset;
+        const u = THREE.MathUtils.clamp(t, 0, 1);
+        const { bend, s, angleRad } = trunkSpineParams(trunk);
+        const wC = Math.sin(Math.PI * u);
+        const wS = s * Math.sin(2 * Math.PI * u);
+        const lateral = bend * (wC + wS);
+        const cx = Math.cos(angleRad);
+        const cz = Math.sin(angleRad);
+        return target.set(cx * lateral, y0 + H * u, cz * lateral);
+      }
+
+      function trunkTangentAtT(t, trunk, target) {
+        const H = Math.max(0.15, trunk.height);
+        const u = THREE.MathUtils.clamp(t, 0, 1);
+        const { bend, s, angleRad } = trunkSpineParams(trunk);
+        const dLateral =
+          bend *
+          (Math.PI * Math.cos(Math.PI * u) +
+            s * 2 * Math.PI * Math.cos(2 * Math.PI * u));
+        const cx = Math.cos(angleRad);
+        const cz = Math.sin(angleRad);
+        target.set(cx * dLateral, H, cz * dLateral);
+        const len = target.length();
+        if (len > 1e-6) target.multiplyScalar(1 / len);
+        else target.set(0, 1, 0);
+        return target;
+      }
+
+      function trunkOutwardAtT(t, thetaRad, trunk, target) {
+        trunkTangentAtT(t, trunk, _trunkTan);
+        _trunkRight.crossVectors(_yAxis, _trunkTan);
+        if (_trunkRight.lengthSq() < 1e-8) _trunkRight.set(1, 0, 0);
+        _trunkRight.normalize();
+        _trunkFwd.crossVectors(_trunkTan, _trunkRight).normalize();
+        return target
+          .copy(_trunkRight)
+          .multiplyScalar(Math.cos(thetaRad))
+          .addScaledVector(_trunkFwd, Math.sin(thetaRad));
+      }
+
+      function trunkPathSegmentCount(trunk) {
+        const manual = Math.round(trunk.pathSegs ?? 0);
+        if (manual >= 4) return Math.min(64, manual);
+        const H = Math.max(0.15, trunk.height);
+        const { bend, s } = trunkSpineParams(trunk);
+        const curve = bend + Math.abs(s) * 0.5;
+        return THREE.MathUtils.clamp(
+          Math.ceil(H * 4) + Math.ceil(curve * 12),
+          4,
+          48,
+        );
+      }
+
+      /** Rotate UVs in 90° steps (geometry.rotateY does not update uv). */
+      function rotateGeometryUV(geo, quarterTurns) {
+        const uv = geo.attributes.uv;
+        if (!uv) return;
+        const n = ((Math.round(quarterTurns) % 4) + 4) % 4;
+        if (n === 0) return;
+        for (let i = 0; i < uv.count; i++) {
+          let u = uv.getX(i);
+          let v = uv.getY(i);
+          for (let t = 0; t < n; t++) {
+            const nu = v;
+            const nv = 1 - u;
+            u = nu;
+            v = nv;
+          }
+          uv.setXY(i, u, v);
+        }
+        uv.needsUpdate = true;
+      }
+
+      function applyMapTransform(tex, matParams) {
+        if (!tex) return;
+        const ru = matParams.texRepeatU ?? 1;
+        const rv = matParams.texRepeatV ?? 1;
+        let su = ru;
+        let sv = rv;
+        if (matParams.texFlipH) su = -Math.abs(ru);
+        if (matParams.texFlipV) sv = -Math.abs(rv);
+        tex.center.set(0.5, 0.5);
+        tex.rotation = (matParams.texRotDeg ?? 0) * DEG;
+        tex.repeat.set(su, sv);
+        tex.offset.set(matParams.texOffsetU ?? 0, matParams.texOffsetV ?? 0);
+        if (matParams.texFlipH) tex.offset.x += Math.abs(ru);
+        if (matParams.texFlipV) tex.offset.y += Math.abs(rv);
+        const tiled =
+          ru !== 1 || rv !== 1 || matParams.texFlipH || matParams.texFlipV;
+        tex.wrapS = tiled ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+        tex.wrapT = tiled ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+        tex.needsUpdate = true;
+      }
+
+      /**
+       * Build in centered XY (normal +Z), deform, move chosen edge midpoint to origin, then rotate +90° Y so:
+       * — plane is perpendicular to trunk (world Y): lies in XZ… after rot, spans Y + tangential Z, normal ≈ −X toward trunk.
+       * — pivot sits on the short-edge center (default: left edge if width ≥ height) for a clean trunk attach.
+       */
+      function createRectangleGeometry(w, h, segX, segY, shape, pivotEdge) {
+        const { bendX, bendY, skewX, skewY, taperX } = shape;
+        const geo = new THREE.PlaneGeometry(w, h, segX, segY);
+        const pos = geo.attributes.position;
+        const hw = w * 0.5;
+        const hh = h * 0.5;
+        for (let i = 0; i < pos.count; i++) {
+          let x = pos.getX(i);
+          let y = pos.getY(i);
+          const nx = hw > 1e-6 ? x / hw : 0;
+          const ny = hh > 1e-6 ? y / hh : 0;
+          const scaleX = 1 + taperX * ny;
+          x *= scaleX;
+          x += skewX * ny * hh;
+          y += skewY * nx * hw;
+          let z = pos.getZ(i);
+          z += bendX * nx * nx;
+          z += bendY * ny * ny;
+          pos.setXYZ(i, x, y, z);
+        }
+
+        let edge = pivotEdge;
+        if (edge === "auto") edge = w >= h ? "left" : "bottom";
+        let px = 0;
+        let py = 0;
+        const pz = 0;
+        switch (edge) {
+          case "bottom":
+            px = 0;
+            py = hh;
+            break;
+          case "top":
+            px = 0;
+            py = -hh;
+            break;
+          case "left":
+            px = hw;
+            py = 0;
+            break;
+          case "right":
+            px = -hw;
+            py = 0;
+            break;
+          default:
+            px = hw;
+            py = 0;
+        }
+        for (let i = 0; i < pos.count; i++) {
+          pos.setXYZ(i, pos.getX(i) + px, pos.getY(i) + py, pos.getZ(i) + pz);
+        }
+
+        geo.rotateY(Math.PI / 2);
+        rotateGeometryUV(geo, 1);
+        pos.needsUpdate = true;
+        geo.computeVertexNormals();
+        return geo;
+      }
+
+      /**
+       * Tapered limb start→end; joints stay exact (bend uses 4t(1−t), zero at both caps).
+       * droop bends in local +Z after align; droopSide in local +X (gravity-ish sag).
+       */
+      function addBentCylinderBetween(
+        parts,
+        start,
+        end,
+        radiusBottom,
+        radiusTop,
+        radialSegs,
+        heightSegs,
+        droop = 0,
+        droopSide = 0,
+      ) {
+        _v3.subVectors(end, start);
+        const len = _v3.length();
+        if (len < 1e-4) return;
+        const r0 = Math.max(0.003, radiusBottom);
+        const r1 = Math.max(0.003, radiusTop);
+        const rs = Math.max(3, Math.round(radialSegs));
+        let hs = Math.max(1, Math.round(heightSegs));
+        const bendAmt = Math.abs(droop) + Math.abs(droopSide);
+        if (bendAmt > 1e-6) hs = Math.max(hs, 2);
+        const geo = new THREE.CylinderGeometry(r1, r0, len, rs, hs);
+        geo.translate(0, len * 0.5, 0);
+        if (bendAmt > 1e-6) {
+          const pos = geo.attributes.position;
+          const capEps = 1e-4;
+          for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i);
+            const y = pos.getY(i);
+            let z = pos.getZ(i);
+            const t = len > 1e-6 ? THREE.MathUtils.clamp(y / len, 0, 1) : 0;
+            if (t <= capEps || t >= 1 - capEps) continue;
+            const profile = 4 * t * (1 - t);
+            z += droop * profile * len;
+            pos.setXYZ(i, x + droopSide * profile * len, y, z);
+          }
+          pos.needsUpdate = true;
+        }
+        geo.computeVertexNormals();
+        _v3.subVectors(end, start).normalize();
+        _qSeg.setFromUnitVectors(_yAxis, _v3);
+        _mSeg.compose(start, _qSeg, new THREE.Vector3(1, 1, 1));
+        geo.applyMatrix4(_mSeg);
+        parts.push(geo);
+      }
+
+      /**
+       * Branch mesh: base (0,0,0) → +Y. Single bent limb by default; optional thin fork twigs.
+       */
+      function createBranchGeometry(b) {
+        const L = Math.max(0.12, b.length);
+        const r0 = Math.max(0.004, b.radiusBottom);
+        const r1 = Math.max(0.004, b.radiusTop);
+        const rs = Math.max(3, Math.round(b.radialSegs));
+        const hs = Math.max(1, Math.round(b.heightSegs));
+        const droop = b.bend ?? 0;
+        const droopSide = b.bendSide ?? 0;
+        const origin = new THREE.Vector3(0, 0, 0);
+        const tip = new THREE.Vector3(0, L, 0);
+        const parts = [];
+
+        if (b.forkEnabled !== true) {
+          addBentCylinderBetween(
+            parts,
+            origin,
+            tip,
+            r0,
+            r1,
+            rs,
+            hs,
+            droop,
+            droopSide,
+          );
+        } else {
+          const forkT = THREE.MathUtils.clamp(b.forkStart ?? 0.68, 0.4, 0.92);
+          const forkN = THREE.MathUtils.clamp(
+            Math.round(b.forkCount ?? 2),
+            1,
+            4,
+          );
+          const spread = (b.forkAngleDeg ?? 28) * DEG;
+          const twist = (b.forkTwistDeg ?? 0) * DEG;
+          const forkRadiusMul = THREE.MathUtils.clamp(
+            b.forkRadiusMul ?? 0.38,
+            0.15,
+            0.85,
+          );
+          const forkTipScale = THREE.MathUtils.clamp(
+            b.forkTipScale ?? 0.5,
+            0.2,
+            1,
+          );
+          const forkLenMul = THREE.MathUtils.clamp(
+            b.forkLengthMul ?? 0.58,
+            0.2,
+            1,
+          );
+          const mainLen = L * forkT;
+          const rFork = THREE.MathUtils.lerp(r0, r1, forkT);
+          const forkPt = new THREE.Vector3(0, mainLen, 0);
+
+          addBentCylinderBetween(
+            parts,
+            origin,
+            forkPt,
+            r0,
+            rFork,
+            rs,
+            hs,
+            droop,
+            droopSide * 0.35,
+          );
+
+          const baseChildLen = L * (1 - forkT) * forkLenMul;
+          const sinS = Math.sin(spread);
+          const cosS = Math.cos(spread);
+          const childR0 = Math.max(0.003, rFork * forkRadiusMul);
+          const childR1 = Math.max(0.003, childR0 * forkTipScale);
+
+          for (let i = 0; i < forkN; i++) {
+            const az = twist + (i / forkN) * Math.PI * 2;
+            const lenJit = 0.72 + 0.28 * ((i * 0.37) % 1);
+            const childLen = baseChildLen * lenJit;
+            const dir = new THREE.Vector3(
+              Math.cos(az) * sinS,
+              cosS,
+              Math.sin(az) * sinS,
+            ).normalize();
+            const end = forkPt.clone().addScaledVector(dir, childLen);
+            const childSign = i % 2 === 0 ? 1 : -1;
+            addBentCylinderBetween(
+              parts,
+              forkPt,
+              end,
+              childR0 * (0.92 + i * 0.02),
+              childR1,
+              Math.max(3, rs - 2),
+              Math.max(1, hs - 1),
+              droop * (0.35 + 0.08 * i),
+              droopSide * 0.45 * childSign,
+            );
+          }
+        }
+
+        if (parts.length === 0) {
+          return new THREE.CylinderGeometry(r1, r0, L, rs, hs);
+        }
+        const merged = parts.length === 1 ? parts[0] : mergeGeometries(parts);
+        for (const g of parts) {
+          if (g !== merged) g.dispose();
+        }
+        merged.computeVertexNormals();
+        return merged;
+      }
+
+      function instanceScaleJitter(idx, amount) {
+        const s = Math.sin(idx * 12.9898) * 43758.5453;
+        return (s - Math.floor(s) - 0.5) * 2 * amount;
+      }
+
+      /** Extra pitch (°) at this whorl, on top of transform.rotXDeg (see Card tilt). */
+      function pineLevelPitchExtraDeg(level, levels, foliage) {
+        if (foliage.pitchCurveEnabled === false) return 0;
+        const tLin = levels <= 1 ? 0 : level / (levels - 1);
+        const pow = Math.max(0.05, foliage.pitchCurvePower ?? 1);
+        const t = Math.pow(tLin, pow);
+        const b = foliage.pitchBottomDeg ?? 0;
+        const top = foliage.pitchTopDeg ?? 0;
+        return THREE.MathUtils.lerp(b, top, t);
+      }
+
+      /** Top whorl (level = levels−1) uses trunk tip; lower whorls lerp from baseY. */
+      function pineRingTrunkT(level, levels, f, tr) {
+        const n = Math.max(1, levels);
+        if (n <= 1) return 1;
+        const tLin = level / (n - 1);
+        const yBase = f.baseY + (f.offsetY ?? 0);
+        const tBottom = THREE.MathUtils.clamp(trunkHeightT(yBase, tr), 0, 1);
+        const hPow = Math.max(0.05, f.heightPower ?? 1);
+        return THREE.MathUtils.lerp(tBottom, 1, Math.pow(tLin, hPow));
+      }
+
+      function migrateFoliageParams(f) {
+        if (f.pitchCurveEnabled == null) f.pitchCurveEnabled = true;
+        if (f.pitchBottomDeg == null) f.pitchBottomDeg = -8;
+        if (f.pitchTopDeg == null) f.pitchTopDeg = -8;
+        if (f.pitchCurvePower == null) f.pitchCurvePower = 1;
+        if (f.heightPower == null) f.heightPower = 1;
+        if (f.tipRingSlide == null) f.tipRingSlide = -0.06;
+        delete f.apexEnabled;
+        delete f.apexCount;
+        delete f.apexYOffset;
+        delete f.apexScaleMul;
+        delete f.apexPitchDeg;
+        delete f.apexSpreadDeg;
+        delete f.apexPivotAlongRadius;
+      }
+
+      function migrateLod2CheapParams(p) {
+        const d = {
+          colorVarMul: 0.35,
+          aoStrengthMul: 1.35,
+          pivotAoMul: 1.2,
+          veinMul: 0.4,
+          sssMul: 0.2,
+          rimMul: 0.15,
+          sunDarkenStr: 0.04,
+          sunDarkenPower: 1.6,
+          brightnessMul: 0.92,
+          cardShadowStr: 0.81,
+          cardShadowFloor: 0.066,
+          cardShadowReach: 0.84,
+          cardShadowPower: 1.35,
+        };
+        if (!p.lod2Cheap) {
+          p.lod2Cheap = { ...d };
+          return;
+        }
+        for (const [k, v] of Object.entries(d)) {
+          if (p.lod2Cheap[k] == null) p.lod2Cheap[k] = v;
+        }
+      }
+
+      /** Stable 0…1 hash for ring / card randomization (seed changes → reshuffle). */
+      function foliageHash01(a, b, seed) {
+        const s =
+          Math.sin(a * 12.9898 + b * 78.233 + seed * 43.758) * 43758.5453;
+        return s - Math.floor(s);
+      }
+
+      function foliageRandomSignedDeg(a, b, seed, amount) {
+        if (!amount) return 0;
+        return (foliageHash01(a, b, seed) * 2 - 1) * amount;
+      }
+
+      function makeCheckerTexture() {
+        const t = new THREE.CanvasTexture(
+          (() => {
+            const c = document.createElement("canvas");
+            c.width = c.height = 256;
+            const g = c.getContext("2d");
+            const n = 8;
+            const s = 256 / n;
+            for (let j = 0; j < n; j++) {
+              for (let i = 0; i < n; i++) {
+                g.fillStyle = (i + j) % 2 ? "#c8d8e8" : "#f0f4f8";
+                g.fillRect(i * s, j * s, s, s);
+              }
+            }
+            g.strokeStyle = "rgba(60,80,120,0.35)";
+            g.lineWidth = 1;
+            for (let k = 0; k <= n; k++) {
+              g.beginPath();
+              g.moveTo(0, k * s);
+              g.lineTo(256, k * s);
+              g.stroke();
+              g.beginPath();
+              g.moveTo(k * s, 0);
+              g.lineTo(k * s, 256);
+              g.stroke();
+            }
+            return c;
+          })(),
+        );
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.repeat.set(4, 4);
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.needsUpdate = true;
+        return t;
+      }
+
+      (async () => {
+        const params = {
+          rect: {
+            width: 2,
+            height: 0.95,
+            /** auto | left | right | bottom | top — short edge recommended for trunk hook */
+            pivotEdge: "auto",
+          },
+          /** Pine card: subdivide along width (bough) for bendX; height needs segY≥2 for bendY (ny² needs ny=0). */
+          grid: {
+            segX: 4,
+            segY: 2,
+          },
+          shape: {
+            bendX: 0.14,
+            bendY: -0.2,
+            skewX: 0,
+            skewY: 0,
+            taperX: 0,
+          },
+          transform: {
+            posX: 0.01,
+            posY: 0.69,
+            posZ: 0,
+            rotXDeg: -20,
+            rotYDeg: 0,
+            rotZDeg: 90,
+          },
+          foliage: {
+            enabled: true,
+            layout: "pine",
+            levels: 7,
+            perRing: 7,
+            baseY: 2,
+            /** Legacy spacing (m); kept in presets — placement uses heightPower + tip lock. */
+            stepY: 0.47,
+            /** Whorl spacing along trunk: 1 = even; >1 bunches rings toward tip. Top whorl always at tip. */
+            heightPower: 0.85,
+            /** Slide top whorl along trunk (m); negative = slightly below tip. */
+            tipRingSlide: -0.06,
+            scaleBottom: 1.2,
+            scaleTop: 0.32,
+            scalePower: 1.15,
+            globalScale: 1,
+            radialInset: 0.02,
+            /** 0 = pivot on trunk axis (centered from top); 1 = pivot on surface at this azimuth (old behavior) */
+            pivotAlongRadius: 0,
+            azimuthOffsetDeg: 0,
+            staggerDeg: 19.5,
+            /** ±° random spin of whole ring per level (Y axis); use seed / reshuffle to reroll */
+            ringRandomDeg: 8,
+            ringRandomSeed: 0,
+            /** ±° extra azimuth per card on the ring (Y axis) */
+            cardRandomDeg: 5,
+            /** Extra pitch (°) added to card tilt at bottom / top whorl; lerped by height. */
+            pitchCurveEnabled: true,
+            pitchBottomDeg: -8,
+            pitchTopDeg: -8,
+            /** 1 = linear by level; >1 shifts pitch change toward the crown tip. */
+            pitchCurvePower: 1,
+            /** Per-leaf variation (same seed as ring/card random; reshuffle rerolls all) */
+            leafPitchRandomDeg: 6,
+            leafYRandom: 0.05,
+            leafScaleRandom: 0.1,
+            offsetX: 0,
+            offsetY: 0,
+            offsetZ: 0,
+          },
+          trunk: {
+            height: 5,
+            radiusBottom: 0.14,
+            radiusTop: 0.01,
+            yOffset: 0,
+            /** Mid-trunk lateral bow (m); base/tip stay on axis. sin(π·t) + optional S term. */
+            curveBend: 0.12,
+            curveAngleDeg: 0,
+            curveS: 0,
+            /** 0 = auto segment count from height + curve; otherwise 4–64 along path. */
+            pathSegs: 0,
+            radialSegs: 20,
+            /** Stylized BOTW-style bark (TSL, world-space). */
+            barkDark: "#2a1f18",
+            barkMid: "#4a3528",
+            barkLight: "#6b5240",
+            barkHighlight: "#8a7058",
+            roughness: 0.94,
+            metalness: 0,
+            stripeFreq: 9,
+            stripeStrength: 0.22,
+            noiseScale: 2.4,
+            noiseStrength: 0.14,
+            crackStrength: 0.1,
+            baseAo: 0.4,
+            mossStrength: 0.12,
+            rimColor: "#a09078",
+            rimStrength: 0.11,
+            rimPower: 2.2,
+            visible: true,
+          },
+          material: {
+            roughness: 1,
+            metalness: 0,
+            useChecker: false,
+            alphaTest: 0.45,
+            depthWrite: true,
+            uploadName: "Frame 56",
+            /** 'tsl' = procedural leaf look; 'texture' = sample RGB from uploaded image */
+            colorSource: "tsl",
+            /** 'alpha' = map RGBA; 'luminance' = alphaMap (red channel) for B&amp;W / grayscale masks */
+            maskMode: "alpha",
+            /** single = full image on each card; atlas = 2×2 cells, random variant per instance */
+            textureMode: "single",
+            atlasCols: 2,
+            atlasRows: 2,
+            bottomColor: "#1a4520",
+            topColor: "#6aab38",
+            colorVar: 0.14,
+            normalBias: 0.28,
+            leafWarp: 0,
+            radialUp: 0.35,
+            veinStrength: 0.1,
+            pivotAo: 0.35,
+            aoStrength: 0.4,
+            aoRadius: 2.2,
+            sssColor: "#b8d85a",
+            sssStrength: 0.38,
+            sssPower: 2.2,
+            rimColor: "#d8f0b0",
+            rimStrength: 0,
+            rimPower: 2.4,
+            /** U = along card width (bough), V = across card height — adjust if art export differs */
+            texRotDeg: 0,
+            texOffsetU: 0,
+            texOffsetV: 0,
+            texRepeatU: 1,
+            texRepeatV: 1,
+            texFlipH: false,
+            texFlipV: false,
+          },
+          // Same defaults as template-unreal-objects.html / v2/editor (config.js light block).
+          light: {
+            sunAzimuth: 135,
+            sunElevation: 43,
+            dirColor: "#fff5e0",
+            dirIntensity: 2.2,
+            hemiSkyColor: "#c8e0ff",
+            hemiGroundColor: "#88aa55",
+            hemiIntensity: 0.4,
+            envIntensity: 0.2,
+            exposure: 0.5,
+            sunDistance: 600,
+            shadowBias: -0.00015,
+            shadowNormalBias: 0.012,
+          },
+          // Same defaults as template-unreal-objects.html / v2/editor (physicalSky block).
+          physicalSky: {
+            turbidity: 2,
+            rayleigh: 1.5,
+            mie: 0.005,
+            mieG: 0.8,
+            cloudCoverage: 0.4,
+            cloudDensity: 0.4,
+            cloudElevation: 0.5,
+            meshScale: 10000,
+          },
+          /** Tighter than open-world template — single-tree editor needs sharper cascades. */
+          csm: {
+            cascades: 2,
+            maxFar: 56,
+            lightMargin: 16,
+            mapSize: 4096,
+          },
+          scene: {
+            showGround: true,
+            showFog: false,
+            castFoliageShadows: true,
+            receiveFoliageShadows: true,
+          },
+          branches: {
+            enabled: false,
+            /** How many branch instances (typical 1–3 near base when using leaf cards). */
+            count: 2,
+            placementSeed: 42,
+            /** Trunk height fraction 0…1 — only place branches in [bottom, top]. */
+            bottomTrunkT: 0.04,
+            topTrunkT: 0.32,
+            /** Stop below foliage.baseY (leaves cover the rest). */
+            clampBelowFoliage: true,
+            belowFoliageMargin: 0.18,
+            scaleVariation: 0.16,
+            lengthVariation: 0.22,
+            globalScale: 1,
+            radialInset: 0.01,
+            pivotAlongRadius: 1,
+            pitchUpDeg: 22,
+            rotXDeg: 0,
+            rotYDeg: 0,
+            rotZDeg: 0,
+            trunkEmbed: 0.02,
+            offsetX: 0,
+            offsetY: 0,
+            offsetZ: 0,
+            length: 0.82,
+            radiusBottom: 0.042,
+            radiusTop: 0.016,
+            radialSegs: 6,
+            heightSegs: 4,
+            bend: 0.22,
+            /** Side sag in branch local X (after attach); pairs with bend for natural droop. */
+            bendSide: 0.06,
+            forkEnabled: false,
+            forkCount: 2,
+            forkStart: 0.68,
+            forkAngleDeg: 28,
+            forkTwistDeg: 0,
+            forkLengthMul: 0.58,
+            forkRadiusMul: 0.38,
+            forkTipScale: 0.5,
+            color: "#4a3528",
+            roughness: 0.88,
+          },
+          wind: {
+            enabled: true,
+            speed: 1.1,
+            strength: 0.14,
+            micro: 0.04,
+            directionDeg: 25,
+          },
+          debug: {
+            wireframe: false,
+            showPivot: false,
+          },
+          presetName: "my_pine",
+          /** v2 Tree slot handoff (arborist-shaped top-level JSON on save). */
+          export: {
+            trunkFile: "",
+            trunkLod1File: "",
+            trunkScale: 1,
+            billboardLeaves: false,
+            billboardYawOnly: true,
+          },
+          lodPreview: false,
+          lodDist1: 80,
+          lodDist2: 200,
+          /** LOD2 = same cards as LOD1; cheaper shading (matches forest bench). */
+          lod2Cheap: {
+            colorVarMul: 0.35,
+            aoStrengthMul: 1.35,
+            pivotAoMul: 1.2,
+            veinMul: 0.4,
+            sssMul: 0.2,
+            rimMul: 0.15,
+            sunDarkenStr: 0.04,
+            sunDarkenPower: 1.6,
+            brightnessMul: 0.92,
+            cardShadowStr: 0.81,
+            cardShadowFloor: 0.066,
+            cardShadowReach: 0.84,
+            cardShadowPower: 1.35,
+          },
+          trunkTris: 0,
+          totalLeaves: 0,
+          totalLeafTris: 0,
+          lod1Leaves: 0,
+          lod2Leaves: 0,
+        };
+
+        const LOD_SPACING = 12;
+        const LOD_LABEL_Z = 5.2;
+        const PRESET_VERSION = 2;
+
+        function sunDirectionFromAngles(
+          azDeg,
+          elDeg,
+          target = new THREE.Vector3(),
+        ) {
+          const az = THREE.MathUtils.degToRad(azDeg);
+          const el = THREE.MathUtils.degToRad(elDeg);
+          return target
+            .set(
+              Math.cos(el) * Math.cos(az),
+              Math.sin(el),
+              Math.cos(el) * Math.sin(az),
+            )
+            .normalize();
+        }
+
+        function migrateLightingParams() {
+          const sc = params.scene ?? {};
+          if (!params.light) {
+            params.light = {
+              sunAzimuth: 135,
+              sunElevation: 43,
+              dirColor: "#fff5e0",
+              dirIntensity: sc.sunIntensity ?? 2.2,
+              hemiSkyColor: "#c8e0ff",
+              hemiGroundColor: "#88aa55",
+              hemiIntensity: sc.ambientInt ?? 0.4,
+              envIntensity: 0.2,
+              exposure: 0.5,
+              sunDistance: 600,
+              shadowBias: -0.00015,
+              shadowNormalBias: 0.012,
+            };
+          }
+          if (sc.sunX != null && sc.sunY != null && sc.sunZ != null) {
+            const v = new THREE.Vector3(sc.sunX, sc.sunY, sc.sunZ).normalize();
+            params.light.sunElevation = THREE.MathUtils.radToDeg(
+              Math.asin(THREE.MathUtils.clamp(v.y, -1, 1)),
+            );
+            params.light.sunAzimuth = THREE.MathUtils.radToDeg(
+              Math.atan2(v.z, v.x),
+            );
+            if (sc.sunIntensity != null)
+              params.light.dirIntensity = sc.sunIntensity;
+            if (sc.ambientInt != null)
+              params.light.hemiIntensity = sc.ambientInt;
+            delete sc.sunX;
+            delete sc.sunY;
+            delete sc.sunZ;
+            delete sc.sunIntensity;
+            delete sc.ambientInt;
+            delete sc.bgColor;
+            delete sc.shadowFocus;
+            delete sc.shadowMapSize;
+            delete sc.csmEnabled;
+            delete sc.csmCascades;
+            delete sc.csmMaxFar;
+            delete sc.csmLightMargin;
+            delete sc.csmMapSize;
+          }
+          if (!params.physicalSky) {
+            params.physicalSky = {
+              turbidity: 2,
+              rayleigh: 1.5,
+              mie: 0.005,
+              mieG: 0.8,
+              cloudCoverage: 0.4,
+              cloudDensity: 0.4,
+              cloudElevation: 0.5,
+              meshScale: 10000,
+            };
+          }
+          if (!params.csm) {
+            params.csm = {
+              cascades: sc.csmCascades ?? 2,
+              maxFar: sc.csmMaxFar ?? 56,
+              lightMargin: sc.csmLightMargin ?? 16,
+              mapSize: sc.csmMapSize ?? 4096,
+            };
+          }
+        }
+        migrateLightingParams();
+
+        // Vite serves `public/` at the site root. From v2/pine-editor33.html, bare
+        // `textures/...` resolves to /v2/textures/... (404). Presets keep the canonical
+        // `textures/...` string; resolve to `/textures/...` at load time.
+        function resolvePublicPath(path) {
+          if (
+            !path ||
+            path.startsWith("data:") ||
+            path.startsWith("http") ||
+            path.startsWith("/")
+          )
+            return path;
+          return "/" + path.replace(/^\.\//, "");
+        }
+
+        const PINE_LEAF_TEXTURES = [
+          {
+            name: "Frame 56",
+            path: "textures/pine-leaves/Frame 56.png",
+            mode: "single",
+          },
+          {
+            name: "Frame 57",
+            path: "textures/pine-leaves/Frame 57.png",
+            mode: "single",
+          },
+          {
+            name: "Atlas 4×128×256",
+            path: "textures/pine-leaves/pine-atlas-4.png",
+            mode: "atlas",
+          },
+        ];
+        let activeLeafTexPath = "";
+        let activeLeafTexDataUrl = "";
+        let galleryImgs = [];
+        let lodMesh1 = null;
+        let lodMesh2 = null;
+        let foliageMeshCapacity = 0;
+        let lodTrunk0Clone = null;
+        let lodTrunk1Clone = null;
+        let lodTrunk2Clone = null;
+        const lodGroundLabels = [];
+        const infoEl = document.getElementById("hint");
+
+        const scene = new THREE.Scene();
+        scene.fog = null;
+
+        const camera = new THREE.PerspectiveCamera(
+          55,
+          innerWidth / innerHeight,
+          0.1,
+          5000,
+        );
+        camera.position.set(7, 5, 10);
+
+        const renderer = new THREE.WebGPURenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = params.light.exposure;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.shadowMap.transmitted = true;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 3, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.update();
+
+        // ── LIGHTS (template-unreal-objects.html) ──
+        const sunDir = new THREE.Vector3();
+        const hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 1);
+        scene.add(hemi);
+
+        const sun = new THREE.DirectionalLight(0xffffff, 1);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(params.csm.mapSize, params.csm.mapSize);
+        sun.shadow.camera.near = 0.5;
+        sun.shadow.camera.far = Math.max(80, params.csm.maxFar * 2);
+        sun.shadow.camera.left = sun.shadow.camera.bottom = -40;
+        sun.shadow.camera.right = sun.shadow.camera.top = 40;
+        const shadowTarget = new THREE.Object3D();
+        shadowTarget.position.set(0, 2.5, 0);
+        scene.add(shadowTarget);
+        sun.target = shadowTarget;
+        scene.add(sun);
+
+        // CSM cascaded shadows — same node as template, tuned for close-up tree editing.
+        let csm = null;
+        try {
+          csm = new CSMShadowNode(sun, {
+            cascades: params.csm.cascades,
+            maxFar: params.csm.maxFar,
+            mode: "practical",
+            lightMargin: params.csm.lightMargin,
+          });
+          sun.shadow.shadowNode = csm;
+          if (csm.lights?.length > 2) {
+            csm.lights[2].shadow.mapSize.set(1024, 1024);
+          }
+        } catch (err) {
+          console.warn("[pine-editor33] CSMShadowNode init failed.", err);
+        }
+
+        function applyCsmSettings() {
+          if (!csm) return;
+          const c = params.csm;
+          csm.cascades = Math.max(1, Math.round(c.cascades ?? 2));
+          csm.maxFar = c.maxFar ?? 56;
+          csm.lightMargin = c.lightMargin ?? 16;
+          const mapSize = THREE.MathUtils.clamp(
+            Math.round(c.mapSize ?? 4096),
+            512,
+            8192,
+          );
+          if (
+            sun.shadow.map &&
+            (sun.shadow.mapSize.x !== mapSize ||
+              sun.shadow.mapSize.y !== mapSize)
+          ) {
+            sun.shadow.map.dispose();
+            sun.shadow.map = null;
+          }
+          sun.shadow.mapSize.set(mapSize, mapSize);
+          if (csm.lights?.length > 2) {
+            csm.lights[2].shadow.mapSize.set(
+              Math.min(1024, mapSize),
+              Math.min(1024, mapSize),
+            );
+          }
+          if (csm.mainFrustum) csm.updateFrustums();
+        }
+        applyCsmSettings();
+
+        // ── SKY (SkyMesh physical sky + PMREM IBL) ──
+        const sky = new SkyMesh();
+        if (sky.material) sky.material.fog = false;
+        scene.add(sky);
+
+        let pmremGenerator = null;
+        let _disposePmrem = null;
+
+        function applySkyUniforms() {
+          const S = params.physicalSky;
+          sky.turbidity.value = S.turbidity;
+          sky.rayleigh.value = S.rayleigh;
+          sky.mieCoefficient.value = S.mie;
+          sky.mieDirectionalG.value = S.mieG;
+          sky.cloudCoverage.value = S.cloudCoverage;
+          sky.cloudDensity.value = S.cloudDensity;
+          sky.cloudElevation.value = S.cloudElevation;
+          sky.scale.setScalar(S.meshScale);
+          if (sky.sunPosition?.value?.copy) sky.sunPosition.value.copy(sunDir);
+          else if (sky.sunPosition?.copy) sky.sunPosition.copy(sunDir);
+        }
+
+        function rebuildSkyEnv() {
+          try {
+            applySkyUniforms();
+            if (_disposePmrem) {
+              _disposePmrem();
+              _disposePmrem = null;
+            }
+            pmremGenerator =
+              pmremGenerator ?? new THREE.PMREMGenerator(renderer);
+            const envScene = new THREE.Scene();
+            envScene.add(sky.clone());
+            const pmremRT = pmremGenerator.fromScene(envScene, 0.04);
+            scene.environment = pmremRT.texture;
+            _disposePmrem = () => pmremRT.dispose();
+          } catch (err) {
+            console.warn("[pine-editor33] PMREM from SkyMesh failed.", err);
+          }
+        }
+
+        function updateSun() {
+          const L = params.light;
+          sunDirectionFromAngles(L.sunAzimuth, L.sunElevation, sunDir);
+          sun.position.copy(sunDir).multiplyScalar(L.sunDistance);
+          sun.color.set(L.dirColor);
+          sun.intensity = L.dirIntensity;
+          sun.shadow.bias = L.shadowBias;
+          sun.shadow.normalBias = L.shadowNormalBias;
+          hemi.color.set(L.hemiSkyColor);
+          hemi.groundColor.set(L.hemiGroundColor);
+          hemi.intensity = L.hemiIntensity;
+          renderer.toneMappingExposure = L.exposure;
+          scene.environmentIntensity = L.envIntensity;
+          if (scene.fog) scene.fog.color.set(L.hemiSkyColor);
+          applySkyUniforms();
+        }
+
+        updateSun();
+        rebuildSkyEnv();
+
+        function applyShadowFlags() {
+          const sc = params.scene;
+          const leafCast = sc.castFoliageShadows !== false;
+          const leafRecv = sc.receiveFoliageShadows === true;
+          trunkMesh.castShadow = true;
+          trunkMesh.receiveShadow = true;
+          if (foliageObject) {
+            foliageObject.castShadow = leafCast;
+            foliageObject.receiveShadow = leafRecv;
+          }
+          if (lodMesh1) {
+            lodMesh1.castShadow = leafCast;
+            lodMesh1.receiveShadow = false;
+          }
+          if (lodMesh2) {
+            lodMesh2.castShadow = false;
+            lodMesh2.receiveShadow = false;
+          }
+          if (branchesObject) {
+            branchesObject.castShadow = leafCast && params.branches.enabled;
+            branchesObject.receiveShadow = leafRecv;
+          }
+          for (const c of [lodTrunk0Clone, lodTrunk1Clone, lodTrunk2Clone]) {
+            if (c) {
+              c.castShadow = true;
+              c.receiveShadow = true;
+            }
+          }
+        }
+
+        const groundGeo = new THREE.CircleGeometry(40, 72);
+        const groundMat = new THREE.MeshStandardMaterial({
+          color: "#4a7c2a",
+          roughness: 0.92,
+          metalness: 0,
+        });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        const pebbleGeo = new THREE.SphereGeometry(0.12, 5, 3);
+        const pebbleMat = new THREE.MeshStandardMaterial({
+          color: "#888",
+          roughness: 0.95,
+        });
+        [
+          [-1.8, 0, 1.4],
+          [2.2, 0, 0.9],
+          [-0.5, 0, 2.3],
+          [1.5, 0, -1.7],
+        ].forEach(([x, y, z]) => {
+          const p = new THREE.Mesh(pebbleGeo, pebbleMat);
+          p.position.set(x, 0.07, z);
+          p.scale.y = 0.5 + Math.random() * 0.5;
+          p.castShadow = true;
+          p.receiveShadow = true;
+          scene.add(p);
+        });
+
+        const checker = makeCheckerTexture();
+        const opaqueTex = new THREE.DataTexture(
+          new Uint8Array([255, 255, 255, 255]),
+          1,
+          1,
+        );
+        opaqueTex.colorSpace = THREE.SRGBColorSpace;
+        opaqueTex.needsUpdate = true;
+        let uploadedTex = null;
+
+        function configureMaskTexture(tex) {
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+          tex.premultiplyAlpha = false;
+          tex.generateMipmaps = false;
+          tex.minFilter = THREE.LinearFilter;
+          tex.magFilter = THREE.LinearFilter;
+          tex.needsUpdate = true;
+        }
+
+        const leafU = {
+          bottomColor: uniform(new THREE.Color(params.material.bottomColor)),
+          topColor: uniform(new THREE.Color(params.material.topColor)),
+          colorVar: uniform(params.material.colorVar),
+          normalBias: uniform(params.material.normalBias),
+          leafWarp: uniform(params.material.leafWarp),
+          radialUp: uniform(params.material.radialUp),
+          veinStrength: uniform(params.material.veinStrength),
+          pivotAo: uniform(params.material.pivotAo),
+          aoStrength: uniform(params.material.aoStrength),
+          aoRadius: uniform(params.material.aoRadius),
+          yMin: uniform(0),
+          yMax: uniform(8),
+          canopyCenter: uniform(new THREE.Vector3(0, 4, 0)),
+          alphaCutoff: uniform(params.material.alphaTest),
+          maskInAlpha: uniform(params.material.maskMode === "alpha" ? 1 : 0),
+          useMaskTex: uniform(0),
+          useAtlas: uniform(0),
+          atlasCols: uniform(2),
+          atlasRows: uniform(2),
+          atlasCount: uniform(4),
+          useImageColor: uniform(0),
+          texRot: uniform(0),
+          texOff: uniform(new THREE.Vector2(0, 0)),
+          texRep: uniform(new THREE.Vector2(1, 1)),
+          texFlip: uniform(new THREE.Vector2(0, 0)),
+          sssColor: uniform(new THREE.Color(params.material.sssColor)),
+          sssStrength: uniform(params.material.sssStrength),
+          sssPower: uniform(params.material.sssPower),
+          rimColor: uniform(new THREE.Color(params.material.rimColor)),
+          rimStrength: uniform(params.material.rimStrength),
+          rimPower: uniform(params.material.rimPower),
+          sunDir: uniform(new THREE.Vector3(5, 12, 4).normalize()),
+          time: uniform(0),
+          windEnabled: uniform(1),
+          windSpeed: uniform(params.wind.speed),
+          windStr: uniform(params.wind.strength),
+          windMicro: uniform(params.wind.micro),
+          windDir: uniform(params.wind.directionDeg * DEG),
+        };
+
+        const c2 = params.lod2Cheap;
+        const leafU2 = {
+          bottomColor: uniform(new THREE.Color(params.material.bottomColor)),
+          topColor: uniform(new THREE.Color(params.material.topColor)),
+          colorVar: uniform(params.material.colorVar * c2.colorVarMul),
+          normalBias: uniform(params.material.normalBias),
+          leafWarp: uniform(params.material.leafWarp),
+          radialUp: uniform(params.material.radialUp),
+          veinStrength: uniform(params.material.veinStrength * c2.veinMul),
+          pivotAo: uniform(
+            Math.min(0.55, params.material.pivotAo * c2.pivotAoMul),
+          ),
+          aoStrength: uniform(
+            Math.min(0.75, params.material.aoStrength * c2.aoStrengthMul),
+          ),
+          aoRadius: uniform(params.material.aoRadius),
+          canopyCenter: uniform(new THREE.Vector3(0, 4, 0)),
+          alphaCutoff: uniform(params.material.alphaTest),
+          maskInAlpha: uniform(params.material.maskMode === "alpha" ? 1 : 0),
+          useMaskTex: uniform(0),
+          useImageColor: uniform(0),
+          sssColor: uniform(new THREE.Color(params.material.sssColor)),
+          sssStrength: uniform(params.material.sssStrength * c2.sssMul),
+          sssPower: uniform(params.material.sssPower),
+          rimColor: uniform(new THREE.Color(params.material.rimColor)),
+          rimStrength: uniform(params.material.rimStrength * c2.rimMul),
+          rimPower: uniform(params.material.rimPower),
+          sunDir: uniform(new THREE.Vector3(5, 12, 4).normalize()),
+          sunDarkenStr: uniform(c2.sunDarkenStr),
+          sunDarkenPower: uniform(c2.sunDarkenPower),
+          brightnessMul: uniform(c2.brightnessMul),
+          cardShadowStr: uniform(c2.cardShadowStr),
+          cardShadowFloor: uniform(c2.cardShadowFloor),
+          cardShadowReach: uniform(c2.cardShadowReach),
+          cardShadowPower: uniform(c2.cardShadowPower),
+          time: uniform(0),
+          windEnabled: uniform(0),
+          windSpeed: uniform(0),
+          windStr: uniform(0),
+          windMicro: uniform(0),
+          windDir: uniform(0),
+        };
+
+        const leafMapNode = texture(checker);
+        leafMapNode.value = checker;
+
+        const leafMaskUv = Fn(() => {
+          let u = uv();
+          u = rotateUV(u, leafU.texRot);
+          u = sub(u, vec2(0.5, 0.5));
+          u = vec2(
+            mix(u.x, sub(float(1), u.x), leafU.texFlip.x),
+            mix(u.y, sub(float(1), u.y), leafU.texFlip.y),
+          );
+          u = add(mul(u, leafU.texRep), vec2(0.5, 0.5));
+          u = add(u, leafU.texOff);
+          const variantIdx = floor(mul(hash(instanceIndex), leafU.atlasCount));
+          const colIdx = sub(
+            variantIdx,
+            mul(floor(div(variantIdx, leafU.atlasCols)), leafU.atlasCols),
+          );
+          const rowIdx = floor(div(variantIdx, leafU.atlasCols));
+          const invCols = div(float(1), leafU.atlasCols);
+          const invRows = div(float(1), leafU.atlasRows);
+          const atlasU = add(mul(u.x, invCols), mul(colIdx, invCols));
+          const atlasV = add(mul(u.y, invRows), mul(rowIdx, invRows));
+          u = vec2(
+            mix(u.x, atlasU, leafU.useAtlas),
+            mix(u.y, atlasV, leafU.useAtlas),
+          );
+          return u;
+        });
+
+        /** One outward dir per card (pivot on trunk), stable when orbiting. */
+        const leafInstancePivotW = modelWorldMatrix.mul(vec4(0, 0, 0, 1)).xyz;
+        const leafTrunkRadial = normalize(
+          vec3(leafInstancePivotW.x, leafU.radialUp, leafInstancePivotW.z),
+        );
+
+        const leafNormalNode = Fn(() => {
+          const warped = normalize(
+            add(normalLocal, mul(sin(mul(uv().x, float(10))), leafU.leafWarp)),
+          );
+          return normalize(mix(warped, leafTrunkRadial, leafU.normalBias));
+        })();
+
+        /** World-space sway; tips move more (local Y²). Rotated into each card via instance matrix. */
+        const leafWindWorld = Fn(() => {
+          const phase = add(
+            mul(leafU.time, leafU.windSpeed),
+            mul(instanceIndex.toFloat(), float(1.31)),
+            mul(hash(instanceIndex), float(6.2832)),
+          );
+          const tip = mul(
+            max(positionLocal.y, float(0)),
+            max(positionLocal.y, float(0)),
+          );
+          const sway = mul(sin(phase), leafU.windStr, tip);
+          const micro = mul(
+            sin(
+              add(mul(phase, float(2.4)), mul(hash(instanceIndex), float(3.1))),
+            ),
+            leafU.windMicro,
+            tip,
+          );
+          const swayZ = mul(
+            cos(
+              add(
+                mul(phase, float(0.85)),
+                mul(instanceIndex.toFloat(), float(0.7)),
+              ),
+            ),
+            leafU.windStr,
+            float(0.45),
+            tip,
+          );
+          const amount = add(sway, micro);
+          return vec3(
+            mul(cos(leafU.windDir), amount),
+            float(0),
+            add(mul(sin(leafU.windDir), amount), swayZ),
+          );
+        });
+
+        const leafPositionNode = Fn(() => {
+          const wo = leafWindWorld();
+          const wl = modelWorldMatrixInverse.mul(
+            vec4(wo.x, wo.y, wo.z, float(0)),
+          ).xyz;
+          return add(positionLocal, mul(wl, leafU.windEnabled));
+        })();
+
+        /** Mask alpha for opacityNode; alphaTest cutout in opaque pass (stable depth, no sort bugs). */
+        const leafMaskAlphaNode = Fn(() => {
+          const s = leafMapNode.sample(leafMaskUv());
+          const maskA = mix(s.r, s.a, leafU.maskInAlpha);
+          const raw = mix(float(1), maskA, step(float(0.5), leafU.useMaskTex));
+          return smoothstep(
+            leafU.alphaCutoff.sub(0.05),
+            leafU.alphaCutoff.add(0.05),
+            raw,
+          );
+        })();
+
+        const leafColorNode = Fn(() => {
+          const u = uv();
+          let col = mix(leafU.bottomColor, leafU.topColor, u.y);
+          const vein = sin(mul(u.x, float(3.14159)))
+            .mul(float(0.5))
+            .add(float(0.5));
+          col = mul(
+            col,
+            mix(float(1), sub(float(1), leafU.veinStrength), vein),
+          );
+          const texRgb = leafMapNode.sample(leafMaskUv()).rgb;
+          col = mix(col, texRgb, leafU.useImageColor);
+          const h = hash(instanceIndex);
+          const varMul = add(
+            mul(h, mul(leafU.colorVar, float(2))),
+            sub(float(1), leafU.colorVar),
+          );
+          col = mul(col, varMul);
+          const hookAo = mix(
+            float(1),
+            sub(float(1), leafU.pivotAo),
+            smoothstep(float(0), float(0.38), u.y),
+          );
+          col = mul(col, hookAo);
+          const distC = length(sub(positionWorld, leafU.canopyCenter));
+          const aoInner = mix(
+            sub(float(1), leafU.aoStrength),
+            float(1),
+            clamp(
+              div(distC, max(leafU.aoRadius, float(0.001))),
+              float(0),
+              float(1),
+            ),
+          );
+          col = mul(col, aoInner);
+          const viewDir = normalize(sub(cameraPosition, positionWorld));
+          const backDot = max(
+            dot(negate(leafU.sunDir), leafTrunkRadial),
+            float(0),
+          );
+          const sss = mul(pow(backDot, leafU.sssPower), leafU.sssStrength);
+          col = add(col, mul(leafU.sssColor, sss));
+          const rimDot = sub(
+            float(1),
+            max(dot(leafTrunkRadial, viewDir), float(0)),
+          );
+          const rim = mul(pow(rimDot, leafU.rimPower), leafU.rimStrength);
+          col = add(col, mul(leafU.rimColor, rim));
+          return clamp(col, float(0), float(2));
+        })();
+
+        const leafTrunkRadialLod2 = normalize(
+          vec3(leafInstancePivotW.x, leafU2.radialUp, leafInstancePivotW.z),
+        );
+
+        const leafColorNodeLod2 = Fn(() => {
+          const u = uv();
+          let col = mix(leafU2.bottomColor, leafU2.topColor, u.y);
+          const vein = sin(mul(u.x, float(3.14159)))
+            .mul(float(0.5))
+            .add(float(0.5));
+          col = mul(
+            col,
+            mix(float(1), sub(float(1), leafU2.veinStrength), vein),
+          );
+          const texRgb = leafMapNode.sample(leafMaskUv()).rgb;
+          col = mix(col, texRgb, leafU2.useImageColor);
+          const h = hash(instanceIndex);
+          col = mul(
+            col,
+            add(
+              mul(h, mul(leafU2.colorVar, float(2))),
+              sub(float(1), leafU2.colorVar),
+            ),
+          );
+          const alongTrunk2 = sub(float(1), u.y);
+          const hookAo = mix(
+            float(1),
+            sub(float(1), leafU2.pivotAo),
+            smoothstep(float(0), float(0.38), alongTrunk2),
+          );
+          col = mul(col, hookAo);
+          const cardT2 = clamp(
+            div(alongTrunk2, max(leafU2.cardShadowReach, float(0.001))),
+            float(0),
+            float(1),
+          );
+          const trunkShade2 = max(
+            leafU2.cardShadowFloor,
+            sub(float(1), leafU2.cardShadowStr),
+          );
+          const cardGrad2 = mix(
+            trunkShade2,
+            float(1),
+            pow(cardT2, max(leafU2.cardShadowPower, float(0.001))),
+          );
+          col = mul(col, cardGrad2);
+          const distC = length(sub(positionWorld, leafU2.canopyCenter));
+          col = mul(
+            col,
+            mix(
+              sub(float(1), leafU2.aoStrength),
+              float(1),
+              clamp(
+                div(distC, max(leafU2.aoRadius, float(0.001))),
+                float(0),
+                float(1),
+              ),
+            ),
+          );
+          const viewDir = normalize(sub(cameraPosition, positionWorld));
+          const backDot = max(
+            dot(negate(leafU2.sunDir), leafTrunkRadialLod2),
+            float(0),
+          );
+          col = add(
+            col,
+            mul(
+              leafU2.sssColor,
+              mul(pow(backDot, leafU2.sssPower), leafU2.sssStrength),
+            ),
+          );
+          const rimDot = sub(
+            float(1),
+            max(dot(leafTrunkRadialLod2, viewDir), float(0)),
+          );
+          col = add(
+            col,
+            mul(
+              leafU2.rimColor,
+              mul(pow(rimDot, leafU2.rimPower), leafU2.rimStrength),
+            ),
+          );
+          const sunSide2 = max(
+            dot(leafTrunkRadialLod2, leafU2.sunDir),
+            float(0),
+          );
+          const fakeRecv2 = sub(
+            float(1),
+            mul(
+              leafU2.sunDarkenStr,
+              pow(sunSide2, max(leafU2.sunDarkenPower, float(0.001))),
+            ),
+          );
+          col = mul(col, mul(fakeRecv2, leafU2.brightnessMul));
+          return clamp(col, float(0), float(2));
+        })();
+
+        const mat = new THREE.MeshStandardNodeMaterial({
+          side: THREE.DoubleSide,
+          roughness: params.material.roughness,
+          metalness: params.material.metalness,
+          alphaTest: 0,
+          depthWrite: true,
+          transparent: false,
+          forceSinglePass: true,
+        });
+        mat.colorNode = leafColorNode;
+        mat.normalNode = leafNormalNode;
+        mat.positionNode = leafPositionNode;
+        mat.envMapIntensity = 0;
+        mat.castShadowNode = Fn(() => {
+          const s = leafMapNode.sample(leafMaskUv());
+          const maskA = mix(s.r, s.a, leafU.maskInAlpha);
+          const raw = mix(float(1), maskA, step(float(0.5), leafU.useMaskTex));
+          const a = smoothstep(
+            leafU.alphaCutoff.sub(0.05),
+            leafU.alphaCutoff.add(0.05),
+            raw,
+          );
+          a.lessThan(leafU.alphaCutoff).discard();
+          return vec4(0, 0, 0, 1);
+        })();
+
+        const matLod2 = new THREE.MeshStandardNodeMaterial({
+          side: THREE.DoubleSide,
+          roughness: params.material.roughness,
+          metalness: params.material.metalness,
+          alphaTest: 0,
+          depthWrite: true,
+          transparent: false,
+          forceSinglePass: true,
+        });
+        matLod2.colorNode = leafColorNodeLod2;
+        matLod2.normalNode = leafNormalNode;
+        matLod2.positionNode = positionLocal;
+        matLod2.envMapIntensity = 0;
+        matLod2.castShadowNode = mat.castShadowNode;
+
+        let geo = null;
+        let branchGeo = null;
+        /** @type {THREE.Mesh | THREE.InstancedMesh | null} */
+        let foliageObject = null;
+        /** @type {THREE.InstancedMesh | null} */
+        let branchesObject = null;
+        /** @type {THREE.Object3D | null} */
+        let pivotHelperRoot = null;
+
+        const trunkU = {
+          barkDark: uniform(new THREE.Color(params.trunk.barkDark)),
+          barkMid: uniform(new THREE.Color(params.trunk.barkMid)),
+          barkLight: uniform(new THREE.Color(params.trunk.barkLight)),
+          barkHighlight: uniform(new THREE.Color(params.trunk.barkHighlight)),
+          yMin: uniform(params.trunk.yOffset),
+          yMax: uniform(params.trunk.yOffset + params.trunk.height),
+          stripeFreq: uniform(params.trunk.stripeFreq),
+          stripeStrength: uniform(params.trunk.stripeStrength),
+          noiseScale: uniform(params.trunk.noiseScale),
+          noiseStrength: uniform(params.trunk.noiseStrength),
+          crackStrength: uniform(params.trunk.crackStrength),
+          baseAo: uniform(params.trunk.baseAo),
+          mossStrength: uniform(params.trunk.mossStrength),
+          rimColor: uniform(new THREE.Color(params.trunk.rimColor)),
+          rimStrength: uniform(params.trunk.rimStrength),
+          rimPower: uniform(params.trunk.rimPower),
+        };
+
+        const trunkColorNode = Fn(() => {
+          const ySpan = max(sub(trunkU.yMax, trunkU.yMin), float(0.001));
+          const yNorm = clamp(
+            div(sub(positionWorld.y, trunkU.yMin), ySpan),
+            float(0),
+            float(1),
+          );
+          let col = mix(trunkU.barkDark, trunkU.barkMid, yNorm);
+          col = mix(col, trunkU.barkLight, mul(yNorm, yNorm));
+          const ang = mx_atan2(positionWorld.z, positionWorld.x);
+          const stripe = sin(
+            add(mul(ang, trunkU.stripeFreq), mul(yNorm, float(3.2))),
+          )
+            .mul(float(0.5))
+            .add(float(0.5));
+          col = mix(
+            col,
+            mul(col, float(0.86)),
+            mul(stripe, trunkU.stripeStrength),
+          );
+          const n1 = mx_noise_float(mul(positionWorld, trunkU.noiseScale));
+          const n2 = mx_noise_float(
+            mul(positionWorld, mul(trunkU.noiseScale, float(2.7))).add(
+              vec3(17.3, 4.1, 9.8),
+            ),
+          );
+          const grain = n1.mul(float(0.6)).add(n2.mul(float(0.4)));
+          col = mul(
+            col,
+            add(float(1), mul(sub(grain, float(0.5)), trunkU.noiseStrength)),
+          );
+          const crack = mx_noise_float(
+            mul(
+              vec2(positionWorld.x, positionWorld.z),
+              mul(trunkU.noiseScale, float(4.5)),
+            ),
+          );
+          const crackMask = smoothstep(float(0.52), float(0.58), crack);
+          col = mix(
+            mul(col, float(0.78)),
+            col,
+            sub(float(1), mul(crackMask, trunkU.crackStrength)),
+          );
+          const hi = smoothstep(float(0.55), float(0.92), grain);
+          col = add(col, mul(trunkU.barkHighlight, mul(hi, float(0.18))));
+          const baseShade = mix(
+            sub(float(1), trunkU.baseAo),
+            float(1),
+            smoothstep(float(0), float(0.22), yNorm),
+          );
+          col = mul(col, baseShade);
+          const moss = smoothstep(float(0.14), float(0), yNorm);
+          col = mix(
+            mul(col, float(0.62)),
+            col,
+            sub(float(1), mul(moss, trunkU.mossStrength)),
+          );
+          const viewDir = normalize(sub(cameraPosition, positionWorld));
+          const rimDot = sub(
+            float(1),
+            max(dot(normalWorld, viewDir), float(0)),
+          );
+          const rim = mul(pow(rimDot, trunkU.rimPower), trunkU.rimStrength);
+          col = add(col, mul(trunkU.rimColor, rim));
+          return clamp(col, float(0), float(2));
+        })();
+
+        const trunkMat = new THREE.MeshStandardNodeMaterial({
+          color: 0xffffff,
+          roughness: params.trunk.roughness,
+          metalness: params.trunk.metalness,
+        });
+        trunkMat.colorNode = trunkColorNode;
+        trunkMat.envMapIntensity = 0;
+        const branchMat = new THREE.MeshStandardMaterial({
+          color: params.branches.color,
+          roughness: params.branches.roughness,
+          metalness: 0,
+        });
+        let trunkGeo = null;
+        const trunkMesh = new THREE.Mesh();
+        trunkMesh.castShadow = true;
+        trunkMesh.receiveShadow = true;
+        scene.add(trunkMesh);
+
+        const fileInput = document.createElement("input");
+        fileInput.type = "file";
+        fileInput.accept = "image/png,image/jpeg,image/webp,image/*";
+        fileInput.style.display = "none";
+        document.body.appendChild(fileInput);
+
+        const texLoader = new THREE.TextureLoader();
+
+        function disposeUploadedTexture() {
+          if (uploadedTex) {
+            uploadedTex.dispose();
+            uploadedTex = null;
+          }
+        }
+
+        function syncTrunkBounds() {
+          const tr = params.trunk;
+          const H = Math.max(0.15, tr.height);
+          trunkU.yMin.value = tr.yOffset;
+          trunkU.yMax.value = tr.yOffset + H;
+        }
+
+        function syncTrunkMaterial() {
+          const t = params.trunk;
+          trunkU.barkDark.value.set(t.barkDark);
+          trunkU.barkMid.value.set(t.barkMid);
+          trunkU.barkLight.value.set(t.barkLight);
+          trunkU.barkHighlight.value.set(t.barkHighlight);
+          trunkU.stripeFreq.value = t.stripeFreq;
+          trunkU.stripeStrength.value = t.stripeStrength;
+          trunkU.noiseScale.value = t.noiseScale;
+          trunkU.noiseStrength.value = t.noiseStrength;
+          trunkU.crackStrength.value = t.crackStrength;
+          trunkU.baseAo.value = t.baseAo;
+          trunkU.mossStrength.value = t.mossStrength;
+          trunkU.rimColor.value.set(t.rimColor);
+          trunkU.rimStrength.value = t.rimStrength;
+          trunkU.rimPower.value = t.rimPower;
+          trunkMat.roughness = t.roughness;
+          trunkMat.metalness = t.metalness ?? 0;
+          trunkMat.wireframe = params.debug.wireframe;
+          trunkMat.needsUpdate = true;
+        }
+
+        function migrateTrunkParams(tr) {
+          if (!tr.barkMid && tr.color) tr.barkMid = tr.color;
+          if (!tr.barkDark) tr.barkDark = "#2a1f18";
+          if (!tr.barkMid) tr.barkMid = "#4a3528";
+          if (!tr.barkLight) tr.barkLight = "#6b5240";
+          if (!tr.barkHighlight) tr.barkHighlight = "#8a7058";
+        }
+
+        function computePineCanopyBounds() {
+          const f = params.foliage;
+          if (f.enabled === false || f.layout !== "pine") return null;
+          const r = params.rect;
+          const cardExt =
+            Math.max(Math.max(0.05, r.width), Math.max(0.05, r.height)) * 0.55;
+          let xMin = Infinity,
+            xMax = -Infinity,
+            yMin = Infinity,
+            yMax = -Infinity,
+            zMin = Infinity,
+            zMax = -Infinity;
+          let n = 0;
+          forEachPineCardPlacement({}, (pos, scale) => {
+            const e = cardExt * scale;
+            xMin = Math.min(xMin, pos.x - e);
+            xMax = Math.max(xMax, pos.x + e);
+            yMin = Math.min(yMin, pos.y - e);
+            yMax = Math.max(yMax, pos.y + e);
+            zMin = Math.min(zMin, pos.z - e);
+            zMax = Math.max(zMax, pos.z + e);
+            n++;
+          });
+          if (n === 0) return null;
+          const cx = (xMin + xMax) * 0.5;
+          const cy = (yMin + yMax) * 0.5;
+          const cz = (zMin + zMax) * 0.5;
+          const ext = Math.max(xMax - xMin, yMax - yMin, zMax - zMin);
+          return {
+            yMin: yMin - 0.3,
+            yMax: yMax + 0.5,
+            canopyCenter: new THREE.Vector3(cx, cy, cz),
+            aoRadius: ext * 0.62,
+          };
+        }
+
+        function syncLeafBounds() {
+          const b = computePineCanopyBounds();
+          if (b) {
+            leafU.yMin.value = b.yMin;
+            leafU.yMax.value = b.yMax;
+            leafU.canopyCenter.value.copy(b.canopyCenter);
+            leafU.aoRadius.value = b.aoRadius;
+            params.material.aoRadius = b.aoRadius;
+          } else {
+            const f = params.foliage;
+            const tr = params.trunk;
+            leafU.yMin.value = f.baseY + (f.offsetY ?? 0);
+            trunkCenterAtT(1, tr, _trunkP1);
+            leafU.yMax.value = _trunkP1.y + 0.35;
+            leafU.canopyCenter.value.set(
+              0,
+              (leafU.yMin.value + leafU.yMax.value) * 0.5,
+              0,
+            );
+            leafU.aoRadius.value = params.material.aoRadius;
+          }
+          syncTrunkBounds();
+        }
+
+        function syncLeafUniforms() {
+          const m = params.material;
+          leafU.bottomColor.value.set(m.bottomColor);
+          leafU.topColor.value.set(m.topColor);
+          leafU.colorVar.value = m.colorVar;
+          leafU.normalBias.value = m.normalBias;
+          leafU.leafWarp.value = m.leafWarp;
+          leafU.radialUp.value = m.radialUp;
+          leafU.veinStrength.value = m.veinStrength;
+          leafU.pivotAo.value = m.pivotAo;
+          leafU.aoStrength.value = m.aoStrength;
+          leafU.sssColor.value.set(m.sssColor);
+          leafU.sssStrength.value = m.sssStrength;
+          leafU.sssPower.value = m.sssPower;
+          leafU.rimColor.value.set(m.rimColor);
+          leafU.rimStrength.value = m.rimStrength;
+          leafU.rimPower.value = m.rimPower;
+          leafU.alphaCutoff.value = m.alphaTest;
+          leafU.maskInAlpha.value = m.maskMode === "alpha" ? 1 : 0;
+          const atlasCols = Math.max(1, Math.round(m.atlasCols ?? 2));
+          const atlasRows = Math.max(1, Math.round(m.atlasRows ?? 2));
+          leafU.useAtlas.value = m.textureMode === "atlas" ? 1 : 0;
+          leafU.atlasCols.value = atlasCols;
+          leafU.atlasRows.value = atlasRows;
+          leafU.atlasCount.value = atlasCols * atlasRows;
+          leafU.texRot.value = (m.texRotDeg ?? 0) * DEG;
+          const ru = m.texRepeatU ?? 1;
+          const rv = m.texRepeatV ?? 1;
+          let su = ru;
+          let sv = rv;
+          if (m.texFlipH) su = -Math.abs(ru);
+          if (m.texFlipV) sv = -Math.abs(rv);
+          leafU.texRep.value.set(su, sv);
+          let ou = m.texOffsetU ?? 0;
+          let ov = m.texOffsetV ?? 0;
+          if (m.texFlipH) ou += Math.abs(ru);
+          if (m.texFlipV) ov += Math.abs(rv);
+          leafU.texOff.value.set(ou, ov);
+          leafU.texFlip.value.set(m.texFlipH ? 1 : 0, m.texFlipV ? 1 : 0);
+          leafU.sunDir.value.copy(sunDir);
+          syncWindUniforms();
+          syncLeafBounds();
+        }
+
+        function syncLod2Uniforms() {
+          const m = params.material;
+          const c = params.lod2Cheap;
+          leafU2.bottomColor.value.copy(leafU.bottomColor.value);
+          leafU2.topColor.value.copy(leafU.topColor.value);
+          leafU2.colorVar.value = m.colorVar * c.colorVarMul;
+          leafU2.normalBias.value = m.normalBias;
+          leafU2.leafWarp.value = m.leafWarp;
+          leafU2.radialUp.value = m.radialUp;
+          leafU2.veinStrength.value = m.veinStrength * c.veinMul;
+          leafU2.pivotAo.value = Math.min(0.55, m.pivotAo * c.pivotAoMul);
+          leafU2.aoStrength.value = Math.min(
+            0.75,
+            m.aoStrength * c.aoStrengthMul,
+          );
+          leafU2.aoRadius.value = leafU.aoRadius.value;
+          leafU2.canopyCenter.value.copy(leafU.canopyCenter.value);
+          leafU2.sssColor.value.copy(leafU.sssColor.value);
+          leafU2.sssStrength.value = m.sssStrength * c.sssMul;
+          leafU2.sssPower.value = m.sssPower;
+          leafU2.rimColor.value.copy(leafU.rimColor.value);
+          leafU2.rimStrength.value = m.rimStrength * c.rimMul;
+          leafU2.rimPower.value = m.rimPower;
+          leafU2.sunDarkenStr.value = c.sunDarkenStr;
+          leafU2.sunDarkenPower.value = c.sunDarkenPower;
+          leafU2.brightnessMul.value = c.brightnessMul;
+          leafU2.cardShadowStr.value = c.cardShadowStr;
+          leafU2.cardShadowFloor.value = c.cardShadowFloor;
+          leafU2.cardShadowReach.value = c.cardShadowReach;
+          leafU2.cardShadowPower.value = c.cardShadowPower;
+          leafU2.alphaCutoff.value = m.alphaTest;
+          leafU2.maskInAlpha.value = leafU.maskInAlpha.value;
+          leafU2.useMaskTex.value = leafU.useMaskTex.value;
+          leafU2.useImageColor.value = leafU.useImageColor.value;
+          leafU2.sunDir.value.copy(leafU.sunDir.value);
+          leafU2.windEnabled.value = 0;
+          matLod2.roughness = m.roughness;
+          matLod2.metalness = m.metalness;
+          matLod2.wireframe = params.debug.wireframe;
+          if (leafU.useMaskTex.value > 0.5) {
+            matLod2.opacityNode = leafMaskAlphaNode;
+            matLod2.transparent = false;
+            matLod2.alphaTest = m.alphaTest;
+            matLod2.depthWrite = m.depthWrite;
+          } else {
+            matLod2.opacityNode = null;
+            matLod2.alphaTest = 0;
+            matLod2.depthWrite = true;
+          }
+          matLod2.needsUpdate = true;
+        }
+
+        function syncWindUniforms() {
+          const w = params.wind;
+          leafU.windEnabled.value = w.enabled !== false ? 1 : 0;
+          leafU.windSpeed.value = w.speed ?? 1;
+          leafU.windStr.value = w.strength ?? 0;
+          leafU.windMicro.value = w.micro ?? 0;
+          leafU.windDir.value = (w.directionDeg ?? 0) * DEG;
+        }
+
+        function syncMaterial() {
+          syncLeafUniforms();
+          const m = params.material;
+          mat.roughness = m.roughness;
+          mat.metalness = m.metalness;
+          mat.wireframe = params.debug.wireframe;
+
+          leafU.useMaskTex.value = uploadedTex ? 1 : 0;
+          if (uploadedTex) {
+            leafMapNode.value = uploadedTex;
+          } else if (m.useChecker) {
+            leafMapNode.value = checker;
+            leafU.useMaskTex.value = 1;
+          } else {
+            leafMapNode.value = opaqueTex;
+          }
+
+          const hasMask = leafU.useMaskTex.value > 0.5;
+          if (hasMask) {
+            /* Opaque alphaTest + depthWrite — same as arborist (avoids transparent sort artifacts). */
+            mat.opacityNode = leafMaskAlphaNode;
+            mat.transparent = false;
+            mat.alphaTest = m.alphaTest;
+            mat.alphaTestNode = null;
+            mat.alphaToCoverage = false;
+            mat.depthWrite = m.depthWrite;
+          } else {
+            mat.opacityNode = null;
+            mat.transparent = false;
+            mat.alphaTest = 0;
+            mat.alphaTestNode = null;
+            mat.alphaToCoverage = false;
+            mat.depthWrite = true;
+          }
+
+          leafU.useImageColor.value =
+            m.colorSource === "texture" && hasMask ? 1 : 0;
+          syncWindUniforms();
+          syncLod2Uniforms();
+          mat.needsUpdate = true;
+        }
+
+        function applySingleTransform() {
+          if (!foliageObject || foliageObject.isInstancedMesh) return;
+          const t = params.transform;
+          const g = params.foliage.globalScale;
+          foliageObject.position.set(t.posX, t.posY, t.posZ);
+          foliageObject.rotation.set(
+            t.rotXDeg * DEG,
+            t.rotYDeg * DEG,
+            t.rotZDeg * DEG,
+            "XYZ",
+          );
+          foliageObject.scale.setScalar(Number.isFinite(g) && g > 0 ? g : 1);
+        }
+
+        function quaternionForAzimuth(thetaRad, pitchExtraDeg = 0, trunkT = 0) {
+          const t = params.transform;
+          _euler.set(
+            (t.rotXDeg + pitchExtraDeg) * DEG,
+            t.rotYDeg * DEG,
+            t.rotZDeg * DEG,
+            "XYZ",
+          );
+          _qCard.setFromEuler(_euler);
+          trunkTangentAtT(trunkT, params.trunk, _trunkTan);
+          _qAz.setFromAxisAngle(_trunkTan, thetaRad);
+          return _qOut.copy(_qAz).multiply(_qCard);
+        }
+
+        function branchPlacementCount(b) {
+          if (
+            b.count !== undefined &&
+            b.count !== null &&
+            Number.isFinite(b.count)
+          ) {
+            return Math.max(0, Math.round(b.count));
+          }
+          return Math.max(
+            0,
+            Math.round(b.levels ?? 2) * Math.round(b.perRing ?? 1),
+          );
+        }
+
+        function migrateBranchParams(b) {
+          if (
+            b.count === undefined ||
+            b.count === null ||
+            !Number.isFinite(b.count)
+          ) {
+            if (b.levels != null && b.perRing != null) {
+              b.count = Math.min(4, Math.max(1, Math.round(b.levels * 0.35)));
+            } else {
+              b.count = 2;
+            }
+          }
+          if (b.pivotAlongRadius == null || b.pivotAlongRadius < 0.5) {
+            b.pivotAlongRadius = 1;
+          }
+          if (b.trunkEmbed == null) b.trunkEmbed = 0.02;
+          if (Math.abs(b.rotZDeg ?? 0) >= 45) {
+            b.rotZDeg = 0;
+            b.rotXDeg = 0;
+          }
+          if (b.forkEnabled == null) b.forkEnabled = false;
+        }
+
+        function branchTrunkTRange(b, tr, f) {
+          let tMin = THREE.MathUtils.clamp(b.bottomTrunkT ?? 0.04, 0, 1);
+          let tMax = THREE.MathUtils.clamp(b.topTrunkT ?? 0.32, 0, 1);
+          if (b.clampBelowFoliage !== false && f.layout === "pine") {
+            const yFol = f.baseY + (f.offsetY ?? 0);
+            const tFol = trunkHeightT(yFol, tr);
+            const H = Math.max(0.15, tr.height);
+            const marginT = (b.belowFoliageMargin ?? 0.15) / H;
+            tMax = Math.min(tMax, Math.max(tMin + 0.02, tFol - marginT));
+          }
+          if (tMax < tMin) tMax = tMin;
+          return { tMin, tMax };
+        }
+
+        /** Local +Y (branch base→tip) aligns to trunk outward, pitched around trunk tangent. */
+        function quaternionForBranchAttach(trunkT, thetaRad, pitchUpDeg) {
+          const b = params.branches;
+          trunkTangentAtT(trunkT, params.trunk, _trunkTan);
+          trunkOutwardAtT(trunkT, thetaRad, params.trunk, _trunkOut);
+          _qSeg.setFromUnitVectors(_yAxis, _trunkOut);
+          const pitch = pitchUpDeg * DEG;
+          if (Math.abs(pitch) > 1e-6) {
+            _qAz.setFromAxisAngle(_trunkTan, pitch);
+            _qOut.copy(_qAz).multiply(_qSeg);
+          } else {
+            _qOut.copy(_qSeg);
+          }
+          if (b.rotXDeg || b.rotYDeg || b.rotZDeg) {
+            _euler.set(
+              b.rotXDeg * DEG,
+              b.rotYDeg * DEG,
+              b.rotZDeg * DEG,
+              "XYZ",
+            );
+            _qCard.setFromEuler(_euler);
+            _qOut.multiply(_qCard);
+          }
+          return _qOut;
+        }
+
+        function syncBranchMaterial() {
+          branchMat.color.set(params.branches.color);
+          branchMat.roughness = params.branches.roughness;
+          branchMat.wireframe = params.debug.wireframe;
+          branchMat.needsUpdate = true;
+        }
+
+        function updateBranchMatrices() {
+          if (!branchesObject) return;
+          const b = params.branches;
+          const tr = params.trunk;
+          const f = params.foliage;
+          const count = branchPlacementCount(b);
+          if (branchesObject.count !== count) return;
+
+          const gScale =
+            Number.isFinite(b.globalScale) && b.globalScale > 0
+              ? b.globalScale
+              : 1;
+          const scaleVar = Math.max(0, b.scaleVariation);
+          const lenVar = Math.max(0, b.lengthVariation ?? 0);
+          const seed = b.placementSeed ?? 0;
+          const { tMin, tMax } = branchTrunkTRange(b, tr, f);
+          const along = THREE.MathUtils.clamp(
+            Number.isFinite(b.pivotAlongRadius) ? b.pivotAlongRadius : 1,
+            0,
+            1,
+          );
+          const pitchBase = b.pitchUpDeg ?? 38;
+
+          for (let idx = 0; idx < count; idx++) {
+            const trunkT =
+              tMin + foliageHash01(idx, 1, seed) * Math.max(0.001, tMax - tMin);
+            const theta =
+              foliageHash01(idx, 2, seed) * Math.PI * 2 +
+              foliageRandomSignedDeg(idx, 3, seed, 12) * DEG;
+            const pitchJit = foliageRandomSignedDeg(idx, 4, seed, 14);
+            const R = Math.max(
+              0.001,
+              trunkRadiusAtT(trunkT, tr) - b.radialInset,
+            );
+            trunkCenterAtT(trunkT, tr, _dummy.position);
+            trunkOutwardAtT(trunkT, theta, tr, _trunkOut);
+            const embed = Math.max(0, b.trunkEmbed ?? 0.02);
+            _dummy.position.addScaledVector(
+              _trunkOut,
+              Math.max(0, along * R - embed),
+            );
+            _dummy.position.x += b.offsetX;
+            _dummy.position.y += b.offsetY;
+            _dummy.position.z += b.offsetZ;
+            const scaleJit =
+              (1 + instanceScaleJitter(idx, scaleVar)) *
+              (1 + instanceScaleJitter(idx + 17, lenVar));
+            _dummy.quaternion.copy(
+              quaternionForBranchAttach(trunkT, theta, pitchBase + pitchJit),
+            );
+            _dummy.scale.setScalar(gScale * scaleJit);
+            _dummy.updateMatrix();
+            branchesObject.setMatrixAt(idx, _dummy.matrix);
+          }
+          branchesObject.instanceMatrix.needsUpdate = true;
+        }
+
+        function disposeBranchesObject() {
+          if (!branchesObject) return;
+          scene.remove(branchesObject);
+          branchesObject.dispose();
+          branchesObject = null;
+        }
+
+        function ensureBranchesObject() {
+          const pine = params.foliage.layout === "pine";
+          const b = params.branches;
+          if (!b.enabled || !pine || !branchGeo) {
+            disposeBranchesObject();
+            return;
+          }
+
+          const needCount = branchPlacementCount(b);
+          if (needCount === 0) {
+            disposeBranchesObject();
+            return;
+          }
+
+          const needNew = !branchesObject || branchesObject.count !== needCount;
+
+          if (needNew) {
+            disposeBranchesObject();
+            branchesObject = new THREE.InstancedMesh(
+              branchGeo,
+              branchMat,
+              needCount,
+            );
+            branchesObject.frustumCulled = false;
+            branchesObject.renderOrder = 0;
+            branchesObject.castShadow = true;
+            branchesObject.receiveShadow = false;
+            scene.add(branchesObject);
+          } else {
+            branchesObject.geometry = branchGeo;
+            branchesObject.material = branchMat;
+          }
+          syncBranchMaterial();
+          updateBranchMatrices();
+        }
+
+        function rebuildBranchGeometry() {
+          const b = params.branches;
+          const newGeo = createBranchGeometry(b);
+          if (branchGeo) branchGeo.dispose();
+          branchGeo = newGeo;
+          if (branchesObject) branchesObject.geometry = branchGeo;
+          ensureBranchesObject();
+        }
+
+        function pineInstanceCapacity() {
+          const f = params.foliage;
+          return (
+            Math.max(1, Math.round(f.levels)) *
+            Math.max(1, Math.round(f.perRing))
+          );
+        }
+
+        function pineCardShouldKeep(
+          level,
+          k,
+          levels,
+          perRing,
+          logical,
+          options,
+        ) {
+          const keepFraction = options.keepFraction ?? 1;
+          if (keepFraction >= 1) return true;
+          const step = Math.max(1, Math.round(1 / keepFraction));
+          return logical % step === 0;
+        }
+
+        /** Visit each LOD0 card placement (same rules as fillPineInstances). */
+        function forEachPineCardPlacement(options, visit) {
+          const f = params.foliage;
+          const tr = params.trunk;
+          const levels = Math.max(1, Math.round(f.levels));
+          const perRing = Math.max(1, Math.round(f.perRing));
+          const xOffset = options.xOffset ?? 0;
+          const scaleMul = options.scaleMul ?? 1;
+          const pow = Math.max(0.05, f.scalePower);
+          const gScale =
+            Number.isFinite(f.globalScale) && f.globalScale > 0
+              ? f.globalScale
+              : 1;
+          let logical = 0;
+          let count = 0;
+
+          for (let level = 0; level < levels; level++) {
+            const tLin = levels <= 1 ? 1 : level / (levels - 1);
+            const u = Math.pow(tLin, pow);
+            const sRing = (f.scaleBottom * (1 - u) + f.scaleTop * u) * gScale;
+            const trunkT = pineRingTrunkT(level, levels, f, tr);
+            const R = Math.max(
+              0.001,
+              trunkRadiusAtT(trunkT, tr) - f.radialInset,
+            );
+            const along = THREE.MathUtils.clamp(
+              Number.isFinite(f.pivotAlongRadius) ? f.pivotAlongRadius : 0,
+              0,
+              1,
+            );
+            const ringRand = foliageRandomSignedDeg(
+              level,
+              0,
+              f.ringRandomSeed,
+              f.ringRandomDeg,
+            );
+            for (let k = 0; k < perRing; k++) {
+              if (
+                pineCardShouldKeep(level, k, levels, perRing, logical, options)
+              ) {
+                const cardRand = foliageRandomSignedDeg(
+                  level,
+                  k + 1,
+                  f.ringRandomSeed,
+                  f.cardRandomDeg,
+                );
+                const thetaDeg =
+                  f.azimuthOffsetDeg +
+                  (k * 360) / perRing +
+                  f.staggerDeg * level +
+                  ringRand +
+                  cardRand;
+                const theta = thetaDeg * DEG;
+                const seed = f.ringRandomSeed;
+                const pitchJit = foliageRandomSignedDeg(
+                  level,
+                  k + 40,
+                  seed,
+                  f.leafPitchRandomDeg,
+                );
+                const levelPitch = pineLevelPitchExtraDeg(level, levels, f);
+                const yJit = foliageRandomSignedDeg(
+                  level,
+                  k + 50,
+                  seed,
+                  f.leafYRandom,
+                );
+                const scaleJit = foliageRandomSignedDeg(
+                  level,
+                  k + 60,
+                  seed,
+                  f.leafScaleRandom,
+                );
+                trunkCenterAtT(trunkT, tr, _dummy.position);
+                if (level === levels - 1) {
+                  const slide = f.tipRingSlide ?? 0;
+                  if (Math.abs(slide) > 1e-6) {
+                    trunkTangentAtT(trunkT, tr, _trunkTan);
+                    _dummy.position.addScaledVector(_trunkTan, slide);
+                  }
+                }
+                trunkOutwardAtT(trunkT, theta, tr, _trunkOut);
+                _dummy.position.addScaledVector(_trunkOut, along * R);
+                _dummy.position.x += f.offsetX + xOffset;
+                _dummy.position.z += f.offsetZ;
+                if (Math.abs(yJit) > 1e-6) {
+                  trunkTangentAtT(trunkT, tr, _trunkTan);
+                  _dummy.position.addScaledVector(_trunkTan, yJit);
+                }
+                const s = Math.max(0.02, sRing * (1 + scaleJit) * scaleMul);
+                _dummy.quaternion.copy(
+                  quaternionForAzimuth(theta, levelPitch + pitchJit, trunkT),
+                );
+                visit(_dummy.position, s);
+                count++;
+              }
+              logical++;
+            }
+          }
+
+          return count;
+        }
+
+        /** @returns {number} instances written */
+        function fillPineInstances(mesh, options = {}) {
+          let out = 0;
+          forEachPineCardPlacement(options, (pos, scale) => {
+            _dummy.position.copy(pos);
+            _dummy.scale.setScalar(scale);
+            _dummy.updateMatrix();
+            mesh.setMatrixAt(out++, _dummy.matrix);
+          });
+          mesh.count = out;
+          mesh.instanceMatrix.needsUpdate = true;
+          syncLeafBounds();
+          return out;
+        }
+
+        function updateInstanceMatrices() {
+          if (!foliageObject?.isInstancedMesh) return;
+          const xOff =
+            params.lodPreview && params.foliage.layout === "pine"
+              ? -LOD_SPACING
+              : 0;
+          fillPineInstances(foliageObject, {
+            keepFraction: 1,
+            xOffset: xOff,
+            scaleMul: 1,
+          });
+        }
+
+        function countLeafTris(leafCount) {
+          const trisPerCard = geo?.index
+            ? geo.index.count / 3
+            : geo
+              ? (geo.attributes.position.count / 3) * 2
+              : 2;
+          return Math.round(leafCount * trisPerCard);
+        }
+
+        function updateStats() {
+          const cap = pineInstanceCapacity();
+          const n0 =
+            foliageObject?.isInstancedMesh && params.foliage.layout === "pine"
+              ? foliageObject.count
+              : foliageObject
+                ? 1
+                : 0;
+          params.totalLeaves = n0;
+          params.totalLeafTris = countLeafTris(n0);
+          params.lod1Leaves = lodMesh1 ? lodMesh1.count : 0;
+          params.lod2Leaves = lodMesh2 ? lodMesh2.count : 0;
+          if (trunkGeo) {
+            params.trunkTris = trunkGeo.index
+              ? trunkGeo.index.count / 3
+              : trunkGeo.attributes.position.count / 3;
+          } else {
+            params.trunkTris = 0;
+          }
+          statTrunkTris?.update(String(params.trunkTris));
+          statLeaves0?.update(String(params.totalLeaves));
+          statLeafTris0?.update(String(params.totalLeafTris));
+          statLod1Leaves?.update(String(params.lod1Leaves));
+          statLod2Leaves?.update(String(params.lod2Leaves));
+          statV2Leaves?.update();
+        }
+
+        function lodLabelRoundRect(ctx, x, y, w, h, r) {
+          const rr = Math.min(r, w / 2, h / 2);
+          ctx.beginPath();
+          ctx.moveTo(x + rr, y);
+          ctx.arcTo(x + w, y, x + w, y + h, rr);
+          ctx.arcTo(x + w, y + h, x, y + h, rr);
+          ctx.arcTo(x, y + h, x, y, rr);
+          ctx.arcTo(x, y, x + w, y, rr);
+          ctx.closePath();
+        }
+
+        function createLodGroundLabel() {
+          const canvas = document.createElement("canvas");
+          const W = 640;
+          const H = 176;
+          canvas.width = W;
+          canvas.height = H;
+          const ctx = canvas.getContext("2d");
+          const tex = new THREE.CanvasTexture(canvas);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          const matLabel = new THREE.MeshBasicMaterial({
+            map: tex,
+            transparent: true,
+            depthWrite: false,
+            toneMapped: false,
+          });
+          const geoLabel = new THREE.PlaneGeometry(5.8, 1.6);
+          geoLabel.rotateX(-Math.PI / 2);
+          const meshLabel = new THREE.Mesh(geoLabel, matLabel);
+          meshLabel.renderOrder = 25;
+          const label = { mesh: meshLabel, canvas, ctx, tex, W, H };
+          label.redraw = (title, sub) => {
+            const { ctx: c, tex: t, W: w, H: h } = label;
+            c.clearRect(0, 0, w, h);
+            lodLabelRoundRect(c, 8, 8, w - 16, h - 16, 14);
+            c.fillStyle = "rgba(12, 18, 12, 0.9)";
+            c.fill();
+            c.strokeStyle = "rgba(100, 160, 95, 0.5)";
+            c.lineWidth = 2;
+            c.stroke();
+            c.fillStyle = "#e8f0e4";
+            c.font = "bold 26px Segoe UI, system-ui, sans-serif";
+            c.textAlign = "center";
+            c.textBaseline = "middle";
+            c.fillText(title, w / 2, 56);
+            c.fillStyle = "#9cb090";
+            c.font = "17px Consolas, monospace";
+            c.fillText(sub, w / 2, 112);
+            t.needsUpdate = true;
+          };
+          return label;
+        }
+
+        function ensureLodGroundLabels() {
+          if (lodGroundLabels.length) return;
+          for (let i = 0; i < 3; i++) {
+            const lb = createLodGroundLabel();
+            lodGroundLabels.push(lb);
+            scene.add(lb.mesh);
+            lb.mesh.visible = false;
+          }
+        }
+
+        function setLodGroundLabelsVisible(visible) {
+          ensureLodGroundLabels();
+          lodGroundLabels.forEach((lb) => {
+            lb.mesh.visible = visible;
+          });
+        }
+
+        function clearLodTrunkClones() {
+          if (lodTrunk0Clone) {
+            scene.remove(lodTrunk0Clone);
+            lodTrunk0Clone = null;
+          }
+          if (lodTrunk1Clone) {
+            scene.remove(lodTrunk1Clone);
+            lodTrunk1Clone = null;
+          }
+          if (lodTrunk2Clone) {
+            scene.remove(lodTrunk2Clone);
+            lodTrunk2Clone = null;
+          }
+        }
+
+        function clearLodPreviews() {
+          if (lodMesh1) {
+            scene.remove(lodMesh1);
+            lodMesh1.dispose();
+            lodMesh1 = null;
+          }
+          if (lodMesh2) {
+            scene.remove(lodMesh2);
+            lodMesh2.dispose();
+            lodMesh2 = null;
+          }
+          clearLodTrunkClones();
+        }
+
+        function cloneTrunksForLod() {
+          clearLodTrunkClones();
+          if (!params.trunk.visible) return;
+          const src = trunkMesh;
+          const offsets = [-LOD_SPACING, 0, LOD_SPACING];
+          const clones = [];
+          for (let i = 0; i < 3; i++) {
+            const c = src.clone();
+            c.position.copy(src.position);
+            c.position.x = offsets[i];
+            c.visible = params.trunk.visible;
+            c.castShadow = true;
+            c.receiveShadow = true;
+            scene.add(c);
+            clones.push(c);
+          }
+          lodTrunk0Clone = clones[0];
+          lodTrunk1Clone = clones[1];
+          lodTrunk2Clone = clones[2];
+        }
+
+        function updateLodTrunkVisibility() {
+          if (params.lodPreview && params.foliage.layout === "pine") {
+            trunkMesh.visible = false;
+          } else {
+            trunkMesh.visible = params.trunk.visible;
+          }
+        }
+
+        function updateLodLabels() {
+          ensureLodGroundLabels();
+          if (!params.lodPreview || params.foliage.layout !== "pine") {
+            setLodGroundLabelsVisible(false);
+            return;
+          }
+          const offsets = [-LOD_SPACING, 0, LOD_SPACING];
+          const n0 =
+            foliageObject?.isInstancedMesh && params.foliage.layout === "pine"
+              ? foliageObject.count
+              : params.totalLeaves;
+          const n1 = lodMesh1?.count ?? params.lod1Leaves;
+          const n2 = lodMesh2?.count ?? params.lod2Leaves;
+          const titles = [
+            "LOD 0 — Full Detail",
+            "LOD 1 — Half Density",
+            "LOD 2 — Far (same shape)",
+          ];
+          const subs = [
+            `${n0} leaves · < ${params.lodDist1}m · receive shadow`,
+            `${n1} leaves · 1.4× · same shader · no receive shadow`,
+            `${n2} leaves · same as LOD1 · cheap shader · ${params.lodDist2}m+`,
+          ];
+          offsets.forEach((xOff, i) => {
+            lodGroundLabels[i].mesh.position.set(xOff, 0.02, LOD_LABEL_Z);
+            lodGroundLabels[i].redraw(titles[i], subs[i]);
+          });
+          setLodGroundLabelsVisible(true);
+        }
+
+        function rebuildLodPreviews() {
+          clearLodPreviews();
+          if (!params.lodPreview || params.foliage.layout !== "pine" || !geo)
+            return;
+
+          updateInstanceMatrices();
+
+          const cap = pineInstanceCapacity();
+          lodMesh1 = new THREE.InstancedMesh(geo, mat, cap);
+          lodMesh1.frustumCulled = false;
+          lodMesh1.castShadow = true;
+          lodMesh1.receiveShadow = false;
+          fillPineInstances(lodMesh1, {
+            keepFraction: 0.5,
+            xOffset: 0,
+            scaleMul: 1.414,
+          });
+          scene.add(lodMesh1);
+
+          lodMesh2 = new THREE.InstancedMesh(geo, matLod2, cap);
+          lodMesh2.frustumCulled = false;
+          lodMesh2.castShadow = false;
+          lodMesh2.receiveShadow = false;
+          fillPineInstances(lodMesh2, {
+            keepFraction: 0.5,
+            xOffset: LOD_SPACING,
+            scaleMul: 1.414,
+          });
+          scene.add(lodMesh2);
+
+          cloneTrunksForLod();
+          updateLodTrunkVisibility();
+          updateStats();
+          updateLodLabels();
+        }
+
+        function refreshLodSystem() {
+          if (branchesObject) {
+            branchesObject.visible =
+              params.branches.enabled &&
+              !params.lodPreview &&
+              params.foliage.layout === "pine";
+          }
+          if (params.lodPreview && params.foliage.layout === "pine") {
+            rebuildLodPreviews();
+          } else {
+            clearLodPreviews();
+            updateInstanceMatrices();
+            updateLodTrunkVisibility();
+            setLodGroundLabelsVisible(false);
+          }
+          syncFoliageVisibility();
+          applyShadowFlags();
+          updateStats();
+        }
+
+        function toggleLodPreview() {
+          if (params.foliage.layout !== "pine") {
+            params.lodPreview = false;
+            infoEl.textContent = "LOD preview requires Pine layout.";
+            return;
+          }
+          if (params.lodPreview) {
+            controls.target.set(0, 3, 0);
+            camera.position.set(0, 6, 22);
+          } else {
+            controls.target.set(0, 3, 0);
+            camera.position.set(7, 5, 10);
+          }
+          controls.update();
+          refreshLodSystem();
+        }
+
+        function detectAlphaChannel(image) {
+          try {
+            const w = image.width || image.naturalWidth;
+            const h = image.height || image.naturalHeight;
+            if (!w || !h) return false;
+            const c = document.createElement("canvas");
+            c.width = w;
+            c.height = h;
+            const ctx = c.getContext("2d", { willReadFrequently: true });
+            ctx.drawImage(image, 0, 0);
+            const data = ctx.getImageData(0, 0, w, h).data;
+            for (let i = 3; i < data.length; i += 16) {
+              if (data[i] < 255) return true;
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        }
+
+        function textureToDataUrl(tex) {
+          const img = tex?.image;
+          if (!img) return "";
+          try {
+            const w = img.width || img.naturalWidth;
+            const h = img.height || img.naturalHeight;
+            if (!w || !h) return "";
+            const c = document.createElement("canvas");
+            c.width = w;
+            c.height = h;
+            c.getContext("2d").drawImage(img, 0, 0);
+            return c.toDataURL("image/png");
+          } catch {
+            return "";
+          }
+        }
+
+        function updateGallerySelection() {
+          galleryImgs.forEach((img, i) => {
+            img.classList.toggle(
+              "active",
+              PINE_LEAF_TEXTURES[i].path === activeLeafTexPath,
+            );
+          });
+        }
+
+        function buildTexGallery(parent) {
+          const label = document.createElement("div");
+          label.className = "tex-gallery-label";
+          label.textContent = "Built-in pine textures";
+          parent.appendChild(label);
+
+          const galleryEl = document.createElement("div");
+          galleryEl.className = "tex-gallery";
+          parent.appendChild(galleryEl);
+
+          galleryImgs = [];
+          PINE_LEAF_TEXTURES.forEach((t) => {
+            const wrap = document.createElement("div");
+            wrap.className = "tex-item";
+            const img = document.createElement("img");
+            img.src = resolvePublicPath(t.path);
+            img.title = t.name;
+            img.alt = t.name;
+            img.addEventListener("click", () =>
+              loadLeafTexFromPath(t.path, t.mode),
+            );
+            wrap.appendChild(img);
+            const cap = document.createElement("div");
+            cap.className = "tex-label";
+            cap.textContent = t.name;
+            wrap.appendChild(cap);
+            galleryEl.appendChild(wrap);
+            galleryImgs.push(img);
+          });
+          updateGallerySelection();
+        }
+
+        function loadLeafTexFromPath(path, mode) {
+          const entry = PINE_LEAF_TEXTURES.find((t) => t.path === path);
+          const url = resolvePublicPath(path);
+          texLoader.load(
+            url,
+            (tex) => {
+              configureMaskTexture(tex);
+              disposeUploadedTexture();
+              uploadedTex = tex;
+              activeLeafTexPath = path;
+              activeLeafTexDataUrl = "";
+              if (entry?.mode) {
+                params.material.textureMode = entry.mode;
+              } else if (mode === "atlas" || mode === "single") {
+                params.material.textureMode = mode;
+              }
+              params.material.uploadName =
+                entry?.name || path.split("/").pop() || path;
+              const img = tex.image;
+              if (img) {
+                params.material.maskMode = detectAlphaChannel(img)
+                  ? "alpha"
+                  : "luminance";
+              }
+              syncMaterial();
+              refreshUploadName();
+              updateGallerySelection();
+              infoEl.textContent = `Texture loaded: ${params.material.uploadName}`;
+            },
+            undefined,
+            (err) => {
+              console.error(err);
+              infoEl.textContent = `Failed to load texture: ${url}`;
+            },
+          );
+        }
+
+        function loadLeafTexFromDataUrl(dataUrl, displayName) {
+          const img = new Image();
+          img.onload = () => {
+            const tex = new THREE.Texture(img);
+            configureMaskTexture(tex);
+            disposeUploadedTexture();
+            uploadedTex = tex;
+            activeLeafTexPath = "";
+            activeLeafTexDataUrl = dataUrl;
+            params.material.uploadName = displayName || "(embedded)";
+            params.material.maskMode = detectAlphaChannel(img)
+              ? "alpha"
+              : "luminance";
+            syncMaterial();
+            refreshUploadName();
+            updateGallerySelection();
+            infoEl.textContent = `Texture loaded: ${params.material.uploadName}`;
+          };
+          img.src = dataUrl;
+        }
+
+        function migrateExportParams() {
+          if (!params.export) {
+            params.export = {
+              trunkFile: "",
+              trunkLod1File: "",
+              trunkScale: 1,
+              billboardLeaves: false,
+              billboardYawOnly: true,
+            };
+          }
+        }
+
+        function buildPineEditorSnapshot() {
+          const snapshot = JSON.parse(JSON.stringify(params));
+          for (const k of [
+            "trunkTris",
+            "totalLeaves",
+            "totalLeafTris",
+            "lod1Leaves",
+            "lod2Leaves",
+          ]) {
+            delete snapshot[k];
+          }
+          return snapshot;
+        }
+
+        function buildV2MaterialBlock() {
+          const m = params.material;
+          const ex = params.export;
+          return {
+            bottomColor: m.bottomColor,
+            topColor: m.topColor,
+            colorVar: m.colorVar,
+            roughness: m.roughness,
+            alphaCutoff: m.alphaTest,
+            sssColor: m.sssColor,
+            sssStr: m.sssStrength,
+            sssPow: m.sssPower,
+            rimColor: m.rimColor,
+            rimStr: m.rimStrength,
+            rimPow: m.rimPower,
+            aoStr: m.aoStrength,
+            normalBias: m.normalBias,
+            leafWarp: m.leafWarp,
+            billboardLeaves: !!ex.billboardLeaves,
+            billboardYawOnly: ex.billboardYawOnly !== false,
+          };
+        }
+
+        function buildPineParamBlock() {
+          return {
+            rect: { ...params.rect },
+            grid: { ...params.grid },
+            shape: { ...params.shape },
+            transform: { ...params.transform },
+            foliage: { ...params.foliage },
+            trunk: { ...params.trunk },
+            branches: { ...params.branches },
+          };
+        }
+
+        function countPineLeaves(keepFraction) {
+          return forEachPineCardPlacement({ keepFraction }, () => {});
+        }
+
+        function buildPresetData() {
+          migrateExportParams();
+          migrateFoliageParams(params.foliage);
+          syncLeafBounds();
+          const bounds = computePineCanopyBounds();
+          const ex = params.export;
+          return {
+            pineEditor: PRESET_VERSION,
+            presetName: params.presetName,
+            foliageLayout: "pine",
+            trunkFile: ex.trunkFile || "",
+            trunkLod1File: ex.trunkLod1File || "",
+            leafTexture:
+              activeLeafTexPath ||
+              activeLeafTexDataUrl ||
+              textureToDataUrl(uploadedTex) ||
+              "",
+            leafTextureName: params.material.uploadName,
+            material: buildV2MaterialBlock(),
+            wind: {
+              windSpeed: params.wind.speed,
+              windStr: params.wind.strength,
+              windMicro: params.wind.micro,
+            },
+            trunkScale: ex.trunkScale ?? 1,
+            lodDistances: {
+              lod1: params.lodDist1,
+              lod2: params.lodDist2,
+            },
+            leafCounts: {
+              lod0: countPineLeaves(1),
+              lod1: countPineLeaves(0.5),
+              lod2: countPineLeaves(0.5),
+            },
+            bounds: bounds
+              ? {
+                  yMin: bounds.yMin,
+                  yMax: bounds.yMax,
+                  canopyCenter: bounds.canopyCenter.toArray(),
+                  aoRadius: bounds.aoRadius,
+                }
+              : null,
+            pine: buildPineParamBlock(),
+            params: buildPineEditorSnapshot(),
+          };
+        }
+
+        async function exportTrunkGlb() {
+          if (!trunkGeo) {
+            infoEl.textContent = "No trunk mesh to export.";
+            return;
+          }
+          const exportRoot = new THREE.Mesh(
+            trunkGeo.clone(),
+            new THREE.MeshStandardMaterial({
+              color: params.trunk.barkMid || "#4a3528",
+              roughness: params.trunk.roughness ?? 0.94,
+              metalness: 0,
+            }),
+          );
+          exportRoot.position.copy(trunkMesh.position);
+          exportRoot.updateMatrixWorld(true);
+          try {
+            const buffer = await new GLTFExporter().parseAsync(exportRoot, {
+              binary: true,
+            });
+            exportRoot.geometry.dispose();
+            const name = (params.presetName || "pine_trunk").replace(
+              /[^a-z0-9_\-]/gi,
+              "_",
+            );
+            const blob = new Blob([buffer], {
+              type: "model/gltf-binary",
+            });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = name + "_trunk.glb";
+            a.click();
+            URL.revokeObjectURL(a.href);
+            params.export.trunkFile = name + "_trunk.glb";
+            infoEl.textContent = `Trunk GLB saved — set trunkFile to ${params.export.trunkFile} in tree-presets/ or models/trunks/`;
+          } catch (e) {
+            console.error(e);
+            infoEl.textContent = "Trunk export failed: " + e.message;
+          }
+        }
+
+        async function savePreset() {
+          const data = buildPresetData();
+          const json = JSON.stringify(data, null, 2);
+          const name = (params.presetName || "pine_preset").replace(
+            /[^a-z0-9_\-]/gi,
+            "_",
+          );
+          if (window.showSaveFilePicker) {
+            try {
+              const handle = await showSaveFilePicker({
+                suggestedName: name + ".json",
+                types: [
+                  {
+                    description: "Pine editor preset",
+                    accept: { "application/json": [".json"] },
+                  },
+                ],
+              });
+              const writable = await handle.createWritable();
+              await writable.write(json);
+              await writable.close();
+              infoEl.textContent = `Preset saved: ${name}.json`;
+            } catch (e) {
+              if (e.name !== "AbortError") console.error(e);
+            }
+          } else {
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(
+              new Blob([json], { type: "application/json" }),
+            );
+            a.download = name + ".json";
+            a.click();
+            URL.revokeObjectURL(a.href);
+            infoEl.textContent = `Preset saved: ${name}.json`;
+          }
+        }
+
+        function deepAssign(target, source) {
+          if (!source || typeof source !== "object") return;
+          for (const key of Object.keys(source)) {
+            const sv = source[key];
+            if (sv && typeof sv === "object" && !Array.isArray(sv)) {
+              if (!target[key] || typeof target[key] !== "object")
+                target[key] = {};
+              deepAssign(target[key], sv);
+            } else {
+              target[key] = sv;
+            }
+          }
+        }
+
+        function applyV2Envelope(data) {
+          migrateExportParams();
+          migrateFoliageParams(params.foliage);
+          const ex = params.export;
+          if (data.trunkFile != null) ex.trunkFile = data.trunkFile;
+          if (data.trunkLod1File != null) ex.trunkLod1File = data.trunkLod1File;
+          if (data.trunkScale != null) ex.trunkScale = data.trunkScale;
+          if (data.lodDistances) {
+            params.lodDist1 = data.lodDistances.lod1 ?? params.lodDist1;
+            params.lodDist2 = data.lodDistances.lod2 ?? params.lodDist2;
+          }
+          if (data.material) {
+            const m = data.material;
+            const mat = params.material;
+            if (m.bottomColor) mat.bottomColor = m.bottomColor;
+            if (m.topColor) mat.topColor = m.topColor;
+            if (m.colorVar != null) mat.colorVar = m.colorVar;
+            if (m.roughness != null) mat.roughness = m.roughness;
+            if (m.alphaCutoff != null) mat.alphaTest = m.alphaCutoff;
+            if (m.sssColor) mat.sssColor = m.sssColor;
+            if (m.sssStr != null) mat.sssStrength = m.sssStr;
+            if (m.sssPow != null) mat.sssPower = m.sssPow;
+            if (m.rimColor) mat.rimColor = m.rimColor;
+            if (m.rimStr != null) mat.rimStrength = m.rimStr;
+            if (m.rimPow != null) mat.rimPower = m.rimPow;
+            if (m.aoStr != null) mat.aoStrength = m.aoStr;
+            if (m.normalBias != null) mat.normalBias = m.normalBias;
+            if (m.leafWarp != null) mat.leafWarp = m.leafWarp;
+            if (m.billboardLeaves != null)
+              ex.billboardLeaves = m.billboardLeaves;
+            if (m.billboardYawOnly != null)
+              ex.billboardYawOnly = m.billboardYawOnly;
+          }
+          if (data.wind) {
+            const w = data.wind;
+            if (w.windSpeed != null) params.wind.speed = w.windSpeed;
+            if (w.windStr != null) params.wind.strength = w.windStr;
+            if (w.windMicro != null) params.wind.micro = w.windMicro;
+          }
+        }
+
+        function applyPresetData(data) {
+          const hasEditor =
+            (data.pineEditor === 1 || data.pineEditor === 2) && data.params;
+          const hasV2 =
+            data.foliageLayout === "pine" && (data.pine || data.params);
+          if (!hasEditor && !hasV2) {
+            throw new Error(
+              "Not a pine preset (need pineEditor+params or foliageLayout pine)",
+            );
+          }
+          if (data.params) deepAssign(params, data.params);
+          if (data.pine) {
+            if (data.pine.rect) deepAssign(params.rect, data.pine.rect);
+            if (data.pine.grid) deepAssign(params.grid, data.pine.grid);
+            if (data.pine.shape) deepAssign(params.shape, data.pine.shape);
+            if (data.pine.transform)
+              deepAssign(params.transform, data.pine.transform);
+            if (data.pine.foliage)
+              deepAssign(params.foliage, data.pine.foliage);
+            if (data.pine.trunk) deepAssign(params.trunk, data.pine.trunk);
+            if (data.pine.branches)
+              deepAssign(params.branches, data.pine.branches);
+          }
+          applyV2Envelope(data);
+          migrateExportParams();
+          migrateBranchParams(params.branches);
+          migrateTrunkParams(params.trunk);
+          migrateFoliageParams(params.foliage);
+          migrateLod2CheapParams(params);
+          if (data.presetName) params.presetName = data.presetName;
+          migrateLightingParams();
+          presetNameInput?.refresh();
+          trunkFileInput?.refresh?.();
+          trunkLod1Input?.refresh?.();
+
+          rebuildTrunk();
+          rebuildGeometry();
+          rebuildBranchGeometry();
+          syncMaterial();
+          syncBranchMaterial();
+          syncScene();
+          rebuildSkyEnv();
+          if (params.foliage.layout === "pine") {
+            ensureFoliageObject();
+            updateInstanceMatrices();
+            ensureBranchesObject();
+            updateBranchMatrices();
+          } else {
+            ensureFoliageObject();
+            applySingleTransform();
+          }
+          refreshLodSystem();
+          updatePivotHelper();
+
+          if (data.leafTexture) {
+            if (data.leafTexture.startsWith("data:")) {
+              loadLeafTexFromDataUrl(
+                data.leafTexture,
+                data.leafTextureName || "(embedded)",
+              );
+            } else if (
+              data.leafTexture.startsWith("textures/") ||
+              data.leafTexture.includes("/")
+            ) {
+              loadLeafTexFromPath(data.leafTexture);
+            }
+          } else {
+            activeLeafTexPath = "";
+            activeLeafTexDataUrl = "";
+            clearUploadedTexture();
+          }
+        }
+
+        function loadPresetFromFile(file) {
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            try {
+              applyPresetData(JSON.parse(ev.target.result));
+              infoEl.textContent = `Preset loaded: ${file.name}`;
+            } catch (e) {
+              infoEl.textContent = "Invalid preset: " + e.message;
+            }
+          };
+          reader.readAsText(file);
+        }
+
+        function disposeFoliageObject() {
+          if (!foliageObject) return;
+          scene.remove(foliageObject);
+          if (foliageObject.isInstancedMesh) foliageObject.dispose();
+          foliageObject = null;
+        }
+
+        function syncFoliageVisibility() {
+          const show = params.foliage.enabled !== false;
+          if (foliageObject) foliageObject.visible = show;
+          if (lodMesh1) lodMesh1.visible = show;
+          if (lodMesh2) lodMesh2.visible = show;
+        }
+
+        function ensureFoliageObject() {
+          const f = params.foliage;
+          const pine = f.layout === "pine";
+          const needCount = pine ? pineInstanceCapacity() : 1;
+
+          const needNewType =
+            !foliageObject ||
+            (pine && !foliageObject.isInstancedMesh) ||
+            (!pine && foliageObject.isInstancedMesh) ||
+            (pine &&
+              foliageObject.isInstancedMesh &&
+              foliageMeshCapacity !== needCount);
+
+          if (needNewType) {
+            disposeFoliageObject();
+            if (pine) {
+              foliageMeshCapacity = needCount;
+              foliageObject = new THREE.InstancedMesh(geo, mat, needCount);
+              foliageObject.frustumCulled = false;
+              foliageObject.renderOrder = 1;
+              foliageObject.castShadow = true;
+              foliageObject.receiveShadow = false;
+              scene.add(foliageObject);
+              updateInstanceMatrices();
+            } else {
+              foliageObject = new THREE.Mesh(geo, mat);
+              foliageObject.castShadow = true;
+              foliageObject.receiveShadow = false;
+              scene.add(foliageObject);
+              applySingleTransform();
+            }
+          } else {
+            foliageObject.geometry = geo;
+            foliageObject.material = mat;
+            foliageObject.castShadow = true;
+            foliageObject.receiveShadow = false;
+            if (pine) updateInstanceMatrices();
+            else applySingleTransform();
+          }
+          syncFoliageVisibility();
+          applyShadowFlags();
+          updatePivotHelper();
+        }
+
+        function rebuildTrunk() {
+          const t = params.trunk;
+          if (trunkGeo) trunkGeo.dispose();
+          const segs = trunkPathSegmentCount(t);
+          const radialSegs = Math.max(6, Math.round(t.radialSegs ?? 20));
+          const parts = [];
+          const straight = !trunkHasSpineCurve(t);
+
+          if (straight) {
+            const H = Math.max(0.15, t.height);
+            const r0 = Math.max(TRUNK_RADIUS_MIN, t.radiusBottom);
+            const r1 = Math.max(TRUNK_RADIUS_MIN, t.radiusTop);
+            trunkGeo = new THREE.CylinderGeometry(r1, r0, H, radialSegs);
+            trunkMesh.position.set(0, t.yOffset + H * 0.5, 0);
+          } else {
+            for (let i = 0; i < segs; i++) {
+              const t0 = i / segs;
+              const t1 = (i + 1) / segs;
+              trunkCenterAtT(t0, t, _trunkP0);
+              trunkCenterAtT(t1, t, _trunkP2);
+              const r0 = Math.max(TRUNK_RADIUS_MIN, trunkRadiusAtT(t0, t));
+              const r1 = Math.max(TRUNK_RADIUS_MIN, trunkRadiusAtT(t1, t));
+              _v3.subVectors(_trunkP2, _trunkP0);
+              const len = _v3.length();
+              if (len < 1e-5) continue;
+              _v3.normalize();
+              _trunkCenter.addVectors(_trunkP0, _trunkP2).multiplyScalar(0.5);
+              const cyl = new THREE.CylinderGeometry(
+                r1,
+                r0,
+                len,
+                radialSegs,
+                1,
+              );
+              _qSeg.setFromUnitVectors(_yAxis, _v3);
+              _mSeg.compose(_trunkCenter, _qSeg, new THREE.Vector3(1, 1, 1));
+              cyl.applyMatrix4(_mSeg);
+              parts.push(cyl);
+            }
+            if (parts.length === 0) {
+              const H = Math.max(0.15, t.height);
+              trunkGeo = new THREE.CylinderGeometry(
+                Math.max(TRUNK_RADIUS_MIN, t.radiusTop),
+                Math.max(TRUNK_RADIUS_MIN, t.radiusBottom),
+                H,
+                radialSegs,
+              );
+              trunkMesh.position.set(0, t.yOffset + H * 0.5, 0);
+            } else {
+              trunkGeo = parts.length === 1 ? parts[0] : mergeGeometries(parts);
+              for (const g of parts) {
+                if (g !== trunkGeo) g.dispose();
+              }
+              trunkMesh.position.set(0, 0, 0);
+            }
+          }
+
+          trunkMesh.geometry = trunkGeo;
+          trunkMesh.material = trunkMat;
+          trunkMesh.visible = t.visible;
+          syncTrunkBounds();
+          syncTrunkMaterial();
+        }
+
+        function updatePivotHelper() {
+          if (pivotHelperRoot) {
+            scene.remove(pivotHelperRoot);
+            pivotHelperRoot.traverse((o) => {
+              o.geometry?.dispose?.();
+              const m = o.material;
+              if (m) (Array.isArray(m) ? m : [m]).forEach((x) => x.dispose?.());
+            });
+            pivotHelperRoot = null;
+          }
+          if (
+            !params.debug.showPivot ||
+            !foliageObject ||
+            params.foliage.enabled === false
+          )
+            return;
+
+          const axes = new THREE.AxesHelper(0.2);
+          if (foliageObject.isInstancedMesh) {
+            const m = new THREE.Matrix4();
+            foliageObject.getMatrixAt(0, m);
+            m.decompose(_dummy.position, _dummy.quaternion, _v3);
+            const g = new THREE.Group();
+            g.position.copy(_dummy.position);
+            g.quaternion.copy(_dummy.quaternion);
+            g.add(axes);
+            scene.add(g);
+            pivotHelperRoot = g;
+          } else {
+            foliageObject.add(axes);
+            pivotHelperRoot = axes;
+          }
+        }
+
+        function rebuildGeometry() {
+          const r = params.rect;
+          const g = params.grid;
+          const w = Math.max(0.05, r.width);
+          const h = Math.max(0.05, r.height);
+          const sx = Math.max(1, Math.round(g.segX));
+          let sy = Math.max(1, Math.round(g.segY));
+          // bendY uses ny² — needs an interior row (ny≈0). segY=1 puts every vert on y=±hh so ny²=1 everywhere.
+          if (Math.abs(params.shape.bendY) > 1e-8) sy = Math.max(sy, 2);
+          const newGeo = createRectangleGeometry(
+            w,
+            h,
+            sx,
+            sy,
+            params.shape,
+            params.rect.pivotEdge,
+          );
+          if (foliageObject) foliageObject.geometry = newGeo;
+          if (geo) geo.dispose();
+          geo = newGeo;
+          ensureFoliageObject();
+        }
+
+        function syncScene() {
+          const sc = params.scene;
+          updateSun();
+          applyCsmSettings();
+          applyShadowFlags();
+          ground.visible = sc.showGround;
+          scene.fog = sc.showFog
+            ? new THREE.FogExp2(params.light.hemiSkyColor, 0.018)
+            : null;
+          syncLeafUniforms();
+        }
+
+        migrateBranchParams(params.branches);
+        migrateTrunkParams(params.trunk);
+        rebuildTrunk();
+        rebuildGeometry();
+        rebuildBranchGeometry();
+        syncMaterial();
+        syncTrunkMaterial();
+        syncBranchMaterial();
+        syncWindUniforms();
+        syncScene();
+
+        let refreshUploadName = () => {};
+        let presetNameInput = null;
+        let trunkFileInput = null;
+        let trunkLod1Input = null;
+        let statV2Leaves = null;
+
+        migrateExportParams();
+        migrateFoliageParams(params.foliage);
+        migrateLod2CheapParams(params);
+        let statTrunkTris = null;
+        let statLeaves0 = null;
+        let statLeafTris0 = null;
+        let statLod1Leaves = null;
+        let statLod2Leaves = null;
+
+        const onTrunkShape = () => {
+          rebuildTrunk();
+          if (params.foliage.layout === "pine") updateInstanceMatrices();
+          refreshLodSystem();
+          if (params.branches.enabled) updateBranchMatrices();
+          updatePivotHelper();
+        };
+        const onTrunkBark = () => {
+          syncTrunkMaterial();
+        };
+        const onFoliage = () => {
+          syncLeafBounds();
+          ensureFoliageObject();
+          ensureBranchesObject();
+          if (params.branches.enabled) updateBranchMatrices();
+          refreshLodSystem();
+        };
+        const onFoliageMatrices = () => {
+          syncLeafBounds();
+          if (params.foliage.layout === "pine") refreshLodSystem();
+          else applySingleTransform();
+        };
+        const onGeom = () => {
+          rebuildGeometry();
+          refreshLodSystem();
+        };
+        const onCardTilt = () => {
+          if (params.foliage.layout === "pine") refreshLodSystem();
+          else applySingleTransform();
+          if (params.debug.showPivot) updatePivotHelper();
+        };
+        const onBranchStruct = () => ensureBranchesObject();
+        const onBranchMat = () => syncBranchMaterial();
+        const onBranchGeom = () => rebuildBranchGeometry();
+        const onBranchLayout = () => updateBranchMatrices();
+        const onMaterial = () => syncMaterial();
+        const onScene = () => syncScene();
+        const onDebug = () => {
+          syncMaterial();
+          syncTrunkMaterial();
+          syncBranchMaterial();
+          updatePivotHelper();
+        };
+
+        fileInput.addEventListener("change", () => {
+          const file = fileInput.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            loadLeafTexFromDataUrl(ev.target.result, file.name);
+          };
+          reader.readAsDataURL(file);
+        });
+
+        function clearUploadedTexture() {
+          fileInput.value = "";
+          disposeUploadedTexture();
+          activeLeafTexPath = "";
+          activeLeafTexDataUrl = "";
+          params.material.uploadName = "(none)";
+          syncMaterial();
+          refreshUploadName();
+          updateGallerySelection();
+        }
+
+        const uiRoot = document.getElementById("ui-scroll");
+        const t = params.trunk;
+        const f = params.foliage;
+        const b = params.branches;
+        const r = params.rect;
+        const g = params.grid;
+        const sh = params.shape;
+        const xf = params.transform;
+        const m = params.material;
+        const sc = params.scene;
+        const L = params.light;
+        const phySky = params.physicalSky;
+        const csmCfg = params.csm;
+        const wnd = params.wind;
+        const dbg = params.debug;
+
+        const sTrunk = _section(uiRoot, "Trunk", true);
+        _slider(sTrunk, t, "height", {
+          label: "height",
+          min: 0.2,
+          max: 24,
+          step: 0.05,
+          onChange: onTrunkShape,
+        });
+        _slider(sTrunk, t, "radiusBottom", {
+          label: "radius bottom",
+          min: 0.03,
+          max: 2,
+          step: 0.01,
+          onChange: onTrunkShape,
+        });
+        _slider(sTrunk, t, "radiusTop", {
+          label: "radius top",
+          min: 0.003,
+          max: 1.5,
+          step: 0.001,
+          onChange: onTrunkShape,
+        });
+        _slider(sTrunk, t, "yOffset", {
+          label: "base Y",
+          min: -1,
+          max: 2,
+          step: 0.01,
+          onChange: onTrunkShape,
+        });
+        _slider(sTrunk, t, "curveBend", {
+          label: "spine bend",
+          min: 0,
+          max: 1.2,
+          step: 0.01,
+          onChange: onTrunkShape,
+        });
+        _slider(sTrunk, t, "curveAngleDeg", {
+          label: "bend direction °",
+          min: 0,
+          max: 360,
+          step: 1,
+          onChange: onTrunkShape,
+        });
+        _slider(sTrunk, t, "curveS", {
+          label: "S-curve amount",
+          min: 0,
+          max: 0.5,
+          step: 0.01,
+          onChange: onTrunkShape,
+        });
+        _info(
+          sTrunk,
+          "spine",
+          () =>
+            "Bow along trunk; base + tip on center axis (not falling-over lean).",
+        );
+        _slider(sTrunk, t, "pathSegs", {
+          label: "path segments (0=auto)",
+          min: 0,
+          max: 64,
+          step: 1,
+          onChange: onTrunkShape,
+        });
+        _slider(sTrunk, t, "radialSegs", {
+          label: "radial segments",
+          min: 8,
+          max: 32,
+          step: 1,
+          onChange: onTrunkShape,
+        });
+        _toggle(sTrunk, t, "visible", {
+          label: "visible",
+          onChange: onTrunkShape,
+        });
+        _separator(sTrunk);
+        _color(sTrunk, t, "barkDark", {
+          label: "bark dark",
+          onChange: onTrunkBark,
+        });
+        _color(sTrunk, t, "barkMid", {
+          label: "bark mid",
+          onChange: onTrunkBark,
+        });
+        _color(sTrunk, t, "barkLight", {
+          label: "bark light",
+          onChange: onTrunkBark,
+        });
+        _color(sTrunk, t, "barkHighlight", {
+          label: "highlight",
+          onChange: onTrunkBark,
+        });
+        _slider(sTrunk, t, "stripeFreq", {
+          label: "vertical bands",
+          min: 2,
+          max: 24,
+          step: 0.5,
+          onChange: onTrunkBark,
+        });
+        _slider(sTrunk, t, "stripeStrength", {
+          label: "band strength",
+          min: 0,
+          max: 0.6,
+          step: 0.01,
+          onChange: onTrunkBark,
+        });
+        _slider(sTrunk, t, "noiseScale", {
+          label: "grain scale",
+          min: 0.5,
+          max: 8,
+          step: 0.1,
+          onChange: onTrunkBark,
+        });
+        _slider(sTrunk, t, "noiseStrength", {
+          label: "grain strength",
+          min: 0,
+          max: 0.4,
+          step: 0.01,
+          onChange: onTrunkBark,
+        });
+        _slider(sTrunk, t, "crackStrength", {
+          label: "crack speckle",
+          min: 0,
+          max: 0.35,
+          step: 0.01,
+          onChange: onTrunkBark,
+        });
+        _slider(sTrunk, t, "baseAo", {
+          label: "base darken",
+          min: 0,
+          max: 0.85,
+          step: 0.02,
+          onChange: onTrunkBark,
+        });
+        _slider(sTrunk, t, "mossStrength", {
+          label: "base moss",
+          min: 0,
+          max: 0.5,
+          step: 0.01,
+          onChange: onTrunkBark,
+        });
+        _color(sTrunk, t, "rimColor", {
+          label: "rim color",
+          onChange: onTrunkBark,
+        });
+        _slider(sTrunk, t, "rimStrength", {
+          label: "rim strength",
+          min: 0,
+          max: 0.35,
+          step: 0.01,
+          onChange: onTrunkBark,
+        });
+        _slider(sTrunk, t, "roughness", {
+          label: "roughness",
+          min: 0.5,
+          max: 1,
+          step: 0.02,
+          onChange: onTrunkBark,
+        });
+
+        const sFol = _section(uiRoot, "Foliage layout", true);
+        _toggle(sFol, f, "enabled", {
+          label: "show foliage",
+          onChange: () => {
+            syncFoliageVisibility();
+            if (params.debug.showPivot) updatePivotHelper();
+            refreshLodSystem();
+          },
+        });
+        _dropdown(sFol, f, "layout", {
+          label: "mode",
+          options: { pine: "pine", single: "single" },
+          onChange: onFoliage,
+        });
+        _slider(sFol, f, "levels", {
+          label: "levels",
+          min: 1,
+          max: 32,
+          step: 1,
+          onChange: onFoliage,
+        });
+        _slider(sFol, f, "perRing", {
+          label: "per ring",
+          min: 1,
+          max: 32,
+          step: 1,
+          onChange: onFoliage,
+        });
+        _slider(sFol, f, "baseY", {
+          label: "base Y",
+          min: -2,
+          max: 24,
+          step: 0.02,
+          onChange: onFoliage,
+        });
+        _info(
+          sFol,
+          "whorl height",
+          () =>
+            "Top ring locked to trunk tip. Lower rings from base Y along the trunk.",
+        );
+        _slider(sFol, f, "heightPower", {
+          label: "height curve",
+          min: 0.2,
+          max: 4,
+          step: 0.05,
+          onChange: onFoliageMatrices,
+        });
+        _slider(sFol, f, "tipRingSlide", {
+          label: "top whorl slide",
+          min: -0.8,
+          max: 0.4,
+          step: 0.01,
+          onChange: onFoliageMatrices,
+        });
+        _info(
+          sFol,
+          "top slide",
+          () => "Along trunk (m). Negative = nudge top ring below tip.",
+        );
+        _slider(sFol, f, "scaleBottom", {
+          label: "scale bottom",
+          min: 0.05,
+          max: 3,
+          step: 0.02,
+          onChange: onFoliage,
+        });
+        _slider(sFol, f, "scaleTop", {
+          label: "scale top",
+          min: 0.05,
+          max: 3,
+          step: 0.02,
+          onChange: onFoliage,
+        });
+        _slider(sFol, f, "scalePower", {
+          label: "scale curve",
+          min: 0.2,
+          max: 4,
+          step: 0.02,
+          onChange: onFoliage,
+        });
+        _separator(sFol);
+        _info(
+          sFol,
+          "pitch curve",
+          () =>
+            "Added on top of Card tilt pitch (transform.rotXDeg). Lower whorls vs crown tip.",
+        );
+        _toggle(sFol, f, "pitchCurveEnabled", {
+          label: "pitch by level",
+          onChange: onFoliageMatrices,
+        });
+        _slider(sFol, f, "pitchBottomDeg", {
+          label: "pitch bottom °",
+          min: -45,
+          max: 45,
+          step: 0.5,
+          onChange: onFoliageMatrices,
+        });
+        _slider(sFol, f, "pitchTopDeg", {
+          label: "pitch top °",
+          min: -45,
+          max: 45,
+          step: 0.5,
+          onChange: onFoliageMatrices,
+        });
+        _slider(sFol, f, "pitchCurvePower", {
+          label: "pitch curve power",
+          min: 0.2,
+          max: 4,
+          step: 0.05,
+          onChange: onFoliageMatrices,
+        });
+        _slider(sFol, f, "globalScale", {
+          label: "global ×",
+          min: 0.1,
+          max: 3,
+          step: 0.02,
+          onChange: onFoliage,
+        });
+        _slider(sFol, f, "radialInset", {
+          label: "trunk inset",
+          min: -0.2,
+          max: 0.5,
+          step: 0.005,
+          onChange: onFoliage,
+        });
+        _slider(sFol, f, "pivotAlongRadius", {
+          label: "pivot → surface",
+          min: 0,
+          max: 1,
+          step: 0.02,
+          onChange: onFoliage,
+        });
+        _slider(sFol, f, "azimuthOffsetDeg", {
+          label: "ring rotate °",
+          min: -180,
+          max: 180,
+          step: 0.5,
+          onChange: onFoliageMatrices,
+        });
+        _slider(sFol, f, "staggerDeg", {
+          label: "stagger / level °",
+          min: -45,
+          max: 45,
+          step: 0.5,
+          onChange: onFoliageMatrices,
+        });
+        _slider(sFol, f, "ringRandomDeg", {
+          label: "ring random ° (±)",
+          min: 0,
+          max: 180,
+          step: 1,
+          onChange: onFoliageMatrices,
+        });
+        _slider(sFol, f, "cardRandomDeg", {
+          label: "card random ° (±)",
+          min: 0,
+          max: 90,
+          step: 1,
+          onChange: onFoliageMatrices,
+        });
+        _slider(sFol, f, "leafPitchRandomDeg", {
+          label: "leaf pitch ± °",
+          min: 0,
+          max: 25,
+          step: 0.5,
+          onChange: onFoliageMatrices,
+        });
+        _slider(sFol, f, "leafYRandom", {
+          label: "leaf height ±",
+          min: 0,
+          max: 0.35,
+          step: 0.005,
+          onChange: onFoliageMatrices,
+        });
+        _slider(sFol, f, "leafScaleRandom", {
+          label: "leaf scale ±",
+          min: 0,
+          max: 0.35,
+          step: 0.01,
+          onChange: onFoliageMatrices,
+        });
+        _button(sFol, {
+          title: "Reshuffle all random",
+          onClick: () => {
+            f.ringRandomSeed = (f.ringRandomSeed | 0) + 1;
+            onFoliageMatrices();
+          },
+        });
+        _slider(sFol, f, "offsetX", {
+          label: "offset X",
+          min: -2,
+          max: 2,
+          step: 0.02,
+          onChange: onFoliage,
+        });
+        _slider(sFol, f, "offsetY", {
+          label: "offset Y",
+          min: -2,
+          max: 2,
+          step: 0.02,
+          onChange: onFoliage,
+        });
+        _slider(sFol, f, "offsetZ", {
+          label: "offset Z",
+          min: -2,
+          max: 2,
+          step: 0.02,
+          onChange: onFoliage,
+        });
+
+        const sBr = _section(uiRoot, "Branches", true);
+        _toggle(sBr, b, "enabled", {
+          label: "enable",
+          onChange: onBranchStruct,
+        });
+        _slider(sBr, b, "count", {
+          label: "count",
+          min: 0,
+          max: 12,
+          step: 1,
+          onChange: onBranchStruct,
+        });
+        _slider(sBr, b, "placementSeed", {
+          label: "placement seed",
+          min: 0,
+          max: 999,
+          step: 1,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "bottomTrunkT", {
+          label: "from bottom (0–1)",
+          min: 0,
+          max: 0.5,
+          step: 0.01,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "topTrunkT", {
+          label: "up to height (0–1)",
+          min: 0.05,
+          max: 0.6,
+          step: 0.01,
+          onChange: onBranchLayout,
+        });
+        _toggle(sBr, b, "clampBelowFoliage", {
+          label: "stop below foliage",
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "belowFoliageMargin", {
+          label: "gap under foliage (m)",
+          min: 0,
+          max: 1.5,
+          step: 0.02,
+          onChange: onBranchLayout,
+        });
+        _info(
+          sBr,
+          "br-hint",
+          () =>
+            "Random on trunk in band above; leaf cards cover the crown — use 1–2 low branches.",
+        );
+        _slider(sBr, b, "scaleVariation", {
+          label: "scale jitter",
+          min: 0,
+          max: 0.5,
+          step: 0.01,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "lengthVariation", {
+          label: "length jitter",
+          min: 0,
+          max: 0.5,
+          step: 0.01,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "globalScale", {
+          label: "global ×",
+          min: 0.1,
+          max: 3,
+          step: 0.02,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "radialInset", {
+          label: "trunk inset",
+          min: -0.2,
+          max: 0.5,
+          step: 0.005,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "pivotAlongRadius", {
+          label: "pivot → surface",
+          min: 0,
+          max: 1,
+          step: 0.02,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "trunkEmbed", {
+          label: "embed into trunk (m)",
+          min: 0,
+          max: 0.12,
+          step: 0.005,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "pitchUpDeg", {
+          label: "pitch up °",
+          min: 0,
+          max: 80,
+          step: 1,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "offsetX", {
+          label: "offset X",
+          min: -2,
+          max: 2,
+          step: 0.02,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "offsetY", {
+          label: "offset Y",
+          min: -2,
+          max: 2,
+          step: 0.02,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "offsetZ", {
+          label: "offset Z",
+          min: -2,
+          max: 2,
+          step: 0.02,
+          onChange: onBranchLayout,
+        });
+        _separator(sBr);
+        _toggle(sBr, b, "forkEnabled", {
+          label: "fork split (twigs)",
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "forkCount", {
+          label: "twigs at split",
+          min: 1,
+          max: 4,
+          step: 1,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "forkStart", {
+          label: "split on main (0–1)",
+          min: 0.4,
+          max: 0.92,
+          step: 0.02,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "forkRadiusMul", {
+          label: "twig thickness ×",
+          min: 0.15,
+          max: 0.75,
+          step: 0.02,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "forkTipScale", {
+          label: "twig tip thin ×",
+          min: 0.2,
+          max: 1,
+          step: 0.02,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "forkLengthMul", {
+          label: "twig length ×",
+          min: 0.2,
+          max: 1,
+          step: 0.02,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "forkAngleDeg", {
+          label: "twig spread °",
+          min: 12,
+          max: 65,
+          step: 1,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "forkTwistDeg", {
+          label: "twig twist °",
+          min: 0,
+          max: 360,
+          step: 1,
+          onChange: onBranchGeom,
+        });
+        _separator(sBr);
+        _slider(sBr, b, "length", {
+          label: "length",
+          min: 0.1,
+          max: 6,
+          step: 0.02,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "radiusBottom", {
+          label: "radius base",
+          min: 0.005,
+          max: 0.25,
+          step: 0.002,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "radiusTop", {
+          label: "radius tip",
+          min: 0.003,
+          max: 0.2,
+          step: 0.002,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "radialSegs", {
+          label: "radial segs",
+          min: 3,
+          max: 16,
+          step: 1,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "heightSegs", {
+          label: "length segs",
+          min: 1,
+          max: 16,
+          step: 1,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "bend", {
+          label: "bend / droop",
+          min: -0.8,
+          max: 0.8,
+          step: 0.02,
+          onChange: onBranchGeom,
+        });
+        _slider(sBr, b, "bendSide", {
+          label: "side sag",
+          min: -0.4,
+          max: 0.4,
+          step: 0.01,
+          onChange: onBranchGeom,
+        });
+        _info(
+          sBr,
+          "bend-hint",
+          () => "Bend keeps joints welded; caps stay on trunk / fork point.",
+        );
+        _slider(sBr, b, "rotXDeg", {
+          label: "tilt X °",
+          min: -180,
+          max: 180,
+          step: 0.5,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "rotYDeg", {
+          label: "tilt Y °",
+          min: -180,
+          max: 180,
+          step: 0.5,
+          onChange: onBranchLayout,
+        });
+        _slider(sBr, b, "rotZDeg", {
+          label: "tilt Z °",
+          min: -180,
+          max: 180,
+          step: 0.5,
+          onChange: onBranchLayout,
+        });
+        _color(sBr, b, "color", { label: "color", onChange: onBranchMat });
+        _slider(sBr, b, "roughness", {
+          label: "roughness",
+          min: 0,
+          max: 1,
+          step: 0.02,
+          onChange: onBranchMat,
+        });
+
+        const sRect = _section(uiRoot, "Rectangle (pivot = short edge)", true);
+        _slider(sRect, r, "width", {
+          label: "width",
+          min: 0.1,
+          max: 8,
+          step: 0.05,
+          onChange: onGeom,
+        });
+        _slider(sRect, r, "height", {
+          label: "height",
+          min: 0.1,
+          max: 8,
+          step: 0.05,
+          onChange: onGeom,
+        });
+        _dropdown(sRect, r, "pivotEdge", {
+          label: "pivot edge",
+          options: {
+            auto: "auto",
+            left: "left",
+            right: "right",
+            bottom: "bottom",
+            top: "top",
+          },
+          onChange: onGeom,
+        });
+
+        const sGrid = _section(uiRoot, "Subdivision (UV grid)", true);
+        _slider(sGrid, g, "segX", {
+          label: "segments X",
+          min: 1,
+          max: 128,
+          step: 1,
+          onChange: onGeom,
+        });
+        _slider(sGrid, g, "segY", {
+          label: "segments Y",
+          min: 1,
+          max: 128,
+          step: 1,
+          onChange: onGeom,
+        });
+
+        const sShape = _section(uiRoot, "Shape (still a rectangle)", true);
+        _slider(sShape, sh, "bendX", {
+          label: "bend width (+ convex)",
+          min: -2,
+          max: 2,
+          step: 0.02,
+          onChange: onGeom,
+        });
+        _slider(sShape, sh, "bendY", {
+          label: "bend height (+ convex)",
+          min: -2,
+          max: 2,
+          step: 0.02,
+          onChange: onGeom,
+        });
+        _slider(sShape, sh, "skewX", {
+          label: "shear X by Y",
+          min: -1,
+          max: 1,
+          step: 0.02,
+          onChange: onGeom,
+        });
+        _slider(sShape, sh, "skewY", {
+          label: "shear Y by X",
+          min: -1,
+          max: 1,
+          step: 0.02,
+          onChange: onGeom,
+        });
+        _slider(sShape, sh, "taperX", {
+          label: "width taper vs Y",
+          min: -0.85,
+          max: 0.85,
+          step: 0.02,
+          onChange: onGeom,
+        });
+
+        const sTilt = _section(uiRoot, "Card tilt (rot: pine + single)", true);
+        _slider(sTilt, xf, "posX", {
+          label: "pos X (single)",
+          min: -4,
+          max: 4,
+          step: 0.02,
+          onChange: onCardTilt,
+        });
+        _slider(sTilt, xf, "posY", {
+          label: "pos Y (single)",
+          min: -4,
+          max: 4,
+          step: 0.02,
+          onChange: onCardTilt,
+        });
+        _slider(sTilt, xf, "posZ", {
+          label: "pos Z (single)",
+          min: -4,
+          max: 4,
+          step: 0.02,
+          onChange: onCardTilt,
+        });
+        _slider(sTilt, xf, "rotXDeg", {
+          label: "pitch ° (tip ↓ = −)",
+          min: -180,
+          max: 180,
+          step: 0.5,
+          onChange: onCardTilt,
+        });
+        _slider(sTilt, xf, "rotYDeg", {
+          label: "yaw °",
+          min: -180,
+          max: 180,
+          step: 0.5,
+          onChange: onCardTilt,
+        });
+        _slider(sTilt, xf, "rotZDeg", {
+          label: "roll °",
+          min: -180,
+          max: 180,
+          step: 0.5,
+          onChange: onCardTilt,
+        });
+
+        const sMat = _section(uiRoot, "Material", false);
+        _slider(sMat, m, "roughness", {
+          label: "roughness",
+          min: 0,
+          max: 1,
+          step: 0.02,
+          onChange: onMaterial,
+        });
+        _slider(sMat, m, "metalness", {
+          label: "metalness",
+          min: 0,
+          max: 1,
+          step: 0.02,
+          onChange: onMaterial,
+        });
+        _toggle(sMat, m, "useChecker", {
+          label: "checker mask preview",
+          onChange: onMaterial,
+        });
+
+        const sTex = _section(uiRoot, "Texture / alpha", true);
+        buildTexGallery(sTex);
+        _separator(sTex);
+        const uploadInfo = _info(sTex, "current file", () => m.uploadName);
+        refreshUploadName = () => uploadInfo.update(m.uploadName);
+        _button(sTex, {
+          title: "Upload image…",
+          onClick: () => fileInput.click(),
+        });
+        _button(sTex, {
+          title: "Clear uploaded",
+          onClick: () => clearUploadedTexture(),
+        });
+        _dropdown(sTex, m, "textureMode", {
+          label: "texture layout",
+          options: {
+            "Single image (full UV)": "single",
+            "Atlas 2×2 (random cell)": "atlas",
+          },
+          onChange: onMaterial,
+        });
+        _slider(sTex, m, "atlasCols", {
+          label: "atlas columns",
+          min: 1,
+          max: 4,
+          step: 1,
+          onChange: onMaterial,
+        });
+        _slider(sTex, m, "atlasRows", {
+          label: "atlas rows",
+          min: 1,
+          max: 4,
+          step: 1,
+          onChange: onMaterial,
+        });
+        _dropdown(sTex, m, "colorSource", {
+          label: "leaf color from",
+          options: {
+            "TSL procedural": "tsl",
+            "Uploaded image (RGB)": "texture",
+          },
+          onChange: onMaterial,
+        });
+        _dropdown(sTex, m, "maskMode", {
+          label: "cutout from",
+          options: {
+            "PNG alpha (RGBA)": "alpha",
+            "B&W / gray (red)": "luminance",
+          },
+          onChange: onMaterial,
+        });
+        _slider(sTex, m, "alphaTest", {
+          label: "alpha test",
+          min: 0,
+          max: 0.99,
+          step: 0.01,
+          onChange: onMaterial,
+        });
+        _toggle(sTex, m, "depthWrite", {
+          label: "depth write",
+          onChange: onMaterial,
+        });
+        _info(sTex, "mask", () =>
+          m.textureMode === "atlas"
+            ? `atlas ${m.atlasCols}×${m.atlasRows} · 256×512 → ${128}×${256}/cell`
+            : "single image · full card UV",
+        );
+        _slider(sTex, m, "texRotDeg", {
+          label: "image rot °",
+          min: -180,
+          max: 180,
+          step: 1,
+          onChange: onMaterial,
+        });
+        _slider(sTex, m, "texOffsetU", {
+          label: "offset U (bough)",
+          min: -2,
+          max: 2,
+          step: 0.01,
+          onChange: onMaterial,
+        });
+        _slider(sTex, m, "texOffsetV", {
+          label: "offset V (across)",
+          min: -2,
+          max: 2,
+          step: 0.01,
+          onChange: onMaterial,
+        });
+        _slider(sTex, m, "texRepeatU", {
+          label: "repeat U",
+          min: 0.05,
+          max: 8,
+          step: 0.01,
+          onChange: onMaterial,
+        });
+        _slider(sTex, m, "texRepeatV", {
+          label: "repeat V",
+          min: 0.05,
+          max: 8,
+          step: 0.01,
+          onChange: onMaterial,
+        });
+        _toggle(sTex, m, "texFlipH", { label: "flip U", onChange: onMaterial });
+        _toggle(sTex, m, "texFlipV", { label: "flip V", onChange: onMaterial });
+
+        const sLeaf = _section(uiRoot, "Leaf look (TSL)", true);
+        _color(sLeaf, m, "bottomColor", {
+          label: "base green",
+          onChange: onMaterial,
+        });
+        _color(sLeaf, m, "topColor", {
+          label: "tip green",
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "colorVar", {
+          label: "color var",
+          min: 0,
+          max: 0.35,
+          step: 0.01,
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "veinStrength", {
+          label: "vein dark",
+          min: 0,
+          max: 0.35,
+          step: 0.01,
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "pivotAo", {
+          label: "hook AO",
+          min: 0,
+          max: 0.7,
+          step: 0.02,
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "normalBias", {
+          label: "lighting → trunk",
+          min: 0,
+          max: 1,
+          step: 0.02,
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "leafWarp", {
+          label: "normal warp",
+          min: 0,
+          max: 0.35,
+          step: 0.01,
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "radialUp", {
+          label: "trunk radial Y",
+          min: 0,
+          max: 1,
+          step: 0.02,
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "aoStrength", {
+          label: "inner AO",
+          min: 0,
+          max: 0.85,
+          step: 0.02,
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "aoRadius", {
+          label: "inner AO radius",
+          min: 0.3,
+          max: 6,
+          step: 0.05,
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "sssStrength", {
+          label: "SSS",
+          min: 0,
+          max: 1,
+          step: 0.02,
+          onChange: onMaterial,
+        });
+        _color(sLeaf, m, "sssColor", {
+          label: "SSS color",
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "sssPower", {
+          label: "SSS power",
+          min: 0.5,
+          max: 6,
+          step: 0.1,
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "rimStrength", {
+          label: "rim",
+          min: 0,
+          max: 0.5,
+          step: 0.01,
+          onChange: onMaterial,
+        });
+        _color(sLeaf, m, "rimColor", {
+          label: "rim color",
+          onChange: onMaterial,
+        });
+        _slider(sLeaf, m, "rimPower", {
+          label: "rim power",
+          min: 0.5,
+          max: 6,
+          step: 0.1,
+          onChange: onMaterial,
+        });
+
+        const sSc = _section(uiRoot, "Scene", false);
+        _toggle(sSc, sc, "showFog", { label: "Show fog", onChange: onScene });
+        _toggle(sSc, sc, "showGround", {
+          label: "Show ground",
+          onChange: onScene,
+        });
+        _toggle(sSc, sc, "castFoliageShadows", {
+          label: "foliage casts shadow",
+          onChange: onScene,
+        });
+        _toggle(sSc, sc, "receiveFoliageShadows", {
+          label: "foliage receives shadow",
+          onChange: onScene,
+        });
+        _info(
+          sSc,
+          "shadow-hint",
+          () =>
+            "Receive: leaf-on-leaf + trunk on cards. Turn cast on too. Compare vs Material AO sliders.",
+        );
+
+        {
+          const sec = _section(uiRoot, "Lights", true);
+          _slider(sec, L, "sunAzimuth", {
+            label: "Sun azimuth",
+            min: 0,
+            max: 360,
+            step: 1,
+            onChange: () => {
+              updateSun();
+              rebuildSkyEnv();
+            },
+          });
+          _slider(sec, L, "sunElevation", {
+            label: "Sun elev",
+            min: -10,
+            max: 90,
+            step: 1,
+            onChange: () => {
+              updateSun();
+              rebuildSkyEnv();
+            },
+          });
+          _color(sec, L, "dirColor", {
+            label: "Sun color",
+            onChange: () => updateSun(),
+          });
+          _slider(sec, L, "dirIntensity", {
+            label: "Sun int",
+            min: 0,
+            max: 10,
+            step: 0.05,
+            onChange: () => updateSun(),
+          });
+          _separator(sec);
+          _color(sec, L, "hemiSkyColor", {
+            label: "Hemi sky",
+            onChange: () => updateSun(),
+          });
+          _color(sec, L, "hemiGroundColor", {
+            label: "Hemi ground",
+            onChange: () => updateSun(),
+          });
+          _slider(sec, L, "hemiIntensity", {
+            label: "Hemi int",
+            min: 0,
+            max: 3,
+            step: 0.05,
+            onChange: () => updateSun(),
+          });
+          _separator(sec);
+          _slider(sec, L, "envIntensity", {
+            label: "Env int",
+            min: 0,
+            max: 3,
+            step: 0.05,
+            onChange: () => updateSun(),
+          });
+          _slider(sec, L, "exposure", {
+            label: "Exposure",
+            min: 0,
+            max: 3,
+            step: 0.05,
+            onChange: () => updateSun(),
+          });
+          _separator(sec);
+          _slider(sec, L, "shadowBias", {
+            label: "Shadow bias",
+            min: -0.005,
+            max: 0.001,
+            step: 0.00005,
+            onChange: () => updateSun(),
+          });
+          _slider(sec, L, "shadowNormalBias", {
+            label: "Normal bias",
+            min: 0,
+            max: 0.08,
+            step: 0.001,
+            onChange: () => updateSun(),
+          });
+        }
+
+        {
+          const sec = _section(uiRoot, "Shadows (CSM)", false);
+          const onCsm = () => applyCsmSettings();
+          _slider(sec, csmCfg, "maxFar", {
+            label: "Max far (m)",
+            min: 16,
+            max: 300,
+            step: 4,
+            onChange: onCsm,
+          });
+          _slider(sec, csmCfg, "mapSize", {
+            label: "Map size",
+            min: 1024,
+            max: 8192,
+            step: 512,
+            onChange: onCsm,
+          });
+          _slider(sec, csmCfg, "lightMargin", {
+            label: "Light margin",
+            min: 0,
+            max: 120,
+            step: 2,
+            onChange: onCsm,
+          });
+          _slider(sec, csmCfg, "cascades", {
+            label: "Cascades",
+            min: 1,
+            max: 4,
+            step: 1,
+            onChange: onCsm,
+          });
+          _info(
+            sec,
+            "csm-hint",
+            () =>
+              "Lower max far + higher map size = sharper ground/foliage shadows. CSM frustums follow the camera each frame.",
+          );
+        }
+
+        {
+          const sec = _section(uiRoot, "Sky", true);
+          const reb = () => rebuildSkyEnv();
+          _slider(sec, phySky, "turbidity", {
+            label: "Turbidity",
+            min: 0.1,
+            max: 20,
+            step: 0.1,
+            onChange: reb,
+          });
+          _slider(sec, phySky, "rayleigh", {
+            label: "Rayleigh",
+            min: 0,
+            max: 4,
+            step: 0.01,
+            onChange: reb,
+          });
+          _slider(sec, phySky, "mie", {
+            label: "Mie",
+            min: 0,
+            max: 0.1,
+            step: 0.0005,
+            onChange: reb,
+          });
+          _slider(sec, phySky, "mieG", {
+            label: "Mie G",
+            min: 0,
+            max: 0.999,
+            step: 0.001,
+            onChange: reb,
+          });
+          _slider(sec, phySky, "cloudCoverage", {
+            label: "Cloud cov",
+            min: 0,
+            max: 1,
+            step: 0.01,
+            onChange: reb,
+          });
+          _slider(sec, phySky, "cloudDensity", {
+            label: "Cloud dens",
+            min: 0,
+            max: 2,
+            step: 0.01,
+            onChange: reb,
+          });
+          _slider(sec, phySky, "cloudElevation", {
+            label: "Cloud elev",
+            min: 0,
+            max: 1,
+            step: 0.01,
+            onChange: reb,
+          });
+          _slider(sec, phySky, "meshScale", {
+            label: "Mesh scale",
+            min: 1000,
+            max: 50000,
+            step: 100,
+            onChange: reb,
+          });
+        }
+
+        const sWind = _section(uiRoot, "Wind", true);
+        _toggle(sWind, wnd, "enabled", {
+          label: "enable wind",
+          onChange: onMaterial,
+        });
+        _slider(sWind, wnd, "speed", {
+          label: "speed",
+          min: 0,
+          max: 4,
+          step: 0.05,
+          onChange: onMaterial,
+        });
+        _slider(sWind, wnd, "strength", {
+          label: "sway",
+          min: 0,
+          max: 0.45,
+          step: 0.01,
+          onChange: onMaterial,
+        });
+        _slider(sWind, wnd, "micro", {
+          label: "flutter",
+          min: 0,
+          max: 0.15,
+          step: 0.005,
+          onChange: onMaterial,
+        });
+        _slider(sWind, wnd, "directionDeg", {
+          label: "direction °",
+          min: 0,
+          max: 360,
+          step: 1,
+          onChange: onMaterial,
+        });
+        _info(
+          sWind,
+          "wind-hint",
+          () => "Vertex sway in world XZ; hook (low Y) moves less than tips.",
+        );
+
+        const sDbg = _section(uiRoot, "Debug", false);
+        _toggle(sDbg, dbg, "wireframe", {
+          label: "wireframe",
+          onChange: onDebug,
+        });
+        _toggle(sDbg, dbg, "showPivot", {
+          label: "axes at pivot",
+          onChange: onDebug,
+        });
+
+        _separator(uiRoot);
+        const sLod = _section(uiRoot, "LOD Preview", true);
+        _toggle(sLod, params, "lodPreview", {
+          label: "Show LOD side-by-side",
+          onChange: () => toggleLodPreview(),
+        });
+        _separator(sLod);
+        _slider(sLod, params, "lodDist1", {
+          label: "LOD0 → LOD1 dist",
+          min: 20,
+          max: 300,
+          step: 5,
+          onChange: () => updateLodLabels(),
+        });
+        _slider(sLod, params, "lodDist2", {
+          label: "LOD1 → LOD2 dist",
+          min: 50,
+          max: 600,
+          step: 10,
+          onChange: () => updateLodLabels(),
+        });
+        _separator(sLod);
+        statLod1Leaves = _info(sLod, "LOD1 leaves", () =>
+          String(params.lod1Leaves),
+        );
+        statLod2Leaves = _info(sLod, "LOD2 leaves", () =>
+          String(params.lod2Leaves),
+        );
+        _info(
+          sLod,
+          "lod1-hint",
+          () =>
+            "LOD1 = half leaves, 1.4× cards, same material as LOD0, no receive shadow.",
+        );
+        _separator(sLod);
+        const sLod2 = sLod;
+        _slider(sLod2, params.lod2Cheap, "aoStrengthMul", {
+          label: "LOD2 AO boost",
+          min: 1,
+          max: 2,
+          step: 0.05,
+          onChange: () => {
+            syncLod2Uniforms();
+            matLod2.needsUpdate = true;
+          },
+        });
+        _slider(sLod2, params.lod2Cheap, "colorVarMul", {
+          label: "LOD2 color var",
+          min: 0.1,
+          max: 1,
+          step: 0.05,
+          onChange: () => syncLod2Uniforms(),
+        });
+        _slider(sLod2, params.lod2Cheap, "sssMul", {
+          label: "LOD2 SSS",
+          min: 0,
+          max: 1,
+          step: 0.05,
+          onChange: () => syncLod2Uniforms(),
+        });
+        _slider(sLod2, params.lod2Cheap, "rimMul", {
+          label: "LOD2 rim",
+          min: 0,
+          max: 1,
+          step: 0.05,
+          onChange: () => syncLod2Uniforms(),
+        });
+
+        const sStats = _section(uiRoot, "Stats", true);
+        statTrunkTris = _info(sStats, "Trunk tris", () =>
+          String(params.trunkTris),
+        );
+        statLeaves0 = _info(sStats, "LOD0 leaves", () =>
+          String(params.totalLeaves),
+        );
+        statLeafTris0 = _info(sStats, "LOD0 leaf tris", () =>
+          String(params.totalLeafTris),
+        );
+
+        const sV2 = _section(uiRoot, "V2 engine handoff", true);
+        const ex = params.export;
+        trunkFileInput = _text(sV2, ex, "trunkFile", {
+          label: "trunkFile",
+          onChange: () => {},
+        });
+        trunkLod1Input = _text(sV2, ex, "trunkLod1File", {
+          label: "trunk LOD1",
+          onChange: () => {},
+        });
+        _slider(sV2, ex, "trunkScale", {
+          label: "trunk scale",
+          min: 0.05,
+          max: 3,
+          step: 0.01,
+          onChange: () => {},
+        });
+        _toggle(sV2, ex, "billboardLeaves", {
+          label: "billboard LOD (v2)",
+          onChange: () => {},
+        });
+        _toggle(sV2, ex, "billboardYawOnly", {
+          label: "billboard yaw only",
+          onChange: () => {},
+        });
+        statV2Leaves = _info(sV2, "leaf counts L0/L1/L2", () => {
+          const l0 = countPineLeaves(1);
+          const l1 = countPineLeaves(0.5);
+          const l2 = countPineLeaves(0.5);
+          return `${l0} / ${l1} / ${l2}`;
+        });
+        _button(sV2, {
+          title: "Export trunk → GLB (for models/trunks/)",
+          onClick: exportTrunkGlb,
+        });
+
+        _separator(uiRoot);
+        const sPreset = _section(uiRoot, "Save / Load", true);
+        presetNameInput = _text(sPreset, params, "presetName", {
+          label: "Preset name",
+        });
+        _button(sPreset, {
+          title: "Save preset (pine + v2 fields)",
+          onClick: savePreset,
+        });
+        _button(sPreset, {
+          title: "Load preset from file",
+          onClick: () => {
+            const i = document.createElement("input");
+            i.type = "file";
+            i.accept = ".json";
+            i.onchange = () => i.files[0] && loadPresetFromFile(i.files[0]);
+            i.click();
+          },
+        });
+        _button(sPreset, {
+          title: "Copy to clipboard",
+          onClick: () => {
+            const json = JSON.stringify(buildPresetData(), null, 2);
+            navigator.clipboard
+              .writeText(json)
+              .then(() => {
+                infoEl.textContent = "Settings copied to clipboard.";
+              })
+              .catch(() => {
+                const ta = document.createElement("textarea");
+                ta.value = json;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand("copy");
+                ta.remove();
+                infoEl.textContent = "Settings copied to clipboard.";
+              });
+          },
+        });
+
+        refreshLodSystem();
+
+        loadLeafTexFromPath(
+          PINE_LEAF_TEXTURES[0].path,
+          PINE_LEAF_TEXTURES[0].mode,
+        );
+
+        addEventListener("resize", () => {
+          camera.aspect = innerWidth / innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(innerWidth, innerHeight);
+          if (csm?.mainFrustum) csm.updateFrustums();
+        });
+
+        let windClock0 = performance.now();
+
+        function tick() {
+          requestAnimationFrame(tick);
+          if (params.wind.enabled !== false) {
+            const tw = (performance.now() - windClock0) * 0.001;
+            leafU.time.value = tw;
+            leafU2.time.value = tw;
+          }
+          controls.update();
+          if (csm?.mainFrustum) csm.updateFrustums();
+          renderer.render(scene, camera);
+        }
+        tick();
+      })();
+    </script>
+  </body>
+</html>
