@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import Stats from "stats-gl";
-import { texture, uniform } from "three/tsl";
+import { texture, uniform, float, mix, positionWorld } from "three/tsl";
 import { createHeightmapTexture, saveTerrainConfig, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
 import { STOCHASTIC_ENABLED, toggleStochastic } from "../../v2/core/legacy/stochasticTex.js";
@@ -563,16 +563,18 @@ async function main() {
     windSpeed: 0.2, windStrength: 1.4, windGust: 0.3, windWaveScale: 0.12, windAngle: 0,
     clumpScale: 1.5, clumpStrength: 0.7,
     grassDensity: 1,
-    bladeColor: "#0e300e", tipColor: "#004d05",
+    bladeColor: "#0e300e", tipColor: "#00b30c",
     aoBase: 0.25, aoPower: 2,
-    colorVariation: true,
+    colorVariation: false,
     cvHueSpread: 0.08, cvSatSpread: 0.3, cvDryAmount: 0.15, cvDryColor: "#8a7a3a",
     skyBlend: 0.8, cylindrical: 0.3, viewThicken: 0.45,
     bssColor: "#2d7a2d", bssIntensity: 1.2, bssPower: 2,
     frontScatter: 0.3, rimSSS: 0.25,
     slopeEnabled: false, slopeMin: 0.65, slopeMax: 0.85,
+    // v3 tint always uses "img" mode (2): the splat/snow terrain color is baked
+    // top-down into grassTintRT and sampled by the blades at their world XZ.
     terrainTintEnabled: false, terrainTintAutoSource: false,
-    terrainTintManualMode: 0, terrainTintStrength: 0.5, terrainTintRootBias: 0.35,
+    terrainTintManualMode: 2, terrainTintStrength: 0.5, terrainTintRootBias: 0.35,
     specV1Enabled: false, specV1Intensity: 1.5, specV1Color: "#ffffff",
     specV1DirX: -1, specV1DirY: 1, specV1DirZ: 0.5, specV1Power: 25.6,
     specV2Enabled: false, specV2Intensity: 1, specV2Color: "#ffffff",
@@ -590,6 +592,67 @@ async function main() {
   let grassRings = null;
   let _grassBuilding = false;
 
+  // ── Terrain tint bake ──────────────────────────────────────────────────────
+  // v2 fed the grass a procedural ground-color TSL fn; v3's terrain color is
+  // the splat overlay, so it gets baked top-down into a small RT the blades
+  // sample in "img" tint mode. Re-baked every ~0.5 s while tint is enabled, so
+  // splat repaints / auto-paint / snow / late texture loads can never go stale.
+  const GRASS_TINT_RES = 512;
+  const grassTintRT = new THREE.RenderTarget(GRASS_TINT_RES, GRASS_TINT_RES, {
+    type: THREE.HalfFloatType,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    generateMipmaps: false,
+    depthBuffer: false,
+    colorSpace: THREE.NoColorSpace,
+  });
+  grassTintRT.texture.flipY = false;
+  grassTintRT.texture.name = "GrassTerrainTint";
+  const grassTintScene = new THREE.Scene();
+  // left/right swapped on purpose: a straight-down lookAt with up=(0,0,1)
+  // mirrors world X in camera space; the swap flips it back so RT u/v match
+  // the grass shader's tintUv = worldXZ / WORLD_SIZE + 0.5.
+  const grassTintCam = new THREE.OrthographicCamera(
+    WORLD_SIZE / 2, -WORLD_SIZE / 2, WORLD_SIZE / 2, -WORLD_SIZE / 2, 0.1, 50,
+  );
+  grassTintCam.position.set(0, 10, 0);
+  grassTintCam.up.set(0, 0, 1);
+  grassTintCam.lookAt(0, 0, 0);
+  {
+    const tintMat = new THREE.MeshBasicNodeMaterial();
+    // Same stack terrainLOD renders: splat layers over the plain tile base,
+    // snow albedo on top where covered — grass under snow tints white.
+    let tintCol = splatOverlay.blendColor(uniform(new THREE.Color(0xe6e3e3)));
+    const snowShared = snowSystem?.shared;
+    if (snowShared) {
+      tintCol = mix(
+        tintCol,
+        snowShared.snowAlbedo(float(0)),
+        snowShared.covBlend(positionWorld.xz),
+      );
+    }
+    tintMat.colorNode = tintCol;
+    const tintPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE),
+      tintMat,
+    );
+    tintPlane.rotation.x = -Math.PI / 2;
+    tintPlane.frustumCulled = false;
+    grassTintScene.add(tintPlane);
+  }
+  let grassTintDirty = true;
+  let _grassTintFrame = 0;
+  function bakeGrassTintIfNeeded() {
+    if (!grassRings || !grassState.terrainTintEnabled) return;
+    _grassTintFrame++;
+    if (!grassTintDirty && _grassTintFrame % 30 !== 0) return;
+    grassTintDirty = false;
+    const prevRT = renderer.getRenderTarget();
+    renderer.setRenderTarget(grassTintRT);
+    renderer.render(grassTintScene, grassTintCam);
+    renderer.setRenderTarget(prevRT);
+  }
+
   async function ensureGrassBuilt() {
     if (grassRings || _grassBuilding) return;
     _grassBuilding = true;
@@ -602,6 +665,7 @@ async function main() {
         densityTex:       grassTerrainData.densityTex,
         windTex:          grassWindTex,
         specNoiseTex:     grassSpecNoiseTex,
+        tintTex:          grassTintRT.texture,
         worldSize:        WORLD_SIZE,
         gp:               grassState,
       };
@@ -1890,6 +1954,7 @@ async function main() {
         if (!editorCamera.flyMode && !controls.enabled) syncEditorOrbitEnabled();
       }
 
+      bakeGrassTintIfNeeded();
       if (grassRings) {
         const _grassAnchor = playMode.active ? playMode.playerPosition : camera.position;
         for (const r of grassRings) r.update(_grassAnchor, camera);
@@ -2850,6 +2915,27 @@ async function main() {
     grassState.crossed = gckCrossed.checked;
     if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
   });
+  const gslSegments  = document.getElementById("gsl-segments");
+  const glblSegments = document.getElementById("glbl-segments");
+  const gslTaper     = document.getElementById("gsl-taper");
+  const glblTaper    = document.getElementById("glbl-taper");
+  const gslClumpSc   = document.getElementById("gsl-clump-scale");
+  const glblClumpSc  = document.getElementById("glbl-clump-scale");
+  const gslClumpStr  = document.getElementById("gsl-clump-str");
+  const glblClumpStr = document.getElementById("glbl-clump-str");
+
+  gslSegments.addEventListener("input", () => {
+    grassState.bladeYSegments = Number(gslSegments.value);
+    glblSegments.textContent = gslSegments.value;
+    if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
+  });
+  gslTaper.addEventListener("input", () => {
+    grassState.tipTaperStart = Number(gslTaper.value) / 100;
+    glblTaper.textContent = grassState.tipTaperStart.toFixed(2);
+    if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
+  });
+  gslClumpSc.addEventListener("input",  () => { grassState.clumpScale = Number(gslClumpSc.value) / 10; glblClumpSc.textContent = grassState.clumpScale.toFixed(1); syncGrassUniforms(); });
+  gslClumpStr.addEventListener("input", () => { grassState.clumpStrength = Number(gslClumpStr.value) / 100; glblClumpStr.textContent = grassState.clumpStrength.toFixed(2); syncGrassUniforms(); });
   gslBend.addEventListener("input",   () => { grassState.bendFocus = Number(gslBend.value) / 10; glblBend.textContent = grassState.bendFocus.toFixed(1); syncGrassUniforms(); });
   gslStiff.addEventListener("input",  () => { grassState.stiffness = Number(gslStiff.value) / 100; glblStiff.textContent = grassState.stiffness.toFixed(2); syncGrassUniforms(); });
   gslMaxAng.addEventListener("input", () => { grassState.maxAngle = Number(gslMaxAng.value) / 100; glblMaxAng.textContent = grassState.maxAngle.toFixed(2); syncGrassUniforms(); });
@@ -2924,6 +3010,24 @@ async function main() {
   gslS2Nstr.addEventListener("input",   () => { grassState.specV2NoiseStr = Number(gslS2Nstr.value) / 100; glblS2Nstr.textContent = grassState.specV2NoiseStr.toFixed(2); syncGrassUniforms(); });
   gslS2Pow.addEventListener("input",    () => { grassState.specV2Power = Number(gslS2Pow.value); glblS2Pow.textContent = gslS2Pow.value; syncGrassUniforms(); });
 
+  const gslS2TipBias  = document.getElementById("gsl-s2-tipbias");
+  const glblS2TipBias = document.getElementById("glbl-s2-tipbias");
+  gslS2TipBias.addEventListener("input", () => { grassState.specV2TipBias = Number(gslS2TipBias.value) / 100; glblS2TipBias.textContent = grassState.specV2TipBias.toFixed(2); syncGrassUniforms(); });
+
+  // Spec light directions (V1 sharp / V2 noisy) — X/Y/Z sliders, -1..1
+  for (const [sl, key] of [
+    ["gsl-s1-dirx", "specV1DirX"], ["gsl-s1-diry", "specV1DirY"], ["gsl-s1-dirz", "specV1DirZ"],
+    ["gsl-s2-dirx", "specV2DirX"], ["gsl-s2-diry", "specV2DirY"], ["gsl-s2-dirz", "specV2DirZ"],
+  ]) {
+    const el  = document.getElementById(sl);
+    const lbl = document.getElementById(sl.replace("gsl-", "glbl-"));
+    el.addEventListener("input", () => {
+      grassState[key] = Number(el.value) / 100;
+      lbl.textContent = grassState[key].toFixed(2);
+      syncGrassUniforms();
+    });
+  }
+
   // Terrain / slope
   const gckSlope    = document.getElementById("gck-slope");
   const gslSlopeMin = document.getElementById("gsl-slope-min");
@@ -2934,6 +3038,21 @@ async function main() {
   gckSlope.addEventListener("change",    () => { grassState.slopeEnabled = gckSlope.checked; syncGrassUniforms(); });
   gslSlopeMin.addEventListener("input",  () => { grassState.slopeMin = Number(gslSlopeMin.value) / 100; glblSlopeMin.textContent = grassState.slopeMin.toFixed(2); syncGrassUniforms(); });
   gslSlopeMax.addEventListener("input",  () => { grassState.slopeMax = Number(gslSlopeMax.value) / 100; glblSlopeMax.textContent = grassState.slopeMax.toFixed(2); syncGrassUniforms(); });
+
+  // Terrain tint (baked splat color, img mode)
+  const gckTint      = document.getElementById("gck-tint");
+  const gslTintStr   = document.getElementById("gsl-tint-str");
+  const glblTintStr  = document.getElementById("glbl-tint-str");
+  const gslTintRoot  = document.getElementById("gsl-tint-root");
+  const glblTintRoot = document.getElementById("glbl-tint-root");
+
+  gckTint.addEventListener("change", () => {
+    grassState.terrainTintEnabled = gckTint.checked;
+    grassTintDirty = true; // bake on next frame so the toggle is instant
+    syncGrassUniforms();
+  });
+  gslTintStr.addEventListener("input",  () => { grassState.terrainTintStrength = Number(gslTintStr.value) / 100; glblTintStr.textContent = grassState.terrainTintStrength.toFixed(2); syncGrassUniforms(); });
+  gslTintRoot.addEventListener("input", () => { grassState.terrainTintRootBias = Number(gslTintRoot.value) / 100; glblTintRoot.textContent = grassState.terrainTintRootBias.toFixed(2); syncGrassUniforms(); });
 
   // LOD
   const gslLodMid  = document.getElementById("gsl-lod-mid");
@@ -2951,6 +3070,24 @@ async function main() {
   gslLodMax.addEventListener("input",  () => { grassState.lodMaxDistance = Number(gslLodMax.value); glblLodMax.textContent = gslLodMax.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); });
   gslLodMega.addEventListener("input", () => { grassState.lodMegaMaxDistance = Number(gslLodMega.value); glblLodMega.textContent = gslLodMega.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); });
   gckLodDebug.addEventListener("change", () => { grassState.lodDebug = gckLodDebug.checked; syncGrassUniforms(); });
+
+  // Per-tier blade geometry (segments / widths) — geometry-baked, needs rebuild
+  const _lodGeoSliders = [
+    ["gsl-lod-mid-seg",  "lodMidSegments",   (v) => v,       (v) => String(v)],
+    ["gsl-lod-far-seg",  "lodFarSegments",   (v) => v,       (v) => String(v)],
+    ["gsl-lod-far-w",    "lodFarBladeWidth", (v) => v / 100, (v) => v.toFixed(2) + "m"],
+    ["gsl-lod-mega-seg", "lodMegaSegments",  (v) => v,       (v) => String(v)],
+    ["gsl-lod-mega-w",   "lodMegaBladeWidth",(v) => v / 100, (v) => v.toFixed(2) + "m"],
+  ];
+  for (const [sl, key, toVal, toLabel] of _lodGeoSliders) {
+    const el  = document.getElementById(sl);
+    const lbl = document.getElementById(sl.replace("gsl-", "glbl-"));
+    el.addEventListener("input", () => {
+      grassState[key] = toVal(Number(el.value));
+      lbl.textContent = toLabel(grassState[key]);
+      if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
+    });
+  }
 
   // Interaction
   const gslIntRad  = document.getElementById("gsl-int-rad");

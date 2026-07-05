@@ -1145,7 +1145,7 @@
               <div class="prop-row">
                 <span class="prop-label">Tip color</span>
                 <div class="prop-value">
-                  <input type="color" id="gcol-tip" value="#004d05"
+                  <input type="color" id="gcol-tip" value="#00b30c"
                     style="width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none;border-radius:3px" />
                 </div>
               </div>
@@ -1168,7 +1168,7 @@
                 <span class="prop-label">Color variation</span>
                 <div class="prop-value">
                   <label class="toggle-label">
-                    <input type="checkbox" id="gck-color-var" checked />
+                    <input type="checkbox" id="gck-color-var" />
                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                   </label>
                 </div>
@@ -1225,6 +1225,34 @@
                     <input type="checkbox" id="gck-crossed" checked />
                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                   </label>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Segments</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-segments" min="1" max="12" step="1" value="7" />
+                  <span class="prop-num" id="glbl-segments">7</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Taper start</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-taper" min="20" max="98" step="1" value="50" />
+                  <span class="prop-num" id="glbl-taper">0.50</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Clump size</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-clump-scale" min="10" max="200" step="5" value="15" />
+                  <span class="prop-num" id="glbl-clump-scale">1.5</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Clump strength</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-clump-str" min="0" max="100" step="1" value="70" />
+                  <span class="prop-num" id="glbl-clump-str">0.70</span>
                 </div>
               </div>
               <div class="prop-row">
@@ -1425,6 +1453,27 @@
                   <span class="prop-num" id="glbl-s1-pow">25.6</span>
                 </div>
               </div>
+              <div class="prop-row">
+                <span class="prop-label">V1 dir X</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s1-dirx" min="-100" max="100" step="5" value="-100" />
+                  <span class="prop-num" id="glbl-s1-dirx">-1.00</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V1 dir Y</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s1-diry" min="-100" max="100" step="5" value="100" />
+                  <span class="prop-num" id="glbl-s1-diry">1.00</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V1 dir Z</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s1-dirz" min="-100" max="100" step="5" value="50" />
+                  <span class="prop-num" id="glbl-s1-dirz">0.50</span>
+                </div>
+              </div>
               <div class="prop-separator"></div>
               <div style="font-size:10px;font-weight:600;color:#888;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px">
                 Noisy highlight (V2)
@@ -1473,6 +1522,34 @@
                   <span class="prop-num" id="glbl-s2-pow">12</span>
                 </div>
               </div>
+              <div class="prop-row">
+                <span class="prop-label">V2 tip bias</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s2-tipbias" min="0" max="100" step="5" value="50" />
+                  <span class="prop-num" id="glbl-s2-tipbias">0.50</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V2 dir X</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s2-dirx" min="-100" max="100" step="5" value="-100" />
+                  <span class="prop-num" id="glbl-s2-dirx">-1.00</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V2 dir Y</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s2-diry" min="-100" max="100" step="5" value="45" />
+                  <span class="prop-num" id="glbl-s2-diry">0.45</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">V2 dir Z</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-s2-dirz" min="-100" max="100" step="5" value="100" />
+                  <span class="prop-num" id="glbl-s2-dirz">1.00</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1506,6 +1583,31 @@
                   <span class="prop-num" id="glbl-slope-max">0.85</span>
                 </div>
               </div>
+              <div class="prop-separator"></div>
+              <div class="prop-row">
+                <span class="prop-label">Terrain tint</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="gck-tint" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Tint strength</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-tint-str" min="0" max="100" step="2" value="50" />
+                  <span class="prop-num" id="glbl-tint-str">0.50</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Root bias</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-tint-root" min="0" max="100" step="2" value="35" />
+                  <span class="prop-num" id="glbl-tint-root">0.35</span>
+                </div>
+              </div>
+              <p class="mode-hint">Blades take the painted terrain color under them</p>
             </div>
           </div>
 
@@ -1551,6 +1653,42 @@
                     <input type="checkbox" id="gck-lod-debug" />
                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                   </label>
+                </div>
+              </div>
+              <div class="prop-separator"></div>
+              <div class="prop-row">
+                <span class="prop-label">Mid segments</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-lod-mid-seg" min="1" max="8" step="1" value="3" />
+                  <span class="prop-num" id="glbl-lod-mid-seg">3</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Far segments</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-lod-far-seg" min="1" max="6" step="1" value="2" />
+                  <span class="prop-num" id="glbl-lod-far-seg">2</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Far width</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-lod-far-w" min="5" max="120" step="5" value="45" />
+                  <span class="prop-num" id="glbl-lod-far-w">0.45m</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Mega segments</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-lod-mega-seg" min="1" max="4" step="1" value="1" />
+                  <span class="prop-num" id="glbl-lod-mega-seg">1</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Mega width</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-lod-mega-w" min="5" max="150" step="5" value="70" />
+                  <span class="prop-num" id="glbl-lod-mega-w">0.70m</span>
                 </div>
               </div>
             </div>
