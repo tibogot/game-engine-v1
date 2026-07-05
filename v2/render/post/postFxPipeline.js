@@ -1,5 +1,15 @@
 import * as THREE from "three";
-import { renderOutput, texture, uniform } from "three/tsl";
+import {
+  diffuseColor,
+  directionToColor,
+  emissive,
+  mrt,
+  normalView,
+  output,
+  renderOutput,
+  texture,
+  uniform,
+} from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
 import { sharpen } from "three/addons/tsl/display/SharpenNode.js";
@@ -32,7 +42,11 @@ import { createPolishUniforms, polish } from "./polishNode.js";
  * Effects shipped:
  *  - SSAO (n8ao-webgpu — TSL port of N8AO; clean at any zoom, half-res
  *    + denoise + temporal accumulation built in).
- *  - Bloom (additive, on the scene pass color in linear HDR).
+ *  - Bloom (additive, in linear HDR). Two modes: threshold (default —
+ *    blooms the whole scene color above a luminance threshold, sky
+ *    included) and selective (`setBloomSelective(true)` — adds an
+ *    `emissive` MRT target and blooms ONLY that buffer, so lanterns/LEDs
+ *    glow while the bright sky stays clean; same trick as the objects lab).
  *  - FXAA (cheap edge anti-aliasing, replaces MSAA which the renderer cannot
  *    apply once we render through a `RenderPipeline`).
  *
@@ -81,6 +95,13 @@ export class PostFxPipeline {
     // `_bloomPass` can't reach the clouds; they land after it).
     this._cloudBloomPass = null;
     this._bloomEnabled = true;
+    /**
+     * Selective bloom: adds an `emissive` MRT target to the scene pass and
+     * blooms only that buffer, so emissive objects glow but the bright sky
+     * cannot. Off by default — the v2 editor keeps threshold bloom until it
+     * opts in.
+     */
+    this._bloomSelective = false;
     this._bloomParams = {
       strength: 0.3,
       threshold: 0.9,
@@ -232,6 +253,26 @@ export class PostFxPipeline {
     if (this._bloomEnabled === enabled) return;
     this._bloomEnabled = enabled;
     if (this._renderPipeline) this._refreshOutputNode();
+  }
+
+  /**
+   * Switch between threshold bloom (whole frame, sky included) and selective
+   * bloom (emissive MRT buffer only — sky can never bloom). Costs one extra
+   * thin RT write in the scene pass; the bloom chain itself gets cheaper
+   * because its input is mostly black. The threshold param still applies,
+   * but on the emissive buffer alone.
+   *
+   * Cloud-path note: in selective mode the solids' bloom is baked into the
+   * linear RT BEFORE the cloud composite, so clouds occlude glow correctly
+   * and never bloom themselves (threshold mode blooms scene+clouds together).
+   */
+  setBloomSelective(enabled) {
+    if (this._bloomSelective === enabled) return;
+    this._bloomSelective = enabled;
+    if (!this._renderPipeline) return;
+    this._applySceneMRT();
+    this._rebuildBloomPasses();
+    this._refreshOutputNode();
   }
 
   setFxaaEnabled(enabled) {
@@ -436,14 +477,7 @@ export class PostFxPipeline {
     // 1080p) and lets us drop in SSAO later with no graph rebuild.
     this._scenePass = createN8AOScenePass(scene, camera);
     this._scenePassColor = this._scenePass.getTextureNode("output");
-
-    this._bloomPass = bloom(
-      this._scenePassColor,
-      this._bloomParams.strength,
-      this._bloomParams.radius,
-      this._bloomParams.threshold,
-    );
-    this._applyBloomUniforms();
+    if (this._bloomSelective) this._applySceneMRT();
 
     if (this._ssaoEnabled) this._ensureSsaoBuilt();
 
@@ -456,15 +490,7 @@ export class PostFxPipeline {
     });
     this._linearTextureNode = texture(this._linearRT.texture);
 
-    // Cloud-path bloom: reads the linear RT (solids + composited clouds), so the
-    // display pass blooms scene+clouds together. The linear pass for the cloud
-    // path renders solids WITHOUT bloom (see `_refreshOutputNode`).
-    this._cloudBloomPass = bloom(
-      this._linearTextureNode,
-      this._bloomParams.strength,
-      this._bloomParams.radius,
-      this._bloomParams.threshold,
-    );
+    this._rebuildBloomPasses();
 
     this._linearPipeline = new THREE.RenderPipeline(renderer);
     this._linearPipeline.outputColorTransform = false;
@@ -517,6 +543,45 @@ export class PostFxPipeline {
     this._ssaoNode.configuration.gammaCorrection = false;
 
     this._applySsaoConfig();
+  }
+
+  /**
+   * (Re)apply the scene pass MRT layout. Mirrors n8ao's own layout
+   * (output/diffuse/normal, byte-typed where possible) and appends the
+   * `emissive` target in selective-bloom mode. Emissive stays HalfFloat —
+   * lantern/LED intensities live well above 1 in linear HDR.
+   */
+  _applySceneMRT() {
+    const targets = {
+      output,
+      diffuseColor,
+      normal: directionToColor(normalView),
+    };
+    if (this._bloomSelective) targets.emissive = emissive;
+    this._scenePass.setMRT(mrt(targets));
+    this._scenePass.getTexture("diffuseColor").type = THREE.UnsignedByteType;
+    this._scenePass.getTexture("normal").type = THREE.UnsignedByteType;
+  }
+
+  /**
+   * (Re)create the bloom passes for the current mode. Threshold mode blooms
+   * the scene color (and, on the cloud path, the post-composite linear RT so
+   * clouds bloom too). Selective mode blooms only the emissive MRT buffer;
+   * the cloud path then needs NO second bloom pass because the solids' glow
+   * is baked into the linear RT before the clouds composite on top.
+   */
+  _rebuildBloomPasses() {
+    if (this._bloomPass?.dispose) this._bloomPass.dispose();
+    if (this._cloudBloomPass?.dispose) this._cloudBloomPass.dispose();
+    const bp = this._bloomParams;
+    const solidsInput = this._bloomSelective
+      ? this._scenePass.getTextureNode("emissive")
+      : this._scenePassColor;
+    this._bloomPass = bloom(solidsInput, bp.strength, bp.radius, bp.threshold);
+    this._cloudBloomPass = this._bloomSelective
+      ? null
+      : bloom(this._linearTextureNode, bp.strength, bp.radius, bp.threshold);
+    this._applyBloomUniforms();
   }
 
   _applyBloomUniforms() {
@@ -682,11 +747,17 @@ export class PostFxPipeline {
     this._renderPipeline.outputNode = mainDisplay.node;
     this._renderPipeline.needsUpdate = true;
 
-    // Cloud path (`renderWithClouds()`): the linear pass renders solids WITHOUT
-    // bloom → linear RT; clouds are composited onto it; then the display pass
-    // blooms the COMBINED buffer (scene + clouds) via `_cloudBloomPass`.
+    // Cloud path (`renderWithClouds()`). Threshold mode: the linear pass
+    // renders solids WITHOUT bloom → linear RT; clouds composite onto it;
+    // the display pass blooms the COMBINED buffer via `_cloudBloomPass`.
+    // Selective mode: the emissive bloom is baked into the linear RT HERE
+    // (same pipeline as the scene pass — no double render), clouds composite
+    // on top (occluding glow correctly), and the display pass adds no bloom.
     if (this._linearPipeline) {
-      this._linearPipeline.outputNode = dofBase;
+      this._linearPipeline.outputNode =
+        this._bloomSelective && this._bloomEnabled && this._bloomPass
+          ? dofBase.add(this._bloomPass)
+          : dofBase;
       this._linearPipeline.needsUpdate = true;
     }
     if (this._displayPipeline && this._linearTextureNode) {

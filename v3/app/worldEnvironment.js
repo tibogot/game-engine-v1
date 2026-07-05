@@ -763,6 +763,10 @@ export async function createWorldEnvironment({
   });
 
   const postFxPipeline = new PostFxPipeline({ renderer, scene, camera });
+  // v3 uses SELECTIVE bloom: only the emissive MRT buffer blooms (lanterns,
+  // LEDs, string lights…), so the bright sky never glows. Same trick as the
+  // objects lab. The sun disc/god rays are separate effects, unaffected.
+  postFxPipeline.setBloomSelective(true);
 
   function applyPostFxState() {
     const p = toolState.postFx;
