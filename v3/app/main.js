@@ -96,6 +96,7 @@ import { RoadConformSystem } from "../tools/roadConformSystem.js";
 import { mergeRoadDrawCalls } from "../tools/roadDrawCallMerge.js";
 import { DEFAULT_ROAD_STATE } from "./state/roadState.js";
 import { buildRoadPanel } from "../ui/buildRoadPanel.js";
+import { buildPlayPhysicsPanel } from "../ui/buildPlayPhysicsPanel.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -393,7 +394,12 @@ async function main() {
     if (playStatMode) playStatMode.textContent = s.mode ?? "—";
   }
 
-  // Painted snow raises the play-mode ground so the character/vehicles ride
+  function syncPlayPhysicsPanel() {
+    playPhysicsUi?.setVisible(!!playMode?.onFootActive);
+    playPhysicsUi?.syncFromPlayMode();
+  }
+
+  // Painted snow raises the play-mode ground
   // *in* the snow rather than floating on bare terrain under it. SNOW_SINK is
   // the fraction of the depth that stays under the feet (the rest is what the
   // deform tile visually compresses away around them).
@@ -426,7 +432,7 @@ async function main() {
     getStuntRoadSolidMeshes: () => [],
     onStartWalking: () => { playHint.classList.add("visible"); },
     onEnterMenu:    () => { playHint.classList.remove("visible"); },
-    onModeChange:   () => refreshPlayStats(),
+    onModeChange:   () => { refreshPlayStats(); syncPlayPhysicsPanel(); },
     onRequestImmersive: () => setPlayImmersive(true),
     onExit: () => {
       syncPlayEditorChrome(false);
@@ -449,6 +455,16 @@ async function main() {
       syncPlayImmersiveButtonLabel();
     },
   });
+
+  const playPhysicsMount = document.getElementById("play-physics-mount");
+  const playPhysicsUi = playPhysicsMount
+    ? buildPlayPhysicsPanel({
+        mount: playPhysicsMount,
+        getCapsuleParams: () => playMode.getCapsuleParams(),
+        setCapsuleParams: (patch) => playMode.setCapsuleParams(patch),
+        resetCapsuleParams: () => playMode.resetCapsuleParams(),
+      })
+    : null;
 
   function syncPlayEditorChrome(immersive) {
     const appEl = document.getElementById("app");
@@ -1350,6 +1366,7 @@ async function main() {
     playStopBar.classList.add("visible");
     playPanel.style.display = "";
     syncCapsuleDebugToggleUi();
+    syncPlayPhysicsPanel();
     sculptPanel.style.display = "none";
     paintPanel.style.display = "none";
     snowPanel.style.display  = "none";
@@ -1370,6 +1387,7 @@ async function main() {
     if (!playMode.active) return;
     snowSystem.setPlayMode(false);
     snowSystem.resetTrail();
+    playPhysicsUi?.setVisible(false);
     playMode.exit();
     setEditorMode(editorMode, { force: true });  // restore whatever panel was active
   }

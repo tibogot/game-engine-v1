@@ -18,6 +18,16 @@ const CAPSULE_MOVE_SPEED = 12;
 
 export const LOD_SNAP = 16;
 
+/** Tuned on-foot baseline — play-mode reset + physics panel defaults. */
+export const HUMAN_CAPSULE_DEFAULTS = {
+  ...DEFAULT_CAPSULE_PARAMS,
+  walkSpeed: 3,
+  runSpeed: 6,
+  jumpVel: 11,
+  gravity: 20,
+  groundSpringK: 35,
+};
+
 export function createPlayMode({
   scene,
   renderer, camera, controls,
@@ -44,14 +54,7 @@ export function createPlayMode({
   // The tuned on-foot baseline. Every param reset below MUST restore these —
   // resetting to bare DEFAULT_CAPSULE_PARAMS (walk 6 / run 14) is what made the
   // character run 2× faster after exiting and re-entering play mode.
-  const HUMAN_CAPSULE_PARAMS = {
-    ...DEFAULT_CAPSULE_PARAMS,
-    walkSpeed: 3,
-    runSpeed: 6,
-    jumpVel: 11,
-    gravity: 20,
-    groundSpringK: 35,
-  };
+  const HUMAN_CAPSULE_PARAMS = { ...HUMAN_CAPSULE_DEFAULTS };
 
   const capsule = new CapsuleController(HUMAN_CAPSULE_PARAMS);
 
@@ -396,6 +399,18 @@ export function createPlayMode({
   function setShowCollider(v) {
     onFootWireOn = !!v;
     if (!onFootWireOn) updateOnFootWire(false);
+  }
+
+  function getCapsuleParams() {
+    return { ...capsule.params };
+  }
+
+  function setCapsuleParams(patch) {
+    capsule.setParams(patch);
+  }
+
+  function resetCapsuleParams() {
+    capsule.setParams({ ...HUMAN_CAPSULE_DEFAULTS });
   }
 
   function isMoveKeysHeld() {
@@ -884,6 +899,12 @@ export function createPlayMode({
     get wheelOpen() { return modeWheel.open; },
     get showCollider() { return onFootWireOn; },
     setShowCollider,
+    get onFootActive() {
+      return active && (moveMode === "capsule" || moveMode === "char" || moveMode === "husky");
+    },
+    getCapsuleParams,
+    setCapsuleParams,
+    resetCapsuleParams,
     get playerPosition() { return capsule.position; },
     getSnowContacts,
     getStats() {
