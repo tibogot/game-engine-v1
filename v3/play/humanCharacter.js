@@ -6,6 +6,10 @@ const WALK_ANIM_REF = 2.0;
 const RUN_ANIM_REF  = 5.5;
 const YAW_LERP_RATE = 14;
 const FADE_TIME     = 0.18; // matches v2
+const CHAR_ROLL_PEAK       = 13.0;
+const CHAR_SLIDE_SPEED     = 10.0;
+const CHAR_SLIDE_MAX_TIME  = 1.2;
+const PI = Math.PI;
 
 const MODEL_PATH = "/models/UA1+UA2_compressed.glb";
 const KATANA_PATH = "/models/katana.glb";
@@ -24,6 +28,14 @@ export function createHumanCharacter(scene, renderer) {
   let loaded    = false;
   let footBoneL = null;
   let footBoneR = null;
+
+  let rolling      = false;
+  let rollYaw      = 0;
+  let rollStart    = 0;
+  let rollDuration = 0.8;
+  let slidePhase   = "none"; // "start" | "loop" | "exit" | "none"
+  let slideYaw     = 0;
+  let slideStart   = 0;
 
   const _footPosL = new THREE.Vector3();
   const _footPosR = new THREE.Vector3();
@@ -125,8 +137,14 @@ export function createHumanCharacter(scene, renderer) {
         return a;
       };
 
+      const idleClip = pick("Idle_Loop");
+      const rollClip = pick("Roll", "Roll_RM") || idleClip;
+      const slideStartClip = pick("Slide_Start");
+      const slideLoopClip  = pick("Slide_Loop") || slideStartClip;
+      const slideExitClip  = pick("Slide_Exit") || slideLoopClip;
+
       charActions = {
-        idle:       mk(pick("Idle_Loop")),
+        idle:       mk(idleClip),
         walk:       mk(pick("Walk_Loop")),
         run:        mk(pick("Sprint_Loop", "Jog_Fwd_Loop")),
         jumpStart:  mk(pick("Jump_Start"), true),
@@ -134,13 +152,27 @@ export function createHumanCharacter(scene, renderer) {
         jumpLand:   mk(pick("Jump_Land"), true),
         crouch:     mk(pick("Crouch_Idle_Loop")),
         crouchWalk: mk(pick("Crouch_Fwd_Loop")),
+        roll:       mk(rollClip, true),
+        slideStart: mk(slideStartClip, true),
+        slideLoop:  mk(slideLoopClip, false),
+        slideExit:  mk(slideExitClip, true),
       };
 
       if (charActions.jumpStart) charActions.jumpStart.timeScale = 1.4;
       if (charActions.jumpLand)  charActions.jumpLand.timeScale  = 1.8;
+      if (charActions.roll) {
+        const d = charActions.roll.getClip()?.duration;
+        if (d && d > 0) rollDuration = d;
+      }
 
       charMixer.addEventListener("finished", e => {
         if (e.action === charActions?.jumpLand) jumpPhase = "none";
+        if (e.action === charActions?.roll) rolling = false;
+        if (e.action === charActions?.slideStart && slidePhase === "start" && charActions.slideLoop) {
+          slidePhase = "loop";
+          setAction(charActions.slideLoop, 0.1);
+        }
+        if (e.action === charActions?.slideExit) slidePhase = "none";
       });
 
       currentAction = charActions.idle;
@@ -160,11 +192,62 @@ export function createHumanCharacter(scene, renderer) {
     currentAction = next;
   }
 
+  function tryRoll() {
+    if (!charActions?.roll || rolling || slidePhase !== "none") return false;
+    rolling = true;
+    rollYaw = charYaw;
+    rollStart = performance.now();
+    setAction(charActions.roll, 0.1);
+    return true;
+  }
+
+  function trySlide(moving) {
+    if (!moving || !charActions?.slideStart || rolling || slidePhase !== "none" || airActive) return false;
+    slidePhase = "start";
+    slideYaw = charYaw;
+    slideStart = performance.now();
+    setAction(charActions.slideStart, 0.1);
+    return true;
+  }
+
+  /** Roll/slide movement override for CapsuleController (v2 playMode parity). */
+  function getMoveOverride(moveKeysHeld, slideKeyHeld) {
+    if (rolling) {
+      const elapsed = (performance.now() - rollStart) / 1000;
+      const t = Math.min(1, elapsed / rollDuration);
+      if (moveKeysHeld && t >= 0.75) {
+        rolling = false;
+        return null;
+      }
+      const speed = CHAR_ROLL_PEAK * Math.cos(t * PI * 0.5);
+      return { mx: Math.sin(rollYaw), mz: Math.cos(rollYaw), speed };
+    }
+    if (slidePhase !== "none") {
+      if (slidePhase === "loop") {
+        const elapsed = (performance.now() - slideStart) / 1000;
+        if ((elapsed >= CHAR_SLIDE_MAX_TIME || !slideKeyHeld) && charActions?.slideExit) {
+          slidePhase = "exit";
+          setAction(charActions.slideExit, 0.12);
+        }
+      }
+      return { mx: Math.sin(slideYaw), mz: Math.cos(slideYaw), speed: CHAR_SLIDE_SPEED };
+    }
+    return null;
+  }
+
   // ── Public API ──────────────────────────────────────────────────────────────
   return {
     get loaded() { return loaded; },
+    get rolling() { return rolling; },
+    get slidePhase() { return slidePhase; },
+    get inSlide() { return slidePhase !== "none"; },
+    get jumpPhase() { return jumpPhase; },
+    get movementBusy() { return rolling || slidePhase !== "none"; },
     get footBoneL() { return footBoneL; },
     get footBoneR() { return footBoneR; },
+    tryRoll,
+    trySlide,
+    getMoveOverride,
 
     /** World positions of foot bones (after update). */
     getFootWorldPositions(outL = _footPosL, outR = _footPosR) {
@@ -194,8 +277,8 @@ export function createHumanCharacter(scene, renderer) {
       // Position — capsule.position.y = feet
       charRoot.position.set(ctrl.position.x, ctrl.position.y, ctrl.position.z);
 
-      // Yaw: smoothly face movement direction
-      if (mlen > 0.01) {
+      // Yaw: smoothly face movement direction (skip during roll/slide)
+      if (mlen > 0.01 && !rolling && slidePhase === "none") {
         const targetYaw = Math.atan2(mx, mz);
         let dYaw = targetYaw - charYaw;
         while (dYaw >  Math.PI) dYaw -= 2 * Math.PI;
@@ -204,7 +287,7 @@ export function createHumanCharacter(scene, renderer) {
       }
       charRoot.rotation.y = charYaw;
 
-      // Animation FSM (mirrors char-test.html / v2 playMode)
+      // Animation FSM (mirrors v2 playMode char locomotion)
       const inAir    = ctrl.inAir;
       airTime = inAir ? airTime + dt : 0;
       const enterAir = inAir && (ctrl.velY > 0.5 || airTime > 0.12);
@@ -227,7 +310,7 @@ export function createHumanCharacter(scene, renderer) {
           jumpPhase = "land";
           setAction(charActions.jumpLand, 0.1);
         }
-      } else if (!inAir && jumpPhase === "none") {
+      } else if (!inAir && jumpPhase === "none" && !rolling && slidePhase === "none") {
         let tgt;
         if (crouch)        tgt = mlen > 0 ? charActions.crouchWalk : charActions.crouch;
         else if (mlen > 0) tgt = run ? charActions.run : charActions.walk;
@@ -254,6 +337,8 @@ export function createHumanCharacter(scene, renderer) {
       airActive = false;
       jumpPhase = "none";
       airTime   = 0;
+      rolling = false;
+      slidePhase = "none";
       if (charRoot) charRoot.rotation.y = 0;
     },
   };

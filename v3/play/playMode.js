@@ -63,6 +63,10 @@ export function createPlayMode({
   capMesh.visible = false;
   scene.add(capMesh);
 
+  let onFootWire = null;
+  let onFootWireOn = false;
+  let onFootWireDims = { r: 0, h: 0 };
+
   let charYaw = 0;
 
   let savedCamPos   = null;
@@ -75,7 +79,7 @@ export function createPlayMode({
 
   const keys = {
     w: false, a: false, s: false, d: false,
-    space: false, shift: false, q: false, e: false, z: false, c: false,
+    space: false, shift: false, ctrl: false, q: false, e: false, x: false,
   };
   // v2 playMode.js keysHeld — used for movement + barrel-roll edge detect
   const keysHeld = Object.create(null);
@@ -356,6 +360,48 @@ export function createPlayMode({
     capMesh.rotation.y = capsule.yaw;
   }
 
+  function updateOnFootWire(visible) {
+    if (!visible) {
+      if (onFootWire) onFootWire.visible = false;
+      return;
+    }
+    const p = capsule.params;
+    const r = p.capRadius;
+    const h = capsule.crouching ? p.capHeight * p.crouchHeightScale : p.capHeight;
+    if (!onFootWire) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x44ff88,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false,
+      });
+      onFootWire = new THREE.Mesh(new THREE.CapsuleGeometry(r, h, 6, 12), mat);
+      onFootWire.frustumCulled = false;
+      scene.add(onFootWire);
+      onFootWireDims = { r, h };
+    } else if (onFootWireDims.r !== r || onFootWireDims.h !== h) {
+      onFootWire.geometry.dispose();
+      onFootWire.geometry = new THREE.CapsuleGeometry(r, h, 6, 12);
+      onFootWireDims = { r, h };
+    }
+    onFootWire.visible = true;
+    onFootWire.position.set(
+      capsule.position.x,
+      capsule.position.y + r + h * 0.5,
+      capsule.position.z,
+    );
+  }
+
+  function setShowCollider(v) {
+    onFootWireOn = !!v;
+    if (!onFootWireOn) updateOnFootWire(false);
+  }
+
+  function isMoveKeysHeld() {
+    return keys.w || keys.a || keys.s || keys.d;
+  }
+
 
   function onRelaxedPointerDown(e) {
     if (!active || !editorRelaxedPointer) return;
@@ -469,6 +515,17 @@ export function createPlayMode({
       }
     }
 
+    if (moveMode === "char" && character?.loaded && !e.repeat) {
+      if (e.code === "KeyC" && character.tryRoll()) {
+        e.preventDefault();
+        return;
+      }
+      if (e.code === "KeyX" && character.trySlide(isMoveKeysHeld())) {
+        e.preventDefault();
+        return;
+      }
+    }
+
     switch (e.code) {
       case "KeyW": case "ArrowUp":    keys.w = true; break;
       case "KeyS": case "ArrowDown":  keys.s = true; break;
@@ -476,10 +533,10 @@ export function createPlayMode({
       case "KeyD": case "ArrowRight": keys.d = true; break;
       case "Space": e.preventDefault(); keys.space = true; break;
       case "ShiftLeft": case "ShiftRight": keys.shift = true; break;
+      case "ControlLeft": case "ControlRight": keys.ctrl = true; break;
       case "KeyQ": if (!isFlyMode()) keys.q = true; break;
       case "KeyE": keys.e = true; break;
-      case "KeyZ": keys.z = true; break;
-      case "KeyC": keys.c = true; break;
+      case "KeyX": keys.x = true; break;
     }
   }
 
@@ -498,10 +555,10 @@ export function createPlayMode({
       case "KeyD": case "ArrowRight": keys.d = false; break;
       case "Space":                   keys.space = false; break;
       case "ShiftLeft": case "ShiftRight": keys.shift = false; break;
+      case "ControlLeft": case "ControlRight": keys.ctrl = false; break;
       case "KeyQ": keys.q = false; break;
       case "KeyE": keys.e = false; break;
-      case "KeyZ": keys.z = false; break;
-      case "KeyC": keys.c = false; break;
+      case "KeyX": keys.x = false; break;
     }
   }
 
@@ -654,6 +711,7 @@ export function createPlayMode({
     character?.reset();
     if (husky?.root) husky.root.visible = false;
     capMesh.visible = false;
+    if (onFootWire) onFootWire.visible = false;
     flight.syncVisuals(capsule.position, false);
     brunoCar.hide();
     stuntCar.hide();
@@ -668,28 +726,48 @@ export function createPlayMode({
   }
 
   function updateOnFoot(dt) {
-    const fwd = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
-    const right = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
-    const mx = -Math.sin(camYaw) * fwd + Math.cos(camYaw) * right;
-    const mz = -Math.cos(camYaw) * fwd - Math.sin(camYaw) * right;
+    let fwd = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
+    let right = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
+    let mx = -Math.sin(camYaw) * fwd + Math.cos(camYaw) * right;
+    let mz = -Math.cos(camYaw) * fwd - Math.sin(camYaw) * right;
 
     const huskyMode = moveMode === "husky" && husky?.loaded;
-    const charMode = moveMode === "char";
+    const charMode = moveMode === "char" && character?.loaded;
+    const inSlide = charMode && character.inSlide;
+    const rolling = charMode && character.rolling;
+
     let speedOverride = null;
     if (moveMode === "capsule") speedOverride = CAPSULE_MOVE_SPEED;
 
-    // getTerrainHeight must be the PURE analytic terrain (not sampleGroundY):
-    // the capsule's floor backstop hard-snaps up to it, so feeding it the
-    // cliff-top raycast would teleport the player onto cliffs when walking
-    // under an overhang. Cliff/prop contact is fully handled by the BVH collider.
+    if (charMode) {
+      const moveOverride = character.getMoveOverride(isMoveKeysHeld(), keys.x);
+      if (moveOverride) {
+        mx = moveOverride.mx;
+        mz = moveOverride.mz;
+        speedOverride = moveOverride.speed;
+      }
+    }
+
+    const wantCrouch = charMode && keys.ctrl && !capsule.inAir && !rolling && !inSlide;
+
     capsule.update(dt, {
-      input: { mx, mz, jump: keys.space, run: keys.shift, crouch: false },
+      input: {
+        mx, mz,
+        jump: keys.space,
+        run: keys.shift,
+        crouch: huskyMode ? false : wantCrouch,
+      },
       moveSpeedOverride: speedOverride,
+      canJump: charMode
+        ? !rolling && !inSlide && character.jumpPhase !== "land"
+        : true,
       collider: getCollider(),
       getTerrainHeight,
       getTerrainNormal: sampleTerrainNormal,
       worldHalf: WORLD_SIZE / 2,
     });
+
+    updateOnFootWire(onFootWireOn && isOnFoot());
 
     if (huskyMode) {
       charYaw = husky.updateFrame({
@@ -708,8 +786,12 @@ export function createPlayMode({
         moveSpeed: capsule.debug.moveSpeed,
       });
     } else if (charMode) {
-      character?.update(dt, capsule, { mx, mz, run: keys.shift, crouch: false });
-      charYaw = character?.yaw ?? charYaw;
+      character.update(dt, capsule, {
+        mx, mz,
+        run: keys.shift,
+        crouch: capsule.crouching,
+      });
+      charYaw = character.yaw;
     }
   }
 
@@ -800,6 +882,8 @@ export function createPlayMode({
     get relaxedPointer() { return editorRelaxedPointer; },
     get moveMode() { return moveMode; },
     get wheelOpen() { return modeWheel.open; },
+    get showCollider() { return onFootWireOn; },
+    setShowCollider,
     get playerPosition() { return capsule.position; },
     getSnowContacts,
     getStats() {

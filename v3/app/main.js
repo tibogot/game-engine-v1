@@ -1349,6 +1349,7 @@ async function main() {
     tbPlay.classList.add("active");
     playStopBar.classList.add("visible");
     playPanel.style.display = "";
+    syncCapsuleDebugToggleUi();
     sculptPanel.style.display = "none";
     paintPanel.style.display = "none";
     snowPanel.style.display  = "none";
@@ -1396,6 +1397,17 @@ async function main() {
   const playBvhDebugToggle = document.getElementById("play-bvh-debug-toggle");
   playBvhDebugToggle?.addEventListener("click", () => {
     setBvhDebugEnabled(!bvhDebugUi.enabled);
+  });
+
+  const playCapsuleDebugToggle = document.getElementById("play-capsule-debug-toggle");
+  function syncCapsuleDebugToggleUi() {
+    if (!playCapsuleDebugToggle) return;
+    playCapsuleDebugToggle.classList.toggle("checked", !!playMode?.showCollider);
+  }
+  playCapsuleDebugToggle?.addEventListener("click", () => {
+    if (!playMode?.active) return;
+    playMode.setShowCollider(!playMode.showCollider);
+    syncCapsuleDebugToggleUi();
   });
 
   tbHelp.addEventListener("click", () => {
