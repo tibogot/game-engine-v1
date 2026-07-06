@@ -8,7 +8,20 @@ import { createFoliageMaterial, setFoliageTexture, applyPresetMaterial, updateFo
 import { createTrunkMaterial } from "../../render/foliage/trunkMaterial.js";
 import { sampleAllClusters, computeFoliageBounds, buildAllFoliageLods } from "./foliageSampler.js";
 import { computeLeafTrimPolygon, buildLeafCardGeometry } from "./leafCardTrim.js";
+import { buildPineFoliageLods, computePineFoliageBounds } from "./pinePlacement.js";
 import { loadTreeGlbFromUrl } from "./glbLoader.js";
+
+/**
+ * Pine-editor presets (v2/pine-editor33.html) carry a `pine` param block
+ * instead of arborist `clusters`. Returns { foliage, trunk, transform, rect,
+ * grid, shape } or null when the preset isn't a pine layout.
+ */
+function getPineBlock(presetJson) {
+  if (presetJson.foliageLayout !== "pine" && !presetJson.pineEditor) return null;
+  const src = presetJson.pine || presetJson.params;
+  if (!src || !src.foliage || !src.trunk || !src.transform) return null;
+  return src;
+}
 
 const TRUNK_SEARCH_PATHS = [
   "../models/trunks/",
@@ -17,21 +30,24 @@ const TRUNK_SEARCH_PATHS = [
 
 export async function loadFoliagePreset(presetJson) {
   const matOpts = presetJson.material || {};
+  const pineBlock = getPineBlock(presetJson);
   // Pass billboard intent through both as createFoliageMaterial opts (so the
   // shader is constructed with the right initial uniform values) and into the
   // sampler (so instance matrices match what the billboard shader path expects).
-  const billboard = !!matOpts.billboardLeaves;
+  // Pine cards are oriented whorls — billboarding them would collapse the
+  // silhouette, so pine always renders via the matrix (non-billboard) path.
+  const billboard = pineBlock ? false : !!matOpts.billboardLeaves;
 
   // Shared leaf-mask atlas: when enabled, the tree samples ONE cell of a single
   // atlas image shared by every tree, instead of a standalone leafTexture. The
   // preset carries the grid config + cell but NOT the atlas image path, so we use
   // a convention (textures/leaves/leaf_atlas.png), overridable via atlas.path.
   const atlas = presetJson.atlas;
-  const useAtlas = !!(atlas && atlas.enabled);
+  let useAtlas = !!(atlas && atlas.enabled);
   const _size = (atlas && atlas.size) || 1024;
   const _cellPx = (atlas && atlas.cellPx) || 256;
   const _gutter = (atlas && atlas.gutter) || 12;
-  const atlasGrid = useAtlas
+  let atlasGrid = useAtlas
     ? [
         atlas.cols || 4,
         _cellPx / _size,
@@ -39,6 +55,19 @@ export async function loadFoliagePreset(presetJson) {
         (_cellPx - 2 * _gutter) / _size,
       ]
     : undefined;
+  let atlasCell = useAtlas ? (atlas.cell ?? 0) : 0;
+
+  // Pine leaf atlas (gutterless N×N grid in the preset's own texture): the
+  // editor picks a random cell per card, but the shared material samples ONE
+  // uniform cell per slot — cell 0 until per-instance variants are supported.
+  const _pineMat = pineBlock ? (presetJson.params?.material || {}) : {};
+  const pineAtlas = !!pineBlock && _pineMat.textureMode === "atlas";
+  if (pineAtlas) {
+    const cols = Math.max(1, Math.round(_pineMat.atlasCols ?? 2));
+    useAtlas = true;
+    atlasGrid = [cols, 1 / cols, 0, 1 / cols];
+    atlasCell = 0;
+  }
 
   const foliageMat = createFoliageMaterial({
     ...matOpts,
@@ -46,16 +75,20 @@ export async function loadFoliagePreset(presetJson) {
     billboardYawOnly: matOpts.billboardYawOnly,
     useAtlas,
     atlasGrid,
-    atlasCell: useAtlas ? (atlas.cell ?? 0) : 0,
+    atlasCell,
   });
   applyPresetMaterial(foliageMat, presetJson);
 
-  const _leafTexPath = useAtlas
-    ? atlas.path || "textures/leaves/leaf_atlas.png"
-    : presetJson.leafTexture;
+  const _leafTexPath =
+    useAtlas && !pineAtlas
+      ? atlas.path || "textures/leaves/leaf_atlas.png"
+      : presetJson.leafTexture;
   if (_leafTexPath) {
     const texPath = _leafTexPath;
-    const candidates = [`../${texPath}`, texPath];
+    // Pine presets may embed the leaf texture as a data URL — load it as-is.
+    const candidates = texPath.startsWith("data:")
+      ? [texPath]
+      : [`../${texPath}`, texPath];
     let tex = null;
     for (const path of candidates) {
       try {
@@ -72,10 +105,53 @@ export async function loadFoliagePreset(presetJson) {
       // The atlas always stores the mask in RED (arborist forces this). Its
       // transparent gutters fool setFoliageTexture's auto-detect into picking
       // alpha — which is opaque inside each cell → solid quads. Force red.
-      if (useAtlas) foliageMat.uniforms.maskInAlpha.value = 0;
+      // (Pine atlases are normal RGBA sheets — keep the auto-detected channel.)
+      if (useAtlas && !pineAtlas) foliageMat.uniforms.maskInAlpha.value = 0;
     } else {
       console.warn(`[Foliage] Could not load leaf texture "${texPath}" — foliage will render without texture`);
     }
+  }
+
+  // ── Pine layout: whorl card placement instead of cluster sampling ─────────
+  if (pineBlock) {
+    // applyPresetMaterial may have re-applied the preset's billboardLeaves
+    // flag — pine lods are always oriented matrices, so keep the shader in
+    // the non-billboard branch no matter what the material block says.
+    foliageMat.uniforms.billboard.value = 0;
+    if (pineBlock.foliage?.enabled === false) {
+      return {
+        material: foliageMat.material,
+        leafMapNode: foliageMat.leafMapNode,
+        uniforms: foliageMat.uniforms,
+        lods: [null, null, null],
+        bounds: null,
+        billboard: false,
+      };
+    }
+    const tScale = presetJson.trunkScale ?? 1;
+    const invS = tScale > 0.001 ? 1 / tScale : 1;
+    const lods = buildPineFoliageLods(pineBlock, {
+      trunkScale: tScale,
+      rect: pineBlock.rect,
+      grid: pineBlock.grid,
+      shape: pineBlock.shape,
+    });
+    const bounds = computePineFoliageBounds(
+      pineBlock,
+      pineBlock.rect ?? { width: 2, height: 0.95 },
+      invS,
+    );
+    if (bounds) {
+      updateFoliageBounds(foliageMat, bounds.yMin, bounds.yMax, bounds.canopyCenter, bounds.aoRadius);
+    }
+    return {
+      material: foliageMat.material,
+      leafMapNode: foliageMat.leafMapNode,
+      uniforms: foliageMat.uniforms,
+      lods,
+      bounds,
+      billboard: false,
+    };
   }
 
   // Trimmed leaf cards: fit an octagon to the mask so cards rasterize far
