@@ -789,7 +789,7 @@ async function main() {
   const slNoiseScale    = document.getElementById("sl-noise-scale");
   const lblNoiseScale   = document.getElementById("lbl-noise-scale");
   const tbHelp          = document.getElementById("tb-help");
-  const tbSculpt        = document.getElementById("tb-sculpt");
+  const tbModeButtons   = document.querySelectorAll("#tb-modes .toolbar-btn");
   const tbPlay          = document.getElementById("tb-play");
   const toolsModeSelect = document.getElementById("tools-mode-select");
   const viewNavHint     = document.getElementById("view-nav-hint");
@@ -1314,7 +1314,9 @@ async function main() {
     editorMode = m;
     roadSystem?.setEditActive(m === "road" && !playMode.active);
     if (splineToolState) splineToolState.mode = m;
-    tbSculpt.classList.toggle("active", m === "sculpt");
+    for (const btn of tbModeButtons) {
+      btn.classList.toggle("active", btn.dataset.mode === m);
+    }
     toolsModeSelect.value = m;
     paintSys.endStroke(); // leaving paint mid-drag must close the stroke
     if (rampState === "waiting_end") cancelRampPlacement();
@@ -1412,7 +1414,9 @@ async function main() {
     setEditorMode(editorMode, { force: true });  // restore whatever panel was active
   }
 
-  tbSculpt.addEventListener("click", () => setEditorMode("sculpt"));
+  for (const btn of tbModeButtons) {
+    btn.addEventListener("click", () => setEditorMode(btn.dataset.mode));
+  }
   toolsModeSelect.addEventListener("change", () => setEditorMode(toolsModeSelect.value));
 
   tbPlay.addEventListener("click", (e) => {
