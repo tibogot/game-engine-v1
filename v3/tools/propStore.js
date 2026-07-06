@@ -82,7 +82,16 @@ export class PropStore {
 
     if (entries.length === 0) return -1;
     const idx = this.types.length;
-    this.types.push({ name, entries, lod1Entries: null, lod2Entries: null, mergedBox, isPrimitive: false, live: false });
+    this.types.push({
+      name,
+      entries,
+      lod1Entries: null,
+      lod2Entries: null,
+      mergedBox,
+      isPrimitive: false,
+      live: false,
+      embeddedMaterials: entries.map((e) => e.material),
+    });
     _ensureProxyGeo(this.types[idx]);
     return idx;
   }
@@ -269,10 +278,27 @@ export class PropStore {
   restoreFromSnapshot(s)  { this.instances = s.map(i => ({ ...i, liveParams: i.liveParams ? { ...i.liveParams } : undefined })); this._bump(); }
   clear()                 { this.instances.length = 0; this._bump(); }
 
-  exportData() {
+  exportData(slots) {
     return {
-      types:     this.types.map(t => ({ name: t.name, live: t.live ?? false, solid: t.solid ?? false, factoryId: t.factoryId })),
+      types: this.types.map(t => ({
+        name: t.name,
+        live: t.live ?? false,
+        solid: t.solid ?? false,
+        factoryId: t.factoryId,
+        isPrimitive: t.isPrimitive ?? false,
+        primShape: t.primShape,
+      })),
       instances: this.instances.map(i => ({ ...i })),
+      slots: slots?.map(s => ({
+        name: s.name,
+        builtin: !!s.builtin,
+        live: !!s.live,
+        solid: !!s.solid,
+        factoryId: s.factoryId,
+        materialId: s.materialId,
+        triplanar: s.triplanar,
+        glbFile: s.glbFile,
+      })) ?? [],
     };
   }
 

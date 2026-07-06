@@ -97,6 +97,8 @@ import { mergeRoadDrawCalls } from "../tools/roadDrawCallMerge.js";
 import { DEFAULT_ROAD_STATE } from "./state/roadState.js";
 import { buildRoadPanel } from "../ui/buildRoadPanel.js";
 import { buildPlayPhysicsPanel } from "../ui/buildPlayPhysicsPanel.js";
+import { buildPlayFlightPanel } from "../ui/buildPlayFlightPanel.js";
+import { createFlyHud } from "../ui/flyHud.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -394,9 +396,13 @@ async function main() {
     if (playStatMode) playStatMode.textContent = s.mode ?? "—";
   }
 
-  function syncPlayPhysicsPanel() {
+  function syncPlayPanels() {
     playPhysicsUi?.setVisible(!!playMode?.onFootActive);
+    playFlightUi?.setVisible(!!playMode?.flyActive);
+    flyHud?.setVisible(!!playMode?.flyActive);
     playPhysicsUi?.syncFromPlayMode();
+    playFlightUi?.syncFromPlayMode();
+    syncColliderDebugUi();
   }
 
   // Painted snow raises the play-mode ground
@@ -432,7 +438,7 @@ async function main() {
     getStuntRoadSolidMeshes: () => [],
     onStartWalking: () => { playHint.classList.add("visible"); },
     onEnterMenu:    () => { playHint.classList.remove("visible"); },
-    onModeChange:   () => { refreshPlayStats(); syncPlayPhysicsPanel(); },
+    onModeChange:   () => { refreshPlayStats(); syncPlayPanels(); },
     onRequestImmersive: () => setPlayImmersive(true),
     onExit: () => {
       syncPlayEditorChrome(false);
@@ -465,6 +471,18 @@ async function main() {
         resetCapsuleParams: () => playMode.resetCapsuleParams(),
       })
     : null;
+
+  const playFlightMount = document.getElementById("play-flight-mount");
+  const playFlightUi = playFlightMount
+    ? buildPlayFlightPanel({
+        mount: playFlightMount,
+        getFlightParams: () => playMode.getFlightParams(),
+        setFlightParams: (patch) => playMode.setFlightParams(patch),
+        resetFlightParams: () => playMode.resetFlightParams(),
+      })
+    : null;
+
+  const flyHud = createFlyHud();
 
   function syncPlayEditorChrome(immersive) {
     const appEl = document.getElementById("app");
@@ -1365,8 +1383,8 @@ async function main() {
     tbPlay.classList.add("active");
     playStopBar.classList.add("visible");
     playPanel.style.display = "";
-    syncCapsuleDebugToggleUi();
-    syncPlayPhysicsPanel();
+    syncColliderDebugUi();
+    syncPlayPanels();
     sculptPanel.style.display = "none";
     paintPanel.style.display = "none";
     snowPanel.style.display  = "none";
@@ -1388,6 +1406,8 @@ async function main() {
     snowSystem.setPlayMode(false);
     snowSystem.resetTrail();
     playPhysicsUi?.setVisible(false);
+    playFlightUi?.setVisible(false);
+    flyHud?.setVisible(false);
     playMode.exit();
     setEditorMode(editorMode, { force: true });  // restore whatever panel was active
   }
@@ -1418,14 +1438,27 @@ async function main() {
   });
 
   const playCapsuleDebugToggle = document.getElementById("play-capsule-debug-toggle");
-  function syncCapsuleDebugToggleUi() {
-    if (!playCapsuleDebugToggle) return;
-    playCapsuleDebugToggle.classList.toggle("checked", !!playMode?.showCollider);
+  const playColliderDebugLabel = document.getElementById("play-collider-debug-label");
+  const playColliderDebugHint = document.getElementById("play-collider-debug-hint");
+  function syncColliderDebugUi() {
+    if (playCapsuleDebugToggle) {
+      playCapsuleDebugToggle.classList.toggle("checked", !!playMode?.showCollider);
+    }
+    if (!playMode?.active) return;
+    const fly = playMode.flyActive;
+    if (playColliderDebugLabel) {
+      playColliderDebugLabel.textContent = fly ? "Flight sphere" : "On-foot capsule";
+    }
+    if (playColliderDebugHint) {
+      playColliderDebugHint.innerHTML = fly
+        ? '<span style="color:#66ccff">Cyan</span> swept-sphere hit volume'
+        : '<span style="color:#44ff88">Green</span> capsule hit volume';
+    }
   }
   playCapsuleDebugToggle?.addEventListener("click", () => {
     if (!playMode?.active) return;
     playMode.setShowCollider(!playMode.showCollider);
-    syncCapsuleDebugToggleUi();
+    syncColliderDebugUi();
   });
 
   tbHelp.addEventListener("click", () => {
@@ -1947,6 +1980,7 @@ async function main() {
         treeBvh?.ensureBaked();
         playMode.update(dt);
         refreshPlayStats();
+        flyHud.update(playMode.getFlightHudState?.(), dt);
 
         const pp = playMode.playerPosition;
         _lodSnapVec.set(
@@ -3206,32 +3240,53 @@ async function main() {
     cliffBvh,
   });
 
-  function _rebuildPrimitiveMaterial(slotIdx) {
+  function _rebuildSlotMaterial(slotIdx) {
     const slot = propSlots[slotIdx];
-    if (!slot?.builtin) return false;
+    if (!slot || slot.live || slot.typeIdx == null) return false;
+    const type = propStore.types[slot.typeIdx];
+    if (!type) return false;
+
+    const useEmbedded = slot.materialId == null || slot.materialId === "__embedded__";
+    if (useEmbedded) {
+      if (!type.embeddedMaterials?.length) return false;
+      type.entries.forEach((e, i) => {
+        e.material = type.embeddedMaterials[i] ?? type.embeddedMaterials[0];
+      });
+      propInstancer.refreshTypeMaterials(slot.typeIdx);
+      return true;
+    }
+
     const propMat = propTextureLibrary.getById(slot.materialId);
     if (!propMat) return false;
     const newMat = createMaterialForLibrary(propMat, { triplanar: !!slot.triplanar });
-    // Solid slots are cliffs — keep the terrain blend across material swaps.
     if (slot.solid) applyCliffTerrainBlend(newMat, cliffBlendDeps);
+    for (const e of type.entries) e.material = newMat;
     propInstancer.setTypeMaterial(slot.typeIdx, newMat);
-    const type = propStore.types[slot.typeIdx];
-    if (type) for (const e of type.entries) e.material = newMat;
     return true;
   }
 
-  function setPrimitiveMaterial(slotIdx, materialId) {
+  function setPropSlotMaterial(slotIdx, materialId) {
     const slot = propSlots[slotIdx];
-    if (!slot?.builtin) return;
+    if (!slot || slot.live) return;
     slot.materialId = materialId;
-    _rebuildPrimitiveMaterial(slotIdx);
+    _rebuildSlotMaterial(slotIdx);
+  }
+
+  function setPropSlotTriplanar(slotIdx, enabled) {
+    const slot = propSlots[slotIdx];
+    if (!slot || slot.live) return;
+    if (!slot.materialId || slot.materialId === "__embedded__") return;
+    slot.triplanar = !!enabled;
+    _rebuildSlotMaterial(slotIdx);
+  }
+
+  // Back-compat aliases used by the props panel for primitives.
+  function setPrimitiveMaterial(slotIdx, materialId) {
+    setPropSlotMaterial(slotIdx, materialId);
   }
 
   function setPrimitiveTriplanar(slotIdx, enabled) {
-    const slot = propSlots[slotIdx];
-    if (!slot?.builtin || !slot.materialId) return;
-    slot.triplanar = !!enabled;
-    _rebuildPrimitiveMaterial(slotIdx);
+    setPropSlotTriplanar(slotIdx, enabled);
   }
 
   const propPlacementPreview = new PropPlacementPreview(scene, propStore, buildProceduralPreviewGroup);
@@ -3549,7 +3604,15 @@ async function main() {
         if (typeIdx < 0) { reject(new Error("No meshes in GLTF")); return; }
         propInstancer.onTypeRegistered(typeIdx);
         const slotIdx = propSlots.length;
-        propSlots.push({ name, loaded: true, typeIdx, builtin: false, live: false });
+        propSlots.push({
+          name,
+          loaded: true,
+          typeIdx,
+          builtin: false,
+          live: false,
+          glbFile: file.name,
+          materialId: "__embedded__",
+        });
         propState.activeSlot = slotIdx;
         document.getElementById("props-panel")?._rebuildPropUi?.();
         resolve(typeIdx);
@@ -3649,6 +3712,7 @@ async function main() {
         }
         entry.material = wrapped.get(entry.material);
       }
+      type.embeddedMaterials = type.entries.map((e) => e.material);
       propInstancer.refreshTypeMaterials(typeIdx);
       const slot = propSlots.find((s) => s.typeIdx === typeIdx);
       if (slot) slot.solid = true;
@@ -3797,6 +3861,8 @@ async function main() {
     importGlbCollectible: async () => {
       console.warn("[V3] GLB collectibles not ported yet — use Flag/Coin/Heart/Key live props.");
     },
+    setPropSlotMaterial,
+    setPropSlotTriplanar,
     setPrimitiveMaterial,
     setPrimitiveTriplanar,
     rebakeBvh: () => rebakePlayerBvh(),
@@ -3838,6 +3904,100 @@ async function main() {
   // + props + roads + splines. This replaces the old road-only localStorage
   // autosave, so refresh behaviour is consistent across all systems.
 
+  function _clearAllPropTypes() {
+    deactivatePropSelection();
+    for (let i = propStore.types.length - 1; i >= 0; i--) {
+      propInstancer.onTypeRemoved(i);
+    }
+    propStore.types.length = 0;
+    propStore.instances.length = 0;
+    propSlots.length = 0;
+    propStore._bump();
+  }
+
+  function _applyGlbSolidCliff(typeIdx) {
+    const type = propStore.types[typeIdx];
+    if (!type) return;
+    type.solid = true;
+    const wrapped = new Map();
+    for (const entry of type.entries) {
+      if (!wrapped.has(entry.material)) {
+        wrapped.set(entry.material, createCliffGlbBlendMaterial(entry.material, cliffBlendDeps));
+      }
+      entry.material = wrapped.get(entry.material);
+    }
+    type.embeddedMaterials = type.entries.map((e) => e.material);
+    propInstancer.refreshTypeMaterials(typeIdx);
+    const slot = propSlots.find((s) => s.typeIdx === typeIdx);
+    if (slot) slot.solid = true;
+  }
+
+  function _applySavedSlotMaterial(slotIdx, meta) {
+    const slot = propSlots[slotIdx];
+    if (!slot || slot.live) return;
+    if (meta.materialId != null) slot.materialId = meta.materialId;
+    if (meta.triplanar != null) slot.triplanar = meta.triplanar;
+    _rebuildSlotMaterial(slotIdx);
+  }
+
+  async function _fetchPropModel(name) {
+    for (const base of ["models/", "../models/"]) {
+      try {
+        const resp = await fetch(base + name);
+        if (resp.ok) return new File([await resp.blob()], name);
+      } catch (_) { /* try next */ }
+    }
+    console.warn(`[V3] Prop asset "${name}" not found in /models — re-import it in the props panel.`);
+    return null;
+  }
+
+  /** Re-register prop types from saved slot metadata before instance import. */
+  async function restorePropSlots(savedSlots, savedTypes) {
+    _clearAllPropTypes();
+
+    let slots = savedSlots;
+    if (!slots?.length && savedTypes?.length) {
+      // Legacy projects saved types/instances but not slot metadata.
+      slots = savedTypes.map((t) => ({
+        name: t.name,
+        builtin: t.isPrimitive ?? false,
+        live: t.live ?? false,
+        solid: t.solid ?? false,
+        factoryId: t.factoryId,
+      }));
+    }
+
+    const cliffNames = new Set(CLIFF_PRESETS.map((c) => c.name));
+
+    for (const meta of slots) {
+      try {
+        if (meta.live) {
+          addLiveProp(meta.name);
+        } else if (meta.glbFile) {
+          const file = await _fetchPropModel(meta.glbFile);
+          if (file) {
+            const typeIdx = await loadGltfAsType(file);
+            if (meta.solid) _applyGlbSolidCliff(typeIdx);
+            const slotIdx = propSlots.findIndex((s) => s.typeIdx === typeIdx);
+            if (slotIdx >= 0) _applySavedSlotMaterial(slotIdx, meta);
+          }
+        } else if (meta.builtin && cliffNames.has(meta.name)) {
+          addCliff(meta.name);
+          _applySavedSlotMaterial(propSlots.length - 1, meta);
+        } else if (meta.builtin) {
+          addPrimitive(meta.name);
+          _applySavedSlotMaterial(propSlots.length - 1, meta);
+        } else {
+          console.warn(`[V3] Cannot restore prop slot "${meta.name}" — re-import the GLB.`);
+        }
+      } catch (err) {
+        console.warn(`[V3] Prop slot "${meta.name}" restore failed:`, err);
+      }
+    }
+
+    document.getElementById("props-panel")?._rebuildPropUi?.();
+  }
+
   async function saveProject() {
     await syncHeightmapToCPU();
     const treeInstances = [];
@@ -3852,7 +4012,7 @@ async function main() {
       snow:      snowMap.snapshot(),
       snowRes:   SNOW_MAP_RES,
       trees:     { slots: treeToolState.treeSlots, instances: treeInstances },
-      props:     propStore.exportData(),
+      props:     propStore.exportData(propSlots),
       roads:     roadSystem.exportData(),
       splines:   splineSys.exportData(),
     });
@@ -3921,10 +4081,11 @@ async function main() {
     }
 
     if (d.props) {
-      deactivatePropSelection();
-      propStore.instances.length = 0;
+      await restorePropSlots(d.props.slots, d.props.types);
       const nameToIdx = Object.fromEntries(propStore.types.map((t, i) => [t.name, i]));
       propStore.importData(d.props, nameToIdx);
+      livePropManager.update(0);
+      rebakePlayerBvh();
       refreshPropCount();
     }
 

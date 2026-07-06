@@ -519,24 +519,33 @@ panel.innerHTML = "";
           });
           headerRow.appendChild(rmBtn);
           row.appendChild(headerRow);
-          if (slot.builtin && app.propTextureLibrary) {
+          if (!slot.live && app.propTextureLibrary) {
             const matOpts = app.propTextureLibrary.getMaterialOptionsForUi();
             if (Object.keys(matOpts).length > 0) {
-              const proxy = {
-                materialId: slot.materialId ?? Object.values(matOpts)[0],
-              };
+              const options = slot.builtin
+                ? matOpts
+                : { "GLB original": "__embedded__", ...matOpts };
+              const defaultId = slot.builtin
+                ? (slot.materialId ?? Object.values(matOpts)[0])
+                : (slot.materialId ?? "__embedded__");
+              const proxy = { materialId: defaultId };
               _dropdown(row, proxy, "materialId", {
                 label: "Material",
-                options: matOpts,
+                options,
                 onChange: () => {
-                  app.setPrimitiveMaterial(i, proxy.materialId);
+                  app.setPropSlotMaterial?.(i, proxy.materialId)
+                    ?? app.setPrimitiveMaterial(i, proxy.materialId);
                   rebuildAll();
                 },
               });
               const propMat = app.propTextureLibrary.getById(
                 proxy.materialId,
               );
-              if (propMat && propMat.type === "pbr") {
+              if (
+                proxy.materialId !== "__embedded__"
+                && propMat
+                && propMat.type === "pbr"
+              ) {
                 _slider(row, propMat, "uvScale", {
                   label: "UV tile",
                   min: 0.01,
@@ -578,7 +587,8 @@ panel.innerHTML = "";
                 _toggle(row, triProxy, "triplanar", {
                   label: "Triplanar",
                   onChange: () =>
-                    app.setPrimitiveTriplanar(i, triProxy.triplanar),
+                    app.setPropSlotTriplanar?.(i, triProxy.triplanar)
+                    ?? app.setPrimitiveTriplanar(i, triProxy.triplanar),
                 });
               }
             }

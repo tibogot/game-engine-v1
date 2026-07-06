@@ -37,6 +37,12 @@ export function createHumanCharacter(scene, renderer) {
   let slideYaw     = 0;
   let slideStart   = 0;
 
+  let attacking           = false;
+  let spellPhase          = "none"; // "enter" | "idle" | "shoot" | "exit" | "none"
+  let spellExitRequested  = false;
+  let gliderPoseActive    = false;
+  let charKite            = null;
+
   const _footPosL = new THREE.Vector3();
   const _footPosR = new THREE.Vector3();
 
@@ -77,6 +83,42 @@ export function createHumanCharacter(scene, renderer) {
     charRoot.add(model);
     charRoot.visible = false;
     scene.add(charRoot);
+
+    // Paraglider kite (visible while gliding)
+    {
+      const kg = new THREE.Group();
+      const shape = new THREE.Shape();
+      shape.moveTo(0, -0.7);
+      shape.lineTo(-1.6, 0.6);
+      shape.lineTo(1.6, 0.6);
+      shape.closePath();
+      const canopy = new THREE.Mesh(
+        new THREE.ShapeGeometry(shape),
+        new THREE.MeshStandardMaterial({
+          color: 0x2563eb,
+          roughness: 0.5,
+          metalness: 0.1,
+          side: THREE.DoubleSide,
+        }),
+      );
+      canopy.castShadow = true;
+      canopy.rotation.x = -0.5;
+      canopy.position.set(0, 0.15, 0);
+      kg.add(canopy);
+      const bar = new THREE.Mesh(
+        new THREE.BoxGeometry(0.7, 0.04, 0.04),
+        new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.4, metalness: 0.3 }),
+      );
+      bar.castShadow = true;
+      bar.position.set(0, -0.6, 0.35);
+      bar.rotation.x = 0.25;
+      kg.add(bar);
+      kg.position.set(0, CHAR_HEIGHT * 0.95, -0.35);
+      kg.rotation.set(0.12, PI / 2, 0);
+      kg.visible = false;
+      charRoot.add(kg);
+      charKite = kg;
+    }
 
     // ── Find attachment bones ─────────────────────────────────────────────────
     const rightHand = findBone(model,
@@ -138,24 +180,32 @@ export function createHumanCharacter(scene, renderer) {
       };
 
       const idleClip = pick("Idle_Loop");
+      const jumpLoopClip = pick("Jump_Loop", "NinjaJump_Idle_Loop");
       const rollClip = pick("Roll", "Roll_RM") || idleClip;
       const slideStartClip = pick("Slide_Start");
       const slideLoopClip  = pick("Slide_Loop") || slideStartClip;
       const slideExitClip  = pick("Slide_Exit") || slideLoopClip;
+      const glideClip = pick("NinjaJump_Idle_Loop") || jumpLoopClip;
 
       charActions = {
         idle:       mk(idleClip),
         walk:       mk(pick("Walk_Loop")),
         run:        mk(pick("Sprint_Loop", "Jog_Fwd_Loop")),
         jumpStart:  mk(pick("Jump_Start"), true),
-        jumpLoop:   mk(pick("Jump_Loop", "NinjaJump_Idle_Loop")),
+        jumpLoop:   mk(jumpLoopClip),
         jumpLand:   mk(pick("Jump_Land"), true),
+        glide:      mk(glideClip),
         crouch:     mk(pick("Crouch_Idle_Loop")),
         crouchWalk: mk(pick("Crouch_Fwd_Loop")),
+        attack:     mk(pick("Sword_Attack", "Sword_Attack_RM"), true),
         roll:       mk(rollClip, true),
         slideStart: mk(slideStartClip, true),
         slideLoop:  mk(slideLoopClip, false),
         slideExit:  mk(slideExitClip, true),
+        spellEnter: mk(pick("Spell_Simple_Enter"), true),
+        spellIdle:  mk(pick("Spell_Simple_Idle_Loop")),
+        spellShoot: mk(pick("Spell_Simple_Shoot"), true),
+        spellExit:  mk(pick("Spell_Simple_Exit"), true),
       };
 
       if (charActions.jumpStart) charActions.jumpStart.timeScale = 1.4;
@@ -166,13 +216,47 @@ export function createHumanCharacter(scene, renderer) {
       }
 
       charMixer.addEventListener("finished", e => {
+        if (e.action === charActions?.attack) {
+          attacking = false;
+          return;
+        }
         if (e.action === charActions?.jumpLand) jumpPhase = "none";
+        if (e.action === charActions?.jumpStart && airActive && charActions.jumpLoop) {
+          jumpPhase = "loop";
+          setAction(charActions.jumpLoop, 0.08);
+          return;
+        }
         if (e.action === charActions?.roll) rolling = false;
         if (e.action === charActions?.slideStart && slidePhase === "start" && charActions.slideLoop) {
           slidePhase = "loop";
           setAction(charActions.slideLoop, 0.1);
         }
         if (e.action === charActions?.slideExit) slidePhase = "none";
+        if (e.action === charActions?.spellEnter && spellPhase === "enter") {
+          if (spellExitRequested && charActions.spellExit) {
+            spellPhase = "exit";
+            setAction(charActions.spellExit, 0.12);
+          } else if (charActions.spellIdle) {
+            spellPhase = "idle";
+            setAction(charActions.spellIdle, 0.12);
+          }
+          return;
+        }
+        if (e.action === charActions?.spellShoot && spellPhase === "shoot") {
+          if (spellExitRequested && charActions.spellExit) {
+            spellPhase = "exit";
+            setAction(charActions.spellExit, 0.12);
+          } else if (charActions.spellIdle) {
+            spellPhase = "idle";
+            setAction(charActions.spellIdle, 0.12);
+          }
+          return;
+        }
+        if (e.action === charActions?.spellExit) {
+          spellPhase = "none";
+          spellExitRequested = false;
+          if (charActions.idle) setAction(charActions.idle, 0.2);
+        }
       });
 
       currentAction = charActions.idle;
@@ -192,8 +276,19 @@ export function createHumanCharacter(scene, renderer) {
     currentAction = next;
   }
 
+  function isActionBusy() {
+    return rolling || attacking || slidePhase !== "none";
+  }
+
+  function tryAttack(inAir = false) {
+    if (!charActions?.attack || isActionBusy() || spellPhase !== "none" || inAir) return false;
+    attacking = true;
+    setAction(charActions.attack, 0.12);
+    return true;
+  }
+
   function tryRoll() {
-    if (!charActions?.roll || rolling || slidePhase !== "none") return false;
+    if (!charActions?.roll || isActionBusy() || spellPhase !== "none") return false;
     rolling = true;
     rollYaw = charYaw;
     rollStart = performance.now();
@@ -201,12 +296,41 @@ export function createHumanCharacter(scene, renderer) {
     return true;
   }
 
-  function trySlide(moving) {
-    if (!moving || !charActions?.slideStart || rolling || slidePhase !== "none" || airActive) return false;
+  function trySlide(moving, inAir = false) {
+    if (!moving || !charActions?.slideStart || isActionBusy() || spellPhase !== "none" || inAir) return false;
     slidePhase = "start";
     slideYaw = charYaw;
     slideStart = performance.now();
     setAction(charActions.slideStart, 0.1);
+    return true;
+  }
+
+  /** Q — enter spell stance or request exit (v2 playMode). */
+  function trySpellToggle() {
+    if (spellPhase === "none") {
+      if (isActionBusy() || !charActions?.spellEnter) return false;
+      spellPhase = "enter";
+      spellExitRequested = false;
+      setAction(charActions.spellEnter, 0.15);
+      return true;
+    }
+    if (!charActions?.spellExit) return false;
+    if (spellPhase === "idle" || spellPhase === "enter" || spellPhase === "shoot") {
+      spellExitRequested = true;
+      if (spellPhase === "idle") {
+        spellPhase = "exit";
+        setAction(charActions.spellExit, 0.12);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /** J — fire spell while in idle stance. */
+  function trySpellShoot() {
+    if (spellPhase !== "idle" || spellExitRequested || !charActions?.spellShoot) return false;
+    spellPhase = "shoot";
+    setAction(charActions.spellShoot, 0.12);
     return true;
   }
 
@@ -242,11 +366,17 @@ export function createHumanCharacter(scene, renderer) {
     get slidePhase() { return slidePhase; },
     get inSlide() { return slidePhase !== "none"; },
     get jumpPhase() { return jumpPhase; },
-    get movementBusy() { return rolling || slidePhase !== "none"; },
+    get attacking() { return attacking; },
+    get spellPhase() { return spellPhase; },
+    get inSpell() { return spellPhase !== "none"; },
+    get movementBusy() { return rolling || slidePhase !== "none" || attacking || spellPhase !== "none"; },
     get footBoneL() { return footBoneL; },
     get footBoneR() { return footBoneR; },
     tryRoll,
     trySlide,
+    tryAttack,
+    trySpellToggle,
+    trySpellShoot,
     getMoveOverride,
 
     /** World positions of foot bones (after update). */
@@ -277,8 +407,12 @@ export function createHumanCharacter(scene, renderer) {
       // Position — capsule.position.y = feet
       charRoot.position.set(ctrl.position.x, ctrl.position.y, ctrl.position.z);
 
-      // Yaw: smoothly face movement direction (skip during roll/slide)
-      if (mlen > 0.01 && !rolling && slidePhase === "none") {
+      const inAir = ctrl.inAir;
+      airTime = inAir ? airTime + dt : 0;
+      const enterAir = inAir && (ctrl.velY > 0.5 || airTime > 0.12);
+
+      // Yaw: smoothly face movement direction (skip during roll/slide/attack/spell)
+      if (mlen > 0.01 && !rolling && slidePhase === "none" && !attacking && spellPhase === "none") {
         const targetYaw = Math.atan2(mx, mz);
         let dYaw = targetYaw - charYaw;
         while (dYaw >  Math.PI) dYaw -= 2 * Math.PI;
@@ -287,30 +421,46 @@ export function createHumanCharacter(scene, renderer) {
       }
       charRoot.rotation.y = charYaw;
 
-      // Animation FSM (mirrors v2 playMode char locomotion)
-      const inAir    = ctrl.inAir;
-      airTime = inAir ? airTime + dt : 0;
-      const enterAir = inAir && (ctrl.velY > 0.5 || airTime > 0.12);
+      if (charKite) charKite.visible = ctrl.gliding && inAir;
 
+      const wantGlide = ctrl.gliding && inAir && charActions.glide;
+      if (wantGlide && !gliderPoseActive && !attacking && spellPhase === "none") {
+        gliderPoseActive = true;
+        setAction(charActions.glide, 0.15);
+      } else if (!wantGlide && gliderPoseActive) {
+        gliderPoseActive = false;
+        if (inAir && charActions.jumpLoop) {
+          jumpPhase = "loop";
+          setAction(charActions.jumpLoop, 0.15);
+        }
+      }
+
+      // Animation FSM (mirrors v2 playMode char locomotion)
       if (enterAir && !airActive) {
         airActive = true;
-        if (ctrl.velY > 0.5 && charActions.jumpStart) {
-          jumpPhase = "start";
-          setAction(charActions.jumpStart, 0.08);
-        } else if (charActions.jumpLoop) {
-          jumpPhase = "loop";
-          setAction(charActions.jumpLoop, 0.12);
+        if (!gliderPoseActive) {
+          if (ctrl.velY > 0.5 && charActions.jumpStart) {
+            jumpPhase = "start";
+            setAction(charActions.jumpStart, 0.08);
+          } else if (charActions.jumpLoop) {
+            jumpPhase = "loop";
+            setAction(charActions.jumpLoop, 0.12);
+          }
         }
       } else if (!inAir && airActive) {
         airActive = false;
-        if (mlen > 0.01) {
+        gliderPoseActive = false;
+        if (mlen > 0.01 && !attacking && spellPhase === "none") {
           jumpPhase = "none";
           setAction(run ? charActions.run : charActions.walk, 0.12);
-        } else if (charActions.jumpLand) {
+        } else if (charActions.jumpLand && !attacking && spellPhase === "none") {
           jumpPhase = "land";
           setAction(charActions.jumpLand, 0.1);
         }
-      } else if (!inAir && jumpPhase === "none" && !rolling && slidePhase === "none") {
+      } else if (
+        !inAir && jumpPhase === "none" && !rolling && slidePhase === "none"
+        && !attacking && !gliderPoseActive && spellPhase === "none"
+      ) {
         let tgt;
         if (crouch)        tgt = mlen > 0 ? charActions.crouchWalk : charActions.crouch;
         else if (mlen > 0) tgt = run ? charActions.run : charActions.walk;
@@ -339,6 +489,11 @@ export function createHumanCharacter(scene, renderer) {
       airTime   = 0;
       rolling = false;
       slidePhase = "none";
+      attacking = false;
+      spellPhase = "none";
+      spellExitRequested = false;
+      gliderPoseActive = false;
+      if (charKite) charKite.visible = false;
       if (charRoot) charRoot.rotation.y = 0;
     },
   };

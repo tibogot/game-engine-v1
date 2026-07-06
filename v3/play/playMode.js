@@ -67,7 +67,7 @@ export function createPlayMode({
   scene.add(capMesh);
 
   let onFootWire = null;
-  let onFootWireOn = false;
+  let colliderDebugOn = false;
   let onFootWireDims = { r: 0, h: 0 };
 
   let charYaw = 0;
@@ -117,7 +117,9 @@ export function createPlayMode({
   const flight = createFlightMode({
     scene,
     sampleGroundY,
+    getTerrainHeight,
     getCliffBvh,
+    getTreeBvh,
   });
 
   const brunoCar = bruno ?? createBrunoCarMode({
@@ -304,6 +306,7 @@ export function createPlayMode({
 
     moveMode = target;
     applyModeVisuals();
+    applyColliderDebug();
     showModeToast(V3_MODE_META[target].label);
     onModeChange?.(target);
   }
@@ -396,9 +399,20 @@ export function createPlayMode({
     );
   }
 
+  function applyColliderDebug() {
+    if (!colliderDebugOn) {
+      updateOnFootWire(false);
+      flight.setShowCollider(false);
+      return;
+    }
+    const fly = isFlyMode();
+    updateOnFootWire(!fly && isOnFoot());
+    flight.setShowCollider(fly);
+  }
+
   function setShowCollider(v) {
-    onFootWireOn = !!v;
-    if (!onFootWireOn) updateOnFootWire(false);
+    colliderDebugOn = !!v;
+    applyColliderDebug();
   }
 
   function getCapsuleParams() {
@@ -531,11 +545,23 @@ export function createPlayMode({
     }
 
     if (moveMode === "char" && character?.loaded && !e.repeat) {
+      if (e.code === "KeyR" && character.tryAttack(capsule.inAir)) {
+        e.preventDefault();
+        return;
+      }
       if (e.code === "KeyC" && character.tryRoll()) {
         e.preventDefault();
         return;
       }
-      if (e.code === "KeyX" && character.trySlide(isMoveKeysHeld())) {
+      if (e.code === "KeyX" && character.trySlide(isMoveKeysHeld(), capsule.inAir)) {
+        e.preventDefault();
+        return;
+      }
+      if (e.code === "KeyQ" && character.trySpellToggle()) {
+        e.preventDefault();
+        return;
+      }
+      if (e.code === "KeyJ" && character.trySpellShoot()) {
         e.preventDefault();
         return;
       }
@@ -726,7 +752,9 @@ export function createPlayMode({
     character?.reset();
     if (husky?.root) husky.root.visible = false;
     capMesh.visible = false;
-    if (onFootWire) onFootWire.visible = false;
+    colliderDebugOn = false;
+    updateOnFootWire(false);
+    flight.setShowCollider(false);
     flight.syncVisuals(capsule.position, false);
     brunoCar.hide();
     stuntCar.hide();
@@ -761,9 +789,14 @@ export function createPlayMode({
         mz = moveOverride.mz;
         speedOverride = moveOverride.speed;
       }
+      if (character.attacking || character.inSpell) {
+        mx = 0;
+        mz = 0;
+      }
     }
 
-    const wantCrouch = charMode && keys.ctrl && !capsule.inAir && !rolling && !inSlide;
+    const wantCrouch = charMode && keys.ctrl && !capsule.inAir && !rolling && !inSlide
+      && !character.attacking && !character.inSpell;
 
     capsule.update(dt, {
       input: {
@@ -775,6 +808,7 @@ export function createPlayMode({
       moveSpeedOverride: speedOverride,
       canJump: charMode
         ? !rolling && !inSlide && character.jumpPhase !== "land"
+          && !character.attacking && !character.inSpell
         : true,
       collider: getCollider(),
       getTerrainHeight,
@@ -782,7 +816,7 @@ export function createPlayMode({
       worldHalf: WORLD_SIZE / 2,
     });
 
-    updateOnFootWire(onFootWireOn && isOnFoot());
+    updateOnFootWire(colliderDebugOn && isOnFoot());
 
     if (huskyMode) {
       charYaw = husky.updateFrame({
@@ -897,14 +931,21 @@ export function createPlayMode({
     get relaxedPointer() { return editorRelaxedPointer; },
     get moveMode() { return moveMode; },
     get wheelOpen() { return modeWheel.open; },
-    get showCollider() { return onFootWireOn; },
+    get showCollider() { return colliderDebugOn; },
     setShowCollider,
     get onFootActive() {
       return active && (moveMode === "capsule" || moveMode === "char" || moveMode === "husky");
     },
+    get flyActive() {
+      return active && isFlyMode();
+    },
     getCapsuleParams,
     setCapsuleParams,
     resetCapsuleParams,
+    getFlightParams: () => flight.getFlightParams(),
+    setFlightParams: (patch) => flight.setFlightParams(patch),
+    resetFlightParams: () => flight.resetFlightParams(),
+    getFlightHudState: () => (active && isFlyMode() ? flight.getHudState() : null),
     get playerPosition() { return capsule.position; },
     getSnowContacts,
     getStats() {
