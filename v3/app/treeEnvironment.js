@@ -148,6 +148,22 @@ export function createTreeEnvironment({
         foliageLodRenderer.debugFreeze = !!v;
         console.log(`[treeDebug] foliage builds/tier-changes ${v ? "FROZEN" : "unfrozen"}`);
       },
+      /** Load a preset object (or JSON string) into a slot from the console —
+       *  same path as the panel's file picker, scriptable. */
+      async loadPresetJson(json, slot = 0) {
+        const text = typeof json === "string" ? json : JSON.stringify(json);
+        await loadTreePreset(slot, new File([text], "console-preset.json", { type: "application/json" }));
+      },
+      /** Plant random trees for the CURRENT slot presets (spawnTestForest
+       *  replaces slot 0 with a synthetic preset; this one doesn't). */
+      plantForest(n = 5000, radius = 700, slot = 0) {
+        for (let i = 0; i < n; i++) {
+          const wx = (Math.random() * 2 - 1) * radius;
+          const wz = (Math.random() * 2 - 1) * radius;
+          treeStore.addTree(wx, wz, terrainStore.getWorldHeight(wx, wz), Math.random() * Math.PI * 2, 0.8 + Math.random() * 0.5, slot);
+        }
+        console.log(`[treeDebug] planted ${n} trees (slot ${slot}, radius ${radius}m)`);
+      },
       /** Self-serve repro: build a synthetic leaf preset + plant a forest. */
       async spawnTestForest(n = 5000, radius = 700) {
         const cv = document.createElement("canvas");
