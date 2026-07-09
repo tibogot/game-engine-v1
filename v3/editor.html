@@ -1120,6 +1120,10 @@
           <div class="inspector-section">
             <div class="section-header">Paint Density</div>
             <div class="section-body">
+              <div style="display:flex;gap:4px;margin-bottom:6px">
+                <button type="button" class="action-btn primary" id="gbtn-target-terrain" style="flex:1" title="Paint grass on the terrain surface">Terrain</button>
+                <button type="button" class="action-btn" id="gbtn-target-cliff" style="flex:1" title="Paint grass on cliff tops (independent of terrain grass)">Cliff top</button>
+              </div>
               <div class="prop-row">
                 <span class="prop-label">Radius</span>
                 <div class="prop-value">
@@ -1155,6 +1159,25 @@
                 <button type="button" class="action-btn primary" id="gbtn-fill" style="flex:1">Fill all</button>
                 <button type="button" class="action-btn" id="gbtn-clear" style="flex:1;color:#f66">Clear all</button>
               </div>
+            </div>
+          </div>
+
+          <!-- CLIFF GRASS --------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Cliff Grass
+            </div>
+            <div class="section-body">
+              <p class="mode-hint">Grass on cliff tops sits on its own baked surface, so it never conflicts with terrain grass. Bake after placing or moving cliffs, then paint with <b>Cliff top</b> selected above.</p>
+              <div style="display:flex;gap:4px;margin-top:4px">
+                <button type="button" class="action-btn primary" id="cliffgrass-bake" style="flex:1">Bake cliff surface</button>
+              </div>
+              <div style="display:flex;gap:4px;margin-top:4px">
+                <button type="button" class="action-btn" id="cliffgrass-fill" style="flex:1">Fill cliff tops</button>
+                <button type="button" class="action-btn" id="cliffgrass-clear" style="flex:1;color:#f66">Clear cliff</button>
+              </div>
+              <p class="mode-hint" id="cliffgrass-status" style="margin-top:6px">No cliff surface baked yet.</p>
             </div>
           </div>
 

@@ -623,10 +623,13 @@ async function main() {
     lodFarBladeWidth: 0.45, lodMegaBladeWidth: 0.7,
   };
 
-  const grassBrush = { radius: 60, strength: 0.7, falloff: 2.0, erase: false };
+  const grassBrush = { radius: 60, strength: 0.7, falloff: 2.0, erase: false, target: "terrain" };
 
   let grassRings = null;
   let _grassBuilding = false;
+  let cliffGrassRings = null;   // second ring set, cliffMode — grass on cliff tops
+  let _cliffGrassBuilding = false;
+  let _cliffRingsEnabled = false;
 
   // ── Terrain tint bake ──────────────────────────────────────────────────────
   // v2 fed the grass a procedural ground-color TSL fn; v3's terrain color is
@@ -689,50 +692,60 @@ async function main() {
     renderer.setRenderTarget(prevRT);
   }
 
+  // The LOD ring windows are shared by both the terrain and the cliff-top grass
+  // layers so their coverage is identical — the overlapping inner/outer ramps
+  // are what make the field seamless (a trimmed set leaves gap rings between
+  // LODs). Each entry is a per-ring override on top of `shared`; the `name` is
+  // suffixed per layer.
+  const GRASS_RING_DEFS = [
+    { key: "Near",    tileSize: 130, bladesPerSide: 512,
+      outerR0: 36, outerR1: 62 },
+    { key: "MidThin", tileSize: 180, bladesPerSide: 384, segments: 3,
+      innerR0: 36, innerR1: 56, outerR0: 70, outerR1: 88,
+      crossFadeR0: 70, crossFadeR1: 88 },
+    { key: "Mid",     normalMode: "flat", crossed: false,
+      tileSize: 440, bladesPerSide: 576,
+      bladeWidth: 0.45, segments: 2, bladeHeightMul: 1.1,
+      innerR0: 64, innerR1: 88, outerR0: 180, outerR1: 218 },
+    { key: "Far",     normalMode: "flat", crossed: false,
+      tileSize: 800, bladesPerSide: 384,
+      bladeWidth: 0.7, segments: 1, bladeHeightMul: 1.2,
+      innerR0: 175, innerR1: 215, outerR0: 360, outerR1: 398 },
+  ];
+
+  async function _buildGrassRingSet(namePrefix, extraShared) {
+    const shared = {
+      scene,
+      renderer,
+      heightTex:        grassTerrainData.grassHeightTex,
+      terrainNormalTex: grassTerrainData.terrainNormalTex,
+      densityTex:       grassTerrainData.densityTex,
+      windTex:          grassWindTex,
+      specNoiseTex:     grassSpecNoiseTex,
+      tintTex:          grassTintRT.texture,
+      worldSize:        WORLD_SIZE,
+      gp:               grassState,
+      ...extraShared,
+    };
+    const rings = GRASS_RING_DEFS.map(({ key, ...def }) =>
+      new HybridGrassSystem({ ...shared, name: namePrefix + key, ...def }));
+    for (const r of rings) await r.init(camera);
+    for (const r of rings) {
+      // Widen horizontal cull pad so fast camera rotation (play-mode mouse-look)
+      // doesn't pop blades in at screen edges. The VS clips properly regardless;
+      // off-screen blades in the compact buffer cost only VS invocations, no pixels.
+      r.u.uCullPadNdcX.value    = 0.45;
+      r.u.uCullPadNdcYFar.value = 0.45;
+    }
+    return rings;
+  }
+
   async function ensureGrassBuilt() {
     if (grassRings || _grassBuilding) return;
     _grassBuilding = true;
     try {
-      const shared = {
-        scene,
-        renderer,
-        heightTex:        grassTerrainData.grassHeightTex,
-        terrainNormalTex: grassTerrainData.terrainNormalTex,
-        densityTex:       grassTerrainData.densityTex,
-        windTex:          grassWindTex,
-        specNoiseTex:     grassSpecNoiseTex,
-        tintTex:          grassTintRT.texture,
-        worldSize:        WORLD_SIZE,
-        gp:               grassState,
-      };
-      const rings = [
-        new HybridGrassSystem({ ...shared, name: "HybridNear",
-          tileSize: 130, bladesPerSide: 512,
-          outerR0: 36, outerR1: 62 }),
-        new HybridGrassSystem({ ...shared, name: "HybridMidThin",
-          tileSize: 180, bladesPerSide: 384, segments: 3,
-          innerR0: 36, innerR1: 56, outerR0: 70, outerR1: 88,
-          crossFadeR0: 70, crossFadeR1: 88 }),
-        new HybridGrassSystem({ ...shared, name: "HybridMid",
-          normalMode: "flat", crossed: false,
-          tileSize: 440, bladesPerSide: 576,
-          bladeWidth: 0.45, segments: 2, bladeHeightMul: 1.1,
-          innerR0: 64, innerR1: 88, outerR0: 180, outerR1: 218 }),
-        new HybridGrassSystem({ ...shared, name: "HybridFar",
-          normalMode: "flat", crossed: false,
-          tileSize: 800, bladesPerSide: 384,
-          bladeWidth: 0.7, segments: 1, bladeHeightMul: 1.2,
-          innerR0: 175, innerR1: 215, outerR0: 360, outerR1: 398 }),
-      ];
-      for (const r of rings) await r.init(camera);
-      for (const r of rings) {
-        r.setEnabled(true);
-        // Widen horizontal cull pad so fast camera rotation (play-mode mouse-look)
-        // doesn't pop blades in at screen edges. The VS clips properly regardless;
-        // off-screen blades in the compact buffer cost only VS invocations, no pixels.
-        r.u.uCullPadNdcX.value    = 0.45;
-        r.u.uCullPadNdcYFar.value = 0.45;
-      }
+      const rings = await _buildGrassRingSet("Hybrid", {});
+      for (const r of rings) r.setEnabled(true);
       grassRings = rings;
     } catch (err) {
       console.error("[V3 Grass] build failed:", err);
@@ -741,11 +754,43 @@ async function main() {
     }
   }
 
+  // Cliff-top grass: a second independent ring set running in cliffMode. It
+  // samples grassTerrainData.cliffHeightTex (baked cliff-top Y + normal) and
+  // cliffDensityTex (its own paint) instead of the terrain heightmap, so it
+  // never fights the terrain layer for a world-XZ texel. Built lazily — the
+  // first time a cliff surface is baked or cliff grass is painted.
+  async function ensureCliffGrassBuilt() {
+    if (cliffGrassRings || _cliffGrassBuilding) return;
+    _cliffGrassBuilding = true;
+    try {
+      // Same LOD ring set as terrain so coverage is seamless — only the sampled
+      // surface (cliff height/density) differs. Rings start disabled; the render
+      // loop enables them once a cliff surface is baked and cliff grass painted.
+      const rings = await _buildGrassRingSet("HybridCliff", {
+        cliffMode:       true,
+        cliffHeightTex:  grassTerrainData.cliffHeightTex,
+        cliffDensityTex: grassTerrainData.cliffDensityTex,
+      });
+      cliffGrassRings = rings;
+      syncGrassUniforms();
+    } catch (err) {
+      console.error("[V3 Cliff Grass] build failed:", err);
+    } finally {
+      _cliffGrassBuilding = false;
+    }
+  }
+
   function syncGrassUniforms() {
-    if (!grassRings || !worldEnv) return;
+    if (!worldEnv) return;
     const sunDir = worldEnv.getEffectiveLightDir();
-    for (const r of grassRings) r.syncFromState(grassState, sunDir);
-    syncHybridGrassLod(grassRings, grassState);
+    if (grassRings) {
+      for (const r of grassRings) r.syncFromState(grassState, sunDir);
+      syncHybridGrassLod(grassRings, grassState);
+    }
+    if (cliffGrassRings) {
+      for (const r of cliffGrassRings) r.syncFromState(grassState, sunDir);
+      syncHybridGrassLod(cliffGrassRings, grassState);
+    }
   }
 
   // ── UI wiring ──────────────────────────────────────────────────────────────
@@ -2029,6 +2074,18 @@ async function main() {
         const _grassAnchor = playMode.active ? playMode.playerPosition : camera.position;
         for (const r of grassRings) r.update(_grassAnchor, camera);
       }
+      if (cliffGrassRings) {
+        // Only spend compute when there's both a baked cliff surface and paint.
+        const wantCliff = grassTerrainData.hasCliffData && grassTerrainData.hasCliffSurface;
+        if (wantCliff !== _cliffRingsEnabled) {
+          _cliffRingsEnabled = wantCliff;
+          for (const r of cliffGrassRings) r.setEnabled(wantCliff);
+        }
+        if (wantCliff) {
+          const _cliffAnchor = playMode.active ? playMode.playerPosition : camera.position;
+          for (const r of cliffGrassRings) r.update(_cliffAnchor, camera);
+        }
+      }
 
       propInstancer.update(camera, propLod);
       livePropManager.update(dt);
@@ -2921,6 +2978,47 @@ async function main() {
   gbtnFill.addEventListener("click", () => grassTerrainData.fillDensity());
   gbtnClear.addEventListener("click", () => { if (confirm("Clear all grass density?")) grassTerrainData.clearDensity(); });
 
+  // ── Cliff grass: paint-target toggle + surface bake + fill/clear ───────────
+  const gbtnTargetTerrain = document.getElementById("gbtn-target-terrain");
+  const gbtnTargetCliff   = document.getElementById("gbtn-target-cliff");
+  const cliffgrassBake    = document.getElementById("cliffgrass-bake");
+  const cliffgrassFill    = document.getElementById("cliffgrass-fill");
+  const cliffgrassClear   = document.getElementById("cliffgrass-clear");
+  const cliffgrassStatus  = document.getElementById("cliffgrass-status");
+
+  function updateCliffGrassStatus() {
+    if (!cliffgrassStatus) return;
+    if (!grassTerrainData.hasCliffSurface) {
+      cliffgrassStatus.textContent = "No cliff surface baked yet.";
+    } else {
+      const stale = grassTerrainData.cliffSurfaceGen !== propStore.gen;
+      cliffgrassStatus.textContent = grassTerrainData.hasCliffData
+        ? (stale ? "Cliff surface baked (cliffs changed — re-bake to refresh)." : "Cliff grass active.")
+        : "Cliff surface baked — paint with Cliff top selected.";
+    }
+  }
+
+  function setGrassTarget(target) {
+    grassBrush.target = target;
+    const cliff = target === "cliff";
+    gbtnTargetTerrain?.classList.toggle("primary", !cliff);
+    gbtnTargetCliff?.classList.toggle("primary", cliff);
+    if (cliff) { ensureFreshCliffSurface(); updateCliffGrassStatus(); }
+  }
+  gbtnTargetTerrain?.addEventListener("click", () => setGrassTarget("terrain"));
+  gbtnTargetCliff?.addEventListener("click", () => setGrassTarget("cliff"));
+
+  cliffgrassBake?.addEventListener("click", () => { bakeCliffGrassSurface(); updateCliffGrassStatus(); });
+  cliffgrassFill?.addEventListener("click", () => {
+    bakeCliffGrassSurface();
+    grassTerrainData.fillCliffDensity();
+    updateCliffGrassStatus();
+  });
+  cliffgrassClear?.addEventListener("click", () => {
+    if (confirm("Clear all cliff grass?")) grassTerrainData.clearCliffDensity();
+    updateCliffGrassStatus();
+  });
+
   // Appearance
   const gcolBlade   = document.getElementById("gcol-blade");
   const gcolTip     = document.getElementById("gcol-tip");
@@ -2980,10 +3078,12 @@ async function main() {
     grassState.bladeWidth = Number(gslBladeW.value) / 100;
     glblBladeW.textContent = grassState.bladeWidth.toFixed(2) + "m";
     if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
+    if (cliffGrassRings) rebuildHybridGrassGeometries(cliffGrassRings, grassState);
   });
   gckCrossed.addEventListener("change", () => {
     grassState.crossed = gckCrossed.checked;
     if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
+    if (cliffGrassRings) rebuildHybridGrassGeometries(cliffGrassRings, grassState);
   });
   const gslSegments  = document.getElementById("gsl-segments");
   const glblSegments = document.getElementById("glbl-segments");
@@ -2998,11 +3098,13 @@ async function main() {
     grassState.bladeYSegments = Number(gslSegments.value);
     glblSegments.textContent = gslSegments.value;
     if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
+    if (cliffGrassRings) rebuildHybridGrassGeometries(cliffGrassRings, grassState);
   });
   gslTaper.addEventListener("input", () => {
     grassState.tipTaperStart = Number(gslTaper.value) / 100;
     glblTaper.textContent = grassState.tipTaperStart.toFixed(2);
     if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
+    if (cliffGrassRings) rebuildHybridGrassGeometries(cliffGrassRings, grassState);
   });
   gslClumpSc.addEventListener("input",  () => { grassState.clumpScale = Number(gslClumpSc.value) / 10; glblClumpSc.textContent = grassState.clumpScale.toFixed(1); syncGrassUniforms(); });
   gslClumpStr.addEventListener("input", () => { grassState.clumpStrength = Number(gslClumpStr.value) / 100; glblClumpStr.textContent = grassState.clumpStrength.toFixed(2); syncGrassUniforms(); });
@@ -3135,10 +3237,10 @@ async function main() {
   const glblLodMega= document.getElementById("glbl-lod-mega");
   const gckLodDebug= document.getElementById("gck-lod-debug");
 
-  gslLodMid.addEventListener("input",  () => { grassState.lodMidDistance = Number(gslLodMid.value); glblLodMid.textContent = gslLodMid.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); });
-  gslLodFar.addEventListener("input",  () => { grassState.lodFarDistance = Number(gslLodFar.value); glblLodFar.textContent = gslLodFar.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); });
-  gslLodMax.addEventListener("input",  () => { grassState.lodMaxDistance = Number(gslLodMax.value); glblLodMax.textContent = gslLodMax.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); });
-  gslLodMega.addEventListener("input", () => { grassState.lodMegaMaxDistance = Number(gslLodMega.value); glblLodMega.textContent = gslLodMega.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); });
+  gslLodMid.addEventListener("input",  () => { grassState.lodMidDistance = Number(gslLodMid.value); glblLodMid.textContent = gslLodMid.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState); });
+  gslLodFar.addEventListener("input",  () => { grassState.lodFarDistance = Number(gslLodFar.value); glblLodFar.textContent = gslLodFar.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState); });
+  gslLodMax.addEventListener("input",  () => { grassState.lodMaxDistance = Number(gslLodMax.value); glblLodMax.textContent = gslLodMax.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState); });
+  gslLodMega.addEventListener("input", () => { grassState.lodMegaMaxDistance = Number(gslLodMega.value); glblLodMega.textContent = gslLodMega.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState); });
   gckLodDebug.addEventListener("change", () => { grassState.lodDebug = gckLodDebug.checked; syncGrassUniforms(); });
 
   // Per-tier blade geometry (segments / widths) — geometry-baked, needs rebuild
@@ -3156,6 +3258,7 @@ async function main() {
       grassState[key] = toVal(Number(el.value));
       lbl.textContent = toLabel(grassState[key]);
       if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
+    if (cliffGrassRings) rebuildHybridGrassGeometries(cliffGrassRings, grassState);
     });
   }
 
@@ -3180,6 +3283,30 @@ async function main() {
   // propStore edits (place/move/delete never rebakes anything).
   const solidCollider = new SolidCollider(propStore);
   colliderSources.push(solidCollider);
+
+  // Bake the cliff-top height surface for cliff grass by raycasting down onto
+  // the solid props (cliffs). Cheap enough to run on demand — the collider
+  // early-outs on texels that miss every cliff bounding box.
+  function bakeCliffGrassSurface() {
+    const terrainHeightAt = (wx, wz) =>
+      sampleTerrainHeight((wx + WORLD_SIZE / 2) / WORLD_SIZE, (wz + WORLD_SIZE / 2) / WORLD_SIZE);
+    // Skip the raycast entirely outside the cliffs' combined footprint — most
+    // texels in a big world sit over open terrain and can't hit any cliff.
+    const bounds = solidCollider.worldBounds();
+    const bMinX = bounds ? bounds.min.x : Infinity, bMaxX = bounds ? bounds.max.x : -Infinity;
+    const bMinZ = bounds ? bounds.min.z : Infinity, bMaxZ = bounds ? bounds.max.z : -Infinity;
+    const raycastDown = (wx, wz) => {
+      if (wx < bMinX || wx > bMaxX || wz < bMinZ || wz > bMaxZ) return null;
+      return solidCollider.raycastDown(wx, 1e5, wz, Infinity);
+    };
+    grassTerrainData.rebuildCliffHeightTex(raycastDown, terrainHeightAt, WORLD_SIZE);
+    grassTerrainData.cliffSurfaceGen = propStore.gen;
+    ensureCliffGrassBuilt();
+  }
+  // Re-bake before cliff painting if cliffs changed since the last bake.
+  function ensureFreshCliffSurface() {
+    if (grassTerrainData.cliffSurfaceGen !== propStore.gen) bakeCliffGrassSurface();
+  }
 
   // World-space hit on terrain surface for prop placement
   const _propHitVec = new THREE.Vector3();
@@ -4777,49 +4904,71 @@ async function main() {
   let _grassRedoStack = [];
   let _grassPainting  = false;
 
+  // Undo entries are tagged with the layer they snapshot so terrain and cliff
+  // paint share one stack without corrupting each other.
   function _pushGrassUndo() {
-    _grassUndoStack.push(grassTerrainData.getDensitySnapshot());
+    const cliff = grassBrush.target === "cliff";
+    _grassUndoStack.push({
+      cliff,
+      data: cliff ? grassTerrainData.getCliffDensitySnapshot()
+                  : grassTerrainData.getDensitySnapshot(),
+    });
     if (_grassUndoStack.length > 32) _grassUndoStack.shift();
     _grassRedoStack = [];
   }
 
-  renderer.domElement.addEventListener("mousemove", e => {
-    if (playMode.active || editorMode !== "grass") return;
+  // Resolve the paint position. Terrain paint hits the heightmap surface; cliff
+  // paint raycasts the actual cliff mesh so clicking a cliff top paints the top
+  // (not the terrain hidden behind it). Returns { wx, wz } or null.
+  function _grassPaintXZ(e) {
+    if (grassBrush.target === "cliff") {
+      refreshMouse(e);
+      raycaster.setFromCamera(mouse, camera);
+      const o = raycaster.ray.origin, d = raycaster.ray.direction;
+      const hit = solidCollider.raycast3D(o.x, o.y, o.z, d.x, d.y, d.z, Infinity);
+      if (!hit) { uCursorUV.value.set(-2, -2); return null; }
+      uCursorUV.value.set(
+        (hit.point.x + WORLD_SIZE / 2) / WORLD_SIZE,
+        (hit.point.z + WORLD_SIZE / 2) / WORLD_SIZE,
+      );
+      return { wx: hit.point.x, wz: hit.point.z };
+    }
     refreshMouse(e);
     const hit = getUV();
     uCursorUV.value.set(hit ? hit.u : -2, hit ? hit.v : -2);
-    if (hit && _grassPainting) {
-      const wx = hit.u * WORLD_SIZE - WORLD_SIZE / 2;
-      const wz = hit.v * WORLD_SIZE - WORLD_SIZE / 2;
-      grassTerrainData.stampDensity({
-        cx: wx, cz: wz,
-        radius:   grassBrush.radius,
-        strength: grassBrush.strength,
-        falloff:  grassBrush.falloff,
-        worldSize: WORLD_SIZE,
-        erase:    grassBrush.erase,
-      });
-    }
-  });
+    if (!hit) return null;
+    return { wx: hit.u * WORLD_SIZE - WORLD_SIZE / 2, wz: hit.v * WORLD_SIZE - WORLD_SIZE / 2 };
+  }
 
-  renderer.domElement.addEventListener("mousedown", e => {
-    if (playMode.active || editorMode !== "grass") return;
-    if (e.button !== 0) return;
-    refreshMouse(e);
-    const hit = getUV();
-    if (!hit) return;
-    _pushGrassUndo();
-    _grassPainting = true;
-    const wx = hit.u * WORLD_SIZE - WORLD_SIZE / 2;
-    const wz = hit.v * WORLD_SIZE - WORLD_SIZE / 2;
-    grassTerrainData.stampDensity({
+  function _stampGrass(wx, wz) {
+    const opts = {
       cx: wx, cz: wz,
       radius:   grassBrush.radius,
       strength: grassBrush.strength,
       falloff:  grassBrush.falloff,
       worldSize: WORLD_SIZE,
       erase:    grassBrush.erase,
-    });
+    };
+    if (grassBrush.target === "cliff") grassTerrainData.stampCliffDensity(opts);
+    else                               grassTerrainData.stampDensity(opts);
+  }
+
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "grass") return;
+    const pt = _grassPaintXZ(e);
+    if (pt && _grassPainting) _stampGrass(pt.wx, pt.wz);
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "grass") return;
+    if (e.button !== 0) return;
+    // Cliff paint needs a current cliff-top surface to sit the blades on.
+    if (grassBrush.target === "cliff") ensureFreshCliffSurface();
+    const pt = _grassPaintXZ(e);
+    if (!pt) return;
+    _pushGrassUndo();
+    _grassPainting = true;
+    _stampGrass(pt.wx, pt.wz);
   }, { capture: true });
 
   renderer.domElement.addEventListener("mouseup", e => {
@@ -4910,19 +5059,27 @@ async function main() {
     }
   }, { passive: false, capture: true });
 
-  // Grass undo/redo — patch into existing Ctrl+Z/Y handler
+  // Grass undo/redo — patch into existing Ctrl+Z/Y handler. Each entry carries
+  // whether it snapshots the terrain or the cliff density layer.
+  const _snapGrass  = (cliff) => cliff ? grassTerrainData.getCliffDensitySnapshot()
+                                       : grassTerrainData.getDensitySnapshot();
+  const _restoreGrass = (cliff, data) => cliff
+    ? grassTerrainData.restoreCliffDensitySnapshot(data)
+    : grassTerrainData.restoreDensitySnapshot(data);
   window.addEventListener("keydown", e => {
     if (editorMode !== "grass") return;
     if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "z") {
-      if (_grassUndoStack.length === 0) return;
-      _grassRedoStack.push(grassTerrainData.getDensitySnapshot());
-      grassTerrainData.restoreDensitySnapshot(_grassUndoStack.pop());
+      const entry = _grassUndoStack.pop();
+      if (!entry) return;
+      _grassRedoStack.push({ cliff: entry.cliff, data: _snapGrass(entry.cliff) });
+      _restoreGrass(entry.cliff, entry.data);
       e.stopImmediatePropagation();
     }
     if (e.ctrlKey && (e.shiftKey && e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
-      if (_grassRedoStack.length === 0) return;
-      _grassUndoStack.push(grassTerrainData.getDensitySnapshot());
-      grassTerrainData.restoreDensitySnapshot(_grassRedoStack.pop());
+      const entry = _grassRedoStack.pop();
+      if (!entry) return;
+      _grassUndoStack.push({ cliff: entry.cliff, data: _snapGrass(entry.cliff) });
+      _restoreGrass(entry.cliff, entry.data);
       e.stopImmediatePropagation();
     }
   }, { capture: true });

@@ -230,6 +230,16 @@ export class SolidCollider {
   /** Compat no-op — this collider resyncs automatically from store.gen. */
   invalidate() {}
 
+  /** Union of all solid instance world AABBs, or null if none. For cheaply
+   *  skipping empty regions before per-texel raycasts (e.g. cliff-grass bake). */
+  worldBounds() {
+    this._sync();
+    if (this._instances.length === 0) return null;
+    const box = new THREE.Box3().makeEmpty();
+    for (const inst of this._instances) box.union(inst.worldBox);
+    return box;
+  }
+
   // ── Rays ────────────────────────────────────────────────────────────────────
 
   /**
