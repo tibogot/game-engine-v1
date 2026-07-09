@@ -284,8 +284,86 @@ export function createRectangleGeometry(w, h, segX, segY, shape, pivotEdge) {
   return geo;
 }
 
-/** Card geometry from a pine preset's rect/grid/shape blocks (clamps + bendY seg guard). */
-export function createPineCardGeometry(rect, grid, shape) {
+/**
+ * Trimmed pine card from a convex mask polygon (leafCardTrim's local space:
+ * x,y ∈ [-0.5, 0.5], uv = p + 0.5, CCW). The polygon lives in MASK-UV space;
+ * the pine card's uv is the plane uv quarter-turned (rotateGeometryUV(geo, 1)
+ * maps plane (u,v) → final (v, 1−u)), so a mask point (mu, mv) sits at plane
+ * position x = −(mv−0.5)·w, y = (mu−0.5)·h. The polygon is mapped there, run
+ * through the SAME deform + pivot + rotate as the grid card, and its final uv
+ * is the mask uv directly (no rotateGeometryUV pass needed).
+ *
+ * Trade: 6 triangles instead of segX·segY·2, and the bend/skew deform is
+ * sampled at the 8 rim verts only (silhouette keeps the bow; the interior
+ * flattens slightly). Leaf rendering is fill-bound, so this is a win twice.
+ */
+function createTrimmedPineCardGeometry(rect, shape, polygon) {
+  const w = Math.max(0.05, rect.width);
+  const h = Math.max(0.05, rect.height);
+  const hw = w * 0.5;
+  const hh = h * 0.5;
+  const { bendX, bendY, skewX, skewY, taperX } = shape;
+  const n = polygon.length;
+  const pos = new Float32Array(n * 3);
+  const uv = new Float32Array(n * 2);
+
+  for (let i = 0; i < n; i++) {
+    const px = polygon[i][0];
+    const py = polygon[i][1];
+    uv[i * 2] = px + 0.5;
+    uv[i * 2 + 1] = py + 0.5;
+    // Mask space → plane space (inverse of the quarter-turn uv rotation).
+    let x = -py * w;
+    let y = px * h;
+    const nx = hw > 1e-6 ? x / hw : 0;
+    const ny = hh > 1e-6 ? y / hh : 0;
+    x *= 1 + taperX * ny;
+    x += skewX * ny * hh;
+    y += skewY * nx * hw;
+    let z = 0;
+    z += bendX * nx * nx;
+    z += bendY * ny * ny;
+    pos[i * 3] = x;
+    pos[i * 3 + 1] = y;
+    pos[i * 3 + 2] = z;
+  }
+
+  let edge = rect.pivotEdge ?? "auto";
+  if (edge === "auto") edge = w >= h ? "left" : "bottom";
+  let ox = 0;
+  let oy = 0;
+  switch (edge) {
+    case "bottom": oy = hh; break;
+    case "top": oy = -hh; break;
+    case "left": ox = hw; break;
+    case "right": ox = -hw; break;
+    default: ox = hw;
+  }
+  for (let i = 0; i < n; i++) {
+    pos[i * 3] += ox;
+    pos[i * 3 + 1] += oy;
+  }
+
+  const idx = [];
+  for (let i = 1; i < n - 1; i++) idx.push(0, i, i + 1);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.rotateY(Math.PI / 2);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Card geometry from a pine preset's rect/grid/shape blocks (clamps + bendY
+ * seg guard). Pass `trimPolygon` (from leafCardTrim.computeLeafTrimPolygon)
+ * to build the fill-trimmed variant instead of the full grid rectangle.
+ */
+export function createPineCardGeometry(rect, grid, shape, trimPolygon = null) {
+  if (trimPolygon && trimPolygon.length >= 3) {
+    return createTrimmedPineCardGeometry(rect, shape, trimPolygon);
+  }
   const w = Math.max(0.05, rect.width);
   const h = Math.max(0.05, rect.height);
   const sx = Math.max(1, Math.round(grid.segX));
@@ -542,6 +620,7 @@ export function buildPineFoliageLods(pine, options = {}) {
   const grid = options.grid ?? { segX: 4, segY: 2 };
   const shape =
     options.shape ?? { bendX: 0, bendY: 0, skewX: 0, skewY: 0, taperX: 0 };
+  const trimPolygon = options.trimPolygon ?? null;
 
   // Gather LOD0 placements once; tiers subset by the same logical stride the
   // editor uses (keepFraction), so LOD1/LOD2 are true subsets of LOD0.
@@ -569,7 +648,7 @@ export function buildPineFoliageLods(pine, options = {}) {
     rands[i * 2 + 1] = rng();
   }
 
-  const cardGeo = createPineCardGeometry(rect, grid, shape);
+  const cardGeo = createPineCardGeometry(rect, grid, shape, trimPolygon);
   const dummy = new THREE.Object3D();
 
   // (indices into placements, scale multiplier) per tier — LOD2 mirrors LOD1.

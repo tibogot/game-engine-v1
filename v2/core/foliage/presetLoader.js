@@ -5,10 +5,10 @@
  */
 import * as THREE from "three";
 import { createFoliageMaterial, setFoliageTexture, applyPresetMaterial, updateFoliageBounds } from "../../render/foliage/foliageMaterial.js";
-import { createTrunkMaterial } from "../../render/foliage/trunkMaterial.js";
+import { createTrunkMaterial, createPineBarkMaterial } from "../../render/foliage/trunkMaterial.js";
 import { sampleAllClusters, computeFoliageBounds, buildAllFoliageLods } from "./foliageSampler.js";
 import { computeLeafTrimPolygon, buildLeafCardGeometry } from "./leafCardTrim.js";
-import { buildPineFoliageLods, computePineFoliageBounds } from "./pinePlacement.js";
+import { buildPineFoliageLods, computePineFoliageBounds, buildPineTrunkGeometry } from "./pinePlacement.js";
 import { loadTreeGlbFromUrl } from "./glbLoader.js";
 
 /**
@@ -43,11 +43,11 @@ export async function loadFoliagePreset(presetJson) {
   // preset carries the grid config + cell but NOT the atlas image path, so we use
   // a convention (textures/leaves/leaf_atlas.png), overridable via atlas.path.
   const atlas = presetJson.atlas;
-  let useAtlas = !!(atlas && atlas.enabled);
+  const useAtlas = !!(atlas && atlas.enabled);
   const _size = (atlas && atlas.size) || 1024;
   const _cellPx = (atlas && atlas.cellPx) || 256;
   const _gutter = (atlas && atlas.gutter) || 12;
-  let atlasGrid = useAtlas
+  const atlasGrid = useAtlas
     ? [
         atlas.cols || 4,
         _cellPx / _size,
@@ -55,19 +55,14 @@ export async function loadFoliagePreset(presetJson) {
         (_cellPx - 2 * _gutter) / _size,
       ]
     : undefined;
-  let atlasCell = useAtlas ? (atlas.cell ?? 0) : 0;
+  const atlasCell = useAtlas ? (atlas.cell ?? 0) : 0;
 
-  // Pine leaf atlas (gutterless N×N grid in the preset's own texture): the
-  // editor picks a random cell per card, but the shared material samples ONE
-  // uniform cell per slot — cell 0 until per-instance variants are supported.
+  // Pine leaf atlas: a gutterless cols×rows grid inside the preset's own leaf
+  // texture, with a cell picked per card (see foliageMaterial's pine branch).
+  // Independent of the shared arborist atlas above — a preset uses one or the
+  // other, never both.
   const _pineMat = pineBlock ? (presetJson.params?.material || {}) : {};
   const pineAtlas = !!pineBlock && _pineMat.textureMode === "atlas";
-  if (pineAtlas) {
-    const cols = Math.max(1, Math.round(_pineMat.atlasCols ?? 2));
-    useAtlas = true;
-    atlasGrid = [cols, 1 / cols, 0, 1 / cols];
-    atlasCell = 0;
-  }
 
   const foliageMat = createFoliageMaterial({
     ...matOpts,
@@ -76,13 +71,15 @@ export async function loadFoliagePreset(presetJson) {
     useAtlas,
     atlasGrid,
     atlasCell,
+    pineAtlas,
+    pineAtlasCols: pineAtlas ? Math.max(1, Math.round(_pineMat.atlasCols ?? 2)) : 2,
+    pineAtlasRows: pineAtlas ? Math.max(1, Math.round(_pineMat.atlasRows ?? 2)) : 2,
   });
   applyPresetMaterial(foliageMat, presetJson);
 
-  const _leafTexPath =
-    useAtlas && !pineAtlas
-      ? atlas.path || "textures/leaves/leaf_atlas.png"
-      : presetJson.leafTexture;
+  const _leafTexPath = useAtlas
+    ? atlas.path || "textures/leaves/leaf_atlas.png"
+    : presetJson.leafTexture;
   if (_leafTexPath) {
     const texPath = _leafTexPath;
     // Pine presets may embed the leaf texture as a data URL — load it as-is.
@@ -102,11 +99,11 @@ export async function loadFoliagePreset(presetJson) {
     }
     if (tex) {
       setFoliageTexture(foliageMat, tex);
-      // The atlas always stores the mask in RED (arborist forces this). Its
-      // transparent gutters fool setFoliageTexture's auto-detect into picking
-      // alpha — which is opaque inside each cell → solid quads. Force red.
-      // (Pine atlases are normal RGBA sheets — keep the auto-detected channel.)
-      if (useAtlas && !pineAtlas) foliageMat.uniforms.maskInAlpha.value = 0;
+      // The shared atlas always stores the mask in RED (arborist forces this).
+      // Its transparent gutters fool setFoliageTexture's auto-detect into
+      // picking alpha — which is opaque inside each cell → solid quads. Force
+      // red. (Pine sheets are normal RGBA — keep the auto-detected channel.)
+      if (useAtlas) foliageMat.uniforms.maskInAlpha.value = 0;
     } else {
       console.warn(`[Foliage] Could not load leaf texture "${texPath}" — foliage will render without texture`);
     }
@@ -130,11 +127,51 @@ export async function loadFoliagePreset(presetJson) {
     }
     const tScale = presetJson.trunkScale ?? 1;
     const invS = tScale > 0.001 ? 1 / tScale : 1;
+
+    // Fill trim: fit the octagon to the pine mask so cards rasterize far
+    // fewer alpha-discarded pixels. With the per-card atlas the polygon must
+    // cover EVERY cell a card might draw, so the cells are composited
+    // (lighten ≈ per-pixel max) into one union mask first.
+    let trimPolygon = null;
+    {
+      const img = foliageMat.leafMapNode.value?.image;
+      if (img) {
+        let trimSrc = img;
+        if (pineAtlas) {
+          try {
+            const cols = Math.max(1, Math.round(_pineMat.atlasCols ?? 2));
+            const rows = Math.max(1, Math.round(_pineMat.atlasRows ?? 2));
+            const S = 64;
+            const cv = document.createElement("canvas");
+            cv.width = cv.height = S;
+            const ctx = cv.getContext("2d");
+            ctx.globalCompositeOperation = "lighten";
+            const iw = img.width ?? img.naturalWidth;
+            const ih = img.height ?? img.naturalHeight;
+            for (let r = 0; r < rows; r++) {
+              for (let c = 0; c < cols; c++) {
+                ctx.drawImage(
+                  img,
+                  (c / cols) * iw, (r / rows) * ih, iw / cols, ih / rows,
+                  0, 0, S, S,
+                );
+              }
+            }
+            trimSrc = cv;
+          } catch (_) { /* tainted canvas etc. — trim against the full sheet */ }
+        }
+        trimPolygon = computeLeafTrimPolygon(trimSrc, {
+          maskInAlpha: foliageMat.uniforms.maskInAlpha.value > 0.5,
+        });
+      }
+    }
+
     const lods = buildPineFoliageLods(pineBlock, {
       trunkScale: tScale,
       rect: pineBlock.rect,
       grid: pineBlock.grid,
       shape: pineBlock.shape,
+      trimPolygon,
     });
     const bounds = computePineFoliageBounds(
       pineBlock,
@@ -253,6 +290,60 @@ async function loadTrunkGlb(filename) {
   return null;
 }
 
+const _identity = new THREE.Matrix4();
+
+/**
+ * Build a pine trunk straight from the preset's `pine.trunk` params — the same
+ * geometry the editor shows — so a pine preset needs no baked trunk GLB. LOD1
+ * halves the radial segment count (silhouette curve is kept: the spine segments
+ * are what make a bent trunk read as bent). Both tiers share one bark material,
+ * which keeps them instancing-friendly and their bark identical across LODs.
+ *
+ * Returns { lod0, lod1 } submesh arrays in the shape glbLoader emits, or nulls
+ * when the preset hides its trunk (ferns / bushes / ground plants).
+ */
+function buildPineTrunkSubmeshes(pineBlock) {
+  const trunk = pineBlock.trunk;
+  if (!trunk || trunk.visible === false) return { lod0: null, lod1: null };
+
+  const { material } = createPineBarkMaterial(trunk);
+  const submesh = (geometry) => [{
+    geometry,
+    material,
+    localMatrix: _identity.clone(),
+  }];
+
+  const radialSegs = Math.max(6, Math.round(trunk.radialSegs ?? 20));
+  return {
+    lod0: submesh(buildPineTrunkGeometry(trunk)),
+    lod1: submesh(
+      buildPineTrunkGeometry({ ...trunk, radialSegs: Math.max(6, Math.round(radialSegs / 2)) }),
+    ),
+  };
+}
+
+/**
+ * Resolve a preset's trunk tiers: baked GLB when `trunkFile` names one,
+ * otherwise procedural geometry from a pine preset's own trunk params.
+ */
+async function resolveTrunkSubmeshes(json) {
+  if (!json.trunkFile) {
+    const pineBlock = getPineBlock(json);
+    if (pineBlock) {
+      const { lod0, lod1 } = buildPineTrunkSubmeshes(pineBlock);
+      return [lod0, lod1];
+    }
+  }
+  const [lod0, lod1] = await Promise.all([
+    loadTrunkGlb(json.trunkFile),
+    json.trunkLod1File ? loadTrunkGlb(json.trunkLod1File) : Promise.resolve(null),
+  ]);
+  if (json.trunkMaterial && !json.trunkMaterial.useGlb) {
+    applyProceduralTrunk(json.trunkMaterial, lod0, lod1);
+  }
+  return [lod0, lod1];
+}
+
 const PRESET_SEARCH_PATHS = [
   "../tree-presets/",
   "tree-presets/",
@@ -274,15 +365,10 @@ export async function loadFullPresetFromUrl(filename) {
   }
   if (!json) throw new Error(`Preset "${filename}" not found in search paths`);
 
-  const [foliagePreset, trunkSubmeshes, trunkLod1Submeshes] = await Promise.all([
+  const [foliagePreset, [trunkSubmeshes, trunkLod1Submeshes]] = await Promise.all([
     loadFoliagePreset(json),
-    loadTrunkGlb(json.trunkFile),
-    json.trunkLod1File ? loadTrunkGlb(json.trunkLod1File) : Promise.resolve(null),
+    resolveTrunkSubmeshes(json),
   ]);
-
-  if (json.trunkMaterial && !json.trunkMaterial.useGlb) {
-    applyProceduralTrunk(json.trunkMaterial, trunkSubmeshes, trunkLod1Submeshes);
-  }
 
   return { foliagePreset, trunkSubmeshes, trunkLod1Submeshes, json };
 }
@@ -298,15 +384,10 @@ export function loadFullPresetFromFile(file) {
       try {
         const json = JSON.parse(ev.target.result);
 
-        const [foliagePreset, trunkSubmeshes, trunkLod1Submeshes] = await Promise.all([
+        const [foliagePreset, [trunkSubmeshes, trunkLod1Submeshes]] = await Promise.all([
           loadFoliagePreset(json),
-          loadTrunkGlb(json.trunkFile),
-          json.trunkLod1File ? loadTrunkGlb(json.trunkLod1File) : Promise.resolve(null),
+          resolveTrunkSubmeshes(json),
         ]);
-
-        if (json.trunkMaterial && !json.trunkMaterial.useGlb) {
-          applyProceduralTrunk(json.trunkMaterial, trunkSubmeshes, trunkLod1Submeshes);
-        }
 
         resolve({ foliagePreset, trunkSubmeshes, trunkLod1Submeshes, json });
       } catch (e) {

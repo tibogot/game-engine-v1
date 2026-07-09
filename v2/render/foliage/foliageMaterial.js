@@ -62,7 +62,17 @@ export function createFoliageMaterial(opts = {}) {
                     opts.atlasGrid?.[3] ?? 232 / 1024,
                   )),
     atlasCell:    uniform(opts.atlasCell ?? 0),
+    // Pine-editor leaf atlas — a DIFFERENT convention from the arborist one
+    // above: cols×rows (not square), no gutters, and cell 0 is the BOTTOM-left
+    // (V origin), not the top-left. Rather than bend one into the other, pine
+    // presets take their own branch. The cell is picked per card, so a single
+    // tree shows every needle variant on the sheet.
+    pineAtlas:     uniform(opts.pineAtlas ? 1.0 : 0.0),
+    pineAtlasCols: uniform(opts.pineAtlasCols ?? 2),
+    pineAtlasRows: uniform(opts.pineAtlasRows ?? 2),
   };
+
+  const aRand = attribute("aRand", "vec2");
 
   const leafTex = new THREE.Texture();
   // Atlas cell-UV remap (identical math to arborist). useAtlas=0 leaves uv() as-is.
@@ -73,12 +83,29 @@ export function createFoliageMaterial(opts = {}) {
   const _agOx = _agCol.mul(u.atlasGrid.y).add(u.atlasGrid.z);
   const _agOy = _agCols.sub(1).sub(_agRow).mul(u.atlasGrid.y).add(u.atlasGrid.z);
   const _cellUv = _baseUv.mul(u.atlasGrid.w).add(vec2(_agOx, _agOy));
-  const _sampleUv = mix(_baseUv, _cellUv, u.useAtlas);
+
+  // Per-card pine variant. The editor keys this off instanceIndex, which we
+  // cannot reuse: our LOD1/LOD2 tiers are a stride-2 SUBSET of LOD0, so a card's
+  // index — and therefore its needle cell — would change as the tree crosses a
+  // LOD distance, popping the texture. aRand is baked per card and copied into
+  // every tier, so it is stable across LODs. Hash it first: aRand.x drives the
+  // wind phase and aRand.y the colour variation, and using either raw would
+  // visibly tie "which needle sprite" to "how this card sways/shades".
+  const _pineHash = fract(sin(aRand.x.mul(127.1).add(aRand.y.mul(311.7))).mul(43758.5453));
+  const _pineIdx = floor(_pineHash.mul(u.pineAtlasCols.mul(u.pineAtlasRows)));
+  const _pineRow = floor(_pineIdx.div(u.pineAtlasCols));
+  const _pineCol = _pineIdx.sub(_pineRow.mul(u.pineAtlasCols));
+  const _pineInvC = float(1).div(u.pineAtlasCols);
+  const _pineInvR = float(1).div(u.pineAtlasRows);
+  const _pineUv = vec2(
+    _baseUv.x.mul(_pineInvC).add(_pineCol.mul(_pineInvC)),
+    _baseUv.y.mul(_pineInvR).add(_pineRow.mul(_pineInvR)),
+  );
+
+  const _sampleUv = mix(mix(_baseUv, _cellUv, u.useAtlas), _pineUv, u.pineAtlas);
   const leafMapNode = texture(leafTex, _sampleUv);
   // Selects mask channel based on the loaded texture's format.
   const leafMaskCh = mix(leafMapNode.r, leafMapNode.a, u.maskInAlpha);
-
-  const aRand = attribute("aRand", "vec2");
   // Per-instance leaf center (world space — written by the chunked renderer).
   const aLeafCenter = attribute("aLeafCenter", "vec3");
   const instanceCenterW = modelWorldMatrix.mul(vec4(aLeafCenter, 1)).xyz;
