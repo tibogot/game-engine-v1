@@ -832,6 +832,11 @@ export class RiverSystemGPU {
           // A river is shallow: absorption has to bite over ~2 m, not 20.
           depthDistance: 3,
           shoreFade: 0.05,
+          // A river sits in a trench, so its banks are always close by and on
+          // screen — SSR pays off more here than on an open lake.
+          ssrEnabled: rp.ssrEnabled ?? true,
+          ssrStrength: rp.ssrStrength ?? 1,
+          ssrMaxDistance: 60,
         },
       });
     }
@@ -870,7 +875,11 @@ export class RiverSystemGPU {
 
     if (this._depthWater) {
       this._depthWater.uniforms.ribbonWidth.value = this._ribbonHalfWidth() * 2;
-      this._depthWater.syncParams({ flowSpeed: p.flowSpeed });
+      this._depthWater.syncParams({
+        flowSpeed:   p.flowSpeed,
+        ssrEnabled:  p.ssrEnabled,
+        ssrStrength: p.ssrStrength,
+      });
     }
 
     const mat = this._activeMaterial();

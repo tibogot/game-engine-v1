@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "mcp__chrome-devtools__evaluate_script"
+      "mcp__chrome-devtools__evaluate_script",
+      "Bash(node --check v3/render/water/lakeMaterial.js)"
     ]
   }
 }

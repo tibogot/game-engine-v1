@@ -26,6 +26,14 @@ export function createLakeToolState() {
       fresnelScale:        0.5,
       skyReflectIntensity: 1.0,
 
+      // Screen-space reflections. Reuse the depth + colour grab the refraction
+      // already pays for. Disabling branches the march out entirely.
+      ssrEnabled:     true,
+      ssrStrength:    1.0,
+      ssrMaxDistance: 120,
+      ssrThickness:   1.5,
+      ssrEdgeFade:    0.15,
+
       // Beer-Lambert. Red absorbs fastest — that is what turns deep water teal.
       absorptionR:       0.35,
       absorptionG:       0.1,
@@ -93,6 +101,12 @@ export function lakeParamsFromToolState(lp) {
     refractionStrength:  lp.refractionStrength,
     fresnelScale:        lp.fresnelScale,
     skyReflectIntensity: lp.skyReflectIntensity,
+
+    ssrEnabled:     lp.ssrEnabled,
+    ssrStrength:    lp.ssrStrength,
+    ssrMaxDistance: lp.ssrMaxDistance,
+    ssrThickness:   lp.ssrThickness,
+    ssrEdgeFade:    lp.ssrEdgeFade,
 
     absorption:        [lp.absorptionR, lp.absorptionG, lp.absorptionB],
     absorptionScale:   lp.absorptionScale,

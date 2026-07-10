@@ -193,6 +193,18 @@ export function buildLakePanel(app) {
     _slider(optics, lp, "fresnelScale",        { label: "Fresnel scale", min: 0, max: 2, step: 0.01, onChange: onM });
     _slider(optics, lp, "skyReflectIntensity", { label: "Sky reflect", min: 0, max: 3, step: 0.01, onChange: onM });
 
+    const ssr = _section(panel, "Screen-space reflections", false);
+    _hint(ssr, "Reflects whatever is on screen — banks, mountains, trees — by marching the reflected ray against the depth buffer the refraction already grabbed. Off-screen rays fall back to the sky gradient. Turning this off removes the march entirely, at no cost.");
+    _toggle(ssr, lp, "ssrEnabled",     { label: "Enabled", onChange: onM });
+    _slider(ssr, lp, "ssrStrength",    { label: "Strength", min: 0, max: 1, step: 0.01, onChange: onM,
+      hint: "0 = sky gradient only, 1 = full screen-space hit colour." });
+    _slider(ssr, lp, "ssrMaxDistance", { label: "Max distance", min: 5, max: 400, step: 1, onChange: onM,
+      hint: "Metres the ray travels before giving up. Also sets the step size, so shorter is sharper." });
+    _slider(ssr, lp, "ssrThickness",   { label: "Thickness", min: 0.05, max: 10, step: 0.05, onChange: onM,
+      hint: "Assumed depth of a surface. Too small and rays tunnel through thin geometry; too large and they snap onto surfaces they should pass behind." });
+    _slider(ssr, lp, "ssrEdgeFade",    { label: "Edge fade", min: 0, max: 0.5, step: 0.005, onChange: onM,
+      hint: "Fades reflections near the screen border so they don't pop as geometry leaves the frame." });
+
     const glint = _section(panel, "Sun glint", false);
     _color (glint, lp, "sunColor",       { label: "Sun color", onChange: onM });
     _slider(glint, lp, "shininess",      { label: "Shininess", min: 1, max: 2000, step: 1, onChange: onM });

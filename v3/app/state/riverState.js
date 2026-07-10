@@ -36,6 +36,9 @@ export function createRiverToolState() {
        * water breaches the channel rim and floats on the surrounding ground.
        */
       waterFreeboard: 0.4,
+      /** Depth style only: screen-space reflections (banks, trees). Off = no march, no cost. */
+      ssrEnabled: true,
+      ssrStrength: 1.0,
       shallowColor: "#4fd8c2",
       deepColor: "#14526e",
       highlightColor: "#cdf3ff",

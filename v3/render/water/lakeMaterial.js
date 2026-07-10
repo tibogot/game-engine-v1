@@ -49,13 +49,19 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
 import {
-  Fn, If, uniform, float, vec2, vec3,
+  Fn, If, Break, uniform, float, vec2, vec3, vec4,
   mix, smoothstep, step, dot, cross, exp, pow, max, min, abs, saturate,
   floor, fract, sin, length, Loop, uv, attribute,
   normalize, reflect, texture, positionWorld, positionView, cameraPosition,
-  cameraNear, cameraFar, screenUV, Discard,
+  cameraNear, cameraFar, cameraViewMatrix, cameraProjectionMatrix,
+  screenUV, Discard,
   viewportDepthTexture, viewportSharedTexture, perspectiveDepthToViewZ,
 } from "three/tsl";
+
+/** Ray-march steps for SSR. Compile-time: TSL Loop counts are unrolled. */
+const SSR_STEPS  = 24;
+/** Binary-search refinements once a step has crossed the depth buffer. */
+const SSR_REFINE = 4;
 
 // ─── Noise helpers (lifted from v2/core/legacy/lake-shader.js) ────────────────
 
@@ -155,6 +161,26 @@ export const LAKE_DEFAULTS = {
   skyZenithColor:     "#3a6ea5",
   skyHorizonColor:    "#bcd4e6",
   skyReflectIntensity: 1.0,
+
+  // ── Screen-space reflections ───────────────────────────────────────────────
+  // Marches the reflected ray against the scene depth buffer we already grabbed
+  // for refraction, so the inputs are free — only the march costs. Reflects
+  // whatever is ON SCREEN (banks, mountains, trees) and falls back to the sky
+  // gradient anywhere the ray misses, leaves the frame, or hits nothing.
+  // Disabling it branches the whole march out; it then costs literally nothing.
+  ssrEnabled:  true,
+  /** 0 = sky gradient only, 1 = full screen-space hit colour. */
+  ssrStrength: 1.0,
+  /** Metres the ray travels before giving up. Also sets the step size. */
+  ssrMaxDistance: 120,
+  /**
+   * How thick a depth-buffer surface is assumed to be, in metres. Too small and
+   * the ray tunnels through thin geometry; too large and it snaps onto surfaces
+   * it should have passed behind.
+   */
+  ssrThickness: 1.5,
+  /** Reflections fade out this far (in UV) from the screen edge, hiding the cutoff. */
+  ssrEdgeFade: 0.15,
 
   // Beer-Lambert absorption. Red absorbs fastest, which is what pushes deep
   // water toward teal; this is the single knob that makes it read as water.
@@ -268,6 +294,12 @@ export function createLakeMaterial({ normalMap, params = {}, uvMode = "world", r
     skyZenithColor:      uniform(new THREE.Color(p.skyZenithColor)),
     skyHorizonColor:     uniform(new THREE.Color(p.skyHorizonColor)),
     skyReflectIntensity: uniform(p.skyReflectIntensity),
+
+    ssrEnabled:     uniform(p.ssrEnabled ? 1 : 0),
+    ssrStrength:    uniform(p.ssrStrength),
+    ssrMaxDistance: uniform(p.ssrMaxDistance),
+    ssrThickness:   uniform(p.ssrThickness),
+    ssrEdgeFade:    uniform(p.ssrEdgeFade),
 
     absorption:        uniform(new THREE.Vector3(...p.absorption)),
     absorptionScale:   uniform(p.absorptionScale),
@@ -411,12 +443,95 @@ export function createLakeMaterial({ normalMap, params = {}, uvMode = "world", r
     const rayDir       = normalize(positionWorld.sub(cameraPosition));
     const verticalDepth = waterThickness.mul(rayDir.y.abs()).toVar();
 
-    // ── 4. Reflection: analytical sky gradient (note 7) ────────────────────
+    // ── 4. Reflection: sky gradient, overlaid with a screen-space march ─────
     const viewDir        = normalize(cameraPosition.sub(positionWorld)).toVar();
     const reflectVec     = reflect(viewDir.negate(), normal);
     const skyT           = saturate(reflectVec.y.abs());
-    const reflectedColor = mix(u.skyHorizonColor, u.skyZenithColor, skyT)
+    const skyColor       = mix(u.skyHorizonColor, u.skyZenithColor, skyT)
       .mul(u.skyReflectIntensity);
+
+    const reflectedColor = skyColor.toVar();
+
+    // The depth buffer was copied BEFORE any water drew, so it holds only opaque
+    // geometry. That is exactly what we want to reflect, and it means the water
+    // can never reflect itself.
+    If(u.ssrEnabled.greaterThan(0), () => {
+      const vsNrm = cameraViewMatrix.mul(vec4(normal, 0)).xyz.normalize().toVar();
+      // Start a hair off the surface, or shallow water self-intersects immediately
+      // at the shoreline and paints a hard rim.
+      const vsPos = positionView.add(vsNrm.mul(0.05)).toVar();
+      const vsDir = reflect(normalize(vsPos), vsNrm).normalize().toVar();
+
+      const stepLen = u.ssrMaxDistance.div(float(SSR_STEPS)).toVar();
+      const hitUv   = vec2(0).toVar();
+      const crossed = float(0).toVar();
+      // Refinement bracket: last t known in front of geometry, first t known behind.
+      const tNear   = float(0).toVar();
+      const tFar    = float(0).toVar();
+
+      Loop(SSR_STEPS, ({ i }) => {
+        const t = stepLen.mul(float(i).add(1)).toVar();
+        const p = vsPos.add(vsDir.mul(t));
+
+        // Behind the near plane — nothing there to sample.
+        If(p.z.greaterThan(cameraNear.negate()), () => { Break(); });
+
+        const clip = cameraProjectionMatrix.mul(vec4(p, 1));
+        const suv  = clip.xy.div(clip.w).mul(0.5).add(0.5).toVar();
+
+        // Off screen: SSR has no information, so stop and keep the sky.
+        If(suv.x.lessThan(0).or(suv.x.greaterThan(1))
+          .or(suv.y.lessThan(0)).or(suv.y.greaterThan(1)), () => { Break(); });
+
+        // Only test that the ray has passed BEHIND the depth buffer. Requiring the
+        // coarse step to also land within `thickness` is what produces salt-and-
+        // pepper noise: at grazing angles a 5 m step jumps clean over that window,
+        // so most rays miss and a few land, at random. Bracket the crossing here,
+        // refine it below, and apply the thickness test to the refined hit.
+        If(p.z.negate().sub(sceneDistAt(suv)).greaterThan(0), () => {
+          crossed.assign(1);
+          hitUv.assign(suv);
+          tNear.assign(t.sub(stepLen));
+          tFar.assign(t);
+          Break();
+        });
+      });
+
+      If(crossed.greaterThan(0), () => {
+        // Binary-search the bracket so the hit lands on the surface rather than on
+        // whichever coarse step happened to overshoot it.
+        const finalDiff = float(0).toVar();
+        Loop(SSR_REFINE, () => {
+          const tMid = tNear.add(tFar).mul(0.5).toVar();
+          const p    = vsPos.add(vsDir.mul(tMid));
+          const clip = cameraProjectionMatrix.mul(vec4(p, 1));
+          const suv  = clip.xy.div(clip.w).mul(0.5).add(0.5);
+          const diff = p.z.negate().sub(sceneDistAt(suv)).toVar();
+          If(diff.greaterThan(0), () => {
+            tFar.assign(tMid);
+            hitUv.assign(suv);
+            finalDiff.assign(diff);
+          }).Else(() => {
+            tNear.assign(tMid);
+          });
+        });
+
+        // Now the thickness test means what it says: reject hits that ended up far
+        // behind the surface, i.e. the ray tunnelled past a silhouette edge.
+        const valid = float(1).sub(smoothstep(u.ssrThickness, u.ssrThickness.mul(2), finalDiff));
+
+        // Fade near the screen border, where the reflection would pop as geometry
+        // leaves the frame; and fade rays aimed back at the camera, which SSR
+        // fundamentally cannot resolve.
+        const e = u.ssrEdgeFade.max(1e-4);
+        const edge = smoothstep(0, e, hitUv.x).mul(smoothstep(0, e, float(1).sub(hitUv.x)))
+          .mul(smoothstep(0, e, hitUv.y)).mul(smoothstep(0, e, float(1).sub(hitUv.y)));
+        const backfacing = saturate(vsDir.z.negate().mul(4));
+
+        const w = valid.mul(edge).mul(backfacing).mul(u.ssrStrength).clamp();
+        reflectedColor.assign(mix(skyColor, sceneColorTex.sample(hitUv).rgb, w));
+      });
+    });
 
     // ── 5. Fresnel (Schlick, F0 = 0.02 for water) ─────────────────────────
     const cosTheta = saturate(dot(normal, viewDir));
@@ -518,6 +633,11 @@ export function createLakeMaterial({ normalMap, params = {}, uvMode = "world", r
     if (sp.refractionStrength!= null) u.refractionStrength.value= sp.refractionStrength;
     if (sp.fresnelScale      != null) u.fresnelScale.value      = sp.fresnelScale;
     if (sp.skyReflectIntensity != null) u.skyReflectIntensity.value = sp.skyReflectIntensity;
+    if (sp.ssrEnabled        != null) u.ssrEnabled.value        = sp.ssrEnabled ? 1 : 0;
+    if (sp.ssrStrength       != null) u.ssrStrength.value       = sp.ssrStrength;
+    if (sp.ssrMaxDistance    != null) u.ssrMaxDistance.value    = sp.ssrMaxDistance;
+    if (sp.ssrThickness      != null) u.ssrThickness.value      = sp.ssrThickness;
+    if (sp.ssrEdgeFade       != null) u.ssrEdgeFade.value       = sp.ssrEdgeFade;
     if (sp.skyZenithColor    != null) _c(sp.skyZenithColor,  u.skyZenithColor.value);
     if (sp.skyHorizonColor   != null) _c(sp.skyHorizonColor, u.skyHorizonColor.value);
     if (sp.absorption        != null) u.absorption.value.set(...sp.absorption);

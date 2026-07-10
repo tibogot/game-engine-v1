@@ -223,6 +223,20 @@ function _buildRiverControls(panel, rp, app, prefix) {
       : { Basic: "Basic", "Stylized v1": "Stylized" },
     onChange: () => app[`${prefix}Changed`]?.(),
   });
+  if (prefix === "river2") {
+    _toggle(matBody, rp, "ssrEnabled", {
+      label: "Screen-space reflections",
+      onChange: matChanged,
+    });
+    _slider(matBody, rp, "ssrStrength", {
+      label: "SSR strength",
+      hint: "Depth style only. 0 = sky gradient only, 1 = full screen-space hit colour.",
+      min: 0,
+      max: 1,
+      step: 0.01,
+      onChange: matChanged,
+    });
+  }
   _color(matBody, rp, "shallowColor", { label: "Shallow", onChange: matChanged });
   _color(matBody, rp, "deepColor", { label: "Deep", onChange: matChanged });
   _color(matBody, rp, "highlightColor", { label: "Highlight", onChange: matChanged });
