@@ -3,11 +3,10 @@ import {
   clamp,
   color,
   float,
-  Fn,
   fwidth,
   mix,
   mod,
-  mrt,
+  output,
   select,
   smoothstep,
   step,
@@ -16,6 +15,7 @@ import {
   uniform,
   uv,
   vec2,
+  vec4,
 } from "three/tsl";
 
 /**
@@ -104,6 +104,31 @@ export function makeTextTexture(str) {
 export function clearLedTextCache() {
   for (const { texture: t } of _textCache.values()) t.dispose();
   _textCache.clear();
+}
+
+// three r184: when a scene renders into a render target while no renderer-level
+// MRT is set, a material's mrtNode becomes the ENTIRE fragment output, and
+// MRTNode maps members to attachments by texture *name*. On a plain RT (env
+// probes, offscreen bakes, thumbnail targets) no attachment is called
+// "emissive", so the stock mrt() node emits a zero-member WGSL output struct —
+// "structures must have at least one member", invalid pipeline. This subclass
+// keeps the stock behaviour whenever any attachment name matches and otherwise
+// collapses to the material's regular `output`, like a normal material.
+class LedBloomMRTNode extends THREE.MRTNode {
+  static get type() {
+    return "LedBloomMRTNode";
+  }
+
+  setup(builder) {
+    const textures = builder.renderer.getRenderTarget()?.textures;
+    const anyNamed =
+      !!textures && textures.some((t) => this.outputNodes[t.name] !== undefined);
+    if (anyNamed) return super.setup(builder);
+    this.members = [vec4(output)];
+    // OutputStructNode defines no setup of its own — this is exactly what
+    // MRTNode's own `super.setup()` resolves to.
+    return THREE.Node.prototype.setup.call(this, builder);
+  }
 }
 
 // Average coverage of one dot within its cell — the value the mask converges to
@@ -250,104 +275,114 @@ export function makeLedMatrixMaterial({
   // spend a full lighting evaluation to contribute ~nothing.
   const mat = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
 
-  const ledOut = Fn(() => {
-    const baseUV = uv();
+  // Plain node graph (no Fn wrapper) so the bloom output below can reuse the
+  // same intermediates — the builder emits each shared temp exactly once.
+  const baseUV = uv();
 
-    // ── which dot, and where inside its cell ──
-    const grid = vec2(baseUV.x.mul(u.cols), baseUV.y.mul(u.rows));
-    const cellCenter = grid.floor().add(0.5);
-    const local = grid.sub(cellCenter); // -0.5 .. 0.5
-    const shaped = vec2(local.x.mul(u.cellAspect), local.y);
-    const ax = shaped.x.abs();
-    const ay = shaped.y.abs();
-    const dist = select(
-      u.shape.lessThan(0.5),
-      shaped.length(), // round
-      select(u.shape.lessThan(1.5), ax.max(ay), ax.add(ay)), // square / diamond
-    );
-    const isSolid = u.shape.greaterThan(2.5);
+  // ── which dot, and where inside its cell ──
+  const grid = vec2(baseUV.x.mul(u.cols), baseUV.y.mul(u.rows));
+  const cellCenter = grid.floor().add(0.5);
+  const local = grid.sub(cellCenter); // -0.5 .. 0.5
+  const shaped = vec2(local.x.mul(u.cellAspect), local.y);
+  const ax = shaped.x.abs();
+  const ay = shaped.y.abs();
+  const dist = select(
+    u.shape.lessThan(0.5),
+    shaped.length(), // round
+    select(u.shape.lessThan(1.5), ax.max(ay), ax.add(ay)), // square / diamond
+  );
+  const isSolid = u.shape.greaterThan(2.5);
 
-    // ── screen-space LOD: how many cells fall inside one pixel ──
-    const cellsPerPx = fwidth(baseUV.x)
-      .mul(u.cols)
-      .max(fwidth(baseUV.y).mul(u.rows));
-    const sharp = smoothstep(float(0.5), float(0.12), cellsPerPx); // 1 near, 0 far
+  // ── screen-space LOD: how many cells fall inside one pixel ──
+  const cellsPerPx = fwidth(baseUV.x)
+    .mul(u.cols)
+    .max(fwidth(baseUV.y).mul(u.rows));
+  const sharp = smoothstep(float(0.5), float(0.12), cellsPerPx); // 1 near, 0 far
 
-    const rawMask = smoothstep(u.dotRadius, u.dotRadius.sub(0.06), dist);
-    const dotMask = select(
-      isSolid,
-      float(1.0),
-      mix(u.dotCoverage, rawMask, sharp), // dissolve to average coverage far off
-    );
+  const rawMask = smoothstep(u.dotRadius, u.dotRadius.sub(0.06), dist);
+  const dotMask = select(
+    isSolid,
+    float(1.0),
+    mix(u.dotCoverage, rawMask, sharp), // dissolve to average coverage far off
+  );
 
-    // Snap the pattern to cell centres up close (each LED lights as a unit);
-    // sample continuously once the cells are subpixel.
-    const cellUV = cellCenter.div(vec2(u.cols, u.rows));
-    const cuv = select(isSolid, baseUV, mix(baseUV, cellUV, sharp));
-    const scroll = time.mul(u.panSpeed);
-    const core = dotMask.mul(dotMask);
+  // Snap the pattern to cell centres up close (each LED lights as a unit);
+  // sample continuously once the cells are subpixel.
+  const cellUV = cellCenter.div(vec2(u.cols, u.rows));
+  const cuv = select(isSolid, baseUV, mix(baseUV, cellUV, sharp));
+  const scroll = time.mul(u.panSpeed);
+  const core = dotMask.mul(dotMask);
 
-    // ── per-mode "is this dot lit" ──
-    const checkerSq = mod(
-      cuv.x.mul(u.checkerX).floor().add(cuv.y.mul(u.checkerY).floor()),
-      2.0,
-    );
+  // ── per-mode "is this dot lit" ──
+  const checkerSq = mod(
+    cuv.x.mul(u.checkerX).floor().add(cuv.y.mul(u.checkerY).floor()),
+    2.0,
+  );
 
-    const chevY = cuv.y.sub(0.5).abs();
-    const phase = cuv.x.mul(u.chevronCount).add(chevY.mul(u.skew)).sub(scroll);
-    const chevLit = smoothstep(u.duty, u.duty.sub(0.04), phase.fract());
+  const chevY = cuv.y.sub(0.5).abs();
+  const phase = cuv.x.mul(u.chevronCount).add(chevY.mul(u.skew)).sub(scroll);
+  const chevLit = smoothstep(u.duty, u.duty.sub(0.04), phase.fract());
 
-    const colIdx = cuv.x.mul(5.0).floor();
-    const band = smoothstep(0.3, 0.26, cuv.y.sub(0.5).abs());
-    const ph = mod(time, 7.0); // count up 0..5s, hold to 6s, dark to 7s
-    const lightsLit = step(colIdx, ph).mul(step(6.0, ph).oneMinus()).mul(band);
+  const colIdx = cuv.x.mul(5.0).floor();
+  const band = smoothstep(0.3, 0.26, cuv.y.sub(0.5).abs());
+  const ph = mod(time, 7.0); // count up 0..5s, hold to 6s, dark to 7s
+  const lightsLit = step(colIdx, ph).mul(step(6.0, ph).oneMinus()).mul(band);
 
-    const sampleUV = vec2(cuv.x.mul(u.contentRepeat).add(scroll), cuv.y);
-    const tex = contentNode.sample(sampleUV);
-    const lum = tex.r.mul(0.299).add(tex.g.mul(0.587)).add(tex.b.mul(0.114));
-    const texLit = smoothstep(u.threshold.sub(0.05), u.threshold.add(0.05), lum);
+  const sampleUV = vec2(cuv.x.mul(u.contentRepeat).add(scroll), cuv.y);
+  const tex = contentNode.sample(sampleUV);
+  const lum = tex.r.mul(0.299).add(tex.g.mul(0.587)).add(tex.b.mul(0.114));
+  const texLit = smoothstep(u.threshold.sub(0.05), u.threshold.add(0.05), lum);
 
-    const isChecker = u.mode.lessThan(0.5);
-    const isChevron = u.mode.lessThan(1.5);
-    const isLights = u.mode.lessThan(2.5);
-    const isRgb = u.rgb.greaterThan(0.5);
+  const isChecker = u.mode.lessThan(0.5);
+  const isChevron = u.mode.lessThan(1.5);
+  const isLights = u.mode.lessThan(2.5);
+  const isRgb = u.rgb.greaterThan(0.5);
 
-    // rgb (video-wall): every LED lit, coloured by the source
-    const contentLit = select(isRgb, float(1.0), texLit);
-    const lit = select(
-      isChecker,
-      float(1.0),
-      select(isChevron, chevLit, select(isLights, lightsLit, contentLit)),
-    );
+  // rgb (video-wall): every LED lit, coloured by the source
+  const contentLit = select(isRgb, float(1.0), texLit);
+  const lit = select(
+    isChecker,
+    float(1.0),
+    select(isChevron, chevLit, select(isLights, lightsLit, contentLit)),
+  );
 
-    // ── colour ──
-    const legacyRamp = mix(float(0.55), float(1.3), core);
-    const monoColor = select(
-      u.useRamp.greaterThan(0.5),
-      mix(u.edgeColor, u.coreColor, core),
-      u.tintColor.mul(legacyRamp),
-    );
-    const checkerColor = mix(u.colorB, u.colorA, checkerSq).mul(legacyRamp);
-    const ledColor = select(
-      isChecker,
-      checkerColor,
-      select(isLights, monoColor, select(isRgb, tex.rgb, monoColor)),
-    );
+  // ── colour ──
+  const legacyRamp = mix(float(0.55), float(1.3), core);
+  const monoColor = select(
+    u.useRamp.greaterThan(0.5),
+    mix(u.edgeColor, u.coreColor, core),
+    u.tintColor.mul(legacyRamp),
+  );
+  const checkerColor = mix(u.colorB, u.colorA, checkerSq).mul(legacyRamp);
+  const ledColor = select(
+    isChecker,
+    checkerColor,
+    select(isLights, monoColor, select(isRgb, tex.rgb, monoColor)),
+  );
 
-    const brightness = dotMask.mul(
-      clamp(lit.mul(u.emissive).add(u.offLevel), 0.0, u.emissive),
-    );
-    return ledColor.mul(brightness);
-  })();
+  const litLevel = clamp(lit.mul(u.emissive).add(u.offLevel), 0.0, u.emissive);
+  const ledOut = ledColor.mul(dotMask.mul(litLevel));
 
   mat.colorNode = ledOut;
+
+  // Bloom feed. The VISIBLE output fades to the dots' average coverage at
+  // distance (~40% for round dots — correct average brightness), but that
+  // drops a far board's luminance to barely above the bloom threshold, so its
+  // glow dies long before solid-faced objects (floodlight) or big square dots
+  // (billboard checker, ~71% coverage). Bloom instead sees the panel as if
+  // the lit dots covered it fully: up close rawMask ≡ the visible mask so the
+  // two outputs are identical; far away glow energy holds steady.
+  const bloomMask = select(isSolid, float(1.0), mix(float(1.0), rawMask, sharp));
+  const bloomOut = ledColor.mul(bloomMask.mul(litLevel));
 
   // Selective bloom: both pipelines bloom ONLY the `emissive` MRT target, which
   // is normally fed by a material's emissive slot — an unlit material has none.
   // A per-material mrtNode is merged over the pass's (mrt.merge), so this fills
   // `emissive` without disturbing the output/diffuseColor/normal targets that
-  // postFxPipeline writes for SSAO. Harmlessly ignored on non-MRT pipelines.
-  mat.mrtNode = mrt({ emissive: ledOut });
+  // postFxPipeline writes for SSAO. LedBloomMRTNode (above) rather than mrt()
+  // so plain-RT renders (env probes, offscreen bakes) fall back to a normal
+  // single output instead of an invalid empty struct.
+  mat.mrtNode = new LedBloomMRTNode({ emissive: bloomOut });
 
   mat.userData.led = { u, contentNode, sourceAspect };
   applyLedMatrixParams(mat, params, boardW, boardH);

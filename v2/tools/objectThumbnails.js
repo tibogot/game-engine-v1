@@ -76,6 +76,17 @@ export async function bakeObjectThumbnails({
         continue;
       }
 
+      // Materials with a selective-bloom mrtNode (LED boards) break plain-RT
+      // renders: with no renderer-level MRT set, three uses material.mrtNode as
+      // the ENTIRE fragment output, and its "emissive" target matches nothing
+      // on this RT — the WGSL output struct ends up empty and the pipeline is
+      // invalid. Thumbnails don't bloom, and make() builds fresh materials, so
+      // stripping it here is safe.
+      group.traverse((o) => {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) if (m?.mrtNode) m.mrtNode = null;
+      });
+
       box.setFromObject(group);
       if (!box.isEmpty()) group.position.y -= box.min.y;
 
