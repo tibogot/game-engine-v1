@@ -1,71 +1,38 @@
 <!doctype html>
-<!-- TEMPORARY verification page for the pine runtime pipeline (safe to delete).
-     Served by Vite so every module (including this script) resolves ONE local
-     three instance — matching how v3 consumes presetLoader. -->
+<!-- Runtime preset preview: renders tree-presets through the REAL game path
+     (presetLoader → FoliageLodRenderer → procedural trunks). Lineup mode shows
+     the whole pine-family library side by side. Safe to delete. -->
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>pine runtime verify</title>
+    <title>pine preset lineup</title>
     <style>
-      body { margin: 0; background: #223; }
+      body { margin: 0; background: #223; overflow: hidden; }
       canvas { display: block; }
-      #status { position: fixed; top: 4px; left: 8px; color: #fff; font: 13px monospace; white-space: pre; }
+      #status { position: fixed; top: 4px; left: 8px; color: #fff; font: 13px monospace; white-space: pre; z-index: 2; }
+      .lbl { position: fixed; color: #fff; font: bold 13px monospace; text-shadow: 0 1px 3px #000; transform: translateX(-50%); z-index: 2; }
     </style>
   </head>
   <body>
     <div id="status">loading…</div>
     <script type="module">
       import * as THREE from "three";
-      import { loadFullPresetFromFile } from "./core/foliage/presetLoader.js";
+      import { loadFullPresetFromUrl } from "./core/foliage/presetLoader.js";
       import { FoliageLodRenderer } from "./render/foliage/foliageLodRenderer.js";
 
       const status = (t) => (document.getElementById("status").textContent = t);
+      // Add preset filenames from public/tree-presets/ to preview them side
+      // by side through the real runtime path.
+      const PRESETS = ["my_pine2.json", "my_pine3.json"];
+      const SPACING = 7;
 
       (async () => {
         try {
-          const preset = {
-            pineEditor: 2, foliageLayout: "pine", trunkFile: "", trunkScale: 1,
-            leafTexture: "textures/pine-leaves/Frame 56.png",
-            material: {
-              bottomColor: "#1a4520", topColor: "#6aab38", colorVar: 0.14,
-              alphaCutoff: 0.45, aoStr: 0.4, normalBias: 0.28, leafWarp: 0,
-            },
-            wind: { windSpeed: 0, windStr: 0, windMicro: 0 },
-            pine: {
-              rect: { width: 2, height: 0.95, pivotEdge: "auto" },
-              grid: { segX: 4, segY: 2 },
-              shape: { bendX: 0.14, bendY: -0.2, skewX: 0, skewY: 0, taperX: 0 },
-              transform: { posX: 0, posY: 0, posZ: 0, rotXDeg: -20, rotYDeg: 0, rotZDeg: 90 },
-              foliage: {
-                enabled: true, layout: "pine", levels: 7, perRing: 7, baseY: 2,
-                heightPower: 0.85, tipRingSlide: -0.06, scaleBottom: 1.2,
-                scaleTop: 0.32, scalePower: 1.15, globalScale: 1, radialInset: 0.02,
-                pivotAlongRadius: 0, azimuthOffsetDeg: 0, staggerDeg: 19.5,
-                ringRandomDeg: 8, ringRandomSeed: 0, cardRandomDeg: 5,
-                pitchCurveEnabled: true, pitchBottomDeg: -8, pitchTopDeg: -8,
-                pitchCurvePower: 1, leafPitchRandomDeg: 6, leafYRandom: 0.05,
-                leafScaleRandom: 0.1, offsetX: 0, offsetY: 0, offsetZ: 0,
-              },
-              trunk: {
-                height: 5, radiusBottom: 0.14, radiusTop: 0.01, yOffset: 0,
-                curveBend: 0.12, curveAngleDeg: 0, curveS: 0, pathSegs: 0,
-                radialSegs: 20, visible: true, barkDark: "#2a1f18",
-                barkMid: "#4a3528", barkLight: "#6b5240", barkHighlight: "#8a7058",
-                roughness: 0.94, stripeFreq: 9, stripeStrength: 0.22,
-                noiseScale: 2.4, noiseStrength: 0.14, crackStrength: 0.1,
-                baseAo: 0.4, mossStrength: 0.12, rimColor: "#a09078",
-                rimStrength: 0.11, rimPower: 2.2,
-              },
-            },
-          };
-
-          const file = new File([JSON.stringify(preset)], "verify.json", { type: "application/json" });
-          const { foliagePreset, trunkSubmeshes, trunkLod1Submeshes } = await loadFullPresetFromFile(file);
-
           const renderer = new THREE.WebGPURenderer({ antialias: true });
           renderer.setSize(innerWidth, innerHeight);
           renderer.toneMapping = THREE.ACESFilmicToneMapping;
           renderer.toneMappingExposure = 0.9;
+          renderer.shadowMap.enabled = true;
           document.body.appendChild(renderer.domElement);
           await renderer.init();
 
@@ -74,101 +41,74 @@
           scene.add(new THREE.HemisphereLight("#cfe4ff", "#7a9a55", 1.1));
           const sun = new THREE.DirectionalLight("#fff2dd", 2.6);
           sun.position.set(30, 50, 20);
+          sun.castShadow = true;
+          sun.shadow.mapSize.set(2048, 2048);
+          sun.shadow.camera.left = sun.shadow.camera.bottom = -30;
+          sun.shadow.camera.right = sun.shadow.camera.top = 30;
           scene.add(sun);
           const ground = new THREE.Mesh(
-            new THREE.CircleGeometry(40, 48),
+            new THREE.CircleGeometry(60, 48),
             new THREE.MeshStandardMaterial({ color: "#4a7c2a", roughness: 0.95 }),
           );
           ground.rotation.x = -Math.PI / 2;
+          ground.receiveShadow = true;
           scene.add(ground);
 
           const fr = new FoliageLodRenderer(scene, { world: { chunkSize: 100, size: 2000 } });
-          fr.setSlotPreset(0, foliagePreset);
-          const trees = [
-            { x: -4.5, y: 0, z: 0, rotY: 0.6, scale: 1.0, slotIdx: 0 },
-            { x: 1.5, y: 0, z: 1, rotY: 2.8, scale: 1.25, slotIdx: 0 },
-            { x: 7, y: 0, z: -1, rotY: 4.4, scale: 0.85, slotIdx: 0 },
-          ];
-          // LOD0 up close + a LOD1 copy off to the side (tier-density sanity)
-          const leafMeshes = fr._buildChunkSlotLod(trees, 0, 0) ?? [];
-          const lod1Trees = [{ x: 13, y: 0, z: -2, rotY: 1.7, scale: 1.0, slotIdx: 0 }];
-          const lod1Meshes = fr._buildChunkSlotLod(lod1Trees, 0, 1) ?? [];
-          for (const m of [...leafMeshes, ...lod1Meshes]) { m.visible = true; scene.add(m); }
-          for (const t of [...trees, ...lod1Trees]) {
-            for (const sm of trunkSubmeshes) {
-              const mesh = new THREE.Mesh(sm.geometry, sm.material);
-              mesh.position.set(t.x, t.y, t.z);
-              mesh.rotation.y = t.rotY;
-              mesh.scale.setScalar(t.scale);
-              scene.add(mesh);
-            }
-          }
+          const stats = [];
+          const labels = [];
+          const x0 = -((PRESETS.length - 1) * SPACING) / 2;
 
-          const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 300);
-          camera.position.set(2.5, 4.6, 15.5);
-          camera.lookAt(3, 3.2, 0);
-          renderer.render(scene, camera);
-
-          // Impostor bake with the PROCEDURAL trunk (the path v3 runs on preset load).
-          let bake = null;
-          try {
-            const { bakeSlotImpostor, IMPOSTOR_BAKE } = await import("./render/foliage/impostorBake.js");
-            const bakeLeaf = fr._buildChunkSlotLod(
-              [{ x: 0, y: 0, z: 0, rotY: 0, scale: 1, slotIdx: 0 }], 0, 0)?.[0] ?? null;
-            const result = await bakeSlotImpostor(renderer, {
-              trunkSubmeshes,
-              leafMesh: bakeLeaf,
-              foliageUniforms: foliagePreset.uniforms,
-              trunkScale: 1,
-            }, IMPOSTOR_BAKE);
-            bake = {
-              ok: !!result,
-              keys: result ? Object.keys(result) : [],
-              hasTexture: !!(result && (result.texture || result.atlas || result.map)),
-            };
-            if (bakeLeaf) bakeLeaf.geometry.dispose();
-          } catch (e) {
-            bake = { ok: false, error: String(e) };
-          }
-
-          renderer.render(scene, camera);
-
-          // Trim stats: polygon area fraction of the full quad = fill kept.
-          const { computeLeafTrimPolygon } = await import("./core/foliage/leafCardTrim.js");
-          const img = foliagePreset.leafMapNode.value?.image;
-          let trimArea = null;
-          if (img) {
-            const poly = computeLeafTrimPolygon(img, {
-              maskInAlpha: foliagePreset.uniforms.maskInAlpha.value > 0.5,
-            });
-            if (poly) {
-              let a = 0;
-              for (let k = 0; k < poly.length; k++) {
-                const [x1, y1] = poly[k];
-                const [x2, y2] = poly[(k + 1) % poly.length];
-                a += x1 * y2 - x2 * y1;
+          for (let i = 0; i < PRESETS.length; i++) {
+            const x = x0 + i * SPACING;
+            const { foliagePreset, trunkSubmeshes, json } = await loadFullPresetFromUrl(PRESETS[i]);
+            fr.setSlotPreset(i, foliagePreset);
+            const meshes = fr._buildChunkSlotLod(
+              [{ x, y: 0, z: 0, rotY: 0.5 + i, scale: 1, slotIdx: i }], i, 0) ?? [];
+            for (const m of meshes) { m.visible = true; m.castShadow = true; scene.add(m); }
+            if (trunkSubmeshes) {
+              for (const sm of trunkSubmeshes) {
+                const mesh = new THREE.Mesh(sm.geometry, sm.material);
+                mesh.position.set(x, 0, 0);
+                mesh.rotation.y = 0.5 + i;
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                scene.add(mesh);
               }
-              trimArea = Math.abs(a) / 2;
             }
+            const cardTris = foliagePreset.lods[0]
+              ? foliagePreset.lods[0].geometry.index.count / 3
+              : 0;
+            const leaves = foliagePreset.lods[0]?.count ?? 0;
+            const trunkTris = trunkSubmeshes
+              ? trunkSubmeshes[0].geometry.index.count / 3
+              : 0;
+            stats.push(`${json.presetName}: ${leaves}c ${leaves * cardTris + trunkTris}tri`);
+            labels.push({ name: json.presetName, x });
           }
-          const cardGeo = foliagePreset.lods[0].geometry;
-          window.__result = {
-            ready: true,
-            lod0Instances: leafMeshes.reduce((s, m) => s + m.count, 0),
-            lod1Instances: lod1Meshes.reduce((s, m) => s + m.count, 0),
-            trunkLod0Tris: trunkSubmeshes[0].geometry.index.count / 3,
-            trunkLod1Tris: trunkLod1Submeshes[0].geometry.index.count / 3,
-            cardTris: cardGeo.index.count / 3,
-            cardTrimmed: cardGeo.index.count / 3 <= 6,
-            trimAreaFraction: trimArea,
-            fillSavedPct: trimArea != null ? Math.round((1 - trimArea) * 100) : null,
-            pineAtlas: foliagePreset.uniforms.pineAtlas.value,
-            bake,
+
+          const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 300);
+          camera.position.set(0, 5.2, 36);
+          camera.lookAt(0, 3.2, 0);
+
+          // Name labels projected to screen once (static camera).
+          for (const l of labels) {
+            const p = new THREE.Vector3(l.x, -0.4, 0).project(camera);
+            const el = document.createElement("div");
+            el.className = "lbl";
+            el.textContent = l.name;
+            el.style.left = ((p.x * 0.5 + 0.5) * innerWidth) + "px";
+            el.style.top = ((-p.y * 0.5 + 0.5) * innerHeight) + "px";
+            document.body.appendChild(el);
+          }
+
+          window.__result = { ready: true, stats };
+          // Console camera hook: __cam(x,y,z, tx,ty,tz) to inspect any tree up close.
+          window.__cam = (x, y, z, tx = 0, ty = 2, tz = 0) => {
+            camera.position.set(x, y, z);
+            camera.lookAt(tx, ty, tz);
           };
-          status("READY  cardTris=" + window.__result.cardTris
-            + " fillSaved=" + window.__result.fillSavedPct + "%"
-            + " lod0=" + window.__result.lod0Instances
-            + "  bake.ok=" + (bake && bake.ok));
+          status(stats.join("  ·  "));
           const loop = () => { renderer.render(scene, camera); requestAnimationFrame(loop); };
           loop();
         } catch (e) {

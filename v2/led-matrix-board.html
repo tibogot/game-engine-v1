@@ -5,69 +5,153 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LED Matrix Board — Chevron / Image / Text — TSL</title>
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body {
-        width: 100%; height: 100%; overflow: hidden;
-        background: #07060a; font-family: "SF Mono", Consolas, ui-monospace, monospace;
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
-      canvas { display: block; width: 100vw; height: 100vh; }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #07060a;
+        font-family: "SF Mono", Consolas, ui-monospace, monospace;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
       #hint {
-        position: fixed; left: 14px; bottom: 14px; z-index: 5;
-        font-size: 11px; line-height: 1.5; color: #888;
-        background: rgba(0, 0, 0, 0.55); padding: 8px 12px;
-        border-radius: 6px; pointer-events: none;
+        position: fixed;
+        left: 14px;
+        bottom: 14px;
+        z-index: 5;
+        font-size: 11px;
+        line-height: 1.5;
+        color: #888;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 8px 12px;
+        border-radius: 6px;
+        pointer-events: none;
       }
-      #hint b { color: #ff9a2e; }
+      #hint b {
+        color: #ff9a2e;
+      }
       #panel {
-        position: fixed; top: 12px; right: 12px; z-index: 20;
-        width: min(270px, calc(100vw - 24px)); max-height: calc(100vh - 24px);
-        overflow: auto; padding: 12px 14px;
-        font-size: 11px; line-height: 1.45; color: #d8d8de;
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        z-index: 20;
+        width: min(270px, calc(100vw - 24px));
+        max-height: calc(100vh - 24px);
+        overflow: auto;
+        padding: 12px 14px;
+        font-size: 11px;
+        line-height: 1.45;
+        color: #d8d8de;
         background: rgba(8, 10, 16, 0.9);
         border: 1px solid rgba(255, 154, 46, 0.18);
-        border-radius: 10px; backdrop-filter: blur(8px);
+        border-radius: 10px;
+        backdrop-filter: blur(8px);
       }
       #panel h2 {
-        font-size: 12px; font-weight: 600; color: #ff9a2e;
-        margin-bottom: 10px; letter-spacing: 0.05em; text-transform: uppercase;
+        font-size: 12px;
+        font-weight: 600;
+        color: #ff9a2e;
+        margin-bottom: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
       }
-      #panel section { margin-bottom: 12px; }
+      #panel section {
+        margin-bottom: 12px;
+      }
       #panel section > label {
-        display: block; font-size: 10px; color: #8a8a96;
-        text-transform: uppercase; letter-spacing: 0.06em;
-        margin-bottom: 6px; padding-bottom: 4px;
+        display: block;
+        font-size: 10px;
+        color: #8a8a96;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 6px;
+        padding-bottom: 4px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.06);
       }
       .row {
-        display: grid; grid-template-columns: 1fr 52px;
-        align-items: center; gap: 8px; margin-bottom: 6px;
+        display: grid;
+        grid-template-columns: 1fr 52px;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
       }
-      .row span:first-child { color: #b8b8c2; }
+      .row span:first-child {
+        color: #b8b8c2;
+      }
       .row output {
-        text-align: right; color: #ff9a2e; font-variant-numeric: tabular-nums;
+        text-align: right;
+        color: #ff9a2e;
+        font-variant-numeric: tabular-nums;
       }
-      .row input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: #ff9a2e; }
+      .row input[type="range"] {
+        grid-column: 1 / -1;
+        width: 100%;
+        accent-color: #ff9a2e;
+      }
       .row input[type="color"] {
-        grid-column: 1 / -1; width: 100%; height: 26px; padding: 0;
-        border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px;
-        background: transparent; cursor: pointer;
+        grid-column: 1 / -1;
+        width: 100%;
+        height: 26px;
+        padding: 0;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 4px;
+        background: transparent;
+        cursor: pointer;
       }
-      .full { grid-column: 1 / -1; }
-      select, input[type="text"], input[type="file"], button {
-        width: 100%; font: inherit; font-size: 11px; color: #e8e8ee;
+      .full {
+        grid-column: 1 / -1;
+      }
+      select,
+      input[type="text"],
+      input[type="file"],
+      button {
+        width: 100%;
+        font: inherit;
+        font-size: 11px;
+        color: #e8e8ee;
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 5px; padding: 6px 8px;
+        border-radius: 5px;
+        padding: 6px 8px;
       }
-      select { background-color: #14161c; }
-      select option { background-color: #14161c; color: #e8e8ee; }
+      select {
+        background-color: #14161c;
+      }
+      select option {
+        background-color: #14161c;
+        color: #e8e8ee;
+      }
       button {
-        cursor: pointer; color: #ff9a2e; border-color: rgba(255, 154, 46, 0.4);
+        cursor: pointer;
+        color: #ff9a2e;
+        border-color: rgba(255, 154, 46, 0.4);
       }
-      button:hover { background: rgba(255, 154, 46, 0.12); }
-      .chk { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-      .chk input { accent-color: #ff9a2e; width: 14px; height: 14px; }
-      .hidden { display: none; }
+      button:hover {
+        background: rgba(255, 154, 46, 0.12);
+      }
+      .chk {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+      }
+      .chk input {
+        accent-color: #ff9a2e;
+        width: 14px;
+        height: 14px;
+      }
+      .hidden {
+        display: none;
+      }
     </style>
     <script type="importmap">
       {
@@ -81,7 +165,9 @@
     </script>
   </head>
   <body>
-    <div id="hint"><b>LED matrix board</b> — Source: Chevron · Image · Text · drag to orbit</div>
+    <div id="hint">
+      <b>LED matrix board</b> — Source: Chevron · Image · Text · drag to orbit
+    </div>
     <aside id="panel"></aside>
 
     <script type="module">
@@ -119,6 +205,7 @@
         threshold: 0.5, // image/text: luminance cutoff for "lit"
         cols: 78,
         rows: 22,
+        shape: 0, // 0 round · 1 square · 2 diamond · 3 solid (no dots)
         dotRadius: 0.36,
         emissive: 6.0,
         offLevel: 0.04,
@@ -139,6 +226,7 @@
         threshold: uniform(float(params.threshold)),
         cols: uniform(float(params.cols)),
         rows: uniform(float(params.rows)),
+        shape: uniform(float(params.shape)),
         dotRadius: uniform(float(params.dotRadius)),
         emissive: uniform(float(params.emissive)),
         offLevel: uniform(float(params.offLevel)),
@@ -249,23 +337,47 @@
           const grid = vec2(baseUV.x.mul(u.cols), baseUV.y.mul(u.rows));
           const cellCenter = grid.floor().add(0.5);
           const local = grid.sub(cellCenter); // -0.5 .. 0.5
-          // correct for non-square cells so the LED stays a round dot
+          // correct for non-square cells so the LED stays the right shape
           const shaped = vec2(local.x.mul(u.cellAspect), local.y);
-          // circular LED — soft edge gives the "clipping dots" look
-          const dot = smoothstep(u.dotRadius, u.dotRadius.sub(0.06), shaped.length());
+          const ax = shaped.x.abs();
+          const ay = shaped.y.abs();
+          // pixel style: 0 round · 1 square · 2 diamond · 3 solid (no mask)
+          const dist = select(
+            u.shape.lessThan(0.5),
+            shaped.length(), // round
+            select(u.shape.lessThan(1.5), ax.max(ay), ax.add(ay)), // square / diamond
+          );
+          const solid = u.shape.greaterThan(2.5);
+          const dot = select(
+            solid,
+            float(1.0), // solid: fill the whole pattern, no LED mask
+            smoothstep(u.dotRadius, u.dotRadius.sub(0.06), dist),
+          );
 
-          const cuv = cellCenter.div(vec2(u.cols, u.rows)); // cell-centre uv 0..1
+          // solid mode samples the pattern continuously (smooth), otherwise at
+          // the cell centre so each LED snaps cleanly on/off
+          const cuv = select(
+            solid,
+            baseUV,
+            cellCenter.div(vec2(u.cols, u.rows)),
+          );
           const scroll = time.mul(u.panSpeed);
 
           // ── SOURCE A: procedural chevron (panned) ──
           const cy = cuv.y.sub(0.5).abs();
-          const phase = cuv.x.mul(u.chevronCount).add(cy.mul(u.skew)).sub(scroll);
+          const phase = cuv.x
+            .mul(u.chevronCount)
+            .add(cy.mul(u.skew))
+            .sub(scroll);
           const chevLit = smoothstep(u.duty, u.duty.sub(0.04), phase.fract());
 
           // ── SOURCE B: content texture (image / scrolling text) ──
           const sampleUV = vec2(cuv.x.mul(u.contentRepeat).add(scroll), cuv.y);
           const tex = contentTex.sample(sampleUV);
-          const lum = tex.r.mul(0.299).add(tex.g.mul(0.587)).add(tex.b.mul(0.114));
+          const lum = tex.r
+            .mul(0.299)
+            .add(tex.g.mul(0.587))
+            .add(tex.b.mul(0.114));
           const texLit = smoothstep(
             u.threshold.sub(0.05),
             u.threshold.add(0.05),
@@ -304,7 +416,10 @@
       function buildScene() {
         const ground = new THREE.Mesh(
           new THREE.PlaneGeometry(60, 60),
-          new THREE.MeshStandardNodeMaterial({ color: 0x17120f, roughness: 0.9 }),
+          new THREE.MeshStandardNodeMaterial({
+            color: 0x17120f,
+            roughness: 0.9,
+          }),
         );
         ground.rotation.x = -Math.PI / 2;
         scene.add(ground);
@@ -433,8 +548,14 @@
         video.onloadedmetadata = () => {
           const maxW = 640;
           const scale = Math.min(1, maxW / video.videoWidth);
-          contentCanvas.width = Math.max(2, Math.round(video.videoWidth * scale));
-          contentCanvas.height = Math.max(2, Math.round(video.videoHeight * scale));
+          contentCanvas.width = Math.max(
+            2,
+            Math.round(video.videoWidth * scale),
+          );
+          contentCanvas.height = Math.max(
+            2,
+            Math.round(video.videoHeight * scale),
+          );
           sourceAspect = video.videoWidth / video.videoHeight;
           updateContentMapping();
           commitContent(true);
@@ -532,6 +653,12 @@
           </section>
           <section>
             <label>LED grid</label>
+            <div class="row"><select id="shape" class="full" style="grid-column:1/-1">
+              <option value="0">Round dots</option>
+              <option value="1">Square dots</option>
+              <option value="2">Diamond dots</option>
+              <option value="3">Solid (no dots)</option>
+            </select></div>
             <div class="row">
               <span>Columns</span><output id="o-cols">${params.cols}</output>
               <input type="range" id="cols" min="20" max="160" step="1" value="${params.cols}" />
@@ -616,6 +743,10 @@
         document.getElementById("source").addEventListener("change", (e) => {
           setSource(Number(e.target.value));
         });
+        document.getElementById("shape").addEventListener("change", (e) => {
+          params.shape = Number(e.target.value);
+          u.shape.value = params.shape;
+        });
         document.getElementById("rgb").addEventListener("change", (e) => {
           params.rgb = e.target.checked ? 1 : 0;
           u.rgb.value = params.rgb;
@@ -640,10 +771,14 @@
           params.text = document.getElementById("textInput").value;
           applyText(params.text);
         };
-        document.getElementById("textApply").addEventListener("click", applyTextFromInput);
-        document.getElementById("textInput").addEventListener("keydown", (e) => {
-          if (e.key === "Enter") applyTextFromInput();
-        });
+        document
+          .getElementById("textApply")
+          .addEventListener("click", applyTextFromInput);
+        document
+          .getElementById("textInput")
+          .addEventListener("keydown", (e) => {
+            if (e.key === "Enter") applyTextFromInput();
+          });
 
         refreshSourceRows();
       }
@@ -664,10 +799,14 @@
         show("row-textbtn", isText);
         show("row-threshold", hasContent && params.rgb === 0);
         show("row-rgb", !isChevron);
-        document.getElementById("sec-chevron").classList.toggle("hidden", !isChevron);
+        document
+          .getElementById("sec-chevron")
+          .classList.toggle("hidden", !isChevron);
         // mono colour pickers only matter when not showing source RGB
         const monoActive = isChevron || params.rgb === 0;
-        document.getElementById("sec-color").classList.toggle("hidden", !monoActive);
+        document
+          .getElementById("sec-color")
+          .classList.toggle("hidden", !monoActive);
       }
 
       function onResize() {

@@ -91,6 +91,9 @@ import { createRiverToolState } from "./state/riverState.js";
 import { buildRiverPanels } from "../ui/buildRiverPanel.js";
 import { RiverSystem } from "../../v2/tools/river/riverSystem.js";
 import { RiverSystemGPU } from "../tools/riverSystemGpu.js";
+import { createLakeToolState } from "./state/lakeState.js";
+import { buildLakePanel } from "../ui/buildLakePanel.js";
+import { LakeSystem } from "../tools/lakeSystem.js";
 import { SmartRoadLabSystem } from "../../v2/tools/smartRoad/smartRoadLabSystem.js";
 import { RoadConformSystem } from "../tools/roadConformSystem.js";
 import { mergeRoadDrawCalls } from "../tools/roadDrawCallMerge.js";
@@ -380,6 +383,7 @@ async function main() {
   const splinePanel    = document.getElementById("spline-panel");
   const riverPanel     = document.getElementById("river-panel");
   const river2Panel    = document.getElementById("river2-panel");
+  const lakePanel      = document.getElementById("lake-panel");
   const roadPanel      = document.getElementById("road-panel");
   const playStatPos    = document.getElementById("play-stat-pos");
   const playStatSpeed  = document.getElementById("play-stat-speed");
@@ -454,9 +458,11 @@ async function main() {
       syncSplinePanelVisibility();
       syncRiverPanelVisibility();
       syncRiver2PanelVisibility();
+      syncLakePanelVisibility();
       syncRoadPanelVisibility();
       syncCliffPaintPanelVisibility();
       applyRiverModeEffects();
+      applyLakeModeEffects();
       syncEditorOrbitEnabled();
       syncPlayImmersiveButtonLabel();
     },
@@ -1251,6 +1257,9 @@ async function main() {
   };
   let riverSystem = null;
   let river2System = null;
+  const lakeToolSlice = createLakeToolState();
+  let lakeSystem = null;
+  let lakeUi = null;
   let roadSystem = null;
   let roadConform = null;
   const roadState = { ...DEFAULT_ROAD_STATE };
@@ -1308,6 +1317,14 @@ async function main() {
     river2Panel.style.display = (editorMode === "river2" && !playMode.active) ? "" : "none";
   }
 
+  function syncLakePanelVisibility() {
+    lakePanel.style.display = (editorMode === "lake" && !playMode.active) ? "" : "none";
+  }
+
+  function applyLakeModeEffects() {
+    lakeSystem?.setEditActive(editorMode === "lake" && !playMode.active);
+  }
+
   function syncRoadPanelVisibility() {
     roadPanel.style.display = (editorMode === "road" && !playMode.active) ? "" : "none";
   }
@@ -1354,6 +1371,7 @@ async function main() {
     if (editorMode === "spline" && m !== "spline") _onLeaveSplineMode();
     if (editorMode === "river" && m !== "river") _onLeaveRiverMode();
     if (editorMode === "river2" && m !== "river2") _onLeaveRiver2Mode();
+    if (editorMode === "lake" && m !== "lake") lakeSystem?.cancelDrag();
     if (editorMode === "road" && m !== "road") _onLeaveRoadMode();
     if (editorMode === "props" && m !== "props") _onLeavePropsMode();
     editorMode = m;
@@ -1385,9 +1403,11 @@ async function main() {
       sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
     } else if (m === "cliffPaint") {
       sculpt.uRadius.value = cliffPaintBrush.radius / WORLD_SIZE;
-    } else if (m === "props" || m === "spline" || m === "river" || m === "river2" || m === "road") {
+    } else if (m === "props" || m === "spline" || m === "river" || m === "river2" || m === "road" || m === "lake") {
       uCursorUV.value.set(-2, -2);
       if (m === "river" || m === "river2") void ensureCpuHeightmapFromGpu();
+      // Lake creation reads terrain height at the click to pick a water level.
+      if (m === "lake") void ensureCpuHeightmapFromGpu().then(() => lakeUi?.refresh());
       if (m === "road") {
         // Fresh CPU mirror → rebase the grade baseline → re-drape the network.
         void ensureCpuHeightmapFromGpu().then(() => {
@@ -1406,9 +1426,11 @@ async function main() {
     syncSplinePanelVisibility();
     syncRiverPanelVisibility();
     syncRiver2PanelVisibility();
+    syncLakePanelVisibility();
     syncRoadPanelVisibility();
     applySplineModeEffects();
     applyRiverModeEffects();
+    applyLakeModeEffects();
     refreshGizmoHud();
     if (viewNavHint) viewNavHint.style.display = (m === "view" && !playMode.active) ? "" : "none";
     syncEditorOrbitEnabled();
@@ -1441,8 +1463,10 @@ async function main() {
     splinePanel.style.display = "none";
     riverPanel.style.display = "none";
     river2Panel.style.display = "none";
+    lakePanel.style.display = "none";
     roadPanel.style.display = "none";
     roadSystem?.setEditActive(false);
+    lakeSystem?.setEditActive(false);
     helpOverlay.classList.remove("visible");
     tbHelp.classList.remove("active");
     syncPlayImmersiveButtonLabel();
@@ -2310,6 +2334,11 @@ async function main() {
     if (e.code === "KeyI" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
       e.preventDefault();
       setEditorMode(editorMode === "props" ? "view" : "props");
+      return;
+    }
+    if (e.code === "KeyL" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "lake" ? "view" : "lake");
       return;
     }
     if (e.code === "KeyP" && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -3467,6 +3496,23 @@ async function main() {
     },
   });
 
+  // ── Lakes ──────────────────────────────────────────────────────────────────
+  // No terrain hookup: the shoreline comes from the depth buffer every frame, so
+  // sculpting under a lake needs no invalidation, rebase or rebuild.
+  {
+    const lakeNormalMap = new THREE.TextureLoader().load("/textures/waterNormal.webp");
+    lakeNormalMap.wrapS = lakeNormalMap.wrapT = THREE.RepeatWrapping;
+    lakeNormalMap.colorSpace = THREE.NoColorSpace;   // it's a normal map, not colour
+    lakeSystem = new LakeSystem({
+      scene,
+      toolState: lakeToolSlice,
+      normalMap: lakeNormalMap,
+      sampleTerrainHeight,
+      worldSize: WORLD_SIZE,
+    });
+    worldEnv?.setLakeSystem(lakeSystem);
+  }
+
   // Keep the river system's uncarved-base RT in sync with every non-river
   // terrain edit (sculpt strokes, sculpt undo/redo, procedural gen, spline
   // plateau, heightmap load — the last three all route through
@@ -4146,6 +4192,7 @@ async function main() {
       props:     propStore.exportData(propSlots),
       roads:     roadSystem.exportData(),
       splines:   splineSys.exportData(),
+      lakes:     lakeSystem.exportData(),
     });
     const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     downloadBuffer(buf, `project-${ts}.v3proj`);
@@ -4222,6 +4269,10 @@ async function main() {
 
     if (d.roads) roadSystem.importData(d.roads);
     if (d.splines) splineSys.importData(d.splines);
+    // Always import, even when absent: a project with no lakes must clear any
+    // lakes left over from the previous scene.
+    lakeSystem.importData(d.lakes ?? null);
+    lakeUi?.refresh();
 
     onHistoryChange();
     console.log("[V3] Project loaded.");
@@ -4333,6 +4384,55 @@ async function main() {
   });
 
   applySplineModeEffects();
+
+  // ── Lake panel + drag-to-place ─────────────────────────────────────────────
+  lakeUi = buildLakePanel({
+    toolState: lakeToolSlice,
+    lakeSystem,
+    worldSize: WORLD_SIZE,
+    maxHeight: MAX_HEIGHT,
+    materialChanged:  () => lakeSystem.syncMaterial(),
+    transformChanged: () => {},   // syncActiveTransform already ran inside the panel
+    selectionChanged: () => {},
+  });
+
+  {
+    let dragging = false;
+    const worldAt = () => {
+      const hit = getUV();
+      if (!hit) return null;
+      return { wx: hit.u * WORLD_SIZE - WORLD_SIZE / 2, wz: hit.v * WORLD_SIZE - WORLD_SIZE / 2 };
+    };
+
+    renderer.domElement.addEventListener("mousedown", e => {
+      if (playMode.active || editorMode !== "lake" || e.button !== 0) return;
+      refreshMouse(e);
+      const p = worldAt();
+      if (!p) return;
+      dragging = true;
+      lakeSystem.beginDrag(p.wx, p.wz);
+    }, { capture: true });
+
+    renderer.domElement.addEventListener("mousemove", e => {
+      if (!dragging || editorMode !== "lake") return;
+      refreshMouse(e);
+      const p = worldAt();
+      if (p) lakeSystem.updateDrag(p.wx, p.wz);
+    });
+
+    // A release anywhere ends the drag; releasing outside the canvas must not
+    // strand a half-finished rectangle.
+    const finish = () => {
+      if (!dragging) return;
+      dragging = false;
+      if (lakeSystem.endDrag()) lakeUi.refresh();
+    };
+    renderer.domElement.addEventListener("mouseup", finish);
+    window.addEventListener("mouseup", finish);
+    renderer.domElement.addEventListener("mouseleave", () => {
+      if (dragging) { dragging = false; lakeSystem.cancelDrag(); }
+    });
+  }
 
   buildRiverPanels({
     toolState: riverToolSlice,
@@ -5099,6 +5199,7 @@ async function main() {
       setEditorMode,
       recoverEditorInput,
       get rendererSideWork() { return _rendererSideWork; },
+      get lakeSystem() { return lakeSystem; },
     };
   }
 }

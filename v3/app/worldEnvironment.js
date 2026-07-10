@@ -797,6 +797,14 @@ export async function createWorldEnvironment({
   worldOcean.syncParams(toolState.worldOcean);
   worldOcean.setSunDir(_effectiveLightDir);
 
+  // LakeSystem is owned by main.js, but driven from here: the effective light
+  // direction and the day/night sky colours are only fresh inside updateFrame().
+  let lakeSystem = null;
+  function setLakeSystem(sys) {
+    lakeSystem = sys;
+    lakeSystem?.setSunDir(_effectiveLightDir);
+  }
+
   let dayNightCloudLayer = null;
   function ensureDayNightCloudLayer() {
     if (dayNightCloudLayer) return dayNightCloudLayer;
@@ -918,6 +926,12 @@ export async function createWorldEnvironment({
     _oceanHorizon.set(ps.horizonDay).lerp(_tmpOceanC.set(ps.horizonNight), 1 - dayT);
     worldOcean.setSkyColors(_oceanZenith, _oceanHorizon);
     worldOcean.update(dtSec, _appTimeSec, camera);
+
+    if (lakeSystem) {
+      lakeSystem.setSkyColors(_oceanZenith, _oceanHorizon);
+      lakeSystem.setSunDir(_effectiveLightDir);
+      lakeSystem.update(dtSec, _appTimeSec);
+    }
   }
 
   function renderFrame(dtSec) {
@@ -980,6 +994,7 @@ export async function createWorldEnvironment({
     syncInteriorUniforms,
     rebuildInteriorVolumes,
     worldOceanChanged,
+    setLakeSystem,
     updateFrame,
     renderFrame,
     setSize,

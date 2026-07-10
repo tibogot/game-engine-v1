@@ -13,9 +13,11 @@
  *   props     propStore.exportData()
  *   roads     roadSystem.exportData()
  *   splines   splineSystem.exportData()
+ *   lakes     lakeSystem.exportData()
  *
  * Binary blobs stay raw (heightmap Float32, splat/snow Uint8) — no base64 bloat.
  * Unknown/absent sections are simply skipped on load, so the format can grow.
+ * That is why `lakes` needed no VERSION bump: older files simply have none.
  */
 
 export const PROJECT_MAGIC = 0x4a503356; // "V3PJ" little-endian
@@ -32,7 +34,7 @@ export function encodeProjectFile({
   heightmap,            // Float32Array
   splat, splatRes,      // Uint8Array (both slices combined), texels per side
   snow, snowRes,        // Uint8Array, texels per side
-  trees, props, roads, splines,
+  trees, props, roads, splines, lakes,
 }) {
   const blobs = {};
   const parts = [];
@@ -58,6 +60,7 @@ export function encodeProjectFile({
     props:    props ?? null,
     roads:    roads ?? null,
     splines:  splines ?? null,
+    lakes:    lakes ?? null,
   };
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
 
@@ -112,6 +115,7 @@ export function decodeProjectFile(buffer) {
     props:     manifest.props,
     roads:     manifest.roads,
     splines:   manifest.splines,
+    lakes:     manifest.lakes,
   };
 }
 
