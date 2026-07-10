@@ -24,6 +24,9 @@ const _look = new THREE.Vector3();
 const _worldUp = new THREE.Vector3(0, 1, 0);
 const _axisY = new THREE.Vector3(0, 1, 0);
 
+const STUNT_WHEEL_RUT_RADIUS = 0.3;   // snow rut half-width per tyre
+const STUNT_WHEEL_RUT_STEP = 0.18;    // interpolation step along each tyre's path
+
 /** Stunt rigid-body car — v2 modular-road Vehicle + terrain ground adapter. */
 export function createStuntCarMode({
   scene,
@@ -170,11 +173,34 @@ export function createStuntCarMode({
     else if (visible) vehicle.enabled = true;
   }
 
+  // Snow trail contacts — one rut per tyre at its ground-contact point.
+  const _wheelXZs = new Float32Array(8);
+  const _wheelTouch = new Float32Array(4);
+  function getSnowContacts() {
+    const tires = vehicle.tires;
+    if (!tires || !tires.length) return null;
+    const n = Math.min(4, tires.length);
+    for (let i = 0; i < n; i++) {
+      _wheelXZs[i * 2]     = tires[i].worldPos.x;
+      _wheelXZs[i * 2 + 1] = tires[i].worldPos.z;
+      _wheelTouch[i]       = tires[i].grounded ? 1 : 0;
+    }
+    for (let i = n; i < 4; i++) _wheelTouch[i] = 0;
+    return {
+      xzs: _wheelXZs,
+      touching: _wheelTouch,
+      isVehicle: true,
+      radius: STUNT_WHEEL_RUT_RADIUS,
+      step: STUNT_WHEEL_RUT_STEP,
+    };
+  }
+
   return {
     get loaded() { return true; },
     get heading() { return heading; },
     get grounded() { return vehicle.groundedCount > 0; },
     getSpeed() { return Math.hypot(vx, vz); },
+    getSnowContacts,
     resetFrom,
     update,
     positionCamera,

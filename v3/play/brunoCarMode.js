@@ -10,6 +10,8 @@ const CAR_TRACK = 1.1;
 const CAR_RIDE_HEIGHT = 0.48;
 const CAR_WHEEL_RADIUS = 0.42;
 const CAR_SUSP_TRAVEL = 0.45;
+const CAR_WHEEL_RUT_RADIUS = 0.34;  // snow rut half-width ≈ tyre width
+const CAR_WHEEL_RUT_STEP = 0.18;    // interpolation step along each wheel's path
 
 const CAR_ACCEL = 26;
 const CAR_ACCEL_BOOST = 52;
@@ -392,11 +394,29 @@ export function createBrunoCarMode({
     return Math.hypot(vx, vz);
   }
 
+  // Snow trail contacts — one rut per wheel where it touches the ground.
+  // wheelWorldXZs is refreshed every update() by _fillWheelXZ.
+  const _wheelTouch = new Float32Array(4);
+  function getSnowContacts() {
+    if (!loaded) return null;
+    for (let i = 0; i < 4; i++) {
+      _wheelTouch[i] = (!inAir && physics.wheelGrounded?.[i]) ? 1 : 0;
+    }
+    return {
+      xzs: wheelWorldXZs,
+      touching: _wheelTouch,
+      isVehicle: true,
+      radius: CAR_WHEEL_RUT_RADIUS,
+      step: CAR_WHEEL_RUT_STEP,
+    };
+  }
+
   return {
     get loaded() { return loaded; },
     get heading() { return heading; },
     get grounded() { return !inAir; },
     getSpeed,
+    getSnowContacts,
     resetFrom,
     update,
     syncVisuals,

@@ -19,6 +19,19 @@
  * The trail render-target is half-float: an 8-bit target quantizes under the
  * per-frame 5-tap blur and produces visible contour bands around prints.
  *
+ * Geometry reads DERIVED blur levels, not the accumulator: whenever the trail
+ * changes, blur passes band-limit the compression at two widths — fine (512²,
+ * ~±0.05 m) and coarse (256², cascaded, ~±0.4 m) — because the tile mesh is a
+ * radially-warped grid: ~0.055 m/vertex under the player (curved rut edges
+ * read as curves, not polygons) stretching to ~0.36 m at the rim. Each vertex
+ * blends the two levels by its distance from centre, so its sampling rate
+ * always matches the signal's band-limit — no staircase, no polygon corners
+ * on turns, no re-aliasing on the stretched outer verts. The rim is analytic
+ * (c·(1−c) lip on the compression transition — dilate/max rims alias into
+ * beads on coarse lattices). Shading normals read the fine blur level so rut
+ * walls light softly; albedo/roughness read the crisp accumulator so prints
+ * still tint sharply.
+ *
  * API:
  *   createSnowSystem(renderer, scene, initialHeightTex)
  *     → { shared, mesh, params, u, setHeightTex, setSnowMaskTex, setPlayMode,
@@ -31,7 +44,7 @@
 import * as THREE from "three";
 import { QuadMesh } from "three/webgpu";
 import {
-  Fn, Loop,
+  Fn, Loop, If, Break,
   float, int, max, min, mix,
   modelViewMatrix,
   positionGeometry, positionWorld,
@@ -45,13 +58,34 @@ import { createSnowShared } from "./snowShared.js";
 // ── Constants ────────────────────────────────────────────────────────────────
 const TRAIL_RES  = 1024;  // trail render-target resolution (~20 px/m — feet read as prints)
 const TRAIL_NEUT = 0.5;   // neutral (untouched) value in the RT
-const MAX_STAMPS = 48;    // max stamp disks per frame (cars need headroom)
+const MAX_STAMPS = 64;    // max stamp disks per frame (4 wheels/paws need headroom)
 
 const TILE_SIZE      = 50;  // matches trailWorldSize — full RT window has vertices
 const TILE_HALF      = TILE_SIZE * 0.5;
-const SUBDIVISIONS   = 256; // ~0.2 m/vertex — medium quality, ~75% fewer tris than 512
 const TILE_FEATHER   = 10;  // metres — terrain↔tile displacement hand-off width
 const TILE_EDGE_FADE = 2;   // metres — opacity fade over the coincident border strip
+
+// Radially-warped tile grid: vertices concentrate under the player (where the
+// camera is and where fresh trail curves live) and stretch toward the edge.
+// warp(t) = H·(a·t + (1−a)·sign(t)·|t|^p) for t ∈ [−1,1] gives ~0.055 m/vertex
+// at the centre (snow-lab density) and ~0.36 m at the rim — 205k tris total vs
+// the 2.9M a uniform grid would need for the same centre density. A curved rut
+// edge drawn with 0.2 m segments reads as visibly polygonal when turning; at
+// 0.055 m it reads as a curve.
+const SUBDIVISIONS = 320;
+const WARP_LINEAR  = 0.35; // linear share `a` — sets centre density
+const WARP_POWER   = 3;    // superlinear exponent `p` — sets edge stretch
+const CENTER_STEP  = TILE_HALF * WARP_LINEAR * (2 / SUBDIVISIONS); // ≈ 0.055 m
+
+// Displacement chain — geometry never samples the crisp accumulator directly.
+// Two band-limit levels matching the graded mesh: fine for the dense centre,
+// a wider blur for the stretched outer vertices (blended radially in the
+// vertex stage) so the coarse region can't re-alias into terraces.
+const DISP_RES        = TRAIL_RES / 2;  // 512 — fine level
+const DISP_RES_COARSE = TRAIL_RES / 4;  // 256 — coarse level
+// Radial blend between the two levels, in metres from the tile centre.
+const LOD_BLEND_NEAR = 6;
+const LOD_BLEND_FAR  = 17;
 
 // ── Default parameters (all live-editable via system.params) ────────────────
 export const SNOW_PARAMS_DEFAULTS = {
@@ -66,6 +100,8 @@ export const SNOW_PARAMS_DEFAULTS = {
   grooveScale:      1.0,    // 0=no groove, 1=fully compress to ground
   rimScale:         0.14,   // height of the pushed-up rim ridge
   rimOffset:        0.55,   // world offset used to detect the rim gradient (m)
+  trailSoftness:    0.30,   // trail edge smoothing half-width (m) — 0.3 ≈ the
+                            // snow-lab's steady-state feedback-blur softness
   // stamping (per-frame)
   stampPush:        0.5,    // how deep each stamp pushes (relative to trail neut)
   stampRadius:      0.42,   // world radius of each stamp disk (m) — snow-lab default
@@ -85,6 +121,50 @@ export const SNOW_PARAMS_DEFAULTS = {
   slopeRejectY:     0.55,   // ~57 degrees
 };
 
+// ── Warped tile grid ─────────────────────────────────────────────────────────
+// Regular (N+1)² grid topology — watertight, no stitching — with vertex
+// positions warped radially per axis. Density is a pure vertex-distribution
+// choice: the surface stays the same world-space function everywhere.
+function buildWarpedTileGeometry(N) {
+  const warp = (t) => {
+    const a = Math.abs(t);
+    return TILE_HALF * (WARP_LINEAR * t + (1 - WARP_LINEAR) * Math.sign(t) * Math.pow(a, WARP_POWER));
+  };
+
+  const vertsPerSide = N + 1;
+  const positions = new Float32Array(vertsPerSide * vertsPerSide * 3);
+  const normals   = new Float32Array(vertsPerSide * vertsPerSide * 3);
+  const indices   = new Uint32Array(N * N * 6);
+
+  let vi = 0;
+  for (let iz = 0; iz <= N; iz++) {
+    const z = warp((iz / N) * 2 - 1);
+    for (let ix = 0; ix <= N; ix++) {
+      positions[vi]     = warp((ix / N) * 2 - 1);
+      positions[vi + 1] = 0;
+      positions[vi + 2] = z;
+      normals[vi + 1]   = 1;
+      vi += 3;
+    }
+  }
+
+  let ii = 0;
+  for (let iz = 0; iz < N; iz++) {
+    for (let ix = 0; ix < N; ix++) {
+      const a = iz * vertsPerSide + ix;
+      const b = a + 1, c = a + vertsPerSide, d = c + 1;
+      indices[ii++] = a; indices[ii++] = c; indices[ii++] = b;
+      indices[ii++] = b; indices[ii++] = c; indices[ii++] = d;
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute("normal",   new THREE.BufferAttribute(normals,   3));
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+  return geo;
+}
+
 // ── Main factory ─────────────────────────────────────────────────────────────
 export function createSnowSystem(renderer, scene, initialHeightTex) {
   const params = { ...SNOW_PARAMS_DEFAULTS };
@@ -95,8 +175,8 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
   shared.u.uTileFeather.value = TILE_FEATHER;
 
   // ── Ping-pong trail render-targets ─────────────────────────────────────────
-  function _makeRT() {
-    const rt = new THREE.RenderTarget(TRAIL_RES, TRAIL_RES, {
+  function _makeRT(res) {
+    const rt = new THREE.RenderTarget(res, res, {
       format:          THREE.RGBAFormat,
       type:            THREE.HalfFloatType,
       colorSpace:      THREE.NoColorSpace,
@@ -109,26 +189,40 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     return rt;
   }
 
-  function _clearRT(rt) {
+  function _clearRT(rt, level) {
     const prevRT  = renderer.getRenderTarget();
     const prevCol = new THREE.Color();
     renderer.getClearColor(prevCol);
     const prevA   = renderer.getClearAlpha();
-    renderer.setClearColor(new THREE.Color(TRAIL_NEUT, TRAIL_NEUT, TRAIL_NEUT), 1);
+    renderer.setClearColor(new THREE.Color(level, level, level), 1);
     renderer.setRenderTarget(rt);
     renderer.clear(true, false, false);
     renderer.setRenderTarget(prevRT);
     renderer.setClearColor(prevCol, prevA);
   }
 
-  const rts = [_makeRT(), _makeRT()];
-  _clearRT(rts[0]);
-  _clearRT(rts[1]);
+  const rts = [_makeRT(TRAIL_RES), _makeRT(TRAIL_RES)];
+  _clearRT(rts[0], TRAIL_NEUT);
+  _clearRT(rts[1], TRAIL_NEUT);
   let rtIdx = 0;  // current read index
+
+  // Derived displacement targets (re-rendered only on trail change). These
+  // store compression [0,1] (0 = pristine), NOT the accumulator's neutral-0.5
+  // encoding — so their cleared/neutral level is 0. The coarse level is a
+  // two-pass cascade: a single 3×3 tent can't widen the kernel enough for the
+  // stretched outer vertices without leaving gaps between taps.
+  const blurTmpRT     = _makeRT(DISP_RES);         // fine cascade intermediate
+  const blurRT        = _makeRT(DISP_RES);         // fine band-limited compression
+  const blurCoarseRT  = _makeRT(DISP_RES_COARSE);  // coarse cascade intermediate
+  const blurCoarse2RT = _makeRT(DISP_RES_COARSE);  // wide band-limit for outer verts
+  _clearRT(blurTmpRT, 0);
+  _clearRT(blurRT, 0);
+  _clearRT(blurCoarseRT, 0);
+  _clearRT(blurCoarse2RT, 0);
 
   // TSL texture nodes that get their .value swapped each frame
   const trailSrcNode  = texture(rts[0].texture);  // input to the pass shader
-  const trailDispNode = texture(rts[0].texture);  // sampled by the snow material
+  const trailDispNode = texture(rts[0].texture);  // crisp — fragment shading + blur input
 
   // ── Trail pass shader (QuadMesh, runs once per frame when needed) ──────────
   const stampVecs = Array.from({ length: MAX_STAMPS }, () => new THREE.Vector4());
@@ -161,12 +255,16 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     const regrown = min(neutral, carried.add(passU.uRegrow));
 
     const val = regrown.toVar("val");
-    // Quintic stamp disks — smoother edges than cubic, no polygon stepping
+    // Quintic stamp disks — smoother edges than cubic, no polygon stepping.
+    // Early-break once past the active stamp count: a walking character stamps
+    // ~2 disks/frame, so the loop exits after 2 iterations instead of grinding
+    // through all 64 slots per texel. The count is uniform across the RT, so
+    // the break is coherent (no divergence).
     Loop({ start: int(0), end: int(MAX_STAMPS), type: "int", condition: "<" }, ({ i }) => {
-      const active = i.lessThan(passU.uStampCount).select(float(1), float(0));
+      If(float(i).greaterThanEqual(passU.uStampCount), () => { Break(); });
       const s      = passU.uStamps.element(i);
       const radius = s.z.max(float(1e-5));
-      const push   = s.w.mul(active);
+      const push   = s.w;
       const d      = uvHere.distance(vec2(s.x, s.y));
       const t      = float(1).sub(d.div(radius)).clamp(0, 1);
       const tq     = t.mul(t).mul(t).mul(t.mul(t.mul(6).sub(15)).add(10));
@@ -204,10 +302,13 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     let activeCount = 0;
     for (let i = 0; i < 4; i++) if (touching[i] > 0) activeCount++;
 
+    // Callers may override stamp size per entity (capsule body width, dog paws,
+    // wheel ruts) so each pawn leaves a footprint that matches its shape rather
+    // than the generic foot/vehicle defaults.
     const vehicle = isVehicle ?? (activeCount > 1);
-    const radius  = vehicle ? params.stampRadius   : params.footRadius;
-    const push    = vehicle ? params.stampPush      : params.footPush;
-    const step    = vehicle ? params.stampStepWorld : params.footStepWorld;
+    const radius  = contacts.radius ?? (vehicle ? params.stampRadius    : params.footRadius);
+    const push    = contacts.push   ?? (vehicle ? params.stampPush      : params.footPush);
+    const step    = contacts.step   ?? (vehicle ? params.stampStepWorld : params.footStepWorld);
 
     for (let i = 0; i < 4; i++) {
       if (!touching[i]) {
@@ -269,11 +370,22 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     renderer.setRenderTarget(rts[wi]);
     trailPassQuad.render(renderer);
 
+    // Derived displacement chain — blur reads the freshly written accumulator,
+    // so swap trailDispNode first. Only runs here, i.e. only on change frames.
+    rtIdx               = wi;
+    trailDispNode.value = rts[wi].texture;
+    renderer.setRenderTarget(blurTmpRT);
+    blurFineQuadA.render(renderer);
+    renderer.setRenderTarget(blurRT);
+    blurFineQuadB.render(renderer);
+    renderer.setRenderTarget(blurCoarseRT);
+    blurCoarseQuadA.render(renderer);
+    renderer.setRenderTarget(blurCoarse2RT);
+    blurCoarseQuadB.render(renderer);
+
     renderer.setRenderTarget(prevRT);
     renderer.setClearColor(prevCol, prevA);
 
-    rtIdx               = wi;
-    trailDispNode.value = rts[wi].texture;
     pendingShift.set(0, 0);
     shiftDirty = false;
   }
@@ -286,7 +398,66 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     uGrooveScale:    uniform(params.grooveScale),
     uRimScale:       uniform(params.rimScale),
     uRimOffset:      uniform(params.rimOffset),
+    uTrailSoft:      uniform(params.trailSoftness),
   };
+
+  // ── Displacement chain (blur → rim, two levels), runs after each trail pass ─
+  // Band-limits the compression to what the graded mesh can represent — the
+  // source of the low-poly look was the ~0.05 m/texel accumulator being
+  // point-sampled by a much coarser vertex grid.
+  function _makePassMat(colorFn) {
+    const m = new THREE.MeshBasicNodeMaterial();
+    m.toneMapped = m.fog = m.depthTest = m.depthWrite = false;
+    m.colorNode = Fn(colorFn)();
+    return m;
+  }
+
+  // 3×3 tent blur. srcNode is sampled at ±offNode (a TSL node, so the width
+  // can be uniform-driven and live-editable); convert() maps the source
+  // encoding to compression [0,1] (identity for already-converted sources).
+  function _makeBlurMat(srcNode, offNode, convert) {
+    return _makePassMat(() => {
+      const uvHere = uv();
+      const w3 = [1, 2, 1];
+      let acc = null;
+      for (let j = -1; j <= 1; j++) {
+        for (let i = -1; i <= 1; i++) {
+          const w = (w3[i + 1] * w3[j + 1]) / 16;
+          const p = uvHere.add(vec2(offNode.mul(i), offNode.mul(j))).clamp(0, 1);
+          const c = convert(srcNode.sample(p).r).mul(w);
+          acc = acc ? acc.add(c) : c;
+        }
+      }
+      return vec4(acc, float(0), float(0), float(1));
+    });
+  }
+
+  // NOTE: no dilate/ring-max rim pass. max() creates kinks (unbandlimited
+  // content) that re-alias on the coarse texel lattice — it showed up as
+  // beading along diagonal rut edges. The rim is instead derived analytically
+  // in the vertex stage from the smooth compression itself (c·(1−c) peaks on
+  // the transition band), which is alias-free by construction.
+
+  const blurTmpNode     = texture(blurTmpRT.texture);
+  const blurNode        = texture(blurRT.texture);
+  const blurCoarseNode  = texture(blurCoarseRT.texture);
+  const blurCoarse2Node = texture(blurCoarse2RT.texture);
+  const _toComp = (v) => neutral.sub(v).max(0).mul(float(1 / TRAIL_NEUT));
+
+  // Fine: two cascaded tents at ±uTrailSoft/2 — the LOOK control. At the 0.30
+  // default this reproduces the snow-lab's steady-state softness (its 512² RT
+  // + per-frame feedback blur settles at ~0.3–0.5 m soft edges) WITHOUT the
+  // feedback (trail never erodes). Lower it for crisp prints, raise for
+  // powder. .sample() via trailDispNode — its .value swaps every ping-pong
+  // frame.
+  const _softOffUV      = u.uTrailSoft.mul(0.5).div(u.uTrailWorldSize);
+  const blurFineQuadA   = new QuadMesh(_makeBlurMat(trailDispNode, _softOffUV, _toComp));
+  const blurFineQuadB   = new QuadMesh(_makeBlurMat(blurTmpNode,   _softOffUV, (v) => v));
+  // Coarse: two more cascaded tents at ±1 coarse texel (~±0.4 m extra with
+  // bilinear) — wide enough that the ~0.35 m outer vertices can't alias on it.
+  const _coarseOffUV    = float(1.0 / DISP_RES_COARSE);
+  const blurCoarseQuadA = new QuadMesh(_makeBlurMat(blurNode,       _coarseOffUV, (v) => v));
+  const blurCoarseQuadB = new QuadMesh(_makeBlurMat(blurCoarseNode, _coarseOffUV, (v) => v));
 
   // ── Snow TSL material ──────────────────────────────────────────────────────
   // Opaque over covered snow; opacity only fades where the painted coverage
@@ -329,24 +500,41 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     return raw.mul(trailEdgeFade(tuv)).mul(shared.tileMask(wxz));
   });
 
-  // ── Vertex: shared snow surface minus compression, plus rim ridge ─────────
+  // Same, from the fine blurred level — used for the shading normal so rut
+  // walls light softly (the lab's smoothness is as much shading as geometry;
+  // a crisp-gradient normal paints hard edges over any mesh).
+  const compressionSoftAt = Fn(([wxz]) => {
+    const tuv = trailUVfn(wxz);
+    return blurNode.sample(tuv.clamp(0, 1)).r
+      .mul(trailEdgeFade(tuv)).mul(shared.tileMask(wxz));
+  });
+
+  // ── Vertex: shared snow surface minus compression, plus rim lip ───────────
+  // Two blur-level taps per vertex, blended by distance from the tile centre
+  // so each vertex reads a signal matched to its local grid density — dense
+  // centre verts get detail, stretched outer verts get a wider blur they
+  // can't alias on. Rim = c·(1−c)·4: an analytic lip riding the compression
+  // transition band — smooth by construction (no dilate/max kinks to alias),
+  // peaks at rimScale·depth on the rut walls, zero in the groove and on
+  // pristine snow. Fade + tileMask are applied here (one consistent factor
+  // for compression AND rim), so both still reach exactly 0 at the tile
+  // border — the terrain hand-off invariant is unchanged.
   mat.positionNode = Fn(() => {
     const lxz   = positionGeometry.xz;
     const wxz   = lxz.add(u.uAnchor);
     const depth = shared.snowDepth(wxz);
 
-    const cH   = compressionAt(wxz);
-    const comp = cH.mul(u.uGrooveScale).clamp(0, 1);
+    const tuv  = trailUVfn(wxz).clamp(0, 1);
+    const fade = trailEdgeFade(tuv).mul(shared.tileMask(wxz));
+    const cF   = blurNode.sample(tuv).r;
+    const cC   = blurCoarse2Node.sample(tuv).r;
+    const lodT = smoothstep(float(LOD_BLEND_NEAR), float(LOD_BLEND_FAR),
+                            max(lxz.x.abs(), lxz.y.abs()));
+    const cB   = mix(cF, cC, lodT).mul(fade);
 
-    // Rim ridge: pushed-up snow around track edges, from the compression
-    // gradient at ±rimOffset. Scales with local depth so thin snow at painted
-    // edges gets a proportionally small rim.
-    const cR = compressionAt(wxz.add(vec2(u.uRimOffset, float(0))));
-    const cL = compressionAt(wxz.sub(vec2(u.uRimOffset, float(0))));
-    const cU = compressionAt(wxz.add(vec2(float(0), u.uRimOffset)));
-    const cD = compressionAt(wxz.sub(vec2(float(0), u.uRimOffset)));
-    const edgeFactor = cR.max(cL).max(cU).max(cD).sub(cH).max(0);
-    const rim        = edgeFactor.mul(u.uRimScale).mul(depth);
+    const comp = cB.mul(u.uGrooveScale).clamp(0, 1);
+    const rim  = cB.mul(float(1).sub(cB)).mul(4)
+      .mul(u.uRimScale).mul(depth);
 
     const y = shared.getTerrainH(wxz)
       .add(depth.mul(float(1).sub(comp)))
@@ -360,14 +548,18 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
   const compRaw = compressionAt(wXZ);
   const compF   = compRaw.mul(u.uGrooveScale).clamp(0, 1);
 
-  // Normal = analytic terrain normal + compression-gradient perturb (makes
-  // prints read crisp and catch light even between vertices) + a small
-  // high-frequency noise perturb so undisturbed snow isn't mirror-flat.
-  const gEps = u.uTrailWorldSize.mul(float(1.5 / TRAIL_RES));
-  const cGR  = compressionAt(wXZ.add(vec2(gEps, float(0))));
-  const cGL  = compressionAt(wXZ.sub(vec2(gEps, float(0))));
-  const cGU  = compressionAt(wXZ.add(vec2(float(0), gEps)));
-  const cGD  = compressionAt(wXZ.sub(vec2(float(0), gEps)));
+  // Normal = analytic terrain normal + compression-gradient perturb + a small
+  // high-frequency noise perturb so undisturbed snow isn't mirror-flat. The
+  // gradient reads the *soft* compression: crisp-gradient normals draw a hard
+  // lighting edge along every rut wall, which reads as polygonal even on
+  // smooth geometry. Albedo/roughness below keep the crisp value so prints
+  // still tint sharply.
+  // Gradient shift tracks the softness control (the lab's normalShift 0.35).
+  const gEps = u.uTrailSoft.clamp(0.1, 0.6);
+  const cGR  = compressionSoftAt(wXZ.add(vec2(gEps, float(0))));
+  const cGL  = compressionSoftAt(wXZ.sub(vec2(gEps, float(0))));
+  const cGU  = compressionSoftAt(wXZ.add(vec2(float(0), gEps)));
+  const cGD  = compressionSoftAt(wXZ.sub(vec2(float(0), gEps)));
   const dScale = u.uBaseDepth.mul(u.uGrooveScale).div(gEps.mul(2));
   const gradX  = cGR.sub(cGL).mul(dScale);
   const gradZ  = cGU.sub(cGD).mul(dScale);
@@ -399,9 +591,8 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
   const rimFade  = smoothstep(float(0), float(TILE_EDGE_FADE), edgeDist);
   mat.opacityNode = smoothstep(float(0.05), float(0.5), shared.covBlend(wXZ)).mul(rimFade);
 
-  // ── Deformation tile mesh (50 m, high-res, play mode only) ──────────────
-  const geo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE, SUBDIVISIONS, SUBDIVISIONS);
-  geo.rotateX(-Math.PI * 0.5);
+  // ── Deformation tile mesh (50 m, centre-dense warped grid, play mode only) ─
+  const geo = buildWarpedTileGeometry(SUBDIVISIONS);
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -420,9 +611,6 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     // in the same call keeps the swap invisible.
     shared.u.uTileOn.value = on ? 1 : 0;
   }
-
-  // ── Grid snap step (matches terrain grid sub-division) ────────────────────
-  const _gridStep = TILE_SIZE / SUBDIVISIONS;   // ~0.2 m
 
   // ── Public API ────────────────────────────────────────────────────────────
 
@@ -456,10 +644,10 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     if (dir) u.uSunDir.value.copy(dir);
   }
 
-  /** Snap the snow tile to a grid aligned with vertex positions. */
+  /** Snap the snow tile anchor to the centre vertex spacing (anti-swim). */
   function updateAnchor(px, pz) {
-    const ax = Math.round(px / _gridStep) * _gridStep;
-    const az = Math.round(pz / _gridStep) * _gridStep;
+    const ax = Math.round(px / CENTER_STEP) * CENTER_STEP;
+    const az = Math.round(pz / CENTER_STEP) * CENTER_STEP;
     u.uAnchor.value.set(ax, az);
     mesh.position.set(ax, 0, az);
   }
@@ -468,8 +656,11 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
    * @param {number} px
    * @param {number} pz
    * @param {boolean} grounded
-   * @param {{ xzs: Float32Array, touching: Float32Array, isVehicle?: boolean } | null} [contacts]
-   *   Per-slot ground contacts (feet / wheels). When set, no body-centre trail.
+   * @param {{ xzs: Float32Array, touching: Float32Array, isVehicle?: boolean,
+   *           radius?: number, push?: number, step?: number } | null} [contacts]
+   *   Per-slot ground contacts (feet / paws / wheels). When set, no body-centre
+   *   trail. radius/push/step override the foot/vehicle stamp defaults so each
+   *   pawn's footprint matches its shape (capsule body width, dog paws, ruts).
    */
   function tick(px, pz, grounded, contacts = null) {
     _shiftTrailCenter(px, pz);
@@ -498,8 +689,12 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
 
   /** Reset trail to neutral (call when exiting play mode). */
   function resetTrail() {
-    _clearRT(rts[0]);
-    _clearRT(rts[1]);
+    _clearRT(rts[0], TRAIL_NEUT);
+    _clearRT(rts[1], TRAIL_NEUT);
+    _clearRT(blurTmpRT, 0);
+    _clearRT(blurRT, 0);
+    _clearRT(blurCoarseRT, 0);
+    _clearRT(blurCoarse2RT, 0);
     rtIdx = 0;
     trailDispNode.value = rts[0].texture;
     trailCenter.set(0, 0);
@@ -515,8 +710,16 @@ export function createSnowSystem(renderer, scene, initialHeightTex) {
     geo.dispose();
     mat.dispose();
     passMat.dispose();
+    blurFineQuadA.material.dispose();
+    blurFineQuadB.material.dispose();
+    blurCoarseQuadA.material.dispose();
+    blurCoarseQuadB.material.dispose();
     rts[0].dispose();
     rts[1].dispose();
+    blurTmpRT.dispose();
+    blurRT.dispose();
+    blurCoarseRT.dispose();
+    blurCoarse2RT.dispose();
   }
 
   /** Debug: current trail RT (read side) — lets tools inspect stamp coverage. */

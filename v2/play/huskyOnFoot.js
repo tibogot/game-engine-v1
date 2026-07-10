@@ -36,6 +36,10 @@ export class HuskyOnFoot {
     this.currentAction = null;
     this.loaded = false;
 
+    // Paw IK-target bones (front-L, front-R, back-L, back-R), filled on load.
+    // Used by the snow system to stamp four paw prints instead of a body trail.
+    this.paws = null;
+
     this.oneShotLock = false;
     this.airActive = false;
     this.jumpPhase = "none";
@@ -85,6 +89,20 @@ export class HuskyOnFoot {
         if (this._excludeFromReflection) this._excludeFromReflection(this.root);
 
         this._autoFitFromModel(model);
+
+        // Paw contact bones. The Husky rig exposes IK foot targets (FFL/FFR =
+        // front paws, FFBL/FFBR = back paws) that sit at ground-contact height
+        // and are keyframed in every gait, so their world XZ tracks the stride.
+        const findByName = (name) => {
+          let found = null;
+          model.traverse((o) => { if (!found && o.name === name) found = o; });
+          return found;
+        };
+        const pFL = findByName("FFL");
+        const pFR = findByName("FFR");
+        const pBL = findByName("FFBL");
+        const pBR = findByName("FFBR");
+        this.paws = (pFL && pFR && pBL && pBR) ? [pFL, pFR, pBL, pBR] : null;
 
         if (gltf.animations?.length) {
           this.mixer = new THREE.AnimationMixer(model);

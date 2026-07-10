@@ -2798,6 +2798,8 @@ async function main() {
     const lbN = document.getElementById("snow-lbl-noise");
     const slG = document.getElementById("snow-sl-groove");
     const lbG = document.getElementById("snow-lbl-groove");
+    const slSo = document.getElementById("snow-sl-soft");
+    const lbSo = document.getElementById("snow-lbl-soft");
     const slRm = document.getElementById("snow-sl-rim");
     const lbRm = document.getElementById("snow-lbl-rim");
     const slRw = document.getElementById("snow-sl-regrow");
@@ -2836,6 +2838,11 @@ async function main() {
       snowSystem.params.grooveScale = Number(slG.value) / 100;
       snowSystem.u.uGrooveScale.value = snowSystem.params.grooveScale;
       lbG.textContent = snowSystem.params.grooveScale.toFixed(2);
+    });
+    slSo.addEventListener("input", () => {
+      snowSystem.params.trailSoftness = Number(slSo.value) / 100;
+      snowSystem.u.uTrailSoft.value = snowSystem.params.trailSoftness;
+      lbSo.textContent = snowSystem.params.trailSoftness.toFixed(2) + "m";
     });
     slRm.addEventListener("input", () => {
       snowSystem.params.rimScale = Number(slRm.value) / 100;

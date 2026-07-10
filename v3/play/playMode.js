@@ -92,6 +92,8 @@ export function createPlayMode({
   const _snowTouch = new Float32Array(4);
   const _footL = new THREE.Vector3();
   const _footR = new THREE.Vector3();
+  const _pawTmp = new THREE.Vector3();
+  const _pawY = new Float32Array(4);
 
   const modeWheel = createModeWheel({
     getCurrentMode: () => moveMode,
@@ -877,12 +879,17 @@ export function createPlayMode({
     positionCamera(dt);
   }
 
-  /** Ground contact points for snow stamping — feet, wheels, or body centre. */
+  /** Ground contact points for snow stamping — feet, paws, wheels, or body. */
   function getSnowContacts() {
     if (moveMode === "fly") return null;
 
     // Ball uses a continuous centre trail (snow-lab style).
     if (moveMode === "ball") return null;
+
+    // Cars stamp a rut under each wheel; the car modules own the wheel
+    // positions and per-wheel ground contact.
+    if (moveMode === "car")   return brunoCar.getSnowContacts?.() ?? null;
+    if (moveMode === "stunt") return stuntCar.getSnowContacts?.() ?? null;
 
     _snowXZs.fill(0);
     _snowTouch.fill(0);
@@ -907,13 +914,40 @@ export function createPlayMode({
       }
     }
 
-    // Capsule / husky / char before bones load — one small body stamp.
+    // Husky leaves four paw prints. Each paw touches when it sits near the
+    // lowest paw of the frame (the planted ones); swinging paws lift clear.
+    // Comparing to the frame minimum keeps this robust to the model's overall
+    // ground offset without needing per-model tuning.
+    if (moveMode === "husky" && capsule.grounded && husky?.paws) {
+      const paws = husky.paws;
+      let minY = Infinity;
+      for (let i = 0; i < 4; i++) {
+        paws[i].getWorldPosition(_pawTmp);
+        _snowXZs[i * 2]     = _pawTmp.x;
+        _snowXZs[i * 2 + 1] = _pawTmp.z;
+        _pawY[i] = _pawTmp.y;
+        if (_pawY[i] < minY) minY = _pawY[i];
+      }
+      for (let i = 0; i < 4; i++) {
+        _snowTouch[i] = (_pawY[i] - minY) < 0.07 ? 1 : 0;
+      }
+      return { xzs: _snowXZs, touching: _snowTouch, isVehicle: false, radius: 0.12 };
+    }
+
+    // Capsule (and char/husky before their model loads) — a body-width trail
+    // sized to the capsule so it reads as the body dragging through the snow,
+    // not a thin footprint line.
     if (moveMode === "capsule" || moveMode === "husky" || moveMode === "char") {
       const touch = capsule.grounded ? 1 : 0;
       _snowXZs[0] = capsule.position.x;
       _snowXZs[1] = capsule.position.z;
       _snowTouch[0] = touch;
-      return { xzs: _snowXZs, touching: _snowTouch, isVehicle: false };
+      return {
+        xzs: _snowXZs,
+        touching: _snowTouch,
+        isVehicle: false,
+        radius: capsule.params?.capRadius ?? 0.4,
+      };
     }
 
     return null;
