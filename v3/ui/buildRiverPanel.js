@@ -190,13 +190,27 @@ function _buildRiverControls(panel, rp, app, prefix) {
     step: 10,
     onChange: () => (prefix === "river2" ? app.river2CarveChanged?.() : app[`${prefix}Changed`]?.()),
   });
+  // Negative offsets must be reachable: the carve only ever LOWERS terrain, so a
+  // surface at or above the height profile can never meet a bank on flat ground —
+  // it just floats. (The Depth style sidesteps this with `waterFreeboard`.)
   _slider(geoBody, rp, "heightOffset", {
     label: "Height offset",
-    min: 0,
+    hint: "Legacy styles only. Metres above the height profile; negative sinks the water into the trench.",
+    min: prefix === "river2" ? -2 : -1,
     max: prefix === "river2" ? 1 : 3,
     step: 0.01,
     onChange: () => app[`${prefix}Changed`]?.(),
   });
+  if (prefix === "river2") {
+    _slider(geoBody, rp, "waterFreeboard", {
+      label: "Water freeboard",
+      hint: "Depth style only. Metres the surface sits below the height profile, down inside the trench. Kept under Carve depth.",
+      min: 0.02,
+      max: 5,
+      step: 0.02,
+      onChange: () => app.river2Changed?.(),
+    });
+  }
 
   const matChanged = () =>
     (prefix === "river2" ? (app.river2MaterialChanged ?? app.river2Changed) : app[`${prefix}Changed`])?.();
@@ -205,7 +219,7 @@ function _buildRiverControls(panel, rp, app, prefix) {
   _dropdown(matBody, rp, "shaderStyle", {
     label: "Shader style",
     options: prefix === "river2"
-      ? { "Toon (GPU)": "Toon", Basic: "Basic" }
+      ? { "Depth (shared w/ lakes)": "Depth", "Toon (GPU)": "Toon", Basic: "Basic" }
       : { Basic: "Basic", "Stylized v1": "Stylized" },
     onChange: () => app[`${prefix}Changed`]?.(),
   });

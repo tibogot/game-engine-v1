@@ -797,12 +797,15 @@ export async function createWorldEnvironment({
   worldOcean.syncParams(toolState.worldOcean);
   worldOcean.setSunDir(_effectiveLightDir);
 
-  // LakeSystem is owned by main.js, but driven from here: the effective light
-  // direction and the day/night sky colours are only fresh inside updateFrame().
-  let lakeSystem = null;
-  function setLakeSystem(sys) {
-    lakeSystem = sys;
-    lakeSystem?.setSunDir(_effectiveLightDir);
+  // Depth-buffer water surfaces (LakeSystem, River+) are owned by main.js but driven
+  // from here: the effective light direction and the day/night sky colours are only
+  // fresh inside updateFrame(). Each surface may implement setSunDir, setSkyColors
+  // and updateWater; all three are optional.
+  const waterSurfaces = [];
+  function addWaterSurface(surface) {
+    if (!surface || waterSurfaces.includes(surface)) return;
+    waterSurfaces.push(surface);
+    surface.setSunDir?.(_effectiveLightDir);
   }
 
   let dayNightCloudLayer = null;
@@ -927,10 +930,10 @@ export async function createWorldEnvironment({
     worldOcean.setSkyColors(_oceanZenith, _oceanHorizon);
     worldOcean.update(dtSec, _appTimeSec, camera);
 
-    if (lakeSystem) {
-      lakeSystem.setSkyColors(_oceanZenith, _oceanHorizon);
-      lakeSystem.setSunDir(_effectiveLightDir);
-      lakeSystem.update(dtSec, _appTimeSec);
+    for (const s of waterSurfaces) {
+      s.setSkyColors?.(_oceanZenith, _oceanHorizon);
+      s.setSunDir?.(_effectiveLightDir);
+      s.updateWater?.(dtSec, _appTimeSec);
     }
   }
 
@@ -994,7 +997,7 @@ export async function createWorldEnvironment({
     syncInteriorUniforms,
     rebuildInteriorVolumes,
     worldOceanChanged,
-    setLakeSystem,
+    addWaterSurface,
     updateFrame,
     renderFrame,
     setSize,

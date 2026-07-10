@@ -3476,6 +3476,11 @@ async function main() {
     maxHeight: MAX_HEIGHT,
     config: splineTerrainConfig,
   });
+  // Shared by lakes and by River+'s Depth style — one texture, both surfaces.
+  const waterNormalMap = new THREE.TextureLoader().load("/textures/waterNormal.webp");
+  waterNormalMap.wrapS = waterNormalMap.wrapT = THREE.RepeatWrapping;
+  waterNormalMap.colorSpace = THREE.NoColorSpace;   // it's a normal map, not colour
+
   riverSystem = new RiverSystem({
     scene,
     toolState: riverEditorToolState,
@@ -3489,29 +3494,26 @@ async function main() {
     heightTexNode,
     cpuHeightmap,
     ensureCpuHeightmap: ensureCpuHeightmapFromGpu,
+    waterNormalMap,
     onCarveCommitted: () => {
       markHeightmapDirty();
       requestHeightmapReadback();
       bvhDebug?.update();
     },
   });
+  worldEnv?.addWaterSurface(river2System);
 
   // ── Lakes ──────────────────────────────────────────────────────────────────
   // No terrain hookup: the shoreline comes from the depth buffer every frame, so
   // sculpting under a lake needs no invalidation, rebase or rebuild.
-  {
-    const lakeNormalMap = new THREE.TextureLoader().load("/textures/waterNormal.webp");
-    lakeNormalMap.wrapS = lakeNormalMap.wrapT = THREE.RepeatWrapping;
-    lakeNormalMap.colorSpace = THREE.NoColorSpace;   // it's a normal map, not colour
-    lakeSystem = new LakeSystem({
-      scene,
-      toolState: lakeToolSlice,
-      normalMap: lakeNormalMap,
-      sampleTerrainHeight,
-      worldSize: WORLD_SIZE,
-    });
-    worldEnv?.setLakeSystem(lakeSystem);
-  }
+  lakeSystem = new LakeSystem({
+    scene,
+    toolState: lakeToolSlice,
+    normalMap: waterNormalMap,
+    sampleTerrainHeight,
+    worldSize: WORLD_SIZE,
+  });
+  worldEnv?.addWaterSurface(lakeSystem);
 
   // Keep the river system's uncarved-base RT in sync with every non-river
   // terrain edit (sculpt strokes, sculpt undo/redo, procedural gen, spline
@@ -5200,6 +5202,8 @@ async function main() {
       recoverEditorInput,
       get rendererSideWork() { return _rendererSideWork; },
       get lakeSystem() { return lakeSystem; },
+      get river2System() { return river2System; },
+      get riverToolSlice() { return riverToolSlice; },
     };
   }
 }

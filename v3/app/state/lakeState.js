@@ -50,7 +50,9 @@ export function createLakeToolState() {
       surfaceOpacity: 1.0,
 
       // Shore foam. Widths are in metres of VERTICAL water depth.
-      foamEnabled:      true,
+      // Off by default: the revo-realms look is a clean depth-faded waterline with
+      // no foam. Turn on per-project in the Foam panel.
+      foamEnabled:      false,
       foamColor:        "#ffffff",
       foamWidth:        0.6,
       foamSharpness:    1.35,
@@ -63,8 +65,8 @@ export function createLakeToolState() {
       foamCutoff:       0.42,
       foamTransition:   0.14,
 
-      // Inward pulse rings
-      pulseEnabled:    true,
+      // Inward pulse rings — off by default, same reason as foam.
+      pulseEnabled:    false,
       pulseColor:      "#c9ebff",
       pulseSpeed:      0.38,
       pulseMaxDepth:   3.2,

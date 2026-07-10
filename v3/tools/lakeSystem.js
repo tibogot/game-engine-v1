@@ -98,6 +98,9 @@ export class LakeSystem {
     this._water.update(dt, elapsed);
   }
 
+  /** worldEnvironment's water-surface hook. River+ drives its own clock from main's loop. */
+  updateWater(dt, elapsed) { this.update(dt, elapsed); }
+
   setSunDir(v)                { this._water.setSunDir(v); }
   setSkyColors(zenith, horizon) { this._water.setSkyColors(zenith, horizon); }
 

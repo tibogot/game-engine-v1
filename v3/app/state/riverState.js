@@ -29,7 +29,13 @@ export function createRiverToolState() {
       showHandles: true,
       activeRiverIndex: 0,
       closed: false,
-      shaderStyle: "Toon",
+      shaderStyle: "Depth",
+      /**
+       * Depth style only: metres the water surface sits BELOW the river's height
+       * profile, i.e. down inside the carved trench. Kept under carveDepth, or the
+       * water breaches the channel rim and floats on the surrounding ground.
+       */
+      waterFreeboard: 0.4,
       shallowColor: "#4fd8c2",
       deepColor: "#14526e",
       highlightColor: "#cdf3ff",

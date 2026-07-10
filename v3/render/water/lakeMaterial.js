@@ -50,8 +50,8 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
 import {
   Fn, If, uniform, float, vec2, vec3,
-  mix, smoothstep, step, dot, exp, pow, max, min, abs, saturate,
-  floor, fract, sin, length, Loop,
+  mix, smoothstep, step, dot, cross, exp, pow, max, min, abs, saturate,
+  floor, fract, sin, length, Loop, uv, attribute,
   normalize, reflect, texture, positionWorld, positionView, cameraPosition,
   cameraNear, cameraFar, screenUV, Discard,
   viewportDepthTexture, viewportSharedTexture, perspectiveDepthToViewZ,
@@ -185,7 +185,10 @@ export const LAKE_DEFAULTS = {
   // ── Shore foam ─────────────────────────────────────────────────────────────
   // All widths below are in metres of VERTICAL water depth, not view-ray depth,
   // so the band keeps its size as the camera tilts.
-  foamEnabled:     true,
+  // Off by default — the reference look (revo-realms) has no foam at all, just a
+  // depth-faded waterline. When both foam and rings are off the Worley FBM is
+  // branched out entirely, so the default costs nothing.
+  foamEnabled:     false,
   foamColor:       "#ffffff",
   /** Vertical depth at which the foam band has faded out entirely. */
   foamWidth:       0.6,
@@ -204,7 +207,7 @@ export const LAKE_DEFAULTS = {
   foamTransition: 0.14,
 
   // ── Inward pulse rings ─────────────────────────────────────────────────────
-  pulseEnabled:   true,
+  pulseEnabled:   false,
   pulseColor:     "#c9ebff",
   /** Rings/second leaving the shoreline. */
   pulseSpeed:     0.38,
@@ -235,9 +238,21 @@ const blendRNM = /*#__PURE__*/ Fn(([n1, n2]) =>
  * @param {object}         deps
  * @param {THREE.Texture}  deps.normalMap — tiling water normal map (NoColorSpace, RepeatWrapping)
  * @param {object}         [deps.params]  — partial LAKE_DEFAULTS override
+ * @param {'world'|'ribbon'} [deps.uvMode='world']
+ *   'world'  — a horizontal lake quad. Normals tile in world XZ; the tangent frame
+ *              is the identity because the surface is always horizontal.
+ *   'ribbon' — a river strip. The geometry must supply `uv` (x = arc length in
+ *              metres downstream, y = 0..1 across) and an `aTangent` vec3 attribute
+ *              (unit, world-space, horizontal centreline direction). Normals tile
+ *              along the ribbon and scroll downstream, and the tangent frame is
+ *              built from aTangent so wave crests run across the flow, not across
+ *              the world.
+ * @param {number}         [deps.ribbonWidth=16] — metres across the ribbon, so the
+ *   normal map keeps a square aspect. Only used by uvMode 'ribbon'.
  */
-export function createLakeMaterial({ normalMap, params = {} }) {
+export function createLakeMaterial({ normalMap, params = {}, uvMode = "world", ribbonWidth = 16 }) {
   const p = { ...LAKE_DEFAULTS, ...params };
+  const isRibbon = uvMode === "ribbon";
 
   const u = {
     time:            uniform(0),
@@ -295,13 +310,18 @@ export function createLakeMaterial({ normalMap, params = {} }) {
     pulse2Intensity: uniform(p.pulse2Intensity),
     pulseSharpness:  uniform(p.pulseSharpness),
     pulseNoiseAmt:   uniform(p.pulseNoiseAmt),
+
+    ribbonWidth: uniform(ribbonWidth),
   };
 
   const material = new MeshBasicNodeMaterial();
   material.fog         = false;
   material.transparent = false;   // we composite against the grabbed backbuffer ourselves
-  material.depthWrite  = false;   // see note 5 — the quad overhangs land
+  material.depthWrite  = false;   // see note 5 — the surface overhangs land
   material.depthTest   = true;
+  // A river ribbon's winding depends on which way its centreline curves, so it can
+  // present either face. A lake quad is always front-facing.
+  if (isRibbon) material.side = THREE.DoubleSide;
 
   // ── One copy of each backbuffer, sampled at several UVs (note 6) ───────────
   const sceneColorTex = viewportSharedTexture();
@@ -312,16 +332,45 @@ export function createLakeMaterial({ normalMap, params = {} }) {
     perspectiveDepthToViewZ(sceneDepthTex.sample(suv).r, cameraNear, cameraFar).negate(),
   );
 
-  /** Tangent -> world for a horizontal plane with world-XZ tiling (note 3). */
-  const toWorld = (n) => vec3(n.x, n.z, n.y).normalize();
+  /**
+   * Tangent -> world.
+   *
+   * 'world': the surface is a horizontal plane tiled in world XZ, so T=(1,0,0),
+   *   B=(0,0,1), N=(0,1,0) and the transform collapses to (x,y,z) -> (x,z,y).
+   *
+   * 'ribbon': T is the centreline direction, B = T x up is the across-stream
+   *   direction, N is up. Using the true up rather than the ribbon's geometric
+   *   normal is a deliberate approximation — the profile is smoothed and
+   *   downhill-enforced, so river slopes are a few percent at most.
+   */
+  const _up = vec3(0, 1, 0);
+  const _T  = isRibbon ? normalize(attribute("aTangent")) : null;
+  const toWorld = isRibbon
+    ? (n) => _T.mul(n.x).add(cross(_T, _up).mul(n.y)).add(_up.mul(n.z)).normalize()
+    : (n) => vec3(n.x, n.z, n.y).normalize();
 
   material.colorNode = Fn(() => {
     // ── 1. Surface normal: two scrolling layers, RNM-blended ────────────────
-    const drift  = u.flowDir.mul(u.time.mul(u.flowSpeed));
-    const baseUv = positionWorld.xz.mul(u.normalTiling);
+    // Lakes tile in world XZ and drift with the wind. Rivers tile along the
+    // ribbon (u.x is arc length in metres) and both layers scroll downstream at
+    // different rates, which is what reads as current rather than chop.
+    let baseUv, drift1, drift2;
+    if (isRibbon) {
+      baseUv = vec2(uv().x, uv().y.sub(0.5).mul(u.ribbonWidth)).mul(u.normalTiling);
+      // flowSpeed is metres/second here (the ribbon's u.x is arc length in metres),
+      // so it has to go through normalTiling to become texture-UV/second.
+      const s = u.time.mul(u.flowSpeed).mul(u.normalTiling);
+      drift1 = vec2(s, 0);
+      drift2 = vec2(s.mul(0.6), 0);
+    } else {
+      baseUv = positionWorld.xz.mul(u.normalTiling);
+      const d = u.flowDir.mul(u.time.mul(u.flowSpeed));
+      drift1 = d;
+      drift2 = d.negate();
+    }
 
-    const tsn1 = texture(normalMap, baseUv.mul(1.37).add(drift)).rgb.mul(2).sub(1).normalize();
-    const tsn2 = texture(normalMap, baseUv.mul(0.73).sub(drift)).rgb.mul(2).sub(1).normalize();
+    const tsn1 = texture(normalMap, baseUv.mul(1.37).add(drift1)).rgb.mul(2).sub(1).normalize();
+    const tsn2 = texture(normalMap, baseUv.mul(0.73).add(drift2)).rgb.mul(2).sub(1).normalize();
     const tsnFull = blendRNM(tsn1, tsn2).toVar();
 
     const tsn    = vec3(tsnFull.xy.mul(u.normalStrength), tsnFull.z).normalize().toVar();

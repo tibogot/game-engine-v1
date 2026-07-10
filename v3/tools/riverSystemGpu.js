@@ -29,6 +29,7 @@ import {
   vec4,
 } from "three/tsl";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
+import { createLakeMaterial } from "../render/water/lakeMaterial.js";
 
 /**
  * River+ for V3 — fully GPU-resident carve pipeline.
@@ -103,7 +104,7 @@ export class RiverSystemGPU {
    * @param {function}       opts.ensureCpuHeightmap async () => refresh cpuHeightmap from GPU
    * @param {function}       opts.onCarveCommitted   () => sync grass/trees/bvh after a committed carve
    */
-  constructor({ scene, toolState, renderer, getRT, heightTexNode, cpuHeightmap, ensureCpuHeightmap, onCarveCommitted }) {
+  constructor({ scene, toolState, renderer, getRT, heightTexNode, cpuHeightmap, ensureCpuHeightmap, onCarveCommitted, waterNormalMap = null }) {
     this.scene = scene;
     this.toolState = toolState;
     this.renderer = renderer;
@@ -112,6 +113,7 @@ export class RiverSystemGPU {
     this.cpuHeightmap = cpuHeightmap;
     this.ensureCpuHeightmap = ensureCpuHeightmap;
     this.onCarveCommitted = onCarveCommitted;
+    this.waterNormalMap = waterNormalMap;
 
     // segments: { points: Vector3[], mesh: Mesh|null, profile: {pts,levels,arc,slopes}|null }
     this.segments = [];
@@ -391,9 +393,34 @@ export class RiverSystemGPU {
     const pts = curve.getSpacedPoints(this._profilePointCount());
     const n = pts.length;
 
+    // Water level = the LOWEST uncarved ground across the carve corridor, not the
+    // height at the centreline.
+    //
+    // Sampling only the centreline is fine on a valley floor but wrong on a
+    // hillside: the ground on the downhill flank sits below the centreline, so the
+    // water surface ends up above it and the river spills sideways out of its own
+    // trench. Carving cannot save it — the carve only ever lowers terrain, it never
+    // builds a levee. Taking the corridor minimum puts the surface under the lowest
+    // rim, which is also what a real river does: it finds the bottom of the valley.
+    const reach = rp.width * 0.5 + rp.carveShoulder;
+    const OFFSETS = [-1, -0.5, 0, 0.5, 1];
     const levels = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-      levels[i] = sampleBaseWorld(this._cpuBase, pts[i].x, pts[i].z);
+      const prev = pts[Math.max(0, i - 1)];
+      const next = pts[Math.min(n - 1, i + 1)];
+      let tx = next.x - prev.x;
+      let tz = next.z - prev.z;
+      const len = Math.hypot(tx, tz) || 1;
+      tx /= len; tz /= len;
+      const px = -tz, pz = tx;   // perpendicular, XZ
+
+      let lo = Infinity;
+      for (const o of OFFSETS) {
+        const dx = px * reach * o, dz = pz * reach * o;
+        const h = sampleBaseWorld(this._cpuBase, pts[i].x + dx, pts[i].z + dz);
+        if (h < lo) lo = h;
+      }
+      levels[i] = lo;
     }
     this._smoothInPlace(levels, 8);
     this._enforceDownhill(levels);
@@ -555,20 +582,57 @@ export class RiverSystemGPU {
   // Water surface geometry
   // ═══════════════════════════════════════════════════════════════════════════
 
+  /** True when the water surface is cut by the depth buffer rather than by its own edge. */
+  _isDepthStyle() {
+    return this.toolState.river2.shaderStyle === "Depth" && !!this.waterNormalMap;
+  }
+
+  /**
+   * Half-width of the water ribbon, in metres.
+   *
+   * Depth style spans the ENTIRE carve footprint. The waterline is then found per
+   * pixel by the material's Discard, so the ribbon only has to over-cover. The
+   * legacy styles draw their own edge, so they keep the old ad-hoc width.
+   *
+   * The old width was a constant `width/2 + min(shoulder, width)/2`, but the real
+   * waterline distance varies station to station with the local bank slope — it was
+   * measured at 8.5 m to 10.25 m along one river against a fixed 8 m ribbon. No
+   * constant can match it, which is why the depth style stops trying.
+   */
+  _ribbonHalfWidth() {
+    const rp = this.toolState.river2;
+    return this._isDepthStyle()
+      ? rp.width * 0.5 + rp.carveShoulder
+      : rp.width * 0.5 + Math.min(rp.carveShoulder, rp.width) * 0.5;
+  }
+
+  /**
+   * Water surface height at a station, in metres.
+   *
+   * Depth style sits `freeboard` metres BELOW the profile, i.e. down inside the
+   * trench. The carve only ever lowers terrain (`newH = min(h, target)`), so a
+   * surface at or above the profile can never meet a bank on flat ground — it just
+   * floats. Legacy styles keep `heightOffset`, which is that bug.
+   */
+  _waterY(level) {
+    const rp = this.toolState.river2;
+    if (!this._isDepthStyle()) return level + rp.heightOffset;
+    // Never breach the channel rim, and always keep some water over the bed.
+    const fb = Math.min(Math.max(rp.waterFreeboard ?? 0.4, 0.02), rp.carveDepth - 0.05);
+    return level - fb;
+  }
+
   _buildRiverGeometry(seg) {
     const profile = this._ensureProfile(seg);
     if (!profile) return null;
-    const rp = this.toolState.river2;
     const { pts, levels, arc, slopes } = profile;
     const n = pts.length;
-    // Overhang into the carve shoulder so the water edge tucks under the
-    // rising bank instead of ending on the flat bed.
-    const halfW = rp.width * 0.5 + Math.min(rp.carveShoulder, rp.width) * 0.5;
-    const off = rp.heightOffset;
+    const halfW = this._ribbonHalfWidth();
 
     const positions = new Float32Array(n * 6);
     const uvs = new Float32Array(n * 4);
     const slopeAttr = new Float32Array(n * 2);
+    const tangents = new Float32Array(n * 6);
     const indices = [];
 
     const tan = new THREE.Vector3();
@@ -582,13 +646,21 @@ export class RiverSystemGPU {
       const px = -tan.z;
       const pz = tan.x;
 
-      const y = levels[i] + off;
+      const y = this._waterY(levels[i]);
       positions[i * 6 + 0] = pos.x - px * halfW;
       positions[i * 6 + 1] = y;
       positions[i * 6 + 2] = pos.z - pz * halfW;
       positions[i * 6 + 3] = pos.x + px * halfW;
       positions[i * 6 + 4] = y;
       positions[i * 6 + 5] = pos.z + pz * halfW;
+
+      // Centreline direction, duplicated to both edge vertices. The depth material
+      // builds its tangent frame from this so wave crests run across the current.
+      for (const o of [0, 3]) {
+        tangents[i * 6 + o + 0] = tan.x;
+        tangents[i * 6 + o + 1] = 0;
+        tangents[i * 6 + o + 2] = tan.z;
+      }
 
       uvs[i * 4 + 0] = arc[i];
       uvs[i * 4 + 1] = 0;
@@ -608,6 +680,7 @@ export class RiverSystemGPU {
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
     geo.setAttribute("aSlope", new THREE.BufferAttribute(slopeAttr, 1));
+    geo.setAttribute("aTangent", new THREE.BufferAttribute(tangents, 3));
     geo.setIndex(indices);
     return geo;
   }
@@ -743,11 +816,35 @@ export class RiverSystemGPU {
     };
     this._toonMat = mkMat(toonFrag);
     this._basicMat = mkMat(basicFrag);
+
+    // Depth style — the same material lakes use. Its waterline comes from the scene
+    // depth buffer, so it needs no bank foam, no depth ramp and no width uniform.
+    this._depthWater = null;
+    if (this.waterNormalMap) {
+      this._depthWater = createLakeMaterial({
+        normalMap: this.waterNormalMap,
+        uvMode: "ribbon",
+        // The depth-style footprint, regardless of the style selected right now.
+        ribbonWidth: (rp.width * 0.5 + rp.carveShoulder) * 2,
+        params: {
+          flowSpeed: rp.flowSpeed ?? 2.5,   // metres/second
+          normalTiling: 0.08,
+          // A river is shallow: absorption has to bite over ~2 m, not 20.
+          depthDistance: 3,
+          shoreFade: 0.05,
+        },
+      });
+    }
   }
 
   _activeMaterial() {
+    if (this._isDepthStyle()) return this._depthWater.material;
     return this.toolState.river2.shaderStyle === "Basic" ? this._basicMat : this._toonMat;
   }
+
+  /** @param {THREE.Vector3} v — unit vector pointing TOWARD the sun */
+  setSunDir(v) { this._depthWater?.setSunDir(v); }
+  setSkyColors(zenith, horizon) { this._depthWater?.setSkyColors(zenith, horizon); }
 
   syncMaterial() {
     const p = this.toolState.river2;
@@ -771,6 +868,11 @@ export class RiverSystemGPU {
     u.riverWidth.value = p.width ?? 8;
     u.foamWidth.value = p.foamWidth ?? 0.18;
 
+    if (this._depthWater) {
+      this._depthWater.uniforms.ribbonWidth.value = this._ribbonHalfWidth() * 2;
+      this._depthWater.syncParams({ flowSpeed: p.flowSpeed });
+    }
+
     const mat = this._activeMaterial();
     for (const seg of this.segments) {
       if (seg.mesh && seg.mesh.material !== mat) seg.mesh.material = mat;
@@ -780,6 +882,7 @@ export class RiverSystemGPU {
   update(dtSec) {
     this._time += dtSec;
     this.wU.time.value = this._time;
+    this._depthWater?.update(dtSec, this._time);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
