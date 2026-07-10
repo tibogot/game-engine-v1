@@ -206,6 +206,38 @@ export function buildLakePanel(app) {
     _slider(shore, lp, "shoreFade",      { label: "Shore fade", min: 0, max: 2, step: 0.01, onChange: onM,
       hint: "Metres of water over which the surface fades in at the waterline." });
     _slider(shore, lp, "surfaceOpacity", { label: "Surface opacity", min: 0, max: 1, step: 0.01, onChange: onM });
+
+    const foam = _section(panel, "Foam", false);
+    _hint(foam, "Widths are metres of vertical water depth, so the band keeps its size as the camera tilts.");
+    _toggle(foam, lp, "foamEnabled",      { label: "Enabled", onChange: onM });
+    _color (foam, lp, "foamColor",        { label: "Color", onChange: onM });
+    _slider(foam, lp, "foamWidth",        { label: "Band width", min: 0.02, max: 4, step: 0.01, onChange: onM });
+    _slider(foam, lp, "foamSharpness",    { label: "Sharpness", min: 0.2, max: 4, step: 0.01, onChange: onM,
+      hint: ">1 pulls the foam tighter against the shore." });
+    _slider(foam, lp, "foamIntensity",    { label: "Intensity", min: 0, max: 2, step: 0.01, onChange: onM });
+    _slider(foam, lp, "foamCutoff",       { label: "Cutoff", min: 0, max: 1, step: 0.01, onChange: onM });
+    _slider(foam, lp, "foamTransition",   { label: "Edge softness", min: 0.01, max: 0.5, step: 0.005, onChange: onM });
+    _slider(foam, lp, "foamNoiseScale",   { label: "Cell scale", min: 0.05, max: 4, step: 0.05, onChange: onM,
+      hint: "Worley cells per metre." });
+    _slider(foam, lp, "foamNoiseSpeed",   { label: "Drift speed", min: 0, max: 0.5, step: 0.005, onChange: onM });
+    _slider(foam, lp, "foamJitter",       { label: "Cell jitter", min: 0, max: 1, step: 0.01, onChange: onM });
+    _slider(foam, lp, "foamWarpScale",    { label: "Warp scale", min: 0.05, max: 2, step: 0.01, onChange: onM });
+    _slider(foam, lp, "foamWarpStrength", { label: "Warp strength", min: 0, max: 2, step: 0.01, onChange: onM,
+      hint: "Turns the cellular pattern into a ragged waterline. At 0 the foam reads as bubbles." });
+
+    const pulse = _section(panel, "Pulse rings", false);
+    _toggle(pulse, lp, "pulseEnabled",    { label: "Enabled", onChange: onM });
+    _color (pulse, lp, "pulseColor",      { label: "Color", onChange: onM });
+    _slider(pulse, lp, "pulseSpeed",      { label: "Rings / sec", min: 0, max: 2, step: 0.01, onChange: onM });
+    _slider(pulse, lp, "pulseMaxDepth",   { label: "Travel depth", min: 0.2, max: 12, step: 0.1, onChange: onM,
+      hint: "Vertical depth a ring reaches before dying." });
+    _slider(pulse, lp, "pulseRingWidth",  { label: "Ring width", min: 0.01, max: 1, step: 0.005, onChange: onM });
+    _slider(pulse, lp, "pulseIntensity",  { label: "Intensity", min: 0, max: 2, step: 0.01, onChange: onM });
+    _slider(pulse, lp, "pulse2Intensity", { label: "2nd ring intensity", min: 0, max: 2, step: 0.01, onChange: onM });
+    _slider(pulse, lp, "pulseStagger",    { label: "2nd ring offset", min: 0, max: 1, step: 0.01, onChange: onM });
+    _slider(pulse, lp, "pulseFade",       { label: "Fade", min: 0, max: 5, step: 0.01, onChange: onM });
+    _slider(pulse, lp, "pulseSharpness",  { label: "Sharpness", min: 0.2, max: 4, step: 0.01, onChange: onM });
+    _slider(pulse, lp, "pulseNoiseAmt",   { label: "Noise breakup", min: 0, max: 1, step: 0.01, onChange: onM });
   }
 
   refresh();

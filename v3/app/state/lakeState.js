@@ -48,6 +48,33 @@ export function createLakeToolState() {
       /** Metres of water over which the surface fades in at the shoreline. */
       shoreFade:      0.1,
       surfaceOpacity: 1.0,
+
+      // Shore foam. Widths are in metres of VERTICAL water depth.
+      foamEnabled:      true,
+      foamColor:        "#ffffff",
+      foamWidth:        0.6,
+      foamSharpness:    1.35,
+      foamIntensity:    1.15,
+      foamNoiseScale:   0.9,
+      foamNoiseSpeed:   0.05,
+      foamJitter:       0.9,
+      foamWarpScale:    0.4,
+      foamWarpStrength: 0.6,
+      foamCutoff:       0.42,
+      foamTransition:   0.14,
+
+      // Inward pulse rings
+      pulseEnabled:    true,
+      pulseColor:      "#c9ebff",
+      pulseSpeed:      0.38,
+      pulseMaxDepth:   3.2,
+      pulseRingWidth:  0.11,
+      pulseIntensity:  0.72,
+      pulseFade:       1.65,
+      pulseStagger:    0.5,
+      pulse2Intensity: 0.45,
+      pulseSharpness:  1.15,
+      pulseNoiseAmt:   0.35,
     },
   };
 }
@@ -80,5 +107,30 @@ export function lakeParamsFromToolState(lp) {
     depthDistance:  lp.depthDistance,
     shoreFade:      lp.shoreFade,
     surfaceOpacity: lp.surfaceOpacity,
+
+    foamEnabled:      lp.foamEnabled,
+    foamColor:        lp.foamColor,
+    foamWidth:        lp.foamWidth,
+    foamSharpness:    lp.foamSharpness,
+    foamIntensity:    lp.foamIntensity,
+    foamNoiseScale:   lp.foamNoiseScale,
+    foamNoiseSpeed:   lp.foamNoiseSpeed,
+    foamJitter:       lp.foamJitter,
+    foamWarpScale:    lp.foamWarpScale,
+    foamWarpStrength: lp.foamWarpStrength,
+    foamCutoff:       lp.foamCutoff,
+    foamTransition:   lp.foamTransition,
+
+    pulseEnabled:    lp.pulseEnabled,
+    pulseColor:      lp.pulseColor,
+    pulseSpeed:      lp.pulseSpeed,
+    pulseMaxDepth:   lp.pulseMaxDepth,
+    pulseRingWidth:  lp.pulseRingWidth,
+    pulseIntensity:  lp.pulseIntensity,
+    pulseFade:       lp.pulseFade,
+    pulseStagger:    lp.pulseStagger,
+    pulse2Intensity: lp.pulse2Intensity,
+    pulseSharpness:  lp.pulseSharpness,
+    pulseNoiseAmt:   lp.pulseNoiseAmt,
   };
 }

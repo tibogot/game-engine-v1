@@ -49,12 +49,91 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
 import {
-  Fn, uniform, float, vec2, vec3,
-  mix, smoothstep, step, dot, exp, pow, max, saturate,
+  Fn, If, uniform, float, vec2, vec3,
+  mix, smoothstep, step, dot, exp, pow, max, min, abs, saturate,
+  floor, fract, sin, length, Loop,
   normalize, reflect, texture, positionWorld, positionView, cameraPosition,
   cameraNear, cameraFar, screenUV, Discard,
   viewportDepthTexture, viewportSharedTexture, perspectiveDepthToViewZ,
 } from "three/tsl";
+
+// ─── Noise helpers (lifted from v2/core/legacy/lake-shader.js) ────────────────
+
+const _hash22 = /*#__PURE__*/ Fn(([p]) => {
+  const px = dot(p, vec2(127.1, 311.7));
+  const py = dot(p, vec2(269.5, 183.3));
+  return fract(sin(vec2(px, py)).mul(43758.5453));
+});
+
+const _nHash = /*#__PURE__*/ Fn(([p]) => {
+  const pp = fract(p.mul(vec2(127.1, 311.7)));
+  const d = dot(pp, pp.add(45.32));
+  return fract(pp.x.add(d).mul(pp.y.add(d)));
+});
+
+const _vnoise2 = /*#__PURE__*/ Fn(([p]) => {
+  const i = floor(p);
+  const f = fract(p);
+  const uu = f.mul(f).mul(float(3).sub(f.mul(2)));
+  const n00 = _nHash(i);
+  const n10 = _nHash(i.add(vec2(1, 0)));
+  const n01 = _nHash(i.add(vec2(0, 1)));
+  const n11 = _nHash(i.add(vec2(1, 1)));
+  return mix(mix(n00, n10, uu.x), mix(n01, n11, uu.x), uu.y);
+});
+
+/** 3-octave value FBM, used only to domain-warp the foam. */
+const _valueFbm3 = /*#__PURE__*/ Fn(([p_immutable]) => {
+  const p = p_immutable.toVar();
+  const value = float(0).toVar();
+  const amp = float(1).toVar();
+  const total = float(0).toVar();
+  Loop(3, () => {
+    value.addAssign(amp.mul(_vnoise2(p)));
+    total.addAssign(amp);
+    p.assign(p.mul(2.3));
+    amp.assign(amp.mul(0.4));
+  });
+  return value.div(max(total, float(1e-4)));
+});
+
+const _NEIGHBORS = [
+  [-1, -1], [0, -1], [1, -1],
+  [-1,  0], [0,  0], [1,  0],
+  [-1,  1], [0,  1], [1,  1],
+];
+
+/** Worley F1, cell points jittered toward hash. jitter=0 -> regular grid. */
+const _worleyF1 = /*#__PURE__*/ Fn(([p, jitter]) => {
+  const ip = floor(p);
+  const fp = fract(p);
+  const md = float(10).toVar();
+  for (const [nx, ny] of _NEIGHBORS) {
+    const cell = vec2(float(nx), float(ny));
+    const pt = mix(vec2(0.5, 0.5), _hash22(ip.add(cell)), jitter);
+    md.assign(min(md, length(cell.add(pt).sub(fp))));
+  }
+  return md;
+});
+
+/**
+ * 3-octave Worley FBM. v2 runs 5 octaves; 3 is visually indistinguishable at the
+ * shoreline and this runs on every water fragment, not just foamy ones — TSL has
+ * no cheap way to branch the band mask around it.
+ */
+const _worleyFbm3 = /*#__PURE__*/ Fn(([p_immutable, jitter]) => {
+  const p = p_immutable.toVar();
+  const value = float(0).toVar();
+  const amp = float(0.5).toVar();
+  const total = float(0).toVar();
+  Loop(3, () => {
+    value.addAssign(amp.mul(_worleyF1(p, jitter)));
+    total.addAssign(amp);
+    p.assign(p.mul(2.0));
+    amp.assign(amp.mul(0.5));
+  });
+  return value.div(max(total, float(1e-4)));
+});
 
 export const LAKE_DEFAULTS = {
   // Surface normals
@@ -102,6 +181,45 @@ export const LAKE_DEFAULTS = {
   shoreFade:         0.1,
   /** Global surface opacity. 1 = fully shaded water, 0 = invisible. */
   surfaceOpacity:    1.0,
+
+  // ── Shore foam ─────────────────────────────────────────────────────────────
+  // All widths below are in metres of VERTICAL water depth, not view-ray depth,
+  // so the band keeps its size as the camera tilts.
+  foamEnabled:     true,
+  foamColor:       "#ffffff",
+  /** Vertical depth at which the foam band has faded out entirely. */
+  foamWidth:       0.6,
+  /** Pushes foam toward the waterline. >1 = tighter against the shore. */
+  foamSharpness:   1.35,
+  foamIntensity:   1.15,
+  /** Worley cells per metre. */
+  foamNoiseScale:  0.9,
+  foamNoiseSpeed:  0.05,
+  foamJitter:      0.9,
+  /** Domain warp — this is what makes the edge ragged instead of cellular. */
+  foamWarpScale:    0.4,
+  foamWarpStrength: 0.6,
+  /** Below this the foam is cut away entirely; the transition sets its softness. */
+  foamCutoff:     0.42,
+  foamTransition: 0.14,
+
+  // ── Inward pulse rings ─────────────────────────────────────────────────────
+  pulseEnabled:   true,
+  pulseColor:     "#c9ebff",
+  /** Rings/second leaving the shoreline. */
+  pulseSpeed:     0.38,
+  /** Vertical depth the ring reaches before dying. */
+  pulseMaxDepth:  3.2,
+  pulseRingWidth: 0.11,
+  pulseIntensity: 0.72,
+  /** How fast a ring fades over its life. Higher = dies sooner. */
+  pulseFade:      1.65,
+  /** Phase offset of the second ring, in ring periods. */
+  pulseStagger:   0.5,
+  pulse2Intensity: 0.45,
+  pulseSharpness: 1.15,
+  /** How much the Worley field chews holes in the rings. */
+  pulseNoiseAmt:  0.35,
 };
 
 /** Reoriented Normal Mapping. Both inputs are unpacked, normalised tangent normals. */
@@ -152,6 +270,31 @@ export function createLakeMaterial({ normalMap, params = {} }) {
     depthDistance:  uniform(p.depthDistance),
     shoreFade:      uniform(p.shoreFade),
     surfaceOpacity: uniform(p.surfaceOpacity),
+
+    foamEnabled:      uniform(p.foamEnabled ? 1 : 0),
+    foamColor:        uniform(new THREE.Color(p.foamColor)),
+    foamWidth:        uniform(p.foamWidth),
+    foamSharpness:    uniform(p.foamSharpness),
+    foamIntensity:    uniform(p.foamIntensity),
+    foamNoiseScale:   uniform(p.foamNoiseScale),
+    foamNoiseSpeed:   uniform(p.foamNoiseSpeed),
+    foamJitter:       uniform(p.foamJitter),
+    foamWarpScale:    uniform(p.foamWarpScale),
+    foamWarpStrength: uniform(p.foamWarpStrength),
+    foamCutoff:       uniform(p.foamCutoff),
+    foamTransition:   uniform(p.foamTransition),
+
+    pulseEnabled:    uniform(p.pulseEnabled ? 1 : 0),
+    pulseColor:      uniform(new THREE.Color(p.pulseColor)),
+    pulseSpeed:      uniform(p.pulseSpeed),
+    pulseMaxDepth:   uniform(p.pulseMaxDepth),
+    pulseRingWidth:  uniform(p.pulseRingWidth),
+    pulseIntensity:  uniform(p.pulseIntensity),
+    pulseFade:       uniform(p.pulseFade),
+    pulseStagger:    uniform(p.pulseStagger),
+    pulse2Intensity: uniform(p.pulse2Intensity),
+    pulseSharpness:  uniform(p.pulseSharpness),
+    pulseNoiseAmt:   uniform(p.pulseNoiseAmt),
   };
 
   const material = new MeshBasicNodeMaterial();
@@ -212,6 +355,13 @@ export function createLakeMaterial({ normalMap, params = {} }) {
     // sample, so absorption and the shoreline agree with the colour we read.
     const waterThickness = mix(thickness, refractedThick, isSafe).toVar();
 
+    // waterThickness runs ALONG THE VIEW RAY, so it stretches at grazing angles.
+    // Foam bands must key off vertical depth or they'd breathe as the camera
+    // tilts. For surface point S and terrain point P on the same ray with
+    // direction r, S.y - P.y == thickness * -r.y. Exact, one dot product.
+    const rayDir       = normalize(positionWorld.sub(cameraPosition));
+    const verticalDepth = waterThickness.mul(rayDir.y.abs()).toVar();
+
     // ── 4. Reflection: analytical sky gradient (note 7) ────────────────────
     const viewDir        = normalize(cameraPosition.sub(positionWorld)).toVar();
     const reflectVec     = reflect(viewDir.negate(), normal);
@@ -243,13 +393,69 @@ export function createLakeMaterial({ normalMap, params = {} }) {
     const glintShore   = smoothstep(0, u.glintShoreFade, waterThickness);
     const sunGlint     = u.sunColor.mul(spec.mul(u.glintStrength).mul(glintFresnel)).mul(glintShore);
 
-    // ── 8. Composite ──────────────────────────────────────────────────────
+    // ── 8/9. Shore foam + inward pulse rings ──────────────────────────────
+    // Both are driven by one domain-warped Worley field, and both only exist
+    // near the shore. A real branch, not a multiply-by-zero: the Worley FBM is
+    // ~30 hashes and most of a lake is deep water that needs none of it. The
+    // condition is uniform across the whole surface at a given depth, so it
+    // stays coherent within a warp.
+    const foamMask  = float(0).toVar();
+    const pulseMask = float(0).toVar();
+
+    const fxWanted   = u.foamEnabled.max(u.pulseEnabled);
+    const fxRange    = u.foamWidth.max(u.pulseMaxDepth);
+    const nearShore  = step(verticalDepth, fxRange);
+
+    If(fxWanted.mul(nearShore).greaterThan(0), () => {
+      // Domain-warped Worley. The warp is what turns a cellular pattern into a
+      // ragged waterline; without it the foam reads as bubbles.
+      const foamUv = positionWorld.xz.mul(u.foamNoiseScale).toVar();
+      const scroll = u.time.mul(u.foamNoiseSpeed);
+      foamUv.addAssign(vec2(scroll, scroll.mul(0.71)));
+
+      const warpP = foamUv.mul(u.foamWarpScale);
+      const warp  = vec2(_valueFbm3(warpP).sub(0.5), _valueFbm3(warpP.add(vec2(4, 4))).sub(0.5));
+      const foamNoise = _worleyFbm3(foamUv.add(warp.mul(u.foamWarpStrength)), u.foamJitter).toVar();
+
+      const foamBand = float(1).sub(smoothstep(0, u.foamWidth, verticalDepth));
+      const foamRaw  = pow(max(foamBand, float(1e-4)), u.foamSharpness).mul(foamNoise);
+      const cutLo    = max(u.foamCutoff.sub(u.foamTransition), float(0));
+      const cutHi    = min(u.foamCutoff.add(u.foamTransition), float(1));
+      foamMask.assign(
+        smoothstep(cutLo, cutHi, foamRaw).mul(u.foamIntensity).mul(u.foamEnabled).clamp(),
+      );
+
+      // Two staggered bands travelling from the waterline into deeper water.
+      // The Worley field doubles as their breakup, for free.
+      const ringMod = mix(float(1), foamNoise, u.pulseNoiseAmt);
+      const ring = Fn(([phase, strength]) => {
+        const t     = fract(u.time.mul(u.pulseSpeed).add(phase)).toVar();
+        const front = t.mul(u.pulseMaxDepth);
+        const raw   = float(1).sub(smoothstep(0, u.pulseRingWidth, verticalDepth.sub(front).abs()));
+        const shaped = pow(max(raw.mul(ringMod), float(1e-4)), u.pulseSharpness);
+        // Rings fade out over their life, and never bleed onto dry land.
+        return shaped.mul(pow(float(1).sub(t), u.pulseFade)).mul(strength)
+          .mul(step(0.02, verticalDepth));
+      });
+      pulseMask.assign(
+        ring(float(0), u.pulseIntensity)
+          .add(ring(u.pulseStagger, u.pulse2Intensity))
+          .mul(u.pulseEnabled).clamp(),
+      );
+    });
+
+    // ── 10. Composite ─────────────────────────────────────────────────────
     // Fading toward screenColor at the waterline is what softens the shore; the
     // hard Discard above only removes the fragments that are truly over land.
     const opacity     = smoothstep(0, u.shoreFade, waterThickness).mul(u.surfaceOpacity).clamp();
     const shadedWater = mix(throughWater, reflectedColor, fresnelWeight);
 
-    return mix(screenColor, shadedWater, opacity).add(sunGlint);
+    // Foam sits on top of the water but under the glint: wet foam doesn't glint.
+    const withWater = mix(screenColor, shadedWater, opacity);
+    const withRings = mix(withWater, u.pulseColor, pulseMask);
+    const withFoam  = mix(withRings, u.foamColor, foamMask);
+
+    return withFoam.add(sunGlint.mul(float(1).sub(foamMask)));
   })();
 
   const _c = (hex, target) => target.set(hex);
@@ -278,6 +484,31 @@ export function createLakeMaterial({ normalMap, params = {} }) {
     if (sp.depthDistance     != null) u.depthDistance.value     = sp.depthDistance;
     if (sp.shoreFade         != null) u.shoreFade.value         = sp.shoreFade;
     if (sp.surfaceOpacity    != null) u.surfaceOpacity.value    = sp.surfaceOpacity;
+
+    if (sp.foamEnabled      != null) u.foamEnabled.value      = sp.foamEnabled ? 1 : 0;
+    if (sp.foamColor        != null) _c(sp.foamColor, u.foamColor.value);
+    if (sp.foamWidth        != null) u.foamWidth.value        = sp.foamWidth;
+    if (sp.foamSharpness    != null) u.foamSharpness.value    = sp.foamSharpness;
+    if (sp.foamIntensity    != null) u.foamIntensity.value    = sp.foamIntensity;
+    if (sp.foamNoiseScale   != null) u.foamNoiseScale.value   = sp.foamNoiseScale;
+    if (sp.foamNoiseSpeed   != null) u.foamNoiseSpeed.value   = sp.foamNoiseSpeed;
+    if (sp.foamJitter       != null) u.foamJitter.value       = sp.foamJitter;
+    if (sp.foamWarpScale    != null) u.foamWarpScale.value    = sp.foamWarpScale;
+    if (sp.foamWarpStrength != null) u.foamWarpStrength.value = sp.foamWarpStrength;
+    if (sp.foamCutoff       != null) u.foamCutoff.value       = sp.foamCutoff;
+    if (sp.foamTransition   != null) u.foamTransition.value   = sp.foamTransition;
+
+    if (sp.pulseEnabled    != null) u.pulseEnabled.value    = sp.pulseEnabled ? 1 : 0;
+    if (sp.pulseColor      != null) _c(sp.pulseColor, u.pulseColor.value);
+    if (sp.pulseSpeed      != null) u.pulseSpeed.value      = sp.pulseSpeed;
+    if (sp.pulseMaxDepth   != null) u.pulseMaxDepth.value   = sp.pulseMaxDepth;
+    if (sp.pulseRingWidth  != null) u.pulseRingWidth.value  = sp.pulseRingWidth;
+    if (sp.pulseIntensity  != null) u.pulseIntensity.value  = sp.pulseIntensity;
+    if (sp.pulseFade       != null) u.pulseFade.value       = sp.pulseFade;
+    if (sp.pulseStagger    != null) u.pulseStagger.value    = sp.pulseStagger;
+    if (sp.pulse2Intensity != null) u.pulse2Intensity.value = sp.pulse2Intensity;
+    if (sp.pulseSharpness  != null) u.pulseSharpness.value  = sp.pulseSharpness;
+    if (sp.pulseNoiseAmt   != null) u.pulseNoiseAmt.value   = sp.pulseNoiseAmt;
   }
 
   function update(dt, elapsed) {
