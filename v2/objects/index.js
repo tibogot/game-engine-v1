@@ -38,6 +38,7 @@ import { buildBillboardMesh, BILLBOARD_DEFAULTS, BILLBOARD_HERO_POINTS } from ".
 import { buildTireWallMesh, TIRE_WALL_DEFAULTS, TIRE_WALL_HERO_POINTS } from "./tireWall.js";
 import { buildFloodlightMesh, FLOODLIGHT_DEFAULTS, FLOODLIGHT_HERO_POINTS } from "./floodlight.js";
 import { buildHedgeMesh, HEDGE_DEFAULTS, HEDGE_HERO_POINTS } from "./hedge.js";
+import { buildLedMatrixMesh, LED_MATRIX_DEFAULTS, LED_MATRIX_HERO_POINTS } from "./ledMatrix.js";
 
 // schema helpers (compact)
 const sl = (key, label, min, max, step) => ({ type: "slider", key, label, min, max, step });
@@ -45,6 +46,7 @@ const co = (key, label) => ({ type: "color", key, label });
 const tg = (key, label) => ({ type: "toggle", key, label });
 const se = (key, label, options) => ({ type: "select", key, label, options });
 const fi = (key, label) => ({ type: "file", key, label, accept: "image/*" });
+const tx = (key, label) => ({ type: "text", key, label });
 const SEP = { type: "sep" };
 const SIDE = { right: "Right", left: "Left" };
 
@@ -585,6 +587,55 @@ export const OBJECTS = [
       co("leafColorTop", "Leaf top"),
       SEP,
       sl("roughness", "Roughness", 0, 1, 0.01),
+    ],
+  },
+  {
+    id: "ledMatrix", label: "LED Matrix Board",
+    build: buildLedMatrixMesh, defaults: LED_MATRIX_DEFAULTS,
+    minPoints: 1, preview: "point", hero: LED_MATRIX_HERO_POINTS,
+    // `image` is a THREE.Texture picked in the inspector; `text` serialises, so
+    // chevron + text are the two sources that survive a save/load round-trip.
+    initParams: { _image: null },
+    resolveParams: (p) => ({ ...p, image: p._image ?? null }),
+    schema: [
+      se("source", "Source", { chevron: "Chevron", image: "Image", text: "Text marquee" }),
+      tx("text", "Text"),
+      fi("_image", "Image"),
+      tg("rgb", "RGB (video wall)"),
+      sl("threshold", "Threshold", 0.05, 0.95, 0.01),
+      tg("fitSource", "Fit to source"),
+      sl("panSpeed", "Speed", -1.5, 1.5, 0.01),
+      SEP,
+      sl("chevronCount", "Chevron count", 3, 12, 1),
+      sl("skew", "Chevron sharpness", 0, 5, 0.1),
+      sl("duty", "Chevron band", 0.15, 0.85, 0.01),
+      SEP,
+      sl("spacing", "Spacing", 6, 80, 0.5),
+      sl("sideOffset", "Side offset", 0, 20, 0.2),
+      se("side", "Side", SIDE),
+      SEP,
+      sl("boardW", "Board W", 1, 12, 0.1),
+      sl("boardH", "Board H", 0.6, 8, 0.1),
+      sl("tiltDeg", "Tilt °", -20, 20, 0.5),
+      tg("legs", "Legs"),
+      sl("standHeight", "Stand height", 0, 4, 0.05),
+      SEP,
+      se("shape", "Pixel style", { round: "Round", square: "Square", diamond: "Diamond", solid: "Solid" }),
+      sl("cols", "Columns", 20, 160, 1),
+      sl("rows", "Rows", 8, 48, 1),
+      sl("dotRadius", "Dot size", 0.12, 0.5, 0.01),
+      sl("emissive", "Brightness", 1, 12, 0.1),
+      sl("offLevel", "Off level", 0, 0.3, 0.005),
+      SEP,
+      co("coreColor", "LED core"),
+      co("edgeColor", "LED rim"),
+      co("colorFrame", "Frame"),
+      co("colorLeg", "Legs"),
+      SEP,
+      sl("framePad", "Frame pad", 0, 0.5, 0.01),
+      sl("frameDepth", "Frame depth", 0.05, 0.6, 0.01),
+      sl("roughness", "Roughness", 0, 1, 0.01),
+      sl("metalness", "Metalness", 0, 1, 0.01),
     ],
   },
 ];

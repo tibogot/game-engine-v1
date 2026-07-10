@@ -5217,6 +5217,10 @@ async function main() {
       get lakeSystem() { return lakeSystem; },
       get river2System() { return river2System; },
       get riverToolSlice() { return riverToolSlice; },
+      get grassRings() { return grassRings; },
+      get cliffGrassRings() { return cliffGrassRings; },
+      get grassState() { return grassState; },
+      renderer,
     };
   }
 }

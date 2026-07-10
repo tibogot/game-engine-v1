@@ -50,18 +50,35 @@ function metal(hex, p) {
   return new THREE.MeshStandardMaterial({ color: hex, roughness: p.roughness, metalness: p.metalness });
 }
 
-function buildBillboardUnit(p) {
+/**
+ * Materials for a whole run of billboards. Built once and shared by every unit:
+ * the LED material is uniform-driven, so a per-unit copy would only buy
+ * duplicate shader compiles.
+ */
+function buildBillboardMaterials(p, W, H) {
+  return {
+    frame: metal(p.colorFrame, p),
+    back: metal(p.colorBack, p),
+    leg: metal(p.colorFrame, p),
+    surf:
+      p.surface === "matte"
+        ? new THREE.MeshStandardMaterial({ color: p.matteColor, roughness: 0.85, metalness: 0 })
+        : makeLedBoardMaterial(p, W, H),
+  };
+}
+
+function buildBillboardUnit(p, mats) {
   const unit = new THREE.Group();
   unit.name = "BillboardUnit";
 
   const W = Math.max(0.5, p.panelWidth);
   const H = Math.max(0.3, p.panelHeight);
   const cy = p.panelBottom + H * 0.5;
-  const frameMat = metal(p.colorFrame, p);
-  const backMat = metal(p.colorBack, p);
+  const frameMat = mats.frame;
+  const backMat = mats.back;
 
   // legs
-  const legMat = metal(p.colorFrame, p);
+  const legMat = mats.leg;
   for (const sx of [-1, 1]) {
     const lx = sx * W * 0.36;
     const leg = new THREE.Mesh(
@@ -103,13 +120,7 @@ function buildBillboardUnit(p) {
   }
 
   // surface
-  let surfMat;
-  if (p.surface === "matte") {
-    surfMat = new THREE.MeshStandardMaterial({ color: p.matteColor, roughness: 0.85, metalness: 0 });
-  } else {
-    surfMat = makeLedBoardMaterial(p, W, H);
-  }
-  const surf = new THREE.Mesh(new THREE.PlaneGeometry(W, H), surfMat);
+  const surf = new THREE.Mesh(new THREE.PlaneGeometry(W, H), mats.surf);
   surf.position.z = 0.06;
   head.add(surf);
 
@@ -143,9 +154,15 @@ export function buildBillboardMesh({
     new THREE.Vector3(pt.x, getWorldHeight(pt.x, pt.z), pt.z),
   );
 
+  const mats = buildBillboardMaterials(
+    p,
+    Math.max(0.5, p.panelWidth),
+    Math.max(0.3, p.panelHeight),
+  );
+
   if (points.length === 1) {
     const v = grounded[0];
-    const unit = buildBillboardUnit(p);
+    const unit = buildBillboardUnit(p, mats);
     unit.position.set(v.x, getWorldHeight(v.x, v.z), v.z);
     group.add(unit);
     return group;
@@ -166,7 +183,7 @@ export function buildBillboardMesh({
 
     const x = pos.x + _perp.x * offset * sign;
     const z = pos.z + _perp.z * offset * sign;
-    const unit = buildBillboardUnit(p);
+    const unit = buildBillboardUnit(p, mats);
     unit.position.set(x, getWorldHeight(x, z), z);
     // face the track (panel +Z points back toward the spline)
     unit.rotation.y = Math.atan2(-_perp.x * sign, -_perp.z * sign);

@@ -1,16 +1,5 @@
 import * as THREE from "three";
-import {
-  color,
-  float,
-  Fn,
-  mix,
-  mod,
-  smoothstep,
-  step,
-  time,
-  uv,
-  vec2,
-} from "three/tsl";
+import { makeLedBoardMaterial } from "./shared/ledBoard.js";
 
 /**
  * Procedural start/finish gantry — a span structure (two towers + a lattice
@@ -78,89 +67,6 @@ function metalMat(hex, p) {
     roughness: p.roughness,
     metalness: p.metalness,
   });
-}
-
-// Emissive LED-board material — pattern picked at build time, self-animating.
-// Dot size is driven by a physical pitch (m/dot) so the board reads the same
-// whether the span is 6 m or 50 m.
-function makeBoardMaterial(p, boardW, boardH) {
-  const pitch = Math.max(0.02, p.dotPitch);
-  const cols = Math.max(6, Math.round(boardW / pitch));
-  const rows = Math.max(2, Math.round(boardH / pitch));
-  const dotR = p.dotRadius;
-  const I = p.emissive;
-  const off = p.offLevel;
-
-  // chevrons / checker squares sized in metres so they scale with the board
-  const chevCount = Math.max(1, Math.round(boardW / Math.max(0.2, p.chevronSpacing)));
-  const nx = Math.max(2, Math.round(boardW / Math.max(0.1, p.checkerSize)));
-  const ny = Math.max(1, Math.round(boardH / Math.max(0.1, p.checkerSize)));
-
-  const mat = new THREE.MeshStandardNodeMaterial({
-    color: 0x000000,
-    roughness: 1,
-    metalness: 0,
-    side: THREE.DoubleSide,
-  });
-
-  const solid = p.boardShape === "solid";
-
-  mat.emissiveNode = Fn(() => {
-    const base = uv();
-    const gx = base.x.mul(cols);
-    const gy = base.y.mul(rows);
-    const cxc = gx.floor().add(0.5);
-    const cyc = gy.floor().add(0.5);
-
-    // pixel style: round / square / diamond / solid (no mask)
-    const lx = gx.sub(cxc).abs();
-    const ly = gy.sub(cyc).abs();
-    let dot;
-    if (solid) {
-      dot = float(1.0);
-    } else {
-      const dist =
-        p.boardShape === "square"
-          ? lx.max(ly)
-          : p.boardShape === "diamond"
-            ? lx.add(ly)
-            : vec2(lx, ly).length(); // round
-      dot = smoothstep(dotR, dotR - 0.06, dist);
-    }
-
-    // solid samples the pattern continuously (smooth); else at the cell centre
-    const cu = solid ? base.x : cxc.div(cols);
-    const cv = solid ? base.y : cyc.div(rows);
-
-    // hot core -> warm rim per dot (matches the LED board look)
-    const core = dot.mul(dot);
-
-    // base colour + "lit" amount per mode
-    let baseColor;
-    let lit;
-    if (p.boardMode === "chevron") {
-      const dy = cv.sub(0.5).abs();
-      const phase = cu.mul(chevCount).add(dy.mul(p.chevronSkew)).sub(time.mul(p.panSpeed));
-      lit = smoothstep(p.chevronDuty, p.chevronDuty - 0.04, phase.fract());
-      baseColor = color(p.chevronColor);
-    } else if (p.boardMode === "lights") {
-      const colIdx = cu.mul(5.0).floor();
-      const band = smoothstep(0.3, 0.26, cv.sub(0.5).abs());
-      const ph = mod(time, 7.0); // count up 0..5s, hold to 6s, dark to 7s
-      lit = step(colIdx, ph).mul(step(6.0, ph).oneMinus()).mul(band);
-      baseColor = color(p.lightColor);
-    } else {
-      const sq = mod(cu.mul(nx).floor().add(cv.mul(ny).floor()), 2.0);
-      baseColor = mix(color(p.boardColorB), color(p.boardColorA), sq);
-      lit = float(1.0);
-    }
-
-    const ledColor = baseColor.mul(mix(float(0.55), float(1.3), core));
-    const brightness = dot.mul(lit.mul(I).add(off));
-    return ledColor.mul(brightness);
-  })();
-
-  return mat;
 }
 
 /**
@@ -266,7 +172,7 @@ export function buildGantryMesh({
   if (p.board) {
     const boardW = Math.max(0.5, spanLen - 2 * p.boardInsetEnds);
     const boardH = Math.max(0.3, p.beamHeight * p.boardHeightFrac);
-    const boardMat = makeBoardMaterial(p, boardW, boardH);
+    const boardMat = makeLedBoardMaterial(p, boardW, boardH);
     const board = new THREE.Mesh(new THREE.PlaneGeometry(boardW, boardH), boardMat);
     const pos = new THREE.Vector3(midXZ.x, beamCenterY, midXZ.z).addScaledVector(
       facing,

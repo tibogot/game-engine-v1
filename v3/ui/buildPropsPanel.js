@@ -788,6 +788,23 @@ panel.innerHTML = "";
                 options: e.options,
                 onChange: () => syncParam(e.key, true),
               });
+            } else if (e.type === "text") {
+              const row = document.createElement("div");
+              row.className = "prop-row";
+              row.innerHTML = `<span class="prop-label">${e.label}</span><div class="prop-value"><input type="text" class="prop-text" style="width:100%"></div>`;
+              const inp = row.querySelector(".prop-text");
+              inp.value = p[e.key] ?? "";
+              // commit on blur/Enter — every edit rasterises a canvas + rebuilds
+              const commit = () => {
+                if (p[e.key] === inp.value) return;
+                p[e.key] = inp.value;
+                syncParam(e.key, true);
+              };
+              inp.addEventListener("change", commit);
+              inp.addEventListener("keydown", (ev) => {
+                if (ev.key === "Enter") commit();
+              });
+              sec.appendChild(row);
             }
             // "file" (texture) params are skipped on placed props for now.
           }

@@ -1857,6 +1857,23 @@
                 options: e.options,
                 onChange: rebuildObj,
               });
+            } else if (e.type === "text") {
+              const row = document.createElement("div");
+              row.className = "prop-row";
+              row.innerHTML = `<span class="prop-label">${e.label}</span><div class="prop-value"><input type="text" class="prop-text" style="width:100%"></div>`;
+              const textInp = row.querySelector(".prop-text");
+              textInp.value = P[e.key] ?? "";
+              // rebuild on commit, not per keystroke — each edit rasterises a canvas
+              const commitText = () => {
+                if (P[e.key] === textInp.value) return;
+                P[e.key] = textInp.value;
+                rebuildObj();
+              };
+              textInp.addEventListener("change", commitText);
+              textInp.addEventListener("keydown", (ev) => {
+                if (ev.key === "Enter") commitText();
+              });
+              sec.appendChild(row);
             } else if (e.type === "file") {
               const row = document.createElement("div");
               row.className = "prop-row";

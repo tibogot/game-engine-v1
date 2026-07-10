@@ -190,7 +190,11 @@ export class LakeSystem {
 
   addLake({ cx, cz, sizeX, sizeZ, level }) {
     const mesh = new THREE.Mesh(this._geometry, this._water.material);
-    mesh.frustumCulled = false;
+    // Frustum culling ON. A lake's bounds are exactly the quad, so three can cull it
+    // reliably — and a rendered water surface costs two full-resolution framebuffer
+    // copies (colour + depth) whether or not it is on screen. `frustumCulled = false`
+    // would make every off-screen lake pay them.
+    mesh.frustumCulled = true;
     // Opaque queue, but after every other opaque: the grabbed backbuffer must
     // already hold the terrain we are going to refract and absorb through.
     mesh.renderOrder = 100;

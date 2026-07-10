@@ -33,10 +33,14 @@
  *     anything drawn afterwards. Discarding makes the waterline a correctness
  *     guarantee rather than a happy accident.
  *
- *  6. One framebuffer copy, not two. The original calls viewportDepthTexture()
- *     twice (once at screenUV, once at the refracted UV); each call builds its
- *     own node and each node copies the depth buffer. We build one node and
- *     .sample() it at both UVs.
+ *  6. One framebuffer copy, not two — and one for the WHOLE ENGINE, not one per
+ *     water surface. Every ViewportTextureNode issues its own
+ *     `renderer.copyFramebufferToTexture()` in `updateBefore`, once per render. The
+ *     original calls viewportDepthTexture() twice (screenUV and the refracted UV),
+ *     so it copies the depth buffer twice per surface. We build ONE colour node and
+ *     ONE depth node at module scope, shared by every lake and river, and .sample()
+ *     them at whatever UV we need. Cost is 2 full-res copies per frame total,
+ *     regardless of how many water surfaces are on screen.
  *
  *  7. Reflections are the analytical zenith->horizon sky gradient that
  *     oceanShader.js already uses, fed by worldEnvironment's setSkyColors().
@@ -74,6 +78,19 @@ const _ssrMaster = /*#__PURE__*/ uniform(1);
 /** @param {boolean} on — false removes the SSR march from every water surface. */
 export function setWaterSsrEnabled(on) { _ssrMaster.value = on ? 1 : 0; }
 export function isWaterSsrEnabled() { return _ssrMaster.value > 0; }
+
+/**
+ * The scene colour and depth grabs, shared by EVERY water surface.
+ *
+ * Each ViewportTextureNode copies the framebuffer once per render inside its
+ * `updateBefore`. Building these per material would mean a lake and a river each
+ * copying colour and depth — four full-resolution copies a frame for two identical
+ * snapshots. Hoisting them here makes it two, no matter how much water exists.
+ * (`viewportSharedTexture` shares the destination texture but NOT the copy, so it
+ * does not solve this on its own.)
+ */
+const _sceneColorTex = /*#__PURE__*/ viewportSharedTexture();
+const _sceneDepthTex = /*#__PURE__*/ viewportDepthTexture();
 
 // ─── Noise helpers (lifted from v2/core/legacy/lake-shader.js) ────────────────
 
@@ -367,9 +384,9 @@ export function createLakeMaterial({ normalMap, params = {}, uvMode = "world", r
   // present either face. A lake quad is always front-facing.
   if (isRibbon) material.side = THREE.DoubleSide;
 
-  // ── One copy of each backbuffer, sampled at several UVs (note 6) ───────────
-  const sceneColorTex = viewportSharedTexture();
-  const sceneDepthTex = viewportDepthTexture();
+  // ── Engine-wide backbuffer grabs, sampled at several UVs (note 6) ──────────
+  const sceneColorTex = _sceneColorTex;
+  const sceneDepthTex = _sceneDepthTex;
 
   /** Scene distance from camera, in metres, at a given screen UV. */
   const sceneDistAt = Fn(([suv = vec2(0)]) =>
