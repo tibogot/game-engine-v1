@@ -63,6 +63,18 @@ const SSR_STEPS  = 24;
 /** Binary-search refinements once a step has crossed the depth buffer. */
 const SSR_REFINE = 4;
 
+/**
+ * Global SSR kill-switch, shared by every water surface ever created — lakes and
+ * rivers alike. It ANDs with each surface's own `ssrEnabled`, so this is the one
+ * lever that turns the ray march off everywhere, whichever panel you're in.
+ * Lives at module scope precisely so there is a single source of truth.
+ */
+const _ssrMaster = /*#__PURE__*/ uniform(1);
+
+/** @param {boolean} on — false removes the SSR march from every water surface. */
+export function setWaterSsrEnabled(on) { _ssrMaster.value = on ? 1 : 0; }
+export function isWaterSsrEnabled() { return _ssrMaster.value > 0; }
+
 // ─── Noise helpers (lifted from v2/core/legacy/lake-shader.js) ────────────────
 
 const _hash22 = /*#__PURE__*/ Fn(([p]) => {
@@ -455,7 +467,8 @@ export function createLakeMaterial({ normalMap, params = {}, uvMode = "world", r
     // The depth buffer was copied BEFORE any water drew, so it holds only opaque
     // geometry. That is exactly what we want to reflect, and it means the water
     // can never reflect itself.
-    If(u.ssrEnabled.greaterThan(0), () => {
+    // Both the global master and this surface's own switch must be on.
+    If(_ssrMaster.mul(u.ssrEnabled).greaterThan(0), () => {
       const vsNrm = cameraViewMatrix.mul(vec4(normal, 0)).xyz.normalize().toVar();
       // Start a hair off the surface, or shallow water self-intersects immediately
       // at the shoreline and paints a hard rim.

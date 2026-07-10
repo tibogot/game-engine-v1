@@ -1,3 +1,5 @@
+import { buildDepthWaterControls } from "./depthWaterControls.js";
+
 const _arrowSvg =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>';
 const _checkSvg =
@@ -81,9 +83,10 @@ function _color(parent, obj, key, opts) {
 }
 
 function _toggle(parent, obj, key, opts) {
-  const { label, onChange } = opts;
+  const { label, onChange, hint } = opts;
   const row = document.createElement("div");
   row.className = "prop-row";
+  if (hint) row.title = hint;
   row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><button type="button" class="prop-toggle ${obj[key] ? "checked" : ""}">${_checkSvg}</button></div>`;
   const btn = row.querySelector(".prop-toggle");
   btn.addEventListener("click", () => {
@@ -109,6 +112,17 @@ function _dropdown(parent, obj, key, opts) {
   });
   parent.appendChild(row);
 }
+
+function _hint(parent, text) {
+  const p = document.createElement("div");
+  p.className = "prop-row";
+  p.style.cssText = "opacity:0.65;font-size:11px;line-height:1.4;display:block";
+  p.textContent = text;
+  parent.appendChild(p);
+}
+
+/** Handed to the shared depth-water control builder. */
+const _widgets = { section: _section, slider: _slider, color: _color, toggle: _toggle, hint: _hint };
 
 function _button(parent, opts) {
   const btn = document.createElement("button");
@@ -221,22 +235,25 @@ function _buildRiverControls(panel, rp, app, prefix) {
     options: prefix === "river2"
       ? { "Depth (shared w/ lakes)": "Depth", "Toon (GPU)": "Toon", Basic: "Basic" }
       : { Basic: "Basic", "Stylized v1": "Stylized" },
-    onChange: () => app[`${prefix}Changed`]?.(),
+    // Styles expose different controls, so the panel has to be rebuilt, not just synced.
+    onChange: () => { app[`${prefix}Changed`]?.(); app.refresh?.(); },
   });
-  if (prefix === "river2") {
-    _toggle(matBody, rp, "ssrEnabled", {
-      label: "Screen-space reflections",
-      onChange: matChanged,
+
+  // Depth style: the exact control set the Lake panel shows, bound to this river's
+  // own values. The Toon/Basic sections below are inert in this style, so they are
+  // skipped entirely rather than left on screen doing nothing.
+  if (prefix === "river2" && rp.shaderStyle === "Depth") {
+    _slider(matBody, rp, "flowSpeed", {
+      label: "Flow speed",
+      hint: "Metres/second downstream. The normal map scrolls along the ribbon's arc length.",
+      min: 0, max: 12, step: 0.05, onChange: matChanged,
     });
-    _slider(matBody, rp, "ssrStrength", {
-      label: "SSR strength",
-      hint: "Depth style only. 0 = sky gradient only, 1 = full screen-space hit colour.",
-      min: 0,
-      max: 1,
-      step: 0.01,
-      onChange: matChanged,
+    buildDepthWaterControls(_widgets, panel, rp.water, app.waterGlobals, matChanged, {
+      label: "this river",
     });
+    return;
   }
+
   _color(matBody, rp, "shallowColor", { label: "Shallow", onChange: matChanged });
   _color(matBody, rp, "deepColor", { label: "Deep", onChange: matChanged });
   _color(matBody, rp, "highlightColor", { label: "Highlight", onChange: matChanged });
@@ -349,15 +366,22 @@ function _buildRiverControls(panel, rp, app, prefix) {
   }
 }
 
+/** @returns {{ refresh: () => void }} — call refresh() when shaderStyle changes. */
 export function buildRiverPanels(app) {
-  const riverPanel = document.getElementById("river-panel");
-  const river2Panel = document.getElementById("river2-panel");
-  if (riverPanel) {
-    riverPanel.innerHTML = "";
-    _buildRiverControls(riverPanel, app.toolState.river, app, "river");
+  function refresh() {
+    const riverPanel = document.getElementById("river-panel");
+    const river2Panel = document.getElementById("river2-panel");
+    if (riverPanel) {
+      riverPanel.innerHTML = "";
+      _buildRiverControls(riverPanel, app.toolState.river, app, "river");
+    }
+    if (river2Panel) {
+      river2Panel.innerHTML = "";
+      _buildRiverControls(river2Panel, app.toolState.river2, app, "river2");
+    }
   }
-  if (river2Panel) {
-    river2Panel.innerHTML = "";
-    _buildRiverControls(river2Panel, app.toolState.river2, app, "river2");
-  }
+  // The shader-style dropdown reaches back through this to rebuild itself.
+  app.refresh = refresh;
+  refresh();
+  return { refresh };
 }

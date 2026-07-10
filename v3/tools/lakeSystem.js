@@ -16,7 +16,7 @@
  */
 
 import * as THREE from "three";
-import { createLakeMaterial } from "../render/water/lakeMaterial.js";
+import { createLakeMaterial, setWaterSsrEnabled } from "../render/water/lakeMaterial.js";
 import { lakeParamsFromToolState } from "../app/state/lakeState.js";
 
 /** Below this the drag was a click, not a rectangle. */
@@ -90,6 +90,9 @@ export class LakeSystem {
 
   /** Push toolState.lake into the shared material. */
   syncMaterial() {
+    // ssrMaster is global (it also gates River+), so it goes to the module, not
+    // to this material's uniforms.
+    setWaterSsrEnabled(this.toolState.lake.ssrMaster !== false);
     this._water.syncParams(lakeParamsFromToolState(this.toolState.lake));
   }
 
@@ -253,7 +256,7 @@ export class LakeSystem {
   exportData() {
     const lp = this.toolState.lake;
     return {
-      params: { ...lp },
+      params: { ...lp, water: { ...lp.water } },
       lakes: this.lakes.map(({ cx, cz, sizeX, sizeZ, level }) => ({ cx, cz, sizeX, sizeZ, level })),
     };
   }
@@ -262,9 +265,16 @@ export class LakeSystem {
     this.clear();
     if (!data) return;
     if (data.params) {
-      // Only adopt keys we still know about — old projects may carry retired ones.
-      for (const k of Object.keys(this.toolState.lake)) {
-        if (data.params[k] !== undefined) this.toolState.lake[k] = data.params[k];
+      // Only adopt keys we still know about — old projects may carry retired ones,
+      // and new ones must keep their defaults rather than becoming undefined.
+      const lp = this.toolState.lake;
+      for (const k of Object.keys(lp)) {
+        if (k === "water") continue;
+        if (data.params[k] !== undefined) lp[k] = data.params[k];
+      }
+      const w = data.params.water;
+      if (w) for (const k of Object.keys(lp.water)) {
+        if (w[k] !== undefined) lp.water[k] = w[k];
       }
       this.syncMaterial();
     }

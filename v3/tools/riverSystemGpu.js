@@ -30,6 +30,7 @@ import {
 } from "three/tsl";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { createLakeMaterial } from "../render/water/lakeMaterial.js";
+import { depthWaterParams } from "../app/state/depthWaterState.js";
 
 /**
  * River+ for V3 — fully GPU-resident carve pipeline.
@@ -826,20 +827,19 @@ export class RiverSystemGPU {
         uvMode: "ribbon",
         // The depth-style footprint, regardless of the style selected right now.
         ribbonWidth: (rp.width * 0.5 + rp.carveShoulder) * 2,
-        params: {
-          flowSpeed: rp.flowSpeed ?? 2.5,   // metres/second
-          normalTiling: 0.08,
-          // A river is shallow: absorption has to bite over ~2 m, not 20.
-          depthDistance: 3,
-          shoreFade: 0.05,
-          // A river sits in a trench, so its banks are always close by and on
-          // screen — SSR pays off more here than on an open lake.
-          ssrEnabled: rp.ssrEnabled ?? true,
-          ssrStrength: rp.ssrStrength ?? 1,
-          ssrMaxDistance: 60,
-        },
+        params: this._depthParams(),
       });
     }
+  }
+
+  /**
+   * toolState.river2 -> createLakeMaterial params.
+   * `flowSpeed` is metres/second downstream; the ribbon UV mode scrolls the normals
+   * along arc length, so it needs no flowDir (that's the lake's wind angle).
+   */
+  _depthParams() {
+    const rp = this.toolState.river2;
+    return { ...depthWaterParams(rp.water), flowSpeed: rp.flowSpeed ?? 2.5 };
   }
 
   _activeMaterial() {
@@ -875,11 +875,7 @@ export class RiverSystemGPU {
 
     if (this._depthWater) {
       this._depthWater.uniforms.ribbonWidth.value = this._ribbonHalfWidth() * 2;
-      this._depthWater.syncParams({
-        flowSpeed:   p.flowSpeed,
-        ssrEnabled:  p.ssrEnabled,
-        ssrStrength: p.ssrStrength,
-      });
+      this._depthWater.syncParams(this._depthParams());
     }
 
     const mat = this._activeMaterial();

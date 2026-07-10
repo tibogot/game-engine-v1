@@ -94,6 +94,7 @@ import { RiverSystemGPU } from "../tools/riverSystemGpu.js";
 import { createLakeToolState } from "./state/lakeState.js";
 import { buildLakePanel } from "../ui/buildLakePanel.js";
 import { LakeSystem } from "../tools/lakeSystem.js";
+import { setWaterSsrEnabled } from "../render/water/lakeMaterial.js";
 import { SmartRoadLabSystem } from "../../v2/tools/smartRoad/smartRoadLabSystem.js";
 import { RoadConformSystem } from "../tools/roadConformSystem.js";
 import { mergeRoadDrawCalls } from "../tools/roadDrawCallMerge.js";
@@ -1260,6 +1261,16 @@ async function main() {
   const lakeToolSlice = createLakeToolState();
   let lakeSystem = null;
   let lakeUi = null;
+  // One source of truth for the SSR master, edited from both the lake and River+
+  // panels. It is stored on the lake slice (which lakeSystem persists) and mirrored
+  // into the module-level uniform that gates every water surface.
+  const waterGlobals = {
+    get ssrMaster() { return lakeToolSlice.lake.ssrMaster !== false; },
+    set ssrMaster(v) {
+      lakeToolSlice.lake.ssrMaster = !!v;
+      setWaterSsrEnabled(!!v);
+    },
+  };
   let roadSystem = null;
   let roadConform = null;
   const roadState = { ...DEFAULT_ROAD_STATE };
@@ -4391,6 +4402,7 @@ async function main() {
   lakeUi = buildLakePanel({
     toolState: lakeToolSlice,
     lakeSystem,
+    waterGlobals,
     worldSize: WORLD_SIZE,
     maxHeight: MAX_HEIGHT,
     materialChanged:  () => lakeSystem.syncMaterial(),
@@ -4438,6 +4450,7 @@ async function main() {
 
   buildRiverPanels({
     toolState: riverToolSlice,
+    waterGlobals,
     riverChanged: () => {
       riverSystem.syncMaterial();
       riverSystem.rebuildAllMeshes();

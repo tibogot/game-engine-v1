@@ -1,3 +1,5 @@
+import { createDepthWaterState } from "./depthWaterState.js";
+
 /** River / River+ toolState slices — same defaults as v2 createToolState(). */
 export function createRiverToolState() {
   return {
@@ -36,9 +38,22 @@ export function createRiverToolState() {
        * water breaches the channel rim and floats on the surrounding ground.
        */
       waterFreeboard: 0.4,
-      /** Depth style only: screen-space reflections (banks, trees). Off = no march, no cost. */
-      ssrEnabled: true,
-      ssrStrength: 1.0,
+
+      /**
+       * Depth-style water. Same shape as the lake's `.water` (see depthWaterState.js)
+       * — same shader, same panel controls — but its own values. A river is a couple
+       * of metres deep and its banks are always close by and on screen, so it wants a
+       * much shorter absorption distance and a shorter SSR ray than an open lake.
+       * Everything below this line is inert when shaderStyle is Toon or Basic.
+       */
+      water: createDepthWaterState({
+        depthDistance:  3,      // lake default is 20
+        shoreFade:      0.05,
+        normalTiling:   0.08,
+        ssrMaxDistance: 60,     // lake default is 120
+      }),
+
+      // ── Toon / Basic only. Inert in Depth style. ────────────────────────────
       shallowColor: "#4fd8c2",
       deepColor: "#14526e",
       highlightColor: "#cdf3ff",
