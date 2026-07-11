@@ -29,6 +29,9 @@
           <button class="toolbar-btn" data-mode="treePaint" title="Trees (T)">
             <i data-lucide="tree-pine"></i>
           </button>
+          <button class="toolbar-btn" data-mode="foliage" title="Foliage (F)">
+            <i data-lucide="leaf"></i>
+          </button>
           <button class="toolbar-btn" data-mode="road" title="Road (smart)">
             <i data-lucide="route"></i>
           </button>
@@ -152,6 +155,7 @@
               <option value="paint">Paint</option>
               <option value="grass">Grass</option>
               <option value="treePaint">Trees (T)</option>
+              <option value="foliage">Foliage (F)</option>
               <option value="props">Props</option>
               <option value="spline">Spline</option>
               <option value="river">River</option>
@@ -1809,6 +1813,9 @@
 
         <!-- TREE panel — built dynamically by buildTreePanel() (v2 layout) -->
         <div id="tree-panel" style="display:none"></div>
+
+        <!-- FOLIAGE panel — built dynamically by buildFoliagePanel() (v2 layout) -->
+        <div id="foliage-panel" style="display:none"></div>
 
         <!-- ═══════════════════════════════════════════════════════════ -->
         <!-- PROPS panel — built dynamically by buildPropsPanel() (v2 layout) -->

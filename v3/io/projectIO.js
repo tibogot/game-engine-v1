@@ -10,6 +10,7 @@
  *   blobs     { heightmap, splat, snow } → { offset, length } into the payload
  *   splatRes / snowRes
  *   trees     { slots: [...slot meta...], instances: [[x,z,y,rotY,scale,slotIdx],…] }
+ *   foliage   { slots: [...slot meta...], instances: [[x,z,y,rotY,scale,slotIdx,nx,nz],…] }
  *   props     propStore.exportData()
  *   roads     roadSystem.exportData()
  *   splines   splineSystem.exportData()
@@ -34,7 +35,7 @@ export function encodeProjectFile({
   heightmap,            // Float32Array
   splat, splatRes,      // Uint8Array (both slices combined), texels per side
   snow, snowRes,        // Uint8Array, texels per side
-  trees, props, roads, splines, lakes,
+  trees, foliage, props, roads, splines, lakes,
 }) {
   const blobs = {};
   const parts = [];
@@ -57,6 +58,7 @@ export function encodeProjectFile({
     splatRes: splatRes ?? null,
     snowRes:  snowRes ?? null,
     trees:    trees ?? null,
+    foliage:  foliage ?? null,
     props:    props ?? null,
     roads:    roads ?? null,
     splines:  splines ?? null,
@@ -112,6 +114,7 @@ export function decodeProjectFile(buffer) {
     snow:      blob("snow"),
     snowRes:   manifest.snowRes,
     trees:     manifest.trees,
+    foliage:   manifest.foliage,
     props:     manifest.props,
     roads:     manifest.roads,
     splines:   manifest.splines,

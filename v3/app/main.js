@@ -87,6 +87,9 @@ import {
 import { createTreeToolState } from "./state/treeState.js";
 import { createTreeEnvironment } from "./treeEnvironment.js";
 import { buildTreePanel } from "../ui/buildTreePanel.js";
+import { createFoliageToolState } from "./state/foliageState.js";
+import { createFoliageEnvironment } from "./foliageEnvironment.js";
+import { buildFoliagePanel } from "../ui/buildFoliagePanel.js";
 import { createRiverToolState } from "./state/riverState.js";
 import { buildRiverPanels } from "../ui/buildRiverPanel.js";
 import { RiverSystem } from "../../v2/tools/river/riverSystem.js";
@@ -544,6 +547,13 @@ export async function startV3App(opts = {}) {
   treeBvh = new TreeBvh(treeEnv.treeStore, (slotIdx) => {
     const s = treeToolState.treeSlots[slotIdx];
     return s ? { radius: s.colliderRadius, height: s.colliderHeight } : null;
+  });
+  const foliageToolState = createFoliageToolState();
+  const foliageEnv = createFoliageEnvironment({
+    scene,
+    config: editorConfig,
+    getWorldHeight: (wx, wz) => terrainStoreAdapter.getWorldHeight(wx, wz),
+    toolState: foliageToolState,
   });
   const perf = createPerfState();
   let splineSys = null;
@@ -1294,6 +1304,7 @@ export async function startV3App(opts = {}) {
 
   const grassPanel = document.getElementById("grass-panel");
   const treePanel  = document.getElementById("tree-panel");
+  const foliagePanel = document.getElementById("foliage-panel");
   const snowPanel  = document.getElementById("snow-panel");
   const cliffPaintPanel = document.getElementById("cliffpaint-panel");
 
@@ -1311,6 +1322,10 @@ export async function startV3App(opts = {}) {
 
   function syncTreePanelVisibility() {
     treePanel.style.display = (editorMode === "treePaint" && !playMode.active) ? "" : "none";
+  }
+
+  function syncFoliagePanelVisibility() {
+    foliagePanel.style.display = (editorMode === "foliage" && !playMode.active) ? "" : "none";
   }
 
   function syncPropsPanelVisibility() {
@@ -1411,6 +1426,8 @@ export async function startV3App(opts = {}) {
       ensureGrassBuilt();
     } else if (m === "treePaint") {
       sculpt.uRadius.value = treeToolState.brush.radius / WORLD_SIZE;
+    } else if (m === "foliage") {
+      sculpt.uRadius.value = foliageToolState.brush.radius / WORLD_SIZE;
     } else if (m === "snow") {
       sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
     } else if (m === "cliffPaint") {
@@ -1434,6 +1451,7 @@ export async function startV3App(opts = {}) {
     syncCliffPaintPanelVisibility();
     syncGrassPanelVisibility();
     syncTreePanelVisibility();
+    syncFoliagePanelVisibility();
     syncPropsPanelVisibility();
     syncSplinePanelVisibility();
     syncRiverPanelVisibility();
@@ -1471,6 +1489,7 @@ export async function startV3App(opts = {}) {
     snowPanel.style.display  = "none";
     grassPanel.style.display = "none";
     treePanel.style.display = "none";
+    foliagePanel.style.display = "none";
     propsPanel.style.display = "none";
     splinePanel.style.display = "none";
     riverPanel.style.display = "none";
@@ -1747,6 +1766,7 @@ export async function startV3App(opts = {}) {
       cpuHeightmapMinY = minH * MAX_HEIGHT;
       grassTerrainData.rebuildFromHeightmap(cpuHeightmap, HEIGHTMAP_SIZE, MAX_HEIGHT, WORLD_SIZE);
       treeEnv.syncTreeHeights();
+      foliageEnv.syncFoliageHeights();
     } finally {
       readbackInFlight = false;
       if (readbackPending) syncHeightmapToCPU();
@@ -1763,6 +1783,7 @@ export async function startV3App(opts = {}) {
     cpuHeightmapMinY = minH * MAX_HEIGHT;
     grassTerrainData.rebuildFromHeightmap(cpuHeightmap, HEIGHTMAP_SIZE, MAX_HEIGHT, WORLD_SIZE);
     treeEnv.syncTreeHeights();
+    foliageEnv.syncFoliageHeights();
   }
 
   async function ensureCpuHeightmapFromGpu() {
@@ -2134,6 +2155,7 @@ export async function startV3App(opts = {}) {
       perf.activeChunks = lod.group.children.length;
       worldEnv?.updateFrame(dt);
       treeEnv.updateFrame(camera, worldEnv?.getSunDir?.(), now * 0.001);
+      foliageEnv.updateFrame(camera, worldEnv?.getSunDir?.(), now * 0.001);
       bvhDebug?.update();
     } catch (err) {
       if (++_loopErrors === 1) console.error("[V3] Frame update error:", err);
@@ -2321,6 +2343,7 @@ export async function startV3App(opts = {}) {
   function onHistoryChange() {
     cancelStroke();
     treeEnv.syncTreeHeights();
+    foliageEnv.syncFoliageHeights();
     markHeightmapDirty();
     requestHeightmapReadback();
   }
@@ -2367,6 +2390,11 @@ export async function startV3App(opts = {}) {
     if (e.code === "KeyT" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
       e.preventDefault();
       setEditorMode(editorMode === "treePaint" ? "view" : "treePaint");
+      return;
+    }
+    if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "foliage" ? "view" : "foliage");
       return;
     }
     // Spline mode shortcuts (v2)
@@ -2469,6 +2497,7 @@ export async function startV3App(opts = {}) {
         else if (editorMode === "props") propSys.undo();
         else if (editorMode === "cliffPaint") cliffPaintSystem.undo();
         else if (editorMode === "treePaint") treeEnv.treeSystem.undo();
+        else if (editorMode === "foliage") foliageEnv.paintSystem.undo();
         else if (editorMode === "river" && riverSystem?.undo()) { /* ok */ }
         else if (editorMode === "river2" && river2System?.undo()) { /* ok */ }
         else if (editorMode === "spline" && splineSys?.undo()) { /* ok */ }
@@ -2485,6 +2514,7 @@ export async function startV3App(opts = {}) {
         else if (editorMode === "props") propSys.redo();
         else if (editorMode === "cliffPaint") cliffPaintSystem.redo();
         else if (editorMode === "treePaint") treeEnv.treeSystem.redo();
+        else if (editorMode === "foliage") foliageEnv.paintSystem.redo();
         else if (editorMode === "river" && riverSystem?.redo()) { /* ok */ }
         else if (editorMode === "river2" && river2System?.redo()) { /* ok */ }
         else if (editorMode === "spline" && splineSys?.redo()) { /* ok */ }
@@ -3624,7 +3654,7 @@ export async function startV3App(opts = {}) {
   const splineTreeStoreStub = {
     addTree: (...args) => treeEnv.treeStore.addTree(...args),
     hasTreeNearby: (...args) => treeEnv.treeStore.hasTreeNearby(...args),
-    syncAllHeights: () => treeEnv.syncTreeHeights(),
+    syncAllHeights: () => { treeEnv.syncTreeHeights(); foliageEnv.syncFoliageHeights(); },
   };
 
   splineSys = new SplineSystem({
@@ -4046,6 +4076,16 @@ export async function startV3App(opts = {}) {
     treeCastShadowChanged: () => treeEnv.setCastShadow(treeToolState.treeLod.castShadow),
   });
 
+  buildFoliagePanel({
+    toolState: foliageToolState,
+    config: editorConfig,
+    loadFoliageTexture: (slotIdx, file) => foliageEnv.loadFoliageTexture(slotIdx, file),
+    foliageSlotStructureChanged: (slotIdx) => foliageEnv.slotStructureChanged(slotIdx),
+    foliageSlotMaterialChanged: (slotIdx) => foliageEnv.slotMaterialChanged(slotIdx),
+    massPlaceFoliage: () => foliageEnv.paintSystem.massPlace(foliageToolState.foliagePaint.massPlaceCount),
+    clearAllFoliage: () => foliageEnv.paintSystem.clearAll(),
+  });
+
   buildPropsPanel({
     toolState: { props: propState, propSlots, propLod },
     propTextureLibrary,
@@ -4214,6 +4254,7 @@ export async function startV3App(opts = {}) {
       snow:      snowMap.snapshot(),
       snowRes:   SNOW_MAP_RES,
       trees:     { slots: treeToolState.treeSlots, instances: treeInstances },
+      foliage:   foliageEnv.exportData(),
       props:     propStore.exportData(propSlots),
       roads:     roadSystem.exportData(),
       splines:   splineSys.exportData(),
@@ -4282,6 +4323,10 @@ export async function startV3App(opts = {}) {
       treeEnv.syncTreeHeights();
       document.getElementById("tree-panel")?._rebuildTreeUi?.();
     }
+
+    // Always import, even when absent: a project with no foliage must clear
+    // instances left over from the previous scene.
+    foliageEnv.importData(d.foliage ?? null);
 
     if (d.props) {
       await restorePropSlots(d.props.slots, d.props.types);
@@ -5207,6 +5252,70 @@ export async function startV3App(opts = {}) {
     }
   }, { passive: false, capture: true });
 
+  // ── Foliage mode mouse events (v2 billboard foliage paint) ────────────────
+  let _foliagePainting = false;
+  const _foliageHit = new THREE.Vector3();
+
+  function _foliageHitFromEvent(e) {
+    refreshMouse(e);
+    const uv = getUV();
+    if (!uv) return null;
+    return _foliageHit.set(
+      uv.u * WORLD_SIZE - WORLD_SIZE / 2,
+      sampleTerrainHeight(uv.u, uv.v),
+      uv.v * WORLD_SIZE - WORLD_SIZE / 2,
+    );
+  }
+
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "foliage") return;
+    refreshMouse(e);
+    const uv = getUV();
+    uCursorUV.value.set(uv ? uv.u : -2, uv ? uv.v : -2);
+    if (uv) sculpt.uRadius.value = foliageToolState.brush.radius / WORLD_SIZE;
+    const pt = _foliageHitFromEvent(e);
+    if (pt && _foliagePainting) foliageEnv.paintSystem.applyAt(pt, e);
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "foliage") return;
+    if (e.button !== 0) return;
+    const pt = _foliageHitFromEvent(e);
+    if (!pt) return;
+    e.preventDefault();
+    _foliagePainting = true;
+    controls.enabled = false;
+    foliageEnv.paintSystem.beginStroke(pt, e);
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (e.button !== 0 || editorMode !== "foliage") return;
+    if (!_foliagePainting) return;
+    _foliagePainting = false;
+    foliageEnv.paintSystem.endStroke();
+    syncEditorOrbitEnabled();
+  });
+
+  renderer.domElement.addEventListener("wheel", e => {
+    if (playMode.active || editorMode !== "foliage") return;
+    if (!e.shiftKey && !e.altKey) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.11;
+    if (e.shiftKey) {
+      foliageToolState.brush.radius = Math.max(
+        editorConfig.sculpt.brushMin,
+        Math.min(editorConfig.sculpt.brushMax, foliageToolState.brush.radius * factor),
+      );
+      sculpt.uRadius.value = foliageToolState.brush.radius / WORLD_SIZE;
+    } else {
+      foliageToolState.brush.strength = Math.max(
+        editorConfig.sculpt.strengthMin,
+        Math.min(editorConfig.sculpt.strengthMax, foliageToolState.brush.strength * factor),
+      );
+    }
+  }, { passive: false, capture: true });
+
   // Grass undo/redo — patch into existing Ctrl+Z/Y handler. Each entry carries
   // whether it snapshots the terrain or the cliff density layer.
   const _snapGrass  = (cliff) => cliff ? grassTerrainData.getCliffDensitySnapshot()
@@ -5273,6 +5382,7 @@ export async function startV3App(opts = {}) {
     lakeSystem,
     river2System,
     treeEnv,
+    foliageEnv,
     // Full-world restore (terrain + splat + snow + trees + props + roads + lakes).
     loadProjectFromUrl,
     loadProjectFromBuffer,

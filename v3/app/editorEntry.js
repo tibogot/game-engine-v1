@@ -3,7 +3,10 @@
 // file is the EDITOR'S caller — it runs the app and shows a boot-error overlay.
 import { startV3App } from "./main.js";
 
-startV3App().catch((err) => {
+startV3App().then((app) => {
+  // Console/debug access to the engine handle (same object games receive).
+  window.__v3app = app;
+}).catch((err) => {
   console.error("[V3] Editor failed to start:", err);
   const vp = document.getElementById("viewport");
   if (vp) {
