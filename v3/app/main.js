@@ -5271,6 +5271,7 @@ export async function startV3App(opts = {}) {
     roadSystem,
     splineSystem: splineSys,
     lakeSystem,
+    river2System,
     treeEnv,
     // Full-world restore (terrain + splat + snow + trees + props + roads + lakes).
     loadProjectFromUrl,
@@ -5282,6 +5283,21 @@ export async function startV3App(opts = {}) {
     // Surface normal at a world X/Z — slope for nav walkability, unit tilt.
     // (Returns a shared vector; read its components immediately, don't retain.)
     getWorldNormal: (wx, wz) => sampleTerrainNormal(wx, wz),
+    // Water surface height (world Y) at an X/Z from the global ocean + any lake
+    // covering that point, or -Infinity if dry. Used to block ground units from
+    // entering water and to keep air units above the surface. (Rivers vary along
+    // their length and aren't included here — nav blocks them separately.)
+    getWaterLevelAt: (wx, wz) => {
+      let level = -Infinity;
+      const o = worldToolState.worldOcean;
+      if (o?.enabled) level = o.seaLevel ?? 0;
+      for (const L of lakeSystem.lakes) {
+        if (Math.abs(wx - L.cx) <= L.sizeX * 0.5 && Math.abs(wz - L.cz) <= L.sizeZ * 0.5 && L.level > level) {
+          level = L.level;
+        }
+      }
+      return level;
+    },
     // Screen pixel → { point: Vector3 } on the terrain (mouse move-orders,
     // box-select, building ghost). Returns null when the ray misses the ground.
     pickWorldAtClient,

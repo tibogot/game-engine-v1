@@ -7,13 +7,16 @@
 // For now it hosts the camera-mode toggle (orbit ⇄ RTS), which you use while
 // building the game.
 
-export function createGameUi({ rtsCamera }) {
+export function createGameUi({ rtsCamera, navGrid }) {
   const root = document.createElement("div");
   root.id = "rts-hud";
   root.innerHTML = `
     <div class="rts-hud-bar">
       <button id="rts-cam-toggle" type="button" title="Toggle camera (C)">
         Camera: <b>RTS</b>
+      </button>
+      <button id="rts-nav-toggle" type="button" title="Toggle nav-grid overlay (N)">
+        Nav grid: <b>off</b>
       </button>
       <span class="rts-hud-hint">Left-click / drag: select (Shift adds) · Right-click: move · WASD pan · wheel zoom · Q/E rotate</span>
     </div>
@@ -45,13 +48,23 @@ export function createGameUi({ rtsCamera }) {
   document.head.appendChild(style);
 
   const btn = root.querySelector("#rts-cam-toggle");
+  const navBtn = root.querySelector("#rts-nav-toggle");
   const render = () => {
     btn.querySelector("b").textContent = rtsCamera.getMode() === "rts" ? "RTS" : "Orbit";
   };
   const toggle = () => { rtsCamera.toggle(); render(); };
+  const toggleNav = () => {
+    const on = navGrid?.toggleDebug?.() ?? false;
+    navBtn.querySelector("b").textContent = on ? "on" : "off";
+  };
 
   btn.addEventListener("click", toggle);
-  const onKey = (e) => { if (e.code === "KeyC" && !e.repeat) toggle(); };
+  navBtn.addEventListener("click", toggleNav);
+  const onKey = (e) => {
+    if (e.repeat) return;
+    if (e.code === "KeyC") toggle();
+    else if (e.code === "KeyN") toggleNav();
+  };
   window.addEventListener("keydown", onKey);
   render();
 

@@ -103,6 +103,35 @@ export function createSelection({ app, units }) {
     dragging = false;
   };
 
+  // ── Move-order marker: a quick expanding ring where you right-click ─────────
+  const marker = new THREE.Mesh(
+    new THREE.RingGeometry(0.5, 1.0, 32).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x37e06b, transparent: true, depthTest: false, depthWrite: false }),
+  );
+  marker.renderOrder = 1000;
+  marker.visible = false;
+  app.scene.add(marker);
+  let markerT = 0, markerRaf = null, markerLast = 0;
+  const MARKER_DUR = 0.55;
+  const animMarker = () => {
+    const now = performance.now();
+    markerT += (now - markerLast) / 1000;
+    markerLast = now;
+    if (markerT >= MARKER_DUR) { marker.visible = false; markerRaf = null; return; }
+    const p = markerT / MARKER_DUR;
+    const s = 1 + p * 3;
+    marker.scale.set(s, 1, s);
+    marker.material.opacity = 1 - p;
+    markerRaf = requestAnimationFrame(animMarker);
+  };
+  const pingMarker = (x, y, z) => {
+    marker.position.set(x, y + 0.25, z);
+    marker.visible = true;
+    markerT = 0;
+    markerLast = performance.now();
+    if (!markerRaf) markerRaf = requestAnimationFrame(animMarker);
+  };
+
   // ── Right-click → move order for the whole selection ────────────────────────
   const onContextMenu = (e) => {
     // Right-click move works in BOTH camera modes — it never fights orbit's
@@ -111,6 +140,7 @@ export function createSelection({ app, units }) {
     if (!selected.size) return;
     const hit = app.pickWorldAtClient?.(e.clientX, e.clientY);
     if (!hit?.point) return;
+    pingMarker(hit.point.x, hit.point.y, hit.point.z);
     // Spread units around the target so they don't stack on one point.
     const arr = [...selected];
     const spacing = 6;
@@ -136,6 +166,8 @@ export function createSelection({ app, units }) {
       window.removeEventListener("pointerup", onPointerUp);
       dom.removeEventListener("contextmenu", onContextMenu);
       boxEl.remove();
+      if (markerRaf) cancelAnimationFrame(markerRaf);
+      app.scene.remove(marker);
     },
   };
 }

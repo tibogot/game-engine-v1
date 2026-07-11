@@ -55,20 +55,21 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   rtsCamera.setMode("rts"); // start in RTS view
   app.rtsCamera = rtsCamera;
 
-  // Custom game UI (HUD). Owned by the game, not the engine.
-  const gameUi = createGameUi({ rtsCamera });
-  app.gameUi = gameUi;
-
-  // 4) ── RTS GAMEPLAY ───────────────────────────────────────────────────────
-  //    A helicopter (air) and a tank (ground). Left-click to select (Shift to
-  //    multi-select, drag a box to select several), right-click to move the
-  //    selection. Next milestones: pathfinding, fog of war, combat.
-  // Nav grid — built from terrain slope once the world is loaded, so steep
-  // terrain is marked unwalkable and ground units path around it.
+  // Nav grid — built once the world is loaded from terrain slope + lakes +
+  // props + trees, so ground units path around steep terrain, water, and
+  // obstacles. Toggle the debug overlay (N) to see blocked cells.
   onStatus("Building navigation…");
   const navGrid = createNavGrid({ app });
   app.navGrid = navGrid;
 
+  // Custom game UI (HUD). Owned by the game, not the engine.
+  const gameUi = createGameUi({ rtsCamera, navGrid });
+  app.gameUi = gameUi;
+
+  // 4) ── RTS GAMEPLAY ───────────────────────────────────────────────────────
+  //    A helicopter (air) and a jeep (ground). Left-click to select (Shift to
+  //    multi-select, drag a box to select several), right-click to move the
+  //    selection. Ground units pathfind; air flies straight.
   onStatus("Spawning units…");
   const units = await createUnits({ app, navGrid });
   app.units = units;

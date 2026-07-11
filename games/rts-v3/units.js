@@ -50,7 +50,12 @@ function loadGltfScene(url) {
 /** Build a selection ring that lies flat on the ground; hidden until selected. */
 function makeSelectionRing(radius, color) {
   const geo = new THREE.RingGeometry(radius * 0.82, radius, 40);
-  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false });
+  // depthTest off + high renderOrder → the ring always draws on top of the
+  // terrain instead of clipping through slopes/bumps (standard RTS decal look).
+  const mat = new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
+    depthWrite: false, depthTest: false,
+  });
   const ring = new THREE.Mesh(geo, mat);
   ring.rotation.x = -Math.PI / 2;
   ring.visible = false;
@@ -124,7 +129,8 @@ function makeUnit(app, cfg, template, navGrid) {
       if (cfg.isAir || !navGrid) { unit.moveTo(x, z); return; }
       const path = navGrid.findPath(pos.x, pos.z, x, z);
       if (path && path.length) { waypoints.length = 0; waypoints.push(...path); }
-      else unit.moveTo(x, z); // no route found — fall back to straight line
+      // else: no route (e.g. across water with no crossing) — hold position
+      // rather than drive straight through the obstacle.
     },
     update(dt) {
       // Advance through any waypoints we've reached; steer toward the next.
@@ -144,7 +150,14 @@ function makeUnit(app, cfg, template, navGrid) {
         heading = Math.atan2(dx, dz);
       }
       const ground = groundAt(pos.x, pos.z);
-      pos.y = ground + (cfg.hover ?? 0);
+      // Air units ride above the water surface (ocean/lake) if it's higher than
+      // the terrain below — so the heli never dips into a lake or the sea.
+      let surf = ground;
+      if (cfg.isAir && app.getWaterLevelAt) {
+        const wl = app.getWaterLevelAt(pos.x, pos.z);
+        if (wl > surf) surf = wl;
+      }
+      pos.y = surf + (cfg.hover ?? 0);
 
       const bobY = cfg.isAir ? Math.sin((bob += dt) * 1.6) * 0.25 : 0;
       root.position.set(pos.x, pos.y + bobY, pos.z);
