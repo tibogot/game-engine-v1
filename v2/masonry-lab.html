@@ -395,6 +395,10 @@
         updateBrickSunDirection,
         createBrickMortarMaterial,
       } from "./objects/masonry/brickMaterial.js";
+      import {
+        GOTHIC_CHURCH_DEFAULTS,
+        generateGothicChurch,
+      } from "./objects/masonry/gothicChurch.js";
 
       // ═══════════════════════════════════════════════════════════════════════
       // Params — kit + material defaults, plus lab-only scene settings
@@ -403,7 +407,9 @@
       const params = {
         ...BRICK_WALL_DEFAULTS,
         ...BRICK_MATERIAL_DEFAULTS,
+        ...GOTHIC_CHURCH_DEFAULTS,
 
+        sceneMode: "church", // "wall" | "church"
         showArchGizmo: true,
         showMortarBacking: false,
         castShadows: true,
@@ -428,7 +434,7 @@
         50,
         window.innerWidth / window.innerHeight,
         0.05,
-        120,
+        700,
       );
       camera.position.set(3.2, 2.1, 4.8);
 

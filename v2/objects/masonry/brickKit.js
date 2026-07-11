@@ -96,7 +96,7 @@ function pointedArcHalfLen(R, k) {
   return r * Math.abs(thetaApex - thetaSpring);
 }
 
-function pathULength(p) {
+export function pathULength(p) {
   const Lj = Math.max(1e-6, p.springY - p.sillY);
   if (p.archShape === "pointed") {
     return 2 * Lj + 2 * pointedArcHalfLen(p.ringRadius, p.archPointedness);
@@ -111,7 +111,7 @@ function sampleSill(s, R, y0) {
 }
 
 /** Walk the U-shaped opening path (left leg → arch → right leg) at arclength s. */
-function sampleUPath(s, p) {
+export function sampleUPath(s, p) {
   const R = p.ringRadius;
   const y0 = p.sillY;
   const ys = p.springY;
@@ -190,7 +190,7 @@ function subtractIntervals(intervals, holeLo, holeHi) {
   return out;
 }
 
-function wallOpeningHalfX(y, R_out, y0, ys, seam, archShape, pointedness) {
+export function wallOpeningHalfX(y, R_out, y0, ys, seam, archShape, pointedness) {
   if (y < y0 - 1e-6) return 0;
   if (y < ys - 1e-6) return R_out + seam;
   const dy = y - ys;
@@ -296,7 +296,7 @@ function pickBrickVariation(rnd, baseSx, baseSy, baseSz, ringDepthScale) {
 }
 
 /** Shader-only per-brick personality for wall field bricks. */
-function pickBrickShaderVar(rnd) {
+export function pickBrickShaderVar(rnd) {
   let shapeMix, warp;
   const u = rnd();
   if (u < 0.18) {
@@ -345,26 +345,48 @@ export function createBrickBaseGeometry(params) {
 
 /**
  * Placement collector: layout code pushes transforms + shader vars here, then
- * `toInstancedMesh` uploads them into an exact-count InstancedMesh.
+ * `toInstancedMesh` uploads them into an exact-count InstancedMesh. Storage
+ * grows geometrically up to `hardMax`, so callers don't pre-allocate the
+ * worst case.
  */
-class BrickPlacements {
-  constructor(cap) {
-    this.cap = cap;
+export class BrickPlacements {
+  constructor(initialCap, hardMax = initialCap) {
+    this.cap = Math.max(16, initialCap | 0);
+    this.hardMax = Math.max(this.cap, hardMax | 0);
     this.count = 0;
-    this.matrices = new Float32Array(cap * 16);
-    this.vars = new Float32Array(cap * 4);
+    this.matrices = new Float32Array(this.cap * 16);
+    this.vars = new Float32Array(this.cap * 4);
     this._o = new THREE.Object3D();
   }
 
-  /** @returns {boolean} false when the cap is hit (caller stops laying bricks) */
+  _ensure(n) {
+    if (n <= this.cap) return true;
+    if (n > this.hardMax) return false;
+    const newCap = Math.min(this.hardMax, Math.max(n, this.cap * 2));
+    const m = new Float32Array(newCap * 16);
+    m.set(this.matrices.subarray(0, this.count * 16));
+    this.matrices = m;
+    const v = new Float32Array(newCap * 4);
+    v.set(this.vars.subarray(0, this.count * 4));
+    this.vars = v;
+    this.cap = newCap;
+    return true;
+  }
+
+  /** @returns {boolean} false when hardMax is hit (caller stops laying bricks) */
   push(x, y, z, yaw, sx, sy, sz, shapeMix, warp, grey, grain) {
-    if (this.count >= this.cap) return false;
     const o = this._o;
     o.position.set(x, y, z);
     o.rotation.set(0, 0, yaw);
     o.scale.set(sx, sy, sz);
     o.updateMatrix();
-    o.matrix.toArray(this.matrices, this.count * 16);
+    return this.pushMatrix(o.matrix, shapeMix, warp, grey, grain);
+  }
+
+  /** Push a fully composed transform (any orientation). */
+  pushMatrix(matrix, shapeMix, warp, grey, grain) {
+    if (!this._ensure(this.count + 1)) return false;
+    matrix.toArray(this.matrices, this.count * 16);
     const vo = this.count * 4;
     this.vars[vo] = shapeMix;
     this.vars[vo + 1] = warp;
@@ -486,7 +508,7 @@ export function generateBrickWall(params, material, opts = {}) {
   const topY = wallBase + Math.max(nomH * 2, params.wallHeight);
   const ny = Math.min(220, Math.max(3, Math.ceil((topY - baseY) / rowH)));
 
-  const placements = new BrickPlacements(params.maxWallBricks ?? 22000);
+  const placements = new BrickPlacements(2048, params.maxWallBricks ?? 22000);
   const rnd = mulberry32((params.colorSeed ^ 91379) | 0);
   const gx = params.archAlong;
 
