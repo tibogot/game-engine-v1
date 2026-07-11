@@ -91,6 +91,7 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
   // optional high-altitude layer above a height band. Updates live while
   // sculpting; hand-painted splat always wins because painting shrinks w0.
   const uAutoEnabled   = uniform(0.0);
+  const uAutoFull      = uniform(0.0);   // 1 = preview bake result everywhere (ignores current paint)
   const uAutoFlat      = uniform(0.0);   // layer channel 0..6 (L1..L7)
   const uAutoCliff     = uniform(1.0);
   const uAutoHigh      = uniform(-1.0);  // -1 = high-altitude rule off
@@ -127,15 +128,19 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
 
     // Redistribute w0 to the chosen layers (gated to heightmap bounds so the
     // far LOD ring keeps the base material instead of smearing edge texels).
+    // Full-preview mode instead replaces ALL weights with the auto rules —
+    // a live stand-in for what "Bake to splatmap" will write (bake replaces
+    // every paint layer too), so tuning the rules needs no bake round-trips.
     const eq = (u, i) => step(abs(u.sub(float(i))), float(0.5));
     const baseShare = nw[0].mul(uAutoEnabled).mul(inBounds);
+    const fullPrev  = uAutoFull.mul(inBounds);
     for (let i = 0; i < NUM_LAYERS; i++) {
       const autoW = cliffW.mul(eq(uAutoCliff, i))
         .add(flatW.mul(eq(uAutoFlat, i)))
         .add(highW.mul(eq(uAutoHigh, i)));
-      nw[i + 1] = nw[i + 1].add(baseShare.mul(autoW));
+      nw[i + 1] = mix(nw[i + 1].add(baseShare.mul(autoW)), autoW, fullPrev);
     }
-    nw[0] = nw[0].sub(baseShare);
+    nw[0] = nw[0].sub(baseShare).mul(float(1).sub(fullPrev));
   }
 
   // ── Layer colors (albedo × AO) ────────────────────────────────────────────────
@@ -223,7 +228,7 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
     blendNormal,
     blendMeadow,
     auto: {
-      uAutoEnabled, uAutoFlat, uAutoCliff, uAutoHigh,
+      uAutoEnabled, uAutoFull, uAutoFlat, uAutoCliff, uAutoHigh,
       uAutoSlopeHiY, uAutoSlopeLoY, uAutoHighStart, uAutoHighEnd, uAutoNoise,
     },
   };

@@ -974,6 +974,15 @@
                     <span class="prop-num" id="apt-lbl-noise">25%</span>
                   </div>
                 </div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:5px;margin-bottom:5px">
+                  <span style="font-size:10px;color:var(--text-dim);flex:1">
+                    Preview bake — shows the bake result live everywhere while tuning (hides current paint until baked or turned off).
+                  </span>
+                  <label class="toggle-label" style="margin:0">
+                    <input type="checkbox" id="apt-preview" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
                 <button type="button" class="action-btn" id="apt-bake" style="width:100%;margin-top:4px"
                         title="Writes the auto rules into the splatmap so you can hand-edit the result. Replaces current paint (undoable).">
                   Bake to splatmap
@@ -1902,6 +1911,6 @@
       </div>
     </div>
 
-    <script type="module" src="./app/main.js"></script>
+    <script type="module" src="./app/editorEntry.js"></script>
   </body>
 </html>

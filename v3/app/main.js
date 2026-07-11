@@ -128,7 +128,7 @@ async function createWebGpuDevice() {
   }
 }
 
-async function main() {
+export async function startV3App(opts = {}) {
   initEditorShell();
 
   const viewport = document.getElementById("viewport");
@@ -926,6 +926,7 @@ async function main() {
   const aptHighStart    = document.getElementById("apt-high-start");
   const aptHighEnd      = document.getElementById("apt-high-end");
   const aptNoise        = document.getElementById("apt-noise");
+  const aptPreview      = document.getElementById("apt-preview");
   const aptBake         = document.getElementById("apt-bake");
 
   // ── Paint state + system ───────────────────────────────────────────────────
@@ -2945,6 +2946,7 @@ async function main() {
     }
     const p = autoPaintParams();
     AUTO.uAutoEnabled.value   = aptEnabled.checked ? 1 : 0;
+    AUTO.uAutoFull.value      = aptPreview.checked ? 1 : 0;
     AUTO.uAutoFlat.value      = p.flat;
     AUTO.uAutoCliff.value     = p.cliff;
     AUTO.uAutoHigh.value      = p.high;
@@ -2959,7 +2961,7 @@ async function main() {
     document.getElementById("apt-lbl-high-end").textContent    = p.highEnd + "m";
     document.getElementById("apt-lbl-noise").textContent       = Math.round(p.noise * 100) + "%";
   }
-  for (const el of [aptEnabled, aptFlat, aptCliff, aptHigh, aptSlopeStart, aptSlopeEnd, aptHighStart, aptHighEnd, aptNoise]) {
+  for (const el of [aptEnabled, aptPreview, aptFlat, aptCliff, aptHigh, aptSlopeStart, aptSlopeEnd, aptHighStart, aptHighEnd, aptNoise]) {
     el.addEventListener("input", syncAutoPaint);
     el.addEventListener("change", syncAutoPaint);
   }
@@ -2974,6 +2976,9 @@ async function main() {
       maxHeight:     MAX_HEIGHT,
       params:        autoPaintParams(),
     });
+    // The splatmap now holds what the preview was showing — drop back to the
+    // real paint so hand-edits on top of the bake are visible immediately.
+    if (aptPreview.checked) { aptPreview.checked = false; syncAutoPaint(); }
   });
 
   // Splat save / load
@@ -4298,6 +4303,27 @@ async function main() {
     console.log("[V3] Project loaded.");
   }
 
+  /**
+   * Headless / game load path. Fetches a saved .v3proj by URL (e.g. a file that
+   * lives with a game project) and restores the full world through the same
+   * applyProjectData the editor's Load button uses — terrain, splat, snow,
+   * trees, props, roads, splines, lakes. No file picker, no size-mismatch
+   * reload dance (the caller is expected to boot at the project's terrain size).
+   */
+  async function loadProjectFromUrl(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to fetch project "${url}" (${res.status})`);
+    const buf = await res.arrayBuffer();
+    if (!isProjectFile(buf)) throw new Error(`"${url}" is not a V3 project file.`);
+    await applyProjectData(decodeProjectFile(buf));
+  }
+
+  /** Same full-world restore as loadProjectFromUrl, from raw .v3proj bytes. */
+  async function loadProjectFromBuffer(buf) {
+    if (!isProjectFile(buf)) throw new Error("Not a V3 project file.");
+    await applyProjectData(decodeProjectFile(buf));
+  }
+
   /** Toolbar Load — sniffs the file: whole project or bare heightmap. */
   async function loadAnyFile() {
     const file = await pickProjectFile();
@@ -5230,15 +5256,35 @@ async function main() {
       renderer,
     };
   }
-}
 
-main().catch((err) => {
-  console.error("[V3] Editor failed to start:", err);
-  const vp = document.getElementById("viewport");
-  if (vp) {
-    const msg = document.createElement("div");
-    msg.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;color:#f66;font:14px/1.4 sans-serif;text-align:center;background:#1a0a0a;z-index:9999";
-    msg.textContent = `Editor failed to start: ${err?.message ?? err}`;
-    vp.appendChild(msg);
-  }
-});
+  // ── App handle ─────────────────────────────────────────────────────────────
+  // What a game project holds after startV3App(). The editor is just the first
+  // caller; a game (games/rts-v3/…) imports this same boot, gets this handle,
+  // loads its own .v3proj through loadProjectFromUrl, and builds gameplay on top.
+  return {
+    scene,
+    camera,
+    controls,
+    renderer,
+    playMode,
+    propStore,
+    roadSystem,
+    splineSystem: splineSys,
+    lakeSystem,
+    treeEnv,
+    // Full-world restore (terrain + splat + snow + trees + props + roads + lakes).
+    loadProjectFromUrl,
+    loadProjectFromBuffer,
+    setEditorMode,
+    // ── Terrain queries a game builds on ──────────────────────────────────────
+    // Ground height at a world X/Z (RTS unit clamping, building placement).
+    getWorldHeight,
+    // Surface normal at a world X/Z — slope for nav walkability, unit tilt.
+    // (Returns a shared vector; read its components immediately, don't retain.)
+    getWorldNormal: (wx, wz) => sampleTerrainNormal(wx, wz),
+    // Screen pixel → { point: Vector3 } on the terrain (mouse move-orders,
+    // box-select, building ghost). Returns null when the ray misses the ground.
+    pickWorldAtClient,
+    worldSize: WORLD_SIZE,
+  };
+}

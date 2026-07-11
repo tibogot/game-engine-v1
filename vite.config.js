@@ -74,6 +74,7 @@ export default defineConfig({
         editor: "v2/editor.html",
         play: "v2/play.html",
         rts: "games/rts/rts.html",
+        rtsV3: "games/rts-v3/rts.html",
         v3editor: "v3/editor.html",
       },
     },
