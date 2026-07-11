@@ -1,0 +1,1220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.svg" />
+    <title>Masonry Lab — brick wall + arch</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #1a1d24;
+      }
+      canvas {
+        display: block;
+      }
+      :root {
+        --bg-darkest: #1a1a1a;
+        --bg-dark: #222222;
+        --bg-panel: #2a2a2a;
+        --bg-item: #333333;
+        --bg-hover: #3a3a3a;
+        --bg-input: #1e1e1e;
+        --border: #3c3c3c;
+        --border-light: #4a4a4a;
+        --text: #cccccc;
+        --text-dim: #888888;
+        --text-bright: #e0e0e0;
+        --accent: #4a9eff;
+        --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+        --font-mono: "Cascadia Code", "Fira Code", Consolas, monospace;
+        --radius: 4px;
+      }
+      #ui {
+        position: fixed;
+        top: 8px;
+        right: 8px;
+        z-index: 10;
+        width: 320px;
+        max-height: calc(100vh - 16px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-family: var(--font);
+        font-size: 13px;
+        color: var(--text);
+        user-select: none;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      }
+      #ui .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        min-height: 36px;
+        background: var(--bg-dark);
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+        color: var(--text-bright);
+        flex-shrink: 0;
+      }
+      #ui .panel-header .header-tag {
+        font-size: 10px;
+        font-weight: 500;
+        color: var(--text-dim);
+        font-family: var(--font-mono);
+      }
+      #ui-scroll {
+        flex: 1;
+        overflow-y: auto;
+        scrollbar-width: thin;
+      }
+      #ui-scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+      #ui-scroll::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 4px;
+      }
+      .inspector-section {
+        border-bottom: 1px solid var(--border);
+      }
+      .section-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--text-dim);
+      }
+      .section-header:hover {
+        background: var(--bg-hover);
+      }
+      .section-header .section-arrow {
+        width: 14px;
+        height: 14px;
+        transition: transform 0.15s;
+        flex-shrink: 0;
+      }
+      .section-header.collapsed .section-arrow {
+        transform: rotate(-90deg);
+      }
+      .section-body {
+        padding: 6px 12px 10px;
+      }
+      .section-body.hidden {
+        display: none;
+      }
+      .prop-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0;
+        min-height: 26px;
+      }
+      .prop-label {
+        width: 108px;
+        min-width: 108px;
+        font-size: 11px;
+        color: var(--text-dim);
+        text-align: right;
+        padding-right: 4px;
+        line-height: 1.2;
+      }
+      .prop-value {
+        flex: 1;
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        min-width: 0;
+      }
+      .prop-input {
+        flex: 1;
+        height: 22px;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 0 6px;
+        color: var(--text);
+        font-size: 12px;
+        font-family: var(--font-mono);
+        outline: none;
+        min-width: 0;
+      }
+      .prop-input:focus {
+        border-color: var(--accent);
+      }
+      select.prop-input {
+        cursor: pointer;
+        font-family: var(--font);
+      }
+      .prop-color-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1;
+      }
+      .prop-color {
+        width: 22px;
+        height: 22px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        cursor: pointer;
+        flex-shrink: 0;
+        padding: 0;
+        -webkit-appearance: none;
+        appearance: none;
+        background: transparent;
+      }
+      .prop-color::-webkit-color-swatch-wrapper {
+        padding: 0;
+      }
+      .prop-color::-webkit-color-swatch {
+        border: none;
+        border-radius: 2px;
+      }
+      .prop-hex {
+        width: auto;
+        font-size: 11px;
+        color: var(--text-dim);
+        font-family: var(--font-mono);
+      }
+      .prop-slider-wrap {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .prop-num-input {
+        width: 64px;
+        height: 22px;
+        flex-shrink: 0;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 0 5px;
+        color: var(--text);
+        font-size: 11px;
+        font-family: var(--font-mono);
+        text-align: right;
+        outline: none;
+      }
+      .prop-num-input:focus {
+        border-color: var(--accent);
+      }
+      .prop-num-input::-webkit-outer-spin-button,
+      .prop-num-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .prop-num-input[type="number"] {
+        appearance: textfield;
+        -moz-appearance: textfield;
+      }
+      .prop-slider {
+        flex: 1;
+        height: 4px;
+        -webkit-appearance: none;
+        appearance: none;
+        background: var(--bg-input);
+        border-radius: 2px;
+        outline: none;
+        min-width: 0;
+      }
+      .prop-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+      }
+      .prop-toggle {
+        width: 14px;
+        height: 14px;
+        border: 1px solid var(--border-light);
+        border-radius: 3px;
+        background: var(--bg-input);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        padding: 0;
+        color: transparent;
+      }
+      .prop-toggle.checked {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: white;
+      }
+      .prop-toggle svg {
+        width: 10px;
+        height: 10px;
+      }
+      .section-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 26px;
+        margin-top: 4px;
+        background: var(--bg-item);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 11px;
+        font-family: var(--font);
+      }
+      .section-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+        border-color: var(--border-light);
+      }
+      .section-separator {
+        height: 1px;
+        background: var(--border);
+        margin: 6px 0;
+      }
+      .info-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0;
+        min-height: 22px;
+      }
+      .info-label {
+        width: 108px;
+        min-width: 108px;
+        font-size: 11px;
+        color: var(--text-dim);
+        text-align: right;
+        padding-right: 4px;
+      }
+      .info-value {
+        flex: 1;
+        font-size: 12px;
+        color: var(--text);
+        font-family: var(--font-mono);
+      }
+      #info {
+        position: fixed;
+        bottom: 8px;
+        left: 8px;
+        color: #ddd;
+        font: 11px/1.8 monospace;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 5px 10px;
+        border-radius: 4px;
+        pointer-events: none;
+        z-index: 9;
+      }
+      #perf-stats {
+        position: fixed;
+        left: 8px;
+        bottom: 64px;
+        z-index: 9;
+        padding: 8px 10px;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(120, 200, 255, 0.25);
+        border-radius: 6px;
+        color: rgba(180, 220, 255, 0.92);
+        font-size: 11px;
+        font-family: ui-monospace, monospace;
+        line-height: 1.5;
+        pointer-events: none;
+        min-width: 180px;
+      }
+      #perf-stats b {
+        color: #9ad9ff;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ui">
+      <div class="panel-header">
+        Masonry Lab
+        <span class="header-tag">wall + arch</span>
+      </div>
+      <div id="ui-scroll"></div>
+    </div>
+    <div id="perf-stats" aria-hidden="true"></div>
+    <div id="info">
+      Orbit: drag &bull; Zoom: wheel &bull; Gizmo: move opening
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+          "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three/webgpu";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { TransformControls } from "three/addons/controls/TransformControls.js";
+      import {
+        BRICK_WALL_DEFAULTS,
+        createBrickBaseGeometry,
+        generateArchRing,
+        generateBrickWall,
+        ringParamsFrom,
+        clampArchAlong,
+        clampArchAlongZ,
+        clampDoorSillInWall,
+      } from "./objects/masonry/brickKit.js";
+      import {
+        BRICK_MATERIAL_DEFAULTS,
+        getBrickMaterial,
+        syncBrickUniforms,
+        updateBrickSunDirection,
+        createBrickMortarMaterial,
+      } from "./objects/masonry/brickMaterial.js";
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // Params — kit + material defaults, plus lab-only scene settings
+      // ═══════════════════════════════════════════════════════════════════════
+
+      const params = {
+        ...BRICK_WALL_DEFAULTS,
+        ...BRICK_MATERIAL_DEFAULTS,
+
+        showArchGizmo: true,
+        showMortarBacking: false,
+        castShadows: true,
+        receiveShadows: true,
+        shadowMapSize: 2048,
+
+        sunIntensity: 4.5,
+        ambientIntensity: 1.05,
+        fillIntensity: 1.25,
+        exposure: 1.45,
+      };
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // Scene
+      // ═══════════════════════════════════════════════════════════════════════
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x8a9aad);
+      scene.fog = new THREE.Fog(0x8a9aad, 28, 55);
+
+      const camera = new THREE.PerspectiveCamera(
+        50,
+        window.innerWidth / window.innerHeight,
+        0.05,
+        120,
+      );
+      camera.position.set(3.2, 2.1, 4.8);
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = params.exposure;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      document.body.appendChild(renderer.domElement);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.target.set(0, 1.4, 0);
+
+      const hemi = new THREE.HemisphereLight(0xd8e4f5, 0x6a6258, params.ambientIntensity);
+      scene.add(hemi);
+
+      const ambient = new THREE.AmbientLight(0xe8eef5, 0.35);
+      scene.add(ambient);
+
+      const sun = new THREE.DirectionalLight(0xfff8ee, params.sunIntensity);
+      sun.position.set(6, 12, 8);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.camera.near = 0.5;
+      sun.shadow.camera.far = 40;
+      sun.shadow.camera.left = -8;
+      sun.shadow.camera.right = 8;
+      sun.shadow.camera.top = 8;
+      sun.shadow.camera.bottom = -8;
+      sun.shadow.bias = -0.00012;
+      sun.shadow.normalBias = 0.02;
+      sun.shadow.radius = 4;
+      scene.add(sun);
+      scene.add(sun.target);
+      sun.target.position.set(0.2, 1.2, 0);
+
+      const fill = new THREE.DirectionalLight(0xc5d4ec, params.fillIntensity);
+      fill.position.set(-7, 6, -5);
+      scene.add(fill);
+
+      const groundMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(24, 24),
+        new THREE.MeshStandardNodeMaterial({
+          color: 0x5c636e,
+          roughness: 0.92,
+          metalness: 0,
+        }),
+      );
+      groundMesh.rotation.x = -Math.PI / 2;
+      groundMesh.receiveShadow = true;
+      scene.add(groundMesh);
+
+      function applyShadowMapSize() {
+        const s = Math.max(256, Math.min(4096, params.shadowMapSize | 0));
+        if (sun.shadow.mapSize.x === s && sun.shadow.mapSize.y === s) return;
+        sun.shadow.mapSize.set(s, s);
+        if (sun.shadow.map) {
+          sun.shadow.map.dispose();
+          sun.shadow.map = null;
+        }
+      }
+
+      function applyShadowSettingsToMesh(m) {
+        if (!m) return;
+        m.castShadow = !!params.castShadows;
+        m.receiveShadow = !!params.receiveShadows;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // Masonry build pipeline (kit modules do the actual work)
+      // ═══════════════════════════════════════════════════════════════════════
+
+      let baseGeo = null;
+      let lastGeoSig = "";
+      let wallMesh = null;
+      let archMesh = null;
+      let mortarMesh = null;
+      let mortarMat = null;
+
+      function brickGeometrySignature() {
+        return [
+          params.brickW,
+          params.brickH,
+          params.brickD,
+          params.brickRound,
+          params.roundSegments,
+        ].join(",");
+      }
+
+      function ensureBrickGeometry(force) {
+        const sig = brickGeometrySignature();
+        if (!force && baseGeo && sig === lastGeoSig) return;
+        if (baseGeo) baseGeo.dispose();
+        baseGeo = createBrickBaseGeometry(params);
+        lastGeoSig = sig;
+      }
+
+      function disposeMasonryMeshes() {
+        for (const m of [wallMesh, archMesh, mortarMesh]) {
+          if (!m) continue;
+          scene.remove(m);
+          if (m.geometry) m.geometry.dispose();
+        }
+        wallMesh = archMesh = mortarMesh = null;
+      }
+
+      function rebuildInstances(remakeGeometry) {
+        disposeMasonryMeshes();
+        ensureBrickGeometry(!!remakeGeometry);
+        clampArchAlong(params);
+        clampArchAlongZ(params);
+        clampDoorSillInWall(params);
+        if (isDraggingArchGizmo && archPivot) {
+          resetArchGizmoTargetOffset();
+          archPivot.position.set(
+            params.archAlong,
+            params.sillY + params.legHeight * 0.35,
+            params.archAlongZ,
+          );
+        }
+
+        const mat = getBrickMaterial(params.shaderQuality, params.lightweightShadows);
+
+        archMesh = generateArchRing(params, mat, { baseGeo });
+        applyShadowSettingsToMesh(archMesh);
+        scene.add(archMesh);
+
+        if (params.wallEnabled) {
+          wallMesh = generateBrickWall(params, mat, { baseGeo });
+          applyShadowSettingsToMesh(wallMesh);
+          scene.add(wallMesh);
+
+          if (params.showMortarBacking) {
+            if (!mortarMat) mortarMat = createBrickMortarMaterial();
+            const wallH = Math.max(params.brickH * 2, params.wallHeight);
+            const wallT = Math.max(0.08, params.wallDepth);
+            mortarMesh = new THREE.Mesh(
+              new THREE.BoxGeometry(params.wallWidth, wallH, wallT),
+              mortarMat,
+            );
+            mortarMesh.position.set(
+              0,
+              params.wallAnchorY + wallH * 0.5,
+              params.wallZ - params.wallDepth * 0.5 - wallT * 0.5 - 0.004,
+            );
+            mortarMesh.receiveShadow = true;
+            scene.add(mortarMesh);
+          }
+        }
+
+        if (!isDraggingArchGizmo) updateArchGizmoFromParams();
+      }
+
+      function syncLiveUniforms() {
+        syncBrickUniforms(params);
+        sun.intensity = params.sunIntensity;
+        hemi.intensity = params.ambientIntensity;
+        fill.intensity = params.fillIntensity;
+        renderer.toneMappingExposure = params.exposure;
+        updateBrickSunDirection(sun);
+      }
+
+      let rebuildTimer = 0;
+      function scheduleRebuild(geometry) {
+        clearTimeout(rebuildTimer);
+        rebuildTimer = setTimeout(() => {
+          rebuildInstances(!!geometry);
+        }, geometry ? 120 : 40);
+      }
+
+      function frameWallCamera() {
+        const rp = ringParamsFrom(params);
+        const midY = (rp.springY + params.sillY) * 0.5 + rp.ringRadius * 0.35;
+        controls.target.set(params.archAlong, midY, params.archAlongZ * 0.22);
+        camera.position.set(
+          params.archAlong + 4.2,
+          midY + 2.4,
+          params.archAlongZ + 6.8,
+        );
+        controls.update();
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // Arch gizmo (TransformControls moves the opening)
+      // ═══════════════════════════════════════════════════════════════════════
+
+      let archPivot = null;
+      let archGizmoTarget = null;
+      let archGizmo = null;
+      let isDraggingArchGizmo = false;
+      let archDragRaf = 0;
+      const _archGizmoWP = new THREE.Vector3();
+
+      function resetArchGizmoTargetOffset() {
+        if (archGizmoTarget) archGizmoTarget.position.set(0, 0, 0);
+      }
+
+      function syncArchPivotOrientation() {
+        if (!archPivot || !archGizmo) return;
+        resetArchGizmoTargetOffset();
+        archPivot.rotation.set(0, 0, 0);
+        archPivot.quaternion.identity();
+        if (archGizmoTarget) archGizmoTarget.quaternion.identity();
+        archGizmo.setSpace("world");
+        archGizmo.showX = archGizmo.showY = archGizmo.showZ = true;
+        archPivot.updateMatrixWorld(true);
+      }
+
+      function updateArchGizmoFromParams() {
+        if (!archPivot || isDraggingArchGizmo) return;
+        clampArchAlong(params);
+        clampArchAlongZ(params);
+        clampDoorSillInWall(params);
+        archPivot.position.set(
+          params.archAlong,
+          params.sillY + params.legHeight * 0.35,
+          params.archAlongZ,
+        );
+        syncArchPivotOrientation();
+      }
+
+      function syncFromArchPivot() {
+        if (!archPivot) return;
+        archPivot.updateMatrixWorld(true);
+        const pw = archGizmoTarget
+          ? archGizmoTarget.getWorldPosition(_archGizmoWP)
+          : _archGizmoWP.copy(archPivot.position);
+        params.archAlong = pw.x;
+        params.archAlongZ = pw.z;
+        params.sillY = THREE.MathUtils.clamp(
+          pw.y - params.legHeight * 0.35,
+          -2,
+          10,
+        );
+        clampArchAlong(params);
+        clampArchAlongZ(params);
+        clampDoorSillInWall(params);
+        resetArchGizmoTargetOffset();
+        archPivot.position.set(
+          params.archAlong,
+          params.sillY + params.legHeight * 0.35,
+          params.archAlongZ,
+        );
+        syncArchPivotOrientation();
+        rebuildInstances(false);
+        uiRefresh();
+      }
+
+      function setupArchGizmo() {
+        if (archGizmo) return;
+        archPivot = new THREE.Object3D();
+        archPivot.name = "archPivot";
+        scene.add(archPivot);
+
+        archGizmoTarget = new THREE.Object3D();
+        archGizmoTarget.name = "archGizmoTarget";
+        archPivot.add(archGizmoTarget);
+
+        archGizmo = new TransformControls(camera, renderer.domElement);
+        archGizmo.attach(archGizmoTarget);
+        archGizmo.setMode("translate");
+        archGizmo.setSpace("world");
+        archGizmo.size = 0.78;
+        archGizmo.enabled = params.showArchGizmo;
+        archGizmo.visible = params.showArchGizmo;
+
+        archGizmo.addEventListener("dragging-changed", (e) => {
+          isDraggingArchGizmo = e.value;
+          controls.enabled = !e.value;
+          if (!e.value) {
+            if (archDragRaf) {
+              cancelAnimationFrame(archDragRaf);
+              archDragRaf = 0;
+            }
+            clampArchAlong(params);
+            clampArchAlongZ(params);
+            clampDoorSillInWall(params);
+            updateArchGizmoFromParams();
+            rebuildInstances(false);
+            uiRefresh();
+          }
+        });
+        archGizmo.addEventListener("change", () => {
+          if (!isDraggingArchGizmo) return;
+          if (archDragRaf) cancelAnimationFrame(archDragRaf);
+          archDragRaf = requestAnimationFrame(() => {
+            archDragRaf = 0;
+            syncFromArchPivot();
+          });
+        });
+
+        scene.add(archGizmo.getHelper());
+        updateArchGizmoFromParams();
+      }
+
+      function applyArchGizmoVisibility() {
+        if (!archGizmo) return;
+        archGizmo.enabled = params.showArchGizmo;
+        archGizmo.visible = params.showArchGizmo;
+        archGizmo.getHelper().visible = params.showArchGizmo;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // Custom UI (arborist-style inspector — no tweakpane)
+      // ═══════════════════════════════════════════════════════════════════════
+
+      const _uiRefreshers = [];
+      const _arrowSvg =
+        '<svg class="section-arrow" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      const _checkSvg =
+        '<svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+      function _fmt(v, step) {
+        const s = String(step);
+        const decimals = s.includes(".") ? s.split(".")[1].length : 0;
+        return Number(v).toFixed(Math.min(decimals, 6));
+      }
+
+      function _clampSnap(v, min, max, step) {
+        let out = Math.round((v - min) / step) * step + min;
+        const stepStr = String(step);
+        let decimals = stepStr.includes(".") ? stepStr.split(".")[1].length : 0;
+        if (stepStr.includes("e-")) decimals = 8;
+        if (decimals > 0) out = Number(out.toFixed(decimals));
+        return Math.min(max, Math.max(min, out));
+      }
+
+      function _section(parent, title, expanded = true) {
+        const sec = document.createElement("div");
+        sec.className = "inspector-section";
+        const hdr = document.createElement("div");
+        hdr.className = "section-header" + (expanded ? "" : " collapsed");
+        hdr.innerHTML = _arrowSvg + " " + title;
+        const body = document.createElement("div");
+        body.className = "section-body" + (expanded ? "" : " hidden");
+        hdr.addEventListener("click", () => {
+          hdr.classList.toggle("collapsed");
+          body.classList.toggle("hidden");
+        });
+        sec.appendChild(hdr);
+        sec.appendChild(body);
+        parent.appendChild(sec);
+        return body;
+      }
+
+      function _slider(parent, obj, key, opts) {
+        const { label, min, max, step = 0.01, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        const cur = obj[key];
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="${min}" max="${max}" step="${step}" value="${cur}"><input type="number" class="prop-num-input" title="Type an exact value" min="${min}" max="${max}" step="${step}" value="${_fmt(cur, step)}"></div></div>`;
+        const sl = row.querySelector(".prop-slider");
+        const num = row.querySelector(".prop-num-input");
+        const syncNumDisplay = () => {
+          num.value = _fmt(obj[key], step);
+        };
+        sl.addEventListener("input", () => {
+          obj[key] = parseFloat(sl.value);
+          syncNumDisplay();
+          onChange?.(obj[key]);
+        });
+        const commitFromNum = () => {
+          const raw = String(num.value).trim();
+          if (raw === "" || raw === "-" || raw === "." || raw === "-.") {
+            syncNumDisplay();
+            return;
+          }
+          let v = parseFloat(raw);
+          if (!Number.isFinite(v)) {
+            syncNumDisplay();
+            return;
+          }
+          v = _clampSnap(v, min, max, step);
+          obj[key] = v;
+          sl.value = String(v);
+          syncNumDisplay();
+          onChange?.(obj[key]);
+        };
+        num.addEventListener("change", commitFromNum);
+        num.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") num.blur();
+        });
+        parent.appendChild(row);
+        const handle = {
+          refresh() {
+            sl.value = obj[key];
+            syncNumDisplay();
+          },
+        };
+        _uiRefreshers.push(handle);
+        return handle;
+      }
+
+      function _color(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-color-wrap"><input type="color" class="prop-color" value="${obj[key]}"><span class="prop-hex">${obj[key]}</span></div></div>`;
+        const inp = row.querySelector(".prop-color");
+        const hex = row.querySelector(".prop-hex");
+        inp.addEventListener("input", () => {
+          obj[key] = inp.value;
+          hex.textContent = inp.value;
+          onChange?.(obj[key]);
+        });
+        parent.appendChild(row);
+        const handle = {
+          refresh() {
+            inp.value = obj[key];
+            hex.textContent = obj[key];
+          },
+        };
+        _uiRefreshers.push(handle);
+        return handle;
+      }
+
+      function _toggle(parent, obj, key, opts) {
+        const { label, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><button type="button" class="prop-toggle ${obj[key] ? "checked" : ""}">${_checkSvg}</button></div>`;
+        const btn = row.querySelector(".prop-toggle");
+        btn.addEventListener("click", () => {
+          obj[key] = !obj[key];
+          btn.classList.toggle("checked", obj[key]);
+          onChange?.(obj[key]);
+        });
+        parent.appendChild(row);
+        const handle = {
+          refresh() {
+            btn.classList.toggle("checked", !!obj[key]);
+          },
+        };
+        _uiRefreshers.push(handle);
+        return handle;
+      }
+
+      function _select(parent, obj, key, opts) {
+        const { label, options, onChange } = opts;
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        const optHtml = Object.entries(options)
+          .map(([v, t]) => `<option value="${v}">${t}</option>`)
+          .join("");
+        row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><select class="prop-input">${optHtml}</select></div>`;
+        const sel = row.querySelector("select");
+        sel.value = String(obj[key]);
+        sel.addEventListener("change", () => {
+          const raw = sel.value;
+          obj[key] = typeof obj[key] === "number" ? Number(raw) : raw;
+          onChange?.(obj[key]);
+        });
+        parent.appendChild(row);
+        const handle = {
+          refresh() {
+            sel.value = String(obj[key]);
+          },
+        };
+        _uiRefreshers.push(handle);
+        return handle;
+      }
+
+      function _button(parent, opts) {
+        const { title, onClick } = opts;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "section-btn";
+        btn.textContent = title;
+        btn.addEventListener("click", () => onClick(btn));
+        parent.appendChild(btn);
+        return btn;
+      }
+
+      function _info(parent, label, getValue) {
+        const row = document.createElement("div");
+        row.className = "info-row";
+        const valSpan = document.createElement("span");
+        valSpan.className = "info-value";
+        valSpan.textContent = getValue();
+        row.innerHTML = `<span class="info-label">${label}</span>`;
+        row.appendChild(valSpan);
+        parent.appendChild(row);
+        const handle = {
+          refresh() {
+            valSpan.textContent = getValue();
+          },
+        };
+        _uiRefreshers.push(handle);
+        return handle;
+      }
+
+      function _separator(parent) {
+        const div = document.createElement("div");
+        div.className = "section-separator";
+        parent.appendChild(div);
+      }
+
+      function uiRefresh() {
+        _uiRefreshers.forEach((h) => h.refresh());
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // Preset (all kit + material params — drops straight into the engine)
+      // ═══════════════════════════════════════════════════════════════════════
+
+      const PRESET_KEYS = [
+        ...Object.keys(BRICK_WALL_DEFAULTS),
+        ...Object.keys(BRICK_MATERIAL_DEFAULTS),
+      ];
+
+      function presetJson() {
+        const out = {};
+        for (const k of PRESET_KEYS) {
+          const v = params[k];
+          out[k] = typeof v === "number" ? +(+v).toFixed(4) : v;
+        }
+        return JSON.stringify(out, null, 2);
+      }
+
+      function applyPreset(text) {
+        let obj;
+        try {
+          obj = JSON.parse(text);
+        } catch {
+          alert("Invalid preset JSON");
+          return;
+        }
+        for (const k of PRESET_KEYS) {
+          if (k in obj) params[k] = obj[k];
+        }
+        uiRefresh();
+        syncLiveUniforms();
+        rebuildInstances(true);
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // Build the inspector
+      // ═══════════════════════════════════════════════════════════════════════
+
+      const uiRoot = document.getElementById("ui-scroll");
+
+      // Rebuild triggers: geometry remake vs layout-only vs live uniforms.
+      const geo = () => scheduleRebuild(true);
+      const layout = () => scheduleRebuild(false);
+      const live = () => syncLiveUniforms();
+
+      {
+        const s = _section(uiRoot, "Preset", true);
+        _button(s, {
+          title: "Copy preset JSON",
+          onClick: async (btn) => {
+            try {
+              await navigator.clipboard.writeText(presetJson());
+              btn.textContent = "Copied ✓";
+            } catch {
+              window.prompt("Copy preset JSON:", presetJson());
+              btn.textContent = "Copy preset JSON";
+              return;
+            }
+            setTimeout(() => (btn.textContent = "Copy preset JSON"), 1200);
+          },
+        });
+        _button(s, {
+          title: "Paste preset JSON",
+          onClick: async () => {
+            let text = "";
+            try {
+              text = await navigator.clipboard.readText();
+            } catch {
+              text = window.prompt("Paste preset JSON:") || "";
+            }
+            if (text.trim()) applyPreset(text);
+          },
+        });
+        _button(s, {
+          title: "Randomize seed",
+          onClick: () => {
+            params.colorSeed = (Math.random() * 2 ** 31) | 0;
+            uiRefresh();
+            scheduleRebuild(false);
+          },
+        });
+        _button(s, {
+          title: "Frame camera",
+          onClick: () => frameWallCamera(),
+        });
+      }
+
+      {
+        const s = _section(uiRoot, "Brick size", true);
+        _slider(s, params, "brickW", { label: "Width", min: 0.2, max: 1.2, step: 0.01, onChange: geo });
+        _slider(s, params, "brickH", { label: "Height", min: 0.15, max: 0.8, step: 0.01, onChange: geo });
+        _slider(s, params, "brickD", { label: "Depth", min: 0.2, max: 1.2, step: 0.01, onChange: geo });
+        _slider(s, params, "brickRound", { label: "Corner radius", min: 0.001, max: 0.08, step: 0.001, onChange: geo });
+        _slider(s, params, "roundSegments", { label: "Round segs", min: 1, max: 6, step: 1, onChange: geo });
+      }
+
+      {
+        const s = _section(uiRoot, "Brick shape", true);
+        _slider(s, params, "faceBulge", { label: "Face bulge", min: 0, max: 0.05, step: 0.001, onChange: live });
+        _slider(s, params, "chipStrength", { label: "Corner chips", min: 0, max: 0.12, step: 0.001, onChange: live });
+        _slider(s, params, "shapeWarp", { label: "Shape warp", min: 0, max: 3, step: 0.01, onChange: live });
+      }
+
+      {
+        const s = _section(uiRoot, "Wall", true);
+        _toggle(s, params, "wallEnabled", { label: "Enabled", onChange: layout });
+        _slider(s, params, "wallWidth", { label: "Width", min: 4, max: 40, step: 0.1, onChange: layout });
+        _slider(s, params, "wallHeight", { label: "Height", min: 2, max: 16, step: 0.05, onChange: layout });
+        _slider(s, params, "wallDepth", { label: "Depth", min: 0.2, max: 1.6, step: 0.01, onChange: layout });
+        _slider(s, params, "wallMortar", { label: "Mortar gap", min: 0.001, max: 0.06, step: 0.001, onChange: layout });
+        _slider(s, params, "wallSeamInset", { label: "Seam inset", min: 0, max: 0.15, step: 0.001, onChange: layout });
+        _slider(s, params, "wallMinBrickScale", { label: "Min brick scale", min: 0.16, max: 0.95, step: 0.01, onChange: layout });
+        _slider(s, params, "wallAnchorY", { label: "Anchor Y", min: -1, max: 2, step: 0.01, onChange: layout });
+        _separator(s);
+        _slider(s, params, "planVariety", { label: "Plan variety", min: 0, max: 1, step: 0.01, onChange: layout });
+        _slider(s, params, "depthRecess", { label: "Depth recess", min: 0, max: 1, step: 0.01, onChange: layout });
+        _slider(s, params, "depthSpread", { label: "Depth spread", min: 0, max: 1, step: 0.01, onChange: layout });
+        _toggle(s, params, "showMortarBacking", { label: "Mortar backing", onChange: layout });
+      }
+
+      {
+        const s = _section(uiRoot, "Arch / opening", true);
+        _select(s, params, "archShape", {
+          label: "Shape",
+          options: { round: "Round", pointed: "Pointed (gothic)" },
+          onChange: layout,
+        });
+        _slider(s, params, "archPointedness", { label: "Pointedness", min: 0.2, max: 2.5, step: 0.01, onChange: layout });
+        _slider(s, params, "doorInnerHalfW", { label: "Inner half-W", min: 0.4, max: 3.2, step: 0.01, onChange: layout });
+        _slider(s, params, "masonryShell", { label: "Ring shell", min: 0.12, max: 1.2, step: 0.01, onChange: layout });
+        _slider(s, params, "legHeight", { label: "Leg height", min: 0.3, max: 5, step: 0.01, onChange: layout });
+        _slider(s, params, "sillY", { label: "Sill Y", min: -1, max: 6, step: 0.01, onChange: layout });
+        _slider(s, params, "spacingMul", { label: "Voussoir gap", min: 0.82, max: 1.08, step: 0.005, onChange: layout });
+        _slider(s, params, "archRingDepthScale", { label: "Ring depth", min: 0.9, max: 1.5, step: 0.01, onChange: layout });
+        _toggle(s, params, "closeBottom", { label: "Sill course", onChange: layout });
+        _separator(s);
+        _slider(s, params, "archAlong", { label: "Along wall X", min: -18, max: 18, step: 0.01, onChange: layout });
+        _slider(s, params, "archAlongZ", { label: "Proud Z", min: -1.2, max: 1.2, step: 0.01, onChange: layout });
+        _slider(s, params, "archContour", { label: "Arch contour", min: 0, max: 1, step: 0.01, onChange: layout });
+        _toggle(s, params, "showArchGizmo", { label: "Show gizmo", onChange: applyArchGizmoVisibility });
+      }
+
+      {
+        const s = _section(uiRoot, "Brick texture", false);
+        _color(s, params, "brickColorDark", { label: "Dark", onChange: live });
+        _color(s, params, "brickColorLight", { label: "Light", onChange: live });
+        _slider(s, params, "brickNoiseScale", { label: "Noise scale", min: 0.2, max: 8, step: 0.05, onChange: live });
+        _slider(s, params, "brickNoiseContrast", { label: "Contrast", min: 0, max: 1, step: 0.01, onChange: live });
+        _slider(s, params, "brickNoiseStrength", { label: "Strength", min: 0, max: 1, step: 0.01, onChange: live });
+        _slider(s, params, "brickEdgeStrength", { label: "Edge tone", min: -0.5, max: 0.5, step: 0.01, onChange: live });
+        _slider(s, params, "brickShadeStrength", { label: "Sun shade", min: 0, max: 1, step: 0.01, onChange: live });
+        _separator(s);
+        _slider(s, params, "brickRoughness", { label: "Roughness", min: 0.3, max: 0.99, step: 0.01, onChange: live });
+        _slider(s, params, "brickRoughnessVar", { label: "Rough var", min: 0, max: 0.5, step: 0.01, onChange: live });
+        _slider(s, params, "brickNoiseOctaves", { label: "FBM octaves", min: 1, max: 4, step: 0.1, onChange: live });
+        _slider(s, params, "brickNoiseLacunarity", { label: "Lacunarity", min: 1.2, max: 3.5, step: 0.05, onChange: live });
+        _slider(s, params, "brickNoiseGain", { label: "Gain", min: 0.2, max: 0.8, step: 0.01, onChange: live });
+        _separator(s);
+        _slider(s, params, "colorSeed", { label: "Seed", min: 0, max: 99999, step: 1, onChange: layout });
+      }
+
+      {
+        const s = _section(uiRoot, "Quality & shadows", false);
+        _select(s, params, "shaderQuality", {
+          label: "Shader tier",
+          options: { low: "Low (~10 ALU)", medium: "Medium (~50 ALU)", high: "High (hero)" },
+          onChange: layout,
+        });
+        _toggle(s, params, "lightweightShadows", { label: "Light shadows", onChange: layout });
+        _toggle(s, params, "castShadows", {
+          label: "Cast shadows",
+          onChange: () => {
+            applyShadowSettingsToMesh(wallMesh);
+            applyShadowSettingsToMesh(archMesh);
+          },
+        });
+        _toggle(s, params, "receiveShadows", {
+          label: "Receive shadows",
+          onChange: () => {
+            applyShadowSettingsToMesh(wallMesh);
+            applyShadowSettingsToMesh(archMesh);
+          },
+        });
+        _select(s, params, "shadowMapSize", {
+          label: "Shadow map",
+          options: { 512: "512", 1024: "1024", 2048: "2048", 4096: "4096" },
+          onChange: applyShadowMapSize,
+        });
+      }
+
+      {
+        const s = _section(uiRoot, "Lighting", false);
+        _slider(s, params, "sunIntensity", { label: "Sun", min: 0, max: 10, step: 0.05, onChange: live });
+        _slider(s, params, "ambientIntensity", { label: "Ambient", min: 0, max: 4, step: 0.05, onChange: live });
+        _slider(s, params, "fillIntensity", { label: "Fill", min: 0, max: 4, step: 0.05, onChange: live });
+        _slider(s, params, "exposure", { label: "Exposure", min: 0.4, max: 3, step: 0.05, onChange: live });
+      }
+
+      let statsBricksInfo, statsVertsInfo;
+      {
+        const s = _section(uiRoot, "Stats", true);
+        statsBricksInfo = _info(s, "Bricks", () =>
+          ((wallMesh?.count || 0) + (archMesh?.count || 0)).toLocaleString(),
+        );
+        statsVertsInfo = _info(s, "Total verts", () => {
+          const bricks = (wallMesh?.count || 0) + (archMesh?.count || 0);
+          return `${((bricks * vertCountPerBrick()) / 1000).toFixed(1)}k`;
+        });
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // Boot + perf overlay + loop
+      // ═══════════════════════════════════════════════════════════════════════
+
+      setupArchGizmo();
+      applyShadowMapSize();
+      rebuildInstances(true);
+      frameWallCamera();
+      syncLiveUniforms();
+
+      await renderer.init();
+
+      const perfStatsEl = document.getElementById("perf-stats");
+      const frameTimes = new Float32Array(60);
+      let frameIdx = 0;
+      let frameFilled = 0;
+      let lastFrameT = performance.now();
+      let statsAccum = 0;
+
+      function vertCountPerBrick() {
+        const s = Math.max(1, Math.min(6, params.roundSegments | 0));
+        // RoundedBoxGeometry approximation — good enough for the overlay.
+        return 24 + 6 * (s + 1) * (s + 1) + 12 * (s + 1);
+      }
+
+      function updatePerfStats() {
+        if (!perfStatsEl) return;
+        const sum = frameTimes
+          .subarray(0, Math.max(1, frameFilled))
+          .reduce((a, b) => a + b, 0);
+        const avg = sum / Math.max(1, frameFilled);
+        const fps = avg > 0 ? 1000 / avg : 0;
+        const bricks = (wallMesh?.count || 0) + (archMesh?.count || 0);
+        const vperb = vertCountPerBrick();
+        const drawCalls =
+          (wallMesh ? 1 : 0) + (archMesh ? 1 : 0) + (mortarMesh ? 1 : 0) + 1;
+        perfStatsEl.innerHTML =
+          `<b>${avg.toFixed(2)}ms</b> · <b>${fps.toFixed(0)} fps</b><br>` +
+          `bricks: <b>${bricks.toLocaleString()}</b> · verts/brick: ${vperb}<br>` +
+          `total verts: <b>${((bricks * vperb) / 1000).toFixed(1)}k</b><br>` +
+          `draw calls: <b>${drawCalls}</b> · shadow: <b>${sun.shadow.mapSize.x}</b><br>` +
+          `shader: <b>${params.shaderQuality}</b>` +
+          (params.lightweightShadows ? " · <b>light shadows</b>" : "") +
+          (params.castShadows ? "" : " · <b>no cast</b>");
+        statsBricksInfo.refresh();
+        statsVertsInfo.refresh();
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const now = performance.now();
+        const dt = now - lastFrameT;
+        lastFrameT = now;
+        frameTimes[frameIdx] = dt;
+        frameIdx = (frameIdx + 1) % frameTimes.length;
+        if (frameFilled < frameTimes.length) frameFilled++;
+        statsAccum += dt;
+        if (statsAccum > 250) {
+          statsAccum = 0;
+          updatePerfStats();
+        }
+        controls.update();
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    </script>
+  </body>
+</html>
