@@ -27,6 +27,19 @@ export function createRiverToolState() {
       carveDepth: 1.5,
       carveShoulder: 12,
       bedCurve: 0.5,
+      /**
+       * Metres the carve may cut below the LOCAL uncarved ground. Without it the
+       * downhill-enforced water profile excavates a spline crossing a mountain all
+       * the way down to valley level — a canyon through the summit. With it the
+       * water rides up over the pass in a gorge no deeper than this.
+       */
+      maxGorgeDepth: 10,
+      /**
+       * When on, a river endpoint dropped near another river snaps onto its
+       * centerline and becomes a tributary: its mouth inherits the parent's
+       * water level so the confluence is seamless.
+       */
+      branchSnap: true,
       selectedPointY: 0,
       showHandles: true,
       activeRiverIndex: 0,

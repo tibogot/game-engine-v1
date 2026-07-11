@@ -186,6 +186,18 @@ function _buildRiverControls(panel, rp, app, prefix) {
       step: 0.05,
       onChange: () => app.river2CarveChanged?.(),
     });
+    _slider(carveBody, rp, "maxGorgeDepth", {
+      label: "Max gorge depth",
+      hint: "Deepest cut below the local ground, in metres. Crossing a hill carves a gorge no deeper than this and the water rides over the pass, instead of a canyon down to valley level.",
+      min: 1,
+      max: 60,
+      step: 0.5,
+      onChange: () => app.river2CarveChanged?.(),
+    });
+    _toggle(carveBody, rp, "branchSnap", {
+      label: "Snap branches",
+      hint: "Endpoints dropped near another river snap onto it and become a tributary (water levels join up). Off: endpoints stop snapping; existing branches stay linked.",
+    });
   }
 
   const geoBody = _section(panel, "Geometry");

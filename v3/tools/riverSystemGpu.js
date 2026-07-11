@@ -53,6 +53,18 @@ import { depthWaterParams } from "../app/state/depthWaterState.js";
  * Water surface: flat across the width, follows the downhill profile along the
  * length. U coordinate is arc-length in METRES so flow speed and foam features
  * are world-scaled. Per-column slope drives rapids foam on steep drops.
+ *
+ * Profile shape: the downhill-enforced water level is clamped to never sit more
+ * than `maxGorgeDepth` metres below the LOCAL uncarved ground, so a spline drawn
+ * across a mountain carves a bounded gorge over the pass instead of excavating
+ * the whole mountain down to valley level.
+ *
+ * Branches: rivers form a tree. An endpoint dropped near another river snaps
+ * onto its centerline (seg.link = { parentId, end }) and becomes a tributary —
+ * its profile solve runs after the parent's and pins the mouth to the parent's
+ * water level at that station, so the confluence is level-continuous. The carve
+ * needs no junction geometry: every river min()-rasterizes into the same
+ * heightmap, so overlapping channels union for free.
  */
 
 const MAX_PATH_POINTS = 384;   // path texture width (points per river)
@@ -116,10 +128,14 @@ export class RiverSystemGPU {
     this.onCarveCommitted = onCarveCommitted;
     this.waterNormalMap = waterNormalMap;
 
-    // segments: { points: Vector3[], mesh: Mesh|null, profile: {pts,levels,arc,slopes}|null }
+    // segments: { id, points: Vector3[], mesh: Mesh|null,
+    //             profile: {pts,levels,arc,slopes}|null,
+    //             link: { parentId, end: 0|1 }|null  — tributary mouth on a parent river }
     this.segments = [];
     this.selectedIdx = -1;
     this.dragging = false;
+    this._nextSegId = 1;
+    this._profileStack = new Set(); // re-entrancy guard for parent-profile recursion
 
     this.undoStack = [];
     this.redoStack = [];
@@ -377,6 +393,22 @@ export class RiverSystemGPU {
     }
   }
 
+  /**
+   * Tributary variant: descend TOWARD a pinned mouth. The mouth level comes from
+   * the parent river, so it is fixed; walking upstream from it, the level may
+   * only rise (a source lower than the mouth becomes a flat backwater arm).
+   */
+  _enforceDownhillTo(arr, mouthIdx, mouthLevel) {
+    const n = arr.length;
+    if (n < 2) return;
+    arr[mouthIdx] = mouthLevel;
+    if (mouthIdx === 0) {
+      for (let i = 1; i < n; i++) if (arr[i] < arr[i - 1]) arr[i] = arr[i - 1];
+    } else {
+      for (let i = n - 2; i >= 0; i--) if (arr[i] < arr[i + 1]) arr[i] = arr[i + 1];
+    }
+  }
+
   _profilePointCount() {
     const rp = this.toolState.river2;
     return Math.min(MAX_PATH_POINTS - 2, Math.max(120, rp.segments | 0));
@@ -423,10 +455,49 @@ export class RiverSystemGPU {
       }
       levels[i] = lo;
     }
+
+    // Local uncarved ground (lightly smoothed) — the bound the gorge clamp
+    // measures from. Captured BEFORE the heavy smoothing/enforcement below.
+    const bound = Float32Array.from(levels);
+    this._smoothInPlace(bound, 2);
+
+    // Tributary mouth pin: the linked endpoint must sit at the parent's water
+    // level at that station, or the confluence gets a step.
+    let pin = null;
+    if (seg.link && !rp.closed) {
+      const parent = this._segById(seg.link.parentId);
+      if (parent && parent !== seg && parent.points.length >= 2) {
+        const pp = this._ensureProfile(parent);
+        if (pp) {
+          const idx = seg.link.end === 0 ? 0 : n - 1;
+          const c = this._closestOnPolyline(pp.pts, pts[idx].x, pts[idx].z);
+          if (c) pin = { idx, level: pp.levels[c.i] + (pp.levels[c.i + 1] - pp.levels[c.i]) * c.t };
+        }
+      }
+    }
+
+    // Downhill enforcement digs a spline crossing a mountain down to valley
+    // level; the clamp raises the level back to at most `maxGorgeDepth` below
+    // the local ground, so the water rides over the pass in a bounded gorge.
+    const gorge = Math.max(0, rp.maxGorgeDepth ?? 10);
+    const enforce = () => {
+      if (pin) this._enforceDownhillTo(levels, pin.idx, pin.level);
+      else this._enforceDownhill(levels);
+    };
+    const clampGorge = () => {
+      if (!(gorge > 0)) return;
+      for (let i = 0; i < n; i++) {
+        const floor = bound[i] - gorge;
+        if (levels[i] < floor) levels[i] = floor;
+      }
+    };
     this._smoothInPlace(levels, 8);
-    this._enforceDownhill(levels);
+    enforce();
+    clampGorge();
     this._smoothInPlace(levels, 3);
-    this._enforceDownhill(levels);
+    enforce();
+    clampGorge();
+    if (pin) levels[pin.idx] = pin.level; // exact continuity at the mouth
 
     const arc = new Float32Array(n);
     for (let i = 1; i < n; i++) arc[i] = arc[i - 1] + pts[i].distanceTo(pts[i - 1]);
@@ -443,8 +514,130 @@ export class RiverSystemGPU {
   }
 
   _ensureProfile(seg) {
-    if (!seg.profile) seg.profile = this._computeProfile(seg);
+    if (!seg.profile) {
+      if (this._profileStack.has(seg)) return null; // defensive: broken link cycle
+      this._profileStack.add(seg);
+      try {
+        seg.profile = this._computeProfile(seg);
+      } finally {
+        this._profileStack.delete(seg);
+      }
+    }
     return seg.profile;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Branch links (tributaries) — rivers form a tree via endpoint snapping
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _segById(id) {
+    return this.segments.find((s) => s.id === id) ?? null;
+  }
+
+  _childrenOf(seg) {
+    return this.segments.filter((s) => s.link && s.link.parentId === seg.id);
+  }
+
+  /** Would linking `seg` under `parentSeg` create a cycle? */
+  _wouldCycle(parentSeg, seg) {
+    let cur = parentSeg;
+    const seen = new Set();
+    while (cur) {
+      if (cur === seg) return true;
+      if (!cur.link || seen.has(cur.id)) return false;
+      seen.add(cur.id);
+      cur = this._segById(cur.link.parentId);
+    }
+    return false;
+  }
+
+  /** A river's centerline, densely sampled — link snapping and re-gluing target. */
+  _segCurvePoints(seg) {
+    const curve = new THREE.CatmullRomCurve3(seg.points, !!this.toolState.river2.closed, "catmullrom", 0.5);
+    return curve.getSpacedPoints(160);
+  }
+
+  /** Closest point on a polyline in XZ. Returns { x, z, dist, i, t } or null. */
+  _closestOnPolyline(pts, x, z) {
+    let best = null;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const ax = pts[i].x, az = pts[i].z;
+      const abx = pts[i + 1].x - ax, abz = pts[i + 1].z - az;
+      const len2 = abx * abx + abz * abz;
+      const t = len2 > 1e-12 ? Math.max(0, Math.min(1, ((x - ax) * abx + (z - az) * abz) / len2)) : 0;
+      const px = ax + abx * t, pz = az + abz * t;
+      const d = Math.hypot(x - px, z - pz);
+      if (!best || d < best.dist) best = { x: px, z: pz, dist: d, i, t };
+    }
+    return best;
+  }
+
+  _snapRadius() {
+    return Math.max(4, (this.toolState.river2.width ?? 8) * 0.75);
+  }
+
+  /**
+   * Re-evaluate this river's endpoint links. The closest other-river centerline
+   * within the snap radius wins (one link per river); the endpoint is glued
+   * exactly onto it. An endpoint dragged out of range unlinks. With branchSnap
+   * off the feature is dormant: no new links, existing ones untouched.
+   */
+  _updateEndpointLinks(seg) {
+    const rp = this.toolState.river2;
+    if (!(rp.branchSnap ?? true) || rp.closed || seg.points.length < 1) return;
+    const radius = this._snapRadius();
+    const ends = seg.points.length === 1 ? [0] : [0, 1];
+    let best = null;
+    for (const end of ends) {
+      const p = seg.points[end === 0 ? 0 : seg.points.length - 1];
+      for (const parent of this.segments) {
+        if (parent === seg || parent.points.length < 2) continue;
+        if (this._wouldCycle(parent, seg)) continue;
+        const c = this._closestOnPolyline(this._segCurvePoints(parent), p.x, p.z);
+        if (!c || c.dist > radius) continue;
+        if (!best || c.dist < best.dist) best = { end, parent, c };
+      }
+    }
+    if (best) {
+      seg.link = { parentId: best.parent.id, end: best.end };
+      const p = seg.points[best.end === 0 ? 0 : seg.points.length - 1];
+      p.x = best.c.x;
+      p.z = best.c.z;
+    } else {
+      seg.link = null;
+    }
+  }
+
+  /** Invalidate a river's profile and every downstream-dependent tributary's. */
+  _invalidateWithDescendants(seg, visited = new Set()) {
+    if (visited.has(seg.id)) return;
+    visited.add(seg.id);
+    seg.profile = null;
+    for (const c of this._childrenOf(seg)) this._invalidateWithDescendants(c, visited);
+  }
+
+  /** After a river's shape changed, slide its tributaries' mouths back onto it. */
+  _reglueChildren(seg, visited = new Set()) {
+    if (visited.has(seg.id)) return;
+    visited.add(seg.id);
+    if (seg.points.length < 2) return;
+    const pts = this._segCurvePoints(seg);
+    for (const child of this._childrenOf(seg)) {
+      const p = child.points[child.link.end === 0 ? 0 : child.points.length - 1];
+      if (p) {
+        const c = this._closestOnPolyline(pts, p.x, p.z);
+        if (c) { p.x = c.x; p.z = c.z; }
+      }
+      child.profile = null;
+      this._reglueChildren(child, visited);
+    }
+  }
+
+  /** Every structural edit funnels through here before the re-carve. */
+  _afterStructuralEdit(seg) {
+    this._invalidateWithDescendants(seg);
+    this._updateEndpointLinks(seg);
+    this._reglueChildren(seg);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -572,7 +765,7 @@ export class RiverSystemGPU {
       this._liveCarveQueued = false;
       if (!this.dragging) return; // finalizeMove already did the committed pass
       const ai = this._activeIdx();
-      if (ai >= 0) this.segments[ai].profile = null;
+      if (ai >= 0) this._invalidateWithDescendants(this.segments[ai]);
       this.applyCarve({ rebuild: false, commit: false });
       this._rebuildActiveSegMesh();
       this._updateDragHandles();
@@ -909,9 +1102,16 @@ export class RiverSystemGPU {
     );
   }
 
+  /** id: pass null for a fresh id; an explicit id (undo/import) bumps the counter past it. */
+  _makeSeg(points = [], id = null, link = null) {
+    if (id == null) id = this._nextSegId++;
+    else this._nextSegId = Math.max(this._nextSegId, id + 1);
+    return { id, points, mesh: null, profile: null, link };
+  }
+
   startNewRiver() {
     this._pushUndo();
-    this.segments.push({ points: [], mesh: null, profile: null });
+    this.segments.push(this._makeSeg());
     this.toolState.river2.activeRiverIndex = this.segments.length - 1;
     this.selectedIdx = -1;
     this._rebuildVisual();
@@ -920,13 +1120,13 @@ export class RiverSystemGPU {
   addPoint(pos) {
     this._pushUndo();
     if (this.segments.length === 0) {
-      this.segments.push({ points: [], mesh: null, profile: null });
+      this.segments.push(this._makeSeg());
       this.toolState.river2.activeRiverIndex = 0;
     }
     this._clampActive();
     const seg = this.segments[this._activeIdx()];
     seg.points.push(pos.clone());
-    seg.profile = null;
+    this._afterStructuralEdit(seg);
     this.selectedIdx = seg.points.length - 1;
     this.applyCarve({ rebuild: true, commit: true });
     this._updateSelectedY();
@@ -939,7 +1139,7 @@ export class RiverSystemGPU {
     if (this.selectedIdx >= seg.points.length) return;
     this._pushUndo();
     seg.points.splice(this.selectedIdx, 1);
-    seg.profile = null;
+    this._afterStructuralEdit(seg);
     this.selectedIdx = Math.min(this.selectedIdx, seg.points.length - 1);
     this.applyCarve({ rebuild: true, commit: true });
     this._updateSelectedY();
@@ -949,7 +1149,13 @@ export class RiverSystemGPU {
     const ai = this._activeIdx();
     if (ai < 0) return;
     this._pushUndo();
-    this._disposeSegMesh(this.segments[ai]);
+    const seg = this.segments[ai];
+    // Orphaned tributaries become independent rivers.
+    for (const c of this._childrenOf(seg)) {
+      c.link = null;
+      this._invalidateWithDescendants(c);
+    }
+    this._disposeSegMesh(seg);
     this.segments.splice(ai, 1);
     this.selectedIdx = -1;
     this.dragging = false;
@@ -973,7 +1179,7 @@ export class RiverSystemGPU {
   finalizeMove() {
     this.dragging = false;
     const ai = this._activeIdx();
-    if (ai >= 0) this.segments[ai].profile = null;
+    if (ai >= 0) this._afterStructuralEdit(this.segments[ai]);
     this.applyCarve({ rebuild: true, commit: true });
   }
 
@@ -1001,6 +1207,8 @@ export class RiverSystemGPU {
   _snapshot() {
     return {
       segments: this.segments.map((s) => ({
+        id: s.id,
+        link: s.link ? { ...s.link } : null,
         points: s.points.map((p) => ({ x: p.x, y: p.y, z: p.z })),
       })),
       activeRiverIndex: this.toolState.river2.activeRiverIndex,
@@ -1016,11 +1224,11 @@ export class RiverSystemGPU {
 
   _restore(snap) {
     this._disposeAllMeshes();
-    this.segments = snap.segments.map((s) => ({
-      points: s.points.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
-      mesh: null,
-      profile: null,
-    }));
+    this.segments = snap.segments.map((s) => this._makeSeg(
+      s.points.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
+      s.id ?? null,
+      s.link ? { ...s.link } : null,
+    ));
     this.toolState.river2.activeRiverIndex = snap.activeRiverIndex;
     this.selectedIdx = snap.selectedIdx;
     this._clampActive();
@@ -1166,6 +1374,8 @@ export class RiverSystemGPU {
 
   exportData() {
     return this.segments.map((s) => ({
+      id: s.id,
+      link: s.link ? { ...s.link } : null,
       points: s.points.map((p) => ({ x: p.x, y: p.y, z: p.z })),
     }));
   }
@@ -1176,11 +1386,19 @@ export class RiverSystemGPU {
       this._blit(this._rtBase.texture, this.getRT());
       this._dropBase();
     }
-    this.segments = (Array.isArray(data) ? data : []).map((s) => ({
-      points: Array.isArray(s.points) ? s.points.map((p) => new THREE.Vector3(p.x, p.y, p.z)) : [],
-      mesh: null,
-      profile: null,
-    }));
+    this.segments = (Array.isArray(data) ? data : []).map((s) => this._makeSeg(
+      Array.isArray(s.points) ? s.points.map((p) => new THREE.Vector3(p.x, p.y, p.z)) : [],
+      Number.isFinite(s.id) ? s.id : null,
+      s.link && Number.isFinite(s.link.parentId)
+        ? { parentId: s.link.parentId, end: s.link.end === 0 ? 0 : 1 }
+        : null,
+    ));
+    // Sanitize imported links: drop danglers and break any cycle.
+    for (const seg of this.segments) {
+      if (!seg.link) continue;
+      const parent = this._segById(seg.link.parentId);
+      if (!parent || parent === seg || this._wouldCycle(parent, seg)) seg.link = null;
+    }
     this.selectedIdx = -1;
     this.dragging = false;
     this._clampActive();
