@@ -31,15 +31,16 @@ function bakeTerrain(app) {
   const img = ctx.createImageData(res, res);
   const data = img.data;
 
-  // py=0 (top of the minimap) maps to +Z (forward/north) so "forward" reads up.
+  // py=0 (top) → +Z (north). px=0 (left) → +X (east), mirroring the main view.
   const wzOf = (py) => (0.5 - py / (res - 1)) * map;
+  const wxOf = (px) => half - (px / (res - 1)) * map;
 
   const heights = new Float32Array(res * res);
   let minH = Infinity, maxH = -Infinity;
   for (let py = 0; py < res; py++) {
     const wz = wzOf(py);
     for (let px = 0; px < res; px++) {
-      const wx = (px / (res - 1)) * map - half;
+      const wx = wxOf(px);
       const h = app.getWorldHeight(wx, wz);
       heights[py * res + px] = h;
       if (h < minH) minH = h;
@@ -55,7 +56,7 @@ function bakeTerrain(app) {
     const wz = wzOf(py);
     for (let px = 0; px < res; px++) {
       const i = py * res + px;
-      const wx = (px / (res - 1)) * map - half;
+      const wx = wxOf(px);
       const h = heights[i];
       let rgb;
       const wl = app.getWaterLevelAt ? app.getWaterLevelAt(wx, wz) : -Infinity;
@@ -103,15 +104,15 @@ export function createMinimap({ app, units }) {
   `;
   document.head.appendChild(style);
 
-  // +Z (forward) maps to the TOP of the minimap, matching the baked terrain.
-  const worldToMini = (x, z) => ({ x: (x / map + 0.5) * VIEW_PX, y: (0.5 - z / map) * VIEW_PX });
+  // +Z → top, +X → left (mirrored to match the main viewport / baked terrain).
+  const worldToMini = (x, z) => ({ x: (0.5 - x / map) * VIEW_PX, y: (0.5 - z / map) * VIEW_PX });
 
   // ── Click / drag to move the camera ─────────────────────────────────────────
   let dragging = false;
   const jump = (ev) => {
     const rect = canvas.getBoundingClientRect();
-    const wx = (((ev.clientX - rect.left) / rect.width) - 0.5) * map;
-    const wz = (0.5 - (ev.clientY - rect.top) / rect.height) * map; // flipped Z
+    const wx = (0.5 - (ev.clientX - rect.left) / rect.width) * map;
+    const wz = (0.5 - (ev.clientY - rect.top) / rect.height) * map;
     app.rtsCamera?.focusOn?.(wx, wz);
   };
   const onDown = (e) => { dragging = true; jump(e); e.preventDefault(); };

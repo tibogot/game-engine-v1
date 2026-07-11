@@ -27,10 +27,11 @@ import { createCombatFx } from "./combatFx.js";
 import { createCombat } from "./combat.js";
 import { createProjectiles } from "./projectiles.js";
 import { createFireSystem } from "./fireSystem.js";
-
-// Where this game's world file lives. Fetched at runtime (not a static import)
-// so a missing file gives a friendly message instead of breaking the build.
-const WORLD_URL = "/games/rts-v3/world.v3proj";
+import {
+  loadBootWorld,
+  loadDefaultWorld,
+  loadWorldFromFile,
+} from "./worldLoader.js";
 
 export async function startRtsGame({ onStatus = () => {} } = {}) {
   // 1) Boot the v3 engine — renderer, terrain clipmap, sky, grass, water… the
@@ -39,23 +40,10 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   const app = await startV3App();
   window.__rts = app; // handy for console debugging
 
-  // 2) Load THIS game's world (terrain + splat + snow + trees + props + roads +
-  //    lakes). If none has been saved yet, boot on the default terrain so you
-  //    can still see the engine run, and log how to add one.
-  try {
-    onStatus("Loading world…");
-    const res = await fetch(WORLD_URL, { method: "HEAD" });
-    if (res.ok) {
-      await app.loadProjectFromUrl(WORLD_URL);
-    } else {
-      console.warn(
-        `[RTS-v3] No world file at ${WORLD_URL}. ` +
-        "Save a project from v3/editor.html and drop it here as world.v3proj.",
-      );
-    }
-  } catch (err) {
-    console.warn("[RTS-v3] World load skipped:", err);
-  }
+  // 2) Load world — default world.v3proj, or ?world=/path/to/other.v3proj.
+  const worldState = { name: "procedural default" };
+  const boot = await loadBootWorld(app, { onStatus });
+  worldState.name = boot.name;
 
   // Post-FX: the GAME owns its look. postFx.enabled defaults to false in the
   // engine and is NOT stored in the .v3proj, so without this the game gets no
@@ -173,8 +161,32 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
 
   // DEV UI (not player-facing): tune camera feel, unit speed, and the nav grid
   // while building the game. Collapsible, top-right.
-  const devPanel = createDevPanel({ app, navGrid, rtsCamera, units, minimap });
+  /** Rebuild gameplay systems that depend on terrain after a world swap. */
+  const afterWorldLoad = (result) => {
+    if (!result?.loaded) return;
+    worldState.name = result.name;
+    const navOn = devPanel.getNavDebug?.() ?? false;
+    navGrid.rebuild();
+    for (const s of structures.list) {
+      navGrid.addObstacle(s.position.x, s.position.z, s.radius);
+    }
+    minimap.rebuildTerrain();
+    navGrid.setDebug(navOn);
+    devPanel.setWorldName(worldState.name);
+    rtsCamera.focusOn(structures.base.position.x, structures.base.position.z);
+  };
+
+  const devPanel = createDevPanel({
+    app, navGrid, rtsCamera, units, minimap,
+    worldName: worldState.name,
+    onLoadWorldFile: async (file) => afterWorldLoad(await loadWorldFromFile(app, file, { onStatus })),
+    onLoadDefaultWorld: async () => afterWorldLoad(await loadDefaultWorld(app, { onStatus })),
+  });
   app.devPanel = devPanel;
+
+  app.loadWorldFile = async (file) => afterWorldLoad(await loadWorldFromFile(app, file, { onStatus }));
+  app.loadDefaultWorld = async () => afterWorldLoad(await loadDefaultWorld(app, { onStatus }));
+  app.worldName = () => worldState.name;
 
   // Frame the camera on the base at boot.
   rtsCamera.focusOn(structures.base.position.x, structures.base.position.z);

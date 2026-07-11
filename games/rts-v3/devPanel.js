@@ -11,7 +11,12 @@
 const CHECK_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 
-export function createDevPanel({ app, navGrid, rtsCamera, units, minimap }) {
+export function createDevPanel({
+  app, navGrid, rtsCamera, units, minimap,
+  worldName = "procedural default",
+  onLoadWorldFile,
+  onLoadDefaultWorld,
+}) {
   const DEG = Math.PI / 180;
 
   const root = document.createElement("div");
@@ -86,6 +91,20 @@ export function createDevPanel({ app, navGrid, rtsCamera, units, minimap }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">World</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Loaded</span>
+            <span class="prop-num dv-world-name" id="dv-world-name"></span>
+          </div>
+          <input type="file" id="dv-world-file" accept=".v3proj" hidden />
+          <button class="action-btn" id="dv-world-load" type="button">Load .v3proj…</button>
+          <button class="action-btn" id="dv-world-default" type="button">Reload default</button>
+          <div class="dv-hint">Default: <code>world.v3proj</code>. Or open with <code>?world=/path/file.v3proj</code>.</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Navigation</div>
         <div class="section-body">
           <div class="prop-row">
@@ -131,6 +150,8 @@ export function createDevPanel({ app, navGrid, rtsCamera, units, minimap }) {
       margin-top: 6px; font-size: 11px; line-height: 1.5; color: var(--text-dim);
     }
     #rts-dev .dv-hint b { color: var(--text); font-weight: 600; }
+    #rts-dev .dv-world-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #rts-dev .dv-hint code { font-size: 10px; color: var(--text-dim); }
   `;
   document.head.appendChild(style);
 
@@ -195,6 +216,34 @@ export function createDevPanel({ app, navGrid, rtsCamera, units, minimap }) {
     bloomV.textContent = (+bloom.value).toFixed(2);
   });
 
+  // ── World ───────────────────────────────────────────────────────────────────
+  const worldNameEl = $("#dv-world-name");
+  const worldFileInput = $("#dv-world-file");
+  const setWorldName = (name) => { worldNameEl.textContent = name || "—"; };
+  setWorldName(worldName);
+
+  $("#dv-world-load").addEventListener("click", () => worldFileInput.click());
+  worldFileInput.addEventListener("change", async () => {
+    const file = worldFileInput.files?.[0];
+    worldFileInput.value = "";
+    if (!file || !onLoadWorldFile) return;
+    try {
+      await onLoadWorldFile(file);
+    } catch (err) {
+      console.error("[RTS-v3] World load failed:", err);
+      window.alert(err instanceof Error ? err.message : "Failed to load world.");
+    }
+  });
+  $("#dv-world-default").addEventListener("click", async () => {
+    if (!onLoadDefaultWorld) return;
+    try {
+      await onLoadDefaultWorld();
+    } catch (err) {
+      console.error("[RTS-v3] Default world load failed:", err);
+      window.alert(err instanceof Error ? err.message : "Failed to load default world.");
+    }
+  });
+
   // ── Navigation ──────────────────────────────────────────────────────────────
   const navBtn = $("#dv-nav");
   const setNavChecked = (on) => navBtn.classList.toggle("checked", !!on);
@@ -219,6 +268,8 @@ export function createDevPanel({ app, navGrid, rtsCamera, units, minimap }) {
   return {
     root,
     setNavChecked,
+    setWorldName,
+    getNavDebug: () => navBtn.classList.contains("checked"),
     dispose() {
       window.removeEventListener("keydown", onKey);
       root.remove(); style.remove();
