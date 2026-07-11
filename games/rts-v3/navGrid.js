@@ -350,7 +350,22 @@ export function createNavGrid({
     cell, cols, rows,
     findPath,
     isBlockedAtWorld: (wx, wz) => { const c = worldToCell(wx, wz); return isBlocked(c.cx, c.cz); },
+    /**
+     * Nearest walkable world point. Returns the point UNCHANGED when it's
+     * already open — snapping to the cell centre would collapse several
+     * distinct spawn points onto one spot (cells are metres wide).
+     */
+    nearestOpenWorld: (wx, wz) => {
+      const c0 = worldToCell(wx, wz);
+      if (!isBlocked(c0.cx, c0.cz)) return { x: wx, z: wz };
+      const c = nearestOpen(wx, wz);
+      return c ? cellToWorld(c.cx, c.cz) : { x: wx, z: wz };
+    },
     rebuild: build,
+    /** Block a circle (used to stamp buildings after they're placed). */
+    addObstacle: (wx, wz, radius) => { stampCircle(wx, wz, radius); },
+    /** Straight-line walkability between two world points (waypoint lookahead). */
+    hasLOS: (ax, az, bx, bz) => hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }),
     setDebug,
     toggleDebug,
   };

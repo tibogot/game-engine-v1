@@ -13,12 +13,20 @@
 
 import { startV3App } from "../../v3/app/main.js";
 import { createRtsCamera } from "./rtsCamera.js";
-import { createGameUi } from "./gameUi.js";
 import { createUnits } from "./units.js";
+import { createUnitRenderer } from "./unitRenderer.js";
 import { createSelection } from "./selection.js";
 import { createNavGrid } from "./navGrid.js";
 import { createMinimap } from "./minimap.js";
 import { createUnitBar } from "./unitBar.js";
+import { createCommandCard } from "./commandCard.js";
+import { createDevPanel } from "./devPanel.js";
+import { createStructures } from "./structures.js";
+import { createStructuresRenderer } from "./structuresRenderer.js";
+import { createCombatFx } from "./combatFx.js";
+import { createCombat } from "./combat.js";
+import { createProjectiles } from "./projectiles.js";
+import { createFireSystem } from "./fireSystem.js";
 
 // Where this game's world file lives. Fetched at runtime (not a static import)
 // so a missing file gives a friendly message instead of breaking the build.
@@ -49,6 +57,14 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
     console.warn("[RTS-v3] World load skipped:", err);
   }
 
+  // Post-FX: the GAME owns its look. postFx.enabled defaults to false in the
+  // engine and is NOT stored in the .v3proj, so without this the game gets no
+  // bloom no matter what its materials do. Bloom is SELECTIVE (emissive MRT),
+  // so only our combat FX / beacons glow — the terrain and sky don't.
+  app.postFx?.setEnabled(true);
+  app.postFx?.setBloomSelective(true);
+  app.postFx?.setBloom({ enabled: true, strength: 0.85, threshold: 0.0, radius: 0.5 });
+
   // 3) Camera — two modes the project needs: "orbit" (engine's editor controls,
   //    for inspecting the world) and "rts" (WASD/edge-scroll pan, wheel zoom,
   //    Q/E rotate, terrain-follow). Toggle with the HUD button or the C key.
@@ -64,29 +80,89 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   const navGrid = createNavGrid({ app });
   app.navGrid = navGrid;
 
-  // Custom game UI (HUD). Owned by the game, not the engine.
-  const gameUi = createGameUi({ rtsCamera, navGrid });
-  app.gameUi = gameUi;
-
   // 4) ── RTS GAMEPLAY ───────────────────────────────────────────────────────
-  //    A helicopter (air) and a jeep (ground). Left-click to select (Shift to
-  //    multi-select, drag a box to select several), right-click to move the
-  //    selection. Ground units pathfind; air flies straight.
+  //    Unit LOGIC is mesh-free (units.js); the RENDERER (unitRenderer.js) turns
+  //    it into visuals. That split is what lets us swap in InstancedMesh for
+  //    hundreds of units later without touching orders, combat or AI.
+  // Structures: the player's base + a ring of enemy turrets. Built BEFORE units
+  // so their footprints can be stamped into the nav grid — units then path
+  // around buildings instead of driving through them.
+  onStatus("Placing structures…");
+  const structures = createStructures({ app, navGrid });
+  app.structures = structures;
+  for (const s of structures.list) {
+    navGrid.addObstacle(s.position.x, s.position.z, s.radius);
+  }
+  const structuresRenderer = createStructuresRenderer({ app, structures });
+  app.structuresRenderer = structuresRenderer;
+
   onStatus("Spawning units…");
-  const units = await createUnits({ app, navGrid });
+  const units = createUnits({ app, navGrid });
   app.units = units;
+
+  onStatus("Building unit visuals…");
+  const unitRenderer = await createUnitRenderer({ app, units });
+  app.unitRenderer = unitRenderer;
+
+  // Combat: units fire VISIBLE rockets with exhaust trails; damage lands on
+  // impact. Wrecks catch fire. All of it glows via the engine's emissive MRT.
+  const fx = createCombatFx({ app });
+  app.combatFx = fx;
+
+  const fire = createFireSystem({ app });
+  app.fire = fire;
+
+  // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
+  let combatRef = null;
+  const projectiles = createProjectiles({
+    app,
+    onImpact: (target, dmg, at, owner) => combatRef?.onImpact(target, dmg, at, owner),
+  });
+  app.projectiles = projectiles;
+
+  const combat = createCombat({
+    units, structures, fx, structuresRenderer, projectiles, fire,
+    onDeath: (entity) => { app.selection?.remove?.(entity); },
+  });
+  combatRef = combat;
+  app.combat = combat;
 
   // Player-facing HUD: bottom-center bar shows the selected units as baked
   // 3D thumbnail tiles (grouped by type + count).
+  //   click     → select only that type (from the current selection)
+  //   dbl-click → select every unit of that type on the map
   const unitBar = createUnitBar({
-    thumbnails: units.thumbnails,
+    thumbnails: unitRenderer.thumbnails,
     onPickGroup: (arr) => app.selection?.select(arr),
+    onSelectAllType: (key) =>
+      app.selection?.select(units.list.filter((u) => u.typeKey === key)),
   });
   app.unitBar = unitBar;
 
+  // Player-facing HUD: command card (bottom-right). Shows unit commands, or the
+  // base's PRODUCTION queue when the base is selected.
+  const commandCard = createCommandCard({
+    thumbnails: unitRenderer.thumbnails,
+    buildable: [{ key: "jeep", label: "Build Jeep" }, { key: "helicopter", label: "Build Heli" }],
+    onBuild: (key) => structures.base.enqueue(key),
+    onStop: () => { for (const u of app.selection?.selected ?? []) u.stop?.(); },
+    onFocus: () => {
+      const sel = app.selection?.selected ?? [];
+      if (!sel.length) return;
+      const cx = sel.reduce((s, u) => s + u.position.x, 0) / sel.length;
+      const cz = sel.reduce((s, u) => s + u.position.z, 0) / sel.length;
+      rtsCamera.focusOn(cx, cz);
+    },
+  });
+  app.commandCard = commandCard;
+
   const selection = createSelection({
-    app, units,
-    onChange: (sel) => unitBar.render(sel),
+    app, units, unitRenderer, structuresRenderer,
+    // The unit bar shows units only; buildings live in the command card.
+    onChange: (sel) => {
+      unitBar.render(sel.filter((e) => !e.isStructure));
+      commandCard.render(sel);
+    },
   });
   app.selection = selection;
 
@@ -95,9 +171,42 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   const minimap = createMinimap({ app, units });
   app.minimap = minimap;
 
-  // Frame the camera on the first unit so it's on-screen at boot.
-  const first = units.list[0];
-  if (first) rtsCamera.focusOn(first.position.x, first.position.z);
+  // DEV UI (not player-facing): tune camera feel, unit speed, and the nav grid
+  // while building the game. Collapsible, top-right.
+  const devPanel = createDevPanel({ app, navGrid, rtsCamera, units, minimap });
+  app.devPanel = devPanel;
+
+  // Frame the camera on the base at boot.
+  rtsCamera.focusOn(structures.base.position.x, structures.base.position.z);
+
+  // 5) ── THE GAME LOOP ──────────────────────────────────────────────────────
+  //    One rAF drives everything, in a deliberate order: input/camera → unit
+  //    logic → push logic into meshes → HUD. (Each system used to run its own
+  //    rAF, which made ordering between them undefined.) The ENGINE renders the
+  //    scene on its own loop; this one only updates game state.
+  let last = performance.now();
+  let elapsed = 0;
+  const tick = () => {
+    const now = performance.now();
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    elapsed += dt;
+
+    rtsCamera.update(dt);
+    structures.updateProduction(dt, (key, x, z) => units.spawn(key, x, z));
+    units.update(dt);
+    combat.update(dt);                    // acquire → chase → launch rockets
+    projectiles.update(dt, app.camera);   // rockets fly, trail, and land damage
+    unitRenderer.sync(dt, app.camera);
+    structuresRenderer.sync(dt, app.camera);
+    fx.update(dt, app.camera);            // muzzle / impact / explosion
+    fire.update(dt, elapsed);             // burning wrecks
+    commandCard.tick();                   // live production bar
+    minimap.draw();
+
+    app._rtsRaf = requestAnimationFrame(tick);
+  };
+  app._rtsRaf = requestAnimationFrame(tick);
 
   onStatus("ready");
   return app;

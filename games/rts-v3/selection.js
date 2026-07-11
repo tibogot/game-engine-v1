@@ -11,11 +11,14 @@
 // camera's left-drag. Picks units by raycasting the meshes tagged in units.js
 // (mesh.userData.unit); box-select projects each unit to screen space.
 import * as THREE from "three";
-import { unitByMesh } from "./units.js";
 
 const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 
-export function createSelection({ app, units, onChange = () => {} }) {
+// `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
+// (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
+// different thing, hence the explicit name.)
+export function createSelection({ app, units, unitRenderer, structuresRenderer = null, onChange = () => {} }) {
+  const { unitByMesh, roots } = unitRenderer;
   const { renderer, camera } = app;
   const dom = renderer.domElement;
   const raycaster = new THREE.Raycaster();
@@ -45,13 +48,22 @@ export function createSelection({ app, units, onChange = () => {} }) {
     ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(ndc, camera);
-    const meshes = units.list.map((u) => u.root);
-    const hits = raycaster.intersectObjects(meshes, true);
+    const hits = raycaster.intersectObjects(roots, true);
     for (const h of hits) {
       let o = h.object;
       while (o && !unitByMesh.get(o)) o = o.parent;
       const u = o && unitByMesh.get(o);
-      if (u) return u;
+      if (u?.alive) return u;
+    }
+    // Nothing under the cursor — try our own buildings (the base is commandable).
+    if (structuresRenderer) {
+      const sHits = raycaster.intersectObjects(structuresRenderer.roots, true);
+      for (const h of sHits) {
+        let o = h.object;
+        while (o && !structuresRenderer.structureByMesh.get(o)) o = o.parent;
+        const s = o && structuresRenderer.structureByMesh.get(o);
+        if (s?.alive && s.team === "player") return s;
+      }
     }
     return null;
   };
@@ -136,24 +148,74 @@ export function createSelection({ app, units, onChange = () => {} }) {
     if (!markerRaf) markerRaf = requestAnimationFrame(animMarker);
   };
 
-  // ── Right-click → move order for the whole selection ────────────────────────
+  /** Raycast the enemy structures under the cursor, if any. */
+  function pickEnemy(clientX, clientY) {
+    if (!structuresRenderer) return null;
+    const rect = dom.getBoundingClientRect();
+    ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(ndc, camera);
+    const hits = raycaster.intersectObjects(structuresRenderer.roots, true);
+    for (const h of hits) {
+      let o = h.object;
+      while (o && !structuresRenderer.structureByMesh.get(o)) o = o.parent;
+      const s = o && structuresRenderer.structureByMesh.get(o);
+      if (s?.alive && s.team === "enemy") return s;
+    }
+    return null;
+  }
+
+  // ── Right-click → attack an enemy, else move ────────────────────────────────
   const onContextMenu = (e) => {
-    // Right-click move works in BOTH camera modes — it never fights orbit's
+    // Right-click works in BOTH camera modes — it never fights orbit's
     // left-drag. (Left-click/box-select stays RTS-only to avoid that clash.)
     e.preventDefault();
     if (!selected.size) return;
+
+    // Right-clicking an enemy is an ATTACK order.
+    const enemy = pickEnemy(e.clientX, e.clientY);
+    if (enemy) {
+      for (const u of selected) u.attack?.(enemy);
+      pingMarker(enemy.position.x, enemy.position.y, enemy.position.z);
+      return;
+    }
+
     const hit = app.pickWorldAtClient?.(e.clientX, e.clientY);
     if (!hit?.point) return;
     pingMarker(hit.point.x, hit.point.y, hit.point.z);
-    // Spread units around the target so they don't stack on one point.
-    const arr = [...selected];
-    const spacing = 6;
+
+    // A selected building can't move — right-click sets its RALLY POINT instead.
+    for (const s of selected) {
+      if (s.isStructure && s.rally) { s.rally.x = hit.point.x; s.rally.z = hit.point.z; }
+    }
+    // Spread units around the target so they don't stack on one point. Spacing
+    // must clear the biggest unit's separation radius — otherwise their goal
+    // points overlap and they shove each other forever instead of settling.
+    //
+    // Assign the CLOSEST unit to each slot (greedy) so the group doesn't cross
+    // over itself on the way, and so two units never chase the same slot.
+    const arr = [...selected].filter((u) => !u.isStructure); // buildings don't move
+    if (!arr.length) return;
+    const maxR = Math.max(...arr.map((u) => u.radius ?? 3));
+    const spacing = Math.max(6, maxR * 2.6);
     const cols = Math.ceil(Math.sqrt(arr.length));
-    arr.forEach((u, i) => {
+
+    const slots = arr.map((_, i) => {
       const gx = (i % cols) - (cols - 1) / 2;
       const gz = Math.floor(i / cols) - (cols - 1) / 2;
-      u.orderTo(hit.point.x + gx * spacing, hit.point.z + gz * spacing);
+      return { x: hit.point.x + gx * spacing, z: hit.point.z + gz * spacing };
     });
+
+    const pool = [...arr];
+    for (const slot of slots) {
+      let best = 0, bestD = Infinity;
+      for (let i = 0; i < pool.length; i++) {
+        const d = (pool[i].position.x - slot.x) ** 2 + (pool[i].position.z - slot.z) ** 2;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      // moveOrder (not orderTo) — a move command cancels any attack order.
+      pool.splice(best, 1)[0].moveOrder(slot.x, slot.z);
+    }
   };
 
   dom.addEventListener("pointerdown", onPointerDown);
@@ -164,6 +226,13 @@ export function createSelection({ app, units, onChange = () => {} }) {
   return {
     get selected() { return [...selected]; },
     clear,
+    /** Drop a unit from the selection when it dies. */
+    remove(unit) {
+      if (!selected.has(unit)) return;
+      selected.delete(unit);
+      unit.setSelected(false);
+      notify();
+    },
     /** Replace the selection with the given units (used by the unit bar). */
     select(arr) {
       clear();

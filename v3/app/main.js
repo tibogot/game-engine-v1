@@ -5459,6 +5459,30 @@ export async function startV3App(opts = {}) {
     loadProjectFromUrl,
     loadProjectFromBuffer,
     setEditorMode,
+
+    // ── Post-FX override ──────────────────────────────────────────────────────
+    // A game owns its own look, so it must be able to turn post-FX on and tune
+    // it regardless of what the editor happened to have set. Note `.v3proj` does
+    // NOT store post-FX state, and postFx.enabled defaults to FALSE — so without
+    // this a game gets no bloom no matter what its materials do.
+    //
+    // v3 bloom is SELECTIVE: only the emissive MRT buffer blooms, so a material
+    // must write `mrtNode` to glow (see games/rts-v3/bloom.js).
+    postFx: {
+      get state() { return worldToolState.postFx; },
+      setEnabled(on) {
+        worldToolState.postFx.enabled = !!on;
+        worldEnv?.applyPostFxState();
+      },
+      setBloom(params = {}) {
+        Object.assign(worldToolState.postFx.bloom, params);
+        worldEnv?.applyPostFxState();
+      },
+      /** Only emissive-MRT materials bloom when true (the v3 default). */
+      setBloomSelective(on) {
+        worldEnv?.postFxPipeline?.setBloomSelective(!!on);
+      },
+    },
     // ── Terrain queries a game builds on ──────────────────────────────────────
     // Ground height at a world X/Z (RTS unit clamping, building placement).
     getWorldHeight,

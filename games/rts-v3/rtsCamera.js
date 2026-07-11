@@ -74,10 +74,9 @@ export function createRtsCamera({ app, edgeScroll = true } = {}) {
     window.removeEventListener("wheel", onWheel, { capture: true });
   }
 
-  // ── Per-frame drive (our own rAF; independent of the engine's render loop) ──
-  function tick() {
+  // Driven by the single game loop in rtsGame.js (no self-running rAF).
+  function update() {
     if (mode === "rts") drive();
-    raf = requestAnimationFrame(tick);
   }
 
   function drive() {
@@ -150,15 +149,15 @@ export function createRtsCamera({ app, edgeScroll = true } = {}) {
   const getMode = () => mode;
 
   bind();
-  let raf = requestAnimationFrame(tick);
 
   return {
     params, // live-editable { pitch, panSpeed, rotSpeed } for the dev panel
+    update, // called by the game loop
     setMode,
     toggle,
     getMode,
     /** Recentre the view on a world point (e.g. jump to a selected unit). */
     focusOn(x, z) { focus.set(x, 0, z); focus.y = getWorldHeight ? getWorldHeight(x, z) : 0; },
-    dispose() { cancelAnimationFrame(raf); unbind(); },
+    dispose() { unbind(); },
   };
 }

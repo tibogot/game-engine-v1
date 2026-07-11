@@ -174,15 +174,13 @@ export function createMinimap({ app, units }) {
       ctx.lineWidth = 1.5;
       ctx.fill(); ctx.stroke();
     }
-    raf = requestAnimationFrame(draw);
   }
-  let raf = requestAnimationFrame(draw);
 
   return {
     root,
+    draw, // called by the game loop
     rebuildTerrain() { terrain = bakeTerrain(app); }, // call after live terrain edits
     dispose() {
-      cancelAnimationFrame(raf);
       canvas.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
