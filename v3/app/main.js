@@ -16,6 +16,7 @@ import {
 } from "../io/heightmapIO.js";
 import { DEFAULT_GEN } from "../terrain/proceduralGen.js";
 import { createProceduralGenPass } from "../terrain/proceduralGenGpu.js";
+import { erodeDroplets, buildErosionKernel } from "../terrain/globalErosion.js";
 import { initEditorShell } from "../ui/editorShell.js";
 import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
@@ -1152,6 +1153,77 @@ export async function startV3App(opts = {}) {
     applyProceduralTerrain();
   });
   syncGenUI();
+
+  // ── Global hydraulic erosion ─────────────────────────────────────────────
+  // CPU droplet sim (v2 port) on the heightmap mirror: readback → erode in
+  // metres → pushHeightmapEditsToGpu (undoable via replaceHeightData's stroke).
+  const eroIters    = document.getElementById("sl-ero-iters");
+  const eroRate     = document.getElementById("sl-ero-rate");
+  const eroDeposit  = document.getElementById("sl-ero-deposit");
+  const eroEvap     = document.getElementById("sl-ero-evap");
+  const eroInertia  = document.getElementById("sl-ero-inertia");
+  const eroCapacity = document.getElementById("sl-ero-capacity");
+  const eroRadius   = document.getElementById("sl-ero-radius");
+  const btnRunErosion = document.getElementById("btn-run-erosion");
+
+  function readErosionFromUI() {
+    return {
+      iterations:     Number(eroIters.value),
+      erosionRate:    Number(eroRate.value)     / 100,
+      depositionRate: Number(eroDeposit.value)  / 100,
+      evaporation:    Number(eroEvap.value)     / 1000,
+      inertia:        Number(eroInertia.value)  / 100,
+      capacity:       Number(eroCapacity.value) / 2,
+      radius:         Number(eroRadius.value),
+    };
+  }
+
+  function syncErosionUI() {
+    const p = readErosionFromUI();
+    document.getElementById("lbl-ero-iters").textContent    = Math.round(p.iterations / 1000) + "k";
+    document.getElementById("lbl-ero-rate").textContent     = p.erosionRate.toFixed(2);
+    document.getElementById("lbl-ero-deposit").textContent  = p.depositionRate.toFixed(2);
+    document.getElementById("lbl-ero-evap").textContent     = p.evaporation.toFixed(3);
+    document.getElementById("lbl-ero-inertia").textContent  = p.inertia.toFixed(2);
+    document.getElementById("lbl-ero-capacity").textContent = p.capacity.toFixed(1);
+    document.getElementById("lbl-ero-radius").textContent   = String(p.radius);
+  }
+
+  for (const sl of [eroIters, eroRate, eroDeposit, eroEvap, eroInertia, eroCapacity, eroRadius]) {
+    sl.addEventListener("input", syncErosionUI);
+  }
+  syncErosionUI();
+
+  let erosionRunning = false;
+  btnRunErosion.addEventListener("click", async () => {
+    if (erosionRunning) return;
+    erosionRunning = true;
+    btnRunErosion.disabled = true;
+    try {
+      const params = readErosionFromUI();
+      await ensureCpuHeightmapFromGpu();
+
+      // Sim runs in metres — v2's tuned constants are metre-scale.
+      const metres = new Float32Array(cpuHeightmap.length);
+      for (let i = 0; i < metres.length; i++) metres[i] = cpuHeightmap[i] * MAX_HEIGHT;
+
+      const kernel = buildErosionKernel(params.radius);
+      const total  = params.iterations;
+      const BATCH  = 5000; // droplets are independent — yield to the UI between batches
+      for (let done = 0; done < total; done += BATCH) {
+        erodeDroplets(metres, HEIGHTMAP_SIZE, Math.min(BATCH, total - done), params, kernel);
+        btnRunErosion.textContent = `Eroding… ${Math.min(100, Math.round(((done + BATCH) / total) * 100))}%`;
+        await new Promise((r) => setTimeout(r, 0));
+      }
+
+      for (let i = 0; i < metres.length; i++) cpuHeightmap[i] = metres[i] / MAX_HEIGHT;
+      pushHeightmapEditsToGpu();
+    } finally {
+      erosionRunning = false;
+      btnRunErosion.disabled = false;
+      btnRunErosion.textContent = "Run Erosion";
+    }
+  });
 
   async function saveHeightmap() {
     await syncHeightmapToCPU();

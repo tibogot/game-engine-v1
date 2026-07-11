@@ -21,12 +21,14 @@ const DEG = Math.PI / 180;
 export function createRtsCamera({ app, edgeScroll = true } = {}) {
   const { camera, controls, getWorldHeight, worldSize } = app;
 
-  // ── Tunables ────────────────────────────────────────────────────────────────
-  const PITCH      = 55 * DEG;   // look-down angle from the horizon
+  // ── Tunables (live-editable from the dev panel via the returned `params`) ────
+  const params = {
+    pitch:    55 * DEG,   // look-down angle from the horizon
+    panSpeed: 0.9,        // world units / frame per unit of zoom distance
+    rotSpeed: 1.4 * DEG,  // radians / frame while Q or E held
+  };
   const DIST_MIN   = 30;
   const DIST_MAX   = 400;
-  const PAN_BASE   = 0.9;        // world units / frame per unit of zoom distance
-  const ROT_SPEED  = 1.4 * DEG;  // radians / frame while Q or E held
   const EDGE_PX    = 24;         // screen border thickness that triggers edge-scroll
   const HALF       = (worldSize ?? 1000) * 0.5;
 
@@ -80,7 +82,7 @@ export function createRtsCamera({ app, edgeScroll = true } = {}) {
 
   function drive() {
     // Pan speed scales with zoom so it feels constant on screen.
-    const pan = PAN_BASE * (dist / 100);
+    const pan = params.panSpeed * (dist / 100);
     // Forward/right on the ground plane, rotated by yaw.
     const fx = Math.sin(yaw), fz = Math.cos(yaw);
     const rx = -Math.cos(yaw), rz = Math.sin(yaw);
@@ -98,16 +100,16 @@ export function createRtsCamera({ app, edgeScroll = true } = {}) {
       if (pointer.x < EDGE_PX / window.innerWidth) mr -= 1;
     }
 
-    if (keys.KeyQ) yaw -= ROT_SPEED;
-    if (keys.KeyE) yaw += ROT_SPEED;
+    if (keys.KeyQ) yaw -= params.rotSpeed;
+    if (keys.KeyE) yaw += params.rotSpeed;
 
     focus.x = THREE.MathUtils.clamp(focus.x + (fx * mf + rx * mr) * pan, -HALF, HALF);
     focus.z = THREE.MathUtils.clamp(focus.z + (fz * mf + rz * mr) * pan, -HALF, HALF);
     focus.y = getWorldHeight ? getWorldHeight(focus.x, focus.z) : 0;
 
     // Place the camera behind/above the focus at the fixed pitch.
-    const horiz  = dist * Math.cos(PITCH);
-    const height = dist * Math.sin(PITCH);
+    const horiz  = dist * Math.cos(params.pitch);
+    const height = dist * Math.sin(params.pitch);
     camera.position.set(
       focus.x - Math.sin(yaw) * horiz,
       focus.y + height,
@@ -126,12 +128,21 @@ export function createRtsCamera({ app, edgeScroll = true } = {}) {
       focus.copy(controls.target);
       focus.y = getWorldHeight ? getWorldHeight(focus.x, focus.z) : focus.y;
       dist = THREE.MathUtils.clamp(camera.position.distanceTo(focus), DIST_MIN, DIST_MAX);
+      // The engine's editor loop re-enables `controls.enabled` every frame, so
+      // disable the individual interactions too — otherwise mouse-drag orbits
+      // the camera while our RTS drive fights it back.
       controls.enabled = false;
+      controls.enableRotate = false;
+      controls.enablePan = false;
+      controls.enableZoom = false;
       drive(); // apply immediately so there's no one-frame jump
     } else {
       // Hand control back to the engine's OrbitControls.
       controls.target.copy(focus);
       controls.enabled = true;
+      controls.enableRotate = true;
+      controls.enablePan = true;
+      controls.enableZoom = true;
       controls.update?.();
     }
   }
@@ -142,6 +153,7 @@ export function createRtsCamera({ app, edgeScroll = true } = {}) {
   let raf = requestAnimationFrame(tick);
 
   return {
+    params, // live-editable { pitch, panSpeed, rotSpeed } for the dev panel
     setMode,
     toggle,
     getMode,

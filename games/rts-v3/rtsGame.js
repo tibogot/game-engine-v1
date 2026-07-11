@@ -78,7 +78,10 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
 
   // Player-facing HUD: bottom-center bar shows the selected units as baked
   // 3D thumbnail tiles (grouped by type + count).
-  const unitBar = createUnitBar({ thumbnails: units.thumbnails });
+  const unitBar = createUnitBar({
+    thumbnails: units.thumbnails,
+    onPickGroup: (arr) => app.selection?.select(arr),
+  });
   app.unitBar = unitBar;
 
   const selection = createSelection({

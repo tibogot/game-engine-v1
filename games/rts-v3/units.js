@@ -131,8 +131,11 @@ function makeUnit(app, cfg, template, navGrid) {
     get position() { return pos; },
     get heading() { return heading; },
     setSelected(v) { unit.selected = v; ring.visible = v; },
+    speedScale: 1,
     /** Direct straight-line move (used by air units). */
     moveTo(x, z) { waypoints.length = 0; target.set(x, 0, z); },
+    /** Halt: drop the path and hold current position. */
+    stop() { waypoints.length = 0; target.copy(pos); },
     /** Order to a destination — ground units pathfind around steep terrain. */
     orderTo(x, z) {
       if (cfg.isAir || !navGrid) { unit.moveTo(x, z); return; }
@@ -153,7 +156,7 @@ function makeUnit(app, cfg, template, navGrid) {
       const dx = target.x - pos.x, dz = target.z - pos.z;
       const dh = Math.hypot(dx, dz);
       if (dh > 0.4) {
-        const step = Math.min(cfg.speed * dt, dh);
+        const step = Math.min(cfg.speed * unit.speedScale * dt, dh);
         pos.x += (dx / dh) * step;
         pos.z += (dz / dh) * step;
         heading = Math.atan2(dx, dz);
@@ -242,6 +245,8 @@ export async function createUnits({ app, navGrid = null } = {}) {
   return {
     list: units,
     thumbnails,
+    /** Global speed multiplier (dev panel). */
+    setSpeedScale(s) { for (const u of units) u.speedScale = s; },
     dispose() { cancelAnimationFrame(raf); for (const u of units) u.dispose(); },
   };
 }

@@ -565,6 +565,69 @@
               </button>
             </div>
           </div>
+
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Erosion
+            </div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Droplets</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-ero-iters" min="1000" max="200000" step="1000" value="30000" />
+                  <span class="prop-num" id="lbl-ero-iters">30k</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Erode rate</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-ero-rate" min="5" max="90" step="5" value="30" />
+                  <span class="prop-num" id="lbl-ero-rate">0.30</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Deposit rate</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-ero-deposit" min="5" max="90" step="5" value="30" />
+                  <span class="prop-num" id="lbl-ero-deposit">0.30</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Evaporation</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-ero-evap" min="1" max="50" step="1" value="15" />
+                  <span class="prop-num" id="lbl-ero-evap">0.015</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Inertia</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-ero-inertia" min="0" max="95" step="5" value="10" />
+                  <span class="prop-num" id="lbl-ero-inertia">0.10</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Capacity</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-ero-capacity" min="2" max="32" step="1" value="12" />
+                  <span class="prop-num" id="lbl-ero-capacity">6.0</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Radius</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-ero-radius" min="1" max="6" step="1" value="3" />
+                  <span class="prop-num" id="lbl-ero-radius">3</span>
+                </div>
+              </div>
+
+              <div class="prop-separator"></div>
+
+              <button type="button" class="action-btn primary" id="btn-run-erosion">Run Erosion</button>
+              <p class="mode-hint">Hydraulic droplet sim — carves flow channels, deposits sediment. Undoable.</p>
+            </div>
+          </div>
           </div><!-- /#sculpt-panel-inner -->
 
         </div><!-- /#sculpt-panel -->

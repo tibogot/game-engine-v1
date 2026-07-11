@@ -164,6 +164,12 @@ export function createSelection({ app, units, onChange = () => {} }) {
   return {
     get selected() { return [...selected]; },
     clear,
+    /** Replace the selection with the given units (used by the unit bar). */
+    select(arr) {
+      clear();
+      for (const u of arr) setSelected(u, true);
+      notify();
+    },
     dispose() {
       dom.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointermove", onPointerMove);
