@@ -17,6 +17,8 @@ import { createGameUi } from "./gameUi.js";
 import { createUnits } from "./units.js";
 import { createSelection } from "./selection.js";
 import { createNavGrid } from "./navGrid.js";
+import { createMinimap } from "./minimap.js";
+import { createUnitBar } from "./unitBar.js";
 
 // Where this game's world file lives. Fetched at runtime (not a static import)
 // so a missing file gives a friendly message instead of breaking the build.
@@ -74,8 +76,21 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   const units = await createUnits({ app, navGrid });
   app.units = units;
 
-  const selection = createSelection({ app, units });
+  // Player-facing HUD: bottom-center bar shows the selected units as baked
+  // 3D thumbnail tiles (grouped by type + count).
+  const unitBar = createUnitBar({ thumbnails: units.thumbnails });
+  app.unitBar = unitBar;
+
+  const selection = createSelection({
+    app, units,
+    onChange: (sel) => unitBar.render(sel),
+  });
   app.selection = selection;
+
+  // Player-facing HUD: minimap (bottom-left). Baked terrain + unit blips +
+  // camera viewport; click/drag to move the camera.
+  const minimap = createMinimap({ app, units });
+  app.minimap = minimap;
 
   // Frame the camera on the first unit so it's on-screen at boot.
   const first = units.list[0];

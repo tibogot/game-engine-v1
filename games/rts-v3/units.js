@@ -8,6 +8,12 @@
 // from the older rts-chibs project so it matches heli5.glb's node layout.
 import * as THREE from "three";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
+import { bakeThumbnails } from "./thumbnails.js";
+
+// Mesh → owning unit, for selection raycasts. A WeakMap (not mesh.userData)
+// keeps the link OUT of userData, which THREE deep-clones via JSON — a unit
+// back-ref there would be circular and break clone(true) (thumbnail baking).
+export const unitByMesh = new WeakMap();
 
 // Scratch for terrain-aligned orientation (reused; single-threaded).
 const _UP = new THREE.Vector3(0, 1, 0);
@@ -119,8 +125,11 @@ function makeUnit(app, cfg, template, navGrid) {
   const unit = {
     root,
     isAir: !!cfg.isAir,
+    typeKey: cfg.typeKey,
+    name: cfg.name,
     selected: false,
     get position() { return pos; },
+    get heading() { return heading; },
     setSelected(v) { unit.selected = v; ring.visible = v; },
     /** Direct straight-line move (used by air units). */
     moveTo(x, z) { waypoints.length = 0; target.set(x, 0, z); },
@@ -185,7 +194,7 @@ function makeUnit(app, cfg, template, navGrid) {
   };
 
   // Tag every mesh so a selection raycast can resolve back to this unit.
-  root.traverse((o) => { if (o.isMesh) o.userData.unit = unit; });
+  root.traverse((o) => { if (o.isMesh) unitByMesh.set(o, unit); });
   unit.update(0);
   return unit;
 }
@@ -206,9 +215,18 @@ export async function createUnits({ app, navGrid = null } = {}) {
   }
 
   const units = [
-    makeUnit(app, { x: 0,  z: 0,  isAir: true,  hover: 8, speed: 40, ringRadius: 9, facingOffset: 0, ringColor: 0x37e06b }, heliTpl, navGrid),
-    makeUnit(app, { x: 24, z: 0,  isAir: false, hover: 0, speed: 20, ringRadius: 4, facingOffset: 0, ringColor: 0x37e06b }, jeepTpl, navGrid),
+    makeUnit(app, { x: 0,  z: 0,  isAir: true,  hover: 8, speed: 40, ringRadius: 9, facingOffset: 0, ringColor: 0x37e06b, typeKey: "helicopter", name: "Helicopter" }, heliTpl, navGrid),
+    makeUnit(app, { x: 24, z: 0,  isAir: false, hover: 0, speed: 20, ringRadius: 4, facingOffset: 0, ringColor: 0x37e06b, typeKey: "jeep", name: "Jeep" }, jeepTpl, navGrid),
   ];
+
+  // Bake a UI thumbnail per unit type (clones share template geometry — safe).
+  const thumbnails = await bakeThumbnails({
+    renderer: app.renderer,
+    items: [
+      { key: "helicopter", make: () => heliTpl.root.clone(true) },
+      { key: "jeep", make: () => jeepTpl.root.clone(true) },
+    ],
+  });
 
   // One shared loop drives every unit.
   let last = performance.now(), raf;
@@ -223,6 +241,7 @@ export async function createUnits({ app, navGrid = null } = {}) {
 
   return {
     list: units,
+    thumbnails,
     dispose() { cancelAnimationFrame(raf); for (const u of units) u.dispose(); },
   };
 }

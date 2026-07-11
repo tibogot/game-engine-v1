@@ -11,10 +11,11 @@
 // camera's left-drag. Picks units by raycasting the meshes tagged in units.js
 // (mesh.userData.unit); box-select projects each unit to screen space.
 import * as THREE from "three";
+import { unitByMesh } from "./units.js";
 
 const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 
-export function createSelection({ app, units }) {
+export function createSelection({ app, units, onChange = () => {} }) {
   const { renderer, camera } = app;
   const dom = renderer.domElement;
   const raycaster = new THREE.Raycaster();
@@ -23,6 +24,7 @@ export function createSelection({ app, units }) {
 
   const rtsActive = () => !app.rtsCamera || app.rtsCamera.getMode() === "rts";
 
+  const notify = () => onChange([...selected]);
   const setSelected = (unit, on) => {
     if (on) selected.add(unit); else selected.delete(unit);
     unit.setSelected(on);
@@ -47,8 +49,9 @@ export function createSelection({ app, units }) {
     const hits = raycaster.intersectObjects(meshes, true);
     for (const h of hits) {
       let o = h.object;
-      while (o && !o.userData.unit) o = o.parent;
-      if (o?.userData.unit) return o.userData.unit;
+      while (o && !unitByMesh.get(o)) o = o.parent;
+      const u = o && unitByMesh.get(o);
+      if (u) return u;
     }
     return null;
   };
@@ -101,6 +104,7 @@ export function createSelection({ app, units }) {
     }
     down = null;
     dragging = false;
+    notify();
   };
 
   // ── Move-order marker: a quick expanding ring where you right-click ─────────
