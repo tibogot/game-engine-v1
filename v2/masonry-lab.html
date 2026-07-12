@@ -471,6 +471,10 @@
       sun.shadow.bias = -0.00012;
       sun.shadow.normalBias = 0.02;
       sun.shadow.radius = 4;
+      // Scene is static between rebuilds — render the shadow map on demand
+      // only (refreshShadows), not every frame. Huge win at cathedral scale.
+      sun.shadow.autoUpdate = false;
+      sun.shadow.needsUpdate = true;
       scene.add(sun);
       scene.add(sun.target);
       sun.target.position.set(0.2, 1.2, 0);
@@ -480,7 +484,7 @@
       scene.add(fill);
 
       const groundMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(24, 24),
+        new THREE.PlaneGeometry(360, 360),
         new THREE.MeshStandardNodeMaterial({
           color: 0x5c636e,
           roughness: 0.92,
@@ -491,6 +495,25 @@
       groundMesh.receiveShadow = true;
       scene.add(groundMesh);
 
+      /** Fog, sun distance and shadow frustum sized to the active scene. */
+      function applySceneEnvironment() {
+        const church = params.sceneMode === "church";
+        scene.fog.near = church ? 110 : 28;
+        scene.fog.far = church ? 380 : 55;
+        const ext = church ? 46 : 8;
+        if (church) sun.position.set(-30, 52, 34);
+        else sun.position.set(6, 12, 8);
+        sun.shadow.camera.left = -ext;
+        sun.shadow.camera.right = ext;
+        sun.shadow.camera.top = ext;
+        sun.shadow.camera.bottom = -ext;
+        sun.shadow.camera.near = 0.5;
+        sun.shadow.camera.far = church ? 180 : 40;
+        sun.shadow.normalBias = church ? 0.06 : 0.02;
+        sun.shadow.camera.updateProjectionMatrix();
+        refreshShadows();
+      }
+
       function applyShadowMapSize() {
         const s = Math.max(256, Math.min(4096, params.shadowMapSize | 0));
         if (sun.shadow.mapSize.x === s && sun.shadow.mapSize.y === s) return;
@@ -499,12 +522,17 @@
           sun.shadow.map.dispose();
           sun.shadow.map = null;
         }
+        refreshShadows();
       }
 
       function applyShadowSettingsToMesh(m) {
         if (!m) return;
         m.castShadow = !!params.castShadows;
         m.receiveShadow = !!params.receiveShadows;
+      }
+
+      function refreshShadows() {
+        sun.shadow.needsUpdate = true;
       }
 
       // ═══════════════════════════════════════════════════════════════════════
@@ -517,6 +545,9 @@
       let archMesh = null;
       let mortarMesh = null;
       let mortarMat = null;
+      let churchGroup = null;
+      let churchMesh = null;
+      let coreMat = null;
 
       function brickGeometrySignature() {
         return [
@@ -543,11 +574,46 @@
           if (m.geometry) m.geometry.dispose();
         }
         wallMesh = archMesh = mortarMesh = null;
+        if (churchGroup) {
+          scene.remove(churchGroup);
+          churchGroup.traverse((m) => m.geometry?.dispose?.());
+          churchGroup = null;
+          churchMesh = null;
+        }
       }
 
       function rebuildInstances(remakeGeometry) {
+        refreshShadows();
         disposeMasonryMeshes();
         ensureBrickGeometry(!!remakeGeometry);
+
+        const mat = getBrickMaterial(params.shaderQuality, params.lightweightShadows);
+
+        if (params.sceneMode === "church") {
+          if (!coreMat) {
+            coreMat = new THREE.MeshStandardNodeMaterial({
+              color: 0x0e0d0c,
+              roughness: 1,
+              metalness: 0,
+            });
+          }
+          const res = generateGothicChurch(params, mat, {
+            baseGeo,
+            coreMaterial: coreMat,
+          });
+          churchGroup = res.group;
+          churchMesh = res.mesh;
+          applyShadowSettingsToMesh(churchMesh);
+          scene.add(churchGroup);
+          if (archGizmo) {
+            archGizmo.enabled = false;
+            archGizmo.visible = false;
+            archGizmo.getHelper().visible = false;
+          }
+          return;
+        }
+
+        applyArchGizmoVisibility();
         clampArchAlong(params);
         clampArchAlongZ(params);
         clampDoorSillInWall(params);
@@ -559,8 +625,6 @@
             params.archAlongZ,
           );
         }
-
-        const mat = getBrickMaterial(params.shaderQuality, params.lightweightShadows);
 
         archMesh = generateArchRing(params, mat, { baseGeo });
         applyShadowSettingsToMesh(archMesh);
@@ -599,6 +663,9 @@
         fill.intensity = params.fillIntensity;
         renderer.toneMappingExposure = params.exposure;
         updateBrickSunDirection(sun);
+        // Displacement uniforms reshape shadow geometry unless lightweight
+        // shadows are on — refresh so the static map never goes stale.
+        if (!params.lightweightShadows) refreshShadows();
       }
 
       let rebuildTimer = 0;
@@ -610,6 +677,13 @@
       }
 
       function frameWallCamera() {
+        if (params.sceneMode === "church") {
+          const xWest = -params.naveHalfW - params.naveBays * params.bayLength;
+          controls.target.set(xWest * 0.32, 10.5, 0);
+          camera.position.set(xWest - 26, 13, 34);
+          controls.update();
+          return;
+        }
         const rp = ringParamsFrom(params);
         const midY = (rp.springY + params.sillY) * 0.5 + rp.ringRadius * 0.35;
         controls.target.set(params.archAlong, midY, params.archAlongZ * 0.22);
@@ -945,8 +1019,10 @@
       // ═══════════════════════════════════════════════════════════════════════
 
       const PRESET_KEYS = [
+        "sceneMode",
         ...Object.keys(BRICK_WALL_DEFAULTS),
         ...Object.keys(BRICK_MATERIAL_DEFAULTS),
+        ...Object.keys(GOTHIC_CHURCH_DEFAULTS),
       ];
 
       function presetJson() {
@@ -986,7 +1062,42 @@
       const live = () => syncLiveUniforms();
 
       {
-        const s = _section(uiRoot, "Preset", true);
+        const s = _section(uiRoot, "Scene", true);
+        _select(s, params, "sceneMode", {
+          label: "Build",
+          options: { church: "Gothic cathedral", wall: "Wall + arch" },
+          onChange: () => {
+            applySceneEnvironment();
+            rebuildInstances(false);
+            frameWallCamera();
+          },
+        });
+      }
+
+      {
+        const s = _section(uiRoot, "Cathedral", true);
+        _slider(s, params, "naveBays", { label: "Nave bays", min: 2, max: 7, step: 1, onChange: layout });
+        _slider(s, params, "bayLength", { label: "Bay length", min: 3.4, max: 6.5, step: 0.05, onChange: layout });
+        _slider(s, params, "naveHalfW", { label: "Nave half-W", min: 3.4, max: 6.5, step: 0.05, onChange: layout });
+        _slider(s, params, "aisleW", { label: "Aisle width", min: 2.2, max: 5, step: 0.05, onChange: layout });
+        _slider(s, params, "transeptHalfL", { label: "Transept arm", min: 8, max: 17, step: 0.1, onChange: layout });
+        _slider(s, params, "choirLen", { label: "Choir length", min: 3, max: 9, step: 0.1, onChange: layout });
+        _separator(s);
+        _slider(s, params, "naveEaveY", { label: "Nave eaves", min: 9, max: 18, step: 0.1, onChange: layout });
+        _slider(s, params, "naveRidgeY", { label: "Nave ridge", min: 14, max: 26, step: 0.1, onChange: layout });
+        _slider(s, params, "aisleEaveY", { label: "Aisle eaves", min: 4, max: 9, step: 0.1, onChange: layout });
+        _slider(s, params, "spireTopY", { label: "Spire top", min: 24, max: 48, step: 0.2, onChange: layout });
+        _slider(s, params, "roseR", { label: "Rose radius", min: 1.4, max: 3.6, step: 0.05, onChange: layout });
+        _slider(s, params, "portalHalfW", { label: "Portal half-W", min: 1, max: 2.6, step: 0.02, onChange: layout });
+        _separator(s);
+        _toggle(s, params, "spireEnabled", { label: "Spire", onChange: layout });
+        _toggle(s, params, "flyersEnabled", { label: "Flying buttresses", onChange: layout });
+        _toggle(s, params, "turretsEnabled", { label: "Corner turrets", onChange: layout });
+        _slider(s, params, "brickScale", { label: "Brick scale", min: 0.7, max: 1.8, step: 0.05, onChange: layout });
+      }
+
+      {
+        const s = _section(uiRoot, "Preset", false);
         _button(s, {
           title: "Copy preset JSON",
           onClick: async (btn) => {
@@ -1028,7 +1139,7 @@
       }
 
       {
-        const s = _section(uiRoot, "Brick size", true);
+        const s = _section(uiRoot, "Brick size", false);
         _slider(s, params, "brickW", { label: "Width", min: 0.2, max: 1.2, step: 0.01, onChange: geo });
         _slider(s, params, "brickH", { label: "Height", min: 0.15, max: 0.8, step: 0.01, onChange: geo });
         _slider(s, params, "brickD", { label: "Depth", min: 0.2, max: 1.2, step: 0.01, onChange: geo });
@@ -1037,14 +1148,14 @@
       }
 
       {
-        const s = _section(uiRoot, "Brick shape", true);
+        const s = _section(uiRoot, "Brick shape", false);
         _slider(s, params, "faceBulge", { label: "Face bulge", min: 0, max: 0.05, step: 0.001, onChange: live });
         _slider(s, params, "chipStrength", { label: "Corner chips", min: 0, max: 0.12, step: 0.001, onChange: live });
         _slider(s, params, "shapeWarp", { label: "Shape warp", min: 0, max: 3, step: 0.01, onChange: live });
       }
 
       {
-        const s = _section(uiRoot, "Wall", true);
+        const s = _section(uiRoot, "Wall", false);
         _toggle(s, params, "wallEnabled", { label: "Enabled", onChange: layout });
         _slider(s, params, "wallWidth", { label: "Width", min: 4, max: 40, step: 0.1, onChange: layout });
         _slider(s, params, "wallHeight", { label: "Height", min: 2, max: 16, step: 0.05, onChange: layout });
@@ -1061,7 +1172,7 @@
       }
 
       {
-        const s = _section(uiRoot, "Arch / opening", true);
+        const s = _section(uiRoot, "Arch / opening", false);
         _select(s, params, "archShape", {
           label: "Shape",
           options: { round: "Round", pointed: "Pointed (gothic)" },
@@ -1114,6 +1225,8 @@
           onChange: () => {
             applyShadowSettingsToMesh(wallMesh);
             applyShadowSettingsToMesh(archMesh);
+            applyShadowSettingsToMesh(churchMesh);
+            refreshShadows();
           },
         });
         _toggle(s, params, "receiveShadows", {
@@ -1121,6 +1234,8 @@
           onChange: () => {
             applyShadowSettingsToMesh(wallMesh);
             applyShadowSettingsToMesh(archMesh);
+            applyShadowSettingsToMesh(churchMesh);
+            refreshShadows();
           },
         });
         _select(s, params, "shadowMapSize", {
@@ -1138,15 +1253,18 @@
         _slider(s, params, "exposure", { label: "Exposure", min: 0.4, max: 3, step: 0.05, onChange: live });
       }
 
+      function totalBrickCount() {
+        return (
+          (wallMesh?.count || 0) + (archMesh?.count || 0) + (churchMesh?.count || 0)
+        );
+      }
+
       let statsBricksInfo, statsVertsInfo;
       {
         const s = _section(uiRoot, "Stats", true);
-        statsBricksInfo = _info(s, "Bricks", () =>
-          ((wallMesh?.count || 0) + (archMesh?.count || 0)).toLocaleString(),
-        );
+        statsBricksInfo = _info(s, "Bricks", () => totalBrickCount().toLocaleString());
         statsVertsInfo = _info(s, "Total verts", () => {
-          const bricks = (wallMesh?.count || 0) + (archMesh?.count || 0);
-          return `${((bricks * vertCountPerBrick()) / 1000).toFixed(1)}k`;
+          return `${((totalBrickCount() * vertCountPerBrick()) / 1000).toFixed(1)}k`;
         });
       }
 
@@ -1155,6 +1273,7 @@
       // ═══════════════════════════════════════════════════════════════════════
 
       setupArchGizmo();
+      applySceneEnvironment();
       applyShadowMapSize();
       rebuildInstances(true);
       frameWallCamera();
@@ -1182,10 +1301,14 @@
           .reduce((a, b) => a + b, 0);
         const avg = sum / Math.max(1, frameFilled);
         const fps = avg > 0 ? 1000 / avg : 0;
-        const bricks = (wallMesh?.count || 0) + (archMesh?.count || 0);
+        const bricks = totalBrickCount();
         const vperb = vertCountPerBrick();
         const drawCalls =
-          (wallMesh ? 1 : 0) + (archMesh ? 1 : 0) + (mortarMesh ? 1 : 0) + 1;
+          (wallMesh ? 1 : 0) +
+          (archMesh ? 1 : 0) +
+          (mortarMesh ? 1 : 0) +
+          (churchMesh ? 4 : 0) + // 1 instanced + 3 interior core boxes
+          1;
         perfStatsEl.innerHTML =
           `<b>${avg.toFixed(2)}ms</b> · <b>${fps.toFixed(0)} fps</b><br>` +
           `bricks: <b>${bricks.toLocaleString()}</b> · verts/brick: ${vperb}<br>` +
@@ -1221,6 +1344,13 @@
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
+
+      // Console/debug helper: position the camera programmatically.
+      window.__labView = (px, py, pz, tx = 0, ty = 8, tz = 0) => {
+        camera.position.set(px, py, pz);
+        controls.target.set(tx, ty, tz);
+        controls.update();
+      };
     </script>
   </body>
 </html>

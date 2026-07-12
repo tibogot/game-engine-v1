@@ -52,8 +52,9 @@ export const GOTHIC_CHURCH_DEFAULTS = {
   turretsEnabled: true,
   portalHalfW: 1.5,
   portalRings: 3,
-  portalSpringY: 5.1,
-  roseR: 2.65,
+  portalSpringY: 4.6,
+  portalPointedness: 1.05,
+  roseR: 2.45,
   windowPointedness: 1.3,
 
   // Perf
@@ -545,15 +546,38 @@ export function generateGothicChurch(params, material, opts = {}) {
   // ═══ WEST FACADE ═══════════════════════════════════════════════════════
   {
     L.setPanel(xWest, 0, -Math.PI / 2); // outward = -X, local +x = +Z
+    const kPort = p.portalPointedness;
     const portR = p.portalHalfW + p.portalRings * (ringShell * 2.1);
-    const roseCy = p.naveEaveY - 0.7;
+    // Portal apex height (pointed arch geometry) → keep the rose clear of it
+    // AND inside the gable rake, whatever the sliders say.
+    const cPort = portR * kPort;
+    const portalTopY =
+      p.portalSpringY + Math.sqrt(Math.max(0, portR * (portR + 2 * cPort)));
+    let roseR = p.roseR;
+    let roseCy = Math.max(p.naveEaveY - 2.0, portalTopY + roseR + ringShell + 0.5);
+    const rakeHalfAt = gableProfile(zNave, p.naveEaveY, p.naveRidgeY);
+    for (let i = 0; i < 8; i++) {
+      const need = roseR + ringShell + 0.3;
+      if (rakeHalfAt(roseCy + roseR + ringShell) >= need) break;
+      roseR *= 0.92;
+      roseCy = Math.max(p.naveEaveY - 2.0, portalTopY + roseR + ringShell + 0.5);
+    }
+    // Full width → sloped half-gable shoulders (closing the aisle lean-to
+    // roof ends) → central gable.
+    const shoulderY0 = p.aisleEaveY + 0.9;
+    const shoulderY1 = p.aisleAttachY + 0.7;
     const facadeProfile = (y) => {
-      if (y <= p.aisleEaveY + 0.9) return zA;
+      if (y <= shoulderY0) return zA;
+      if (y <= shoulderY1) {
+        return THREE.MathUtils.lerp(
+          zA, zNave, (y - shoulderY0) / (shoulderY1 - shoulderY0),
+        );
+      }
       return gableProfile(zNave, p.naveEaveY, p.naveRidgeY)(y);
     };
     const openings = [
-      lancetOpening(0, 0, p.portalSpringY, portR + 0.04, k),
-      circleOpening(0, roseCy, p.roseR + ringShell),
+      lancetOpening(0, 0, p.portalSpringY, portR + 0.04, kPort),
+      circleOpening(0, roseCy, roseR + ringShell),
       lancetOpening(-(zNave + p.aisleW * 0.52), aisle.sill, aisle.spring, aisle.r + ringShell, k),
       lancetOpening(zNave + p.aisleW * 0.52, aisle.sill, aisle.spring, aisle.r + ringShell, k),
     ];
@@ -563,7 +587,7 @@ export function generateGothicChurch(params, material, opts = {}) {
     for (let ri = p.portalRings - 1; ri >= 0; ri--) {
       const R = p.portalHalfW + ringShell + ri * (ringShell * 2.1);
       layLancetRing(L, rnd, {
-        cx: 0, sill: 0, spring: p.portalSpringY, R, k, bw, bh, bd,
+        cx: 0, sill: 0, spring: p.portalSpringY, R, k: kPort, bw, bh, bd,
         ringDepth: 1.5, proud: 0.14 - (p.portalRings - 1 - ri) * 0.22,
         spacing: 0.8,
         tone: ri % 2 === 0 ? trimTone : stoneTone,
@@ -574,9 +598,9 @@ export function generateGothicChurch(params, material, opts = {}) {
     const lintelY = 2.75;
     const tympR = p.portalHalfW + ringShell - bh * 0.55;
     layPanel(L, rnd, wall({
-      y0: lintelY, y1: p.portalSpringY + tympR * 1.6,
+      y0: lintelY, y1: p.portalSpringY + tympR * 1.9,
       halfW: (y) => {
-        const h = wallOpeningHalfX(y, tympR, 0, p.portalSpringY, 0, "pointed", k);
+        const h = wallOpeningHalfX(y, tympR, 0, p.portalSpringY, 0, "pointed", kPort);
         return h > 1e-5 ? h : null;
       },
       zFace: -0.42, bw: bw * 0.7, bh: bh * 0.7, tone: trimTone, depthJitter: 0.02,
@@ -590,7 +614,7 @@ export function generateGothicChurch(params, material, opts = {}) {
     L.box(0, lintelY + 0.09, -0.32, 0, 0, doorHalf * 2 + 0.3, 0.24, bd * 0.9, trimTone(rnd));
 
     // Rose window
-    layCircleRing(L, rnd, { cx: 0, cy: roseCy, R: p.roseR + ringShell, bw, bh, bd, spokes: 12, ringDepth: 1.35, proud: 0.08 });
+    layCircleRing(L, rnd, { cx: 0, cy: roseCy, R: roseR + ringShell, bw, bh, bd, spokes: 12, ringDepth: 1.35, proud: 0.08 });
     // Aisle-front lancet rings
     layLancetRing(L, rnd, ringFor(aisle, -(zNave + p.aisleW * 0.52)));
     layLancetRing(L, rnd, ringFor(aisle, zNave + p.aisleW * 0.52));
@@ -628,18 +652,20 @@ export function generateGothicChurch(params, material, opts = {}) {
           L.box(0, y, -bd * 0.35, 0, 0, facetW * 0.92, bh, bd * 0.7, stoneTone(rnd));
         }
       }
-      // spirelet
+      // cap cornice, then spirelet
       const y1 = rows * rowH;
+      L.setPanel(cx, cz, 0);
+      L.box(0, y1 + 0.06, 0, 0, 0, r * 2.15, 0.16, r * 2.15, trimTone(rnd));
       const spRows = Math.round(3.4 / (bh * 0.8));
       for (let iy = 0; iy < spRows; iy++) {
         const t = iy / spRows;
-        const rr = r * 0.85 * (1 - t);
-        const y = y1 + (bh * 0.8) * (iy + 0.5);
+        const rr = Math.max(0.08, r * (1 - t));
+        const y = y1 + 0.14 + (bh * 0.8) * (iy + 0.5);
         const nfac = rr > 0.3 ? 8 : 4;
         for (let f = 0; f < nfac; f++) {
           const a = (f / nfac) * Math.PI * 2 + (iy % 2) * (Math.PI / nfac);
-          L.setPanel(cx + Math.cos(a) * rr * 0.8, cz + Math.sin(a) * rr * 0.8, -a - Math.PI / 2);
-          L.box(0, y, 0, 0, 0, Math.max(0.18, 2 * rr * Math.tan(Math.PI / nfac) * 0.9), bh * 0.78, Math.max(0.15, bd * 0.5 * (1 - t)), slateTone(rnd));
+          L.setPanel(cx + Math.cos(a) * rr * 0.78, cz + Math.sin(a) * rr * 0.78, -a - Math.PI / 2);
+          L.box(0, y, 0, 0, 0, Math.max(0.18, 2 * rr * Math.tan(Math.PI / nfac) * 0.95), bh * 0.78, Math.max(0.14, bd * 0.55 * (1 - t)), slateTone(rnd));
         }
       }
       L.setPanel(cx, cz, 0);
@@ -904,9 +930,15 @@ export function generateGothicChurch(params, material, opts = {}) {
       m.position.set(x, h / 2 + 0.02, z);
       group.add(m);
     };
-    mkCore(xApse - xWest - 1.2, p.naveEaveY - 1.2, zNave * 2 - 1.1, (xApse + xWest) / 2, 0);
-    mkCore(tHW * 2 - 1.1, p.naveEaveY - 1.2, THL * 2 - 1.2, 0, 0);
-    mkCore(zNave * 1.4, p.apseEaveY - 1.0, zNave * 1.4, xApse + 0.8, 0);
+    mkCore(xApse - xWest - 1.2, p.naveEaveY + 0.8, zNave * 2 - 1.1, (xApse + xWest) / 2, 0);
+    mkCore(tHW * 2 - 1.1, p.naveEaveY + 0.8, THL * 2 - 1.2, 0, 0);
+    // Apse core is a cylinder so it stays inside the polygonal facets.
+    const apseCore = new THREE.Mesh(
+      new THREE.CylinderGeometry(zNave * 0.78, zNave * 0.78, p.apseEaveY - 0.6, 12),
+      opts.coreMaterial,
+    );
+    apseCore.position.set(xApse, (p.apseEaveY - 0.6) / 2 + 0.02, 0);
+    group.add(apseCore);
   }
 
   return { group, mesh, brickCount: mesh.count };
