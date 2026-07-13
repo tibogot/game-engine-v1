@@ -180,15 +180,19 @@ export class CliffBvh {
     return null;
   }
 
-  // Down ray for ground-stick: returns { y, ny } with the surface normal.y
+  // Down ray for ground-stick: returns { y, nx, ny, nz } with the surface normal
   // oriented up (geometry is double-sided so winding is arbitrary), or null.
+  // The full normal matters for bodies that pitch to the ground (the husky) —
+  // with only `ny` they fall back to the terrain normal and tilt on flat decks.
   raycastDown(ox, oy, oz, maxDist) {
     if (!this.baked || !this._bvh) return null;
     _ray.origin.set(ox, oy, oz);
     _ray.direction.set(0, -1, 0);
     const hit = this._bvh.raycastFirst(_ray);
     if (hit && hit.distance <= maxDist) {
-      return { y: hit.point.y, ny: Math.abs(hit.face.normal.y) };
+      const n = hit.face.normal;
+      const s = n.y < 0 ? -1 : 1;
+      return { y: hit.point.y, nx: n.x * s, ny: Math.abs(n.y), nz: n.z * s };
     }
     return null;
   }

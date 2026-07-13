@@ -299,10 +299,18 @@ export class SolidCollider {
     return hit ? hit.point.y : null;
   }
 
+  /**
+   * The FULL surface normal comes back, not just its Y: the husky pitches its
+   * body to the ground it stands on, and with only `ny` it fell back to the
+   * terrain normal — tilting on flat bridge decks over sloped ground.
+   * raycast3D already orients the normal against the ray, so it points up here.
+   */
   raycastDown(ox, oy, oz, maxDist) {
     const hit = this.raycast3D(ox, oy, oz, 0, -1, 0, maxDist);
     if (!hit) return null;
-    return { y: hit.point.y, ny: Math.abs(hit.normal.y) };
+    const n = hit.normal;
+    const s = n.y < 0 ? -1 : 1;
+    return { y: hit.point.y, nx: n.x * s, ny: Math.abs(n.y), nz: n.z * s };
   }
 
   raycastHeight(wx, wz) {
