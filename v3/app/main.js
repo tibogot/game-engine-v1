@@ -21,6 +21,8 @@ import { initEditorShell } from "../ui/editorShell.js";
 import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
 import { createPlayMode, LOD_SNAP } from "../play/playMode.js";
+import { createSpawnPointSystem } from "../play/spawnPoint.js";
+import { buildSpawnPanel } from "../ui/buildSpawnPanel.js";
 import { V2_CONFIG } from "../../v2/app/config.js";
 import { createPerfState, tickPerf } from "../../v2/app/state/toolState.js";
 import { createWorldToolState } from "./state/worldState.js";
@@ -391,6 +393,7 @@ export async function startV3App(opts = {}) {
   const river2Panel    = document.getElementById("river2-panel");
   const lakePanel      = document.getElementById("lake-panel");
   const roadPanel      = document.getElementById("road-panel");
+  const spawnPanel     = document.getElementById("spawn-panel");
   const playStatPos    = document.getElementById("play-stat-pos");
   const playStatSpeed  = document.getElementById("play-stat-speed");
   const playStatGround = document.getElementById("play-stat-ground");
@@ -431,11 +434,24 @@ export async function startV3App(opts = {}) {
     return cov * slope * snowSystem.params.baseDepth * SNOW_SINK;
   }
 
+  /** Player start (spawn) — where play mode drops the character in. */
+  const spawnSystem = createSpawnPointSystem({
+    scene,
+    getGroundY: (wx, wz) => {
+      const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
+      const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
+      if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+      return sampleTerrainHeight(u, v);
+    },
+  });
+  let spawnUi = null;
+
   const playMode = createPlayMode({
     scene,
     renderer,
     camera,
     controls,
+    getSpawnPoint: () => spawnSystem.getSpawn(),
     sampleTerrainHeight: (u, v) => sampleTerrainHeight(u, v) + snowGroundOffset(u, v),
     sampleTerrainNormal: (wx, wz) => sampleTerrainNormal(wx, wz),
     uCursorUV,
@@ -467,8 +483,10 @@ export async function startV3App(opts = {}) {
       syncLakePanelVisibility();
       syncRoadPanelVisibility();
       syncCliffPaintPanelVisibility();
+      syncSpawnPanelVisibility();
       applyRiverModeEffects();
       applyLakeModeEffects();
+      applySpawnModeEffects();
       syncEditorOrbitEnabled();
       syncPlayImmersiveButtonLabel();
     },
@@ -1430,6 +1448,17 @@ export async function startV3App(opts = {}) {
     roadPanel.style.display = (editorMode === "road" && !playMode.active) ? "" : "none";
   }
 
+  function syncSpawnPanelVisibility() {
+    spawnPanel.style.display = (editorMode === "spawn" && !playMode.active) ? "" : "none";
+  }
+
+  function applySpawnModeEffects() {
+    // The marker stays visible in every editor mode (like a Unity Player Start),
+    // but only lights up — and only takes clicks — while spawn mode is active.
+    spawnSystem.setEditActive(editorMode === "spawn" && !playMode.active);
+    spawnSystem.setVisible(!playMode.active);
+  }
+
   function syncSnowPanelVisibility() {
     snowPanel.style.display = (editorMode === "snow" && !playMode.active) ? "" : "none";
   }
@@ -1506,6 +1535,9 @@ export async function startV3App(opts = {}) {
       sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
     } else if (m === "cliffPaint") {
       sculpt.uRadius.value = cliffPaintBrush.radius / WORLD_SIZE;
+    } else if (m === "spawn") {
+      uCursorUV.value.set(-2, -2);
+      spawnUi?.refresh();
     } else if (m === "props" || m === "spline" || m === "river" || m === "river2" || m === "road" || m === "lake") {
       uCursorUV.value.set(-2, -2);
       if (m === "river" || m === "river2") void ensureCpuHeightmapFromGpu();
@@ -1532,9 +1564,11 @@ export async function startV3App(opts = {}) {
     syncRiver2PanelVisibility();
     syncLakePanelVisibility();
     syncRoadPanelVisibility();
+    syncSpawnPanelVisibility();
     applySplineModeEffects();
     applyRiverModeEffects();
     applyLakeModeEffects();
+    applySpawnModeEffects();
     refreshGizmoHud();
     if (viewNavHint) viewNavHint.style.display = (m === "view" && !playMode.active) ? "" : "none";
     syncEditorOrbitEnabled();
@@ -1570,8 +1604,10 @@ export async function startV3App(opts = {}) {
     river2Panel.style.display = "none";
     lakePanel.style.display = "none";
     roadPanel.style.display = "none";
+    spawnPanel.style.display = "none";
     roadSystem?.setEditActive(false);
     lakeSystem?.setEditActive(false);
+    spawnSystem.setVisible(false);
     helpOverlay.classList.remove("visible");
     tbHelp.classList.remove("active");
     syncPlayImmersiveButtonLabel();
@@ -2198,6 +2234,8 @@ export async function startV3App(opts = {}) {
         lod.update(controls.target);
         if (!editorCamera.flyMode) controls.update();
         if (!editorCamera.flyMode && !controls.enabled) syncEditorOrbitEnabled();
+        // Sculpting under the marker must not bury it — re-drape every frame.
+        spawnSystem.refreshHeight();
       }
 
       bakeGrassTintIfNeeded();
@@ -2472,6 +2510,19 @@ export async function startV3App(opts = {}) {
     if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
       e.preventDefault();
       setEditorMode(editorMode === "foliage" ? "view" : "foliage");
+      return;
+    }
+    if (e.code === "KeyN" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "spawn" ? "view" : "spawn");
+      return;
+    }
+    // Delete clears the player start while spawn mode is active.
+    if (editorMode === "spawn" && !playMode.active
+        && (e.code === "Delete" || e.code === "Backspace")) {
+      e.preventDefault();
+      spawnSystem.clear();
+      spawnUi?.refresh();
       return;
     }
     // Spline mode shortcuts (v2)
@@ -4355,6 +4406,7 @@ export async function startV3App(opts = {}) {
       lakes:     lakeSystem.exportData(),
       rivers:    riverSystem.exportData(),
       rivers2,
+      spawn:     spawnSystem.exportData(),
     });
     const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     downloadBuffer(buf, `project-${ts}.v3proj`);
@@ -4452,6 +4504,11 @@ export async function startV3App(opts = {}) {
     // leftovers. River+ re-carves the saved (uncarved) base heightmap.
     riverSystem.importData(d.rivers ?? null);
     river2System.importData(d.rivers2 ?? null);
+
+    // Also always import: a project with no player start must clear the old marker.
+    spawnSystem.importData(d.spawn ?? null);
+    spawnSystem.setVisible(!playMode.active);
+    spawnUi?.refresh();
 
     onHistoryChange();
     console.log("[V3] Project loaded.");
@@ -4584,6 +4641,23 @@ export async function startV3App(opts = {}) {
   });
 
   applySplineModeEffects();
+
+  // ── Spawn panel ────────────────────────────────────────────────────────────
+  spawnUi = buildSpawnPanel({
+    mount: spawnPanel,
+    spawnSystem,
+    onPlaceAtCamera: () => {
+      const t = controls.target;
+      // Face the way the camera looks, so "place at camera" also aims the character.
+      const yaw = Math.atan2(camera.position.x - t.x, camera.position.z - t.z);
+      spawnSystem.setPosition(t.x, t.z, yaw);
+    },
+    onFaceCamera: () => {
+      if (!spawnSystem.placed) return;
+      const s = spawnSystem.state;
+      spawnSystem.setYaw(Math.atan2(camera.position.x - s.x, camera.position.z - s.z));
+    },
+  });
 
   // ── Lake panel + drag-to-place ─────────────────────────────────────────────
   lakeUi = buildLakePanel({
@@ -4960,6 +5034,38 @@ export async function startV3App(opts = {}) {
       syncEditorOrbitEnabled();
     }
   });
+
+  // ── Spawn (player start) mode mouse events ────────────────────────────────
+  // Click places the spawn; holding and dragging away aims its facing.
+  let _spawnDragging = false;
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "spawn" || e.button !== 0) return;
+    const hit = getTerrainHitWorld(e);
+    if (!hit) return;
+    e.preventDefault();
+    spawnSystem.setPosition(hit.x, hit.z);
+    _spawnDragging = true;
+    controls.enabled = false;
+    spawnUi?.refresh();
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "spawn" || !_spawnDragging) return;
+    const hit = getTerrainHitWorld(e);
+    if (!hit) return;
+    spawnSystem.aimAt(hit.x, hit.z);
+    spawnUi?.refresh();
+  });
+
+  const _endSpawnDrag = () => {
+    if (!_spawnDragging) return;
+    _spawnDragging = false;
+    syncEditorOrbitEnabled();
+    spawnUi?.refresh();
+  };
+  renderer.domElement.addEventListener("mouseup", _endSpawnDrag);
+  window.addEventListener("mouseup", _endSpawnDrag);
 
   // ── Smart Road mode mouse events (v2 Smart Road 2 wiring) ──────────────────
   renderer.domElement.addEventListener("mousemove", e => {
@@ -5499,6 +5605,10 @@ export async function startV3App(opts = {}) {
     loadProjectFromUrl,
     loadProjectFromBuffer,
     setEditorMode,
+
+    // Player start saved with the project — { x, y, z, yaw } or null. A game can
+    // read it to drop its own camera/units in where the level designer intended.
+    getSpawnPoint: () => spawnSystem.getSpawn(),
 
     // ── Post-FX override ──────────────────────────────────────────────────────
     // A game owns its own look, so it must be able to turn post-FX on and tune

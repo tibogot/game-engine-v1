@@ -41,6 +41,8 @@ export function createPlayMode({
   getTreeBvh = () => null,
   getStuntRoadMeshes = () => [],
   getStuntRoadSolidMeshes = () => [],
+  /** Player start placed in the editor: { x, z, yaw } — null falls back to the camera target. */
+  getSpawnPoint = () => null,
   onEnterMenu, onStartWalking, onExit,
   onModeChange,
   onRequestImmersive,
@@ -699,8 +701,11 @@ export function createPlayMode({
     controls.enabled = false;
     uCursorUV.value.set(-2, -2);
 
-    const tx = controls.target.x;
-    const tz = controls.target.z;
+    // Player start wins when one is placed; otherwise drop in at the orbit target.
+    const spawn = opts.spawn ?? getSpawnPoint();
+    const tx = spawn ? spawn.x : controls.target.x;
+    const tz = spawn ? spawn.z : controls.target.z;
+    if (spawn && Number.isFinite(spawn.yaw)) camYaw = spawn.yaw;
     capsule.reset(tx, sampleGroundY(tx, tz), tz);
     charYaw = camYaw;
     capsule.yaw = camYaw;

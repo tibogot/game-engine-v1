@@ -44,6 +44,9 @@
           <button class="toolbar-btn" data-mode="spline" title="Spline (K)">
             <i data-lucide="spline"></i>
           </button>
+          <button class="toolbar-btn" data-mode="spawn" title="Player start (N)">
+            <i data-lucide="flag"></i>
+          </button>
         </div>
 
         <div class="toolbar-group">
@@ -164,6 +167,7 @@
               <option value="road">Road (smart)</option>
               <option value="snow">Snow</option>
               <option value="cliffPaint">Cliff paint</option>
+              <option value="spawn">Player start (N)</option>
             </select>
             <p class="mode-hint" id="view-nav-hint" style="margin-top:6px">View: drag to orbit · scroll to zoom</p>
           </div>
@@ -1897,6 +1901,9 @@
         <!-- ROAD panel — built dynamically by buildRoadPanel() -->
         <div id="road-panel" style="display:none"></div>
 
+        <!-- SPAWN panel — built dynamically by buildSpawnPanel() -->
+        <div id="spawn-panel" style="display:none"></div>
+
       </div><!-- /#tab-tools -->
 
         <!-- World panel — sibling of tab-tools (must NOT nest inside tab-tools) -->
@@ -1976,6 +1983,7 @@
         <div><kbd>Shift</kbd>+<kbd>Scroll</kbd> brush size</div>
         <div><kbd>Alt</kbd>+<kbd>Scroll</kbd> strength</div>
         <div><kbd>LMB</kbd> / <kbd>MMB</kbd> orbit (view) · <kbd>RMB</kbd> pan · <kbd>Scroll</kbd> zoom</div>
+        <div><kbd>N</kbd> player start · click to place, drag to aim</div>
         <div><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Ctrl</kbd>+<kbd>Y</kbd> redo</div>
         <div><kbd>Ctrl</kbd>+<kbd>S</kbd> save</div>
       </div>
