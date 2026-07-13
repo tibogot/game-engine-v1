@@ -21,7 +21,8 @@ async function probeModelsForFile(filename) {
     const url = base + filename;
     try {
       const resp = await fetch(url, { method: "HEAD" });
-      if (resp.ok) return url;
+      // Dev servers answer missing files with index.html + 200 (SPA fallback)
+      if (resp.ok && !resp.headers.get("content-type")?.includes("text/html")) return url;
     } catch (_) { /* try next */ }
   }
   return null;

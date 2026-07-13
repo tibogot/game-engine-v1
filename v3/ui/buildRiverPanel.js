@@ -136,6 +136,12 @@ function _button(parent, opts) {
 
 function _buildRiverControls(panel, rp, app, prefix) {
   const body = _section(panel, prefix === "river2" ? "River+ (Auto-Carve)" : "River");
+  if (prefix === "river2") {
+    _hint(body,
+      "Click ground: extend from the selected end (first point selected = trace upstream). " +
+      "Select a middle point, then click: start a branch from it. " +
+      "Alt-click near the line: insert a point. Handles of every river are clickable.");
+  }
   _toggle(body, rp, "showHandles", {
     label: "Show handles",
     onChange: () => app[`${prefix}Changed`]?.(),

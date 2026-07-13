@@ -52,7 +52,9 @@ export const BRICK_WALL_DEFAULTS = {
   brickH: 0.38,
   brickD: 0.55,
   brickRound: 0.02,
-  roundSegments: 4, // lab default; drop to 1–2 for in-game vertex budget
+  // 2 = engine default (114 verts/brick, visually identical beyond ~5 m).
+  // The original claude-zelda lab shipped 4 (234 verts/brick).
+  roundSegments: 2,
 
   // Wall field
   wallEnabled: true,

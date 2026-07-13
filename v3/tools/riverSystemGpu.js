@@ -169,6 +169,7 @@ export class RiverSystemGPU {
     this.handleGroup.name = "RiverGpuHandles";
     this.scene.add(this.handleGroup);
     this.handleMeshes = [];
+    this._activeLine = null;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1117,18 +1118,78 @@ export class RiverSystemGPU {
     this._rebuildVisual();
   }
 
+  /**
+   * Ground click — Smart-Road-style "extend from the selected node":
+   *  - last point selected (or nothing): append, tracing downstream.
+   *  - first point selected: prepend, tracing upstream.
+   *  - a MIDDLE point (or a linked mouth) selected: a new river branches off
+   *    from that point — its first point is glued there and becomes a
+   *    tributary link, the click becomes its second point.
+   */
   addPoint(pos) {
     this._pushUndo();
     if (this.segments.length === 0) {
       this.segments.push(this._makeSeg());
       this.toolState.river2.activeRiverIndex = 0;
+      this.selectedIdx = -1;
     }
     this._clampActive();
-    const seg = this.segments[this._activeIdx()];
-    seg.points.push(pos.clone());
+    let seg = this.segments[this._activeIdx()];
+    const n = seg.points.length;
+    const sel = this.selectedIdx;
+    const midSel = n >= 2 && sel > 0 && sel < n - 1;
+    // Extending past a glued mouth would silently break the confluence, so a
+    // selected mouth endpoint branches instead.
+    const mouthSel = n >= 2 && !!seg.link &&
+      ((seg.link.end === 0 && sel === 0) || (seg.link.end === 1 && sel === n - 1));
+
+    if (midSel || mouthSel) {
+      const branch = this._makeSeg([seg.points[sel].clone(), pos.clone()]);
+      this.segments.push(branch);
+      this.toolState.river2.activeRiverIndex = this.segments.length - 1;
+      seg = branch;
+      this.selectedIdx = 1;
+    } else if (n >= 2 && sel === 0) {
+      seg.points.unshift(pos.clone());
+      this.selectedIdx = 0;
+    } else {
+      seg.points.push(pos.clone());
+      this.selectedIdx = seg.points.length - 1;
+    }
     this._afterStructuralEdit(seg);
-    this.selectedIdx = seg.points.length - 1;
     this.applyCarve({ rebuild: true, commit: true });
+    this._updateSelectedY();
+  }
+
+  /**
+   * Alt-click — insert a control point where the active river passes closest to
+   * `pos` (Smart Road's alt-click edge split). Returns false when the click is
+   * too far from the centerline to be an insert.
+   */
+  insertPointNear(pos) {
+    const ai = this._activeIdx();
+    if (ai < 0) return false;
+    const seg = this.segments[ai];
+    if (seg.points.length < 2) return false;
+    // The curve interpolates its control points, so the nearest CONTROL span is
+    // the right insertion slot — no need to project onto the smoothed curve.
+    const c = this._closestOnPolyline(seg.points, pos.x, pos.z);
+    if (!c || c.dist > this._snapRadius() * 3) return false;
+    this._pushUndo();
+    seg.points.splice(c.i + 1, 0, pos.clone());
+    this.selectedIdx = c.i + 1;
+    this._afterStructuralEdit(seg);
+    this.applyCarve({ rebuild: true, commit: true });
+    this._updateSelectedY();
+    return true;
+  }
+
+  /** Select a picked handle — switches the active river when needed. */
+  selectPoint({ seg, point }) {
+    this.toolState.river2.activeRiverIndex = seg;
+    this._clampActive();
+    this.selectedIdx = point;
+    this._rebuildHandles();
     this._updateSelectedY();
   }
 
@@ -1192,12 +1253,14 @@ export class RiverSystemGPU {
     this._rebuildHandles();
   }
 
+  /** @returns {{seg:number, point:number}|null} — every river's handles are pickable. */
   pickPoint(raycaster) {
     const spheres = this.handleMeshes.filter((m) => m.isMesh);
-    if (spheres.length === 0) return -1;
+    if (spheres.length === 0) return null;
     const hits = raycaster.intersectObjects(spheres, false);
-    if (hits.length === 0) return -1;
-    return this.handleMeshes.indexOf(hits[0].object);
+    if (hits.length === 0) return null;
+    const u = hits[0].object.userData;
+    return { seg: u.segIdx, point: u.pointIdx };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1294,29 +1357,37 @@ export class RiverSystemGPU {
       if (child.material) child.material.dispose();
     }
     this.handleMeshes = [];
+    this._activeLine = null;
 
     const ai = this._activeIdx();
-    if (ai < 0) {
-      this._syncHandlesVisibility();
-      return;
-    }
-    const pts = this.segments[ai].points;
-    for (let i = 0; i < pts.length; i++) {
-      const sphere = new THREE.Mesh(
-        new THREE.SphereGeometry(0.5, 8, 8),
-        new THREE.MeshBasicMaterial({ color: i === this.selectedIdx ? 0xffff00 : 0x00cc44 }),
-      );
-      sphere.position.copy(pts[i]);
-      this.handleGroup.add(sphere);
-      this.handleMeshes.push(sphere);
-    }
-
-    if (pts.length >= 2) {
-      const curve = new THREE.CatmullRomCurve3(pts, !!this.toolState.river2.closed, "catmullrom", 0.5);
-      const lineGeo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(80));
-      const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x44ff88 }));
-      this.handleGroup.add(line);
-      this.handleMeshes.push(line);
+    for (let s = 0; s < this.segments.length; s++) {
+      const pts = this.segments[s].points;
+      const isActive = s === ai;
+      for (let i = 0; i < pts.length; i++) {
+        const selected = isActive && i === this.selectedIdx;
+        const sphere = new THREE.Mesh(
+          new THREE.SphereGeometry(isActive ? 0.5 : 0.4, 8, 8),
+          new THREE.MeshBasicMaterial({
+            color: selected ? 0xffff00 : isActive ? 0x00cc44 : 0x3d7fd6,
+          }),
+        );
+        sphere.position.copy(pts[i]);
+        sphere.userData.segIdx = s;
+        sphere.userData.pointIdx = i;
+        this.handleGroup.add(sphere);
+        this.handleMeshes.push(sphere);
+      }
+      if (pts.length >= 2) {
+        const curve = new THREE.CatmullRomCurve3(pts, !!this.toolState.river2.closed, "catmullrom", 0.5);
+        const lineGeo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(80));
+        const line = new THREE.Line(
+          lineGeo,
+          new THREE.LineBasicMaterial({ color: isActive ? 0x44ff88 : 0x2a5f8f }),
+        );
+        this.handleGroup.add(line);
+        this.handleMeshes.push(line);
+        if (isActive) this._activeLine = line;
+      }
     }
     this._syncHandlesVisibility();
   }
@@ -1325,14 +1396,14 @@ export class RiverSystemGPU {
     const ai = this._activeIdx();
     if (ai < 0) return;
     const pts = this.segments[ai].points;
-    for (let i = 0; i < pts.length && i < this.handleMeshes.length; i++) {
-      const m = this.handleMeshes[i];
-      if (m.isMesh) m.position.copy(pts[i]);
+    for (const m of this.handleMeshes) {
+      if (m.isMesh && m.userData.segIdx === ai && m.userData.pointIdx < pts.length) {
+        m.position.copy(pts[m.userData.pointIdx]);
+      }
     }
-    const lastHandle = this.handleMeshes[this.handleMeshes.length - 1];
-    if (lastHandle && !lastHandle.isMesh && pts.length >= 2) {
+    if (this._activeLine && pts.length >= 2) {
       const curve = new THREE.CatmullRomCurve3(pts, !!this.toolState.river2.closed, "catmullrom", 0.5);
-      const posAttr = lastHandle.geometry.attributes.position;
+      const posAttr = this._activeLine.geometry.attributes.position;
       const newPts = curve.getPoints(80);
       for (let i = 0; i < newPts.length; i++) {
         posAttr.setXYZ(i, newPts[i].x, newPts[i].y, newPts[i].z);
@@ -1371,6 +1442,40 @@ export class RiverSystemGPU {
   // ═══════════════════════════════════════════════════════════════════════════
   // Serialization
   // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Save-time snapshot of the UNCARVED base heights. A project with carved
+   * rivers must store the base, not the carved result: the carve profile is
+   * derived from base ground, so re-carving an already-carved heightmap on
+   * load would dig every gorge twice as deep. Returns null when no carve is
+   * active (caller saves the plain heightmap).
+   */
+  async exportBaseHeightmap() {
+    if (!this._baseReady) return null;
+    clearTimeout(this._rebaseTimer);
+    this._rebaseNow(); // fold any debounce-pending sculpt edits into the base first
+    const raw = await this.renderer.readRenderTargetPixelsAsync(
+      this._rtBase, 0, 0, HEIGHTMAP_SIZE, HEIGHTMAP_SIZE,
+    );
+    const out = new Float32Array(HEIGHTMAP_SIZE * HEIGHTMAP_SIZE);
+    const isHalf = raw instanceof Uint16Array;
+    for (let i = 0; i < out.length; i++) {
+      const r = raw[i * 4];
+      out[i] = isHalf ? THREE.DataUtils.fromHalfFloat(r) : r;
+    }
+    return out;
+  }
+
+  /**
+   * Project load: forget the captured base outright. The incoming heightmap
+   * replaces the whole terrain, so importData's in-session base restore (blit
+   * base over rtMain) and the debounced rebase would both fold stale terrain
+   * into the load. Call BEFORE replaceHeightData.
+   */
+  resetForLoad() {
+    clearTimeout(this._rebaseTimer);
+    this._dropBase();
+  }
 
   exportData() {
     return this.segments.map((s) => ({

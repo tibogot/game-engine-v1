@@ -8,17 +8,21 @@
  *     the 3 corners of whichever triangle a fragment falls in.
  *     25% fewer texture taps than 4-corner square, and no diagonal bias.
  *
- *  2. Distance fade
- *     Hash offsets are multiplied by a [1→0] fade factor that reaches 0
- *     beyond FADE_END world units from the camera. At fade=0 all three
- *     samples collapse to the same plain UV — graceful fallback with no
- *     extra texture tap, and no stochastic cell-edge artifacts at distance.
+ *  2. Distance fade (colour crossfade)
+ *     Beyond FADE_START the blended stochastic colour crossfades toward one
+ *     plain-UV tap, reaching fully plain at FADE_END — kills stochastic
+ *     cell-edge artifacts at distance. The hash offsets themselves stay
+ *     world-anchored constants: scaling them by the camera-relative fade
+ *     (the previous scheme) made the texture visibly SLIDE as the camera
+ *     moved anywhere in the band — glaring on cliff faces, which sit at
+ *     mid-distance and face the camera head-on. A colour dissolve has no
+ *     slide.
  *
  *  3. Albedo-only (callers)
  *     ORM (roughness / AO / normals) is sampled with plain texture() by
  *     the callers — tiling in those channels is barely perceptible.
- *     Net cost: 3 albedo samples vs 1 before = 2 extra taps per painted layer,
- *     ORM unchanged.
+ *     Net cost: 4 albedo samples (3 stochastic + 1 plain for the crossfade)
+ *     vs 1 before, ORM unchanged.
  *
  *  Toggle: a floating button is injected so you can compare perf / visuals.
  *  It saves to localStorage and reloads — the disabled path builds plain
@@ -26,7 +30,7 @@
  */
 import {
   vec2, float,
-  floor, fract, max, min, step, smoothstep,
+  floor, fract, max, min, mix, step, smoothstep,
   texture, cameraPosition, positionWorld, length,
 } from "three/tsl";
 import { hash22 } from "./tsl-utils.js";
@@ -80,13 +84,13 @@ _injectToggleButton();
 // ── distance fade node (created once, shared across all stochastic calls) ─────
 // Evaluates per-fragment at runtime; TSL deduplicates the shared node reference.
 //
-// The fade is CAMERA-relative, so wherever it transitions, the ground texture
-// visibly slides/morphs as the camera moves. The original 50→80 m band put that
-// morph right where the player looks (glaring once anisotropic filtering made
-// mid-distance detail sharp). Pushed far out and stretched: at 300+ m ground
-// texels are small and mip-blurred, and a 900 m-wide ramp changes offsets so
-// slowly per frame that the transition is imperceptible. Tap count is
-// unchanged — the fade only collapses the 3 sample UVs, not the sampling.
+// The fade is CAMERA-relative and drives a COLOUR crossfade (stochastic blend →
+// one plain tap), never the hash offsets. Scaling the offsets by this fade — the
+// original scheme — made the texture content slide/morph whenever the camera
+// moved, because every fragment's UV offset changed per frame. Ground at grazing
+// angle hid it after the band was pushed to 300–1200 m, but cliff faces sit at
+// exactly that range, viewed head-on, and kept morphing. A dissolve between two
+// world-stable samples has no slide at any distance or slope.
 const _FADE_START = 300.0;
 const _FADE_END   = 1200.0;
 const _distFade = float(1).sub(
@@ -127,11 +131,12 @@ export function stochasticSample(texNode, uv) {
   const f = fract(uv);
   const { w00, w1, w11, i1 } = _triWeights(f);
 
-  // Multiply hash offsets by _distFade: at far distance all three UVs converge
-  // to the plain UV, collapsing cost to effectively a single tap.
-  return texture(texNode, uv.add(hash22(i).mul(_distFade))).mul(w00)
-    .add(texture(texNode, uv.add(hash22(i.add(i1)).mul(_distFade))).mul(w1))
-    .add(texture(texNode, uv.add(hash22(i.add(vec2(1, 1))).mul(_distFade))).mul(w11));
+  // World-anchored constant offsets; the camera-relative fade only crossfades
+  // the resulting colour toward a plain tap (see _distFade comment).
+  const stoch = texture(texNode, uv.add(hash22(i))).mul(w00)
+    .add(texture(texNode, uv.add(hash22(i.add(i1)))).mul(w1))
+    .add(texture(texNode, uv.add(hash22(i.add(vec2(1, 1))))).mul(w11));
+  return mix(texture(texNode, uv), stoch, _distFade);
 }
 
 /**
@@ -151,7 +156,10 @@ export function stochasticSampleArray(arrayTexNode, uv, layerIndex) {
   const f = fract(uv);
   const { w00, w1, w11, i1 } = _triWeights(f);
 
-  return arrayTexNode.sample(uv.add(hash22(i).mul(_distFade))).depth(layerIndex).mul(w00)
-    .add(arrayTexNode.sample(uv.add(hash22(i.add(i1)).mul(_distFade))).depth(layerIndex).mul(w1))
-    .add(arrayTexNode.sample(uv.add(hash22(i.add(vec2(1, 1))).mul(_distFade))).depth(layerIndex).mul(w11));
+  // World-anchored constant offsets; the camera-relative fade only crossfades
+  // the resulting colour toward a plain tap (see _distFade comment).
+  const stoch = arrayTexNode.sample(uv.add(hash22(i))).depth(layerIndex).mul(w00)
+    .add(arrayTexNode.sample(uv.add(hash22(i.add(i1)))).depth(layerIndex).mul(w1))
+    .add(arrayTexNode.sample(uv.add(hash22(i.add(vec2(1, 1))))).depth(layerIndex).mul(w11));
+  return mix(arrayTexNode.sample(uv).depth(layerIndex), stoch, _distFade);
 }

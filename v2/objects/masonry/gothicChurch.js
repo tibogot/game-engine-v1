@@ -60,6 +60,12 @@ export const GOTHIC_CHURCH_DEFAULTS = {
   // Perf
   brickScale: 1.0, // scales the masonry unit — bigger bricks = fewer instances
   maxChurchBricks: 90000,
+
+  // LOD hints — used by hosts (lab / engine LOD manager), ignored by the
+  // generator itself. LOD1 = same church rebuilt at brickScale × lod1BrickMul.
+  lodEnabled: true,
+  lodDistance: 85, // metres from the structure center where LOD1 takes over
+  lod1BrickMul: 2.0,
 };
 
 const DEG = Math.PI / 180;
@@ -519,14 +525,18 @@ export function generateGothicChurch(params, material, opts = {}) {
     bw, bh, bd, mortar: 0.012, tone: stoneTone, ...over,
   });
 
-  // Window specs
-  const cler = { r: bw * 1.3, sill: p.naveEaveY - 3.9, spring: p.naveEaveY - 1.45 };
-  const aisle = { r: bw * 1.55, sill: 1.6, spring: 4.35 };
-  const choirW = { r: bw * 1.6, sill: 2.6, spring: 9.6 };
-  const apseW = { r: bw * 1.45, sill: 2.3, spring: 8.2 };
-  const tGab = { r: bw * 1.25, sill: 1.6, spring: 6.6 };
+  // Window specs — absolute metres (NOT brick-relative), so every LOD built
+  // at a different brickScale keeps the same openings and silhouette.
+  const cler = { r: 0.68, sill: p.naveEaveY - 3.9, spring: p.naveEaveY - 1.45 };
+  const aisle = { r: 0.8, sill: 1.6, spring: 4.35 };
+  const choirW = { r: 0.83, sill: 2.6, spring: 9.6 };
+  const apseW = { r: 0.75, sill: 2.3, spring: 8.2 };
+  const tGab = { r: 0.65, sill: 1.6, spring: 6.6 };
 
-  const ringShell = bh * 0.55;
+  // Ring shell (and thus every opening cut = r + ringShell) tracks the BASE
+  // brick height, not the LOD-scaled one — keeps openings identical across
+  // LODs; the bigger LOD bricks simply overlap the path more.
+  const ringShell = (params.brickH ?? 0.38) * 0.55;
   const lancetHole = (spec, cx) =>
     lancetOpening(cx, spec.sill, spec.spring, spec.r + ringShell, k);
   const ringFor = (spec, cx, extra = {}) => ({
@@ -919,6 +929,8 @@ export function generateGothicChurch(params, material, opts = {}) {
   // ═══ Finish: one InstancedMesh ═════════════════════════════════════════
   const mesh = pl.toInstancedMesh(baseGeo, material);
   mesh.name = "gothicChurch";
+  // toInstancedMesh clones the base geometry; release ours if we created it.
+  if (!opts.baseGeo) baseGeo.dispose();
 
   // Dark interior core so windows read as depth, not sky (3 tiny meshes)
   const group = new THREE.Group();

@@ -547,6 +547,9 @@
       let mortarMat = null;
       let churchGroup = null;
       let churchMesh = null;
+      let churchGroupL1 = null;
+      let churchMeshL1 = null;
+      let churchLodCurrent = 0;
       let coreMat = null;
 
       function brickGeometrySignature() {
@@ -574,12 +577,12 @@
           if (m.geometry) m.geometry.dispose();
         }
         wallMesh = archMesh = mortarMesh = null;
-        if (churchGroup) {
-          scene.remove(churchGroup);
-          churchGroup.traverse((m) => m.geometry?.dispose?.());
-          churchGroup = null;
-          churchMesh = null;
+        for (const g of [churchGroup, churchGroupL1]) {
+          if (!g) continue;
+          scene.remove(g);
+          g.traverse((m) => m.geometry?.dispose?.());
         }
+        churchGroup = churchMesh = churchGroupL1 = churchMeshL1 = null;
       }
 
       function rebuildInstances(remakeGeometry) {
@@ -605,6 +608,25 @@
           churchMesh = res.mesh;
           applyShadowSettingsToMesh(churchMesh);
           scene.add(churchGroup);
+
+          // LOD1: same cathedral, bigger masonry unit + 1-segment bricks.
+          if (params.lodEnabled) {
+            const res1 = generateGothicChurch(
+              {
+                ...params,
+                brickScale: params.brickScale * params.lod1BrickMul,
+                roundSegments: 1,
+              },
+              mat,
+              { coreMaterial: coreMat },
+            );
+            churchGroupL1 = res1.group;
+            churchMeshL1 = res1.mesh;
+            applyShadowSettingsToMesh(churchMeshL1);
+            scene.add(churchGroupL1);
+          }
+          updateChurchLod(true);
+
           if (archGizmo) {
             archGizmo.enabled = false;
             archGizmo.visible = false;
@@ -654,6 +676,31 @@
         }
 
         if (!isDraggingArchGizmo) updateArchGizmoFromParams();
+      }
+
+      /**
+       * Distance LOD: LOD0 (live bricks) near, LOD1 (bigger masonry) far,
+       * with 15% hysteresis so the swap can't flicker on the boundary. The
+       * static shadow map refreshes only when the swap actually happens.
+       */
+      function updateChurchLod(force) {
+        if (!churchMesh) return;
+        let want = 0;
+        if (params.lodEnabled && churchMeshL1) {
+          const c = churchMesh.boundingSphere?.center;
+          const d = c ? camera.position.distanceTo(c) : 0;
+          if (churchLodCurrent === 1) {
+            want = d < params.lodDistance * 0.85 ? 0 : 1;
+          } else {
+            want = d > params.lodDistance ? 1 : 0;
+          }
+        }
+        if (force || want !== churchLodCurrent) {
+          churchLodCurrent = want;
+          churchGroup.visible = want === 0;
+          if (churchGroupL1) churchGroupL1.visible = want === 1;
+          refreshShadows();
+        }
       }
 
       function syncLiveUniforms() {
@@ -1096,6 +1143,21 @@
         _slider(s, params, "brickScale", { label: "Brick scale", min: 0.7, max: 1.8, step: 0.05, onChange: layout });
       }
 
+      let lodInfoRow;
+      {
+        const s = _section(uiRoot, "LOD", true);
+        _toggle(s, params, "lodEnabled", { label: "Distance LOD", onChange: layout });
+        _slider(s, params, "lodDistance", { label: "LOD1 distance", min: 40, max: 220, step: 1 });
+        _slider(s, params, "lod1BrickMul", { label: "LOD1 brick ×", min: 1.4, max: 3, step: 0.05, onChange: layout });
+        lodInfoRow = _info(s, "Active LOD", () =>
+          params.sceneMode === "church"
+            ? churchLodCurrent === 1
+              ? "LOD1 (far)"
+              : "LOD0 (near)"
+            : "—",
+        );
+      }
+
       {
         const s = _section(uiRoot, "Preset", false);
         _button(s, {
@@ -1253,9 +1315,15 @@
         _slider(s, params, "exposure", { label: "Exposure", min: 0.4, max: 3, step: 0.05, onChange: live });
       }
 
+      function activeChurchMesh() {
+        return churchLodCurrent === 1 && churchMeshL1 ? churchMeshL1 : churchMesh;
+      }
+
       function totalBrickCount() {
         return (
-          (wallMesh?.count || 0) + (archMesh?.count || 0) + (churchMesh?.count || 0)
+          (wallMesh?.count || 0) +
+          (archMesh?.count || 0) +
+          (activeChurchMesh()?.count || 0)
         );
       }
 
@@ -1289,7 +1357,11 @@
       let statsAccum = 0;
 
       function vertCountPerBrick() {
-        const s = Math.max(1, Math.min(6, params.roundSegments | 0));
+        // LOD1 church bricks are always built with 1-segment geometry.
+        const s =
+          params.sceneMode === "church" && churchLodCurrent === 1
+            ? 1
+            : Math.max(1, Math.min(6, params.roundSegments | 0));
         // RoundedBoxGeometry approximation — good enough for the overlay.
         return 24 + 6 * (s + 1) * (s + 1) + 12 * (s + 1);
       }
@@ -1315,10 +1387,14 @@
           `total verts: <b>${((bricks * vperb) / 1000).toFixed(1)}k</b><br>` +
           `draw calls: <b>${drawCalls}</b> · shadow: <b>${sun.shadow.mapSize.x}</b><br>` +
           `shader: <b>${params.shaderQuality}</b>` +
+          (params.sceneMode === "church"
+            ? ` · lod: <b>${churchLodCurrent}</b>`
+            : "") +
           (params.lightweightShadows ? " · <b>light shadows</b>" : "") +
           (params.castShadows ? "" : " · <b>no cast</b>");
         statsBricksInfo.refresh();
         statsVertsInfo.refresh();
+        lodInfoRow.refresh();
       }
 
       function animate() {
@@ -1335,6 +1411,7 @@
           updatePerfStats();
         }
         controls.update();
+        updateChurchLod(false);
         renderer.render(scene, camera);
       }
       animate();
@@ -1351,6 +1428,20 @@
         controls.target.set(tx, ty, tz);
         controls.update();
       };
+      window.__labDebug = () => ({
+        lodEnabled: params.lodEnabled,
+        lodDistance: params.lodDistance,
+        lod1BrickMul: params.lod1BrickMul,
+        hasL1: !!churchMeshL1,
+        l1Count: churchMeshL1?.count ?? null,
+        lod: churchLodCurrent,
+        center: churchMesh?.boundingSphere?.center?.toArray() ?? null,
+        camDist: churchMesh?.boundingSphere
+          ? camera.position.distanceTo(churchMesh.boundingSphere.center)
+          : null,
+        l0Visible: churchGroup?.visible,
+        l1Visible: churchGroupL1?.visible,
+      });
     </script>
   </body>
 </html>

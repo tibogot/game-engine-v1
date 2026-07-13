@@ -4258,7 +4258,9 @@ export async function startV3App(opts = {}) {
     for (const base of ["models/", "../models/"]) {
       try {
         const resp = await fetch(base + name);
-        if (resp.ok) return new File([await resp.blob()], name);
+        // Dev servers answer missing files with index.html + 200 (SPA fallback)
+        if (!resp.ok || resp.headers.get("content-type")?.includes("text/html")) continue;
+        return new File([await resp.blob()], name);
       } catch (_) { /* try next */ }
     }
     console.warn(`[V3] Prop asset "${name}" not found in /models — re-import it in the props panel.`);
@@ -4314,13 +4316,19 @@ export async function startV3App(opts = {}) {
 
   async function saveProject() {
     await syncHeightmapToCPU();
+    // River+ carves the terrain, and its carve profile is derived from the
+    // UNCARVED base ground — so the project stores the base heightmap plus the
+    // river splines, and the load re-carves. Saving the carved result instead
+    // would dig every gorge twice as deep on reload.
+    const rivers2 = river2System.exportData();
+    const baseHeightmap = rivers2.length ? await river2System.exportBaseHeightmap() : null;
     const treeInstances = [];
     for (const arr of treeEnv.treeStore.chunks.values()) {
       for (const t of arr) treeInstances.push([t.x, t.z, t.y, t.rotY, t.scale, t.slotIdx]);
     }
     const buf = encodeProjectFile({
       terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, maxHeight: MAX_HEIGHT },
-      heightmap: cpuHeightmap,
+      heightmap: baseHeightmap ?? cpuHeightmap,
       splat:     splatMap.combined,
       splatRes:  SPLAT_RES,
       snow:      snowMap.snapshot(),
@@ -4331,6 +4339,8 @@ export async function startV3App(opts = {}) {
       roads:     roadSystem.exportData(),
       splines:   splineSys.exportData(),
       lakes:     lakeSystem.exportData(),
+      rivers:    riverSystem.exportData(),
+      rivers2,
     });
     const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     downloadBuffer(buf, `project-${ts}.v3proj`);
@@ -4338,22 +4348,26 @@ export async function startV3App(opts = {}) {
 
   /** Best-effort reload of tree slot assets (presets/GLBs) from /models. */
   async function restoreTreeSlotAssets(slots) {
-    const fetchModel = async (name) => {
-      for (const base of ["models/", "../models/"]) {
+    const fetchAsset = async (name, bases) => {
+      for (const base of bases) {
         try {
           const resp = await fetch(base + name);
-          if (resp.ok) return new File([await resp.blob()], name);
+          // Dev servers answer missing files with index.html + 200 (SPA fallback)
+          if (!resp.ok || resp.headers.get("content-type")?.includes("text/html")) continue;
+          return new File([await resp.blob()], name);
         } catch (_) { /* try next */ }
       }
-      console.warn(`[V3] Tree asset "${name}" not found in /models — reload it manually in the tree panel.`);
+      console.warn(`[V3] Tree asset "${name}" not found in ${bases.join(", ")} — reload it manually in the tree panel.`);
       return null;
     };
+    const fetchPreset = (name) => fetchAsset(name, ["tree-presets/", "../tree-presets/", "models/", "../models/"]);
+    const fetchModel = (name) => fetchAsset(name, ["models/", "../models/"]);
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
       if (!s) continue;
       try {
         if (s.presetFile) {
-          const f = await fetchModel(s.presetFile);
+          const f = await fetchPreset(s.presetFile);
           if (f) await treeEnv.loadTreePreset(i, f);
         } else if (s.glbFile?.lod0) {
           const f0 = await fetchModel(s.glbFile.lod0);
@@ -4370,6 +4384,10 @@ export async function startV3App(opts = {}) {
   }
 
   async function applyProjectData(d) {
+    // Drop River+'s captured base BEFORE the heightmap swap: the wrapped
+    // replaceHeightData would otherwise schedule a rebase that folds the
+    // freshly loaded terrain into the previous scene's base.
+    river2System.resetForLoad();
     if (d.heightmap?.length === HEIGHTMAP_SIZE * HEIGHTMAP_SIZE) {
       sculpt.replaceHeightData(d.heightmap);
       markHeightmapDirty();
@@ -4415,6 +4433,11 @@ export async function startV3App(opts = {}) {
     // lakes left over from the previous scene.
     lakeSystem.importData(d.lakes ?? null);
     lakeUi?.refresh();
+
+    // Rivers restore like lakes — always import so a river-less project clears
+    // leftovers. River+ re-carves the saved (uncarved) base heightmap.
+    riverSystem.importData(d.rivers ?? null);
+    river2System.importData(d.rivers2 ?? null);
 
     onHistoryChange();
     console.log("[V3] Project loaded.");
@@ -4901,12 +4924,15 @@ export async function startV3App(opts = {}) {
     refreshMouse(e);
     raycaster.setFromCamera(mouse, camera);
     const picked = river2System.pickPoint(raycaster);
-    if (picked >= 0) {
-      river2System.selectedIdx = picked;
+    if (picked) {
+      // Any river's handle — selecting switches the active river too.
+      river2System.selectPoint(picked);
       river2System.dragging = true;
       controls.enabled = false;
-      river2System._rebuildHandles();
-      river2System._updateSelectedY();
+    } else if (e.altKey) {
+      // Alt-click near the active centerline inserts a control point there.
+      const hit = getTerrainHitWorld(e);
+      if (hit) river2System.insertPointNear(hit);
     } else {
       const hit = getTerrainHitWorld(e);
       if (hit) river2System.addPoint(hit);

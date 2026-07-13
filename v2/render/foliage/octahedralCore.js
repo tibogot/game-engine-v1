@@ -303,11 +303,14 @@ async function bakeAtlases(renderer, meshData, opts) {
     samples: 1,
   });
 
-  const savedTM = renderer.toneMapping;
-  const savedOCS = renderer.outputColorSpace;
-  renderer.toneMapping = THREE.NoToneMapping;
-  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-  renderer.setClearColor(0x000000, 0);
+  // No global toneMapping/outputColorSpace override, and renderer state is
+  // restored around every render, before each readback await — see the note in
+  // bakeColorAtlasFromObject: dirty global state leaks into the app frames the
+  // main loop renders between our awaits.
+  const savedTarget = renderer.getRenderTarget();
+  const savedAutoClear = renderer.autoClear;
+  const savedClearColor = renderer.getClearColor(new THREE.Color());
+  const savedClearAlpha = renderer.getClearAlpha();
 
   await renderer.compileAsync(colorScene, ortho);
   await renderer.compileAsync(normalScene, ortho);
@@ -340,9 +343,13 @@ async function bakeAtlases(renderer, meshData, opts) {
       ortho.updateMatrixWorld(true);
 
       for (const [sc, dest] of scenes) {
+        renderer.setClearColor(0x000000, 0);
         renderer.setRenderTarget(cellRT);
         renderer.autoClear = true;
         renderer.render(sc, ortho);
+        renderer.setRenderTarget(savedTarget);
+        renderer.autoClear = savedAutoClear;
+        renderer.setClearColor(savedClearColor, savedClearAlpha);
 
         const buf = await renderer.readRenderTargetPixelsAsync(cellRT, 0, 0, ssCS, ssCS);
         const src = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -367,10 +374,6 @@ async function bakeAtlases(renderer, meshData, opts) {
   }
 
   cellRT.dispose();
-  renderer.setRenderTarget(null);
-  renderer.autoClear = true;
-  renderer.toneMapping = savedTM;
-  renderer.outputColorSpace = savedOCS;
 
   linearToSrgb(colorPixels);
 
@@ -790,13 +793,19 @@ async function bakeColorAtlasFromObject(renderer, objects, opts) {
     colorSpace: THREE.LinearSRGBColorSpace, samples: 1,
   });
 
-  const savedTM = renderer.toneMapping;
-  const savedOCS = renderer.outputColorSpace;
+  // No global toneMapping/outputColorSpace override: RenderTarget renders are
+  // always untonemapped working-space (the renderer forces it), so it changed
+  // nothing for the bake — but this function awaits GPU readbacks dozens of
+  // times, and the app's main loop renders frames BETWEEN those awaits. Global
+  // state left dirty across an await leaks into those frames: NoToneMapping
+  // drops the canvas HDR framebuffer target, and every water/transmission
+  // viewport grab then fails with "bgra8unorm vs rgba16float" format errors.
+  // Same reason clear color and render target are restored per-cell below,
+  // before each await, not once at the end.
   const savedTarget = renderer.getRenderTarget();
   const savedAutoClear = renderer.autoClear;
-  renderer.toneMapping = THREE.NoToneMapping;
-  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-  renderer.setClearColor(0x000000, 0);
+  const savedClearColor = renderer.getClearColor(new THREE.Color());
+  const savedClearAlpha = renderer.getClearAlpha();
   await renderer.compileAsync(bakeScene, ortho);
 
   const colorPixels = new Uint8Array(atlasSize * atlasSize * 4);
@@ -813,9 +822,13 @@ async function bakeColorAtlasFromObject(renderer, objects, opts) {
       ortho.lookAt(center);
       ortho.updateMatrixWorld(true);
 
+      renderer.setClearColor(0x000000, 0);
       renderer.setRenderTarget(cellRT);
       renderer.autoClear = true;
       renderer.render(bakeScene, ortho);
+      renderer.setRenderTarget(savedTarget);
+      renderer.autoClear = savedAutoClear;
+      renderer.setClearColor(savedClearColor, savedClearAlpha);
 
       const buf = await renderer.readRenderTargetPixelsAsync(cellRT, 0, 0, ssCS, ssCS);
       const src = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -835,10 +848,6 @@ async function bakeColorAtlasFromObject(renderer, objects, opts) {
   }
 
   cellRT.dispose();
-  renderer.setRenderTarget(savedTarget);
-  renderer.autoClear = savedAutoClear;
-  renderer.toneMapping = savedTM;
-  renderer.outputColorSpace = savedOCS;
 
   linearToSrgb(colorPixels);
   dilateAtlasEdges(colorPixels, atlasSize, grid, 8);

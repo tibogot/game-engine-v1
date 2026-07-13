@@ -15,6 +15,9 @@
  *   roads     roadSystem.exportData()
  *   splines   splineSystem.exportData()
  *   lakes     lakeSystem.exportData()
+ *   rivers    riverSystem.exportData()      (basic ribbon rivers)
+ *   rivers2   river2System.exportData()     (River+ carve — heightmap blob is the
+ *                                            UNCARVED base; load re-carves)
  *
  * Binary blobs stay raw (heightmap Float32, splat/snow Uint8) — no base64 bloat.
  * Unknown/absent sections are simply skipped on load, so the format can grow.
@@ -35,7 +38,7 @@ export function encodeProjectFile({
   heightmap,            // Float32Array
   splat, splatRes,      // Uint8Array (both slices combined), texels per side
   snow, snowRes,        // Uint8Array, texels per side
-  trees, foliage, props, roads, splines, lakes,
+  trees, foliage, props, roads, splines, lakes, rivers, rivers2,
 }) {
   const blobs = {};
   const parts = [];
@@ -63,6 +66,8 @@ export function encodeProjectFile({
     roads:    roads ?? null,
     splines:  splines ?? null,
     lakes:    lakes ?? null,
+    rivers:   rivers ?? null,
+    rivers2:  rivers2 ?? null,
   };
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
 
@@ -119,6 +124,8 @@ export function decodeProjectFile(buffer) {
     roads:     manifest.roads,
     splines:   manifest.splines,
     lakes:     manifest.lakes,
+    rivers:    manifest.rivers,
+    rivers2:   manifest.rivers2,
   };
 }
 
