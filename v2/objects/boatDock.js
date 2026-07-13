@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { seededRand } from "./woodUtils.js";
+import { legSpan } from "./trestle.js";
 
 /**
  * Procedural boat dock / mooring pier along a Catmull-Rom spline.
@@ -38,7 +39,8 @@ export const BOAT_DOCK_DEFAULTS = {
 
   pileSpacing: 2.6, // metres between pile pairs
   pileRadius: 0.09,
-  pileDepth: 1.4, // FOOT length below the deck underside (into the water)
+  pileEmbed: 0.4, // how far each foot sinks INTO the seabed below it
+  pileMaxLength: 8, // clamp so a deep hole doesn't grow an absurd spike (0 = off)
   pileOver: 0.45, // pile sticking up above the deck top (mooring post)
   pileLean: 1.2, // random pile lean in degrees
   pileSides: 8,
@@ -265,26 +267,36 @@ export function buildBoatDockMesh({
   }
 
   // ── piles ("feet") + header beams at regular stations ──
+  // Each foot reaches the SEABED BENEATH ITSELF: the ground is sampled at the
+  // pile's own xz (offset sideways from the path), so a sloping bottom gives
+  // short piles near the shore and long ones out in deep water. The deck stays
+  // dead flat above them.
   const pileOut = halfW + (p.fender ? p.fenderT : 0) + p.pileRadius * 0.8;
-  const pileTotal = p.pileOver + p.deckThickness + p.stringerH + Math.max(0.1, p.pileDepth);
   const stations = Math.max(2, Math.floor(length / Math.max(0.8, p.pileSpacing)) + 1);
   const pileCol = new THREE.Color(p.pileColor);
   const darkCol = new THREE.Color(p.darkColor);
   const headerCol = new THREE.Color(p.woodAlt);
+  let deepestPile = deckTopY;
   for (let i = 0; i < stations; i++) {
     const t = stations === 1 ? 0.5 : i / (stations - 1);
     const f = frameAt(t);
 
     for (const s of [-1, 1]) {
       const k = i * 2 + (s > 0 ? 1 : 0);
-      // pile centre: from pileOver above deck top down to pileDepth below
       const top = deckPos(t)
         .addScaledVector(f.right, s * pileOut)
         .addScaledVector(f.up, p.pileOver);
-      const mid = top.clone().addScaledVector(f.up, -pileTotal * 0.5);
+      const leg = legSpan(top.y, getWorldHeight(top.x, top.z), {
+        embed: p.pileEmbed,
+        maxLength: p.pileMaxLength,
+        minLength: p.deckThickness + p.stringerH + 0.2,
+      });
+      deepestPile = Math.min(deepestPile, leg.bottomY);
+
+      const mid = top.clone().addScaledVector(f.up, -leg.length * 0.5);
       const leanA = ((seededRand(p.seed, k * 7 + 3) - 0.5) * 2 * p.pileLean * Math.PI) / 180;
       const leanB = ((seededRand(p.seed, k * 7 + 4) - 0.5) * 2 * p.pileLean * Math.PI) / 180;
-      scl.set(p.pileRadius, pileTotal, p.pileRadius);
+      scl.set(p.pileRadius, leg.length, p.pileRadius);
       m.makeRotationFromEuler(eul.set(leanA, 0, leanB)).scale(scl).setPosition(mid);
       const v = (seededRand(p.seed, k * 7 + 5) - 0.5) * 0.2;
       _c.copy(pileCol).offsetHSL(0, 0, v);
