@@ -9,6 +9,7 @@
 // rts-chibs. Rotor meshes are RENAMED on the template so the tag survives
 // clone(true) — userData refs would still point at the template's own nodes.
 import * as THREE from "three";
+import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
 import { UNIT_TYPES, UNIT_TYPE_KEYS } from "./unitTypes.js";
@@ -49,14 +50,19 @@ function rotorKind(obj, root) {
   return null;
 }
 
-function loadGltfScene(url) {
+function loadGltf(url) {
   return new Promise((resolve, reject) => {
-    getSharedGltfLoader().load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+    getSharedGltfLoader().load(
+      url,
+      (gltf) => resolve({ scene: gltf.scene, animations: gltf.animations ?? [] }),
+      undefined,
+      reject,
+    );
   });
 }
 
 /** Normalise a model into a reusable template and rename its rotor meshes. */
-function buildTemplate(gltf, { targetLength, excludeRotorsFromBox }) {
+function buildTemplate(gltf, { targetLength, targetHeight, excludeRotorsFromBox }) {
   const root = new THREE.Group();
   const holder = new THREE.Group();
   holder.add(gltf);
@@ -75,7 +81,12 @@ function buildTemplate(gltf, { targetLength, excludeRotorsFromBox }) {
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   holder.position.set(-center.x, -box.min.y, -center.z);
-  root.scale.setScalar(targetLength / Math.max(size.x, size.z, 1e-4));
+  // Vehicles scale by horizontal length; humanoids by HEIGHT (their horizontal
+  // footprint is shoulder width — meaningless as a size reference).
+  const scale = targetHeight
+    ? targetHeight / Math.max(size.y, 1e-4)
+    : targetLength / Math.max(size.x, size.z, 1e-4);
+  root.scale.setScalar(scale);
 
   let rotors = 0;
   root.traverse((o) => {
@@ -131,18 +142,31 @@ export async function createUnitRenderer({ app, units }) {
   initGlbLoaderRenderer(app.renderer); // idempotent; wires KTX2 support
 
   // One template per type.
-  const scenes = await Promise.all(UNIT_TYPE_KEYS.map((k) => loadGltfScene(UNIT_TYPES[k].url)));
+  const loaded = await Promise.all(UNIT_TYPE_KEYS.map((k) => loadGltf(UNIT_TYPES[k].url)));
   const templates = {};
   UNIT_TYPE_KEYS.forEach((k, i) => {
     const t = UNIT_TYPES[k];
-    templates[k] = buildTemplate(scenes[i], {
-      targetLength: t.targetLength,
-      excludeRotorsFromBox: t.excludeRotorsFromBox,
-    });
+    templates[k] = {
+      ...buildTemplate(loaded[i].scene, {
+        targetLength: t.targetLength,
+        targetHeight: t.targetHeight,
+        excludeRotorsFromBox: t.excludeRotorsFromBox,
+      }),
+      animations: loaded[i].animations,
+      skinned: !!t.skinned,
+    };
   });
   if (!templates.helicopter?.rotors) {
     console.info("[rts-v3] no rotor node found in heli5.glb — rotors won't spin.");
   }
+
+  // Skinned templates MUST clone via SkeletonUtils — a plain clone(true) leaves
+  // the copy's SkinnedMeshes bound to the TEMPLATE's skeleton, so every clone
+  // silently deforms with (or stays frozen at) the original's pose.
+  const cloneTemplateRoot = (key) => {
+    const tpl = templates[key];
+    return tpl.skinned ? SkeletonUtils.clone(tpl.root) : tpl.root.clone(true);
+  };
 
   // Per-unit visuals.
   const views = new Map(); // unit → view
@@ -151,7 +175,8 @@ export async function createUnitRenderer({ app, units }) {
   /** Build the visuals for one unit. Also used for units spawned at runtime. */
   function addUnit(unit) {
     const t = unit.type;
-    const root = templates[t.typeKey].root.clone(true);
+    const tpl = templates[t.typeKey];
+    const root = cloneTemplateRoot(t.typeKey);
     const mainRotors = [], tailRotors = [];
     root.traverse((o) => {
       if (!o.isMesh) return;
@@ -159,6 +184,18 @@ export async function createUnitRenderer({ app, units }) {
       if (o.name === "MainRotor") mainRotors.push(o);
       else if (o.name === "TailRotor") tailRotors.push(o);
     });
+
+    // Skinned units get their own AnimationMixer (idle ⇄ run driven in sync()).
+    let mixer = null, actions = null;
+    if (tpl.skinned && tpl.animations.length) {
+      mixer = new THREE.AnimationMixer(root);
+      actions = {};
+      for (const clip of tpl.animations) actions[clip.name] = mixer.clipAction(clip);
+      (actions.idle ?? Object.values(actions)[0])?.play();
+      // Animated bones walk out of the bind-pose bounding sphere → the whole
+      // unit vanishes at screen edges. Standard fix for crowds: don't cull.
+      root.traverse((o) => { if (o.isSkinnedMesh) o.frustumCulled = false; });
+    }
 
     const ring = makeSelectionRing(t.ringRadius);
     const ringPos = ring.geometry.attributes.position;
@@ -169,6 +206,7 @@ export async function createUnitRenderer({ app, units }) {
     roots.push(root);
     views.set(unit, {
       root, ring, ringPos, ringBase, bar, mainRotors, tailRotors,
+      mixer, actions, currentAction: actions ? (actions.idle ? "idle" : Object.keys(actions)[0]) : null,
       bob: Math.random() * 6, mainAngle: Math.random() * 6, tailAngle: 0,
     });
   }
@@ -180,7 +218,7 @@ export async function createUnitRenderer({ app, units }) {
   // UI thumbnails (clones share template geometry — safe; never dispose them).
   const thumbnails = await bakeThumbnails({
     renderer: app.renderer,
-    items: UNIT_TYPE_KEYS.map((k) => ({ key: k, make: () => templates[k].root.clone(true) })),
+    items: UNIT_TYPE_KEYS.map((k) => ({ key: k, make: () => cloneTemplateRoot(k) })),
   });
 
   /** Push unit data into the meshes. Called once per frame by the game loop. */
@@ -223,6 +261,19 @@ export async function createUnitRenderer({ app, units }) {
       if (v.tailRotors.length) {
         v.tailAngle += dt * 28 * 2.4;
         for (const r of v.tailRotors) r.rotation.x = v.tailAngle;
+      }
+
+      // Skinned units: run while moving, idle while holding (cross-faded).
+      if (v.mixer) {
+        const want = unit.isMoving && v.actions.run
+          ? "run"
+          : (v.actions.idle ? "idle" : v.currentAction);
+        if (want !== v.currentAction) {
+          v.actions[v.currentAction]?.fadeOut(0.15);
+          v.actions[want]?.reset().fadeIn(0.15).play();
+          v.currentAction = want;
+        }
+        v.mixer.update(dt);
       }
 
       // Health bar — billboard to the camera, above the unit.

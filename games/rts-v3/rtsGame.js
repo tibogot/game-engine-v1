@@ -131,7 +131,11 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   // base's PRODUCTION queue when the base is selected.
   const commandCard = createCommandCard({
     thumbnails: unitRenderer.thumbnails,
-    buildable: [{ key: "jeep", label: "Build Jeep" }, { key: "helicopter", label: "Build Heli" }],
+    buildable: [
+      { key: "soldier", label: "Build Soldier" },
+      { key: "jeep", label: "Build Jeep" },
+      { key: "helicopter", label: "Build Heli" },
+    ],
     onBuild: (key) => structures.base.enqueue(key),
     onStop: () => { for (const u of app.selection?.selected ?? []) u.stop?.(); },
     onFocus: () => {

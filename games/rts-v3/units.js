@@ -447,10 +447,14 @@ function makeUnit(app, type, navGrid, x, z, getUnits) {
   return unit;
 }
 
-export function createUnits({ app, navGrid, spawn = { jeep: 8, helicopter: 4 } } = {}) {
+export function createUnits({ app, navGrid, spawn = { jeep: 8, helicopter: 4, soldier: 6 } } = {}) {
   const units = [];
   const getUnits = () => units;
-  const origins = { jeep: { x: 26, z: 0 }, helicopter: { x: -26, z: 0 } };
+  const origins = {
+    jeep: { x: 26, z: 0 },
+    helicopter: { x: -26, z: 0 },
+    soldier: { x: 0, z: 30 },
+  };
 
   for (const key of UNIT_TYPE_KEYS) {
     const type = UNIT_TYPES[key];

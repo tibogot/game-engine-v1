@@ -56,4 +56,31 @@ export const UNIT_TYPES = {
   },
 };
 
+UNIT_TYPES.soldier = {
+  typeKey: "soldier",
+  name: "Soldier",
+  // logic
+  isAir: false,
+  hover: 0,
+  speed: 11,
+  radius: 1.3,
+  turnRate: 6,
+  maxHp: 60,
+  // combat — rifle: fast, weak, can plink at helicopters
+  range: 30,
+  damage: 6,
+  fireRate: 2.4,
+  canHitAir: true,
+  // render — SKINNED (Mixamo): needs SkeletonUtils.clone + an AnimationMixer,
+  // and scales by HEIGHT (a humanoid's horizontal footprint is meaningless).
+  url: "/models/testsolanim.glb",
+  skinned: true,
+  targetHeight: 1.9,
+  excludeRotorsFromBox: false,
+  facingOffset: 0,
+  ringRadius: 2.2,
+  barWidth: 3,
+  barY: 2.8,
+};
+
 export const UNIT_TYPE_KEYS = Object.keys(UNIT_TYPES);

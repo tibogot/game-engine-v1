@@ -67,7 +67,7 @@ function makeStructure(app, type, x, z) {
  * Positions are snapped clear of water/cliffs via the nav grid.
  */
 /** Seconds to build each unit type. */
-export const BUILD_TIME = { jeep: 4, helicopter: 7 };
+export const BUILD_TIME = { soldier: 2.5, jeep: 4, helicopter: 7 };
 
 export function createStructures({ app, navGrid, basePos = { x: 0, z: -60 }, turretCount = 5 } = {}) {
   const list = [];
