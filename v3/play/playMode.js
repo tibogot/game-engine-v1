@@ -198,14 +198,28 @@ export function createPlayMode({
     _modeToastTimer = setTimeout(() => { _modeToastEl.style.opacity = "0"; }, 1400);
   }
 
+  /**
+   * Yaw conventions in play mode — every mode is stored in its own, so switching
+   * between them has to convert or the new mode comes out spun 180°:
+   *
+   *   facing  (character, husky, capsule) — forward is +Z: (sin y,  cos y)
+   *   heading (cars, plane)               — forward is -Z: (-sin h, -cos h) = facing + π
+   *   camYaw  (chase camera, ball)        — points from the player TOWARD the camera,
+   *                                         i.e. behind them: facing + π
+   *
+   * `currentYaw()` normalizes all of them to FACING; setMoveMode() converts back
+   * on the way into each mode.
+   */
+  const flipYaw = (y) => Math.atan2(Math.sin(y + Math.PI), Math.cos(y + Math.PI));
+
   function currentYaw() {
     switch (moveMode) {
       case "char": return character?.yaw ?? charYaw;
       case "husky": return charYaw;
-      case "fly": return flight.state.heading;
-      case "car": return brunoCar.heading;
-      case "stunt": return stuntCar.heading;
-      case "ball": return camYaw;
+      case "fly": return flipYaw(flight.state.heading);
+      case "car": return flipYaw(brunoCar.heading);
+      case "stunt": return flipYaw(stuntCar.heading);
+      case "ball": return flipYaw(camYaw);
       default: return capsule.yaw;
     }
   }
@@ -230,7 +244,8 @@ export function createPlayMode({
 
   function setMoveMode(target) {
     if (!V3_MODE_META[target] || target === moveMode) return;
-    const yaw = currentYaw();
+    const yaw = currentYaw();     // FACING — the shared currency between modes
+    const heading = flipYaw(yaw); // what the cars and the plane want
     const p = capsule.position;
 
     if (moveMode === "husky" && target !== "husky") {
@@ -257,7 +272,7 @@ export function createPlayMode({
         p.x,
         Math.max(p.y + 2, sampleGroundY(p.x, p.z) + 3),
         p.z,
-        yaw,
+        heading,
       );
       p.x = spawn.x;
       p.y = spawn.y;
@@ -276,6 +291,11 @@ export function createPlayMode({
       ballDebug.hide();
     }
 
+    // On foot (and in the ball) the chase camera sits behind the facing.
+    if (target === "char" || target === "husky" || target === "capsule" || target === "ball") {
+      camYaw = flipYaw(yaw);
+    }
+
     if (target === "husky") {
       husky?.resetAnimState?.();
       husky?.applyCapsuleParams?.(capsule);
@@ -288,13 +308,13 @@ export function createPlayMode({
       capsule.setParams({ ...HUMAN_CAPSULE_PARAMS });
       capsule.yaw = yaw;
     } else if (target === "car") {
-      const spawn = brunoCar.resetFrom(p.x, p.y, p.z, yaw);
+      const spawn = brunoCar.resetFrom(p.x, p.y, p.z, heading);
       p.x = spawn.x;
       p.y = spawn.y;
       p.z = spawn.z;
       charYaw = yaw;
     } else if (target === "stunt") {
-      const spawn = stuntCar.resetFrom(p.x, p.y, p.z, yaw);
+      const spawn = stuntCar.resetFrom(p.x, p.y, p.z, heading);
       p.x = spawn.x;
       p.y = spawn.y;
       p.z = spawn.z;
@@ -707,8 +727,12 @@ export function createPlayMode({
     const tz = spawn ? spawn.z : controls.target.z;
     if (spawn && Number.isFinite(spawn.yaw)) camYaw = spawn.yaw;
     capsule.reset(tx, sampleGroundY(tx, tz), tz);
-    charYaw = camYaw;
-    capsule.yaw = camYaw;
+
+    // camYaw sits BEHIND the player, so the facing is the flip of it — spawning
+    // the character at camYaw itself would stand them nose-to-camera.
+    charYaw = flipYaw(camYaw);
+    capsule.yaw = charYaw;
+    character?.setYaw?.(charYaw);
 
     applyModeVisuals();
     positionCamera(0);
