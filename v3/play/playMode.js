@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { CapsuleController, DEFAULT_CAPSULE_PARAMS } from "./capsuleController.js";
 import { WORLD_SIZE } from "../terrain/heightmapTexture.js";
-import { createModeWheel, V3_MODE_ORDER, V3_MODE_META } from "./modeWheel.js";
+import { createModeWheel, V3_MODE_ORDER, V3_MODE_META, V3_QUADRUPED_MODES } from "./modeWheel.js";
 import { createFlightMode } from "./flightMode.js";
 import { createBrunoCarMode } from "./brunoCarMode.js";
 import { createStuntCarMode } from "./stuntCarMode.js";
@@ -34,6 +34,7 @@ export function createPlayMode({
   sampleTerrainHeight, sampleTerrainNormal = null, uCursorUV,
   character,
   husky = null,
+  fox = null,
   bruno = null,
   stunt = null,
   getCollider = () => null,
@@ -173,8 +174,25 @@ export function createPlayMode({
     return isFlyMode() && flight.loaded;
   }
 
+  /**
+   * Quadruped pawns share one slot: same CapsuleController, same QuadrupedOnFoot
+   * rig, only different models and clip FSMs. Mode name === key, so adding another
+   * animal is a registry entry here plus one in V3_MODE_ORDER.
+   */
+  const quadrupeds = { husky, fox };
+
+  function isQuadrupedMode(mode = moveMode) {
+    return V3_QUADRUPED_MODES.includes(mode);
+  }
+
+  /** The pawn for the current mode, or null if it isn't a quadruped / hasn't loaded. */
+  function activePawn() {
+    const pawn = quadrupeds[moveMode];
+    return pawn?.loaded ? pawn : null;
+  }
+
   function isOnFoot() {
-    return moveMode === "capsule" || moveMode === "char" || moveMode === "husky";
+    return moveMode === "capsule" || moveMode === "char" || isQuadrupedMode();
   }
 
   let _modeToastEl = null;
@@ -213,9 +231,9 @@ export function createPlayMode({
   const flipYaw = (y) => Math.atan2(Math.sin(y + Math.PI), Math.cos(y + Math.PI));
 
   function currentYaw() {
+    if (isQuadrupedMode()) return charYaw;
     switch (moveMode) {
       case "char": return character?.yaw ?? charYaw;
-      case "husky": return charYaw;
       case "fly": return flipYaw(flight.state.heading);
       case "car": return flipYaw(brunoCar.heading);
       case "stunt": return flipYaw(stuntCar.heading);
@@ -226,15 +244,19 @@ export function createPlayMode({
 
   function applyModeVisuals() {
     const flyMode = isFlyMode();
-    const huskyMode = moveMode === "husky" && husky?.loaded;
+    const pawn = activePawn();
+    // A quadruped mode whose model hasn't loaded yet falls back to the capsule.
+    const pawnPending = isQuadrupedMode() && !pawn;
     const charMode = moveMode === "char";
     const capMode = moveMode === "capsule";
     const brunoMode = isBrunoMode() && brunoCar.loaded;
     const stuntMode = isStuntMode();
 
-    capMesh.visible = active && (capMode || (huskyMode && !husky?.loaded));
+    capMesh.visible = active && (capMode || pawnPending);
     character?.setVisible(active && charMode && character.loaded);
-    if (husky?.root) husky.root.visible = active && huskyMode && husky.loaded;
+    for (const [name, q] of Object.entries(quadrupeds)) {
+      if (q?.root) q.root.visible = active && q === pawn && moveMode === name;
+    }
     flight.syncVisuals(capsule.position, flyMode);
     if (!brunoMode) brunoCar.hide();
     if (stuntMode) stuntCar.syncVisuals(true);
@@ -248,8 +270,10 @@ export function createPlayMode({
     const heading = flipYaw(yaw); // what the cars and the plane want
     const p = capsule.position;
 
-    if (moveMode === "husky" && target !== "husky") {
-      husky?.restoreHumanCapsuleParams?.(capsule);
+    // Leaving a quadruped: hand the capsule back its human dimensions before the
+    // next mode gets to set its own.
+    if (isQuadrupedMode() && !isQuadrupedMode(target)) {
+      quadrupeds[moveMode]?.restoreHumanCapsuleParams?.(capsule);
     }
 
     if (isCarMode() && target !== "car" && target !== "stunt") {
@@ -292,13 +316,14 @@ export function createPlayMode({
     }
 
     // On foot (and in the ball) the chase camera sits behind the facing.
-    if (target === "char" || target === "husky" || target === "capsule" || target === "ball") {
+    if (target === "char" || target === "capsule" || target === "ball" || isQuadrupedMode(target)) {
       camYaw = flipYaw(yaw);
     }
 
-    if (target === "husky") {
-      husky?.resetAnimState?.();
-      husky?.applyCapsuleParams?.(capsule);
+    if (isQuadrupedMode(target)) {
+      const pawn = quadrupeds[target];
+      pawn?.resetAnimState?.();
+      pawn?.applyCapsuleParams?.(capsule);
       charYaw = yaw;
     } else if (target === "char") {
       capsule.setParams({ ...HUMAN_CAPSULE_PARAMS });
@@ -337,10 +362,13 @@ export function createPlayMode({
 
   function positionCameraOnFoot() {
     const capBase = CAP_R + CAP_H * 0.5;
+    // Quadrupeds are looked at mid-body, so the look height scales with the pawn
+    // rather than being a per-animal magic number.
+    const pawn = activePawn();
     const lookY = isBallMode()
       ? capsule.position.y
-      : moveMode === "husky" && husky?.loaded
-        ? capsule.position.y + 0.66
+      : pawn
+        ? capsule.position.y + pawn.targetHeight * 0.55
         : capsule.position.y + (moveMode === "capsule" ? capBase + 0.6 : 1.875);
     const cosP = Math.cos(camPitch);
     const sinP = Math.sin(camPitch);
@@ -561,8 +589,10 @@ export function createPlayMode({
       return;
     }
 
-    if (moveMode === "husky" && husky?.loaded && !e.repeat) {
-      if (husky.onKeyDown?.(e.code)) {
+    if (!e.repeat) {
+      // Pawn one-shots (bite / sit / bark …) get first refusal on the key.
+      const pawn = activePawn();
+      if (pawn?.onKeyDown?.(e.code)) {
         e.preventDefault();
         return;
       }
@@ -781,7 +811,9 @@ export function createPlayMode({
 
     character?.setVisible(false);
     character?.reset();
-    if (husky?.root) husky.root.visible = false;
+    for (const q of Object.values(quadrupeds)) {
+      if (q?.root) q.root.visible = false;
+    }
     capMesh.visible = false;
     colliderDebugOn = false;
     updateOnFootWire(false);
@@ -805,7 +837,7 @@ export function createPlayMode({
     let mx = -Math.sin(camYaw) * fwd + Math.cos(camYaw) * right;
     let mz = -Math.cos(camYaw) * fwd - Math.sin(camYaw) * right;
 
-    const huskyMode = moveMode === "husky" && husky?.loaded;
+    const pawn = activePawn();
     const charMode = moveMode === "char" && character?.loaded;
     const inSlide = charMode && character.inSlide;
     const rolling = charMode && character.rolling;
@@ -834,7 +866,7 @@ export function createPlayMode({
         mx, mz,
         jump: keys.space,
         run: keys.shift,
-        crouch: huskyMode ? false : wantCrouch,
+        crouch: pawn ? false : wantCrouch,
       },
       moveSpeedOverride: speedOverride,
       canJump: charMode
@@ -849,8 +881,10 @@ export function createPlayMode({
 
     updateOnFootWire(colliderDebugOn && isOnFoot());
 
-    if (huskyMode) {
-      charYaw = husky.updateFrame({
+    if (pawn) {
+      // keysHeld is passed raw (keyed by e.code) so the pawns can read modifier
+      // holds like KeyC for the husky's head-low idle and the fox's sneak.
+      charYaw = pawn.updateFrame({
         dtSec: dt,
         playerPos: capsule.position,
         charYaw,
@@ -858,10 +892,7 @@ export function createPlayMode({
         ctrl: capsule,
         collider: getCollider(),
         getTerrainHeight,
-        keys: {
-          ShiftLeft: keys.shift,
-          ShiftRight: keys.shift,
-        },
+        keys: keysHeld,
         gallop: keys.shift,
         moveSpeed: capsule.debug.moveSpeed,
       });
@@ -943,12 +974,13 @@ export function createPlayMode({
       }
     }
 
-    // Husky leaves four paw prints. Each paw touches when it sits near the
+    // Quadrupeds leave four paw prints. Each paw touches when it sits near the
     // lowest paw of the frame (the planted ones); swinging paws lift clear.
     // Comparing to the frame minimum keeps this robust to the model's overall
     // ground offset without needing per-model tuning.
-    if (moveMode === "husky" && capsule.grounded && husky?.paws) {
-      const paws = husky.paws;
+    const snowPawn = activePawn();
+    if (snowPawn?.paws && capsule.grounded) {
+      const paws = snowPawn.paws;
       let minY = Infinity;
       for (let i = 0; i < 4; i++) {
         paws[i].getWorldPosition(_pawTmp);
@@ -957,16 +989,18 @@ export function createPlayMode({
         _pawY[i] = _pawTmp.y;
         if (_pawY[i] < minY) minY = _pawY[i];
       }
+      // Print size tracks the animal — the fox's paws are not the husky's.
+      const sizeK = snowPawn.targetHeight / 1.2;
       for (let i = 0; i < 4; i++) {
-        _snowTouch[i] = (_pawY[i] - minY) < 0.07 ? 1 : 0;
+        _snowTouch[i] = (_pawY[i] - minY) < 0.07 * sizeK ? 1 : 0;
       }
-      return { xzs: _snowXZs, touching: _snowTouch, isVehicle: false, radius: 0.12 };
+      return { xzs: _snowXZs, touching: _snowTouch, isVehicle: false, radius: 0.12 * sizeK };
     }
 
-    // Capsule (and char/husky before their model loads) — a body-width trail
+    // Capsule (and char/quadrupeds before their model loads) — a body-width trail
     // sized to the capsule so it reads as the body dragging through the snow,
     // not a thin footprint line.
-    if (moveMode === "capsule" || moveMode === "husky" || moveMode === "char") {
+    if (moveMode === "capsule" || moveMode === "char" || isQuadrupedMode()) {
       const touch = capsule.grounded ? 1 : 0;
       _snowXZs[0] = capsule.position.x;
       _snowXZs[1] = capsule.position.z;
@@ -997,7 +1031,7 @@ export function createPlayMode({
     get showCollider() { return colliderDebugOn; },
     setShowCollider,
     get onFootActive() {
-      return active && (moveMode === "capsule" || moveMode === "char" || moveMode === "husky");
+      return active && isOnFoot();
     },
     get flyActive() {
       return active && isFlyMode();

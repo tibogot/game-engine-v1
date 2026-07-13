@@ -30,6 +30,7 @@ import { createWorldEnvironment } from "./worldEnvironment.js";
 import { buildWorldPanel } from "../ui/buildWorldPanel.js";
 import { createHumanCharacter } from "../play/humanCharacter.js";
 import { HuskyOnFoot } from "../../v2/play/huskyOnFoot.js";
+import { FoxOnFoot } from "../play/foxOnFoot.js";
 import { SplatMap } from "../terrain/splatMap.js";
 import { createSplatOverlay } from "../terrain/splatOverlayTsl.js";
 import { TextureLibrary } from "../terrain/textureLibrary.js";
@@ -333,7 +334,7 @@ export async function startV3App(opts = {}) {
   // Terrain starts flat (createHeightmapTexture initializes all-zeros).
   // User can generate terrain manually via the Procedural panel.
 
-  // ── Human character + husky ───────────────────────────────────────────────
+  // ── Human character + quadruped pawns ─────────────────────────────────────
   const character = createHumanCharacter(scene, renderer);
   const husky = new HuskyOnFoot({
     scene,
@@ -341,6 +342,8 @@ export async function startV3App(opts = {}) {
     modelUrl: "/models/Husky_compressed.glb",
   });
   husky.load();
+  const fox = new FoxOnFoot({ scene, loader: getSharedGltfLoader() });
+  fox.load();
 
   // Player BVH — merged CliffBvh bake (prop box proxies / live props) plus the
   // instanced SolidCollider (cliffs, real triangles, no rebake on edits),
@@ -457,6 +460,7 @@ export async function startV3App(opts = {}) {
     uCursorUV,
     character,
     husky,
+    fox,
     getCollider: () => onFootCollider,
     getCliffBvh: () => worldCollider,
     getTreeBvh: () => treeBvh,

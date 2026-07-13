@@ -223,7 +223,7 @@ export function buildPlayPhysicsPanel(app) {
 
   const capHint = document.createElement("p");
   capHint.style.cssText = "margin:6px 0 0;font-size:11px;color:var(--text-dim);line-height:1.35";
-  capHint.textContent = "Husky mode overrides height/offset when active.";
+  capHint.textContent = "Husky / Fox modes override height/offset when active.";
   capBody.appendChild(capHint);
 
   function setVisible(show) {
