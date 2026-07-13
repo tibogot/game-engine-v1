@@ -447,13 +447,18 @@ function makeUnit(app, type, navGrid, x, z, getUnits) {
   return unit;
 }
 
-export function createUnits({ app, navGrid, spawn = { jeep: 8, helicopter: 4, soldier: 6 } } = {}) {
+export function createUnits({
+  app, navGrid,
+  spawn = { jeep: 8, helicopter: 4, soldier: 6 },
+  origin = { x: 0, z: 0 }, // the starting army musters here (the base)
+} = {}) {
   const units = [];
   const getUnits = () => units;
+  // Fan the starting army out AROUND the muster point, facing up-map.
   const origins = {
-    jeep: { x: 26, z: 0 },
-    helicopter: { x: -26, z: 0 },
-    soldier: { x: 0, z: 30 },
+    jeep:       { x: origin.x + 34, z: origin.z + 26 },
+    helicopter: { x: origin.x - 34, z: origin.z + 26 },
+    soldier:    { x: origin.x,      z: origin.z + 40 },
   };
 
   for (const key of UNIT_TYPE_KEYS) {

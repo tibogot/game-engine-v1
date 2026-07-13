@@ -5610,6 +5610,46 @@ export async function startV3App(opts = {}) {
     // read it to drop its own camera/units in where the level designer intended.
     getSpawnPoint: () => spawnSystem.getSpawn(),
 
+    // ── Terrain modification ──────────────────────────────────────────────────
+    /**
+     * Flatten a circular area to `targetY` (world metres) — the engine-side
+     * capability a game needs to seat buildings on uneven ground. Drives the
+     * editor's own GPU flatten brush, then re-syncs the CPU heightmap mirror so
+     * getWorldHeight / getWorldNormal (and therefore the game's nav grid) see
+     * the new terrain immediately.
+     *
+     * Async: it awaits the GPU→CPU readback. Rebuild any nav grid AFTER this.
+     */
+    async flattenArea(wx, wz, radius, targetY, { strength = 1, falloff = 3, passes = 8 } = {}) {
+      const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
+      const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
+
+      const prev = {
+        r: sculpt.uRadius.value,
+        s: sculpt.uStrength.value,
+        f: sculpt.uFalloff.value,
+        t: sculpt.uFlattenTarget.value,
+      };
+      sculpt.uRadius.value        = radius / WORLD_SIZE;
+      sculpt.uStrength.value      = strength;
+      sculpt.uFalloff.value       = falloff;
+      sculpt.uFlattenTarget.value = THREE.MathUtils.clamp(targetY / MAX_HEIGHT, 0, 1);
+
+      // The brush BLENDS toward the target, so one stamp only partially levels
+      // the ground — repeat stamps converge on a true plateau.
+      sculpt.beginStroke();
+      for (let i = 0; i < passes; i++) sculpt.flatten(u, v);
+      sculpt.endStroke();
+
+      sculpt.uRadius.value        = prev.r;
+      sculpt.uStrength.value      = prev.s;
+      sculpt.uFalloff.value       = prev.f;
+      sculpt.uFlattenTarget.value = prev.t;
+
+      markHeightmapDirty();
+      await ensureCpuHeightmapFromGpu();
+    },
+
     // ── Post-FX override ──────────────────────────────────────────────────────
     // A game owns its own look, so it must be able to turn post-FX on and tune
     // it regardless of what the editor happened to have set. Note `.v3proj` does

@@ -72,20 +72,27 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   //    Unit LOGIC is mesh-free (units.js); the RENDERER (unitRenderer.js) turns
   //    it into visuals. That split is what lets us swap in InstancedMesh for
   //    hundreds of units later without touching orders, combat or AI.
-  // Structures: the player's base + a ring of enemy turrets. Built BEFORE units
-  // so their footprints can be stamped into the nav grid — units then path
-  // around buildings instead of driving through them.
+  //
+  // Structures come FIRST because they MODIFY THE TERRAIN: each one picks a
+  // buildable site and flattens the ground under it. So the nav grid built above
+  // (used to pick sites) is now stale — we rebuild it from the new terrain, then
+  // stamp the building footprints as obstacles.
   onStatus("Placing structures…");
-  const structures = createStructures({ app, navGrid });
+  const structures = await createStructures({ app, navGrid });
   app.structures = structures;
+
+  onStatus("Re-baking navigation…");
+  navGrid.rebuild(); // the ground under every building changed
   for (const s of structures.list) {
     navGrid.addObstacle(s.position.x, s.position.z, s.radius);
   }
+
   const structuresRenderer = createStructuresRenderer({ app, structures });
   app.structuresRenderer = structuresRenderer;
 
+  // The starting army musters at the base (bottom of the map), not the origin.
   onStatus("Spawning units…");
-  const units = createUnits({ app, navGrid });
+  const units = createUnits({ app, navGrid, origin: structures.base.position });
   app.units = units;
 
   onStatus("Building unit visuals…");

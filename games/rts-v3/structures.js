@@ -7,6 +7,7 @@
 // Structures are combatants: combat.js treats them and units uniformly (both
 // have position/hp/team/range/damage), so one targeting+damage system covers all.
 import * as THREE from "three";
+import { findBuildSite, prepareSite } from "./sitePlanner.js";
 
 export const STRUCTURE_TYPES = {
   base: {
@@ -62,39 +63,61 @@ function makeStructure(app, type, x, z) {
   };
 }
 
-/**
- * Place the player base and a scatter of enemy turrets on walkable ground.
- * Positions are snapped clear of water/cliffs via the nav grid.
- */
 /** Seconds to build each unit type. */
 export const BUILD_TIME = { soldier: 2.5, jeep: 4, helicopter: 7 };
 
-export function createStructures({ app, navGrid, basePos = { x: 0, z: -60 }, turretCount = 5 } = {}) {
+/**
+ * Place structures on the map.
+ *
+ * MAP LAYOUT: the player starts at the BOTTOM (−Z) and the enemy holds the TOP
+ * (+Z) — the classic RTS "you here, them there" axis, so there's a front line to
+ * push up. (+Z is the top of the minimap; we flipped it to match earlier.)
+ *
+ * Every structure gets a REAL site: the ground is evaluated, rejected if too
+ * steep, and then FLATTENED so the building sits level on a plateau. Async
+ * because flattening round-trips the GPU heightmap — the caller must rebuild the
+ * nav grid afterwards, since the terrain has genuinely changed.
+ */
+export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
   const list = [];
+  const world = app.worldSize ?? 1000;
+  const half = world / 2;
 
-  const snap = (x, z) => (navGrid ? navGrid.nearestOpenWorld(x, z) : { x, z });
+  /** Validate + level a site, then build there. Returns null if unbuildable. */
+  async function place(type, x, z, opts = {}) {
+    const site = findBuildSite(app, x, z, type.radius, opts);
+    if (!site) {
+      console.warn(`[rts-v3] no buildable ground for ${type.typeKey} near (${x | 0}, ${z | 0}) — skipped.`);
+      return null;
+    }
+    await prepareSite(app, site.x, site.z, type.radius, site.y);
+    const s = makeStructure(app, type, site.x, site.z); // reads the NEW height
+    list.push(s);
+    return s;
+  }
 
-  // Player base.
-  const b = snap(basePos.x, basePos.z);
-  const base = makeStructure(app, STRUCTURE_TYPES.base, b.x, b.z);
+  // ── Player base: bottom of the map ──────────────────────────────────────────
+  const base = await place(STRUCTURE_TYPES.base, 0, -half * 0.72, { searchRadius: half * 0.5 });
+  if (!base) throw new Error("[rts-v3] could not place the player base anywhere.");
 
   // ── Production ──────────────────────────────────────────────────────────────
   base.queue = [];       // typeKeys waiting to be built
   base.progress = 0;     // 0..1 through the head of the queue
-  base.rally = { x: base.position.x + 26, z: base.position.z + 26 };
+  // Rally toward the enemy (up the map), on flat ground beside the base.
+  base.rally = { x: base.position.x, z: base.position.z + base.radius + 22 };
   base.enqueue = (typeKey) => {
     if (base.alive && base.queue.length < 8) base.queue.push(typeKey);
   };
-  list.push(base);
 
-  // Enemy turrets — ringed around the map at a distance from the base so there's
-  // somewhere to attack, and something that shoots back.
-  const world = app.worldSize ?? 1000;
-  const ringR = Math.min(world * 0.28, 260);
+  // ── Enemy turrets: spread across the TOP of the map ─────────────────────────
+  // A defensive line to push into, not a ring around your own base. Each finds
+  // its own flat site, so a turret never ends up half-buried in a hillside.
+  const lineZ = half * 0.55;
+  const spanX = half * 1.2;
   for (let i = 0; i < turretCount; i++) {
-    const a = (i / turretCount) * Math.PI * 2 + 0.6;
-    const t = snap(base.position.x + Math.cos(a) * ringR, base.position.z + Math.sin(a) * ringR);
-    list.push(makeStructure(app, STRUCTURE_TYPES.turret, t.x, t.z));
+    const tx = -spanX / 2 + (spanX * i) / Math.max(1, turretCount - 1);
+    const tz = lineZ + (i % 2 ? -1 : 1) * half * 0.1; // stagger so it's not a wall
+    await place(STRUCTURE_TYPES.turret, tx, tz, { searchRadius: 120, maxSpread: 4 });
   }
 
   /**
