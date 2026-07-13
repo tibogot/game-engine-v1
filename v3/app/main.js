@@ -74,6 +74,7 @@ import { CliffStore } from "../../v2/core/cliffs/cliffStore.js";
 import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
 import { createColliderGroup } from "../physics/colliderGroup.js";
+import { createSplineFeatureColliderStore } from "../physics/splineFeatureCollider.js";
 import { createProceduralCliffGeometry, CLIFF_PRESETS } from "../props/proceduralCliff.js";
 import { applyCliffTerrainBlend, createCliffGlbBlendMaterial } from "../props/cliffTerrainBlend.js";
 import { CliffPaintMask } from "../../v2/core/cliffs/cliffPaintMask.js";
@@ -558,6 +559,7 @@ export async function startV3App(opts = {}) {
   });
   const perf = createPerfState();
   let splineSys = null;
+  let splineFeatureStore = null;
 
   function getTerrainMeshesForWorld() {
     const out = [];
@@ -2219,6 +2221,9 @@ export async function startV3App(opts = {}) {
       propInstancer.update(camera, propLod);
       livePropManager.update(dt);
       splineSys.update(dt);
+      // Cheap poll: rebuilds the spline-object BVHs only when a feature is
+      // added, edited, moved or deleted (string-compare on a signature).
+      splineFeatureStore?.refresh();
       riverSystem?.update(dt);
       river2System?.update(dt);
       roadSystem?.update();
@@ -3742,6 +3747,15 @@ export async function startV3App(opts = {}) {
     onVolumesChange: () => worldEnv?.rebuildInteriorVolumes(),
   });
   worldEnv?.rebuildInteriorVolumes();
+
+  // Spline-mode objects (bridges, fences, docks, wire…) collide too. Their
+  // meshes live in splineSys.linearFeatures, not the PropStore, so they get
+  // their own SolidCollider fed by a PropStore-shaped view of that list.
+  splineFeatureStore = createSplineFeatureColliderStore(
+    () => splineSys?.linearFeatures ?? [],
+  );
+  const splineFeatureCollider = new SolidCollider(splineFeatureStore);
+  colliderSources.push(splineFeatureCollider);
 
   _onLeaveSplineMode = () => {
     splineSys.dragging = false;
