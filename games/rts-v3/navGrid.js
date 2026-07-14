@@ -316,7 +316,7 @@ export function createNavGrid({
     let count = 0;
     for (let i = 0; i < blocked.length; i++) if (blocked[i]) count++;
     const geo = new THREE.PlaneGeometry(cell * 0.92, cell * 0.92).rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xff3344, transparent: true, opacity: 0.4, depthWrite: false });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xff3344, transparent: true, opacity: 0.4, depthWrite: false, fog: false });
     debugMesh = new THREE.InstancedMesh(geo, mat, count);
     const m = new THREE.Matrix4();
     let w = 0;

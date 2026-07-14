@@ -37,7 +37,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
   // ── Box-select overlay ──────────────────────────────────────────────────────
   const boxEl = document.createElement("div");
   boxEl.style.cssText =
-    "position:fixed;border:1px solid #37e06b;background:rgba(55,224,107,0.12);pointer-events:none;z-index:60;display:none";
+    "position:fixed;border:1px solid #6ab0ff;background:rgba(106,176,255,0.12);pointer-events:none;z-index:60;display:none";
   document.body.appendChild(boxEl);
 
   let down = null;   // { x, y, shift } while the left button is held
@@ -122,7 +122,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
   // ── Move-order marker: a quick expanding ring where you right-click ─────────
   const marker = new THREE.Mesh(
     new THREE.RingGeometry(0.5, 1.0, 32).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ color: 0x37e06b, transparent: true, depthTest: false, depthWrite: false }),
+    new THREE.MeshBasicMaterial({ color: 0x6ab0ff, transparent: true, depthTest: false, depthWrite: false, fog: false }),
   );
   marker.renderOrder = 1000;
   marker.visible = false;

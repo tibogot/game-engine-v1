@@ -11,6 +11,8 @@
 const CHECK_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 
+const DEV_PANEL_OPEN_W = 264;
+
 export function createDevPanel({
   app, navGrid, rtsCamera, units, minimap,
   worldName = "procedural default",
@@ -184,7 +186,7 @@ export function createDevPanel({
           <div class="dv-hint">
             <b>Left-click / drag</b> select (Shift adds)<br />
             <b>Right-click</b> move order<br />
-            <b>WASD</b> / edge pan · <b>wheel</b> zoom · <b>Q/E</b> rotate<br />
+            <b>WASD</b> pan · <b>wheel</b> zoom · <b>Q/E</b> rotate<br />
             <b>C</b> camera mode · <b>N</b> nav grid
           </div>
         </div>
@@ -197,13 +199,36 @@ export function createDevPanel({
   const style = document.createElement("style");
   style.textContent = `
     #rts-dev {
-      position: fixed; right: 0; top: 0; bottom: 0; width: 264px; z-index: 56;
+      position: fixed; right: 0; top: 0; bottom: 0; width: ${DEV_PANEL_OPEN_W}px; z-index: 200;
       background: var(--bg-panel); border-left: 1px solid var(--border);
-      display: flex; flex-direction: column; overflow-y: auto;
+      display: flex; flex-direction: column; overflow: hidden;
       font-family: var(--font);
+      pointer-events: auto;
     }
-    #rts-dev.collapsed { bottom: auto; }
+    #rts-dev .tab-bar { flex: 0 0 auto; }
+    #rts-dev .tab-content {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    #rts-dev.collapsed {
+      top: 10px; bottom: auto; width: auto; height: auto;
+      border-left: none; border-radius: 6px 0 0 6px;
+      box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
+      overflow: visible;
+    }
+    #rts-dev.collapsed .tab-bar { border-bottom: none; }
+    #rts-dev.collapsed .tab-btn:not(.dv-collapse) { display: none; }
     #rts-dev.collapsed .tab-content { display: none; }
+    #rts-dev.collapsed .tab-btn.dv-collapse {
+      flex: 0 0 auto;
+      padding: 7px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text);
+      border-bottom: none;
+      background: var(--bg-panel);
+    }
     #rts-dev .tab-btn { cursor: default; }
     #rts-dev .tab-btn.dv-collapse { flex: 0 0 32px; cursor: pointer; }
     #rts-dev .dv-hint {
@@ -223,10 +248,12 @@ export function createDevPanel({
 
   // ── Collapse ────────────────────────────────────────────────────────────────
   const collapseBtn = $(".dv-collapse");
-  collapseBtn.addEventListener("click", () => {
-    const collapsed = root.classList.toggle("collapsed");
-    collapseBtn.textContent = collapsed ? "+" : "–";
-  });
+  const setCollapsed = (collapsed) => {
+    root.classList.toggle("collapsed", collapsed);
+    collapseBtn.textContent = collapsed ? "Dev ▸" : "–";
+    collapseBtn.title = collapsed ? "Open dev controls" : "Collapse";
+  };
+  collapseBtn.addEventListener("click", () => setCollapsed(!root.classList.contains("collapsed")));
 
   // ── Camera ──────────────────────────────────────────────────────────────────
   const camBtn = $("#dv-cam");

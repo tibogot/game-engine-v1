@@ -27,6 +27,7 @@ import { createCombatFx } from "./combatFx.js";
 import { createCombat } from "./combat.js";
 import { createProjectiles } from "./projectiles.js";
 import { createFireSystem } from "./fireSystem.js";
+import { createCraterSystem } from "./craterSystem.js";
 import {
   loadBootWorld,
   loadDefaultWorld,
@@ -71,7 +72,7 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   });
 
   // 3) Camera — two modes the project needs: "orbit" (engine's editor controls,
-  //    for inspecting the world) and "rts" (WASD/edge-scroll pan, wheel zoom,
+  //    for inspecting the world) and "rts" (WASD pan, wheel zoom,
   //    Q/E rotate, terrain-follow). Toggle with the HUD button or the C key.
   onStatus("Setting up camera…");
   const rtsCamera = createRtsCamera({ app });
@@ -124,6 +125,10 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   const fire = createFireSystem({ app });
   app.fire = fire;
 
+  onStatus("Loading crater decals…");
+  const craters = await createCraterSystem({ app });
+  app.craters = craters;
+
   // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
   let combatRef = null;
   const projectiles = createProjectiles({
@@ -133,7 +138,7 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   app.projectiles = projectiles;
 
   const combat = createCombat({
-    units, structures, fx, structuresRenderer, projectiles, fire,
+    units, structures, fx, structuresRenderer, projectiles, fire, craters,
     onDeath: (entity) => { app.selection?.remove?.(entity); },
   });
   combatRef = combat;
@@ -190,9 +195,11 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   // DEV UI (not player-facing): tune camera feel, unit speed, and the nav grid
   // while building the game. Collapsible, top-right.
   /** Rebuild gameplay systems that depend on terrain after a world swap. */
-  const afterWorldLoad = (result) => {
+  const afterWorldLoad = async (result) => {
     if (!result?.loaded) return;
     worldState.name = result.name;
+    onStatus("Re-seating structures…");
+    await structures.reanchorToTerrain(app);
     const navOn = devPanel.getNavDebug?.() ?? false;
     navGrid.rebuild();
     for (const s of structures.list) {

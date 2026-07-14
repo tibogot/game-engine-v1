@@ -3,8 +3,8 @@
 // Two modes, toggleable at runtime:
 //   • "orbit" — hands control back to the engine's editor OrbitControls (good
 //     for inspecting the world while building the game).
-//   • "rts"   — top-down angled view: WASD / edge-scroll pan, wheel zoom,
-//     Q/E rotate, and the look-point follows the terrain height.
+//   • "rts"   — top-down angled view: WASD pan, wheel zoom, Q/E rotate, and the
+//     look-point follows the terrain height.
 //
 // How it coexists with the engine without touching engine source:
 //   • The engine streams its terrain clipmap around `controls.target` and calls
@@ -18,39 +18,31 @@ import * as THREE from "three";
 
 const DEG = Math.PI / 180;
 
-export function createRtsCamera({ app, edgeScroll = true } = {}) {
+export function createRtsCamera({ app } = {}) {
   const { camera, controls, getWorldHeight, worldSize } = app;
 
   // ── Tunables (live-editable from the dev panel via the returned `params`) ────
   const params = {
-    pitch:    55 * DEG,   // look-down angle from the horizon
+    pitch:    40 * DEG,   // look-down angle — CoH-style tactical view
     panSpeed: 0.9,        // world units / frame per unit of zoom distance
     rotSpeed: 1.4 * DEG,  // radians / frame while Q or E held
   };
-  const DIST_MIN   = 30;
-  const DIST_MAX   = 400;
-  const EDGE_PX    = 24;         // screen border thickness that triggers edge-scroll
+  const DIST_MIN   = 18;   // closest zoom — near ground-level tactics
+  const DIST_MAX   = 280;
+  const DIST_DEFAULT = 52; // starting zoom — close like Company of Heroes
   const HALF       = (worldSize ?? 1000) * 0.5;
 
   // ── State ───────────────────────────────────────────────────────────────────
   let mode  = "orbit";
   const focus = new THREE.Vector3(0, 0, 0); // ground point the camera looks at
-  let dist  = 160;
+  let dist  = DIST_DEFAULT;
   let yaw   = 0;                             // rotation of the view around Y
-  let dragging = false;
+  let rtsEntered = false; // first RTS entry keeps DIST_DEFAULT; orbit→rts adopts zoom
   const keys = Object.create(null);
-  const pointer = { x: 0.5, y: 0.5, inside: false };
-  const _tmp = new THREE.Vector3();
 
   // ── Input ─────────────────────────────────────────────────────────────────
   const onKeyDown = (e) => { keys[e.code] = true; };
   const onKeyUp   = (e) => { keys[e.code] = false; };
-  const onMouseMove = (e) => {
-    pointer.x = e.clientX / window.innerWidth;
-    pointer.y = e.clientY / window.innerHeight;
-    pointer.inside = true;
-  };
-  const onMouseLeave = () => { pointer.inside = false; };
   // Claim the wheel at capture so the engine's editor camera never zooms while RTS-active.
   const onWheel = (e) => {
     if (mode !== "rts") return;
@@ -62,15 +54,11 @@ export function createRtsCamera({ app, edgeScroll = true } = {}) {
   function bind() {
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseout", onMouseLeave);
     window.addEventListener("wheel", onWheel, { capture: true, passive: false });
   }
   function unbind() {
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
-    window.removeEventListener("mousemove", onMouseMove);
-    window.removeEventListener("mouseout", onMouseLeave);
     window.removeEventListener("wheel", onWheel, { capture: true });
   }
 
@@ -91,13 +79,6 @@ export function createRtsCamera({ app, edgeScroll = true } = {}) {
     if (keys.KeyS || keys.ArrowDown)  mf -= 1;
     if (keys.KeyD || keys.ArrowRight) mr += 1;
     if (keys.KeyA || keys.ArrowLeft)  mr -= 1;
-
-    if (edgeScroll && pointer.inside) {
-      if (pointer.y < EDGE_PX / window.innerHeight) mf += 1;
-      if (pointer.y > 1 - EDGE_PX / window.innerHeight) mf -= 1;
-      if (pointer.x > 1 - EDGE_PX / window.innerWidth) mr += 1;
-      if (pointer.x < EDGE_PX / window.innerWidth) mr -= 1;
-    }
 
     if (keys.KeyQ) yaw -= params.rotSpeed;
     if (keys.KeyE) yaw += params.rotSpeed;
@@ -126,7 +107,13 @@ export function createRtsCamera({ app, edgeScroll = true } = {}) {
       // Seed the focus from wherever the orbit camera was looking.
       focus.copy(controls.target);
       focus.y = getWorldHeight ? getWorldHeight(focus.x, focus.z) : focus.y;
-      dist = THREE.MathUtils.clamp(camera.position.distanceTo(focus), DIST_MIN, DIST_MAX);
+      // Boot starts zoomed in; only adopt orbit distance when toggling back from orbit.
+      if (rtsEntered) {
+        dist = THREE.MathUtils.clamp(camera.position.distanceTo(focus), DIST_MIN, DIST_MAX);
+      } else {
+        dist = DIST_DEFAULT;
+      }
+      rtsEntered = true;
       // The engine's editor loop re-enables `controls.enabled` every frame, so
       // disable the individual interactions too — otherwise mouse-drag orbits
       // the camera while our RTS drive fights it back.

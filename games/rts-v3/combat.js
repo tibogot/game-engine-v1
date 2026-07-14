@@ -12,7 +12,7 @@ import * as THREE from "three";
 const ACQUIRE_MULT = 1.15; // auto-acquire slightly beyond weapon range
 
 export function createCombat({
-  units, structures, fx, structuresRenderer, projectiles, fire, onDeath = () => {},
+  units, structures, fx, structuresRenderer, projectiles, fire, craters, onDeath = () => {},
 }) {
   const _muzzle = new THREE.Vector3();
 
@@ -32,6 +32,7 @@ export function createCombat({
     const reach = e.range * ACQUIRE_MULT;
     for (const o of combatants()) {
       if (!o.alive || o.team === e.team) continue;
+      if (o.passive) continue;
       if (o.isAir && !e.canHitAir) continue; // jeeps can't shoot helicopters
       const d = flat(e, o);
       if (d <= reach && d < bestD) { bestD = d; best = o; }
@@ -60,6 +61,14 @@ export function createCombat({
         target.position.z,
         big ? (target.typeKey === "base" ? 9 : 5) : 2.4,
         big ? 26 : 11,
+      );
+      craters?.addCrater(
+        target.position.x,
+        target.position.z,
+        target.typeKey === "base" ? 7.5
+          : target.typeKey === "turret" ? 4.8
+            : target.typeKey === "trainingDummy" ? 3.2
+              : target.isStructure ? 4.8 : 2.4,
       );
       onDeath(target);
     }

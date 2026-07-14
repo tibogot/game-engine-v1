@@ -1,14 +1,36 @@
 // Structures RENDERER — procedural geometry for the base and enemy turrets.
 // Mirrors unitRenderer: all visuals here, logic stays mesh-free in structures.js.
 import * as THREE from "three";
+import { materialColor } from "three/tsl";
 import { makeHealthBar } from "./healthBar.js";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
 
 export const structureByMesh = new WeakMap();
 
-const _matBody = () => new THREE.MeshStandardMaterial({ color: 0x5a6472, roughness: 0.85, metalness: 0.15 });
-const _matDark = () => new THREE.MeshStandardMaterial({ color: 0x333a45, roughness: 0.9, metalness: 0.2 });
-const _matEnemy = () => new THREE.MeshStandardMaterial({ color: 0x6e4a4a, roughness: 0.85, metalness: 0.2 });
+/**
+ * Structures never move, and that makes them a trap for scene-level fog.
+ *
+ * three's NodeMaterialObserver only re-uploads a render object's uniforms when
+ * the material carries a node, the mesh is skinned, or its world matrix /
+ * material properties changed. Everything else is treated as static and keeps
+ * the uniform buffer it was first rendered with — including the scene fogNode's
+ * uniforms. A plain material on a never-moving mesh therefore FREEZES the fog it
+ * booted with: toggle height fog off and the base and turret bodies stay stuck
+ * in the old mist while the terrain and the (moving) units clear up.
+ *
+ * A node material with a `colorNode` flips the observer to "always refresh".
+ * `materialColor` just reads the material's own color uniform, so `.color` still
+ * works exactly as before.
+ */
+const _standardMat = (params) => {
+  const m = new THREE.MeshStandardNodeMaterial(params);
+  m.colorNode = materialColor;
+  return m;
+};
+
+const _matBody = () => _standardMat({ color: 0x5a6472, roughness: 0.85, metalness: 0.15 });
+const _matDark = () => _standardMat({ color: 0x333a45, roughness: 0.9, metalness: 0.2 });
+const _matEnemy = () => _standardMat({ color: 0x6e4a4a, roughness: 0.85, metalness: 0.2 });
 
 /** Procedural player HQ: platform, main block, corner pillars, glowing beacon. */
 function buildBase() {
@@ -43,6 +65,28 @@ function buildBase() {
   );
   beacon.position.y = 21;
   g.add(beacon);
+
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
+/** Unarmed practice target — bright so it's easy to spot near the base. */
+function buildTrainingDummy() {
+  const g = new THREE.Group();
+  const body = _matEnemy();
+  const mark = _standardMat({ color: 0xff6a3a, roughness: 0.75, metalness: 0.1 });
+
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.6, 0.5, 12), _matDark());
+  pad.position.y = 0.25;
+  g.add(pad);
+
+  const crate = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3), body);
+  crate.position.y = 2;
+  g.add(crate);
+
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.5, 3.1), mark);
+  stripe.position.y = 2.8;
+  g.add(stripe);
 
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return g;
@@ -94,6 +138,8 @@ export function createStructuresRenderer({ app, structures }) {
     let group, head = null, muzzleLocal = null;
     if (s.typeKey === "base") {
       group = buildBase();
+    } else if (s.typeKey === "trainingDummy") {
+      group = buildTrainingDummy();
     } else {
       const t = buildTurret();
       group = t.group; head = t.head; muzzleLocal = t.muzzleLocal;
@@ -129,6 +175,8 @@ export function createStructuresRenderer({ app, structures }) {
         v.bar.group.visible = false;
         continue;
       }
+
+      v.group.position.set(s.position.x, s.position.y, s.position.z);
 
       // Turret head tracks its target.
       if (v.head) {

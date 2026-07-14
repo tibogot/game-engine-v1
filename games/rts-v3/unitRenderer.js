@@ -104,11 +104,11 @@ function buildTemplate(gltf, { targetLength, targetHeight, excludeRotorsFromBox 
 // the terrain height each frame (a conforming decal). Because it hugs the
 // ground we keep depthTest ON, so the unit properly occludes it — depthTest:false
 // would draw the ring *over* the unit.
-function makeSelectionRing(radius, color = 0x37e06b) {
+function makeSelectionRing(radius, color = 0x6ab0ff) {
   const geo = new THREE.RingGeometry(radius * 0.82, radius, 48).rotateX(-Math.PI / 2);
   const mat = new THREE.MeshBasicMaterial({
     color, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
-    depthWrite: false, depthTest: true,
+    depthWrite: false, depthTest: true, fog: false, // selection UI — never fogged
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
   const ring = new THREE.Mesh(geo, mat);
@@ -122,14 +122,14 @@ function makeHealthBar(width, height = 0.55) {
   const group = new THREE.Group();
   const bg = new THREE.Mesh(
     new THREE.PlaneGeometry(width + 0.18, height + 0.18),
-    new THREE.MeshBasicMaterial({ color: 0x0b0e13, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false }),
+    new THREE.MeshBasicMaterial({ color: 0x0b0e13, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false, fog: false }),
   );
   bg.renderOrder = 1001;
   group.add(bg);
 
   const fill = new THREE.Mesh(
     new THREE.PlaneGeometry(width, height).translate(width / 2, 0, 0), // left-anchored
-    new THREE.MeshBasicMaterial({ color: 0x3ddc60, depthTest: false, depthWrite: false }),
+    new THREE.MeshBasicMaterial({ color: 0x3ddc60, depthTest: false, depthWrite: false, fog: false }),
   );
   fill.position.set(-width / 2, 0, 0.001);
   fill.renderOrder = 1002;

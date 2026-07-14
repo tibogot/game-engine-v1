@@ -33,6 +33,18 @@ export const STRUCTURE_TYPES = {
     barWidth: 6,
     barY: 10,
   },
+  // Unarmed targets for close-range crater / combat tests — no need to cross the map.
+  trainingDummy: {
+    typeKey: "trainingDummy",
+    name: "Training Target",
+    team: "enemy",
+    passive: true,   // won't be auto-targeted — order an attack to test
+    maxHp: 80,
+    radius: 2.5,
+    range: 0,
+    barWidth: 4,
+    barY: 4.5,
+  },
 };
 
 function makeStructure(app, type, x, z) {
@@ -43,6 +55,7 @@ function makeStructure(app, type, x, z) {
     typeKey: type.typeKey,
     name: type.name,
     team: type.team,
+    passive: !!type.passive,
     isAir: false,
     isStructure: true,
     radius: type.radius,
@@ -120,6 +133,18 @@ export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
     await place(STRUCTURE_TYPES.turret, tx, tz, { searchRadius: 120, maxSpread: 4 });
   }
 
+  // ── Training targets: a short row north of the base (+Z toward the enemy) ───
+  // Unarmed dummies so you can test craters / combat without trekking across the map.
+  const dummyOffsets = [-28, -14, 0, 14, 28];
+  for (let i = 0; i < dummyOffsets.length; i++) {
+    await place(
+      STRUCTURE_TYPES.trainingDummy,
+      base.position.x + dummyOffsets[i],
+      base.position.z + 52 + (i % 2) * 6,
+      { searchRadius: 50, maxSpread: 3 },
+    );
+  }
+
   /**
    * Advance the base's build queue. `spawn(typeKey, x, z)` comes from the unit
    * manager; the finished unit walks to the base's rally point.
@@ -145,5 +170,24 @@ export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
     base,
     updateProduction,
     get turrets() { return list.filter((s) => s.typeKey === "turret" && s.alive); },
+    /** Re-seat every structure on the current terrain (after loading a .v3proj). */
+    async reanchorToTerrain(app) {
+      for (const s of list) {
+        if (!s.alive) continue;
+        const site = findBuildSite(app, s.position.x, s.position.z, s.radius, {
+          searchRadius: s.typeKey === "base" ? 120 : 50,
+          maxSpread: s.typeKey === "base" ? 8 : 6,
+        });
+        if (!site) {
+          s.position.y = app.getWorldHeight?.(s.position.x, s.position.z) ?? s.position.y;
+          continue;
+        }
+        await prepareSite(app, site.x, site.z, s.radius, site.y);
+        s.position.set(site.x, site.y, site.z);
+      }
+      if (base?.alive) {
+        base.rally = { x: base.position.x, z: base.position.z + base.radius + 22 };
+      }
+    },
   };
 }
