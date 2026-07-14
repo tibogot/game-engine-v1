@@ -18,7 +18,9 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 // (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
 // different thing, hence the explicit name.)
 export function createSelection({ app, units, unitRenderer, structuresRenderer = null, onChange = () => {} }) {
-  const { unitByMesh, roots } = unitRenderer;
+  // Rigid unit types render as shared InstancedMeshes, so a hit identifies its
+  // unit by instanceId, not by the mesh — unitRenderer owns that resolution.
+  const { roots, unitFromHit } = unitRenderer;
   const { renderer, camera } = app;
   const dom = renderer.domElement;
   const raycaster = new THREE.Raycaster();
@@ -50,9 +52,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     raycaster.setFromCamera(ndc, camera);
     const hits = raycaster.intersectObjects(roots, true);
     for (const h of hits) {
-      let o = h.object;
-      while (o && !unitByMesh.get(o)) o = o.parent;
-      const u = o && unitByMesh.get(o);
+      const u = unitFromHit(h);
       if (u?.alive) return u;
     }
     // Nothing under the cursor — try our own buildings (the base is commandable).

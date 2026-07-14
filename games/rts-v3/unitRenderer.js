@@ -10,6 +10,8 @@
 // clone(true) — userData refs would still point at the template's own nodes.
 import * as THREE from "three";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { materialColor } from "three/tsl";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
 import { UNIT_TYPES, UNIT_TYPE_KEYS } from "./unitTypes.js";
@@ -97,7 +99,195 @@ function buildTemplate(gltf, { targetLength, targetHeight, excludeRotorsFromBox 
     if (kind === "main") { o.name = "MainRotor"; rotors++; }
     else if (kind === "tail") { o.name = "TailRotor"; rotors++; }
   });
+
+  mergeTemplateParts(root);
+
   return { root, rotors };
+}
+
+// ── Template merging ─────────────────────────────────────────────────────────
+// A GLB arrives split by MATERIAL, not by anything we care about: the soldier is
+// 6 skinned meshes (bags / green / grey / mags / shirt / skin) and the heli's body
+// is 4. Every one of those is a draw call PER UNIT, twice over once shadows are
+// on — 36 draws for six soldiers.
+//
+// None of those parts is textured: they're flat colors. So we bake each part's
+// color into a vertex-color attribute and merge them into ONE mesh per model.
+// Textured parts keep their own mesh (they can't share a vertex-color material),
+// and rotors are left alone — they spin about their own pivots, and baking their
+// matrices into the merged geometry would move those pivots.
+
+const _identity = new THREE.Matrix4();
+
+/** Bake a flat material color into a `color` attribute so parts can merge. */
+function paint(geo, color) {
+  const n = geo.attributes.position.count;
+  const arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    arr[i * 3] = color.r;
+    arr[i * 3 + 1] = color.g;
+    arr[i * 3 + 2] = color.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(arr, 3));
+  return geo;
+}
+
+/**
+ * One material for a merged model. `vertexColors` carries what used to be one
+ * material per part, and MeshStandardMaterial replaces the GLB's
+ * MeshPhysicalMaterial (the priciest shader in three — its clearcoat /
+ * transmission / iridescence lobes buy us nothing on an RTS unit).
+ */
+function mergedMaterial(src) {
+  return new THREE.MeshStandardMaterial({
+    color: 0xffffff, // white: the vertex colors ARE the color
+    roughness: src.roughness ?? 0.8,
+    metalness: src.metalness ?? 0.1,
+    vertexColors: true,
+    side: src.side,
+  });
+}
+
+/** Merge the flat-colored parts of a template into one mesh (skinned or not). */
+function mergeTemplateParts(root) {
+  const skinned = [];
+  const statics = new Map(); // parent → meshes
+
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.name === "MainRotor" || o.name === "TailRotor") return; // own pivots — leave them
+    if (o.material.map) return;                                   // textured — can't share the material
+    if (o.isSkinnedMesh) {
+      // Skinned geometry is in bind space; a non-identity mesh matrix would have
+      // to be baked in, which would fight the bind matrix. GLTF skins are always
+      // identity here, but bail rather than silently deform the model.
+      if (!o.matrix.equals(_identity)) return;
+      skinned.push(o);
+    } else {
+      const arr = statics.get(o.parent) ?? [];
+      arr.push(o);
+      statics.set(o.parent, arr);
+    }
+  });
+
+  const merge = (meshes, { skinned: isSkinned }) => {
+    if (meshes.length < 2) return;
+    const geos = meshes.map((m) => {
+      const g = m.geometry.clone();
+      if (!isSkinned && !m.matrix.equals(_identity)) g.applyMatrix4(m.matrix);
+      return paint(g, m.material.color);
+    });
+    // mergeGeometries returns null on ANY attribute mismatch — don't ship a model
+    // with its body silently missing.
+    const geo = mergeGeometries(geos, false);
+    if (!geo) {
+      console.warn("[rts-v3] template merge skipped: attribute mismatch");
+      return;
+    }
+
+    const first = meshes[0];
+    const mat = mergedMaterial(first.material);
+    let merged;
+    if (isSkinned) {
+      merged = new THREE.SkinnedMesh(geo, mat);
+      // The parts each carry their own Skeleton object, but those all reference
+      // the SAME bones — the ones the AnimationMixer drives — so binding to the
+      // first one animates the merged mesh exactly as before.
+      merged.bind(first.skeleton, first.bindMatrix);
+      merged.frustumCulled = false;
+    } else {
+      merged = new THREE.Mesh(geo, mat);
+    }
+    merged.castShadow = true;
+    merged.receiveShadow = true;
+
+    const parent = first.parent;
+    for (const m of meshes) m.removeFromParent();
+    parent.add(merged);
+  };
+
+  merge(skinned, { skinned: true });
+  for (const meshes of statics.values()) merge(meshes, { skinned: false });
+}
+
+// ── Instancing (non-skinned types) ───────────────────────────────────────────
+// Jeeps and helicopters are rigid models: every unit of a type draws the SAME
+// geometry with the SAME material, only the transform differs. So instead of one
+// cloned Group per unit (8 jeeps = 8 draws), each PART of the template becomes
+// one InstancedMesh shared by every unit of that type — 8 jeeps = 1 draw, 40
+// jeeps would still be 1 draw.
+//
+// Rotors stay their own instanced part: they spin per unit, so their instance
+// matrix is composed with that unit's own rotor angle.
+//
+// Soldiers are skinned and keep a Group each — a skinned mesh can't be instanced
+// without a GPU-skinning path, and each one is posed by its own AnimationMixer.
+
+const MAX_PER_TYPE = 256; // instance buffer headroom for base production
+
+const _mat = new THREE.Matrix4();
+const _local = new THREE.Matrix4();
+const _euler = new THREE.Euler();
+const _quat = new THREE.Quaternion();
+
+/**
+ * A plain three material carries no node, and three's NodeMaterialObserver only
+ * re-uploads uniforms for materials that do (or whose mesh moved). An
+ * InstancedMesh NEVER moves — the instances do — so its scene fog uniforms would
+ * FREEZE, exactly like the static structures did. `materialColor` reads the
+ * material's own color AND its map, so the model keeps its texture.
+ */
+function refreshingMaterial(src) {
+  const m = new THREE.MeshStandardNodeMaterial({
+    color: src.color,
+    map: src.map ?? null,
+    roughness: src.roughness ?? 0.8,
+    metalness: src.metalness ?? 0.1,
+    vertexColors: src.vertexColors,
+    side: src.side,
+    transparent: src.transparent,
+    alphaTest: src.alphaTest,
+  });
+  m.colorNode = materialColor;
+  return m;
+}
+
+/** Turn a rigid template into one InstancedMesh per part. */
+function buildInstancedType(tpl, scene) {
+  const root = tpl.root;
+  root.updateMatrixWorld(true);
+  const invRoot = new THREE.Matrix4().copy(root.matrixWorld).invert();
+
+  const parts = [];
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+
+    const im = new THREE.InstancedMesh(o.geometry, refreshingMaterial(o.material), MAX_PER_TYPE);
+    im.count = 0;
+    im.castShadow = true;
+    im.receiveShadow = true;
+    im.frustumCulled = false; // instances live anywhere; the shared bounds are meaningless
+    scene.add(im);
+
+    const kind = o.name === "MainRotor" ? "main" : o.name === "TailRotor" ? "tail" : null;
+    const part = { im, kind };
+    if (kind) {
+      // A rotor spins about ITS OWN pivot, so we rebuild its local matrix per
+      // unit from the spin angle and compose it with the pivot's place in the model.
+      part.parentRel = new THREE.Matrix4().multiplyMatrices(invRoot, o.parent.matrixWorld);
+      part.basePos = o.position.clone();
+      part.baseEuler = o.rotation.clone();
+      part.baseScale = o.scale.clone();
+    } else {
+      // Rigid part: a fixed offset from the unit's own transform.
+      part.rel = new THREE.Matrix4().multiplyMatrices(invRoot, o.matrixWorld);
+    }
+    parts.push(part);
+  });
+
+  // The template's own scale (buildTemplate normalises model size) is part of
+  // every unit's transform, so instances carry it too.
+  return { parts, scale: root.scale.x, n: 0, unitAt: [] };
 }
 
 // Selection ring: a flat ring in the XZ plane whose vertices are displaced to
@@ -148,22 +338,55 @@ export async function createUnitRenderer({ app, units, healthBars }) {
     return tpl.skinned ? SkeletonUtils.clone(tpl.root) : tpl.root.clone(true);
   };
 
+  // Rigid types render through shared InstancedMeshes; skinned types keep a Group
+  // per unit. `instanced[key]` is null for the latter.
+  const instanced = {};
+  for (const k of UNIT_TYPE_KEYS) {
+    instanced[k] = templates[k].skinned ? null : buildInstancedType(templates[k], scene);
+  }
+
   // Per-unit visuals.
   const views = new Map(); // unit → view
   const roots = [];        // raycast targets for selection
+
+  // Instanced units have no mesh of their own, so a raycast hit lands on the
+  // shared InstancedMesh and identifies the unit by instanceId. This maps the
+  // mesh back to the type whose per-frame instance list holds the units.
+  const typeOfInstancedMesh = new Map();
+  for (const k of UNIT_TYPE_KEYS) {
+    const inst = instanced[k];
+    if (!inst) continue;
+    for (const p of inst.parts) {
+      typeOfInstancedMesh.set(p.im, inst);
+      roots.push(p.im);
+    }
+  }
 
   /** Build the visuals for one unit. Also used for units spawned at runtime. */
   function addUnit(unit) {
     const t = unit.type;
     const tpl = templates[t.typeKey];
+    const inst = instanced[t.typeKey];
+
+    const ring = makeSelectionRing(t.ringRadius);
+    const ringPos = ring.geometry.attributes.position;
+    const ringBase = Float32Array.from(ringPos.array); // flat XZ offsets (y = 0)
+    scene.add(ring);
+
+    // An instanced unit owns NO scene objects — just an off-scene Object3D we use
+    // to compose its transform (and to hold the slerped terrain tilt between frames).
+    if (inst) {
+      const xform = new THREE.Object3D();
+      xform.scale.setScalar(inst.scale);
+      views.set(unit, {
+        inst, xform, ring, ringPos, ringBase,
+        bob: Math.random() * 6, mainAngle: Math.random() * 6, tailAngle: 0,
+      });
+      return;
+    }
+
     const root = cloneTemplateRoot(t.typeKey);
-    const mainRotors = [], tailRotors = [];
-    root.traverse((o) => {
-      if (!o.isMesh) return;
-      unitByMesh.set(o, unit);
-      if (o.name === "MainRotor") mainRotors.push(o);
-      else if (o.name === "TailRotor") tailRotors.push(o);
-    });
+    root.traverse((o) => { if (o.isMesh) unitByMesh.set(o, unit); });
 
     // Skinned units get their own AnimationMixer (idle ⇄ run driven in sync()).
     let mixer = null, actions = null;
@@ -177,17 +400,22 @@ export async function createUnitRenderer({ app, units, healthBars }) {
       root.traverse((o) => { if (o.isSkinnedMesh) o.frustumCulled = false; });
     }
 
-    const ring = makeSelectionRing(t.ringRadius);
-    const ringPos = ring.geometry.attributes.position;
-    const ringBase = Float32Array.from(ringPos.array); // flat XZ offsets (y = 0)
-
-    scene.add(root, ring);
+    scene.add(root);
     roots.push(root);
     views.set(unit, {
-      root, ring, ringPos, ringBase, mainRotors, tailRotors,
+      root, xform: root, ring, ringPos, ringBase,
       mixer, actions, currentAction: actions ? (actions.idle ? "idle" : Object.keys(actions)[0]) : null,
       bob: Math.random() * 6, mainAngle: Math.random() * 6, tailAngle: 0,
     });
+  }
+
+  /** Resolve a raycast hit to the unit it belongs to (instanced or not). */
+  function unitFromHit(hit) {
+    const inst = typeOfInstancedMesh.get(hit.object);
+    if (inst) return inst.unitAt[hit.instanceId];
+    let o = hit.object;
+    while (o && !unitByMesh.get(o)) o = o.parent;
+    return o ? unitByMesh.get(o) : null;
   }
 
   for (const unit of units.list) addUnit(unit);
@@ -202,25 +430,32 @@ export async function createUnitRenderer({ app, units, healthBars }) {
 
   /** Push unit data into the meshes. Called once per frame by the game loop. */
   function sync(dt, camera) {
+    // Instanced types are rebuilt from scratch each frame, so spawns and deaths
+    // need no bookkeeping — a dead unit simply isn't written.
+    for (const k of UNIT_TYPE_KEYS) {
+      if (instanced[k]) instanced[k].n = 0;
+    }
+
     for (const unit of units.list) {
       const v = views.get(unit);
       if (!v) continue;
 
       if (!unit.alive) {
-        v.root.visible = false;
+        if (v.root) v.root.visible = false;
         v.ring.visible = false;
         continue;
       }
 
       const t = unit.type;
       const p = unit.position;
+      const x = v.xform; // the unit's transform: its Group, or an off-scene proxy
 
       const bobY = t.isAir ? Math.sin((v.bob += dt) * 1.6) * 0.25 : 0;
-      v.root.position.set(p.x, p.y + bobY, p.z);
+      x.position.set(p.x, p.y + bobY, p.z);
 
       const yaw = unit.heading + (t.facingOffset ?? 0);
       if (t.isAir || !app.getWorldNormal) {
-        v.root.rotation.y = yaw; // air stays level
+        x.rotation.y = yaw; // air stays level
       } else {
         // Ground units tilt to the terrain: align local up to the surface
         // normal, then yaw around it. Slerp so it eases over bumps.
@@ -229,16 +464,33 @@ export async function createUnitRenderer({ app, units, healthBars }) {
         _alignQ.setFromUnitVectors(_UP, _n);
         _yawQ.setFromAxisAngle(_UP, yaw);
         _targetQ.copy(_alignQ).multiply(_yawQ);
-        v.root.quaternion.slerp(_targetQ, Math.min(1, dt * 12));
+        x.quaternion.slerp(_targetQ, Math.min(1, dt * 12));
       }
 
-      if (v.mainRotors.length) {
-        v.mainAngle += dt * 28;
-        for (const r of v.mainRotors) r.rotation.y = v.mainAngle;
-      }
-      if (v.tailRotors.length) {
-        v.tailAngle += dt * 28 * 2.4;
-        for (const r of v.tailRotors) r.rotation.x = v.tailAngle;
+      v.mainAngle += dt * 28;
+      v.tailAngle += dt * 28 * 2.4;
+
+      // Instanced unit: write one matrix per template part and move on.
+      if (v.inst) {
+        const inst = v.inst;
+        const i = inst.n;
+        if (i < MAX_PER_TYPE) {
+          x.updateMatrix(); // off-scene: nothing else will do this for us
+          for (const part of inst.parts) {
+            if (part.kind) {
+              _euler.copy(part.baseEuler);
+              if (part.kind === "main") _euler.y = v.mainAngle;
+              else _euler.x = v.tailAngle;
+              _local.compose(part.basePos, _quat.setFromEuler(_euler), part.baseScale);
+              _mat.multiplyMatrices(part.parentRel, _local).premultiply(x.matrix);
+            } else {
+              _mat.multiplyMatrices(x.matrix, part.rel);
+            }
+            part.im.setMatrixAt(i, _mat);
+          }
+          inst.unitAt[i] = unit; // so a raycast on instanceId finds this unit
+          inst.n = i + 1;
+        }
       }
 
       // Skinned units: run while moving, idle while holding (cross-faded).
@@ -274,16 +526,32 @@ export async function createUnitRenderer({ app, units, healthBars }) {
         v.ringPos.needsUpdate = true;
       }
     }
+
+    for (const k of UNIT_TYPE_KEYS) {
+      const inst = instanced[k];
+      if (!inst) continue;
+      for (const part of inst.parts) {
+        part.im.count = inst.n;
+        part.im.instanceMatrix.needsUpdate = true;
+      }
+    }
   }
 
   return {
     thumbnails,
-    roots,       // raycast targets for selection
+    roots,        // raycast targets for selection (instanced meshes + skinned groups)
     unitByMesh,
+    unitFromHit,  // resolves a raycast hit, instanced or not
     addUnit,
     sync,
     dispose() {
-      for (const v of views.values()) scene.remove(v.root, v.ring);
+      for (const v of views.values()) {
+        if (v.root) scene.remove(v.root);
+        scene.remove(v.ring);
+      }
+      for (const k of UNIT_TYPE_KEYS) {
+        for (const part of instanced[k]?.parts ?? []) scene.remove(part.im);
+      }
       views.clear();
     },
   };
