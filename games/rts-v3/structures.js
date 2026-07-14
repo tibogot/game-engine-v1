@@ -169,6 +169,8 @@ export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
     list,
     base,
     updateProduction,
+    /** Add a runtime structure (a player-built building) so combat/selection see it. */
+    add(s) { list.push(s); },
     get turrets() { return list.filter((s) => s.typeKey === "turret" && s.alive); },
     /** Re-seat every structure on the current terrain (after loading a .v3proj). */
     async reanchorToTerrain(app) {

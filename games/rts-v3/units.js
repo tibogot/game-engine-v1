@@ -159,6 +159,15 @@ function makeUnit(app, type, navGrid, x, z, getUnits, team = "player") {
     target: null,        // auto-acquired
     attackTarget: null,  // explicitly ordered (takes priority)
 
+    // ── Launch (helipad-built aircraft) ────────────────────────────────────────
+    // Air units normally snap to hover height instantly. A launched one starts on
+    // the ground and rises: launchT ramps 0→launchDur, and the air-Y code below
+    // scales hover by that fraction. Default launchDur 0 = already at altitude.
+    launchT: 0,
+    launchDur: 0,
+    /** Take off from the ground over `dur` seconds (helipad rise animation). */
+    launch(dur = 1.6) { unit.launchDur = dur; unit.launchT = 0; },
+
     /** Explicit attack order (right-click an enemy). */
     attack(enemy) { unit.attackTarget = enemy; unit.chaseCd = 0; },
     // While `ghost` is on, the unit ignores (and is ignored by) friendly
@@ -443,7 +452,16 @@ function makeUnit(app, type, navGrid, x, z, getUnits, team = "player") {
         const wl = app.getWaterLevelAt(pos.x, pos.z);
         if (wl > surf) surf = wl;
       }
-      pos.y = surf + (type.hover ?? 0);
+      // Launch ramp: rise from the pad to hover over launchDur (smoothstep so it
+      // eases off the ground and settles into the hover, not a linear slide).
+      let hoverScale = 1;
+      if (unit.launchDur > 0) {
+        unit.launchT = Math.min(unit.launchDur, unit.launchT + dt);
+        const p = unit.launchT / unit.launchDur;
+        hoverScale = p * p * (3 - 2 * p);           // smoothstep
+        if (unit.launchT >= unit.launchDur) unit.launchDur = 0; // done — full hover
+      }
+      pos.y = surf + (type.hover ?? 0) * hoverScale;
     },
   };
   return unit;

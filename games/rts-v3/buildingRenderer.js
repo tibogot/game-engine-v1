@@ -1,0 +1,119 @@
+// Building RENDERER — procedural geometry for player-built structures.
+//
+// Separate from structuresRenderer (which merges the fixed boot structures into
+// one static mesh) because buildings appear at RUNTIME and ANIMATE: they rise out
+// of the ground while the builder raises them, and the helipad's corner lights
+// pulse while it's producing. Few exist, so each is its own small Group — no
+// instancing gymnastics, just clean animated meshes.
+import * as THREE from "three";
+import { materialColor } from "three/tsl";
+import { makeBloomMaterial, BLOOM } from "./bloom.js";
+
+const C_PAD = 0x2b2f36;
+const C_RIM = 0x3d4550;
+const C_MARK = 0xf0c020; // the landing "H"
+
+/** Refreshing standard material — a colorNode keeps its fog uniforms live (see
+ *  structuresRenderer.js for why a static mesh needs this). */
+function mat(color, { rough = 0.9, metal = 0.2 } = {}) {
+  const m = new THREE.MeshStandardNodeMaterial({ color, roughness: rough, metalness: metal });
+  m.colorNode = materialColor;
+  return m;
+}
+
+/** Procedural helipad: disc + rim + painted H + four corner lights. */
+function buildHelipad(radius) {
+  const g = new THREE.Group();
+
+  // Landing disc.
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 1.0, 40), mat(C_PAD));
+  disc.position.y = 0.5;
+  disc.receiveShadow = true;
+  disc.castShadow = true;
+  g.add(disc);
+
+  // Raised rim.
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.5, 40, 1, true), mat(C_RIM, { metal: 0.4 }));
+  rim.position.y = 1.15;
+  rim.castShadow = true;
+  g.add(rim);
+
+  // Landing "H", painted flat on the deck (three bars).
+  const markMat = mat(C_MARK, { rough: 0.6 });
+  const bar = (w, d, x) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), markMat);
+    m.position.set(x, 1.05, 0);
+    g.add(m);
+  };
+  bar(0.9, radius * 0.9, -radius * 0.28); // left upright
+  bar(0.9, radius * 0.9, radius * 0.28);  // right upright
+  const cross = new THREE.Mesh(new THREE.BoxGeometry(radius * 0.62, 0.12, 0.9), markMat);
+  cross.position.set(0, 1.05, 0);
+  g.add(cross);
+
+  // Corner lights — emissive (they bloom). Kept as refs so production can pulse them.
+  const lights = [];
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const L = new THREE.Mesh(
+      new THREE.SphereGeometry(0.5, 12, 8),
+      makeBloomMaterial({ color: 0x64d2ff, blending: THREE.NormalBlending, depthWrite: true, transparent: false }, BLOOM.beacon),
+    );
+    L.position.set(Math.cos(a) * (radius - 0.8), 1.4, Math.sin(a) * (radius - 0.8));
+    g.add(L);
+    lights.push(L);
+  }
+
+  // Total vertical extent, for the rise-from-ground construction animation.
+  g.userData.height = 2.0;
+  g.userData.lights = lights;
+  return g;
+}
+
+export function createBuildingRenderer({ app, buildings }) {
+  const { scene } = app;
+  const views = new Map(); // building → Group
+  let _t = 0;
+
+  function ensureView(b) {
+    let g = views.get(b);
+    if (g) return g;
+    if (b.typeKey === "helipad") g = buildHelipad(b.radius);
+    else return null;
+    g.frustumCulled = false;
+    scene.add(g);
+    views.set(b, g);
+    return g;
+  }
+
+  function sync(dt) {
+    _t += dt;
+
+    for (const b of buildings.list) {
+      const g = ensureView(b);
+      if (!g) continue;
+
+      if (!b.alive) { g.visible = false; continue; }
+      g.visible = true;
+
+      // Construction: the pad emerges from the ground. Below `built`=1 it's sunk,
+      // and the terrain (drawn in front, depthwise) hides the buried part, so it
+      // reads as rising out of the earth rather than scaling in mid-air.
+      const rise = (1 - b.built) * (g.userData.height + 1.5);
+      g.position.set(b.position.x, b.position.y - rise, b.position.z);
+
+      // Corner lights pulse while it's actively producing (something on the pad).
+      const producing = !b.constructing && b.queue.length > 0;
+      const pulse = producing ? 0.6 + 0.4 * Math.sin(_t * 6) : 0.18;
+      for (const L of g.userData.lights) L.scale.setScalar(pulse + 0.5);
+    }
+  }
+
+  return {
+    sync,
+    dispose() {
+      for (const g of views.values()) scene.remove(g);
+      views.clear();
+    },
+  };
+}

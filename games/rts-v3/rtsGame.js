@@ -26,6 +26,8 @@ import { createStructuresRenderer } from "./structuresRenderer.js";
 import { createHealthBarField } from "./healthBar.js";
 import { createWaves } from "./waves.js";
 import { createWaveHud } from "./waveHud.js";
+import { createBuildings } from "./buildings.js";
+import { createBuildingRenderer } from "./buildingRenderer.js";
 import { createCombatFx } from "./combatFx.js";
 import { createCombat } from "./combat.js";
 import { createProjectiles } from "./projectiles.js";
@@ -126,6 +128,13 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   const unitRenderer = await createUnitRenderer({ app, units, healthBars });
   app.unitRenderer = unitRenderer;
 
+  // Player-built buildings (helipad, …): runtime structures the builder raises.
+  // They live in structures.list too, so combat/selection see them for free.
+  const buildings = createBuildings({ app, structures, units });
+  app.buildings = buildings;
+  const buildingRenderer = createBuildingRenderer({ app, buildings });
+  app.buildingRenderer = buildingRenderer;
+
   // Combat: units fire VISIBLE rockets with exhaust trails; damage lands on
   // impact. Wrecks catch fire. All of it glows via the engine's emissive MRT.
   const fx = createCombatFx({ app });
@@ -183,6 +192,7 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
       { key: "soldier", label: "Build Soldier" },
       { key: "jeep", label: "Build Jeep" },
       { key: "helicopter", label: "Build Heli" },
+      { key: "builder", label: "Build Builder" },
     ],
     onBuild: (key) => structures.base.enqueue(key),
     onStop: () => { for (const u of app.selection?.selected ?? []) u.stop?.(); },
@@ -261,12 +271,14 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
     rtsCamera.update(dt);
     waves.update(dt);                     // spawn the next wave, keep them marching
     structures.updateProduction(dt, (key, x, z) => units.spawn(key, x, z));
+    buildings.update(dt);                 // construction ramp + helipad production
     units.update(dt);
     combat.update(dt);                    // acquire → chase → launch rockets
     projectiles.update(dt, app.camera);   // rockets fly, trail, and land damage
     healthBars.begin();                   // both renderers push their bars into it
     unitRenderer.sync(dt, app.camera);
     structuresRenderer.sync(dt, app.camera);
+    buildingRenderer.sync(dt);
     healthBars.commit();
     fx.update(dt, app.camera);            // muzzle / impact / explosion
     fire.update(dt, elapsed);             // burning wrecks

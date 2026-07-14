@@ -56,6 +56,29 @@ export const UNIT_TYPES = {
     barY: 4,
     castShadow: true,
   },
+  builder: {
+    typeKey: "builder",
+    name: "Builder",
+    // logic — a mobile engineer. Slow, tough-ish, UNARMED: it constructs, it
+    // doesn't fight. `builds` lists the building keys it can raise (buildings.js).
+    isAir: false,
+    hover: 0,
+    speed: 16,
+    radius: 3.6,
+    turnRate: 3.0,
+    maxHp: 160,
+    range: 0,          // no weapon — combat.js skips anything with range 0
+    builds: ["helipad"],
+    // render
+    url: "/models/rts/truckmilitary_compressed.glb",
+    targetLength: 6,
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 4.4,
+    barWidth: 5,
+    barY: 4.5,
+    castShadow: true,
+  },
 };
 
 UNIT_TYPES.soldier = {

@@ -165,6 +165,7 @@ export function createStructuresRenderer({ app, structures, healthBars }) {
     let tri = 0;
     for (const s of structures.list) {
       if (!s.alive) continue;
+      if (s.isBuilding) continue; // runtime buildings have their own renderer
       const g = bodyGeoOf(s).clone();
       g.translate(s.position.x, s.position.y, s.position.z);
       parts.push(g);
@@ -270,7 +271,7 @@ export function createStructuresRenderer({ app, structures, healthBars }) {
     // a cheap signature catches both without rebuilding every frame.
     let key = "";
     for (const s of structures.list) {
-      if (s.alive) key += `${s.position.x.toFixed(1)},${s.position.z.toFixed(1)};`;
+      if (s.alive && !s.isBuilding) key += `${s.position.x.toFixed(1)},${s.position.z.toFixed(1)};`;
     }
     if (key !== staticKey) {
       staticKey = key;
@@ -282,6 +283,7 @@ export function createStructuresRenderer({ app, structures, healthBars }) {
 
     for (const s of structures.list) {
       if (!s.alive) continue;
+      if (s.isBuilding) continue; // rendered by buildingRenderer
 
       if (s.typeKey === "base") {
         _m.compose(
