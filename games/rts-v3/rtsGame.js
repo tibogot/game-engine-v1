@@ -24,6 +24,8 @@ import { createDevPanel } from "./devPanel.js";
 import { createStructures } from "./structures.js";
 import { createStructuresRenderer } from "./structuresRenderer.js";
 import { createHealthBarField } from "./healthBar.js";
+import { createWaves } from "./waves.js";
+import { createWaveHud } from "./waveHud.js";
 import { createCombatFx } from "./combatFx.js";
 import { createCombat } from "./combat.js";
 import { createProjectiles } from "./projectiles.js";
@@ -151,6 +153,16 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   combatRef = combat;
   app.combat = combat;
 
+  // The opponent. Enemy waves muster off-map, march on the base, and fight — all
+  // of it through the EXISTING combat system, which is team-based and never knew
+  // the difference. They also cost no draw calls: enemy units join the same
+  // instanced fields / compute-skinned crowd as ours, tinted per instance.
+  const waves = createWaves({ app, units, structures, navGrid });
+  app.waves = waves;
+
+  const waveHud = createWaveHud();
+  app.waveHud = waveHud;
+
   // Player-facing HUD: bottom-center bar shows the selected units as baked
   // 3D thumbnail tiles (grouped by type + count).
   //   click     → select only that type (from the current selection)
@@ -247,6 +259,7 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
     elapsed += dt;
 
     rtsCamera.update(dt);
+    waves.update(dt);                     // spawn the next wave, keep them marching
     structures.updateProduction(dt, (key, x, z) => units.spawn(key, x, z));
     units.update(dt);
     combat.update(dt);                    // acquire → chase → launch rockets
@@ -258,6 +271,7 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
     fx.update(dt, app.camera);            // muzzle / impact / explosion
     fire.update(dt, elapsed);             // burning wrecks
     commandCard.tick();                   // live production bar
+    waveHud.update(dt, waves);            // wave counter, countdown, defeat
     minimap.draw();
 
     app._rtsRaf = requestAnimationFrame(tick);
