@@ -65,7 +65,7 @@ function loadGltf(url) {
 }
 
 /** Normalise a model into a reusable template and rename its rotor meshes. */
-function buildTemplate(gltf, { targetLength, targetHeight, excludeRotorsFromBox }) {
+function buildTemplate(gltf, { targetLength, targetHeight, excludeRotorsFromBox, castShadow = true }) {
   const root = new THREE.Group();
   const holder = new THREE.Group();
   holder.add(gltf);
@@ -94,7 +94,10 @@ function buildTemplate(gltf, { targetLength, targetHeight, excludeRotorsFromBox 
   let rotors = 0;
   root.traverse((o) => {
     if (!o.isMesh) return;
-    o.castShadow = true;
+    // Shadow-cast policy lives on the unit TYPE (unitTypes.js): the shadow pass
+    // redraws every caster once per CSM cascade, so a caster nobody can see still
+    // costs 3 draws.
+    o.castShadow = castShadow;
     o.receiveShadow = true;
     const kind = rotorKind(o, root);
     if (kind === "main") { o.name = "MainRotor"; rotors++; }
@@ -199,7 +202,7 @@ function mergeTemplateParts(root) {
     } else {
       merged = new THREE.Mesh(geo, mat);
     }
-    merged.castShadow = true;
+    merged.castShadow = first.castShadow; // inherit the type's shadow policy
     merged.receiveShadow = true;
 
     const parent = first.parent;
@@ -265,7 +268,7 @@ function buildInstancedType(tpl, scene) {
 
     const im = new THREE.InstancedMesh(o.geometry, refreshingMaterial(o.material), MAX_PER_TYPE);
     im.count = 0;
-    im.castShadow = true;
+    im.castShadow = o.castShadow; // the type's shadow policy, set on the template
     im.receiveShadow = true;
     im.frustumCulled = false; // instances live anywhere; the shared bounds are meaningless
 
@@ -332,6 +335,7 @@ export async function createUnitRenderer({ app, units, healthBars }) {
         targetLength: t.targetLength,
         targetHeight: t.targetHeight,
         excludeRotorsFromBox: t.excludeRotorsFromBox,
+        castShadow: t.castShadow !== false,
       }),
       animations: loaded[i].animations,
       skinned: !!t.skinned,

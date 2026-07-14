@@ -26,6 +26,7 @@ export const UNIT_TYPES = {
     ringRadius: 9,
     barWidth: 8,
     barY: 9,
+    castShadow: true, // big, and the ground shadow reads as an altitude cue
   },
   jeep: {
     typeKey: "jeep",
@@ -53,6 +54,7 @@ export const UNIT_TYPES = {
     ringRadius: 4,
     barWidth: 4.5,
     barY: 4,
+    castShadow: true,
   },
 };
 
@@ -81,6 +83,14 @@ UNIT_TYPES.soldier = {
   ringRadius: 2.2,
   barWidth: 3,
   barY: 2.8,
+  // A 1.9 m man at RTS zoom casts a shadow a few pixels wide — you cannot see it,
+  // but the shadow pass draws him once PER CASCADE (3), so six soldiers cost 18
+  // draw calls to render nothing. Vehicles are big enough that their shadows read,
+  // so they keep theirs. (Measured: 92 → 72 draws, no visible difference.)
+  //
+  // Worth revisiting when the soldiers move to compute skinning: the whole crowd
+  // becomes ONE mesh, so 1000 of them would cost the same 3 shadow draws.
+  castShadow: false,
 };
 
 export const UNIT_TYPE_KEYS = Object.keys(UNIT_TYPES);

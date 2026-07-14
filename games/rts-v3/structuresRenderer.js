@@ -95,7 +95,9 @@ function buildBase() {
     makeBloomMaterial({ color: 0x64d2ff, blending: THREE.NormalBlending, depthWrite: true, transparent: false }, BLOOM.beacon),
   );
   beacon.position.y = 21;
-  beacon.castShadow = true;
+  // No shadow: it's an emissive lamp (a light source casting a shadow of itself
+  // reads as a bug), and the shadow pass would redraw it once per CSM cascade.
+  beacon.castShadow = false;
   g.add(beacon);
 
   return g;
@@ -140,7 +142,7 @@ function buildTurret() {
     makeBloomMaterial({ color: 0xff4a3a, blending: THREE.NormalBlending, depthWrite: true, transparent: false }, BLOOM.beacon),
   );
   eye.position.set(0, 0.95, 1.1);
-  eye.castShadow = true;
+  eye.castShadow = false; // emissive — same reason as the base's beacon
   head.add(eye);
 
   return { group: g, head, muzzleLocal: new THREE.Vector3(0, 0.2, 5.1) };
