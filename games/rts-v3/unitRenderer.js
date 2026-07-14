@@ -267,9 +267,14 @@ function buildInstancedType(tpl, scene) {
   root.traverse((o) => {
     if (!o.isMesh) return;
 
+    const kind = o.name === "MainRotor" ? "main" : o.name === "TailRotor" ? "tail" : null;
+
     const im = new THREE.InstancedMesh(o.geometry, refreshingMaterial(o.material), MAX_PER_TYPE);
     im.count = 0;
-    im.castShadow = o.castShadow; // the type's shadow policy, set on the template
+    // The type's shadow policy (unitTypes.js) — except ROTORS, which never cast.
+    // A rotor is a thin disc spinning at 28 rad/s: its shadow is visual noise, and
+    // each instanced part is a full caster redrawn once per CSM cascade.
+    im.castShadow = o.castShadow && kind === null;
     im.receiveShadow = true;
     im.frustumCulled = false; // instances live anywhere; the shared bounds are meaningless
 
@@ -284,7 +289,6 @@ function buildInstancedType(tpl, scene) {
 
     scene.add(im);
 
-    const kind = o.name === "MainRotor" ? "main" : o.name === "TailRotor" ? "tail" : null;
     const part = { im, kind };
     if (kind) {
       // A rotor spins about ITS OWN pivot, so we rebuild its local matrix per

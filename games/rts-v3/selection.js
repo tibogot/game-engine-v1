@@ -62,12 +62,12 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     const soldier = pickCrowdUnit?.(clientX, clientY, camera, rect);
     if (soldier?.alive) return soldier;
     // Nothing under the cursor — try our own buildings (the base is commandable).
+    // Structures are instanced per kind now, so a hit names its structure by
+    // instanceId, exactly like the units.
     if (structuresRenderer) {
       const sHits = raycaster.intersectObjects(structuresRenderer.roots, true);
       for (const h of sHits) {
-        let o = h.object;
-        while (o && !structuresRenderer.structureByMesh.get(o)) o = o.parent;
-        const s = o && structuresRenderer.structureByMesh.get(o);
+        const s = structuresRenderer.structureFromHit(h);
         if (s?.alive && s.team === "player") return s;
       }
     }
@@ -163,9 +163,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     raycaster.setFromCamera(ndc, camera);
     const hits = raycaster.intersectObjects(structuresRenderer.roots, true);
     for (const h of hits) {
-      let o = h.object;
-      while (o && !structuresRenderer.structureByMesh.get(o)) o = o.parent;
-      const s = o && structuresRenderer.structureByMesh.get(o);
+      const s = structuresRenderer.structureFromHit(h);
       if (s?.alive && s.team === "enemy") return s;
     }
     return null;
