@@ -340,14 +340,10 @@ function buildCrowdType(tpl, type, app, scene) {
     animRoot: root,
     clips: { idle, run },
     max: MAX_CROWD,
-    // Follows the type's shadow policy (unitTypes.js — soldiers: off), and there's
-    // a second reason to leave it off here:
-    //
-    // The crowd's vertices are posed in the COMPUTE pass, but the shadow depth pass
-    // still offsets by `normalBias` along the geometry's BIND-POSE normals. Those
-    // don't match the skinned surface, so the offset goes the wrong way and every
-    // soldier lands inside his own shadow — they render pitch black. Turning shadow
-    // casting back on needs that bias problem solved first.
+    // The shadow pass picks up the compute-skinned positions for free: it renders
+    // the object with an override material but keeps the material's `positionNode`
+    // (Renderer._getShadowNodes), so the crowd casts its real animated silhouette.
+    // Costs 3 draws (one per CSM cascade) for the ENTIRE crowd, 6 soldiers or 106.
     castShadow: type.castShadow !== false,
   });
 

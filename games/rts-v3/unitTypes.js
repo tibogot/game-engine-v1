@@ -83,14 +83,13 @@ UNIT_TYPES.soldier = {
   ringRadius: 2.2,
   barWidth: 3,
   barY: 2.8,
-  // A 1.9 m man at RTS zoom casts a shadow a few pixels wide — you cannot see it,
-  // but the shadow pass draws him once PER CASCADE (3), so six soldiers cost 18
-  // draw calls to render nothing. Vehicles are big enough that their shadows read,
-  // so they keep theirs. (Measured: 92 → 72 draws, no visible difference.)
-  //
-  // Worth revisiting when the soldiers move to compute skinning: the whole crowd
-  // becomes ONE mesh, so 1000 of them would cost the same 3 shadow draws.
-  castShadow: false,
+  // Soldiers cast shadows again. They were switched off when each one was his own
+  // SkinnedMesh: the shadow pass redraws every caster once per CSM cascade, so six
+  // soldiers cost 18 draws. Now the whole crowd is ONE compute-skinned mesh
+  // (crowdSkinning.js), so its shadow costs 3 draws — MEASURED IDENTICAL at 6 and
+  // at 106 soldiers. Shadows are what ground infantry on the terrain, and they're
+  // now free, so there's no reason to skip them.
+  castShadow: true,
 };
 
 export const UNIT_TYPE_KEYS = Object.keys(UNIT_TYPES);
