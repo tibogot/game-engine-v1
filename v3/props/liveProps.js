@@ -1,11 +1,6 @@
-// Re-export v2's production-quality live prop factories directly.
-// v2/core/props/flagFactory.js  → real Verlet cloth simulation flag
-// v2/core/props/collectibleFactory.js → glow-material coin/heart/key with shared geometry
+// Live (animated) props that still need one THREE.Group per instance.
+// v2/core/props/flagFactory.js → real Verlet cloth simulation flag
+//
+// Collectibles are NOT here: coin/heart/key/GLB collectibles are GPU-instanced by
+// props/collectibles.js + props/collectibleField.js, one draw call per kind.
 export { createFlagProp as createFlag } from "../../v2/core/props/flagFactory.js";
-export {
-  createCoinProp  as createCoin,
-  createHeartProp as createHeart,
-  createKeyProp   as createKey,
-  registerGlbCollectibleKind,
-  COLLECTIBLE_KINDS,
-} from "../../v2/core/props/collectibleFactory.js";

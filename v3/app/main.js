@@ -51,9 +51,16 @@ import { PropInstancer, MAX_PROP_INSTANCES_PER_MESH } from "../tools/propInstanc
 import { PropSystem } from "../tools/propSystem.js";
 import { PropPlacementPreview } from "../tools/propPlacementPreview.js";
 import { LivePropManager } from "../tools/livePropManager.js";
-import { createFlag, createCoin, createHeart, createKey } from "../props/liveProps.js";
+import { createFlag } from "../props/liveProps.js";
 import { FLAG_DEFAULTS } from "../../v2/core/props/flagFactory.js";
-import { COIN_DEFAULTS, HEART_DEFAULTS, KEY_DEFAULTS } from "../../v2/core/props/collectibleFactory.js";
+import {
+  COIN_DEFAULTS, HEART_DEFAULTS, KEY_DEFAULTS,
+  registerGlbCollectibleKind, isCollectibleFactoryId, buildCollectibleGhostGroup,
+  collectibleUniforms,
+} from "../props/collectibles.js";
+import { createCollectibleRuntime } from "../play/collectibleRuntime.js";
+import { createCollectibleBurst } from "../../v2/effects/collectibleBurst.js";
+import { createCollectibleSfx } from "../../v2/play/collectibleSfx.js";
 import {
   PROCEDURAL_PROP_DEFS,
   PROCEDURAL_PROP_LABELS,
@@ -1588,6 +1595,7 @@ export async function startV3App(opts = {}) {
     snowSystem.setPlayMode(true);
     snowSystem.setDeformActive(false);
     playMode.enter({ editorRelaxedPointer: !immersive });
+    collectibleRuntime?.start();
     try { renderer.domElement.focus({ preventScroll: true }); } catch (_) { renderer.domElement.focus(); }
     syncPlayEditorChrome(immersive);
     if (immersive) playMode.startWalking();
@@ -1624,6 +1632,7 @@ export async function startV3App(opts = {}) {
     playPhysicsUi?.setVisible(false);
     playFlightUi?.setVisible(false);
     flyHud?.setVisible(false);
+    collectibleRuntime?.stop();
     playMode.exit();
     setEditorMode(editorMode, { force: true });  // restore whatever panel was active
   }
@@ -2142,6 +2151,8 @@ export async function startV3App(opts = {}) {
   const _noopUpdate = { update() {} };
   let propInstancer = _noopUpdate;
   let livePropManager = _noopUpdate;
+  let collectibleRuntime = null;
+  let collectibleBurst = null;
   // splineSys assigned below (SplineSystem); starts as noop until wired.
   if (!splineSys) splineSys = _noopUpdate;
   let propLod = { lod0Distance: 60, lod1Distance: 150, fadeOutDistance: 500, castShadow: true };
@@ -2229,6 +2240,8 @@ export async function startV3App(opts = {}) {
         }
         if (_hasLocalSnow) snowSystem.tick(pp.x, pp.z, _snowGrounded, _snowContacts);
         snowSystem.updateSunDir(worldEnv?.getSunDir?.());
+
+        collectibleRuntime?.update(dt, pp, _mm);
       } else {
         if (isPainting && editorMode === "sculpt") {
           const hit = getUV();
@@ -3537,11 +3550,16 @@ export async function startV3App(opts = {}) {
   // Live prop manager — handles animated THREE.Group props
   livePropManager = new LivePropManager(scene, propStore);
   livePropManager.registerFactory("flag",  createFlag);
-  livePropManager.registerFactory("coin",  createCoin);
-  livePropManager.registerFactory("heart", createHeart);
-  livePropManager.registerFactory("key",   createKey);
 
   registerProceduralObjectFactories(livePropManager);
+
+  // Collectibles: the field renders them (GPU-instanced), the runtime owns pickups.
+  collectibleBurst = createCollectibleBurst(scene);
+  collectibleRuntime = createCollectibleRuntime({
+    field: livePropManager.collectibles,
+    burst: collectibleBurst,
+    playSfx: createCollectibleSfx(null).play,
+  });
 
   rebakePlayerBvh = () => {
     livePropManager.update(0);
@@ -3634,7 +3652,15 @@ export async function startV3App(opts = {}) {
     setPropSlotTriplanar(slotIdx, enabled);
   }
 
-  const propPlacementPreview = new PropPlacementPreview(scene, propStore, buildProceduralPreviewGroup);
+  // Ghost for Place mode: collectibles build theirs from the kind registry, everything else
+  // falls back to the procedural-object preview builder.
+  const propPlacementPreview = new PropPlacementPreview(
+    scene,
+    propStore,
+    (factoryId) => (isCollectibleFactoryId(factoryId)
+      ? buildCollectibleGhostGroup(factoryId)
+      : buildProceduralPreviewGroup(factoryId)),
+  );
 
   let _lastMouseEvent = null;
   let _propPainting = false;
@@ -3993,6 +4019,72 @@ export async function startV3App(opts = {}) {
     });
   }
 
+  /**
+   * Import a GLB as a collectible kind. Its submeshes join the GPU collectible field, so every
+   * placed copy is drawn by the same handful of instanced calls and picked up by the same runtime
+   * as the built-in coin/heart/key.
+   */
+  async function importGlbCollectible(preselectedFile = null) {
+    const handle = (file) => new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const name = file.name.replace(/\.[^.]+$/, "");
+      gltfLoader.load(url, (gltf) => {
+        URL.revokeObjectURL(url);
+        try {
+          // Flatten the GLB hierarchy: each mesh, with its place in the tree baked to a matrix.
+          const submeshes = [];
+          gltf.scene.updateMatrixWorld(true);
+          const rootInv = new THREE.Matrix4().copy(gltf.scene.matrixWorld).invert();
+          gltf.scene.traverse((child) => {
+            if (!child.isMesh || !child.geometry) return;
+            submeshes.push({
+              geometry: child.geometry,
+              material: child.material,
+              localMatrix: new THREE.Matrix4().multiplyMatrices(rootInv, child.matrixWorld),
+            });
+          });
+          if (submeshes.length === 0) throw new Error("No meshes in GLTF");
+
+          const spec = registerGlbCollectibleKind(name, submeshes);
+          const typeIdx = propStore.registerLiveType(spec.name, spec.kind, spec.defaults);
+          propInstancer.onTypeRegistered(typeIdx);
+          const slotIdx = propSlots.length;
+          propSlots.push({
+            name: spec.name,
+            loaded: true,
+            typeIdx,
+            live: true,
+            factoryId: spec.kind,
+            collectible: true,
+            glbFile: file.name,
+          });
+          propState.activeSlot = slotIdx;
+          document.getElementById("props-panel")?._rebuildPropUi?.();
+          console.log(
+            `[V3] GLB collectible "${spec.name}" imported — kind "${spec.kind}", `
+            + `${spec.parts.length} draw call(s)`,
+          );
+          resolve(typeIdx);
+        } catch (err) { reject(err); }
+      }, undefined, (err) => { URL.revokeObjectURL(url); reject(err); });
+    });
+
+    if (preselectedFile) return handle(preselectedFile);
+    return new Promise((resolve) => {
+      const inp = document.createElement("input");
+      inp.type = "file";
+      inp.accept = ".glb,.gltf";
+      inp.addEventListener("change", async () => {
+        if (!inp.files?.length) { resolve(null); return; }
+        resolve(await handle(inp.files[0]).catch((err) => {
+          console.error("[V3] GLB collectible import failed:", err);
+          return null;
+        }));
+      });
+      inp.click();
+    });
+  }
+
   function addPrimitive(primitiveName) {
     const existing = propSlots.find((s) => s.name === primitiveName && s.builtin);
     if (existing) {
@@ -4241,9 +4333,7 @@ export async function startV3App(opts = {}) {
     removePropSlot,
     setPropSlotSolid,
     importPropLod,
-    importGlbCollectible: async () => {
-      console.warn("[V3] GLB collectibles not ported yet — use Flag/Coin/Heart/Key live props.");
-    },
+    importGlbCollectible,
     setPropSlotMaterial,
     setPropSlotTriplanar,
     setPrimitiveMaterial,
@@ -5613,6 +5703,21 @@ export async function startV3App(opts = {}) {
     // Player start saved with the project — { x, y, z, yaw } or null. A game can
     // read it to drop its own camera/units in where the level designer intended.
     getSpawnPoint: () => spawnSystem.getSpawn(),
+
+    /**
+     * Collectibles gameplay hook.
+     *   app.collectibles.onPickup((kind, instIdx, position, kindCount) => { ... })
+     *   app.collectibles.getCounts()  → { coin: 3, heart: 1 }
+     */
+    collectibles: {
+      onPickup: (cb) => collectibleRuntime?.onPickup(cb),
+      offPickup: (cb) => collectibleRuntime?.offPickup(cb),
+      getCounts: () => collectibleRuntime?.getCountsByKind() ?? {},
+      getTotal: () => collectibleRuntime?.getCollectedCount() ?? 0,
+      /** How hard collectibles blaze into the selective-bloom buffer (needs Post FX on). */
+      getBloom: () => collectibleUniforms.bloom.value,
+      setBloom: (v) => { collectibleUniforms.bloom.value = v; },
+    },
 
     // ── Terrain modification ──────────────────────────────────────────────────
     /**
