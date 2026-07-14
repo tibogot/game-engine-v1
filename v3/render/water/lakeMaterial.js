@@ -376,7 +376,15 @@ export function createLakeMaterial({ normalMap, params = {}, uvMode = "world", r
   };
 
   const material = new MeshBasicNodeMaterial();
-  material.fog         = false;
+  // Water is part of the world, so it recedes into the atmosphere like everything
+  // else. With fog off, a distant lake stayed saturated teal while the hills behind
+  // it washed out to haze — it read as a hole in the fog rather than a surface in it.
+  //
+  // The one inaccuracy: what you see THROUGH the water was already fogged when the
+  // terrain was drawn into the backbuffer we grab, so the refracted part gets fog
+  // applied twice. It doesn't show — near the camera the fog term is tiny, and far
+  // away the water and the riverbed under it both converge on the fog colour anyway.
+  material.fog         = true;
   material.transparent = false;   // we composite against the grabbed backbuffer ourselves
   material.depthWrite  = false;   // see note 5 — the surface overhangs land
   material.depthTest   = true;
