@@ -1,135 +1,152 @@
 // Structures RENDERER — procedural geometry for the base and enemy turrets.
 // Mirrors unitRenderer: all visuals here, logic stays mesh-free in structures.js.
+//
+// Every structure is built from a handful of boxes and cylinders, and it NEVER
+// changes shape. So the parts are MERGED into one geometry per rigid piece, with
+// the per-part color baked into a vertex-color attribute: the base went from 9
+// draws to 2, a turret from 5 to 3. Only pieces that must move independently stay
+// separate — the turret head (it yaws at its target) and the glowing beacon/eye
+// (a different, emissive-MRT material).
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materialColor } from "three/tsl";
-import { makeHealthBar } from "./healthBar.js";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
 
 export const structureByMesh = new WeakMap();
 
+const C_BODY = 0x5a6472;
+const C_DARK = 0x333a45;
+const C_ENEMY = 0x6e4a4a;
+const C_MARK = 0xff6a3a;
+
 /**
- * Structures never move, and that makes them a trap for scene-level fog.
+ * The shared material for every merged structure piece.
  *
- * three's NodeMaterialObserver only re-uploads a render object's uniforms when
- * the material carries a node, the mesh is skinned, or its world matrix /
- * material properties changed. Everything else is treated as static and keeps
- * the uniform buffer it was first rendered with — including the scene fogNode's
- * uniforms. A plain material on a never-moving mesh therefore FREEZES the fog it
- * booted with: toggle height fog off and the base and turret bodies stay stuck
- * in the old mist while the terrain and the (moving) units clear up.
+ * `vertexColors` carries the per-part color that used to live in one material per
+ * part (three multiplies colorNode by the vertex color).
  *
- * A node material with a `colorNode` flips the observer to "always refresh".
- * `materialColor` just reads the material's own color uniform, so `.color` still
- * works exactly as before.
+ * The `colorNode` is NOT cosmetic: structures never move, and three's
+ * NodeMaterialObserver only re-uploads a render object's uniforms when the
+ * material carries a node, the mesh is skinned, or its matrix / material
+ * properties changed. A plain material on a never-moving mesh therefore FREEZES
+ * the scene fogNode uniforms it first rendered with — toggle height fog off and
+ * the base stays stuck in the old mist. A colorNode flips the observer to "always
+ * refresh"; `materialColor` just reads the material's own (white) color uniform.
  */
-const _standardMat = (params) => {
-  const m = new THREE.MeshStandardNodeMaterial(params);
+function makeStructureMaterial() {
+  const m = new THREE.MeshStandardNodeMaterial({
+    color: 0xffffff, // white: the vertex colors ARE the color
+    roughness: 0.87,
+    metalness: 0.18,
+    vertexColors: true,
+  });
   m.colorNode = materialColor;
   return m;
-};
+}
 
-const _matBody = () => _standardMat({ color: 0x5a6472, roughness: 0.85, metalness: 0.15 });
-const _matDark = () => _standardMat({ color: 0x333a45, roughness: 0.9, metalness: 0.2 });
-const _matEnemy = () => _standardMat({ color: 0x6e4a4a, roughness: 0.85, metalness: 0.2 });
+/** Tag every vertex of `geo` with `hex`, so merged parts keep their colors. */
+function paint(geo, hex) {
+  const c = new THREE.Color(hex); // already in linear working space
+  const n = geo.attributes.position.count;
+  const arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    arr[i * 3] = c.r;
+    arr[i * 3 + 1] = c.g;
+    arr[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(arr, 3));
+  return geo;
+}
+
+/**
+ * Merge painted parts into one shadow-casting mesh.
+ *
+ * mergeGeometries returns null on ANY attribute mismatch, so an untagged part
+ * would silently delete the whole structure — assert instead of shipping a
+ * missing base.
+ */
+function mergePainted(parts, name) {
+  const geo = mergeGeometries(parts, false);
+  if (!geo) throw new Error(`[rts-v3] ${name}: mergeGeometries failed (attribute mismatch)`);
+  const mesh = new THREE.Mesh(geo, makeStructureMaterial());
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
 
 /** Procedural player HQ: platform, main block, corner pillars, glowing beacon. */
 function buildBase() {
   const g = new THREE.Group();
-  const body = _matBody(), dark = _matDark();
 
-  const platform = new THREE.Mesh(new THREE.CylinderGeometry(15, 16.5, 1.6, 24), dark);
-  platform.position.y = 0.8;
-  g.add(platform);
-
-  const block = new THREE.Mesh(new THREE.BoxGeometry(16, 9, 16), body);
-  block.position.y = 6;
-  g.add(block);
-
-  const upper = new THREE.Mesh(new THREE.BoxGeometry(10, 4, 10), body);
-  upper.position.y = 12.5;
-  g.add(upper);
-
+  const parts = [
+    paint(new THREE.CylinderGeometry(15, 16.5, 1.6, 24).translate(0, 0.8, 0), C_DARK),
+    paint(new THREE.BoxGeometry(16, 9, 16).translate(0, 6, 0), C_BODY),
+    paint(new THREE.BoxGeometry(10, 4, 10).translate(0, 12.5, 0), C_BODY),
+    paint(new THREE.CylinderGeometry(0.35, 0.35, 6, 8).translate(0, 17.5, 0), C_DARK), // beacon mast
+  ];
   for (const [px, pz] of [[-7.5, -7.5], [7.5, -7.5], [-7.5, 7.5], [7.5, 7.5]]) {
-    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.6, 13, 10), dark);
-    pillar.position.set(px, 6.5, pz);
-    g.add(pillar);
+    parts.push(paint(new THREE.CylinderGeometry(1.3, 1.6, 13, 10).translate(px, 6.5, pz), C_DARK));
   }
+  g.add(mergePainted(parts, "base"));
 
-  // Beacon mast + glowing tip (writes to the emissive buffer → blooms).
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 6, 8), dark);
-  mast.position.y = 17.5;
-  g.add(mast);
+  // Beacon tip stays its own mesh — emissive MRT material (it blooms).
   const beacon = new THREE.Mesh(
     new THREE.SphereGeometry(1.1, 14, 10),
     makeBloomMaterial({ color: 0x64d2ff, blending: THREE.NormalBlending, depthWrite: true, transparent: false }, BLOOM.beacon),
   );
   beacon.position.y = 21;
+  beacon.castShadow = true;
   g.add(beacon);
 
-  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return g;
 }
 
 /** Unarmed practice target — bright so it's easy to spot near the base. */
 function buildTrainingDummy() {
   const g = new THREE.Group();
-  const body = _matEnemy();
-  const mark = _standardMat({ color: 0xff6a3a, roughness: 0.75, metalness: 0.1 });
-
-  const pad = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.6, 0.5, 12), _matDark());
-  pad.position.y = 0.25;
-  g.add(pad);
-
-  const crate = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3), body);
-  crate.position.y = 2;
-  g.add(crate);
-
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.5, 3.1), mark);
-  stripe.position.y = 2.8;
-  g.add(stripe);
-
-  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  g.add(mergePainted([
+    paint(new THREE.CylinderGeometry(2.2, 2.6, 0.5, 12).translate(0, 0.25, 0), C_DARK),
+    paint(new THREE.BoxGeometry(3, 3, 3).translate(0, 2, 0), C_ENEMY),
+    paint(new THREE.BoxGeometry(3.1, 0.5, 3.1).translate(0, 2.8, 0), C_MARK),
+  ], "trainingDummy"));
   return g;
 }
 
 /** Procedural enemy turret: base, rotating head + barrel, glowing eye. */
 function buildTurret() {
   const g = new THREE.Group();
-  const body = _matEnemy(), dark = _matDark();
 
-  const pad = new THREE.Mesh(new THREE.CylinderGeometry(4, 4.6, 1.2, 16), dark);
-  pad.position.y = 0.6;
-  g.add(pad);
+  g.add(mergePainted([
+    paint(new THREE.CylinderGeometry(4, 4.6, 1.2, 16).translate(0, 0.6, 0), C_DARK),
+    paint(new THREE.CylinderGeometry(2, 2.4, 3.5, 12).translate(0, 2.8, 0), C_ENEMY),
+  ], "turret"));
 
-  const column = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.4, 3.5, 12), body);
-  column.position.y = 2.8;
-  g.add(column);
-
-  // Head is a child group so we can yaw it toward the target.
+  // Head is a child group so we can yaw it toward the target — so its geometry
+  // merges separately from the static pedestal.
   const head = new THREE.Group();
   head.position.y = 5.2;
   g.add(head);
 
-  const housing = new THREE.Mesh(new THREE.BoxGeometry(3.4, 2.4, 3.6), body);
-  head.add(housing);
-
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.42, 5, 10), dark);
-  barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 0.2, 2.6); // points along +Z of the head
-  head.add(barrel);
+  const barrel = paint(new THREE.CylinderGeometry(0.36, 0.42, 5, 10), C_DARK);
+  barrel.rotateX(Math.PI / 2);          // lay it along +Z
+  barrel.translate(0, 0.2, 2.6);        // …pointing out of the head
+  head.add(mergePainted([
+    paint(new THREE.BoxGeometry(3.4, 2.4, 3.6), C_ENEMY),
+    barrel,
+  ], "turretHead"));
 
   const eye = new THREE.Mesh(
     new THREE.SphereGeometry(0.45, 12, 8),
     makeBloomMaterial({ color: 0xff4a3a, blending: THREE.NormalBlending, depthWrite: true, transparent: false }, BLOOM.beacon),
   );
   eye.position.set(0, 0.95, 1.1);
+  eye.castShadow = true;
   head.add(eye);
 
-  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return { group: g, head, muzzleLocal: new THREE.Vector3(0, 0.2, 5.1) };
 }
 
-export function createStructuresRenderer({ app, structures }) {
+export function createStructuresRenderer({ app, structures, healthBars }) {
   const { scene } = app;
   const views = new Map();
   const roots = [];
@@ -147,10 +164,9 @@ export function createStructuresRenderer({ app, structures }) {
     group.position.set(s.position.x, s.position.y, s.position.z);
     group.traverse((o) => { if (o.isMesh) structureByMesh.set(o, s); });
 
-    const bar = makeHealthBar(s.type.barWidth ?? 6);
-    scene.add(group, bar.group);
+    scene.add(group);
     roots.push(group);
-    views.set(s, { group, head, muzzleLocal, bar });
+    views.set(s, { group, head, muzzleLocal });
   }
 
   const _muzzleWorld = new THREE.Vector3();
@@ -172,7 +188,6 @@ export function createStructuresRenderer({ app, structures }) {
 
       if (!s.alive) {
         v.group.visible = false;
-        v.bar.group.visible = false;
         continue;
       }
 
@@ -188,11 +203,13 @@ export function createStructuresRenderer({ app, structures }) {
         v.head.rotation.y = s.turretYaw;
       }
 
-      const frac = THREE.MathUtils.clamp(s.hp / s.maxHp, 0, 1);
-      v.bar.set(
-        frac, camera,
+      // Health bar — one instance in the shared field (see healthBar.js).
+      healthBars.add(
         s.position.x, s.position.y + (s.type.barY ?? 10), s.position.z,
+        s.type.barWidth ?? 6,
+        s.hp / s.maxHp,
         s.team === "enemy",
+        camera,
       );
     }
   }
@@ -203,7 +220,7 @@ export function createStructuresRenderer({ app, structures }) {
     muzzleOf,
     sync,
     dispose() {
-      for (const v of views.values()) scene.remove(v.group, v.bar.group);
+      for (const v of views.values()) scene.remove(v.group);
       views.clear();
     },
   };

@@ -117,27 +117,7 @@ function makeSelectionRing(radius, color = 0x6ab0ff) {
   return ring;
 }
 
-/** Camera-facing health bar: dark backing + fill anchored on its left edge. */
-function makeHealthBar(width, height = 0.55) {
-  const group = new THREE.Group();
-  const bg = new THREE.Mesh(
-    new THREE.PlaneGeometry(width + 0.18, height + 0.18),
-    new THREE.MeshBasicMaterial({ color: 0x0b0e13, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false, fog: false }),
-  );
-  bg.renderOrder = 1001;
-  group.add(bg);
-
-  const fill = new THREE.Mesh(
-    new THREE.PlaneGeometry(width, height).translate(width / 2, 0, 0), // left-anchored
-    new THREE.MeshBasicMaterial({ color: 0x3ddc60, depthTest: false, depthWrite: false, fog: false }),
-  );
-  fill.position.set(-width / 2, 0, 0.001);
-  fill.renderOrder = 1002;
-  group.add(fill);
-  return { group, fill };
-}
-
-export async function createUnitRenderer({ app, units }) {
+export async function createUnitRenderer({ app, units, healthBars }) {
   const { scene } = app;
   initGlbLoaderRenderer(app.renderer); // idempotent; wires KTX2 support
 
@@ -200,12 +180,11 @@ export async function createUnitRenderer({ app, units }) {
     const ring = makeSelectionRing(t.ringRadius);
     const ringPos = ring.geometry.attributes.position;
     const ringBase = Float32Array.from(ringPos.array); // flat XZ offsets (y = 0)
-    const bar = makeHealthBar(t.barWidth);
 
-    scene.add(root, ring, bar.group);
+    scene.add(root, ring);
     roots.push(root);
     views.set(unit, {
-      root, ring, ringPos, ringBase, bar, mainRotors, tailRotors,
+      root, ring, ringPos, ringBase, mainRotors, tailRotors,
       mixer, actions, currentAction: actions ? (actions.idle ? "idle" : Object.keys(actions)[0]) : null,
       bob: Math.random() * 6, mainAngle: Math.random() * 6, tailAngle: 0,
     });
@@ -230,7 +209,6 @@ export async function createUnitRenderer({ app, units }) {
       if (!unit.alive) {
         v.root.visible = false;
         v.ring.visible = false;
-        v.bar.group.visible = false;
         continue;
       }
 
@@ -276,12 +254,14 @@ export async function createUnitRenderer({ app, units }) {
         v.mixer.update(dt);
       }
 
-      // Health bar — billboard to the camera, above the unit.
-      const frac = THREE.MathUtils.clamp(unit.hp / unit.maxHp, 0, 1);
-      v.bar.group.position.set(p.x, p.y + (t.barY ?? 6) + bobY, p.z);
-      if (camera) v.bar.group.quaternion.copy(camera.quaternion);
-      v.bar.fill.scale.x = Math.max(1e-4, frac);
-      v.bar.fill.material.color.setHex(frac > 0.6 ? 0x3ddc60 : frac > 0.3 ? 0xf5c542 : 0xe4483a);
+      // Health bar — one instance in the shared field (see healthBar.js).
+      healthBars.add(
+        p.x, p.y + (t.barY ?? 6) + bobY, p.z,
+        t.barWidth,
+        unit.hp / unit.maxHp,
+        unit.team === "enemy",
+        camera,
+      );
 
       // Selection ring — drape over the terrain, only while shown.
       v.ring.visible = unit.selected;
@@ -303,7 +283,7 @@ export async function createUnitRenderer({ app, units }) {
     addUnit,
     sync,
     dispose() {
-      for (const v of views.values()) scene.remove(v.root, v.ring, v.bar.group);
+      for (const v of views.values()) scene.remove(v.root, v.ring);
       views.clear();
     },
   };

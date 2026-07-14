@@ -23,6 +23,7 @@ import { createCommandCard } from "./commandCard.js";
 import { createDevPanel } from "./devPanel.js";
 import { createStructures } from "./structures.js";
 import { createStructuresRenderer } from "./structuresRenderer.js";
+import { createHealthBarField } from "./healthBar.js";
 import { createCombatFx } from "./combatFx.js";
 import { createCombat } from "./combat.js";
 import { createProjectiles } from "./projectiles.js";
@@ -95,6 +96,12 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   // buildable site and flattens the ground under it. So the nav grid built above
   // (used to pick sites) is now stale — we rebuild it from the new terrain, then
   // stamp the building footprints as obstacles.
+  // Every health bar in the game — units AND structures — is one instance of a
+  // single quad, so the whole HUD costs 1 draw call (it used to be 2 meshes per
+  // entity). The renderers below push into it; the loop begins/commits it.
+  const healthBars = createHealthBarField({ scene: app.scene });
+  app.healthBars = healthBars;
+
   onStatus("Placing structures…");
   const structures = await createStructures({ app, navGrid });
   app.structures = structures;
@@ -105,7 +112,7 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
     navGrid.addObstacle(s.position.x, s.position.z, s.radius);
   }
 
-  const structuresRenderer = createStructuresRenderer({ app, structures });
+  const structuresRenderer = createStructuresRenderer({ app, structures, healthBars });
   app.structuresRenderer = structuresRenderer;
 
   // The starting army musters at the base (bottom of the map), not the origin.
@@ -114,7 +121,7 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   app.units = units;
 
   onStatus("Building unit visuals…");
-  const unitRenderer = await createUnitRenderer({ app, units });
+  const unitRenderer = await createUnitRenderer({ app, units, healthBars });
   app.unitRenderer = unitRenderer;
 
   // Combat: units fire VISIBLE rockets with exhaust trails; damage lands on
@@ -244,8 +251,10 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
     units.update(dt);
     combat.update(dt);                    // acquire → chase → launch rockets
     projectiles.update(dt, app.camera);   // rockets fly, trail, and land damage
+    healthBars.begin();                   // both renderers push their bars into it
     unitRenderer.sync(dt, app.camera);
     structuresRenderer.sync(dt, app.camera);
+    healthBars.commit();
     fx.update(dt, app.camera);            // muzzle / impact / explosion
     fire.update(dt, elapsed);             // burning wrecks
     commandCard.tick();                   // live production bar
