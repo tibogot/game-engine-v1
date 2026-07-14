@@ -271,6 +271,9 @@ export async function createWorldEnvironment({
     const focus = playMode?.active ? playMode.playerPosition : controls.target;
     _shadowFocus.copy(focus);
     shadowTarget.position.set(_shadowFocus.x, 0, _shadowFocus.z);
+    // The target just moved, so the sun has to move with it — otherwise the light
+    // DIRECTION changes as the camera pans (see placeSun).
+    placeSun();
 
     if (!csm) {
       if (!cfg.enabled) {
@@ -749,20 +752,44 @@ export async function createWorldEnvironment({
     input.click();
   }
 
+  /**
+   * Place the sun RELATIVE TO ITS SHADOW TARGET, never relative to the origin.
+   *
+   * A DirectionalLight's direction is `normalize(target - position)`. The shadow
+   * target follows the camera (see syncCsmFromToolState), so anchoring the sun to
+   * the world origin made the light direction depend on WHERE THE CAMERA WAS
+   * LOOKING: correct at the origin, and increasingly skewed the further out you
+   * went — sunDistance is only 600, less than half a world away.
+   *
+   * Measured before this fix, with the sun configured at 43° elevation / 135°
+   * azimuth: looking at the origin gave 43°/135° (right); looking 737 units out
+   * gave 20.5°/163.5°; at the far corner, 18.6°/66.2° — the shadows had swung 70°
+   * around the compass. Shadows also disagreed with the sun drawn in the SKY,
+   * which always used the true direction.
+   *
+   * Nobody caught it because the editor orbits the terrain centre — which is the
+   * origin, the one place the maths came out right.
+   */
+  function placeSun() {
+    sun.position
+      .copy(shadowTarget.position)
+      .addScaledVector(_effectiveLightDir, toolState.light.sunDistance);
+  }
+
   function updateSunSky() {
     const Li = toolState.light;
     sunDirectionFromAngles(Li.sunAzimuth, Li.sunElevation, sunDir);
     const sunUp = sunDir.y;
     if (toolState.skyMode === "procedural" && sunUp < 0) {
       _effectiveLightDir.copy(sunDir).negate();
-      sun.position.copy(_effectiveLightDir).multiplyScalar(Li.sunDistance);
+      placeSun();
       sun.color.set(toolState.proceduralSky.moonColor);
       sun.intensity =
         (Li.moonIntensity ?? 0.3) *
         THREE.MathUtils.smoothstep(-sunUp, 0.0, 0.15);
     } else {
       _effectiveLightDir.copy(sunDir);
-      sun.position.copy(sunDir).multiplyScalar(Li.sunDistance);
+      placeSun();
       sun.color.set(Li.dirColor);
       const sunFade =
         toolState.skyMode === "procedural"
