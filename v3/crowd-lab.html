@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — Crowd Skinning (compute)</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #0d1013; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; left: 10px; z-index: 10;
+             background: rgba(12,16,20,0.88); border: 1px solid #2a343c;
+             border-radius: 8px; padding: 12px 14px; min-width: 260px; }
+      #hud h1 { margin: 0 0 8px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: #8fb8d8; }
+      .row { display: flex; justify-content: space-between; gap: 14px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .modes { display: flex; gap: 4px; margin: 10px 0 8px; }
+      .modes button { flex: 1; padding: 6px 4px; font-size: 11px; cursor: pointer;
+             background: #1a222a; color: #cfd8de; border: 1px solid #2f3b45; border-radius: 5px; }
+      .modes button.on { background: #2b6cb0; border-color: #4a9ae0; color: #fff; }
+      .counts { display: flex; gap: 4px; margin-bottom: 10px; }
+      .counts button { flex: 1; padding: 5px 2px; font-size: 11px; cursor: pointer;
+             background: #1a222a; color: #cfd8de; border: 1px solid #2f3b45; border-radius: 5px; }
+      .counts button.on { background: #276749; border-color: #48bb78; color: #fff; }
+      .note { margin-top: 9px; padding-top: 8px; border-top: 1px solid #2a343c; color: #8b99a4; font-size: 11px; }
+      #err { color: #ff8c8c; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Crowd Skinning Lab</h1>
+      <div class="modes">
+        <button data-mode="classic" class="on">Classic</button>
+        <button data-mode="live">Compute·live</button>
+        <button data-mode="baked">Compute·baked</button>
+      </div>
+      <div class="counts">
+        <button data-count="50">50</button>
+        <button data-count="200" class="on">200</button>
+        <button data-count="500">500</button>
+        <button data-count="1000">1000</button>
+      </div>
+      <div class="row"><span>Soldiers</span><b id="s-count">—</b></div>
+      <div class="row"><span>Draw calls</span><b id="s-draws">—</b></div>
+      <div class="row"><span>FPS</span><b id="s-fps">—</b></div>
+      <div class="row"><span>CPU / frame</span><b id="s-cpu">—</b></div>
+      <div class="row"><span>Skin buffer</span><b id="s-mem">—</b></div>
+      <div class="note" id="s-note">Loading…</div>
+      <div class="note" id="err"></div>
+    </div>
+
+    <script type="module">
+      // ── Crowd skinning lab ───────────────────────────────────────────────────
+      // Answers one question: can we render HUNDREDS of animated soldiers without
+      // a draw call each — on the three.js we already ship (r184)?
+      //
+      // Three modes, same model, same camera, so the numbers are comparable:
+      //
+      //   classic       What rts-v3 does today. One SkinnedMesh + one
+      //                 AnimationMixer per soldier. 1 draw EACH.
+      //
+      //   compute·live  The r185 example's technique (webgpu_skinning_instancing_
+      //                 individual), ported to r184. Skinning runs in a COMPUTE
+      //                 pass into a storage buffer; a single Mesh with `.count`
+      //                 renders the whole crowd in 1 draw. Per-instance poses come
+      //                 from re-posing ONE shared skeleton on the CPU, once per
+      //                 instance per frame, and copying its bone matrices into a
+      //                 per-instance slice.
+      //
+      //   compute·baked Same GPU path, but the clip's bone matrices are BAKED to a
+      //                 fixed number of frames ONCE at load. Per frame the CPU only
+      //                 writes one integer per soldier (which baked frame it's on),
+      //                 so the CPU cost stops scaling with crowd size. This is the
+      //                 variant a real RTS wants; "live" is here to show why.
+      import * as THREE from "three";
+      import {
+        Fn, add, attributeArray, instanceIndex, storage, transformNormal,
+        transformNormalToView, uint, uniform, vertexIndex, vec4,
+      } from "three/tsl";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
+      import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+
+      const MODEL = "/models/testsolanim.glb"; // the RTS soldier
+      const BAKE_FPS = 30;                     // baked-mode sampling rate
+      const SPACING = 2.2;
+
+      const $ = (id) => document.getElementById(id);
+      const setNote = (t) => { $("s-note").textContent = t; };
+
+      let renderer, scene, camera, controls;
+      let mode = "classic";
+      let count = 200;
+      let requiredLimits = {};
+      let deviceLimit = 0; // maxStorageBufferBindingSize actually granted
+
+      // Model data shared by every mode.
+      let gltfScene, clip, mergedSource; // mergedSource: one SkinnedMesh (all parts merged)
+      let bakedBones = null;             // Float32Array[frames * bones * 16]
+      let bakeFrames = 0;
+
+      let current = null; // the live crowd (whatever mode built it)
+
+      // ── Model prep ───────────────────────────────────────────────────────────
+      /** Merge the GLB's 6 skinned parts into ONE SkinnedMesh (vertex colors). */
+      function mergeSkinnedParts(root) {
+        const parts = [];
+        root.traverse((o) => { if (o.isSkinnedMesh) parts.push(o); });
+
+        const geos = parts.map((m) => {
+          const g = m.geometry.clone();
+          const n = g.attributes.position.count;
+          const c = m.material.color;
+          const arr = new Float32Array(n * 3);
+          for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+          g.setAttribute("color", new THREE.BufferAttribute(arr, 3));
+          return g;
+        });
+
+        const geo = mergeGeometries(geos, false);
+        if (!geo) throw new Error("mergeGeometries failed (attribute mismatch)");
+
+        const mat = new THREE.MeshStandardNodeMaterial({
+          color: 0xffffff, roughness: 0.85, metalness: 0.05, vertexColors: true,
+        });
+        const mesh = new THREE.SkinnedMesh(geo, mat);
+        // The parts each carry their own Skeleton object, but all reference the
+        // SAME bones — the ones the mixer drives — so binding to the first works.
+        mesh.bind(parts[0].skeleton, parts[0].bindMatrix);
+
+        const parent = parts[0].parent; // grab it BEFORE detaching the parts
+        for (const p of parts) p.removeFromParent();
+        parent.add(mesh);
+        return mesh;
+      }
+
+      /**
+       * Sample the clip into a flat table of bone matrices: [frame][bone] → mat4.
+       * This is what makes the baked mode's per-frame CPU cost independent of the
+       * crowd size — the poses already exist, each soldier just points at one.
+       */
+      function bakeClip(object, skeleton, animClip) {
+        const mixer = new THREE.AnimationMixer(object);
+        mixer.clipAction(animClip).play();
+
+        const boneCount = skeleton.bones.length;
+        const frames = Math.max(2, Math.round(animClip.duration * BAKE_FPS));
+        const out = new Float32Array(frames * boneCount * 16);
+
+        for (let f = 0; f < frames; f++) {
+          mixer.setTime((f / frames) * animClip.duration);
+          object.updateMatrixWorld(true);
+          skeleton.update();
+          out.set(skeleton.boneMatrices, f * boneCount * 16);
+        }
+        mixer.stopAllAction();
+        return { bakedBones: out, bakeFrames: frames };
+      }
+
+      // ── Crowd layout ─────────────────────────────────────────────────────────
+      function layout(i, n) {
+        const cols = Math.ceil(Math.sqrt(n));
+        const x = ((i % cols) - (cols - 1) / 2) * SPACING;
+        const z = (Math.floor(i / cols) - (cols - 1) / 2) * SPACING;
+        return { x, z, yaw: (Math.random() - 0.5) * 0.6 };
+      }
+
+      // ── Mode 1: classic (what the game does today) ────────────────────────────
+      async function buildClassic(n) {
+        const group = new THREE.Group();
+        const mixers = [];
+
+        for (let i = 0; i < n; i++) {
+          const root = cloneSkinned(gltfScene);
+          const { x, z, yaw } = layout(i, n);
+          root.position.set(x, 0, z);
+          root.rotation.y = yaw;
+          root.traverse((o) => {
+            if (!o.isMesh) return;
+            // The template's merged mesh is hidden (it only carries the skeleton);
+            // the clones are the actual soldiers, so they must be visible.
+            o.visible = true;
+            o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
+          });
+          const mixer = new THREE.AnimationMixer(root);
+          const action = mixer.clipAction(clip);
+          action.time = Math.random() * clip.duration; // each soldier out of phase
+          action.play();
+          mixers.push(mixer);
+          group.add(root);
+        }
+
+        scene.add(group);
+        return {
+          group,
+          update(dt) { for (const m of mixers) m.update(dt); },
+          dispose() { scene.remove(group); },
+        };
+      }
+
+      // ── Modes 2 & 3: GPU compute skinning ────────────────────────────────────
+      /**
+       * ONE compute pass skins every vertex of every instance into a storage
+       * buffer; ONE Mesh with `.count = n` draws the whole crowd.
+       *
+       * Both compute modes share this shader. The only difference is where each
+       * instance's bone matrices come from, which is expressed as an indirection:
+       * `boneSlot[instance]` picks a slice of the bone-matrix buffer.
+       *   live  → buffer holds one slice per INSTANCE, refilled by the CPU each frame
+       *   baked → buffer holds one slice per baked FRAME (uploaded once), and the
+       *           CPU only updates which frame each soldier is on.
+       */
+      function buildComputed(n, baked) {
+        const source = mergedSource;
+        const skeleton = source.skeleton;
+        const boneCount = skeleton.bones.length;
+        const geometry = source.geometry.clone();
+        const vertexCount = geometry.getAttribute("position").count;
+
+        // Slices of bone matrices: per-instance (live) or per-baked-frame (baked).
+        const slices = baked ? bakeFrames : n;
+        const boneMatrices = new THREE.StorageBufferAttribute(slices * boneCount, 16);
+        if (baked) {
+          boneMatrices.array.set(bakedBones); // upload the whole animation ONCE
+          boneMatrices.needsUpdate = true;
+        }
+        const boneMatricesNode = storage(boneMatrices, "mat4", boneMatrices.count).toReadOnly();
+
+        // Which bone-matrix slice each soldier reads this frame.
+        const boneSlot = new THREE.StorageBufferAttribute(new Uint32Array(n), 1);
+        const boneSlotNode = storage(boneSlot, "uint", n).toReadOnly();
+
+        // Per-soldier world transform.
+        const instanceMatrices = new THREE.StorageBufferAttribute(n, 16);
+        const instanceMatricesNode = storage(instanceMatrices, "mat4", n).toReadOnly();
+
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < n; i++) {
+          const { x, z, yaw } = layout(i, n);
+          dummy.position.set(x, 0, z);
+          dummy.rotation.set(0, yaw, 0);
+          dummy.scale.setScalar(1);
+          dummy.updateMatrix();
+          dummy.matrix.toArray(instanceMatrices.array, i * 16);
+        }
+        instanceMatrices.needsUpdate = true;
+
+        // Source vertices (position + normal) as a read-only storage buffer.
+        const position = geometry.getAttribute("position");
+        const normal = geometry.getAttribute("normal");
+        const src = new Float32Array(vertexCount * 8); // 2 × vec4 per vertex
+        for (let i = 0; i < vertexCount; i++) {
+          const o = i * 8;
+          src[o + 0] = position.getX(i); src[o + 1] = position.getY(i); src[o + 2] = position.getZ(i);
+          src[o + 4] = normal.getX(i); src[o + 5] = normal.getY(i); src[o + 6] = normal.getZ(i);
+        }
+        const sourceVertices = storage(new THREE.StorageBufferAttribute(src, 4), "vec4", vertexCount * 2).toReadOnly();
+        const skinIndices = storage(
+          new THREE.StorageBufferAttribute(new Uint32Array(geometry.getAttribute("skinIndex").array), 4),
+          "uvec4", vertexCount,
+        ).toReadOnly();
+        const skinWeights = storage(
+          new THREE.StorageBufferAttribute(geometry.getAttribute("skinWeight").array, 4),
+          "vec4", vertexCount,
+        ).toReadOnly();
+
+        const uBindMatrix = uniform(source.bindMatrix, "mat4");
+        const uBindMatrixInverse = uniform(source.bindMatrixInverse, "mat4");
+
+        // Output: skinned position + normal per instance-vertex. This is the one
+        // real cost of the technique — memory scales with instances × vertices.
+        const vertices = attributeArray(n * vertexCount * 2, "vec4");
+
+        const computeSkinning = Fn(() => {
+          const sourceVertex = instanceIndex.mod(uint(vertexCount));
+          const meshInstance = instanceIndex.div(uint(vertexCount));
+          const sourceOffset = sourceVertex.mul(uint(2));
+          const targetOffset = instanceIndex.mul(uint(2));
+
+          // The indirection that makes both modes one shader.
+          const boneOffset = boneSlotNode.element(meshInstance).mul(uint(boneCount));
+
+          const skinIndex = skinIndices.element(sourceVertex);
+          const skinWeight = skinWeights.element(sourceVertex);
+
+          const localPos = sourceVertices.element(sourceOffset).xyz;
+          const localNrm = sourceVertices.element(sourceOffset.add(uint(1))).xyz;
+
+          const skinVertex = uBindMatrix.mul(vec4(localPos, 1.0));
+
+          const bx = boneMatricesNode.element(boneOffset.add(skinIndex.x));
+          const by = boneMatricesNode.element(boneOffset.add(skinIndex.y));
+          const bz = boneMatricesNode.element(boneOffset.add(skinIndex.z));
+          const bw = boneMatricesNode.element(boneOffset.add(skinIndex.w));
+
+          const skinMatrix = add(
+            skinWeight.x.mul(bx), skinWeight.y.mul(by),
+            skinWeight.z.mul(bz), skinWeight.w.mul(bw),
+          );
+
+          const skinPosition = uBindMatrixInverse.mul(add(
+            bx.mul(skinWeight.x).mul(skinVertex),
+            by.mul(skinWeight.y).mul(skinVertex),
+            bz.mul(skinWeight.z).mul(skinVertex),
+            bw.mul(skinWeight.w).mul(skinVertex),
+          )).xyz;
+
+          const skinNormal = uBindMatrixInverse.mul(skinMatrix).mul(uBindMatrix)
+            .transformDirection(localNrm).xyz;
+
+          const instanceMatrix = instanceMatricesNode.element(meshInstance);
+
+          vertices.element(targetOffset).assign(vec4(instanceMatrix.mul(vec4(skinPosition, 1.0)).xyz, 1));
+          vertices.element(targetOffset.add(uint(1))).assign(vec4(transformNormal(skinNormal, instanceMatrix), 0));
+        })().compute(n * vertexCount).setName("Crowd skinning");
+
+        // Render: one Mesh, `.count` instances, reading the computed buffer.
+        const material = source.material.clone();
+        const meshVertex = instanceIndex.mul(uint(vertexCount)).add(vertexIndex).mul(uint(2));
+        material.positionNode = vertices.element(meshVertex).xyz;
+        material.normalNode = transformNormalToView(vertices.element(meshVertex.add(uint(1))).xyz).toVarying();
+
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.count = n;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
+        scene.add(mesh);
+
+        // CPU side per frame.
+        const liveMixer = baked ? null : new THREE.AnimationMixer(gltfScene);
+        if (liveMixer) liveMixer.clipAction(clip).play();
+        const offsets = [];
+        for (let i = 0; i < n; i++) offsets.push(Math.random() * clip.duration);
+        if (!baked) for (let i = 0; i < n; i++) boneSlot.array[i] = i; // one slice each
+        boneSlot.needsUpdate = true;
+
+        let elapsed = 0;
+        const bytes = n * vertexCount * 2 * 16;
+
+        return {
+          bytes, vertexCount,
+          update(dt) {
+            elapsed += dt;
+
+            if (baked) {
+              // CPU work per frame: ONE integer per soldier. That's it.
+              for (let i = 0; i < n; i++) {
+                const t = (elapsed + offsets[i]) % clip.duration;
+                boneSlot.array[i] = Math.floor((t / clip.duration) * bakeFrames) % bakeFrames;
+              }
+              boneSlot.needsUpdate = true;
+            } else {
+              // CPU work per frame: re-pose the shared skeleton ONCE PER SOLDIER
+              // and copy its bone matrices out. This is what doesn't scale.
+              for (let i = 0; i < n; i++) {
+                liveMixer.setTime((elapsed + offsets[i]) % clip.duration);
+                gltfScene.updateMatrixWorld(true);
+                skeleton.update();
+                boneMatrices.array.set(skeleton.boneMatrices, i * boneCount * 16);
+              }
+              boneMatrices.needsUpdate = true;
+            }
+
+            renderer.compute(computeSkinning);
+          },
+          dispose() { scene.remove(mesh); },
+        };
+      }
+
+      // ── Boot ─────────────────────────────────────────────────────────────────
+      async function init() {
+        // The skinned-vertex buffer is BIG (instances × vertices × 2 × vec4). At
+        // 1000 soldiers it's ~183 MB, which blows past WebGPU's DEFAULT
+        // maxStorageBufferBindingSize of 128 MB — and the failure mode is nasty:
+        // the bind group goes invalid, so the compute pass AND the render pass are
+        // silently dropped. You get a frozen crowd at a fake 60 FPS, not an error.
+        // Adapters typically allow far more (2 GB here), but you must ASK.
+        const adapter = await navigator.gpu?.requestAdapter();
+        if (adapter) {
+          deviceLimit = adapter.limits.maxStorageBufferBindingSize;
+          requiredLimits = {
+            maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+            maxBufferSize: adapter.limits.maxBufferSize,
+          };
+        }
+
+        renderer = new THREE.WebGPURenderer({ antialias: true, requiredLimits });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFShadowMap;
+        renderer.toneMapping = THREE.NeutralToneMapping;
+        renderer.info.autoReset = false;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0d1013);
+
+        camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.5, 400);
+        camera.position.set(28, 22, 34);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 1, 0);
+        controls.enableDamping = true;
+
+        scene.add(new THREE.HemisphereLight(0xbfd8ff, 0x27303a, 1.5));
+        const sun = new THREE.DirectionalLight(0xfff2dd, 2.4);
+        sun.position.set(-30, 45, 25);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        const c = sun.shadow.camera;
+        c.left = -45; c.right = 45; c.top = 45; c.bottom = -45; c.near = 1; c.far = 140;
+        c.updateProjectionMatrix();
+        scene.add(sun);
+
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(400, 400),
+          new THREE.MeshStandardNodeMaterial({ color: 0x2f3a30, roughness: 1 }),
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        setNote("Loading soldier…");
+        const gltf = await new GLTFLoader().loadAsync(MODEL);
+        gltfScene = gltf.scene;
+
+        // Prefer a run/walk clip so the motion is obvious.
+        clip = gltf.animations.find((a) => /run|walk/i.test(a.name)) ?? gltf.animations[0];
+
+        mergedSource = mergeSkinnedParts(gltfScene);
+        gltfScene.add(mergedSource);
+        gltfScene.updateMatrixWorld(true);
+        mergedSource.skeleton.update();
+
+        ({ bakedBones, bakeFrames } = bakeClip(gltfScene, mergedSource.skeleton, clip));
+
+        // The template itself is never drawn; it only holds the skeleton.
+        mergedSource.visible = false;
+        scene.add(gltfScene);
+
+        setNote(
+          `${gltf.animations.length} clips (using "${clip.name}") · `
+          + `${mergedSource.skeleton.bones.length} bones · baked ${bakeFrames} frames`,
+        );
+
+        rebuild();
+        addEventListener("resize", () => {
+          camera.aspect = innerWidth / innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(innerWidth, innerHeight);
+        });
+        renderer.setAnimationLoop(animate);
+      }
+
+      async function rebuild() {
+        current?.dispose();
+        current = null;
+        current = mode === "classic" ? await buildClassic(count) : buildComputed(count, mode === "baked");
+        $("s-count").textContent = count;
+
+        const mb = (b) => `${(b / 1048576).toFixed(1)} MB`;
+        if (!current.bytes) {
+          $("s-mem").textContent = "—";
+          $("err").textContent = "";
+          return;
+        }
+        $("s-mem").textContent = `${mb(current.bytes)} / ${mb(deviceLimit)}`;
+        // Over the limit → WebGPU invalidates the bind group and DROPS the passes.
+        // The crowd freezes while FPS still reads 60. Say so, loudly.
+        $("err").textContent = current.bytes > deviceLimit
+          ? `Skin buffer exceeds maxStorageBufferBindingSize — passes dropped, crowd is FROZEN.`
+          : "";
+      }
+
+      // ── Loop + HUD ───────────────────────────────────────────────────────────
+      let last = performance.now();
+      let cpuAcc = 0, frames = 0, fpsAcc = 0, hudT = 0;
+
+      function animate() {
+        const now = performance.now();
+        const dt = Math.min((now - last) / 1000, 0.05);
+        last = now;
+
+        const t0 = performance.now();
+        controls.update();
+        current?.update(dt);
+        renderer.render(scene, camera);
+        const cpu = performance.now() - t0;
+
+        cpuAcc += cpu; fpsAcc += 1 / Math.max(dt, 1e-4); frames++; hudT += dt;
+        if (hudT > 0.4) {
+          $("s-draws").textContent = renderer.info.render.drawCalls;
+          $("s-fps").textContent = (fpsAcc / frames).toFixed(0);
+          $("s-cpu").textContent = `${(cpuAcc / frames).toFixed(2)} ms`;
+          cpuAcc = 0; fpsAcc = 0; frames = 0; hudT = 0;
+        }
+        renderer.info.reset();
+      }
+
+      for (const b of document.querySelectorAll(".modes button")) {
+        b.onclick = async () => {
+          document.querySelectorAll(".modes button").forEach((x) => x.classList.remove("on"));
+          b.classList.add("on");
+          mode = b.dataset.mode;
+          await rebuild();
+        };
+      }
+      for (const b of document.querySelectorAll(".counts button")) {
+        b.onclick = async () => {
+          document.querySelectorAll(".counts button").forEach((x) => x.classList.remove("on"));
+          b.classList.add("on");
+          count = +b.dataset.count;
+          await rebuild();
+        };
+      }
+
+      init().catch((e) => {
+        console.error(e);
+        $("err").textContent = String(e?.message ?? e);
+      });
+    </script>
+  </body>
+</html>
