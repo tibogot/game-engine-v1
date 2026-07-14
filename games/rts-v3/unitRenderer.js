@@ -13,6 +13,7 @@ import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materialColor } from "three/tsl";
 import { teamTint, isUntinted } from "./teams.js";
+import { createCrowdField } from "./crowdSkinning.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
 import { UNIT_TYPES, UNIT_TYPE_KEYS } from "./unitTypes.js";
@@ -304,6 +305,64 @@ function buildInstancedType(tpl, scene) {
   return { parts, scale: root.scale.x, n: 0, unitAt: [] };
 }
 
+// ── Crowd (skinned types) ────────────────────────────────────────────────────
+// Skinned units can't join an InstancedMesh, so they get the compute-skinning
+// path instead: the clips are baked to a bone-matrix table, a compute pass skins
+// every soldier into a storage buffer, and ONE Mesh draws the lot. Adding
+// soldiers costs no draw calls and (measured in the lab) no CPU either.
+
+const MAX_CROWD = 128; // soldiers renderable at once; sizes the skin buffer
+
+/** Wire a skinned template up to a crowd field. */
+function buildCrowdType(tpl, type, app, scene) {
+  const root = tpl.root;
+  root.updateMatrixWorld(true);
+
+  let source = null;
+  root.traverse((o) => { if (!source && o.isSkinnedMesh) source = o; });
+  if (!source) {
+    console.warn("[rts-v3] skinned template has no SkinnedMesh — crowd disabled.");
+    return null;
+  }
+
+  const byName = (re) => tpl.animations.find((a) => re.test(a.name));
+  const idle = byName(/idle/i) ?? tpl.animations[0];
+  const run = byName(/run|walk/i) ?? idle;
+  if (!idle) {
+    console.warn("[rts-v3] skinned template has no clips — crowd disabled.");
+    return null;
+  }
+
+  const field = createCrowdField({
+    scene,
+    renderer: app.renderer,
+    source,
+    animRoot: root,
+    clips: { idle, run },
+    max: MAX_CROWD,
+    // Follows the type's shadow policy (unitTypes.js — soldiers: off), and there's
+    // a second reason to leave it off here:
+    //
+    // The crowd's vertices are posed in the COMPUTE pass, but the shadow depth pass
+    // still offsets by `normalBias` along the geometry's BIND-POSE normals. Those
+    // don't match the skinned surface, so the offset goes the wrong way and every
+    // soldier lands inside his own shadow — they render pitch black. Turning shadow
+    // casting back on needs that bias problem solved first.
+    castShadow: type.castShadow !== false,
+  });
+
+  // The compute pass emits vertices in the TEMPLATE MESH's local space, which
+  // knows nothing about buildTemplate's normalisation (the centring offset and
+  // the scale that makes the model targetHeight tall). Fold that in, exactly like
+  // the rigid instanced parts do: rel = root⁻¹ · mesh, applied inside the unit's
+  // own transform.
+  const rel = new THREE.Matrix4()
+    .copy(root.matrixWorld).invert()
+    .multiply(source.matrixWorld);
+
+  return { field, rel, scale: root.scale.x };
+}
+
 // Selection ring: a flat ring in the XZ plane whose vertices are displaced to
 // the terrain height each frame (a conforming decal). Because it hugs the
 // ground we keep depthTest ON, so the unit properly occludes it — depthTest:false
@@ -353,16 +412,20 @@ export async function createUnitRenderer({ app, units, healthBars }) {
     return tpl.skinned ? SkeletonUtils.clone(tpl.root) : tpl.root.clone(true);
   };
 
-  // Rigid types render through shared InstancedMeshes; skinned types keep a Group
-  // per unit. `instanced[key]` is null for the latter.
+  // Rigid types render through shared InstancedMeshes; skinned types go through a
+  // GPU-skinned CROWD field (crowdSkinning.js) — also one draw for all of them.
+  // `instanced[key]` / `crowd[key]` is null for the type that doesn't apply.
   const instanced = {};
+  const crowd = {};
   for (const k of UNIT_TYPE_KEYS) {
     instanced[k] = templates[k].skinned ? null : buildInstancedType(templates[k], scene);
+    crowd[k] = templates[k].skinned ? buildCrowdType(templates[k], UNIT_TYPES[k], app, scene) : null;
   }
 
   // Per-unit visuals.
   const views = new Map(); // unit → view
   const roots = [];        // raycast targets for selection
+  const crowdUnits = [];   // crowd soldiers written this frame (they have no mesh)
 
   // Instanced units have no mesh of their own, so a raycast hit lands on the
   // shared InstancedMesh and identifies the unit by instanceId. This maps the
@@ -382,6 +445,7 @@ export async function createUnitRenderer({ app, units, healthBars }) {
     const t = unit.type;
     const tpl = templates[t.typeKey];
     const inst = instanced[t.typeKey];
+    const crd = crowd[t.typeKey];
 
     const ring = makeSelectionRing(t.ringRadius);
     const ringPos = ring.geometry.attributes.position;
@@ -396,6 +460,19 @@ export async function createUnitRenderer({ app, units, healthBars }) {
       views.set(unit, {
         inst, xform, ring, ringPos, ringBase,
         bob: Math.random() * 6, mainAngle: Math.random() * 6, tailAngle: 0,
+      });
+      return;
+    }
+
+    // Same for a crowd soldier: no mesh, no mixer. Just a transform, its own
+    // animation clock (so the squad isn't in lockstep) and an idle⇄run blend the
+    // compute shader crossfades.
+    if (crd) {
+      const xform = new THREE.Object3D();
+      xform.scale.setScalar(crd.scale);
+      views.set(unit, {
+        crowd: crd, xform, ring, ringPos, ringBase,
+        animTime: Math.random() * 3, blend: 0, bob: 0,
       });
       return;
     }
@@ -445,6 +522,32 @@ export async function createUnitRenderer({ app, units, healthBars }) {
     return o ? unitByMesh.get(o) : null;
   }
 
+  const _proj = new THREE.Vector3();
+
+  /**
+   * Pick a crowd soldier by SCREEN PROXIMITY, not by raycast.
+   *
+   * Crowd soldiers exist only inside a compute buffer — there is no mesh under
+   * the cursor to hit. Projecting them and taking the nearest within a few pixels
+   * is both simpler and kinder than raycasting: a 1.9 m man at RTS zoom is a
+   * miserable click target.
+   */
+  function pickCrowdUnit(clientX, clientY, camera, rect, maxPx = 22) {
+    let best = null;
+    let bestD = maxPx;
+    for (const unit of crowdUnits) {
+      if (!unit.alive) continue;
+      const p = unit.position;
+      _proj.set(p.x, p.y + 1, p.z).project(camera);
+      if (_proj.z > 1) continue; // behind the camera
+      const sx = rect.left + (_proj.x * 0.5 + 0.5) * rect.width;
+      const sy = rect.top + (-_proj.y * 0.5 + 0.5) * rect.height;
+      const d = Math.hypot(sx - clientX, sy - clientY);
+      if (d < bestD) { bestD = d; best = unit; }
+    }
+    return best;
+  }
+
   for (const unit of units.list) addUnit(unit);
   // Units built by the base at runtime get their visuals through this.
   units.setOnSpawn(addUnit);
@@ -457,11 +560,13 @@ export async function createUnitRenderer({ app, units, healthBars }) {
 
   /** Push unit data into the meshes. Called once per frame by the game loop. */
   function sync(dt, camera) {
-    // Instanced types are rebuilt from scratch each frame, so spawns and deaths
-    // need no bookkeeping — a dead unit simply isn't written.
+    // Instanced and crowd types are rebuilt from scratch each frame, so spawns and
+    // deaths need no bookkeeping — a dead unit simply isn't written.
     for (const k of UNIT_TYPE_KEYS) {
       if (instanced[k]) instanced[k].n = 0;
+      if (crowd[k]) crowd[k].field.begin();
     }
+    crowdUnits.length = 0;
 
     for (const unit of units.list) {
       const v = views.get(unit);
@@ -522,7 +627,19 @@ export async function createUnitRenderer({ app, units, healthBars }) {
         }
       }
 
-      // Skinned units: run while moving, idle while holding (cross-faded).
+      // Crowd soldier: no mesh and no mixer — just a transform, an animation
+      // clock, and a blend weight the compute shader crossfades idle⇄run with.
+      if (v.crowd) {
+        v.animTime += dt;
+        const want = unit.isMoving ? 1 : 0;
+        v.blend += (want - v.blend) * Math.min(1, dt * 8); // ~0.15 s crossfade
+        x.updateMatrix(); // off-scene: nothing else will do this for us
+        _mat.multiplyMatrices(x.matrix, v.crowd.rel);
+        v.crowd.field.add(_mat, v.animTime, v.blend);
+        crowdUnits.push(unit); // instance order = pick order (see pickCrowdUnit)
+      }
+
+      // Skinned units on the fallback path: run while moving, idle while holding.
       if (v.mixer) {
         const want = unit.isMoving && v.actions.run
           ? "run"
@@ -558,20 +675,24 @@ export async function createUnitRenderer({ app, units, healthBars }) {
 
     for (const k of UNIT_TYPE_KEYS) {
       const inst = instanced[k];
-      if (!inst) continue;
-      for (const part of inst.parts) {
-        part.im.count = inst.n;
-        part.im.instanceMatrix.needsUpdate = true;
-        part.im.instanceColor.needsUpdate = true;
+      if (inst) {
+        for (const part of inst.parts) {
+          part.im.count = inst.n;
+          part.im.instanceMatrix.needsUpdate = true;
+          part.im.instanceColor.needsUpdate = true;
+        }
       }
+      // Uploads the per-soldier buffers and dispatches the skinning compute pass.
+      crowd[k]?.field.commit();
     }
   }
 
   return {
     thumbnails,
-    roots,        // raycast targets for selection (instanced meshes + skinned groups)
+    roots,          // raycast targets for selection (instanced meshes + skinned groups)
     unitByMesh,
-    unitFromHit,  // resolves a raycast hit, instanced or not
+    unitFromHit,    // resolves a raycast hit, instanced or not
+    pickCrowdUnit,  // crowd soldiers have no mesh — pick them by screen proximity
     addUnit,
     sync,
     dispose() {

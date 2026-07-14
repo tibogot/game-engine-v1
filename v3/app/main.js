@@ -133,6 +133,23 @@ async function createWebGpuDevice() {
     if (adapter.limits[key] > 16) requiredLimits[key] = adapter.limits[key];
   }
 
+  // GPU compute paths (crowd skinning) allocate storage buffers far bigger than
+  // WebGPU's 128 MB default binding limit. Going over it does NOT throw: the bind
+  // group is invalidated and the compute AND render passes are silently DROPPED —
+  // you get a frozen crowd at a convincing 60 fps. Adapters allow much more (2 GB
+  // here), but only if you ask.
+  // A skinning kernel binds a fair few storage buffers at once (bone table, source
+  // verts, skin indices/weights, per-instance data, output), and the default cap is
+  // only 8 PER STAGE. Same silent failure as above: over the cap, the pipeline is
+  // invalid and the pass is dropped.
+  for (const key of [
+    "maxStorageBufferBindingSize",
+    "maxBufferSize",
+    "maxStorageBuffersPerShaderStage",
+  ]) {
+    if (adapter.limits[key] !== undefined) requiredLimits[key] = adapter.limits[key];
+  }
+
   const requiredFeatures = [...adapter.features];
 
   try {

@@ -20,7 +20,9 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 export function createSelection({ app, units, unitRenderer, structuresRenderer = null, onChange = () => {} }) {
   // Rigid unit types render as shared InstancedMeshes, so a hit identifies its
   // unit by instanceId, not by the mesh — unitRenderer owns that resolution.
-  const { roots, unitFromHit } = unitRenderer;
+  // Crowd soldiers have no mesh AT ALL (they live in a compute buffer), so they
+  // are picked by screen proximity instead.
+  const { roots, unitFromHit, pickCrowdUnit } = unitRenderer;
   const { renderer, camera } = app;
   const dom = renderer.domElement;
   const raycaster = new THREE.Raycaster();
@@ -55,6 +57,10 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       const u = unitFromHit(h);
       if (u?.alive) return u;
     }
+
+    // Nothing with a mesh — try the crowd (soldiers), which is picked in 2D.
+    const soldier = pickCrowdUnit?.(clientX, clientY, camera, rect);
+    if (soldier?.alive) return soldier;
     // Nothing under the cursor — try our own buildings (the base is commandable).
     if (structuresRenderer) {
       const sHits = raycaster.intersectObjects(structuresRenderer.roots, true);
