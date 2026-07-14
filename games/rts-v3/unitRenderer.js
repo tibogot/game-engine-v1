@@ -271,10 +271,12 @@ function buildInstancedType(tpl, scene) {
 
     const im = new THREE.InstancedMesh(o.geometry, refreshingMaterial(o.material), MAX_PER_TYPE);
     im.count = 0;
-    // The type's shadow policy (unitTypes.js) — except ROTORS, which never cast.
-    // A rotor is a thin disc spinning at 28 rad/s: its shadow is visual noise, and
-    // each instanced part is a full caster redrawn once per CSM cascade.
-    im.castShadow = o.castShadow && kind === null;
+    // The type's shadow policy (unitTypes.js). Rotors included: the turning blade
+    // shadow on the ground is half of what makes a helicopter read as a helicopter.
+    // (They were briefly excluded as "visual noise" — but that call was made while
+    // the sun direction was skewed and every shadow landed 62 m from its object,
+    // so the rotor shadow never actually got a fair look.)
+    im.castShadow = o.castShadow;
     im.receiveShadow = true;
     im.frustumCulled = false; // instances live anywhere; the shared bounds are meaningless
 
