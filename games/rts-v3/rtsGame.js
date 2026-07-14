@@ -53,6 +53,23 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   app.postFx?.setBloomSelective(true);
   app.postFx?.setBloom({ enabled: true, strength: 0.85, threshold: 0.0, radius: 0.5 });
 
+  // Valley height fog (three.js webgpu_custom_fog style): low ground mist + distance
+  // haze so hills peek through and the map edge dissolves into the sky.
+  app.fog?.setHeight({
+    enabled: true,
+    mode: "valley",
+    color: "#c8d8e4",
+    base: 8,
+    top: 42,
+    haze: 0.0018,
+    noiseWobble: 16,
+  });
+  app.fog?.setDistance({
+    enabled: true,
+    matchSky: true,
+    density: 0.0004,
+  });
+
   // 3) Camera — two modes the project needs: "orbit" (engine's editor controls,
   //    for inspecting the world) and "rts" (WASD/edge-scroll pan, wheel zoom,
   //    Q/E rotate, terrain-follow). Toggle with the HUD button or the C key.

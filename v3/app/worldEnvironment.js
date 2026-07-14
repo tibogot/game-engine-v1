@@ -17,6 +17,7 @@ import {
   fog,
   length,
   select,
+  triNoise3D,
   densityFogFactor,
 } from "three/tsl";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
@@ -356,10 +357,18 @@ export async function createWorldEnvironment({
 
   const F = toolState.fog;
   const uHFogEnabled = uniform(F.height.enabled ? 1 : 0);
+  const uHFogValleyMode = uniform(F.height.mode === "valley" ? 1 : 0);
   const uHFogColor = uniform(new THREE.Color(F.height.color).convertSRGBToLinear());
   const uHFogDensity = uniform(F.height.density);
   const uHFogFalloff = uniform(F.height.falloff ?? 0.05);
   const uHFogHeight = uniform(F.height.height);
+  const uValleyBase = uniform(F.height.base ?? -20);
+  const uValleyTop = uniform(F.height.top ?? 55);
+  const uValleyHaze = uniform(F.height.haze ?? 0.0012);
+  const uValleyNoiseWobble = uniform(F.height.noiseWobble ?? 22);
+  const uValleyNoiseScaleA = uniform(F.height.noiseScaleA ?? 0.005);
+  const uValleyNoiseScaleB = uniform(F.height.noiseScaleB ?? 0.01);
+  const uValleyTime = uniform(0);
   const uDFogEnabled = uniform(F.distance.enabled ? 1 : 0);
   const uDFogColor = uniform(new THREE.Color(F.distance.color).convertSRGBToLinear());
   const uDFogSunTint = uniform(new THREE.Color(F.distance.sunTint).convertSRGBToLinear());
@@ -387,7 +396,32 @@ export async function createWorldEnvironment({
     .min(50)
     .exp();
   const _hfTau = uHFogDensity.mul(_hfCamTerm).mul(_hfDist).mul(_hfG);
-  const _hFactorRaw = _hfTau.negate().min(50).exp().oneMinus();
+  const _analyticFactorRaw = _hfTau.negate().min(50).exp().oneMinus();
+
+  // Valley band fog (three.js webgpu_custom_fog): world-Y layer + animated triNoise3D wisps.
+  const _valleyNoiseA = triNoise3D(
+    positionWorld.mul(uValleyNoiseScaleA),
+    float(0.2),
+    uValleyTime,
+  );
+  const _valleyNoiseB = triNoise3D(
+    positionWorld.mul(uValleyNoiseScaleB),
+    float(0.2),
+    uValleyTime.mul(1.2),
+  );
+  const _valleyNoise = _valleyNoiseA.add(_valleyNoiseB);
+  const _valleyTop = uValleyTop.add(_valleyNoise.sub(0.7).mul(uValleyNoiseWobble));
+  const _valleyBand = _valleyTop
+    .sub(positionWorld.y)
+    .div(_valleyTop.sub(uValleyBase).max(1e-4))
+    .saturate()
+    .mul(0.98);
+  const _valleyFactorRaw = _valleyBand
+    .oneMinus()
+    .mul(densityFogFactor(uValleyHaze).oneMinus())
+    .oneMinus();
+
+  const _hFactorRaw = select(uHFogValleyMode.greaterThan(0.5), _valleyFactorRaw, _analyticFactorRaw);
   const _hFactor = select(uHFogEnabled.greaterThan(0.5), _hFactorRaw, float(0));
   const _dFactorRaw = densityFogFactor(uDFogDensity);
   const _dFactor = select(uDFogEnabled.greaterThan(0.5), _dFactorRaw, float(0));
@@ -415,10 +449,17 @@ export async function createWorldEnvironment({
 
   function syncFog() {
     uHFogEnabled.value = F.height.enabled ? 1 : 0;
+    uHFogValleyMode.value = F.height.mode === "valley" ? 1 : 0;
     uHFogColor.value.set(F.height.color).convertSRGBToLinear();
     uHFogDensity.value = F.height.density;
     uHFogFalloff.value = F.height.falloff ?? 0.05;
     uHFogHeight.value = F.height.height;
+    uValleyBase.value = F.height.base ?? -20;
+    uValleyTop.value = F.height.top ?? 55;
+    uValleyHaze.value = F.height.haze ?? 0.0012;
+    uValleyNoiseWobble.value = F.height.noiseWobble ?? 22;
+    uValleyNoiseScaleA.value = F.height.noiseScaleA ?? 0.005;
+    uValleyNoiseScaleB.value = F.height.noiseScaleB ?? 0.01;
     uDFogEnabled.value = F.distance.enabled ? 1 : 0;
     uDFogColor.value.set(F.distance.color).convertSRGBToLinear();
     uDFogDensity.value = F.distance.density;
@@ -863,6 +904,7 @@ export async function createWorldEnvironment({
 
   function updateFrame(dtSec, { streamQueueDepth = 0 } = {}) {
     _appTimeSec += dtSec;
+    uValleyTime.value = _appTimeSec;
 
     const focusPos = playMode?.active ? playMode.playerPosition : camera.position;
     const cloudFollowAnchor = playMode?.active ? playMode.playerPosition : controls.target;

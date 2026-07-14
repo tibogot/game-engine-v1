@@ -5782,6 +5782,25 @@ export async function startV3App(opts = {}) {
         worldEnv?.postFxPipeline?.setBloomSelective(!!on);
       },
     },
+    // ── Fog override ──────────────────────────────────────────────────────────
+    // Height + distance fog live in worldToolState.fog and sync to scene.fogNode.
+    // Valley mode matches three.js webgpu_custom_fog (world-Y band + distance haze).
+    fog: {
+      get state() { return worldToolState.fog; },
+      sync() {
+        worldEnv?.syncFog();
+        worldEnv?.driveFogSun();
+      },
+      setHeight(params = {}) {
+        Object.assign(worldToolState.fog.height, params);
+        worldEnv?.syncFog();
+      },
+      setDistance(params = {}) {
+        Object.assign(worldToolState.fog.distance, params);
+        worldEnv?.syncFog();
+        worldEnv?.driveFogSun();
+      },
+    },
     // ── Terrain queries a game builds on ──────────────────────────────────────
     // Ground height at a world X/Z (RTS unit clamping, building placement).
     getWorldHeight,

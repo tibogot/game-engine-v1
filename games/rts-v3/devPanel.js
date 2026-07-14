@@ -71,6 +71,66 @@ export function createDevPanel({
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Fog</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Height fog</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-fog" type="button" aria-label="Height fog">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Color</span>
+            <div class="prop-value">
+              <input type="color" id="dv-fog-color" />
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Base (Y)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fog-base" min="-40" max="80" step="1" />
+              <span class="prop-num" id="dv-fog-base-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Top (Y)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fog-top" min="10" max="200" step="1" />
+              <span class="prop-num" id="dv-fog-top-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Haze</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fog-haze" min="0" max="0.005" step="0.0001" />
+              <span class="prop-num" id="dv-fog-haze-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wobble</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fog-wobble" min="0" max="40" step="1" />
+              <span class="prop-num" id="dv-fog-wobble-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Dist. fog</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-fog-dist" type="button" aria-label="Distance fog">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Dist. density</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fog-dist-d" min="0" max="0.003" step="0.0001" />
+              <span class="prop-num" id="dv-fog-dist-d-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">Valley band fog — mist below Top, clear above. Haze fades distant terrain into the sky.</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Post-FX</div>
         <div class="section-body">
           <div class="prop-row">
@@ -152,6 +212,10 @@ export function createDevPanel({
     #rts-dev .dv-hint b { color: var(--text); font-weight: 600; }
     #rts-dev .dv-world-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #rts-dev .dv-hint code { font-size: 10px; color: var(--text-dim); }
+    #rts-dev input[type="color"] {
+      width: 36px; height: 22px; padding: 0; border: 1px solid var(--border);
+      background: transparent; cursor: pointer;
+    }
   `;
   document.head.appendChild(style);
 
@@ -198,6 +262,72 @@ export function createDevPanel({
   $("#dv-stop-all").addEventListener("click", () => { for (const u of units.list) u.stop(); });
   $("#dv-debug-units").addEventListener("click", () => {
     console.table(units.list.map((u) => u.debugState()));
+  });
+
+  // ── Fog ─────────────────────────────────────────────────────────────────────
+  const fogState = app?.fog?.state?.height ?? {};
+  const distState = app?.fog?.state?.distance ?? {};
+
+  const fogBtn = $("#dv-fog");
+  const setFogChecked = (on) => {
+    fogBtn.classList.toggle("checked", !!on);
+    app?.fog?.setHeight?.({ enabled: !!on, mode: "valley" });
+  };
+  setFogChecked(fogState.enabled !== false);
+  fogBtn.addEventListener("click", () => setFogChecked(!fogBtn.classList.contains("checked")));
+
+  const fogColor = $("#dv-fog-color");
+  fogColor.value = fogState.color ?? "#c8d8e4";
+  fogColor.addEventListener("input", () => {
+    app?.fog?.setHeight?.({ color: fogColor.value });
+  });
+
+  const fogBase = $("#dv-fog-base"), fogBaseV = $("#dv-fog-base-v");
+  fogBase.value = fogState.base ?? 8;
+  fogBaseV.textContent = fogBase.value;
+  fogBase.addEventListener("input", () => {
+    app?.fog?.setHeight?.({ base: +fogBase.value });
+    fogBaseV.textContent = fogBase.value;
+  });
+
+  const fogTop = $("#dv-fog-top"), fogTopV = $("#dv-fog-top-v");
+  fogTop.value = fogState.top ?? 42;
+  fogTopV.textContent = fogTop.value;
+  fogTop.addEventListener("input", () => {
+    app?.fog?.setHeight?.({ top: +fogTop.value });
+    fogTopV.textContent = fogTop.value;
+  });
+
+  const fogHaze = $("#dv-fog-haze"), fogHazeV = $("#dv-fog-haze-v");
+  fogHaze.value = fogState.haze ?? 0.0018;
+  fogHazeV.textContent = (+fogHaze.value).toFixed(4);
+  fogHaze.addEventListener("input", () => {
+    app?.fog?.setHeight?.({ haze: +fogHaze.value });
+    fogHazeV.textContent = (+fogHaze.value).toFixed(4);
+  });
+
+  const fogWobble = $("#dv-fog-wobble"), fogWobbleV = $("#dv-fog-wobble-v");
+  fogWobble.value = fogState.noiseWobble ?? 16;
+  fogWobbleV.textContent = fogWobble.value;
+  fogWobble.addEventListener("input", () => {
+    app?.fog?.setHeight?.({ noiseWobble: +fogWobble.value });
+    fogWobbleV.textContent = fogWobble.value;
+  });
+
+  const fogDistBtn = $("#dv-fog-dist");
+  const setFogDistChecked = (on) => {
+    fogDistBtn.classList.toggle("checked", !!on);
+    app?.fog?.setDistance?.({ enabled: !!on, matchSky: true });
+  };
+  setFogDistChecked(distState.enabled !== false);
+  fogDistBtn.addEventListener("click", () => setFogDistChecked(!fogDistBtn.classList.contains("checked")));
+
+  const fogDistD = $("#dv-fog-dist-d"), fogDistDV = $("#dv-fog-dist-d-v");
+  fogDistD.value = distState.density ?? 0.0004;
+  fogDistDV.textContent = (+fogDistD.value).toFixed(4);
+  fogDistD.addEventListener("input", () => {
+    app?.fog?.setDistance?.({ density: +fogDistD.value });
+    fogDistDV.textContent = (+fogDistD.value).toFixed(4);
   });
 
   // ── Post-FX ─────────────────────────────────────────────────────────────────

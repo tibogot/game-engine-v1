@@ -474,10 +474,19 @@ export const V2_CONFIG = {
     // decay (≈ 1/falloff m layer thickness).
     height: {
       enabled: false,
+      /** "analytic" = Crytek ray-integrated fog; "valley" = world-Y band (three.js webgpu_custom_fog). */
+      mode: "analytic",
       color: "#a8c4e0",
       density: 0.015,
       falloff: 0.05,
       height: 30.0,
+      // Valley band — solid below `base`, fades out by `top`, plus distance `haze`.
+      base: -20,
+      top: 55,
+      haze: 0.0012,
+      noiseWobble: 22,
+      noiseScaleA: 0.005,
+      noiseScaleB: 0.01,
     },
     distance: {
       enabled: false,
