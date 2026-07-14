@@ -19,9 +19,18 @@
     <style>
       /* Hide the editor chrome — the game shows only the viewport. */
       #toolbar,
-      #right-panel,
-      #perf-stats { display: none !important; }
+      #right-panel { display: none !important; }
       #viewport { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; }
+
+      /* Engine perf stats (stats-gl: FPS / CPU / GPU + DRAW / KTRI) — the engine
+         creates and updates it, and pins it to the viewport's BOTTOM-left, which
+         is where the minimap lives. `!important` beats the inline style the
+         engine's layoutStatsOverlay() rewrites on every resize. */
+      #perf-stats {
+        top: 8px !important;
+        bottom: auto !important;
+        left: 8px !important;
+      }
 
       #boot {
         position: fixed; inset: 0; z-index: 9999;
