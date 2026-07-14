@@ -12,6 +12,7 @@ import * as THREE from "three";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materialColor } from "three/tsl";
+import { teamTint, isUntinted } from "./teams.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
 import { UNIT_TYPES, UNIT_TYPE_KEYS } from "./unitTypes.js";
@@ -267,6 +268,16 @@ function buildInstancedType(tpl, scene) {
     im.castShadow = true;
     im.receiveShadow = true;
     im.frustumCulled = false; // instances live anywhere; the shared bounds are meaningless
+
+    // Team color (teams.js). Allocated UP FRONT, not lazily via setColorAt: three
+    // decides whether to compile `vInstanceColor` into the shader by looking at
+    // object.instanceColor when the material is first built, so a buffer that
+    // appears later would simply be ignored. White = untinted.
+    im.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_PER_TYPE * 3).fill(1), 3,
+    );
+    im.instanceColor.setUsage(THREE.DynamicDrawUsage);
+
     scene.add(im);
 
     const kind = o.name === "MainRotor" ? "main" : o.name === "TailRotor" ? "tail" : null;
@@ -388,6 +399,18 @@ export async function createUnitRenderer({ app, units, healthBars }) {
     const root = cloneTemplateRoot(t.typeKey);
     root.traverse((o) => { if (o.isMesh) unitByMesh.set(o, unit); });
 
+    // Skinned units can't carry an instanceColor, so a non-player team takes a
+    // tinted clone of the shared material. Player units keep sharing the
+    // template's material — no clone, no extra pipeline, for the common case.
+    if (!isUntinted(unit.team)) {
+      const tint = teamTint(unit.team);
+      root.traverse((o) => {
+        if (!o.isMesh) return;
+        o.material = o.material.clone();
+        o.material.color.multiply(tint);
+      });
+    }
+
     // Skinned units get their own AnimationMixer (idle ⇄ run driven in sync()).
     let mixer = null, actions = null;
     if (tpl.skinned && tpl.animations.length) {
@@ -476,6 +499,7 @@ export async function createUnitRenderer({ app, units, healthBars }) {
         const i = inst.n;
         if (i < MAX_PER_TYPE) {
           x.updateMatrix(); // off-scene: nothing else will do this for us
+          const tint = teamTint(unit.team);
           for (const part of inst.parts) {
             if (part.kind) {
               _euler.copy(part.baseEuler);
@@ -487,6 +511,7 @@ export async function createUnitRenderer({ app, units, healthBars }) {
               _mat.multiplyMatrices(x.matrix, part.rel);
             }
             part.im.setMatrixAt(i, _mat);
+            part.im.setColorAt(i, tint); // same material, different side
           }
           inst.unitAt[i] = unit; // so a raycast on instanceId finds this unit
           inst.n = i + 1;
@@ -533,6 +558,7 @@ export async function createUnitRenderer({ app, units, healthBars }) {
       for (const part of inst.parts) {
         part.im.count = inst.n;
         part.im.instanceMatrix.needsUpdate = true;
+        part.im.instanceColor.needsUpdate = true;
       }
     }
   }

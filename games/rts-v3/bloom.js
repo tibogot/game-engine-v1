@@ -18,7 +18,7 @@ import { output, vec4, float, mul, uv, vec2, smoothstep, materialColor, material
  * and otherwise collapses to the material's plain `output` like a normal
  * material.
  */
-class BloomMRTNode extends THREE.MRTNode {
+export class BloomMRTNode extends THREE.MRTNode {
   static get type() { return "BloomMRTNode"; }
 
   setup(builder) {

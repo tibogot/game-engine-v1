@@ -35,7 +35,7 @@ function turnToward(a, b, maxStep) {
   return a + THREE.MathUtils.clamp(d, -maxStep, maxStep);
 }
 
-function makeUnit(app, type, navGrid, x, z, getUnits) {
+function makeUnit(app, type, navGrid, x, z, getUnits, team = "player") {
   const pos = new THREE.Vector3(x, 0, z);
   const target = new THREE.Vector3(x, 0, z);
   const waypoints = [];
@@ -138,7 +138,9 @@ function makeUnit(app, type, navGrid, x, z, getUnits) {
     type,
     typeKey: type.typeKey,
     name: type.name,
-    team: "player",
+    // The renderer turns this into a per-instance tint (teams.js) — a team never
+    // forks a material, so every jeep on the map stays in one draw call.
+    team,
     isAir: !!type.isAir,
     isStructure: false,
     radius: type.radius,
@@ -535,13 +537,13 @@ export function createUnits({
     /** Called by unitRenderer so it can build a view for runtime-spawned units. */
     setOnSpawn(fn) { onSpawn = fn ?? (() => {}); },
 
-    /** Build a new unit at runtime (base production). */
-    spawn(typeKey, x, z) {
+    /** Build a new unit at runtime (base production, or an enemy wave). */
+    spawn(typeKey, x, z, { team = "player" } = {}) {
       const type = UNIT_TYPES[typeKey];
       if (!type) return null;
       let px = x, pz = z;
       if (!type.isAir && navGrid) ({ x: px, z: pz } = navGrid.nearestOpenWorld(x, z));
-      const u = makeUnit(app, type, navGrid, px, pz, getUnits);
+      const u = makeUnit(app, type, navGrid, px, pz, getUnits, team);
       units.push(u);
       onSpawn(u);
       return u;
