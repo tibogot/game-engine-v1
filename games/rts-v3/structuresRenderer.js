@@ -274,6 +274,11 @@ export function createStructuresRenderer({ app, structures, healthBars }) {
   if (structures.base) {
     const bp = structures.base.position;
     baseView.position.set(bp.x, bp.y, bp.z);
+    // The RTS camera looks UP the map (toward the enemy, +Z) from behind the base,
+    // so it only ever sees the base's -Z face. Turn the HQ around so its door faces
+    // the CAMERA (-Z) — otherwise the whole door animation plays where you can't
+    // see it. Units muster on this near side too (structures.js).
+    baseView.rotation.y = Math.PI;
     scene.add(baseView);
   }
   let doorOpen = 0; // 0 shut → 1 fully up

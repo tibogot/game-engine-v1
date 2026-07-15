@@ -117,7 +117,7 @@ export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
   base.queue = [];       // typeKeys waiting to be built
   base.progress = 0;     // 0..1 through the head of the queue
   // Rally toward the enemy (up the map), on flat ground beside the base.
-  base.rally = { x: base.position.x, z: base.position.z + base.radius + 22 };
+  base.rally = { x: base.position.x, z: base.position.z - (base.radius + 22) };
   base.enqueue = (typeKey) => {
     if (base.alive && base.queue.length < 8) base.queue.push(typeKey);
   };
@@ -158,10 +158,10 @@ export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
     base.progress = 0;
     base.queue.shift();
 
-    // Emerge from the DOOR (front of the hangar, +Z toward the rally), just clear
-    // of the base footprint, then drive to the rally point.
+    // Emerge from the DOOR — the hangar's -Z face, which is the side the RTS
+    // camera sees — just clear of the base footprint, then drive to the rally.
     const jitter = (Math.random() - 0.5) * 7;
-    const u = spawn(key, base.position.x + jitter, base.position.z + base.radius + 3);
+    const u = spawn(key, base.position.x + jitter, base.position.z - (base.radius + 3));
     u?.moveOrder(base.rally.x, base.rally.z);
   }
 
@@ -188,7 +188,7 @@ export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
         s.position.set(site.x, site.y, site.z);
       }
       if (base?.alive) {
-        base.rally = { x: base.position.x, z: base.position.z + base.radius + 22 };
+        base.rally = { x: base.position.x, z: base.position.z - (base.radius + 22) };
       }
     },
   };

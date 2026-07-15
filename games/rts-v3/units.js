@@ -475,10 +475,12 @@ export function createUnits({
   const units = [];
   const getUnits = () => units;
   // Fan the starting army out AROUND the muster point, facing up-map.
+  // Muster on the base's -Z side — the side the RTS camera faces (where the HQ's
+  // door is), so the starting army sits in view, not behind the building.
   const origins = {
-    jeep:       { x: origin.x + 34, z: origin.z + 26 },
-    helicopter: { x: origin.x - 34, z: origin.z + 26 },
-    soldier:    { x: origin.x,      z: origin.z + 40 },
+    jeep:       { x: origin.x + 34, z: origin.z - 26 },
+    helicopter: { x: origin.x - 34, z: origin.z - 26 },
+    soldier:    { x: origin.x,      z: origin.z - 40 },
   };
 
   for (const key of UNIT_TYPE_KEYS) {
