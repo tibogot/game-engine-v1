@@ -8,7 +8,9 @@ export function createCommandCard({
   onStop = () => {},
   onFocus = () => {},
   onBuild = () => {},
-  buildable = [],   // [{ key, label }]
+  buildable = [],       // [{ key, label }] — the base's unit production
+  structureBuilds = [], // [{ key, label }] — buildings a selected builder can raise
+  onBuildStructure = () => {},
 }) {
   const root = document.createElement("div");
   root.id = "rts-cmd-card";
@@ -57,6 +59,12 @@ export function createCommandCard({
     const types = new Set(selected.map((u) => u.typeKey));
     const lead = selected[0];
     const url = thumbnails?.get(lead.typeKey);
+
+    // Which buildings can this selection raise? (union of every selected builder's list)
+    const canBuild = new Set();
+    for (const u of selected) for (const k of u.type?.builds ?? []) canBuild.add(k);
+    const builds = structureBuilds.filter((b) => canBuild.has(b.key));
+
     root.innerHTML = `
       <div class="cc-head">
         <div class="cc-portrait" style="${url ? `background-image:url(${url})` : ""}"></div>
@@ -65,6 +73,7 @@ export function createCommandCard({
           <div class="cc-sub">${selected.length} unit${selected.length > 1 ? "s" : ""}</div>
         </div>
       </div>
+      ${builds.length ? `<div class="cc-actions">${builds.map((b) => `<button data-struct="${b.key}">${b.label}</button>`).join("")}</div>` : ""}
       <div class="cc-actions">
         <button data-act="stop">Stop</button>
         <button data-act="focus">Focus</button>
@@ -72,6 +81,10 @@ export function createCommandCard({
     `;
     root.querySelector('[data-act="stop"]').addEventListener("click", onStop);
     root.querySelector('[data-act="focus"]').addEventListener("click", onFocus);
+    for (const b of builds) {
+      root.querySelector(`[data-struct="${b.key}"]`)
+        .addEventListener("click", () => onBuildStructure(b.key, selected));
+    }
   }
 
   function renderBase(base) {

@@ -28,6 +28,7 @@ import { createWaves } from "./waves.js";
 import { createWaveHud } from "./waveHud.js";
 import { createBuildings } from "./buildings.js";
 import { createBuildingRenderer } from "./buildingRenderer.js";
+import { createBuildPlacement } from "./buildPlacement.js";
 import { createCombatFx } from "./combatFx.js";
 import { createCombat } from "./combat.js";
 import { createProjectiles } from "./projectiles.js";
@@ -130,10 +131,23 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
 
   // Player-built buildings (helipad, …): runtime structures the builder raises.
   // They live in structures.list too, so combat/selection see them for free.
-  const buildings = createBuildings({ app, structures, units });
+  const buildings = createBuildings({ app, structures, units, navGrid });
   app.buildings = buildings;
   const buildingRenderer = createBuildingRenderer({ app, buildings });
   app.buildingRenderer = buildingRenderer;
+
+  // Ghost placement: select a builder → Build Helipad → site it → the builder
+  // drives there and raises it (buildings.updateBuilders).
+  const buildPlacement = createBuildPlacement({
+    app,
+    onCommit: (typeKey, x, z, chosenBuilders) => {
+      for (const b of chosenBuilders) {
+        b.buildOrder = { typeKey, x, z };
+        b.moveOrder?.(x, z);
+      }
+    },
+  });
+  app.buildPlacement = buildPlacement;
 
   // Combat: units fire VISIBLE rockets with exhaust trails; damage lands on
   // impact. Wrecks catch fire. All of it glows via the engine's emissive MRT.
@@ -195,6 +209,8 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
       { key: "builder", label: "Build Builder" },
     ],
     onBuild: (key) => structures.base.enqueue(key),
+    structureBuilds: [{ key: "helipad", label: "Build Helipad" }],
+    onBuildStructure: (key, selected) => buildPlacement.begin(key, selected),
     onStop: () => { for (const u of app.selection?.selected ?? []) u.stop?.(); },
     onFocus: () => {
       const sel = app.selection?.selected ?? [];

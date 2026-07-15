@@ -76,6 +76,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
 
   const onPointerDown = (e) => {
     if (e.button !== 0 || !rtsActive()) return;
+    if (app.buildPlacement?.state.active) return; // placement owns the cursor
     down = { x: e.clientX, y: e.clientY, shift: e.shiftKey };
     dragging = false;
   };

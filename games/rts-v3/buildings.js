@@ -68,7 +68,7 @@ function makeBuilding(app, type, x, z) {
   };
 }
 
-export function createBuildings({ app, structures, units }) {
+export function createBuildings({ app, structures, units, navGrid = null }) {
   const list = [];
 
   /**
@@ -87,7 +87,30 @@ export function createBuildings({ app, structures, units }) {
     const b = makeBuilding(app, type, site.x, site.z);
     list.push(b);
     structures.add?.(b);       // combat / selection / waves now see it
+    // Block pathing under the footprint so units route around it, not over it.
+    navGrid?.addObstacle?.(site.x, site.z, type.radius);
     return b;
+  }
+
+  /**
+   * Drive builders that have a pending build order: once one reaches its site it
+   * stops and raises the building. `buildOrder` is set by the placement UX.
+   */
+  function updateBuilders() {
+    for (const u of units.list) {
+      if (!u.alive || !u.buildOrder || u.busyBuilding) continue;
+      const bo = u.buildOrder;
+      const reach = (BUILDING_TYPES[bo.typeKey]?.radius ?? 8) + 8;
+      if (Math.hypot(u.position.x - bo.x, u.position.z - bo.z) > reach) continue; // still driving
+
+      // Arrived — raise it. Guard against re-entry while the async flatten runs.
+      u.busyBuilding = true;
+      u.haltMovement?.();
+      place(bo.typeKey, bo.x, bo.z).finally(() => {
+        u.buildOrder = null;
+        u.busyBuilding = false;
+      });
+    }
   }
 
   /** Where a finished helicopter should rally: just off the pad, toward the enemy. */
@@ -96,6 +119,8 @@ export function createBuildings({ app, structures, units }) {
   }
 
   function update(dt) {
+    updateBuilders();
+
     for (const b of list) {
       if (!b.alive) continue;
 
