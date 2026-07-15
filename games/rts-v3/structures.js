@@ -158,10 +158,10 @@ export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
     base.progress = 0;
     base.queue.shift();
 
-    // Pop out around the edge of the base, then head for the rally point.
-    const a = Math.random() * Math.PI * 2;
-    const r = base.radius + 8;
-    const u = spawn(key, base.position.x + Math.cos(a) * r, base.position.z + Math.sin(a) * r);
+    // Emerge from the DOOR (front of the hangar, +Z toward the rally), just clear
+    // of the base footprint, then drive to the rally point.
+    const jitter = (Math.random() - 0.5) * 7;
+    const u = spawn(key, base.position.x + jitter, base.position.z + base.radius + 3);
     u?.moveOrder(base.rally.x, base.rally.z);
   }
 
