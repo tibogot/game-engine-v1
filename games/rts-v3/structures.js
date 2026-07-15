@@ -162,6 +162,7 @@ export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
     // camera sees — just clear of the base footprint, then drive to the rally.
     const jitter = (Math.random() - 0.5) * 7;
     const u = spawn(key, base.position.x + jitter, base.position.z - (base.radius + 3));
+    u?.faceToward(base.rally.x, base.rally.z); // face out the door, don't spin to it
     u?.moveOrder(base.rally.x, base.rally.z);
   }
 

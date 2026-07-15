@@ -202,10 +202,10 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   // base's PRODUCTION queue when the base is selected.
   const commandCard = createCommandCard({
     thumbnails: unitRenderer.thumbnails,
+    // The base makes ground units + builders. Helicopters come from a HELIPAD.
     buildable: [
       { key: "soldier", label: "Build Soldier" },
       { key: "jeep", label: "Build Jeep" },
-      { key: "helicopter", label: "Build Heli" },
       { key: "builder", label: "Build Builder" },
     ],
     onBuild: (key) => structures.base.enqueue(key),

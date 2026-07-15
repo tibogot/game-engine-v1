@@ -38,7 +38,8 @@ export function createWaves({ app, units, structures, navGrid }) {
   let timer = FIRST_WAVE_DELAY;
   let advanceCd = 0;
   let running = true;
-  let outcome = null; // "defeat" once the base falls
+  let enabled = false; // OFF by default — the player turns waves on from the dev panel
+  let outcome = null;  // "defeat" once the base falls
 
   const liveEnemies = () =>
     units.list.filter((u) => u.team === "enemy" && u.alive);
@@ -97,7 +98,7 @@ export function createWaves({ app, units, structures, navGrid }) {
   }
 
   function update(dt) {
-    if (!running) return;
+    if (!running || !enabled) return;
 
     // The base is the win condition. Lose it and the game is over.
     if (!base.alive && !outcome) {
@@ -122,6 +123,12 @@ export function createWaves({ app, units, structures, navGrid }) {
 
   return {
     update,
+    get enabled() { return enabled; },
+    /** Toggle the wave clock. Turning on (re)starts the countdown to the next wave. */
+    setEnabled(on) {
+      enabled = !!on;
+      if (enabled && wave === 0) timer = FIRST_WAVE_DELAY;
+    },
     get wave() { return wave; },
     get nextWaveIn() { return Math.max(0, timer); },
     get enemiesAlive() { return liveEnemies().length; },

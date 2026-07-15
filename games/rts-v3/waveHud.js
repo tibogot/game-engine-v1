@@ -93,9 +93,11 @@ export function createWaveHud() {
       e.textContent = alive > 0 ? `${alive} enemy${alive === 1 ? "" : " units"}` : "no contact";
       e.classList.toggle("none", alive === 0);
 
-      $("wave-next").innerHTML = n > 0
-        ? `next in <b>${mmss(waves.nextWaveIn)}</b>`
-        : `first wave in <b>${mmss(waves.nextWaveIn)}</b>`;
+      $("wave-next").innerHTML = !waves.enabled
+        ? `<b>waves off</b>`
+        : n > 0
+          ? `next in <b>${mmss(waves.nextWaveIn)}</b>`
+          : `first wave in <b>${mmss(waves.nextWaveIn)}</b>`;
 
       if (waves.outcome === "defeat" && !end.classList.contains("show")) {
         $("end-title").textContent = "Defeat";

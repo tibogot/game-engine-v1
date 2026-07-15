@@ -73,6 +73,20 @@ export function createDevPanel({
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Enemy Waves</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Auto waves</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-waves" type="button" aria-label="Enemy waves">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <button class="action-btn" id="dv-wave-now" type="button">Spawn wave now</button>
+          <div class="dv-hint">Off by default. Turn on for timed attacks, or spawn one manually.</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Fog</div>
         <div class="section-body">
           <div class="prop-row">
@@ -290,6 +304,16 @@ export function createDevPanel({
   $("#dv-debug-units").addEventListener("click", () => {
     console.table(units.list.map((u) => u.debugState()));
   });
+
+  // ── Enemy waves ─────────────────────────────────────────────────────────────
+  const wavesBtn = $("#dv-waves");
+  const setWavesChecked = (on) => {
+    wavesBtn.classList.toggle("checked", !!on);
+    app?.waves?.setEnabled?.(!!on);
+  };
+  setWavesChecked(app?.waves?.enabled ?? false);
+  wavesBtn.addEventListener("click", () => setWavesChecked(!wavesBtn.classList.contains("checked")));
+  $("#dv-wave-now").addEventListener("click", () => app?.waves?.spawnNow?.());
 
   // ── Fog ─────────────────────────────────────────────────────────────────────
   const fogState = app?.fog?.state?.height ?? {};

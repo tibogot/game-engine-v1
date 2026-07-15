@@ -207,6 +207,10 @@ function makeUnit(app, type, navGrid, x, z, getUnits, team = "player") {
       unit.orderTo(tx, tz);
     },
 
+    /** Point the unit at a world direction immediately (no turn). Used at spawn so
+     *  a unit emerging from a building doesn't pirouette to face its exit. */
+    faceToward(tx, tz) { heading = Math.atan2(tx - pos.x, tz - pos.z); },
+
     takeDamage(n) {
       if (!unit.alive) return;
       unit.hp -= n;

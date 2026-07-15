@@ -146,6 +146,7 @@ export function createBuildings({ app, structures, units, navGrid = null }) {
       if (u) {
         u.launch?.(b.type.launchDur ?? 1.8);
         const r = rallyFor(b);
+        u.faceToward?.(r.x, r.z); // face the rally before lifting off, no mid-air spin
         u.moveOrder?.(r.x, r.z);
       }
     }
