@@ -598,7 +598,12 @@ export async function createUnitRenderer({ app, units, healthBars }) {
         _alignQ.setFromUnitVectors(_UP, _n);
         _yawQ.setFromAxisAngle(_UP, yaw);
         _targetQ.copy(_alignQ).multiply(_yawQ);
-        x.quaternion.slerp(_targetQ, Math.min(1, dt * 12));
+        // First frame: SNAP to the spawn heading. A fresh xform is identity
+        // (facing +Z), so slerping would make the unit visibly pivot from +Z to
+        // its real heading as it leaves the hangar — the "quick shift". After
+        // that, ease so it rolls smoothly over terrain bumps.
+        if (v.oriented) x.quaternion.slerp(_targetQ, Math.min(1, dt * 12));
+        else { x.quaternion.copy(_targetQ); v.oriented = true; }
       }
 
       v.mainAngle += dt * 28;

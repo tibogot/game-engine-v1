@@ -202,13 +202,20 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   // base's PRODUCTION queue when the base is selected.
   const commandCard = createCommandCard({
     thumbnails: unitRenderer.thumbnails,
-    // The base makes ground units + builders. Helicopters come from a HELIPAD.
-    buildable: [
-      { key: "soldier", label: "Build Soldier" },
-      { key: "jeep", label: "Build Jeep" },
-      { key: "builder", label: "Build Builder" },
-    ],
-    onBuild: (key) => structures.base.enqueue(key),
+    // What a selected structure can produce: the base makes ground units +
+    // builders; a helipad makes helicopters. Helicopters come ONLY from a helipad.
+    productionFor: (s) => (
+      s.typeKey === "base"
+        ? [
+            { key: "soldier", label: "Build Soldier" },
+            { key: "jeep", label: "Build Jeep" },
+            { key: "builder", label: "Build Builder" },
+          ]
+        : s.typeKey === "helipad"
+          ? [{ key: "helicopter", label: "Build Heli" }]
+          : []
+    ),
+    onBuild: (structure, key) => structure.enqueue(key),
     structureBuilds: [{ key: "helipad", label: "Build Helipad" }],
     onBuildStructure: (key, selected) => buildPlacement.begin(key, selected),
     onStop: () => { for (const u of app.selection?.selected ?? []) u.stop?.(); },
@@ -223,7 +230,7 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
   app.commandCard = commandCard;
 
   const selection = createSelection({
-    app, units, unitRenderer, structuresRenderer,
+    app, units, unitRenderer, structuresRenderer, buildingRenderer,
     // The unit bar shows units only; buildings live in the command card.
     onChange: (sel) => {
       unitBar.render(sel.filter((e) => !e.isStructure));

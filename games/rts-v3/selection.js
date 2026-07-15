@@ -17,7 +17,7 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 // `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
 // (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
 // different thing, hence the explicit name.)
-export function createSelection({ app, units, unitRenderer, structuresRenderer = null, onChange = () => {} }) {
+export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, onChange = () => {} }) {
   // Rigid unit types render as shared InstancedMeshes, so a hit identifies its
   // unit by instanceId, not by the mesh — unitRenderer owns that resolution.
   // Crowd soldiers have no mesh AT ALL (they live in a compute buffer), so they
@@ -69,6 +69,14 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       for (const h of sHits) {
         const s = structuresRenderer.structureFromHit(h);
         if (s?.alive && s.team === "player") return s;
+      }
+    }
+    // Player-built buildings (helipad) have their own renderer/pick.
+    if (buildingRenderer) {
+      const bHits = raycaster.intersectObjects(buildingRenderer.roots, true);
+      for (const h of bHits) {
+        const b = buildingRenderer.buildingFromHit(h);
+        if (b?.alive && b.team === "player") return b;
       }
     }
     return null;

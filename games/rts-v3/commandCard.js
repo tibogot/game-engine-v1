@@ -7,9 +7,9 @@ export function createCommandCard({
   thumbnails,
   onStop = () => {},
   onFocus = () => {},
-  onBuild = () => {},
-  buildable = [],       // [{ key, label }] — the base's unit production
-  structureBuilds = [], // [{ key, label }] — buildings a selected builder can raise
+  onBuild = () => {},          // (structure, key) — enqueue production on that structure
+  productionFor = () => [],    // (structure) → [{ key, label }] it can produce
+  structureBuilds = [],        // [{ key, label }] — buildings a selected builder can raise
   onBuildStructure = () => {},
 }) {
   const root = document.createElement("div");
@@ -87,31 +87,34 @@ export function createCommandCard({
     }
   }
 
-  function renderBase(base) {
-    baseRef = base;
+  function renderProducer(s) {
+    baseRef = s;
+    const opts = productionFor(s);
+    const constructing = s.constructing === true;
     root.innerHTML = `
       <div class="cc-head">
         <div>
-          <div class="cc-name">${base.name}</div>
-          <div class="cc-sub">Right-click to set rally point</div>
+          <div class="cc-name">${s.name}</div>
+          <div class="cc-sub">${constructing ? "Under construction…" : "Production"}</div>
         </div>
       </div>
       <div class="cc-bar"><i id="cc-prog"></i></div>
       <div class="cc-queue" id="cc-queue"></div>
       <div class="cc-actions">
-        ${buildable.map((b) => `<button data-build="${b.key}">${b.label}</button>`).join("")}
+        ${opts.map((b) => `<button data-build="${b.key}">${b.label}</button>`).join("")}
       </div>
     `;
-    for (const b of buildable) {
+    for (const b of opts) {
       root.querySelector(`[data-build="${b.key}"]`)
-        .addEventListener("click", () => onBuild(b.key));
+        .addEventListener("click", () => onBuild(s, b.key));
     }
   }
 
   function render(selected) {
     if (!selected.length) { root.classList.remove("show"); baseRef = null; return; }
-    const base = selected.find((e) => e.isStructure && e.enqueue);
-    if (base) renderBase(base);
+    // A selected PRODUCING structure (base or a finished building) shows its queue.
+    const producer = selected.find((e) => e.isStructure && e.enqueue);
+    if (producer) renderProducer(producer);
     else renderUnits(selected.filter((e) => !e.isStructure));
     root.classList.add("show");
   }

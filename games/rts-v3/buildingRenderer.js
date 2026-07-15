@@ -75,6 +75,9 @@ export function createBuildingRenderer({ app, buildings }) {
   const views = new Map(); // building → Group
   let _t = 0;
 
+  const roots = [];             // raycast targets for selection (one group per building)
+  const buildingOfGroup = new Map();
+
   function ensureView(b) {
     let g = views.get(b);
     if (g) return g;
@@ -83,7 +86,18 @@ export function createBuildingRenderer({ app, buildings }) {
     g.frustumCulled = false;
     scene.add(g);
     views.set(b, g);
+    roots.push(g);
+    buildingOfGroup.set(g, b);
     return g;
+  }
+
+  /** Resolve a raycast hit to its building (a hit on any child of the group). */
+  function buildingFromHit(hit) {
+    for (let o = hit.object; o; o = o.parent) {
+      const b = buildingOfGroup.get(o);
+      if (b) return b;
+    }
+    return null;
   }
 
   function sync(dt) {
@@ -111,6 +125,8 @@ export function createBuildingRenderer({ app, buildings }) {
 
   return {
     sync,
+    roots,             // raycast targets for selection
+    buildingFromHit,   // resolve a hit to its building
     dispose() {
       for (const g of views.values()) scene.remove(g);
       views.clear();
