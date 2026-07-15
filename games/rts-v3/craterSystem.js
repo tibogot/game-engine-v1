@@ -10,7 +10,7 @@
 import * as THREE from "three";
 import { texture, uv } from "three/tsl";
 
-const TEXTURE_URL = "/textures/leaves/crater-decal.png";
+const TEXTURE_URL = "/textures/crater-decal.png";
 const MAX_CRATERS = 96;
 const SUBDIV = 28;
 const HEIGHT_OFFSET = 0.15;
