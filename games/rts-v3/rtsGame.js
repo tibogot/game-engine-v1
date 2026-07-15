@@ -286,7 +286,7 @@ export async function startRtsGame({ onStatus = () => {} } = {}) {
 
     rtsCamera.update(dt);
     waves.update(dt);                     // spawn the next wave, keep them marching
-    structures.updateProduction(dt, (key, x, z) => units.spawn(key, x, z));
+    structures.updateProduction(dt, (key, x, z, opts) => units.spawn(key, x, z, opts));
     buildings.update(dt);                 // construction ramp + helipad production
     units.update(dt);
     combat.update(dt);                    // acquire → chase → launch rockets

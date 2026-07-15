@@ -44,6 +44,7 @@ function makeUnit(app, type, navGrid, x, z, getUnits, team = "player") {
   // treating it as arrived made every separation nudge cancel a heli's order.
   let arrived = true;
   let heading = 0;
+  let emerging = null;        // { toX, toZ, rallyX, rallyZ } — scripted drive out of a building
   let stuckT = 0;             // seconds without a NEW closest-distance to the waypoint
   let bestTgtDist = Infinity; // closest we've ever been to the current waypoint
   let escapeT = 0;   // seconds left of the "sidestep hard" escape
@@ -211,6 +212,19 @@ function makeUnit(app, type, navGrid, x, z, getUnits, team = "player") {
      *  a unit emerging from a building doesn't pirouette to face its exit. */
     faceToward(tx, tz) { heading = Math.atan2(tx - pos.x, tz - pos.z); },
 
+    /**
+     * Drive smoothly OUT of a building: from wherever it spawned (the door mouth)
+     * straight to (outX,outZ), then hand off to a normal move order to the rally.
+     * Runs as a GHOST so nothing shoves it and it ignores the building's own
+     * blocked footprint — a scripted, collision-free exit, then normal AI resumes.
+     */
+    emerge(outX, outZ, rallyX, rallyZ) {
+      heading = Math.atan2(outX - pos.x, outZ - pos.z);
+      unit.ghost = true;
+      arrived = false;
+      emerging = { toX: outX, toZ: outZ, rallyX, rallyZ };
+    },
+
     takeDamage(n) {
       if (!unit.alive) return;
       unit.hp -= n;
@@ -279,6 +293,27 @@ function makeUnit(app, type, navGrid, x, z, getUnits, team = "player") {
       const prevX = pos.x, prevZ = pos.z;
       if (repathCd > 0) repathCd -= dt;
       sinceIntervene += dt;
+
+      // ── Emerging from a building ──────────────────────────────────────────────
+      // A scripted straight drive from the door to the exit point, BEFORE any
+      // pathfinding / collision / blocked-terrain logic (it's a ghost). When it
+      // reaches the exit, hand off to a normal move to the rally.
+      if (emerging) {
+        const ex = emerging.toX - pos.x, ez = emerging.toZ - pos.z;
+        const el = Math.hypot(ex, ez);
+        const step = type.speed * unit.speedScale * dt;
+        if (el <= step + 0.5) {
+          pos.x = emerging.toX; pos.z = emerging.toZ;
+          const r = emerging; emerging = null; unit.ghost = false;
+          unit.moveOrder(r.rallyX, r.rallyZ);
+        } else {
+          pos.x += (ex / el) * step;
+          pos.z += (ez / el) * step;
+          heading = turnToward(heading, Math.atan2(ex, ez), (type.turnRate ?? 3) * dt * 2);
+        }
+        pos.y = groundAt(pos.x, pos.z) + (type.hover ?? 0);
+        return;
+      }
 
       // ── Escape blocked terrain ────────────────────────────────────────────
       // If a unit somehow ends up inside a blocked cell (shoved to a boundary,
@@ -561,12 +596,17 @@ export function createUnits({
     /** Called by unitRenderer so it can build a view for runtime-spawned units. */
     setOnSpawn(fn) { onSpawn = fn ?? (() => {}); },
 
-    /** Build a new unit at runtime (base production, or an enemy wave). */
-    spawn(typeKey, x, z, { team = "player" } = {}) {
+    /**
+     * Build a new unit at runtime (base production, or an enemy wave).
+     * `snap` (default true) nudges the spawn to open ground; pass false to place
+     * it EXACTLY — e.g. at a hangar door inside the building's own footprint, from
+     * where it then drives out via emerge().
+     */
+    spawn(typeKey, x, z, { team = "player", snap = true } = {}) {
       const type = UNIT_TYPES[typeKey];
       if (!type) return null;
       let px = x, pz = z;
-      if (!type.isAir && navGrid) ({ x: px, z: pz } = navGrid.nearestOpenWorld(x, z));
+      if (snap && !type.isAir && navGrid) ({ x: px, z: pz } = navGrid.nearestOpenWorld(x, z));
       const u = makeUnit(app, type, navGrid, px, pz, getUnits, team);
       units.push(u);
       onSpawn(u);

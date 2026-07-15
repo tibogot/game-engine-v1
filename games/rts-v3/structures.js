@@ -79,6 +79,10 @@ function makeStructure(app, type, x, z) {
 /** Seconds to build each unit type. */
 export const BUILD_TIME = { soldier: 2.5, jeep: 4, helicopter: 7 };
 
+// The hangar door sits on the base's -Z face, half the hangar depth from centre
+// (B_DZ/2 in structuresRenderer.js). Units spawn here and drive straight out.
+const DOOR_MOUTH = 8;
+
 /**
  * Place structures on the map.
  *
@@ -158,12 +162,13 @@ export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
     base.progress = 0;
     base.queue.shift();
 
-    // Emerge from the DOOR — the hangar's -Z face, which is the side the RTS
-    // camera sees — just clear of the base footprint, then drive to the rally.
-    const jitter = (Math.random() - 0.5) * 7;
-    const u = spawn(key, base.position.x + jitter, base.position.z - (base.radius + 3));
-    u?.faceToward(base.rally.x, base.rally.z); // face out the door, don't spin to it
-    u?.moveOrder(base.rally.x, base.rally.z);
+    // Drive OUT OF THE DOOR: spawn at the door mouth (the hangar's -Z face, which
+    // the RTS camera sees), placed exactly there — inside the footprint — then a
+    // scripted straight exit clear of the base, then a normal move to the rally.
+    const doorZ = base.position.z - DOOR_MOUTH;                 // at the door
+    const exitZ = base.position.z - (base.radius + 8);          // clear of the footprint
+    const u = spawn(key, base.position.x, doorZ, { snap: false });
+    u?.emerge(base.position.x, exitZ, base.rally.x, base.rally.z);
   }
 
   return {
