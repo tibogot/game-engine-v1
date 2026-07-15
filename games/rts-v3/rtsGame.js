@@ -40,12 +40,17 @@ import {
   loadWorldFromFile,
 } from "./worldLoader.js";
 
-export async function startRtsGame({ onStatus = () => {} } = {}) {
+export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   // 1) Boot the v3 engine — renderer, terrain clipmap, sky, grass, water… the
   //    whole runtime. Same entry the editor uses; the page hides editor chrome.
   onStatus("Starting engine…");
   const app = await startV3App();
   window.__rts = app; // handy for console debugging
+
+  if (fov != null) {
+    app.camera.fov = fov;
+    app.camera.updateProjectionMatrix();
+  }
 
   // 2) Load world — default world.v3proj, or ?world=/path/to/other.v3proj.
   const worldState = { name: "procedural default" };

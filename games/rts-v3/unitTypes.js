@@ -88,7 +88,7 @@ UNIT_TYPES.soldier = {
   isAir: false,
   hover: 0,
   speed: 11,
-  radius: 1.3,
+  radius: 2.6,
   turnRate: 6,
   maxHp: 60,
   // combat — rifle: fast, weak, can plink at helicopters
@@ -100,12 +100,12 @@ UNIT_TYPES.soldier = {
   // and scales by HEIGHT (a humanoid's horizontal footprint is meaningless).
   url: "/models/testsolanim.glb",
   skinned: true,
-  targetHeight: 1.9,
+  targetHeight: 3.8,
   excludeRotorsFromBox: false,
   facingOffset: 0,
-  ringRadius: 2.2,
-  barWidth: 3,
-  barY: 2.8,
+  ringRadius: 4.4,
+  barWidth: 6,
+  barY: 5.6,
   // Soldiers cast shadows again. They were switched off when each one was his own
   // SkinnedMesh: the shadow pass redraws every caster once per CSM cascade, so six
   // soldiers cost 18 draws. Now the whole crowd is ONE compute-skinned mesh

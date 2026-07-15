@@ -80,7 +80,7 @@
         // 2) Boot the game. Relative specifier: ES imports resolve against this
         //    module's URL (not <base>), and Vite code-splits it at build time.
         const { startRtsGame } = await import("./rtsGame.js");
-        await startRtsGame({ onStatus: (s) => (msg.textContent = s) });
+        await startRtsGame({ onStatus: (s) => (msg.textContent = s), fov: 40 });
 
         boot.classList.add("hidden");
         setTimeout(() => boot.remove(), 600);
