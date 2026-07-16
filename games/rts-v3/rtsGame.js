@@ -29,6 +29,7 @@ import { createWaveHud } from "./waveHud.js";
 import { createBuildings } from "./buildings.js";
 import { createBuildingRenderer } from "./buildingRenderer.js";
 import { createBuildPlacement } from "./buildPlacement.js";
+import { createBaseFlag } from "./baseFlag.js";
 import { createCombatFx } from "./combatFx.js";
 import { createCombat } from "./combat.js";
 import { createProjectiles } from "./projectiles.js";
@@ -124,6 +125,11 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
 
   const structuresRenderer = createStructuresRenderer({ app, structures, healthBars });
   app.structuresRenderer = structuresRenderer;
+
+  // The HQ flag — the engine's Verlet cloth prop, scaled up and planted beside
+  // the base. Its texture is importable from the dev panel.
+  const baseFlag = createBaseFlag({ app, structures });
+  app.baseFlag = baseFlag;
 
   // The starting army musters at the base (bottom of the map), not the origin.
   onStatus("Spawning units…");
@@ -310,6 +316,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
     healthBars.commit();
     fx.update(dt, app.camera);            // muzzle / impact / explosion
     fire.update(dt, elapsed);             // burning wrecks
+    baseFlag?.update(dt);                 // HQ flag cloth sim
     commandCard.tick();                   // live production bar
     waveHud.update(dt, waves);            // wave counter, countdown, defeat
     minimap.draw();

@@ -87,6 +87,29 @@ export function createDevPanel({
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Base Flag</div>
+        <div class="section-body">
+          <input type="file" id="dv-flag-file" accept="image/*" hidden />
+          <button class="action-btn" id="dv-flag-import" type="button">Import flag image…</button>
+          <button class="action-btn" id="dv-flag-clear" type="button">Clear image</button>
+          <div class="prop-row">
+            <span class="prop-label">Color</span>
+            <div class="prop-value">
+              <input type="color" id="dv-flag-color" />
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wind</span>
+            <div class="prop-value">
+              <input type="range" id="dv-flag-wind" min="0" max="900" step="10" />
+              <span class="prop-num" id="dv-flag-wind-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">Any image works. Colour tints the cloth under the image.</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Fog</div>
         <div class="section-body">
           <div class="prop-row">
@@ -314,6 +337,35 @@ export function createDevPanel({
   setWavesChecked(app?.waves?.enabled ?? false);
   wavesBtn.addEventListener("click", () => setWavesChecked(!wavesBtn.classList.contains("checked")));
   $("#dv-wave-now").addEventListener("click", () => app?.waves?.spawnNow?.());
+
+  // ── Base flag ───────────────────────────────────────────────────────────────
+  const flagFileInput = $("#dv-flag-file");
+  const flagColor = $("#dv-flag-color");
+  flagColor.value = app?.baseFlag?.currentColor?.() ?? "#c8322d";
+  flagColor.addEventListener("input", () => app?.baseFlag?.setParam?.("flagColor", flagColor.value));
+
+  // Applying/clearing an image also resets the tint (see baseFlag.js) — keep the
+  // picker showing what the cloth is actually using.
+  const syncFlagColor = () => { flagColor.value = app?.baseFlag?.currentColor?.() ?? "#c8322d"; };
+
+  $("#dv-flag-import").addEventListener("click", () => flagFileInput.click());
+  flagFileInput.addEventListener("change", () => {
+    const file = flagFileInput.files?.[0];
+    if (file) { app?.baseFlag?.setTextureFile?.(file); syncFlagColor(); }
+    flagFileInput.value = ""; // let the same file be picked again
+  });
+  $("#dv-flag-clear").addEventListener("click", () => {
+    app?.baseFlag?.clearTexture?.();
+    syncFlagColor();
+  });
+
+  const flagWind = $("#dv-flag-wind"), flagWindV = $("#dv-flag-wind-v");
+  flagWind.value = app?.baseFlag?.getParams?.()?.windIntensity ?? 300;
+  flagWindV.textContent = flagWind.value;
+  flagWind.addEventListener("input", () => {
+    app?.baseFlag?.setParam?.("windIntensity", +flagWind.value);
+    flagWindV.textContent = flagWind.value;
+  });
 
   // ── Fog ─────────────────────────────────────────────────────────────────────
   const fogState = app?.fog?.state?.height ?? {};
