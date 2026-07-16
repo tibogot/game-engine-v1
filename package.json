@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --open /v2/editor.html",
-    "dev:v3": "vite --open /v3/editor.html",
+    "dev": "vite --open /v3/editor.html",
+    "dev:v2": "vite --open /v2/editor.html",
     "build": "vite build",
     "preview": "vite preview"
   },

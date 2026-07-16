@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rond-Carré</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #060606; }
+      canvas { display: block; width: 100vw; height: 100vh; }
+
+      #veil {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        background: #060606;
+        display: grid;
+        place-items: center;
+        color: #6f6f6b;
+        font: 500 12px/1 "Archivo", system-ui, sans-serif;
+        letter-spacing: 0.3em;
+        text-transform: uppercase;
+        transition: opacity 0.9s ease, visibility 0.9s;
+      }
+      #veil.done { opacity: 0; visibility: hidden; }
+
+    </style>
+  </head>
+  <body>
+    <div id="veil">rond—carré</div>
+
+    <script type="module">
+      // Vite aliases `three` → `three/webgpu` (see vite.config.js)
+      import * as THREE from "three";
+      import { reflector, color, mix } from "three/tsl";
+      import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+      import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
+      import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+      const HDR_URLS = [
+        "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_09_1k.hdr",
+        "https://threejs.org/examples/textures/equirectangular/royal_esplanade_1k.hdr",
+      ];
+
+      // ------------------------------------------------------------ constants
+      const COUNT = 6;               // sphere, cube, sphere, cube, sphere, cube
+      const D = 1.0;                 // pendulum pitch = ball diameter
+      const R = D / 2;               // sphere radius
+      const CUBE = 0.94;             // cube edge (hair under D so faces kiss)
+      const STRING_LEN = 3.4;        // pivot to ball centre
+      const PIVOT_Y = STRING_LEN;    // ball centres rest at y = 0
+      const BAR_Z = 0.72;            // the two support rails sit at ±BAR_Z
+      const FLOOR_Y = -0.6;          // just under the resting balls
+      const AMP = 0.55;              // swing amplitude, radians (~31°)
+      const OMEGA = 2.6;             // swing speed
+
+      // ---------------------------------------------------------------- setup
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.toneMapping = THREE.NeutralToneMapping;
+      renderer.toneMappingExposure = 1.0;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x060606);
+
+      const camera = new THREE.PerspectiveCamera(
+        35,
+        innerWidth / innerHeight,
+        0.1,
+        100,
+      );
+      const CAM_TARGET = new THREE.Vector3(0, 1.05, 0);
+      camera.position.set(0, 1.05, 8.6);
+      camera.lookAt(CAM_TARGET);
+
+      // ------------------------------------------------------------- lighting
+      const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+      sun.position.set(4, 9, 5);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.camera.left = -6;
+      sun.shadow.camera.right = 6;
+      sun.shadow.camera.top = 6;
+      sun.shadow.camera.bottom = -6;
+      sun.shadow.camera.near = 1;
+      sun.shadow.camera.far = 25;
+      sun.shadow.radius = 6;
+      sun.shadow.bias = -0.0005;
+      scene.add(sun);
+      scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+
+      // ------------------------------------------------------------ materials
+      const chrome = new THREE.MeshStandardMaterial({
+        color: 0x111111,
+        metalness: 1.0,
+        roughness: 0.1,
+      });
+      const railMat = new THREE.MeshStandardMaterial({
+        color: 0x161616,
+        metalness: 1.0,
+        roughness: 0.25,
+      });
+      const stringMat = new THREE.MeshStandardMaterial({
+        color: 0x4a4a48,
+        metalness: 0.3,
+        roughness: 0.6,
+      });
+      // mirror floor: TSL reflector renders the scene from below the plane
+      const reflection = reflector({ resolution: 0.5 });
+      reflection.target.rotateX(-Math.PI / 2);
+      reflection.target.position.y = FLOOR_Y;
+      scene.add(reflection.target);
+
+      // unlit, so lights/env can't wash the black mirror out to gray
+      const floorMat = new THREE.MeshBasicNodeMaterial();
+      floorMat.colorNode = mix(color(0x030303), reflection, 0.6);
+
+      // ----------------------------------------------------------------- rig
+      const cradle = new THREE.Group();
+      scene.add(cradle);
+
+      // floor (reflective, still catches the soft shadow)
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), floorMat);
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = FLOOR_Y;
+      floor.receiveShadow = true;
+      scene.add(floor);
+
+      // two chrome support rails running along x, near the top of frame
+      const railGeo = new THREE.CylinderGeometry(0.045, 0.045, COUNT * D + 3.2, 24);
+      railGeo.rotateZ(Math.PI / 2);
+      for (const z of [-BAR_Z, BAR_Z]) {
+        const rail = new THREE.Mesh(railGeo, railMat);
+        rail.position.set(0, PIVOT_Y, z);
+        rail.castShadow = true;
+        cradle.add(rail);
+      }
+
+      // one thin string, stretched between two local points
+      const stringGeo = new THREE.CylinderGeometry(0.0065, 0.0065, 1, 8);
+      function makeString(from, to) {
+        const mesh = new THREE.Mesh(stringGeo, stringMat);
+        const dir = new THREE.Vector3().subVectors(to, from);
+        const len = dir.length();
+        mesh.scale.y = len;
+        mesh.position.copy(from).addScaledVector(dir, 0.5);
+        mesh.quaternion.setFromUnitVectors(
+          new THREE.Vector3(0, 1, 0),
+          dir.normalize(),
+        );
+        return mesh;
+      }
+
+      const sphereGeo = new THREE.SphereGeometry(R, 64, 48);
+      const cubeGeo = new RoundedBoxGeometry(CUBE, CUBE, CUBE, 5, 0.07);
+
+      // pendulums: group pivots at the rail line (rotation about z = swing).
+      // The two tie points sit ON the z rotation axis, so the V of strings
+      // swings rigidly and stays attached to the rails — physically exact.
+      const pendulums = [];
+      for (let i = 0; i < COUNT; i++) {
+        const x = (i - (COUNT - 1) / 2) * D;
+        const pivot = new THREE.Group();
+        pivot.position.set(x, PIVOT_Y, 0);
+
+        const isSphere = i % 2 === 0;
+        const ball = new THREE.Mesh(isSphere ? sphereGeo : cubeGeo, chrome);
+        ball.position.set(0, -STRING_LEN, 0);
+        ball.castShadow = true;
+        pivot.add(ball);
+
+        const attach = new THREE.Vector3(0, -STRING_LEN + R + 0.04, 0);
+        pivot.add(makeString(new THREE.Vector3(0, 0, -BAR_Z), attach));
+        pivot.add(makeString(new THREE.Vector3(0, 0, BAR_Z), attach));
+
+        cradle.add(pivot);
+        pendulums.push(pivot);
+      }
+
+      // ------------------------------------------------------------ animation
+      // Classic cradle fake: while sin(ωt) > 0 the LEFT ball is out, while
+      // it's < 0 the RIGHT ball is out. Velocity matches at the handoff, so
+      // the impact reads as a clean energy transfer — forever.
+      const clock = new THREE.Clock();
+      let prevSign = 1;
+      let impactT = -10;
+      let impactDir = 1;
+
+      const mouse = new THREE.Vector2(0, 0);
+      addEventListener("pointermove", (e) => {
+        mouse.x = (e.clientX / innerWidth) * 2 - 1;
+        mouse.y = (e.clientY / innerHeight) * 2 - 1;
+      });
+
+      function animate() {
+        const t = clock.getElapsedTime();
+        const s = Math.sin(t * OMEGA);
+
+        // end pendulums
+        pendulums[0].rotation.z = -AMP * Math.max(0, s);
+        pendulums[COUNT - 1].rotation.z = -AMP * Math.min(0, s);
+
+        // click: on each handoff the middle balls shiver for a beat
+        const sign = s >= 0 ? 1 : -1;
+        if (sign !== prevSign) {
+          prevSign = sign;
+          impactT = t;
+          impactDir = sign;
+        }
+        const dt = t - impactT;
+        const shiver = 0.014 * Math.exp(-7 * dt) * Math.sin(34 * dt) * -impactDir;
+        for (let i = 1; i < COUNT - 1; i++) {
+          pendulums[i].rotation.z = shiver;
+        }
+
+        // gentle camera parallax
+        camera.position.x += (mouse.x * 0.45 - camera.position.x) * 0.04;
+        camera.position.y +=
+          (1.05 - mouse.y * 0.25 - camera.position.y) * 0.04;
+        camera.lookAt(CAM_TARGET);
+
+        renderer.render(scene, camera);
+      }
+
+      // ----------------------------------------------------------- resize/env
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+
+      async function loadEnv() {
+        // dark studio with softboxes → crisp highlight streaks on black chrome
+        const loader = new HDRLoader();
+        for (const url of HDR_URLS) {
+          try {
+            const tex = await loader.loadAsync(url);
+            tex.mapping = THREE.EquirectangularReflectionMapping;
+            scene.environment = tex;
+            scene.environmentIntensity = 1.3;
+            return;
+          } catch (e) {
+            console.warn("HDR failed, trying fallback:", url);
+          }
+        }
+        // offline fallback: white room, dimmed so the blacks stay black
+        const pmrem = new THREE.PMREMGenerator(renderer);
+        const envRT = await pmrem.fromSceneAsync(new RoomEnvironment());
+        scene.environment = envRT.texture;
+        scene.environmentIntensity = 0.5;
+      }
+
+      await renderer.init();
+      await loadEnv();
+      renderer.setAnimationLoop(animate);
+      document.getElementById("veil").classList.add("done");
+    </script>
+  </body>
+</html>
