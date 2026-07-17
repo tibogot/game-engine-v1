@@ -5,26 +5,34 @@
  *
  *   - camera-following wrap tile (infinite field, fixed instance budget)
  *   - ALL per-plant work in ONE compute pass (paint density, slope reject,
- *     radial fade window, frustum cull, wind force smoothed across ticks)
+ *     radial fade window, frustum cull, wind + player-push bend vector
+ *     smoothed across ticks)
  *   - atomic compaction + GPU-written indirect draws: culled plants cost ZERO
  *     vertex work; the CPU never knows or cares how many plants are visible
- *   - per-plant identity derived from hash(instanceIndex) — the only SSBO is
- *     one vec4 per plant (tile offset, smoothed force, terrain Y)
+ *
+ * Each instance is a TUSSOCK: `tufts` stems + plumes with baked offsets,
+ * per-tuft height variation and phase (aTuft vec4 attribute) — real susuki
+ * grows in bunches of 5+, not single stalks.
+ *
+ * Bending is a WORLD-SPACE vector (bufDir SSBO), not a per-plant yaw:
+ * wind pushes every plant the same downwind way — coherent with the grass,
+ * which shares the same windTex + grassState wind params — and the player
+ * push adds into the same vector, so plumes part radially around you.
+ * Per-plant random yaw is baked into the stem geometry only (cosmetic).
  *
  * Two draws total: stems (crossed thin ribbons, opaque) + plumes (3 crossed
  * cards, alpha-tested procedural strand texture, backlit silver-lining
  * emissive). Both read the same compact list, so they always agree.
- *
- * Wind is the same baked windTex the hybrid grass samples, driven by the SAME
- * grassState wind params — gusts sweep the plumes and the grass together.
  */
 import * as THREE from "three";
 import {
   Fn,
   If,
   abs,
+  atan,
   atomicAdd,
   atomicStore,
+  attribute,
   cameraPosition,
   clamp,
   cos,
@@ -34,6 +42,7 @@ import {
   hash,
   instanceIndex,
   instancedArray,
+  length,
   max,
   mix,
   negate,
@@ -66,6 +75,9 @@ function srgb(hex) {
 
 export const SUSUKI_DEFAULTS = {
   density: 1,
+  tufts: 1,              // stems per painted plant (optional bunching)
+  plumesPerFlower: 5,    // plumes in the flower head atop each stem
+  flowerSpread: 65,      // fan half-angle (deg) of the flower head
   stemHeight: 1.9,
   stemHeightVar: 0.26,   // ± fraction of stemHeight
   stemWidth: 0.03,
@@ -86,6 +98,8 @@ export const SUSUKI_DEFAULTS = {
   flutter: 0.05,
   alphaTest: 0.2,
   windMul: 1,
+  interactRadius: 2.2,   // player/horse push radius (m)
+  interactStrength: 1.2,
   fadeStart: 150,        // radial plume fade-out window (m from camera)
   fadeEnd: 195,
   slopeMinY: 0.55,       // terrain normal.y below which susuki stops growing
@@ -158,79 +172,157 @@ export function drawPlumeTexture(canvas, sp) {
   }
 }
 
+// ── Tussock layout (shared by stem + plume geometry so they line up) ─────────
+function tuftLayout(count) {
+  let seed = 777;
+  const rand = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+  const tufts = [];
+  for (let i = 0; i < count; i++) {
+    // golden-angle spiral: first tuft at the center, rest spread outward
+    const r = i === 0 ? 0 : 0.14 + 0.3 * Math.sqrt(i / count);
+    const a = i * 2.39996;
+    tufts.push({
+      ox: Math.cos(a) * r,
+      oz: Math.sin(a) * r,
+      hMul: 0.82 + rand() * 0.33,   // per-tuft height variation
+      phase: rand(),                // per-tuft flutter phase
+      yaw: rand() * Math.PI * 2,    // cosmetic ribbon/card rotation
+    });
+  }
+  return tufts;
+}
+
+/** Per-vertex vec4 aTuft = (offsetX, offsetZ, heightMul, phase). */
+function addTuftAttr(positions, count, t) {
+  const arr = new Float32Array(count * 4);
+  for (let i = 0; i < count; i++) {
+    arr[i * 4] = t.ox; arr[i * 4 + 1] = t.oz;
+    arr[i * 4 + 2] = t.hMul; arr[i * 4 + 3] = t.phase;
+  }
+  return arr;
+}
+
 // ── Geometry ─────────────────────────────────────────────────────────────────
 
-/** Crossed thin ribbon for the stem — second copy pre-rotated 90° (baked). */
-export function createStemGeometry(width) {
+/**
+ * Stem cluster: `tufts` crossed thin ribbons, each pre-rotated by its own
+ * cosmetic yaw and carrying its tuft offset/height/phase in aTuft. Ribbons
+ * are built around the origin — the VS adds the offset AFTER bending so each
+ * stem bends around its own base.
+ */
+export function createStemGeometry(width, tufts = 5) {
   const base = createBladeGeometry(1.0, width, 4, 0.9);
   const srcPos = base.attributes.position.array;
   const srcUv = base.attributes.uv.array;
-  const srcNorm = base.attributes.normal.array;
   const srcIdx = base.index.array;
   const n = base.attributes.position.count;
+  const layout = tuftLayout(tufts);
 
-  const positions = new Float32Array(n * 2 * 3);
-  positions.set(srcPos, 0);
-  for (let i = 0; i < n; i++) {
-    positions[(n + i) * 3 + 0] = srcPos[i * 3 + 2];
-    positions[(n + i) * 3 + 1] = srcPos[i * 3 + 1];
-    positions[(n + i) * 3 + 2] = -srcPos[i * 3 + 0];
+  const positions = [], uvs = [], normals = [], tuftArr = [], indices = [];
+  let vertBase = 0;
+  for (const t of layout) {
+    // crossed ribbon = the blade + a copy pre-rotated 90°, both then rotated
+    // by the tuft's cosmetic yaw (bend direction comes from the VS, in world
+    // space, so this rotation is purely visual variety)
+    const ca = Math.cos(t.yaw), sa = Math.sin(t.yaw);
+    for (let i = 0; i < n; i++) {
+      const x = srcPos[i * 3], z = srcPos[i * 3 + 2];
+      positions.push(x * ca + z * sa, srcPos[i * 3 + 1], -x * sa + z * ca);
+      uvs.push(srcUv[i * 2], srcUv[i * 2 + 1]);
+      normals.push(0, 1, 0);
+    }
+    for (let i = 0; i < n; i++) {
+      const x = srcPos[i * 3 + 2], z = -srcPos[i * 3]; // 90° cross
+      positions.push(x * ca + z * sa, srcPos[i * 3 + 1], -x * sa + z * ca);
+      uvs.push(srcUv[i * 2], srcUv[i * 2 + 1]);
+      normals.push(0, 1, 0);
+    }
+    for (let i = 0; i < srcIdx.length; i++) indices.push(vertBase + srcIdx[i]);
+    for (let i = 0; i < srcIdx.length; i++) indices.push(vertBase + n + srcIdx[i]);
+    for (let i = 0; i < n * 2; i++) tuftArr.push(t.ox, t.oz, t.hMul, t.phase);
+    vertBase += n * 2;
   }
-  const uvs = new Float32Array(n * 2 * 2);
-  uvs.set(srcUv, 0); uvs.set(srcUv, n * 2);
-  const normals = new Float32Array(n * 2 * 3);
-  normals.set(srcNorm, 0); normals.set(srcNorm, n * 3);
-  const indices = new Uint16Array(srcIdx.length * 2);
-  indices.set(srcIdx, 0);
-  for (let i = 0; i < srcIdx.length; i++) indices[srcIdx.length + i] = srcIdx[i] + n;
 
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-  geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
-  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
+  geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
+  geo.setAttribute("aTuft", new THREE.BufferAttribute(new Float32Array(tuftArr), 4));
+  geo.setIndex(indices);
   base.dispose();
   return geo;
 }
 
 /**
- * Plume tuft: 3 crossed cards that all droop the same local +X.
- * (Rotating an already-drooped card would fan the tuft into a fountain;
- * rotating flat cards THEN adding the shared +X arc keeps it one coherent
- * tuft from every view angle — the GoT read.)
+ * Flower head: per stem, `plumesPerFlower` plumes ALL JOINED AT THE ORIGIN
+ * (the stem tip) and fanning out around local +X — a feather spray, like the
+ * real miscanthus flower (the GoT reference shows ~5 plumes per head).
+ * Each plume is 2 crossed cards drooping along its own fan direction, with
+ * per-plume length/droop variation. The VS rotates the whole head so +X
+ * points DOWNWIND, so the fan spreads around the wind direction.
  */
-export function createPlumeGeometry(sp) {
+export function createPlumeGeometry(sp, tufts = 1) {
   const W = sp.plumeWidth, H = sp.plumeHeight, droop = sp.plumeDroop;
-  const angles = [0, Math.PI / 3, (2 * Math.PI) / 3];
+  const plumes = Math.max(1, Math.round(sp.plumesPerFlower ?? 5));
+  const spreadRad = ((sp.flowerSpread ?? 65) * Math.PI) / 180;
+  const crossAngles = [0, Math.PI / 2];
   const ws = 2, hs = 6;
-  const positions = [], uvs = [], normals = [], indices = [];
-  let base = 0;
-  for (const a of angles) {
-    const ca = Math.cos(a), sa = Math.sin(a);
-    for (let j = 0; j <= hs; j++) {
-      const v = j / hs;
-      const y = v * H;
-      const arc = droop * H * v * v;
-      for (let i = 0; i <= ws; i++) {
-        const u01 = i / ws;
-        const x0 = (u01 - 0.5) * W;
-        positions.push(x0 * ca + arc, y, -x0 * sa);
-        uvs.push(u01, v);
-        normals.push(sa, 0, ca);
+  const layout = tuftLayout(tufts);
+  const positions = [], uvs = [], normals = [], tuftArr = [], indices = [];
+  let vertBase = 0;
+
+  // deterministic per-plume jitter
+  let seed = 4242;
+  const rand = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+
+  for (const t of layout) {
+    for (let k = 0; k < plumes; k++) {
+      // fan angles centered on +X (downwind after the VS rotation)
+      const fk = plumes === 1 ? 0 : (k / (plumes - 1)) * 2 - 1; // -1..1
+      const yawK = fk * spreadRad + (rand() - 0.5) * 0.25;
+      const lenMul = 0.82 + rand() * 0.28;
+      const droopMul = 0.85 + rand() * 0.4 + Math.abs(fk) * 0.25; // outer droop more
+      const cy = Math.cos(yawK), sy = Math.sin(yawK);
+
+      for (const a of crossAngles) {
+        const ca = Math.cos(a), sa = Math.sin(a);
+        for (let j = 0; j <= hs; j++) {
+          const v = j / hs;
+          const y = v * H * lenMul;
+          const arc = droop * droopMul * H * lenMul * v * v;
+          for (let i = 0; i <= ws; i++) {
+            const u01 = i / ws;
+            const x0 = (u01 - 0.5) * W * 0.85; // slightly narrower per plume
+            // card in plume-local space (droop along +X), then fan-rotate
+            const px = x0 * ca + arc;
+            const pz = -x0 * sa;
+            positions.push(px * cy + pz * sy, y, -px * sy + pz * cy);
+            uvs.push(u01, v);
+            normals.push(sa, 0, ca);
+            tuftArr.push(t.ox, t.oz, t.hMul, t.phase + k * 0.13);
+          }
+        }
+        for (let j = 0; j < hs; j++) {
+          for (let i = 0; i < ws; i++) {
+            const r0 = vertBase + j * (ws + 1) + i, r1 = r0 + ws + 1;
+            indices.push(r0, r1, r0 + 1, r0 + 1, r1, r1 + 1);
+          }
+        }
+        vertBase += (hs + 1) * (ws + 1);
       }
     }
-    for (let j = 0; j < hs; j++) {
-      for (let i = 0; i < ws; i++) {
-        const r0 = base + j * (ws + 1) + i, r1 = r0 + ws + 1;
-        indices.push(r0, r1, r0 + 1, r0 + 1, r1, r1 + 1);
-      }
-    }
-    base += (hs + 1) * (ws + 1);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
   geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
   geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
+  geo.setAttribute("aTuft", new THREE.BufferAttribute(new Float32Array(tuftArr), 4));
   geo.setIndex(indices);
   return geo;
 }
@@ -270,6 +362,7 @@ export class SusukiSystem {
 
     this.count = plantsPerSide * plantsPerSide;
     this.tileSize = tileSize;
+    this._tufts = Math.max(1, Math.round(sp.tufts ?? 5));
 
     const windRad = ((gp.windAngle ?? 0) * Math.PI) / 180;
     const u = (this.u = {
@@ -288,6 +381,10 @@ export class SusukiSystem {
       uWindGust: uniform(gp.windGust ?? 0.3),
       uWindWaveScale: uniform(gp.windWaveScale ?? 0.12),
       uWindDir: uniform(new THREE.Vector2(Math.cos(windRad), Math.sin(windRad))),
+      // player interaction (same anchor the grass uses)
+      uPlayerPos: uniform(new THREE.Vector3()),
+      uInteractRadius: uniform(sp.interactRadius ?? 2.2),
+      uInteractStrength: uniform(sp.interactStrength ?? 1.2),
       // plant
       uDensity: uniform(sp.density ?? 1),
       uStemH: uniform(sp.stemHeight ?? 1.9),
@@ -324,18 +421,19 @@ export class SusukiSystem {
     this.plumeTex.anisotropy = 8;
 
     // ── Geometry ──
-    const stemGeo = createStemGeometry(sp.stemWidth ?? 0.03);
-    const plumeGeo = createPlumeGeometry(sp);
+    const stemGeo = createStemGeometry(sp.stemWidth ?? 0.03, this._tufts);
+    const plumeGeo = createPlumeGeometry(sp, this._tufts);
 
     // ── SSBOs ──
-    // bufPos: x,y = tile-local offset (wraps with anchor),
-    //         z = smoothed wind force, w = terrain Y
+    // bufPos: x,y = tile-local offset (wraps with anchor), z free, w = terrain Y
+    // bufDir: x,y = smoothed WORLD-SPACE bend vector (wind + player push);
+    //         its length is the bend angle, its direction the lean direction
     const bufPos = instancedArray(this.count, "vec4");
+    const bufDir = instancedArray(this.count, "vec4");
     const compactBuf = instancedArray(this.count, "uint");
-    this._buffers = { bufPos, compactBuf };
+    this._buffers = { bufPos, bufDir, compactBuf };
 
     // ── Indirect draw args, one per mesh (index counts differ) ──
-    // Layout: [indexCount, instanceCount, firstIndex, baseVertex, firstInstance]
     const mkIndirect = (geo) => {
       const data = new Uint32Array(5);
       data[0] = geo.index.count;
@@ -369,6 +467,9 @@ export class SusukiSystem {
       p.y.assign(row.mul(fSpacing).sub(fHalf).add(jz.mul(fSpacing)));
       p.z.assign(float(0));
       p.w.assign(float(0));
+      const d = bufDir.element(instanceIndex);
+      d.x.assign(float(0));
+      d.y.assign(float(0));
     })().compute(this.count, [64]);
 
     // Per-plant stem height — MUST match the VS's derivation exactly.
@@ -377,7 +478,7 @@ export class SusukiSystem {
         mix(float(1).sub(u.uStemHVar), float(1).add(u.uStemHVar), hash(id.add(911))),
       );
 
-    // ── UPDATE: once per plant — density, slope, window, wind, culls ──
+    // ── UPDATE: once per plant — density, slope, window, bend vector, culls ──
     this.computeUpdate = Fn(() => {
       const p = bufPos.element(instanceIndex);
 
@@ -423,7 +524,7 @@ export class SusukiSystem {
         u.uCameraMatrix,
         u.uFx,
         u.uFy,
-        stemH.add(u.uPlumeSize.mul(1.6)),
+        stemH.add(u.uPlumeSize.mul(1.6)).add(float(0.5)), // tussock spread pad
         u.uCullPadNdcX,
         u.uCullPadNdcYNear,
         u.uCullPadNdcYFar,
@@ -455,29 +556,33 @@ export class SusukiSystem {
         const windScaled = wave.mul(0.5).add(0.5).add(gustStr).add(micro)
           .mul(u.uWindStrength);
 
-        // Tall stiff stems: scaled by flex, eased across compute ticks so
-        // throttled updates never step visibly (hybrid's k=0.18 smoothing).
-        const targetForce = u.uLean.add(windScaled.mul(u.uStemFlex).mul(0.35));
-        const prevForce = p.z;
-        p.z.assign(prevForce.add(targetForce.sub(prevForce).mul(float(0.18))));
+        // Wind bend magnitude (tall stiff stems: scaled by flex)
+        const windMag = u.uLean.add(windScaled.mul(u.uStemFlex).mul(0.35));
+
+        // ── Player push: radial part around the anchor (walk/ride through) ──
+        const toPlant = vec2(worldX.sub(u.uPlayerPos.x), worldZ.sub(u.uPlayerPos.z));
+        const pDist = length(toPlant);
+        const pFall = float(1).sub(smoothstep(float(0.3), u.uInteractRadius, pDist));
+        const pushDir = toPlant.div(max(pDist, float(0.001)));
+        const pushMag = pFall.mul(u.uInteractStrength);
+
+        // ── World-space bend vector: downwind + away from player, eased
+        // across compute ticks so throttled updates never step visibly ──
+        const targetX = dirX.mul(windMag).add(pushDir.x.mul(pushMag));
+        const targetZ = dirZ.mul(windMag).add(pushDir.y.mul(pushMag));
+        const d = bufDir.element(instanceIndex);
+        const kF = float(0.18);
+        d.x.assign(d.x.add(targetX.sub(d.x).mul(kF)));
+        d.y.assign(d.y.add(targetZ.sub(d.y).mul(kF)));
+
         p.w.assign(terrainY);
       });
     })().compute(this.count, [64]);
 
     // ── Materials ──
-    const rotY = (ang, v) => {
-      const cc = cos(ang);
-      const ss = sin(ang);
-      return vec3(
-        v.x.mul(cc).add(v.z.mul(ss)),
-        v.y,
-        negate(v.x).mul(ss).add(v.z.mul(cc)),
-      );
-    };
-
     // — stems —
     const stemMat = new THREE.MeshStandardNodeMaterial({
-      side: THREE.FrontSide,
+      side: THREE.DoubleSide,
       roughness: 0.9,
       metalness: 0,
     });
@@ -485,20 +590,25 @@ export class SusukiSystem {
     stemMat.positionNode = Fn(() => {
       const id = compactBuf.element(instanceIndex);
       const p = bufPos.element(id);
+      const d = bufDir.element(id);
+      const tuft = attribute("aTuft", "vec4");
       const h = uv().y;
-      const stemH = stemHOf(id);
-      const force = p.z;
-      const yaw = hash(id.add(196)).mul(PI2);
-      const angle = force.mul(pow(max(h, 1e-4), 1.6)); // bend high up only
+      const stemH = stemHOf(id).mul(tuft.z);
+
+      const mag = length(vec2(d.x, d.y));
+      const invMag = float(1).div(max(mag, float(1e-4)));
+      const bendX = d.x.mul(invMag);
+      const bendZ = d.y.mul(invMag);
+
+      const angle = mag.mul(pow(max(h, 1e-4), 1.6)); // bend high up only
       const L = h.mul(stemH);
-      const pArc = vec3(
-        sin(angle).mul(L).add(positionLocal.x),
-        cos(angle).mul(L),
-        positionLocal.z,
-      );
-      const pR = rotY(yaw, pArc);
+      const horiz = sin(angle).mul(L);
       normalLocal.assign(vec3(0, 1, 0));
-      return vec3(pR.x.add(p.x), pR.y.add(p.w), pR.z.add(p.y));
+      return vec3(
+        positionLocal.x.add(horiz.mul(bendX)).add(tuft.x).add(p.x),
+        cos(angle).mul(L).add(p.w),
+        positionLocal.z.add(horiz.mul(bendZ)).add(tuft.y).add(p.y),
+      );
     })();
     stemMat.colorNode = mix(u.uStemBase, u.uStemTip, pow(uv().y, 1.4));
 
@@ -521,30 +631,54 @@ export class SusukiSystem {
     const vPWorld = varying(vec3(0), "v_su_w");
     const vPHue = varying(float(0), "v_su_hue");
 
+    const rotY = (ang, v) => {
+      const cc = cos(ang);
+      const ss = sin(ang);
+      return vec3(
+        v.x.mul(cc).add(v.z.mul(ss)),
+        v.y,
+        negate(v.x).mul(ss).add(v.z.mul(cc)),
+      );
+    };
+
     plumeMat.positionNode = Fn(() => {
       const id = compactBuf.element(instanceIndex);
       const p = bufPos.element(id);
-      const stemH = stemHOf(id);
-      const force = p.z;
-      const yaw = hash(id.add(196)).mul(PI2);
+      const d = bufDir.element(id);
+      const tuft = attribute("aTuft", "vec4");
+      const stemH = stemHOf(id).mul(tuft.z);
       const scale = mix(float(0.8), float(1.2), hash(id.add(577))).mul(u.uPlumeSize);
 
-      // ride the stem tip: rotate the plume by the tip angle (≈ force at h=1)
+      const mag = length(vec2(d.x, d.y));
+      const invMag = float(1).div(max(mag, float(1e-4)));
+      const bendX = d.x.mul(invMag);
+      const bendZ = d.y.mul(invMag);
+      // rotY(a, (1,0,0)) = (cos a, 0, -sin a) → a = atan2(-z, x) points the
+      // plume's droop (+X) along the bend/wind direction — the whole field
+      // leans the same way, and parts around the player with the push vector.
+      // Small per-tuft jitter keeps it organic.
+      const yawA = atan(negate(bendZ), bendX)
+        .add(tuft.w.sub(0.5).mul(0.5));
+
+      // ride the stem tip: rotate the plume by the tip angle (≈ mag at h=1)
       // in the bend plane, then translate to the arc tip
       const local = positionLocal.mul(scale);
-      const ca = cos(force), sa = sin(force);
+      const ca = cos(mag), sa = sin(mag);
       const bent = vec3(
         local.x.mul(ca).add(local.y.mul(sa)),
         local.y.mul(ca).sub(local.x.mul(sa)),
         local.z,
       );
-      const tip = vec3(sin(force).mul(stemH), cos(force).mul(stemH), 0);
-      const phase = hash(id.add(2741));
-      const fl = sin(time.mul(5.2).add(phase.mul(37)).add(positionLocal.y.mul(2.5)))
+      const tip = vec3(sin(mag).mul(stemH), cos(mag).mul(stemH), 0);
+      const fl = sin(time.mul(5.2).add(tuft.w.mul(37)).add(positionLocal.y.mul(2.5)))
         .mul(u.uFlutter).mul(uv().y.add(0.15));
-      const pR = rotY(yaw, bent.add(tip).add(vec3(fl, 0, fl.mul(0.6))));
+      const pR = rotY(yawA, bent.add(tip).add(vec3(fl, 0, fl.mul(0.6))));
       normalLocal.assign(vec3(0, 1, 0)); // soft top-lit fluff
-      const out = vec3(pR.x.add(p.x), pR.y.add(p.w), pR.z.add(p.y));
+      const out = vec3(
+        pR.x.add(tuft.x).add(p.x),
+        pR.y.add(p.w),
+        pR.z.add(tuft.y).add(p.y),
+      );
       vPWorld.assign(out.add(vec3(u.uAnchorPos.x, 0, u.uAnchorPos.z)));
       vPHue.assign(hash(id.add(3197)));
       return out;
@@ -604,9 +738,10 @@ export class SusukiSystem {
     this.plumeTex.needsUpdate = true;
   }
 
-  /** Swap plume geometry (plumeWidth/plumeHeight/plumeDroop are baked). */
+  /** Swap plume geometry (plumeWidth/Height/Droop + tufts are baked). */
   rebuildPlumeGeometry(sp) {
-    const geo = createPlumeGeometry(sp);
+    this._tufts = Math.max(1, Math.round(sp.tufts ?? this._tufts));
+    const geo = createPlumeGeometry(sp, this._tufts);
     this._plumeIndirect.array[0] = geo.index.count;
     this._plumeIndirect.needsUpdate = true;
     if (typeof geo.setIndirect === "function") geo.setIndirect(this._plumeIndirect);
@@ -616,9 +751,10 @@ export class SusukiSystem {
     old?.dispose();
   }
 
-  /** Swap stem geometry (stemWidth is baked). */
+  /** Swap stem geometry (stemWidth + tufts are baked). */
   rebuildStemGeometry(sp) {
-    const geo = createStemGeometry(sp.stemWidth ?? 0.03);
+    this._tufts = Math.max(1, Math.round(sp.tufts ?? this._tufts));
+    const geo = createStemGeometry(sp.stemWidth ?? 0.03, this._tufts);
     this._stemIndirect.array[0] = geo.index.count;
     this._stemIndirect.needsUpdate = true;
     if (typeof geo.setIndirect === "function") geo.setIndirect(this._stemIndirect);
@@ -653,6 +789,8 @@ export class SusukiSystem {
     u.uBacklitInt.value = sp.backlitIntensity ?? 1.7;
     u.uBacklitPow.value = sp.backlitPower ?? 6;
     u.uFlutter.value = sp.flutter ?? 0.05;
+    u.uInteractRadius.value = sp.interactRadius ?? 2.2;
+    u.uInteractStrength.value = sp.interactStrength ?? 1.2;
     u.uOuterR0.value = sp.fadeStart ?? 150;
     u.uOuterR1.value = Math.max(sp.fadeEnd ?? 195, (sp.fadeStart ?? 150) + 1);
     u.uSlopeMinY.value = sp.slopeMinY ?? 0.55;
@@ -672,6 +810,7 @@ export class SusukiSystem {
     this._anchorDelta.set(dx, dz);
     u.uAnchorDeltaXZ.value.copy(this._anchorDelta);
     u.uAnchorPos.value.copy(anchorPos);
+    u.uPlayerPos.value.copy(anchorPos);
     this.stemMesh.position.set(anchorPos.x, 0, anchorPos.z);
     this.plumeMesh.position.set(anchorPos.x, 0, anchorPos.z);
     this._lastAnchor.copy(anchorPos);

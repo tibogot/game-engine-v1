@@ -125,6 +125,11 @@ export function buildSusukiPanel(root, {
   // ── Plants ──
   const plants = _section(root, "Plants");
   W(_slider(plants, susukiState, "density",       { label: "Density",     min: 0.05, max: 1, step: 0.05, onChange: onStateChanged }));
+  W(_slider(plants, susukiState, "tufts",         { label: "Stems/plant", min: 1, max: 8, step: 1, hint: "Optional bunching: stems per painted plant", onChange: () => { onStemGeoChanged?.(); onPlumeGeoChanged?.(); } }));
+  W(_slider(plants, susukiState, "plumesPerFlower", { label: "Plumes/flower", min: 1, max: 8, step: 1, hint: "Plumes in the flower head atop each stem", onChange: onPlumeGeoChanged }));
+  W(_slider(plants, susukiState, "flowerSpread",  { label: "Flower spread", min: 10, max: 90, step: 1, hint: "Fan half-angle of the flower head (°)", onChange: onPlumeGeoChanged }));
+  W(_slider(plants, susukiState, "interactRadius",   { label: "Push radius",   min: 0.5, max: 6, step: 0.1, onChange: onStateChanged, hint: "Player/horse parting radius" }));
+  W(_slider(plants, susukiState, "interactStrength", { label: "Push strength", min: 0, max: 3, step: 0.05, onChange: onStateChanged }));
   W(_slider(plants, susukiState, "stemHeight",    { label: "Stem height", min: 0.8, max: 3.5, step: 0.05, onChange: onStateChanged }));
   W(_slider(plants, susukiState, "stemHeightVar", { label: "Height var",  min: 0, max: 0.6, step: 0.02, onChange: onStateChanged }));
   W(_slider(plants, susukiState, "stemFlex",      { label: "Wind flex",   min: 0, max: 1.2, step: 0.05, onChange: onStateChanged }));
