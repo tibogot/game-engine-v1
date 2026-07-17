@@ -35,6 +35,13 @@ export function createRiverToolState() {
        */
       maxGorgeDepth: 10,
       /**
+       * Metres the whole water profile (bed AND surface together) is lifted —
+       * the "bring the river up to a nice level" control. Clamped per station
+       * under the local banks so raising it can never make the water spill.
+       * Negative sinks the river deeper.
+       */
+      waterLevelOffset: 0,
+      /**
        * When on, a river endpoint dropped near another river snaps onto its
        * centerline and becomes a tributary: its mouth inherits the parent's
        * water level so the confluence is seamless.

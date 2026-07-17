@@ -31,8 +31,9 @@ export function createDepthWaterState(overrides = {}) {
     skyReflectIntensity: 1.0,
 
     // Screen-space reflections. The `ssrMaster` kill-switch is global and lives
-    // elsewhere; this one only governs this surface.
-    ssrEnabled:     true,
+    // elsewhere; this one only governs this surface. Off by default — SSR is a
+    // per-surface opt-in cost.
+    ssrEnabled:     false,
     ssrStrength:    1.0,
     ssrMaxDistance: 120,
     ssrThickness:   1.5,

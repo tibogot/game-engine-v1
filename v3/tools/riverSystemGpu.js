@@ -395,18 +395,27 @@ export class RiverSystemGPU {
   }
 
   /**
-   * Tributary variant: descend TOWARD a pinned mouth. The mouth level comes from
-   * the parent river, so it is fixed; walking upstream from it, the level may
-   * only rise (a source lower than the mouth becomes a flat backwater arm).
+   * Branch variant: one end is pinned to the parent's water level. Direction
+   * depends on where the branch's terrain sits relative to the junction:
+   *  - tributary  (far end HIGHER): water descends TOWARD the mouth — walking
+   *    away from it, levels may only rise.
+   *  - distributary (far end LOWER): water splits off and descends AWAY from
+   *    the junction — walking away, levels may only fall. Without this case a
+   *    branch drawn toward lower ground gets hoisted to the junction level,
+   *    floats above the terrain, and (since the carve only lowers ground under
+   *    the profile) never carves at all.
    */
-  _enforceDownhillTo(arr, mouthIdx, mouthLevel) {
+  _enforcePinned(arr, mouthIdx, mouthLevel, outflow) {
     const n = arr.length;
     if (n < 2) return;
     arr[mouthIdx] = mouthLevel;
+    const clamp = outflow
+      ? (v, prev) => Math.min(v, prev)
+      : (v, prev) => Math.max(v, prev);
     if (mouthIdx === 0) {
-      for (let i = 1; i < n; i++) if (arr[i] < arr[i - 1]) arr[i] = arr[i - 1];
+      for (let i = 1; i < n; i++) arr[i] = clamp(arr[i], arr[i - 1]);
     } else {
-      for (let i = n - 2; i >= 0; i--) if (arr[i] < arr[i + 1]) arr[i] = arr[i + 1];
+      for (let i = n - 2; i >= 0; i--) arr[i] = clamp(arr[i], arr[i + 1]);
     }
   }
 
@@ -457,8 +466,11 @@ export class RiverSystemGPU {
       levels[i] = lo;
     }
 
-    // Local uncarved ground (lightly smoothed) — the bound the gorge clamp
-    // measures from. Captured BEFORE the heavy smoothing/enforcement below.
+    // Local uncarved ground — the bound the gorge clamp measures from.
+    // Captured BEFORE the heavy smoothing/enforcement below. `boundRaw` keeps
+    // the unsmoothed corridor min: smoothing raises dips, so the lift cap must
+    // check the raw ground or lifted water can clear the lowest bank sample.
+    const boundRaw = Float32Array.from(levels);
     const bound = Float32Array.from(levels);
     this._smoothInPlace(bound, 2);
 
@@ -481,8 +493,15 @@ export class RiverSystemGPU {
     // level; the clamp raises the level back to at most `maxGorgeDepth` below
     // the local ground, so the water rides over the pass in a bounded gorge.
     const gorge = Math.max(0, rp.maxGorgeDepth ?? 10);
+    this._smoothInPlace(levels, 8);
+
+    // Branch flow direction, decided once from the smoothed terrain profile:
+    // far end below the junction level ⇒ water flows OUT of the junction.
+    const outflow = pin
+      ? levels[pin.idx === 0 ? n - 1 : 0] < pin.level
+      : false;
     const enforce = () => {
-      if (pin) this._enforceDownhillTo(levels, pin.idx, pin.level);
+      if (pin) this._enforcePinned(levels, pin.idx, pin.level, outflow);
       else this._enforceDownhill(levels);
     };
     const clampGorge = () => {
@@ -492,12 +511,36 @@ export class RiverSystemGPU {
         if (levels[i] < floor) levels[i] = floor;
       }
     };
-    this._smoothInPlace(levels, 8);
     enforce();
     clampGorge();
     this._smoothInPlace(levels, 3);
     enforce();
     clampGorge();
+
+    // User lift — applied LAST, on the solved profile (before it, the profile
+    // still hugs the terrain and a bank-clamped lift is a no-op). Raises bed +
+    // surface together, never above the banks (0.2 m containment margin), so
+    // the water cannot spill; on flat ground it is a no-op, never a push down.
+    // Near a pinned mouth the lift tapers to zero over ~15 m so the confluence
+    // stays step-free (the parent carries the same lift on its own profile).
+    const lift = rp.waterLevelOffset ?? 0;
+    if (lift) {
+      const step = n > 1 ? (pts[0].distanceTo(pts[1]) || 1) : 1; // spaced ⇒ uniform
+      const taperR = pin ? Math.max(1, Math.round(15 / step)) : 0;
+      for (let i = 0; i < n; i++) {
+        let l = lift;
+        if (pin) {
+          const d = Math.abs(i - pin.idx);
+          if (d <= taperR) l *= d / taperR;
+        }
+        if (l > 0) {
+          const cap = Math.min(bound[i], boundRaw[i]) - 0.2;
+          levels[i] = Math.max(levels[i], Math.min(levels[i] + l, cap));
+        } else if (l < 0) {
+          levels[i] += l;
+        }
+      }
+    }
     if (pin) levels[pin.idx] = pin.level; // exact continuity at the mouth
 
     const arc = new Float32Array(n);

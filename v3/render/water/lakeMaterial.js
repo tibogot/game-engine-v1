@@ -197,7 +197,8 @@ export const LAKE_DEFAULTS = {
   // whatever is ON SCREEN (banks, mountains, trees) and falls back to the sky
   // gradient anywhere the ray misses, leaves the frame, or hits nothing.
   // Disabling it branches the whole march out; it then costs literally nothing.
-  ssrEnabled:  true,
+  // Off by default — SSR is a per-surface opt-in cost (matches depthWaterState).
+  ssrEnabled:  false,
   /** 0 = sky gradient only, 1 = full screen-space hit colour. */
   ssrStrength: 1.0,
   /** Metres the ray travels before giving up. Also sets the step size. */
