@@ -966,7 +966,17 @@ export class HybridGrassSystem {
         float(0),
         float(2.5),
       );
-      const tintMixed = mix(tintMatched, tintRgb, float(0.45));
+      // Luminance matching keeps low strengths subtle (no dark×dark crush),
+      // but it also means the grass can never actually BECOME the ground
+      // color — max strength just re-shaded the blade (debug-blue ground
+      // gave dark grass, not blue grass). Past ~0.6 strength, hand the tint
+      // target over to the TRUE ground color so 1.0 = full takeover.
+      const trueGround = smoothstep(float(0.6), float(1.0), u.uTerrainTintStrength);
+      const tintMixed = mix(
+        tintMatched,
+        tintRgb,
+        mix(float(0.45), float(1.0), trueGround),
+      );
       const tintedVaried = mix(variedCol, tintMixed, tintAmt);
 
       // Lighting comes from the standard material pipeline (scene lights,

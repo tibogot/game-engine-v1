@@ -220,7 +220,7 @@ function buildRingGrid(N, step) {
 
 // ── Material ──────────────────────────────────────────────────────────────────
 
-function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null) {
+function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null, lakebed = null, groundProc = null) {
   const mat = createTileMaterial({
     roughness:     0.95,
     textureScale:  400,
@@ -301,7 +301,12 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   // Splat overlay blends on top of base colour; painted snow shades on top
   // with the shared snow functions (compression = 0: only the deform tile
   // shows grooves; out here the trail RT doesn't exist).
-  const baseColor = splatOverlay ? splatOverlay.blendColor(mat.colorNode) : mat.colorNode;
+  // groundProc (v2 procedural ground TSL, uniform-gated) replaces the grey
+  // tile base when enabled — the splat layers still paint over it.
+  const tileBase = groundProc
+    ? mix(mat.colorNode, groundProc.colorAt(wxz, worldNormal.y, terrainY), groundProc.uOn)
+    : mat.colorNode;
+  const baseColor = splatOverlay ? splatOverlay.blendColor(tileBase) : tileBase;
   let finalColor = baseColor;
   let finalRoughness = baseRoughness;
   if (snowShared) {
@@ -310,6 +315,11 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
     finalRoughness = mix(baseRoughness, snowShared.snowRoughness(zeroComp), snowCov);
     mat.emissiveNode = snowShared.snowSparkle(wxz, zeroComp).mul(snowCov);
   }
+
+  // Underwater lakebed treatment (sand + depth tint + caustics) sits on top of
+  // splat and snow — water covers everything — but under the cursor ring, which
+  // is editor UI and must stay visible over a submerged brush target.
+  if (lakebed) finalColor = lakebed.apply(finalColor);
 
   mat.colorNode = mix(
     finalColor,
@@ -324,7 +334,7 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null) {
+export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null, lakebed = null, groundProc = null) {
   const group  = new THREE.Group();
   const levels = [];
 
@@ -333,7 +343,7 @@ export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrush
     // Level 0 = full grid; levels 1-4 = stitched rings (no overlap, no polygon offset needed).
     const geo     = lod === 0 ? buildFullGrid(GRID_N, step) : buildRingGrid(GRID_N, step);
     const uCenter = uniform(new THREE.Vector2(0, 0));
-    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared);
+    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed, groundProc);
     const mesh    = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
     mesh.receiveShadow = true;

@@ -1,4 +1,5 @@
 import { createDepthWaterState, depthWaterParams } from "./depthWaterState.js";
+import { createLakebedState } from "./lakebedState.js";
 
 /**
  * Lake toolState slice.
@@ -30,6 +31,13 @@ export function createLakeToolState() {
       flowSpeed: 0.1,
 
       water: createDepthWaterState(),
+
+      /**
+       * Underwater TERRAIN shading (sand + depth tint + caustics), rendered by the
+       * terrain shader, not the water. Global: follows every water surface — lakes
+       * and River+ alike — via the shared water-surface map.
+       */
+      lakebed: createLakebedState(),
     },
   };
 }

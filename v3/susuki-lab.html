@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — Susuki Field (Ghost of Tsushima)</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #10150f; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; left: 10px; z-index: 10;
+             background: rgba(12,16,12,0.88); border: 1px solid #2a342a;
+             border-radius: 8px; padding: 10px 12px; min-width: 210px; }
+      #hud h1 { margin: 0 0 6px; font-size: 12px; letter-spacing: .05em;
+                text-transform: uppercase; color: #cfd8b8; }
+      .row { display: flex; justify-content: space-between; gap: 14px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .note { margin-top: 7px; padding-top: 6px; border-top: 1px solid #2a342a;
+              color: #8b998b; font-size: 11px; }
+      #err { color: #ff8c8c; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Susuki Field Lab</h1>
+      <div class="row"><span>Grass blades</span><b id="s-grass">—</b></div>
+      <div class="row"><span>Susuki plants</span><b id="s-susuki">—</b></div>
+      <div class="row"><span>Draw calls</span><b id="s-draws">—</b></div>
+      <div class="row"><span>FPS</span><b id="s-fps">—</b></div>
+      <div class="note">Miscanthus sinensis — silver plumes over dark grass,
+        traveling wind waves, backlit sheen. Tune everything on the right.</div>
+      <div class="note" id="err"></div>
+    </div>
+
+    <script type="module">
+      // ── Susuki lab ───────────────────────────────────────────────────────────
+      // Goal: the Ghost-of-Tsushima pampas/susuki field. Two instanced layers on
+      // a rolling height field, all animated in the vertex shader:
+      //
+      //   grass   Gemini-style crossed ribbons (same createBladeGeometry the
+      //           engine's hybrid grass uses): arc bend, clump shade, hue/dry
+      //           variation, SSS emissive. Dark green base carpet.
+      //
+      //   susuki  NEW. Per plant: a tall stiff stem (crossed thin ribbon) that
+      //           bends with the wind, topped by a PLUME — 3 crossed cards that
+      //           all droop the same local direction, alpha-tested against a
+      //           procedurally-drawn strand texture (canvas: hundreds of fine
+      //           arcing white strokes + soft volume pass + seed sparkle).
+      //           A backlight term (view·-sun) gives the silver-lining glow
+      //           that sells the GoT look at dusk.
+      //
+      // No compute passes, no camera-follow wrap: a fixed 160 m field, per-plant
+      // data filled once on the CPU into storage buffers, read by instanceIndex
+      // in the VS (plain Mesh + .count — same trick as crowd-lab). Wind is a
+      // traveling mx_noise flow evaluated in the VS so waves sweep the field.
+      import * as THREE from "three";
+      import {
+        Fn, abs, clamp, cos, dot, float, hash, instanceIndex, max, mix,
+        mx_noise_float, negate, normalize, positionLocal, normalLocal, pow,
+        reflect, sin, smoothstep, storage, texture, time, uniform, uv,
+        varying, vec2, vec3, vec4, cameraPosition, PI2,
+      } from "three/tsl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "three/addons/libs/lil-gui.module.min.js";
+      import { createBladeGeometry } from "../v2/core/foliage/grassGemini.js";
+
+      const $ = (id) => document.getElementById(id);
+      const TILE = 160;          // field size (m)
+      const MARGIN = 4;
+
+      // ── CPU height field (analytic — placement + ground share it exactly) ──
+      function fract01(s) { return s - Math.floor(s); }
+      function hash2(x, y) {
+        return fract01(Math.sin(x * 127.1 + y * 311.7) * 43758.5453);
+      }
+      function vnoise(x, y) {
+        const xi = Math.floor(x), yi = Math.floor(y);
+        const xf = x - xi, yf = y - yi;
+        const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+        const a = hash2(xi, yi), b = hash2(xi + 1, yi);
+        const c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+        return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+      }
+      function terrainH(x, z) {
+        return (
+          4.2 * vnoise(x * 0.016 + 13.7, z * 0.016 + 7.1) +
+          1.4 * vnoise(x * 0.055 + 3.3, z * 0.055 + 9.9) +
+          0.35 * vnoise(x * 0.16, z * 0.16) - 3.0
+        );
+      }
+      function terrainNormal(x, z) {
+        const e = 0.6;
+        const nx = terrainH(x - e, z) - terrainH(x + e, z);
+        const nz = terrainH(x, z - e) - terrainH(x, z + e);
+        const n = new THREE.Vector3(nx, 2 * e, nz).normalize();
+        return n;
+      }
+
+      // ── Crossed ribbon (same construction as hybridGrassSystem) ─────────────
+      function createCrossedBladeGeometry(width, segs, taper) {
+        const base = createBladeGeometry(1.0, width, segs, taper);
+        const srcPos = base.attributes.position.array;
+        const srcUv = base.attributes.uv.array;
+        const srcNorm = base.attributes.normal.array;
+        const srcIdx = base.index.array;
+        const n = base.attributes.position.count;
+
+        const positions = new Float32Array(n * 2 * 3);
+        positions.set(srcPos, 0);
+        // second copy pre-rotated 90° around Y (bake it — no aCross needed here)
+        for (let i = 0; i < n; i++) {
+          positions[(n + i) * 3 + 0] = srcPos[i * 3 + 2];
+          positions[(n + i) * 3 + 1] = srcPos[i * 3 + 1];
+          positions[(n + i) * 3 + 2] = -srcPos[i * 3 + 0];
+        }
+        const uvs = new Float32Array(n * 2 * 2);
+        uvs.set(srcUv, 0); uvs.set(srcUv, n * 2);
+        const normals = new Float32Array(n * 2 * 3);
+        normals.set(srcNorm, 0); normals.set(srcNorm, n * 3);
+        const indices = new Uint16Array(srcIdx.length * 2);
+        indices.set(srcIdx, 0);
+        for (let i = 0; i < srcIdx.length; i++) indices[srcIdx.length + i] = srcIdx[i] + n;
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+        geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+        geo.setIndex(new THREE.BufferAttribute(indices, 1));
+        base.dispose();
+        return geo;
+      }
+
+      // ── Plume strand texture (canvas) ────────────────────────────────────────
+      // The whole GoT feel lives here: hundreds of fine arcing strokes fanning
+      // up-and-out from a central spine, a blurred low-alpha pass underneath for
+      // volume, and bright dots for seed sparkle. Drawn white — tinting, AO and
+      // backlight happen in the shader off the alpha channel only.
+      const PW = 256, PH = 512;
+      const plumeCanvas = document.createElement("canvas");
+      plumeCanvas.width = PW; plumeCanvas.height = PH;
+      const plumeTex = new THREE.CanvasTexture(plumeCanvas);
+      plumeTex.colorSpace = THREE.SRGBColorSpace;
+      plumeTex.anisotropy = 8;
+
+      let strandSeed = 1;
+      function srand() { // deterministic per redraw so tweaks compare fairly
+        strandSeed = (strandSeed * 16807) % 2147483647;
+        return (strandSeed - 1) / 2147483646;
+      }
+      function drawPlumeTexture(p) {
+        strandSeed = 12345;
+        const ctx = plumeCanvas.getContext("2d");
+        ctx.clearRect(0, 0, PW, PH);
+        ctx.lineCap = "round";
+        const cx = PW / 2;
+        const spreadRad = (p.plumeSpread * Math.PI) / 180;
+
+        const strand = (soft) => {
+          const t = Math.pow(srand(), 0.8);            // 0 base → 1 top of spine
+          let x = cx + (srand() - 0.5) * 10;
+          let y = PH * (1 - 0.05 - t * 0.88);
+          const side = srand() < 0.5 ? -1 : 1;
+          let theta = -Math.PI / 2 + side * spreadRad * (0.2 + 0.8 * srand());
+          // longest strands around the mid-upper spine, short at base and apex
+          const len = PH * p.plumeStrandLen *
+            (0.3 + 0.7 * Math.sin(Math.min(t * 1.2, 1) * Math.PI));
+          const segs = 8, step = len / segs;
+          const curl = side * (0.04 + srand() * 0.07);
+          const droop = p.plumeDroopTex * 0.05;
+          let alpha = soft ? 0.07 + srand() * 0.07 : 0.35 + srand() * 0.55;
+          let lw = soft ? 6 + srand() * 9 : 0.9 + srand() * 1.5;
+          for (let k = 0; k < segs; k++) {
+            const nx = x + Math.cos(theta) * step * 0.6; // 0.6: keep inside card
+            const ny = y + Math.sin(theta) * step;
+            ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+            ctx.lineWidth = lw;
+            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
+            x = nx; y = ny;
+            theta += curl + droop;                      // curl out + droop down
+            alpha *= soft ? 0.85 : 0.78;
+            lw *= 0.9;
+          }
+          return { x, y };
+        };
+
+        for (let i = 0; i < p.plumeStrands * 0.2; i++) strand(true);   // volume
+        const tips = [];
+        for (let i = 0; i < p.plumeStrands; i++) tips.push(strand(false));
+        // seed sparkle near strand ends
+        for (let i = 0; i < p.plumeStrands * 0.6; i++) {
+          const tip = tips[(srand() * tips.length) | 0];
+          const a = 0.4 + srand() * 0.5;
+          ctx.fillStyle = `rgba(255,255,255,${a.toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(tip.x + (srand() - 0.5) * 14, tip.y + (srand() - 0.5) * 14,
+                  0.5 + srand() * 0.9, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        plumeTex.needsUpdate = true;
+      }
+
+      // ── Plume geometry: 3 crossed cards, all drooping the same local +X ─────
+      // (rotating an already-drooped card would fan the tuft into a fountain;
+      // rotating flat cards THEN adding the shared +X arc keeps it one coherent
+      // tuft from every view angle, like GoT's.)
+      function createPlumeGeometry(p) {
+        const W = p.plumeWidth, H = p.plumeHeight, droop = p.plumeDroop;
+        const angles = [0, Math.PI / 3, (2 * Math.PI) / 3];
+        const ws = 2, hs = 6;
+        const positions = [], uvs = [], normals = [], indices = [];
+        let base = 0;
+        for (const a of angles) {
+          const ca = Math.cos(a), sa = Math.sin(a);
+          for (let j = 0; j <= hs; j++) {
+            const v = j / hs;
+            const y = v * H;
+            const arc = droop * H * v * v; // shared droop, local +X
+            for (let i = 0; i <= ws; i++) {
+              const u01 = i / ws;
+              const x0 = (u01 - 0.5) * W;
+              positions.push(x0 * ca + arc, y, -x0 * sa);
+              uvs.push(u01, v);
+              normals.push(sa, 0, ca);
+            }
+          }
+          for (let j = 0; j < hs; j++) {
+            for (let i = 0; i < ws; i++) {
+              const r0 = base + j * (ws + 1) + i, r1 = r0 + ws + 1;
+              indices.push(r0, r1, r0 + 1, r0 + 1, r1, r1 + 1);
+            }
+          }
+          base += (hs + 1) * (ws + 1);
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+        geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
+        geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
+        geo.setIndex(indices);
+        return geo;
+      }
+
+      // ── Params (defaults tuned toward the GoT screenshot: dusk, overcast) ───
+      const P = {
+        // wind
+        windStrength: 0.55, windSpeed: 1.1, windWaveScale: 0.05,
+        windGust: 0.55, windAngle: 35,
+        // grass
+        grassSide: 288, grassHeight: 1.25, grassWidth: 0.13, grassLean: 0.85,
+        grassBendFocus: 0.85, grassBase: "#1a4a15", grassTip: "#63a23b",
+        aoBase: 0.35, aoPower: 2.0, skyBlend: 0.75, clumpStrength: 0.7,
+        cvHueSpread: 0.12, cvDrySpread: 0.1, cvDryColor: "#7a6b34",
+        bssColor: "#4d8f3a", bssIntensity: 1.3,
+        // susuki
+        susukiTarget: 20000, susukiCoverage: 0.62, stemHeight: 1.9,
+        stemHeightVar: 0.5, stemWidth: 0.03, stemFlex: 0.45,
+        stemBase: "#2c4018", stemTip: "#6f7a40",
+        // plume
+        plumeSize: 1.1, plumeWidth: 0.48, plumeHeight: 1.2, plumeDroop: 0.55,
+        plumeBase: "#d0c8b2", plumeTip: "#f7f4ea", plumeAO: 0.62,
+        plumeGlow: 0.2, backlitIntensity: 1.7, backlitPower: 6,
+        alphaTest: 0.2, alphaToCoverage: true, plumeFlutter: 0.05,
+        // plume texture
+        plumeStrands: 460, plumeSpread: 52, plumeStrandLen: 0.33,
+        plumeDroopTex: 0.6,
+        // atmosphere
+        sunElevation: 14, sunAzimuth: 215, sunIntensity: 2.6, sunColor: "#ffdfb8",
+        hemiIntensity: 1.2, hemiSky: "#8ba3b5", hemiGround: "#33421f",
+        fogColor: "#293a22", fogNear: 45, fogFar: 210, exposure: 1.12,
+      };
+
+      // ── Renderer / scene ─────────────────────────────────────────────────────
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.toneMapping = THREE.NeutralToneMapping;
+      renderer.toneMappingExposure = P.exposure;
+      renderer.info.autoReset = false;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(P.fogColor);
+      scene.fog = new THREE.Fog(new THREE.Color(P.fogColor), P.fogNear, P.fogFar);
+
+      const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.3, 500);
+      camera.position.set(20, 13, 24);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(-6, 0.5, -8);
+      controls.enableDamping = true;
+      controls.maxPolarAngle = Math.PI * 0.49;
+
+      const hemi = new THREE.HemisphereLight(P.hemiSky, P.hemiGround, P.hemiIntensity);
+      scene.add(hemi);
+      const sun = new THREE.DirectionalLight(P.sunColor, P.sunIntensity);
+      scene.add(sun);
+
+      // ── Shared uniforms ──────────────────────────────────────────────────────
+      const srgb = (hex) => new THREE.Color(hex);
+      const U = {
+        uSunDir: uniform(new THREE.Vector3(0, 1, 0)),
+        uWindDir: uniform(new THREE.Vector2(1, 0)),
+        uWindSpeed: uniform(P.windSpeed),
+        uWindStrength: uniform(P.windStrength),
+        uWindGust: uniform(P.windGust),
+        uWaveScale: uniform(P.windWaveScale),
+        // grass
+        uGrassHeight: uniform(P.grassHeight),
+        uGrassLean: uniform(P.grassLean),
+        uBendFocus: uniform(P.grassBendFocus),
+        uGrassBase: uniform(srgb(P.grassBase)),
+        uGrassTip: uniform(srgb(P.grassTip)),
+        uAoBase: uniform(P.aoBase),
+        uAoPower: uniform(P.aoPower),
+        uSkyBlend: uniform(P.skyBlend),
+        uCvHue: uniform(P.cvHueSpread),
+        uCvDry: uniform(P.cvDrySpread),
+        uCvDryCol: uniform(srgb(P.cvDryColor)),
+        uBssCol: uniform(srgb(P.bssColor)),
+        uBssInt: uniform(P.bssIntensity),
+        // susuki
+        uStemHMul: uniform(1),
+        uStemFlex: uniform(P.stemFlex),
+        uStemBase: uniform(srgb(P.stemBase)),
+        uStemTip: uniform(srgb(P.stemTip)),
+        uPlumeSize: uniform(P.plumeSize),
+        uPlumeBase: uniform(srgb(P.plumeBase)),
+        uPlumeTip: uniform(srgb(P.plumeTip)),
+        uPlumeAO: uniform(P.plumeAO),
+        uPlumeGlow: uniform(P.plumeGlow),
+        uBacklitInt: uniform(P.backlitIntensity),
+        uBacklitPow: uniform(P.backlitPower),
+        uFlutter: uniform(P.plumeFlutter),
+      };
+      function applySun() {
+        const el = (P.sunElevation * Math.PI) / 180;
+        const az = (P.sunAzimuth * Math.PI) / 180;
+        const d = new THREE.Vector3(
+          Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
+        U.uSunDir.value.copy(d);
+        sun.position.copy(d).multiplyScalar(120);
+        sun.color.set(P.sunColor);
+        sun.intensity = P.sunIntensity;
+      }
+      function applyWindDir() {
+        const r = (P.windAngle * Math.PI) / 180;
+        U.uWindDir.value.set(Math.cos(r), Math.sin(r));
+      }
+      applySun(); applyWindDir();
+
+      // ── TSL helpers ──────────────────────────────────────────────────────────
+      const rotY = (ang, v) => {
+        const cc = cos(ang), ss = sin(ang);
+        return vec3(v.x.mul(cc).add(v.z.mul(ss)), v.y,
+                    negate(v.x).mul(ss).add(v.z.mul(cc)));
+      };
+      // Traveling wind: a directional-flow noise wave + slower gust field +
+      // per-plant micro phase. Returns a bend force ≥ 0 that sweeps the field.
+      const windForce = (wx, wz, phase) => {
+        const t = time.mul(U.uWindSpeed);
+        const fx = wx.mul(U.uWaveScale).sub(U.uWindDir.x.mul(t).mul(0.35));
+        const fz = wz.mul(U.uWaveScale).sub(U.uWindDir.y.mul(t).mul(0.35));
+        const wave = mx_noise_float(vec3(fx, fz, t.mul(0.12)));
+        const gust = smoothstep(float(0.15), float(0.75),
+          mx_noise_float(vec3(fx.mul(0.3), fz.mul(0.3), t.mul(0.07)))).mul(U.uWindGust);
+        const micro = sin(t.mul(3.5).add(phase.mul(PI2))).mul(0.07);
+        return wave.mul(0.5).add(0.5).add(gust).add(micro).mul(U.uWindStrength);
+      };
+
+      // ── Grass layer ──────────────────────────────────────────────────────────
+      let grass = null;
+      function buildGrass() {
+        grass?.dispose();
+        const side = P.grassSide, N = side * side;
+        const spacing = (TILE - MARGIN * 2) / side;
+        const gA = new THREE.StorageBufferAttribute(N, 4); // x, y, z, bladeHMul
+        const gB = new THREE.StorageBufferAttribute(N, 4); // yaw, lean, phase, clumpShade
+        const gC = new THREE.StorageBufferAttribute(N, 4); // h4 hue, h5 dry, nx, nz
+        const a = gA.array, b = gB.array, c = gC.array;
+        const CLUMP = 1.7;
+        for (let i = 0; i < N; i++) {
+          const gx = (i % side) + Math.random();
+          const gz = Math.floor(i / side) + Math.random();
+          const x = gx * spacing - TILE / 2 + MARGIN;
+          const z = gz * spacing - TILE / 2 + MARGIN;
+          // world-space clump cell (CPU version of the hybrid's Voronoi clump)
+          const ci = Math.floor(x / CLUMP), cj = Math.floor(z / CLUMP);
+          const cvx = hash2(ci, cj), cvy = hash2(ci + 57, cj + 113);
+          const cvz = hash2(ci + 7, cj + 3), cvw = hash2(ci + 29, cj + 71);
+          const fx = x / CLUMP - ci, fz = z / CLUMP - cj;
+          const cd = Math.hypot(cvx - fx, cvy - fz);
+          const infl = Math.max(0, Math.min(1, (0.75 - cd) / 0.7)) * P.clumpStrength;
+          const h0 = Math.random(), h2 = Math.random(), h3 = Math.random();
+          const yaw = (h0 * (1 - infl) + cvz * infl) * Math.PI * 2;
+          const hMul = (0.75 + h2 * 0.75) * (1 - infl) + (0.6 + cvx * 0.8) * infl;
+          const lean = (h3 * (1 - infl) + cvw * infl);
+          const shade = 1 * (1 - infl) + (0.82 + cvy * 0.36) * infl;
+          const n = terrainNormal(x, z);
+          a[i*4] = x; a[i*4+1] = terrainH(x, z); a[i*4+2] = z; a[i*4+3] = hMul;
+          b[i*4] = yaw; b[i*4+1] = lean; b[i*4+2] = Math.random(); b[i*4+3] = shade;
+          c[i*4] = Math.random(); c[i*4+1] = Math.random(); c[i*4+2] = n.x; c[i*4+3] = n.z;
+        }
+        const sA = storage(gA, "vec4", N).toReadOnly();
+        const sB = storage(gB, "vec4", N).toReadOnly();
+        const sC = storage(gC, "vec4", N).toReadOnly();
+
+        const mat = new THREE.MeshStandardNodeMaterial({
+          side: THREE.FrontSide, roughness: 0.92, metalness: 0,
+        });
+        mat.envMapIntensity = 0;
+
+        const vData = varying(vec4(1, 1, 0, 0), "v_g_data");
+        const vNormal = varying(vec3(0, 1, 0), "v_g_n");
+        const vWorld = varying(vec3(0), "v_g_w");
+
+        mat.positionNode = Fn(() => {
+          const pa = sA.element(instanceIndex);
+          const pb = sB.element(instanceIndex);
+          const pc = sC.element(instanceIndex);
+          const h = uv().y;
+          const bladeH = U.uGrassHeight.mul(pa.w);
+          const lean = pb.y.mul(U.uGrassLean);
+          const wind = windForce(pa.x, pa.z, pb.z);
+          const maxA = float(1.5);
+          const force = lean.add(wind.mul(maxA.sub(lean).div(maxA)));
+          const angle = force.mul(pow(max(h, 1e-4), U.uBendFocus));
+          const L = h.mul(bladeH);
+          // high-frequency per-vertex shimmer on top of the traveling wave
+          const sway = sin(time.mul(2.3).add(pb.z.mul(PI2)))
+            .mul(0.05).mul(clamp(U.uWindStrength, 0, 2)).mul(h.mul(h));
+          const pArc = vec3(
+            sin(angle).mul(L).add(positionLocal.x),
+            cos(angle).mul(L),
+            positionLocal.z);
+          const pR = rotY(pb.x, pArc);
+
+          // flat lighting normal blended to terrain (hybrid's proven trick);
+          // per-blade normal reserved for the SSS emissive
+          const tNy = pow(max(float(0), float(1).sub(pc.z.mul(pc.z)).sub(pc.w.mul(pc.w))), 0.5);
+          const terrN = vec3(pc.z, tNy, pc.w);
+          const nFlat = normalize(mix(vec3(0, 1, 0), terrN, U.uSkyBlend));
+          normalLocal.assign(nFlat);
+          const spread = uv().x.mul(2).sub(1).mul(0.3).mul(Math.PI * 0.5);
+          vNormal.assign(normalize(mix(rotY(pb.x.add(spread), vec3(0, 0, 1)), terrN, U.uSkyBlend)));
+          vData.assign(vec4(pb.w, mix(float(0.75), float(1), hash(instanceIndex.add(8521))), pc.x, pc.y));
+
+          const out = vec3(
+            pR.x.add(sway.mul(U.uWindDir.x)).add(pa.x),
+            pR.y.add(pa.y),
+            pR.z.add(sway.mul(U.uWindDir.y)).add(pa.z));
+          vWorld.assign(out);
+          return out;
+        })();
+
+        mat.colorNode = Fn(() => {
+          const h = uv().y;
+          const ao = mix(U.uAoBase, float(1), pow(h, U.uAoPower));
+          const base = mix(U.uGrassBase, U.uGrassTip, h);
+          const warm = vec3(0.18, 0.28, 0.02), cool = vec3(0.02, 0.18, 0.08);
+          const hueCol = mix(base, mix(warm, cool, vData.z), U.uCvHue);
+          const dry = smoothstep(U.uCvDry, float(0), vData.w)
+            .mul(float(1).sub(h).mul(0.5).add(0.5));
+          const col = mix(hueCol, U.uCvDryCol, dry);
+          return col.mul(vData.x).mul(vData.y).mul(ao);
+        })();
+
+        mat.emissiveNode = Fn(() => {
+          const h = uv().y;
+          const N = normalize(vNormal);
+          const viewDir = normalize(cameraPosition.sub(vWorld));
+          const thickness = float(1).sub(h).mul(0.7).add(0.3);
+          const backScat = pow(max(dot(negate(U.uSunDir), N), 0), 2).mul(thickness);
+          const rim = pow(float(1).sub(max(dot(N, viewDir), 0)), 3).mul(thickness).mul(0.25);
+          // transmission when looking toward the sun — the GoT green glow
+          const backlit = pow(max(dot(viewDir, negate(U.uSunDir)), 0), 4)
+            .mul(h).mul(0.55);
+          return U.uBssCol.mul(0.35)
+            .mul(clamp(backScat.add(rim).add(backlit), 0, 1.4)).mul(U.uBssInt);
+        })();
+
+        const geo = createCrossedBladeGeometry(P.grassWidth, 6, 0.55);
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.count = N;
+        mesh.frustumCulled = false;
+        scene.add(mesh);
+        $("s-grass").textContent = N.toLocaleString();
+        grass = {
+          mesh,
+          dispose() { scene.remove(mesh); geo.dispose(); mat.dispose(); },
+        };
+      }
+
+      // ── Susuki layer (stems + plumes share the per-plant buffers) ───────────
+      let susuki = null;
+      function buildSusuki() {
+        susuki?.dispose();
+        const M = P.susukiTarget;
+        const sAAttr = new THREE.StorageBufferAttribute(M, 4); // x, y, z, stemH
+        const sBAttr = new THREE.StorageBufferAttribute(M, 4); // yaw, phase, hue, plumeScale
+        const a = sAAttr.array, b = sBAttr.array;
+        // patchy coverage: susuki grows in swaths, not uniformly (GoT look)
+        let placed = 0, attempts = 0;
+        while (placed < M && attempts < M * 6) {
+          attempts++;
+          const x = (Math.random() - 0.5) * (TILE - MARGIN * 2);
+          const z = (Math.random() - 0.5) * (TILE - MARGIN * 2);
+          const mask = vnoise(x * 0.035 + 41.3, z * 0.035 + 17.9);
+          if (mask < 1 - P.susukiCoverage) continue;
+          const i = placed++;
+          a[i*4] = x; a[i*4+1] = terrainH(x, z); a[i*4+2] = z;
+          a[i*4+3] = P.stemHeight + (Math.random() - 0.5) * 2 * P.stemHeightVar;
+          b[i*4] = Math.random() * Math.PI * 2;
+          b[i*4+1] = Math.random();
+          b[i*4+2] = Math.random();
+          b[i*4+3] = 0.8 + Math.random() * 0.4;
+        }
+        const sA = storage(sAAttr, "vec4", M).toReadOnly();
+        const sB = storage(sBAttr, "vec4", M).toReadOnly();
+
+        // shared per-plant force (stiffer than grass — tall stems resist)
+        const plantForce = (pa, pb) =>
+          windForce(pa.x, pa.z, pb.y).mul(U.uStemFlex).add(0.08);
+
+        // — stems —
+        const stemMat = new THREE.MeshStandardNodeMaterial({
+          side: THREE.FrontSide, roughness: 0.9, metalness: 0,
+        });
+        stemMat.envMapIntensity = 0;
+        stemMat.positionNode = Fn(() => {
+          const pa = sA.element(instanceIndex);
+          const pb = sB.element(instanceIndex);
+          const h = uv().y;
+          const stemH = pa.w.mul(U.uStemHMul);
+          const force = plantForce(pa, pb);
+          const angle = force.mul(pow(max(h, 1e-4), 1.6)); // bend high up only
+          const L = h.mul(stemH);
+          const pArc = vec3(sin(angle).mul(L).add(positionLocal.x),
+                            cos(angle).mul(L), positionLocal.z);
+          const pR = rotY(pb.x, pArc);
+          normalLocal.assign(vec3(0, 1, 0));
+          return vec3(pR.x.add(pa.x), pR.y.add(pa.y), pR.z.add(pa.z));
+        })();
+        stemMat.colorNode = mix(U.uStemBase, U.uStemTip, pow(uv().y, 1.4));
+
+        const stemGeo = createCrossedBladeGeometry(P.stemWidth, 4, 0.9);
+        const stems = new THREE.Mesh(stemGeo, stemMat);
+        stems.count = placed;
+        stems.frustumCulled = false;
+        scene.add(stems);
+
+        // — plumes —
+        const plumeMat = new THREE.MeshStandardNodeMaterial({
+          side: THREE.DoubleSide, roughness: 1, metalness: 0,
+          alphaTest: P.alphaTest, alphaToCoverage: P.alphaToCoverage,
+        });
+        plumeMat.envMapIntensity = 0;
+        const vPWorld = varying(vec3(0), "v_p_w");
+        const vPHue = varying(float(0), "v_p_hue");
+
+        plumeMat.positionNode = Fn(() => {
+          const pa = sA.element(instanceIndex);
+          const pb = sB.element(instanceIndex);
+          const stemH = pa.w.mul(U.uStemHMul);
+          const force = plantForce(pa, pb);
+          // ride the stem tip: rotate the plume by the tip angle (≈ force at
+          // h=1) in the bend plane, then translate to the arc tip
+          const local = positionLocal.mul(pb.w.mul(U.uPlumeSize));
+          const ca = cos(force), sa2 = sin(force);
+          const bent = vec3(
+            local.x.mul(ca).add(local.y.mul(sa2)),
+            local.y.mul(ca).sub(local.x.mul(sa2)),
+            local.z);
+          const tip = vec3(sin(force).mul(stemH), cos(force).mul(stemH), 0);
+          // per-vertex flutter, stronger toward the plume tip
+          const fl = sin(time.mul(5.2).add(pb.y.mul(37)).add(positionLocal.y.mul(2.5)))
+            .mul(U.uFlutter).mul(uv().y.add(0.15));
+          const p = rotY(pb.x, bent.add(tip).add(vec3(fl, 0, fl.mul(0.6))));
+          normalLocal.assign(vec3(0, 1, 0)); // soft top-lit fluff
+          const out = vec3(p.x.add(pa.x), p.y.add(pa.y), p.z.add(pa.z));
+          vPWorld.assign(out);
+          vPHue.assign(pb.z);
+          return out;
+        })();
+
+        const plumeSample = texture(plumeTex, uv());
+        plumeMat.opacityNode = plumeSample.a;
+        plumeMat.colorNode = Fn(() => {
+          const v = uv().y;
+          const col = mix(U.uPlumeBase, U.uPlumeTip, smoothstep(0.1, 0.85, v));
+          const warm = mix(col, col.mul(vec3(1.07, 1.0, 0.88)), vPHue); // straw tint
+          // dense strand cores brighter than the fringe → soft interior depth
+          const strandShade = mix(float(0.8), float(1), plumeSample.a);
+          return warm.mul(strandShade)
+            .mul(mix(U.uPlumeAO, float(1), smoothstep(0.0, 0.5, v)));
+        })();
+        plumeMat.emissiveNode = Fn(() => {
+          const viewDir = normalize(cameraPosition.sub(vPWorld));
+          // silver lining: light traveling -sunDir continues into the camera
+          const backlit = pow(max(dot(viewDir, negate(U.uSunDir)), 0), U.uBacklitPow)
+            .mul(U.uBacklitInt);
+          const col = mix(U.uPlumeBase, U.uPlumeTip, uv().y);
+          return col.mul(backlit.add(U.uPlumeGlow));
+        })();
+
+        const plumeGeo = createPlumeGeometry(P);
+        const plumes = new THREE.Mesh(plumeGeo, plumeMat);
+        plumes.count = placed;
+        plumes.frustumCulled = false;
+        scene.add(plumes);
+
+        $("s-susuki").textContent = placed.toLocaleString();
+        susuki = {
+          stems, plumes, plumeMat,
+          rebuildPlumeGeo() {
+            const g = createPlumeGeometry(P);
+            plumes.geometry.dispose();
+            plumes.geometry = g;
+          },
+          dispose() {
+            scene.remove(stems); scene.remove(plumes);
+            stemGeo.dispose(); stemMat.dispose();
+            plumes.geometry.dispose(); plumeMat.dispose();
+          },
+        };
+      }
+
+      // ── Ground ───────────────────────────────────────────────────────────────
+      {
+        const seg = 220;
+        const geo = new THREE.PlaneGeometry(TILE + 20, TILE + 20, seg, seg);
+        geo.rotateX(-Math.PI / 2);
+        const pos = geo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          pos.setY(i, terrainH(pos.getX(i), pos.getZ(i)));
+        }
+        geo.computeVertexNormals();
+        const mat = new THREE.MeshStandardNodeMaterial({ roughness: 1, metalness: 0 });
+        // colorNode (not .color) so fog uniforms keep refreshing on this
+        // never-moving mesh (three WebGPU static-material fog freeze)
+        const gBase = uniform(srgb("#16220f"));
+        const gSoil = uniform(srgb("#2e2a1a"));
+        mat.colorNode = Fn(() => {
+          const w = positionLocal; // mesh at origin: local == world
+          const n = mx_noise_float(vec3(w.x.mul(0.12), w.z.mul(0.12), 3.7));
+          return mix(gBase, gSoil, smoothstep(0.25, 0.8, n).mul(0.5));
+        })();
+        const ground = new THREE.Mesh(geo, mat);
+        scene.add(ground);
+      }
+
+      // ── GUI ──────────────────────────────────────────────────────────────────
+      const gui = new GUI({ title: "Susuki Lab" });
+      const fWind = gui.addFolder("Wind");
+      fWind.add(P, "windStrength", 0, 2, 0.01).onChange((v) => (U.uWindStrength.value = v));
+      fWind.add(P, "windSpeed", 0, 4, 0.01).onChange((v) => (U.uWindSpeed.value = v));
+      fWind.add(P, "windWaveScale", 0.01, 0.2, 0.001).onChange((v) => (U.uWaveScale.value = v));
+      fWind.add(P, "windGust", 0, 1.5, 0.01).onChange((v) => (U.uWindGust.value = v));
+      fWind.add(P, "windAngle", 0, 360, 1).onChange(applyWindDir);
+
+      const fGrass = gui.addFolder("Grass").close();
+      fGrass.add(P, "grassSide", [160, 224, 288, 352, 448]).name("blades/side").onFinishChange(buildGrass);
+      fGrass.add(P, "grassHeight", 0.3, 2.5, 0.01).onChange((v) => (U.uGrassHeight.value = v));
+      fGrass.add(P, "grassWidth", 0.05, 0.3, 0.005).onFinishChange(buildGrass);
+      fGrass.add(P, "grassLean", 0, 1.4, 0.01).onChange((v) => (U.uGrassLean.value = v));
+      fGrass.add(P, "grassBendFocus", 0.3, 2, 0.01).onChange((v) => (U.uBendFocus.value = v));
+      fGrass.addColor(P, "grassBase").onChange((v) => U.uGrassBase.value.set(v));
+      fGrass.addColor(P, "grassTip").onChange((v) => U.uGrassTip.value.set(v));
+      fGrass.add(P, "aoBase", 0, 1, 0.01).onChange((v) => (U.uAoBase.value = v));
+      fGrass.add(P, "skyBlend", 0, 1, 0.01).onChange((v) => (U.uSkyBlend.value = v));
+      fGrass.add(P, "clumpStrength", 0, 1, 0.01).onFinishChange(buildGrass);
+      fGrass.add(P, "cvHueSpread", 0, 0.5, 0.01).onChange((v) => (U.uCvHue.value = v));
+      fGrass.add(P, "cvDrySpread", 0, 0.6, 0.01).onChange((v) => (U.uCvDry.value = v));
+      fGrass.addColor(P, "cvDryColor").onChange((v) => U.uCvDryCol.value.set(v));
+      fGrass.add(P, "bssIntensity", 0, 3, 0.01).onChange((v) => (U.uBssInt.value = v));
+      fGrass.addColor(P, "bssColor").onChange((v) => U.uBssCol.value.set(v));
+
+      const fSus = gui.addFolder("Susuki");
+      fSus.add(P, "susukiTarget", [5000, 10000, 20000, 40000]).name("plants").onFinishChange(buildSusuki);
+      fSus.add(P, "susukiCoverage", 0.1, 1, 0.01).name("coverage").onFinishChange(buildSusuki);
+      fSus.add(P, "stemHeight", 0.8, 3.5, 0.01).onFinishChange(buildSusuki);
+      fSus.add(P, "stemHeightVar", 0, 1.2, 0.01).onFinishChange(buildSusuki);
+      fSus.add(P, "stemFlex", 0, 1.2, 0.01).onChange((v) => (U.uStemFlex.value = v));
+      fSus.addColor(P, "stemBase").onChange((v) => U.uStemBase.value.set(v));
+      fSus.addColor(P, "stemTip").onChange((v) => U.uStemTip.value.set(v));
+
+      const fPlume = gui.addFolder("Plume");
+      fPlume.add(P, "plumeSize", 0.4, 2, 0.01).onChange((v) => (U.uPlumeSize.value = v));
+      fPlume.add(P, "plumeWidth", 0.2, 1.2, 0.01).onFinishChange(() => susuki?.rebuildPlumeGeo());
+      fPlume.add(P, "plumeHeight", 0.4, 2, 0.01).onFinishChange(() => susuki?.rebuildPlumeGeo());
+      fPlume.add(P, "plumeDroop", 0, 1.2, 0.01).onFinishChange(() => susuki?.rebuildPlumeGeo());
+      fPlume.addColor(P, "plumeBase").onChange((v) => U.uPlumeBase.value.set(v));
+      fPlume.addColor(P, "plumeTip").onChange((v) => U.uPlumeTip.value.set(v));
+      fPlume.add(P, "plumeAO", 0, 1, 0.01).onChange((v) => (U.uPlumeAO.value = v));
+      fPlume.add(P, "plumeGlow", 0, 0.6, 0.01).onChange((v) => (U.uPlumeGlow.value = v));
+      fPlume.add(P, "backlitIntensity", 0, 4, 0.01).onChange((v) => (U.uBacklitInt.value = v));
+      fPlume.add(P, "backlitPower", 1, 16, 0.5).onChange((v) => (U.uBacklitPow.value = v));
+      fPlume.add(P, "plumeFlutter", 0, 0.2, 0.005).onChange((v) => (U.uFlutter.value = v));
+      fPlume.add(P, "alphaTest", 0, 0.6, 0.01).onChange((v) => {
+        if (susuki) { susuki.plumeMat.alphaTest = v; susuki.plumeMat.needsUpdate = true; }
+      });
+      fPlume.add(P, "alphaToCoverage").onChange((v) => {
+        if (susuki) { susuki.plumeMat.alphaToCoverage = v; susuki.plumeMat.needsUpdate = true; }
+      });
+
+      const fTex = gui.addFolder("Plume texture").close();
+      const redraw = () => drawPlumeTexture(P);
+      fTex.add(P, "plumeStrands", 60, 800, 10).onFinishChange(redraw);
+      fTex.add(P, "plumeSpread", 15, 85, 1).onFinishChange(redraw);
+      fTex.add(P, "plumeStrandLen", 0.1, 0.6, 0.01).onFinishChange(redraw);
+      fTex.add(P, "plumeDroopTex", 0, 2, 0.05).onFinishChange(redraw);
+
+      const fAtm = gui.addFolder("Atmosphere").close();
+      fAtm.add(P, "sunElevation", 1, 80, 0.5).onChange(applySun);
+      fAtm.add(P, "sunAzimuth", 0, 360, 1).onChange(applySun);
+      fAtm.add(P, "sunIntensity", 0, 6, 0.05).onChange(applySun);
+      fAtm.addColor(P, "sunColor").onChange(applySun);
+      fAtm.add(P, "hemiIntensity", 0, 2, 0.01).onChange((v) => (hemi.intensity = v));
+      fAtm.addColor(P, "hemiSky").onChange((v) => hemi.color.set(v));
+      fAtm.addColor(P, "hemiGround").onChange((v) => hemi.groundColor.set(v));
+      fAtm.addColor(P, "fogColor").onChange((v) => {
+        scene.fog.color.set(v); scene.background.set(v);
+      });
+      fAtm.add(P, "fogNear", 5, 150, 1).onChange((v) => (scene.fog.near = v));
+      fAtm.add(P, "fogFar", 50, 400, 1).onChange((v) => (scene.fog.far = v));
+      fAtm.add(P, "exposure", 0.3, 2.5, 0.01).onChange((v) => (renderer.toneMappingExposure = v));
+
+      // ── Boot + loop ──────────────────────────────────────────────────────────
+      drawPlumeTexture(P);
+      buildGrass();
+      buildSusuki();
+
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+
+      let frames = 0, fpsAcc = 0, hudT = 0, last = performance.now();
+      renderer.setAnimationLoop(() => {
+        const now = performance.now();
+        const dt = Math.min((now - last) / 1000, 0.05);
+        last = now;
+        controls.update();
+        renderer.render(scene, camera);
+        fpsAcc += 1 / Math.max(dt, 1e-4); frames++; hudT += dt;
+        if (hudT > 0.4) {
+          $("s-draws").textContent = renderer.info.render.drawCalls;
+          $("s-fps").textContent = (fpsAcc / frames).toFixed(0);
+          fpsAcc = 0; frames = 0; hudT = 0;
+        }
+        renderer.info.reset();
+      });
+
+      addEventListener("error", (e) => { $("err").textContent = String(e.message); });
+      addEventListener("unhandledrejection", (e) => { $("err").textContent = String(e.reason); });
+    </script>
+  </body>
+</html>

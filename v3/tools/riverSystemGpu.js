@@ -116,8 +116,10 @@ export class RiverSystemGPU {
    * @param {Float32Array}   opts.cpuHeightmap       main.js CPU mirror (normalized)
    * @param {function}       opts.ensureCpuHeightmap async () => refresh cpuHeightmap from GPU
    * @param {function}       opts.onCarveCommitted   () => sync grass/trees/bvh after a committed carve
+   * @param {function}       [opts.onWaterMeshesChanged] () => a water ribbon was (re)built or removed
+   *   (drives the water-surface map rebake for the terrain's lakebed shading)
    */
-  constructor({ scene, toolState, renderer, getRT, heightTexNode, cpuHeightmap, ensureCpuHeightmap, onCarveCommitted, waterNormalMap = null }) {
+  constructor({ scene, toolState, renderer, getRT, heightTexNode, cpuHeightmap, ensureCpuHeightmap, onCarveCommitted, waterNormalMap = null, onWaterMeshesChanged = null }) {
     this.scene = scene;
     this.toolState = toolState;
     this.renderer = renderer;
@@ -127,6 +129,7 @@ export class RiverSystemGPU {
     this.ensureCpuHeightmap = ensureCpuHeightmap;
     this.onCarveCommitted = onCarveCommitted;
     this.waterNormalMap = waterNormalMap;
+    this.onWaterMeshesChanged = onWaterMeshesChanged;
 
     // segments: { id, points: Vector3[], mesh: Mesh|null,
     //             profile: {pts,levels,arc,slopes}|null,
@@ -1376,6 +1379,7 @@ export class RiverSystemGPU {
       seg.mesh.frustumCulled = false;
       this.scene.add(seg.mesh);
     }
+    this.onWaterMeshesChanged?.();
   }
 
   _rebuildActiveSegMesh() {
@@ -1390,6 +1394,7 @@ export class RiverSystemGPU {
     seg.mesh.renderOrder = 2;
     seg.mesh.frustumCulled = false;
     this.scene.add(seg.mesh);
+    this.onWaterMeshesChanged?.();
   }
 
   _rebuildHandles() {
@@ -1476,6 +1481,7 @@ export class RiverSystemGPU {
     this.scene.remove(seg.mesh);
     seg.mesh.geometry.dispose();
     seg.mesh = null;
+    this.onWaterMeshesChanged?.();
   }
 
   _disposeAllMeshes() {

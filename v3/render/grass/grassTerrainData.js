@@ -75,10 +75,20 @@ export class GrassTerrainData {
     this.cliffDensityTex.minFilter = this.cliffDensityTex.magFilter = THREE.LinearFilter;
     this.cliffDensityTex.needsUpdate = true;
 
+    // ── Susuki painted density (own layer — plumes are not grass) ─────────
+    const sdData = new Uint8Array(DENSITY_RES * DENSITY_RES * 4);
+    this.susukiDensityTex = new THREE.DataTexture(sdData, DENSITY_RES, DENSITY_RES, THREE.RGBAFormat);
+    this.susukiDensityTex.wrapS = this.susukiDensityTex.wrapT = THREE.ClampToEdgeWrapping;
+    this.susukiDensityTex.minFilter = this.susukiDensityTex.magFilter = THREE.LinearFilter;
+    this.susukiDensityTex.needsUpdate = true;
+    this._hasSusukiData = false;
+
     this._hasCliffData    = false; // any cliff density painted
     this._hasCliffSurface = false; // any valid cliff-top height baked
     this.cliffSurfaceGen  = -1;    // propStore.gen at last surface bake (staleness check)
   }
+
+  get hasSusukiData() { return this._hasSusukiData; }
 
   get hasCliffData()    { return this._hasCliffData; }
   get hasCliffSurface() { return this._hasCliffSurface; }
@@ -186,6 +196,49 @@ export class GrassTerrainData {
   restoreDensitySnapshot(s)   { this.densityTex.image.data.set(s); this.densityTex.needsUpdate = true; }
   fillDensity()               { this.densityTex.image.data.fill(255); this.densityTex.needsUpdate = true; }
   clearDensity()              { this.densityTex.image.data.fill(0);   this.densityTex.needsUpdate = true; }
+
+  // ── Susuki paint layer ───────────────────────────────────────────────────
+
+  /** Paint or erase susuki density at world position (cx, cz). */
+  stampSusukiDensity({ cx, cz, radius, strength, falloff, worldSize, erase }) {
+    const res  = DENSITY_RES;
+    const data = this.susukiDensityTex.image.data;
+    const half = worldSize * 0.5;
+    const rPx  = (radius / worldSize) * res;
+    const cxPx = ((cx + half) / worldSize) * res;
+    const czPx = ((cz + half) / worldSize) * res;
+    const r2   = rPx * rPx;
+    const x0   = Math.max(0, Math.floor(cxPx - rPx));
+    const x1   = Math.min(res - 1, Math.ceil(cxPx + rPx));
+    const z0   = Math.max(0, Math.floor(czPx - rPx));
+    const z1   = Math.min(res - 1, Math.ceil(czPx + rPx));
+
+    for (let z = z0; z <= z1; z++) {
+      for (let x = x0; x <= x1; x++) {
+        const dx = x - cxPx, dz = z - czPx;
+        if (dx * dx + dz * dz > r2) continue;
+        const t = Math.sqrt(dx * dx + dz * dz) / rPx;
+        const w = Math.pow(Math.max(0, 1 - t), falloff) * strength;
+        const i = (z * res + x) * 4;
+        const v = erase
+          ? Math.max(0,   data[i] - w * 255)
+          : Math.min(255, data[i] + w * 255);
+        data[i] = data[i + 1] = data[i + 2] = v;
+        data[i + 3] = 255;
+      }
+    }
+    this.susukiDensityTex.needsUpdate = true;
+    if (!erase) this._hasSusukiData = true;
+  }
+
+  getSusukiDensitySnapshot()      { return new Uint8Array(this.susukiDensityTex.image.data); }
+  restoreSusukiDensitySnapshot(s) {
+    this.susukiDensityTex.image.data.set(s);
+    this.susukiDensityTex.needsUpdate = true;
+    this._hasSusukiData = s.some((v) => v > 0);
+  }
+  fillSusukiDensity()  { this.susukiDensityTex.image.data.fill(255); this.susukiDensityTex.needsUpdate = true; this._hasSusukiData = true; }
+  clearSusukiDensity() { this.susukiDensityTex.image.data.fill(0);   this.susukiDensityTex.needsUpdate = true; this._hasSusukiData = false; }
 
   // ── Cliff-top grass layer ────────────────────────────────────────────────
 

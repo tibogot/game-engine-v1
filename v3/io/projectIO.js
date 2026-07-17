@@ -7,7 +7,8 @@
  *
  * Manifest:
  *   terrain   { worldSize, heightmapSize, maxHeight }
- *   blobs     { heightmap, splat, snow } → { offset, length } into the payload
+ *   blobs     { heightmap, splat, snow, grassDensity, susukiDensity }
+ *             → { offset, length } into the payload
  *   splatRes / snowRes
  *   trees     { slots: [...slot meta...], instances: [[x,z,y,rotY,scale,slotIdx],…] }
  *   foliage   { slots: [...slot meta...], instances: [[x,z,y,rotY,scale,slotIdx,nx,nz],…] }
@@ -41,6 +42,10 @@ export function encodeProjectFile({
   snow, snowRes,        // Uint8Array, texels per side
   trees, foliage, props, roads, splines, lakes, rivers, rivers2,
   spawn,                // { x, z, yaw } player start, or null
+  grassDensity,         // Uint8Array (RGBA 512²) painted grass coverage
+  susukiDensity,        // Uint8Array (RGBA 512²) painted susuki coverage
+  susuki,               // susuki appearance params (JSON)
+  groundTsl,            // procedural ground params (JSON)
 }) {
   const blobs = {};
   const parts = [];
@@ -55,6 +60,8 @@ export function encodeProjectFile({
   addBlob("heightmap", heightmap);
   addBlob("splat", splat);
   addBlob("snow", snow);
+  addBlob("grassDensity", grassDensity);
+  addBlob("susukiDensity", susukiDensity);
 
   const manifest = {
     version: VERSION,
@@ -71,6 +78,8 @@ export function encodeProjectFile({
     rivers:   rivers ?? null,
     rivers2:  rivers2 ?? null,
     spawn:    spawn ?? null,
+    susuki:   susuki ?? null,
+    groundTsl: groundTsl ?? null,
   };
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
 
@@ -130,6 +139,10 @@ export function decodeProjectFile(buffer) {
     rivers:    manifest.rivers,
     rivers2:   manifest.rivers2,
     spawn:     manifest.spawn ?? null,
+    grassDensity:  blob("grassDensity"),
+    susukiDensity: blob("susukiDensity"),
+    susuki:    manifest.susuki ?? null,
+    groundTsl: manifest.groundTsl ?? null,
   };
 }
 

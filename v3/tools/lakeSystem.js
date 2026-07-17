@@ -53,12 +53,15 @@ export class LakeSystem {
    * @param {THREE.Texture} deps.normalMap   — tiling water normal map
    * @param {function} deps.sampleTerrainHeight — (u, v) => metres
    * @param {number}   deps.worldSize
+   * @param {function} [deps.onChanged] — a lake was added/removed/moved/releveled
+   *   (drives the water-surface map rebake for the terrain's lakebed shading)
    */
-  constructor({ scene, toolState, normalMap, sampleTerrainHeight, worldSize }) {
+  constructor({ scene, toolState, normalMap, sampleTerrainHeight, worldSize, onChanged = null }) {
     this.scene = scene;
     this.toolState = toolState;
     this.sampleTerrainHeight = sampleTerrainHeight;
     this.worldSize = worldSize;
+    this.onChanged = onChanged;
 
     /** @type {{cx:number,cz:number,sizeX:number,sizeZ:number,level:number,mesh:THREE.Mesh,outline:THREE.Line}[]} */
     this.lakes = [];
@@ -221,6 +224,7 @@ export class LakeSystem {
     lake.outline.material.dispose();
     this._clampActive();
     this._refreshOutlines();
+    this.onChanged?.();
     return true;
   }
 
@@ -242,6 +246,7 @@ export class LakeSystem {
     lake.mesh.scale.set(lake.sizeX, 1, lake.sizeZ);
     lake.outline.position.copy(lake.mesh.position);
     lake.outline.scale.copy(lake.mesh.scale);
+    this.onChanged?.();
   }
 
   _refreshOutlines() {
@@ -260,7 +265,7 @@ export class LakeSystem {
   exportData() {
     const lp = this.toolState.lake;
     return {
-      params: { ...lp, water: { ...lp.water } },
+      params: { ...lp, water: { ...lp.water }, lakebed: lp.lakebed ? { ...lp.lakebed } : undefined },
       lakes: this.lakes.map(({ cx, cz, sizeX, sizeZ, level }) => ({ cx, cz, sizeX, sizeZ, level })),
     };
   }
@@ -273,12 +278,17 @@ export class LakeSystem {
       // and new ones must keep their defaults rather than becoming undefined.
       const lp = this.toolState.lake;
       for (const k of Object.keys(lp)) {
-        if (k === "water") continue;
+        if (k === "water" || k === "lakebed") continue;
         if (data.params[k] !== undefined) lp[k] = data.params[k];
       }
       const w = data.params.water;
       if (w) for (const k of Object.keys(lp.water)) {
         if (w[k] !== undefined) lp.water[k] = w[k];
+      }
+      // Same per-key merge as `water`: old projects keep new keys' defaults.
+      const b = data.params.lakebed;
+      if (b && lp.lakebed) for (const k of Object.keys(lp.lakebed)) {
+        if (b[k] !== undefined) lp.lakebed[k] = b[k];
       }
       this.syncMaterial();
     }

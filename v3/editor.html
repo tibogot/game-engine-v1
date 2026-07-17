@@ -26,6 +26,9 @@
           <button class="toolbar-btn" data-mode="grass" title="Grass (G)">
             <i data-lucide="sprout"></i>
           </button>
+          <button class="toolbar-btn" data-mode="susuki" title="Susuki plumes (U)">
+            <i data-lucide="wheat"></i>
+          </button>
           <button class="toolbar-btn" data-mode="treePaint" title="Trees (T)">
             <i data-lucide="tree-pine"></i>
           </button>
@@ -157,6 +160,7 @@
               <option value="sculpt">Sculpt</option>
               <option value="paint">Paint</option>
               <option value="grass">Grass</option>
+              <option value="susuki">Susuki (U)</option>
               <option value="treePaint">Trees (T)</option>
               <option value="foliage">Foliage (F)</option>
               <option value="props">Props</option>
@@ -1885,6 +1889,9 @@
 
         <!-- FOLIAGE panel — built dynamically by buildFoliagePanel() (v2 layout) -->
         <div id="foliage-panel" style="display:none"></div>
+
+        <!-- SUSUKI panel — built dynamically by buildSusukiPanel() -->
+        <div id="susuki-panel" style="display:none"></div>
 
         <!-- ═══════════════════════════════════════════════════════════ -->
         <!-- PROPS panel — built dynamically by buildPropsPanel() (v2 layout) -->

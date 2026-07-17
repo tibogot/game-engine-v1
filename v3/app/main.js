@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import Stats from "stats-gl";
-import { texture, uniform, float, mix, positionWorld } from "three/tsl";
+import { texture, uniform, float, mix, positionWorld, vec2, vec3, length, smoothstep, mx_noise_float } from "three/tsl";
 import { createHeightmapTexture, saveTerrainConfig, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
 import { STOCHASTIC_ENABLED, toggleStochastic } from "../../v2/core/legacy/stochasticTex.js";
@@ -80,6 +80,15 @@ import { downloadProps, importPropsFromFile } from "../io/propsIO.js";
 import { HybridGrassSystem, syncHybridGrassLod, rebuildHybridGrassGeometries } from "../../v2/render/hybridGrass/hybridGrassSystem.js";
 import { createWindTexture, createSpecNoiseTexture } from "../../v2/core/foliage/windTexture.js";
 import { GrassTerrainData } from "../render/grass/grassTerrainData.js";
+import { SusukiSystem, SUSUKI_DEFAULTS } from "../render/grass/susukiSystem.js";
+import { buildSusukiPanel } from "../ui/buildSusukiPanel.js";
+import { buildGroundTslPanel } from "../ui/buildGroundTslPanel.js";
+import {
+  createGroundTslBundle,
+  GROUND_DEFAULT_PARAMS,
+  GROUND_PRESETS,
+  applyGroundPresetToParams,
+} from "../../v2/core/legacy/chunkGroundTsl.js";
 import { CliffStore } from "../../v2/core/cliffs/cliffStore.js";
 import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
@@ -110,6 +119,8 @@ import { createLakeToolState } from "./state/lakeState.js";
 import { buildLakePanel } from "../ui/buildLakePanel.js";
 import { LakeSystem } from "../tools/lakeSystem.js";
 import { setWaterSsrEnabled } from "../render/water/lakeMaterial.js";
+import { createWaterSurfaceMap } from "../render/water/waterSurfaceMap.js";
+import { createLakebedShading } from "../render/water/lakebedTsl.js";
 import { SmartRoadLabSystem } from "../../v2/tools/smartRoad/smartRoadLabSystem.js";
 import { RoadConformSystem } from "../tools/roadConformSystem.js";
 import { mergeRoadDrawCalls } from "../tools/roadDrawCallMerge.js";
@@ -343,17 +354,99 @@ export async function startV3App(opts = {}) {
     heightTexNode, // live heights → slope/height auto-paint updates while sculpting
   );
 
+  // ── Procedural ground (v2 groundTsl port) ──────────────────────────────────
+  // v2's TSL base-terrain texture: base color + 2 masked noise layers, all
+  // uniform-driven. When enabled it replaces the grey tile base UNDER the splat
+  // layers, and feeds the same color into the grass tint bake — so blades and
+  // ground share one palette (the "full field without more blades" trick).
+  const groundTslState = {
+    enabled: false,
+    ...structuredClone(GROUND_DEFAULT_PARAMS),
+    // v3-only extension rules on top of the v2 bundle: slope-band and
+    // height-band recolors with noise breakup (Genshin-style cliff/summit
+    // color changes without image textures).
+    slopeTint:  { enabled: false, color: "#6b6257", startDeg: 32, endDeg: 50 },
+    heightTint: { enabled: false, color: "#e8e4da", start: 180, end: 240 },
+    bandNoise: 0.25,
+  };
+  const groundBundle = createGroundTslBundle(groundTslState);
+  const uGroundTslOn = uniform(0);
+  const gExt = {
+    uSlopeOn:    uniform(0),
+    uSlopeCol:   uniform(new THREE.Color(groundTslState.slopeTint.color)),
+    uSlopeHiY:   uniform(Math.cos((groundTslState.slopeTint.startDeg * Math.PI) / 180)),
+    uSlopeLoY:   uniform(Math.cos((groundTslState.slopeTint.endDeg * Math.PI) / 180)),
+    uHeightOn:   uniform(0),
+    uHeightCol:  uniform(new THREE.Color(groundTslState.heightTint.color)),
+    uHeightStart: uniform(groundTslState.heightTint.start),
+    uHeightEnd:  uniform(groundTslState.heightTint.end),
+    uBandNoise:  uniform(groundTslState.bandNoise),
+  };
+  const groundProc = {
+    /**
+     * Procedural ground color at world XZ. When the caller can supply the
+     * terrain normal.y and height (metres), the slope/height band rules
+     * apply on top — same world-anchored FBM breakup as the auto-paint
+     * rules so the bands meander instead of tracing contour lines.
+     */
+    colorAt: (xz, ny = null, hMet = null) => {
+      let col = groundBundle.groundColorAtWorldXZ(xz);
+      if (ny && hMet) {
+        const bp = xz.mul(float(0.02));
+        const breakup = mx_noise_float(vec3(bp.x, bp.y, float(7.7))).mul(gExt.uBandNoise);
+        const slopeW = float(1)
+          .sub(smoothstep(gExt.uSlopeLoY, gExt.uSlopeHiY, ny.add(breakup.mul(float(0.15)))))
+          .mul(gExt.uSlopeOn);
+        col = mix(col, gExt.uSlopeCol, slopeW);
+        const heightW = smoothstep(gExt.uHeightStart, gExt.uHeightEnd, hMet.add(breakup.mul(float(40))))
+          .mul(float(1).sub(slopeW))
+          .mul(gExt.uHeightOn);
+        col = mix(col, gExt.uHeightCol, heightW);
+      }
+      return col;
+    },
+    uOn: uGroundTslOn,
+  };
+  function syncGroundTsl() {
+    groundBundle.syncFromParams(groundTslState);
+    uGroundTslOn.value = groundTslState.enabled ? 1 : 0;
+    const st = groundTslState.slopeTint, ht = groundTslState.heightTint;
+    gExt.uSlopeOn.value  = st.enabled ? 1 : 0;
+    gExt.uSlopeCol.value.set(st.color);
+    gExt.uSlopeHiY.value = Math.cos((st.startDeg * Math.PI) / 180);
+    gExt.uSlopeLoY.value = Math.cos((Math.max(st.endDeg, st.startDeg + 1) * Math.PI) / 180);
+    gExt.uHeightOn.value = ht.enabled ? 1 : 0;
+    gExt.uHeightCol.value.set(ht.color);
+    gExt.uHeightStart.value = ht.start;
+    gExt.uHeightEnd.value   = Math.max(ht.end, ht.start + 1);
+    gExt.uBandNoise.value   = groundTslState.bandNoise;
+    grassTintDirty = true; // re-bake the grass tint from the new ground color
+  }
+
   // Cliff paint mask (v2 parity) — world-XZ brush mask whose R channel forces
   // the terrain look onto cliff surfaces. Shared deps for every cliff blend
   // material (procedural presets, imported GLBs, their LODs).
   const cliffPaintMask = new CliffPaintMask(512);
   const cliffBlendDeps = { heightTexNode, splatOverlay, cliffPaintTex: cliffPaintMask.texture };
 
+  // ── Water-surface map + lakebed shading ────────────────────────────────────
+  // A top-down bake of every water surface's world Y (lakes + River+ ribbons).
+  // The terrain samples it to shade submerged ground — sand, depth tint, animated
+  // caustics (revo-realms' Terrain.ts water block). Sources are registered after
+  // the water systems exist below; until then the bake is a no-op.
+  const waterSurfaceMap = createWaterSurfaceMap({ worldSize: WORLD_SIZE, maxHeight: MAX_HEIGHT });
+  // Starts on defaults — identical to the lake slice's `lakebed` defaults created
+  // later; lakebedChanged/import push any edited values into these uniforms.
+  const lakebedShading = createLakebedShading({
+    waterMapTex: waterSurfaceMap.texture,
+    worldSize: WORLD_SIZE,
+  });
+
   // LOD meshes share the same heightTexNode, cursor uniforms, brush mask, rotation,
   // and the snow surface definition (snowSystem.shared): painted snow displaces
   // the terrain itself with real volume; the deform tile only refines the same
   // surface with trail compression near the player.
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared);
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, groundProc);
   scene.add(lod.group);
   // Terrain starts flat (createHeightmapTexture initializes all-zeros).
   // User can generate terrain manually via the Procedural panel.
@@ -691,6 +784,14 @@ export async function startV3App(opts = {}) {
 
   const grassBrush = { radius: 60, strength: 0.7, falloff: 2.0, erase: false, target: "terrain" };
 
+  // ── Susuki (GoT miscanthus plumes — own paint layer + instanced system) ────
+  const susukiState = structuredClone(SUSUKI_DEFAULTS);
+  const susukiBrush = { radius: 60, strength: 0.7, falloff: 2.0, erase: false };
+  let susukiSystem = null;
+  let _susukiBuilding = false;
+  let susukiUi = null;
+  let groundTslUi = null;
+
   let grassRings = null;
   let _grassBuilding = false;
   let cliffGrassRings = null;   // second ring set, cliffMode — grass on cliff tops
@@ -724,10 +825,32 @@ export async function startV3App(opts = {}) {
   grassTintCam.up.set(0, 0, 1);
   grassTintCam.lookAt(0, 0, 0);
   {
-    const tintMat = new THREE.MeshBasicNodeMaterial();
+    // DoubleSide is REQUIRED: the swapped-axis ortho projection above flips
+    // triangle winding, so a FrontSide plane is backface-culled and the bake
+    // silently stays black (= the "tint only darkens" bug).
+    const tintMat = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
     // Same stack terrainLOD renders: splat layers over the plain tile base,
     // snow albedo on top where covered — grass under snow tints white.
-    let tintCol = splatOverlay.blendColor(uniform(new THREE.Color(0xe6e3e3)));
+    // Base under the splat: the same procedural ground the terrain shows when
+    // groundTsl is enabled, else the plain grey tile — grass tint always
+    // matches what the ground actually looks like. The slope/height band
+    // rules need normal.y + height, recomputed here from the heightmap (the
+    // tint plane is flat — it has no real geometry to read them from).
+    const tintUV = positionWorld.xz.div(float(WORLD_SIZE)).add(float(0.5));
+    const tintTexel = float(1.0 / HEIGHTMAP_SIZE);
+    const thC = texture(heightTexNode, tintUV).r;
+    const thL = texture(heightTexNode, vec2(tintUV.x.sub(tintTexel), tintUV.y)).r;
+    const thR = texture(heightTexNode, vec2(tintUV.x.add(tintTexel), tintUV.y)).r;
+    const thD = texture(heightTexNode, vec2(tintUV.x, tintUV.y.sub(tintTexel))).r;
+    const thU = texture(heightTexNode, vec2(tintUV.x, tintUV.y.add(tintTexel))).r;
+    const tintFlat = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
+    const tintNy = tintFlat.div(length(vec3(thL.sub(thR), tintFlat, thD.sub(thU))));
+    const tintBase = mix(
+      uniform(new THREE.Color(0xe6e3e3)),
+      groundProc.colorAt(positionWorld.xz, tintNy, thC.mul(float(MAX_HEIGHT))),
+      uGroundTslOn,
+    );
+    let tintCol = splatOverlay.blendColor(tintBase);
     const snowShared = snowSystem?.shared;
     if (snowShared) {
       tintCol = mix(
@@ -857,6 +980,40 @@ export async function startV3App(opts = {}) {
       for (const r of cliffGrassRings) r.syncFromState(grassState, sunDir);
       syncHybridGrassLod(cliffGrassRings, grassState);
     }
+    // Susuki shares the grass wind params — keep it in step with every sync.
+    syncSusukiUniforms();
+  }
+
+  // ── Susuki build/sync (lazy, like the grass rings) ─────────────────────────
+  async function ensureSusukiBuilt() {
+    if (susukiSystem || _susukiBuilding) return;
+    _susukiBuilding = true;
+    try {
+      const sys = new SusukiSystem({
+        scene,
+        renderer,
+        heightTex:        grassTerrainData.grassHeightTex,
+        terrainNormalTex: grassTerrainData.terrainNormalTex,
+        densityTex:       grassTerrainData.susukiDensityTex,
+        windTex:          grassWindTex,
+        worldSize:        WORLD_SIZE,
+        sp:               susukiState,
+        gp:               grassState,
+      });
+      await sys.init(camera);
+      sys.setEnabled(true);
+      susukiSystem = sys;
+      syncSusukiUniforms();
+    } catch (err) {
+      console.error("[V3 Susuki] build failed:", err);
+    } finally {
+      _susukiBuilding = false;
+    }
+  }
+
+  function syncSusukiUniforms() {
+    if (!susukiSystem || !worldEnv) return;
+    susukiSystem.syncFromState(susukiState, grassState, worldEnv.getEffectiveLightDir());
   }
 
   // ── UI wiring ──────────────────────────────────────────────────────────────
@@ -1423,6 +1580,7 @@ export async function startV3App(opts = {}) {
   let _gizmoTarget = null;
 
   const grassPanel = document.getElementById("grass-panel");
+  const susukiPanel = document.getElementById("susuki-panel");
   const treePanel  = document.getElementById("tree-panel");
   const foliagePanel = document.getElementById("foliage-panel");
   const snowPanel  = document.getElementById("snow-panel");
@@ -1438,6 +1596,10 @@ export async function startV3App(opts = {}) {
 
   function syncGrassPanelVisibility() {
     grassPanel.style.display = (editorMode === "grass" && !playMode.active) ? "" : "none";
+  }
+
+  function syncSusukiPanelVisibility() {
+    susukiPanel.style.display = (editorMode === "susuki" && !playMode.active) ? "" : "none";
   }
 
   function syncTreePanelVisibility() {
@@ -1555,6 +1717,10 @@ export async function startV3App(opts = {}) {
     } else if (m === "grass") {
       uCursorUV.value.set(-2, -2);
       ensureGrassBuilt();
+    } else if (m === "susuki") {
+      uCursorUV.value.set(-2, -2);
+      sculpt.uRadius.value = susukiBrush.radius / WORLD_SIZE;
+      ensureSusukiBuilt();
     } else if (m === "treePaint") {
       sculpt.uRadius.value = treeToolState.brush.radius / WORLD_SIZE;
     } else if (m === "foliage") {
@@ -1584,6 +1750,7 @@ export async function startV3App(opts = {}) {
     syncSnowPanelVisibility();
     syncCliffPaintPanelVisibility();
     syncGrassPanelVisibility();
+    syncSusukiPanelVisibility();
     syncTreePanelVisibility();
     syncFoliagePanelVisibility();
     syncPropsPanelVisibility();
@@ -1625,6 +1792,7 @@ export async function startV3App(opts = {}) {
     paintPanel.style.display = "none";
     snowPanel.style.display  = "none";
     grassPanel.style.display = "none";
+    susukiPanel.style.display = "none";
     treePanel.style.display = "none";
     foliagePanel.style.display = "none";
     propsPanel.style.display = "none";
@@ -2273,6 +2441,7 @@ export async function startV3App(opts = {}) {
       }
 
       bakeGrassTintIfNeeded();
+      waterSurfaceMap.bakeIfNeeded(renderer);
       if (grassRings) {
         const _grassAnchor = playMode.active ? playMode.playerPosition : camera.position;
         for (const r of grassRings) r.update(_grassAnchor, camera);
@@ -2287,6 +2456,15 @@ export async function startV3App(opts = {}) {
         if (wantCliff) {
           const _cliffAnchor = playMode.active ? playMode.playerPosition : camera.position;
           for (const r of cliffGrassRings) r.update(_cliffAnchor, camera);
+        }
+      }
+      if (susukiSystem) {
+        // Only spend compute while any susuki is painted.
+        const wantSusuki = grassTerrainData.hasSusukiData;
+        susukiSystem.setEnabled(wantSusuki);
+        if (wantSusuki) {
+          const _susukiAnchor = playMode.active ? playMode.playerPosition : camera.position;
+          susukiSystem.update(_susukiAnchor, camera);
         }
       }
 
@@ -2544,6 +2722,11 @@ export async function startV3App(opts = {}) {
     if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
       e.preventDefault();
       setEditorMode(editorMode === "foliage" ? "view" : "foliage");
+      return;
+    }
+    if (e.code === "KeyU" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "susuki" ? "view" : "susuki");
       return;
     }
     if (e.code === "KeyN" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
@@ -3728,6 +3911,7 @@ export async function startV3App(opts = {}) {
       requestHeightmapReadback();
       bvhDebug?.update();
     },
+    onWaterMeshesChanged: () => waterSurfaceMap.markDirty(),
   });
   worldEnv?.addWaterSurface(river2System);
 
@@ -3740,8 +3924,17 @@ export async function startV3App(opts = {}) {
     normalMap: waterNormalMap,
     sampleTerrainHeight,
     worldSize: WORLD_SIZE,
+    onChanged: () => waterSurfaceMap.markDirty(),
   });
   worldEnv?.addWaterSurface(lakeSystem);
+
+  // Both water systems exist — the lakebed shading's water-surface map can now
+  // see their meshes. Terrain edits change where water meets ground, but the
+  // MAP only stores the water surfaces' own Y, so only water edits rebake it.
+  waterSurfaceMap.setSourceProvider(() => [
+    lakeSystem.group,
+    ...river2System.segments.map((s) => s.mesh).filter(Boolean),
+  ]);
 
   // Keep the river system's uncarved-base RT in sync with every non-river
   // terrain edit (sculpt strokes, sculpt undo/redo, procedural gen, spline
@@ -4518,6 +4711,10 @@ export async function startV3App(opts = {}) {
       rivers:    riverSystem.exportData(),
       rivers2,
       spawn:     spawnSystem.exportData(),
+      grassDensity:  grassTerrainData.getDensitySnapshot(),
+      susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
+      susuki:    { ...susukiState },
+      groundTsl: structuredClone(groundTslState),
     });
     const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     downloadBuffer(buf, `project-${ts}.v3proj`);
@@ -4576,6 +4773,41 @@ export async function startV3App(opts = {}) {
 
     if (d.snow && d.snowRes === SNOW_MAP_RES) snowMap.restoreSnapshot(d.snow);
 
+    // Painted grass / susuki density layers (older projects simply lack them)
+    if (d.grassDensity?.length === grassTerrainData.densityTex.image.data.length) {
+      grassTerrainData.restoreDensitySnapshot(d.grassDensity);
+      if (d.grassDensity.some((v) => v > 0)) void ensureGrassBuilt();
+    }
+    if (d.susuki) Object.assign(susukiState, d.susuki);
+    if (d.susukiDensity?.length === grassTerrainData.susukiDensityTex.image.data.length) {
+      grassTerrainData.restoreSusukiDensitySnapshot(d.susukiDensity);
+    }
+    if (d.susuki || d.susukiDensity) {
+      if (susukiSystem) {
+        syncSusukiUniforms();
+        susukiSystem.rebuildPlumeGeometry(susukiState);
+        susukiSystem.rebuildStemGeometry(susukiState);
+        susukiSystem.redrawPlumeTexture(susukiState);
+      } else if (grassTerrainData.hasSusukiData) {
+        void ensureSusukiBuilt();
+      }
+      susukiUi?.refresh();
+    }
+
+    if (d.groundTsl) {
+      groundTslState.enabled = !!d.groundTsl.enabled;
+      if (d.groundTsl.baseColor)  groundTslState.baseColor = d.groundTsl.baseColor;
+      if (Number.isFinite(d.groundTsl.brightness)) groundTslState.brightness = d.groundTsl.brightness;
+      if (Number.isFinite(d.groundTsl.contrast))   groundTslState.contrast = d.groundTsl.contrast;
+      if (d.groundTsl.layer1) Object.assign(groundTslState.layer1, d.groundTsl.layer1);
+      if (d.groundTsl.layer2) Object.assign(groundTslState.layer2, d.groundTsl.layer2);
+      if (d.groundTsl.slopeTint)  Object.assign(groundTslState.slopeTint,  d.groundTsl.slopeTint);
+      if (d.groundTsl.heightTint) Object.assign(groundTslState.heightTint, d.groundTsl.heightTint);
+      if (Number.isFinite(d.groundTsl.bandNoise)) groundTslState.bandNoise = d.groundTsl.bandNoise;
+      syncGroundTsl();
+      groundTslUi?.refresh();
+    }
+
     if (d.trees) {
       treeEnv.treeStore.clear();
       if (Array.isArray(d.trees.slots)) {
@@ -4609,6 +4841,9 @@ export async function startV3App(opts = {}) {
     // Always import, even when absent: a project with no lakes must clear any
     // lakes left over from the previous scene.
     lakeSystem.importData(d.lakes ?? null);
+    // importData merged the saved lakebed values into the slice; push them to the
+    // terrain uniforms (the panel callback only fires on user edits).
+    lakebedShading.syncParams(lakeToolSlice.lake.lakebed);
     lakeUi?.refresh();
 
     // Rivers restore like lakes — always import so a river-less project clears
@@ -4778,6 +5013,7 @@ export async function startV3App(opts = {}) {
     worldSize: WORLD_SIZE,
     maxHeight: MAX_HEIGHT,
     materialChanged:  () => lakeSystem.syncMaterial(),
+    lakebedChanged:   () => lakebedShading.syncParams(lakeToolSlice.lake.lakebed),
     transformChanged: () => {},   // syncActiveTransform already ran inside the panel
     selectionChanged: () => {},
   });
@@ -5517,6 +5753,112 @@ export async function startV3App(opts = {}) {
     }
   }, { passive: false, capture: true });
 
+  // ── Susuki mode: panel + paint events ──────────────────────────────────────
+  susukiUi = buildSusukiPanel(susukiPanel, {
+    susukiBrush,
+    susukiState,
+    onBrushChanged:    () => { sculpt.uRadius.value = susukiBrush.radius / WORLD_SIZE; },
+    onStateChanged:    () => syncSusukiUniforms(),
+    onPlumeGeoChanged: () => susukiSystem?.rebuildPlumeGeometry(susukiState),
+    onStemGeoChanged:  () => susukiSystem?.rebuildStemGeometry(susukiState),
+    onTextureChanged:  () => susukiSystem?.redrawPlumeTexture(susukiState),
+    onFill:  () => { _pushSusukiUndo(); grassTerrainData.fillSusukiDensity(); void ensureSusukiBuilt(); },
+    onClear: () => { _pushSusukiUndo(); grassTerrainData.clearSusukiDensity(); },
+  });
+
+  groundTslUi = buildGroundTslPanel(paintPanel, {
+    groundTslState,
+    presets: GROUND_PRESETS,
+    applyPreset: (id) => applyGroundPresetToParams(id, groundTslState),
+    onChanged: syncGroundTsl,
+  });
+
+  let _susukiUndoStack = [];
+  let _susukiRedoStack = [];
+  let _susukiPainting  = false;
+
+  function _pushSusukiUndo() {
+    _susukiUndoStack.push(grassTerrainData.getSusukiDensitySnapshot());
+    if (_susukiUndoStack.length > 32) _susukiUndoStack.shift();
+    _susukiRedoStack = [];
+  }
+
+  function _susukiPaintXZ(e) {
+    refreshMouse(e);
+    const hit = getUV();
+    uCursorUV.value.set(hit ? hit.u : -2, hit ? hit.v : -2);
+    if (!hit) return null;
+    return { wx: hit.u * WORLD_SIZE - WORLD_SIZE / 2, wz: hit.v * WORLD_SIZE - WORLD_SIZE / 2 };
+  }
+
+  function _stampSusuki(wx, wz, altErase) {
+    grassTerrainData.stampSusukiDensity({
+      cx: wx, cz: wz,
+      radius:    susukiBrush.radius,
+      strength:  susukiBrush.strength,
+      falloff:   susukiBrush.falloff,
+      worldSize: WORLD_SIZE,
+      erase:     susukiBrush.erase || altErase,
+    });
+  }
+
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "susuki") return;
+    const pt = _susukiPaintXZ(e);
+    if (pt) sculpt.uRadius.value = susukiBrush.radius / WORLD_SIZE;
+    if (pt && _susukiPainting) _stampSusuki(pt.wx, pt.wz, e.altKey);
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "susuki") return;
+    if (e.button !== 0) return;
+    const pt = _susukiPaintXZ(e);
+    if (!pt) return;
+    _pushSusukiUndo();
+    _susukiPainting = true;
+    void ensureSusukiBuilt();
+    _stampSusuki(pt.wx, pt.wz, e.altKey);
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (e.button !== 0) return;
+    _susukiPainting = false;
+  });
+
+  // Scroll wheel in susuki mode: Shift = radius, Alt = strength
+  renderer.domElement.addEventListener("wheel", e => {
+    if (playMode.active || editorMode !== "susuki") return;
+    if (!e.shiftKey && !e.altKey) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.11;
+    if (e.shiftKey) {
+      susukiBrush.radius = Math.max(5, Math.min(300, susukiBrush.radius * factor));
+      sculpt.uRadius.value = susukiBrush.radius / WORLD_SIZE;
+    } else {
+      susukiBrush.strength = Math.max(0.05, Math.min(1.0, susukiBrush.strength * factor));
+    }
+    susukiUi.refresh();
+  }, { passive: false, capture: true });
+
+  window.addEventListener("keydown", e => {
+    if (editorMode !== "susuki") return;
+    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "z") {
+      const entry = _susukiUndoStack.pop();
+      if (!entry) return;
+      _susukiRedoStack.push(grassTerrainData.getSusukiDensitySnapshot());
+      grassTerrainData.restoreSusukiDensitySnapshot(entry);
+      e.stopImmediatePropagation();
+    }
+    if (e.ctrlKey && (e.shiftKey && e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
+      const entry = _susukiRedoStack.pop();
+      if (!entry) return;
+      _susukiUndoStack.push(grassTerrainData.getSusukiDensitySnapshot());
+      grassTerrainData.restoreSusukiDensitySnapshot(entry);
+      e.stopImmediatePropagation();
+    }
+  }, { capture: true });
+
   // ── Tree mode mouse events (v2 treePaint) ─────────────────────────────────
   let _treePainting = false;
   const _treeHit = new THREE.Vector3();
@@ -5687,6 +6029,19 @@ export async function startV3App(opts = {}) {
       get rendererSideWork() { return _rendererSideWork; },
       get lakeSystem() { return lakeSystem; },
       get river2System() { return river2System; },
+      get grassState() { return grassState; },
+      get grassRings() { return grassRings; },
+      get grassTintRT() { return grassTintRT; },
+      get susukiSystem() { return susukiSystem; },
+      renderer,
+      grassTintScene,
+      grassTintCam,
+      forceGrassTintBake() {
+        const prevRT = renderer.getRenderTarget();
+        renderer.setRenderTarget(grassTintRT);
+        renderer.render(grassTintScene, grassTintCam);
+        renderer.setRenderTarget(prevRT);
+      },
       get riverToolSlice() { return riverToolSlice; },
       get grassRings() { return grassRings; },
       get cliffGrassRings() { return cliffGrassRings; },
