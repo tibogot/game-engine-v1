@@ -150,6 +150,26 @@ export const MEADOW_DEFAULT_PARAMS = {
 
 export const MEADOW_PRESETS = {
   default: MEADOW_DEFAULT_PARAMS,
+  // Genshin-style path soil — light sandy beige with soft stains (paint it
+  // with the Meadow card for roads/plazas; calibrated against a reference).
+  genshinSoil: {
+    brightness: 1.18,
+    contrast: 0.95,
+    baseColor: "#e6d49e",
+    layer1: {
+      enable: true, noiseType: "perlin", color: "#c9b177", strength: 0.35,
+      useFbm: true, octaves: 3, lacunarity: 2.2, gain: 0.5, scale: 0.02,
+      offsetX: 7, offsetY: 19, invert: false,
+      maskLow: 0.35, maskHigh: 0.75, maskSharpness: 1.0, voronoiJitter: 0.8,
+    },
+    layer2: {
+      enable: true, noiseType: "value", color: "#f0e3b4", strength: 0.25,
+      useFbm: false, octaves: 2, lacunarity: 2.0, gain: 0.5, scale: 0.12,
+      offsetX: -14, offsetY: 33, invert: false,
+      maskLow: 0.45, maskHigh: 0.88, maskSharpness: 1.1, voronoiJitter: 0.8,
+    },
+  },
+
   summerStraw: {
     brightness: 1.14,
     contrast: 0.96,
