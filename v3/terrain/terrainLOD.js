@@ -306,7 +306,12 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   const tileBase = groundProc
     ? mix(mat.colorNode, groundProc.colorAt(wxz, worldNormal.y, terrainY), groundProc.uOn)
     : mat.colorNode;
-  const baseColor = splatOverlay ? splatOverlay.blendColor(tileBase) : tileBase;
+  let baseColor = splatOverlay ? splatOverlay.blendColor(tileBase) : tileBase;
+  // Paintable meadow TSL (layer card 8): its splat-mask channel blends the
+  // procedural meadow color over the image layers wherever it's painted.
+  if (groundProc?.meadowAt && splatOverlay) {
+    baseColor = splatOverlay.blendMeadow(baseColor, groundProc.meadowAt);
+  }
   let finalColor = baseColor;
   let finalRoughness = baseRoughness;
   if (snowShared) {

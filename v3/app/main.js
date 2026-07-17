@@ -82,13 +82,19 @@ import { createWindTexture, createSpecNoiseTexture } from "../../v2/core/foliage
 import { GrassTerrainData } from "../render/grass/grassTerrainData.js";
 import { SusukiSystem, SUSUKI_DEFAULTS } from "../render/grass/susukiSystem.js";
 import { buildSusukiPanel } from "../ui/buildSusukiPanel.js";
-import { buildGroundTslPanel } from "../ui/buildGroundTslPanel.js";
+import { buildGroundTslPanel, buildMeadowTslSection } from "../ui/buildGroundTslPanel.js";
 import {
   createGroundTslBundle,
   GROUND_DEFAULT_PARAMS,
   GROUND_PRESETS,
   applyGroundPresetToParams,
 } from "../../v2/core/legacy/chunkGroundTsl.js";
+import {
+  createMeadowTslBundle,
+  MEADOW_DEFAULT_PARAMS,
+  MEADOW_PRESETS,
+  applyMeadowPresetToParams,
+} from "../../v2/core/legacy/chunkMeadowTsl.js";
 import { CliffStore } from "../../v2/core/cliffs/cliffStore.js";
 import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
@@ -406,7 +412,19 @@ export async function startV3App(opts = {}) {
       return col;
     },
     uOn: uGroundTslOn,
+    // Paintable meadow color (mask-gated via splatOverlay.blendMeadow)
+    meadowAt: () => meadowBundle.meadowProc(),
   };
+  // ── Meadow (paintable TSL) — v2 chunkMeadowTsl, gated by the splatmap's
+  // meadow mask (layer card 8). Painting the mask IS the enable: wherever it's
+  // painted, this procedural color blends over the image layers.
+  const meadowTslState = structuredClone(MEADOW_DEFAULT_PARAMS);
+  const meadowBundle = createMeadowTslBundle(meadowTslState);
+  function syncMeadowTsl() {
+    meadowBundle.syncFromParams(meadowTslState);
+    grassTintDirty = true;
+  }
+
   function syncGroundTsl() {
     groundBundle.syncFromParams(groundTslState);
     uGroundTslOn.value = groundTslState.enabled ? 1 : 0;
@@ -791,6 +809,7 @@ export async function startV3App(opts = {}) {
   let _susukiBuilding = false;
   let susukiUi = null;
   let groundTslUi = null;
+  let meadowTslUi = null;
 
   let grassRings = null;
   let _grassBuilding = false;
@@ -851,6 +870,8 @@ export async function startV3App(opts = {}) {
       uGroundTslOn,
     );
     let tintCol = splatOverlay.blendColor(tintBase);
+    // Painted meadow TSL tints the grass exactly like it tints the terrain
+    tintCol = splatOverlay.blendMeadow(tintCol, groundProc.meadowAt);
     const snowShared = snowSystem?.shared;
     if (snowShared) {
       tintCol = mix(
@@ -4715,6 +4736,7 @@ export async function startV3App(opts = {}) {
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
       susuki:    { ...susukiState },
       groundTsl: structuredClone(groundTslState),
+      meadowTsl: structuredClone(meadowTslState),
     });
     const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     downloadBuffer(buf, `project-${ts}.v3proj`);
@@ -4806,6 +4828,16 @@ export async function startV3App(opts = {}) {
       if (Number.isFinite(d.groundTsl.bandNoise)) groundTslState.bandNoise = d.groundTsl.bandNoise;
       syncGroundTsl();
       groundTslUi?.refresh();
+    }
+
+    if (d.meadowTsl) {
+      if (d.meadowTsl.baseColor) meadowTslState.baseColor = d.meadowTsl.baseColor;
+      if (Number.isFinite(d.meadowTsl.brightness)) meadowTslState.brightness = d.meadowTsl.brightness;
+      if (Number.isFinite(d.meadowTsl.contrast))   meadowTslState.contrast = d.meadowTsl.contrast;
+      if (d.meadowTsl.layer1) Object.assign(meadowTslState.layer1, d.meadowTsl.layer1);
+      if (d.meadowTsl.layer2) Object.assign(meadowTslState.layer2, d.meadowTsl.layer2);
+      syncMeadowTsl();
+      meadowTslUi?.refresh();
     }
 
     if (d.trees) {
@@ -5771,6 +5803,13 @@ export async function startV3App(opts = {}) {
     presets: GROUND_PRESETS,
     applyPreset: (id) => applyGroundPresetToParams(id, groundTslState),
     onChanged: syncGroundTsl,
+  });
+
+  meadowTslUi = buildMeadowTslSection(paintPanel, {
+    meadowTslState,
+    presets: MEADOW_PRESETS,
+    applyPreset: (id) => applyMeadowPresetToParams(id, meadowTslState),
+    onChanged: syncMeadowTsl,
   });
 
   let _susukiUndoStack = [];

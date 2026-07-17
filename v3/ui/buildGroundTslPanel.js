@@ -189,3 +189,47 @@ export function buildGroundTslPanel(root, { groundTslState, presets, applyPreset
     refresh() { for (const w of widgets) w.refresh?.(); },
   };
 }
+
+/**
+ * Meadow (paintable TSL) — the v2 meadow layer, now painted with the Meadow
+ * card (layer 8) and colored by these controls. No enable toggle: the painted
+ * mask IS the enable — erase the paint, the meadow is gone.
+ */
+export function buildMeadowTslSection(root, { meadowTslState, presets, applyPreset, onChanged }) {
+  const widgets = [];
+  const W = (w) => { widgets.push(w); return w; };
+
+  const body = _section(root, "Meadow (paintable TSL)", false);
+  const note = document.createElement("p");
+  note.className = "mode-hint";
+  note.textContent =
+    "Procedural color you PAINT with the Meadow layer card above — a TSL brush "
+    + "that covers image textures wherever its mask is painted. Grass tint follows it.";
+  body.appendChild(note);
+
+  const presetRow = document.createElement("div");
+  presetRow.className = "prop-row";
+  const ids = Object.keys(presets);
+  presetRow.innerHTML =
+    `<span class="prop-label">Preset</span><div class="prop-value">` +
+    `<select class="prop-dropdown">${ids.map((i) => `<option value="${i}">${i}</option>`).join("")}</select>` +
+    `<button type="button" class="action-btn" style="margin-left:4px">Apply</button></div>`;
+  const presetSel = presetRow.querySelector("select");
+  presetRow.querySelector("button").addEventListener("click", () => {
+    applyPreset(presetSel.value);
+    for (const w of widgets) w.refresh?.();
+    onChanged?.();
+  });
+  body.appendChild(presetRow);
+
+  W(_color(body, meadowTslState, "baseColor", { label: "Base color", onChange: onChanged }));
+  W(_slider(body, meadowTslState, "brightness", { label: "Brightness", min: 0.2, max: 2, step: 0.02, onChange: onChanged }));
+  W(_slider(body, meadowTslState, "contrast",   { label: "Contrast",   min: 0.3, max: 2, step: 0.02, onChange: onChanged }));
+
+  _layerControls(body, meadowTslState.layer1, "Noise Layer 1", onChanged, widgets);
+  _layerControls(body, meadowTslState.layer2, "Noise Layer 2", onChanged, widgets);
+
+  return {
+    refresh() { for (const w of widgets) w.refresh?.(); },
+  };
+}

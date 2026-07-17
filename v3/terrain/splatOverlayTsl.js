@@ -131,7 +131,14 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
     // Full-preview mode instead replaces ALL weights with the auto rules —
     // a live stand-in for what "Bake to splatmap" will write (bake replaces
     // every paint layer too), so tuning the rules needs no bake round-trips.
+    // A rule set to -1 ("Base (TSL)") assigns NO layer: only the fraction that
+    // actually went to a layer leaves w0, so those areas keep the base — this
+    // is how "procedural TSL ground + image cliffs" composes.
     const eq = (u, i) => step(abs(u.sub(float(i))), float(0.5));
+    const hasFlat   = step(float(-0.5), uAutoFlat);
+    const hasCliff  = step(float(-0.5), uAutoCliff);
+    // highW is already gated by its own -1 check (highOn) where it's computed.
+    const assignedW = cliffW.mul(hasCliff).add(flatW.mul(hasFlat)).add(highW);
     const baseShare = nw[0].mul(uAutoEnabled).mul(inBounds);
     const fullPrev  = uAutoFull.mul(inBounds);
     for (let i = 0; i < NUM_LAYERS; i++) {
@@ -140,7 +147,11 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
         .add(highW.mul(eq(uAutoHigh, i)));
       nw[i + 1] = mix(nw[i + 1].add(baseShare.mul(autoW)), autoW, fullPrev);
     }
-    nw[0] = nw[0].sub(baseShare).mul(float(1).sub(fullPrev));
+    nw[0] = mix(
+      nw[0].sub(baseShare.mul(assignedW)),
+      float(1).sub(assignedW),
+      fullPrev,
+    );
   }
 
   // ── Layer colors (albedo × AO) ────────────────────────────────────────────────

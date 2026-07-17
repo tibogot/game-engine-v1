@@ -46,6 +46,7 @@ export function encodeProjectFile({
   susukiDensity,        // Uint8Array (RGBA 512²) painted susuki coverage
   susuki,               // susuki appearance params (JSON)
   groundTsl,            // procedural ground params (JSON)
+  meadowTsl,            // paintable meadow TSL params (JSON)
 }) {
   const blobs = {};
   const parts = [];
@@ -80,6 +81,7 @@ export function encodeProjectFile({
     spawn:    spawn ?? null,
     susuki:   susuki ?? null,
     groundTsl: groundTsl ?? null,
+    meadowTsl: meadowTsl ?? null,
   };
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
 
@@ -143,6 +145,7 @@ export function decodeProjectFile(buffer) {
     susukiDensity: blob("susukiDensity"),
     susuki:    manifest.susuki ?? null,
     groundTsl: manifest.groundTsl ?? null,
+    meadowTsl: manifest.meadowTsl ?? null,
   };
 }
 
