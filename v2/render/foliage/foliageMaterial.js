@@ -70,6 +70,13 @@ export function createFoliageMaterial(opts = {}) {
     pineAtlas:     uniform(opts.pineAtlas ? 1.0 : 0.0),
     pineAtlasCols: uniform(opts.pineAtlasCols ?? 2),
     pineAtlasRows: uniform(opts.pineAtlasRows ?? 2),
+    // Pine-editor shading model (pine-editor33): per-CARD bottom→top gradient
+    // (uv.y, not tree height), trunk-radial normals/SSS/rim, hook-side pivot
+    // AO and vein stripes. pineMode=0 leaves the arborist model untouched.
+    pineMode:     uniform(opts.pineLayout ? 1.0 : 0.0),
+    radialUp:     uniform(opts.radialUp ?? 0.35),
+    pivotAo:      uniform(opts.pivotAo ?? 0.35),
+    veinStrength: uniform(opts.veinStrength ?? 0.1),
   };
 
   // Per-slot parameter accessor: for a classic (one-preset) material every
@@ -99,10 +106,18 @@ export function createFoliageMaterial(opts = {}) {
  * `opts.data` (optional) replaces the per-instance vertex attributes with
  * injected nodes — the GPU leaf field feeds the same graph from a compute-
  * written storage buffer: { rand: vec2, leafCenterW: vec3, treeCenterW: vec3,
- * leafSize: float, heightFrac: float } (world-space centers, no model matrix).
+ * leafSize: float, heightFrac: float, cardQuat?: vec4 } (world-space centers,
+ * no model matrix). When `cardQuat` is present the card is ORIENTED: the
+ * non-billboard path rotates card verts/normals by the per-instance
+ * quaternion instead of relying on an instance matrix (field pines).
  */
 function _buildFoliageMaterial(u, P, opts) {
   const D = opts.data ?? null;
+  // v' = v + 2·q.xyz × (q.xyz × v + q.w·v) — standard quaternion rotate.
+  const qRot = (q, v) => {
+    const t = cross(q.xyz, v).add(v.mul(q.w));
+    return v.add(cross(q.xyz, t).mul(2.0));
+  };
   const aRand = D?.rand ?? attribute("aRand", "vec2");
 
   const leafTex = new THREE.Texture();
@@ -213,8 +228,15 @@ function _buildFoliageMaterial(u, P, opts) {
 
     // Non-billboard branch: instance matrices carry rotation/scale, so keep
     // the local-space path (wind added locally — existing v2 behavior).
-    const localWindy = positionLocal.add(wo);
-    return mix(localWindy, bb3, u.billboard);
+    // Field-injected ORIENTED cards have no instance matrix — rotate by the
+    // per-instance quaternion, scale, place at the world center instead
+    // (wind applied world-space, scaled with the card).
+    const nonBB = D?.cardQuat
+      ? qRot(D.cardQuat, positionLocal.mul(aLeafSize))
+          .add(instanceCenterW)
+          .add(wo.mul(aLeafSize))
+      : positionLocal.add(wo);
+    return mix(nonBB, bb3, u.billboard);
   })();
 
   // Stylized foliage lighting: every leaf uses world-up as its normal so the
@@ -227,8 +249,18 @@ function _buildFoliageMaterial(u, P, opts) {
   // backlit leaves on the anti-sun hemisphere still glow with the SSS color.
   // Kept separate so Lambert stays uniform but SSS gives the stylized highlight.
   const sphereDirForSSS = normalize(instanceCenterW.sub(treeCenterW));
-  // Non-billboard normal: local quad normal warped by UV (gives leaves a fake curvature).
-  const warpedNormal = normalize(normalLocal.add(sin(uv().x.mul(10)).mul(P.leafWarp)));
+  // Pine (pine-editor33) model: cards light by their trunk-radial outward
+  // direction (radialUp tilts it skyward) instead of the canopy-sphere dir —
+  // that's what makes a pine read as stacked fronds, not a leaf ball.
+  const _pineRadial = instanceCenterW.sub(treeCenterW);
+  const trunkRadialDir = normalize(vec3(_pineRadial.x, u.radialUp, _pineRadial.z));
+  const litDir = normalize(mix(sphereDirForSSS, trunkRadialDir, u.pineMode));
+  const normalTargetDir = normalize(mix(sphereDir, trunkRadialDir, u.pineMode));
+  // Non-billboard normal: local quad normal warped by UV (gives leaves a fake
+  // curvature). Oriented field cards rotate it by the card quaternion first
+  // (matrix-less mesh — object space IS world space).
+  const _geoNormal = D?.cardQuat ? qRot(D.cardQuat, normalLocal) : normalLocal;
+  const warpedNormal = normalize(_geoNormal.add(sin(uv().x.mul(10)).mul(P.leafWarp)));
   // Billboard normal: camera-facing (or yaw-facing) direction at the leaf's pivot.
   // Without this branch, billboarded leaves render with the UV-stripe warp from
   // warpedNormal — that's where the vertical "banding" gradient on the canopy comes from.
@@ -244,13 +276,19 @@ function _buildFoliageMaterial(u, P, opts) {
     return normalize(mix(toCam, yawDir, P.billboardYaw));
   })();
   const geomForMix  = normalize(mix(warpedNormal, leafBillboardFace, u.billboard));
-  const finalNormal = normalize(mix(geomForMix, sphereDir, P.normalBias));
+  const finalNormal = normalize(mix(geomForMix, normalTargetDir, P.normalBias));
 
   const colorNode = Fn(() => {
     const h1 = aRand.x;
     const h2 = aRand.y;
-    // heightFactor: per-leaf canopy height fraction (attribute or injected)
-    let col = mix(P.bottomColor, P.topColor, heightFactor);
+    // Gradient axis: arborist runs bottom→top over the TREE's height
+    // (heightFactor); pine runs it along each CARD's uv.y (hook→tip), which
+    // is why identical colors read totally differently between the models.
+    const colorT = mix(heightFactor, uv().y, u.pineMode);
+    let col = mix(P.bottomColor, P.topColor, colorT);
+    // Pine vein stripes across the card (editor: sin(u.x·π) darkening).
+    const vein = sin(uv().x.mul(3.14159)).mul(0.5).add(0.5);
+    col = col.mul(mix(float(1.0), float(1.0).sub(u.veinStrength.mul(u.pineMode)), vein));
     const varMul = h1.mul(P.colorVar.mul(2.0)).add(float(1.0).sub(P.colorVar));
     col = col.mul(varMul);
     const hueShift = h2.sub(0.5).mul(P.colorVar.mul(0.4));
@@ -281,8 +319,16 @@ function _buildFoliageMaterial(u, P, opts) {
       col.z.sub(treeHue.mul(0.3)).add(treeBright)
     );
 
+    // Whole-tree height AO is an arborist concept — pine skips it and darkens
+    // the card's hook side instead (pivotAo, editor's smoothstep(0,0.38,uv.y)).
     const aoHeight = mix(float(1.0).sub(P.aoStr), float(1.0), heightFactor.mul(0.8).add(0.2));
-    col = col.mul(aoHeight);
+    col = col.mul(mix(aoHeight, float(1.0), u.pineMode));
+    const hookAo = mix(
+      float(1.0),
+      float(1.0).sub(u.pivotAo.mul(u.pineMode)),
+      smoothstep(float(0.0), float(0.38), uv().y),
+    );
+    col = col.mul(hookAo);
 
     const distC = clamp(length(sub(positionWorld, treeCenterW)).div(max(P.aoRadius, float(0.001))), float(0), float(1));
     const aoSphere = mix(float(1.0).sub(P.aoStr), float(1.0), distC);
@@ -292,14 +338,14 @@ function _buildFoliageMaterial(u, P, opts) {
     const n = normalWorld;
     // SSS uses per-leaf sphere direction so backlit anti-sun leaves glow,
     // while Lambert (via normalWorld = uniform world-up) stays stable.
-    const backDot = max(dot(negate(u.sunDir), sphereDirForSSS), float(0));
+    const backDot = max(dot(negate(u.sunDir), litDir), float(0));
     const sss = pow(backDot, P.sssPow).mul(P.sssStr);
     col = col.add(P.sssColor.mul(sss));
 
     // Rim uses per-leaf sphere direction so it activates on leaves whose
     // outward direction is perpendicular to view — i.e. the canopy silhouette
     // from any camera angle, regardless of normalBias.
-    const rimDot = float(1.0).sub(max(dot(sphereDirForSSS, viewDir), float(0)));
+    const rimDot = float(1.0).sub(max(dot(litDir, viewDir), float(0)));
     const rim = pow(rimDot, P.rimPow).mul(P.rimStr);
     col = col.add(P.rimColor.mul(rim));
 
@@ -372,6 +418,11 @@ export function createMergedFoliageMaterial(opts = {}) {
     pineAtlas:     uniform(0.0),
     pineAtlasCols: uniform(2),
     pineAtlasRows: uniform(2),
+    // Pine shading is per-slot-material only; inert in merged materials.
+    pineMode:     uniform(0.0),
+    radialUp:     uniform(0.35),
+    pivotAo:      uniform(0.0),
+    veinStrength: uniform(0.0),
   };
 
   // ONE uniform array for every per-slot parameter, laid out as
@@ -483,6 +534,10 @@ export function applyPresetMaterial(foliageMat, preset) {
   if (m.aoStr != null)       u.aoStr.value         = m.aoStr;
   if (m.normalBias != null)  u.normalBias.value    = m.normalBias;
   if (m.leafWarp != null)    u.leafWarp.value      = m.leafWarp;
+  // Pine-editor shading params (only meaningful when pineMode is on).
+  if (m.radialUp != null && u.radialUp)         u.radialUp.value     = m.radialUp;
+  if (m.pivotAo != null && u.pivotAo)           u.pivotAo.value      = m.pivotAo;
+  if (m.veinStrength != null && u.veinStrength) u.veinStrength.value = m.veinStrength;
   // Billboard mode (matches arborist preview).
   if (m.billboardLeaves != null)  u.billboard.value    = m.billboardLeaves ? 1.0 : 0.0;
   if (m.billboardYawOnly != null) u.billboardYaw.value = m.billboardYawOnly ? 1.0 : 0.0;

@@ -74,8 +74,20 @@ export async function loadFoliagePreset(presetJson) {
     pineAtlas,
     pineAtlasCols: pineAtlas ? Math.max(1, Math.round(_pineMat.atlasCols ?? 2)) : 2,
     pineAtlasRows: pineAtlas ? Math.max(1, Math.round(_pineMat.atlasRows ?? 2)) : 2,
+    // Pine presets shade with the pine-editor model (per-card gradient,
+    // trunk-radial lighting, pivot AO) — pineMode gates it in the shader.
+    pineLayout: !!pineBlock,
   });
   applyPresetMaterial(foliageMat, presetJson);
+  if (pineBlock) {
+    // Pine shading params: newer exports carry them in `material`; older
+    // presets (my_pine10 era) only in the editor snapshot `params.material`.
+    const pmSnap = presetJson.params?.material || {};
+    const u = foliageMat.uniforms;
+    u.radialUp.value = matOpts.radialUp ?? pmSnap.radialUp ?? 0.35;
+    u.pivotAo.value = matOpts.pivotAo ?? pmSnap.pivotAo ?? 0.35;
+    u.veinStrength.value = matOpts.veinStrength ?? pmSnap.veinStrength ?? 0.1;
+  }
 
   const _leafTexPath = useAtlas
     ? atlas.path || "textures/leaves/leaf_atlas.png"
@@ -123,6 +135,7 @@ export async function loadFoliagePreset(presetJson) {
         lods: [null, null, null],
         bounds: null,
         billboard: false,
+        pineLayout: true,
       };
     }
     const tScale = presetJson.trunkScale ?? 1;
@@ -188,6 +201,9 @@ export async function loadFoliagePreset(presetJson) {
       lods,
       bounds,
       billboard: false,
+      // Oriented whorl cards — the v3 GPU leaf field renders these as a
+      // per-slot oriented entry (chunked path keeps them in v2).
+      pineLayout: true,
     };
   }
 

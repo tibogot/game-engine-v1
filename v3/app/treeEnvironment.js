@@ -45,11 +45,18 @@ export function createTreeEnvironment({
   // the chunked renderer skips them (per-slot pine/non-atlas stay chunked).
   const leafFieldRenderer = new LeafFieldRenderer(scene, renderer);
   foliageLodRenderer.externalMergeRendering = true;
-  const syncLeafField = () => leafFieldRenderer.syncGroups(
-    foliageLodRenderer.mergeGroups,
-    foliageLodRenderer.slotPresets,
-    treeStore,
-  );
+  // Live Set of slot indices the field draws (merge groups + pines) — the
+  // chunked renderer skips their cell meshes entirely.
+  foliageLodRenderer.externalSlots = leafFieldRenderer.claimedSlots;
+  const syncLeafField = () => {
+    leafFieldRenderer.syncGroups(
+      foliageLodRenderer.mergeGroups,
+      foliageLodRenderer.slotPresets,
+      treeStore,
+    );
+    // Claimed slots may have changed — stale chunked meshes for them must go.
+    foliageLodRenderer._invalidateAllChunks();
+  };
   const treeSystem = new TreeSystem({
     toolState,
     treeStore,

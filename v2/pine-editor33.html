@@ -3014,6 +3014,11 @@
             aoStr: m.aoStrength,
             normalBias: m.normalBias,
             leafWarp: m.leafWarp,
+            // Pine shading model params — read by the shared foliage shader's
+            // pineMode branch so the game matches the editor.
+            radialUp: m.radialUp,
+            pivotAo: m.pivotAo,
+            veinStrength: m.veinStrength,
             billboardLeaves: !!ex.billboardLeaves,
             billboardYawOnly: ex.billboardYawOnly !== false,
           };

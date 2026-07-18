@@ -1,43 +1,45 @@
 /**
- * GPU leaf field — indirect-drawn tree canopies for atlas merge groups.
+ * GPU leaf field — indirect-drawn tree canopies (susukiSystem pattern).
  *
- * The endgame of the tree draw-call work: instead of the chunked
- * FoliageLodRenderer building one CPU mesh per cell × tier (draws scale with
- * visible cells), each merge group renders ALL its leaves with ONE indirect
- * draw. Per frame a compute pass walks every leaf slot, culls by camera
- * frustum + distance, and appends surviving leaves to a compact payload
- * buffer; the indirect instanceCount comes straight from the GPU atomic —
- * the CPU never knows how many leaves are visible (susukiSystem pattern).
+ * Two entry kinds share the same architecture:
+ *   "group" — atlas merge groups: BILLBOARD cards, merged foliage material
+ *             bound to the group's shared param uniform-array.
+ *   "pine"  — per-slot pine-editor presets: ORIENTED cards (baked whorl
+ *             quaternions), classic per-slot foliage material with pineMode
+ *             shading; its uniforms mirror the preset's own every frame so
+ *             panel edits flow through.
  *
- * LOD is CONTINUOUS, replacing the 3 discrete tiers: leaf tables are stored
- * pre-shuffled, and a tree at distance d keeps only the first
- * keepP(d)·count leaves of its table while the survivors grow by
- * 1/sqrt(keepP) — density thins smoothly leaf-by-leaf (no tier popping, no
- * cross-fade machinery). Endpoints match the old tiers: 50% @ ×1.414 around
- * lod1Distance, 25% @ ×2 toward fade-out, 0 where the impostors take over.
+ * Per frame one compute pass per entry walks every leaf slot, culls by
+ * camera frustum + distance, and appends survivors to a compact payload
+ * buffer; the indirect instanceCount comes straight from the GPU atomic.
+ *
+ * LOD is CONTINUOUS (replaces the chunked renderer's 3 cell tiers): leaf
+ * tables are stored pre-shuffled and a tree at distance d keeps the first
+ * keepP(d)·count entries while survivors grow by 1/sqrt(keepP). For pines
+ * this is the fix for "LOD1 big-leaf popping": density thins card-by-card,
+ * evenly around the whorls, with no discrete jump.
  *
  * Static data (rewritten on tree edits, debounced like the impostor field):
  *   treeA[i]      vec4  (x, y, z, scale)
  *   treeB[i]      vec4  (rotY, memberIdx, tableOffset, leafCount)
  *   leafToTree[k] uint  (treeIdx << 16 | leafIdx)   — exact dispatch mapping
- *   table[o*2..]  vec4  (local x,y,z, size), (rand.x, rand.y, heightFrac, 0)
- * Per-frame payload (compute-written, visCap entries × 3 vec4):
+ *   table         vec4× TABLE_STRIDE per leaf:
+ *     group: (local xyz, size), (rand.xy, heightFrac, 0)
+ *     pine:  (local xyz, size), (card quat), (rand.xy, heightFrac, 0)
+ * Payload (compute-written, visCap × PAYLOAD_STRIDE vec4):
  *   (leafCenterW, size·scale·sizeMul), (rand, heightFrac, memberIdx),
- *   (treeCenterW, 1)
+ *   (treeCenterW, 1)[, (world quat — tree yaw ∘ card quat)]
  *
- * The draw uses the SAME merged foliage material as the chunked path, with
- * instance data injected from the payload buffer (opts.data) and the param
- * uniform-array shared with the group (opts.sharedArrays) — one param sync
- * covers both. Terrain-normal tree tilt (t.nx/nz) is NOT applied here (yaw
- * only); canopies of slope-planted trees render upright.
+ * Terrain-normal tree tilt (t.nx/nz) is NOT applied (yaw only).
  */
 import * as THREE from "three";
 import {
-  Fn, If, attribute, atomicAdd, atomicStore, cos, float, instanceIndex,
+  Fn, If, atomicAdd, atomicStore, attribute, cos, float, instanceIndex,
   instancedArray, int, length, negate, sin, smoothstep, step, storage,
   uint, uniform, uniformArray, vec2, vec3, vec4,
 } from "three/tsl";
 import {
+  createFoliageMaterial,
   createMergedFoliageMaterial,
   setFoliageTexture,
   MAX_MERGED_SLOTS,
@@ -45,7 +47,7 @@ import {
 import { computeFrustumVisibility } from "../../../v2/core/revoGrass/revoGrassSsboUtils.js";
 
 const REPACK_DEBOUNCE = 250;   // ms — coalesce per-stamp gen bumps while painting
-const VIS_CAP = 300000;        // max on-screen leaves per group (payload budget)
+const VIS_CAP = 300000;        // max on-screen leaves per entry (payload budget)
 const MAX_TREES = 65535;       // treeIdx packs into 16 bits
 const CULL_WORKGROUP = 64;
 
@@ -55,14 +57,33 @@ function pow2(n) {
   return c;
 }
 
+/** Deterministic shuffle — the cull keeps a PREFIX of the table, so stored
+ *  order must be spatially uniform (cluster/whorl order would thin unevenly). */
+function shuffledOrder(n) {
+  const order = Array.from({ length: n }, (_, i) => i);
+  let seed = 1234567;
+  const rng = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0xffffffff;
+  };
+  for (let i = n - 1; i > 0; i--) {
+    const j = (rng() * (i + 1)) | 0;
+    const tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+  }
+  return order;
+}
+
 export class LeafFieldRenderer {
   constructor(scene, renderer) {
     this.scene = scene;
     this.renderer = renderer;
-    /** mergeKey -> field entry */
+    /** entryKey ("g:<mergeKey>" | "p:<slotIdx>") -> field entry */
     this.entries = new Map();
+    /** Slot indices whose leaves this field draws (chunked path skips them).
+     *  Mutated in place — consumers can hold a reference. */
+    this.claimedSlots = new Set();
 
-    // Camera/LOD uniforms shared by every group's compute.
+    // Camera/LOD uniforms shared by every entry's compute.
     this.u = {
       uCamPos: uniform(new THREE.Vector3()),
       uCamMatrix: uniform(new THREE.Matrix4()),
@@ -84,31 +105,48 @@ export class LeafFieldRenderer {
     this._treeStore = null;
   }
 
-  // ── Group sync ─────────────────────────────────────────────────────────────
+  // ── Entry sync ─────────────────────────────────────────────────────────────
 
   /**
-   * (Re)build field entries from the renderer's merge groups. Call after any
-   * preset load/clear. Entries whose group membership changed are rebuilt
-   * from scratch (leaf tables, buffers, material) — rare, preset-load-time.
+   * (Re)build field entries from the renderer's merge groups AND stand-alone
+   * pine slots. Call after any preset load/clear.
    */
   syncGroups(mergeGroups, slotPresets, treeStore) {
     this._treeStore = treeStore;
-    for (const key of [...this.entries.keys()]) {
-      if (!mergeGroups.groups.has(key)) this._disposeEntry(key);
-    }
+
+    const want = new Map(); // entryKey -> descriptor
     for (const [key, g] of mergeGroups.groups) {
-      const existing = this.entries.get(key);
-      if (existing && existing.cardGen === g.cardGen) continue;
-      this._disposeEntry(key);
-      this._createEntry(key, g, slotPresets);
+      want.set("g:" + key, { kind: "group", group: g, rev: g.cardGen });
     }
+    slotPresets.forEach((preset, si) => {
+      if (!preset?.pineLayout || !preset.lods?.[0]) return;
+      want.set("p:" + si, { kind: "pine", si, preset, rev: preset });
+    });
+
+    for (const key of [...this.entries.keys()]) {
+      if (!want.has(key)) this._disposeEntry(key);
+    }
+    for (const [key, desc] of want) {
+      const existing = this.entries.get(key);
+      if (existing && existing.rev === desc.rev) continue;
+      this._disposeEntry(key);
+      this._createEntry(key, desc, slotPresets);
+    }
+
+    this.claimedSlots.clear();
+    for (const [, entry] of this.entries) {
+      for (const si of entry.slotSet) this.claimedSlots.add(si);
+    }
+
     if (treeStore) this._repackAll(treeStore);
   }
 
-  /** Build the per-slot shuffled leaf tables for a group. */
-  _buildTables(g, slotPresets) {
+  // ── Leaf tables ────────────────────────────────────────────────────────────
+
+  /** Group tables: every member slot's billboard leaves (2 vec4/leaf). */
+  _buildGroupTables(g, slotPresets) {
     const rows = [];
-    const slotTable = new Map(); // slotIdx -> { offset, count, memberIdx }
+    const slotTable = new Map();
     for (const [si, mi] of g.members) {
       const preset = slotPresets[si];
       const lod0 = preset?.lods?.[0];
@@ -119,22 +157,9 @@ export class LeafFieldRenderer {
       const n = lod0.count;
       const bYMin = (preset.bounds && preset.bounds.yMin) ?? 0;
       const bRange = Math.max(((preset.bounds && preset.bounds.yMax) ?? 8) - bYMin, 0.001);
-      // Deterministic shuffle: the cull keeps a PREFIX of the table, so the
-      // stored order must be spatially uniform — cluster-sequential order
-      // would thin whole clusters last.
-      const order = Array.from({ length: n }, (_, i) => i);
-      let seed = 1234567;
-      const rng = () => {
-        seed = (seed * 1664525 + 1013904223) >>> 0;
-        return seed / 0xffffffff;
-      };
-      for (let i = n - 1; i > 0; i--) {
-        const j = (rng() * (i + 1)) | 0;
-        const tmp = order[i]; order[i] = order[j]; order[j] = tmp;
-      }
       const offset = rows.length / 2;
       const c = lod0.centerData, s = lod0.scaleData, r = lod0.randData;
-      for (const src of order) {
+      for (const src of shuffledOrder(n)) {
         const ly = c[src * 3 + 1];
         rows.push(
           [c[src * 3], ly, c[src * 3 + 2], s[src]],
@@ -149,16 +174,54 @@ export class LeafFieldRenderer {
     return { tableArr: arr, slotTable };
   }
 
-  _createEntry(key, g, slotPresets) {
-    const { tableArr, slotTable } = this._buildTables(g, slotPresets);
+  /** Pine table: one slot's oriented cards (3 vec4/leaf, quat from the
+   *  baked local instance matrix). */
+  _buildPineTable(si, preset) {
+    const lod0 = preset.lods[0];
+    const n = lod0.count;
+    const bYMin = (preset.bounds && preset.bounds.yMin) ?? 0;
+    const bRange = Math.max(((preset.bounds && preset.bounds.yMax) ?? 8) - bYMin, 0.001);
+    const m = new THREE.Matrix4();
+    const p = new THREE.Vector3();
+    const q = new THREE.Quaternion();
+    const s = new THREE.Vector3();
+    const rows = [];
+    const c = lod0.centerData, sd = lod0.scaleData, r = lod0.randData;
+    for (const src of shuffledOrder(n)) {
+      m.fromArray(lod0.matrices, src * 16);
+      m.decompose(p, q, s);
+      const ly = c[src * 3 + 1];
+      rows.push(
+        [c[src * 3], ly, c[src * 3 + 2], sd[src]],
+        [q.x, q.y, q.z, q.w],
+        [r[src * 2], r[src * 2 + 1],
+         Math.min(1, Math.max(0, (ly - bYMin) / bRange)), 0],
+      );
+    }
+    const arr = new Float32Array(rows.length * 4);
+    rows.forEach((row, i) => arr.set(row, i * 4));
+    const slotTable = new Map([[si, { offset: 0, count: n, memberIdx: 0 }]]);
+    return { tableArr: arr, slotTable };
+  }
+
+  _createEntry(key, desc, slotPresets) {
+    const oriented = desc.kind === "pine";
+    const { tableArr, slotTable } = oriented
+      ? this._buildPineTable(desc.si, desc.preset)
+      : this._buildGroupTables(desc.group, slotPresets);
     let maxLeavesPerTree = 1;
     for (const [, info] of slotTable) maxLeavesPerTree = Math.max(maxLeavesPerTree, info.count);
-    if (maxLeavesPerTree === 1 && tableArr.length === 0) return; // nothing to draw, ever
+    if (tableArr.length === 0) return;
 
     const entry = {
       key,
-      group: g,
-      cardGen: g.cardGen,
+      kind: desc.kind,
+      rev: desc.rev,
+      group: desc.group ?? null,
+      preset: desc.preset ?? null,
+      si: desc.si,
+      tableStride: oriented ? 3 : 2,
+      payloadStride: oriented ? 4 : 3,
       tableArrData: tableArr,
       slotTable,
       slotSet: new Set(slotTable.keys()),
@@ -191,7 +254,9 @@ export class LeafFieldRenderer {
   /** Allocate buffers/computes/mesh for the entry's current caps. */
   _allocEntry(entry) {
     const u = this.u;
-    const g = entry.group;
+    const oriented = entry.kind === "pine";
+    const TS = entry.tableStride;
+    const PS = entry.payloadStride;
 
     // ── CPU-written static buffers ──
     entry.treeAAttr = new THREE.StorageBufferAttribute(new Float32Array(entry.treeCap * 4), 4);
@@ -205,10 +270,10 @@ export class LeafFieldRenderer {
     const table = storage(entry.tableAttr, "vec4", entry.tableArrData.length / 4).toReadOnly();
 
     // ── GPU-only payload ──
-    const payload = instancedArray(entry.visCap * 3, "vec4");
+    const payload = instancedArray(entry.visCap * PS, "vec4");
 
-    // ── Geometry (union leaf card) + indirect args ──
-    const geo = entry.group.cardGeometry.clone();
+    // ── Geometry + indirect args ──
+    const geo = this._entryCardGeometry(entry);
     const indirectData = new Uint32Array(5);
     indirectData[0] = geo.index.count;
     entry.indirectAttr = new THREE.IndirectStorageBufferAttribute(indirectData, 5);
@@ -262,53 +327,69 @@ export class LeafFieldRenderer {
           // NEAR OVERRIDE: with the camera beside/inside a canopy, the NDC
           // test of its CENTER goes degenerate (behind the near plane /
           // off-screen) and culled the leaves right in front of the player.
-          // Any tree the camera could be touching is always visible.
           const nearVis = step(dist, radius.add(float(12)));
           If(vis.add(nearVis).greaterThan(0.5), () => {
-            const tableIdx = uint(B.z.add(0.5)).add(liU);
-            const t0 = table.element(tableIdx.mul(uint(2)));
-            const t1 = table.element(tableIdx.mul(uint(2)).add(uint(1)));
+            const tableIdx = uint(B.z.add(0.5)).add(liU).mul(uint(TS));
+            const t0 = table.element(tableIdx);
             const leafW = treePos.add(rot(t0.xyz).mul(scale));
             const slot = atomicAdd(indirectStorage.element(1), uint(1));
             If(slot.lessThan(uint(entry.visCap)), () => {
-              const p = slot.mul(uint(3));
+              const p = slot.mul(uint(PS));
+              const tRand = table.element(tableIdx.add(uint(TS - 1)));
               payload.element(p).assign(vec4(leafW, t0.w.mul(scale).mul(sizeMul)));
-              payload.element(p.add(uint(1))).assign(vec4(t1.x, t1.y, t1.z, B.y));
+              payload.element(p.add(uint(1))).assign(vec4(tRand.x, tRand.y, tRand.z, B.y));
               payload.element(p.add(uint(2))).assign(vec4(treeCenterW, 1));
+              if (oriented) {
+                // World card orientation = tree yaw ∘ baked card quat.
+                // yaw quat = (0, sh, 0, ch); composed inline.
+                const cq = table.element(tableIdx.add(uint(1)));
+                const half = B.x.mul(0.5);
+                const sh = sin(half);
+                const ch = cos(half);
+                payload.element(p.add(uint(3))).assign(vec4(
+                  ch.mul(cq.x).add(sh.mul(cq.z)),
+                  ch.mul(cq.y).add(sh.mul(cq.w)),
+                  ch.mul(cq.z).sub(sh.mul(cq.x)),
+                  ch.mul(cq.w).sub(sh.mul(cq.y)),
+                ));
+              }
             });
           });
         });
       });
     })().compute(entry.leafSlotCap, [CULL_WORKGROUP]);
 
-    // ── Material: merged foliage graph fed from the payload buffer ──
-    const pi = instanceIndex.mul(uint(3));
+    // ── Material: shared foliage graph fed from the payload buffer ──
+    const pi = instanceIndex.mul(uint(PS));
     const p0 = payload.element(pi);
     const p1 = payload.element(pi.add(uint(1)));
     const p2 = payload.element(pi.add(uint(2)));
     // Overflow gate: instances past visCap have no payload — collapse them.
     const capGate = step(float(instanceIndex), entry.uVisCapF.sub(0.5));
-    const built = createMergedFoliageMaterial({
-      atlasGrid: this._atlasGridOf(g),
-      sharedArrays: g.arrays,
-      data: {
-        rand: p1.xy,
-        leafCenterW: p0.xyz,
-        treeCenterW: p2.xyz,
-        leafSize: p0.w.mul(capGate),
-        heightFrac: p1.z,
-        slotId: int(p1.w.add(0.5)),
-      },
-    });
+    const data = {
+      rand: p1.xy,
+      leafCenterW: p0.xyz,
+      treeCenterW: p2.xyz,
+      leafSize: p0.w.mul(capGate),
+      heightFrac: p1.z,
+      slotId: int(p1.w.add(0.5)),
+    };
+    if (oriented) data.cardQuat = payload.element(pi.add(uint(3)));
+
+    let built;
+    if (oriented) {
+      built = createFoliageMaterial({ pineLayout: true, data });
+    } else {
+      built = createMergedFoliageMaterial({
+        atlasGrid: this._atlasGridOf(entry.group),
+        sharedArrays: entry.group.arrays,
+        data,
+      });
+    }
     entry.material = built.material;
     entry.uniforms = built.uniforms;
     entry.leafMapNode = built.leafMapNode;
-    const tex = g.leafMapNode.value;
-    if (tex) {
-      setFoliageTexture({ leafMapNode: built.leafMapNode, uniforms: built.uniforms }, tex);
-      built.uniforms.maskInAlpha.value = 0; // shared atlas mask lives in RED
-    }
-    entry.material.roughness = g.material?.roughness ?? 0.88;
+    this._syncEntryMaterial(entry);
 
     entry.mesh = new THREE.Mesh(geo, entry.material);
     entry.mesh.count = entry.visCap;
@@ -317,6 +398,49 @@ export class LeafFieldRenderer {
     entry.mesh.receiveShadow = false;
     entry.mesh.name = `LeafField:${entry.key}`;
     this.scene.add(entry.mesh);
+  }
+
+  /** Bare per-card geometry for the entry's mesh. */
+  _entryCardGeometry(entry) {
+    if (entry.kind === "group") return entry.group.cardGeometry.clone();
+    // Pine: the lods[0] geometry is the trimmed card PLUS instanced attrs —
+    // strip them (the field feeds instance data from the payload buffer).
+    const geo = entry.preset.lods[0].geometry.clone();
+    for (const name of ["aRand", "aLeafCenter", "aTreeCenter", "aLeafScale"]) {
+      if (geo.getAttribute(name)) geo.deleteAttribute(name);
+    }
+    return geo;
+  }
+
+  /** Texture + per-frame-safe material state from the entry's source. */
+  _syncEntryMaterial(entry) {
+    if (entry.kind === "group") {
+      const g = entry.group;
+      const tex = g.leafMapNode.value;
+      if (tex && entry.leafMapNode.value !== tex) {
+        setFoliageTexture({ leafMapNode: entry.leafMapNode, uniforms: entry.uniforms }, tex);
+        entry.uniforms.maskInAlpha.value = 0; // shared atlas mask lives in RED
+      }
+      entry.material.roughness = g.material?.roughness ?? 0.88;
+      return;
+    }
+    // Pine: mirror EVERY same-named uniform from the preset's own material —
+    // panel edits, wind, sun, pineMode/pivotAo/etc. all flow through.
+    const src = entry.preset.uniforms;
+    const dst = entry.uniforms;
+    for (const k in src) {
+      const s = src[k];
+      const d = dst[k];
+      if (!s || !d) continue;
+      if (s.value && s.value.isColor) d.value.copy(s.value);
+      else if (s.value && s.value.isVector4) d.value.copy(s.value);
+      else if (s.value && s.value.isVector3) d.value.copy(s.value);
+      else if (s.value && s.value.isVector2) d.value.copy(s.value);
+      else if (typeof s.value === "number") d.value = s.value;
+    }
+    const tex = entry.preset.leafMapNode?.value;
+    if (tex && entry.leafMapNode.value !== tex) entry.leafMapNode.value = tex;
+    entry.material.roughness = entry.preset.material?.roughness ?? 0.88;
   }
 
   _atlasGridOf(g) {
@@ -438,6 +562,7 @@ export class LeafFieldRenderer {
     const computes = [];
     for (const [, entry] of this.entries) {
       if (entry.leafCount === 0 || !entry.mesh) continue;
+      if (entry.kind === "pine") this._syncEntryMaterial(entry);
       computes.push(entry.computeReset, entry.computeCull);
     }
     if (computes.length) this.renderer.compute(computes);
@@ -457,5 +582,6 @@ export class LeafFieldRenderer {
 
   dispose() {
     for (const key of [...this.entries.keys()]) this._disposeEntry(key);
+    this.claimedSlots.clear();
   }
 }

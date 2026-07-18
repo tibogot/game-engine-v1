@@ -690,7 +690,10 @@ export class FoliageLodRenderer {
       const si = t.slotIdx;
       if (si >= this.slotPresets.length || !this.slotPresets[si]) continue;
       const g = this.mergeGroups.slotToGroup.get(si);
-      if (g && this.externalMergeRendering) continue; // GPU leaf field draws these
+      // GPU leaf field draws merged slots AND any slot it claimed (pines).
+      if (this.externalMergeRendering) {
+        if (g || this.externalSlots?.has(si)) continue;
+      }
       const ukey = g ? "g:" + g.key : "s:" + si;
       if (!units.has(ukey)) units.set(ukey, g ? { group: g } : { si });
     }
@@ -814,19 +817,21 @@ export class FoliageLodRenderer {
       // Tier with hysteresis: 0=lod0, 1=lod1, 2=lod2, 3=hidden.
       // Demote (further tier) past threshold*(1+H); promote back under *(1-H).
       //
-      // The HIDE boundary (tier 3) uses the cell's NEAREST-corner distance,
-      // not its center: with big cells, a tree can sit ~cellRadius nearer
-      // than the center — hiding by center distance left bare trunks in the
-      // band before the impostors take over.
+      // The HIDE boundary (tier 3) AND the LOD0 boundary use the cell's
+      // NEAREST-corner distance, not its center: with big cells, a tree can
+      // sit ~cellRadius nearer than the center — hiding by center distance
+      // left bare trunks before the impostors took over, and demoting by it
+      // showed HALF-DENSITY canopies right next to the camera (the "sparse
+      // near pine" bug). Only the lod1→lod2 boundary keeps center distance.
       const cellRadius = cellSize * 0.7071;
       const distFar = Math.max(0, dist - cellRadius);
-      const dFor = (i) => (i === 2 ? distFar : dist);
+      const dFor = (i) => (i === 1 ? dist : distFar);
       let tier = entry.tier;
       if (this.debugFreeze) {
         // Diagnostic freeze: no tier changes, no builds — warmed meshes only.
         tier = tier >= 0 ? tier : 3;
       } else if (tier < 0) {
-        tier = distFar > fadeD ? 3 : dist > lod1D ? 2 : dist > lod0D ? 1 : 0;
+        tier = distFar > fadeD ? 3 : dist > lod1D ? 2 : distFar > lod0D ? 1 : 0;
         entry.tier = tier;
       } else {
         while (tier < 3 && dFor(tier) > th[tier] * (1 + LOD_HYST)) tier++;
