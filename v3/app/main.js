@@ -690,6 +690,14 @@ export async function startV3App(opts = {}) {
   }
 
   const worldToolState = createWorldToolState();
+  // Boot-time CSM override — startV3App({ csm: { cascades: 2 } }). MUST land
+  // before createWorldEnvironment builds the CSMShadowNode: on three r184 a
+  // LIVE cascade-count change is broken at the renderer level — the old node's
+  // compiled pipeline keeps running updateBefore (re-adding its cascade lights
+  // to the scene every frame) while the replacement node never gets compiled.
+  // Cascade count is therefore a boot decision; see app.shadows for what CAN
+  // change at runtime.
+  if (opts.csm) Object.assign(worldToolState.csm, opts.csm);
   const treeToolState = createTreeToolState();
   const editorConfig = {
     world: { size: WORLD_SIZE, chunkSize: V2_CONFIG.world.chunkSize },
@@ -6195,6 +6203,31 @@ export async function startV3App(opts = {}) {
       setBloomSelective(on) {
         worldEnv?.postFxPipeline?.setBloomSelective(!!on);
       },
+    },
+    // ── Shadow override ───────────────────────────────────────────────────────
+    // CSM lives in worldToolState.csm and is NOT stored in .v3proj, so a game
+    // can own it. Every shadow caster is re-drawn once per cascade per frame —
+    // a game with a constrained camera (RTS top-down) cuts draw calls by
+    // lowering the cascade count, but that is a BOOT option:
+    // startV3App({ csm: { cascades: 2 } }). Changing `cascades`/`fade` live is
+    // broken on three r184 (the old CSMShadowNode's compiled pipeline keeps
+    // re-adding its cascade lights every frame while the new node never
+    // compiles), so set() refuses them. mapSize/maxFar/lightMargin/shadowRadius
+    // go through live-safe paths (syncCascadeShadowSettings/updateFrustums).
+    shadows: {
+      get state() { return worldToolState.csm; },
+      set(params = {}) {
+        const { cascades, fade, ...rest } = params;
+        if (cascades !== undefined || fade !== undefined) {
+          console.warn(
+            "[V3] shadows.set: `cascades`/`fade` cannot change at runtime — " +
+            "pass startV3App({ csm: { ... } }) at boot instead.",
+          );
+        }
+        Object.assign(worldToolState.csm, rest);
+        worldEnv?.syncCsm();
+      },
+      setEnabled(on) { worldEnv?.setCsmEnabled(!!on); },
     },
     // ── Fog override ──────────────────────────────────────────────────────────
     // Height + distance fog live in worldToolState.fog and sync to scene.fogNode.

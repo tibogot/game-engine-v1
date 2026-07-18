@@ -45,7 +45,14 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   // 1) Boot the v3 engine — renderer, terrain clipmap, sky, grass, water… the
   //    whole runtime. Same entry the editor uses; the page hides editor chrome.
   onStatus("Starting engine…");
-  const app = await startV3App();
+  // csm.cascades is a BOOT-ONLY option (live changes are broken on three r184 —
+  // see app.shadows in v3/app/main.js). The RTS camera is a fixed-pitch
+  // top-down view with maxFar 80, so 2 cascades cover it; each cascade re-draws
+  // every shadow caster per frame, so this is ~12 draw calls per cascade saved.
+  // A/B against the old look with ?csm=3 (or ?csm=1 to see why 1 isn't enough).
+  const csmParam = Number(new URLSearchParams(location.search).get("csm"));
+  const cascades = csmParam >= 1 && csmParam <= 4 ? Math.round(csmParam) : 2;
+  const app = await startV3App({ csm: { cascades } });
   window.__rts = app; // handy for console debugging
 
   if (fov != null) {
