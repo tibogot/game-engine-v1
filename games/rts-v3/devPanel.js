@@ -18,6 +18,7 @@ export function createDevPanel({
   worldName = "procedural default",
   onLoadWorldFile,
   onLoadDefaultWorld,
+  onReseat,
 }) {
   const DEG = Math.PI / 180;
 
@@ -199,7 +200,8 @@ export function createDevPanel({
           <input type="file" id="dv-world-file" accept=".v3proj" hidden />
           <button class="action-btn" id="dv-world-load" type="button">Load .v3proj…</button>
           <button class="action-btn" id="dv-world-default" type="button">Reload default</button>
-          <div class="dv-hint">Default: <code>world.v3proj</code>. Or open with <code>?world=/path/file.v3proj</code>.</div>
+          <button class="action-btn" id="dv-world-reseat" type="button">Re-seat on terrain</button>
+          <div class="dv-hint">Default: <code>world.v3proj</code>. Or open with <code>?world=/path/file.v3proj</code>. Re-seat drops structures/flag back onto the ground if anything floats.</div>
         </div>
       </div>
 
@@ -474,6 +476,13 @@ export function createDevPanel({
     } catch (err) {
       console.error("[RTS-v3] Default world load failed:", err);
       window.alert(err instanceof Error ? err.message : "Failed to load default world.");
+    }
+  });
+  $("#dv-world-reseat").addEventListener("click", async () => {
+    try {
+      await onReseat?.();
+    } catch (err) {
+      console.error("[RTS-v3] Re-seat failed:", err);
     }
   });
 

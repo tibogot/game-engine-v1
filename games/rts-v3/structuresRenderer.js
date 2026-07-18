@@ -350,10 +350,14 @@ export function createStructuresRenderer({ app, structures, healthBars }) {
   function sync(dt, camera) {
     _t2 += dt;
     // The static bodies only change when a structure dies or the world reloads —
-    // a cheap signature catches both without rebuilding every frame.
+    // a cheap signature catches both without rebuilding every frame. Y MUST be
+    // in the key: re-seating after a terrain swap often keeps x/z and only moves
+    // y, and without it the merged bodies stayed floating at the old altitude.
     let key = "";
     for (const s of structures.list) {
-      if (s.alive && !s.isBuilding) key += `${s.position.x.toFixed(1)},${s.position.z.toFixed(1)};`;
+      if (s.alive && !s.isBuilding) {
+        key += `${s.position.x.toFixed(1)},${s.position.y.toFixed(1)},${s.position.z.toFixed(1)};`;
+      }
     }
     if (key !== staticKey) {
       staticKey = key;
@@ -368,6 +372,9 @@ export function createStructuresRenderer({ app, structures, healthBars }) {
     if (base) {
       baseView.visible = base.alive;
       if (base.alive) {
+        // Follow the logic position — placed once at boot, the view floated
+        // whenever a terrain swap re-seated the base.
+        baseView.position.set(base.position.x, base.position.y, base.position.z);
         // Door opens while the base is producing (queue non-empty / mid-build),
         // so units drive out through an open door. Eased, not snapped.
         const producing = (base.queue?.length ?? 0) > 0 || (base.progress ?? 0) > 0;

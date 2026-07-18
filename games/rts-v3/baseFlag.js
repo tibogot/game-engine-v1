@@ -34,9 +34,13 @@ export function createBaseFlag({ app, structures, offset = { x: 30, z: -16 } }) 
   if (!b) return null;
 
   const flag = createFlag(FLAG_PARAMS);
-  const x = b.x + offset.x;
-  const z = b.z + offset.z;
-  flag.group.position.set(x, app.getWorldHeight?.(x, z) ?? 0, z);
+  const plant = () => {
+    const base = structures.base.position; // base may move when re-seated
+    const x = base.x + offset.x;
+    const z = base.z + offset.z;
+    flag.group.position.set(x, app.getWorldHeight?.(x, z) ?? 0, z);
+  };
+  plant();
   app.scene.add(flag.group);
 
   let objectUrl = null;   // revoked when replaced — imported images are blob: URLs
@@ -55,6 +59,9 @@ export function createBaseFlag({ app, structures, offset = { x: 30, z: -16 } }) 
     group: flag.group,
     /** Verlet step — called from the game loop. */
     update(dt) { flag.update(dt); },
+
+    /** Re-plant beside the base on the current terrain (after a world load). */
+    reanchor: plant,
 
     /** Point the flag at an image URL (http(s):, data:, or blob:). */
     setTextureUrl(url) { applyTexture(url); },

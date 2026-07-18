@@ -5031,7 +5031,10 @@ export async function startV3App(opts = {}) {
   }
 
   // Import a file stashed across a terrain-size reload (project or heightmap).
-  takePendingHeightmap().then(async (buf) => {
+  // The promise is exposed on the app handle (pendingWorldImport) so a game can
+  // AWAIT the import before placing anything on the terrain — a fixed sleep
+  // races it and seats gameplay objects on the pre-import ground.
+  const pendingWorldImport = takePendingHeightmap().then(async (buf) => {
     if (!buf) return;
     try {
       if (isProjectFile(buf)) {
@@ -6254,6 +6257,17 @@ export async function startV3App(opts = {}) {
       markHeightmapDirty();
       await ensureCpuHeightmapFromGpu();
     },
+
+    // Resolves once the world stashed across a terrain-size reload has been
+    // imported (immediately when there is none). Await before reading heights.
+    pendingWorldImport,
+
+    /**
+     * Re-sync the CPU heightmap mirror from the GPU. Rivers/lakes carve the
+     * terrain AFTER a project's own height sync, so a game should await this
+     * before re-seating objects on freshly loaded ground.
+     */
+    refreshWorldHeights: ensureCpuHeightmapFromGpu,
 
     // ── Post-FX override ──────────────────────────────────────────────────────
     // A game owns its own look, so it must be able to turn post-FX on and tune

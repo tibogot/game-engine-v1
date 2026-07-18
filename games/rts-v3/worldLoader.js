@@ -76,8 +76,10 @@ export async function loadBootWorld(app, { onStatus } = {}) {
   if (pendingName) {
     sessionStorage.removeItem("rts-v3.pendingWorld");
     onStatus?.(`Loading ${pendingName}…`);
-    // startV3App imports the stashed buffer asynchronously right after boot.
-    await new Promise((r) => setTimeout(r, 300));
+    // startV3App imports the stashed buffer right after boot — AWAIT it. A fixed
+    // sleep raced the import: structures got placed on the pre-import terrain,
+    // then the loaded world swapped in underneath and left them floating.
+    await (app.pendingWorldImport ?? new Promise((r) => setTimeout(r, 300)));
     return { name: pendingName, loaded: true };
   }
 

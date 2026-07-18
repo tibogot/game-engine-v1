@@ -50,9 +50,12 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   // top-down view with maxFar 80, so 2 cascades cover it; each cascade re-draws
   // every shadow caster per frame, so this is ~12 draw calls per cascade saved.
   // A/B against the old look with ?csm=3 (or ?csm=1 to see why 1 isn't enough).
+  // maxFar 300: the editor default (80) is tuned for a ground-level camera — the
+  // RTS camera orbits 50-280 m up, so at 80 every shadow faded out before the
+  // player could see it. 300 covers the whole zoom range (DIST_MAX 280).
   const csmParam = Number(new URLSearchParams(location.search).get("csm"));
   const cascades = csmParam >= 1 && csmParam <= 4 ? Math.round(csmParam) : 2;
-  const app = await startV3App({ csm: { cascades } });
+  const app = await startV3App({ csm: { cascades, maxFar: 300 } });
   window.__rts = app; // handy for console debugging
 
   if (fov != null) {
@@ -64,6 +67,9 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   const worldState = { name: "procedural default" };
   const boot = await loadBootWorld(app, { onStatus });
   worldState.name = boot.name;
+  // Rivers/lakes carve the heightmap AFTER the project's own height sync, so
+  // pull a fresh CPU mirror before anything below reads ground heights.
+  await app.refreshWorldHeights?.();
 
   // Post-FX: the GAME owns its look. postFx.enabled defaults to false in the
   // engine and is NOT stored in the .v3proj, so without this the game gets no
@@ -266,21 +272,39 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
 
   // DEV UI (not player-facing): tune camera feel, unit speed, and the nav grid
   // while building the game. Collapsible, top-right.
-  /** Rebuild gameplay systems that depend on terrain after a world swap. */
-  const afterWorldLoad = async (result) => {
-    if (!result?.loaded) return;
-    worldState.name = result.name;
+  /**
+   * Re-seat every terrain-anchored gameplay object on the CURRENT terrain and
+   * rebuild what depends on it (nav grid, minimap). Runs automatically after a
+   * world load; also wired to the dev panel's "Re-seat on terrain" button as a
+   * manual fix-up for anything left floating.
+   */
+  const reseatWorld = async () => {
     onStatus("Re-seating structures…");
+    // Rivers/lakes carve the heightmap AFTER a project's own height sync — pull
+    // a fresh CPU mirror so re-seating reads the FINAL ground, not a stale one.
+    await app.refreshWorldHeights?.();
     await structures.reanchorToTerrain(app);
-    const navOn = devPanel.getNavDebug?.() ?? false;
+    for (const b of buildings.list) {
+      b.position.y = app.getWorldHeight?.(b.position.x, b.position.z) ?? b.position.y;
+    }
+    baseFlag?.reanchor();
+    const navOn = devPanel?.getNavDebug?.() ?? false;
     navGrid.rebuild();
     for (const s of structures.list) {
       navGrid.addObstacle(s.position.x, s.position.z, s.radius);
     }
     minimap.rebuildTerrain();
     navGrid.setDebug(navOn);
-    devPanel.setWorldName(worldState.name);
     rtsCamera.focusOn(structures.base.position.x, structures.base.position.z);
+  };
+  app.reseatWorld = reseatWorld;
+
+  /** Rebuild gameplay systems that depend on terrain after a world swap. */
+  const afterWorldLoad = async (result) => {
+    if (!result?.loaded) return;
+    worldState.name = result.name;
+    await reseatWorld();
+    devPanel.setWorldName(worldState.name);
   };
 
   const devPanel = createDevPanel({
@@ -288,6 +312,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
     worldName: worldState.name,
     onLoadWorldFile: async (file) => afterWorldLoad(await loadWorldFromFile(app, file, { onStatus })),
     onLoadDefaultWorld: async () => afterWorldLoad(await loadDefaultWorld(app, { onStatus })),
+    onReseat: reseatWorld,
   });
   app.devPanel = devPanel;
 
