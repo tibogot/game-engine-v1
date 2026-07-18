@@ -17,6 +17,7 @@ import {
 import { DEFAULT_GEN } from "../terrain/proceduralGen.js";
 import { createProceduralGenPass } from "../terrain/proceduralGenGpu.js";
 import { erodeDroplets, buildErosionKernel } from "../terrain/globalErosion.js";
+import { streamPowerErode, createStreamPowerScratch } from "../terrain/streamPowerErosion.js";
 import { initEditorShell } from "../ui/editorShell.js";
 import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
@@ -1459,6 +1460,67 @@ export async function startV3App(opts = {}) {
       erosionRunning = false;
       btnRunErosion.disabled = false;
       btnRunErosion.textContent = "Run Erosion";
+    }
+  });
+
+  // ── Global fluvial erosion (stream power) ────────────────────────────────
+  // CPU Fastscape-style sim (streamPowerErosion.js): carves the dendritic
+  // valley network the droplet sim can't. Same readback → metres → push flow.
+  const speIters    = document.getElementById("sl-spe-iters");
+  const speStrength = document.getElementById("sl-spe-strength");
+  const speUplift   = document.getElementById("sl-spe-uplift");
+  const speSmooth   = document.getElementById("sl-spe-smooth");
+  const btnRunStreamPower = document.getElementById("btn-run-stream-power");
+
+  function readStreamPowerFromUI() {
+    return {
+      iterations: Number(speIters.value),
+      strength:   Number(speStrength.value) / 2000,
+      uplift:     Number(speUplift.value)   / 100,
+      smoothing:  Number(speSmooth.value)   / 100,
+    };
+  }
+
+  function syncStreamPowerUI() {
+    const p = readStreamPowerFromUI();
+    document.getElementById("lbl-spe-iters").textContent    = String(p.iterations);
+    document.getElementById("lbl-spe-strength").textContent = p.strength.toFixed(3);
+    document.getElementById("lbl-spe-uplift").textContent   = p.uplift.toFixed(2) + "m";
+    document.getElementById("lbl-spe-smooth").textContent   = p.smoothing.toFixed(2);
+  }
+
+  for (const sl of [speIters, speStrength, speUplift, speSmooth]) {
+    sl.addEventListener("input", syncStreamPowerUI);
+  }
+  syncStreamPowerUI();
+
+  let streamPowerRunning = false;
+  btnRunStreamPower.addEventListener("click", async () => {
+    if (streamPowerRunning) return;
+    streamPowerRunning = true;
+    btnRunStreamPower.disabled = true;
+    try {
+      const params = readStreamPowerFromUI();
+      await ensureCpuHeightmapFromGpu();
+
+      const metres = new Float32Array(cpuHeightmap.length);
+      for (let i = 0; i < metres.length; i++) metres[i] = cpuHeightmap[i] * MAX_HEIGHT;
+
+      const scratch = createStreamPowerScratch(HEIGHTMAP_SIZE);
+      const total = params.iterations;
+      const BATCH = 10; // iterations carry state only via `metres` — safe to split
+      for (let done = 0; done < total; done += BATCH) {
+        streamPowerErode(metres, HEIGHTMAP_SIZE, Math.min(BATCH, total - done), params, scratch);
+        btnRunStreamPower.textContent = `Carving… ${Math.min(100, Math.round(((done + BATCH) / total) * 100))}%`;
+        await new Promise((r) => setTimeout(r, 0));
+      }
+
+      for (let i = 0; i < metres.length; i++) cpuHeightmap[i] = metres[i] / MAX_HEIGHT;
+      pushHeightmapEditsToGpu();
+    } finally {
+      streamPowerRunning = false;
+      btnRunStreamPower.disabled = false;
+      btnRunStreamPower.textContent = "Run Stream Power";
     }
   });
 

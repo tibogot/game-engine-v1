@@ -638,6 +638,48 @@
               <p class="mode-hint">Hydraulic droplet sim — carves flow channels, deposits sediment. Undoable.</p>
             </div>
           </div>
+
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Fluvial (Stream Power)
+            </div>
+            <div class="section-body">
+              <div class="prop-row">
+                <span class="prop-label">Iterations</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-spe-iters" min="20" max="400" step="10" value="120" />
+                  <span class="prop-num" id="lbl-spe-iters">120</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Strength</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-spe-strength" min="1" max="100" step="1" value="20" />
+                  <span class="prop-num" id="lbl-spe-strength">0.010</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Uplift</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-spe-uplift" min="0" max="200" step="5" value="0" />
+                  <span class="prop-num" id="lbl-spe-uplift">0.00m</span>
+                </div>
+              </div>
+              <div class="prop-row">
+                <span class="prop-label">Smoothing</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-spe-smooth" min="0" max="25" step="1" value="5" />
+                  <span class="prop-num" id="lbl-spe-smooth">0.05</span>
+                </div>
+              </div>
+
+              <div class="prop-separator"></div>
+
+              <button type="button" class="action-btn primary" id="btn-run-stream-power">Run Stream Power</button>
+              <p class="mode-hint">Carves a dendritic valley network from drainage area. Raise uplift to keep ridges tall while rivers deepen. Undoable.</p>
+            </div>
+          </div>
           </div><!-- /#sculpt-panel-inner -->
 
         </div><!-- /#sculpt-panel -->
