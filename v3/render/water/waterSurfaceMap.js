@@ -59,10 +59,16 @@ export function createWaterSurfaceMap({ worldSize, maxHeight, resolution = 1024 
 
   const scene = new THREE.Scene();
 
-  // See main.js's grass-tint bake for why left/right are swapped.
+  // Frustum axes measured empirically against the terrain shader's
+  // `worldXZ / worldSize + 0.5` sampling (lake at +300/+200, ghost at +300/-200
+  // before the fix):
+  //  - left/right swapped because a straight-down lookAt with up=(0,0,1)
+  //    mirrors world X in camera space (same as main.js's grass-tint bake);
+  //  - top/bottom ALSO swapped because WebGPU puts NDC +Y at texel ROW 0, so an
+  //    unswapped frustum lands world +Z at v=0 — mirroring the map in Z.
   const camY = maxHeight + 10;
   const camera = new THREE.OrthographicCamera(
-    worldSize / 2, -worldSize / 2, worldSize / 2, -worldSize / 2,
+    worldSize / 2, -worldSize / 2, -worldSize / 2, worldSize / 2,
     1, camY - NO_WATER_Y + 10,
   );
   camera.position.set(0, camY, 0);
