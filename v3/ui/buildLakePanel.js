@@ -205,11 +205,14 @@ export function buildLakePanel(app) {
         hint: "Warm sand highlight in the first metres of water." });
       _slider(bed, lb, "shallowDepth", { label: "Shallow depth (m)", min: 0.1, max: 6, step: 0.1, onChange: onB });
       _color(bed, lb, "causticsColor", { label: "Caustics colour", onChange: onB });
-      _slider(bed, lb, "causticsIntensity", { label: "Caustics intensity", min: 0, max: 2, step: 0.01, onChange: onB });
-      _slider(bed, lb, "causticsScale1", { label: "Caustics scale A", min: 0.05, max: 2, step: 0.01, onChange: onB,
-        hint: "Voronoi cells per metre of the first light web. 0.5 = one cell every 2 m." });
-      _slider(bed, lb, "causticsScale2", { label: "Caustics scale B", min: 0.05, max: 2, step: 0.01, onChange: onB });
-      _slider(bed, lb, "causticsSpeed", { label: "Caustics speed", min: 0, max: 3, step: 0.01, onChange: onB });
+      _slider(bed, lb, "causticsIntensity", { label: "Caustics intensity", min: 0, max: 3, step: 0.01, onChange: onB });
+      _slider(bed, lb, "causticsScale", { label: "Caustics scale", min: 0.02, max: 0.6, step: 0.005, onChange: onB,
+        hint: "Pattern tiles per metre. Higher = smaller, busier filaments." });
+      _slider(bed, lb, "causticsSharpness", { label: "Caustics sharpness", min: 1, max: 16, step: 0.5, onChange: onB,
+        hint: "Pinches the light net into thinner, brighter filaments." });
+      _slider(bed, lb, "causticsDispersion", { label: "Caustics dispersion", min: 0, max: 1, step: 0.01, onChange: onB,
+        hint: "Chromatic fringing — red/blue split on the filament edges, like real refracted light." });
+      _slider(bed, lb, "causticsSpeed", { label: "Caustics speed", min: 0, max: 2, step: 0.01, onChange: onB });
       _slider(bed, lb, "causticsMaxDepth", { label: "Caustics max depth (m)", min: 1, max: 30, step: 0.5, onChange: onB,
         hint: "Caustics fade out by this depth — light stops reaching the bed." });
       _slider(bed, lb, "shoreBlend", { label: "Shore blend (m)", min: 0.02, max: 3, step: 0.01, onChange: onB,

@@ -28,15 +28,19 @@ export function createLakebedState(overrides = {}) {
     shallowBoost: 1.0,
     shallowDepth: 1.5,
 
-    // Caustics — two counter-scrolling Voronoi crack webs (revo samples its
-    // noise atlas's "cracks" channel — same pattern), summed and cubed.
-    // Scales are Voronoi CELLS per metre: 0.5 => one bright-line cell every 2 m.
-    causticsIntensity: 0.35,
-    causticsColor:     "#4d6680",
-    causticsScale1:    0.35,
-    causticsScale2:    0.65,
-    /** Cell-units/second each web drifts (in metres: speed / scale). */
-    causticsSpeed:     0.6,
+    // Caustics — the classic iterative-trig water caustic (lakebedTsl.js): a
+    // filament net that morphs internally like real refracted sunlight, with
+    // optional chromatic dispersion (R/B fringing on the filaments).
+    causticsIntensity: 1.5,
+    causticsColor:     "#8fb8cc",
+    /** Pattern tiles per metre. 0.15 => one ~6.7 m tile, filaments well under that. */
+    causticsScale:     0.15,
+    /** Final pow shaping: higher pinches the net into thinner, brighter filaments. */
+    causticsSharpness: 8,
+    /** 0 = white filaments, 1 = strong red/blue fringing. */
+    causticsDispersion: 0.5,
+    /** Morph rate of the net, in pattern time. ~0.5 reads as gentle sunlight. */
+    causticsSpeed:     0.5,
     /** Caustics die out by this depth — light stops reaching the bed. */
     causticsMaxDepth:  7.5,
 

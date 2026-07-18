@@ -6078,6 +6078,8 @@ export async function startV3App(opts = {}) {
       recoverEditorInput,
       get rendererSideWork() { return _rendererSideWork; },
       get lakeSystem() { return lakeSystem; },
+      lakebedShading,
+      waterSurfaceMap,
       get river2System() { return river2System; },
       get grassState() { return grassState; },
       get grassRings() { return grassRings; },

@@ -7,7 +7,7 @@
  * lakebed: sand colour, a deep-water tint that grows with depth, a warm boost in
  * the shallows, and animated caustics.
  *
- * Differences from the original, both deliberate:
+ * Differences from the original, all deliberate:
  *
  *  1. "Is this under water" comes from the shared water-surface map
  *     (waterSurfaceMap.js) instead of a hand-painted 512² mask — so it follows
@@ -18,13 +18,17 @@
  *     positionWorld.y.negate() — their world has one lake at sea level, ours has
  *     water at any altitude.
  *
- * The caustics noise is a procedural Voronoi CRACK web rather than revo's
- * noise-atlas texture — but it is the same pattern: their caustics sample the
- * atlas's `.a` channel, documented as "cracks" (thin bright lines along cell
- * borders), softened by a mip bias. Real caustics ARE a Voronoi-edge net —
- * smooth blob noise here reads as murk, not light (tried first; it doesn't).
- * Two webs at different scales counter-scroll, get summed and cubed (revo's
- * exact shaping — the interference of the two moving nets is the shimmer).
+ *  3. The caustics OUTCLASS the original's scrolled "cracks" texture: they are
+ *     the classic iterative-trig water caustic (the widely-copied tileable
+ *     Shadertoy pattern). Each iteration warps the domain by trig of the warped
+ *     domain, so the filament net MORPHS internally — filaments split, merge and
+ *     wander like real refracted sunlight — instead of two static webs sliding
+ *     past each other. On top of that, optional chromatic dispersion samples the
+ *     pattern three times at a slight spatial offset, giving the red/blue
+ *     fringes real caustics have. History of this slot: smooth value noise
+ *     (read as murk), then a Voronoi F2−F1 crack web (static filaments, revo
+ *     parity) — both retired for this.
+ *
  * Everything but the map lookup lives inside a real branch — dry terrain
  * (almost every fragment) pays one texture sample.
  */
@@ -32,43 +36,48 @@
 import * as THREE from "three";
 import {
   Fn, If, uniform, float, vec2, vec3,
-  mix, smoothstep, max, min, floor, fract, dot, sin, length,
+  mix, smoothstep, max, abs, pow, sin, cos, length, fract,
   texture, positionWorld, time,
 } from "three/tsl";
 import { createLakebedState } from "../../app/state/lakebedState.js";
 
-// Same hash family as lakeMaterial.js's Worley (module-private there).
-const _hash22 = /*#__PURE__*/ Fn(([p]) => {
-  const px = dot(p, vec2(127.1, 311.7));
-  const py = dot(p, vec2(269.5, 183.3));
-  return fract(sin(vec2(px, py)).mul(43758.5453));
-});
-
-const _NEIGHBORS = [
-  [-1, -1], [0, -1], [1, -1],
-  [-1,  0], [0,  0], [1,  0],
-  [-1,  1], [0,  1], [1,  1],
-];
+/** Iterations of the domain warp. 4 is the sweet spot; 3 loses filament detail. */
+const CAUSTIC_ITER = 4;
+const TAU = 6.28318530718;
 
 /**
- * Voronoi crack web — 1 on cell borders, 0 inside cells. Border distance is
- * F2 - F1 (the two nearest feature points); the wide smoothstep stands in for
- * the mip-bias blur revo applies to their cracks texture, and the cube in the
- * caller re-sharpens the summed webs into filaments.
+ * Tileable iterative-trig water caustic, scalar brightness in ~[0, 1.5].
+ * `uv` is in pattern tiles (period 1), `t` in seconds. The per-iteration time
+ * factor (1 − 3.5/(n+1)) makes the layers counter-rotate, which is what keeps
+ * the net alive rather than drifting as one rigid sheet. `sharpness` is the
+ * final pow — high values pinch the net into thin bright filaments.
  */
-const _crackNoise = /*#__PURE__*/ Fn(([p]) => {
-  const ip = floor(p);
-  const fp = fract(p);
-  const f1 = float(8).toVar();
-  const f2 = float(8).toVar();
-  for (const [nx, ny] of _NEIGHBORS) {
-    const cell = vec2(float(nx), float(ny));
-    const d = length(cell.add(_hash22(ip.add(cell))).sub(fp));
-    // Branchless two-smallest: new F2 before F1, so the old F1 can demote into it.
-    f2.assign(min(f2, max(f1, d)));
-    f1.assign(min(f1, d));
+const _caustic = /*#__PURE__*/ Fn(([uv, t, sharpness]) => {
+  // mod(uv·TAU, TAU) − 250, verbatim from the original. BOTH parts matter: the
+  // mod makes the pattern stationary across the world (it repeats per tile
+  // instead of depending on |world position|), and the −250 keeps |p| ≈ 250 so
+  // the 1/length(p/…) terms stay normalized — without it the sum explodes near
+  // the domain origin (bed blows out white with black holes; seen live).
+  const p = fract(uv).mul(TAU).sub(250).toVar();
+  const i = p.toVar();
+  const c = float(1).toVar();
+  const inten = 0.005;
+
+  for (let n = 0; n < CAUSTIC_ITER; n++) {
+    const tt = t.mul(1.0 - 3.5 / (n + 1));
+    i.assign(p.add(vec2(
+      cos(tt.sub(i.x)).add(sin(tt.add(i.y))),
+      sin(tt.sub(i.y)).add(cos(tt.add(i.x))),
+    )));
+    c.addAssign(float(1).div(length(vec2(
+      p.x.div(sin(i.x.add(tt)).div(inten)),
+      p.y.div(cos(i.y.add(tt)).div(inten)),
+    ))));
   }
-  return float(1).sub(smoothstep(float(0), float(0.6), f2.sub(f1)));
+
+  c.divAssign(CAUSTIC_ITER);
+  c.assign(float(1.17).sub(pow(c, 1.4)));
+  return pow(abs(c), sharpness);
 });
 
 /**
@@ -82,20 +91,21 @@ export function createLakebedShading({ waterMapTex, worldSize, params = {} }) {
   const p = { ...createLakebedState(), ...params };
 
   const u = {
-    enabled:           uniform(p.enabled ? 1 : 0),
-    sandColor:         uniform(new THREE.Color(p.sandColor)),
-    sandMix:           uniform(p.sandMix),
-    deepColor:         uniform(new THREE.Color(p.deepColor)),
-    tintDepth:         uniform(p.tintDepth),
-    shallowBoost:      uniform(p.shallowBoost),
-    shallowDepth:      uniform(p.shallowDepth),
-    causticsIntensity: uniform(p.causticsIntensity),
-    causticsColor:     uniform(new THREE.Color(p.causticsColor)),
-    causticsScale1:    uniform(p.causticsScale1),
-    causticsScale2:    uniform(p.causticsScale2),
-    causticsSpeed:     uniform(p.causticsSpeed),
-    causticsMaxDepth:  uniform(p.causticsMaxDepth),
-    shoreBlend:        uniform(p.shoreBlend),
+    enabled:            uniform(p.enabled ? 1 : 0),
+    sandColor:          uniform(new THREE.Color(p.sandColor)),
+    sandMix:            uniform(p.sandMix),
+    deepColor:          uniform(new THREE.Color(p.deepColor)),
+    tintDepth:          uniform(p.tintDepth),
+    shallowBoost:       uniform(p.shallowBoost),
+    shallowDepth:       uniform(p.shallowDepth),
+    causticsIntensity:  uniform(p.causticsIntensity),
+    causticsColor:      uniform(new THREE.Color(p.causticsColor)),
+    causticsScale:      uniform(p.causticsScale),
+    causticsSharpness:  uniform(p.causticsSharpness),
+    causticsDispersion: uniform(p.causticsDispersion),
+    causticsSpeed:      uniform(p.causticsSpeed),
+    causticsMaxDepth:   uniform(p.causticsMaxDepth),
+    shoreBlend:         uniform(p.shoreBlend),
   };
 
   /**
@@ -117,18 +127,34 @@ export function createLakebedShading({ waterMapTex, worldSize, params = {} }) {
       .mul(u.enabled);
 
     If(mask.greaterThan(0.001), () => {
-      // Caustics: two counter-scrolling Voronoi crack webs, summed and cubed.
-      // Where the moving nets cross, the sum peaks and the cube turns it into a
-      // bright focused filament; everywhere else it falls to dim noise.
-      const t  = time.mul(u.causticsSpeed);
-      const n1 = _crackNoise(wxz.mul(u.causticsScale1).add(vec2(t, 0)));
-      const n2 = _crackNoise(wxz.mul(u.causticsScale2).add(vec2(0, t.negate())));
-      const c  = n1.add(n2);
-      const c3 = c.mul(c).mul(c);
-      // Light stops reaching the bed with depth (revo's -1 start keeps a little
-      // sparkle right at the waterline).
+      // Caustics with chromatic dispersion: light of different wavelengths
+      // refracts to slightly different spots, so R, G and B sample the pattern
+      // at a small spatial stagger. Dispersion 0 still converges (three equal
+      // samples) — no separate path needed.
+      const t    = time.mul(u.causticsSpeed);
+      // Static domain warp at frequencies incommensurate with the tile period.
+      // The pattern is exactly tileable (the mod in _caustic), and dozens of
+      // tiles are visible across a lake — without this the same motif repeats
+      // as an obvious grid. The warp shifts every tile's sampling differently,
+      // so the repetition never lines up. No time term: morphing is _caustic's
+      // job, and a moving warp would smear its filaments.
+      const rUv  = wxz.mul(u.causticsScale);
+      const cUv  = rUv.add(vec2(
+        sin(rUv.y.mul(0.83).add(rUv.x.mul(0.19))),
+        cos(rUv.x.mul(0.71).sub(rUv.y.mul(0.23))),
+      ).mul(0.35));
+      const dOff = vec2(1, 1).mul(u.causticsDispersion.mul(0.012));
+      const sh   = max(u.causticsSharpness, float(1));
+
+      const cr = _caustic(cUv, t, sh);
+      const cg = _caustic(cUv.add(dOff), t, sh);
+      const cb = _caustic(cUv.add(dOff.mul(2)), t, sh);
+
+      // Light stops reaching the bed with depth (the -1 start keeps a little
+      // sparkle right at the waterline — revo's constant).
       const causticsFade = float(1).sub(smoothstep(float(-1), u.causticsMaxDepth, depth));
-      const caustics = u.causticsColor.mul(u.causticsIntensity).mul(c3.mul(causticsFade));
+      const caustics = vec3(cr, cg, cb)
+        .mul(u.causticsColor).mul(u.causticsIntensity).mul(causticsFade);
 
       // Sand bed -> deep tint with depth, warm boost in the shallows.
       const bed        = mix(out, u.sandColor, u.sandMix);
@@ -148,20 +174,21 @@ export function createLakebedShading({ waterMapTex, worldSize, params = {} }) {
   /** Push a lakebed state object (createLakebedState shape) into the uniforms. */
   function syncParams(s) {
     if (!s) return;
-    if (s.enabled           != null) u.enabled.value           = s.enabled ? 1 : 0;
-    if (s.sandColor         != null) _c(s.sandColor, u.sandColor.value);
-    if (s.sandMix           != null) u.sandMix.value           = s.sandMix;
-    if (s.deepColor         != null) _c(s.deepColor, u.deepColor.value);
-    if (s.tintDepth         != null) u.tintDepth.value         = s.tintDepth;
-    if (s.shallowBoost      != null) u.shallowBoost.value      = s.shallowBoost;
-    if (s.shallowDepth      != null) u.shallowDepth.value      = s.shallowDepth;
-    if (s.causticsIntensity != null) u.causticsIntensity.value = s.causticsIntensity;
-    if (s.causticsColor     != null) _c(s.causticsColor, u.causticsColor.value);
-    if (s.causticsScale1    != null) u.causticsScale1.value    = s.causticsScale1;
-    if (s.causticsScale2    != null) u.causticsScale2.value    = s.causticsScale2;
-    if (s.causticsSpeed     != null) u.causticsSpeed.value     = s.causticsSpeed;
-    if (s.causticsMaxDepth  != null) u.causticsMaxDepth.value  = s.causticsMaxDepth;
-    if (s.shoreBlend        != null) u.shoreBlend.value        = s.shoreBlend;
+    if (s.enabled            != null) u.enabled.value            = s.enabled ? 1 : 0;
+    if (s.sandColor          != null) _c(s.sandColor, u.sandColor.value);
+    if (s.sandMix            != null) u.sandMix.value            = s.sandMix;
+    if (s.deepColor          != null) _c(s.deepColor, u.deepColor.value);
+    if (s.tintDepth          != null) u.tintDepth.value          = s.tintDepth;
+    if (s.shallowBoost       != null) u.shallowBoost.value       = s.shallowBoost;
+    if (s.shallowDepth       != null) u.shallowDepth.value       = s.shallowDepth;
+    if (s.causticsIntensity  != null) u.causticsIntensity.value  = s.causticsIntensity;
+    if (s.causticsColor      != null) _c(s.causticsColor, u.causticsColor.value);
+    if (s.causticsScale      != null) u.causticsScale.value      = s.causticsScale;
+    if (s.causticsSharpness  != null) u.causticsSharpness.value  = s.causticsSharpness;
+    if (s.causticsDispersion != null) u.causticsDispersion.value = s.causticsDispersion;
+    if (s.causticsSpeed      != null) u.causticsSpeed.value      = s.causticsSpeed;
+    if (s.causticsMaxDepth   != null) u.causticsMaxDepth.value   = s.causticsMaxDepth;
+    if (s.shoreBlend         != null) u.shoreBlend.value         = s.shoreBlend;
   }
 
   return { apply, syncParams, uniforms: u };
