@@ -24,8 +24,10 @@ export function createProjectiles({ app, onImpact = () => {} }) {
   const { scene } = app;
 
   // ── Rocket bodies — one InstancedMesh for every rocket in flight ────────────
+  // FrontSide: the capsule is closed geometry, its inside is never visible —
+  // and DoubleSide transparent costs two draws per pass in the WebGPU renderer.
   const bodyMat = makeBloomMaterial(
-    { color: 0xffe9a8, blending: THREE.AdditiveBlending }, BLOOM.muzzle,
+    { color: 0xffe9a8, blending: THREE.AdditiveBlending, side: THREE.FrontSide }, BLOOM.muzzle,
   );
   // Capsule is built along Y; bake a rotation into the GEOMETRY so its long axis
   // is +Z — which is where a lookAt() quaternion points an object.
@@ -140,6 +142,8 @@ export function createProjectiles({ app, onImpact = () => {} }) {
     }
 
     bodyMesh.count = n;
+    // count 0 still issues a draw per pass — drop out of the render list.
+    bodyMesh.visible = n > 0;
     bodyMesh.instanceMatrix.needsUpdate = true;
 
     puffs.update(dt, camera);

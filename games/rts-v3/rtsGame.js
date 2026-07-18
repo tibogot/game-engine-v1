@@ -205,7 +205,9 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
     thumbnails: unitRenderer.thumbnails,
     onPickGroup: (arr) => app.selection?.select(arr),
     onSelectAllType: (key) =>
-      app.selection?.select(units.list.filter((u) => u.typeKey === key)),
+      app.selection?.select(units.list.filter(
+        (u) => u.alive && u.team === "player" && u.typeKey === key,
+      )),
   });
   app.unitBar = unitBar;
 

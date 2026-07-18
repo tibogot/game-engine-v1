@@ -102,6 +102,7 @@ export function createFireSystem({ app }) {
   const iSeedArr = new Float32Array(MAX_BLOBS);
   const iLifeArr = new Float32Array(MAX_BLOBS);
   const iSeedAttr = new THREE.InstancedBufferAttribute(iSeedArr, 1);
+  iSeedAttr.setUsage(THREE.DynamicDrawUsage);
   const iLifeAttr = new THREE.InstancedBufferAttribute(iLifeArr, 1);
   iLifeAttr.setUsage(THREE.DynamicDrawUsage);
   geo.setAttribute("iSeed", iSeedAttr);
@@ -147,23 +148,26 @@ export function createFireSystem({ app }) {
   const mesh = new THREE.InstancedMesh(geo, mat, MAX_BLOBS);
   mesh.frustumCulled = false;
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  mesh.count = MAX_BLOBS;
+  // Live blobs are COMPACTED to the front of the buffer each update; count
+  // tracks them. Drawing all 160 with dead ones scaled to zero at y=-99999 cost
+  // two draws (DoubleSide transparent) and ~250k verts/frame with no fires at all.
+  mesh.count = 0;
+  mesh.visible = false;
   scene.add(mesh);
 
   // ── Blob pool ───────────────────────────────────────────────────────────────
+  // Each blob carries its OWN noise seed and writes it into whatever instance
+  // slot it lands in this frame, so compaction never pops a flame's pattern.
   const blobs = [];
   for (let i = 0; i < MAX_BLOBS; i++) {
-    blobs.push({ fire: null, life: 1, speed: 1, size: 1, x: 0, y: 0, z: 0, vy: 0, drift: 0 });
-    iSeedArr[i] = Math.random() * 10;
+    blobs.push({ fire: null, life: 1, speed: 1, size: 1, x: 0, y: 0, z: 0, vy: 0, drift: 0, seed: Math.random() * 10 });
   }
-  iSeedAttr.needsUpdate = true;
 
   const fires = [];   // { x, y, z, radius, timeLeft }
   const _m = new THREE.Matrix4();
   const _q = new THREE.Quaternion();
   const _s = new THREE.Vector3();
   const _p = new THREE.Vector3();
-  const HIDDEN = new THREE.Vector3(0, -99999, 0);
 
   function respawn(b, fire) {
     b.fire = fire;
@@ -201,14 +205,9 @@ export function createFireSystem({ app }) {
       if (fires[i].timeLeft <= 0) fires.splice(i, 1);
     }
 
-    for (let i = 0; i < MAX_BLOBS; i++) {
-      const b = blobs[i];
-      if (!b.fire) {
-        _m.compose(HIDDEN, _q.identity(), _s.set(0.001, 0.001, 0.001));
-        mesh.setMatrixAt(i, _m);
-        iLifeArr[i] = 1;
-        continue;
-      }
+    let n = 0;
+    for (const b of blobs) {
+      if (!b.fire) continue;
 
       b.life += dt * b.speed;
       if (b.life >= 1) {
@@ -223,12 +222,19 @@ export function createFireSystem({ app }) {
       _p.set(b.x, b.y, b.z);
       _s.setScalar(b.size * grow);
       _m.compose(_p, _q.identity(), _s);
-      mesh.setMatrixAt(i, _m);
-      iLifeArr[i] = b.life;
+      mesh.setMatrixAt(n, _m);
+      iLifeArr[n] = b.life;
+      iSeedArr[n] = b.seed;
+      n++;
     }
 
-    mesh.instanceMatrix.needsUpdate = true;
-    iLifeAttr.needsUpdate = true;
+    mesh.count = n;
+    mesh.visible = n > 0;
+    if (n > 0) {
+      mesh.instanceMatrix.needsUpdate = true;
+      iLifeAttr.needsUpdate = true;
+      iSeedAttr.needsUpdate = true;
+    }
   }
 
   return { addFire, update, params: u };

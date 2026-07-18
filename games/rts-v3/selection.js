@@ -113,8 +113,13 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       const minY = Math.min(e.clientY, down.y), maxY = Math.max(e.clientY, down.y);
       const rect = dom.getBoundingClientRect();
       if (!down.shift) clear();
+      // Only the player's LIVING units. Dead units stay in units.list forever
+      // (the renderer keeps their corpse on the ground), so without the alive
+      // check a drag also grabbed every casualty in the rectangle.
       for (const u of units.list) {
+        if (!u.alive || u.team !== "player") continue;
         const p = u.position.clone().project(camera);
+        if (p.z > 1) continue; // behind the camera
         const sx = rect.left + (p.x * 0.5 + 0.5) * rect.width;
         const sy = rect.top + (-p.y * 0.5 + 0.5) * rect.height;
         if (sx >= minX && sx <= maxX && sy >= minY && sy <= maxY) setSelected(u, true);

@@ -685,6 +685,10 @@ export async function createUnitRenderer({ app, units, healthBars }) {
       if (inst) {
         for (const part of inst.parts) {
           part.im.count = inst.n;
+          // A count-0 InstancedMesh still costs a draw in every pass it's in
+          // (beauty + each shadow cascade) — hide the field when the type has
+          // no live units (builders at boot, or a type wiped out).
+          part.im.visible = inst.n > 0;
           part.im.instanceMatrix.needsUpdate = true;
           part.im.instanceColor.needsUpdate = true;
         }

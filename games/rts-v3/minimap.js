@@ -158,6 +158,7 @@ export function createMinimap({ app, units }) {
     ctx.drawImage(terrain, 0, 0, VIEW_PX, VIEW_PX);
 
     for (const u of units.list) {
+      if (!u.alive) continue; // corpses stay in the list for the renderer
       const { x, y } = worldToMini(u.position.x, u.position.z);
       drawBlip(x, y, u);
     }

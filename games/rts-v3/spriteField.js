@@ -48,9 +48,12 @@ export function createSpriteField({
     alpha = mul(alpha, smoothstep(float(0.5), float(0.0), d));
   }
 
+  // FrontSide: these quads are billboarded to the camera every frame, so the
+  // back face can never be seen — and the WebGPU renderer draws a DoubleSide
+  // transparent object TWICE (back pass + front pass), doubling the cost.
   const mat = new THREE.MeshBasicNodeMaterial({
     transparent: true, depthWrite: false, depthTest: true,
-    blending, side: THREE.DoubleSide,
+    blending, side: THREE.FrontSide,
   });
   mat.color.set(color);
   mat.opacityNode = alpha;
@@ -99,6 +102,8 @@ export function createSpriteField({
         n++;
       }
       mesh.count = n;
+      // count 0 still issues a draw per pass — drop out of the render list.
+      mesh.visible = n > 0;
       mesh.instanceMatrix.needsUpdate = true;
       lifeAttr.needsUpdate = true;
     },
