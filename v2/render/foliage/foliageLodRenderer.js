@@ -72,6 +72,12 @@ export class FoliageLodRenderer {
     /** Atlas slot-merge groups (shared material + uniform arrays per atlas). */
     this.mergeGroups = new FoliageMergeGroups();
 
+    /** When true (v3's GPU leaf field), merged slots are drawn EXTERNALLY —
+     *  no chunked cell meshes are built for them. Per-slot units (pine,
+     *  non-atlas) still render here, and syncParams keeps feeding the shared
+     *  param arrays the external material binds. */
+    this.externalMergeRendering = false;
+
     this._frustum = new THREE.Frustum();
     this._projScreen = new THREE.Matrix4();
     this._viewInv = new THREE.Matrix4();
@@ -684,6 +690,7 @@ export class FoliageLodRenderer {
       const si = t.slotIdx;
       if (si >= this.slotPresets.length || !this.slotPresets[si]) continue;
       const g = this.mergeGroups.slotToGroup.get(si);
+      if (g && this.externalMergeRendering) continue; // GPU leaf field draws these
       const ukey = g ? "g:" + g.key : "s:" + si;
       if (!units.has(ukey)) units.set(ukey, g ? { group: g } : { si });
     }

@@ -5,6 +5,7 @@ import { TreeStore } from "../../v2/core/foliage/treeStore.js";
 import { TreeLodRenderer } from "../../v2/render/foliage/treeLodRenderer.js";
 import { FoliageLodRenderer } from "../../v2/render/foliage/foliageLodRenderer.js";
 import { ImpostorFieldRenderer as ImpostorRenderer } from "../render/trees/impostorFieldRenderer.js";
+import { LeafFieldRenderer } from "../render/trees/leafFieldRenderer.js";
 import { TreeSystem } from "../../v2/tools/foliage/treeSystem.js";
 import {
   loadTreeGlbFromFile,
@@ -40,6 +41,15 @@ export function createTreeEnvironment({
   const treeLodRenderer = new TreeLodRenderer(scene, config);
   const foliageLodRenderer = new FoliageLodRenderer(scene, config);
   const impostorRenderer = new ImpostorRenderer(scene, config);
+  // GPU leaf field: atlas merge groups render as ONE indirect draw each —
+  // the chunked renderer skips them (per-slot pine/non-atlas stay chunked).
+  const leafFieldRenderer = new LeafFieldRenderer(scene, renderer);
+  foliageLodRenderer.externalMergeRendering = true;
+  const syncLeafField = () => leafFieldRenderer.syncGroups(
+    foliageLodRenderer.mergeGroups,
+    foliageLodRenderer.slotPresets,
+    treeStore,
+  );
   const treeSystem = new TreeSystem({
     toolState,
     treeStore,
@@ -125,6 +135,12 @@ export function createTreeEnvironment({
       leaves(v = false) {
         foliageLodRenderer.debugHide = !v;
         console.log(`[treeDebug] leaves ${v ? "shown" : "hidden"}`);
+      },
+      leafField(v = false) {
+        for (const [, entry] of leafFieldRenderer.entries) {
+          if (entry.mesh) entry.mesh.visible = v;
+        }
+        console.log(`[treeDebug] GPU leaf field ${v ? "shown" : "hidden"}`);
       },
       trunks(v = false) {
         for (const slot of treeLodRenderer.slotRender ?? []) {
@@ -245,8 +261,13 @@ export function createTreeEnvironment({
     treeLodRenderer.update(treeStore, camera, toolState.foliageLod);
     foliageLodRenderer.update(treeStore, camera, toolState.foliageLod);
     impostorRenderer.update(treeStore, camera, toolState.foliageLod);
-    if (sunDir) impostorRenderer.setSunDir(sunDir.x, sunDir.y, sunDir.z);
+    leafFieldRenderer.update(treeStore, camera, toolState.foliageLod);
+    if (sunDir) {
+      impostorRenderer.setSunDir(sunDir.x, sunDir.y, sunDir.z);
+      leafFieldRenderer.setSunDir(sunDir.x, sunDir.y, sunDir.z);
+    }
     foliageLodRenderer.updateTime(timeSec);
+    leafFieldRenderer.updateTime(timeSec);
   }
 
   function foliageParamChanged(slotIdx) {
@@ -306,6 +327,7 @@ export function createTreeEnvironment({
         treeLodRenderer.setSlotModel(slotIdx, 1, trunkLod1Submeshes, toolState.treeLod.castShadow);
       }
       foliageLodRenderer.setSlotPreset(slotIdx, foliagePreset);
+      syncLeafField();
       queueImpostorBake(slotIdx);
       toolState.treeSlots[slotIdx].presetFile = file.name;
       toolState.treeSlots[slotIdx].name = json.presetName || file.name.replace(/\.json$/, "");
@@ -346,6 +368,7 @@ export function createTreeEnvironment({
   function removeTreeSlot(slotIdx) {
     treeLodRenderer.disposeSlot(slotIdx);
     foliageLodRenderer.clearSlot(slotIdx);
+    syncLeafField();
     console.log(`[V3] Tree slot ${slotIdx} models removed`);
   }
 
@@ -359,6 +382,7 @@ export function createTreeEnvironment({
     treeLodRenderer.dispose();
     foliageLodRenderer.dispose?.();
     impostorRenderer.dispose?.();
+    leafFieldRenderer.dispose?.();
   }
 
   return {
@@ -367,6 +391,7 @@ export function createTreeEnvironment({
     treeLodRenderer,
     foliageLodRenderer,
     impostorRenderer,
+    leafFieldRenderer,
     syncTreeHeights,
     updateFrame,
     importTreeGlb,

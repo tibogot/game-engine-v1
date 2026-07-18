@@ -95,9 +95,15 @@ export function createFoliageMaterial(opts = {}) {
  * billboard/atlas mode flags); `P` maps every per-slot parameter to a node —
  * plain uniforms for the classic material, uniform-array elements for the
  * merged one. `opts.merged` widens aLeafScale to vec3 (z = slot id).
+ *
+ * `opts.data` (optional) replaces the per-instance vertex attributes with
+ * injected nodes — the GPU leaf field feeds the same graph from a compute-
+ * written storage buffer: { rand: vec2, leafCenterW: vec3, treeCenterW: vec3,
+ * leafSize: float, heightFrac: float } (world-space centers, no model matrix).
  */
 function _buildFoliageMaterial(u, P, opts) {
-  const aRand = attribute("aRand", "vec2");
+  const D = opts.data ?? null;
+  const aRand = D?.rand ?? attribute("aRand", "vec2");
 
   const leafTex = new THREE.Texture();
   // Atlas cell-UV remap (identical math to arborist). useAtlas=0 leaves uv() as-is.
@@ -132,14 +138,14 @@ function _buildFoliageMaterial(u, P, opts) {
   // Selects mask channel based on the loaded texture's format.
   const leafMaskCh = mix(leafMapNode.r, leafMapNode.a, u.maskInAlpha);
   // Per-instance leaf center (world space — written by the chunked renderer).
-  const aLeafCenter = attribute("aLeafCenter", "vec3");
-  const instanceCenterW = modelWorldMatrix.mul(vec4(aLeafCenter, 1)).xyz;
+  const instanceCenterW = D?.leafCenterW
+    ?? modelWorldMatrix.mul(vec4(attribute("aLeafCenter", "vec3"), 1)).xyz;
   // Per-instance tree canopy center (world space). Every leaf of one tree
   // shares this value; trees in different world positions get different ones.
   // Replaces the old u.canopyCenter (which was trunk-local and shared across
   // every tree of the slot — wrong once trees are placed away from origin).
-  const aTreeCenter = attribute("aTreeCenter", "vec3");
-  const treeCenterW = modelWorldMatrix.mul(vec4(aTreeCenter, 1)).xyz;
+  const treeCenterW = D?.treeCenterW
+    ?? modelWorldMatrix.mul(vec4(attribute("aTreeCenter", "vec3"), 1)).xyz;
   // Per-leaf size; only consulted in billboard mode (instance matrices are
   // pure translation there, so the size lives on the attribute instead).
   // x = per-leaf size (billboard mode); y = canopy height fraction (0=bottom,
@@ -147,8 +153,15 @@ function _buildFoliageMaterial(u, P, opts) {
   // trees placed at terrain height / any scale. Packed into ONE vec2 because
   // WebGPU caps vertex buffers at 8 and the foliage geometry is already at the
   // limit — a separate aHeightFactor attribute overflowed it (9 > 8).
-  const aLeafScale = attribute("aLeafScale", opts.merged ? "vec3" : "vec2");
-  const aLeafSize = aLeafScale.x;
+  let aLeafSize, heightFactor;
+  if (D) {
+    aLeafSize = D.leafSize;
+    heightFactor = D.heightFrac;
+  } else {
+    const aLeafScale = attribute("aLeafScale", opts.merged ? "vec3" : "vec2");
+    aLeafSize = aLeafScale.x;
+    heightFactor = aLeafScale.y;
+  }
 
   const positionNode = Fn(() => {
     const phase     = aRand.x.mul(6.2832);
@@ -236,7 +249,7 @@ function _buildFoliageMaterial(u, P, opts) {
   const colorNode = Fn(() => {
     const h1 = aRand.x;
     const h2 = aRand.y;
-    const heightFactor = aLeafScale.y; // per-leaf, local-space (packed in aLeafScale.y)
+    // heightFactor: per-leaf canopy height fraction (attribute or injected)
     let col = mix(P.bottomColor, P.topColor, heightFactor);
     const varMul = h1.mul(P.colorVar.mul(2.0)).add(float(1.0).sub(P.colorVar));
     col = col.mul(varMul);
@@ -375,13 +388,19 @@ export function createMergedFoliageMaterial(opts = {}) {
     [2.0, 2.5, 6.0, 0.0],     // 5: sssPow, rimPow, aoRadius, atlasCell
     [0.9, 0.0, 0.0, 1.0],     // 6: windSpeed, windStr, windMicro, billboardYaw
   ];
-  const values = [];
-  for (let s = 0; s < MAX_MERGED_SLOTS; s++) {
-    for (const d of rowDefaults) values.push(new THREE.Vector4(...d));
+  // opts.sharedArrays: a second material (the GPU leaf field's) can bind the
+  // SAME packed param buffer as the chunked group material — one sync path
+  // covers both.
+  let arrays = opts.sharedArrays ?? null;
+  if (!arrays) {
+    const values = [];
+    for (let s = 0; s < MAX_MERGED_SLOTS; s++) {
+      for (const d of rowDefaults) values.push(new THREE.Vector4(...d));
+    }
+    arrays = { params: uniformArray(values), PARAM_ROWS: rowDefaults.length };
   }
-  const arrays = { params: uniformArray(values), PARAM_ROWS: rowDefaults.length };
 
-  const sid = int(attribute("aLeafScale", "vec3").z.add(0.5));
+  const sid = opts.data?.slotId ?? int(attribute("aLeafScale", "vec3").z.add(0.5));
   const base   = sid.mul(int(rowDefaults.length));
   const eColA  = arrays.params.element(base);
   const eColB  = arrays.params.element(base.add(int(1)));
