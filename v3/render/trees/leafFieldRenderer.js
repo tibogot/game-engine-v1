@@ -34,7 +34,7 @@
  */
 import * as THREE from "three";
 import {
-  Fn, If, atomicAdd, atomicStore, attribute, cos, float, instanceIndex,
+  Fn, If, atomicAdd, atomicStore, cos, float, instanceIndex,
   instancedArray, int, length, negate, sin, smoothstep, step, storage,
   uint, uniform, uniformArray, vec2, vec3, vec4,
 } from "three/tsl";
@@ -44,7 +44,30 @@ import {
   setFoliageTexture,
   MAX_MERGED_SLOTS,
 } from "../../../v2/render/foliage/foliageMaterial.js";
-import { computeFrustumVisibility } from "../../../v2/core/revoGrass/revoGrassSsboUtils.js";
+
+/**
+ * Sphere-vs-frustum in NDC with SYMMETRIC radius padding. Deliberately NOT
+ * revoGrass's computeFrustumVisibility: that one SUBTRACTS the radius from
+ * the screen-top margin (for ground grass, anything projecting near the top
+ * is far away), which for a TALL tree culled the whole canopy while it was
+ * still on screen — the "leaves disappear when I get close and look down"
+ * play-mode bug. Here the radius always widens acceptance on every side.
+ */
+const treeFrustumVisibility = Fn(
+  ([worldPos, cameraMatrix, fx, fy, radius, padX, padY]) => {
+    const one = float(1);
+    const clip = cameraMatrix.mul(vec4(worldPos, 1));
+    const invW = one.div(clip.w);
+    const ndc = clip.xyz.mul(invW);
+    const eyeDepthAbs = clip.w.abs().max(float(1e-6));
+    const rx = fx.mul(radius).div(eyeDepthAbs).add(padX);
+    const ry = fy.mul(radius).div(eyeDepthAbs).add(padY);
+    const visX = step(ndc.x.abs(), one.add(rx));
+    const visY = step(ndc.y.abs(), one.add(ry));
+    const visZ = step(float(-1), ndc.z).mul(step(ndc.z, one));
+    return visX.mul(visY).mul(visZ);
+  },
+);
 
 const REPACK_DEBOUNCE = 250;   // ms — coalesce per-stamp gen bumps while painting
 const VIS_CAP = 300000;        // max on-screen leaves per entry (payload budget)
@@ -95,8 +118,7 @@ export class LeafFieldRenderer {
       uFade0: uniform(560),
       uFade1: uniform(620),
       uCullPadNdcX: uniform(0.45),
-      uCullPadNdcYNear: uniform(0.75),
-      uCullPadNdcYFar: uniform(0.45),
+      uCullPadNdcY: uniform(0.5),
     };
 
     this._viewInv = new THREE.Matrix4();
@@ -320,9 +342,9 @@ export class LeafFieldRenderer {
           const treePos = vec3(A.x, A.y, A.z);
           const treeCenterW = treePos.add(rot(bounds.xyz).mul(scale));
           const radius = bounds.w.mul(scale).mul(1.3).add(float(1));
-          const vis = computeFrustumVisibility(
+          const vis = treeFrustumVisibility(
             treeCenterW, u.uCamMatrix, u.uFx, u.uFy, radius,
-            u.uCullPadNdcX, u.uCullPadNdcYNear, u.uCullPadNdcYFar,
+            u.uCullPadNdcX, u.uCullPadNdcY,
           );
           // NEAR OVERRIDE: with the camera beside/inside a canopy, the NDC
           // test of its CENTER goes degenerate (behind the near plane /
