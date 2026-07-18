@@ -708,7 +708,8 @@ export function createDayNightCloudLayer({ scene, camera, renderer }) {
   // cloud buffer OVER it so the display chain tonemaps + blooms scene+clouds in
   // one pass. The cloud RT is stored Y-flipped in WebGPU, so it needs the SAME
   // flip as the owns-the-frame quad to come out upright (target being an RT vs
-  // the canvas doesn't change that). Shadows + god-rays NOT applied on this path.
+  // the canvas doesn't change that). God-rays ARE applied here (folded into the
+  // premultiplied src below); cloud SHADOWS still are not.
   const cloudBlur = Fn(() => {
     const o = uCloudTexel;
     const b = vec2(uv().x, uv().y.oneMinus());
@@ -719,8 +720,22 @@ export function createDayNightCloudLayer({ scene, camera, renderer }) {
     const c4 = cloudTexNode.sample(b.add(vec2(o.x.negate(), o.y.negate())));
     return c0.mul(0.4).add(c1.add(c2).add(c3).add(c4).mul(0.15));
   });
+  // Linear-path composite = blurred clouds + god-ray shafts UNDER them. With
+  // premultiplied One/OneMinusSrcAlpha blending, dst' = src.rgb + dst·(1−a);
+  // folding rays·(1−a) into src.rgb reproduces the owns-the-frame ordering
+  // ((scene+rays)·(1−a) + cloud) exactly — dense deck still occludes shafts.
+  // Tone-space note: the occlusion buffer renders through the scene's tone
+  // mapping while this RT is linear HDR; the shafts get tone-mapped a second
+  // time on display. Visually that only softens them slightly — exposure on
+  // the god-rays panel compensates.
+  const linearComposite = Fn(() => {
+    const c = cloudBlur();
+    const fuv = vec2(uv().x, uv().y.oneMinus());
+    const rays = godraysTexNode.sample(fuv).rgb;
+    return vec4(c.rgb.add(rays.mul(uGodRaysMix).mul(c.a.oneMinus())), c.a);
+  });
   const linearCompositeMat = new THREE.MeshBasicNodeMaterial();
-  linearCompositeMat.colorNode = cloudBlur();
+  linearCompositeMat.colorNode = linearComposite();
   linearCompositeMat.transparent = true;
   linearCompositeMat.blending = THREE.CustomBlending; // premultiplied over
   linearCompositeMat.blendSrc = THREE.OneFactor;
@@ -936,6 +951,14 @@ export function createDayNightCloudLayer({ scene, camera, renderer }) {
     return true;
   }
 
+  // God-rays config for the post-FX path, refreshed each frame by the caller
+  // (setGodRaysOpts). tryRenderFrame receives the same data as an argument;
+  // prepareFrame can't — PostFxPipeline calls it with (anchor, dt) only.
+  let _godRaysOpts = null;
+  function setGodRaysOpts(opts) {
+    _godRaysOpts = opts;
+  }
+
   /**
    * Post-FX path part 1 (called by PostFxPipeline.renderWithClouds BEFORE the
    * solids pass): raymarch the deck into cloudRT (LINEAR) with depth occlusion.
@@ -965,6 +988,28 @@ export function createDayNightCloudLayer({ scene, camera, renderer }) {
     renderer.render(scene, camera);
     camera.layers.mask = prevMask;
     renderer.setClearColor(prevClear, prevClearA);
+
+    // God rays for the linear composite (mirrors tryRenderFrame's step 3).
+    const godP = _godRaysOpts?.P;
+    const grFrame = _godRaysOpts?.frame;
+    let raysOk = false;
+    if (godP?.enabled && grFrame) {
+      uOccMaxSteps.value = godP.occCloudSteps ?? 12;
+      raysOk = godRays.render(renderer, {
+        scene,
+        camera,
+        cloudMesh: mesh,
+        cloudOccMaterial,
+        cloudLayer: CLOUD_LAYER,
+        skyMesh: _godRaysOpts.skyMesh,
+        occluders: _godRaysOpts.occluders ?? [],
+        P: godP,
+        frame: grFrame,
+        fullWidth: fullW,
+        fullHeight: fullH,
+      });
+    }
+    uGodRaysMix.value = raysOk ? 1 : 0;
 
     renderer.setRenderTarget(prevTarget);
     return true;
@@ -1013,6 +1058,7 @@ export function createDayNightCloudLayer({ scene, camera, renderer }) {
     // is ON so bloom/SSAO/DOF apply over the clouds.
     prepareFrame,
     compositeOntoLinearHDR,
+    setGodRaysOpts,
     layer: CLOUD_LAYER,
     /** Toggle env-bake mode (skip depth occlusion, cheaper march) for PMREM. */
     setEnvMode: (on) => { uEnvMode.value = on ? 1 : 0; },

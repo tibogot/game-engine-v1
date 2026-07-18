@@ -626,8 +626,13 @@ export async function createWorldEnvironment({
   function renderProcEnvFace(face) {
     ensureProcEnvRig();
     const prev = renderer.getRenderTarget();
+    // Sun disc OUT of the IBL: its energy already reaches surfaces via the
+    // directional light — capturing it in the env map counted it twice (lifted
+    // ambient + a phantom specular sun). The aureole/glow stays in.
+    dayNightSky.setSunDiscScale?.(0);
     renderer.setRenderTarget(_procCubeRT, face);
     renderer.render(_procEnvScene, _procCubeCam.children[face]);
+    dayNightSky.setSunDiscScale?.(1);
     renderer.setRenderTarget(prev);
   }
 
@@ -923,6 +928,15 @@ export async function createWorldEnvironment({
       sunDir,
     });
     dayNightCloudLayer.setBloom(toolState.cloudBloom);
+    // God rays on the post-FX path: prepareFrame() renders the shaft buffer and
+    // the linear cloud composite adds it (the owns-the-frame path passes the
+    // same config through tryRenderFrame instead).
+    dayNightCloudLayer.setGodRaysOpts?.({
+      P: toolState.cloudGodRays,
+      frame: { camera, sunDir, lightColor: _cloudLightColor },
+      occluders: getTerrainMeshes(),
+      skyMesh: dayNightSky.mesh,
+    });
   }
 
   function worldOceanChanged() {

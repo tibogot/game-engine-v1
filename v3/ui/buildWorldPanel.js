@@ -306,12 +306,7 @@ function _buildProceduralSkyControls(parent, ts, app) {
     min: 0,
     max: 3,
     step: 0.05,
-  });
-  _slider(atmo, ps, "msExtinct", {
-    label: "MS energy keep",
-    min: 0,
-    max: 1,
-    step: 0.02,
+    hint: "Ψms LUT multiple scattering. 1 = physical; energy-conserving, so it no longer washes the midday sky.",
   });
   _slider(atmo, ps, "atmoHorizonSoft", {
     label: "Horizon soft",
@@ -360,6 +355,13 @@ function _buildProceduralSkyControls(parent, ts, app) {
     min: 0,
     max: 20,
     step: 0.1,
+  });
+  _slider(sun, ps, "sunBloom", {
+    label: "Bloom feed",
+    min: 0,
+    max: 4,
+    step: 0.05,
+    hint: "Sun disc → selective-bloom buffer. Needs Post FX + Bloom ON; 0 = the sun never blooms.",
   });
 
   const moon = _section(wrap, "Moon", false);
@@ -796,6 +798,13 @@ function _buildProceduralSkyControls(parent, ts, app) {
     min: 4,
     max: 16,
     step: 1,
+  });
+  _slider(grSec, gr, "occLumThreshold", {
+    label: "Occlusion gate",
+    min: 0,
+    max: 0.9,
+    step: 0.01,
+    hint: "Occlusion pixels dimmer than this can't feed shafts — stops lit foliage/water acting as fake light sources.",
   });
   _slider(grSec, gr, "sunDistance", {
     label: "sunDistance",

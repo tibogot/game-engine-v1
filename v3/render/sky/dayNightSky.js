@@ -17,10 +17,34 @@
 import * as THREE from "three/webgpu";
 import {
   float, vec2, vec3, vec4, Fn, If, Loop, Break, uniform,
-  positionWorld, cameraPosition, uv, texture,
+  positionWorld, cameraPosition, uv, texture, output,
   normalize, dot, max, min, mix, smoothstep, clamp, step, sqrt,
   pow, sin, cos, atan, asin, sign, floor, fract, length, abs, exp, sub, mul,
 } from "three/tsl";
+
+// three r184: when a scene renders into a render target while no renderer-level
+// MRT is set, a material's mrtNode becomes the ENTIRE fragment output, and
+// MRTNode maps members to attachments by texture *name*. The sky dome renders
+// into plenty of plain RTs (env-probe cube faces, the cloud layer's scene RT,
+// PMREM) where no attachment is called "emissive" — the stock mrt() node would
+// emit a zero-member WGSL struct there ("structures must have at least one
+// member", invalid pipeline). Same fallback as ledMatrix.js's LedBloomMRTNode:
+// keep stock behaviour when an attachment name matches, otherwise collapse to
+// the material's regular `output` like a normal material.
+class SkyBloomMRTNode extends THREE.MRTNode {
+  static get type() {
+    return "SkyBloomMRTNode";
+  }
+
+  setup(builder) {
+    const textures = builder.renderer.getRenderTarget()?.textures;
+    const anyNamed =
+      !!textures && textures.some((t) => this.outputNodes[t.name] !== undefined);
+    if (anyNamed) return super.setup(builder);
+    this.members = [vec4(output)];
+    return THREE.Node.prototype.setup.call(this, builder);
+  }
+}
 
 // 4000 (not the lab's 9000): v3's camera far-plane is WORLD_SIZE*4 = 8192, and
 // the dome follows the camera, so a 9000 radius is fully beyond far → clipped to
@@ -55,12 +79,9 @@ export function createDayNightSky() {
   const uHm = uniform(1200);           // Mie scale height (m)
   const uBetaR = uniform(new THREE.Vector3(5.5e-6, 13.0e-6, 22.4e-6));
   const uBetaM = uniform(21e-6);
-  // Multiple-scattering approximation (no LUT): bounced light is ~isotropic and
-  // less path-extincted, so it fills the long-path horizon (bright glow) and
-  // shadowed twilight sky that single-scatter leaves dark. Gated by sun
-  // visibility so the night stays dark.
-  const uMsAmount = uniform(1.0);   // strength of the multi-scatter fill
-  const uMsExtinct = uniform(0.3);  // <1 = bounced light keeps more energy
+  // Multiple scattering: strength of the Ψms LUT term (see the MS LUT section).
+  // 1 = the physical amount; kept as a slider for art direction.
+  const uMsAmount = uniform(1.0);
   // Soft terminator width for the per-sample sun-shadow. A hard test banded the
   // twilight sky (stepped count of lit samples); smoothing it removes the bands.
   const uHorizonSoft = uniform(0.05);
@@ -75,6 +96,9 @@ export function createDayNightSky() {
   const uSunGlowPow = uniform(280);
   const uSunGlowStrength = uniform(0.08);
   const uSunDiscBright = uniform(8.0);
+  // Not a PARAMS knob: zeroed by the env bake (see setSunDiscScale) so the sun
+  // disc stays out of the IBL — its energy already arrives via the dir light.
+  const uSunDiscScale = uniform(1);
 
   const uMoonColor = uniform(new THREE.Color(0xcdd9ff));
   const uMoonCos = uniform(Math.cos(THREE.MathUtils.degToRad(1.6)));
@@ -266,6 +290,32 @@ export function createDayNightSky() {
     return transLutTex.sample(vec2(uu, vv.oneMinus())).rgb;
   });
 
+  // ── Multiple-scattering LUT (Hillaire 2020) ───────────────────────────────
+  // Ψms(cosSunZenith, h): luminance from ALL scattering orders ≥ 2 reaching a
+  // point at altitude h, per unit scatter coefficient, with the infinite bounce
+  // series closed as L₂/(1 − f_ms). Replaces the old additive isotropic fill
+  // (uMsExtinct hack), which pumped un-conserved energy into the whole dome and
+  // washed the midday zenith toward white. This term conserves energy: deep
+  // blue at noon, and the horizon/twilight fill emerges physically.
+  // Sun-direction independent (parameterized by the sun's zenith cosine), so
+  // it re-bakes only when atmosphere params change — never per sun move.
+  const MSLUT_SIZE = 32;
+  const MS_DIRS = 16, MS_STEPS = 20;
+  const msLutRT = new THREE.RenderTarget(MSLUT_SIZE, MSLUT_SIZE, {
+    type: THREE.HalfFloatType,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    depthBuffer: false,
+  });
+  msLutRT.texture.generateMipmaps = false;
+  const msLutTex = texture(msLutRT.texture);
+
+  const sampleMsLut = Fn(([hArg, cosSArg]) => {
+    const uu = clamp(cosSArg.mul(0.5).add(0.5), 0.0, 1.0);
+    const vv = clamp(hArg.div(float(RT - RG)), 0.0, 1.0);
+    return msLutTex.sample(vec2(uu, vv.oneMinus())).rgb;
+  });
+
   // ── Nishita single-scattering atmosphere ─────────────────────────────────
   // Marches the view ray through the atmosphere shell. The inner light-march
   // (previously 8 steps per view sample) is now replaced by a single fetch
@@ -292,7 +342,7 @@ export function createDayNightSky() {
     const tCur = float(0.0).toVar();
     const sumR = vec3(0.0).toVar();
     const sumM = vec3(0.0).toVar();
-    const sumMS = vec3(0.0).toVar(); // isotropic multiple-scatter fill
+    const sumMS = vec3(0.0).toVar(); // Ψms-weighted multiple scattering (LUT)
     const odR = float(0.0).toVar();
     const odM = float(0.0).toVar();
     const odOz = float(0.0).toVar();
@@ -323,13 +373,14 @@ export function createDayNightSky() {
       const att = attV.mul(T_sun);
       sumR.addAssign(att.mul(hr).mul(shadowF));
       sumM.addAssign(att.mul(hm).mul(shadowF));
-      // Multiple-scatter fill: view path only, with reduced extinction.
-      const attMS = vec3(
-        exp(tauV.x.mul(uMsExtinct).negate()),
-        exp(tauV.y.mul(uMsExtinct).negate()),
-        exp(tauV.z.mul(uMsExtinct).negate()),
+      // Multiple scattering: Ψms from the LUT × the sample's scatter coefficient
+      // × view-path transmittance. No shadow gate — bounced light legitimately
+      // reaches samples the sun can't (that's the twilight fill), and the LUT
+      // already zeroes itself as the sun sinks.
+      sumMS.addAssign(
+        attV.mul(sampleMsLut(h.max(0.0), cosSunSample))
+          .mul(betaR.mul(hr).add(betaM.mul(hm))),
       );
-      sumMS.addAssign(attMS.mul(betaR.mul(hr).add(betaM.mul(hm))).mul(shadowF));
       tCur.addAssign(segLen);
     });
 
@@ -342,8 +393,9 @@ export function createDayNightSky() {
       .div(float(2.0).add(g2).mul(pow(float(1.0).add(g2).sub(g.mul(mu).mul(2.0)).max(0.0001), 1.5)));
 
     const single = sumR.mul(betaR).mul(phaseR).add(sumM.mul(betaM).mul(phaseM));
-    // Isotropic phase (1/4π) for the bounced fill.
-    const multi = sumMS.mul(uMsAmount).mul(float(1 / (4 * Math.PI)));
+    // Ψms already carries its phase (isotropic) and the bounce series — just
+    // scale. uMsAmount = 1 is the physical amount.
+    const multi = sumMS.mul(uMsAmount);
     return single.add(multi).mul(uSunIntensity);
   });
 
@@ -462,7 +514,9 @@ export function createDayNightSky() {
       }).Else(() => {
         atmo.assign(atmosphere(dir, uSunDir));
       });
-      skyCol.assign(nightCol.add(atmo));
+      // Night gradient fades out with daylight: adding it at full strength all
+      // day put a constant gray-blue lift under the scattering (washed zenith).
+      skyCol.assign(nightCol.mul(nightF).add(atmo));
     }).Else(() => {
       // ANALYTIC sky: crossfade day↔night + warm sunset wash (the old look).
       const analyticSky = mix(nightCol, analyticDay, dayF).toVar();
@@ -531,7 +585,8 @@ export function createDayNightSky() {
     // Sun disc + glow (fades out below the horizon).
     const sunDot = dot(dir, uSunDir);
     const sunUpFade = smoothstep(-0.06, 0.05, uSunDir.y);
-    const sunDisc = smoothstep(uSunCos, float(1.0), sunDot).mul(uSunDiscBright);
+    const sunDisc = smoothstep(uSunCos, float(1.0), sunDot)
+      .mul(uSunDiscBright).mul(uSunDiscScale);
     const sunGlow = pow(max(sunDot, float(0.0)), uSunGlowPow).mul(uSunGlowStrength);
     // Redden + dim the disc by the atmospheric transmittance toward the sun
     // (deep-red horizon sun). =1 in analytic mode → keeps the old look there.
@@ -584,8 +639,30 @@ export function createDayNightSky() {
     return vec4(max(skyCol, vec3(0.0)), 1.0);
   });
 
+  // ── Selective-bloom feed ──────────────────────────────────────────────────
+  // v3's post-FX bloom is selective (it blooms only the `emissive` MRT buffer),
+  // so the sky can never glow unless the dome itself writes its sun into that
+  // buffer. Recompute just the disc + a slice of the aureole here — a few ALU,
+  // cheaper than restructuring skyColorNode to share intermediates. The result:
+  // the sun blooms, and the bloom dies correctly when clouds/terrain cover the
+  // disc (they overwrite the emissive target). Moon stays out — its disc sits
+  // far below any sensible bloom threshold.
+  const uSunBloom = uniform(1);
+  const skyEmissiveNode = Fn(() => {
+    const dir = normalize(positionWorld.sub(cameraPosition));
+    const sunDot = dot(dir, uSunDir);
+    const sunUpFade = smoothstep(-0.06, 0.05, uSunDir.y);
+    const sunDisc = smoothstep(uSunCos, float(1.0), sunDot)
+      .mul(uSunDiscBright).mul(uSunDiscScale);
+    const sunGlow = pow(max(sunDot, float(0.0)), uSunGlowPow).mul(uSunGlowStrength);
+    const sun = uSunColor.mul(sunDisc.add(sunGlow.mul(0.35)))
+      .mul(sunUpFade).mul(uSunTransmittance);
+    return vec4(sun.mul(uSunBloom), 1.0);
+  });
+
   const material = new THREE.MeshBasicNodeMaterial();
   material.colorNode = skyColorNode();
+  material.mrtNode = new SkyBloomMRTNode({ emissive: skyEmissiveNode() });
   material.side = THREE.BackSide;
   material.depthWrite = false;
   // Draw BEFORE terrain (renderOrder -2, depthTest off) — same as v2. Rendering
@@ -663,6 +740,97 @@ export function createDayNightSky() {
     renderer.setRenderTarget(prevRT);
   }
 
+  // ── Multiple-scattering LUT bake ──────────────────────────────────────────
+  // Per texel: viewer at altitude h (uv.y), sun at zenith-cos μ (uv.x). Fire
+  // MS_DIRS golden-spiral rays over the sphere; each marches MS_STEPS through
+  // the shell accumulating (a) 2nd-order in-scatter L₂ — sunlight scattered
+  // once elsewhere, arriving here (uniform phase), and (b) the transfer factor
+  // f_ms — how much of the local radiance re-scatters. Ψms = L₂ / (1 − f_ms)
+  // sums the infinite bounce series. Samples the transmittance LUT for the sun
+  // path, so bake order is trans → ms → sky-view.
+  const msBakeNode = Fn(() => {
+    const uvv = uv();
+    const mu = uvv.x.mul(2.0).sub(1.0);          // cos(sun zenith angle)
+    const h0 = uvv.y.mul(float(RT - RG));
+    const r0 = float(RG).add(h0);
+    const sunDirT = vec3(sqrt(float(1.0).sub(mu.mul(mu)).max(0.0)), mu, 0.0);
+    const betaR = uBetaR.mul(uRayleigh);
+    const betaM = uBetaM.mul(uMie);
+    const betaOz = vec3(0.65e-6, 1.881e-6, 0.085e-6);
+
+    const L2 = vec3(0.0).toVar();   // 2nd-order in-scatter (uniform phase)
+    const fms = vec3(0.0).toVar();  // transfer factor
+    Loop(MS_DIRS, ({ i }) => {
+      // Golden-spiral directions — near-uniform over the sphere.
+      const fi = float(i).add(0.5);
+      const cz = float(1.0).sub(fi.mul(2.0 / MS_DIRS));
+      const sz = sqrt(float(1.0).sub(cz.mul(cz)).max(0.0));
+      const phi = fi.mul(2.399963);
+      const dirS = vec3(cos(phi).mul(sz), cz, sin(phi).mul(sz));
+
+      // March span: to the atmosphere top, clipped to the ground if hit.
+      const b = r0.mul(dirS.y);
+      const ococ = r0.mul(r0);
+      const tmax = b.negate()
+        .add(sqrt(b.mul(b).sub(ococ.sub(float(RT * RT))).max(0.0)))
+        .toVar();
+      const discG = b.mul(b).sub(ococ.sub(float(RG * RG)));
+      If(discG.greaterThan(0.0), () => {
+        const tg = b.negate().sub(sqrt(discG));
+        If(tg.greaterThan(0.0), () => { tmax.assign(min(tmax, tg)); });
+      });
+
+      const seg = tmax.div(float(MS_STEPS));
+      const odR = float(0.0).toVar();
+      const odM = float(0.0).toVar();
+      const odOz = float(0.0).toVar();
+      Loop(MS_STEPS, ({ i: j }) => {
+        const t = float(j).add(0.5).mul(seg);
+        const px = dirS.x.mul(t);
+        const py = r0.add(dirS.y.mul(t));
+        const pz = dirS.z.mul(t);
+        const rS = sqrt(px.mul(px).add(py.mul(py)).add(pz.mul(pz)));
+        const hS = rS.sub(float(RG)).max(0.0);
+        const hr = exp(hS.negate().div(uHr)).mul(seg);
+        const hm = exp(hS.negate().div(uHm)).mul(seg);
+        odR.addAssign(hr);
+        odM.addAssign(hm);
+        const hOz = hS.sub(25000.0);
+        odOz.addAssign(exp(hOz.mul(hOz).negate().div(float(1.28e8))).mul(seg));
+
+        const tauV = betaR.mul(odR).add(betaM.mul(1.1).mul(odM)).add(betaOz.mul(odOz));
+        const attV = vec3(exp(tauV.x.negate()), exp(tauV.y.negate()), exp(tauV.z.negate()));
+        const cosS = dot(vec3(px, py, pz).div(rS.max(1.0)), sunDirT);
+        const shadowF = smoothstep(uHorizonSoft.negate(), uHorizonSoft, cosS);
+        const T_sun = sampleTransLut(hS, cosS);
+        const sigmaS = betaR.mul(hr).add(betaM.mul(hm)); // σs·ds (vec3)
+        L2.addAssign(attV.mul(T_sun).mul(sigmaS).mul(shadowF));
+        fms.addAssign(attV.mul(sigmaS));
+      });
+    });
+
+    const invN = float(1.0 / MS_DIRS);
+    const L = L2.mul(invN).mul(float(1 / (4 * Math.PI))); // sun event's uniform phase
+    const F = fms.mul(invN).clamp(0.0, 0.999);
+    const psi = L.div(F.oneMinus());                      // Σ fⁿ bounce series
+    return vec4(psi, 1.0);
+  });
+  const msLutMat = new THREE.MeshBasicNodeMaterial();
+  msLutMat.colorNode = msBakeNode();
+  msLutMat.toneMapped = false;
+  msLutMat.depthTest = false;
+  msLutMat.depthWrite = false;
+  const msLutScene = new THREE.Scene();
+  msLutScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), msLutMat));
+
+  let _msBakeSig = '';
+  function bakeMsLut(renderer) {
+    const prevRT = renderer.getRenderTarget();
+    renderer.setRenderTarget(msLutRT);
+    renderer.render(msLutScene, lutCam);
+    renderer.setRenderTarget(prevRT);
+  }
+
   // ── Sky-view LUT re-bake gating ──────────────────────────────────────────
   // Re-baked when the sun moved (~0.5°) or an atmo param changed.
   const _lastBakeSun = new THREE.Vector3(0, -2, 0); // impossible dir → bakes frame 1
@@ -699,7 +867,6 @@ export function createDayNightSky() {
     uMieG.value = P.mieG;
     uAtmoAltitude.value = P.atmoAltitude;
     uMsAmount.value = P.msAmount;
-    uMsExtinct.value = P.msExtinct;
     uHorizonSoft.value = P.atmoHorizonSoft ?? 0.05;
 
     // Sun-disc transmittance: 16-step march toward the sun matching the GPU
@@ -738,6 +905,7 @@ export function createDayNightSky() {
     uSunGlowPow.value = P.sunGlowPow;
     uSunGlowStrength.value = P.sunGlowStrength;
     uSunDiscBright.value = P.sunDiscBright;
+    uSunBloom.value = P.sunBloom ?? 1.0;
 
     uMoonColor.value.set(P.moonColor);
     uMoonCos.value = Math.cos(THREE.MathUtils.degToRad(P.moonSizeDeg));
@@ -816,23 +984,34 @@ export function createDayNightSky() {
     }
 
     // ── LUT re-bakes (must run after atmo uniforms are set above) ────────────
+    // Trans + MS LUTs bake regardless of useLut: the live per-pixel march
+    // (useLut off) samples them too, so gating them on useLut would leave the
+    // A/B path reading stale (or empty) textures after an atmo-param change.
     const useLut = P.useLut ?? true;
     uUseLut.value = useLut ? 1 : 0;
-    if (frame.renderer && P.scatter && useLut) {
+    if (frame.renderer && P.scatter) {
       const sd = frame.sunDir;
       // Trans LUT: sun-direction independent, re-bake only when atmo params change.
-      // Must bake before the sky-view LUT (which samples it).
+      // Must bake before the MS + sky-view LUTs (both sample it).
       const transSig = `${P.rayleigh}|${P.mie}|${P.atmoAltitude}`;
       if (transSig !== _transBakeSig) {
         bakeTransLut(frame.renderer);
         _transBakeSig = transSig;
       }
+      // MS LUT: also sun-direction independent (parameterized by sun zenith).
+      const msSig = `${P.rayleigh}|${P.mie}|${P.atmoHorizonSoft}`;
+      if (msSig !== _msBakeSig) {
+        bakeMsLut(frame.renderer);
+        _msBakeSig = msSig;
+      }
       // Sky-view LUT: re-bake when sun moved (~0.5°) or any atmo param changed.
-      const sig = `${P.rayleigh}|${P.mie}|${P.mieG}|${P.atmoAltitude}|${P.msAmount}|${P.msExtinct}|${P.sunIntensity}|${P.atmoHorizonSoft}`;
-      if (_lastBakeSun.dot(sd) < 0.99996 || sig !== _bakeSig) {
-        bakeSkyView(frame.renderer);
-        _lastBakeSun.copy(sd);
-        _bakeSig = sig;
+      if (useLut) {
+        const sig = `${P.rayleigh}|${P.mie}|${P.mieG}|${P.atmoAltitude}|${P.msAmount}|${P.sunIntensity}|${P.atmoHorizonSoft}`;
+        if (_lastBakeSun.dot(sd) < 0.99996 || sig !== _bakeSig) {
+          bakeSkyView(frame.renderer);
+          _lastBakeSun.copy(sd);
+          _bakeSig = sig;
+        }
       }
     }
   }
@@ -842,11 +1021,22 @@ export function createDayNightSky() {
     material.dispose();
     transLutRT.dispose();
     transLutMat.dispose();
+    msLutRT.dispose();
+    msLutMat.dispose();
     skyLutRT.dispose();
     lutMat.dispose();
   }
 
-  return { mesh, update, dispose };
+  /**
+   * Scale the sun DISC only (glow/aureole unaffected). The env bake sets this
+   * to 0 while rendering the IBL cube faces so the sun's energy isn't counted
+   * twice (directional light + env map); restored to 1 right after.
+   */
+  function setSunDiscScale(v) {
+    uSunDiscScale.value = v;
+  }
+
+  return { mesh, update, setSunDiscScale, dispose };
 }
 
 export const SKY_DEFAULTS = {
@@ -865,8 +1055,7 @@ export const SKY_DEFAULTS = {
   mie: 1.0,
   mieG: 0.82,
   atmoAltitude: 1500,
-  msAmount: 1.0,    // multiple-scattering fill strength (bright horizon glow)
-  msExtinct: 0.3,   // <1 = bounced light keeps more energy
+  msAmount: 1.0,    // Ψms LUT multiple-scattering strength (1 = physical)
   atmoHorizonSoft: 0.05, // soft terminator width — higher = smoother twilight, no bands
 
   sunColor: "#fff3d8",
@@ -874,6 +1063,7 @@ export const SKY_DEFAULTS = {
   sunGlowPow: 280,
   sunGlowStrength: 0.08,
   sunDiscBright: 8.0,
+  sunBloom: 1.0,    // emissive-MRT feed scale (selective bloom, needs Post FX on)
 
   moonColor: "#cdd9ff",
   moonSizeDeg: 1.6,

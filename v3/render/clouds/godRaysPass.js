@@ -6,7 +6,7 @@
  * Rays are composited with the scene *before* clouds (see dayNightCloudLayer.js).
  */
 import * as THREE from "three/webgpu";
-import { float, vec2, vec3, vec4, Fn, Loop, If, Break, uniform, uv, texture } from "three/tsl";
+import { float, vec2, vec3, vec4, Fn, Loop, If, Break, uniform, uv, texture, dot, smoothstep } from "three/tsl";
 
 const MAX_GOD_SAMPLES = 96;
 /** Must match superjet sun sphere geometry radius. */
@@ -26,20 +26,30 @@ export const GOD_RAYS_DEFAULTS = {
   sunDiscRadius: 260,
   sunTint: "#ffddaa",
   matchLightColor: false,
+  // Occlusion-buffer luminance gate: pixels below this are treated as fully
+  // occluding. Only terrain gets the black material override, so trees/grass/
+  // water land in the buffer with their REAL lit colors — without the gate,
+  // bright foliage acted as extra light sources smeared into the shafts. The
+  // white sun disc (lum 1.0) passes untouched; partial cloud cover over the
+  // disc fades smoothly through the gate's soft edge.
+  occLumThreshold: 0.45,
 };
 
 export function createGodRaysPass() {
+  // HalfFloat (was UnsignedByteType): the radial accumulation multiplies tiny
+  // decayed samples — 8-bit quantized them into visible banding rings in dim
+  // shafts.
   const occlusionRT = new THREE.RenderTarget(4, 4, {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,
-    type: THREE.UnsignedByteType,
+    type: THREE.HalfFloatType,
   });
   const godraysRT = new THREE.RenderTarget(4, 4, {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,
-    type: THREE.UnsignedByteType,
+    type: THREE.HalfFloatType,
   });
 
   const occlusionTex = texture(occlusionRT.texture);
@@ -52,6 +62,7 @@ export function createGodRaysPass() {
   const uWeight = uniform(GOD_RAYS_DEFAULTS.weight);
   const uExposure = uniform(GOD_RAYS_DEFAULTS.exposure);
   const uSamples = uniform(GOD_RAYS_DEFAULTS.samples);
+  const uOccLum = uniform(GOD_RAYS_DEFAULTS.occLumThreshold);
 
   const godRaysNode = Fn(() => {
     // Match WebGPU post UV (same flip as scene/cloud composite sampling).
@@ -65,7 +76,12 @@ export function createGodRaysPass() {
       If(float(i).greaterThanEqual(uSamples), () => Break());
       const sampleCoord = vUv.add(float(i).mul(step));
       const sc = occlusionTex.sample(sampleCoord);
-      colorAcc.addAssign(sc.rgb.mul(illuminationDecay).mul(uWeight));
+      // Luminance gate: only near-white pixels count as light (the sun disc,
+      // thin-cloud-dimmed sun). Kills the fake shafts contributed by lit
+      // foliage/water rendering into the occlusion buffer with real materials.
+      const lum = dot(sc.rgb, vec3(0.2126, 0.7152, 0.0722));
+      const gate = smoothstep(uOccLum, uOccLum.mul(0.5).add(0.5), lum);
+      colorAcc.addAssign(sc.rgb.mul(gate).mul(illuminationDecay).mul(uWeight));
       illuminationDecay.mulAssign(uDecay);
     });
     return vec4(colorAcc.mul(uSunColor).mul(uDensity).mul(uExposure), 1);
@@ -186,6 +202,7 @@ export function createGodRaysPass() {
     uDensity.value = P.density;
     uDecay.value = P.decay;
     uWeight.value = P.weight;
+    uOccLum.value = P.occLumThreshold ?? GOD_RAYS_DEFAULTS.occLumThreshold;
 
     const bgSaved = scene.background;
     const fogSaved = scene.fog;
