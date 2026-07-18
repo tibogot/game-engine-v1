@@ -9,6 +9,7 @@
  * leaf positions (from foliageSampler) and a shared TSL material.
  */
 import * as THREE from "three";
+import { FoliageMergeGroups } from "./foliageSlotMerge.js";
 
 const MAX_LEAVES_PER_CHUNK = 65536;
 // Expand the chunk cull AABB so canopies overhanging the chunk edge don't pop.
@@ -60,13 +61,16 @@ export class FoliageLodRenderer {
     this.slotPresets = [];
 
     /**
-     * Per-chunk meshes.
-     * _chunkMeshes: Map<chunkKey, {
-     *   gen: number,
-     *   slots: Map<slotIdx, { lod0: InstancedMesh|null, lod1: InstancedMesh|null, lod2: InstancedMesh|null }>
-     * }>
+     * Per-chunk meshes, keyed per RENDER UNIT: "s:<slotIdx>" for stand-alone
+     * slots, "g:<mergeKey>" for a merge group (all atlas-sharing slots of the
+     * cell in one mesh). Each unit entry: { lod0, lod1, lod2, _meta } where
+     * lodN is null | false | Mesh[] and _meta = { si } or { group }.
+     * _chunkMeshes: Map<chunkKey, { gen: number, slots: Map<unitKey, unit> }>
      */
     this._chunkMeshes = new Map();
+
+    /** Atlas slot-merge groups (shared material + uniform arrays per atlas). */
+    this.mergeGroups = new FoliageMergeGroups();
 
     this._frustum = new THREE.Frustum();
     this._projScreen = new THREE.Matrix4();
@@ -134,9 +138,17 @@ export class FoliageLodRenderer {
     else m.geometry.instanceCount = n;
   }
 
-  /** Rough leaf-fill cost of building one chunk-slot-tier mesh. */
+  /** Rough leaf-fill cost of building one chunk-unit-tier mesh. */
   _jobCost(job) {
-    const preset = this.slotPresets[job.si];
+    if (job.meta.group) {
+      let total = 0;
+      for (const t of job.trees) {
+        if (!job.meta.group.members.has(t.slotIdx)) continue;
+        total += this.slotPresets[t.slotIdx]?.lods?.[job.tier]?.count ?? 0;
+      }
+      return Math.min(total, MAX_LEAVES_PER_CHUNK);
+    }
+    const preset = this.slotPresets[job.meta.si];
     const perTree = preset?.lods?.[job.tier]?.count ?? 0;
     return Math.min(job.trees.length * perTree, MAX_LEAVES_PER_CHUNK);
   }
@@ -181,7 +193,15 @@ export class FoliageLodRenderer {
   setSlotPreset(slotIdx, preset) {
     while (this.slotPresets.length <= slotIdx) this.slotPresets.push(null);
     this._clearSlotChunkMeshes(slotIdx);
+    const wasMerged = this.mergeGroups.slotToGroup.has(slotIdx);
     this.slotPresets[slotIdx] = preset;
+    // Membership change ⇒ merged instance data (slot ids, union card) is
+    // stale for EVERY member — meshes and pools must go before rebuild()
+    // disposes the card geometry their vertex buffers are shared with.
+    if (wasMerged || preset?.mergeKey) {
+      this._clearMergedChunkMeshes();
+      this.mergeGroups.rebuild(this.slotPresets);
+    }
     this._invalidateAllChunks();
   }
 
@@ -191,7 +211,38 @@ export class FoliageLodRenderer {
 
   clearSlot(slotIdx) {
     this._clearSlotChunkMeshes(slotIdx);
+    const wasMerged = this.mergeGroups.slotToGroup.has(slotIdx);
     if (slotIdx < this.slotPresets.length) this.slotPresets[slotIdx] = null;
+    if (wasMerged) {
+      this._clearMergedChunkMeshes();
+      this.mergeGroups.rebuild(this.slotPresets);
+      // Surviving members need their group units re-established per cell.
+      this._invalidateAllChunks();
+    }
+  }
+
+  /** Drop every merged-unit mesh + pooled merged mesh (full dispose, no pool:
+   *  merged meshes share the group card geometry's vertex buffers, which the
+   *  next rebuild() replaces). */
+  _clearMergedChunkMeshes() {
+    for (const [, entry] of this._chunkMeshes) {
+      for (const [ukey, se] of entry.slots) {
+        if (typeof ukey !== "string" || !ukey.startsWith("g:")) continue;
+        for (const lk of ["lod0", "lod1", "lod2"]) {
+          this._eachMesh(se[lk], (m) => {
+            this.scene.remove(m);
+            m.geometry.dispose();
+            m.dispose?.();
+          });
+        }
+        entry.slots.delete(ukey);
+      }
+    }
+    for (const [key, arr] of this._meshPool) {
+      if (!key.startsWith("g:")) continue;
+      for (const m of arr) { m.geometry.dispose(); m.dispose?.(); }
+      this._meshPool.delete(key);
+    }
   }
 
   _invalidateAllChunks() {
@@ -201,8 +252,9 @@ export class FoliageLodRenderer {
   }
 
   _clearSlotChunkMeshes(slotIdx) {
+    const ukey = "s:" + slotIdx;
     for (const [, entry] of this._chunkMeshes) {
-      const slotEntry = entry.slots.get(slotIdx);
+      const slotEntry = entry.slots.get(ukey);
       if (!slotEntry) continue;
       for (const key of ["lod0", "lod1", "lod2"]) {
         this._eachMesh(slotEntry[key], (m) => {
@@ -212,7 +264,7 @@ export class FoliageLodRenderer {
         });
         slotEntry[key] = null;
       }
-      entry.slots.delete(slotIdx);
+      entry.slots.delete(ukey);
     }
     // The preset (geometry/material) is being replaced — pooled meshes built
     // from it must not be reused.
@@ -344,10 +396,12 @@ export class FoliageLodRenderer {
       centerData     = new Float32Array(cappedTotal * 3);
       treeCenterData = new Float32Array(cappedTotal * 3);
       scaleData      = new Float32Array(cappedTotal * 2);
-      // Shadow policy: LOD0 + LOD1 leaves cast shadows (measured ~free on the
-      // shadow pass, and with big render cells a NEAR tree can live in a
-      // tier-1 cell — LOD0-only left close canopies shadowless). LOD2 (far)
-      // stays off; the terrain shadow blend hides it at that distance.
+      // Shadow policy: LOD0 always casts; LOD1 casts but is distance-gated
+      // per frame in update() — only cells whose nearest corner is inside the
+      // LOD0 band cast (a NEAR tree can live in a tier-1 cell; LOD0-only left
+      // close canopies shadowless, while far tier-1 cells casting was pure
+      // shadow-pass draw-call waste). LOD2 (far) stays off; the terrain
+      // shadow blend hides it at that distance.
       im.castShadow = lodIdx <= 1 && !this.debugNoLeafShadows;
       im.receiveShadow = false;
       im.frustumCulled = false;
@@ -450,6 +504,156 @@ export class FoliageLodRenderer {
     return im;
   }
 
+  /**
+   * Build the foliage meshes for one cell + MERGE GROUP + LOD tier: every
+   * member slot's trees in one mesh, batched at MAX_LEAVES_PER_CHUNK.
+   * Returns Mesh[] or null.
+   */
+  _buildChunkGroupLod(trees, group, lodIdx) {
+    const out = [];
+    let batch = [];
+    let batchLeaves = 0;
+    const flush = () => {
+      if (batchLeaves > 0) {
+        const m = this._buildMergedLeafMesh(batch, batchLeaves, group, lodIdx);
+        if (m) out.push(m);
+      }
+      batch = [];
+      batchLeaves = 0;
+    };
+    for (const t of trees) {
+      if (!group.members.has(t.slotIdx)) continue;
+      const count = this.slotPresets[t.slotIdx]?.lods?.[lodIdx]?.count ?? 0;
+      if (count === 0) continue;
+      if (batchLeaves > 0 && batchLeaves + count > MAX_LEAVES_PER_CHUNK) flush();
+      batch.push(t);
+      batchLeaves += count;
+    }
+    flush();
+    return out.length ? out : null;
+  }
+
+  /**
+   * ONE merged mesh (≤ MAX_LEAVES_PER_CHUNK leaves), pool-first. Merge groups
+   * are billboard-only, so this is the matrix-less Mesh + InstancedBufferGeometry
+   * path of _buildLeafMesh with two differences: per-tree leaf data comes from
+   * that tree's OWN slot preset, and aLeafScale is vec3 with the group-local
+   * slot id in .z (the merged material's uniform-array index).
+   */
+  _buildMergedLeafMesh(batchTrees, cappedTotal, group, lodIdx) {
+    if (cappedTotal === 0) return null;
+    // cardGen in the key: a membership change replaces the shared card
+    // geometry, so pooled meshes from the old card must never be refilled
+    // (they are fully disposed in _clearMergedChunkMeshes).
+    const poolKey = `g:${group.key}:${group.cardGen}:${lodIdx}`;
+    let im = null;
+    const poolArr = this._meshPool.get(poolKey);
+    if (poolArr) {
+      for (let i = poolArr.length - 1; i >= 0; i--) {
+        if (poolArr[i].userData._poolCap >= cappedTotal) { im = poolArr.splice(i, 1)[0]; break; }
+      }
+    }
+    let geo, randData, centerData, treeCenterData, scaleData;
+    const fromPool = !!im;
+    if (fromPool) {
+      geo            = im.geometry;
+      randData       = geo.getAttribute("aRand").array;
+      centerData     = geo.getAttribute("aLeafCenter").array;
+      treeCenterData = geo.getAttribute("aTreeCenter").array;
+      scaleData      = geo.getAttribute("aLeafScale").array;
+    } else {
+      const base = group.cardGeometry;
+      geo = new THREE.InstancedBufferGeometry();
+      geo.setIndex(base.index);
+      geo.setAttribute("position", base.getAttribute("position"));
+      geo.setAttribute("normal", base.getAttribute("normal"));
+      geo.setAttribute("uv", base.getAttribute("uv"));
+      im = new THREE.Mesh(geo, group.material);
+      randData       = new Float32Array(cappedTotal * 2);
+      centerData     = new Float32Array(cappedTotal * 3);
+      treeCenterData = new Float32Array(cappedTotal * 3);
+      scaleData      = new Float32Array(cappedTotal * 3);
+      im.castShadow = lodIdx <= 1 && !this.debugNoLeafShadows;
+      im.receiveShadow = false;
+      im.frustumCulled = false;
+      im.userData._poolKey = poolKey;
+      im.userData._poolCap = cappedTotal;
+    }
+
+    let idx = 0;
+    for (const t of batchTrees) {
+      const preset = this.slotPresets[t.slotIdx];
+      const lodData = preset.lods[lodIdx];
+      const memberIdx = group.members.get(t.slotIdx) ?? 0;
+      const randSrc = lodData.randData;
+      const centerSrc = lodData.centerData;
+      const scaleSrc = lodData.scaleData;
+      const canopyLocal = (preset.bounds && preset.bounds.canopyCenter) || null;
+      const bYMin = (preset.bounds && preset.bounds.yMin) ?? 0;
+      const bRange = Math.max(((preset.bounds && preset.bounds.yMax) ?? 8) - bYMin, 0.001);
+
+      this._pos.set(t.x, t.y ?? 0, t.z);
+      const _nx = t.nx ?? 0;
+      const _nz = t.nz ?? 0;
+      if (_nx !== 0 || _nz !== 0) {
+        const _ny = Math.sqrt(Math.max(0, 1 - _nx * _nx - _nz * _nz));
+        this._surfNorm.set(_nx, _ny, _nz);
+        this._quatNorm.setFromUnitVectors(this._yAxis, this._surfNorm);
+        this._quatSpin.setFromAxisAngle(this._yAxis, t.rotY);
+        this._quat.multiplyQuaternions(this._quatNorm, this._quatSpin);
+      } else {
+        this._quat.setFromAxisAngle(this._yAxis, t.rotY);
+      }
+      this._scl.setScalar(t.scale);
+      this._treeMat.compose(this._pos, this._quat, this._scl);
+
+      if (canopyLocal) {
+        this._tmpTreeCenter.copy(canopyLocal).applyMatrix4(this._treeMat);
+      } else {
+        this._tmpTreeCenter.copy(this._pos);
+      }
+      const tcx = this._tmpTreeCenter.x;
+      const tcy = this._tmpTreeCenter.y;
+      const tcz = this._tmpTreeCenter.z;
+
+      for (let li = 0; li < lodData.count && idx < cappedTotal; li++, idx++) {
+        this._tmpCenter.set(
+          centerSrc[li * 3],
+          centerSrc[li * 3 + 1],
+          centerSrc[li * 3 + 2],
+        ).applyMatrix4(this._treeMat);
+        centerData[idx * 3]     = this._tmpCenter.x;
+        centerData[idx * 3 + 1] = this._tmpCenter.y;
+        centerData[idx * 3 + 2] = this._tmpCenter.z;
+        randData[idx * 2] = randSrc[li * 2];
+        randData[idx * 2 + 1] = randSrc[li * 2 + 1];
+        treeCenterData[idx * 3]     = tcx;
+        treeCenterData[idx * 3 + 1] = tcy;
+        treeCenterData[idx * 3 + 2] = tcz;
+        scaleData[idx * 3] = scaleSrc[li] * t.scale;
+        const _leafLocalY = centerSrc[li * 3 + 1];
+        scaleData[idx * 3 + 1] = Math.min(1, Math.max(0, (_leafLocalY - bYMin) / bRange));
+        scaleData[idx * 3 + 2] = memberIdx;
+      }
+    }
+
+    this._setCount(im, idx);
+    im._fullCount = idx;
+    if (fromPool) {
+      geo.getAttribute("aRand").needsUpdate = true;
+      geo.getAttribute("aLeafCenter").needsUpdate = true;
+      geo.getAttribute("aTreeCenter").needsUpdate = true;
+      geo.getAttribute("aLeafScale").needsUpdate = true;
+    } else {
+      geo.setAttribute("aRand", new THREE.InstancedBufferAttribute(randData, 2));
+      geo.setAttribute("aLeafCenter", new THREE.InstancedBufferAttribute(centerData, 3));
+      geo.setAttribute("aTreeCenter", new THREE.InstancedBufferAttribute(treeCenterData, 3));
+      geo.setAttribute("aLeafScale", new THREE.InstancedBufferAttribute(scaleData, 3));
+    }
+
+    return im;
+  }
+
   _ensureChunkMeshes(chunkKey, members, gen) {
     let entry = this._chunkMeshes.get(chunkKey);
     if (entry && entry.gen === gen) return entry;
@@ -473,28 +677,36 @@ export class FoliageLodRenderer {
     // reset its hysteresis state (-1 = unset, pick fresh from raw thresholds).
     entry = { gen, trees, slots: new Map(), tier: entry ? entry.tier : -1 };
 
-    const slotsInChunk = new Set();
-    for (const t of trees) slotsInChunk.add(t.slotIdx);
-
-    for (const si of slotsInChunk) {
+    // Render units: merged slots collapse into one "g:<key>" unit per group;
+    // everything else stays per-slot ("s:<idx>").
+    const units = new Map();
+    for (const t of trees) {
+      const si = t.slotIdx;
       if (si >= this.slotPresets.length || !this.slotPresets[si]) continue;
+      const g = this.mergeGroups.slotToGroup.get(si);
+      const ukey = g ? "g:" + g.key : "s:" + si;
+      if (!units.has(ukey)) units.set(ukey, g ? { group: g } : { si });
+    }
+    for (const [ukey, meta] of units) {
       // Lazy: tier meshes start null and are built on demand in update() — only
       // the chunk's currently-visible tier, never all 3 (saves ~3x memory + the
       // build hitch when a fresh chunk enters the frustum).
-      entry.slots.set(si, { lod0: null, lod1: null, lod2: null });
+      entry.slots.set(ukey, { lod0: null, lod1: null, lod2: null, _meta: meta });
     }
 
     this._chunkMeshes.set(chunkKey, entry);
     return entry;
   }
 
-  // Build one (chunk-slot-lod) mesh on demand and cache it. `false` = this tier
-  // genuinely has no leaves for this slot, so it isn't retried each frame.
-  _ensureTier(slotEntry, slotIdx, trees, lodIdx) {
+  // Build one (chunk-unit-lod) mesh on demand and cache it. `false` = this tier
+  // genuinely has no leaves for this unit, so it isn't retried each frame.
+  _ensureTier(slotEntry, meta, trees, lodIdx) {
     const key = `lod${lodIdx}`;
     if (slotEntry[key] !== null) return;
     this._dbg.builds++;
-    const meshes = this._buildChunkSlotLod(trees, slotIdx, lodIdx);
+    const meshes = meta.group
+      ? this._buildChunkGroupLod(trees, meta.group, lodIdx)
+      : this._buildChunkSlotLod(trees, meta.si, lodIdx);
     if (meshes) {
       for (const mesh of meshes) {
         mesh.visible = false;
@@ -521,6 +733,10 @@ export class FoliageLodRenderer {
     this._viewInv.copy(camera.matrixWorld).invert();
     this._projScreen.multiplyMatrices(camera.projectionMatrix, this._viewInv);
     this._frustum.setFromProjectionMatrix(this._projScreen);
+
+    // Mirror per-slot uniforms into merge-group arrays so panel edits on a
+    // merged slot show up without any extra plumbing (~a hundred float copies).
+    this.mergeGroups.syncParams(this.slotPresets);
 
     const f = ++this._dbg.frame;
     const camX = camera.position.x;
@@ -611,7 +827,7 @@ export class FoliageLodRenderer {
         entry.tier = tier;
       }
 
-      for (const [si, se] of entry.slots) {
+      for (const [ukey, se] of entry.slots) {
         // Time-sliced builds: queue missing tier meshes instead of building
         // synchronously — at most _buildBudget() builds happen per frame,
         // nearest chunks first. Until the wanted tier exists, show the best
@@ -624,8 +840,8 @@ export class FoliageLodRenderer {
           // a wrong-density canopy is a visible flash. Far chunks stream via
           // the budgeted queue (a coarse stand-in is fine at distance).
           if (wantedMissing && !this.debugFreeze) {
-            if (dist < lod1D) this._ensureTier(se, si, trees, tier);
-            else this._pendingBuilds.push({ se, si, trees, tier, dist });
+            if (dist < lod1D) this._ensureTier(se, se._meta, trees, tier);
+            else this._pendingBuilds.push({ se, meta: se._meta, trees, tier, dist });
           }
           if (se[`lod${tier}`]) showTier = tier;
           else {
@@ -637,7 +853,7 @@ export class FoliageLodRenderer {
           // canopy always exists while the wanted tier streams in.
           if (showTier === -1 && se.lod2 === null && !this.debugFreeze) {
             this._dbg.emergency++;
-            this._ensureTier(se, si, trees, 2);
+            this._ensureTier(se, se._meta, trees, 2);
             if (se.lod2) showTier = 2;
           }
         }
@@ -649,7 +865,7 @@ export class FoliageLodRenderer {
           se._shownFrame = f;
         } else if (tier < 3 && se._shownFrame === f - 1) {
           this._dbg.blinks++;
-          this._dbgNote(`BLINK ${key}:${si} tier=${tier} lod0=${!!se.lod0} lod1=${!!se.lod1} lod2=${String(se.lod2)}`);
+          this._dbgNote(`BLINK ${key}:${ukey} tier=${tier} lod0=${!!se.lod0} lod1=${!!se.lod1} lod2=${String(se.lod2)}`);
         }
 
         // Tier CROSS-DISSOLVE, density-safe: only the DENSER tier ramps its
@@ -678,11 +894,16 @@ export class FoliageLodRenderer {
           if (se._fadeT >= 1) se._fadeFrom = null;
           else fading = true;
         }
+        // LOD1 shadow gate: cast only when some tree in the cell can be near
+        // the camera (nearest-corner distance inside the LOD0 band). Far
+        // tier-1 cells skip the shadow pass entirely.
+        const lod1Shadow = distFar < lod0D && !this.debugNoLeafShadows;
         for (const lk of ["lod0", "lod1", "lod2"]) {
           const isNew = lk === se._shownKey;
           const isOld = fading && lk === se._fadeFrom;
           this._eachMesh(se[lk], (m) => {
             m.visible = isNew || isOld;
+            if (lk === "lod1") m.castShadow = lod1Shadow;
             const full = m._fullCount ?? 0;
             if (isNew) {
               this._setCount(m, (fading && lk === se._fadeRamp)
@@ -709,7 +930,7 @@ export class FoliageLodRenderer {
         const cost = this._jobCost(job);
         if (i > 0 && cost > remaining) break;
         remaining -= cost;
-        this._ensureTier(job.se, job.si, job.trees, job.tier);
+        this._ensureTier(job.se, job.meta, job.trees, job.tier);
         // No manual visibility here: next frame's pass sees the built tier
         // and starts the cross-dissolve from whatever fallback was showing.
         if (remaining <= 0) break;
@@ -733,12 +954,14 @@ export class FoliageLodRenderer {
     for (const preset of this.slotPresets) {
       if (preset) preset.uniforms.time.value = t;
     }
+    for (const [, g] of this.mergeGroups.groups) g.uniforms.time.value = t;
   }
 
   updateSunDirection(dir) {
     for (const preset of this.slotPresets) {
       if (preset) preset.uniforms.sunDir.value.copy(dir).normalize();
     }
+    for (const [, g] of this.mergeGroups.groups) g.uniforms.sunDir.value.copy(dir).normalize();
   }
 
   dispose() {
@@ -758,5 +981,6 @@ export class FoliageLodRenderer {
       for (const m of arr) { m.geometry.dispose(); m.dispose?.(); }
     }
     this._meshPool.clear();
+    this.mergeGroups.dispose();
   }
 }

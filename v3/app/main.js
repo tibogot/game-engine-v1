@@ -695,6 +695,9 @@ export async function startV3App(opts = {}) {
     world: { size: WORLD_SIZE, chunkSize: V2_CONFIG.world.chunkSize },
     lod: { ...V2_CONFIG.lod },
     sculpt: { ...V2_CONFIG.sculpt },
+    // Tree leaf render cells = chunkGroup × chunkSize (300 m): fewer, bigger
+    // leaf meshes → fewer draw calls, at the cost of coarser per-cell LOD.
+    foliageLod: { chunkGroup: 3 },
   };
   const treeEnv = createTreeEnvironment({
     scene,

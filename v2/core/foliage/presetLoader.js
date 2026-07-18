@@ -191,26 +191,30 @@ export async function loadFoliagePreset(presetJson) {
     };
   }
 
+  // Atlas cell rect in CANVAS space (fractions, y from the top) — used for the
+  // per-cell card trim below and carried on the preset so merge groups can
+  // composite member cells into a union trim.
+  let cellRect = null;
+  if (useAtlas) {
+    const cols = atlasGrid[0];
+    const cellStep = atlasGrid[1];
+    const gutterFrac = atlasGrid[2];
+    const innerFrac = atlasGrid[3];
+    const cell = atlas.cell ?? 0;
+    const col = cell % cols;
+    const row = Math.floor(cell / cols);
+    const ox = col * cellStep + gutterFrac;             // uv space (v up)
+    const oy = (cols - 1 - row) * cellStep + gutterFrac;
+    // canvas space (y down):
+    cellRect = { x: ox, y: 1 - oy - innerFrac, w: innerFrac, h: innerFrac };
+  }
+
   // Trimmed leaf cards: fit an octagon to the mask so cards rasterize far
   // fewer alpha-discarded pixels. Atlas presets trim against their own cell.
   let cardGeometry = null;
   {
     const img = foliageMat.leafMapNode.value?.image;
     if (img) {
-      let cellRect = null;
-      if (useAtlas) {
-        const cols = atlasGrid[0];
-        const cellStep = atlasGrid[1];
-        const gutterFrac = atlasGrid[2];
-        const innerFrac = atlasGrid[3];
-        const cell = atlas.cell ?? 0;
-        const col = cell % cols;
-        const row = Math.floor(cell / cols);
-        const ox = col * cellStep + gutterFrac;             // uv space (v up)
-        const oy = (cols - 1 - row) * cellStep + gutterFrac;
-        // canvas space (y down):
-        cellRect = { x: ox, y: 1 - oy - innerFrac, w: innerFrac, h: innerFrac };
-      }
       const poly = computeLeafTrimPolygon(img, {
         maskInAlpha: foliageMat.uniforms.maskInAlpha.value > 0.5,
         cellRect,
@@ -247,6 +251,12 @@ export async function loadFoliagePreset(presetJson) {
     lods,
     bounds,
     billboard,
+    // Slot-merge metadata: billboard slots sampling the SAME shared atlas can
+    // render as one mesh per cell (FoliageMergeGroups). Key = atlas path.
+    mergeKey: useAtlas && billboard ? _leafTexPath : null,
+    atlasGridArr: useAtlas ? atlasGrid : null,
+    atlasCell: useAtlas ? (atlas.cell ?? 0) : 0,
+    atlasCellRect: cellRect,
   };
 }
 

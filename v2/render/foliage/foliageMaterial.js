@@ -4,8 +4,8 @@
  */
 import * as THREE from "three";
 import {
-  Fn, float, vec2, vec3, vec4,
-  uniform, attribute,
+  Fn, float, int, vec2, vec3, vec4,
+  uniform, uniformArray, attribute,
   texture, uv,
   mix, step, smoothstep, clamp, fract, floor,
   sin, cos, abs, max, pow, dot, cross, normalize, length, sub, negate,
@@ -72,14 +72,39 @@ export function createFoliageMaterial(opts = {}) {
     pineAtlasRows: uniform(opts.pineAtlasRows ?? 2),
   };
 
+  // Per-slot parameter accessor: for a classic (one-preset) material every
+  // entry is simply the slot's own uniform. createMergedFoliageMaterial()
+  // builds the same node graph with these backed by uniform-array elements
+  // indexed by a per-instance slot id instead.
+  const P = {
+    bottomColor: u.bottomColor, topColor: u.topColor,
+    colorVar: u.colorVar, treeColorVar: u.treeColorVar,
+    alphaCutoff: u.alphaCutoff,
+    sssColor: u.sssColor, sssStr: u.sssStr, sssPow: u.sssPow,
+    rimColor: u.rimColor, rimStr: u.rimStr, rimPow: u.rimPow,
+    aoStr: u.aoStr, aoRadius: u.aoRadius,
+    normalBias: u.normalBias, leafWarp: u.leafWarp,
+    windSpeed: u.windSpeed, windStr: u.windStr, windMicro: u.windMicro,
+    atlasCell: u.atlasCell, billboardYaw: u.billboardYaw,
+  };
+  return _buildFoliageMaterial(u, P, opts);
+}
+
+/**
+ * Shared node-graph builder. `u` carries the global uniforms (time, sunDir,
+ * billboard/atlas mode flags); `P` maps every per-slot parameter to a node —
+ * plain uniforms for the classic material, uniform-array elements for the
+ * merged one. `opts.merged` widens aLeafScale to vec3 (z = slot id).
+ */
+function _buildFoliageMaterial(u, P, opts) {
   const aRand = attribute("aRand", "vec2");
 
   const leafTex = new THREE.Texture();
   // Atlas cell-UV remap (identical math to arborist). useAtlas=0 leaves uv() as-is.
   const _baseUv = uv();
   const _agCols = u.atlasGrid.x;
-  const _agRow = floor(u.atlasCell.div(_agCols));
-  const _agCol = u.atlasCell.sub(_agRow.mul(_agCols));
+  const _agRow = floor(P.atlasCell.div(_agCols));
+  const _agCol = P.atlasCell.sub(_agRow.mul(_agCols));
   const _agOx = _agCol.mul(u.atlasGrid.y).add(u.atlasGrid.z);
   const _agOy = _agCols.sub(1).sub(_agRow).mul(u.atlasGrid.y).add(u.atlasGrid.z);
   const _cellUv = _baseUv.mul(u.atlasGrid.w).add(vec2(_agOx, _agOy));
@@ -122,15 +147,15 @@ export function createFoliageMaterial(opts = {}) {
   // trees placed at terrain height / any scale. Packed into ONE vec2 because
   // WebGPU caps vertex buffers at 8 and the foliage geometry is already at the
   // limit — a separate aHeightFactor attribute overflowed it (9 > 8).
-  const aLeafScale = attribute("aLeafScale", "vec2");
+  const aLeafScale = attribute("aLeafScale", opts.merged ? "vec3" : "vec2");
   const aLeafSize = aLeafScale.x;
 
   const positionNode = Fn(() => {
     const phase     = aRand.x.mul(6.2832);
     const tipFactor = positionLocal.y.add(0.5);
-    const sway      = sin(u.time.mul(u.windSpeed).add(phase)).mul(u.windStr).mul(tipFactor);
-    const micro     = sin(u.time.mul(3.1).add(phase.mul(2.6))).mul(u.windMicro).mul(tipFactor);
-    const swayZ     = cos(u.time.mul(u.windSpeed.mul(0.8)).add(phase.mul(1.3))).mul(u.windStr.mul(0.5)).mul(tipFactor);
+    const sway      = sin(u.time.mul(P.windSpeed).add(phase)).mul(P.windStr).mul(tipFactor);
+    const micro     = sin(u.time.mul(3.1).add(phase.mul(2.6))).mul(P.windMicro).mul(tipFactor);
+    const swayZ     = cos(u.time.mul(P.windSpeed.mul(0.8)).add(phase.mul(1.3))).mul(P.windStr.mul(0.5)).mul(tipFactor);
     // World-space wind delta (must NOT be projected into the camera basis or
     // it appears to rotate with the view).
     const wo = vec3(sway.add(micro), float(0), swayZ);
@@ -144,7 +169,7 @@ export function createFoliageMaterial(opts = {}) {
     const yawDir = normalize(
       normalize(horiz).mul(useH).add(vec3(0, 0, float(1)).mul(float(1).sub(useH)))
     );
-    const face = normalize(mix(toCam, yawDir, u.billboardYaw));
+    const face = normalize(mix(toCam, yawDir, P.billboardYaw));
     const worldUp = vec3(0, 1, 0);
     // NaN-safe basis: pick non-degenerate cross BEFORE normalizing.
     const cA = cross(worldUp, face);
@@ -190,7 +215,7 @@ export function createFoliageMaterial(opts = {}) {
   // Kept separate so Lambert stays uniform but SSS gives the stylized highlight.
   const sphereDirForSSS = normalize(instanceCenterW.sub(treeCenterW));
   // Non-billboard normal: local quad normal warped by UV (gives leaves a fake curvature).
-  const warpedNormal = normalize(normalLocal.add(sin(uv().x.mul(10)).mul(u.leafWarp)));
+  const warpedNormal = normalize(normalLocal.add(sin(uv().x.mul(10)).mul(P.leafWarp)));
   // Billboard normal: camera-facing (or yaw-facing) direction at the leaf's pivot.
   // Without this branch, billboarded leaves render with the UV-stripe warp from
   // warpedNormal — that's where the vertical "banding" gradient on the canopy comes from.
@@ -203,19 +228,19 @@ export function createFoliageMaterial(opts = {}) {
     const yawDir = normalize(
       normalize(horiz).mul(useH).add(vec3(0, 0, float(1)).mul(float(1).sub(useH)))
     );
-    return normalize(mix(toCam, yawDir, u.billboardYaw));
+    return normalize(mix(toCam, yawDir, P.billboardYaw));
   })();
   const geomForMix  = normalize(mix(warpedNormal, leafBillboardFace, u.billboard));
-  const finalNormal = normalize(mix(geomForMix, sphereDir, u.normalBias));
+  const finalNormal = normalize(mix(geomForMix, sphereDir, P.normalBias));
 
   const colorNode = Fn(() => {
     const h1 = aRand.x;
     const h2 = aRand.y;
     const heightFactor = aLeafScale.y; // per-leaf, local-space (packed in aLeafScale.y)
-    let col = mix(u.bottomColor, u.topColor, heightFactor);
-    const varMul = h1.mul(u.colorVar.mul(2.0)).add(float(1.0).sub(u.colorVar));
+    let col = mix(P.bottomColor, P.topColor, heightFactor);
+    const varMul = h1.mul(P.colorVar.mul(2.0)).add(float(1.0).sub(P.colorVar));
     col = col.mul(varMul);
-    const hueShift = h2.sub(0.5).mul(u.colorVar.mul(0.4));
+    const hueShift = h2.sub(0.5).mul(P.colorVar.mul(0.4));
     col = vec3(col.x.add(hueShift.mul(0.3)), col.y, col.z.sub(hueShift.mul(0.2)));
 
     // Per-tree seed from the per-instance world canopy center (treeCenterW), NOT
@@ -233,21 +258,21 @@ export function createFoliageMaterial(opts = {}) {
     const treeSeed = mx_noise_float(vec3(
       treeCenterW.x.mul(0.031), treeCenterW.z.mul(0.031), float(7.7),
     )).mul(0.5).add(0.5);
-    const treeBright = treeSeed.sub(0.5).mul(u.treeColorVar);
+    const treeBright = treeSeed.sub(0.5).mul(P.treeColorVar);
     const treeHue = mx_noise_float(vec3(
       treeCenterW.x.mul(0.047), treeCenterW.z.mul(0.047), float(19.3),
-    )).mul(0.5).mul(u.treeColorVar.mul(0.6));
+    )).mul(0.5).mul(P.treeColorVar.mul(0.6));
     col = vec3(
       col.x.add(treeHue.mul(0.4)).add(treeBright),
       col.y.add(treeBright),
       col.z.sub(treeHue.mul(0.3)).add(treeBright)
     );
 
-    const aoHeight = mix(float(1.0).sub(u.aoStr), float(1.0), heightFactor.mul(0.8).add(0.2));
+    const aoHeight = mix(float(1.0).sub(P.aoStr), float(1.0), heightFactor.mul(0.8).add(0.2));
     col = col.mul(aoHeight);
 
-    const distC = clamp(length(sub(positionWorld, treeCenterW)).div(max(u.aoRadius, float(0.001))), float(0), float(1));
-    const aoSphere = mix(float(1.0).sub(u.aoStr), float(1.0), distC);
+    const distC = clamp(length(sub(positionWorld, treeCenterW)).div(max(P.aoRadius, float(0.001))), float(0), float(1));
+    const aoSphere = mix(float(1.0).sub(P.aoStr), float(1.0), distC);
     col = col.mul(aoSphere);
 
     const viewDir = normalize(cameraPosition.sub(positionWorld));
@@ -255,15 +280,15 @@ export function createFoliageMaterial(opts = {}) {
     // SSS uses per-leaf sphere direction so backlit anti-sun leaves glow,
     // while Lambert (via normalWorld = uniform world-up) stays stable.
     const backDot = max(dot(negate(u.sunDir), sphereDirForSSS), float(0));
-    const sss = pow(backDot, u.sssPow).mul(u.sssStr);
-    col = col.add(u.sssColor.mul(sss));
+    const sss = pow(backDot, P.sssPow).mul(P.sssStr);
+    col = col.add(P.sssColor.mul(sss));
 
     // Rim uses per-leaf sphere direction so it activates on leaves whose
     // outward direction is perpendicular to view — i.e. the canopy silhouette
     // from any camera angle, regardless of normalBias.
     const rimDot = float(1.0).sub(max(dot(sphereDirForSSS, viewDir), float(0)));
-    const rim = pow(rimDot, u.rimPow).mul(u.rimStr);
-    col = col.add(u.rimColor.mul(rim));
+    const rim = pow(rimDot, P.rimPow).mul(P.rimStr);
+    col = col.add(P.rimColor.mul(rim));
 
     return clamp(col, float(0), float(2));
   })();
@@ -271,7 +296,7 @@ export function createFoliageMaterial(opts = {}) {
   const opacityNode = Fn(() => {
     const camDist = length(cameraPosition.sub(positionWorld));
     const distFade = clamp(camDist.div(float(150.0)), float(0), float(1));
-    const adaptiveCutoff = mix(u.alphaCutoff, float(0.15), distFade);
+    const adaptiveCutoff = mix(P.alphaCutoff, float(0.15), distFade);
     return smoothstep(adaptiveCutoff.sub(0.05), adaptiveCutoff.add(0.05), leafMaskCh);
   })();
 
@@ -292,12 +317,94 @@ export function createFoliageMaterial(opts = {}) {
   mat.castShadowNode = Fn(() => {
     // Match the visible pass: same channel select and same alphaTest threshold (0.3),
     // so the shadow silhouette aligns with the leaf silhouette.
-    const a = smoothstep(u.alphaCutoff.sub(0.05), u.alphaCutoff.add(0.05), leafMaskCh);
+    const a = smoothstep(P.alphaCutoff.sub(0.05), P.alphaCutoff.add(0.05), leafMaskCh);
     a.lessThan(float(0.3)).discard();
     return vec4(0, 0, 0, 1);
   })();
 
   return { material: mat, uniforms: u, leafMapNode };
+}
+
+/** Max slots one merged material can carry (uniform-array size). */
+export const MAX_MERGED_SLOTS = 16;
+
+/**
+ * One material for MANY atlas tree slots — the draw-call merger. Leaf
+ * instances carry their group-local slot id in aLeafScale.z, and every
+ * per-slot parameter (atlas cell, colors, wind, SSS/rim/AO…) lives in a
+ * uniform array indexed by it, so the chunked renderer can draw all
+ * atlas-sharing slots of a cell in ONE mesh. Merge groups are billboard-only
+ * (u.billboard is constant 1); per-slot billboardYaw still works via the
+ * wind array's .w lane. Writers mutate arrays.*.array[i] in place —
+ * UniformArrayNode re-uploads every render.
+ *
+ * uniforms.time / uniforms.sunDir keep the same names as the per-slot
+ * material so updateTime()/updateSunDirection() treat both alike.
+ */
+export function createMergedFoliageMaterial(opts = {}) {
+  const u = {
+    time:        uniform(0.0),
+    sunDir:      uniform(new THREE.Vector3(5, 12, 4).normalize()),
+    // The shared arborist atlas always stores the mask in RED (transparent
+    // gutters fool alpha auto-detect — see loadFoliagePreset).
+    maskInAlpha: uniform(0.0),
+    billboard:   uniform(1.0),
+    useAtlas:    uniform(1.0),
+    atlasGrid:   uniform(new THREE.Vector4(
+                   opts.atlasGrid?.[0] ?? 4,
+                   opts.atlasGrid?.[1] ?? 0.25,
+                   opts.atlasGrid?.[2] ?? 12 / 1024,
+                   opts.atlasGrid?.[3] ?? 232 / 1024,
+                 )),
+    pineAtlas:     uniform(0.0),
+    pineAtlasCols: uniform(2),
+    pineAtlasRows: uniform(2),
+  };
+
+  // ONE uniform array for every per-slot parameter, laid out as
+  // PARAM_ROWS vec4 rows per slot (index = slotId * PARAM_ROWS + row).
+  // Seven separate uniformArrays each got their own uniform BUFFER binding,
+  // which blew WebGPU's 12-per-stage limit (13) once the material's regular
+  // buffers were counted — packed into one buffer it's a single binding.
+  const rowDefaults = [
+    [0.18, 0.35, 0.11, 0.12], // 0: bottomColor.rgb, colorVar
+    [0.35, 0.67, 0.16, 0.0],  // 1: topColor.rgb, treeColorVar
+    [0.78, 0.88, 0.44, 0.0],  // 2: sssColor.rgb, sssStr
+    [0.78, 1.0, 0.67, 0.07],  // 3: rimColor.rgb, rimStr
+    [0.45, 1.0, 0.28, 0.7],   // 4: alphaCutoff, normalBias, leafWarp, aoStr
+    [2.0, 2.5, 6.0, 0.0],     // 5: sssPow, rimPow, aoRadius, atlasCell
+    [0.9, 0.0, 0.0, 1.0],     // 6: windSpeed, windStr, windMicro, billboardYaw
+  ];
+  const values = [];
+  for (let s = 0; s < MAX_MERGED_SLOTS; s++) {
+    for (const d of rowDefaults) values.push(new THREE.Vector4(...d));
+  }
+  const arrays = { params: uniformArray(values), PARAM_ROWS: rowDefaults.length };
+
+  const sid = int(attribute("aLeafScale", "vec3").z.add(0.5));
+  const base   = sid.mul(int(rowDefaults.length));
+  const eColA  = arrays.params.element(base);
+  const eColB  = arrays.params.element(base.add(int(1)));
+  const eSss   = arrays.params.element(base.add(int(2)));
+  const eRim   = arrays.params.element(base.add(int(3)));
+  const eMisc  = arrays.params.element(base.add(int(4)));
+  const eMisc2 = arrays.params.element(base.add(int(5)));
+  const eWind  = arrays.params.element(base.add(int(6)));
+  const P = {
+    bottomColor: eColA.xyz,  colorVar: eColA.w,
+    topColor: eColB.xyz,     treeColorVar: eColB.w,
+    sssColor: eSss.xyz,      sssStr: eSss.w,
+    rimColor: eRim.xyz,      rimStr: eRim.w,
+    alphaCutoff: eMisc.x,    normalBias: eMisc.y,
+    leafWarp: eMisc.z,       aoStr: eMisc.w,
+    sssPow: eMisc2.x,        rimPow: eMisc2.y,
+    aoRadius: eMisc2.z,      atlasCell: eMisc2.w,
+    windSpeed: eWind.x,      windStr: eWind.y,
+    windMicro: eWind.z,      billboardYaw: eWind.w,
+  };
+
+  const res = _buildFoliageMaterial(u, P, { ...opts, merged: true });
+  return { ...res, arrays };
 }
 
 // Detects whether an image's alpha channel carries meaningful (<255) data.
