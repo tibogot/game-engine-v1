@@ -10,13 +10,13 @@
  * run the sim, and normalize back; see the Run Erosion handler in main.js.
  */
 
-const MAX_STEPS = 80;
 const GRAVITY = 4;
 const MIN_SLOPE = 0.001;
 
-/** v2 `toolState.erosion` defaults (v2/app/config.js). */
+/** v2 `toolState.erosion` defaults (v2/app/config.js), iterations rescaled for
+ * v3's 1024² grid — v2-era 30k droplets only scratch ~3% of a map this size. */
 export const EROSION_DEFAULTS = {
-  iterations: 30000,
+  iterations: 300000,
   erosionRate: 0.3,
   depositionRate: 0.3,
   evaporation: 0.015,
@@ -87,14 +87,16 @@ function deposit(heights, size, px, pz, amt) {
 }
 
 function erodeAt(heights, size, px, pz, amt, kernel) {
-  const cx = px | 0;
-  const cz = pz | 0;
+  // Bilinear splat per kernel tap, mirroring deposit(). Centering the kernel
+  // on the floored texel instead carves staircase channel walls as the
+  // droplet's smooth path quantizes to texel centers.
+  const maxI = size - 1;
   const { offX, offZ, w } = kernel;
   for (let i = 0; i < w.length; i++) {
-    const nx = cx + offX[i];
-    const nz = cz + offZ[i];
-    if (nx < 0 || nx >= size || nz < 0 || nz >= size) continue;
-    heights[nz * size + nx] -= amt * w[i];
+    const ex = px + offX[i];
+    const ez = pz + offZ[i];
+    if (ex < 0 || ez < 0 || ex > maxI || ez > maxI) continue;
+    deposit(heights, size, ex, ez, -amt * w[i]);
   }
 }
 
@@ -117,6 +119,10 @@ export function erodeDroplets(heights, size, count, params, kernel) {
   const Kin = params.inertia;
   const Kc = params.capacity;
   const maxG = size - 1;
+  // Droplet lifetime scales with the grid — a fixed 80 steps (v2's constant,
+  // tuned for smaller maps) chops channels into short disconnected gouges on
+  // a 1024² grid. Evaporation still caps life at ~350 steps at default rate.
+  const maxSteps = Math.max(80, (size * 0.3) | 0);
 
   for (let iter = 0; iter < count; iter++) {
     let px = 1 + Math.random() * (maxG - 2);
@@ -127,7 +133,7 @@ export function erodeDroplets(heights, size, count, params, kernel) {
     let water = 1;
     let sediment = 0;
 
-    for (let step = 0; step < MAX_STEPS; step++) {
+    for (let step = 0; step < maxSteps; step++) {
       sampleHG(heights, size, px, pz);
       const h = _s.h;
       ddx = ddx * Kin - _s.gx * (1 - Kin);
@@ -158,5 +164,39 @@ export function erodeDroplets(heights, size, count, params, kernel) {
       pz = nz2;
     }
     deposit(heights, size, px, pz, sediment * Kd);
+  }
+}
+
+/**
+ * Post-run hillslope smoothing: `passes` Laplacian diffusion sweeps (borders
+ * pinned). Rounds off the texel-frequency noise droplets leave behind — the
+ * end-of-life sediment dumps and carve edges — which otherwise reads as
+ * faceted "low poly" normals at clipmap render time. `amount` must stay
+ * < 0.25 for stability.
+ */
+export function smoothHeights(heights, size, passes, amount = 0.15) {
+  if (passes <= 0) return;
+  const temp = new Float32Array(heights.length);
+  const last = size - 1;
+  for (let p = 0; p < passes; p++) {
+    for (let z = 1; z < last; z++) {
+      const row = z * size;
+      for (let x = 1; x < last; x++) {
+        const i = row + x;
+        const h = heights[i];
+        temp[i] =
+          h +
+          amount *
+            (heights[i - 1] +
+              heights[i + 1] +
+              heights[i - size] +
+              heights[i + size] -
+              4 * h);
+      }
+    }
+    for (let z = 1; z < last; z++) {
+      const row = z * size;
+      for (let x = 1; x < last; x++) heights[row + x] = temp[row + x];
+    }
   }
 }

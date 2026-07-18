@@ -16,7 +16,7 @@ import {
 } from "../io/heightmapIO.js";
 import { DEFAULT_GEN } from "../terrain/proceduralGen.js";
 import { createProceduralGenPass } from "../terrain/proceduralGenGpu.js";
-import { erodeDroplets, buildErosionKernel } from "../terrain/globalErosion.js";
+import { erodeDroplets, buildErosionKernel, smoothHeights } from "../terrain/globalErosion.js";
 import { streamPowerErode, createStreamPowerScratch } from "../terrain/streamPowerErosion.js";
 import { initEditorShell } from "../ui/editorShell.js";
 import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
@@ -1402,6 +1402,7 @@ export async function startV3App(opts = {}) {
   const eroInertia  = document.getElementById("sl-ero-inertia");
   const eroCapacity = document.getElementById("sl-ero-capacity");
   const eroRadius   = document.getElementById("sl-ero-radius");
+  const eroSmooth   = document.getElementById("sl-ero-smooth");
   const btnRunErosion = document.getElementById("btn-run-erosion");
 
   function readErosionFromUI() {
@@ -1413,21 +1414,24 @@ export async function startV3App(opts = {}) {
       inertia:        Number(eroInertia.value)  / 100,
       capacity:       Number(eroCapacity.value) / 2,
       radius:         Number(eroRadius.value),
+      smoothing:      Number(eroSmooth.value),
     };
   }
 
   function syncErosionUI() {
     const p = readErosionFromUI();
-    document.getElementById("lbl-ero-iters").textContent    = Math.round(p.iterations / 1000) + "k";
+    document.getElementById("lbl-ero-iters").textContent    =
+      p.iterations >= 1e6 ? (p.iterations / 1e6).toFixed(1) + "M" : Math.round(p.iterations / 1000) + "k";
     document.getElementById("lbl-ero-rate").textContent     = p.erosionRate.toFixed(2);
     document.getElementById("lbl-ero-deposit").textContent  = p.depositionRate.toFixed(2);
     document.getElementById("lbl-ero-evap").textContent     = p.evaporation.toFixed(3);
     document.getElementById("lbl-ero-inertia").textContent  = p.inertia.toFixed(2);
     document.getElementById("lbl-ero-capacity").textContent = p.capacity.toFixed(1);
     document.getElementById("lbl-ero-radius").textContent   = String(p.radius);
+    document.getElementById("lbl-ero-smooth").textContent   = String(p.smoothing);
   }
 
-  for (const sl of [eroIters, eroRate, eroDeposit, eroEvap, eroInertia, eroCapacity, eroRadius]) {
+  for (const sl of [eroIters, eroRate, eroDeposit, eroEvap, eroInertia, eroCapacity, eroRadius, eroSmooth]) {
     sl.addEventListener("input", syncErosionUI);
   }
   syncErosionUI();
@@ -1447,11 +1451,17 @@ export async function startV3App(opts = {}) {
 
       const kernel = buildErosionKernel(params.radius);
       const total  = params.iterations;
-      const BATCH  = 5000; // droplets are independent — yield to the UI between batches
+      const BATCH  = 2500; // droplets are independent — yield to the UI between batches (~100ms each)
       for (let done = 0; done < total; done += BATCH) {
         erodeDroplets(metres, HEIGHTMAP_SIZE, Math.min(BATCH, total - done), params, kernel);
         btnRunErosion.textContent = `Eroding… ${Math.min(100, Math.round(((done + BATCH) / total) * 100))}%`;
         await new Promise((r) => setTimeout(r, 0));
+      }
+
+      if (params.smoothing > 0) {
+        btnRunErosion.textContent = "Smoothing…";
+        await new Promise((r) => setTimeout(r, 0));
+        smoothHeights(metres, HEIGHTMAP_SIZE, params.smoothing);
       }
 
       for (let i = 0; i < metres.length; i++) cpuHeightmap[i] = metres[i] / MAX_HEIGHT;
