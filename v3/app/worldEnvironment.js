@@ -971,7 +971,7 @@ export async function createWorldEnvironment({
         setTimeOfDay((ps.timeOfDay + ps.daySpeed * procDt) % 24);
       }
       driveProceduralSky();
-      const procSnap = `${Li.sunAzimuth},${Li.sunElevation},${ps.scatter},${ps.rayleigh},${ps.mie},${ps.mieG},${ps.sunIntensity},${ps.msAmount},${ps.msExtinct},${ps.zenithDay},${ps.horizonDay},${ps.zenithNight},${ps.horizonNight},${ps.sunsetColor},${ps.groundColor},${ps.sunColor},${ps.moonColor},${ps.cloudEnabled},${ps.cloudCoverage},${ps.cloudColor}`;
+      const procSnap = `${Li.sunAzimuth},${Li.sunElevation},${ps.scatter},${ps.rayleigh},${ps.mie},${ps.mieG},${ps.sunIntensity},${ps.msAmount},${ps.zenithDay},${ps.horizonDay},${ps.zenithNight},${ps.horizonNight},${ps.sunsetColor},${ps.groundColor},${ps.sunColor},${ps.moonColor},${ps.cloudEnabled},${ps.cloudCoverage},${ps.cloudColor}`;
       if (procSnap !== _lastProcSkySnap) {
         _lastProcSkySnap = procSnap;
         _procEnvNeeds = true;
