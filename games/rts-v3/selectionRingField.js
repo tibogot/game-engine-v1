@@ -16,8 +16,8 @@
 // entity, commit(). Deselected units simply aren't re-added.
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
-import { Fn, attribute, texture, positionLocal, vec2, vec3, float, step } from "three/tsl";
-import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../../v3/terrain/heightmapTexture.js";
+import { Fn, attribute, positionLocal } from "three/tsl";
+import { drapedPosition } from "./terrainDrape.js";
 
 const INNER = 0.82; // inner/outer radius ratio — matches the old per-unit ring
 const SEGMENTS = 48;
@@ -55,18 +55,7 @@ export function createSelectionRingField({ app, max = 512, color = 0x6ab0ff }) {
     const aRing = attribute("aRing", "vec3");
     const wx = positionLocal.x.mul(aRing.z).add(aRing.x);
     const wz = positionLocal.z.mul(aRing.z).add(aRing.y);
-
-    // Same world→heightmap UV mapping as terrainLOD, so the ring can never
-    // disagree with the surface it's draped over.
-    const u = wx.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE));
-    const v = wz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE));
-    // Clamp-to-edge would smear the border height across everything off-map;
-    // outside the heightmap the terrain reads 0, so match it.
-    const inBounds = step(float(0), u).mul(step(u, float(1)))
-      .mul(step(float(0), v)).mul(step(v, float(1)));
-    const y = texture(heightTexNode, vec2(u, v)).r.mul(inBounds).mul(float(MAX_HEIGHT));
-
-    return vec3(wx, y.add(float(LIFT)), wz);
+    return drapedPosition(heightTexNode, wx, wz, LIFT);
   });
 
   // Ground-hugging decal, so depthTest stays ON — the unit standing on the ring
