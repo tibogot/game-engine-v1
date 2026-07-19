@@ -1,5 +1,7 @@
 // RTS unit RENDERER — GAME code. Turns mesh-free unit data (units.js) into
-// visuals: model, rotors, terrain tilt, health bar, selection ring.
+// visuals: model, rotors, terrain tilt. Health bars and selection rings are each
+// a single shared instanced draw (healthBar.js / selectionRingField.js) that this
+// renderer just pushes one entry into per unit.
 //
 // Today: one cloned model per unit (clones share geometry/materials, so this is
 // fine for dozens). To scale to hundreds, replace THIS FILE with an
@@ -365,24 +367,7 @@ function buildCrowdType(tpl, type, app, scene) {
   return { field, rel, scale: root.scale.x };
 }
 
-// Selection ring: a flat ring in the XZ plane whose vertices are displaced to
-// the terrain height each frame (a conforming decal). Because it hugs the
-// ground we keep depthTest ON, so the unit properly occludes it — depthTest:false
-// would draw the ring *over* the unit.
-function makeSelectionRing(radius, color = 0x6ab0ff) {
-  const geo = new THREE.RingGeometry(radius * 0.82, radius, 48).rotateX(-Math.PI / 2);
-  const mat = new THREE.MeshBasicMaterial({
-    color, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
-    depthWrite: false, depthTest: true, fog: false, // selection UI — never fogged
-    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-  });
-  const ring = new THREE.Mesh(geo, mat);
-  ring.visible = false;
-  ring.frustumCulled = false;
-  return ring;
-}
-
-export async function createUnitRenderer({ app, units, healthBars }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings }) {
   const { scene } = app;
   initGlbLoaderRenderer(app.renderer); // idempotent; wires KTX2 support
 
@@ -449,18 +434,13 @@ export async function createUnitRenderer({ app, units, healthBars }) {
     const inst = instanced[t.typeKey];
     const crd = crowd[t.typeKey];
 
-    const ring = makeSelectionRing(t.ringRadius);
-    const ringPos = ring.geometry.attributes.position;
-    const ringBase = Float32Array.from(ringPos.array); // flat XZ offsets (y = 0)
-    scene.add(ring);
-
     // An instanced unit owns NO scene objects — just an off-scene Object3D we use
     // to compose its transform (and to hold the slerped terrain tilt between frames).
     if (inst) {
       const xform = new THREE.Object3D();
       xform.scale.setScalar(inst.scale);
       views.set(unit, {
-        inst, xform, ring, ringPos, ringBase,
+        inst, xform,
         bob: Math.random() * 6, mainAngle: Math.random() * 6, tailAngle: 0,
       });
       return;
@@ -473,7 +453,7 @@ export async function createUnitRenderer({ app, units, healthBars }) {
       const xform = new THREE.Object3D();
       xform.scale.setScalar(crd.scale);
       views.set(unit, {
-        crowd: crd, xform, ring, ringPos, ringBase,
+        crowd: crd, xform,
         animTime: Math.random() * 3, blend: 0, bob: 0,
       });
       return;
@@ -509,7 +489,7 @@ export async function createUnitRenderer({ app, units, healthBars }) {
     scene.add(root);
     roots.push(root);
     views.set(unit, {
-      root, xform: root, ring, ringPos, ringBase,
+      root, xform: root,
       mixer, actions, currentAction: actions ? (actions.idle ? "idle" : Object.keys(actions)[0]) : null,
       bob: Math.random() * 6, mainAngle: Math.random() * 6, tailAngle: 0,
     });
@@ -576,8 +556,7 @@ export async function createUnitRenderer({ app, units, healthBars }) {
 
       if (!unit.alive) {
         if (v.root) v.root.visible = false;
-        v.ring.visible = false;
-        continue;
+        continue; // a dead unit is simply never pushed into the ring field
       }
 
       const t = unit.type;
@@ -668,16 +647,9 @@ export async function createUnitRenderer({ app, units, healthBars }) {
         camera,
       );
 
-      // Selection ring — drape over the terrain, only while shown.
-      v.ring.visible = unit.selected;
-      if (unit.selected) {
-        v.ring.position.set(p.x, 0, p.z);
-        for (let i = 0; i < v.ringPos.count; i++) {
-          const bx = v.ringBase[i * 3], bz = v.ringBase[i * 3 + 2];
-          v.ringPos.setY(i, app.getWorldHeight(p.x + bx, p.z + bz) + 0.25);
-        }
-        v.ringPos.needsUpdate = true;
-      }
+      // Selection ring — one instance in the shared field. The draping over the
+      // terrain happens in its vertex shader, so all we push is centre + radius.
+      if (unit.selected) selectionRings?.add(p.x, p.z, t.ringRadius);
     }
 
     for (const k of UNIT_TYPE_KEYS) {
@@ -709,7 +681,6 @@ export async function createUnitRenderer({ app, units, healthBars }) {
     dispose() {
       for (const v of views.values()) {
         if (v.root) scene.remove(v.root);
-        scene.remove(v.ring);
       }
       for (const k of UNIT_TYPE_KEYS) {
         for (const part of instanced[k]?.parts ?? []) scene.remove(part.im);

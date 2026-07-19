@@ -6339,6 +6339,12 @@ export async function startV3App(opts = {}) {
     // ── Terrain queries a game builds on ──────────────────────────────────────
     // Ground height at a world X/Z (RTS unit clamping, building placement).
     getWorldHeight,
+    // GPU-side counterpart of getWorldHeight: the live heightmap as a TSL texture
+    // node, for shaders that must drape geometry over the terrain in the vertex
+    // stage instead of paying a CPU sample per vertex (RTS selection rings).
+    // sculptBrush swaps its .value to the active ping-pong RT, so anything that
+    // captured the NODE keeps reading live heights while the terrain is edited.
+    heightTexNode,
     // Surface normal at a world X/Z — slope for nav walkability, unit tilt.
     // (Returns a shared vector; read its components immediately, don't retain.)
     getWorldNormal: (wx, wz) => sampleTerrainNormal(wx, wz),

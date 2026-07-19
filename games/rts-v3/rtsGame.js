@@ -24,6 +24,7 @@ import { createDevPanel } from "./devPanel.js";
 import { createStructures } from "./structures.js";
 import { createStructuresRenderer } from "./structuresRenderer.js";
 import { createHealthBarField } from "./healthBar.js";
+import { createSelectionRingField } from "./selectionRingField.js";
 import { createWaves } from "./waves.js";
 import { createWaveHud } from "./waveHud.js";
 import { createBuildings } from "./buildings.js";
@@ -126,6 +127,12 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   const healthBars = createHealthBarField({ scene: app.scene });
   app.healthBars = healthBars;
 
+  // Every selection ring in the game is likewise ONE instanced draw, and it
+  // drapes itself over the terrain in the vertex shader — so selecting 200 units
+  // costs 1 draw call and no CPU height sampling at all.
+  const selectionRings = createSelectionRingField({ app });
+  app.selectionRings = selectionRings;
+
   onStatus("Placing structures…");
   const structures = await createStructures({ app, navGrid });
   app.structures = structures;
@@ -150,7 +157,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   app.units = units;
 
   onStatus("Building unit visuals…");
-  const unitRenderer = await createUnitRenderer({ app, units, healthBars });
+  const unitRenderer = await createUnitRenderer({ app, units, healthBars, selectionRings });
   app.unitRenderer = unitRenderer;
 
   // Player-built buildings (helipad, …): runtime structures the builder raises.
@@ -344,10 +351,12 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
     combat.update(dt);                    // acquire → chase → launch rockets
     projectiles.update(dt, app.camera);   // rockets fly, trail, and land damage
     healthBars.begin();                   // both renderers push their bars into it
+    selectionRings.begin();               // unitRenderer pushes a ring per selected unit
     unitRenderer.sync(dt, app.camera);
     structuresRenderer.sync(dt, app.camera);
     buildingRenderer.sync(dt);
     healthBars.commit();
+    selectionRings.commit();
     fx.update(dt, app.camera);            // muzzle / impact / explosion
     fire.update(dt, elapsed);             // burning wrecks
     baseFlag?.update(dt);                 // HQ flag cloth sim
