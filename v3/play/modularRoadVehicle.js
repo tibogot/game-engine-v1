@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { materialEmissive } from "three/tsl";
+import { applyBloomMRT } from "../render/bloomMRT.js";
 
 /**
  * VVV-pattern raycast vehicle — recreated (not imported) from the Lotus VVV
@@ -662,16 +664,17 @@ export class Vehicle {
       this.headlights.push(light);
       this.headlightTargets.push(target);
 
-      const lamp = new THREE.Mesh(
-        this._lampGeo,
-        new THREE.MeshStandardMaterial({
-          color: H.color,
-          emissive: H.color,
-          emissiveIntensity: H.lampEmissive,
-          roughness: 0.4,
-          metalness: 0,
-        }),
-      );
+      // Node material + bloom MRT so the lamp glows under v3's SELECTIVE bloom
+      // (only the emissive buffer blooms; a plain `emissive` value does nothing).
+      const lampMat = new THREE.MeshStandardNodeMaterial({
+        color: H.color,
+        emissive: H.color,
+        emissiveIntensity: H.lampEmissive,
+        roughness: 0.4,
+        metalness: 0,
+      });
+      applyBloomMRT(lampMat, materialEmissive);
+      const lamp = new THREE.Mesh(this._lampGeo, lampMat);
       lamp.castShadow = false;
       lamp.receiveShadow = false;
       lamp.position.set(s * H.side, H.height, H.forward + 0.02);
@@ -719,13 +722,16 @@ export class Vehicle {
     const T = TAILLIGHTS;
     const geo = new THREE.BoxGeometry(1, 1, 1); // unit box, scaled per params
     for (const s of [-1, 1]) {
-      const mat = new THREE.MeshStandardMaterial({
+      const mat = new THREE.MeshStandardNodeMaterial({
         color: T.color,
         emissive: T.color,
         emissiveIntensity: T.runningIntensity,
         roughness: 0.4,
         metalness: 0,
       });
+      // Brake lights are the clearest read of what the car is doing — they need
+      // to bloom, which under v3's selective bloom means writing the MRT buffer.
+      applyBloomMRT(mat, materialEmissive);
       const m = new THREE.Mesh(geo, mat);
       m.castShadow = false;
       m.receiveShadow = false;

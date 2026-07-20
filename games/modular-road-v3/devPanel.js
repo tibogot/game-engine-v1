@@ -23,7 +23,7 @@ const DEV_PANEL_OPEN_W = 264;
  * @param {object} o.params       live-tunable param objects from the vehicle/kit
  */
 export function createRoadDevPanel({ app, game, params }) {
-  const { TIRE, AERO, DRIVETRAIN, DECK } = params;
+  const { TIRE, AERO, DRIVETRAIN, DECK, HEADLIGHTS, glowPropParams } = params;
 
   const root = document.createElement("div");
   root.id = "road-dev";
@@ -59,6 +59,23 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <button class="action-btn" id="dv-respawn" type="button">Respawn car (R)</button>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Spawn</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Source</span>
+            <div class="prop-value"><span class="prop-num" id="dv-spawn-src">.v3proj / origin</span></div>
+          </div>
+          <button class="action-btn primary" id="dv-spawn-car" type="button">Set to car position</button>
+          <button class="action-btn" id="dv-spawn-cursor" type="button">Set to build cursor</button>
+          <button class="action-btn" id="dv-spawn-clear" type="button">Clear (use .v3proj)</button>
+          <div class="dv-hint">
+            The green arrow marks where the car starts / respawns. <b>Set to car</b>
+            (drive somewhere first) is the quickest way to set a start line.
+          </div>
         </div>
       </div>
 
@@ -212,7 +229,80 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
-        <div class="section-header">FX &amp; Audio</div>
+        <div class="section-header">Lights</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Headlights</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-lights" type="button" aria-label="Headlights">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Auto (by sun)</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-lights-auto" type="button" aria-label="Auto headlights">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lamp glow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lamp" min="0" max="12" step="0.5" />
+              <span class="prop-num" id="dv-lamp-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Beam power</span>
+            <div class="prop-value">
+              <input type="range" id="dv-beam" min="0" max="60" step="1" />
+              <span class="prop-num" id="dv-beam-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Auto</b> switches them on when the v3 sun drops near the horizon.
+            Lamps only glow with Bloom on.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Bloom</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Enabled</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-bloom" type="button" aria-label="Bloom">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Strength</span>
+            <div class="prop-value">
+              <input type="range" id="dv-bloom-str" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-bloom-str-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Radius</span>
+            <div class="prop-value">
+              <input type="range" id="dv-bloom-rad" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-bloom-rad-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Glow prop power</span>
+            <div class="prop-value">
+              <input type="range" id="dv-glow" min="0" max="20" step="0.5" />
+              <span class="prop-num" id="dv-glow-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            v3 bloom is <b>selective</b> — only materials writing the emissive MRT
+            buffer glow. Glow box / ring / boost pads opt in.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Audio — Mixer</div>
         <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Mute all</span>
@@ -221,12 +311,90 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Volume</span>
+            <span class="prop-label">Master</span>
             <div class="prop-value">
               <input type="range" id="dv-vol" min="0" max="1" step="0.05" />
               <span class="prop-num" id="dv-vol-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Vehicle bus</span>
+            <div class="prop-value">
+              <input type="range" id="dv-bus-veh" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-bus-veh-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Audio — Layers</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Engine</span>
+            <div class="prop-value">
+              <input type="range" id="dv-a-engine" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-a-engine-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wind</span>
+            <div class="prop-value">
+              <input type="range" id="dv-a-wind" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-a-wind-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wheels</span>
+            <div class="prop-value">
+              <input type="range" id="dv-a-wheels" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-a-wheels-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Drift / brake</span>
+            <div class="prop-value">
+              <input type="range" id="dv-a-drift" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-a-drift-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Nitro</span>
+            <div class="prop-value">
+              <input type="range" id="dv-a-nitro" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-a-nitro-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Wind</b> and <b>Wheels</b> ship at 0 (inherited from v2's defaults)
+            — raise them to hear those layers at all.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Audio — Engine pitch</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Pitch min</span>
+            <div class="prop-value">
+              <input type="range" id="dv-p-min" min="0.2" max="3" step="0.05" />
+              <span class="prop-num" id="dv-p-min-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Pitch max</span>
+            <div class="prop-value">
+              <input type="range" id="dv-p-max" min="0.5" max="6" step="0.05" />
+              <span class="prop-num" id="dv-p-max-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">FX</div>
+        <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Tire marks</span>
             <div class="prop-value">
@@ -355,6 +523,16 @@ export function createRoadDevPanel({ app, game, params }) {
   modeBtn.addEventListener("click", () => { game.toggleMode(); renderMode(); });
   $("#dv-respawn").addEventListener("click", () => game.respawn());
 
+  // ── Spawn ─────────────────────────────────────────────────────────────────
+  const spawnSrc = $("#dv-spawn-src");
+  const renderSpawnSrc = () => {
+    spawnSrc.textContent = game.hasSpawn() ? "custom" : ".v3proj / origin";
+  };
+  $("#dv-spawn-car").addEventListener("click", () => { game.setSpawnToCar(); renderSpawnSrc(); });
+  $("#dv-spawn-cursor").addEventListener("click", () => { game.setSpawnToCursor(); renderSpawnSrc(); });
+  $("#dv-spawn-clear").addEventListener("click", () => { game.clearSpawn(); renderSpawnSrc(); });
+  renderSpawnSrc();
+
   // ── Camera ──────────────────────────────────────────────────────────────────
   toggle("dv-freelook", false, (on) => game.setFreeLook(on));
   const cam = game.cameraParams;
@@ -385,10 +563,43 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-inst", true, (on) => game.setInstancing(on));
   $("#dv-rebake").addEventListener("click", () => game.bakeCollision());
 
-  // ── FX & audio ──────────────────────────────────────────────────────────────
+  // ── Lights ──────────────────────────────────────────────────────────────────
+  const lightsToggle = toggle("dv-lights", false, (on) => {
+    game.setAutoHeadlights(false);   // manual click takes over from auto
+    autoToggle.set(false);
+    game.setHeadlights(on);
+  });
+  const autoToggle = toggle("dv-lights-auto", true, (on) => game.setAutoHeadlights(on));
+  slider("dv-lamp", HEADLIGHTS, "lampEmissive", (v) => v.toFixed(1), () => game.refreshLights());
+  slider("dv-beam", HEADLIGHTS, "intensity", (v) => v.toFixed(0), () => game.refreshLights());
+
+  // ── Bloom ───────────────────────────────────────────────────────────────────
+  const bloom = { strength: 0.9, radius: 0.5 };
+  toggle("dv-bloom", true, (on) => app.postFx?.setBloom({ enabled: on }));
+  slider("dv-bloom-str", bloom, "strength", (v) => v.toFixed(2),
+    (v) => app.postFx?.setBloom({ strength: v }));
+  slider("dv-bloom-rad", bloom, "radius", (v) => v.toFixed(2),
+    (v) => app.postFx?.setBloom({ radius: v }));
+  slider("dv-glow", glowPropParams, "intensity", (v) => v.toFixed(1),
+    () => game.refreshGlowProps());
+
+  // ── Audio ───────────────────────────────────────────────────────────────────
   const audio = game.audioState;
+  const va = game.vehicleAudioSettings;
   toggle("dv-mute", !!audio.muteAll, (on) => { audio.muteAll = on; });
   slider("dv-vol", audio.buses.master, "volume", (v) => `${Math.round(v * 100)}%`);
+  slider("dv-bus-veh", audio.buses.vehicle, "volume", (v) => `${Math.round(v * 100)}%`);
+
+  const pct = (v) => `${Math.round(v * 100)}%`;
+  slider("dv-a-engine", va, "engineVol", pct);
+  slider("dv-a-wind", va, "windMul", pct);
+  slider("dv-a-wheels", va, "wheelsMul", pct);
+  slider("dv-a-drift", va, "driftBrakeMul", pct);
+  slider("dv-a-nitro", va, "nitroMul", pct);
+  slider("dv-p-min", va, "enginePitchMin");
+  slider("dv-p-max", va, "enginePitchMax");
+
+  // ── FX ──────────────────────────────────────────────────────────────────────
   toggle("dv-marks", true, (on) => game.setTireMarksEnabled(on));
   toggle("dv-smoke", true, (on) => game.setDriftSmokeEnabled(on));
 
@@ -399,6 +610,9 @@ export function createRoadDevPanel({ app, game, params }) {
     renderMode();
     piecesEl.textContent = String(game.getPieceCount());
     trisEl.textContent = game.getCollisionTriCount().toLocaleString();
+    // Auto mode flips the headlights from outside the panel — keep the toggle
+    // showing the truth rather than the last thing that was clicked.
+    lightsToggle.set(game.getHeadlights());
   }
   refresh();
 

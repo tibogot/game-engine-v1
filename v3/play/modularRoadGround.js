@@ -23,6 +23,8 @@ const _tmpN = new THREE.Vector3();
 const _cliffN = new THREE.Vector3();
 const _treeN = new THREE.Vector3();
 const _terrN = new THREE.Vector3();
+const _deckN = new THREE.Vector3();
+const _moverN = new THREE.Vector3();
 
 /**
  * @param {object} opts
@@ -50,7 +52,15 @@ export function createVehicleGround({
     return out.normalize();
   }
 
-  const state = { cliffBvh, roadBvh, roadSolidsBvh, treeBvh };
+  // moverBvh / moverSolidsBvh are the DYNAMIC counterparts of roadBvh /
+  // roadSolidsBvh: geometry that moves every tick (elevator platforms, sliding
+  // walls). Kept separate so the big static track BVH is baked once on edit and
+  // only the handful of moving meshes is rebuilt per tick — rebuilding one
+  // combined BVH per tick is O(whole track) and dominates the frame.
+  const state = {
+    cliffBvh, roadBvh, roadSolidsBvh, treeBvh,
+    moverBvh: null, moverSolidsBvh: null,
+  };
 
   // ── GROUND (wheel probes + deck contact) ────────────────────────────────
   const ground = {
@@ -65,6 +75,11 @@ export function createVehicleGround({
 
       if (state.roadBvh?.baked) {
         const h = state.roadBvh.raycastFirst(origin, dir, far);
+        if (h && (!best || h.distance < best.distance)) best = h;
+      }
+
+      if (state.moverBvh?.baked) {
+        const h = state.moverBvh.raycastFirst(origin, dir, far);
         if (h && (!best || h.distance < best.distance)) best = h;
       }
 
@@ -110,6 +125,10 @@ export function createVehicleGround({
         const h = state.roadBvh.spherecast(ox, oy, oz, radius, dx, dy, dz, maxDist);
         if (h) best = h;
       }
+      if (state.moverBvh?.baked) {
+        const h = state.moverBvh.spherecast(ox, oy, oz, radius, dx, dy, dz, maxDist);
+        if (h && (!best || h.distance < best.distance)) best = h;
+      }
       if (state.cliffBvh?.spherecast && state.cliffBvh?.baked) {
         const h = state.cliffBvh.spherecast(ox, oy, oz, radius, dx, dy, dz, maxDist);
         if (h && (!best || h.distance < best.distance)) best = h;
@@ -124,11 +143,22 @@ export function createVehicleGround({
      *  and bounces the chassis. Over terrain the wheels + suspension are the
      *  only ground contact (matching v2's existing car). */
     closestPointWithNormal(px, py, pz, maxDist, outNormal) {
+      let best = null;
       if (state.roadBvh?.baked) {
         const r = state.roadBvh.closestPointWithNormal(px, py, pz, maxDist, outNormal);
-        if (r) return r;
+        if (r) best = r;
       }
-      return null;
+      // A moving platform can be nearer than the static track, so compare rather
+      // than returning the first hit — write into a scratch normal and only copy
+      // it out if it wins, or a losing mover would still overwrite outNormal.
+      if (state.moverBvh?.baked) {
+        const r = state.moverBvh.closestPointWithNormal(px, py, pz, maxDist, _deckN);
+        if (r && (!best || r.distance < best.distance)) {
+          best = r;
+          outNormal.copy(_deckN);
+        }
+      }
+      return best;
     },
   };
 
@@ -137,6 +167,7 @@ export function createVehicleGround({
     get baked() {
       return !!(
         state.roadSolidsBvh?.baked ||
+        state.moverSolidsBvh?.baked ||
         state.cliffBvh?.baked ||
         state.treeBvh?.baked
       );
@@ -150,6 +181,17 @@ export function createVehicleGround({
         if (r) {
           best = r;
           outNormal.copy(_tmpN);
+        }
+      }
+
+      // Moving walls / sliding barriers — same query as the static road solids,
+      // but from the per-tick BVH so the chassis hits where the wall IS, not
+      // where it was baked.
+      if (state.moverSolidsBvh?.baked) {
+        const r = state.moverSolidsBvh.closestPointWithNormal(px, py, pz, maxDist, _moverN);
+        if (r && (!best || r.distance < best.distance)) {
+          best = r;
+          outNormal.copy(_moverN);
         }
       }
 
@@ -192,6 +234,14 @@ export function createVehicleGround({
     },
     setRoadSolidsBvh(bvh) {
       state.roadSolidsBvh = bvh || null;
+    },
+    /** Dynamic deck BVH (moving platforms) — rebaked per physics tick. */
+    setMoverBvh(bvh) {
+      state.moverBvh = bvh || null;
+    },
+    /** Dynamic solids BVH (moving walls) — rebaked per physics tick. */
+    setMoverSolidsBvh(bvh) {
+      state.moverSolidsBvh = bvh || null;
     },
     setCliffBvh(bvh) {
       state.cliffBvh = bvh || null;

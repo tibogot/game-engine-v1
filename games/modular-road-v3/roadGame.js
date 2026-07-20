@@ -35,6 +35,7 @@ import {
   AERO,
   DRIVETRAIN,
   DECK,
+  HEADLIGHTS,
 } from "../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../v3/play/modularRoadGround.js";
@@ -52,7 +53,7 @@ import {
   guardrailParams,
 } from "./modularRoadKit.js";
 import { bakeRoadThumbnails } from "./modularRoadThumbnails.js";
-import { PropManager, PROP_CATALOG } from "./modularRoadProps.js";
+import { PropManager, PROP_CATALOG, glowPropParams } from "./modularRoadProps.js";
 import { MoverPropManager, MOVER_CATALOG } from "./modularRoadMoverProps.js";
 import { PortalManager, DEFAULT_PORTAL_PARAMS } from "./modularRoadPortals.js";
 import { ModularRoadTireMarks } from "./modularRoadTireMarks.js";
@@ -79,6 +80,8 @@ const MAX_SIM_TICKS = 8;
 const FALL_Y = -60;
 /** How far above the terrain a freshly seeded chain's first piece sits. */
 const ROAD_SEED_CLEARANCE = 0.5;
+/** Seconds between auto-headlight sun checks (cheap, but not per-frame work). */
+const AUTO_LIGHT_INTERVAL = 0.5;
 
 export async function startRoadGame({ onStatus = () => {} } = {}) {
   // 1) ── BOOT THE ENGINE ────────────────────────────────────────────────────
@@ -97,6 +100,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Rivers/lakes carve the heightmap AFTER the project's own height sync, so
   // pull a fresh CPU mirror before anything below reads ground heights.
   await app.refreshWorldHeights?.();
+
+  // Post-FX: the GAME owns its look. postFx.enabled defaults to FALSE in the
+  // engine and is NOT stored in the .v3proj, so without this the game gets no
+  // bloom no matter what its materials do.
+  //
+  // v3 bloom is SELECTIVE — only the emissive MRT buffer blooms, so a material
+  // must write `mrtNode` to glow (see applyBloomMRT in modularRoadProps.js).
+  // That differs from the lab, which bloomed the whole scene's bright pixels, so
+  // a high `emissiveIntensity` alone was enough there and is NOT enough here.
+  app.postFx?.setEnabled(true);
+  app.postFx?.setBloomSelective(true);
+  app.postFx?.setBloom({ enabled: true, strength: 0.9, threshold: 0.0, radius: 0.5 });
 
   // 3) ── THE TRACK ──────────────────────────────────────────────────────────
   onStatus("Building track…");
@@ -196,8 +211,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Chassis-corner safety floor follows the terrain instead of pinning to y=0.
   vehicle.getFloorY = (x, z) => app.getWorldHeight(x, z);
 
+  // STATIC collision — track pieces + props. Baked only when the track changes.
   const deckBvh = new RoadBvh();   // road decks → wheel probes
   const solidsBvh = new RoadBvh(); // guardrails + tunnel shells → chassis collision
+  // DYNAMIC collision — moving platforms / walls only. Rebaked every physics
+  // tick, which is affordable precisely BECAUSE the static track isn't in here.
+  const moverDeckBvh = new RoadBvh();
+  const moverSolidsBvh = new RoadBvh();
 
   const ground = createVehicleGround({
     getTerrainHeight: (x, z) => app.getWorldHeight(x, z),
@@ -222,12 +242,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       if (p.shellMesh) solids.push(p.shellMesh);
     }
 
-    const moverCol = movers.collisionMeshes();
-    decks.push(...moverCol.deck);
-    solids.push(...moverCol.solids);
+    // Props are static during a run (they only move via the build-mode gizmo, and
+    // that fires onChange → a full rebake), so they belong in the static BVH.
+    // Movers do NOT — they go in the dynamic one, rebaked per tick below.
     const propCol = props.collisionMeshes();
     decks.push(...propCol.deck);
     solids.push(...propCol.solids);
+
+    rebakeMovers();
 
     if (decks.length) {
       deckBvh.bakeFromMeshes(decks);
@@ -246,25 +268,35 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   /**
-   * Deck-only rebake including the moving platforms' CURRENT pose.
+   * Rebake ONLY the moving geometry, at its current pose.
    *
    * A moving platform's mesh travels, so a BVH baked once goes stale the moment
-   * it moves and the wheels probe empty space. The lab re-bakes the deck BVH
-   * every tick while any deck-mover exists — expensive, so it's gated on there
-   * actually being one (see the tick loop).
+   * it moves and the wheels probe empty space. The lab solved this by rebuilding
+   * the ENTIRE deck BVH (whole track included) every tick — O(track size) work,
+   * up to 8× per frame here, which dominates the frame on any real track.
+   *
+   * Instead the movers live in their own BVH that the ground adapter queries
+   * alongside the static one, so this rebuild is proportional to the number of
+   * moving platforms (usually 1–3 meshes) and independent of track size.
    */
-  function rebakeDeckWithMovers() {
-    scene.updateMatrixWorld(true);
-    const decks = builder.pieces
-      .map((p) => p.mesh)
-      .filter((m) => m && !m.userData.noCollision);
+  function rebakeMovers() {
     const moverCol = movers.collisionMeshes();
-    decks.push(...moverCol.deck);
-    for (const dm of movers.getDeckMovers()) decks.push(dm.mesh);
-    decks.push(...props.collisionMeshes().deck);
-    if (!decks.length) return;
-    deckBvh.bakeFromMeshes(decks);
-    ground.setRoadBvh(deckBvh.baked ? deckBvh : null);
+    const decks = [...moverCol.deck];
+    for (const dm of movers.getDeckMovers()) {
+      if (dm.mesh && !decks.includes(dm.mesh)) decks.push(dm.mesh);
+    }
+    if (decks.length) {
+      moverDeckBvh.bakeFromMeshes(decks);
+      ground.setMoverBvh(moverDeckBvh.baked ? moverDeckBvh : null);
+    } else {
+      ground.setMoverBvh(null);
+    }
+    if (moverCol.solids.length) {
+      moverSolidsBvh.bakeFromMeshes(moverCol.solids);
+      ground.setMoverSolidsBvh(moverSolidsBvh.baked ? moverSolidsBvh : null);
+    } else {
+      ground.setMoverSolidsBvh(null);
+    }
   }
 
   // ── COLLISION DEBUG ────────────────────────────────────────────────────────
@@ -288,8 +320,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.5 }),
       ));
     };
-    add(deckBvh, 0xff5060);   // decks = red
-    add(solidsBvh, 0x5080ff); // solids = blue
+    add(deckBvh, 0xff5060);   // static decks = red
+    add(solidsBvh, 0x5080ff); // static solids = blue
+    // Mover BVHs are intentionally NOT drawn here: they rebake every tick, so a
+    // wireframe snapshot would lag the platform. The movers' own visible meshes
+    // already show where they are.
   }
 
   function setCollisionDebug(on) {
@@ -307,10 +342,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // require a gesture before anything plays, hence unlock() on first input.
   // Deep-copy `buses`: a shallow spread would share that object with the
   // exported DEFAULT_MIXER, so the dev panel's volume slider would write back
-  // into the module-level default.
+  // into the module-level default. Starts MUTED (the mixer's own default) — the
+  // dev panel's Mute-all toggle turns it on.
   const audioState = {
     ...DEFAULT_MIXER,
-    muteAll: false,
+    muteAll: true,
     buses: Object.fromEntries(
       Object.entries(DEFAULT_MIXER.buses).map(([k, v]) => [k, { ...v }]),
     ),
@@ -325,6 +361,41 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const unlockAudio = () => audioSystem.unlock();
   addEventListener("pointerdown", unlockAudio, { passive: true });
   addEventListener("keydown", unlockAudio, { passive: true });
+
+  // 4c) ── HEADLIGHTS ────────────────────────────────────────────────────────
+  // The lab drove headlights from a day/night preset that also moved the sun.
+  // v3 owns time-of-day itself, so instead we READ the sun and switch the lights
+  // to match. `worldToolState.light.sunElevation` isn't on the app's public API,
+  // so the sun's DirectionalLight is located in the scene and its direction used
+  // — no engine source touched.
+  let sunLight = null;
+  scene.traverse((o) => { if (!sunLight && o.isDirectionalLight) sunLight = o; });
+
+  let autoHeadlights = true;
+  let headlightsOn = false;
+  const _sunDir = new THREE.Vector3();
+
+  function setHeadlights(on) {
+    headlightsOn = !!on;
+    vehicle.setHeadlights(headlightsOn);
+  }
+
+  /**
+   * Sun height → lights. Hysteresis (on below 0.10, off above 0.16) so the lamps
+   * don't strobe when the sun sits right on the threshold.
+   */
+  function updateAutoHeadlights() {
+    if (!autoHeadlights || !sunLight) return;
+    _sunDir.copy(sunLight.position);
+    if (sunLight.target) _sunDir.sub(sunLight.target.position);
+    if (_sunDir.lengthSq() < 1e-8) return;
+    const sinElev = _sunDir.normalize().y;
+    if (!headlightsOn && sinElev < 0.10) setHeadlights(true);
+    else if (headlightsOn && sinElev > 0.16) setHeadlights(false);
+  }
+
+  setHeadlights(false);
+  updateAutoHeadlights(); // match the world we just loaded, before first frame
 
   // 5) ── CAMERA ─────────────────────────────────────────────────────────────
   // The lab's chase rig (loop-follow included). In build mode we hand the camera
@@ -371,30 +442,97 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     mb.RIGHT = mode === "build" ? THREE.MOUSE.PAN : null;
   }
 
-  // 6) ── INPUT ──────────────────────────────────────────────────────────────
-  // buildRoadPaletteUI() installs the BUILD-mode shortcuts itself (piece hotkeys,
-  // R flip, Q/E yaw, Enter/Space place, Backspace undo) — so this handler only
-  // owns the mode toggle and the DRIVE controls, and must not shadow those keys
-  // while building.
-  // Arrows mirror WASD. preventDefault on them matters more than on WASD —
-  // otherwise arrow keys scroll the page while you're driving.
+  // 6) ── INPUT (the game OWNS the keyboard) ─────────────────────────────────
+  // The v3 editor binds its shortcuts on window in the BUBBLE phase, gated only
+  // on `!playMode.active` — and this game isn't play mode, so every editor
+  // letter-shortcut (N=spawn, mode keys…) is live under us. Our palette also
+  // listens in bubble, and the editor registered first, so a bubble listener
+  // can't preempt it. The only interception that beats the editor is CAPTURE.
+  //
+  // So the game takes the keyboard outright: one capture-phase handler that
+  // SWALLOWS every non-form key (nothing reaches the editor) and implements the
+  // whole keymap itself — drive controls AND the build shortcuts the palette
+  // used to own. The palette's own key listener simply stops receiving events
+  // (its mouse/tile UI is unaffected); future editor shortcuts can't leak.
   const DRIVE_KEYS = new Set([
     "keyw", "keya", "keys", "keyd", "keyq", "keye", "space",
     "arrowup", "arrowdown", "arrowleft", "arrowright",
   ]);
+  const DEG15 = Math.PI / 12;
+
+  const isFormField = (t) =>
+    t instanceof HTMLInputElement ||
+    t instanceof HTMLSelectElement ||
+    t instanceof HTMLTextAreaElement;
+
+  function handleBuildKey(e, code) {
+    // Piece hotkeys (1–9, 0, letters) select the active piece.
+    const byKey = PIECE_CATALOG.find((p) => p.key && p.key === e.key);
+    if (byKey) {
+      builder.setActivePiece(byKey.id);
+      paletteUi?.renderPieces?.();
+      paletteUi?.refreshStatus?.();
+      return;
+    }
+    switch (code) {
+      case "keyr": builder.flip(); break;
+      case "keyq": if (builder.freePlaceMode) builder.rotateFreeYaw(DEG15); break;
+      case "keye":
+        if (builder.freePlaceMode) {
+          if (e.shiftKey) builder.setPlacementGizmoMode("rotate");
+          else builder.rotateFreeYaw(-DEG15);
+        }
+        break;
+      case "keyw": if (builder.freePlaceMode) builder.setPlacementGizmoMode("translate"); break;
+      case "enter": case "space": builder.place(); break;
+      case "backspace": builder.undo(); break;
+      case "keyn": seedChainAtSpawn(); break;      // new chain (game-owned, not editor spawn)
+      case "bracketleft": builder.cycleChain(-1); break;
+      case "bracketright": builder.cycleChain(1); break;
+      default: return;
+    }
+    paletteUi?.refreshStatus?.();
+  }
+
+  // Keys whose browser default we suppress (page scroll / history-back). Letters
+  // and digits have no default worth blocking, and we deliberately DON'T
+  // preventDefault F-keys / Tab / refresh — only stopPropagation, which blocks
+  // the editor's JS listeners without touching browser/OS shortcuts.
+  const PREVENT_DEFAULT = new Set([
+    "space", "arrowup", "arrowdown", "arrowleft", "arrowright", "backspace",
+  ]);
 
   addEventListener("keydown", (e) => {
-    if (e.target instanceof HTMLInputElement) return;
+    if (isFormField(e.target)) return; // let the dev panel / any text field type
+    // Let Ctrl/Meta/Alt combos through (browser + OS shortcuts). The editor's own
+    // shortcuts are all unmodified, so this still blocks every one of them.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
     const code = e.code.toLowerCase();
     keys[code] = true;
 
-    if (code === "keyb") { toggleMode(); return; }
-    if (mode !== "drive") return; // build mode belongs to the palette
+    // Block the editor (and our now-redundant palette listener) from seeing this
+    // key. stopImmediatePropagation is harmless to browser shortcuts — those
+    // aren't cancelable via propagation, only via preventDefault (scoped below).
+    e.stopImmediatePropagation();
+    if (PREVENT_DEFAULT.has(code)) e.preventDefault();
 
-    if (DRIVE_KEYS.has(code)) e.preventDefault();
-    if (code === "keyr") respawn();
-  });
-  addEventListener("keyup", (e) => { keys[e.code.toLowerCase()] = false; });
+    if (code === "keyb") { toggleMode(); return; }
+
+    if (mode === "drive") {
+      if (code === "keyr") respawn();
+      return;
+    }
+    handleBuildKey(e, code); // build mode
+  }, true); // ← capture phase
+
+  addEventListener("keyup", (e) => {
+    // Always clear the key regardless of modifiers — if a modifier were held at
+    // release the state would otherwise stick and jam the throttle/steer.
+    keys[e.code.toLowerCase()] = false;
+    if (isFormField(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+    e.stopImmediatePropagation();
+  }, true);
 
   // Toolbar buttons the palette does NOT wire (the lab's page owned these).
   const onClick = (id, fn) => document.getElementById(id)?.addEventListener("click", fn);
@@ -418,7 +556,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   });
 
   onClick("road-save", () => {
-    downloadTrackJson(exportTrack(trackCtx()), "modular-road-track.json");
+    // `spawn` is wrapped around the lab's track format rather than folded into
+    // modularRoadTrackIO — keeps that ported module untouched, and old tracks
+    // without a spawn just resolve to the .v3proj start.
+    const track = { ...exportTrack(trackCtx()), spawn: gameSpawn };
+    downloadTrackJson(track, "modular-road-track.json");
   });
 
   const trackFileInput = createTrackFileInput((data) => {
@@ -428,6 +570,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       alert(`Could not load track: ${res.error}`);
       return;
     }
+    gameSpawn = data.spawn ?? null;
+    updateSpawnMarker();
     bakeCollision();
     paletteUi.refreshStatus();
   });
@@ -447,11 +591,59 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     };
   }
 
-  /** Where the level designer put the player start, else the world origin. */
-  function spawnXZ() {
+  // ── SPAWN ──────────────────────────────────────────────────────────────────
+  // Where the car drops on entering drive mode / after a fall. Priority:
+  //   1. gameSpawn — set by the user in the dev panel, saved WITH THE TRACK.
+  //   2. the .v3proj player start (app.getSpawnPoint).
+  //   3. world origin.
+  // For an air track the spawn has a REAL Y (up on the track), so the full pose
+  // is stored, not just XZ + terrain height.
+  let gameSpawn = null; // {x, y, z, yaw} | null
+
+  function resolveSpawn() {
+    if (gameSpawn) return gameSpawn;
     const sp = app.getSpawnPoint?.() ?? null;
-    return { x: sp?.x ?? 0, z: sp?.z ?? 0, yaw: sp?.yaw ?? 0 };
+    if (sp) return { x: sp.x, y: sp.y, z: sp.z, yaw: sp.yaw ?? 0 };
+    return { x: 0, y: app.getWorldHeight(0, 0), z: 0, yaw: 0 };
   }
+
+  // Marker so the spawn is visible while building — a green arrow pointing the
+  // way the car will face. One draw, build-mode only.
+  const spawnMarker = new THREE.Group();
+  spawnMarker.name = "RoadSpawnMarker";
+  {
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(0.6, 2.2, 12),
+      new THREE.MeshStandardMaterial({ color: 0x35e07a, emissive: 0x0c5028, roughness: 0.5 }),
+    );
+    cone.rotation.x = Math.PI / 2; // point +Z (the car's forward)
+    cone.position.z = 0.4;
+    spawnMarker.add(cone);
+  }
+  scene.add(spawnMarker);
+
+  function updateSpawnMarker() {
+    const s = resolveSpawn();
+    spawnMarker.position.set(s.x, s.y + 0.6, s.z);
+    spawnMarker.rotation.set(0, s.yaw, 0);
+  }
+
+  /** Capture the car's current pose as the spawn (drive to a good start, click). */
+  function setSpawnToCar() {
+    const b = vehicle.body;
+    const e = new THREE.Euler().setFromQuaternion(b.quat, "YXZ");
+    gameSpawn = { x: b.pos.x, y: b.pos.y, z: b.pos.z, yaw: e.y - Math.PI };
+    updateSpawnMarker();
+  }
+
+  /** Capture the current build cursor (open chain end) as the spawn. */
+  function setSpawnToCursor() {
+    const p = new THREE.Vector3().setFromMatrixPosition(builder.currentConnector);
+    gameSpawn = { x: p.x, y: p.y, z: p.z, yaw: builder.freeYaw ?? 0 };
+    updateSpawnMarker();
+  }
+
+  function clearSpawn() { gameSpawn = null; updateSpawnMarker(); }
 
   /**
    * Seat a fresh chain on the ground at the spawn point.
@@ -461,19 +653,27 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * origin is usually underground or floating, so the first piece has to be
    * seeded against the heightfield or the track starts buried.
    */
-  function seedChainAtSpawn() {
-    const { x, z, yaw } = spawnXZ();
-    const y = app.getWorldHeight(x, z) + ROAD_SEED_CLEARANCE;
-    builder.beginNewChain(new THREE.Vector3(x, y, z), yaw);
+  function seedChainAtSpawn({ showGizmo = true } = {}) {
+    const s = resolveSpawn();
+    const y = s.y + ROAD_SEED_CLEARANCE;
+    builder.beginNewChain(new THREE.Vector3(s.x, y, s.z), s.yaw);
+    // beginNewChain always pops the placement gizmo up. That's right when the
+    // user asked for a new chain, but not on boot: it's ~13 draw calls of grab
+    // handles floating in an empty world before anyone has touched anything.
+    // deselectPlacement only hides it — freePlaceMode and the anchor survive, so
+    // pressing N (or selecting a chain) brings it straight back.
+    if (!showGizmo) builder.deselectPlacement();
     builder.refreshGhost?.();
   }
 
-  /** Drop the car at the project's saved player start, or the world origin. */
+  /** Drop the car at the resolved spawn (user spawn → .v3proj start → origin). */
   function respawn() {
-    const { x, z, yaw } = spawnXZ();
-    const y = app.getWorldHeight(x, z) + 1.0;
-    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw + Math.PI);
-    vehicle.setSpawn(new THREE.Vector3(x, y, z), q);
+    const s = resolveSpawn();
+    // An explicit spawn is already a valid on-track pose; only the terrain-based
+    // fallback needs a lift so the wheels clear the ground.
+    const y = s.y + (gameSpawn ? 0 : 1.0);
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s.yaw + Math.PI);
+    vehicle.setSpawn(new THREE.Vector3(s.x, y, s.z), q);
     vehicle.respawn();
     chase.reset();
     // Without these the old skid ribbon and smoke puffs stay stretched across
@@ -508,6 +708,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       builder.setGhostVisible(true);
       vehicle.enabled = false;
     }
+    spawnMarker.visible = !driving; // a build-time guide; hidden while racing
     if (paletteEl) paletteEl.style.display = driving ? "none" : "";
     if (hintEl) hintEl.dataset.mode = mode;
     applyControlMode();
@@ -522,8 +723,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   movers.setEnabled(true);
   portals.setBuildEnabled(true);
   applyControlMode();
-  seedChainAtSpawn(); // put the build anchor on the ground, not at origin/y=0
+  // Put the build anchor on the ground rather than at origin/y=0, but leave the
+  // gizmo hidden until the user actually starts placing (see seedChainAtSpawn).
+  seedChainAtSpawn({ showGizmo: false });
   bakeCollision();
+  updateSpawnMarker();
   if (paletteEl) paletteEl.style.display = ""; // boots in build mode
   paletteUi.refreshStatus();
 
@@ -534,8 +738,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let worldName = boot.name;
   devPanel = createRoadDevPanel({
     app,
-    params: { TIRE, AERO, DRIVETRAIN, DECK },
+    params: { TIRE, AERO, DRIVETRAIN, DECK, HEADLIGHTS, glowPropParams },
     game: {
+      setSpawnToCar,
+      setSpawnToCursor,
+      clearSpawn,
+      hasSpawn: () => gameSpawn != null,
+      setHeadlights,
+      getHeadlights: () => headlightsOn,
+      setAutoHeadlights: (on) => { autoHeadlights = !!on; updateAutoHeadlights(); },
+      // Re-push HEADLIGHTS params onto the rig after a slider moves.
+      refreshLights: () => vehicle.applyHeadlightParams(),
+      // glowPropParams is shared by every placed glow prop; this pushes the new
+      // values onto them (emissive is a live node, so bloom follows for free).
+      refreshGlowProps: () => props.applyGlowParams(),
       getMode: () => mode,
       toggleMode,
       respawn,
@@ -558,8 +774,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       },
       cameraParams: chase.params,
       audioState,
+      vehicleAudioSettings,
       getPieceCount: () => builder.pieces.length,
-      getCollisionTriCount: () => deckBvh.triCount + solidsBvh.triCount,
+      getCollisionTriCount: () =>
+        deckBvh.triCount + solidsBvh.triCount +
+        moverDeckBvh.triCount + moverSolidsBvh.triCount,
       getWorldName: () => worldName,
       async loadWorldFile(file) {
         const res = await loadWorldFromFile(app, file, { onStatus: () => {} });
@@ -582,6 +801,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // ghosts stay framerate-independent; visuals interpolate the leftover.
   let last = performance.now();
   let simAccum = 0;
+  let autoLightAccum = 0;
   const tick = () => {
     const now = performance.now();
     const dt = Math.min((now - last) / 1000, 0.05);
@@ -604,10 +824,17 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // Everything that affects the OUTCOME advances in whole fixed ticks —
       // movers, the car, boost fields, portals — so the result is identical at
       // any framerate. Visuals interpolate the leftover fraction afterwards.
-      const hasDeckMovers = movers.getDeckMovers().length > 0;
+      const hasMovers = movers.getMovers().length > 0;
       for (let i = 0; i < ticks; i++) {
         movers.update(FIXED_DT);
-        if (hasDeckMovers) rebakeDeckWithMovers(); // platforms moved → BVH is stale
+        if (hasMovers) {
+          // Only the movers' own (small) BVH — the static track BVH is untouched.
+          // And only the movers' subtree is re-transformed: scene.updateMatrixWorld
+          // would walk the whole world (terrain, foliage, props) every tick to
+          // pick up a couple of platforms.
+          movers.group.updateMatrixWorld(true);
+          rebakeMovers();
+        }
         vehicle.tick(input);
         props.applyFields(vehicle, FIXED_DT);      // boost pads etc.
         portals.updateDrive(FIXED_DT, vehicle);
@@ -628,6 +855,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
 
     chase.update(dt);
+
+    // Per-frame audio pump — drives every layer's gain/pitch from the car's
+    // state. WITHOUT THIS CALL NOTHING PLAYS AT ALL. Runs unconditionally (not
+    // just in drive mode) so layers fade out cleanly when the car is parked or
+    // you switch back to build.
+    audioSystem.update(dt);
+
+    // The sun can be moved live from the v3 world panel, so re-check rather than
+    // only sampling at boot. Throttled — this is a scene lookup, not per-frame work.
+    autoLightAccum += dt;
+    if (autoLightAccum >= AUTO_LIGHT_INTERVAL) {
+      autoLightAccum = 0;
+      const wasOn = headlightsOn;
+      updateAutoHeadlights();
+      if (wasOn !== headlightsOn) devPanel?.refresh();
+    }
 
     app._roadRaf = requestAnimationFrame(tick);
   };

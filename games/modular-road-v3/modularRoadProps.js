@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
+import { materialEmissive } from "three/tsl";
+import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { computeFrames, buildProfile, buildTunnelGeometry } from "./modularRoadKit.js";
 import {
   kickerRampGeometry,
@@ -155,15 +157,49 @@ function boostRingGroup() {
  *  high emissiveIntensity (>1) so it blooms against any sky (folio-2025 style). */
 export const glowPropParams = { color: "#ff5a1e", intensity: 6 };
 
+/**
+ * Write a material's emissive into the bloom buffer.
+ *
+ * Built from `materialEmissive`, a LIVE node, so later changes to `.emissive` /
+ * `.emissiveIntensity` (see applyGlowParams) update the glow with no mrtNode
+ * rebuild.
+ *
+ * Goes through v3's BloomMRTNode (applyBloomMRT), NOT stock mrt(): these
+ * materials are also rendered into a plain offscreen RenderTarget by
+ * bakeRoadThumbnails() for the palette tiles, and on three r184 a stock mrtNode
+ * there emits a zero-member WGSL output struct and kills the renderer.
+ */
+function applyPropBloom(material) {
+  applyBloomMRT(material, materialEmissive);
+  material.userData.bloom = true;
+  return material;
+}
+
+/**
+ * Standard prop material.
+ *
+ * NODE material, not MeshStandardMaterial — v3's bloom is SELECTIVE: only the
+ * emissive MRT buffer blooms, and `mrtNode` is a NodeMaterial property. The lab
+ * bloomed the whole scene's bright pixels, so `emissive` plus a high
+ * `emissiveIntensity` glowed there for free; here that alone does nothing.
+ *
+ * `bloom` defaults on for emissiveIntensity > 1 — the props MEANT to glow
+ * (chevrons 5, boost ring 4.5, glow box/ring 6) opt in, while incidental
+ * emissive (a 0.4 metal sheen, the 0.5 pad slab) stays out of the bloom buffer.
+ * Pass `bloom` explicitly to override either way.
+ */
 function mat(color, opts = {}) {
-  return new THREE.MeshStandardMaterial({
+  const emissiveIntensity = opts.emissiveIntensity ?? 1;
+  const m = new THREE.MeshStandardNodeMaterial({
     color: new THREE.Color(color),
     roughness: opts.roughness ?? 0.7,
     metalness: opts.metalness ?? 0.1,
     emissive: new THREE.Color(opts.emissive ?? 0x000000),
-    emissiveIntensity: opts.emissiveIntensity ?? 1,
+    emissiveIntensity,
     side: opts.side ?? THREE.FrontSide,
   });
+  if (opts.bloom ?? emissiveIntensity > 1) applyPropBloom(m);
+  return m;
 }
 
 /** @type {{id:string,label:string,collision:string,make:()=>THREE.Object3D}[]} */
@@ -448,7 +484,13 @@ export class PropManager {
     this.gizmo.setMode(mode);
   }
 
-  /** Push the shared glow params onto every placed glow prop (box + ring). */
+  /**
+   * Push the shared glow params onto every placed glow prop (box + ring).
+   *
+   * No mrtNode rebuild needed: the bloom node is `materialEmissive`, which three
+   * resolves as emissive × emissiveIntensity through live uniform accessors — so
+   * writing these three properties updates the glow AND the bloom together.
+   */
   applyGlowParams() {
     for (const inst of this.instances) {
       if (inst.id !== "glowbox" && inst.id !== "glowring") continue;
