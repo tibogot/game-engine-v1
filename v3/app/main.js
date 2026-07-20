@@ -1073,8 +1073,10 @@ export async function startV3App(opts = {}) {
   const subTerrace      = document.getElementById("sub-terrace");
   const subNoise        = document.getElementById("sub-noise");
   const subErode        = document.getElementById("sub-erode");
+  const subHydro        = document.getElementById("sub-hydro");
   const subRamp         = document.getElementById("sub-ramp");
   const btnErode        = document.getElementById("btn-erode");
+  const btnHydro        = document.getElementById("btn-hydro");
   const btnRamp         = document.getElementById("btn-ramp");
   const btnSmudge       = document.getElementById("btn-smudge");
   const btnContrast     = document.getElementById("btn-contrast");
@@ -1084,6 +1086,12 @@ export async function startV3App(opts = {}) {
   const lblThermalSlope = document.getElementById("lbl-thermal-slope");
   const slThermalIter   = document.getElementById("sl-thermal-iter");
   const lblThermalIter  = document.getElementById("lbl-thermal-iter");
+  const slHydroStrength = document.getElementById("sl-hydro-strength");
+  const lblHydroStrength = document.getElementById("lbl-hydro-strength");
+  const slHydroWater    = document.getElementById("sl-hydro-water");
+  const lblHydroWater   = document.getElementById("lbl-hydro-water");
+  const slHydroIter     = document.getElementById("sl-hydro-iter");
+  const lblHydroIter    = document.getElementById("lbl-hydro-iter");
   const slRampWidth     = document.getElementById("sl-ramp-width");
   const lblRampWidth    = document.getElementById("lbl-ramp-width");
   const rampHint        = document.getElementById("ramp-hint");
@@ -1212,6 +1220,7 @@ export async function startV3App(opts = {}) {
     btnNoise  .classList.toggle("active", m === "noise");
     btnTerrace.classList.toggle("active", m === "terrace");
     btnErode  .classList.toggle("active", m === "erode");
+    btnHydro  .classList.toggle("active", m === "hydro");
     btnRamp   .classList.toggle("active", m === "ramp");
     btnSmudge .classList.toggle("active", m === "smudge");
     btnContrast.classList.toggle("active", m === "contrast");
@@ -1220,6 +1229,7 @@ export async function startV3App(opts = {}) {
     subTerrace   .style.display = stickyMode === "terrace" ? "" : "none";
     subNoise     .style.display = stickyMode === "noise"   ? "" : "none";
     subErode     .style.display = stickyMode === "erode"   ? "" : "none";
+    subHydro     .style.display = stickyMode === "hydro"   ? "" : "none";
     subRamp      .style.display = stickyMode === "ramp"    ? "" : "none";
   }
 
@@ -1230,6 +1240,7 @@ export async function startV3App(opts = {}) {
   btnNoise  .addEventListener("click", () => { stickyMode = "noise";   refreshModeIndicator(); });
   btnTerrace.addEventListener("click", () => { stickyMode = "terrace"; refreshModeIndicator(); });
   btnErode   .addEventListener("click", () => { stickyMode = "erode";    refreshModeIndicator(); });
+  btnHydro   .addEventListener("click", () => { stickyMode = "hydro";    refreshModeIndicator(); });
   btnSmudge  .addEventListener("click", () => { stickyMode = "smudge";   refreshModeIndicator(); });
   btnContrast.addEventListener("click", () => { stickyMode = "contrast"; refreshModeIndicator(); });
   btnRamp   .addEventListener("click", () => {
@@ -2128,6 +2139,25 @@ export async function startV3App(opts = {}) {
   });
   syncThermalUI();
 
+  function syncHydroUI() {
+    lblHydroStrength.textContent = slHydroStrength.value;
+    lblHydroWater   .textContent = slHydroWater.value;
+    lblHydroIter    .textContent = slHydroIter.value;
+  }
+  slHydroStrength.addEventListener("input", () => {
+    sculpt.uHydroStrength.value = Number(slHydroStrength.value) * 0.5;
+    syncHydroUI();
+  });
+  slHydroWater.addEventListener("input", () => {
+    sculpt.uHydroRain.value = Number(slHydroWater.value) / 1000;
+    syncHydroUI();
+  });
+  slHydroIter.addEventListener("input", () => {
+    sculpt.hydroConfig.iterations = Number(slHydroIter.value);
+    syncHydroUI();
+  });
+  syncHydroUI();
+
   function syncRampWidthUI() { lblRampWidth.textContent = slRampWidth.value + "m"; }
   slRampWidth.addEventListener("input", () => {
     sculpt.uRampWidth.value = Number(slRampWidth.value) / WORLD_SIZE;
@@ -2280,6 +2310,7 @@ export async function startV3App(opts = {}) {
     else if (mode === "noise")   sculpt.noise(u, v);
     else if (mode === "terrace") sculpt.terrace(u, v);
     else if (mode === "erode")    sculpt.thermal(u, v);
+    else if (mode === "hydro")    sculpt.hydro(u, v);
     else if (mode === "smudge")   sculpt.smudge(u, v);
     else if (mode === "contrast") sculpt.contrast(u, v);
     else sculpt.paint(u, v, mode === "lower" ? -1 : 1, stickyStamp);

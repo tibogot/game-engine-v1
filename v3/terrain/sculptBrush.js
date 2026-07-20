@@ -83,6 +83,12 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   const uRampB            = uniform(new THREE.Vector2(0.7, 0.5));
   const uRampWidth        = uniform(0.02);  // ramp half-width in UV space
   const uMaskRotation     = uniform(0.0);   // brush mask rotation in radians
+  // Hydraulic (virtual-pipe) brush. Rain = water added per stamp (normalized
+  // height units); strength = erosion coefficient; accel = pipe flow gain
+  // (internal, stability-tuned — not exposed).
+  const uHydroRain     = uniform(0.01);
+  const uHydroStrength = uniform(25.0);
+  const uHydroAccel    = uniform(0.5);
 
   // Read source for all brush passes (scratch copy of the brush neighbourhood).
   const srcNode = texture(rtMain.texture);
@@ -324,6 +330,122 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   })();
   const thermalQuad = new QuadMesh(thermalMat);
 
+  // ── Hydraulic (virtual-pipe) brush ─────────────────────────────────────────
+  // Mei et al. shallow-water erosion scoped to the brush rect: rain falls under
+  // the cursor, water flows downhill via pipe fluxes (concentrating into
+  // channels), and terrain is incised where fast water crosses slopes. Unlike
+  // the global stream-power pass this can't see the whole watershed, so it
+  // detail-carves gullies within the footprint rather than a full river network.
+  //
+  // Extra transient RTs (water depth + 4-way outflow flux, ping-ponged) are
+  // allocated lazily on first use — they cost a full-map RGBA each, wasteful for
+  // users who never touch this tool. State lives only for the duration of one
+  // stamp; nothing persists between stamps except the eroded rtMain.
+  let hydroRTs = null;
+  function ensureHydroRTs() {
+    if (!hydroRTs) {
+      hydroRTs = {
+        waterA: makeHeightRT(), waterB: makeHeightRT(),
+        fluxA:  makeHeightRT(), fluxB:  makeHeightRT(),
+      };
+    }
+    return hydroRTs;
+  }
+
+  // Dedicated read nodes — hydro passes sample terrain, water and flux at once,
+  // so they can't share the single srcNode the other brushes ping-pong through.
+  const hTerr  = texture(rtScratch.texture);
+  const hWater = texture(rtMain.texture);
+  const hFlux  = texture(rtMain.texture);
+
+  const hydroZeroMat = new THREE.MeshBasicNodeMaterial();
+  hydroZeroMat.fragmentNode = Fn(() => vec4(float(0), float(0), float(0), float(0)))();
+  const hydroZeroQuad = new QuadMesh(hydroZeroMat);
+
+  // Rain: seed water = rain·falloff so it pools under the brush and feathers to
+  // ~0 at the rect margin (acts as an absorbing boundary — no edge reflection).
+  const hydroRainMat = new THREE.MeshBasicNodeMaterial();
+  hydroRainMat.fragmentNode = Fn(() =>
+    vec4(uHydroRain.mul(getBrushFalloff(uv())), float(0), float(0), float(1)),
+  )();
+  const hydroRainQuad = new QuadMesh(hydroRainMat);
+
+  // Flux update: grow each of the 4 outflow pipes by the water-surface drop to
+  // that neighbour, then scale them down if they'd drain more water than the
+  // cell holds (the stability guarantee — flux can never go negative or
+  // over-empty a cell). Channels: r=left, g=right, b=down(-v), a=up(+v).
+  const hydroFluxMat = new THREE.MeshBasicNodeMaterial();
+  hydroFluxMat.fragmentNode = Fn(() => {
+    const c = uv();
+    const surf = texture(hTerr, c).r.add(texture(hWater, c).r);
+    const uvL = vec2(c.x.sub(texel), c.y);
+    const uvR = vec2(c.x.add(texel), c.y);
+    const uvD = vec2(c.x, c.y.sub(texel));
+    const uvU = vec2(c.x, c.y.add(texel));
+    const dL = surf.sub(texture(hTerr, uvL).r.add(texture(hWater, uvL).r));
+    const dR = surf.sub(texture(hTerr, uvR).r.add(texture(hWater, uvR).r));
+    const dD = surf.sub(texture(hTerr, uvD).r.add(texture(hWater, uvD).r));
+    const dU = surf.sub(texture(hTerr, uvU).r.add(texture(hWater, uvU).r));
+    const prev = texture(hFlux, c);
+    const fL = max(float(0), prev.r.add(uHydroAccel.mul(dL)));
+    const fR = max(float(0), prev.g.add(uHydroAccel.mul(dR)));
+    const fD = max(float(0), prev.b.add(uHydroAccel.mul(dD)));
+    const fU = max(float(0), prev.a.add(uHydroAccel.mul(dU)));
+    const sumF = fL.add(fR).add(fD).add(fU);
+    const w = texture(hWater, c).r;
+    const kScale = min(float(1), w.div(sumF.add(float(1e-6))));
+    return vec4(fL.mul(kScale), fR.mul(kScale), fD.mul(kScale), fU.mul(kScale));
+  })();
+  const hydroFluxQuad = new QuadMesh(hydroFluxMat);
+
+  // Water update: new depth = old + inflow(neighbours' opposing pipes) − outflow.
+  const hydroWaterMat = new THREE.MeshBasicNodeMaterial();
+  hydroWaterMat.fragmentNode = Fn(() => {
+    const c = uv();
+    const w = texture(hWater, c).r;
+    const F = texture(hFlux, c);
+    const fL = texture(hFlux, vec2(c.x.sub(texel), c.y)); // left neighbour
+    const fR = texture(hFlux, vec2(c.x.add(texel), c.y));
+    const fD = texture(hFlux, vec2(c.x, c.y.sub(texel)));
+    const fU = texture(hFlux, vec2(c.x, c.y.add(texel)));
+    const inflow  = fL.g.add(fR.r).add(fD.a).add(fU.b);
+    const outflow = F.r.add(F.g).add(F.b).add(F.a);
+    return vec4(max(float(0), w.add(inflow).sub(outflow)), float(0), float(0), float(1));
+  })();
+  const hydroWaterQuad = new QuadMesh(hydroWaterMat);
+
+  // Erosion: derive flow velocity from the flux field, incise terrain by
+  // strength·speed·slope wherever water is present, shaped by the brush mask.
+  const hydroErodeMat = new THREE.MeshBasicNodeMaterial();
+  hydroErodeMat.fragmentNode = Fn(() => {
+    const c = uv();
+    const terr = texture(hTerr, c).r;
+    const w    = texture(hWater, c).r;
+    const F  = texture(hFlux, c);
+    const fL = texture(hFlux, vec2(c.x.sub(texel), c.y));
+    const fR = texture(hFlux, vec2(c.x.add(texel), c.y));
+    const fD = texture(hFlux, vec2(c.x, c.y.sub(texel)));
+    const fU = texture(hFlux, vec2(c.x, c.y.add(texel)));
+    const vx = fL.g.sub(F.r).add(F.g).sub(fR.r).mul(float(0.5));
+    const vy = fD.a.sub(F.b).add(F.a).sub(fU.b).mul(float(0.5));
+    const speed = length(vec2(vx, vy));
+    const tL = texture(hTerr, vec2(c.x.sub(texel), c.y)).r;
+    const tR = texture(hTerr, vec2(c.x.add(texel), c.y)).r;
+    const tD = texture(hTerr, vec2(c.x, c.y.sub(texel))).r;
+    const tU = texture(hTerr, vec2(c.x, c.y.add(texel))).r;
+    const slope = length(vec2(tR.sub(tL).mul(float(0.5)), tU.sub(tD).mul(float(0.5))));
+    const waterGate = clamp(w.mul(float(500)), float(0), float(1));
+    const cap = speed.mul(max(slope, float(0.0005)));
+    // Per-iteration incision, capped at ~10 m so a steep spike can't punch a
+    // single-texel crater (velocity×slope both spike where a channel just cut).
+    const delta = min(
+      uHydroStrength.mul(cap).mul(waterGate).mul(getBrushFalloff(c)).mul(edgeFade(c)),
+      float(0.02),
+    );
+    return vec4(clamp(terr.sub(delta), uClampMin, uClampMax), float(0), float(0), float(1));
+  })();
+  const hydroErodeQuad = new QuadMesh(hydroErodeMat);
+
   // ── Ramp brush ────────────────────────────────────────────────────────────
   // Applied once on second click. Uses lateral distance from A→B segment rather
   // than a brush-centered mask; mask does not apply to this tool.
@@ -550,6 +672,51 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     for (let i = 0; i < thermalConfig.iterations; i++) _applyBrush(thermalQuad, rect);
   }
 
+  const hydroConfig = { iterations: 25 };
+
+  function hydro(brushUVx, brushUVy) {
+    uBrushUV.value.set(brushUVx, brushUVy);
+    const writeRect = _brushRect();
+    if (!writeRect) return;
+    if (!strokeOpen) beginStroke();
+    const rts = ensureHydroRTs();
+    // Clear one texel past the write rect so the border's neighbour taps read
+    // valid (zero) water/flux, not stale values from a previous stamp.
+    const clearRect = _expandRect(writeRect, 2) ?? writeRect;
+
+    _render(hydroRainQuad, rts.waterA, clearRect); // seed rain
+    _render(hydroZeroQuad, rts.waterB, clearRect);
+    _render(hydroZeroQuad, rts.fluxA,  clearRect);
+    _render(hydroZeroQuad, rts.fluxB,  clearRect);
+
+    let wr = rts.waterA, ww = rts.waterB;
+    let fr = rts.fluxA,  fw = rts.fluxB;
+    for (let i = 0; i < hydroConfig.iterations; i++) {
+      // Snapshot terrain so the erode pass can read pre-incision heights while
+      // writing rtMain (same read/write split the other brushes use).
+      srcNode.value = rtMain.texture;
+      _render(copyQuad, rtScratch, clearRect);
+
+      hTerr.value = rtScratch.texture;
+      hWater.value = wr.texture;
+      hFlux.value  = fr.texture;
+      _render(hydroFluxQuad, fw, writeRect);
+
+      hWater.value = wr.texture;
+      hFlux.value  = fw.texture;
+      _render(hydroWaterQuad, ww, writeRect);
+
+      hTerr.value  = rtScratch.texture;
+      hWater.value = ww.texture;
+      hFlux.value  = fw.texture;
+      _render(hydroErodeQuad, rtMain, writeRect);
+
+      const tw = wr; wr = ww; ww = tw;
+      const tf = fr; fr = fw; fw = tf;
+    }
+    strokeRect = _unionRect(strokeRect, writeRect);
+  }
+
   function ramp(aUV, bUV) {
     uRampA.value.set(aUV.u, aUV.v);
     uRampB.value.set(bUV.u, bUV.v);
@@ -664,6 +831,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     smudge,
     contrast,
     thermal,
+    hydro,
     ramp,
     beginStroke,
     endStroke,
@@ -688,6 +856,9 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     uThermalSlope,
     uRampWidth,
     thermalConfig,
+    uHydroRain,
+    uHydroStrength,
+    hydroConfig,
     getCurrentRT: () => rtMain,
   };
 }
