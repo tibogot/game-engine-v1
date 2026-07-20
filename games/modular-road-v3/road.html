@@ -47,6 +47,54 @@
       #hint[data-mode="build"] .hint-build { display: inline; }
       #hint[data-mode="drive"] .hint-drive { display: inline; }
 
+      /* ── RACE HUD (drive mode) ─────────────────────────────────────────── */
+      #race-hud {
+        position: fixed; inset: 0; z-index: 40; pointer-events: none;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        display: none;
+      }
+      #race-hud.on { display: block; }
+      #race-clock {
+        position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+        text-align: center; color: #fff;
+      }
+      #race-time {
+        font-variant-numeric: tabular-nums; font-weight: 700;
+        font-size: 40px; line-height: 1; letter-spacing: 0.5px;
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+      }
+      #race-sub {
+        margin-top: 4px; font-size: 13px; color: #cfd6e0;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+      }
+      #race-sub b { color: #fff; }
+      #race-best { color: #8fe3ff; }
+      #race-flash {
+        position: absolute; top: 42%; left: 50%; transform: translateX(-50%);
+        font-size: 34px; font-weight: 800; letter-spacing: 1px; text-align: center;
+        color: #fff; text-shadow: 0 3px 16px rgba(0, 0, 0, 0.7);
+        opacity: 0; transition: opacity 0.25s ease;
+      }
+      #race-flash.show { opacity: 1; }
+      #race-flash.good { color: #7cffb4; }
+      #race-flash.bad { color: #ff9a8c; }
+      #race-split {
+        position: absolute; top: 92px; left: 50%; transform: translateX(-50%);
+        font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 700;
+        opacity: 0; transition: opacity 0.2s ease;
+      }
+      #race-split.show { opacity: 1; }
+      #race-split.ahead { color: #7cffb4; }
+      #race-split.behind { color: #ff9a8c; }
+      #race-speed {
+        position: absolute; right: 22px; bottom: 26px; color: #fff; text-align: right;
+      }
+      #race-speed .v {
+        font-variant-numeric: tabular-nums; font-weight: 700; font-size: 36px; line-height: 1;
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+      }
+      #race-speed .u { font-size: 12px; color: #cfd6e0; }
+
       #boot {
         position: fixed; inset: 0; z-index: 9999;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -133,6 +181,21 @@
         title="Collapse palette"
         aria-label="Collapse palette"
       ></button>
+    </div>
+
+    <!-- Race HUD — shown only while driving (roadGame toggles #race-hud.on). -->
+    <div id="race-hud">
+      <div id="race-clock">
+        <div id="race-time">0.000</div>
+        <div id="race-sub">
+          <span id="race-lap">Lap 0/3</span> &nbsp;·&nbsp;
+          <span id="race-next">Cross the START line</span> &nbsp;·&nbsp;
+          <span id="race-best">Best --:--.---</span>
+        </div>
+      </div>
+      <div id="race-split"></div>
+      <div id="race-flash"></div>
+      <div id="race-speed"><span class="v">0</span><span class="u"> km/h</span></div>
     </div>
 
     <!-- data-mode is set by roadGame.js on every toggle; CSS swaps the text. -->

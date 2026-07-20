@@ -36,6 +36,7 @@ import {
   DRIVETRAIN,
   DECK,
   HEADLIGHTS,
+  CHASSIS,
 } from "../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../v3/play/modularRoadGround.js";
@@ -56,6 +57,8 @@ import { bakeRoadThumbnails } from "./modularRoadThumbnails.js";
 import { PropManager, PROP_CATALOG, glowPropParams } from "./modularRoadProps.js";
 import { MoverPropManager, MOVER_CATALOG } from "./modularRoadMoverProps.js";
 import { PortalManager, DEFAULT_PORTAL_PARAMS } from "./modularRoadPortals.js";
+import { LapTracker, formatLapTime } from "./modularRoadLap.js";
+import { GhostTrack, createGhostMesh } from "./modularRoadGhost.js";
 import { ModularRoadTireMarks } from "./modularRoadTireMarks.js";
 import { ModularRoadDriftSmoke, DEFAULT_DRIFT_SMOKE_SETTINGS } from "./modularRoadDriftSmoke.js";
 import {
@@ -76,10 +79,17 @@ import { createRoadDevPanel } from "./devPanel.js";
 
 /** Cap on physics ticks per frame — a long stall must not queue a huge backlog. */
 const MAX_SIM_TICKS = 8;
-/** Below this world Y the car is considered fallen and is respawned. */
+/** Absolute-Y backstop: below this the car is always respawned. */
 const FALL_Y = -60;
+/** Air-stunt: dropping this far BELOW the last grounded height counts as a fall
+ *  (relative to the track, so it works at any track altitude). */
+const FALL_DROP = 12;
 /** How far above the terrain a freshly seeded chain's first piece sits. */
 const ROAD_SEED_CLEARANCE = 0.5;
+/** Lift applied to a resolved spawn so the wheels settle onto the deck. */
+const SPAWN_LIFT = 0.6;
+/** Default build altitude (m above terrain) — this is the SKY-stunt mode. */
+const DEFAULT_BUILD_HEIGHT = 40;
 /** Seconds between auto-headlight sun checks (cheap, but not per-frame work). */
 const AUTO_LIGHT_INTERVAL = 0.5;
 
@@ -264,6 +274,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       ground.setRoadSolidsBvh(null);
     }
     refreshCollisionDebug();
+    // The default spawn tracks the Start/first piece, so keep the marker on it as
+    // the track changes (no-op cost when a custom spawn is set).
+    updateSpawnMarker();
     devPanel?.refresh();
   }
 
@@ -397,6 +410,114 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   setHeadlights(false);
   updateAutoHeadlights(); // match the world we just loaded, before first frame
 
+  // 4d) ── RACE (timing · checkpoints · ghost · fall→respawn) ────────────────
+  // Wires the already-built LapTracker + GhostTrack. Air-stunt rule: falling off
+  // the track respawns at the LAST SAFE GROUNDED POSE (not a checkpoint), so a
+  // missed jump just puts you back on the takeoff ramp. Timing checkpoints
+  // (start/checkpoint/finish pieces) drive splits + the lap clock only.
+  const RACE_KEY = "modular-road-v3.rec.";
+  const lap = new LapTracker({ roadWidth: 16, fallY: FALL_Y, targetLaps: 3 });
+  const ghost = new GhostTrack({ sampleHz: 20 });
+  const ghostMesh = createGhostMesh(CHASSIS.width, CHASSIS.height, CHASSIS.length);
+  scene.add(ghostMesh);
+  const _ghostPos = new THREE.Vector3();
+  const _ghostQuat = new THREE.Quaternion();
+
+  // Last pose the car was safely grounded on the track — the air-stunt respawn.
+  const lastSafePos = new THREE.Vector3();
+  const lastSafeQuat = new THREE.Quaternion();
+  let lastSafeY = 0;
+  let hasSafe = false;
+  const _respawnPos = new THREE.Vector3();
+
+  const recKey = () => RACE_KEY + lap.courseSignature();
+
+  function loadRecord() {
+    if (!lap.hasCourse) return;
+    try {
+      const raw = localStorage.getItem(recKey());
+      if (!raw) return;
+      const rec = JSON.parse(raw);
+      if (Number.isFinite(rec.best)) lap.applyStoredBest(rec.best);
+      if (Array.isArray(rec.splits)) lap.applyStoredSplits(rec.splits);
+      if (rec.ghost) ghost.load(rec.ghost);
+    } catch { /* corrupt / disabled — ignore */ }
+  }
+
+  function saveRecord() {
+    if (!lap.hasCourse) return;
+    try {
+      localStorage.setItem(recKey(), JSON.stringify({
+        best: lap.bestLap,
+        splits: lap.bestLapSplits,
+        ghost: ghost.serialize(),
+      }));
+    } catch { /* quota / disabled */ }
+  }
+
+  function clearRecord() {
+    try { if (lap.hasCourse) localStorage.removeItem(recKey()); } catch {}
+    ghost.clear();
+    ghostMesh.visible = false;
+    lap.bestLap = NaN;
+    lap.bestLapSplits = null;
+  }
+
+  /** Set up timing for a fresh run — call on entering drive mode. */
+  function beginRace() {
+    // buildGates() resets timing internally, so load the stored record AFTER it
+    // (reset() clears bestLap/bestLapSplits — loading before it would be wiped).
+    lap.buildGates(builder.pieces);
+    ghost.clear();
+    loadRecord();
+    ghostMesh.visible = false;
+    hasSafe = false;
+  }
+
+  function handleLapEvent(ev) {
+    if (ev.kind === "start") {
+      ghost.beginLap();
+    } else if (ev.kind === "checkpoint") {
+      showSplit(ev.splitDelta);
+    } else if (ev.kind === "lap") {
+      if (ev.isRecord) {
+        ghost.commit();
+        ghostMesh.visible = true;
+        saveRecord();
+      } else {
+        ghost.discard();
+      }
+      if (!ev.finished) ghost.beginLap();
+    }
+  }
+
+  /** Per-tick: record the safe pose while grounded (deterministic). */
+  function trackSafePose() {
+    if (vehicle.groundedCount > 0) {
+      const b = vehicle.body;
+      lastSafePos.copy(b.pos);
+      lastSafeQuat.copy(b.quat);
+      lastSafeY = b.pos.y;
+      hasSafe = true;
+    }
+  }
+
+  /** Air-stunt fall check (per frame) → back to the last safe grounded pose. */
+  function checkFall() {
+    const y = vehicle.body.pos.y;
+    const fell = (hasSafe && y < lastSafeY - FALL_DROP) || y < FALL_Y;
+    if (!fell) return;
+    if (hasSafe) {
+      _respawnPos.copy(lastSafePos); _respawnPos.y += 0.5; // small lift so wheels clear
+      vehicle.setSpawn(_respawnPos, lastSafeQuat);
+      vehicle.respawn();
+      chase.reset(); tireMarks.reset(); driftSmoke.reset();
+      simAccum = 0;
+    } else {
+      respawn(); // never touched track yet → back to the start line
+    }
+  }
+
   // 5) ── CAMERA ─────────────────────────────────────────────────────────────
   // The lab's chase rig (loop-follow included). In build mode we hand the camera
   // back to the engine's OrbitControls so you can fly around and place pieces.
@@ -486,7 +607,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       case "keyw": if (builder.freePlaceMode) builder.setPlacementGizmoMode("translate"); break;
       case "enter": case "space": builder.place(); break;
       case "backspace": builder.undo(); break;
-      case "keyn": seedChainAtSpawn(); break;      // new chain (game-owned, not editor spawn)
+      case "keyn": seedChainAtSpawn({ atCursor: true }); break; // new chain at the sky cursor
       case "bracketleft": builder.cycleChain(-1); break;
       case "bracketright": builder.cycleChain(1); break;
       default: return;
@@ -538,7 +659,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const onClick = (id, fn) => document.getElementById(id)?.addEventListener("click", fn);
   onClick("road-drive", () => toggleMode());
   onClick("build-mode-toggle", () => toggleMode());
-  onClick("road-new-chain", () => { seedChainAtSpawn(); paletteUi.refreshStatus(); });
+  onClick("road-new-chain", () => { seedChainAtSpawn({ atCursor: true }); paletteUi.refreshStatus(); });
   onClick("road-prev-chain", () => { builder.cycleChain(-1); paletteUi.refreshStatus(); });
   onClick("road-next-chain", () => { builder.cycleChain(1); paletteUi.refreshStatus(); });
   onClick("road-rebake", () => bakeCollision());
@@ -594,14 +715,46 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // ── SPAWN ──────────────────────────────────────────────────────────────────
   // Where the car drops on entering drive mode / after a fall. Priority:
   //   1. gameSpawn — set by the user in the dev panel, saved WITH THE TRACK.
-  //   2. the .v3proj player start (app.getSpawnPoint).
-  //   3. world origin.
-  // For an air track the spawn has a REAL Y (up on the track), so the full pose
-  // is stored, not just XZ + terrain height.
+  //   2. the track's Start piece (so a sky track just works — hit drive, you're
+  //      on it, facing down-track).
+  //   3. the first placed piece.
+  //   4. the .v3proj player start.
+  //   5. world origin.
+  // An air track's spawn has a REAL Y (up on the track), so the full pose is
+  // stored, not just XZ + terrain height.
   let gameSpawn = null; // {x, y, z, yaw} | null
+
+  const _inPos = new THREE.Vector3();
+  const _outPos = new THREE.Vector3();
+  const _fwd = new THREE.Vector3();
+
+  /**
+   * On-deck, down-track pose from a placed piece — the car sits on the piece's
+   * surface a little past its entry edge, facing the way the track runs.
+   */
+  function poseFromPiece(p) {
+    _inPos.setFromMatrixPosition(p.connectorIn);
+    _outPos.setFromMatrixPosition(p.connectorOut);
+    _fwd.copy(_outPos).sub(_inPos);
+    if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
+    _fwd.normalize();
+    // respawn() faces the car by axisAngle(Y, yaw + PI) on the car's +Z forward,
+    // so this yaw makes +Z point along the track. (Same convention setSpawnToCar
+    // stores: yaw = eulerY − PI.)
+    const yaw = Math.atan2(_fwd.x, _fwd.z) - Math.PI;
+    return {
+      x: _inPos.x + _fwd.x * 2, // a touch into the piece, off the entry seam
+      y: _inPos.y,
+      z: _inPos.z + _fwd.z * 2,
+      yaw,
+    };
+  }
 
   function resolveSpawn() {
     if (gameSpawn) return gameSpawn;
+    const start = builder.pieces.find((p) => p.id === "start");
+    if (start) return poseFromPiece(start);
+    if (builder.pieces.length) return poseFromPiece(builder.pieces[0]);
     const sp = app.getSpawnPoint?.() ?? null;
     if (sp) return { x: sp.x, y: sp.y, z: sp.z, yaw: sp.yaw ?? 0 };
     return { x: 0, y: app.getWorldHeight(0, 0), z: 0, yaw: 0 };
@@ -645,35 +798,47 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   function clearSpawn() { gameSpawn = null; updateSpawnMarker(); }
 
+  // Build altitude (m above terrain). This IS the sky-stunt mode, so a fresh
+  // chain floats up here by default; pieces auto-chain from the anchor, so the
+  // whole track floats without dragging each piece up.
+  let buildHeight = DEFAULT_BUILD_HEIGHT;
+
   /**
-   * Seat a fresh chain on the ground at the spawn point.
+   * Seat a fresh chain floating at `buildHeight` above terrain.
    *
-   * The builder's default anchor is initialConnector() — world origin at y=0.
-   * The lab could rely on that because its floor WAS y=0; on real v3 terrain the
-   * origin is usually underground or floating, so the first piece has to be
-   * seeded against the heightfield or the track starts buried.
+   * `atCursor` seeds where the orbit camera is looking (build where you're
+   * looking); otherwise at the spawn XZ. Height is always terrain + buildHeight,
+   * so the anchor is in the sky and the whole chain floats from it.
    */
-  function seedChainAtSpawn({ showGizmo = true } = {}) {
-    const s = resolveSpawn();
-    const y = s.y + ROAD_SEED_CLEARANCE;
-    builder.beginNewChain(new THREE.Vector3(s.x, y, s.z), s.yaw);
-    // beginNewChain always pops the placement gizmo up. That's right when the
-    // user asked for a new chain, but not on boot: it's ~13 draw calls of grab
-    // handles floating in an empty world before anyone has touched anything.
-    // deselectPlacement only hides it — freePlaceMode and the anchor survive, so
-    // pressing N (or selecting a chain) brings it straight back.
+  function seedChainAtSpawn({ showGizmo = true, atCursor = false } = {}) {
+    let x, z, yaw;
+    if (atCursor && controls.target) {
+      x = controls.target.x; z = controls.target.z; yaw = builder.freeYaw ?? 0;
+    } else {
+      const s = resolveSpawn();
+      x = s.x; z = s.z; yaw = s.yaw;
+    }
+    const y = app.getWorldHeight(x, z) + buildHeight;
+    builder.beginNewChain(new THREE.Vector3(x, y, z), yaw);
+    // Frame the anchor so building in the sky doesn't leave you staring at bare
+    // ground far below it.
+    if (controls.target) { controls.target.set(x, y, z); controls.update?.(); }
+    // beginNewChain always pops the placement gizmo up. Right when the user asked
+    // for a new chain, but not on boot: it's ~13 draw calls of grab handles
+    // floating before anyone has touched anything. deselectPlacement only hides
+    // it — freePlaceMode + the anchor survive, so N brings it straight back.
     if (!showGizmo) builder.deselectPlacement();
     builder.refreshGhost?.();
   }
 
-  /** Drop the car at the resolved spawn (user spawn → .v3proj start → origin). */
+  /** Drop the car at the resolved spawn (user → Start piece → first piece → …). */
   function respawn() {
     const s = resolveSpawn();
-    // An explicit spawn is already a valid on-track pose; only the terrain-based
-    // fallback needs a lift so the wheels clear the ground.
-    const y = s.y + (gameSpawn ? 0 : 1.0);
+    // Every source resolves to a surface/deck-level pose, so a small constant
+    // lift lets the wheels settle onto it (a custom car-pose is already ~COM
+    // height, so it just drops a touch — harmless).
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s.yaw + Math.PI);
-    vehicle.setSpawn(new THREE.Vector3(s.x, y, s.z), q);
+    vehicle.setSpawn(new THREE.Vector3(s.x, s.y + SPAWN_LIFT, s.z), q);
     vehicle.respawn();
     chase.reset();
     // Without these the old skid ribbon and smoke puffs stay stretched across
@@ -685,6 +850,52 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   const paletteEl = document.getElementById("palette");
   const hintEl = document.getElementById("hint");
+
+  // ── RACE HUD ────────────────────────────────────────────────────────────────
+  const hud = document.getElementById("race-hud");
+  const hudTime = document.getElementById("race-time");
+  const hudLap = document.getElementById("race-lap");
+  const hudNext = document.getElementById("race-next");
+  const hudBest = document.getElementById("race-best");
+  const hudFlash = document.getElementById("race-flash");
+  const hudSplit = document.getElementById("race-split");
+  const hudSpeed = document.querySelector("#race-speed .v");
+  let splitTimer = 0;
+
+  function showSplit(delta) {
+    if (!Number.isFinite(delta) || !hudSplit) return;
+    const ahead = delta < 0;
+    hudSplit.textContent = (ahead ? "−" : "+") + Math.abs(delta).toFixed(2);
+    hudSplit.className = `show ${ahead ? "ahead" : "behind"}`;
+    splitTimer = 2.0;
+  }
+
+  function updateRaceHud(dt) {
+    if (!hud) return;
+    hudTime.textContent = formatLapTime(lap.running ? lap.currentTime : 0);
+    hudLap.textContent = `Lap ${lap.currentLapNumber}/${lap.targetLaps}`;
+    hudNext.textContent = lap.hasCourse
+      ? lap.nextLabel
+      : "No timing — place a Start piece";
+    hudBest.textContent = `Best ${formatLapTime(lap.bestLap)}`;
+
+    // Centre flash mirrors the LapTracker's own message (GO! / RECORD / FINISH).
+    if (lap.messageTimer > 0 && lap.message) {
+      hudFlash.textContent = lap.message;
+      const good = /RECORD|GO|FINISH/.test(lap.message);
+      hudFlash.className = `show ${good ? "good" : ""}`;
+    } else {
+      hudFlash.className = "";
+    }
+
+    if (splitTimer > 0) {
+      splitTimer -= dt;
+      if (splitTimer <= 0) hudSplit.className = "";
+    }
+
+    const kmh = Math.round(Math.hypot(vehicle.body.vel.x, vehicle.body.vel.z) * 3.6);
+    if (hudSpeed) hudSpeed.textContent = String(kmh);
+  }
 
   function toggleMode() {
     mode = mode === "build" ? "drive" : "build";
@@ -704,11 +915,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       vehicle.enabled = true;
       if (vehicle.group) vehicle.group.visible = true;
       respawn();
+      beginRace(); // gates from the current track + load its record
     } else {
       builder.setGhostVisible(true);
       vehicle.enabled = false;
+      ghostMesh.visible = false;
     }
     spawnMarker.visible = !driving; // a build-time guide; hidden while racing
+    if (hud) hud.classList.toggle("on", driving);
     if (paletteEl) paletteEl.style.display = driving ? "none" : "";
     if (hintEl) hintEl.dataset.mode = mode;
     applyControlMode();
@@ -775,6 +989,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       cameraParams: chase.params,
       audioState,
       vehicleAudioSettings,
+      // Build
+      getBuildHeight: () => buildHeight,
+      setBuildHeight: (m) => { buildHeight = m; },
+      reseedChain: () => { seedChainAtSpawn({ atCursor: true }); paletteUi.refreshStatus(); },
+      // Race
+      setTargetLaps: (n) => lap.setTargetLaps(n),
+      getTargetLaps: () => lap.targetLaps,
+      clearRecord,
+      getBestLap: () => lap.bestLap,
       getPieceCount: () => builder.pieces.length,
       getCollisionTriCount: () =>
         deckBvh.triCount + solidsBvh.triCount +
@@ -838,6 +1061,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         vehicle.tick(input);
         props.applyFields(vehicle, FIXED_DT);      // boost pads etc.
         portals.updateDrive(FIXED_DT, vehicle);
+
+        // Timing runs INSIDE the fixed tick so splits/lap times are quantised to
+        // the deterministic clock (framerate-independent records).
+        const ev = lap.update(FIXED_DT, vehicle.body.pos, vehicle.body.vel);
+        if (ev) handleLapEvent(ev);
+        if (lap.running) ghost.record(lap.currentTime, vehicle.body.pos, vehicle.body.quat);
+        trackSafePose(); // remember where we were last grounded on the track
       }
       vehicle.syncVisuals(dt, simAccum / FIXED_DT);
 
@@ -846,7 +1076,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       tireMarks.update(vehicle);
       driftSmoke.updateFromVehicle(vehicle, camera, dt, keys);
 
-      if (vehicle.body.pos.y < FALL_Y) respawn();
+      checkFall(); // air-stunt: dropped off the track → last safe grounded pose
+
+      // Ghost replay: park it at the live lap time. Hidden until a lap is running.
+      if (lap.running && ghost.hasGhost && ghost.sampleAt(lap.currentTime, _ghostPos, _ghostQuat)) {
+        ghostMesh.position.copy(_ghostPos);
+        ghostMesh.quaternion.copy(_ghostQuat);
+        ghostMesh.visible = true;
+      } else if (ghostMesh.visible && !lap.running) {
+        ghostMesh.visible = false;
+      }
+
+      updateRaceHud(dt);
 
       // Keep the engine's terrain clipmap streaming around the car. The chase
       // rig owns camera.position/up, but `controls.target` is what the engine

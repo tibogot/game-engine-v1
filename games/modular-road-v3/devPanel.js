@@ -50,6 +50,25 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Build (sky)</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Build height</span>
+            <div class="prop-value">
+              <input type="range" id="dv-bh" min="0" max="200" step="2" />
+              <span class="prop-num" id="dv-bh-v"></span>
+            </div>
+          </div>
+          <button class="action-btn primary" id="dv-newchain" type="button">New chain here (N)</button>
+          <div class="dv-hint">
+            The track floats at this height above the terrain. <b>New chain</b> drops
+            a fresh anchor in the sky where you're looking; pieces auto-chain from
+            it, so the whole track floats — no dragging pieces up.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Mode</div>
         <div class="section-body">
           <div class="prop-row">
@@ -75,6 +94,29 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="dv-hint">
             The green arrow marks where the car starts / respawns. <b>Set to car</b>
             (drive somewhere first) is the quickest way to set a start line.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Race</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Target laps</span>
+            <div class="prop-value">
+              <input type="range" id="dv-laps" min="1" max="10" step="1" />
+              <span class="prop-num" id="dv-laps-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Best lap</span>
+            <div class="prop-value"><span class="prop-num" id="dv-best">--:--.---</span></div>
+          </div>
+          <button class="action-btn" id="dv-clear-rec" type="button">Clear record + ghost</button>
+          <div class="dv-hint">
+            Place <b>Start</b> / <b>Checkpoint</b> / <b>Finish</b> pieces to enable
+            timing. Falling off the track respawns you at the last spot you were
+            safely on it.
           </div>
         </div>
       </div>
@@ -523,6 +565,20 @@ export function createRoadDevPanel({ app, game, params }) {
   modeBtn.addEventListener("click", () => { game.toggleMode(); renderMode(); });
   $("#dv-respawn").addEventListener("click", () => game.respawn());
 
+  // ── Build (sky) ─────────────────────────────────────────────────────────────
+  const bhEl = $("#dv-bh");
+  const bhVal = $("#dv-bh-v");
+  if (bhEl) {
+    bhEl.value = game.getBuildHeight();
+    bhVal.textContent = `${game.getBuildHeight()} m`;
+    bhEl.addEventListener("input", () => {
+      const m = +bhEl.value;
+      game.setBuildHeight(m);
+      bhVal.textContent = `${m} m`;
+    });
+  }
+  $("#dv-newchain").addEventListener("click", () => game.reseedChain());
+
   // ── Spawn ─────────────────────────────────────────────────────────────────
   const spawnSrc = $("#dv-spawn-src");
   const renderSpawnSrc = () => {
@@ -532,6 +588,21 @@ export function createRoadDevPanel({ app, game, params }) {
   $("#dv-spawn-cursor").addEventListener("click", () => { game.setSpawnToCursor(); renderSpawnSrc(); });
   $("#dv-spawn-clear").addEventListener("click", () => { game.clearSpawn(); renderSpawnSrc(); });
   renderSpawnSrc();
+
+  // ── Race ────────────────────────────────────────────────────────────────────
+  const lapsEl = $("#dv-laps");
+  const lapsVal = $("#dv-laps-v");
+  const bestEl = $("#dv-best");
+  if (lapsEl) {
+    lapsEl.value = game.getTargetLaps();
+    lapsVal.textContent = String(game.getTargetLaps());
+    lapsEl.addEventListener("input", () => {
+      const n = +lapsEl.value;
+      game.setTargetLaps(n);
+      lapsVal.textContent = String(n);
+    });
+  }
+  $("#dv-clear-rec").addEventListener("click", () => { game.clearRecord(); refresh(); });
 
   // ── Camera ──────────────────────────────────────────────────────────────────
   toggle("dv-freelook", false, (on) => game.setFreeLook(on));
@@ -610,6 +681,10 @@ export function createRoadDevPanel({ app, game, params }) {
     renderMode();
     piecesEl.textContent = String(game.getPieceCount());
     trisEl.textContent = game.getCollisionTriCount().toLocaleString();
+    if (bestEl) {
+      const b = game.getBestLap();
+      bestEl.textContent = Number.isFinite(b) ? b.toFixed(3) : "--:--.---";
+    }
     // Auto mode flips the headlights from outside the panel — keep the toggle
     // showing the truth rather than the last thing that was clicked.
     lightsToggle.set(game.getHeadlights());
