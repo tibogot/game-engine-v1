@@ -508,7 +508,9 @@ function makeUnit(app, type, navGrid, x, z, getUnits, team = "player") {
 
 export function createUnits({
   app, navGrid,
-  spawn = { jeep: 8, helicopter: 4, soldier: 6 },
+  // Two harvesters at boot: the economy should already be running when you arrive,
+  // rather than making your first click "build the thing that makes money".
+  spawn = { jeep: 8, helicopter: 4, soldier: 6, harvester: 2 },
   origin = { x: 0, z: 0 }, // the starting army musters here (the base)
 } = {}) {
   const units = [];
@@ -520,6 +522,7 @@ export function createUnits({
     jeep:       { x: origin.x + 34, z: origin.z - 26 },
     helicopter: { x: origin.x - 34, z: origin.z - 26 },
     soldier:    { x: origin.x,      z: origin.z - 40 },
+    harvester:  { x: origin.x + 20, z: origin.z - 44 },
   };
 
   for (const key of UNIT_TYPE_KEYS) {
@@ -530,8 +533,11 @@ export function createUnits({
     for (let i = 0; i < n; i++) {
       const gx = (i % cols) - (cols - 1) / 2;
       const gz = Math.floor(i / cols) - (cols - 1) / 2;
-      let x = origins[key].x + gx * gap;
-      let z = origins[key].z + gz * gap;
+      // Fall back to the muster point so a newly added type can be given a
+      // starting count without also needing an origins entry.
+      const o = origins[key] ?? origin;
+      let x = o.x + gx * gap;
+      let z = o.z + gz * gap;
       // Ground units must not spawn in a lake or on a cliff.
       if (!type.isAir && navGrid) ({ x, z } = navGrid.nearestOpenWorld(x, z));
       units.push(makeUnit(app, type, navGrid, x, z, getUnits));

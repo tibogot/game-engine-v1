@@ -17,7 +17,7 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 // `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
 // (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
 // different thing, hence the explicit name.)
-export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, onChange = () => {} }) {
+export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {} }) {
   // Rigid unit types render as shared InstancedMeshes, so a hit identifies its
   // unit by instanceId, not by the mesh — unitRenderer owns that resolution.
   // Crowd soldiers have no mesh AT ALL (they live in a compute buffer), so they
@@ -168,6 +168,34 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     if (!markerRaf) markerRaf = requestAnimationFrame(animMarker);
   };
 
+  /**
+   * The resource node under the cursor, if any.
+   *
+   * Two passes, because a crate pile is full of holes: the crates sit at fixed
+   * offsets with gaps between them, so a ray aimed at the middle of a dump can
+   * thread straight through and hit nothing. Hitting a crate is the precise
+   * answer; landing on the GROUND inside a node's radius means the same thing to
+   * the player, so that counts too.
+   */
+  function pickNode(clientX, clientY) {
+    if (!resourceRenderer) return null;
+    const rect = dom.getBoundingClientRect();
+    ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(ndc, camera);
+    const hits = raycaster.intersectObjects(resourceRenderer.roots, true);
+    for (const h of hits) {
+      const n = resourceRenderer.nodeFromHit(h);
+      if (n?.alive) return n;
+    }
+
+    // Missed the crates — did the click land on the ground inside a node's footprint?
+    const ground = app.pickWorldAtClient?.(clientX, clientY);
+    if (!ground?.point) return null;
+    for (const n of resourceRenderer.nodesNear(ground.point.x, ground.point.z)) return n;
+    return null;
+  }
+
   /** Raycast the enemy structures under the cursor, if any. */
   function pickEnemy(clientX, clientY) {
     if (!structuresRenderer) return null;
@@ -196,6 +224,19 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       for (const u of selected) u.attack?.(enemy);
       pingMarker(enemy.position.x, enemy.position.y, enemy.position.z);
       return;
+    }
+
+    // Right-clicking a resource node sends any selected HARVESTERS to work it.
+    // Anything else in the selection falls through to a normal move order, so a
+    // mixed selection does the sensible thing with both halves.
+    const node = pickNode(e.clientX, e.clientY);
+    if (node && harvesting) {
+      let assigned = 0;
+      for (const u of selected) if (harvesting.assignNode(u, node)) assigned++;
+      if (assigned) {
+        pingMarker(node.position.x, node.position.y, node.position.z);
+        if (assigned === selected.size) return; // pure harvester selection — done
+      }
     }
 
     const hit = app.pickWorldAtClient?.(e.clientX, e.clientY);

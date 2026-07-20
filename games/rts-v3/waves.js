@@ -27,6 +27,11 @@ function composition(n) {
     jeep: n < 2 ? 0 : Math.min(14, Math.floor(n / 2)),
     // Helicopters from wave 4: they ignore terrain and only air-capable units answer.
     helicopter: n < 4 ? 0 : Math.min(8, Math.floor((n - 2) / 3)),
+    // Armour from wave 3. APCs first (fast, and they shoot back at your air),
+    // then the Battle Tank from wave 6 — slow, but a turret line alone won't stop
+    // one, which is the point at which you need armour of your own.
+    bigtank: n < 3 ? 0 : Math.min(6, Math.floor((n - 1) / 2)),
+    tank: n < 6 ? 0 : Math.min(4, Math.floor((n - 4) / 2)),
   };
 }
 

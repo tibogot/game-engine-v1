@@ -8,7 +8,8 @@ export function createCommandCard({
   onStop = () => {},
   onFocus = () => {},
   onBuild = () => {},          // (structure, key) — enqueue production on that structure
-  productionFor = () => [],    // (structure) → [{ key, label }] it can produce
+  productionFor = () => [],    // (structure) → [{ key, label, cost }] it can produce
+  canAfford = () => true,      // (cost) → is it affordable right now?
   structureBuilds = [],        // [{ key, label }] — buildings a selected builder can raise
   onBuildStructure = () => {},
 }) {
@@ -39,6 +40,13 @@ export function createCommandCard({
       padding: 7px 0; border-radius: 6px; background: #23303f; border: 1px solid rgba(255,255,255,0.14);
     }
     #rts-cmd-card button:hover { background: #2d3f52; border-color: #6ab0ff; }
+    #rts-cmd-card button .cc-cost {
+      display: block; font-size: 10px; color: #f0c86a; font-weight: 600; margin-top: 2px;
+    }
+    /* Can't afford it — still clickable (the click just no-ops), but clearly dead. */
+    #rts-cmd-card button.poor { opacity: 0.45; border-color: rgba(255,255,255,0.08); }
+    #rts-cmd-card button.poor:hover { background: #23303f; border-color: rgba(255,255,255,0.08); }
+    #rts-cmd-card button.poor .cc-cost { color: #e4483a; }
     #rts-cmd-card .cc-bar {
       height: 6px; border-radius: 3px; background: #11151c; overflow: hidden;
       border: 1px solid rgba(255,255,255,0.12);
@@ -101,12 +109,28 @@ export function createCommandCard({
       <div class="cc-bar"><i id="cc-prog"></i></div>
       <div class="cc-queue" id="cc-queue"></div>
       <div class="cc-actions">
-        ${opts.map((b) => `<button data-build="${b.key}">${b.label}</button>`).join("")}
+        ${opts.map((b) => `
+          <button data-build="${b.key}" data-cost="${b.cost ?? 0}">
+            ${b.label}${b.cost ? `<span class="cc-cost">${b.cost}</span>` : ""}
+          </button>`).join("")}
       </div>
     `;
     for (const b of opts) {
       root.querySelector(`[data-build="${b.key}"]`)
         .addEventListener("click", () => onBuild(s, b.key));
+    }
+    refreshAffordability();
+  }
+
+  /**
+   * Grey out what the player can't pay for. Called on render AND every frame from
+   * tick(), because stock changes continuously as harvesters unload — a button
+   * that only re-evaluated on selection would lie for as long as the card is open.
+   */
+  function refreshAffordability() {
+    for (const btn of root.querySelectorAll("[data-build]")) {
+      const cost = Number(btn.dataset.cost) || 0;
+      btn.classList.toggle("poor", cost > 0 && !canAfford(cost));
     }
   }
 
@@ -143,9 +167,10 @@ export function createCommandCard({
     root.classList.add("show");
   }
 
-  /** Called each frame — keeps the production bar/queue live. */
+  /** Called each frame — keeps the production bar/queue/affordability live. */
   function tick() {
     if (!baseRef) return;
+    refreshAffordability();
     const prog = root.querySelector("#cc-prog");
     const queue = root.querySelector("#cc-queue");
     if (prog) prog.style.width = `${Math.round((baseRef.progress ?? 0) * 100)}%`;

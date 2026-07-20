@@ -8,6 +8,7 @@
 // have position/hp/team/range/damage), so one targeting+damage system covers all.
 import * as THREE from "three";
 import { findBuildSite, prepareSite } from "./sitePlanner.js";
+import { UNIT_COST } from "./resources.js";
 
 export const STRUCTURE_TYPES = {
   base: {
@@ -77,7 +78,10 @@ function makeStructure(app, type, x, z) {
 }
 
 /** Seconds to build each unit type. */
-export const BUILD_TIME = { soldier: 2.5, jeep: 4, helicopter: 7 };
+export const BUILD_TIME = {
+  soldier: 2.5, jeep: 4, builder: 4.5, harvester: 5,
+  bigtank: 6.5, tank: 10, helicopter: 7,
+};
 
 // The hangar door sits on the base's -Z face, half the hangar depth from centre
 // (B_DZ/2 in structuresRenderer.js). Units spawn here and drive straight out.
@@ -95,7 +99,7 @@ const DOOR_MOUTH = 8;
  * because flattening round-trips the GPU heightmap — the caller must rebuild the
  * nav grid afterwards, since the terrain has genuinely changed.
  */
-export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
+export async function createStructures({ app, navGrid, turretCount = 5, resources = null } = {}) {
   const list = [];
   const world = app.worldSize ?? 1000;
   const half = world / 2;
@@ -122,8 +126,17 @@ export async function createStructures({ app, navGrid, turretCount = 5 } = {}) {
   base.progress = 0;     // 0..1 through the head of the queue
   // Rally toward the enemy (up the map), on flat ground beside the base.
   base.rally = { x: base.position.x, z: base.position.z - (base.radius + 22) };
+  // Production costs supplies, charged AT QUEUE TIME (the C&C convention): the
+  // cost is committed when you click, so a full queue can't outspend your stock
+  // and the HUD number always reflects what you've actually promised away.
+  // `resources` is optional — without it the base builds for free, which keeps
+  // structures.js usable in tests and any harness that has no economy.
   base.enqueue = (typeKey) => {
-    if (base.alive && base.queue.length < 8) base.queue.push(typeKey);
+    if (!base.alive || base.queue.length >= 8) return false;
+    const cost = UNIT_COST[typeKey] ?? 0;
+    if (cost && resources && !resources.spend(cost)) return false; // can't afford it
+    base.queue.push(typeKey);
+    return true;
   };
 
   // ── Enemy turrets: spread across the TOP of the map ─────────────────────────
