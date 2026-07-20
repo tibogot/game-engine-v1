@@ -699,6 +699,13 @@ export async function startV3App(opts = {}) {
   // Cascade count is therefore a boot decision; see app.shadows for what CAN
   // change at runtime.
   if (opts.csm) Object.assign(worldToolState.csm, opts.csm);
+  // Boot-time LIGHT override — startV3App({ light: { shadowNormalBias: 0.12 } }).
+  // Same reason it lives here as the CSM block: createWorldEnvironment reads these
+  // when it builds the sun and its cascades. Games with lots of flat-topped hard-
+  // surface geometry (the RTS's structures) need a larger normalBias than the
+  // editor default — terrain and foliage are curved enough not to show acne at
+  // 0.02, but a flat armour deck self-shadows into stripes.
+  if (opts.light) Object.assign(worldToolState.light, opts.light);
   const treeToolState = createTreeToolState();
   const editorConfig = {
     world: { size: WORLD_SIZE, chunkSize: V2_CONFIG.world.chunkSize },

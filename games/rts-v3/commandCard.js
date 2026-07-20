@@ -110,12 +110,36 @@ export function createCommandCard({
     }
   }
 
+  /** A structure with nothing to produce (a turret): identity + status only. */
+  function renderStructure(s) {
+    baseRef = null;
+    const status = s.constructing
+      ? "Under construction…"
+      : (s.deploy ?? 1) < 1 ? "Calibrating…"
+        : s.range ? `Defensive emplacement · ${Math.round(s.range)}m` : "Structure";
+    root.innerHTML = `
+      <div class="cc-head">
+        <div>
+          <div class="cc-name">${s.name}</div>
+          <div class="cc-sub">${status}</div>
+        </div>
+      </div>
+      <div class="cc-actions">
+        <button data-act="focus">Focus</button>
+      </div>
+    `;
+    root.querySelector('[data-act="focus"]').addEventListener("click", onFocus);
+  }
+
   function render(selected) {
     if (!selected.length) { root.classList.remove("show"); baseRef = null; return; }
     // A selected PRODUCING structure (base or a finished building) shows its queue.
     const producer = selected.find((e) => e.isStructure && e.enqueue);
+    const mobile = selected.filter((e) => !e.isStructure);
     if (producer) renderProducer(producer);
-    else renderUnits(selected.filter((e) => !e.isStructure));
+    else if (mobile.length) renderUnits(mobile);
+    // Nothing mobile and nothing producing — a lone turret or other silent structure.
+    else renderStructure(selected[0]);
     root.classList.add("show");
   }
 

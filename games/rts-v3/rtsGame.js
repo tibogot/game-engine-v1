@@ -56,7 +56,16 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   // player could see it. 300 covers the whole zoom range (DIST_MAX 280).
   const csmParam = Number(new URLSearchParams(location.search).get("csm"));
   const cascades = csmParam >= 1 && csmParam <= 4 ? Math.round(csmParam) : 2;
-  const app = await startV3App({ csm: { cascades, maxFar: 300 } });
+  // shadowNormalBias 0.12 (editor default 0.02): this game is all hard-surface
+  // structures with big FLAT decks, and a flat up-facing face self-shadows into
+  // diagonal stripes at the editor's bias. Terrain and foliage are curved enough
+  // that 0.02 never showed it — verified the stripes appear/vanish by toggling
+  // castShadow on the turrets alone. Boot-only, like csm (both are read when
+  // createWorldEnvironment builds the sun).
+  const app = await startV3App({
+    csm: { cascades, maxFar: 300 },
+    light: { shadowNormalBias: 0.12 },
+  });
   window.__rts = app; // handy for console debugging
 
   if (fov != null) {
@@ -164,7 +173,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   // They live in structures.list too, so combat/selection see them for free.
   const buildings = createBuildings({ app, structures, units, navGrid });
   app.buildings = buildings;
-  const buildingRenderer = createBuildingRenderer({ app, buildings });
+  const buildingRenderer = createBuildingRenderer({ app, buildings, healthBars });
   app.buildingRenderer = buildingRenderer;
 
   // Ghost placement: select a builder → Build Helipad → site it → the builder
@@ -249,7 +258,10 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
           : []
     ),
     onBuild: (structure, key) => structure.enqueue(key),
-    structureBuilds: [{ key: "helipad", label: "Build Helipad" }],
+    structureBuilds: [
+      { key: "helipad", label: "Build Helipad" },
+      { key: "turret", label: "Build Turret" },
+    ],
     onBuildStructure: (key, selected) => buildPlacement.begin(key, selected),
     onStop: () => { for (const u of app.selection?.selected ?? []) u.stop?.(); },
     onFocus: () => {
@@ -354,7 +366,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
     selectionRings.begin();               // unitRenderer pushes a ring per selected unit
     unitRenderer.sync(dt, app.camera);
     structuresRenderer.sync(dt, app.camera);
-    buildingRenderer.sync(dt);
+    buildingRenderer.sync(dt, app.camera);
     healthBars.commit();
     selectionRings.commit();
     fx.update(dt, app.camera);            // muzzle / impact / explosion

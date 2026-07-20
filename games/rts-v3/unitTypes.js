@@ -68,7 +68,7 @@ export const UNIT_TYPES = {
     turnRate: 3.0,
     maxHp: 160,
     range: 0,          // no weapon — combat.js skips anything with range 0
-    builds: ["helipad"],
+    builds: ["helipad", "turret"],
     // render
     url: "/models/rts/truckmilitary_compressed.glb",
     targetLength: 6,

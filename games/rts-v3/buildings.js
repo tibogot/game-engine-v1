@@ -24,6 +24,23 @@ export const BUILDING_TYPES = {
     barWidth: 11,
     barY: 8,
   },
+  turret: {
+    typeKey: "turret",
+    name: "Turret",
+    team: "player",
+    maxHp: 400,
+    radius: 4,
+    buildTime: 4,        // seconds the builder spends raising it
+    // Armed: combat.js drives structures and units through the same targeting
+    // code, so these stats are all a defensive emplacement needs.
+    range: 60,
+    damage: 16,
+    fireRate: 1.1,       // shots per second
+    canHitAir: true,
+    deployDur: 1.1,      // head's calibration sweep once it finishes rising
+    barWidth: 6,
+    barY: 10,
+  },
 };
 
 /** A structure-shaped building. Same contract as structures.js makeStructure. */
@@ -44,25 +61,34 @@ function makeBuilding(app, type, x, z) {
     hp: type.maxHp,
     alive: true,
     selected: false,
-    // combat: unarmed (range 0 → combat.js never fires it, but still targets it)
-    range: 0,
-    damage: 0,
-    fireRate: 0,
-    canHitAir: false,
+    // Combat. An unarmed building (range 0) is never fired by combat.js but is
+    // still a target; a turret fills these in and defends itself.
+    range: type.range ?? 0,
+    damage: type.damage ?? 0,
+    fireRate: type.fireRate ?? 0,
+    canHitAir: !!type.canHitAir,
     cooldown: 0,
     target: null,
-    turretYaw: 0,
+    turretYaw: 0,      // rendered head rotation
+    // 0→1 calibration sweep after construction. Anything without a deploy phase
+    // starts fully deployed, so "deploy < 1" always means "not ready to fire".
+    deploy: type.deployDur ? 0 : 1,
     // construction + production
     built: 0,            // 0 while rising, 1 when finished
     constructing: true,
     queue: [],
     progress: 0,
-    enqueue(key) {
-      // Only the thing this building makes, and only once it's finished.
-      if (this.alive && !this.constructing && key === type.produces && this.queue.length < 8) {
-        this.queue.push(key);
-      }
-    },
+    // Only buildings that PRODUCE get an enqueue — the command card uses its
+    // presence to decide whether to show a production face at all, so a turret
+    // must not carry a no-op one.
+    ...(type.produces ? {
+      enqueue(key) {
+        // Only the thing this building makes, and only once it's finished.
+        if (this.alive && !this.constructing && key === type.produces && this.queue.length < 8) {
+          this.queue.push(key);
+        }
+      },
+    } : {}),
     get position() { return pos; },
     setSelected(v) { this.selected = !!v; },
   };
@@ -128,7 +154,13 @@ export function createBuildings({ app, structures, units, navGrid = null }) {
       if (b.constructing) {
         b.built = Math.min(1, b.built + dt / b.type.buildTime);
         if (b.built >= 1) b.constructing = false;
-        continue; // no production until it's up
+        continue; // no production, and no shooting, until it's up
+      }
+
+      // Deploy ramp — a turret spends a beat calibrating before it can fire.
+      // combat.js holds fire while this is under 1 (see its `deploying` check).
+      if (b.deploy < 1 && b.type.deployDur) {
+        b.deploy = Math.min(1, b.deploy + dt / b.type.deployDur);
       }
 
       // Production.

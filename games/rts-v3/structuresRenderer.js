@@ -14,6 +14,10 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materialColor } from "three/tsl";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
+import {
+  turretBodyGeometry, turretHeadGeometry, turretEyeGeometry, turretHeadMatrix,
+  TURRET_PALETTE, HEAD_Y, MUZZLE_LOCAL, EYE_LOCAL,
+} from "./turretKit.js";
 
 const MAX_PER_KIND = 64; // instance capacity per structure kind
 
@@ -157,28 +161,9 @@ function dummyGeometry() {
   ], "trainingDummy");
 }
 
-/** Turret pedestal (static) — the head is a separate kind. */
-function turretGeometry() {
-  return mergePainted([
-    paint(new THREE.CylinderGeometry(4, 4.6, 1.2, 16).translate(0, 0.6, 0), C_DARK),
-    paint(new THREE.CylinderGeometry(2, 2.4, 3.5, 12).translate(0, 2.8, 0), C_ENEMY),
-  ], "turret");
-}
-
-/** Turret head + barrel. Its origin is the yaw pivot, HEAD_Y above the pedestal. */
-function turretHeadGeometry() {
-  const barrel = paint(new THREE.CylinderGeometry(0.36, 0.42, 5, 10), C_DARK);
-  barrel.rotateX(Math.PI / 2);   // lay it along +Z
-  barrel.translate(0, 0.2, 2.6); // …pointing out of the head
-  return mergePainted([
-    paint(new THREE.BoxGeometry(3.4, 2.4, 3.6), C_ENEMY),
-    barrel,
-  ], "turretHead");
-}
-
-const HEAD_Y = 5.2;                                   // head pivot above the pedestal
-const MUZZLE_LOCAL = new THREE.Vector3(0, 0.2, 5.1);  // in head space
-const EYE_LOCAL = new THREE.Vector3(0, 0.95, 1.1);    // in head space
+// Turret geometry now lives in turretKit.js — the player builds the same turret at
+// runtime through a completely different (instanced, animated) render path, so the
+// shape is shared and only the team palette differs.
 
 export const structureByMesh = new WeakMap(); // kept for API compatibility
 
@@ -203,7 +188,7 @@ export function createStructuresRenderer({ app, structures, healthBars }) {
   // The base is NOT in the merged mesh — it animates (sliding door), so it gets
   // its own view below. Only the turrets and dummies merge.
   const geos = {
-    turret: turretGeometry(),
+    turret: turretBodyGeometry("enemy"),
     dummy: dummyGeometry(),
   };
   const bodyGeoOf = (s) => (s.typeKey === "trainingDummy" ? geos.dummy : geos.turret);
@@ -262,9 +247,9 @@ export function createStructuresRenderer({ app, structures, healthBars }) {
 
   const kinds = {
     // Turret heads yaw independently, so they can't join the static merge.
-    head: makeKind(turretHeadGeometry(), structureMat, { shadow: true }),
+    head: makeKind(turretHeadGeometry("enemy"), structureMat, { shadow: true }),
     // Turret eyes: emissive, no shadow (a light casting a shadow of itself is a bug).
-    eye: makeKind(new THREE.SphereGeometry(0.45, 12, 8), bloom(0xff4a3a)),
+    eye: makeKind(turretEyeGeometry(), bloom(TURRET_PALETTE.enemy.eye)),
   };
 
   const kindOfMesh = new Map(Object.values(kinds).map((k) => [k.im, k]));
@@ -296,20 +281,11 @@ export function createStructuresRenderer({ app, structures, healthBars }) {
 
   const _m = new THREE.Matrix4();
   const _head = new THREE.Matrix4();
-  const _pos = new THREE.Vector3();
-  const _quat = new THREE.Quaternion();
-  const _scale = new THREE.Vector3(1, 1, 1);
   const _muzzle = new THREE.Vector3();
-  const _up = new THREE.Vector3(0, 1, 0);
   const _eye = new THREE.Matrix4();
   const _eyeOffset = new THREE.Matrix4().makeTranslation(EYE_LOCAL.x, EYE_LOCAL.y, EYE_LOCAL.z);
 
-  /** World matrix of a turret's head (its yaw pivot). */
-  const headMatrix = (s, out) => out.compose(
-    _pos.set(s.position.x, s.position.y + HEAD_Y, s.position.z),
-    _quat.setFromAxisAngle(_up, s.turretYaw ?? 0),
-    _scale,
-  );
+  const headMatrix = (s, out) => turretHeadMatrix(s, out);
 
   const push = (kind, matrix, s) => {
     if (kind.n >= MAX_PER_KIND) return;

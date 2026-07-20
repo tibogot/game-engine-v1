@@ -3,11 +3,23 @@
 // Separate from structuresRenderer (which merges the fixed boot structures into
 // one static mesh) because buildings appear at RUNTIME and ANIMATE: they rise out
 // of the ground while the builder raises them, and the helipad's corner lights
-// pulse while it's producing. Few exist, so each is its own small Group — no
-// instancing gymnastics, just clean animated meshes.
+// pulse while it's producing.
+//
+// Two strategies, chosen by how many of each the player can end up with:
+//   • HELIPAD — one animated Group each. You build a couple; each has fiddly
+//     per-instance state (pulsing corner lights), so a Group is the honest fit.
+//   • TURRET  — INSTANCED (body / head / eye). Turrets are free and unlimited, so
+//     a Group each would put us straight back to a draw call per building. Three
+//     instanced kinds cover any number of turrets, and the rise animation is just
+//     a Y offset baked into each instance matrix — instancing costs us no motion.
+// The turret shape itself is shared with the enemy turrets (turretKit.js).
 import * as THREE from "three";
 import { materialColor } from "three/tsl";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
+import {
+  turretBodyGeometry, turretHeadGeometry, turretEyeGeometry, turretHeadMatrix,
+  TURRET_PALETTE, EYE_LOCAL,
+} from "./turretKit.js";
 
 const C_PAD = 0x2b2f36;
 const C_RIM = 0x3d4550;
@@ -70,13 +82,57 @@ function buildHelipad(radius) {
   return g;
 }
 
-export function createBuildingRenderer({ app, buildings }) {
+const MAX_TURRETS = 128; // instance capacity — turrets are free, so be generous
+const TURRET_HEIGHT = 7;  // total vertical extent, for the rise-from-ground animation
+
+/** How far a building sinks below ground at built = 0. */
+const riseOffset = (b, height) => -(1 - b.built) * (height + 1.5);
+
+export function createBuildingRenderer({ app, buildings, healthBars = null }) {
   const { scene } = app;
-  const views = new Map(); // building → Group
+  const views = new Map(); // building → Group (helipads only)
   let _t = 0;
 
-  const roots = [];             // raycast targets for selection (one group per building)
+  const roots = [];             // raycast targets for selection
   const buildingOfGroup = new Map();
+
+  // ── Instanced turret kinds ──────────────────────────────────────────────────
+  const turretMat = mat(0xffffff, { rough: 0.87, metal: 0.18 });
+  turretMat.vertexColors = true; // the merged geometry carries the team palette
+
+  const makeKind = (geometry, material, { shadow = false } = {}) => {
+    const im = new THREE.InstancedMesh(geometry, material, MAX_TURRETS);
+    im.count = 0;
+    im.castShadow = shadow;
+    im.receiveShadow = shadow;
+    im.frustumCulled = false;
+    scene.add(im);
+    return { im, n: 0, at: [] };
+  };
+
+  const turretKinds = {
+    body: makeKind(turretBodyGeometry("player"), turretMat, { shadow: true }),
+    head: makeKind(turretHeadGeometry("player"), turretMat, { shadow: true }),
+    // Emissive sensor — no shadow (a light casting a shadow of itself is a bug).
+    eye: makeKind(turretEyeGeometry(), makeBloomMaterial(
+      { color: TURRET_PALETTE.player.eye, blending: THREE.NormalBlending, depthWrite: true, transparent: false },
+      BLOOM.beacon,
+    )),
+  };
+  const kindOfMesh = new Map(Object.values(turretKinds).map((k) => [k.im, k]));
+  for (const k of Object.values(turretKinds)) roots.push(k.im);
+
+  const _m = new THREE.Matrix4();
+  const _head = new THREE.Matrix4();
+  const _eye = new THREE.Matrix4();
+  const _eyeOffset = new THREE.Matrix4().makeTranslation(EYE_LOCAL.x, EYE_LOCAL.y, EYE_LOCAL.z);
+
+  const push = (kind, matrix, b) => {
+    if (kind.n >= MAX_TURRETS) return;
+    kind.im.setMatrixAt(kind.n, matrix);
+    kind.at[kind.n] = b;
+    kind.n++;
+  };
 
   function ensureView(b) {
     let g = views.get(b);
@@ -91,8 +147,10 @@ export function createBuildingRenderer({ app, buildings }) {
     return g;
   }
 
-  /** Resolve a raycast hit to its building (a hit on any child of the group). */
+  /** Resolve a raycast hit to its building (an instanced turret, or a Group child). */
   function buildingFromHit(hit) {
+    const kind = kindOfMesh.get(hit.object);
+    if (kind) return kind.at[hit.instanceId] ?? null;
     for (let o = hit.object; o; o = o.parent) {
       const b = buildingOfGroup.get(o);
       if (b) return b;
@@ -100,10 +158,62 @@ export function createBuildingRenderer({ app, buildings }) {
     return null;
   }
 
-  function sync(dt) {
+  /** Head yaw while a turret is coming online, or null once it's under AI control. */
+  function deployYaw(b) {
+    if (b.built < 1) return b.deploy * 0; // still buried — hold still
+    if (b.deploy >= 1) return null;       // deployed: normal targeting takes over
+    // A calibration sweep: one full turn, easing to a stop. Reads as "powering up"
+    // and, conveniently, shows the player which way the barrels point.
+    const e = 1 - (1 - b.deploy) ** 3; // ease-out cubic
+    return e * Math.PI * 2;
+  }
+
+  /** One instance in the shared health-bar field. Rides the rise so it never floats. */
+  function addBar(b, y, camera) {
+    if (!healthBars || !camera) return;
+    healthBars.add(
+      b.position.x, b.position.y + y + (b.type.barY ?? 8), b.position.z,
+      b.type.barWidth ?? 6,
+      b.hp / b.maxHp,
+      b.team === "enemy",
+      camera,
+    );
+  }
+
+  function sync(dt, camera) {
     _t += dt;
 
+    for (const k of Object.values(turretKinds)) k.n = 0;
+
     for (const b of buildings.list) {
+      if (b.typeKey === "turret") {
+        if (!b.alive) continue; // not pushed = not drawn; no per-turret mesh to hide
+
+        // Rise out of the ground while the builder raises it. The terrain occludes
+        // the buried part, so it reads as emerging rather than scaling in mid-air.
+        const y = riseOffset(b, TURRET_HEIGHT);
+        addBar(b, y, camera);
+
+        // Head aim: the deploy sweep owns it until the turret is online, then the
+        // target does. Without a target it simply holds its last heading.
+        const sweep = deployYaw(b);
+        if (sweep !== null) b.turretYaw = sweep;
+        else if (b.target?.alive) {
+          b.turretYaw = Math.atan2(
+            b.target.position.x - b.position.x,
+            b.target.position.z - b.position.z,
+          );
+        }
+
+        _m.makeTranslation(b.position.x, b.position.y + y, b.position.z);
+        push(turretKinds.body, _m, b);
+
+        turretHeadMatrix(b, _head, y);
+        push(turretKinds.head, _head, b);
+        push(turretKinds.eye, _eye.multiplyMatrices(_head, _eyeOffset), b);
+        continue;
+      }
+
       const g = ensureView(b);
       if (!g) continue;
 
@@ -113,13 +223,19 @@ export function createBuildingRenderer({ app, buildings }) {
       // Construction: the pad emerges from the ground. Below `built`=1 it's sunk,
       // and the terrain (drawn in front, depthwise) hides the buried part, so it
       // reads as rising out of the earth rather than scaling in mid-air.
-      const rise = (1 - b.built) * (g.userData.height + 1.5);
-      g.position.set(b.position.x, b.position.y - rise, b.position.z);
+      const gy = riseOffset(b, g.userData.height);
+      g.position.set(b.position.x, b.position.y + gy, b.position.z);
+      addBar(b, gy, camera);
 
       // Corner lights pulse while it's actively producing (something on the pad).
       const producing = !b.constructing && b.queue.length > 0;
       const pulse = producing ? 0.6 + 0.4 * Math.sin(_t * 6) : 0.18;
       for (const L of g.userData.lights) L.scale.setScalar(pulse + 0.5);
+    }
+
+    for (const k of Object.values(turretKinds)) {
+      k.im.count = k.n;
+      k.im.instanceMatrix.needsUpdate = true;
     }
   }
 
@@ -130,6 +246,10 @@ export function createBuildingRenderer({ app, buildings }) {
     dispose() {
       for (const g of views.values()) scene.remove(g);
       views.clear();
+      for (const k of Object.values(turretKinds)) {
+        scene.remove(k.im);
+        k.im.geometry.dispose();
+      }
     },
   };
 }

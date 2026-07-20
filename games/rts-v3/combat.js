@@ -77,6 +77,10 @@ export function createCombat({
   function update(dt) {
     for (const e of combatants()) {
       if (!e.alive || !e.range) continue;
+      // A building still rising out of the ground, or a turret still running its
+      // calibration sweep, is a target but not yet a shooter. (It stays in
+      // `acquire`'s candidate list — enemies can and should shoot it meanwhile.)
+      if (e.constructing || (e.deploy ?? 1) < 1) continue;
       e.cooldown = Math.max(0, (e.cooldown ?? 0) - dt);
 
       // Forget dead targets.
