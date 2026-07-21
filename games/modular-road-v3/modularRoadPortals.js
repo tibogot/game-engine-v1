@@ -39,7 +39,8 @@ function yawQuatFromObject(obj, out) {
   return out.setFromAxisAngle(_yAxis, yaw);
 }
 
-function buildPortalMesh(params, colorHex, side) {
+/** Exported for the palette thumbnail bake (roadGame bakes "portal_door"). */
+export function buildPortalMesh(params, colorHex, side) {
   const W = params.width;
   const H = params.height;
   const hw = W / 2;

@@ -33,7 +33,7 @@ export class GapPreview {
     geo.setDrawRange(0, 0);
     this.line = new THREE.Line(
       geo,
-      new THREE.LineBasicMaterial({ color: 0x5fd4ff, transparent: true, opacity: 0.9, depthWrite: false }),
+      new THREE.LineBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.9, depthWrite: false }),
     );
     this.line.name = "GapArc";
     this.line.frustumCulled = false;

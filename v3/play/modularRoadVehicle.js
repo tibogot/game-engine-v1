@@ -71,7 +71,8 @@ export const TIRE = {
   tireStiffness: 7.0,
   lowSpeedRef: 2.5,
   accelForce: 4000,
-  topSpeed: 30,
+  // Default at the Car Power slider max (dev panel #dv-top max=80).
+  topSpeed: 80,
   powerCurveExp: 2.0,
   brakeForce: 8000,
   reverseAccel: 2000,

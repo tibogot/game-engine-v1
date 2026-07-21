@@ -530,17 +530,21 @@ export function buildTunnelGeometry(frames, profileData = buildProfile(), pp = p
   const apex = Math.max(xo + 1.2, pp.tunnelHeight); // crown clearance above the deck
   const springY = Math.max(0.6, apex - xo); // wall height where the arch springs
   const arcSteps = 16;
+  // Walls sit 0.4 m OUTSIDE the deck edge, so a wall base at deck level leaves
+  // a see-through slit between wall and slab. A skirt down past the slab bottom
+  // closes it (same class of gap as the tube's missing bottom wedge).
+  const skirtY = -(roadParams.thickness + 0.4);
 
-  // Cross-section from left base, up the wall, over the arch, down the right wall.
+  // Cross-section from left skirt, up the wall, over the arch, down the right.
   const prof = [
-    { x: -xo, y: 0 },
+    { x: -xo, y: skirtY },
     { x: -xo, y: springY },
   ];
   for (let k = 1; k <= arcSteps; k++) {
     const a = Math.PI * (1 - k / arcSteps); // PI (left springline) → 0 (right springline)
     prof.push({ x: Math.cos(a) * xo, y: springY + Math.sin(a) * xo });
   }
-  prof.push({ x: xo, y: 0 });
+  prof.push({ x: xo, y: skirtY });
   return _sweepShellProfile(frames, prof);
 }
 
@@ -553,14 +557,17 @@ export function buildChannelGeometry(frames, profileData = buildProfile(), pp = 
   const xo = profileData.hw + 0.3;
   const rc = Math.max(1, pp.channelRadius ?? 4);
   const steps = 12;
+  const skirtY = -(roadParams.thickness + 0.4); // seal the wall-to-slab slit
   const geos = [];
   for (const side of [-1, 1]) {
-    // From top rim down to the deck edge: P(a) = (xo + rc·sin a, rc·(1 − cos a)).
+    // From top rim down to the deck edge: P(a) = (xo + rc·sin a, rc·(1 − cos a)),
+    // then straight down past the slab bottom.
     const prof = [];
     for (let k = steps; k >= 0; k--) {
       const a = (Math.PI / 2) * (k / steps);
       prof.push({ x: side * (xo + rc * Math.sin(a)), y: rc * (1 - Math.cos(a)) });
     }
+    prof.push({ x: side * xo, y: skirtY });
     geos.push(_sweepShellProfile(frames, prof));
   }
   const merged = mergeGeometries(geos, false);

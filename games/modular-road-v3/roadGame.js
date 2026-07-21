@@ -58,7 +58,7 @@ import {
 import { bakeRoadThumbnails } from "./modularRoadThumbnails.js";
 import { PropManager, PROP_CATALOG, glowPropParams } from "./modularRoadProps.js";
 import { MoverPropManager, MOVER_CATALOG } from "./modularRoadMoverProps.js";
-import { PortalManager, DEFAULT_PORTAL_PARAMS } from "./modularRoadPortals.js";
+import { PortalManager, DEFAULT_PORTAL_PARAMS, buildPortalMesh } from "./modularRoadPortals.js";
 import { GapPreview } from "./gapPreview.js";
 import { LapTracker, formatLapTime } from "./modularRoadLap.js";
 import { GhostTrack, createGhostMesh } from "./modularRoadGhost.js";
@@ -195,6 +195,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
   for (const p of PROP_CATALOG) thumbItems.push({ key: p.id, make: p.make });
   for (const m of MOVER_CATALOG) thumbItems.push({ key: m.id, make: m.make });
+  // The portals palette tile is synthetic (id "portal_door" in buildRoadPaletteUI),
+  // not a catalog entry — bake it a real door thumbnail under that key.
+  thumbItems.push({
+    key: "portal_door",
+    make: () => buildPortalMesh(DEFAULT_PORTAL_PARAMS, DEFAULT_PORTAL_PARAMS.colorA, "a").root,
+  });
   let roadThumbnails = new Map();
   try {
     roadThumbnails = await bakeRoadThumbnails({
@@ -1331,7 +1337,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   onStatus("ready");
 
-  return {
+  const handle = {
     app,
     builder,
     vehicle,
@@ -1341,4 +1347,6 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     get mode() { return mode; },
     world: boot,
   };
+  window.__roadGame = handle; // console debugging (window.__road is just the engine app)
+  return handle;
 }

@@ -14,7 +14,9 @@ import * as THREE from "three";
 const CHECK_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 
-const DEV_PANEL_OPEN_W = 264;
+// Match the v3 editor's --right-w (300px). Narrower than that and prop-rows
+// (label + range + readout) clip on the right edge of the panel.
+const DEV_PANEL_OPEN_W = 300;
 
 /**
  * @param {object} o
@@ -130,7 +132,7 @@ export function createRoadDevPanel({ app, game, params }) {
           </div>
           <button class="action-btn primary" id="dv-snap" type="button">Snap landing → new chain</button>
           <div class="dv-hint">
-            The blue arc is where a jump at <b>launch speed</b> lands (green ring).
+            The red arc is where a jump at <b>launch speed</b> lands (green ring).
             <b>Snap landing</b> starts a new chain there, heading down-arc — then
             place a landing / dive piece to catch the car.
           </div>
@@ -579,12 +581,16 @@ export function createRoadDevPanel({ app, game, params }) {
   const style = document.createElement("style");
   style.textContent = `
     #road-dev {
-      position: fixed; right: 0; top: 0; bottom: 0; width: ${DEV_PANEL_OPEN_W}px; z-index: 200;
+      position: fixed; right: 0; top: 0; bottom: 0;
+      width: ${DEV_PANEL_OPEN_W}px; min-width: ${DEV_PANEL_OPEN_W}px; z-index: 200;
       background: var(--bg-panel); border-left: 1px solid var(--border);
       display: flex; flex-direction: column; overflow: hidden;
       font-family: var(--font);
       pointer-events: auto;
     }
+    /* Readouts like "80 m/s" need more than the editor's default 36px. */
+    #road-dev .prop-num { width: auto; min-width: 52px; }
+    #road-dev .prop-label { width: 90px; min-width: 90px; }
     #road-dev .tab-bar { flex: 0 0 auto; }
     #road-dev .tab-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
     #road-dev.collapsed {

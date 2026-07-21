@@ -78,6 +78,19 @@ export class ModularRoadBuilder {
     this.freeYaw = 0;
     this._freePos = new THREE.Vector3(0, 0, 0);
 
+    /**
+     * What the placement gizmo edits (Apex-Rush placement model):
+     *  - "chain": the active chain's ANCHOR — dragging moves the whole chain
+     *    (entered via N / chain cycling, and on empty chains).
+     *  - "ghost": the NEXT PIECE. It rides the open connector; dragging DETACHES
+     *    it for free XYZ + yaw placement, with a magnetic snap back onto any
+     *    chain's open end. Placing while detached starts a new chain there.
+     */
+    this._gizmoTarget = "chain";
+    this.ghostDetached = false;
+    this._ghostPos = new THREE.Vector3();
+    this._ghostYaw = 0;
+
     this.root = new THREE.Group();
     this.root.name = "ModularRoad";
     scene.add(this.root);
@@ -191,8 +204,20 @@ export class ModularRoadBuilder {
   setActivePiece(id) {
     if (!PIECE_BY_ID.has(id)) return;
     this.activePieceId = id;
+    this._ensureGizmoOnGhost();
     this.refreshGhost();
     this._notify();
+  }
+
+  /** Selecting a shape summons the gizmo on it (Apex-style) — at the open end,
+   *  or wherever the ghost was already dragged to. */
+  _ensureGizmoOnGhost() {
+    if (!this.isBuildMode()) return;
+    if (this._gizmoTarget === "ghost" && this.ghostDetached) {
+      this._showGizmoAt(this._ghostPos, this._ghostYaw);
+    } else {
+      this._syncGizmoToOpenEnd();
+    }
   }
 
   /**
@@ -206,6 +231,7 @@ export class ModularRoadBuilder {
     if (!preset || !PIECE_BY_ID.has(preset.base)) return;
     Object.assign(pieceParams, preset.params);
     this.activePieceId = preset.base;
+    this._ensureGizmoOnGhost();
     this.refreshGhost();
     this._notify();
   }
@@ -220,6 +246,8 @@ export class ModularRoadBuilder {
   /** Start a new disconnected chain at `atPos` and make it active. */
   beginNewChain(atPos = null, yaw = null) {
     this.freePlaceMode = true;
+    this._gizmoTarget = "chain";
+    this.ghostDetached = false;
     this.freeYaw = this.snapYaw(yaw != null ? yaw : 0);
     if (atPos) this._freePos.copy(atPos);
     else if (this.orbit?.target) this._freePos.copy(this.orbit.target);
@@ -259,12 +287,14 @@ export class ModularRoadBuilder {
         : initialConnector();
   }
 
-  /** Switch the active (append) chain and move the gizmo + ghost to it. */
+  /** Switch the active (append) chain — gizmo grabs the WHOLE chain's anchor. */
   selectChain(chainId) {
     const chain = this.chains.find((c) => c.id === chainId);
     if (!chain) return;
     this.activeChainId = chainId;
     this.freePlaceMode = true;
+    this._gizmoTarget = "chain";
+    this.ghostDetached = false;
     // Seed the gizmo from the chain's anchor (pos + yaw).
     this._freePos.setFromMatrixPosition(chain.anchor);
     const e = new THREE.Euler().setFromRotationMatrix(chain.anchor, "YXZ");
@@ -298,9 +328,76 @@ export class ModularRoadBuilder {
   }
 
   setPlacementGizmoMode(mode) {
-    if (!this.placementGizmo || !this.freePlaceMode) return;
+    if (!this.placementGizmo) return;
     this.placementGizmo.setMode(mode);
+    // Rotation is yaw-only: a free 3-axis rotation would pitch/roll the entry
+    // socket, and every socket in the kit is level by convention.
+    const rot = mode === "rotate";
+    this.placementGizmo.showX = !rot;
+    this.placementGizmo.showZ = !rot;
+    this.placementGizmo.showY = true;
     this._notify();
+  }
+
+  /** "chain" (gizmo moves the whole chain) or "ghost" (gizmo moves the next piece). */
+  get gizmoMode() {
+    return this._gizmoTarget;
+  }
+
+  /** Open end (last piece's exit, or the anchor) of every chain. */
+  _openConnectors() {
+    const out = [];
+    for (const chain of this.chains) {
+      const last = this._lastPieceOfChain(chain.id);
+      out.push({ chainId: chain.id, matrix: last ? last.connectorOut : chain.anchor });
+    }
+    return out;
+  }
+
+  _nearestOpenConnector(pos) {
+    let best = null;
+    const p = new THREE.Vector3();
+    for (const oc of this._openConnectors()) {
+      const d = p.setFromMatrixPosition(oc.matrix).distanceTo(pos);
+      if (!best || d < best.dist) best = { ...oc, dist: d };
+    }
+    return best;
+  }
+
+  /** Connector matrix from the detached ghost pose (level, yaw only). */
+  _anchorFromGhost() {
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this._ghostYaw);
+    const travel = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+    return socketMatrix(this._ghostPos, travel, new THREE.Vector3(0, 1, 0));
+  }
+
+  /**
+   * Bind the gizmo to the next piece at the active chain's open end (the default
+   * state after selecting or placing a piece). Empty chains keep the "chain"
+   * anchor target instead — same pose, and dragging it is what N expects.
+   */
+  _syncGizmoToOpenEnd() {
+    const last = this._lastPieceOfChain(this.activeChainId);
+    if (!last) {
+      this._gizmoTarget = "chain";
+      this.ghostDetached = false;
+      this._showPlacementGizmo();
+      return;
+    }
+    this._gizmoTarget = "ghost";
+    this.ghostDetached = false;
+    this._ghostPos.setFromMatrixPosition(this.currentConnector);
+    this._ghostYaw = new THREE.Euler().setFromRotationMatrix(this.currentConnector, "YXZ").y;
+    this._showGizmoAt(this._ghostPos, this._ghostYaw);
+  }
+
+  _showGizmoAt(pos, yaw) {
+    if (!this.placementGizmo) return;
+    this.placementPivot.position.copy(pos);
+    this.placementPivot.rotation.set(0, yaw, 0);
+    this.placementGizmo.attach(this.placementPivot);
+    this.placementGizmo.enabled = true;
+    this.placementGizmo.visible = true;
   }
 
   /** True while dragging / hovering the free-placement gizmo (suppress LMB place). */
@@ -313,13 +410,7 @@ export class ModularRoadBuilder {
   }
 
   _showPlacementGizmo() {
-    if (!this.placementGizmo) return;
-    this.placementPivot.position.copy(this._freePos);
-    this.placementPivot.rotation.set(0, this.freeYaw, 0);
-    this.placementGizmo.attach(this.placementPivot);
-    this.placementGizmo.setMode("translate");
-    this.placementGizmo.enabled = true;
-    this.placementGizmo.visible = true;
+    this._showGizmoAt(this._freePos, this.freeYaw);
   }
 
   _hidePlacementGizmo() {
@@ -330,11 +421,37 @@ export class ModularRoadBuilder {
   }
 
   _onPlacementGizmoChange() {
-    if (!this.freePlaceMode) return;
     // TransformControls fires "change" for PROPERTY writes too (e.g. setSnap),
     // not just drags. Ignore those — only react while the gizmo is actually up,
     // or a snap-setting tweak would spuriously re-anchor the chain.
     if (!this.placementGizmo?.visible) return;
+
+    if (this._gizmoTarget === "ghost") {
+      // Moving the NEXT PIECE. Within magnet range of any chain's open end the
+      // ghost locks onto it exactly (and that chain becomes the append target);
+      // otherwise it detaches for free grid-snapped placement.
+      const pos = this.placementPivot.position;
+      const hit = this._nearestOpenConnector(pos);
+      const magnet = Math.max(4, this.snapEnabled ? this.snapStep * 0.75 : 4);
+      if (hit && hit.dist <= magnet) {
+        this.activeChainId = hit.chainId;
+        this._syncCurrentConnector();
+        this.ghostDetached = false;
+        this._ghostPos.setFromMatrixPosition(this.currentConnector);
+        this._ghostYaw = new THREE.Euler().setFromRotationMatrix(this.currentConnector, "YXZ").y;
+      } else {
+        this.ghostDetached = true;
+        this._ghostPos.copy(pos);
+        this.snapPos(this._ghostPos);
+        this._ghostYaw = this.snapYaw(this.placementPivot.rotation.y);
+      }
+      this.placementPivot.position.copy(this._ghostPos);
+      this.placementPivot.rotation.set(0, this._ghostYaw, 0);
+      this.refreshGhost();
+      return; // ghost moves never touch placed geometry — no rebuild/rebake
+    }
+
+    if (!this.freePlaceMode) return;
     // The gizmo's own translationSnap/rotationSnap handle the drag, but re-snap
     // here too: rotationSnap doesn't apply in translate mode, and a programmatic
     // move would otherwise land off-grid.
@@ -365,6 +482,19 @@ export class ModularRoadBuilder {
   }
 
   rotateFreeYaw(delta) {
+    if (this._gizmoTarget === "ghost") {
+      // Q/E rotate the NEXT PIECE: detach it in place and spin it (yaw only).
+      if (!this.ghostDetached) {
+        this.ghostDetached = true;
+        this._ghostPos.setFromMatrixPosition(this.currentConnector);
+        this._ghostYaw = new THREE.Euler().setFromRotationMatrix(this.currentConnector, "YXZ").y;
+      }
+      this._ghostYaw += delta;
+      this.placementPivot.position.copy(this._ghostPos);
+      this.placementPivot.rotation.set(0, this._ghostYaw, 0);
+      this.refreshGhost();
+      return;
+    }
     if (!this.freePlaceMode) return;
     this.freeYaw += delta;
     this.placementPivot.rotation.set(0, this.freeYaw, 0);
@@ -380,11 +510,15 @@ export class ModularRoadBuilder {
     return socketMatrix(this._freePos, travel, new THREE.Vector3(0, 1, 0));
   }
 
-  /** Rebuild the translucent ghost at the current open connector. */
+  /** Rebuild the translucent ghost at the open connector (or the detached pose). */
   refreshGhost() {
+    const conn =
+      this._gizmoTarget === "ghost" && this.ghostDetached
+        ? this._anchorFromGhost()
+        : this.currentConnector;
     const { geometry, world } = buildPiece(
       this.activePieceId,
-      this.currentConnector,
+      conn,
       pieceParams,
       roadParams,
       guardrailParams,
@@ -399,8 +533,13 @@ export class ModularRoadBuilder {
   setGhostVisible(v) {
     const on = v && this.isBuildMode();
     this.ghost.visible = on;
-    if (on && this.freePlaceMode) this._showPlacementGizmo();
-    else this._hidePlacementGizmo();
+    if (!on) {
+      this._hidePlacementGizmo();
+    } else if (this._gizmoTarget === "ghost") {
+      this._syncGizmoToOpenEnd();
+    } else if (this.freePlaceMode) {
+      this._showPlacementGizmo();
+    }
   }
 
   /**
@@ -490,8 +629,17 @@ export class ModularRoadBuilder {
     }
   }
 
-  /** Place the active piece onto the open end. */
+  /** Place the active piece — onto the open end, or wherever the detached
+   *  ghost sits (which starts a new chain there, Apex-style). */
   place() {
+    if (this._gizmoTarget === "ghost" && this.ghostDetached) {
+      const id = this.chainSeq++;
+      const anchor = this._anchorFromGhost();
+      this.chains.push({ id, anchor });
+      this.activeChainId = id;
+      this.currentConnector = anchor.clone();
+      this.ghostDetached = false;
+    }
     const connectorIn = this.currentConnector.clone();
     const edges = guardrailParams.enabled;
     const built = buildPiece(
@@ -536,8 +684,8 @@ export class ModularRoadBuilder {
     });
     this.currentConnector = built.connectorOut.clone();
     this._rebuildInstances();
-    // Keep the anchor gizmo on the active chain so the whole chain stays movable.
-    this._showPlacementGizmo();
+    // Hand the gizmo to the NEXT piece at the fresh open end.
+    this._syncGizmoToOpenEnd();
     this.refreshGhost();
     this._notify();
     return mesh;
@@ -571,7 +719,7 @@ export class ModularRoadBuilder {
     this._removePiece(last);
     this._rebuildInstances();
     this._syncCurrentConnector();
-    this._showPlacementGizmo();
+    this._syncGizmoToOpenEnd();
     this.refreshGhost();
     this._notify();
     return true;
@@ -585,6 +733,8 @@ export class ModularRoadBuilder {
     this.chainSeq = 1;
     this.activeChainId = 0;
     this.freePlaceMode = true;
+    this._gizmoTarget = "chain";
+    this.ghostDetached = false;
     this._freePos.set(0, 0, 0);
     this.freeYaw = 0;
     this.currentConnector = initialConnector();
@@ -613,6 +763,11 @@ export class ModularRoadBuilder {
     }
     this._rebuildInstances();
     this._syncCurrentConnector();
+    // A rebuild moves the open end; if the gizmo is riding the (attached)
+    // ghost, keep it glued to the new end.
+    if (this._gizmoTarget === "ghost" && !this.ghostDetached && this.placementGizmo?.visible) {
+      this._syncGizmoToOpenEnd();
+    }
     this.refreshGhost();
     this._notify();
   }
@@ -1616,9 +1771,15 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       const curveIds = new Set(["curve", "banked", "scurve", "spiral", "loop_half", "loop_spiral"]);
       const chainInfo =
         builder.chainCount > 1 ? ` · chain ${builder.activeChainIndex + 1}/${builder.chainCount}` : "";
+      const gizmoHint =
+        builder.gizmoMode === "ghost"
+          ? builder.ghostDetached
+            ? "free piece — drag near an open end to snap"
+            : "drag gizmo to move the piece anywhere"
+          : "anchor gizmo drags whole chain";
       statusEl.textContent = `${builder.count} placed · ${label}${
         curveIds.has(builder.activePieceId) ? " (" + dir + ")" : ""
-      }${chainInfo} · anchor gizmo drags whole chain`;
+      }${chainInfo} · ${gizmoHint}`;
     }
     for (const [key, btn] of pieceTiles) {
       let active;
