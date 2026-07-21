@@ -915,7 +915,18 @@ export class Vehicle {
     this.body.quat.copy(this.spawnQuat);
     this.body.angVel.set(0, 0, 0);
     this._resetInterpolation();
+    // Keep the render pose in step with the teleport (syncVisuals hasn't run yet).
+    this._renderPos.copy(this.body.pos);
+    this._renderQuat.copy(this.body.quat);
   }
+
+  /** Interpolated render pose — the pose the MESH is drawn at (syncVisuals lerps
+   *  _prev→body by alpha). A chase camera MUST follow this, not body.pos: the
+   *  body advances in discrete FIXED_DT ticks while the mesh interpolates every
+   *  frame, so following body.pos makes the car jitter in frame (classic
+   *  camera-follows-physics shake). */
+  get renderPos() { return this._renderPos; }
+  get renderQuat() { return this._renderQuat; }
 
   /** Snap the interpolation history to the current pose so teleports and
    *  respawns don't smear the mesh across the map for one frame. */

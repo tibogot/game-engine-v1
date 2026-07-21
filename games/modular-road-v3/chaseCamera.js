@@ -23,10 +23,14 @@ export const CHASE_CAM = {
   lookLerp: 5.0,      // how fast the look direction tracks velocity
   posLerp: 7.0,       // camera position smoothing
   // Loop-follow blend ramps by how far the car's up-axis tilts from world up.
-  loopStart: 0.85,    // carUp.y where loop-follow begins (~32° tilt)
-  loopFull: 0.2,      // carUp.y where loop-follow is fully on (~78° tilt)
-  loopLerp: 3.5,      // how fast the camera rolls into/out of loop-follow
-  upLerp: 4.0,        // how fast camera.up eases (smooths the loop roll)
+  // Smooth = engage EARLY and ramp over a WIDE tilt range so the camera rolls a
+  // little the whole way through the loop (tracking the car), rather than a late,
+  // fast snap. Ease speeds stay moderate for the same reason.
+  loopStart: 0.98,    // carUp.y where loop-follow begins (~11° tilt — as it noses in)
+  loopFull: 0.0,      // fully committed only when the car is VERTICAL (90°) — the
+                      //   whole climb is a gradual roll, then held over the top
+  loopLerp: 5.0,      // how fast the blend eases toward its tilt-based target
+  upLerp: 5.0,        // how fast camera.up eases (the roll)
 };
 
 /**
@@ -57,6 +61,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
   const _cLook = new THREE.Vector3();             // car-frame look target
   let _camLoop = 0;                               // smoothed 0..1 loop-follow blend
   let _camInit = false;
+  let _snap = false;                              // force a full snap next update
 
   /** Snap the rig to the car — call on respawn so it doesn't sweep across the map. */
   function reset() {
@@ -64,27 +69,39 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     _camLoop = 0;
     _camUp.set(0, 1, 0);
     camera.up.set(0, 1, 0);
+    // Reset alone only re-seeds heading/look; the POSITION + up still eased in
+    // from wherever the camera was, so a respawn teleport swung the camera across
+    // the world (which looked like the shake). Snap everything for one frame so
+    // the camera just appears behind the car.
+    _snap = true;
   }
 
   function update(dt) {
     if (isOrbit()) {
+      // Orbit modes (build / free-look) are owned by the ENGINE's OrbitControls,
+      // which runs its own controls.update() every frame. The chase must NOT also
+      // drive the camera or force orbit.target here — doing both makes the two
+      // fight (and in build mode it yanked the orbit target onto the car). Just
+      // un-roll the persistent up so a following drive frame starts clean.
       if (_camUp.x !== 0 || _camUp.z !== 0) {
-        _camUp.set(0, 1, 0); // un-roll so OrbitControls behaves
+        _camUp.set(0, 1, 0);
         camera.up.set(0, 1, 0);
         _camLoop = 0;
-      }
-      if (orbit) {
-        orbit.target.copy(vehicle.body.pos);
-        orbit.update();
       }
       return;
     }
 
-    const pos = vehicle.body.pos;
+    const snap = _snap; // full snap this frame (respawn) — see reset()
+    _snap = false;
+    // Follow the INTERPOLATED render pose (what the mesh is drawn at), not
+    // body.pos — the body steps at FIXED_DT while the mesh interpolates per
+    // frame, so following body.pos makes the car jitter in frame.
+    const pos = vehicle.renderPos ?? vehicle.body.pos;
+    const rquat = vehicle.renderQuat ?? vehicle.body.quat;
     const v = vehicle.body.vel;
     const speed = v.length();
     const grounded = vehicle.groundedCount > 0;
-    _camFwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat); // car facing (fallback)
+    _camFwd.set(0, 0, 1).applyQuaternion(rquat); // car facing (fallback)
     const reversing = grounded && v.dot(_camFwd) < -0.5;
 
     // 3D look direction: travel dir when moving, else the car's facing.
@@ -111,12 +128,12 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
       _camInit = true;
     }
 
-    const kh = 1 - Math.exp(-CAM.headingLerp * dt);
+    const kh = snap ? 1 : 1 - Math.exp(-CAM.headingLerp * dt);
     _camHeading.lerp(_camTgtH, kh);
     if (_camHeading.lengthSq() < 1e-6) _camHeading.copy(_camTgtH);
     _camHeading.normalize();
 
-    const kl = 1 - Math.exp(-CAM.lookLerp * dt);
+    const kl = snap ? 1 : 1 - Math.exp(-CAM.lookLerp * dt);
     _camLookDir.lerp(_camV, kl);
     if (_camLookDir.y > CAM.maxLookPitch) _camLookDir.y = CAM.maxLookPitch;
     else if (_camLookDir.y < -CAM.maxLookPitch) _camLookDir.y = -CAM.maxLookPitch;
@@ -133,7 +150,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     // ── Car-frame rig (loops / wall-rides): trails along the car's OWN forward
     // & up so the view rolls with the car through a vertical loop. Only blended
     // in while grounded — airborne spins keep the world rig.
-    _carUp.set(0, 1, 0).applyQuaternion(vehicle.body.quat);
+    _carUp.set(0, 1, 0).applyQuaternion(rquat);
     _cDesired.copy(pos)
       .addScaledVector(_camFwd, -CAM.dist)
       .addScaledVector(_carUp, CAM.height);
@@ -148,10 +165,10 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
         (CAM.loopStart - _carUp.y) / (CAM.loopStart - CAM.loopFull), 0, 1,
       );
     }
-    _camLoop += (loopTgt - _camLoop) * (1 - Math.exp(-CAM.loopLerp * dt));
+    _camLoop = snap ? loopTgt : _camLoop + (loopTgt - _camLoop) * (1 - Math.exp(-CAM.loopLerp * dt));
 
     _camDesired.lerpVectors(_wDesired, _cDesired, _camLoop);
-    const kp = 1 - Math.exp(-CAM.posLerp * dt);
+    const kp = snap ? 1 : 1 - Math.exp(-CAM.posLerp * dt);
     camera.position.lerp(_camDesired, kp);
 
     _camLook.lerpVectors(_wLook, _cLook, _camLoop);
@@ -172,7 +189,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
       const g = THREE.MathUtils.smoothstep(vert, 0.85, 0.999) * _camLoop;
       if (g > 0) _upTgt.lerp(_carUp, g);
     }
-    const ku = 1 - Math.exp(-CAM.upLerp * dt);
+    const ku = snap ? 1 : 1 - Math.exp(-CAM.upLerp * dt);
     _camUp.lerp(_upTgt, ku);
     // Keep it valid: strip any component along the view dir; fall back to the
     // car's up if that leaves nothing (up nearly parallel to view).

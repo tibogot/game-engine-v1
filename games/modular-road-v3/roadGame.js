@@ -37,6 +37,7 @@ import {
   DECK,
   HEADLIGHTS,
   CHASSIS,
+  GRAVITY,
 } from "../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../v3/play/modularRoadGround.js";
@@ -57,6 +58,7 @@ import { bakeRoadThumbnails } from "./modularRoadThumbnails.js";
 import { PropManager, PROP_CATALOG, glowPropParams } from "./modularRoadProps.js";
 import { MoverPropManager, MOVER_CATALOG } from "./modularRoadMoverProps.js";
 import { PortalManager, DEFAULT_PORTAL_PARAMS } from "./modularRoadPortals.js";
+import { GapPreview } from "./gapPreview.js";
 import { LapTracker, formatLapTime } from "./modularRoadLap.js";
 import { GhostTrack, createGhostMesh } from "./modularRoadGhost.js";
 import { ModularRoadTireMarks } from "./modularRoadTireMarks.js";
@@ -423,6 +425,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const _ghostPos = new THREE.Vector3();
   const _ghostQuat = new THREE.Quaternion();
 
+  // Air-stunt fall→respawn rule. OFF for now: free-drive lets the car fall off
+  // the track onto the terrain and keep driving. Game mode flips this on later.
+  let raceRespawn = false;
+
   // Last pose the car was safely grounded on the track — the air-stunt respawn.
   const lastSafePos = new THREE.Vector3();
   const lastSafeQuat = new THREE.Quaternion();
@@ -502,19 +508,32 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
   }
 
-  /** Air-stunt fall check (per frame) → back to the last safe grounded pose. */
+  /**
+   * Fall handling (per frame).
+   *
+   * Two separate things:
+   *  • Absolute void backstop — ALWAYS on. A car below FALL_Y is truly lost (fell
+   *    through the world), so send it back to the start.
+   *  • Air-stunt rule — GAME MODE ONLY (`raceRespawn`). Dropping FALL_DROP below
+   *    the last track contact snaps you back to that safe pose.
+   *
+   * In free-drive (`raceRespawn` off, the default for now) the car simply FALLS
+   * off the track and lands on the terrain, which is drivable — no respawn. The
+   * old always-on version looped: respawn at the edge → fall → repeat.
+   */
   function checkFall() {
     const y = vehicle.body.pos.y;
-    const fell = (hasSafe && y < lastSafeY - FALL_DROP) || y < FALL_Y;
-    if (!fell) return;
-    if (hasSafe) {
+
+    if (y < FALL_Y) { respawn(); return; } // lost below the world
+
+    if (!raceRespawn) return; // free-drive: fall to terrain and keep driving
+
+    if (hasSafe && y < lastSafeY - FALL_DROP) {
       _respawnPos.copy(lastSafePos); _respawnPos.y += 0.5; // small lift so wheels clear
       vehicle.setSpawn(_respawnPos, lastSafeQuat);
       vehicle.respawn();
       chase.reset(); tireMarks.reset(); driftSmoke.reset();
       simAccum = 0;
-    } else {
-      respawn(); // never touched track yet → back to the start line
     }
   }
 
@@ -546,13 +565,26 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * a pile of engine tooling — "road" mode would switch on the Smart Road
    * system — so re-asserting the three buttons is the narrower fix.)
    */
+  // The engine calls controls.update() every frame, and OrbitControls.update()
+  // ALWAYS ends with camera.lookAt(controls.target) + a polar-angle clamp —
+  // ignoring `enabled`. That overrode the chase rig's look-ahead + loop-roll every
+  // frame, and since the two run in separate rAFs the winner alternated → violent
+  // shake (worst in loops, where the up-vectors fought). While the chase owns the
+  // camera (drive, not free-look) we neuter that call to a no-op and restore it
+  // for orbit modes. Saved bound so restore is exact.
+  const _origControlsUpdate = controls.update.bind(controls);
+  const _noopUpdate = () => {};
+
   function applyControlMode() {
-    const orbitting = mode === "build";
+    const orbitting = mode === "build" || freeLook;
     controls.enableRotate = orbitting;
     controls.enablePan = orbitting;
     controls.enableZoom = orbitting;
+    // Chase owns the camera in normal drive → stop the engine's OrbitControls from
+    // stomping it; orbit modes get the real update back.
+    controls.update = orbitting ? _origControlsUpdate : _noopUpdate;
     syncMouseButtons();
-    if (orbitting) controls.update?.();
+    if (orbitting) controls.update();
   }
 
   function syncMouseButtons() {
@@ -803,6 +835,28 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // whole track floats without dragging each piece up.
   let buildHeight = DEFAULT_BUILD_HEIGHT;
 
+  // ── GAP PREVIEW (jump authoring) ────────────────────────────────────────────
+  // Ballistic arc from the open connector at a reference speed → shows where a
+  // jump lands so you can place the landing. Gravity matches the vehicle's.
+  const gapPreview = new GapPreview({ scene, gravity: GRAVITY });
+  let gapPreviewOn = true;
+  let refSpeed = 25;       // m/s launch speed the arc assumes
+  let landingDrop = 0;     // m below launch height to mark the landing
+  let lastLanding = null;  // last computed landing (for Snap landing)
+
+  /** Start a new chain on the previewed landing point, heading down-arc. */
+  function snapLanding() {
+    if (!lastLanding) return;
+    const v = lastLanding.vel;
+    // beginNewChain's freeYaw maps to travel = (0,0,-1) rotated by yaw, so this
+    // yaw makes the new chain head along the landing's horizontal velocity.
+    const yaw = Math.atan2(-v.x, -v.z);
+    builder.beginNewChain(lastLanding.pos.clone(), yaw);
+    if (controls.target) { controls.target.copy(lastLanding.pos); controls.update?.(); }
+    builder.refreshGhost?.();
+    paletteUi?.refreshStatus?.();
+  }
+
   /**
    * Seat a fresh chain floating at `buildHeight` above terrain.
    *
@@ -921,6 +975,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       vehicle.enabled = false;
       ghostMesh.visible = false;
     }
+    if (driving) gapPreview.setVisible(false); // build-only aid
     spawnMarker.visible = !driving; // a build-time guide; hidden while racing
     if (hud) hud.classList.toggle("on", driving);
     if (paletteEl) paletteEl.style.display = driving ? "none" : "";
@@ -973,8 +1028,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       setCollisionDebug,
       setFreeLook: (on) => {
         freeLook = !!on;
-        applyControlMode(); // orbit interactions must follow the flag
-        if (!freeLook) chase.reset(); // don't sweep back from wherever orbit left it
+        applyControlMode(); // flips the controls.update patch + interactions FIRST
+        // Then center the orbit on the car so it starts framed on it (the real
+        // OrbitControls, just restored, takes over from here).
+        if (freeLook) { controls.target.copy(vehicle.body.pos); controls.update(); }
+        else chase.reset(); // don't sweep back from wherever orbit left it
       },
       setInstancing: (on) => builder.setInstancing(on),
       setTireMarksEnabled: (on) => {
@@ -993,7 +1051,17 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       getBuildHeight: () => buildHeight,
       setBuildHeight: (m) => { buildHeight = m; },
       reseedChain: () => { seedChainAtSpawn({ atCursor: true }); paletteUi.refreshStatus(); },
+      // Gap authoring
+      getGapPreview: () => gapPreviewOn,
+      setGapPreview: (on) => { gapPreviewOn = !!on; if (!on) gapPreview.setVisible(false); },
+      getRefSpeed: () => refSpeed,
+      setRefSpeed: (v) => { refSpeed = v; },
+      getLandingDrop: () => landingDrop,
+      setLandingDrop: (v) => { landingDrop = v; },
+      snapLanding,
       // Race
+      setRaceRespawn: (on) => { raceRespawn = !!on; },
+      getRaceRespawn: () => raceRespawn,
       setTargetLaps: (n) => lap.setTargetLaps(n),
       getTargetLaps: () => lap.targetLaps,
       clearRecord,
@@ -1091,8 +1159,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
       // Keep the engine's terrain clipmap streaming around the car. The chase
       // rig owns camera.position/up, but `controls.target` is what the engine
-      // centres terrain on, so it has to track the car too.
-      controls.target.copy(vehicle.body.pos);
+      // centres terrain on, so it has to track the car too. Use the render pose
+      // (matches the camera) so nothing stair-steps.
+      controls.target.copy(vehicle.renderPos);
+    } else {
+      // BUILD mode — refresh the jump arc from the current open connector. Cheap
+      // (a few hundred vec ops); build mode isn't perf-critical.
+      if (gapPreviewOn) {
+        gapPreview.setVisible(true);
+        lastLanding = gapPreview.update(builder.currentConnector, refSpeed, landingDrop);
+      } else {
+        gapPreview.setVisible(false);
+      }
     }
 
     chase.update(dt);

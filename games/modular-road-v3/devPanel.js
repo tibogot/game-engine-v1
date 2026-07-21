@@ -69,6 +69,38 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Gap / jump</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Arc preview</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-gap" type="button" aria-label="Gap preview">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Launch speed</span>
+            <div class="prop-value">
+              <input type="range" id="dv-refspd" min="8" max="60" step="1" />
+              <span class="prop-num" id="dv-refspd-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Landing drop</span>
+            <div class="prop-value">
+              <input type="range" id="dv-drop" min="0" max="80" step="1" />
+              <span class="prop-num" id="dv-drop-v"></span>
+            </div>
+          </div>
+          <button class="action-btn primary" id="dv-snap" type="button">Snap landing → new chain</button>
+          <div class="dv-hint">
+            The blue arc is where a jump at <b>launch speed</b> lands (green ring).
+            <b>Snap landing</b> starts a new chain there, heading down-arc — then
+            place a landing / dive piece to catch the car.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Mode</div>
         <div class="section-body">
           <div class="prop-row">
@@ -102,6 +134,12 @@ export function createRoadDevPanel({ app, game, params }) {
         <div class="section-header">Race</div>
         <div class="section-body">
           <div class="prop-row">
+            <span class="prop-label">Fall respawn</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-respawn-on" type="button" aria-label="Fall respawn">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Target laps</span>
             <div class="prop-value">
               <input type="range" id="dv-laps" min="1" max="10" step="1" />
@@ -115,8 +153,8 @@ export function createRoadDevPanel({ app, game, params }) {
           <button class="action-btn" id="dv-clear-rec" type="button">Clear record + ghost</button>
           <div class="dv-hint">
             Place <b>Start</b> / <b>Checkpoint</b> / <b>Finish</b> pieces to enable
-            timing. Falling off the track respawns you at the last spot you were
-            safely on it.
+            timing. <b>Fall respawn</b> off (free-drive) = fall off the track and
+            land on the terrain; on = snap back to the last safe spot (game rule).
           </div>
         </div>
       </div>
@@ -154,6 +192,45 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="dv-hint">
             <b>Free look</b> hands the camera to orbit while driving (MMB rotate,
             RMB pan) — useful for inspecting the car mid-run.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Loop camera</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Engage tilt</span>
+            <div class="prop-value">
+              <input type="range" id="dv-loopstart" min="0.5" max="1" step="0.01" />
+              <span class="prop-num" id="dv-loopstart-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Full commit</span>
+            <div class="prop-value">
+              <input type="range" id="dv-loopfull" min="-1" max="0.8" step="0.05" />
+              <span class="prop-num" id="dv-loopfull-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Roll ease</span>
+            <div class="prop-value">
+              <input type="range" id="dv-looplerp" min="1" max="12" step="0.5" />
+              <span class="prop-num" id="dv-looplerp-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Up ease</span>
+            <div class="prop-value">
+              <input type="range" id="dv-uplerp" min="1" max="12" step="0.5" />
+              <span class="prop-num" id="dv-uplerp-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Engage tilt</b> higher = starts rolling earlier as the car noses into
+            the loop. <b>Full commit</b> lower = ramps more gradually across the
+            whole loop. Keep the eases moderate for smoothness.
           </div>
         </div>
       </div>
@@ -579,6 +656,30 @@ export function createRoadDevPanel({ app, game, params }) {
   }
   $("#dv-newchain").addEventListener("click", () => game.reseedChain());
 
+  // ── Gap / jump ──────────────────────────────────────────────────────────────
+  toggle("dv-gap", game.getGapPreview(), (on) => game.setGapPreview(on));
+  const refSpdEl = $("#dv-refspd");
+  const refSpdVal = $("#dv-refspd-v");
+  if (refSpdEl) {
+    refSpdEl.value = game.getRefSpeed();
+    refSpdVal.textContent = `${game.getRefSpeed()} m/s`;
+    refSpdEl.addEventListener("input", () => {
+      game.setRefSpeed(+refSpdEl.value);
+      refSpdVal.textContent = `${refSpdEl.value} m/s`;
+    });
+  }
+  const dropEl = $("#dv-drop");
+  const dropVal = $("#dv-drop-v");
+  if (dropEl) {
+    dropEl.value = game.getLandingDrop();
+    dropVal.textContent = `${game.getLandingDrop()} m`;
+    dropEl.addEventListener("input", () => {
+      game.setLandingDrop(+dropEl.value);
+      dropVal.textContent = `${dropEl.value} m`;
+    });
+  }
+  $("#dv-snap").addEventListener("click", () => game.snapLanding());
+
   // ── Spawn ─────────────────────────────────────────────────────────────────
   const spawnSrc = $("#dv-spawn-src");
   const renderSpawnSrc = () => {
@@ -602,6 +703,7 @@ export function createRoadDevPanel({ app, game, params }) {
       lapsVal.textContent = String(n);
     });
   }
+  toggle("dv-respawn-on", game.getRaceRespawn(), (on) => game.setRaceRespawn(on));
   $("#dv-clear-rec").addEventListener("click", () => { game.clearRecord(); refresh(); });
 
   // ── Camera ──────────────────────────────────────────────────────────────────
@@ -610,6 +712,12 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-cam-dist", cam, "dist", (v) => `${v.toFixed(1)}m`);
   slider("dv-cam-height", cam, "height", (v) => `${v.toFixed(1)}m`);
   slider("dv-cam-ahead", cam, "lookAhead", (v) => `${v.toFixed(1)}m`);
+
+  // Loop camera (live tuning — smoothness is subjective, dial to taste).
+  slider("dv-loopstart", cam, "loopStart", (v) => v.toFixed(2));
+  slider("dv-loopfull", cam, "loopFull", (v) => v.toFixed(2));
+  slider("dv-looplerp", cam, "loopLerp", (v) => v.toFixed(1));
+  slider("dv-uplerp", cam, "upLerp", (v) => v.toFixed(1));
 
   // ── Car ─────────────────────────────────────────────────────────────────────
   slider("dv-top", TIRE, "topSpeed", (v) => `${v.toFixed(0)} m/s`);
