@@ -216,6 +216,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     thumbnails: roadThumbnails,
     onAddProp: (id) => props.add(id),
     onAddMover: (id) => movers.add(id),
+    onAddPortal: () => { portals.addDoor(); paletteUi?.refreshStatus?.(); },
     onEdgesChange: () => bakeCollision(),
   });
 
@@ -750,6 +751,21 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     e.stopImmediatePropagation();
   }, true);
 
+  // LMB click-to-place (the lab had this; v3 only had Enter/Space). Suppressed
+  // while ANY editing gizmo is being dragged, or a gizmo drag would also drop a
+  // piece under the cursor.
+  renderer.domElement.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || mode !== "build") return;
+    if (
+      props.isUsingGizmo?.() ||
+      movers.isUsingGizmo?.() ||
+      portals.isUsingGizmo?.() ||
+      builder.isUsingPlacementGizmo?.()
+    ) return;
+    builder.place();
+    paletteUi.refreshStatus();
+  });
+
   // Toolbar buttons the palette does NOT wire (the lab's page owned these).
   const onClick = (id, fn) => document.getElementById(id)?.addEventListener("click", fn);
   onClick("road-drive", () => toggleMode());
@@ -898,6 +914,43 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // whole track floats without dragging each piece up.
   let buildHeight = DEFAULT_BUILD_HEIGHT;
 
+  // ── BUILD GRID ──────────────────────────────────────────────────────────────
+  // A visual reference plane at the active chain's height. In an empty sky there
+  // is nothing to judge position against, so the grid is what makes snapped
+  // building legible — and it shows the cells anchors actually land on.
+  const GRID_SPAN = 400;
+  let buildGrid = null;
+  let gridVisible = true;
+
+  function rebuildGrid() {
+    if (buildGrid) { buildGrid.geometry.dispose(); buildGrid.material.dispose(); scene.remove(buildGrid); }
+    const divisions = Math.max(4, Math.round(GRID_SPAN / builder.snapStep));
+    buildGrid = new THREE.GridHelper(GRID_SPAN, divisions, 0x5fd4ff, 0x39424e);
+    buildGrid.material.transparent = true;
+    buildGrid.material.opacity = 0.35;
+    buildGrid.material.depthWrite = false;
+    buildGrid.frustumCulled = false;
+    buildGrid.visible = false;
+    scene.add(buildGrid);
+  }
+  rebuildGrid();
+
+  const _gridPos = new THREE.Vector3();
+  function updateBuildGrid() {
+    if (!buildGrid) return;
+    const show = gridVisible && mode === "build";
+    buildGrid.visible = show;
+    if (!show) return;
+    // Follow the open connector, but quantised to the grid so it doesn't crawl.
+    _gridPos.setFromMatrixPosition(builder.currentConnector);
+    const s = builder.snapStep;
+    buildGrid.position.set(
+      Math.round(_gridPos.x / s) * s,
+      _gridPos.y,
+      Math.round(_gridPos.z / s) * s,
+    );
+  }
+
   // ── GAP PREVIEW (jump authoring) ────────────────────────────────────────────
   // Ballistic arc from the open connector at a reference speed → shows where a
   // jump lands so you can place the landing. Gravity matches the vehicle's.
@@ -1040,7 +1093,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       vehicle.enabled = false;
       ghostMesh.visible = false;
     }
-    if (driving) gapPreview.setVisible(false); // build-only aid
+    if (driving) { gapPreview.setVisible(false); if (buildGrid) buildGrid.visible = false; } // build-only aids
     spawnMarker.visible = !driving; // a build-time guide; hidden while racing
     if (hud) hud.classList.toggle("on", driving);
     if (paletteEl) paletteEl.style.display = driving ? "none" : "";
@@ -1118,6 +1171,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       getBuildHeight: () => buildHeight,
       setBuildHeight: (m) => { buildHeight = m; },
       reseedChain: () => { seedChainAtSpawn({ atCursor: true }); paletteUi.refreshStatus(); },
+      // Grid snapping
+      getSnapOn: () => builder.snapEnabled,
+      setSnapOn: (on) => builder.setSnap({ enabled: on }),
+      getSnapStep: () => builder.snapStep,
+      setSnapStep: (m) => { builder.setSnap({ step: m }); rebuildGrid(); },
+      getSnapYaw: () => builder.snapYawDeg,
+      setSnapYaw: (d) => builder.setSnap({ yawDeg: d }),
+      getGridVisible: () => gridVisible,
+      setGridVisible: (on) => { gridVisible = !!on; },
       // Gap authoring
       getGapPreview: () => gapPreviewOn,
       setGapPreview: (on) => { gapPreviewOn = !!on; if (!on) gapPreview.setVisible(false); },
@@ -1238,7 +1300,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       } else {
         gapPreview.setVisible(false);
       }
+      updateBuildGrid();
     }
+
+    // Portal doors animate (shimmer / ring spin) in BOTH modes — this was missing,
+    // so doors sat frozen.
+    portals.updateVisuals(dt);
 
     chase.update(dt);
 

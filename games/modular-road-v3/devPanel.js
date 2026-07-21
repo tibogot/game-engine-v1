@@ -69,6 +69,43 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Grid snap</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Snap to grid</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-snap" type="button" aria-label="Snap to grid">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Show grid</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-grid" type="button" aria-label="Show grid">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cell size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-snapstep" min="2" max="32" step="2" />
+              <span class="prop-num" id="dv-snapstep-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Angle step</span>
+            <div class="prop-value">
+              <input type="range" id="dv-snapyaw" min="5" max="90" step="5" />
+              <span class="prop-num" id="dv-snapyaw-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Snapping is what lets two separately-built chains <b>meet</b> — needed
+            to close a circuit. Anchors land on grid cells; the gizmo drags in
+            steps too.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Gap / jump</div>
         <div class="section-body">
           <div class="prop-row">
@@ -661,6 +698,30 @@ export function createRoadDevPanel({ app, game, params }) {
     });
   }
   $("#dv-newchain").addEventListener("click", () => game.reseedChain());
+
+  // ── Grid snap ───────────────────────────────────────────────────────────────
+  toggle("dv-snap", game.getSnapOn(), (on) => game.setSnapOn(on));
+  toggle("dv-grid", game.getGridVisible(), (on) => game.setGridVisible(on));
+  const stepEl = $("#dv-snapstep");
+  const stepVal = $("#dv-snapstep-v");
+  if (stepEl) {
+    stepEl.value = game.getSnapStep();
+    stepVal.textContent = `${game.getSnapStep()} m`;
+    stepEl.addEventListener("input", () => {
+      game.setSnapStep(+stepEl.value);
+      stepVal.textContent = `${stepEl.value} m`;
+    });
+  }
+  const yawEl = $("#dv-snapyaw");
+  const yawVal = $("#dv-snapyaw-v");
+  if (yawEl) {
+    yawEl.value = game.getSnapYaw();
+    yawVal.textContent = `${game.getSnapYaw()}°`;
+    yawEl.addEventListener("input", () => {
+      game.setSnapYaw(+yawEl.value);
+      yawVal.textContent = `${yawEl.value}°`;
+    });
+  }
 
   // ── Gap / jump ──────────────────────────────────────────────────────────────
   toggle("dv-gap", game.getGapPreview(), (on) => game.setGapPreview(on));

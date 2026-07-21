@@ -61,6 +61,7 @@ export const pieceParams = {
   slopeRise: 9, // vertical rise over the run (m); negative = downhill
   // Banked curve (reuses curveRadius/curveAngle/curveDir):
   bankAngle: 22, // peak lean in degrees, eased to 0 at both ends
+  bankEase: 0.35, // banked turn: fraction of the arc easing the lean in / out
   // Jump / launch ramp:
   jumpLength: 18, // arc length of the ramp (m)
   jumpAngle: 28, // takeoff angle at the exit (deg)
@@ -509,6 +510,19 @@ function rotateY(v, ang) {
   return new V3(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
 }
 
+/** Max bend per sweep step (rad). Fixed-length stepping alone lets tight arcs
+ *  facet visibly (1.6 m steps on an 18 m radius ≈ 5°/step, and the kerb +
+ *  guardrail silhouettes show every facet), so curved pieces cap the per-step
+ *  turn/roll too. Pass the TOTAL angle the piece sweeps (yaw + roll). */
+const MAX_STEP_ANGLE = THREE.MathUtils.degToRad(1.5);
+function stepsFor(arcLen, totalAngle = 0, minSteps = 2) {
+  return Math.max(
+    minSteps,
+    Math.ceil(arcLen / roadParams.segLen),
+    Math.ceil(Math.abs(totalAngle) / MAX_STEP_ANGLE),
+  );
+}
+
 function straightPoints(pp) {
   const L = Math.max(1, pp.straightLength);
   const n = Math.max(2, Math.ceil(L / roadParams.segLen));
@@ -538,9 +552,10 @@ function wallRidePoints(pp) {
   const ramp = THREE.MathUtils.clamp(pp.wallRamp ?? 0.35, 0.05, 0.5);
   const hw = roadParams.width / 2;
   const maxAng = THREE.MathUtils.degToRad(pp.wallAngle);
-  // DENSITY FLOOR (same reason twistPoints uses 12 and loopPoints 96): arc-length
-  // spacing is blind to TORSION. A fine fixed step keeps the lean ~2-3°/segment.
-  const n = Math.max(96, Math.ceil(L / 0.6));
+  // Torsion-aware density: the lean rolls in AND back out (2× wallAngle of total
+  // roll), plus the centreline rise adds pitch. stepsFor caps the per-step angle
+  // so this scales with the params instead of a hand-picked fixed step.
+  const n = stepsFor(L, 2 * maxAng, 48);
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const t = i / n;
@@ -559,7 +574,7 @@ function curvePoints(pp) {
   const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.curveAngle, 1, 180));
   const dir = pp.curveDir >= 0 ? 1 : -1;
   const arc = R * A;
-  const n = Math.max(2, Math.ceil(arc / roadParams.segLen));
+  const n = stepsFor(arc, A);
   const center = new V3(dir * R, 0, 0);
   const radius0 = new V3(-dir * R, 0, 0); // origin - center
   const pts = [];
@@ -573,7 +588,11 @@ function curvePoints(pp) {
 function slopePoints(pp) {
   const L = Math.max(2, pp.slopeLength);
   const H = pp.slopeRise;
-  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
+  // Pitch swings 0 → max grade → 0 (smoothstep peak slope = 1.5·H/L), so pass
+  // the total direction change through stepsFor — length-only stepping put ~5°
+  // of pitch per step on a typical slope and the kerbs showed every facet.
+  const swing = 2 * Math.atan((1.5 * Math.abs(H)) / L);
+  const n = stepsFor(L, swing, 8);
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const tt = i / n;
@@ -608,6 +627,110 @@ function bankOutRoll(t, pp) {
   return dir * a * (1 - t * t * (3 - 2 * t));
 }
 
+/**
+ * Bank-in/out straights RISE with the lean — the wall-ride's low-edge pivot fix
+ * applied to the bank family: centreline y = hw·sin(lean(t)) so the LOW edge
+ * stays on the entry plane. Rolling about the centreline alone see-saws the deck
+ * (±hw·sin(bank) ≈ ±3 m at 22°/16 m width) — half the road below track level.
+ * The rise uses the SAME smoothstep as the roll fns above so lean and height
+ * always agree; smoothstep's zero slope at both ends keeps flatEndTangents valid.
+ */
+function bankInPoints(pp) {
+  const L = Math.max(1, pp.straightLength);
+  const hw = roadParams.width / 2;
+  const bank = THREE.MathUtils.degToRad(Math.abs(pp.bankAngle));
+  const n = stepsFor(L, bank, 12);
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const s = t * t * (3 - 2 * t);
+    pts.push(new V3(0, hw * Math.sin(bank * s), -L * t));
+  }
+  return pts;
+}
+
+function bankOutPoints(pp) {
+  const L = Math.max(1, pp.straightLength);
+  const hw = roadParams.width / 2;
+  const bank = THREE.MathUtils.degToRad(Math.abs(pp.bankAngle));
+  const n = stepsFor(L, bank, 12);
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const s = 1 - t * t * (3 - 2 * t);
+    pts.push(new V3(0, hw * Math.sin(bank * s), -L * t));
+  }
+  return pts;
+}
+
+/** Banked turn's lean fraction over the arc: 0 → 1 → 0, eased over `bankEase`
+ *  of the arc at each end (shared by points + frames so rise and lean agree). */
+function bankedTurnRoll(t, pp) {
+  const dir = pp.curveDir >= 0 ? 1 : -1;
+  const ramp = THREE.MathUtils.clamp(pp.bankEase ?? 0.35, 0.05, 0.5);
+  return dir * THREE.MathUtils.degToRad(pp.bankAngle) * wallRampFrac(t, ramp);
+}
+
+/**
+ * Drop-anywhere banked turn: ONE arc that eases the lean 0 → bankAngle → 0
+ * within the curve and rises with it (low-edge pivot), so the inside edge sweeps
+ * along the entry plane — a bowl, not a tilted washer. Entry/exit are flat and
+ * level, so it composes with any flat piece directly. (The constant-lean
+ * `banked` piece stays for bank-in → hold → bank-out chains; placed on a FLAT
+ * connector its rolled entry socket rigidly un-rolls the whole piece and pitches
+ * the exit out of plane — this piece exists so the common case never does that.)
+ */
+function bankedTurnPoints(pp) {
+  const R = Math.max(2, pp.curveRadius);
+  const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.curveAngle, 1, 180));
+  const dir = pp.curveDir >= 0 ? 1 : -1;
+  const hw = roadParams.width / 2;
+  const bank = THREE.MathUtils.degToRad(Math.abs(pp.bankAngle));
+  const ramp = THREE.MathUtils.clamp(pp.bankEase ?? 0.35, 0.05, 0.5);
+  const n = stepsFor(R * A, A + 2 * bank, 24);
+  const center = new V3(dir * R, 0, 0);
+  const radius0 = new V3(-dir * R, 0, 0); // origin - center
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const pt = center.clone().add(rotateY(radius0, -dir * A * t));
+    pt.y = hw * Math.sin(bank * wallRampFrac(t, ramp));
+    pts.push(pt);
+  }
+  return pts;
+}
+
+/**
+ * Exact frames for the banked turn: level (up = world-up ⊥ tangent) then rolled
+ * about the tangent by bankedTurnRoll(t). Built analytically instead of via
+ * applyRoll because the centreline now bends in yaw AND pitch at once, and
+ * parallel transport accumulates a small twist over such a path — a residual
+ * roll at the exit seam. Constructing the frame from world-up kills that drift:
+ * lean is exactly 0 at both sockets, exactly bankAngle mid-arc.
+ */
+function bankedTurnFixFrames(frames, pp) {
+  const worldUp = new V3(0, 1, 0);
+  const up = new V3();
+  const right = new V3();
+  const q = new THREE.Quaternion();
+  const F = frames.length;
+  for (let i = 0; i < F; i++) {
+    const fr = frames[i];
+    const T = fr.tangent;
+    up.copy(worldUp).addScaledVector(T, -worldUp.dot(T));
+    if (up.lengthSq() < 1e-9) up.copy(worldUp);
+    up.normalize();
+    const ang = bankedTurnRoll(F > 1 ? i / (F - 1) : 0, pp);
+    if (Math.abs(ang) > 1e-9) {
+      q.setFromAxisAngle(T, ang);
+      up.applyQuaternion(q).normalize();
+    }
+    right.crossVectors(T, up).normalize();
+    fr.up.copy(up);
+    fr.right.copy(right);
+  }
+}
+
 /** Wall-ride: flat → up to (near-)vertical → HOLD → back to flat, all in one
  *  piece, so it chains cleanly off a flat straight (no abrupt twist at the
  *  joints). Ramps over the first/last quarter, holds the wall through the middle. */
@@ -622,7 +745,7 @@ function sCurvePoints(pp) {
   const R = Math.max(2, pp.curveRadius);
   const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.curveAngle, 1, 120));
   const dir = pp.curveDir >= 0 ? 1 : -1;
-  const half = Math.max(2, Math.ceil((R * A) / roadParams.segLen));
+  const half = stepsFor(R * A, A);
   const ds = (R * A) / half;
   const dth = A / half;
   const pts = [new V3(0, 0, 0)];
@@ -645,7 +768,10 @@ function sCurvePoints(pp) {
 function crestPoints(pp) {
   const L = Math.max(2, pp.slopeLength);
   const H = pp.slopeRise;
-  const n = Math.max(4, Math.ceil(L / roadParams.segLen));
+  // sin² profile: peak grade π·H/L, and the pitch swings up-over-down-out —
+  // ~4× the peak angle of total direction change. Cap per-step bend via stepsFor.
+  const swing = 4 * Math.atan((Math.PI * Math.abs(H)) / L);
+  const n = stepsFor(L, swing, 8);
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const tt = i / n;
@@ -659,7 +785,7 @@ function crestPoints(pp) {
 function jumpPoints(pp) {
   const L = Math.max(2, pp.jumpLength);
   const ang = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.jumpAngle, 0, 80));
-  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
+  const n = stepsFor(L, ang);
   const ds = L / n;
   const cur = new V3(0, 0, 0);
   const pts = [cur.clone()];
@@ -677,7 +803,7 @@ function jumpPoints(pp) {
 function divePoints(pp) {
   const L = Math.max(2, pp.diveLength);
   const ang = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.diveAngle, 0, 80));
-  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
+  const n = stepsFor(L, ang);
   const ds = L / n;
   const cur = new V3(0, 0, 0);
   const pts = [cur.clone()];
@@ -727,7 +853,9 @@ function loopPoints(pp) {
   // half: undefined/'full' = whole loop; 'in' = entry foot → top; 'out' = top → exit foot.
   const half = pp.loopHalf;
   const segN = Math.max(1, Math.ceil(Math.max(0.001, flat) / roadParams.segLen));
-  const ringN = Math.max(96, Math.ceil((2 * Math.PI * R) / roadParams.segLen));
+  // Full 360° of bend — honor the per-step angle cap (the old floor of 96 was
+  // 3.75°/step, visibly faceted on the ring silhouette).
+  const ringN = stepsFor(2 * Math.PI * R, 2 * Math.PI, 96);
   const pts = [];
 
   // Sideways offset across the FULL ring (θ over 0..2π). Zero slope at both feet
@@ -748,7 +876,7 @@ function loopPoints(pp) {
     return new V3(xAt(u), y, z);
   };
 
-  const hN = Math.max(48, Math.ceil((Math.PI * R) / roadParams.segLen));
+  const hN = stepsFor(Math.PI * R, Math.PI, 48); // 180° of bend under the angle cap
   if (half === "in") {
     // Entry foot → top. Flat lead-in from origin heading -Z (same as the full
     // loop's start), then the first half of the ring (u: 0 → 0.5). Top left open.
@@ -825,7 +953,7 @@ function loopSpiralPoints(pp) {
   const center = new V3(dir * R, 0, 0); // turn centre (origin starts on the rim)
   const radius0 = new V3(-dir * R, 0, 0); // origin - center
   const smooth = (u) => u * u * (3 - 2 * u); // ease climb in/out → flat ends
-  const n = Math.max(64, Math.ceil((R * A) / roadParams.segLen));
+  const n = stepsFor(R * A, A, 64); // A can exceed 540° — angle cap must apply
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const u = i / n;
@@ -874,7 +1002,7 @@ function gameLinePoints(pp) {
 function quarterPipePoints(pp) {
   const R = Math.max(4, pp.qpRadius ?? 16);
   const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.qpAngle ?? 90, 10, 100));
-  const n = Math.max(8, Math.ceil((R * A) / roadParams.segLen));
+  const n = stepsFor(R * A, A, 8);
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const phi = A * (i / n);
@@ -892,7 +1020,7 @@ function quarterPipePoints(pp) {
 function quarterPipeDownPoints(pp) {
   const R = Math.max(4, pp.qpRadius ?? 16);
   const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.qpAngle ?? 90, 10, 100));
-  const n = Math.max(8, Math.ceil((R * A) / roadParams.segLen));
+  const n = stepsFor(R * A, A, 8);
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const phi = A * (i / n);
@@ -903,7 +1031,10 @@ function quarterPipeDownPoints(pp) {
 
 function twistPoints(pp) {
   const L = Math.max(2, pp.twistLength);
-  const n = Math.max(12, Math.ceil(L / roadParams.segLen));
+  // The ROLL is the whole piece: 360°·turns of torsion. The old floor of 12
+  // steps put ~21°+ of roll per step — the single blockiest thing in the kit.
+  const rollAngle = 2 * Math.PI * Math.max(1, Math.round(pp.twistTurns));
+  const n = stepsFor(L, rollAngle, 24);
   const pts = [];
   for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
   return pts;
@@ -924,7 +1055,7 @@ function spiralPoints(pp) {
   const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.spiralAngle, 5, 1080));
   const dir = pp.curveDir >= 0 ? 1 : -1;
   const rise = pp.spiralRise;
-  const n = Math.max(6, Math.ceil((R * A) / roadParams.segLen));
+  const n = stepsFor(R * A, A, 6);
   const center = new V3(dir * R, 0, 0);
   const radius0 = new V3(-dir * R, 0, 0); // origin - center
   const pts = [];
@@ -959,7 +1090,7 @@ function gapPoints(pp) {
 function landingPoints(pp) {
   const L = Math.max(2, pp.landLength);
   const ang = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.landAngle, 0, 80));
-  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
+  const n = stepsFor(L, ang);
   const ds = L / n;
   const cur = new V3(0, 0, 0);
   const pts = [cur.clone()];
@@ -978,7 +1109,7 @@ function landingPoints(pp) {
 function browPoints(pp) {
   const L = Math.max(2, pp.browLength);
   const ang = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.browAngle, 0, 80));
-  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
+  const n = stepsFor(L, ang);
   const ds = L / n;
   const cur = new V3(0, 0, 0);
   const pts = [cur.clone()];
@@ -1115,11 +1246,20 @@ export const PIECE_CATALOG = [
     points: slopePoints,
   },
   {
-    id: "banked",
-    label: "Banked curve",
-    hint: "Constant lean — chain freely",
+    id: "banked_ease",
+    label: "Banked turn",
+    hint: "Eased bank — flat entry/exit, drop anywhere",
     swatch: "#9b59b6",
     key: "4",
+    points: bankedTurnPoints,
+    fixFrames: bankedTurnFixFrames,
+  },
+  {
+    id: "banked",
+    label: "Banked hold",
+    hint: "Constant lean — chain between Bank in/out",
+    swatch: "#9b59b6",
+    key: "",
     points: curvePoints,
     roll: bankRoll,
   },
@@ -1137,7 +1277,7 @@ export const PIECE_CATALOG = [
     hint: "Flat → banked (straight)",
     swatch: "#7d5fb0",
     key: "8",
-    points: straightPoints,
+    points: bankInPoints,
     roll: bankInRoll,
   },
   {
@@ -1146,7 +1286,7 @@ export const PIECE_CATALOG = [
     hint: "Banked → flat (straight)",
     swatch: "#6b4fa0",
     key: "9",
-    points: straightPoints,
+    points: bankOutPoints,
     roll: bankOutRoll,
   },
   {
@@ -1328,6 +1468,9 @@ const _END_TANGENTS = {
   finish: flatEndTangents,
   curve: curveEndTangents,
   banked: curveEndTangents,
+  // banked_ease: bank eases to 0 with zero slope at both ends (wallRampFrac), so
+  // its ends are exactly level and the flat-curve tangents apply unchanged.
+  banked_ease: curveEndTangents,
   jump: jumpEndTangents,
   dive: diveEndTangents,
   landing: landingEndTangents,

@@ -52,6 +52,11 @@ export class ModularRoadBuilder {
     this.isBuildMode = isBuildMode;
     this.onChange = onChange;
 
+    // Build-grid snapping (see setSnap). 8 m cells + 15° yaw by default.
+    this.snapEnabled = true;
+    this.snapStep = 8;
+    this.snapYawDeg = 15;
+
     this.activePieceId = PIECE_CATALOG[0].id;
     /** @type {{id:string, chainId:number, pp:object, mesh:THREE.Mesh, railMesh:THREE.Mesh|null, shellMesh:THREE.Mesh|null, decorMesh:THREE.Mesh|null, connectorIn:THREE.Matrix4, connectorOut:THREE.Matrix4}[]} */
     this.pieces = [];
@@ -121,6 +126,12 @@ export class ModularRoadBuilder {
       this.placementGizmo.visible = false;
       this.placementGizmo.size = 1.15;
       scene.add(this.placementGizmo.getHelper());
+      // Apply snap BEFORE wiring the change listener: assigning translationSnap /
+      // rotationSnap makes TransformControls fire "change", and handling that
+      // during construction cascades into onChange → the game's bakeCollision,
+      // which touches `builder` before `new ModularRoadBuilder()` has returned
+      // (temporal dead zone). Order matters here.
+      this._applyGizmoSnap();
       this.placementGizmo.addEventListener("dragging-changed", (e) => {
         if (this.orbit) this.orbit.enabled = !e.value && this.isBuildMode();
       });
@@ -128,6 +139,41 @@ export class ModularRoadBuilder {
     }
 
     this.refreshGhost();
+  }
+
+  /**
+   * Grid snapping for chain anchors — the TrackMania discipline that lets two
+   * separately-built chains actually MEET (and therefore lets a circuit close).
+   * Applies to the placement gizmo (native translationSnap/rotationSnap) and to
+   * anchors set programmatically.
+   */
+  setSnap({ enabled, step, yawDeg } = {}) {
+    if (enabled !== undefined) this.snapEnabled = !!enabled;
+    if (step !== undefined) this.snapStep = Math.max(0.25, step);
+    if (yawDeg !== undefined) this.snapYawDeg = Math.max(1, yawDeg);
+    this._applyGizmoSnap();
+  }
+
+  _applyGizmoSnap() {
+    const g = this.placementGizmo;
+    if (!g) return;
+    g.translationSnap = this.snapEnabled ? this.snapStep : null;
+    g.rotationSnap = this.snapEnabled ? THREE.MathUtils.degToRad(this.snapYawDeg) : null;
+  }
+
+  /** Snap a world position onto the build grid (in place). */
+  snapPos(v) {
+    if (!this.snapEnabled) return v;
+    const s = this.snapStep;
+    v.set(Math.round(v.x / s) * s, Math.round(v.y / s) * s, Math.round(v.z / s) * s);
+    return v;
+  }
+
+  /** Snap a yaw (radians) onto the angle grid. */
+  snapYaw(a) {
+    if (!this.snapEnabled) return a;
+    const s = THREE.MathUtils.degToRad(this.snapYawDeg);
+    return Math.round(a / s) * s;
   }
 
   get count() {
@@ -174,9 +220,10 @@ export class ModularRoadBuilder {
   /** Start a new disconnected chain at `atPos` and make it active. */
   beginNewChain(atPos = null, yaw = null) {
     this.freePlaceMode = true;
-    this.freeYaw = yaw != null ? yaw : 0;
+    this.freeYaw = this.snapYaw(yaw != null ? yaw : 0);
     if (atPos) this._freePos.copy(atPos);
     else if (this.orbit?.target) this._freePos.copy(this.orbit.target);
+    this.snapPos(this._freePos); // land the new chain on the build grid
     const id = this.chainSeq++;
     const anchor = this._anchorFromFree();
     this.chains.push({ id, anchor });
@@ -284,8 +331,17 @@ export class ModularRoadBuilder {
 
   _onPlacementGizmoChange() {
     if (!this.freePlaceMode) return;
+    // TransformControls fires "change" for PROPERTY writes too (e.g. setSnap),
+    // not just drags. Ignore those — only react while the gizmo is actually up,
+    // or a snap-setting tweak would spuriously re-anchor the chain.
+    if (!this.placementGizmo?.visible) return;
+    // The gizmo's own translationSnap/rotationSnap handle the drag, but re-snap
+    // here too: rotationSnap doesn't apply in translate mode, and a programmatic
+    // move would otherwise land off-grid.
     this._freePos.copy(this.placementPivot.position);
-    this.freeYaw = this.placementPivot.rotation.y;
+    this.snapPos(this._freePos);
+    this.freeYaw = this.snapYaw(this.placementPivot.rotation.y);
+    this.placementPivot.position.copy(this._freePos);
     this.placementPivot.rotation.set(0, this.freeYaw, 0);
     // Push the new anchor onto the active chain, then re-chain it rigidly.
     const chain = this._activeChain();
@@ -793,6 +849,7 @@ const PIECE_TO_CATEGORY = {
   slope: "slopes",
   crest: "slopes",
   spiral: "slopes",
+  banked_ease: "banked",
   banked: "banked",
   banktilt: "banked",
   wallride: "banked",
@@ -817,6 +874,7 @@ export const PALETTE_CATEGORIES = [
   { id: "banked", label: "Banked" },
   { id: "obstacles", label: "Obstacles" },
   { id: "moving", label: "Moving" },
+  { id: "portals", label: "Portals" },
   { id: "loop", label: "Loop" },
 ];
 
@@ -848,6 +906,7 @@ function piecePreviewSvg(pieceId) {
     crest: `<svg viewBox="0 0 80 80"><path d="M8 56 L24 24 L40 56 L56 24 L72 56" ${_RS}/><line x1="8" y1="56" x2="72" y2="56" stroke="#c0392b" stroke-width="1.5"/></svg>`,
     spiral: `<svg viewBox="0 0 80 80"><path d="M14 66 L14 40 Q14 20 36 16 Q58 12 62 36" ${_RS}/><line x1="14" y1="66" x2="14" y2="50" stroke="#dce622" stroke-width="1.5" opacity="0.7"/></svg>`,
     banked: `<svg viewBox="0 0 80 80"><path d="M8 52 L72 28" ${_RS}/><rect x="10" y="30" width="60" height="12" rx="2" transform="rotate(-14 40 36)" ${_RB}/></svg>`,
+    banked_ease: `<svg viewBox="0 0 80 80"><path d="M22 68 L22 40 Q22 22 44 22 L66 22" ${_RS}/><rect x="30" y="30" width="34" height="11" rx="2" transform="rotate(-14 47 36)" ${_RB}/></svg>`,
     bankin: `<svg viewBox="0 0 80 80"><rect x="10" y="38" width="28" height="10" rx="1" ${_RB}/><rect x="38" y="32" width="32" height="10" rx="1" transform="rotate(-16 54 37)" ${_RB}/></svg>`,
     bankout: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="32" height="10" rx="1" transform="rotate(-16 26 37)" ${_RB}/><rect x="42" y="38" width="28" height="10" rx="1" ${_RB}/></svg>`,
     jump: `<svg viewBox="0 0 80 80"><polygon points="8,60 72,60 72,28" fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"/><line x1="10" y1="58" x2="70" y2="30" ${_RS}/></svg>`,
@@ -882,6 +941,30 @@ function piecePreviewSvg(pieceId) {
  */
 export const CATEGORY_PRESETS = {
   banked: [
+    // Drop-anywhere eased turns FIRST (the default tile): flat entry/exit, the
+    // bank eases in/out inside the arc, inside edge sweeps the entry plane.
+    {
+      id: "bank_short_turn",
+      label: "Short Turn",
+      base: "banked_ease",
+      params: { curveRadius: 18, curveAngle: 60, bankAngle: 22, curveDir: 1, bankEase: 0.35 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M22 68 L22 40 Q22 22 44 22 L66 22" ${_RS}/></svg>`,
+    },
+    {
+      id: "bank_long_turn",
+      label: "Long Turn",
+      base: "banked_ease",
+      params: { curveRadius: 30, curveAngle: 90, bankAngle: 22, curveDir: 1, bankEase: 0.35 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/></svg>`,
+    },
+    {
+      id: "bank_hairpin",
+      label: "Hairpin",
+      base: "banked_ease",
+      params: { curveRadius: 20, curveAngle: 180, bankAngle: 30, curveDir: 1, bankEase: 0.3 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M22 70 L22 40 Q22 14 40 14 Q58 14 58 40 L58 70" ${_RS}/></svg>`,
+    },
+    // Chain workflow: Bank up → (hold pieces at constant lean) → Bank down.
     {
       id: "bank_up_right",
       label: "Up Right",
@@ -895,6 +978,13 @@ export const CATEGORY_PRESETS = {
       base: "bankin",
       params: { straightLength: 18, bankAngle: 22, curveDir: -1 },
       preview: `<svg viewBox="0 0 80 80"><rect x="10" y="40" width="26" height="10" rx="1" ${_RB}/><rect x="38" y="32" width="32" height="10" rx="1" transform="rotate(16 54 37)" ${_RB}/></svg>`,
+    },
+    {
+      id: "bank_hold_turn",
+      label: "Hold Turn",
+      base: "banked",
+      params: { curveRadius: 26, curveAngle: 90, bankAngle: 22, curveDir: 1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><rect x="30" y="30" width="34" height="11" rx="2" transform="rotate(-16 47 36)" ${_RB}/></svg>`,
     },
     {
       id: "bank_down_right",
@@ -930,20 +1020,6 @@ export const CATEGORY_PRESETS = {
       base: "banktilt",
       params: { straightLength: 22, bankAngle: 35, curveDir: 1 },
       preview: `<svg viewBox="0 0 80 80"><rect x="10" y="34" width="60" height="12" rx="2" transform="rotate(-26 40 40)" ${_RB}/></svg>`,
-    },
-    {
-      id: "bank_short_turn",
-      label: "Short Turn",
-      base: "banked",
-      params: { curveRadius: 18, curveAngle: 60, bankAngle: 22, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M22 68 L22 40 Q22 22 44 22 L66 22" ${_RS}/></svg>`,
-    },
-    {
-      id: "bank_long_turn",
-      label: "Long Turn",
-      base: "banked",
-      params: { curveRadius: 30, curveAngle: 90, bankAngle: 22, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/></svg>`,
     },
     {
       id: "wall_ride_right",
@@ -1327,6 +1403,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     thumbnails = null,
     onAddProp = null,
     onAddMover = null,
+    onAddPortal = null,
     onEdgesChange = null,
   } = opts;
   const catList = document.getElementById("category-list");
@@ -1360,6 +1437,10 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     }
     if (catId === "moving") {
       return moverCatalog.map((m) => ({ id: m.id, label: m.label, isMover: true, hint: "" }));
+    }
+    if (catId === "portals") {
+      // Teleport doors are placed, not chained — one tile that drops a door pair.
+      return [{ id: "portal_door", label: "Portal door", isPortal: true, hint: "Adds a door (pairs up in twos)" }];
     }
     // Curated kit: if this category has presets, show those instead of raw pieces.
     if (CATEGORY_PRESETS[catId]) {
@@ -1449,6 +1530,14 @@ export function buildRoadPaletteUI(builder, opts = {}) {
           refreshStatus();
           return;
         }
+        if (item.isPortal && onAddPortal) {
+          activePropId = null;
+          activeMoverId = null;
+          activePresetId = null;
+          onAddPortal();
+          refreshStatus();
+          return;
+        }
         if (item.isPreset) {
           activePropId = null;
           activeMoverId = null;
@@ -1482,7 +1571,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         label = def?.label ?? builder.activePieceId;
       }
       const dir = pieceParams.curveDir >= 0 ? "R" : "L";
-      const curveIds = new Set(["curve", "banked", "scurve", "spiral", "loop_half", "loop_spiral"]);
+      const curveIds = new Set(["curve", "banked", "banked_ease", "scurve", "spiral", "loop_half", "loop_spiral"]);
       const chainInfo =
         builder.chainCount > 1 ? ` · chain ${builder.activeChainIndex + 1}/${builder.chainCount}` : "";
       statusEl.textContent = `${builder.count} placed · ${label}${
