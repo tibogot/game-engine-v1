@@ -838,7 +838,12 @@ const PIECE_TO_CATEGORY = {
   straight: "straight",
   platform: "straight",
   narrow: "straight",
-  tunnel: "straight",
+  tunnel: "tubes",
+  tunnel_curve: "tubes",
+  tube: "tubes",
+  tube_curve: "tubes",
+  channel: "tubes",
+  channel_curve: "tubes",
   curve: "turns",
   scurve: "turns",
   jump: "ramps",
@@ -849,7 +854,6 @@ const PIECE_TO_CATEGORY = {
   slope: "slopes",
   crest: "slopes",
   spiral: "slopes",
-  banked_ease: "banked",
   banked: "banked",
   banktilt: "banked",
   wallride: "banked",
@@ -872,6 +876,7 @@ export const PALETTE_CATEGORIES = [
   { id: "ramps", label: "Ramps" },
   { id: "slopes", label: "Slopes" },
   { id: "banked", label: "Banked" },
+  { id: "tubes", label: "Tubes" },
   { id: "obstacles", label: "Obstacles" },
   { id: "moving", label: "Moving" },
   { id: "portals", label: "Portals" },
@@ -889,6 +894,7 @@ function categoryIconSvg(id) {
     ramps: `<svg viewBox="0 0 48 48"><polygon points="8,36 40,36 40,14" fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"/><line x1="10" y1="34" x2="38" y2="16" ${_RS}/></svg>`,
     slopes: `<svg viewBox="0 0 48 48"><polygon points="6,36 42,36 42,12" fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"/><line x1="8" y1="34" x2="40" y2="14" ${_RS}/></svg>`,
     banked: `<svg viewBox="0 0 48 48"><path d="M6 30 L42 18" ${_RS}/><rect x="8" y="16" width="32" height="8" rx="1" transform="rotate(-12 24 20)" ${_RB}/></svg>`,
+    tubes: `<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" fill="none" stroke="#6a7580" stroke-width="3"/><rect x="12" y="28" width="24" height="6" rx="1" ${_RB}/></svg>`,
     obstacles: `<svg viewBox="0 0 48 48"><rect x="12" y="14" width="14" height="22" rx="1" fill="#6a7580" stroke="#999" stroke-width="1.5"/><ellipse cx="34" cy="28" rx="8" ry="10" fill="none" stroke="#dce622" stroke-width="2"/></svg>`,
     moving: `<svg viewBox="0 0 48 48"><rect x="8" y="22" width="32" height="6" rx="1" fill="#e8c040" stroke="#999" stroke-width="1.2"/><path d="M24 8 L24 18 M24 32 L24 42" stroke="#dce622" stroke-width="2" stroke-linecap="round"/><path d="M18 8 L24 14 L30 8" fill="none" stroke="#dce622" stroke-width="2" stroke-linecap="round"/></svg>`,
     loop: `<svg viewBox="0 0 48 48"><circle cx="24" cy="26" r="14" fill="none" stroke="#c0392b" stroke-width="1.8"/><path d="M10 38 L10 26 Q10 12 24 12 Q38 12 38 26 L38 38" ${_RS}/></svg>`,
@@ -906,7 +912,6 @@ function piecePreviewSvg(pieceId) {
     crest: `<svg viewBox="0 0 80 80"><path d="M8 56 L24 24 L40 56 L56 24 L72 56" ${_RS}/><line x1="8" y1="56" x2="72" y2="56" stroke="#c0392b" stroke-width="1.5"/></svg>`,
     spiral: `<svg viewBox="0 0 80 80"><path d="M14 66 L14 40 Q14 20 36 16 Q58 12 62 36" ${_RS}/><line x1="14" y1="66" x2="14" y2="50" stroke="#dce622" stroke-width="1.5" opacity="0.7"/></svg>`,
     banked: `<svg viewBox="0 0 80 80"><path d="M8 52 L72 28" ${_RS}/><rect x="10" y="30" width="60" height="12" rx="2" transform="rotate(-14 40 36)" ${_RB}/></svg>`,
-    banked_ease: `<svg viewBox="0 0 80 80"><path d="M22 68 L22 40 Q22 22 44 22 L66 22" ${_RS}/><rect x="30" y="30" width="34" height="11" rx="2" transform="rotate(-14 47 36)" ${_RB}/></svg>`,
     bankin: `<svg viewBox="0 0 80 80"><rect x="10" y="38" width="28" height="10" rx="1" ${_RB}/><rect x="38" y="32" width="32" height="10" rx="1" transform="rotate(-16 54 37)" ${_RB}/></svg>`,
     bankout: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="32" height="10" rx="1" transform="rotate(-16 26 37)" ${_RB}/><rect x="42" y="38" width="28" height="10" rx="1" ${_RB}/></svg>`,
     jump: `<svg viewBox="0 0 80 80"><polygon points="8,60 72,60 72,28" fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"/><line x1="10" y1="58" x2="70" y2="30" ${_RS}/></svg>`,
@@ -940,31 +945,10 @@ function piecePreviewSvg(pieceId) {
  * @type {Record<string, {id:string,label:string,base:string,params:object,preview:string}[]>}
  */
 export const CATEGORY_PRESETS = {
+  // The Apex-Rush Banks palette: Up/Down transitions curl the deck up from the
+  // plane, Straight/Turn tiles HOLD the lean. Level sockets keep every piece
+  // upright wherever it's dropped.
   banked: [
-    // Drop-anywhere eased turns FIRST (the default tile): flat entry/exit, the
-    // bank eases in/out inside the arc, inside edge sweeps the entry plane.
-    {
-      id: "bank_short_turn",
-      label: "Short Turn",
-      base: "banked_ease",
-      params: { curveRadius: 18, curveAngle: 60, bankAngle: 22, curveDir: 1, bankEase: 0.35 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M22 68 L22 40 Q22 22 44 22 L66 22" ${_RS}/></svg>`,
-    },
-    {
-      id: "bank_long_turn",
-      label: "Long Turn",
-      base: "banked_ease",
-      params: { curveRadius: 30, curveAngle: 90, bankAngle: 22, curveDir: 1, bankEase: 0.35 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/></svg>`,
-    },
-    {
-      id: "bank_hairpin",
-      label: "Hairpin",
-      base: "banked_ease",
-      params: { curveRadius: 20, curveAngle: 180, bankAngle: 30, curveDir: 1, bankEase: 0.3 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M22 70 L22 40 Q22 14 40 14 Q58 14 58 40 L58 70" ${_RS}/></svg>`,
-    },
-    // Chain workflow: Bank up → (hold pieces at constant lean) → Bank down.
     {
       id: "bank_up_right",
       label: "Up Right",
@@ -978,27 +962,6 @@ export const CATEGORY_PRESETS = {
       base: "bankin",
       params: { straightLength: 18, bankAngle: 22, curveDir: -1 },
       preview: `<svg viewBox="0 0 80 80"><rect x="10" y="40" width="26" height="10" rx="1" ${_RB}/><rect x="38" y="32" width="32" height="10" rx="1" transform="rotate(16 54 37)" ${_RB}/></svg>`,
-    },
-    {
-      id: "bank_hold_turn",
-      label: "Hold Turn",
-      base: "banked",
-      params: { curveRadius: 26, curveAngle: 90, bankAngle: 22, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><rect x="30" y="30" width="34" height="11" rx="2" transform="rotate(-16 47 36)" ${_RB}/></svg>`,
-    },
-    {
-      id: "bank_down_right",
-      label: "Down Right",
-      base: "bankout",
-      params: { straightLength: 18, bankAngle: 22, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="32" height="10" rx="1" transform="rotate(-16 26 37)" ${_RB}/><rect x="44" y="40" width="26" height="10" rx="1" ${_RB}/></svg>`,
-    },
-    {
-      id: "bank_down_left",
-      label: "Down Left",
-      base: "bankout",
-      params: { straightLength: 18, bankAngle: 22, curveDir: -1 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="32" height="10" rx="1" transform="rotate(16 26 37)" ${_RB}/><rect x="44" y="40" width="26" height="10" rx="1" ${_RB}/></svg>`,
     },
     {
       id: "bank_straight_right",
@@ -1022,6 +985,34 @@ export const CATEGORY_PRESETS = {
       preview: `<svg viewBox="0 0 80 80"><rect x="10" y="34" width="60" height="12" rx="2" transform="rotate(-26 40 40)" ${_RB}/></svg>`,
     },
     {
+      id: "bank_down_right",
+      label: "Down Right",
+      base: "bankout",
+      params: { straightLength: 18, bankAngle: 22, curveDir: 1 },
+      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="32" height="10" rx="1" transform="rotate(-16 26 37)" ${_RB}/><rect x="44" y="40" width="26" height="10" rx="1" ${_RB}/></svg>`,
+    },
+    {
+      id: "bank_down_left",
+      label: "Down Left",
+      base: "bankout",
+      params: { straightLength: 18, bankAngle: 22, curveDir: -1 },
+      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="32" height="10" rx="1" transform="rotate(16 26 37)" ${_RB}/><rect x="44" y="40" width="26" height="10" rx="1" ${_RB}/></svg>`,
+    },
+    {
+      id: "bank_short_turn",
+      label: "Short Turn",
+      base: "banked",
+      params: { curveRadius: 20, curveAngle: 60, bankAngle: 22, curveDir: 1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M22 68 L22 40 Q22 22 44 22 L66 22" ${_RS}/><rect x="30" y="30" width="34" height="11" rx="2" transform="rotate(-16 47 36)" ${_RB}/></svg>`,
+    },
+    {
+      id: "bank_long_turn",
+      label: "Long Turn",
+      base: "banked",
+      params: { curveRadius: 30, curveAngle: 90, bankAngle: 22, curveDir: 1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><rect x="30" y="30" width="34" height="11" rx="2" transform="rotate(-16 47 36)" ${_RB}/></svg>`,
+    },
+    {
       id: "wall_ride_right",
       label: "Wall Ride R",
       base: "wallride",
@@ -1034,6 +1025,57 @@ export const CATEGORY_PRESETS = {
       base: "wallride",
       params: { wallRideLength: 70, wallAngle: 70, wallRamp: 0.38, curveDir: -1 },
       preview: `<svg viewBox="0 0 80 80"><path d="M66 66 Q54 66 50 40 Q46 14 34 14" fill="none" stroke="#8e6fc0" stroke-width="8" stroke-linecap="round"/></svg>`,
+    },
+  ],
+  tubes: [
+    {
+      id: "tube_str",
+      label: "Tube",
+      base: "tube",
+      params: { straightLength: 26, tubeRadius: 8, tubeWall: 0.6 },
+      preview: `<svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="26" fill="none" stroke="#6a7580" stroke-width="5"/><circle cx="40" cy="40" r="20" fill="none" stroke="#3f4650" stroke-width="2"/><rect x="30" y="56" width="20" height="5" rx="2" fill="#2a2e36"/></svg>`,
+    },
+    {
+      id: "tube_long",
+      label: "Tube Long",
+      base: "tube",
+      params: { straightLength: 44, tubeRadius: 8, tubeWall: 0.6 },
+      preview: `<svg viewBox="0 0 80 80"><ellipse cx="26" cy="40" rx="12" ry="22" fill="none" stroke="#6a7580" stroke-width="4"/><path d="M26 18 L66 22 M26 62 L66 58" stroke="#6a7580" stroke-width="3"/><ellipse cx="66" cy="40" rx="7" ry="18" fill="none" stroke="#6a7580" stroke-width="3"/></svg>`,
+    },
+    {
+      id: "tube_turn",
+      label: "Tube Turn",
+      base: "tube_curve",
+      params: { curveRadius: 26, curveAngle: 90, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><circle cx="52" cy="52" r="16" fill="none" stroke="#6a7580" stroke-width="4"/><circle cx="52" cy="52" r="11" fill="none" stroke="#3f4650" stroke-width="2"/></svg>`,
+    },
+    {
+      id: "tunnel_str",
+      label: "Arch Tunnel",
+      base: "tunnel",
+      params: { straightLength: 26, tunnelHeight: 7 },
+      preview: `<svg viewBox="0 0 80 80"><rect x="8" y="34" width="64" height="14" rx="2" ${_RB}/><path d="M8 34 Q40 8 72 34" fill="none" stroke="#6a7580" stroke-width="3"/></svg>`,
+    },
+    {
+      id: "tunnel_turn",
+      label: "Arch Turn",
+      base: "tunnel_curve",
+      params: { curveRadius: 26, curveAngle: 90, curveDir: 1, tunnelHeight: 7 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><path d="M30 52 Q30 30 52 30" fill="none" stroke="#6a7580" stroke-width="6" stroke-linecap="round"/></svg>`,
+    },
+    {
+      id: "channel_str",
+      label: "Half-pipe",
+      base: "channel",
+      params: { straightLength: 26, channelRadius: 4 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M12 28 Q16 46 40 46 Q64 46 68 28" fill="none" stroke="#3a7bd5" stroke-width="4"/><rect x="26" y="42" width="28" height="7" rx="1" ${_RB}/></svg>`,
+    },
+    {
+      id: "channel_turn",
+      label: "Half-pipe Turn",
+      base: "channel_curve",
+      params: { curveRadius: 26, curveAngle: 90, curveDir: 1, channelRadius: 4 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><path d="M32 56 Q32 32 56 32" fill="none" stroke="#3a7bd5" stroke-width="6" stroke-linecap="round"/></svg>`,
     },
   ],
   straight: [
@@ -1571,7 +1613,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         label = def?.label ?? builder.activePieceId;
       }
       const dir = pieceParams.curveDir >= 0 ? "R" : "L";
-      const curveIds = new Set(["curve", "banked", "banked_ease", "scurve", "spiral", "loop_half", "loop_spiral"]);
+      const curveIds = new Set(["curve", "banked", "scurve", "spiral", "loop_half", "loop_spiral"]);
       const chainInfo =
         builder.chainCount > 1 ? ` · chain ${builder.activeChainIndex + 1}/${builder.chainCount}` : "";
       statusEl.textContent = `${builder.count} placed · ${label}${

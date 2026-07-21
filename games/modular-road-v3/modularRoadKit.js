@@ -59,9 +59,8 @@ export const pieceParams = {
   curveDir: 1, // +1 = right turn, -1 = left turn
   slopeLength: 26, // horizontal run of the slope (m)
   slopeRise: 9, // vertical rise over the run (m); negative = downhill
-  // Banked curve (reuses curveRadius/curveAngle/curveDir):
-  bankAngle: 22, // peak lean in degrees, eased to 0 at both ends
-  bankEase: 0.35, // banked turn: fraction of the arc easing the lean in / out
+  // Banked pieces (reuse curveRadius/curveAngle/curveDir):
+  bankAngle: 22, // lean in degrees (turns HOLD it; Bank up/down ease it in/out)
   // Jump / launch ramp:
   jumpLength: 18, // arc length of the ramp (m)
   jumpAngle: 28, // takeoff angle at the exit (deg)
@@ -102,6 +101,11 @@ export const pieceParams = {
   browAngle: 30, // entry up-pitch (deg)
   // Tunnel shell:
   tunnelHeight: 7, // interior clearance from deck to crown (m)
+  // Rideable tube (the tube wall IS the road — drive inside, loop the walls):
+  tubeRadius: 8, // interior radius (m)
+  tubeWall: 0.6, // wall thickness (m) — visible at the open ends
+  // Half-pipe channel shell (open-top quarter-pipe walls):
+  channelRadius: 4, // wall fillet radius = wall height (m)
   // Quarter-pipe (concave ramp curving up a vertical-plane arc to a wall):
   qpRadius: 16, // arc radius (m) — also the wall height at 90°
   qpAngle: 90, // arc sweep (deg): 90 = up to vertical, less = a launch kicker
@@ -151,6 +155,39 @@ export function buildProfile(p = roadParams, withKerbs = true) {
     { x: -hw, y: -t, zone: 0 }, // underside, left
   ];
   return { pts, hw };
+}
+
+/**
+ * Rideable-tube cross-section: a thick-walled annulus whose INNER surface is
+ * the drivable "deck" (zone 1) — the car rides inside, up the walls, even a
+ * full inverted loop at speed. No flat road, no kerbs. The ring bottom sits at
+ * y = 0 so a flat piece feeds straight onto the tube floor; both ends are left
+ * open, showing the wall thickness (like the obstacles pipe prop).
+ * The closed outline runs the inner circle, jumps to the outer wall at the
+ * bottom seam, and runs back — the two radial webs sit hidden at the seam.
+ */
+function buildTubeProfile(pp = pieceParams) {
+  const Ri = Math.max(3, pp.tubeRadius ?? 8);
+  const tw = Math.max(0.15, pp.tubeWall ?? 0.6);
+  const Ro = Ri + tw;
+  const N = 48;
+  const pts = [];
+  // Inner surface (drivable): the FULL circle, k = 0..N inclusive, so the last
+  // edge lands back on the seam angle — stopping at N-1 left a missing wedge
+  // (an open band) at the tube bottom. The duplicated seam angle then jumps
+  // radially to the outer wall, which walks back the other way; the two radial
+  // webs sit coincident at the seam, hidden inside the wall.
+  // Zones 3 (tube inner) / 4 (tube outer) get their own colors + the inner
+  // neon rings in createRoadMaterial.
+  for (let k = 0; k <= N; k++) {
+    const a = -Math.PI / 2 + (2 * Math.PI * k) / N;
+    pts.push({ x: Math.cos(a) * Ri, y: Ri + Math.sin(a) * Ri, zone: 3 });
+  }
+  for (let k = N; k >= 0; k--) {
+    const a = -Math.PI / 2 + (2 * Math.PI * k) / N;
+    pts.push({ x: Math.cos(a) * Ro, y: Ri + Math.sin(a) * Ro, zone: 4 });
+  }
+  return { pts, hw: Ri };
 }
 
 /* ----------------------------------------------------------------------- */
@@ -300,7 +337,10 @@ export function buildSweepGeometry(frames, profileData = buildProfile(), opts = 
   for (let k = 0; k < M; k++) {
     const a = profile[k];
     const b = profile[(k + 1) % M];
-    const edgeZone = a.zone === 1 && b.zone === 1 ? 1 : a.zone === 2 && b.zone === 2 ? 2 : 0;
+    // An edge keeps its zone only when both endpoints agree (mixed edges are
+    // structural sides → 0). Zones: 0 side, 1 deck, 2 rail, 3 tube inner,
+    // 4 tube outer — the material colors each band.
+    const edgeZone = a.zone === b.zone ? a.zone : 0;
     const devA = dev[k];
     const devB = dev[k + 1];
 
@@ -439,33 +479,13 @@ export function buildGuardrailGeometry(frames, profileData = buildProfile(), gp 
 }
 
 /* ----------------------------------------------------------------------- */
-/* Tunnel shell (open arch swept along the frames)                          */
+/* Shells — enclosures swept along the frames (tunnel arch, tube, channel)  */
 /* ----------------------------------------------------------------------- */
 
-/**
- * Tunnel shell — vertical side walls plus a semicircular crown, swept along the
- * piece frames and left open underneath so the deck stays drivable. Built as a
- * single surface (rendered double-sided) and baked into the SOLIDS BVH, so the
- * chassis is blocked by the walls/roof while the wheels still probe the deck.
- */
-export function buildTunnelGeometry(frames, profileData = buildProfile(), pp = pieceParams) {
-  const hw = profileData.hw;
-  const xo = hw + 0.4; // walls sit just outside the deck edge
-  const apex = Math.max(xo + 1.2, pp.tunnelHeight); // crown clearance above the deck
-  const springY = Math.max(0.6, apex - xo); // wall height where the arch springs
-  const arcSteps = 16;
-
-  // Cross-section from left base, up the wall, over the arch, down the right wall.
-  const prof = [
-    { x: -xo, y: 0 },
-    { x: -xo, y: springY },
-  ];
-  for (let k = 1; k <= arcSteps; k++) {
-    const a = Math.PI * (1 - k / arcSteps); // PI (left springline) → 0 (right springline)
-    prof.push({ x: Math.cos(a) * xo, y: springY + Math.sin(a) * xo });
-  }
-  prof.push({ x: xo, y: 0 });
-
+/** Sweep one open (x, y) profile polyline along the frames into one surface
+ *  (rendered double-sided; baked into the SOLIDS BVH so the chassis collides
+ *  with it while the wheels still probe the deck underneath). */
+function _sweepShellProfile(frames, prof) {
   const F = frames.length;
   const P = prof.length;
   const along = new Float32Array(F);
@@ -498,6 +518,63 @@ export function buildTunnelGeometry(frames, profileData = buildProfile(), pp = p
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
   return geo;
+}
+
+/**
+ * Tunnel shell — vertical side walls plus a semicircular crown, swept along the
+ * piece frames and left open underneath so the deck stays drivable.
+ */
+export function buildTunnelGeometry(frames, profileData = buildProfile(), pp = pieceParams) {
+  const hw = profileData.hw;
+  const xo = hw + 0.4; // walls sit just outside the deck edge
+  const apex = Math.max(xo + 1.2, pp.tunnelHeight); // crown clearance above the deck
+  const springY = Math.max(0.6, apex - xo); // wall height where the arch springs
+  const arcSteps = 16;
+
+  // Cross-section from left base, up the wall, over the arch, down the right wall.
+  const prof = [
+    { x: -xo, y: 0 },
+    { x: -xo, y: springY },
+  ];
+  for (let k = 1; k <= arcSteps; k++) {
+    const a = Math.PI * (1 - k / arcSteps); // PI (left springline) → 0 (right springline)
+    prof.push({ x: Math.cos(a) * xo, y: springY + Math.sin(a) * xo });
+  }
+  prof.push({ x: xo, y: 0 });
+  return _sweepShellProfile(frames, prof);
+}
+
+/**
+ * Half-pipe channel shell — open-top quarter-pipe walls curving up from just
+ * outside each deck edge (tangent to the deck at the base, vertical at the top).
+ * A U-channel that keeps the car funneled without enclosing the sky.
+ */
+export function buildChannelGeometry(frames, profileData = buildProfile(), pp = pieceParams) {
+  const xo = profileData.hw + 0.3;
+  const rc = Math.max(1, pp.channelRadius ?? 4);
+  const steps = 12;
+  const geos = [];
+  for (const side of [-1, 1]) {
+    // From top rim down to the deck edge: P(a) = (xo + rc·sin a, rc·(1 − cos a)).
+    const prof = [];
+    for (let k = steps; k >= 0; k--) {
+      const a = (Math.PI / 2) * (k / steps);
+      prof.push({ x: side * (xo + rc * Math.sin(a)), y: rc * (1 - Math.cos(a)) });
+    }
+    geos.push(_sweepShellProfile(frames, prof));
+  }
+  const merged = mergeGeometries(geos, false);
+  for (const g of geos) g.dispose();
+  if (merged) merged.computeBoundingSphere();
+  return merged;
+}
+
+/** Shell dispatch by kind — `def.shell` is "arch" | "channel" (legacy `true`
+ *  = arch). Rideable tubes are NOT shells — their ring is the road itself
+ *  (def.profile = buildTubeProfile), so it lands in the deck BVH, not solids. */
+export function buildShellGeometry(kind, frames, profileData, pp) {
+  if (kind === "channel") return buildChannelGeometry(frames, profileData, pp);
+  return buildTunnelGeometry(frames, profileData, pp);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -539,11 +616,19 @@ function platformPoints(pp) {
   return pts;
 }
 
+/** Quintic smootherstep — C2, so slope AND curvature are zero at both ends.
+ *  The cubic smoothstep used before left a curvature jump where an ease meets
+ *  the hold, which the sweep lighting showed as a hard crease line across the
+ *  deck (the "blocky" banked look). */
+function smoother(u) {
+  return u * u * u * (u * (u * 6 - 15) + 10);
+}
+
 /** Fraction of full lean at t: eases 0→1 over `ramp`, holds, eases back to 0.
  *  Shared by the wall-ride's POINTS and ROLL so the rise and the lean agree. */
 function wallRampFrac(t, ramp) {
-  if (t < ramp) { const s = t / ramp; return s * s * (3 - 2 * s); }
-  if (t > 1 - ramp) { const s = (1 - t) / ramp; return s * s * (3 - 2 * s); }
+  if (t < ramp) return smoother(t / ramp);
+  if (t > 1 - ramp) return smoother((1 - t) / ramp);
   return 1;
 }
 
@@ -617,118 +702,111 @@ function bankRoll(t, pp) {
 function bankInRoll(t, pp) {
   const dir = pp.curveDir >= 0 ? 1 : -1;
   const a = THREE.MathUtils.degToRad(pp.bankAngle);
-  return dir * a * (t * t * (3 - 2 * t));
+  return dir * a * smoother(t);
 }
 
 /** Straight that ramps the lean bankAngle → 0 (banked → flat exit). */
 function bankOutRoll(t, pp) {
   const dir = pp.curveDir >= 0 ? 1 : -1;
   const a = THREE.MathUtils.degToRad(pp.bankAngle);
-  return dir * a * (1 - t * t * (3 - 2 * t));
+  return dir * a * (1 - smoother(t));
 }
 
-/**
- * Bank-in/out straights RISE with the lean — the wall-ride's low-edge pivot fix
- * applied to the bank family: centreline y = hw·sin(lean(t)) so the LOW edge
- * stays on the entry plane. Rolling about the centreline alone see-saws the deck
- * (±hw·sin(bank) ≈ ±3 m at 22°/16 m width) — half the road below track level.
- * The rise uses the SAME smoothstep as the roll fns above so lean and height
- * always agree; smoothstep's zero slope at both ends keeps flatEndTangents valid.
+/*
+ * BANK FAMILY — the Apex-Rush model, three rules working together:
+ *
+ *  1. LOW-EDGE PIVOT. The centreline rises by hw·sin(lean) while the roll drops
+ *     one side by the same amount, so the deck curls UP from the connector
+ *     plane like a wave and never dips below it.
+ *  2. TURNS HOLD the bank; the STRAIGHT Up/Down pieces do the transitions
+ *     (no rise-hold-fall hump inside a single turn — that read as a bump).
+ *  3. LEVEL SOCKETS (def.sockets): connectors carry position + heading only,
+ *     never the roll. A held-bank piece dropped on a FLAT connector sits
+ *     upright exactly as authored (the old rolled sockets rigidly un-rolled
+ *     the piece and pitched its exit out of plane). Seams between bank pieces
+ *     still match because they all share the same raised/rolled cross-section.
  */
+
+/** Low-edge raise for a given lean (m above the connector plane). */
+function bankRaise(pp, frac = 1) {
+  const bank = THREE.MathUtils.degToRad(Math.abs(pp.bankAngle));
+  return (roadParams.width / 2) * Math.sin(bank * frac);
+}
+
+/** Bank-in straight: deck curls up 0 → bankAngle (C2, matches bankInRoll). */
 function bankInPoints(pp) {
   const L = Math.max(1, pp.straightLength);
-  const hw = roadParams.width / 2;
   const bank = THREE.MathUtils.degToRad(Math.abs(pp.bankAngle));
   const n = stepsFor(L, bank, 12);
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const t = i / n;
-    const s = t * t * (3 - 2 * t);
-    pts.push(new V3(0, hw * Math.sin(bank * s), -L * t));
+    pts.push(new V3(0, bankRaise(pp, smoother(t)), -L * t));
   }
   return pts;
 }
 
+/** Bank-out straight: deck settles bankAngle → 0 (C2, matches bankOutRoll). */
 function bankOutPoints(pp) {
   const L = Math.max(1, pp.straightLength);
-  const hw = roadParams.width / 2;
   const bank = THREE.MathUtils.degToRad(Math.abs(pp.bankAngle));
   const n = stepsFor(L, bank, 12);
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const t = i / n;
-    const s = 1 - t * t * (3 - 2 * t);
-    pts.push(new V3(0, hw * Math.sin(bank * s), -L * t));
+    pts.push(new V3(0, bankRaise(pp, 1 - smoother(t)), -L * t));
   }
   return pts;
 }
 
-/** Banked turn's lean fraction over the arc: 0 → 1 → 0, eased over `bankEase`
- *  of the arc at each end (shared by points + frames so rise and lean agree). */
-function bankedTurnRoll(t, pp) {
-  const dir = pp.curveDir >= 0 ? 1 : -1;
-  const ramp = THREE.MathUtils.clamp(pp.bankEase ?? 0.35, 0.05, 0.5);
-  return dir * THREE.MathUtils.degToRad(pp.bankAngle) * wallRampFrac(t, ramp);
+/** Held-bank straight: constant lean, centreline held at the full raise. */
+function bankHoldPoints(pp) {
+  const L = Math.max(1, pp.straightLength);
+  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
+  const y = bankRaise(pp);
+  const pts = [];
+  for (let i = 0; i <= n; i++) pts.push(new V3(0, y, -L * (i / n)));
+  return pts;
 }
 
-/**
- * Drop-anywhere banked turn: ONE arc that eases the lean 0 → bankAngle → 0
- * within the curve and rises with it (low-edge pivot), so the inside edge sweeps
- * along the entry plane — a bowl, not a tilted washer. Entry/exit are flat and
- * level, so it composes with any flat piece directly. (The constant-lean
- * `banked` piece stays for bank-in → hold → bank-out chains; placed on a FLAT
- * connector its rolled entry socket rigidly un-rolls the whole piece and pitches
- * the exit out of plane — this piece exists so the common case never does that.)
- */
-function bankedTurnPoints(pp) {
+/** Held-bank turn: flat arc at the full raise, constant lean (Short/Long Turn). */
+function bankedHoldCurvePoints(pp) {
   const R = Math.max(2, pp.curveRadius);
   const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.curveAngle, 1, 180));
   const dir = pp.curveDir >= 0 ? 1 : -1;
-  const hw = roadParams.width / 2;
-  const bank = THREE.MathUtils.degToRad(Math.abs(pp.bankAngle));
-  const ramp = THREE.MathUtils.clamp(pp.bankEase ?? 0.35, 0.05, 0.5);
-  const n = stepsFor(R * A, A + 2 * bank, 24);
+  const n = stepsFor(R * A, A, 24);
+  const y = bankRaise(pp);
   const center = new V3(dir * R, 0, 0);
   const radius0 = new V3(-dir * R, 0, 0); // origin - center
   const pts = [];
   for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    const pt = center.clone().add(rotateY(radius0, -dir * A * t));
-    pt.y = hw * Math.sin(bank * wallRampFrac(t, ramp));
+    const pt = center.clone().add(rotateY(radius0, -dir * A * (i / n)));
+    pt.y = y;
     pts.push(pt);
   }
   return pts;
 }
 
-/**
- * Exact frames for the banked turn: level (up = world-up ⊥ tangent) then rolled
- * about the tangent by bankedTurnRoll(t). Built analytically instead of via
- * applyRoll because the centreline now bends in yaw AND pitch at once, and
- * parallel transport accumulates a small twist over such a path — a residual
- * roll at the exit seam. Constructing the frame from world-up kills that drift:
- * lean is exactly 0 at both sockets, exactly bankAngle mid-arc.
- */
-function bankedTurnFixFrames(frames, pp) {
-  const worldUp = new V3(0, 1, 0);
-  const up = new V3();
-  const right = new V3();
-  const q = new THREE.Quaternion();
-  const F = frames.length;
-  for (let i = 0; i < F; i++) {
-    const fr = frames[i];
-    const T = fr.tangent;
-    up.copy(worldUp).addScaledVector(T, -worldUp.dot(T));
-    if (up.lengthSq() < 1e-9) up.copy(worldUp);
-    up.normalize();
-    const ang = bankedTurnRoll(F > 1 ? i / (F - 1) : 0, pp);
-    if (Math.abs(ang) > 1e-9) {
-      q.setFromAxisAngle(T, ang);
-      up.applyQuaternion(q).normalize();
-    }
-    right.crossVectors(T, up).normalize();
-    fr.up.copy(up);
-    fr.right.copy(right);
-  }
+/** Level sockets for the straight bank pieces (entry plane → exit plane). */
+function bankStraightSockets(pp) {
+  const L = Math.max(1, pp.straightLength);
+  const fwd = new V3(0, 0, -1);
+  return { entryPos: new V3(0, 0, 0), entryDir: fwd.clone(), exitPos: new V3(0, 0, -L), exitDir: fwd.clone() };
+}
+
+/** Level sockets for the held-bank turn: the flat arc projected to the plane. */
+function bankedCurveSockets(pp) {
+  const R = Math.max(2, pp.curveRadius);
+  const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.curveAngle, 1, 180));
+  const dir = pp.curveDir >= 0 ? 1 : -1;
+  const center = new V3(dir * R, 0, 0);
+  const exitPos = center.clone().add(rotateY(new V3(-dir * R, 0, 0), -dir * A));
+  return {
+    entryPos: new V3(0, 0, 0),
+    entryDir: new V3(0, 0, -1),
+    exitPos,
+    exitDir: rotateY(new V3(0, 0, -1), -dir * A),
+  };
 }
 
 /** Wall-ride: flat → up to (near-)vertical → HOLD → back to flat, all in one
@@ -1246,48 +1324,43 @@ export const PIECE_CATALOG = [
     points: slopePoints,
   },
   {
-    id: "banked_ease",
+    id: "banked",
     label: "Banked turn",
-    hint: "Eased bank — flat entry/exit, drop anywhere",
+    hint: "Held lean, curls up from the plane — pair with Bank up/down",
     swatch: "#9b59b6",
     key: "4",
-    points: bankedTurnPoints,
-    fixFrames: bankedTurnFixFrames,
-  },
-  {
-    id: "banked",
-    label: "Banked hold",
-    hint: "Constant lean — chain between Bank in/out",
-    swatch: "#9b59b6",
-    key: "",
-    points: curvePoints,
+    points: bankedHoldCurvePoints,
     roll: bankRoll,
+    sockets: bankedCurveSockets,
   },
   {
     id: "banktilt",
     label: "Banked straight",
-    hint: "Constant lean (straight) — chain freely",
+    hint: "Held lean (straight) — chain freely",
     swatch: "#8e6fc0",
-    points: straightPoints,
+    points: bankHoldPoints,
     roll: bankRoll,
+    sockets: bankStraightSockets,
   },
   {
     id: "bankin",
     label: "Bank in",
-    hint: "Flat → banked (straight)",
+    hint: "Flat → banked: deck curls up from the plane",
     swatch: "#7d5fb0",
     key: "8",
     points: bankInPoints,
     roll: bankInRoll,
+    sockets: bankStraightSockets,
   },
   {
     id: "bankout",
     label: "Bank out",
-    hint: "Banked → flat (straight)",
+    hint: "Banked → flat: deck settles back to the plane",
     swatch: "#6b4fa0",
     key: "9",
     points: bankOutPoints,
     roll: bankOutRoll,
+    sockets: bankStraightSockets,
   },
   {
     id: "scurve",
@@ -1407,7 +1480,56 @@ export const PIECE_CATALOG = [
     swatch: "#7f8c8d",
     key: "t",
     points: straightPoints,
-    shell: true,
+    shell: "arch",
+  },
+  {
+    id: "tunnel_curve",
+    label: "Tunnel curve",
+    hint: "Arch tunnel on a flat curve (R flips L/R)",
+    swatch: "#7f8c8d",
+    key: "",
+    points: curvePoints,
+    shell: "arch",
+  },
+  {
+    id: "tube",
+    label: "Tube",
+    hint: "Ride INSIDE the tube — walls are the road",
+    swatch: "#16a0c0",
+    key: "",
+    points: straightPoints,
+    profile: buildTubeProfile,
+    noKerb: true,
+    plain: true,
+  },
+  {
+    id: "tube_curve",
+    label: "Tube curve",
+    hint: "Rideable tube on a flat curve (R flips L/R)",
+    swatch: "#16a0c0",
+    key: "",
+    points: curvePoints,
+    profile: buildTubeProfile,
+    noKerb: true,
+    plain: true,
+  },
+  {
+    id: "channel",
+    label: "Half-pipe channel",
+    hint: "Open-top U walls — funnels the car",
+    swatch: "#3a7bd5",
+    key: "",
+    points: straightPoints,
+    shell: "channel",
+  },
+  {
+    id: "channel_curve",
+    label: "Channel curve",
+    hint: "U-channel on a flat curve (R flips L/R)",
+    swatch: "#3a7bd5",
+    key: "",
+    points: curvePoints,
+    shell: "channel",
   },
   {
     id: "spiral",
@@ -1456,6 +1578,11 @@ const _END_TANGENTS = {
   narrow: flatEndTangents,
   wallride: flatEndTangents,
   tunnel: flatEndTangents,
+  tube: flatEndTangents,
+  channel: flatEndTangents,
+  tunnel_curve: curveEndTangents,
+  tube_curve: curveEndTangents,
+  channel_curve: curveEndTangents,
   twist: flatEndTangents,
   banktilt: flatEndTangents,
   bankin: flatEndTangents,
@@ -1468,9 +1595,6 @@ const _END_TANGENTS = {
   finish: flatEndTangents,
   curve: curveEndTangents,
   banked: curveEndTangents,
-  // banked_ease: bank eases to 0 with zero slope at both ends (wallRampFrac), so
-  // its ends are exactly level and the flat-curve tangents apply unchanged.
-  banked_ease: curveEndTangents,
   jump: jumpEndTangents,
   dive: diveEndTangents,
   landing: landingEndTangents,
@@ -1724,18 +1848,30 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   const pieceWidth = def.width ? def.width(pp) : rp.width;
   const rpForProfile = pieceWidth !== rp.width ? { ...rp, width: pieceWidth } : rp;
   const useKerbs = edges && !def.noKerb;
-  const profileData = buildProfile(rpForProfile, useKerbs);
+  // A piece can swap the whole cross-section (rideable tubes sweep an annulus
+  // instead of the road profile); everything downstream just sweeps it.
+  const profileData = def.profile ? def.profile(pp) : buildProfile(rpForProfile, useKerbs);
   const geometry = buildSweepGeometry(frames, profileData, { plain: def.plain });
-  const railGeometry = useKerbs && !def.noMesh ? buildGuardrailGeometry(frames, profileData, gp, rpForProfile) : null;
-  const shellGeometry = def.shell ? buildTunnelGeometry(frames, profileData, pp) : null;
+  const railGeometry = useKerbs && !def.noMesh && !def.profile ? buildGuardrailGeometry(frames, profileData, gp, rpForProfile) : null;
+  const shellGeometry = def.shell ? buildShellGeometry(def.shell, frames, profileData, pp) : null;
   const decorGeometry = def.game ? buildGameDecorGeometry(frames, profileData, def.game) : null;
 
   const f0 = frames[0];
   const fN = frames[frames.length - 1];
-  // entry travel dir points INTO the piece (= tangent at start).
-  const entryLocal = socketMatrix(f0.pos, f0.tangent, f0.up);
-  // exit travel dir points OUT of the piece (= tangent at end).
-  const exitLocal = socketMatrix(fN.pos, fN.tangent, fN.up);
+  let entryLocal, exitLocal;
+  if (def.sockets) {
+    // LEVEL sockets: position + heading only, up = world-up. Bank pieces use
+    // this so a rolled deck never rolls the connector — the piece always sits
+    // upright as authored, and its exit hands the next piece a level frame.
+    const s = def.sockets(pp);
+    entryLocal = socketMatrix(s.entryPos, s.entryDir, _up);
+    exitLocal = socketMatrix(s.exitPos, s.exitDir, _up);
+  } else {
+    // entry travel dir points INTO the piece (= tangent at start).
+    entryLocal = socketMatrix(f0.pos, f0.tangent, f0.up);
+    // exit travel dir points OUT of the piece (= tangent at end).
+    exitLocal = socketMatrix(fN.pos, fN.tangent, fN.up);
+  }
 
   const world = currentConnector.clone().multiply(entryLocal.clone().invert());
   const connectorOut = world.clone().multiply(exitLocal);

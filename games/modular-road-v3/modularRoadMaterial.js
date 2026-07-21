@@ -15,6 +15,7 @@ import {
   sin,
   floor,
 } from "three/tsl";
+import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
 function lin(hex) {
   return new THREE.Color(hex).convertSRGBToLinear();
@@ -46,7 +47,17 @@ export function createRoadMaterial(opts = {}) {
     edgeWidth: uniform(opts.edgeWidth ?? 0.05),
     railDash: uniform(opts.railDash ?? 0.5), // paint bands per meter
     grainScale: uniform(opts.grainScale ?? 0.55),
-    linesOn: uniform(opts.linesOn ?? 1), // 1 = draw centre + edge lines, 0 = plain deck
+    // Centre + edge paint lines. Default OFF — the clean Apex-Rush deck look;
+    // the dev panel's "Road lines" toggle flips the uniform live.
+    linesOn: uniform(opts.linesOn ?? 0), // 1 = draw centre + edge lines, 0 = plain deck
+    // Rideable tubes (aZone 3 = inner wall, 4 = outer shell) — their own look,
+    // clearly not asphalt, plus emissive neon rings inside that bloom.
+    tubeInner: uniform(lin(opts.tubeInner ?? 0x24303c)), // dark blue-steel interior
+    tubeOuter: uniform(lin(opts.tubeOuter ?? 0xd9662a)), // hot-wheels orange shell
+    neonColor: uniform(lin(opts.neonColor ?? 0x35e0ff)), // cyan glow rings
+    neonIntensity: uniform(opts.neonIntensity ?? 3.0), // >1 so bloom picks it up
+    neonSpacing: uniform(opts.neonSpacing ?? 8.0), // meters between rings
+    neonWidth: uniform(opts.neonWidth ?? 0.35), // ring width (m)
   };
 
   const mat = new THREE.MeshStandardNodeMaterial({
@@ -92,14 +103,42 @@ export function createRoadMaterial(opts = {}) {
     const railBand = step(0.5, fract(along.mul(u.railDash)));
     const railCol = mix(u.railA, u.railB, railBand);
 
-    // Select by zone: 0 -> side, 1 -> deck, 2 -> rail.
+    // Tube interior: base color + a lit strip where the neon rings sit so the
+    // glow reads as a fixture, not just bloom haze.
+    const ringMask = tubeRingMask(u, along);
+    const tubeInnerCol = mix(u.tubeInner, u.neonColor, ringMask);
+
+    // Select by zone: 0 side, 1 deck, 2 rail, 3 tube inner, 4 tube outer.
     let col = mix(u.sideColor, deckCol, step(0.5, zone));
     col = mix(col, railCol, step(1.5, zone));
+    col = mix(col, tubeInnerCol, step(2.5, zone));
+    col = mix(col, u.tubeOuter, step(3.5, zone));
     return col;
   })();
 
+  // Neon rings inside tubes — emissive, and routed into the emissive MRT
+  // buffer so v3's SELECTIVE bloom picks them up (plain emissive alone does not
+  // bloom here; see the note in roadGame.js). BloomMRTNode also keeps this
+  // material safe in plain-RT renders (thumbnail bakes).
+  const neonNode = Fn(() => {
+    const zone = attribute("aZone", "float");
+    const along = uv().x;
+    const innerMask = step(2.5, zone).mul(float(1).sub(step(3.5, zone)));
+    return u.neonColor.mul(tubeRingMask(u, along)).mul(u.neonIntensity).mul(innerMask);
+  })();
+  mat.emissiveNode = neonNode;
+  applyBloomMRT(mat, neonNode);
+
   mat._roadUniforms = u;
   return mat;
+}
+
+/** Soft-edged ring band repeating every `neonSpacing` meters along the path. */
+function tubeRingMask(u, along) {
+  const halfW = u.neonWidth.mul(0.5).div(u.neonSpacing); // width in cycle units
+  const cyc = fract(along.div(u.neonSpacing));
+  const d = abs(cyc.sub(0.5)); // distance from ring centre (in cycle units)
+  return smoothstep(halfW.add(0.02), halfW, d);
 }
 
 /** Simple galvanised-metal material for the guardrail beams + posts. */
@@ -142,7 +181,10 @@ export function syncRoadUniforms(mat, p) {
   if (p.railA != null) u.railA.value.copy(lin(p.railA));
   if (p.railB != null) u.railB.value.copy(lin(p.railB));
   if (p.sideColor != null) u.sideColor.value.copy(lin(p.sideColor));
-  for (const k of ["centerHalf", "centerSoft", "centerDash", "edgePos", "edgeWidth", "railDash", "grainScale"]) {
+  if (p.tubeInner != null) u.tubeInner.value.copy(lin(p.tubeInner));
+  if (p.tubeOuter != null) u.tubeOuter.value.copy(lin(p.tubeOuter));
+  if (p.neonColor != null) u.neonColor.value.copy(lin(p.neonColor));
+  for (const k of ["centerHalf", "centerSoft", "centerDash", "edgePos", "edgeWidth", "railDash", "grainScale", "neonIntensity", "neonSpacing", "neonWidth"]) {
     if (p[k] != null) u[k].value = p[k];
   }
 }
