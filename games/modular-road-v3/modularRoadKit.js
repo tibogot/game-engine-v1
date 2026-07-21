@@ -49,9 +49,11 @@ export const pieceParams = {
   platformLength: 24,
   platformWidth: 44,
   narrowWidth: 8, // narrow precision road (keeps lines + kerbs)
-  // Wall-ride: one piece that eases flat → near-vertical → hold → flat.
-  wallRideLength: 34,
-  wallAngle: 80, // peak lean (deg); ~80–88 rides the wall
+  // Wall-ride: one piece that eases flat → steeply banked → hold → flat, and
+  // RISES as it banks so the low edge stays on the original plane.
+  wallRideLength: 70, // long — the lean needs room to read as a smooth curve
+  wallAngle: 70,      // peak lean (deg)
+  wallRamp: 0.38,     // fraction of the length spent easing in / out of the lean
   curveRadius: 26,
   curveAngle: 90, // degrees of arc
   curveDir: 1, // +1 = right turn, -1 = left turn
@@ -523,11 +525,32 @@ function platformPoints(pp) {
   return pts;
 }
 
+/** Fraction of full lean at t: eases 0→1 over `ramp`, holds, eases back to 0.
+ *  Shared by the wall-ride's POINTS and ROLL so the rise and the lean agree. */
+function wallRampFrac(t, ramp) {
+  if (t < ramp) { const s = t / ramp; return s * s * (3 - 2 * s); }
+  if (t > 1 - ramp) { const s = (1 - t) / ramp; return s * s * (3 - 2 * s); }
+  return 1;
+}
+
 function wallRidePoints(pp) {
   const L = Math.max(8, pp.wallRideLength);
-  const n = Math.max(4, Math.ceil(L / roadParams.segLen));
+  const ramp = THREE.MathUtils.clamp(pp.wallRamp ?? 0.35, 0.05, 0.5);
+  const hw = roadParams.width / 2;
+  const maxAng = THREE.MathUtils.degToRad(pp.wallAngle);
+  // DENSITY FLOOR (same reason twistPoints uses 12 and loopPoints 96): arc-length
+  // spacing is blind to TORSION. A fine fixed step keeps the lean ~2-3°/segment.
+  const n = Math.max(96, Math.ceil(L / 0.6));
   const pts = [];
-  for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const ang = maxAng * wallRampFrac(t, ramp);
+    // RAISE the centreline by hw·sin(lean) so the LOW edge stays on the original
+    // plane and the road banks UP into a wall. Without this the deck rolls about
+    // its centreline — a see-saw blade with half the road swinging below the
+    // track, which is what made it read as a huge dark slab.
+    pts.push(new V3(0, hw * Math.sin(ang), -L * t));
+  }
   return pts;
 }
 
@@ -590,13 +613,8 @@ function bankOutRoll(t, pp) {
  *  joints). Ramps over the first/last quarter, holds the wall through the middle. */
 function wallRideRoll(t, pp) {
   const dir = pp.curveDir >= 0 ? 1 : -1;
-  const a = THREE.MathUtils.degToRad(pp.wallAngle);
-  const ramp = 0.25;
-  let f;
-  if (t < ramp) { const s = t / ramp; f = s * s * (3 - 2 * s); }
-  else if (t > 1 - ramp) { const s = (1 - t) / ramp; f = s * s * (3 - 2 * s); }
-  else f = 1;
-  return dir * a * f;
+  const ramp = THREE.MathUtils.clamp(pp.wallRamp ?? 0.35, 0.05, 0.5);
+  return dir * THREE.MathUtils.degToRad(pp.wallAngle) * wallRampFrac(t, ramp);
 }
 
 /** Chicane: turn `curveAngle` one way then back the other, ending parallel. */
@@ -1077,6 +1095,8 @@ export const PIECE_CATALOG = [
     key: "",
     points: wallRidePoints,
     roll: wallRideRoll,
+    // NO width override — a wall-ride must match the road width or the deck
+    // steps at the connector where it meets a straight.
   },
   {
     id: "curve",
