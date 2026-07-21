@@ -46,6 +46,7 @@ export function createRoadMaterial(opts = {}) {
     edgeWidth: uniform(opts.edgeWidth ?? 0.05),
     railDash: uniform(opts.railDash ?? 0.5), // paint bands per meter
     grainScale: uniform(opts.grainScale ?? 0.55),
+    linesOn: uniform(opts.linesOn ?? 1), // 1 = draw centre + edge lines, 0 = plain deck
   };
 
   const mat = new THREE.MeshStandardNodeMaterial({
@@ -57,6 +58,7 @@ export function createRoadMaterial(opts = {}) {
   mat.colorNode = Fn(() => {
     const lateral = attribute("aLateral", "float");
     const zone = attribute("aZone", "float");
+    const plain = attribute("aPlain", "float"); // 1 on platforms → no lines
     const along = uv().x;
     const across = uv().y;
 
@@ -82,7 +84,8 @@ export function createRoadMaterial(opts = {}) {
       abs(abs(lateral).sub(u.edgePos)),
     );
 
-    const lineAmt = clamp(centerLine.add(edgeMask), 0.0, 1.0);
+    // Global lines toggle × per-piece plain flag (platforms suppress lines).
+    const lineAmt = clamp(centerLine.add(edgeMask), 0.0, 1.0).mul(u.linesOn).mul(float(1).sub(plain));
     const deckCol = mix(deckBase, u.lineColor, lineAmt);
 
     // Rail hazard bands.

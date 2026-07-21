@@ -328,6 +328,12 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value"><span class="prop-num" id="dv-tris">0</span></div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Road lines</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-lines" type="button" aria-label="Road lines">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Show collision</span>
             <div class="prop-value">
               <button class="prop-toggle" id="dv-showcol" type="button" aria-label="Show collision">${CHECK_SVG}</button>
@@ -738,6 +744,7 @@ export function createRoadDevPanel({ app, game, params }) {
   });
 
   // ── Track ───────────────────────────────────────────────────────────────────
+  toggle("dv-lines", game.getLinesOn(), (on) => game.setLinesOn(on));
   toggle("dv-showcol", false, (on) => game.setCollisionDebug(on));
   toggle("dv-inst", true, (on) => game.setInstancing(on));
   $("#dv-rebake").addEventListener("click", () => game.bakeCollision());

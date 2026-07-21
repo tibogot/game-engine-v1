@@ -24,6 +24,7 @@
 //   from a real mesh BVH for the road. The Vehicle is unchanged.
 // ============================================================================
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 // Vite bundles this and injects it — see the note in road.html for why it isn't
 // a <link> tag.
 import "./palette.css";
@@ -346,6 +347,68 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     debugOn = !!on;
     debugGroup.visible = debugOn;
     refreshCollisionDebug();
+  }
+
+  // ── MERGED TRACK (draw-call optimization for driving) ──────────────────────
+  // The builder instances pieces by geometry hash, so IDENTICAL pieces share a
+  // draw — but a diverse stunt track (every curve/bank/jump a unique shape) gets
+  // ~1 draw per piece, i.e. 80+ for a 2-min circuit. For DRIVING we don't need
+  // per-piece editing, so we MERGE every piece's geometry per material into one
+  // static mesh: the whole track becomes ~4 draws (road + rail + shell + decor)
+  // no matter how many or how varied the pieces are. Build mode keeps the
+  // editable instanced/proxy meshes; drive mode swaps to the merged ones.
+  const mergedGroup = new THREE.Group();
+  mergedGroup.name = "ModularRoadMerged";
+  mergedGroup.visible = false;
+  scene.add(mergedGroup);
+
+  const MERGE_ROLES = [
+    { pick: (p) => p.mesh, mat: () => roadMaterial, cast: true },
+    { pick: (p) => p.railMesh, mat: () => railMaterial, cast: true },
+    { pick: (p) => p.shellMesh, mat: () => shellMaterial, cast: true },
+    { pick: (p) => p.decorMesh, mat: () => decorMaterial, cast: false },
+  ];
+
+  function disposeMergedTrack() {
+    for (const m of mergedGroup.children) m.geometry?.dispose();
+    mergedGroup.clear();
+  }
+
+  function buildMergedTrack() {
+    disposeMergedTrack();
+    scene.updateMatrixWorld(true);
+    for (const role of MERGE_ROLES) {
+      const geos = [];
+      for (const p of builder.pieces) {
+        const m = role.pick(p);
+        if (!m || m.userData.noRender || !m.geometry) continue;
+        const g = m.geometry.clone();
+        g.applyMatrix4(m.matrixWorld); // bake to world space
+        geos.push(g);
+      }
+      if (!geos.length) continue;
+      const merged = mergeGeometries(geos, false);
+      for (const g of geos) g.dispose();
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, role.mat());
+      mesh.castShadow = role.cast;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false; // one big mesh spanning the track
+      mergedGroup.add(mesh);
+    }
+  }
+
+  /** Swap between editable (build) and merged (drive) track rendering. */
+  function setMergedTrack(on) {
+    if (on) {
+      buildMergedTrack();
+      builder.root.visible = false; // hide instanced/proxy pieces
+      mergedGroup.visible = true;
+    } else {
+      mergedGroup.visible = false;
+      builder.root.visible = true;
+      disposeMergedTrack();
+    }
   }
 
   // 4b) ── DRIVING FX + AUDIO ────────────────────────────────────────────────
@@ -962,6 +1025,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
     if (driving) {
       bakeCollision(); // drive the track as it stands right now
+      setMergedTrack(true); // ~4 draws for the whole track instead of ~1/piece
       builder.setGhostVisible(false);
       builder.deselectPlacement?.();
       props.deselect();
@@ -971,6 +1035,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       respawn();
       beginRace(); // gates from the current track + load its record
     } else {
+      setMergedTrack(false); // back to editable pieces
       builder.setGhostVisible(true);
       vehicle.enabled = false;
       ghostMesh.visible = false;
@@ -1035,6 +1100,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         else chase.reset(); // don't sweep back from wherever orbit left it
       },
       setInstancing: (on) => builder.setInstancing(on),
+      getLinesOn: () => roadMaterial._roadUniforms.linesOn.value > 0.5,
+      setLinesOn: (on) => { roadMaterial._roadUniforms.linesOn.value = on ? 1 : 0; },
       setTireMarksEnabled: (on) => {
         tireMarks.mesh.visible = !!on;
         if (!on) tireMarks.reset();

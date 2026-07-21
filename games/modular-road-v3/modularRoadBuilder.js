@@ -780,6 +780,8 @@ export class ModularRoadBuilder {
  */
 const PIECE_TO_CATEGORY = {
   straight: "straight",
+  platform: "straight",
+  narrow: "straight",
   tunnel: "straight",
   curve: "turns",
   scurve: "turns",
@@ -793,6 +795,7 @@ const PIECE_TO_CATEGORY = {
   spiral: "slopes",
   banked: "banked",
   banktilt: "banked",
+  wallride: "banked",
   bankin: "banked",
   bankout: "banked",
   loop: "loop",
@@ -942,6 +945,20 @@ export const CATEGORY_PRESETS = {
       params: { curveRadius: 30, curveAngle: 90, bankAngle: 22, curveDir: 1 },
       preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/></svg>`,
     },
+    {
+      id: "wall_ride_right",
+      label: "Wall Ride R",
+      base: "wallride",
+      params: { wallRideLength: 34, wallAngle: 80, curveDir: 1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M14 66 Q26 66 30 40 Q34 14 46 14" fill="none" stroke="#8e6fc0" stroke-width="8" stroke-linecap="round"/></svg>`,
+    },
+    {
+      id: "wall_ride_left",
+      label: "Wall Ride L",
+      base: "wallride",
+      params: { wallRideLength: 34, wallAngle: 80, curveDir: -1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M66 66 Q54 66 50 40 Q46 14 34 14" fill="none" stroke="#8e6fc0" stroke-width="8" stroke-linecap="round"/></svg>`,
+    },
   ],
   straight: [
     {
@@ -964,6 +981,20 @@ export const CATEGORY_PRESETS = {
       base: "tunnel",
       params: { straightLength: 22, tunnelHeight: 7 },
       preview: `<svg viewBox="0 0 80 80"><rect x="8" y="34" width="64" height="14" rx="2" ${_RB}/><path d="M8 34 Q40 8 72 34" fill="none" stroke="#6a7580" stroke-width="3"/></svg>`,
+    },
+    {
+      id: "platform_pad",
+      label: "Platform",
+      base: "platform",
+      params: { platformLength: 24, platformWidth: 44 },
+      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="22" width="60" height="36" rx="2" fill="#565f6b" stroke="#8a929c" stroke-width="1.5"/></svg>`,
+    },
+    {
+      id: "narrow_run",
+      label: "Narrow",
+      base: "narrow",
+      params: { straightLength: 24, narrowWidth: 8 },
+      preview: `<svg viewBox="0 0 80 80"><rect x="34" y="10" width="12" height="60" rx="1" ${_RB}/><line x1="40" y1="14" x2="40" y2="66" ${_RS}/></svg>`,
     },
   ],
   ramps: [

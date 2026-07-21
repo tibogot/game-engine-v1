@@ -45,6 +45,13 @@ export const guardrailParams = {
 /** Per-piece geometry params (global for v1; per-instance can come later). */
 export const pieceParams = {
   straightLength: 22,
+  // Platform: a wide, flat, line-free deck for landing zones / open stunt areas.
+  platformLength: 24,
+  platformWidth: 44,
+  narrowWidth: 8, // narrow precision road (keeps lines + kerbs)
+  // Wall-ride: one piece that eases flat → near-vertical → hold → flat.
+  wallRideLength: 34,
+  wallAngle: 80, // peak lean (deg); ~80–88 rides the wall
   curveRadius: 26,
   curveAngle: 90, // degrees of arc
   curveDir: 1, // +1 = right turn, -1 = left turn
@@ -257,8 +264,9 @@ function _setFrameTangent(fr, t) {
  * (x = meters along path, y = meters across developed profile), aLateral
  * (x / halfWidth, for centre/edge lines), aZone (0 side, 1 deck, 2 rail).
  */
-export function buildSweepGeometry(frames, profileData = buildProfile()) {
+export function buildSweepGeometry(frames, profileData = buildProfile(), opts = {}) {
   const { pts: profile, hw } = profileData;
+  const plain = opts.plain ? 1 : 0; // 1 = suppress centre/edge lines (platforms)
   const M = profile.length;
   const F = frames.length;
 
@@ -319,6 +327,10 @@ export function buildSweepGeometry(frames, profileData = buildProfile()) {
   geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(lateral, 1));
   geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zone, 1));
+  // Constant per piece, but a real attribute so it survives geometry merging
+  // (all pieces carry it → merge stays valid). Platforms set it to suppress lines.
+  const vcount = positions.length / 3;
+  geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(new Float32Array(vcount).fill(plain), 1));
   geo.setIndex(indices);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
@@ -503,6 +515,22 @@ function straightPoints(pp) {
   return pts;
 }
 
+function platformPoints(pp) {
+  const L = Math.max(4, pp.platformLength);
+  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
+  const pts = [];
+  for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
+  return pts;
+}
+
+function wallRidePoints(pp) {
+  const L = Math.max(8, pp.wallRideLength);
+  const n = Math.max(4, Math.ceil(L / roadParams.segLen));
+  const pts = [];
+  for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
+  return pts;
+}
+
 function curvePoints(pp) {
   const R = Math.max(2, pp.curveRadius);
   const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.curveAngle, 1, 180));
@@ -555,6 +583,20 @@ function bankOutRoll(t, pp) {
   const dir = pp.curveDir >= 0 ? 1 : -1;
   const a = THREE.MathUtils.degToRad(pp.bankAngle);
   return dir * a * (1 - t * t * (3 - 2 * t));
+}
+
+/** Wall-ride: flat → up to (near-)vertical → HOLD → back to flat, all in one
+ *  piece, so it chains cleanly off a flat straight (no abrupt twist at the
+ *  joints). Ramps over the first/last quarter, holds the wall through the middle. */
+function wallRideRoll(t, pp) {
+  const dir = pp.curveDir >= 0 ? 1 : -1;
+  const a = THREE.MathUtils.degToRad(pp.wallAngle);
+  const ramp = 0.25;
+  let f;
+  if (t < ramp) { const s = t / ramp; f = s * s * (3 - 2 * s); }
+  else if (t > 1 - ramp) { const s = (1 - t) / ramp; f = s * s * (3 - 2 * s); }
+  else f = 1;
+  return dir * a * f;
 }
 
 /** Chicane: turn `curveAngle` one way then back the other, ending parallel. */
@@ -1008,6 +1050,35 @@ export const PIECE_CATALOG = [
     points: straightPoints,
   },
   {
+    id: "platform",
+    label: "Platform",
+    hint: "Wide flat deck — no lines / kerbs",
+    swatch: "#6b7280",
+    key: "",
+    points: platformPoints,
+    width: (pp) => pp.platformWidth, // wider than the road profile
+    plain: true,                     // suppress centre / edge lines
+    noKerb: true,                    // no kerbs or guardrails
+  },
+  {
+    id: "narrow",
+    label: "Narrow",
+    hint: "Narrow precision road",
+    swatch: "#4a9eff",
+    key: "",
+    points: straightPoints,
+    width: (pp) => pp.narrowWidth, // narrower than the road profile (keeps lines/kerbs)
+  },
+  {
+    id: "wallride",
+    label: "Wall ride",
+    hint: "Flat → wall → flat (self-contained)",
+    swatch: "#8e6fc0",
+    key: "",
+    points: wallRidePoints,
+    roll: wallRideRoll,
+  },
+  {
     id: "curve",
     label: "Curve",
     hint: "Flat arc (R flips L/R)",
@@ -1221,6 +1292,9 @@ export const PIECE_BY_ID = new Map(PIECE_CATALOG.map((p) => [p.id, p]));
 // touching every catalog entry.
 const _END_TANGENTS = {
   straight: flatEndTangents,
+  platform: flatEndTangents,
+  narrow: flatEndTangents,
+  wallride: flatEndTangents,
   tunnel: flatEndTangents,
   twist: flatEndTangents,
   banktilt: flatEndTangents,
@@ -1482,9 +1556,14 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // up-vector directly (e.g. the loop sets up = toward the ring axis so the feet
   // stay flat instead of banking from the sideways drift). Recomputes `right`.
   if (def.fixFrames) def.fixFrames(frames, pp);
-  const profileData = buildProfile(rp, edges);
-  const geometry = buildSweepGeometry(frames, profileData);
-  const railGeometry = edges && !def.noMesh ? buildGuardrailGeometry(frames, profileData, gp, rp) : null;
+  // Per-piece deck width (platforms are wide) and no-kerb (platforms are plain
+  // slabs). Everything else uses the global road profile.
+  const pieceWidth = def.width ? def.width(pp) : rp.width;
+  const rpForProfile = pieceWidth !== rp.width ? { ...rp, width: pieceWidth } : rp;
+  const useKerbs = edges && !def.noKerb;
+  const profileData = buildProfile(rpForProfile, useKerbs);
+  const geometry = buildSweepGeometry(frames, profileData, { plain: def.plain });
+  const railGeometry = useKerbs && !def.noMesh ? buildGuardrailGeometry(frames, profileData, gp, rpForProfile) : null;
   const shellGeometry = def.shell ? buildTunnelGeometry(frames, profileData, pp) : null;
   const decorGeometry = def.game ? buildGameDecorGeometry(frames, profileData, def.game) : null;
 
