@@ -1582,6 +1582,7 @@ export const CATEGORY_PRESETS = {
 export function categoryThumbnailKey(catId, propCatalog = [], moverCatalog = []) {
   if (catId === "moving") return moverCatalog[0]?.id ?? null;
   if (catId === "obstacles") return propCatalog[0]?.id ?? null;
+  if (catId === "portals") return "portal_door";
   const presets = CATEGORY_PRESETS[catId];
   if (presets?.length) return presets[0].id;
   const piece = PIECE_CATALOG.find((p) => PIECE_TO_CATEGORY[p.id] === catId);

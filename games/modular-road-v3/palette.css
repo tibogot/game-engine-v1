@@ -108,20 +108,16 @@
         color: #fff;
         background: rgba(220, 230, 34, 0.06);
       }
-      .cat-btn.active::before,
-      .cat-btn.active::after {
+      /* Single left accent — top+bottom bars sat on shared borders and looked like
+         double yellow lines between the selected row and its neighbors. */
+      .cat-btn.active::before {
         content: "";
         position: absolute;
         left: 0;
-        right: 0;
-        height: 3px;
-        background: var(--tm-yellow);
-      }
-      .cat-btn.active::before {
         top: 0;
-      }
-      .cat-btn.active::after {
         bottom: 0;
+        width: 3px;
+        background: var(--tm-yellow);
       }
       .cat-btn-icon {
         width: 76px;
