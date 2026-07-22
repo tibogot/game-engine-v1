@@ -61,8 +61,11 @@ export const TIRE = {
   bottomOutMult: 8,
   // Per-axle friction multipliers (× frictionCoeff). Lower the rear for
   // oversteer, lower the front for understeer. Handbrake swaps the rear out.
+  // Rear runs a touch MORE grip than front: with 80 m/s of engine the driven
+  // rear otherwise saturates its friction circle under power and the tail
+  // walks (why FWD felt like the only stable layout).
   gripFront: 1.0,
-  gripRear: 1.0,
+  gripRear: 1.1,
   gripHandbrake: 0.35,
   // Lateral slip model: force builds linearly with slip then saturates at the
   // friction circle. `tireStiffness` is the slope (≈ 1/peak-slip-angle); higher
@@ -82,9 +85,11 @@ export const TIRE = {
   steerSmooth: 8.0,
   // Speed-sensitive steering: the usable steer angle shrinks as speed rises so
   // the car isn't twitchy / spin-happy at the top end. At/above `steerSpeedRef`
-  // (m/s) the angle is reduced by `steerSpeedReduce` (fraction).
-  steerSpeedRef: 26,
-  steerSpeedReduce: 0.55,
+  // (m/s) the angle is reduced by `steerSpeedReduce` (fraction). Sized for the
+  // 80 m/s top-speed world — the old 26/0.55 (tuned for topSpeed 30) numbed the
+  // wheel to 45% right where loop/tube exits happen.
+  steerSpeedRef: 50,
+  steerSpeedReduce: 0.45,
   frictionCoeff: 1.5,
   maxAngVel: 9.0,
   // Anti-roll / orientation. When grounded the chassis aligns its up-axis to the
@@ -99,6 +104,12 @@ export const TIRE = {
   airControl: 5000,
   airYawControl: 4500,
   airYawDamp: 250,
+  // W/S/A/D air torque only kicks in after this much CONTINUOUS airtime (s).
+  // Loop / tube / crest exits almost always include a brief hop — without the
+  // gate, the throttle you're still holding pitched the nose mid-hop and the
+  // car landed misaligned ("uncontrollable after the loop"). Deliberate stunt
+  // input (Q/E yaw) stays ungated.
+  airControlDelay: 0.25,
 };
 
 /** Drivetrain. `layout` picks which axle(s) get engine torque; for AWD,
@@ -108,7 +119,9 @@ export const TIRE = {
  *  rear (more power-oversteer) rather than halving acceleration. */
 export const DRIVETRAIN = {
   layout: "AWD", // 'FWD' | 'RWD' | 'AWD'
-  powerBias: 0.5,
+  // Front-leaning split: the rear axle's drive share is what eats its lateral
+  // grip under power, so 0.4 keeps AWD stable at speed without FWD's plow.
+  powerBias: 0.4,
 };
 
 /** Aerodynamics. `drag` bounds top speed and tames downhill runaway (quadratic,
@@ -834,6 +847,9 @@ export class Vehicle {
     this._zAxis = new THREE.Vector3(0, 0, 1);
     this._arrowDir = new THREE.Vector3();
     this._geomCenter = new THREE.Vector3();
+    this._steerFwd = new THREE.Vector3();
+    /** Continuous airborne time (s) — gates W/S/A/D air torque (airControlDelay). */
+    this._airTime = 0;
     _syncComOffset();
   }
 
@@ -915,6 +931,7 @@ export class Vehicle {
     this.body.vel.set(0, 0, 0);
     this.body.quat.copy(this.spawnQuat);
     this.body.angVel.set(0, 0, 0);
+    this._airTime = 0;
     this._resetInterpolation();
     // Keep the render pose in step with the teleport (syncVisuals hasn't run yet).
     this._renderPos.copy(this.body.pos);
@@ -1007,7 +1024,11 @@ export class Vehicle {
 
   /** Steer angle after speed-sensitive reduction (shared by physics + visuals). */
   _steerAngle() {
-    const speed = this.body.vel.length();
+    // Speed ALONG THE CHASSIS FORWARD axis, not |vel|: total speed includes the
+    // vertical component, which numbed the steering exactly when it's needed
+    // most — falling toward a landing after a jump or drop.
+    this._steerFwd.set(0, 0, 1).applyQuaternion(this.body.quat);
+    const speed = Math.abs(this.body.vel.dot(this._steerFwd));
     let t = speed / Math.max(0.1, TIRE.steerSpeedRef);
     if (t > 1) t = 1;
     const factor = 1 - TIRE.steerSpeedReduce * t;
@@ -1051,14 +1072,14 @@ export class Vehicle {
       if (SOLID.enabled && this.solidsBvh && this.solidsBvh.baked) this._resolveSolids();
       if (DECK.enabled && this.groundBvh && this.groundBvh.baked) this._applyDeckContact();
       this._applyChassisGroundContact();
-      this._applyStabilizer();
+      this._applyStabilizer(subDt);
       body.integrate(subDt);
       const wMax = TIRE.maxAngVel;
       if (body.angVel.lengthSq() > wMax * wMax) body.angVel.setLength(wMax);
     }
   }
 
-  _applyStabilizer() {
+  _applyStabilizer(dt = FIXED_DT / this.SUBSTEPS) {
     const body = this.body;
     let grounded = 0;
     this._stabN.set(0, 0, 0);
@@ -1071,6 +1092,7 @@ export class Vehicle {
     this._stabUp.set(0, 1, 0).applyQuaternion(body.quat);
 
     if (grounded > 0) {
+      this._airTime = 0;
       if (TIRE.stabilizerStrength <= 0 || this._stabN.lengthSq() < 1e-8) return;
       // Align chassis-up to the averaged ground normal (banks/loops follow the
       // surface), with damping on the roll/pitch rate but not on yaw (steering).
@@ -1084,11 +1106,15 @@ export class Vehicle {
     } else {
       // Airborne: damp pitch/roll firmly but yaw lightly (so a flat spin carries),
       // plus player air control — W/S pitch, A/D roll, Q/E yaw spin.
+      this._airTime += dt;
       const wYaw = body.angVel.dot(this._stabUp);
       this._stabWTilt.copy(body.angVel).addScaledVector(this._stabUp, -wYaw);
       this._stabTorque.copy(this._stabWTilt).multiplyScalar(-TIRE.airAngularDamp);
       this._stabTorque.addScaledVector(this._stabUp, -wYaw * TIRE.airYawDamp);
-      if (TIRE.airControl > 0) {
+      // W/S/A/D torque waits out airControlDelay so the throttle/steer held
+      // through a loop-exit hop can't flip the car; Q/E yaw is deliberate
+      // stunt input and stays immediate.
+      if (TIRE.airControl > 0 && this._airTime >= (TIRE.airControlDelay ?? 0)) {
         this._airRight.set(1, 0, 0).applyQuaternion(body.quat);
         this._airFwd.set(0, 0, 1).applyQuaternion(body.quat);
         this._stabTorque.addScaledVector(this._airRight, -this.input.throttle * TIRE.airControl);
