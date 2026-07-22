@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — Advanced Terrain Erosion Filter</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #0b0e11; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; left: 10px; z-index: 10; width: 296px;
+             max-height: calc(100vh - 20px); overflow-y: auto;
+             background: rgba(12,16,20,0.9); border: 1px solid #2a343c;
+             border-radius: 8px; padding: 12px 14px; }
+      #hud h1 { margin: 0 0 4px; font-size: 13px; letter-spacing: .04em;
+             text-transform: uppercase; color: #8fb8d8; }
+      #hud h2 { margin: 12px 0 6px; font-size: 11px; letter-spacing: .06em;
+             text-transform: uppercase; color: #6f8494;
+             border-top: 1px solid #232c34; padding-top: 9px; }
+      .row { display: flex; justify-content: space-between; gap: 12px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .sl { margin: 5px 0; }
+      .sl label { display: flex; justify-content: space-between; font-size: 11px; color: #a8b6c0; }
+      .sl label b { color: #e8f0f5; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .sl input { width: 100%; margin: 1px 0 0; accent-color: #4a9ae0; }
+      .btns { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0 2px; }
+      .btns button { flex: 1 1 60px; padding: 5px 3px; font-size: 11px; cursor: pointer;
+             background: #1a222a; color: #cfd8de; border: 1px solid #2f3b45; border-radius: 5px; }
+      .btns button.on { background: #2b6cb0; border-color: #4a9ae0; color: #fff; }
+      .note { margin-top: 9px; padding-top: 8px; border-top: 1px solid #2a343c;
+             color: #8b99a4; font-size: 11px; }
+      #err { color: #ff8c8c; }
+      #tip { position: fixed; bottom: 10px; left: 10px; z-index: 10; color: #6f8494;
+             font-size: 11px; background: rgba(12,16,20,0.8); padding: 6px 10px;
+             border-radius: 6px; border: 1px solid #232c34; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Erosion Filter Lab</h1>
+      <div class="row"><span>Bake</span><b id="s-bake">—</b></div>
+      <div class="row"><span>FPS</span><b id="s-fps">—</b></div>
+
+      <h2>View</h2>
+      <div class="btns" id="views">
+        <button data-view="0" class="on">Shaded</button>
+        <button data-view="1">Ridge map</button>
+        <button data-view="2">Slope</button>
+        <button data-view="3">Height</button>
+      </div>
+      <div class="btns" id="presets">
+        <button data-preset="default" class="on">Default</button>
+        <button data-preset="raw">Erosion off</button>
+        <button data-preset="deep">Deep gullies</button>
+      </div>
+
+      <h2>Base terrain</h2>
+      <div id="ui-terrain"></div>
+
+      <h2>Environment</h2>
+      <div id="ui-env"></div>
+
+      <h2>Erosion</h2>
+      <div id="ui-erosion"></div>
+
+      <h2>Shape detail</h2>
+      <div id="ui-shape"></div>
+
+      <div class="note" id="s-note">Booting…</div>
+      <div class="note" id="err"></div>
+    </div>
+    <div id="tip">Drag to orbit · scroll to zoom. Terrain sliders re-bake 2048²; environment sliders are free.</div>
+
+    <script type="module">
+      // ── Advanced Terrain Erosion Filter lab ──────────────────────────────────
+      // Establishes visual parity with runevision's Shadertoy (wXcfWn) before the
+      // filter gets wired into the v3 bake pipeline, and answers the only question
+      // that matters for shipping it: how long does a full-map bake actually take?
+      //
+      // Architecture — deliberately NOT "evaluate the filter per vertex". At 5
+      // octaves the filter is 5×16 = 80 cos/sin pairs per sample, so evaluating it
+      // on a 512² display mesh every frame would be ~20M trig ops/frame for a
+      // result that never changes between parameter edits. Instead:
+      //
+      //   1. one fragment pass bakes height + ridge + analytic slope into an RT
+      //   2. the display mesh just SAMPLES that RT in its positionNode
+      //
+      // which is also exactly how it would work in the editor (bake to the
+      // heightmap, then the clipmap reads the heightmap). The lab and the shipping
+      // path therefore exercise the same code.
+      import * as THREE from "three";
+      import { QuadMesh } from "three/webgpu";
+      import {
+        Discard, Fn, float, vec2, vec3, vec4, abs, cameraPosition, clamp, dot, exp,
+        length, max, min, mix, mx_noise_float, normalize, positionWorld, pow,
+        saturate, smoothstep, step, texture, time, uniform, uv,
+      } from "three/tsl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import {
+        createErosionUniforms, erodedTerrain,
+        EROSION_FILTER_DEFAULTS, TERRAIN_NOISE_DEFAULTS,
+      } from "./terrain/erosionFilterTsl.js";
+
+      const BAKE_SIZE = 2048; // heightmap resolution baked per parameter change
+      // MUST match BAKE_SIZE. At half resolution the mesh throws away every other
+      // baked texel, and since a typical gully is only 15-25 m wide it ends up
+      // spanning 4-6 quads — which is what produces the stair-stepped terracing
+      // along ridges and the faceted coastline. Shading cannot rescue silhouette.
+      const MESH_SEGMENTS = 2048;
+      const WORLD_SIZE = 4096; // metres across the lab terrain
+      const OCEAN_SIZE = WORLD_SIZE * 8; // ocean runs past the terrain to the horizon
+      const SKY_RADIUS = 60000;
+
+      const $ = (id) => document.getElementById(id);
+      const setNote = (t) => { $("s-note").textContent = t; };
+
+      // ── parameters ───────────────────────────────────────────────────────────
+      // `octaves_terrain` etc. are the base-noise counterparts of the erosion
+      // fields with the same name; the filter uniforms keep them separate.
+      const params = {
+        ...EROSION_FILTER_DEFAULTS,
+        frequency: TERRAIN_NOISE_DEFAULTS.frequency,
+        // Above the reference 0.125: the Shadertoy views its terrain from much
+        // closer to ground level, so it needs less vertical exaggeration than a
+        // 1 km overview plane does to read as mountains.
+        amplitude: 0.2,
+        octaves_terrain: TERRAIN_NOISE_DEFAULTS.octaves,
+        gain_terrain: TERRAIN_NOISE_DEFAULTS.gain,
+        lacunarity_terrain: TERRAIN_NOISE_DEFAULTS.lacunarity,
+        heightOffset: TERRAIN_NOISE_DEFAULTS.heightOffset,
+        heightOffsetMix: TERRAIN_NOISE_DEFAULTS.heightOffsetMix,
+        seed: 1337,
+        // lab-only display controls
+        domain: 1.0,
+        heightScale: 3500,
+        // Environment. seaLevel is in the same normalized units the bake stores.
+        // Note the terrain is NOT centred on zero: the filter's heightOffset sinks
+        // it (measured range at defaults is roughly -0.13..+0.07), so this sits
+        // near the 55th percentile of the height histogram to get an archipelago
+        // rather than a drowned shelf. Re-check with `__lab.heightStats()` after
+        // changing erosion strength or octaves.
+        seaLevel: -0.045,
+        vegetation: 0.55,
+        snowLine: 0.72,
+        haze: 0.32,
+      };
+      const DEFAULTS = { ...params };
+
+      // Slider spec: [key, label, min, max, step]
+      const UI = {
+        "ui-terrain": [
+          ["frequency", "Frequency", 0.5, 12, 0.1],
+          ["amplitude", "Amplitude", 0.01, 0.5, 0.005],
+          ["octaves_terrain", "Octaves", 1, 8, 1],
+          ["gain_terrain", "Gain", 0, 0.9, 0.01],
+          ["lacunarity_terrain", "Lacunarity", 1.2, 4, 0.05],
+          ["domain", "Zoom (domain)", 0.2, 4, 0.05],
+          ["heightScale", "Height scale (m)", 200, 12000, 50],
+          ["seed", "Seed", 1, 4000, 1],
+        ],
+        "ui-env": [
+          ["seaLevel", "Sea level", -0.16, 0.1, 0.002],
+          ["vegetation", "Vegetation", 0, 1, 0.01],
+          ["snowLine", "Snow line", 0.2, 1.2, 0.01],
+          ["haze", "Aerial haze", 0, 1.5, 0.01],
+        ],
+        "ui-erosion": [
+          ["octaves", "Octaves", 0, 8, 1],
+          ["scale", "Scale", 0.02, 0.6, 0.005],
+          ["strength", "Strength", 0, 0.8, 0.005],
+          ["gullyWeight", "Gully weight", 0, 1.5, 0.01],
+          ["detail", "Detail", 0.2, 4, 0.05],
+          ["gain", "Gain", 0.1, 0.9, 0.01],
+          ["lacunarity", "Lacunarity", 1.2, 4, 0.05],
+          ["cellScale", "Cell scale", 0.3, 1.5, 0.01],
+          ["normalization", "Normalization", 0, 1, 0.01],
+        ],
+        "ui-shape": [
+          ["roundingCrease", "Rounding · crease", 0, 0.6, 0.005],
+          ["roundingRidge", "Rounding · ridge", 0, 0.6, 0.005],
+          ["roundingInput", "Rounding · input", 0, 1, 0.01],
+          ["roundingFalloff", "Rounding · falloff", 0.5, 4, 0.05],
+          ["onsetInput", "Onset · input", 0.1, 5, 0.05],
+          ["onsetOctave", "Onset · octave", 0.1, 5, 0.05],
+          ["onsetRidgeInput", "Onset · ridge in", 0.1, 6, 0.05],
+          ["onsetRidgeOctave", "Onset · ridge oct", 0.1, 5, 0.05],
+          ["assumedSlope", "Assumed slope", 0, 2, 0.01],
+          ["assumedSlopeMix", "Assumed slope mix", 0, 1, 0.01],
+          ["heightOffset", "Height offset", -2, 1, 0.01],
+          ["heightOffsetMix", "Height offset mix", 0, 1, 0.01],
+        ],
+      };
+
+      const PRESETS = {
+        default: {},
+        raw: { octaves: 0 },
+        // Pushed until just before the gullies degenerate into shark fins:
+        // past ~0.3 strength with rounding this low, creases stop reading as
+        // valleys and the whole map turns into parallel spikes.
+        deep: { octaves: 6, strength: 0.28, gullyWeight: 0.6, detail: 1.8,
+                roundingCrease: 0.09, onsetInput: 1.5, normalization: 0.55 },
+      };
+
+      // ── boot ─────────────────────────────────────────────────────────────────
+      let renderer, scene, camera, controls, bakeQuad, bakeRT, terrainMesh, oceanMesh, skyMesh;
+      let bakeDirty = true;
+      const uView = uniform(float(0));
+      const uHeightScale = uniform(float(params.heightScale));
+      const uDomain = uniform(float(params.domain));
+      const uAltRange = uniform(float(params.amplitude * 0.5)); // half the base relief
+      const uSeaLevel = uniform(float(params.seaLevel));
+      const uVegetation = uniform(float(params.vegetation));
+      const uSnowLine = uniform(float(params.snowLine));
+      const uHaze = uniform(float(params.haze));
+
+      // ── shared environment ───────────────────────────────────────────────────
+      // One sun and one sky palette drive terrain, ocean and sky, so the three
+      // never drift apart — the single biggest reason a hand-lit scene reads as
+      // fake is three surfaces disagreeing about where the light is.
+      // Deliberately low. A high sun flattens erosion detail — the gullies read
+      // almost entirely through the shadowing of their own walls, so raking light
+      // is what makes the filter's work visible at all.
+      const SUN_DIR = new THREE.Vector3(0.58, 0.33, 0.62).normalize();
+      const uSunDir = uniform(new THREE.Vector3().copy(SUN_DIR));
+      const SKY_ZENITH = vec3(0.19, 0.38, 0.66);
+      const SKY_HORIZON = vec3(0.62, 0.75, 0.88);
+
+      /**
+       * Aerial perspective. Distance haze is what supplies depth cues in a scene
+       * this large; without it every ridge sits in the same plane and the terrain
+       * reads flat no matter how good the geometry is.
+       */
+      function applyHaze(color, dist) {
+        const d = dist ?? length(positionWorld.sub(cameraPosition));
+        const t = saturate(float(1).sub(exp(d.mul(uHaze).mul(float(-1 / 9000)))));
+        return mix(color, SKY_HORIZON, t.mul(float(0.92)));
+      }
+      const eroU = createErosionUniforms(params);
+
+      async function requestDevice() {
+        if (!navigator.gpu) throw new Error("WebGPU not available in this browser.");
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) throw new Error("No WebGPU adapter.");
+        // Ask for everything the adapter offers — notably float32-filterable, which
+        // decides whether the bake RT can be fp32 (see below).
+        return adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+      }
+
+      async function init() {
+        const device = await requestDevice();
+        renderer = new THREE.WebGPURenderer({ antialias: true, device });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setClearColor(0x11161b);
+        // Filmic response. Without it the hand-authored colours clip to pale grey
+        // in the highlights and the whole scene reads washed out. The bake pass is
+        // unaffected: it writes through fragmentNode into a NoColorSpace target.
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.15;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        // fp32 heightmaps only work as a *sampled* displacement source if the
+        // device can filter them. Half-float here would band visibly on the long
+        // smooth slopes between gullies — the same trap the snow heightmap hit.
+        const filterable = device.features?.has("float32-filterable");
+        const rtType = filterable ? THREE.FloatType : THREE.HalfFloatType;
+
+        bakeRT = new THREE.RenderTarget(BAKE_SIZE, BAKE_SIZE, {
+          type: rtType,
+          format: THREE.RGBAFormat,
+          colorSpace: THREE.NoColorSpace,
+          minFilter: THREE.LinearFilter,
+          magFilter: THREE.LinearFilter,
+          depthBuffer: false,
+          generateMipmaps: false,
+        });
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x11161b);
+
+        // Far plane has to clear the sky sphere, near plane kept large enough that
+        // depth precision survives it.
+        camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 5, SKY_RADIUS * 2.5);
+        // An aerial three-quarter view, high enough to read the drainage networks
+        // but angled enough to keep the relief legible — roughly the reference's
+        // framing. Orbiting keeps the terrain centred instead of swinging off.
+        camera.position.set(1250, 1850, 1650);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.06;
+        controls.maxPolarAngle = Math.PI * 0.49; // never orbit under the sea plane
+        controls.minDistance = 250;
+        controls.maxDistance = WORLD_SIZE * 3;
+        controls.target.set(0, 0, 0);
+
+        buildBakePass();
+        buildSky();
+        buildTerrain(filterable);
+        buildOcean();
+        buildUI();
+
+        addEventListener("resize", () => {
+          camera.aspect = innerWidth / innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(innerWidth, innerHeight);
+        });
+
+        syncDisplay();
+
+        // Debug handle: lets the height distribution be inspected from the console,
+        // which is the only reliable way to pick a sea level — the erosion filter's
+        // height offset shifts the whole terrain by an amount that depends on
+        // strength and octave count, so it cannot be eyeballed.
+        window.__lab = {
+          renderer, scene, camera, controls, params, bakeRT,
+          uniforms: { uHeightScale, uDomain, uAltRange, uSeaLevel, uVegetation, uSnowLine, uHaze },
+          async heightStats(size = 256) {
+            const px = await renderer.readRenderTargetPixelsAsync(bakeRT, 0, 0, size, size);
+            let lo = Infinity, hi = -Infinity, sum = 0;
+            for (let i = 0; i < px.length; i += 4) { const v = px[i]; if (v < lo) lo = v; if (v > hi) hi = v; sum += v; }
+            return { min: lo, max: hi, mean: sum / (px.length / 4) };
+          },
+        };
+
+        setNote(`Ready. Bake RT: ${filterable ? "fp32" : "fp16 (no float32-filterable — expect banding)"}.`);
+        renderer.setAnimationLoop(frame);
+      }
+
+      // ── bake pass: the whole filter, once per parameter change ───────────────
+      function buildBakePass() {
+        const mat = new THREE.MeshBasicNodeMaterial();
+        mat.fragmentNode = Fn(() => {
+          const p = uv().sub(vec2(0.5, 0.5)).mul(uDomain);
+          const t = erodedTerrain(p, eroU);
+          // r: height (centred on 0), g: ridge map, ba: analytic gradient.
+          return vec4(t.height.sub(float(0.5)), t.ridgeMap, t.slope.x, t.slope.y);
+        })();
+        bakeQuad = new QuadMesh(mat);
+      }
+
+      function bake() {
+        eroU.sync(params);
+        uDomain.value = params.domain;
+        uAltRange.value = Math.max(params.amplitude * 0.5, 1e-4);
+        const prevAutoClear = renderer.autoClear;
+        renderer.autoClear = false;
+        renderer.setRenderTarget(bakeRT);
+        bakeQuad.render(renderer);
+        renderer.setRenderTarget(null);
+        renderer.autoClear = prevAutoClear;
+      }
+
+      /** Bake and time it honestly — the readback forces the GPU to finish. */
+      async function bakeTimed() {
+        const t0 = performance.now();
+        bake();
+        await renderer.readRenderTargetPixelsAsync(bakeRT, 0, 0, 1, 1);
+        $("s-bake").textContent = `${(performance.now() - t0).toFixed(1)} ms @ ${BAKE_SIZE}²`;
+      }
+
+      // ── display mesh ─────────────────────────────────────────────────────────
+      function buildTerrain(filterable) {
+        // Only the vertex COUNT and the uv layout matter: positionNode replaces
+        // the position attribute outright, so orienting the geometry here would be
+        // a no-op. The mesh is left unrotated and unmoved, which makes local space
+        // and world space identical — the shading math below relies on that.
+        const geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, MESH_SEGMENTS, MESH_SEGMENTS);
+
+        // DoubleSide is load-bearing, not laziness. positionNode maps the plane's
+        // (x, y) to world (x, z), which is a REFLECTION of the XY plane onto XZ,
+        // not a rotation — so every triangle's winding is reversed and the whole
+        // terrain renders back-facing. Culled, the only surviving fragments are
+        // steep faces whose screen-space orientation happens to flip back, which
+        // looks exactly like a terrain full of holes.
+        const mat = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
+        const bakeTex = texture(bakeRT.texture);
+
+        // Sampled once per shader stage; `.level(0)` is required in the vertex
+        // stage, where there are no implicit derivatives to pick a mip from.
+        const sampleVert = bakeTex.sample(uv()).level(0);
+        const sampleFrag = bakeTex.sample(uv());
+
+        // Rebuild the position from uv rather than reading `positionLocal`, so the
+        // mesh grid and the baked texel grid are guaranteed to line up exactly.
+        // uv.x → world X, uv.y → world Z, height → world Y.
+        mat.positionNode = Fn(() => vec3(
+          uv().x.sub(0.5).mul(float(WORLD_SIZE)),
+          sampleVert.r.mul(uHeightScale),
+          uv().y.sub(0.5).mul(float(WORLD_SIZE)),
+        ))();
+
+        mat.colorNode = Fn(() => {
+          const s = sampleFrag;
+          const height = s.r.mul(uHeightScale);
+          const ridge = s.g;
+          const viewDist = length(positionWorld.sub(cameraPosition)).toVar();
+
+          // Normals come from CENTRAL DIFFERENCES of the baked height, not from
+          // the filter's analytic gradient in s.ba.
+          //
+          // The analytic gradient is exact for the continuous field, and that is
+          // precisely the problem: its finest octave runs at ~150 cycles across
+          // the domain, far below what a 2048² bake on a 4 km map can resolve. Used
+          // directly it reports near-vertical micro-slopes on a surface the mesh
+          // draws as smooth, so n.y collapses to ~0 everywhere and the terrain
+          // shades like a cliff face. Differencing the baked texels band-limits the
+          // gradient to the same detail the geometry actually carries.
+          // Stencil width is matched to the MESH spacing, not the texel spacing.
+          // The bake is finer than the mesh, and differencing at bake resolution
+          // reintroduces the same problem in miniature: normals describing bumps
+          // between vertices, which alias into dashed streaks along the gullies.
+          const stencil = Math.max(1, BAKE_SIZE / MESH_SEGMENTS);
+          const texel = float(stencil / BAKE_SIZE);
+          const hL = bakeTex.sample(uv().sub(vec2(texel, float(0)))).r;
+          const hR = bakeTex.sample(uv().add(vec2(texel, float(0)))).r;
+          const hD = bakeTex.sample(uv().sub(vec2(float(0), texel))).r;
+          const hU = bakeTex.sample(uv().add(vec2(float(0), texel))).r;
+          const perTexel = float((2 * stencil * WORLD_SIZE) / BAKE_SIZE); // metres across the stencil
+          const gx = hR.sub(hL).mul(uHeightScale).div(perTexel);
+          const gz = hU.sub(hD).mul(uHeightScale).div(perTexel);
+          const n = normalize(vec3(gx.negate(), float(1), gz.negate())).toVar();
+
+          const flatness = pow(clamp(n.y, float(0), float(1)), float(3.5));
+
+          // Height ABOVE SEA rather than raw altitude — every material band on a
+          // real coastline is referenced to the waterline, so driving them from
+          // sea level keeps beaches and treelines put when sea level moves.
+          const aboveSea = s.r.sub(uSeaLevel).div(max(uAltRange, float(1e-4)));
+
+          // Mottled vegetation. Two noise scales: a coarse one that decides where
+          // forest grows at all, a fine one that breaks the edge into clumps so it
+          // does not read as an altitude band painted on the hill.
+          const wp = positionWorld;
+          const nCoarse = mx_noise_float(vec3(wp.x.mul(0.0022), wp.z.mul(0.0022), float(3.1)));
+          const nFine = mx_noise_float(vec3(wp.x.mul(0.017), wp.z.mul(0.017), float(9.7)));
+          const clump = nCoarse.mul(float(0.6)).add(nFine.mul(float(0.4)));
+
+          const rockDark = vec3(0.028, 0.034, 0.048);
+          const rockLight = vec3(0.185, 0.180, 0.172);
+          const forest = vec3(0.022, 0.085, 0.014);
+          const forestLit = vec3(0.13, 0.30, 0.045);
+          const sand = vec3(0.52, 0.48, 0.38);
+          const snow = vec3(0.90, 0.93, 0.97);
+
+          // Rock varies with the fine noise so cliffs are not one flat colour.
+          const base = mix(rockDark, rockLight, saturate(nFine.mul(float(0.5)).add(float(0.55)))).toVar();
+
+          // Vegetation: low ground, gated by the clump noise. The ridge map joins
+          // in here — creases hold water, so they green up first.
+          //
+          // Note this uses a much gentler slope gate than `flatness`: real forest
+          // climbs anything short of bare cliff, and gating it on flatness^3.5
+          // confines it to valley floors and leaves the hillsides bald.
+          const vegSlope = pow(clamp(n.y, float(0), float(1)), float(2.0));
+          const drainage = saturate(ridge.negate());
+          const vegBand = smoothstep(float(0.01), float(0.12), aboveSea)
+            .mul(float(1).sub(smoothstep(uSnowLine.mul(float(0.66)), uSnowLine, aboveSea)));
+          // The clump bias decides how much bare rock survives: push it toward 1
+          // and the coast turns into an unbroken green carpet with no exposed
+          // gully walls, which is the tell that the erosion detail is being hidden
+          // rather than dressed.
+          const vegMask = saturate(
+            vegBand.mul(vegSlope).mul(uVegetation.mul(float(2.2)))
+              .mul(saturate(clump.add(float(0.3)).add(drainage.mul(float(0.4))))),
+          );
+          // Tree canopy. The blog only says he "added bumpy parts that evoke
+          // trees" without giving a mechanism, so this is our own: a tree-scale
+          // noise finite-differenced into a normal perturbation, applied ONLY
+          // where vegetation is. It costs 3 noise taps and does most of the work
+          // of making forest read as a surface with texture rather than as green
+          // paint — which is the single biggest difference from the reference.
+          const CANOPY_FREQ = 0.42; // ~2.4 m features
+          const cAt = (ox, oz) => mx_noise_float(vec3(
+            wp.x.add(float(ox)).mul(CANOPY_FREQ), wp.z.add(float(oz)).mul(CANOPY_FREQ), float(17.3),
+          ));
+          const c0 = cAt(0, 0);
+          const eps = 1.1; // metres
+          const canopyGrad = vec2(cAt(eps, 0).sub(c0), cAt(0, eps).sub(c0)).mul(float(1 / eps));
+
+          // Fade the canopy out with distance. 2.4 m detail sampled by pixels that
+          // cover tens of metres is pure aliasing — it sparkles when the camera
+          // moves and reads as dithered noise when it doesn't. This is a manual
+          // LOD because the bump is procedural and has no mipmap chain to fall
+          // back on.
+          const canopyFade = float(1).sub(smoothstep(float(700), float(2600), viewDist));
+          n.assign(normalize(
+            n.add(vec3(canopyGrad.x.negate(), float(0), canopyGrad.y.negate())
+              .mul(vegMask).mul(canopyFade).mul(float(1.9))),
+          ));
+
+          // Per-clump colour variation, plus a lift on canopy tops so the bump
+          // reads as lit foliage instead of a flat pattern.
+          const leaf = mix(forest, forestLit,
+            saturate(nFine.add(c0.mul(canopyFade).mul(float(0.55))).add(float(0.5))));
+          base.assign(mix(base, leaf, vegMask));
+
+          // Beach: a thin strip right at the waterline, flat ground only.
+          const beach = smoothstep(float(0.05), float(0.0), aboveSea)
+            .mul(smoothstep(float(-0.04), float(0.005), aboveSea)).mul(flatness);
+          base.assign(mix(base, sand, saturate(beach)));
+
+          // Snow: high and gentle, with the clump noise roughening the snow line.
+          const snowMask = smoothstep(
+            uSnowLine, uSnowLine.add(float(0.22)), aboveSea.add(nFine.mul(float(0.06))),
+          ).mul(pow(clamp(n.y, float(0), float(1)), float(1.6)));
+          base.assign(mix(base, snow, saturate(snowMask)));
+
+          // Wet, dark sediment in the drainage creases.
+          base.assign(mix(base, base.mul(float(0.45)), drainage.mul(float(0.5))));
+
+          // Sun + sky-dome fill. The fill is tinted with the sky colour and keyed
+          // off n.y so shadowed north faces go blue rather than merely dark. Kept
+          // low — a strong ambient term is what flattens hand-lit terrain.
+          // Recomputed here because the canopy bump above modified n.
+          const ndl = max(dot(n, uSunDir), float(0));
+          const skyFill = mix(SKY_HORIZON, SKY_ZENITH, saturate(n.y)).mul(float(0.17));
+          const lit = base.mul(vec3(1.12, 1.02, 0.86).mul(ndl).add(skyFill)).toVar();
+
+          // Pull saturation back up. Hand-authored albedo × a broad sky fill drifts
+          // toward grey, which is what reads as "faded" next to the reference.
+          const lum = dot(lit, vec3(0.2126, 0.7152, 0.0722));
+          lit.assign(max(mix(vec3(lum), lit, float(1.45)), vec3(0)));
+
+          // Underwater ground loses contrast fast and shifts blue-green; without
+          // this the seabed glows through the ocean and kills the shoreline read.
+          const sub = saturate(aboveSea.negate().mul(float(6)));
+          lit.assign(mix(lit, vec3(0.05, 0.15, 0.17), sub.mul(float(0.85))));
+
+          const shaded = applyHaze(lit, viewDist);
+
+          // Debug views.
+          const ridgeView = mix(
+            vec3(0.85, 0.35, 0.2), vec3(0.25, 0.6, 0.95), ridge.mul(float(0.5)).add(float(0.5)),
+          );
+          const slopeView = vec3(clamp(float(1).sub(n.y), float(0), float(1)));
+          const heightView = vec3(saturate(aboveSea.mul(float(0.5)).add(float(0.5))));
+
+          // Branchless view select — one uniform, four mutually exclusive masks.
+          const isV = (i) => step(float(i - 0.5), uView).mul(step(uView, float(i + 0.5)));
+
+          return vec4(
+            shaded.mul(isV(0))
+              .add(ridgeView.mul(isV(1)))
+              .add(slopeView.mul(isV(2)))
+              .add(heightView.mul(isV(3))),
+            1,
+          );
+        })();
+
+        terrainMesh = new THREE.Mesh(geo, mat);
+        terrainMesh.frustumCulled = false;
+        scene.add(terrainMesh);
+      }
+
+      /** World XZ → bake UV. The inverse of the terrain's positionNode mapping. */
+      function worldToBakeUv(wp) {
+        return vec2(
+          wp.x.div(float(WORLD_SIZE)).add(float(0.5)),
+          wp.z.div(float(WORLD_SIZE)).add(float(0.5)),
+        );
+      }
+
+      // ── ocean ────────────────────────────────────────────────────────────────
+      // A flat plane, but the colour is driven by the DEPTH of the terrain beneath
+      // it — read straight out of the bake RT we already have. That single trick is
+      // what produces the turquoise shallows and dark channels in the reference;
+      // a constant-colour water plane never reads as an archipelago.
+      function buildOcean() {
+        const geo = new THREE.PlaneGeometry(OCEAN_SIZE, OCEAN_SIZE, 1, 1);
+        geo.rotateX(-Math.PI / 2);
+
+        const mat = new THREE.MeshBasicNodeMaterial();
+        const bakeTex = texture(bakeRT.texture);
+
+        mat.colorNode = Fn(() => {
+          const wp = positionWorld;
+          const bu = worldToBakeUv(wp).toVar();
+
+          // Past the terrain's footprint there is no heightmap, so treat it as open
+          // ocean rather than letting ClampToEdge smear the border texel outward.
+          const outside = max(
+            max(step(bu.x, float(0)), step(float(1), bu.x)),
+            max(step(bu.y, float(0)), step(float(1), bu.y)),
+          );
+          const groundH = mix(bakeTex.sample(bu).r, float(-10), outside);
+          const depth = uSeaLevel.sub(groundH).mul(uHeightScale).toVar(); // metres
+
+          // No water where the ground is already above sea level.
+          Discard(depth.lessThanEqual(float(0)));
+
+          const shallow = vec3(0.16, 0.52, 0.55);
+          const deep = vec3(0.015, 0.075, 0.22);
+          const t = float(1).sub(exp(depth.mul(float(-0.022))));
+          const water = mix(shallow, deep, saturate(t)).toVar();
+
+          // Animated ripples, only used for the specular highlight — cheap, and
+          // enough to stop the surface reading as flat vinyl.
+          const ripple = mx_noise_float(vec3(
+            wp.x.mul(0.06).add(time.mul(0.35)), wp.z.mul(0.06), time.mul(0.21),
+          ));
+          const nWater = normalize(vec3(ripple.mul(0.045), float(1), ripple.mul(0.038)));
+          const spec = pow(max(dot(nWater, uSunDir), float(0)), float(48)).mul(float(0.5));
+
+          // Sky reflection, strongest at grazing angles (cheap Fresnel).
+          const viewDir = normalize(cameraPosition.sub(wp));
+          const fres = pow(float(1).sub(saturate(dot(viewDir, nWater))), float(4));
+          water.assign(mix(water, SKY_HORIZON.mul(float(0.85)), fres.mul(float(0.6))));
+          water.addAssign(spec);
+
+          // Foam where the seabed comes up to meet the surface. Kept to a narrow
+          // band: widen it and gentle shelves turn into sheets of white.
+          const foam = smoothstep(float(3.5), float(0.2), depth)
+            .mul(saturate(ripple.mul(float(0.4)).add(float(0.7))));
+          water.assign(mix(water, vec3(0.92, 0.95, 0.96), foam.mul(float(0.6))));
+
+          return vec4(applyHaze(water), 1);
+        })();
+
+        oceanMesh = new THREE.Mesh(geo, mat);
+        oceanMesh.frustumCulled = false;
+        scene.add(oceanMesh);
+      }
+
+      // ── sky ──────────────────────────────────────────────────────────────────
+      // An inverted sphere rather than a flat background, so the gradient stays
+      // anchored to the world horizon while the camera orbits.
+      function buildSky() {
+        const geo = new THREE.SphereGeometry(SKY_RADIUS, 32, 16);
+        const mat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false });
+        mat.colorNode = Fn(() => {
+          const dir = normalize(positionWorld);
+          const grad = saturate(dir.y.mul(float(1.6)).add(float(0.06)));
+          const sky = mix(SKY_HORIZON, SKY_ZENITH, pow(grad, float(0.65))).toVar();
+          // Sun disc plus a wide bloom, so the lighting direction is legible.
+          const sunAmt = saturate(dot(dir, uSunDir));
+          sky.addAssign(vec3(1.0, 0.93, 0.78).mul(pow(sunAmt, float(220)).mul(float(1.6))));
+          sky.addAssign(vec3(1.0, 0.9, 0.72).mul(pow(sunAmt, float(9)).mul(float(0.22))));
+          return vec4(sky, 1);
+        })();
+        skyMesh = new THREE.Mesh(geo, mat);
+        skyMesh.frustumCulled = false;
+        scene.add(skyMesh);
+      }
+
+      // ── UI ───────────────────────────────────────────────────────────────────
+      const sliders = {};
+
+      function buildUI() {
+        for (const [containerId, spec] of Object.entries(UI)) {
+          const host = $(containerId);
+          for (const [key, label, min, max, stepv] of spec) {
+            const wrap = document.createElement("div");
+            wrap.className = "sl";
+            wrap.innerHTML =
+              `<label><span>${label}</span><b id="v-${key}"></b></label>` +
+              `<input type="range" min="${min}" max="${max}" step="${stepv}" />`;
+            const input = wrap.querySelector("input");
+            input.value = params[key];
+            host.appendChild(wrap);
+            const out = wrap.querySelector("b");
+            const show = () => { out.textContent = fmt(params[key]); };
+            show();
+            input.addEventListener("input", () => {
+              params[key] = parseFloat(input.value);
+              show();
+              onParamChange(key);
+            });
+            sliders[key] = { input, show };
+          }
+        }
+
+        $("views").addEventListener("click", (e) => {
+          const b = e.target.closest("button");
+          if (!b) return;
+          [...$("views").children].forEach((c) => c.classList.toggle("on", c === b));
+          uView.value = parseFloat(b.dataset.view);
+        });
+
+        $("presets").addEventListener("click", (e) => {
+          const b = e.target.closest("button");
+          if (!b) return;
+          [...$("presets").children].forEach((c) => c.classList.toggle("on", c === b));
+          Object.assign(params, DEFAULTS, PRESETS[b.dataset.preset]);
+          for (const [key, s] of Object.entries(sliders)) { s.input.value = params[key]; s.show(); }
+          syncDisplay();
+          bakeDirty = true;
+        });
+      }
+
+      const fmt = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/0+$/, "").replace(/\.$/, ""));
+
+      /** Uniforms the SHADERS read directly — changing these needs no re-bake. */
+      const DISPLAY_ONLY = {
+        heightScale: uHeightScale,
+        seaLevel: uSeaLevel,
+        vegetation: uVegetation,
+        snowLine: uSnowLine,
+        haze: uHaze,
+      };
+
+      function syncDisplay() {
+        for (const [key, u] of Object.entries(DISPLAY_ONLY)) u.value = params[key];
+        if (oceanMesh) oceanMesh.position.y = params.seaLevel * params.heightScale;
+      }
+
+      function onParamChange(key) {
+        // The RT stores normalized height, so display-side knobs are free — only
+        // parameters that feed the filter itself force the 2048² bake to rerun.
+        syncDisplay();
+        if (!(key in DISPLAY_ONLY)) bakeDirty = true;
+      }
+
+      // ── frame loop ───────────────────────────────────────────────────────────
+      let lastFpsT = performance.now();
+      let frames = 0;
+      let baking = false;
+
+      function frame() {
+        if (bakeDirty && !baking) {
+          bakeDirty = false;
+          baking = true;
+          bakeTimed().finally(() => { baking = false; });
+        }
+
+        controls.update();
+        renderer.render(scene, camera);
+
+        frames++;
+        const now = performance.now();
+        if (now - lastFpsT >= 500) {
+          $("s-fps").textContent = Math.round((frames * 1000) / (now - lastFpsT));
+          frames = 0;
+          lastFpsT = now;
+        }
+      }
+
+      init().catch((e) => {
+        $("err").textContent = String(e?.message || e);
+        console.error(e);
+      });
+    </script>
+  </body>
+</html>
