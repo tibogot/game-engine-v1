@@ -25,7 +25,7 @@ const DEV_PANEL_OPEN_W = 300;
  * @param {object} o.params       live-tunable param objects from the vehicle/kit
  */
 export function createRoadDevPanel({ app, game, params }) {
-  const { TIRE, AERO, DRIVETRAIN, DECK, HEADLIGHTS, glowPropParams } = params;
+  const { TIRE, AERO, DRIVETRAIN, DECK, SOLID, HEADLIGHTS, glowPropParams } = params;
 
   const root = document.createElement("div");
   root.id = "road-dev";
@@ -327,6 +327,125 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="dv-hint">
             Lower <b>rear grip</b> for oversteer / easier drifts. Friction scales
             both axles.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Car — Steering feel</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Turn-in rate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-attack" min="1" max="30" step="0.5" />
+              <span class="prop-num" id="dv-st-attack-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Return rate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-release" min="1" max="40" step="0.5" />
+              <span class="prop-num" id="dv-st-release-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Countersteer</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-counter" min="1" max="50" step="0.5" />
+              <span class="prop-num" id="dv-st-counter-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Weight at speed</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-drop" min="0" max="0.8" step="0.05" />
+              <span class="prop-num" id="dv-st-drop-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Stick filter</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-analog" min="5" max="60" step="1" />
+              <span class="prop-num" id="dv-st-analog-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Keyboard steering is a ramp, and its shape IS the feel. Higher =
+            faster. <b>Countersteer</b> is the rate used when you flick the
+            opposite way mid-slide — keep it the fastest of the three.
+            <b>Stick filter</b> only applies to a gamepad stick.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Car — Wall response</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Max bounce</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wall-exit" min="0.5" max="20" step="0.5" />
+              <span class="prop-num" id="dv-wall-exit-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Scrape drag</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wall-scrub" min="0" max="8" step="0.1" />
+              <span class="prop-num" id="dv-wall-scrub-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Caps how hard a guardrail can throw the car back — the collision
+            springs stack across contact points and used to launch it. Raise
+            <b>max bounce</b> for pinball, lower for a car that hugs the rail.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Car — Yaw assist</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Assist</span>
+            <div class="prop-value">
+              <input type="range" id="dv-yaw" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-yaw-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Align torque</span>
+            <div class="prop-value">
+              <input type="range" id="dv-yaw-align" min="0" max="40000" step="500" />
+              <span class="prop-num" id="dv-yaw-align-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Max slip</span>
+            <div class="prop-value">
+              <input type="range" id="dv-yaw-slip" min="0.15" max="1.4" step="0.01" />
+              <span class="prop-num" id="dv-yaw-slip-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Yaw damping</span>
+            <div class="prop-value">
+              <input type="range" id="dv-yaw-damp" min="0" max="15000" step="250" />
+              <span class="prop-num" id="dv-yaw-damp-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Drift release</span>
+            <div class="prop-value">
+              <input type="range" id="dv-yaw-drift" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-yaw-drift-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Keeps the slip angle drivable — the tire model has no yaw damping of
+            its own. <b>Assist 0</b> = raw tire sim. <b>Max slip</b> is how far
+            the car may rotate before the clamp bites; <b>drift release</b> is how
+            much assist survives while the handbrake is down (0 = none).
           </div>
         </div>
       </div>
@@ -798,6 +917,18 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-fric", TIRE, "frictionCoeff");
   slider("dv-rear", TIRE, "gripRear");
   slider("dv-steer", TIRE, "maxSteerAngle", (v) => `${Math.round(v * 57.2958)}°`);
+  slider("dv-yaw", TIRE, "yawAssist", (v) => v.toFixed(2));
+  slider("dv-yaw-align", TIRE, "alignTorque", (v) => `${(v / 1000).toFixed(1)}k`);
+  slider("dv-yaw-slip", TIRE, "slipMax", (v) => `${Math.round(v * 57.2958)}°`);
+  slider("dv-yaw-damp", TIRE, "yawRateDamp", (v) => `${(v / 1000).toFixed(1)}k`);
+  slider("dv-yaw-drift", TIRE, "driftYawAssistMul", (v) => `${Math.round(v * 100)}%`);
+  slider("dv-st-attack", TIRE, "steerAttack", (v) => v.toFixed(1));
+  slider("dv-st-release", TIRE, "steerRelease", (v) => v.toFixed(1));
+  slider("dv-st-counter", TIRE, "steerCounter", (v) => v.toFixed(1));
+  slider("dv-st-drop", TIRE, "steerRateSpeedDrop", (v) => `${Math.round(v * 100)}%`);
+  slider("dv-st-analog", TIRE, "steerAnalogRate", (v) => v.toFixed(0));
+  slider("dv-wall-exit", SOLID, "maxExitSpeed", (v) => `${v.toFixed(1)} m/s`);
+  slider("dv-wall-scrub", SOLID, "tangentScrub", (v) => v.toFixed(1));
   slider("dv-drag", AERO, "drag");
   slider("dv-down", AERO, "downforce", (v) => v.toFixed(1));
 

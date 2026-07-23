@@ -41,6 +41,11 @@ export const WHEEL_LOCAL = [
   { name: "RR", pos: new THREE.Vector3(1.05, -0.1, -1.4), steer: false, drive: true },
 ];
 
+/** Front↔rear hub separation (m). Derived from WHEEL_LOCAL so it follows any
+ *  edit to the hub layout. Used by the yaw assist's bicycle-model reference
+ *  yaw rate (ω = v·tan δ / L). */
+const WHEELBASE = Math.abs(WHEEL_LOCAL[0].pos.z - WHEEL_LOCAL[2].pos.z);
+
 export const TIRE = {
   rayLength: 1.0,
   rayPadAbove: 0.6,
@@ -74,24 +79,99 @@ export const TIRE = {
   tireStiffness: 7.0,
   lowSpeedRef: 2.5,
   accelForce: 4000,
-  // Default at the Car Power slider max (dev panel #dv-top max=80).
-  topSpeed: 80,
+  // Sized to the TRACK KIT, not to the slider max. modularRoadKit's standard
+  // curve is `curveRadius: 26` m, and peak lateral grip here is ~1.5 g
+  // (frictionCoeff 1.5 × ~3.4 kN static wheel load × 4), so the fastest a curve
+  // piece can physically be taken is √(26 × 14.7) ≈ 19.5 m/s. Loops need
+  // ≥ √(g × loopRadius 25) ≈ 15.7 m/s to stay stuck at the top. That leaves a
+  // usable window of roughly 20–35 m/s and 30 sits in it.
+  //
+  // The old default was 80 (the #dv-top slider max), which needed ~25 g to hold
+  // a 26 m corner — unreachable by ANY slider, so every curve was a plow into
+  // the guardrail. If you raise this, raise curveRadius to match: the minimum
+  // radius the car can hold is v² / 14.7.
+  topSpeed: 30,
   powerCurveExp: 2.0,
   brakeForce: 8000,
   reverseAccel: 2000,
   brakeReverseThreshold: 0.5,
   engineBrake: 800,
   maxSteerAngle: 0.55,
-  steerSmooth: 8.0,
+
+  // ── STEERING INPUT SHAPING ──────────────────────────────────────────────
+  // A keyboard key is a binary switch, so the shape of the ramp between 0 and
+  // full lock IS the steering feel. The old single symmetric rate
+  // (`steerSmooth: 8`, ~125 ms in BOTH directions) is the classic mushy-keyboard
+  // -car recipe: too slow to catch a slide, and equally slow to straighten out
+  // of one. Splitting it three ways costs nothing and fixes both.
+  /** Winding lock ON (1/s). The slowest of the three — this is the car's weight. */
+  steerAttack: 7.0,
+  /** Unwinding back toward centre (1/s). Straightening should feel immediate. */
+  steerRelease: 12.0,
+  /** Input flipped sign — a countersteer (1/s). Fastest: this is the input you
+   *  make when the car is ALREADY sideways, where every millisecond counts. */
+  steerCounter: 18.0,
+  /** Analog-stick rate (1/s). A stick already IS the wheel position, so this is
+   *  only a jitter filter — running analog input through the keyboard ramp adds
+   *  lag the player can feel directly. */
+  steerAnalogRate: 30.0,
+  /** Fraction the ATTACK rate is cut by at `steerSpeedRef` and above, so the
+   *  wheel gets heavier with speed. Returning to centre and the countersteer
+   *  CROSSING are never slowed — they're the recovery inputs. (Once a
+   *  countersteer has crossed centre it's winding lock on in the new direction,
+   *  which is ordinary turn-in and does get the speed weighting.) */
+  steerRateSpeedDrop: 0.3,
   // Speed-sensitive steering: the usable steer angle shrinks as speed rises so
   // the car isn't twitchy / spin-happy at the top end. At/above `steerSpeedRef`
-  // (m/s) the angle is reduced by `steerSpeedReduce` (fraction). Sized for the
-  // 80 m/s top-speed world — the old 26/0.55 (tuned for topSpeed 30) numbed the
-  // wheel to 45% right where loop/tube exits happen.
-  steerSpeedRef: 50,
-  steerSpeedReduce: 0.45,
+  // (m/s) the angle is reduced by `steerSpeedReduce` (fraction).
+  //
+  // Back in scale with topSpeed 30: full reduction lands AT top speed, leaving
+  // 0.55 × (1 − 0.5) ≈ 16° of lock there. A 26 m curve at 20 m/s only asks for
+  // atan(2.8 / 26) ≈ 6°, so there's ample margin. The previous 50/0.45 pair was
+  // stretched to cover an 80 m/s top end that no longer exists.
+  steerSpeedRef: 26,
+  steerSpeedReduce: 0.5,
   frictionCoeff: 1.5,
   maxAngVel: 9.0,
+  // Contact-normal low-pass rate (1/s). ~55 ms time constant: at 30 m/s that
+  // spans ~1.6 m of travel, which is one curve-piece segment — fast enough to
+  // follow a real bank transition, slow enough to reject seam flicker between
+  // adjacent pieces. 0 disables the filter. See the note in Tire.apply().
+  normalSmooth: 18,
+
+  // ── YAW ASSIST (arcade slip management) ─────────────────────────────────
+  // The tire model alone has NO yaw damping on the ground — _applyStabilizer
+  // deliberately strips the yaw component out, so the only thing resisting a
+  // spin is lateral tire force. That makes the car understeer to the limit and
+  // then snap, with nothing to catch it. This is the layer every arcade racer
+  // has and a pure raycast sim doesn't: it keeps the slip angle inside a range
+  // the player can actually drive, without making the car feel on-rails.
+  //
+  // Three terms, all torque about the SURFACE normal (so it works on banks and
+  // inside loops, not just flat ground) — see _applyYawAssist().
+  /** Master scale, 0..1. 0 = pure tire sim, no assist at all. */
+  yawAssist: 1.0,
+  /** Slip (rad) that gets NO assist — ordinary cornering must still feel like
+   *  tires rather than magnets. ~4.6°. */
+  alignDeadband: 0.08,
+  /** N·m per rad of slip past the deadband: pulls the nose toward travel. */
+  alignTorque: 12000,
+  /** Slip (rad) past which the clamp ramps hard — you can drift up to here,
+   *  but not rotate past what's recoverable. ~40°. */
+  slipMax: 0.7,
+  /** N·m per rad of slip past `slipMax`. */
+  slipClampTorque: 30000,
+  /** N·m per rad/s of yaw-rate ERROR vs what the steering is asking for. Damping
+   *  the RAW yaw rate would fight the driver; damping only the error kills the
+   *  pendulum overshoot and leaves the intended rotation alone. */
+  yawRateDamp: 4000,
+  /** Below this speed (m/s) slip angle is numerical noise — a parked car would
+   *  get spun by it. */
+  yawAssistMinSpeed: 2.0,
+  /** Assist multiplier while the handbrake is down, so a deliberate drift still
+   *  goes where you point it. The slip CLAMP is deliberately not scaled by this
+   *  — drifting should not be able to become a full spin. */
+  driftYawAssistMul: 0.25,
   // Anti-roll / orientation. When grounded the chassis aligns its up-axis to the
   // averaged ground normal (so it leans into banks and follows loops instead of
   // fighting toward world-up); `stabilizerDamp` damps the roll/pitch rate.
@@ -203,6 +283,16 @@ export const SOLID = {
   stiffness: 260000,
   damper: 12000,
   clampPenFrac: 0.5,
+  /** Hard cap (m/s) on how fast a solid may throw the car back out along the
+   *  aggregate contact normal. 26 penetration springs at 260 kN/m STACK when
+   *  several samples bury at once, so a fast graze along a guardrail turned into
+   *  a launcher — the car played pinball down the rail. The springs still do the
+   *  depenetrating; this just refuses to let them return more than they should.
+   *  Only limits OUTWARD velocity, so it can't push the car into a wall. */
+  maxExitSpeed: 4.0,
+  /** Tangential speed scrubbed per second (1/s) while in contact, so scraping a
+   *  rail costs a little speed instead of conserving it perfectly. */
+  tangentScrub: 1.5,
 };
 
 /** Cached each rebuild — offset from box center to CoM in chassis-local space. */
@@ -317,6 +407,12 @@ class Tire {
     this.lastSteering = new THREE.Vector3();
     this.lastAccel = new THREE.Vector3();
     this._smoothDist = undefined;
+    /** Unfiltered contact normal, before the low-pass in apply(). */
+    this._rawNormal = new THREE.Vector3(0, 1, 0);
+    /** Low-passed contact normal — this is what `hitNormal` exposes. */
+    this._smoothNormal = new THREE.Vector3(0, 1, 0);
+    /** Was this tire on a surface last tick? Drives snap-vs-filter. */
+    this._hadGround = false;
 
     this._tireVel = new THREE.Vector3();
     this._up = new THREE.Vector3();
@@ -448,16 +544,37 @@ class Tire {
       this.grounded = false;
       this.compression = 0;
       this.hitDistance = TIRE.rayLength;
+      this._hadGround = false; // next contact snaps instead of easing in
       return;
     }
 
     const bestDist = probe.dist;
     this.grounded = true;
     this.hitPoint.copy(probe.point);
-    this.hitNormal.copy(this._bestN);
-    if (this.hitNormal.dot(this._up) < 0) this.hitNormal.negate();
-    if (this.hitNormal.lengthSq() < 1e-8) this.hitNormal.copy(this._up);
-    this.hitNormal.normalize();
+    this._rawNormal.copy(this._bestN);
+    if (this._rawNormal.dot(this._up) < 0) this._rawNormal.negate();
+    if (this._rawNormal.lengthSq() < 1e-8) this._rawNormal.copy(this._up);
+    this._rawNormal.normalize();
+
+    // Low-pass the contact normal. _probeGround keeps the CLOSEST of the ring
+    // rays, and reports THAT ray's raw triangle normal — so where two modular
+    // pieces meet, the winning ray flips between the two pieces' normals from
+    // tick to tick. This normal is what feeds the stabilizer's alignment torque,
+    // so the flicker showed up as a twitch on every seam. Filtering here fixes it
+    // for every consumer at once (stabilizer, yaw assist, tire marks).
+    //
+    // Snap on the FIRST tick of contact — a landing must not ease in from a
+    // stale airborne normal — and filter only while contact is continuous.
+    if (!this._hadGround || TIRE.normalSmooth <= 0) {
+      this._smoothNormal.copy(this._rawNormal);
+    } else {
+      this._smoothNormal.lerp(this._rawNormal, 1 - Math.exp(-TIRE.normalSmooth * dt));
+      if (this._smoothNormal.lengthSq() < 1e-8) this._smoothNormal.copy(this._rawNormal);
+      this._smoothNormal.normalize();
+    }
+    this._hadGround = true;
+    this.hitNormal.copy(this._smoothNormal);
+
     const distFromHub = bestDist - pad;
     this.hitDistance = distFromHub;
     this.compression = TIRE.restLength - distFromHub;
@@ -825,6 +942,13 @@ export class Vehicle {
     this._stabWTilt = new THREE.Vector3();
     this._airRight = new THREE.Vector3();
     this._airFwd = new THREE.Vector3();
+    this._yawN = new THREE.Vector3();
+    this._yawFwd = new THREE.Vector3();
+    this._yawLat = new THREE.Vector3();
+    this._yawVel = new THREE.Vector3();
+    this._solidN = new THREE.Vector3();
+    this._solidT = new THREE.Vector3();
+    this._steerRateFwd = new THREE.Vector3();
     this._deckN = new THREE.Vector3();
     this.BOTTOM_CORNERS = [0, 1, 4, 5];
     this._aeroF = new THREE.Vector3();
@@ -932,6 +1056,9 @@ export class Vehicle {
     this.body.quat.copy(this.spawnQuat);
     this.body.angVel.set(0, 0, 0);
     this._airTime = 0;
+    // Drop the contact-normal history — the first probe after a teleport must
+    // snap to the new surface, not ease over from wherever the car just was.
+    for (const t of this.tires) t._hadGround = false;
     this._resetInterpolation();
     // Keep the render pose in step with the teleport (syncVisuals hasn't run yet).
     this._renderPos.copy(this.body.pos);
@@ -1012,14 +1139,51 @@ export class Vehicle {
     if (!this.enabled) return;
     this._prevPos.copy(this.body.pos);
     this._prevQuat.copy(this.body.quat);
-    const k = 1 - Math.exp(-TIRE.steerSmooth * FIXED_DT);
-    this.input.steer += ((controls.steerTarget ?? 0) - this.input.steer) * k;
+    this.input.steer = this._smoothSteer(controls.steerTarget ?? 0, !!controls.analog);
     this.input.throttle = controls.throttle ?? 0;
     this.input.handbrake = !!controls.handbrake;
     this.input.yaw = controls.yaw ?? 0;
 
     this._physicsStep(FIXED_DT);
     this._depenetrateFromWalls();
+  }
+
+  /**
+   * Advance the steering input toward `target`, at a rate chosen by what the
+   * player is actually doing — see the steerAttack/Release/Counter notes on TIRE.
+   * `analog` bypasses the keyboard ramp entirely (a stick is already a position).
+   */
+  _smoothSteer(target, analog) {
+    const cur = this.input.steer;
+    let rate;
+    let slowWithSpeed = false;
+    if (analog) {
+      rate = TIRE.steerAnalogRate;
+    } else if (Math.abs(target) < 1e-3) {
+      rate = TIRE.steerRelease; // let go → straighten
+    } else if (cur !== 0 && Math.sign(target) !== Math.sign(cur)) {
+      // Crossing over centre. This IS the countersteer, and it has to use the
+      // fast rate for the WHOLE traverse — treating the unwind half as a plain
+      // release is what made catching a slide feel impossible.
+      rate = TIRE.steerCounter;
+    } else if (Math.abs(target) > Math.abs(cur)) {
+      rate = TIRE.steerAttack; // winding lock on
+      slowWithSpeed = true;
+    } else {
+      rate = TIRE.steerRelease; // easing off toward a smaller angle
+    }
+
+    // Heavier wheel at speed. The usable ANGLE already shrinks (steerSpeedRef);
+    // this shrinks how fast you get to it. Attack only — slowing the recovery
+    // inputs at speed would be exactly backwards.
+    if (slowWithSpeed && TIRE.steerRateSpeedDrop > 0) {
+      this._steerRateFwd.set(0, 0, 1).applyQuaternion(this.body.quat);
+      const sp = Math.abs(this.body.vel.dot(this._steerRateFwd));
+      const t = Math.min(1, sp / Math.max(0.1, TIRE.steerSpeedRef));
+      rate *= 1 - TIRE.steerRateSpeedDrop * t;
+    }
+
+    return cur + (target - cur) * (1 - Math.exp(-rate * FIXED_DT));
   }
 
   /** Steer angle after speed-sensitive reduction (shared by physics + visuals). */
@@ -1069,14 +1233,96 @@ export class Vehicle {
         );
       }
       if (this.walls.length) this._applyWallProbes();
-      if (SOLID.enabled && this.solidsBvh && this.solidsBvh.baked) this._resolveSolids();
+      if (SOLID.enabled && this.solidsBvh && this.solidsBvh.baked) this._resolveSolids(subDt);
       if (DECK.enabled && this.groundBvh && this.groundBvh.baked) this._applyDeckContact();
       this._applyChassisGroundContact();
+      // After the tires (their contact normals are what both of these read) and
+      // before integrate(), so the torques land in this substep.
+      this._applyYawAssist();
       this._applyStabilizer(subDt);
       body.integrate(subDt);
       const wMax = TIRE.maxAngVel;
       if (body.angVel.lengthSq() > wMax * wMax) body.angVel.setLength(wMax);
     }
+  }
+
+  /**
+   * Yaw assist — keep the slip angle inside a drivable range.
+   *
+   * Everything here is a torque about the averaged SURFACE normal rather than
+   * world up, so it behaves the same on a bank, in a corkscrew, or upside down
+   * inside a loop.
+   *
+   * Sign convention (matches Tire's `_wheelRight`): with the chassis facing +Z
+   * and up +Y, `N × fwd` is +X, and a POSITIVE rotation about up turns the nose
+   * toward +X. So a positive slip angle — travel is toward +X of the nose —
+   * needs a positive torque to bring the nose back onto the velocity vector.
+   */
+  _applyYawAssist() {
+    const body = this.body;
+    if (TIRE.yawAssist <= 0) return;
+
+    // Surface frame from the (already filtered) contact normals.
+    let grounded = 0;
+    this._yawN.set(0, 0, 0);
+    for (const t of this.tires) {
+      if (!t.grounded) continue;
+      grounded++;
+      this._yawN.add(t.hitNormal);
+    }
+    // Two wheels minimum: with one contact the "surface" is a single triangle
+    // and the frame is too arbitrary to steer the whole car by.
+    if (grounded < 2 || this._yawN.lengthSq() < 1e-8) return;
+    this._yawN.normalize();
+
+    // Chassis forward and velocity, both flattened INTO the surface plane.
+    this._yawFwd.set(0, 0, 1).applyQuaternion(body.quat);
+    this._yawFwd.addScaledVector(this._yawN, -this._yawFwd.dot(this._yawN));
+    if (this._yawFwd.lengthSq() < 1e-8) return; // nose along the normal — no yaw frame
+    this._yawFwd.normalize();
+
+    this._yawVel.copy(body.vel);
+    this._yawVel.addScaledVector(this._yawN, -this._yawVel.dot(this._yawN));
+    const speed = this._yawVel.length();
+    if (speed < TIRE.yawAssistMinSpeed) return;
+    this._yawVel.multiplyScalar(1 / speed);
+
+    this._yawLat.crossVectors(this._yawN, this._yawFwd);
+    const alongFwd = this._yawVel.dot(this._yawFwd);
+    // Travelling backwards (reverse gear, or already spun past 90°). Slip angle
+    // is meaningless here — aligning the nose to travel would violently spin the
+    // car around — so the assist stands down and the tires have it.
+    if (alongFwd <= 0) return;
+
+    const slip = Math.atan2(this._yawVel.dot(this._yawLat), alongFwd);
+    const absSlip = Math.abs(slip);
+    const sign = slip >= 0 ? 1 : -1;
+    // Ramp with how much of the car is actually on the surface.
+    const contact = grounded * 0.25;
+    const drifting = this.input.handbrake;
+    const driftMul = drifting ? TIRE.driftYawAssistMul : 1;
+
+    // 1) Alignment — pull the nose toward travel, but only past the deadband so
+    //    ordinary cornering is still decided by the tires.
+    let mag = 0;
+    const over = absSlip - TIRE.alignDeadband;
+    if (over > 0) mag += over * TIRE.alignTorque * driftMul;
+
+    // 2) Slip clamp — past slipMax the assist ramps hard. NOT scaled by
+    //    driftMul: a drift should be holdable, not become a spin.
+    const past = absSlip - TIRE.slipMax;
+    if (past > 0) mag += past * TIRE.slipClampTorque;
+
+    let torque = sign * mag;
+
+    // 3) Yaw-rate damping against the rate the STEERING is asking for (bicycle
+    //    model). Damping the raw rate would fight the driver's own cornering;
+    //    damping the error only removes the overshoot that starts the pendulum.
+    const yawRate = body.angVel.dot(this._yawN);
+    const refRate = (speed * Math.tan(this._steerAngle())) / WHEELBASE;
+    torque -= (yawRate - refRate) * TIRE.yawRateDamp * driftMul;
+
+    body.torqueAccum.addScaledVector(this._yawN, torque * TIRE.yawAssist * contact);
   }
 
   _applyStabilizer(dt = FIXED_DT / this.SUBSTEPS) {
@@ -1097,8 +1343,18 @@ export class Vehicle {
       // Align chassis-up to the averaged ground normal (banks/loops follow the
       // surface), with damping on the roll/pitch rate but not on yaw (steering).
       this._stabN.normalize();
-      this._stabCross.crossVectors(this._stabUp, this._stabN);
-      this._stabTorque.copy(this._stabCross).multiplyScalar(TIRE.stabilizerStrength);
+      // Alignment ramps with contact count, and is OFF at a single wheel: one
+      // wheel clipping a guardrail or hanging over an edge would otherwise yank
+      // the whole chassis toward that one triangle's normal at full strength.
+      // Unchanged at four wheels, so the existing on-track tune carries over.
+      const align = grounded >= 2 ? grounded * 0.25 : 0;
+      this._stabTorque.set(0, 0, 0);
+      if (align > 0) {
+        this._stabCross.crossVectors(this._stabUp, this._stabN);
+        this._stabTorque.addScaledVector(this._stabCross, TIRE.stabilizerStrength * align);
+      }
+      // Roll/pitch damping stays on at ANY contact count — it only removes
+      // energy, and it's what stops a one-wheel touch starting a tumble.
       const wYaw = body.angVel.dot(this._stabUp);
       this._stabWTilt.copy(body.angVel).addScaledVector(this._stabUp, -wYaw);
       this._stabTorque.addScaledVector(this._stabWTilt, -TIRE.stabilizerDamp);
@@ -1182,10 +1438,20 @@ export class Vehicle {
       this._aeroF.copy(v).multiplyScalar(-AERO.drag * sp); // -drag·sp·v  (∝ sp²)
       this.body.addForce(this._aeroF);
     }
+    // Downforce presses along -chassis-up, so it is only meaningful while there
+    // is a surface to be pressed ONTO. Airborne it becomes thrust along whatever
+    // way the car happens to be pointing — inverted over a loop exit it shoved
+    // the car UP — which is why air behaviour read as unpredictable. Scale it by
+    // how many wheels are actually in contact: full grip = full downforce, all
+    // four wheels off = none, and the ramp between keeps a crest from stepping
+    // the force discontinuously.
     if (AERO.downforce > 0) {
-      this._aeroUp.set(0, 1, 0).applyQuaternion(this.body.quat);
-      this._aeroF.copy(this._aeroUp).multiplyScalar(-AERO.downforce * sp * sp);
-      this.body.addForce(this._aeroF); // along -chassis-up → presses onto track
+      const contact = this.groundedCount * 0.25;
+      if (contact > 0) {
+        this._aeroUp.set(0, 1, 0).applyQuaternion(this.body.quat);
+        this._aeroF.copy(this._aeroUp).multiplyScalar(-AERO.downforce * sp * sp * contact);
+        this.body.addForce(this._aeroF);
+      }
     }
   }
 
@@ -1214,16 +1480,22 @@ export class Vehicle {
     }
   }
 
-  _resolveSolids() {
-    if (SOLID.enabled && this.solidsBvh?.baked) this._resolveSolidBvh(this.solidsBvh, null);
+  _resolveSolids(dt) {
+    if (SOLID.enabled && this.solidsBvh?.baked) this._resolveSolidBvh(this.solidsBvh, null, dt);
     for (const mover of this.dynamicMovers) {
-      if (mover.bvh?.baked) this._resolveSolidBvh(mover.bvh, (p, out) => mover.velocityAt(p, out));
+      if (mover.bvh?.baked) {
+        this._resolveSolidBvh(mover.bvh, (p, out) => mover.velocityAt(p, out), dt);
+      }
     }
   }
 
-  _resolveSolidBvh(bvh, surfaceVelFn) {
+  _resolveSolidBvh(bvh, surfaceVelFn, dt = FIXED_DT / this.SUBSTEPS) {
     const body = this.body;
     const r = SOLID.radius;
+    // Penetration-weighted mean contact normal + deepest penetration, for the
+    // aggregate response after the sample loop.
+    let maxPen = 0;
+    this._solidN.set(0, 0, 0);
     for (const sp of this.SOLID_BOX_SAMPLES) {
       this._geomToWorld(sp, this._sphC);
       const res = bvh.closestPointWithNormal(
@@ -1232,6 +1504,8 @@ export class Vehicle {
       if (!res) continue;
       const pen = r - res.distance;
       if (pen <= 0) continue;
+      this._solidN.addScaledVector(this._sphN, pen);
+      if (pen > maxPen) maxPen = pen;
       body.getVelocityAtPoint(this._sphC, this._sphV);
       if (surfaceVelFn) {
         surfaceVelFn(this._sphC, this._surfV);
@@ -1254,6 +1528,27 @@ export class Vehicle {
           body.vel.addScaledVector(this._surfV, 0.12);
         }
       }
+    }
+
+    // ── Aggregate contact response ────────────────────────────────────────
+    // STATIC solids only. A moving wall is *supposed* to impart its velocity,
+    // so capping its exit speed would fight the mover push above.
+    if (surfaceVelFn || maxPen <= 0 || this._solidN.lengthSq() < 1e-12) return;
+    this._solidN.normalize();
+
+    // Cap the rebound. Outward only — a negative vN means the car is still
+    // heading INTO the wall, which the springs are there to deal with.
+    const vN = body.vel.dot(this._solidN);
+    if (vN > SOLID.maxExitSpeed) {
+      body.vel.addScaledVector(this._solidN, SOLID.maxExitSpeed - vN);
+    }
+
+    // Scrub speed along the wall so a graze costs something.
+    if (SOLID.tangentScrub > 0 && dt > 0) {
+      const vn2 = body.vel.dot(this._solidN);
+      this._solidT.copy(body.vel).addScaledVector(this._solidN, -vn2);
+      this._solidT.multiplyScalar(Math.exp(-SOLID.tangentScrub * dt));
+      body.vel.copy(this._solidT).addScaledVector(this._solidN, vn2);
     }
   }
 

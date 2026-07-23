@@ -36,6 +36,7 @@ import {
   AERO,
   DRIVETRAIN,
   DECK,
+  SOLID,
   HEADLIGHTS,
   CHASSIS,
   GRAVITY,
@@ -77,6 +78,7 @@ import {
   createTrackFileInput,
 } from "./modularRoadTrackIO.js";
 import { createChaseCamera } from "./chaseCamera.js";
+import { createGamepadInput } from "./gamepadInput.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
 
@@ -816,16 +818,50 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   document.body.appendChild(trackFileInput);
   onClick("road-load", () => trackFileInput.click());
 
+  const gamepad = createGamepadInput();
+  /** Set by readControls() when the pad's respawn button goes down this frame. */
+  let padRespawnPressed = false;
+
+  /**
+   * Merge keyboard + gamepad into one control frame.
+   *
+   * Merged PER AXIS rather than picking one device: a pad resting at centre must
+   * never block the keys, and a hand on the keyboard must never be overridden by
+   * stick drift. Whichever device is actually deflected wins its own axis.
+   *
+   * `analog` tells the Vehicle to skip the keyboard steering ramp — it's only
+   * true when the STICK is supplying the steering, so d-pad and keyboard both
+   * still get the ramp they need.
+   *
+   * Called exactly once per frame: the pad's respawn button is edge-detected
+   * inside read(), so a second call would swallow the press.
+   */
   function readControls() {
     const left = keys.keya || keys.arrowleft;
     const right = keys.keyd || keys.arrowright;
     const fwd = keys.keyw || keys.arrowup;
     const back = keys.keys || keys.arrowdown;
+    const kbSteer = (left ? 1 : 0) - (right ? 1 : 0);
+    const kbThrottle = (fwd ? 1 : 0) - (back ? 1 : 0);
+    const kbYaw = (keys.keye ? 1 : 0) - (keys.keyq ? 1 : 0);
+
+    const gp = gamepad.read();
+    padRespawnPressed = !!gp?.respawnPressed;
+    if (!gp) {
+      return {
+        steerTarget: kbSteer,
+        throttle: kbThrottle,
+        handbrake: !!keys.space,
+        yaw: kbYaw,
+        analog: false,
+      };
+    }
     return {
-      steerTarget: (left ? 1 : 0) - (right ? 1 : 0),
-      throttle: (fwd ? 1 : 0) - (back ? 1 : 0),
-      handbrake: !!keys.space,
-      yaw: (keys.keye ? 1 : 0) - (keys.keyq ? 1 : 0),
+      steerTarget: kbSteer !== 0 ? kbSteer : gp.steerTarget,
+      throttle: kbThrottle !== 0 ? kbThrottle : gp.throttle,
+      handbrake: !!keys.space || gp.handbrake,
+      yaw: kbYaw !== 0 ? kbYaw : gp.yaw,
+      analog: kbSteer === 0 && gp.analog,
     };
   }
 
@@ -1131,7 +1167,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let worldName = boot.name;
   devPanel = createRoadDevPanel({
     app,
-    params: { TIRE, AERO, DRIVETRAIN, DECK, HEADLIGHTS, glowPropParams },
+    params: { TIRE, AERO, DRIVETRAIN, DECK, SOLID, HEADLIGHTS, glowPropParams },
     game: {
       setSpawnToCar,
       setSpawnToCursor,
@@ -1239,6 +1275,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
     if (mode === "drive") {
       const input = readControls();
+      // Pad Y mirrors the keyboard's R. Without it a gamepad player has to reach
+      // back to the keyboard after every fall.
+      if (padRespawnPressed) respawn();
       simAccum += dt;
       let ticks = Math.floor(simAccum / FIXED_DT);
       if (ticks > MAX_SIM_TICKS) {
