@@ -36,6 +36,11 @@ export const guardrailParams = {
   beamDepth: 0.1, // lateral thickness of the beam (m)
   beamGap: 0.16, // gap from kerb top to beam bottom (m)
   crownFrac: 0.22, // depth of the central W indent (fraction of beamDepth)
+  /** Peaked top cap — rise as a fraction of beamDepth, over a run of half the
+   *  depth. Above 0.5 the face tilts past 45° so a car landing on the rail is
+   *  shed sideways rather than balanced on it; 0 restores the old bare knife
+   *  edge. See wBeamProfile for why this matters. */
+  capRiseFrac: 0.8,
   postSpacing: 4, // meters between posts
   postWidth: 0.1, // lateral width of a post (m)
   postThickness: 0.1, // along-travel thickness of a post (m)
@@ -385,14 +390,49 @@ export function buildSweepGeometry(frames, profileData = buildProfile(), opts = 
 /* ----------------------------------------------------------------------- */
 
 /** W-beam cross-section in (vertical y, lateral z) meters, about the beam centre. */
-function wBeamProfile(h, d, crownFrac) {
-  return [
+/**
+ * W-beam cross-section in (y, z): y vertical, z lateral offset from the beam
+ * centreline. An OPEN polyline swept along the frames — the beam is a
+ * corrugated sheet, not a solid.
+ *
+ * The last three points are a PEAKED TOP CAP, and they exist for gameplay, not
+ * looks. Without them the profile simply ended at (0.5h, 0.5d): a bare knife
+ * edge ~1.18 m above the deck whose only face normal is HORIZONTAL. A car
+ * landing on the rail was therefore shoved sideways and never either properly
+ * supported or cleanly rejected — and since guardrails live in the SOLIDS BVH,
+ * the wheels can't probe them, so a car up there has no drive, no steering and
+ * no suspension. That is the "stuck on a guardrail" case.
+ *
+ * The cap turns the top into a ridge whose faces point up-AND-outward, so
+ * anything landing on it slides off. `capRiseFrac` sets the slope: rise
+ * capRiseFrac·d over a run of 0.5·d, so anything above 0.5 tilts the face past
+ * 45° and makes the shedding (lateral) component beat the supporting (vertical)
+ * one. 0 restores the old bare edge.
+ *
+ * The ridge is deliberately SYMMETRIC about z=0. Biasing it inward so the car
+ * always sheds back onto the track would be nicer — but `prof.z` is added along
+ * the same `fr.right` axis for BOTH rails while only `edgeX` is mirrored (see
+ * sweepBeamGeometry), so any z-asymmetry would point the right way on one rail
+ * and backwards on the other.
+ */
+function wBeamProfile(h, d, crownFrac, capRiseFrac) {
+  const prof = [
     { y: -0.5 * h, z: 0.5 * d },
     { y: -0.16 * h, z: 0.32 * d },
     { y: 0.0, z: -crownFrac * d },
     { y: 0.16 * h, z: 0.32 * d },
-    { y: 0.5 * h, z: 0.5 * d },
   ];
+  const cap = Math.max(0, capRiseFrac ?? 0) * d;
+  if (cap <= 1e-6) {
+    prof.push({ y: 0.5 * h, z: 0.5 * d }); // legacy bare edge
+    return prof;
+  }
+  prof.push(
+    { y: 0.5 * h - cap, z: 0.5 * d }, // outer shoulder
+    { y: 0.5 * h, z: 0.0 }, // ridge
+    { y: 0.5 * h - cap, z: -0.5 * d }, // inner shoulder
+  );
+  return prof;
 }
 
 /** Sweep a small (y,z) profile along the frames, offset to one kerb edge. */
@@ -465,7 +505,7 @@ export function buildGuardrailGeometry(frames, profileData = buildProfile(), gp 
   const kerbTop = rp.railHeight;
   const centerV = kerbTop + gp.beamGap + gp.beamHeight * 0.5;
   const edgeX = hw - rw * 0.5; // centre of each kerb
-  const prof = wBeamProfile(gp.beamHeight, gp.beamDepth, gp.crownFrac);
+  const prof = wBeamProfile(gp.beamHeight, gp.beamDepth, gp.crownFrac, gp.capRiseFrac);
 
   const geos = [];
   for (const side of [-1, 1]) {
