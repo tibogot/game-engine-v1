@@ -80,6 +80,7 @@ import {
 } from "./modularRoadTrackIO.js";
 import { createChaseCamera } from "./chaseCamera.js";
 import { createGamepadInput } from "./gamepadInput.js";
+import { loadWheelModel } from "./wheelModel.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
 
@@ -233,6 +234,24 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const vehicle = new Vehicle({ scene, showArrows: false });
   // Chassis-corner safety floor follows the terrain instead of pinning to y=0.
   vehicle.getFloorY = (x, z) => app.getWorldHeight(x, z);
+
+  // GLB wheels, loaded in the BACKGROUND: the car boots on its procedural wheels
+  // and upgrades when the model arrives, so a slow or missing file can never
+  // leave the game wheel-less or block startup. The dev panel's Wheels button
+  // switches back to procedural, which also restores WHEEL_PROCEDURAL's exact
+  // radius/thickness — the dimensions the handling was tuned against.
+  loadWheelModel(renderer)
+    .then(({ object, radius, width }) => {
+      vehicle.setWheelModel(object, { radius, thickness: width });
+      vehicle.setWheelStyle("glb");
+      console.info(
+        `[ModularRoad-v3] GLB wheels: radius ${radius.toFixed(3)}m, width ${width.toFixed(3)}m`,
+      );
+      devPanel?.refresh();
+    })
+    .catch((e) => {
+      console.warn("[ModularRoad-v3] wheel model failed to load — staying procedural", e);
+    });
 
   // STATIC collision — track pieces + props. Baked only when the track changes.
   const deckBvh = new RoadBvh();   // road decks → wheel probes
@@ -1195,6 +1214,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         if (freeLook) { controls.target.copy(vehicle.body.pos); controls.update(); }
         else chase.reset(); // don't sweep back from wherever orbit left it
       },
+      getWheelStyle: () => vehicle.wheelStyle,
+      setWheelStyle: (s) => vehicle.setWheelStyle(s),
+      hasWheelModel: () => vehicle.hasWheelModel,
       setInstancing: (on) => builder.setInstancing(on),
       getLinesOn: () => roadMaterial._roadUniforms.linesOn.value > 0.5,
       setLinesOn: (on) => { roadMaterial._roadUniforms.linesOn.value = on ? 1 : 0; },

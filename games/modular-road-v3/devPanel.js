@@ -228,9 +228,18 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-cam-ahead-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Speed FOV</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cam-fov" min="0" max="30" step="1" />
+              <span class="prop-num" id="dv-cam-fov-v"></span>
+            </div>
+          </div>
           <div class="dv-hint">
             <b>Free look</b> hands the camera to orbit while driving (MMB rotate,
-            RMB pan) — useful for inspecting the car mid-run.
+            RMB pan) — useful for inspecting the car mid-run. <b>Speed FOV</b> is
+            how many extra degrees the view widens at top speed (0 = static, the
+            old behaviour).
           </div>
         </div>
       </div>
@@ -295,6 +304,12 @@ export function createRoadDevPanel({ app, game, params }) {
             <span class="prop-label">Drivetrain</span>
             <div class="prop-value">
               <button class="action-btn" id="dv-layout" type="button">AWD</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wheels</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-wheels" type="button">Procedural</button>
             </div>
           </div>
         </div>
@@ -952,6 +967,7 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-cam-dist", cam, "dist", (v) => `${v.toFixed(1)}m`);
   slider("dv-cam-height", cam, "height", (v) => `${v.toFixed(1)}m`);
   slider("dv-cam-ahead", cam, "lookAhead", (v) => `${v.toFixed(1)}m`);
+  slider("dv-cam-fov", cam, "fovAtSpeed", (v) => (v > 0 ? `+${v.toFixed(0)}°` : "static"));
 
   // Loop camera (live tuning — smoothness is subjective, dial to taste).
   slider("dv-loopstart", cam, "loopStart", (v) => v.toFixed(2));
@@ -994,6 +1010,24 @@ export function createRoadDevPanel({ app, game, params }) {
     DRIVETRAIN.layout = LAYOUTS[(i + 1) % LAYOUTS.length];
     layoutBtn.textContent = DRIVETRAIN.layout;
   });
+
+  // Wheel style. The GLB loads asynchronously, so the button stays disabled
+  // ("Procedural only") until a model is actually available — and syncWheelBtn
+  // is called from refresh(), which the loader fires on success.
+  const wheelBtn = $("#dv-wheels");
+  function syncWheelBtn() {
+    if (!wheelBtn) return;
+    const glb = game.getWheelStyle() === "glb";
+    const has = game.hasWheelModel();
+    wheelBtn.textContent = glb ? "Lotus GLB" : has ? "Procedural" : "Procedural only";
+    wheelBtn.disabled = !has;
+    wheelBtn.classList.toggle("primary", glb);
+  }
+  wheelBtn?.addEventListener("click", () => {
+    game.setWheelStyle(game.getWheelStyle() === "glb" ? "procedural" : "glb");
+    syncWheelBtn();
+  });
+  syncWheelBtn();
 
   // ── Track ───────────────────────────────────────────────────────────────────
   toggle("dv-lines", game.getLinesOn(), (on) => game.setLinesOn(on));
@@ -1055,6 +1089,8 @@ export function createRoadDevPanel({ app, game, params }) {
     // Auto mode flips the headlights from outside the panel — keep the toggle
     // showing the truth rather than the last thing that was clicked.
     lightsToggle.set(game.getHeadlights());
+    // The wheel GLB finishes loading after the panel is built and calls refresh().
+    syncWheelBtn();
   }
   refresh();
 

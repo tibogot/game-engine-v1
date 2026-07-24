@@ -31,6 +31,18 @@ export const CHASE_CAM = {
                       //   whole climb is a gradual roll, then held over the top
   loopLerp: 5.0,      // how fast the blend eases toward its tilt-based target
   upLerp: 5.0,        // how fast camera.up eases (the roll)
+  // ── SPEED FOV ──────────────────────────────────────────────────────────────
+  // The engine's camera FOV (60° vertical ≈ 91° horizontal at 16:9) is a fine
+  // value, but it was inherited from the v3 editor and it is STATIC — and a
+  // static FOV is why a racing game stops feeling fast. Widening with speed is
+  // the cheapest possible speed cue.
+  //
+  // `fovBase` is overwritten at construction from the camera's actual FOV, so it
+  // can't silently drift out of sync with v3/app/main.js.
+  fovBase: 60,
+  fovAtSpeed: 12,     // extra degrees at fovSpeedRef and above
+  fovSpeedRef: 30,    // m/s for the full kick — matches TIRE.topSpeed
+  fovLerp: 3.0,       // how fast FOV eases (slow: a twitchy FOV reads as nausea)
 };
 
 /**
@@ -42,6 +54,9 @@ export const CHASE_CAM = {
  */
 export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () => false, params = {} }) {
   const CAM = { ...CHASE_CAM, ...params };
+  // Anchor the FOV kick to whatever the engine actually authored (unless a
+  // caller pinned it explicitly), so this can never drift from main.js.
+  if (camera.isPerspectiveCamera && params.fovBase == null) CAM.fovBase = camera.fov;
 
   const _camHeading = new THREE.Vector3(0, 0, 1); // horizontal trail heading
   const _camLookDir = new THREE.Vector3(0, 0, 1); // 3D look direction
@@ -62,6 +77,20 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
   let _camLoop = 0;                               // smoothed 0..1 loop-follow blend
   let _camInit = false;
   let _snap = false;                              // force a full snap next update
+
+  /**
+   * Ease camera.fov toward `target`. Guarded so we only touch the projection
+   * matrix when it actually moves — updateProjectionMatrix() every frame for a
+   * sub-millidegree change is pure waste.
+   */
+  function applyFov(target, dt, snap) {
+    if (!camera.isPerspectiveCamera) return;
+    const k = snap ? 1 : 1 - Math.exp(-CAM.fovLerp * dt);
+    const next = camera.fov + (target - camera.fov) * k;
+    if (Math.abs(next - camera.fov) < 1e-3) return;
+    camera.fov = next;
+    camera.updateProjectionMatrix();
+  }
 
   /** Snap the rig to the car — call on respawn so it doesn't sweep across the map. */
   function reset() {
@@ -88,6 +117,9 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
         camera.up.set(0, 1, 0);
         _camLoop = 0;
       }
+      // Hand the FOV back too, or build mode inherits whatever kick the last
+      // drive frame left behind and the editor view sits subtly zoomed out.
+      applyFov(CAM.fovBase, dt, false);
       return;
     }
 
@@ -101,6 +133,15 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     const v = vehicle.body.vel;
     const speed = v.length();
     const grounded = vehicle.groundedCount > 0;
+
+    // Widen with speed. Driven by TOTAL speed rather than horizontal, so a
+    // near-vertical drop off a jump reads as fast too.
+    applyFov(
+      CAM.fovBase + CAM.fovAtSpeed * Math.min(1, speed / Math.max(1, CAM.fovSpeedRef)),
+      dt,
+      snap,
+    );
+
     _camFwd.set(0, 0, 1).applyQuaternion(rquat); // car facing (fallback)
     const reversing = grounded && v.dot(_camFwd) < -0.5;
 

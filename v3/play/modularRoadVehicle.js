@@ -284,12 +284,28 @@ export const BODYLEAN = {
   smooth: 9,
 };
 
+/**
+ * LIVE wheel dimensions. `radius` is a PHYSICS parameter, not just a visual one
+ * — it scales the tire probe's ray ring (`rayRingScale`) and sphere sweep
+ * (`sphereSweepScale`), sets the visual suspension extension, and divides into
+ * the wheel spin rate. Switching wheel style therefore rewrites these; see
+ * Vehicle.setWheelStyle().
+ *
+ * `thickness` is currently VISUAL ONLY: its physics consumer is
+ * `rayLateralBias`, which lives in the `else` branch of Tire._probeGround and is
+ * only reached when `rayRingCount < 3`. It is 10.
+ */
 export const WHEEL = {
   radius: 0.36,
   thickness: 0.24,
   rimRadius: 0.22,
   rimWidth: 0.26,
 };
+
+/** The procedural wheel's dimensions — the baseline the handling was tuned on.
+ *  Selecting "procedural" restores exactly these, so it stays a true A/B against
+ *  any model-derived size. */
+export const WHEEL_PROCEDURAL = { radius: 0.36, thickness: 0.24 };
 
 /** Forward-facing headlights (cheap, no shadows). Two SpotLights parented to the
  *  chassis mesh so they follow position + orientation for free. Mount/aim offsets
@@ -797,31 +813,28 @@ export class Vehicle {
     this._buildHeadlights();
     this._buildTaillights();
 
-    const tireGeo = new THREE.CylinderGeometry(WHEEL.radius, WHEEL.radius, WHEEL.thickness, 28);
-    tireGeo.rotateZ(Math.PI / 2);
-    const tireMat = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.85 });
-    const rimGeo = new THREE.CylinderGeometry(WHEEL.rimRadius, WHEEL.rimRadius, WHEEL.rimWidth, 18);
-    rimGeo.rotateZ(Math.PI / 2);
-    const rimMat = new THREE.MeshStandardMaterial({ color: 0xb0b8c0, roughness: 0.35, metalness: 0.85 });
-    const spokeGeo = new THREE.CircleGeometry(WHEEL.rimRadius * 0.92, 6);
-    const spokeMat = new THREE.MeshStandardMaterial({ color: 0x2a3038, roughness: 0.5, metalness: 0.6, side: THREE.DoubleSide });
-
+    // Wheel visuals are swappable (procedural ⇄ GLB), so the tireGroups are
+    // created empty and filled by _rebuildWheelMeshes(). syncVisuals only ever
+    // drives the GROUP transform, so nothing downstream cares what's inside.
+    this._wheelStyle = "procedural";
+    this._wheelTemplate = null;
+    this._wheelModelDims = null;
+    this._procGeo = null;
+    // Materials don't depend on the dimensions, so they're built once and reused
+    // across style switches (the geometry is not — see _buildProceduralWheelGeo).
+    this._procMat = {
+      tire: new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.85 }),
+      rim: new THREE.MeshStandardMaterial({ color: 0xb0b8c0, roughness: 0.35, metalness: 0.85 }),
+      spoke: new THREE.MeshStandardMaterial({
+        color: 0x2a3038, roughness: 0.5, metalness: 0.6, side: THREE.DoubleSide,
+      }),
+    };
     this.tireGroups = this.tires.map(() => {
       const g = new THREE.Group();
-      const tire = new THREE.Mesh(tireGeo, tireMat);
-      const rim = new THREE.Mesh(rimGeo, rimMat);
-      tire.castShadow = true;
-      rim.castShadow = true;
-      const spokeL = new THREE.Mesh(spokeGeo, spokeMat);
-      const spokeR = new THREE.Mesh(spokeGeo, spokeMat);
-      spokeL.position.x = -WHEEL.rimWidth / 2 - 0.001;
-      spokeR.position.x = WHEEL.rimWidth / 2 + 0.001;
-      spokeL.rotation.y = Math.PI / 2;
-      spokeR.rotation.y = -Math.PI / 2;
-      g.add(tire, rim, spokeL, spokeR);
       this.group.add(g);
       return g;
     });
+    this._rebuildWheelMeshes();
 
     this.arrowGroup = new THREE.Group();
     this.arrowGroup.visible = showArrows;
@@ -834,6 +847,113 @@ export class Vehicle {
       return { up, side, fwd };
     });
     this.wheelSpin = [0, 0, 0, 0];
+  }
+
+  /** True once a GLB wheel template has been handed over. */
+  get hasWheelModel() { return !!this._wheelTemplate; }
+  get wheelStyle() { return this._wheelStyle; }
+
+  /**
+   * Hand over a loaded GLB wheel (see games/modular-road-v3/wheelModel.js).
+   * `dims` are the model's MEASURED radius/thickness in metres.
+   */
+  setWheelModel(template, dims = null) {
+    this._wheelTemplate = template || null;
+    this._wheelModelDims = dims;
+    if (this._wheelStyle === "glb") this.setWheelStyle("glb"); // re-apply with the new model
+  }
+
+  /**
+   * Swap wheel style — and with it WHEEL.radius/thickness, because the radius
+   * drives the tire probe geometry and must match what you can see. Selecting
+   * "procedural" restores WHEEL_PROCEDURAL exactly, so it is a true A/B.
+   *
+   * @param {"procedural"|"glb"} style
+   * @returns {string} the style actually applied (falls back if no model loaded)
+   */
+  setWheelStyle(style) {
+    const useGlb = style === "glb" && !!this._wheelTemplate;
+    this._wheelStyle = useGlb ? "glb" : "procedural";
+    const dims = useGlb && this._wheelModelDims ? this._wheelModelDims : WHEEL_PROCEDURAL;
+    WHEEL.radius = dims.radius;
+    WHEEL.thickness = dims.thickness;
+    this._rebuildWheelMeshes();
+    // The suspension visual easing caches a distance measured against the OLD
+    // radius; leaving it would pop the wheels on the first frame after a swap.
+    for (const t of this.tires) t._smoothDist = undefined;
+    return this._wheelStyle;
+  }
+
+  /** (Re)create the shared procedural wheel geometry at the CURRENT WHEEL dims. */
+  _buildProceduralWheelGeo() {
+    this._disposeProceduralWheelGeo();
+    const tireGeo = new THREE.CylinderGeometry(WHEEL.radius, WHEEL.radius, WHEEL.thickness, 28);
+    tireGeo.rotateZ(Math.PI / 2);
+    const rimGeo = new THREE.CylinderGeometry(WHEEL.rimRadius, WHEEL.rimRadius, WHEEL.rimWidth, 18);
+    rimGeo.rotateZ(Math.PI / 2);
+    const spokeGeo = new THREE.CircleGeometry(WHEEL.rimRadius * 0.92, 6);
+    this._procGeo = { tireGeo, rimGeo, spokeGeo };
+  }
+
+  _disposeProceduralWheelGeo() {
+    if (!this._procGeo) return;
+    this._procGeo.tireGeo.dispose();
+    this._procGeo.rimGeo.dispose();
+    this._procGeo.spokeGeo.dispose();
+    this._procGeo = null;
+  }
+
+  /** One procedural wheel, sharing the cached geometry + materials. */
+  _makeProceduralWheel() {
+    const g = new THREE.Group();
+    const tire = new THREE.Mesh(this._procGeo.tireGeo, this._procMat.tire);
+    const rim = new THREE.Mesh(this._procGeo.rimGeo, this._procMat.rim);
+    tire.castShadow = true;
+    rim.castShadow = true;
+    const spokeL = new THREE.Mesh(this._procGeo.spokeGeo, this._procMat.spoke);
+    const spokeR = new THREE.Mesh(this._procGeo.spokeGeo, this._procMat.spoke);
+    spokeL.position.x = -WHEEL.rimWidth / 2 - 0.001;
+    spokeR.position.x = WHEEL.rimWidth / 2 + 0.001;
+    spokeL.rotation.y = Math.PI / 2;
+    spokeR.rotation.y = -Math.PI / 2;
+    g.add(tire, rim, spokeL, spokeR);
+    return g;
+  }
+
+  /** Refill every tireGroup for the current style. */
+  _rebuildWheelMeshes() {
+    const useGlb = this._wheelStyle === "glb" && !!this._wheelTemplate;
+    for (const g of this.tireGroups) {
+      for (const c of [...g.children]) g.remove(c);
+    }
+    // Only safe to dispose AFTER the meshes referencing it are detached.
+    if (useGlb) this._disposeProceduralWheelGeo();
+    else this._buildProceduralWheelGeo();
+
+    for (let i = 0; i < this.tireGroups.length; i++) {
+      let w;
+      if (useGlb) {
+        // clone() shares geometry + materials, so four wheels stay one geometry set.
+        w = this._wheelTemplate.clone(true);
+        // The GLB is a FRONT-LEFT assembly, so one side has to be mirrored.
+        //
+        // WHICH side: the model's brake caliper spans x ∈ [-0.240, -0.073] and
+        // the rotor x ∈ [-0.162, -0.098] — both entirely negative, and brake
+        // hardware is always INBOARD. So the assembly's exterior (the rim face
+        // you're meant to see) points toward +X, and it's the -X wheels that
+        // need turning. Getting this backwards shows every wheel from the
+        // inside, which is exactly how it looked first time round.
+        //
+        // A half-turn about the vertical, never a negative scale: mirroring by
+        // scale inverts the triangle winding and darkens the lighting. The
+        // group's spin is about X and is applied on top, so this static
+        // re-orientation does not change which way the wheel appears to rotate.
+        if (WHEEL_LOCAL[i].pos.x < 0) w.rotation.y = Math.PI;
+      } else {
+        w = this._makeProceduralWheel();
+      }
+      this.tireGroups[i].add(w);
+    }
   }
 
   _buildHeadlights() {
