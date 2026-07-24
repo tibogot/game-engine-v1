@@ -25,7 +25,7 @@ const DEV_PANEL_OPEN_W = 300;
  * @param {object} o.params       live-tunable param objects from the vehicle/kit
  */
 export function createRoadDevPanel({ app, game, params }) {
-  const { TIRE, AERO, DRIVETRAIN, DECK, SOLID, HEADLIGHTS, glowPropParams } = params;
+  const { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, glowPropParams } = params;
 
   const root = document.createElement("div");
   root.id = "road-dev";
@@ -130,7 +130,7 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-drop-v"></span>
             </div>
           </div>
-          <button class="action-btn primary" id="dv-snap" type="button">Snap landing → new chain</button>
+          <button class="action-btn primary" id="dv-snap-landing" type="button">Snap landing → new chain</button>
           <div class="dv-hint">
             The red arc is where a jump at <b>launch speed</b> lands (green ring).
             <b>Snap landing</b> starts a new chain there, heading down-arc — then
@@ -374,6 +374,54 @@ export function createRoadDevPanel({ app, game, params }) {
             faster. <b>Countersteer</b> is the rate used when you flick the
             opposite way mid-slide — keep it the fastest of the three.
             <b>Stick filter</b> only applies to a gamepad stick.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Car — Landing &amp; body</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Landing absorb</span>
+            <div class="prop-value">
+              <input type="range" id="dv-land-absorb" min="0" max="0.95" step="0.05" />
+              <span class="prop-num" id="dv-land-absorb-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Land assist</span>
+            <div class="prop-value">
+              <input type="range" id="dv-land-assist" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-land-assist-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Assist range</span>
+            <div class="prop-value">
+              <input type="range" id="dv-land-range" min="2" max="40" step="1" />
+              <span class="prop-num" id="dv-land-range-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Body roll</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lean-roll" min="0" max="0.3" step="0.01" />
+              <span class="prop-num" id="dv-lean-roll-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Body pitch</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lean-pitch" min="0" max="0.3" step="0.01" />
+              <span class="prop-num" id="dv-lean-pitch-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Landing absorb</b> eats the impact so a hard landing doesn't pogo.
+            <b>Land assist</b> eases the car level with whatever it's about to hit
+            during the last few metres of a fall — <b>range</b> is how early it
+            starts. Body roll/pitch are purely visual lean (degrees per g); they
+            do not affect handling.
           </div>
         </div>
       </div>
@@ -870,7 +918,7 @@ export function createRoadDevPanel({ app, game, params }) {
       dropVal.textContent = `${dropEl.value} m`;
     });
   }
-  $("#dv-snap").addEventListener("click", () => game.snapLanding());
+  $("#dv-snap-landing").addEventListener("click", () => game.snapLanding());
 
   // ── Spawn ─────────────────────────────────────────────────────────────────
   const spawnSrc = $("#dv-spawn-src");
@@ -929,6 +977,12 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-st-analog", TIRE, "steerAnalogRate", (v) => v.toFixed(0));
   slider("dv-wall-exit", SOLID, "maxExitSpeed", (v) => `${v.toFixed(1)} m/s`);
   slider("dv-wall-scrub", SOLID, "tangentScrub", (v) => v.toFixed(1));
+  const deg = (v) => `${(v * 57.2958).toFixed(1)}°/g`;
+  slider("dv-land-absorb", TIRE, "landingAbsorb", (v) => `${Math.round(v * 100)}%`);
+  slider("dv-land-assist", TIRE, "airLandAssist", (v) => v.toFixed(2));
+  slider("dv-land-range", TIRE, "airLandRange", (v) => `${v.toFixed(0)} m`);
+  slider("dv-lean-roll", BODYLEAN, "rollPerG", deg);
+  slider("dv-lean-pitch", BODYLEAN, "pitchPerG", deg);
   slider("dv-drag", AERO, "drag");
   slider("dv-down", AERO, "downforce", (v) => v.toFixed(1));
 

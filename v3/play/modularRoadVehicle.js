@@ -66,11 +66,13 @@ export const TIRE = {
   bottomOutMult: 8,
   // Per-axle friction multipliers (× frictionCoeff). Lower the rear for
   // oversteer, lower the front for understeer. Handbrake swaps the rear out.
-  // Rear runs a touch MORE grip than front: with 80 m/s of engine the driven
-  // rear otherwise saturates its friction circle under power and the tail
-  // walks (why FWD felt like the only stable layout).
+  // Neutral front/rear balance. The rear used to run 1.1 because at topSpeed 80
+  // the driven rear axle saturated its friction circle under power and the tail
+  // walked — but that pressure went away with topSpeed 30, and rear-grippier-
+  // than-front is precisely what produces terminal understeer with nothing to
+  // catch it. The yaw assist now handles what the grip split used to paper over.
   gripFront: 1.0,
-  gripRear: 1.1,
+  gripRear: 1.0,
   gripHandbrake: 0.35,
   // Lateral slip model: force builds linearly with slip then saturates at the
   // friction circle. `tireStiffness` is the slope (≈ 1/peak-slip-angle); higher
@@ -184,6 +186,41 @@ export const TIRE = {
   airControl: 5000,
   airYawControl: 4500,
   airYawDamp: 250,
+  // ── LANDINGS ────────────────────────────────────────────────────────────
+  // A jump-heavy track lives or dies on whether landings feel FAIR. Two separate
+  // mechanisms — see _applyLandingAssist().
+  //
+  // (a) TOUCHDOWN ABSORPTION. Without it a hard landing dumps all its closing
+  //     speed into the springs, hits the quadratic bottom-out (bottomOutMult)
+  //     and pogos the car back into the air. Fires once on the airborne→grounded
+  //     transition, so it's framerate-independent by construction: it's an event,
+  //     not a per-second rate.
+  /** Fraction of the into-surface closing speed removed on touchdown. */
+  landingAbsorb: 0.55,
+  /** Closing speed (m/s) below which touchdown is left completely alone —
+   *  ordinary driving over bumps and kerbs must not be touched. */
+  landingMinSpeed: 6.0,
+  /** Fraction of the pitch/roll RATE killed on touchdown. Yaw is deliberately
+   *  untouched, so landing mid-spin still carries the spin. */
+  landingAngDamp: 0.4,
+  //
+  // (b) PREDICTIVE ALIGNMENT. While falling, look ahead down the flight path and
+  //     ease the chassis' up-axis toward the surface it's about to hit. This is
+  //     what stops a good jump ending in a random tumble because the car happened
+  //     to be 20° off when it arrived. It only touches PITCH/ROLL — yaw spin is
+  //     about the up-axis and is orthogonal, so deliberate flat spins survive.
+  /** Master scale, 0..1. 0 = no landing help at all. */
+  airLandAssist: 1.0,
+  /** Alignment torque (N·m) at full engagement. */
+  airLandTorque: 6000,
+  /** Metres before contact over which the assist ramps 0→1. Also the probe
+   *  length — beyond it the assist is zero anyway. Kept short so the player has
+   *  already committed to their trick before it engages. */
+  airLandRange: 12,
+  /** Damping on the tilt rate while engaged, or the alignment overshoots and the
+   *  car wobbles through the last metres of the fall. */
+  airLandDamp: 1200,
+
   // W/S/A/D air torque only kicks in after this much CONTINUOUS airtime (s).
   // Loop / tube / crest exits almost always include a brief hop — without the
   // gate, the throttle you're still holding pitched the nose mid-hop and the
@@ -222,6 +259,29 @@ export const DECK = {
   searchRadius: 0.8,
   stiffness: 220000,
   damper: 9000,
+};
+
+/**
+ * Visual body lean — purely cosmetic, zero effect on handling.
+ *
+ * The car reads as weightless: static suspension sag is ~5 cm of 55 cm travel
+ * (2.2 Hz ride frequency), and the stabilizer holds the chassis flat to the
+ * ground normal anyway, so nothing visibly moves. This leans the chassis MESH
+ * (and its children — headlights, taillights) against the tire forces the
+ * physics already produced, while the wheels stay planted where the sim put
+ * them. Angles are normalised by vehicle weight, so they read in g and don't
+ * change if CHASSIS.mass is edited.
+ */
+export const BODYLEAN = {
+  enabled: true,
+  /** Radians of roll per g of lateral load. */
+  rollPerG: 0.10,
+  /** Radians of pitch per g of longitudinal load (squat / dive). */
+  pitchPerG: 0.06,
+  maxRoll: 0.13, // ~7.5°
+  maxPitch: 0.09, // ~5°
+  /** Ease rate (1/s) toward the target angles. */
+  smooth: 9,
 };
 
 export const WHEEL = {
@@ -949,6 +1009,20 @@ export class Vehicle {
     this._solidN = new THREE.Vector3();
     this._solidT = new THREE.Vector3();
     this._steerRateFwd = new THREE.Vector3();
+    this._landN = new THREE.Vector3();
+    this._landUp = new THREE.Vector3();
+    this._landTilt = new THREE.Vector3();
+    this._landTorque = new THREE.Vector3();
+    this._landDir = new THREE.Vector3();
+    /** Grounded wheel count last substep — drives the touchdown edge. */
+    this._prevGrounded = 0;
+    this._leanRight = new THREE.Vector3();
+    this._leanFwd = new THREE.Vector3();
+    this._leanQRoll = new THREE.Quaternion();
+    this._leanQPitch = new THREE.Quaternion();
+    /** Smoothed visual lean angles (rad). Cosmetic only. */
+    this._leanRoll = 0;
+    this._leanPitch = 0;
     this._deckN = new THREE.Vector3();
     this.BOTTOM_CORNERS = [0, 1, 4, 5];
     this._aeroF = new THREE.Vector3();
@@ -1059,6 +1133,11 @@ export class Vehicle {
     // Drop the contact-normal history — the first probe after a teleport must
     // snap to the new surface, not ease over from wherever the car just was.
     for (const t of this.tires) t._hadGround = false;
+    // Likewise the landing edge and the visual lean: a respawn is not a landing,
+    // and the body should appear settled the instant it arrives.
+    this._prevGrounded = 0;
+    this._leanRoll = 0;
+    this._leanPitch = 0;
     this._resetInterpolation();
     // Keep the render pose in step with the teleport (syncVisuals hasn't run yet).
     this._renderPos.copy(this.body.pos);
@@ -1239,6 +1318,7 @@ export class Vehicle {
       // After the tires (their contact normals are what both of these read) and
       // before integrate(), so the torques land in this substep.
       this._applyYawAssist();
+      this._applyLandingAssist();
       this._applyStabilizer(subDt);
       body.integrate(subDt);
       const wMax = TIRE.maxAngVel;
@@ -1323,6 +1403,73 @@ export class Vehicle {
     torque -= (yawRate - refRate) * TIRE.yawRateDamp * driftMul;
 
     body.torqueAccum.addScaledVector(this._yawN, torque * TIRE.yawAssist * contact);
+  }
+
+  /**
+   * Landing help — touchdown absorption, and predictive alignment while falling.
+   * See the LANDINGS block on TIRE for what each half is for.
+   */
+  _applyLandingAssist() {
+    const body = this.body;
+    let grounded = 0;
+    this._landN.set(0, 0, 0);
+    for (const t of this.tires) {
+      if (!t.grounded) continue;
+      grounded++;
+      this._landN.add(t.hitNormal);
+    }
+
+    if (grounded > 0) {
+      // ── Touchdown: fires on the airborne→grounded edge only ──
+      const justLanded = this._prevGrounded === 0;
+      this._prevGrounded = grounded;
+      if (!justLanded || this._landN.lengthSq() < 1e-8) return;
+      if (TIRE.landingAbsorb <= 0) return;
+      this._landN.normalize();
+      const vN = body.vel.dot(this._landN); // negative = still closing on the surface
+      if (vN >= -TIRE.landingMinSpeed) return; // gentle contact — leave it alone
+      body.vel.addScaledVector(this._landN, -vN * TIRE.landingAbsorb);
+      if (TIRE.landingAngDamp > 0) {
+        // Tilt rate only. Stripping yaw out keeps a landing mid-flat-spin spinning.
+        this._landUp.set(0, 1, 0).applyQuaternion(body.quat);
+        const wYaw = body.angVel.dot(this._landUp);
+        this._landTilt.copy(body.angVel).addScaledVector(this._landUp, -wYaw);
+        body.angVel.addScaledVector(this._landTilt, -TIRE.landingAngDamp);
+      }
+      return;
+    }
+
+    this._prevGrounded = 0;
+    if (TIRE.airLandAssist <= 0 || TIRE.airLandTorque <= 0) return;
+
+    // ── Airborne: align to whatever we're about to land on ──
+    // Probe along the flight path when genuinely descending, else straight down.
+    // A mostly-horizontal probe would find a wall rather than the landing.
+    this._landDir.copy(body.vel);
+    if (this._landDir.y > -1 || this._landDir.lengthSq() < 1e-6) this._landDir.set(0, -1, 0);
+    else this._landDir.normalize();
+
+    const hit = this._castGround(body.pos, this._landDir, TIRE.airLandRange);
+    if (!hit) return;
+    const engage = 1 - Math.min(1, (hit.distance ?? 0) / Math.max(0.1, TIRE.airLandRange));
+    if (engage <= 0) return;
+
+    if (hit.normal) this._landN.set(hit.normal.x, hit.normal.y, hit.normal.z);
+    else if (hit.face?.normal) this._landN.copy(hit.face.normal);
+    else this._landN.set(0, 1, 0);
+    if (this._landN.lengthSq() < 1e-8) return;
+    this._landN.normalize();
+    // Triangles can be wound either way — face the normal back toward us.
+    if (this._landN.dot(this._landDir) > 0) this._landN.negate();
+
+    this._landUp.set(0, 1, 0).applyQuaternion(body.quat);
+    this._landTorque
+      .crossVectors(this._landUp, this._landN)
+      .multiplyScalar(TIRE.airLandTorque * engage * TIRE.airLandAssist);
+    const wYaw = body.angVel.dot(this._landUp);
+    this._landTilt.copy(body.angVel).addScaledVector(this._landUp, -wYaw);
+    this._landTorque.addScaledVector(this._landTilt, -TIRE.airLandDamp * engage);
+    body.torqueAccum.add(this._landTorque);
   }
 
   _applyStabilizer(dt = FIXED_DT / this.SUBSTEPS) {
@@ -1587,7 +1734,17 @@ export class Vehicle {
       this._wheelUp.set(0, 1, 0).applyQuaternion(this._renderQuat);
       this.chassisMesh.position.addScaledVector(this._wheelUp, CHASSIS.visualLift);
     }
+    // Body lean goes on the CHASSIS ONLY. The wheels below are placed from
+    // _renderQuat, so they stay planted while the body rolls over them — which
+    // is the whole effect. Post-multiplying applies the lean in the chassis'
+    // own frame, and the lights parented to this mesh come along for free.
+    this._updateBodyLean(dt);
     this.chassisMesh.quaternion.copy(this._renderQuat);
+    if (this._leanRoll !== 0 || this._leanPitch !== 0) {
+      this._leanQRoll.setFromAxisAngle(this._zAxis, this._leanRoll);
+      this._leanQPitch.setFromAxisAngle(this._xAxis, this._leanPitch);
+      this.chassisMesh.quaternion.multiply(this._leanQRoll).multiply(this._leanQPitch);
+    }
 
     const steerAngle = this._steerAngle();
     for (let i = 0; i < this.tires.length; i++) {
@@ -1635,6 +1792,46 @@ export class Vehicle {
         this._placeArrow(a.fwd, t.worldPos, t.lastAccel);
       }
     }
+  }
+
+  /**
+   * Ease the cosmetic lean angles toward the load the tires are ALREADY
+   * reporting — `lastSteering` / `lastAccel` are the real per-wheel forces from
+   * this tick, so the lean tracks weight transfer for free instead of guessing
+   * at it from acceleration.
+   *
+   * Signs: +X is the chassis' left (forward is +Z), and a positive rotation
+   * about +Z lifts +X. Cornering left loads the tires toward +X and the body
+   * should roll onto its right, lifting the left — so roll follows lateral load
+   * directly. Pitch is inverted: accelerating (+Z load) lifts the nose, and a
+   * positive rotation about +X drops +Z.
+   */
+  _updateBodyLean(dt) {
+    if (!BODYLEAN.enabled) {
+      this._leanRoll = 0;
+      this._leanPitch = 0;
+      return;
+    }
+    this._leanRight.copy(this._xAxis).applyQuaternion(this._renderQuat);
+    this._leanFwd.copy(this._zAxis).applyQuaternion(this._renderQuat);
+    let lat = 0;
+    let lon = 0;
+    for (const t of this.tires) {
+      if (!t.grounded) continue;
+      lat += t.lastSteering.dot(this._leanRight);
+      lon += t.lastAccel.dot(this._leanFwd);
+    }
+    // Normalise by weight so the angles read in g and survive a mass edit.
+    const w = CHASSIS.mass * GRAVITY;
+    const rollTgt = THREE.MathUtils.clamp(
+      (lat / w) * BODYLEAN.rollPerG, -BODYLEAN.maxRoll, BODYLEAN.maxRoll,
+    );
+    const pitchTgt = THREE.MathUtils.clamp(
+      (-lon / w) * BODYLEAN.pitchPerG, -BODYLEAN.maxPitch, BODYLEAN.maxPitch,
+    );
+    const k = 1 - Math.exp(-BODYLEAN.smooth * dt);
+    this._leanRoll += (rollTgt - this._leanRoll) * k;
+    this._leanPitch += (pitchTgt - this._leanPitch) * k;
   }
 
   _placeArrow(arrow, origin, force) {

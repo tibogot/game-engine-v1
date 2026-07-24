@@ -37,6 +37,7 @@ import {
   DRIVETRAIN,
   DECK,
   SOLID,
+  BODYLEAN,
   HEADLIGHTS,
   CHASSIS,
   GRAVITY,
@@ -1167,7 +1168,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let worldName = boot.name;
   devPanel = createRoadDevPanel({
     app,
-    params: { TIRE, AERO, DRIVETRAIN, DECK, SOLID, HEADLIGHTS, glowPropParams },
+    params: { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, glowPropParams },
     game: {
       setSpawnToCar,
       setSpawnToCursor,
