@@ -445,23 +445,26 @@ export function createRoadDevPanel({ app, game, params }) {
         <div class="section-header">Car — Wall response</div>
         <div class="section-body">
           <div class="prop-row">
-            <span class="prop-label">Max bounce</span>
+            <span class="prop-label">Contact skin</span>
             <div class="prop-value">
-              <input type="range" id="dv-wall-exit" min="0.5" max="20" step="0.5" />
-              <span class="prop-num" id="dv-wall-exit-v"></span>
+              <input type="range" id="dv-wall-skin" min="0.02" max="0.5" step="0.01" />
+              <span class="prop-num" id="dv-wall-skin-v"></span>
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Scrape drag</span>
+            <span class="prop-label">Hit spin</span>
             <div class="prop-value">
-              <input type="range" id="dv-wall-scrub" min="0" max="8" step="0.1" />
-              <span class="prop-num" id="dv-wall-scrub-v"></span>
+              <input type="range" id="dv-wall-spin" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-wall-spin-v"></span>
             </div>
           </div>
           <div class="dv-hint">
-            Caps how hard a guardrail can throw the car back — the collision
-            springs stack across contact points and used to launch it. Raise
-            <b>max bounce</b> for pinball, lower for a car that hugs the rail.
+            Chassis hits are resolved by <b>projection</b> (move out of the
+            surface, kill the inward speed) rather than springs, so they can't
+            store energy and launch the car. <b>Contact skin</b> is how far the
+            collider sits outside the visible body — keep it small or the car
+            floats off geometry and shape stops mattering. <b>Hit spin</b> is how
+            much an off-centre hit turns the car.
           </div>
         </div>
       </div>
@@ -1100,8 +1103,8 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-st-counter", TIRE, "steerCounter", (v) => v.toFixed(1));
   slider("dv-st-drop", TIRE, "steerRateSpeedDrop", (v) => `${Math.round(v * 100)}%`);
   slider("dv-st-analog", TIRE, "steerAnalogRate", (v) => v.toFixed(0));
-  slider("dv-wall-exit", SOLID, "maxExitSpeed", (v) => `${v.toFixed(1)} m/s`);
-  slider("dv-wall-scrub", SOLID, "tangentScrub", (v) => v.toFixed(1));
+  slider("dv-wall-skin", SOLID, "skin", (v) => `${(v * 100).toFixed(0)} cm`);
+  slider("dv-wall-spin", SOLID, "spin", (v) => v.toFixed(2));
   const deg = (v) => `${(v * 57.2958).toFixed(1)}°/g`;
   slider("dv-land-absorb", TIRE, "landingAbsorb", (v) => `${Math.round(v * 100)}%`);
   slider("dv-land-assist", TIRE, "airLandAssist", (v) => v.toFixed(2));

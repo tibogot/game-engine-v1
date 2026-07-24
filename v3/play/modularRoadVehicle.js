@@ -213,14 +213,19 @@ export const TIRE = {
   /**
    * Lockout (s) after ANY wheel contact before air control may engage again.
    *
-   * The old `airControlDelay` counted CONTINUOUS airborne time from zero, so a
-   * landing bounce longer than it simply re-armed air control mid-bounce — which
-   * is exactly the reported bug: land, hold steer, and the bounce rolls you
-   * over. Timing from the last CONTACT instead means a bounce can never re-arm
-   * it, however long it lasts, while a clean launch is airborne for well over
-   * this and keeps full trick control.
+   * DELIBERATELY TINY — it exists only to swallow single-frame ground flicker on
+   * rough surfaces, not to gate tricks. It was 0.45 s when the rate model landed,
+   * because the torque model needed a long lockout to stop a landing bounce from
+   * winding roll up; measured afterwards, the rate model alone does that job:
+   *
+   *   lockout 0.45s → peak roll after landing+steer 1.01 rad/s
+   *   lockout 0.00s → 1.21 rad/s        (the original bug was 7.00)
+   *
+   * So the lockout was buying almost nothing and costing half a second of dead
+   * input — flips only started 0.48 s after leaving the ground. At 0.05 s a flip
+   * starts in ~0.08 s, i.e. as soon as you press.
    */
-  airGroundLockout: 0.45,
+  airGroundLockout: 0.05,
   // ── LANDINGS ────────────────────────────────────────────────────────────
   // A jump-heavy track lives or dies on whether landings feel FAIR. Two separate
   // mechanisms — see _applyLandingAssist().
@@ -382,22 +387,99 @@ export const WALL = {
 /** Chassis-vs-solids (guardrails, ramp walls) via the solids BVH. Samples the
  *  oriented chassis box (8 corners + 12 edge midpoints + 6 face centres) and
  *  pushes each point out of the nearest surface within `radius`. */
+/**
+ * Chassis vs solids (guardrails, tunnel walls) AND vs the deck.
+ *
+ * PROJECTION-based, not spring-based. The old model put a `radius: 0.4` sphere
+ * on each of 26 box samples and pushed with `pen × 260000` N. Three things were
+ * wrong with that, all of them things you could feel:
+ *
+ *  • A 0.4 m force field. Force began at 0.4 m of CLEARANCE, in every direction,
+ *    inflating the 1.8×0.6×3.6 chassis to an effective 2.6×1.4×4.4 — about 4×
+ *    the volume. The car was shoved by geometry it wasn't touching, and it
+ *    floated above rails instead of sitting on them. It also erased shape: the
+ *    distance field 0.4 m outside a sharp ridge is a smooth rounded blob, so the
+ *    guardrail's peaked cap could never do its job.
+ *  • Springs store energy. A buried sample pushes ~78 kN (5.7× the car's weight)
+ *    and 26 of them stack — measured launches to 22 m, 40 m, 161 m.
+ *  • Opposing normals cancel exactly, so a wedged car sat in equilibrium under
+ *    enormous forces with no escape direction.
+ *
+ * Projection has none of those failure modes: it moves the body out by the
+ * overlap and removes the into-surface velocity. It cannot store energy, so it
+ * cannot launch; and because the skin is thin, the collider matches the car.
+ */
 export const SOLID = {
   enabled: true,
-  radius: 0.4, // search distance per box sample (m)
-  stiffness: 260000,
-  damper: 12000,
-  clampPenFrac: 0.5,
-  /** Hard cap (m/s) on how fast a solid may throw the car back out along the
-   *  aggregate contact normal. 26 penetration springs at 260 kN/m STACK when
-   *  several samples bury at once, so a fast graze along a guardrail turned into
-   *  a launcher — the car played pinball down the rail. The springs still do the
-   *  depenetrating; this just refuses to let them return more than they should.
-   *  Only limits OUTWARD velocity, so it can't push the car into a wall. */
-  maxExitSpeed: 4.0,
-  /** Tangential speed scrubbed per second (1/s) while in contact, so scraping a
-   *  rail costs a little speed instead of conserving it perfectly. */
-  tangentScrub: 1.5,
+  /** Contact skin (m). This IS the collider inflation — keep it small. */
+  skin: 0.08,
+  /**
+   * Anti-tunnel margin, as a multiple of the distance travelled per substep.
+   *
+   * A skin alone cannot stop a fast car: at 30 m/s the body advances 0.125 m per
+   * substep, which is bigger than the 0.08 m skin, so a sample sits outside the
+   * band one substep and past the surface the next — it never registers at all.
+   * That is how cars drove through tube walls and guardrails.
+   *
+   * So detection uses a WIDER band than the skin. Anything inside the band and
+   * closing gets its inward velocity clamped so it cannot cross before the next
+   * substep; only things inside the actual SKIN get pushed out positionally.
+   * Splitting the two is what keeps the collider tight (shape still matters, no
+   * floating) while making it impossible to step over.
+   */
+  sweepMargin: 1.6,
+  /** Fraction of the overlap corrected per substep. <1 damps jitter when several
+   *  samples disagree; 1 is instant but can buzz on concave corners. */
+  push: 0.8,
+  /** Bounciness of a chassis hit. 0 = dead stop into the surface (arcade-correct
+   *  — a car hitting a wall should not rebound like a ball). */
+  restitution: 0.05,
+  /** Tangential speed kept per second while scraping (1/s decay). Scraping a
+   *  rail should cost some speed; being stuck must not drain everything, so this
+   *  ramps with speed via `frictionFullSpeed`. */
+  friction: 1.2,
+  frictionFullSpeed: 6.0,
+  /** Torque from off-centre contacts, as a fraction of the "physically correct"
+   *  amount. Full torque makes a rail clip spin the car wildly; 0 makes hits
+   *  feel dead. This is deliberately light — the wheels and stabilizer own the
+   *  car's attitude, a wall only deflects it. */
+  spin: 0.15,
+  /** Max rad/s a single contact may impart, so nothing can wind up a tumble. */
+  maxSpin: 2.5,
+};
+
+/**
+ * Stuck detection — the safety net every game in this genre has.
+ *
+ * Some traps are not solvable in the contact model. Landing balanced on a
+ * guardrail is the clearest: the rail lives in the SOLIDS bvh and the wheels
+ * only probe the DECK bvh, so there is no traction available up there at all,
+ * and pushing the chassis harder just reintroduces the launch bug. Verified
+ * permanent — 2000+ physics ticks with throttle held and the car never recovers.
+ *
+ * The detection signal is unusually clean here BECAUSE of that split: no wheel
+ * on a drivable surface, chassis resting on something, barely moving, and the
+ * player asking to move. A parked car has its wheels down, so it can never
+ * false-positive.
+ */
+export const STUCK = {
+  enabled: true,
+  /** Horizontal speed (m/s) below which the car counts as not going anywhere. */
+  speed: 1.5,
+  /** Seconds of that before a nudge, and before giving up entirely. */
+  nudgeAfter: 0.8,
+  respawnAfter: 2.5,
+  /** Nudge impulse (m/s) along chassis-up and chassis-forward — enough to tip
+   *  the car off a rail it is balanced on. */
+  nudgeUp: 3.5,
+  nudgeForward: 2.0,
+  /**
+   * Rate (1/s) the timer bleeds off once free. A DECAY, not a reset: the nudge
+   * itself pushes the car over `speed`, so a hard reset would restart the clock
+   * on every nudge and a car that got freed for a moment and fell straight back
+   * into the same trap could loop forever without ever escalating.
+   */
+  releaseRate: 0.5,
 };
 
 /** Cached each rebuild — offset from box center to CoM in chassis-local space. */
@@ -684,8 +766,34 @@ class Tire {
     this.hitNormal.copy(this._smoothNormal);
 
     const distFromHub = bestDist - pad;
+
+
     this.hitDistance = distFromHub;
     this.compression = TIRE.restLength - distFromHub;
+
+    // NOTE — a 'ceiling guard' was tried here and REMOVED. Do not re-add one
+    // without reading this.
+    //
+    // The probe starts `pad` (0.6 m) along chassis-UP and casts along
+    // chassis-DOWN, so a car that is inverted or under a slab can hit a road
+    // from the wrong side and report a NEGATIVE hub distance. Suspension force
+    // is applied along chassis-up regardless — i.e. INTO the surface — which is
+    // what fires a car under a road into the sky (measured 87 g / 161 m).
+    //
+    // Rejecting negative hub distances does fix that. But the SAME geometry
+    // occurs legitimately: rolling round a tube or loop, centrifugal load bottoms
+    // the strut out and the contact sits slightly above the hub. Rejecting there
+    // tears the car off the wall — measured r 97 against a tube wall at r 8, and
+    // the loop falling from 49 m to 38 m. Every discriminator tried (a distance
+    // tolerance, `_hadGround` continuity) either left the tube broken or stopped
+    // firing at all: from inside the chassis frame the two cases are identical.
+    //
+    // So the tube/loop case wins — it is core gameplay and happens constantly,
+    // while landing inverted is rare and already falls into the fall/stuck
+    // respawn path. Both the inverted pass-through and the under-road launch are
+    // PRE-EXISTING (verified against the pre-session code), not regressions of
+    // this work. A real fix needs signed inside/outside queries against closed
+    // geometry, not a heuristic on hub distance.
 
     body.getVelocityAtPoint(this.worldPos, this._tireVel);
 
@@ -1225,6 +1333,16 @@ export class Vehicle {
     this._yawVel = new THREE.Vector3();
     this._solidN = new THREE.Vector3();
     this._solidT = new THREE.Vector3();
+    this._solidPoint = new THREE.Vector3();
+    this._solidApproachN = new THREE.Vector3();
+    this._stuckUp = new THREE.Vector3();
+    this._stuckFwd = new THREE.Vector3();
+    /** Seconds trapped against geometry while asking to move — see _updateStuck. */
+    this._stuckTime = 0;
+    this._stuckNudged = false;
+    this._solidTouch = false;
+    this._solidR = new THREE.Vector3();
+    this._solidTorque = new THREE.Vector3();
     this._steerRateFwd = new THREE.Vector3();
     this._landN = new THREE.Vector3();
     this._landUp = new THREE.Vector3();
@@ -1440,9 +1558,59 @@ export class Vehicle {
     this.input.handbrake = !!controls.handbrake;
     this.input.yaw = controls.yaw ?? 0;
 
+    this._solidTouch = false; // set by _resolveSolidBvh during the step
     this._physicsStep(FIXED_DT);
     this._depenetrateFromWalls();
+    this._updateStuck();
   }
+
+  /**
+   * Stuck detection + the first stage of recovery. See the STUCK block.
+   *
+   * Requires ALL of: touching a solid, no wheel on a drivable surface, barely
+   * moving, and throttle held. Requiring throttle means deliberately parking
+   * against a wall is never treated as stuck; requiring zero grounded wheels
+   * means a car that can drive is never treated as stuck either.
+   *
+   * Stage two is the game's job — it owns the last-safe-pose bookkeeping — so
+   * this only exposes `stuckTime` for roadGame to escalate on.
+   */
+  _updateStuck() {
+    if (!STUCK.enabled) { this._stuckTime = 0; this._stuckNudged = false; return; }
+    const sp = Math.hypot(this.body.vel.x, this.body.vel.z);
+    // Fewer than 3 wheels down means the car is NOT properly on the road — it is
+    // balanced on an edge or a rail. Measured: a car resting on a guardrail has
+    // 2/4 (some wheels reach the kerb) and 0.5 m/s, so requiring exactly 0 missed
+    // it entirely. Requiring <3 also correctly EXCLUDES a car sitting squarely on
+    // the road pushing into a wall — that has 4/4, is not trapped, and just needs
+    // to reverse.
+    const trapped =
+      this._solidTouch &&
+      this.groundedCount < 3 &&
+      sp < STUCK.speed &&
+      Math.abs(this.input.throttle) > 0.01;
+
+    if (!trapped) {
+      this._stuckTime = Math.max(0, this._stuckTime - STUCK.releaseRate * FIXED_DT);
+      if (this._stuckTime === 0) this._stuckNudged = false;
+      return;
+    }
+    this._stuckTime += FIXED_DT;
+    if (!this._stuckNudged && this._stuckTime >= STUCK.nudgeAfter) {
+      this._stuckNudged = true;
+      // Up and along the car's own forward: lifts it off whatever it is balanced
+      // on and gives it somewhere to go.
+      this._stuckUp.set(0, 1, 0).applyQuaternion(this.body.quat);
+      this._stuckFwd.set(0, 0, 1).applyQuaternion(this.body.quat);
+      this.body.vel
+        .addScaledVector(this._stuckUp, STUCK.nudgeUp)
+        .addScaledVector(this._stuckFwd, Math.sign(this.input.throttle) * STUCK.nudgeForward);
+    }
+  }
+
+  /** Seconds the car has been trapped against geometry while asking to move; 0
+   *  whenever it is free. The game escalates past STUCK.respawnAfter. */
+  get stuckTime() { return this._stuckTime; }
 
   /**
    * Advance the steering input toward `target`, at a rate chosen by what the
@@ -1530,7 +1698,7 @@ export class Vehicle {
       }
       if (this.walls.length) this._applyWallProbes();
       if (SOLID.enabled && this.solidsBvh && this.solidsBvh.baked) this._resolveSolids(subDt);
-      if (DECK.enabled && this.groundBvh && this.groundBvh.baked) this._applyDeckContact();
+      if (DECK.enabled && this.groundBvh && this.groundBvh.baked) this._applyDeckContact(subDt);
       this._applyChassisGroundContact();
       // After the tires (their contact normals are what both of these read) and
       // before integrate(), so the torques land in this substep.
@@ -1839,11 +2007,45 @@ export class Vehicle {
     }
   }
 
-  _applyDeckContact() {
+  /**
+   * Chassis vs the DECK — an anti-clip backstop only. FORCE-based, deliberately.
+   *
+   * The solids resolver next door uses positional projection, which is right for
+   * a WALL you hit. It is WRONG for a surface the car RESTS on: a positional
+   * correction teleports the body away from the deck every substep, which
+   * unloads the suspension instead of sharing load with it.
+   *
+   * Measured in a loop when this briefly WAS projection-based: wheel compression
+   * fell 0.45 → 0.24 and grounded wheels 4/4 → 2/4, so the car lost grip and
+   * dropped out of a 51 m loop at 36 m. Forces superpose with the suspension;
+   * positional corrections fight it. Loops and tubes are exactly the case where
+   * the body is pressed hard toward a surface the wheels are already holding.
+   *
+   * The wheels hold the car up. If this is ever what stops the body sinking into
+   * a road, something upstream already failed — hence "backstop".
+   */
+  _applyDeckContact(dt = FIXED_DT / this.SUBSTEPS) {
     const body = this.body;
     const skin = DECK.skin;
-    for (const ci of this.BOTTOM_CORNERS) {
-      this._geomToWorld(this.CHASSIS_CORNERS[ci], this._cWorld);
+    // ALL EIGHT corners, not just the lower four.
+    //
+    // A stunt car lands on whatever face happens to be pointing down. With only
+    // the bottom corners sampled, an INVERTED car had nothing between its roof
+    // and the road and fell straight through it — reproducible in one line, and
+    // pre-existing rather than new. The extra four queries are ~free next to the
+    // wheel probes, and they cost nothing on a normal lap: upright, the top
+    // corners sit ~0.6 m clear of the deck, far outside `skin` (0.05), so they
+    // never register. Verified against the loop test — no change there.
+    // Anti-tunnel band, same split as the solids resolver: FORCE only inside
+    // `skin`, velocity clamp anywhere inside `band`. At 15 m/s a corner advances
+    // 0.0625 m per substep — already past the 0.05 m skin — which is exactly how
+    // an inverted car fell through the road.
+    const band = Math.max(skin, body.vel.length() * dt * SOLID.sweepMargin);
+    let approach = 0;
+    this._solidApproachN.set(0, 0, 0);
+
+    for (const corner of this.CHASSIS_CORNERS) {
+      this._geomToWorld(corner, this._cWorld);
       const res = this.groundBvh.closestPointWithNormal(
         this._cWorld.x, this._cWorld.y, this._cWorld.z, DECK.searchRadius, this._deckN,
       );
@@ -1853,7 +2055,20 @@ export class Vehicle {
         (this._cWorld.x - res.x) * this._deckN.x +
         (this._cWorld.y - res.y) * this._deckN.y +
         (this._cWorld.z - res.z) * this._deckN.z;
-      if (sd >= skin) continue; // corner safely above the deck → wheels handle it
+      if (sd >= skin) {
+        // Clamp ONLY if this corner would actually CROSS before the next
+        // substep. Banding on distance alone is wrong here: in a loop the
+        // chassis rides permanently close to the deck, so a proximity band
+        // cancelled the car's centripetal motion every substep and it dropped
+        // out of the loop at 38 m of 51 m.
+        body.getVelocityAtPoint(this._cWorld, this._cVel);
+        const closing = -this._cVel.dot(this._deckN);
+        if (closing > 0 && closing * dt > sd - skin) {
+          this._solidApproachN.addScaledVector(this._deckN, closing);
+          approach = Math.max(approach, closing);
+        }
+        continue; // corner clear of the deck → the wheels have it
+      }
       const pen = skin - sd;
       body.getVelocityAtPoint(this._cWorld, this._cVel);
       const inward = -this._cVel.dot(this._deckN);
@@ -1861,6 +2076,20 @@ export class Vehicle {
       const forceMag = pen * DECK.stiffness + dampMag;
       this._cF.copy(this._deckN).multiplyScalar(forceMag);
       body.addForceAtPoint(this._cF, this._cWorld);
+    }
+
+    // Velocity-only, so it cannot lift the car or change ride height — it just
+    // stops a corner crossing the surface between substeps.
+    //
+    // Gated on the wheels NOT already holding the car. This is a backstop for
+    // orientations the suspension cannot handle — on its side, inverted, under a
+    // slab. With three or more wheels down the car is supported properly, and
+    // firing it there braked normal driving: a 30 m/s graze along a kerb dropped
+    // to 0 because a corner near a piece seam read as an imminent crossing.
+    if (this.groundedCount < 3 && approach > 0 && this._solidApproachN.lengthSq() > 1e-10) {
+      this._solidApproachN.normalize();
+      const vIn = body.vel.dot(this._solidApproachN);
+      if (vIn < 0) body.vel.addScaledVector(this._solidApproachN, -vIn);
     }
   }
 
@@ -1873,66 +2102,118 @@ export class Vehicle {
     }
   }
 
+  /**
+   * Resolve the chassis box against one BVH by PROJECTION — see the SOLID block
+   * for why this replaced penetration springs.
+   *
+   * Two passes. First gather every overlapping sample into one aggregate
+   * contact: a penetration-weighted mean normal, the deepest overlap, and the
+   * mean contact point (for the torque). Then apply the correction ONCE.
+   * Resolving per-sample is what let 26 springs stack into a launcher; one
+   * aggregate correction cannot exceed the actual overlap no matter how many
+   * samples agree.
+   */
   _resolveSolidBvh(bvh, surfaceVelFn, dt = FIXED_DT / this.SUBSTEPS) {
     const body = this.body;
-    const r = SOLID.radius;
-    // Penetration-weighted mean contact normal + deepest penetration, for the
-    // aggregate response after the sample loop.
-    let maxPen = 0;
+    const skin = SOLID.skin;
+    // Detection band widens with speed so a fast sample can never step over the
+    // skin between substeps — see SOLID.sweepMargin. Push-out still uses `skin`.
+    const band = Math.max(skin, body.vel.length() * dt * SOLID.sweepMargin);
+    let deepest = 0;
+    let hits = 0;
+    let approach = 0; // deepest imminent (band-only) contact
     this._solidN.set(0, 0, 0);
+    this._solidPoint.set(0, 0, 0);
+    this._solidApproachN.set(0, 0, 0);
+
     for (const sp of this.SOLID_BOX_SAMPLES) {
       this._geomToWorld(sp, this._sphC);
       const res = bvh.closestPointWithNormal(
-        this._sphC.x, this._sphC.y, this._sphC.z, r, this._sphN,
+        this._sphC.x, this._sphC.y, this._sphC.z, band, this._sphN,
       );
       if (!res) continue;
-      const pen = r - res.distance;
+      // Close but not overlapping. NO anti-tunnel clamp here, deliberately:
+      // rails are thin, fast grazes are constant, and clamping on them braked
+      // the car on every pass (a 30 m/s graze fell to 0, because the posts and
+      // piece seams present faces whose normals point along travel). The
+      // tunnel-prone geometry a stunt track actually has — road decks and tube
+      // walls — all lives in the DECK bvh, which does carry the clamp. Rails
+      // rely on the skin plus projection.
+      if (res.distance >= skin) continue;
+      const pen = skin - res.distance;
       if (pen <= 0) continue;
+      hits++;
       this._solidN.addScaledVector(this._sphN, pen);
-      if (pen > maxPen) maxPen = pen;
-      body.getVelocityAtPoint(this._sphC, this._sphV);
-      if (surfaceVelFn) {
-        surfaceVelFn(this._sphC, this._surfV);
-        this._sphV.sub(this._surfV);
-      }
-      const inward = -this._sphV.dot(this._sphN);
-      const dampMag = Math.max(0, inward) * SOLID.damper;
-      const forceMag = pen * SOLID.stiffness + dampMag;
-      this._sphF.copy(this._sphN).multiplyScalar(forceMag);
-      body.addForceAtPoint(this._sphF, this._sphC);
-      if (surfaceVelFn && pen > 0.02) {
-        surfaceVelFn(this._sphC, this._surfV);
-        body.vel.addScaledVector(this._surfV, Math.min(0.4, pen * 1.8));
-      }
-      if (pen > r * SOLID.clampPenFrac) {
-        const vInto = body.vel.dot(this._sphN);
-        if (vInto < 0) body.vel.addScaledVector(this._sphN, -vInto);
-        if (surfaceVelFn) {
-          surfaceVelFn(this._sphC, this._surfV);
-          body.vel.addScaledVector(this._surfV, 0.12);
-        }
-      }
+      this._solidPoint.add(this._sphC);
+      if (pen > deepest) deepest = pen;
     }
+    if (!hits) {
+      // No real overlap, but something is close and we are closing on it: kill
+      // just the inward velocity so the next substep lands ON the surface
+      // instead of beyond it. No positional change, so this cannot lift the car
+      // off anything or affect ride height — it only removes the ability to
+      // teleport through a wall.
+      if (approach > 0 && this._solidApproachN.lengthSq() > 1e-10) {
+        this._solidApproachN.normalize();
+        const vIn = body.vel.dot(this._solidApproachN);
+        if (vIn < 0) body.vel.addScaledVector(this._solidApproachN, -vIn);
+      }
+      return;
+    }
+    this._solidTouch = true; // feeds the stuck detector in tick()
+    this._solidPoint.multiplyScalar(1 / hits);
 
-    // ── Aggregate contact response ────────────────────────────────────────
-    // STATIC solids only. A moving wall is *supposed* to impart its velocity,
-    // so capping its exit speed would fight the mover push above.
-    if (surfaceVelFn || maxPen <= 0 || this._solidN.lengthSq() < 1e-12) return;
+    // Opposing normals cancel here, which is CORRECT: wedged between two
+    // surfaces there is no meaningful "out", so pushing along the near-zero
+    // mean would be pushing in a direction made of rounding noise. Bail and
+    // leave the car free to drive itself out.
+    if (this._solidN.lengthSq() < 1e-10) return;
     this._solidN.normalize();
 
-    // Cap the rebound. Outward only — a negative vN means the car is still
-    // heading INTO the wall, which the springs are there to deal with.
-    const vN = body.vel.dot(this._solidN);
-    if (vN > SOLID.maxExitSpeed) {
-      body.vel.addScaledVector(this._solidN, SOLID.maxExitSpeed - vN);
+    // 1) POSITIONAL — move out of the surface. No force, so no stored energy.
+    body.pos.addScaledVector(this._solidN, deepest * SOLID.push);
+
+    // 2) VELOCITY — kill the component heading into the surface. Only inward:
+    //    outward motion is the car already leaving, and must not be touched.
+    body.getVelocityAtPoint(this._solidPoint, this._sphV);
+    if (surfaceVelFn) {
+      // A moving wall carries the car with it, so resolve in ITS frame and add
+      // its velocity back afterwards.
+      surfaceVelFn(this._solidPoint, this._surfV);
+      this._sphV.sub(this._surfV);
+    }
+    const vN = this._sphV.dot(this._solidN);
+    if (vN < 0) {
+      body.vel.addScaledVector(this._solidN, -vN * (1 + SOLID.restitution));
+    }
+    if (surfaceVelFn) {
+      const relN = body.vel.dot(this._solidN) - this._surfV.dot(this._solidN);
+      if (relN < 0) body.vel.addScaledVector(this._solidN, -relN);
     }
 
-    // Scrub speed along the wall so a graze costs something.
-    if (SOLID.tangentScrub > 0 && dt > 0) {
+    // 3) TANGENTIAL — scraping costs speed, ramped in so a car crawling out of
+    //    somewhere it is trapped is not drained of the little it has.
+    if (SOLID.friction > 0 && dt > 0) {
       const vn2 = body.vel.dot(this._solidN);
       this._solidT.copy(body.vel).addScaledVector(this._solidN, -vn2);
-      this._solidT.multiplyScalar(Math.exp(-SOLID.tangentScrub * dt));
-      body.vel.copy(this._solidT).addScaledVector(this._solidN, vn2);
+      const vT = this._solidT.length();
+      const ramp = Math.min(1, vT / Math.max(0.01, SOLID.frictionFullSpeed));
+      if (ramp > 0) {
+        this._solidT.multiplyScalar(Math.exp(-SOLID.friction * ramp * dt));
+        body.vel.copy(this._solidT).addScaledVector(this._solidN, vn2);
+      }
+    }
+
+    // 4) SPIN — an off-centre hit should turn the car a little. Deliberately a
+    //    fraction of the physically correct impulse and hard-capped: the wheels
+    //    and stabilizer own the car's attitude, a wall only nudges it.
+    if (SOLID.spin > 0 && vN < 0) {
+      this._solidR.subVectors(this._solidPoint, body.pos);
+      this._solidTorque.crossVectors(this._solidR, this._solidN)
+        .multiplyScalar(-vN * SOLID.spin);
+      const mag = this._solidTorque.length();
+      if (mag > SOLID.maxSpin) this._solidTorque.multiplyScalar(SOLID.maxSpin / mag);
+      body.angVel.add(this._solidTorque);
     }
   }
 

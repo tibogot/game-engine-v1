@@ -37,6 +37,7 @@ import {
   DRIVETRAIN,
   DECK,
   SOLID,
+  STUCK,
   BODYLEAN,
   HEADLIGHTS,
   CHASSIS,
@@ -613,20 +614,35 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * off the track and lands on the terrain, which is drivable — no respawn. The
    * old always-on version looped: respawn at the edge → fall → repeat.
    */
+  /** Put the car back on the last pose where it was properly on the track. */
+  function recoverToSafePose() {
+    if (!hasSafe) { respawn(); return; }
+    _respawnPos.copy(lastSafePos); _respawnPos.y += 0.5; // small lift so wheels clear
+    vehicle.setSpawn(_respawnPos, lastSafeQuat);
+    vehicle.respawn();
+    chase.reset(); tireMarks.reset(); driftSmoke.reset();
+    simAccum = 0;
+  }
+
   function checkFall() {
     const y = vehicle.body.pos.y;
 
     if (y < FALL_Y) { respawn(); return; } // lost below the world
 
+    // STUCK — always on, unlike the air-stunt rule below. Some traps have no
+    // solution in the contact model at all (landing balanced on a guardrail: the
+    // rail is in the solids BVH, the wheels only probe the deck BVH, so there is
+    // no traction up there to drive out with). The Vehicle already tried a nudge;
+    // this is the give-up path. Independent of `raceRespawn` because being
+    // trapped is never a playable state, in free-drive or a race.
+    if (STUCK.enabled && vehicle.stuckTime >= STUCK.respawnAfter) {
+      recoverToSafePose();
+      return;
+    }
+
     if (!raceRespawn) return; // free-drive: fall to terrain and keep driving
 
-    if (hasSafe && y < lastSafeY - FALL_DROP) {
-      _respawnPos.copy(lastSafePos); _respawnPos.y += 0.5; // small lift so wheels clear
-      vehicle.setSpawn(_respawnPos, lastSafeQuat);
-      vehicle.respawn();
-      chase.reset(); tireMarks.reset(); driftSmoke.reset();
-      simAccum = 0;
-    }
+    if (hasSafe && y < lastSafeY - FALL_DROP) recoverToSafePose();
   }
 
   // 5) ── CAMERA ─────────────────────────────────────────────────────────────
