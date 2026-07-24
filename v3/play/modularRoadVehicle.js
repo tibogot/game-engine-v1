@@ -373,6 +373,9 @@ export const SOLID = {
 
 /** Cached each rebuild — offset from box center to CoM in chassis-local space. */
 const _COM_OFFSET = new THREE.Vector3();
+/** Shared constants for composing instanced wheel matrices. */
+const _UNIT_SCALE = new THREE.Vector3(1, 1, 1);
+const _MIRROR_Y = new THREE.Matrix4().makeRotationY(Math.PI);
 
 function _syncComOffset() {
   _COM_OFFSET.set(CHASSIS.comX, CHASSIS.comY, CHASSIS.comZ);
@@ -820,6 +823,12 @@ export class Vehicle {
     this._wheelTemplate = null;
     this._wheelModelDims = null;
     this._procGeo = null;
+    /** One InstancedMesh per wheel PART, 4 instances each — see _rebuildWheelMeshes. */
+    this._wheelInstances = [];
+    this._wheelParts = [];
+    this._wheelMirror = false;
+    this._wheelMat = new THREE.Matrix4();
+    this._partMat = new THREE.Matrix4();
     // Materials don't depend on the dimensions, so they're built once and reused
     // across style switches (the geometry is not — see _buildProceduralWheelGeo).
     this._procMat = {
@@ -903,56 +912,115 @@ export class Vehicle {
     this._procGeo = null;
   }
 
-  /** One procedural wheel, sharing the cached geometry + materials. */
-  _makeProceduralWheel() {
-    const g = new THREE.Group();
-    const tire = new THREE.Mesh(this._procGeo.tireGeo, this._procMat.tire);
-    const rim = new THREE.Mesh(this._procGeo.rimGeo, this._procMat.rim);
-    tire.castShadow = true;
-    rim.castShadow = true;
-    const spokeL = new THREE.Mesh(this._procGeo.spokeGeo, this._procMat.spoke);
-    const spokeR = new THREE.Mesh(this._procGeo.spokeGeo, this._procMat.spoke);
-    spokeL.position.x = -WHEEL.rimWidth / 2 - 0.001;
-    spokeR.position.x = WHEEL.rimWidth / 2 + 0.001;
-    spokeL.rotation.y = Math.PI / 2;
-    spokeR.rotation.y = -Math.PI / 2;
-    g.add(tire, rim, spokeL, spokeR);
-    return g;
+  /**
+   * The procedural wheel as a flat part list (geometry + material + transform
+   * within the wheel), matching what _glbWheelParts() returns.
+   *
+   * Only the tyre and rim cast: the spokes sit inside the rim, and a caster
+   * costs one draw per shadow cascade.
+   */
+  _proceduralWheelParts() {
+    this._buildProceduralWheelGeo();
+    const hw = WHEEL.rimWidth / 2;
+    // makeRotationY() then setPosition() composes to p' = R·p + t, which is what
+    // Object3D's position+rotation.y pair produced before.
+    const spoke = (x, ry) => new THREE.Matrix4().makeRotationY(ry).setPosition(x, 0, 0);
+    return [
+      { geometry: this._procGeo.tireGeo, material: this._procMat.tire, matrix: new THREE.Matrix4(), castShadow: true },
+      { geometry: this._procGeo.rimGeo, material: this._procMat.rim, matrix: new THREE.Matrix4(), castShadow: true },
+      { geometry: this._procGeo.spokeGeo, material: this._procMat.spoke, matrix: spoke(-hw - 0.001, Math.PI / 2), castShadow: false },
+      { geometry: this._procGeo.spokeGeo, material: this._procMat.spoke, matrix: spoke(hw + 0.001, -Math.PI / 2), castShadow: false },
+    ];
   }
 
-  /** Refill every tireGroup for the current style. */
+  /** The loaded GLB flattened to the same shape, each part's transform baked
+   *  relative to the template root (which sits on the axle). */
+  _glbWheelParts() {
+    const parts = [];
+    this._wheelTemplate.updateMatrixWorld(true);
+    this._wheelTemplate.traverse((o) => {
+      if (!o.isMesh) return;
+      parts.push({
+        geometry: o.geometry,
+        material: o.material,
+        matrix: o.matrixWorld.clone(),
+        castShadow: o.castShadow, // wheelModel.js already picked tyre + rim
+      });
+    });
+    return parts;
+  }
+
+  /**
+   * Rebuild the wheels as ONE InstancedMesh PER PART, four instances each.
+   *
+   * All four wheels are the same object at different poses, which is the exact
+   * case instancing exists for. Per-wheel meshes cost 4 parts × 4 wheels = 16
+   * main draws plus 3 shadow draws for every caster among them; instanced, the
+   * whole set is 4 main draws and 3 per casting part — 10 draws total for either
+   * style, against 40 (procedural) and 64 (the GLB as first shipped).
+   */
   _rebuildWheelMeshes() {
     const useGlb = this._wheelStyle === "glb" && !!this._wheelTemplate;
-    for (const g of this.tireGroups) {
-      for (const c of [...g.children]) g.remove(c);
-    }
-    // Only safe to dispose AFTER the meshes referencing it are detached.
-    if (useGlb) this._disposeProceduralWheelGeo();
-    else this._buildProceduralWheelGeo();
 
+    for (const inst of this._wheelInstances) {
+      this.group.remove(inst);
+      inst.dispose(); // frees instanceMatrix only — geometry/materials are shared
+    }
+    this._wheelInstances.length = 0;
+    // Only safe to dispose AFTER the meshes referencing it are gone.
+    if (useGlb) this._disposeProceduralWheelGeo();
+
+    this._wheelParts = useGlb ? this._glbWheelParts() : this._proceduralWheelParts();
+    // The GLB is a FRONT-LEFT assembly, so one side has to be mirrored.
+    //
+    // WHICH side: the model's brake caliper spans x ∈ [-0.240, -0.073] and the
+    // rotor x ∈ [-0.162, -0.098] — both entirely negative, and brake hardware is
+    // always INBOARD. So the assembly's exterior (the rim face you're meant to
+    // see) points toward +X, and it's the -X wheels that need turning. Getting
+    // this backwards shows every wheel from the inside.
+    //
+    // A half-turn about the vertical, never a negative scale: mirroring by scale
+    // inverts the triangle winding and darkens the lighting. The wheel's spin is
+    // about X and is composed on top, so this does not change which way the
+    // wheel appears to rotate. The procedural wheel is symmetric and needs none.
+    this._wheelMirror = useGlb;
+
+    const count = this.tireGroups.length;
+    for (const part of this._wheelParts) {
+      const inst = new THREE.InstancedMesh(part.geometry, part.material, count);
+      inst.castShadow = part.castShadow;
+      inst.receiveShadow = false;
+      inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage); // rewritten every frame
+      this.group.add(inst);
+      this._wheelInstances.push(inst);
+    }
+    this._syncWheelInstances();
+  }
+
+  /**
+   * Push the tireGroups' poses into the instanced meshes. The groups are still
+   * driven by syncVisuals exactly as before — they're now empty transform
+   * holders rather than mesh parents, which keeps the visual code unchanged.
+   */
+  _syncWheelInstances() {
+    if (!this._wheelInstances.length) return;
     for (let i = 0; i < this.tireGroups.length; i++) {
-      let w;
-      if (useGlb) {
-        // clone() shares geometry + materials, so four wheels stay one geometry set.
-        w = this._wheelTemplate.clone(true);
-        // The GLB is a FRONT-LEFT assembly, so one side has to be mirrored.
-        //
-        // WHICH side: the model's brake caliper spans x ∈ [-0.240, -0.073] and
-        // the rotor x ∈ [-0.162, -0.098] — both entirely negative, and brake
-        // hardware is always INBOARD. So the assembly's exterior (the rim face
-        // you're meant to see) points toward +X, and it's the -X wheels that
-        // need turning. Getting this backwards shows every wheel from the
-        // inside, which is exactly how it looked first time round.
-        //
-        // A half-turn about the vertical, never a negative scale: mirroring by
-        // scale inverts the triangle winding and darkens the lighting. The
-        // group's spin is about X and is applied on top, so this static
-        // re-orientation does not change which way the wheel appears to rotate.
-        if (WHEEL_LOCAL[i].pos.x < 0) w.rotation.y = Math.PI;
-      } else {
-        w = this._makeProceduralWheel();
+      const g = this.tireGroups[i];
+      this._wheelMat.compose(g.position, g.quaternion, _UNIT_SCALE);
+      if (this._wheelMirror && WHEEL_LOCAL[i].pos.x < 0) this._wheelMat.multiply(_MIRROR_Y);
+      for (let p = 0; p < this._wheelParts.length; p++) {
+        this._partMat.multiplyMatrices(this._wheelMat, this._wheelParts[p].matrix);
+        this._wheelInstances[p].setMatrixAt(i, this._partMat);
       }
-      this.tireGroups[i].add(w);
+    }
+    for (const inst of this._wheelInstances) {
+      inst.instanceMatrix.needsUpdate = true;
+      // An InstancedMesh culls against ITS OWN transform, which here is identity
+      // at the world origin, while the instances sit wherever the car is. Without
+      // recomputing this the wheels get culled the moment the car drives away
+      // from the origin. computeBoundingSphere() does account for the instance
+      // matrices, and it's four of them.
+      inst.computeBoundingSphere();
     }
   }
 
@@ -1912,6 +1980,10 @@ export class Vehicle {
         this._placeArrow(a.fwd, t.worldPos, t.lastAccel);
       }
     }
+
+    // The loop above posed the tireGroups; push those poses into the instanced
+    // meshes that actually draw the wheels.
+    this._syncWheelInstances();
   }
 
   /**

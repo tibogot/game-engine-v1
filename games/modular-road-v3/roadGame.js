@@ -1218,6 +1218,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       setWheelStyle: (s) => vehicle.setWheelStyle(s),
       hasWheelModel: () => vehicle.hasWheelModel,
       setInstancing: (on) => builder.setInstancing(on),
+      roadUniforms: roadMaterial._roadUniforms,
+      railMaterial,
       getLinesOn: () => roadMaterial._roadUniforms.linesOn.value > 0.5,
       setLinesOn: (on) => { roadMaterial._roadUniforms.linesOn.value = on ? 1 : 0; },
       setTireMarksEnabled: (on) => {

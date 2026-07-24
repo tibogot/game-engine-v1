@@ -555,6 +555,66 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Road brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-bright" min="0.2" max="2.5" step="0.05" />
+              <span class="prop-num" id="dv-road-bright-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Grain contrast</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-grain" min="0" max="2.5" step="0.05" />
+              <span class="prop-num" id="dv-road-grain-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Aggregate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-agg" min="0.5" max="20" step="0.5" />
+              <span class="prop-num" id="dv-road-agg-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Gloss variation</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-rvary" min="0" max="0.4" step="0.01" />
+              <span class="prop-num" id="dv-road-rvary-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wheel polish</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-polish" min="0" max="0.6" step="0.02" />
+              <span class="prop-num" id="dv-road-polish-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rail metalness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-rail-metal" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-rail-metal-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rail roughness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-rail-rough" min="0.05" max="1" step="0.02" />
+              <span class="prop-num" id="dv-rail-rough-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Asphalt is fully procedural — no textures, so no sampler slots and it
+            tiles down a track of any length. <b>Aggregate</b> is the chip size in
+            cycles/metre (it self-fades before it aliases at distance).
+            <b>Wheel polish</b> smooths the two tyre tracks, which is what catches
+            the sun and sells the surface.
+            <br><br>
+            <b>Rail metalness</b> near 1 means the rail has no diffuse at all and
+            only shows reflections of the sky — which is why it looked black. Pull
+            it down to let sunlight hit it.
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Show collision</span>
             <div class="prop-value">
               <button class="prop-toggle" id="dv-showcol" type="button" aria-label="Show collision">${CHECK_SVG}</button>
@@ -1031,6 +1091,22 @@ export function createRoadDevPanel({ app, game, params }) {
 
   // ── Track ───────────────────────────────────────────────────────────────────
   toggle("dv-lines", game.getLinesOn(), (on) => game.setLinesOn(on));
+  // Road-surface uniforms are TSL `uniform()` objects, so the slider helper
+  // drives their `.value` directly — every change is live, no rebuild.
+  const ru = game.roadUniforms;
+  if (ru) {
+    slider("dv-road-bright", ru.deckBrightness, "value", (v) => `${v.toFixed(2)}×`);
+    slider("dv-road-grain", ru.grainScale, "value", (v) => v.toFixed(2));
+    slider("dv-road-agg", ru.aggScale, "value", (v) => `${v.toFixed(1)}/m`);
+    slider("dv-road-rvary", ru.roughVary, "value", (v) => v.toFixed(2));
+    slider("dv-road-polish", ru.wheelPolish, "value", (v) => v.toFixed(2));
+  }
+  // Guardrails are a plain MeshStandardMaterial, so these drive it directly.
+  const rm = game.railMaterial;
+  if (rm) {
+    slider("dv-rail-metal", rm, "metalness", (v) => v.toFixed(2));
+    slider("dv-rail-rough", rm, "roughness", (v) => v.toFixed(2));
+  }
   toggle("dv-showcol", false, (on) => game.setCollisionDebug(on));
   toggle("dv-inst", true, (on) => game.setInstancing(on));
   $("#dv-rebake").addEventListener("click", () => game.bakeCollision());

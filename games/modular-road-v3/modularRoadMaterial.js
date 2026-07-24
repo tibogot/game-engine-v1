@@ -5,6 +5,7 @@ import {
   attribute,
   uv,
   vec3,
+  vec4,
   float,
   mix,
   clamp,
@@ -12,8 +13,12 @@ import {
   fract,
   smoothstep,
   step,
-  sin,
-  floor,
+  max,
+  fwidth,
+  saturate,
+  oneMinus,
+  mx_noise_float,
+  mx_fractal_noise_float,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
@@ -34,8 +39,16 @@ function lin(hex) {
  */
 export function createRoadMaterial(opts = {}) {
   const u = {
-    asphaltDark: uniform(lin(opts.asphaltDark ?? 0x14161a)),
-    asphaltLight: uniform(lin(opts.asphaltLight ?? 0x23262c)),
+    // ASPHALT ALBEDO. The old 0x14161a→0x23262c pair sat at roughly 0.007–0.017
+    // in LINEAR light — real asphalt is 0.04 (fresh) to 0.12 (weathered), so the
+    // deck was 3–6× darker than the material it was imitating and no amount of
+    // exposure or light tuning could recover it. These land at ~0.040 and ~0.098
+    // linear, i.e. the actual physical range.
+    asphaltDark: uniform(lin(opts.asphaltDark ?? 0x383b40)),
+    asphaltLight: uniform(lin(opts.asphaltLight ?? 0x585c62)),
+    /** Final multiplier on the deck albedo — the one knob for "too dark / too
+     *  bright" without touching the two colours. */
+    deckBrightness: uniform(opts.deckBrightness ?? 1.0),
     lineColor: uniform(lin(opts.lineColor ?? 0xf2f2f2)),
     railA: uniform(lin(opts.railA ?? 0xd0342c)),
     railB: uniform(lin(opts.railB ?? 0xf0f0f0)),
@@ -49,7 +62,25 @@ export function createRoadMaterial(opts = {}) {
     edgePos: uniform(opts.edgePos ?? 0.82), // |lateral| where edge lines sit
     edgeWidth: uniform(opts.edgeWidth ?? 0.05),
     railDash: uniform(opts.railDash ?? 0.5), // paint bands per meter
-    grainScale: uniform(opts.grainScale ?? 0.55),
+    /** Contrast of the asphalt tone around its midpoint. NOTE: this used to cap
+     *  the dark→light mix (tone × grainScale, so 0.55 meant the deck could never
+     *  reach asphaltLight — part of why it read so dark). It is now a symmetric
+     *  contrast multiplier, 1.0 = the full authored range. */
+    grainScale: uniform(opts.grainScale ?? 1.0),
+    /** Cycles per metre of the slow tonal drift (resurfacing patches, bleaching). */
+    macroScale: uniform(opts.macroScale ?? 0.06),
+    /** Cycles per metre of the aggregate speckle. 5 ⇒ ~20 cm chips. */
+    aggScale: uniform(opts.aggScale ?? 5.0),
+    /** Base deck roughness before variation. */
+    deckRough: uniform(opts.deckRough ?? 0.93),
+    /** How much the noise modulates roughness. This is what makes the deck read
+     *  as a surface rather than a flat colour — gloss follows visible aggregate. */
+    roughVary: uniform(opts.roughVary ?? 0.10),
+    /** Roughness REMOVED in the wheel paths. Tyres polish asphalt smooth, and
+     *  that gloss strip is the strongest real-world road cue at grazing angles. */
+    wheelPolish: uniform(opts.wheelPolish ?? 0.22),
+    /** Albedo darkening in the wheel paths (rubber deposit). */
+    wheelDarken: uniform(opts.wheelDarken ?? 0.10),
     // Centre + edge paint lines. Default OFF — the clean Apex-Rush deck look;
     // the dev panel's "Road lines" toggle flips the uniform live.
     linesOn: uniform(opts.linesOn ?? 0), // 1 = draw centre + edge lines, 0 = plain deck
@@ -69,29 +100,68 @@ export function createRoadMaterial(opts = {}) {
     side: THREE.DoubleSide,
   });
 
+  // ── SHARED ASPHALT SURFACE ────────────────────────────────────────────────
+  // Built ONCE here and referenced by both colorNode and roughnessNode below.
+  // Because it's the same node instance in both, the graph emits the noise a
+  // single time per fragment — computing it inside each Fn separately would
+  // double the cost for identical results. Packed into a vec4 so one node
+  // carries all four fields.
+  //
+  // Still zero textures: no sampler slots (v3 is already near the Windows WebGPU
+  // 16-sampler cap), no VRAM, no streaming, and it tiles infinitely along a
+  // track of any length.
+  const surface = Fn(() => {
+    const along = uv().x; // metres along the path
+    const across = uv().y; // metres across the developed profile
+    const lateral = attribute("aLateral", "float");
+
+    // MACRO — slow tonal drift: resurfacing patches, sun bleaching, old repairs.
+    // Low frequency, so it can never alias and needs no LOD handling.
+    const macro = mx_fractal_noise_float(
+      vec3(along.mul(u.macroScale), across.mul(u.macroScale), 0.0), 3, 2.0, 0.5, 1.0,
+    ).mul(0.5).add(0.5);
+
+    // AGGREGATE — the chip speckle that actually reads as asphalt up close.
+    //
+    // This is the part the old sin-hash got wrong: a per-pixel hash has no scale
+    // at all, so at distance it undersampled into crawling static. Here the
+    // speckle is a real spatial frequency, and it's faded out once it drops
+    // below the sampling rate. fwidth() gives UV-units-per-pixel directly, which
+    // is resolution- AND angle-independent; the max of both axes is what
+    // matters because looking down a road is precisely the case where one axis
+    // undersamples badly while the other is still fine.
+    const texel = max(fwidth(along), fwidth(across));
+    const aggFade = saturate(oneMinus(texel.mul(u.aggScale).mul(2.0)));
+    const agg = mx_noise_float(
+      vec3(along.mul(u.aggScale), across.mul(u.aggScale), 0.0),
+    ).mul(0.5).mul(aggFade).add(0.5); // fades toward flat 0.5, not toward black
+
+    // WHEEL PATHS — the two bands where tyres actually run.
+    const wheelPath = smoothstep(0.18, 0.42, abs(lateral))
+      .mul(oneMinus(smoothstep(0.55, 0.8, abs(lateral))));
+
+    return vec4(macro, agg, wheelPath, aggFade);
+  })();
+
   mat.colorNode = Fn(() => {
     const lateral = attribute("aLateral", "float");
     const zone = attribute("aZone", "float");
     const plain = attribute("aPlain", "float"); // 1 on platforms → no lines
     const along = uv().x;
-    const across = uv().y;
 
-    // Asphalt: fine hash grain + a coarse mottle octave (patchy resurfacing
-    // look) + subtle wheel-path wear darkening where tires actually run. All
-    // cheap ALU — no textures.
-    const grain = fract(
-      sin(along.mul(12.9898).add(across.mul(78.233))).mul(43758.5453),
-    );
-    const mottle = sin(along.mul(0.31).add(sin(across.mul(0.43)).mul(2.1)))
-      .mul(sin(across.mul(0.23).add(along.mul(0.11))))
-      .mul(0.5)
-      .add(0.5);
-    const tone = grain.mul(0.72).add(mottle.mul(0.28));
-    let deckBase = mix(u.asphaltDark, u.asphaltLight, tone.mul(u.grainScale));
-    const wheelWear = smoothstep(0.18, 0.42, abs(lateral)).mul(
-      float(1).sub(smoothstep(0.55, 0.8, abs(lateral))),
-    );
-    deckBase = deckBase.mul(float(1).sub(wheelWear.mul(0.14)));
+    const macro = surface.x;
+    const agg = surface.y;
+    const wheelPath = surface.z;
+
+    // Weighted toward the macro layer: large-scale variation is what the eye
+    // reads as "a road surface", the speckle is the close-up detail on top.
+    const tone = macro.mul(0.6).add(agg.mul(0.4));
+    // Symmetric contrast about the midpoint, so grainScale can push or pull
+    // variation without dragging the average brightness down with it.
+    const shaped = saturate(tone.sub(0.5).mul(u.grainScale).add(0.5));
+    let deckBase = mix(u.asphaltDark, u.asphaltLight, shaped);
+    deckBase = deckBase.mul(oneMinus(wheelPath.mul(u.wheelDarken)));
+    deckBase = deckBase.mul(u.deckBrightness);
 
     // Dashed centre line.
     const centerMask = smoothstep(
@@ -135,8 +205,25 @@ export function createRoadMaterial(opts = {}) {
   // matte asphalt, glossy painted kerbs, satin tube shell, dull concrete sides.
   mat.roughnessNode = Fn(() => {
     const zone = attribute("aZone", "float");
+
+    // Same `surface` node as colorNode — referenced, not recomputed.
+    const macro = surface.x;
+    const agg = surface.y;
+    const wheelPath = surface.z;
+
+    // Deck asphalt: vary gloss with the SAME noise that varies colour, so the
+    // highlights line up with the visible aggregate instead of floating over a
+    // uniform sheen. Then polish the wheel paths — that pair of smoother strips
+    // catching the sun is what sells a road at grazing angles, and it costs
+    // nothing here because the fields are already computed.
+    let deck = u.deckRough
+      .add(macro.sub(0.5).mul(u.roughVary))
+      .add(agg.sub(0.5).mul(u.roughVary).mul(0.5))
+      .sub(wheelPath.mul(u.wheelPolish));
+    deck = clamp(deck, 0.05, 1.0);
+
     let r = float(0.9); // sides / underside
-    r = mix(r, float(0.94), step(0.5, zone)); // deck asphalt
+    r = mix(r, deck, step(0.5, zone)); // deck asphalt
     r = mix(r, float(0.5), step(1.5, zone)); // kerb paint
     r = mix(r, float(0.82), step(2.5, zone)); // tube inner
     r = mix(r, float(0.55), step(3.5, zone)); // tube shell paint
@@ -168,13 +255,25 @@ function tubeRingMask(u, along) {
   return smoothstep(halfW.add(0.02), halfW, d);
 }
 
-/** Galvanised-metal material for the guardrail beams + posts — brighter and
- *  glossier so the W-beam profile actually catches sky/sun highlights. */
+/**
+ * Guardrail beams + posts.
+ *
+ * This was `metalness 0.92` — near-pure metal — and that is why the rails read
+ * almost black. A metal has NO diffuse response whatsoever: every photon it
+ * shows you is a specular reflection of the environment. At roughness 0.32 that
+ * reflection is a narrow lobe, so a vertical rail mirrors the DIM horizon band
+ * of the sky rather than the bright dome overhead or the sun, and it never picks
+ * up any of the direct sunlight that lights everything around it.
+ *
+ * Physically correct, visually useless here. Dropping metalness to ~0.5 gives
+ * the rail a real diffuse term, so it responds to the sun and sky like the rest
+ * of the scene while keeping enough specular to still read as metal.
+ */
 export function createGuardrailMaterial(opts = {}) {
   return new THREE.MeshStandardMaterial({
-    color: lin(opts.color ?? 0xaeb6c0),
-    roughness: opts.roughness ?? 0.32,
-    metalness: opts.metalness ?? 0.92,
+    color: lin(opts.color ?? 0xc9d2dc),
+    roughness: opts.roughness ?? 0.42,
+    metalness: opts.metalness ?? 0.5,
     side: THREE.DoubleSide,
   });
 }
@@ -212,7 +311,7 @@ export function syncRoadUniforms(mat, p) {
   if (p.tubeInner != null) u.tubeInner.value.copy(lin(p.tubeInner));
   if (p.tubeOuter != null) u.tubeOuter.value.copy(lin(p.tubeOuter));
   if (p.neonColor != null) u.neonColor.value.copy(lin(p.neonColor));
-  for (const k of ["centerHalf", "centerSoft", "centerDash", "edgePos", "edgeWidth", "railDash", "railStriped", "grainScale", "neonIntensity", "neonSpacing", "neonWidth"]) {
+  for (const k of ["centerHalf", "centerSoft", "centerDash", "edgePos", "edgeWidth", "railDash", "railStriped", "grainScale", "neonIntensity", "neonSpacing", "neonWidth", "deckBrightness", "macroScale", "aggScale", "deckRough", "roughVary", "wheelPolish", "wheelDarken"]) {
     if (p[k] != null) u[k].value = p[k];
   }
 }

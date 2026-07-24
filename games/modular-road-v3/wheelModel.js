@@ -54,12 +54,49 @@ export async function loadWheelModel(renderer, url = WHEEL_GLB_URL) {
   root.position.sub(center);
   object.add(root);
 
+  // SHADOW BUDGET. Every caster is re-drawn once per shadow cascade, and v3 runs
+  // 3 (v2/app/config.js: capped at 3, not 4, by the Windows WebGPU 16-sampler
+  // limit). So a caster costs 1 main draw + 3 shadow draws.
+  //
+  // Only the TYRE casts. The rim, rotor and caliper all sit INSIDE the tyre's
+  // silhouette, so their shadows are entirely contained by it and cost 9 draws
+  // per wheel for nothing. Marking all four (the obvious thing, and what this
+  // did at first) put the GLB wheels at 64 draws/frame against the procedural
+  // wheels' 40.
+  //
+  // frustumCulled is deliberately left ON: "it's small and near the car" is true
+  // for the main pass but wrong for shadows, where each cascade culls against
+  // its own frustum and would otherwise redraw all four wheels in all three.
+  const meshes = [];
   object.traverse((o) => {
     if (!o.isMesh) return;
-    o.castShadow = true;
+    o.castShadow = false;
     o.receiveShadow = false;
-    o.frustumCulled = false; // small, always near the car — culling per wheel is waste
+    meshes.push(o);
   });
+
+  // TYRE **and RIM** cast. The tyre alone is not enough: a tyre mesh is an
+  // ANNULUS, so on its own it casts a ring with a hole punched through the
+  // middle. The rim (outer radius ~0.29 against the tyre's ~0.37) fills that
+  // hole, and the two together give a solid disc silhouette. The rotor and
+  // caliper stay off — they sit inside the rim and add nothing but draws.
+  const _b = new THREE.Box3();
+  const _s = new THREE.Vector3();
+  const label = (m) => `${m.material?.name ?? ""} ${m.name ?? ""}`;
+  const tyre = meshes.find((m) => /tyre|tire/i.test(label(m)));
+  const rim = meshes.find((m) => m !== tyre && /wheel|rim/i.test(label(m)));
+  if (tyre) tyre.castShadow = true;
+  if (rim) rim.castShadow = true;
+
+  // Fallback for an unrecognised file: cast from the two physically largest
+  // parts, measured in WORLD space. Raw local bounding radii would pick wrong —
+  // the four nodes carry very different scales (0.374 down to 0.178).
+  if (!tyre && !rim) {
+    const bySize = meshes
+      .map((m) => ({ m, size: (_b.setFromObject(m), _b.getSize(_s).length()) }))
+      .sort((a, b) => b.size - a.size);
+    for (const { m } of bySize.slice(0, 2)) m.castShadow = true;
+  }
 
   return {
     object,
