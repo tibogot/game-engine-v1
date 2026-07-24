@@ -179,13 +179,48 @@ export const TIRE = {
   // fighting toward world-up); `stabilizerDamp` damps the roll/pitch rate.
   stabilizerStrength: 9000,
   stabilizerDamp: 2600,
-  // Airborne control: gentle tumble damping + player torque (W/S pitch, A/D roll,
-  // Q/E yaw spin). Yaw is damped far less (`airYawDamp`) than pitch/roll so a
-  // flat spin actually carries once you start it.
-  airAngularDamp: 1400,
-  airControl: 5000,
-  airYawControl: 4500,
-  airYawDamp: 250,
+  // ── AIRBORNE CONTROL — RATE-BASED (W/S pitch, A/D roll, Q/E yaw) ────────
+  //
+  // Hold a direction and the car rotates AT `…Rate`; release and it stops. This
+  // is what arcade stunt racers do, and it replaced a TORQUE model that was the
+  // cause of the "uncontrollable spin after a flip" bug.
+  //
+  // Why torque was wrong. It applied a flat 5000 N·m to whichever axis you
+  // pushed — but torque only becomes rotation after dividing by that axis's
+  // inertia, and this chassis is wildly asymmetric: pitch 1554, yaw 1890,
+  // ROLL 420 kg·m². So the same input gave 11.9 rad/s² of roll against 3.2 of
+  // pitch — nearly 4× more authority on the weakest axis, purely by accident.
+  // Worse, torque INTEGRATES: it never stopped adding, so a landing bounce with
+  // steering held wound the car to 7 rad/s of roll and flipped it inverted.
+  // (Measured: peak roll 7.00 rad/s, tilt 180°; with airControl forced to 0,
+  // 0.09 rad/s and 1°.)
+  //
+  // A rate model is immune to both. You specify the RATE, so inertia cancels out
+  // and every axis behaves the same; and it converges on a target instead of
+  // accumulating, so holding an input longer can never wind up more rotation.
+  /** Full-input rotation rates (rad/s). ~3.6 ⇒ a full flip in about 1.7 s. */
+  airPitchRate: 3.6,
+  airRollRate: 3.6,
+  /** Yaw sits higher so a flat spin still reads as a deliberate trick. */
+  airYawRate: 4.5,
+  /** How fast the actual rate converges on the target (1/s). Higher = snappier
+   *  and more digital; lower = floatier. This is the "air feel" knob. */
+  airResponse: 9.0,
+  /** Convergence toward ZERO on an axis with no input (1/s) — this is the tumble
+   *  damping. Softer than `airResponse` so a knock still tumbles naturally
+   *  instead of freezing the instant you let go. */
+  airSettle: 2.0,
+  /**
+   * Lockout (s) after ANY wheel contact before air control may engage again.
+   *
+   * The old `airControlDelay` counted CONTINUOUS airborne time from zero, so a
+   * landing bounce longer than it simply re-armed air control mid-bounce — which
+   * is exactly the reported bug: land, hold steer, and the bounce rolls you
+   * over. Timing from the last CONTACT instead means a bounce can never re-arm
+   * it, however long it lasts, while a clean launch is airborne for well over
+   * this and keeps full trick control.
+   */
+  airGroundLockout: 0.45,
   // ── LANDINGS ────────────────────────────────────────────────────────────
   // A jump-heavy track lives or dies on whether landings feel FAIR. Two separate
   // mechanisms — see _applyLandingAssist().
@@ -221,12 +256,6 @@ export const TIRE = {
    *  car wobbles through the last metres of the fall. */
   airLandDamp: 1200,
 
-  // W/S/A/D air torque only kicks in after this much CONTINUOUS airtime (s).
-  // Loop / tube / crest exits almost always include a brief hop — without the
-  // gate, the throttle you're still holding pitched the nose mid-hop and the
-  // car landed misaligned ("uncontrollable after the loop"). Deliberate stunt
-  // input (Q/E yaw) stays ungated.
-  airControlDelay: 0.25,
 };
 
 /** Drivetrain. `layout` picks which axle(s) get engine torque; for AWD,
@@ -1234,7 +1263,7 @@ export class Vehicle {
     this._arrowDir = new THREE.Vector3();
     this._geomCenter = new THREE.Vector3();
     this._steerFwd = new THREE.Vector3();
-    /** Continuous airborne time (s) — gates W/S/A/D air torque (airControlDelay). */
+    /** Seconds since the last wheel contact — gates air control (airGroundLockout). */
     this._airTime = 0;
     _syncComOffset();
   }
@@ -1695,23 +1724,43 @@ export class Vehicle {
       this._stabTorque.addScaledVector(this._stabWTilt, -TIRE.stabilizerDamp);
       body.torqueAccum.add(this._stabTorque);
     } else {
-      // Airborne: damp pitch/roll firmly but yaw lightly (so a flat spin carries),
-      // plus player air control — W/S pitch, A/D roll, Q/E yaw spin.
+      // ── Airborne: RATE-BASED control (see the AIRBORNE CONTROL block on TIRE) ──
+      // Per axis: pick a target rotation RATE from the input, then push the
+      // actual rate toward it. Torque is scaled by that axis's inertia so the
+      // resulting angular ACCELERATION is identical on all three — which is the
+      // whole point, since roll's inertia is 3.7× smaller than pitch's and the
+      // old flat-torque model therefore gave roll 4× the authority.
       this._airTime += dt;
-      const wYaw = body.angVel.dot(this._stabUp);
-      this._stabWTilt.copy(body.angVel).addScaledVector(this._stabUp, -wYaw);
-      this._stabTorque.copy(this._stabWTilt).multiplyScalar(-TIRE.airAngularDamp);
-      this._stabTorque.addScaledVector(this._stabUp, -wYaw * TIRE.airYawDamp);
-      // W/S/A/D torque waits out airControlDelay so the throttle/steer held
-      // through a loop-exit hop can't flip the car; Q/E yaw is deliberate
-      // stunt input and stays immediate.
-      if (TIRE.airControl > 0 && this._airTime >= (TIRE.airControlDelay ?? 0)) {
-        this._airRight.set(1, 0, 0).applyQuaternion(body.quat);
-        this._airFwd.set(0, 0, 1).applyQuaternion(body.quat);
-        this._stabTorque.addScaledVector(this._airRight, -this.input.throttle * TIRE.airControl);
-        this._stabTorque.addScaledVector(this._airFwd, this.input.steer * TIRE.airControl);
-      }
-      this._stabTorque.addScaledVector(this._stabUp, this.input.yaw * TIRE.airYawControl);
+      this._airRight.set(1, 0, 0).applyQuaternion(body.quat); // pitch axis
+      this._airFwd.set(0, 0, 1).applyQuaternion(body.quat);   // roll axis
+      // _stabUp is the yaw axis, already computed above.
+
+      // A bounce is not a trick: time from the last CONTACT, not from zero
+      // airborne time, so no bounce can ever re-arm control mid-landing.
+      const armed = this._airTime >= TIRE.airGroundLockout;
+      const inP = armed ? -this.input.throttle : 0;
+      const inR = armed ? this.input.steer : 0;
+      const inY = this.input.yaw; // Q/E is deliberate stunt input — never gated
+
+      // Diagonal inertia in body-local axes (x pitch, y yaw, z roll).
+      const li = body.localInvInertia.elements;
+      const Ip = 1 / (li[0] || 1e-6);
+      const Iy = 1 / (li[4] || 1e-6);
+      const Ir = 1 / (li[8] || 1e-6);
+
+      const axis = (unit, input, rate, inertia) => {
+        const cur = body.angVel.dot(unit);
+        const target = input * rate;
+        // Softer convergence when the axis is idle, so a knock still tumbles
+        // naturally rather than freezing the moment you release.
+        const gain = input !== 0 ? TIRE.airResponse : TIRE.airSettle;
+        this._stabTorque.addScaledVector(unit, (target - cur) * gain * inertia);
+      };
+
+      this._stabTorque.set(0, 0, 0);
+      axis(this._airRight, inP, TIRE.airPitchRate, Ip);
+      axis(this._airFwd, inR, TIRE.airRollRate, Ir);
+      axis(this._stabUp, inY, TIRE.airYawRate, Iy);
       body.torqueAccum.add(this._stabTorque);
     }
   }

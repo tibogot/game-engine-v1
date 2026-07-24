@@ -514,6 +514,55 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Car — Air control</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Flip rate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-air-pitch" min="0" max="10" step="0.2" />
+              <span class="prop-num" id="dv-air-pitch-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Roll rate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-air-roll" min="0" max="10" step="0.2" />
+              <span class="prop-num" id="dv-air-roll-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spin rate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-air-yaw" min="0" max="10" step="0.2" />
+              <span class="prop-num" id="dv-air-yaw-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Response</span>
+            <div class="prop-value">
+              <input type="range" id="dv-air-resp" min="1" max="25" step="0.5" />
+              <span class="prop-num" id="dv-air-resp-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bounce lockout</span>
+            <div class="prop-value">
+              <input type="range" id="dv-air-lock" min="0" max="1.5" step="0.05" />
+              <span class="prop-num" id="dv-air-lock-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Air control is <b>rate-based</b>: hold a direction and the car rotates
+            at that many rad/s, release and it stops — so the same input always
+            does the same thing. <b>Response</b> is how fast it reaches the rate
+            (higher = snappier). <b>Bounce lockout</b> is how long after touching
+            down before air control re-arms; a landing bounce is not a trick, and
+            without it holding steer through a bounce rolls the car over.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Car — Aero</div>
         <div class="section-body">
           <div class="prop-row">
@@ -1059,6 +1108,12 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-land-range", TIRE, "airLandRange", (v) => `${v.toFixed(0)} m`);
   slider("dv-lean-roll", BODYLEAN, "rollPerG", deg);
   slider("dv-lean-pitch", BODYLEAN, "pitchPerG", deg);
+  const rads = (v) => `${v.toFixed(1)} rad/s`;
+  slider("dv-air-pitch", TIRE, "airPitchRate", rads);
+  slider("dv-air-roll", TIRE, "airRollRate", rads);
+  slider("dv-air-yaw", TIRE, "airYawRate", rads);
+  slider("dv-air-resp", TIRE, "airResponse", (v) => v.toFixed(1));
+  slider("dv-air-lock", TIRE, "airGroundLockout", (v) => `${v.toFixed(2)}s`);
   slider("dv-drag", AERO, "drag");
   slider("dv-down", AERO, "downforce", (v) => v.toFixed(1));
 
