@@ -102,6 +102,7 @@ import { SolidCollider } from "../physics/solidCollider.js";
 import { createColliderGroup } from "../physics/colliderGroup.js";
 import { createSplineFeatureColliderStore } from "../physics/splineFeatureCollider.js";
 import { createProceduralCliffGeometry, CLIFF_PRESETS } from "../props/proceduralCliff.js";
+import { GREYBOX_KIT, buildGreyboxGeometry } from "../props/greyboxKit.js";
 import { applyCliffTerrainBlend, createCliffGlbBlendMaterial } from "../props/cliffTerrainBlend.js";
 import { CliffPaintMask } from "../../v2/core/cliffs/cliffPaintMask.js";
 import { CliffPaintSystem } from "../../v2/tools/cliffs/cliffPaintSystem.js";
@@ -4512,6 +4513,42 @@ export async function startV3App(opts = {}) {
     document.getElementById("props-panel")?._rebuildPropUi?.();
   }
 
+  // Grey-box structure kit (props/greyboxKit.js) — parametric building blocks.
+  // Each preset is one primitive type = one InstancedMesh = one draw call for any
+  // count. Pieces with holes/slopes (`solid`) go through SolidCollider so the
+  // opening is genuinely walkable; box-shaped pieces keep the cheap AABB proxy.
+  function addKitPiece(pieceName) {
+    const piece = GREYBOX_KIT.find((p) => p.name === pieceName);
+    if (!piece) return;
+    const existing = propSlots.find((s) => s.name === pieceName && s.builtin);
+    if (existing) {
+      propState.activeSlot = propSlots.indexOf(existing);
+      document.getElementById("props-panel")?._rebuildPropUi?.();
+      return;
+    }
+    const geometry = buildGreyboxGeometry(pieceName);
+    if (!geometry) return;
+    const defaultPropMat =
+      propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
+    const material = createMaterialForLibrary(defaultPropMat, { triplanar: false });
+    const typeIdx = propStore.registerPrimitive(pieceName, geometry, material);
+    if (typeIdx < 0) return;
+    if (piece.solid) propStore.types[typeIdx].solid = true;
+    propInstancer.onTypeRegistered(typeIdx);
+    const slotIdx = propSlots.length;
+    propSlots.push({
+      name: pieceName,
+      loaded: true,
+      typeIdx,
+      builtin: true,
+      solid: !!piece.solid,
+      materialId: defaultPropMat?.id ?? "__none__",
+      triplanar: false,
+    });
+    propState.activeSlot = slotIdx;
+    document.getElementById("props-panel")?._rebuildPropUi?.();
+  }
+
   // Import a GLB as a solid cliff type — real-triangle collision, same
   // placement/gizmo/undo pipeline as props.
   async function importCliffGlb(preselectedFile = null) {
@@ -4679,6 +4716,8 @@ export async function startV3App(opts = {}) {
     importPropGlb,
     addPrimitive,
     addCliff,
+    addKitPiece,
+    getKitPieceNames: () => GREYBOX_KIT.map((p) => p.name),
     importCliffGlb,
     getCliffPresetNames: () => CLIFF_PRESETS.map((c) => c.name),
     addLiveProp,
@@ -4795,6 +4834,7 @@ export async function startV3App(opts = {}) {
     }
 
     const cliffNames = new Set(CLIFF_PRESETS.map((c) => c.name));
+    const kitNames   = new Set(GREYBOX_KIT.map((p) => p.name));
 
     for (const meta of slots) {
       try {
@@ -4810,6 +4850,9 @@ export async function startV3App(opts = {}) {
           }
         } else if (meta.builtin && cliffNames.has(meta.name)) {
           addCliff(meta.name);
+          _applySavedSlotMaterial(propSlots.length - 1, meta);
+        } else if (meta.builtin && kitNames.has(meta.name)) {
+          addKitPiece(meta.name);
           _applySavedSlotMaterial(propSlots.length - 1, meta);
         } else if (meta.builtin) {
           addPrimitive(meta.name);

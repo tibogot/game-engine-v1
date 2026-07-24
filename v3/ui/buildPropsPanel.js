@@ -374,6 +374,24 @@ panel.innerHTML = "";
         });
       }
 
+      // --- Structure kit (grey-box building blocks; 4×3 m module) ---
+      const kitBody = _section(panel, "Add Structure", false);
+      const kitHint = document.createElement("p");
+      kitHint.style.cssText =
+        "margin:2px 0 6px; font-size:11px; color:var(--text-dim); line-height:1.35;";
+      kitHint.textContent =
+        "Grey-box blocks on a 4 m module. Hold Shift while dragging the gizmo to grid-snap, and use rotation snap (90°) to tile them into rooms. Doorways/windows/stairs/ramps are walkable; each piece is one draw call no matter how many you place.";
+      kitBody.appendChild(kitHint);
+      for (const pieceName of app.getKitPieceNames?.() ?? []) {
+        _button(kitBody, {
+          title: pieceName,
+          onClick: () => {
+            app.addKitPiece(pieceName);
+            rebuildAll();
+          },
+        });
+      }
+
       // --- Cliffs (solid: real-triangle collision, acts like terrain) ---
       const cliffBody = _section(panel, "Add Cliff (solid)", false);
       const cliffHint = document.createElement("p");
