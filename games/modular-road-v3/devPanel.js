@@ -62,6 +62,17 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <button class="action-btn primary" id="dv-newchain" type="button">New chain here (N)</button>
+          <div class="prop-row">
+            <span class="prop-label">Anchor tilt</span>
+            <div class="prop-value"><span class="prop-num" id="dv-anchor-tilt">level</span></div>
+          </div>
+          <button class="action-btn" id="dv-anchor-level" type="button">Level anchor</button>
+          <div class="dv-hint">
+            To tilt a chain (e.g. a banked landing strip after a jump): start or
+            select it, press <b>Shift+E</b> for the rotate gizmo — on a chain
+            anchor it turns on all 3 axes — and drag. The whole chain tilts
+            rigidly. <b>Level anchor</b> resets pitch/roll (keeps the heading).
+          </div>
           <div class="dv-hint">
             The track floats at this height above the terrain. <b>New chain</b> drops
             a fresh anchor in the sky where you're looking; pieces auto-chain from
@@ -590,6 +601,33 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Edit piece</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Selected</span>
+            <div class="prop-value"><span class="prop-num" id="dv-sel-piece">none</span></div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Tilt</span>
+            <div class="prop-value"><span class="prop-num" id="dv-sel-tilt">level</span></div>
+          </div>
+          <button class="action-btn" id="dv-piece-level" type="button">Level tilt (L)</button>
+          <button class="action-btn" id="dv-piece-gap" type="button">Make empty space</button>
+          <button class="action-btn" id="dv-piece-replace" type="button">Replace with active (Enter)</button>
+          <button class="action-btn" id="dv-piece-insert" type="button">Insert active before (I)</button>
+          <button class="action-btn" id="dv-piece-delete" type="button">Delete (Del)</button>
+          <div class="dv-hint">
+            <b>Right-click</b> a placed piece to select it (Esc to deselect). A
+            gizmo appears on it: <b>E</b> = rotate to <b>tilt</b> it and everything
+            after it (banked/descending landing strips), <b>W</b> = move the whole
+            chain. <b>L</b> levels the tilt. <b>Make empty space</b> turns it into
+            a jump gap (still selectable — replace to fill it back). Replace /
+            insert / delete re-flow the rest of the chain to fit.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Track</div>
         <div class="section-body">
           <div class="prop-row">
@@ -998,6 +1036,8 @@ export function createRoadDevPanel({ app, game, params }) {
     });
   }
   $("#dv-newchain").addEventListener("click", () => game.reseedChain());
+  const anchorTiltEl = $("#dv-anchor-tilt");
+  $("#dv-anchor-level")?.addEventListener("click", () => { game.levelAnchor?.(); refresh(); });
 
   // ── Grid snap ───────────────────────────────────────────────────────────────
   toggle("dv-snap", game.getSnapOn(), (on) => game.setSnapOn(on));
@@ -1148,6 +1188,17 @@ export function createRoadDevPanel({ app, game, params }) {
   syncWheelBtn();
 
   // ── Track ───────────────────────────────────────────────────────────────────
+  // Piece editing. The buttons no-op with no selection; the readout + disabled
+  // state come from refresh(), which the game calls after any pick/edit.
+  const selPieceEl = $("#dv-sel-piece");
+  const pieceBtns = ["dv-piece-replace", "dv-piece-insert", "dv-piece-delete", "dv-piece-level", "dv-piece-gap"].map((id) => $(`#${id}`));
+  $("#dv-piece-replace")?.addEventListener("click", () => { game.replaceSelected(); refresh(); });
+  $("#dv-piece-insert")?.addEventListener("click", () => { game.insertBeforeSelected(); refresh(); });
+  $("#dv-piece-delete")?.addEventListener("click", () => { game.deleteSelected(); refresh(); });
+  $("#dv-piece-level")?.addEventListener("click", () => { game.levelSelected?.(); refresh(); });
+  $("#dv-piece-gap")?.addEventListener("click", () => { game.makeSelectedGap?.(); refresh(); });
+  const selTiltEl = $("#dv-sel-tilt");
+
   toggle("dv-lines", game.getLinesOn(), (on) => game.setLinesOn(on));
   // Road-surface uniforms are TSL `uniform()` objects, so the slider helper
   // drives their `.value` directly — every change is live, no rebuild.
@@ -1225,6 +1276,23 @@ export function createRoadDevPanel({ app, game, params }) {
     lightsToggle.set(game.getHeadlights());
     // The wheel GLB finishes loading after the panel is built and calls refresh().
     syncWheelBtn();
+    // Selected-piece readout + button enable state.
+    const selId = game.getSelectedPieceId?.() ?? null;
+    if (selPieceEl) selPieceEl.textContent = selId ?? "none";
+    for (const b of pieceBtns) if (b) b.disabled = !selId;
+    if (selTiltEl) {
+      const t = game.getSelectedTilt?.() ?? { pitch: 0, roll: 0 };
+      const flat = Math.abs(t.pitch) < 0.5 && Math.abs(t.roll) < 0.5;
+      selTiltEl.textContent = !selId ? "—" : flat ? "level" : `pitch ${t.pitch.toFixed(0)}°  roll ${t.roll.toFixed(0)}°`;
+    }
+    // Anchor tilt readout.
+    if (anchorTiltEl) {
+      const t = game.getAnchorTilt?.() ?? { pitch: 0, roll: 0 };
+      const flat = Math.abs(t.pitch) < 0.5 && Math.abs(t.roll) < 0.5;
+      anchorTiltEl.textContent = flat
+        ? "level"
+        : `pitch ${t.pitch.toFixed(0)}°  roll ${t.roll.toFixed(0)}°`;
+    }
   }
   refresh();
 

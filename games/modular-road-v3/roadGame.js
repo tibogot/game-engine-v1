@@ -81,6 +81,7 @@ import {
 } from "./modularRoadTrackIO.js";
 import { createChaseCamera } from "./chaseCamera.js";
 import { createGamepadInput } from "./gamepadInput.js";
+import { createGearbox, GEARBOX } from "./gearbox.js";
 import { loadWheelModel } from "./wheelModel.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
@@ -727,6 +728,26 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     t instanceof HTMLTextAreaElement;
 
   function handleBuildKey(e, code) {
+    // Piece editing takes precedence while a placed piece is selected (right-click).
+    const sel = builder.selectedPiece;
+    if (sel) {
+      switch (code) {
+        case "escape": builder.deselectPiece(); paletteUi?.refreshStatus?.(); devPanel?.refresh(); return;
+        case "keyw": builder.setPlacementGizmoMode("translate"); return; // move the whole chain
+        case "keye": builder.setPlacementGizmoMode("rotate"); return;    // tilt this piece + downstream
+        case "keyl": builder.levelPiece(sel); devPanel?.refresh(); return; // reset tilt
+        case "delete": case "backspace":
+          builder.deletePiece(sel); paletteUi?.refreshStatus?.(); devPanel?.refresh(); return;
+        case "enter": // replace the selected piece with the active palette piece
+          builder.replacePiece(sel, builder.activePieceId);
+          paletteUi?.refreshStatus?.(); devPanel?.refresh(); return;
+        case "keyi": // insert the active piece just before the selection
+          builder.insertPieceBefore(sel, builder.activePieceId);
+          paletteUi?.refreshStatus?.(); devPanel?.refresh(); return;
+      }
+      // Any other key (piece hotkeys, etc.) falls through to normal handling.
+    }
+
     // Piece hotkeys (1–9, 0, letters) select the active piece.
     const byKey = PIECE_CATALOG.find((p) => p.key && p.key === e.key);
     if (byKey) {
@@ -808,6 +829,29 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     ) return;
     builder.place();
     paletteUi.refreshStatus();
+  });
+
+  // RIGHT-CLICK selects a placed piece to edit (tilt / delete / replace /
+  // insert). Right is also the camera PAN button, so a stationary click selects
+  // while a drag still pans — decided on pointerUP by how far the pointer moved.
+  let rmbDown = null;
+  renderer.domElement.addEventListener("pointerdown", (e) => {
+    if (e.button === 2 && mode === "build") rmbDown = { x: e.clientX, y: e.clientY };
+  });
+  renderer.domElement.addEventListener("pointerup", (e) => {
+    if (e.button !== 2 || mode !== "build" || !rmbDown) return;
+    const moved = Math.hypot(e.clientX - rmbDown.x, e.clientY - rmbDown.y);
+    rmbDown = null;
+    if (moved > 6) return; // that was a pan drag, not a click
+    const picked = builder.pickPiece(e.clientX, e.clientY);
+    if (picked) builder.selectPiece(picked);
+    else builder.deselectPiece();
+    paletteUi.refreshStatus();
+    devPanel?.refresh();
+  });
+  // Suppress the browser context menu in build mode so right-click is ours.
+  renderer.domElement.addEventListener("contextmenu", (e) => {
+    if (mode === "build") e.preventDefault();
   });
 
   // Toolbar buttons the palette does NOT wire (the lab's page owned these).
@@ -1108,6 +1152,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const hudFlash = document.getElementById("race-flash");
   const hudSplit = document.getElementById("race-split");
   const hudSpeed = document.querySelector("#race-speed .v");
+  const hudGaugeVal = document.getElementById("gauge-val");
+  const hudGear = document.getElementById("race-gear");
+  // Auto gearbox is DISPLAY-ONLY — the car has no transmission (see gearbox.js).
+  const gearbox = createGearbox();
+  const _hudFwd = new THREE.Vector3();
+  let _hudStroke = "";
+  let _hudGearLabel = "";
+  let _hudGearCls = "";
+  let shiftFlash = 0;
   let splitTimer = 0;
 
   function showSplit(delta) {
@@ -1141,8 +1194,32 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       if (splitTimer <= 0) hudSplit.className = "";
     }
 
-    const kmh = Math.round(Math.hypot(vehicle.body.vel.x, vehicle.body.vel.z) * 3.6);
-    if (hudSpeed) hudSpeed.textContent = String(kmh);
+    const speedMs = Math.hypot(vehicle.body.vel.x, vehicle.body.vel.z);
+    if (hudSpeed) hudSpeed.textContent = String(Math.round(speedMs * 3.6));
+
+    // Tach + gear. Forward speed is SIGNED (dot with the car's own forward) so
+    // the box can tell reversing from sliding backwards — a magnitude can't.
+    _hudFwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat);
+    const g = gearbox.update(speedMs, TIRE.topSpeed, vehicle.body.vel.dot(_hudFwd));
+
+    if (hudGaugeVal) {
+      // pathLength=100 on the arc ⇒ dashoffset is just "100 − percent".
+      const shown = Math.min(1, g.rpm);
+      hudGaugeVal.setAttribute("stroke-dashoffset", String(100 - shown * 100));
+      const hot = g.rpm >= GEARBOX.redline;
+      const stroke = g.reverse ? "#ffd24a" : hot ? "#ff6b45" : "#4a9eff";
+      // Only touch the attribute on change — this runs every frame.
+      if (stroke !== _hudStroke) { hudGaugeVal.setAttribute("stroke", stroke); _hudStroke = stroke; }
+    }
+    if (hudGear) {
+      if (g.label !== _hudGearLabel) { hudGear.textContent = g.label; _hudGearLabel = g.label; }
+      if (g.shifted) shiftFlash = 0.18; // brief upshift blink
+      if (shiftFlash > 0) shiftFlash -= dt;
+      const cls = g.reverse ? "reverse"
+        : shiftFlash > 0 ? "shift"
+        : g.rpm >= GEARBOX.redline ? "redline" : "";
+      if (cls !== _hudGearCls) { hudGear.className = cls; _hudGearCls = cls; }
+    }
   }
 
   function toggleMode() {
@@ -1159,6 +1236,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       setMergedTrack(true); // ~4 draws for the whole track instead of ~1/piece
       builder.setGhostVisible(false);
       builder.deselectPlacement?.();
+      builder.deselectPiece?.(); // clear any edit selection before racing
       props.deselect();
       movers.deselect();
       vehicle.enabled = true;
@@ -1234,6 +1312,31 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       setWheelStyle: (s) => vehicle.setWheelStyle(s),
       hasWheelModel: () => vehicle.hasWheelModel,
       setInstancing: (on) => builder.setInstancing(on),
+      // Piece editing (also on right-click select + W/E/L/Del/Enter/I).
+      getSelectedPieceId: () => builder.selectedPiece?.id ?? null,
+      deselectPiece: () => { builder.deselectPiece(); paletteUi.refreshStatus(); },
+      deleteSelected: () => {
+        if (builder.selectedPiece) builder.deletePiece(builder.selectedPiece);
+        paletteUi.refreshStatus();
+      },
+      replaceSelected: () => {
+        if (builder.selectedPiece) builder.replacePiece(builder.selectedPiece, builder.activePieceId);
+        paletteUi.refreshStatus();
+      },
+      insertBeforeSelected: () => {
+        if (builder.selectedPiece) builder.insertPieceBefore(builder.selectedPiece, builder.activePieceId);
+        paletteUi.refreshStatus();
+      },
+      getSelectedTilt: () =>
+        builder.selectedPiece ? builder.pieceTiltDeg(builder.selectedPiece) : { pitch: 0, roll: 0 },
+      levelSelected: () => { if (builder.selectedPiece) builder.levelPiece(builder.selectedPiece); },
+      isSelectedGap: () => builder.selectedPiece?.id === "gap",
+      makeSelectedGap: () => {
+        // FLAT empty-space spacer sized to the piece (level hole, downstream
+        // unmoved). Reversible: gaps stay selectable, so replace to fill it in.
+        if (builder.selectedPiece) builder.makeGap(builder.selectedPiece);
+        paletteUi.refreshStatus();
+      },
       roadUniforms: roadMaterial._roadUniforms,
       railMaterial,
       getLinesOn: () => roadMaterial._roadUniforms.linesOn.value > 0.5,
@@ -1254,6 +1357,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       getBuildHeight: () => buildHeight,
       setBuildHeight: (m) => { buildHeight = m; },
       reseedChain: () => { seedChainAtSpawn({ atCursor: true }); paletteUi.refreshStatus(); },
+      // Anchor tilt (banked landing strips). The gizmo does the tilting —
+      // Shift+E for the rotate gizmo, which is full 3-axis on a chain anchor —
+      // this is just a readout + a one-click reset.
+      getAnchorTilt: () => builder.anchorTiltDeg?.() ?? { pitch: 0, roll: 0 },
+      levelAnchor: () => { builder.levelAnchor(); paletteUi.refreshStatus(); },
       // Grid snapping
       getSnapOn: () => builder.snapEnabled,
       setSnapOn: (on) => builder.setSnap({ enabled: on }),

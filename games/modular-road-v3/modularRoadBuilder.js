@@ -11,6 +11,22 @@ import {
   socketMatrix,
 } from "./modularRoadKit.js";
 
+/** Shared empty geometry used to drop the selection-highlight's reference to a
+ *  piece geometry without disposing that (shared) geometry. */
+const _EMPTY_GEO = new THREE.BufferGeometry();
+
+/** Scratch for the anchor-orientation math (avoids per-drag allocation). */
+const _YUP = new THREE.Vector3(0, 1, 0);
+const _A_TRAVEL = new THREE.Vector3();
+const _A_UP = new THREE.Vector3();
+const _A_Q = new THREE.Quaternion();
+const _A_E = new THREE.Euler();
+const _A_M = new THREE.Matrix4();
+const _A_Q2 = new THREE.Quaternion();
+const _A_V = new THREE.Vector3();
+const _A_V2 = new THREE.Vector3();
+const _isIdentityQuat = (q) => Math.abs(q.w) > 0.9999999;
+
 /**
  * Auto-chain modular road builder. Pieces always snap onto the track's current
  * open exit connector — no grid. Each placed entry stores the piece id and a
@@ -51,6 +67,14 @@ export class ModularRoadBuilder {
     this.orbit = orbit;
     this.isBuildMode = isBuildMode;
     this.onChange = onChange;
+    // Kept for click-to-pick (delete / replace / insert). The placement gizmo
+    // below also uses them, but only when both are present.
+    this._camera = camera;
+    this._domElement = domElement;
+    /** The placed piece currently selected for editing, or null. */
+    this.selectedPiece = null;
+    this._raycaster = new THREE.Raycaster();
+    this._pickNdc = new THREE.Vector2();
 
     // Build-grid snapping (see setSnap). 8 m cells + 15° yaw by default.
     this.snapEnabled = true;
@@ -73,9 +97,13 @@ export class ModularRoadBuilder {
     this.activeChainId = 0;
     this.currentConnector = initialConnector();
 
-    /** Anchor gizmo state (pos + yaw) for the active chain. */
+    /** Anchor gizmo state for the active chain. `_freeQuat` is the FULL
+     *  orientation (pitch/roll/yaw) — this is what lets an anchor tilt, e.g. a
+     *  banked landing strip after a jump. `freeYaw` is kept in sync as the
+     *  extracted yaw for the few consumers that only want a heading. */
     this.freePlaceMode = true;
     this.freeYaw = 0;
+    this._freeQuat = new THREE.Quaternion();
     this._freePos = new THREE.Vector3(0, 0, 0);
 
     /**
@@ -125,6 +153,16 @@ export class ModularRoadBuilder {
     this.ghost.name = "ModularRoadGhost";
     this.ghost.matrixAutoUpdate = false;
     scene.add(this.ghost);
+
+    // Faint marker for GAP pieces (empty-space spacers). They're `noRender` so
+    // they never draw as road or instance/merge into the drive track — but a
+    // build-time ghost makes the hole visible and gives you something to
+    // right-click to change it back. Drive mode hides builder.root entirely, so
+    // this only ever shows while building.
+    this.gapMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff7043, transparent: true, opacity: 0.14,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
 
     /** Pivot + gizmo for free-chain placement (N). */
     this.placementPivot = new THREE.Object3D();
@@ -249,6 +287,7 @@ export class ModularRoadBuilder {
     this._gizmoTarget = "chain";
     this.ghostDetached = false;
     this.freeYaw = this.snapYaw(yaw != null ? yaw : 0);
+    this._freeQuat.setFromAxisAngle(_YUP, this.freeYaw); // new chains start level
     if (atPos) this._freePos.copy(atPos);
     else if (this.orbit?.target) this._freePos.copy(this.orbit.target);
     this.snapPos(this._freePos); // land the new chain on the build grid
@@ -295,10 +334,11 @@ export class ModularRoadBuilder {
     this.freePlaceMode = true;
     this._gizmoTarget = "chain";
     this.ghostDetached = false;
-    // Seed the gizmo from the chain's anchor (pos + yaw).
+    // Seed the gizmo from the chain's anchor — FULL orientation, so a tilted
+    // chain shows its tilt when re-selected instead of snapping back to level.
     this._freePos.setFromMatrixPosition(chain.anchor);
-    const e = new THREE.Euler().setFromRotationMatrix(chain.anchor, "YXZ");
-    this.freeYaw = e.y;
+    _A_M.extractRotation(chain.anchor);
+    this._setFreeQuat(_A_Q.setFromRotationMatrix(_A_M));
     this._syncCurrentConnector();
     this._showPlacementGizmo();
     this.refreshGhost();
@@ -330,12 +370,10 @@ export class ModularRoadBuilder {
   setPlacementGizmoMode(mode) {
     if (!this.placementGizmo) return;
     this.placementGizmo.setMode(mode);
-    // Rotation is yaw-only: a free 3-axis rotation would pitch/roll the entry
-    // socket, and every socket in the kit is level by convention.
-    const rot = mode === "rotate";
-    this.placementGizmo.showX = !rot;
-    this.placementGizmo.showZ = !rot;
-    this.placementGizmo.showY = true;
+    // A CHAIN ANCHOR may tilt on all 3 axes (banked landing strips); the NEXT
+    // PIECE stays yaw-only because every socket in the kit is level by
+    // convention. See _applyGizmoAxes.
+    this._applyGizmoAxes();
     this._notify();
   }
 
@@ -398,19 +436,29 @@ export class ModularRoadBuilder {
     this.placementGizmo.attach(this.placementPivot);
     this.placementGizmo.enabled = true;
     this.placementGizmo.visible = true;
+    this._applyGizmoAxes();
   }
 
-  /** True while dragging / hovering the free-placement gizmo (suppress LMB place). */
+  /** True while dragging / hovering the placement gizmo (suppress LMB place).
+   *  Also covers the SELECTED-PIECE gizmo, whose target isn't freePlaceMode. */
   isUsingPlacementGizmo() {
-    return (
-      this.freePlaceMode &&
+    return !!(
       this.placementGizmo &&
+      (this.freePlaceMode || this._gizmoTarget === "piece") &&
       (this.placementGizmo.dragging || this.placementGizmo.axis != null)
     );
   }
 
   _showPlacementGizmo() {
-    this._showGizmoAt(this._freePos, this.freeYaw);
+    if (!this.placementGizmo) return;
+    // The anchor carries a FULL orientation, so drive the pivot's quaternion —
+    // not a yaw scalar — or a tilt would be flattened the moment the gizmo shows.
+    this.placementPivot.position.copy(this._freePos);
+    this.placementPivot.quaternion.copy(this._freeQuat);
+    this.placementGizmo.attach(this.placementPivot);
+    this.placementGizmo.enabled = true;
+    this.placementGizmo.visible = true;
+    this._applyGizmoAxes();
   }
 
   _hidePlacementGizmo() {
@@ -420,11 +468,60 @@ export class ModularRoadBuilder {
     this.placementGizmo.visible = false;
   }
 
+  /**
+   * Gizmo drag on a SELECTED PIECE.
+   *  • rotate → set the piece's entry TILT (base⁻¹·pose), banking it + downstream.
+   *  • translate → move the WHOLE CHAIN (a single piece can't move alone without
+   *    tearing the chain), by shifting the chain anchor by the drag delta.
+   * After rebuildAll the piece has moved, so the pivot is re-seated on it.
+   */
+  _onPieceGizmoChange() {
+    const p = this.selectedPiece;
+    if (!p) return;
+
+    if (this.placementGizmo.mode === "rotate") {
+      _A_M.extractRotation(p._baseIn);
+      _A_Q.setFromRotationMatrix(_A_M);            // base rotation
+      // tilt = base⁻¹ · pivotOrientation
+      _A_Q2.copy(this.placementPivot.quaternion).premultiply(_A_Q.invert());
+      if (this.snapEnabled) {
+        const step = THREE.MathUtils.degToRad(this.snapYawDeg || 15);
+        _A_E.setFromQuaternion(_A_Q2, "YXZ");
+        _A_E.x = Math.round(_A_E.x / step) * step;
+        _A_E.y = Math.round(_A_E.y / step) * step;
+        _A_E.z = Math.round(_A_E.z / step) * step;
+        _A_Q2.setFromEuler(_A_E);
+      }
+      p.tilt.copy(_A_Q2);
+    } else {
+      // translate → move the whole chain by the delta from where the piece was.
+      const chain = this._activeChain();
+      if (chain) {
+        _A_V.setFromMatrixPosition(p.connectorIn);       // old piece position
+        _A_V.subVectors(this.placementPivot.position, _A_V); // drag delta
+        _A_M.makeTranslation(_A_V.x, _A_V.y, _A_V.z);
+        chain.anchor.premultiply(_A_M);                  // world-space shift of the run
+      }
+    }
+
+    this.rebuildAll();
+    // Re-seat the pivot on the piece's new pose (rebuild moved it).
+    this.placementPivot.position.setFromMatrixPosition(p.connectorIn);
+    _A_M.extractRotation(p.connectorIn);
+    this.placementPivot.quaternion.setFromRotationMatrix(_A_M);
+    this._updateSelectionHighlight();
+  }
+
   _onPlacementGizmoChange() {
     // TransformControls fires "change" for PROPERTY writes too (e.g. setSnap),
     // not just drags. Ignore those — only react while the gizmo is actually up,
     // or a snap-setting tweak would spuriously re-anchor the chain.
     if (!this.placementGizmo?.visible) return;
+
+    if (this._gizmoTarget === "piece") {
+      this._onPieceGizmoChange();
+      return;
+    }
 
     if (this._gizmoTarget === "ghost") {
       // Moving the NEXT PIECE. Within magnet range of any chain's open end the
@@ -454,12 +551,15 @@ export class ModularRoadBuilder {
     if (!this.freePlaceMode) return;
     // The gizmo's own translationSnap/rotationSnap handle the drag, but re-snap
     // here too: rotationSnap doesn't apply in translate mode, and a programmatic
-    // move would otherwise land off-grid.
+    // move would otherwise land off-grid. Read the pivot's FULL quaternion so a
+    // 3-axis tilt of a chain anchor is kept (the next-piece gizmo stays yaw-only
+    // via _applyGizmoAxes, so it can only ever produce a yaw here).
     this._freePos.copy(this.placementPivot.position);
     this.snapPos(this._freePos);
-    this.freeYaw = this.snapYaw(this.placementPivot.rotation.y);
+    this._setFreeQuat(this.placementPivot.quaternion);
+    this._snapFreeQuat();
     this.placementPivot.position.copy(this._freePos);
-    this.placementPivot.rotation.set(0, this.freeYaw, 0);
+    this.placementPivot.quaternion.copy(this._freeQuat);
     // Push the new anchor onto the active chain, then re-chain it rigidly.
     const chain = this._activeChain();
     if (chain) {
@@ -473,9 +573,12 @@ export class ModularRoadBuilder {
 
   setFreePlacement(pos, yaw) {
     this._freePos.copy(pos);
-    if (yaw !== undefined) this.freeYaw = yaw;
+    if (yaw !== undefined) {
+      this.freeYaw = yaw;
+      this._freeQuat.setFromAxisAngle(_YUP, yaw); // an explicit yaw resets any tilt
+    }
     this.placementPivot.position.copy(this._freePos);
-    this.placementPivot.rotation.set(0, this.freeYaw, 0);
+    this.placementPivot.quaternion.copy(this._freeQuat);
     const chain = this._activeChain();
     if (chain) chain.anchor = this._anchorFromFree();
     this.rebuildAll();
@@ -496,18 +599,78 @@ export class ModularRoadBuilder {
       return;
     }
     if (!this.freePlaceMode) return;
-    this.freeYaw += delta;
-    this.placementPivot.rotation.set(0, this.freeYaw, 0);
+    // Q/E spin the anchor about WORLD up, PRESERVING any pitch/roll it carries
+    // (premultiply, not a scalar reset), so a quick yaw doesn't flatten a bank.
+    _A_Q.setFromAxisAngle(_YUP, delta);
+    this._freeQuat.premultiply(_A_Q);
+    this.freeYaw = _A_E.setFromQuaternion(this._freeQuat, "YXZ").y;
+    this.placementPivot.quaternion.copy(this._freeQuat);
     const chain = this._activeChain();
     if (chain) chain.anchor = this._anchorFromFree();
     this.rebuildAll();
   }
 
+  /** Reset the active chain's anchor tilt to level (keeps position + yaw). */
+  levelAnchor() {
+    if (!this.freePlaceMode) return false;
+    this._freeQuat.setFromAxisAngle(_YUP, this.freeYaw);
+    if (this.placementGizmo) this.placementPivot.quaternion.copy(this._freeQuat);
+    const chain = this._activeChain();
+    if (chain) { chain.anchor = this._anchorFromFree(); this.rebuildAll(); }
+    return true;
+  }
+
+  /** Pitch/roll of the active anchor in degrees (yaw excluded), for a readout. */
+  anchorTiltDeg() {
+    _A_E.setFromQuaternion(this._freeQuat, "YXZ");
+    return { pitch: THREE.MathUtils.radToDeg(_A_E.x), roll: THREE.MathUtils.radToDeg(_A_E.z) };
+  }
+
   /** Build a connector matrix from the gizmo's pos + yaw. */
+  /** Build the active chain's anchor matrix from the FULL free orientation.
+   *  socketMatrix reconstructs exactly `_freeQuat` from the rotated travel+up
+   *  (verified: for R, travel=R·-Z and up=R·+Y give basis R), so this supports
+   *  any pitch/roll, and collapses to the old yaw-only behaviour when _freeQuat
+   *  is a pure yaw (up stays +Y). */
   _anchorFromFree() {
-    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.freeYaw);
-    const travel = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
-    return socketMatrix(this._freePos, travel, new THREE.Vector3(0, 1, 0));
+    _A_TRAVEL.set(0, 0, -1).applyQuaternion(this._freeQuat);
+    _A_UP.set(0, 1, 0).applyQuaternion(this._freeQuat);
+    return socketMatrix(this._freePos, _A_TRAVEL, _A_UP);
+  }
+
+  /** Set the free orientation from a quaternion and keep `freeYaw` (the extracted
+   *  yaw) in sync for consumers that only want a heading. */
+  _setFreeQuat(q) {
+    this._freeQuat.copy(q);
+    this.freeYaw = _A_E.setFromQuaternion(this._freeQuat, "YXZ").y;
+  }
+
+  /** Snap each Euler component of an orientation to the yaw step. Snapping
+   *  pitch/roll too keeps tilted anchors on tidy angles (e.g. 15° banks). */
+  _snapFreeQuat() {
+    if (!this.snapEnabled) return;
+    const step = THREE.MathUtils.degToRad(this.snapYawDeg || 15);
+    _A_E.setFromQuaternion(this._freeQuat, "YXZ");
+    _A_E.x = Math.round(_A_E.x / step) * step;
+    _A_E.y = Math.round(_A_E.y / step) * step;
+    _A_E.z = Math.round(_A_E.z / step) * step;
+    this._freeQuat.setFromEuler(_A_E);
+    this.freeYaw = _A_E.y;
+  }
+
+  /** Show/hide gizmo axes for the current mode + target: translate = all axes;
+   *  rotate = yaw-only for the NEXT PIECE (level-socket convention), but full
+   *  3-axis for a CHAIN ANCHOR so it can tilt. */
+  _applyGizmoAxes() {
+    const g = this.placementGizmo;
+    if (!g) return;
+    const rot = g.mode === "rotate";
+    // A CHAIN anchor or a selected PIECE may tilt on all 3 axes; the next-piece
+    // ghost stays yaw-only (kit sockets are level).
+    const fullTilt = rot && (this._gizmoTarget === "chain" || this._gizmoTarget === "piece");
+    g.showX = !rot || fullTilt;
+    g.showY = true;
+    g.showZ = !rot || fullTilt;
   }
 
   /** Rebuild the translucent ghost at the open connector (or the detached pose). */
@@ -564,7 +727,7 @@ export class ModularRoadBuilder {
     this.instancingEnabled = !!on;
     for (const p of this.pieces) {
       for (const m of [p.mesh, p.railMesh, p.shellMesh, p.decorMesh]) {
-        if (m) m.visible = !this.instancingEnabled && !m.userData.noRender;
+        if (m) m.visible = m.userData.noRender ? true : !this.instancingEnabled;
       }
     }
     this._rebuildInstances();
@@ -629,32 +792,22 @@ export class ModularRoadBuilder {
     }
   }
 
-  /** Place the active piece — onto the open end, or wherever the detached
-   *  ghost sits (which starts a new chain there, Apex-style). */
-  place() {
-    if (this._gizmoTarget === "ghost" && this.ghostDetached) {
-      const id = this.chainSeq++;
-      const anchor = this._anchorFromGhost();
-      this.chains.push({ id, anchor });
-      this.activeChainId = id;
-      this.currentConnector = anchor.clone();
-      this.ghostDetached = false;
-    }
-    const connectorIn = this.currentConnector.clone();
-    const edges = guardrailParams.enabled;
-    const built = buildPiece(
-      this.activePieceId,
-      connectorIn,
-      pieceParams,
-      roadParams,
-      guardrailParams,
-      edges,
-    );
+  /**
+   * Build a piece + its meshes and return the piece record — WITHOUT touching
+   * `this.pieces`, the connector, or the render layer. Shared by place() and
+   * insertPieceBefore(): they differ only in WHERE the record goes in the array.
+   * Every sub-mesh carries a back-reference to the record so a raycast hit on
+   * any part maps straight to the piece (see pickPiece).
+   */
+  _makePieceEntry(id, chainId, connectorIn, pp, edges) {
+    const built = buildPiece(id, connectorIn, pp, roadParams, guardrailParams, edges);
     const mesh = this._makeMesh(built.geometry, this.material, built.world);
-    mesh.userData.pieceId = this.activePieceId;
+    mesh.userData.pieceId = id;
     if (built.def.noMesh) {
       mesh.userData.noCollision = true;
-      mesh.userData.noRender = true; // gap = invisible spacer, nothing to instance
+      mesh.userData.noRender = true; // gap spacer: no road, no instance/merge
+      mesh.material = this.gapMaterial; // ...but a faint build-time marker
+      mesh.visible = true;
     }
     const railMesh =
       built.railGeometry && this.railMaterial
@@ -670,25 +823,251 @@ export class ModularRoadBuilder {
         : null;
     if (decorMesh) decorMesh.castShadow = false; // flat markings don't cast
 
-    this.pieces.push({
-      id: this.activePieceId,
-      chainId: this.activeChainId,
-      pp: this._snapshotParams(),
+    const piece = {
+      id,
+      chainId,
+      pp: { ...pp },
       edges,
       mesh,
       railMesh,
       shellMesh,
       decorMesh,
-      connectorIn,
+      connectorIn: connectorIn.clone(),
       connectorOut: built.connectorOut.clone(),
-    });
-    this.currentConnector = built.connectorOut.clone();
+      /** Per-piece entry tilt (local-frame rotation, propagates downstream). */
+      tilt: new THREE.Quaternion(),
+      /** Entry seam BEFORE the tilt — filled by rebuildAll, used by the edit gizmo. */
+      _baseIn: connectorIn.clone(),
+    };
+    for (const m of [mesh, railMesh, shellMesh, decorMesh]) {
+      if (m) m.userData.piece = piece;
+    }
+    return piece;
+  }
+
+  /** Place the active piece — onto the open end, or wherever the detached
+   *  ghost sits (which starts a new chain there, Apex-style). */
+  place() {
+    if (this._gizmoTarget === "ghost" && this.ghostDetached) {
+      const id = this.chainSeq++;
+      const anchor = this._anchorFromGhost();
+      this.chains.push({ id, anchor });
+      this.activeChainId = id;
+      this.currentConnector = anchor.clone();
+      this.ghostDetached = false;
+    }
+    const piece = this._makePieceEntry(
+      this.activePieceId,
+      this.activeChainId,
+      this.currentConnector,
+      this._snapshotParams(),
+      guardrailParams.enabled,
+    );
+    this.pieces.push(piece);
+    this.currentConnector = piece.connectorOut.clone();
     this._rebuildInstances();
     // Hand the gizmo to the NEXT piece at the fresh open end.
     this._syncGizmoToOpenEnd();
     this.refreshGhost();
     this._notify();
-    return mesh;
+    return piece.mesh;
+  }
+
+  // ── PIECE EDITING (delete / replace / insert) ──────────────────────────────
+  // All three are the same move: change `this.pieces`, then rebuildAll() re-walks
+  // each chain from its anchor and reconnects everything downstream. The array
+  // order WITHIN a chain is the chain order, so a splice is all that's needed.
+
+  /**
+   * Which placed piece is under a screen-space point, or null.
+   * Raycasts the per-piece proxy meshes — they stay in the scene as edit handles
+   * even while the instanced layer does the drawing, and a raycast hits them
+   * regardless of their `visible` flag.
+   */
+  pickPiece(clientX, clientY) {
+    if (!this._camera || !this._domElement) return null;
+    const rect = this._domElement.getBoundingClientRect();
+    this._pickNdc.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this._raycaster.setFromCamera(this._pickNdc, this._camera);
+    this.root.updateMatrixWorld(true); // proxies are matrixAutoUpdate=false
+    const targets = [];
+    for (const p of this.pieces) {
+      // Include the road mesh even for GAPS (noRender) so an empty-space spacer
+      // stays selectable — its full-span geometry raycasts fine invisible.
+      if (p.mesh?.geometry?.attributes?.position) targets.push(p.mesh);
+      for (const m of [p.railMesh, p.shellMesh]) {
+        if (m && !m.userData.noRender && m.geometry?.attributes?.position) targets.push(m);
+      }
+    }
+    const hits = this._raycaster.intersectObjects(targets, false);
+    return hits.length ? hits[0].object.userData.piece ?? null : null;
+  }
+
+  /** Highlight a placed piece and put the transform gizmo ON it (null clears).
+   *  Focuses the piece's chain so appends/gizmo follow it. Rotate the gizmo (E)
+   *  to tilt the piece + downstream; translate (W) to move the whole chain. */
+  selectPiece(p) {
+    this.selectedPiece = p && this.pieces.includes(p) ? p : null;
+    if (this.selectedPiece) {
+      this.activeChainId = this.selectedPiece.chainId;
+      this._syncCurrentConnector();
+      this._showPieceGizmo(this.selectedPiece);
+    }
+    this._updateSelectionHighlight();
+    this._notify();
+  }
+
+  deselectPiece() {
+    if (!this.selectedPiece) return;
+    this.selectedPiece = null;
+    this._updateSelectionHighlight();
+    // Hand the gizmo back to the next-piece / anchor.
+    this._syncGizmoToOpenEnd();
+    this._notify();
+  }
+
+  /** Attach the transform gizmo to a selected piece, at its entry connector. */
+  _showPieceGizmo(p) {
+    if (!this.placementGizmo) return;
+    this._gizmoTarget = "piece";
+    this.ghostDetached = false;
+    this.placementPivot.position.setFromMatrixPosition(p.connectorIn);
+    _A_M.extractRotation(p.connectorIn);
+    this.placementPivot.quaternion.setFromRotationMatrix(_A_M);
+    this.placementGizmo.attach(this.placementPivot);
+    this.placementGizmo.enabled = true;
+    this.placementGizmo.visible = true;
+    this._applyGizmoAxes();
+  }
+
+  /** A translucent gold overlay of the exact selected piece, drawn on top
+   *  (depthTest off) so it reads through other geometry. Shares the piece's
+   *  geometry — never disposes it. */
+  _updateSelectionHighlight() {
+    const p = this.selectedPiece;
+    if (!this._selMesh) {
+      this._selMesh = new THREE.Mesh(
+        new THREE.BufferGeometry(),
+        new THREE.MeshBasicMaterial({
+          color: 0xffd24a, transparent: true, opacity: 0.4,
+          depthWrite: false, depthTest: false, side: THREE.DoubleSide,
+        }),
+      );
+      this._selMesh.matrixAutoUpdate = false;
+      this._selMesh.renderOrder = 999;
+      this._selMesh.frustumCulled = false;
+      this.scene.add(this._selMesh);
+    }
+    if (p && p.mesh?.geometry) {
+      this._selMesh.geometry = p.mesh.geometry; // shared — do NOT dispose
+      this._selMesh.matrix.copy(p.mesh.matrix);
+      this._selMesh.visible = true;
+    } else {
+      this._selMesh.geometry = _EMPTY_GEO; // drop the reference
+      this._selMesh.visible = false;
+    }
+  }
+
+  /** Remove a placed piece; everything downstream in its chain reconnects. */
+  deletePiece(p) {
+    const idx = this.pieces.indexOf(p);
+    if (idx < 0) return false;
+    // Drop the highlight's reference to p's geometry BEFORE _removePiece disposes
+    // it, or a frame could draw a disposed buffer.
+    if (this.selectedPiece === p) {
+      this.selectedPiece = null;
+      this._updateSelectionHighlight();
+    }
+    this.activeChainId = p.chainId;
+    this.pieces.splice(idx, 1);
+    this._removePiece(p);
+    this.rebuildAll();
+    return true;
+  }
+
+  /** Swap a placed piece's TYPE in place (keeps its slot in the chain); the rest
+   *  of the chain re-flows from the new piece's exit. */
+  replacePiece(p, newId, pp = this._snapshotParams()) {
+    if (this.pieces.indexOf(p) < 0 || !PIECE_BY_ID.has(newId)) return false;
+    const def = PIECE_BY_ID.get(newId);
+    p.id = newId;
+    p.pp = { ...pp };
+    p.mesh.userData.pieceId = newId;
+    // A piece can gain/lose its render+collision presence across the swap (e.g.
+    // to/from a gap) — rebuildAll only replaces geometry, not these flags.
+    p.mesh.userData.noCollision = !!def.noMesh;
+    p.mesh.userData.noRender = !!def.noMesh;
+    p.mesh.material = def.noMesh ? this.gapMaterial : this.material;
+    p.mesh.visible = def.noMesh ? true : !this.instancingEnabled;
+    this.rebuildAll();
+    this._updateSelectionHighlight();
+    return true;
+  }
+
+  /**
+   * Set a piece's entry TILT (a local-frame rotation quaternion). Banks this
+   * piece and everything after it in the chain; the chain stays connected.
+   * `q` is the tilt relative to the piece's un-tilted seam (`_baseIn`).
+   */
+  setPieceTilt(p, q) {
+    if (this.pieces.indexOf(p) < 0) return false;
+    p.tilt.copy(q);
+    this.rebuildAll();
+    if (this.selectedPiece === p) this._updateSelectionHighlight();
+    return true;
+  }
+
+  /**
+   * Turn a piece into a FLAT empty-space spacer — a level hole the same forward
+   * length as the piece it replaces, so the rest of the chain doesn't move.
+   *
+   * The plain `gap` piece is a downward JUMP (its exit drops `gapDrop` and
+   * pitches nose-down), which is why replacing a flat straight with it dropped
+   * and tilted everything after it. Here we size the gap to the replaced piece's
+   * span and force `gapDrop: 0`, so a flat run stays flat and downstream is
+   * left where it was.
+   */
+  makeGap(p) {
+    if (this.pieces.indexOf(p) < 0) return false;
+    _A_V.setFromMatrixPosition(p.connectorIn);
+    _A_V2.setFromMatrixPosition(p.connectorOut);
+    const len = _A_V.distanceTo(_A_V2);
+    const pp = { ...this._snapshotParams(), gapLength: Math.max(4, len), gapDrop: 0 };
+    return this.replacePiece(p, "gap", pp);
+  }
+
+  /** Reset a piece's tilt to none (downstream re-levels from here). */
+  levelPiece(p) {
+    if (this.pieces.indexOf(p) < 0) return false;
+    p.tilt.identity();
+    this.rebuildAll();
+    if (this.selectedPiece === p) this._updateSelectionHighlight();
+    return true;
+  }
+
+  /** Pitch/roll of a piece's tilt in degrees (for a readout). */
+  pieceTiltDeg(p) {
+    if (!p?.tilt) return { pitch: 0, roll: 0 };
+    _A_E.setFromQuaternion(p.tilt, "YXZ");
+    return { pitch: THREE.MathUtils.radToDeg(_A_E.x), roll: THREE.MathUtils.radToDeg(_A_E.z) };
+  }
+
+  /** Insert a new piece just BEFORE `p` in its chain; `p` and the rest shift
+   *  downstream. Selects the new piece. */
+  insertPieceBefore(p, newId, pp = this._snapshotParams()) {
+    const idx = this.pieces.indexOf(p);
+    if (idx < 0 || !PIECE_BY_ID.has(newId)) return false;
+    // rebuildAll re-derives the transform from the chain walk, so p.connectorIn
+    // here is only a placeholder for the initial build.
+    const entry = this._makePieceEntry(newId, p.chainId, p.connectorIn, pp, guardrailParams.enabled);
+    this.pieces.splice(idx, 0, entry);
+    this.activeChainId = p.chainId;
+    this.rebuildAll();
+    this.selectPiece(entry);
+    return true;
   }
 
   _removePiece(p) {
@@ -726,6 +1105,8 @@ export class ModularRoadBuilder {
   }
 
   clear() {
+    this.selectedPiece = null;
+    this._updateSelectionHighlight();
     for (const p of this.pieces) this._removePiece(p);
     this.pieces = [];
     this._rebuildInstances();
@@ -737,6 +1118,7 @@ export class ModularRoadBuilder {
     this.ghostDetached = false;
     this._freePos.set(0, 0, 0);
     this.freeYaw = 0;
+    this._freeQuat.identity();
     this.currentConnector = initialConnector();
     this._hidePlacementGizmo();
     this.refreshGhost();
@@ -753,6 +1135,16 @@ export class ModularRoadBuilder {
       let conn = chain.anchor.clone();
       for (const p of this.pieces) {
         if (p.chainId !== chain.id) continue;
+        // PER-PIECE TILT: a rotation applied at this piece's entry seam, in the
+        // connector's LOCAL frame (roll about travel, pitch about lateral). It
+        // banks this piece AND flows into every piece after it — the chain stays
+        // connected because it's a rotation at the joint, never a free move.
+        // `_baseIn` is the seam BEFORE the tilt, kept so the edit gizmo can read
+        // the current tilt back as base⁻¹·pose.
+        p._baseIn = conn.clone();
+        if (p.tilt && !_isIdentityQuat(p.tilt)) {
+          conn.multiply(_A_M.makeRotationFromQuaternion(p.tilt));
+        }
         p.connectorIn = conn.clone();
         const edges = p.edges ?? true;
         const built = buildPiece(p.id, conn, p.pp, roadParams, guardrailParams, edges);
@@ -768,6 +1160,9 @@ export class ModularRoadBuilder {
     if (this._gizmoTarget === "ghost" && !this.ghostDetached && this.placementGizmo?.visible) {
       this._syncGizmoToOpenEnd();
     }
+    // The selected piece may have moved (an anchor drag or an upstream edit flows
+    // down the chain), so keep its highlight glued to it.
+    if (this.selectedPiece) this._updateSelectionHighlight();
     this.refreshGhost();
     this._notify();
   }
@@ -841,6 +1236,8 @@ export class ModularRoadBuilder {
       if (built.def.noMesh) {
         mesh.userData.noCollision = true;
         mesh.userData.noRender = true;
+        mesh.material = this.gapMaterial;
+        mesh.visible = true;
       }
       const railMesh =
         built.railGeometry && this.railMaterial
@@ -856,7 +1253,7 @@ export class ModularRoadBuilder {
           : null;
       if (decorMesh) decorMesh.castShadow = false;
 
-      this.pieces.push({
+      const piece = {
         id: e.id,
         chainId: e.chainId ?? 0,
         pp,
@@ -867,7 +1264,13 @@ export class ModularRoadBuilder {
         decorMesh,
         connectorIn,
         connectorOut: built.connectorOut.clone(),
-      });
+        tilt: new THREE.Quaternion(),
+        _baseIn: connectorIn.clone(),
+      };
+      for (const m of [mesh, railMesh, shellMesh, decorMesh]) {
+        if (m) m.userData.piece = piece;
+      }
+      this.pieces.push(piece);
     }
     this._rebuildInstances();
     // Reconstruct chains from the loaded pieces (anchor = first piece's entry).
@@ -875,13 +1278,30 @@ export class ModularRoadBuilder {
     for (const p of this.pieces) {
       if (!seen.has(p.chainId)) seen.set(p.chainId, { id: p.chainId, anchor: p.connectorIn.clone() });
     }
+    // RECOVER per-piece tilt from the stored connectors, so a later edit's
+    // rebuildAll reproduces the loaded (possibly banked) track instead of
+    // re-flattening it. tilt = baseIn_rotation⁻¹ · connectorIn_rotation, where
+    // baseIn is the anchor (first piece) or the previous piece's exit.
+    for (const chain of seen.values()) {
+      let baseIn = chain.anchor;
+      for (const p of this.pieces) {
+        if (p.chainId !== chain.id) continue;
+        _A_M.extractRotation(baseIn);
+        _A_Q.setFromRotationMatrix(_A_M);           // base rotation
+        _A_M.extractRotation(p.connectorIn);
+        p.tilt.setFromRotationMatrix(_A_M).premultiply(_A_Q.invert()); // base⁻¹ · in
+        p._baseIn = baseIn.clone();
+        baseIn = p.connectorOut;
+      }
+    }
     this.chains = seen.size ? [...seen.values()] : [{ id: 0, anchor: initialConnector() }];
     this.chainSeq = Math.max(-1, ...this.chains.map((c) => c.id)) + 1;
     this.activeChainId = this.chains[this.chains.length - 1].id;
     this.freePlaceMode = true;
     const a = this.chains[this.chains.length - 1].anchor;
     this._freePos.setFromMatrixPosition(a);
-    this.freeYaw = new THREE.Euler().setFromRotationMatrix(a, "YXZ").y;
+    _A_M.extractRotation(a);
+    this._setFreeQuat(_A_Q.setFromRotationMatrix(_A_M)); // carry any tilt from the loaded track
     this._syncCurrentConnector();
     this._hidePlacementGizmo();
     this.refreshGhost();
