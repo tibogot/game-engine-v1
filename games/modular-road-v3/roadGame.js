@@ -1078,7 +1078,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // jump lands so you can place the landing. Gravity matches the vehicle's.
   const gapPreview = new GapPreview({ scene, gravity: GRAVITY });
   let gapPreviewOn = true;
-  let refSpeed = 25;       // m/s launch speed the arc assumes
+  // ~80% of TIRE.topSpeed — the speed you realistically hit a ramp at. Scale it
+  // with top speed or the previewed arc will under-shoot every jump you build.
+  let refSpeed = 40;       // m/s launch speed the arc assumes
   let landingDrop = 0;     // m below launch height to mark the landing
   let lastLanding = null;  // last computed landing (for Snap landing)
 

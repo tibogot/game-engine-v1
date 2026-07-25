@@ -41,7 +41,7 @@ export const CHASE_CAM = {
   // can't silently drift out of sync with v3/app/main.js.
   fovBase: 60,
   fovAtSpeed: 12,     // extra degrees at fovSpeedRef and above
-  fovSpeedRef: 30,    // m/s for the full kick — matches TIRE.topSpeed
+  fovSpeedRef: 50,    // m/s for the full kick — keep matching TIRE.topSpeed
   fovLerp: 3.0,       // how fast FOV eases (slow: a twitchy FOV reads as nausea)
 };
 

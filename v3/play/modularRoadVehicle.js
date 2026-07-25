@@ -81,18 +81,30 @@ export const TIRE = {
   tireStiffness: 7.0,
   lowSpeedRef: 2.5,
   accelForce: 4000,
-  // Sized to the TRACK KIT, not to the slider max. modularRoadKit's standard
-  // curve is `curveRadius: 26` m, and peak lateral grip here is ~1.5 g
-  // (frictionCoeff 1.5 × ~3.4 kN static wheel load × 4), so the fastest a curve
-  // piece can physically be taken is √(26 × 14.7) ≈ 19.5 m/s. Loops need
-  // ≥ √(g × loopRadius 25) ≈ 15.7 m/s to stay stuck at the top. That leaves a
-  // usable window of roughly 20–35 m/s and 30 sits in it.
-  //
-  // The old default was 80 (the #dv-top slider max), which needed ~25 g to hold
-  // a 26 m corner — unreachable by ANY slider, so every curve was a plow into
-  // the guardrail. If you raise this, raise curveRadius to match: the minimum
-  // radius the car can hold is v² / 14.7.
-  topSpeed: 30,
+  /**
+   * Target top speed (m/s). NOT the speed you actually reach: the power curve's
+   * falling drive force meets quadratic drag a little below it, so 50 settles at
+   * ~48.3 m/s ≈ 174 km/h. (The model is verified — it predicted 107 km/h at the
+   * old value of 30, which is exactly what the HUD showed.) `AERO.drag` is the
+   * knob if you want the readout to land on a rounder number.
+   *
+   * WHAT THIS IS AND ISN'T CONSTRAINED BY. A FLAT corner of the kit's standard
+   * `curveRadius: 26` m caps at √(26 × 1.5g) ≈ 19.5 m/s ≈ 70 km/h regardless of
+   * this number — that is a brake zone by design, and the speed differential
+   * between a 174 km/h straight and a 70 km/h hairpin is drama, not a bug.
+   *
+   * High-speed cornering comes from BANKING, which converts the track's normal
+   * force into cornering force. On that same 26 m radius:
+   *     10° → 87 km/h, 20° → 116 km/h, 25° → 147 km/h
+   * The kit already has banked pieces, so nothing needs rebuilding to go fast.
+   * (v_max = √(r·g·(tanθ + μ) / (1 − μ·tanθ)); it runs away near μ·tanθ = 1.)
+   *
+   * HARD CEILING ~70 m/s: above that the chassis starts tunnelling through
+   * geometry (0.29 m per substep against an 0.08 m contact skin — measured).
+   * Guardrails and decks were verified to hold at 60 m/s, so 45–60 is the safe
+   * envelope. Raising past that needs collision work first, not just this number.
+   */
+  topSpeed: 50,
   powerCurveExp: 2.0,
   brakeForce: 8000,
   reverseAccel: 2000,
@@ -127,11 +139,13 @@ export const TIRE = {
   // the car isn't twitchy / spin-happy at the top end. At/above `steerSpeedRef`
   // (m/s) the angle is reduced by `steerSpeedReduce` (fraction).
   //
-  // Back in scale with topSpeed 30: full reduction lands AT top speed, leaving
-  // 0.55 × (1 − 0.5) ≈ 16° of lock there. A 26 m curve at 20 m/s only asks for
-  // atan(2.8 / 26) ≈ 6°, so there's ample margin. The previous 50/0.45 pair was
-  // stretched to cover an 80 m/s top end that no longer exists.
-  steerSpeedRef: 26,
+  // KEEP THIS TRACKING `topSpeed` — full reduction should land AT top speed, so
+  // it scales with it (26 was the value for topSpeed 30; 45 for 50). Leaving it
+  // low would fully numb the wheel across the entire upper half of the speed
+  // range instead of easing into it. At top speed this leaves 0.55 × (1 − 0.5)
+  // ≈ 16° of lock, and a 26 m curve only asks for atan(2.8 / 26) ≈ 6°, so
+  // there's ample margin even in the tightest corner the kit builds.
+  steerSpeedRef: 45,
   steerSpeedReduce: 0.5,
   frictionCoeff: 1.5,
   maxAngVel: 9.0,

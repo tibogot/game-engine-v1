@@ -66,12 +66,23 @@ export const pieceParams = {
   slopeRise: 9, // vertical rise over the run (m); negative = downhill
   // Banked pieces (reuse curveRadius/curveAngle/curveDir):
   bankAngle: 22, // lean in degrees (turns HOLD it; Bank up/down ease it in/out)
-  // Jump / launch ramp:
+  // ── Jump / launch ramp ────────────────────────────────────────────────────
+  // TAKEOFF ANGLE IS TIED TO TOP SPEED. Ballistic range is v²·sin(2θ)/g, so it
+  // scales with the SQUARE of speed — raising TIRE.topSpeed 30 → 50 m/s made
+  // every jump 2.6× longer on its own. At terminal speed (48 m/s / 174 km/h):
+  //     8° → 66 m,  12° → 97 m,  20° → 153 m,  28° → 197 m
+  // 28° was sized for the old 108 km/h car and threw the car ~197 m and 26 m
+  // high — far past any gap you'd actually build (the kit's gap was 22 m).
+  // 12° gives a 97 m arc peaking 5.1 m up: still a proper stunt jump, but in
+  // proportion to the pieces around it.
+  //
+  // If topSpeed changes again, rescale this — the arc goes as v².
   jumpLength: 18, // arc length of the ramp (m)
-  jumpAngle: 28, // takeoff angle at the exit (deg)
-  // Dive / down ramp (mirror of the jump — flat entry, exit pitched down):
+  jumpAngle: 12, // takeoff angle at the exit (deg)
+  // Dive / down ramp (mirror of the jump — flat entry, exit pitched down).
+  // Kept equal to jumpAngle so a dive→jump pair stays symmetric.
   diveLength: 18, // arc length of the ramp (m)
-  diveAngle: 28, // down-pitch angle at the exit (deg)
+  diveAngle: 12, // down-pitch angle at the exit (deg)
   // Drivable vertical looping (round ring split at the bottom, feet slid apart
   // sideways so both stay flat on the floor). Tunable shape controls:
   loopRadius: 25, // ring radius (m)
@@ -95,15 +106,24 @@ export const pieceParams = {
   spiralRadius: 18,
   spiralAngle: 180, // degrees of arc (allow multi-turn for a true helix)
   spiralRise: 10, // total height gained over the arc (m)
-  // Gap spacer (invisible air gap that drifts forward & drops):
-  gapLength: 22, // forward run across the gap (m)
+  // ── Gap spacer (invisible air gap that drifts forward & drops) ────────────
+  // SIZED TO THE BALLISTIC ARC, so the gap's exit lands where the car actually
+  // does: a flat launch falling `gapDrop` covers v·√(2·drop/g). At the gap
+  // preview's reference speed (roadGame `refSpeed` 40 m/s) with a 6 m drop
+  // that's 44 m. The old 22 m was sized for the 30 m/s car and left you flying
+  // well past the far side.
+  gapLength: 44, // forward run across the gap (m)
   gapDrop: 6, // height lost across the gap (m)
-  // Landing ramp (enters pitched down, eases to level):
+  // ── Landing ramp (enters pitched down, eases to level) ────────────────────
+  // MATCHED TO THE ARRIVAL ANGLE, or the car slams into a ramp that's flatter
+  // than its descent. A 12° jump landing level arrives at 12°; a flat gap with
+  // a 6 m drop arrives at 13–15°. 15° is a touch steeper than both, so the ramp
+  // meets the car rather than the car hitting the ramp.
   landLength: 16,
-  landAngle: 30, // entry down-pitch (deg)
+  landAngle: 15, // entry down-pitch (deg)
   // Brow ramp (mirror of landing — enters pitched up, eases to level):
   browLength: 16,
-  browAngle: 30, // entry up-pitch (deg)
+  browAngle: 15, // entry up-pitch (deg)
   // Tunnel shell:
   tunnelHeight: 7, // interior clearance from deck to crown (m)
   // Rideable tube (the tube wall IS the road — drive inside, loop the walls):
