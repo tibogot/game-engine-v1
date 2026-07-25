@@ -24,6 +24,8 @@ export const PAD = {
   steerGamma: 1.5,
   /** Triggers rest at 0 but drift, so they get a (much smaller) deadzone too. */
   triggerDeadzone: 0.06,
+  /** Flip the air-pitch stick axis if you prefer push-forward = nose up. */
+  invertPitch: false,
 };
 
 /**
@@ -95,6 +97,12 @@ export function createGamepadInput() {
       - shape(analogVal(6), PAD.triggerDeadzone, 1);
     if (throttle === 0) throttle = down(12) - down(13); // d-pad up/down fallback
 
+    // AIR PITCH on the left stick's Y axis. The keyboard needs dedicated keys
+    // for this (the gas is held constantly, so sharing it forces flips) — but a
+    // pad never had that problem: throttle lives on the TRIGGERS, so the stick
+    // is free. Pull back = nose up, matching flight and Rocket League.
+    const pitch = shape(ax[1] ?? 0, PAD.steerDeadzone, PAD.steerGamma) * (PAD.invertPitch ? -1 : 1);
+
     const respawn = down(3) === 1; // Y
     const respawnPressed = respawn && !lastRespawn;
     lastRespawn = respawn;
@@ -104,6 +112,7 @@ export function createGamepadInput() {
       throttle,
       handbrake: down(0) === 1 || down(1) === 1, // A or B
       yaw: down(5) - down(4), // RB / LB — matches E / Q air spin
+      pitch,                  // left stick Y — air pitch (see above)
       analog,
       respawnPressed,
     };

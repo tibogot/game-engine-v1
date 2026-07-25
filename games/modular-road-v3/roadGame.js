@@ -788,11 +788,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   addEventListener("keydown", (e) => {
     if (isFormField(e.target)) return; // let the dev panel / any text field type
+    const code = e.code.toLowerCase();
+    // CTRL IS AN AIR-CONTROL KEY (pitch down), so the modifier guard below has to
+    // let the Control key ITSELF through. Real Ctrl+<letter> combos are unaffected:
+    // the LETTER's own event carries ctrlKey and still returns early, so
+    // Ctrl+S / Ctrl+R etc. reach the browser exactly as before.
+    const isCtrlKey = code === "controlleft" || code === "controlright";
     // Let Ctrl/Meta/Alt combos through (browser + OS shortcuts). The editor's own
     // shortcuts are all unmodified, so this still blocks every one of them.
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!isCtrlKey && (e.ctrlKey || e.metaKey || e.altKey)) return;
 
-    const code = e.code.toLowerCase();
     keys[code] = true;
 
     // Block the editor (and our now-redundant palette listener) from seeing this
@@ -926,6 +931,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const kbSteer = (left ? 1 : 0) - (right ? 1 : 0);
     const kbThrottle = (fwd ? 1 : 0) - (back ? 1 : 0);
     const kbYaw = (keys.keye ? 1 : 0) - (keys.keyq ? 1 : 0);
+    // AIR PITCH ON ITS OWN KEYS — Shift = nose up (backflip), Ctrl = nose down
+    // (frontflip). Deliberately NOT the throttle: the gas is held almost all the
+    // time, so sharing it made every jump a forced flip (see the note in
+    // _applyStabilizer). Shift/Ctrl sit under the left hand while WASD is busy.
+    const up = keys.shiftleft || keys.shiftright;
+    const down = keys.controlleft || keys.controlright;
+    const kbPitch = (up ? 1 : 0) - (down ? 1 : 0);
 
     const gp = gamepad.read();
     padRespawnPressed = !!gp?.respawnPressed;
@@ -935,6 +947,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         throttle: kbThrottle,
         handbrake: !!keys.space,
         yaw: kbYaw,
+        pitch: kbPitch,
         analog: false,
       };
     }
@@ -943,6 +956,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       throttle: kbThrottle !== 0 ? kbThrottle : gp.throttle,
       handbrake: !!keys.space || gp.handbrake,
       yaw: kbYaw !== 0 ? kbYaw : gp.yaw,
+      pitch: kbPitch !== 0 ? kbPitch : gp.pitch,
       analog: kbSteer === 0 && gp.analog,
     };
   }

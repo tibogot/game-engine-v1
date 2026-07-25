@@ -193,7 +193,7 @@ export const TIRE = {
   // fighting toward world-up); `stabilizerDamp` damps the roll/pitch rate.
   stabilizerStrength: 9000,
   stabilizerDamp: 2600,
-  // ── AIRBORNE CONTROL — RATE-BASED (W/S pitch, A/D roll, Q/E yaw) ────────
+  // ── AIRBORNE CONTROL — RATE-BASED (Shift/Ctrl pitch, A/D roll, Q/E yaw) ──
   //
   // Hold a direction and the car rotates AT `…Rate`; release and it stops. This
   // is what arcade stunt racers do, and it replaced a TORQUE model that was the
@@ -945,7 +945,7 @@ export class Vehicle {
 
     this.body = new RigidBody({ mass: CHASSIS.mass, size: CHASSIS });
     this.tires = WHEEL_LOCAL.map((w) => new Tire({ name: w.name, localPos: w.pos, steer: w.steer, drive: w.drive }));
-    this.input = { steer: 0, throttle: 0, handbrake: false, yaw: 0 };
+    this.input = { steer: 0, throttle: 0, handbrake: false, yaw: 0, pitch: 0 };
 
     this.group = new THREE.Group();
     this.group.name = "Vehicle";
@@ -1607,6 +1607,7 @@ export class Vehicle {
     this.input.throttle = controls.throttle ?? 0;
     this.input.handbrake = !!controls.handbrake;
     this.input.yaw = controls.yaw ?? 0;
+    this.input.pitch = controls.pitch ?? 0; // air pitch — its own key, not throttle
 
     this._solidTouch = false; // set by _resolveSolidBvh during the step
     this._physicsStep(FIXED_DT);
@@ -2011,7 +2012,23 @@ export class Vehicle {
       // A bounce is not a trick: time from the last CONTACT, not from zero
       // airborne time, so no bounce can ever re-arm control mid-landing.
       const armed = this._airTime >= TIRE.airGroundLockout;
-      const inP = armed ? -this.input.throttle : 0;
+      // PITCH IS ITS OWN INPUT, not the throttle.
+      //
+      // It used to be `-throttle`, and that was a design error: the throttle is
+      // held almost continuously — approaching a ramp, in the air, on landing —
+      // so pitch was permanently commanded. Holding the gas through a standard
+      // 2.05 s jump produced 422° of pitch, i.e. it FORCED a flip you never
+      // asked for, and a 0.3 s crest hop landed you 62° nose-up. Both of the
+      // hacks this file used to carry (`airControlDelay`, and the long
+      // `airGroundLockout`) existed only to paper over that.
+      //
+      // Steering does not have the problem — while airborne it does nothing for
+      // driving, so there is no competing intent and roll can stay on it.
+      //
+      // `input.pitch` is +1 for NOSE UP. A positive rotation about the chassis'
+      // +X axis pitches the nose DOWN (+X is the chassis' left; rotating +Z
+      // about it takes the nose toward −Y), hence the negation.
+      const inP = armed ? -this.input.pitch : 0;
       const inR = armed ? this.input.steer : 0;
       const inY = this.input.yaw; // Q/E is deliberate stunt input — never gated
 
