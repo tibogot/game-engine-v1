@@ -519,7 +519,12 @@ function buildPostGeometries(frames, edgeX, kerbTop, centerV, gp, out) {
  * disabled. Returns a single merged geometry (beams + posts).
  */
 export function buildGuardrailGeometry(frames, profileData = buildProfile(), gp = guardrailParams, rp = roadParams) {
-  if (!gp.enabled || gp.beamHeight <= 0) return null;
+  // NOTE: deliberately does NOT check `gp.enabled`. That is the GLOBAL "new
+  // pieces get edges" default, and testing it here made it override the
+  // PER-PIECE `edges` flag: toggling Edges off stripped rails from every piece
+  // in the track on the next rebuild, so per-piece edges were unreachable.
+  // The only caller (buildPiece) already gates on the per-piece flag.
+  if (gp.beamHeight <= 0) return null;
   const hw = profileData.hw;
   const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
   const kerbTop = rp.railHeight;

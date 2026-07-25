@@ -25,6 +25,7 @@ const _A_M = new THREE.Matrix4();
 const _A_Q2 = new THREE.Quaternion();
 const _A_V = new THREE.Vector3();
 const _A_V2 = new THREE.Vector3();
+const _UNIT_SCALE = new THREE.Vector3(1, 1, 1);
 const _isIdentityQuat = (q) => Math.abs(q.w) > 0.9999999;
 
 /**
@@ -73,6 +74,10 @@ export class ModularRoadBuilder {
     this._domElement = domElement;
     /** The placed piece currently selected for editing, or null. */
     this.selectedPiece = null;
+    /** Pivot pose captured when a gizmo drag begins — piece edits snap the
+     *  DELTA against it (see _onPieceGizmoChange). */
+    this._dragStartPos = new THREE.Vector3();
+    this._dragStartQuat = new THREE.Quaternion();
     this._raycaster = new THREE.Raycaster();
     this._pickNdc = new THREE.Vector2();
 
@@ -185,6 +190,14 @@ export class ModularRoadBuilder {
       this._applyGizmoSnap();
       this.placementGizmo.addEventListener("dragging-changed", (e) => {
         if (this.orbit) this.orbit.enabled = !e.value && this.isBuildMode();
+        // Capture the pose the drag STARTED from. Piece edits snap the delta
+        // against this rather than snapping absolute coordinates, so a piece
+        // that isn't on a grid cell (which is most of them — the chain spaces
+        // them by piece length, not by grid step) doesn't jump on first touch.
+        if (e.value) {
+          this._dragStartPos.copy(this.placementPivot.position);
+          this._dragStartQuat.copy(this.placementPivot.quaternion);
+        }
       });
       this.placementGizmo.addEventListener("change", () => this._onPlacementGizmoChange());
     }
@@ -208,7 +221,18 @@ export class ModularRoadBuilder {
   _applyGizmoSnap() {
     const g = this.placementGizmo;
     if (!g) return;
-    g.translationSnap = this.snapEnabled ? this.snapStep : null;
+    // TransformControls' translationSnap rounds the object's ABSOLUTE position
+    // to the grid. That's right for placing a new chain anchor, but wrong for a
+    // PLACED PIECE: pieces sit wherever the chain put them (a straight is 22 m,
+    // the grid is 8 m), so touching the gizmo teleported the piece to the
+    // nearest cell before you had moved anything. For pieces we turn it off and
+    // snap the DRAG DELTA ourselves in _onPieceGizmoChange, which keeps the
+    // piece where it is while still moving in tidy steps.
+    //
+    // rotationSnap is left on for every target — TransformControls snaps the
+    // rotation ANGLE of the drag, which is already relative.
+    const editingPiece = this._gizmoTarget === "piece";
+    g.translationSnap = this.snapEnabled && !editingPiece ? this.snapStep : null;
     g.rotationSnap = this.snapEnabled ? THREE.MathUtils.degToRad(this.snapYawDeg) : null;
   }
 
@@ -479,7 +503,12 @@ export class ModularRoadBuilder {
     const p = this.selectedPiece;
     if (!p) return;
 
-    if (this.placementGizmo.mode === "rotate") {
+    const rotating = this.placementGizmo.mode === "rotate";
+
+    if (rotating && !p.detached) {
+      // ATTACHED + rotate = TILT, which propagates down the chain. This is the
+      // banked-landing-strip tool: bank one piece and the rest of the run banks
+      // with it. Detach the piece first if you want it to turn on its own.
       _A_M.extractRotation(p._baseIn);
       _A_Q.setFromRotationMatrix(_A_M);            // base rotation
       // tilt = base⁻¹ · pivotOrientation
@@ -494,14 +523,35 @@ export class ModularRoadBuilder {
       }
       p.tilt.copy(_A_Q2);
     } else {
-      // translate → move the whole chain by the delta from where the piece was.
-      const chain = this._activeChain();
-      if (chain) {
-        _A_V.setFromMatrixPosition(p.connectorIn);       // old piece position
-        _A_V.subVectors(this.placementPivot.position, _A_V); // drag delta
-        _A_M.makeTranslation(_A_V.x, _A_V.y, _A_V.z);
-        chain.anchor.premultiply(_A_M);                  // world-space shift of the run
+      // FREE MOVE / FREE ROTATE of this piece alone. Translating always detaches
+      // (a chain piece has no position of its own to edit), and a detached piece
+      // rotates on its own rather than tilting the run.
+      this.detachPiece(p);
+      // SNAP THE DELTA, NOT THE ABSOLUTE POSE. Pieces sit where the chain put
+      // them, which is almost never on a grid cell, so rounding their absolute
+      // position teleported them the instant the gizmo was touched. Snapping the
+      // movement instead keeps the piece put and still moves in tidy steps.
+      _A_V.copy(this.placementPivot.position);
+      _A_Q2.copy(this.placementPivot.quaternion);
+      if (this.snapEnabled) {
+        _A_V.sub(this._dragStartPos);
+        this.snapPos(_A_V);
+        _A_V.add(this._dragStartPos);
+
+        const step = THREE.MathUtils.degToRad(this.snapYawDeg || 15);
+        _A_Q.copy(this._dragStartQuat).invert();
+        _A_Q2.premultiply(_A_Q);                 // delta = start⁻¹ · current
+        _A_E.setFromQuaternion(_A_Q2, "YXZ");
+        _A_E.x = Math.round(_A_E.x / step) * step;
+        _A_E.y = Math.round(_A_E.y / step) * step;
+        _A_E.z = Math.round(_A_E.z / step) * step;
+        _A_Q2.setFromEuler(_A_E).premultiply(this._dragStartQuat); // back to world
       }
+      // pinnedIn is the seam BEFORE tilt, so strip this piece's own tilt back
+      // out — otherwise a tilted piece would drift further every drag.
+      _A_Q.copy(p.tilt).invert();
+      _A_Q2.multiply(_A_Q);
+      p.pinnedIn.compose(_A_V, _A_Q2, _UNIT_SCALE);
     }
 
     this.rebuildAll();
@@ -513,10 +563,19 @@ export class ModularRoadBuilder {
   }
 
   _onPlacementGizmoChange() {
-    // TransformControls fires "change" for PROPERTY writes too (e.g. setSnap),
-    // not just drags. Ignore those — only react while the gizmo is actually up,
-    // or a snap-setting tweak would spuriously re-anchor the chain.
+    // TransformControls fires "change" for PROPERTY writes too, not just drags —
+    // `mode`, `enabled`, `showX/showY/showZ`, the snap settings, all of them go
+    // through a defineProperty setter that dispatches it.
+    //
+    // ONLY REACT TO ACTUAL DRAGS. Attaching the gizmo to a freshly right-clicked
+    // piece writes several of those properties (see _showPieceGizmo →
+    // _applyGizmoAxes), so the setup itself arrived here looking like a drag:
+    // the piece got detached and grid-snapped the instant you selected it, which
+    // shifted it. `dragging` is true only between pointerdown and pointerup, and
+    // every real transform in TransformControls dispatches inside that window
+    // (including reset()), so nothing legitimate is lost.
     if (!this.placementGizmo?.visible) return;
+    if (!this.placementGizmo.dragging) return;
 
     if (this._gizmoTarget === "piece") {
       this._onPieceGizmoChange();
@@ -664,6 +723,9 @@ export class ModularRoadBuilder {
   _applyGizmoAxes() {
     const g = this.placementGizmo;
     if (!g) return;
+    // Snap policy depends on the target (see _applyGizmoSnap), and every place
+    // that changes the target comes through here.
+    this._applyGizmoSnap();
     const rot = g.mode === "rotate";
     // A CHAIN anchor or a selected PIECE may tilt on all 3 axes; the next-piece
     // ghost stays yaw-only (kit sockets are level).
@@ -838,6 +900,10 @@ export class ModularRoadBuilder {
       tilt: new THREE.Quaternion(),
       /** Entry seam BEFORE the tilt — filled by rebuildAll, used by the edit gizmo. */
       _baseIn: connectorIn.clone(),
+      /** Free-placed? Then `pinnedIn` replaces the chain's running connector. */
+      detached: false,
+      /** @type {THREE.Matrix4|null} absolute entry seam while detached. */
+      pinnedIn: null,
     };
     for (const m of [mesh, railMesh, shellMesh, decorMesh]) {
       if (m) m.userData.piece = piece;
@@ -1039,6 +1105,64 @@ export class ModularRoadBuilder {
     return this.replacePiece(p, "gap", pp);
   }
 
+  /** Turn this piece's guardrails/kerbs on or off — PER PIECE, independent of
+   *  the palette's global "new pieces get edges" default. */
+  setPieceEdges(p, on) {
+    if (this.pieces.indexOf(p) < 0) return false;
+    p.edges = !!on;
+    this.rebuildAll();
+    if (this.selectedPiece === p) this._updateSelectionHighlight();
+    return true;
+  }
+
+  // ── DETACH: free-placing one piece without dragging the chain ─────────────
+  // The chain (each piece's entry = the previous piece's exit) is what makes
+  // building fast and gap-free, but it means a piece has no position of its own
+  // to edit. A DETACHED piece carries an absolute `pinnedIn` instead, which
+  // rebuildAll uses in place of the running connector — so it can be moved and
+  // rotated freely while everything else stays put.
+  //
+  // The save format already stores an absolute matrix per piece, so this needed
+  // no format change; `detached`/`pinnedIn` just ride along with it.
+
+  /** The next piece in the same chain, or null. */
+  _nextInChain(p) {
+    const ps = this._chainPieces(p.chainId);
+    return ps[ps.indexOf(p) + 1] ?? null;
+  }
+
+  /**
+   * Free this piece from the chain, pinned where it currently sits.
+   *
+   * ALSO pins the NEXT piece at its current place — that is what stops the rest
+   * of the chain from following when you then move this one. Everything past
+   * the next piece still chains from it, so it stays put too: one extra pin
+   * holds the whole downstream still.
+   */
+  detachPiece(p) {
+    if (this.pieces.indexOf(p) < 0 || p.detached) return false;
+    p.detached = true;
+    // `_baseIn` is the entry BEFORE this piece's tilt, so pinning it keeps any
+    // tilt working as a rotation on top rather than baking it in.
+    p.pinnedIn = (p._baseIn ?? p.connectorIn).clone();
+    const next = this._nextInChain(p);
+    if (next && !next.detached) {
+      next.detached = true;
+      next.pinnedIn = (next._baseIn ?? next.connectorIn).clone();
+    }
+    return true;
+  }
+
+  /** Re-join the chain: snap back onto the previous piece's exit. */
+  attachPiece(p) {
+    if (this.pieces.indexOf(p) < 0 || !p.detached) return false;
+    p.detached = false;
+    p.pinnedIn = null;
+    this.rebuildAll();
+    if (this.selectedPiece === p) this._updateSelectionHighlight();
+    return true;
+  }
+
   /** Reset a piece's tilt to none (downstream re-levels from here). */
   levelPiece(p) {
     if (this.pieces.indexOf(p) < 0) return false;
@@ -1135,6 +1259,12 @@ export class ModularRoadBuilder {
       let conn = chain.anchor.clone();
       for (const p of this.pieces) {
         if (p.chainId !== chain.id) continue;
+        // DETACHED pieces ignore the running connector and sit at their own
+        // absolute `pinnedIn` — that is what lets one piece be moved or rotated
+        // without dragging the chain with it. The running connector resumes from
+        // this piece's exit, so anything after it still chains normally.
+        if (p.detached && p.pinnedIn) conn = p.pinnedIn.clone();
+
         // PER-PIECE TILT: a rotation applied at this piece's entry seam, in the
         // connector's LOCAL frame (roll about travel, pitch about lateral). It
         // banks this piece AND flows into every piece after it — the chain stays
@@ -1266,6 +1396,10 @@ export class ModularRoadBuilder {
         connectorOut: built.connectorOut.clone(),
         tilt: new THREE.Quaternion(),
         _baseIn: connectorIn.clone(),
+        detached: !!e.detached,
+        pinnedIn: Array.isArray(e.pinnedIn) && e.pinnedIn.length === 16
+          ? new THREE.Matrix4().fromArray(e.pinnedIn)
+          : null,
       };
       for (const m of [mesh, railMesh, shellMesh, decorMesh]) {
         if (m) m.userData.piece = piece;
@@ -1286,6 +1420,10 @@ export class ModularRoadBuilder {
       let baseIn = chain.anchor;
       for (const p of this.pieces) {
         if (p.chainId !== chain.id) continue;
+        // A DETACHED piece's entry comes from its own saved `pinnedIn`, so its
+        // difference from the chain is deliberate, not a tilt to recover. Take
+        // that as the base instead or the offset would be folded into `tilt`.
+        if (p.detached && p.pinnedIn) baseIn = p.pinnedIn;
         _A_M.extractRotation(baseIn);
         _A_Q.setFromRotationMatrix(_A_M);           // base rotation
         _A_M.extractRotation(p.connectorIn);
@@ -1382,15 +1520,29 @@ export class ModularRoadBuilder {
     this._notify();
   }
 
-  /** @returns {{id:string, chainId:number, pp:object, edges:boolean, connectorIn:number[]}[]} */
+  /**
+   * `detached`/`pinnedIn` must be saved explicitly. `connectorIn` alone is not
+   * enough: on load the tilt-recovery pass can express a rotation difference
+   * from the chain, but NOT a translation — so a free-placed piece would snap
+   * back onto the chain and lose its position.
+   * @returns {{id:string, chainId:number, pp:object, edges:boolean,
+   *            connectorIn:number[], detached?:boolean, pinnedIn?:number[]}[]}
+   */
   exportTrackPieces() {
-    return this.pieces.map((p) => ({
-      id: p.id,
-      chainId: p.chainId ?? 0,
-      pp: { ...p.pp },
-      edges: p.edges ?? true,
-      connectorIn: p.connectorIn.toArray(),
-    }));
+    return this.pieces.map((p) => {
+      const e = {
+        id: p.id,
+        chainId: p.chainId ?? 0,
+        pp: { ...p.pp },
+        edges: p.edges ?? true,
+        connectorIn: p.connectorIn.toArray(),
+      };
+      if (p.detached && p.pinnedIn) {
+        e.detached = true;
+        e.pinnedIn = p.pinnedIn.toArray();
+      }
+      return e;
+    });
   }
 
   dispose() {

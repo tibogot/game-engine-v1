@@ -1386,6 +1386,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       getSelectedTilt: () =>
         builder.selectedPiece ? builder.pieceTiltDeg(builder.selectedPiece) : { pitch: 0, roll: 0 },
       levelSelected: () => { if (builder.selectedPiece) builder.levelPiece(builder.selectedPiece); },
+      getSelectedEdges: () => builder.selectedPiece?.edges ?? true,
+      toggleSelectedEdges: () => {
+        const sp = builder.selectedPiece;
+        if (sp) builder.setPieceEdges(sp, !(sp.edges ?? true));
+      },
+      isSelectedDetached: () => !!builder.selectedPiece?.detached,
+      toggleSelectedDetached: () => {
+        const sp = builder.selectedPiece;
+        if (!sp) return;
+        if (sp.detached) builder.attachPiece(sp);
+        else { builder.detachPiece(sp); builder.rebuildAll(); }
+      },
       isSelectedGap: () => builder.selectedPiece?.id === "gap",
       makeSelectedGap: () => {
         // FLAT empty-space spacer sized to the piece (level hole, downstream

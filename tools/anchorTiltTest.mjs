@@ -17,7 +17,7 @@ const R2D = THREE.MathUtils.radToDeg;
 /** Minimal TransformControls stand-in — the builder only uses these members. */
 function fakeGizmo() {
   return {
-    visible:false, enabled:false, mode:"translate", dragging:false, axis:null,
+    visible:false, enabled:false, mode:"translate", dragging:true /* these fixtures simulate DRAGS */, axis:null,
     showX:true, showY:true, showZ:true,
     setMode(m){ this.mode = m; }, setSpace(){}, setSize(){},
     attach(){ this.object = arguments[0]; }, detach(){ this.object = null; },

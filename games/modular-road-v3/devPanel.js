@@ -611,18 +611,30 @@ export function createRoadDevPanel({ app, game, params }) {
             <span class="prop-label">Tilt</span>
             <div class="prop-value"><span class="prop-num" id="dv-sel-tilt">level</span></div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Placement</span>
+            <div class="prop-value"><span class="prop-num" id="dv-sel-attach">—</span></div>
+          </div>
+          <button class="action-btn" id="dv-piece-detach" type="button">Detach from chain</button>
+          <button class="action-btn" id="dv-piece-edges" type="button">Edges: on</button>
           <button class="action-btn" id="dv-piece-level" type="button">Level tilt (L)</button>
           <button class="action-btn" id="dv-piece-gap" type="button">Make empty space</button>
           <button class="action-btn" id="dv-piece-replace" type="button">Replace with active (Enter)</button>
           <button class="action-btn" id="dv-piece-insert" type="button">Insert active before (I)</button>
           <button class="action-btn" id="dv-piece-delete" type="button">Delete (Del)</button>
           <div class="dv-hint">
-            <b>Right-click</b> a placed piece to select it (Esc to deselect). A
-            gizmo appears on it: <b>E</b> = rotate to <b>tilt</b> it and everything
-            after it (banked/descending landing strips), <b>W</b> = move the whole
-            chain. <b>L</b> levels the tilt. <b>Make empty space</b> turns it into
-            a jump gap (still selectable — replace to fill it back). Replace /
-            insert / delete re-flow the rest of the chain to fit.
+            <b>Right-click</b> a placed piece to select it (Esc to deselect), then
+            <b>W</b> move / <b>E</b> rotate with the gizmo.
+            <br><br>
+            <b>Chained</b> (default): the piece takes its position from the one
+            before it. Rotating it <b>tilts</b> it and everything after — that's
+            how you bank a landing strip. <b>Free</b> (after a move, or via
+            Detach): the piece keeps its own position and rotates on its own, and
+            nothing else moves. <b>Re-attach</b> snaps it back onto the chain.
+            <br><br>
+            <b>Edges</b> is per piece. <b>L</b> levels tilt. <b>Make empty space</b>
+            turns it into a jump gap (still selectable — replace to fill it back).
+            Replace / insert / delete re-flow the chain to fit.
           </div>
         </div>
       </div>
@@ -1191,12 +1203,17 @@ export function createRoadDevPanel({ app, game, params }) {
   // Piece editing. The buttons no-op with no selection; the readout + disabled
   // state come from refresh(), which the game calls after any pick/edit.
   const selPieceEl = $("#dv-sel-piece");
-  const pieceBtns = ["dv-piece-replace", "dv-piece-insert", "dv-piece-delete", "dv-piece-level", "dv-piece-gap"].map((id) => $(`#${id}`));
+  const pieceBtns = ["dv-piece-replace", "dv-piece-insert", "dv-piece-delete", "dv-piece-level", "dv-piece-gap", "dv-piece-detach", "dv-piece-edges"].map((id) => $(`#${id}`));
   $("#dv-piece-replace")?.addEventListener("click", () => { game.replaceSelected(); refresh(); });
   $("#dv-piece-insert")?.addEventListener("click", () => { game.insertBeforeSelected(); refresh(); });
   $("#dv-piece-delete")?.addEventListener("click", () => { game.deleteSelected(); refresh(); });
   $("#dv-piece-level")?.addEventListener("click", () => { game.levelSelected?.(); refresh(); });
   $("#dv-piece-gap")?.addEventListener("click", () => { game.makeSelectedGap?.(); refresh(); });
+  $("#dv-piece-detach")?.addEventListener("click", () => { game.toggleSelectedDetached?.(); refresh(); });
+  $("#dv-piece-edges")?.addEventListener("click", () => { game.toggleSelectedEdges?.(); refresh(); });
+  const selAttachEl = $("#dv-sel-attach");
+  const detachBtn = $("#dv-piece-detach");
+  const edgesBtn2 = $("#dv-piece-edges");
   const selTiltEl = $("#dv-sel-tilt");
 
   toggle("dv-lines", game.getLinesOn(), (on) => game.setLinesOn(on));
@@ -1280,6 +1297,14 @@ export function createRoadDevPanel({ app, game, params }) {
     const selId = game.getSelectedPieceId?.() ?? null;
     if (selPieceEl) selPieceEl.textContent = selId ?? "none";
     for (const b of pieceBtns) if (b) b.disabled = !selId;
+    if (selAttachEl) {
+      const det = game.isSelectedDetached?.() ?? false;
+      selAttachEl.textContent = !selId ? "—" : det ? "free" : "chained";
+      if (detachBtn) detachBtn.textContent = det ? "Re-attach to chain" : "Detach from chain";
+      if (edgesBtn2) {
+        edgesBtn2.textContent = `Edges: ${(game.getSelectedEdges?.() ?? true) ? "on" : "off"}`;
+      }
+    }
     if (selTiltEl) {
       const t = game.getSelectedTilt?.() ?? { pitch: 0, roll: 0 };
       const flat = Math.abs(t.pitch) < 0.5 && Math.abs(t.roll) < 0.5;

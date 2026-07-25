@@ -86,7 +86,7 @@ const pitchQuat=(deg)=>new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3
 }
 
 // ── GIZMO-DRIVEN path (_onPieceGizmoChange) ────────────────────────────────
-function fakeGizmo(){return{visible:false,enabled:false,mode:"translate",dragging:false,axis:null,showX:1,showY:1,showZ:1,setMode(m){this.mode=m},setSpace(){},setSize(){},attach(o){this.object=o},detach(){this.object=null},getHelper(){return new THREE.Object3D()},addEventListener(){},removeEventListener(){}};}
+function fakeGizmo(){return{visible:false,enabled:false,mode:"translate",dragging:true /* these fixtures simulate DRAGS */,axis:null,showX:1,showY:1,showZ:1,setMode(m){this.mode=m},setSpace(){},setSize(){},attach(o){this.object=o},detach(){this.object=null},getHelper(){return new THREE.Object3D()},addEventListener(){},removeEventListener(){}};}
 {
   const b = fresh(); b.placementGizmo = fakeGizmo();
   const p = b.pieces[2];
@@ -106,19 +106,24 @@ function fakeGizmo(){return{visible:false,enabled:false,mode:"translate",draggin
   check("pivot re-seats on the moved piece", b.placementPivot.position.distanceTo(new THREE.Vector3().setFromMatrixPosition(p.connectorIn))<1e-6);
 }
 {
-  // TRANSLATE moves the whole chain by the drag delta.
+  // TRANSLATE now DETACHES the piece and moves it ALONE. (It used to shift the
+  // whole chain, which meant a piece had no position of its own to edit — the
+  // thing that made the builder feel stuck.) Moving the whole run is still
+  // available by selecting the chain rather than a piece.
   const b = fresh(); b.placementGizmo = fakeGizmo();
   const p = b.pieces[2];
   b.selectPiece(p);
-  const end0 = new THREE.Vector3().setFromMatrixPosition(b.pieces[4].connectorOut);
+  const before = b.pieces.map(q => new THREE.Vector3().setFromMatrixPosition(q.connectorIn));
   b.placementGizmo.mode = "translate";
-  const oldPos = new THREE.Vector3().setFromMatrixPosition(p.connectorIn);
-  b.placementPivot.position.copy(oldPos).add(new THREE.Vector3(5, 3, 0)); // drag +5x +3y
+  b.placementPivot.position.copy(before[2]).add(new THREE.Vector3(5, 3, 0)); // drag +5x +3y
   b._onPlacementGizmoChange();
-  const end1 = new THREE.Vector3().setFromMatrixPosition(b.pieces[4].connectorOut);
-  check("translate shifts the whole chain by the delta",
-    Math.abs(end1.x-end0.x-5)<1e-4 && Math.abs(end1.y-end0.y-3)<1e-4, `d ${(end1.x-end0.x).toFixed(2)},${(end1.y-end0.y).toFixed(2)}`);
-  check("chain still connected after move", connected(b));
+  const after = b.pieces.map(q => new THREE.Vector3().setFromMatrixPosition(q.connectorIn));
+  check("translate detaches the piece", p.detached === true);
+  check("the dragged piece moved by the delta",
+    Math.abs(after[2].x - before[2].x - 5) < 1e-4 && Math.abs(after[2].y - before[2].y - 3) < 1e-4,
+    `d ${(after[2].x-before[2].x).toFixed(2)},${(after[2].y-before[2].y).toFixed(2)}`);
+  check("no other piece moved",
+    [0,1,3,4].every(i => after[i].distanceTo(before[i]) < 1e-6));
 }
 
 // ── EMPTY-SPACE (gap) round-trip ───────────────────────────────────────────
