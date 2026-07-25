@@ -283,9 +283,29 @@ export const TIRE = {
  *  drive force is preserved across layouts, so RWD just concentrates it on the
  *  rear (more power-oversteer) rather than halving acceleration. */
 export const DRIVETRAIN = {
-  layout: "AWD", // 'FWD' | 'RWD' | 'AWD'
-  // Front-leaning split: the rear axle's drive share is what eats its lateral
-  // grip under power, so 0.4 keeps AWD stable at speed without FWD's plow.
+  /**
+   * 'FWD' | 'RWD' | 'AWD'.
+   *
+   * RWD by default because this is a DRIFT game and the drivetrain is what
+   * decides whether drifting is something the car does or something you have to
+   * ask the handbrake for. The old AWD default made it the latter — worse, its
+   * `powerBias: 0.4` was FRONT-leaning, so most of the drive went to the wheels
+   * that are not supposed to break loose.
+   *
+   * The rear axle cannot hold the full drive force, and that is the point:
+   *     rear static load   6867 N
+   *     rear grip budget  10301 N   (μ 1.5)
+   *     full drive force  16000 N   ← all of it on the rear in RWD
+   * The friction circle clamps the excess, which is wheelspin and power-over —
+   * drift as an emergent property of the tyre model rather than a special case.
+   *
+   * KNOWN TRADEOFF: standing starts are slower (drive is capped near 10.3 kN
+   * instead of ~16 kN spread over four wheels) and corner exits need catching
+   * on the throttle. `gripRear` is the trim knob if the tail is too loose.
+   */
+  layout: "RWD",
+  /** Rear power fraction, AWD only (0 = all front … 1 = all rear). Ignored for
+   *  FWD/RWD, which are hard 0 and 1. */
   powerBias: 0.4,
 };
 

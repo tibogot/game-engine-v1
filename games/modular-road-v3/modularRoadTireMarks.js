@@ -1,4 +1,7 @@
 import * as THREE from "three";
+// Marks are sized from the fitted wheel (see MARK_WIDTH_FRAC). No import cycle:
+// the vehicle module knows nothing about tyre marks.
+import { WHEEL } from "../../v3/play/modularRoadVehicle.js";
 
 /**
  * Rear-wheel skid ribbons for modular-road test drive.
@@ -11,7 +14,21 @@ const VERTS_PER_SEGMENT = 6;
 const FLOATS_PER_SEGMENT = VERTS_PER_SEGMENT * 3;
 const COLOR_FLOATS_PER_SEGMENT = VERTS_PER_SEGMENT * 4;
 
-const MARK_WIDTH = 0.09;
+/**
+ * Contact-patch width as a fraction of the TYRE's width.
+ *
+ * Derived from `WHEEL.thickness` rather than hardcoded, so it follows whichever
+ * wheel is fitted — the procedural wheel is 0.24 m but the Lotus GLB is 0.289 m,
+ * and a fixed number would be wrong for one of them. `setWheelStyle` rewrites
+ * WHEEL.thickness on the swap, so the marks re-width for free.
+ *
+ * Slightly under 1: a tyre's shoulders carry less load than the centre, so the
+ * mark it leaves is a little narrower than the carcass.
+ *
+ * (Was a flat 0.09 HALF-width — a 0.18 m mark under a 0.24 m tyre, i.e. 75%.
+ * Too narrow to read as a tyre print.)
+ */
+const MARK_WIDTH_FRAC = 0.92;
 const MARK_Y_OFFSET = 0.045;
 const MIN_SEGMENT_LENGTH = 0.035;
 const INTENSITY_MIN = 0.15;
@@ -187,7 +204,9 @@ export class ModularRoadTireMarks {
     if (len < MIN_SEGMENT_LENGTH) return;
     _dir.divideScalar(len);
 
-    _side.set(_dir.z, 0, -_dir.x).multiplyScalar(MARK_WIDTH);
+    // Half-width, read from the fitted wheel each segment so a wheel-style swap
+    // is picked up immediately (see MARK_WIDTH_FRAC).
+    _side.set(_dir.z, 0, -_dir.x).multiplyScalar(WHEEL.thickness * MARK_WIDTH_FRAC * 0.5);
     _pL.copy(prev).add(_side);
     _pR.copy(prev).sub(_side);
     _cL.copy(curr).add(_side);
