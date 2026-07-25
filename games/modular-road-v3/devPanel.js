@@ -346,7 +346,7 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="prop-row">
             <span class="prop-label">Steer angle</span>
             <div class="prop-value">
-              <input type="range" id="dv-steer" min="0.15" max="1.0" step="0.01" />
+              <input type="range" id="dv-steer" min="0.15" max="1.2" step="0.01" />
               <span class="prop-num" id="dv-steer-v"></span>
             </div>
           </div>
@@ -910,6 +910,12 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Mark style</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-skid-style" type="button">Solid</button>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Drift smoke</span>
             <div class="prop-value">
               <button class="prop-toggle checked" id="dv-smoke" type="button" aria-label="Drift smoke">${CHECK_SVG}</button>
@@ -1275,6 +1281,13 @@ export function createRoadDevPanel({ app, game, params }) {
 
   // ── FX ──────────────────────────────────────────────────────────────────────
   toggle("dv-marks", true, (on) => game.setTireMarksEnabled(on));
+  // Live A/B between the flat ribbon and the textured skid decal.
+  const skidBtn = $("#dv-skid-style");
+  const syncSkidBtn = () => {
+    if (skidBtn) skidBtn.textContent = game.getSkidStyle?.() === "textured" ? "Textured" : "Solid";
+  };
+  skidBtn?.addEventListener("click", () => { game.toggleSkidStyle?.(); syncSkidBtn(); });
+  syncSkidBtn();
   toggle("dv-smoke", true, (on) => game.setDriftSmokeEnabled(on));
 
   // ── Live readouts ───────────────────────────────────────────────────────────

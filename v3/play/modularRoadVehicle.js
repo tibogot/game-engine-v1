@@ -110,7 +110,27 @@ export const TIRE = {
   reverseAccel: 2000,
   brakeReverseThreshold: 0.5,
   engineBrake: 800,
-  maxSteerAngle: 0.55,
+  /**
+   * Steering lock at a standstill (rad). 0.95 ≈ 54°.
+   *
+   * DRIFT-CAR LOCK, NOT STOCK-CAR LOCK — this is what makes donuts possible.
+   * The tightest circle a car can pivot is geometric: `wheelbase / tan(lock)`.
+   * At the old 0.55 (31.5°) that floor was 4.6 m, and a donut needs ~1.5–3 m,
+   * so no amount of power or drift tuning could produce one. Measured circle
+   * radius, full lock + throttle held:
+   *     31.5° → 6.7 m,  45° → 4.7 m,  55° → 3.8 m,  65° → 3.0 m
+   *
+   * Real drift cars fit steering-angle kits for exactly this reason (50–65°
+   * versus ~35° stock), so this is the realistic value for the car this is.
+   *
+   * NOTE the yaw assist was NOT the blocker — measured, reducing it actually
+   * WIDENS the circle (it keeps the nose aligned so the car corners properly
+   * instead of ploughing). Don't "fix" donuts by weakening the assist.
+   *
+   * `steerSpeedReduce` below is paired with this: it is raised so the angle
+   * available AT SPEED is unchanged. Only the low-speed end got more lock.
+   */
+  maxSteerAngle: 0.95,
 
   // ── STEERING INPUT SHAPING ──────────────────────────────────────────────
   // A keyboard key is a binary switch, so the shape of the ramp between 0 and
@@ -142,11 +162,19 @@ export const TIRE = {
   // KEEP THIS TRACKING `topSpeed` — full reduction should land AT top speed, so
   // it scales with it (26 was the value for topSpeed 30; 45 for 50). Leaving it
   // low would fully numb the wheel across the entire upper half of the speed
-  // range instead of easing into it. At top speed this leaves 0.55 × (1 − 0.5)
-  // ≈ 16° of lock, and a 26 m curve only asks for atan(2.8 / 26) ≈ 6°, so
-  // there's ample margin even in the tightest corner the kit builds.
+  // range instead of easing into it.
+  //
+  // `steerSpeedReduce` IS PAIRED WITH `maxSteerAngle` — raise one and this must
+  // follow, or the extra lock leaks into high-speed driving and the car turns
+  // twitchy. It was 0.5 against a 0.55 lock (≈16° at speed); the drift lock of
+  // 0.95 needs 0.70 to land on ≈16° again. So the low-speed end gained 23° of
+  // lock for donuts and the high-speed end did not change at all.
+  //   at rest:      0.95 rad = 54°   (donut floor ≈ 2.0 m)
+  //   at top speed: 0.95 × 0.30 = 16.3°  (was 15.8°)
+  // A 26 m curve only asks for atan(2.8 / 26) ≈ 6°, so there is still ample
+  // margin in the tightest corner the kit builds.
   steerSpeedRef: 45,
-  steerSpeedReduce: 0.5,
+  steerSpeedReduce: 0.70,
   frictionCoeff: 1.5,
   maxAngVel: 9.0,
   // Contact-normal low-pass rate (1/s). ~55 ms time constant: at 30 m/s that

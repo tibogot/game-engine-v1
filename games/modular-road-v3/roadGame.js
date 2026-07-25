@@ -1413,6 +1413,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         tireMarks.mesh.visible = !!on;
         if (!on) tireMarks.reset();
       },
+      // Skid-mark look. Geometry is shared, so this is a live material swap —
+      // the flat ribbon stays available if the texture doesn't convince.
+      getSkidStyle: () => tireMarks.style,
+      toggleSkidStyle: () =>
+        tireMarks.setStyle(tireMarks.style === "textured" ? "solid" : "textured"),
       setDriftSmokeEnabled: (on) => {
         driftSmoke.settings.enabled = !!on;
         driftSmoke.mesh.visible = !!on;

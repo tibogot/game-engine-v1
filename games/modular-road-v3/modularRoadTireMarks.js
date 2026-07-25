@@ -13,6 +13,23 @@ const MAX_SEGMENTS = 4096;
 const VERTS_PER_SEGMENT = 6;
 const FLOATS_PER_SEGMENT = VERTS_PER_SEGMENT * 3;
 const COLOR_FLOATS_PER_SEGMENT = VERTS_PER_SEGMENT * 4;
+const UV_FLOATS_PER_SEGMENT = VERTS_PER_SEGMENT * 2;
+
+/**
+ * TEXTURED SKID MARKS — an alternative look, switchable at runtime against the
+ * original flat ribbon (`setStyle`). Both styles share this one geometry and
+ * ring buffer, so switching is just a material swap: nothing to rebuild, and
+ * the flat ribbon stays available as a fallback.
+ *
+ * Kept as one class rather than two because the emit logic — drift detection,
+ * contact points, ring buffer, fade — is identical for both. Only the material
+ * differs. UVs are written unconditionally (+192 KB) so a switch needs no
+ * regeneration.
+ */
+export const SKID_TEXTURE_URL = "/textures/skid_mark01.png";
+
+/** Metres of track per repeat of the texture along the mark. */
+const TILE_LENGTH = 6.0;
 
 /**
  * Contact-patch width as a fraction of the TYRE's width.
@@ -72,6 +89,14 @@ export class ModularRoadTireMarks {
     const colorAttr = new THREE.BufferAttribute(colors, 4);
     colorAttr.setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute("color", colorAttr);
+
+    // u runs ALONG the mark (distance / TILE_LENGTH), v ACROSS it (0..1).
+    // Written for both styles so switching never has to regenerate anything.
+    const uvs = new Float32Array(MAX_SEGMENTS * UV_FLOATS_PER_SEGMENT);
+    const uvAttr = new THREE.BufferAttribute(uvs, 2);
+    uvAttr.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute("uv", uvAttr);
+
     geometry.setDrawRange(0, 0);
 
     const material = new THREE.MeshBasicMaterial({
@@ -93,13 +118,74 @@ export class ModularRoadTireMarks {
 
     this.positions = positions;
     this.colors = colors;
+    this.uvs = uvs;
     this.geometry = geometry;
     this.segmentIndex = 0;
     this.drawCount = 0;
+    // `dist` is metres laid down since this mark started — it drives u, so the
+    // texture flows continuously along the streak instead of per-segment.
     this.states = [
-      { prev: new THREE.Vector3(), active: false },
-      { prev: new THREE.Vector3(), active: false },
+      { prev: new THREE.Vector3(), active: false, dist: 0 },
+      { prev: new THREE.Vector3(), active: false, dist: 0 },
     ];
+
+    this.style = "solid";
+    this._solidMaterial = material;
+    this._texturedMaterial = null;
+    this._skidTexture = null;
+  }
+
+  /**
+   * Swap the look: "solid" (flat dark ribbon) or "textured" (skid_mark01.png).
+   * Geometry is shared, so this is a material swap and nothing more — the solid
+   * ribbon is always available as a fallback if the texture doesn't convince.
+   */
+  setStyle(style) {
+    const want = style === "textured" ? "textured" : "solid";
+    this.style = want;
+    if (want === "solid") {
+      this.mesh.material = this._solidMaterial;
+      return want;
+    }
+    if (!this._texturedMaterial) {
+      this._texturedMaterial = new THREE.MeshBasicMaterial({
+        // The PNG is pure black with all its detail in ALPHA, so the tint stays
+        // white and the texture carries the look. Vertex alpha still fades the
+        // ribbon in/out with drift intensity, multiplying the texture's own.
+        color: 0xffffff,
+        transparent: true,
+        vertexColors: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
+      });
+      new THREE.TextureLoader().load(
+        SKID_TEXTURE_URL,
+        (tex) => {
+          // MIRRORED repeat along the mark, and this is the important bit:
+          // measured, the texture does NOT tile — its left edge fades to alpha 0
+          // but its right edge is still at 0.53, so plain RepeatWrapping shows a
+          // hard seam every TILE_LENGTH. Mirroring makes each repeat a flip of
+          // the last, so 0.53 always meets 0.53 and 0 meets 0 — continuous.
+          tex.wrapS = THREE.MirroredRepeatWrapping;
+          tex.wrapT = THREE.ClampToEdgeWrapping; // v is across the mark: never tile
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.anisotropy = 8; // marks are viewed at a very grazing angle
+          this._skidTexture = tex;
+          this._texturedMaterial.map = tex;
+          this._texturedMaterial.needsUpdate = true;
+        },
+        undefined,
+        (err) => {
+          console.warn("[modular-road] skid texture failed, staying solid:", SKID_TEXTURE_URL, err);
+          this.setStyle("solid");
+        },
+      );
+    }
+    this.mesh.material = this._texturedMaterial;
+    return want;
   }
 
   reset() {
@@ -109,6 +195,8 @@ export class ModularRoadTireMarks {
     this.mesh.visible = false;
     this.states[0].active = false;
     this.states[1].active = false;
+    this.states[0].dist = 0;
+    this.states[1].dist = 0;
   }
 
   /** @param {import("./modularRoadVehicle.js").Vehicle} vehicle */
@@ -192,12 +280,15 @@ export class ModularRoadTireMarks {
       state.active = false;
       return;
     }
-    if (emit && state.active) this._addSegment(state.prev, point, intensity);
+    // Restart the texture run whenever a new mark begins, so every streak opens
+    // at u=0 (the texture's faded end) instead of mid-pattern.
+    if (emit && !state.active) state.dist = 0;
+    if (emit && state.active) this._addSegment(state.prev, point, intensity, state);
     state.prev.copy(point);
     state.active = emit;
   }
 
-  _addSegment(prev, curr, intensity) {
+  _addSegment(prev, curr, intensity, state) {
     _dir.subVectors(curr, prev);
     _dir.y = 0;
     const len = _dir.length();
@@ -243,12 +334,30 @@ export class ModularRoadTireMarks {
       this.colors[colorOffset + i * 4 + 3] = alpha;
     }
 
+    // UVs — u advances with real distance travelled so the texture flows along
+    // the streak continuously rather than restarting per segment. Vertex order
+    // is (pL, pR, cL, pR, cR, cL); v is 0 on the left edge, 1 on the right.
+    const u0 = state.dist / TILE_LENGTH;
+    state.dist += len;
+    const u1 = state.dist / TILE_LENGTH;
+    const uvOffset = this.segmentIndex * UV_FLOATS_PER_SEGMENT;
+    const uv = this.uvs;
+    uv[uvOffset + 0] = u0; uv[uvOffset + 1] = 0;  // pL
+    uv[uvOffset + 2] = u0; uv[uvOffset + 3] = 1;  // pR
+    uv[uvOffset + 4] = u1; uv[uvOffset + 5] = 0;  // cL
+    uv[uvOffset + 6] = u0; uv[uvOffset + 7] = 1;  // pR
+    uv[uvOffset + 8] = u1; uv[uvOffset + 9] = 1;  // cR
+    uv[uvOffset + 10] = u1; uv[uvOffset + 11] = 0; // cL
+
     const posAttr = this.geometry.attributes.position;
     posAttr.addUpdateRange(offset, FLOATS_PER_SEGMENT);
     posAttr.needsUpdate = true;
     const colorAttr = this.geometry.attributes.color;
     colorAttr.addUpdateRange(colorOffset, COLOR_FLOATS_PER_SEGMENT);
     colorAttr.needsUpdate = true;
+    const uvAttr = this.geometry.attributes.uv;
+    uvAttr.addUpdateRange(uvOffset, UV_FLOATS_PER_SEGMENT);
+    uvAttr.needsUpdate = true;
 
     this.segmentIndex = (this.segmentIndex + 1) % MAX_SEGMENTS;
     if (this.drawCount < MAX_SEGMENTS * VERTS_PER_SEGMENT) {
