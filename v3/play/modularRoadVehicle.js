@@ -343,6 +343,36 @@ export const BODYLEAN = {
  * `rayLateralBias`, which lives in the `else` branch of Tire._probeGround and is
  * only reached when `rayRingCount < 3`. It is 10.
  */
+/**
+ * DRIFT VISUALS — cosmetic only, zero effect on handling.
+ *
+ * In a real drift the driver countersteers, and the reason is mechanical: with
+ * the body at a big slip angle, leaving the front wheels aligned with the body
+ * would put THEM at that same slip angle too, saturate them, and the car would
+ * just spin. Aiming them along the direction of travel keeps the front tyres
+ * near zero slip — still gripping, still steering — while the rears slide.
+ * "Front wheels pointing down the road while the body is sideways" is the
+ * visual signature of that, and it's what makes a drift read as a drift.
+ *
+ * The physics here already lets the player do this with the steering keys. This
+ * block only makes the WHEEL MESHES take up part of the slip angle on their
+ * own, so the pose looks right even when the yaw assist means the player didn't
+ * need much input. It rotates meshes and nothing else — `_steerAngle()`, which
+ * is what the tyres actually use, is untouched.
+ */
+export const DRIFT = {
+  /** Fraction of the slip angle the front wheels visually take up. 0 = off. */
+  counterSteerVisual: 0.7,
+  /** Slip (rad) below which nothing is added — ordinary cornering must not get
+   *  a permanent cosmetic offset. ~3.5°. */
+  counterDeadband: 0.06,
+  /** Cap on total visual steer (rad). A little past physical lock is fine —
+   *  nothing reads this but the renderer. ~43°. */
+  maxVisualSteer: 0.75,
+  /** Ease rate (1/s) so the wheels don't snap between poses. */
+  visualSmooth: 12,
+};
+
 export const WHEEL = {
   radius: 0.36,
   thickness: 0.24,
@@ -1358,6 +1388,12 @@ export class Vehicle {
     this._solidR = new THREE.Vector3();
     this._solidTorque = new THREE.Vector3();
     this._steerRateFwd = new THREE.Vector3();
+    this._slipUp = new THREE.Vector3();
+    this._slipFwd = new THREE.Vector3();
+    this._slipLat = new THREE.Vector3();
+    this._slipVel = new THREE.Vector3();
+    /** Smoothed visual steer incl. drift countersteer (cosmetic). */
+    this._visSteer = 0;
     this._landN = new THREE.Vector3();
     this._landUp = new THREE.Vector3();
     this._landTilt = new THREE.Vector3();
@@ -1626,6 +1662,11 @@ export class Vehicle {
    *  whenever it is free. The game escalates past STUCK.respawnAfter. */
   get stuckTime() { return this._stuckTime; }
 
+  /** Did the chassis touch a solid (guardrail / wall) during the last tick?
+   *  Drift scoring breaks a chain on contact — that risk is what makes holding
+   *  a long chain worth anything. */
+  get hitSolid() { return this._solidTouch; }
+
   /**
    * Advance the steering input toward `target`, at a rate chosen by what the
    * player is actually doing — see the steerAttack/Release/Counter notes on TIRE.
@@ -1662,6 +1703,56 @@ export class Vehicle {
     }
 
     return cur + (target - cur) * (1 - Math.exp(-rate * FIXED_DT));
+  }
+
+  /**
+   * Signed slip angle (rad): from the chassis' forward axis to its velocity,
+   * measured in the chassis' OWN ground plane — so it stays meaningful on a
+   * bank or inside a loop, where a world-horizontal measure would not.
+   *
+   * Positive = travelling to the LEFT of where the nose points. (+X is the
+   * chassis' left here; `Tire._right` is misnamed but self-consistent.) 0 when
+   * effectively stationary, where the angle is numerical noise.
+   */
+  get slipAngle() {
+    const v = this.body.vel;
+    this._slipUp.set(0, 1, 0).applyQuaternion(this.body.quat);
+    this._slipFwd.set(0, 0, 1).applyQuaternion(this.body.quat);
+    this._slipVel.copy(v).addScaledVector(this._slipUp, -v.dot(this._slipUp));
+    if (this._slipVel.lengthSq() < 1) return 0; // < 1 m/s in-plane
+    this._slipFwd.addScaledVector(this._slipUp, -this._slipFwd.dot(this._slipUp));
+    if (this._slipFwd.lengthSq() < 1e-8) return 0;
+    this._slipFwd.normalize();
+    this._slipLat.crossVectors(this._slipUp, this._slipFwd); // = chassis left
+    return Math.atan2(this._slipVel.dot(this._slipLat), this._slipVel.dot(this._slipFwd));
+  }
+
+  /**
+   * Steer angle for the WHEEL MESHES — the physics angle plus a slice of the
+   * slip angle, so the front wheels aim down the road during a slide. See the
+   * DRIFT block. Never fed to the tyres.
+   */
+  _visualSteerAngle(dt) {
+    const phys = this._steerAngle();
+    if (DRIFT.counterSteerVisual <= 0) { this._visSteer = phys; return phys; }
+
+    // GROUNDED ONLY. Countersteer is a response to the tyres sliding on a
+    // surface — with the wheels in the air there is nothing to counter, and a
+    // car pitched or yawed mid-jump has a big "slip angle" that means nothing.
+    // Left ungated the front wheels visibly steered themselves during flight.
+    // Airborne, the wheels simply follow the steering input, as a real car's do.
+    const contact = this.groundedCount * 0.25;
+    const slip = contact > 0 ? this.slipAngle : 0;
+    const over = Math.abs(slip) - DRIFT.counterDeadband;
+    // Steering toward the slip direction IS the countersteer: with the nose
+    // left of the velocity, pointing the wheels left aims them along travel.
+    const counter = over > 0 ? Math.sign(slip) * over * DRIFT.counterSteerVisual * contact : 0;
+    let target = phys + counter;
+    const cap = DRIFT.maxVisualSteer;
+    if (target > cap) target = cap; else if (target < -cap) target = -cap;
+    const k = 1 - Math.exp(-DRIFT.visualSmooth * Math.max(1e-4, dt));
+    this._visSteer += (target - this._visSteer) * k;
+    return this._visSteer;
   }
 
   /** Steer angle after speed-sensitive reduction (shared by physics + visuals). */
@@ -2278,7 +2369,9 @@ export class Vehicle {
       this.chassisMesh.quaternion.multiply(this._leanQRoll).multiply(this._leanQPitch);
     }
 
-    const steerAngle = this._steerAngle();
+    // Visual steer INCLUDES the drift countersteer overlay. The TYRES used the
+    // plain _steerAngle() back in _physicsStep — this only turns meshes.
+    const steerAngle = this._visualSteerAngle(dt);
     for (let i = 0; i < this.tires.length; i++) {
       const t = this.tires[i];
       const cfg = WHEEL_LOCAL[i];

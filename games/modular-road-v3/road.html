@@ -107,6 +107,33 @@
       #race-speed .u {
         font-size: 10px; letter-spacing: 2.5px; color: #9fb0c4; text-transform: uppercase;
       }
+      /* Drift chain — right of centre, clear of the speedo (left) and the lap
+         clock (top-centre). Only visible while a chain is live or flashing. */
+      #race-drift {
+        position: absolute; right: 24px; bottom: 92px; text-align: right;
+        color: #fff; opacity: 0; transition: opacity 140ms linear;
+      }
+      #race-drift.on { opacity: 1; }
+      #race-drift .row { display: flex; align-items: baseline; gap: 8px; justify-content: flex-end; }
+      #race-drift-pts {
+        font-variant-numeric: tabular-nums; font-weight: 800; font-size: 34px; line-height: 1;
+        text-shadow: 0 2px 12px rgba(0, 0, 0, 0.75);
+      }
+      #race-drift-mul {
+        font-weight: 800; font-size: 19px; color: #ffd24a;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+      }
+      #race-drift .lbl {
+        font-size: 10px; letter-spacing: 2.5px; color: #9fb0c4; text-transform: uppercase;
+      }
+      /* Banked / lost flash. */
+      #race-drift-bank {
+        font-weight: 800; font-size: 17px; color: #7cffb4; min-height: 20px;
+        opacity: 0; transition: opacity 120ms linear;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+      }
+      #race-drift-bank.show { opacity: 1; }
+
       /* Gear badge sits in the mouth of the arc. */
       #race-gear {
         position: absolute; left: 50%; bottom: -2px; transform: translateX(-50%);
@@ -224,6 +251,15 @@
       </div>
       <div id="race-split"></div>
       <div id="race-flash"></div>
+      <!-- Drift chain. Hidden (opacity 0) until a chain is live. -->
+      <div id="race-drift">
+        <div id="race-drift-bank"></div>
+        <div class="row">
+          <span id="race-drift-pts">0</span><span id="race-drift-mul">x1</span>
+        </div>
+        <div class="lbl">drift</div>
+      </div>
+
       <!-- Speedo + tach. The arc is a single path reused four times; pathLength
            ="100" lets every dash figure below be a plain percentage, independent
            of the actual arc geometry, so retuning the sweep needs no maths. -->

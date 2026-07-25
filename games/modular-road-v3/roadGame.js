@@ -82,6 +82,7 @@ import {
 import { createChaseCamera } from "./chaseCamera.js";
 import { createGamepadInput } from "./gamepadInput.js";
 import { createGearbox, GEARBOX } from "./gearbox.js";
+import { createDriftScore, DRIFT_SCORE } from "./driftScore.js";
 import { loadWheelModel } from "./wheelModel.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
@@ -568,6 +569,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // buildGates() resets timing internally, so load the stored record AFTER it
     // (reset() clears bestLap/bestLapSplits — loading before it would be wiped).
     lap.buildGates(builder.pieces);
+    drift.reset(); // fresh drift total per run
     ghost.clear();
     loadRecord();
     ghostMesh.visible = false;
@@ -1158,6 +1160,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const hudGear = document.getElementById("race-gear");
   // Auto gearbox is DISPLAY-ONLY — the car has no transmission (see gearbox.js).
   const gearbox = createGearbox();
+  // Drift scoring — always on, no mode. See driftScore.js.
+  const drift = createDriftScore();
+  const hudDrift = document.getElementById("race-drift");
+  const hudDriftPts = document.getElementById("race-drift-pts");
+  const hudDriftMul = document.getElementById("race-drift-mul");
+  const hudDriftBank = document.getElementById("race-drift-bank");
+  let driftBankFlash = 0;
+  let _driftShown = false;
   const _hudFwd = new THREE.Vector3();
   let _hudStroke = "";
   let _hudGearLabel = "";
@@ -1213,6 +1223,36 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // Only touch the attribute on change — this runs every frame.
       if (stroke !== _hudStroke) { hudGaugeVal.setAttribute("stroke", stroke); _hudStroke = stroke; }
     }
+    // ── DRIFT ────────────────────────────────────────────────────────────
+    // Fed from the vehicle's own slip angle (measured in the chassis' ground
+    // plane, so it stays right on banks and inside loops).
+    drift.update(dt, {
+      slip: vehicle.slipAngle,
+      speed: speedMs,
+      grounded: vehicle.groundedCount > 0,
+      hitSolid: vehicle.hitSolid,
+    });
+    const banked = drift.consumeBanked();
+    if (banked > 0) {
+      driftBankFlash = 1.1;
+      if (hudDriftBank) hudDriftBank.textContent = `+${banked.toLocaleString()}`;
+    }
+    if (drift.consumeFailed()) {
+      driftBankFlash = 0.9;
+      if (hudDriftBank) hudDriftBank.textContent = "LOST";
+    }
+    if (driftBankFlash > 0) driftBankFlash -= dt;
+    if (hudDrift) {
+      // Visible while chaining or while a bank/lost flash is running.
+      const show = drift.drifting || drift.pending > 0 || driftBankFlash > 0;
+      if (show !== _driftShown) { hudDrift.classList.toggle("on", show); _driftShown = show; }
+      if (show) {
+        if (hudDriftPts) hudDriftPts.textContent = drift.pending.toLocaleString();
+        if (hudDriftMul) hudDriftMul.textContent = `x${drift.multiplier}`;
+        if (hudDriftBank) hudDriftBank.className = driftBankFlash > 0 ? "show" : "";
+      }
+    }
+
     if (hudGear) {
       if (g.label !== _hudGearLabel) { hudGear.textContent = g.label; _hudGearLabel = g.label; }
       if (g.shifted) shiftFlash = 0.18; // brief upshift blink
