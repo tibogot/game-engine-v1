@@ -39,6 +39,7 @@ import {
   SOLID,
   STUCK,
   BODYLEAN,
+  WHEEL_LAYOUT,
   HEADLIGHTS,
   CHASSIS,
   GRAVITY,
@@ -84,6 +85,9 @@ import { createGamepadInput } from "./gamepadInput.js";
 import { createGearbox, GEARBOX } from "./gearbox.js";
 import { createDriftScore, DRIFT_SCORE } from "./driftScore.js";
 import { loadWheelModel } from "./wheelModel.js";
+import {
+  loadChassisModel, CHASSIS_GLB, applyChassisGlbTransform, resetChassisGlbFit,
+} from "./chassisModel.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
 
@@ -254,6 +258,27 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     })
     .catch((e) => {
       console.warn("[ModularRoad-v3] wheel model failed to load — staying procedural", e);
+    });
+
+  // GLB body, same deal. This one changes NO physics — the collision box stays
+  // CHASSIS.width/height/length either way — so it is a pure visual swap and the
+  // handling is identical in both styles.
+  // Kept so the dev-panel fit sliders have something to re-transform.
+  let chassisGlbObject = null;
+  loadChassisModel(renderer)
+    .then(({ object, size, brakeLights, headlampLenses, meshCount, casterCount }) => {
+      chassisGlbObject = object;
+      vehicle.setChassisModel(object, { brakeLights, headlampLenses });
+      vehicle.setChassisStyle("glb");
+      console.info(
+        `[ModularRoad-v3] GLB chassis: ${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)}m, `
+        + `${meshCount} meshes (${casterCount} cast shadows), `
+        + `${brakeLights.length} brake + ${headlampLenses.length} headlamp emissive parts`,
+      );
+      devPanel?.refresh();
+    })
+    .catch((e) => {
+      console.warn("[ModularRoad-v3] chassis model failed to load — staying procedural", e);
     });
 
   // STATIC collision — track pieces + props. Baked only when the track changes.
@@ -1337,7 +1362,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let worldName = boot.name;
   devPanel = createRoadDevPanel({
     app,
-    params: { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, glowPropParams },
+    params: { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, WHEEL_LAYOUT, glowPropParams },
     game: {
       setSpawnToCar,
       setSpawnToCursor,
@@ -1366,6 +1391,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       },
       getWheelStyle: () => vehicle.wheelStyle,
       setWheelStyle: (s) => vehicle.setWheelStyle(s),
+      hasChassisModel: () => vehicle.hasChassisModel,
+      getChassisStyle: () => vehicle.chassisStyle,
+      setChassisStyle: (s) => vehicle.setChassisStyle(s),
+      // Live fit. The panel mutates CHASSIS_GLB in place (that's what slider()
+      // does) and then asks for a re-transform.
+      applyWheelLayout: () => vehicle.applyWheelLayout(),
+      getChassisFit: () => CHASSIS_GLB,
+      applyChassisFit: () => applyChassisGlbTransform(chassisGlbObject),
+      resetChassisFit: () => resetChassisGlbFit(chassisGlbObject),
       hasWheelModel: () => vehicle.hasWheelModel,
       setInstancing: (on) => builder.setInstancing(on),
       // Piece editing (also on right-click select + W/E/L/Del/Enter/I).

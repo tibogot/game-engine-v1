@@ -22,6 +22,10 @@ export const CHASE_CAM = {
   headingLerp: 4.0,   // how fast the trailing heading reorients
   lookLerp: 5.0,      // how fast the look direction tracks velocity
   posLerp: 7.0,       // camera position smoothing
+  /** Cancels the follow lag that otherwise grows the chase distance with speed.
+   *  1 = hold CAM.dist at every speed, 0 = the old behaviour (drifts to ~14 m
+   *  at top speed). See the derivation at the use site. */
+  lagCompensate: 1.0,
   // Loop-follow blend ramps by how far the car's up-axis tilts from world up.
   // Smooth = engage EARLY and ramp over a WIDE tilt range so the camera rolls a
   // little the whole way through the loop (tracking the car), rather than a late,
@@ -209,6 +213,22 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     _camLoop = snap ? loopTgt : _camLoop + (loopTgt - _camLoop) * (1 - Math.exp(-CAM.loopLerp * dt));
 
     _camDesired.lerpVectors(_wDesired, _cDesired, _camLoop);
+
+    // LAG COMPENSATION. An exponential follow lags a target moving at constant
+    // v by exactly v / posLerp. At posLerp 7 and 48 m/s that is 6.9 m ON TOP of
+    // CAM.dist — so the 7.5 m chase silently becomes ~14.4 m flat out, and the
+    // car shrinks into the distance exactly when you most need to see it. It
+    // reads as "the camera pulls away at speed" but nothing in the rig asks for
+    // that; it is pure filter lag.
+    //
+    // Feeding the velocity forward cancels the STEADY-STATE error while leaving
+    // the smoothing untouched for bumps, landings and direction changes — which
+    // is why this is preferable to just raising posLerp (that would stiffen the
+    // camera everywhere to fix a problem that only exists at speed).
+    if (!snap && CAM.lagCompensate > 0) {
+      _camDesired.addScaledVector(v, CAM.lagCompensate / CAM.posLerp);
+    }
+
     const kp = snap ? 1 : 1 - Math.exp(-CAM.posLerp * dt);
     camera.position.lerp(_camDesired, kp);
 

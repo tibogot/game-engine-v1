@@ -25,7 +25,7 @@ const DEV_PANEL_OPEN_W = 300;
  * @param {object} o.params       live-tunable param objects from the vehicle/kit
  */
 export function createRoadDevPanel({ app, game, params }) {
-  const { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, glowPropParams } = params;
+  const { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, WHEEL_LAYOUT, glowPropParams } = params;
 
   const root = document.createElement("div");
   root.id = "road-dev";
@@ -321,6 +321,54 @@ export function createRoadDevPanel({ app, game, params }) {
             <span class="prop-label">Wheels</span>
             <div class="prop-value">
               <button class="action-btn" id="dv-wheels" type="button">Procedural</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Chassis</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-chassis" type="button">Procedural</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Track width</span>
+            <div class="prop-value">
+              <input type="range" id="dv-track" min="0.70" max="1.15" step="0.01" />
+              <span class="prop-num" id="dv-track-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Fit scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-ch-scale" min="0.80" max="1.30" step="0.005" />
+              <span class="prop-num" id="dv-ch-scale-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Fit X</span>
+            <div class="prop-value">
+              <input type="range" id="dv-ch-x" min="-0.30" max="0.30" step="0.005" />
+              <span class="prop-num" id="dv-ch-x-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Fit Y (height)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-ch-y" min="-1.10" max="-0.10" step="0.005" />
+              <span class="prop-num" id="dv-ch-y-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Fit Z (fore/aft)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-ch-z" min="-0.90" max="0.50" step="0.005" />
+              <span class="prop-num" id="dv-ch-z-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Fit</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-ch-reset" type="button">Reset fit</button>
+              <button class="action-btn" id="dv-ch-log" type="button">Log values</button>
             </div>
           </div>
         </div>
@@ -1167,6 +1215,10 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-land-absorb", TIRE, "landingAbsorb", (v) => `${Math.round(v * 100)}%`);
   slider("dv-land-assist", TIRE, "airLandAssist", (v) => v.toFixed(2));
   slider("dv-land-range", TIRE, "airLandRange", (v) => `${v.toFixed(0)} m`);
+  // Track width is the hub |x|; the readout shows the FULL track so it can be
+  // compared against the body width directly.
+  slider("dv-track", WHEEL_LAYOUT, "halfTrack", (v) => (v * 2).toFixed(2) + "m",
+    () => game.applyWheelLayout?.());
   slider("dv-lean-roll", BODYLEAN, "rollPerG", deg);
   slider("dv-lean-pitch", BODYLEAN, "pitchPerG", deg);
   const rads = (v) => `${v.toFixed(1)} rad/s`;
@@ -1204,6 +1256,65 @@ export function createRoadDevPanel({ app, game, params }) {
     syncWheelBtn();
   });
   syncWheelBtn();
+
+  // Chassis style — same async-load pattern as the wheels. Unlike the wheels this
+  // changes nothing physical (the collision box is unchanged), so it is a pure
+  // visual A/B.
+  const chassisBtn = $("#dv-chassis");
+  function syncChassisBtn() {
+    if (!chassisBtn) return;
+    const glb = game.getChassisStyle?.() === "glb";
+    const has = !!game.hasChassisModel?.();
+    chassisBtn.textContent = glb ? "Emira GT4" : has ? "Procedural" : "Procedural only";
+    chassisBtn.disabled = !has;
+    chassisBtn.classList.toggle("primary", glb);
+  }
+  chassisBtn?.addEventListener("click", () => {
+    game.setChassisStyle?.(game.getChassisStyle?.() === "glb" ? "procedural" : "glb");
+    syncChassisBtn();
+  });
+  syncChassisBtn();
+
+  // Chassis FIT. slider() mutates the CHASSIS_GLB object in place, so all these
+  // have to do afterwards is ask the game to re-apply the transform. The GLB may
+  // still be loading — the object is captured by the game, so applying before it
+  // arrives is a harmless no-op and the sliders keep whatever the user set.
+  const chFit = game.getChassisFit?.();
+  const chFitIds = ["dv-ch-scale", "dv-ch-x", "dv-ch-y", "dv-ch-z"];
+  if (chFit) {
+    const apply = () => game.applyChassisFit?.();
+    const f3 = (v) => v.toFixed(3);
+    slider("dv-ch-scale", chFit, "scale", f3, apply);
+    slider("dv-ch-x", chFit, "offsetX", f3, apply);
+    slider("dv-ch-y", chFit, "offsetY", f3, apply);
+    slider("dv-ch-z", chFit, "offsetZ", f3, apply);
+
+    // Sliders don't re-read their object, so a reset has to push the values back
+    // into the inputs by hand or the thumbs lie about what the model is doing.
+    const syncFitInputs = () => {
+      const map = { "dv-ch-scale": "scale", "dv-ch-x": "offsetX", "dv-ch-y": "offsetY", "dv-ch-z": "offsetZ" };
+      for (const [id, key] of Object.entries(map)) {
+        const el = $(`#${id}`), out = $(`#${id}-v`);
+        if (el) el.value = chFit[key];
+        if (out) out.textContent = f3(chFit[key]);
+      }
+    };
+    $("#dv-ch-reset")?.addEventListener("click", () => {
+      game.resetChassisFit?.();
+      syncFitInputs();
+    });
+    // Nudging is only half the job — the numbers have to get back into
+    // chassisModel.js, so print them in paste-ready form.
+    $("#dv-ch-log")?.addEventListener("click", () => {
+      console.info(
+        "[ModularRoad-v3] CHASSIS_GLB fit:\n"
+        + `  scale: ${f3(chFit.scale)},\n  offsetX: ${f3(chFit.offsetX)},\n`
+        + `  offsetY: ${f3(chFit.offsetY)},\n  offsetZ: ${f3(chFit.offsetZ)},`,
+      );
+    });
+  } else {
+    for (const id of chFitIds) { const el = $(`#${id}`); if (el) el.disabled = true; }
+  }
 
   // ── Track ───────────────────────────────────────────────────────────────────
   // Piece editing. The buttons no-op with no selection; the readout + disabled
@@ -1304,8 +1415,10 @@ export function createRoadDevPanel({ app, game, params }) {
     // Auto mode flips the headlights from outside the panel — keep the toggle
     // showing the truth rather than the last thing that was clicked.
     lightsToggle.set(game.getHeadlights());
-    // The wheel GLB finishes loading after the panel is built and calls refresh().
+    // The wheel and chassis GLBs finish loading after the panel is built and
+    // call refresh().
     syncWheelBtn();
+    syncChassisBtn();
     // Selected-piece readout + button enable state.
     const selId = game.getSelectedPieceId?.() ?? null;
     if (selPieceEl) selPieceEl.textContent = selId ?? "none";

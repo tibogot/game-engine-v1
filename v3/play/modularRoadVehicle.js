@@ -33,12 +33,29 @@ export const CHASSIS = {
   visualLift: 0,
 };
 
-/** Wheel hubs in chassis-local space. z>0 = front. */
+/**
+ * Hub |x| — HALF the track width, and the one wheel-layout number that is
+ * genuinely a look-vs-feel tradeoff, so it is live-tunable (dev panel → Track
+ * width) rather than baked into WHEEL_LOCAL.
+ *
+ * 1.05 was the procedural box's value and it puts the wheel CENTRE exactly on
+ * the GLB body's side (half-width 1.05), so half of each tyre hangs outside the
+ * bodywork. 0.92 tucks the outer edge roughly flush, which is the GT4 look.
+ * For reference the real Emira's track is 1.63 m (half 0.81) — narrower still,
+ * but that far in starts to look like the wheels are sunk into the arches.
+ *
+ * It is NOT purely cosmetic: track width is the lever arm for weight transfer,
+ * so narrowing it lowers roll resistance and the rollover threshold together.
+ */
+export const WHEEL_LAYOUT = { halfTrack: 0.92 };
+
+/** Wheel hubs in chassis-local space. z>0 = front. `pos.x` is rewritten by
+ *  Vehicle.applyWheelLayout() — read it, don't hardcode it. */
 export const WHEEL_LOCAL = [
-  { name: "FL", pos: new THREE.Vector3(-1.05, -0.1, 1.4), steer: true, drive: true },
-  { name: "FR", pos: new THREE.Vector3(1.05, -0.1, 1.4), steer: true, drive: true },
-  { name: "RL", pos: new THREE.Vector3(-1.05, -0.1, -1.4), steer: false, drive: true },
-  { name: "RR", pos: new THREE.Vector3(1.05, -0.1, -1.4), steer: false, drive: true },
+  { name: "FL", pos: new THREE.Vector3(-0.92, -0.1, 1.4), steer: true, drive: true },
+  { name: "FR", pos: new THREE.Vector3(0.92, -0.1, 1.4), steer: true, drive: true },
+  { name: "RL", pos: new THREE.Vector3(-0.92, -0.1, -1.4), steer: false, drive: true },
+  { name: "RR", pos: new THREE.Vector3(0.92, -0.1, -1.4), steer: false, drive: true },
 ];
 
 /** Front↔rear hub separation (m). Derived from WHEEL_LOCAL so it follows any
@@ -402,12 +419,16 @@ export const DECK = {
  */
 export const BODYLEAN = {
   enabled: true,
-  /** Radians of roll per g of lateral load. */
-  rollPerG: 0.10,
-  /** Radians of pitch per g of longitudinal load (squat / dive). */
-  pitchPerG: 0.06,
-  maxRoll: 0.13, // ~7.5°
-  maxPitch: 0.09, // ~5°
+  // HALVED once the GLB body landed. These values were set against the plain
+  // box, where a big lean was the only way to read weight transfer at all. On a
+  // real car silhouette the same angles look like the suspension has failed —
+  // a GT4 rolls ~1.5–2.5°/g, not the 5.7°/g the box was using.
+  /** Radians of roll per g of lateral load. 0.045 ≈ 2.6°/g. */
+  rollPerG: 0.045,
+  /** Radians of pitch per g of longitudinal load (squat / dive). ≈1.7°/g. */
+  pitchPerG: 0.03,
+  maxRoll: 0.08, // ~4.6°
+  maxPitch: 0.05, // ~2.9°
   /** Ease rate (1/s) toward the target angles. */
   smooth: 9,
 };
@@ -499,6 +520,24 @@ export const TAILLIGHTS = {
   side: 0.62, // ±X
   up: 0.12, // +Y
   back: 1.78, // distance behind centre (placed at -Z)
+};
+
+/**
+ * Emissive drive for the GLB body's OWN lights (games/modular-road-v3/
+ * chassisModel.js). Separate from TAILLIGHTS because the model's tail-light
+ * material already carries an emissive texture at strength 3.64, so it reaches
+ * the same on-screen brightness from a much lower multiplier than the flat
+ * procedural quads need.
+ */
+export const CHASSIS_GLB_LIGHTS = {
+  /** Tail lights: dim glow while the headlights are on. */
+  runningIntensity: 1.0,
+  /** Tail lights: flare under brake / handbrake. */
+  brakeIntensity: 5.0,
+  /** Headlight LENS emissive when lit — the lenses are glass in the file, not
+   *  emissive, so this is what makes them read as switched on. 0 = plain glass. */
+  headlampIntensity: 3.0,
+  headlampColor: "#fff2d6",
 };
 
 export const WALL = {
@@ -1067,13 +1106,24 @@ export class Vehicle {
   }
 
   _buildMeshes(showArrows) {
-    this.chassisMesh = new THREE.Mesh(
+    // `chassisMesh` is the ANCHOR, not the body: it carries the body transform
+    // (position, lean) and EVERY light is parented to it. The visible body is a
+    // child, because swapping styles by toggling `visible` on the anchor itself
+    // would take the whole subtree — headlights, tail lights — down with it.
+    this.chassisMesh = new THREE.Object3D();
+    this.group.add(this.chassisMesh);
+
+    this._chassisProc = new THREE.Mesh(
       new THREE.BoxGeometry(CHASSIS.width, CHASSIS.height, CHASSIS.length),
       new THREE.MeshStandardMaterial({ color: 0x5b6cd6, roughness: 0.55, metalness: 0.3 }),
     );
-    this.chassisMesh.castShadow = true;
-    this.chassisMesh.receiveShadow = true;
-    this.group.add(this.chassisMesh);
+    this._chassisProc.castShadow = true;
+    this._chassisProc.receiveShadow = true;
+    this.chassisMesh.add(this._chassisProc);
+    this._chassisStyle = "procedural";
+    this._chassisGlb = null;
+    this._chassisGlbParts = null;
+
     this._buildHeadlights();
     this._buildTaillights();
 
@@ -1398,11 +1448,27 @@ export class Vehicle {
 
   /** Per-frame: dim running glow when headlights are on, bright on brake. */
   _updateTaillights() {
-    if (!this.taillights.length) return;
     const T = TAILLIGHTS;
     this._tlFwd.set(0, 0, 1).applyQuaternion(this.body.quat);
     const vFwd = this.body.vel.dot(this._tlFwd);
     const braking = this.input.handbrake || (this.input.throttle < 0 && vFwd > 0.5);
+
+    // The GLB body brings its own lights, so it drives those instead of the
+    // procedural quads — which are hidden in that style (see _applyChassisStyle),
+    // otherwise two sets of tail lights overlap inside the model.
+    const glb = this._chassisStyle === "glb" ? this._chassisGlbParts : null;
+    if (glb) {
+      const L = CHASSIS_GLB_LIGHTS;
+      const lit = T.enabled
+        ? (braking ? L.brakeIntensity : (HEADLIGHTS.enabled ? L.runningIntensity : 0))
+        : 0;
+      for (const m of glb.brakeLights) m.material.emissiveIntensity = lit;
+      const lamp = HEADLIGHTS.enabled ? L.headlampIntensity : 0;
+      for (const m of glb.headlampLenses) m.material.emissiveIntensity = lamp;
+      return;
+    }
+
+    if (!this.taillights.length) return;
     let intensity = 0;
     if (braking) intensity = T.brakeIntensity;
     else if (HEADLIGHTS.enabled) intensity = T.runningIntensity;
@@ -1411,6 +1477,70 @@ export class Vehicle {
       m.visible = on;
       m.material.emissiveIntensity = intensity;
     }
+  }
+
+  /**
+   * Push WHEEL_LAYOUT.halfTrack into both the shared hub table and each Tire's
+   * own copy. The Tire clones localPos at construction, so writing only
+   * WHEEL_LOCAL would move the VISUALS (syncVisuals reads t.localPos... which is
+   * the clone) and leave the physics probes where they were — or vice versa.
+   * Both, or neither.
+   */
+  applyWheelLayout() {
+    const hx = WHEEL_LAYOUT.halfTrack;
+    for (let i = 0; i < WHEEL_LOCAL.length; i++) {
+      const sx = WHEEL_LOCAL[i].pos.x < 0 ? -1 : 1;
+      WHEEL_LOCAL[i].pos.x = sx * hx;
+      if (this.tires[i]) this.tires[i].localPos.x = sx * hx;
+    }
+  }
+
+  // ── CHASSIS VISUAL STYLE (procedural box ⇄ GLB body) ────────────────────────
+
+  /** True once a GLB body has been handed over. */
+  get hasChassisModel() { return !!this._chassisGlb; }
+  get chassisStyle() { return this._chassisStyle; }
+
+  /**
+   * Hand over a loaded GLB body (see games/modular-road-v3/chassisModel.js).
+   * `parts` carries the model's own light meshes so _updateTaillights can drive
+   * them. Unlike the wheel this changes NO physics — the collision box stays
+   * CHASSIS.width/height/length, so the body is purely cosmetic and the swap is
+   * a true A/B on handling.
+   */
+  setChassisModel(object, parts = null) {
+    if (this._chassisGlb && this._chassisGlb !== object) {
+      this.chassisMesh.remove(this._chassisGlb);
+    }
+    this._chassisGlb = object || null;
+    this._chassisGlbParts = parts;
+    if (this._chassisGlb) {
+      this._chassisGlb.visible = this._chassisStyle === "glb";
+      this.chassisMesh.add(this._chassisGlb);
+    }
+    this._applyChassisStyle();
+  }
+
+  /**
+   * @param {"procedural"|"glb"} style
+   * @returns {string} the style actually applied (falls back if no model loaded)
+   */
+  setChassisStyle(style) {
+    this._chassisStyle = style === "glb" && this._chassisGlb ? "glb" : "procedural";
+    this._applyChassisStyle();
+    return this._chassisStyle;
+  }
+
+  _applyChassisStyle() {
+    const useGlb = this._chassisStyle === "glb" && !!this._chassisGlb;
+    this._chassisProc.visible = !useGlb;
+    if (this._chassisGlb) this._chassisGlb.visible = useGlb;
+    // The procedural lamp faces and tail-light quads are sized and placed for the
+    // BOX. Against the model they float inside the bodywork, so hand the job to
+    // the model's own emissive parts. The SpotLights stay either way — they light
+    // the road, which no amount of emissive geometry does.
+    for (const m of this.taillights) if (useGlb) m.visible = false;
+    for (const m of this.headlamps) m.visible = useGlb ? false : HEADLIGHTS.enabled;
   }
 
   _initScratch() {
@@ -1561,8 +1691,10 @@ export class Vehicle {
     this.body.invMass = 1 / CHASSIS.mass;
     this.body._setInertia(CHASSIS.mass, CHASSIS);
     this._refreshLocalFrames();
-    this.chassisMesh.geometry.dispose();
-    this.chassisMesh.geometry = new THREE.BoxGeometry(CHASSIS.width, CHASSIS.height, CHASSIS.length);
+    // Only the procedural body tracks the collision-box dims; the GLB is a fixed
+    // real-world shape and is placed by CHASSIS_GLB instead.
+    this._chassisProc.geometry.dispose();
+    this._chassisProc.geometry = new THREE.BoxGeometry(CHASSIS.width, CHASSIS.height, CHASSIS.length);
   }
 
   setColliders(collidables, walls = []) {
