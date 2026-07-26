@@ -307,14 +307,36 @@ export const TIRE = {
   // A rate model is immune to both. You specify the RATE, so inertia cancels out
   // and every axis behaves the same; and it converges on a target instead of
   // accumulating, so holding an input longer can never wind up more rotation.
-  /** Full-input rotation rates (rad/s). ~3.6 ⇒ a full flip in about 1.7 s. */
-  airPitchRate: 3.6,
+  /**
+   * Full-input rotation rates (rad/s).
+   *
+   * PITCH IS SOFTER THAN ROLL ON PURPOSE. At 3.6 with the shared `airResponse`
+   * the flip was reported as "too brutal", and the measurements agree — a mere
+   * 0.3 s tap of Shift/Ctrl rotated 91°, a 0.5 s press 158°. On a ~1.5 s jump
+   * that means you are inverted before you intended to commit to anything.
+   *   3.6 / resp 9 → 90% rate in 300ms, 0.3s tap = 91°, 0.5s press = 158°
+   *   3.0 / resp 5 → 90% rate in 508ms, 0.3s tap = 74°, 0.5s press =  89°
+   * Roll stays at 3.6: it is on the steering keys, it self-corrects visually,
+   * and nobody complained about it.
+   *
+   * FLOOR: this must stay ABOVE `airAlignMaxSpin` (2.5) or the nose-follows-arc
+   * assist would start fighting a deliberate flip instead of standing down.
+   */
+  airPitchRate: 3.0,
   airRollRate: 3.6,
   /** Yaw sits higher so a flat spin still reads as a deliberate trick. */
   airYawRate: 4.5,
   /** How fast the actual rate converges on the target (1/s). Higher = snappier
    *  and more digital; lower = floatier. This is the "air feel" knob. */
   airResponse: 9.0,
+  /**
+   * Pitch-only convergence (1/s). Separate from `airResponse` because the
+   * complaint was specifically about flips: softening the shared knob would
+   * have made ROLL and YAW mushy too, and neither needed it. This is what turns
+   * the flip from a switch into a press — 90% of full rate in ~500 ms instead
+   * of 300 ms, so a light tap reads as a nudge rather than a quarter-flip.
+   */
+  airPitchResponse: 5.0,
   /** Convergence toward ZERO on an axis with no input (1/s) — this is the tumble
    *  damping. Softer than `airResponse` so a knock still tumbles naturally
    *  instead of freezing the instant you let go. */
@@ -2424,7 +2446,8 @@ export class Vehicle {
       // player is NOT pitching it does not settle toward zero — it settles
       // toward the trajectory (see the "NOSE FOLLOWS THE ARC" block in TIRE).
       let pitchTarget = inP * TIRE.airPitchRate;
-      let pitchGain = inP !== 0 ? TIRE.airResponse : TIRE.airSettle;
+      // Pitch uses its OWN response — see airPitchResponse.
+      let pitchGain = inP !== 0 ? TIRE.airPitchResponse : TIRE.airSettle;
       if (inP === 0 && TIRE.airTrajectoryAlign > 0) {
         const v = body.vel;
         const horiz = Math.hypot(v.x, v.z);

@@ -609,6 +609,13 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Flip softness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-air-presp" min="1" max="25" step="0.5" />
+              <span class="prop-num" id="dv-air-presp-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Bounce lockout</span>
             <div class="prop-value">
               <input type="range" id="dv-air-lock" min="0" max="1.5" step="0.05" />
@@ -1432,6 +1439,8 @@ export function createRoadDevPanel({ app, game, params }) {
   // dead-flat jump. See the NOSE FOLLOWS THE ARC block in modularRoadVehicle.
   slider("dv-air-arc", TIRE, "airTrajectoryAlign");
   slider("dv-air-resp", TIRE, "airResponse", (v) => v.toFixed(1));
+  // Pitch-only convergence: LOWER = the flip ramps in instead of snapping.
+  slider("dv-air-presp", TIRE, "airPitchResponse");
   slider("dv-air-lock", TIRE, "airGroundLockout", (v) => `${v.toFixed(2)}s`);
   slider("dv-drag", AERO, "drag");
   slider("dv-down", AERO, "downforce", (v) => v.toFixed(1));

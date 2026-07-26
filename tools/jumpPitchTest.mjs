@@ -113,6 +113,46 @@ console.log("\n=== IT YIELDS TO THE PLAYER ===");
     `${Math.abs(on - off).toFixed(1)}° difference`);
 }
 
+console.log("\n=== FLIP FEEL ===");
+// "Too brutal" was measurable: at rate 3.6 / shared response 9, a 0.3 s tap of
+// Shift/Ctrl rotated 91° and a 0.5 s press 158°, so a light input on a ~1.5 s
+// jump left you inverted. Pitch now has its own softer response.
+{
+  const R2D2 = 57.2958;
+  /** Degrees of nose rotation from holding pitch for `hold` seconds. */
+  const rotFor = (hold) => {
+    const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
+    c.groundBvh = ground; c.enabled = true;
+    c.body.pos.set(0, 60, 0); c.body.vel.set(0, 0, 35); c.body.quat.identity();
+    const R = new THREE.Vector3();
+    let tot = 0;
+    for (let i = 0; i < 180; i++) {
+      const t = i * FIXED_DT;
+      c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0, pitch: t < hold ? 1 : 0 });
+      R.set(1, 0, 0).applyQuaternion(c.body.quat);
+      tot += Math.abs(c.body.angVel.dot(R)) * FIXED_DT;
+    }
+    return tot * R2D2;
+  };
+  const tap = rotFor(0.3), press = rotFor(0.5);
+  const full360 = 360 / (TIRE.airPitchRate * R2D2);
+  console.log(`  0.3s tap ${tap.toFixed(0)}°   0.5s press ${press.toFixed(0)}°   full 360 in ${full360.toFixed(2)}s`);
+
+  check("a light tap is a nudge, not a quarter-flip (was 91°)", tap < 80, `${tap.toFixed(0)}°`);
+  check("a half-second press stays well short of inverted (was 158°)",
+    press < 110, `${press.toFixed(0)}°`);
+  check("a 360 is still landable inside a big jump's airtime", full360 < 2.4,
+    `${full360.toFixed(2)}s`);
+  check("pitch is softer than roll — roll was never the complaint",
+    TIRE.airPitchResponse < TIRE.airResponse && TIRE.airPitchRate <= TIRE.airRollRate,
+    `pitch ${TIRE.airPitchRate}/${TIRE.airPitchResponse} vs roll ${TIRE.airRollRate}/${TIRE.airResponse}`);
+  // If pitch rate ever drops to/below the align cutoff, the nose-follows-arc
+  // assist stops standing down and starts dragging deliberate flips back.
+  check("airPitchRate stays ABOVE airAlignMaxSpin, or the assist fights flips",
+    TIRE.airPitchRate > TIRE.airAlignMaxSpin,
+    `${TIRE.airPitchRate} > ${TIRE.airAlignMaxSpin}`);
+}
+
 console.log("\n=== THE GATES ===");
 {
   // Inverted: "point at where you're going" would try to right the car mid-trick.
