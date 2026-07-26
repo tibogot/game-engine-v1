@@ -127,10 +127,11 @@ export const TIRE = {
    * WIDENS the circle (it keeps the nose aligned so the car corners properly
    * instead of ploughing). Don't "fix" donuts by weakening the assist.
    *
-   * `steerSpeedReduce` below is paired with this: it is raised so the angle
-   * available AT SPEED is unchanged. Only the low-speed end got more lock.
+   * The extra lock donuts need is NOT applied here — see `lowSpeedExtraLock`.
+   * Raising THIS value raises the whole curve, which is a driving-feel change
+   * at every speed; the donut requirement is purely a standstill one.
    */
-  maxSteerAngle: 0.95,
+  maxSteerAngle: 0.55,
 
   // ── STEERING INPUT SHAPING ──────────────────────────────────────────────
   // A keyboard key is a binary switch, so the shape of the ramp between 0 and
@@ -164,17 +165,48 @@ export const TIRE = {
   // low would fully numb the wheel across the entire upper half of the speed
   // range instead of easing into it.
   //
-  // `steerSpeedReduce` IS PAIRED WITH `maxSteerAngle` — raise one and this must
-  // follow, or the extra lock leaks into high-speed driving and the car turns
-  // twitchy. It was 0.5 against a 0.55 lock (≈16° at speed); the drift lock of
-  // 0.95 needs 0.70 to land on ≈16° again. So the low-speed end gained 23° of
-  // lock for donuts and the high-speed end did not change at all.
-  //   at rest:      0.95 rad = 54°   (donut floor ≈ 2.0 m)
-  //   at top speed: 0.95 × 0.30 = 16.3°  (was 15.8°)
-  // A 26 m curve only asks for atan(2.8 / 26) ≈ 6°, so there is still ample
-  // margin in the tightest corner the kit builds.
+  // KEEP THIS TRACKING `topSpeed` — full reduction should land AT top speed, so
+  // it scales with it (26 was the value for topSpeed 30; 45 for 50).
   steerSpeedRef: 45,
-  steerSpeedReduce: 0.70,
+  steerSpeedReduce: 0.50,
+
+  // ── LOW-SPEED LOCK BOOST (donuts) ───────────────────────────────────────────
+  // Donuts need ~50° of lock; ordinary driving wants ~25°. Those two facts are
+  // only compatible because they happen at DIFFERENT SPEEDS — a donut is a
+  // 4–6 m/s manoeuvre and a corner is a 20–40 m/s one.
+  //
+  // THIS WAS ORIGINALLY DONE WRONG, and the way it failed is worth keeping:
+  // the first attempt raised `maxSteerAngle` 0.55 → 0.95 and raised
+  // `steerSpeedReduce` 0.50 → 0.70 to compensate. The compensation was verified
+  // AT TOP SPEED ONLY (15.8° → 16.3°, fine) — but the reduction is a straight
+  // line to `steerSpeedRef`, so it barely bites in between. The mid-range, where
+  // the car is actually driven, gained 38–64% more lock and went twitchy:
+  //     10 m/s  28.0° → 46.0°   20 m/s  24.5° → 37.5°   30 m/s  21.0° → 29.0°
+  // Checking the endpoints of a curve does not check the curve.
+  //
+  // So the boost is ADDITIVE and dies off before normal driving speeds instead
+  // of scaling the whole range. Above `lowSpeedLockRef` the angle is EXACTLY
+  // what it was before donuts existed. The falloff is quadratic (1 − t²) rather
+  // than linear so lock is held near full through the 4–6 m/s the manoeuvre
+  // actually lives at, then drops away quickly:
+  //     0 m/s 54.4°   4 m/s 49.4° (≈2.4 m circle)   10 m/s 28.0° = pre-donut
+  /** Extra lock (rad) at a standstill, on top of the normal curve. */
+  lowSpeedExtraLock: 0.40,
+  /**
+   * Speed (m/s) at which the boost has fully decayed. Above this the steering is
+   * bit-for-bit the pre-donut curve.
+   *
+   * MEASURED, not guessed — a held donut SETTLES at ~5.4 m/s rather than
+   * accelerating away, so the cutoff only has to clear that. Sweep of cutoff vs
+   * donut radius vs how far the boost intrudes into ordinary driving:
+   *     ref 10 → 5.3 m   ref 12 → 4.4 m   ref 14 → 4.1 m   ref 20 → 3.9 m
+   * Tightness saturates around 14 — going higher buys ~0.2 m of circle and
+   * starts leaking lock into real cornering (ref 16 already puts +2.8° at
+   * 15 m/s, ref 20 puts +10°). 14 is therefore the largest cutoff that still
+   * leaves every driving speed untouched: cornering happens at 17 m/s and up
+   * (the user's own 60 km/h corner), so the boost is long gone by then.
+   */
+  lowSpeedLockRef: 14,
   frictionCoeff: 1.5,
   maxAngVel: 9.0,
   // Contact-normal low-pass rate (1/s). ~55 ms time constant: at 30 m/s that
@@ -1814,7 +1846,13 @@ export class Vehicle {
     let t = speed / Math.max(0.1, TIRE.steerSpeedRef);
     if (t > 1) t = 1;
     const factor = 1 - TIRE.steerSpeedReduce * t;
-    return this.input.steer * TIRE.maxSteerAngle * factor;
+    // Donut boost, ADDED to the normal curve rather than scaling it, so it can
+    // only ever affect the crawl. `lowSpeedExtraLock` is gone by
+    // `lowSpeedLockRef` and everything above that speed is untouched.
+    let lt = speed / Math.max(0.1, TIRE.lowSpeedLockRef);
+    if (lt > 1) lt = 1;
+    const boost = TIRE.lowSpeedExtraLock * (1 - lt * lt);
+    return this.input.steer * (TIRE.maxSteerAngle * factor + boost);
   }
 
   /** Rear power fraction from the drivetrain layout (FWD=0, RWD=1, AWD=bias). */

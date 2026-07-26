@@ -82,24 +82,53 @@ check("handbrake tightens it further (that's how you'd really do it)",
   hb.r < d.r, `${d.r.toFixed(1)} m → ${hb.r.toFixed(1)} m`);
 check("the circle is stable, not spiralling out", d.r < 4.5 && d.turns >= 1.5);
 
-console.log("\n=== HIGH-SPEED FEEL MUST BE UNCHANGED ===");
-console.log("  speed      lock");
-for (const v of [0, 10, 25, 45]) console.log(`  ${String(v).padStart(2)} m/s   ${lockAt(v).toFixed(1).padStart(5)}°`);
+// ── THE WHOLE CURVE, NOT ITS ENDPOINTS ──────────────────────────────────────
+// A previous donut fix raised maxSteerAngle 0.55 → 0.95 and raised
+// steerSpeedReduce 0.50 → 0.70 to compensate, then verified ONLY that top speed
+// still landed on ~16°. It did. But the reduction is linear in speed, so the
+// middle of the range — where the car is actually driven — silently gained
+// 38–64% more lock and the car became twitchy and hard to control.
+//
+// Checking both ends of a curve does not check the curve. So this samples the
+// whole range against the pre-donut reference and demands they match ABOVE the
+// boost's cutoff, which is the only region ordinary driving happens in.
+const PRE_DONUT = (v) => 0.55 * (1 - 0.50 * Math.min(1, v / 45)) * R2D;
+
+console.log("\n=== DRIVING FEEL: MUST MATCH THE PRE-DONUT CURVE ABOVE THE CUTOFF ===");
+console.log("  speed   pre-donut     now     delta");
+let maxDelta = 0;
+for (let v = 0; v <= 45; v += 2.5) {
+  const ref = PRE_DONUT(v), now = lockAt(v);
+  const d = now - ref;
+  if (v >= TIRE.lowSpeedLockRef) maxDelta = Math.max(maxDelta, Math.abs(d));
+  const tag = v < TIRE.lowSpeedLockRef ? "  (boost)" : (Math.abs(d) < 0.05 ? "  =" : "  ← DRIFTED");
+  console.log(`  ${String(v).padStart(4)}  ${ref.toFixed(1).padStart(8)}  ${now.toFixed(1).padStart(7)}  ${d >= 0 ? "+" : ""}${d.toFixed(1).padStart(6)}${tag}`);
+}
+check("EVERY speed at/above the cutoff matches the pre-donut curve exactly",
+  maxDelta < 0.05, `worst deviation ${maxDelta.toFixed(3)}° over ${TIRE.lowSpeedLockRef}→45 m/s`);
+check("the boost is strictly additive — it can never REDUCE lock anywhere",
+  Array.from({ length: 46 }, (_, v) => lockAt(v) >= PRE_DONUT(v) - 1e-6).every(Boolean));
+check("lock is monotonically decreasing with speed (no bump to steer through)",
+  Array.from({ length: 45 }, (_, v) => lockAt(v) >= lockAt(v + 1) - 1e-6).every(Boolean));
+
+console.log("\n=== THE TWO ENDS STILL DO THEIR JOBS ===");
 check("standstill lock is drift-car wide (~54°)", Math.abs(lockAt(0) - 54.4) < 1, `${lockAt(0).toFixed(1)}°`);
-check("top-speed lock unchanged (~16°, was 15.8° at the old settings)",
-  Math.abs(lockAt(45) - 15.8) < 1.0, `${lockAt(45).toFixed(1)}°`);
+check("still ~50° at the 4 m/s a donut is actually held at",
+  lockAt(4) > 45, `${lockAt(4).toFixed(1)}°`);
+check("top-speed lock is the original 15.8°, not merely close to it",
+  Math.abs(lockAt(45) - 15.8) < 0.05, `${lockAt(45).toFixed(1)}°`);
 const need = Math.atan(2.8 / 26) * R2D;
 check("ample margin for the kit's tightest 26 m curve", lockAt(30) > need * 2,
   `${lockAt(30).toFixed(1)}° available vs ${need.toFixed(1)}° needed`);
 
-console.log("\n=== maxSteerAngle AND steerSpeedReduce ARE A PAIR ===");
+console.log("\n=== THE BOOST IS WHAT MAKES DONUTS POSSIBLE ===");
 {
-  const savedR = TIRE.steerSpeedReduce;
-  TIRE.steerSpeedReduce = 0.5; // the old value against the new lock
-  const leaked = lockAt(45);
-  TIRE.steerSpeedReduce = savedR;
-  check("raising lock without raising the reduction would leak into high speed",
-    leaked > 25, `${leaked.toFixed(1)}° at top speed vs the intended ${lockAt(45).toFixed(1)}°`);
+  const saved = TIRE.lowSpeedExtraLock;
+  TIRE.lowSpeedExtraLock = 0;
+  const without = donut();
+  TIRE.lowSpeedExtraLock = saved;
+  check("removing the boost widens the circle back out of donut range",
+    without.r > d.r, `${d.r.toFixed(1)} m with boost → ${without.r.toFixed(1)} m without`);
 }
 
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nall green");
