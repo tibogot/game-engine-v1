@@ -1060,6 +1060,34 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Flag image</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-flag-img" type="button">Load image…</button>
+              <button class="action-btn" id="dv-flag-clear" type="button">Clear</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Flag colour</span>
+            <div class="prop-value">
+              <input type="color" id="dv-flag-color" />
+              <span class="prop-num" id="dv-flag-count"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Flag wave</span>
+            <div class="prop-value">
+              <input type="range" id="dv-flag-amp" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-flag-amp-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Flag speed</span>
+            <div class="prop-value">
+              <input type="range" id="dv-flag-speed" min="0" max="8" step="0.1" />
+              <span class="prop-num" id="dv-flag-speed-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Guardrail sparks</span>
             <div class="prop-value">
               <button class="prop-toggle checked" id="dv-sparks" type="button" aria-label="Guardrail sparks">${CHECK_SVG}</button>
@@ -1741,6 +1769,48 @@ export function createRoadDevPanel({ app, game, params }) {
         ].join("\n"),
       );
     });
+  }
+
+  // ── Banner flags ────────────────────────────────────────────────────────────
+  // One image and one colour drive EVERY flag, because they are all one
+  // instanced draw. The colour picker is disabled while an image is loaded: the
+  // material multiplies colour × map, so a tinted flag stains the picture (the
+  // RTS base flag hit exactly this).
+  const flagP = game.getFlagParams?.();
+  if (flagP) {
+    const colEl = $("#dv-flag-color");
+    const countEl = $("#dv-flag-count");
+    const syncFlagUi = () => {
+      const tex = !!game.flagHasTexture?.();
+      if (colEl) { colEl.value = flagP.color; colEl.disabled = tex; }
+      if (countEl) countEl.textContent = `${game.flagCount?.() ?? 0} placed${tex ? " · image" : ""}`;
+    };
+    colEl?.addEventListener("input", () => {
+      flagP.color = colEl.value;
+      game.applyFlagParams?.();
+    });
+    // Hidden file input — same shape as the track loader.
+    const flagFile = document.createElement("input");
+    flagFile.type = "file";
+    flagFile.accept = "image/*";
+    flagFile.style.display = "none";
+    flagFile.addEventListener("change", () => {
+      const f = flagFile.files?.[0];
+      if (f) game.setFlagTextureFile?.(f);
+      flagFile.value = "";
+      syncFlagUi();
+    });
+    document.body.appendChild(flagFile);
+    $("#dv-flag-img")?.addEventListener("click", () => flagFile.click());
+    $("#dv-flag-clear")?.addEventListener("click", () => {
+      game.clearFlagTexture?.();
+      syncFlagUi();
+    });
+    slider("dv-flag-amp", flagP, "amplitude", (v) => v.toFixed(2),
+      () => game.applyFlagParams?.());
+    slider("dv-flag-speed", flagP, "speed", (v) => v.toFixed(1),
+      () => game.applyFlagParams?.());
+    syncFlagUi();
   }
 
   const spk = game.getSparkSettings?.();

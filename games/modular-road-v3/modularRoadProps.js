@@ -160,6 +160,30 @@ function boostRingGroup() {
 export const glowPropParams = { color: "#ff5a1e", intensity: 6 };
 
 /**
+ * Where a placed prop's feet land.
+ *
+ * Props used to keep whatever y `make()` authored, so anything dropped near an
+ * elevated road piece just hung in the air at its rest height. Both surfaces are
+ * already available to the game (the deck BVH for road, `app.getWorldHeight` for
+ * terrain) — this just asks for one.
+ *
+ * THREE modes, not two, and the third is the one that matters:
+ *   • auto   — road if there is any under the point, else terrain. Right ~90% of
+ *              the time, so it is the default.
+ *   • ground — terrain ONLY. The escape hatch: placing a prop on the ground
+ *              UNDERNEATH an elevated road is exactly the parkour case, and auto
+ *              would snap it up onto the deck above. Unfixable without this.
+ *   • road   — deck ONLY. Nothing placed if there is no road under the point.
+ *   • free   — no snapping; drag the Y axis by hand.
+ *
+ * In every snapped mode Y is DRIVEN by the surface, so dragging the gizmo's Y
+ * axis does nothing — that is what `free` is for. A predictable rule beats a
+ * clever one that sometimes lets you nudge height and sometimes doesn't.
+ */
+export const SURFACE_SNAP = { mode: "auto" };
+export const SURFACE_SNAP_MODES = ["auto", "ground", "road", "free"];
+
+/**
  * Write a material's emissive into the bloom buffer.
  *
  * Built from `materialEmissive`, a LIVE node, so later changes to `.emissive` /
@@ -276,6 +300,37 @@ export const PROP_CATALOG = [
       const R = PHYSICS_PROP_TYPES.cone.radius;
       g.children.forEach((c) => { c.position.y -= R; });
       g.position.y = R;
+      return g;
+    },
+  },
+  {
+    id: "flag",
+    label: "Banner flag",
+    collision: "none",
+    // Just the POLE. The CLOTH is drawn by ModularRoadFlags as a single
+    // instanced mesh across every flag on the track — see that file for why it
+    // is a shader wave rather than the engine's Verlet cloth. The pole stays a
+    // real prop mesh so the gizmo has something to grab and right-click picking
+    // still works; an empty root would be unselectable.
+    make: () => {
+      const g = new THREE.Group();
+      g.name = "BannerFlag";
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.07, 0.09, 6, 10),
+        mat(0xb9c0c8, { roughness: 0.35, metalness: 0.75 }),
+      );
+      pole.position.y = 3;
+      const finial = new THREE.Mesh(
+        new THREE.SphereGeometry(0.11, 10, 8),
+        mat(0xd8dee6, { roughness: 0.25, metalness: 0.85 }),
+      );
+      finial.position.y = 6.05;
+      const base = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.34, 0.42, 0.16, 12),
+        mat(0x23262b, { roughness: 0.85 }),
+      );
+      base.position.y = 0.08;
+      g.add(base, pole, finial);
       return g;
     },
   },
@@ -518,8 +573,16 @@ export class PropManager {
    * @param {import("three/addons/controls/OrbitControls.js").OrbitControls} o.orbit
    * @param {() => void} [o.onChange] fired when props are added/removed/moved (collision is now stale)
    * @param {() => void} [o.onSelect] fired when a prop is selected (deselect other gizmos)
+   * @param {(x:number,y:number,z:number,mode:string)=>number|null} [o.getSurfaceY]
+   *        surface height under a point for the current snap mode — see
+   *        SURFACE_SNAP. `y` is the prop's current height; the search runs
+   *        downward from there.
    */
-  constructor({ scene, camera, domElement, orbit, onChange = null, onSelect = null }) {
+  constructor({
+    scene, camera, domElement, orbit,
+    onChange = null, onSelect = null, getSurfaceY = null,
+  }) {
+    this.getSurfaceY = getSurfaceY;
     this.scene = scene;
     this.camera = camera;
     this.domElement = domElement;
@@ -555,7 +618,13 @@ export class PropManager {
       if (this.orbit) this.orbit.enabled = !e.value && this.enabled;
     });
     this.gizmo.addEventListener("change", () => {
-      if (this.selected) this.selBox.setFromObject(this.selected.root);
+      if (!this.selected) return;
+      // LIVE while dragging, so the prop visibly hugs the surface as it moves
+      // rather than snapping only on release. Translate mode only — during a
+      // rotate or scale the position is not what is changing, and re-snapping
+      // there would fight a prop deliberately tilted onto banking.
+      if (this.gizmo.mode === "translate") this.snapToSurface(this.selected);
+      this.selBox.setFromObject(this.selected.root);
     });
     this.gizmo.addEventListener("mouseUp", () => this.onChange?.());
 
@@ -659,9 +728,13 @@ export class PropManager {
       root.position.z = this.orbit.target.z;
     }
     this.group.add(root);
-    const inst = { id: typeId, def, root, collision: def.collision };
+    // `restY` is the offset make() authored — 0 for ground-flush props, or a
+    // deliberate lift like the pipe's radius. Captured BEFORE any snapping, so
+    // snapping can add it back and keep the prop's feet on the surface.
+    const inst = { id: typeId, def, root, collision: def.collision, restY: root.position.y };
     root.userData.propInstance = inst;
     this.instances.push(inst);
+    this.snapToSurface(inst);
     this._select(inst);
     this.onChange?.();
     return inst;
@@ -677,9 +750,10 @@ export class PropManager {
     root.quaternion.copy(src.root.quaternion);
     root.scale.copy(src.root.scale);
     this.group.add(root);
-    const inst = { id: src.id, def: src.def, root, collision: src.collision };
+    const inst = { id: src.id, def: src.def, root, collision: src.collision, restY: src.restY ?? 0 };
     root.userData.propInstance = inst;
     this.instances.push(inst);
+    this.snapToSurface(inst); // the +4,+4 offset may have landed on a different surface
     this._select(inst);
     this.onChange?.();
   }
@@ -708,6 +782,39 @@ export class PropManager {
     this.gizmo.enabled = false;
     this.gizmo.visible = false;
     this.selBox.visible = false;
+  }
+
+  /**
+   * Drop a prop onto the surface under it, preserving its authored rest offset.
+   *
+   * `restY` is whatever `make()` left on the root — for most props 0 (they are
+   * authored ground-flush), for others a deliberate offset like the pipe's
+   * radius or the cone's collision radius. Adding it back is what keeps a cone's
+   * BASE on the road rather than burying it by a radius.
+   *
+   * @returns {boolean} true if it moved (i.e. a surface was found)
+   */
+  snapToSurface(inst) {
+    if (!inst || !this.getSurfaceY) return false;
+    const mode = SURFACE_SNAP.mode;
+    if (mode === "free") return false;
+    const p = inst.root.position;
+    // The prop's CURRENT height is passed so the search looks DOWNWARD from
+    // where it already is. That is what makes "auto" behave: a prop sitting on
+    // the terrain under an elevated road finds the terrain, not the deck 20 m
+    // above it — while dragging the same prop up onto the road finds the deck.
+    const y = this.getSurfaceY(p.x, p.y, p.z, mode);
+    if (y === null || y === undefined || !Number.isFinite(y)) return false;
+    p.y = y + (inst.restY ?? 0);
+    return true;
+  }
+
+  /** Re-snap every prop — after a track load, or a snap-mode change. */
+  snapAll() {
+    let n = 0;
+    for (const inst of this.instances) if (this.snapToSurface(inst)) n++;
+    if (n) this.onChange?.();
+    return n;
   }
 
   /** Meshes split by collision role, for the page's BVH bake. */
@@ -747,6 +854,8 @@ export class PropManager {
       const root = def.make();
       enableMeshShadows(root);
       root.userData.isProp = true;
+      // Read the authored rest offset BEFORE the saved position overwrites it.
+      const restY = root.position.y;
       root.position.fromArray(item.position);
       if (Array.isArray(item.quaternion) && item.quaternion.length === 4) {
         root.quaternion.fromArray(item.quaternion);
@@ -755,7 +864,7 @@ export class PropManager {
         root.scale.fromArray(item.scale);
       }
       this.group.add(root);
-      const inst = { id: item.type, def, root, collision: def.collision };
+      const inst = { id: item.type, def, root, collision: def.collision, restY };
       root.userData.propInstance = inst;
       this.instances.push(inst);
     }

@@ -60,7 +60,9 @@ import {
   guardrailParams,
 } from "./modularRoadKit.js";
 import { bakeRoadThumbnails } from "./modularRoadThumbnails.js";
-import { PropManager, PROP_CATALOG, glowPropParams } from "./modularRoadProps.js";
+import {
+  PropManager, PROP_CATALOG, glowPropParams, SURFACE_SNAP, SURFACE_SNAP_MODES,
+} from "./modularRoadProps.js";
 import { MoverPropManager, MOVER_CATALOG } from "./modularRoadMoverProps.js";
 import { PortalManager, DEFAULT_PORTAL_PARAMS, buildPortalMesh } from "./modularRoadPortals.js";
 import { GapPreview } from "./gapPreview.js";
@@ -90,6 +92,7 @@ import {
 } from "./chassisModel.js";
 import { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } from "./modularRoadSparks.js";
 import { PropPhysics, PROP_PHYSICS } from "./modularRoadPropPhysics.js";
+import { ModularRoadFlags, FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 
 /** Preset track shipped with the game (Load Apex track). Kept as its own
@@ -202,13 +205,39 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // moving platforms (movers), and teleport door pairs (portals). All three edit
   // via their own TransformControls gizmo, so they must deselect each other —
   // two live gizmos fight over the mouse.
+  // Scratch for the prop surface query — allocated once, not per placement.
+  const _snapOrigin = new THREE.Vector3();
+  const _snapDown = new THREE.Vector3(0, -1, 0);
+
   const props = new PropManager({
     scene,
     camera,
     domElement: renderer.domElement,
     orbit: controls,
-    onChange: () => { bakeCollision(); paletteUi?.refreshStatus?.(); },
+    // Fires on add / delete / gizmo release. `flags.sync()` belongs here rather
+    // than only on add: its self-heal watches the prop COUNT, so dragging an
+    // existing flag would otherwise leave its cloth behind at the old spot.
+    onChange: () => { bakeCollision(); flags?.sync(); paletteUi?.refreshStatus?.(); },
     onSelect: () => { movers.deselect(); portals.deselect?.(); builder.deselectPlacement?.(); },
+    /**
+     * Surface under a prop, for placement snapping (see SURFACE_SNAP).
+     *
+     * Searches DOWNWARD from the prop's own height, which is what makes "auto"
+     * behave around elevated track: a prop on the terrain beneath a raised road
+     * finds the terrain, not the deck above it. The +2 m margin lets a prop that
+     * is already sitting flush still find the surface it is resting on.
+     */
+    getSurfaceY: (x, y, z, mode) => {
+      if (mode !== "ground" && deckBvh?.baked) {
+        _snapOrigin.set(x, y + 2, z);
+        const hit = deckBvh.raycastFirst(_snapOrigin, _snapDown, 400);
+        if (hit) return hit.point.y;
+      }
+      // Road-only and there is no road here: refuse rather than silently
+      // dropping the prop to the terrain, which would look like a bug.
+      if (mode === "road") return null;
+      return app.getWorldHeight(x, z);
+    },
   });
   const movers = new MoverPropManager({
     scene,
@@ -263,7 +292,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     propCatalog: PROP_CATALOG,
     moverCatalog: MOVER_CATALOG,
     thumbnails: roadThumbnails,
-    onAddProp: (id) => { props.add(id); propPhysics.sync(); },
+    onAddProp: (id) => { props.add(id); propPhysics.sync(); flags.sync(); },
     onAddMover: (id) => movers.add(id),
     onAddPortal: () => { portals.addDoor(); paletteUi?.refreshStatus?.(); },
     onEdgesChange: () => bakeCollision(),
@@ -515,6 +544,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     props,
     getGroundBvh: () => vehicle.groundBvh,
   });
+  // Banner cloths — every flag on the track in ONE instanced draw, waved in the
+  // vertex shader. The poles are ordinary "flag" props; this only owns the cloth.
+  const flags = new ModularRoadFlags(scene, props);
 
   // DEFAULT_MIXER starts muted (muteAll: true) — the lab exposes a mixer panel to
   // unmute. There's no such panel here yet, so start audible; browsers still
@@ -966,6 +998,34 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     downloadTrackJson(track, "modular-road-track.json");
   });
 
+  // ── PROP SURFACE SNAP ───────────────────────────────────────────────────────
+  // Cycles auto → ground → road → free. Lives in the PALETTE, not the dev panel:
+  // it changes what the next click does, so it belongs beside the thing you are
+  // about to place.
+  const SNAP_LABEL = { auto: "Auto", ground: "Ground", road: "Road", free: "Free" };
+  const snapBtn = document.getElementById("road-snap");
+  const syncSnapBtn = () => {
+    if (!snapBtn) return;
+    snapBtn.textContent = `Snap: ${SNAP_LABEL[SURFACE_SNAP.mode] ?? SURFACE_SNAP.mode}`;
+    snapBtn.classList.toggle("palette-btn-primary", SURFACE_SNAP.mode !== "free");
+    snapBtn.title = {
+      auto: "Road if there is any under the prop, else terrain",
+      ground: "Terrain only — use for props UNDER an elevated road",
+      road: "Road decks only",
+      free: "No snapping; drag the gizmo's Y axis by hand",
+    }[SURFACE_SNAP.mode];
+  };
+  onClick("road-snap", () => {
+    const i = SURFACE_SNAP_MODES.indexOf(SURFACE_SNAP.mode);
+    SURFACE_SNAP.mode = SURFACE_SNAP_MODES[(i + 1) % SURFACE_SNAP_MODES.length];
+    syncSnapBtn();
+    // Re-snap the SELECTED prop only. Re-snapping everything would silently
+    // relocate props placed under an earlier mode, which is not what switching
+    // a placement setting should mean.
+    if (props.selected) { props.snapToSurface(props.selected); bakeCollision(); }
+  });
+  syncSnapBtn();
+
   const trackFileInput = createTrackFileInput((data) => {
     const res = importTrack(data, trackCtx());
     if (!res.ok) {
@@ -977,6 +1037,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     updateSpawnMarker();
     bakeCollision();
     propPhysics.sync();
+    flags.sync();
     paletteUi.refreshStatus();
   });
   document.body.appendChild(trackFileInput);
@@ -1002,6 +1063,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       updateSpawnMarker();
       bakeCollision();
       propPhysics.sync();
+    flags.sync();
       paletteUi.refreshStatus();
       devPanel?.refresh();
       console.info(`[ModularRoad-v3] preset track loaded: ${data.pieces?.length ?? 0} pieces`);
@@ -1484,6 +1546,14 @@ ${e.message}`);
       applyWheelLayout: () => vehicle.applyWheelLayout(),
       getDriftSmokeSettings: () => driftSmoke.settings,
       getSparkSettings: () => sparks.settings,
+      // Banner flags. One image for ALL of them — that is the cost of a single
+      // instanced draw; per-flag pictures would need a draw each or an atlas.
+      getFlagParams: () => FLAG,
+      applyFlagParams: () => flags.applyParams(),
+      setFlagTextureFile: (file) => flags.setTextureFile(file),
+      clearFlagTexture: () => flags.clearTexture(),
+      flagHasTexture: () => flags.hasTexture,
+      flagCount: () => flags.count,
       getPropPhysics: () => PROP_PHYSICS,
       syncPropPhysics: () => propPhysics.sync(),
       awakeProps: () => propPhysics.awakeCount,
@@ -1679,6 +1749,9 @@ ${e.message}`);
       tireMarks.update(vehicle);
       driftSmoke.updateFromVehicle(vehicle, camera, dt, keys);
       sparks.updateFromVehicle(vehicle, camera, dt);
+      // Render-rate, not the fixed step: the wave is purely visual and this only
+      // advances a uniform — the flags themselves cost no CPU per frame.
+      flags.update(dt);
 
       checkFall(); // air-stunt: dropped off the track → last safe grounded pose
 
