@@ -712,6 +712,25 @@ export const STUCK = {
   enabled: true,
   /** Horizontal speed (m/s) below which the car counts as not going anywhere. */
   speed: 1.5,
+  /**
+   * BEACHED — the guardrail case, and the reason the old rule never fired.
+   *
+   * With ZERO wheels on a drivable surface while resting on a solid, no input
+   * can free the car: the wheels only probe the deck BVH and the rail lives in
+   * the solids BVH, so there is no traction up there at all. That is a fact
+   * about the contact model, not a heuristic — so it needs neither the throttle
+   * (a player who lands on a rail lets OFF the gas, which armed nothing) nor
+   * the tight 1.5 m/s gate (measured: a car settling on a rail creeps at
+   * ~2.1 m/s and so never qualified either). Both of those are why the
+   * documented give-up path in roadGame never actually triggered.
+   *
+   * Uses 3-D speed, not horizontal: a car FALLING past a rail is not beached,
+   * and its vertical velocity is what says so.
+   *
+   * Kept under a wall-ride's speed — sliding a wall at 4 m/s is gameplay, and
+   * must never be mistaken for being stuck on one.
+   */
+  beachedSpeed: 2.5,
   /** Seconds of that before a nudge, and before giving up entirely. */
   nudgeAfter: 0.8,
   respawnAfter: 2.5,
@@ -742,7 +761,16 @@ function _syncComOffset() {
 /* Rigid body — 6-DOF, force/torque accumulators                            */
 /* ----------------------------------------------------------------------- */
 
-class RigidBody {
+/**
+ * Minimal rigid body: mass, a real (box) inertia tensor, and semi-implicit Euler.
+ *
+ * EXPORTED because it is fully general — nothing in here knows about cars. Track
+ * props (cones, barrels) reuse it rather than pulling in a second physics engine
+ * alongside the one already integrating the vehicle. `addForceAtPoint` is what
+ * makes a knocked cone tumble instead of slide: it turns an off-centre impulse
+ * into torque, which is most of what sells the effect.
+ */
+export class RigidBody {
   constructor({ mass, size }) {
     this.mass = mass;
     this.invMass = 1 / mass;
@@ -2001,11 +2029,25 @@ export class Vehicle {
     // it entirely. Requiring <3 also correctly EXCLUDES a car sitting squarely on
     // the road pushing into a wall — that has 4/4, is not trapped, and just needs
     // to reverse.
-    const trapped =
+    // BEACHED: no wheel on anything drivable, resting against a solid. Nothing
+    // the player does can help, so this needs no throttle and gets the more
+    // generous speed gate. See STUCK.beachedSpeed.
+    const beached =
       this._solidTouch &&
+      this.groundedCount === 0 &&
+      this.body.vel.length() < STUCK.beachedSpeed;
+
+    // The original rule: SOME wheels down, so the car might still wiggle out —
+    // hence the throttle requirement (never respawn someone deliberately parked
+    // against a wall) and the tighter speed gate.
+    const wedged =
+      this._solidTouch &&
+      this.groundedCount > 0 &&
       this.groundedCount < 3 &&
       sp < STUCK.speed &&
       Math.abs(this.input.throttle) > 0.01;
+
+    const trapped = beached || wedged;
 
     if (!trapped) {
       this._stuckTime = Math.max(0, this._stuckTime - STUCK.releaseRate * FIXED_DT);
@@ -2129,7 +2171,20 @@ export class Vehicle {
     // car pitched or yawed mid-jump has a big "slip angle" that means nothing.
     // Left ungated the front wheels visibly steered themselves during flight.
     // Airborne, the wheels simply follow the steering input, as a real car's do.
-    const contact = this.groundedCount * 0.25;
+    // FORWARD ONLY. `slipAngle` is atan2(vel·left, vel·forward), so REVERSING
+    // straight makes it ±π — a "slip angle" of 180°, which slammed the front
+    // wheels to full visual lock and then flipped them side to side as the tiny
+    // lateral component changed sign. That is the weird wheel judder when
+    // backing up, and it is meaningless: a countersteer is a response to the
+    // tail stepping out under power, which cannot happen in reverse.
+    //
+    // Faded rather than switched, so rolling to a stop and reversing does not
+    // snap the wheels.
+    this._steerFwd.set(0, 0, 1).applyQuaternion(this.body.quat);
+    const fwdSpeed = this.body.vel.dot(this._steerFwd);
+    const goingForward = THREE.MathUtils.clamp(fwdSpeed / 2, 0, 1);
+
+    const contact = this.groundedCount * 0.25 * goingForward;
     const slip = contact > 0 ? this.slipAngle : 0;
     const over = Math.abs(slip) - DRIFT.counterDeadband;
     // Steering toward the slip direction IS the countersteer: with the nose

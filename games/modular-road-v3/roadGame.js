@@ -89,6 +89,7 @@ import {
   loadChassisModel, CHASSIS_GLB, applyChassisGlbTransform, resetChassisGlbFit, chassisGlbMounts,
 } from "./chassisModel.js";
 import { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } from "./modularRoadSparks.js";
+import { PropPhysics, PROP_PHYSICS } from "./modularRoadPropPhysics.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 
 /** Preset track shipped with the game (Load Apex track). Kept as its own
@@ -262,7 +263,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     propCatalog: PROP_CATALOG,
     moverCatalog: MOVER_CATALOG,
     thumbnails: roadThumbnails,
-    onAddProp: (id) => props.add(id),
+    onAddProp: (id) => { props.add(id); propPhysics.sync(); },
     onAddMover: (id) => movers.add(id),
     onAddPortal: () => { portals.addDoor(); paletteUi?.refreshStatus?.(); },
     onEdgesChange: () => bakeCollision(),
@@ -508,6 +509,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const tireMarks = new ModularRoadTireMarks(scene);
   const driftSmoke = new ModularRoadDriftSmoke(scene, { ...DEFAULT_DRIFT_SMOKE_SETTINGS });
   const sparks = new ModularRoadSparks(scene, { ...DEFAULT_SPARK_SETTINGS });
+  // Cones and gates. Physics props carry collision:"none" so they stay OUT of the
+  // static bake — see the note on PROP_CATALOG — and are simulated instead.
+  const propPhysics = new PropPhysics({
+    props,
+    getGroundBvh: () => vehicle.groundBvh,
+  });
 
   // DEFAULT_MIXER starts muted (muteAll: true) — the lab exposes a mixer panel to
   // unmute. There's no such panel here yet, so start audible; browsers still
@@ -692,6 +699,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     vehicle.setSpawn(_respawnPos, lastSafeQuat);
     vehicle.respawn();
     chase.reset(); tireMarks.reset(); driftSmoke.reset(); sparks.reset();
+    propPhysics.reset();  // knocked cones stand back up on a lap reset
     simAccum = 0;
   }
 
@@ -968,6 +976,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     gameSpawn = data.spawn ?? null;
     updateSpawnMarker();
     bakeCollision();
+    propPhysics.sync();
     paletteUi.refreshStatus();
   });
   document.body.appendChild(trackFileInput);
@@ -992,6 +1001,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       gameSpawn = data.spawn ?? null;
       updateSpawnMarker();
       bakeCollision();
+      propPhysics.sync();
       paletteUi.refreshStatus();
       devPanel?.refresh();
       console.info(`[ModularRoad-v3] preset track loaded: ${data.pieces?.length ?? 0} pieces`);
@@ -1474,6 +1484,9 @@ ${e.message}`);
       applyWheelLayout: () => vehicle.applyWheelLayout(),
       getDriftSmokeSettings: () => driftSmoke.settings,
       getSparkSettings: () => sparks.settings,
+      getPropPhysics: () => PROP_PHYSICS,
+      syncPropPhysics: () => propPhysics.sync(),
+      awakeProps: () => propPhysics.awakeCount,
       // World lighting. The engine re-reads these every frame via its own
       // dirty-check, so mutating them is enough — except time of day, which has
       // to recompute the sun's astronomical position.
@@ -1649,6 +1662,7 @@ ${e.message}`);
         }
         vehicle.tick(input);
         props.applyFields(vehicle, FIXED_DT);      // boost pads etc.
+        propPhysics.tick(FIXED_DT, vehicle);       // cones, gates
         portals.updateDrive(FIXED_DT, vehicle);
 
         // Timing runs INSIDE the fixed tick so splits/lap times are quantised to

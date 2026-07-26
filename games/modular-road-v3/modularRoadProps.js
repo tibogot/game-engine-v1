@@ -1,4 +1,6 @@
 import * as THREE from "three";
+// Collision radius is shared so the visual offset and the body can never drift.
+import { PHYSICS_PROP_TYPES } from "./modularRoadPropPhysics.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { materialEmissive } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
@@ -204,6 +206,107 @@ function mat(color, opts = {}) {
 
 /** @type {{id:string,label:string,collision:string,make:()=>THREE.Object3D}[]} */
 export const PROP_CATALOG = [
+  // ── PHYSICS PROPS ───────────────────────────────────────────────────────────
+  // `collision: "none"` is deliberate: these are simulated by PropPhysics and
+  // must NOT go into the static collision bake. Baking them would weld a cone to
+  // the track — the car would hit an immovable invisible wall where the cone was
+  // authored, and the visible cone would fly off on its own.
+  {
+    id: "cone",
+    label: "Traffic cone",
+    collision: "none",
+    make: () => {
+      const g = new THREE.Group();
+      g.name = "Cone";
+      // A real traffic cone is NOT a pointed cone: it is a truncated taper with
+      // a FLAT TOP, standing on a square flanged base, with two retroreflective
+      // collars. The pointed-ConeGeometry version read as a party hat.
+      //
+      // Built as a LATHE so the silhouette curves slightly inward like moulded
+      // PVC instead of being a dead-straight ramp, and so the base flange and
+      // body are one continuous surface rather than two parts intersecting.
+      //
+      // Sized like a MOTORWAY cone (~0.93 m) rather than a footpath one: against
+      // a 4.85 m car anything shorter reads as a toy.
+      const H = 0.93;
+      const profile = [
+        new THREE.Vector2(0.278, 0.0),    // flange edge
+        new THREE.Vector2(0.263, 0.033),
+        new THREE.Vector2(0.198, 0.045),  // flange tucks in
+        new THREE.Vector2(0.177, 0.083),
+        new THREE.Vector2(0.150, 0.21),   // slight concave sweep up the body
+        new THREE.Vector2(0.119, 0.42),
+        new THREE.Vector2(0.083, 0.66),
+        new THREE.Vector2(0.057, 0.84),
+        new THREE.Vector2(0.051, H),      // FLAT top, not a point
+        new THREE.Vector2(0.0, H),
+      ];
+      const body = new THREE.Mesh(
+        new THREE.LatheGeometry(profile, 20),
+        mat(0xf4581a, { roughness: 0.55, metalness: 0.0 }),
+      );
+      // Two collars, the upper one narrower — they follow the taper, so each
+      // needs its own radii or they float off the surface.
+      const collar = (yBottom, h, rB, rT) => {
+        const m = new THREE.Mesh(
+          new THREE.CylinderGeometry(rT, rB, h, 20, 1, true),
+          mat(0xeef0f2, { roughness: 0.35, metalness: 0.15 }),
+        );
+        m.position.y = yBottom + h / 2;
+        return m;
+      };
+      const square = new THREE.Mesh(
+        new THREE.BoxGeometry(0.55, 0.042, 0.55),
+        mat(0x141417, { roughness: 0.9 }),
+      );
+      square.position.y = 0.021;
+      g.add(square, body, collar(0.45, 0.17, 0.113, 0.097), collar(0.70, 0.105, 0.076, 0.067));
+
+      // ── SIT ON THE GROUND, AND ROTATE ABOUT THE MIDDLE ──────────────────────
+      // Two constraints that pull opposite ways:
+      //  • PropManager keeps the authored y on placement (it only sets x/z), so
+      //    make() must leave the prop ground-flush.
+      //  • The rigid body integrates about the ROOT, so the root has to be the
+      //    cone's CENTRE — put it at the base and a knocked cone pivots on its
+      //    tip like a spinning top.
+      // Satisfy both: drop the geometry by the collision radius, then lift the
+      // ROOT by the same amount. Base lands on y=0, root sits at the centre.
+      // Taken from PHYSICS_PROP_TYPES so the two can never drift apart — the
+      // earlier hardcoded copy is exactly how it ended up half-buried.
+      const R = PHYSICS_PROP_TYPES.cone.radius;
+      g.children.forEach((c) => { c.position.y -= R; });
+      g.position.y = R;
+      return g;
+    },
+  },
+  {
+    id: "gate",
+    label: "Swing gate",
+    collision: "none",
+    make: () => {
+      const g = new THREE.Group();
+      g.name = "Gate";
+      // Hinge post at the LOCAL ORIGIN — the panel swings about it, so the prop's
+      // placement point IS the hinge.
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.11, 0.11, 1.9, 10),
+        mat(0x9aa0a8, { roughness: 0.45, metalness: 0.6 }),
+      );
+      post.position.y = 0.95;
+      const panel = new THREE.Mesh(
+        new THREE.BoxGeometry(2.2, 1.5, 0.09),
+        mat(0xe23b2e, { roughness: 0.65, emissive: 0x3a0a06, emissiveIntensity: 0.4 }),
+      );
+      panel.position.set(1.1, 0.9, 0); // extends along +X from the hinge
+      const stripe = new THREE.Mesh(
+        new THREE.BoxGeometry(2.2, 0.26, 0.11),
+        mat(0xf4f4f4, { roughness: 0.6 }),
+      );
+      stripe.position.set(1.1, 0.9, 0);
+      g.add(post, panel, stripe);
+      return g;
+    },
+  },
   {
     id: "box",
     label: "Box",
