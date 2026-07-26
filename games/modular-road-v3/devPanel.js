@@ -615,6 +615,13 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-air-lock-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Nose follows arc</span>
+            <div class="prop-value">
+              <input type="range" id="dv-air-arc" min="0" max="6" step="0.1" />
+              <span class="prop-num" id="dv-air-arc-v"></span>
+            </div>
+          </div>
           <div class="dv-hint">
             Air control is <b>rate-based</b>: hold a direction and the car rotates
             at that many rad/s, release and it stops — so the same input always
@@ -1388,6 +1395,9 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-air-pitch", TIRE, "airPitchRate", rads);
   slider("dv-air-roll", TIRE, "airRollRate", rads);
   slider("dv-air-yaw", TIRE, "airYawRate", rads);
+  // Pitches the nose toward the direction of travel in flight; 0 = the old
+  // dead-flat jump. See the NOSE FOLLOWS THE ARC block in modularRoadVehicle.
+  slider("dv-air-arc", TIRE, "airTrajectoryAlign");
   slider("dv-air-resp", TIRE, "airResponse", (v) => v.toFixed(1));
   slider("dv-air-lock", TIRE, "airGroundLockout", (v) => `${v.toFixed(2)}s`);
   slider("dv-drag", AERO, "drag");

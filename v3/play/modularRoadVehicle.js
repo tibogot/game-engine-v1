@@ -335,6 +335,40 @@ export const TIRE = {
    * starts in ~0.08 s, i.e. as soon as you press.
    */
   airGroundLockout: 0.05,
+
+  // ── NOSE FOLLOWS THE ARC ────────────────────────────────────────────────
+  // Left alone the chassis holds whatever attitude it launched with, because
+  // nothing in free flight applies torque — which is CORRECT rigid-body physics
+  // and looks wrong. Measured over a 35 m/s, 9 m/s-up launch: the trajectory
+  // swings from +14° to −7° while the nose sits at exactly 0.0° the whole way,
+  // so the car sails out flat and lands flat, and a jump reads as a hop.
+  //
+  // Real cars pitch through a jump because the rear wheels leave the ramp last
+  // and aero pushes the nose down on the way in. Simulating either is far more
+  // trouble than it is worth, so this does what arcade racers do: rotate the
+  // nose toward the direction of travel. It is a rate target like every other
+  // air axis, so it composes with the existing model rather than fighting it.
+  //
+  // Deliberately yields, in three ways, because "follow the arc" is exactly the
+  // wrong instruction during a trick:
+  //   • ANY pitch input (Shift/Ctrl) turns it off outright — the player wins.
+  //   • It stops above `airAlignMaxSpin`, so a flip is never dragged back.
+  //   • It requires roughly upright (`airAlignMinUp`), so it does not try to
+  //     "correct" inverted flight to point at the ground.
+  /** Rate per radian of error (1/s). 0 disables. err 14° ⇒ ~0.5 rad/s. */
+  airTrajectoryAlign: 2.0,
+  /** Cap on the aligning rate (rad/s) — a gentle settle, never a snap. */
+  airAlignMaxRate: 1.2,
+  /** Convergence onto that rate (1/s). Well under `airResponse`: this is an
+   *  ambient drift the player should never feel as a control input. */
+  airAlignGain: 3.0,
+  /** Below this speed (m/s) the velocity vector is noise, not a heading. */
+  airAlignMinSpeed: 8,
+  /** Minimum chassis up·worldUp. Below it the car is on its side or inverted. */
+  airAlignMinUp: 0.35,
+  /** Existing pitch rate (rad/s) above which this stays out of the way. */
+  airAlignMaxSpin: 2.5,
+
   // ── LANDINGS ────────────────────────────────────────────────────────────
   // A jump-heavy track lives or dies on whether landings feel FAIR. Two separate
   // mechanisms — see _applyLandingAssist().
@@ -2284,7 +2318,49 @@ export class Vehicle {
       };
 
       this._stabTorque.set(0, 0, 0);
-      axis(this._airRight, inP, TIRE.airPitchRate, Ip);
+
+      // PITCH is written out rather than going through axis(), because when the
+      // player is NOT pitching it does not settle toward zero — it settles
+      // toward the trajectory (see the "NOSE FOLLOWS THE ARC" block in TIRE).
+      let pitchTarget = inP * TIRE.airPitchRate;
+      let pitchGain = inP !== 0 ? TIRE.airResponse : TIRE.airSettle;
+      if (inP === 0 && TIRE.airTrajectoryAlign > 0) {
+        const v = body.vel;
+        const horiz = Math.hypot(v.x, v.z);
+        const curPitch = body.angVel.dot(this._airRight);
+        if (
+          Math.hypot(horiz, v.y) >= TIRE.airAlignMinSpeed
+          && this._stabUp.y > TIRE.airAlignMinUp          // upright-ish only
+          && Math.abs(curPitch) < TIRE.airAlignMaxSpin    // never fight a flip
+        ) {
+          const traj = Math.atan2(v.y, horiz);
+          const nose = Math.atan2(
+            this._airFwd.y, Math.hypot(this._airFwd.x, this._airFwd.z),
+          );
+          // FEED THE ARC'S OWN ROTATION FORWARD. The target is not a fixed angle
+          // — it sweeps downward the whole flight — so a proportional term alone
+          // trails it by (target rate / gain) forever. Measured: the nose peaked
+          // at 5.7° when the trajectory was already at 1.2°, and the error grew
+          // to 8.7° by touchdown, i.e. WORSE than the flat car it replaced.
+          //
+          // For ballistic motion that rate is closed-form: differentiating
+          // atan2(vy, vh) with vy' = −g and vh' = 0 gives −g·vh / |v|². Adding it
+          // means the proportional term only has to correct the residual.
+          const v2 = horiz * horiz + v.y * v.y;
+          const trajRate = v2 > 1e-6 ? -GRAVITY * horiz / v2 : 0;
+          // err > 0 means the nose is BELOW the arc and must come up; a positive
+          // rotation about _airRight pitches DOWN, hence the negation.
+          let rate = -(trajRate + (traj - nose) * TIRE.airTrajectoryAlign);
+          const cap = TIRE.airAlignMaxRate;
+          if (rate > cap) rate = cap; else if (rate < -cap) rate = -cap;
+          pitchTarget = rate;
+          pitchGain = TIRE.airAlignGain;
+        }
+      }
+      this._stabTorque.addScaledVector(
+        this._airRight, (pitchTarget - body.angVel.dot(this._airRight)) * pitchGain * Ip,
+      );
+
       axis(this._airFwd, inR, TIRE.airRollRate, Ir);
       axis(this._stabUp, inY, TIRE.airYawRate, Iy);
       body.torqueAccum.add(this._stabTorque);
