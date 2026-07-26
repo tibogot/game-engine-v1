@@ -6398,6 +6398,35 @@ export async function startV3App(opts = {}) {
       },
       setEnabled(on) { worldEnv?.setCsmEnabled(!!on); },
     },
+    // ── WORLD LIGHTING ────────────────────────────────────────────────────────
+    // NOT stored in the .v3proj. Check encodeProjectFile's manifest: it carries
+    // terrain, heightmap, splat, snow, trees, props, roads, lakes, rivers and
+    // spawn — and no lighting whatsoever. So whatever a level author sets up in
+    // the editor's World tab dies with the tab, and every game boots on engine
+    // defaults until it says otherwise. This is how a game says otherwise.
+    //
+    // Mutating these objects is ENOUGH for almost everything: worldEnvironment
+    // re-reads them each frame through a snapshot dirty-check (`lightSnap` /
+    // `procSnap` in updateFrame), so there is no sync call to forget. Exposure
+    // included — `renderer.toneMappingExposure` is written from `light.exposure`
+    // inside updateSunSky.
+    light: {
+      get state() { return worldToolState.light; },
+      /** e.g. { exposure: 1.2, dirIntensity: 2.6, hemiIntensity: 0.5 } */
+      set(params = {}) { Object.assign(worldToolState.light, params); },
+    },
+    // ── SKY ───────────────────────────────────────────────────────────────────
+    // Sun and sky are ONE system, not two: setTimeOfDay computes the sun's
+    // astronomical position (latitude + day-of-year + hour angle) and WRITES
+    // light.sunAzimuth/sunElevation from it. Setting a sun angle by hand works,
+    // but the next setTimeOfDay call overwrites it — so time of day is the
+    // master control and the angles are its output.
+    sky: {
+      get state() { return worldToolState.proceduralSky; },
+      set(params = {}) { Object.assign(worldToolState.proceduralSky, params); },
+      /** Hours, 0–24. Drives the sun angles AND the scattering. */
+      setTimeOfDay(t) { worldEnv?.setTimeOfDay(t); },
+    },
     // ── Fog override ──────────────────────────────────────────────────────────
     // Height + distance fog live in worldToolState.fog and sync to scene.fogNode.
     // Valley mode matches three.js webgpu_custom_fog (world-Y band + distance haze).

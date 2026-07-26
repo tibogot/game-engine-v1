@@ -120,7 +120,26 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // chase camera looking down a long track, so the shadow config stays near the
   // editor default.
   onStatus("Starting engine…");
-  const app = await startV3App();
+  // ── THE GAME OWNS ITS LIGHT ────────────────────────────────────────────────
+  // Lighting is NOT saved in the .v3proj (encodeProjectFile's manifest has no
+  // light section at all), so a loaded world contributes terrain and props but
+  // no look. Without this the game inherits raw engine defaults — which are the
+  // EDITOR's defaults, tuned for authoring terrain, not for a stunt track.
+  //
+  // Boot-time rather than post-boot because createWorldEnvironment reads these
+  // when it builds the sun and its cascades (see the opts.light block in
+  // v3/app/main.js). Everything here is re-tunable live from the dev panel.
+  const app = await startV3App({
+    light: {
+      // The editor default is 0.2 envIntensity / 0.4 hemi, which is why the
+      // scene reads dark: almost nothing fills the shadows. A racer wants a
+      // readable road surface in shadow more than it wants contrast.
+      envIntensity: 0.45,
+      hemiIntensity: 0.6,
+      dirIntensity: 2.6,
+      exposure: 1.0,
+    },
+  });
   window.__road = app; // handy for console debugging
 
   const { scene, camera, controls, renderer } = app;
@@ -139,6 +158,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // must write `mrtNode` to glow (see applyBloomMRT in modularRoadProps.js).
   // That differs from the lab, which bloomed the whole scene's bright pixels, so
   // a high `emissiveIntensity` alone was enough there and is NOT enough here.
+  // Mid-morning: a high-ish sun keeps the track readable and the shadows short
+  // enough not to swallow a piece of road. `autoAdvance` is false by default, so
+  // this is FROZEN — a lap at minute 20 lights the same as a lap at minute 1,
+  // which also stops the auto-headlights flicking on mid-race.
+  app.sky?.setTimeOfDay(10.5);
+
   app.postFx?.setEnabled(true);
   app.postFx?.setBloomSelective(true);
   app.postFx?.setBloom({ enabled: true, strength: 0.9, threshold: 0.0, radius: 0.5 });
@@ -1449,6 +1474,12 @@ ${e.message}`);
       applyWheelLayout: () => vehicle.applyWheelLayout(),
       getDriftSmokeSettings: () => driftSmoke.settings,
       getSparkSettings: () => sparks.settings,
+      // World lighting. The engine re-reads these every frame via its own
+      // dirty-check, so mutating them is enough — except time of day, which has
+      // to recompute the sun's astronomical position.
+      getLightState: () => app.light?.state ?? null,
+      getSkyState: () => app.sky?.state ?? null,
+      setTimeOfDay: (t) => app.sky?.setTimeOfDay(t),
       getChassisFit: () => CHASSIS_GLB,
       applyChassisFit: () => {
         applyChassisGlbTransform(chassisGlbObject);

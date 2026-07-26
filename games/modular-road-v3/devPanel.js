@@ -801,6 +801,74 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">World light</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Time of day</span>
+            <div class="prop-value">
+              <input type="range" id="dv-tod" min="0" max="24" step="0.1" />
+              <span class="prop-num" id="dv-tod-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Exposure</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exposure" min="0.1" max="3" step="0.02" />
+              <span class="prop-num" id="dv-exposure-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun intensity</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sun-int" min="0" max="6" step="0.05" />
+              <span class="prop-num" id="dv-sun-int-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sky fill (hemi)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-hemi" min="0" max="2" step="0.02" />
+              <span class="prop-num" id="dv-hemi-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Ambient (env)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-env" min="0" max="2" step="0.02" />
+              <span class="prop-num" id="dv-env-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sky blue (rayleigh)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sky-ray" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-sky-ray-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Haze (mie)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sky-mie" min="0" max="2" step="0.02" />
+              <span class="prop-num" id="dv-sky-mie-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun glow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sky-glow" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-sky-glow-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Light</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-light-log" type="button">Log values</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Lights</div>
         <div class="section-body">
           <div class="prop-row">
@@ -1631,6 +1699,47 @@ export function createRoadDevPanel({ app, game, params }) {
     stochBtn.addEventListener("click", () => {
       localStorage.setItem("terrain_stochastic", stochOn() ? "false" : "true");
       location.reload();
+    });
+  }
+
+  // ── World light ─────────────────────────────────────────────────────────────
+  // Lighting is not stored in the .v3proj, so these edit LIVE engine state that
+  // the game seeded at boot. The engine re-reads light/sky every frame through
+  // its own snapshot dirty-check, so a plain slider() write is enough — EXCEPT
+  // time of day, which must recompute the sun's astronomical position.
+  const lightState = game.getLightState?.();
+  const skyState = game.getSkyState?.();
+  if (lightState && skyState) {
+    const hhmm = (v) => {
+      const h = Math.floor(v), m = Math.round((v - h) * 60);
+      return `${String(h).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    };
+    slider("dv-tod", skyState, "timeOfDay", hhmm, (v) => game.setTimeOfDay?.(v));
+    slider("dv-exposure", lightState, "exposure");
+    slider("dv-sun-int", lightState, "dirIntensity");
+    slider("dv-hemi", lightState, "hemiIntensity");
+    slider("dv-env", lightState, "envIntensity");
+    slider("dv-sky-ray", skyState, "rayleigh");
+    slider("dv-sky-mie", skyState, "mie");
+    slider("dv-sky-glow", skyState, "sunGlowStrength");
+    $("#dv-light-log")?.addEventListener("click", () => {
+      const f = (v) => Number(v).toFixed(2);
+      // Paste-ready: lighting is not saved anywhere, so a look you like has to
+      // get back into roadGame.js by hand or it dies with the tab.
+      console.info(
+        [
+          "[ModularRoad-v3] lighting — paste into roadGame.js:",
+          "  startV3App({ light: {",
+          `    exposure: ${f(lightState.exposure)},`,
+          `    dirIntensity: ${f(lightState.dirIntensity)},`,
+          `    hemiIntensity: ${f(lightState.hemiIntensity)},`,
+          `    envIntensity: ${f(lightState.envIntensity)},`,
+          "  } })",
+          `  app.sky.setTimeOfDay(${f(skyState.timeOfDay)});`,
+          `  app.sky.set({ rayleigh: ${f(skyState.rayleigh)}, `
+            + `mie: ${f(skyState.mie)}, sunGlowStrength: ${f(skyState.sunGlowStrength)} });`,
+        ].join("\n"),
+      );
     });
   }
 

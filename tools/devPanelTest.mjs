@@ -79,6 +79,55 @@ console.log("\n=== DEFAULT_OPEN NAMES STILL EXIST ===");
   }
 }
 
+console.log("\n=== WORLD-LIGHT SLIDERS COVER THE ACTUAL VALUES ===");
+// These edit LIVE engine state, not constants in this file — so a range that
+// excludes the value in play clamps on init and silently changes the look the
+// moment the panel opens. Checked against the game's boot overrides where it
+// sets them, and the engine defaults where it doesn't.
+{
+  const game = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
+  const cfg = readFileSync(join(ROOT, "v2/app/config.js"), "utf8");
+  const wstate = readFileSync(join(ROOT, "v3/app/state/worldState.js"), "utf8");
+
+  const range = (id) => {
+    const tag = new RegExp(`<input[^>]*id="${id}"[^>]*>`).exec(SRC)?.[0] ?? "";
+    return {
+      min: Number(/min="(-?[\d.]+)"/.exec(tag)?.[1]),
+      max: Number(/max="(-?[\d.]+)"/.exec(tag)?.[1]),
+    };
+  };
+  const num = (src, key) => Number(new RegExp(`${key}:\\s*(-?[\\d.]+)`).exec(src)?.[1]);
+
+  // roadGame's startV3App({ light: {...} }) block wins over the engine default.
+  const boot = /startV3App\(\{[\s\S]*?light:\s*\{([\s\S]*?)\}/.exec(game)?.[1] ?? "";
+  const tod = Number(/setTimeOfDay\(([\d.]+)\)/.exec(game)?.[1]);
+
+  const cases = [
+    ["dv-tod", "time of day", tod],
+    ["dv-exposure", "exposure", num(boot, "exposure")],
+    ["dv-sun-int", "dirIntensity", num(boot, "dirIntensity")],
+    ["dv-hemi", "hemiIntensity", num(boot, "hemiIntensity")],
+    ["dv-env", "envIntensity", num(boot, "envIntensity")],
+    ["dv-sky-ray", "rayleigh", num(cfg, "rayleigh")],
+    ["dv-sky-mie", "mie", num(wstate, "mie")],
+    ["dv-sky-glow", "sunGlowStrength", num(wstate, "sunGlowStrength")],
+  ];
+  for (const [id, label, val] of cases) {
+    const r = range(id);
+    check(`${id} covers the live ${label} (${val})`,
+      Number.isFinite(val) && Number.isFinite(r.min) && val >= r.min && val <= r.max,
+      `${r.min} .. ${r.max}`);
+  }
+  // Match on the whole slider() line. `[^)]*` does NOT work here — it stops at
+  // the first ")" which belongs to the "(v) =>" callback, not the call.
+  const todLine = SRC.split("\n").find((l) => l.includes('slider("dv-tod"')) ?? "";
+  check("time of day is wired through setTimeOfDay, not written directly — the "
+    + "sun angles are its OUTPUT, so writing them would be overwritten",
+    todLine.includes("setTimeOfDay"), todLine.trim());
+  check("the game sets its own lighting at boot (a .v3proj carries none)",
+    boot.length > 0 && Number.isFinite(tod));
+}
+
 console.log("\n=== EVERY WIRED CONTROL EXISTS IN THE MARKUP ===");
 {
   // slider(id, obj, key, ...) — needs both the input and its "-v" readout.
