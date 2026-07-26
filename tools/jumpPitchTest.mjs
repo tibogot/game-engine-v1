@@ -113,6 +113,57 @@ console.log("\n=== IT YIELDS TO THE PLAYER ===");
     `${Math.abs(on - off).toFixed(1)}° difference`);
 }
 
+console.log("\n=== AIR ROLL DIRECTION ===");
+// Press RIGHT, roll RIGHT — right side down, i.e. CLOCKWISE from a chase camera.
+// This shipped INVERTED, and the sign is genuinely easy to get wrong: WHEEL_LOCAL
+// labels the +X wheels "R", but +X is SCREEN-LEFT for a camera behind a car that
+// faces +Z. So "right" is defined here by a REAL camera, not by reasoning about
+// handedness. Ground steering was always correct — only the air axis was flipped.
+{
+  const cam = new THREE.PerspectiveCamera(60, 1.6, 0.1, 1000);
+  cam.position.set(0, 3, -9);   // behind a car facing +Z
+  cam.lookAt(0, 1, 0);
+  cam.updateMatrixWorld();
+  const camRight = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0).normalize();
+
+  const rollWith = (steerTarget) => {
+    const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
+    c.groundBvh = ground; c.enabled = true;
+    c.body.pos.set(0, 80, 0); c.body.vel.set(0, 0, 30); c.body.quat.identity();
+    for (let i = 0; i < 60; i++) {
+      c.tick({ steerTarget, throttle: 0, handbrake: false, yaw: 0, pitch: 0 });
+    }
+    // Top tipping toward screen-right = clockwise (12 o'clock toward 3).
+    return new THREE.Vector3(0, 1, 0).applyQuaternion(c.body.quat).dot(camRight);
+  };
+  const groundWith = (steerTarget) => {
+    const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
+    c.groundBvh = ground; c.enabled = true;
+    c.body.pos.set(0, 0.6, 0); c.body.vel.set(0, 0, 18); c.body.quat.identity();
+    for (let i = 0; i < 200; i++) {
+      c.tick({ steerTarget, throttle: 0.5, handbrake: false, yaw: 0, pitch: 0 });
+    }
+    return c.body.pos.dot(camRight);
+  };
+  // roadGame: kbSteer = (left?1:0) - (right?1:0)  =>  LEFT = +1, RIGHT = -1
+  const RIGHT = -1, LEFT = 1;
+  console.log(`  press RIGHT: roll ${rollWith(RIGHT).toFixed(2)}  ground ${groundWith(RIGHT).toFixed(1)}`);
+  console.log(`  press LEFT : roll ${rollWith(LEFT).toFixed(2)}  ground ${groundWith(LEFT).toFixed(1)}`);
+  console.log("  (positive = screen-right)");
+
+  check("press RIGHT rolls CLOCKWISE — right side down, as in every flight sim",
+    rollWith(RIGHT) > 0.1, `${rollWith(RIGHT).toFixed(2)}`);
+  check("press LEFT rolls COUNTER-CLOCKWISE", rollWith(LEFT) < -0.1,
+    `${rollWith(LEFT).toFixed(2)}`);
+  check("roll is symmetric between the two inputs",
+    Math.abs(rollWith(RIGHT) + rollWith(LEFT)) < 0.02);
+  check("GROUND steering still matches the key (it was never wrong)",
+    groundWith(RIGHT) > 1 && groundWith(LEFT) < -1,
+    `right ${groundWith(RIGHT).toFixed(1)}, left ${groundWith(LEFT).toFixed(1)}`);
+  check("air roll and ground steer agree in direction — press right, go right",
+    Math.sign(rollWith(RIGHT)) === Math.sign(groundWith(RIGHT)));
+}
+
 console.log("\n=== FLIP FEEL ===");
 // "Too brutal" was measurable: at rate 3.6 / shared response 9, a 0.3 s tap of
 // Shift/Ctrl rotated 91° and a 0.5 s press 158°, so a light input on a ~1.5 s

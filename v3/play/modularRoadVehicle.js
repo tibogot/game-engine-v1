@@ -2422,7 +2422,15 @@ export class Vehicle {
       // +X axis pitches the nose DOWN (+X is the chassis' left; rotating +Z
       // about it takes the nose toward −Y), hence the negation.
       const inP = armed ? -this.input.pitch : 0;
-      const inR = armed ? this.input.steer : 0;
+      // ROLL IS NEGATED — press RIGHT, roll RIGHT (right side down, which is
+      // CLOCKWISE seen from the chase camera). Un-negated it did the opposite,
+      // which is what every flight sim and stunt racer trained the player NOT to
+      // expect. Verified against a real chase camera rather than by reasoning
+      // about handedness, because the sign here is genuinely easy to get wrong:
+      // WHEEL_LOCAL labels the +X wheels "R", but +X is SCREEN-LEFT for a camera
+      // sitting behind a car that faces +Z. Ground steering was already correct;
+      // only this axis was inverted.
+      const inR = armed ? -this.input.steer : 0;
       const inY = this.input.yaw; // Q/E is deliberate stunt input — never gated
 
       // Diagonal inertia in body-local axes (x pitch, y yaw, z roll).

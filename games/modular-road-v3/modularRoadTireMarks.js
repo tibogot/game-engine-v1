@@ -26,6 +26,9 @@ const UV_FLOATS_PER_SEGMENT = VERTS_PER_SEGMENT * 2;
  * differs. UVs are written unconditionally (+192 KB) so a switch needs no
  * regeneration.
  */
+/** Look the marks ship with. "solid" is the flat-ribbon fallback. */
+export const DEFAULT_MARK_STYLE = "textured";
+
 export const SKID_TEXTURE_URL = "/textures/skid_mark01.png";
 
 /** Metres of track per repeat of the texture along the mark. */
@@ -133,6 +136,11 @@ export class ModularRoadTireMarks {
     this._solidMaterial = material;
     this._texturedMaterial = null;
     this._skidTexture = null;
+    // TEXTURED is the shipped look. Applied through setStyle rather than by
+    // assigning `style` directly, because the textured material and its texture
+    // are built lazily in there — and setStyle already falls back to solid if
+    // the PNG fails to load, so this cannot leave the marks invisible.
+    this.setStyle(DEFAULT_MARK_STYLE);
   }
 
   /**
