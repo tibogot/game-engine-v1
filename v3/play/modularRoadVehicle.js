@@ -326,6 +326,11 @@ export const TIRE = {
   airRollRate: 3.6,
   /** Yaw sits higher so a flat spin still reads as a deliberate trick. */
   airYawRate: 4.5,
+  // NOTE: a world-Y "heading lock" was tried here and REMOVED. Damping
+  // body.angVel.y fights any rotation with a vertical component — which for a
+  // rolled or pitched car is part of the roll itself, so it distorted the
+  // rotation and the car stopped looking like it faced its travel. If the
+  // heading is drifting, find the torque that is actually turning it.
   /** How fast the actual rate converges on the target (1/s). Higher = snappier
    *  and more digital; lower = floatier. This is the "air feel" knob. */
   airResponse: 9.0,
@@ -379,6 +384,15 @@ export const TIRE = {
   //     "correct" inverted flight to point at the ground.
   /** Rate per radian of error (1/s). 0 disables. err 14° ⇒ ~0.5 rad/s. */
   airTrajectoryAlign: 2.0,
+  /**
+   * Fraction of the trajectory angle the nose actually tracks.
+   *
+   * 1.0 (matching the arc exactly) is what "nose follows the arc" literally
+   * means and it lands badly — 16° nose-down at touchdown, front wheels 150 ms
+   * before the rear. Real cars pitch a little in a jump and land near-flat; they
+   * do not rotate to match their flight path.
+   */
+  airAlignFraction: 0.5,
   /** Cap on the aligning rate (rad/s) — a gentle settle, never a snap. */
   airAlignMaxRate: 1.2,
   /** Convergence onto that rate (1/s). Well under `airResponse`: this is an
@@ -386,8 +400,21 @@ export const TIRE = {
   airAlignGain: 3.0,
   /** Below this speed (m/s) the velocity vector is noise, not a heading. */
   airAlignMinSpeed: 8,
-  /** Minimum chassis up·worldUp. Below it the car is on its side or inverted. */
-  airAlignMinUp: 0.35,
+  /**
+   * Minimum chassis up·worldUp for the arc assist to act. 0.90 ≈ stands down
+   * past 26° of tilt.
+   *
+   * RAISED from 0.35 (70°) because a pitch torque on a ROLLED car does not stay
+   * on the pitch axis. The inertia tensor is very asymmetric (pitch 1554, yaw
+   * 1890, roll 420 kg·m²) and `integrate()` runs torque through the full world
+   * inverse inertia, so the correction acquires a yaw component — real physics,
+   * which no choice of torque axis avoids. Two axis rewrites were tried and
+   * neither helped; standing the assist down is what does.
+   *
+   * The player is flying the car during a roll anyway; the assist is there for
+   * ordinary jumps, and a straight jump is unaffected (measured 0.0° either way).
+   */
+  airAlignMinUp: 0.90,
   /** Existing pitch rate (rad/s) above which this stays out of the way. */
   airAlignMaxSpin: 2.5,
 
@@ -416,15 +443,50 @@ export const TIRE = {
   //     about the up-axis and is orthogonal, so deliberate flat spins survive.
   /** Master scale, 0..1. 0 = no landing help at all. */
   airLandAssist: 1.0,
-  /** Alignment torque (N·m) at full engagement. */
-  airLandTorque: 6000,
-  /** Metres before contact over which the assist ramps 0→1. Also the probe
-   *  length — beyond it the assist is zero anyway. Kept short so the player has
-   *  already committed to their trick before it engages. */
-  airLandRange: 12,
-  /** Damping on the tilt rate while engaged, or the alignment overshoots and the
-   *  car wobbles through the last metres of the fall. */
-  airLandDamp: 1200,
+  /**
+   * Alignment torque (N·m) at full engagement.
+   *
+   * RAISED from 6000, which was an order of magnitude too weak to right a ROLLED
+   * car. That is what caused the reported "car drifts by itself on landing": it
+   * is not a rotation at all — the car arrives still rolled ~30°, the tyres bite
+   * at an angle and shove it SIDEWAYS. Measured over a 45 m/s jump with 0.6 s of
+   * roll input:
+   *     torque  window   tilt@land   lateral slide
+   *       6000   0.55s        30°        4.2 m
+   *      20000   0.55s        19°        0.4 m
+   *      45000   0.90s         2°        0.2 m
+   * Every earlier attempt measured HEADING and found almost nothing, because the
+   * car was barely turning — it was translating.
+   */
+  airLandTorque: 32000,
+  /** Probe length (m). Only the reach of the look-ahead now — the RAMP is timed,
+   *  see airLandTime. Long enough to see the landing coming at speed. */
+  airLandRange: 40,
+  /**
+   * Seconds before impact over which the assist ramps 0→1, and over which the
+   * nose-follows-arc pitch hands over to it.
+   *
+   * Timed rather than distance-based because the probe runs along the flight
+   * path: on a fast shallow jump that is mostly horizontal, so slant range wildly
+   * overstates how much time is left. Measured with the old distance ramp, engage
+   * peaked at 0.53 all the way to touchdown — half strength precisely when the
+   * car needed levelling, which is why jumps landed 17° nose-down and see-sawed
+   * onto the front wheels 158 ms before the rear arrived.
+   *
+   * 0.55 s is about a car length of air at speed: enough to rotate level, short
+   * enough that the player has long since committed to their trick.
+   */
+  airLandTime: 0.85,
+  /**
+   * Damping on the tilt rate while engaged, or the alignment overshoots and the
+   * car wobbles through the last metres of the fall.
+   *
+   * MUST SCALE WITH airLandTorque. Raising the torque 6000 → 32000 while leaving
+   * this at 1200 turned a long barrel roll into a 113° spin on touchdown: the
+   * assist had five times the authority to swing the car and the same authority
+   * to stop it, so it drove straight past level.
+   */
+  airLandDamp: 6400,
 
 };
 
@@ -1719,6 +1781,8 @@ export class Vehicle {
     this._stabWTilt = new THREE.Vector3();
     this._airRight = new THREE.Vector3();
     this._airFwd = new THREE.Vector3();
+    this._airHeading = new THREE.Vector3(); // horizontal projection of _airFwd
+    this._airPitchAxis = new THREE.Vector3(); // horizontal pitch axis for the arc assist
     this._yawN = new THREE.Vector3();
     this._yawFwd = new THREE.Vector3();
     this._yawLat = new THREE.Vector3();
@@ -2029,25 +2093,36 @@ export class Vehicle {
     // it entirely. Requiring <3 also correctly EXCLUDES a car sitting squarely on
     // the road pushing into a wall — that has 4/4, is not trapped, and just needs
     // to reverse.
-    // BEACHED: no wheel on anything drivable, resting against a solid. Nothing
-    // the player does can help, so this needs no throttle and gets the more
-    // generous speed gate. See STUCK.beachedSpeed.
-    const beached =
-      this._solidTouch &&
-      this.groundedCount === 0 &&
-      this.body.vel.length() < STUCK.beachedSpeed;
-
-    // The original rule: SOME wheels down, so the car might still wiggle out —
-    // hence the throttle requirement (never respawn someone deliberately parked
-    // against a wall) and the tighter speed gate.
-    const wedged =
-      this._solidTouch &&
-      this.groundedCount > 0 &&
+    // CAN'T DRIVE: too few wheels on anything drivable, and not moving.
+    //
+    // THIS IS THE THIRD ATTEMPT, and the first two failed because they described
+    // a trap that does not actually happen. MEASURED against the real rail
+    // (tools/railTrapRepro.mjs) across seven landings:
+    //
+    //   scenario                grounded   0-wheel%   old condition fired
+    //   crown, rolling in          2          2%            never
+    //   straddling road+rail       2          2%            never
+    //   dead on the crown          1          2%            never
+    //
+    // The car does NOT end up balanced on top of the rail with nothing under it.
+    // It ends up HANGING OFF THE TRACK EDGE with one or two wheels still
+    // catching the road while the chassis leans on the rail. So requiring
+    // `groundedCount === 0` fired 2% of the time, and the older rule covered
+    // 1–2 wheels but still demanded throttle — which nobody holds once they
+    // realise they are stuck.
+    //
+    // Neither the throttle nor the solid contact is required now:
+    //   • `< 3 wheels` already excludes a car parked squarely on the road
+    //     pushing into a wall (that has 4/4 and can simply reverse out), which
+    //     is the only thing the throttle check was protecting.
+    //   • Contact is irrelevant — "dead on the crown" ends up touching NOTHING,
+    //     dangling off the edge on one wheel, and is every bit as stuck.
+    //
+    // 3-D speed, so a car falling past the rail is never mistaken for a stopped
+    // one, and a fast wall-ride (0 wheels, touching a solid) stays well clear.
+    const trapped =
       this.groundedCount < 3 &&
-      sp < STUCK.speed &&
-      Math.abs(this.input.throttle) > 0.01;
-
-    const trapped = beached || wedged;
+      this.body.vel.length() < STUCK.beachedSpeed;
 
     if (!trapped) {
       this._stuckTime = Math.max(0, this._stuckTime - STUCK.releaseRate * FIXED_DT);
@@ -2379,6 +2454,10 @@ export class Vehicle {
     }
 
     this._prevGrounded = 0;
+    // Published for the air control: how strongly this assist owns the attitude
+    // right now. The arc-follow fades out against it, so the nose tracks the
+    // flight path in mid-air and then LEVELS to the surface for touchdown.
+    this._landEngage = 0;
     if (TIRE.airLandAssist <= 0 || TIRE.airLandTorque <= 0) return;
 
     // ── Airborne: align to whatever we're about to land on ──
@@ -2390,8 +2469,22 @@ export class Vehicle {
 
     const hit = this._castGround(body.pos, this._landDir, TIRE.airLandRange);
     if (!hit) return;
-    const engage = 1 - Math.min(1, (hit.distance ?? 0) / Math.max(0.1, TIRE.airLandRange));
+    // ENGAGE ON TIME-TO-IMPACT, NOT DISTANCE.
+    //
+    // The probe runs along the FLIGHT PATH, so on a fast shallow jump it is
+    // mostly horizontal and its length is far greater than the height — a car
+    // 0.6 m off the deck at 30 m/s still reads several metres of slant range.
+    // MEASURED: engage peaked at 0.53 right up to touchdown, so the assist was
+    // running at half strength exactly when it was needed most, and never took
+    // over the attitude at all.
+    //
+    // Seconds-to-impact is speed-invariant and is what actually decides whether
+    // there is time to level the car.
+    const dist = hit.distance ?? 0;
+    const speed = Math.max(1, body.vel.length());
+    const engage = 1 - Math.min(1, (dist / speed) / Math.max(0.05, TIRE.airLandTime));
     if (engage <= 0) return;
+    this._landEngage = engage;
 
     if (hit.normal) this._landN.set(hit.normal.x, hit.normal.y, hit.normal.z);
     else if (hit.face?.normal) this._landN.copy(hit.face.normal);
@@ -2508,6 +2601,7 @@ export class Vehicle {
       // PITCH is written out rather than going through axis(), because when the
       // player is NOT pitching it does not settle toward zero — it settles
       // toward the trajectory (see the "NOSE FOLLOWS THE ARC" block in TIRE).
+      let aligning = false; // true when the arc assist is driving pitch, not the player
       let pitchTarget = inP * TIRE.airPitchRate;
       // Pitch uses its OWN response — see airPitchResponse.
       let pitchGain = inP !== 0 ? TIRE.airPitchResponse : TIRE.airSettle;
@@ -2520,7 +2614,20 @@ export class Vehicle {
           && this._stabUp.y > TIRE.airAlignMinUp          // upright-ish only
           && Math.abs(curPitch) < TIRE.airAlignMaxSpin    // never fight a flip
         ) {
-          const traj = Math.atan2(v.y, horiz);
+          // FOLLOW A FRACTION OF THE ARC, NOT ALL OF IT.
+          //
+          // Matching the trajectory exactly is geometrically "correct" and lands
+          // badly: measured, the car arrived 16° nose-down and see-sawed onto its
+          // front wheels 150 ms before the rear. Trying to level that back out
+          // with the landing assist is a losing fight — even at 10× torque and a
+          // longer window it only reached −6.3°, and flattened the in-flight look
+          // to −9.8° in the process, i.e. it damaged the thing the assist exists
+          // for.
+          //
+          // Real cars do not rotate to match their flight path either; they pitch
+          // a little and land near-flat. Half the arc reads clearly nose-down
+          // without turning touchdown into a slam.
+          const traj = Math.atan2(v.y, horiz) * TIRE.airAlignFraction;
           const nose = Math.atan2(
             this._airFwd.y, Math.hypot(this._airFwd.x, this._airFwd.z),
           );
@@ -2534,20 +2641,70 @@ export class Vehicle {
           // atan2(vy, vh) with vy' = −g and vh' = 0 gives −g·vh / |v|². Adding it
           // means the proportional term only has to correct the residual.
           const v2 = horiz * horiz + v.y * v.y;
-          const trajRate = v2 > 1e-6 ? -GRAVITY * horiz / v2 : 0;
+          const trajRate = (v2 > 1e-6 ? -GRAVITY * horiz / v2 : 0) * TIRE.airAlignFraction;
           // err > 0 means the nose is BELOW the arc and must come up; a positive
           // rotation about _airRight pitches DOWN, hence the negation.
           let rate = -(trajRate + (traj - nose) * TIRE.airTrajectoryAlign);
           const cap = TIRE.airAlignMaxRate;
           if (rate > cap) rate = cap; else if (rate < -cap) rate = -cap;
-          pitchTarget = rate;
-          pitchGain = TIRE.airAlignGain;
+          // HAND OVER TO THE LANDING ASSIST. Following the arc means pitching the
+          // nose DOWN for the whole descent, and holding that to touchdown is why
+          // the car see-sawed onto its front wheels: MEASURED at −17.5° nose-down
+          // at front-wheel contact with the rear arriving 158 ms later, against
+          // 0.0° and 0 ms with the assist off. Fading out over the landing
+          // assist's own engage ramp keeps the arc look in mid-flight and lets
+          // the car LEVEL for the landing, which is the half that has to feel
+          // good rather than look good.
+          const handover = 1 - (this._landEngage ?? 0);
+          if (handover > 0.02) {
+            pitchTarget = rate * handover;
+            pitchGain = TIRE.airAlignGain;
+            aligning = true;
+          }
+        }
+      }
+      // WHICH AXIS THE PITCH TORQUE ACTS ABOUT MATTERS ONCE THE CAR IS ROLLED.
+      //
+      // Player pitch stays on the chassis RIGHT axis: rolled, that gives a
+      // corkscrew, which is a legitimate stunt and what the input should do.
+      //
+      // The nose-follows-arc ALIGNMENT must not. It is an automatic assist, and
+      // about a rolled chassis-right axis its correction carries a world-vertical
+      // component — so it silently YAWS the car for the whole descent. Measured:
+      // 0.6 s of roll input yawed the heading 8° on a short jump and 33° on a
+      // full-height one, entirely from this term. The player never sees it (they
+      // are watching a rolling car), then lands 33° across their direction of
+      // travel and the tyres snap it straight. That is the reported "car turns
+      // abruptly by itself on landing" — it was never a landing bug.
+      //
+      // So the assist uses a HORIZONTAL pitch axis: perpendicular to world up and
+      // to the heading, i.e. the axis about which pitching cannot yaw.
+      let pitchAxis = this._airRight;
+      if (aligning) {
+        // Horizontal, perpendicular to the HEADING. Rotation about it changes the
+        // nose's ELEVATION and nothing else — which is all the assist wants. The
+        // chassis-right axis would do the same job only while the car is level;
+        // rolled, it is tilted, and then the assist's correction sweeps the nose
+        // SIDEWAYS. That is the whole 33° of unrequested yaw.
+        this._airHeading.copy(this._airFwd);
+        this._airHeading.y = 0;
+        if (this._airHeading.lengthSq() > 1e-6) {
+          this._airHeading.normalize();
+          this._airPitchAxis.crossVectors(this._yAxis, this._airHeading).normalize();
+          pitchAxis = this._airPitchAxis;
         }
       }
       this._stabTorque.addScaledVector(
-        this._airRight, (pitchTarget - body.angVel.dot(this._airRight)) * pitchGain * Ip,
+        pitchAxis, (pitchTarget - body.angVel.dot(pitchAxis)) * pitchGain * Ip,
       );
 
+      // ROLL STAYS ON THE CHASSIS FORWARD AXIS. Rotating about a body's own
+      // forward vector cannot change that vector, so pure roll can never alter
+      // the heading — which is exactly the property wanted. An earlier attempt
+      // rolled about the HORIZONTAL PROJECTION of forward instead; with a pitched
+      // nose that is a different axis, so it started swinging the nose sideways
+      // and the car visibly stopped facing its direction of travel. Do not
+      // "improve" this axis.
       axis(this._airFwd, inR, TIRE.airRollRate, Ir);
       axis(this._stabUp, inY, TIRE.airYawRate, Iy);
       body.torqueAccum.add(this._stabTorque);

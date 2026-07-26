@@ -127,6 +127,20 @@ console.log("\n=== IT MUST NOT FIRE WHEN THE CAR IS FINE ===");
   const ride = sim({ solids: wall(2.0), pos: V(1.5, 1.4, 0), vel: V(0, 0, 34), throttle: 1, secs: 2 });
   check("never fires during a fast wall ride (0 wheels down, touching a solid)",
     ride.firedAt === null, `peak ${ride.peak.toFixed(2)}s`);
+
+  // THE CRITICAL NEGATIVE. The condition no longer requires throttle OR solid
+  // contact — the only thing standing between "stuck" and "parked" is the wheel
+  // count. So a car sitting still in the middle of the road, on all four wheels,
+  // must never accumulate a single tick, however long it sits there.
+  const parkedOnRoad = sim({
+    solids: rail(40), pos: V(0, 0.45, 0), vel: V(0, 0, 0), throttle: 0, secs: 12,
+  });
+  console.log(`  parked mid-road: grounded=${parkedOnRoad.grounded} peak ${parkedOnRoad.peak.toFixed(2)}s`);
+  check("a car PARKED on the road is never treated as stuck, however long",
+    parkedOnRoad.firedAt === null && parkedOnRoad.peak < 0.5,
+    "4 wheels down is the whole safeguard now");
+  check("and it really was on all four wheels", parkedOnRoad.grounded >= 3,
+    `${parkedOnRoad.grounded}/4`);
 }
 
 console.log("\n=== THE GATE ITSELF ===");

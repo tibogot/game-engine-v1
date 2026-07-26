@@ -89,16 +89,26 @@ console.log("=== THE NOSE FOLLOWS THE ARC ===");
   console.log(`  nose ${r[0].nose.toFixed(1)}° → ${last.nose.toFixed(1)}°   trajectory ${r[0].traj.toFixed(1)}° → ${last.traj.toFixed(1)}°`);
   console.log(`  mean |mismatch| once settled: ${meanErr.toFixed(1)}°`);
 
-  check("the car does NOT stay flat through the jump", Math.abs(last.nose) > 4,
-    `${last.nose.toFixed(1)}° at touchdown`);
-  check("the nose ends up pointing DOWN, with the descent", last.nose < 0);
-  check("it tracks the trajectory rather than trailing it",
-    meanErr < 4, `${meanErr.toFixed(1)}° mean error`);
-  // Without the rate feed-forward a proportional term lags by (target rate/gain)
-  // forever — measured 8.7° and still growing at touchdown, i.e. worse than flat.
-  check("error does not GROW across the flight (the feed-forward's whole job)",
-    Math.abs(last.nose - last.traj) < 4,
-    `${Math.abs(last.nose - last.traj).toFixed(1)}° at touchdown`);
+  // NOSE-DOWN IS MEASURED IN FLIGHT, LEVEL IS MEASURED AT TOUCHDOWN. These are
+  // two different goals and the earlier version conflated them: it asserted the
+  // nose was still pitched when the wheels arrived, which is precisely the
+  // see-sawing landing that had to be removed.
+  const deepest = Math.min(...air.map((x) => x.nose));
+  const steepestTraj = Math.min(...air.map((x) => x.traj));
+  // Measured RELATIVE to the arc, not as an absolute angle: a jump whose
+  // trajectory is nearly flat at touchdown SHOULD land flat, so a fixed
+  // threshold would fail correct behaviour on the fastest, flattest jumps.
+  check("the car does NOT stay flat — the nose tracks a real share of the arc",
+    Math.abs(deepest) > Math.abs(steepestTraj) * 0.25,
+    `nose ${deepest.toFixed(1)}° against a ${steepestTraj.toFixed(1)}° arc`);
+  check("the nose points DOWN on the way in, never up", deepest < 0);
+  // Half the arc, not all of it — matching the trajectory exactly landed 16°
+  // nose-down with the front wheels 150 ms ahead of the rear.
+  check("it follows only a FRACTION of the arc, so touchdown is not a slam",
+    Math.abs(deepest) < Math.abs(Math.min(...air.map((x) => x.traj))) * 0.9,
+    `nose ${deepest.toFixed(1)}° vs trajectory ${Math.min(...air.map((x) => x.traj)).toFixed(1)}°`);
+  check("and it LEVELS OUT for the landing, rather than arriving nose-first",
+    Math.abs(last.nose) < 4, `${last.nose.toFixed(1)}° at touchdown`);
 }
 
 console.log("\n=== IT YIELDS TO THE PLAYER ===");
@@ -164,6 +174,126 @@ console.log("\n=== AIR ROLL DIRECTION ===");
     Math.sign(rollWith(RIGHT)) === Math.sign(groundWith(RIGHT)));
 }
 
+console.log("\n=== AIR ROLL MUST NOT TURN THE CAR ===");
+// Reported as "landing straight after a roll, something turns the car abruptly".
+// It was never a landing bug: rolling a PITCHED body leaks into world yaw as a
+// matter of geometry, and the nose-follows-arc assist pitches the nose for the
+// whole descent. Measured before the fix: 0.6 s of roll input left the car 33°
+// across its direction of travel at touchdown, and the tyres then snapped it
+// straight — which is the "abrupt turn" the player sees.
+//
+// No axis choice removes it (picking better axes only got 17° → 9°), so
+// TIRE.airYawLock damps accidental world-vertical rotation instead.
+{
+  const R2D3 = 57.2958;
+  const headingOf = (q) => {
+    const f = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    return Math.atan2(f.x, f.z) * R2D3;
+  };
+  /** Jump, roll for a while, land with the steering dead centre. */
+  const rollJump = (roll, rollFor = 0.6) => {
+    const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
+    c.groundBvh = ground; c.enabled = true;
+    c.body.pos.set(0, 6, 0); c.body.vel.set(0, 3, 28); c.body.quat.identity();
+    let landed = null, hdgAtLand = 0, worst = 0;
+    for (let i = 0; i < 4 / FIXED_DT; i++) {
+      const t = i * FIXED_DT;
+      c.tick({
+        steerTarget: (landed === null && t < rollFor) ? roll : 0,
+        throttle: 0, handbrake: false, yaw: 0, pitch: 0,
+      });
+      if (landed === null && c.groundedCount >= 3) { landed = t; hdgAtLand = headingOf(c.body.quat); }
+      if (landed !== null && t - landed <= 1.5) {
+        const d = headingOf(c.body.quat) - hdgAtLand;
+        if (Math.abs(d) > Math.abs(worst)) worst = d;
+      }
+    }
+    return { landed, worst, lateral: c.body.pos.x };
+  };
+
+  const none = rollJump(0);
+  const right = rollJump(-1);
+  const left = rollJump(1);
+  console.log(`  no roll: ${none.worst.toFixed(1)}°   roll right: ${right.worst.toFixed(1)}°   roll left: ${left.worst.toFixed(1)}°`);
+
+  check("a straight jump lands dead straight", Math.abs(none.worst) < 0.5,
+    `${none.worst.toFixed(2)}°`);
+  check("rolling in the air does not swing the car on landing (was 17°)",
+    Math.abs(right.worst) < 5, `${right.worst.toFixed(1)}°`);
+  check("and it is symmetric left/right",
+    Math.abs(right.worst + left.worst) < 0.5,
+    `${right.worst.toFixed(1)}° vs ${left.worst.toFixed(1)}°`);
+  // The fix is that the arc assist STANDS DOWN while rolled — a pitch torque on
+  // a rolled body acquires a yaw component through the asymmetric inertia
+  // tensor, which no choice of torque axis avoids. (A world-Y "heading lock" was
+  // tried and removed: it fought the roll itself.)
+  check("the arc assist stands down well before the car is far from upright",
+    TIRE.airAlignMinUp >= 0.8,
+    `minUp ${TIRE.airAlignMinUp} = stands down past ${(Math.acos(TIRE.airAlignMinUp) * R2D3).toFixed(0)}° tilt`);
+
+  // The lock must be gated on yaw input, or it kills deliberate flat spins.
+  const spun = (() => {
+    const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
+    c.groundBvh = ground; c.enabled = true;
+    c.body.pos.set(0, 60, 0); c.body.vel.set(0, 3, 28); c.body.quat.identity();
+    for (let i = 0; i < 1.2 / FIXED_DT; i++) {
+      c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 1, pitch: 0 });
+    }
+    return Math.abs(headingOf(c.body.quat));
+  })();
+  check("a DELIBERATE flat spin is untouched by the lock", spun > 45,
+    `${spun.toFixed(0)}° of spin`);
+}
+
+console.log("\n=== LANDING AFTER A ROLL MUST NOT SLIDE ===");
+// The reported bug was NOT a rotation, which is why three attempts that measured
+// heading found nothing. At realistic speed the car arrives still rolled ~30°,
+// the tyres bite at an angle and shove it SIDEWAYS — up to 4.8 m of lateral
+// slide with almost no heading change. Only visible if you measure translation.
+{
+  const bigJump = (rollFor, throttle) => {
+    const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
+    c.groundBvh = ground; c.enabled = true;
+    c.body.pos.set(0, 14, 0); c.body.vel.set(0, 9, 45); c.body.quat.identity();
+    const up = new THREE.Vector3();
+    let landed = null, xAtLand = 0, tilt = 0, lateral = 0;
+    for (let i = 0; i < 6 / FIXED_DT; i++) {
+      const t = i * FIXED_DT;
+      c.tick({
+        steerTarget: (landed === null && t < rollFor) ? -1 : 0,
+        throttle, handbrake: false, yaw: 0, pitch: 0,
+      });
+      if (landed === null && c.groundedCount >= 3) {
+        landed = t; xAtLand = c.body.pos.x;
+        up.set(0, 1, 0).applyQuaternion(c.body.quat);
+        tilt = Math.acos(THREE.MathUtils.clamp(up.y, -1, 1)) * 57.2958;
+      }
+      if (landed !== null && t - landed <= 2) lateral = c.body.pos.x - xAtLand;
+    }
+    return { tilt, lateral };
+  };
+
+  let worstSlide = 0, worstTilt = 0;
+  for (const rollFor of [0, 0.3, 0.6, 1.0, 1.6]) {
+    for (const thr of [0, 1]) {
+      const r = bigJump(rollFor, thr);
+      worstSlide = Math.max(worstSlide, Math.abs(r.lateral));
+      worstTilt = Math.max(worstTilt, r.tilt);
+    }
+  }
+  console.log(`  worst lateral slide ${worstSlide.toFixed(1)} m, worst tilt at touchdown ${worstTilt.toFixed(0)}°`);
+  check("landing after a roll does not slide the car sideways (was 4.8 m)",
+    worstSlide < 1.5, `${worstSlide.toFixed(1)} m`);
+  // The slide is caused by landing rolled, so the assist must actually level it.
+  check("the landing assist levels the ROLL before touchdown (was 30°)",
+    worstTilt < 25, `${worstTilt.toFixed(0)}°`);
+  // Torque and damping are a PAIR: 5x the torque with the old damping drove a
+  // long barrel roll straight past level into a 113° spin.
+  check("landing damping is scaled to the landing torque",
+    TIRE.airLandDamp / TIRE.airLandTorque > 0.1,
+    `damp ${TIRE.airLandDamp} vs torque ${TIRE.airLandTorque}`);
+}
+
 console.log("\n=== FLIP FEEL ===");
 // "Too brutal" was measurable: at rate 3.6 / shared response 9, a 0.3 s tap of
 // Shift/Ctrl rotated 91° and a 0.5 s press 158°, so a light input on a ~1.5 s
@@ -190,8 +320,11 @@ console.log("\n=== FLIP FEEL ===");
   console.log(`  0.3s tap ${tap.toFixed(0)}°   0.5s press ${press.toFixed(0)}°   full 360 in ${full360.toFixed(2)}s`);
 
   check("a light tap is a nudge, not a quarter-flip (was 91°)", tap < 80, `${tap.toFixed(0)}°`);
+  // Slightly more than before (113° vs 89°) because the arc assist now stands
+  // down during a flip instead of quietly opposing it — which is correct: an
+  // automatic assist should not be fighting a deliberate trick.
   check("a half-second press stays well short of inverted (was 158°)",
-    press < 110, `${press.toFixed(0)}°`);
+    press < 125, `${press.toFixed(0)}°`);
   check("a 360 is still landable inside a big jump's airtime", full360 < 2.4,
     `${full360.toFixed(2)}s`);
   check("pitch is softer than roll — roll was never the complaint",
@@ -233,9 +366,12 @@ console.log("\n=== IT WORKS ACROSS THE RANGE OF JUMPS THE KIT BUILDS ===");
     const air = fly({ vy, vz }).filter((x) => x.y > 0);
     const L = air[air.length - 1];
     console.log(`  ${String(vz).padStart(2)} m/s fwd, ${String(vy).padStart(2)} up  ${L.nose.toFixed(1).padStart(9)}°     ${L.traj.toFixed(1).padStart(9)}°`);
-    if (L.nose > -0.1) ok = false; // must always end nose-down
+    // Never nose-UP, and never steeper than the arc it is following. A jump
+    // arriving on a −1.3° trajectory landing at −0.0° is CORRECT — the old
+    // "always nose-down" rule failed the flattest jumps for behaving properly.
+    if (L.nose > 0.5 || L.nose < L.traj - 1) ok = false;
   }
-  check("every jump ends nose-down, none stays flat", ok);
+  check("no jump lands nose-UP, and none lands steeper than its own arc", ok);
 }
 
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nall green");
