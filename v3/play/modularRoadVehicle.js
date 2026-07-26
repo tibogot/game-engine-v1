@@ -76,6 +76,24 @@ export const TIRE = {
   useSphereSweep: true,
   sphereSweepScale: 0.88, // × wheel radius
   suspVisSmooth: 12,
+  /**
+   * VISUAL cap on how far a wheel may hang below its hub (m). Physics is
+   * untouched — this only clamps the offset syncVisuals applies to the tyre
+   * group.
+   *
+   * It exists because `rayLength` was doing double duty. Airborne there is no
+   * hit, so the visual falls back to the full PROBE length (1.0 m) as if the
+   * suspension had extended that far — 0.64 m of droop once the wheel radius is
+   * taken off, which left the wheels dangling 0.44 m below the body. The probe
+   * has to stay long (it is what catches ground early enough not to tunnel);
+   * the suspension does NOT travel that far. Two different numbers that had
+   * been one.
+   *
+   * Static ride uses 0.137 m of this, so 0.22 leaves ~0.08 m of visible
+   * extension on a jump — about right for a race car (a road car runs
+   * 0.08–0.12 m of total travel, a GT4 nearer 0.05–0.08).
+   */
+  maxDroop: 0.22,
   restLength: 0.55,
   springStrength: 65000,
   damper: 6500,
@@ -2615,7 +2633,11 @@ export class Vehicle {
       if (t._smoothDist === undefined) t._smoothDist = targetDist;
       const k = 1 - Math.exp(-TIRE.suspVisSmooth * dt);
       t._smoothDist += (targetDist - t._smoothDist) * k;
-      const suspExt = Math.max(0, t._smoothDist - WHEEL.radius);
+      // Clamped to TIRE.maxDroop — airborne there is no hit, so _smoothDist
+      // eases to the full PROBE length and the wheel would hang far below the
+      // body. Visual only; the tyre's own physics never reads this.
+      let suspExt = Math.max(0, t._smoothDist - WHEEL.radius);
+      if (suspExt > TIRE.maxDroop) suspExt = TIRE.maxDroop;
       this._wheelOffset.copy(this._wheelUp).multiplyScalar(-suspExt);
       // Hub position recomputed from the INTERPOLATED pose (t.worldPos is the
       // tick-time position and would lag the interpolated chassis).

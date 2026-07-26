@@ -10,18 +10,51 @@ export const DEFAULT_DRIFT_SMOKE_TEXTURE = "/textures/smoke.png";
 
 export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
   enabled: true,
-  emitRate: 48,
+  emitRate: 64,
   trigger: 0.04,
-  opacity: 0.55,
-  sizeMin: 0.55,
-  sizeMax: 1.05,
-  sizeGrowth: 2.6,
-  lifeMin: 0.65,
-  lifeMax: 1.45,
+  opacity: 0.5,
+  sizeMin: 0.42,
+  sizeMax: 0.85,
+  sizeGrowth: 3.4,
+  lifeMin: 0.8,
+  lifeMax: 1.9,
   rise: 0.75,
   spread: 0.55,
   drag: 0.12,
-  color: "#6a6c76",
+  /** Legacy flat tint. Only used if colorHot/colorCool are cleared. */
+  color: "",
+
+  // ── WHAT MAKES IT READ AS SMOKE RATHER THAN GREY SPRITES ──────────────────
+  /**
+   * Tyre smoke is DENSE and dark where it leaves the contact patch, and pales
+   * as it expands and thins. A single flat tint is the main reason billboard
+   * smoke looks like confetti — the puffs never change, so the eye reads them
+   * as a repeating sprite instead of a dispersing volume.
+   */
+  colorHot: "#4a4a52",   // fresh at the contact patch
+  colorCool: "#b4b8c2",  // thinned out and drifting
+  /**
+   * Fraction of life spent fading IN. Without it every particle appears at full
+   * opacity, which pops visibly at the emitter — the single most obvious tell.
+   */
+  fadeIn: 0.15,
+  /**
+   * Swirl. Real smoke is turbulent; straight-line particles with drag look
+   * ballistic. Applied as an ACCELERATION (not a position offset) so it
+   * accumulates into curling paths instead of a uniform wobble.
+   */
+  turbulence: 1.5,
+  /** Upward acceleration over life — hot rubber smoke keeps climbing rather
+   *  than coasting to a stop under drag. */
+  buoyancy: 0.55,
+  /**
+   * Directional shading, 0..1. Each billboard gets a brightness gradient across
+   * it, aligned with the sun projected into the quad's own axes — so puffs are
+   * lit on the sun side and shaded away from it. Costs nothing (the vertex
+   * colours are already being written per corner) and is most of what separates
+   * flat sprites from something that looks lit.
+   */
+  sunTint: 0.42,
 };
 
 const POOL_SIZE = 256;
@@ -41,7 +74,19 @@ const RISE = 0.75;
 const SPREAD = 0.55;
 const SPEED_DRAG = 0.12;
 const _smokeTint = new THREE.Color();
+const _smokeHot = new THREE.Color();
+const _smokeCool = new THREE.Color();
+/** Sun direction (TOWARD the sun), fed in by the game. Identity = straight up. */
+const _smokeSun = new THREE.Vector3(0, 1, 0);
 const SMOKE_COLOR_HEX = 0x6a6c76;
+
+/** Billboard corners as two triangles. Hoisted: this used to be rebuilt inside
+ *  _writeParticle, i.e. seven array allocations per particle per frame (~1000/frame
+ *  at a full pool) for a constant. */
+const _CORNERS = [
+  [-1, -1], [1, -1], [-1, 1],
+  [1, -1], [1, 1], [-1, 1],
+];
 
 const ENTRY_SPEED = 8;
 const INTENSITY_MIN = 0.04;
@@ -127,6 +172,8 @@ export class ModularRoadDriftSmoke {
       size: 1,
       rotation: 0,
       spin: 0,
+      turbPhase: 0,
+      turbFreq: 3,
     }));
     this.emitIndex = 0;
     this.emitAccum = [0, 0];
@@ -257,12 +304,43 @@ export class ModularRoadDriftSmoke {
       if (p.life <= 0) continue;
 
       const age = 1 - p.life / p.maxLife;
+
+      // Turbulence as ACCELERATION so it integrates into a curling path. Each
+      // particle carries its own phase/frequency, otherwise the whole plume
+      // swirls in lockstep and reads as a single wobbling sheet.
+      const turb = s.turbulence ?? 0;
+      if (turb > 0) {
+        const t = (p.maxLife - p.life) * p.turbFreq + p.turbPhase;
+        p.velocity.x += Math.sin(t) * turb * dt;
+        p.velocity.z += Math.cos(t * 1.37) * turb * dt;
+        p.velocity.y += Math.sin(t * 0.73) * turb * 0.35 * dt;
+      }
+      p.velocity.y += (s.buoyancy ?? 0) * dt;
+
       p.velocity.multiplyScalar(Math.max(0, 1 - dt * 0.85));
       p.position.addScaledVector(p.velocity, dt);
       p.rotation += p.spin * dt;
 
-      const size = p.size * (1 + age * (s.sizeGrowth ?? SIZE_GROWTH));
-      const alpha = (s.opacity ?? OPACITY) * (1 - age) * (1 - age);
+      // Turbulent diffusion widens fast then slows, so growth goes as √age
+      // rather than linearly — a linear ramp makes puffs look like inflating
+      // balloons, all expanding at the same steady rate.
+      const size = p.size * (1 + Math.sqrt(age) * (s.sizeGrowth ?? SIZE_GROWTH));
+
+      // Fade IN over the first slice of life, then the quadratic fade out.
+      const fadeIn = s.fadeIn ?? 0;
+      const rampIn = fadeIn > 0 ? Math.min(1, age / fadeIn) : 1;
+      const alpha = (s.opacity ?? OPACITY) * rampIn * (1 - age) * (1 - age);
+
+      // Dense/dark fresh → pale/thin as it disperses.
+      if (s.colorHot && s.colorCool) {
+        _smokeHot.set(s.colorHot);
+        _smokeCool.set(s.colorCool);
+        _smokeTint.copy(_smokeHot).lerp(_smokeCool, Math.sqrt(age));
+      } else {
+        _smokeTint.setHex(SMOKE_COLOR_HEX);
+        if (s.color) _smokeTint.set(s.color);
+      }
+
       this._writeParticle(alive++, p.position, size, p.rotation, alpha);
     }
 
@@ -311,29 +389,38 @@ export class ModularRoadDriftSmoke {
       THREE.MathUtils.lerp(0.75, 1.25, THREE.MathUtils.clamp(intensity, 0, 1));
     p.rotation = Math.random() * Math.PI * 2;
     p.spin = (Math.random() - 0.5) * 1.7;
+    // Per-particle swirl. Without an independent phase AND frequency the whole
+    // plume oscillates together, which reads as one wobbling sheet rather than
+    // turbulence.
+    p.turbPhase = Math.random() * Math.PI * 2;
+    p.turbFreq = 2.2 + Math.random() * 3.4;
   }
 
-  _writeParticle(index, center, size, rotation, alpha) {
-    _smokeTint.setHex(SMOKE_COLOR_HEX);
-    if (this.settings.color) _smokeTint.set(this.settings.color);
+  /** Sun direction, pointing TOWARD the sun. Drives the per-billboard gradient. */
+  setSunDirection(v) {
+    if (v && v.lengthSq() > 1e-8) _smokeSun.copy(v).normalize();
+  }
 
+  /** `_smokeTint` is set by the caller (age ramp) before this runs. */
+  _writeParticle(index, center, size, rotation, alpha) {
     const half = size * 0.5;
     const cosR = Math.cos(rotation);
     const sinR = Math.sin(rotation);
     const posOffset = index * FLOATS_PER_PARTICLE;
     const colorOffset = index * COLOR_FLOATS_PER_PARTICLE;
-    const corners = [
-      [-1, -1],
-      [1, -1],
-      [-1, 1],
-      [1, -1],
-      [1, 1],
-      [-1, 1],
-    ];
+
+    // FAKE DIRECTIONAL LIGHTING. The billboard has no normals to light, but it
+    // does have two known axes — so project the sun onto them and shade ACROSS
+    // the quad. The sun-facing edge brightens, the far edge darkens, and a flat
+    // sprite starts reading as a lit volume. 0.7071 normalises the unit-square
+    // corner directions.
+    const sunTint = this.settings.sunTint ?? 0;
+    const sr = sunTint > 0 ? _smokeSun.dot(_smokeRight) * 0.7071 : 0;
+    const su = sunTint > 0 ? _smokeSun.dot(_smokeUp) * 0.7071 : 0;
 
     for (let i = 0; i < VERTS_PER_PARTICLE; i++) {
-      const x = corners[i][0];
-      const y = corners[i][1];
+      const x = _CORNERS[i][0];
+      const y = _CORNERS[i][1];
       const rx = (x * cosR - y * sinR) * half;
       const ry = (x * sinR + y * cosR) * half;
       _smokeHalfRight.copy(_smokeRight).multiplyScalar(rx);
@@ -345,10 +432,13 @@ export class ModularRoadDriftSmoke {
       this.positions[po + 1] = _smokeCorner.y;
       this.positions[po + 2] = _smokeCorner.z;
 
+      // Corner direction is the UNROTATED (x, y): the texture rotates with the
+      // quad but the lighting must stay fixed in world space.
+      const lit = 1 + sunTint * (x * sr + y * su);
       const co = colorOffset + i * 4;
-      this.colors[co] = _smokeTint.r;
-      this.colors[co + 1] = _smokeTint.g;
-      this.colors[co + 2] = _smokeTint.b;
+      this.colors[co] = _smokeTint.r * lit;
+      this.colors[co + 1] = _smokeTint.g * lit;
+      this.colors[co + 2] = _smokeTint.b * lit;
       this.colors[co + 3] = alpha;
     }
   }

@@ -266,14 +266,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Kept so the dev-panel fit sliders have something to re-transform.
   let chassisGlbObject = null;
   loadChassisModel(renderer)
-    .then(({ object, size, brakeLights, headlampLenses, meshCount, casterCount }) => {
+    .then((m) => {
+      const { object, size, brakeLights, headlampLenses, meshCount, casterCount } = m;
       chassisGlbObject = object;
       vehicle.setChassisModel(object, { brakeLights, headlampLenses });
       vehicle.setChassisStyle("glb");
       console.info(
-        `[ModularRoad-v3] GLB chassis: ${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)}m, `
-        + `${meshCount} meshes (${casterCount} cast shadows), `
-        + `${brakeLights.length} brake + ${headlampLenses.length} headlamp emissive parts`,
+        `[ModularRoad-v3] GLB chassis: ${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)}m — `
+        + `${m.loadedCount} meshes in file → ${meshCount} drawn `
+        + `(−${m.droppedInterior} cabin, merged shared materials), `
+        + `${casterCount} cast shadows ⇒ ${meshCount + casterCount * 3} draws/frame at 3 cascades`,
       );
       devPanel?.refresh();
     })
@@ -520,11 +522,17 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * don't strobe when the sun sits right on the threshold.
    */
   function updateAutoHeadlights() {
-    if (!autoHeadlights || !sunLight) return;
+    if (!sunLight) return;
     _sunDir.copy(sunLight.position);
     if (sunLight.target) _sunDir.sub(sunLight.target.position);
     if (_sunDir.lengthSq() < 1e-8) return;
     const sinElev = _sunDir.normalize().y;
+    // The same normalised vector drives the smoke's per-billboard shading, and
+    // the sun moves with time of day — so this is computed BEFORE the
+    // autoHeadlights gate. Behind it, turning auto headlights off would also
+    // freeze the smoke's lighting at whatever the sun was doing at the time.
+    driftSmoke.setSunDirection(_sunDir);
+    if (!autoHeadlights) return;
     if (!headlightsOn && sinElev < 0.10) setHeadlights(true);
     else if (headlightsOn && sinElev > 0.16) setHeadlights(false);
   }
@@ -1397,6 +1405,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // Live fit. The panel mutates CHASSIS_GLB in place (that's what slider()
       // does) and then asks for a re-transform.
       applyWheelLayout: () => vehicle.applyWheelLayout(),
+      getDriftSmokeSettings: () => driftSmoke.settings,
       getChassisFit: () => CHASSIS_GLB,
       applyChassisFit: () => applyChassisGlbTransform(chassisGlbObject),
       resetChassisFit: () => resetChassisGlbFit(chassisGlbObject),

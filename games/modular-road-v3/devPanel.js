@@ -32,6 +32,8 @@ export function createRoadDevPanel({ app, game, params }) {
   root.innerHTML = `
     <div class="tab-bar">
       <button class="tab-btn active" type="button">Dev Controls</button>
+      <button class="tab-btn dv-expand-all" type="button" title="Expand all sections">⊞</button>
+      <button class="tab-btn dv-collapse-all" type="button" title="Collapse all sections">⊟</button>
       <button class="tab-btn dv-collapse" type="button" title="Collapse">–</button>
     </div>
     <div class="tab-content active">
@@ -969,6 +971,55 @@ export function createRoadDevPanel({ app, game, params }) {
               <button class="prop-toggle checked" id="dv-smoke" type="button" aria-label="Drift smoke">${CHECK_SVG}</button>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Smoke amount</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-rate" min="8" max="140" step="2" />
+              <span class="prop-num" id="dv-smk-rate-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Smoke opacity</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-op" min="0.05" max="1" step="0.01" />
+              <span class="prop-num" id="dv-smk-op-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Smoke life</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-life" min="0.4" max="4" step="0.05" />
+              <span class="prop-num" id="dv-smk-life-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Smoke growth</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-grow" min="0.5" max="7" step="0.1" />
+              <span class="prop-num" id="dv-smk-grow-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Turbulence</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-turb" min="0" max="5" step="0.05" />
+              <span class="prop-num" id="dv-smk-turb-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Buoyancy</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-buoy" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-smk-buoy-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun shading</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-sun" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-smk-sun-v"></span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1014,10 +1065,122 @@ export function createRoadDevPanel({ app, game, params }) {
     #road-dev .dv-world-name {
       max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+    /* NESTED GROUPS. editor.css pads .section-body, so a body inside a body
+       would double-indent and eat the panel's 300px width. The group body
+       contributes no padding of its own; the children keep theirs. */
+    #road-dev .dv-group-body { padding: 0; }
+    /* The parent reads as a heading, the children as items under it. */
+    #road-dev .dv-group-header { color: var(--text); }
+    #road-dev .dv-group-body > .inspector-section > .section-header {
+      padding-left: 22px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    #road-dev .dv-group-body > .inspector-section:last-child { border-bottom: none; }
   `;
   document.head.appendChild(style);
 
   const $ = (sel) => root.querySelector(sel);
+
+  // ── FOLDABLE SECTIONS ───────────────────────────────────────────────────────
+  // 25 sections in one scroll is unusable, so every .section-header becomes a
+  // fold using the SAME mechanism as the v3 editor: `.collapsed` on the header,
+  // `.hidden` on the body that follows it. The CSS for both (including the arrow
+  // rotation) already lives in editor.css, which this panel reuses — see the
+  // module header — so nothing new is styled here.
+  //
+  // Done in JS rather than by hand-editing 25 headers in the template: the
+  // markup stays readable, and a section added later is folded automatically
+  // instead of being silently left out.
+  //
+  // State persists per section, keyed by header text, because the alternative is
+  // re-opening the same four sections after every reload while tuning.
+  // ── NESTING ─────────────────────────────────────────────────────────────────
+  // Eight "Car — …" blocks and three "Audio — …" blocks are most of the panel's
+  // length, and they are only ever opened one at a time. Each family collapses
+  // into ONE parent fold, so the top level reads as ~14 entries instead of 25.
+  //
+  // Built from the existing flat markup rather than by re-indenting the template:
+  // the prefix in the header text ("Car — Power") is already the grouping, so the
+  // markup stays flat and readable and a new "Car — …" section joins its parent
+  // automatically. Each family's sections are contiguous, so wrapping in place
+  // preserves order.
+  //
+  // Display text loses the prefix once nested (it is above them now) but the
+  // FOLD KEY keeps the full original — otherwise a bare "Power" would be one
+  // rename away from colliding with some other section's key in localStorage.
+  const GROUP_PREFIXES = ["Car", "Audio"];
+  for (const prefix of GROUP_PREFIXES) {
+    const sep = `${prefix} — `;
+    const secs = [...root.querySelectorAll(".inspector-section")].filter((s) => {
+      const h = s.querySelector(":scope > .section-header");
+      return h && h.textContent.trim().startsWith(sep);
+    });
+    if (secs.length < 2) continue;
+
+    const wrap = document.createElement("div");
+    wrap.className = "inspector-section dv-group";
+    const gh = document.createElement("div");
+    gh.className = "section-header dv-group-header";
+    gh.textContent = prefix;
+    const gb = document.createElement("div");
+    gb.className = "section-body dv-group-body";
+    wrap.append(gh, gb);
+    secs[0].parentNode.insertBefore(wrap, secs[0]);
+
+    for (const s of secs) {
+      const h = s.querySelector(":scope > .section-header");
+      const full = h.textContent.trim();
+      h.dataset.foldKey = full;              // stable across the rename
+      h.textContent = full.slice(sep.length);
+      gb.appendChild(s);                     // moves it out of the flat list
+    }
+  }
+
+  const FOLD_KEY = "modular-road-v3.devPanel.folds";
+  /** Open on a fresh profile. Everything else — the ten "Car — …" tuning blocks
+   *  especially — starts folded so the panel opens as an index, not a wall. */
+  const DEFAULT_OPEN = new Set(["World", "Mode", "Track"]);
+  const ARROW_SVG =
+    '<svg class="section-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    + ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+    + '<polyline points="6 9 12 15 18 9"></polyline></svg>';
+
+  let folds = {};
+  try { folds = JSON.parse(localStorage.getItem(FOLD_KEY) || "{}") || {}; } catch { folds = {}; }
+  const saveFolds = () => {
+    try { localStorage.setItem(FOLD_KEY, JSON.stringify(folds)); } catch { /* private mode */ }
+  };
+
+  const sections = [];
+  for (const hdr of root.querySelectorAll(".section-header")) {
+    // Nested headers carry their original full text as the key (see NESTING).
+    const key = hdr.dataset.foldKey || hdr.textContent.trim(); // BEFORE the arrow goes in
+    const body = hdr.nextElementSibling;
+    if (!body || !body.classList.contains("section-body")) continue;
+    hdr.setAttribute("data-toggle", "");
+    hdr.insertAdjacentHTML("afterbegin", ARROW_SVG);
+
+    const setOpen = (open) => {
+      hdr.classList.toggle("collapsed", !open);
+      body.classList.toggle("hidden", !open);
+    };
+    setOpen(folds[key] ?? DEFAULT_OPEN.has(key));
+    hdr.addEventListener("click", () => {
+      const open = hdr.classList.contains("collapsed"); // about to open
+      setOpen(open);
+      folds[key] = open;
+      saveFolds();
+    });
+    sections.push({ key, setOpen });
+  }
+
+  const setAllFolds = (open) => {
+    for (const s of sections) { s.setOpen(open); folds[s.key] = open; }
+    saveFolds();
+  };
+  $(".dv-expand-all")?.addEventListener("click", () => setAllFolds(true));
+  $(".dv-collapse-all")?.addEventListener("click", () => setAllFolds(false));
 
   // ── Collapse ────────────────────────────────────────────────────────────────
   const collapseBtn = $(".dv-collapse");
@@ -1400,6 +1563,19 @@ export function createRoadDevPanel({ app, game, params }) {
   skidBtn?.addEventListener("click", () => { game.toggleSkidStyle?.(); syncSkidBtn(); });
   syncSkidBtn();
   toggle("dv-smoke", true, (on) => game.setDriftSmokeEnabled(on));
+  // Smoke look.  is driven directly and lifeMin follows at 45% of it —
+  // two independent life sliders is a fiddly way to say "longer plume".
+  const smk = game.getDriftSmokeSettings?.();
+  if (smk) {
+    slider("dv-smk-rate", smk, "emitRate", (v) => v.toFixed(0));
+    slider("dv-smk-op", smk, "opacity");
+    slider("dv-smk-life", smk, "lifeMax", (v) => v.toFixed(2) + "s",
+      (v) => { smk.lifeMin = v * 0.45; });
+    slider("dv-smk-grow", smk, "sizeGrowth");
+    slider("dv-smk-turb", smk, "turbulence");
+    slider("dv-smk-buoy", smk, "buoyancy");
+    slider("dv-smk-sun", smk, "sunTint");
+  }
 
   // ── Live readouts ───────────────────────────────────────────────────────────
   const piecesEl = $("#dv-pieces");

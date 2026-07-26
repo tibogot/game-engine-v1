@@ -32,7 +32,8 @@ writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "ut
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};")
   .replace(/THREE\.(Mesh\w+?)NodeMaterial/g, "THREE.$1Material"));
-const { Vehicle, CHASSIS, HEADLIGHTS, TAILLIGHTS, CHASSIS_GLB_LIGHTS } =
+const TMP2 = TMP;
+const { Vehicle, CHASSIS, HEADLIGHTS, TAILLIGHTS, CHASSIS_GLB_LIGHTS, TIRE, WHEEL, WHEEL_LOCAL } =
   await import(pathToFileURL(TMP).href);
 unlinkSync(TMP);
 
@@ -200,6 +201,90 @@ console.log("\n=== RIDE-HEIGHT FIT (CHASSIS_GLB.offsetY) ===");
   check("offsetY matches the measured settled ride height (model would float/sink otherwise)",
     Math.abs(offsetY + settled) < 0.01, `off by ${Math.abs(offsetY + settled).toFixed(4)} m`);
   check("scale is 1.0 — the model is authored at real-world size", scale === 1);
+}
+
+console.log("\n=== WHEEL DROOP (TIRE.maxDroop) ===");
+// Airborne there is no ground hit, so the visual suspension eases to the full
+// PROBE length and the wheels hang far below the body. maxDroop clamps that, and
+// it is squeezed between two limits that are easy to cross without noticing:
+//   too LOW  → the wheels are pulled up into the bodywork while simply parked
+//   too HIGH → it stops clamping and the droop bug is back
+{
+  const c = mkCar();
+  c.body.pos.set(0, 1.2, 0); c.body.quat.identity();
+  for (let i = 0; i < 600; i++) c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0, pitch: 0 });
+  // Ground sits at chassis-local -settled; a planted wheel centre is radius above it.
+  const staticDroop = WHEEL_LOCAL[0].pos.y - (-c.body.pos.y + WHEEL.radius);
+  const airborneDroop = TIRE.rayLength - WHEEL.radius; // what it would be, unclamped
+
+  console.log(`  parked droop      ${staticDroop.toFixed(3)} m`);
+  console.log(`  unclamped airborne ${airborneDroop.toFixed(3)} m   → clamped to ${TIRE.maxDroop}`);
+  console.log(`  visible travel on a jump ${(TIRE.maxDroop - staticDroop).toFixed(3)} m`);
+
+  check("maxDroop actually clamps (below the unclamped airborne value)",
+    TIRE.maxDroop < airborneDroop, `${TIRE.maxDroop} < ${airborneDroop.toFixed(3)}`);
+  check("maxDroop clears the parked droop — parked wheels must not be pulled up",
+    TIRE.maxDroop > staticDroop, `${TIRE.maxDroop} > ${staticDroop.toFixed(3)}`);
+  check("leaves visible suspension travel (a rigid car reads as broken too)",
+    TIRE.maxDroop - staticDroop > 0.03, `${(TIRE.maxDroop - staticDroop).toFixed(3)} m`);
+  check("travel stays in the plausible range for a race car (< 0.15 m)",
+    TIRE.maxDroop - staticDroop < 0.15);
+}
+
+console.log("\n=== DRAW-CALL BUDGET (classification vs the real GLB) ===");
+// The loader can't run here (Draco + KTX2 + a GPU), but its CLASSIFICATION is
+// just regexes over node/material names — and that is exactly the part that
+// silently rots when a model is re-exported with different node names. So the
+// GLB's JSON chunk is parsed directly and the loader's OWN regexes (pulled from
+// its source, not copied) are run against it.
+{
+  const src = readFileSync(join(ROOT, "games/modular-road-v3/chassisModel.js"), "utf8");
+  const reOf = (name) => {
+    const m = new RegExp(`const ${name} = (/[^\\n]*?/[gimsuy]*);`).exec(src);
+    return m ? new RegExp(m[1].slice(1, m[1].lastIndexOf("/")), m[1].slice(m[1].lastIndexOf("/") + 1)) : null;
+  };
+  const RE = {
+    interior: reOf("RE_INTERIOR"), lens: reOf("RE_HEADLIGHT_LENS"),
+    emissive: reOf("RE_EMISSIVE"), glass: reOf("RE_GLASS"), sil: reOf("RE_SILHOUETTE"),
+  };
+  check("all five classification regexes found in the loader source",
+    Object.values(RE).every(Boolean));
+
+  const buf = readFileSync(join(ROOT, "public/models/chassis_compressed.glb"));
+  const gltf = JSON.parse(buf.toString("utf8", 20, 20 + buf.readUInt32LE(12)));
+  const meshes = gltf.nodes.filter((n) => n.mesh != null).map((n) => ({
+    name: n.name,
+    mat: gltf.materials[gltf.meshes[n.mesh].primitives[0].material]?.name ?? "",
+  }));
+  const tag = (m) => `${m.name} ${m.mat}`;
+
+  const interior = meshes.filter((m) => RE.interior.test(m.name));
+  const lenses = meshes.filter((m) => !RE.interior.test(m.name) && RE.lens.test(m.name));
+  const emissive = meshes.filter((m) => !RE.interior.test(m.name) && !RE.lens.test(m.name) && RE.emissive.test(tag(m)));
+  const glass = meshes.filter((m) => !RE.interior.test(m.name) && !RE.lens.test(m.name)
+    && !RE.emissive.test(tag(m)) && RE.glass.test(tag(m)));
+  const casters = meshes.filter((m) => RE.sil.test(tag(m)));
+
+  console.log(`  file has ${meshes.length} meshes: ${interior.length} cabin, ${glass.length} glass, `
+    + `${lenses.length} lens, ${emissive.length} emissive, ${casters.length} silhouette`);
+
+  check("cabin regex catches exactly the 6 interior meshes", interior.length === 6,
+    interior.map((m) => m.name.replace(/^emira_gt4(_int)?LOD_A_/, "").slice(0, 18)).join(", "));
+  check("no EXTERIOR mesh is misread as cabin (would delete visible bodywork)",
+    !interior.some((m) => /^emira_gt4LOD_A_(BODY|GLASS|HEADLIGHT|BRAKES)/.test(m.name)));
+  check("both headlight lenses are found", lenses.length === 2);
+  check("the tail-light mesh is found", emissive.length === 1);
+  check("four windows left to merge", glass.length === 4);
+  check("exactly 2 shadow casters — the outer body and the aero", casters.length === 2,
+    casters.map((m) => m.mat).join(", "));
+
+  // 4 windows → 1 draw, 2 lenses → 1 draw.
+  const drawn = meshes.length - interior.length - (glass.length - 1) - (lenses.length - 1);
+  const before = meshes.length + 2 * 3;
+  const after = drawn + casters.length * 3;
+  console.log(`  draws/frame at 3 cascades:  ${before} → ${after}   (procedural box = 4)`);
+  check("the optimisation actually removes draw calls", after < before, `${before} → ${after}`);
+  check("drawn meshes account for every kept part", drawn === 8, `${drawn}`);
 }
 
 console.log("\n=== DEV-PANEL FIT SLIDERS ===");
