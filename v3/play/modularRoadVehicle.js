@@ -625,6 +625,15 @@ export const WALL = {
  * cannot launch; and because the skin is thin, the collider matches the car.
  */
 export const SOLID = {
+  /**
+   * Seconds a solid contact is held for the RENDER layer (see
+   * Vehicle._updateScrapeLatch). Physics ticks at 120 Hz and projection response
+   * clears the penetration immediately, so a continuous rail scrape is really an
+   * on/off flicker at tick rate — a 60 Hz frame samples it and mostly sees
+   * nothing. 0.12 s bridges the flicker (~7 frames) without the shower lingering
+   * after the car has left the rail.
+   */
+  scrapeHold: 0.12,
   enabled: true,
   /** Contact skin (m). This IS the collider inflation — keep it small. */
   skin: 0.08,
@@ -1175,6 +1184,7 @@ export class Vehicle {
     this._chassisStyle = "procedural";
     this._chassisGlb = null;
     this._chassisGlbParts = null;
+    this._headlampMounts = null;
 
     this._buildHeadlights();
     this._buildTaillights();
@@ -1432,9 +1442,30 @@ export class Vehicle {
     this.applyHeadlightParams();
   }
 
+  /**
+   * Lamp mount points in CHASSIS-ANCHOR space, taken from the GLB's own
+   * HEADLIGHT_LENS nodes. Ordered −X first, to match headlights[0].
+   *
+   * HEADLIGHTS.side/height/forward were measured against the PROCEDURAL BOX and
+   * are wrong for the car by 23 cm inboard and 17 cm back — the beams appear to
+   * come out of the bonnet rather than the lamps. Rather than hand-tuning three
+   * more constants that would go stale the moment the model changes, the model
+   * says where its own lamps are.
+   *
+   * Pass null to fall back to the constants (which is right for the box).
+   */
+  setHeadlampMounts(mounts) {
+    this._headlampMounts = Array.isArray(mounts) && mounts.length >= 2
+      ? [...mounts].sort((a, b) => a.x - b.x)
+      : null;
+    this.applyHeadlightParams();
+  }
+
   /** Re-sync the headlight rig after editing HEADLIGHTS params live. */
   applyHeadlightParams() {
     const H = HEADLIGHTS;
+    // Only the GLB has real lamps to sit in; the box gets the tuned constants.
+    const mounts = this._chassisStyle === "glb" ? this._headlampMounts : null;
     for (let i = 0; i < this.headlights.length; i++) {
       const s = i === 0 ? -1 : 1;
       const l = this.headlights[i];
@@ -1445,8 +1476,11 @@ export class Vehicle {
       l.penumbra = H.penumbra;
       l.decay = H.decay;
       l.visible = H.enabled;
-      l.position.set(s * H.side, H.height, H.forward);
-      this.headlightTargets[i].position.set(s * H.side, H.height - H.aimDrop, H.forward + H.aimForward);
+      const mx = mounts ? mounts[i].x : s * H.side;
+      const my = mounts ? mounts[i].y : H.height;
+      const mz = mounts ? mounts[i].z : H.forward;
+      l.position.set(mx, my, mz);
+      this.headlightTargets[i].position.set(mx, my - H.aimDrop, mz + H.aimForward);
     }
     for (let i = 0; i < this.headlamps.length; i++) {
       const s = i === 0 ? -1 : 1;
@@ -1593,6 +1627,8 @@ export class Vehicle {
     // the road, which no amount of emissive geometry does.
     for (const m of this.taillights) if (useGlb) m.visible = false;
     for (const m of this.headlamps) m.visible = useGlb ? false : HEADLIGHTS.enabled;
+    // The mounts only apply in glb style, so the beams have to be re-placed.
+    this.applyHeadlightParams();
   }
 
   _initScratch() {
@@ -1647,6 +1683,12 @@ export class Vehicle {
     this._stuckTime = 0;
     this._stuckNudged = false;
     this._solidTouch = false;
+    // Render-layer contact latch — see _updateScrapeLatch.
+    this._scrapeHold = 0;
+    this._scrapeSpeed = 0;
+    this._scrapePoint = new THREE.Vector3();
+    this._scrapeNormal = new THREE.Vector3(0, 1, 0);
+    this._scrapeVel = new THREE.Vector3();
     this._solidR = new THREE.Vector3();
     this._solidTorque = new THREE.Vector3();
     this._steerRateFwd = new THREE.Vector3();
@@ -1874,9 +1916,47 @@ export class Vehicle {
     this.input.pitch = controls.pitch ?? 0; // air pitch — its own key, not throttle
 
     this._solidTouch = false; // set by _resolveSolidBvh during the step
+    this._solidImpactSpeed = 0;
     this._physicsStep(FIXED_DT);
     this._depenetrateFromWalls();
     this._updateStuck();
+    this._updateScrapeLatch();
+  }
+
+  /**
+   * Latch solid contact for the RENDER layer.
+   *
+   * `_solidTouch` is a per-TICK flag, and two things conspire to hide it from
+   * anything sampling at frame rate:
+   *
+   *   • Physics runs at 120 Hz and rendering at 60, so a frame sees only the
+   *     LAST of two ticks — contact on the first is invisible.
+   *   • Solid response is PROJECTION-based: it pushes the car out, so the very
+   *     next tick usually is NOT penetrating. A continuous scrape along a rail
+   *     is therefore an on/off flicker at tick rate, not a steady signal.
+   *
+   * Together those made guardrail sparks fire on a small fraction of the ticks
+   * where the car was actually rubbing. The latch holds the contact for
+   * `SOLID.scrapeHold` so a flickering contact reads as the continuous scrape it
+   * physically is — while still ending promptly once the car leaves the rail.
+   *
+   * `_solidTouch` itself is deliberately left raw: the stuck detector wants the
+   * instantaneous truth, not a smoothed one.
+   */
+  _updateScrapeLatch() {
+    if (this._solidTouch) {
+      this._scrapeHold = SOLID.scrapeHold;
+      this._scrapePoint.copy(this._solidPoint);
+      this._scrapeNormal.copy(this._solidN);
+      // TANGENTIAL speed — sliding ALONG the rail is what throws sparks, and a
+      // head-on nudge (all velocity along the normal) should throw almost none.
+      this._scrapeVel.copy(this.body.vel);
+      this._scrapeVel.addScaledVector(this._scrapeNormal, -this._scrapeVel.dot(this._scrapeNormal));
+      this._scrapeSpeed = Math.max(this._scrapeVel.length(), this._solidImpactSpeed);
+    } else if (this._scrapeHold > 0) {
+      this._scrapeHold -= FIXED_DT;
+      if (this._scrapeHold <= 0) { this._scrapeHold = 0; this._scrapeSpeed = 0; }
+    }
   }
 
   /**
@@ -1931,6 +2011,27 @@ export class Vehicle {
    *  Drift scoring breaks a chain on contact — that risk is what makes holding
    *  a long chain worth anything. */
   get hitSolid() { return this._solidTouch; }
+  /** World-space contact point of the last solid hit (guardrail, tunnel wall).
+   *  Only meaningful while  is true. */
+  get solidPoint() { return this._solidPoint; }
+
+  // ── LATCHED contact, for anything sampling at RENDER rate ───────────────────
+  // Use THESE from visuals/audio, not the raw solid* above. The raw flag is a
+  // per-tick pulse: physics runs at 120 Hz, rendering at 60, and projection
+  // response clears the penetration immediately — so a continuous rail scrape is
+  // an on/off flicker that a frame-rate sample mostly misses entirely.
+  // See _updateScrapeLatch for the measurements.
+  /** True while the car is rubbing a solid, held across the tick flicker. */
+  get scraping() { return this._scrapeHold > 0; }
+  get scrapePoint() { return this._scrapePoint; }
+  get scrapeNormal() { return this._scrapeNormal; }
+  /** Speed ALONG the surface — what actually throws sparks. */
+  get scrapeSpeed() { return this._scrapeSpeed; }
+  /** Outward surface normal at that contact. */
+  get solidNormal() { return this._solidN; }
+  /** Speed the chassis was closing on the surface at, m/s. Drives spark volume —
+   *  a scrape and a slam must not look the same. */
+  get solidImpactSpeed() { return this._solidImpactSpeed; }
 
   /**
    * Advance the steering input toward `target`, at a rate chosen by what the
@@ -2603,6 +2704,13 @@ export class Vehicle {
     // leave the car free to drive itself out.
     if (this._solidN.lengthSq() < 1e-10) return;
     this._solidN.normalize();
+
+    // Sampled AFTER the normal is resolved and normalised, but BEFORE the push
+    // below cancels the inward velocity — a frame later it always reads ~0.
+    // Sparks need the difference between a graze and a slam.
+    this._solidImpactSpeed = Math.max(
+      this._solidImpactSpeed, -body.vel.dot(this._solidN),
+    );
 
     // 1) POSITIONAL — move out of the surface. No force, so no stored energy.
     body.pos.addScaledVector(this._solidN, deepest * SOLID.push);

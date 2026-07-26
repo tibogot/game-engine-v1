@@ -287,6 +287,66 @@ console.log("\n=== DRAW-CALL BUDGET (classification vs the real GLB) ===");
   check("drawn meshes account for every kept part", drawn === 8, `${drawn}`);
 }
 
+console.log("\n=== MERGE SAFETY (KHR_mesh_quantization) ===");
+// This shipped broken and spammed the console every frame:
+//   "Vertex buffer arrayStride (6) is not a multiple of 4 ... renderPipeline_mm_windows"
+// The GLB stores POSITION as NORMALIZED INT16, so 3 components is a 6-byte
+// stride and WebGPU rejects it. The unmerged meshes are fine — three pads them
+// on upload — but a geometry we hand-build to mergeGeometries gets no such help.
+//
+// The same fix covers a second, quieter bug: applying the node matrix BEFORE
+// dequantizing writes world-space metres into an int16 normalised to [-1,1].
+{
+  const { mergeGeometries } = await import("three/addons/utils/BufferGeometryUtils.js");
+  const src = readFileSync(join(ROOT, "games/modular-road-v3/chassisModel.js"), "utf8");
+  check("loader dequantizes before baking the node matrix (order matters)",
+    src.indexOf("dequantizeGeometry(g)") < src.indexOf("g.applyMatrix4"),
+    "dequantizeGeometry must come first");
+
+  const quantized = () => {
+    const g = new THREE.BufferGeometry();
+    const q = (v) => Math.round(v * 32767);
+    const a = new THREE.BufferAttribute(
+      new Int16Array([q(-0.5), 0, 0, q(0.5), 0, 0, 0, q(0.5), 0]), 3,
+    );
+    a.normalized = true;
+    g.setAttribute("position", a);
+    g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 0, 1]), 2));
+    return g;
+  };
+  const dequantize = (g) => {
+    for (const name of Object.keys(g.attributes)) {
+      const a = g.attributes[name];
+      if (a.array instanceof Float32Array && !a.normalized) continue;
+      const out = new Float32Array(a.count * a.itemSize);
+      for (let i = 0; i < a.count; i++) {
+        for (let c = 0; c < a.itemSize; c++) out[i * a.itemSize + c] = a.getComponent(i, c);
+      }
+      g.setAttribute(name, new THREE.BufferAttribute(out, a.itemSize));
+    }
+  };
+  const stride = (a) => a.itemSize * a.array.BYTES_PER_ELEMENT;
+
+  check("raw quantized POSITION really does have an illegal stride",
+    stride(quantized().attributes.position) % 4 === 2, "6 bytes — the reported error");
+
+  const geos = [0, 1, 2, 3].map((i) => {
+    const g = quantized();
+    dequantize(g);
+    g.applyMatrix4(new THREE.Matrix4().makeTranslation(i, 0, 2.07));
+    return g;
+  });
+  const merged = mergeGeometries(geos, false);
+  check("dequantized geometries merge without returning null", !!merged);
+  check("merged vertex count is the sum of the inputs", merged?.attributes.position.count === 12);
+  check("EVERY merged attribute has a WebGPU-legal stride (multiple of 4)",
+    !!merged && Object.values(merged.attributes).every((a) => stride(a) % 4 === 0),
+    merged ? Object.entries(merged.attributes).map(([k, a]) => `${k}:${stride(a)}`).join(" ") : "");
+  check("the node transform survives dequantization intact",
+    !!merged && Math.abs(merged.attributes.position.getZ(0) - 2.07) < 1e-3,
+    `z0 = ${merged?.attributes.position.getZ(0).toFixed(3)}`);
+}
+
 console.log("\n=== DEV-PANEL FIT SLIDERS ===");
 // A range that does not contain its own default is a silent bug: the input
 // clamps on init, the first paint moves the model, and nothing reports it.

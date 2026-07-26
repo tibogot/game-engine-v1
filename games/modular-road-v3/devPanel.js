@@ -979,6 +979,39 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Stochastic tiling</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-stoch" type="button">Off</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Guardrail sparks</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-sparks" type="button" aria-label="Guardrail sparks">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spark rate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spk-rate" min="0" max="400" step="10" />
+              <span class="prop-num" id="dv-spk-rate-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spark brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spk-int" min="0.5" max="8" step="0.1" />
+              <span class="prop-num" id="dv-spk-int-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spark stretch</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spk-str" min="0" max="0.2" step="0.005" />
+              <span class="prop-num" id="dv-spk-str-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Smoke amount</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-rate" min="8" max="140" step="2" />
@@ -1575,6 +1608,30 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-smoke", true, (on) => game.setDriftSmokeEnabled(on));
   // Smoke look.  is driven directly and lifeMin follows at 45% of it —
   // two independent life sliders is a fiddly way to say "longer plume".
+  // Stochastic terrain tiling. road.html defaults it OFF before the engine
+  // loads; this is the way back. It costs ~5ms of GPU (35 texture fetches per
+  // terrain pixel vs 14) to hide texture repetition. The shader graph is built
+  // at module load, so flipping it RELOADS the page — hence a button, not a
+  // toggle switch that would appear to do nothing.
+  const stochBtn = $("#dv-stoch");
+  if (stochBtn) {
+    const stochOn = () => localStorage.getItem("terrain_stochastic") !== "false";
+    stochBtn.textContent = stochOn() ? "On (~5ms)" : "Off";
+    stochBtn.classList.toggle("primary", stochOn());
+    stochBtn.title = "Hides terrain texture repetition. Costs ~5ms GPU. Reloads the page.";
+    stochBtn.addEventListener("click", () => {
+      localStorage.setItem("terrain_stochastic", stochOn() ? "false" : "true");
+      location.reload();
+    });
+  }
+
+  const spk = game.getSparkSettings?.();
+  if (spk) {
+    toggle("dv-sparks", spk.enabled !== false, (on) => { spk.enabled = on; });
+    slider("dv-spk-rate", spk, "emitRate", (v) => v.toFixed(0));
+    slider("dv-spk-int", spk, "intensity");
+    slider("dv-spk-str", spk, "stretch", (v) => v.toFixed(3));
+  }
   const smk = game.getDriftSmokeSettings?.();
   if (smk) {
     slider("dv-smk-rate", smk, "emitRate", (v) => v.toFixed(0));

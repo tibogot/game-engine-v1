@@ -113,6 +113,24 @@ const RE_SILHOUETTE = /mm_ext|misc/i;
 const label = (o) => `${o.name ?? ""} ${o.material?.name ?? ""}`;
 
 /**
+ * Rewrite every attribute as plain Float32, in place.
+ *
+ * `getComponent` denormalises for us, so this handles the KHR_mesh_quantization
+ * int8/int16 encodings without needing to know which one a given attribute used.
+ */
+function dequantizeGeometry(g) {
+  for (const name of Object.keys(g.attributes)) {
+    const a = g.attributes[name];
+    if (a.array instanceof Float32Array && !a.normalized) continue;
+    const out = new Float32Array(a.count * a.itemSize);
+    for (let i = 0; i < a.count; i++) {
+      for (let c = 0; c < a.itemSize; c++) out[i * a.itemSize + c] = a.getComponent(i, c);
+    }
+    g.setAttribute(name, new THREE.BufferAttribute(out, a.itemSize));
+  }
+}
+
+/**
  * Collapse several meshes that share a material into one draw.
  *
  * mergeGeometries returns NULL — silently, no throw — when the inputs disagree
@@ -129,6 +147,20 @@ function mergeMeshes(meshes, root, name) {
   const inv = _m4a.copy(root.matrixWorld).invert();
   const geos = meshes.map((m) => {
     const g = m.geometry.clone();
+    // DEQUANTIZE FIRST — this file is KHR_mesh_quantization, so POSITION arrives
+    // as NORMALIZED INT16. Two things break if it is merged as-is:
+    //
+    //   • 3 × int16 is a 6-byte arrayStride, and WebGPU requires a multiple of
+    //     4 — the pipeline fails to create, every frame, forever:
+    //     "Vertex buffer arrayStride (6) is not a multiple of 4".
+    //     The UNMERGED meshes are fine because three pads them on upload; a
+    //     geometry we hand-build gets no such help.
+    //   • applyMatrix4 below would write world-space metres back into an int16
+    //     normalised to [-1,1], which quantises the car into confetti.
+    //
+    // Float32 also makes the stride check unconditional: 4 × itemSize is always
+    // a multiple of 4.
+    dequantizeGeometry(g);
     g.applyMatrix4(_m4b.multiplyMatrices(inv, m.matrixWorld)); // bake to root space
     return g;
   });
@@ -302,7 +334,17 @@ export async function loadChassisModel(renderer, url = CHASSIS_GLB_URL) {
     for (const o of interior) { o.removeFromParent(); o.geometry.dispose(); }
   }
 
-  // ── 3. MERGE WHAT SHARES A MATERIAL ─────────────────────────────────────────
+  // ── 3. LAMP MOUNTS — BEFORE MERGING ─────────────────────────────────────────
+  // The two lenses collapse into one mesh below, so their individual centres
+  // have to be read now. Root-space: the caller re-derives anchor-space from the
+  // CURRENT CHASSIS_GLB fit, so nudging the fit sliders moves the beams with the
+  // bodywork instead of leaving them behind.
+  object.updateMatrixWorld(true);
+  const _c = new THREE.Box3();
+  const headlampMountsLocal = headlampLenses.map((m) =>
+    root.worldToLocal(_c.setFromObject(m).getCenter(new THREE.Vector3())));
+
+  // ── 4. MERGE WHAT SHARES A MATERIAL ─────────────────────────────────────────
   // The windows are one material across four meshes. The two lenses share it too
   // but are driven as lights, so they merge into their OWN mesh rather than
   // joining the glass — they are always lit together, so one draw covers both.
@@ -318,7 +360,7 @@ export async function loadChassisModel(renderer, url = CHASSIS_GLB_URL) {
   root.traverse((o) => { if (o.isMesh) { meshCount++; if (o.castShadow) casterCount++; } });
 
   return {
-    object, size, brakeLights, headlampLenses, meshCount, casterCount,
+    object, size, brakeLights, headlampLenses, meshCount, casterCount, headlampMountsLocal,
     loadedCount, droppedInterior: CHASSIS_GLB.showInterior ? 0 : interior.length,
   };
 }
@@ -331,6 +373,13 @@ export function applyChassisGlbTransform(object) {
   if (!object) return;
   object.scale.setScalar(CHASSIS_GLB.scale);
   object.position.set(CHASSIS_GLB.offsetX, CHASSIS_GLB.offsetY, CHASSIS_GLB.offsetZ);
+}
+
+/** Root-space lamp centres → chassis-anchor space under the CURRENT fit. */
+export function chassisGlbMounts(local) {
+  return (local ?? []).map((p) => p.clone()
+    .multiplyScalar(CHASSIS_GLB.scale)
+    .add(new THREE.Vector3(CHASSIS_GLB.offsetX, CHASSIS_GLB.offsetY, CHASSIS_GLB.offsetZ)));
 }
 
 /** Restore the shipped fit. Returns CHASSIS_GLB so callers can re-read sliders. */

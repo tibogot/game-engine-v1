@@ -318,7 +318,26 @@
         if (!appEl) throw new Error("Could not find #app in v3/editor.html");
         document.body.insertBefore(document.importNode(appEl, true), boot);
 
-        // 2) Boot the game. Relative specifier: ES imports resolve against this
+        // 2) STOCHASTIC TILING DEFAULT — must be set BEFORE roadGame.js is
+        //    imported. v2/core/legacy/stochasticTex.js reads this ONCE at module
+        //    load and builds the terrain node graph from it, so setting it later
+        //    does nothing until a reload.
+        //
+        //    Measured on this project: ON makes the terrain sample 35 textures
+        //    per pixel instead of 14 (7 layers x 4 stochastic taps + ORM) and
+        //    costs ~5 ms of GPU per frame — a third of the frame, on a scene
+        //    that is fill-rate bound. It exists to hide texture repetition,
+        //    which barely matters on a stunt track that is mostly sky and road.
+        //
+        //    NOT stored in the .v3proj — it is a per-browser preference, so
+        //    without this the game's performance depended on whatever the last
+        //    person happened to leave in localStorage. Applied only when UNSET,
+        //    so an explicit choice either way still wins.
+        if (localStorage.getItem("terrain_stochastic") === null) {
+          localStorage.setItem("terrain_stochastic", "false");
+        }
+
+        // 3) Boot the game. Relative specifier: ES imports resolve against this
         //    module's URL (not <base>), and Vite code-splits it at build time.
         const { startRoadGame } = await import("./roadGame.js");
         await startRoadGame({ onStatus: (s) => (msg.textContent = s) });

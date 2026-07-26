@@ -10,7 +10,9 @@ import { decodeProjectFile, isProjectFile } from "../../v3/io/projectIO.js";
 import { saveTerrainConfig, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../../v3/terrain/heightmapTexture.js";
 import { stashPendingHeightmap } from "../../v3/io/pendingLoad.js";
 
-export const DEFAULT_WORLD_URL = "/games/modular-road-v3/world.v3proj";
+/** Flat empty terrain — a stunt track supplies its own scenery, so the world
+ *  under it only has to exist and not get in the way. */
+export const DEFAULT_WORLD_URL = "/games/modular-road-v3/stunt.v3proj";
 
 const PENDING_KEY = "modular-road-v3.pendingWorld";
 const LOG = "[ModularRoad-v3]";

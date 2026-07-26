@@ -86,8 +86,9 @@ import { createGearbox, GEARBOX } from "./gearbox.js";
 import { createDriftScore, DRIFT_SCORE } from "./driftScore.js";
 import { loadWheelModel } from "./wheelModel.js";
 import {
-  loadChassisModel, CHASSIS_GLB, applyChassisGlbTransform, resetChassisGlbFit,
+  loadChassisModel, CHASSIS_GLB, applyChassisGlbTransform, resetChassisGlbFit, chassisGlbMounts,
 } from "./chassisModel.js";
+import { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } from "./modularRoadSparks.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
 
@@ -265,10 +266,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // handling is identical in both styles.
   // Kept so the dev-panel fit sliders have something to re-transform.
   let chassisGlbObject = null;
+  let chassisLampsLocal = null;
   loadChassisModel(renderer)
     .then((m) => {
       const { object, size, brakeLights, headlampLenses, meshCount, casterCount } = m;
       chassisGlbObject = object;
+      chassisLampsLocal = m.headlampMountsLocal;
+      vehicle.setHeadlampMounts(chassisGlbMounts(chassisLampsLocal));
       vehicle.setChassisModel(object, { brakeLights, headlampLenses });
       vehicle.setChassisStyle("glb");
       console.info(
@@ -473,6 +477,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // 4b) ── DRIVING FX + AUDIO ────────────────────────────────────────────────
   const tireMarks = new ModularRoadTireMarks(scene);
   const driftSmoke = new ModularRoadDriftSmoke(scene, { ...DEFAULT_DRIFT_SMOKE_SETTINGS });
+  const sparks = new ModularRoadSparks(scene, { ...DEFAULT_SPARK_SETTINGS });
 
   // DEFAULT_MIXER starts muted (muteAll: true) — the lab exposes a mixer panel to
   // unmute. There's no such panel here yet, so start audible; browsers still
@@ -656,7 +661,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     _respawnPos.copy(lastSafePos); _respawnPos.y += 0.5; // small lift so wheels clear
     vehicle.setSpawn(_respawnPos, lastSafeQuat);
     vehicle.respawn();
-    chase.reset(); tireMarks.reset(); driftSmoke.reset();
+    chase.reset(); tireMarks.reset(); driftSmoke.reset(); sparks.reset();
     simAccum = 0;
   }
 
@@ -1188,6 +1193,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // the map from wherever the car was to where it just teleported.
     tireMarks.reset();
     driftSmoke.reset();
+    sparks.reset();
     simAccum = 0;
   }
 
@@ -1406,9 +1412,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // does) and then asks for a re-transform.
       applyWheelLayout: () => vehicle.applyWheelLayout(),
       getDriftSmokeSettings: () => driftSmoke.settings,
+      getSparkSettings: () => sparks.settings,
       getChassisFit: () => CHASSIS_GLB,
-      applyChassisFit: () => applyChassisGlbTransform(chassisGlbObject),
-      resetChassisFit: () => resetChassisGlbFit(chassisGlbObject),
+      applyChassisFit: () => {
+        applyChassisGlbTransform(chassisGlbObject);
+        // Beams live on the anchor, not the model, so they need re-deriving.
+        vehicle.setHeadlampMounts(chassisGlbMounts(chassisLampsLocal));
+      },
+      resetChassisFit: () => {
+        const r = resetChassisGlbFit(chassisGlbObject);
+        vehicle.setHeadlampMounts(chassisGlbMounts(chassisLampsLocal));
+        return r;
+      },
       hasWheelModel: () => vehicle.hasWheelModel,
       setInstancing: (on) => builder.setInstancing(on),
       // Piece editing (also on right-click select + W/E/L/Del/Enter/I).
@@ -1582,6 +1597,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // they must not affect the deterministic outcome.
       tireMarks.update(vehicle);
       driftSmoke.updateFromVehicle(vehicle, camera, dt, keys);
+      sparks.updateFromVehicle(vehicle, camera, dt);
 
       checkFall(); // air-stunt: dropped off the track → last safe grounded pose
 
