@@ -63,11 +63,36 @@ export const CHASSIS_GLB = {
   /** The file is laterally symmetric (x −1.16..+1.16), so this should stay 0 —
    *  it exists only so a fit problem can be ruled out rather than assumed. */
   offsetX: 0,
-  /** Measured settled ride height: the chassis origin sits this far above the
-   *  ground, so the model (whose y=0 IS the ground) drops by exactly that.
-   *  NOTE tools/chassisModelTest.mjs asserts this against a fresh settle — if
-   *  you tune it away from the measured value that test will tell you. */
-  offsetY: -0.597,
+  /**
+   * Body height above the chassis origin.
+   *
+   * THIS IS NOT THE SETTLED RIDE HEIGHT, AND IT MUST NOT BE. It was −0.597,
+   * chosen so the model's own ground plane (y=0 in the file) landed exactly on
+   * the physics ground plane, and tools/chassisModelTest.mjs asserted that
+   * coincidence against a fresh settle.
+   *
+   * Aligning ground planes does NOT align arches to tyres. It only would if our
+   * wheel matched the one the body was modelled around, and it does not —
+   * WHEEL.radius is 0.36 while this body's arches are cut for something slightly
+   * smaller. MEASURED in the running page by raycasting up from each wheel
+   * centre into the body and scanning the full width and length of the tyre:
+   *     offsetY −0.595    front −1.9 cm    rear −2.6 cm     <- NEGATIVE
+   * i.e. the tyres were already 2–3 cm INSIDE the bodywork parked on flat
+   * ground, before any suspension travel or body lean at all. Every millimetre
+   * of movement then made a visible clip, which is why it showed up on bumps,
+   * on landings and in turns but never cruising — the static overlap was
+   * invisible only because the arch lip hides it head-on.
+   *
+   * The fit has to clear the tyre by at least the worst DYNAMIC closure
+   * (tools/archClearanceRepro.mjs measures 7.8 cm: suspension bump travel plus
+   * what is left of the body lean after BODYLEAN.archCompensate). Swept in the
+   * page, clearance is linear in this number:
+   *     −0.595 →  −1.9 / −2.6 cm        −0.535 →  +4.1 / +3.4 cm
+   *     −0.555 →  +2.1 / +1.4 cm        −0.500 →  +8.1 / +7.4 cm   <= here
+   * −0.50 is the shallowest value that covers the 7.8 cm worst case at both
+   * axles, and it is the value that was arrived at independently by driving.
+   */
+  offsetY: -0.50,
   /** Body bounds centre is +0.23 in the file (rear wing skews it), but −0.23
    *  sits the car slightly too far back against the axles — eyeballed to −0.15,
    *  which is the wing's contribution to the bounds rather than the body's. */

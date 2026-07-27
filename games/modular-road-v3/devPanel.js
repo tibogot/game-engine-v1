@@ -25,7 +25,7 @@ const DEV_PANEL_OPEN_W = 300;
  * @param {object} o.params       live-tunable param objects from the vehicle/kit
  */
 export function createRoadDevPanel({ app, game, params }) {
-  const { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, WHEEL_LAYOUT, glowPropParams } = params;
+  const { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, WHEEL_LAYOUT, DRIFT, glowPropParams } = params;
 
   const root = document.createElement("div");
   root.id = "road-dev";
@@ -457,6 +457,47 @@ export function createRoadDevPanel({ app, game, params }) {
       <div class="inspector-section">
         <div class="section-header">Car — Landing &amp; body</div>
         <div class="section-body">
+          <!-- WHEEL TRAVEL (visual only — physics compression is unclamped).
+               Bump stop is the one to nudge with the debug cam (C) if a wheel
+               still clips the arch: LOWER lets it ride further into the body. -->
+          <div class="prop-row">
+            <span class="prop-label">Wheel bump stop</span>
+            <div class="prop-value">
+              <input type="range" id="dv-susp-bump" min="0" max="0.16" step="0.005" />
+              <span class="prop-num" id="dv-susp-bump-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wheel droop stop</span>
+            <div class="prop-value">
+              <input type="range" id="dv-susp-droop" min="0.05" max="0.5" step="0.01" />
+              <span class="prop-num" id="dv-susp-droop-v"></span>
+            </div>
+          </div>
+          <!-- Drift counter-steer LOOK. Deadband is the slip angle at which the
+               front wheels start pointing down the road instead of into the
+               corner; too low and ordinary cornering shows opposite lock. -->
+          <div class="prop-row">
+            <span class="prop-label">Countersteer look</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cs-gain" min="0" max="1.5" step="0.05" />
+              <span class="prop-num" id="dv-cs-gain-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Countersteer from</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cs-dead" min="0" max="0.7" step="0.01" />
+              <span class="prop-num" id="dv-cs-dead-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Max visual steer</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cs-max" min="0.2" max="1.2" step="0.05" />
+              <span class="prop-num" id="dv-cs-max-v"></span>
+            </div>
+          </div>
           <div class="prop-row">
             <span class="prop-label">Landing absorb</span>
             <div class="prop-value">
@@ -1553,6 +1594,13 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-wall-skin", SOLID, "skin", (v) => `${(v * 100).toFixed(0)} cm`);
   slider("dv-wall-spin", SOLID, "spin", (v) => v.toFixed(2));
   const deg = (v) => `${(v * 57.2958).toFixed(1)}°/g`;
+  const cm = (v) => `${(v * 100).toFixed(1)} cm`;
+  slider("dv-susp-bump", TIRE, "minSuspExt", cm);
+  slider("dv-susp-droop", TIRE, "maxDroop", cm);
+  const csDeg = (v) => `${(v * 57.2958).toFixed(0)}°`;
+  slider("dv-cs-gain", DRIFT, "counterSteerVisual", (v) => `${Math.round(v * 100)}%`);
+  slider("dv-cs-dead", DRIFT, "counterDeadband", csDeg);
+  slider("dv-cs-max", DRIFT, "maxVisualSteer", csDeg);
   slider("dv-land-absorb", TIRE, "landingAbsorb", (v) => `${Math.round(v * 100)}%`);
   slider("dv-land-assist", TIRE, "airLandAssist", (v) => v.toFixed(2));
   slider("dv-land-range", TIRE, "airLandRange", (v) => `${v.toFixed(0)} m`);

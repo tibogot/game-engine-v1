@@ -94,6 +94,31 @@ export const TIRE = {
    * 0.08–0.12 m of total travel, a GT4 nearer 0.05–0.08).
    */
   maxDroop: 0.22,
+  /**
+   * VISUAL cap on how far a wheel may travel UP toward its hub (m) — a bump
+   * stop. The mirror of `maxDroop`, and it was missing: the renderer clamped
+   * the wheel's droop but let compression run all the way to `Math.max(0, …)`,
+   * i.e. to the hub itself.
+   *
+   * That is why wheels vanish into the body over obstacles. The GLB body is
+   * fitted around the SETTLED pose (chassisModel.js: "the wheels land exactly in
+   * the arches with no scaling"), which sits at 0.137 m of extension — so every
+   * millimetre below that drives the tyre up into an arch that was modelled
+   * around it. MEASURED, front wheel, how far it rises above the fitted spot:
+   *     drop 1 m onto flat     0.026 m    fine
+   *     drive onto a 0.10 m step   0.098 m    tyre well into the arch
+   *     drive onto a 0.20 m step   0.140 m    wheel centre AT the hub
+   * 0.10 leaves ~0.037 m of visible bump travel — in the band a GT4 actually
+   * runs (0.05–0.08 m TOTAL, bump plus droop) and inside the arch gap the body
+   * fit provides. It was 0.08 first, which fitted the arch only if the body lean
+   * never saturated; the two budgets are checked together now, see
+   * BODYLEAN.archCompensate and tools/chassisModelTest.mjs.
+   *
+   * PHYSICS IS UNTOUCHED — `compression` still runs its full range, so the
+   * spring, the bottom-out and the handling are exactly as before. This clamps
+   * the mesh offset only.
+   */
+  minSuspExt: 0.10,
   restLength: 0.55,
   springStrength: 65000,
   damper: 6500,
@@ -605,6 +630,42 @@ export const BODYLEAN = {
   maxPitch: 0.05, // ~2.9°
   /** Ease rate (1/s) toward the target angles. */
   smooth: 9,
+  /**
+   * Fraction of the lean's own vertical drop that is lifted back out, 0..1.
+   *
+   * THIS IS WHY WHEELS GO INSIDE THE BODY, and it is not the suspension. The
+   * lean rotates the CHASSIS MESH about its origin while the wheels stay where
+   * `_renderQuat` put them, so the outer arch sweeps DOWN onto a wheel that has
+   * not moved — halfTrack·sin(roll) at the side, frontZ·sin(pitch) at the nose.
+   * Neither is checked against the arch gap, and neither happens on flat ground
+   * at constant speed, which is exactly the reported pattern: fine cruising,
+   * clipping on bumps, jumps and in turns. MEASURED closure at the front-outer
+   * arch (tools/archClearanceRepro.mjs), suspension vs lean:
+   *     flat, cruising           −0.3 cm  +  3.7 cm  =   3.4 cm
+   *     turn 35 m/s               2.0 cm  +  8.5 cm  =  10.5 cm
+   *     brake + turn              3.7 cm  + 10.1 cm  =  13.9 cm
+   *     landing INTO a turn       5.7 cm  +  8.4 cm  =  14.2 cm
+   * The suspension column is the whole of what TIRE.minSuspExt controls; the
+   * lean column is bigger and was uncorrected.
+   *
+   * DOUBLE-COUNTING, NOT PHYSICS. A real car's arch-to-tyre gap is governed by
+   * SUSPENSION travel, which this rig already models separately. Rolling the
+   * body about its own centre on top of that closes the gap a second time for
+   * the same corner. Lifting it back out is the more correct model, not a fudge
+   * — the body still visibly rolls, it just stops sinking onto its tyres.
+   *
+   * Raising CHASSIS_GLB.offsetY fixes the clipping for the same reason and was
+   * the right diagnosis; it just buys the clearance at rest too, where none is
+   * needed, so the car then stands too tall parked.
+   *
+   * Not 1.0: full cancellation holds the OUTER gap perfectly constant but opens
+   * the INNER one by twice the roll drop, and the lifted inner wheel starts to
+   * look detached. 0.85 leaves a little visible squat on the loaded corner while
+   * still fitting inside the arch gap the fit provides — the budget is checked
+   * every run by tools/chassisModelTest.mjs against maxRoll and maxPitch BOTH
+   * saturated, which trail-braking into a corner can genuinely do.
+   */
+  archCompensate: 0.85,
 };
 
 /**
@@ -636,13 +697,40 @@ export const BODYLEAN = {
  * is what the tyres actually use, is untouched.
  */
 export const DRIFT = {
-  /** Fraction of the slip angle the front wheels visually take up. 0 = off. */
-  counterSteerVisual: 0.7,
-  /** Slip (rad) below which nothing is added — ordinary cornering must not get
-   *  a permanent cosmetic offset. ~3.5°. */
-  counterDeadband: 0.06,
-  /** Cap on total visual steer (rad). A little past physical lock is fine —
-   *  nothing reads this but the renderer. ~43°. */
+  /**
+   * Fraction of the slip angle PAST the deadband that the front wheels visually
+   * take up. 0 = off.
+   *
+   * RAISED 0.7 → 1.0 together with the deadband below. The two move together:
+   * the deadband decides WHEN the counter-steer look appears and the gain
+   * decides how strong it is, so pushing the deadband out to a real drift buys
+   * the room to make the drift itself read harder than it used to.
+   */
+  counterSteerVisual: 1.0,
+  /**
+   * Slip (rad) below which nothing is added.
+   *
+   * RAISED 0.06 (3.4°) → 0.35 (20°), because 3.4° is not a drift — it is an
+   * ordinary corner, and the overlay was firing through all of them. The
+   * counter term grows as gain × (slip − deadband) while the physical lock is
+   * simultaneously being cut by `steerSpeedReduce`, so past ~13 m/s the overlay
+   * simply outgrew the steering. MEASURED in a corner the car is still gripping
+   * its way around (30 m/s, 0.2 input, slip −20°):
+   *     deadband 0.06   physical +4.1°   drawn −5.9°   <- pointing the WRONG WAY
+   *     deadband 0.35   physical +4.1°   drawn +4.0°   <- steers into the corner
+   * Reported as "if I go fast and turn I don't see the front wheels turning,
+   * but I see them counter-turning for the drift".
+   *
+   * The drift look does not pay for this — it gets BETTER, because the gain
+   * went up at the same time. Peak counter-steer in a handbrake drift:
+   *     0.06 / 0.7  →  −60°        0.35 / 1.0  →  −63°
+   * Below ~20° of slip the car is cornering; above it, it is sliding, and only
+   * then do the wheels start pointing down the road.
+   */
+  counterDeadband: 0.35,
+  /** Cap on total visual steer (rad). ~43°, deliberately past the 31.5° the
+   *  rack gives at speed — a drift-spec car runs extended lock and this is the
+   *  only place that shows. Nothing reads it but the renderer. */
   maxVisualSteer: 0.75,
   /** Ease rate (1/s) so the wheels don't snap between poses. */
   visualSmooth: 12,
@@ -3123,15 +3211,29 @@ export class Vehicle {
     this._renderQuat.slerpQuaternions(this._prevQuat, body.quat, alpha);
     this._geomCenter.copy(_COM_OFFSET).applyQuaternion(this._renderQuat).add(this._renderPos);
     this.chassisMesh.position.copy(this._geomCenter);
-    if (CHASSIS.visualLift !== 0) {
-      this._wheelUp.set(0, 1, 0).applyQuaternion(this._renderQuat);
-      this.chassisMesh.position.addScaledVector(this._wheelUp, CHASSIS.visualLift);
-    }
     // Body lean goes on the CHASSIS ONLY. The wheels below are placed from
     // _renderQuat, so they stay planted while the body rolls over them — which
     // is the whole effect. Post-multiplying applies the lean in the chassis'
     // own frame, and the lights parented to this mesh come along for free.
+    //
+    // MUST BE COMPUTED BEFORE THE LIFT — the lift depends on the lean angles.
     this._updateBodyLean(dt);
+    // ARCH CLEARANCE. Rotating the body about its own origin sweeps the OUTER
+    // wheel arch DOWN onto a wheel that has not moved, by halfTrack·sin(roll)
+    // at the side and frontZ·sin(pitch) at the nose. See BODYLEAN.archCompensate
+    // for why that is a modelling artefact rather than something to look at.
+    let lift = CHASSIS.visualLift;
+    if (BODYLEAN.archCompensate > 0 && (this._leanRoll !== 0 || this._leanPitch !== 0)) {
+      this._leanLift = BODYLEAN.archCompensate * (
+        WHEEL_LAYOUT.halfTrack * Math.abs(Math.sin(this._leanRoll))
+        + Math.abs(WHEEL_LOCAL[0].pos.z) * Math.abs(Math.sin(this._leanPitch))
+      );
+      lift += this._leanLift;
+    } else this._leanLift = 0;
+    if (lift !== 0) {
+      this._wheelUp.set(0, 1, 0).applyQuaternion(this._renderQuat);
+      this.chassisMesh.position.addScaledVector(this._wheelUp, lift);
+    }
     this.chassisMesh.quaternion.copy(this._renderQuat);
     if (this._leanRoll !== 0 || this._leanPitch !== 0) {
       this._leanQRoll.setFromAxisAngle(this._zAxis, this._leanRoll);
@@ -3155,6 +3257,10 @@ export class Vehicle {
       // body. Visual only; the tyre's own physics never reads this.
       let suspExt = Math.max(0, t._smoothDist - WHEEL.radius);
       if (suspExt > TIRE.maxDroop) suspExt = TIRE.maxDroop;
+      // …and the bump stop at the other end. Without it the wheel rides all the
+      // way up to the hub on an obstacle and disappears inside the body, which
+      // the arches were never modelled for. See TIRE.minSuspExt.
+      else if (suspExt < TIRE.minSuspExt) suspExt = TIRE.minSuspExt;
       this._wheelOffset.copy(this._wheelUp).multiplyScalar(-suspExt);
       // Hub position recomputed from the INTERPOLATED pose (t.worldPos is the
       // tick-time position and would lag the interpolated chassis).

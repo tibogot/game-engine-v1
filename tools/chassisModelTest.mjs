@@ -33,8 +33,10 @@ writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "ut
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};")
   .replace(/THREE\.(Mesh\w+?)NodeMaterial/g, "THREE.$1Material"));
 const TMP2 = TMP;
-const { Vehicle, CHASSIS, HEADLIGHTS, TAILLIGHTS, CHASSIS_GLB_LIGHTS, TIRE, WHEEL, WHEEL_LOCAL } =
-  await import(pathToFileURL(TMP).href);
+const {
+  Vehicle, CHASSIS, HEADLIGHTS, TAILLIGHTS, CHASSIS_GLB_LIGHTS, TIRE, WHEEL, WHEEL_LOCAL,
+  WHEEL_LAYOUT, BODYLEAN,
+} = await import(pathToFileURL(TMP).href);
 unlinkSync(TMP);
 
 let fail = 0;
@@ -196,10 +198,48 @@ console.log("\n=== RIDE-HEIGHT FIT (CHASSIS_GLB.offsetY) ===");
   for (let i = 0; i < 600; i++) c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0, pitch: 0 });
   const settled = c.body.pos.y;
 
-  console.log(`  settled ride height ${settled.toFixed(4)} m  →  needs offsetY ${(-settled).toFixed(4)}`);
+  // THE OLD ASSERTION HERE ENFORCED A BUG. It required offsetY == −settled,
+  // i.e. the model's own ground plane sitting exactly on the physics ground —
+  // and treated that coincidence as proof the body fitted the wheels. It is not:
+  // the arches are cut for the wheel the body was modelled around, not for
+  // WHEEL.radius. Measured in the running page, that "correct" fit had the tyres
+  // 1.9 cm (front) and 2.6 cm (rear) INSIDE the bodywork while parked.
+  //
+  // What actually has to hold is CLEARANCE, and it has to survive the car
+  // moving. The arch geometry needs the GLB (Draco + KTX2 + a GPU) so it cannot
+  // be raycast here; it is pinned as a measured constant instead, and the
+  // dynamic half — which is pure maths on constants this file already has — is
+  // recomputed every run so a lean or suspension retune moves the requirement.
+  const GROUND_ALIGNED_OFFSET_Y = -0.595; // fit at which clearance was measured
+  const MEASURED_CLEAR_AT_THAT_FIT = { front: -0.019, rear: -0.026 };
+  const lift = offsetY - GROUND_ALIGNED_OFFSET_Y; // clearance is linear in this
+  const clearF = MEASURED_CLEAR_AT_THAT_FIT.front + lift;
+  const clearR = MEASURED_CLEAR_AT_THAT_FIT.rear + lift;
+
+  // Worst-case dynamic closure at an arch: the wheel rising on its bump stop,
+  // plus whatever body lean is left after archCompensate.
+  const suspRise = 0.137 - TIRE.minSuspExt;
+  const leanDrop = (1 - BODYLEAN.archCompensate) * (
+    WHEEL_LAYOUT.halfTrack * Math.sin(BODYLEAN.maxRoll)
+    + Math.abs(WHEEL_LOCAL[0].pos.z) * Math.sin(BODYLEAN.maxPitch)
+  );
+  const needed = suspRise + leanDrop;
+
+  console.log(`  settled ride height ${settled.toFixed(4)} m`);
   console.log(`  chassisModel.js declares offsetY ${offsetY}, scale ${scale}`);
-  check("offsetY matches the measured settled ride height (model would float/sink otherwise)",
-    Math.abs(offsetY + settled) < 0.01, `off by ${Math.abs(offsetY + settled).toFixed(4)} m`);
+  console.log(`  static arch clearance: front ${(clearF * 100).toFixed(1)} cm, rear ${(clearR * 100).toFixed(1)} cm`);
+  console.log(`  worst dynamic closure: ${(needed * 100).toFixed(1)} cm`
+    + ` (susp ${(suspRise * 100).toFixed(1)} + lean ${(leanDrop * 100).toFixed(1)})`);
+
+  check("the tyres are not inside the bodywork at rest",
+    clearF > 0 && clearR > 0,
+    `front ${(clearF * 100).toFixed(1)} cm, rear ${(clearR * 100).toFixed(1)} cm`);
+  check("…and the arch still clears the tyre at full bump + full lean",
+    clearF >= needed && clearR >= needed,
+    `have ${(Math.min(clearF, clearR) * 100).toFixed(1)} cm, need ${(needed * 100).toFixed(1)} cm`);
+  check("the body is not lifted further than it needs to be (car would stand tall)",
+    Math.min(clearF, clearR) < needed + 0.04,
+    `${(Math.min(clearF, clearR) * 100).toFixed(1)} cm vs ${(needed * 100).toFixed(1)} cm needed`);
   check("scale is 1.0 — the model is authored at real-world size", scale === 1);
 }
 

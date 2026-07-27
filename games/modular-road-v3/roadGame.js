@@ -42,6 +42,7 @@ import {
   WHEEL_LAYOUT,
   HEADLIGHTS,
   CHASSIS,
+  DRIFT,
   GRAVITY,
 } from "../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../v3/play/modularRoadBvh.js";
@@ -1611,7 +1612,7 @@ ${e.message}`);
   let worldName = boot.name;
   devPanel = createRoadDevPanel({
     app,
-    params: { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, WHEEL_LAYOUT, glowPropParams },
+    params: { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, WHEEL_LAYOUT, DRIFT, glowPropParams },
     game: {
       setSpawnToCar,
       setSpawnToCursor,
