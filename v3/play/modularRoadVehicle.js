@@ -166,6 +166,32 @@ export const TIRE = {
    * kerb strike does not drop the body out from under itself.
    */
   archLiftSettle: 6,
+  /**
+   * Keep the DRAWN wheel out of SOLID geometry too — guardrails, tunnel shells,
+   * gates, cliffs, tree trunks. 0 disables. VISUAL ONLY.
+   *
+   * The wheels have never known solids exist: `Tire.apply` probes `castGround`,
+   * which v3 wires to terrain + road decks + movers, while rails and shells live
+   * in a SEPARATE `solids` BVH used only for chassis collision (see
+   * createVehicleGround in modularRoadGround.js). So a tyre resting on a
+   * guardrail passed straight through it, and no amount of suspension tuning
+   * touched that — it is a missing query, not a bad number.
+   *
+   * Deliberately NOT made a driving surface. Feeding solids into the tyre probe
+   * would let the car drive UP guardrails and would change handling everywhere;
+   * this only raises the mesh, so the physics is bit-for-bit unchanged.
+   */
+  wheelSolidClear: 1,
+  /**
+   * Minimum surface-normal·chassis-up for the solid clearance to act.
+   *
+   * A wheel beside a VERTICAL wall is not sinking into anything, and raising it
+   * would not help if it were — the correction goes as 1/(n·up), so without this
+   * gate a glancing rail contact divides by ~0 and throws the wheel at the sky.
+   * 0.35 ≈ only surfaces within ~70° of horizontal, i.e. things you can end up
+   * ON TOP of: a rail cap, a gate panel, a ramp lip.
+   */
+  wheelSolidMinFacing: 0.35,
   restLength: 0.55,
   springStrength: 65000,
   damper: 6500,
@@ -2045,6 +2071,11 @@ export class Vehicle {
     /** Body lift (m) currently paying for wheel-arch clearance — see
      *  TIRE.archLiftBody. Cosmetic only. */
     this._archLift = 0;
+    // Scratch for the visual wheel-vs-solids clearance (_clearSolids).
+    this._wsHub = new THREE.Vector3();
+    this._wsCentre = new THREE.Vector3();
+    this._wsUp = new THREE.Vector3();
+    this._wsN = new THREE.Vector3();
     this._leanPitch = 0;
     this._deckN = new THREE.Vector3();
     this.BOTTOM_CORNERS = [0, 1, 4, 5];
@@ -3428,6 +3459,32 @@ export class Vehicle {
   }
 
   /**
+   * Raise a wheel out of any SOLID it is intersecting. Returns the corrected
+   * extension; only ever smaller (higher) than what went in.
+   *
+   * Treats the tyre as a sphere at its centre, which is what the wheel already
+   * uses for its anti-tunnel sweep (TIRE.sphereSweepScale) and is close enough
+   * for a rail cap or a gate panel. The correction is along the SUSPENSION axis,
+   * so it has to be divided by how much of the surface normal lies along that
+   * axis — hence the facing gate, see TIRE.wheelSolidMinFacing.
+   */
+  _clearSolids(t, ext) {
+    this._wsHub.copy(t.localPos).sub(_COM_OFFSET)
+      .applyQuaternion(this._renderQuat).add(this._renderPos);
+    this._wsCentre.copy(this._wsHub).addScaledVector(this._wsUp, -ext);
+    const hit = this.solidsBvh.closestPointWithNormal(
+      this._wsCentre.x, this._wsCentre.y, this._wsCentre.z, WHEEL.radius, this._wsN,
+    );
+    if (!hit) return ext;
+    const pen = WHEEL.radius - hit.distance;
+    if (pen <= 0) return ext;
+    const facing = this._wsN.dot(this._wsUp);
+    if (facing < TIRE.wheelSolidMinFacing) return ext;
+    const raise = Math.min(pen / facing, WHEEL.radius);
+    return ext - raise;
+  }
+
+  /**
    * PASS 1 of syncVisuals: decide where every wheel must be DRAWN, and how much
    * body lift that costs. Sets `t.visualExt` (the offset the placement loop
    * uses) and `this._archLift`. Physics reads neither.
@@ -3436,6 +3493,8 @@ export class Vehicle {
    */
   _updateWheelExtensions(dt) {
     const k = 1 - Math.exp(-TIRE.suspVisSmooth * dt);
+    const solids = TIRE.wheelSolidClear > 0 && this.solidsBvh?.baked ? this.solidsBvh : null;
+    if (solids) this._wsUp.set(0, 1, 0).applyQuaternion(this._renderQuat);
     let shortfall = 0;
     for (const t of this.tires) {
       const targetDist = t.grounded ? t.hitDistance : TIRE.rayLength;
@@ -3459,6 +3518,10 @@ export class Vehicle {
       // leaves the hub 0.297 m up against a 0.36 m tyre), so a negative
       // extension is a real requirement rather than an error. Bounded so a bad
       // probe cannot fling the body upward.
+      // SOLIDS the tyre probe cannot see — rails, gates, shells. See
+      // TIRE.wheelSolidClear. Applied after the ground clamp and only ever
+      // RAISES the wheel, so it can never reintroduce sink.
+      if (solids) ext = this._clearSolids(t, ext);
       if (ext < -TIRE.archLiftMax) ext = -TIRE.archLiftMax;
       t._visExt = ext;
       if (TIRE.minSuspExt - ext > shortfall) shortfall = TIRE.minSuspExt - ext;

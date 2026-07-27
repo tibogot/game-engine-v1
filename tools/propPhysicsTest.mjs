@@ -221,18 +221,33 @@ console.log("\n=== THE GATE IS HELD OPEN UNTIL THE CAR IS THROUGH ===");
     phys.sync();
     const g = phys.sims[0];
     const body = {
-      pos: V(1.1, 0.5, -8), vel: V(0, 0, speed), quat: new THREE.Quaternion(),
+      // Halfway ALONG the panel — derived, not hardcoded. This was a literal
+      // 1.1, which was the mid-point of a 2.2 m panel; widening the gate turned
+      // it into a quarter-point near the hinge, where clearing the car needs a
+      // much larger swing, and the gate saturated against its hinge limit.
+      pos: V(PHYSICS_PROP_TYPES.gate.width / 2, 0.5, -8), vel: V(0, 0, speed), quat: new THREE.Quaternion(),
       getVelocityAtPoint(_p, o) { return o.copy(this.vel); },
     };
     let opened = false, minWhilePassing = Infinity, peak = 0, closedAt = null;
-    for (let i = 0; i < 5 / DT; i++) {
+    // RUN LONG ENOUGH FOR THE MANOEUVRE, not a flat 5 s.
+    //
+    // The gate stays in contact until the car is `width + carR` from the hinge
+    // (see _tickHinge), so a WIDER gate is released later — and the spring then
+    // needs its own ~2.5 s to decay from full swing whatever the car is doing.
+    // A fixed window made "does it close?" a question about the clock: at 4 m/s
+    // the car was still inside the doorway when the sim ended.
+    const clearZ = PHYSICS_PROP_TYPES.gate.width + 2;
+    const secs = (8 + clearZ) / speed + 4;
+    for (let i = 0; i < secs / DT; i++) {
       body.pos.addScaledVector(body.vel, DT);
       phys.tick(DT, { enabled: true, body });
       const a = Math.abs(g.angle);
       peak = Math.max(peak, a);
       if (!opened && a > 0.05) opened = true;
       if (opened && body.pos.z < 2.5) minWhilePassing = Math.min(minWhilePassing, a);
-      if (opened && closedAt === null && body.pos.z > 4 && a < 0.08) closedAt = body.pos.z;
+      // Only once the car is genuinely CLEAR of the panel's reach — otherwise
+      // this measures the gate closing on a car that is still in the doorway.
+      if (opened && closedAt === null && body.pos.z > clearZ && a < 0.08) closedAt = body.pos.z;
     }
     return { peak, minWhilePassing, exit: body.vel.z, closedAt, opened };
   };
@@ -247,7 +262,7 @@ console.log("\n=== THE GATE IS HELD OPEN UNTIL THE CAR IS THROUGH ===");
     // Never springs shut through the car mid-pass.
     if (!(r.minWhilePassing > 0.02)) allHeld = false;
     // And it does close again once clear — a gate stuck open is not a gate.
-    if (r.closedAt === null || r.closedAt < 2) allClosed = false;
+    if (r.closedAt === null) allClosed = false;
     if (r.exit < 2) allThrough = false;
   }
   check("a FAST car pushes it open just as a slow one does", allOpen);

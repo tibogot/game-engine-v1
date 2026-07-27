@@ -60,22 +60,58 @@ export const PROP_PHYSICS = {
   minHitSpeed: 1.5,
 };
 
+/**
+ * Linear scale of the traffic cone, against the ~0.93 m motorway cone the
+ * geometry is authored at. 3 puts it at ~2.8 m — an obstacle you aim at rather
+ * than street furniture you happen to clip, and big enough to actually see the
+ * collision happen from the debug cam.
+ *
+ * EXPORTED AND SHARED because the cone's size lives in two files: the LOOK in
+ * modularRoadProps.js and the collision proxy here. Both read this, so they
+ * cannot drift — which they already did once (the hardcoded copy is exactly how
+ * the cone ended up half-buried; see the note in the cone's make()).
+ */
+export const CONE_SCALE = 3;
+/**
+ * Panel reach of the swing gate, from its hinge (m).
+ *
+ * Same shared-constant reasoning as CONE_SCALE: the panel MESH is built in
+ * modularRoadProps.js and the hinge simulation is here, and a gate whose visual
+ * panel is a different length from its physical one swings visibly wrong.
+ */
+export const GATE_WIDTH = 4.4;
+
 /** Per-type physics profile. `kind` selects the simulation, not the look. */
 export const PHYSICS_PROP_TYPES = {
   cone: {
     kind: "body",
-    mass: 2.2,
+    /**
+     * Mass scales with the SQUARE of size, not the cube.
+     *
+     * Cubic (×27 → 59 kg) is the physically honest answer for a solid object 3×
+     * bigger, and it is the wrong one here: the whole point of a cone is that
+     * hitting it is spectacular and free, and at 59 kg against a 1400 kg car it
+     * stops flying and starts feeling like a bollard. A real cone is also mostly
+     * hollow shell plus a weighted base, so its mass grows nearer area than
+     * volume anyway — ×9 → 19.8 kg is both the better-playing and the more
+     * defensible number. Raise it if you want them to shrug the car off.
+     */
+    mass: 2.2 * CONE_SCALE * CONE_SCALE,
     /** Collision proxy: a sphere at the centre of mass. A cone is close enough
      *  to a sphere for being punted by a car, and it never gets stuck on edges
      *  the way a hull would. */
-    radius: 0.42,
-    size: { width: 0.54, height: 0.9, length: 0.54 },
-    comY: -0.27, // low CoM so it rights itself and settles base-down
+    radius: 0.42 * CONE_SCALE,
+    size: {
+      width: 0.54 * CONE_SCALE,
+      height: 0.9 * CONE_SCALE,
+      length: 0.54 * CONE_SCALE,
+    },
+    comY: -0.27 * CONE_SCALE, // low CoM so it rights itself and settles base-down
   },
   gate: {
     kind: "hinge",
     /** Panel reach from the hinge (m) and its height. */
-    width: 2.2,
+    width: GATE_WIDTH,
     height: 1.6,
     /** Radians the panel may swing either way. */
     maxAngle: 1.5,

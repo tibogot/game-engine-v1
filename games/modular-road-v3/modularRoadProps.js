@@ -1,6 +1,6 @@
 import * as THREE from "three";
 // Collision radius is shared so the visual offset and the body can never drift.
-import { PHYSICS_PROP_TYPES } from "./modularRoadPropPhysics.js";
+import { PHYSICS_PROP_TYPES, CONE_SCALE, GATE_WIDTH } from "./modularRoadPropPhysics.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { materialEmissive } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
@@ -250,9 +250,12 @@ export const PROP_CATALOG = [
       // PVC instead of being a dead-straight ramp, and so the base flange and
       // body are one continuous surface rather than two parts intersecting.
       //
-      // Sized like a MOTORWAY cone (~0.93 m) rather than a footpath one: against
-      // a 4.85 m car anything shorter reads as a toy.
-      const H = 0.93;
+      // Authored as a MOTORWAY cone (~0.93 m) rather than a footpath one:
+      // against a 4.85 m car anything shorter reads as a toy. CONE_SCALE then
+      // multiplies the whole silhouette — shared with the collision proxy in
+      // modularRoadPropPhysics.js so the two cannot drift.
+      const S = CONE_SCALE;
+      const H = 0.93 * S;
       const profile = [
         new THREE.Vector2(0.278, 0.0),    // flange edge
         new THREE.Vector2(0.263, 0.033),
@@ -262,9 +265,9 @@ export const PROP_CATALOG = [
         new THREE.Vector2(0.119, 0.42),
         new THREE.Vector2(0.083, 0.66),
         new THREE.Vector2(0.057, 0.84),
-        new THREE.Vector2(0.051, H),      // FLAT top, not a point
-        new THREE.Vector2(0.0, H),
-      ];
+        new THREE.Vector2(0.051, 0.93),   // FLAT top, not a point
+        new THREE.Vector2(0.0, 0.93),
+      ].map((v) => v.multiplyScalar(S));
       const body = new THREE.Mesh(
         new THREE.LatheGeometry(profile, 20),
         mat(0xf4581a, { roughness: 0.55, metalness: 0.0 }),
@@ -280,11 +283,15 @@ export const PROP_CATALOG = [
         return m;
       };
       const square = new THREE.Mesh(
-        new THREE.BoxGeometry(0.55, 0.042, 0.55),
+        new THREE.BoxGeometry(0.55 * S, 0.042 * S, 0.55 * S),
         mat(0x141417, { roughness: 0.9 }),
       );
-      square.position.y = 0.021;
-      g.add(square, body, collar(0.45, 0.17, 0.113, 0.097), collar(0.70, 0.105, 0.076, 0.067));
+      square.position.y = 0.021 * S;
+      g.add(
+        square, body,
+        collar(0.45 * S, 0.17 * S, 0.113 * S, 0.097 * S),
+        collar(0.70 * S, 0.105 * S, 0.076 * S, 0.067 * S),
+      );
 
       // ── SIT ON THE GROUND, AND ROTATE ABOUT THE MIDDLE ──────────────────────
       // Two constraints that pull opposite ways:
@@ -343,21 +350,25 @@ export const PROP_CATALOG = [
       g.name = "Gate";
       // Hinge post at the LOCAL ORIGIN — the panel swings about it, so the prop's
       // placement point IS the hinge.
+      // Panel length comes from GATE_WIDTH, shared with the hinge simulation in
+      // modularRoadPropPhysics.js — the panel you SEE and the panel the car is
+      // resisted by have to be the same length or the swing reads wrong.
+      const W = GATE_WIDTH;
       const post = new THREE.Mesh(
         new THREE.CylinderGeometry(0.11, 0.11, 1.9, 10),
         mat(0x9aa0a8, { roughness: 0.45, metalness: 0.6 }),
       );
       post.position.y = 0.95;
       const panel = new THREE.Mesh(
-        new THREE.BoxGeometry(2.2, 1.5, 0.09),
+        new THREE.BoxGeometry(W, 1.5, 0.09),
         mat(0xe23b2e, { roughness: 0.65, emissive: 0x3a0a06, emissiveIntensity: 0.4 }),
       );
-      panel.position.set(1.1, 0.9, 0); // extends along +X from the hinge
+      panel.position.set(W / 2, 0.9, 0); // extends along +X from the hinge
       const stripe = new THREE.Mesh(
-        new THREE.BoxGeometry(2.2, 0.26, 0.11),
+        new THREE.BoxGeometry(W, 0.26, 0.11),
         mat(0xf4f4f4, { roughness: 0.6 }),
       );
-      stripe.position.set(1.1, 0.9, 0);
+      stripe.position.set(W / 2, 0.9, 0);
       g.add(post, panel, stripe);
       return g;
     },

@@ -868,10 +868,25 @@ export function createRoadDevPanel({ app, game, params }) {
             it down to let sunlight hit it.
           </div>
           <div class="prop-row">
-            <span class="prop-label">Show collision</span>
+            <span class="prop-label">Show colliders</span>
             <div class="prop-value">
-              <button class="prop-toggle" id="dv-showcol" type="button" aria-label="Show collision">${CHECK_SVG}</button>
+              <button class="prop-toggle" id="dv-showcol" type="button" aria-label="Show colliders">${CHECK_SVG}</button>
             </div>
+          </div>
+          <div class="prop-hint">
+            Wireframes of what the car ACTUALLY collides with, which is not always
+            what you can see. Pair it with the debug orbit cam (<b>C</b>) to watch a
+            contact happen from outside the car.
+            <br><br>
+            <b style="color:#ff5060">red</b> road decks (wheels probe these) &middot;
+            <b style="color:#5080ff">blue</b> guardrails and tunnel shells (chassis
+            only) &middot; <b style="color:#ffe14a">yellow</b> the car's collision
+            BOX &mdash; the bodywork you see is only a look &middot;
+            <b style="color:#4ad2ff">cyan</b> the four tyres &middot;
+            <b style="color:#ff8a3d">orange</b> moving platforms and walls &middot;
+            <b style="color:#9dff5a">green</b> simulated props: the cone's SPHERE
+            proxy and the swing gate's panel, which is what the sim uses rather
+            than the mesh.
           </div>
           <div class="prop-row">
             <span class="prop-label">Instancing</span>

@@ -175,6 +175,78 @@ console.log("=== (1) THE WHEEL CANNOT CLIMB INTO THE BODY ===");
   );
 }
 
+console.log("\n=== (1b) THE WHEEL IS KEPT OUT OF SOLIDS TOO, NOT JUST THE ROAD ===");
+// The tyre probe only ever queried the GROUND bvh (terrain + road decks), while
+// guardrails, tunnel shells and gates live in a SEPARATE solids bvh used for
+// chassis collision only — so a wheel resting on a rail passed straight through
+// it. That was a missing query, not a bad number. See TIRE.wheelSolidClear.
+{
+  /** A solid whose flat top is at `topY`, everywhere. Mirrors the shape of
+   *  RoadBvh.closestPointWithNormal: nearest point + outward normal. */
+  const slab = (topY) => ({
+    baked: true,
+    closestPointWithNormal(px, py, pz, maxDist, out) {
+      const d = Math.abs(py - topY);
+      if (d > maxDist) return null;
+      out.set(0, py >= topY ? 1 : -1, 0); // outward = toward the query point
+      return { x: px, y: topY, z: pz, distance: d };
+    },
+  });
+
+  const TOP = 0.2; // a low rail cap the car is sitting across
+  const onSlab = (clear) => {
+    const save = TIRE.wheelSolidClear;
+    TIRE.wheelSolidClear = clear;
+    const c = make(makeGround());
+    c.solidsBvh = slab(TOP);
+    settle(c);
+    let lowest = Infinity;
+    for (let i = 0; i < 4; i++) {
+      lowest = Math.min(lowest, c.tireGroups[i].position.y - WHEEL.radius);
+    }
+    TIRE.wheelSolidClear = save;
+    return lowest;
+  };
+
+  const off = onSlab(0);
+  const on = onSlab(1);
+  console.log(`      lowest tyre point: ${off.toFixed(3)} m without the probe,`
+    + ` ${on.toFixed(3)} m with it (rail cap at ${TOP})`);
+  check(
+    "without it the tyre is drawn inside the rail — the defect",
+    off < TOP - 0.05,
+    `${((TOP - off) * 100).toFixed(1)} cm inside`,
+  );
+  check(
+    "with it the tyre rests ON the rail instead of through it",
+    on >= TOP - 1e-3,
+    `${((on - TOP) * 100).toFixed(2)} cm clear`,
+  );
+
+  // A VERTICAL face must be ignored: a wheel beside a wall is not sinking into
+  // anything, and the 1/(n·up) correction would throw it at the sky.
+  const wall = {
+    baked: true,
+    closestPointWithNormal(px, py, pz, maxDist, out) {
+      const d = Math.abs(px - 0.2);
+      if (d > maxDist) return null;
+      out.set(px >= 0.2 ? 1 : -1, 0, 0); // purely horizontal normal
+      return { x: 0.2, y: py, z: pz, distance: d };
+    },
+  };
+  const flat = make(makeGround());
+  settle(flat);
+  const before = flat.tireGroups[0].position.y;
+  const beside = make(makeGround());
+  beside.solidsBvh = wall;
+  settle(beside);
+  check(
+    "a vertical wall beside the wheel is ignored, not treated as ground",
+    Math.abs(beside.tireGroups[0].position.y - before) < 1e-3,
+    `moved ${((beside.tireGroups[0].position.y - before) * 100).toFixed(2)} cm`,
+  );
+}
+
 console.log("\n=== PHYSICS IS UNTOUCHED BY THE VISUAL CLAMP ===");
 // The whole point of fixing this in the renderer: compression, and therefore the
 // spring, the bottom-out and the handling, must be exactly as before.

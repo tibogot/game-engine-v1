@@ -42,6 +42,7 @@ import {
   WHEEL_LAYOUT,
   HEADLIGHTS,
   CHASSIS,
+  WHEEL,
   DRIFT,
   GRAVITY,
 } from "../../v3/play/modularRoadVehicle.js";
@@ -402,6 +403,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       ground.setRoadSolidsBvh(null);
     }
     refreshCollisionDebug();
+    // Movers and physics props can have been added/removed by the same edit.
+    buildDynamicDebug();
     // The default spawn tracks the Start/first piece, so keep the marker on it as
     // the track changes (no-op cost when a custom spawn is set).
     updateSpawnMarker();
@@ -448,15 +451,23 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   debugGroup.name = "RoadCollisionDebug";
   debugGroup.visible = false;
   scene.add(debugGroup);
+  // STATIC wireframes (baked track) vs DYNAMIC ones (the car, movers, physics
+  // props). Separate subgroups because the static half is rebuilt only when the
+  // track changes while the dynamic half is re-posed every frame — and the
+  // static rebuild used to clear the whole group, which would take the car's
+  // collider down with it.
+  const debugStatic = new THREE.Group();
+  const debugDyn = new THREE.Group();
+  debugGroup.add(debugStatic, debugDyn);
   let debugOn = false;
 
   function refreshCollisionDebug() {
-    for (const c of debugGroup.children) c.geometry?.dispose();
-    debugGroup.clear();
+    for (const c of debugStatic.children) c.geometry?.dispose();
+    debugStatic.clear();
     if (!debugOn) return;
     const add = (bvh, color) => {
       if (!bvh?.geometry) return;
-      debugGroup.add(new THREE.Mesh(
+      debugStatic.add(new THREE.Mesh(
         bvh.geometry.clone(),
         new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.5 }),
       ));
@@ -464,14 +475,126 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     add(deckBvh, 0xff5060);   // static decks = red
     add(solidsBvh, 0x5080ff); // static solids = blue
     // Mover BVHs are intentionally NOT drawn here: they rebake every tick, so a
-    // wireframe snapshot would lag the platform. The movers' own visible meshes
-    // already show where they are.
+    // wireframe snapshot would lag the platform. They get live wireframes in the
+    // DYNAMIC half instead, posed from their real meshes every frame.
   }
+
+  // ── LIVE COLLIDER WIREFRAMES ───────────────────────────────────────────────
+  // What the car is ACTUALLY collided as, drawn where it actually is:
+  //   yellow  the chassis box — CHASSIS.width/height/length, the box the solids
+  //           resolver samples. NOT the GLB silhouette, which is only a look.
+  //   cyan    the four tyres at WHEEL.radius, where the ground probes start.
+  //   orange  moving platforms and walls (the per-tick mover BVHs).
+  //   green   simulated props — the cone's SPHERE proxy and the gate's panel,
+  //           which are what the sim uses rather than the meshes you see.
+  // Everything here is lines, so it reads through the geometry it is inside.
+  const DBG_LINE = {
+    car: new THREE.LineBasicMaterial({ color: 0xffe14a }),
+    wheel: new THREE.LineBasicMaterial({ color: 0x4ad2ff }),
+    mover: new THREE.LineBasicMaterial({ color: 0xff8a3d }),
+    prop: new THREE.LineBasicMaterial({ color: 0x9dff5a }),
+  };
+  let dbgCar = null;
+  let dbgWheels = [];
+  /** [{ line, mesh }] — wireframe clones tracking a live mesh's world matrix. */
+  let dbgMovers = [];
+  /** [{ line, sim }] — proxies tracking a PropPhysics sim. */
+  let dbgProps = [];
+  const _dbgCentre = new THREE.Vector3();
+
+  function clearDynamicDebug() {
+    for (const c of debugDyn.children) c.geometry?.dispose();
+    debugDyn.clear();
+    dbgCar = null; dbgWheels = []; dbgMovers = []; dbgProps = [];
+  }
+
+  /** Rebuild the dynamic wireframes for whatever exists right now. */
+  function buildDynamicDebug() {
+    clearDynamicDebug();
+    if (!debugOn) return;
+    const line = (geo, mat) => {
+      const l = new THREE.LineSegments(new THREE.EdgesGeometry(geo), mat);
+      geo.dispose();
+      l.frustumCulled = false;
+      debugDyn.add(l);
+      return l;
+    };
+
+    dbgCar = line(new THREE.BoxGeometry(CHASSIS.width, CHASSIS.height, CHASSIS.length), DBG_LINE.car);
+    for (let i = 0; i < 4; i++) {
+      // A cylinder's EdgesGeometry is its two rims — the tyre silhouette, which
+      // is what you want to see against the road, and only ~32 segments.
+      const g = new THREE.CylinderGeometry(WHEEL.radius, WHEEL.radius, WHEEL.thickness, 16);
+      g.rotateZ(Math.PI / 2); // axle along X, matching the wheel meshes
+      dbgWheels.push(line(g, DBG_LINE.wheel));
+    }
+
+    for (const inst of movers.instances ?? []) {
+      const mesh = inst.root?.userData?.moverBind?.mesh;
+      if (!mesh?.geometry) continue;
+      dbgMovers.push({ line: line(mesh.geometry.clone(), DBG_LINE.mover), mesh });
+    }
+
+    for (const sim of propPhysics.sims ?? []) {
+      const p = sim.profile;
+      if (p.kind === "body") {
+        // The sphere PROXY, not the cone mesh — the whole point is to show that
+        // the sim collides a sphere at the centre of mass.
+        dbgProps.push({ line: line(new THREE.SphereGeometry(p.radius, 10, 6), DBG_LINE.prop), sim });
+      } else if (p.kind === "hinge") {
+        const g = new THREE.BoxGeometry(p.width, p.height, 0.1);
+        g.translate(p.width / 2, 0, 0); // panel extends +X from the hinge
+        dbgProps.push({ line: line(g, DBG_LINE.prop), sim });
+      }
+    }
+  }
+
+  /** Re-pose the dynamic wireframes. Cheap: a handful of matrix writes. */
+  function updateDynamicDebug() {
+    if (!debugOn) return;
+    if (dbgCar) {
+      // The collision box is centred on the GEOMETRIC centre, which is the CoM
+      // offset away from body.pos — the same mapping _geomToWorld uses. Follows
+      // the RENDER pose so it sits on the car rather than one tick behind it.
+      _dbgCentre.set(CHASSIS.comX, CHASSIS.comY, CHASSIS.comZ)
+        .applyQuaternion(vehicle.renderQuat).add(vehicle.renderPos);
+      dbgCar.position.copy(_dbgCentre);
+      dbgCar.quaternion.copy(vehicle.renderQuat);
+    }
+    for (let i = 0; i < dbgWheels.length; i++) {
+      const g = vehicle.tireGroups[i];
+      if (!g) continue;
+      dbgWheels[i].position.copy(g.position);
+      dbgWheels[i].quaternion.copy(g.quaternion);
+    }
+    for (const { line, mesh } of dbgMovers) {
+      mesh.updateWorldMatrix(true, false);
+      line.matrix.copy(mesh.matrixWorld);
+      line.matrixAutoUpdate = false;
+      line.matrixWorldNeedsUpdate = true;
+    }
+    for (const { line, sim } of dbgProps) {
+      if (sim.body) {
+        line.position.copy(sim.body.pos);
+        line.quaternion.copy(sim.body.quat);
+      } else {
+        // Hinge: the panel swings about the prop root by the sim's own angle.
+        line.position.copy(sim.inst.root.position);
+        line.quaternion.copy(sim.inst.root.quaternion);
+        _dbgQuat.setFromAxisAngle(_dbgUpAxis, sim.angle ?? 0);
+        line.quaternion.multiply(_dbgQuat);
+      }
+    }
+  }
+  const _dbgQuat = new THREE.Quaternion();
+  const _dbgUpAxis = new THREE.Vector3(0, 1, 0);
 
   function setCollisionDebug(on) {
     debugOn = !!on;
     debugGroup.visible = debugOn;
     refreshCollisionDebug();
+    buildDynamicDebug();
+    updateDynamicDebug();
   }
 
   // ── MERGED TRACK (draw-call optimization for driving) ──────────────────────
@@ -1880,6 +2003,7 @@ ${e.message}`);
       // Render-rate, not the fixed step: the wave is purely visual and this only
       // advances a uniform — the flags themselves cost no CPU per frame.
       flags.update(dt);
+      updateDynamicDebug(); // live collider wireframes, when they are switched on
 
       checkFall(); // air-stunt: dropped off the track → last safe grounded pose
 
