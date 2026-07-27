@@ -29,7 +29,8 @@
       "Bash(node tools/jumpPitchTest.mjs)",
       "Bash(node tools/pieceTiltTest.mjs)",
       "Bash(node tools/propPhysicsTest.mjs)",
-      "Bash(node tools/sparksTest.mjs)"
+      "Bash(node tools/sparksTest.mjs)",
+      "Bash(node tools/groundRollRepro.mjs)"
     ]
   }
 }

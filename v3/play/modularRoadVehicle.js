@@ -487,6 +487,44 @@ export const TIRE = {
    * to stop it, so it drove straight past level.
    */
   airLandDamp: 6400,
+  /**
+   * How much of the alignment is allowed to act on PITCH, 0..1. Roll is always
+   * corrected in full; this scales only the nose-up/nose-down half.
+   *
+   * 0 BY DESIGN. The two halves of "align to the landing surface" are not equally
+   * wanted:
+   *   • ROLL levelling is the half that matters. A car that arrives 30° on its
+   *     side digs a wheel and gets shoved sideways — that is the whole reason
+   *     this assist exists (see airLandTorque).
+   *   • PITCH levelling is the half that looks WRONG. It cancels the nose-down
+   *     attitude the arc assist spent the whole descent building, so the car
+   *     visibly flattens in the last few metres and slaps down on all four
+   *     wheels at once. Reported as "the car gets flat and stabilised, that
+   *     doesn't make sense". It is also not what a real car does: the nose leads
+   *     and the rear follows a fraction of a second later.
+   * MEASURED over a 6 m/s-up, 32 m/s jump — nose angle at front-wheel contact
+   * and how long the rear took to arrive:
+   *     pitchLevel 1.0 (old)   −5.7°    42 ms
+   *     pitchLevel 0.0         −10.9°   83 ms
+   * The second is the landing that was asked for.
+   */
+  airLandPitchLevel: 0,
+  /**
+   * Fraction of the assist surrendered while the player is actively rolling,
+   * 0..1, scaled by |steer|.
+   *
+   * THE ASSIST MUST NOT SILENTLY CANCEL AN INPUT. Every other automatic help in
+   * this file yields to the player (the arc assist stands down on any pitch
+   * input, and above airAlignMaxSpin), but this one did not, and it is by far
+   * the strongest torque in the air: 32000 N·m against the 13600 N·m ceiling the
+   * rate model can ever ask for on the roll axis (3.6 rad/s × airResponse 9 ×
+   * 420 kg·m²). Holding full roll therefore did almost nothing — reported as
+   * "the car couldn't roll, something was resisting".
+   *
+   * If the player holds roll all the way to touchdown they have CHOSEN to land
+   * rolled; release and the assist comes straight back with the time it has left.
+   */
+  airLandInputYield: 1.0,
 
 };
 
@@ -1816,6 +1854,7 @@ export class Vehicle {
     this._landUp = new THREE.Vector3();
     this._landTilt = new THREE.Vector3();
     this._landTorque = new THREE.Vector3();
+    this._landRight = new THREE.Vector3(); // chassis right — the PITCH axis of the assist
     this._landDir = new THREE.Vector3();
     /** Grounded wheel count last substep — drives the touchdown edge. */
     this._prevGrounded = 0;
@@ -2480,10 +2519,32 @@ export class Vehicle {
     //
     // Seconds-to-impact is speed-invariant and is what actually decides whether
     // there is time to level the car.
-    const dist = hit.distance ?? 0;
-    const speed = Math.max(1, body.vel.length());
-    const engage = 1 - Math.min(1, (dist / speed) / Math.max(0.05, TIRE.airLandTime));
+    // TIME-TO-IMPACT MUST BE BALLISTIC, NOT dist/speed.
+    //
+    // The old form divided the PROBE's slant range by the full 3-D speed, and
+    // when the car is climbing the probe points straight DOWN (see above) — so
+    // it divided the current HEIGHT by the current SPEED, which is not a time to
+    // anything. Off a ramp lying on the ground that reads a fraction of a second
+    // while the car is still travelling UPWARD at 8 m/s:
+    //     t=0.15  y=1.56  vy=+6.2  engage 0.94   <- full assist on the way up
+    //     t=0.85  y=3.45  vy=−0.7  engage 0.86
+    // i.e. the assist ran at ~90% for the entire jump, and 32000 N·m of
+    // levelling against a 13600 N·m roll ceiling meant the roll simply never
+    // happened: 39° reached against 180° with the assist disabled.
+    //
+    // The car is a projectile, so the honest answer is closed form. Solving
+    // drop = −vy·t + ½g·t² for the positive root is speed-invariant, correctly
+    // counts the time still to be spent CLIMBING, and needs no probe geometry.
+    const hitY = hit.point ? hit.point.y : body.pos.y - (hit.distance ?? 0);
+    const drop = body.pos.y - hitY;
+    if (drop <= 0) return; // probe found something at or above us — not a landing
+    const vy = body.vel.y;
+    const tti = (vy + Math.sqrt(Math.max(0, vy * vy + 2 * GRAVITY * drop))) / GRAVITY;
+    let engage = 1 - Math.min(1, tti / Math.max(0.05, TIRE.airLandTime));
     if (engage <= 0) return;
+    // YIELD TO A HELD ROLL — see airLandInputYield.
+    engage *= 1 - TIRE.airLandInputYield * Math.min(1, Math.abs(this.input.steer));
+    if (engage <= 1e-3) return;
     this._landEngage = engage;
 
     if (hit.normal) this._landN.set(hit.normal.x, hit.normal.y, hit.normal.z);
@@ -2500,6 +2561,24 @@ export class Vehicle {
       .multiplyScalar(TIRE.airLandTorque * engage * TIRE.airLandAssist);
     const wYaw = body.angVel.dot(this._landUp);
     this._landTilt.copy(body.angVel).addScaledVector(this._landUp, -wYaw);
+
+    // SPLIT ROLL FROM PITCH — see airLandPitchLevel. cross(up, N) is by
+    // construction perpendicular to the chassis up-axis, so it lies exactly in
+    // the chassis' right/forward plane: its RIGHT component pitches the car and
+    // its FORWARD component rolls it, with no yaw term to worry about. Scaling
+    // the right component down therefore levels the car side-to-side (which is
+    // what saves the landing) while leaving the nose wherever the arc assist put
+    // it (which is what makes the landing look right).
+    const keepPitch = THREE.MathUtils.clamp(TIRE.airLandPitchLevel, 0, 1);
+    if (keepPitch < 1) {
+      this._landRight.set(1, 0, 0).applyQuaternion(body.quat);
+      const pitchTq = this._landTorque.dot(this._landRight);
+      this._landTorque.addScaledVector(this._landRight, -pitchTq * (1 - keepPitch));
+      // The damping is split the same way, or it would bleed off the arc
+      // assist's pitch RATE and flatten the nose by the back door.
+      const pitchRate = this._landTilt.dot(this._landRight);
+      this._landTilt.addScaledVector(this._landRight, -pitchRate * (1 - keepPitch));
+    }
     this._landTorque.addScaledVector(this._landTilt, -TIRE.airLandDamp * engage);
     body.torqueAccum.add(this._landTorque);
   }
@@ -2655,7 +2734,18 @@ export class Vehicle {
           // assist's own engage ramp keeps the arc look in mid-flight and lets
           // the car LEVEL for the landing, which is the half that has to feel
           // good rather than look good.
-          const handover = 1 - (this._landEngage ?? 0);
+          // HAND OVER ONLY AS FAR AS THE LANDING ASSIST ACTUALLY TAKES OVER.
+          // This used to fade to zero over the assist's engage ramp, back when
+          // the assist levelled pitch as well as roll — handing the axis to
+          // something else and then also switching yourself off is correct. It
+          // no longer levels pitch by default (airLandPitchLevel 0), so fading
+          // out would leave NOBODY driving the nose for the last half-second and
+          // the car would coast in flat: the arc look would be built over the
+          // whole descent and then abandoned exactly where the player is looking
+          // at it. Scaling by the same fraction keeps the two consistent at any
+          // setting, and at the default means the nose tracks the arc all the
+          // way to touchdown.
+          const handover = 1 - (this._landEngage ?? 0) * THREE.MathUtils.clamp(TIRE.airLandPitchLevel, 0, 1);
           if (handover > 0.02) {
             pitchTarget = rate * handover;
             pitchGain = TIRE.airAlignGain;

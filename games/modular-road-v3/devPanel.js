@@ -479,6 +479,41 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Assist window</span>
+            <div class="prop-value">
+              <input type="range" id="dv-land-time" min="0.1" max="2.5" step="0.05" />
+              <span class="prop-num" id="dv-land-time-v"></span>
+            </div>
+          </div>
+          <!-- 0 = the assist levels ROLL only and leaves the nose down, so the
+               car lands front-first. 1 = the old behaviour, which flattened the
+               car in the last few metres. -->
+          <div class="prop-row">
+            <span class="prop-label">Assist levels pitch</span>
+            <div class="prop-value">
+              <input type="range" id="dv-land-pitch" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-land-pitch-v"></span>
+            </div>
+          </div>
+          <!-- How much of the assist a held roll input switches off. At 0 the
+               assist out-torques the player and the car will not roll. -->
+          <div class="prop-row">
+            <span class="prop-label">Assist yields to roll</span>
+            <div class="prop-value">
+              <input type="range" id="dv-land-yield" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-land-yield-v"></span>
+            </div>
+          </div>
+          <!-- Fraction of the flight-path angle the nose tracks in the air:
+               higher = more nose-down through a jump. -->
+          <div class="prop-row">
+            <span class="prop-label">Arc follow amount</span>
+            <div class="prop-value">
+              <input type="range" id="dv-air-arcfrac" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-air-arcfrac-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Body roll</span>
             <div class="prop-value">
               <input type="range" id="dv-lean-roll" min="0" max="0.3" step="0.01" />
@@ -1521,6 +1556,11 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-land-absorb", TIRE, "landingAbsorb", (v) => `${Math.round(v * 100)}%`);
   slider("dv-land-assist", TIRE, "airLandAssist", (v) => v.toFixed(2));
   slider("dv-land-range", TIRE, "airLandRange", (v) => `${v.toFixed(0)} m`);
+  slider("dv-land-time", TIRE, "airLandTime", (v) => `${v.toFixed(2)}s`);
+  // 0 keeps the nose down for a front-first landing; 1 is the old flatten.
+  slider("dv-land-pitch", TIRE, "airLandPitchLevel", (v) => `${Math.round(v * 100)}%`);
+  slider("dv-land-yield", TIRE, "airLandInputYield", (v) => `${Math.round(v * 100)}%`);
+  slider("dv-air-arcfrac", TIRE, "airAlignFraction", (v) => `${Math.round(v * 100)}%`);
   // Track width is the hub |x|; the readout shows the FULL track so it can be
   // compared against the body width directly.
   slider("dv-track", WHEEL_LAYOUT, "halfTrack", (v) => (v * 2).toFixed(2) + "m",

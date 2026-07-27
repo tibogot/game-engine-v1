@@ -374,5 +374,140 @@ console.log("\n=== IT WORKS ACROSS THE RANGE OF JUMPS THE KIT BUILDS ===");
   check("no jump lands nose-UP, and none lands steeper than its own arc", ok);
 }
 
+console.log("\n=== A LOW RAMP ON FLAT GROUND MUST STILL LET YOU ROLL ===");
+// Reported: put a ramp obstacle on the ground, hit it, hold roll, and "something
+// is resisting" — the car barely turns over.
+//
+// It was the predictive landing assist. Its `engage` came from
+// (probe range / speed), and while the car is CLIMBING the probe points straight
+// down — so it divided the current HEIGHT by the current SPEED, which is not a
+// time to anything. A car 1.5 m off the deck at 31 m/s read 0.05 s to impact and
+// engaged at 0.94 on the way UP. At 32000 N·m against the 13600 N·m ceiling the
+// rate model can ask for on roll (3.6 rad/s × response 9 × 420 kg·m²), the
+// player simply loses: 39° of roll reached against 180° with the assist off.
+//
+// engage is now a real ballistic time-to-impact, so a climbing car reads seconds.
+{
+  const lowRamp = (assist) => {
+    const save = TIRE.airLandAssist;
+    TIRE.airLandAssist = assist;
+    const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
+    c.groundBvh = ground; c.enabled = true;
+    c.body.pos.set(0, 0.45, 0); c.body.vel.set(0, 8, 30); c.body.quat.identity();
+    let peak = 0, engageWhileClimbing = 0;
+    for (let i = 0; i < 2 / FIXED_DT; i++) {
+      c.tick({ steerTarget: -1, throttle: 1, handbrake: false, yaw: 0, pitch: 0 });
+      _up.set(0, 1, 0).applyQuaternion(c.body.quat);
+      _fwd.set(0, 0, 1).applyQuaternion(c.body.quat);
+      const right = new THREE.Vector3().crossVectors(_up, _fwd);
+      const roll = Math.abs(Math.atan2(right.y, _up.y) * R2D);
+      if (roll > peak) peak = roll;
+      if (c.groundedCount === 0 && c.body.vel.y > 1) {
+        engageWhileClimbing = Math.max(engageWhileClimbing, c._landEngage ?? 0);
+      }
+    }
+    TIRE.airLandAssist = save;
+    return { peak, engageWhileClimbing };
+  };
+  const on = lowRamp(1);
+  const off = lowRamp(0);
+  check(
+    "the landing assist never engages while the car is still going UP",
+    on.engageWhileClimbing < 0.05,
+    `peak engage while climbing ${on.engageWhileClimbing.toFixed(2)} (was 0.94)`,
+  );
+  check(
+    "holding roll off a low ground ramp gets the car over",
+    on.peak > 150,
+    `${on.peak.toFixed(0)}° with the assist, ${off.peak.toFixed(0)}° without (was 78° vs 179°)`,
+  );
+}
+
+console.log("\n=== BUT THE ASSIST MUST STILL SAVE A RELEASED ROLL ===");
+// The other half: it yields to a HELD roll, so it must still level the car once
+// the player lets go. Landing rolled is not a cosmetic problem — the tyres bite
+// at an angle and shove the car sideways (see airLandTorque).
+{
+  const bigJump = (assist) => {
+    const save = TIRE.airLandAssist;
+    TIRE.airLandAssist = assist;
+    const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
+    c.groundBvh = ground; c.enabled = true;
+    c.body.pos.set(0, 14, 0); c.body.vel.set(0, 9, 45); c.body.quat.identity();
+    let landed = null, tilt = 0, xAtLand = 0, lateral = 0;
+    for (let i = 0; i < 6 / FIXED_DT; i++) {
+      const t = i * FIXED_DT;
+      c.tick({
+        steerTarget: (landed === null && t < 0.3) ? -1 : 0, // released well before landing
+        throttle: 1, handbrake: false, yaw: 0, pitch: 0,
+      });
+      if (landed === null && c.groundedCount >= 3) {
+        landed = t; xAtLand = c.body.pos.x;
+        _up.set(0, 1, 0).applyQuaternion(c.body.quat);
+        tilt = Math.acos(THREE.MathUtils.clamp(_up.y, -1, 1)) * R2D;
+      }
+      if (landed !== null && t - landed <= 2) lateral = Math.abs(c.body.pos.x - xAtLand);
+    }
+    TIRE.airLandAssist = save;
+    return { tilt, lateral };
+  };
+  const on = bigJump(1);
+  const off = bigJump(0);
+  check(
+    "roll is levelled before touchdown once the input is released",
+    on.tilt < 15 && on.tilt < off.tilt,
+    `${on.tilt.toFixed(0)}° tilt with the assist vs ${off.tilt.toFixed(0)}° without`,
+  );
+  check(
+    "and the car does not get shoved sideways on landing",
+    on.lateral < 1.0 && on.lateral <= off.lateral + 0.05,
+    `${on.lateral.toFixed(1)} m slide vs ${off.lateral.toFixed(1)} m`,
+  );
+}
+
+console.log("\n=== THE NOSE STAYS DOWN THROUGH TOUCHDOWN ===");
+// Reported: the nose points down in flight (correct) but the car "gets flat and
+// stabilised" in the last few metres, so it slaps down on all four wheels at
+// once. That was the assist's PITCH half cancelling everything the arc assist
+// built, plus the arc assist handing its axis over to it. The assist now levels
+// ROLL only, so the nose leads and the rear follows — which is what a real car
+// does off a jump.
+{
+  const attitude = () => {
+    const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
+    c.groundBvh = ground; c.enabled = true;
+    c.body.pos.set(0, 8, 0); c.body.vel.set(0, 6, 32); c.body.quat.identity();
+    let deepest = 0, frontAt = null, noseAtFront = 0, rearDelay = null;
+    for (let i = 0; i < 5 / FIXED_DT; i++) {
+      const t = i * FIXED_DT;
+      c.tick({ steerTarget: 0, throttle: 1, handbrake: false, yaw: 0, pitch: 0 });
+      _fwd.set(0, 0, 1).applyQuaternion(c.body.quat);
+      const nose = Math.asin(THREE.MathUtils.clamp(_fwd.y, -1, 1)) * R2D;
+      if (c.groundedCount === 0) deepest = Math.min(deepest, nose);
+      const front = c.tires[0].grounded || c.tires[1].grounded;
+      const rear = c.tires[2].grounded || c.tires[3].grounded;
+      if (frontAt === null && front) { frontAt = t; noseAtFront = nose; }
+      if (frontAt !== null && rearDelay === null && rear) rearDelay = t - frontAt;
+    }
+    return { deepest, noseAtFront, rearDelay: (rearDelay ?? 0) * 1000 };
+  };
+  const r = attitude();
+  check(
+    "the nose is still pointing DOWN when the front wheels arrive",
+    r.noseAtFront < -7,
+    `${r.noseAtFront.toFixed(1)}° at contact, deepest ${r.deepest.toFixed(1)}° (was −5.7° at contact)`,
+  );
+  check(
+    "it does not flatten out over the last metres",
+    r.noseAtFront <= r.deepest + 1.5,
+    `held ${(r.deepest - r.noseAtFront).toFixed(1)}° of the ${Math.abs(r.deepest).toFixed(1)}° it built`,
+  );
+  check(
+    "front lands first and the rear follows straight after",
+    r.rearDelay > 20 && r.rearDelay < 200,
+    `rear arrives ${r.rearDelay.toFixed(0)} ms later (was 42 ms — near-simultaneous)`,
+  );
+}
+
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nall green");
 process.exit(fail ? 1 : 0);

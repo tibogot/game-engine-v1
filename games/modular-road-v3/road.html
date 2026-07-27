@@ -47,6 +47,29 @@
       #hint[data-mode="build"] .hint-build { display: inline; }
       #hint[data-mode="drive"] .hint-drive { display: inline; }
 
+      /* ── DEBUG ORBIT CAM (C) ───────────────────────────────────────────────
+         Deliberately its own overlay rather than a corner of #race-hud: the race
+         HUD is hidden in build mode and this has to survive independently, and a
+         debug readout should never be mistaken for part of the game UI. */
+      #debug-cam {
+        position: fixed; left: 12px; bottom: 12px; z-index: 60;
+        display: none; pointer-events: none;
+        font: 11px/1.55 ui-monospace, "Cascadia Mono", Consolas, monospace;
+        color: #cfe4ff; background: rgba(8, 12, 20, 0.72);
+        border: 1px solid rgba(120, 170, 255, 0.28); border-radius: 6px;
+        padding: 7px 10px; letter-spacing: 0.2px;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+      }
+      #debug-cam.on { display: block; }
+      #debug-cam b { color: #fff; font-weight: 600; }
+      #debug-cam .k { color: #7fb2ff; }
+      #debug-cam .num { color: #fff; font-variant-numeric: tabular-nums; }
+      #debug-cam .air { color: #ffcf6b; }
+      #debug-cam .keys {
+        margin-top: 5px; padding-top: 5px; color: #8ea3bd;
+        border-top: 1px solid rgba(120, 170, 255, 0.18);
+      }
+
       /* ── RACE HUD (drive mode) ─────────────────────────────────────────── */
       #race-hud {
         position: fixed; inset: 0; z-index: 40; pointer-events: none;
@@ -241,6 +264,29 @@
       ></button>
     </div>
 
+    <!-- Debug orbit cam readout — roadGame toggles #debug-cam.on with the C key.
+         The attitude numbers are the point: the camera lets you SEE the car from
+         any angle, these say exactly what angle it is at. -->
+    <div id="debug-cam">
+      <div>
+        cam <b id="dbg-frame">world</b>
+        &nbsp;·&nbsp; <span class="k">pitch</span> <span class="num" id="dbg-pitch">0.0°</span>
+        &nbsp; <span class="k">roll</span> <span class="num" id="dbg-roll">0.0°</span>
+        &nbsp; <span class="k">yaw</span> <span class="num" id="dbg-yaw">0.0°</span>
+      </div>
+      <div>
+        <span class="k">wheels</span> <span class="num" id="dbg-grounded">4/4</span>
+        &nbsp; <span class="k">spd</span> <span class="num" id="dbg-speed">0</span> m/s
+        &nbsp; <span id="dbg-air" class="air"></span>
+      </div>
+      <div class="keys">
+        <b>C</b> off &nbsp; <b>V</b> world/car &nbsp; <b>1</b>-<b>4</b> back/front/left/right
+        &nbsp; <b>X</b> recentre &nbsp; <b>+</b>/<b>−</b> zoom
+        <br />drag orbit · right-drag pan · wheel zoom
+        &nbsp;·&nbsp; <span class="k">dist</span> <span class="num" id="dbg-dist">9.0</span> m
+      </div>
+    </div>
+
     <!-- Race HUD — shown only while driving (roadGame toggles #race-hud.on). -->
     <div id="race-hud">
       <div id="race-clock">
@@ -299,7 +345,8 @@
       </span>
       <span class="hint-drive">
         <b>B</b> build &nbsp;·&nbsp; <b>WASD</b>/<b>Arrows</b> drive &nbsp;·&nbsp;
-        <b>Space</b> handbrake &nbsp;·&nbsp; <b>R</b> respawn
+        <b>Space</b> handbrake &nbsp;·&nbsp; <b>R</b> respawn &nbsp;·&nbsp;
+        <b>C</b> debug cam
         &nbsp;&nbsp;|&nbsp;&nbsp; in air: <b>Shift</b>/<b>Ctrl</b> flip &nbsp;·&nbsp;
         <b>A/D</b> roll &nbsp;·&nbsp; <b>Q/E</b> spin
       </span>

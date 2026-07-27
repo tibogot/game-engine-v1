@@ -83,6 +83,7 @@ import {
   createTrackFileInput,
 } from "./modularRoadTrackIO.js";
 import { createChaseCamera } from "./chaseCamera.js";
+import { createDebugCamera } from "./debugCamera.js";
 import { createGamepadInput } from "./gamepadInput.js";
 import { createGearbox, GEARBOX } from "./gearbox.js";
 import { createDriftScore, DRIFT_SCORE } from "./driftScore.js";
@@ -762,12 +763,86 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // freeLook hands the camera back to orbit WHILE driving — a dev affordance for
   // inspecting the car mid-run without leaving drive mode.
   let freeLook = false;
+  // Debug orbit cam (C) — drive AND look at the car from any angle at once.
+  // It owns camera.position/up directly, exactly like the chase rig, so it must
+  // be mutually exclusive with BOTH the chase rig and OrbitControls. That falls
+  // out for free: it only runs in drive mode, where applyControlMode() has
+  // already neutered controls.update, and the chase call site below picks one.
+  let debugCamOn = false;
   const chase = createChaseCamera({
     camera,
     vehicle,
     orbit: controls,
     isOrbit: () => mode === "build" || freeLook,
   });
+  const debugCam = createDebugCamera({
+    camera,
+    vehicle,
+    domElement: renderer.domElement,
+    isActive: () => debugCamOn && mode === "drive" && !freeLook,
+  });
+
+  /** Which rig owns the camera this frame. Drive mode only — build is orbit. */
+  const debugCamActive = () => debugCamOn && mode === "drive" && !freeLook;
+
+  function setDebugCam(on) {
+    const next = !!on;
+    if (next === debugCamOn) return debugCamOn;
+    debugCamOn = next;
+    // Seed from wherever the other rig left the camera so the switch is a
+    // continuous move rather than a cut, in BOTH directions.
+    if (debugCamOn) debugCam.enter();
+    else chase.reset();
+    dbgEl.root?.classList.toggle("on", debugCamOn);
+    return debugCamOn;
+  }
+
+  // ── Debug cam readout ──────────────────────────────────────────────────────
+  // Cached element lookups: this updates every frame while the cam is on, and
+  // getElementById ×8 per frame for a debug overlay is pure waste.
+  const dbgEl = {
+    root: document.getElementById("debug-cam"),
+    frame: document.getElementById("dbg-frame"),
+    pitch: document.getElementById("dbg-pitch"),
+    roll: document.getElementById("dbg-roll"),
+    yaw: document.getElementById("dbg-yaw"),
+    grounded: document.getElementById("dbg-grounded"),
+    speed: document.getElementById("dbg-speed"),
+    air: document.getElementById("dbg-air"),
+    dist: document.getElementById("dbg-dist"),
+  };
+  const _dbgFwd = new THREE.Vector3();
+  const _dbgUp = new THREE.Vector3();
+  const _dbgRight = new THREE.Vector3();
+  const R2D = 180 / Math.PI;
+  let _dbgAir = 0;
+
+  function updateDebugReadout(dt) {
+    if (!dbgEl.root || !debugCamActive()) return;
+    const q = vehicle.body.quat;
+    _dbgFwd.set(0, 0, 1).applyQuaternion(q);
+    _dbgUp.set(0, 1, 0).applyQuaternion(q);
+    _dbgRight.crossVectors(_dbgUp, _dbgFwd);
+    // Pitch from the nose's elevation, roll from how far the up-axis has tipped
+    // toward the car's own right — the same decomposition the landing assist
+    // uses, so the numbers here match what the physics is acting on.
+    const pitch = Math.asin(THREE.MathUtils.clamp(_dbgFwd.y, -1, 1)) * R2D;
+    const roll = Math.atan2(_dbgRight.y, _dbgUp.y) * R2D;
+    const yaw = Math.atan2(_dbgFwd.x, _dbgFwd.z) * R2D;
+    const g = vehicle.groundedCount;
+    _dbgAir = g === 0 ? _dbgAir + dt : 0;
+
+    dbgEl.frame.textContent = debugCam.frame;
+    dbgEl.pitch.textContent = `${pitch >= 0 ? "+" : ""}${pitch.toFixed(1)}°`;
+    dbgEl.roll.textContent = `${roll >= 0 ? "+" : ""}${roll.toFixed(1)}°`;
+    dbgEl.yaw.textContent = `${yaw.toFixed(0)}°`;
+    dbgEl.grounded.textContent = `${g}/4`;
+    dbgEl.speed.textContent = vehicle.body.vel.length().toFixed(1);
+    dbgEl.air.textContent = g === 0 ? `AIRBORNE ${_dbgAir.toFixed(2)}s` : "";
+    // Live distance readout — the zoom is otherwise invisible feedback, and it
+    // is what told us the wheel was doing nothing at all.
+    if (dbgEl.dist) dbgEl.dist.textContent = debugCam.distance.toFixed(1);
+  }
 
   /**
    * The engine's editor loop re-enables `controls.enabled` every frame, so
@@ -918,6 +993,27 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
     if (mode === "drive") {
       if (code === "keyr") respawn();
+      // DEBUG ORBIT CAM. None of these collide with driving: the drive keymap is
+      // WASD / arrows / QE / space / shift / ctrl only (see the input block).
+      else if (code === "keyc") setDebugCam(!debugCamOn);
+      else if (debugCamActive()) {
+        if (code === "keyv") debugCam.toggleFrame();
+        else if (code === "keyx") debugCam.recenter();
+        // Canned angles. Side-on at eye level is the one that reads a jump's
+        // pitch profile, which is why they're on the number row where a thumb
+        // can reach them mid-flight.
+        else if (code === "digit1") debugCam.preset("behind");
+        else if (code === "digit2") debugCam.preset("front");
+        else if (code === "digit3") debugCam.preset("left");
+        else if (code === "digit4") debugCam.preset("right");
+        // Keyboard zoom as well as the wheel. Not redundant: the wheel is a
+        // contested event on this canvas (the editor camera controller
+        // stopPropagation()s it — see debugCamera.js), and a key cannot be
+        // stolen the same way now that the game owns the keyboard outright.
+        // It is also the only zoom that works one-handed mid-jump.
+        else if (code === "equal" || code === "numpadadd") debugCam.zoomBy(-1);
+        else if (code === "minus" || code === "numpadsubtract") debugCam.zoomBy(1);
+      }
       return;
     }
     handleBuildKey(e, code); // build mode
@@ -1477,6 +1573,12 @@ ${e.message}`);
       vehicle.enabled = false;
       ghostMesh.visible = false;
     }
+    // The debug cam only exists in drive mode. Its ON state SURVIVES a trip to
+    // build mode (you go there to move a ramp and come straight back), so
+    // re-seed the rig on the way in or it would resume from the angle it held
+    // before the editor moved the camera somewhere else entirely.
+    if (driving && debugCamOn) debugCam.enter();
+    dbgEl.root?.classList.toggle("on", driving && debugCamOn);
     if (driving) { gapPreview.setVisible(false); if (buildGrid) buildGrid.visible = false; } // build-only aids
     spawnMarker.visible = !driving; // a build-time guide; hidden while racing
     if (hud) hud.classList.toggle("on", driving);
@@ -1787,7 +1889,12 @@ ${e.message}`);
     // so doors sat frozen.
     portals.updateVisuals(dt);
 
-    chase.update(dt);
+    // ONE rig owns camera.position/up per frame. Both write it directly, so
+    // running both would make them alternate and the view would shake (the same
+    // failure the chase rig's controls.update patch exists to prevent).
+    if (debugCamActive()) debugCam.update(dt);
+    else chase.update(dt);
+    updateDebugReadout(dt);
 
     // Per-frame audio pump — drives every layer's gain/pitch from the car's
     // state. WITHOUT THIS CALL NOTHING PLAYS AT ALL. Runs unconditionally (not
