@@ -58,18 +58,26 @@ const make = (ground, y = 0.6) => {
   c.body.pos.set(0, y, 0); c.body.quat.identity();
   return c;
 };
-/** The renderer's clamp chain, kept in step with modularRoadVehicle.js. */
-const drawnExt = (t) => {
-  const target = t.grounded ? t.hitDistance : TIRE.rayLength;
-  const e = Math.max(0, target - WHEEL.radius);
-  if (e > TIRE.maxDroop) return TIRE.maxDroop;
-  if (e < TIRE.minSuspExt) return TIRE.minSuspExt;
-  return e;
+/**
+ * What the renderer ACTUALLY drew, read back off the vehicle.
+ *
+ * This used to be a copy of the clamp chain written out again here — which is
+ * how it survived the arch-lift work unchanged while quietly testing a formula
+ * the renderer had stopped using. Read the real field; a duplicated rule only
+ * ever tests itself.
+ */
+const drawnExt = (t) => t.visualExt;
+/** Arch gap actually presented to the bodywork: the wheel's own extension plus
+ *  whatever lift the body took on to keep that gap open. */
+const archGap = (c, t) => t.visualExt + c._archLift;
+/** Advance BOTH the sim and the visual layer — visualExt only exists after a
+ *  syncVisuals, and it eases, so it has to be stepped every tick. */
+const step1 = (c, input = {}) => {
+  c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0, pitch: 0, ...input });
+  c.syncVisuals(FIXED_DT, 1);
 };
 const settle = (c, secs = 2) => {
-  for (let i = 0; i < secs / FIXED_DT; i++) {
-    c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0, pitch: 0 });
-  }
+  for (let i = 0; i < secs / FIXED_DT; i++) step1(c);
 };
 
 console.log("=== (1) THE WHEEL CANNOT CLIMB INTO THE BODY ===");
@@ -93,33 +101,73 @@ console.log("=== (1) THE WHEEL CANNOT CLIMB INTO THE BODY ===");
     `minSuspExt ${TIRE.minSuspExt} < maxDroop ${TIRE.maxDroop}`,
   );
 
-  let worstRise = 0;
-  const rows = [];
-  for (const step of [0.05, 0.1, 0.2, 0.35, 0.6]) {
+  // THE ARCH GAP IS NOW HELD OPEN BY THE BODY, NOT BY CLAMPING THE WHEEL.
+  //
+  // This assertion used to be "the wheel never rises more than the bump travel
+  // above its fitted spot", which was the right property while `minSuspExt` was
+  // a hard floor on the drawn wheel. It no longer is: the wheel goes wherever
+  // the ground is (that is the point — a floor can only push the tyre DOWN, into
+  // the road), and the BODY lifts to keep the gap. So the thing to check is the
+  // gap itself, which is what the bodywork actually cares about.
+  const probeStep = (step) => {
     const c = make(makeGround(step, 5));
-    let minExt = Infinity;
+    let minGap = Infinity, sink = 0;
     for (let i = 0; i < 4 / FIXED_DT; i++) {
-      c.tick({ steerTarget: 0, throttle: 1, handbrake: false, yaw: 0, pitch: 0 });
-      if (c.tires[0].grounded) minExt = Math.min(minExt, drawnExt(c.tires[0]));
+      step1(c, { throttle: 1 });
+      const t = c.tires[0];
+      if (!t.grounded) continue;
+      minGap = Math.min(minGap, archGap(c, t));
+      // …and the other half of the same trade: the wheel must not be drawn
+      // BELOW the surface it just measured.
+      sink = Math.max(sink, drawnExt(t) - (t.hitDistance - WHEEL.radius));
     }
-    const rise = restExt - minExt;
-    worstRise = Math.max(worstRise, rise);
-    rows.push(`${step}m→${(rise * 100).toFixed(1)}cm`);
-  }
-  // The tyre top may not pass the settled top by more than the arch gap.
-  check(
-    "no obstacle drives the wheel more than the bump travel above its fitted spot",
-    worstRise <= restExt - TIRE.minSuspExt + 1e-6,
-    `worst rise ${(worstRise * 100).toFixed(1)} cm, limit ${((restExt - TIRE.minSuspExt) * 100).toFixed(1)} cm (was 14.0 cm)`,
-  );
-  console.log(`      steps: ${rows.join("  ")}`);
+    return { gap: minGap, sink };
+  };
 
-  // Falling off a ledge must still show the suspension EXTEND — the bump stop
+  // DRIVABLE obstacles — a kerb, a ramp lip. This is the range the mechanism is
+  // specified for, and the range a road deck can actually present.
+  let worstGap = Infinity, worstSink = 0;
+  const rows = [];
+  for (const step of [0.05, 0.1, 0.2]) {
+    const r = probeStep(step);
+    worstGap = Math.min(worstGap, r.gap);
+    worstSink = Math.max(worstSink, r.sink);
+    rows.push(`${step}m→${(r.gap * 100).toFixed(1)}cm`);
+  }
+  check(
+    "over drivable obstacles the body keeps the wheel-arch gap open",
+    worstGap >= TIRE.minSuspExt - 1e-6,
+    `worst gap ${(worstGap * 100).toFixed(1)} cm vs target ${(TIRE.minSuspExt * 100).toFixed(1)} cm`,
+  );
+  check(
+    "…and the wheel is never drawn below the surface it measured",
+    worstSink <= 1e-4,
+    `worst ${(worstSink * 100).toFixed(2)} cm below contact`,
+  );
+  console.log(`      arch gap: ${rows.join("  ")}`);
+
+  // BEYOND THE CAP — reported, deliberately not asserted.
+  //
+  // TIRE.archLiftMax (0.25 m) bounds both the body lift and how far above its
+  // hub a wheel may be drawn. A step taller than that is not a bump the
+  // suspension absorbs, it is a WALL: at 0.60 m the hub itself ends up below the
+  // new surface (0.497 m of static hub height against a 0.60 m rise), so there
+  // is no wheel placement and no bounded lift that keeps the tyre out of it.
+  // The chassis collider owns that case, not the visual layer.
+  //
+  // Left visible rather than tuned away, because if these numbers ever appear on
+  // a real track it means a deck has a cliff in it.
+  console.log("      beyond the cap (walls, not bumps — chassis collision's job):");
+  for (const step of [0.35, 0.6]) {
+    const r = probeStep(step);
+    console.log(`        ${step} m step → arch gap ${(r.gap * 100).toFixed(1)} cm,`
+      + ` wheel ${(r.sink * 100).toFixed(1)} cm below contact`);
+  }
+
+  // Falling off a ledge must still show the suspension EXTEND — the clamps
   // must not have accidentally frozen the travel.
   const air = make(makeGround(), 6);
-  for (let i = 0; i < 0.5 / FIXED_DT; i++) {
-    air.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0, pitch: 0 });
-  }
+  for (let i = 0; i < 0.5 / FIXED_DT; i++) step1(air);
   check(
     "airborne, the wheels still hang down on the droop stop",
     Math.abs(drawnExt(air.tires[0]) - TIRE.maxDroop) < 1e-6,

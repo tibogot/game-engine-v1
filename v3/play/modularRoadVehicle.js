@@ -117,8 +117,55 @@ export const TIRE = {
    * PHYSICS IS UNTOUCHED — `compression` still runs its full range, so the
    * spring, the bottom-out and the handling are exactly as before. This clamps
    * the mesh offset only.
+   *
+   * NOTE this is no longer a hard floor on the drawn wheel — see `archLiftBody`,
+   * which pays for the clearance by raising the BODY instead. It is now the
+   * arch-gap TARGET rather than a clamp.
    */
   minSuspExt: 0.10,
+
+  // ── ARCH CLEARANCE: WHO MOVES, THE WHEEL OR THE BODY? ───────────────────
+  // `minSuspExt` used to be a floor on the drawn wheel, and a floor can only
+  // push one way: DOWN, into the road. MEASURED sink of the drawn tyre below the
+  // surface (tools/wheelSinkRepro.mjs) before this existed:
+  //     0.10 m step  6.9 cm     0.20 m step  14.7 cm     2 m drop  12.5 cm
+  // while steady state — flat, and 15°/25° slopes — was already a clean 0.0 cm.
+  // So all of it is transient, and there are two separate causes:
+  //   • `suspVisSmooth` eases the DRAWN extension, so on rising ground the mesh
+  //     lags the contact the tyre has already found. Fixed by never drawing the
+  //     wheel below `hitDistance` (see _updateWheelExtensions).
+  //   • deep compression genuinely runs out of visual travel. On a 0.20 m step
+  //     the hub sits 0.297 m above the new surface with a 0.36 m tyre — the
+  //     contact patch is ABOVE the hub, and NO wheel placement avoids clipping.
+  //
+  // That second one cannot be won by moving the wheel, because the travel budget
+  // is fixed by where the body sits. The body has to move, which is also what a
+  // real car does over a bump. BODYLEAN.archCompensate already does exactly this
+  // trick for body roll; this is the same idea with a different cause.
+  /**
+   * Fraction of an arch shortfall paid for by LIFTING THE BODY rather than by
+   * pushing the wheel down into the ground, 0..1.
+   *
+   * 1 = the wheel always sits on the surface and the body rides up over bumps.
+   * 0 = bit-for-bit the old `suspExt < minSuspExt → minSuspExt` clamp.
+   *
+   * The cost of 1 is that a shortfall at ONE corner lifts the whole mesh, so the
+   * other three wheels look further extended for as long as it lasts. That is
+   * roughly what a real body does (it rises AND rolls; only the rise is modelled
+   * here), and it only happens on compressions past ~3.7 cm from static, i.e.
+   * real hits rather than ordinary driving.
+   */
+  archLiftBody: 1,
+  /** Cap on that lift (m). Also caps how far a wheel may be drawn ABOVE its hub,
+   *  so a bad probe can never fling the body into the air. */
+  archLiftMax: 0.25,
+  /**
+   * Ease rate (1/s) for the lift coming back DOWN. Going up is instant and
+   * deliberately unsmoothed: every frame of delay is a frame of tyre inside the
+   * bodywork, which is the whole thing being fixed. Coming down is eased so a
+   * kerb strike does not drop the body out from under itself.
+   */
+  archLiftSettle: 6,
   restLength: 0.55,
   springStrength: 65000,
   damper: 6500,
@@ -210,6 +257,40 @@ export const TIRE = {
    *  only a jitter filter — running analog input through the keyboard ramp adds
    *  lag the player can feel directly. */
   steerAnalogRate: 30.0,
+  /**
+   * AIR ROLL ramp (1/s) — the steering keys' rate while AIRBORNE, where they
+   * drive roll instead of the front wheels.
+   *
+   * The air axis used to read `input.steer` directly, i.e. the value shaped for
+   * the TYRES: `steerAttack` 7/s, cut a further 30% by `steerRateSpeedDrop` at
+   * speed. That ramp is the steering RACK'S weight, and there is no rack in the
+   * air — so the rate model's own feel knob (`airResponse` 9/s) was never what
+   * the player actually felt on roll; it ran in SERIES with a slower filter.
+   * MEASURED at 45 m/s (tools/airRollLagRepro.mjs), full key held:
+   *     input.steer reaches 90% in 0.48 s  →  90° of roll took 0.73 s
+   *     airSteer at 18/s reaches 90% in 0.13 s  →  90° of roll takes 0.60 s
+   * Short inputs suffered worst, because the rack ramp never got near full
+   * deflection at all. A 0.25 s tap, roll at release and peak roll rate:
+   *     rack ≈4.9/s   11.6°   1.93 rad/s
+   *     18/s          23.1°   2.94 rad/s
+   *     raw           —       3.24 rad/s
+   *
+   * NOT RAW, THOUGH. Removing the filter does not "restore" anything — the roll
+   * axis has never once run at its nominal settings, so raw would expose
+   * `airResponse` 9 × `airRollRate` 3.6 for the first time. The sweep also
+   * saturates: raw buys only 50 ms more on the held roll, while putting a 0.15 s
+   * tap at 2.69 rad/s of the 3.6 ceiling — a flick of the key most of the way to
+   * maximum roll rate. 18/s keeps ~90% of raw's authority on a realistic tap and
+   * matches `steerCounter`, the existing "every millisecond counts" rate, which
+   * is the same category of input.
+   *
+   * MEASURE THIS AXIS AT RELEASE OR BY PEAK RATE, NOT BY TOTAL ROTATION. The
+   * obvious metric — how far the car ends up rolled long after the key is up —
+   * is blind to this constant by construction: a unity-DC-gain filter passes the
+   * same total impulse whatever its time constant, so every rate integrates to
+   * the same angle and the change looks like a no-op.
+   */
+  airSteerRate: 18.0,
   /** Fraction the ATTACK rate is cut by at `steerSpeedRef` and above, so the
    *  wheel gets heavier with speed. Returning to centre and the countersteer
    *  CROSSING are never slowed — they're the recovery inputs. (Once a
@@ -1059,6 +1140,12 @@ class Tire {
     this.lastSteering = new THREE.Vector3();
     this.lastAccel = new THREE.Vector3();
     this._smoothDist = undefined;
+    /** Ground-hugging extension this wheel wants (m); may be negative on a deep
+     *  hit. Set by Vehicle._updateWheelExtensions. */
+    this._visExt = 0;
+    /** Extension the wheel is actually DRAWN at (m) — `_visExt` plus whatever
+     *  arch shortfall the body did not absorb. Visual only. */
+    this.visualExt = 0;
     /** Unfiltered contact normal, before the low-pass in apply(). */
     this._rawNormal = new THREE.Vector3(0, 1, 0);
     /** Low-passed contact normal — this is what `hitNormal` exposes. */
@@ -1363,7 +1450,10 @@ export class Vehicle {
 
     this.body = new RigidBody({ mass: CHASSIS.mass, size: CHASSIS });
     this.tires = WHEEL_LOCAL.map((w) => new Tire({ name: w.name, localPos: w.pos, steer: w.steer, drive: w.drive }));
-    this.input = { steer: 0, throttle: 0, handbrake: false, yaw: 0, pitch: 0 };
+    // `steer` is shaped for the TYRES; `airSteer` is the same stick/key shaped
+    // for the AIR ROLL axis, which has no steering rack to give weight. See
+    // TIRE.airSteerRate.
+    this.input = { steer: 0, airSteer: 0, throttle: 0, handbrake: false, yaw: 0, pitch: 0 };
 
     this.group = new THREE.Group();
     this.group.name = "Vehicle";
@@ -1952,6 +2042,9 @@ export class Vehicle {
     this._leanQPitch = new THREE.Quaternion();
     /** Smoothed visual lean angles (rad). Cosmetic only. */
     this._leanRoll = 0;
+    /** Body lift (m) currently paying for wheel-arch clearance — see
+     *  TIRE.archLiftBody. Cosmetic only. */
+    this._archLift = 0;
     this._leanPitch = 0;
     this._deckN = new THREE.Vector3();
     this.BOTTOM_CORNERS = [0, 1, 4, 5];
@@ -2070,6 +2163,7 @@ export class Vehicle {
     this._prevGrounded = 0;
     this._leanRoll = 0;
     this._leanPitch = 0;
+    this._archLift = 0;
     this._resetInterpolation();
     // Keep the render pose in step with the teleport (syncVisuals hasn't run yet).
     this._renderPos.copy(this.body.pos);
@@ -2151,6 +2245,7 @@ export class Vehicle {
     this._prevPos.copy(this.body.pos);
     this._prevQuat.copy(this.body.quat);
     this.input.steer = this._smoothSteer(controls.steerTarget ?? 0, !!controls.analog);
+    this.input.airSteer = this._smoothAirSteer(controls.steerTarget ?? 0, !!controls.analog);
     this.input.throttle = controls.throttle ?? 0;
     this.input.handbrake = !!controls.handbrake;
     this.input.yaw = controls.yaw ?? 0;
@@ -2334,6 +2429,29 @@ export class Vehicle {
       rate *= 1 - TIRE.steerRateSpeedDrop * t;
     }
 
+    return cur + (target - cur) * (1 - Math.exp(-rate * FIXED_DT));
+  }
+
+  /**
+   * The steering input shaped for the AIR ROLL axis — see TIRE.airSteerRate for
+   * why this is not just `input.steer`.
+   *
+   * Deliberately ONE symmetric rate, unlike `_smoothSteer`'s three. That split
+   * exists because winding a rack on, unwinding it, and catching a slide are
+   * three different manoeuvres with three different urgencies. Rolling has no
+   * such structure: there is no self-centring to unwind and nothing to catch, so
+   * a roll left and a roll back right are the same input and want the same rate.
+   *
+   * Runs unconditionally (not only while airborne) so the value is already
+   * settled the instant the wheels leave the ground — gating it would put a
+   * fresh ramp at the start of every jump, which is precisely the lag being
+   * removed.
+   */
+  _smoothAirSteer(target, analog) {
+    // A stick is already a deflection, so it only wants the jitter filter — the
+    // same reasoning as the analog branch of _smoothSteer.
+    const rate = analog ? TIRE.steerAnalogRate : TIRE.airSteerRate;
+    const cur = this.input.airSteer;
     return cur + (target - cur) * (1 - Math.exp(-rate * FIXED_DT));
   }
 
@@ -2631,7 +2749,12 @@ export class Vehicle {
     let engage = 1 - Math.min(1, tti / Math.max(0.05, TIRE.airLandTime));
     if (engage <= 0) return;
     // YIELD TO A HELD ROLL — see airLandInputYield.
-    engage *= 1 - TIRE.airLandInputYield * Math.min(1, Math.abs(this.input.steer));
+    // Reads `airSteer` so the yield tracks the input the ROLL axis is actually
+    // acting on. Against the rack-shaped `steer` the assist stood down over
+    // ~480 ms while the roll it was supposed to be yielding to had already
+    // started — i.e. it fought the first part of every deliberate roll, which is
+    // the one thing this yield exists to prevent.
+    engage *= 1 - TIRE.airLandInputYield * Math.min(1, Math.abs(this.input.airSteer));
     if (engage <= 1e-3) return;
     this._landEngage = engage;
 
@@ -2745,7 +2868,9 @@ export class Vehicle {
       // WHEEL_LOCAL labels the +X wheels "R", but +X is SCREEN-LEFT for a camera
       // sitting behind a car that faces +Z. Ground steering was already correct;
       // only this axis was inverted.
-      const inR = armed ? -this.input.steer : 0;
+      // `airSteer`, NOT `steer` — the latter is shaped for the steering rack and
+      // was silently costing this axis ~180 ms of lag. See TIRE.airSteerRate.
+      const inR = armed ? -this.input.airSteer : 0;
       const inY = this.input.yaw; // Q/E is deliberate stunt input — never gated
 
       // Diagonal inertia in body-local axes (x pitch, y yaw, z roll).
@@ -3209,6 +3334,10 @@ export class Vehicle {
     this._updateTaillights();
     this._renderPos.lerpVectors(this._prevPos, body.pos, alpha);
     this._renderQuat.slerpQuaternions(this._prevQuat, body.quat, alpha);
+    // WHEELS FIRST. Where each wheel has to sit decides how much arch clearance
+    // is left, and that feeds the body lift below — so this cannot wait for the
+    // placement loop further down. See TIRE.archLiftBody.
+    this._updateWheelExtensions(dt);
     this._geomCenter.copy(_COM_OFFSET).applyQuaternion(this._renderQuat).add(this._renderPos);
     this.chassisMesh.position.copy(this._geomCenter);
     // Body lean goes on the CHASSIS ONLY. The wheels below are placed from
@@ -3230,6 +3359,10 @@ export class Vehicle {
       );
       lift += this._leanLift;
     } else this._leanLift = 0;
+    // …and the same idea for SUSPENSION: when a wheel needs to come up further
+    // than the arch gap allows, raise the body rather than shove the tyre into
+    // the road. _updateWheelExtensions worked out how much.
+    lift += this._archLift;
     if (lift !== 0) {
       this._wheelUp.set(0, 1, 0).applyQuaternion(this._renderQuat);
       this.chassisMesh.position.addScaledVector(this._wheelUp, lift);
@@ -3248,19 +3381,10 @@ export class Vehicle {
       const t = this.tires[i];
       const cfg = WHEEL_LOCAL[i];
       this._wheelUp.copy(this._yAxis).applyQuaternion(this._renderQuat);
-      const targetDist = t.grounded ? t.hitDistance : TIRE.rayLength;
-      if (t._smoothDist === undefined) t._smoothDist = targetDist;
-      const k = 1 - Math.exp(-TIRE.suspVisSmooth * dt);
-      t._smoothDist += (targetDist - t._smoothDist) * k;
-      // Clamped to TIRE.maxDroop — airborne there is no hit, so _smoothDist
-      // eases to the full PROBE length and the wheel would hang far below the
-      // body. Visual only; the tyre's own physics never reads this.
-      let suspExt = Math.max(0, t._smoothDist - WHEEL.radius);
-      if (suspExt > TIRE.maxDroop) suspExt = TIRE.maxDroop;
-      // …and the bump stop at the other end. Without it the wheel rides all the
-      // way up to the hub on an obstacle and disappears inside the body, which
-      // the arches were never modelled for. See TIRE.minSuspExt.
-      else if (suspExt < TIRE.minSuspExt) suspExt = TIRE.minSuspExt;
+      // Decided up front by _updateWheelExtensions, because the body lift above
+      // depends on it. May be NEGATIVE (wheel above its hub) on a deep hit —
+      // that is a real requirement, and the lift is what keeps the arch clear.
+      const suspExt = t.visualExt;
       this._wheelOffset.copy(this._wheelUp).multiplyScalar(-suspExt);
       // Hub position recomputed from the INTERPOLATED pose (t.worldPos is the
       // tick-time position and would lag the interpolated chassis).
@@ -3301,6 +3425,59 @@ export class Vehicle {
     // The loop above posed the tireGroups; push those poses into the instanced
     // meshes that actually draw the wheels.
     this._syncWheelInstances();
+  }
+
+  /**
+   * PASS 1 of syncVisuals: decide where every wheel must be DRAWN, and how much
+   * body lift that costs. Sets `t.visualExt` (the offset the placement loop
+   * uses) and `this._archLift`. Physics reads neither.
+   *
+   * See the ARCH CLEARANCE block on TIRE for the measurements behind this.
+   */
+  _updateWheelExtensions(dt) {
+    const k = 1 - Math.exp(-TIRE.suspVisSmooth * dt);
+    let shortfall = 0;
+    for (const t of this.tires) {
+      const targetDist = t.grounded ? t.hitDistance : TIRE.rayLength;
+      if (t._smoothDist === undefined) t._smoothDist = targetDist;
+      t._smoothDist += (targetDist - t._smoothDist) * k;
+
+      // Airborne there is no hit, so _smoothDist eases out to the full PROBE
+      // length and the wheel would hang far below the body — hence the droop cap.
+      let ext = t._smoothDist - WHEEL.radius;
+      if (ext > TIRE.maxDroop) ext = TIRE.maxDroop;
+      // NEVER BELOW THE MEASURED CONTACT. `hitDistance` is where the tyre found
+      // the surface on THIS tick; `_smoothDist` deliberately lags it, and on
+      // rising ground that lag is drawn as tyre inside road. A ceiling only, so
+      // the easing still owns the wheel whenever it is not about to sink —
+      // the suspension visibly works exactly as before.
+      if (t.grounded) {
+        const contactExt = t.hitDistance - WHEEL.radius;
+        if (ext > contactExt) ext = contactExt;
+      }
+      // Deep compression puts the contact patch ABOVE the hub (a 0.20 m step
+      // leaves the hub 0.297 m up against a 0.36 m tyre), so a negative
+      // extension is a real requirement rather than an error. Bounded so a bad
+      // probe cannot fling the body upward.
+      if (ext < -TIRE.archLiftMax) ext = -TIRE.archLiftMax;
+      t._visExt = ext;
+      if (TIRE.minSuspExt - ext > shortfall) shortfall = TIRE.minSuspExt - ext;
+    }
+
+    const share = THREE.MathUtils.clamp(TIRE.archLiftBody, 0, 1);
+    const wantLift = Math.min(TIRE.archLiftMax, Math.max(0, shortfall) * share);
+    // UP INSTANTLY, DOWN EASED. Any smoothing on the way up is a frame of tyre
+    // inside the bodywork, which is the defect being fixed; on the way down a
+    // hard drop would yank the body out from under the car after a kerb.
+    if (wantLift >= this._archLift) this._archLift = wantLift;
+    else this._archLift += (wantLift - this._archLift) * (1 - Math.exp(-TIRE.archLiftSettle * dt));
+
+    // Whatever the body did NOT take, the wheel still absorbs. At archLiftBody 0
+    // this is bit-for-bit the old `ext < minSuspExt → minSuspExt` clamp.
+    for (const t of this.tires) {
+      const over = TIRE.minSuspExt - t._visExt;
+      t.visualExt = over > 0 ? t._visExt + over * (1 - share) : t._visExt;
+    }
   }
 
   /**

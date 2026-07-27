@@ -1445,6 +1445,25 @@ ${e.message}`);
   const gearbox = createGearbox();
   // Drift scoring — always on, no mode. See driftScore.js.
   const drift = createDriftScore();
+  /**
+   * Did the chassis touch a solid at ANY point during this frame's physics?
+   *
+   * `vehicle.hitSolid` is a per-TICK pulse: `tick()` clears it at the top and
+   * `_resolveSolidBvh` re-raises it, so reading it once per frame only ever sees
+   * the LAST of the (usually 2) ticks a 60 Hz frame runs. On top of that, solid
+   * response is projection-based — it pushes the car out, so the next tick
+   * usually is NOT penetrating and a continuous rail scrape is an on/off flicker
+   * at tick rate. Together those made "hitting a wall breaks your drift chain"
+   * fire only about half the time, at random.
+   *
+   * The vehicle already solved the same problem for SPARKS with a 0.12 s latch
+   * (`vehicle.scraping`), but that is the wrong tool here: its hold time is a
+   * VFX look knob, and scoring should not change when someone retunes sparks.
+   * OR-ing the raw flag across the frame's ticks is exact — every contact is
+   * caught, with no window to tune and nothing held past the frame it happened
+   * in.
+   */
+  let hitSolidThisFrame = false;
   const hudDrift = document.getElementById("race-drift");
   const hudDriftPts = document.getElementById("race-drift-pts");
   const hudDriftMul = document.getElementById("race-drift-mul");
@@ -1513,7 +1532,7 @@ ${e.message}`);
       slip: vehicle.slipAngle,
       speed: speedMs,
       grounded: vehicle.groundedCount > 0,
-      hitSolid: vehicle.hitSolid,
+      hitSolid: hitSolidThisFrame,
     });
     const banked = drift.consumeBanked();
     if (banked > 0) {
@@ -1823,6 +1842,11 @@ ${e.message}`);
       // movers, the car, boost fields, portals — so the result is identical at
       // any framerate. Visuals interpolate the leftover fraction afterwards.
       const hasMovers = movers.getMovers().length > 0;
+      // Latch solid contact across every tick this frame — see the declaration.
+      // Reset here rather than after reading it, so a frame that runs ZERO ticks
+      // (framerate above the 120 Hz sim rate) reports no contact, which is
+      // correct: no physics happened, so nothing new was hit.
+      hitSolidThisFrame = false;
       for (let i = 0; i < ticks; i++) {
         movers.update(FIXED_DT);
         if (hasMovers) {
@@ -1834,6 +1858,7 @@ ${e.message}`);
           rebakeMovers();
         }
         vehicle.tick(input);
+        if (vehicle.hitSolid) hitSolidThisFrame = true;
         props.applyFields(vehicle, FIXED_DT);      // boost pads etc.
         propPhysics.tick(FIXED_DT, vehicle);       // cones, gates
         portals.updateDrive(FIXED_DT, vehicle);

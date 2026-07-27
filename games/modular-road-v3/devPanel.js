@@ -458,13 +458,24 @@ export function createRoadDevPanel({ app, game, params }) {
         <div class="section-header">Car — Landing &amp; body</div>
         <div class="section-body">
           <!-- WHEEL TRAVEL (visual only — physics compression is unclamped).
-               Bump stop is the one to nudge with the debug cam (C) if a wheel
-               still clips the arch: LOWER lets it ride further into the body. -->
+               The bump stop is now the arch-gap TARGET rather than a floor on
+               the wheel: "Body rides bumps" decides who gives way when there is
+               not enough travel — the body (1) or the tyre (0). -->
           <div class="prop-row">
             <span class="prop-label">Wheel bump stop</span>
             <div class="prop-value">
               <input type="range" id="dv-susp-bump" min="0" max="0.16" step="0.005" />
               <span class="prop-num" id="dv-susp-bump-v"></span>
+            </div>
+          </div>
+          <!-- 1 = the wheel always sits on the surface and the BODY lifts to
+               keep the arch clear (a floor on the wheel can only push it DOWN,
+               into the road). 0 = the old clamp, for an A/B. -->
+          <div class="prop-row">
+            <span class="prop-label">Body rides bumps</span>
+            <div class="prop-value">
+              <input type="range" id="dv-susp-archlift" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-susp-archlift-v"></span>
             </div>
           </div>
           <div class="prop-row">
@@ -1596,6 +1607,7 @@ export function createRoadDevPanel({ app, game, params }) {
   const deg = (v) => `${(v * 57.2958).toFixed(1)}°/g`;
   const cm = (v) => `${(v * 100).toFixed(1)} cm`;
   slider("dv-susp-bump", TIRE, "minSuspExt", cm);
+  slider("dv-susp-archlift", TIRE, "archLiftBody", (v) => `${Math.round(v * 100)}%`);
   slider("dv-susp-droop", TIRE, "maxDroop", cm);
   const csDeg = (v) => `${(v * 57.2958).toFixed(0)}°`;
   slider("dv-cs-gain", DRIFT, "counterSteerVisual", (v) => `${Math.round(v * 100)}%`);
