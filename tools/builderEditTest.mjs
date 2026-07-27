@@ -139,5 +139,45 @@ function fresh() {
   check("pickPiece returns null over empty space", b.pickPiece(400, 300) === null);
 }
 
+
+
+console.log("\n=== PIECE HOTKEYS KEEP THE PALETTE IN STEP ===");
+// buildRoadPaletteUI needs a DOM, so this is a SOURCE-level contract rather than
+// a behavioural one — but the bug it guards was pure state desync, and that is
+// visible in the wiring.
+//
+// roadGame.js takes the keyboard in the CAPTURE phase (so the v3 editor's own
+// shortcuts cannot reach the game), which leaves the palette's own keydown
+// listener dead and makes roadGame responsible for the piece hotkeys. It called
+// builder.setActivePiece() directly — but selecting a piece must ALSO clear any
+// active prop/preset and switch the visible category, and that state is private
+// to the palette. The result was a palette describing the previous selection
+// while a different piece was actually being placed.
+{
+  const { readFileSync } = await import("node:fs");
+  const paletteSrc = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadBuilder.js"), "utf8");
+  const gameSrc = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
+
+  check("the palette exposes a single entry point for selecting a piece",
+    /return \{[^}]*selectPieceById[^}]*\}/.test(paletteSrc));
+  check("…which clears the prop/mover/preset selection",
+    /function selectPieceById\([\s\S]{0,400}?activePresetId = null/.test(paletteSrc),
+    "or the status line keeps naming the old preset");
+  check("…and switches the visible category to the piece's own",
+    /function selectPieceById\([\s\S]{0,400}?activeCategory = PIECE_TO_CATEGORY/.test(paletteSrc),
+    "or the grid stays on a category the piece is not in");
+
+  // The regression itself: the hotkey path must go through the palette.
+  const hotkeyBlock = gameSrc.slice(
+    gameSrc.indexOf("const byKey = PIECE_CATALOG.find"),
+    gameSrc.indexOf("const byKey = PIECE_CATALOG.find") + 400,
+  );
+  check("roadGame's piece hotkeys go through it",
+    /selectPieceById/.test(hotkeyBlock), hotkeyBlock.split("\n")[3]?.trim());
+  check("…and no longer poke builder.setActivePiece behind the palette's back",
+    !/setActivePiece/.test(hotkeyBlock),
+    "half-selecting is what desynced the UI");
+}
+
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nall green");
 process.exit(fail ? 1 : 0);

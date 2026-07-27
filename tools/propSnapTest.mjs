@@ -148,6 +148,91 @@ console.log("\n=== restY: the authored rest offset survives ===");
     `y = ${onSlope.root.position.y.toFixed(2)} at x=20`);
 }
 
+console.log("\n=== WHERE add() STARTS THE SEARCH FROM ===");
+// THE GAP THAT LET THE REAL BUG THROUGH. Every case above hands snapToSurface an
+// explicit starting y, so the maths was covered from the beginning and the one
+// thing that was actually wrong — the height add() spawns a prop at — could not
+// be seen at all.
+//
+// The search runs DOWNWARD from `y + 2`, so the spawn height decides which
+// surfaces are even reachable. add() used to take x/z from the orbit target and
+// leave y at restY (~0); with the game's default 40 m build height that put the
+// ray 38 m below the deck, and every prop landed on the terrain under the track.
+{
+  /** add()'s spawn choice, transcribed from PropManager.add(). */
+  const spawn = (target, restY) => ({
+    root: { position: new THREE.Vector3(target.x, target.y, target.z) },
+    restY,
+  });
+  // Camera parked on an elevated deck, which is what building a sky track looks
+  // like. DECK_Y here is 20; the real default build height is 40.
+  const target = { x: 0, y: DECK_Y, z: 0 };
+
+  const onDeck = spawn(target, 0);
+  snapToSurface(onDeck, "auto");
+  check("a prop added while looking at an elevated deck lands ON it",
+    onDeck.root.position.y === DECK_Y,
+    `y = ${onDeck.root.position.y} (terrain is ${TERRAIN(0)})`);
+
+  const road = spawn(target, 0);
+  check("…and road mode finds it too, rather than refusing",
+    snapToSurface(road, "road") && road.root.position.y === DECK_Y,
+    `y = ${road.root.position.y}`);
+
+  const cone = spawn(target, 0.42);
+  snapToSurface(cone, "auto");
+  check("the authored rest offset still survives the new spawn height",
+    Math.abs(cone.root.position.y - (DECK_Y + 0.42)) < 1e-6,
+    `y = ${cone.root.position.y}`);
+
+  // Regression guard for the ORIGINAL bug, stated as the thing that must not
+  // come back: spawning at restY makes the deck unreachable.
+  const oldWay = { root: { position: new THREE.Vector3(target.x, 0, target.z) }, restY: 0 };
+  snapToSurface(oldWay, "auto");
+  check("spawning at restY instead would drop it to the terrain — the bug",
+    Math.abs(oldWay.root.position.y - TERRAIN(0)) < 1e-6,
+    `y = ${oldWay.root.position.y.toFixed(2)}, ${(DECK_Y - TERRAIN(0)).toFixed(0)} m under the deck`);
+
+  // Ground mode must be UNAFFECTED — it is the parkour override and still has to
+  // ignore the deck the camera is looking at.
+  const under = spawn(target, 0);
+  snapToSurface(under, "ground");
+  check("ground mode still overrides to the terrain, as it must",
+    Math.abs(under.root.position.y - TERRAIN(0)) < 1e-6,
+    `y = ${under.root.position.y.toFixed(2)}`);
+}
+
+console.log("\n=== A PLACED PROP IS NEVER LEFT IN MID-AIR ===");
+// The other half of spawning at the camera's height: the spawn point is EMPTY
+// SPACE, so a snap that finds nothing leaves the prop floating there instead of
+// near the ground. `road` is the mode that can fail — it refuses rather than
+// dropping to terrain, which is right for a DRAG and wrong for a PLACEMENT.
+{
+  /** add()'s placement snap, including the fallback. */
+  const place = (target, restY, mode) => {
+    const inst = { root: { position: new THREE.Vector3(target.x, target.y, target.z) }, restY };
+    if (!snapToSurface(inst, mode) && mode !== "free") snapToSurface(inst, "auto");
+    return inst;
+  };
+  // Camera up at deck height but off to the side, where x=30 has no deck.
+  const offRoad = { x: 30, y: DECK_Y, z: 0 };
+
+  const p = place(offRoad, 0, "road");
+  check("road mode with no road under the camera lands on the terrain, not the sky",
+    Math.abs(p.root.position.y - TERRAIN(30)) < 1e-6,
+    `y = ${p.root.position.y.toFixed(2)} (camera was at ${DECK_Y})`);
+
+  const onRoad = place({ x: 0, y: DECK_Y, z: 0 }, 0, "road");
+  check("…while road mode WITH road under it still lands on the road",
+    onRoad.root.position.y === DECK_Y, `y = ${onRoad.root.position.y}`);
+
+  // `free` is exempt on purpose: it means "do not move my prop", and spawning
+  // at the camera is exactly what you want before placing it by hand.
+  const f = place(offRoad, 0, "free");
+  check("free mode is left alone — spawning at the camera IS the point",
+    f.root.position.y === DECK_Y, `y = ${f.root.position.y}`);
+}
+
 console.log("\n=== WIRED UP IN THE REAL FILES ===");
 {
   const propsSrc = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadProps.js"), "utf8");
@@ -157,10 +242,25 @@ console.log("\n=== WIRED UP IN THE REAL FILES ===");
   check("all four modes exist", /SURFACE_SNAP_MODES\s*=\s*\["auto",\s*"ground",\s*"road",\s*"free"\]/.test(propsSrc));
   check("auto is the default", /SURFACE_SNAP\s*=\s*\{\s*mode:\s*"auto"\s*\}/.test(propsSrc));
   // restY must be captured BEFORE the saved position overwrites it on import.
-  check("restY is captured on add()", /restY:\s*root\.position\.y/.test(propsSrc));
+  // add() spawns at the camera target INCLUDING its height, so the downward
+  // search can reach an elevated deck — and restY must therefore be read BEFORE
+  // that overwrites y, or the "authored rest offset" becomes the camera height.
+  check("add() spawns at the orbit target's height, not the prop's rest height",
+    /root\.position\.copy\(this\.orbit\.target\)/.test(propsSrc),
+    "or props land under an elevated track");
+  check("restY is captured BEFORE the spawn position overwrites y",
+    propsSrc.indexOf("const restY = root.position.y") <
+      propsSrc.indexOf("root.position.copy(this.orbit.target)"));
   check("restY is captured on import BEFORE fromArray overwrites y",
     propsSrc.indexOf("const restY = root.position.y") < propsSrc.indexOf("root.position.fromArray(item.position)"));
   check("snapping runs on placement", /this\.snapToSurface\(inst\)/.test(propsSrc));
+  // The behavioural block above transcribes add()'s fallback, so on its own it
+  // would keep passing if the real one were deleted. THIS is what binds them.
+  check("a placement that finds nothing falls back rather than floating",
+    /!this\.snapToSurface\(inst\)[\s\S]{0,160}?this\.snapToSurface\(inst, "auto"\)/.test(propsSrc),
+    "or road mode leaves a newly placed prop at the camera's height");
+  check("…but `free` is exempt from that fallback",
+    /!this\.snapToSurface\(inst\) && SURFACE_SNAP\.mode !== "free"/.test(propsSrc));
   // Live during a translate drag, but NOT during rotate/scale — re-snapping
   // there would fight a prop deliberately tilted onto banking.
   check("snapping runs live while dragging, translate only",

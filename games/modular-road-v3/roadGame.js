@@ -1058,11 +1058,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
 
     // Piece hotkeys (1–9, 0, letters) select the active piece.
+    //
+    // Goes through the PALETTE rather than poking builder.setActivePiece here:
+    // selecting a piece also has to clear any active prop/preset and switch the
+    // visible category, and that state is private to buildRoadPaletteUI. Doing
+    // half of it from out here is exactly how the palette ended up naming a
+    // different piece from the one being placed — see selectPieceById.
     const byKey = PIECE_CATALOG.find((p) => p.key && p.key === e.key);
     if (byKey) {
-      builder.setActivePiece(byKey.id);
-      paletteUi?.renderPieces?.();
-      paletteUi?.refreshStatus?.();
+      paletteUi?.selectPieceById?.(byKey.id);
       return;
     }
     switch (code) {

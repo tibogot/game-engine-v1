@@ -730,22 +730,54 @@ export class PropManager {
     const root = def.make();
     enableMeshShadows(root);
     root.userData.isProp = true;
+    // `restY` is the offset make() authored — 0 for ground-flush props, or a
+    // deliberate lift like the pipe's radius. Captured BEFORE the spawn position
+    // overwrites y, so snapping can add it back and keep the prop's feet on the
+    // surface. (Read straight off root.position.y below, this silently became
+    // the CAMERA's height the moment the spawn started setting y.)
+    const restY = root.position.y;
     if (this.orbit?.target) {
-      // Spawn under wherever the camera is looking, but keep the prop's authored
-      // rest height (make() leaves y = 0 for ground-flush props, or sets a resting
-      // offset like the pipe's radius) — don't yank it up to the camera target's y,
-      // which is what made props hover above the ground.
-      root.position.x = this.orbit.target.x;
-      root.position.z = this.orbit.target.z;
+      // Spawn where the camera is looking — INCLUDING its height.
+      //
+      // This used to take x/z only and leave y at `restY`, so the downward
+      // surface search started ~2 m above the world floor. That is fine on a
+      // ground-level track and wrong everywhere else: the game's default build
+      // height is 40 m (DEFAULT_BUILD_HEIGHT), and a deck up there is ABOVE the
+      // ray, so it can never be hit. MEASURED with a deck at y=40.5:
+      //     auto/ground → y=0.5, the terrain 40 m BELOW the track
+      //     road        → refused, prop left at y=0 with no feedback
+      // i.e. in the mode the game boots in, every prop landed under the road.
+      //
+      // The old comment justified it as "don't yank it up to the camera's y,
+      // which is what made props hover" — true BEFORE snapToSurface existed and
+      // nothing pulled them back down. It now sets y = surface + restY, so
+      // seeding from the camera lands the prop ON the deck rather than above it.
+      // MoverPropManager.add() has always used the full target for this reason.
+      root.position.copy(this.orbit.target);
     }
     this.group.add(root);
-    // `restY` is the offset make() authored — 0 for ground-flush props, or a
-    // deliberate lift like the pipe's radius. Captured BEFORE any snapping, so
-    // snapping can add it back and keep the prop's feet on the surface.
-    const inst = { id: typeId, def, root, collision: def.collision, restY: root.position.y };
+    const inst = { id: typeId, def, root, collision: def.collision, restY };
     root.userData.propInstance = inst;
     this.instances.push(inst);
-    this.snapToSurface(inst);
+    // A PROP YOU JUST ADDED MUST NEVER BE LEFT HANGING IN MID-AIR.
+    //
+    // Spawning at the camera's height (above) is what lets a prop land on the
+    // elevated deck you are looking at — but it also means the spawn point is
+    // EMPTY SPACE, so a snap that finds nothing leaves the prop floating there
+    // rather than near the ground. "road" is the mode that can fail: it returns
+    // null rather than falling back to terrain, deliberately, so that dragging a
+    // prop off the road does not silently teleport it downhill. MEASURED with a
+    // deck at y=40.5 and the camera on it but off to one side:
+    //     road, no deck under the camera → prop left at y=39.2, in the sky
+    // That refusal is right for a DRAG (there is a previous position worth
+    // keeping) and wrong for a PLACEMENT (there is not).
+    //
+    // So placement falls back to `auto` — road if there is any, else terrain.
+    // "free" is exempt: it means "do not move my prop", and spawning at the
+    // camera is precisely what you want when you are about to place it by hand.
+    if (!this.snapToSurface(inst) && SURFACE_SNAP.mode !== "free") {
+      this.snapToSurface(inst, "auto");
+    }
     this._select(inst);
     this.onChange?.();
     return inst;
@@ -805,9 +837,9 @@ export class PropManager {
    *
    * @returns {boolean} true if it moved (i.e. a surface was found)
    */
-  snapToSurface(inst) {
+  snapToSurface(inst, modeOverride = null) {
     if (!inst || !this.getSurfaceY) return false;
-    const mode = SURFACE_SNAP.mode;
+    const mode = modeOverride ?? SURFACE_SNAP.mode;
     if (mode === "free") return false;
     const p = inst.root.position;
     // The prop's CURRENT height is passed so the search looks DOWNWARD from

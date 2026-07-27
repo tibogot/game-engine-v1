@@ -2469,5 +2469,36 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     }
   });
 
-  return { refreshStatus, renderPieces, syncEdgesBtn };
+  /**
+   * Select a piece BY ID and put the palette in the matching state — the same
+   * thing clicking its tile does.
+   *
+   * Exists because the piece HOTKEYS live in roadGame.js (it takes the keyboard
+   * in the capture phase so the v3 editor's own shortcuts cannot reach us, which
+   * leaves the listener below dead), and from out there the three `active*`
+   * variables and `activeCategory` are unreachable — the palette only ever
+   * exported {refreshStatus, renderPieces, syncEdgesBtn}. So its hotkey handler
+   * called `builder.setActivePiece()` and could do nothing about the rest, and
+   * the palette went on describing the PREVIOUS selection:
+   *   • the status line showed the preset's label, because renderPieces() clears
+   *     activePropId and activeMoverId but not activePresetId;
+   *   • no tile highlighted, since that test requires all three to be null;
+   *   • the grid stayed on the old category, so the piece could be off-screen.
+   * You were placing one piece while the UI named another.
+   *
+   * @returns {boolean} false if `id` is not a real piece
+   */
+  function selectPieceById(id) {
+    if (!PIECE_BY_ID.has(id)) return false;
+    activePropId = null;
+    activeMoverId = null;
+    activePresetId = null;
+    activeCategory = PIECE_TO_CATEGORY[id] ?? activeCategory;
+    builder.setActivePiece(id);
+    renderPieces(); // re-renders the grid for the (possibly new) category
+    refreshStatus();
+    return true;
+  }
+
+  return { refreshStatus, renderPieces, syncEdgesBtn, selectPieceById };
 }
