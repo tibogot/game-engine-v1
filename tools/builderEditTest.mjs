@@ -179,5 +179,49 @@ console.log("\n=== PIECE HOTKEYS KEEP THE PALETTE IN STEP ===");
     "half-selecting is what desynced the UI");
 }
 
+console.log("\n=== PROPS ARE PLACED WITH THE CURSOR, NOT AT THE CAMERA ===");
+// Picking a prop in the palette used to DROP it at the camera's orbit target and
+// leave you to drag it into position with a gizmo — a different mental model
+// from road pieces (ghost, aim, click) in the same palette. Both now work the
+// same way. This is wiring, so it is checked at the source level; the surface
+// maths itself lives in propSnapTest.
+{
+  const { readFileSync } = await import("node:fs");
+  const gameSrc = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
+  const propsSrc = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadProps.js"), "utf8");
+  const moverSrc = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadMoverProps.js"), "utf8");
+  const paletteSrc = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadBuilder.js"), "utf8");
+
+  check("picking a prop ARMS a brush instead of placing it",
+    /onAddProp:\s*\(id\)\s*=>\s*armBrush\("prop", id\)/.test(gameSrc)
+    && /onAddMover:\s*\(id\)\s*=>\s*armBrush\("mover", id\)/.test(gameSrc));
+  check("both managers accept a world position to place at",
+    /add\(typeId, worldPos = null\)/.test(propsSrc)
+    && /add\(typeId, worldPos = null\)/.test(moverSrc));
+  check("the ghost follows the pointer",
+    /addEventListener\("pointermove"[\s\S]{0,240}?updateBrush/.test(gameSrc));
+  check("left-click places the brush INSTEAD of a road piece",
+    /if \(brush\) \{[\s\S]{0,240}?placeBrush\(\);\s*return;/.test(gameSrc),
+    "or clicking with a cone armed also drops a road piece");
+  check("the brush stays armed after placing, so a run of cones is one pick",
+    !/placeBrush\(\);[\s\S]{0,80}?clearBrush\(\)/.test(gameSrc));
+
+  // Every way out of the mode — a brush you cannot put down is a trap.
+  check("Escape cancels it", /code === "escape" && brush/.test(gameSrc));
+  check("right-click cancels it", /if \(brush\) \{ clearBrush\(\); return; \}/.test(gameSrc));
+  check("choosing a road piece cancels it",
+    /onPickPiece:\s*\(\)\s*=>\s*clearBrush/.test(gameSrc));
+  check("entering drive mode cancels it", /if \(driving\) clearBrush\(\)/.test(gameSrc));
+  check("…and the palette highlight is cleared with it",
+    /clearBrushHighlight/.test(paletteSrc) && /clearBrushHighlight/.test(gameSrc));
+
+  check("the status line says what the brush is carrying",
+    /activePropId \|\| activeMoverId[\s\S]{0,320}?click to place/.test(paletteSrc),
+    "or it keeps naming the road piece while the mouse carries a cone");
+  check("road mode marks an illegal spot instead of hiding the ghost",
+    /return terr \? \{ point: terr, valid: false \} : null;/.test(gameSrc),
+    "a ghost that vanishes reads as a broken tool");
+}
+
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nall green");
 process.exit(fail ? 1 : 0);

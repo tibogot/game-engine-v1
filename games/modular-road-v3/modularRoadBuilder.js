@@ -2174,6 +2174,9 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     onAddProp = null,
     onAddMover = null,
     onAddPortal = null,
+    /** Called when the palette selects something that is NOT a prop/mover
+     *  brush, so the game can put a live cursor brush down. */
+    onPickPiece = null,
     onEdgesChange = null,
   } = opts;
   const catList = document.getElementById("category-list");
@@ -2283,9 +2286,16 @@ export function buildRoadPaletteUI(builder, opts = {}) {
 
       btn.addEventListener("click", () => {
         if (item.soon) return;
+        // PROPS AND MOVERS ARM A CURSOR BRUSH — they do not place anything yet.
+        // Clicking the tile used to drop the object at the camera's orbit target
+        // and leave you to drag it into position with a gizmo, which is a
+        // different mental model from road PIECES (ghost, aim, click) in the
+        // same palette. Now both work the same way: pick it here, aim with the
+        // mouse, left-click to place, Escape to put the brush down.
         if (item.isProp && onAddProp) {
           activePropId = item.id;
           activeMoverId = null;
+          activePresetId = null;
           builder.setActivePiece(builder.activePieceId);
           onAddProp(item.id);
           refreshStatus();
@@ -2304,6 +2314,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
           activePropId = null;
           activeMoverId = null;
           activePresetId = null;
+          onPickPiece?.(); // a door is placed immediately — drop any live brush
           onAddPortal();
           refreshStatus();
           return;
@@ -2312,6 +2323,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
           activePropId = null;
           activeMoverId = null;
           activePresetId = item.id;
+          onPickPiece?.();
           builder.setActivePreset(item.preset);
           refreshStatus();
           return;
@@ -2319,6 +2331,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         activePropId = null;
         activeMoverId = null;
         activePresetId = null;
+        onPickPiece?.(); // choosing a road piece cancels a prop brush
         builder.setActivePiece(item.id);
         refreshStatus();
       });
@@ -2330,7 +2343,39 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     refreshStatus();
   }
 
+  /** Highlight whichever tile + category is currently selected. */
+  function syncTiles() {
+    for (const [key, btn] of pieceTiles) {
+      let active;
+      if (key.endsWith(":prop")) {
+        active = activePropId === key.slice(0, -5);
+      } else if (key.endsWith(":mover")) {
+        active = activeMoverId === key.slice(0, -6);
+      } else if (key.endsWith(":preset")) {
+        active = activePresetId === key.slice(0, -7);
+      } else {
+        active = !activePropId && !activeMoverId && !activePresetId && key === builder.activePieceId;
+      }
+      btn.classList.toggle("active", active);
+    }
+    for (const [id, btn] of catBtns) {
+      btn.classList.toggle("active", id === activeCategory);
+    }
+  }
+
   function refreshStatus() {
+    // A prop/mover brush is a MODE, and the status line is the only thing that
+    // says so — without this it goes on naming the road piece while the mouse is
+    // carrying a cone, which is the same class of lie selectPieceById fixed.
+    if (statusEl && (activePropId || activeMoverId)) {
+      const src = activePropId ? propCatalog : moverCatalog;
+      const id = activePropId ?? activeMoverId;
+      const label = src.find((p) => p.id === id)?.label ?? id;
+      statusEl.textContent =
+        `${builder.count} placed · ${label} — click to place, Esc to cancel`;
+      syncTiles();
+      return;
+    }
     if (statusEl) {
       let label;
       if (activePresetId) {
@@ -2354,22 +2399,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         curveIds.has(builder.activePieceId) ? " (" + dir + ")" : ""
       }${chainInfo} · ${gizmoHint}`;
     }
-    for (const [key, btn] of pieceTiles) {
-      let active;
-      if (key.endsWith(":prop")) {
-        active = activePropId === key.slice(0, -5);
-      } else if (key.endsWith(":mover")) {
-        active = activeMoverId === key.slice(0, -6);
-      } else if (key.endsWith(":preset")) {
-        active = activePresetId === key.slice(0, -7);
-      } else {
-        active = !activePropId && !activeMoverId && !activePresetId && key === builder.activePieceId;
-      }
-      btn.classList.toggle("active", active);
-    }
-    for (const [id, btn] of catBtns) {
-      btn.classList.toggle("active", id === activeCategory);
-    }
+    syncTiles();
   }
 
   // Category rail
@@ -2490,6 +2520,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
    */
   function selectPieceById(id) {
     if (!PIECE_BY_ID.has(id)) return false;
+    onPickPiece?.(); // hotkeys cancel a live prop brush, same as clicking a tile
     activePropId = null;
     activeMoverId = null;
     activePresetId = null;
@@ -2500,5 +2531,14 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     return true;
   }
 
-  return { refreshStatus, renderPieces, syncEdgesBtn, selectPieceById };
+  /** Drop the prop/mover brush highlight — the game calls this when the brush
+   *  is cancelled from its side (Escape, right-click, leaving build mode). */
+  function clearBrushHighlight() {
+    if (!activePropId && !activeMoverId) return;
+    activePropId = null;
+    activeMoverId = null;
+    refreshStatus();
+  }
+
+  return { refreshStatus, renderPieces, syncEdgesBtn, selectPieceById, clearBrushHighlight };
 }

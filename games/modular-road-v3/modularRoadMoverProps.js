@@ -253,14 +253,21 @@ export class MoverPropManager {
     }
   }
 
-  add(typeId) {
+  /**
+   * @param {string} typeId
+   * @param {THREE.Vector3|null} [worldPos] where to put it — the cursor point
+   *        when placed from the palette brush. Falls back to the orbit target.
+   */
+  add(typeId, worldPos = null) {
     this.onSelect?.();
     const def = MOVER_BY_ID.get(typeId);
     if (!def) return null;
     const root = def.make();
     enableMeshShadows(root);
     root.userData.isMoverProp = true;
-    if (this.orbit?.target) {
+    if (worldPos) {
+      root.position.copy(worldPos);
+    } else if (this.orbit?.target) {
       root.position.set(this.orbit.target.x, Math.max(0, this.orbit.target.y), this.orbit.target.z);
     }
     this.group.add(root);

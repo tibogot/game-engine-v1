@@ -63,9 +63,9 @@ import {
 } from "./modularRoadKit.js";
 import { bakeRoadThumbnails } from "./modularRoadThumbnails.js";
 import {
-  PropManager, PROP_CATALOG, glowPropParams, SURFACE_SNAP, SURFACE_SNAP_MODES,
+  PropManager, PROP_CATALOG, PROP_BY_ID, glowPropParams, SURFACE_SNAP, SURFACE_SNAP_MODES,
 } from "./modularRoadProps.js";
-import { MoverPropManager, MOVER_CATALOG } from "./modularRoadMoverProps.js";
+import { MoverPropManager, MOVER_CATALOG, MOVER_BY_ID } from "./modularRoadMoverProps.js";
 import { PortalManager, DEFAULT_PORTAL_PARAMS, buildPortalMesh } from "./modularRoadPortals.js";
 import { GapPreview } from "./gapPreview.js";
 import { LapTracker, formatLapTime } from "./modularRoadLap.js";
@@ -289,15 +289,158 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     console.warn("[ModularRoad-v3] thumbnail bake skipped", e);
   }
 
+  // ── PLACEMENT BRUSH (props / movers) ───────────────────────────────────────
+  // Picking a prop in the palette ARMS a brush: a translucent ghost follows the
+  // mouse across whatever surface the snap mode selects, and left-click places
+  // it there. The brush stays armed so you can lay down a run of cones; Escape,
+  // right-click or picking a road piece puts it down.
+  //
+  // This replaces "the object appears at the camera's orbit target and you drag
+  // it into place with a gizmo", which was a second, worse mental model living
+  // beside the road pieces' own ghost-and-click flow in the same palette. The
+  // gizmo is still there for ADJUSTING something already placed — it just isn't
+  // the only way to position it any more.
+  const GHOST_OK = new THREE.MeshBasicMaterial({
+    color: 0x7cffb4, transparent: true, opacity: 0.5, depthWrite: false,
+  });
+  const GHOST_BAD = new THREE.MeshBasicMaterial({
+    color: 0xff6b6b, transparent: true, opacity: 0.35, depthWrite: false,
+  });
+  /** @type {{kind:"prop"|"mover", id:string, root:THREE.Object3D, restY:number, point:THREE.Vector3|null}|null} */
+  let brush = null;
+  /** Last cursor position over the canvas, so the ghost can be re-picked without
+   *  waiting for a mouse move (e.g. right after the snap mode changes). */
+  let lastPointer = null;
+  const _brushRay = new THREE.Raycaster();
+  const _brushNdc = new THREE.Vector2();
+  const _brushPoint = new THREE.Vector3();
+
+  /**
+   * A flat translucent stand-in for the real object.
+   *
+   * Deliberately NOT the real materials with opacity turned down: these are TSL
+   * node materials, several are emissive, and a ghost has to read as "not placed
+   * yet" at a glance. One shared basic material also means the ghost costs
+   * nothing and can be recoloured to show whether the spot is valid.
+   */
+  function buildBrushGhost(def) {
+    const root = def.make();
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      o.material = GHOST_OK;
+      o.castShadow = false;
+      o.receiveShadow = false;
+    });
+    root.frustumCulled = false;
+    return root;
+  }
+
+  function clearBrush({ silent = false } = {}) {
+    if (!brush) return;
+    scene.remove(brush.root);
+    brush.root.traverse((o) => { if (o.isMesh) o.geometry?.dispose(); });
+    brush = null;
+    if (!silent) paletteUi?.clearBrushHighlight?.();
+  }
+
+  function armBrush(kind, id) {
+    clearBrush({ silent: true });
+    const def = kind === "prop" ? PROP_BY_ID.get(id) : MOVER_BY_ID.get(id);
+    if (!def) return;
+    const root = buildBrushGhost(def);
+    // make() authors the rest offset on the ROOT (a cone sits a collision radius
+    // up so its base is flush), so the ghost has to keep it when it rides a
+    // surface — otherwise the preview sits a radius lower than what you place.
+    const restY = root.position.y;
+    root.visible = false; // until the mouse says where
+    scene.add(root);
+    brush = { kind, id, root, restY, point: null };
+  }
+
+  /**
+   * Surface under the cursor for the active snap mode.
+   *
+   * `road` uses the deck BVH only and returns null off it — that is the mode's
+   * whole contract, and here it gives real feedback: the ghost turns red and the
+   * click is refused, rather than the prop quietly going somewhere else.
+   * `ground` is terrain only (the parkour case, under an elevated road).
+   * `auto`/`free` take whichever of the two the ray reaches FIRST, so aiming at
+   * a bridge gets the bridge and aiming past its edge gets the valley floor.
+   */
+  function pickPlacementSurface(clientX, clientY) {
+    const mode = SURFACE_SNAP.mode;
+    const rect = renderer.domElement.getBoundingClientRect();
+    _brushNdc.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    _brushRay.setFromCamera(_brushNdc, camera);
+
+    let deck = null;
+    if (mode !== "ground" && deckBvh?.baked) {
+      const hit = deckBvh.raycastFirst(_brushRay.ray.origin, _brushRay.ray.direction, 5000);
+      if (hit?.point) deck = _brushPoint.set(hit.point.x, hit.point.y, hit.point.z).clone();
+    }
+    const terr = app.pickWorldAtClient?.(clientX, clientY)?.point?.clone() ?? null;
+
+    // ROAD mode still reports the TERRAIN point when it misses the deck, marked
+    // invalid. The ghost has to stay under the cursor to be useful feedback — a
+    // red ghost frozen at the last legal spot says "the tool is stuck", while a
+    // red ghost tracking the mouse says "not HERE". Returning null would hide it
+    // entirely, which reads as broken.
+    if (mode === "road") {
+      if (deck) return { point: deck, valid: true };
+      return terr ? { point: terr, valid: false } : null;
+    }
+    if (mode === "ground") return terr ? { point: terr, valid: true } : null;
+    if (!deck) return terr ? { point: terr, valid: true } : null;
+    if (!terr) return { point: deck, valid: true };
+    // Nearest along the view ray wins — that is what "the thing you are pointing
+    // at" means, and it is the only rule that behaves under a bridge.
+    return _brushRay.ray.origin.distanceToSquared(deck)
+      <= _brushRay.ray.origin.distanceToSquared(terr)
+      ? { point: deck, valid: true }
+      : { point: terr, valid: true };
+  }
+
+  /** Move the ghost to the cursor. Returns true when the spot is placeable. */
+  function updateBrush(clientX, clientY) {
+    if (!brush) return false;
+    const hit = pickPlacementSurface(clientX, clientY);
+    // `point` is what PLACES, so it is only set when the spot is legal; the
+    // ghost is positioned from the hit either way so it keeps tracking the mouse.
+    brush.point = hit?.valid ? hit.point : null;
+    brush.root.visible = !!hit;
+    if (hit) brush.root.position.set(hit.point.x, hit.point.y + brush.restY, hit.point.z);
+    const mat = hit?.valid ? GHOST_OK : GHOST_BAD;
+    brush.root.traverse((o) => { if (o.isMesh) o.material = mat; });
+    return !!hit?.valid;
+  }
+
+  /** Place the armed brush at the ghost. Keeps the brush for the next click. */
+  function placeBrush() {
+    if (!brush?.point) return false;
+    if (brush.kind === "prop") {
+      props.add(brush.id, brush.point);
+      propPhysics.sync();
+      flags.sync();
+    } else {
+      movers.add(brush.id, brush.point);
+    }
+    paletteUi?.refreshStatus?.();
+    return true;
+  }
+
   // The palette owns the piece catalog, categories AND the build-mode keyboard
   // shortcuts (they live inside buildRoadPaletteUI).
   const paletteUi = buildRoadPaletteUI(builder, {
     propCatalog: PROP_CATALOG,
     moverCatalog: MOVER_CATALOG,
     thumbnails: roadThumbnails,
-    onAddProp: (id) => { props.add(id); propPhysics.sync(); flags.sync(); },
-    onAddMover: (id) => movers.add(id),
+    onAddProp: (id) => armBrush("prop", id),
+    onAddMover: (id) => armBrush("mover", id),
     onAddPortal: () => { portals.addDoor(); paletteUi?.refreshStatus?.(); },
+    onPickPiece: () => clearBrush({ silent: true }),
     onEdgesChange: () => bakeCollision(),
   });
 
@@ -1037,6 +1180,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     t instanceof HTMLTextAreaElement;
 
   function handleBuildKey(e, code) {
+    // A live placement brush owns Escape first — putting the brush down is the
+    // most likely thing you want, and it is the only way to cancel it from the
+    // keyboard.
+    if (code === "escape" && brush) { clearBrush(); return; }
     // Piece editing takes precedence while a placed piece is selected (right-click).
     const sel = builder.selectedPiece;
     if (sel) {
@@ -1079,7 +1226,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         }
         break;
       case "keyw": if (builder.freePlaceMode) builder.setPlacementGizmoMode("translate"); break;
-      case "enter": case "space": builder.place(); break;
+      // Enter/Space follow the left button: with a brush armed they place the
+      // PROP at the cursor, not a road piece at the chain's open end.
+      case "enter": case "space":
+        if (brush) { if (lastPointer) updateBrush(lastPointer.x, lastPointer.y); placeBrush(); }
+        else builder.place();
+        break;
       case "backspace": builder.undo(); break;
       case "keyn": seedChainAtSpawn({ atCursor: true }); break; // new chain at the sky cursor
       case "bracketleft": builder.cycleChain(-1); break;
@@ -1158,6 +1310,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // LMB click-to-place (the lab had this; v3 only had Enter/Space). Suppressed
   // while ANY editing gizmo is being dragged, or a gizmo drag would also drop a
   // piece under the cursor.
+  // The brush ghost tracks the cursor. Cheap: one BVH ray plus one terrain pick.
+  renderer.domElement.addEventListener("pointermove", (e) => {
+    lastPointer = { x: e.clientX, y: e.clientY };
+    if (!brush || mode !== "build") return;
+    updateBrush(e.clientX, e.clientY);
+  });
+  // Leaving the canvas hides the ghost rather than freezing it at the last edge
+  // position, which otherwise looks like a stuck object.
+  renderer.domElement.addEventListener("pointerleave", () => {
+    if (brush) { brush.root.visible = false; brush.point = null; }
+  });
+
   renderer.domElement.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || mode !== "build") return;
     if (
@@ -1166,6 +1330,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       portals.isUsingGizmo?.() ||
       builder.isUsingPlacementGizmo?.()
     ) return;
+    // A live brush owns the left button: click places the PROP under the cursor,
+    // not a road piece at the chain's open end.
+    if (brush) {
+      updateBrush(e.clientX, e.clientY); // the pointer may have moved since
+      placeBrush();
+      return;
+    }
     builder.place();
     paletteUi.refreshStatus();
   });
@@ -1182,6 +1353,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const moved = Math.hypot(e.clientX - rmbDown.x, e.clientY - rmbDown.y);
     rmbDown = null;
     if (moved > 6) return; // that was a pan drag, not a click
+    // Right-click is the usual "put the tool down" gesture in an editor, so a
+    // live brush consumes it rather than also selecting whatever is behind it.
+    if (brush) { clearBrush(); return; }
     const picked = builder.pickPiece(e.clientX, e.clientY);
     if (picked) builder.selectPiece(picked);
     else builder.deselectPiece();
@@ -1233,16 +1407,19 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     snapBtn.textContent = `Snap: ${SNAP_LABEL[SURFACE_SNAP.mode] ?? SURFACE_SNAP.mode}`;
     snapBtn.classList.toggle("palette-btn-primary", SURFACE_SNAP.mode !== "free");
     snapBtn.title = {
-      auto: "Road if there is any under the prop, else terrain",
-      ground: "Terrain only — use for props UNDER an elevated road",
-      road: "Road decks only",
-      free: "No snapping; drag the gizmo's Y axis by hand",
+      auto: "Ghost rides whichever you point at — road if there is any, else terrain",
+      ground: "Ghost rides the terrain only — use for props UNDER an elevated road",
+      road: "Ghost rides road decks only; it turns red off the road and will not place",
+      free: "Ghost rides the nearest surface but the prop is left exactly where you click",
     }[SURFACE_SNAP.mode];
   };
   onClick("road-snap", () => {
     const i = SURFACE_SNAP_MODES.indexOf(SURFACE_SNAP.mode);
     SURFACE_SNAP.mode = SURFACE_SNAP_MODES[(i + 1) % SURFACE_SNAP_MODES.length];
     syncSnapBtn();
+    // A live brush is riding the OLD surface — re-pick so the ghost jumps to the
+    // new one immediately instead of on the next mouse move.
+    if (brush && lastPointer) updateBrush(lastPointer.x, lastPointer.y);
     // Re-snap the SELECTED prop only. Re-snapping everything would silently
     // relocate props placed under an earlier mode, which is not what switching
     // a placement setting should mean.
@@ -1696,6 +1873,7 @@ ${e.message}`);
   function toggleMode() {
     mode = mode === "build" ? "drive" : "build";
     const driving = mode === "drive";
+    if (driving) clearBrush(); // no cursor brush while racing
     // Editing systems own the mouse in build mode only — leaving them live while
     // driving would keep their gizmos grabbing clicks behind the car.
     props.setEnabled(!driving);

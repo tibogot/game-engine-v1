@@ -722,8 +722,16 @@ export class PropManager {
     }
   }
 
-  /** Spawn a prop near the orbit target (or origin) and select it. */
-  add(typeId) {
+  /**
+   * Spawn a prop and select it.
+   *
+   * @param {string} typeId
+   * @param {THREE.Vector3|null} [worldPos] where to put it. This is the normal
+   *        path — the palette arms a cursor BRUSH and the game passes the point
+   *        under the mouse. Omitting it falls back to the camera's orbit target,
+   *        which is what the API-only callers (and track import) use.
+   */
+  add(typeId, worldPos = null) {
     this.onSelect?.();
     const def = PROP_BY_ID.get(typeId);
     if (!def) return null;
@@ -736,7 +744,11 @@ export class PropManager {
     // surface. (Read straight off root.position.y below, this silently became
     // the CAMERA's height the moment the spawn started setting y.)
     const restY = root.position.y;
-    if (this.orbit?.target) {
+    if (worldPos) {
+      // Placed under the cursor: the caller already picked a real surface point,
+      // so the snap below only has to re-add restY and resolve the mode.
+      root.position.copy(worldPos);
+    } else if (this.orbit?.target) {
       // Spawn where the camera is looking — INCLUDING its height.
       //
       // This used to take x/z only and leave y at `restY`, so the downward
