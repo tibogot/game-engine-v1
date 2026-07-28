@@ -1,6 +1,14 @@
 import * as THREE from "three";
 // Collision radius is shared so the visual offset and the body can never drift.
-import { PHYSICS_PROP_TYPES, CONE_SCALE, GATE_WIDTH } from "./modularRoadPropPhysics.js";
+import {
+  PHYSICS_PROP_TYPES,
+  CONE_SCALE,
+  GATE_WIDTH,
+  GATE_HEIGHT,
+  GATE_BASE_Y,
+  GATE_POST_RADIUS,
+  GATE_POST_HEIGHT,
+} from "./modularRoadPropPhysics.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { materialEmissive } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
@@ -470,31 +478,48 @@ export const PROP_CATALOG = [
   {
     id: "gate",
     label: "Swing gate",
-    collision: "none",
+    /**
+     * SPLIT COLLISION, unlike the cone above. The post is a fixed steel column
+     * bolted to the deck and clipping through it read as a bug, so the gate opts
+     * IN to the static solids bake — and the panel opts back out per-mesh
+     * (`noCollide`), because a swinging panel baked into a static BVH is exactly
+     * the invisible-wall failure the cone's comment describes.
+     *
+     * Safe only because the post is a cylinder ON the hinge axis: PropPhysics
+     * rotates the whole prop root by the gate angle, so every other child moves
+     * in world space, but a cylinder spun about its own axis has an unchanged
+     * footprint and the baked snapshot stays correct.
+     */
+    collision: "solid",
     make: () => {
       const g = new THREE.Group();
       g.name = "Gate";
       // Hinge post at the LOCAL ORIGIN — the panel swings about it, so the prop's
       // placement point IS the hinge.
-      // Panel length comes from GATE_WIDTH, shared with the hinge simulation in
-      // modularRoadPropPhysics.js — the panel you SEE and the panel the car is
-      // resisted by have to be the same length or the swing reads wrong.
+      // Panel size comes from GATE_*, shared with the hinge simulation in
+      // modularRoadPropPhysics.js — the panel you SEE, the panel the car is
+      // resisted by, and the collider wireframe all read the same numbers.
       const W = GATE_WIDTH;
+      const H = GATE_HEIGHT;
+      const Y = GATE_BASE_Y + H / 2; // panel centre; bottom sits at GATE_BASE_Y
       const post = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.11, 0.11, 1.9, 10),
+        new THREE.CylinderGeometry(GATE_POST_RADIUS, GATE_POST_RADIUS, GATE_POST_HEIGHT, 10),
         mat(0x9aa0a8, { roughness: 0.45, metalness: 0.6 }),
       );
-      post.position.y = 0.95;
+      post.position.y = GATE_POST_HEIGHT / 2;
       const panel = new THREE.Mesh(
-        new THREE.BoxGeometry(W, 1.5, 0.09),
+        new THREE.BoxGeometry(W, H, 0.09),
         mat(0xe23b2e, { roughness: 0.65, emissive: 0x3a0a06, emissiveIntensity: 0.4 }),
       );
-      panel.position.set(W / 2, 0.9, 0); // extends along +X from the hinge
+      panel.position.set(W / 2, Y, 0); // extends along +X from the hinge
       const stripe = new THREE.Mesh(
         new THREE.BoxGeometry(W, 0.26, 0.11),
         mat(0xf4f4f4, { roughness: 0.6 }),
       );
-      stripe.position.set(W / 2, 0.9, 0);
+      stripe.position.set(W / 2, Y, 0);
+      // The moving half stays out of the static bake — see `collision` above.
+      panel.userData.noCollide = true;
+      stripe.userData.noCollide = true;
       g.add(post, panel, stripe);
       return g;
     },
@@ -1059,6 +1084,12 @@ export class PropManager {
       if (inst.collision === "none") continue;
       inst.root.traverse((o) => {
         if (!o.isMesh) return;
+        // PER-MESH OPT-OUT. A prop can be part static, part simulated — the swing
+        // gate's POST never moves and must be solid, while its PANEL is driven by
+        // PropPhysics and would be welded into the static bake as an invisible
+        // wall across the doorway. The prop-level `collision` flag alone cannot
+        // express that, so a mesh may exclude itself.
+        if (o.userData.noCollide) return;
         if (inst.collision === "deck" || inst.collision === "both") deck.push(o);
         if (inst.collision === "solid" || inst.collision === "both") solids.push(o);
       });

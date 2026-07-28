@@ -701,7 +701,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         dbgProps.push({ line: line(new THREE.SphereGeometry(p.radius, 10, 6), DBG_LINE.prop), sim });
       } else if (p.kind === "hinge") {
         const g = new THREE.BoxGeometry(p.width, p.height, 0.1);
-        g.translate(p.width / 2, 0, 0); // panel extends +X from the hinge
+        // Panel extends +X from the hinge and its BOTTOM sits `baseY` above the
+        // root — matching the mesh. Without the y term the wireframe drew half a
+        // metre underground, which is half of why it did not sit on the gate.
+        g.translate(p.width / 2, p.baseY + p.height / 2, 0);
         dbgProps.push({ line: line(g, DBG_LINE.prop), sim });
       }
     }
@@ -736,16 +739,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         line.position.copy(sim.body.pos);
         line.quaternion.copy(sim.body.quat);
       } else {
-        // Hinge: the panel swings about the prop root by the sim's own angle.
+        // Hinge: the prop ROOT already carries the swing — _tickHinge writes
+        // `root.quaternion = home * R(angle)` every tick. Applying R(angle) a
+        // SECOND time here is what made the wireframe lead the panel, by exactly
+        // the swing (at the 1.5 rad limit it sat 86° past the gate). Copy the
+        // root and nothing else.
         line.position.copy(sim.inst.root.position);
         line.quaternion.copy(sim.inst.root.quaternion);
-        _dbgQuat.setFromAxisAngle(_dbgUpAxis, sim.angle ?? 0);
-        line.quaternion.multiply(_dbgQuat);
       }
     }
   }
-  const _dbgQuat = new THREE.Quaternion();
-  const _dbgUpAxis = new THREE.Vector3(0, 1, 0);
 
   function setCollisionDebug(on) {
     debugOn = !!on;

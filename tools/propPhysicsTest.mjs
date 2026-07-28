@@ -284,6 +284,81 @@ console.log("\n=== THE GATE IS HELD OPEN UNTIL THE CAR IS THROUGH ===");
     `20 -> ${mid.exit.toFixed(1)} m/s`);
 }
 
+console.log("\n=== NOTHING BUT THE PANEL OPENS THE GATE ===");
+// The contact test used to be plan-view RADIUS from the hinge and nothing else,
+// so anything inside `width + carR` counted — including the far side of the post,
+// where the panel is not. `want = carAng ± halfW` then clamped to maxAngle and
+// flung the gate wide open with nothing touching it, and the resistance braked a
+// car that never met the panel. The panel is a RAY at bearing `angle`; the car
+// has to overlap that ray, and be at the panel's HEIGHT.
+{
+  const P = PHYSICS_PROP_TYPES.gate;
+  /**
+   * Drive a straight line past a gate hinged at the origin (panel along +X) and
+   * report the biggest swing it provoked and the speed the car kept.
+   */
+  const driveBy = ({ x, y = 0.5, z0 = -8, speed = 20 }) => {
+    const root = new THREE.Object3D();
+    const phys = new PropPhysics({ props: { instances: [{ id: "gate", root }] }, getGroundBvh: () => null });
+    phys.sync();
+    const g = phys.sims[0];
+    const body = {
+      pos: V(x, y, z0), vel: V(0, 0, speed), quat: new THREE.Quaternion(),
+      getVelocityAtPoint(_p, o) { return o.copy(this.vel); },
+    };
+    let peak = 0;
+    for (let i = 0; i < 16 / DT && body.pos.z < 16; i++) {
+      body.pos.addScaledVector(body.vel, DT);
+      phys.tick(DT, { enabled: true, body });
+      peak = Math.max(peak, Math.abs(g.angle));
+    }
+    return { peak, exit: body.vel.z };
+  };
+
+  // BEHIND THE POST. Inside the old radius test (3 < 4.4 + 1.25) but 180° away
+  // from the panel — the gate must not move and the car must not be braked.
+  const behind = driveBy({ x: -3 });
+  check("driving past the BACK of the hinge post leaves the gate shut",
+    behind.peak < 0.02, `peak ${behind.peak.toFixed(3)} rad`);
+  check("...and does not brake the car either", behind.exit > 19.9,
+    `${behind.exit.toFixed(1)} m/s`);
+
+  // OVER THE TOP. Panel top is baseY + height; a car well above it is jumping
+  // the gate, not going through it.
+  const over = driveBy({ x: P.width / 2, y: P.baseY + P.height + 1.5 });
+  check("a car flying OVER the panel does not swing it",
+    over.peak < 0.02, `peak ${over.peak.toFixed(3)} rad`);
+
+  // The control: the same run at panel height still works, so the two tests
+  // above are not passing because contact broke everywhere.
+  const through = driveBy({ x: P.width / 2 });
+  check("...while the same line at panel height still opens it",
+    through.peak > 0.8, `peak ${through.peak.toFixed(2)} rad`);
+}
+
+console.log("\n=== THE COLLIDER OVERLAY DRAWS WHAT THE SIM USES ===");
+// "Show colliders" is a debugging instrument, so a wireframe that does not sit
+// on the thing it describes costs more time than it saves. Both of its errors
+// were in roadGame.js, not in the sim.
+{
+  const game = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
+  const dyn = game.slice(game.indexOf("function updateDynamicDebug"),
+    game.indexOf("function setCollisionDebug"));
+  // _tickHinge already writes `root.quaternion = home * R(angle)`. Multiplying
+  // R(angle) in again here made the wireframe lead the panel BY THE SWING — 86°
+  // out at the hinge limit, which is what "it doesn't follow the gate" was.
+  check("the hinge wireframe does not re-apply the swing the root already carries",
+    !/setFromAxisAngle/.test(dyn));
+  // And it is built at the panel's real height rather than centred on the root,
+  // which had it drawing half a metre underground.
+  const build = game.slice(game.indexOf("function buildDynamicDebug"),
+    game.indexOf("function updateDynamicDebug"));
+  check("the hinge wireframe is lifted to the panel's own baseY",
+    /translate\(p\.width \/ 2, p\.baseY/.test(build));
+  check("the sim's panel height and the mesh's are the same constants",
+    /GATE_HEIGHT/.test(readFileSync(join(ROOT, "games/modular-road-v3/modularRoadProps.js"), "utf8")));
+}
+
 console.log("\n=== CONES STAY STRICTLY ONE-WAY ===");
 {
   const { phys } = mk([{ id: "cone", x: 0, z: 0 }]);
@@ -308,14 +383,35 @@ console.log("\n=== DELETING A PROP CANNOT LEAVE A GHOST ===");
 console.log("\n=== SAVED WITH THE TRACK, AND OUT OF THE COLLISION BAKE ===");
 {
   const propsSrc = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadProps.js"), "utf8");
+  /** Source text of one PROP_CATALOG entry, `id:` up to the start of the next. */
+  const catalogEntry = (id) => {
+    const start = propsSrc.indexOf(`id: "${id}"`);
+    if (start < 0) return null;
+    const next = propsSrc.indexOf('\n    id: "', start + 1);
+    return propsSrc.slice(start, next < 0 ? propsSrc.length : next);
+  };
+  // THE INVARIANT IS PER-MESH, NOT PER-PROP. A moving collider in the static bake
+  // is an invisible wall welded where it was authored while the visible prop
+  // swings/flies off on its own — but "no simulated geometry in the bake" does
+  // not mean "no geometry at all". The swing gate's POST never moves and is a
+  // solid; only its panel is excluded. So: every mesh a physics prop simulates
+  // must be either out of the bake by prop, or out by `noCollide`.
   for (const id of Object.keys(PHYSICS_PROP_TYPES)) {
-    const entry = new RegExp(`id: "${id}"[\\s\\S]{0,200}?collision: "([a-z]+)"`).exec(propsSrc);
+    const entry = catalogEntry(id);
     check(`"${id}" is in PROP_CATALOG, so it saves/loads with the track`, !!entry);
-    // A physics prop in the static bake = an invisible wall welded where it was
-    // authored, while the visible prop flies off on its own.
-    check(`"${id}" is collision:"none" — never welded into the static bake`,
-      entry?.[1] === "none", entry?.[1]);
+    const collision = /collision: "([a-z]+)"/.exec(entry ?? "")?.[1];
+    const simulated = { cone: [], gate: ["panel", "stripe"] }[id] ?? [];
+    const excluded = collision === "none"
+      || simulated.every((m) => new RegExp(`${m}\\.userData\\.noCollide = true`).test(entry ?? ""));
+    check(`"${id}" keeps its SIMULATED geometry out of the static bake`,
+      excluded, collision === "none" ? "collision:none" : `collision:${collision} + noCollide`);
   }
+  check("collisionMeshes() honours the per-mesh opt-out",
+    /noCollide/.test(propsSrc.slice(propsSrc.indexOf("collisionMeshes()"))));
+  // And the half that has to STAY solid: a hinge post you drive through is not a
+  // gate. It is only bakeable because it is a cylinder on the rotation axis.
+  check("the gate's hinge post IS a static solid",
+    /collision: "solid"/.test(catalogEntry("gate") ?? ""));
   const io = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadTrackIO.js"), "utf8");
   check("track export includes props", /props:\s*props\.exportInstances\(\)/.test(io));
   check("track import restores them", /importInstances\(data\.props\)/.test(io));

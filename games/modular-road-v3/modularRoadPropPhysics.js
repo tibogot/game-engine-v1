@@ -80,6 +80,21 @@ export const CONE_SCALE = 3;
  * panel is a different length from its physical one swings visibly wrong.
  */
 export const GATE_WIDTH = 4.4;
+/**
+ * Panel height, and how far its BOTTOM sits above the hinge root (m).
+ *
+ * Shared for the same reason as GATE_WIDTH, and it was NOT before: the mesh was
+ * 1.5 tall spanning y 0.15..1.65 while the profile said `height: 1.6` measured
+ * about the root, i.e. the "physical" panel ran −0.8..+0.8 and was a metre out
+ * of place vertically. Invisible in play (the car's y always fell inside both)
+ * but it is what the collider wireframe was drawing, which is how it showed up.
+ */
+export const GATE_HEIGHT = 1.5;
+export const GATE_BASE_Y = 0.15;
+/** Hinge post radius and height (m). The post is a STATIC solid, not part of the
+ *  hinge sim — see the gate entry in modularRoadProps.js. */
+export const GATE_POST_RADIUS = 0.11;
+export const GATE_POST_HEIGHT = 1.9;
 
 /** Per-type physics profile. `kind` selects the simulation, not the look. */
 export const PHYSICS_PROP_TYPES = {
@@ -110,9 +125,11 @@ export const PHYSICS_PROP_TYPES = {
   },
   gate: {
     kind: "hinge",
-    /** Panel reach from the hinge (m) and its height. */
+    /** Panel reach from the hinge (m), its height, and its bottom edge above the
+     *  hinge root. All three are the MESH's numbers — see GATE_HEIGHT. */
     width: GATE_WIDTH,
-    height: 1.6,
+    height: GATE_HEIGHT,
+    baseY: GATE_BASE_Y,
     /** Radians the panel may swing either way. */
     maxAngle: 1.5,
     /** Spring back to closed (1/s²) and its damping (1/s). Together these ARE
@@ -424,13 +441,30 @@ export class PropPhysics {
       // Plan-view radius of the car — what the panel actually has to clear.
       const carR = CHASSIS.width * 0.5 + 0.35;
 
-      if (r < p.width + carR && Math.abs(_v.y) < p.height + 0.6) {
-        // Angle from the hinge to the car, and how wide the car looks from there.
-        // Close to the hinge a car subtends nearly 90°, far out it is a sliver —
-        // which is exactly why a door has to swing further when you are near it.
-        const carAng = Math.atan2(-_v.z, _v.x);
-        const halfW = Math.atan2(carR, Math.max(0.4, r));
+      // Vertical band the panel actually occupies, plus a car's worth of slack
+      // below (car.pos is the chassis origin, ~0.5 m up) and a little above. A
+      // car cleanly OVER the gate has to miss it — this used to be measured
+      // symmetrically about the root, so the band sat half a metre low.
+      const overPanel = _v.y > -1.0 && _v.y < p.baseY + p.height + 0.4;
+      // Angle from the hinge to the car, and how wide the car looks from there.
+      // Close to the hinge a car subtends nearly 90°, far out it is a sliver —
+      // which is exactly why a door has to swing further when you are near it.
+      const carAng = Math.atan2(-_v.z, _v.x);
+      const halfW = Math.atan2(carR, Math.max(0.4, r));
+      // IS THE CAR ACTUALLY AT THE PANEL? Radius alone is not enough, and this
+      // was the "gate opens by itself" bug: the panel ray points along bearing
+      // `s.angle`, so a car driving past the BACK of the post (bearing ~180°)
+      // was still inside `r < width + carR`, and `want = carAng ± halfW` then
+      // clamped to maxAngle and flung the gate wide open with nothing touching
+      // it. Even on the near side, a car 0.5 rad off a panel it subtends 0.3 rad
+      // of is clear of it and must not push. Wrapped, because the two bearings
+      // straddle ±π.
+      let dAng = carAng - s.angle;
+      if (dAng > Math.PI) dAng -= 2 * Math.PI;
+      else if (dAng < -Math.PI) dAng += 2 * Math.PI;
+      const atPanel = Math.abs(dAng) < halfW + 0.05;
 
+      if (r < p.width + carR && overPanel && atPanel) {
         // Which way the panel is being shoved: with the car's travel through the
         // doorway, never into it. Latched for the whole contact so a car that
         // yaws mid-pass cannot flip the gate back through itself.
