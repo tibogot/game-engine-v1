@@ -134,6 +134,10 @@ export const pieceParams = {
   // Quarter-pipe (concave ramp curving up a vertical-plane arc to a wall):
   qpRadius: 16, // arc radius (m) — also the wall height at 90°
   qpAngle: 90, // arc sweep (deg): 90 = up to vertical, less = a launch kicker
+  // Hole road (straight deck with a big circular hole punched through it):
+  holedLength: 32, // run of the piece (m)
+  holedWidth: 16, // deck width (m) — widen for a bigger hole with real ledges
+  holeRadius: 5, // hole radius (m) — clamped so ledges never vanish
   onChange: null,
 };
 
@@ -399,6 +403,104 @@ export function buildSweepGeometry(frames, profileData = buildProfile(), opts = 
   // (all pieces carry it → merge stays valid). Platforms set it to suppress lines.
   const vcount = positions.length / 3;
   geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(new Float32Array(vcount).fill(plain), 1));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Holed deck (straight slab with a circular hole punched through it)       */
+/* ----------------------------------------------------------------------- */
+
+/**
+ * Straight deck with a big circular hole through the middle — the sweep can't
+ * express holes (it always emits a continuous strip), so this piece builds its
+ * slab directly in piece-local space (origin → −Z, deck top at y = 0).
+ *
+ * Physics needs NOTHING special: the deck BVH only contains the triangles that
+ * exist, so a wheel probing over the hole finds no ground and the car simply
+ * falls through — same rule as the gap spacer, but inside one piece.
+ *
+ * Triangulation: walk the rectangle perimeter CCW (corners included, so the
+ * outer edges stay perfectly straight and seam cleanly with neighbours), pair
+ * each border point with the point on the hole circle at the same angle from
+ * the hole centre, and band-quad between the two rings. Same attributes as
+ * buildSweepGeometry (uv / aLateral / aZone / aPlain) so the road material
+ * works unchanged. Every quad gets unique vertices → crisp flat shading.
+ */
+export function buildHoledDeckGeometry(pp = pieceParams, rp = roadParams) {
+  const L = Math.max(8, pp.holedLength ?? 32);
+  const hw = Math.max(3, (pp.holedWidth ?? rp.width) / 2);
+  const t = Math.max(0.05, rp.thickness);
+  // Keep at least a 1.2 m ledge on the sides and 2 m of deck at the ends.
+  const r = THREE.MathUtils.clamp(pp.holeRadius ?? 5, 1, Math.min(hw - 1.2, L / 2 - 2));
+  const cz = -L / 2; // hole centre (piece-local z)
+
+  // Border points, CCW in the (u = x, v = z − cz) plane. Each side includes its
+  // start corner and excludes its end corner, so corners appear exactly once.
+  const border = [];
+  const push = (u0, v0, u1, v1, n) => {
+    for (let i = 0; i < n; i++) {
+      const s = i / n;
+      border.push([u0 + (u1 - u0) * s, v0 + (v1 - v0) * s]);
+    }
+  };
+  const nSide = Math.max(8, Math.ceil(L / 2));
+  const nEnd = Math.max(6, Math.ceil(hw));
+  push(hw, -L / 2, hw, L / 2, nSide); // right side
+  push(hw, L / 2, -hw, L / 2, nEnd); // far end
+  push(-hw, L / 2, -hw, -L / 2, nSide); // left side
+  push(-hw, -L / 2, hw, -L / 2, nEnd); // near end
+  const M = border.length;
+
+  // Hole-circle point at the same angle as each border point.
+  const circle = border.map(([u, v]) => {
+    const a = Math.atan2(v, u);
+    return [Math.cos(a) * r, Math.sin(a) * r];
+  });
+
+  const positions = [];
+  const uvs = [];
+  const lateral = [];
+  const zone = [];
+  const indices = [];
+
+  // One quad, unique vertices. p* = [x, y, z]; zone constant per quad.
+  const quad = (pa, pb, pc, pd, zn) => {
+    const base = positions.length / 3;
+    for (const p of [pa, pb, pc, pd]) {
+      positions.push(p[0], p[1], p[2]);
+      uvs.push(-p[2], p[0]); // uv.x = metres along path, uv.y = across
+      lateral.push(p[0] / hw);
+      zone.push(zn);
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+
+  const P = (uv2, y) => [uv2[0], y, cz + uv2[1]]; // (u,v) plane → piece-local
+
+  for (let i = 0; i < M; i++) {
+    const j = (i + 1) % M;
+    const Bi = border[i], Bj = border[j];
+    const Ci = circle[i], Cj = circle[j];
+    // Top ring band (deck, +Y): CCW in (u,v) seen from above = +Y normal.
+    quad(P(Ci, 0), P(Cj, 0), P(Bj, 0), P(Bi, 0), 1);
+    // Bottom ring band (underside, −Y): reversed winding.
+    quad(P(Bi, -t), P(Bj, -t), P(Cj, -t), P(Ci, -t), 0);
+    // Hole wall (inner cylinder).
+    quad(P(Ci, -t), P(Cj, -t), P(Cj, 0), P(Ci, 0), 0);
+    // Outer perimeter wall.
+    quad(P(Bi, 0), P(Bj, 0), P(Bj, -t), P(Bi, -t), 0);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(lateral, 1));
+  geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zone, 1));
+  const vcount = positions.length / 3;
+  geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(new Float32Array(vcount).fill(1), 1));
   geo.setIndex(indices);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
@@ -682,6 +784,15 @@ function straightPoints(pp) {
 
 function platformPoints(pp) {
   const L = Math.max(4, pp.platformLength);
+  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
+  const pts = [];
+  for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
+  return pts;
+}
+
+/** Hole-road centerline: only the connectors matter (geometry is custom). */
+function holedPoints(pp) {
+  const L = Math.max(8, pp.holedLength ?? 32);
   const n = Math.max(2, Math.ceil(L / roadParams.segLen));
   const pts = [];
   for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
@@ -1369,6 +1480,18 @@ export const PIECE_CATALOG = [
     width: (pp) => pp.narrowWidth, // narrower than the road profile (keeps lines/kerbs)
   },
   {
+    id: "holed",
+    label: "Hole road",
+    hint: "Straight deck with a big circular hole — don't fall in",
+    swatch: "#4a9eff",
+    key: "",
+    points: holedPoints,
+    width: (pp) => pp.holedWidth,
+    geometry: (pp, rp) => buildHoledDeckGeometry(pp, rp),
+    noKerb: true, // no kerbs / guardrails — the hazard IS the point
+    plain: true,
+  },
+  {
     id: "wallride",
     label: "Wall ride",
     hint: "Flat → wall → flat (self-contained)",
@@ -1648,6 +1771,7 @@ const _END_TANGENTS = {
   straight: flatEndTangents,
   platform: flatEndTangents,
   narrow: flatEndTangents,
+  holed: flatEndTangents,
   wallride: flatEndTangents,
   tunnel: flatEndTangents,
   tube: flatEndTangents,
@@ -1926,8 +2050,12 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // A piece can swap the whole cross-section (rideable tubes sweep an annulus
   // instead of the road profile); everything downstream just sweeps it.
   const profileData = def.profile ? def.profile(pp) : buildProfile(rpForProfile, useKerbs);
-  const geometry = buildSweepGeometry(frames, profileData, { plain: def.plain });
-  const railGeometry = useKerbs && !def.noMesh && !def.profile ? buildGuardrailGeometry(frames, profileData, gp, rpForProfile) : null;
+  // A piece can also skip the sweep entirely and author its own geometry
+  // (the hole road punches a circle through its slab — impossible as a sweep).
+  const geometry = def.geometry
+    ? def.geometry(pp, rpForProfile)
+    : buildSweepGeometry(frames, profileData, { plain: def.plain });
+  const railGeometry = useKerbs && !def.noMesh && !def.profile && !def.geometry ? buildGuardrailGeometry(frames, profileData, gp, rpForProfile) : null;
   const shellGeometry = def.shell ? buildShellGeometry(def.shell, frames, profileData, pp) : null;
   const decorGeometry = def.game ? buildGameDecorGeometry(frames, profileData, def.game) : null;
 

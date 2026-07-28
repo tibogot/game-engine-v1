@@ -140,6 +140,127 @@ function flatPadGroup(w, d, color, name = "Pad") {
   return g;
 }
 
+/**
+ * Emissive chevrons pointing along local −Z, laid flat at deck level.
+ * Shared arrow-drawing for the pad decals (no slab — see flatDecalGroup).
+ */
+function chevronRunMesh(w, d, color, y = 0.06) {
+  const hw = w * 0.34;
+  const aLen = Math.min(3.4, d * 0.22);
+  const gap = d * 0.24;
+  const pos = [];
+  for (let i = 0; i < 3; i++) {
+    const zBack = gap - i * gap;
+    pos.push(0, y, zBack - aLen, hw, y, zBack, -hw, y, zBack); // tip, right, left
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  return new THREE.Mesh(
+    geo,
+    mat(color, { roughness: 0.3, emissive: color, emissiveIntensity: 5, side: THREE.DoubleSide }),
+  );
+}
+
+/**
+ * TRUE flat decal: no slab at all — just the emissive chevrons plus a faint
+ * translucent tint rectangle, hugging the deck like paint. Same trigger-field
+ * effects as the pad props; use this version when the raised pad base would
+ * read as an obstacle (banked decks, tube floors, narrow roads).
+ */
+function flatDecalGroup(w, d, color, name = "Decal") {
+  const g = new THREE.Group();
+  g.name = name;
+  const tint = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, d),
+    mat(0x0d1116, { roughness: 0.55, opacity: 0.45, side: THREE.DoubleSide }),
+  );
+  tint.rotation.x = -Math.PI / 2;
+  tint.position.y = 0.03;
+  g.add(tint, chevronRunMesh(w, d, color));
+  return g;
+}
+
+/**
+ * Circular launch decal: concentric emissive rings painted flat on the deck
+ * (reads as a vertical-launch target rather than a directional strip).
+ */
+function launchDecalGroup(radius = 5.5, color = 0xffae33) {
+  const g = new THREE.Group();
+  g.name = "LaunchDecal";
+  const tint = new THREE.Mesh(
+    new THREE.CircleGeometry(radius, 40),
+    mat(0x0d1116, { roughness: 0.55, opacity: 0.45, side: THREE.DoubleSide }),
+  );
+  tint.rotation.x = -Math.PI / 2;
+  tint.position.y = 0.03;
+  g.add(tint);
+  for (const [rFrac, i] of [[0.92, 4], [0.6, 3.2], [0.28, 2.4]]) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(radius * rFrac - 0.35, radius * rFrac, 40),
+      mat(color, { roughness: 0.3, emissive: color, emissiveIntensity: i, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.06;
+    g.add(ring);
+  }
+  return g;
+}
+
+/**
+ * Tube booster decal: a ring of emissive chevrons wrapped around the INSIDE of
+ * a cylinder, all pointing along −Z — the boost-pad look bent into a hoop, for
+ * mounting inside tube pieces (or the rotating tube). Authored with its axis at
+ * the group ORIGIN and the group lifted by the tube radius, so surface-snapping
+ * onto a tube floor puts the band dead on the tube's axis.
+ */
+function boostTubeGroup(r = 7.3, len = 5.2, color = 0x18ffd0) {
+  const g = new THREE.Group();
+  g.name = "BoostTube";
+
+  // Faint translucent sleeve so the band reads as one object.
+  const sleeve = new THREE.Mesh(
+    new THREE.CylinderGeometry(r + 0.15, r + 0.15, len, 48, 1, true),
+    mat(0x0d1116, { roughness: 0.55, opacity: 0.35, side: THREE.DoubleSide }),
+  );
+  sleeve.rotation.x = Math.PI / 2; // axis along Z
+  g.add(sleeve);
+
+  // Bright hoops at both mouths.
+  for (const z of [-len / 2, len / 2]) {
+    const hoop = new THREE.Mesh(
+      new THREE.TorusGeometry(r + 0.2, 0.14, 12, 48), // torus already lies in XY → axis = Z
+      mat(color, { roughness: 0.35, emissive: color, emissiveIntensity: 3.5 }),
+    );
+    hoop.position.z = z;
+    g.add(hoop);
+  }
+
+  // Chevrons around the inner surface, tips toward −Z (the boost direction).
+  const K = 10;
+  const dphi = 2.2 / r; // ~2.2 m arc half-width per arm
+  const zTip = -len * 0.32;
+  const zBack = len * 0.32;
+  const pos = [];
+  for (let k = 0; k < K; k++) {
+    const phi = (2 * Math.PI * k) / K;
+    const p = (ph, z) => pos.push(Math.cos(ph) * r, Math.sin(ph) * r, z);
+    p(phi, zTip); // tip
+    p(phi + dphi, zBack); // arm
+    p(phi - dphi, zBack); // arm
+  }
+  const chevGeo = new THREE.BufferGeometry();
+  chevGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  chevGeo.computeVertexNormals();
+  g.add(new THREE.Mesh(
+    chevGeo,
+    mat(color, { roughness: 0.3, emissive: color, emissiveIntensity: 5, side: THREE.DoubleSide }),
+  ));
+
+  g.position.y = r; // rest offset: snapping to a tube floor centres the band on the axis
+  return g;
+}
+
 /** Functional boost ring: an emissive cyan torus gate that slingshots the car
  *  forward when driven through. Distinct cyan glow (vs the orange Glow ring). */
 function boostRingGroup() {
@@ -224,6 +345,11 @@ function mat(color, opts = {}) {
     emissiveIntensity,
     side: opts.side ?? THREE.FrontSide,
   });
+  if (opts.opacity != null && opts.opacity < 1) {
+    m.transparent = true;
+    m.opacity = opts.opacity;
+    m.depthWrite = false; // translucent decal tint — never occlude the deck
+  }
   if (opts.bloom ?? emissiveIntensity > 1) applyPropBloom(m);
   return m;
 }
@@ -483,6 +609,59 @@ export const PROP_CATALOG = [
         const target = 70; // strong punch through the gate
         const along = body.vel.dot(fwd);
         if (along < target) body.vel.addScaledVector(fwd, Math.min(700 * dt, target - along));
+      },
+    },
+  },
+  {
+    id: "boostdecal",
+    label: "Boost decal",
+    collision: "none", // pure paint — chevrons + tint, zero slab
+    make: () => flatDecalGroup(BOOST_W, BOOST_D, 0x18ffd0, "BoostDecal"),
+    field: {
+      center: [0, 1.5, 0],
+      half: [BOOST_W / 2, 2.5, BOOST_D / 2],
+      apply(vehicle, dt, fwd) {
+        const body = vehicle.body;
+        const target = 62; // same push as the boost pad — only the look differs
+        const along = body.vel.dot(fwd);
+        if (along < target) body.vel.addScaledVector(fwd, Math.min(150 * dt, target - along));
+      },
+    },
+  },
+  {
+    id: "launchdecal",
+    label: "Launch decal",
+    collision: "none",
+    make: () => launchDecalGroup(5.5, 0xffae33),
+    field: {
+      center: [0, 1.5, 0],
+      half: [5.5, 2.5, 5.5],
+      apply(vehicle, dt, fwd) {
+        const body = vehicle.body;
+        const up = 18; // same launch as the pad — set, not add → one clean pop
+        if (body.vel.y < up) body.vel.y = up;
+        const fwdTarget = 22;
+        const along = body.vel.dot(fwd);
+        if (along < fwdTarget) body.vel.addScaledVector(fwd, Math.min(90 * dt, fwdTarget - along));
+      },
+    },
+  },
+  {
+    id: "boosttube",
+    label: "Booster (tube)",
+    collision: "none",
+    make: () => boostTubeGroup(),
+    // The band's axis sits at the group origin (make() lifts the root by the
+    // tube radius), so the field is a fat slab across the whole cross-section:
+    // boost fires wherever you are on the tube wall — floor, side, or ceiling.
+    field: {
+      center: [0, 0, 0],
+      half: [7.6, 7.6, 3],
+      apply(vehicle, dt, fwd) {
+        const body = vehicle.body;
+        const target = 68; // punchier than the flat pad — tubes eat speed
+        const along = body.vel.dot(fwd);
+        if (along < target) body.vel.addScaledVector(fwd, Math.min(400 * dt, target - along));
       },
     },
   },

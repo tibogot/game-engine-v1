@@ -254,7 +254,7 @@ export class ParkourMover {
   /**
    * @param {object} o
    * @param {THREE.Mesh} o.mesh collision + visual mesh
-   * @param {"spin-y"|"slide-z"|"slide-y"|"pendulum-x"} o.mode
+   * @param {"spin-y"|"spin-z"|"slide-z"|"slide-y"|"pendulum-x"} o.mode
    * @param {number} o.speed rad/s or phase speed
    * @param {THREE.Object3D} [o.pivot] required for spin-y / pendulum-x
    * @param {number} [o.amplitude] slide distance (m) or swing angle (rad)
@@ -294,6 +294,13 @@ export class ParkourMover {
       this.pivot.rotation.y = this.phase;
       this._angVelW.set(0, this.speed, 0).applyQuaternion(this.pivot.getWorldQuaternion(_q));
       this._linVel.set(0, 0, 0);
+    } else if (this.mode === "spin-z" && this.pivot) {
+      // Barrel roll about the pivot's local Z — a tube spinning about its own
+      // length axis (the rotating-tube obstacle). Orient the tube by rotating
+      // the ROOT; the pivot's Z stays the tube axis.
+      this.pivot.rotation.set(0, 0, this.phase);
+      this._angVelW.set(0, 0, this.speed).applyQuaternion(this.pivot.getWorldQuaternion(_q));
+      this._linVel.set(0, 0, 0);
     } else if (this.mode === "slide-z") {
       const offset = this.amplitude * Math.sin(this.phase);
       this.mesh.position.set(this.origin.x, this.origin.y, this.origin.z + offset);
@@ -317,7 +324,7 @@ export class ParkourMover {
 
   /** Surface velocity at a world-space contact point (for chassis coupling). */
   velocityAt(worldPoint, out) {
-    if ((this.mode === "spin-y" || this.mode === "pendulum-x") && this.pivot) {
+    if ((this.mode === "spin-y" || this.mode === "spin-z" || this.mode === "pendulum-x") && this.pivot) {
       this.pivot.getWorldPosition(_pivotW);
       _r.subVectors(worldPoint, _pivotW);
       return out.crossVectors(this._angVelW, _r);

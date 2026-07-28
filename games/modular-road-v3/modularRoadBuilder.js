@@ -1698,6 +1698,7 @@ const PIECE_TO_CATEGORY = {
   straight: "straight",
   platform: "straight",
   narrow: "straight",
+  holed: "straight",
   tunnel: "tubes",
   tunnel_curve: "tubes",
   tube: "tubes",
@@ -1973,6 +1974,20 @@ export const CATEGORY_PRESETS = {
       base: "narrow",
       params: { straightLength: 24, narrowWidth: 8 },
       preview: `<svg viewBox="0 0 80 80"><rect x="34" y="10" width="12" height="60" rx="1" ${_RB}/><line x1="40" y1="14" x2="40" y2="66" ${_RS}/></svg>`,
+    },
+    {
+      id: "hole_road",
+      label: "Hole Road",
+      base: "holed",
+      params: { holedLength: 32, holedWidth: 16, holeRadius: 5 },
+      preview: `<svg viewBox="0 0 80 80"><rect x="24" y="8" width="32" height="64" rx="2" ${_RB}/><circle cx="40" cy="40" r="11" fill="#12151a" stroke="#dce622" stroke-width="1.5"/></svg>`,
+    },
+    {
+      id: "hole_road_xl",
+      label: "Hole Road XL",
+      base: "holed",
+      params: { holedLength: 36, holedWidth: 26, holeRadius: 9 },
+      preview: `<svg viewBox="0 0 80 80"><rect x="16" y="8" width="48" height="64" rx="2" ${_RB}/><circle cx="40" cy="40" r="17" fill="#12151a" stroke="#dce622" stroke-width="1.5"/></svg>`,
     },
   ],
   ramps: [

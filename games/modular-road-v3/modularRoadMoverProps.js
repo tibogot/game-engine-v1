@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
+import { materialEmissive } from "three/tsl";
+import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { ParkourMover, enableMeshShadows } from "./modularRoadParkour.js";
 
 /**
@@ -16,6 +18,91 @@ function moverMat(color) {
     metalness: 0.35,
     side: THREE.DoubleSide,
   });
+}
+
+/**
+ * Rotating-tube shell + hole-rim geometry.
+ *
+ * A drive-through tube (axis along local Z, centred on the origin) whose wall
+ * has rectangular holes punched through it. Built as an (angle × length) grid
+ * of cells; holes are INTEGER cell ranges, so hole borders align with the grid
+ * and the rims come out as clean curved rectangles. Solid cells emit an inner
+ * and an outer wall quad; every hole↔solid boundary emits a radial rim quad.
+ * Rims are returned separately so they can glow (you need to see the holes
+ * coming while the tube spins).
+ *
+ * θ = 0 is the tube BOTTOM; position on the circle = (R·sinθ, −R·cosθ, z).
+ *
+ * @param {number} Ri inner (drivable) radius
+ * @param {number} wall wall thickness
+ * @param {number} L tube length
+ * @param {{a:number, span:number, z:number, len:number}[]} holes
+ *        a/span = angular centre/width (rad), z/len = centre/length (m)
+ * @returns {{shell: THREE.BufferGeometry, rims: THREE.BufferGeometry}}
+ */
+function rotoTubeGeometries(Ri, wall, L, holes) {
+  const Ro = Ri + wall;
+  const A = 64; // angular cells
+  const NZ = Math.max(8, Math.round(L / 1.25)); // length cells
+  const da = (2 * Math.PI) / A;
+  const dz = L / NZ;
+
+  // Holes as integer cell ranges (angular range wraps).
+  const rects = holes.map((h) => {
+    const na = Math.max(2, Math.round(h.span / da));
+    const nz = Math.max(2, Math.round(h.len / dz));
+    return {
+      ia0: ((Math.round(h.a / da - na / 2) % A) + A) % A,
+      na,
+      iz0: Math.max(0, Math.min(NZ - nz, Math.round((h.z + L / 2) / dz - nz / 2))),
+      nz,
+    };
+  });
+  const isHole = (ia, iz) =>
+    rects.some((r) => ((ia - r.ia0 + A) % A) < r.na && iz >= r.iz0 && iz < r.iz0 + r.nz);
+
+  const pt = (ia, R, iz) => {
+    const th = ia * da;
+    return [R * Math.sin(th), -R * Math.cos(th), -L / 2 + iz * dz];
+  };
+
+  const mkEmit = () => ({ pos: [], idx: [] });
+  const quad = (part, a, b, c, d) => {
+    const base = part.pos.length / 3;
+    part.pos.push(...a, ...b, ...c, ...d);
+    part.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+  const shell = mkEmit();
+  const rims = mkEmit();
+
+  for (let ia = 0; ia < A; ia++) {
+    const ja = (ia + 1) % A;
+    for (let iz = 0; iz < NZ; iz++) {
+      if (isHole(ia, iz)) {
+        // Rim quads on every edge shared with a solid neighbour.
+        if (!isHole((ia - 1 + A) % A, iz)) quad(rims, pt(ia, Ri, iz), pt(ia, Ri, iz + 1), pt(ia, Ro, iz + 1), pt(ia, Ro, iz));
+        if (!isHole(ja, iz)) quad(rims, pt(ja, Ri, iz), pt(ja, Ro, iz), pt(ja, Ro, iz + 1), pt(ja, Ri, iz + 1));
+        if (iz === 0 || !isHole(ia, iz - 1)) quad(rims, pt(ia, Ri, iz), pt(ia, Ro, iz), pt(ja, Ro, iz), pt(ja, Ri, iz));
+        if (iz === NZ - 1 || !isHole(ia, iz + 1)) quad(rims, pt(ia, Ri, iz + 1), pt(ja, Ri, iz + 1), pt(ja, Ro, iz + 1), pt(ia, Ro, iz + 1));
+        continue;
+      }
+      quad(shell, pt(ia, Ri, iz), pt(ja, Ri, iz), pt(ja, Ri, iz + 1), pt(ia, Ri, iz + 1)); // inner wall
+      quad(shell, pt(ia, Ro, iz), pt(ia, Ro, iz + 1), pt(ja, Ro, iz + 1), pt(ja, Ro, iz)); // outer wall
+    }
+    // Annular end caps (solid cells only — a hole reaching an end stays open).
+    if (!isHole(ia, 0)) quad(shell, pt(ia, Ri, 0), pt(ia, Ro, 0), pt(ja, Ro, 0), pt(ja, Ri, 0));
+    if (!isHole(ia, NZ - 1)) quad(shell, pt(ia, Ri, NZ), pt(ja, Ri, NZ), pt(ja, Ro, NZ), pt(ia, Ro, NZ));
+  }
+
+  const toGeo = (part) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(part.pos, 3));
+    g.setIndex(part.idx);
+    g.computeVertexNormals();
+    g.computeBoundingSphere();
+    return g;
+  };
+  return { shell: toGeo(shell), rims: toGeo(rims) };
 }
 
 /** @param {THREE.Object3D} root */
@@ -155,6 +242,58 @@ export const MOVER_CATALOG = [
         phase0: -Math.PI / 2,
         slideOrigin: new V3(0, elevOriginY, 0),
       });
+    },
+  },
+  {
+    id: "rototube",
+    label: "Rotating tube",
+    collision: "deck",
+    defaults: { speed: 0.55, amplitude: 8 },
+    make: () => {
+      // Drive-through barrel that spins about its own axis. The wall is the
+      // road (inner radius matches the kit's rideable tube, so it lines up with
+      // Tube pieces), and rectangular holes are punched through it — as the
+      // tube turns, a hole sweeping under the car is bare sky. isDeck: the
+      // shell rebakes into the wheel BVH every tick, so the missing cells are
+      // really missing for physics too.
+      const Ri = 8;
+      const wall = 0.6;
+      const L = 40;
+      const deg = THREE.MathUtils.degToRad;
+      const { shell, rims } = rotoTubeGeometries(Ri, wall, L, [
+        { a: deg(0), span: deg(80), z: -12, len: 7 },
+        { a: deg(100), span: deg(70), z: -4, len: 7 },
+        { a: deg(200), span: deg(90), z: 4, len: 7 },
+        { a: deg(300), span: deg(70), z: 12, len: 7 },
+      ]);
+      const root = new THREE.Group();
+      root.name = "RotoTube";
+      const pivot = new THREE.Object3D();
+      pivot.position.set(0, Ri, 0); // inner floor rests on y = 0
+      root.add(pivot);
+      // Glossy metal barrel — low roughness so the spin reads in the highlights.
+      const mesh = new THREE.Mesh(
+        shell,
+        new THREE.MeshStandardMaterial({
+          color: 0x8fb6cc,
+          metalness: 0.85,
+          roughness: 0.16,
+          side: THREE.DoubleSide,
+        }),
+      );
+      mesh.name = "RotoTubeShell";
+      // Emissive hole rims (bloomed) — you must SEE the holes coming around.
+      const rimMat = new THREE.MeshStandardNodeMaterial({
+        color: new THREE.Color(0xff5a1e),
+        emissive: new THREE.Color(0xff5a1e),
+        emissiveIntensity: 4,
+        roughness: 0.4,
+        side: THREE.DoubleSide,
+      });
+      applyBloomMRT(rimMat, materialEmissive);
+      mesh.add(new THREE.Mesh(rims, rimMat)); // child ⇒ visual only, no collision
+      pivot.add(mesh);
+      return bindMover(root, { mesh, pivot, mode: "spin-z", speed: 0.55, amplitude: 8, isDeck: true });
     },
   },
 ];
