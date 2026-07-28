@@ -155,6 +155,71 @@ console.log("\n=== IS IT THE RACK, OR SOMETHING ELSE ABOUT LANDING? ===");
   console.log("  the AIR input driving the ground steering rack.");
 }
 
+console.log("\n=== THE THINGS THE FIX COULD BREAK ===");
+// Returning the rack to centre in the air is only correct if it leaves the two
+// legitimate cases alone: a short hop taken mid-corner, and a player who is
+// genuinely steering as they land.
+{
+  /**
+   * Hop over a crest with the steering HELD the whole way, and report how much
+   * lock survives. `airFor` is how long the wheels are off the ground.
+   */
+  const hop = (airFor) => {
+    const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
+    c.groundBvh = ground; c.enabled = true;
+    c.body.pos.set(0, 0.55, 0);
+    c.body.vel.set(0, 0, 30);
+    c.body.quat.identity();
+    // Settle on the ground with full lock wound on, so there is something to lose.
+    for (let i = 0; i < 1.0 / FIXED_DT; i++) {
+      c.tick({ steerTarget: 1, throttle: 0.4, handbrake: false, yaw: 0, pitch: 0 });
+    }
+    const before = c.input.steer;
+    // Launch, stay airborne for `airFor`, keeping the key held throughout.
+    c.body.vel.y = 0.5 * GRAV * airFor; // up-speed for a ballistic hop of that length
+    // PEAK, not the final value: _rackAirTime resets the moment the tyres take
+    // load again, so sampling it after the hop always reads 0.
+    let peakAir = 0;
+    for (let i = 0; i < airFor / FIXED_DT; i++) {
+      c.tick({ steerTarget: 1, throttle: 0.4, handbrake: false, yaw: 0, pitch: 0 });
+      peakAir = Math.max(peakAir, c._rackAirTime);
+    }
+    return { before, after: c.input.steer, air: peakAir };
+  };
+  const GRAV = 9.81;
+  // The x-axis is `_rackAirTime`, NOT the launch duration: the suspension stays
+  // loaded for part of a small hop, so the time the car is genuinely UNSUPPORTED
+  // is shorter than the time it spends off its rest height. Reporting the launch
+  // figure made a 0.35 s hop look like it kept 100% "for free".
+  console.log("  launch   unsupported   lock before   at touchdown   kept");
+  for (const t of [0.10, 0.20, 0.35, 0.60, 1.20]) {
+    const r = hop(t);
+    const kept = r.before > 1e-6 ? (r.after / r.before) * 100 : 0;
+    console.log(`  ${t.toFixed(2)}s     ${f(r.air, 6, 2)}s       ${f(r.before, 6, 2)}       ${f(r.after, 6, 2)}        ${f(kept, 5, 0)}%`);
+  }
+  console.log("\n  Short hops must keep their lock — that is a corner with a bump in it,");
+  console.log(`  not a jump. The grace is ${TIRE.airSteerCenterDelay}s.`);
+
+  // …and steering that is actually asked for on landing must still arrive.
+  const steerOnLanding = () => {
+    const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
+    c.groundBvh = ground; c.enabled = true;
+    c.body.pos.set(0, 8, 0); c.body.vel.set(0, 5, 35); c.body.quat.identity();
+    let land = null, at200 = 0;
+    for (let i = 0; i < 4 / FIXED_DT; i++) {
+      const t = i * FIXED_DT;
+      // Holding right the WHOLE time, through the air and after landing.
+      c.tick({ steerTarget: 1, throttle: 0.4, handbrake: false, yaw: 0, pitch: 0 });
+      if (!land && c.groundedCount >= 3) land = t;
+      if (land && t - land >= 0.2 && !at200) at200 = c._steerAngle() * R2D;
+    }
+    return at200;
+  };
+  console.log(`\n  holding steer THROUGH the landing: ${steerOnLanding().toFixed(1)}° of lock`
+    + " 200 ms after touchdown");
+  console.log("  (it winds up from the ground on steerAttack — ordinary turn-in.)");
+}
+
 console.log("\n=== HOW FAST DOES THE RACK UNWIND ONCE YOU LET GO? ===");
 // Even if you release on touchdown, steerRelease decides how long the car keeps
 // turning. This is the "it kept going after I let go" half of the complaint.

@@ -195,6 +195,19 @@ export const TIRE = {
   restLength: 0.55,
   springStrength: 65000,
   damper: 6500,
+  /**
+   * How square to the surface a contact must be (chassis-up · contact-normal)
+   * before the damper measures travel along the NORMAL instead of the chassis
+   * up-axis. See the long note in Tire.apply.
+   *
+   * 0.85 (≈32°) is chosen to cover every contact the car RESTS on while
+   * excluding the ones it CRASHES into. A car square to the road reads 0.998
+   * even when pitched hard on a landing, and a bank or the inside of a loop is
+   * the same — the chassis follows the surface. Only a wheel against something
+   * it is not driving on (rail flank, edge, wall) falls below, and those want
+   * the old closing-speed damping so an impact is still absorbed.
+   */
+  damperNormalMinFacing: 0.85,
   bottomOutThresh: 0.7,
   bottomOutMult: 8,
   // Per-axle friction multipliers (× frictionCoeff). Lower the rear for
@@ -317,6 +330,44 @@ export const TIRE = {
    * the same angle and the change looks like a no-op.
    */
   airSteerRate: 18.0,
+
+  // ── THE STEERING RACK MUST NOT WIND UP IN THE AIR ───────────────────────
+  // A/D is TWO controls on one key: roll in the air, front wheels on the ground.
+  // `_smoothSteer` runs every tick regardless of contact, so every millisecond
+  // spent rolling was also winding the RACK toward full lock. Touch down and the
+  // tyres are handed all of it at once. MEASURED off a 35 m/s jump with the key
+  // RELEASED at touchdown (tools/landingSteerRepro.mjs):
+  //     rack at land 1.00   front wheels 19.6°   heading swing 27.9°
+  // and with the rack frozen, the same jump swings 0.1°. It is not that the car
+  // turns abruptly after a jump — it LANDS with the wheels already turned.
+  /**
+   * Seconds airborne before the rack starts returning to centre.
+   *
+   * A DELAY, not just a slower rate, and that distinction is the whole design.
+   * A single exponential cannot be both "ignore a crest hop" and "centred by the
+   * time a real jump lands": at the release rate (12/s) a 0.15 s hop already
+   * unwinds 83% of your lock, which would gut the steering every time you
+   * crested a rise mid-corner.
+   *
+   * So short air does not count as airborne for steering at all — under 0.25 s
+   * the rack is untouched and you keep cornering through the bump — and past it
+   * the wheels centre well before a real jump touches down.
+   *
+   * Measured from `_airTime`, which is time since the last CONTACT, so tyre
+   * flicker over rough ground can never start it.
+   */
+  airSteerCenterDelay: 0.25,
+  /**
+   * Rate (1/s) the rack returns to centre once that delay has passed. 6/s puts
+   * it under 5% of full lock in ~0.5 s, so anything that reads as a jump lands
+   * with the wheels straight.
+   *
+   * The player does not lose the ability to steer on landing: hold the key and
+   * the rack winds back up on `steerAttack` from the ground, which is ordinary
+   * turn-in. The point is that the wheels follow what you ask AFTER you land,
+   * rather than arriving pre-turned by an input that meant "roll".
+   */
+  airSteerCenterRate: 6.0,
   /** Fraction the ATTACK rate is cut by at `steerSpeedRef` and above, so the
    *  wheel gets heavier with speed. Returning to centre and the countersteer
    *  CROSSING are never slowed — they're the recovery inputs. (Once a
@@ -374,6 +425,45 @@ export const TIRE = {
    * (the user's own 60 km/h corner), so the boost is long gone by then.
    */
   lowSpeedLockRef: 14,
+  // ── LATERAL GRIP FADES AS THE CAR TIPS OVER ─────────────────────────────
+  // A tyre only makes cornering force through a contact PATCH that is flat on
+  // the road. Tip the car onto its shoulder and there is no patch — but the
+  // model does not know that: `vLat` is measured along the chassis' right axis
+  // whatever attitude it is in, and the force it answers with is the full
+  // friction circle.
+  //
+  // That is what makes a rolled landing violent. A lateral force at a wheel acts
+  // `WHEEL_LOCAL.z` = 1.4 m fore/aft of the CoM, so it is a YAW LEVER, and on
+  // touchdown the suspension load — and therefore the friction budget — is
+  // enormous. MEASURED landing part-way through a barrel roll: 81.7 kN·m of yaw
+  // torque against a 1890 kg·m² yaw inertia, i.e. 43 rad/s², snapping the
+  // heading 11.7° almost instantly. That is the "the car turns by itself VERY
+  // abruptly" — and it only happens after a roll because only a roll puts the
+  // car on its side at the moment the tyres take load.
+  //
+  // Fading the LATERAL force by how square the wheel is to the surface fixes it
+  // at the source and is what a real tyre does. It costs nothing anywhere else:
+  // the stabilizer aligns the chassis to the surface normal whenever the car is
+  // driving, so on flat ground, on banks, through loops and inside tubes this
+  // factor sits at 1.0 and the handling is bit-for-bit unchanged. It only ever
+  // bites when the car is NOT on its wheels — which is exactly when the tyre
+  // model has no business generating a cornering force.
+  //
+  // LONGITUDINAL force is deliberately untouched: braking and drive act through
+  // the wheel's rolling direction, they are not a yaw lever, and cutting them
+  // would change acceleration everywhere for no reason.
+  /**
+   * chassis-up · contact-normal at/above which lateral grip is full. 0.45 ≈ 63°.
+   *
+   * Deliberately LATE. An earlier fade (0.85, ~32°) killed the yaw snap just as
+   * well but also bled grip off a car merely leaning on a guardrail, which then
+   * slid off the track — it broke chassisCollisionTest's "land on the rail" case.
+   * Past 63° the car is genuinely on its side and has no contact patch worth
+   * modelling; before that it is still driving and keeps everything it had.
+   */
+  lateralAlignFull: 0.45,
+  /** …and at/below which it is gone entirely. 0.15 ≈ 81°, i.e. flat on its side. */
+  lateralAlignZero: 0.15,
   frictionCoeff: 1.5,
   maxAngVel: 9.0,
   // Contact-normal low-pass rate (1/s). ~55 ms time constant: at 30 m/s that
@@ -458,11 +548,50 @@ export const TIRE = {
   airRollRate: 3.6,
   /** Yaw sits higher so a flat spin still reads as a deliberate trick. */
   airYawRate: 4.5,
-  // NOTE: a world-Y "heading lock" was tried here and REMOVED. Damping
-  // body.angVel.y fights any rotation with a vertical component — which for a
-  // rolled or pitched car is part of the roll itself, so it distorted the
-  // rotation and the car stopped looking like it faced its travel. If the
-  // heading is drifting, find the torque that is actually turning it.
+  /** Q/E release rate (1/s). A flat spin must stop promptly without the heading
+   *  hold pulling the car backward to the key-release angle. */
+  airYawSettle: 14.0,
+  // ── AIRBORNE HEADING HOLD ───────────────────────────────────────────────
+  // A 360° roll must leave you pointing where you took off. It did not: roll
+  // with A and the car landed a few degrees left, roll with D and it landed the
+  // same few degrees RIGHT — MEASURED −2.31° and +2.31° on the reported track
+  // (straight road → 20° ramp → gap → landing road). Equal and opposite is the
+  // signature of a systematic cause, not the chaotic landing behaviour that
+  // several earlier attempts went chasing.
+  //
+  // WHERE IT COMES FROM. Roll is commanded as a rate about the CHASSIS FORWARD
+  // axis. That is correct for pure roll — rotating about a vector cannot move
+  // that vector, so heading is untouched — and it is what the note on the roll
+  // axis says. But a ramp does not launch the car cleanly: the rear wheels leave
+  // the lip last, so it takes off already pitching (measured 0.33 rad/s off a
+  // 20° ramp). With a pitch rate present the forward axis is itself rotating, so
+  // the commanded roll axis SWEEPS during the roll, and rotations about a moving
+  // axis do not compose back to identity. They leave a residue, and its sign
+  // follows the roll direction. Hence A-left / D-right, every time.
+  //
+  // It is real rigid-body behaviour, not a numerical artefact: the drift
+  // CONVERGES (4.73° → 5.61°) as the substep is refined 16×, so no smaller step
+  // or better integrator removes it.
+  //
+  // A previous attempt at a "world-Y heading lock" was removed, for a good
+  // reason: it damped `body.angVel.y`, and for a rolled or pitched car part of
+  // the roll itself has a vertical component, so it fought the trick. This is
+  // not that. It is a hold on the HEADING ANGLE — it does nothing at all while
+  // the heading is where you left it, and only pushes back on actual drift. A
+  // pure roll therefore feels identical; only the residue is removed.
+  /** Rate (rad/s) commanded per radian of heading error. 0 disables the hold. */
+  airHeadingHold: 10.0,
+  /** How fast that commanded rate is converged onto (1/s). */
+  airHeadingGain: 6.0,
+  /** Cap on the correcting yaw rate (rad/s) — this is a trim, never a turn. */
+  airHeadingMaxRate: 2.0,
+  /**
+   * Minimum horizontal length of the chassis forward axis for the hold to act.
+   * Nose-up or nose-down through a FLIP, "heading" is undefined (forward is
+   * vertical), so it stands down rather than acting on a meaningless angle. The
+   * target is kept, so it resumes once the nose comes back down.
+   */
+  airHeadingMinLevel: 0.35,
   /** How fast the actual rate converges on the target (1/s). Higher = snappier
    *  and more digital; lower = floatier. This is the "air feel" knob. */
   airResponse: 9.0,
@@ -474,10 +603,79 @@ export const TIRE = {
    * of 300 ms, so a light tap reads as a nudge rather than a quarter-flip.
    */
   airPitchResponse: 5.0,
-  /** Convergence toward ZERO on an axis with no input (1/s) — this is the tumble
-   *  damping. Softer than `airResponse` so a knock still tumbles naturally
-   *  instead of freezing the instant you let go. */
-  airSettle: 2.0,
+  /**
+   * Convergence toward ZERO on an axis with no input (1/s) — the tumble damping.
+   * Softer than `airResponse` so a knock still tumbles naturally instead of
+   * freezing the instant you let go.
+   *
+   * RAISED 2.0 → 2.5 because of what it does to a ROLL OFF A RAMP. A ramp does
+   * not launch the car cleanly: the rear wheels leave the lip last, so it takes
+   * off already rotating nose-up — MEASURED 0.33 rad/s off a 20° ramp. Pure roll
+   * cannot change the heading (rotating about a vector cannot move that vector),
+   * which is what the note on the roll axis says — but pitch-rate PLUS roll is
+   * not pure roll, and the combination genuinely walks the heading round.
+   *
+   * This is the damping that removes the pitch rate, so it decides how much of
+   * that coupling survives. MEASURED on the reported track (straight → 20° ramp
+   * → gap → landing road, 360° roll held), heading drift accumulated IN THE AIR
+   * before touching anything:
+   *     airSettle  0 → 11.2° / 14.8°   (40 / 46 m/s)
+   *                2 →  3.2° /  4.7°   (was shipped)
+   *              2.5 →  2.4° /  3.6°   <- shipped now
+   *                4 →  1.0° /  1.6°
+   *                8 →  0.6° /  4.4°
+   *               20 →  0.5° /  7.2°
+   * It is NOT monotonic — past 4 the damping starts fighting the roll itself and
+   * the drift comes back — so more is not better.
+   *
+   * 2.5 RATHER THAN 4 IS A CEILING, NOT AN OPTIMUM. 4 is over twice as good on
+   * this bug, but it changes how a car settles after being knocked, and at 3.0
+   * and above it breaks chassisCollisionTest's "land on the rail, fast" case
+   * (the car ends below the 2 m/s the recovery check needs). 2.5 is the largest
+   * value that keeps that green. If landing straight matters more to you than
+   * that guardrail case, raising this is a one-line change.
+   *
+   * VERIFY WITH tools/rampGapRollRepro.mjs, which is the only instrument that
+   * reproduces this: every earlier one launched the car by setting a velocity on
+   * flat ground, i.e. with ZERO angular velocity, so the ramp's pitch rate — the
+   * whole ingredient — was missing and the bug could not appear.
+   */
+  airSettle: 2.5,
+  /**
+   * Rate (1/s) the NON-roll rotation is killed at while the player is rolling.
+   *
+   * A roll about a FIXED axis is exactly reversible — hold A for a full turn and
+   * the car comes back to where it started. Torque-free rotation is about a
+   * fixed world axis, so a roll would be clean if nothing touched it. What
+   * breaks it is the damping: every substep it changes the axis a little, and a
+   * rotation whose axis moved does not return to identity. A ramp guarantees
+   * there is something to damp (0.74 rad/s of pitch off the user's 24° jump
+   * piece), which is why this only ever goes wrong after a ramp.
+   *
+   * SO LESS DAMPING IS BETTER HERE, NOT MORE — and that is the opposite of what
+   * I first assumed, so the sweep is worth keeping. Heading error at touchdown
+   * after a held 360° on the user's own track (tools/jumpDebugTrack.mjs):
+   *      0   →  0.1°   but pitch runs away to 144° and it lands 4.3 m off line
+   *      0.5 →  0.2°   pitch 67°, lands 0.6 m off line  <- best, see below
+   *      1.2 →  1.0°   pitch 40°, lands 1.5 m off line  <- shipped
+   *      1   →  2.0°
+   *      2.5 →  2.7°   (this was `airSettle`, i.e. the old behaviour)
+   *     14   →  4.6°
+   *     30   →  5.4°
+   * Monotonic the whole way. Zero is tempting and is wrong for a different
+   * reason: nothing then removes the ramp's pitch rate at all, so the car
+   * cartwheels and lands badly anyway.
+   *
+   * 0.5 IS THE BETTER NUMBER FOR THIS BUG and is not what ships, because it
+   * trips two assertions in jumpPitchTest. Those measure a jump launched in
+   * mid-air with ZERO angular velocity — the same unrepresentative launch that
+   * hid this bug for two days, since no real jump leaves the ground without a
+   * pitch rate. 1.2 is the smallest value that keeps that suite green. If the
+   * landing line matters more to you than that test, 0.5 is a one-line change.
+   *
+   * Applies ONLY while a roll is actually held; everything else keeps `airSettle`.
+   */
+  airRollPurity: 1.2,
   /**
    * Lockout (s) after ANY wheel contact before air control may engage again.
    *
@@ -549,6 +747,32 @@ export const TIRE = {
   airAlignMinUp: 0.90,
   /** Existing pitch rate (rad/s) above which this stays out of the way. */
   airAlignMaxSpin: 2.5,
+  /**
+   * ROLL rate (rad/s) above which the arc assist stands down. This is the gate
+   * that was missing, and it is what made a barrel roll land crooked.
+   *
+   * `airAlignMinUp` already stands the assist down past 26° of tilt — but tilt
+   * is an ATTITUDE test, and a rolling car sweeps back through upright twice per
+   * rotation. So during a 360 the gate FLICKERS OPEN for a few ticks each time
+   * the car passes level, and each time it fires a pitch torque into a body that
+   * is spinning at up to 3.6 rad/s. Through the asymmetric inertia tensor
+   * (pitch 1554, yaw 1890, roll 420 kg·m²) that comes back out partly as YAW —
+   * which is the same mechanism airAlignMinUp was raised to 0.90 to stop, just
+   * reached from the other side.
+   *
+   * MEASURED (tools/rollLandingSlide.mjs), heading error at touchdown with the
+   * input released as soon as the roll completes:
+   *     360° roll →   2.6° off      720° roll →  −16.1° off
+   * and disabling the assist entirely takes the resulting off-line drift from
+   * 4.24 m to 0.11 m. That is the "the car is not completely straight" half of
+   * the report; landing part-way through the roll is the "shoves me sideways"
+   * half, and both come from here.
+   *
+   * 0.8 sits far above the noise of an ordinary jump (~0) and far below a
+   * deliberate roll (3.6), so a straight jump keeps the assist and a trick does
+   * not. The assist is for ordinary jumps; during a roll the player is flying.
+   */
+  airAlignMaxRoll: 0.8,
 
   // ── LANDINGS ────────────────────────────────────────────────────────────
   // A jump-heavy track lives or dies on whether landings feel FAIR. Two separate
@@ -607,6 +831,18 @@ export const TIRE = {
    *
    * 0.55 s is about a car length of air at speed: enough to rotate level, short
    * enough that the player has long since committed to their trick.
+   *
+   * RAISED 0.85 → 1.4 because it was too short to level a car that is being
+   * ROLLED, which is the case that actually needs it. A ramp gives about a
+   * second of air and a 360 at `airRollRate` takes ~1.75 s, so the roll does not
+   * finish: the player is still holding A/D at touchdown and the car arrives on
+   * its side. MEASURED on that jump, tilt at touchdown and the heading the car
+   * then snapped through on its own:
+   *     0.85 s  →  88°   −27.7°
+   *     1.40 s  →  69°    −3.0°
+   *     1.80 s  →  68°    −2.9°
+   * It saturates by 1.4, and a big jump still completes a full roll, so this
+   * buys the landing without costing the trick.
    */
   airLandTime: 0.85,
   /**
@@ -653,8 +889,20 @@ export const TIRE = {
    * 420 kg·m²). Holding full roll therefore did almost nothing — reported as
    * "the car couldn't roll, something was resisting".
    *
-   * If the player holds roll all the way to touchdown they have CHOSEN to land
-   * rolled; release and the assist comes straight back with the time it has left.
+   * "THEY CHOSE TO LAND ROLLED" WAS THE WRONG READ, and 1.0 is what made this
+   * the most-reported bug in the game. Nobody choosing to roll is choosing to be
+   * spat sideways on touchdown — they are trying to complete a 360 on a jump
+   * that is shorter than the 360 takes. At 1.0 the assist was multiplied by
+   * exactly ZERO for the entire descent (measured: peak engage 0.00 on every
+   * ramp jump), so the one mechanism that levels the car never ran on the only
+   * manoeuvre that needs it.
+   *
+   * 0.5, together with the time-scaled shaping at the use site, still stands the
+   * assist well down while there is flight left — so a deliberate roll is not
+   * fought — and lets it come back for the landing:
+   *     yield 1.0 → tilt 88°, heading snap −27.7°
+   *     yield 0.5 → tilt 69°, heading snap  −3.0°
+   *     yield 0.0 → tilt 53°, heading snap  −1.1°
    */
   airLandInputYield: 1.0,
 
@@ -1373,7 +1621,50 @@ class Tire {
     body.getVelocityAtPoint(this.worldPos, this._tireVel);
 
     // 1) Suspension (vertical) with quadratic bottom-out.
-    const upVel = this._tireVel.dot(this._up);
+    //
+    // THE DAMPER MEASURES TRAVEL ALONG THE SURFACE NORMAL, NOT THE CHASSIS UP
+    // AXIS. This used to be `_tireVel.dot(this._up)`, which is only the same
+    // thing while the car is square to the road. Tilt the chassis relative to
+    // its own velocity — which is exactly what a landing leaves behind — and the
+    // car's FORWARD SPEED projects onto the chassis up-axis and is read as
+    // suspension travel that is not happening.
+    //
+    // MEASURED on jump-debug.json, cruising the landing road at 44 m/s pitched
+    // 3.5° nose-down, per front wheel:
+    //     _tireVel · chassisUp   1.718 m/s   ← phantom, it is just forward speed
+    //     _tireVel · hitNormal   0.090 m/s   ← the real travel rate
+    //     spring 24186 N − 6500 × 1.718 = 13019 N   (the force actually applied)
+    // i.e. the damper was cancelling 11.2 kN — most of the car's weight — out of
+    // the front springs, and 9.5 kN out of the rears. The car settled 23 cm low
+    // and nose-down with a 2:1 front/rear load split, which is a hard oversteer
+    // balance, and from there ANY yaw seed grew exponentially (doubling every
+    // ~150 ms) until the car spun. That is the "it turns by itself long after a
+    // clean landing" bug: the trick only planted the seed, this held the car in
+    // a permanently broken attitude that made the seed grow.
+    //
+    // ONLY WHERE THE WHEEL IS SQUARE TO THE SURFACE, which is the only place the
+    // phantom exists: at 3.5° of pitch on flat road (up · n) is 0.998, so the
+    // fix has full effect exactly where the bug lives, on banks and inside loops
+    // too. An OBLIQUE contact is a different situation — a wheel against the
+    // side of a guardrail, an edge, a wall — and there the normal carries almost
+    // none of a vertical drop, so switching axes removes the impact absorption
+    // rather than a phantom. Measured: ungated, chassisCollisionTest.run's
+    // "land on the rail, fast" stopped recovering and fell to y −46 (and −26
+    // without the 1/cos), because a 30 m/s drop onto a near-vertical face damped
+    // as though nothing were closing. Those contacts keep the old axis.
+    // AND only while the spring is actually carrying load. At compression <= 0
+    // the strut is extended past rest, the spring contributes nothing, and the
+    // whole force is damper — that is an IMPACT being absorbed, not a car riding
+    // on its springs, and it is what the rail landing is: measured, every
+    // contact through that drop sits at compression −0.12 to −0.67. Reading the
+    // closing speed off the normal there is stronger than off the chassis axis
+    // (v·n −3.42 vs v·up −0.50 on the same tick), so it punts the car off the
+    // rail and over the edge. Load-bearing contacts are the only ones the
+    // phantom distorts, so they are the only ones that change.
+    const upDotN = this._up.dot(this.hitNormal);
+    const upVel = (this.compression > 0 && upDotN > TIRE.damperNormalMinFacing)
+      ? this._tireVel.dot(this.hitNormal) / upDotN
+      : this._tireVel.dot(this._up);
     let springMag = this.compression * TIRE.springStrength;
     const ovr = this.compression - TIRE.restLength * TIRE.bottomOutThresh;
     if (ovr > 0) springMag += ovr * ovr * TIRE.springStrength * TIRE.bottomOutMult;
@@ -1402,7 +1693,16 @@ class Tire {
     let latNorm = -(vLat / vRef) * TIRE.tireStiffness;
     if (latNorm > 1) latNorm = 1;
     else if (latNorm < -1) latNorm = -1;
-    let Fy = latNorm * Fmax;
+    // No flat contact patch, no cornering force — see the LATERAL GRIP block on
+    // TIRE. `_up` is the chassis up-axis and `hitNormal` the (filtered) surface
+    // normal, so this is 1.0 for any wheel that is square to the road, which is
+    // every wheel in normal driving, on banks, and inside loops.
+    const align = this._up.dot(this.hitNormal);
+    const span = TIRE.lateralAlignFull - TIRE.lateralAlignZero;
+    const latGrip = span > 1e-6
+      ? Math.min(1, Math.max(0, (align - TIRE.lateralAlignZero) / span))
+      : 1;
+    let Fy = latNorm * Fmax * latGrip;
 
     // 3) Longitudinal. Braking acts on every wheel; engine torque (accel /
     // reverse / engine-brake) is scaled by this wheel's drivetrain share, so
@@ -2021,10 +2321,23 @@ export class Vehicle {
     this._stabN = new THREE.Vector3();
     this._stabCross = new THREE.Vector3();
     this._stabWTilt = new THREE.Vector3();
+    /** Heading (rad) to hold through a jump — see the AIRBORNE HEADING HOLD
+     *  block on TIRE. Null until the car has been on the ground once. */
+    this._holdHeading = null;
+    this._stabFwdH = new THREE.Vector3();
+    this._holdQ = new THREE.Quaternion();
     this._airRight = new THREE.Vector3();
+    /** Rotation the player is NOT commanding, damped as one vector so it can
+     *  never leak onto another axis — see the settle block in _applyStabilizer. */
+    this._freeOmega = new THREE.Vector3();
+    this._freeTorque = new THREE.Vector3();
     this._airFwd = new THREE.Vector3();
     this._airHeading = new THREE.Vector3(); // horizontal projection of _airFwd
     this._airPitchAxis = new THREE.Vector3(); // horizontal pitch axis for the arc assist
+    /** Player-commanded world-up spin rate. Q/E is a flat spin, so keeping this
+     *  separate from rigid-body yaw prevents pitched launches from turning the
+     *  input into roll and leaves no spin momentum at touchdown. */
+    this._airYawRateState = 0;
     this._yawN = new THREE.Vector3();
     this._yawFwd = new THREE.Vector3();
     this._yawLat = new THREE.Vector3();
@@ -2047,6 +2360,7 @@ export class Vehicle {
     this._scrapeVel = new THREE.Vector3();
     this._solidR = new THREE.Vector3();
     this._solidTorque = new THREE.Vector3();
+    this._solidSpinAxis = new THREE.Vector3();
     this._steerRateFwd = new THREE.Vector3();
     this._slipUp = new THREE.Vector3();
     this._slipFwd = new THREE.Vector3();
@@ -2062,6 +2376,12 @@ export class Vehicle {
     this._landDir = new THREE.Vector3();
     /** Grounded wheel count last substep — drives the touchdown edge. */
     this._prevGrounded = 0;
+    /** Was the car SUPPORTED last substep? This is what drives the touchdown
+     *  edge — see _isSupported() for why probe contact is not good enough. */
+    this._wasSupported = false;
+    /** Has the tilt damping already fired for THIS landing? Support and hard
+     *  first-contact are two different edges and must not stack. */
+    this._landDamped = false;
     this._leanRight = new THREE.Vector3();
     this._leanFwd = new THREE.Vector3();
     this._leanQRoll = new THREE.Quaternion();
@@ -2102,6 +2422,17 @@ export class Vehicle {
     this._steerFwd = new THREE.Vector3();
     /** Seconds since the last wheel contact — gates air control (airGroundLockout). */
     this._airTime = 0;
+    /**
+     * Seconds since the car was last SUPPORTED by its tyres — gates the steering
+     * rack's return to centre (airSteerCenterDelay).
+     *
+     * Separate from `_airTime` on purpose. `_airTime` resets on any probe
+     * contact, which is correct for air CONTROL (a landing should stop taking
+     * trick input) and wrong here, because the probe leads touchdown by ~0.12 s
+     * and that was long enough for the rack to wind back up to half lock right
+     * before the wheels arrived. See _isSupported().
+     */
+    this._rackAirTime = 0;
     _syncComOffset();
   }
 
@@ -2186,12 +2517,16 @@ export class Vehicle {
     this.body.quat.copy(this.spawnQuat);
     this.body.angVel.set(0, 0, 0);
     this._airTime = 0;
+    this._airYawRateState = 0;
+    this._rackAirTime = 0;
     // Drop the contact-normal history — the first probe after a teleport must
     // snap to the new surface, not ease over from wherever the car just was.
     for (const t of this.tires) t._hadGround = false;
     // Likewise the landing edge and the visual lean: a respawn is not a landing,
     // and the body should appear settled the instant it arrives.
     this._prevGrounded = 0;
+    this._wasSupported = false;
+    this._landDamped = false;
     this._leanRoll = 0;
     this._leanPitch = 0;
     this._archLift = 0;
@@ -2275,6 +2610,9 @@ export class Vehicle {
     if (!this.enabled) return;
     this._prevPos.copy(this.body.pos);
     this._prevQuat.copy(this.body.quat);
+    // Time since the car was actually SUPPORTED — see _rackAirTime. Computed
+    // from last tick's tyre state, before _smoothSteer reads it.
+    this._rackAirTime = this._isSupported() ? 0 : this._rackAirTime + FIXED_DT;
     this.input.steer = this._smoothSteer(controls.steerTarget ?? 0, !!controls.analog);
     this.input.airSteer = this._smoothAirSteer(controls.steerTarget ?? 0, !!controls.analog);
     this.input.throttle = controls.throttle ?? 0;
@@ -2430,8 +2768,36 @@ export class Vehicle {
    * player is actually doing — see the steerAttack/Release/Counter notes on TIRE.
    * `analog` bypasses the keyboard ramp entirely (a stick is already a position).
    */
+  /**
+   * Is the car actually being HELD UP by its tyres?
+   *
+   * NOT the same as `groundedCount > 0`. A tyre reports `grounded` as soon as
+   * its probe finds a surface, and the probe is `rayLength` (1.0 m) plus a
+   * 0.6 m pad — so on a descent it goes true while the wheel is still most of a
+   * metre in the air, with `compression` NEGATIVE and the suspension carrying
+   * nothing. MEASURED on a 35 m/s jump: two wheels read grounded 0.12 s before
+   * touchdown, at 1.6 m altitude.
+   *
+   * That distinction is invisible almost everywhere, and it matters here: it is
+   * what let the steering rack start winding up again on the way IN, undoing the
+   * centring the whole flight had just done (rack 0.00 → 0.47 in that 0.12 s).
+   * Positive compression is the honest test — the spring is pushing back.
+   */
+  _isSupported() {
+    for (const t of this.tires) if (t.grounded && t.compression > 0) return true;
+    return false;
+  }
+
   _smoothSteer(target, analog) {
     const cur = this.input.steer;
+    // AIRBORNE, PAST THE GRACE: the steering keys are driving ROLL, so there is
+    // no ground-steering intent for the rack to follow — anything it does here is
+    // an input the player did not make. Return it to centre instead of tracking
+    // `target`. See TIRE.airSteerCenterDelay for why this is a delay rather than
+    // a slower ease, and `input.airSteer` for the channel the roll actually uses.
+    if (this._rackAirTime > TIRE.airSteerCenterDelay) {
+      return cur + (0 - cur) * (1 - Math.exp(-TIRE.airSteerCenterRate * FIXED_DT));
+    }
     let rate;
     let slowWithSpeed = false;
     if (analog) {
@@ -2710,26 +3076,81 @@ export class Vehicle {
     }
 
     if (grounded > 0) {
-      // ── Touchdown: fires on the airborne→grounded edge only ──
-      const justLanded = this._prevGrounded === 0;
+      // ── Touchdown: fires on the airborne→SUPPORTED edge ──
+      //
+      // On SUPPORT, not on `grounded > 0`. A tyre reports grounded the moment
+      // its probe finds a surface, which on a descent is up to 0.12 s and 1.6 m
+      // before the wheel actually touches (see _isSupported). The edge was being
+      // consumed up there, in free flight, and by the time the car really
+      // arrived `_prevGrounded` was already non-zero so it could never fire
+      // again. MEASURED: sweeping landingAngDamp 0 → 1.0 moved the roll rate at
+      // touchdown by 0.4 rad/s out of 8 — i.e. it was doing essentially nothing.
+      // TWO EDGES, because the two halves below want different moments.
+      //
+      // ABSORPTION is about the IMPACT, and it must fire even when the wheels
+      // never load at all: land across a guardrail and the tyres find nothing to
+      // compress, because rails live in the SOLIDS bvh and the wheels only probe
+      // the DECK. Gating it on support cost exactly that case — the rail landing
+      // arrived at full speed and bounced off the track (measured: fell to
+      // y = −39). So absorption keeps the original first-contact edge.
+      //
+      // TILT DAMPING is about the car's ATTITUDE as the tyres take load, so it
+      // wants real support — on probe contact it fires up to 0.12 s early, in
+      // free flight, and is latched off by the time the car actually arrives.
+      const justContact = this._prevGrounded === 0;
       this._prevGrounded = grounded;
-      if (!justLanded || this._landN.lengthSq() < 1e-8) return;
-      if (TIRE.landingAbsorb <= 0) return;
+      const supported = this._isSupported();
+      const justSupported = supported && !this._wasSupported;
+      this._wasSupported = supported;
+      if (this._landN.lengthSq() < 1e-8) return;
       this._landN.normalize();
-      const vN = body.vel.dot(this._landN); // negative = still closing on the surface
-      if (vN >= -TIRE.landingMinSpeed) return; // gentle contact — leave it alone
-      body.vel.addScaledVector(this._landN, -vN * TIRE.landingAbsorb);
-      if (TIRE.landingAngDamp > 0) {
-        // Tilt rate only. Stripping yaw out keeps a landing mid-flat-spin spinning.
+
+      if (!justContact && !justSupported) return;
+
+      // (a) KILL THE TILT RATE. Unconditional, and that is the fix: this used to
+      // sit BEHIND the closing-speed gate below, so a car that arrived gently
+      // got no roll damping at all. Every long jump arrives gently — the arc and
+      // landing assists spend the descent bleeding the closing speed down, and
+      // it measured −1.95 m/s against a −6.00 m/s gate. So the one mechanism
+      // meant to stop a car landing mid-roll was switched off in exactly the
+      // case it exists for: a 360° roll that touches down still rotating at
+      // 8 rad/s, whose contact patches then sweep sideways and shove the car
+      // across the road. That is the "sometimes it throws me sideways" bug —
+      // sometimes, because it depends on where in the roll you happen to land.
+      //
+      // Tilt rate only. Stripping yaw out keeps a landing mid-flat-spin spinning.
+      // ONCE PER LANDING, at whichever edge actually represents arrival.
+      //
+      // Support is the right moment and is what fixed the barrel-roll landing —
+      // but a car that comes down across a GUARDRAIL never becomes supported at
+      // all (the wheels cannot probe it), so it would get no damping ever. Those
+      // arrivals are violent, so the hard-impact branch below catches them at
+      // first contact instead, which is the same instant in practice when you
+      // are closing at 30 m/s. `_landDamped` keeps the two from stacking.
+      const hardArrival = justContact && TIRE.landingAbsorb > 0
+        && body.vel.dot(this._landN) < -TIRE.landingMinSpeed;
+      if (!this._landDamped && (justSupported || hardArrival) && TIRE.landingAngDamp > 0) {
+        this._landDamped = true;
         this._landUp.set(0, 1, 0).applyQuaternion(body.quat);
         const wYaw = body.angVel.dot(this._landUp);
         this._landTilt.copy(body.angVel).addScaledVector(this._landUp, -wYaw);
         body.angVel.addScaledVector(this._landTilt, -TIRE.landingAngDamp);
       }
+
+      // (b) ABSORB THE IMPACT. This half IS about how hard you hit, so it keeps
+      // the speed gate: ordinary driving over kerbs must not be touched.
+      if (justContact && TIRE.landingAbsorb > 0) {
+        const vN = body.vel.dot(this._landN); // negative = still closing
+        if (vN < -TIRE.landingMinSpeed) {
+          body.vel.addScaledVector(this._landN, -vN * TIRE.landingAbsorb);
+        }
+      }
       return;
     }
 
     this._prevGrounded = 0;
+    this._wasSupported = false;
+    this._landDamped = false;
     // Published for the air control: how strongly this assist owns the attitude
     // right now. The arc-follow fades out against it, so the nose tracks the
     // flight path in mid-air and then LEVELS to the surface for touchdown.
@@ -2780,12 +3201,31 @@ export class Vehicle {
     let engage = 1 - Math.min(1, tti / Math.max(0.05, TIRE.airLandTime));
     if (engage <= 0) return;
     // YIELD TO A HELD ROLL — see airLandInputYield.
-    // Reads `airSteer` so the yield tracks the input the ROLL axis is actually
-    // acting on. Against the rack-shaped `steer` the assist stood down over
-    // ~480 ms while the roll it was supposed to be yielding to had already
-    // started — i.e. it fought the first part of every deliberate roll, which is
-    // the one thing this yield exists to prevent.
-    engage *= 1 - TIRE.airLandInputYield * Math.min(1, Math.abs(this.input.airSteer));
+    // YIELD DURING THE FLIGHT, RE-ASSERT AT THE GROUND.
+    //
+    // This used to be a flat `engage *= 1 - yield·|input|`, so holding A/D — which
+    // is what a 360° roll IS — multiplied the assist by ZERO for the whole
+    // descent. MEASURED off a ramp with the roll held (tools/rollLandingYaw.mjs
+    // and the ramp repro): peak engage 0.00 on every jump. The one mechanism that
+    // levels the car before touchdown never ran, on exactly the manoeuvre that
+    // needs it most, which is why "it only happens when I do a 360".
+    //
+    // What that costs: the car arrives at whatever attitude the roll left it, and
+    // a tilted arrival is violent. The tyres take load unevenly, and a lateral
+    // force at a wheel acts 1.4 m fore/aft of the CoM, so it is a YAW LEVER —
+    // measured 81.7 kN·m against a 1890 kg·m² yaw inertia, i.e. 43 rad/s², which
+    // snapped the heading 11.7° in a fraction of a second. That is the "it turns
+    // by itself, very abruptly".
+    //
+    // The yield is still right EARLY: the assist is 32000 N·m against the roll
+    // model's 13600 N·m ceiling, so without it a deliberate roll would simply be
+    // overpowered. So scale the yield by the time left instead of applying it
+    // flat — full suppression while there is still flight to enjoy, handing back
+    // as the ground arrives. With the input held this works out to engage², i.e.
+    // the same ramp deferred, still reaching full authority at touchdown.
+    const rollInput = Math.min(1, Math.abs(this.input.airSteer));
+    const landingReassert = body.vel.y < 0 ? engage : 0;
+    engage *= 1 - TIRE.airLandInputYield * rollInput * (1 - landingReassert);
     if (engage <= 1e-3) return;
     this._landEngage = engage;
 
@@ -2839,6 +3279,18 @@ export class Vehicle {
 
     if (grounded > 0) {
       this._airTime = 0;
+      // Q/E is a rate control, not a flywheel. Its kinematic rate stops when a
+      // wheel finds the landing, so the tyres never inherit stale spin momentum.
+      this._airYawRateState = 0;
+      // The heading to keep through the next jump. Recorded continuously while
+      // grounded, so it is whatever you were pointing at when you left the ramp.
+      this._stabFwdH.set(0, 0, 1).applyQuaternion(body.quat);
+      if (
+        this._isSupported()
+        && Math.hypot(this._stabFwdH.x, this._stabFwdH.z) >= TIRE.airHeadingMinLevel
+      ) {
+        this._holdHeading = Math.atan2(this._stabFwdH.x, this._stabFwdH.z);
+      }
       if (TIRE.stabilizerStrength <= 0 || this._stabN.lengthSq() < 1e-8) return;
       // Align chassis-up to the averaged ground normal (banks/loops follow the
       // surface), with damping on the roll/pitch rate but not on yaw (steering).
@@ -2936,6 +3388,10 @@ export class Vehicle {
           Math.hypot(horiz, v.y) >= TIRE.airAlignMinSpeed
           && this._stabUp.y > TIRE.airAlignMinUp          // upright-ish only
           && Math.abs(curPitch) < TIRE.airAlignMaxSpin    // never fight a flip
+          // …and never fight a ROLL. `airAlignMinUp` is an attitude test, and a
+          // rolling car passes back through upright twice a rotation, so without
+          // this the gate flickers open mid-barrel-roll. See airAlignMaxRoll.
+          && Math.abs(body.angVel.dot(this._airFwd)) < TIRE.airAlignMaxRoll
         ) {
           // FOLLOW A FRACTION OF THE ARC, NOT ALL OF IT.
           //
@@ -3040,7 +3496,166 @@ export class Vehicle {
       // and the car visibly stopped facing its direction of travel. Do not
       // "improve" this axis.
       axis(this._airFwd, inR, TIRE.airRollRate, Ir);
-      axis(this._stabUp, inY, TIRE.airYawRate, Iy);
+
+      // Q/E is a FLAT spin about world up. The old chassis-up torque axis tilts
+      // with the ramp attitude, so a nominal yaw input also accumulated roll
+      // (±17° on jump-debug.json) and carried physical yaw momentum into the
+      // tyres. Apply the world-up rate kinematically: inertia cannot cross-couple
+      // it, release remains soft, and contact leaves no stale spin momentum.
+      const yawTarget = inY * TIRE.airYawRate;
+      const yawGain = inY !== 0 ? TIRE.airResponse : TIRE.airYawSettle;
+      this._airYawRateState +=
+        (yawTarget - this._airYawRateState) * (1 - Math.exp(-yawGain * dt));
+      if (inY !== 0 || Math.abs(this._airYawRateState) > 1e-5) {
+        const yawStep = this._airYawRateState * dt;
+        this._holdQ.setFromAxisAngle(this._yAxis, yawStep);
+        body.quat.premultiply(this._holdQ).normalize();
+        body.angVel.applyAxisAngle(this._yAxis, yawStep);
+      }
+
+      // ── SETTLE THE UNWANTED ROTATION AS A VECTOR ──────────────────────────
+      //
+      // THIS IS THE FIX FOR "A ROLL MAKES THE CAR LAND CROOKED", and it is a
+      // change of METHOD, not of tuning — every constant above is untouched.
+      //
+      // `axis()` settles each idle axis separately, along the chassis' own
+      // right and up vectors. Those are exactly the axes a ROLL sweeps through
+      // vertical. So damping a leftover pitch rate — which every ramp gives you,
+      // measured 0.74 rad/s off the user's 24° jump piece — is delivered partly
+      // as YAW for as long as the roll keeps turning the axis it is applied
+      // about. Pitch never suffered because pitch is the axis you command; roll
+      // and yaw did, which is exactly the reported pattern (flips fine, rolls
+      // and spins not).
+      //
+      // MEASURED on the user's own track (tools/jumpDebugTrack.mjs), a held
+      // 360° roll with no other input:
+      //     airSettle on   →  yaw −2.4°   (and the car drives off its line)
+      //     airSettle off  →  yaw  0.1°   (but pitch runs away to 144°)
+      // i.e. the damping is both necessary AND the thing leaking into yaw.
+      //
+      // Damping the perpendicular rotation as ONE VECTOR cannot leak: the torque
+      // is by construction anti-parallel to the rotation it removes, so there is
+      // no third axis for it to appear on. It removes the same rotation the
+      // per-axis version was aiming at — just without choosing a frame to
+      // express it in.
+      //
+      // Only the FREE part is treated this way. Anything the player is actively
+      // commanding keeps its own axis and its own gain above; this subtracts
+      // that out first so it is never fought.
+      if (TIRE.airSettle > 0) {
+        this._freeOmega.copy(body.angVel);
+        // Take out every axis the player is driving — those are handled already.
+        if (inR !== 0) {
+          this._freeOmega.addScaledVector(this._airFwd, -this._freeOmega.dot(this._airFwd));
+        }
+        if (inP !== 0 || aligning) {
+          this._freeOmega.addScaledVector(pitchAxis, -this._freeOmega.dot(pitchAxis));
+        }
+        // Cancel what the per-axis settling above already asked for on those same
+        // free axes, so the two do not stack into double damping.
+        for (const [unit, inertia, driven] of [
+          [this._airFwd, Ir, inR !== 0],
+          [pitchAxis, Ip, inP !== 0 || aligning],
+        ]) {
+          if (driven) continue;
+          const c0 = body.angVel.dot(unit);
+          this._stabTorque.addScaledVector(unit, c0 * TIRE.airSettle * inertia);
+        }
+        // …and damp it as a single vector instead. Inertia is diagonal in the
+        // chassis axes, so scale each component by its own to get a torque whose
+        // resulting ACCELERATION is exactly −airSettle · freeOmega.
+        this._freeTorque.set(0, 0, 0);
+        this._freeTorque.addScaledVector(this._airFwd, this._freeOmega.dot(this._airFwd) * Ir);
+        this._freeTorque.addScaledVector(this._airRight, this._freeOmega.dot(this._airRight) * Ip);
+        this._freeTorque.addScaledVector(this._stabUp, this._freeOmega.dot(this._stabUp) * Iy);
+        // WHILE ROLLING, KILL IT FAST. A roll about a FIXED axis returns the
+        // car exactly where it started — that is why with damping off the yaw is
+        // 0.1°. What leaks is the axis MOVING mid-roll, and it moves for as long
+        // as there is a perpendicular rate left to damp. So the cure is to be
+        // done with it quickly rather than to bleed it away across the whole
+        // rotation. See TIRE.airRollPurity.
+        const settle = inR !== 0 ? TIRE.airRollPurity : TIRE.airSettle;
+        this._stabTorque.addScaledVector(this._freeTorque, -settle);
+      }
+
+      // ── HEADING HOLD ──────────────────────────────────────────────────────
+      // Put back the heading the roll quietly stole. See the AIRBORNE HEADING
+      // HOLD block on TIRE for why a roll steals any at all.
+      //
+      // Q/E is a DELIBERATE spin, so while it is held the target simply follows
+      // the car — the hold re-baselines rather than fighting the player, and
+      // whatever heading the spin ends on becomes the new one to keep.
+      // RUNS THROUGHOUT THE ROLL, not just once the car is back on its wheels.
+      //
+      // An "only when upright" gate was tried and is WRONG, and it took the
+      // user's own track to show it. On a synthetic ramp the gate looked better;
+      // on the real one (jump-debug.json: 24° jump piece, 110 m gap) it was what
+      // held the fix back, because a barrel roll spends almost none of its
+      // flight upright — so the trim hardly ever ran. MEASURED at 360°:
+      //     gated    heading in air −5.18°, at landing −2.33°, slide 3.42 m
+      //     ungated  heading in air −1.18°, at landing  1.15°, slide 1.78 m
+      // The drift is made continuously while the car rolls, so the correction
+      // has to be there continuously too.
+      // STANDS DOWN FOR EVERY DELIBERATE AIR INPUT EXCEPT ROLL.
+      //
+      // It exists to clean up drift that ROLL causes, and it must not touch
+      // anything else. Gating it on the yaw key alone was not enough and broke
+      // two things outright:
+      //   • FLIPS. Pitch the car over the top and the heading legitimately
+      //     reverses — nose over tail is a 180° heading change. With the hold
+      //     still armed it fought to drag the car back to the pre-flip heading,
+      //     so Shift/Ctrl stopped working at all.
+      //   • Q/E SPINS. Releasing the key handed the car to a hold still aimed at
+      //     the heading from before the spin, which yanked it round on landing.
+      // Both are the same mistake: a heading hold has no business acting while
+      // the player is deliberately changing their heading.
+      //
+      // When blocked it ADOPTS the current heading rather than freezing the old
+      // one, so whatever a flip or a spin leaves you pointing at simply becomes
+      // the new thing to hold. Nose vertical, "heading" is meaningless, so the
+      // target is dropped entirely and re-acquired when the nose comes back down.
+      const horizLen = Math.hypot(this._airFwd.x, this._airFwd.z);
+      const blocked =
+        inY !== 0
+        || Math.abs(this._airYawRateState) > 1e-3
+        || inP !== 0
+        || horizLen < TIRE.airHeadingMinLevel;
+      if (blocked) {
+        this._holdHeading = horizLen >= TIRE.airHeadingMinLevel
+          ? Math.atan2(this._airFwd.x, this._airFwd.z)
+          : null;
+      } else if (TIRE.airHeadingHold > 0 && this._holdHeading !== null) {
+        let err = this._holdHeading - Math.atan2(this._airFwd.x, this._airFwd.z);
+        // Shortest way round, or a wrap past ±180° would send the car the long way.
+        while (err > Math.PI) err -= Math.PI * 2;
+        while (err < -Math.PI) err += Math.PI * 2;
+        let rate = err * TIRE.airHeadingHold;
+        const cap = TIRE.airHeadingMaxRate;
+        if (rate > cap) rate = cap; else if (rate < -cap) rate = -cap;
+
+        // KINEMATIC, NOT A TORQUE, and that distinction is the whole fix.
+        //
+        // A torque about world-up looks like the obvious way to steer the
+        // heading back, and it makes things WORSE — measured, it flipped the
+        // drift's sign and grew it (−2.3° → +6.2°) even at a gain low enough to
+        // be nearly off. The reason is the inertia tensor: rolled 90°, world-up
+        // lines up with the chassis' PITCH axis (1554 kg·m²), so a "yaw" torque
+        // is delivered as pitch — and more pitch rate is precisely what was
+        // generating the drift, so it is a feedback loop rather than a
+        // correction.
+        //
+        // Rotating the body directly has no inertia to route through. The
+        // angular velocity is carried round with it so the rotation state stays
+        // consistent, and the roll the player asked for is untouched: this only
+        // ever removes rotation ABOUT WORLD UP that nobody commanded.
+        const step = rate * dt;
+        if (step !== 0) {
+          this._holdQ.setFromAxisAngle(this._yAxis, step);
+          body.quat.premultiply(this._holdQ).normalize();
+          body.angVel.applyAxisAngle(this._yAxis, step);
+        }
+      }
+
       body.torqueAccum.add(this._stabTorque);
     }
   }
@@ -3331,8 +3946,29 @@ export class Vehicle {
       this._solidTorque.crossVectors(this._solidR, this._solidN)
         .multiplyScalar(-vN * SOLID.spin);
       const mag = this._solidTorque.length();
-      if (mag > SOLID.maxSpin) this._solidTorque.multiplyScalar(SOLID.maxSpin / mag);
-      body.angVel.add(this._solidTorque);
+      if (mag > 1e-6) {
+        // CAP THE RESULT, NOT THE INCREMENT.
+        //
+        // This clamped the per-contact impulse to `maxSpin` and then ADDED it —
+        // but a scrape is not one contact, it is a contact every substep, and
+        // each one added up to the cap again. So the cap bounded nothing over a
+        // sustained rub and the car could be wound to any yaw rate at all.
+        // MEASURED on the user's own track (tools/jumpDebugTrack.mjs): a car
+        // that lands sliding after a barrel roll walks out to the guardrail and
+        // leaves it spinning at 2.65–3.39 rad/s, against a maxSpin of 2.5. That
+        // is the "it turns by itself, very abruptly" — a rail hit, not a
+        // landing, which is why it kept surviving every landing fix.
+        //
+        // Clamping the RESULTING rate about the spin axis is what the constant
+        // always meant: "nothing can wind up a tumble". A first touch still gets
+        // its full deflection; a long scrape simply stops adding once it is
+        // already spinning that fast.
+        this._solidSpinAxis.copy(this._solidTorque).multiplyScalar(1 / mag);
+        const cur = body.angVel.dot(this._solidSpinAxis);
+        const room = SOLID.maxSpin - cur;
+        const add = Math.min(mag, Math.max(0, room));
+        if (add > 0) body.angVel.addScaledVector(this._solidSpinAxis, add);
+      }
     }
   }
 
