@@ -808,9 +808,33 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Asphalt dark</span>
+            <div class="prop-value">
+              <input type="color" id="dv-road-dark" />
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Asphalt light</span>
+            <div class="prop-value">
+              <input type="color" id="dv-road-light" />
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Side colour</span>
+            <div class="prop-value">
+              <input type="color" id="dv-road-side" />
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Kerb colour</span>
+            <div class="prop-value">
+              <input type="color" id="dv-road-kerb" />
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Road brightness</span>
             <div class="prop-value">
-              <input type="range" id="dv-road-bright" min="0.2" max="2.5" step="0.05" />
+              <input type="range" id="dv-road-bright" min="0.2" max="5" step="0.05" />
               <span class="prop-num" id="dv-road-bright-v"></span>
             </div>
           </div>
@@ -843,6 +867,13 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Wheel darken</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-wdark" min="0" max="0.4" step="0.01" />
+              <span class="prop-num" id="dv-road-wdark-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Rail metalness</span>
             <div class="prop-value">
               <input type="range" id="dv-rail-metal" min="0" max="1" step="0.02" />
@@ -858,10 +889,14 @@ export function createRoadDevPanel({ app, game, params }) {
           </div>
           <div class="dv-hint">
             Asphalt is fully procedural — no textures, so no sampler slots and it
-            tiles down a track of any length. <b>Aggregate</b> is the chip size in
-            cycles/metre (it self-fades before it aliases at distance).
-            <b>Wheel polish</b> smooths the two tyre tracks, which is what catches
-            the sun and sells the surface.
+            tiles down a track of any length. <b>Asphalt dark / light</b> are the
+            real levers for how light the deck reads; brightness only multiplies
+            them. A mid-grey deck (~#6a7078 → #8a9098) keeps black tyres readable.
+            <br><br>
+            <b>Aggregate</b> is the chip size in cycles/metre (it self-fades before
+            it aliases at distance). <b>Wheel polish</b> smooths the two tyre
+            tracks; <b>Wheel darken</b> is the rubber deposit in those same paths
+            — pull it down if the lanes look too black.
             <br><br>
             <b>Rail metalness</b> near 1 means the rail has no diffuse at all and
             only shows reflections of the sky — which is why it looked black. Pull
@@ -1451,6 +1486,17 @@ export function createRoadDevPanel({ app, game, params }) {
     });
   }
 
+  /** Wire a colour input to a TSL/THREE Color uniform stored in linear space. */
+  function colorUniform(id, uColor) {
+    const el = $(`#${id}`);
+    if (!el || !uColor?.value) return;
+    const toHex = () => `#${uColor.value.clone().convertLinearToSRGB().getHexString()}`;
+    el.value = toHex();
+    el.addEventListener("input", () => {
+      uColor.value.set(el.value).convertSRGBToLinear();
+    });
+  }
+
   /** Wire a .prop-toggle button. `initial` seeds the checked class. */
   function toggle(id, initial, onChange) {
     const el = $(`#${id}`);
@@ -1760,15 +1806,21 @@ export function createRoadDevPanel({ app, game, params }) {
   const selTiltEl = $("#dv-sel-tilt");
 
   toggle("dv-lines", game.getLinesOn(), (on) => game.setLinesOn(on));
-  // Road-surface uniforms are TSL `uniform()` objects, so the slider helper
-  // drives their `.value` directly — every change is live, no rebuild.
+  // Road-surface uniforms are TSL `uniform()` objects, so the slider / colour
+  // helpers drive their `.value` directly — every change is live, no rebuild.
+  // Colours live in linear space in the shader; the picker shows sRGB.
   const ru = game.roadUniforms;
   if (ru) {
+    colorUniform("dv-road-dark", ru.asphaltDark);
+    colorUniform("dv-road-light", ru.asphaltLight);
+    colorUniform("dv-road-side", ru.sideColor);
+    colorUniform("dv-road-kerb", ru.railA);
     slider("dv-road-bright", ru.deckBrightness, "value", (v) => `${v.toFixed(2)}×`);
     slider("dv-road-grain", ru.grainScale, "value", (v) => v.toFixed(2));
     slider("dv-road-agg", ru.aggScale, "value", (v) => `${v.toFixed(1)}/m`);
     slider("dv-road-rvary", ru.roughVary, "value", (v) => v.toFixed(2));
     slider("dv-road-polish", ru.wheelPolish, "value", (v) => v.toFixed(2));
+    slider("dv-road-wdark", ru.wheelDarken, "value", (v) => v.toFixed(2));
   }
   // Guardrails are a plain MeshStandardMaterial, so these drive it directly.
   const rm = game.railMaterial;

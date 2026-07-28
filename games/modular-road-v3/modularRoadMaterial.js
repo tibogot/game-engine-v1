@@ -39,13 +39,13 @@ function lin(hex) {
  */
 export function createRoadMaterial(opts = {}) {
   const u = {
-    // ASPHALT ALBEDO. The old 0x14161a→0x23262c pair sat at roughly 0.007–0.017
-    // in LINEAR light — real asphalt is 0.04 (fresh) to 0.12 (weathered), so the
-    // deck was 3–6× darker than the material it was imitating and no amount of
-    // exposure or light tuning could recover it. These land at ~0.040 and ~0.098
-    // linear, i.e. the actual physical range.
-    asphaltDark: uniform(lin(opts.asphaltDark ?? 0x383b40)),
-    asphaltLight: uniform(lin(opts.asphaltLight ?? 0x585c62)),
+    // ASPHALT ALBEDO. Kept intentionally above real-world asphalt (~0.04–0.12
+    // linear) so black tyres stay readable against the deck in-game. These land
+    // around ~0.11–0.22 linear — still reads as asphalt, just a mid-grey track
+    // rather than a near-black one. Use the panel's dark/light colour pickers
+    // to push warmer, cooler, or darker from here.
+    asphaltDark: uniform(lin(opts.asphaltDark ?? 0x5c626a)),
+    asphaltLight: uniform(lin(opts.asphaltLight ?? 0x8a919a)),
     /** Final multiplier on the deck albedo — the one knob for "too dark / too
      *  bright" without touching the two colours. */
     deckBrightness: uniform(opts.deckBrightness ?? 1.0),

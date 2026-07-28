@@ -458,9 +458,6 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     .then(({ object, radius, width }) => {
       vehicle.setWheelModel(object, { radius, thickness: width });
       vehicle.setWheelStyle("glb");
-      console.info(
-        `[ModularRoad-v3] GLB wheels: radius ${radius.toFixed(3)}m, width ${width.toFixed(3)}m`,
-      );
       devPanel?.refresh();
     })
     .catch((e) => {
@@ -475,18 +472,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let chassisLampsLocal = null;
   loadChassisModel(renderer)
     .then((m) => {
-      const { object, size, brakeLights, headlampLenses, meshCount, casterCount } = m;
+      const { object, brakeLights, headlampLenses } = m;
       chassisGlbObject = object;
       chassisLampsLocal = m.headlampMountsLocal;
       vehicle.setHeadlampMounts(chassisGlbMounts(chassisLampsLocal));
       vehicle.setChassisModel(object, { brakeLights, headlampLenses });
       vehicle.setChassisStyle("glb");
-      console.info(
-        `[ModularRoad-v3] GLB chassis: ${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)}m — `
-        + `${m.loadedCount} meshes in file → ${meshCount} drawn `
-        + `(−${m.droppedInterior} cabin, merged shared materials), `
-        + `${casterCount} cast shadows ⇒ ${meshCount + casterCount * 3} draws/frame at 3 cascades`,
-      );
       devPanel?.refresh();
     })
     .catch((e) => {
@@ -1001,116 +992,6 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     chase.reset(); tireMarks.reset(); driftSmoke.reset(); sparks.reset();
     propPhysics.reset();  // knocked cones stand back up on a lap reset
     simAccum = 0;
-  }
-
-  // ── "THE CAR TURNS BY ITSELF" — CATCH IT IN THE ACT ────────────────────────
-  // The vehicle physics driven over this exact track headlessly shows no such
-  // turn at ANY approach speed or landing point (peak yaw 0.05 rad/s, see
-  // tools/jumpDebugTrack.mjs). So whatever causes it lives out here, in the game
-  // layer, and the fastest way to find it is to have the game say what the car
-  // was doing at the moment it went.
-  //
-  // Prints ONE line per event, to the console, with every input that could be
-  // responsible — including the gamepad, because a drifting stick steers the car
-  // for real and reads exactly like "it turned by itself".
-  // A RING BUFFER, not a single line. The first capture showed 0.91 rad/s of
-  // world-Y at only 6° of slip, which steering cannot produce — but a car still
-  // TILTED from the roll projects its ROLL rate onto world-Y (2.7 rad/s of roll
-  // at 20° of tilt reads as 0.92), so a single sample cannot tell a real yaw
-  // from the tail of the barrel roll. The timeline can.
-  const SNAP_YAW = 0.9;          // rad/s about the car's OWN up axis
-  const HIST = 240;              // ~2 s of ticks at 120 Hz
-  const hist = [];
-  let _snapArmed = true;
-  let _snapCountdown = -1;
-  const _wUp = new THREE.Vector3();
-  const _wFwd = new THREE.Vector3();
-  const _wRight = new THREE.Vector3();
-
-  function watchYawSnap() {
-    const b = vehicle.body;
-    _wUp.set(0, 1, 0).applyQuaternion(b.quat);
-    _wFwd.set(0, 0, 1).applyQuaternion(b.quat);
-    _wRight.crossVectors(_wUp, _wFwd);
-    const tilt = Math.acos(Math.max(-1, Math.min(1, _wUp.y))) * 57.2958;
-    // Yaw about the CAR's own up-axis is "is it actually turning"; world-Y mixes
-    // in roll whenever the car is tilted.
-    const yawCar = b.angVel.dot(_wUp);
-    const rollRate = b.angVel.dot(_wFwd);
-    const latVel = b.vel.dot(_wRight);
-
-    hist.push({
-      z: b.pos.z, x: b.pos.x, tilt,
-      yawCar, yawWorld: b.angVel.y, rollRate, latVel,
-      slip: vehicle.slipAngle * 57.2958,
-      spd: Math.hypot(b.vel.x, b.vel.z),
-      g: vehicle.groundedCount,
-      st: vehicle.input.steer, th: vehicle.input.throttle,
-      solid: vehicle.hitSolid ? 1 : 0,
-      // FULL rigid-body state, so the exact moment can be REPLAYED headlessly.
-      // Everything above describes the divergence; this reproduces it.
-      s: [
-        b.pos.x, b.pos.y, b.pos.z,
-        b.quat.x, b.quat.y, b.quat.z, b.quat.w,
-        b.vel.x, b.vel.y, b.vel.z,
-        b.angVel.x, b.angVel.y, b.angVel.z,
-      ],
-    });
-    if (hist.length > HIST) hist.shift();
-
-    if (_snapCountdown > 0) { _snapCountdown--; return; }
-    if (_snapCountdown === 0) {           // dump AFTER capturing the aftermath
-      _snapCountdown = -1;
-      // THE TUNING, TOO. The vehicle driven over this exact track headlessly is
-      // directionally STABLE — a yaw poke decays to zero. The dev panel writes
-      // straight into these shared objects, so a slider left somewhere odd is
-      // the remaining way the running game can differ from that. Anything marked
-      // (!) is not the default the stability was verified at.
-      {
-        const D = {
-          gripFront: 1, gripRear: 1, tireStiffness: 7, frictionCoeff: 1.5,
-          yawAssist: 1, alignTorque: 12000, slipClampTorque: 30000, yawRateDamp: 4000,
-          stabilizerStrength: 9000, stabilizerDamp: 2600, maxSteerAngle: 0.55,
-          lateralAlignFull: 0.45, lateralAlignZero: 0.15, accelForce: 4000,
-        };
-        const out = Object.keys(D).map((k) => {
-          const v = TIRE[k];
-          return `${k} ${v}${Math.abs(v - D[k]) > 1e-9 ? " (!)" : ""}`;
-        });
-        console.warn(
-          `[yaw snap] tuning — drivetrain ${DRIVETRAIN.layout}`
-          + `, halfTrack ${WHEEL_LAYOUT.halfTrack}, comZ ${CHASSIS.comZ}, mass ${CHASSIS.mass}`
-          + `\n  ${out.join("  ·  ")}`,
-        );
-      }
-      // A REPLAYABLE SEED. The state from the START of the buffer — i.e. well
-      // before the divergence — so the exact car can be dropped into a headless
-      // sim and stepped forward. Everything else here describes the symptom;
-      // this is the only thing that can reproduce it.
-      console.warn(
-        "[yaw snap] REPLAY SEED (paste this whole line):\n"
-        + `REPLAY ${JSON.stringify(hist[0].s.map((v) => Number(v.toFixed(6))))}`,
-      );
-      console.warn("[yaw snap] timeline — every 8th tick, ~15 ms apart");
-      console.warn("      z       x   tilt  yaw(car) yaw(world)  roll   latVel   slip   spd  gr st  th solid");
-      for (let i = 0; i < hist.length; i += 8) {
-        const r = hist[i];
-        console.warn(
-          `  ${r.z.toFixed(1).padStart(7)} ${r.x.toFixed(1).padStart(6)} ${r.tilt.toFixed(0).padStart(5)}°`
-          + ` ${r.yawCar.toFixed(2).padStart(8)} ${r.yawWorld.toFixed(2).padStart(10)}`
-          + ` ${r.rollRate.toFixed(2).padStart(6)} ${r.latVel.toFixed(1).padStart(7)}`
-          + ` ${r.slip.toFixed(0).padStart(6)}° ${r.spd.toFixed(0).padStart(5)}`
-          + `  ${r.g}  ${r.st.toFixed(1).padStart(4)} ${r.th.toFixed(1)} ${r.solid}`,
-        );
-      }
-      return;
-    }
-    const snapped = Math.abs(yawCar) > SNAP_YAW && vehicle.groundedCount >= 3;
-    if (snapped && _snapArmed) {
-      _snapArmed = false;
-      _snapCountdown = 90;   // keep recording ~0.75 s past the event, then dump
-    }
-    if (!snapped && Math.abs(yawCar) < 0.2) _snapArmed = true;
   }
 
   function checkFall() {
@@ -2318,7 +2199,6 @@ ${e.message}`);
       flags.update(dt);
       updateDynamicDebug(); // live collider wireframes, when they are switched on
 
-      watchYawSnap(); // console report if the car turns without being asked to
       checkFall(); // air-stunt: dropped off the track → last safe grounded pose
 
       // Ghost replay: park it at the live lap time. Hidden until a lap is running.
