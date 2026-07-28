@@ -3,6 +3,8 @@
 // Two faces:
 //   • UNITS selected    → portrait, name, count, Stop / Focus.
 //   • The BASE selected → production: build buttons + queue + progress bar.
+import { DEV_PANEL_OPEN_W } from "./devPanel.js";
+
 export function createCommandCard({
   thumbnails,
   onStop = () => {},
@@ -20,7 +22,7 @@ export function createCommandCard({
   const style = document.createElement("style");
   style.textContent = `
     #rts-cmd-card {
-      position: fixed; right: 280px; bottom: 12px; z-index: 55; width: 232px;
+      position: fixed; right: ${DEV_PANEL_OPEN_W + 12}px; bottom: 12px; z-index: 55; width: 232px;
       display: none; flex-direction: column; gap: 8px; padding: 10px;
       background: rgba(16,18,22,0.72); border: 1px solid rgba(255,255,255,0.1);
       border-radius: 10px; backdrop-filter: blur(6px);

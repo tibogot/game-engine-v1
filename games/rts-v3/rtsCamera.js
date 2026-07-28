@@ -4,7 +4,7 @@
 //   • "orbit" — hands control back to the engine's editor OrbitControls (good
 //     for inspecting the world while building the game).
 //   • "rts"   — top-down angled view: WASD pan, wheel zoom, Q/E rotate, and the
-//     look-point follows the terrain height.
+//     look-point eases toward terrain height (no per-frame snapping).
 //
 // How it coexists with the engine without touching engine source:
 //   • The engine streams its terrain clipmap around `controls.target` and calls
@@ -26,6 +26,7 @@ export function createRtsCamera({ app } = {}) {
     pitch:    40 * DEG,   // look-down angle — CoH-style tactical view
     panSpeed: 0.9,        // world units / frame per unit of zoom distance
     rotSpeed: 1.4 * DEG,  // radians / frame while Q or E held
+    heightSmooth: 4,      // terrain-height follow rate (1/s); 0 = snap instantly
   };
   const DIST_MIN   = 18;   // closest zoom — near ground-level tactics
   const DIST_MAX   = 280;
@@ -35,6 +36,7 @@ export function createRtsCamera({ app } = {}) {
   // ── State ───────────────────────────────────────────────────────────────────
   let mode  = "orbit";
   const focus = new THREE.Vector3(0, 0, 0); // ground point the camera looks at
+  let focusY = 0;                            // smoothed elevation (focus.y follows this)
   let dist  = DIST_DEFAULT;
   let yaw   = 0;                             // rotation of the view around Y
   let rtsEntered = false; // first RTS entry keeps DIST_DEFAULT; orbit→rts adopts zoom
@@ -63,11 +65,22 @@ export function createRtsCamera({ app } = {}) {
   }
 
   // Driven by the single game loop in rtsGame.js (no self-running rAF).
-  function update() {
-    if (mode === "rts") drive();
+  function update(dt = 0) {
+    if (mode === "rts") drive(dt);
   }
 
-  function drive() {
+  function terrainY(x, z) {
+    return getWorldHeight ? getWorldHeight(x, z) : 0;
+  }
+
+  /** Frame-rate-independent ease toward sampled terrain height. */
+  function easeHeight(current, target, dt) {
+    if (params.heightSmooth <= 0 || dt <= 0) return target;
+    const t = 1 - Math.exp(-params.heightSmooth * dt);
+    return current + (target - current) * t;
+  }
+
+  function drive(dt) {
     // Pan speed scales with zoom so it feels constant on screen.
     const pan = params.panSpeed * (dist / 100);
     // Forward/right on the ground plane, rotated by yaw.
@@ -85,7 +98,8 @@ export function createRtsCamera({ app } = {}) {
 
     focus.x = THREE.MathUtils.clamp(focus.x + (fx * mf + rx * mr) * pan, -HALF, HALF);
     focus.z = THREE.MathUtils.clamp(focus.z + (fz * mf + rz * mr) * pan, -HALF, HALF);
-    focus.y = getWorldHeight ? getWorldHeight(focus.x, focus.z) : 0;
+    focusY = easeHeight(focusY, terrainY(focus.x, focus.z), dt);
+    focus.y = focusY;
 
     // Place the camera behind/above the focus at the fixed pitch.
     const horiz  = dist * Math.cos(params.pitch);
@@ -106,7 +120,8 @@ export function createRtsCamera({ app } = {}) {
     if (mode === "rts") {
       // Seed the focus from wherever the orbit camera was looking.
       focus.copy(controls.target);
-      focus.y = getWorldHeight ? getWorldHeight(focus.x, focus.z) : focus.y;
+      focusY = terrainY(focus.x, focus.z);
+      focus.y = focusY;
       // Boot starts zoomed in; only adopt orbit distance when toggling back from orbit.
       if (rtsEntered) {
         dist = THREE.MathUtils.clamp(camera.position.distanceTo(focus), DIST_MIN, DIST_MAX);
@@ -121,7 +136,7 @@ export function createRtsCamera({ app } = {}) {
       controls.enableRotate = false;
       controls.enablePan = false;
       controls.enableZoom = false;
-      drive(); // apply immediately so there's no one-frame jump
+      drive(0); // apply immediately so there's no one-frame jump
     } else {
       // Hand control back to the engine's OrbitControls.
       controls.target.copy(focus);
@@ -144,7 +159,11 @@ export function createRtsCamera({ app } = {}) {
     toggle,
     getMode,
     /** Recentre the view on a world point (e.g. jump to a selected unit). */
-    focusOn(x, z) { focus.set(x, 0, z); focus.y = getWorldHeight ? getWorldHeight(x, z) : 0; },
+    focusOn(x, z) {
+      focus.set(x, 0, z);
+      focusY = terrainY(x, z);
+      focus.y = focusY;
+    },
     dispose() { unbind(); },
   };
 }

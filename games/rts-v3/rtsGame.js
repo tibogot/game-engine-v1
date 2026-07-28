@@ -8,7 +8,7 @@
 //
 // Nothing here edits the engine's source — it only imports it. To reshape the
 // terrain or move objects: open v3/editor.html, build/tweak, Save Project, and
-// drop the resulting file here as `world.v3proj`. This game reloads it on boot.
+// drop the resulting file here as `rts.v3proj`. This game reloads it on boot.
 // ============================================================================
 
 import { startV3App } from "../../v3/app/main.js";
@@ -77,7 +77,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
     app.camera.updateProjectionMatrix();
   }
 
-  // 2) Load world — default world.v3proj, or ?world=/path/to/other.v3proj.
+  // 2) Load world — default rts.v3proj, or ?world=/path/to/other.v3proj.
   const worldState = { name: "procedural default" };
   const boot = await loadBootWorld(app, { onStatus });
   worldState.name = boot.name;

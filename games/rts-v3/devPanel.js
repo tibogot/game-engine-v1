@@ -11,7 +11,17 @@
 const CHECK_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 
-const DEV_PANEL_OPEN_W = 264;
+// Match the v3 editor's --right-w (300px). Narrower than that and prop-rows
+// (label + range + readout) clip on the right edge of the panel.
+export const DEV_PANEL_OPEN_W = 300;
+
+const FOLD_KEY = "rts-v3.devPanel.folds";
+/** Sections open on a fresh profile — the rest start folded. */
+const DEFAULT_OPEN = new Set(["Camera", "Controls"]);
+const ARROW_SVG =
+  '<svg class="section-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+  + ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+  + '<polyline points="6 9 12 15 18 9"></polyline></svg>';
 
 export function createDevPanel({
   app, navGrid, rtsCamera, units, minimap,
@@ -26,8 +36,10 @@ export function createDevPanel({
   root.id = "rts-dev";
   root.innerHTML = `
     <div class="tab-bar">
-      <button class="tab-btn active" type="button">Dev Controls</button>
-      <button class="tab-btn dv-collapse" type="button" title="Collapse">–</button>
+      <button class="tab-btn active" type="button"><i data-lucide="wrench"></i> Dev</button>
+      <button class="tab-btn dv-expand-all" type="button" title="Expand all sections">⊞</button>
+      <button class="tab-btn dv-collapse-all" type="button" title="Collapse all sections">⊟</button>
+      <button class="tab-btn dv-collapse" type="button" title="Collapse panel"><i data-lucide="panel-right-close"></i></button>
     </div>
     <div class="tab-content active">
 
@@ -54,6 +66,14 @@ export function createDevPanel({
               <span class="prop-num" id="dv-pitch-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Height ease</span>
+            <div class="prop-value">
+              <input type="range" id="dv-height-smooth" min="0" max="12" step="0.5" />
+              <span class="prop-num" id="dv-height-smooth-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">Height ease damps terrain follow while panning. 0 = snap (old feel).</div>
         </div>
       </div>
 
@@ -201,7 +221,7 @@ export function createDevPanel({
           <button class="action-btn" id="dv-world-load" type="button">Load .v3proj…</button>
           <button class="action-btn" id="dv-world-default" type="button">Reload default</button>
           <button class="action-btn" id="dv-world-reseat" type="button">Re-seat on terrain</button>
-          <div class="dv-hint">Default: <code>world.v3proj</code>. Or open with <code>?world=/path/file.v3proj</code>. Re-seat drops structures/flag back onto the ground if anything floats.</div>
+          <div class="dv-hint">Default: <code>rts.v3proj</code>. Or open with <code>?world=/path/file.v3proj</code>. Re-seat drops structures/flag back onto the ground if anything floats.</div>
         </div>
       </div>
 
@@ -238,12 +258,15 @@ export function createDevPanel({
   const style = document.createElement("style");
   style.textContent = `
     #rts-dev {
-      position: fixed; right: 0; top: 0; bottom: 0; width: ${DEV_PANEL_OPEN_W}px; z-index: 200;
+      position: fixed; right: 0; top: 0; bottom: 0;
+      width: ${DEV_PANEL_OPEN_W}px; min-width: ${DEV_PANEL_OPEN_W}px; z-index: 200;
       background: var(--bg-panel); border-left: 1px solid var(--border);
       display: flex; flex-direction: column; overflow: hidden;
       font-family: var(--font);
       pointer-events: auto;
     }
+    #rts-dev .prop-num { width: auto; min-width: 52px; }
+    #rts-dev .prop-label { width: 90px; min-width: 90px; }
     #rts-dev .tab-bar { flex: 0 0 auto; }
     #rts-dev .tab-content {
       flex: 1 1 auto;
@@ -251,7 +274,7 @@ export function createDevPanel({
       overflow-y: auto;
     }
     #rts-dev.collapsed {
-      top: 10px; bottom: auto; width: auto; height: auto;
+      top: 10px; bottom: auto; width: auto; min-width: 0; height: auto;
       border-left: none; border-radius: 6px 0 0 6px;
       box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
       overflow: visible;
@@ -267,14 +290,18 @@ export function createDevPanel({
       color: var(--text);
       border-bottom: none;
       background: var(--bg-panel);
+      gap: 5px;
     }
     #rts-dev .tab-btn { cursor: default; }
-    #rts-dev .tab-btn.dv-collapse { flex: 0 0 32px; cursor: pointer; }
+    #rts-dev .tab-btn.dv-collapse,
+    #rts-dev .tab-btn.dv-expand-all,
+    #rts-dev .tab-btn.dv-collapse-all { flex: 0 0 32px; cursor: pointer; }
+    #rts-dev .tab-btn i { width: 13px; height: 13px; }
     #rts-dev .dv-hint {
       margin-top: 6px; font-size: 11px; line-height: 1.5; color: var(--text-dim);
     }
     #rts-dev .dv-hint b { color: var(--text); font-weight: 600; }
-    #rts-dev .dv-world-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #rts-dev .dv-world-name { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #rts-dev .dv-hint code { font-size: 10px; color: var(--text-dim); }
     #rts-dev input[type="color"] {
       width: 36px; height: 22px; padding: 0; border: 1px solid var(--border);
@@ -285,12 +312,53 @@ export function createDevPanel({
 
   const $ = (sel) => root.querySelector(sel);
 
-  // ── Collapse ────────────────────────────────────────────────────────────────
+  // ── Collapsible sections (same pattern as v3 editor / editorShell.js) ───────
+  let folds = {};
+  try { folds = JSON.parse(localStorage.getItem(FOLD_KEY) || "{}") || {}; } catch { folds = {}; }
+  const saveFolds = () => {
+    try { localStorage.setItem(FOLD_KEY, JSON.stringify(folds)); } catch { /* private mode */ }
+  };
+
+  const sections = [];
+  for (const hdr of root.querySelectorAll(".section-header")) {
+    const key = hdr.textContent.trim();
+    const body = hdr.nextElementSibling;
+    if (!body?.classList.contains("section-body")) continue;
+    hdr.setAttribute("data-toggle", "");
+    hdr.insertAdjacentHTML("afterbegin", ARROW_SVG);
+
+    const setOpen = (open) => {
+      hdr.classList.toggle("collapsed", !open);
+      body.classList.toggle("hidden", !open);
+    };
+    setOpen(folds[key] ?? DEFAULT_OPEN.has(key));
+    hdr.addEventListener("click", () => {
+      const open = hdr.classList.contains("collapsed");
+      setOpen(open);
+      folds[key] = open;
+      saveFolds();
+    });
+    sections.push({ key, setOpen });
+  }
+
+  const setAllFolds = (open) => {
+    for (const s of sections) { s.setOpen(open); folds[s.key] = open; }
+    saveFolds();
+  };
+  $(".dv-expand-all")?.addEventListener("click", () => setAllFolds(true));
+  $(".dv-collapse-all")?.addEventListener("click", () => setAllFolds(false));
+
+  if (typeof lucide !== "undefined") lucide.createIcons();
+
+  // ── Collapse panel ──────────────────────────────────────────────────────────
   const collapseBtn = $(".dv-collapse");
   const setCollapsed = (collapsed) => {
     root.classList.toggle("collapsed", collapsed);
-    collapseBtn.textContent = collapsed ? "Dev ▸" : "–";
-    collapseBtn.title = collapsed ? "Open dev controls" : "Collapse";
+    collapseBtn.innerHTML = collapsed
+      ? '<i data-lucide="panel-right-open"></i> Dev'
+      : '<i data-lucide="panel-right-close"></i>';
+    collapseBtn.title = collapsed ? "Open dev controls" : "Collapse panel";
+    if (typeof lucide !== "undefined") lucide.createIcons();
   };
   collapseBtn.addEventListener("click", () => setCollapsed(!root.classList.contains("collapsed")));
 
@@ -315,6 +383,14 @@ export function createDevPanel({
   pitch.addEventListener("input", () => {
     rtsCamera.params.pitch = +pitch.value * DEG;
     pitchV.textContent = `${pitch.value}°`;
+  });
+
+  const heightSmooth = $("#dv-height-smooth"), heightSmoothV = $("#dv-height-smooth-v");
+  heightSmooth.value = rtsCamera.params.heightSmooth;
+  heightSmoothV.textContent = (+heightSmooth.value).toFixed(1);
+  heightSmooth.addEventListener("input", () => {
+    rtsCamera.params.heightSmooth = +heightSmooth.value;
+    heightSmoothV.textContent = (+heightSmooth.value).toFixed(1);
   });
 
   // ── Units ───────────────────────────────────────────────────────────────────

@@ -1,10 +1,11 @@
-// Load .v3proj worlds into the RTS game. Default boot uses world.v3proj; callers
+// Load .v3proj worlds into the RTS game. Default boot uses rts.v3proj; callers
 // can also load other saved projects from disk (dev panel) or via ?world= URL.
 import { decodeProjectFile, isProjectFile } from "../../v3/io/projectIO.js";
 import { saveTerrainConfig, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../../v3/terrain/heightmapTexture.js";
 import { stashPendingHeightmap } from "../../v3/io/pendingLoad.js";
 
-export const DEFAULT_WORLD_URL = "/games/rts-v3/world.v3proj";
+export const DEFAULT_WORLD_URL = "/games/rts-v3/rts.v3proj";
+export const DEFAULT_WORLD_NAME = DEFAULT_WORLD_URL.split("/").pop();
 
 function terrainMismatch(t) {
   return t.heightmapSize !== HEIGHTMAP_SIZE
@@ -19,13 +20,13 @@ export async function loadDefaultWorld(app, { onStatus } = {}) {
     if (!res.ok) {
       console.warn(
         `[RTS-v3] No world file at ${DEFAULT_WORLD_URL}. ` +
-        "Save a project from v3/editor.html and drop it here as world.v3proj.",
+        "Save a project from v3/editor.html and drop it here as rts.v3proj.",
       );
       return { name: "procedural default", loaded: false };
     }
     onStatus?.("Loading world…");
     await app.loadProjectFromUrl(DEFAULT_WORLD_URL);
-    return { name: "world.v3proj", loaded: true };
+    return { name: DEFAULT_WORLD_NAME, loaded: true };
   } catch (err) {
     console.warn("[RTS-v3] Default world load failed:", err);
     return { name: "procedural default", loaded: false };
