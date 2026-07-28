@@ -26,14 +26,52 @@ export const CHASE_CAM = {
    *  1 = hold CAM.dist at every speed, 0 = the old behaviour (drifts to ~14 m
    *  at top speed). See the derivation at the use site. */
   lagCompensate: 1.0,
-  // Loop-follow blend ramps by how far the car's up-axis tilts from world up.
-  // Smooth = engage EARLY and ramp over a WIDE tilt range so the camera rolls a
-  // little the whole way through the loop (tracking the car), rather than a late,
-  // fast snap. Ease speeds stay moderate for the same reason.
-  loopStart: 0.98,    // carUp.y where loop-follow begins (~11° tilt — as it noses in)
-  loopFull: 0.0,      // fully committed only when the car is VERTICAL (90°) — the
-                      //   whole climb is a gradual roll, then held over the top
-  loopLerp: 5.0,      // how fast the blend eases toward its tilt-based target
+  // Loop-follow blend, ramped by how far the car's up-axis tilts from world up.
+  //
+  // ONLY ONCE THE CAR IS ACTUALLY PAST VERTICAL. Tilt alone cannot tell a loop
+  // from a steep ramp — both lay the car over by the same angle — so an early,
+  // wide ramp (the previous 0.98 → 0.0, engaging from ~11° of tilt) committed to
+  // loop behaviour on any steep climb. MEASURED driving a near-vertical quarter
+  // pipe on the old values:
+  //     car tilt 30°  blend 12%    70°  blend 65%    85°  blend 91%
+  // and at 73° the camera had rolled into the ramp's plane — camera.up.y 0.988
+  // → 0.643, and the view elevation swung −24° (above the car, looking down) to
+  // +17° (below it, looking up). A near-vertical wall then renders as flat grey
+  // ground: the steeper the ramp, the harder the rig worked to make it look
+  // level, which is exactly backwards.
+  //
+  // A LOOP inverts and a ramp never does, so that — not tilt — is the thing
+  // worth keying on. The blend now sits at 0 for every upright attitude, however
+  // steep, and ramps in across the inverted half where the camera genuinely has
+  // to follow the car round. Loop entry is less rolled than it used to be; that
+  // is the deliberate trade for ramps reading as steep.
+  loopStart: 0.0,     // carUp.y where loop-follow begins — the car is VERTICAL
+  loopFull: -1.0,     // fully committed only when fully INVERTED (180°)
+  /**
+   * How fast the blend eases toward its tilt-based target.
+   *
+   * RAISED WITH THE NARROWER ENGAGE RANGE. The blend used to have the whole
+   * climb (11°→90°) to ease in; it now has only the inverted half, which a car
+   * clears in well under a second, so at the old 5/s it lagged so far behind
+   * that the camera never rolled — measured camera.up.y bottoming at −0.09 at
+   * the apex where the old rig reached −0.99, i.e. the loop barely read as a
+   * loop any more. Tracking the target closely is what restores it.
+   *
+   * Safe to be this quick only because the position blend now swings on an ARC
+   * (see the use site); on a chord a blend this fast threw the camera at the car.
+   */
+  loopLerp: 12.0,
+  /** Grace period (s) after the wheels leave before the blend starts unwinding.
+   *  Without it the blend collapsed the instant `grounded` went false, so
+   *  launching off a lip unwound the whole rig mid-flight — measured as ~65% of
+   *  blend released over about a second, right at the moment of the jump. A
+   *  crest hop or the lip of a loop is shorter than this and now changes
+   *  nothing. */
+  loopAirHold: 0.35,
+  /** Rate the blend eases to 0 once airborne past `loopAirHold`. Deliberately
+   *  far slower than `loopLerp`: the car's tilt in the air is trick input, not
+   *  surface following, so the rig should let go gently rather than track it. */
+  loopAirLerp: 1.2,
   upLerp: 5.0,        // how fast camera.up eases (the roll)
   // ── SPEED FOV ──────────────────────────────────────────────────────────────
   // The engine's camera FOV (60° vertical ≈ 91° horizontal at 16:9) is a fine
@@ -74,11 +112,13 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
   const _camUp = new THREE.Vector3(0, 1, 0);      // smoothed (persistent) camera up
   const _upTgt = new THREE.Vector3(0, 1, 0);      // this frame's desired up
   const _camDir = new THREE.Vector3();            // current view direction
+  const _camOff = new THREE.Vector3();            // car → camera offset, for the arc
   const _wDesired = new THREE.Vector3();          // world-frame camera position
   const _cDesired = new THREE.Vector3();          // car-frame camera position
   const _wLook = new THREE.Vector3();             // world-frame look target
   const _cLook = new THREE.Vector3();             // car-frame look target
   let _camLoop = 0;                               // smoothed 0..1 loop-follow blend
+  let _loopAir = 0;                               // seconds airborne, for the blend hold
   let _camInit = false;
   let _snap = false;                              // force a full snap next update
 
@@ -100,6 +140,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
   function reset() {
     _camInit = false;
     _camLoop = 0;
+    _loopAir = 0;
     _camUp.set(0, 1, 0);
     camera.up.set(0, 1, 0);
     // Reset alone only re-seeds heading/look; the POSITION + up still eased in
@@ -120,6 +161,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
         _camUp.set(0, 1, 0);
         camera.up.set(0, 1, 0);
         _camLoop = 0;
+        _loopAir = 0;
       }
       // Hand the FOV back too, or build mode inherits whatever kick the last
       // drive frame left behind and the editor view sits subtly zoomed out.
@@ -204,15 +246,42 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
       .addScaledVector(_carUp, CAM.lookUp);
 
     // Blend target: how far the car's up tilts from world up, gated on grip.
+    // Airborne the tilt is trick input rather than a surface to follow, so the
+    // blend is not recomputed — it is HELD briefly and then released slowly, so
+    // a lip or a crest hop cannot unwind the rig in the middle of a jump.
     let loopTgt = 0;
     if (grounded) {
+      _loopAir = 0;
       loopTgt = THREE.MathUtils.clamp(
         (CAM.loopStart - _carUp.y) / (CAM.loopStart - CAM.loopFull), 0, 1,
       );
+    } else {
+      _loopAir += dt;
     }
-    _camLoop = snap ? loopTgt : _camLoop + (loopTgt - _camLoop) * (1 - Math.exp(-CAM.loopLerp * dt));
+    const loopRate = grounded
+      ? CAM.loopLerp
+      : (_loopAir < CAM.loopAirHold ? 0 : CAM.loopAirLerp);
+    if (snap) _camLoop = loopTgt;
+    else if (loopRate > 0) {
+      _camLoop += (loopTgt - _camLoop) * (1 - Math.exp(-loopRate * dt));
+    }
 
     _camDesired.lerpVectors(_wDesired, _cDesired, _camLoop);
+    // SWING THE CAMERA ROUND THE CAR, DON'T CUT ACROSS. Both rigs place the
+    // camera at the same radius — hypot(dist, height) — just in different
+    // frames, so a straight lerp between them follows the CHORD and dives at the
+    // car exactly mid-blend. MEASURED through a loop: 8.15 m collapsing to 2.8 m
+    // at the apex, which is inside the car's own length. This was always present
+    // (5.9 m on the old wide blend) and only became obvious once the blend had
+    // less angular room to happen in. Re-projecting onto the sphere makes it an
+    // arc; it is a no-op at blend 0 and 1, where the lerp is already an endpoint.
+    if (_camLoop > 0 && _camLoop < 1) {
+      _camOff.copy(_camDesired).sub(pos);
+      const len = _camOff.length();
+      if (len > 1e-4) {
+        _camDesired.copy(pos).addScaledVector(_camOff, Math.hypot(CAM.dist, CAM.height) / len);
+      }
+    }
 
     // LAG COMPENSATION. An exponential follow lags a target moving at constant
     // v by exactly v / posLerp. At posLerp 7 and 48 m/s that is 6.9 m ON TOP of
