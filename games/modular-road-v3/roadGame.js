@@ -1744,7 +1744,8 @@ ${e.message}`);
   }
 
   const paletteEl = document.getElementById("palette");
-  const hintEl = document.getElementById("hint");
+  // Hint / shortcuts live in the Mode section of the right-hand panel (temporary
+  // until a dedicated menu exists). Looked up AFTER the panel is built below.
 
   // ── RACE HUD ────────────────────────────────────────────────────────────────
   const hud = document.getElementById("race-hud");
@@ -1920,7 +1921,7 @@ ${e.message}`);
     spawnMarker.visible = !driving; // a build-time guide; hidden while racing
     if (hud) hud.classList.toggle("on", driving);
     if (paletteEl) paletteEl.style.display = driving ? "none" : "";
-    if (hintEl) hintEl.dataset.mode = mode;
+    document.getElementById("hint")?.setAttribute("data-mode", mode);
     applyControlMode();
     devPanel?.renderMode(); // B key and the panel button share this path
   }
@@ -1944,7 +1945,8 @@ ${e.message}`);
   // 6b) ── DEV PANEL ─────────────────────────────────────────────────────────
   // Right-hand developer UI, styled like the v3 editor's right panel. This page
   // is the DEV page for the game (same relationship rts.html has to rts-v3) —
-  // player-facing UI is the palette and the hint bar.
+  // player-facing UI is the palette; shortcuts sit in the panel Mode section
+  // for now.
   let worldName = boot.name;
   devPanel = createRoadDevPanel({
     app,

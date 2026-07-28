@@ -21,6 +21,15 @@
          bundled by Vite (it would 404 in a production build). -->
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <style>
+      /* Road-game HUD typeface only — absolute path because <base> is /v3/. */
+      @font-face {
+        font-family: "PP Neue Montreal";
+        src: url("/games/modular-road-v3/fonts/PP%20Neue%20Montreal-Variable.ttf") format("truetype");
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+      }
+
       /* Hide the editor chrome — the game shows only the viewport. */
       #toolbar,
       #right-panel { display: none !important; }
@@ -34,19 +43,6 @@
         left: 8px !important;
       }
 
-      #hint {
-        position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
-        z-index: 50; padding: 8px 16px; border-radius: 999px;
-        background: rgba(12, 12, 14, 0.72); color: #d6d6d6;
-        font: 13px/1.4 system-ui, -apple-system, sans-serif;
-        border: 1px solid rgba(255, 255, 255, 0.09);
-        pointer-events: none; white-space: nowrap;
-      }
-      #hint b { color: #fff; font-weight: 600; }
-      #hint .hint-build, #hint .hint-drive { display: none; }
-      #hint[data-mode="build"] .hint-build { display: inline; }
-      #hint[data-mode="drive"] .hint-drive { display: inline; }
-
       /* ── DEBUG ORBIT CAM (C) ───────────────────────────────────────────────
          Deliberately its own overlay rather than a corner of #race-hud: the race
          HUD is hidden in build mode and this has to survive independently, and a
@@ -58,7 +54,6 @@
         color: #cfe4ff; background: rgba(8, 12, 20, 0.72);
         border: 1px solid rgba(120, 170, 255, 0.28); border-radius: 6px;
         padding: 7px 10px; letter-spacing: 0.2px;
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
       }
       #debug-cam.on { display: block; }
       #debug-cam b { color: #fff; font-weight: 600; }
@@ -80,22 +75,21 @@
       #race-clock {
         position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
         text-align: center; color: #fff;
+        font-family: "PP Neue Montreal", system-ui, sans-serif;
       }
       #race-time {
         font-variant-numeric: tabular-nums; font-weight: 700;
         font-size: 40px; line-height: 1; letter-spacing: 0.5px;
-        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
       }
       #race-sub {
         margin-top: 4px; font-size: 13px; color: #cfd6e0;
-        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
       }
       #race-sub b { color: #fff; }
       #race-best { color: #8fe3ff; }
       #race-flash {
         position: absolute; top: 42%; left: 50%; transform: translateX(-50%);
         font-size: 34px; font-weight: 800; letter-spacing: 1px; text-align: center;
-        color: #fff; text-shadow: 0 3px 16px rgba(0, 0, 0, 0.7);
+        color: #fff;
         opacity: 0; transition: opacity 0.25s ease;
       }
       #race-flash.show { opacity: 1; }
@@ -110,10 +104,11 @@
       #race-split.ahead { color: #7cffb4; }
       #race-split.behind { color: #ff9a8c; }
       /* Speedo + tach — BOTTOM-LEFT. Deliberately clear of the dev panel (right,
-         300px), the perf stats (top-left) and the hint bar (bottom-centre). */
+         300px) and the perf stats (top-left). */
       #race-speed {
         position: absolute; left: 22px; bottom: 20px; width: 208px; height: 132px;
         color: #fff; pointer-events: none;
+        font-family: "PP Neue Montreal", system-ui, sans-serif;
       }
       #race-speed svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
       /* The sweeping value arc. stroke-dashoffset is the only thing animated per
@@ -125,7 +120,6 @@
       #race-speed .v {
         display: block; font-variant-numeric: tabular-nums; font-weight: 700;
         font-size: 42px; line-height: 0.95; letter-spacing: -1px;
-        text-shadow: 0 2px 12px rgba(0, 0, 0, 0.75);
       }
       #race-speed .u {
         font-size: 10px; letter-spacing: 2.5px; color: #9fb0c4; text-transform: uppercase;
@@ -140,11 +134,9 @@
       #race-drift .row { display: flex; align-items: baseline; gap: 8px; justify-content: flex-end; }
       #race-drift-pts {
         font-variant-numeric: tabular-nums; font-weight: 800; font-size: 34px; line-height: 1;
-        text-shadow: 0 2px 12px rgba(0, 0, 0, 0.75);
       }
       #race-drift-mul {
         font-weight: 800; font-size: 19px; color: #ffd24a;
-        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
       }
       #race-drift .lbl {
         font-size: 10px; letter-spacing: 2.5px; color: #9fb0c4; text-transform: uppercase;
@@ -153,7 +145,6 @@
       #race-drift-bank {
         font-weight: 800; font-size: 17px; color: #7cffb4; min-height: 20px;
         opacity: 0; transition: opacity 120ms linear;
-        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
       }
       #race-drift-bank.show { opacity: 1; }
 
@@ -163,7 +154,7 @@
         min-width: 34px; padding: 2px 9px; border-radius: 7px;
         background: rgba(10, 14, 20, 0.82); border: 1px solid rgba(255, 255, 255, 0.14);
         font-weight: 800; font-size: 19px; line-height: 1.25; text-align: center;
-        font-variant-numeric: tabular-nums; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+        font-variant-numeric: tabular-nums;
         transition: color 90ms linear, border-color 90ms linear, box-shadow 90ms linear;
       }
       /* Flashes on an upshift, and turns hot at redline. */
@@ -344,22 +335,6 @@
       </div>
     </div>
 
-    <!-- data-mode is set by roadGame.js on every toggle; CSS swaps the text. -->
-    <div id="hint" style="display: none" data-mode="build">
-      <span class="hint-build">
-        <b>B</b> test drive &nbsp;·&nbsp; <b>MMB</b> orbit &nbsp;·&nbsp;
-        <b>RMB</b> pan &nbsp;·&nbsp; <b>LMB</b> gizmo / place &nbsp;·&nbsp;
-        <b>Enter</b> place &nbsp;·&nbsp; <b>Backspace</b> undo
-      </span>
-      <span class="hint-drive">
-        <b>B</b> build &nbsp;·&nbsp; <b>WASD</b>/<b>Arrows</b> drive &nbsp;·&nbsp;
-        <b>Space</b> handbrake &nbsp;·&nbsp; <b>R</b> respawn &nbsp;·&nbsp;
-        <b>C</b> debug cam
-        &nbsp;&nbsp;|&nbsp;&nbsp; in air: <b>Shift</b>/<b>Ctrl</b> flip &nbsp;·&nbsp;
-        <b>A/D</b> roll &nbsp;·&nbsp; <b>Q/E</b> spin
-      </span>
-    </div>
-
     <script type="module">
       const boot = document.getElementById("boot");
       const msg = document.getElementById("msg");
@@ -399,7 +374,6 @@
         const { startRoadGame } = await import("./roadGame.js");
         await startRoadGame({ onStatus: (s) => (msg.textContent = s) });
 
-        document.getElementById("hint").style.display = "";
         boot.classList.add("hidden");
         setTimeout(() => boot.remove(), 600);
       } catch (e) {

@@ -8,7 +8,8 @@
 // a grid cell we can't reuse).
 //
 // This is the single home for every dev utility — world, camera, car tuning,
-// track, FX. Player-facing UI is the palette (build) and the hint bar (drive).
+// track, FX. Player-facing UI is the palette (build); shortcuts live here for
+// now (Mode section) until a dedicated menu exists.
 import * as THREE from "three";
 
 const CHECK_SVG =
@@ -162,6 +163,18 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <button class="action-btn" id="dv-respawn" type="button">Respawn car (R)</button>
+          <!-- Temporary home for the old bottom shortcut bar — a proper menu later. -->
+          <div id="hint" data-mode="build">
+            <span class="hint-build">
+              <b>B</b> test drive · <b>MMB</b> orbit · <b>RMB</b> pan ·
+              <b>LMB</b> gizmo / place · <b>Enter</b> place · <b>Backspace</b> undo
+            </span>
+            <span class="hint-drive">
+              <b>B</b> build · <b>WASD</b>/<b>Arrows</b> drive ·
+              <b>Space</b> handbrake · <b>R</b> respawn · <b>C</b> debug cam
+              <br>in air: <b>Shift</b>/<b>Ctrl</b> flip · <b>A/D</b> roll · <b>Q/E</b> spin
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1342,6 +1355,18 @@ export function createRoadDevPanel({ app, game, params }) {
     }
     #road-dev .dv-hint b { color: var(--text); font-weight: 600; }
     #road-dev .dv-hint code { font-size: 10px; color: var(--text-dim); }
+    /* Shortcut strip — parked in Mode until a real menu exists. */
+    #road-dev #hint {
+      margin-top: 8px; padding: 8px 10px;
+      font-size: 11px; line-height: 1.5; color: var(--text-dim);
+      background: rgba(0, 0, 0, 0.22);
+      border: 1px solid var(--border); border-radius: var(--radius, 4px);
+    }
+    #road-dev #hint b { color: var(--text); font-weight: 600; }
+    #road-dev #hint .hint-build,
+    #road-dev #hint .hint-drive { display: none; }
+    #road-dev #hint[data-mode="build"] .hint-build { display: block; }
+    #road-dev #hint[data-mode="drive"] .hint-drive { display: block; }
     #road-dev .dv-world-name {
       max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
