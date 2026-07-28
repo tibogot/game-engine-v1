@@ -42,6 +42,7 @@ import {
   WHEEL_LAYOUT,
   HEADLIGHTS,
   CHASSIS,
+  CHASSIS_HULL,
   WHEEL,
   DRIFT,
   GRAVITY,
@@ -189,6 +190,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Assigned near the end of setup, but bakeCollision() runs before that and
   // pokes it — `let … = null` so the early call sees null instead of a TDZ throw.
   let devPanel = null;
+  /** Exact round colliders (gate posts) — see PropManager.collisionCapsules(). */
+  let solidCapsules = [];
+  /** Same `let … = null` reason as devPanel: bakeCollision hands these to the
+   *  vehicle, and `const vehicle` below would be in TDZ on an early bake. */
+  let vehicleRef = null;
 
   const builder = new ModularRoadBuilder({
     scene,
@@ -472,6 +478,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const vehicle = new Vehicle({ scene, showArrows: false });
   // Chassis-corner safety floor follows the terrain instead of pinning to y=0.
   vehicle.getFloorY = (x, z) => app.getWorldHeight(x, z);
+  // Adopt whatever a bake that ran before this point already worked out.
+  vehicleRef = vehicle;
+  vehicle.setSolidCapsules(solidCapsules);
 
   // GLB wheels, loaded in the BACKGROUND: the car boots on its procedural wheels
   // and upgrades when the model arrives, so a slow or missing file can never
@@ -545,6 +554,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const propCol = props.collisionMeshes();
     decks.push(...propCol.deck);
     solids.push(...propCol.solids);
+    // Round primitives bypass the BVH entirely — the chassis hull is SAMPLED
+    // against triangles, and anything thinner than the sample spacing (a gate
+    // post, say) falls between the samples. See PropManager.collisionCapsules().
+    solidCapsules = props.collisionCapsules();
+    vehicleRef?.setSolidCapsules(solidCapsules);
 
     rebakeMovers();
 
@@ -618,6 +632,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const debugDyn = new THREE.Group();
   debugGroup.add(debugStatic, debugDyn);
   let debugOn = false;
+  const _capUp = new THREE.Vector3(0, 1, 0);
+  const _capAxis = new THREE.Vector3();
 
   function refreshCollisionDebug() {
     for (const c of debugStatic.children) c.geometry?.dispose();
@@ -632,6 +648,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     };
     add(deckBvh, 0xff5060);   // static decks = red
     add(solidsBvh, 0x5080ff); // static solids = blue
+    // Capsule colliders are solids too, but they are never in the BVH, so
+    // without this the gate post looked uncollided in the very overlay you would
+    // check it in. Same blue — it is the same channel to the player.
+    for (const cap of solidCapsules) {
+      const h = cap.a.distanceTo(cap.b);
+      const g = new THREE.CapsuleGeometry(cap.radius, h, 4, 10);
+      const m = new THREE.Mesh(
+        g,
+        new THREE.MeshBasicMaterial({ color: 0x5080ff, wireframe: true, transparent: true, opacity: 0.5 }),
+      );
+      m.position.copy(cap.a).add(cap.b).multiplyScalar(0.5);
+      // CapsuleGeometry stands along +Y; lay it on the capsule's own axis.
+      if (h > 1e-6) {
+        m.quaternion.setFromUnitVectors(
+          _capUp, _capAxis.subVectors(cap.b, cap.a).normalize(),
+        );
+      }
+      debugStatic.add(m);
+    }
     // Mover BVHs are intentionally NOT drawn here: they rebake every tick, so a
     // wireframe snapshot would lag the platform. They get live wireframes in the
     // DYNAMIC half instead, posed from their real meshes every frame.
@@ -639,8 +674,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   // ── LIVE COLLIDER WIREFRAMES ───────────────────────────────────────────────
   // What the car is ACTUALLY collided as, drawn where it actually is:
-  //   yellow  the chassis box — CHASSIS.width/height/length, the box the solids
-  //           resolver samples. NOT the GLB silhouette, which is only a look.
+  //   yellow  CHASSIS_HULL — the silhouette the car HITS things with, and what
+  //           the solids resolver samples. Roughly the bodywork.
+  //   dim yellow  CHASSIS — the smaller core box: deck contact and the inertia
+  //           tensor. Deliberately not the silhouette; see the comment on
+  //           CHASSIS in modularRoadVehicle.js for why it cannot grow.
   //   cyan    the four tyres at WHEEL.radius, where the ground probes start.
   //   orange  moving platforms and walls (the per-tick mover BVHs).
   //   green   simulated props — the cone's SPHERE proxy and the gate's panel,
@@ -648,22 +686,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Everything here is lines, so it reads through the geometry it is inside.
   const DBG_LINE = {
     car: new THREE.LineBasicMaterial({ color: 0xffe14a }),
+    core: new THREE.LineBasicMaterial({ color: 0x8a7420 }),
     wheel: new THREE.LineBasicMaterial({ color: 0x4ad2ff }),
     mover: new THREE.LineBasicMaterial({ color: 0xff8a3d }),
     prop: new THREE.LineBasicMaterial({ color: 0x9dff5a }),
   };
   let dbgCar = null;
+  let dbgCore = null;
   let dbgWheels = [];
   /** [{ line, mesh }] — wireframe clones tracking a live mesh's world matrix. */
   let dbgMovers = [];
   /** [{ line, sim }] — proxies tracking a PropPhysics sim. */
   let dbgProps = [];
   const _dbgCentre = new THREE.Vector3();
+  const _dbgHullOff = new THREE.Vector3();
 
   function clearDynamicDebug() {
     for (const c of debugDyn.children) c.geometry?.dispose();
     debugDyn.clear();
-    dbgCar = null; dbgWheels = []; dbgMovers = []; dbgProps = [];
+    dbgCar = null; dbgCore = null; dbgWheels = []; dbgMovers = []; dbgProps = [];
   }
 
   /** Rebuild the dynamic wireframes for whatever exists right now. */
@@ -678,7 +719,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       return l;
     };
 
-    dbgCar = line(new THREE.BoxGeometry(CHASSIS.width, CHASSIS.height, CHASSIS.length), DBG_LINE.car);
+    // The SOLID HULL — what the car actually hits things with. The smaller
+    // CHASSIS box is drawn too, in a dimmer yellow, because it is a different
+    // real thing (deck contact + inertia) and seeing only one of them is how
+    // "the collider is nowhere near the car" reads as a bug either way.
+    dbgCar = line(new THREE.BoxGeometry(
+      CHASSIS_HULL.width, CHASSIS_HULL.height, CHASSIS_HULL.length,
+    ), DBG_LINE.car);
+    dbgCore = line(new THREE.BoxGeometry(CHASSIS.width, CHASSIS.height, CHASSIS.length), DBG_LINE.core);
     for (let i = 0; i < 4; i++) {
       // A cylinder's EdgesGeometry is its two rims — the tyre silhouette, which
       // is what you want to see against the road, and only ~32 segments.
@@ -714,12 +762,17 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function updateDynamicDebug() {
     if (!debugOn) return;
     if (dbgCar) {
-      // The collision box is centred on the GEOMETRIC centre, which is the CoM
-      // offset away from body.pos — the same mapping _geomToWorld uses. Follows
-      // the RENDER pose so it sits on the car rather than one tick behind it.
+      // Both boxes are placed in the GEOMETRIC-CENTRE frame — the CoM offset away
+      // from body.pos, the same mapping _geomToWorld uses — and follow the RENDER
+      // pose so they sit on the car rather than one tick behind it. The hull then
+      // adds its own centre offset on top, in chassis-local axes.
       _dbgCentre.set(CHASSIS.comX, CHASSIS.comY, CHASSIS.comZ)
         .applyQuaternion(vehicle.renderQuat).add(vehicle.renderPos);
-      dbgCar.position.copy(_dbgCentre);
+      dbgCore?.position.copy(_dbgCentre);
+      dbgCore?.quaternion.copy(vehicle.renderQuat);
+      _dbgHullOff.set(0, CHASSIS_HULL.offsetY, CHASSIS_HULL.offsetZ)
+        .applyQuaternion(vehicle.renderQuat);
+      dbgCar.position.copy(_dbgCentre).add(_dbgHullOff);
       dbgCar.quaternion.copy(vehicle.renderQuat);
     }
     for (let i = 0; i < dbgWheels.length; i++) {

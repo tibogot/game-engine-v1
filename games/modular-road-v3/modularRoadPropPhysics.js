@@ -31,7 +31,7 @@
 // integrates forever AND jitters in place. A settled prop costs one comparison.
 // ============================================================================
 import * as THREE from "three";
-import { RigidBody, CHASSIS } from "../../v3/play/modularRoadVehicle.js";
+import { RigidBody, CHASSIS_HULL } from "../../v3/play/modularRoadVehicle.js";
 
 export const PROP_PHYSICS = {
   enabled: true,
@@ -144,14 +144,30 @@ export const PHYSICS_PROP_TYPES = {
      * through-panel component only). This is the half that was missing: the
      * panel swung but the car sailed through untouched, so it read as "the gate
      * does nothing". Scaled by how closed the gate still is, so you shove
-     * through with a knock rather than bouncing off a wall. Measured: 5.5 took
-     * a 20 m/s car down to 6.2 — a wall, not a gate. 1.8 costs about a third of
-     * your speed, which reads as shouldering through something.
+     * through with a knock rather than bouncing off a wall.
+     *
+     * RECALIBRATED when the contact test started using the car's real footprint
+     * (see _carFootprint). The gate now begins swinging when the BONNET reaches
+     * it rather than when the car's middle does — 2.4 m earlier — so it is
+     * already part-open by the time the car arrives and `closedness` has faded.
+     * At the old 0.9 that dropped the cost of a 20 m/s pass from 1.3 m/s to
+     * 0.89, i.e. the geometry fix quietly made gates softer. Re-measured across
+     * the range (the old figures in this comment predate two contact fixes and
+     * no longer describe anything):
+     *
+     *     resistance   4 m/s exit   20 m/s cost   45 m/s kept
+     *        0.9          3.43         0.89          98%
+     *        1.4          3.20         1.38          96%     <- here
+     *        2.4          2.89         2.37          94%
+     *        4.0          2.68         3.92          90%
+     *
+     * 1.4 restores the tuned feel exactly: same cost as before, and a crawling
+     * car still clears `minPushSpeed`.
      *
      * The ONLY place a prop touches the car — cones stay strictly one-way. A
      * gate that cost you nothing would not be an obstacle.
      */
-    resistance: 0.9,
+    resistance: 1.4,
     /**
      * Floor on the through-panel speed the resistance may scrub to (m/s).
      *
@@ -174,6 +190,8 @@ const _n = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _qi = new THREE.Quaternion();
 const _carVel = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
 const _down = new THREE.Vector3(0, -1, 0);
 const _up = new THREE.Vector3(0, 1, 0);
 
@@ -365,11 +383,17 @@ export class PropPhysics {
     // Prop centre in chassis-local space.
     _qi.copy(car.quat).invert();
     _local.copy(b.pos).sub(car.pos).applyQuaternion(_qi);
-    const hw = CHASSIS.width * 0.5, hh = CHASSIS.height * 0.5, hl = CHASSIS.length * 0.5;
+    // THE HULL, not the core box: this is "what shape does the car hit things
+    // with", which is exactly the question CHASSIS_HULL answers. The core box
+    // stops 0.6 m short of the nose, so cones were being punted by an invisible
+    // bumper set back inside the bodywork.
+    const hw = CHASSIS_HULL.width * 0.5;
+    const hh = CHASSIS_HULL.height * 0.5;
+    const hl = CHASSIS_HULL.length * 0.5;
     _closest.set(
       Math.max(-hw, Math.min(hw, _local.x)),
-      Math.max(-hh, Math.min(hh, _local.y)),
-      Math.max(-hl, Math.min(hl, _local.z)),
+      CHASSIS_HULL.offsetY + Math.max(-hh, Math.min(hh, _local.y - CHASSIS_HULL.offsetY)),
+      CHASSIS_HULL.offsetZ + Math.max(-hl, Math.min(hl, _local.z - CHASSIS_HULL.offsetZ)),
     );
     const d2 = _closest.distanceToSquared(_local);
     if (d2 > r * r) return false;
@@ -420,6 +444,77 @@ export class PropPhysics {
 
   // ── HINGE (gates) ───────────────────────────────────────────────────────────
 
+  /**
+   * The car's plan-view footprint as seen from the hinge, in the hinge's HOME
+   * frame. `_v` must already hold the car centre in that frame.
+   *
+   * Returns the angular WEDGE the bodywork occupies — because that is the actual
+   * question a swing gate asks: "through what range of angles is the panel
+   * inside the car?" A radius-and-bearing pair cannot express it for a shape
+   * three times longer than it is wide.
+   *
+   * @returns {{lo:number, hi:number, rel:number, dist:number, full:boolean}}
+   *   `lo`/`hi` bracket the wedge and `rel` is the panel's current angle, all
+   *   relative to the same arbitrary base so no caller has to unwrap anything.
+   *   `dist` is how close the bodywork gets to the hinge; `full` means the hinge
+   *   is INSIDE the car, where every angle is blocked and there is no wedge.
+   */
+  _carFootprint(car, angle) {
+    const H = CHASSIS_HULL;
+    // The car's plan axes in the home frame. Projected, then re-normalised: a
+    // pitched or rolled car casts a SHORTER shadow, and using the full extents
+    // on unit axes keeps the footprint conservative rather than letting a car
+    // mid-barrel-roll slip through a gate it is visibly hitting.
+    _right.set(1, 0, 0).applyQuaternion(car.quat).applyQuaternion(_qi);
+    _fwd.set(0, 0, 1).applyQuaternion(car.quat).applyQuaternion(_qi);
+    let rx = _right.x, rz = _right.z, fx = _fwd.x, fz = _fwd.z;
+    const rl = Math.hypot(rx, rz), fl = Math.hypot(fx, fz);
+    if (rl < 1e-3 || fl < 1e-3) {
+      // Car exactly nose-down or on its side — the footprint degenerates to a
+      // line and the axes are noise. Fall back to a circle, which is what this
+      // whole function replaced but is still the right answer for a shape with
+      // no meaningful plan orientation.
+      const r = Math.hypot(_v.x, _v.z);
+      const half = Math.atan2(H.width * 0.5 + 0.35, Math.max(0.4, r));
+      return { lo: -half, hi: half, rel: 0, dist: Math.max(0, r - H.width * 0.5), full: r < 0.4 };
+    }
+    rx /= rl; rz /= rl; fx /= fl; fz /= fl;
+
+    const hw = H.width * 0.5, hl = H.length * 0.5;
+    // Hull centre, not car.pos — the hull is offset along the car's own forward.
+    const cx = _v.x + fx * H.offsetZ, cz = _v.z + fz * H.offsetZ;
+
+    // Hinge in the CAR's plan frame, so "how close does the bodywork get" and
+    // "is the hinge inside the car" are the same clamp.
+    const u = -cx * rx - cz * rz;
+    const w = -cx * fx - cz * fz;
+    const cu = Math.max(-hw, Math.min(hw, u));
+    const cw = Math.max(-hl, Math.min(hl, w));
+    const dist = Math.hypot(u - cu, w - cw);
+    if (dist < 1e-4) return { lo: 0, hi: 0, rel: 0, dist: 0, full: true };
+
+    // Corner bearings, unwrapped against the FIRST corner rather than against
+    // the panel — with the hinge outside the rectangle the wedge is always under
+    // π wide, so this is unambiguous wherever the car happens to be.
+    let lo = 0, hi = 0, base = 0;
+    for (let i = 0; i < 4; i++) {
+      const sx = i & 1 ? 1 : -1, sz = i & 2 ? 1 : -1;
+      const px = cx + rx * hw * sx + fx * hl * sz;
+      const pz = cz + rz * hw * sx + fz * hl * sz;
+      const a = Math.atan2(-pz, px);
+      if (i === 0) { base = a; continue; }
+      let d = a - base;
+      if (d > Math.PI) d -= 2 * Math.PI;
+      else if (d < -Math.PI) d += 2 * Math.PI;
+      if (d < lo) lo = d;
+      if (d > hi) hi = d;
+    }
+    let rel = angle - base;
+    if (rel > Math.PI) rel -= 2 * Math.PI;
+    else if (rel < -Math.PI) rel += 2 * Math.PI;
+    return { lo, hi, rel, dist, full: false };
+  }
+
   _tickHinge(s, dt, car, vehicle) {
     const p = s.profile;
     _q.setFromAxisAngle(_up, s.angle);
@@ -437,34 +532,31 @@ export class PropPhysics {
       // −Z, which is the sign convention everything below depends on.
       _qi.copy(s.home.quat).invert();
       _v.copy(car.pos).sub(s.home.pos).applyQuaternion(_qi);
-      const r = Math.hypot(_v.x, _v.z);
-      // Plan-view radius of the car — what the panel actually has to clear.
-      const carR = CHASSIS.width * 0.5 + 0.35;
 
       // Vertical band the panel actually occupies, plus a car's worth of slack
       // below (car.pos is the chassis origin, ~0.5 m up) and a little above. A
       // car cleanly OVER the gate has to miss it — this used to be measured
       // symmetrically about the root, so the band sat half a metre low.
       const overPanel = _v.y > -1.0 && _v.y < p.baseY + p.height + 0.4;
-      // Angle from the hinge to the car, and how wide the car looks from there.
-      // Close to the hinge a car subtends nearly 90°, far out it is a sliver —
-      // which is exactly why a door has to swing further when you are near it.
-      const carAng = Math.atan2(-_v.z, _v.x);
-      const halfW = Math.atan2(carR, Math.max(0.4, r));
-      // IS THE CAR ACTUALLY AT THE PANEL? Radius alone is not enough, and this
-      // was the "gate opens by itself" bug: the panel ray points along bearing
-      // `s.angle`, so a car driving past the BACK of the post (bearing ~180°)
-      // was still inside `r < width + carR`, and `want = carAng ± halfW` then
-      // clamped to maxAngle and flung the gate wide open with nothing touching
-      // it. Even on the near side, a car 0.5 rad off a panel it subtends 0.3 rad
-      // of is clear of it and must not push. Wrapped, because the two bearings
-      // straddle ±π.
-      let dAng = carAng - s.angle;
-      if (dAng > Math.PI) dAng -= 2 * Math.PI;
-      else if (dAng < -Math.PI) dAng += 2 * Math.PI;
-      const atPanel = Math.abs(dAng) < halfW + 0.05;
 
-      if (r < p.width + carR && overPanel && atPanel) {
+      // THE CAR IS A RECTANGLE, NOT A DOT WITH A RADIUS.
+      //
+      // This was a circle of `hull.width/2 + 0.35` centred on `car.pos` — and
+      // `car.pos` is the chassis ORIGIN, i.e. the middle of a 4.85 m car. The
+      // bonnet sticks out 2.5 m in front of the only point the gate was looking
+      // at, so the panel could not react until the car's MIDDLE had nearly
+      // arrived. Measured in tools/gateFootprintRepro.mjs: the nose was 1.2–1.8 m
+      // PAST the panel plane before the gate moved at all, at every speed and
+      // every crossing point. That is precisely the "I drive through it" feel,
+      // and no amount of tuning spring/kick/resistance could have fixed it —
+      // the contact test was looking in the wrong place.
+      //
+      // So use the hull's actual plan-view footprint. The nose now reaches the
+      // panel when the nose reaches the panel.
+      const fp = this._carFootprint(car, s.angle);
+      const atPanel = fp.dist < p.width && fp.rel >= fp.lo && fp.rel <= fp.hi;
+
+      if (overPanel && atPanel) {
         // Which way the panel is being shoved: with the car's travel through the
         // doorway, never into it. Latched for the whole contact so a car that
         // yaws mid-pass cannot flip the gate back through itself.
@@ -480,7 +572,13 @@ export class PropPhysics {
         // the car was through the doorway before an impulse had built. A door
         // does not get nudged — it is DISPLACED, and stays displaced for exactly
         // as long as something is in its way.
-        let want = carAng + side * halfW;
+        // Swing to whichever EDGE of the car's footprint the panel is being
+        // pushed toward — the angle at which the panel just clears the bodywork.
+        // Expressed as a delta from the current angle so nothing here has to
+        // worry about which turn of ±π the bearings landed on.
+        let want = fp.full
+          ? side * p.maxAngle // hinge is inside the car: nothing to clear to
+          : s.angle + ((side > 0 ? fp.hi : fp.lo) - fp.rel);
         if (want > p.maxAngle) want = p.maxAngle;
         else if (want < -p.maxAngle) want = -p.maxAngle;
         // Push ONLY — never drag the gate closed toward the car.

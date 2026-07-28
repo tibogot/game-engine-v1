@@ -507,6 +507,10 @@ export const PROP_CATALOG = [
         mat(0x9aa0a8, { roughness: 0.45, metalness: 0.6 }),
       );
       post.position.y = GATE_POST_HEIGHT / 2;
+      // Collided as an exact capsule rather than as triangles — a 0.22 m post is
+      // thinner than the chassis hull's sample spacing, so the sampled path
+      // cannot see it reliably. See PropManager.collisionCapsules().
+      post.userData.capsule = { radius: GATE_POST_RADIUS, height: GATE_POST_HEIGHT };
       const panel = new THREE.Mesh(
         new THREE.BoxGeometry(W, H, 0.09),
         mat(0xe23b2e, { roughness: 0.65, emissive: 0x3a0a06, emissiveIntensity: 0.4 }),
@@ -1089,12 +1093,56 @@ export class PropManager {
         // PropPhysics and would be welded into the static bake as an invisible
         // wall across the doorway. The prop-level `collision` flag alone cannot
         // express that, so a mesh may exclude itself.
-        if (o.userData.noCollide) return;
+        //
+        // `capsule` implies the same exclusion: that mesh is collided EXACTLY as
+        // a primitive instead (see collisionCapsules), and having it in both
+        // channels would resolve the same contact twice.
+        if (o.userData.noCollide || o.userData.capsule) return;
         if (inst.collision === "deck" || inst.collision === "both") deck.push(o);
         if (inst.collision === "solid" || inst.collision === "both") solids.push(o);
       });
     }
     return { deck, solids };
+  }
+
+  /**
+   * World-space capsule colliders, from meshes tagged
+   * `userData.capsule = { radius, height }`.
+   *
+   * A ROUND POST IS NOT A TRIANGLE PROBLEM. The chassis is collided against
+   * triangle geometry by SAMPLING its hull surface, and sample spacing is a
+   * hard floor on how thin an obstacle can be and still register — a 0.22 m gate
+   * post fell straight between the samples and the car drove through it
+   * (measured in tools/postColliderRepro.mjs). Handing the vehicle the primitive
+   * instead removes the floor entirely: it solves closest-point exactly, so the
+   * post registers at every approach angle and speed.
+   *
+   * The capsule is taken along the mesh's own local +Y, so it follows any
+   * rotation the prop was placed with.
+   */
+  collisionCapsules() {
+    const out = [];
+    for (const inst of this.instances) {
+      inst.root.traverse((o) => {
+        const c = o.userData.capsule;
+        if (!c) return;
+        o.updateWorldMatrix(true, false);
+        const mid = new THREE.Vector3().setFromMatrixPosition(o.matrixWorld);
+        // The mesh's local up, in world space — NOT (0,1,0), or a gate placed on
+        // a banked piece would get an upright collider through a leaning post.
+        const up = new THREE.Vector3(0, 1, 0)
+          .transformDirection(o.matrixWorld).normalize();
+        // Capsule ENDS are the sphere centres, so they sit a radius inside each
+        // flat end of the cylinder the artist authored.
+        const half = Math.max(0, c.height / 2 - c.radius);
+        out.push({
+          a: mid.clone().addScaledVector(up, -half),
+          b: mid.clone().addScaledVector(up, half),
+          radius: c.radius,
+        });
+      });
+    }
+    return out;
   }
 
   /** @returns {{type:string, position:number[], quaternion:number[], scale:number[]}[]} */

@@ -30,7 +30,7 @@ const PTMP = join(ROOT, `.pp.${process.pid}.mjs`);
 writeFileSync(PTMP, readFileSync(join(ROOT, "games/modular-road-v3/modularRoadPropPhysics.js"), "utf8")
   .replace('from "../../v3/play/modularRoadVehicle.js"', `from "./${VTMP.split(/[\\/]/).pop()}"`));
 const { PropPhysics, PROP_PHYSICS, PHYSICS_PROP_TYPES } = await import(pathToFileURL(PTMP).href);
-const { CHASSIS } = await import(pathToFileURL(VTMP).href);
+const { CHASSIS, CHASSIS_HULL } = await import(pathToFileURL(VTMP).href);
 unlinkSync(PTMP); unlinkSync(VTMP);
 
 /** Flat ground at y=0, same shape as the deck BVH the game passes in. */
@@ -334,6 +334,57 @@ console.log("\n=== NOTHING BUT THE PANEL OPENS THE GATE ===");
   const through = driveBy({ x: P.width / 2 });
   check("...while the same line at panel height still opens it",
     through.peak > 0.8, `peak ${through.peak.toFixed(2)} rad`);
+}
+
+console.log("\n=== THE GATE OPENS WHEN THE BONNET ARRIVES, NOT THE MIDDLE ===");
+// The car was collided against the panel as a plan-view CIRCLE centred on
+// `car.pos` — the chassis ORIGIN, i.e. the middle of a 4.85 m car. The bonnet
+// sticks out ~2.5 m in front of the only point the gate was looking at, so the
+// panel could not react until the car's middle had nearly arrived and the nose
+// was already 1.2–1.8 m through it. That is what "I just drive through the gate"
+// was, and it survived the whole hull rework because the gate never used the
+// hull. tools/gateFootprintRepro.mjs has the before/after table.
+{
+  const noseAhead = CHASSIS_HULL.length / 2 + CHASSIS_HULL.offsetZ;
+
+  /** Drive +Z through a gate hinged at the origin; report where it first moved. */
+  const firstMove = ({ x, speed }) => {
+    const root = new THREE.Object3D();
+    const phys = new PropPhysics({ props: { instances: [{ id: "gate", root }] }, getGroundBvh: () => null });
+    phys.sync();
+    const g = phys.sims[0];
+    const body = {
+      pos: V(x, 0.5, -10), vel: V(0, 0, speed), quat: new THREE.Quaternion(),
+      getVelocityAtPoint(_p, o) { return o.copy(this.vel); },
+    };
+    for (let i = 0; i < 8 / DT && body.pos.z < 12; i++) {
+      body.pos.addScaledVector(body.vel, DT);
+      phys.tick(DT, { enabled: true, body });
+      // Panel plane is z = 0 while shut, so this is how far the NOSE is past it.
+      if (Math.abs(g.angle) > 0.01) return body.pos.z + noseAhead;
+    }
+    return null;
+  };
+
+  let worst = 0, all = true;
+  for (const x of [1.0, 2.2, 3.5, 4.2]) {
+    for (const speed of [8, 20, 40]) {
+      const over = firstMove({ x, speed });
+      if (over === null) { all = false; continue; }
+      worst = Math.max(worst, over);
+    }
+  }
+  check("the gate reacts at every crossing point and speed", all);
+  // One tick at 40 m/s is 0.33 m, so anything under that is as tight as a fixed
+  // step can be. It was 1.84 m.
+  check("the panel moves as the bonnet reaches it, not a car-length later",
+    worst < 0.35, `worst nose overlap ${worst.toFixed(2)} m (was 1.84)`);
+
+  // The footprint is a RECTANGLE, so a car alongside the gate — within a circle
+  // of its length but nowhere near the panel — still must not touch it.
+  const src = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadPropPhysics.js"), "utf8");
+  check("the contact test uses the hull footprint, not a radius",
+    /_carFootprint\(car, s\.angle\)/.test(src) && /CHASSIS_HULL\.length/.test(src));
 }
 
 console.log("\n=== THE COLLIDER OVERLAY DRAWS WHAT THE SIM USES ===");

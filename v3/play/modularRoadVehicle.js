@@ -20,6 +20,25 @@ export const GRAVITY = 9.81;
  *  so car behavior, lap times, and ghosts are framerate-independent. */
 export const FIXED_DT = 1 / 120;
 
+/**
+ * THE CORE BOX — mass distribution, deck contact, wall probes.
+ *
+ * NOT the car's silhouette, and deliberately so on both counts:
+ *
+ *  • INERTIA. `_setInertia` derives Ixx/Iyy/Izz from these. A solid box of the
+ *    full 4.85 × 2.10 × 1.26 body is the wrong inertia for a car anyway — real
+ *    mass sits low and central, not out at the wing and roofline — so this
+ *    smaller box is the better tensor as well as the tuned one.
+ *
+ *  • DECK CONTACT. `CHASSIS_CORNERS` are what stop the body sinking through the
+ *    road, and `height: 0.6` is not a round number: the box bottom sits at
+ *    −0.30, the tyre contact patch at −0.46, and SOLID.skin (0.08) plus the 7.8
+ *    cm of dynamic suspension closure measured by tools/archClearanceRepro.mjs
+ *    eats all but 2 mm of the gap. Lower the box AT ALL and the car starts being
+ *    shoved off every ramp it drives over.
+ *
+ * What the car HITS is a separate, bigger shape — see CHASSIS_HULL.
+ */
 export const CHASSIS = {
   width: 1.8,
   height: 0.6,
@@ -31,6 +50,56 @@ export const CHASSIS = {
   comZ: 0,
   /** Visual-only mesh lift along chassis-up (physics unchanged). */
   visualLift: 0,
+};
+
+/**
+ * THE SOLID HULL — the silhouette the car is collided as against walls, rails,
+ * guardrails, gate posts and props.
+ *
+ * Split from CHASSIS because the two shapes answer different questions and the
+ * single shared box could only ever satisfy one of them. The core box is pinned
+ * by ride height and by a tuned inertia tensor; the hull wants to be the actual
+ * car, because "the collider is nowhere near the bodywork" is a thing players
+ * see. Measured off the GLB in games/modular-road-v3/chassisModel.js, in
+ * chassis-local metres (the model sits at CHASSIS_GLB.offsetY −0.50):
+ *
+ *     body half-width  1.05      -> width  2.10   (excludes the aero, which is
+ *                                                  fragile trim, not structure)
+ *     model height     1.26      -> spans −0.50 .. +0.76
+ *     model length     4.85      -> spans −2.34 .. +2.51 (offsetZ −0.15)
+ *
+ * The one number that is NOT the model's: the hull BOTTOM stays at −0.30, the
+ * core box's floor, for exactly the ride-height reason above. So the hull is the
+ * car from the sills up, which is the half that hits things anyway.
+ */
+export const CHASSIS_HULL = {
+  width: 2.10,
+  height: 1.06,
+  length: 4.85,
+  /** Hull centre in chassis-local metres. Y puts the floor on −0.30 and the roof
+   *  on +0.76; Z re-centres the body's own asymmetric bounds. */
+  offsetY: 0.23,
+  offsetZ: 0.085,
+  /**
+   * Target spacing of the surface sample points (m).
+   *
+   * THE HULL IS SAMPLED, AND SAMPLE SPACING IS A COLLIDER SIZE LIMIT. Each
+   * sample is a sphere of `SOLID.skin`, so an obstacle thinner than the gap
+   * between samples falls straight between them and the car drives through it.
+   * The old fixed 26-point layout (corners + edge mids + face centres) put the
+   * front-face samples 0.90 m apart, and tools/postColliderRepro.mjs measured
+   * the consequence: 11 of 14 head-on approaches to a solid 0.22 m gate post
+   * passed clean through it. It was invisible until now only because everything
+   * else solid on a track — rails, tube shells, walls — is long enough that
+   * SOME sample always lands on it.
+   *
+   * 0.45 m is chosen against the thinnest thing a track actually has: a
+   * guardrail post at 0.32 m across reaches 0.16 + skin = 0.24 m, and catching
+   * it needs spacing < 2 × 0.24. Round primitives (posts, bollards, pylons) do
+   * not rely on this at all — they register as exact capsules instead, see
+   * Vehicle.setSolidCapsules.
+   */
+  sampleSpacing: 0.45,
 };
 
 /**
@@ -1288,10 +1357,31 @@ export const STUCK = {
    * into the same trap could loop forever without ever escalating.
    */
   releaseRate: 0.5,
+  /**
+   * Seconds after a nudge during which the car's own hop does NOT count as being
+   * free (unless it genuinely lands on something drivable).
+   *
+   * The decay above was meant to stop the nudge looping and does not quite: a
+   * 3.5 m/s hop keeps the car over `beachedSpeed` for longer than the decay
+   * takes to drain 0.8 s of timer, so the timer reached 0, `_stuckNudged`
+   * re-armed, and the car bounced on the same rail forever without ever
+   * escalating to the respawn. Measured on the flat-rail case in
+   * tools/guardrailStuckTest.mjs: peak stuckTime 0.81 s against a respawnAfter
+   * of 2.5, i.e. it never got a third of the way there.
+   *
+   * SIZED BY THE ESCALATION, not by the hop: ONE failed nudge must reach the
+   * respawn rather than buy itself another nudge, so `nudgeAfter + nudgeHold`
+   * has to clear `respawnAfter` (0.8 + 1.8 > 2.5). That is also comfortably
+   * longer than a 3.5 m/s hop's 0.71 s flight, so a nudge that DOES work still
+   * gets judged on where the car lands.
+   */
+  nudgeHold: 1.8,
 };
 
 /** Cached each rebuild — offset from box center to CoM in chassis-local space. */
 const _COM_OFFSET = new THREE.Vector3();
+/** Scratch for _worldToGeom. */
+const _invQuat = new THREE.Quaternion();
 /** Shared constants for composing instanced wheel matrices. */
 const _UNIT_SCALE = new THREE.Vector3(1, 1, 1);
 const _MIRROR_Y = new THREE.Matrix4().makeRotationY(Math.PI);
@@ -2299,11 +2389,21 @@ export class Vehicle {
       { pos: new THREE.Vector3(), dir: new THREE.Vector3(-1, 0, 0) },
     ];
     for (let i = 0; i < 8; i++) this.CHASSIS_CORNERS.push(new THREE.Vector3());
-    /** Oriented box samples for solids BVH — corners + edge mids + face centres. */
+    /** Surface samples on CHASSIS_HULL for the solids BVH. Rebuilt (and resized)
+     *  by _refreshLocalFrames — the count follows the hull and its spacing. */
     this.SOLID_BOX_SAMPLES = [];
-    for (let i = 0; i < 26; i++) this.SOLID_BOX_SAMPLES.push(new THREE.Vector3());
+    /** Exact analytic colliders — see setSolidCapsules. */
+    this.solidCapsules = [];
     this._sphC = new THREE.Vector3();
     this._sphN = new THREE.Vector3();
+    // Capsule solver scratch — see _closestHullToSegment.
+    this._capA = new THREE.Vector3();
+    this._capB = new THREE.Vector3();
+    this._capD = new THREE.Vector3();
+    this._capP = new THREE.Vector3();
+    this._capQ = new THREE.Vector3();
+    this._capT = new THREE.Vector3();
+    this._capN = new THREE.Vector3();
     this._sphV = new THREE.Vector3();
     this._sphF = new THREE.Vector3();
     this._refreshLocalFrames();
@@ -2351,6 +2451,8 @@ export class Vehicle {
     /** Seconds trapped against geometry while asking to move — see _updateStuck. */
     this._stuckTime = 0;
     this._stuckNudged = false;
+    /** Countdown that stops our own nudge reading as an escape — see STUCK.nudgeHold. */
+    this._stuckNudgeHold = 0;
     this._solidTouch = false;
     // Render-layer contact latch — see _updateScrapeLatch.
     this._scrapeHold = 0;
@@ -2442,6 +2544,13 @@ export class Vehicle {
     return out.copy(geomLocal).sub(_COM_OFFSET).applyQuaternion(body.quat).add(body.pos);
   }
 
+  /** Inverse of _geomToWorld — world point into chassis-box-local space. */
+  _worldToGeom(world, out) {
+    const body = this.body;
+    _invQuat.copy(body.quat).invert();
+    return out.copy(world).sub(body.pos).applyQuaternion(_invQuat).add(_COM_OFFSET);
+  }
+
   _refreshLocalFrames() {
     const hw = (this._hw = CHASSIS.width / 2);
     const hh = (this._hh = CHASSIS.height / 2);
@@ -2455,23 +2564,46 @@ export class Vehicle {
     this.PROBE_LOCALS[1].pos.set(0, 0, -hl);
     this.PROBE_LOCALS[2].pos.set(hw, 0, 0);
     this.PROBE_LOCALS[3].pos.set(-hw, 0, 0);
-    // Oriented chassis box — 8 corners, 12 edge midpoints, 6 face centres.
+    this._refreshHullSamples();
+  }
+
+  /**
+   * Lay out the solid-hull surface samples on a REGULAR GRID at the hull's own
+   * spacing, rather than the fixed 26 landmark points this used to be.
+   *
+   * The landmark layout tied sample density to the box's SIZE — a wider car got
+   * a coarser collider — which is the wrong dependency and is what let a gate
+   * post fit between the front-face samples. A grid decouples them: the hull can
+   * grow to the real silhouette and the collider gets FINER, not coarser.
+   *
+   * Surface only. Interior points can never be the closest point on the hull to
+   * anything outside it, so they cost queries and change nothing.
+   */
+  _refreshHullSamples() {
+    const H = CHASSIS_HULL;
+    const s = Math.max(0.05, H.sampleSpacing);
+    const nx = Math.max(2, Math.ceil(H.width / s) + 1);
+    const ny = Math.max(2, Math.ceil(H.height / s) + 1);
+    const nz = Math.max(2, Math.ceil(H.length / s) + 1);
     const sb = this.SOLID_BOX_SAMPLES;
-    for (let i = 0; i < 8; i++) sb[i].copy(c[i]);
-    const edgePairs = [
-      [0, 1], [2, 3], [4, 5], [6, 7],
-      [0, 2], [1, 3], [4, 6], [5, 7],
-      [0, 4], [1, 5], [2, 6], [3, 7],
-    ];
-    for (let i = 0; i < 12; i++) {
-      sb[8 + i].copy(c[edgePairs[i][0]]).add(c[edgePairs[i][1]]).multiplyScalar(0.5);
+    let n = 0;
+    const put = (x, y, z) => {
+      if (!sb[n]) sb[n] = new THREE.Vector3();
+      sb[n++].set(x, y + H.offsetY, z + H.offsetZ);
+    };
+    for (let i = 0; i < nx; i++) {
+      const x = -H.width / 2 + (H.width * i) / (nx - 1);
+      for (let j = 0; j < ny; j++) {
+        const y = -H.height / 2 + (H.height * j) / (ny - 1);
+        for (let k = 0; k < nz; k++) {
+          const onSurface = i === 0 || i === nx - 1 || j === 0 || j === ny - 1
+            || k === 0 || k === nz - 1;
+          if (!onSurface) continue;
+          put(x, y, -H.length / 2 + (H.length * k) / (nz - 1));
+        }
+      }
     }
-    sb[20].set(0, 0, hl); // front
-    sb[21].set(0, 0, -hl); // rear
-    sb[22].set(-hw, 0, 0); // left
-    sb[23].set(hw, 0, 0); // right
-    sb[24].set(0, hh, 0); // top
-    sb[25].set(0, -hh, 0); // bottom
+    sb.length = n;
   }
 
   /** Re-derive inertia + local frames + visual box after mass/size/CoM edits. */
@@ -2499,6 +2631,28 @@ export class Vehicle {
   setBvh(ground, solids) {
     this.groundBvh = ground || null;
     this.solidsBvh = solids || null;
+  }
+
+  /**
+   * Exact round colliders, resolved analytically instead of by sampling.
+   *
+   * WHY THIS EXISTS RATHER THAN "MORE SAMPLES". Sampling a triangle soup is a
+   * general answer with a size floor: whatever the spacing, something thinner
+   * slips through, and driving the spacing down is paid on every substep by
+   * every sample. A gate post is not an unknown shape — it is a cylinder whose
+   * radius and endpoints we already have — so it can be solved exactly, for a
+   * constant handful of operations and with NO thinness limit at all. A 2 cm
+   * bollard would register as reliably as a 2 m pillar.
+   *
+   * Capsules (round caps) rather than flat-capped cylinders: closest-point to a
+   * segment is exact for a capsule, and on a vertical post the difference is a
+   * rounded top nobody drives into.
+   *
+   * @param {Array<{a: THREE.Vector3, b: THREE.Vector3, radius: number}>} list
+   *        World-space axis endpoints. Static — re-set them on a collision bake.
+   */
+  setSolidCapsules(list) {
+    this.solidCapsules = list ? list.slice() : [];
   }
 
   /** Moving parkour solids — each mover rebakes its own BVH and pushes via surface velocity. */
@@ -2716,13 +2870,25 @@ export class Vehicle {
       this.body.vel.length() < STUCK.beachedSpeed;
 
     if (!trapped) {
+      // OUR OWN NUDGE IS NOT AN ESCAPE. It throws the car upward on purpose, so
+      // for the length of that hop it looks fast and airborne — i.e. exactly like
+      // a car that got free. Draining the timer on it is what let a car bounce on
+      // the same rail indefinitely: hop, timer decays to 0, `_stuckNudged`
+      // re-arms, hop again, and the respawn escalation is never reached.
+      // Landing on something drivable is the only thing that counts as free.
+      if (this._stuckNudgeHold > 0 && this.groundedCount < 3) {
+        this._stuckNudgeHold -= FIXED_DT;
+        this._stuckTime += FIXED_DT;
+        return;
+      }
       this._stuckTime = Math.max(0, this._stuckTime - STUCK.releaseRate * FIXED_DT);
-      if (this._stuckTime === 0) this._stuckNudged = false;
+      if (this._stuckTime === 0) { this._stuckNudged = false; this._stuckNudgeHold = 0; }
       return;
     }
     this._stuckTime += FIXED_DT;
     if (!this._stuckNudged && this._stuckTime >= STUCK.nudgeAfter) {
       this._stuckNudged = true;
+      this._stuckNudgeHold = STUCK.nudgeHold;
       // Up and along the car's own forward: lifts it off whatever it is balanced
       // on and gives it somewhere to go.
       this._stuckUp.set(0, 1, 0).applyQuaternion(this.body.quat);
@@ -2968,7 +3134,10 @@ export class Vehicle {
         );
       }
       if (this.walls.length) this._applyWallProbes();
-      if (SOLID.enabled && this.solidsBvh && this.solidsBvh.baked) this._resolveSolids(subDt);
+      // Gated on SOLID.enabled only — _resolveSolids picks its own channels. It
+      // used to require a baked solidsBvh here, which silently disabled the
+      // capsule colliders and the movers on any track with no static solids.
+      if (SOLID.enabled) this._resolveSolids(subDt);
       if (DECK.enabled && this.groundBvh && this.groundBvh.baked) this._applyDeckContact(subDt);
       this._applyChassisGroundContact();
       // After the tires (their contact normals are what both of these read) and
@@ -3821,7 +3990,9 @@ export class Vehicle {
   }
 
   _resolveSolids(dt) {
-    if (SOLID.enabled && this.solidsBvh?.baked) this._resolveSolidBvh(this.solidsBvh, null, dt);
+    if (!SOLID.enabled) return;
+    if (this.solidsBvh?.baked) this._resolveSolidBvh(this.solidsBvh, null, dt);
+    if (this.solidCapsules.length) this._resolveSolidCapsules(dt);
     for (const mover of this.dynamicMovers) {
       if (mover.bvh?.baked) {
         this._resolveSolidBvh(mover.bvh, (p, out) => mover.velocityAt(p, out), dt);
@@ -3830,15 +4001,108 @@ export class Vehicle {
   }
 
   /**
-   * Resolve the chassis box against one BVH by PROJECTION — see the SOLID block
+   * Resolve the hull against the exact capsule colliders — same aggregate-contact
+   * shape as the BVH path, so response, friction, spin and sparks are identical;
+   * only the DETECTION is analytic instead of sampled.
+   *
+   * Its own aggregate rather than sharing the BVH's, for the same reason each
+   * mover gets one: two independent surfaces can disagree about "out", and
+   * averaging a rail normal with a post normal produces a direction that is
+   * neither.
+   */
+  _resolveSolidCapsules(dt = FIXED_DT / this.SUBSTEPS) {
+    const skin = SOLID.skin;
+    let deepest = 0;
+    let hits = 0;
+    this._solidN.set(0, 0, 0);
+    this._solidPoint.set(0, 0, 0);
+
+    for (const cap of this.solidCapsules) {
+      const d = this._closestHullToSegment(cap.a, cap.b, this._capQ, this._capN);
+      const pen = cap.radius + skin - d;
+      if (pen <= 0) continue;
+      hits++;
+      // _capN already points out of the capsule, in world space.
+      this._solidN.addScaledVector(this._capN, pen);
+      this._geomToWorld(this._capQ, this._sphC);
+      this._solidPoint.add(this._sphC);
+      if (pen > deepest) deepest = pen;
+    }
+    if (!hits) return;
+    this._solidPoint.multiplyScalar(1 / hits);
+    if (this._solidN.lengthSq() < 1e-10) return;
+    this._solidN.normalize();
+    this._applySolidContact(deepest, null, dt);
+  }
+
+  /**
+   * Closest point on CHASSIS_HULL to a world-space segment.
+   *
+   * Solved by ALTERNATING PROJECTION in hull-local space: clamp the current
+   * segment point into the box, project that back onto the segment, repeat. Both
+   * sets are convex so this converges monotonically, and for a vertical post
+   * against a roughly-upright car it is exact within a couple of iterations —
+   * the segment parameter barely moves after the first.
+   *
+   * @param {THREE.Vector3} aW segment start (world)
+   * @param {THREE.Vector3} bW segment end (world)
+   * @param {THREE.Vector3} outQ receives the hull point, in hull-local space
+   * @param {THREE.Vector3} outN receives the outward normal, in WORLD space
+   * @returns {number} distance from the hull surface point to the segment
+   */
+  _closestHullToSegment(aW, bW, outQ, outN) {
+    const H = CHASSIS_HULL;
+    this._worldToGeom(aW, this._capA);
+    this._worldToGeom(bW, this._capB);
+    const dir = this._capD.subVectors(this._capB, this._capA);
+    const dd = dir.lengthSq();
+    const hw = H.width / 2, hh = H.height / 2, hl = H.length / 2;
+    const loY = H.offsetY - hh, hiY = H.offsetY + hh;
+    const loZ = H.offsetZ - hl, hiZ = H.offsetZ + hl;
+    const cl = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+    let t = 0.5;
+    for (let i = 0; i < 6; i++) {
+      this._capP.copy(this._capA).addScaledVector(dir, t);
+      outQ.set(cl(this._capP.x, -hw, hw), cl(this._capP.y, loY, hiY), cl(this._capP.z, loZ, hiZ));
+      if (dd < 1e-9) break;
+      const next = cl(this._capT.subVectors(outQ, this._capA).dot(dir) / dd, 0, 1);
+      if (Math.abs(next - t) < 1e-5) { t = next; break; }
+      t = next;
+    }
+    this._capP.copy(this._capA).addScaledVector(dir, t);
+    outQ.set(cl(this._capP.x, -hw, hw), cl(this._capP.y, loY, hiY), cl(this._capP.z, loZ, hiZ));
+
+    const dist = outQ.distanceTo(this._capP);
+    if (dist > 1e-6) {
+      outN.subVectors(outQ, this._capP).multiplyScalar(1 / dist);
+    } else {
+      // The axis is INSIDE the hull — the car has swallowed the post, so there is
+      // no "away from it" to read off the geometry. Escape through the nearest
+      // face instead, which is the shallowest way out and the only choice that
+      // cannot fling the car across the track.
+      const dx = hw - Math.abs(this._capP.x);
+      const dy = Math.min(this._capP.y - loY, hiY - this._capP.y);
+      const dz = Math.min(this._capP.z - loZ, hiZ - this._capP.z);
+      if (dx <= dy && dx <= dz) outN.set(this._capP.x >= 0 ? 1 : -1, 0, 0);
+      else if (dy <= dz) outN.set(0, this._capP.y >= H.offsetY ? 1 : -1, 0);
+      else outN.set(0, 0, this._capP.z >= H.offsetZ ? 1 : -1);
+    }
+    outN.applyQuaternion(this.body.quat);
+    return dist;
+  }
+
+  /**
+   * Resolve CHASSIS_HULL against one BVH by PROJECTION — see the SOLID block
    * for why this replaced penetration springs.
    *
    * Two passes. First gather every overlapping sample into one aggregate
    * contact: a penetration-weighted mean normal, the deepest overlap, and the
    * mean contact point (for the torque). Then apply the correction ONCE.
-   * Resolving per-sample is what let 26 springs stack into a launcher; one
+   * Resolving per-sample is what let the samples stack into a launcher; one
    * aggregate correction cannot exceed the actual overlap no matter how many
-   * samples agree.
+   * agree — which matters more now than it did, since the hull carries ~200
+   * samples rather than the 26 this was written against.
    */
   _resolveSolidBvh(bvh, surfaceVelFn, dt = FIXED_DT / this.SUBSTEPS) {
     const body = this.body;
@@ -3887,7 +4151,6 @@ export class Vehicle {
       }
       return;
     }
-    this._solidTouch = true; // feeds the stuck detector in tick()
     this._solidPoint.multiplyScalar(1 / hits);
 
     // Opposing normals cancel here, which is CORRECT: wedged between two
@@ -3896,6 +4159,22 @@ export class Vehicle {
     // leave the car free to drive itself out.
     if (this._solidN.lengthSq() < 1e-10) return;
     this._solidN.normalize();
+    this._applySolidContact(deepest, surfaceVelFn, dt);
+  }
+
+  /**
+   * Apply ONE aggregate solid contact: push out, kill inward speed, scrape, spin.
+   *
+   * Split out so the sampled (BVH) and analytic (capsule) detectors share it
+   * verbatim. They must: a post that responded even slightly differently from a
+   * wall would feel like a different material, and the sparks/scrape/stuck
+   * signals all hang off this one path.
+   *
+   * Expects `this._solidN` normalised and `this._solidPoint` averaged.
+   */
+  _applySolidContact(deepest, surfaceVelFn, dt) {
+    const body = this.body;
+    this._solidTouch = true; // feeds the stuck detector in tick()
 
     // Sampled AFTER the normal is resolved and normalised, but BEFORE the push
     // below cancels the inward velocity — a frame later it always reads ~0.
