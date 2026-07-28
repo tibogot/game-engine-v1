@@ -442,6 +442,30 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     onAddPortal: () => { portals.addDoor(); paletteUi?.refreshStatus?.(); },
     onPickPiece: () => clearBrush({ silent: true }),
     onEdgesChange: () => bakeCollision(),
+    onLoadDemo: () => {
+      // Seat the showcase in the sky at the current build height — same rule as
+      // New chain (N), so the demo never drops onto the terrain.
+      const s = resolveSpawn();
+      const x = s.x;
+      const z = s.z;
+      const y = app.getWorldHeight(x, z) + buildHeight;
+      builder.loadDemo({ startPos: new THREE.Vector3(x, y, z), yaw: s.yaw });
+      if (controls.target) {
+        controls.target.set(x, y, z);
+        controls.update?.();
+      }
+    },
+    onLoadCircuit: () => {
+      const s = resolveSpawn();
+      const x = s.x;
+      const z = s.z;
+      const y = app.getWorldHeight(x, z) + buildHeight;
+      builder.loadBigCircuit({ startPos: new THREE.Vector3(x, y, z), yaw: s.yaw });
+      if (controls.target) {
+        controls.target.set(x, y, z);
+        controls.update?.();
+      }
+    },
   });
 
   // 4) ── THE CAR ────────────────────────────────────────────────────────────
@@ -1279,6 +1303,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // DEBUG ORBIT CAM. None of these collide with driving: the drive keymap is
       // WASD / arrows / QE / space / shift / ctrl only (see the input block).
       else if (code === "keyc") setDebugCam(!debugCamOn);
+      else if (code === "keyh") {
+        // Manual headlight toggle — same as the Lights panel: takes over from auto.
+        autoHeadlights = false;
+        setHeadlights(!headlightsOn);
+        devPanel?.refresh();
+      }
       else if (debugCamActive()) {
         if (code === "keyv") debugCam.toggleFrame();
         else if (code === "keyx") debugCam.recenter();
@@ -1959,6 +1989,7 @@ ${e.message}`);
       setHeadlights,
       getHeadlights: () => headlightsOn,
       setAutoHeadlights: (on) => { autoHeadlights = !!on; updateAutoHeadlights(); },
+      getAutoHeadlights: () => autoHeadlights,
       // Re-push HEADLIGHTS params onto the rig after a slider moves.
       refreshLights: () => vehicle.applyHeadlightParams(),
       // glowPropParams is shared by every placed glow prop; this pushes the new

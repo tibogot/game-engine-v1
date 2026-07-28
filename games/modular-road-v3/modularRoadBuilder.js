@@ -28,6 +28,32 @@ const _A_V2 = new THREE.Vector3();
 const _UNIT_SCALE = new THREE.Vector3(1, 1, 1);
 const _isIdentityQuat = (q) => Math.abs(q.w) > 0.9999999;
 
+/** Ballistic landing for demo jumps — same math as GapPreview.update().
+ *  Connector Z column is −travel, so launch dir is the negated Z axis. */
+function _ballisticLanding(connector, speed, g, landingDrop) {
+  const e = connector.elements;
+  const exit = new THREE.Vector3().setFromMatrixPosition(connector);
+  const dir = new THREE.Vector3(-e[8], -e[9], -e[10]).normalize();
+  const v0 = dir.clone().multiplyScalar(speed);
+  const targetY = exit.y - landingDrop;
+  const dt = 1 / 60;
+  let prevY = exit.y;
+  for (let t = dt; t < 12; t += dt) {
+    const y = exit.y + v0.y * t - 0.5 * g * t * t;
+    if (prevY > targetY && y <= targetY) {
+      const x = exit.x + v0.x * t;
+      const z = exit.z + v0.z * t;
+      // Match beginNewChain yaw: travel = R_y(yaw)·(0,0,-1) = (−sin, 0, −cos).
+      return {
+        pos: new THREE.Vector3(x, targetY, z),
+        yaw: Math.atan2(-dir.x, -dir.z),
+      };
+    }
+    prevY = y;
+  }
+  return null;
+}
+
 /**
  * Auto-chain modular road builder. Pieces always snap onto the track's current
  * open exit connector — no grid. Each placed entry stores the piece id and a
@@ -1446,43 +1472,40 @@ export class ModularRoadBuilder {
     this._notify();
   }
 
-  /** Load a few pieces so the page isn't empty on first open. */
-  loadDemo() {
-    this.clear();
-    const demo = ["straight", "curve", "slope", "straight", "curve"];
-    const savedDir = pieceParams.curveDir;
-    for (const id of demo) {
-      this.activePieceId = id;
-      this.place();
-    }
-    pieceParams.curveDir = savedDir;
-    this.activePieceId = PIECE_CATALOG[0].id;
-    this.refreshGhost();
-    this._notify();
-  }
-
   /**
-   * Load a large, coherent CLOSED circuit — a flowing flat lap that returns
-   * exactly onto its own start line. The design rules that make it work:
+   * Load a short sky-stunt showcase — open chain (not a closed lap), floating
+   * above the terrain. Uses only well-behaved kit pieces: flat corners, a climb,
+   * one jump with a SECOND chain for the landing (jump→gap in one chain inherits
+   * the ramp pitch and climbs forever — the gap preview / jump-debug track both
+   * use a fresh level chain for the far side), a tunnel, a narrow, then finish.
+   * Avoids loops / tubes / wall-rides / twists — those need hand-tuned placement.
    *
-   *  - **Canonical pieces only.** Every corner is a true 90° / 45° curve at a
-   *    fixed radius — no bespoke angles — so each piece matches a preset and
-   *    stays GPU-instanceable. This relies on the kit's exact connector tangents
-   *    (see applyEndTangents): a 90° curve really does turn 90°, so four of them
-   *    sum to 360° and the loop closes on its labelled angles.
-   *
-   *  - **Exact closure via 180° rotational symmetry.** The lap is two identical
-   *    halves; each turns exactly 180° (two 90° corners; the chicane's opposite
-   *    45°s net 0°), so placing the half twice turns a full 360° and lands back
-   *    on the start — the position closes automatically, no hand-tuned lengths.
-   *
-   *  - **Dead flat, so it can never go underground.** Banked corners would sink
-   *    their low edge below ground at deck level, so corners stay flat. Variety
-   *    comes from the sweepers, a chicane, a tunnel, and the game lines.
-   *    (Elevation belongs on the open, non-closed chains the free demo builds.)
+   * @param {{ startPos?: THREE.Vector3, yaw?: number, refSpeed?: number }} [opts]
+   *        `startPos` seats the anchor in the sky (terrain + buildHeight from the
+   *        game). Without it the track starts at the origin like the old demo.
+   *        `refSpeed` is the approach speed the jump landing is sized for —
+   *        keep it BELOW top speed; after a climb you rarely arrive at 40+.
    */
-  loadBigCircuit() {
+  loadDemo(opts = {}) {
     this.clear();
+    // 28 m/s ≈ 100 km/h: reachable after the climb. A long platform then covers
+    // overshoot up to ~40 m/s so a hot approach still lands on deck.
+    const { startPos = null, yaw = 0, refSpeed = 28 } = opts;
+    if (startPos) {
+      this.freePlaceMode = true;
+      this._gizmoTarget = "chain";
+      this.ghostDetached = false;
+      this.freeYaw = this.snapYaw(yaw);
+      this._freeQuat.setFromAxisAngle(_YUP, this.freeYaw);
+      this._freePos.copy(startPos);
+      this.snapPos(this._freePos);
+      const anchor = this._anchorFromFree();
+      this.chains = [{ id: 0, anchor }];
+      this.chainSeq = 1;
+      this.activeChainId = 0;
+      this.currentConnector = anchor.clone();
+    }
+
     const saved = { ...pieceParams };
     const put = (id, overrides = {}) => {
       Object.assign(pieceParams, overrides);
@@ -1490,32 +1513,142 @@ export class ModularRoadBuilder {
       this.place();
     };
 
-    const R = 34; // sweeping corner radius (m)
-    const Rc = 22; // tighter chicane radius (m)
+    // Wide sweeping corners — readable at speed, easy to hold.
+    const R = 28;
+    const Rtight = 20;
 
-    // One half-lap: turns exactly 180° (two 90° corners; the chicane nets 0°)
-    // and stays perfectly flat. `gameId` opens the half with its game line.
-    const half = (gameId) => {
-      put(gameId, { gameLineLength: 22 }); // start / finish line on the straight
-      put("straight", { straightLength: 36 });
-      put("straight", { straightLength: 30 });
-      put("curve", { curveRadius: R, curveAngle: 90, curveDir: 1 }); // corner (90°)
-      put("straight", { straightLength: 28 });
-      // Chicane: equal-and-opposite curves → an S-kink that nets exactly 0°.
-      put("curve", { curveRadius: Rc, curveAngle: 45, curveDir: -1 });
-      put("curve", { curveRadius: Rc, curveAngle: 45, curveDir: 1 });
-      put("straight", { straightLength: 24 });
-      put("checkpoint", { gameLineLength: 16 }); // mid-half checkpoint
-      put("tunnel", { straightLength: 30 }); // enclosed section
-      put("straight", { straightLength: 28 });
-      put("curve", { curveRadius: R, curveAngle: 90, curveDir: 1 }); // corner (90°)
-    };
+    // ── Launch plateau ──────────────────────────────────────────────────────
+    put("start", { gameLineLength: 18 });
+    put("straight", { straightLength: 28 });
+    put("curve", { curveRadius: R, curveAngle: 90, curveDir: 1 });
+    put("straight", { straightLength: 22 });
 
-    half("start"); // first half opens on the start line
-    half("finish"); // second half opens on the finish line, then closes onto start
+    // ── Climb into the sky a bit more ───────────────────────────────────────
+    put("slope", { slopeLength: 30, slopeRise: 8 });
+    put("straight", { straightLength: 18 });
+    put("checkpoint", { gameLineLength: 16 });
+    put("curve", { curveRadius: R, curveAngle: 90, curveDir: 1 });
+
+    // ── Signature jump → empty air → fresh landing chain ────────────────────
+    // Same pattern as the gap preview / jump-debug track: the takeoff ends this
+    // chain; the far side is a NEW level chain seated on the ballistic landing.
+    put("straight", { straightLength: 30 }); // longer run-up so you can build speed
+    put("jump", { jumpLength: 18, jumpAngle: 12 });
+    const landNear = _ballisticLanding(this.currentConnector, refSpeed, 9.81, 0);
+    const landFar = _ballisticLanding(this.currentConnector, Math.max(refSpeed + 12, 40), 9.81, 0);
+    if (landNear) {
+      const snapWas = this.snapEnabled;
+      this.snapEnabled = false; // keep the ballistic point exact (grid would nudge it)
+      this.beginNewChain(landNear.pos, landNear.yaw);
+      this.snapEnabled = snapWas;
+      this.deselectPlacement?.();
+      // Platform long enough that a faster jump still lands on it, not past it.
+      const span = landFar
+        ? Math.hypot(landFar.pos.x - landNear.pos.x, landFar.pos.z - landNear.pos.z)
+        : 36;
+      put("platform", { platformLength: Math.max(36, span + 8), platformWidth: 40 });
+    } else {
+      put("platform", { platformLength: 40, platformWidth: 40 });
+    }
+    put("straight", { straightLength: 22 });
+
+    // ── Flow section ────────────────────────────────────────────────────────
+    put("scurve", { curveRadius: 18, curveAngle: 40, curveDir: 1 });
+    put("tunnel", { straightLength: 28 });
+    put("curve", { curveRadius: R, curveAngle: 90, curveDir: -1 });
+
+    // ── Precision + exit ────────────────────────────────────────────────────
+    put("straight", { straightLength: 16 });
+    put("narrow", { straightLength: 22, narrowWidth: 8 });
+    put("curve", { curveRadius: Rtight, curveAngle: 45, curveDir: 1 });
+    put("curve", { curveRadius: Rtight, curveAngle: 45, curveDir: 1 });
+    put("crest", { slopeLength: 24, slopeRise: 4 });
+    put("straight", { straightLength: 24 });
+    put("finish", { gameLineLength: 18 });
 
     Object.assign(pieceParams, saved);
     this.activePieceId = PIECE_CATALOG[0].id;
+    this.deselectPlacement?.();
+    this.refreshGhost();
+    this._notify();
+  }
+
+  /**
+   * Load a large CLOSED sky circuit — floats at `startPos`, returns onto its own
+   * start line. Only uses pieces that appear as tiles in the left palette
+   * (Straight / Turns / Tubes / Slopes / Game) — no kit orphans like twist.
+   *
+   * Closure rules:
+   *  - **180° rotational symmetry.** Two identical halves, each turning exactly
+   *    180° (two 90° corners; S-curve nets 0°).
+   *  - **Dead flat ends.** Hill crest rises mid-piece but returns to level.
+   *
+   * @param {{ startPos?: THREE.Vector3, yaw?: number }} [opts]
+   */
+  loadBigCircuit(opts = {}) {
+    this.clear();
+    const { startPos = null, yaw = 0 } = opts;
+    if (startPos) {
+      this.freePlaceMode = true;
+      this._gizmoTarget = "chain";
+      this.ghostDetached = false;
+      this.freeYaw = this.snapYaw(yaw);
+      this._freeQuat.setFromAxisAngle(_YUP, this.freeYaw);
+      this._freePos.copy(startPos);
+      this.snapPos(this._freePos);
+      const anchor = this._anchorFromFree();
+      this.chains = [{ id: 0, anchor }];
+      this.chainSeq = 1;
+      this.activeChainId = 0;
+      this.currentConnector = anchor.clone();
+    }
+
+    const saved = { ...pieceParams };
+    const put = (id, overrides = {}) => {
+      Object.assign(pieceParams, overrides);
+      this.activePieceId = id;
+      this.place();
+    };
+
+    // Radii / lengths match CATEGORY_PRESETS tiles (Tube Turn, Arch Turn, etc.).
+    const R = 26;
+    const tubeR = 8;
+    const chanR = 4;
+
+    // One half-lap: turns exactly 180° (two 90° corners; S-curve nets 0°).
+    const half = (gameId) => {
+      put(gameId, { gameLineLength: 22 });
+      put("straight", { straightLength: 32 }); // Straight → Long
+
+      // Tubes → Tube Long → Tube Turn
+      put("tube", { straightLength: 44, tubeRadius: tubeR, tubeWall: 0.6 });
+      put("tube_curve", {
+        curveRadius: R, curveAngle: 90, curveDir: 1,
+        tubeRadius: tubeR, tubeWall: 0.6,
+      }); // 90°
+
+      put("channel", { straightLength: 26, channelRadius: chanR }); // Tubes → Half-pipe
+      put("scurve", { curveRadius: 20, curveAngle: 38, curveDir: 1 }); // Turns → S Right
+      put("checkpoint", { gameLineLength: 16 });
+
+      // Tubes → Arch Tunnel, another Tube, then Arch Turn
+      put("tunnel", { straightLength: 26, tunnelHeight: 7 });
+      put("tube", { straightLength: 26, tubeRadius: tubeR, tubeWall: 0.6 });
+      put("straight", { straightLength: 14 }); // Straight → Short
+      put("tunnel_curve", {
+        curveRadius: R, curveAngle: 90, curveDir: 1, tunnelHeight: 7,
+      }); // 90°
+
+      put("narrow", { straightLength: 24, narrowWidth: 8 }); // Straight → Narrow
+      put("crest", { slopeLength: 32, slopeRise: 8 }); // Slopes → Hill
+    };
+
+    half("start");
+    half("finish");
+
+    Object.assign(pieceParams, saved);
+    this.activePieceId = PIECE_CATALOG[0].id;
+    this.deselectPlacement?.();
     this.refreshGhost();
     this._notify();
   }
@@ -2178,6 +2311,10 @@ export function buildRoadPaletteUI(builder, opts = {}) {
      *  brush, so the game can put a live cursor brush down. */
     onPickPiece = null,
     onEdgesChange = null,
+    /** Optional: seat the demo in the sky (terrain + buildHeight). */
+    onLoadDemo = null,
+    /** Optional: seat the big circuit in the sky. */
+    onLoadCircuit = null,
   } = opts;
   const catList = document.getElementById("category-list");
   const grid = document.getElementById("piece-grid");
@@ -2449,11 +2586,13 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     refreshStatus();
   });
   document.getElementById("road-demo")?.addEventListener("click", () => {
-    builder.loadDemo();
+    if (onLoadDemo) onLoadDemo();
+    else builder.loadDemo();
     refreshStatus();
   });
   document.getElementById("road-circuit")?.addEventListener("click", () => {
-    builder.loadBigCircuit();
+    if (onLoadCircuit) onLoadCircuit();
+    else builder.loadBigCircuit();
     refreshStatus();
   });
   document.getElementById("road-clear")?.addEventListener("click", () => {

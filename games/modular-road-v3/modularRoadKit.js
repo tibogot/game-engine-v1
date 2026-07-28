@@ -1811,10 +1811,13 @@ function _archPart(fr, hw, height) {
 function _chevronPart(fr, hw, length, width) {
   const part = _geoPart();
   const n = fr.up.clone().normalize();
-  const tip = _deckPt(fr, 0, -length);
+  // Tip points ALONG travel (tangent). It used to sit at −length, which aimed
+  // the chevron back up the track.
+  const tip = _deckPt(fr, 0, length);
   const l = _deckPt(fr, -width, 0);
   const r = _deckPt(fr, width, 0);
-  _pushTri(part, tip, l, r, n, _DECO_YELLOW, _DECO_YELLOW, _DECO_YELLOW);
+  // Winding keeps the normal = +up after flipping the tip forward.
+  _pushTri(part, tip, r, l, n, _DECO_YELLOW, _DECO_YELLOW, _DECO_YELLOW);
   return part;
 }
 

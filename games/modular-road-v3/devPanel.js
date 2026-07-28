@@ -171,7 +171,8 @@ export function createRoadDevPanel({ app, game, params }) {
             </span>
             <span class="hint-drive">
               <b>B</b> build · <b>WASD</b>/<b>Arrows</b> drive ·
-              <b>Space</b> handbrake · <b>R</b> respawn · <b>C</b> debug cam
+              <b>Space</b> handbrake · <b>R</b> respawn · <b>H</b> headlights ·
+              <b>C</b> debug cam
               <br>in air: <b>Shift</b>/<b>Ctrl</b> flip · <b>A/D</b> roll · <b>Q/E</b> spin
             </span>
           </div>
@@ -1025,6 +1026,7 @@ export function createRoadDevPanel({ app, game, params }) {
             <span class="prop-label">Headlights</span>
             <div class="prop-value">
               <button class="prop-toggle" id="dv-lights" type="button" aria-label="Headlights">${CHECK_SVG}</button>
+              <span class="prop-num">H</span>
             </div>
           </div>
           <div class="prop-row">
@@ -2038,6 +2040,7 @@ export function createRoadDevPanel({ app, game, params }) {
     // Auto mode flips the headlights from outside the panel — keep the toggle
     // showing the truth rather than the last thing that was clicked.
     lightsToggle.set(game.getHeadlights());
+    autoToggle.set(game.getAutoHeadlights?.() ?? true);
     // The wheel and chassis GLBs finish loading after the panel is built and
     // call refresh().
     syncWheelBtn();

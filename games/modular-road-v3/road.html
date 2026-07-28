@@ -16,20 +16,16 @@
     <base href="/v3/" />
     <title>Modular Road (v3)</title>
     <link rel="stylesheet" href="./styles/editor.css" />
+    <!-- Oxanium: geometric game HUD face — sharp digits without the GTA condensed
+         look. Absolute Google URLs so <base href="/v3/"> can't rewrite them. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <!-- palette.css is imported from roadGame.js, NOT linked here: <base> is
          /v3/ so a relative href would resolve wrong, and an absolute one isn't
          bundled by Vite (it would 404 in a production build). -->
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <style>
-      /* Road-game HUD typeface only — absolute path because <base> is /v3/. */
-      @font-face {
-        font-family: "PP Neue Montreal";
-        src: url("/games/modular-road-v3/fonts/PP%20Neue%20Montreal-Variable.ttf") format("truetype");
-        font-weight: 100 900;
-        font-style: normal;
-        font-display: swap;
-      }
-
       /* Hide the editor chrome — the game shows only the viewport. */
       #toolbar,
       #right-panel { display: none !important; }
@@ -68,14 +64,14 @@
       /* ── RACE HUD (drive mode) ─────────────────────────────────────────── */
       #race-hud {
         position: fixed; inset: 0; z-index: 40; pointer-events: none;
-        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        font-family: "Oxanium", system-ui, sans-serif;
+        font-weight: 600;
         display: none;
       }
       #race-hud.on { display: block; }
       #race-clock {
         position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
         text-align: center; color: #fff;
-        font-family: "PP Neue Montreal", system-ui, sans-serif;
       }
       #race-time {
         font-variant-numeric: tabular-nums; font-weight: 700;
@@ -108,7 +104,6 @@
       #race-speed {
         position: absolute; left: 22px; bottom: 20px; width: 208px; height: 132px;
         color: #fff; pointer-events: none;
-        font-family: "PP Neue Montreal", system-ui, sans-serif;
       }
       #race-speed svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
       /* The sweeping value arc. stroke-dashoffset is the only thing animated per
