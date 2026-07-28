@@ -451,7 +451,9 @@ console.log("\n=== SAVED WITH THE TRACK, AND OUT OF THE COLLISION BAKE ===");
     const entry = catalogEntry(id);
     check(`"${id}" is in PROP_CATALOG, so it saves/loads with the track`, !!entry);
     const collision = /collision: "([a-z]+)"/.exec(entry ?? "")?.[1];
-    const simulated = { cone: [], gate: ["panel", "stripe"] }[id] ?? [];
+    // The gate's stripe used to be a second mesh and needed excluding too; it is
+    // painted into the panel's texture now, so the panel is all that moves.
+    const simulated = { cone: [], gate: ["panel"] }[id] ?? [];
     const excluded = collision === "none"
       || simulated.every((m) => new RegExp(`${m}\\.userData\\.noCollide = true`).test(entry ?? ""));
     check(`"${id}" keeps its SIMULATED geometry out of the static bake`,
@@ -463,6 +465,20 @@ console.log("\n=== SAVED WITH THE TRACK, AND OUT OF THE COLLISION BAKE ===");
   // gate. It is only bakeable because it is a cylinder on the rotation axis.
   check("the gate's hinge post IS a static solid",
     /collision: "solid"/.test(catalogEntry("gate") ?? ""));
+
+  // NO COPLANAR DECAL GEOMETRY. A second mesh laid on a flat face z-fights the
+  // moment depth precision runs out, which on a track this size is a few tens of
+  // metres away — the gate's white band shimmered for exactly this reason. Bands
+  // and stripes are painted into a shared texture instead, which also keeps each
+  // prop to one draw.
+  for (const [id, thing] of [["gate", "hazard band"], ["pole", "hazard rings"]]) {
+    const entry = catalogEntry(id) ?? "";
+    check(`the ${id}'s ${thing} is a texture, not stacked geometry`,
+      /Texture\(\)/.test(entry), "coplanar decal meshes always z-fight eventually");
+  }
+  check("...and those textures are built once for the whole catalog, not per prop",
+    /if \(_gateStripeTex\) return _gateStripeTex;/.test(propsSrc)
+    && /if \(_poleBandTex\) return _poleBandTex;/.test(propsSrc));
   const io = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadTrackIO.js"), "utf8");
   check("track export includes props", /props:\s*props\.exportInstances\(\)/.test(io));
   check("track import restores them", /importInstances\(data\.props\)/.test(io));

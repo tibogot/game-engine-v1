@@ -9,8 +9,9 @@ import {
   GATE_POST_RADIUS,
   GATE_POST_HEIGHT,
 } from "./modularRoadPropPhysics.js";
+import { SCENERY_CATALOG, makeSceneryProp } from "./modularRoadScenery.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { materialEmissive } from "three/tsl";
+import { materialEmissive, materialColor } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { computeFrames, buildProfile, buildTunnelGeometry } from "./modularRoadKit.js";
 import {
@@ -358,11 +359,83 @@ function mat(color, opts = {}) {
     m.opacity = opts.opacity;
     m.depthWrite = false; // translucent decal tint — never occlude the deck
   }
+  if (opts.map) m.map = opts.map;
+  // KEEPS THE FOG LIVE. three's WebGPU backend only re-uploads a render object's
+  // uniforms when its material carries a NODE property — scene-level uniforms
+  // behind `scene.fogNode` are not tracked — so a plain-node material on a prop
+  // that never moves would keep whatever fog it first rendered with forever,
+  // while the track around it updates. Props are exactly that: static world
+  // geometry. `materialColor` leaves `.color` (and `.map`, which it multiplies
+  // in) authoritative, so this changes nothing about how the prop looks.
+  m.colorNode = materialColor;
   if (opts.bloom ?? emissiveIntensity > 1) applyPropBloom(m);
   return m;
 }
 
-/** @type {{id:string,label:string,collision:string,make:()=>THREE.Object3D}[]} */
+/**
+ * The swing gate's red panel with its white hazard band, as a 1-D texture.
+ *
+ * Built once and shared by every gate ever placed: it is 4×64 pixels, so the
+ * cost of caching it is nil next to handing each gate its own. `v` runs up the
+ * panel on a BoxGeometry's ±Z faces, which is exactly the axis the band needs.
+ */
+let _gateStripeTex = null;
+function gateStripeTexture() {
+  if (_gateStripeTex) return _gateStripeTex;
+  const H = 64;
+  const band = Math.round((0.26 / GATE_HEIGHT) * H); // same 0.26 m band as before
+  const data = new Uint8Array(H * 4);
+  for (let i = 0; i < H; i++) {
+    // v=0 is the BOTTOM of the face, so the band lands mid-panel either way.
+    const inBand = Math.abs(i - H / 2) < band / 2;
+    const c = inBand ? [244, 244, 244] : [226, 59, 46];
+    data[i * 4] = c[0]; data[i * 4 + 1] = c[1]; data[i * 4 + 2] = c[2]; data[i * 4 + 3] = 255;
+  }
+  // 1 px wide: the band only varies vertically, and the GPU samples a 1×64 the
+  // same as a 4×64 for a third of the memory.
+  _gateStripeTex = new THREE.DataTexture(data, 1, H);
+  _gateStripeTex.colorSpace = THREE.SRGBColorSpace;
+  _gateStripeTex.wrapS = _gateStripeTex.wrapT = THREE.ClampToEdgeWrapping;
+  _gateStripeTex.needsUpdate = true;
+  return _gateStripeTex;
+}
+
+/**
+ * Diagonal-free hazard banding for the pole — yellow/black rings up its length.
+ *
+ * Same shared-and-painted approach as the gate stripe: stacking real ring meshes
+ * would be a draw call each AND put every ring's cap coplanar with the shaft.
+ */
+let _poleBandTex = null;
+function poleBandTexture() {
+  const H = 128;
+  if (_poleBandTex) return _poleBandTex;
+  const data = new Uint8Array(H * 4);
+  for (let i = 0; i < H; i++) {
+    const dark = Math.floor(i / 8) % 2 === 0;
+    const c = dark ? [26, 26, 28] : [232, 176, 32];
+    data[i * 4] = c[0]; data[i * 4 + 1] = c[1]; data[i * 4 + 2] = c[2]; data[i * 4 + 3] = 255;
+  }
+  _poleBandTex = new THREE.DataTexture(data, 1, H);
+  _poleBandTex.colorSpace = THREE.SRGBColorSpace;
+  _poleBandTex.wrapS = _poleBandTex.wrapT = THREE.ClampToEdgeWrapping;
+  _poleBandTex.needsUpdate = true;
+  return _poleBandTex;
+}
+
+/**
+ * @typedef {object} PropDef
+ * @property {string} id
+ * @property {string} label
+ * @property {string} collision  Role in the TRIANGLE bake: none|deck|solid|both.
+ *   Capsule colliders are a SEPARATE channel and are collected regardless — see
+ *   PropManager.collisionCapsules() — so a prop can be `none` here and still
+ *   block the car. Scenery is the case that needs it: its meshes are decor and
+ *   only its masts and legs are solid.
+ * @property {string} [category] Palette tab. Defaults to "obstacles".
+ * @property {() => THREE.Object3D} make
+ */
+/** @type {PropDef[]} */
 export const PROP_CATALOG = [
   // ── PHYSICS PROPS ───────────────────────────────────────────────────────────
   // `collision: "none"` is deliberate: these are simulated by PropPhysics and
@@ -511,20 +584,70 @@ export const PROP_CATALOG = [
       // thinner than the chassis hull's sample spacing, so the sampled path
       // cannot see it reliably. See PropManager.collisionCapsules().
       post.userData.capsule = { radius: GATE_POST_RADIUS, height: GATE_POST_HEIGHT };
+      // THE STRIPE IS PAINTED, NOT BUILT.
+      //
+      // It used to be a second box 2 cm proud of the panel and exactly as wide,
+      // which put its ±X end caps EXACTLY coplanar with the panel's — guaranteed
+      // z-fighting, and the 2 cm front offset is below depth-buffer resolution
+      // once the gate is any distance away, so the whole band shimmered. Insetting
+      // the box would only push the flicker further out, never remove it.
+      //
+      // A texture removes the second surface entirely, so there is nothing left to
+      // fight, and it drops the gate from three meshes to two. The texture is
+      // built once for the whole catalog, not per gate.
       const panel = new THREE.Mesh(
         new THREE.BoxGeometry(W, H, 0.09),
-        mat(0xe23b2e, { roughness: 0.65, emissive: 0x3a0a06, emissiveIntensity: 0.4 }),
+        mat(0xffffff, {
+          roughness: 0.65, emissive: 0x3a0a06, emissiveIntensity: 0.4,
+          map: gateStripeTexture(),
+        }),
       );
       panel.position.set(W / 2, Y, 0); // extends along +X from the hinge
-      const stripe = new THREE.Mesh(
-        new THREE.BoxGeometry(W, 0.26, 0.11),
-        mat(0xf4f4f4, { roughness: 0.6 }),
-      );
-      stripe.position.set(W / 2, Y, 0);
       // The moving half stays out of the static bake — see `collision` above.
       panel.userData.noCollide = true;
-      stripe.userData.noCollide = true;
-      g.add(post, panel, stripe);
+      g.add(post, panel);
+      return g;
+    },
+  },
+  {
+    id: "pole",
+    label: "Pole",
+    /**
+     * A round obstacle you have to steer around — and the first prop built on
+     * the capsule collider from the outset rather than retrofitted onto it.
+     *
+     * `solid`, but every mesh here is either a capsule or excluded, so it
+     * contributes ZERO triangles to the static bake. That is the point: a pole
+     * is exactly the shape triangle sampling handles worst (see the sample-gap
+     * note on CHASSIS_HULL.sampleSpacing), and exactly the shape an analytic
+     * primitive handles perfectly.
+     */
+    collision: "solid",
+    make: () => {
+      const g = new THREE.Group();
+      g.name = "Pole";
+      const R = 0.36;   // fat enough to read as a hazard from a moving car
+      const H = 7.0;
+      const shaft = new THREE.Mesh(
+        new THREE.CylinderGeometry(R, R, H, 14),
+        mat(0xc8ccd2, { roughness: 0.4, metalness: 0.7 }),
+      );
+      shaft.position.y = H / 2;
+      shaft.userData.capsule = { radius: R, height: H };
+      // Hazard bands, painted rather than stacked as rings — same z-fighting
+      // reasoning as the swing gate's stripe, and it keeps the pole at one draw.
+      shaft.material.map = poleBandTexture();
+      shaft.material.color.set(0xffffff);
+      // A footing so it reads as bolted down rather than dropped in. Squat and
+      // wide, so it never decides a contact the shaft should have owned — it is
+      // excluded from collision entirely and the capsule covers the whole height.
+      const base = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 2.1, R * 2.4, 0.22, 14),
+        mat(0x2a2d33, { roughness: 0.85 }),
+      );
+      base.position.y = 0.11;
+      base.userData.noCollide = true;
+      g.add(shaft, base);
       return g;
     },
   },
@@ -775,6 +898,24 @@ export const PROP_CATALOG = [
     collision: "solid",
     make: () => new THREE.Mesh(airTunnelGeometry(36, 9), mat(0x5b6168, { roughness: 0.92, side: THREE.DoubleSide })),
   },
+
+  // ── SCENERY ────────────────────────────────────────────────────────────────
+  // Roadside dressing from the v2 objects lab, on its own palette tab because it
+  // is not gameplay: obstacles are things you must avoid, these are things that
+  // make the avoiding look like somewhere. See modularRoadScenery.js for how the
+  // lab's spline objects become single placeable props (and for why their
+  // materials have to be rebuilt before they go anywhere near v3's fog).
+  //
+  // `collision: "none"` refers to the TRIANGLE bake only — each of these carries
+  // capsule colliders on its masts and legs, which is the channel that can
+  // actually see something that thin.
+  ...SCENERY_CATALOG.map((s) => ({
+    id: s.id,
+    label: s.label,
+    collision: "none",
+    category: "scenery",
+    make: () => makeSceneryProp(s.id) ?? new THREE.Group(),
+  })),
 ];
 
 export const PROP_BY_ID = new Map(PROP_CATALOG.map((p) => [p.id, p]));

@@ -1739,6 +1739,7 @@ export const PALETTE_CATEGORIES = [
   { id: "banked", label: "Banked" },
   { id: "tubes", label: "Tubes" },
   { id: "obstacles", label: "Obstacles" },
+  { id: "scenery", label: "Scenery" },
   { id: "moving", label: "Moving" },
   { id: "portals", label: "Portals" },
   { id: "loop", label: "Loop" },
@@ -1757,6 +1758,7 @@ function categoryIconSvg(id) {
     banked: `<svg viewBox="0 0 48 48"><path d="M6 30 L42 18" ${_RS}/><rect x="8" y="16" width="32" height="8" rx="1" transform="rotate(-12 24 20)" ${_RB}/></svg>`,
     tubes: `<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" fill="none" stroke="#6a7580" stroke-width="3"/><rect x="12" y="28" width="24" height="6" rx="1" ${_RB}/></svg>`,
     obstacles: `<svg viewBox="0 0 48 48"><rect x="12" y="14" width="14" height="22" rx="1" fill="#6a7580" stroke="#999" stroke-width="1.5"/><ellipse cx="34" cy="28" rx="8" ry="10" fill="none" stroke="#dce622" stroke-width="2"/></svg>`,
+    scenery: `<svg viewBox="0 0 48 48"><rect x="8" y="10" width="26" height="15" rx="1" fill="#2a2e36" stroke="#dce622" stroke-width="1.8"/><line x1="14" y1="25" x2="14" y2="38" stroke="#999" stroke-width="2"/><line x1="28" y1="25" x2="28" y2="38" stroke="#999" stroke-width="2"/><circle cx="40" cy="16" r="4" fill="none" stroke="#f0c419" stroke-width="2"/><line x1="40" y1="20" x2="40" y2="38" stroke="#999" stroke-width="2"/></svg>`,
     moving: `<svg viewBox="0 0 48 48"><rect x="8" y="22" width="32" height="6" rx="1" fill="#e8c040" stroke="#999" stroke-width="1.2"/><path d="M24 8 L24 18 M24 32 L24 42" stroke="#dce622" stroke-width="2" stroke-linecap="round"/><path d="M18 8 L24 14 L30 8" fill="none" stroke="#dce622" stroke-width="2" stroke-linecap="round"/></svg>`,
     loop: `<svg viewBox="0 0 48 48"><circle cx="24" cy="26" r="14" fill="none" stroke="#c0392b" stroke-width="1.8"/><path d="M10 38 L10 26 Q10 12 24 12 Q38 12 38 26 L38 38" ${_RS}/></svg>`,
   };
@@ -2301,7 +2303,9 @@ export const CATEGORY_PRESETS = {
 /** Thumbnail map key for the first tile shown in a palette category. */
 export function categoryThumbnailKey(catId, propCatalog = [], moverCatalog = []) {
   if (catId === "moving") return moverCatalog[0]?.id ?? null;
-  if (catId === "obstacles") return propCatalog[0]?.id ?? null;
+  if (catId === "obstacles" || catId === "scenery") {
+    return propCatalog.find((p) => (p.category ?? "obstacles") === catId)?.id ?? null;
+  }
   if (catId === "portals") return "portal_door";
   const presets = CATEGORY_PRESETS[catId];
   if (presets?.length) return presets[0].id;
@@ -2357,8 +2361,13 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   }
 
   function piecesInCategory(catId) {
-    if (catId === "obstacles") {
-      return propCatalog.map((p) => ({ id: p.id, label: p.label, isProp: true, hint: "" }));
+    // Props split across two tabs by their own `category`, defaulting to
+    // obstacles — so adding a prop needs no edit here, and an older catalog
+    // entry with no category still lands where it always did.
+    if (catId === "obstacles" || catId === "scenery") {
+      return propCatalog
+        .filter((p) => (p.category ?? "obstacles") === catId)
+        .map((p) => ({ id: p.id, label: p.label, isProp: true, hint: "" }));
     }
     if (catId === "moving") {
       return moverCatalog.map((m) => ({ id: m.id, label: m.label, isMover: true, hint: "" }));
