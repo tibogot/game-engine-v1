@@ -6,7 +6,9 @@
  *   binary payload (blobs referenced by { offset, length } in the manifest)
  *
  * Manifest:
- *   terrain   { worldSize, heightmapSize, maxHeight }
+ *   terrain   { worldSize, heightmapSize, splatSize, maxHeight }
+ *             splatSize is absent in files written before it was configurable —
+ *             those used splatRes = min(2048, max(256, heightmapSize / 2)).
  *   blobs     { heightmap, splat, snow, grassDensity, susukiDensity }
  *             → { offset, length } into the payload
  *   splatRes / snowRes

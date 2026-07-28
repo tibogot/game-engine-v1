@@ -3,7 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import Stats from "stats-gl";
 import { texture, uniform, float, mix, positionWorld, vec2, vec3, length, smoothstep, mx_noise_float } from "three/tsl";
-import { createHeightmapTexture, saveTerrainConfig, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
+import { createHeightmapTexture, saveTerrainConfig, legacySplatSize, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
 import { STOCHASTIC_ENABLED, toggleStochastic } from "../../v2/core/legacy/stochasticTex.js";
 import { createTerrainLOD, LOD_LEVELS } from "../terrain/terrainLOD.js";
@@ -1587,6 +1587,7 @@ export async function startV3App(opts = {}) {
       saveTerrainConfig({
         worldSize:     decoded.worldSize,
         heightmapSize: decoded.width,
+        splatSize:     SPLAT_RES, // heightmap files carry no paint — keep the current setting
         maxHeight:     decoded.maxHeight,
       });
       await stashPendingHeightmap(buf);
@@ -2019,31 +2020,59 @@ export async function startV3App(opts = {}) {
   tbTerrainSize.textContent = `${WORLD_SIZE} m · ${HEIGHTMAP_SIZE}²`;
   document.getElementById("insp-world").textContent = `${WORLD_SIZE} × ${WORLD_SIZE} m`;
   document.getElementById("insp-hmap").textContent  = `${HEIGHTMAP_SIZE} × ${HEIGHTMAP_SIZE}`;
+  document.getElementById("insp-splat").textContent =
+    `${SPLAT_RES} × ${SPLAT_RES} (${+(WORLD_SIZE / SPLAT_RES).toFixed(3)} m/texel)`;
   document.getElementById("insp-maxh").textContent  = `${MAX_HEIGHT} m`;
   document.getElementById("insp-lod").textContent   = String(LOD_LEVELS);
 
   const ntOverlay = document.getElementById("terrain-size-overlay");
   const ntWorld   = document.getElementById("nt-world");
   const ntDetail  = document.getElementById("nt-detail");
+  const ntSplat   = document.getElementById("nt-splat");
   const ntHeight  = document.getElementById("nt-height");
   const ntSummary = document.getElementById("nt-summary");
 
+  // Set a dropdown to `value`, falling back to the numerically closest option so
+  // a config saved outside the preset list still shows something sensible.
+  function ntSetSelect(sel, value) {
+    sel.value = String(value);
+    if (sel.selectedIndex >= 0) return;
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < sel.options.length; i++) {
+      const d = Math.abs(Number(sel.options[i].value) - value);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    sel.selectedIndex = best;
+  }
+
   function ntComputedRes() {
     return Math.min(4096, Math.max(256, Number(ntWorld.value) / Number(ntDetail.value)));
+  }
+  function ntComputedSplat() {
+    return Math.min(4096, Math.max(256, Math.round(Number(ntWorld.value) / Number(ntSplat.value))));
   }
   function syncNtSummary() {
     const res = ntComputedRes();
     const mb  = Math.round((res * res * 8 * 3) / 1e6); // 3 × RGBA16F height RTs
     const eff = Number(ntWorld.value) / res;
+    const sRes = ntComputedSplat();
+    const sEff = +(Number(ntWorld.value) / sRes).toFixed(3);
+    const sMb  = Math.round((sRes * sRes * 4 * 2) / 1e6); // RGBA8 × 2 slices
     ntSummary.textContent =
       `Heightmap ${res} × ${res} (${eff} m/texel) · ~${mb} MB GPU height data`
-      + (res >= 4096 ? " — heavy: desktop GPU recommended" : "");
+      + (res >= 4096 ? " — heavy: desktop GPU recommended" : "")
+      + `\nSplatmap ${sRes} × ${sRes} (${sEff} m/texel) · ~${sMb} MB`
+      + (sMb >= 100 ? " — large; 0.5 m/texel is usually enough" : "");
   }
+  ntSummary.style.whiteSpace = "pre-line";
   ntWorld .addEventListener("change", syncNtSummary);
   ntDetail.addEventListener("change", syncNtSummary);
+  ntSplat .addEventListener("change", syncNtSummary);
   tbTerrainSize.addEventListener("click", () => {
-    ntWorld.value  = String(WORLD_SIZE);
-    ntHeight.value = String(MAX_HEIGHT);
+    ntSetSelect(ntWorld,  WORLD_SIZE);
+    ntSetSelect(ntDetail, WORLD_SIZE / HEIGHTMAP_SIZE);
+    ntSetSelect(ntSplat,  WORLD_SIZE / SPLAT_RES);
+    ntSetSelect(ntHeight, MAX_HEIGHT);
     syncNtSummary();
     ntOverlay.style.display = "flex";
   });
@@ -2057,6 +2086,7 @@ export async function startV3App(opts = {}) {
     saveTerrainConfig({
       worldSize:     Number(ntWorld.value),
       heightmapSize: ntComputedRes(),
+      splatSize:     ntComputedSplat(),
       maxHeight:     Number(ntHeight.value),
     });
     location.reload();
@@ -3511,14 +3541,14 @@ export async function startV3App(opts = {}) {
     if (!file) return;
     try {
       const decoded = decodeSplatmapFile(await file.arrayBuffer());
+      // A splatmap is weights over the whole world, so a resolution difference
+      // is a rescale, not an error — importing older/finer maps just works.
       if (decoded.resolution !== SPLAT_RES) {
-        window.alert(
-          `This splatmap is ${decoded.resolution}²; expected ${SPLAT_RES}².`,
-        );
-        return;
+        console.info(`[V3] Splatmap ${decoded.resolution}² → resampled to ${SPLAT_RES}².`);
+        splatMap.setCombinedResampled(decoded.data, decoded.resolution);
+      } else {
+        splatMap.setCombined(decoded.data);
       }
-      splatMap._combined.set(decoded.data);
-      splatMap.tex.needsUpdate = true;
     } catch (err) {
       console.error(err);
       window.alert(err instanceof Error ? err.message : "Failed to load splatmap.");
@@ -4881,7 +4911,7 @@ export async function startV3App(opts = {}) {
       for (const t of arr) treeInstances.push([t.x, t.z, t.y, t.rotY, t.scale, t.slotIdx]);
     }
     const buf = encodeProjectFile({
-      terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, maxHeight: MAX_HEIGHT },
+      terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT },
       heightmap: baseHeightmap ?? cpuHeightmap,
       splat:     splatMap.combined,
       splatRes:  SPLAT_RES,
@@ -4954,8 +4984,18 @@ export async function startV3App(opts = {}) {
     }
     await ensureCpuHeightmapFromGpu(); // fresh mirror before draping trees/roads
 
-    if (d.splat && d.splatRes === SPLAT_RES) splatMap.setCombined(d.splat);
-    else if (d.splat) console.warn(`[V3] Project splatmap is ${d.splatRes}²; expected ${SPLAT_RES}² — skipped.`);
+    // Splat resolution is independent of the heightmap, so a project may carry a
+    // different one — rescale rather than discard the paint. Pre-splatSize
+    // projects have no splatRes recorded; they used the legacy half-heightmap rule.
+    if (d.splat) {
+      const srcRes = d.splatRes ?? legacySplatSize(d.terrain?.heightmapSize ?? HEIGHTMAP_SIZE);
+      if (srcRes === SPLAT_RES) {
+        splatMap.setCombined(d.splat);
+      } else {
+        console.info(`[V3] Project splatmap ${srcRes}² → resampled to ${SPLAT_RES}².`);
+        splatMap.setCombinedResampled(d.splat, srcRes);
+      }
+    }
 
     if (d.snow && d.snowRes === SNOW_MAP_RES) snowMap.restoreSnapshot(d.snow);
 
@@ -5099,7 +5139,10 @@ export async function startV3App(opts = {}) {
           + `Reload the editor at that terrain size to open it?`,
         );
         if (!ok) return;
-        saveTerrainConfig(t);
+        // Splat resolution is NOT part of the mismatch test (it resamples on
+        // load), so a project that predates splatSize must not drag the editor
+        // back down to the legacy value — keep the current setting in that case.
+        saveTerrainConfig({ ...t, splatSize: t.splatSize ?? SPLAT_RES });
         await stashPendingHeightmap(buf); // stash is format-agnostic — sniffed on boot
         location.reload();
         return;

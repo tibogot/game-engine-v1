@@ -17,11 +17,11 @@
  * tiles for larger worlds without changing the shader or UI.
  */
 import * as THREE from "three";
-import { WORLD_SIZE, HEIGHTMAP_SIZE } from "./heightmapTexture.js";
+import { WORLD_SIZE, SPLAT_SIZE } from "./heightmapTexture.js";
 
-// Half the heightmap resolution → constant 2× the height texel size
-// (4 m/texel at the default 2048 m / 1024² config) at any terrain size.
-export const SPLAT_RES = Math.min(2048, Math.max(256, HEIGHTMAP_SIZE / 2));
+// Configured independently of the heightmap (see heightmapTexture.js). Old
+// configs with no splatSize resolve to the previous half-heightmap value.
+export const SPLAT_RES = SPLAT_SIZE;
 
 function _makeDataArrayTex(data) {
   const tex = new THREE.DataArrayTexture(data, SPLAT_RES, SPLAT_RES, 2);
@@ -225,9 +225,31 @@ export class SplatMap {
   /** Both slices as one contiguous buffer (project save / splat export). */
   get combined() { return this._combined; }
 
-  /** Replace all splat data (project load). */
+  /** Replace all splat data (project load). Requires SPLAT_RES-sized input. */
   setCombined(bytes) {
     this._combined.set(bytes);
+    this.tex.addLayerUpdate(0);
+    this.tex.addLayerUpdate(1);
+    this.tex.needsUpdate = true;
+  }
+
+  /**
+   * Replace all splat data from a DIFFERENT resolution, rescaling both slices.
+   * Splat channels are blend weights over the same world extent, so rescaling is
+   * a plain image resize — this is what lets a project painted at one splat
+   * resolution open at another without losing the paint.
+   */
+  setCombinedResampled(bytes, srcRes) {
+    if (srcRes === SPLAT_RES) return this.setCombined(bytes);
+    const sliceBytes = srcRes * srcRes * 4;
+    if (bytes.byteLength < sliceBytes * 2) {
+      throw new Error(`Splat data is too small for a ${srcRes}² source.`);
+    }
+    const src = bytes instanceof Uint8Array
+      ? bytes
+      : new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    _resampleRGBA8(src.subarray(0, sliceBytes),              srcRes, this.data0, SPLAT_RES);
+    _resampleRGBA8(src.subarray(sliceBytes, sliceBytes * 2), srcRes, this.data1, SPLAT_RES);
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
@@ -316,6 +338,60 @@ export class SplatMap {
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
+  }
+}
+
+// ── Resampling ────────────────────────────────────────────────────────────────
+
+/**
+ * Resize one RGBA8 slice. Upsampling uses bilinear (smooth weight ramps);
+ * downsampling box-averages the source footprint so shrinking does not alias
+ * thin painted strokes away. Both preserve the weight sum at each texel.
+ */
+function _resampleRGBA8(src, srcRes, dst, dstRes) {
+  const scale = srcRes / dstRes;
+
+  if (dstRes < srcRes) {
+    for (let dy = 0; dy < dstRes; dy++) {
+      const sy0 = Math.floor(dy * scale);
+      const sy1 = Math.min(srcRes, Math.max(sy0 + 1, Math.ceil((dy + 1) * scale)));
+      for (let dx = 0; dx < dstRes; dx++) {
+        const sx0 = Math.floor(dx * scale);
+        const sx1 = Math.min(srcRes, Math.max(sx0 + 1, Math.ceil((dx + 1) * scale)));
+        let r = 0, g = 0, b = 0, a = 0, n = 0;
+        for (let sy = sy0; sy < sy1; sy++) {
+          let si = (sy * srcRes + sx0) * 4;
+          for (let sx = sx0; sx < sx1; sx++, si += 4) {
+            r += src[si]; g += src[si+1]; b += src[si+2]; a += src[si+3]; n++;
+          }
+        }
+        const di = (dy * dstRes + dx) * 4;
+        dst[di]   = (r / n + 0.5) | 0;
+        dst[di+1] = (g / n + 0.5) | 0;
+        dst[di+2] = (b / n + 0.5) | 0;
+        dst[di+3] = (a / n + 0.5) | 0;
+      }
+    }
+    return;
+  }
+
+  const max = srcRes - 1;
+  for (let dy = 0; dy < dstRes; dy++) {
+    const fy = Math.min(max, Math.max(0, (dy + 0.5) * scale - 0.5));
+    const y0 = fy | 0, y1 = Math.min(y0 + 1, max), ty = fy - y0;
+    for (let dx = 0; dx < dstRes; dx++) {
+      const fx = Math.min(max, Math.max(0, (dx + 0.5) * scale - 0.5));
+      const x0 = fx | 0, x1 = Math.min(x0 + 1, max), tx = fx - x0;
+      const i00 = (y0 * srcRes + x0) * 4, i10 = (y0 * srcRes + x1) * 4;
+      const i01 = (y1 * srcRes + x0) * 4, i11 = (y1 * srcRes + x1) * 4;
+      const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty);
+      const w01 = (1 - tx) * ty,       w11 = tx * ty;
+      const di = (dy * dstRes + dx) * 4;
+      for (let c = 0; c < 4; c++) {
+        dst[di + c] = (src[i00+c]*w00 + src[i10+c]*w10
+                     + src[i01+c]*w01 + src[i11+c]*w11 + 0.5) | 0;
+      }
+    }
   }
 }
 
