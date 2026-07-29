@@ -93,6 +93,12 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="prop-row">
             <div class="prop-value" id="dv-livery-swatches" style="display:flex;flex-wrap:wrap;gap:4px"></div>
           </div>
+          <div class="prop-row" id="dv-decal-row">
+            <span class="prop-label" id="dv-decal-label">Decal</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-decal" type="button" aria-label="Decal">${CHECK_SVG}</button>
+            </div>
+          </div>
           <div class="prop-row">
             <span class="prop-label">All of this type</span>
             <div class="prop-value">
@@ -100,10 +106,12 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="dv-hint">
-            Colour is a <b>per-instance tint</b>, not a second material — forty
-            containers in seven colours are the same four draw calls as forty in
-            one. Right-click a prop to select it, then click a swatch or press
-            <b>C</b> (<b>Shift+C</b> to go back). It saves with the track.
+            Colour is a <b>per-instance tint</b> and the decal is <b>one shared
+            instanced quad</b> — neither is a second material, so forty
+            containers in seven colours with logos are five draw calls rather
+            than forty. Right-click a prop to select it, then click a swatch or
+            press <b>C</b> (<b>Shift+C</b> to go back); <b>V</b> toggles the
+            decal. Both save with the track.
           </div>
         </div>
       </div>
@@ -2065,17 +2073,24 @@ export function createRoadDevPanel({ app, game, params }) {
     refresh();
   });
 
+  const decalRow = $("#dv-decal-row");
+  const decalToggle = toggle("dv-decal", false, (on) => { game.setPropDecal?.(on); });
+
   function renderLiveries() {
     if (!liverySwatches || !liveryName) return;
     const sel = game.getSelectedProp?.();
     const list = sel?.variants ?? [];
     liverySwatches.innerHTML = "";
+    // The decal row only means anything for a prop that HAS one, so it hides
+    // rather than sitting there dead.
+    if (decalRow) decalRow.style.display = sel?.hasDecal ? "" : "none";
+    if (sel?.hasDecal) decalToggle?.set?.(!!sel.decal);
     if (!sel) {
       liveryName.textContent = "No prop selected";
       return;
     }
     if (!list.length) {
-      liveryName.textContent = `${sel.label} — no liveries`;
+      liveryName.textContent = sel.hasDecal ? sel.label : `${sel.label} — no liveries`;
       return;
     }
     liveryName.textContent = `${sel.label} — ${sel.variant + 1}/${list.length}`;

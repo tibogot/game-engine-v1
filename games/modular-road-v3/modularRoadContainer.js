@@ -14,7 +14,8 @@
 //     y range 1.368 .. 34.156 — it does NOT sit on its own origin
 //
 // 2.44 : 1 : 1 is a 20 ft ISO container (6.058 x 2.591 x 2.438 m -> 2.49 : 1.06 : 1),
-// not a 40 ft one, so that is what it is scaled to.
+// not a 40 ft one — so ISO 20 ft proportions are what it is normalised to, then
+// multiplied by CONTAINER_SCALE to read right beside the car. See that constant.
 //
 // EXACT ISO, NOT A UNIFORM SCALE. A uniform factor picked off the length leaves
 // it 6.058 x 2.482 x 2.493 — 4% short and 2% wide — and a container is a
@@ -35,8 +36,38 @@ import { mergeByMaterial, dequantize } from "./modularRoadBatching.js";
 
 export const CONTAINER_URL = "/models/container01_compressed.glb";
 
-/** Real 20 ft ISO container, metres. */
-export const CONTAINER_SIZE = { length: 6.058, height: 2.591, width: 2.438 };
+/** Real 20 ft ISO container, metres — what the model's own 2.44 : 1 : 1
+ *  proportions say it is (a 20 ft is 2.48 : 1.06 : 1; a 40 ft would be 5 : 1.06 : 1). */
+const ISO_20FT = { length: 6.058, height: 2.591, width: 2.438 };
+
+/**
+ * Uniform size multiplier — a GAME number, not a real one.
+ *
+ * At true scale a 20 ft container is 6.06 x 2.59 m against a 4.97 x 1.26 m car:
+ * only 1.22x its length and 1.05x its width, so parked side by side they read as
+ * roughly the same object. That is accurate and it looks wrong, because the
+ * thing everyone pictures when you say "shipping container" is the 40 ft one
+ * that dwarfs a car.
+ *
+ * Scaling up rather than switching to a 40 ft on purpose: a 40 ft is the same
+ * body stretched to twice the length, which doubles the spacing of the
+ * corrugation ribs and makes it visibly coarser up close. A uniform scale keeps
+ * the silhouette and the rib proportions exactly right — it just makes the box
+ * bigger, the way the cone is authored at 3x a real motorway cone (CONE_SCALE)
+ * for the same reason.
+ *
+ * ONE NUMBER. Everything downstream — the collider proxy, the stack height, the
+ * decal placement — is derived from CONTAINER_SIZE below, so this is the only
+ * value to change.
+ */
+export const CONTAINER_SCALE = 1.9;
+
+/** In-game container dimensions. ISO x CONTAINER_SCALE. */
+export const CONTAINER_SIZE = {
+  length: ISO_20FT.length * CONTAINER_SCALE,
+  height: ISO_20FT.height * CONTAINER_SCALE,
+  width: ISO_20FT.width * CONTAINER_SCALE,
+};
 /** The model's own bounds, measured. Kept here so the scale is derived, never
  *  guessed — re-export the GLB at a different size and only these change. */
 const MODEL = {

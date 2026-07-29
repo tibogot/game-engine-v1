@@ -11,6 +11,11 @@ import {
 } from "./modularRoadPropPhysics.js";
 import { SCENERY_CATALOG, makeSceneryProp } from "./modularRoadScenery.js";
 import { makeContainer, CONTAINER_LIVERIES, CONTAINER_SIZE } from "./modularRoadContainer.js";
+import { DECAL_OFFSET } from "./modularRoadDecals.js";
+
+/** The one decal there is so far. Lives beside the game rather than in
+ *  public/models because it is track dressing, not a shared engine asset. */
+export const DECAL_URL = "/games/modular-road-v3/rondcarre.png";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { materialEmissive, materialColor } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
@@ -701,6 +706,27 @@ export const PROP_CATALOG = [
     /** Footprint + course height, so placements stack onto each other exactly —
      *  see PropManager.stackSnap. */
     stack: CONTAINER_SIZE,
+    /**
+     * A sticker on both long sides — its own instanced quad, NOT a second map on
+     * the container material, which would cost a draw call per container. See
+     * modularRoadDecals.js.
+     *
+     * EVERY NUMBER DERIVED FROM CONTAINER_SIZE. The height and the patch size
+     * were literals sized against the unscaled box, so raising CONTAINER_SCALE
+     * left the logo 0.56 m below centre and proportionally too small — the wall
+     * grew and the sticker did not. Anything hardcoded here silently comes
+     * unstuck the moment the container is resized.
+     */
+    decal: {
+      url: DECAL_URL,
+      // ~58% of the wall height, which leaves it clear of the corner castings
+      // top and bottom at any scale.
+      size: [CONTAINER_SIZE.height * 0.58, CONTAINER_SIZE.height * 0.58],
+      faces: [
+        { pos: [0, CONTAINER_SIZE.height / 2, CONTAINER_SIZE.width / 2 + DECAL_OFFSET], yaw: 0 },
+        { pos: [0, CONTAINER_SIZE.height / 2, -(CONTAINER_SIZE.width / 2 + DECAL_OFFSET)], yaw: Math.PI },
+      ],
+    },
     make: () => makeContainer(),
   },
   {
@@ -1179,6 +1205,11 @@ export class PropManager {
     // A new placement picks its own livery, so a run of containers is a yard
     // rather than a warehouse order. Costs nothing to draw — see `variants`.
     setVariant(inst, def.variants ? Math.floor(Math.random() * def.variants.length) : 0);
+    // OFF by default. Branding is a decision, not a default: a yard where boxes
+    // randomly carry a logo is not something you can author, because you cannot
+    // tell what you asked for from what the dice gave you. Turn it on per prop
+    // (panel toggle or V), or on everything of a type at once.
+    inst.decal = false;
     root.userData.propInstance = inst;
     this.instances.push(inst);
     // A PROP YOU JUST ADDED MUST NEVER BE LEFT HANGING IN MID-AIR.
@@ -1217,6 +1248,7 @@ export class PropManager {
     this.group.add(root);
     const inst = { id: src.id, def: src.def, root, collision: src.collision, restY: src.restY ?? 0 };
     setVariant(inst, src.variant ?? 0); // a duplicate keeps its original's livery
+    inst.decal = !!src.decal;
     root.userData.propInstance = inst;
     this.instances.push(inst);
     this.snapToSurface(inst); // the +4,+4 offset may have landed on a different surface
@@ -1290,6 +1322,19 @@ export class PropManager {
   setSelectedVariant(index) {
     if (!this.selected?.def?.variants?.length) return false;
     setVariant(this.selected, index);
+    this.onVariantChange?.(this.selected);
+    return true;
+  }
+
+  /**
+   * Turn the selected prop's decal on or off.
+   *
+   * Same `onVariantChange` hook as the livery: what changed is a property of the
+   * prop INSTANCE, and the thing that draws it has to be told to re-read.
+   */
+  setSelectedDecal(on) {
+    if (!this.selected?.def?.decal) return false;
+    this.selected.decal = !!on;
     this.onVariantChange?.(this.selected);
     return true;
   }
@@ -1443,6 +1488,7 @@ export class PropManager {
       // Only written when the prop actually has variants, so existing tracks
       // round-trip byte-identical and an older file simply loads as variant 0.
       ...(inst.def?.variants?.length ? { variant: inst.variant } : {}),
+      ...(inst.decal ? { decal: true } : {}),
     }));
   }
 
@@ -1470,6 +1516,7 @@ export class PropManager {
       this.group.add(root);
       const inst = { id: item.type, def, root, collision: def.collision, restY };
       setVariant(inst, item.variant ?? 0);
+      inst.decal = !!item.decal;
       root.userData.propInstance = inst;
       this.instances.push(inst);
     }
@@ -1526,6 +1573,7 @@ export class PropManager {
       // Next livery on the selected prop. A key as well as the panel swatches
       // because cycling while you look at it is how you actually pick a colour.
       case "KeyC": handled = this.cycleVariant(e.shiftKey ? -1 : 1); break;
+      case "KeyV": handled = this.setSelectedDecal(!this.selected.decal); break;
       default: handled = false;
     }
     if (handled) {

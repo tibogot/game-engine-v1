@@ -29,10 +29,15 @@
 // ============================================================================
 import * as THREE from "three";
 import { mergeByMaterial } from "./modularRoadBatching.js";
+import { decalMaterial, decalGeometry } from "./modularRoadDecals.js";
 
 /** Reused for "no tint" — three multiplies instanceColor in, so white is the
  *  identity and an unset entry would render black. */
 const _WHITE = new THREE.Color(0xffffff);
+
+/** All-zero matrix — a decal instance for a prop that is not wearing one. Every
+ *  triangle comes out degenerate, so it rasterises nothing. */
+const _ZERO = new THREE.Matrix4().set(0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0);
 
 /** Growth headroom so placing one more cone does not rebuild every buffer. */
 const SLACK = 8;
@@ -60,6 +65,9 @@ export class PropInstancer {
     this._enabled = false;
     this._lastCount = -1;
     this._m4 = new THREE.Matrix4();
+    this._face = new THREE.Matrix4();
+    /** key -> shared quad geometry for a decal batch. */
+    this._decalGeo = new Map();
   }
 
   /**
@@ -120,11 +128,19 @@ export class PropInstancer {
       wanted.get(inst.id).push(inst);
     }
 
-    // Drop batches for types that no longer have any props.
+    // Drop batches for types that no longer have any props. Decal batches are
+    // keyed `<id>::decal` and are never in `wanted`, so they are left to
+    // _syncDecals — without this guard they would be torn down every sync.
     for (const [id, batch] of [...this._batches]) {
-      if (wanted.has(id)) continue;
+      if (batch.decal || wanted.has(id)) continue;
       for (const m of batch.meshes) this.group.remove(m);
       this._batches.delete(id);
+    }
+    for (const [key, batch] of [...this._batches]) {
+      if (!batch.decal) continue;
+      if (wanted.has(key.replace(/::decal$/, ""))) continue;
+      for (const m of batch.meshes) this.group.remove(m);
+      this._batches.delete(key);
     }
 
     for (const [id, insts] of wanted) {
@@ -156,7 +172,57 @@ export class PropInstancer {
       });
       this._batches.set(id, { insts, meshes, capacity, colorsDirty: true });
     }
+    this._syncDecals(wanted);
     if (this._enabled) this.update();
+  }
+
+  /**
+   * One extra InstancedMesh per decal-carrying prop type, holding every face of
+   * every placement.
+   *
+   * FIXED STRIDE — `faces.length` instances per prop, whether or not that prop
+   * actually wears a decal, with the unwanted ones scaled to zero. The
+   * alternative is a compacted list, which means the mapping from prop to
+   * instance index changes every time anyone toggles a sticker, and every
+   * toggle becomes a buffer rebuild. A degenerate instance costs four vertices
+   * and produces no fragments; that is cheaper than the bookkeeping.
+   */
+  _syncDecals(wanted) {
+    for (const [id, insts] of wanted) {
+      const def = this.catalog.find((d) => d.id === id);
+      const decal = def?.decal;
+      const key = `${id}::decal`;
+      const material = decal ? decalMaterial(decal.url) : null;
+      // No decal declared, or its texture never loaded — drop any batch we had.
+      if (!material) {
+        const old = this._batches.get(key);
+        if (old) { for (const m of old.meshes) this.group.remove(m); this._batches.delete(key); }
+        continue;
+      }
+      const faces = decal.faces ?? [];
+      const need = insts.length * faces.length;
+      let batch = this._batches.get(key);
+      if (batch && batch.capacity >= need) {
+        batch.insts = insts;
+        batch.faces = faces;
+        for (const m of batch.meshes) m.count = need;
+        continue;
+      }
+      if (batch) for (const m of batch.meshes) this.group.remove(m);
+      if (!this._decalGeo.has(key)) {
+        this._decalGeo.set(key, decalGeometry(decal.size?.[0] ?? 1, decal.size?.[1] ?? 1));
+      }
+      const capacity = need + SLACK * faces.length;
+      const im = new THREE.InstancedMesh(this._decalGeo.get(key), material, capacity);
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.castShadow = false;   // a flat sticker casting a shadow reads as a bug
+      im.receiveShadow = true; // but it must darken with the wall it is on
+      im.count = need;
+      im.frustumCulled = false;
+      im.renderOrder = 1;      // after the wall it sits on
+      this.group.add(im);
+      this._batches.set(key, { insts, meshes: [im], capacity, faces, decal: true });
+    }
   }
 
   /** Per frame, after the sim has posed the props. */
@@ -170,6 +236,7 @@ export class PropInstancer {
     if (n !== this._lastCount) { this._lastCount = n; this.sync(); }
     for (const batch of this._batches.values()) {
       const { insts, meshes } = batch;
+      if (batch.decal) { this._updateDecals(batch); continue; }
       for (let i = 0; i < insts.length; i++) {
         const root = insts[i].root;
         root.updateWorldMatrix(false, false);
@@ -211,6 +278,29 @@ export class PropInstancer {
       inst.root.visible = !this._enabled;
     }
     if (this._enabled) { this.sync(); this.update(); }
+  }
+
+  /** Pose one decal batch: prop world matrix x the face's local placement, or a
+   *  zero matrix for a prop that is not wearing one. */
+  _updateDecals(batch) {
+    const { insts, faces, meshes } = batch;
+    const im = meshes[0];
+    let k = 0;
+    for (const inst of insts) {
+      inst.root.updateWorldMatrix(false, false);
+      for (const f of faces) {
+        if (inst.decal) {
+          this._face.makeRotationY(f.yaw ?? 0);
+          this._face.setPosition(f.pos[0], f.pos[1], f.pos[2]);
+          im.setMatrixAt(k++, this._m4.multiplyMatrices(inst.root.matrixWorld, this._face));
+        } else {
+          // Collapsed to a point: the vertex shader still runs on four vertices
+          // and the triangles come out degenerate, so nothing is rasterised.
+          im.setMatrixAt(k++, _ZERO);
+        }
+      }
+    }
+    im.instanceMatrix.needsUpdate = true;
   }
 
   /** Re-upload instance colours on the next update. Cheap and idempotent —

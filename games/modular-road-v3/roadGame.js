@@ -64,7 +64,7 @@ import {
 } from "./modularRoadKit.js";
 import { bakeRoadThumbnails } from "./modularRoadThumbnails.js";
 import {
-  PropManager, PROP_CATALOG, PROP_BY_ID, glowPropParams, SURFACE_SNAP, SURFACE_SNAP_MODES,
+  PropManager, PROP_CATALOG, PROP_BY_ID, glowPropParams, SURFACE_SNAP, SURFACE_SNAP_MODES, DECAL_URL,
 } from "./modularRoadProps.js";
 import { MoverPropManager, MOVER_CATALOG, MOVER_BY_ID } from "./modularRoadMoverProps.js";
 import { PortalManager, DEFAULT_PORTAL_PARAMS, buildPortalMesh } from "./modularRoadPortals.js";
@@ -98,6 +98,7 @@ import { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } from "./modularRoadSparks.j
 import { PropPhysics, PROP_PHYSICS, PHYSICS_PROP_TYPES } from "./modularRoadPropPhysics.js";
 import { PropInstancer } from "./modularRoadPropInstancer.js";
 import { preloadContainer } from "./modularRoadContainer.js";
+import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 
@@ -280,7 +281,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // back empty — so loading it later left the container as the one palette tile
   // with a hand-drawn fallback icon. 18 KB, so the wait is not measurable.
   onStatus("Loading models…");
-  await preloadContainer();
+  // Decals settle alongside the model for the same reason: decalMaterial() is
+  // synchronous (the instancer calls it while building a batch), so the texture
+  // has to be in hand before the first container can be drawn — or the batch is
+  // built with no material and quietly skipped.
+  await Promise.all([
+    preloadContainer(),
+    preloadDecal(DECAL_URL).then(() => settleDecals()),
+  ]);
 
   onStatus("Baking piece thumbnails…");
   const thumbItems = [];
@@ -2104,9 +2112,12 @@ ${e.message}`);
           label: s.def?.label ?? s.id,
           variant: s.variant ?? 0,
           variants: s.def?.variants ?? [],
+          hasDecal: !!s.def?.decal,
+          decal: !!s.decal,
         };
       },
       setPropVariant: (i) => props.setSelectedVariant(i),
+      setPropDecal: (on) => props.setSelectedDecal(on),
       randomisePropVariants: () => props.randomiseVariants(props.selected?.id ?? null),
       getMode: () => mode,
       toggleMode,
