@@ -54,7 +54,8 @@ import { QuadMesh } from "three/webgpu";
 import {
   Break, Fn, If, Loop, cameraPosition, dot, exp, float, floor, fract, length,
   max, min, mix, modelWorldMatrixInverse, normalize, positionGeometry, saturate,
-  sin, smoothstep, texture, uniform, uv, varying, vec2, vec3, vec4,
+  screenCoordinate, sin, smoothstep, texture, uniform, uv, varying, vec2, vec3,
+  vec4,
 } from "three/tsl";
 
 /** Straight from the gist's serialized fields and shader properties. */
@@ -72,7 +73,11 @@ export const GROUND_FOG_DEFAULTS = {
   swirl: 1.5,
   regrow: 0.25,
   densityScale: 6,
-  steps: 16,
+  // The gist ships 16. 16 is only viable WITH the start-offset dither below —
+  // undithered, a 16-step march over a slab this deep is the concentric banding
+  // that makes the whole effect look cheap. 32 + dither is visually clean.
+  steps: 32,
+  dither: 1,
   // Shader-side (linear) values, NOT sRGB hex. Unity hands a URP shader the
   // linear form of a Color property, so these are the numbers the HLSL saw.
   fogColor: [0.85, 0.9, 1.0],
@@ -145,6 +150,7 @@ export class GroundFog {
       dt: uniform(0),
       densityScale: uniform(p.densityScale),
       steps: uniform(p.steps),
+      dither: uniform(p.dither),
       fogColor: uniform(new THREE.Color().setRGB(...p.fogColor)),
       shadowColor: uniform(new THREE.Color().setRGB(...p.shadowColor)),
     };
@@ -419,7 +425,27 @@ export class GroundFog {
       const far = min(min(tmax.x, tmax.y), tmax.z).toVar();
 
       const stepSize = far.sub(near).div(u.steps).toVar();
-      const p = ro.add(rd.mul(near.add(stepSize.mul(0.5)))).toVar();
+
+      // Stratified start offset. The original starts every ray at a half-step,
+      // which puts every pixel's samples on the same set of shells around the
+      // camera — and since the slab's density varies smoothly, those shells show
+      // up as hard concentric arcs. Randomising the offset per pixel over [0, 1)
+      // keeps the estimator unbiased (the samples still span exactly one step
+      // each) and turns the arcs into fine grain the eye reads as texture.
+      //
+      // Interleaved gradient noise rather than a value hash: it is one fract
+      // chain, and its spectrum is deliberately good at exactly this, spreading
+      // error between neighbouring pixels instead of clumping it. Deliberately
+      // NOT animated — without temporal accumulation a moving pattern would
+      // boil, while a static one reads as film grain.
+      const ign = fract(
+        float(52.9829189).mul(
+          fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))),
+        ),
+      );
+      const offset = mix(float(0.5), ign, u.dither);
+
+      const p = ro.add(rd.mul(near.add(stepSize.mul(offset)))).toVar();
       const dp = rd.mul(stepSize).toVar();
 
       const color = vec3(0).toVar();

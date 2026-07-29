@@ -97,10 +97,13 @@
       //   - a capsule as the player, because the effect is entirely about what
       //     the player's own velocity does to the field; the capsule is the
       //     contact point and carves the hole the wake trails from
-      //   - a ring of standing stones as FogObstacles, so you can watch wind
-      //     flow fog around static geometry and see the baked mask working
-      //   - a low backlit sun, because a raking light is what makes a wake in a
-      //     pale fog read at all
+      //   - a ring of procedural trees as FogObstacles, so you can watch wind
+      //     flow fog around static geometry and see the baked mask working; thin
+      //     trunks vanishing into the mist also read the fog's depth far better
+      //     than a solid block ever does
+      //   - a cold moonlit palette, because the fog colour is a near-white
+      //     constant the shader never lights, so it only reads as fog if
+      //     everything around it is darker and cooler than it is
       //   - the raw 256² density field in a corner inset, since the whole trick
       //     is that this expensive-looking volume is one small 2D texture
       import * as THREE from "three";
@@ -110,6 +113,7 @@
       } from "three/tsl";
       import { OrbitControls } from "three/addons/controls/OrbitControls.js";
       import { GROUND_FOG_DEFAULTS, GroundFog } from "./fog/groundFogTsl.js";
+      import { buildTreeField, seededRandom } from "./fog/proceduralTree.js";
 
       const AREA_SIZE = GROUND_FOG_DEFAULTS.areaSize; // 30 m, the gist's value
       const GROUND_RADIUS = 120;
@@ -122,15 +126,17 @@
       const PLAYER_BASE_Y = PLAYER_RADIUS + PLAYER_MID * 0.5;
 
       // Low and raking in from the left, roughly side-on to the default camera.
-      // The volume shader is unlit, so the sun never touches the fog itself — the
-      // only depth cues it can supply are the lit faces of whatever stands in the
-      // fog and the long shadows those cast across it. Putting the sun BEHIND the
-      // scene (the obvious choice for backlit fog) therefore just turns every
-      // stone into a black silhouette, because there is no scattering to light.
-      const SUN_DIR = new THREE.Vector3(-0.62, 0.24, 0.3).normalize();
-      const SKY_ZENITH = vec3(0.045, 0.075, 0.145);
-      const SKY_HORIZON = vec3(0.4, 0.3, 0.27);
-      const HAZE_COLOR = new THREE.Color().setRGB(0.4, 0.3, 0.27);
+      // The volume shader is unlit, so the moon never touches the fog itself —
+      // the only depth cues it can supply are the lit faces of whatever stands in
+      // the fog and the long shadows those cast across it. Putting the light
+      // BEHIND the scene (the obvious choice for backlit fog) therefore just
+      // turns every tree into a black silhouette, because there is no scattering
+      // for it to light.
+      const MOON_DIR = new THREE.Vector3(-0.62, 0.24, 0.3).normalize();
+      const SKY_ZENITH = vec3(0.014, 0.032, 0.08);
+      const SKY_HORIZON = vec3(0.13, 0.19, 0.29);
+      const HAZE_COLOR = new THREE.Color().setRGB(0.13, 0.19, 0.29);
+      const rand = seededRandom(1337);
 
       const $ = (id) => document.getElementById(id);
       const setNote = (t) => { $("s-note").textContent = t; };
@@ -147,6 +153,7 @@
         playerRadius: GROUND_FOG_DEFAULTS.playerRadius,
         densityScale: GROUND_FOG_DEFAULTS.densityScale,
         steps: GROUND_FOG_DEFAULTS.steps,
+        dither: GROUND_FOG_DEFAULTS.dither,
         height: GROUND_FOG_DEFAULTS.height,
         moveSpeed: 4.5,
         autoWalk: true,
@@ -171,6 +178,7 @@
         "ui-volume": [
           ["densityScale", "Density scale", 0, 20, 0.1],
           ["steps", "Raymarch steps", 4, 64, 1],
+          ["dither", "Step dither", 0, 1, 0.05],
           ["height", "Slab height (m)", 1, 8, 0.1],
         ],
         "ui-player": [["moveSpeed", "Walk speed (m/s)", 1, 12, 0.1]],
@@ -196,16 +204,9 @@
         aces: THREE.ACESFilmicToneMapping,
       };
 
-      // Deterministic layout, so the stone circle is the same every reload.
-      let seed = 1337;
-      const rand = () => {
-        seed = (seed * 1664525 + 1013904223) % 4294967296;
-        return seed / 4294967296;
-      };
-
       let renderer, scene, camera, controls, fog, player, ground, boundsHelper;
       let insetMesh, insetMaterials;
-      const uSunDir = uniform(new THREE.Vector3().copy(SUN_DIR));
+      const uMoonDir = uniform(new THREE.Vector3().copy(MOON_DIR));
 
       async function init() {
         renderer = new THREE.WebGPURenderer({ antialias: true });
@@ -225,9 +226,10 @@
         scene.fog = new THREE.Fog(HAZE_COLOR, 30, 170);
 
         camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, SKY_RADIUS * 2);
-        // Low enough that the fog is seen across its top surface, which is where
-        // the wake and the swirl actually live.
-        camera.position.set(3.2, 4.3, 15.5);
+        // Above the tree line looking down at a shallow angle: high enough that
+        // the crowns do not fill the frame, low enough that the fog is still seen
+        // across its top surface, which is where the wake and the swirl live.
+        camera.position.set(4, 8.5, 19);
         scene.add(camera); // the inset quad is parented to it
 
         controls = new OrbitControls(camera, renderer.domElement);
@@ -236,7 +238,7 @@
         controls.maxPolarAngle = Math.PI * 0.495; // never orbit under the ground
         controls.minDistance = 3;
         controls.maxDistance = 70;
-        controls.target.set(0, 0.9, 0);
+        controls.target.set(0, 0.6, 0);
 
         buildLights();
         buildSky();
@@ -253,7 +255,7 @@
         boundsHelper.visible = false;
         scene.add(boundsHelper);
 
-        fog.setObstacles(buildObstacles());
+        fog.setObstacles(buildTrees());
         buildInset();
         buildUI();
         syncFog();
@@ -274,26 +276,26 @@
 
       // ── environment ──────────────────────────────────────────────────────────
       function buildLights() {
-        const sun = new THREE.DirectionalLight(0xffd2a1, 3.2);
-        sun.position.copy(SUN_DIR).multiplyScalar(45);
-        sun.castShadow = true;
-        sun.shadow.mapSize.set(2048, 2048);
+        const moon = new THREE.DirectionalLight(0xc4d8ff, 2.9);
+        moon.position.copy(MOON_DIR).multiplyScalar(45);
+        moon.castShadow = true;
+        moon.shadow.mapSize.set(2048, 2048);
         // Sized to the fog area, not the ground plane — nothing outside the
         // simulated square is worth spending shadow texels on.
         const extent = AREA_SIZE * 0.62;
-        sun.shadow.camera.left = -extent;
-        sun.shadow.camera.right = extent;
-        sun.shadow.camera.top = extent;
-        sun.shadow.camera.bottom = -extent;
-        sun.shadow.camera.near = 1;
-        sun.shadow.camera.far = 120;
-        sun.shadow.bias = -0.0008;
-        sun.shadow.normalBias = 0.03;
-        scene.add(sun);
+        moon.shadow.camera.left = -extent;
+        moon.shadow.camera.right = extent;
+        moon.shadow.camera.top = extent;
+        moon.shadow.camera.bottom = -extent;
+        moon.shadow.camera.near = 1;
+        moon.shadow.camera.far = 120;
+        moon.shadow.bias = -0.0008;
+        moon.shadow.normalBias = 0.03;
+        scene.add(moon);
 
-        // Dusk fill: cool from the sky, warm bounce off the ground. Carries the
-        // shadow sides on its own, since there is no bounce light in the scene.
-        scene.add(new THREE.HemisphereLight(0x6d8bad, 0x33281f, 0.9));
+        // Cool sky fill over a slightly deeper slate bounce. Carries the shadow
+        // sides on its own, since there is no bounce light in the scene.
+        scene.add(new THREE.HemisphereLight(0x5d7ea8, 0x1b232c, 0.95));
       }
 
       function buildSky() {
@@ -306,9 +308,9 @@
           const dir = normalize(positionWorld);
           const grad = saturate(dir.y.mul(1.5).add(0.05));
           const sky = mix(SKY_HORIZON, SKY_ZENITH, pow(grad, float(0.7))).toVar();
-          const sunAmount = saturate(dot(dir, uSunDir));
-          sky.addAssign(vec3(1.0, 0.72, 0.45).mul(pow(sunAmount, float(180)).mul(2.2)));
-          sky.addAssign(vec3(1.0, 0.6, 0.34).mul(pow(sunAmount, float(7)).mul(0.3)));
+          const moonAmount = saturate(dot(dir, uMoonDir));
+          sky.addAssign(vec3(0.88, 0.94, 1.0).mul(pow(moonAmount, float(320)).mul(2.6)));
+          sky.addAssign(vec3(0.42, 0.58, 0.85).mul(pow(moonAmount, float(6)).mul(0.28)));
           return vec4(sky, 1);
         })();
 
@@ -322,19 +324,19 @@
         geometry.rotateX(-Math.PI / 2);
 
         const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
-        // Dark, mottled earth. Kept deliberately low-key: the fog is pale and
-        // nearly opaque, so any albedo detail under it is wasted, and contrast
-        // is what sells the wake.
+        // Cold wet slate. Kept deliberately low-key: the fog is pale and nearly
+        // opaque, so any albedo detail under it is wasted, and it is the contrast
+        // against a dark cool ground that sells the wake.
         material.colorNode = Fn(() => {
           const wp = positionWorld;
           const coarse = mx_noise_float(vec3(wp.x.mul(0.085), wp.z.mul(0.085), float(2.3)));
           const fine = mx_noise_float(vec3(wp.x.mul(0.6), wp.z.mul(0.6), float(7.1)));
-          const soil = mix(
-            vec3(0.052, 0.045, 0.038),
-            vec3(0.125, 0.108, 0.086),
+          const slate = mix(
+            vec3(0.024, 0.031, 0.039),
+            vec3(0.068, 0.082, 0.096),
             saturate(coarse.mul(0.5).add(0.5)),
           );
-          return mix(soil, soil.mul(0.55), saturate(fine.mul(0.45).add(0.3)));
+          return mix(slate, slate.mul(0.55), saturate(fine.mul(0.45).add(0.3)));
         })();
 
         ground = new THREE.Mesh(geometry, material);
@@ -343,78 +345,103 @@
       }
 
       /**
-       * Standing stones in a ring plus scattered boulders. Returns the
-       * {x, z, radius} list for GroundFog.setObstacles — the fog radii are a
-       * little wider than the visible stone so the clearing reads as fog being
-       * pushed aside rather than as geometry clipping through it.
+       * A ring of trees plus scattered saplings. Returns the {x, z, radius} list
+       * for GroundFog.setObstacles — the fog radii come back a good deal wider
+       * than the trunk, so the clearing reads as fog pushed aside by a trunk
+       * rather than as geometry punched through a sheet.
        */
-      function buildObstacles() {
-        const stoneMaterial = new THREE.MeshStandardNodeMaterial({
-          color: new THREE.Color().setRGB(0.16, 0.148, 0.132),
-          roughness: 0.92,
-          metalness: 0,
-        });
-        const obstacles = [];
+      function buildTrees() {
+        const wood = new THREE.MeshStandardNodeMaterial({ roughness: 0.88, metalness: 0 });
+        wood.colorNode = Fn(() => {
+          const wp = positionWorld;
+          const grain = mx_noise_float(vec3(wp.x.mul(1.7), wp.y.mul(0.65), wp.z.mul(1.7)));
+          return mix(
+            vec3(0.028, 0.033, 0.041),
+            vec3(0.082, 0.09, 0.104),
+            saturate(grain.mul(0.5).add(0.5)),
+          );
+        })();
+
+        const foliage = new THREE.MeshStandardNodeMaterial({ roughness: 0.72, metalness: 0 });
+        // Two noise scales: a coarse one deciding which clumps are in shade and
+        // which catch the moon, a fine one breaking up the flat icosahedron facets
+        // so they do not read as faceted solids.
+        foliage.colorNode = Fn(() => {
+          const wp = positionWorld;
+          const clump = mx_noise_float(vec3(wp.x.mul(0.5), wp.y.mul(0.38), wp.z.mul(0.5)));
+          const fine = mx_noise_float(vec3(wp.x.mul(3.2), wp.y.mul(3.2), wp.z.mul(3.2)));
+          const base = mix(
+            vec3(0.009, 0.036, 0.031),
+            vec3(0.05, 0.122, 0.074),
+            saturate(clump.mul(0.5).add(0.5)),
+          ).toVar();
+          return mix(base, base.mul(1.55), saturate(fine.mul(0.4).add(0.32)));
+        })();
+
+        const addField = (placements, options, castShadow) => {
+          const field = buildTreeField(placements, options);
+          for (const [geometry, material] of [[field.wood, wood], [field.foliage, foliage]]) {
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = castShadow;
+            mesh.receiveShadow = castShadow;
+            scene.add(mesh);
+          }
+          return field.obstacles;
+        };
 
         // Phase chosen so the default camera looks through the GAP between two
-        // stones rather than straight into one.
-        const STONE_COUNT = 7;
-        for (let i = 0; i < STONE_COUNT; i++) {
-          const angle = (i / STONE_COUNT) * Math.PI * 2 + 0.91;
-          const distance = 9.4 + rand() * 0.8;
-          const x = Math.cos(angle) * distance;
-          const z = Math.sin(angle) * distance;
-          const height = 2.6 + rand() * 1.6;
-          const width = 0.7 + rand() * 0.45;
-
-          const stone = new THREE.Mesh(new THREE.BoxGeometry(width, height, width * 0.72), stoneMaterial);
-          stone.position.set(x, height * 0.5 - 0.15, z);
-          stone.rotation.set((rand() - 0.5) * 0.1, angle + (rand() - 0.5) * 0.5, (rand() - 0.5) * 0.12);
-          stone.castShadow = true;
-          stone.receiveShadow = true;
-          scene.add(stone);
-
-          obstacles.push({ x, z, radius: width * 0.5 + 0.85 });
+        // trees rather than straight into a trunk.
+        const placements = [];
+        const RING_COUNT = 7;
+        for (let i = 0; i < RING_COUNT; i++) {
+          const angle = (i / RING_COUNT) * Math.PI * 2 + 0.91;
+          const distance = 11.6 + rand() * 1.2;
+          placements.push({
+            x: Math.cos(angle) * distance,
+            z: Math.sin(angle) * distance,
+            height: 4.6 + rand() * 2.1,
+          });
         }
 
-        const BOULDERS = [
+        // Saplings inside the ring, short enough that the fog swallows most of
+        // each one — which is the cheapest possible depth cue for its height.
+        const SAPLINGS = [
           [-4.6, 5.4], [5.1, -6.3], [-6.9, -3.2], [2.4, 7.6], [7.2, 3.1], [-2.1, -7.8],
         ];
-        for (const [x, z] of BOULDERS) {
-          const scale = 0.55 + rand() * 0.5;
-          const boulder = new THREE.Mesh(new THREE.IcosahedronGeometry(scale, 0), stoneMaterial);
-          boulder.position.set(x, scale * 0.55, z);
-          boulder.rotation.set(rand() * 3.14, rand() * 3.14, rand() * 3.14);
-          boulder.scale.set(1, 0.75 + rand() * 0.4, 1);
-          boulder.castShadow = true;
-          boulder.receiveShadow = true;
-          scene.add(boulder);
-
-          obstacles.push({ x, z, radius: scale + 0.5 });
+        for (const [x, z] of SAPLINGS) {
+          placements.push({ x, z, height: 2.2 + rand() * 1.4 });
         }
 
-        // Scenery outside the simulated square. Not obstacles — they exist only
-        // so the fog's hard 30 m boundary has something beyond it to read against
-        // instead of ending in empty haze.
-        for (let i = 0; i < 14; i++) {
+        const obstacles = addField(placements, { depth: 4, foliageScale: 0.85 }, true);
+
+        // Scenery outside the simulated square. Not obstacles, no shadows, and
+        // one recursion level shallower — they exist only so the fog's hard 30 m
+        // boundary has something beyond it to read against instead of ending in
+        // empty haze.
+        const distant = [];
+        for (let i = 0; i < 22; i++) {
           const angle = rand() * Math.PI * 2;
-          const distance = 26 + rand() * 55;
-          const height = 1.6 + rand() * 4.5;
-          const width = 0.8 + rand() * 1.6;
-          const far = new THREE.Mesh(new THREE.BoxGeometry(width, height, width * 0.8), stoneMaterial);
-          far.position.set(Math.cos(angle) * distance, height * 0.5 - 0.2, Math.sin(angle) * distance);
-          far.rotation.y = rand() * Math.PI;
-          scene.add(far);
+          const distance = 25 + rand() * 62;
+          distant.push({
+            x: Math.cos(angle) * distance,
+            z: Math.sin(angle) * distance,
+            height: 4 + rand() * 4.5,
+          });
         }
+        addField(distant, { depth: 3 }, false);
 
         return obstacles;
       }
 
       function buildPlayer() {
+        // Red, and slightly emissive. A red albedo under a blue-white moon comes
+        // out almost black (red channel is all it can reflect), so the emissive is
+        // what keeps the capsule reading as a marker rather than a hole.
         const material = new THREE.MeshStandardNodeMaterial({
-          color: new THREE.Color().setRGB(0.62, 0.6, 0.55),
-          roughness: 0.4,
-          metalness: 0.05,
+          color: new THREE.Color().setRGB(0.66, 0.05, 0.04),
+          emissive: new THREE.Color().setRGB(0.22, 0.014, 0.01),
+          roughness: 0.36,
+          metalness: 0.04,
         });
         const mesh = new THREE.Mesh(
           new THREE.CapsuleGeometry(PLAYER_RADIUS, PLAYER_MID, 6, 20),
@@ -665,6 +692,7 @@
         u.playerRadius.value = params.playerRadius / fog.areaSize;
         u.densityScale.value = params.densityScale;
         u.steps.value = params.steps;
+        u.dither.value = params.dither;
         if (fog.height !== params.height) fog.setHeight(params.height);
         boundsHelper.scale.copy(fog.mesh.scale);
         boundsHelper.position.copy(fog.mesh.position);
