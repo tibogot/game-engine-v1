@@ -387,6 +387,95 @@ console.log("\n=== THE GATE OPENS WHEN THE BONNET ARRIVES, NOT THE MIDDLE ===");
     /_carFootprint\(car, s\.angle\)/.test(src) && /CHASSIS_HULL\.length/.test(src));
 }
 
+console.log("\n=== THE GATE NEVER ENDS UP INSIDE THE CAR ===");
+// Two separate ways it did. The panel could not be displaced far enough (`want`
+// is clamped to maxAngle) and the car drove on with it 0.57 m into the bodywork;
+// and once the car was mostly through, `held` went false while its TAIL was
+// still in the doorway, so the spring swung the gate shut across the car —
+// measured in the running page at ~1.0 m, half a car width.
+{
+  const P = PHYSICS_PROP_TYPES.gate;
+  const hull = CHASSIS_HULL;
+  const hw = hull.width / 2, hl = hull.length / 2;
+
+  /** Deepest reach of the panel segment into the car's plan rectangle. */
+  const panelInsideCar = (angle, pos, quat) => {
+    const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
+    const rgt = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+    const cx = pos.x + fwd.x * hull.offsetZ, cz = pos.z + fwd.z * hull.offsetZ;
+    let deep = 0;
+    for (let i = 0; i <= 48; i++) {
+      const t = i / 48;
+      const px = Math.cos(angle) * P.width * t, pz = -Math.sin(angle) * P.width * t;
+      const u = (px - cx) * rgt.x + (pz - cz) * rgt.z;
+      const w = (px - cx) * fwd.x + (pz - cz) * fwd.z;
+      if (Math.abs(u) > hw || Math.abs(w) > hl) continue;
+      deep = Math.max(deep, Math.min(hw - Math.abs(u), hl - Math.abs(w)));
+    }
+    return deep;
+  };
+
+  const runPass = ({ x, speed }) => {
+    const root = new THREE.Object3D();
+    const phys = new PropPhysics({ props: { instances: [{ id: "gate", root }] }, getGroundBvh: () => null });
+    phys.sync();
+    const g = phys.sims[0];
+    const body = {
+      pos: V(x, 0.5, -14), vel: V(0, 0, speed), quat: new THREE.Quaternion(),
+      getVelocityAtPoint(_p, o) { return o.copy(this.vel); },
+    };
+    let worst = 0, drift = 0, addedSpeed = 0;
+    for (let i = 0; i < 10 / DT && body.pos.z < 16; i++) {
+      body.pos.addScaledVector(body.vel, DT);
+      const before = body.vel.length();
+      phys.tick(DT, { enabled: true, body });
+      addedSpeed += Math.max(0, body.vel.length() - before);
+      worst = Math.max(worst, panelInsideCar(g.angle, body.pos, body.quat));
+      drift = Math.max(drift, Math.abs(body.pos.x - x));
+    }
+    return { worst, drift, addedSpeed };
+  };
+
+  // Crossings CLEAR OF THE HINGE POST. A car within ~1.24 m of the hinge is
+  // sitting on the post (hull half-width 1.05 + the post's 0.19 reach), and no
+  // panel angle can clear a car that the panel's own root is underneath — that
+  // case belongs to the post, which is a capsule collider on the vehicle side.
+  let worst = 0, drift = 0, added = 0;
+  for (const x of [1.4, 2.2, 3.0, 3.6, 4.3]) {
+    for (const speed of [8, 20, 40]) {
+      const r = runPass({ x, speed });
+      worst = Math.max(worst, r.worst);
+      drift = Math.max(drift, r.drift);
+      added = Math.max(added, r.addedSpeed);
+    }
+  }
+  check("the panel never ends up inside the bodywork",
+    worst < 0.02, `worst ${worst.toFixed(3)} m (was 0.57 forcing, ~1.0 closing)`);
+
+  // THE REQUIREMENT THAT MATTERS. An earlier fix achieved the above by pushing
+  // the CAR out of the panel, which was worse than the bug: the panel is swung
+  // BY the car, so the overlap to correct can be enormous, and the gate flung
+  // the car sideways out of the doorway — 12.6 m over one pass, 1.87 m in a
+  // single tick.
+  check("...and the gate never moves the car to achieve it",
+    drift < 1e-6, `${drift.toFixed(3)} m of lateral drift`);
+  check("...nor ever speeds it up", added < 1e-6, `${added.toFixed(3)} m/s added`);
+
+  const src = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadPropPhysics.js"), "utf8");
+  check("the fix is on the PANEL — it only ever writes the hinge angle",
+    /_keepPanelClearOfCar\(s, car\)/.test(src));
+  check("...and nothing in the gate touches car.pos",
+    !/car\.pos\.addScaledVector/.test(src));
+  // Resistance still exists, but as a pure speed scrub: applied along the panel
+  // normal it steered the car, because that normal swings with the panel.
+  check("resistance scrubs SPEED rather than pushing along the panel normal",
+    /car\.vel\.multiplyScalar\(Math\.max\(0, \(speed - drop\) \/ speed\)\)/.test(src));
+
+  // The panel has to be able to lay back past the doorway, or it is pinned
+  // against the car on every ordinary pass.
+  check("the panel can swing past 90 degrees", P.maxAngle > Math.PI / 2,
+    `${P.maxAngle} rad = ${(P.maxAngle * 180 / Math.PI).toFixed(0)}°`);
+}
 console.log("\n=== THE COLLIDER OVERLAY DRAWS WHAT THE SIM USES ===");
 // "Show colliders" is a debugging instrument, so a wireframe that does not sit
 // on the thing it describes costs more time than it saves. Both of its errors

@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — Interactive Ground Fog</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #0b0e11; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; left: 10px; z-index: 10; width: 296px;
+             max-height: calc(100vh - 20px); overflow-y: auto;
+             background: rgba(12,16,20,0.9); border: 1px solid #2a343c;
+             border-radius: 8px; padding: 12px 14px; }
+      #hud h1 { margin: 0 0 4px; font-size: 13px; letter-spacing: .04em;
+             text-transform: uppercase; color: #8fb8d8; }
+      #hud h2 { margin: 12px 0 6px; font-size: 11px; letter-spacing: .06em;
+             text-transform: uppercase; color: #6f8494;
+             border-top: 1px solid #232c34; padding-top: 9px; }
+      .row { display: flex; justify-content: space-between; gap: 12px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .sl { margin: 5px 0; }
+      .sl label { display: flex; justify-content: space-between; font-size: 11px; color: #a8b6c0; }
+      .sl label b { color: #e8f0f5; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .sl input { width: 100%; margin: 1px 0 0; accent-color: #4a9ae0; }
+      .btns { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0 2px; }
+      .btns button { flex: 1 1 60px; padding: 5px 3px; font-size: 11px; cursor: pointer;
+             background: #1a222a; color: #cfd8de; border: 1px solid #2f3b45; border-radius: 5px; }
+      .btns button.on { background: #2b6cb0; border-color: #4a9ae0; color: #fff; }
+      .swatches { display: flex; gap: 8px; margin: 7px 0 2px; }
+      .swatches label { flex: 1; display: flex; align-items: center; justify-content: space-between;
+             font-size: 11px; color: #a8b6c0; }
+      .swatches input { width: 44px; height: 20px; padding: 0; cursor: pointer;
+             background: none; border: 1px solid #2f3b45; border-radius: 4px; }
+      .note { margin-top: 9px; padding-top: 8px; border-top: 1px solid #2a343c;
+             color: #8b99a4; font-size: 11px; }
+      #err { color: #ff8c8c; }
+      #tip { position: fixed; bottom: 10px; left: 10px; z-index: 10; color: #6f8494;
+             font-size: 11px; background: rgba(12,16,20,0.8); padding: 6px 10px;
+             border-radius: 6px; border: 1px solid #232c34; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Interactive Ground Fog</h1>
+      <div class="row"><span>FPS</span><b id="s-fps">—</b></div>
+      <div class="row"><span>Density field</span><b id="s-res">—</b></div>
+      <div class="row"><span>Walk speed</span><b id="s-speed">—</b></div>
+
+      <h2>Scene</h2>
+      <div class="btns" id="toggles">
+        <button data-toggle="autoWalk" class="on">Auto walk</button>
+        <button data-toggle="follow">Follow cam</button>
+        <button data-toggle="inset" class="on">Field inset</button>
+        <button data-toggle="bounds">Bounds</button>
+        <button data-toggle="depthTest" class="on">Depth test</button>
+        <button id="reprime">Re-prime</button>
+      </div>
+      <div class="btns" id="presets">
+        <button data-preset="gist" class="on">Gist defaults</button>
+        <button data-preset="thick">Thick</button>
+        <button data-preset="gale">Gale</button>
+        <button data-preset="ghost">Ghost</button>
+      </div>
+
+      <h2>Simulation</h2>
+      <div id="ui-sim"></div>
+
+      <h2>Volume</h2>
+      <div id="ui-volume"></div>
+      <div class="swatches">
+        <label><span>Fog</span><input type="color" id="c-fog" /></label>
+        <label><span>Shadow</span><input type="color" id="c-shadow" /></label>
+      </div>
+
+      <h2>Player</h2>
+      <div id="ui-player"></div>
+
+      <h2>Tone mapping</h2>
+      <div class="btns" id="tonemap">
+        <button data-tm="none">None</button>
+        <button data-tm="neutral" class="on">Neutral</button>
+        <button data-tm="aces">ACES</button>
+      </div>
+      <div class="note">The fog math is identical to the Unity original; this is
+        the knob that decides whether it <em>looks</em> identical.</div>
+
+      <div class="note" id="s-note">Booting…</div>
+      <div class="note" id="err"></div>
+    </div>
+    <div id="tip">WASD / arrows to walk · Shift to run · drag to orbit · scroll to zoom</div>
+
+    <script type="module">
+      // ── Interactive Ground Fog lab ───────────────────────────────────────────
+      // Showcase for the TSL port in ./fog/groundFogTsl.js (see that file for the
+      // port decisions). Everything here is set dressing whose only job is to
+      // make the fog legible:
+      //
+      //   - a capsule as the player, because the effect is entirely about what
+      //     the player's own velocity does to the field; the capsule is the
+      //     contact point and carves the hole the wake trails from
+      //   - a ring of standing stones as FogObstacles, so you can watch wind
+      //     flow fog around static geometry and see the baked mask working
+      //   - a low backlit sun, because a raking light is what makes a wake in a
+      //     pale fog read at all
+      //   - the raw 256² density field in a corner inset, since the whole trick
+      //     is that this expensive-looking volume is one small 2D texture
+      import * as THREE from "three";
+      import {
+        Fn, abs, dot, float, max, mix, mx_noise_float, normalize, positionWorld,
+        pow, saturate, step, texture, uniform, uv, vec2, vec3, vec4,
+      } from "three/tsl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { GROUND_FOG_DEFAULTS, GroundFog } from "./fog/groundFogTsl.js";
+
+      const AREA_SIZE = GROUND_FOG_DEFAULTS.areaSize; // 30 m, the gist's value
+      const GROUND_RADIUS = 120;
+      const SKY_RADIUS = 400;
+
+      // Capsule: 0.42 radius + 1.16 mid-section = 2.0 m tall, so the fog's dense
+      // lower band sits around its waist.
+      const PLAYER_RADIUS = 0.42;
+      const PLAYER_MID = 1.16;
+      const PLAYER_BASE_Y = PLAYER_RADIUS + PLAYER_MID * 0.5;
+
+      // Low and raking in from the left, roughly side-on to the default camera.
+      // The volume shader is unlit, so the sun never touches the fog itself — the
+      // only depth cues it can supply are the lit faces of whatever stands in the
+      // fog and the long shadows those cast across it. Putting the sun BEHIND the
+      // scene (the obvious choice for backlit fog) therefore just turns every
+      // stone into a black silhouette, because there is no scattering to light.
+      const SUN_DIR = new THREE.Vector3(-0.62, 0.24, 0.3).normalize();
+      const SKY_ZENITH = vec3(0.045, 0.075, 0.145);
+      const SKY_HORIZON = vec3(0.4, 0.3, 0.27);
+      const HAZE_COLOR = new THREE.Color().setRGB(0.4, 0.3, 0.27);
+
+      const $ = (id) => document.getElementById(id);
+      const setNote = (t) => { $("s-note").textContent = t; };
+      const linearHex = (rgb) =>
+        `#${new THREE.Color().setRGB(...rgb).getHexString(THREE.SRGBColorSpace)}`;
+
+      // ── parameters ───────────────────────────────────────────────────────────
+      const params = {
+        push: GROUND_FOG_DEFAULTS.push,
+        swirl: GROUND_FOG_DEFAULTS.swirl,
+        regrow: GROUND_FOG_DEFAULTS.regrow,
+        windX: GROUND_FOG_DEFAULTS.wind[0],
+        windZ: GROUND_FOG_DEFAULTS.wind[1],
+        playerRadius: GROUND_FOG_DEFAULTS.playerRadius,
+        densityScale: GROUND_FOG_DEFAULTS.densityScale,
+        steps: GROUND_FOG_DEFAULTS.steps,
+        height: GROUND_FOG_DEFAULTS.height,
+        moveSpeed: 4.5,
+        autoWalk: true,
+        follow: false,
+        inset: true,
+        bounds: false,
+        depthTest: true,
+      };
+      const DEFAULTS = { ...params };
+      const TOGGLE_KEYS = ["autoWalk", "follow", "inset", "bounds", "depthTest"];
+
+      // Slider spec: [key, label, min, max, step]
+      const UI = {
+        "ui-sim": [
+          ["push", "Push strength", 0, 10, 0.1],
+          ["swirl", "Swirl strength", 0, 10, 0.1],
+          ["regrow", "Regrow rate", 0, 2, 0.01],
+          ["windX", "Wind X", -0.08, 0.08, 0.002],
+          ["windZ", "Wind Z", -0.08, 0.08, 0.002],
+          ["playerRadius", "Player radius (m)", 0.3, 6, 0.05],
+        ],
+        "ui-volume": [
+          ["densityScale", "Density scale", 0, 20, 0.1],
+          ["steps", "Raymarch steps", 4, 64, 1],
+          ["height", "Slab height (m)", 1, 8, 0.1],
+        ],
+        "ui-player": [["moveSpeed", "Walk speed (m/s)", 1, 12, 0.1]],
+      };
+
+      const PRESETS = {
+        gist: {},
+        // Denser and shallower: the fog stops being a veil and starts being a
+        // surface you plough through.
+        thick: { densityScale: 12, regrow: 0.55, height: 2.1 },
+        // Wind dominates the player. Watch the wake get bent downwind instead of
+        // staying symmetric behind the capsule.
+        gale: { windX: 0.055, windZ: 0.02, push: 6.5, swirl: 3.2, regrow: 0.12 },
+        // Player-dominated: a wide swirling trail that lingers for seconds. Push
+        // any harder with regrow this low and the capsule stops leaving a wake
+        // and just vacuums the whole field flat within a lap.
+        ghost: { push: 7, swirl: 5.5, regrow: 0.15, densityScale: 9 },
+      };
+
+      const TONE_MAPPING = {
+        none: THREE.NoToneMapping,
+        neutral: THREE.NeutralToneMapping,
+        aces: THREE.ACESFilmicToneMapping,
+      };
+
+      // Deterministic layout, so the stone circle is the same every reload.
+      let seed = 1337;
+      const rand = () => {
+        seed = (seed * 1664525 + 1013904223) % 4294967296;
+        return seed / 4294967296;
+      };
+
+      let renderer, scene, camera, controls, fog, player, ground, boundsHelper;
+      let insetMesh, insetMaterials;
+      const uSunDir = uniform(new THREE.Vector3().copy(SUN_DIR));
+
+      async function init() {
+        renderer = new THREE.WebGPURenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setClearColor(HAZE_COLOR);
+        renderer.toneMapping = THREE.NeutralToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        scene = new THREE.Scene();
+        // Distance haze so the ground plane's edge dissolves instead of ending.
+        // The volume material opts out (fog = false) — it does its own extinction.
+        scene.fog = new THREE.Fog(HAZE_COLOR, 30, 170);
+
+        camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, SKY_RADIUS * 2);
+        // Low enough that the fog is seen across its top surface, which is where
+        // the wake and the swirl actually live.
+        camera.position.set(3.2, 4.3, 15.5);
+        scene.add(camera); // the inset quad is parented to it
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.07;
+        controls.maxPolarAngle = Math.PI * 0.495; // never orbit under the ground
+        controls.minDistance = 3;
+        controls.maxDistance = 70;
+        controls.target.set(0, 0.9, 0);
+
+        buildLights();
+        buildSky();
+        buildGround();
+        player = buildPlayer();
+
+        fog = new GroundFog(renderer, { center: new THREE.Vector3(0, 0, 0) });
+        scene.add(fog.mesh);
+
+        boundsHelper = new THREE.LineSegments(
+          new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
+          new THREE.LineBasicMaterial({ color: 0x4a9ae0, transparent: true, opacity: 0.35, fog: false }),
+        );
+        boundsHelper.visible = false;
+        scene.add(boundsHelper);
+
+        fog.setObstacles(buildObstacles());
+        buildInset();
+        buildUI();
+        syncFog();
+
+        // Start with fully grown fog rather than an empty texture.
+        fog.prime(player.position);
+
+        addEventListener("resize", onResize);
+        addEventListener("keydown", onKeyDown);
+        addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+
+        window.__fogLab = { renderer, scene, camera, controls, fog, player, params };
+
+        $("s-res").textContent = `${fog.resolution}² · ${AREA_SIZE} m`;
+        setNote("Ready. One 256² R16F texture is doing all of this.");
+        renderer.setAnimationLoop(frame);
+      }
+
+      // ── environment ──────────────────────────────────────────────────────────
+      function buildLights() {
+        const sun = new THREE.DirectionalLight(0xffd2a1, 3.2);
+        sun.position.copy(SUN_DIR).multiplyScalar(45);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        // Sized to the fog area, not the ground plane — nothing outside the
+        // simulated square is worth spending shadow texels on.
+        const extent = AREA_SIZE * 0.62;
+        sun.shadow.camera.left = -extent;
+        sun.shadow.camera.right = extent;
+        sun.shadow.camera.top = extent;
+        sun.shadow.camera.bottom = -extent;
+        sun.shadow.camera.near = 1;
+        sun.shadow.camera.far = 120;
+        sun.shadow.bias = -0.0008;
+        sun.shadow.normalBias = 0.03;
+        scene.add(sun);
+
+        // Dusk fill: cool from the sky, warm bounce off the ground. Carries the
+        // shadow sides on its own, since there is no bounce light in the scene.
+        scene.add(new THREE.HemisphereLight(0x6d8bad, 0x33281f, 0.9));
+      }
+
+      function buildSky() {
+        const material = new THREE.MeshBasicNodeMaterial({
+          side: THREE.BackSide,
+          depthWrite: false,
+          fog: false,
+        });
+        material.colorNode = Fn(() => {
+          const dir = normalize(positionWorld);
+          const grad = saturate(dir.y.mul(1.5).add(0.05));
+          const sky = mix(SKY_HORIZON, SKY_ZENITH, pow(grad, float(0.7))).toVar();
+          const sunAmount = saturate(dot(dir, uSunDir));
+          sky.addAssign(vec3(1.0, 0.72, 0.45).mul(pow(sunAmount, float(180)).mul(2.2)));
+          sky.addAssign(vec3(1.0, 0.6, 0.34).mul(pow(sunAmount, float(7)).mul(0.3)));
+          return vec4(sky, 1);
+        })();
+
+        const mesh = new THREE.Mesh(new THREE.SphereGeometry(SKY_RADIUS, 32, 16), material);
+        mesh.frustumCulled = false;
+        scene.add(mesh);
+      }
+
+      function buildGround() {
+        const geometry = new THREE.PlaneGeometry(GROUND_RADIUS * 2, GROUND_RADIUS * 2, 1, 1);
+        geometry.rotateX(-Math.PI / 2);
+
+        const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
+        // Dark, mottled earth. Kept deliberately low-key: the fog is pale and
+        // nearly opaque, so any albedo detail under it is wasted, and contrast
+        // is what sells the wake.
+        material.colorNode = Fn(() => {
+          const wp = positionWorld;
+          const coarse = mx_noise_float(vec3(wp.x.mul(0.085), wp.z.mul(0.085), float(2.3)));
+          const fine = mx_noise_float(vec3(wp.x.mul(0.6), wp.z.mul(0.6), float(7.1)));
+          const soil = mix(
+            vec3(0.052, 0.045, 0.038),
+            vec3(0.125, 0.108, 0.086),
+            saturate(coarse.mul(0.5).add(0.5)),
+          );
+          return mix(soil, soil.mul(0.55), saturate(fine.mul(0.45).add(0.3)));
+        })();
+
+        ground = new THREE.Mesh(geometry, material);
+        ground.receiveShadow = true;
+        scene.add(ground);
+      }
+
+      /**
+       * Standing stones in a ring plus scattered boulders. Returns the
+       * {x, z, radius} list for GroundFog.setObstacles — the fog radii are a
+       * little wider than the visible stone so the clearing reads as fog being
+       * pushed aside rather than as geometry clipping through it.
+       */
+      function buildObstacles() {
+        const stoneMaterial = new THREE.MeshStandardNodeMaterial({
+          color: new THREE.Color().setRGB(0.16, 0.148, 0.132),
+          roughness: 0.92,
+          metalness: 0,
+        });
+        const obstacles = [];
+
+        // Phase chosen so the default camera looks through the GAP between two
+        // stones rather than straight into one.
+        const STONE_COUNT = 7;
+        for (let i = 0; i < STONE_COUNT; i++) {
+          const angle = (i / STONE_COUNT) * Math.PI * 2 + 0.91;
+          const distance = 9.4 + rand() * 0.8;
+          const x = Math.cos(angle) * distance;
+          const z = Math.sin(angle) * distance;
+          const height = 2.6 + rand() * 1.6;
+          const width = 0.7 + rand() * 0.45;
+
+          const stone = new THREE.Mesh(new THREE.BoxGeometry(width, height, width * 0.72), stoneMaterial);
+          stone.position.set(x, height * 0.5 - 0.15, z);
+          stone.rotation.set((rand() - 0.5) * 0.1, angle + (rand() - 0.5) * 0.5, (rand() - 0.5) * 0.12);
+          stone.castShadow = true;
+          stone.receiveShadow = true;
+          scene.add(stone);
+
+          obstacles.push({ x, z, radius: width * 0.5 + 0.85 });
+        }
+
+        const BOULDERS = [
+          [-4.6, 5.4], [5.1, -6.3], [-6.9, -3.2], [2.4, 7.6], [7.2, 3.1], [-2.1, -7.8],
+        ];
+        for (const [x, z] of BOULDERS) {
+          const scale = 0.55 + rand() * 0.5;
+          const boulder = new THREE.Mesh(new THREE.IcosahedronGeometry(scale, 0), stoneMaterial);
+          boulder.position.set(x, scale * 0.55, z);
+          boulder.rotation.set(rand() * 3.14, rand() * 3.14, rand() * 3.14);
+          boulder.scale.set(1, 0.75 + rand() * 0.4, 1);
+          boulder.castShadow = true;
+          boulder.receiveShadow = true;
+          scene.add(boulder);
+
+          obstacles.push({ x, z, radius: scale + 0.5 });
+        }
+
+        // Scenery outside the simulated square. Not obstacles — they exist only
+        // so the fog's hard 30 m boundary has something beyond it to read against
+        // instead of ending in empty haze.
+        for (let i = 0; i < 14; i++) {
+          const angle = rand() * Math.PI * 2;
+          const distance = 26 + rand() * 55;
+          const height = 1.6 + rand() * 4.5;
+          const width = 0.8 + rand() * 1.6;
+          const far = new THREE.Mesh(new THREE.BoxGeometry(width, height, width * 0.8), stoneMaterial);
+          far.position.set(Math.cos(angle) * distance, height * 0.5 - 0.2, Math.sin(angle) * distance);
+          far.rotation.y = rand() * Math.PI;
+          scene.add(far);
+        }
+
+        return obstacles;
+      }
+
+      function buildPlayer() {
+        const material = new THREE.MeshStandardNodeMaterial({
+          color: new THREE.Color().setRGB(0.62, 0.6, 0.55),
+          roughness: 0.4,
+          metalness: 0.05,
+        });
+        const mesh = new THREE.Mesh(
+          new THREE.CapsuleGeometry(PLAYER_RADIUS, PLAYER_MID, 6, 20),
+          material,
+        );
+        mesh.position.set(0, PLAYER_BASE_Y, 0);
+        mesh.castShadow = true;
+        scene.add(mesh);
+        return mesh;
+      }
+
+      // ── density field inset ──────────────────────────────────────────────────
+      // Parented to the camera rather than drawn in a second viewport pass: one
+      // render call, no viewport/scissor juggling, and it survives resizes with
+      // a single layout call.
+      function buildInset() {
+        insetMaterials = fog.densityTextures.map((densityTexture) => {
+          const material = new THREE.MeshBasicNodeMaterial({
+            transparent: true, // so it sorts AFTER the fog volume
+            depthTest: false,
+            depthWrite: false,
+            fog: false,
+          });
+          material.fragmentNode = Fn(() => {
+            const q = uv().toVar();
+            // Flip v so the inset reads as a minimap: +Z is down-screen, which
+            // matches the default camera looking along -Z.
+            const density = texture(densityTexture)
+              .sample(vec2(q.x, float(1).sub(q.y)))
+              .level(0).r;
+            const field = mix(
+              vec3(0.02, 0.03, 0.045),
+              vec3(0.78, 0.85, 1.0),
+              saturate(density.mul(0.85)),
+            );
+            const edge = max(abs(q.x.sub(0.5)), abs(q.y.sub(0.5)));
+            return vec4(mix(field, vec3(0.1, 0.14, 0.18), step(float(0.478), edge)), 1);
+          })();
+          return material;
+        });
+
+        insetMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), insetMaterials[0]);
+        insetMesh.renderOrder = 999;
+        insetMesh.frustumCulled = false;
+        camera.add(insetMesh);
+        layoutInset();
+      }
+
+      function layoutInset() {
+        const distance = 1;
+        const height = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)) * distance;
+        const width = height * camera.aspect;
+        const size = Math.min(height, width) * 0.24;
+        const margin = size * 0.16;
+        insetMesh.scale.set(size, size, 1);
+        insetMesh.position.set(
+          width * 0.5 - size * 0.5 - margin,
+          -(height * 0.5 - size * 0.5 - margin),
+          -distance,
+        );
+      }
+
+      // ── player movement ──────────────────────────────────────────────────────
+      const keys = new Set();
+      const MOVE_KEYS = new Set([
+        "w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright",
+      ]);
+      const UP = new THREE.Vector3(0, 1, 0);
+      const forward = new THREE.Vector3();
+      const right = new THREE.Vector3();
+      const desiredVelocity = new THREE.Vector3();
+      const velocity = new THREE.Vector3();
+      const previousPosition = new THREE.Vector3();
+      const leanAxis = new THREE.Vector3();
+      let autoTime = 0;
+      let bobPhase = 0;
+
+      function onKeyDown(event) {
+        const key = event.key.toLowerCase();
+        keys.add(key);
+        if (MOVE_KEYS.has(key)) {
+          if (key.startsWith("arrow")) event.preventDefault();
+          if (params.autoWalk) setToggle("autoWalk", false);
+        }
+      }
+
+      function updatePlayer(dt) {
+        previousPosition.copy(player.position);
+
+        if (params.autoWalk) {
+          // Figure-eight, so the capsule walks back through fog it cleared a few
+          // seconds ago. Crossing your own wake is the only way to actually see
+          // what the regrow rate is doing. Sized to stay INSIDE the stone circle,
+          // which keeps the capsule from disappearing behind a menhir and keeps
+          // the stones framing the shot.
+          autoTime += dt;
+          const a = autoTime * 0.4;
+          player.position.x = Math.sin(a) * 7.2;
+          player.position.z = Math.sin(a * 2) * 4.1;
+          velocity
+            .subVectors(player.position, previousPosition)
+            .divideScalar(Math.max(dt, 1e-4));
+          velocity.y = 0;
+        } else {
+          camera.getWorldDirection(forward);
+          forward.y = 0;
+          if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
+          forward.normalize();
+          right.crossVectors(forward, UP).normalize();
+
+          const ahead = (keys.has("w") || keys.has("arrowup") ? 1 : 0)
+            - (keys.has("s") || keys.has("arrowdown") ? 1 : 0);
+          const strafe = (keys.has("d") || keys.has("arrowright") ? 1 : 0)
+            - (keys.has("a") || keys.has("arrowleft") ? 1 : 0);
+
+          desiredVelocity.set(0, 0, 0)
+            .addScaledVector(forward, ahead)
+            .addScaledVector(right, strafe);
+          if (desiredVelocity.lengthSq() > 1e-6) {
+            desiredVelocity
+              .normalize()
+              .multiplyScalar(params.moveSpeed * (keys.has("shift") ? 2.1 : 1));
+          }
+          // ~0.12 s to reach speed. The push term scales with player speed, so
+          // acceleration is directly visible in the fog and worth smoothing —
+          // teleporting the velocity makes the wake snap into existence.
+          velocity.lerp(desiredVelocity, 1 - Math.exp(-dt / 0.12));
+          player.position.addScaledVector(velocity, dt);
+        }
+
+        const limit = AREA_SIZE * 0.5 - 1.2;
+        player.position.x = THREE.MathUtils.clamp(player.position.x, -limit, limit);
+        player.position.z = THREE.MathUtils.clamp(player.position.z, -limit, limit);
+
+        const speed = Math.hypot(velocity.x, velocity.z);
+        const normalized = Math.min(1, speed / Math.max(params.moveSpeed, 1e-3));
+
+        bobPhase += dt * speed * 3.4;
+        player.position.y = PLAYER_BASE_Y + Math.abs(Math.sin(bobPhase)) * 0.06 * normalized;
+
+        // Lean into the direction of travel: axis = up × velocity.
+        if (speed > 1e-3) {
+          leanAxis.set(velocity.z, 0, -velocity.x).normalize();
+          player.quaternion.setFromAxisAngle(leanAxis, normalized * 0.09);
+        } else {
+          player.quaternion.identity();
+        }
+
+        return speed;
+      }
+
+      // ── UI ───────────────────────────────────────────────────────────────────
+      const sliders = {};
+      const format = (v) =>
+        Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+
+      function buildUI() {
+        for (const [containerId, spec] of Object.entries(UI)) {
+          const host = $(containerId);
+          for (const [key, label, min, max, stepValue] of spec) {
+            const wrap = document.createElement("div");
+            wrap.className = "sl";
+            wrap.innerHTML =
+              `<label><span>${label}</span><b></b></label>`
+              + `<input type="range" min="${min}" max="${max}" step="${stepValue}" />`;
+            const input = wrap.querySelector("input");
+            const out = wrap.querySelector("b");
+            input.value = params[key];
+            host.appendChild(wrap);
+
+            const show = () => { out.textContent = format(params[key]); };
+            show();
+            input.addEventListener("input", () => {
+              params[key] = parseFloat(input.value);
+              show();
+              syncFog();
+            });
+            sliders[key] = { input, show };
+          }
+        }
+
+        $("c-fog").value = linearHex(GROUND_FOG_DEFAULTS.fogColor);
+        $("c-shadow").value = linearHex(GROUND_FOG_DEFAULTS.shadowColor);
+        $("c-fog").addEventListener("input", (e) => {
+          fog.uniforms.fogColor.value.setStyle(e.target.value, THREE.SRGBColorSpace);
+        });
+        $("c-shadow").addEventListener("input", (e) => {
+          fog.uniforms.shadowColor.value.setStyle(e.target.value, THREE.SRGBColorSpace);
+        });
+
+        $("toggles").addEventListener("click", (e) => {
+          const button = e.target.closest("button[data-toggle]");
+          if (button) setToggle(button.dataset.toggle, !params[button.dataset.toggle]);
+        });
+        $("reprime").addEventListener("click", () => {
+          fog.prime(player.position);
+          setNote("Field re-primed (90 steps @ 0.1 s).");
+        });
+
+        $("presets").addEventListener("click", (e) => {
+          const button = e.target.closest("button");
+          if (!button) return;
+          [...$("presets").children].forEach((c) => c.classList.toggle("on", c === button));
+          // Presets are fog tunings, not scene state — whatever the camera and
+          // the toggles are doing survives a preset change.
+          const kept = {};
+          for (const key of TOGGLE_KEYS) kept[key] = params[key];
+          Object.assign(params, DEFAULTS, PRESETS[button.dataset.preset], kept);
+          for (const [key, slider] of Object.entries(sliders)) {
+            slider.input.value = params[key];
+            slider.show();
+          }
+          syncFog();
+        });
+
+        $("tonemap").addEventListener("click", (e) => {
+          const button = e.target.closest("button");
+          if (!button) return;
+          [...$("tonemap").children].forEach((c) => c.classList.toggle("on", c === button));
+          // The WebGPU renderer tone maps in a cached full-screen output pass
+          // keyed on this value, so no material needs invalidating.
+          renderer.toneMapping = TONE_MAPPING[button.dataset.tm];
+        });
+
+        syncToggleButtons();
+      }
+
+      function setToggle(key, value) {
+        params[key] = value;
+        if (key === "inset") insetMesh.visible = value;
+        if (key === "bounds") boundsHelper.visible = value;
+        if (key === "depthTest") fog.setDepthTest(value);
+        syncToggleButtons();
+      }
+
+      function syncToggleButtons() {
+        for (const button of $("toggles").querySelectorAll("button[data-toggle]")) {
+          button.classList.toggle("on", !!params[button.dataset.toggle]);
+        }
+      }
+
+      function syncFog() {
+        const u = fog.uniforms;
+        u.push.value = params.push;
+        u.swirl.value = params.swirl;
+        u.regrow.value = params.regrow;
+        u.wind.value.set(params.windX, params.windZ);
+        u.playerRadius.value = params.playerRadius / fog.areaSize;
+        u.densityScale.value = params.densityScale;
+        u.steps.value = params.steps;
+        if (fog.height !== params.height) fog.setHeight(params.height);
+        boundsHelper.scale.copy(fog.mesh.scale);
+        boundsHelper.position.copy(fog.mesh.position);
+      }
+
+      function onResize() {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+        layoutInset();
+      }
+
+      // ── frame loop ───────────────────────────────────────────────────────────
+      let lastTime = performance.now();
+      let lastFpsTime = lastTime;
+      let frames = 0;
+
+      function frame() {
+        const now = performance.now();
+        // Clamped hard: advection distance and the regrow lerp are both dt-scaled,
+        // so one long frame both over-carves the wake and over-heals it. This is
+        // the same fps sensitivity the Unity original has.
+        const dt = Math.min((now - lastTime) / 1000, 1 / 30);
+        lastTime = now;
+
+        const speed = updatePlayer(dt);
+        fog.update(dt, player.position);
+        insetMesh.material = insetMaterials[fog.currentIndex];
+
+        if (params.follow) {
+          controls.target.lerp(player.position, 1 - Math.exp(-dt / 0.5));
+        }
+        controls.update();
+        renderer.render(scene, camera);
+
+        frames++;
+        if (now - lastFpsTime >= 500) {
+          $("s-fps").textContent = Math.round((frames * 1000) / (now - lastFpsTime));
+          $("s-speed").textContent = `${speed.toFixed(1)} m/s`;
+          frames = 0;
+          lastFpsTime = now;
+        }
+      }
+
+      init().catch((e) => {
+        $("err").textContent = String(e?.message || e);
+        console.error(e);
+      });
+    </script>
+  </body>
+</html>

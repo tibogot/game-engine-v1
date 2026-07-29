@@ -130,8 +130,17 @@ export const PHYSICS_PROP_TYPES = {
     width: GATE_WIDTH,
     height: GATE_HEIGHT,
     baseY: GATE_BASE_Y,
-    /** Radians the panel may swing either way. */
-    maxAngle: 1.5,
+    /**
+     * Radians the panel may swing either way.
+     *
+     * Past 90°, deliberately. At exactly 90° the panel lies along the doorway
+     * and is only just out of the way; anything approaching off-centre needs
+     * more than that, and 1.5 rad (85.9°) never even reached parallel — so the
+     * clamp bound constantly and the car was left pressing on a panel that had
+     * run out of travel. 1.75 rad is 100°: the panel lays back past the opening
+     * the way a real gate swings against its stop.
+     */
+    maxAngle: 1.75,
     /** Spring back to closed (1/s²) and its damping (1/s). Together these ARE
      *  the feel: stiff+damped = a shop door, soft+loose = a saloon door. */
     spring: 14,
@@ -602,8 +611,25 @@ export class PropPhysics {
           // gate face must stay free, or it grabs the car sideways. And never
           // below minPushSpeed, so a gate can always be nosed open.
           const vN = car.vel.dot(_n);
-          const target = Math.sign(vN) * Math.max(p.minPushSpeed, Math.abs(vN) * brake);
-          car.vel.addScaledVector(_n, target - vN);
+          // SCRUB SPEED, DO NOT STEER.
+          //
+          // This applied its correction ALONG THE PANEL NORMAL, and that normal
+          // swings round with the panel — so removing a through-panel component
+          // necessarily injected a sideways one, and the car came out of the gate
+          // pointing somewhere else. Measured against an identical run with the
+          // gate deleted: 4.4 m of lateral drift, purely from a prop that is
+          // supposed to cost speed and nothing else.
+          //
+          // The gate wants to take energy, not to aim the car. Taking the same
+          // amount off the speed leaves the direction untouched, which is what
+          // "a knock, not a wall" always meant.
+          const floor = Math.min(Math.abs(vN), p.minPushSpeed);
+          const target = Math.max(floor, Math.abs(vN) * brake);
+          const drop = Math.abs(vN) - target;
+          const speed = car.vel.length();
+          if (drop > 0 && speed > 1e-4) {
+            car.vel.multiplyScalar(Math.max(0, (speed - drop) / speed));
+          }
         }
       } else {
         s.pushSide = 0; // out of range: next contact re-picks a side
@@ -620,5 +646,55 @@ export class PropPhysics {
 
     _q.setFromAxisAngle(_up, s.angle);
     s.inst.root.quaternion.copy(s.home.quat).multiply(_q);
+
+    // KEEP THE PANEL OUT OF THE CAR — by moving the PANEL, never the car.
+    //
+    // The spring is what puts it there. `held` stops the gate closing only while
+    // the car's footprint still overlaps the panel's own ray, and a car that has
+    // driven most of the way through is past that while its TAIL is still in the
+    // doorway — so the gate swung shut through the back of the car. Measured in
+    // the running page at every crossing point: ~1.0 m of panel inside the
+    // bodywork, which is half a car width, i.e. the panel sweeping across the
+    // centreline.
+    //
+    // An earlier attempt fixed this by pushing the CAR out instead, and that was
+    // worse than the bug: the panel is being swung by the car, so the overlap it
+    // has to correct can be enormous, and it flung the car sideways out of the
+    // doorway — 12.6 m of displacement over one pass, 1.87 m in a single tick.
+    // A gate is allowed to stop moving. It is not allowed to drive the car.
+    if (car) this._keepPanelClearOfCar(s, car);
+
+    _q.setFromAxisAngle(_up, s.angle);
+    s.inst.root.quaternion.copy(s.home.quat).multiply(_q);
+  }
+
+  /**
+   * Back the panel off to the edge of the car if the swing put it inside.
+   *
+   * Costs the car nothing: this only ever writes `s.angle`. The panel stops
+   * against the bodywork exactly as a real gate would, and the car carries on
+   * with its speed and its heading untouched.
+   */
+  _keepPanelClearOfCar(s, car) {
+    const p = s.profile;
+    _qi.copy(s.home.quat).invert();
+    _v.copy(car.pos).sub(s.home.pos).applyQuaternion(_qi);
+    if (_v.y < -1.0 || _v.y > p.baseY + p.height + 0.4) return; // over or under it
+
+    const fp = this._carFootprint(car, s.angle);
+    if (fp.dist >= p.width) return;      // bodywork out of the panel's reach
+    if (fp.full) return;                 // hinge inside the car: nowhere to go
+    if (fp.rel <= fp.lo || fp.rel >= fp.hi) return; // already clear
+
+    // Out to whichever edge of the wedge is nearer — the shortest way back to
+    // not intersecting, which is also the side it swung in from.
+    const toLo = fp.rel - fp.lo, toHi = fp.hi - fp.rel;
+    s.angle += toLo < toHi ? -toLo : toHi;
+    if (s.angle > p.maxAngle) s.angle = p.maxAngle;
+    else if (s.angle < -p.maxAngle) s.angle = -p.maxAngle;
+    // It stopped against something; carrying the closing speed would just drive
+    // it straight back in on the next tick.
+    if (s.angVel * (toLo < toHi ? -1 : 1) < 0) s.angVel = 0;
+    s.blocking = 1;
   }
 }
