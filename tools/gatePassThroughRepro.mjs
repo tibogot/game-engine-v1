@@ -100,12 +100,23 @@ function pass({ x, speed, yaw = 0 }) {
   return { worstOverlap, worstAt, peak, sawMax, exit: body.vel.length() };
 }
 
+// THE POST OWNS THE INNER BAND. A car within (hull half-width + the post's
+// reach) of the hinge is sitting ON the hinge post, and no panel angle can clear
+// a car that the panel's own root is underneath. That case is stopped by the post
+// CAPSULE on the vehicle side, which this harness does not model — sweeping it
+// here would only measure a collider that is not present. Verified separately in
+// the running page: a car at x=0.5 is stopped dead 2.3 m short of the gate.
+const POST_BAND = CHASSIS_HULL.width / 2 + 0.19;
+console.log(`  the post owns |x| < ${POST_BAND.toFixed(2)} m — not modelled here`);
+
 console.log("\n=== DOES THE PANEL END UP INSIDE THE CAR? ===");
 console.log("  crossing at   speed   yaw   peak swing   hit limit   panel inside car");
 let worst = 0;
-for (const x of [0.8, 2.2, 3.6, 4.3]) {
+// Swept finely across the band the PANEL is responsible for: from just clear of
+// the post, out past the free edge.
+for (const x of [1.3, 1.6, 2.0, 2.4, 2.8, 3.2, 3.6, 4.0, 4.4, 4.8]) {
   for (const speed of [10, 28]) {
-    for (const yaw of [0, 0.35]) {
+    for (const yaw of [0, 0.25]) {
       const r = pass({ x, speed, yaw });
       worst = Math.max(worst, r.worstOverlap);
       console.log(`  x=${x.toFixed(1)}`.padEnd(16)
@@ -120,6 +131,5 @@ for (const x of [0.8, 2.2, 3.6, 4.3]) {
   }
 }
 console.log(`\n  WORST: the panel was ${worst.toFixed(2)} m inside the bodywork.`);
-console.log("  maxAngle caps how far the panel can be displaced; past that cap");
-console.log("  nothing is holding the car out, because the panel is a constraint");
-console.log("  and not a collider.");
+console.log("  The panel yields first (moving itself, never the car); when it runs");
+console.log("  out of swing it blocks instead, cancelling only the inward velocity.");

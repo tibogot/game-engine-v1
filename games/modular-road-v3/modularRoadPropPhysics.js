@@ -683,18 +683,61 @@ export class PropPhysics {
 
     const fp = this._carFootprint(car, s.angle);
     if (fp.dist >= p.width) return;      // bodywork out of the panel's reach
-    if (fp.full) return;                 // hinge inside the car: nowhere to go
+    // Hinge inside the car: the panel's own root is under the bodywork, so no
+    // angle can clear it. Nothing to yield to — go straight to blocking.
+    if (fp.full) { this._blockCarAtPanel(s, car); return; }
     if (fp.rel <= fp.lo || fp.rel >= fp.hi) return; // already clear
 
     // Out to whichever edge of the wedge is nearer — the shortest way back to
     // not intersecting, which is also the side it swung in from.
     const toLo = fp.rel - fp.lo, toHi = fp.hi - fp.rel;
-    s.angle += toLo < toHi ? -toLo : toHi;
-    if (s.angle > p.maxAngle) s.angle = p.maxAngle;
-    else if (s.angle < -p.maxAngle) s.angle = -p.maxAngle;
+    const useLo = toLo < toHi;
+    let next = s.angle + (useLo ? -toLo : toHi);
+    // RAN OUT OF SWING. This is the whole case the gate could never handle: the
+    // panel is against its stop and still inside the car, so yielding further is
+    // not available and something has to hold the car out.
+    let jammed = false;
+    if (next > p.maxAngle) { next = p.maxAngle; jammed = true; }
+    else if (next < -p.maxAngle) { next = -p.maxAngle; jammed = true; }
+    s.angle = next;
     // It stopped against something; carrying the closing speed would just drive
     // it straight back in on the next tick.
-    if (s.angVel * (toLo < toHi ? -1 : 1) < 0) s.angVel = 0;
+    if (s.angVel * (useLo ? -1 : 1) < 0) s.angVel = 0;
     s.blocking = 1;
+    if (jammed) this._blockCarAtPanel(s, car);
+  }
+
+  /**
+   * Stop the car at a panel that has run out of swing.
+   *
+   * STOPPING IS NOT PUSHING, and the difference is the whole point. This cancels
+   * the component of velocity carrying the car INTO the panel and does nothing
+   * else: no repositioning, no energy added, tangential motion untouched. The car
+   * cannot advance into the panel, can slide along it, and can always reverse
+   * back out — which is exactly how the chassis already behaves against a wall.
+   *
+   * An earlier attempt at this repositioned the car instead and flung it 12.6 m
+   * sideways over a single pass. Velocity-only cannot do that: penetration only
+   * deepens while the car is still moving inward, and that is precisely what is
+   * being removed here.
+   */
+  _blockCarAtPanel(s, car) {
+    const p = s.profile;
+    // Panel frame at the settled angle, plan view. `_n` ends up as the outward
+    // face normal on whichever side the car is on.
+    const ax = Math.cos(s.angle), az = -Math.sin(s.angle);
+    const nx = -az, nz = ax;
+    _qi.copy(s.home.quat).invert();
+    _v.copy(car.pos).sub(s.home.pos).applyQuaternion(_qi);
+    _fwd.set(0, 0, 1).applyQuaternion(car.quat).applyQuaternion(_qi);
+    const fl = Math.hypot(_fwd.x, _fwd.z);
+    const cx = _v.x + (fl > 1e-6 ? (_fwd.x / fl) * CHASSIS_HULL.offsetZ : 0);
+    const cz = _v.z + (fl > 1e-6 ? (_fwd.z / fl) * CHASSIS_HULL.offsetZ : 0);
+    const d = cx * nx + cz * nz;
+    if (Math.abs(d) < 1e-6) return; // dead on the panel plane: no side to hold
+    _n.set(nx, 0, nz).applyQuaternion(s.home.quat).multiplyScalar(d >= 0 ? 1 : -1);
+    const vIn = car.vel.dot(_n);
+    if (vIn < 0) car.vel.addScaledVector(_n, -vIn);
+    void p;
   }
 }
