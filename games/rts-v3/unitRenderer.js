@@ -79,6 +79,7 @@ function buildTemplate(gltf, { targetLength, targetHeight, excludeRotorsFromBox,
   let hasBody = false;
   root.traverse((o) => {
     if (!o.isMesh) return;
+    dequantizeGeometry(o.geometry);
     if (excludeRotorsFromBox && rotorKind(o, root)) return;
     box.expandByObject(o);
     hasBody = true;
@@ -140,6 +141,23 @@ function paint(geo, color) {
 }
 
 /**
+ * Rewrite quantized GLB attributes (KHR_mesh_quantization int16) as Float32.
+ * WebGPU requires arrayStride to be a multiple of 4; 3 × int16 = 6 bytes, which
+ * breaks InstancedMesh / merged geometry that three does not pad for us.
+ */
+function dequantizeGeometry(g) {
+  for (const name of Object.keys(g.attributes)) {
+    const a = g.attributes[name];
+    if (a.array instanceof Float32Array && !a.normalized) continue;
+    const out = new Float32Array(a.count * a.itemSize);
+    for (let i = 0; i < a.count; i++) {
+      for (let c = 0; c < a.itemSize; c++) out[i * a.itemSize + c] = a.getComponent(i, c);
+    }
+    g.setAttribute(name, new THREE.BufferAttribute(out, a.itemSize));
+  }
+}
+
+/**
  * One material for a merged model. `vertexColors` carries what used to be one
  * material per part, and MeshStandardMaterial replaces the GLB's
  * MeshPhysicalMaterial (the priciest shader in three — its clearcoat /
@@ -181,6 +199,7 @@ function mergeTemplateParts(root) {
     if (meshes.length < 2) return;
     const geos = meshes.map((m) => {
       const g = m.geometry.clone();
+      dequantizeGeometry(g);
       if (!isSkinned && !m.matrix.equals(_identity)) g.applyMatrix4(m.matrix);
       return paint(g, m.material.color);
     });
@@ -271,7 +290,9 @@ function buildInstancedType(tpl, scene) {
 
     const kind = o.name === "MainRotor" ? "main" : o.name === "TailRotor" ? "tail" : null;
 
-    const im = new THREE.InstancedMesh(o.geometry, refreshingMaterial(o.material), MAX_PER_TYPE);
+    const geo = o.geometry.clone();
+    dequantizeGeometry(geo);
+    const im = new THREE.InstancedMesh(geo, refreshingMaterial(o.material), MAX_PER_TYPE);
     im.count = 0;
     // The type's shadow policy (unitTypes.js). Rotors included: the turning blade
     // shadow on the ground is half of what makes a helicopter read as a helicopter.

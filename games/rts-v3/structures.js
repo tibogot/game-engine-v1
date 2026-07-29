@@ -16,7 +16,11 @@ export const STRUCTURE_TYPES = {
     name: "Command Base",
     team: "player",
     maxHp: 3000,
-    radius: 14,      // footprint (blocks pathing, and a hit target)
+    radius: 14,      // combat hit footprint
+    navRadius: 24,   // pathfinding block — hangar apron (~17 m) + unit clearance
+    // Walkable corridor on the −Z face (door / production exit). Carved after the
+    // nav circle is stamped so units path around the HQ but still drive out.
+    doorApproach: { halfWidth: 7, length: 32, dirX: 0, dirZ: -1 },
     range: 0,        // unarmed
     barWidth: 14,
     barY: 20,
@@ -27,6 +31,8 @@ export const STRUCTURE_TYPES = {
     team: "enemy",
     maxHp: 3000,
     radius: 14,
+    navRadius: 24,
+    doorApproach: { halfWidth: 7, length: 32, dirX: 0, dirZ: -1 },
     range: 0,
     barWidth: 14,
     barY: 20,

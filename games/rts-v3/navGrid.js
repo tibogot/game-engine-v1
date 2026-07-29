@@ -91,6 +91,26 @@ export function createNavGrid({
     }
   }
 
+  function structureNavRadius(s) {
+    const t = s.type ?? s;
+    return t.navRadius ?? (s.radius ?? t.radius ?? 4) + 2;
+  }
+
+  /** Stamp a structure footprint on the nav grid; HQ types also carve a door lane. */
+  function addStructureObstacle(s) {
+    const wx = s.position.x;
+    const wz = s.position.z;
+    stampCircle(wx, wz, structureNavRadius(s));
+    const ap = s.type?.doorApproach;
+    if (!ap) return;
+    const dx = ap.dirX ?? 0;
+    const dz = ap.dirZ ?? -1;
+    const len = ap.length ?? 24;
+    const hw = ap.halfWidth ?? 7;
+    const ry = Math.atan2(dx, dz);
+    carveOrientedRect(wx + dx * len * 0.5, wz + dz * len * 0.5, hw, len * 0.5, ry);
+  }
+
   // Bridges (props named "bridge*") punch a walkable corridor through whatever
   // they span — a river, say. Runs AFTER all obstacle stamping so it wins. This
   // is the one place editor-authored geometry maps to a nav *override*: place a
@@ -362,8 +382,9 @@ export function createNavGrid({
       return c ? cellToWorld(c.cx, c.cz) : { x: wx, z: wz };
     },
     rebuild: build,
-    /** Block a circle (used to stamp buildings after they're placed). */
+    /** Block a circle (legacy — prefer addStructureObstacle for buildings). */
     addObstacle: (wx, wz, radius) => { stampCircle(wx, wz, radius); },
+    addStructureObstacle,
     /** Straight-line walkability between two world points (waypoint lookahead). */
     hasLOS: (ax, az, bx, bz) => hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }),
     setDebug,

@@ -136,7 +136,7 @@ export function createBuildings({ app, structures, units, navGrid = null }) {
     list.push(b);
     structures.add?.(b);       // combat / selection / waves now see it
     // Block pathing under the footprint so units route around it, not over it.
-    navGrid?.addObstacle?.(site.x, site.z, type.radius);
+    navGrid?.addStructureObstacle?.(b);
     return b;
   }
 

@@ -161,7 +161,8 @@ export const UNIT_TYPES = {
     url: "/models/rts/low_poly_tank_compressed.glb",
     targetLength: 7,
     excludeRotorsFromBox: false,
-    facingOffset: 0,
+    // GLB hull faces +X; game heading uses +Z forward — quarter-turn correction.
+    facingOffset: Math.PI / 2,
     ringRadius: 5.5,
     barWidth: 6.5,
     barY: 4.2,

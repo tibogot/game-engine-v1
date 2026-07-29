@@ -164,7 +164,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   onStatus("Re-baking navigation…");
   navGrid.rebuild(); // the ground under every building AND node changed
   for (const s of structures.list) {
-    navGrid.addObstacle(s.position.x, s.position.z, s.radius);
+    navGrid.addStructureObstacle(s);
   }
   // Resource nodes are deliberately NOT nav obstacles: a harvester has to be able
   // to park on one, and blocking the footprint just makes it stall at the edge.
@@ -343,7 +343,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   const syncNavObstacles = () => {
     navGrid.rebuild();
     for (const s of structures.list) {
-      if (s.alive) navGrid.addObstacle(s.position.x, s.position.z, s.radius);
+      if (s.alive) navGrid.addStructureObstacle(s);
     }
   };
 
@@ -382,7 +382,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
     const navOn = devPanel?.getNavDebug?.() ?? false;
     navGrid.rebuild();
     for (const s of structures.list) {
-      navGrid.addObstacle(s.position.x, s.position.z, s.radius);
+      navGrid.addStructureObstacle(s);
     }
     minimap.rebuildTerrain();
     navGrid.setDebug(navOn);
