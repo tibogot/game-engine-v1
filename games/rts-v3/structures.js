@@ -21,6 +21,16 @@ export const STRUCTURE_TYPES = {
     barWidth: 14,
     barY: 20,
   },
+  enemyBase: {
+    typeKey: "enemyBase",
+    name: "Enemy Command Base",
+    team: "enemy",
+    maxHp: 3000,
+    radius: 14,
+    range: 0,
+    barWidth: 14,
+    barY: 20,
+  },
   turret: {
     typeKey: "turret",
     name: "Turret",
@@ -139,6 +149,37 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
     return true;
   };
 
+  // Enemy HQ — spawned on demand when a match is enabled (see spawnEnemyBase).
+  let enemyBase = null;
+
+  /** Mirror the player HQ at the top of the map. Flatten + nav rebuild is async. */
+  async function spawnEnemyBase() {
+    if (enemyBase?.alive) return enemyBase;
+    // Strip a dead entry so combat/raycast don't see a corpse.
+    if (enemyBase) {
+      const i = list.indexOf(enemyBase);
+      if (i >= 0) list.splice(i, 1);
+      enemyBase = null;
+    }
+    const s = await place(STRUCTURE_TYPES.enemyBase, 0, half * 0.72, {
+      searchRadius: half * 0.5,
+      maxSpread: 8,
+    });
+    if (!s) {
+      console.warn("[rts-v3] could not place the enemy command base.");
+      return null;
+    }
+    enemyBase = s;
+    return enemyBase;
+  }
+
+  function removeEnemyBase() {
+    if (!enemyBase) return;
+    const i = list.indexOf(enemyBase);
+    if (i >= 0) list.splice(i, 1);
+    enemyBase = null;
+  }
+
   // ── Enemy turrets: spread across the TOP of the map ─────────────────────────
   // A defensive line to push into, not a ring around your own base. Each finds
   // its own flat site, so a turret never ends up half-buried in a hillside.
@@ -187,6 +228,9 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
   return {
     list,
     base,
+    get enemyBase() { return enemyBase; },
+    spawnEnemyBase,
+    removeEnemyBase,
     updateProduction,
     /** Add a runtime structure (a player-built building) so combat/selection see it. */
     add(s) { list.push(s); },
@@ -195,9 +239,10 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
     async reanchorToTerrain(app) {
       for (const s of list) {
         if (!s.alive) continue;
+        const isHq = s.typeKey === "base" || s.typeKey === "enemyBase";
         const site = findBuildSite(app, s.position.x, s.position.z, s.radius, {
-          searchRadius: s.typeKey === "base" ? 120 : 50,
-          maxSpread: s.typeKey === "base" ? 8 : 6,
+          searchRadius: isHq ? 120 : 50,
+          maxSpread: isHq ? 8 : 6,
         });
         if (!site) {
           s.position.y = app.getWorldHeight?.(s.position.x, s.position.z) ?? s.position.y;

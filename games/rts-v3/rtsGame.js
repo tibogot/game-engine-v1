@@ -30,6 +30,7 @@ import { createResourceRenderer } from "./resourceRenderer.js";
 import { createResourceHud } from "./resourceHud.js";
 import { createHarvesting } from "./harvesting.js";
 import { createWaves } from "./waves.js";
+import { createMatch } from "./match.js";
 import { createWaveHud } from "./waveHud.js";
 import { createBuildings } from "./buildings.js";
 import { createBuildingRenderer } from "./buildingRenderer.js";
@@ -335,8 +336,24 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
 
   // Player-facing HUD: minimap (bottom-left). Baked terrain + unit blips +
   // camera viewport; click/drag to move the camera.
-  const minimap = createMinimap({ app, units, buildings, fogOfWar });
+  const minimap = createMinimap({ app, units, buildings, structures, fogOfWar });
   app.minimap = minimap;
+
+  const syncNavObstacles = () => {
+    navGrid.rebuild();
+    for (const s of structures.list) {
+      if (s.alive) navGrid.addObstacle(s.position.x, s.position.z, s.radius);
+    }
+  };
+
+  const match = createMatch({
+    structures,
+    onTerrainChanged: async () => {
+      syncNavObstacles();
+      minimap.rebuildTerrain();
+    },
+  });
+  app.match = match;
 
   // DEV UI (not player-facing): tune camera feel, unit speed, and the nav grid
   // while building the game. Collapsible, top-right.
@@ -413,6 +430,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
     units.update(dt);
     fogOfWar.update(dt);                  // vision grid → GPU shroud texture
     combat.update(dt);                    // acquire → chase → launch rockets
+    match.update(dt);                     // win/lose when enemy HQ match is on
     projectiles.update(dt, app.camera);   // rockets fly, trail, and land damage
     resourceRenderer.sync();              // only rewrites when a node visibly drains
     healthBars.begin();                   // both renderers push their bars into it
@@ -427,7 +445,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
     baseFlag?.update(dt);                 // HQ flag cloth sim
     commandCard.tick();                   // live production bar + affordability
     resourceHud.update(resources, units); // supplies / harvesters / nodes left
-    waveHud.update(dt, waves);            // wave counter, countdown, defeat
+    waveHud.update(dt, waves, match);     // wave counter, match objective, win/lose
     minimap.draw();
   };
   app.addPreRenderHook(tick);

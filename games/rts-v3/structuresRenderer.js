@@ -78,6 +78,11 @@ function mergePainted(parts, name) {
 const C_DOOR = 0x455066;   // hangar door
 const C_ROOF = 0x2a313b;   // roof / caps
 
+const BASE_PALETTE = {
+  player: { body: C_BODY, dark: C_DARK, door: C_DOOR, roof: C_ROOF, beacon: 0x64d2ff, strips: 0x64d2ff },
+  enemy: { body: 0x5a4048, dark: 0x3a2830, door: 0x4a3848, roof: 0x2a2028, beacon: 0xff6a3a, strips: 0xff6a3a },
+};
+
 // Base hangar dimensions (origin at ground centre; +Z faces the enemy/rally).
 const B_WX = 24, B_DZ = 16, B_HY = 13;  // hangar width / depth / height
 const B_OW = 11, B_OH = 6.5;            // door opening width / height
@@ -91,7 +96,8 @@ const DOOR_TRAVEL = B_OH + 0.4;         // slides up out of the opening
  * because they move / glow. The door faces +Z so produced units drive straight
  * out toward the rally point.
  */
-function buildBaseView(structureMat, bloom) {
+function buildBaseView(structureMat, bloom, paletteKey = "player") {
+  const pal = BASE_PALETTE[paletteKey] ?? BASE_PALETTE.player;
   const group = new THREE.Group();
 
   // ── Static shell (merged) ───────────────────────────────────────────────────
@@ -99,28 +105,25 @@ function buildBaseView(structureMat, bloom) {
   const add = (geo, hex) => shell.push(paint(geo, hex));
 
   // Foundation apron under the building.
-  add(new THREE.CylinderGeometry(16, 17, 1.2, 28).translate(0, 0.6, 0), C_DARK);
+  add(new THREE.CylinderGeometry(16, 17, 1.2, 28).translate(0, 0.6, 0), pal.dark);
 
   const cy = B_HY / 2;
   // Back + side walls.
-  add(new THREE.BoxGeometry(B_WX, B_HY, 1.2).translate(0, cy, -B_DZ / 2), C_BODY);
-  add(new THREE.BoxGeometry(1.2, B_HY, B_DZ).translate(-B_WX / 2, cy, 0), C_BODY);
-  add(new THREE.BoxGeometry(1.2, B_HY, B_DZ).translate(B_WX / 2, cy, 0), C_BODY);
+  add(new THREE.BoxGeometry(B_WX, B_HY, 1.2).translate(0, cy, -B_DZ / 2), pal.body);
+  add(new THREE.BoxGeometry(1.2, B_HY, B_DZ).translate(-B_WX / 2, cy, 0), pal.body);
+  add(new THREE.BoxGeometry(1.2, B_HY, B_DZ).translate(B_WX / 2, cy, 0), pal.body);
   // Front face = two pillars either side of the door + a header above it.
   const pillarW = (B_WX - B_OW) / 2;
   const pillarX = B_OW / 2 + pillarW / 2;
-  add(new THREE.BoxGeometry(pillarW, B_HY, 1.2).translate(-pillarX, cy, B_DZ / 2), C_BODY);
-  add(new THREE.BoxGeometry(pillarW, B_HY, 1.2).translate(pillarX, cy, B_DZ / 2), C_BODY);
-  add(new THREE.BoxGeometry(B_WX, B_HY - B_OH, 1.2).translate(0, B_OH + (B_HY - B_OH) / 2, B_DZ / 2), C_BODY);
-  // Overhanging roof cap.
-  add(new THREE.BoxGeometry(B_WX + 2, 1.0, B_DZ + 2).translate(0, B_HY + 0.5, 0), C_ROOF);
-  // Roof vents (a little silhouette detail).
-  add(new THREE.BoxGeometry(3, 1.4, 3).translate(-6, B_HY + 1.6, -3), C_DARK);
-  add(new THREE.BoxGeometry(3, 1.4, 3).translate(6, B_HY + 1.6, -3), C_DARK);
-  // Control tower on the back-left, taller than the hangar.
-  add(new THREE.BoxGeometry(5, 20, 5).translate(-9, 10, -5), C_BODY);
-  add(new THREE.BoxGeometry(6, 1, 6).translate(-9, 20.5, -5), C_ROOF);
-  add(new THREE.CylinderGeometry(0.35, 0.35, 4, 8).translate(-9, 22.5, -5), C_DARK);
+  add(new THREE.BoxGeometry(pillarW, B_HY, 1.2).translate(-pillarX, cy, B_DZ / 2), pal.body);
+  add(new THREE.BoxGeometry(pillarW, B_HY, 1.2).translate(pillarX, cy, B_DZ / 2), pal.body);
+  add(new THREE.BoxGeometry(B_WX, B_HY - B_OH, 1.2).translate(0, B_OH + (B_HY - B_OH) / 2, B_DZ / 2), pal.body);
+  add(new THREE.BoxGeometry(B_WX + 2, 1.0, B_DZ + 2).translate(0, B_HY + 0.5, 0), pal.roof);
+  add(new THREE.BoxGeometry(3, 1.4, 3).translate(-6, B_HY + 1.6, -3), pal.dark);
+  add(new THREE.BoxGeometry(3, 1.4, 3).translate(6, B_HY + 1.6, -3), pal.dark);
+  add(new THREE.BoxGeometry(5, 20, 5).translate(-9, 10, -5), pal.body);
+  add(new THREE.BoxGeometry(6, 1, 6).translate(-9, 20.5, -5), pal.roof);
+  add(new THREE.CylinderGeometry(0.35, 0.35, 4, 8).translate(-9, 22.5, -5), pal.dark);
 
   const shellMesh = new THREE.Mesh(mergePainted(shell, "base"), structureMat);
   shellMesh.castShadow = true;
@@ -129,7 +132,7 @@ function buildBaseView(structureMat, bloom) {
 
   // ── Door (slides up) ────────────────────────────────────────────────────────
   const door = new THREE.Mesh(
-    paint(new THREE.BoxGeometry(B_OW - 0.4, B_OH - 0.2, 0.6), C_DOOR),
+    paint(new THREE.BoxGeometry(B_OW - 0.4, B_OH - 0.2, 0.6), pal.door),
     structureMat,
   );
   door.position.set(0, DOOR_CLOSED_Y, B_DZ / 2 - 0.4); // recessed so the header hides it when up
@@ -138,14 +141,14 @@ function buildBaseView(structureMat, bloom) {
   group.add(door);
 
   // ── Emissive (beacon + door-frame strips), no shadow ────────────────────────
-  const beacon = new THREE.Mesh(new THREE.SphereGeometry(1.0, 14, 10), bloom(0x64d2ff));
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(1.0, 14, 10), bloom(pal.beacon));
   beacon.position.set(-9, 25, -5); // atop the tower mast
   group.add(beacon);
 
   // Two vertical light strips flanking the door — one mesh, pulse while producing.
   const stripL = new THREE.BoxGeometry(0.4, B_OH, 0.4).translate(-(B_OW / 2 + 0.5), B_OH / 2, B_DZ / 2);
   const stripR = new THREE.BoxGeometry(0.4, B_OH, 0.4).translate(B_OW / 2 + 0.5, B_OH / 2, B_DZ / 2);
-  const strips = new THREE.Mesh(mergeGeometries([stripL, stripR], false), bloom(0x64d2ff));
+  const strips = new THREE.Mesh(mergeGeometries([stripL, stripR], false), bloom(pal.strips));
   group.add(strips);
 
   group.userData = { door, beacon, strips };
@@ -212,7 +215,7 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     for (const s of structures.list) {
       if (!s.alive) continue;
       if (s.isBuilding) continue;      // runtime buildings have their own renderer
-      if (s.typeKey === "base") continue; // the base has its own animated view
+      if (s.typeKey === "base" || s.typeKey === "enemyBase") continue;
       const g = bodyGeoOf(s).clone();
       g.translate(s.position.x, s.position.y, s.position.z);
       parts.push(g);
@@ -254,29 +257,31 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
 
   const kindOfMesh = new Map(Object.values(kinds).map((k) => [k.im, k]));
 
-  // ── Base view: its own animated group (sliding door), placed once ────────────
-  const baseView = buildBaseView(structureMat, bloom);
+  // ── Base views: animated hangar groups (player + optional enemy HQ) ─────────
+  const baseView = buildBaseView(structureMat, bloom, "player");
   if (structures.base) {
     const bp = structures.base.position;
     baseView.position.set(bp.x, bp.y, bp.z);
-    // The RTS camera looks UP the map (toward the enemy, +Z) from behind the base,
-    // so it only ever sees the base's -Z face. Turn the HQ around so its door faces
-    // the CAMERA (-Z) — otherwise the whole door animation plays where you can't
-    // see it. Units muster on this near side too (structures.js).
+    // Door faces the camera (−Z) from the player's starting view.
     baseView.rotation.y = Math.PI;
     scene.add(baseView);
   }
-  let doorOpen = 0; // 0 shut → 1 fully up
-  let _t2 = 0;      // pulse clock for the door strips
 
-  // Raycast targets. Selection holds this ARRAY by reference, and rebuildStatic()
-  // swaps the merged mesh, so refresh it in place rather than reassigning.
+  const enemyBaseView = buildBaseView(structureMat, bloom, "enemy");
+  enemyBaseView.visible = false;
+  enemyBaseView.rotation.y = Math.PI; // door toward the player (−Z)
+  scene.add(enemyBaseView);
+
+  let doorOpen = 0;
+  let _t2 = 0;
+
   const roots = [];
   const refreshRoots = () => {
     roots.length = 0;
     if (staticMesh) roots.push(staticMesh);
     for (const k of Object.values(kinds)) roots.push(k.im);
-    roots.push(baseView); // a hit on any base part resolves to the base
+    roots.push(baseView);
+    if (structures.enemyBase?.alive) roots.push(enemyBaseView);
   };
 
   const _m = new THREE.Matrix4();
@@ -305,9 +310,9 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
 
   /** Resolve a raycast hit to its structure (base view, merged body, or a kind). */
   function structureFromHit(hit) {
-    // A hit on any child of the base group is the base.
     for (let o = hit.object; o; o = o.parent) {
       if (o === baseView) return structures.base;
+      if (o === enemyBaseView) return structures.enemyBase;
     }
 
     const kind = kindOfMesh.get(hit.object);
@@ -343,28 +348,32 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
 
     for (const k of Object.values(kinds)) k.n = 0;
 
-    // ── Base view: animate the door, glow, and hide it when the base dies ──────
+    // ── Player base view ───────────────────────────────────────────────────────
     const base = structures.base;
     if (base) {
       baseView.visible = base.alive;
       if (base.alive) {
-        // Follow the logic position — placed once at boot, the view floated
-        // whenever a terrain swap re-seated the base.
         baseView.position.set(base.position.x, base.position.y, base.position.z);
-        // Door opens while the base is producing (queue non-empty / mid-build),
-        // so units drive out through an open door. Eased, not snapped.
         const producing = (base.queue?.length ?? 0) > 0 || (base.progress ?? 0) > 0;
         doorOpen += ((producing ? 1 : 0) - doorOpen) * Math.min(1, dt * 4);
         baseView.userData.door.position.y = DOOR_CLOSED_Y + doorOpen * DOOR_TRAVEL;
-        // Door-frame strips pulse while producing, dim otherwise.
         const s = producing ? 1.2 + 0.5 * Math.sin(_t2 * 6) : 0.7;
         baseView.userData.strips.scale.set(s, 1, s);
       }
     }
 
+    // ── Enemy HQ (match mode) ───────────────────────────────────────────────────
+    const enemyBase = structures.enemyBase;
+    const showEnemyHq = enemyBase?.alive
+      && (!fogOfWar?.enabled || fogOfWar.canSeeEntity(enemyBase));
+    enemyBaseView.visible = !!showEnemyHq;
+    if (showEnemyHq) {
+      enemyBaseView.position.set(enemyBase.position.x, enemyBase.position.y, enemyBase.position.z);
+    }
+
     for (const s of structures.list) {
       if (!s.alive) continue;
-      if (s.isBuilding) continue; // rendered by buildingRenderer
+      if (s.isBuilding) continue;
 
       if (s.typeKey === "turret") {
         if (s.team === "enemy" && fogOfWar?.enabled && !fogOfWar.canSeeEntity(s)) continue;
@@ -378,6 +387,8 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
         push(kinds.head, _head, s);
         push(kinds.eye, _eye.multiplyMatrices(_head, _eyeOffset), s);
       }
+
+      if (s.typeKey === "enemyBase" && !showEnemyHq) continue;
 
       // Health bar — one instance in the shared field (see healthBar.js).
       healthBars.add(

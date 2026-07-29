@@ -107,6 +107,19 @@ export function createDevPanel({
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Match</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Enemy HQ</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-match" type="button" aria-label="Enemy HQ match">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">Spawns an enemy command base at the top of the map. Destroy it to win; lose if yours falls.</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Enemy Waves</div>
         <div class="section-body">
           <div class="prop-row">
@@ -427,6 +440,15 @@ export function createDevPanel({
   };
   setFowChecked(app?.fogOfWar?.enabled !== false);
   fowBtn.addEventListener("click", () => setFowChecked(!fowBtn.classList.contains("checked")));
+
+  // ── Symmetric HQ match ──────────────────────────────────────────────────────
+  const matchBtn = $("#dv-match");
+  const setMatchChecked = (on) => {
+    matchBtn.classList.toggle("checked", !!on);
+    app?.match?.setEnabled?.(!!on);
+  };
+  setMatchChecked(app?.match?.enabled ?? false);
+  matchBtn.addEventListener("click", () => setMatchChecked(!matchBtn.classList.contains("checked")));
 
   // ── Enemy waves ─────────────────────────────────────────────────────────────
   const wavesBtn = $("#dv-waves");

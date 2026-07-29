@@ -153,6 +153,7 @@ export function createCommandCard({
       : (s.deploy ?? 1) < 1 ? "Calibrating…"
         : s.typeKey === "radio" ? "Tactical map · vision relay"
           : s.typeKey === "captureNode" ? `Supply relay · +${s.type.incomeRate ?? 0}/s`
+          : s.typeKey === "enemyBase" ? "Primary objective · destroy to win"
             : s.range ? `Defensive emplacement · ${Math.round(s.range)}m` : "Structure";
     root.innerHTML = `
       <div class="cc-head">

@@ -1,6 +1,5 @@
-// Wave HUD — player-facing. Top-centre: which wave, how long until the next one,
-// how many enemies are still alive. Plus the two moments that matter: a wave
-// landing, and the base falling.
+// Wave + match HUD — player-facing. Top-centre: wave counter when waves are on,
+// match objective when a symmetric HQ match is active, and win/lose banners.
 const CSS = `
 #wave-hud {
   position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
@@ -17,6 +16,7 @@ const CSS = `
 #wave-hud .enemies.none { color: #6f7c86; font-weight: 400; }
 #wave-hud .next { color: #cfd8de; }
 #wave-hud .next b { color: #fff; }
+#wave-hud .objective { color: #ffb080; font-weight: 600; letter-spacing: .04em; }
 
 #wave-banner {
   position: fixed; top: 22%; left: 50%; transform: translate(-50%, -10px);
@@ -36,6 +36,7 @@ const CSS = `
 }
 #wave-end.show { opacity: 1; }
 #wave-end .title { font: 700 56px/1 system-ui; letter-spacing: .14em; color: #ff5a4a; }
+#wave-end .title.win { color: #6fd4a0; }
 #wave-end .sub { font-size: 15px; color: #cfd8de; }
 `;
 
@@ -47,6 +48,8 @@ export function createWaveHud() {
   const hud = document.createElement("div");
   hud.id = "wave-hud";
   hud.innerHTML = `
+    <span class="objective" id="wave-objective" hidden>Destroy enemy HQ</span>
+    <span class="sep" id="wave-objective-sep" hidden></span>
     <span class="w" id="wave-n">Wave —</span>
     <span class="sep"></span>
     <span class="enemies none" id="wave-enemies">no contact</span>
@@ -69,10 +72,17 @@ export function createWaveHud() {
 
   let lastWave = 0;
   let bannerT = 0;
+  let shownOutcome = null;
 
   return {
-    /** Called every frame with the live wave state. */
-    update(dt, waves) {
+    /** Called every frame with live wave + match state. */
+    update(dt, waves, match = null) {
+      const matchOn = !!match?.enabled;
+      const spawning = !!match?.spawning;
+      $("wave-objective").hidden = !matchOn;
+      $("wave-objective-sep").hidden = !matchOn;
+      $("wave-objective").textContent = spawning ? "Deploying enemy HQ…" : "Destroy enemy HQ";
+
       const n = waves.wave;
 
       if (n !== lastWave && n > 0) {
@@ -99,13 +109,26 @@ export function createWaveHud() {
           ? `next in <b>${mmss(waves.nextWaveIn)}</b>`
           : `first wave in <b>${mmss(waves.nextWaveIn)}</b>`;
 
-      if (waves.outcome === "defeat" && !end.classList.contains("show")) {
-        $("end-title").textContent = "Defeat";
-        $("end-sub").textContent = n > 1
-          ? `The base fell on wave ${n}. You held ${n - 1}.`
-          : `The base fell on the first wave.`;
-        end.classList.add("show");
+      const outcome = match?.outcome ?? (waves.enabled ? waves.outcome : null);
+      if (!outcome || outcome === shownOutcome) return;
+      shownOutcome = outcome;
+
+      const title = $("end-title");
+      const sub = $("end-sub");
+      if (outcome === "victory") {
+        title.textContent = "Victory";
+        title.classList.add("win");
+        sub.textContent = "Enemy command base destroyed.";
+      } else {
+        title.textContent = "Defeat";
+        title.classList.remove("win");
+        sub.textContent = matchOn
+          ? "Your command base was destroyed."
+          : n > 1
+            ? `The base fell on wave ${n}. You held ${n - 1}.`
+            : "The base fell on the first wave.";
       }
+      end.classList.add("show");
     },
   };
 }

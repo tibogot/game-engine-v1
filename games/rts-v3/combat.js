@@ -59,13 +59,13 @@ export function createCombat({
         target.position.x,
         target.position.y + (big ? 2 : 0.6),
         target.position.z,
-        big ? (target.typeKey === "base" ? 9 : 5) : 2.4,
+        big ? (target.typeKey === "base" || target.typeKey === "enemyBase" ? 9 : 5) : 2.4,
         big ? 26 : 11,
       );
       craters?.addCrater(
         target.position.x,
         target.position.z,
-        target.typeKey === "base" ? 7.5
+        target.typeKey === "base" || target.typeKey === "enemyBase" ? 7.5
           : target.typeKey === "turret" ? 4.8
             : target.typeKey === "trainingDummy" ? 3.2
               : target.isStructure ? 4.8 : 2.4,

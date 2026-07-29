@@ -76,7 +76,7 @@ function bakeTerrain(app) {
   return canvas;
 }
 
-export function createMinimap({ app, units, buildings = null, fogOfWar = null }) {
+export function createMinimap({ app, units, buildings = null, structures = null, fogOfWar = null }) {
   const map = app.worldSize ?? 1000;
   let terrain = bakeTerrain(app);
 
@@ -183,6 +183,16 @@ export function createMinimap({ app, units, buildings = null, fogOfWar = null })
     ctx.restore();
   }
 
+  function drawHq(x, y, hostile) {
+    ctx.fillStyle = hostile ? "#ff6a5a" : "#64d2ff";
+    ctx.strokeStyle = hostile ? "rgba(255,106,90,0.95)" : "rgba(100,210,255,0.95)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.rect(x - 4.5, y - 4.5, 9, 9);
+    ctx.fill();
+    ctx.stroke();
+  }
+
   function draw() {
     const intel = hasRadioIntel();
     root.classList.toggle("show", intel);
@@ -195,6 +205,19 @@ export function createMinimap({ app, units, buildings = null, fogOfWar = null })
 
     if (fogOfWar?.enabled && fogOfWar.miniCanvas) {
       ctx.drawImage(fogOfWar.miniCanvas, 0, 0, VIEW_PX, VIEW_PX);
+    }
+
+    const pb = structures?.base;
+    if (pb?.alive) {
+      const { x, y } = worldToMini(pb.position.x, pb.position.z);
+      drawHq(x, y, false);
+    }
+    const eb = structures?.enemyBase;
+    if (eb?.alive) {
+      if (!fogOfWar?.enabled || fogOfWar.isVisible(eb.position.x, eb.position.z)) {
+        const { x, y } = worldToMini(eb.position.x, eb.position.z);
+        drawHq(x, y, true);
+      }
     }
 
     if (buildings?.list) {
