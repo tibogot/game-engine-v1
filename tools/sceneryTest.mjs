@@ -130,8 +130,8 @@ console.log("\n=== NOTHING BLOCKS THE DRIVE-MODE MERGE ===");
 
   const game = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
   const batching = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadBatching.js"), "utf8");
-  check("drive mode merges static props, not just road pieces",
-    /function buildMergedProps/.test(game) && /materialKey\(o\.material\)/.test(game));
+  check("scenery is drawn through the shared prop instancer",
+    /new PropInstancer\(scene, props, PROP_CATALOG, \(\) => true\)/.test(game));
   // Keying the merge on material IDENTITY merges almost nothing, because every
   // prop's make() builds its own material objects — twenty poles are twenty
   // distinct-but-identical materials. Measured: poles stayed at 8.0 draws each
@@ -139,14 +139,19 @@ console.log("\n=== NOTHING BLOCKS THE DRIVE-MODE MERGE ===");
   check("...keyed on what a material RENDERS as, not its identity",
     /export function materialKey/.test(batching) && /m\.color\?\.getHexString/.test(batching));
   // A material with its own shader graph can match on every plain property and
-  // still render nothing alike.
-  check("...with custom shader graphs held back to identity",
-    /if \(m\.fragmentNode \|\| m\.outputNode \|\| m\.positionNode \|\| m\.mrtNode\) return m\.uuid;/.test(batching));
-  // Simulated props cannot be merged — they move every tick — so they get the
-  // other half of the same trade instead of being left as loose meshes.
-  check("...and simulated props INSTANCED rather than merged or left loose",
-    /if \(PHYSICS_PROP_TYPES\[inst\.id\]\) continue;/.test(game)
-    && /new PropInstancer\(/.test(game));
+  // still render nothing alike — so it is held back to identity unless it
+  // explicitly declares its graph batchable (see propInstancerTest for why that
+  // escape hatch has to exist). The LED panel must NOT declare it: its board
+  // dimensions are per-material uniforms the signature cannot see.
+  check("...with custom shader graphs held back to identity by default",
+    /if \(custom && !m\.userData\?\.batchKey\) return m\.uuid;/.test(batching));
+  const scenerySrc = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadScenery.js"), "utf8");
+  check("...and the LED panel never opts in — its uniforms are per-board",
+    !/batchKey/.test(scenerySrc));
+  // The signature key is what makes the instancing templates collapse a prop's
+  // own sub-meshes — a billboard's four materials rather than its ten boxes.
+  check("...and it is what mergeByMaterial groups on",
+    /materialKey\(o\.material\)/.test(batching));
 }
 
 console.log("\n=== MASTS AND LEGS ARE CAPSULES ===");

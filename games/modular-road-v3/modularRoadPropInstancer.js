@@ -1,28 +1,31 @@
 // ============================================================================
-// PHYSICS-PROP INSTANCER — every cone on the track in a couple of draws.
+// PROP INSTANCER — every prop on the track in a fixed handful of draws, in BOTH
+// modes.
 //
-// Static props are handled by merging (see buildMergedProps in roadGame.js), and
-// merging is off the table here for the obvious reason: a cone that gets punted
-// has to MOVE, and a merged mesh has its transforms baked into vertices.
+// One geometry and one material per prop type, N matrices. The matrices are the
+// prop roots' own world transforms, which the editor writes when you drag
+// something and the sim writes when a cone gets punted — so the same mechanism
+// covers static scenery and simulated props without caring which is which.
 //
-// Instancing is the version of the same trade that keeps the movement. One
-// geometry, one material, N matrices — and the matrices are exactly what the sim
-// already produces every tick, so the per-frame cost is a matrix copy per cone
-// rather than a draw call per mesh per cone.
+// WHY NOT JUST MERGE. Merging (one baked mesh per material, see the road pieces
+// in roadGame.js) collapses further — every prop type sharing a material becomes
+// a single draw — and it is genuinely better for geometry that never changes.
+// It is the wrong tool here for two reasons:
 //
-// WHY IT WAS WORTH DOING. Measured in the running page, 20 props, drive mode:
+//   • A merged mesh has its transforms baked into vertices, so nothing inside it
+//     can move. Cones and gates are out immediately.
+//   • Every edit invalidates the whole bake. Moving one prop of a hundred means
+//     re-merging all hundred, and the editor is where you move props constantly.
+//     Instancing writes one matrix.
 //
-//     pole        0.4 draws each   (static -> merged)
-//     billboard   0.6             (static -> merged)
-//     cone       12.65            (simulated -> neither)
+// So merging only ever paid off in drive mode, and that left the EDITOR scaling
+// linearly — measured, 100 poles cost 648 draws while building and 58 driving.
+// Which is the wrong way round: the editor is where a track gets big.
 //
-// The cone was quietly the most expensive thing on the track — four meshes each,
-// doubled by the shadow pass — and cones are the one prop you place by the
-// dozen. After this it is a fixed handful of draws for any number of them.
-//
-// The loose per-prop objects are NOT thrown away, only hidden: build mode still
-// needs something real for the gizmo to grab and for right-click picking, and
-// the sim still writes each prop's root transform, which is what gets read here.
+// The loose per-prop objects are NOT thrown away, only hidden. three's Raycaster
+// tests `layers`, not `visible` (Raycaster.js — `object.layers.test(...)` then
+// `object.raycast(...)`, no visibility check), so picking and the gizmo keep
+// working on exactly the objects they always did.
 // ============================================================================
 import * as THREE from "three";
 import { mergeByMaterial } from "./modularRoadBatching.js";
@@ -99,6 +102,11 @@ export class PropInstancer {
     const wanted = new Map();
     for (const inst of this.props.instances ?? []) {
       if (!this.isInstanceable(inst.id)) continue;
+      // HIDE HERE, not only in setEnabled. Props placed AFTER the instancer was
+      // switched on would otherwise stay visible and also get an instance — drawn
+      // twice, which reads as the optimisation doing nothing at all (measured:
+      // 200 poles at 1152 draws, slightly WORSE than before instancing).
+      inst.root.visible = !this._enabled;
       if (!wanted.has(inst.id)) wanted.set(inst.id, []);
       wanted.get(inst.id).push(inst);
     }
@@ -181,6 +189,30 @@ export class PropInstancer {
     let n = 0;
     for (const b of this._batches.values()) n += b.meshes.length;
     return n;
+  }
+
+  /**
+   * Throw away the cached templates for these types so the next sync rebuilds
+   * them from the catalog.
+   *
+   * Needed because a template is a SNAPSHOT: it holds its own copies of the
+   * materials `make()` produced, so anything that live-tunes a prop's look (the
+   * dev panel's glow colour and intensity) writes to the loose roots — which are
+   * only what the gizmo and picking act on — and never reaches what is drawn.
+   * Rebuilding is one `make()` per type, which for a glow box is a single
+   * BoxGeometry, so this is cheap enough to run on a slider drag.
+   */
+  refreshTemplates(ids) {
+    for (const id of ids) {
+      for (const p of this._templates.get(id) ?? []) p.geometry.dispose();
+      this._templates.delete(id);
+      const batch = this._batches.get(id);
+      if (batch) {
+        for (const m of batch.meshes) this.group.remove(m);
+        this._batches.delete(id);
+      }
+    }
+    this.sync();
   }
 
   dispose() {

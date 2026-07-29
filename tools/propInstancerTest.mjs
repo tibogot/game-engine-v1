@@ -79,6 +79,29 @@ console.log("=== THE TEMPLATE IS MERGED BEFORE IT IS INSTANCED ===");
     materialKey(white()) === materialKey(white()));
   check("...while different materials stay apart",
     materialKey(white()) !== materialKey(dark()));
+
+  // THE GLOWING PROPS. v3's selective bloom puts an `mrtNode` on every material
+  // that is meant to glow, which sends it down materialKey's custom-shader
+  // fallback to identity — and since each prop's make() builds its own material,
+  // that meant twenty glow rings merged into twenty meshes, i.e. not at all.
+  // Measured at 80 draws for 20 rings before `batchKey`, 4 after.
+  const glow = () => {
+    const m = new THREE.MeshStandardNodeMaterial({ color: 0xe8912d, emissive: 0xe8912d });
+    m.emissiveIntensity = 6;
+    m.mrtNode = {}; // stands in for applyBloomMRT's node
+    return m;
+  };
+  const tagged = () => { const m = glow(); m.userData.batchKey = "propBloom"; return m; };
+  check("an mrtNode alone still forces identity — that rule is right",
+    materialKey(glow()) !== materialKey(glow()));
+  check("...but a declared batchKey lets identical glow props batch",
+    materialKey(tagged()) === materialKey(tagged()));
+  check("...without flattening genuinely different ones",
+    (() => { const a = tagged(); const b = tagged(); b.emissiveIntensity = 2;
+      return materialKey(a) !== materialKey(b); })());
+  const props = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadProps.js"), "utf8");
+  check("applyPropBloom declares it, since it applies ONE uniform graph",
+    /material\.userData\.batchKey = "propBloom";/.test(props));
 }
 
 console.log("\n=== DRAW COUNT IS CONSTANT IN THE NUMBER OF PROPS ===");
@@ -177,22 +200,49 @@ console.log("\n=== BUILD MODE GETS ITS REAL OBJECTS BACK ===");
   check("...and the instanced group goes away", inst.group.visible === false);
 }
 
+console.log("\n=== NEWLY PLACED PROPS ARE TAKEN OVER TOO ===");
+// The bug this catches drew everything TWICE and read as the optimisation doing
+// nothing: setEnabled hid the roots that existed when it ran, and props placed
+// afterwards stayed visible while also getting an instance. Measured at the
+// time: 200 poles at 1152 draws, slightly worse than no instancing at all.
+{
+  const props = fakeProps(["cone"]);
+  const inst = makeInstancer(props);
+  inst.setEnabled(true);
+  check("the prop present at switch-on is hidden", props.instances[0].root.visible === false);
+  props.instances.push(fakeProps(["cone"]).instances[0]);
+  inst.sync();
+  check("...and so is one placed afterwards",
+    props.instances.every((p) => p.root.visible === false));
+  check("...with both drawn from the same batch", inst.group.children[0].count === 2);
+}
+
 console.log("\n=== WIRED INTO THE GAME ===");
 {
   const game = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
-  check("only the SIMULATED props are instanced",
-    /new PropInstancer\(\s*scene, props, PROP_CATALOG, \(id\) => !!PHYSICS_PROP_TYPES\[id\]/.test(game));
-  check("...and they are therefore skipped by the static merge",
-    /if \(PHYSICS_PROP_TYPES\[inst\.id\]\) continue;/.test(game));
-  check("it takes over on the same switch as the merged track",
-    /propInstancer\.setEnabled\(on\);/.test(game));
-  // Once per FRAME: this only copies poses the sim already settled on, so
-  // running it per substep would repeat the same GPU upload two or three times.
-  const perFrame = game.slice(game.indexOf("flags.update(dt);"), game.indexOf("checkFall();"));
-  check("matrices upload once per frame, not per physics substep",
-    /propInstancer\.update\(\);/.test(perFrame));
+  // EVERY prop, not just the simulated ones. Merging only ever paid off in drive
+  // mode — merged geometry cannot move, and every edit re-bakes the lot — which
+  // left the editor scaling linearly at 648 draws for 100 poles.
+  check("every prop type is instanced, not just the simulated ones",
+    /new PropInstancer\(scene, props, PROP_CATALOG, \(\) => true\)/.test(game));
+  check("...in BOTH modes, not on the drive-mode switch",
+    /propInstancer\.setEnabled\(true\);/.test(game)
+    && !/propInstancer\.setEnabled\(on\)/.test(game));
+  check("the static-prop merge it replaced is gone, so nothing double-hides",
+    !/buildMergedProps/.test(game));
+  // Once per FRAME and OUTSIDE the mode branch: build mode moves props through
+  // the gizmo, and per substep would repeat the same GPU upload.
+  const shared = game.slice(game.indexOf("portals.updateVisuals(dt);"));
+  check("matrices upload once per frame, in both modes",
+    /propInstancer\.update\(\);/.test(shared.slice(0, 800)));
   check("the prop set changes are pushed through",
     (game.match(/propInstancer\.sync\(\)/g) ?? []).length >= 3);
+  // Live-tuned looks are written to the loose roots, which are not what is drawn.
+  check("live glow tuning rebuilds the templates it would otherwise miss",
+    /props\.onGlowChange = \(ids\) => propInstancer\.refreshTemplates\(ids\)/.test(game));
+  const propsSrc = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadProps.js"), "utf8");
+  check("...and applyGlowParams actually raises it",
+    /this\.onGlowChange\?\.\(\["glowbox", "glowring"\]\)/.test(propsSrc));
 }
 
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nall green");

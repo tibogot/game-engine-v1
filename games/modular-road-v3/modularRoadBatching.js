@@ -31,11 +31,22 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
  * signature has no way to see the difference. `colorNode` is included BY NODE
  * IDENTITY rather than excepted, so the standard `materialColor` (a shared
  * singleton) groups while anything bespoke separates itself.
+ *
+ * `userData.batchKey` is the escape hatch from that fallback, and it is needed:
+ * the identity rule is correct in principle and defeats merging entirely for the
+ * props that glow, because v3's selective bloom puts an `mrtNode` on every one of
+ * them. Measured — twenty glow rings merged into twenty meshes, i.e. not at all,
+ * at 80 draws. A material sets `batchKey` to assert "my shader graph is fully
+ * determined by my plain properties plus this tag", which is true of a bloom
+ * treatment applied uniformly (see applyPropBloom) and false of anything with
+ * its own per-instance uniforms (the LED panel's board dimensions).
  */
 export function materialKey(m) {
   if (!m) return "-";
-  if (m.fragmentNode || m.outputNode || m.positionNode || m.mrtNode) return m.uuid;
+  const custom = m.fragmentNode || m.outputNode || m.positionNode || m.mrtNode;
+  if (custom && !m.userData?.batchKey) return m.uuid;
   return [
+    m.userData?.batchKey ?? "-",
     m.type,
     m.colorNode?.uuid ?? "-",
     m.color?.getHexString() ?? "-",

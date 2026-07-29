@@ -328,6 +328,13 @@ export const SURFACE_SNAP_MODES = ["auto", "ground", "road", "free"];
 function applyPropBloom(material) {
   applyBloomMRT(material, materialEmissive);
   material.userData.bloom = true;
+  // BATCHABLE DESPITE THE mrtNode. Every material through here gets the SAME
+  // graph — applyBloomMRT over the live `materialEmissive` node — so what it
+  // renders is fully determined by its plain `.emissive` / `.emissiveIntensity`,
+  // which the merge signature already covers. Without this tag the mrtNode sends
+  // it down materialKey's identity fallback and the glowing props stop merging
+  // entirely: measured at twenty separate meshes for twenty glow rings.
+  material.userData.batchKey = "propBloom";
   return material;
 }
 
@@ -1034,6 +1041,11 @@ export class PropManager {
         }
       });
     }
+    // The props are DRAWN from per-type instancing templates, which hold their
+    // own copies of these materials — the loose roots above are only what the
+    // gizmo and picking act on. Without this the slider would move numbers
+    // nothing on screen was reading.
+    this.onGlowChange?.(["glowbox", "glowring"]);
   }
 
   /**

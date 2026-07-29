@@ -96,7 +96,6 @@ import {
 } from "./chassisModel.js";
 import { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } from "./modularRoadSparks.js";
 import { PropPhysics, PROP_PHYSICS, PHYSICS_PROP_TYPES } from "./modularRoadPropPhysics.js";
-import { materialKey } from "./modularRoadBatching.js";
 import { PropInstancer } from "./modularRoadPropInstancer.js";
 import { ModularRoadFlags, FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
@@ -863,122 +862,30 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
   }
 
-  // ── MERGED PROPS ───────────────────────────────────────────────────────────
-  // The same trade, for the same reason, on the other half of the scene.
-  //
-  // A prop is a little tree of meshes and each one is a draw — plus another in
-  // the shadow pass. Measured in the running page: ~10 draws per cone, ~10 per
-  // billboard, ~8 per floodlight. That is fine for the handful you place while
-  // building and completely wrong for driving: forty roadside billboards is 400
-  // draws of scenery you pass at 40 m/s.
-  //
-  // Merging by MATERIAL rather than by prop is what makes it scale — twenty
-  // billboards share four materials (they share them by reference, see
-  // modularRoadScenery.js), so they merge to four draws no matter how many you
-  // place. Build mode keeps the real per-prop objects so the gizmo, picking and
-  // deletion all work on something real.
-  const mergedProps = new THREE.Group();
-  mergedProps.name = "ModularRoadPropsMerged";
-  mergedProps.visible = false;
-  scene.add(mergedProps);
-
-  function disposeMergedProps() {
-    for (const m of mergedProps.children) m.geometry?.dispose();
-    mergedProps.clear();
-  }
-
-  function buildMergedProps() {
-    disposeMergedProps();
-    scene.updateMatrixWorld(true);
-    /** key -> { material, geos } */
-    const byMaterial = new Map();
-    /** Props that are still individually visible — excluded from the merge. */
-    const kept = [];
-
-    for (const inst of props.instances ?? []) {
-      // SIMULATED PROPS ARE NOT MERGED — a cone that gets knocked flying and a
-      // gate that swings are moved by PropPhysics every tick, and geometry baked
-      // into a shared world-space mesh cannot move at all. They are INSTANCED
-      // instead (propInstancer), which keeps the movement and still collapses
-      // the draws, so they are neither merged here nor left loose.
-      if (PHYSICS_PROP_TYPES[inst.id]) continue;
-      let mergeable = true;
-      inst.root.traverse((o) => {
-        // InstancedMesh carries its transforms in a buffer this cannot bake, and
-        // it is already one draw — leaving it alone costs nothing.
-        if (o.isMesh && o.isInstancedMesh) mergeable = false;
-      });
-      if (!mergeable) { kept.push(inst); continue; }
-
-      inst.root.traverse((o) => {
-        if (!o.isMesh || !o.geometry || o.userData.noRender) return;
-        const g = o.geometry.clone();
-        g.applyMatrix4(o.matrixWorld);
-        const key = materialKey(o.material);
-        if (!byMaterial.has(key)) byMaterial.set(key, { material: o.material, geos: [] });
-        byMaterial.get(key).geos.push(g);
-      });
-      inst.root.visible = false;
-    }
-
-    for (const { material, geos } of byMaterial.values()) {
-      // Attribute mismatch makes mergeGeometries return null, and a silently
-      // missing prop is far worse than an unmerged one — so on failure the props
-      // that fed this material go back to being drawn themselves.
-      const keys = Object.keys(geos[0].attributes).sort().join(",");
-      const uniform = geos.every((g) => Object.keys(g.attributes).sort().join(",") === keys);
-      const merged = uniform ? mergeGeometries(geos, false) : null;
-      for (const g of geos) g.dispose();
-      if (!merged) { mergedProps.userData.failed = true; continue; }
-      const mesh = new THREE.Mesh(merged, material);
-      mesh.castShadow = true;
-      mesh.receiveShadow = false;
-      mesh.frustumCulled = false; // one mesh spanning the whole track
-      mergedProps.add(mesh);
-    }
-    // Any material that would not merge: un-hide everything again rather than
-    // leave a partly-drawn track.
-    if (mergedProps.userData.failed) {
-      delete mergedProps.userData.failed;
-      disposeMergedProps();
-      for (const inst of props.instances ?? []) {
-        if (!PHYSICS_PROP_TYPES[inst.id]) inst.root.visible = true;
-      }
-      return;
-    }
-    for (const inst of kept) inst.root.visible = true;
-  }
-
-  function restoreLooseProps() {
-    disposeMergedProps();
-    for (const inst of props.instances ?? []) {
-      if (!PHYSICS_PROP_TYPES[inst.id]) inst.root.visible = true;
-    }
-  }
-
-  // Cones and gates: instanced rather than merged, because they move. See
-  // modularRoadPropInstancer.js — the cone was the most expensive prop on the
-  // track precisely because it qualified for neither optimisation before.
-  const propInstancer = new PropInstancer(
-    scene, props, PROP_CATALOG, (id) => !!PHYSICS_PROP_TYPES[id],
-  );
+  // ── INSTANCED PROPS ────────────────────────────────────────────────────────
+  // EVERY prop, in BOTH modes — see modularRoadPropInstancer.js. This replaced a
+  // drive-mode-only merge, which collapsed further but could not cover the
+  // editor: merged geometry cannot move (so cones and gates were excluded) and
+  // every edit invalidates the whole bake (so dragging one prop of a hundred
+  // re-merged all hundred). Measured before: 100 poles cost 648 draws while
+  // building against 58 driving. Now both are flat.
+  const propInstancer = new PropInstancer(scene, props, PROP_CATALOG, () => true);
+  // Live glow tuning writes to the loose roots; the templates hold their own
+  // copies of those materials, so they have to be rebuilt to be seen.
+  props.onGlowChange = (ids) => propInstancer.refreshTemplates(ids);
+  propInstancer.setEnabled(true);
 
   /** Swap between editable (build) and merged (drive) track rendering. */
   function setMergedTrack(on) {
     if (on) {
       buildMergedTrack();
-      buildMergedProps();
       builder.root.visible = false; // hide instanced/proxy pieces
       mergedGroup.visible = true;
-      mergedProps.visible = true;
     } else {
       mergedGroup.visible = false;
-      mergedProps.visible = false;
       builder.root.visible = true;
       disposeMergedTrack();
-      restoreLooseProps();
     }
-    propInstancer.setEnabled(on);
   }
 
   // 4b) ── DRIVING FX + AUDIO ────────────────────────────────────────────────
@@ -2396,10 +2303,6 @@ ${e.message}`);
       // Render-rate, not the fixed step: the wave is purely visual and this only
       // advances a uniform — the flags themselves cost no CPU per frame.
       flags.update(dt);
-      // Once per FRAME, not per tick: this only copies the poses the sim already
-      // settled on into the instance buffers, so running it per substep would
-      // write the same GPU upload two or three times over.
-      propInstancer.update();
       updateDynamicDebug(); // live collider wireframes, when they are switched on
 
       checkFall(); // air-stunt: dropped off the track → last safe grounded pose
@@ -2435,6 +2338,13 @@ ${e.message}`);
     // Portal doors animate (shimmer / ring spin) in BOTH modes — this was missing,
     // so doors sat frozen.
     portals.updateVisuals(dt);
+
+    // BOTH MODES, and once per FRAME. Drive mode moves props through the sim;
+    // build mode moves them through the gizmo, and there is no single hook for
+    // "the gizmo dragged something" — so this just copies the current root poses
+    // into the instance buffers, which is a matrix write per prop and nothing
+    // else. Per SUBSTEP would repeat the same GPU upload two or three times.
+    propInstancer.update();
 
     // ONE rig owns camera.position/up per frame. Both write it directly, so
     // running both would make them alternate and the view would shake (the same
