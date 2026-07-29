@@ -11,9 +11,9 @@
 const CHECK_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 
-// Match the v3 editor's --right-w (300px). Narrower than that and prop-rows
-// (label + range + readout) clip on the right edge of the panel.
-export const DEV_PANEL_OPEN_W = 300;
+// Match the v3 editor's --right-w (300px) but give prop-rows a little more room —
+// label + range slider + 4-decimal readout clips below ~340px.
+export const DEV_PANEL_OPEN_W = 360;
 
 const FOLD_KEY = "rts-v3.devPanel.folds";
 /** Sections open on a fresh profile — the rest start folded. */
@@ -241,7 +241,9 @@ export function createDevPanel({
         <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Loaded</span>
-            <span class="prop-num dv-world-name" id="dv-world-name"></span>
+            <div class="prop-value">
+              <span class="prop-num dv-world-name" id="dv-world-name"></span>
+            </div>
           </div>
           <input type="file" id="dv-world-file" accept=".v3proj" hidden />
           <button class="action-btn" id="dv-world-load" type="button">Load .v3proj…</button>
@@ -290,9 +292,15 @@ export function createDevPanel({
       display: flex; flex-direction: column; overflow: hidden;
       font-family: var(--font);
       pointer-events: auto;
+      box-sizing: border-box;
     }
-    #rts-dev .prop-num { width: auto; min-width: 52px; }
-    #rts-dev .prop-label { width: 90px; min-width: 90px; }
+    #rts-dev .prop-row { min-width: 0; }
+    #rts-dev .prop-label { width: 100px; min-width: 100px; flex-shrink: 0; }
+    #rts-dev .prop-value { min-width: 0; overflow: visible; }
+    #rts-dev .prop-num {
+      width: auto; min-width: 58px; flex-shrink: 0;
+      white-space: nowrap; font-variant-numeric: tabular-nums;
+    }
     #rts-dev .tab-bar { flex: 0 0 auto; }
     #rts-dev .tab-content {
       flex: 1 1 auto;
@@ -327,7 +335,11 @@ export function createDevPanel({
       margin-top: 6px; font-size: 11px; line-height: 1.5; color: var(--text-dim);
     }
     #rts-dev .dv-hint b { color: var(--text); font-weight: 600; }
-    #rts-dev .dv-world-name { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #rts-dev .dv-world-name {
+      flex: 1; min-width: 0; max-width: none;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      text-align: right;
+    }
     #rts-dev .dv-hint code { font-size: 10px; color: var(--text-dim); }
     #rts-dev input[type="color"] {
       width: 36px; height: 22px; padding: 0; border: 1px solid var(--border);
