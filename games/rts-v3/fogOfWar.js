@@ -214,7 +214,7 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
 
   /** Post-process modifier — shades ground pixels using world-locked FoW UVs. */
   function createPostModifier(camera) {
-    const uEnabled = float(1);
+    const uEnabled = uniform(1);
     const uHalf = float(half);
     const uMap = float(map);
     const uInvProj = uniform(new THREE.Matrix4());
