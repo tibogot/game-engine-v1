@@ -25,7 +25,7 @@ import { createStructures } from "./structures.js";
 import { createStructuresRenderer } from "./structuresRenderer.js";
 import { createHealthBarField } from "./healthBar.js";
 import { createSelectionRingField } from "./selectionRingField.js";
-import { createResources, UNIT_COST } from "./resources.js";
+import { createResources, UNIT_COST, BUILDING_COST } from "./resources.js";
 import { createResourceRenderer } from "./resourceRenderer.js";
 import { createResourceHud } from "./resourceHud.js";
 import { createHarvesting } from "./harvesting.js";
@@ -40,6 +40,7 @@ import { createCombat } from "./combat.js";
 import { createProjectiles } from "./projectiles.js";
 import { createFireSystem } from "./fireSystem.js";
 import { createCraterSystem } from "./craterSystem.js";
+import { createFogOfWar } from "./fogOfWar.js";
 import {
   loadBootWorld,
   loadDefaultWorld,
@@ -167,32 +168,40 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   // Resource nodes are deliberately NOT nav obstacles: a harvester has to be able
   // to park on one, and blocking the footprint just makes it stall at the edge.
 
-  const structuresRenderer = createStructuresRenderer({ app, structures, healthBars });
-  app.structuresRenderer = structuresRenderer;
-
-  // Every crate of every resource node is one instance of one geometry — the whole
-  // economy layer is 1 draw call, and a draining node just shows fewer crates.
+  // Resource renderer + flag first — no unit dependency.
   const resourceRenderer = createResourceRenderer({ app, resources });
   app.resourceRenderer = resourceRenderer;
 
-  // The HQ flag — the engine's Verlet cloth prop, scaled up and planted beside
-  // the base. Its texture is importable from the dev panel.
   const baseFlag = createBaseFlag({ app, structures });
   app.baseFlag = baseFlag;
 
-  // The starting army musters at the base (bottom of the map), not the origin.
   onStatus("Spawning units…");
   const units = createUnits({ app, navGrid, origin: structures.base.position });
   app.units = units;
 
-  onStatus("Building unit visuals…");
-  const unitRenderer = await createUnitRenderer({ app, units, healthBars, selectionRings });
-  app.unitRenderer = unitRenderer;
-
-  // Player-built buildings (helipad, …): runtime structures the builder raises.
-  // They live in structures.list too, so combat/selection see them for free.
   const buildings = createBuildings({ app, structures, units, navGrid });
   app.buildings = buildings;
+
+  const fogOfWar = createFogOfWar({
+    app, units, structures, buildings,
+    getRadioIntel: () => buildings.list.some(
+      (b) => b.alive && b.typeKey === "radio" && !b.constructing && b.built >= 1,
+    ),
+  });
+  app.fogOfWar = fogOfWar;
+  fogOfWar.installPostFx(app);
+
+  onStatus("Building unit visuals…");
+  const unitRenderer = await createUnitRenderer({
+    app, units, healthBars, selectionRings, fogOfWar,
+  });
+  app.unitRenderer = unitRenderer;
+
+  const structuresRenderer = createStructuresRenderer({
+    app, structures, healthBars, fogOfWar,
+  });
+  app.structuresRenderer = structuresRenderer;
+
   const buildingRenderer = createBuildingRenderer({ app, buildings, healthBars });
   app.buildingRenderer = buildingRenderer;
 
@@ -200,7 +209,10 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   // drives there and raises it (buildings.updateBuilders).
   const buildPlacement = createBuildPlacement({
     app,
+    canAfford: (cost) => resources.canAfford(cost),
     onCommit: (typeKey, x, z, chosenBuilders) => {
+      const cost = BUILDING_COST[typeKey] ?? 0;
+      if (cost && !resources.spend(cost)) return;
       for (const b of chosenBuilders) {
         b.buildOrder = { typeKey, x, z };
         b.moveOrder?.(x, z);
@@ -294,7 +306,10 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
     structureBuilds: [
       { key: "helipad", label: "Build Helipad" },
       { key: "turret", label: "Build Turret" },
+      { key: "radio", label: "Radio Station" },
+      { key: "captureNode", label: "Supply Relay" },
     ],
+    buildingCosts: BUILDING_COST,
     onBuildStructure: (key, selected) => buildPlacement.begin(key, selected),
     onStop: () => { for (const u of app.selection?.selected ?? []) u.stop?.(); },
     onFocus: () => {
@@ -320,7 +335,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
 
   // Player-facing HUD: minimap (bottom-left). Baked terrain + unit blips +
   // camera viewport; click/drag to move the camera.
-  const minimap = createMinimap({ app, units });
+  const minimap = createMinimap({ app, units, buildings, fogOfWar });
   app.minimap = minimap;
 
   // DEV UI (not player-facing): tune camera feel, unit speed, and the nav grid
@@ -382,24 +397,21 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   rtsCamera.focusOn(structures.base.position.x, structures.base.position.z);
 
   // 5) ── THE GAME LOOP ──────────────────────────────────────────────────────
-  //    One rAF drives everything, in a deliberate order: input/camera → unit
-  //    logic → push logic into meshes → HUD. (Each system used to run its own
-  //    rAF, which made ordering between them undefined.) The ENGINE renders the
-  //    scene on its own loop; this one only updates game state.
-  let last = performance.now();
+  //    One pre-render hook drives everything, in a deliberate order: input/camera
+  //    → unit logic → push logic into meshes → HUD. Running on the engine loop
+  //    (not a separate rAF) keeps fog-of-war in sync with the render pass.
   let elapsed = 0;
-  const tick = () => {
-    const now = performance.now();
-    const dt = Math.min((now - last) / 1000, 0.05);
-    last = now;
+  const tick = (dt) => {
     elapsed += dt;
 
     rtsCamera.update(dt);
     waves.update(dt);                     // spawn the next wave, keep them marching
     structures.updateProduction(dt, (key, x, z, opts) => units.spawn(key, x, z, opts));
     buildings.update(dt);                 // construction ramp + helipad production
+    resources.tickCaptureIncome(dt, buildings);
     harvesting.update(dt);                // node → fill → base → unload → repeat
     units.update(dt);
+    fogOfWar.update(dt);                  // vision grid → GPU shroud texture
     combat.update(dt);                    // acquire → chase → launch rockets
     projectiles.update(dt, app.camera);   // rockets fly, trail, and land damage
     resourceRenderer.sync();              // only rewrites when a node visibly drains
@@ -417,10 +429,8 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
     resourceHud.update(resources, units); // supplies / harvesters / nodes left
     waveHud.update(dt, waves);            // wave counter, countdown, defeat
     minimap.draw();
-
-    app._rtsRaf = requestAnimationFrame(tick);
   };
-  app._rtsRaf = requestAnimationFrame(tick);
+  app.addPreRenderHook(tick);
 
   onStatus("ready");
   return app;

@@ -367,7 +367,7 @@ function buildCrowdType(tpl, type, app, scene) {
   return { field, rel, scale: root.scale.x };
 }
 
-export async function createUnitRenderer({ app, units, healthBars, selectionRings }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, fogOfWar = null }) {
   const { scene } = app;
   initGlbLoaderRenderer(app.renderer); // idempotent; wires KTX2 support
 
@@ -556,7 +556,12 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
 
       if (!unit.alive) {
         if (v.root) v.root.visible = false;
-        continue; // a dead unit is simply never pushed into the ring field
+        continue;
+      }
+
+      if (fogOfWar?.enabled && unit.team !== "player" && !fogOfWar.canSeeEntity(unit)) {
+        if (v.root) v.root.visible = false;
+        continue;
       }
 
       const t = unit.type;

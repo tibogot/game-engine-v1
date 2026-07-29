@@ -164,6 +164,7 @@ export function createRtsCamera({ app } = {}) {
       focusY = terrainY(x, z);
       focus.y = focusY;
     },
+    getFocusY: () => focusY,
     dispose() { unbind(); },
   };
 }

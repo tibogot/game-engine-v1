@@ -13,6 +13,7 @@ export function createCommandCard({
   productionFor = () => [],    // (structure) → [{ key, label, cost }] it can produce
   canAfford = () => true,      // (cost) → is it affordable right now?
   structureBuilds = [],        // [{ key, label }] — buildings a selected builder can raise
+  buildingCosts = {},          // { key: supplies } — shown on builder structure buttons
   onBuildStructure = () => {},
 }) {
   const root = document.createElement("div");
@@ -83,7 +84,11 @@ export function createCommandCard({
           <div class="cc-sub">${selected.length} unit${selected.length > 1 ? "s" : ""}</div>
         </div>
       </div>
-      ${builds.length ? `<div class="cc-actions">${builds.map((b) => `<button data-struct="${b.key}">${b.label}</button>`).join("")}</div>` : ""}
+      ${builds.length ? `<div class="cc-actions">${builds.map((b) => {
+        const cost = buildingCosts[b.key] ?? 0;
+        const poor = cost > 0 && !canAfford(cost);
+        return `<button data-struct="${b.key}" class="${poor ? "poor" : ""}">${b.label}${cost ? `<span class="cc-cost">${cost}</span>` : ""}</button>`;
+      }).join("")}</div>` : ""}
       <div class="cc-actions">
         <button data-act="stop">Stop</button>
         <button data-act="focus">Focus</button>
@@ -93,7 +98,11 @@ export function createCommandCard({
     root.querySelector('[data-act="focus"]').addEventListener("click", onFocus);
     for (const b of builds) {
       root.querySelector(`[data-struct="${b.key}"]`)
-        .addEventListener("click", () => onBuildStructure(b.key, selected));
+        .addEventListener("click", () => {
+          const cost = buildingCosts[b.key] ?? 0;
+          if (cost > 0 && !canAfford(cost)) return;
+          onBuildStructure(b.key, selected);
+        });
     }
   }
 
@@ -142,7 +151,9 @@ export function createCommandCard({
     const status = s.constructing
       ? "Under construction…"
       : (s.deploy ?? 1) < 1 ? "Calibrating…"
-        : s.range ? `Defensive emplacement · ${Math.round(s.range)}m` : "Structure";
+        : s.typeKey === "radio" ? "Tactical map · vision relay"
+          : s.typeKey === "captureNode" ? `Supply relay · +${s.type.incomeRate ?? 0}/s`
+            : s.range ? `Defensive emplacement · ${Math.round(s.range)}m` : "Structure";
     root.innerHTML = `
       <div class="cc-head">
         <div>

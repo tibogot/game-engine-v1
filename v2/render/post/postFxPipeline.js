@@ -102,6 +102,8 @@ export class PostFxPipeline {
      * opts in.
      */
     this._bloomSelective = false;
+    /** Optional `(sceneColorNode) => sceneColorNode` before bloom (RTS fog of war). */
+    this._sceneColorModifier = null;
     this._bloomParams = {
       strength: 0.3,
       threshold: 0.9,
@@ -273,6 +275,11 @@ export class PostFxPipeline {
     this._applySceneMRT();
     this._rebuildBloomPasses();
     this._refreshOutputNode();
+  }
+
+  setSceneColorModifier(fn) {
+    this._sceneColorModifier = typeof fn === "function" ? fn : null;
+    if (this._renderPipeline) this._refreshOutputNode();
   }
 
   setFxaaEnabled(enabled) {
@@ -674,10 +681,14 @@ export class PostFxPipeline {
   // node lets both the no-cloud path (adds solids bloom) and the cloud path
   // (adds bloom after clouds) share it. Bloom is added by `_refreshOutputNode`.
   _buildDofBaseNode() {
-    const sceneInput =
+    let sceneInput =
       this._ssaoEnabled && this._ssaoNode
         ? this._ssaoNode.getTextureNode()
         : this._scenePassColor;
+
+    if (this._sceneColorModifier) {
+      sceneInput = this._sceneColorModifier(sceneInput);
+    }
 
     if (this._dofEnabled && this._dofUniforms) {
       const viewZ = this._scenePass.getViewZNode();

@@ -21,6 +21,14 @@ export const UNIT_COST = {
   tank: 420,   // the heavy: a real investment, and it shows on the field
 };
 
+/** Builder-raised structures — charged when the builder commits the site. */
+export const BUILDING_COST = {
+  helipad: 0,
+  turret: 0,
+  radio: 120,
+  captureNode: 180,
+};
+
 const NODE_RADIUS = 5;
 const NODE_AMOUNT = 1500;   // supplies in a full node
 const STARTING_STOCK = 400; // enough for a harvester's worth of opening moves
@@ -115,6 +123,16 @@ export async function createResources({ app, startingStock = STARTING_STOCK, nod
     deposit(n) {
       stock += n;
       earned += n;
+    },
+    /** Passive income from online capture relays. */
+    tickCaptureIncome(dt, buildings) {
+      for (const b of buildings?.list ?? []) {
+        if (b.typeKey !== "captureNode" || !b.alive || b.constructing || b.built < 1) continue;
+        const rate = b.type.incomeRate ?? 0;
+        if (rate <= 0) continue;
+        stock += rate * dt;
+        earned += rate * dt;
+      }
     },
   };
 }

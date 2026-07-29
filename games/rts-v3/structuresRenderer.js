@@ -167,7 +167,7 @@ function dummyGeometry() {
 
 export const structureByMesh = new WeakMap(); // kept for API compatibility
 
-export function createStructuresRenderer({ app, structures, healthBars }) {
+export function createStructuresRenderer({ app, structures, healthBars, fogOfWar = null }) {
   const { scene } = app;
 
   // ── One merged mesh for every static structure body ─────────────────────────
@@ -367,6 +367,7 @@ export function createStructuresRenderer({ app, structures, healthBars }) {
       if (s.isBuilding) continue; // rendered by buildingRenderer
 
       if (s.typeKey === "turret") {
+        if (s.team === "enemy" && fogOfWar?.enabled && !fogOfWar.canSeeEntity(s)) continue;
         // Head tracks its target, and the eye rides in head space.
         if (s.target?.alive) {
           const dx = s.target.position.x - s.position.x;

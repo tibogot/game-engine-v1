@@ -41,6 +41,28 @@ export const BUILDING_TYPES = {
     barWidth: 6,
     barY: 10,
   },
+  radio: {
+    typeKey: "radio",
+    name: "Radio Station",
+    team: "player",
+    maxHp: 260,
+    radius: 8,
+    buildTime: 8,
+    barWidth: 8,
+    barY: 18,
+    role: "intel",       // unlocks tactical minimap + extended vision
+  },
+  captureNode: {
+    typeKey: "captureNode",
+    name: "Supply Relay",
+    team: "player",
+    maxHp: 320,
+    radius: 10,
+    buildTime: 6,
+    incomeRate: 10,      // supplies/sec while online
+    barWidth: 10,
+    barY: 16,
+  },
 };
 
 /** A structure-shaped building. Same contract as structures.js makeStructure. */

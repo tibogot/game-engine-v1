@@ -18,6 +18,7 @@ export const UNIT_TYPES = {
     damage: 11,
     fireRate: 3.2,  // shots per second
     canHitAir: true,
+    vision: 72,
     // render
     url: "/models/heli5.glb",
     targetLength: 12,
@@ -45,6 +46,7 @@ export const UNIT_TYPES = {
     damage: 14,
     fireRate: 1.8,
     canHitAir: false, // ground vehicle — can't shoot helicopters
+    vision: 38,
 
     // render
     url: "/models/jeep_compressed.glb",
@@ -68,7 +70,8 @@ export const UNIT_TYPES = {
     turnRate: 3.0,
     maxHp: 160,
     range: 0,          // no weapon — combat.js skips anything with range 0
-    builds: ["helipad", "turret"],
+    vision: 34,
+    builds: ["helipad", "turret", "radio", "captureNode"],
     // render
     url: "/models/rts/truckmilitary_compressed.glb",
     targetLength: 6,
@@ -99,6 +102,7 @@ export const UNIT_TYPES = {
     damage: 40,
     fireRate: 0.6,   // one heavy shell rather than a stream
     canHitAir: false,
+    vision: 36,
     // render
     url: "/models/rts/tankmilitary_compressed.glb",
     targetLength: 8,
@@ -126,6 +130,7 @@ export const UNIT_TYPES = {
     damage: 16,
     fireRate: 1.6,
     canHitAir: true,
+    vision: 38,
     // render
     url: "/models/rts/bigtank_compressed.glb",
     targetLength: 7,
@@ -149,6 +154,7 @@ export const UNIT_TYPES = {
     turnRate: 2.8,
     maxHp: 220,
     range: 0,          // no weapon — combat.js skips anything with range 0
+    vision: 32,
     // harvesting
     harvest: {
       capacity: 60,    // supplies per trip
@@ -178,10 +184,11 @@ UNIT_TYPES.soldier = {
   turnRate: 6,
   maxHp: 60,
   // combat — rifle: fast, weak, can plink at helicopters
-  range: 30,
-  damage: 6,
-  fireRate: 2.4,
-  canHitAir: true,
+    range: 30,
+    damage: 6,
+    fireRate: 2.4,
+    canHitAir: true,
+    vision: 42,
   // render — SKINNED (Mixamo): needs SkeletonUtils.clone + an AnimationMixer,
   // and scales by HEIGHT (a humanoid's horizontal footprint is meaningless).
   url: "/models/testsolanim.glb",

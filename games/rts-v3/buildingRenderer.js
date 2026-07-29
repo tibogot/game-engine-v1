@@ -16,6 +16,7 @@
 import * as THREE from "three";
 import { materialColor } from "three/tsl";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
+import { buildRadioTower } from "./radioKit.js";
 import {
   turretBodyGeometry, turretHeadGeometry, turretEyeGeometry, turretHeadMatrix,
   TURRET_PALETTE, EYE_LOCAL,
@@ -138,6 +139,8 @@ export function createBuildingRenderer({ app, buildings, healthBars = null }) {
     let g = views.get(b);
     if (g) return g;
     if (b.typeKey === "helipad") g = buildHelipad(b.radius);
+    else if (b.typeKey === "radio") g = buildRadioTower("radio");
+    else if (b.typeKey === "captureNode") g = buildRadioTower("capture");
     else return null;
     g.frustumCulled = false;
     scene.add(g);
@@ -227,10 +230,22 @@ export function createBuildingRenderer({ app, buildings, healthBars = null }) {
       g.position.set(b.position.x, b.position.y + gy, b.position.z);
       addBar(b, gy, camera);
 
-      // Corner lights pulse while it's actively producing (something on the pad).
-      const producing = !b.constructing && b.queue.length > 0;
-      const pulse = producing ? 0.6 + 0.4 * Math.sin(_t * 6) : 0.18;
-      for (const L of g.userData.lights) L.scale.setScalar(pulse + 0.5);
+      // Radio / relay beacons pulse when online.
+      const online = !b.constructing && b.built >= 1;
+      const pulse = online ? 0.65 + 0.35 * Math.sin(_t * (b.typeKey === "captureNode" ? 4.2 : 3)) : 0.2;
+      if (g.userData.beacon) g.userData.beacon.scale.setScalar(pulse + 0.35);
+      if (g.userData.lip) g.userData.lip.scale.setScalar(pulse + 0.25);
+      if (g.userData.ring) {
+        g.userData.ring.visible = online;
+        g.userData.ring.scale.setScalar(pulse + 0.5);
+      }
+
+      // Corner lights pulse while it's actively producing (helipad only).
+      if (g.userData.lights) {
+        const producing = !b.constructing && b.queue.length > 0;
+        const helPulse = producing ? 0.6 + 0.4 * Math.sin(_t * 6) : 0.18;
+        for (const L of g.userData.lights) L.scale.setScalar(helPulse + 0.5);
+      }
     }
 
     for (const k of Object.values(turretKinds)) {

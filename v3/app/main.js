@@ -2557,6 +2557,7 @@ export async function startV3App(opts = {}) {
   const _lodSnapVec = new THREE.Vector3();
   let _lastFrameMs = performance.now();
   let _loopErrors = 0;
+  const _preRenderHooks = [];
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     const dt  = Math.min((now - _lastFrameMs) / 1000, 0.05);
@@ -2663,6 +2664,7 @@ export async function startV3App(opts = {}) {
 
     try {
       renderer.setRenderTarget(null);
+      for (const hook of _preRenderHooks) hook(dt);
       if (!_rendererSideWork && worldEnv) {
         worldEnv.renderFrame(dt);
       } else if (!_rendererSideWork) {
@@ -6415,6 +6417,10 @@ export async function startV3App(opts = {}) {
       setBloomSelective(on) {
         worldEnv?.postFxPipeline?.setBloomSelective(!!on);
       },
+      /** `(colorNode) => colorNode` — applied to scene beauty before bloom (FoW). */
+      setSceneColorModifier(fn) {
+        worldEnv?.postFxPipeline?.setSceneColorModifier(fn);
+      },
     },
     // ── Shadow override ───────────────────────────────────────────────────────
     // CSM lives in worldToolState.csm and is NOT stored in .v3proj, so a game
@@ -6520,5 +6526,15 @@ export async function startV3App(opts = {}) {
     // box-select, building ghost). Returns null when the ray misses the ground.
     pickWorldAtClient,
     worldSize: WORLD_SIZE,
+    /** All terrain LOD meshes — games use this to bind world-space shaders (FoW, etc.). */
+    getTerrainMeshes: getTerrainMeshesForWorld,
+    /** Run a callback immediately before the main render pass (same dt as the engine loop). */
+    addPreRenderHook(fn) {
+      if (typeof fn === "function" && !_preRenderHooks.includes(fn)) _preRenderHooks.push(fn);
+    },
+    removePreRenderHook(fn) {
+      const i = _preRenderHooks.indexOf(fn);
+      if (i >= 0) _preRenderHooks.splice(i, 1);
+    },
   };
 }

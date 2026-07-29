@@ -94,6 +94,19 @@ export function createDevPanel({
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Fog of War</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Enabled</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-fow" type="button" aria-label="Fog of war">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">CoH-style shroud. Enemy units hidden until scouted.</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Enemy Waves</div>
         <div class="section-body">
           <div class="prop-row">
@@ -405,6 +418,15 @@ export function createDevPanel({
   $("#dv-debug-units").addEventListener("click", () => {
     console.table(units.list.map((u) => u.debugState()));
   });
+
+  // ── Fog of war ──────────────────────────────────────────────────────────────
+  const fowBtn = $("#dv-fow");
+  const setFowChecked = (on) => {
+    fowBtn.classList.toggle("checked", !!on);
+    app?.fogOfWar?.setEnabled?.(!!on);
+  };
+  setFowChecked(app?.fogOfWar?.enabled !== false);
+  fowBtn.addEventListener("click", () => setFowChecked(!fowBtn.classList.contains("checked")));
 
   // ── Enemy waves ─────────────────────────────────────────────────────────────
   const wavesBtn = $("#dv-waves");

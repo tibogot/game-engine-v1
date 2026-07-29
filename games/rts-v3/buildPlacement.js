@@ -9,6 +9,7 @@
 import * as THREE from "three";
 import { findBuildSite } from "./sitePlanner.js";
 import { BUILDING_TYPES } from "./buildings.js";
+import { BUILDING_COST } from "./resources.js";
 
 const OK = new THREE.Color(0x3ddc60);
 const BAD = new THREE.Color(0xe4483a);
@@ -30,7 +31,7 @@ function makeGhost(radius) {
   return g;
 }
 
-export function createBuildPlacement({ app, onCommit = () => {} }) {
+export function createBuildPlacement({ app, onCommit = () => {}, canAfford = () => true }) {
   const { scene } = app;
   const dom = app.renderer.domElement;
 
@@ -55,7 +56,8 @@ export function createBuildPlacement({ app, onCommit = () => {} }) {
 
     // Buildable exactly here? (searchRadius 0 = don't wander — validate THIS spot.)
     site = findBuildSite(app, p.x, p.z, type.radius, { searchRadius: 0 });
-    valid = !!site;
+    const cost = BUILDING_COST[typeKey] ?? 0;
+    valid = !!site && (cost <= 0 || canAfford(cost));
 
     ghost.visible = true;
     ghost.position.set(p.x, (site ? site.y : p.y) + 0.15, p.z);
