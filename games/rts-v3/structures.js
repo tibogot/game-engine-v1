@@ -90,7 +90,7 @@ function makeStructure(app, type, x, z) {
 /** Seconds to build each unit type. */
 export const BUILD_TIME = {
   soldier: 2.5, jeep: 4, builder: 4.5, harvester: 5,
-  bigtank: 6.5, tank: 10, helicopter: 7,
+  bigtank: 6.5, lightTank: 8, tank: 10, helicopter: 7,
 };
 
 // The hangar door sits on the base's -Z face, half the hangar depth from centre

@@ -58,6 +58,36 @@ export function materialKey(m) {
 }
 
 /**
+ * Expand quantized vertex attributes to plain float ones.
+ *
+ * MUST run before any matrix is applied to geometry that came out of a
+ * KHR_mesh_quantization glTF (which is most compressed exports —
+ * glTF-Transform emits it by default alongside Draco). Those files store
+ * positions as NORMALIZED Int16 with the real scale folded into the node
+ * transform, and `BufferGeometry.applyMatrix4` writes its results straight back
+ * into the underlying array: float values truncated into an Int16Array, which
+ * silently mangles the mesh rather than failing. Symptom when it bit here: a
+ * 6 m container came out 15 cm across and floating below the ground.
+ *
+ * It is also what lets quantized and unquantized geometry merge — mergeGeometries
+ * refuses to mix attributes whose array types differ.
+ */
+export function dequantize(geometry) {
+  for (const [name, attr] of Object.entries(geometry.attributes)) {
+    if (!attr.normalized && attr.array instanceof Float32Array) continue;
+    const out = new Float32Array(attr.count * attr.itemSize);
+    const get = [
+      (i) => attr.getX(i), (i) => attr.getY(i), (i) => attr.getZ(i), (i) => attr.getW(i),
+    ];
+    for (let i = 0; i < attr.count; i++) {
+      for (let c = 0; c < attr.itemSize; c++) out[i * attr.itemSize + c] = get[c](i);
+    }
+    geometry.setAttribute(name, new THREE.BufferAttribute(out, attr.itemSize, false));
+  }
+  return geometry;
+}
+
+/**
  * Turn InstancedMeshes back into ordinary geometry.
  *
  * Counter-intuitive, and measured. The v2 object builders instance because in
@@ -147,6 +177,10 @@ export function mergeByMaterial(root) {
     mesh.name = `${root.name || "merged"}_${meshes.length}`;
     mesh.castShadow = meshes.some((m) => m.castShadow);
     mesh.receiveShadow = meshes.some((m) => m.receiveShadow);
+    // Carried across, or a merge would silently strip a part's livery flag. Safe
+    // to take from the first: the group already shares one material, and
+    // tintability is a property of the material.
+    if (meshes[0].userData.tintable) mesh.userData.tintable = true;
     for (const m of meshes) {
       m.removeFromParent();
       m.geometry.dispose();

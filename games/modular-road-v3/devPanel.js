@@ -85,6 +85,30 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Prop livery</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label" id="dv-livery-name">No prop selected</span>
+          </div>
+          <div class="prop-row">
+            <div class="prop-value" id="dv-livery-swatches" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">All of this type</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-livery-random" type="button">Randomise</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Colour is a <b>per-instance tint</b>, not a second material — forty
+            containers in seven colours are the same four draw calls as forty in
+            one. Right-click a prop to select it, then click a swatch or press
+            <b>C</b> (<b>Shift+C</b> to go back). It saves with the track.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Grid snap</div>
         <div class="section-body">
           <div class="prop-row">
@@ -2029,8 +2053,48 @@ export function createRoadDevPanel({ app, game, params }) {
   // ── Live readouts ───────────────────────────────────────────────────────────
   const piecesEl = $("#dv-pieces");
   const trisEl = $("#dv-tris");
+  // ── Prop livery ─────────────────────────────────────────────────────────────
+  // Rebuilt on every refresh rather than wired once: the swatches ARE the
+  // selected prop's palette, and different prop types have different ones (or
+  // none). Cheap — a handful of buttons.
+  const liveryName = $("#dv-livery-name");
+  const liverySwatches = $("#dv-livery-swatches");
+  const liveryRandom = $("#dv-livery-random");
+  liveryRandom?.addEventListener("click", () => {
+    game.randomisePropVariants?.();
+    refresh();
+  });
+
+  function renderLiveries() {
+    if (!liverySwatches || !liveryName) return;
+    const sel = game.getSelectedProp?.();
+    const list = sel?.variants ?? [];
+    liverySwatches.innerHTML = "";
+    if (!sel) {
+      liveryName.textContent = "No prop selected";
+      return;
+    }
+    if (!list.length) {
+      liveryName.textContent = `${sel.label} — no liveries`;
+      return;
+    }
+    liveryName.textContent = `${sel.label} — ${sel.variant + 1}/${list.length}`;
+    list.forEach((hex, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.title = `Livery ${i + 1}`;
+      const on = i === sel.variant;
+      b.style.cssText = `width:26px;height:22px;border-radius:4px;cursor:pointer;`
+        + `background:#${hex.toString(16).padStart(6, "0")};`
+        + `border:2px solid ${on ? "#fff" : "rgba(255,255,255,0.25)"};`;
+      b.addEventListener("click", () => { game.setPropVariant?.(i); refresh(); });
+      liverySwatches.appendChild(b);
+    });
+  }
+
   function refresh() {
     renderMode();
+    renderLiveries();
     piecesEl.textContent = String(game.getPieceCount());
     trisEl.textContent = game.getCollisionTriCount().toLocaleString();
     if (bestEl) {

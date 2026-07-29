@@ -141,6 +141,32 @@ export const UNIT_TYPES = {
     barY: 4.4,
     castShadow: true,
   },
+  lightTank: {
+    typeKey: "lightTank",
+    name: "Light Tank",
+    // logic — agile armour: quicker than the battle tank, cheaper, lighter gun.
+    isAir: false,
+    hover: 0,
+    speed: 17,
+    radius: 4.6,
+    turnRate: 2.1,
+    maxHp: 260,
+    // combat
+    range: 42,
+    damage: 26,
+    fireRate: 0.85,
+    canHitAir: false,
+    vision: 36,
+    // render — low_poly_tank_compressed.glb normalised to ~7 m (APC scale).
+    url: "/models/rts/low_poly_tank_compressed.glb",
+    targetLength: 7,
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 5.5,
+    barWidth: 6.5,
+    barY: 4.2,
+    castShadow: true,
+  },
   harvester: {
     typeKey: "harvester",
     name: "Harvester",

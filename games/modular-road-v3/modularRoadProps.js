@@ -10,6 +10,7 @@ import {
   GATE_POST_HEIGHT,
 } from "./modularRoadPropPhysics.js";
 import { SCENERY_CATALOG, makeSceneryProp } from "./modularRoadScenery.js";
+import { makeContainer, CONTAINER_LIVERIES, CONTAINER_SIZE } from "./modularRoadContainer.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { materialEmissive, materialColor } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
@@ -47,6 +48,9 @@ const BOOST_H = 0.12; // slab thickness (flush decal)
 const _fieldInv = new THREE.Matrix4();
 const _fieldLocal = new V3();
 const _fieldFwd = new V3();
+// Scratch for stackSnap — see PropManager.stackSnap.
+const _stackLocal = new V3();
+const _stackQuat = new THREE.Quaternion();
 
 /* ----------------------------------------------------------------------- */
 /* Prop geometry builders                                                   */
@@ -431,6 +435,22 @@ function poleBandTexture() {
 }
 
 /**
+ * Give a placement its colour variant.
+ *
+ * `tint` is what the instancer writes into `InstancedMesh.instanceColor`, which
+ * three multiplies into the material's colour — so variation is a vec3 per
+ * instance and costs no extra draw, material or binding. A prop with no
+ * `variants` gets no tint at all and renders exactly as its materials say.
+ */
+function setVariant(inst, index) {
+  const list = inst.def?.variants;
+  if (!list?.length) { inst.variant = 0; inst.tint = null; return inst; }
+  inst.variant = ((index | 0) % list.length + list.length) % list.length;
+  inst.tint = new THREE.Color(list[inst.variant]);
+  return inst;
+}
+
+/**
  * @typedef {object} PropDef
  * @property {string} id
  * @property {string} label
@@ -657,6 +677,31 @@ export const PROP_CATALOG = [
       g.add(shaft, base);
       return g;
     },
+  },
+  {
+    id: "container",
+    label: "Container",
+    /**
+     * `both`, like the Box: a container is a solid you steer around AND a roof
+     * you can land on. At 2.59 m tall that is a genuine stunt feature rather
+     * than a nicety, and it is free — the deck bake and the solid bake read the
+     * same meshes.
+     *
+     * Triangle collision rather than a capsule, unlike the pole: this really is
+     * a box, so the chassis hull's surface sampling has plenty to land on and
+     * an analytic primitive would buy nothing.
+     */
+    collision: "both",
+    /**
+     * Per-placement colour, applied as an instance tint rather than as extra
+     * materials — so a yard of containers in seven liveries costs exactly what
+     * one container costs. See CONTAINER_LIVERIES for why that works.
+     */
+    variants: CONTAINER_LIVERIES,
+    /** Footprint + course height, so placements stack onto each other exactly —
+     *  see PropManager.stackSnap. */
+    stack: CONTAINER_SIZE,
+    make: () => makeContainer(),
   },
   {
     id: "box",
@@ -947,7 +992,7 @@ export class PropManager {
    */
   constructor({
     scene, camera, domElement, orbit,
-    onChange = null, onSelect = null, getSurfaceY = null,
+    onChange = null, onSelect = null, onSelectionChange = null, getSurfaceY = null,
   }) {
     this.getSurfaceY = getSurfaceY;
     this.scene = scene;
@@ -956,6 +1001,7 @@ export class PropManager {
     this.orbit = orbit;
     this.onChange = onChange;
     this.onSelect = onSelect;
+    this.onSelectionChange = onSelectionChange;
     this.enabled = false;
 
     /** @type {{id:string, def:object, root:THREE.Object3D, collision:string}[]} */
@@ -1130,6 +1176,9 @@ export class PropManager {
     }
     this.group.add(root);
     const inst = { id: typeId, def, root, collision: def.collision, restY };
+    // A new placement picks its own livery, so a run of containers is a yard
+    // rather than a warehouse order. Costs nothing to draw — see `variants`.
+    setVariant(inst, def.variants ? Math.floor(Math.random() * def.variants.length) : 0);
     root.userData.propInstance = inst;
     this.instances.push(inst);
     // A PROP YOU JUST ADDED MUST NEVER BE LEFT HANGING IN MID-AIR.
@@ -1167,6 +1216,7 @@ export class PropManager {
     root.scale.copy(src.root.scale);
     this.group.add(root);
     const inst = { id: src.id, def: src.def, root, collision: src.collision, restY: src.restY ?? 0 };
+    setVariant(inst, src.variant ?? 0); // a duplicate keeps its original's livery
     root.userData.propInstance = inst;
     this.instances.push(inst);
     this.snapToSurface(inst); // the +4,+4 offset may have landed on a different surface
@@ -1193,11 +1243,13 @@ export class PropManager {
   }
 
   deselect() {
+    const had = !!this.selected;
     this.selected = null;
     this.gizmo.detach();
     this.gizmo.enabled = false;
     this.gizmo.visible = false;
     this.selBox.visible = false;
+    if (had) this.onSelectionChange?.(null);
   }
 
   /**
@@ -1223,6 +1275,89 @@ export class PropManager {
     if (y === null || y === undefined || !Number.isFinite(y)) return false;
     p.y = y + (inst.restY ?? 0);
     return true;
+  }
+
+  /** Liveries available on the selection, or [] — drives the panel swatches. */
+  get selectedVariants() { return this.selected?.def?.variants ?? []; }
+
+  /**
+   * Set the selected prop's livery.
+   *
+   * `onVariantChange` rather than a direct call into the instancer, because
+   * PropManager does not know how its props are drawn — the tint lives on the
+   * instance and something else has to notice it moved.
+   */
+  setSelectedVariant(index) {
+    if (!this.selected?.def?.variants?.length) return false;
+    setVariant(this.selected, index);
+    this.onVariantChange?.(this.selected);
+    return true;
+  }
+
+  /** Step the selected prop's livery. `dir` −1 or +1. */
+  cycleVariant(dir = 1) {
+    if (!this.selected?.def?.variants?.length) return false;
+    return this.setSelectedVariant(this.selected.variant + dir);
+  }
+
+  /** Re-roll every placement of `typeId` (or everything) — instant yard. */
+  randomiseVariants(typeId = null) {
+    let n = 0;
+    for (const inst of this.instances) {
+      const list = inst.def?.variants;
+      if (!list?.length) continue;
+      if (typeId && inst.id !== typeId) continue;
+      setVariant(inst, Math.floor(Math.random() * list.length));
+      n++;
+    }
+    if (n) this.onVariantChange?.(null);
+    return n;
+  }
+
+  /**
+   * Snap a placement onto the prop it is landing on, if they stack.
+   *
+   * Containers are the case that needs it: they are the one prop you place in
+   * runs and towers, and a stack is only convincing if the boxes line up
+   * exactly. The vertical half already works for free — a container is
+   * `collision: "both"`, so its roof is in the deck BVH and the placement ray
+   * lands on it — but the horizontal half does not, and eyeballing x/z to the
+   * centimetre is not something anyone should be asked to do.
+   *
+   * Snapping to the SUPPORTING PROP rather than to a world grid is what makes it
+   * work at any angle: a rotated stack lines up just as well as an axis-aligned
+   * one, because the alignment is copied from what is underneath rather than
+   * computed from world axes.
+   *
+   * @param {string} typeId what is being placed
+   * @param {THREE.Vector3} point where the placement ray hit
+   * @returns {{position: THREE.Vector3, quaternion: THREE.Quaternion}|null}
+   */
+  stackSnap(typeId, point) {
+    const def = PROP_BY_ID.get(typeId);
+    const size = def?.stack;
+    if (!size || !point) return null;
+    let best = null;
+    for (const inst of this.instances) {
+      if (inst.id !== typeId) continue;
+      const base = inst.root.position;
+      const top = base.y + size.height;
+      // Landing ON its roof, within a hand's width vertically.
+      if (Math.abs(point.y - top) > 0.25) continue;
+      // ...and inside its footprint, tested in the SUPPORTING prop's own frame
+      // so a rotated container still reads as a rectangle.
+      _stackLocal.copy(point).sub(base).applyQuaternion(
+        _stackQuat.copy(inst.root.quaternion).invert(),
+      );
+      if (Math.abs(_stackLocal.x) > size.length / 2 || Math.abs(_stackLocal.z) > size.width / 2) continue;
+      // Nearest roof wins, so a tower stacks on its own top course.
+      if (!best || top > best.top) best = { inst, top };
+    }
+    if (!best) return null;
+    return {
+      position: new THREE.Vector3(best.inst.root.position.x, best.top, best.inst.root.position.z),
+      quaternion: best.inst.root.quaternion.clone(),
+    };
   }
 
   /** Re-snap every prop — after a track load, or a snap-mode change. */
@@ -1305,6 +1440,9 @@ export class PropManager {
       position: inst.root.position.toArray(),
       quaternion: inst.root.quaternion.toArray(),
       scale: inst.root.scale.toArray(),
+      // Only written when the prop actually has variants, so existing tracks
+      // round-trip byte-identical and an older file simply loads as variant 0.
+      ...(inst.def?.variants?.length ? { variant: inst.variant } : {}),
     }));
   }
 
@@ -1331,6 +1469,7 @@ export class PropManager {
       }
       this.group.add(root);
       const inst = { id: item.type, def, root, collision: def.collision, restY };
+      setVariant(inst, item.variant ?? 0);
       root.userData.propInstance = inst;
       this.instances.push(inst);
     }
@@ -1347,6 +1486,10 @@ export class PropManager {
     this.gizmo.visible = true;
     this.selBox.setFromObject(inst.root);
     this.selBox.visible = true;
+    // AFTER the assignment, unlike onSelect — which fires first because its job
+    // is to clear the other gizmos, and so still sees the previous selection.
+    // Anything that renders the selection needs this one.
+    this.onSelectionChange?.(inst);
   }
 
   _pickAt(e) {
@@ -1380,6 +1523,9 @@ export class PropManager {
       case "Delete": case "Backspace": this.deleteSelected(); break;
       case "Escape": this.deselect(); break;
       case "KeyD": if (e.ctrlKey || e.metaKey) this.duplicateSelected(); else handled = false; break;
+      // Next livery on the selected prop. A key as well as the panel swatches
+      // because cycling while you look at it is how you actually pick a colour.
+      case "KeyC": handled = this.cycleVariant(e.shiftKey ? -1 : 1); break;
       default: handled = false;
     }
     if (handled) {

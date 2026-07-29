@@ -295,6 +295,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
             { key: "jeep", label: "Jeep", cost: UNIT_COST.jeep },
             { key: "builder", label: "Builder", cost: UNIT_COST.builder },
             { key: "bigtank", label: "Heavy APC", cost: UNIT_COST.bigtank },
+            { key: "lightTank", label: "Light Tank", cost: UNIT_COST.lightTank },
             { key: "tank", label: "Battle Tank", cost: UNIT_COST.tank },
           ]
         // Helipad units are free in this pass — only base production is costed.

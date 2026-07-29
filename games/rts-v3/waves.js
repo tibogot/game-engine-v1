@@ -31,6 +31,7 @@ function composition(n) {
     // then the Battle Tank from wave 6 — slow, but a turret line alone won't stop
     // one, which is the point at which you need armour of your own.
     bigtank: n < 3 ? 0 : Math.min(6, Math.floor((n - 1) / 2)),
+    lightTank: n < 5 ? 0 : Math.min(5, Math.floor((n - 3) / 2)),
     tank: n < 6 ? 0 : Math.min(4, Math.floor((n - 4) / 2)),
   };
 }

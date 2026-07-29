@@ -30,6 +30,10 @@
 import * as THREE from "three";
 import { mergeByMaterial } from "./modularRoadBatching.js";
 
+/** Reused for "no tint" — three multiplies instanceColor in, so white is the
+ *  identity and an unset entry would render black. */
+const _WHITE = new THREE.Color(0xffffff);
+
 /** Growth headroom so placing one more cone does not rebuild every buffer. */
 const SLACK = 8;
 
@@ -83,7 +87,12 @@ export class PropInstancer {
         g.applyMatrix4(this._m4.multiplyMatrices(
           root.matrixWorld.clone().invert(), o.matrixWorld,
         ));
-        parts.push({ geometry: g, material: o.material, castShadow: o.castShadow });
+        parts.push({
+          geometry: g, material: o.material, castShadow: o.castShadow,
+          // Marked by the prop's own builder — the container's shell and door
+          // take a livery, its frame rails do not.
+          tintable: !!o.userData.tintable,
+        });
       });
       // The template tree itself is scaffolding; only the parts are kept.
       root.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
@@ -126,6 +135,7 @@ export class PropInstancer {
       // can be lowered for free, only growing needs new buffers.
       if (batch && batch.capacity >= insts.length && batch.meshes.length === parts.length) {
         batch.insts = insts;
+        batch.colorsDirty = true; // the list changed, so index -> livery did too
         for (const m of batch.meshes) m.count = insts.length;
         continue;
       }
@@ -134,6 +144,7 @@ export class PropInstancer {
       const meshes = parts.map((p) => {
         const im = new THREE.InstancedMesh(p.geometry, p.material, capacity);
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); // rewritten every frame
+        im.userData.tintable = p.tintable;
         im.castShadow = p.castShadow;
         im.receiveShadow = false;
         im.count = insts.length;
@@ -143,7 +154,7 @@ export class PropInstancer {
         this.group.add(im);
         return im;
       });
-      this._batches.set(id, { insts, meshes, capacity });
+      this._batches.set(id, { insts, meshes, capacity, colorsDirty: true });
     }
     if (this._enabled) this.update();
   }
@@ -157,13 +168,31 @@ export class PropInstancer {
     // deleted still being drawn — or worse, an index past the end of a batch.
     const n = this.props.instances?.length ?? 0;
     if (n !== this._lastCount) { this._lastCount = n; this.sync(); }
-    for (const { insts, meshes } of this._batches.values()) {
+    for (const batch of this._batches.values()) {
+      const { insts, meshes } = batch;
       for (let i = 0; i < insts.length; i++) {
         const root = insts[i].root;
         root.updateWorldMatrix(false, false);
         for (const m of meshes) m.setMatrixAt(i, root.matrixWorld);
       }
       for (const m of meshes) m.instanceMatrix.needsUpdate = true;
+
+      // COLOURS ONLY WHEN THEY CHANGE. Matrices are rewritten every frame because
+      // props move; a livery is picked once at placement and then sits there, so
+      // re-uploading the colour buffer at 60 Hz would be pure waste. Dirty flag
+      // instead, raised by sync() and by any variant change.
+      if (!batch.colorsDirty) continue;
+      batch.colorsDirty = false;
+      for (const m of meshes) {
+        if (!m.userData.tintable) continue;
+        for (let i = 0; i < insts.length; i++) {
+          // No tint means "render as the material says" — white, since three
+          // MULTIPLIES the instance colour in. Leaving it unset would give black.
+          const c = insts[i].tint ?? _WHITE;
+          m.setColorAt(i, c);
+        }
+        if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      }
     }
   }
 
@@ -182,6 +211,12 @@ export class PropInstancer {
       inst.root.visible = !this._enabled;
     }
     if (this._enabled) { this.sync(); this.update(); }
+  }
+
+  /** Re-upload instance colours on the next update. Cheap and idempotent —
+   *  colours are otherwise only written when a batch is built or resized. */
+  markColorsDirty() {
+    for (const b of this._batches.values()) b.colorsDirty = true;
   }
 
   /** Draw calls this is currently responsible for — for the stats readout. */

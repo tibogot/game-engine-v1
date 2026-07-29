@@ -97,6 +97,7 @@ import {
 import { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } from "./modularRoadSparks.js";
 import { PropPhysics, PROP_PHYSICS, PHYSICS_PROP_TYPES } from "./modularRoadPropPhysics.js";
 import { PropInstancer } from "./modularRoadPropInstancer.js";
+import { preloadContainer } from "./modularRoadContainer.js";
 import { ModularRoadFlags, FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 
@@ -229,6 +230,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // existing flag would otherwise leave its cloth behind at the old spot.
     onChange: () => { bakeCollision(); flags?.sync(); paletteUi?.refreshStatus?.(); },
     onSelect: () => { movers.deselect(); portals.deselect?.(); builder.deselectPlacement?.(); },
+    // The panel's livery swatches ARE the current selection's palette, so they
+    // have to follow it — and this fires AFTER the selection settles, which
+    // onSelect deliberately does not.
+    onSelectionChange: () => devPanel?.refresh(),
     /**
      * Surface under a prop, for placement snapping (see SURFACE_SNAP).
      *
@@ -269,6 +274,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   // Live-bake real 3/4 thumbnails for every piece + preset so palette tiles show
   // the actual built geometry instead of the hand-drawn SVG fallbacks.
+  // BEFORE the thumbnails, and that is the whole reason it is awaited here.
+  // Every other prop's make() is synchronous; the container's needs a GLB, and
+  // the bake calls make() once per catalog entry and skips anything that comes
+  // back empty — so loading it later left the container as the one palette tile
+  // with a hand-drawn fallback icon. 18 KB, so the wait is not measurable.
+  onStatus("Loading models…");
+  await preloadContainer();
+
   onStatus("Baking piece thumbnails…");
   const thumbItems = [];
   for (const p of PIECE_CATALOG) thumbItems.push({ key: p.id, pieceId: p.id, params: {} });
@@ -428,7 +441,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function placeBrush() {
     if (!brush?.point) return false;
     if (brush.kind === "prop") {
-      props.add(brush.id, brush.point);
+      // Landing on another one of these? Line up with it exactly. See
+      // PropManager.stackSnap — the ray already found the roof, this is the
+      // horizontal half.
+      const stack = props.stackSnap(brush.id, brush.point);
+      const placed = props.add(brush.id, stack?.position ?? brush.point);
+      if (stack && placed) {
+        placed.root.quaternion.copy(stack.quaternion);
+        placed.root.position.copy(stack.position);
+      }
       propPhysics.sync();
       propInstancer.sync();
       flags.sync();
@@ -873,7 +894,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Live glow tuning writes to the loose roots; the templates hold their own
   // copies of those materials, so they have to be rebuilt to be seen.
   props.onGlowChange = (ids) => propInstancer.refreshTemplates(ids);
+  // A livery lives on the prop INSTANCE, not its material, so the instancer has
+  // to be told to re-upload the colour buffer — it only does so when dirty,
+  // since a colour is picked once and then sits there.
+  props.onVariantChange = () => { propInstancer.markColorsDirty(); devPanel?.refresh(); };
   propInstancer.setEnabled(true);
+
 
   /** Swap between editable (build) and merged (drive) track rendering. */
   function setMergedTrack(on) {
@@ -2068,6 +2094,20 @@ ${e.message}`);
       // glowPropParams is shared by every placed glow prop; this pushes the new
       // values onto them (emissive is a live node, so bloom follows for free).
       refreshGlowProps: () => props.applyGlowParams(),
+      // Prop liveries — the panel needs the SELECTION, since the swatches it
+      // draws are whatever palette the selected prop declares.
+      getSelectedProp: () => {
+        const s = props.selected;
+        if (!s) return null;
+        return {
+          id: s.id,
+          label: s.def?.label ?? s.id,
+          variant: s.variant ?? 0,
+          variants: s.def?.variants ?? [],
+        };
+      },
+      setPropVariant: (i) => props.setSelectedVariant(i),
+      randomisePropVariants: () => props.randomiseVariants(props.selected?.id ?? null),
       getMode: () => mode,
       toggleMode,
       respawn,

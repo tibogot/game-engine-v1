@@ -18,6 +18,7 @@ export const UNIT_COST = {
   builder: 100,
   harvester: 150,
   bigtank: 260,
+  lightTank: 340,
   tank: 420,   // the heavy: a real investment, and it shows on the field
 };
 
