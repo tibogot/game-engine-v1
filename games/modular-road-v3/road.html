@@ -24,7 +24,21 @@
     <!-- palette.css is imported from roadGame.js, NOT linked here: <base> is
          /v3/ so a relative href would resolve wrong, and an absolute one isn't
          bundled by Vite (it would 404 in a production build). -->
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <!-- NO LUCIDE HERE, deliberately. v3/editor.html loads it from unpkg for its
+         toolbar/panel icons, and this page used to copy that <script> along with
+         the rest of the head. It was never doing anything: the only `data-lucide`
+         elements on this page arrive inside the injected #app subtree, and every
+         one of them sits in #toolbar, #hierarchy or #right-panel — the first and
+         last are `display:none !important` below, and #hierarchy is completely
+         covered by the fixed full-screen #viewport. The game's own palette and
+         dev panel use inline SVG.
+         So it was a blocking, un-bundled request to a third-party CDN, on the
+         critical path of every boot, for zero visible icons — it fails offline
+         and it is not part of the Vite build. Both `lucide.createIcons()` call
+         sites (v3/app/main.js, v3/ui/editorShell.js) are guarded by
+         `typeof lucide !== "undefined"`, so its absence is a no-op.
+         If this page ever DOES need icons, add `lucide` to package.json and
+         import it from roadGame.js — do not bring the CDN tag back. -->
     <style>
       /* Hide the editor chrome — the game shows only the viewport. */
       #toolbar,
