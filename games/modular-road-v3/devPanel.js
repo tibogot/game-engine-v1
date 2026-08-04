@@ -219,11 +219,13 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value"><span class="prop-num" id="dv-spawn-src">.v3proj / origin</span></div>
           </div>
           <button class="action-btn primary" id="dv-spawn-car" type="button">Set to car position</button>
-          <button class="action-btn" id="dv-spawn-cursor" type="button">Set to build cursor</button>
+          <button class="action-btn" id="dv-spawn-cursor" type="button">Set under crosshair</button>
           <button class="action-btn" id="dv-spawn-clear" type="button">Clear (use .v3proj)</button>
           <div class="dv-hint">
-            The green arrow marks where the car starts / respawns. <b>Set to car</b>
-            (drive somewhere first) is the quickest way to set a start line.
+            The green arrow marks where the car starts / respawns. Aim at the spot
+            on the road, then <b>Set under crosshair</b> (uses canvas center if your
+            pointer is on this panel). <b>Set to car</b> is fastest if you can drive
+            there first.
           </div>
         </div>
       </div>

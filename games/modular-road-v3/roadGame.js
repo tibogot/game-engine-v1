@@ -1698,26 +1698,69 @@ ${e.message}`);
   const _outPos = new THREE.Vector3();
   const _fwd = new THREE.Vector3();
 
+  /** Down-track yaw from a placed piece (same convention as setSpawnToCar). */
+  function yawFromPiece(p) {
+    _inPos.setFromMatrixPosition(p.connectorIn);
+    _outPos.setFromMatrixPosition(p.connectorOut);
+    _fwd.copy(_outPos).sub(_inPos);
+    if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
+    _fwd.normalize();
+    return Math.atan2(_fwd.x, _fwd.z) - Math.PI;
+  }
+
   /**
    * On-deck, down-track pose from a placed piece — the car sits on the piece's
    * surface a little past its entry edge, facing the way the track runs.
    */
   function poseFromPiece(p) {
     _inPos.setFromMatrixPosition(p.connectorIn);
-    _outPos.setFromMatrixPosition(p.connectorOut);
-    _fwd.copy(_outPos).sub(_inPos);
+    _fwd.copy(_outPos.setFromMatrixPosition(p.connectorOut)).sub(_inPos);
     if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
     _fwd.normalize();
-    // respawn() faces the car by axisAngle(Y, yaw + PI) on the car's +Z forward,
-    // so this yaw makes +Z point along the track. (Same convention setSpawnToCar
-    // stores: yaw = eulerY − PI.)
-    const yaw = Math.atan2(_fwd.x, _fwd.z) - Math.PI;
     return {
       x: _inPos.x + _fwd.x * 2, // a touch into the piece, off the entry seam
       y: _inPos.y,
       z: _inPos.z + _fwd.z * 2,
-      yaw,
+      yaw: Math.atan2(_fwd.x, _fwd.z) - Math.PI,
     };
+  }
+
+  /**
+   * Ray-pick a spawn pose on the road deck under a screen point.
+   * Falls back to dropping a vertical ray at the orbit target when the view
+   * ray misses the deck (common at shallow angles / track edges).
+   */
+  function pickSpawnPose(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    _brushNdc.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    _brushRay.setFromCamera(_brushNdc, camera);
+
+    let point = null;
+    if (deckBvh?.baked) {
+      const hit = deckBvh.raycastFirst(_brushRay.ray.origin, _brushRay.ray.direction, 5000);
+      if (hit?.point) point = hit.point;
+    }
+    if (!point && controls.target && deckBvh?.baked) {
+      _snapOrigin.set(controls.target.x, controls.target.y + 80, controls.target.z);
+      const hit = deckBvh.raycastFirst(_snapOrigin, _snapDown, 400);
+      if (hit?.point) point = hit.point;
+    }
+    if (!point) return null;
+
+    const piece = builder.pickPiece(clientX, clientY);
+    let yaw;
+    if (piece) yaw = yawFromPiece(piece);
+    else {
+      _fwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+      _fwd.y = 0;
+      if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
+      else _fwd.normalize();
+      yaw = Math.atan2(_fwd.x, _fwd.z) - Math.PI;
+    }
+    return { x: point.x, y: point.y, z: point.z, yaw };
   }
 
   function resolveSpawn() {
@@ -1759,10 +1802,25 @@ ${e.message}`);
     updateSpawnMarker();
   }
 
-  /** Capture the current build cursor (open chain end) as the spawn. */
-  function setSpawnToCursor() {
-    const p = new THREE.Vector3().setFromMatrixPosition(builder.currentConnector);
-    gameSpawn = { x: p.x, y: p.y, z: p.z, yaw: builder.freeYaw ?? 0 };
+  /**
+   * Capture the road point under the crosshair as spawn.
+   * Uses the last canvas pointer when it is over the view; otherwise canvas center
+   * (e.g. when the dev-panel button is clicked).
+   */
+  function setSpawnToCursor(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    let x = clientX, y = clientY;
+    if (x == null || y == null) {
+      const lp = lastPointer;
+      const overCanvas = lp
+        && lp.x >= rect.left && lp.x <= rect.right
+        && lp.y >= rect.top && lp.y <= rect.bottom;
+      if (overCanvas) { x = lp.x; y = lp.y; }
+      else { x = rect.left + rect.width * 0.5; y = rect.top + rect.height * 0.5; }
+    }
+    const pose = pickSpawnPose(x, y);
+    if (!pose) return;
+    gameSpawn = pose;
     updateSpawnMarker();
   }
 
