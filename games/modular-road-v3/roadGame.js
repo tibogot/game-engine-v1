@@ -44,6 +44,7 @@ import {
   CHASSIS,
   CHASSIS_HULL,
   WHEEL,
+  WHEEL_LOCAL,
   DRIFT,
   GRAVITY,
 } from "../../v3/play/modularRoadVehicle.js";
@@ -363,12 +364,116 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     return root;
   }
 
+  /**
+   * Car-shaped ghost for the SPAWN tool.
+   *
+   * Prefers a clone of the real GLB body, so what you line up is literally the
+   * car you are about to drive — including whatever the dev panel's fit sliders
+   * did to it, since those author the GLB's own transform and `clone(true)`
+   * carries it. Falls back to primitives sized from CHASSIS/WHEEL_LOCAL while the
+   * model is still loading in the background (see loadChassisModel below), so the
+   * tool is usable from the first frame instead of silently doing nothing.
+   *
+   * Both variants are built in CAR-LOCAL space — body centred on the origin, hubs
+   * at WHEEL_LOCAL — which is the frame `respawn()` places the body in. The
+   * caller lifts the whole thing by SPAWN_LIFT, so the ghost sits exactly where
+   * the car will, floating gap included: that gap is real and worth seeing.
+   */
+  function buildSpawnGhost(material = GHOST_OK, name = "SpawnBrushGhost") {
+    const root = new THREE.Group();
+    root.name = name;
+
+    if (chassisGlbObject) {
+      const car = chassisGlbObject.clone(true);
+      car.traverse((o) => {
+        if (!o.isMesh) return;
+        o.material = material;
+        o.castShadow = false;
+        o.receiveShadow = false;
+      });
+      root.add(car);
+    } else {
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(CHASSIS.width, CHASSIS.height, CHASSIS.length), material,
+      );
+      root.add(body);
+      // A cabin and a nose wedge: a bare box has no readable front, and the whole
+      // point of this ghost is that you can see which way the car will face.
+      const cabin = new THREE.Mesh(
+        new THREE.BoxGeometry(CHASSIS.width * 0.8, CHASSIS.height * 0.7, CHASSIS.length * 0.4),
+        material,
+      );
+      cabin.position.set(0, CHASSIS.height * 0.75, -CHASSIS.length * 0.1);
+      root.add(cabin);
+      const nose = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.9, 4), material);
+      nose.rotation.x = Math.PI / 2; // point +Z — the chassis' forward axis
+      nose.position.set(0, CHASSIS.height * 0.2, CHASSIS.length * 0.5 + 0.45);
+      root.add(nose);
+      const wheelGeo = new THREE.CylinderGeometry(
+        WHEEL.radius, WHEEL.radius, WHEEL.thickness, 14,
+      );
+      for (const w of WHEEL_LOCAL) {
+        const wheel = new THREE.Mesh(wheelGeo, material);
+        wheel.rotation.z = Math.PI / 2; // cylinder axis +Y → +X, the hub axis
+        wheel.position.copy(w.pos);
+        root.add(wheel);
+      }
+    }
+
+    root.traverse((o) => { o.frustumCulled = false; });
+    return root;
+  }
+
+  /**
+   * Arm the spawn ghost. `snapMode` is 'road' or 'ground' — the two surfaces a
+   * car can start on, and the only thing this tool needs to know.
+   *
+   * Deliberately a BRUSH rather than its own bespoke picker: the brush path
+   * already owns the pointer in build mode (move → ghost follows, LMB → place,
+   * Esc/RMB → put down), so the spawn tool inherits all of it and behaves like
+   * every other placement tool on the page instead of being the odd one out.
+   */
+  function armSpawnBrush(snapMode = "road") {
+    // Brushes only exist in build mode — the pointer handlers bail on anything
+    // else, so arming from the panel while driving would light the button up and
+    // then do nothing at all. Asking for the tool is asking to be in the mode
+    // that has it.
+    if (mode !== "build") toggleMode();
+    clearBrush({ silent: true });
+    const root = buildSpawnGhost();
+    root.visible = false; // until the mouse says where
+    scene.add(root);
+    brush = {
+      kind: "spawn",
+      id: null,
+      root,
+      restY: SPAWN_LIFT,
+      point: null,
+      snapMode,
+      // FACING angle (what root.rotation.y is set to), not the stored spawn yaw —
+      // those differ by π. Converted once, at the point of placement.
+      facing: resolveSpawn().yaw + Math.PI,
+      // Until you touch Q/E the ghost keeps snapping to the down-track direction
+      // of whatever piece is under it; after that your angle is yours to keep.
+      facingLocked: false,
+      // The GLB clone SHARES its geometry with the car you drive. Disposing it
+      // in clearBrush would delete the player's own body mesh.
+      disposeGeo: !chassisGlbObject,
+    };
+    devPanel?.refresh();
+    return true;
+  }
+
   function clearBrush({ silent = false } = {}) {
     if (!brush) return;
     scene.remove(brush.root);
-    brush.root.traverse((o) => { if (o.isMesh) o.geometry?.dispose(); });
+    if (brush.disposeGeo !== false) {
+      brush.root.traverse((o) => { if (o.isMesh) o.geometry?.dispose(); });
+    }
+    const wasSpawn = brush.kind === "spawn";
     brush = null;
     if (!silent) paletteUi?.clearBrushHighlight?.();
+    if (wasSpawn) devPanel?.refresh();
   }
 
   function armBrush(kind, id) {
@@ -395,8 +500,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * `auto`/`free` take whichever of the two the ray reaches FIRST, so aiming at
    * a bridge gets the bridge and aiming past its edge gets the valley floor.
    */
-  function pickPlacementSurface(clientX, clientY) {
-    const mode = SURFACE_SNAP.mode;
+  function pickPlacementSurface(clientX, clientY, mode = SURFACE_SNAP.mode) {
     const rect = renderer.domElement.getBoundingClientRect();
     _brushNdc.set(
       ((clientX - rect.left) / rect.width) * 2 - 1,
@@ -434,20 +538,53 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   /** Move the ghost to the cursor. Returns true when the spot is placeable. */
   function updateBrush(clientX, clientY) {
     if (!brush) return false;
-    const hit = pickPlacementSurface(clientX, clientY);
+    const hit = pickPlacementSurface(clientX, clientY, brush.snapMode);
     // `point` is what PLACES, so it is only set when the spot is legal; the
     // ghost is positioned from the hit either way so it keeps tracking the mouse.
     brush.point = hit?.valid ? hit.point : null;
     brush.root.visible = !!hit;
     if (hit) brush.root.position.set(hit.point.x, hit.point.y + brush.restY, hit.point.z);
+    // The spawn ghost also carries a FACING. Left to itself it points down-track
+    // off whatever piece is under the cursor — which is the answer you want
+    // ~every time on a road — and holds still once Q/E have had their say.
+    if (brush.kind === "spawn") {
+      if (!brush.facingLocked) {
+        const piece = builder.pickPiece(clientX, clientY);
+        if (piece) brush.facing = yawFromPiece(piece) + Math.PI;
+      }
+      brush.root.rotation.y = brush.facing;
+    }
     const mat = hit?.valid ? GHOST_OK : GHOST_BAD;
     brush.root.traverse((o) => { if (o.isMesh) o.material = mat; });
     return !!hit?.valid;
   }
 
+  /** Turn the armed spawn ghost. No-op for any other brush. */
+  function rotateSpawnBrush(delta) {
+    if (brush?.kind !== "spawn") return false;
+    brush.facing += delta;
+    brush.facingLocked = true; // your angle now — stop re-aiming it down-track
+    brush.root.rotation.y = brush.facing;
+    return true;
+  }
+
   /** Place the armed brush at the ghost. Keeps the brush for the next click. */
   function placeBrush() {
     if (!brush?.point) return false;
+    if (brush.kind === "spawn") {
+      // `facing` is the direction the car points; the stored yaw is that minus π
+      // (see the SPAWN block). One conversion, in one place.
+      gameSpawn = {
+        x: brush.point.x, y: brush.point.y, z: brush.point.z,
+        yaw: brush.facing - Math.PI,
+      };
+      updateSpawnMarker();
+      // Unlike a prop — where you lay a whole run and the brush stays armed —
+      // there is exactly ONE spawn, so placing it IS finishing. Leaving the tool
+      // armed would make it ambiguous whether the click had taken.
+      clearBrush();
+      return true;
+    }
     if (brush.kind === "prop") {
       // Landing on another one of these? Line up with it exactly. See
       // PropManager.stackSnap — the ray already found the roof, this is the
@@ -542,6 +679,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       vehicle.setHeadlampMounts(chassisGlbMounts(chassisLampsLocal));
       vehicle.setChassisModel(object, { brakeLights, headlampLenses });
       vehicle.setChassisStyle("glb");
+      // The spawn marker was built from the primitive stand-in at boot (this load
+      // is deliberately in the background). Now that the real body exists, swap
+      // the silhouette for it — otherwise the marker stays a box for the session.
+      rebuildSpawnMarkerCar();
       devPanel?.refresh();
     })
     .catch((e) => {
@@ -1336,6 +1477,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       paletteUi?.selectPieceById?.(byKey.id);
       return;
     }
+    // A live SPAWN ghost owns Q/E before the chain anchor does: while you are
+    // aiming the car, "rotate" can only sensibly mean the car.
+    if (brush?.kind === "spawn") {
+      if (code === "keyq") { rotateSpawnBrush(DEG15); return; }
+      if (code === "keye") { rotateSpawnBrush(-DEG15); return; }
+    }
     switch (code) {
       case "keyr": builder.flip(); break;
       case "keyq": if (builder.freePlaceMode) builder.rotateFreeYaw(DEG15); break;
@@ -1725,44 +1872,6 @@ ${e.message}`);
     };
   }
 
-  /**
-   * Ray-pick a spawn pose on the road deck under a screen point.
-   * Falls back to dropping a vertical ray at the orbit target when the view
-   * ray misses the deck (common at shallow angles / track edges).
-   */
-  function pickSpawnPose(clientX, clientY) {
-    const rect = renderer.domElement.getBoundingClientRect();
-    _brushNdc.set(
-      ((clientX - rect.left) / rect.width) * 2 - 1,
-      -((clientY - rect.top) / rect.height) * 2 + 1,
-    );
-    _brushRay.setFromCamera(_brushNdc, camera);
-
-    let point = null;
-    if (deckBvh?.baked) {
-      const hit = deckBvh.raycastFirst(_brushRay.ray.origin, _brushRay.ray.direction, 5000);
-      if (hit?.point) point = hit.point;
-    }
-    if (!point && controls.target && deckBvh?.baked) {
-      _snapOrigin.set(controls.target.x, controls.target.y + 80, controls.target.z);
-      const hit = deckBvh.raycastFirst(_snapOrigin, _snapDown, 400);
-      if (hit?.point) point = hit.point;
-    }
-    if (!point) return null;
-
-    const piece = builder.pickPiece(clientX, clientY);
-    let yaw;
-    if (piece) yaw = yawFromPiece(piece);
-    else {
-      _fwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
-      _fwd.y = 0;
-      if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
-      else _fwd.normalize();
-      yaw = Math.atan2(_fwd.x, _fwd.z) - Math.PI;
-    }
-    return { x: point.x, y: point.y, z: point.z, yaw };
-  }
-
   function resolveSpawn() {
     if (gameSpawn) return gameSpawn;
     const start = builder.pieces.find((p) => p.id === "start");
@@ -1773,25 +1882,79 @@ ${e.message}`);
     return { x: 0, y: app.getWorldHeight(0, 0), z: 0, yaw: 0 };
   }
 
-  // Marker so the spawn is visible while building — a green arrow pointing the
-  // way the car will face. One draw, build-mode only.
+  // Marker so the spawn is visible while building. Build-mode only.
+  //
+  // This WAS a big green cone, which had to be read as "an arrow, and the car
+  // will be somewhere around its base, facing along it" — a legend you had to
+  // know. It is now the same car silhouette the placement tool uses, so the
+  // marker simply shows the car standing where it will stand. Nothing to decode.
+  //
+  // Deliberately a DIFFERENT, dimmer material from GHOST_OK: while the tool is
+  // armed both are on screen at once, and they mean different things ("the spawn
+  // is here" vs "the next click puts it here"). Same shape, different weight.
+  const SPAWN_MARKER_MAT = new THREE.MeshBasicMaterial({
+    color: 0x2fbf8f, transparent: true, opacity: 0.28, depthWrite: false,
+  });
   const spawnMarker = new THREE.Group();
   spawnMarker.name = "RoadSpawnMarker";
+  /** The car silhouette inside the marker — swapped out when the GLB lands. */
+  let spawnMarkerCar = null;
   {
-    const cone = new THREE.Mesh(
-      new THREE.ConeGeometry(0.6, 2.2, 12),
-      new THREE.MeshStandardMaterial({ color: 0x35e07a, emissive: 0x0c5028, roughness: 0.5 }),
+    // A ground ring, because a car-sized marker is hard to FIND on a big track
+    // (the cone was at least tall). Sits on the surface, under the car.
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(2.6, 3.1, 40),
+      new THREE.MeshBasicMaterial({
+        color: 0x35e07a, transparent: true, opacity: 0.5,
+        depthWrite: false, side: THREE.DoubleSide,
+      }),
     );
-    cone.rotation.x = Math.PI / 2; // point +Z (the car's forward)
-    cone.position.z = 0.4;
-    spawnMarker.add(cone);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.03;
+    ring.frustumCulled = false;
+    spawnMarker.add(ring);
   }
   scene.add(spawnMarker);
 
+  /**
+   * (Re)build the marker's car silhouette.
+   *
+   * Called once at boot and AGAIN when the chassis GLB finishes loading — the
+   * marker is created long before the model arrives, so without the second call
+   * it would keep the primitive stand-in for the whole session.
+   */
+  function rebuildSpawnMarkerCar() {
+    if (spawnMarkerCar) {
+      spawnMarker.remove(spawnMarkerCar);
+      // Only the primitive fallback owns its geometry; a GLB clone shares the
+      // player car's buffers. Same rule as the placement brush.
+      if (!spawnMarkerCar.userData.sharedGeo) {
+        spawnMarkerCar.traverse((o) => { if (o.isMesh) o.geometry?.dispose(); });
+      }
+    }
+    spawnMarkerCar = buildSpawnGhost(SPAWN_MARKER_MAT, "RoadSpawnMarkerCar");
+    spawnMarkerCar.userData.sharedGeo = !!chassisGlbObject;
+    // Lift by the same SPAWN_LIFT respawn() uses, so the silhouette stands
+    // exactly where the body will.
+    spawnMarkerCar.position.y = SPAWN_LIFT;
+    spawnMarker.add(spawnMarkerCar);
+  }
+  rebuildSpawnMarkerCar();
+
   function updateSpawnMarker() {
     const s = resolveSpawn();
-    spawnMarker.position.set(s.x, s.y + 0.6, s.z);
-    spawnMarker.rotation.set(0, s.yaw, 0);
+    // The GROUP now sits on the surface (the ring is a ground decal); the car
+    // child carries SPAWN_LIFT itself.
+    spawnMarker.position.set(s.x, s.y, s.z);
+    // `+ Math.PI` IS THE POINT — do not "simplify" it away.
+    //
+    // The silhouette faces along the marker's local +Z, and the chassis' forward
+    // axis is also local +Z, but the STORED yaw is the car's yaw minus π (the
+    // convention setSpawnToCar and yawFromPiece both write in, and that respawn()
+    // undoes with the same `+ Math.PI` two functions down). Without it the marker
+    // rendered the exact opposite of the direction the car spawns facing: you
+    // would line it up down-track, hit drive, and set off backwards.
+    spawnMarker.rotation.set(0, s.yaw + Math.PI, 0);
   }
 
   /** Capture the car's current pose as the spawn (drive to a good start, click). */
@@ -1802,27 +1965,20 @@ ${e.message}`);
     updateSpawnMarker();
   }
 
-  /**
-   * Capture the road point under the crosshair as spawn.
-   * Uses the last canvas pointer when it is over the view; otherwise canvas center
-   * (e.g. when the dev-panel button is clicked).
-   */
-  function setSpawnToCursor(clientX, clientY) {
-    const rect = renderer.domElement.getBoundingClientRect();
-    let x = clientX, y = clientY;
-    if (x == null || y == null) {
-      const lp = lastPointer;
-      const overCanvas = lp
-        && lp.x >= rect.left && lp.x <= rect.right
-        && lp.y >= rect.top && lp.y <= rect.bottom;
-      if (overCanvas) { x = lp.x; y = lp.y; }
-      else { x = rect.left + rect.width * 0.5; y = rect.top + rect.height * 0.5; }
-    }
-    const pose = pickSpawnPose(x, y);
-    if (!pose) return;
-    gameSpawn = pose;
-    updateSpawnMarker();
-  }
+  // NOTE — "Set under crosshair" USED TO LIVE HERE, and it is gone on purpose.
+  //
+  // It read the last canvas pointer position and claimed to fall back to canvas
+  // centre "if your pointer is on the panel". It never did: the canvas is
+  // full-screen (road.html pins #viewport to inset:0) and the dev panel is an
+  // overlay sibling, so the last-known pointer was ALWAYS inside the canvas rect
+  // and the centre branch was dead code. What you actually got was the road under
+  // wherever the mouse happened to cross the viewport on its way to the button —
+  // i.e. a spot near the panel edge, unrelated to anything you aimed at. It also
+  // only ever queried the deck BVH, so terrain spawns were impossible, and a miss
+  // returned null and did nothing at all with no feedback.
+  //
+  // armSpawnBrush() replaces it: the ghost is under the cursor the whole time, so
+  // there is no "where did it think I was pointing" left to get wrong.
 
   function clearSpawn() { gameSpawn = null; updateSpawnMarker(); }
 
@@ -2148,9 +2304,14 @@ ${e.message}`);
     params: { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, WHEEL_LAYOUT, DRIFT, glowPropParams },
     game: {
       setSpawnToCar,
-      setSpawnToCursor,
       clearSpawn,
       hasSpawn: () => gameSpawn != null,
+      /** Arm the car ghost. `mode` is 'road' or 'ground'. */
+      placeSpawn: (mode) => armSpawnBrush(mode),
+      cancelSpawnPlacement: () => { if (brush?.kind === "spawn") clearBrush(); },
+      /** 'road' | 'ground' while the ghost is armed, else null — drives the
+       *  panel's active-button state. */
+      spawnPlacingMode: () => (brush?.kind === "spawn" ? brush.snapMode : null),
       setHeadlights,
       getHeadlights: () => headlightsOn,
       setAutoHeadlights: (on) => { autoHeadlights = !!on; updateAutoHeadlights(); },

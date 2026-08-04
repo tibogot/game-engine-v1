@@ -218,14 +218,24 @@ export function createRoadDevPanel({ app, game, params }) {
             <span class="prop-label">Source</span>
             <div class="prop-value"><span class="prop-num" id="dv-spawn-src">.v3proj / origin</span></div>
           </div>
-          <button class="action-btn primary" id="dv-spawn-car" type="button">Set to car position</button>
-          <button class="action-btn" id="dv-spawn-cursor" type="button">Set under crosshair</button>
+          <button class="action-btn primary" id="dv-spawn-road" type="button">Place car on road</button>
+          <button class="action-btn primary" id="dv-spawn-ground" type="button">Place car on ground</button>
+          <button class="action-btn" id="dv-spawn-car" type="button">Set to car position</button>
           <button class="action-btn" id="dv-spawn-clear" type="button">Clear (use .v3proj)</button>
           <div class="dv-hint">
-            The green arrow marks where the car starts / respawns. Aim at the spot
-            on the road, then <b>Set under crosshair</b> (uses canvas center if your
-            pointer is on this panel). <b>Set to car</b> is fastest if you can drive
-            there first.
+            <b>Place car</b> arms a ghost of the car that follows your cursor —
+            <kbd>LMB</kbd> to drop it, <kbd>Q</kbd>/<kbd>E</kbd> to turn it,
+            <kbd>Esc</kbd> or <kbd>RMB</kbd> to cancel. <b>On road</b> rides the
+            track only (the ghost turns red off it and will not place);
+            <b>on ground</b> rides the terrain, so you can start off-track or under
+            an elevated section. Left alone the ghost aims itself down-track off
+            whatever piece it is on; Q/E take that over.
+            <br><br>
+            A dimmer car silhouette in a ring marks the current spawn while
+            building. <b>Set to car position</b> pins wherever the car is right
+            now — one click, no mode switch, no hunting for the spot in the build
+            camera, which is the fast way to restart from a section you are
+            iterating on mid-test-drive.
           </div>
         </div>
       </div>
@@ -1391,6 +1401,20 @@ export function createRoadDevPanel({ app, game, params }) {
     }
     #road-dev .dv-hint b { color: var(--text); font-weight: 600; }
     #road-dev .dv-hint code { font-size: 10px; color: var(--text-dim); }
+    #road-dev .dv-hint kbd {
+      padding: 1px 4px; font-family: var(--font-mono); font-size: 10px;
+      color: var(--text); background: var(--bg-input);
+      border: 1px solid var(--border); border-radius: 3px;
+    }
+    /* A tool that is ARMED, not a button that was clicked. editor.css has
+       .primary (a highlighted call-to-action) but nothing for "this mode is live
+       right now", and the spawn ghost needs the difference to be visible: the lit
+       button is the only thing on screen saying the next click will drop a car. */
+    #road-dev .action-btn.active {
+      background: var(--accent); border-color: var(--accent); color: #08101c;
+      font-weight: 600;
+    }
+    #road-dev .action-btn.active:hover { filter: brightness(1.08); }
     /* Shortcut strip — parked in Mode until a real menu exists. */
     #road-dev #hint {
       margin-top: 8px; padding: 8px 10px;
@@ -1670,11 +1694,30 @@ export function createRoadDevPanel({ app, game, params }) {
 
   // ── Spawn ─────────────────────────────────────────────────────────────────
   const spawnSrc = $("#dv-spawn-src");
+  const spawnRoadBtn = $("#dv-spawn-road");
+  const spawnGroundBtn = $("#dv-spawn-ground");
   const renderSpawnSrc = () => {
     spawnSrc.textContent = game.hasSpawn() ? "custom" : ".v3proj / origin";
+    // The buttons are a MODE, not a one-shot action: while the ghost is armed the
+    // active one stays lit, so the panel and the viewport never disagree about
+    // whether a tool is live. roadGame calls refresh() on arm, place and cancel —
+    // including the cancels it does NOT own (Esc, right-click, arming a prop).
+    const placing = game.spawnPlacingMode?.() ?? null;
+    spawnRoadBtn.classList.toggle("active", placing === "road");
+    spawnGroundBtn.classList.toggle("active", placing === "ground");
+    spawnRoadBtn.textContent = placing === "road" ? "Placing… (Esc)" : "Place car on road";
+    spawnGroundBtn.textContent = placing === "ground" ? "Placing… (Esc)" : "Place car on ground";
   };
+  // Clicking the armed mode again puts the tool down — a lit button you cannot
+  // switch off is a trap.
+  const armSpawn = (mode) => {
+    if ((game.spawnPlacingMode?.() ?? null) === mode) game.cancelSpawnPlacement();
+    else game.placeSpawn(mode);
+    renderSpawnSrc();
+  };
+  spawnRoadBtn.addEventListener("click", () => armSpawn("road"));
+  spawnGroundBtn.addEventListener("click", () => armSpawn("ground"));
   $("#dv-spawn-car").addEventListener("click", () => { game.setSpawnToCar(); renderSpawnSrc(); });
-  $("#dv-spawn-cursor").addEventListener("click", () => { game.setSpawnToCursor(); renderSpawnSrc(); });
   $("#dv-spawn-clear").addEventListener("click", () => { game.clearSpawn(); renderSpawnSrc(); });
   renderSpawnSrc();
 
@@ -2112,6 +2155,7 @@ export function createRoadDevPanel({ app, game, params }) {
   function refresh() {
     renderMode();
     renderLiveries();
+    renderSpawnSrc();
     piecesEl.textContent = String(game.getPieceCount());
     trisEl.textContent = game.getCollisionTriCount().toLocaleString();
     if (bestEl) {
