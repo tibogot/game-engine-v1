@@ -279,20 +279,40 @@ function smoothScalar(cur, target, dt, lambda = 8) {
   return cur + (target - cur) * Math.min(1, dt * lambda);
 }
 
-function horizontalSpeed(body) {
-  _velHoriz.copy(body.vel);
-  _velHoriz.y = 0;
-  return _velHoriz.length();
+/**
+ * How fast the car is actually travelling — the FULL 3D speed.
+ *
+ * This used to drop the Y component, which is only equivalent to real speed
+ * while the road is roughly level. On the vertical flanks of a loop the car is
+ * moving almost purely upward, so the horizontal-only measure collapsed to ~0
+ * at 150 km/h: the engine fell to idle, the wind died and the tyre roll cut out
+ * halfway up every loop. Same story on quarter-pipes, wall-rides and tubes.
+ *
+ * Drift detection deliberately still works in the horizontal plane — see
+ * isDrifting, which now takes its own measurement rather than sharing a scratch
+ * vector with this.
+ */
+function travelSpeed(body) {
+  return body.vel.length();
 }
 
-function isDrifting(vehicle, speed) {
-  if (speed < DRIFT_ENTRY_SPEED) return false;
+/**
+ * Slip between where the car points and where it is going, measured in the
+ * horizontal plane (both terms flattened, so it stays consistent). Self
+ * contained on purpose: it used to read `_velHoriz` left behind by the last
+ * horizontalSpeed() call, which silently coupled it to an unrelated helper.
+ */
+function isDrifting(vehicle) {
+  _velHoriz.copy(vehicle.body.vel);
+  _velHoriz.y = 0;
+  const horiz = _velHoriz.length();
+  if (horiz < DRIFT_ENTRY_SPEED || horiz < 0.5) return false;
   _chassisFwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat);
   _chassisFwd.y = 0;
-  if (_chassisFwd.lengthSq() < 1e-8 || speed < 0.5) return false;
+  if (_chassisFwd.lengthSq() < 1e-8) return false;
   _chassisFwd.normalize();
   const driftAngle = Math.acos(
-    THREE.MathUtils.clamp(_velHoriz.dot(_chassisFwd) / speed, -1, 1),
+    THREE.MathUtils.clamp(_velHoriz.dot(_chassisFwd) / horiz, -1, 1),
   );
   return driftAngle > DRIFT_ANGLE_MIN;
 }
@@ -410,7 +430,7 @@ export function setupModularRoadVehicleAudio(audioSystem, ctx) {
       volume: 0,
       onPlaying: whenDriving((item, dt) => {
         const st = settings();
-        const curSpeed = horizontalSpeed(vehicle.body);
+        const curSpeed = travelSpeed(vehicle.body);
         const targetVol = Math.min(3, st.engineVol * st.engineMul);
         smoothVolume(item, targetVol, dt, st.engineFadeEaseUp, 2.5);
         const rateTarget = enginePitchFromSpeed(
@@ -435,7 +455,7 @@ export function setupModularRoadVehicleAudio(audioSystem, ctx) {
       autoplay: true,
       volume: 0,
       onPlaying: whenDriving((item, dt) => {
-        const curSpeed = horizontalSpeed(vehicle.body);
+        const curSpeed = travelSpeed(vehicle.body);
         const speedEffect = THREE.MathUtils.clamp(curSpeed * 0.1, 0, 1);
         const inAir = vehicle.groundedCount === 0;
         const air = inAir ? 0.35 : 1;
@@ -464,7 +484,7 @@ export function setupModularRoadVehicleAudio(audioSystem, ctx) {
       const forward = keys.KeyW || keys.ArrowUp;
       const backward = keys.KeyS || keys.ArrowDown;
       const keyN = !!keys.KeyN;
-      const curSpeed = horizontalSpeed(vehicle.body);
+      const curSpeed = travelSpeed(vehicle.body);
       const active = keyN && forward && !backward && curSpeed > 1;
       const rising = active && item._nitroPrevActive !== true;
       if (rising) {
@@ -498,8 +518,8 @@ export function setupModularRoadVehicleAudio(audioSystem, ctx) {
       onPlaying: whenDriving((item) => {
         const keys = getKeys();
         const handbrake = !!keys.Space || !!vehicle.input?.handbrake;
-        const curSpeed = horizontalSpeed(vehicle.body);
-        const drifting = isDrifting(vehicle, curSpeed);
+        const curSpeed = travelSpeed(vehicle.body);
+        const drifting = isDrifting(vehicle);
         const speedGate = THREE.MathUtils.smoothstep(curSpeed, 2, 16);
         if (!handbrake && !drifting) {
           item.volume = 0;
@@ -530,7 +550,7 @@ export function setupModularRoadVehicleAudio(audioSystem, ctx) {
       autoplay: true,
       volume: 0,
       onPlaying: whenDriving((item, dt) => {
-        const curSpeed = horizontalSpeed(vehicle.body);
+        const curSpeed = travelSpeed(vehicle.body);
         const grounded = vehicle.groundedCount > 0 ? 1 : 0;
         const targetVol =
           THREE.MathUtils.clamp(curSpeed * 0.1, 0, 1) *

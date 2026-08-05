@@ -2176,7 +2176,15 @@ ${e.message}`);
       if (splitTimer <= 0) hudSplit.className = "";
     }
 
-    const speedMs = Math.hypot(vehicle.body.vel.x, vehicle.body.vel.z);
+    // FULL 3D speed — do not drop the Y component. Horizontal-only speed is
+    // only the real speed while the road is level: on the vertical flanks of a
+    // loop the car is moving almost straight up, so a car doing 146 km/h read
+    // 4 km/h on the HUD and the tach fell to idle right before the top. It
+    // looked exactly like the car was bogging down and stalling out of the
+    // loop, but the car was never actually slowing — the measured minimum on a
+    // clean loop is 108 km/h (tools/loopSpeedReadoutTest.mjs).
+    // Same applies to quarter-pipes, wall-rides and tubes.
+    const speedMs = vehicle.body.vel.length();
     if (hudSpeed) hudSpeed.textContent = String(Math.round(speedMs * 3.6));
 
     // Tach + gear. Forward speed is SIGNED (dot with the car's own forward) so
