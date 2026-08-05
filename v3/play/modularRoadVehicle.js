@@ -1018,6 +1018,67 @@ export const AERO = {
   downforce: 3.0,
 };
 
+/**
+ * Concave-surface grip — what makes tubes, loops and half-pipes drivable.
+ *
+ * THE PROBLEM THIS SOLVES, measured by tools/tubeControlRepro.mjs on the kit's
+ * own r=8 tube. With a closed-loop driver actively steering to hold a wall-ride,
+ * the car held its target bank 0% of the time at EVERY downforce tried,
+ * including 13x the shipped value:
+ *
+ *     target  downforce   peak   held%   mean speed   min speed
+ *       90°       3       44°      0%      10.3         1.6
+ *       90°      12       76°      0%       8.6         0.0
+ *       90°      40      180°      0%      13.4         5.8
+ *
+ * It enters at 35 m/s and settles around 10 m/s in every configuration. And it
+ * is NOT an attitude failure: alignment lag to the wall stays at 2-5°, all four
+ * wheels are down 100% of the time, the suspension never bottoms out (0%), and
+ * the airborne landing assist never fires at all (0% air time). The car stays
+ * perfectly glued and correctly oriented while decelerating out of the ride.
+ *
+ * WHY IT DIES. A tube is not a bank you hold, it is an orbit you sustain: static
+ * hold needs tan(bank) <= mu, so past ~56° nothing can hold at all and the car
+ * must keep circulating. Circulating means permanent hard steering, and steering
+ * scrubs — brush-model scrub power is Fy * vLat, and vLat is proportional to
+ * Fy / Fmax, so the loss goes as Fy^2 / Fmax. Bleed the speed and you lose the
+ * circulation that was holding you up, which costs more speed. That spiral is
+ * what "hardly controllable in a tube" actually is.
+ *
+ * THE FIX. Following a surface of curvature k at tangential speed v REQUIRES a
+ * centripetal force m*v^2*k. On flat road k is 0 and this whole block is a no-op
+ * — which is the point: it cannot regress ordinary driving, because it does not
+ * exist there. On a concave surface it hands the tyres that force directly
+ * instead of making them buy it out of the friction circle, so Fmax stays
+ * available for driving and steering, and the Fy^2/Fmax scrub collapses.
+ *
+ * ONLY CONCAVE. Curvature is SIGNED here (see _applySurfaceGrip): a crest is
+ * convex and gets nothing. Adding load over a crest would glue the car to it and
+ * kill every jump on the track, which would be a far worse bug than the one this
+ * fixes.
+ */
+export const SURFACE_GRIP = {
+  enabled: true,
+  /**
+   * Fraction of the centripetal requirement to supply. 1.0 would hand over the
+   * whole thing; the suspension springs are already contributing some of it, so
+   * the default deliberately supplies most-but-not-all and leaves the tyres
+   * doing real work. Swept in tubeControlRepro before picking this.
+   */
+  gain: 0.85,
+  /** Below this (1/m) the surface is flat and we do nothing. r=100 curve = 0.01. */
+  minCurvature: 0.012,
+  /** Hard ceiling on the added load, in car weights. Stops a degenerate normal
+   *  spread (a seam, a wheel on an edge) from firing the car off the surface. */
+  maxG: 6,
+  /** Rate (1/s) the applied magnitude eases toward its target. THIS IS WHAT
+   *  MAKES THE TUBE EXIT BEHAVE: curvature vanishes the instant the last wheel
+   *  leaves the wall, and stepping the load to zero flicks the car sideways.
+   *  Easing it out over ~a tenth of a second lets the exit read as driving off
+   *  the end rather than being spat out of it. */
+  ease: 12,
+};
+
 /** Chassis shell vs the deck BVH — stops the body clipping into elevated track
  *  (ramps, loops, hard landings). Bottom corners get pushed out along the deck
  *  normal once they sink within `skin` of the surface. */
@@ -2503,6 +2564,13 @@ export class Vehicle {
     this.BOTTOM_CORNERS = [0, 1, 4, 5];
     this._aeroF = new THREE.Vector3();
     this._aeroUp = new THREE.Vector3();
+    this._sgN = new THREE.Vector3();
+    this._sgDp = new THREE.Vector3();
+    this._sgDn = new THREE.Vector3();
+    this._sgVt = new THREE.Vector3();
+    this._sgF = new THREE.Vector3();
+    /** Eased magnitude of the concave-surface load (N). See SURFACE_GRIP.ease. */
+    this._sgMag = 0;
     this._surfV = new THREE.Vector3();
     this._probeOrigin = new THREE.Vector3();
     this._probeDirW = new THREE.Vector3();
@@ -3142,6 +3210,11 @@ export class Vehicle {
       this._applyChassisGroundContact();
       // After the tires (their contact normals are what both of these read) and
       // before integrate(), so the torques land in this substep.
+      //
+      // Surface grip reads the same contact normals — it measures the curvature
+      // they fan out over — so it belongs here too, not up with _applyAero: run
+      // before the tyres and it would be working off last substep's contacts.
+      this._applySurfaceGrip(subDt);
       this._applyYawAssist();
       this._applyLandingAssist();
       this._applyStabilizer(subDt);
@@ -3901,6 +3974,90 @@ export class Vehicle {
         this.body.addForce(this._aeroF);
       }
     }
+  }
+
+  /**
+   * Concave-surface grip — see the SURFACE_GRIP block for what this is for and
+   * what it measured before it existed.
+   *
+   * Curvature comes free from data the tyres already produced: across any two
+   * contact points the normals fan out, and how fast they fan IS the curvature.
+   * For a surface of radius R, n = (C - p)/R on a concave surface, so
+   *
+   *     (p2 - p1) . (n2 - n1) = -|p2 - p1|^2 / R
+   *
+   * giving a SIGNED estimate k = -(dp . dn) / |dp|^2 that is positive inside a
+   * tube or loop and NEGATIVE over a crest. Only positive values are used, which
+   * is what keeps this off jumps entirely.
+   *
+   * No BVH query, no geometry lookup, no knowledge of what piece the car is on —
+   * a tube, a loop, a half-pipe and a banked bowl all present the same way.
+   */
+  _applySurfaceGrip(dt = FIXED_DT / this.SUBSTEPS) {
+    if (!SURFACE_GRIP.enabled || SURFACE_GRIP.gain <= 0) {
+      this._sgMag = 0;
+      return;
+    }
+    const body = this.body;
+
+    // Averaged contact normal — the direction the extra load pushes along.
+    let grounded = 0;
+    this._sgN.set(0, 0, 0);
+    for (const t of this.tires) {
+      if (!t.grounded) continue;
+      grounded++;
+      this._sgN.add(t.hitNormal);
+    }
+
+    let target = 0;
+    // Two contacts minimum: one normal cannot describe a curve.
+    if (grounded >= 2 && this._sgN.lengthSq() > 1e-8) {
+      this._sgN.normalize();
+
+      let kSum = 0, kN = 0;
+      for (let i = 0; i < this.tires.length; i++) {
+        const a = this.tires[i];
+        if (!a.grounded) continue;
+        for (let j = i + 1; j < this.tires.length; j++) {
+          const b = this.tires[j];
+          if (!b.grounded) continue;
+          this._sgDp.subVectors(b.hitPoint, a.hitPoint);
+          const d2 = this._sgDp.lengthSq();
+          // Contacts closer than ~0.5 m apart give a baseline too short to
+          // measure curvature over — the estimate is dominated by normal noise.
+          if (d2 < 0.25) continue;
+          this._sgDn.subVectors(b.hitNormal, a.hitNormal);
+          kSum += -this._sgDp.dot(this._sgDn) / d2; // signed: + concave, - convex
+          kN++;
+        }
+      }
+
+      if (kN > 0) {
+        const k = kSum / kN;
+        if (k > SURFACE_GRIP.minCurvature) {
+          // Speed ALONG the surface — the component that actually has to be
+          // turned by the curve. The normal component is closing speed, not
+          // orbital speed, and counting it would spike the load on every bump.
+          this._sgVt.copy(body.vel);
+          this._sgVt.addScaledVector(this._sgN, -this._sgVt.dot(this._sgN));
+          const v2 = this._sgVt.lengthSq();
+          // Ramp with contact count for the same reason the stabilizer does:
+          // two wheels over an edge should not command a full-strength shove.
+          const contact = grounded * 0.25;
+          target = SURFACE_GRIP.gain * body.mass * v2 * k * contact;
+          const cap = SURFACE_GRIP.maxG * body.mass * GRAVITY;
+          if (target > cap) target = cap;
+        }
+      }
+    }
+
+    // Ease in AND out — the exit is the half that matters (see SURFACE_GRIP.ease).
+    this._sgMag += (target - this._sgMag) * (1 - Math.exp(-SURFACE_GRIP.ease * dt));
+    if (this._sgMag <= 1) return;
+    // Along -N: N points out of the surface toward the car, so this presses the
+    // car INTO whatever it is riding, at the centre of mass (no torque).
+    this._sgF.copy(this._sgN).multiplyScalar(-this._sgMag);
+    body.addForce(this._sgF);
   }
 
   /**
