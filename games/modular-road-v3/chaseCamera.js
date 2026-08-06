@@ -72,6 +72,16 @@ export const CHASE_CAM = {
    *  far slower than `loopLerp`: the car's tilt in the air is trick input, not
    *  surface following, so the rig should let go gently rather than track it. */
   loopAirLerp: 1.2,
+  /** Rate the car-frame rig's up-axis eases toward its target — world up while
+   *  the player is rolling in the air, the car's own up otherwise. See the long
+   *  note at the use site for why world up is the target that matters: it makes
+   *  the two rigs converge, so there is never a handover to snap. Fast enough
+   *  that it has converged before a landing, slow enough that the traverse is a
+   *  drift rather than a lurch. */
+  rigUpLerp: 6.0,
+  /** Deadzone on the air-roll input before that retarget engages, so controller
+   *  noise or a feathered stick does not disturb the loop rig. */
+  rollInput: 0.15,
   upLerp: 5.0,        // how fast camera.up eases (the roll)
   // ── SPEED FOV ──────────────────────────────────────────────────────────────
   // The engine's camera FOV (60° vertical ≈ 91° horizontal at 16:9) is a fine
@@ -109,6 +119,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
   const _camTgtH = new THREE.Vector3();
   const _worldUp = new THREE.Vector3(0, 1, 0);
   const _carUp = new THREE.Vector3();             // car's own up-axis (loop-follow)
+  const _rigUp = new THREE.Vector3(0, 1, 0);      // car-frame rig's up — retargeted during an air roll
   const _camUp = new THREE.Vector3(0, 1, 0);      // smoothed (persistent) camera up
   const _upTgt = new THREE.Vector3(0, 1, 0);      // this frame's desired up
   const _camDir = new THREE.Vector3();            // current view direction
@@ -142,6 +153,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     _camLoop = 0;
     _loopAir = 0;
     _camUp.set(0, 1, 0);
+    _rigUp.set(0, 1, 0);
     camera.up.set(0, 1, 0);
     // Reset alone only re-seeds heading/look; the POSITION + up still eased in
     // from wherever the camera was, so a respawn teleport swung the camera across
@@ -187,6 +199,10 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
       dt,
       snap,
     );
+
+    // Is the player deliberately rolling? A/D is steering on the ground and roll
+    // in the air, so this is only meaningful airborne — see the rig-up freeze.
+    const rolling = Math.abs(vehicle.input?.airSteer ?? 0) > CAM.rollInput;
 
     _camFwd.set(0, 0, 1).applyQuaternion(rquat); // car facing (fallback)
     const reversing = grounded && v.dot(_camFwd) < -0.5;
@@ -238,12 +254,64 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     // & up so the view rolls with the car through a vertical loop. Only blended
     // in while grounded — airborne spins keep the world rig.
     _carUp.set(0, 1, 0).applyQuaternion(rquat);
+
+    // THE RIG'S UP-AXIS STOPS FOLLOWING A DELIBERATE AIR ROLL.
+    //
+    // This is the "after a ring half the car swings through a wide arc instead
+    // of rolling on itself" bug, and it was never in the physics — the car
+    // really does rotate cleanly about its own centre (tools/ringHalfRollRepro
+    // bisects the whole air controller and none of it moves the car; the COM
+    // path is ballistic to 0.3 m/s²). It is this rig. Over the top of a ring
+    // half the car is inverted, so the blend is fully committed here, and the
+    // offset below is built on the car's own up-axis. Roll the car and that axis
+    // sweeps with it, so THE CAMERA ORBITS THE CAR at hypot(dist, height) =
+    // 8.15 m — on screen, exactly a car swinging about a pivot out in space.
+    //
+    // SO FREEZE THE AXIS, DO NOT SWITCH RIGS. Unwinding the blend instead (the
+    // obvious fix, and the first one tried) is worse: the two rigs sit on
+    // OPPOSITE SIDES of an inverted car — 2·height = 6.4 m apart — so releasing
+    // the blend vaults the camera over the car, and against an unchanged
+    // ballistic path that reads as the car being shoved downwards. Reported
+    // immediately, and rightly.
+    //
+    // Holding the axis in world space has neither problem. At the instant the
+    // roll starts it still equals the car's up, so THE CAMERA DOES NOT MOVE AT
+    // ALL — there is no handover to see. From then on it simply stops being
+    // dragged round by the roll, which is the entire bug. The car is then the
+    // only thing rotating on screen, which is what a roll should look like.
+    //
+    // It eases back to the car's up whenever the player is not rolling, so a
+    // genuine loop still gets the loop rig and landing re-acquires it smoothly.
+    // FREEZING IT IS NOT ENOUGH, AND HOLDING THE BLEND IS WORSE. Both were
+    // tried. Freezing kills the orbit but leaves the camera parked below an
+    // inverted car, and then SOMETHING still has to put it back: unwinding the
+    // blend mid-air vaults it over the car (reported as the car being shoved
+    // down), and holding the blend until touchdown just saves the whole debt up
+    // and pays it at `loopLerp` the instant the wheels land. MEASURED as peak
+    // camera speed relative to the car — a rig snap is a spike:
+    //     shipped            in flight 10.7 m/s   at landing 21.4 m/s
+    //     freeze + hold      in flight  6.0 m/s   at landing 24.9 m/s  <- worse
+    // which is precisely the "big jump down when landing" that came back.
+    //
+    // So ease it toward WORLD UP instead. That is the one target that makes the
+    // two rigs CONVERGE — a world-up car-frame rig IS the world rig — so the
+    // blend underneath stops mattering, there is nothing left to unwind, and
+    // touchdown costs nothing however the blend happens to be sitting. The
+    // traverse still has to happen (the camera genuinely has to get from below
+    // an inverted car to above an upright one), but it is spread across the roll
+    // instead of spiking, and a rolling car is the best possible cover for it.
+    const upTarget = rolling && !grounded ? _worldUp : _carUp;
+    const kr = snap ? 1 : 1 - Math.exp(-CAM.rigUpLerp * dt);
+    _rigUp.lerp(upTarget, kr);
+    if (_rigUp.lengthSq() < 1e-6) _rigUp.copy(_carUp);
+    _rigUp.normalize();
+
     _cDesired.copy(pos)
       .addScaledVector(_camFwd, -CAM.dist)
-      .addScaledVector(_carUp, CAM.height);
+      .addScaledVector(_rigUp, CAM.height);
     _cLook.copy(pos)
       .addScaledVector(_camFwd, CAM.lookAhead)
-      .addScaledVector(_carUp, CAM.lookUp);
+      .addScaledVector(_rigUp, CAM.lookUp);
 
     // Blend target: how far the car's up tilts from world up, gated on grip.
     // Airborne the tilt is trick input rather than a surface to follow, so the
@@ -258,6 +326,9 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     } else {
       _loopAir += dt;
     }
+    // The blend itself is left exactly as it shipped. With the rig's up-axis
+    // easing to world up above, the two rigs converge on their own, so there is
+    // no longer anything for this to snap between — no special case needed here.
     const loopRate = grounded
       ? CAM.loopLerp
       : (_loopAir < CAM.loopAirHold ? 0 : CAM.loopAirLerp);
@@ -294,6 +365,12 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     // the smoothing untouched for bumps, landings and direction changes — which
     // is why this is preferable to just raising posLerp (that would stiffen the
     // camera everywhere to fix a problem that only exists at speed).
+    //
+    // DO NOT SMOOTH THIS. Easing the term was tried as a cure for the landing
+    // jump and MAKES IT WORSE: a smoothed vector still carries the fall's
+    // velocity for a few tenths after touchdown, holding the camera target down
+    // once the car has already stopped. MEASURED as the camera's height over the
+    // car through the second after landing — excursion 0.2 m raw, 1.8 m smoothed.
     if (!snap && CAM.lagCompensate > 0) {
       _camDesired.addScaledVector(v, CAM.lagCompensate / CAM.posLerp);
     }
@@ -317,14 +394,16 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
       // carUp ⊥ travel, so it's a safe perpendicular.
       const vert = Math.abs(_camDir.y); // 1 = looking straight up/down
       const g = THREE.MathUtils.smoothstep(vert, 0.85, 0.999) * _camLoop;
-      if (g > 0) _upTgt.lerp(_carUp, g);
+      // Frozen axis, not the live car up — otherwise the VIEW rolls with the
+      // trick and undoes the freeze above.
+      if (g > 0) _upTgt.lerp(_rigUp, g);
     }
     const ku = snap ? 1 : 1 - Math.exp(-CAM.upLerp * dt);
     _camUp.lerp(_upTgt, ku);
     // Keep it valid: strip any component along the view dir; fall back to the
     // car's up if that leaves nothing (up nearly parallel to view).
     if (dlen > 1e-5) _camUp.addScaledVector(_camDir, -_camUp.dot(_camDir));
-    if (_camUp.lengthSq() < 1e-4) _camUp.copy(_carUp);
+    if (_camUp.lengthSq() < 1e-4) _camUp.copy(_rigUp);
     camera.up.copy(_camUp.normalize());
     camera.lookAt(_camLook);
   }
