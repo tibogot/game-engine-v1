@@ -2291,6 +2291,34 @@ export const CATEGORY_PRESETS = {
       preview: `<svg viewBox="0 0 80 80"><line x1="6" y1="66" x2="74" y2="66" stroke="#c0392b" stroke-width="1.2"/><path d="M14 66 Q48 66 62 26" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
     },
     {
+      // SKATEPARK RE-ENTRY: ride up, pop off the lip, drop back onto the SAME
+      // face. The shape for that was always the quarter-pipe; what was missing
+      // was the SCALE.
+      //
+      // A transition can only trade speed for height, v²/2 = g·h, so the climb
+      // that brings the car to rest at the lip is h = v²/(2g) — and for a
+      // quarter circle that IS the radius. This car arrives at a park section at
+      // 40–46 m/s, which is 86–108 m of climb. Against that, the 16 m and 13 m
+      // presets below are barely a kerb: the car is still doing 31 m/s at the
+      // lip, gets 7 s of hangtime, and lands 11 m PAST the ramp every time.
+      // MEASURED at 16 m: never once caught, at five lip angles and two radii.
+      //
+      // Big enough to actually bleed the speed and it works. Measured entering
+      // at 46 m/s: R=30 still overshoots; R=45 catches it low on the face; R=55
+      // to 70 drops it back in right at the lip; R=100 never gets airborne at
+      // all — the car stalls short of the lip and rolls back down, which is also
+      // exactly what a skatepark does.
+      //
+      // 60 m is the middle of that window. Scale it to the speed you want to
+      // arrive at: roughly half to three-quarters of v²/(2g). Too small and you
+      // fly past the ramp; too large and you never leave the surface.
+      id: "quarterpipe_bowl",
+      label: "Park bowl",
+      base: "quarterpipe",
+      params: { qpRadius: 60, qpAngle: 90 },
+      preview: `<svg viewBox="0 0 80 80"><line x1="4" y1="70" x2="40" y2="70" stroke="#c0392b" stroke-width="1.2"/><path d="M8 70 Q56 70 62 8" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M50 30 a13 13 0 0 1 -9 22" stroke="#16a0c0" stroke-width="1.6" fill="none" stroke-dasharray="3 2"/></svg>`,
+    },
+    {
       id: "quarterpipe_down",
       label: "Quarter-pipe down",
       base: "quarterpipe_down",

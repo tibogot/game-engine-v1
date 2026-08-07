@@ -620,6 +620,14 @@ export const TIRE = {
   /** Q/E release rate (1/s). A flat spin must stop promptly without the heading
    *  hold pulling the car backward to the key-release angle. */
   airYawSettle: 14.0,
+  /** Where the Q/E spin axis crosses over from world up to the car's own up,
+   *  measured as |forward.y| — how near the nose is to vertical. World up is a
+   *  perfectly good yaw axis until it lines up with the nose, at which point it
+   *  becomes the ROLL axis and a spin input can only barrel-roll (which is what
+   *  a park bowl does to you). Start 0.5 = 30° of nose-up, full 0.9 = 64°.
+   *  See the long note at the use site: both endpoints are wrong on their own. */
+  airYawUprightStart: 0.5,
+  airYawUprightFull: 0.9,
   // ── AIRBORNE HEADING HOLD ───────────────────────────────────────────────
   // A 360° roll must leave you pointing where you took off. It did not: roll
   // with A and the car landed a few degrees left, roll with D and it landed the
@@ -2499,6 +2507,7 @@ export class Vehicle {
      *  separate from rigid-body yaw prevents pitched launches from turning the
      *  input into roll and leaves no spin momentum at touchdown. */
     this._airYawRateState = 0;
+    this._yawAxisHeld = false;
     this._yawN = new THREE.Vector3();
     this._yawFwd = new THREE.Vector3();
     this._yawLat = new THREE.Vector3();
@@ -2585,6 +2594,8 @@ export class Vehicle {
     this._wheelFwdWorld = new THREE.Vector3();
     this._wheelTireVel = new THREE.Vector3();
     this._yAxis = new THREE.Vector3(0, 1, 0);
+    this._yawAxis = new THREE.Vector3(0, 1, 0); // Q/E spin axis, blended per attitude
+    this._yawAxisHeld = false;                 // latched for the duration of a spin
     this._xAxis = new THREE.Vector3(1, 0, 0);
     this._zAxis = new THREE.Vector3(0, 0, 1);
     this._arrowDir = new THREE.Vector3();
@@ -2740,6 +2751,7 @@ export class Vehicle {
     this.body.angVel.set(0, 0, 0);
     this._airTime = 0;
     this._airYawRateState = 0;
+    this._yawAxisHeld = false;
     this._rackAirTime = 0;
     // Drop the contact-normal history — the first probe after a teleport must
     // snap to the new surface, not ease over from wherever the car just was.
@@ -3524,6 +3536,8 @@ export class Vehicle {
       // Q/E is a rate control, not a flywheel. Its kinematic rate stops when a
       // wheel finds the landing, so the tyres never inherit stale spin momentum.
       this._airYawRateState = 0;
+      this._yawAxisHeld = false;
+    this._yawAxisHeld = false;
       // The heading to keep through the next jump. Recorded continuously while
       // grounded, so it is whatever you were pointing at when you left the ramp.
       this._stabFwdH.set(0, 0, 1).applyQuaternion(body.quat);
@@ -3739,20 +3753,62 @@ export class Vehicle {
       // "improve" this axis.
       axis(this._airFwd, inR, TIRE.airRollRate, Ir);
 
-      // Q/E is a FLAT spin about world up. The old chassis-up torque axis tilts
-      // with the ramp attitude, so a nominal yaw input also accumulated roll
-      // (±17° on jump-debug.json) and carried physical yaw momentum into the
-      // tyres. Apply the world-up rate kinematically: inertia cannot cross-couple
-      // it, release remains soft, and contact leaves no stale spin momentum.
+      // THE Q/E SPIN AXIS IS WORLD UP UNTIL THE NOSE GOES VERTICAL, THEN THE
+      // CAR'S OWN UP. Neither works everywhere — this is a measured trade, not a
+      // preference, and both endpoints have a failure you can see.
+      //
+      // WORLD UP alone breaks on a wall. Off a park bowl the car leaves the lip
+      // nose STRAIGHT UP, so world up IS its roll axis and a "flat spin" about it
+      // can only barrel-roll. MEASURED at the lip: fwd·fwd0 +0.99 (the nose does
+      // not move at all), up·up0 −0.86 — a pure roll, reported exactly that way.
+      //
+      // CHASSIS UP alone breaks on a jump. On a pitched ramp the axis tilts with
+      // the attitude and the spin leaks into roll: MEASURED on jump-debug.json,
+      // E gave roll −15° / yaw 2° against world up's roll −1° / yaw 18°. That is
+      // the same ±17° this file already warned about — and note it is the AXIS
+      // that does it, not the torque model, since this path is kinematic.
+      //
+      // So key it on the one thing that actually decides it: how close world up
+      // is to being useless, i.e. how near the nose is to vertical. Level nose ⇒
+      // world up, unchanged flat spin. Nose up a wall ⇒ the car's own up, which
+      // is the skater's 180 — back down the face nose-first, same way up.
+      //
+      // Kinematic, not a torque, and that stays load-bearing: an earlier
+      // chassis-up TORQUE cross-coupled through the inertia tensor on top of all
+      // this. Rotating the body directly has no inertia to route through.
+      // THE AXIS IS LATCHED WHEN THE SPIN STARTS, and that is not a detail — a
+      // re-evaluated axis cannot complete the manoeuvre it started. The blend
+      // reads the nose attitude, and the spin ITSELF changes the nose attitude:
+      // 90° into a bowl 180 the nose has come down to horizontal, the blend falls
+      // back toward world up, and the axis moves out from under the rotation.
+      // MEASURED live-blended at the lip: fwd·fwd0 0.53, up·up0 −0.21 — a spin
+      // that starts as a 180 and finishes as neither. Latched: −0.87 / 1.00.
+      //
+      // Held through the release settle too, so letting go mid-spin does not
+      // change axis while the rate bleeds off.
+      if (inY !== 0 && !this._yawAxisHeld) {
+        const noseVert = Math.abs(this._airFwd.y);
+        const upBlend = THREE.MathUtils.smoothstep(
+          noseVert, TIRE.airYawUprightStart, TIRE.airYawUprightFull);
+        this._yawAxis.copy(this._yAxis).lerp(this._stabUp, upBlend);
+        // Only ever near-degenerate if the two are opposed, which needs a level
+        // nose — and a level nose means blend 0, i.e. plain world up.
+        if (this._yawAxis.lengthSq() < 1e-6) this._yawAxis.copy(this._stabUp);
+        this._yawAxis.normalize();
+        this._yawAxisHeld = true;
+      } else if (inY === 0 && Math.abs(this._airYawRateState) < 1e-4) {
+        this._yawAxisHeld = false;
+      }
+
       const yawTarget = inY * TIRE.airYawRate;
       const yawGain = inY !== 0 ? TIRE.airResponse : TIRE.airYawSettle;
       this._airYawRateState +=
         (yawTarget - this._airYawRateState) * (1 - Math.exp(-yawGain * dt));
       if (inY !== 0 || Math.abs(this._airYawRateState) > 1e-5) {
         const yawStep = this._airYawRateState * dt;
-        this._holdQ.setFromAxisAngle(this._yAxis, yawStep);
+        this._holdQ.setFromAxisAngle(this._yawAxis, yawStep);
         body.quat.premultiply(this._holdQ).normalize();
-        body.angVel.applyAxisAngle(this._yAxis, yawStep);
+        body.angVel.applyAxisAngle(this._yawAxis, yawStep);
       }
 
       // ── SETTLE THE UNWANTED ROTATION AS A VECTOR ──────────────────────────
