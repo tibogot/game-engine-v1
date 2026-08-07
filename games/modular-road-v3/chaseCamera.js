@@ -1,100 +1,199 @@
 import * as THREE from "three";
 
 /**
- * Chase camera — ported verbatim from modular-road.html's updateChaseCamera.
+ * Chase camera.
  *
- * The camera trails the car's *travel direction* (from velocity), NOT the car's
- * orientation, so mid-air spins/rolls don't whip the view around; the look tilts
- * up when climbing / down when falling so you can see the landing.
+ * ═══ THE ARCHITECTURE: TWO INDEPENDENT JOBS ═════════════════════════════════
  *
- * The part v3's stuntCarMode camera does NOT have, and the reason this one is
- * ported instead: LOOP-FOLLOW. On a banked or looping surface the rig blends
- * into the car's own frame so the view rolls with the car through a vertical
- * loop. A stunt track is mostly loops, so that behaviour is the point.
+ * A chase camera has to answer two questions, and every version of this file
+ * that went wrong went wrong by answering them with the SAME vector:
+ *
+ *   1. WHERE DOES THE CAMERA SIT?    → the BOOM. Must follow the road, or it
+ *                                      ends up on the wrong side of the tarmac
+ *                                      and you are looking at the underside of
+ *                                      a loop instead of at the car.
+ *   2. WHICH WAY IS UP ON SCREEN?    → the VIEW. Must stay world-level, or the
+ *                                      horizon rolls and it is nauseating.
+ *
+ * Tie them together and you must sacrifice one. Follow the road with both and a
+ * tube rolls the camera (headache). Level both and the boom swings under the car
+ * mid-loop and the road blocks the shot. They are SEPARATE here:
+ *
+ *     P   = car − boomF·dist + boomU·height        (boom: follows the road)
+ *     d   = normalise(car − P)                     (aim straight AT the car)
+ *     r   = normalise(d × worldUp)                 (horizontal by construction)
+ *     u_d = r × d
+ *     view = d·cos φ + u_d·sin φ                   (tilt the AXIS up by φ)
+ *     camera.up = r × view
+ *
+ * ═══ WHY THIS PINS THE CAR ══════════════════════════════════════════════════
+ *
+ * The view axis is the direction to the car rotated UP by exactly φ about a
+ * horizontal axis. So the car is exactly φ below the view axis, and exactly on
+ * the vertical centre line, at every attitude, always:
+ *
+ *     ndc.x = 0                    ndc.y = −tan φ / tan(fov/2)
+ *
+ * This is stronger than what the previous version achieved. It held the car at a
+ * constant ANGLE off the axis by building the camera and the aim point in one
+ * shared frame — but that only works while camera.up is also locked to that
+ * frame, which is exactly what forced the frame to roll. Aiming AT the car
+ * instead makes the framing independent of the boom entirely: the boom can do
+ * whatever it likes, roll included, and the car does not move a pixel.
+ *
+ * That independence is the whole point. It means job 1 can be solved on its
+ * merits — hug the road, stay out of the scenery — without ever being traded off
+ * against job 2.
+ *
+ * ═══ THE THREE BUGS THIS FILE HAS HAD, SO THEY DON'T COME BACK ══════════════
+ *
+ * 1. TWO UNRELATED FRAMES (the original). Camera placed behind a world-horizontal
+ *    heading at a world-up height, aimed along a separately-smoothed velocity
+ *    vector. The car's screen position was whatever the two happened to disagree
+ *    by. Measured: flat road ndc.y −0.41, steep ramp +0.12, vertical wall +0.38,
+ *    −60° descent −1.22 (OFF SCREEN), inverted +0.41 with the camera 3.2 m BELOW
+ *    the car — 53° of framing swing from attitude alone. "Sometimes the camera is
+ *    up, sometimes down / on a ramp I see only the tip of the car."
+ *
+ * 2. ONE FRAME THAT FOLLOWED THE ROAD. Fixed the framing, but a tube or corkscrew
+ *    rolls the road about the travel axis, so the frame rolled about the VIEW
+ *    axis. "The camera rotates and it's really giving headache."
+ *
+ * 3. ONE FRAME THAT STAYED LEVEL (yaw+pitch only). No roll, but the boom was then
+ *    forced level too: pitching with the travel direction it swung 5.2 m BELOW
+ *    the car climbing a loop, into the loop's interior, and the road came between
+ *    camera and car (measured: line of sight BLOCKED from the apex onward).
+ *
+ * The fix for all three is the same one: stop making one vector do both jobs.
+ *
+ * 4. SHOWING THE NOSE OVER THE TOP OF A LOOP. With the boom free to follow the
+ *    road, the remaining problem was that a loop REVERSES the travel heading, so
+ *    the boom's azimuth has to travel 180° — and traced analytically, its
+ *    horizontal part vanishes halfway through that journey (φ = 113° round a loop
+ *    entered heading −Z), i.e. the path runs over the pole. Holding the azimuth
+ *    dodges the pole but parks the camera in FRONT of the car at the apex.
+ *
+ *    Both are fixed by going round the SIDE — see the swing at the use site. It
+ *    is not a flourish; it is what makes the azimuth's 180° reachable without
+ *    passing through vertical, and it costs nothing anywhere else because it
+ *    computes to exactly zero unless the boom is actually near the pole.
  */
 export const CHASE_CAM = {
-  dist: 7.5,          // trail distance behind the heading
-  height: 3.2,        // height above the car
-  lookAhead: 5.5,     // how far ahead (along travel) to aim
-  lookUp: 1.2,        // raise the look target a touch
-  minSpeed: 3.0,      // below this, fall back to the car's facing
-  maxLookPitch: 0.85, // clamp so we never look fully straight up/down
-  headingLerp: 4.0,   // how fast the trailing heading reorients
-  lookLerp: 5.0,      // how fast the look direction tracks velocity
-  posLerp: 7.0,       // camera position smoothing
-  /** Cancels the follow lag that otherwise grows the chase distance with speed.
-   *  1 = hold CAM.dist at every speed, 0 = the old behaviour (drifts to ~14 m
-   *  at top speed). See the derivation at the use site. */
-  lagCompensate: 1.0,
-  // Loop-follow blend, ramped by how far the car's up-axis tilts from world up.
-  //
-  // ONLY ONCE THE CAR IS ACTUALLY PAST VERTICAL. Tilt alone cannot tell a loop
-  // from a steep ramp — both lay the car over by the same angle — so an early,
-  // wide ramp (the previous 0.98 → 0.0, engaging from ~11° of tilt) committed to
-  // loop behaviour on any steep climb. MEASURED driving a near-vertical quarter
-  // pipe on the old values:
-  //     car tilt 30°  blend 12%    70°  blend 65%    85°  blend 91%
-  // and at 73° the camera had rolled into the ramp's plane — camera.up.y 0.988
-  // → 0.643, and the view elevation swung −24° (above the car, looking down) to
-  // +17° (below it, looking up). A near-vertical wall then renders as flat grey
-  // ground: the steeper the ramp, the harder the rig worked to make it look
-  // level, which is exactly backwards.
-  //
-  // A LOOP inverts and a ramp never does, so that — not tilt — is the thing
-  // worth keying on. The blend now sits at 0 for every upright attitude, however
-  // steep, and ramps in across the inverted half where the camera genuinely has
-  // to follow the car round. Loop entry is less rolled than it used to be; that
-  // is the deliberate trade for ramps reading as steep.
-  loopStart: 0.0,     // carUp.y where loop-follow begins — the car is VERTICAL
-  loopFull: -1.0,     // fully committed only when fully INVERTED (180°)
-  /**
-   * How fast the blend eases toward its tilt-based target.
+  // ── FRAMING. `carBelowCentre` is now the ONLY thing that moves the car on
+  // screen. dist/height change where you watch FROM, not where the car sits. ──
+  /** Degrees the car sits below the centre of the screen. 0 = dead centre.
+   *  Exact, at every attitude — see the derivation above. */
+  carBelowCentre: 14.0,
+
+  // ── THE BOOM: where the camera sits. Free to follow the road, because it can
+  // no longer disturb the framing. ─────────────────────────────────────────────
+  dist: 7.5,          // trail distance behind the car, along −boomF
+  height: 3.2,        // offset along the ROAD's normal, +boomU
+  minSpeed: 3.0,      // below this the boom falls back to the car's facing
+  headingLerp: 4.0,   // how fast the boom swings onto the travel direction
+  /** How fast the boom's up tracks the road while GROUNDED. This is what keeps
+   *  the camera on the drivable side of the tarmac through a loop or a wall
+   *  ride, instead of outside it looking at the back of the road. */
+  upLerp: 5.0,
+  /** How fast the boom's up returns to world up while AIRBORNE. Slow on purpose:
+   *  in the air the car's roll is trick input, not a surface, so a boom that
+   *  chased it would swing the camera around the car during a roll. */
+  airUpLerp: 1.6,
+  /** Grace period (s) after the wheels leave before that starts, so a crest hop
+   *  or the lip of a loop cannot unwind the boom mid-jump. */
+  airHold: 0.35,
+  // ── POLE GUARD ─────────────────────────────────────────────────────────────
+  /** Hard limit on the boom's ELEVATION, in degrees. Not a nicety — it is what
+   *  makes the level horizon below well-defined at all.
    *
-   * RAISED WITH THE NARROWER ENGAGE RANGE. The blend used to have the whole
-   * climb (11°→90°) to ease in; it now has only the inverted half, which a car
-   * clears in well under a second, so at the old 5/s it lagged so far behind
-   * that the camera never rolled — measured camera.up.y bottoming at −0.09 at
-   * the apex where the old rig reached −0.99, i.e. the loop barely read as a
-   * loop any more. Tracking the target closely is what restores it.
+   *  The boom is −f·dist + u·height, and on a DESCENT both terms tilt upward. Its
+   *  horizontal part is −dist·cos θ + height·sin θ, exactly ZERO at
+   *  θ = atan(dist/height) = 67°: the camera sits directly above the car, the view
+   *  points straight down, and "level" has no answer. MEASURED as the horizon
+   *  arriving 180° out — the car rendered upside down on a plain steep descent.
+   *  A loop passes through the same configuration on its way round.
    *
-   * Safe to be this quick only because the position blend now swings on an ARC
-   * (see the use site); on a chord a blend this fast threw the camera at the car.
-   */
-  loopLerp: 12.0,
-  /** Grace period (s) after the wheels leave before the blend starts unwinding.
-   *  Without it the blend collapsed the instant `grounded` went false, so
-   *  launching off a lip unwound the whole rig mid-flight — measured as ~65% of
-   *  blend released over about a second, right at the moment of the jump. A
-   *  crest hop or the lip of a loop is shorter than this and now changes
-   *  nothing. */
-  loopAirHold: 0.35,
-  /** Rate the blend eases to 0 once airborne past `loopAirHold`. Deliberately
-   *  far slower than `loopLerp`: the car's tilt in the air is trick input, not
-   *  surface following, so the rig should let go gently rather than track it. */
-  loopAirLerp: 1.2,
-  /** Rate the car-frame rig's up-axis eases toward its target — world up while
-   *  the player is rolling in the air, the car's own up otherwise. See the long
-   *  note at the use site for why world up is the target that matters: it makes
-   *  the two rigs converge, so there is never a handover to snap. Fast enough
-   *  that it has converged before a landing, slow enough that the traverse is a
-   *  drift rather than a lurch. */
-  rigUpLerp: 6.0,
-  /** Deadzone on the air-roll input before that retarget engages, so controller
-   *  noise or a feathered stick does not disturb the loop rig. */
-  rollInput: 0.15,
-  upLerp: 5.0,        // how fast camera.up eases (the roll)
+   *  With the limit in place the view always keeps cos(68°) = 0.37 of horizontal
+   *  content, so `camera.up` can be taken exactly level, every frame, with no
+   *  easing and therefore no roll. Above the limit the camera simply stops
+   *  chasing the road downhill and hangs back — which is what it should do
+   *  anyway: you want to see the drop, not be pointed into it. */
+  poleGuard: 68,
+  /** Margin on the sideways swing, ×. 1.0 is the exact minimum that satisfies
+   *  `poleGuard`; a little over keeps the camera clear of rails and tube walls. */
+  sideScale: 1.15,
+  /** Softening on the swing's onset, m². `side = √(need)` has an INFINITE
+   *  derivative at need = 0, so the swing slams in the instant it engages —
+   *  measured as part of 2041 m/s² of camera acceleration entering a quarterpipe.
+   *  `√(need + ε) − √(ε)` is the same curve everywhere that matters but with a
+   *  finite slope at the onset. */
+  sideSoften: 0.5,
+  /** Time constant of the boom's critically-damped smoothing, seconds.
+   *
+   *  SECOND ORDER, NOT A LERP, and that is the point. A first-order ease has a
+   *  DISCONTINUOUS VELOCITY whenever its target kinks — and the boom's target
+   *  kinks constantly: at a piece boundary where road curvature steps, where the
+   *  pole guard starts clamping, where the sideways swing engages. A hard rate cap
+   *  is worse still, adding a kink every time it saturates and desaturates.
+   *  MEASURED with lerp + cap: 21655°/s² of view acceleration through a loop and
+   *  2041 m/s² of camera acceleration on a quarterpipe — roughly 200 g. The rig
+   *  read as "a bit too brutal", which is exactly what that is.
+   *
+   *  A critically damped spring is C1 by construction: it cannot step its own
+   *  velocity, so no upstream kink can reach the screen as a snap. It also
+   *  absorbs everything earlier in the chain, which is why the first-order eases
+   *  on boomF/boomU are still fine.
+   *
+   *  Raise for a lazier, more cinematic camera; lower for a tighter one. Below
+   *  ~0.1 s it stops filtering the piece-boundary kinks and the harshness returns. */
+  //
+  // WHY THIS IS ONE FIXED NUMBER AND NOT ERROR-ADAPTIVE. Stiffening the spring
+  // when the error is large is the obvious way to buy smoothness on the straights
+  // without lagging through a reversal, and it does work for the lag: it restored
+  // the quarterpipe to astern at T = 0.45. But it stiffens precisely where the
+  // camera was reported as brutal — the loop and the quarterpipe, which are all
+  // large error — and MEASURED it doubled them, view acceleration 692 → 1547°/s²
+  // through a loop and 3013 → 5618°/s² on a quarterpipe. Exactly the wrong trade.
+  //
+  // The ceiling on this number is instead set by keeping the camera ASTERN: at
+  // 0.40 the boom lags far enough off a quarterpipe lip that the camera ends up in
+  // front of the car (boom·forward +0.10). 0.28 leaves it behind (−0.03) with most
+  // of the smoothing won.
+  boomSmoothTime: 0.28,
+  /** Ceiling on how fast the boom may swing around the car, in °/s. With the
+   *  spring this is a true backstop and normally inactive — a loop sweeps about
+   *  90°/s. Kept because a spring bounds acceleration, not speed. */
+  boomMaxRate: 300,
+
+  // ── LEVELLING ──────────────────────────────────────────────────────────────
+  // SAFETY NET ONLY. `poleGuard` keeps the boom's elevation at or under 68°, so
+  // the view direction always retains cos(68°) = 0.37 of horizontal content —
+  // comfortably above `levelFull`, which means the horizon is taken level and
+  // EXACTLY level, every frame, and none of this runs.
+  //
+  // It exists because the alternative to a guard is a singularity: without one
+  // the boom sweeps through vertical inside a loop, where "level" not only
+  // vanishes but REVERSES across the pole (looking up-and-back and up-and-forward
+  // have opposite level horizons), and taking the answer directly there was a
+  // ONE-FRAME 20694°/s snap. If anyone widens `poleGuard` past ~78° this brings
+  // that back under control instead of letting it snap.
+  levelLerp: 8.0,
+  levelFloor: 0.02,
+  levelFull: 0.20,
+
+  // ── FOLLOW ─────────────────────────────────────────────────────────────────
+  posLerp: 7.0,       // rate any residual anchor error decays at
+  /** How much of the car's per-frame displacement the anchor carries across.
+   *  1 = the boom is rigid on the smoothed frame: no lag at any speed or
+   *  framerate. Below 1 the anchor falls behind under acceleration, which softens
+   *  a landing at the cost of the chase distance stretching with speed. */
+  follow: 1.0,
+
   // ── SPEED FOV ──────────────────────────────────────────────────────────────
-  // The engine's camera FOV (60° vertical ≈ 91° horizontal at 16:9) is a fine
-  // value, but it was inherited from the v3 editor and it is STATIC — and a
-  // static FOV is why a racing game stops feeling fast. Widening with speed is
-  // the cheapest possible speed cue.
-  //
-  // `fovBase` is overwritten at construction from the camera's actual FOV, so it
-  // can't silently drift out of sync with v3/app/main.js.
   fovBase: 60,
   fovAtSpeed: 12,     // extra degrees at fovSpeedRef and above
   fovSpeedRef: 50,    // m/s for the full kick — keep matching TIRE.topSpeed
-  fovLerp: 3.0,       // how fast FOV eases (slow: a twitchy FOV reads as nausea)
+  fovLerp: 3.0,       // slow: a twitchy FOV reads as nausea
 };
 
 /**
@@ -106,38 +205,79 @@ export const CHASE_CAM = {
  */
 export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () => false, params = {} }) {
   const CAM = { ...CHASE_CAM, ...params };
-  // Anchor the FOV kick to whatever the engine actually authored (unless a
-  // caller pinned it explicitly), so this can never drift from main.js.
   if (camera.isPerspectiveCamera && params.fovBase == null) CAM.fovBase = camera.fov;
 
-  const _camHeading = new THREE.Vector3(0, 0, 1); // horizontal trail heading
-  const _camLookDir = new THREE.Vector3(0, 0, 1); // 3D look direction
-  const _camDesired = new THREE.Vector3();
-  const _camLook = new THREE.Vector3();
-  const _camV = new THREE.Vector3();
-  const _camFwd = new THREE.Vector3();
-  const _camTgtH = new THREE.Vector3();
+  const _boomF = new THREE.Vector3(0, 0, 1);  // boom forward (unit)
+  const _boomU = new THREE.Vector3(0, 1, 0);  // boom up — the road's normal
+  const _anchor = new THREE.Vector3();
+  const _prevPos = new THREE.Vector3();
+  const _delta = new THREE.Vector3();
+  const _dirTgt = new THREE.Vector3();
+  const _upTgt = new THREE.Vector3();
+  const _carFwd = new THREE.Vector3();
+  const _carUp = new THREE.Vector3();
   const _worldUp = new THREE.Vector3(0, 1, 0);
-  const _carUp = new THREE.Vector3();             // car's own up-axis (loop-follow)
-  const _rigUp = new THREE.Vector3(0, 1, 0);      // car-frame rig's up — retargeted during an air roll
-  const _camUp = new THREE.Vector3(0, 1, 0);      // smoothed (persistent) camera up
-  const _upTgt = new THREE.Vector3(0, 1, 0);      // this frame's desired up
-  const _camDir = new THREE.Vector3();            // current view direction
-  const _camOff = new THREE.Vector3();            // car → camera offset, for the arc
-  const _wDesired = new THREE.Vector3();          // world-frame camera position
-  const _cDesired = new THREE.Vector3();          // car-frame camera position
-  const _wLook = new THREE.Vector3();             // world-frame look target
-  const _cLook = new THREE.Vector3();             // car-frame look target
-  let _camLoop = 0;                               // smoothed 0..1 loop-follow blend
-  let _loopAir = 0;                               // seconds airborne, for the blend hold
-  let _camInit = false;
-  let _snap = false;                              // force a full snap next update
+  const _axis = new THREE.Vector3();
+  const _lat = new THREE.Vector3();            // loop axis — the side to swing to
+  const _boom = new THREE.Vector3();           // raw road-frame boom
+  const _boomDir = new THREE.Vector3(0, 0, 1); // actual boom direction (unit)
+  let _az = 0, _el = 0, _azTgt = 0;            // the boom, as angles
+  const _vel = [0, 0];                         // their spring velocities
+  let _initBoom = false;
+  const _d = new THREE.Vector3();             // camera → car
+  const _right = new THREE.Vector3(1, 0, 0);  // persistent, eased toward level
+  const _rightTgt = new THREE.Vector3();
+
+  const _upD = new THREE.Vector3();
+  const _view = new THREE.Vector3();
+  const _camUp = new THREE.Vector3();
+  const _look = new THREE.Vector3();
+  let _air = 0;
+  let _init = false;
+  let _snap = false;
+
+  const D2R = Math.PI / 180;
 
   /**
-   * Ease camera.fov toward `target`. Guarded so we only touch the projection
-   * matrix when it actually moves — updateProjectionMatrix() every frame for a
-   * sub-millidegree change is pure waste.
+   * Rotate unit `cur` toward unit `tgt` by fraction `k` of the angle between.
+   *
+   * A plain lerp is wrong and the failure is not subtle: easing an inverted boom
+   * back toward world up lerps a vector toward its own negation, which passes
+   * through zero and normalises to garbage.
    */
+  function easeDir(cur, tgt, k) {
+    const dot = THREE.MathUtils.clamp(cur.dot(tgt), -1, 1);
+    if (dot > 0.999999) { cur.copy(tgt); return; }
+    _axis.crossVectors(cur, tgt);
+    if (_axis.lengthSq() < 1e-12) {
+      _axis.set(1, 0, 0).cross(cur);
+      if (_axis.lengthSq() < 1e-6) _axis.set(0, 0, 1).cross(cur);
+    }
+    _axis.normalize();
+    cur.applyAxisAngle(_axis, Math.acos(dot) * k).normalize();
+  }
+
+  /**
+   * Critically damped smoothing (the classic SmoothDamp). Returns the new value
+   * and writes the new velocity back into `v[i]`.
+   *
+   * Critically damped means no overshoot and no ringing, and — the reason it is
+   * here rather than a lerp — the output's VELOCITY is continuous. A lerp's is
+   * not: step its target and the output's speed steps with it, which is a
+   * discontinuity in acceleration and reads on screen as a snap.
+   */
+  function smoothDamp(cur, tgt, v, i, T, dt, maxSpeed) {
+    const omega = 2 / Math.max(1e-4, T);
+    const x = omega * dt;
+    const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    let change = cur - tgt;
+    const maxChange = maxSpeed * Math.max(1e-4, T);
+    change = THREE.MathUtils.clamp(change, -maxChange, maxChange);
+    const temp = (v[i] + omega * change) * dt;
+    v[i] = (v[i] - omega * temp) * exp;
+    return (cur - change) + (change + temp) * exp;
+  }
+
   function applyFov(target, dt, snap) {
     if (!camera.isPerspectiveCamera) return;
     const k = snap ? 1 : 1 - Math.exp(-CAM.fovLerp * dt);
@@ -147,42 +287,26 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     camera.updateProjectionMatrix();
   }
 
-  /** Snap the rig to the car — call on respawn so it doesn't sweep across the map. */
+  /** Snap the rig onto the car — call on respawn so it doesn't sweep the map. */
   function reset() {
-    _camInit = false;
-    _camLoop = 0;
-    _loopAir = 0;
-    _camUp.set(0, 1, 0);
-    _rigUp.set(0, 1, 0);
-    camera.up.set(0, 1, 0);
-    // Reset alone only re-seeds heading/look; the POSITION + up still eased in
-    // from wherever the camera was, so a respawn teleport swung the camera across
-    // the world (which looked like the shake). Snap everything for one frame so
-    // the camera just appears behind the car.
+    _init = false;
+    _air = 0;
     _snap = true;
   }
 
   function update(dt) {
     if (isOrbit()) {
-      // Orbit modes (build / free-look) are owned by the ENGINE's OrbitControls,
-      // which runs its own controls.update() every frame. The chase must NOT also
-      // drive the camera or force orbit.target here — doing both makes the two
-      // fight (and in build mode it yanked the orbit target onto the car). Just
-      // un-roll the persistent up so a following drive frame starts clean.
-      if (_camUp.x !== 0 || _camUp.z !== 0) {
-        _camUp.set(0, 1, 0);
-        camera.up.set(0, 1, 0);
-        _camLoop = 0;
-        _loopAir = 0;
-      }
-      // Hand the FOV back too, or build mode inherits whatever kick the last
-      // drive frame left behind and the editor view sits subtly zoomed out.
+      // Orbit modes (build / free-look) are owned by the ENGINE's OrbitControls.
+      // The chase must not also drive the camera — doing both makes them fight.
+      if (camera.up.x !== 0 || camera.up.z !== 0) camera.up.set(0, 1, 0);
       applyFov(CAM.fovBase, dt, false);
+      _init = false;
       return;
     }
 
-    const snap = _snap; // full snap this frame (respawn) — see reset()
+    const snap = _snap;
     _snap = false;
+
     // Follow the INTERPOLATED render pose (what the mesh is drawn at), not
     // body.pos — the body steps at FIXED_DT while the mesh interpolates per
     // frame, so following body.pos makes the car jitter in frame.
@@ -191,222 +315,211 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     const v = vehicle.body.vel;
     const speed = v.length();
     const grounded = vehicle.groundedCount > 0;
+    _air = grounded ? 0 : _air + dt;
 
-    // Widen with speed. Driven by TOTAL speed rather than horizontal, so a
-    // near-vertical drop off a jump reads as fast too.
+    // Total speed, not horizontal, so a near-vertical drop reads as fast too.
     applyFov(
       CAM.fovBase + CAM.fovAtSpeed * Math.min(1, speed / Math.max(1, CAM.fovSpeedRef)),
-      dt,
-      snap,
+      dt, snap,
     );
 
-    // Is the player deliberately rolling? A/D is steering on the ground and roll
-    // in the air, so this is only meaningful airborne — see the rig-up freeze.
-    const rolling = Math.abs(vehicle.input?.airSteer ?? 0) > CAM.rollInput;
-
-    _camFwd.set(0, 0, 1).applyQuaternion(rquat); // car facing (fallback)
-    const reversing = grounded && v.dot(_camFwd) < -0.5;
-
-    // 3D look direction: travel dir when moving, else the car's facing.
-    if (speed > CAM.minSpeed && !reversing) _camV.copy(v).multiplyScalar(1 / speed);
-    else _camV.copy(_camFwd);
-
-    // Horizontal trail heading: from velocity when moving forward; the car's
-    // facing on the ground; held steady in the air at low horizontal speed (so a
-    // flat spin or a near-vertical climb doesn't spin the camera).
-    const hSpeed = Math.hypot(v.x, v.z);
-    if (hSpeed > CAM.minSpeed && !reversing) {
-      _camTgtH.set(v.x, 0, v.z).multiplyScalar(1 / hSpeed);
-    } else if (grounded) {
-      _camTgtH.set(_camFwd.x, 0, _camFwd.z);
-      if (_camTgtH.lengthSq() > 1e-6) _camTgtH.normalize();
-      else _camTgtH.copy(_camHeading);
-    } else {
-      _camTgtH.copy(_camHeading);
-    }
-
-    if (!_camInit) {
-      _camHeading.copy(_camTgtH);
-      _camLookDir.copy(_camV);
-      _camInit = true;
-    }
-
-    const kh = snap ? 1 : 1 - Math.exp(-CAM.headingLerp * dt);
-    _camHeading.lerp(_camTgtH, kh);
-    if (_camHeading.lengthSq() < 1e-6) _camHeading.copy(_camTgtH);
-    _camHeading.normalize();
-
-    const kl = snap ? 1 : 1 - Math.exp(-CAM.lookLerp * dt);
-    _camLookDir.lerp(_camV, kl);
-    if (_camLookDir.y > CAM.maxLookPitch) _camLookDir.y = CAM.maxLookPitch;
-    else if (_camLookDir.y < -CAM.maxLookPitch) _camLookDir.y = -CAM.maxLookPitch;
-    if (_camLookDir.lengthSq() < 1e-6) _camLookDir.copy(_camV);
-    _camLookDir.normalize();
-
-    // ── World-frame rig (normal driving / airborne): stable, world-up. ──
-    _wDesired.copy(pos)
-      .addScaledVector(_camHeading, -CAM.dist)
-      .addScaledVector(_worldUp, CAM.height);
-    _wLook.copy(pos).addScaledVector(_camLookDir, CAM.lookAhead);
-    _wLook.y += CAM.lookUp;
-
-    // ── Car-frame rig (loops / wall-rides): trails along the car's OWN forward
-    // & up so the view rolls with the car through a vertical loop. Only blended
-    // in while grounded — airborne spins keep the world rig.
+    _carFwd.set(0, 0, 1).applyQuaternion(rquat);
     _carUp.set(0, 1, 0).applyQuaternion(rquat);
 
-    // THE RIG'S UP-AXIS STOPS FOLLOWING A DELIBERATE AIR ROLL.
-    //
-    // This is the "after a ring half the car swings through a wide arc instead
-    // of rolling on itself" bug, and it was never in the physics — the car
-    // really does rotate cleanly about its own centre (tools/ringHalfRollRepro
-    // bisects the whole air controller and none of it moves the car; the COM
-    // path is ballistic to 0.3 m/s²). It is this rig. Over the top of a ring
-    // half the car is inverted, so the blend is fully committed here, and the
-    // offset below is built on the car's own up-axis. Roll the car and that axis
-    // sweeps with it, so THE CAMERA ORBITS THE CAR at hypot(dist, height) =
-    // 8.15 m — on screen, exactly a car swinging about a pivot out in space.
-    //
-    // SO FREEZE THE AXIS, DO NOT SWITCH RIGS. Unwinding the blend instead (the
-    // obvious fix, and the first one tried) is worse: the two rigs sit on
-    // OPPOSITE SIDES of an inverted car — 2·height = 6.4 m apart — so releasing
-    // the blend vaults the camera over the car, and against an unchanged
-    // ballistic path that reads as the car being shoved downwards. Reported
-    // immediately, and rightly.
-    //
-    // Holding the axis in world space has neither problem. At the instant the
-    // roll starts it still equals the car's up, so THE CAMERA DOES NOT MOVE AT
-    // ALL — there is no handover to see. From then on it simply stops being
-    // dragged round by the roll, which is the entire bug. The car is then the
-    // only thing rotating on screen, which is what a roll should look like.
-    //
-    // It eases back to the car's up whenever the player is not rolling, so a
-    // genuine loop still gets the loop rig and landing re-acquires it smoothly.
-    // FREEZING IT IS NOT ENOUGH, AND HOLDING THE BLEND IS WORSE. Both were
-    // tried. Freezing kills the orbit but leaves the camera parked below an
-    // inverted car, and then SOMETHING still has to put it back: unwinding the
-    // blend mid-air vaults it over the car (reported as the car being shoved
-    // down), and holding the blend until touchdown just saves the whole debt up
-    // and pays it at `loopLerp` the instant the wheels land. MEASURED as peak
-    // camera speed relative to the car — a rig snap is a spike:
-    //     shipped            in flight 10.7 m/s   at landing 21.4 m/s
-    //     freeze + hold      in flight  6.0 m/s   at landing 24.9 m/s  <- worse
-    // which is precisely the "big jump down when landing" that came back.
-    //
-    // So ease it toward WORLD UP instead. That is the one target that makes the
-    // two rigs CONVERGE — a world-up car-frame rig IS the world rig — so the
-    // blend underneath stops mattering, there is nothing left to unwind, and
-    // touchdown costs nothing however the blend happens to be sitting. The
-    // traverse still has to happen (the camera genuinely has to get from below
-    // an inverted car to above an upright one), but it is spread across the roll
-    // instead of spiking, and a rolling car is the best possible cover for it.
-    const upTarget = rolling && !grounded ? _worldUp : _carUp;
-    const kr = snap ? 1 : 1 - Math.exp(-CAM.rigUpLerp * dt);
-    _rigUp.lerp(upTarget, kr);
-    if (_rigUp.lengthSq() < 1e-6) _rigUp.copy(_carUp);
-    _rigUp.normalize();
+    // ── 1. BOOM FORWARD — the travel direction, so a drift shows the car
+    // sideways in frame rather than hiding it behind the camera. ──────────────
+    const reversing = grounded && v.dot(_carFwd) < -0.5;
+    if (speed > CAM.minSpeed && !reversing) _dirTgt.copy(v).multiplyScalar(1 / speed);
+    else _dirTgt.copy(_carFwd);
 
-    _cDesired.copy(pos)
-      .addScaledVector(_camFwd, -CAM.dist)
-      .addScaledVector(_rigUp, CAM.height);
-    _cLook.copy(pos)
-      .addScaledVector(_camFwd, CAM.lookAhead)
-      .addScaledVector(_rigUp, CAM.lookUp);
+    // ── 2. BOOM UP — the road's normal while grounded, world up in the air. ──
+    _upTgt.copy(grounded ? _carUp : _worldUp);
 
-    // Blend target: how far the car's up tilts from world up, gated on grip.
-    // Airborne the tilt is trick input rather than a surface to follow, so the
-    // blend is not recomputed — it is HELD briefly and then released slowly, so
-    // a lip or a crest hop cannot unwind the rig in the middle of a jump.
-    let loopTgt = 0;
-    if (grounded) {
-      _loopAir = 0;
-      loopTgt = THREE.MathUtils.clamp(
-        (CAM.loopStart - _carUp.y) / (CAM.loopStart - CAM.loopFull), 0, 1,
-      );
-    } else {
-      _loopAir += dt;
-    }
-    // The blend itself is left exactly as it shipped. With the rig's up-axis
-    // easing to world up above, the two rigs converge on their own, so there is
-    // no longer anything for this to snap between — no special case needed here.
-    const loopRate = grounded
-      ? CAM.loopLerp
-      : (_loopAir < CAM.loopAirHold ? 0 : CAM.loopAirLerp);
-    if (snap) _camLoop = loopTgt;
-    else if (loopRate > 0) {
-      _camLoop += (loopTgt - _camLoop) * (1 - Math.exp(-loopRate * dt));
+    if (!_init) {
+      _boomF.copy(_dirTgt);
+      _boomU.copy(_upTgt);
+      _anchor.copy(pos);
+      _prevPos.copy(pos);
+      _init = true;
     }
 
-    _camDesired.lerpVectors(_wDesired, _cDesired, _camLoop);
-    // SWING THE CAMERA ROUND THE CAR, DON'T CUT ACROSS. Both rigs place the
-    // camera at the same radius — hypot(dist, height) — just in different
-    // frames, so a straight lerp between them follows the CHORD and dives at the
-    // car exactly mid-blend. MEASURED through a loop: 8.15 m collapsing to 2.8 m
-    // at the apex, which is inside the car's own length. This was always present
-    // (5.9 m on the old wide blend) and only became obvious once the blend had
-    // less angular room to happen in. Re-projecting onto the sphere makes it an
-    // arc; it is a no-op at blend 0 and 1, where the lerp is already an endpoint.
-    if (_camLoop > 0 && _camLoop < 1) {
-      _camOff.copy(_camDesired).sub(pos);
-      const len = _camOff.length();
-      if (len > 1e-4) {
-        _camDesired.copy(pos).addScaledVector(_camOff, Math.hypot(CAM.dist, CAM.height) / len);
-      }
-    }
+    easeDir(_boomF, _dirTgt, snap ? 1 : 1 - Math.exp(-CAM.headingLerp * dt));
+    const upRate = grounded ? CAM.upLerp : (_air < CAM.airHold ? 0 : CAM.airUpLerp);
+    if (upRate > 0) easeDir(_boomU, _upTgt, snap ? 1 : 1 - Math.exp(-upRate * dt));
 
-    // LAG COMPENSATION. An exponential follow lags a target moving at constant
-    // v by exactly v / posLerp. At posLerp 7 and 48 m/s that is 6.9 m ON TOP of
-    // CAM.dist — so the 7.5 m chase silently becomes ~14.4 m flat out, and the
-    // car shrinks into the distance exactly when you most need to see it. It
-    // reads as "the camera pulls away at speed" but nothing in the rig asks for
-    // that; it is pure filter lag.
-    //
-    // Feeding the velocity forward cancels the STEADY-STATE error while leaving
-    // the smoothing untouched for bumps, landings and direction changes — which
-    // is why this is preferable to just raising posLerp (that would stiffen the
-    // camera everywhere to fix a problem that only exists at speed).
-    //
-    // DO NOT SMOOTH THIS. Easing the term was tried as a cure for the landing
-    // jump and MAKES IT WORSE: a smoothed vector still carries the fall's
-    // velocity for a few tenths after touchdown, holding the camera target down
-    // once the car has already stopped. MEASURED as the camera's height over the
-    // car through the second after landing — excursion 0.2 m raw, 1.8 m smoothed.
-    if (!snap && CAM.lagCompensate > 0) {
-      _camDesired.addScaledVector(v, CAM.lagCompensate / CAM.posLerp);
+    // Keep the boom a frame: `up` must stay perpendicular to the forward.
+    _boomU.addScaledVector(_boomF, -_boomU.dot(_boomF));
+    if (_boomU.lengthSq() < 1e-6) {
+      _boomU.copy(_worldUp).addScaledVector(_boomF, -_worldUp.dot(_boomF));
+      if (_boomU.lengthSq() < 1e-6) _boomU.set(1, 0, 0).cross(_boomF);
     }
+    _boomU.normalize();
 
+    // ── 3. ANCHOR ─────────────────────────────────────────────────────────────
+    // Carry the car's per-frame DISPLACEMENT across, then let any residual error
+    // decay. A plain exponential follow lags a target moving at constant v by
+    // v/posLerp — at 48 m/s that is ~7 m added straight onto `dist`.
+    //
+    // The obvious cure — feed the velocity forward — is a trap, and the original
+    // rig fell into it: `vel/posLerp` is a POSITION offset proportional to
+    // velocity, so any impulsive change in velocity teleports the camera.
+    // MEASURED at the touchdown frame of a loop exit, with the car's own position
+    // perfectly continuous: the camera jumped 2.06 m in ONE STEP (248 m/s).
+    // A displacement cannot do that, and it cancels the lag at every speed AND
+    // every framerate rather than only the one a constant was tuned for.
+    _delta.copy(pos).sub(_prevPos);
+    _prevPos.copy(pos);
+    _anchor.addScaledVector(_delta, CAM.follow);
     const kp = snap ? 1 : 1 - Math.exp(-CAM.posLerp * dt);
-    camera.position.lerp(_camDesired, kp);
+    _anchor.lerp(pos, kp);
 
-    _camLook.lerpVectors(_wLook, _cLook, _camLoop);
+    // ── 4. THE BOOM, CARRIED AS AZIMUTH + ELEVATION ──────────────────────────
+    //
+    // The boom is assembled from the road frame, but it is STORED and
+    // interpolated as two angles rather than as a vector, and that is what keeps
+    // it off the pole.
+    //
+    // Interpolating the vector cannot: two booms at the same steep latitude on
+    // opposite meridians — which is exactly what a loop produces, since it
+    // reverses the travel heading — have a SHORTEST GREAT CIRCLE between them
+    // that runs straight over the pole. So a rate limiter faithfully walks the
+    // camera through vertical, the horizon loses its definition there, and the
+    // view snaps. MEASURED 17971°/s in one step, with the boom's own elevation
+    // sweeping smoothly through −88.7° on the way. Clamping the endpoints does
+    // not help, because it is the PATH that crosses the pole, not the ends.
+    //
+    // In angle space the pole is simply unreachable: elevation is clamped, and
+    // azimuth wraps the short way round a circle of constant latitude. The
+    // horizon therefore always has at least cos(poleGuard) of horizontal content
+    // to lock onto, which is why `camera.up` can be taken exactly level below.
+    _boom.set(0, 0, 0)
+      .addScaledVector(_boomF, -CAM.dist)
+      .addScaledVector(_boomU, CAM.height);
 
-    // Keep the camera WORLD-upright through the loop so the car visibly turns
-    // upside down on screen. A world-up camera must roll 180° somewhere as the
-    // view sweeps past vertical — unavoidable — so we EASE camera.up toward its
-    // target every frame, turning that roll into smooth motion instead of a snap.
-    _upTgt.copy(_worldUp);
-    _camDir.copy(_camLook).sub(camera.position);
-    const dlen = _camDir.length();
-    if (dlen > 1e-5) {
-      _camDir.multiplyScalar(1 / dlen);
-      // Near-vertical view: bias the target toward the car's up so the roll has a
-      // well-defined direction (no ambiguous spin) and lookAt can't gimbal-lock.
-      // carUp ⊥ travel, so it's a safe perpendicular.
-      const vert = Math.abs(_camDir.y); // 1 = looking straight up/down
-      const g = THREE.MathUtils.smoothstep(vert, 0.85, 0.999) * _camLoop;
-      // Frozen axis, not the live car up — otherwise the VIEW rolls with the
-      // trick and undoes the freeze above.
-      if (g > 0) _upTgt.lerp(_rigUp, g);
+    // ── SWING ROUND THE SIDE. ────────────────────────────────────────────────
+    //
+    // A loop reverses the travel heading, so a camera that stays behind the car
+    // must get its azimuth from 0° to 180°. Traced analytically on a loop entered
+    // heading −Z, the boom is (0, −7.5 sin φ + 3.2 cos φ, 7.5 cos φ + 3.2 sin φ):
+    // its horizontal part vanishes at φ = 113°, where it points STRAIGHT DOWN.
+    // That is the pole, and it sits right in the middle of the path.
+    //
+    // Suppressing the flip — holding the azimuth at the entry heading — avoids it
+    // but leaves the camera AHEAD of the car over the top, showing the nose
+    // instead of the tail. Reported, and correct: a chase camera should show the
+    // back of the car.
+    //
+    // So go round the SIDE instead. `_lat` is the loop's own axis (perpendicular
+    // to the plane the boom swings in, so it is constant through the loop), and
+    // pushing along it makes the boom's horizontal part unable to vanish. The
+    // azimuth then travels 0° → 90° → 180° through the side, continuously, with
+    // the camera behind the car the whole way.
+    //
+    // The amount is not a taste knob: `_lat ⊥ _boom`, so |boom + s·lat|² =
+    // |boom|² + s², and requiring elevation ≤ poleGuard gives
+    //     s = √( boom.y² / sin²(guard) − |boom|² )
+    // which is ZERO whenever the boom is already shallow enough — flat road, and
+    // the loop's apex — and peaks at 3.3 m exactly where it would otherwise go
+    // vertical. The swing pays for itself only where it is needed.
+    _lat.crossVectors(_boomU, _boomF);
+    if (_lat.lengthSq() < 1e-8) _lat.set(1, 0, 0); else _lat.normalize();
+    const bl2 = _boom.lengthSq();
+    const sg = Math.sin(CAM.poleGuard * D2R);
+    const need = (_boom.y * _boom.y) / (sg * sg) - bl2;
+    if (need > 0) {
+      // Softened onset — see `sideSoften`.
+      const e = CAM.sideSoften;
+      _boom.addScaledVector(_lat, (Math.sqrt(need + e) - Math.sqrt(e)) * CAM.sideScale);
     }
-    const ku = snap ? 1 : 1 - Math.exp(-CAM.upLerp * dt);
-    _camUp.lerp(_upTgt, ku);
-    // Keep it valid: strip any component along the view dir; fall back to the
-    // car's up if that leaves nothing (up nearly parallel to view).
-    if (dlen > 1e-5) _camUp.addScaledVector(_camDir, -_camUp.dot(_camDir));
-    if (_camUp.lengthSq() < 1e-4) _camUp.copy(_rigUp);
-    camera.up.copy(_camUp.normalize());
-    camera.lookAt(_camLook);
+
+    const bLen = _boom.length() || 1;
+    // The clamp is now only a backstop: the swing above already satisfies it,
+    // exactly, whenever `_lat` is horizontal. It still earns its place for the
+    // cases where `_lat` is not — a banked entry, a corkscrew — because there the
+    // closed form above is an approximation rather than a guarantee.
+    const lim = CAM.poleGuard * D2R;
+    const elTgt = THREE.MathUtils.clamp(
+      Math.asin(THREE.MathUtils.clamp(_boom.y / bLen, -1, 1)), -lim, lim);
+    // Held only when there is genuinely nothing to read, which the swing makes
+    // very nearly impossible: it keeps at least cos(68°) = 0.37 of the boom
+    // horizontal.
+    const bh = Math.hypot(_boom.x, _boom.z);
+    if (bh > 0.08 * bLen) _azTgt = Math.atan2(_boom.x, _boom.z);
+
+    if (!_initBoom || snap) {
+      _az = _azTgt; _el = elTgt; _vel[0] = 0; _vel[1] = 0; _initBoom = true;
+    } else {
+      const cap = CAM.boomMaxRate * D2R;
+      // Unwrap the target onto the branch nearest the current angle, so the
+      // spring always takes the short way round.
+      let dAz = _azTgt - _az;
+      while (dAz > Math.PI) dAz -= 2 * Math.PI;
+      while (dAz < -Math.PI) dAz += 2 * Math.PI;
+      _az = smoothDamp(_az, _az + dAz, _vel, 0, CAM.boomSmoothTime, dt, cap);
+      _el = smoothDamp(_el, elTgt, _vel, 1, CAM.boomSmoothTime, dt, cap);
+    }
+
+    const ce = Math.cos(_el);
+    _boomDir.set(Math.sin(_az) * ce, Math.sin(_el), Math.cos(_az) * ce);
+    camera.position.copy(_anchor).addScaledVector(_boomDir, Math.hypot(CAM.dist, CAM.height));
+
+    // ── 4. VIEW — aim AT the car, then tilt the axis up by φ. Independent of
+    // the boom, which is what pins the car and frees the boom. ────────────────
+    _d.copy(_anchor).sub(camera.position);
+    const dLen = _d.length();
+    if (dLen < 1e-5) return; // degenerate boom; leave the camera as it was
+    _d.multiplyScalar(1 / dLen);
+
+    // `d × worldUp` is horizontal for ANY d, so a right axis taken from it makes
+    // the horizon exactly level — the camera cannot roll. Its LENGTH is how much
+    // horizontal content the view has, i.e. how trustworthy "level" currently is:
+    // it goes to zero looking straight up, which is the one case that has to be
+    // eased through rather than obeyed. See `levelLerp`.
+    _rightTgt.crossVectors(_d, _worldUp);
+    const hMag = _rightTgt.length();
+    if (hMag > 1e-5) {
+      _rightTgt.multiplyScalar(1 / hMag);
+      const conf = snap ? 1 : THREE.MathUtils.smoothstep(hMag, CAM.levelFloor, CAM.levelFull);
+      // NORMAL PATH, and with the pole guard in place it is the only one that
+      // ever runs: take the level answer outright. Easing toward it instead is
+      // pure lag — it costs a constant roll wherever the view is turning, which
+      // MEASURED 2.8° on an ordinary corner and 25° through a loop, for no
+      // benefit at all now that the guard means the pole is never reached.
+      if (conf >= 1) _right.copy(_rightTgt);
+      else if (conf > 0) easeDir(_right, _rightTgt, 1 - Math.exp(-CAM.levelLerp * conf * dt));
+    }
+    // Carry it across the pole and keep it a valid axis.
+    _right.addScaledVector(_d, -_right.dot(_d));
+    if (_right.lengthSq() < 1e-6) {
+      _right.set(1, 0, 0).cross(_d);
+      if (_right.lengthSq() < 1e-6) _right.set(0, 0, 1).cross(_d);
+    }
+    _right.normalize();
+
+    const phi = CAM.carBelowCentre * D2R;
+    _upD.crossVectors(_right, _d);
+    _view.copy(_d).multiplyScalar(Math.cos(phi)).addScaledVector(_upD, Math.sin(phi));
+    _camUp.crossVectors(_right, _view).normalize();
+
+    camera.up.copy(_camUp);
+    _look.copy(camera.position).add(_view);
+    camera.lookAt(_look);
   }
 
-  return { update, reset, params: CAM };
+  /** Live state, for tests and debug overlays. */
+  const state = {
+    boomF: _boomF,
+    boomU: _boomU,
+    boomDir: _boomDir,
+    lat: _lat,
+    right: _right,
+    get air() { return _air; },
+    get az() { return _az; },
+    get el() { return _el; },
+    /** Where the car sits relative to the view axis, in degrees (negative =
+     *  below centre). Exact — the rig places it there by construction. */
+    get framingDeg() { return -CAM.carBelowCentre; },
+  };
+
+  return { update, reset, params: CAM, state };
 }

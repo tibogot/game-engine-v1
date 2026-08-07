@@ -293,10 +293,10 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Look ahead</span>
+            <span class="prop-label">Car below centre</span>
             <div class="prop-value">
-              <input type="range" id="dv-cam-ahead" min="0" max="15" step="0.5" />
-              <span class="prop-num" id="dv-cam-ahead-v"></span>
+              <input type="range" id="dv-cam-below" min="0" max="30" step="0.5" />
+              <span class="prop-num" id="dv-cam-below-v"></span>
             </div>
           </div>
           <div class="prop-row">
@@ -316,40 +316,50 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
-        <div class="section-header">Loop camera</div>
+        <div class="section-header">Camera frame</div>
         <div class="section-body">
           <div class="prop-row">
-            <span class="prop-label">Engage tilt</span>
+            <span class="prop-label">Heading ease</span>
             <div class="prop-value">
-              <input type="range" id="dv-loopstart" min="0.5" max="1" step="0.01" />
-              <span class="prop-num" id="dv-loopstart-v"></span>
+              <input type="range" id="dv-headinglerp" min="1" max="12" step="0.5" />
+              <span class="prop-num" id="dv-headinglerp-v"></span>
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Full commit</span>
-            <div class="prop-value">
-              <input type="range" id="dv-loopfull" min="-1" max="0.8" step="0.05" />
-              <span class="prop-num" id="dv-loopfull-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Roll ease</span>
-            <div class="prop-value">
-              <input type="range" id="dv-looplerp" min="1" max="12" step="0.5" />
-              <span class="prop-num" id="dv-looplerp-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Up ease</span>
+            <span class="prop-label">Road ease</span>
             <div class="prop-value">
               <input type="range" id="dv-uplerp" min="1" max="12" step="0.5" />
               <span class="prop-num" id="dv-uplerp-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Smoothing</span>
+            <div class="prop-value">
+              <input type="range" id="dv-boomsmooth" min="0.05" max="0.6" step="0.01" />
+              <span class="prop-num" id="dv-boomsmooth-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Max elevation</span>
+            <div class="prop-value">
+              <input type="range" id="dv-poleguard" min="30" max="78" step="1" />
+              <span class="prop-num" id="dv-poleguard-v"></span>
+            </div>
+          </div>
           <div class="dv-hint">
-            <b>Engage tilt</b> higher = starts rolling earlier as the car noses into
-            the loop. <b>Full commit</b> lower = ramps more gradually across the
-            whole loop. Keep the eases moderate for smoothness.
+            The camera aims straight <i>at</i> the car and then tilts its axis up,
+            so <b>Car below centre</b> is the only thing that can move the car on
+            screen — Distance and Height change where you watch <i>from</i>, never
+            where the car lands. The horizon is taken level every frame, so
+            <b>the camera never rolls</b>: through a loop or a tube the car turns
+            over on screen and the view stays put.
+            <b>Smoothing</b> is the boom's critically-damped time constant: higher
+            is lazier and more cinematic, lower is tighter. Past about 0.35 s the
+            boom lags far enough through a violent reversal (a quarterpipe lip)
+            that the camera can end up in front of the car.
+            <b>Max elevation</b> caps how far the camera may swing above or below
+            the car. Keep it under about 78° — past that the view approaches
+            straight down, where "level" has no answer and the horizon flips.
           </div>
         </div>
       </div>
@@ -1742,14 +1752,15 @@ export function createRoadDevPanel({ app, game, params }) {
   const cam = game.cameraParams;
   slider("dv-cam-dist", cam, "dist", (v) => `${v.toFixed(1)}m`);
   slider("dv-cam-height", cam, "height", (v) => `${v.toFixed(1)}m`);
-  slider("dv-cam-ahead", cam, "lookAhead", (v) => `${v.toFixed(1)}m`);
+  slider("dv-cam-below", cam, "carBelowCentre", (v) => `${v.toFixed(1)}°`);
   slider("dv-cam-fov", cam, "fovAtSpeed", (v) => (v > 0 ? `+${v.toFixed(0)}°` : "static"));
 
-  // Loop camera (live tuning — smoothness is subjective, dial to taste).
-  slider("dv-loopstart", cam, "loopStart", (v) => v.toFixed(2));
-  slider("dv-loopfull", cam, "loopFull", (v) => v.toFixed(2));
-  slider("dv-looplerp", cam, "loopLerp", (v) => v.toFixed(1));
+  // Boom behaviour (live tuning — smoothness is subjective, dial to taste).
+  // None of these can move the car on screen; that is `carBelowCentre` alone.
+  slider("dv-headinglerp", cam, "headingLerp", (v) => v.toFixed(1));
   slider("dv-uplerp", cam, "upLerp", (v) => v.toFixed(1));
+  slider("dv-boomsmooth", cam, "boomSmoothTime", (v) => `${v.toFixed(2)}s`);
+  slider("dv-poleguard", cam, "poleGuard", (v) => `${v.toFixed(0)}°`);
 
   // ── Car ─────────────────────────────────────────────────────────────────────
   slider("dv-top", TIRE, "topSpeed", (v) => `${v.toFixed(0)} m/s`);
