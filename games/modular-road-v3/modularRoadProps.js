@@ -11,6 +11,7 @@ import {
 } from "./modularRoadPropPhysics.js";
 import { SCENERY_CATALOG, makeSceneryProp } from "./modularRoadScenery.js";
 import { makeContainer, CONTAINER_LIVERIES, CONTAINER_SIZE } from "./modularRoadContainer.js";
+import { makeTireWall } from "./modularRoadTireWall.js";
 import { DECAL_OFFSET } from "./modularRoadDecals.js";
 
 /** The one decal there is so far. Lives beside the game rather than in
@@ -728,6 +729,17 @@ export const PROP_CATALOG = [
       ],
     },
     make: () => makeContainer(),
+  },
+  {
+    id: "tirewall",
+    label: "Tire wall",
+    /**
+     * Solid barrier — steer around it, not over it. Triangle collision goes
+     * through a box proxy (see modularRoadTireWall.js) so a row of segments
+     * does not put thousands of tire tread triangles into the static BVH.
+     */
+    collision: "solid",
+    make: () => makeTireWall(),
   },
   {
     id: "box",

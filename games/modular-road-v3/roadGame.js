@@ -99,6 +99,7 @@ import { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } from "./modularRoadSparks.j
 import { PropPhysics, PROP_PHYSICS, PHYSICS_PROP_TYPES } from "./modularRoadPropPhysics.js";
 import { PropInstancer } from "./modularRoadPropInstancer.js";
 import { preloadContainer } from "./modularRoadContainer.js";
+import { preloadTireWall } from "./modularRoadTireWall.js";
 import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
@@ -303,6 +304,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // built with no material and quietly skipped.
   await Promise.all([
     preloadContainer(),
+    preloadTireWall(renderer),
     preloadDecal(DECAL_URL).then(() => settleDecals()),
   ]);
 
