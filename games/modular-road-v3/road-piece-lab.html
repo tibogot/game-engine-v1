@@ -84,6 +84,8 @@
         mix,
         step,
         oneMinus,
+        clamp,
+        positionWorld,
       } from "three/tsl";
       import {
         buildPiece,
@@ -131,209 +133,519 @@
         return frames;
       }
 
-      function wBeamProfile(h, d, crownFrac, capRiseFrac, flipW) {
-        const s = flipW ? -1 : 1;
-        const o = 0.5 * d;
-        const b = 0.34 * d;
-        const c = crownFrac * d;
-        const prof = [
-          { y: -0.5 * h, z: s * o },
-          { y: -0.42 * h, z: s * o },
-          { y: -0.34 * h, z: s * b },
-          { y: -0.24 * h, z: s * b },
-          { y: -0.14 * h, z: s * b * 0.58 },
-          { y: -0.05 * h, z: s * -c * 0.4 },
-          { y: 0.0, z: s * -c },
-          { y: 0.05 * h, z: s * -c * 0.4 },
-          { y: 0.14 * h, z: s * b * 0.58 },
-          { y: 0.24 * h, z: s * b },
-          { y: 0.34 * h, z: s * b },
-          { y: 0.42 * h, z: s * o },
-        ];
-        const cap = Math.max(0, capRiseFrac ?? 0) * d;
-        if (cap <= 1e-6) {
-          prof.push({ y: 0.5 * h, z: s * o });
-          return prof;
+      /* --- 2-D section helpers, in (y vertical, z lateral) metres ---------- */
+
+      /** Signed area of a closed polyline in the (z, y) plane. */
+      function signedArea(pts) {
+        let a = 0;
+        for (let i = 0, n = pts.length; i < n; i++) {
+          const p = pts[i];
+          const q = pts[(i + 1) % n];
+          a += p.z * q.y - q.z * p.y;
         }
-        prof.push(
-          { y: 0.46 * h, z: s * o },
-          { y: 0.5 * h - cap * 0.6, z: s * o },
-          { y: 0.5 * h - cap * 0.2, z: s * o * 0.38 },
-          { y: 0.5 * h, z: 0.0 },
-          { y: 0.5 * h - cap * 0.2, z: s * -o * 0.38 },
-          { y: 0.5 * h - cap * 0.6, z: s * -o },
-        );
-        return prof;
+        return a * 0.5;
       }
 
-      function beamLateral(side, edgeAbs, z, mirrorSides) {
-        const s = side >= 0 ? 1 : -1;
-        return mirrorSides ? s * (edgeAbs + z) : s * edgeAbs + z;
+      /** Drop coincident points (fillets and arcs meet exactly on their tangent
+       *  points, and a zero-length segment has no normal). */
+      function dedupe(pts, eps = 1e-5) {
+        const out = [];
+        for (const p of pts) {
+          const q = out[out.length - 1];
+          if (q && Math.abs(q.y - p.y) < eps && Math.abs(q.z - p.z) < eps) continue;
+          out.push(p);
+        }
+        const a = out[0];
+        const b = out[out.length - 1];
+        if (out.length > 2 && Math.abs(a.y - b.y) < eps && Math.abs(a.z - b.z) < eps) out.pop();
+        return out;
       }
 
-      function beamVertex(fr, lateral, y) {
-        return [
-          fr.pos.x + fr.right.x * lateral + fr.up.x * y,
-          fr.pos.y + fr.right.y * lateral + fr.up.y * y,
-          fr.pos.z + fr.right.z * lateral + fr.up.z * y,
-        ];
-      }
-
-      /** Front + back faces and rim strips — reads as formed steel, not a paper-thin ribbon. */
-      function buildBeamVolume(frames, side, edgeAbs, centerV, prof, mirrorSides, shell) {
-        const geos = [
-          sweepBeam(frames, side, edgeAbs, centerV, prof, mirrorSides),
-        ];
-        const inner = prof.map((p) => ({ y: p.y, z: p.z - shell }));
-        geos.push(sweepBeam(frames, side, edgeAbs, centerV, inner, mirrorSides));
-
-        const F = frames.length;
-        const positions = [];
-        const uvs = [];
-        const indices = [];
-        const stitch = (jOut, jIn) => {
-          const row = positions.length / 3;
-          for (let i = 0; i < F; i++) {
-            const fr = frames[i];
-            const po = prof[jOut];
-            const pi = inner[jIn];
-            const yo = centerV + po.y;
-            const yi = centerV + pi.y;
-            positions.push(...beamVertex(fr, beamLateral(side, edgeAbs, po.z, mirrorSides), yo));
-            positions.push(...beamVertex(fr, beamLateral(side, edgeAbs, pi.z, mirrorSides), yi));
-            uvs.push(i / (F - 1), 0);
-            uvs.push(i / (F - 1), 1);
+      /**
+       * Round every corner of a CLOSED polyline with a circular fillet.
+       *
+       * This is the single biggest reason the kit rail reads as folded card:
+       * its section is a bare polyline, so every corrugation corner is a hard
+       * crease that computeVertexNormals turns into a facet. Sheet steel is
+       * roll-formed — the corners have a radius, and once they do the sweep
+       * shades as a continuous surface.
+       *
+       * Tangent lengths are clamped to half the shorter neighbouring segment, so
+       * neighbouring fillets can never overlap and turn the section inside out.
+       *
+       * Only the corrugated face gets filleted (open mode) — running it over the
+       * finished ring would also nibble the bull-nose arcs, which are already
+       * smooth, and pull the beam a millimetre or two under its stated height.
+       */
+      function filletPolyline(pts, radius, seg, closed = false) {
+        const n = pts.length;
+        if (radius <= 1e-5 || seg < 1 || n < 3) return pts.slice();
+        const out = [];
+        if (!closed) out.push(pts[0]);
+        const first = closed ? 0 : 1;
+        const last = closed ? n - 1 : n - 2;
+        for (let i = first; i <= last; i++) {
+          const p = pts[i];
+          const a = pts[(i - 1 + n) % n];
+          const b = pts[(i + 1) % n];
+          let ay = a.y - p.y;
+          let az = a.z - p.z;
+          let by = b.y - p.y;
+          let bz = b.z - p.z;
+          const la = Math.hypot(ay, az);
+          const lb = Math.hypot(by, bz);
+          if (la < 1e-6 || lb < 1e-6) continue;
+          ay /= la; az /= la; by /= lb; bz /= lb;
+          const theta = Math.acos(Math.min(1, Math.max(-1, ay * by + az * bz)));
+          // Straight-through or doubled-back: nothing to round.
+          if (theta > Math.PI - 1e-3 || theta < 1e-3) {
+            out.push(p);
+            continue;
           }
-          for (let i = 0; i < F - 1; i++) {
-            const a = row + i * 2;
-            const b = row + (i + 1) * 2;
-            indices.push(a, a + 1, b, a + 1, b + 1, b);
+          const half = theta * 0.5;
+          const tanDist = Math.min(radius / Math.tan(half), la * 0.5, lb * 0.5);
+          const r = tanDist * Math.tan(half);
+          let my = ay + by;
+          let mz = az + bz;
+          const lm = Math.hypot(my, mz);
+          if (lm < 1e-6) {
+            out.push(p);
+            continue;
+          }
+          my /= lm; mz /= lm;
+          const cDist = r / Math.sin(half);
+          const cy = p.y + my * cDist;
+          const cz = p.z + mz * cDist;
+          const a0 = Math.atan2(p.y + ay * tanDist - cy, p.z + az * tanDist - cz);
+          const a1 = Math.atan2(p.y + by * tanDist - cy, p.z + bz * tanDist - cz);
+          let d = a1 - a0;
+          while (d > Math.PI) d -= Math.PI * 2;
+          while (d < -Math.PI) d += Math.PI * 2;
+          for (let k = 0; k <= seg; k++) {
+            const ang = a0 + d * (k / seg);
+            out.push({ y: cy + Math.sin(ang) * r, z: cz + Math.cos(ang) * r });
+          }
+        }
+        if (!closed) out.push(pts[n - 1]);
+        return out;
+      }
+
+      /** Outward unit normal per point of a CCW closed polyline, averaged from
+       *  the two adjacent segments. Supplied to the sweep directly instead of
+       *  calling computeVertexNormals, which would leave a shading seam where
+       *  the ring wraps back on itself. */
+      function polylineNormals(pts) {
+        const n = pts.length;
+        const seg = new Array(n);
+        for (let i = 0; i < n; i++) {
+          const p = pts[i];
+          const q = pts[(i + 1) % n];
+          const dy = q.y - p.y;
+          const dz = q.z - p.z;
+          const l = Math.hypot(dy, dz) || 1;
+          seg[i] = { y: -dz / l, z: dy / l }; // outward for CCW winding
+        }
+        return pts.map((_, i) => {
+          const a = seg[(i - 1 + n) % n];
+          const b = seg[i];
+          const y = a.y + b.y;
+          const z = a.z + b.z;
+          const l = Math.hypot(y, z) || 1;
+          return { y: y / l, z: z / l };
+        });
+      }
+
+      /**
+       * Closed rail cross-section, about the beam centre. +z is the FIELD side
+       * (where the posts live); the corrugated face looks at traffic on -z.
+       *
+       * `humps` picks the family: 1 = plain box beam, 2 = W-beam (one centre
+       * valley), 3 = thrie-beam (two valleys). At the height this kit uses —
+       * 0.8 m, nearly three times a real W-beam — a two-hump section is mostly
+       * flat sheet, which is the other half of why it looks like a slab. Three
+       * humps put a corrugation every ~0.25 m and the silhouette reads as steel.
+       *
+       * The ends are half-round bull-noses of radius depth/2, which also
+       * replaces the kit's `capRiseFrac` peak: a cylinder sheds a car landing on
+       * the rail at least as well as a 45° ridge (see wBeamProfile in
+       * modularRoadKit.js for why that matters) without the knife-edge look.
+       *
+       * Returns the (already CCW) point ring, its outward normals, the field-side
+       * plane the posts bolt to, and the valley positions the bolts sit in.
+       */
+      function railProfile(o) {
+        const h = Math.max(0.12, o.height);
+        // The bull-nose radius is half the depth, and it has to fit inside the
+        // height — so a section deeper than it is tall is clamped, not left with
+        // a bead that can't reach the crest plane.
+        const d = Math.min(Math.max(0.04, o.depth), h * 0.9);
+        const r = d * 0.5;
+        const yEnd = h * 0.5 - r; // where the beads take over
+        const zCrest = -d * 0.5;
+        const valleyGap = Math.min(0.45, Math.max(0.05, o.valleyGap));
+        const zValley = d * 0.5 - valleyGap * d;
+
+        // Corrugated traffic face, bottom → top. A crest at BOTH ends so the
+        // beads meet it tangentially.
+        const humps = Math.max(1, Math.round(o.humps));
+        const K = 2 * (humps - 1);
+        const face = [];
+        const valleys = [];
+        if (K === 0) {
+          face.push({ y: -yEnd, z: zCrest }, { y: yEnd, z: zCrest });
+        } else {
+          const stepY = (yEnd * 2) / K;
+          const flat = Math.max(0, Math.min(0.48, o.plateau)) * stepY;
+          for (let k = 0; k <= K; k++) {
+            const y = -yEnd + stepY * k;
+            const z = k % 2 === 0 ? zCrest : zValley;
+            if (k % 2 === 1) valleys.push({ y, z });
+            face.push({ y: k === 0 ? y : y - flat, z });
+            face.push({ y: k === K ? y : y + flat, z });
+          }
+        }
+
+        // Round the formed corners, then close the ring: top bull-nose (crest →
+        // field side), flat back plate, bottom bull-nose.
+        const pts = dedupe(
+          filletPolyline(
+            dedupe(face), o.bendRadius, Math.max(1, Math.round(o.bendSeg)), false,
+          ),
+        );
+        const faceEnd = pts.length;
+        // Even segment count so the apex lands exactly on h/2 rather than being
+        // chorded off by a sample either side of it.
+        const beadSeg = 2 * Math.max(1, Math.round(Math.max(2, o.beadSeg) / 2));
+        const arc = (cy, a0, a1) => {
+          for (let k = 0; k <= beadSeg; k++) {
+            const ang = a0 + (a1 - a0) * (k / beadSeg);
+            pts.push({ y: cy + Math.sin(ang) * r, z: Math.cos(ang) * r });
           }
         };
-        stitch(0, 0);
-        stitch(prof.length - 1, prof.length - 1);
+        arc(yEnd, Math.PI, 0);
+        // Back face. A flat plate there is the last slab-shaped surface on the
+        // barrier and it is what you see from off-track, so it gets a shallow
+        // mirror of the corrugation. Amplitude is capped to keep a real wall
+        // thickness at the valleys, where front and back come closest.
+        const back = pts.slice(0, faceEnd).reverse();
+        const amp = back.length
+          ? Math.min(
+            Math.max(0, o.backAmp ?? 0),
+            (r - zValley - 0.012) / Math.max(1e-4, zValley + r),
+          )
+          : 0;
+        if (amp > 1e-4) {
+          for (const p of back) pts.push({ y: p.y, z: r - (p.z - zCrest) * amp });
+        } else {
+          pts.push({ y: -yEnd, z: r });
+        }
+        arc(-yEnd, 0, -Math.PI);
 
-        const rim = new THREE.BufferGeometry();
-        rim.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-        rim.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-        rim.setIndex(indices);
-        rim.computeVertexNormals();
-        geos.push(rim);
+        let ring = dedupe(pts);
+        if (o.flip) for (const p of ring) p.z = -p.z;
+        if (signedArea(ring) < 0) ring.reverse(); // normals + winding assume CCW
 
-        const merged = mergeGeometries(geos, false);
-        for (const g of geos) g.dispose();
-        merged.computeVertexNormals();
-        return merged;
+        const sgn = o.flip ? -1 : 1;
+        return {
+          pts: ring,
+          normals: polylineNormals(ring),
+          backZ: r * sgn, // the plane posts bolt to
+          valleys: valleys.map((v) => ({ y: v.y, z: v.z * sgn })),
+          height: h,
+          depth: d,
+        };
       }
 
-      function sweepBeam(frames, side, edgeAbs, centerV, prof, mirrorSides) {
+      /**
+       * Sweep the closed section along the frames, with explicit normals and
+       * both ends capped — a solid box beam, not an open sheet that has to be
+       * rendered DoubleSide and still shows its zero-thickness edge on.
+       *
+       * `zSign` mirrors the section for the left-hand rail (so the corrugation
+       * faces traffic on both sides); that mirror reverses the parametrisation,
+       * hence the winding flip.
+       */
+      function sweepRail(frames, prof, baseLat, zSign, centerV) {
         const F = frames.length;
-        const R = prof.length;
-        const along = new Float32Array(F);
+        const R = prof.pts.length;
+        const V = R + 1; // seam column duplicated so the UVs don't wrap
+
+        const along = [0];
         for (let i = 1; i < F; i++) {
           along[i] = along[i - 1] + frames[i].pos.distanceTo(frames[i - 1].pos);
         }
+        // v in metres around the section, so galvanising detail stays square.
+        const arcV = [0];
+        for (let j = 1; j < V; j++) {
+          const p = prof.pts[j % R];
+          const q = prof.pts[j - 1];
+          arcV[j] = arcV[j - 1] + Math.hypot(p.y - q.y, p.z - q.z);
+        }
+
         const positions = [];
+        const normals = [];
         const uvs = [];
         const indices = [];
-        const p = new THREE.Vector3();
-        const s = side >= 0 ? 1 : -1;
+        const push = (fr, lat, y, nz, ny, u, v) => {
+          positions.push(
+            fr.pos.x + fr.right.x * lat + fr.up.x * y,
+            fr.pos.y + fr.right.y * lat + fr.up.y * y,
+            fr.pos.z + fr.right.z * lat + fr.up.z * y,
+          );
+          normals.push(
+            fr.right.x * nz + fr.up.x * ny,
+            fr.right.y * nz + fr.up.y * ny,
+            fr.right.z * nz + fr.up.z * ny,
+          );
+          uvs.push(u, v);
+        };
+
         for (let i = 0; i < F; i++) {
           const fr = frames[i];
-          for (let j = 0; j < R; j++) {
-            const pr = prof[j];
-            const lateral = mirrorSides ? s * (edgeAbs + pr.z) : s * edgeAbs + pr.z;
-            p.copy(fr.pos)
-              .addScaledVector(fr.right, lateral)
-              .addScaledVector(fr.up, centerV + pr.y);
-            positions.push(p.x, p.y, p.z);
-            uvs.push(along[i], j / (R - 1));
+          for (let j = 0; j < V; j++) {
+            const p = prof.pts[j % R];
+            const n = prof.normals[j % R];
+            push(fr, baseLat + zSign * p.z, centerV + p.y, zSign * n.z, n.y, along[i], arcV[j]);
           }
         }
+        const flipWind = zSign < 0;
         for (let i = 0; i < F - 1; i++) {
-          const r0 = i * R;
-          const r1 = (i + 1) * R;
-          for (let j = 0; j < R - 1; j++) {
-            if (!mirrorSides || s >= 0) {
-              indices.push(r0 + j, r1 + j, r0 + j + 1, r0 + j + 1, r1 + j, r1 + j + 1);
-            } else {
+          const r0 = i * V;
+          const r1 = (i + 1) * V;
+          for (let j = 0; j < V - 1; j++) {
+            if (flipWind) {
               indices.push(r0 + j, r0 + j + 1, r1 + j, r0 + j + 1, r1 + j + 1, r1 + j);
+            } else {
+              indices.push(r0 + j, r1 + j, r0 + j + 1, r0 + j + 1, r1 + j, r1 + j + 1);
             }
           }
         }
+
+        // End caps: a fan from the section centroid, facing along ∓tangent.
+        let cy = 0;
+        let cz = 0;
+        for (const p of prof.pts) {
+          cy += p.y;
+          cz += p.z;
+        }
+        cy /= R;
+        cz /= R;
+        const cap = (i, dir) => {
+          const fr = frames[i];
+          const base = positions.length / 3;
+          const t = fr.tangent;
+          const capN = (lat, y, u, v) => {
+            positions.push(
+              fr.pos.x + fr.right.x * lat + fr.up.x * y,
+              fr.pos.y + fr.right.y * lat + fr.up.y * y,
+              fr.pos.z + fr.right.z * lat + fr.up.z * y,
+            );
+            normals.push(t.x * dir, t.y * dir, t.z * dir);
+            uvs.push(u, v);
+          };
+          capN(baseLat + zSign * cz, centerV + cy, 0, 0);
+          for (const p of prof.pts) {
+            capN(baseLat + zSign * p.z, centerV + p.y, p.z, p.y);
+          }
+          const forward = dir * zSign < 0;
+          for (let j = 0; j < R; j++) {
+            const a = base + 1 + j;
+            const b = base + 1 + ((j + 1) % R);
+            if (forward) indices.push(base, a, b);
+            else indices.push(base, b, a);
+          }
+        };
+        cap(0, -1);
+        cap(F - 1, 1);
+
         const geo = new THREE.BufferGeometry();
         geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
         geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
         geo.setIndex(indices);
-        geo.computeVertexNormals();
         return geo;
       }
 
-      /** Outermost profile z on the field side — posts straddle this edge. */
-      function outerProfileZ(prof, side, mirrorSides) {
-        const zs = prof.map((p) => p.z);
-        if (mirrorSides) return Math.max(...zs);
-        const s = side >= 0 ? 1 : -1;
-        return s >= 0 ? Math.max(...zs) : Math.min(...zs);
+      /* --- Post hardware, built in POST SPACE ------------------------------
+       * x = lateral offset from the kerb centreline, +x toward the field
+       * y = height above the deck (so it lines up with the sweep's centerV)
+       * z = along travel
+       * One template is built per rebuild and cloned per post.
+       */
+
+      /** ExtrudeGeometry comes back non-indexed while the sweeps and cylinders
+       *  are indexed, and mergeGeometries refuses to mix the two (it returns
+       *  null and you get a silently empty rail). A trivial sequential index
+       *  costs one int per vertex and keeps everything mergeable. */
+      function ensureIndexed(geo) {
+        if (geo.index) return geo;
+        const n = geo.attributes.position.count;
+        const arr = n > 65535 ? new Uint32Array(n) : new Uint16Array(n);
+        for (let i = 0; i < n; i++) arr[i] = i;
+        geo.setIndex(new THREE.BufferAttribute(arr, 1));
+        return geo;
       }
 
-      function buildPosts(frames, side, edgeAbs, kerbTop, centerV, gp, prof, mirrorSides, out) {
+      /** Box with chamfered edges. ExtrudeGeometry's bevel does the work — a
+       *  bare BoxGeometry (what the kit uses for posts) has nothing for a
+       *  highlight to catch, which is exactly what "blocky" looks like. */
+      function chamferBox(w, h, d, bevel) {
+        const b = Math.max(0.001, Math.min(bevel, w * 0.24, h * 0.24, d * 0.24));
+        const hw = w * 0.5 - b;
+        const hd = d * 0.5 - b;
+        const shape = new THREE.Shape();
+        shape.moveTo(-hw, -hd);
+        shape.lineTo(hw, -hd);
+        shape.lineTo(hw, hd);
+        shape.lineTo(-hw, hd);
+        shape.closePath();
+        const geo = new THREE.ExtrudeGeometry(shape, {
+          depth: Math.max(0.001, h - 2 * b),
+          bevelEnabled: true,
+          bevelThickness: b,
+          bevelSize: b,
+          bevelOffset: 0,
+          bevelSegments: 1,
+          curveSegments: 1,
+        });
+        geo.translate(0, 0, b);
+        geo.rotateX(-Math.PI / 2); // extrusion axis → up, shape y → along travel
+        return ensureIndexed(geo);
+      }
+
+      /** I-section post: flanges facing the field, web running along travel. */
+      function iBeamPost(width, depth, flangeT, webT, height, bevel) {
+        const x0 = width * 0.5;
+        const y0 = depth * 0.5;
+        const xi = Math.max(0.002, x0 - flangeT);
+        const yi = Math.max(0.001, webT * 0.5);
+        const s = new THREE.Shape();
+        s.moveTo(-x0, -y0);
+        s.lineTo(-x0, y0);
+        s.lineTo(-xi, y0);
+        s.lineTo(-xi, yi);
+        s.lineTo(xi, yi);
+        s.lineTo(xi, y0);
+        s.lineTo(x0, y0);
+        s.lineTo(x0, -y0);
+        s.lineTo(xi, -y0);
+        s.lineTo(xi, -yi);
+        s.lineTo(-xi, -yi);
+        s.lineTo(-xi, -y0);
+        s.closePath();
+        // Bevel must stay under half the thinnest wall or the reflex corners of
+        // the I self-intersect and the post turns into spaghetti.
+        const b = Math.max(0.001, Math.min(bevel, flangeT * 0.35, webT * 0.35));
+        const geo = new THREE.ExtrudeGeometry(s, {
+          depth: Math.max(0.01, height - 2 * b),
+          bevelEnabled: true,
+          bevelThickness: b,
+          bevelSize: b,
+          bevelOffset: 0,
+          bevelSegments: 1,
+          curveSegments: 1,
+        });
+        geo.translate(0, 0, b);
+        geo.rotateX(-Math.PI / 2);
+        return ensureIndexed(geo);
+      }
+
+      /** Button-head bolt sunk in a corrugation valley, axis along ±x. */
+      function boltHead(radius, len, dir) {
+        const geo = new THREE.CylinderGeometry(radius, radius * 0.62, len, 10, 1, false);
+        geo.rotateZ(-Math.PI / 2); // +y → +x
+        if (dir < 0) geo.rotateY(Math.PI);
+        return geo;
+      }
+
+      /** Everything that repeats at each post, merged once into one template. */
+      function buildPostTemplate(prof, r, kerbTop, centerV) {
+        const parts = [];
+        const sgn = prof.backZ >= 0 ? 1 : -1;
+        const beamTop = centerV + prof.height * 0.5;
+        const postX = prof.backZ + sgn * (r.blockout + r.postWidth * 0.5);
+        const postTop = beamTop + r.postRise;
+        const postH = Math.max(0.08, postTop - kerbTop);
+
+        const post = iBeamPost(
+          r.postWidth, r.postDepth, r.flangeT, r.webT, postH, r.bevel,
+        );
+        post.translate(postX, kerbTop, 0);
+        parts.push(post);
+
+        if (r.basePlate) {
+          const plate = chamferBox(r.postWidth * 1.55, 0.028, r.postDepth * 1.35, r.bevel);
+          plate.translate(postX, kerbTop, 0);
+          parts.push(plate);
+        }
+
+        // Spacer between post and beam, overlapping both a little so no hairline
+        // gap opens up at grazing angles.
+        // chamferBox sits on y = 0, so centre it on the beam rather than
+        // hanging it off the beam's midline.
+        const blockW = r.blockout + 0.024;
+        const blockH = prof.height * 0.62;
+        const block = chamferBox(blockW, blockH, r.postDepth * 0.92, r.bevel);
+        block.translate(
+          prof.backZ + sgn * (blockW * 0.5 - 0.012), centerV - blockH * 0.5, 0,
+        );
+        parts.push(block);
+
+        if (r.bolts) {
+          for (const v of prof.valleys) {
+            // Wide end flush with the valley floor, taper toward traffic.
+            const len = r.boltRadius * 1.5;
+            const bolt = boltHead(r.boltRadius, len, sgn);
+            bolt.translate(v.z - sgn * len * 0.5, centerV + v.y, 0);
+            parts.push(bolt);
+          }
+        }
+
+        const merged = mergeGeometries(parts, false);
+        for (const g of parts) g.dispose();
+        return merged;
+      }
+
+      function placePosts(frames, template, baseLat, zSign, spacing, out) {
         const F = frames.length;
         let total = 0;
         for (let i = 1; i < F; i++) total += frames[i].pos.distanceTo(frames[i - 1].pos);
-        const n = Math.max(2, Math.floor(total / Math.max(0.5, gp.postSpacing)) + 1);
-        // Real posts poke slightly above the W-beam crest (bolt plate / end cap).
-        const beamTop = centerV + gp.beamHeight * 0.5;
-        const postTop = beamTop + gp.beamHeight * 0.12;
-        const postH = Math.max(0.05, postTop - kerbTop);
-        const postCenterV = kerbTop + postH * 0.5;
-        const s = side >= 0 ? 1 : -1;
-        const outerZ = outerProfileZ(prof, side, mirrorSides);
-        // Inner face flush with the outer W skin — entire post sits outside the profile envelope.
-        const postX = mirrorSides
-          ? s * (edgeAbs + outerZ + gp.postWidth * 0.5)
-          : s * edgeAbs + outerZ + s * gp.postWidth * 0.5;
+        const n = Math.max(2, Math.round(total / Math.max(0.6, spacing)) + 1);
+        const rightS = new THREE.Vector3();
+        const fwdS = new THREE.Vector3();
         for (let k = 0; k < n; k++) {
           const idx = Math.round((k / (n - 1)) * (F - 1));
           const fr = frames[idx];
-          const box = new THREE.BoxGeometry(gp.postWidth, postH, gp.postThickness);
-          _pos.copy(fr.pos).addScaledVector(fr.right, postX).addScaledVector(fr.up, postCenterV);
-          _m.makeBasis(fr.right, fr.up, fr.tangent).setPosition(_pos);
-          box.applyMatrix4(_m);
-          out.push(box);
+          // (right, up, tangent) is LEFT-handed here (right = cross(tangent, up)),
+          // so negate the third axis to keep the template's winding intact; the
+          // post is symmetric along travel, so the flip costs nothing.
+          rightS.copy(fr.right).multiplyScalar(zSign);
+          fwdS.copy(fr.tangent).multiplyScalar(-zSign);
+          _pos.copy(fr.pos).addScaledVector(fr.right, baseLat);
+          _m.makeBasis(rightS, fr.up, fwdS).setPosition(_pos);
+          out.push(template.clone().applyMatrix4(_m));
         }
       }
 
-      function buildLabRails(length, rp, gp, { mirrorSides, flipW }) {
-        if (gp.beamHeight <= 0) return null;
-        // Deeper W + deeper crown so posts can sit outside the corrugated sheet without piercing it.
-        const postWidth = gp.postWidth * 1.4;
-        const postThickness = gp.postThickness * 1.35;
-        const beamDepth = Math.max(0.3, postWidth * 2.8);
-        const labGp = {
-          ...gp,
-          postWidth,
-          postThickness,
-          beamHeight: gp.beamHeight * 1.05,
-          beamDepth,
-          crownFrac: 0.5,
-          capRiseFrac: Math.min(gp.capRiseFrac, 0.65),
-        };
-        const shell = Math.max(0.028, beamDepth * 0.11);
+      function buildLabRails(length, rp, r) {
+        if (r.height <= 0) return null;
         const hw = rp.width / 2;
         const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
         const kerbTop = rp.railHeight;
-        const centerV = kerbTop + labGp.beamGap + labGp.beamHeight * 0.5;
         const edgeAbs = hw - rw * 0.5;
-        const frames = straightFrames(length);
-        const prof = wBeamProfile(
-          labGp.beamHeight, labGp.beamDepth, labGp.crownFrac, labGp.capRiseFrac, flipW,
-        );
+        const centerV = kerbTop + r.gap + r.height * 0.5;
+        const frames = straightFrames(length, rp.segLen);
+        const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
+
+        const template = r.posts ? buildPostTemplate(prof, r, kerbTop, centerV) : null;
         const geos = [];
         for (const side of [-1, 1]) {
-          geos.push(buildBeamVolume(frames, side, edgeAbs, centerV, prof, mirrorSides, shell));
-          buildPosts(frames, side, edgeAbs, kerbTop, centerV, labGp, prof, mirrorSides, geos);
+          const zSign = r.mirrorSides ? side : 1;
+          const baseLat = side * edgeAbs;
+          geos.push(sweepRail(frames, prof, baseLat, zSign, centerV));
+          if (template) placePosts(frames, template, baseLat, zSign, r.postSpacing, geos);
         }
+        template?.dispose();
         const merged = mergeGeometries(geos, false);
         for (const g of geos) g.dispose();
         if (merged) merged.computeBoundingSphere();
@@ -372,9 +684,77 @@
         railHeight: kitRoadParams.railHeight,
         edges: true,
         guardrails: true,
+      };
+
+      /**
+       * Lab guardrail shape. Defaults are a THRIE-beam (3 humps) rather than the
+       * kit's W: at 0.8 m tall a two-hump section is mostly flat sheet, and flat
+       * sheet at that size is what reads as a slab. Post spacing is ~2.8 m
+       * instead of the kit's 4 m for the same reason — long unsupported runs
+       * make a barrier look like a fence panel.
+       */
+      const rail = {
+        useLab: true,
         mirrorSides: true,
-        flipW: true,
-        useLabRails: true,
+        flipW: false,
+        style: 3, // humps: 1 box beam · 2 W-beam · 3 thrie-beam
+        height: 0.8,
+        depth: 0.26,
+        gap: 0.18, // kerb top → beam bottom
+        valleyGap: 0.3, // valley inset, as a fraction of depth
+        backAmp: 0.35, // corrugation carried onto the back face (0 = flat plate)
+        plateau: 0.22, // flat run at each crest/valley, fraction of the pitch
+        bendRadius: 0.05,
+        bendSeg: 4,
+        beadSeg: 10,
+        posts: true,
+        postSpacing: 2.8,
+        postWidth: 0.15, // lateral, flange to flange
+        postDepth: 0.17, // along travel, flange width
+        flangeT: 0.022,
+        webT: 0.018,
+        postRise: 0.06, // how far the post pokes above the beam
+        blockout: 0.11, // spacer between post and beam
+        basePlate: true,
+        bolts: true,
+        boltRadius: 0.034,
+        bevel: 0.006,
+      };
+
+      /**
+       * Galvanised steel for the lab rails.
+       *
+       * The kit material had to drop to metalness 0.5 to stop the rails reading
+       * black (see createGuardrailMaterial) — but the real problem is that a
+       * metal with NO ENVIRONMENT has nothing to reflect, so the fix was to make
+       * it half-plastic. Give the rail its own small prefiltered env and it can
+       * go back to being a metal at 0.9+ and actually look like one. The env is
+       * set per-material, so the asphalt look-dev is untouched.
+       *
+       * `spangle` is the crystalline patchwork hot-dip galvanising leaves
+       * behind: it breaks up the flat sheet at any distance, which no amount of
+       * geometry detail does on its own.
+       */
+      const railLook = {
+        base: 0x6b737c,
+        tint: 0xa6b0ba,
+        // Galvanising is matte-ish; at 0.33 with an env this bright the whole
+        // rail blew out to white and read as chrome.
+        roughness: 0.44,
+        metalness: 0.9,
+        spangleScale: 9.0, // ~11 cm crystals; much below this it reads as marble
+        spangleAmount: 0.45,
+        roughVary: 0.3,
+        envIntensity: 0.6,
+      };
+      const railU = {
+        base: uniform(new THREE.Color(railLook.base)),
+        tint: uniform(new THREE.Color(railLook.tint)),
+        roughness: uniform(railLook.roughness),
+        metalness: uniform(railLook.metalness),
+        spangleScale: uniform(railLook.spangleScale),
+        spangleAmount: uniform(railLook.spangleAmount),
+        roughVary: uniform(railLook.roughVary),
       };
 
       const sceneCtl = {
@@ -473,8 +853,90 @@
         bumpU.macroMix.value = bump.macroMix;
       }
 
+      /**
+       * Tiny procedural sky/ground equirect with a sun blob, matched to the
+       * studio lights. Assigned to `railMat.envMap`; three prefilters it to a
+       * PMREM on first use (PMREMNode does this for any equirect), so a rough
+       * metal gets a blurred dome and a polished one gets the sun.
+       *
+       * HalfFloat, not Float32: rgba32float is not linearly filterable in WebGPU
+       * without an optional feature, and the PMREM chain filters.
+       */
+      function buildStudioEnv() {
+        const W = 128;
+        const H = 64;
+        const data = new Uint16Array(W * H * 4);
+        const sunDir = new THREE.Vector3(22, 36, 16).normalize();
+        const d = new THREE.Vector3();
+        const half = THREE.DataUtils.toHalfFloat;
+        for (let y = 0; y < H; y++) {
+          const phi = ((y + 0.5) / H) * Math.PI; // 0 = straight up
+          for (let x = 0; x < W; x++) {
+            const theta = ((x + 0.5) / W) * Math.PI * 2;
+            const sp = Math.sin(phi);
+            d.set(sp * Math.cos(theta), Math.cos(phi), sp * Math.sin(theta));
+            let r;
+            let g;
+            let b;
+            // Kept close to the studio clear colour (0xb8c4d2). A saturated
+            // blue dome here is physically fine but the rail then mirrors a sky
+            // that isn't the one behind it, and the concave back valleys go
+            // bright blue against a pale grey background.
+            if (d.y >= 0) {
+              const t = Math.pow(d.y, 0.55); // horizon haze → zenith
+              r = 0.56 * (1 - t) + 0.34 * t;
+              g = 0.61 * (1 - t) + 0.43 * t;
+              b = 0.69 * (1 - t) + 0.57 * t;
+            } else {
+              const t = Math.min(1, -d.y * 2.2); // warm ground bounce
+              r = 0.56 * (1 - t) + 0.36 * t;
+              g = 0.56 * (1 - t) + 0.33 * t;
+              b = 0.55 * (1 - t) + 0.28 * t;
+            }
+            const s = Math.max(0, d.dot(sunDir));
+            const sun = Math.pow(s, 340) * 80 + Math.pow(s, 14) * 0.4;
+            const i = (y * W + x) * 4;
+            data[i] = half(r + sun);
+            data[i + 1] = half(g + sun * 0.96);
+            data[i + 2] = half(b + sun * 0.86);
+            data[i + 3] = half(1);
+          }
+        }
+        const tex = new THREE.DataTexture(
+          data, W, H, THREE.RGBAFormat, THREE.HalfFloatType,
+        );
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        tex.colorSpace = THREE.LinearSRGBColorSpace; // already radiance
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
+        tex.needsUpdate = true;
+        return tex;
+      }
+
+      function createLabRailMaterial(envTex) {
+        const mat = new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide });
+        const p = positionWorld.mul(railU.spangleScale);
+        const coarse = mx_noise_float(p);
+        const fine = mx_noise_float(p.mul(4.7).add(vec3(11.3, 2.7, 5.1)));
+        const grain = coarse.mul(0.65).add(fine.mul(0.35));
+        mat.colorNode = mix(
+          railU.base,
+          railU.tint,
+          clamp(grain.mul(railU.spangleAmount).add(0.5), 0.0, 1.0),
+        );
+        mat.roughnessNode = clamp(
+          railU.roughness.add(grain.mul(railU.roughVary)), 0.04, 1.0,
+        );
+        mat.metalnessNode = railU.metalness;
+        mat.envMap = envTex;
+        mat.envMapIntensity = railLook.envIntensity;
+        mat.shadowSide = THREE.FrontSide;
+        return mat;
+      }
+
       let renderer, scene, camera, controls, sun, hemi, fill, ambient;
-      let roadMat, railMat;
+      let roadMat, railMat, kitRailMat, railEnv;
       let pieceRoot, ground, grid;
       let roadMesh = null;
       let railMesh = null;
@@ -555,8 +1017,10 @@
           linesOn: look.linesOn ? 1 : 0,
           railStriped: look.railStriped ? 1 : 0,
         });
-        railMat = createGuardrailMaterial();
-        railMat.shadowSide = THREE.FrontSide;
+        railEnv = buildStudioEnv();
+        railMat = createLabRailMaterial(railEnv);
+        kitRailMat = createGuardrailMaterial();
+        kitRailMat.shadowSide = THREE.FrontSide;
 
         if (bump.enabled) applyLabBumpNormals(roadMat);
         applyLook(); // respects softenAlbedoGrain
@@ -569,7 +1033,8 @@
         addEventListener("keydown", onKey);
 
         window.__roadPieceLab = {
-          renderer, scene, camera, controls, look, geom, bump, rebuildPiece, roadMat, railMat,
+          renderer, scene, camera, controls, look, geom, rail, railLook, bump,
+          rebuildPiece, applyRailLook, roadMat, railMat,
         };
 
         renderer.setAnimationLoop(frame);
@@ -607,12 +1072,9 @@
 
         let railGeo = null;
         if (geom.guardrails && edges) {
-          if (geom.useLabRails) {
+          if (rail.useLab) {
             built.railGeometry?.dispose();
-            railGeo = buildLabRails(geom.straightLength, rp, gp, {
-              mirrorSides: geom.mirrorSides,
-              flipW: geom.flipW,
-            });
+            railGeo = buildLabRails(geom.straightLength, rp, rail);
           } else {
             railGeo = built.railGeometry;
           }
@@ -635,7 +1097,7 @@
         pieceRoot.add(roadMesh);
 
         if (railGeo) {
-          railMesh = new THREE.Mesh(railGeo, railMat);
+          railMesh = new THREE.Mesh(railGeo, rail.useLab ? railMat : kitRailMat);
           railMesh.castShadow = sceneCtl.shadows;
           railMesh.receiveShadow = sceneCtl.shadows && sceneCtl.railReceiveShadow;
           pieceRoot.add(railMesh);
@@ -667,6 +1129,17 @@
           linesOn: look.linesOn ? 1 : 0,
           railStriped: look.railStriped ? 1 : 0,
         });
+      }
+
+      function applyRailLook() {
+        railU.base.value.set(railLook.base);
+        railU.tint.value.set(railLook.tint);
+        railU.roughness.value = railLook.roughness;
+        railU.metalness.value = railLook.metalness;
+        railU.spangleScale.value = railLook.spangleScale;
+        railU.spangleAmount.value = railLook.spangleAmount;
+        railU.roughVary.value = railLook.roughVary;
+        railMat.envMapIntensity = railLook.envIntensity;
       }
 
       function applyBump() {
@@ -739,11 +1212,47 @@
         fGeom.add(geom, "edges").name("Kerbs").onFinishChange(rebuildPiece);
         fGeom.add(geom, "guardrails").name("Guardrails").onFinishChange(rebuildPiece);
 
-        const fRail = gui.addFolder("Guardrail facing");
-        fRail.add(geom, "useLabRails").name("Lab rails (vs kit)").onFinishChange(rebuildPiece);
-        fRail.add(geom, "mirrorSides").name("Mirror L/R facing").onFinishChange(rebuildPiece);
-        fRail.add(geom, "flipW").name("Flip W cup").onFinishChange(rebuildPiece);
+        const fRail = gui.addFolder("Guardrail — section");
+        fRail.add(rail, "useLab").name("Lab rails (vs kit)").onFinishChange(rebuildPiece);
+        fRail.add(rail, "style", { "Box beam": 1, "W-beam": 2, "Thrie-beam": 3 })
+          .name("Section").onFinishChange(rebuildPiece);
+        fRail.add(rail, "height", 0.25, 1.2, 0.01).name("Height (m)").onFinishChange(rebuildPiece);
+        fRail.add(rail, "depth", 0.08, 0.45, 0.005).name("Depth (m)").onFinishChange(rebuildPiece);
+        fRail.add(rail, "gap", 0, 0.5, 0.01).name("Kerb gap (m)").onFinishChange(rebuildPiece);
+        fRail.add(rail, "valleyGap", 0.05, 0.45, 0.01).name("Valley inset").onFinishChange(rebuildPiece);
+        fRail.add(rail, "backAmp", 0, 0.5, 0.01).name("Back relief").onFinishChange(rebuildPiece);
+        fRail.add(rail, "plateau", 0, 0.45, 0.01).name("Crest flat").onFinishChange(rebuildPiece);
+        fRail.add(rail, "bendRadius", 0, 0.12, 0.002).name("Bend radius").onFinishChange(rebuildPiece);
+        fRail.add(rail, "bendSeg", 1, 8, 1).name("Bend segments").onFinishChange(rebuildPiece);
+        fRail.add(rail, "beadSeg", 3, 20, 1).name("Bull-nose segments").onFinishChange(rebuildPiece);
+        fRail.add(rail, "mirrorSides").name("Mirror L/R facing").onFinishChange(rebuildPiece);
+        fRail.add(rail, "flipW").name("Face the field").onFinishChange(rebuildPiece);
         fRail.open();
+
+        const fPost = gui.addFolder("Guardrail — posts");
+        fPost.add(rail, "posts").name("Posts").onFinishChange(rebuildPiece);
+        fPost.add(rail, "postSpacing", 1.2, 8, 0.1).name("Spacing (m)").onFinishChange(rebuildPiece);
+        fPost.add(rail, "postWidth", 0.06, 0.32, 0.005).name("Width (m)").onFinishChange(rebuildPiece);
+        fPost.add(rail, "postDepth", 0.06, 0.32, 0.005).name("Flange (m)").onFinishChange(rebuildPiece);
+        fPost.add(rail, "flangeT", 0.008, 0.05, 0.001).name("Flange thick").onFinishChange(rebuildPiece);
+        fPost.add(rail, "webT", 0.006, 0.05, 0.001).name("Web thick").onFinishChange(rebuildPiece);
+        fPost.add(rail, "blockout", 0.02, 0.28, 0.005).name("Blockout (m)").onFinishChange(rebuildPiece);
+        fPost.add(rail, "postRise", 0, 0.25, 0.005).name("Rise above beam").onFinishChange(rebuildPiece);
+        fPost.add(rail, "basePlate").name("Base plate").onFinishChange(rebuildPiece);
+        fPost.add(rail, "bolts").name("Bolts").onFinishChange(rebuildPiece);
+        fPost.add(rail, "boltRadius", 0.012, 0.07, 0.002).name("Bolt radius").onFinishChange(rebuildPiece);
+        fPost.add(rail, "bevel", 0.001, 0.02, 0.001).name("Chamfer (m)").onFinishChange(rebuildPiece);
+
+        const fSteel = gui.addFolder("Guardrail — steel");
+        fSteel.addColor(railLook, "base").name("Base").onChange(applyRailLook);
+        fSteel.addColor(railLook, "tint").name("Spangle tint").onChange(applyRailLook);
+        fSteel.add(railLook, "roughness", 0.02, 1, 0.01).name("Roughness").onChange(applyRailLook);
+        fSteel.add(railLook, "metalness", 0, 1, 0.01).name("Metalness").onChange(applyRailLook);
+        fSteel.add(railLook, "spangleScale", 0.3, 12, 0.1).name("Spangle scale").onChange(applyRailLook);
+        fSteel.add(railLook, "spangleAmount", 0, 1.5, 0.01).name("Spangle amount").onChange(applyRailLook);
+        fSteel.add(railLook, "roughVary", 0, 0.6, 0.01).name("Rough vary").onChange(applyRailLook);
+        fSteel.add(railLook, "envIntensity", 0, 2.5, 0.05).name("Env intensity").onChange(applyRailLook);
+        fSteel.open();
 
         const fScene = gui.addFolder("Scene");
         fScene.add(sceneCtl, "exposure", 0.4, 2, 0.01).name("Exposure").onChange((v) => {
