@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Road Piece Lab — Straight Long</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #c8d0da; color: #1a2230;
+                   font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10;
+        min-width: 240px; max-width: 320px;
+        padding: 12px 14px;
+        background: rgba(255, 255, 255, 0.78);
+        border: 1px solid rgba(30, 45, 70, 0.14);
+        border-radius: 10px;
+        backdrop-filter: blur(6px);
+        pointer-events: none;
+        box-shadow: 0 8px 28px rgba(20, 30, 50, 0.12);
+      }
+      #hud h1 {
+        margin: 0 0 4px; font-size: 12px; letter-spacing: 0.06em;
+        text-transform: uppercase; color: #5a6a82; font-weight: 700;
+      }
+      #hud .title { margin: 0 0 8px; font-size: 18px; font-weight: 650; color: #152033; }
+      #hud .meta { color: #4a5a72; font-size: 12px; }
+      #hud .meta b { color: #152033; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #hud .keys {
+        margin-top: 10px; padding-top: 8px;
+        border-top: 1px solid rgba(30, 45, 70, 0.12);
+        color: #6a7a90; font-size: 11px; line-height: 1.5;
+      }
+      #hud .keys b { color: #243248; font-weight: 600; }
+      #err {
+        position: fixed; left: 12px; bottom: 12px; z-index: 20;
+        max-width: 520px; padding: 10px 12px; display: none;
+        background: rgba(60, 12, 12, 0.9); border: 1px solid #a44;
+        border-radius: 8px; color: #ffb0b0; white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Road piece lab</h1>
+      <div class="title">Straight · Long</div>
+      <div class="meta">
+        Palette preset <b>straight_long</b><br />
+        Length <b id="s-len">32</b> m · Width <b id="s-w">16</b> m<br />
+        Triangles <b id="s-tris">—</b>
+      </div>
+      <div class="keys">
+        Orbit: drag · Pan: right-drag / middle · Zoom: wheel<br />
+        <b>R</b> reset camera · <b>L</b> toggle road lines · <b>G</b> grazing view (reads bumps)<br />
+        lil-gui (top-right) — toggle <b>Noise normals</b> vs off to A/B
+      </div>
+    </div>
+    <div id="err"></div>
+
+    <script type="module">
+      /**
+       * Single-file look-dev for Straight → Long. Does not edit road.html or the
+       * kit. Imports kit builders/materials read-only so the asphalt shader
+       * matches the game; all lab experiments (rails facing, etc.) live below.
+       */
+      import * as THREE from "three";
+      import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "three/addons/libs/lil-gui.module.min.js";
+      import {
+        Fn,
+        uv,
+        vec2,
+        vec3,
+        float,
+        uniform,
+        attribute,
+        mx_noise_float,
+        mx_fractal_noise_float,
+        normalMap,
+        sqrt,
+        max,
+        mix,
+        step,
+        oneMinus,
+      } from "three/tsl";
+      import {
+        buildPiece,
+        roadParams as kitRoadParams,
+        guardrailParams as kitGuardrailParams,
+        pieceParams as kitPieceParams,
+      } from "./modularRoadKit.js";
+      import {
+        createRoadMaterial,
+        createGuardrailMaterial,
+        syncRoadUniforms,
+      } from "./modularRoadMaterial.js";
+
+      const PRESET = {
+        id: "straight_long",
+        label: "Long",
+        base: "straight",
+        params: { straightLength: 32 },
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => {
+        const el = $("err");
+        el.style.display = "block";
+        el.textContent = e?.stack || String(e);
+        console.error(e);
+      };
+
+      // ── Lab-only W-beam (straight is trivial — keep it here, not a 2nd file) ─
+      const _m = new THREE.Matrix4();
+      const _pos = new THREE.Vector3();
+
+      function straightFrames(length, segLen = 1.6) {
+        const n = Math.max(2, Math.ceil(length / segLen) + 1);
+        const frames = [];
+        for (let i = 0; i < n; i++) {
+          const t = i / (n - 1);
+          frames.push({
+            pos: new THREE.Vector3(0, 0, -length * t),
+            tangent: new THREE.Vector3(0, 0, -1),
+            up: new THREE.Vector3(0, 1, 0),
+            right: new THREE.Vector3(1, 0, 0),
+          });
+        }
+        return frames;
+      }
+
+      function wBeamProfile(h, d, crownFrac, capRiseFrac, flipW) {
+        const s = flipW ? -1 : 1;
+        const prof = [
+          { y: -0.5 * h, z: s * 0.5 * d },
+          { y: -0.16 * h, z: s * 0.32 * d },
+          { y: 0.0, z: s * -crownFrac * d },
+          { y: 0.16 * h, z: s * 0.32 * d },
+        ];
+        const cap = Math.max(0, capRiseFrac ?? 0) * d;
+        if (cap <= 1e-6) {
+          prof.push({ y: 0.5 * h, z: s * 0.5 * d });
+          return prof;
+        }
+        prof.push(
+          { y: 0.5 * h - cap, z: s * 0.5 * d },
+          { y: 0.5 * h, z: 0.0 },
+          { y: 0.5 * h - cap, z: s * -0.5 * d },
+        );
+        return prof;
+      }
+
+      function sweepBeam(frames, side, edgeAbs, centerV, prof, mirrorSides) {
+        const F = frames.length;
+        const R = prof.length;
+        const along = new Float32Array(F);
+        for (let i = 1; i < F; i++) {
+          along[i] = along[i - 1] + frames[i].pos.distanceTo(frames[i - 1].pos);
+        }
+        const positions = [];
+        const uvs = [];
+        const indices = [];
+        const p = new THREE.Vector3();
+        const s = side >= 0 ? 1 : -1;
+        for (let i = 0; i < F; i++) {
+          const fr = frames[i];
+          for (let j = 0; j < R; j++) {
+            const pr = prof[j];
+            const lateral = mirrorSides ? s * (edgeAbs + pr.z) : s * edgeAbs + pr.z;
+            p.copy(fr.pos)
+              .addScaledVector(fr.right, lateral)
+              .addScaledVector(fr.up, centerV + pr.y);
+            positions.push(p.x, p.y, p.z);
+            uvs.push(along[i], j / (R - 1));
+          }
+        }
+        for (let i = 0; i < F - 1; i++) {
+          const r0 = i * R;
+          const r1 = (i + 1) * R;
+          for (let j = 0; j < R - 1; j++) {
+            if (!mirrorSides || s >= 0) {
+              indices.push(r0 + j, r1 + j, r0 + j + 1, r0 + j + 1, r1 + j, r1 + j + 1);
+            } else {
+              indices.push(r0 + j, r0 + j + 1, r1 + j, r0 + j + 1, r1 + j + 1, r1 + j);
+            }
+          }
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+        geo.setIndex(indices);
+        geo.computeVertexNormals();
+        return geo;
+      }
+
+      function buildPosts(frames, side, edgeAbs, kerbTop, centerV, gp, mirrorSides, out) {
+        const F = frames.length;
+        let total = 0;
+        for (let i = 1; i < F; i++) total += frames[i].pos.distanceTo(frames[i - 1].pos);
+        const n = Math.max(2, Math.floor(total / Math.max(0.5, gp.postSpacing)) + 1);
+        const postH = Math.max(0.05, centerV - kerbTop + gp.beamHeight * 0.4);
+        const postCenterV = kerbTop + postH * 0.5;
+        const s = side >= 0 ? 1 : -1;
+        const postX = mirrorSides ? s * (edgeAbs + gp.beamDepth * 0.45) : s * edgeAbs;
+        for (let k = 0; k < n; k++) {
+          const idx = Math.round((k / (n - 1)) * (F - 1));
+          const fr = frames[idx];
+          const box = new THREE.BoxGeometry(gp.postWidth, postH, gp.postThickness);
+          _pos.copy(fr.pos).addScaledVector(fr.right, postX).addScaledVector(fr.up, postCenterV);
+          _m.makeBasis(fr.right, fr.up, fr.tangent).setPosition(_pos);
+          box.applyMatrix4(_m);
+          out.push(box);
+        }
+      }
+
+      function buildLabRails(length, rp, gp, { mirrorSides, flipW }) {
+        if (gp.beamHeight <= 0) return null;
+        const hw = rp.width / 2;
+        const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
+        const kerbTop = rp.railHeight;
+        const centerV = kerbTop + gp.beamGap + gp.beamHeight * 0.5;
+        const edgeAbs = hw - rw * 0.5;
+        const frames = straightFrames(length);
+        const prof = wBeamProfile(gp.beamHeight, gp.beamDepth, gp.crownFrac, gp.capRiseFrac, flipW);
+        const geos = [];
+        for (const side of [-1, 1]) {
+          geos.push(sweepBeam(frames, side, edgeAbs, centerV, prof, mirrorSides));
+          buildPosts(frames, side, edgeAbs, kerbTop, centerV, gp, mirrorSides, geos);
+        }
+        const merged = mergeGeometries(geos, false);
+        for (const g of geos) g.dispose();
+        if (merged) merged.computeBoundingSphere();
+        return merged;
+      }
+
+      // ── Look / scene state ─────────────────────────────────────────────────
+      const look = {
+        asphaltDark: 0x5c626a,
+        asphaltLight: 0x8a919a,
+        deckBrightness: 1.0,
+        lineColor: 0xf2f2f2,
+        railA: 0xd0342c,
+        railB: 0xf0f0f0,
+        sideColor: 0x3a3d42,
+        linesOn: false,
+        railStriped: false,
+        grainScale: 1.0,
+        macroScale: 0.06,
+        aggScale: 5.0,
+        deckRough: 0.93,
+        roughVary: 0.1,
+        wheelPolish: 0.22,
+        wheelDarken: 0.1,
+        centerHalf: 0.045,
+        edgePos: 0.82,
+        edgeWidth: 0.05,
+        centerDash: 0.18,
+      };
+
+      const geom = {
+        straightLength: PRESET.params.straightLength,
+        width: kitRoadParams.width,
+        thickness: kitRoadParams.thickness,
+        railWidth: kitRoadParams.railWidth,
+        railHeight: kitRoadParams.railHeight,
+        edges: true,
+        guardrails: true,
+        mirrorSides: true,
+        flipW: true,
+        useLabRails: true,
+      };
+
+      const sceneCtl = {
+        exposure: 1.25,
+        sunIntensity: 3.2,
+        hemiIntensity: 1.15,
+        fillIntensity: 1.1,
+        ambIntensity: 0.45,
+        showGround: true,
+        showGrid: true,
+        shadows: true,
+        railReceiveShadow: false,
+        shadowBias: -0.0008,
+        shadowNormalBias: 0.04,
+      };
+
+      // Lab-only procedural normals (does not edit modularRoadMaterial.js).
+      // Height from mx_noise → finite differences in UV metres → normalMap.
+      const bump = {
+        enabled: true,
+        softenAlbedoGrain: true,
+        previewGloss: true, // lower roughness while tuning normals (specular reads bumps)
+        strength: 1.1,
+        normalScale: 2.2,
+        sampleEps: 0.008,
+        aggScale: 14.0,
+        macroScale: 0.05,
+        macroMix: 0.15,
+      };
+      const bumpU = {
+        strength: uniform(bump.strength),
+        normalScale: uniform(bump.normalScale),
+        sampleEps: uniform(bump.sampleEps),
+        aggScale: uniform(bump.aggScale),
+        macroScale: uniform(bump.macroScale),
+        macroMix: uniform(bump.macroMix),
+      };
+
+      /** Procedural asphalt height in UV-metres (along, across). */
+      function asphaltHeight(uvn) {
+        const along = uvn.x;
+        const across = uvn.y;
+        const agg = mx_noise_float(
+          vec3(along.mul(bumpU.aggScale), across.mul(bumpU.aggScale), 0.0),
+        );
+        const macro = mx_fractal_noise_float(
+          vec3(along.mul(bumpU.macroScale), across.mul(bumpU.macroScale), 1.7),
+          3, 2.0, 0.5, 1.0,
+        );
+        return mix(agg, macro, bumpU.macroMix);
+      }
+
+      function applyLabBumpNormals(mat) {
+        mat.normalNode = Fn(() => {
+          const uvn = uv();
+          const zone = attribute("aZone", "float");
+          const onDeck = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
+
+          const h0 = asphaltHeight(uvn);
+          const hx = asphaltHeight(uvn.add(vec2(bumpU.sampleEps, 0)));
+          const hy = asphaltHeight(uvn.add(vec2(0, bumpU.sampleEps)));
+
+          const dHdU = hx.sub(h0).div(bumpU.sampleEps);
+          const dHdV = hy.sub(h0).div(bumpU.sampleEps);
+
+          const tsNx = dHdU.negate().mul(bumpU.strength);
+          const tsNy = dHdV.negate().mul(bumpU.strength);
+          const len2 = tsNx.mul(tsNx).add(tsNy.mul(tsNy));
+          const tsNz = sqrt(max(float(1e-4), float(1).sub(len2)));
+
+          const nx = mix(float(0), tsNx, onDeck);
+          const ny = mix(float(0), tsNy, onDeck);
+          const nz = mix(float(1), tsNz, onDeck);
+
+          const packed = vec3(
+            nx.mul(0.5).add(0.5),
+            ny.mul(0.5).add(0.5),
+            nz.mul(0.5).add(0.5),
+          );
+          return normalMap(packed, vec2(bumpU.normalScale, bumpU.normalScale));
+        })();
+        mat.needsUpdate = true;
+      }
+
+      function clearLabBumpNormals(mat) {
+        mat.normalNode = null;
+        mat.needsUpdate = true;
+      }
+
+      function syncBumpUniforms() {
+        bumpU.strength.value = bump.strength;
+        bumpU.normalScale.value = bump.normalScale;
+        bumpU.sampleEps.value = bump.sampleEps;
+        bumpU.aggScale.value = bump.aggScale;
+        bumpU.macroScale.value = bump.macroScale;
+        bumpU.macroMix.value = bump.macroMix;
+      }
+
+      let renderer, scene, camera, controls, sun, hemi, fill, ambient;
+      let roadMat, railMat;
+      let pieceRoot, ground, grid;
+      let roadMesh = null;
+      let railMesh = null;
+
+      async function init() {
+        renderer = new THREE.WebGPURenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        // Soft daylight studio — reads asphalt / metal without a cave bg.
+        renderer.setClearColor(0xb8c4d2);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = sceneCtl.exposure;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xb8c4d2);
+        scene.fog = new THREE.Fog(0xb8c4d2, 55, 140);
+
+        camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 400);
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 4;
+        controls.maxDistance = 120;
+
+        // Bright sky / warm ground bounce — was too dim + navy before.
+        hemi = new THREE.HemisphereLight(0xf0f5ff, 0xd2c4b0, sceneCtl.hemiIntensity);
+        scene.add(hemi);
+
+        ambient = new THREE.AmbientLight(0xffffff, sceneCtl.ambIntensity);
+        scene.add(ambient);
+
+        sun = new THREE.DirectionalLight(0xfff6e8, sceneCtl.sunIntensity);
+        sun.position.set(22, 36, 16);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.camera.near = 1;
+        sun.shadow.camera.far = 90;
+        sun.shadow.camera.left = -32;
+        sun.shadow.camera.right = 32;
+        sun.shadow.camera.top = 32;
+        sun.shadow.camera.bottom = -32;
+        sun.shadow.bias = sceneCtl.shadowBias;
+        sun.shadow.normalBias = sceneCtl.shadowNormalBias;
+        scene.add(sun);
+        scene.add(sun.target);
+
+        fill = new THREE.DirectionalLight(0xdde8ff, sceneCtl.fillIntensity);
+        fill.position.set(-20, 14, -18);
+        scene.add(fill);
+
+        // Soft key from behind-camera so the near face of the W-beam isn't in shadow.
+        const rim = new THREE.DirectionalLight(0xffffff, 0.55);
+        rim.position.set(4, 12, 28);
+        scene.add(rim);
+
+        ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(200, 200),
+          new THREE.MeshStandardMaterial({ color: 0xd8dde6, roughness: 0.92, metalness: 0 }),
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.02;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        grid = new THREE.GridHelper(80, 40, 0x8a96a8, 0xb8c0cc);
+        grid.position.y = 0.001;
+        scene.add(grid);
+
+        pieceRoot = new THREE.Group();
+        scene.add(pieceRoot);
+
+        roadMat = createRoadMaterial({
+          ...look,
+          linesOn: look.linesOn ? 1 : 0,
+          railStriped: look.railStriped ? 1 : 0,
+        });
+        railMat = createGuardrailMaterial();
+        railMat.shadowSide = THREE.FrontSide;
+
+        if (bump.enabled) applyLabBumpNormals(roadMat);
+        applyLook(); // respects softenAlbedoGrain
+
+        rebuildPiece();
+        resetCamera();
+        buildGui();
+
+        addEventListener("resize", onResize);
+        addEventListener("keydown", onKey);
+
+        window.__roadPieceLab = {
+          renderer, scene, camera, controls, look, geom, bump, rebuildPiece, roadMat, railMat,
+        };
+
+        renderer.setAnimationLoop(frame);
+      }
+
+      function rebuildPiece() {
+        if (roadMesh) {
+          pieceRoot.remove(roadMesh);
+          roadMesh.geometry.dispose();
+          roadMesh = null;
+        }
+        if (railMesh) {
+          pieceRoot.remove(railMesh);
+          railMesh.geometry.dispose();
+          railMesh = null;
+        }
+
+        const rp = {
+          ...kitRoadParams,
+          width: geom.width,
+          thickness: geom.thickness,
+          railWidth: geom.railWidth,
+          railHeight: geom.railHeight,
+        };
+        const pp = {
+          ...kitPieceParams,
+          ...PRESET.params,
+          straightLength: geom.straightLength,
+        };
+        const gp = { ...kitGuardrailParams, enabled: geom.edges };
+        const edges = geom.edges;
+
+        // Deck from kit (keeps aZone / aLateral for the real asphalt shader).
+        const built = buildPiece(PRESET.base, new THREE.Matrix4(), pp, rp, gp, edges);
+
+        let railGeo = null;
+        if (geom.guardrails && edges) {
+          if (geom.useLabRails) {
+            built.railGeometry?.dispose();
+            railGeo = buildLabRails(geom.straightLength, rp, gp, {
+              mirrorSides: geom.mirrorSides,
+              flipW: geom.flipW,
+            });
+          } else {
+            railGeo = built.railGeometry;
+          }
+        } else {
+          built.railGeometry?.dispose();
+        }
+
+        const box = new THREE.Box3().setFromBufferAttribute(
+          built.geometry.getAttribute("position"),
+        );
+        const center = box.getCenter(new THREE.Vector3());
+        const offset = new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z);
+        built.geometry.applyMatrix4(offset);
+        if (railGeo) railGeo.applyMatrix4(offset);
+        // Tangents help normalMap align chip detail with the sweep UVs.
+        if (bump.enabled) built.geometry.computeTangents();
+
+        roadMesh = new THREE.Mesh(built.geometry, roadMat);
+        roadMesh.castShadow = roadMesh.receiveShadow = sceneCtl.shadows;
+        pieceRoot.add(roadMesh);
+
+        if (railGeo) {
+          railMesh = new THREE.Mesh(railGeo, railMat);
+          railMesh.castShadow = sceneCtl.shadows;
+          railMesh.receiveShadow = sceneCtl.shadows && sceneCtl.railReceiveShadow;
+          pieceRoot.add(railMesh);
+        }
+
+        sun.target.position.set(0, 0, 0);
+        sun.target.updateMatrixWorld();
+
+        const tris =
+          (built.geometry.index ? built.geometry.index.count : built.geometry.attributes.position.count) / 3
+          + (railGeo
+            ? (railGeo.index ? railGeo.index.count : railGeo.attributes.position.count) / 3
+            : 0);
+        $("s-len").textContent = String(geom.straightLength);
+        $("s-w").textContent = String(geom.width);
+        $("s-tris").textContent = Math.round(tris).toLocaleString();
+      }
+
+      function applyLook() {
+        const grain = bump.enabled && bump.softenAlbedoGrain
+          ? look.grainScale * 0.12
+          : look.grainScale;
+        syncRoadUniforms(roadMat, {
+          ...look,
+          grainScale: grain,
+          // Matte asphalt kills normal reads — temporarily gloss the deck for look-dev.
+          deckRough: bump.enabled && bump.previewGloss ? look.deckRough * 0.72 : look.deckRough,
+          roughVary: bump.enabled && bump.previewGloss ? look.roughVary * 2.2 : look.roughVary,
+          linesOn: look.linesOn ? 1 : 0,
+          railStriped: look.railStriped ? 1 : 0,
+        });
+      }
+
+      function applyBump() {
+        syncBumpUniforms();
+        if (bump.enabled) applyLabBumpNormals(roadMat);
+        else clearLabBumpNormals(roadMat);
+        applyLook();
+        rebuildPiece();
+      }
+
+      function resetCamera() {
+        const L = geom.straightLength;
+        camera.position.set(L * 0.55, L * 0.28, L * 0.55);
+        controls.target.set(0, 0.4, 0);
+        controls.update();
+      }
+
+      function grazingCamera() {
+        camera.position.set(0.8, 0.22, 10);
+        controls.target.set(0, 0.02, -4);
+        controls.update();
+      }
+
+      function buildGui() {
+        const gui = new GUI({ title: "Look / style" });
+
+        const fLook = gui.addFolder("Asphalt");
+        fLook.addColor(look, "asphaltDark").name("Dark").onChange(applyLook);
+        fLook.addColor(look, "asphaltLight").name("Light").onChange(applyLook);
+        fLook.add(look, "deckBrightness", 0.4, 1.8, 0.01).name("Brightness").onChange(applyLook);
+        fLook.add(look, "grainScale", 0, 2, 0.01).name("Grain contrast").onChange(applyLook);
+        fLook.add(look, "macroScale", 0.01, 0.2, 0.005).name("Macro scale").onChange(applyLook);
+        fLook.add(look, "aggScale", 1, 12, 0.1).name("Aggregate scale").onChange(applyLook);
+        fLook.add(look, "deckRough", 0.4, 1, 0.01).name("Roughness").onChange(applyLook);
+        fLook.add(look, "roughVary", 0, 0.3, 0.01).name("Rough vary").onChange(applyLook);
+        fLook.add(look, "wheelPolish", 0, 0.5, 0.01).name("Wheel polish").onChange(applyLook);
+        fLook.add(look, "wheelDarken", 0, 0.35, 0.01).name("Wheel darken").onChange(applyLook);
+        fLook.open();
+
+        const fBump = gui.addFolder("Noise normals (lab)");
+        fBump.add(bump, "enabled").name("Enabled").onChange(applyBump);
+        fBump.add(bump, "softenAlbedoGrain").name("Soften albedo grain").onChange(applyLook);
+        fBump.add(bump, "previewGloss").name("Preview gloss").onChange(applyLook);
+        fBump.add(bump, "strength", 0, 3, 0.01).name("Strength").onChange(syncBumpUniforms);
+        fBump.add(bump, "normalScale", 0, 5, 0.05).name("Normal scale").onChange(syncBumpUniforms);
+        fBump.add(bump, "sampleEps", 0.002, 0.04, 0.001).name("Sample eps (m)").onChange(syncBumpUniforms);
+        fBump.add(bump, "aggScale", 4, 40, 0.5).name("Chip scale").onChange(syncBumpUniforms);
+        fBump.add(bump, "macroScale", 0.02, 0.25, 0.005).name("Macro scale").onChange(syncBumpUniforms);
+        fBump.add(bump, "macroMix", 0, 1, 0.01).name("Macro mix").onChange(syncBumpUniforms);
+        fBump.open();
+
+        const fLines = gui.addFolder("Lines & kerbs");
+        fLines.add(look, "linesOn").name("Road lines").onChange(applyLook);
+        fLines.addColor(look, "lineColor").name("Line color").onChange(applyLook);
+        fLines.add(look, "centerHalf", 0.01, 0.12, 0.005).name("Centre width").onChange(applyLook);
+        fLines.add(look, "centerDash", 0.05, 0.5, 0.01).name("Dash density").onChange(applyLook);
+        fLines.add(look, "edgePos", 0.5, 0.95, 0.01).name("Edge position").onChange(applyLook);
+        fLines.add(look, "edgeWidth", 0.01, 0.12, 0.005).name("Edge width").onChange(applyLook);
+        fLines.addColor(look, "railA").name("Kerb color").onChange(applyLook);
+        fLines.add(look, "railStriped").name("Kerb stripes").onChange(applyLook);
+        fLines.addColor(look, "railB").name("Stripe B").onChange(applyLook);
+        fLines.addColor(look, "sideColor").name("Side / underside").onChange(applyLook);
+
+        const fGeom = gui.addFolder("Geometry");
+        fGeom.add(geom, "straightLength", 8, 48, 1).name("Length (m)").onFinishChange(rebuildPiece);
+        fGeom.add(geom, "width", 8, 24, 0.5).name("Width (m)").onFinishChange(rebuildPiece);
+        fGeom.add(geom, "thickness", 0.2, 1.6, 0.05).name("Thickness").onFinishChange(rebuildPiece);
+        fGeom.add(geom, "railWidth", 0.15, 1.2, 0.05).name("Kerb width").onFinishChange(rebuildPiece);
+        fGeom.add(geom, "railHeight", 0.05, 0.5, 0.01).name("Kerb height").onFinishChange(rebuildPiece);
+        fGeom.add(geom, "edges").name("Kerbs").onFinishChange(rebuildPiece);
+        fGeom.add(geom, "guardrails").name("Guardrails").onFinishChange(rebuildPiece);
+
+        const fRail = gui.addFolder("Guardrail facing");
+        fRail.add(geom, "useLabRails").name("Lab rails (vs kit)").onFinishChange(rebuildPiece);
+        fRail.add(geom, "mirrorSides").name("Mirror L/R facing").onFinishChange(rebuildPiece);
+        fRail.add(geom, "flipW").name("Flip W cup").onFinishChange(rebuildPiece);
+        fRail.open();
+
+        const fScene = gui.addFolder("Scene");
+        fScene.add(sceneCtl, "exposure", 0.4, 2, 0.01).name("Exposure").onChange((v) => {
+          renderer.toneMappingExposure = v;
+        });
+        fScene.add(sceneCtl, "sunIntensity", 0, 6, 0.05).name("Sun").onChange((v) => {
+          sun.intensity = v;
+        });
+        fScene.add(sceneCtl, "hemiIntensity", 0, 3, 0.05).name("Hemi").onChange((v) => {
+          hemi.intensity = v;
+        });
+        fScene.add(sceneCtl, "fillIntensity", 0, 3, 0.05).name("Fill").onChange((v) => {
+          fill.intensity = v;
+        });
+        fScene.add(sceneCtl, "ambIntensity", 0, 1.5, 0.05).name("Ambient").onChange((v) => {
+          ambient.intensity = v;
+        });
+        fScene.add(sceneCtl, "showGround").name("Ground").onChange((v) => {
+          ground.visible = v;
+        });
+        fScene.add(sceneCtl, "showGrid").name("Grid").onChange((v) => {
+          grid.visible = v;
+        });
+
+        const fShadow = gui.addFolder("Shadows (acne demo)");
+        fShadow.add(sceneCtl, "shadows").name("Shadows on").onChange((v) => {
+          renderer.shadowMap.enabled = v;
+          sun.castShadow = v;
+          if (roadMesh) roadMesh.castShadow = roadMesh.receiveShadow = v;
+          if (railMesh) {
+            railMesh.castShadow = v;
+            railMesh.receiveShadow = v && sceneCtl.railReceiveShadow;
+          }
+        });
+        fShadow.add(sceneCtl, "railReceiveShadow").name("Rail receives (acne)").onChange((v) => {
+          if (railMesh) railMesh.receiveShadow = sceneCtl.shadows && v;
+        });
+        fShadow.add(sceneCtl, "shadowBias", -0.005, 0.005, 0.0001).name("Bias").onChange((v) => {
+          sun.shadow.bias = v;
+        });
+        fShadow.add(sceneCtl, "shadowNormalBias", 0, 0.2, 0.005).name("Normal bias").onChange((v) => {
+          sun.shadow.normalBias = v;
+        });
+        fShadow.open();
+
+        fScene.add({ resetCamera }, "resetCamera").name("Reset camera");
+        fScene.add({ grazingCamera }, "grazingCamera").name("Grazing view");
+        fScene.add({ rebuildPiece }, "rebuildPiece").name("Rebuild piece");
+      }
+
+      function onKey(e) {
+        if (e.target?.matches?.("input, textarea")) return;
+        const k = e.key.toLowerCase();
+        if (k === "r") resetCamera();
+        if (k === "g") grazingCamera();
+        if (k === "l") {
+          look.linesOn = !look.linesOn;
+          applyLook();
+        }
+      }
+
+      function onResize() {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      }
+
+      function frame() {
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      init().catch(showErr);
+    </script>
+  </body>
+</html>
