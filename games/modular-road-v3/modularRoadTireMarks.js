@@ -58,6 +58,10 @@ const INV_INTENSITY_RANGE = 1 / (INTENSITY_MAX - INTENSITY_MIN);
 /** Minimum horizontal speed (m/s) before marks are emitted. */
 const ENTRY_SPEED = 8;
 const DRIFT_ANGLE_MIN = 0.1;
+/** How strongly a tyre at its LONGITUDINAL limit marks the road, vs a sideways
+ *  slide. Under 1 because a straight-line stop is a shorter, cleaner event than
+ *  a drift and should read as a firm line, not a black smear. 0 disables it. */
+const BRAKE_MARK = 0.75;
 
 const _dir = new THREE.Vector3();
 const _side = new THREE.Vector3();
@@ -242,6 +246,7 @@ export class ModularRoadTireMarks {
       : 0;
 
     let rearSlip = 0;
+    let rearOver = 0;
     let rearIdx = 0;
     let p0 = null;
     let p1 = null;
@@ -267,12 +272,27 @@ export class ModularRoadTireMarks {
         const vLong = Math.abs(_scratchVel.dot(_wheelFwd));
         const vRef = Math.max(vLong, 3.5);
         rearSlip = Math.max(rearSlip, vLat / vRef);
+        rearOver = Math.max(rearOver, tire.overDemand ?? 0);
       }
       rearIdx++;
     }
 
     const slipAmount = THREE.MathUtils.clamp(rearSlip * 0.85, 0, 1);
-    const driftIntensity = Math.max(driftAmount, handbrakeAmount, slipAmount);
+    // HARD BRAKING LAYS RUBBER TOO.
+    //
+    // Every term above measures LATERAL slip, so a straight-line stop — measured
+    // at 1.71 g, 40 m/s to standstill in 44 m — produced exactly zero marks: the
+    // car has no sideways velocity, so as far as this module was concerned
+    // nothing was happening. `tire.overDemand` is how far past its grip the
+    // tyre's longitudinal demand went, which is the same thing in the other axis.
+    //
+    // Speed-gated separately from `emit` so marks fade out as the car slows
+    // instead of stopping dead at ENTRY_SPEED and leaving a blunt line end.
+    const brakeAmount = BRAKE_MARK > 0
+      ? THREE.MathUtils.clamp(rearOver * BRAKE_MARK, 0, 1)
+        * THREE.MathUtils.smoothstep(speed, ENTRY_SPEED, ENTRY_SPEED * 2)
+      : 0;
+    const driftIntensity = Math.max(driftAmount, handbrakeAmount, slipAmount, brakeAmount);
     const inAir = vehicle.groundedCount === 0;
     const emit =
       !inAir &&

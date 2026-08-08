@@ -572,8 +572,35 @@ export const TIRE = {
   yawAssistMinSpeed: 2.0,
   /** Assist multiplier while the handbrake is down, so a deliberate drift still
    *  goes where you point it. The slip CLAMP is deliberately not scaled by this
-   *  — drifting should not be able to become a full spin. */
-  driftYawAssistMul: 0.25,
+   *  — drifting should not be able to become a full spin.
+   *
+   *  RAISED 0.25 → 0.70 (measured). At 0.25 this scaled the YAW-RATE DAMPING down
+   *  to a quarter, which is the term that gives a slide a stable state to sit in —
+   *  and without it the car is directionally UNSTABLE the whole time Space is
+   *  held. Not "unstable if provoked": holding the handbrake dead straight with no
+   *  input at all, the yaw rate grew from 2.3e-17 (floating-point round-off) by
+   *  ~25× PER SECOND, steadily, through thirteen orders of magnitude, until at
+   *  ~12 s it became a visible spin. Reported as "the car starts turning on its
+   *  own after some time" — and the delay is not a timer, it is how long noise
+   *  takes to grow. On a real track, with seams and kerbs to disturb it, it bites
+   *  far sooner and unpredictably.
+   *
+   *  This directly fought the drift SCORING: `driftScore.js` loses the chain past
+   *  110° of slip and wants ~17.5 s of unbroken slide for the full multiplier, so
+   *  the physics was destroying the mechanic the game rewards.
+   *
+   *  `gripHandbrake` is the WRONG knob for it and stays at 0.35. That one decides
+   *  how easily the rear breaks away — drift INITIATION, which should stay loose.
+   *  This one decides whether the resulting slide is HOLDABLE. Measured with grip
+   *  unchanged, straight-line drift over 15 s vs the steered slide:
+   *      0.25  61° drift   peak slip 180°   scoring slide 4.9 s
+   *      0.55  20°         peak slip 180°                 5.0 s
+   *      0.70   3°         peak slip 180°                 5.6 s
+   *  i.e. the spin goes away and the slide is untouched — the rear still comes
+   *  right round when you ask it to, and there is slightly MORE scoring time.
+   *  Do not "split the difference" at 0.40: it measured WORSE than 0.25 (108°),
+   *  the curve is not monotonic. */
+  driftYawAssistMul: 0.7,
   // Anti-roll / orientation. When grounded the chassis aligns its up-axis to the
   // averaged ground normal (so it leans into banks and follows loops instead of
   // fighting toward world-up); `stabilizerDamp` damps the roll/pitch rate.
@@ -1565,6 +1592,9 @@ class Tire {
 
     this.grounded = false;
     this.compression = 0;
+    /** 0..1: how far the longitudinal demand exceeded this tyre's grip. Set in
+     *  apply(); read by the tyre marks and drift smoke. Applies no force. */
+    this.overDemand = 0;
     this.hitDistance = TIRE.rayLength;
     this.hitPoint = new THREE.Vector3();
     this.hitNormal = new THREE.Vector3(0, 1, 0);
@@ -1715,6 +1745,10 @@ class Tire {
     if (!probe) {
       this.grounded = false;
       this.compression = 0;
+      // Airborne this returns before the force block, so it must be cleared here
+      // or a tyre keeps the last value it had on the ground and starts smoking
+      // again the instant it touches down.
+      this.overDemand = 0;
       this.hitDistance = TIRE.rayLength;
       this._hadGround = false; // next contact snaps instead of easing in
       return;
@@ -1887,6 +1921,22 @@ class Tire {
       const fwdVel = this._tireVel.dot(this._wheelFwd);
       Fx = -Math.sign(fwdVel) * Math.min(Math.abs(fwdVel) * 200, TIRE.engineBrake);
     }
+    // HOW FAR PAST THE TYRE THE BRAKE ASKED — read-only, applies no force.
+    //
+    // There is no wheel angular velocity in this model, so there is no true slip
+    // ratio and a wheel can never lock: an over-demand is simply clamped to Fmax,
+    // which is ideal (ABS-like) braking. The information is still there in the
+    // clamp though, and it is the honest measure of a tyre at its longitudinal
+    // limit — so record it for the tyre marks and smoke, which until now could
+    // only see LATERAL slip and therefore drew nothing at all under a 1.7 g stop.
+    //
+    // Derived rather than "is the brake pressed" on purpose: it falls out of the
+    // real load, so weight transfer, downforce and a light rear all move it, and
+    // it keeps tracking if brakeForce or grip is ever retuned.
+    this.overDemand = Fmax > 1e-6
+      ? THREE.MathUtils.clamp(Math.abs(Fx) / Fmax - 1, 0, 1)
+      : 0;
+
     if (Fx > Fmax) Fx = Fmax;
     else if (Fx < -Fmax) Fx = -Fmax;
 

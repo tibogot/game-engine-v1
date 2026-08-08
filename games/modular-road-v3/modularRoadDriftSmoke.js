@@ -90,6 +90,11 @@ const _CORNERS = [
 
 const ENTRY_SPEED = 8;
 const INTENSITY_MIN = 0.04;
+/** How much a tyre at its LONGITUDINAL limit smokes, vs a sideways slide. Lower
+ *  than the mark's equivalent: a braking tyre scrubs a line but does not throw
+ *  the cloud a drift does, and a full-strength puff under every stop reads as a
+ *  car permanently on fire. 0 disables it. */
+const BRAKE_SMOKE = 0.45;
 
 const DRIFT_ANGLE_MIN = 0.1;
 const MARK_Y_OFFSET = 0.045;
@@ -226,6 +231,7 @@ export class ModularRoadDriftSmoke {
       : 0;
 
     let rearSlip = 0;
+    let rearOver = 0;
     let rearIdx = 0;
     let hasRear = false;
     for (const tire of vehicle.tires) {
@@ -240,6 +246,7 @@ export class ModularRoadDriftSmoke {
         const vLat = Math.abs(_scratchVel.dot(_wheelRight));
         const vLong = Math.abs(_scratchVel.dot(_wheelFwd));
         rearSlip = Math.max(rearSlip, vLat / Math.max(vLong, 3.5));
+        rearOver = Math.max(rearOver, tire.overDemand ?? 0);
       } else if (rearIdx === 0) {
         _rearContact0.set(0, -9999, 0);
       } else {
@@ -249,7 +256,15 @@ export class ModularRoadDriftSmoke {
     }
 
     const slipAmount = THREE.MathUtils.clamp(rearSlip * 0.85, 0, 1);
-    const driftIntensity = Math.max(driftAmount, handbrakeAmount, slipAmount);
+    // Hard braking smokes too — see the matching note in modularRoadTireMarks.js.
+    // Every other term here measures LATERAL slip, so a straight-line stop showed
+    // nothing at all. `tire.overDemand` is the same measurement in the other axis:
+    // how far past its grip the tyre's longitudinal demand went.
+    const brakeAmount = BRAKE_SMOKE > 0
+      ? THREE.MathUtils.clamp(rearOver * BRAKE_SMOKE, 0, 1)
+        * THREE.MathUtils.smoothstep(speed, ENTRY_SPEED, ENTRY_SPEED * 2)
+      : 0;
+    const driftIntensity = Math.max(driftAmount, handbrakeAmount, slipAmount, brakeAmount);
     const inAir = vehicle.groundedCount === 0;
     const s = this.settings;
     const trigger = s.trigger ?? INTENSITY_MIN;
