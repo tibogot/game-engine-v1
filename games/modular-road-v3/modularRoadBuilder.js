@@ -2319,6 +2319,37 @@ export const CATEGORY_PRESETS = {
       preview: `<svg viewBox="0 0 80 80"><line x1="4" y1="70" x2="40" y2="70" stroke="#c0392b" stroke-width="1.2"/><path d="M8 70 Q56 70 62 8" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M50 30 a13 13 0 0 1 -9 22" stroke="#16a0c0" stroke-width="1.6" fill="none" stroke-dasharray="3 2"/></svg>`,
     },
     {
+      // The same re-entry on a smaller wall — and 40 m IS the smallest that works.
+      // Not a style choice: below it the car leaves the lip too fast and lands
+      // beyond the ramp however the rest of the track is built.
+      //
+      // MEASURED as where it lands along the face (1.00 = back at the lip, >1 =
+      // past the ramp entirely), against the speed it arrives at:
+      //
+      //              46     42     38     34
+      //     R=25m   1.29   1.30   1.40   1.03      <- past it at every real speed
+      //     R=30m   1.25   1.29   0.54   0.98
+      //     R=40m   0.47   1.02   0.99   1.00      <- catches across the whole band
+      //     R=60m   0.99   1.00  stall  stall
+      //
+      // This shipped as R=25 first, on the theory that a smaller bowl just needed a
+      // slower approach. It does — but "slower" turned out to mean 30 m/s, which is
+      // not a speed you arrive at unless the whole section is built for it, so in
+      // practice it never caught the car and was reported that way. 40 m needs no
+      // special approach.
+      //
+      // At full speed it lands mid-face (0.47) rather than at the lip; that is the
+      // trade for the smaller wall, and it is still a re-entry.
+      //
+      // The apex does NOT shrink with the bowl — that is v²/(2g), with the ramp
+      // height cancelling out. Only arriving slower lowers the flight.
+      id: "quarterpipe_bowl_small",
+      label: "Park bowl (small)",
+      base: "quarterpipe",
+      params: { qpRadius: 40, qpAngle: 90 },
+      preview: `<svg viewBox="0 0 80 80"><line x1="4" y1="66" x2="46" y2="66" stroke="#c0392b" stroke-width="1.2"/><path d="M10 66 Q52 66 56 26" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M46 40 a9 9 0 0 1 -6 15" stroke="#16a0c0" stroke-width="1.6" fill="none" stroke-dasharray="3 2"/></svg>`,
+    },
+    {
       id: "quarterpipe_down",
       label: "Quarter-pipe down",
       base: "quarterpipe_down",
