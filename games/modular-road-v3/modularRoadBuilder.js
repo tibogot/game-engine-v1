@@ -28,6 +28,30 @@ const _A_V2 = new THREE.Vector3();
 const _UNIT_SCALE = new THREE.Vector3(1, 1, 1);
 const _isIdentityQuat = (q) => Math.abs(q.w) > 0.9999999;
 
+/**
+ * Flat chevron for a junction branch marker, in socket-local space: a socket's
+ * −Z axis is the way out (see socketMatrix), so the arrow is drawn pointing −Z
+ * and floats a little above the deck.
+ */
+function _makeBranchMarkerGeometry() {
+  const s = 2.2;
+  const y = 1.2;
+  const v = [
+    0, y, -3.4 * s, // tip
+    -1.9 * s, y, -1.0 * s,
+    -0.7 * s, y, -1.0 * s,
+    -0.7 * s, y, 1.6 * s,
+    0.7 * s, y, 1.6 * s,
+    0.7 * s, y, -1.0 * s,
+    1.9 * s, y, -1.0 * s,
+  ];
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
+  geo.setIndex([0, 1, 2, 0, 2, 5, 0, 5, 6, 2, 3, 4, 2, 4, 5]);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 /** Ballistic landing for demo jumps — same math as GapPreview.update().
  *  Connector Z column is −travel, so launch dir is the negated Z axis. */
 function _ballisticLanding(connector, speed, g, landingDrop) {
@@ -160,6 +184,14 @@ export class ModularRoadBuilder {
     this.ghostDetached = false;
     this._ghostPos = new THREE.Vector3();
     this._ghostYaw = 0;
+    /** FULL ghost orientation. Free placement can only ever produce a yaw (kit
+     *  sockets are level), but a JUNCTION BRANCH hands over the junction's own
+     *  pose — including whatever pitch/roll the junction inherited from its
+     *  chain — and a yaw-only ghost would silently flatten the side road at the
+     *  seam. `_ghostYaw` stays in sync for the readouts. */
+    this._ghostQuat = new THREE.Quaternion();
+    /** True while the ghost is parked on a junction branch (see branchConnectors). */
+    this.ghostOnBranch = false;
 
     this.root = new THREE.Group();
     this.root.name = "ModularRoad";
@@ -203,6 +235,22 @@ export class ModularRoadBuilder {
     // this only ever shows while building.
     this.gapMaterial = new THREE.MeshBasicMaterial({
       color: 0xff7043, transparent: true, opacity: 0.14,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+
+    // ── JUNCTION BRANCH MARKERS ──────────────────────────────────────────────
+    // A branch is an open connector with nothing standing on it, so unlike a
+    // chain's open end (which has the ghost sitting on it) there is nothing on
+    // screen to say it exists. These floating arrows are that signal: one per
+    // UNUSED branch, pointing the way the side road would run, gone the moment a
+    // chain starts there. Build-mode only — drive mode hides builder.root, and
+    // this group rides it.
+    this.branchMarkers = new THREE.Group();
+    this.branchMarkers.name = "ModularRoadBranchMarkers";
+    this.root.add(this.branchMarkers);
+    this.branchMarkerGeo = _makeBranchMarkerGeometry();
+    this.branchMarkerMat = new THREE.MeshBasicMaterial({
+      color: 0xffc93c, transparent: true, opacity: 0.55,
       depthWrite: false, side: THREE.DoubleSide,
     });
 
@@ -323,6 +371,10 @@ export class ModularRoadBuilder {
     if (!this.isBuildMode()) return;
     if (this._gizmoTarget === "ghost" && this.ghostDetached) {
       this._showGizmoAt(this._ghostPos, this._ghostYaw);
+      // On a branch the ghost carries the junction's FULL pose, so put that on
+      // the pivot too — otherwise picking a different piece would quietly level
+      // the gizmo while the ghost itself stayed tilted.
+      if (this.ghostOnBranch) this.placementPivot.quaternion.copy(this._ghostQuat);
     } else {
       this._syncGizmoToOpenEnd();
     }
@@ -453,14 +505,115 @@ export class ModularRoadBuilder {
     return this._gizmoTarget;
   }
 
-  /** Open end (last piece's exit, or the anchor) of every chain. */
+  /** Open end (last piece's exit, or the anchor) of every chain, PLUS every
+   *  junction branch that nothing has been built on yet. Both are places a piece
+   *  can legally go, which is exactly what the ghost's magnet wants. */
   _openConnectors() {
     const out = [];
     for (const chain of this.chains) {
       const last = this._lastPieceOfChain(chain.id);
       out.push({ chainId: chain.id, matrix: last ? last.connectorOut : chain.anchor });
     }
+    for (const b of this.branchConnectors()) {
+      if (!b.used) out.push({ chainId: null, matrix: b.matrix, branch: b });
+    }
     return out;
+  }
+
+  // ── JUNCTIONS ──────────────────────────────────────────────────────────────
+  // A junction is an ordinary chain piece — the chain flows in its entry and out
+  // its exit like any other. What makes it a junction is the EXTRA sockets it
+  // publishes (`built.branchesOut`), each of which is a valid start for a NEW
+  // chain. That is the whole model: no piece ever has two successors, so the
+  // linear chain walk in rebuildAll (and the snapshot history built on it) is
+  // untouched — the side road is simply its own chain that happens to begin at
+  // a branch. It saves and loads with no format change for the same reason.
+
+  /**
+   * Every branch socket on the track, flagged with whether a chain already
+   * starts there. "Used" is decided by POSITION rather than by a stored link,
+   * so it keeps working across a save/load, an undo, or a chain dragged off the
+   * junction by hand — there is no bookkeeping to get out of step.
+   */
+  branchConnectors() {
+    const out = [];
+    const bp = new THREE.Vector3();
+    const cp = new THREE.Vector3();
+    for (const p of this.pieces) {
+      for (const b of p.branches ?? []) {
+        bp.setFromMatrixPosition(b.matrix);
+        let used = false;
+        for (const c of this.chains) {
+          if (!this._chainPieces(c.id).length) continue; // an empty chain claims nothing
+          if (cp.setFromMatrixPosition(c.anchor).distanceTo(bp) < 1.0) { used = true; break; }
+        }
+        out.push({ piece: p, label: b.label, matrix: b.matrix, pos: bp.clone(), used });
+      }
+    }
+    return out;
+  }
+
+  /** How many branches are still free (status line / UI enablement). */
+  get openBranchCount() {
+    return this.branchConnectors().filter((b) => !b.used).length;
+  }
+
+  /** Park the next-piece ghost on a branch pose (full orientation — a junction
+   *  on a banked chain hands its own tilt to the side road). */
+  _putGhostOnBranch(matrix) {
+    this._gizmoTarget = "ghost";
+    // DETACHED, deliberately: place() forks a new chain wherever a detached
+    // ghost sits, which is precisely what starting a side road means.
+    this.ghostDetached = true;
+    this.ghostOnBranch = true;
+    this._ghostPos.setFromMatrixPosition(matrix);
+    _A_M.extractRotation(matrix);
+    this._ghostQuat.setFromRotationMatrix(_A_M);
+    this.freeYaw = this._ghostYaw = _A_E.setFromQuaternion(this._ghostQuat, "YXZ").y;
+    if (this.placementGizmo) {
+      this.placementPivot.position.copy(this._ghostPos);
+      this.placementPivot.quaternion.copy(this._ghostQuat);
+      this.placementGizmo.attach(this.placementPivot);
+      this.placementGizmo.enabled = true;
+      this.placementGizmo.visible = true;
+      this._applyGizmoAxes();
+    }
+    this.refreshGhost();
+  }
+
+  /**
+   * Jump the ghost to the nearest unused branch (the K key / palette button).
+   * Dragging the ghost onto a branch marker does the same thing; this is the
+   * version that needs no aim.
+   */
+  snapGhostToNearestBranch() {
+    const free = this.branchConnectors().filter((b) => !b.used);
+    if (!free.length) return false;
+    const from = new THREE.Vector3().setFromMatrixPosition(this.currentConnector);
+    let best = free[0];
+    for (const b of free) if (b.pos.distanceTo(from) < best.pos.distanceTo(from)) best = b;
+    this._putGhostOnBranch(best.matrix);
+    this._notify();
+    return true;
+  }
+
+  /** One floating arrow per FREE branch; they disappear as branches get used. */
+  _refreshBranchMarkers() {
+    const g = this.branchMarkers;
+    if (!g) return;
+    const free = this.branchConnectors().filter((b) => !b.used);
+    while (g.children.length > free.length) {
+      g.remove(g.children[g.children.length - 1]);
+    }
+    while (g.children.length < free.length) {
+      const m = new THREE.Mesh(this.branchMarkerGeo, this.branchMarkerMat);
+      m.matrixAutoUpdate = false;
+      m.frustumCulled = false;
+      m.castShadow = m.receiveShadow = false;
+      g.add(m);
+    }
+    for (let i = 0; i < free.length; i++) g.children[i].matrix.copy(free[i].matrix);
+    g.visible = this.isBuildMode() && free.length > 0;
   }
 
   _nearestOpenConnector(pos) {
@@ -473,11 +626,19 @@ export class ModularRoadBuilder {
     return best;
   }
 
-  /** Connector matrix from the detached ghost pose (level, yaw only). */
+  /** Set the ghost's heading from a yaw (the free-placement case — level). */
+  _setGhostYaw(yaw) {
+    this._ghostYaw = yaw;
+    this._ghostQuat.setFromAxisAngle(_YUP, yaw);
+    this.ghostOnBranch = false;
+  }
+
+  /** Connector matrix from the detached ghost pose. Yaw-only for free
+   *  placement; the junction's full orientation when parked on a branch. */
   _anchorFromGhost() {
-    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this._ghostYaw);
-    const travel = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
-    return socketMatrix(this._ghostPos, travel, new THREE.Vector3(0, 1, 0));
+    _A_TRAVEL.set(0, 0, -1).applyQuaternion(this._ghostQuat);
+    _A_UP.set(0, 1, 0).applyQuaternion(this._ghostQuat);
+    return socketMatrix(this._ghostPos, _A_TRAVEL, _A_UP);
   }
 
   /**
@@ -496,7 +657,7 @@ export class ModularRoadBuilder {
     this._gizmoTarget = "ghost";
     this.ghostDetached = false;
     this._ghostPos.setFromMatrixPosition(this.currentConnector);
-    this._ghostYaw = new THREE.Euler().setFromRotationMatrix(this.currentConnector, "YXZ").y;
+    this._setGhostYaw(new THREE.Euler().setFromRotationMatrix(this.currentConnector, "YXZ").y);
     this._showGizmoAt(this._ghostPos, this._ghostYaw);
   }
 
@@ -636,17 +797,23 @@ export class ModularRoadBuilder {
       const pos = this.placementPivot.position;
       const hit = this._nearestOpenConnector(pos);
       const magnet = Math.max(4, this.snapEnabled ? this.snapStep * 0.75 : 4);
+      if (hit?.branch && hit.dist <= magnet) {
+        // A JUNCTION BRANCH takes the ghost exactly as it is — pose and all —
+        // and leaves it "detached", so placing forks a new chain there.
+        this._putGhostOnBranch(hit.matrix);
+        return; // ghost moves never touch placed geometry — no rebuild/rebake
+      }
       if (hit && hit.dist <= magnet) {
         this.activeChainId = hit.chainId;
         this._syncCurrentConnector();
         this.ghostDetached = false;
         this._ghostPos.setFromMatrixPosition(this.currentConnector);
-        this._ghostYaw = new THREE.Euler().setFromRotationMatrix(this.currentConnector, "YXZ").y;
+        this._setGhostYaw(new THREE.Euler().setFromRotationMatrix(this.currentConnector, "YXZ").y);
       } else {
         this.ghostDetached = true;
         this._ghostPos.copy(pos);
         this.snapPos(this._ghostPos);
-        this._ghostYaw = this.snapYaw(this.placementPivot.rotation.y);
+        this._setGhostYaw(this.snapYaw(this.placementPivot.rotation.y));
       }
       this.placementPivot.position.copy(this._ghostPos);
       this.placementPivot.rotation.set(0, this._ghostYaw, 0);
@@ -696,9 +863,11 @@ export class ModularRoadBuilder {
       if (!this.ghostDetached) {
         this.ghostDetached = true;
         this._ghostPos.setFromMatrixPosition(this.currentConnector);
-        this._ghostYaw = new THREE.Euler().setFromRotationMatrix(this.currentConnector, "YXZ").y;
+        this._setGhostYaw(new THREE.Euler().setFromRotationMatrix(this.currentConnector, "YXZ").y);
       }
-      this._ghostYaw += delta;
+      // Turning the ghost by hand takes it off the branch it was parked on (it
+      // no longer matches that socket), so this falls back to a level yaw.
+      this._setGhostYaw(this._ghostYaw + delta);
       this.placementPivot.position.copy(this._ghostPos);
       this.placementPivot.rotation.set(0, this._ghostYaw, 0);
       this.refreshGhost();
@@ -805,6 +974,7 @@ export class ModularRoadBuilder {
   setGhostVisible(v) {
     const on = v && this.isBuildMode();
     this.ghost.visible = on;
+    if (this.branchMarkers) this.branchMarkers.visible = on && this.branchMarkers.children.length > 0;
     if (!on) {
       this._hidePlacementGizmo();
     } else if (this._gizmoTarget === "ghost") {
@@ -946,6 +1116,8 @@ export class ModularRoadBuilder {
       decorMesh,
       connectorIn: connectorIn.clone(),
       connectorOut: built.connectorOut.clone(),
+      /** Junction side sockets in WORLD space (empty for every other piece). */
+      branches: built.branchesOut ?? [],
       /** Per-piece entry tilt (local-frame rotation, propagates downstream). */
       tilt: new THREE.Quaternion(),
       /** Entry seam BEFORE the tilt — filled by rebuildAll, used by the edit gizmo. */
@@ -986,7 +1158,9 @@ export class ModularRoadBuilder {
     );
     this.pieces.push(piece);
     this.currentConnector = piece.connectorOut.clone();
+    this.ghostOnBranch = false; // the branch (if that's where this went) is taken
     this._rebuildInstances();
+    this._refreshBranchMarkers();
     // Hand the gizmo to the NEXT piece at the fresh open end.
     this._syncGizmoToOpenEnd();
     this.refreshGhost();
@@ -1395,6 +1569,7 @@ export class ModularRoadBuilder {
     for (const p of this.pieces) this._removePiece(p);
     this.pieces = [];
     this._rebuildInstances();
+    this._refreshBranchMarkers();
     this.chains = [{ id: 0, anchor: initialConnector() }];
     this.chainSeq = 1;
     this.activeChainId = 0;
@@ -1481,6 +1656,7 @@ export class ModularRoadBuilder {
     // The selected piece may have moved (an anchor drag or an upstream edit flows
     // down the chain), so keep its highlight glued to it.
     if (this.selectedPiece) this._updateSelectionHighlight();
+    this._refreshBranchMarkers();
     this.refreshGhost();
     this._notify();
   }
@@ -1490,6 +1666,8 @@ export class ModularRoadBuilder {
     p.mesh.geometry.dispose();
     p.mesh.geometry = built.geometry;
     p.mesh.matrix.copy(built.world);
+    // Branch sockets are world matrices, so they move with the piece.
+    p.branches = built.branchesOut ?? [];
 
     if (built.railGeometry && this.railMaterial) {
       if (p.railMesh) {
@@ -1582,6 +1760,7 @@ export class ModularRoadBuilder {
         decorMesh,
         connectorIn,
         connectorOut: built.connectorOut.clone(),
+        branches: built.branchesOut ?? [],
         tilt: new THREE.Quaternion(),
         _baseIn: connectorIn.clone(),
         detached: !!e.detached,
@@ -1595,6 +1774,7 @@ export class ModularRoadBuilder {
       this.pieces.push(piece);
     }
     this._rebuildInstances();
+    this._refreshBranchMarkers();
     // Reconstruct chains from the loaded pieces (anchor = first piece's entry).
     const seen = new Map();
     for (const p of this.pieces) {
@@ -1852,6 +2032,9 @@ export class ModularRoadBuilder {
     this.scene.remove(this.ghost);
     this.ghost.geometry.dispose();
     this.ghostMat.dispose();
+    this.branchMarkers?.clear();
+    this.branchMarkerGeo?.dispose();
+    this.branchMarkerMat?.dispose();
     this.scene.remove(this.root);
   }
 }
@@ -1893,11 +2076,18 @@ const PIECE_TO_CATEGORY = {
   start: "game",
   checkpoint: "game",
   finish: "game",
+  junction_split: "junctions",
+  junction_merge: "junctions",
+  junction_y: "junctions",
+  junction_t: "junctions",
+  junction_cross: "junctions",
+  junction_roundabout: "junctions",
 };
 
 export const PALETTE_CATEGORIES = [
   { id: "straight", label: "Straight" },
   { id: "turns", label: "Turns" },
+  { id: "junctions", label: "Junctions" },
   { id: "game", label: "Game" },
   { id: "ramps", label: "Ramps" },
   { id: "slopes", label: "Slopes" },
@@ -1913,6 +2103,12 @@ export const PALETTE_CATEGORIES = [
 /** Shared road stroke for preview SVGs. */
 const _RS = 'stroke="#e8eaed" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"';
 const _RB = 'fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"';
+/** Junction previews are drawn as DECKS, not centrelines — a fork only reads as
+ *  a fork if you can see the two lanes share a surface. _JR = the deck (a fat
+ *  stroke), _JC = the through route, _JB = the branch. */
+const _JR = 'fill="none" stroke="#2a2e36" stroke-width="16" stroke-linecap="butt"';
+const _JC = 'fill="none" stroke="#e8eaed" stroke-width="1.6" stroke-dasharray="6 5"';
+const _JB = 'fill="none" stroke="#f39c12" stroke-width="2" stroke-dasharray="4 3"';
 function categoryIconSvg(id) {
   const icons = {
     straight: `<svg viewBox="0 0 48 48"><rect x="6" y="20" width="36" height="10" rx="1" ${_RB}/><line x1="8" y1="25" x2="40" y2="25" ${_RS}/></svg>`,
@@ -1926,6 +2122,7 @@ function categoryIconSvg(id) {
     scenery: `<svg viewBox="0 0 48 48"><rect x="8" y="10" width="26" height="15" rx="1" fill="#2a2e36" stroke="#dce622" stroke-width="1.8"/><line x1="14" y1="25" x2="14" y2="38" stroke="#999" stroke-width="2"/><line x1="28" y1="25" x2="28" y2="38" stroke="#999" stroke-width="2"/><circle cx="40" cy="16" r="4" fill="none" stroke="#f0c419" stroke-width="2"/><line x1="40" y1="20" x2="40" y2="38" stroke="#999" stroke-width="2"/></svg>`,
     moving: `<svg viewBox="0 0 48 48"><rect x="8" y="22" width="32" height="6" rx="1" fill="#e8c040" stroke="#999" stroke-width="1.2"/><path d="M24 8 L24 18 M24 32 L24 42" stroke="#dce622" stroke-width="2" stroke-linecap="round"/><path d="M18 8 L24 14 L30 8" fill="none" stroke="#dce622" stroke-width="2" stroke-linecap="round"/></svg>`,
     loop: `<svg viewBox="0 0 48 48"><circle cx="24" cy="26" r="14" fill="none" stroke="#c0392b" stroke-width="1.8"/><path d="M10 38 L10 26 Q10 12 24 12 Q38 12 38 26 L38 38" ${_RS}/></svg>`,
+    junctions: `<svg viewBox="0 0 48 48"><path d="M19 44 L19 26 Q19 20 25 20 L44 20 M29 44 L29 4" fill="none" stroke="#3a3f48" stroke-width="9" stroke-linecap="butt"/><path d="M24 44 L24 4 M24 24 L44 24" fill="none" stroke="#f39c12" stroke-width="2" stroke-dasharray="4 3"/></svg>`,
   };
   return icons[id] ?? icons.straight;
 }
@@ -2405,6 +2602,109 @@ export const CATEGORY_PRESETS = {
       preview: `<svg viewBox="0 0 80 80"><path d="M22 70 L22 50 Q22 34 40 34 Q58 34 58 18 L58 10" ${_RS}/></svg>`,
     },
   ],
+  // JUNCTIONS. Every tile is the same handful of plate shapes at different
+  // sizes / sides; `curveDir` is what "R flips L/R" acts on, so the left-hand
+  // variants are the identical preset with curveDir: -1.
+  junctions: [
+    {
+      id: "junction_split_r",
+      label: "Split R",
+      base: "junction_split",
+      params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: 1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M40 46 Q50 38 70 18" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M42 48 Q52 40 68 22" ${_JB}/></svg>`,
+    },
+    {
+      id: "junction_split_l",
+      label: "Split L",
+      base: "junction_split",
+      params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: -1 },
+      preview: `<svg viewBox="0 0 80 80"><g transform="translate(80,0) scale(-1,1)"><path d="M40 76 L40 6" ${_JR}/><path d="M40 46 Q50 38 70 18" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M42 48 Q52 40 68 22" ${_JB}/></g></svg>`,
+    },
+    {
+      id: "junction_split_wide",
+      label: "Split wide",
+      base: "junction_split",
+      params: { splitAngle: 40, splitLength: 44, splitArm: 34, splitStart: 6, curveDir: 1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M40 50 L74 24" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M42 52 L72 28" ${_JB}/></svg>`,
+    },
+    {
+      id: "junction_merge_r",
+      label: "Merge R",
+      base: "junction_merge",
+      params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: 1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M40 34 Q50 42 70 62" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M68 58 Q52 40 42 32" ${_JB}/></svg>`,
+    },
+    {
+      id: "junction_merge_l",
+      label: "Merge L",
+      base: "junction_merge",
+      params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: -1 },
+      preview: `<svg viewBox="0 0 80 80"><g transform="translate(80,0) scale(-1,1)"><path d="M40 76 L40 6" ${_JR}/><path d="M40 34 Q50 42 70 62" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M68 58 Q52 40 42 32" ${_JB}/></g></svg>`,
+    },
+    {
+      id: "junction_y_r",
+      label: "Y fork R",
+      base: "junction_y",
+      params: { forkAngle: 30, forkArm: 34, forkThroat: 6, curveDir: 1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 44" ${_JR}/><path d="M40 44 L68 10" ${_JR}/><path d="M40 44 L12 10" ${_JR}/><path d="M40 76 L40 46 L66 14" ${_JC}/><path d="M38 46 L14 16" ${_JB}/></svg>`,
+    },
+    {
+      id: "junction_y_l",
+      label: "Y fork L",
+      base: "junction_y",
+      params: { forkAngle: 30, forkArm: 34, forkThroat: 6, curveDir: -1 },
+      preview: `<svg viewBox="0 0 80 80"><g transform="translate(80,0) scale(-1,1)"><path d="M40 76 L40 44" ${_JR}/><path d="M40 44 L68 10" ${_JR}/><path d="M40 44 L12 10" ${_JR}/><path d="M40 76 L40 46 L66 14" ${_JC}/><path d="M38 46 L14 16" ${_JB}/></g></svg>`,
+    },
+    {
+      id: "junction_y_wide",
+      label: "Y fork wide",
+      base: "junction_y",
+      params: { forkAngle: 55, forkArm: 30, forkThroat: 4, curveDir: 1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 50" ${_JR}/><path d="M40 50 L74 26" ${_JR}/><path d="M40 50 L6 26" ${_JR}/><path d="M40 76 L40 52 L70 30" ${_JC}/><path d="M38 52 L10 32" ${_JB}/></svg>`,
+    },
+    {
+      id: "junction_t_r",
+      label: "T right",
+      base: "junction_t",
+      params: { junctionLength: 34, junctionStub: 24, junctionFillet: 6, curveDir: 1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M40 40 L74 40" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M44 38 L72 38" ${_JB}/></svg>`,
+    },
+    {
+      id: "junction_t_l",
+      label: "T left",
+      base: "junction_t",
+      params: { junctionLength: 34, junctionStub: 24, junctionFillet: 6, curveDir: -1 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M6 40 L40 40" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M8 38 L36 38" ${_JB}/></svg>`,
+    },
+    {
+      id: "junction_cross_std",
+      label: "Crossroads",
+      base: "junction_cross",
+      params: { junctionLength: 34, junctionStub: 24, junctionFillet: 6 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M6 40 L74 40" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M6 38 L74 38" ${_JB}/></svg>`,
+    },
+    {
+      id: "junction_cross_big",
+      label: "Crossroads XL",
+      base: "junction_cross",
+      params: { junctionLength: 48, junctionStub: 36, junctionFillet: 10 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M40 78 L40 2" fill="none" stroke="#2a2e36" stroke-width="22"/><path d="M2 40 L78 40" fill="none" stroke="#2a2e36" stroke-width="22"/><path d="M40 78 L40 2" ${_JC}/><path d="M2 38 L78 38" ${_JB}/></svg>`,
+    },
+    {
+      id: "junction_roundabout_std",
+      label: "Roundabout",
+      base: "junction_roundabout",
+      params: { roundaboutRadius: 22, roundaboutStub: 10 },
+      preview: `<svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="22" fill="none" stroke="#2a2e36" stroke-width="14"/><path d="M40 78 L40 62 M40 18 L40 2 M2 40 L18 40 M62 40 L78 40" ${_JR}/><circle cx="40" cy="40" r="15" fill="#12151a" stroke="#f39c12" stroke-width="1.4"/><path d="M52 24 a20 20 0 0 1 6 12" fill="none" stroke="#f39c12" stroke-width="2" stroke-dasharray="4 3"/></svg>`,
+    },
+    {
+      id: "junction_roundabout_big",
+      label: "Roundabout XL",
+      base: "junction_roundabout",
+      params: { roundaboutRadius: 34, roundaboutStub: 14 },
+      preview: `<svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="27" fill="none" stroke="#2a2e36" stroke-width="12"/><path d="M40 78 L40 68 M40 12 L40 2 M2 40 L12 40 M68 40 L78 40" ${_JR}/><circle cx="40" cy="40" r="21" fill="#12151a" stroke="#f39c12" stroke-width="1.4"/></svg>`,
+    },
+  ],
   loop: [
     {
       id: "looping_full",
@@ -2776,18 +3076,28 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         label = def?.label ?? builder.activePieceId;
       }
       const dir = pieceParams.curveDir >= 0 ? "R" : "L";
-      const curveIds = new Set(["curve", "banked", "scurve", "spiral", "loop_half", "loop_spiral"]);
+      const curveIds = new Set([
+        "curve", "banked", "scurve", "spiral", "loop_half", "loop_spiral",
+        "junction_split", "junction_merge", "junction_y", "junction_t",
+      ]);
       const chainInfo =
         builder.chainCount > 1 ? ` · chain ${builder.activeChainIndex + 1}/${builder.chainCount}` : "";
       const gizmoHint =
         builder.gizmoMode === "ghost"
-          ? builder.ghostDetached
-            ? "free piece — drag near an open end to snap"
-            : "drag gizmo to move the piece anywhere"
+          ? builder.ghostOnBranch
+            ? "on a junction branch — place to start the side road"
+            : builder.ghostDetached
+              ? "free piece — drag near an open end to snap"
+              : "drag gizmo to move the piece anywhere"
           : "anchor gizmo drags whole chain";
+      // Only mentioned when there ARE loose branches: a floating arrow on screen
+      // with nothing telling you what it is, or how to get to it, is worse than
+      // no marker at all.
+      const open = builder.openBranchCount;
+      const branchInfo = open && !builder.ghostOnBranch ? ` · ${open} open branch${open > 1 ? "es" : ""} (K)` : "";
       statusEl.textContent = `${builder.count} placed · ${label}${
         curveIds.has(builder.activePieceId) ? " (" + dir + ")" : ""
-      }${chainInfo} · ${gizmoHint}`;
+      }${chainInfo}${branchInfo} · ${gizmoHint}`;
     }
     syncTiles();
   }

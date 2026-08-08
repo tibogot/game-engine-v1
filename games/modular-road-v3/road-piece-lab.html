@@ -133,23 +133,97 @@
 
       function wBeamProfile(h, d, crownFrac, capRiseFrac, flipW) {
         const s = flipW ? -1 : 1;
+        const o = 0.5 * d;
+        const b = 0.34 * d;
+        const c = crownFrac * d;
         const prof = [
-          { y: -0.5 * h, z: s * 0.5 * d },
-          { y: -0.16 * h, z: s * 0.32 * d },
-          { y: 0.0, z: s * -crownFrac * d },
-          { y: 0.16 * h, z: s * 0.32 * d },
+          { y: -0.5 * h, z: s * o },
+          { y: -0.42 * h, z: s * o },
+          { y: -0.34 * h, z: s * b },
+          { y: -0.24 * h, z: s * b },
+          { y: -0.14 * h, z: s * b * 0.58 },
+          { y: -0.05 * h, z: s * -c * 0.4 },
+          { y: 0.0, z: s * -c },
+          { y: 0.05 * h, z: s * -c * 0.4 },
+          { y: 0.14 * h, z: s * b * 0.58 },
+          { y: 0.24 * h, z: s * b },
+          { y: 0.34 * h, z: s * b },
+          { y: 0.42 * h, z: s * o },
         ];
         const cap = Math.max(0, capRiseFrac ?? 0) * d;
         if (cap <= 1e-6) {
-          prof.push({ y: 0.5 * h, z: s * 0.5 * d });
+          prof.push({ y: 0.5 * h, z: s * o });
           return prof;
         }
         prof.push(
-          { y: 0.5 * h - cap, z: s * 0.5 * d },
+          { y: 0.46 * h, z: s * o },
+          { y: 0.5 * h - cap * 0.6, z: s * o },
+          { y: 0.5 * h - cap * 0.2, z: s * o * 0.38 },
           { y: 0.5 * h, z: 0.0 },
-          { y: 0.5 * h - cap, z: s * -0.5 * d },
+          { y: 0.5 * h - cap * 0.2, z: s * -o * 0.38 },
+          { y: 0.5 * h - cap * 0.6, z: s * -o },
         );
         return prof;
+      }
+
+      function beamLateral(side, edgeAbs, z, mirrorSides) {
+        const s = side >= 0 ? 1 : -1;
+        return mirrorSides ? s * (edgeAbs + z) : s * edgeAbs + z;
+      }
+
+      function beamVertex(fr, lateral, y) {
+        return [
+          fr.pos.x + fr.right.x * lateral + fr.up.x * y,
+          fr.pos.y + fr.right.y * lateral + fr.up.y * y,
+          fr.pos.z + fr.right.z * lateral + fr.up.z * y,
+        ];
+      }
+
+      /** Front + back faces and rim strips — reads as formed steel, not a paper-thin ribbon. */
+      function buildBeamVolume(frames, side, edgeAbs, centerV, prof, mirrorSides, shell) {
+        const geos = [
+          sweepBeam(frames, side, edgeAbs, centerV, prof, mirrorSides),
+        ];
+        const inner = prof.map((p) => ({ y: p.y, z: p.z - shell }));
+        geos.push(sweepBeam(frames, side, edgeAbs, centerV, inner, mirrorSides));
+
+        const F = frames.length;
+        const positions = [];
+        const uvs = [];
+        const indices = [];
+        const stitch = (jOut, jIn) => {
+          const row = positions.length / 3;
+          for (let i = 0; i < F; i++) {
+            const fr = frames[i];
+            const po = prof[jOut];
+            const pi = inner[jIn];
+            const yo = centerV + po.y;
+            const yi = centerV + pi.y;
+            positions.push(...beamVertex(fr, beamLateral(side, edgeAbs, po.z, mirrorSides), yo));
+            positions.push(...beamVertex(fr, beamLateral(side, edgeAbs, pi.z, mirrorSides), yi));
+            uvs.push(i / (F - 1), 0);
+            uvs.push(i / (F - 1), 1);
+          }
+          for (let i = 0; i < F - 1; i++) {
+            const a = row + i * 2;
+            const b = row + (i + 1) * 2;
+            indices.push(a, a + 1, b, a + 1, b + 1, b);
+          }
+        };
+        stitch(0, 0);
+        stitch(prof.length - 1, prof.length - 1);
+
+        const rim = new THREE.BufferGeometry();
+        rim.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        rim.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+        rim.setIndex(indices);
+        rim.computeVertexNormals();
+        geos.push(rim);
+
+        const merged = mergeGeometries(geos, false);
+        for (const g of geos) g.dispose();
+        merged.computeVertexNormals();
+        return merged;
       }
 
       function sweepBeam(frames, side, edgeAbs, centerV, prof, mirrorSides) {
@@ -195,15 +269,30 @@
         return geo;
       }
 
-      function buildPosts(frames, side, edgeAbs, kerbTop, centerV, gp, mirrorSides, out) {
+      /** Outermost profile z on the field side — posts straddle this edge. */
+      function outerProfileZ(prof, side, mirrorSides) {
+        const zs = prof.map((p) => p.z);
+        if (mirrorSides) return Math.max(...zs);
+        const s = side >= 0 ? 1 : -1;
+        return s >= 0 ? Math.max(...zs) : Math.min(...zs);
+      }
+
+      function buildPosts(frames, side, edgeAbs, kerbTop, centerV, gp, prof, mirrorSides, out) {
         const F = frames.length;
         let total = 0;
         for (let i = 1; i < F; i++) total += frames[i].pos.distanceTo(frames[i - 1].pos);
         const n = Math.max(2, Math.floor(total / Math.max(0.5, gp.postSpacing)) + 1);
-        const postH = Math.max(0.05, centerV - kerbTop + gp.beamHeight * 0.4);
+        // Real posts poke slightly above the W-beam crest (bolt plate / end cap).
+        const beamTop = centerV + gp.beamHeight * 0.5;
+        const postTop = beamTop + gp.beamHeight * 0.12;
+        const postH = Math.max(0.05, postTop - kerbTop);
         const postCenterV = kerbTop + postH * 0.5;
         const s = side >= 0 ? 1 : -1;
-        const postX = mirrorSides ? s * (edgeAbs + gp.beamDepth * 0.45) : s * edgeAbs;
+        const outerZ = outerProfileZ(prof, side, mirrorSides);
+        // Inner face flush with the outer W skin — entire post sits outside the profile envelope.
+        const postX = mirrorSides
+          ? s * (edgeAbs + outerZ + gp.postWidth * 0.5)
+          : s * edgeAbs + outerZ + s * gp.postWidth * 0.5;
         for (let k = 0; k < n; k++) {
           const idx = Math.round((k / (n - 1)) * (F - 1));
           const fr = frames[idx];
@@ -217,17 +306,33 @@
 
       function buildLabRails(length, rp, gp, { mirrorSides, flipW }) {
         if (gp.beamHeight <= 0) return null;
+        // Deeper W + deeper crown so posts can sit outside the corrugated sheet without piercing it.
+        const postWidth = gp.postWidth * 1.4;
+        const postThickness = gp.postThickness * 1.35;
+        const beamDepth = Math.max(0.3, postWidth * 2.8);
+        const labGp = {
+          ...gp,
+          postWidth,
+          postThickness,
+          beamHeight: gp.beamHeight * 1.05,
+          beamDepth,
+          crownFrac: 0.5,
+          capRiseFrac: Math.min(gp.capRiseFrac, 0.65),
+        };
+        const shell = Math.max(0.028, beamDepth * 0.11);
         const hw = rp.width / 2;
         const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
         const kerbTop = rp.railHeight;
-        const centerV = kerbTop + gp.beamGap + gp.beamHeight * 0.5;
+        const centerV = kerbTop + labGp.beamGap + labGp.beamHeight * 0.5;
         const edgeAbs = hw - rw * 0.5;
         const frames = straightFrames(length);
-        const prof = wBeamProfile(gp.beamHeight, gp.beamDepth, gp.crownFrac, gp.capRiseFrac, flipW);
+        const prof = wBeamProfile(
+          labGp.beamHeight, labGp.beamDepth, labGp.crownFrac, labGp.capRiseFrac, flipW,
+        );
         const geos = [];
         for (const side of [-1, 1]) {
-          geos.push(sweepBeam(frames, side, edgeAbs, centerV, prof, mirrorSides));
-          buildPosts(frames, side, edgeAbs, kerbTop, centerV, gp, mirrorSides, geos);
+          geos.push(buildBeamVolume(frames, side, edgeAbs, centerV, prof, mirrorSides, shell));
+          buildPosts(frames, side, edgeAbs, kerbTop, centerV, labGp, prof, mirrorSides, geos);
         }
         const merged = mergeGeometries(geos, false);
         for (const g of geos) g.dispose();

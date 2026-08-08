@@ -1524,6 +1524,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         if (e.shiftKey ? builder.redo() : builder.undo()) bakeCollision();
         break;
       case "keyn": seedChainAtSpawn({ atCursor: true }); break; // new chain at the sky cursor
+      case "keyk": goToBranch(); return;                        // hop to a junction branch
       case "bracketleft": builder.cycleChain(-1); break;
       case "bracketright": builder.cycleChain(1); break;
       default: return;
@@ -1719,7 +1720,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   onClick("road-new-chain", () => { seedChainAtSpawn({ atCursor: true }); paletteUi.refreshStatus(); });
   onClick("road-prev-chain", () => { builder.cycleChain(-1); paletteUi.refreshStatus(); });
   onClick("road-next-chain", () => { builder.cycleChain(1); paletteUi.refreshStatus(); });
+  onClick("road-branch", () => { goToBranch(); });
   onClick("road-rebake", () => bakeCollision());
+
+  /** Jump the ghost to the nearest free junction branch (button + K key). */
+  function goToBranch() {
+    if (builder.snapGhostToNearestBranch()) {
+      paletteUi?.refreshStatus?.();
+      return;
+    }
+    // Says why nothing happened, in the one place that is already describing
+    // what the builder is doing. The next builder change refreshes it.
+    const el = document.getElementById("road-status");
+    if (el) el.textContent = "No open junction branches — place a fork, T, crossroads or roundabout first";
+  }
 
   // ── TRACK SAVE / LOAD (JSON — deliberately separate from world.v3proj) ──
   const trackCtx = () => ({

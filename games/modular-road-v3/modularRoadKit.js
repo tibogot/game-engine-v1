@@ -134,6 +134,21 @@ export const pieceParams = {
   // Quarter-pipe (concave ramp curving up a vertical-plane arc to a wall):
   qpRadius: 16, // arc radius (m) — also the wall height at 90°
   qpAngle: 90, // arc sweep (deg): 90 = up to vertical, less = a launch kicker
+  // ── Junctions (see the JUNCTION AUTHORING PLANE block below) ─────────────
+  // Sizes are in metres and all of them are clamped against the road width, so
+  // a junction can never end up with an arm narrower than the road feeding it.
+  junctionLength: 34, // through-lane run of a T / crossroads (m)
+  junctionStub: 22, // how far a side arm reaches from the through centreline (m)
+  junctionFillet: 6, // corner radius where an arm meets the through lane (m)
+  forkAngle: 30, // half-angle of each Y-fork arm (deg)
+  forkArm: 34, // Y-fork arm length from the split (m)
+  forkThroat: 6, // straight run before a Y fork starts to diverge (m)
+  splitAngle: 24, // slip-road departure angle (deg)
+  splitLength: 40, // through run of a split / merge (m)
+  splitArm: 30, // slip-road arm length (m)
+  splitStart: 8, // where along the run the slip road peels off (m)
+  roundaboutRadius: 22, // ring CENTRELINE radius (m)
+  roundaboutStub: 10, // stub length outside the ring (m)
   // Hole road (straight deck with a big circular hole punched through it):
   holedLength: 32, // run of the piece (m)
   holedWidth: 16, // deck width (m) — widen for a bigger hole with real ledges
@@ -1449,6 +1464,531 @@ function loopSpiralEndTangents(pp) {
   return { entry: new V3(0, 0, -1), exit: rotateY(new V3(0, 0, -1), -dir * A) };
 }
 
+/* ----------------------------------------------------------------------- */
+/* Junctions — the pieces with more than one way out                        */
+/* ----------------------------------------------------------------------- */
+
+/**
+ * JUNCTION AUTHORING PLANE.
+ *
+ * Every junction is one FLAT PLATE described by a closed outline (plus optional
+ * holes) in a 2-D plane where `u` is lateral and `v` is distance along travel.
+ * A plane point maps to piece-local space as (u, 0, −v) — deck top at y = 0,
+ * slab bottom at −thickness — so a junction seams flush against any swept piece
+ * of the same width.
+ *
+ * A PLATE, NOT A SET OF SWEPT LANES, and that is the whole design. Lanes that
+ * fork or cross OVERLAP: sweeping each one separately gives two coincident decks
+ * through the shared area, which z-fight, double up in the collision BVH, and
+ * leave a wheel probe resolving against whichever of the two triangles the ray
+ * happened to hit first (so the car picks up a phantom step in the middle of the
+ * junction). One outline expresses the UNION of the lanes exactly, triangulated
+ * once, with no overlap anywhere.
+ *
+ * Sockets are (pos, dir) in the same plane. Entry/exit are the through line —
+ * the chain flows in one and out the other, so a junction is an ordinary chain
+ * piece. `branches` are the EXTRA ways out; the builder treats each as a place a
+ * NEW chain can start (see ModularRoadBuilder.branchConnectors). Every branch
+ * direction points AWAY from the junction, so the side road is always built
+ * outward from it.
+ */
+
+/** Outline vertex: lateral, along-travel, and the corner radius to round it by
+ *  (0 = leave it sharp — every seam edge must stay sharp or it won't mate). */
+const _JP = (u, v, r = 0) => ({ u, v, r });
+
+/** Plane point (u, v) → piece-local position. */
+function _jPos(p) {
+  return new V3(p[0], 0, -p[1]);
+}
+
+/** Plane direction (du, dv) → piece-local travel direction. */
+function _jDir(d) {
+  return new V3(d[0], 0, -d[1]).normalize();
+}
+
+/**
+ * Round the flagged corners of an outline with true tangent arcs.
+ *
+ * Works for convex AND reflex corners (the bisector always points into the
+ * corner's own wedge), which matters because the interesting corners of a
+ * junction — where an arm meets the through lane — are the reflex ones. The
+ * tangent distance is clamped to half of each adjoining edge so two fillets on a
+ * short edge can never cross and turn the outline inside out.
+ */
+function _filletOutline(pts, steps = 7) {
+  const n = pts.length;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const p = pts[i];
+    const a = pts[(i - 1 + n) % n];
+    const b = pts[(i + 1) % n];
+    const r = p.r ?? 0;
+    let d1u = a.u - p.u, d1v = a.v - p.v;
+    let d2u = b.u - p.u, d2v = b.v - p.v;
+    const l1 = Math.hypot(d1u, d1v);
+    const l2 = Math.hypot(d2u, d2v);
+    if (r <= 1e-4 || l1 < 1e-6 || l2 < 1e-6) {
+      out.push([p.u, p.v]);
+      continue;
+    }
+    d1u /= l1; d1v /= l1; d2u /= l2; d2v /= l2;
+    const ang = Math.acos(THREE.MathUtils.clamp(d1u * d2u + d1v * d2v, -1, 1));
+    if (ang < 1e-3 || Math.PI - ang < 1e-3) {
+      out.push([p.u, p.v]);
+      continue;
+    }
+    const half = Math.tan(ang / 2);
+    const tanDist = Math.min(r / half, l1 * 0.5, l2 * 0.5);
+    const rr = tanDist * half; // the radius actually achievable after clamping
+    const t1 = [p.u + d1u * tanDist, p.v + d1v * tanDist];
+    const t2 = [p.u + d2u * tanDist, p.v + d2v * tanDist];
+    let bu = d1u + d2u, bv = d1v + d2v;
+    const bl = Math.hypot(bu, bv);
+    if (bl < 1e-6) {
+      out.push([p.u, p.v]);
+      continue;
+    }
+    bu /= bl; bv /= bl;
+    const cd = rr / Math.sin(ang / 2);
+    const cx = p.u + bu * cd;
+    const cy = p.v + bv * cd;
+    const a1 = Math.atan2(t1[1] - cy, t1[0] - cx);
+    let da = Math.atan2(t2[1] - cy, t2[0] - cx) - a1;
+    while (da > Math.PI) da -= 2 * Math.PI;
+    while (da < -Math.PI) da += 2 * Math.PI;
+    for (let k = 0; k <= steps; k++) {
+      const th = a1 + da * (k / steps);
+      out.push([cx + Math.cos(th) * rr, cy + Math.sin(th) * rr]);
+    }
+  }
+  return out;
+}
+
+/** Normalise an outline's winding (contours CCW, holes CW — what three's ear
+ *  clipper and the wall winding below both assume). */
+function _orient(poly, wantCCW) {
+  const v = poly.map(([u, w]) => new THREE.Vector2(u, w));
+  if (THREE.ShapeUtils.isClockWise(v) === wantCCW) v.reverse();
+  return v;
+}
+
+/**
+ * Triangulate a junction outline into a slab: deck on top, matching underside,
+ * vertical walls all the way round (and around every hole). Same attribute set
+ * as the swept pieces, so the shared road material works unchanged.
+ */
+function buildJunctionPlate(shape, rp = roadParams) {
+  const t = Math.max(0.05, rp.thickness);
+  const hw = Math.max(1, rp.width / 2);
+
+  const contour = _orient(_filletOutline(shape.contour), true);
+  const holes = (shape.holes ?? []).map((h) => _orient(_filletOutline(h), false));
+  const faces = THREE.ShapeUtils.triangulateShape(contour, holes);
+  const verts = holes.length ? contour.concat(...holes) : contour;
+
+  const positions = [];
+  const uvs = [];
+  const lateral = [];
+  const zone = [];
+  const indices = [];
+
+  const push = (u, v, y, zn) => {
+    positions.push(u, y, -v);
+    uvs.push(v, u); // uv.x = metres along travel, uv.y = metres across
+    lateral.push(u / hw);
+    zone.push(zn);
+    return positions.length / 3 - 1;
+  };
+
+  // Deck ring (zone 1) and its mirror underneath (zone 0 — structural side).
+  const topBase = positions.length / 3;
+  for (const p of verts) push(p.x, p.y, 0, 1);
+  const botBase = positions.length / 3;
+  for (const p of verts) push(p.x, p.y, -t, 0);
+  for (const f of faces) {
+    indices.push(topBase + f[0], topBase + f[1], topBase + f[2]);
+    indices.push(botBase + f[2], botBase + f[1], botBase + f[0]);
+  }
+
+  // Walls. One quad per outline edge, unique vertices so the slab keeps a crisp
+  // edge instead of smoothing into the deck.
+  const wall = (ring) => {
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      const i0 = push(a.x, a.y, 0, 0);
+      push(a.x, a.y, -t, 0);
+      push(b.x, b.y, -t, 0);
+      push(b.x, b.y, 0, 0);
+      indices.push(i0, i0 + 1, i0 + 2, i0, i0 + 2, i0 + 3);
+    }
+  };
+  wall(contour);
+  for (const h of holes) wall(h);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(lateral, 1));
+  geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zone, 1));
+  const vcount = positions.length / 3;
+  geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(new Float32Array(vcount).fill(1), 1));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/* --- Outlines ---------------------------------------------------------- */
+
+/** Crossroads: through lane from v=0 to v=L with an arm out each side. */
+function _crossShape(pp, rp, sides) {
+  const hw = rp.width / 2;
+  // The arm box is `width` tall and has to sit inside the run with road left
+  // over at both ends, so the run can never be shorter than ~1.6 × the width.
+  const L = Math.max(1.6 * rp.width, pp.junctionLength ?? 34);
+  const S = Math.max(hw + 6, pp.junctionStub ?? 22);
+  const f = Math.max(0, pp.junctionFillet ?? 6);
+  const vc = L / 2;
+  const right = sides !== "left";
+  const left = sides !== "right";
+
+  const c = [_JP(-hw, 0), _JP(hw, 0)];
+  if (right) {
+    c.push(_JP(hw, vc - hw, f), _JP(S, vc - hw), _JP(S, vc + hw), _JP(hw, vc + hw, f));
+  }
+  c.push(_JP(hw, L), _JP(-hw, L));
+  if (left) {
+    c.push(_JP(-hw, vc + hw, f), _JP(-S, vc + hw), _JP(-S, vc - hw), _JP(-hw, vc - hw, f));
+  }
+
+  const branches = [];
+  if (right) branches.push({ pos: [S, vc], dir: [1, 0], label: "right" });
+  if (left) branches.push({ pos: [-S, vc], dir: [-1, 0], label: "left" });
+  return {
+    contour: c,
+    sockets: {
+      entry: { pos: [0, 0], dir: [0, 1] },
+      exit: { pos: [0, L], dir: [0, 1] },
+      branches,
+    },
+  };
+}
+
+/**
+ * Symmetric Y: one lane in, two arms out at ±forkAngle.
+ *
+ * The GORE NOSE — where the two arms' inner edges meet — is not a free choice:
+ * two lanes of half-width `hw` diverging by `a` from the same centreline cross
+ * their inner edges at exactly hw/sin(a) past the split. Below it the outline is
+ * one wide deck, above it two lanes, which is what makes the fork a single
+ * plate with no overlap.
+ */
+function _wyeShape(pp, rp) {
+  const hw = rp.width / 2;
+  const a = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.forkAngle ?? 30, 8, 75));
+  const vs = Math.max(0, pp.forkThroat ?? 6);
+  const noseV = vs + hw / Math.sin(a);
+  // The arms must outlive the nose or there is no split — only a wide blob.
+  const La = Math.max(hw / Math.sin(a) + 10, pp.forkArm ?? 34);
+  const sa = Math.sin(a);
+  const ca = Math.cos(a);
+
+  const arm = (s) => {
+    // s = +1 right arm, −1 left. n = outward lateral normal of that arm.
+    const cu = s * La * sa;
+    const cv = vs + La * ca;
+    const nu = s * ca;
+    const nv = -sa;
+    return {
+      end: [cu, cv],
+      dir: [s * sa, ca],
+      outer: [cu + nu * hw, cv + nv * hw],
+      inner: [cu - nu * hw, cv - nv * hw],
+    };
+  };
+  const R = arm(1);
+  const Lf = arm(-1);
+
+  // A zero throat makes the throat corner COINCIDENT with the entry corner, and
+  // a duplicated outline vertex is what an ear clipper turns into zero-area
+  // triangles — so with no throat the outline simply doesn't have that corner.
+  const throat = vs > 0.05;
+  const contour = [
+    _JP(-hw, 0),
+    _JP(hw, 0),
+    ...(throat ? [_JP(hw, vs, vs > 1 ? 3 : 0)] : []),
+    _JP(R.outer[0], R.outer[1]),
+    _JP(R.inner[0], R.inner[1]),
+    // A knife-sharp gore tip is a bad thing to hand a collision BVH; round it.
+    _JP(0, noseV, 2.5),
+    _JP(Lf.inner[0], Lf.inner[1]),
+    _JP(Lf.outer[0], Lf.outer[1]),
+    ...(throat ? [_JP(-hw, vs, vs > 1 ? 3 : 0)] : []),
+  ];
+
+  // `curveDir` picks which arm the CHAIN follows; the other becomes the branch.
+  const mainRight = (pp.curveDir ?? 1) >= 0;
+  const main = mainRight ? R : Lf;
+  const side = mainRight ? Lf : R;
+  return {
+    contour,
+    sockets: {
+      entry: { pos: [0, 0], dir: [0, 1] },
+      exit: { pos: main.end, dir: main.dir },
+      branches: [{ pos: side.end, dir: side.dir, label: mainRight ? "left arm" : "right arm" }],
+    },
+  };
+}
+
+/**
+ * Slip road: the through lane runs dead straight and a side lane peels off it.
+ * `flip` mirrors the whole thing along travel, which turns the fork into a
+ * MERGE (the side lane joins from upstream instead of leaving downstream).
+ */
+function _splitShape(pp, rp, flip = false) {
+  const hw = rp.width / 2;
+  const b = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.splitAngle ?? 24, 8, 70));
+  const sb = Math.sin(b);
+  const cb = Math.cos(b);
+  const vd = Math.max(2, pp.splitStart ?? 8); // where the arm leaves the edge
+  // GORE NOSE. The arm's inner edge only clears the through lane's edge after
+  // hw·(1+cos b)/sin b along the arm — that is where the two lanes stop sharing
+  // deck and the split becomes a split. Both the arm and the through run have to
+  // outlive it, or the "branch" is just a bulge with a socket buried inside it
+  // (which is exactly what a 30 m arm at 24° on a 16 m road gave: the nose is
+  // 38 m out). Shallow angles on a wide road need length — that is not a bug to
+  // tune away, it is what a slip road is.
+  const tNose = (hw * (1 + cb)) / sb;
+  const noseV = vd + tNose;
+  const L = Math.max(noseV + 10, pp.splitLength ?? 40);
+  const La = Math.max(tNose + 14, pp.splitArm ?? 30);
+  const dir = (pp.curveDir ?? 1) >= 0 ? 1 : -1;
+
+  const cu = dir * La * sb;
+  const cv = vd + La * cb;
+  const nu = dir * cb;
+  const nv = -sb;
+  const outer = [cu + nu * hw, cv + nv * hw];
+  const inner = [cu - nu * hw, cv - nv * hw];
+
+  // Authored as a right-hand split, then mirrored laterally for a left-hand one.
+  let contour = [
+    _JP(-hw * dir, 0),
+    _JP(hw * dir, 0),
+    _JP(hw * dir, vd, 4),
+    _JP(outer[0], outer[1]),
+    _JP(inner[0], inner[1]),
+    _JP(hw * dir, noseV, 2.5),
+    _JP(hw * dir, L),
+    _JP(-hw * dir, L),
+  ];
+  let branch = { pos: [cu, cv], dir: [dir * sb, cb], label: dir > 0 ? "right" : "left" };
+
+  if (flip) {
+    // Mirror along travel. Reversing the point order keeps the winding, and the
+    // branch now points BACK up the track — a feeder, built outward from here.
+    contour = contour.map((p) => _JP(p.u, L - p.v, p.r)).reverse();
+    branch = { pos: [branch.pos[0], L - branch.pos[1]], dir: [branch.dir[0], -branch.dir[1]], label: branch.label };
+  }
+
+  return {
+    contour,
+    sockets: {
+      entry: { pos: [0, 0], dir: [0, 1] },
+      exit: { pos: [0, L], dir: [0, 1] },
+      branches: [branch],
+    },
+  };
+}
+
+/**
+ * Roundabout: a ring deck with four stubs, and the island punched clean through
+ * (drive over the middle and you drop, exactly like the Hole Road piece). The
+ * outline walks the outer circle counter-clockwise and detours out and back at
+ * each stub; the island is a hole, so it gets its own wall.
+ */
+function _roundaboutShape(pp, rp) {
+  const hw = rp.width / 2;
+  const Rc = Math.max(hw + 6, pp.roundaboutRadius ?? 22);
+  const Ro = Rc + hw;
+  const Ri = Math.max(2, Rc - hw);
+  const stub = Math.max(4, pp.roundaboutStub ?? 10);
+  const Dc = Ro + stub; // ring centre → stub end
+  const phi = Math.asin(THREE.MathUtils.clamp(hw / Ro, 0, 0.95));
+  const C = [0, Dc];
+  const at = (r, th) => [C[0] + Math.cos(th) * r, C[1] + Math.sin(th) * r];
+
+  // Angles in the (u, v) plane: 0 = +u (right), π/2 = +v (exit), π = left,
+  // 3π/2 = −v (entry, which is why the entry stub end lands on the origin).
+  const stubs = [
+    { th: 0, label: "right" },
+    { th: Math.PI / 2, label: "exit" },
+    { th: Math.PI, label: "left" },
+    { th: (3 * Math.PI) / 2, label: "entry" },
+  ];
+  const arcSteps = Math.max(6, Math.round((Rc / 3) | 0));
+  const flare = Math.min(6, stub * 0.8);
+
+  const contour = [];
+  for (let i = 0; i < stubs.length; i++) {
+    const s = stubs[i];
+    const d = [Math.cos(s.th), Math.sin(s.th)];
+    const p = [-Math.sin(s.th), Math.cos(s.th)];
+    const end = [C[0] + d[0] * Dc, C[1] + d[1] * Dc];
+    const A = at(Ro, s.th - phi);
+    const B = [end[0] - p[0] * hw, end[1] - p[1] * hw];
+    const D = [end[0] + p[0] * hw, end[1] + p[1] * hw];
+    contour.push(_JP(A[0], A[1], flare), _JP(B[0], B[1]), _JP(D[0], D[1]));
+    // Arc across to the next stub (its own A point closes it).
+    const next = stubs[(i + 1) % stubs.length];
+    const th0 = s.th + phi;
+    let th1 = next.th - phi;
+    while (th1 < th0) th1 += 2 * Math.PI;
+    contour.push(_JP(at(Ro, th0)[0], at(Ro, th0)[1], flare));
+    for (let k = 1; k < arcSteps; k++) {
+      const th = th0 + (th1 - th0) * (k / arcSteps);
+      const q = at(Ro, th);
+      contour.push(_JP(q[0], q[1]));
+    }
+  }
+
+  const island = [];
+  const islandSteps = Math.max(16, arcSteps * 4);
+  for (let k = 0; k < islandSteps; k++) {
+    const th = -2 * Math.PI * (k / islandSteps);
+    island.push(_JP(C[0] + Math.cos(th) * Ri, C[1] + Math.sin(th) * Ri));
+  }
+
+  const stubSocket = (th) => [C[0] + Math.cos(th) * Dc, C[1] + Math.sin(th) * Dc];
+  return {
+    contour,
+    holes: [island],
+    sockets: {
+      entry: { pos: [0, 0], dir: [0, 1] },
+      exit: { pos: stubSocket(Math.PI / 2), dir: [0, 1] },
+      branches: [
+        { pos: stubSocket(0), dir: [1, 0], label: "right" },
+        { pos: stubSocket(Math.PI), dir: [-1, 0], label: "left" },
+      ],
+    },
+  };
+}
+
+/** @param {"cross"|"tee"|"wye"|"split"|"merge"|"roundabout"} kind */
+function junctionShape(kind, pp, rp) {
+  switch (kind) {
+    case "cross": return _crossShape(pp, rp, "both");
+    case "tee": return _crossShape(pp, rp, (pp.curveDir ?? 1) >= 0 ? "right" : "left");
+    case "wye": return _wyeShape(pp, rp);
+    case "split": return _splitShape(pp, rp, false);
+    case "merge": return _splitShape(pp, rp, true);
+    case "roundabout": return _roundaboutShape(pp, rp);
+    default: return _crossShape(pp, rp, "both");
+  }
+}
+
+/* --- Junction road markings (decor mesh, vertex-coloured) ---------------- */
+
+const _YUP_DECO = new V3(0, 1, 0);
+
+/** Painted line just inside an outline. Each edge is drawn as its own quad,
+ *  overlapping its neighbours by the line width so the corners close. */
+function _paintEdgePart(part, ring, inset, width, color) {
+  const n = ring.length;
+  for (let i = 0; i < n; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % n];
+    let du = b.x - a.x, dv = b.y - a.y;
+    const len = Math.hypot(du, dv);
+    if (len < 1e-5) continue;
+    du /= len; dv /= len;
+    // Left of travel = into the deck for a CCW contour / a CW hole.
+    const nu = -dv, nv = du;
+    const ax = a.x - du * width, ay = a.y - dv * width;
+    const bx = b.x + du * width, by = b.y + dv * width;
+    const o0 = inset;
+    const o1 = inset + width;
+    const P = (x, y, o) => new V3(x + nu * o, 0.05, -(y + nv * o));
+    _pushQuad(
+      part,
+      P(ax, ay, o0), P(bx, by, o0), P(bx, by, o1), P(ax, ay, o1),
+      _YUP_DECO, color, color, color, color,
+    );
+  }
+}
+
+/** Arrow on the deck a little way inside a socket, pointing the way out. */
+function _paintArrowPart(part, pos, dir, color, back = 7) {
+  const cu = pos[0] - dir[0] * back;
+  const cv = pos[1] - dir[1] * back;
+  const pu = -dir[1], pv = dir[0];
+  const P = (fwd, side) =>
+    new V3(cu + dir[0] * fwd + pu * side, 0.05, -(cv + dir[1] * fwd + pv * side));
+  // Wound counter-clockwise in the (u, v) plane, which is what faces +Y once
+  // the plane maps to (u, 0, −v) — the other way round the paint is a back face
+  // and simply does not draw (the decor material is single-sided).
+  _pushTri(part, P(3.2, 0), P(-0.6, 2.4), P(-0.6, -2.4), _YUP_DECO, color, color, color);
+  _pushQuad(part, P(-0.6, 0.9), P(-3.6, 0.9), P(-3.6, -0.9), P(-0.6, -0.9), _YUP_DECO, color, color, color, color);
+}
+
+function buildJunctionDecorGeometry(shape, rp = roadParams) {
+  const part = _geoPart();
+  const contour = _orient(_filletOutline(shape.contour), true);
+  _paintEdgePart(part, contour, 0.45, 0.32, _DECO_WHITE);
+  for (const h of shape.holes ?? []) {
+    _paintEdgePart(part, _orient(_filletOutline(h), false), 0.45, 0.32, _DECO_YELLOW);
+  }
+  const { exit, branches } = shape.sockets;
+  _paintArrowPart(part, exit.pos, exit.dir, _DECO_WHITE);
+  for (const b of branches) _paintArrowPart(part, b.pos, b.dir, _DECO_YELLOW);
+  if (!part.positions.length) return null;
+  const geo = _partToGeo(part);
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/* --- Catalog adapters --------------------------------------------------- */
+
+// A junction authors its own geometry and its own sockets, so its "centreline"
+// exists only to give computeFrames something to chew on — nothing downstream
+// reads the frames (no sweep, no kerbs, no shell).
+const junctionPoints = (kind) => (pp) => {
+  const s = junctionShape(kind, pp, roadParams);
+  return [_jPos(s.sockets.entry.pos), _jPos(s.sockets.exit.pos)];
+};
+const junctionSockets = (kind) => (pp) => {
+  const s = junctionShape(kind, pp, roadParams).sockets;
+  return {
+    entryPos: _jPos(s.entry.pos), entryDir: _jDir(s.entry.dir),
+    exitPos: _jPos(s.exit.pos), exitDir: _jDir(s.exit.dir),
+  };
+};
+const junctionBranches = (kind) => (pp) =>
+  junctionShape(kind, pp, roadParams).sockets.branches.map((b) => ({
+    pos: _jPos(b.pos), dir: _jDir(b.dir), label: b.label,
+  }));
+const junctionGeometry = (kind) => (pp, rp) => buildJunctionPlate(junctionShape(kind, pp, rp), rp);
+const junctionDecor = (kind) => (pp, rp) => buildJunctionDecorGeometry(junctionShape(kind, pp, rp), rp);
+
+/** Everything a junction entry in the catalog shares. */
+function junctionDef(kind, extra) {
+  return {
+    swatch: "#f39c12",
+    key: "",
+    points: junctionPoints(kind),
+    sockets: junctionSockets(kind),
+    branches: junctionBranches(kind),
+    geometry: junctionGeometry(kind),
+    decor: junctionDecor(kind),
+    noKerb: true, // a plate has no cross-section, so no kerbs and no guardrail
+    plain: true,
+    junction: true,
+    ...extra,
+  };
+}
+
 /** @type {{id:string,label:string,hint:string,swatch:string,key:string,points:(pp:any)=>THREE.Vector3[]}[]} */
 export const PIECE_CATALOG = [
   {
@@ -1759,6 +2299,39 @@ export const PIECE_CATALOG = [
     key: "b",
     points: browPoints,
   },
+  // ── Junctions ────────────────────────────────────────────────────────────
+  // The chain runs entry → exit as usual; every extra way out is a BRANCH the
+  // builder can start a new chain from (K, or drag the ghost onto its marker).
+  junctionDef("split", {
+    id: "junction_split",
+    label: "Split",
+    hint: "Straight through + a slip road peeling off (R flips the side)",
+  }),
+  junctionDef("merge", {
+    id: "junction_merge",
+    label: "Merge",
+    hint: "A feeder lane joins the straight (build the feeder from its branch)",
+  }),
+  junctionDef("wye", {
+    id: "junction_y",
+    label: "Y fork",
+    hint: "Two arms at ±fork angle — R picks which one the chain follows",
+  }),
+  junctionDef("tee", {
+    id: "junction_t",
+    label: "T junction",
+    hint: "Straight through + one square-on arm (R flips the side)",
+  }),
+  junctionDef("cross", {
+    id: "junction_cross",
+    label: "Crossroads",
+    hint: "Straight through + an arm out each side",
+  }),
+  junctionDef("roundabout", {
+    id: "junction_roundabout",
+    label: "Roundabout",
+    hint: "Ring with four ways out — the island is a hole, don't cut across",
+  }),
 ];
 
 export const PIECE_BY_ID = new Map(PIECE_CATALOG.map((p) => [p.id, p]));
@@ -2057,7 +2630,13 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
     : buildSweepGeometry(frames, profileData, { plain: def.plain });
   const railGeometry = useKerbs && !def.noMesh && !def.profile && !def.geometry ? buildGuardrailGeometry(frames, profileData, gp, rpForProfile) : null;
   const shellGeometry = def.shell ? buildShellGeometry(def.shell, frames, profileData, pp) : null;
-  const decorGeometry = def.game ? buildGameDecorGeometry(frames, profileData, def.game) : null;
+  // Decor is the vertex-coloured overlay mesh: game lines build theirs from the
+  // frames, junctions paint their own markings from their outline.
+  const decorGeometry = def.game
+    ? buildGameDecorGeometry(frames, profileData, def.game)
+    : def.decor
+      ? def.decor(pp, rpForProfile)
+      : null;
 
   const f0 = frames[0];
   const fN = frames[frames.length - 1];
@@ -2079,5 +2658,18 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   const world = currentConnector.clone().multiply(entryLocal.clone().invert());
   const connectorOut = world.clone().multiply(exitLocal);
 
-  return { def, geometry, railGeometry, shellGeometry, decorGeometry, world, connectorOut };
+  // EXTRA WAYS OUT (junctions). Same connector convention as `connectorOut`, so
+  // a branch can seed a chain exactly like a chain's own open end — see
+  // ModularRoadBuilder.branchConnectors().
+  const branchesOut = [];
+  if (def.branches) {
+    for (const b of def.branches(pp)) {
+      branchesOut.push({
+        label: b.label ?? "branch",
+        matrix: world.clone().multiply(socketMatrix(b.pos, b.dir, _up)),
+      });
+    }
+  }
+
+  return { def, geometry, railGeometry, shellGeometry, decorGeometry, world, connectorOut, branchesOut };
 }
