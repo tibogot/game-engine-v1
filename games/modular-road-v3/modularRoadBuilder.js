@@ -1092,6 +1092,9 @@ export class ModularRoadBuilder {
       built.railGeometry && this.railMaterial
         ? this._makeMesh(built.railGeometry, this.railMaterial, built.world)
         : null;
+    // The cheap stand-in the BVH bakes instead of the rail you can see — rides
+    // along on the mesh so nothing downstream needs a new field to plumb.
+    if (railMesh) railMesh.userData.collisionGeometry = built.railCollision ?? null;
     const shellMesh =
       built.shellGeometry && this.shellMaterial
         ? this._makeMesh(built.shellGeometry, this.shellMaterial, built.world)
@@ -1677,6 +1680,8 @@ export class ModularRoadBuilder {
       } else {
         p.railMesh = this._makeMesh(built.railGeometry, this.railMaterial, built.world);
       }
+      p.railMesh.userData.collisionGeometry?.dispose();
+      p.railMesh.userData.collisionGeometry = built.railCollision ?? null;
     } else if (p.railMesh) {
       this.root.remove(p.railMesh);
       p.railMesh.geometry.dispose();
@@ -1739,6 +1744,10 @@ export class ModularRoadBuilder {
         built.railGeometry && this.railMaterial
           ? this._makeMesh(built.railGeometry, this.railMaterial, built.world)
           : null;
+      // Third place a rail mesh is born (this one is the track IMPORT path) —
+      // the collision proxy has to be attached at every one of them or the BVH
+      // silently falls back to baking the full-detail rail.
+      if (railMesh) railMesh.userData.collisionGeometry = built.railCollision ?? null;
       const shellMesh =
         built.shellGeometry && this.shellMaterial
           ? this._makeMesh(built.shellGeometry, this.shellMaterial, built.world)

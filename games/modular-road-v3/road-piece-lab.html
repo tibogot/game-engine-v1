@@ -44,16 +44,17 @@
   <body>
     <div id="hud">
       <h1>Road piece lab</h1>
-      <div class="title">Straight · Long</div>
+      <div class="title" id="s-title">—</div>
       <div class="meta">
-        Palette preset <b>straight_long</b><br />
-        Length <b id="s-len">32</b> m · Width <b id="s-w">16</b> m<br />
-        Triangles <b id="s-tris">—</b>
+        Piece <b id="s-len">—</b> · Width <b id="s-w">16</b> m<br />
+        Triangles <b id="s-tris">—</b><br />
+        GPU <b id="s-gpu">—</b> · <b id="s-fps">—</b> fps
       </div>
       <div class="keys">
         Orbit: drag · Pan: right-drag / middle · Zoom: wheel<br />
         <b>R</b> reset camera · <b>L</b> toggle road lines · <b>G</b> grazing view (reads bumps)<br />
-        lil-gui (top-right) — toggle <b>Noise normals</b> vs off to A/B
+        <b>F</b> fill test — deck covers the frame, so GPU ms measures the ROAD<br />
+        lil-gui (top-right) — <b>Surface model</b> chip / f1 / off to A/B the cost
       </div>
     </div>
     <div id="err"></div>
@@ -86,6 +87,7 @@
         oneMinus,
         clamp,
         positionWorld,
+        normalWorld,
       } from "three/tsl";
       import {
         buildPiece,
@@ -97,13 +99,29 @@
         createRoadMaterial,
         createGuardrailMaterial,
         syncRoadUniforms,
+        ROAD_LOOK_KEYS,
+        ROAD_LOOK_FORMAT,
+        ROAD_LOOK_VERSION,
       } from "./modularRoadMaterial.js";
+      import { buildRailGeometry, railParams } from "./modularRoadRail.js";
 
-      const PRESET = {
-        id: "straight_long",
-        label: "Long",
-        base: "straight",
-        params: { straightLength: 32 },
+      /**
+       * What the lab builds. A CURVE is not decoration here: the racing line,
+       * the marbles and the red/white kerbs are all corner features, and tuning
+       * them against a straight is tuning them blind.
+       */
+      const PRESETS = {
+        straight: { label: "Straight · Long", base: "straight", params: { straightLength: 32 } },
+        curve: {
+          label: "Curve · 90°",
+          base: "curve",
+          params: { curveRadius: 26, curveAngle: 90, curveDir: 1 },
+        },
+        curveTight: {
+          label: "Curve · tight hairpin",
+          base: "curve",
+          params: { curveRadius: 14, curveAngle: 150, curveDir: 1 },
+        },
       };
 
       const $ = (id) => document.getElementById(id);
@@ -114,554 +132,23 @@
         console.error(e);
       };
 
-      // ── Lab-only W-beam (straight is trivial — keep it here, not a 2nd file) ─
-      const _m = new THREE.Matrix4();
-      const _pos = new THREE.Vector3();
-
-      function straightFrames(length, segLen = 1.6) {
-        const n = Math.max(2, Math.ceil(length / segLen) + 1);
-        const frames = [];
-        for (let i = 0; i < n; i++) {
-          const t = i / (n - 1);
-          frames.push({
-            pos: new THREE.Vector3(0, 0, -length * t),
-            tangent: new THREE.Vector3(0, 0, -1),
-            up: new THREE.Vector3(0, 1, 0),
-            right: new THREE.Vector3(1, 0, 0),
-          });
-        }
-        return frames;
-      }
-
-      /* --- 2-D section helpers, in (y vertical, z lateral) metres ---------- */
-
-      /** Signed area of a closed polyline in the (z, y) plane. */
-      function signedArea(pts) {
-        let a = 0;
-        for (let i = 0, n = pts.length; i < n; i++) {
-          const p = pts[i];
-          const q = pts[(i + 1) % n];
-          a += p.z * q.y - q.z * p.y;
-        }
-        return a * 0.5;
-      }
-
-      /** Drop coincident points (fillets and arcs meet exactly on their tangent
-       *  points, and a zero-length segment has no normal). */
-      function dedupe(pts, eps = 1e-5) {
-        const out = [];
-        for (const p of pts) {
-          const q = out[out.length - 1];
-          if (q && Math.abs(q.y - p.y) < eps && Math.abs(q.z - p.z) < eps) continue;
-          out.push(p);
-        }
-        const a = out[0];
-        const b = out[out.length - 1];
-        if (out.length > 2 && Math.abs(a.y - b.y) < eps && Math.abs(a.z - b.z) < eps) out.pop();
-        return out;
-      }
-
-      /**
-       * Round every corner of a CLOSED polyline with a circular fillet.
-       *
-       * This is the single biggest reason the kit rail reads as folded card:
-       * its section is a bare polyline, so every corrugation corner is a hard
-       * crease that computeVertexNormals turns into a facet. Sheet steel is
-       * roll-formed — the corners have a radius, and once they do the sweep
-       * shades as a continuous surface.
-       *
-       * Tangent lengths are clamped to half the shorter neighbouring segment, so
-       * neighbouring fillets can never overlap and turn the section inside out.
-       *
-       * Only the corrugated face gets filleted (open mode) — running it over the
-       * finished ring would also nibble the bull-nose arcs, which are already
-       * smooth, and pull the beam a millimetre or two under its stated height.
-       */
-      function filletPolyline(pts, radius, seg, closed = false) {
-        const n = pts.length;
-        if (radius <= 1e-5 || seg < 1 || n < 3) return pts.slice();
-        const out = [];
-        if (!closed) out.push(pts[0]);
-        const first = closed ? 0 : 1;
-        const last = closed ? n - 1 : n - 2;
-        for (let i = first; i <= last; i++) {
-          const p = pts[i];
-          const a = pts[(i - 1 + n) % n];
-          const b = pts[(i + 1) % n];
-          let ay = a.y - p.y;
-          let az = a.z - p.z;
-          let by = b.y - p.y;
-          let bz = b.z - p.z;
-          const la = Math.hypot(ay, az);
-          const lb = Math.hypot(by, bz);
-          if (la < 1e-6 || lb < 1e-6) continue;
-          ay /= la; az /= la; by /= lb; bz /= lb;
-          const theta = Math.acos(Math.min(1, Math.max(-1, ay * by + az * bz)));
-          // Straight-through or doubled-back: nothing to round.
-          if (theta > Math.PI - 1e-3 || theta < 1e-3) {
-            out.push(p);
-            continue;
-          }
-          const half = theta * 0.5;
-          const tanDist = Math.min(radius / Math.tan(half), la * 0.5, lb * 0.5);
-          const r = tanDist * Math.tan(half);
-          let my = ay + by;
-          let mz = az + bz;
-          const lm = Math.hypot(my, mz);
-          if (lm < 1e-6) {
-            out.push(p);
-            continue;
-          }
-          my /= lm; mz /= lm;
-          const cDist = r / Math.sin(half);
-          const cy = p.y + my * cDist;
-          const cz = p.z + mz * cDist;
-          const a0 = Math.atan2(p.y + ay * tanDist - cy, p.z + az * tanDist - cz);
-          const a1 = Math.atan2(p.y + by * tanDist - cy, p.z + bz * tanDist - cz);
-          let d = a1 - a0;
-          while (d > Math.PI) d -= Math.PI * 2;
-          while (d < -Math.PI) d += Math.PI * 2;
-          for (let k = 0; k <= seg; k++) {
-            const ang = a0 + d * (k / seg);
-            out.push({ y: cy + Math.sin(ang) * r, z: cz + Math.cos(ang) * r });
-          }
-        }
-        if (!closed) out.push(pts[n - 1]);
-        return out;
-      }
-
-      /** Outward unit normal per point of a CCW closed polyline, averaged from
-       *  the two adjacent segments. Supplied to the sweep directly instead of
-       *  calling computeVertexNormals, which would leave a shading seam where
-       *  the ring wraps back on itself. */
-      function polylineNormals(pts) {
-        const n = pts.length;
-        const seg = new Array(n);
-        for (let i = 0; i < n; i++) {
-          const p = pts[i];
-          const q = pts[(i + 1) % n];
-          const dy = q.y - p.y;
-          const dz = q.z - p.z;
-          const l = Math.hypot(dy, dz) || 1;
-          seg[i] = { y: -dz / l, z: dy / l }; // outward for CCW winding
-        }
-        return pts.map((_, i) => {
-          const a = seg[(i - 1 + n) % n];
-          const b = seg[i];
-          const y = a.y + b.y;
-          const z = a.z + b.z;
-          const l = Math.hypot(y, z) || 1;
-          return { y: y / l, z: z / l };
-        });
-      }
-
-      /**
-       * Closed rail cross-section, about the beam centre. +z is the FIELD side
-       * (where the posts live); the corrugated face looks at traffic on -z.
-       *
-       * `humps` picks the family: 1 = plain box beam, 2 = W-beam (one centre
-       * valley), 3 = thrie-beam (two valleys). At the height this kit uses —
-       * 0.8 m, nearly three times a real W-beam — a two-hump section is mostly
-       * flat sheet, which is the other half of why it looks like a slab. Three
-       * humps put a corrugation every ~0.25 m and the silhouette reads as steel.
-       *
-       * The ends are half-round bull-noses of radius depth/2, which also
-       * replaces the kit's `capRiseFrac` peak: a cylinder sheds a car landing on
-       * the rail at least as well as a 45° ridge (see wBeamProfile in
-       * modularRoadKit.js for why that matters) without the knife-edge look.
-       *
-       * Returns the (already CCW) point ring, its outward normals, the field-side
-       * plane the posts bolt to, and the valley positions the bolts sit in.
-       */
-      function railProfile(o) {
-        const h = Math.max(0.12, o.height);
-        // The bull-nose radius is half the depth, and it has to fit inside the
-        // height — so a section deeper than it is tall is clamped, not left with
-        // a bead that can't reach the crest plane.
-        const d = Math.min(Math.max(0.04, o.depth), h * 0.9);
-        const r = d * 0.5;
-        const yEnd = h * 0.5 - r; // where the beads take over
-        const zCrest = -d * 0.5;
-        const valleyGap = Math.min(0.45, Math.max(0.05, o.valleyGap));
-        const zValley = d * 0.5 - valleyGap * d;
-
-        // Corrugated traffic face, bottom → top. A crest at BOTH ends so the
-        // beads meet it tangentially.
-        const humps = Math.max(1, Math.round(o.humps));
-        const K = 2 * (humps - 1);
-        const face = [];
-        const valleys = [];
-        if (K === 0) {
-          face.push({ y: -yEnd, z: zCrest }, { y: yEnd, z: zCrest });
-        } else {
-          const stepY = (yEnd * 2) / K;
-          const flat = Math.max(0, Math.min(0.48, o.plateau)) * stepY;
-          for (let k = 0; k <= K; k++) {
-            const y = -yEnd + stepY * k;
-            const z = k % 2 === 0 ? zCrest : zValley;
-            if (k % 2 === 1) valleys.push({ y, z });
-            face.push({ y: k === 0 ? y : y - flat, z });
-            face.push({ y: k === K ? y : y + flat, z });
-          }
-        }
-
-        // Round the formed corners, then close the ring: top bull-nose (crest →
-        // field side), flat back plate, bottom bull-nose.
-        const pts = dedupe(
-          filletPolyline(
-            dedupe(face), o.bendRadius, Math.max(1, Math.round(o.bendSeg)), false,
-          ),
-        );
-        const faceEnd = pts.length;
-        // Even segment count so the apex lands exactly on h/2 rather than being
-        // chorded off by a sample either side of it.
-        const beadSeg = 2 * Math.max(1, Math.round(Math.max(2, o.beadSeg) / 2));
-        const arc = (cy, a0, a1) => {
-          for (let k = 0; k <= beadSeg; k++) {
-            const ang = a0 + (a1 - a0) * (k / beadSeg);
-            pts.push({ y: cy + Math.sin(ang) * r, z: Math.cos(ang) * r });
-          }
-        };
-        arc(yEnd, Math.PI, 0);
-        // Back face. A flat plate there is the last slab-shaped surface on the
-        // barrier and it is what you see from off-track, so it gets a shallow
-        // mirror of the corrugation. Amplitude is capped to keep a real wall
-        // thickness at the valleys, where front and back come closest.
-        const back = pts.slice(0, faceEnd).reverse();
-        const amp = back.length
-          ? Math.min(
-            Math.max(0, o.backAmp ?? 0),
-            (r - zValley - 0.012) / Math.max(1e-4, zValley + r),
-          )
-          : 0;
-        if (amp > 1e-4) {
-          for (const p of back) pts.push({ y: p.y, z: r - (p.z - zCrest) * amp });
-        } else {
-          pts.push({ y: -yEnd, z: r });
-        }
-        arc(-yEnd, 0, -Math.PI);
-
-        let ring = dedupe(pts);
-        if (o.flip) for (const p of ring) p.z = -p.z;
-        if (signedArea(ring) < 0) ring.reverse(); // normals + winding assume CCW
-
-        const sgn = o.flip ? -1 : 1;
-        return {
-          pts: ring,
-          normals: polylineNormals(ring),
-          backZ: r * sgn, // the plane posts bolt to
-          valleys: valleys.map((v) => ({ y: v.y, z: v.z * sgn })),
-          height: h,
-          depth: d,
-        };
-      }
-
-      /**
-       * Sweep the closed section along the frames, with explicit normals and
-       * both ends capped — a solid box beam, not an open sheet that has to be
-       * rendered DoubleSide and still shows its zero-thickness edge on.
-       *
-       * `zSign` mirrors the section for the left-hand rail (so the corrugation
-       * faces traffic on both sides); that mirror reverses the parametrisation,
-       * hence the winding flip.
-       */
-      function sweepRail(frames, prof, baseLat, zSign, centerV) {
-        const F = frames.length;
-        const R = prof.pts.length;
-        const V = R + 1; // seam column duplicated so the UVs don't wrap
-
-        const along = [0];
-        for (let i = 1; i < F; i++) {
-          along[i] = along[i - 1] + frames[i].pos.distanceTo(frames[i - 1].pos);
-        }
-        // v in metres around the section, so galvanising detail stays square.
-        const arcV = [0];
-        for (let j = 1; j < V; j++) {
-          const p = prof.pts[j % R];
-          const q = prof.pts[j - 1];
-          arcV[j] = arcV[j - 1] + Math.hypot(p.y - q.y, p.z - q.z);
-        }
-
-        const positions = [];
-        const normals = [];
-        const uvs = [];
-        const indices = [];
-        const push = (fr, lat, y, nz, ny, u, v) => {
-          positions.push(
-            fr.pos.x + fr.right.x * lat + fr.up.x * y,
-            fr.pos.y + fr.right.y * lat + fr.up.y * y,
-            fr.pos.z + fr.right.z * lat + fr.up.z * y,
-          );
-          normals.push(
-            fr.right.x * nz + fr.up.x * ny,
-            fr.right.y * nz + fr.up.y * ny,
-            fr.right.z * nz + fr.up.z * ny,
-          );
-          uvs.push(u, v);
-        };
-
-        for (let i = 0; i < F; i++) {
-          const fr = frames[i];
-          for (let j = 0; j < V; j++) {
-            const p = prof.pts[j % R];
-            const n = prof.normals[j % R];
-            push(fr, baseLat + zSign * p.z, centerV + p.y, zSign * n.z, n.y, along[i], arcV[j]);
-          }
-        }
-        const flipWind = zSign < 0;
-        for (let i = 0; i < F - 1; i++) {
-          const r0 = i * V;
-          const r1 = (i + 1) * V;
-          for (let j = 0; j < V - 1; j++) {
-            if (flipWind) {
-              indices.push(r0 + j, r0 + j + 1, r1 + j, r0 + j + 1, r1 + j + 1, r1 + j);
-            } else {
-              indices.push(r0 + j, r1 + j, r0 + j + 1, r0 + j + 1, r1 + j, r1 + j + 1);
-            }
-          }
-        }
-
-        // End caps: a fan from the section centroid, facing along ∓tangent.
-        let cy = 0;
-        let cz = 0;
-        for (const p of prof.pts) {
-          cy += p.y;
-          cz += p.z;
-        }
-        cy /= R;
-        cz /= R;
-        const cap = (i, dir) => {
-          const fr = frames[i];
-          const base = positions.length / 3;
-          const t = fr.tangent;
-          const capN = (lat, y, u, v) => {
-            positions.push(
-              fr.pos.x + fr.right.x * lat + fr.up.x * y,
-              fr.pos.y + fr.right.y * lat + fr.up.y * y,
-              fr.pos.z + fr.right.z * lat + fr.up.z * y,
-            );
-            normals.push(t.x * dir, t.y * dir, t.z * dir);
-            uvs.push(u, v);
-          };
-          capN(baseLat + zSign * cz, centerV + cy, 0, 0);
-          for (const p of prof.pts) {
-            capN(baseLat + zSign * p.z, centerV + p.y, p.z, p.y);
-          }
-          const forward = dir * zSign < 0;
-          for (let j = 0; j < R; j++) {
-            const a = base + 1 + j;
-            const b = base + 1 + ((j + 1) % R);
-            if (forward) indices.push(base, a, b);
-            else indices.push(base, b, a);
-          }
-        };
-        cap(0, -1);
-        cap(F - 1, 1);
-
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-        geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
-        geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-        geo.setIndex(indices);
-        return geo;
-      }
-
-      /* --- Post hardware, built in POST SPACE ------------------------------
-       * x = lateral offset from the kerb centreline, +x toward the field
-       * y = height above the deck (so it lines up with the sweep's centerV)
-       * z = along travel
-       * One template is built per rebuild and cloned per post.
-       */
-
-      /** ExtrudeGeometry comes back non-indexed while the sweeps and cylinders
-       *  are indexed, and mergeGeometries refuses to mix the two (it returns
-       *  null and you get a silently empty rail). A trivial sequential index
-       *  costs one int per vertex and keeps everything mergeable. */
-      function ensureIndexed(geo) {
-        if (geo.index) return geo;
-        const n = geo.attributes.position.count;
-        const arr = n > 65535 ? new Uint32Array(n) : new Uint16Array(n);
-        for (let i = 0; i < n; i++) arr[i] = i;
-        geo.setIndex(new THREE.BufferAttribute(arr, 1));
-        return geo;
-      }
-
-      /** Box with chamfered edges. ExtrudeGeometry's bevel does the work — a
-       *  bare BoxGeometry (what the kit uses for posts) has nothing for a
-       *  highlight to catch, which is exactly what "blocky" looks like. */
-      function chamferBox(w, h, d, bevel) {
-        const b = Math.max(0.001, Math.min(bevel, w * 0.24, h * 0.24, d * 0.24));
-        const hw = w * 0.5 - b;
-        const hd = d * 0.5 - b;
-        const shape = new THREE.Shape();
-        shape.moveTo(-hw, -hd);
-        shape.lineTo(hw, -hd);
-        shape.lineTo(hw, hd);
-        shape.lineTo(-hw, hd);
-        shape.closePath();
-        const geo = new THREE.ExtrudeGeometry(shape, {
-          depth: Math.max(0.001, h - 2 * b),
-          bevelEnabled: true,
-          bevelThickness: b,
-          bevelSize: b,
-          bevelOffset: 0,
-          bevelSegments: 1,
-          curveSegments: 1,
-        });
-        geo.translate(0, 0, b);
-        geo.rotateX(-Math.PI / 2); // extrusion axis → up, shape y → along travel
-        return ensureIndexed(geo);
-      }
-
-      /** I-section post: flanges facing the field, web running along travel. */
-      function iBeamPost(width, depth, flangeT, webT, height, bevel) {
-        const x0 = width * 0.5;
-        const y0 = depth * 0.5;
-        const xi = Math.max(0.002, x0 - flangeT);
-        const yi = Math.max(0.001, webT * 0.5);
-        const s = new THREE.Shape();
-        s.moveTo(-x0, -y0);
-        s.lineTo(-x0, y0);
-        s.lineTo(-xi, y0);
-        s.lineTo(-xi, yi);
-        s.lineTo(xi, yi);
-        s.lineTo(xi, y0);
-        s.lineTo(x0, y0);
-        s.lineTo(x0, -y0);
-        s.lineTo(xi, -y0);
-        s.lineTo(xi, -yi);
-        s.lineTo(-xi, -yi);
-        s.lineTo(-xi, -y0);
-        s.closePath();
-        // Bevel must stay under half the thinnest wall or the reflex corners of
-        // the I self-intersect and the post turns into spaghetti.
-        const b = Math.max(0.001, Math.min(bevel, flangeT * 0.35, webT * 0.35));
-        const geo = new THREE.ExtrudeGeometry(s, {
-          depth: Math.max(0.01, height - 2 * b),
-          bevelEnabled: true,
-          bevelThickness: b,
-          bevelSize: b,
-          bevelOffset: 0,
-          bevelSegments: 1,
-          curveSegments: 1,
-        });
-        geo.translate(0, 0, b);
-        geo.rotateX(-Math.PI / 2);
-        return ensureIndexed(geo);
-      }
-
-      /** Button-head bolt sunk in a corrugation valley, axis along ±x. */
-      function boltHead(radius, len, dir) {
-        const geo = new THREE.CylinderGeometry(radius, radius * 0.62, len, 10, 1, false);
-        geo.rotateZ(-Math.PI / 2); // +y → +x
-        if (dir < 0) geo.rotateY(Math.PI);
-        return geo;
-      }
-
-      /** Everything that repeats at each post, merged once into one template. */
-      function buildPostTemplate(prof, r, kerbTop, centerV) {
-        const parts = [];
-        const sgn = prof.backZ >= 0 ? 1 : -1;
-        const beamTop = centerV + prof.height * 0.5;
-        const postX = prof.backZ + sgn * (r.blockout + r.postWidth * 0.5);
-        const postTop = beamTop + r.postRise;
-        const postH = Math.max(0.08, postTop - kerbTop);
-
-        const post = iBeamPost(
-          r.postWidth, r.postDepth, r.flangeT, r.webT, postH, r.bevel,
-        );
-        post.translate(postX, kerbTop, 0);
-        parts.push(post);
-
-        if (r.basePlate) {
-          const plate = chamferBox(r.postWidth * 1.55, 0.028, r.postDepth * 1.35, r.bevel);
-          plate.translate(postX, kerbTop, 0);
-          parts.push(plate);
-        }
-
-        // Spacer between post and beam, overlapping both a little so no hairline
-        // gap opens up at grazing angles.
-        // chamferBox sits on y = 0, so centre it on the beam rather than
-        // hanging it off the beam's midline.
-        const blockW = r.blockout + 0.024;
-        const blockH = prof.height * 0.62;
-        const block = chamferBox(blockW, blockH, r.postDepth * 0.92, r.bevel);
-        block.translate(
-          prof.backZ + sgn * (blockW * 0.5 - 0.012), centerV - blockH * 0.5, 0,
-        );
-        parts.push(block);
-
-        if (r.bolts) {
-          for (const v of prof.valleys) {
-            // Wide end flush with the valley floor, taper toward traffic.
-            const len = r.boltRadius * 1.5;
-            const bolt = boltHead(r.boltRadius, len, sgn);
-            bolt.translate(v.z - sgn * len * 0.5, centerV + v.y, 0);
-            parts.push(bolt);
-          }
-        }
-
-        const merged = mergeGeometries(parts, false);
-        for (const g of parts) g.dispose();
-        return merged;
-      }
-
-      function placePosts(frames, template, baseLat, zSign, spacing, out) {
-        const F = frames.length;
-        let total = 0;
-        for (let i = 1; i < F; i++) total += frames[i].pos.distanceTo(frames[i - 1].pos);
-        const n = Math.max(2, Math.round(total / Math.max(0.6, spacing)) + 1);
-        const rightS = new THREE.Vector3();
-        const fwdS = new THREE.Vector3();
-        for (let k = 0; k < n; k++) {
-          const idx = Math.round((k / (n - 1)) * (F - 1));
-          const fr = frames[idx];
-          // (right, up, tangent) is LEFT-handed here (right = cross(tangent, up)),
-          // so negate the third axis to keep the template's winding intact; the
-          // post is symmetric along travel, so the flip costs nothing.
-          rightS.copy(fr.right).multiplyScalar(zSign);
-          fwdS.copy(fr.tangent).multiplyScalar(-zSign);
-          _pos.copy(fr.pos).addScaledVector(fr.right, baseLat);
-          _m.makeBasis(rightS, fr.up, fwdS).setPosition(_pos);
-          out.push(template.clone().applyMatrix4(_m));
-        }
-      }
-
-      function buildLabRails(length, rp, r) {
-        if (r.height <= 0) return null;
-        const hw = rp.width / 2;
-        const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
-        const kerbTop = rp.railHeight;
-        const edgeAbs = hw - rw * 0.5;
-        const centerV = kerbTop + r.gap + r.height * 0.5;
-        const frames = straightFrames(length, rp.segLen);
-        const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
-
-        const template = r.posts ? buildPostTemplate(prof, r, kerbTop, centerV) : null;
-        const geos = [];
-        for (const side of [-1, 1]) {
-          const zSign = r.mirrorSides ? side : 1;
-          const baseLat = side * edgeAbs;
-          geos.push(sweepRail(frames, prof, baseLat, zSign, centerV));
-          if (template) placePosts(frames, template, baseLat, zSign, r.postSpacing, geos);
-        }
-        template?.dispose();
-        const merged = mergeGeometries(geos, false);
-        for (const g of geos) g.dispose();
-        if (merged) merged.computeBoundingSphere();
-        return merged;
-      }
+      // The rail lives in modularRoadRail.js — the SAME code the game builds,
+      // so tuning here cannot drift from what ships. Only the lab's own
+      // parameter object and its GUI stay in this file.
 
       // ── Look / scene state ─────────────────────────────────────────────────
       const look = {
         asphaltDark: 0x5c626a,
         asphaltLight: 0x8a919a,
         deckBrightness: 1.0,
+        streak: 14, // features this many times longer along the road than across
         lineColor: 0xf2f2f2,
         railA: 0xd0342c,
         railB: 0xf0f0f0,
-        sideColor: 0x3a3d42,
+        sideColor: 0xd0342c, // matches the kerb by default
         linesOn: false,
+        centerOn: true,
+        edgeOn: true,
         railStriped: false,
         grainScale: 1.0,
         macroScale: 0.06,
@@ -672,12 +159,18 @@
         wheelDarken: 0.1,
         centerHalf: 0.045,
         edgePos: 0.82,
-        edgeWidth: 0.05,
+        edgeWidth: 0.022, // half-width of the SOLID paint (lateral units)
+        edgeSoft: 0.004, // feather outside it; the pixel floor handles distance
+        centerSoft: 0.02,
         centerDash: 0.18,
       };
 
       const geom = {
-        straightLength: PRESET.params.straightLength,
+        preset: "curve",
+        straightLength: PRESETS.straight.params.straightLength,
+        curveRadius: PRESETS.curve.params.curveRadius,
+        curveAngle: PRESETS.curve.params.curveAngle,
+        curveDir: PRESETS.curve.params.curveDir,
         width: kitRoadParams.width,
         thickness: kitRoadParams.thickness,
         railWidth: kitRoadParams.railWidth,
@@ -687,39 +180,15 @@
       };
 
       /**
-       * Lab guardrail shape. Defaults are a THRIE-beam (3 humps) rather than the
-       * kit's W: at 0.8 m tall a two-hump section is mostly flat sheet, and flat
-       * sheet at that size is what reads as a slab. Post spacing is ~2.8 m
-       * instead of the kit's 4 m for the same reason — long unsupported runs
-       * make a barrier look like a fence panel.
+       * The lab's working copy of the SHIPPING rail params, seeded from the
+       * module so the panel opens on exactly what the game builds — no second
+       * set of defaults to drift.
+       *
+       * Edits here are live-only. "Export look" carries the ROAD look, not the
+       * rail, so a rail setting you want to keep has to be written back into
+       * railParams in modularRoadRail.js.
        */
-      const rail = {
-        useLab: true,
-        mirrorSides: true,
-        flipW: false,
-        style: 3, // humps: 1 box beam · 2 W-beam · 3 thrie-beam
-        height: 0.8,
-        depth: 0.26,
-        gap: 0.18, // kerb top → beam bottom
-        valleyGap: 0.3, // valley inset, as a fraction of depth
-        backAmp: 0.35, // corrugation carried onto the back face (0 = flat plate)
-        plateau: 0.22, // flat run at each crest/valley, fraction of the pitch
-        bendRadius: 0.05,
-        bendSeg: 4,
-        beadSeg: 10,
-        posts: true,
-        postSpacing: 2.8,
-        postWidth: 0.15, // lateral, flange to flange
-        postDepth: 0.17, // along travel, flange width
-        flangeT: 0.022,
-        webT: 0.018,
-        postRise: 0.06, // how far the post pokes above the beam
-        blockout: 0.11, // spacer between post and beam
-        basePlate: true,
-        bolts: true,
-        boltRadius: 0.034,
-        bevel: 0.006,
-      };
+      const rail = { useLab: true, ...railParams };
 
       /**
        * Galvanised steel for the lab rails.
@@ -736,22 +205,38 @@
        * geometry detail does on its own.
        */
       const railLook = {
-        base: 0x6b737c,
-        tint: 0xa6b0ba,
-        // Galvanising is matte-ish; at 0.33 with an env this bright the whole
-        // rail blew out to white and read as chrome.
-        roughness: 0.44,
-        metalness: 0.9,
+        // Tuned against THIS lab's studio, which is bright (sun 3.2 + hemi 1.15
+        // + fill 1.1 + rim 0.55 + ambient 0.45, exposure 1.25). A lighter albedo
+        // that looked right on paper blew out to flat white here; expect to
+        // lift these again under the game's own sky.
+        base: 0x3a4048,
+        tint: 0x8b949d,
+        roughness: 0.5,
+        metalness: 0.3,
+        /**
+         * STYLIZED SHADE, not noise. `shade` darkens downward-facing metal and
+         * lightens upward-facing metal from the world normal alone — a flat
+         * directional term that makes the corrugation and the bull-nose read as
+         * FORM. Stylized art carries a surface on its silhouette and its
+         * shading, not on texture detail, and the spangle was doing the
+         * opposite: fighting the shape with high-frequency mush that also
+         * shimmered at distance.
+         *
+         * `spangleAmount` defaults to 0 for that reason. The machinery stays so
+         * a weathered galvanised look is one slider away, but it is off.
+         */
+        shade: 0.6,
         spangleScale: 9.0, // ~11 cm crystals; much below this it reads as marble
-        spangleAmount: 0.45,
-        roughVary: 0.3,
-        envIntensity: 0.6,
+        spangleAmount: 0.0,
+        roughVary: 0.12,
+        envIntensity: 0.4,
       };
       const railU = {
         base: uniform(new THREE.Color(railLook.base)),
         tint: uniform(new THREE.Color(railLook.tint)),
         roughness: uniform(railLook.roughness),
         metalness: uniform(railLook.metalness),
+        shade: uniform(railLook.shade),
         spangleScale: uniform(railLook.spangleScale),
         spangleAmount: uniform(railLook.spangleAmount),
         roughVary: uniform(railLook.roughVary),
@@ -773,8 +258,28 @@
 
       // Lab-only procedural normals (does not edit modularRoadMaterial.js).
       // Height from mx_noise → finite differences in UV metres → normalMap.
+      //
+      // THE COST IS IN THE TAP COUNT, and it is worth knowing before tuning:
+      // the normal is a 3-tap finite difference, so whatever `asphaltHeight`
+      // costs is paid THREE times per fragment, on top of the ~4 noise
+      // evaluations createRoadMaterial already does for colour and roughness —
+      // across most of the screen, since that is what a road is. `model` picks
+      // how much of that to pay:
+      //
+      //   chip  gravelly asphalt: chip noise + a 3-octave fractal = 4 evals per
+      //         tap, 12 for the normal. What the lab shipped with.
+      //   f1    smooth circuit: ONE low-frequency noise = 1 eval per tap, 3 for
+      //         the normal. No chip at all — a resurfaced F1 track is flat, and
+      //         the detail you actually see at speed is long-wavelength
+      //         waviness plus the polish in the wheel paths.
+      //   off   no normal map at all.
+      //
+      // Use the GPU ms in the HUD to A/B them; "Fill test" (F) points the camera
+      // so the deck covers the frame, which is the only pose where the road
+      // shader is the thing being measured.
+      const BUMP_MODELS = { chip: "chip", f1: "f1", off: "off" };
       const bump = {
-        enabled: true,
+        model: BUMP_MODELS.f1,
         softenAlbedoGrain: true,
         previewGloss: true, // lower roughness while tuning normals (specular reads bumps)
         strength: 1.1,
@@ -783,7 +288,24 @@
         aggScale: 14.0,
         macroScale: 0.05,
         macroMix: 0.15,
+        /** f1 model: cycles per metre of the surface waviness. */
+        waveScale: 0.55,
+        /**
+         * f1 model: height of that waviness, and it needs its own control.
+         *
+         * The normal comes from a finite difference, so its steepness is
+         * amplitude × FREQUENCY — and `strength` was dialled in against
+         * chip noise at 14 cycles/m. Reused at 0.55 cycles/m the gradient
+         * overshoots, `1 − len²` clamps to its floor, and every normal ends up
+         * horizontal: the deck turns into a mirror of soft chrome blobs.
+         */
+        waveAmp: 0.06,
+        /** Matches the deck albedo's `streak` — the bumps have to run the same
+         *  way as the tone, or the surface reads as two materials at once. */
+        streak: 14,
       };
+      /** Anything but "off" wants tangents, softened albedo grain and gloss preview. */
+      const bumpOn = () => bump.model !== BUMP_MODELS.off;
       const bumpU = {
         strength: uniform(bump.strength),
         normalScale: uniform(bump.normalScale),
@@ -791,11 +313,14 @@
         aggScale: uniform(bump.aggScale),
         macroScale: uniform(bump.macroScale),
         macroMix: uniform(bump.macroMix),
+        waveScale: uniform(bump.waveScale),
+        waveAmp: uniform(bump.waveAmp),
+        streak: uniform(bump.streak),
       };
 
-      /** Procedural asphalt height in UV-metres (along, across). */
-      function asphaltHeight(uvn) {
-        const along = uvn.x;
+      /** Gravelly asphalt: chip speckle over a 3-octave drift. 4 noise evals. */
+      function asphaltHeightChip(uvn) {
+        const along = uvn.x.div(bumpU.streak);
         const across = uvn.y;
         const agg = mx_noise_float(
           vec3(along.mul(bumpU.aggScale), across.mul(bumpU.aggScale), 0.0),
@@ -805,6 +330,29 @@
           3, 2.0, 0.5, 1.0,
         );
         return mix(agg, macro, bumpU.macroMix);
+      }
+
+      /**
+       * Smooth circuit: ONE low-frequency noise, no chip. 1 eval.
+       *
+       * Long wavelength on purpose. Chip-scale normal detail is invisible past a
+       * few metres and turns into shimmer beyond that — the fwidth fade in
+       * createRoadMaterial exists to hide exactly that — whereas surface
+       * waviness at ~2 m reads as a real, slightly uneven track surface from a
+       * moving car, and cannot alias.
+       */
+      function asphaltHeightF1(uvn) {
+        return mx_noise_float(vec3(
+          uvn.x.div(bumpU.streak).mul(bumpU.waveScale),
+          uvn.y.mul(bumpU.waveScale),
+          3.1,
+        )).mul(bumpU.waveAmp);
+      }
+
+      function asphaltHeight(uvn) {
+        return bump.model === BUMP_MODELS.chip
+          ? asphaltHeightChip(uvn)
+          : asphaltHeightF1(uvn);
       }
 
       function applyLabBumpNormals(mat) {
@@ -851,6 +399,9 @@
         bumpU.aggScale.value = bump.aggScale;
         bumpU.macroScale.value = bump.macroScale;
         bumpU.macroMix.value = bump.macroMix;
+        bumpU.waveScale.value = bump.waveScale;
+        bumpU.waveAmp.value = bump.waveAmp;
+        bumpU.streak.value = bump.streak;
       }
 
       /**
@@ -920,11 +471,16 @@
         const coarse = mx_noise_float(p);
         const fine = mx_noise_float(p.mul(4.7).add(vec3(11.3, 2.7, 5.1)));
         const grain = coarse.mul(0.65).add(fine.mul(0.35));
-        mat.colorNode = mix(
-          railU.base,
-          railU.tint,
-          clamp(grain.mul(railU.spangleAmount).add(0.5), 0.0, 1.0),
+        // Which way the surface faces, remapped to 0..1. Upward-facing metal
+        // catches sky, downward-facing sits in its own shadow — one term, no
+        // texture, and it is what makes the corrugation legible at a distance.
+        const facing = normalWorld.y.mul(0.5).add(0.5);
+        const shaded = clamp(
+          facing.sub(0.5).mul(railU.shade).add(0.5)
+            .add(grain.mul(railU.spangleAmount)),
+          0.0, 1.0,
         );
+        mat.colorNode = mix(railU.base, railU.tint, shaded);
         mat.roughnessNode = clamp(
           railU.roughness.add(grain.mul(railU.roughVary)), 0.04, 1.0,
         );
@@ -937,12 +493,46 @@
 
       let renderer, scene, camera, controls, sun, hemi, fill, ambient;
       let roadMat, railMat, kitRailMat, railEnv;
+      /** Module-scope so importLook can refresh every control after a load. */
+      let gui = null;
+      let hasTimestamps = false;
+      /** Rolling averages — a single frame's GPU time is far too noisy to read. */
+      const perf = { frames: 0, gpuSum: 0, gpuN: 0, since: 0, gpu: 0, fps: 0 };
       let pieceRoot, ground, grid;
       let roadMesh = null;
       let railMesh = null;
 
+      /**
+       * A device carrying every adapter feature, which is how `timestamp-query`
+       * gets enabled. Without it `renderer.info.render.timestamp` stays 0 and
+       * every performance claim made in this lab is a guess — the whole point of
+       * the surface-model A/B is that you can see the number move.
+       */
+      async function createTimingDevice() {
+        if (!navigator.gpu) return null;
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) return null;
+          return await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+        } catch (e) {
+          console.warn("[road-lab] timestamp device unavailable; GPU ms will read —", e);
+          return null;
+        }
+      }
+
       async function init() {
-        renderer = new THREE.WebGPURenderer({ antialias: true });
+        const device = await createTimingDevice();
+        hasTimestamps = Boolean(device?.features?.has("timestamp-query"));
+        renderer = new THREE.WebGPURenderer({
+          antialias: true,
+          // BOTH halves are required and neither warns if missing: the device
+          // has to carry the `timestamp-query` feature, AND the renderer has to
+          // be asked to track it (Backend defaults trackTimestamp to false, then
+          // ANDs it with the feature). Miss either and info.render.timestamp
+          // silently stays 0 forever.
+          trackTimestamp: true,
+          ...(device ? { device } : {}),
+        });
         renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
         renderer.setSize(innerWidth, innerHeight);
         // Soft daylight studio — reads asphalt / metal without a cave bg.
@@ -1012,17 +602,13 @@
         pieceRoot = new THREE.Group();
         scene.add(pieceRoot);
 
-        roadMat = createRoadMaterial({
-          ...look,
-          linesOn: look.linesOn ? 1 : 0,
-          railStriped: look.railStriped ? 1 : 0,
-        });
+        roadMat = createRoadMaterial(lookUniforms());
         railEnv = buildStudioEnv();
         railMat = createLabRailMaterial(railEnv);
         kitRailMat = createGuardrailMaterial();
         kitRailMat.shadowSide = THREE.FrontSide;
 
-        if (bump.enabled) applyLabBumpNormals(roadMat);
+        if (bumpOn()) applyLabBumpNormals(roadMat);
         applyLook(); // respects softenAlbedoGrain
 
         rebuildPiece();
@@ -1034,7 +620,8 @@
 
         window.__roadPieceLab = {
           renderer, scene, camera, controls, look, geom, rail, railLook, bump,
-          rebuildPiece, applyRailLook, roadMat, railMat,
+          rebuildPiece, applyPreset, applyRailLook, applyLook, applyBump, exportLook, importLook,
+          lookPayload, fillCamera, perf, roadMat, railMat,
         };
 
         renderer.setAnimationLoop(frame);
@@ -1059,22 +646,28 @@
           railWidth: geom.railWidth,
           railHeight: geom.railHeight,
         };
+        const preset = PRESETS[geom.preset] ?? PRESETS.straight;
         const pp = {
           ...kitPieceParams,
-          ...PRESET.params,
+          ...preset.params,
           straightLength: geom.straightLength,
+          curveRadius: geom.curveRadius,
+          curveAngle: geom.curveAngle,
+          curveDir: geom.curveDir,
         };
         const gp = { ...kitGuardrailParams, enabled: geom.edges };
         const edges = geom.edges;
 
         // Deck from kit (keeps aZone / aLateral for the real asphalt shader).
-        const built = buildPiece(PRESET.base, new THREE.Matrix4(), pp, rp, gp, edges);
+        const built = buildPiece(preset.base, new THREE.Matrix4(), pp, rp, gp, edges);
 
         let railGeo = null;
         if (geom.guardrails && edges) {
           if (rail.useLab) {
             built.railGeometry?.dispose();
-            railGeo = buildLabRails(geom.straightLength, rp, rail);
+            // The piece's OWN frames, so the rail banks and bends with whatever
+            // centreline the kit generated instead of assuming a straight.
+            railGeo = buildRailGeometry(built.frames, rp, rail);
           } else {
             railGeo = built.railGeometry;
           }
@@ -1090,7 +683,7 @@
         built.geometry.applyMatrix4(offset);
         if (railGeo) railGeo.applyMatrix4(offset);
         // Tangents help normalMap align chip detail with the sweep UVs.
-        if (bump.enabled) built.geometry.computeTangents();
+        if (bumpOn()) built.geometry.computeTangents();
 
         roadMesh = new THREE.Mesh(built.geometry, roadMat);
         roadMesh.castShadow = roadMesh.receiveShadow = sceneCtl.shadows;
@@ -1111,24 +704,106 @@
           + (railGeo
             ? (railGeo.index ? railGeo.index.count : railGeo.attributes.position.count) / 3
             : 0);
-        $("s-len").textContent = String(geom.straightLength);
+        roadMesh.geometry.computeBoundingSphere();
+        $("s-title").textContent = preset.label;
+        $("s-len").textContent = preset.base === "curve"
+          ? `R${geom.curveRadius} ${geom.curveAngle}°`
+          : `${geom.straightLength} m`;
         $("s-w").textContent = String(geom.width);
         $("s-tris").textContent = Math.round(tris).toLocaleString();
       }
 
-      function applyLook() {
-        const grain = bump.enabled && bump.softenAlbedoGrain
-          ? look.grainScale * 0.12
-          : look.grainScale;
-        syncRoadUniforms(roadMat, {
-          ...look,
-          grainScale: grain,
-          // Matte asphalt kills normal reads — temporarily gloss the deck for look-dev.
-          deckRough: bump.enabled && bump.previewGloss ? look.deckRough * 0.72 : look.deckRough,
-          roughVary: bump.enabled && bump.previewGloss ? look.roughVary * 2.2 : look.roughVary,
-          linesOn: look.linesOn ? 1 : 0,
-          railStriped: look.railStriped ? 1 : 0,
+      /** `look` holds the on/off switches as booleans so lil-gui renders them as
+       *  checkboxes, but they drive FLOAT uniforms. Converting in one place means
+       *  a new switch can't be wired to the GUI and forgotten on the way to the
+       *  material — which is the same shape as the bug that made "Road lines" do
+       *  nothing (see NUMERIC_UNIFORMS in modularRoadMaterial.js). */
+      const LOOK_FLAGS = ["linesOn", "centerOn", "edgeOn", "railStriped"];
+      function lookUniforms(extra = {}) {
+        const out = { ...look, ...extra };
+        for (const k of LOOK_FLAGS) out[k] = out[k] ? 1 : 0;
+        return out;
+      }
+
+      /* --- Look I/O: the whole point of the lab -----------------------------
+       * Tuning here was previously a dead end — roadGame.js calls
+       * createRoadMaterial() with no arguments, and the track file saved the
+       * road's GEOMETRY params but nothing about its surface. These two write
+       * and read the file that closes that loop; the game's "Load" button takes
+       * it directly and then carries it in the track's own save.
+       *
+       * Only ROAD_LOOK_KEYS are written, so lab-only controls (the bump preview,
+       * the guardrail params) can't leak into a file the game will read, and the
+       * flags go out as 0/1 rather than booleans.
+       */
+      function lookPayload() {
+        const params = lookUniforms();
+        const roadLook = {};
+        for (const k of ROAD_LOOK_KEYS) {
+          if (params[k] != null) roadLook[k] = params[k];
+        }
+        return {
+          format: ROAD_LOOK_FORMAT,
+          version: ROAD_LOOK_VERSION,
+          savedAt: new Date().toISOString(),
+          roadLook,
+        };
+      }
+
+      function exportLook() {
+        const blob = new Blob([JSON.stringify(lookPayload(), null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "modular-road-look.json";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function importLook(data) {
+        const src = data?.roadLook ?? (data?.format ? null : data);
+        if (!src || typeof src !== "object") {
+          alert("Not a road look file.");
+          return;
+        }
+        for (const k of ROAD_LOOK_KEYS) {
+          if (src[k] == null || !(k in look)) continue;
+          // `look` holds the flags as booleans for lil-gui; the file has 0/1.
+          look[k] = typeof look[k] === "boolean" ? !!src[k] : src[k];
+        }
+        applyLook();
+        gui?.controllersRecursive().forEach((c) => c.updateDisplay());
+      }
+
+      const lookFileInput = (() => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".json,application/json";
+        input.hidden = true;
+        input.addEventListener("change", async () => {
+          const file = input.files?.[0];
+          input.value = "";
+          if (!file) return;
+          try {
+            importLook(JSON.parse(await file.text()));
+          } catch (err) {
+            showErr(err);
+          }
         });
+        document.body.appendChild(input);
+        return input;
+      })();
+
+      function applyLook() {
+        const gloss = bumpOn() && bump.previewGloss;
+        syncRoadUniforms(roadMat, lookUniforms({
+          grainScale: bumpOn() && bump.softenAlbedoGrain
+            ? look.grainScale * 0.12
+            : look.grainScale,
+          // Matte asphalt kills normal reads — temporarily gloss the deck for look-dev.
+          deckRough: gloss ? look.deckRough * 0.72 : look.deckRough,
+          roughVary: gloss ? look.roughVary * 2.2 : look.roughVary,
+        }));
       }
 
       function applyRailLook() {
@@ -1136,23 +811,43 @@
         railU.tint.value.set(railLook.tint);
         railU.roughness.value = railLook.roughness;
         railU.metalness.value = railLook.metalness;
+        railU.shade.value = railLook.shade;
         railU.spangleScale.value = railLook.spangleScale;
         railU.spangleAmount.value = railLook.spangleAmount;
         railU.roughVary.value = railLook.roughVary;
         railMat.envMapIntensity = railLook.envIntensity;
       }
 
+      /**
+       * Switching preset has to SEED the shared sliders from it.
+       *
+       * The piece is built from `geom`, not from the preset — the sliders have
+       * to stay live for tuning — so without this the preset's own params are
+       * overwritten on the way in and every curve preset silently builds
+       * whatever the sliders last held. (Measured: "tight hairpin" came out as
+       * R26 90°, identical to the 90° preset, down to the triangle count.)
+       */
+      function applyPreset() {
+        Object.assign(geom, PRESETS[geom.preset]?.params ?? {});
+        rebuildPiece();
+        resetCamera();
+        gui?.controllersRecursive().forEach((c) => c.updateDisplay());
+      }
+
       function applyBump() {
         syncBumpUniforms();
-        if (bump.enabled) applyLabBumpNormals(roadMat);
+        if (bumpOn()) applyLabBumpNormals(roadMat);
         else clearLabBumpNormals(roadMat);
         applyLook();
         rebuildPiece();
       }
 
+      /** Frame whatever was built — a 150° hairpin is a very different size
+       *  from a 32 m straight, so this reads the bounds rather than the length. */
       function resetCamera() {
-        const L = geom.straightLength;
-        camera.position.set(L * 0.55, L * 0.28, L * 0.55);
+        const s = roadMesh?.geometry?.boundingSphere;
+        const r = Math.max(8, s ? s.radius : geom.straightLength * 0.6);
+        camera.position.set(r * 0.95, r * 0.5, r * 0.95);
         controls.target.set(0, 0.4, 0);
         controls.update();
       }
@@ -1163,13 +858,38 @@
         controls.update();
       }
 
+      /**
+       * Nose-down over the deck so road fragments cover the whole frame.
+       *
+       * The measurement pose. In any normal view the road is a fraction of the
+       * pixels and half the GPU time is sky, ground and guardrail, so switching
+       * surface models barely moves the number and you conclude — wrongly —
+       * that the shader is free. Here the road IS the frame, so the delta
+       * between models is the road shader's actual per-pixel cost.
+       */
+      function fillCamera() {
+        camera.position.set(0, 2.2, 0);
+        controls.target.set(0, 0, -0.001); // not exactly down: OrbitControls gimbal
+        controls.update();
+      }
+
       function buildGui() {
-        const gui = new GUI({ title: "Look / style" });
+        gui = new GUI({ title: "Look / style" });
+
+        // Top of the panel on purpose — this is how a look leaves the lab.
+        const fIO = gui.addFolder("Look → game");
+        fIO.add({ exportLook }, "exportLook").name("Export look (.json)");
+        fIO.add({ load: () => lookFileInput.click() }, "load").name("Import look (.json)");
+        fIO.open();
 
         const fLook = gui.addFolder("Asphalt");
         fLook.addColor(look, "asphaltDark").name("Dark").onChange(applyLook);
         fLook.addColor(look, "asphaltLight").name("Light").onChange(applyLook);
         fLook.add(look, "deckBrightness", 0.4, 1.8, 0.01).name("Brightness").onChange(applyLook);
+        // Top of the asphalt folder: this is the control that decides whether
+        // the deck reads as road or as gravel.
+        fLook.add(look, "streak", 1, 40, 0.5).name("Streak (along/across)")
+          .onChange(() => { bump.streak = look.streak; syncBumpUniforms(); applyLook(); });
         fLook.add(look, "grainScale", 0, 2, 0.01).name("Grain contrast").onChange(applyLook);
         fLook.add(look, "macroScale", 0.01, 0.2, 0.005).name("Macro scale").onChange(applyLook);
         fLook.add(look, "aggScale", 1, 12, 0.1).name("Aggregate scale").onChange(applyLook);
@@ -1179,8 +899,14 @@
         fLook.add(look, "wheelDarken", 0, 0.35, 0.01).name("Wheel darken").onChange(applyLook);
         fLook.open();
 
-        const fBump = gui.addFolder("Noise normals (lab)");
-        fBump.add(bump, "enabled").name("Enabled").onChange(applyBump);
+        const fBump = gui.addFolder("Surface normals (lab)");
+        fBump.add(bump, "model", {
+          "F1 — smooth (3 noise)": BUMP_MODELS.f1,
+          "Chip — gravel (12 noise)": BUMP_MODELS.chip,
+          "Off (0)": BUMP_MODELS.off,
+        }).name("Surface model").onChange(applyBump);
+        fBump.add(bump, "waveScale", 0.1, 3, 0.05).name("Wave scale (F1)").onChange(syncBumpUniforms);
+        fBump.add(bump, "waveAmp", 0, 0.3, 0.005).name("Wave height (F1)").onChange(syncBumpUniforms);
         fBump.add(bump, "softenAlbedoGrain").name("Soften albedo grain").onChange(applyLook);
         fBump.add(bump, "previewGloss").name("Preview gloss").onChange(applyLook);
         fBump.add(bump, "strength", 0, 3, 0.01).name("Strength").onChange(syncBumpUniforms);
@@ -1192,18 +918,29 @@
         fBump.open();
 
         const fLines = gui.addFolder("Lines & kerbs");
-        fLines.add(look, "linesOn").name("Road lines").onChange(applyLook);
+        fLines.add(look, "linesOn").name("Road lines (all)").onChange(applyLook);
         fLines.addColor(look, "lineColor").name("Line color").onChange(applyLook);
-        fLines.add(look, "centerHalf", 0.01, 0.12, 0.005).name("Centre width").onChange(applyLook);
+        fLines.add(look, "centerOn").name("· Centre line").onChange(applyLook);
+        fLines.add(look, "centerHalf", 0.005, 0.12, 0.001).name("Centre width").onChange(applyLook);
+        fLines.add(look, "centerSoft", 0, 0.06, 0.001).name("Centre softness").onChange(applyLook);
         fLines.add(look, "centerDash", 0.05, 0.5, 0.01).name("Dash density").onChange(applyLook);
+        fLines.add(look, "edgeOn").name("· Edge lines").onChange(applyLook);
         fLines.add(look, "edgePos", 0.5, 0.95, 0.01).name("Edge position").onChange(applyLook);
-        fLines.add(look, "edgeWidth", 0.01, 0.12, 0.005).name("Edge width").onChange(applyLook);
+        fLines.add(look, "edgeWidth", 0.002, 0.08, 0.001).name("Edge width").onChange(applyLook);
+        // 0 is not blurry — the per-pixel floor in the shader still antialiases.
+        fLines.add(look, "edgeSoft", 0, 0.04, 0.001).name("Edge softness").onChange(applyLook);
         fLines.addColor(look, "railA").name("Kerb color").onChange(applyLook);
         fLines.add(look, "railStriped").name("Kerb stripes").onChange(applyLook);
         fLines.addColor(look, "railB").name("Stripe B").onChange(applyLook);
         fLines.addColor(look, "sideColor").name("Side / underside").onChange(applyLook);
 
         const fGeom = gui.addFolder("Geometry");
+        fGeom.add(geom, "preset", Object.fromEntries(
+          Object.entries(PRESETS).map(([k, v]) => [v.label, k]),
+        )).name("Piece").onFinishChange(applyPreset);
+        fGeom.add(geom, "curveRadius", 8, 60, 1).name("Curve radius (m)").onFinishChange(rebuildPiece);
+        fGeom.add(geom, "curveAngle", 15, 180, 5).name("Curve angle (°)").onFinishChange(rebuildPiece);
+        fGeom.add(geom, "curveDir", { Right: 1, Left: -1 }).name("Turn").onFinishChange(rebuildPiece);
         fGeom.add(geom, "straightLength", 8, 48, 1).name("Length (m)").onFinishChange(rebuildPiece);
         fGeom.add(geom, "width", 8, 24, 0.5).name("Width (m)").onFinishChange(rebuildPiece);
         fGeom.add(geom, "thickness", 0.2, 1.6, 0.05).name("Thickness").onFinishChange(rebuildPiece);
@@ -1244,8 +981,9 @@
         fPost.add(rail, "bevel", 0.001, 0.02, 0.001).name("Chamfer (m)").onFinishChange(rebuildPiece);
 
         const fSteel = gui.addFolder("Guardrail — steel");
-        fSteel.addColor(railLook, "base").name("Base").onChange(applyRailLook);
-        fSteel.addColor(railLook, "tint").name("Spangle tint").onChange(applyRailLook);
+        fSteel.addColor(railLook, "base").name("Base (down-facing)").onChange(applyRailLook);
+        fSteel.addColor(railLook, "tint").name("Lit (up-facing)").onChange(applyRailLook);
+        fSteel.add(railLook, "shade", 0, 1.5, 0.01).name("Shade").onChange(applyRailLook);
         fSteel.add(railLook, "roughness", 0.02, 1, 0.01).name("Roughness").onChange(applyRailLook);
         fSteel.add(railLook, "metalness", 0, 1, 0.01).name("Metalness").onChange(applyRailLook);
         fSteel.add(railLook, "spangleScale", 0.3, 12, 0.1).name("Spangle scale").onChange(applyRailLook);
@@ -1300,6 +1038,7 @@
 
         fScene.add({ resetCamera }, "resetCamera").name("Reset camera");
         fScene.add({ grazingCamera }, "grazingCamera").name("Grazing view");
+        fScene.add({ fillCamera }, "fillCamera").name("Fill test (measure)");
         fScene.add({ rebuildPiece }, "rebuildPiece").name("Rebuild piece");
       }
 
@@ -1308,6 +1047,7 @@
         const k = e.key.toLowerCase();
         if (k === "r") resetCamera();
         if (k === "g") grazingCamera();
+        if (k === "f") fillCamera();
         if (k === "l") {
           look.linesOn = !look.linesOn;
           applyLook();
@@ -1323,6 +1063,24 @@
       function frame() {
         controls.update();
         renderer.render(scene, camera);
+
+        // Fire-and-forget, exactly as v3/app/main.js does it: the resolve lands
+        // a frame or two later and writes info.render.timestamp, so awaiting it
+        // here would only stall the loop to read a stale number anyway.
+        if (hasTimestamps) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+
+        const now = performance.now();
+        if (!perf.since) perf.since = now;
+        perf.frames++;
+        const ts = renderer.info.render.timestamp;
+        if (ts > 0) { perf.gpuSum += ts; perf.gpuN++; }
+        if (now - perf.since >= 500) {
+          perf.fps = (perf.frames * 1000) / (now - perf.since);
+          perf.gpu = perf.gpuN ? perf.gpuSum / perf.gpuN : 0;
+          $("s-fps").textContent = perf.fps.toFixed(0);
+          $("s-gpu").textContent = perf.gpuN ? `${perf.gpu.toFixed(2)} ms` : "n/a";
+          perf.frames = 0; perf.gpuSum = 0; perf.gpuN = 0; perf.since = now;
+        }
       }
 
       init().catch(showErr);

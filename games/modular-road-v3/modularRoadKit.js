@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { buildRailGeometry } from "./modularRoadRail.js";
 
 /**
  * Modular Road kit — parametric track pieces built by sweeping a single shared
@@ -18,7 +19,13 @@ const _up = new V3(0, 1, 0);
 export const roadParams = {
   width: 16, // outer kerb-to-kerb deck width (m)
   thickness: 0.8, // slab depth below the deck (m) — this is the "depth"
-  railWidth: 0.5, // kerb width on each side (m)
+  // KERB WIDTH (m, each side). Was 0.5, which the old flat-sheet rail sat on
+  // fine — its posts were 0.1 m boxes right against the beam. The rail in
+  // modularRoadRail.js has a blockout and a base plate, so its footprint reaches
+  // ~0.37 m out from the kerb centre and 0.5 left most of it hanging in the air.
+  // buildPostTemplate clamps as a backstop (old tracks carry their own saved
+  // railWidth), but the kerb wants to be genuinely wide enough to carry a post.
+  railWidth: 0.75,
   railHeight: 0.22, // kerb height above the deck (m) — low; guardrail sits on top
   segLen: 1.6, // target sweep step length along the path (m)
   onChange: null,
@@ -2628,7 +2635,18 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   const geometry = def.geometry
     ? def.geometry(pp, rpForProfile)
     : buildSweepGeometry(frames, profileData, { plain: def.plain });
-  const railGeometry = useKerbs && !def.noMesh && !def.profile && !def.geometry ? buildGuardrailGeometry(frames, profileData, gp, rpForProfile) : null;
+  // TWO rails, deliberately.
+  //
+  // `railGeometry` is what you SEE (modularRoadRail.js — corrugated, rolled
+  // edges, posts). `railCollision` is the old flat-sheet builder, kept because a
+  // BVH wants the cheapest possible triangles: bolts, chamfers and a bull-nose
+  // radius contribute nothing to a chassis sweep, and bakeCollision() reruns on
+  // every single track edit. Measured: 3,688 tris vs 696 for the same piece.
+  const wantsRail = useKerbs && !def.noMesh && !def.profile && !def.geometry;
+  const railGeometry = wantsRail ? buildRailGeometry(frames, rpForProfile) : null;
+  const railCollision = wantsRail
+    ? buildGuardrailGeometry(frames, profileData, gp, rpForProfile)
+    : null;
   const shellGeometry = def.shell ? buildShellGeometry(def.shell, frames, profileData, pp) : null;
   // Decor is the vertex-coloured overlay mesh: game lines build theirs from the
   // frames, junctions paint their own markings from their outline.
@@ -2671,5 +2689,12 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
     }
   }
 
-  return { def, geometry, railGeometry, shellGeometry, decorGeometry, world, connectorOut, branchesOut };
+  // `frames` is handed back so a caller can sweep its OWN geometry along the
+  // exact centreline this piece used — road-piece-lab.html builds its
+  // experimental guardrail that way. Recomputing them outside would mean
+  // duplicating every centreline function in here and watching the two drift.
+  return {
+    def, geometry, railGeometry, railCollision, shellGeometry, decorGeometry,
+    frames, world, connectorOut, branchesOut,
+  };
 }

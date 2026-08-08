@@ -1,59 +1,50 @@
 /**
- * Headless checks for the road-piece-lab guardrail.
+ * Headless checks for the modular-road guardrail (games/modular-road-v3/modularRoadRail.js).
  *
- * The rail lives inline in games/modular-road-v3/road-piece-lab.html (it is a
- * look-dev sandbox, not kit code), so this pulls the pure builders straight out
- * of the file rather than importing them. That keeps the lab a single file while
- * still letting the geometry be tested — which matters, because two of the
- * failure modes here are SILENT: mergeGeometries returns null when indexed and
- * non-indexed geometry are mixed (empty rail, no error), and a section whose
- * winding disagrees with its supplied normals shades inside-out rather than
- * disappearing.
+ * Two of the failure modes here are SILENT, which is why this exists:
+ * mergeGeometries returns null when indexed and non-indexed geometry are mixed
+ * (empty rail, no error), and a section whose winding disagrees with its
+ * supplied normals shades inside-out rather than disappearing.
  *
  *   node tools/labGuardrailTest.mjs
  */
-import fs from "node:fs";
 import * as THREE from "three";
-import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import {
+  decimateFrames,
+  railParams, railProfile, sweepRail, buildPostTemplate, placePosts,
+  buildRailGeometry, straightFrames, signedArea,
+} from "../games/modular-road-v3/modularRoadRail.js";
 
-const LAB = "games/modular-road-v3/road-piece-lab.html";
-const src = fs.readFileSync(new URL(`../${LAB}`, import.meta.url), "utf8");
-
-/** Lift one top-level `function name(...) {...}` out of the lab by brace match. */
-function grab(name) {
-  const i = src.indexOf(`function ${name}(`);
-  if (i < 0) throw new Error(`${LAB}: missing function ${name}`);
-  let depth = 0;
-  for (let k = src.indexOf("{", i); k < src.length; k++) {
-    if (src[k] === "{") depth++;
-    else if (src[k] === "}" && --depth === 0) return src.slice(i, k + 1);
-  }
-  throw new Error(`${LAB}: unbalanced braces in ${name}`);
-}
-
-const NAMES = [
-  "straightFrames", "signedArea", "dedupe", "filletPolyline", "polylineNormals",
-  "railProfile", "sweepRail", "ensureIndexed", "chamferBox", "iBeamPost",
-  "boltHead", "buildPostTemplate", "placePosts", "buildLabRails",
-];
-const lab = new Function(
-  "THREE",
-  "mergeGeometries",
-  `const _m = new THREE.Matrix4();
-   const _pos = new THREE.Vector3();
-   ${NAMES.map(grab).join("\n")}
-   return { ${NAMES.join(", ")} };`,
-)(THREE, mergeGeometries);
-
-const RAIL = {
-  mirrorSides: true, flipW: false, style: 3,
-  height: 0.8, depth: 0.26, gap: 0.18, valleyGap: 0.3, backAmp: 0.35, plateau: 0.22,
-  bendRadius: 0.05, bendSeg: 4, beadSeg: 10,
-  posts: true, postSpacing: 2.8, postWidth: 0.15, postDepth: 0.17,
-  flangeT: 0.022, webT: 0.018, postRise: 0.06, blockout: 0.11,
-  basePlate: true, bolts: true, boltRadius: 0.034, bevel: 0.006,
+const lab = {
+  railParams, railProfile, sweepRail, buildPostTemplate, placePosts,
+  buildRailGeometry, straightFrames, signedArea,
 };
+
+const RAIL = { ...railParams, style: 3 };
 const RP = { width: 16, thickness: 0.8, railWidth: 0.5, railHeight: 0.22, segLen: 1.6 };
+
+/**
+ * buildLabRails now takes a PIECE's own transport frames rather than a length,
+ * so the rail follows whatever centreline the kit generated. The curved fixture
+ * is the point of that change: a straight sweep can hide sign and winding bugs
+ * that only show up once `right` and `tangent` actually rotate along the piece.
+ */
+const FRAMES = lab.straightFrames(32, RP.segLen);
+
+function curvedFrames(radius, angleDeg, steps = 48) {
+  const out = [];
+  const total = (angleDeg * Math.PI) / 180;
+  for (let i = 0; i <= steps; i++) {
+    const a = total * (i / steps);
+    const pos = new THREE.Vector3(radius - Math.cos(a) * radius, 0, -Math.sin(a) * radius);
+    const tangent = new THREE.Vector3(Math.sin(a), 0, -Math.cos(a)).normalize();
+    const up = new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(tangent, up).normalize();
+    out.push({ pos, tangent, up, right });
+  }
+  return out;
+}
+const CURVED = curvedFrames(26, 90);
 
 let failed = 0;
 const check = (ok, msg) => {
@@ -166,13 +157,13 @@ for (const [name, opts] of SECTIONS) {
 
 console.log("\n— shell —");
 const prof = lab.railProfile({ ...RAIL, humps: RAIL.style, flip: RAIL.flipW });
-const frames = lab.straightFrames(32, RP.segLen);
 const centerV = RP.railHeight + RAIL.gap + RAIL.height * 0.5;
 
 // Edges are keyed by rounded POSITION, not vertex index: the sweep duplicates
 // the seam column and the caps carry their own hard-normal copies of the ring,
 // so an index-keyed test would report a shell that is geometrically watertight
 // as wide open.
+for (const [shape, frames] of [["straight", FRAMES], ["curved", CURVED]]) {
 for (const zSign of [1, -1]) {
   const beam = lab.sweepRail(frames, prof, 7.75 * zSign, zSign, centerV);
   const idx = beam.index.array;
@@ -199,9 +190,47 @@ for (const zSign of [1, -1]) {
     if (e.fwd + e.rev !== 2) unpaired++;
     else if (e.fwd !== 1 || e.rev !== 1) inconsistent++;
   }
-  check(unpaired === 0, `zSign=${zSign} closed shell (${unpaired} unpaired edges)`);
-  check(inconsistent === 0, `zSign=${zSign} consistent winding (${inconsistent} flipped edges)`);
+  check(unpaired === 0, `${shape} zSign=${zSign} closed shell (${unpaired} unpaired edges)`);
+  check(inconsistent === 0, `${shape} zSign=${zSign} consistent winding (${inconsistent} flipped)`);
   beam.dispose();
+}
+}
+
+/* ── 2b. the end caps ───────────────────────────────────────────────────── */
+//
+// A centroid fan shipped here first and it is WRONG: the section is strongly
+// non-convex (corrugated front, relieved back, two bull-noses), so it is not
+// star-shaped about its centroid and the fan throws triangles straight across
+// the valleys — on screen, a bulging knot of crossing facets at the rail's end.
+// Total triangle area is the invariant that catches it: a correct triangulation
+// sums to exactly the polygon's area, while an overlapping fan sums to more.
+console.log("\n— end caps —");
+for (const [name, humps] of [["thrie", 3], ["W-beam", 2], ["box", 1]]) {
+  const p = lab.railProfile({ ...RAIL, humps, flip: false });
+  const tris = THREE.ShapeUtils.triangulateShape(
+    p.pts.map((q) => new THREE.Vector2(q.z, q.y)), [],
+  );
+  const polyArea = Math.abs(lab.signedArea(p.pts));
+  let triArea = 0;
+  let degenerate = 0;
+  for (const [a, b, c] of tris) {
+    const A = p.pts[a];
+    const B = p.pts[b];
+    const C = p.pts[c];
+    const cross = (B.z - A.z) * (C.y - A.y) - (B.y - A.y) * (C.z - A.z);
+    triArea += Math.abs(cross) * 0.5;
+    if (Math.abs(cross) < 1e-12) degenerate++;
+  }
+  check(
+    tris.length === p.pts.length - 2,
+    `${name}: ${tris.length} triangles for ${p.pts.length} points (want n−2)`,
+  );
+  check(
+    Math.abs(triArea - polyArea) < polyArea * 1e-3,
+    `${name}: triangles cover the section exactly ` +
+    `(${triArea.toFixed(5)} vs ${polyArea.toFixed(5)} m²)`,
+  );
+  check(degenerate === 0, `${name}: no zero-area triangles (${degenerate})`);
 }
 
 /* ── 3. post hardware ───────────────────────────────────────────────────── */
@@ -223,6 +252,89 @@ check(
   `post top = beam top + rise (${box.max.y.toFixed(3)} vs ${(beamTop + RAIL.postRise).toFixed(3)})`,
 );
 
+// The post has to STAND on the kerb. There is no ground beside a floating road
+// piece, so anything past the kerb's outer edge is visibly in mid-air — which is
+// exactly what shipped first: 78% of the base plate hung off. Checked across
+// kerb widths because railWidth is saved into every track file, so old saves
+// bring their own narrow kerb back and the clamp is what has to catch it.
+console.log("\n— posts stand on the kerb —");
+for (const railWidth of [0.35, 0.5, 0.75, 1.2]) {
+  const hw = RP.width / 2;
+  const rw = Math.min(Math.max(0, railWidth), hw * 0.45);
+  const kerbHalf = rw * 0.5;
+  const tpl2 = lab.buildPostTemplate(prof, RAIL, RP.railHeight, centerV, kerbHalf);
+  // Only what actually TOUCHES DOWN. The blockout and the bolts live up at beam
+  // height (~1.2 m) and are supposed to overhang — measuring the whole
+  // template's width flags them and hides the real question.
+  const pos = tpl2.attributes.position;
+  const footTop = RP.railHeight + 0.15;
+  let worst = 0;
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getY(i) <= footTop) worst = Math.max(worst, Math.abs(pos.getX(i)));
+  }
+  check(
+    worst <= kerbHalf + 1e-6,
+    `kerb ${railWidth.toFixed(2)} m: footprint reaches ${worst.toFixed(3)} m ` +
+    `of ${kerbHalf.toFixed(3)} m available`,
+  );
+  tpl2.dispose();
+}
+
+// Posts must sit ON the polyline the beam was swept along.
+//
+// They did not: the beam swept decimated frames (chords that cut the corner)
+// while posts were placed on the piece's true arc, so on a curve they drifted
+// apart — and asymmetrically, because the chord always moves toward the centre
+// of curvature while posts sit outboard. Measured on an R14 150° hairpin before
+// the fix: 4.4 cm on the inner rail, 1.3 cm on the outer. One side visibly
+// detached from its rail, the other looked fine.
+console.log("\n— posts meet the beam —");
+{
+  const arc = curvedFrames(14, 150, 101); // the hairpin that showed it
+  const swept = decimateFrames(arc, railParams.frameStep, railParams.frameAngle);
+  // A POINT-SIZED template, so the placed geometry's centre IS the anchor.
+  // The real post is a poor probe: it stands ~0.22 m outboard and rotates with
+  // its frame, so its bounding-box centre wanders by more than the defect.
+  const probe = new THREE.BoxGeometry(0.004, 0.004, 0.004);
+
+  /** Furthest any post anchor strays from the polyline the beam was swept on. */
+  const strayFrom = (postFrames, side) => {
+    const baseLat = side * 7.625;
+    const out = [];
+    lab.placePosts(postFrames, probe, baseLat, side, RAIL.postSpacing, out);
+    const chord = swept.map((f) => f.pos.clone().addScaledVector(f.right, baseLat));
+    let worst = 0;
+    for (const g of out) {
+      g.computeBoundingBox();
+      const c = g.boundingBox.getCenter(new THREE.Vector3());
+      let best = Infinity;
+      for (let i = 0; i < chord.length - 1; i++) {
+        const a = chord[i];
+        const ab = chord[i + 1].clone().sub(a);
+        const t = Math.max(0, Math.min(1, c.clone().sub(a).dot(ab) / ab.lengthSq()));
+        best = Math.min(best, c.distanceTo(a.clone().addScaledVector(ab, t)));
+      }
+      worst = Math.max(worst, best);
+      g.dispose();
+    }
+    return worst;
+  };
+
+  let worstBug = 0;
+  for (const [name, side] of [["inner", -1], ["outer", 1]]) {
+    const now = strayFrom(swept, side);
+    worstBug = Math.max(worstBug, strayFrom(arc, side)); // posts on the true arc
+    check(now < 0.001, `${name} rail: anchors sit on the beam (${(now * 1000).toFixed(2)} mm)`);
+  }
+  // Proves the check above has teeth. Asymmetric by nature — the chord always
+  // cuts toward the centre of curvature — so it is the worse side that matters.
+  check(
+    worstBug > 0.01,
+    `the old placement still fails it (worst side ${(worstBug * 1000).toFixed(1)} mm)`,
+  );
+  probe.dispose();
+}
+
 for (const [len, spacing] of [[32, 2.8], [32, 6], [12, 2.8]]) {
   const out = [];
   lab.placePosts(lab.straightFrames(len, RP.segLen), tpl, 7.75, 1, spacing, out);
@@ -234,7 +346,7 @@ for (const [len, spacing] of [[32, 2.8], [32, 6], [12, 2.8]]) {
 /* ── 4. every toggle still builds ───────────────────────────────────────── */
 
 console.log("\n— variants —");
-const whole = lab.buildLabRails(32, RP, RAIL);
+const whole = lab.buildRailGeometry(FRAMES, RP, RAIL);
 check(whole != null, "default rail builds");
 if (whole) {
   note(`${whole.attributes.position.count} verts / ${Math.round(whole.index.count / 3)} tris`);
@@ -251,16 +363,34 @@ if (whole) {
 for (const style of [1, 2, 3]) {
   for (const flipW of [false, true]) {
     for (const mirrorSides of [false, true]) {
-      const g = lab.buildLabRails(32, RP, { ...RAIL, style, flipW, mirrorSides });
+      const g = lab.buildRailGeometry(FRAMES, RP, { ...RAIL, style, flipW, mirrorSides });
       check(g != null && g.index.count > 0, `style=${style} flip=${flipW} mirror=${mirrorSides}`);
       g?.dispose();
     }
   }
 }
 for (const key of ["posts", "bolts", "basePlate"]) {
-  const g = lab.buildLabRails(32, RP, { ...RAIL, [key]: false });
+  const g = lab.buildRailGeometry(FRAMES, RP, { ...RAIL, [key]: false });
   check(g != null && g.index.count > 0, `${key} off`);
   g?.dispose();
+}
+
+// On a curve the rail must actually BEND — a sweep that quietly ignored the
+// frames' rotation would still build, still be watertight, and still be wrong.
+const curved = lab.buildRailGeometry(CURVED, RP, RAIL);
+check(curved != null, "curved rail builds");
+if (curved) {
+  const b = new THREE.Box3().setFromBufferAttribute(curved.attributes.position);
+  const size = b.getSize(new THREE.Vector3());
+  note(`curved bounds ${size.x.toFixed(1)} × ${size.z.toFixed(1)} m`);
+  // A 90° arc of R=26 spans ~26 m each way; a straight sweep would be ~16 m
+  // wide (deck width) by 32 m long.
+  check(size.x > 24 && size.z > 24, "rail follows the arc in both axes");
+  check(
+    Math.abs(size.x - size.z) < 6,
+    `arc is roughly square in plan (${size.x.toFixed(1)} vs ${size.z.toFixed(1)})`,
+  );
+  curved.dispose();
 }
 
 console.log(failed ? `\n${failed} check(s) failed` : "\nall guardrail checks pass");

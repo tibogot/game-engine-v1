@@ -30,6 +30,7 @@ function assignPlainParams(target, source) {
  * @param {object} ctx.guardrailParams
  * @param {object} ctx.pieceParams
  * @param {object} [ctx.portalParams]
+ * @param {object} [ctx.roadLook] surface appearance (see ROAD_LOOK_KEYS)
  */
 export function exportTrack({
   builder,
@@ -40,6 +41,7 @@ export function exportTrack({
   guardrailParams,
   pieceParams,
   portalParams,
+  roadLook,
 }) {
   return {
     format: TRACK_FORMAT,
@@ -49,6 +51,11 @@ export function exportTrack({
     guardrailParams: clonePlainParams(guardrailParams),
     pieceParams: clonePlainParams(pieceParams),
     portalParams: clonePlainParams(portalParams),
+    // Surface appearance, kept beside the geometry params it belongs with. A
+    // plain object on purpose: this module knows nothing about materials or
+    // three, and stays loadable without them. Optional, so tracks saved before
+    // looks were portable still load — they just keep the material defaults.
+    roadLook: clonePlainParams(roadLook),
     pieces: builder.exportTrackPieces(),
     props: props.exportInstances(),
     movers: movers.exportInstances(),
@@ -76,6 +83,10 @@ export function importTrack(data, ctx) {
   assignPlainParams(ctx.guardrailParams, data.guardrailParams);
   assignPlainParams(ctx.pieceParams, data.pieceParams);
   if (ctx.portalParams && data.portalParams) assignPlainParams(ctx.portalParams, data.portalParams);
+  // Filled in for the caller to push at its material — importTrack does not
+  // touch the renderer. Absent in pre-look saves, and left untouched then, so
+  // loading an old track does not reset a look the user just dialled in.
+  if (ctx.roadLook && data.roadLook) assignPlainParams(ctx.roadLook, data.roadLook);
 
   ctx.builder.importTrackPieces(data.pieces);
   ctx.props.importInstances(data.props);

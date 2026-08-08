@@ -55,6 +55,9 @@ import {
   createGuardrailMaterial,
   createTunnelMaterial,
   createDecorMaterial,
+  readRoadLook,
+  syncRoadUniforms,
+  ROAD_LOOK_FORMAT,
 } from "./modularRoadMaterial.js";
 import { ModularRoadBuilder, buildRoadPaletteUI, CATEGORY_PRESETS } from "./modularRoadBuilder.js";
 import {
@@ -733,7 +736,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       .filter((m) => m && !m.userData.noCollision);
     const solids = [];
     for (const p of builder.pieces) {
-      if (p.railMesh) solids.push(p.railMesh);
+      if (p.railMesh) {
+        // Bake the cheap proxy, not the rail you can see. bakeFromMeshes only
+        // reads .geometry and .matrixWorld, so a stand-in with the same world
+        // transform substitutes cleanly — 696 triangles a piece instead of
+        // 3,688, on a bake that reruns every time you place or drag a piece.
+        const proxy = p.railMesh.userData.collisionGeometry;
+        solids.push(proxy
+          ? { geometry: proxy, matrixWorld: p.railMesh.matrixWorld, updateMatrixWorld() {} }
+          : p.railMesh);
+      }
       if (p.shellMesh) solids.push(p.shellMesh);
     }
 
@@ -1025,27 +1037,61 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     mergedGroup.clear();
   }
 
+  // Pieces per merged chunk.
+  //
+  // ONE mesh per material was the obvious win and it is half a win: 4 draws, but
+  // a single mesh spanning the whole circuit has to be `frustumCulled = false`,
+  // so every triangle on the track is submitted every frame no matter where you
+  // are looking — and again for the shadow pass. You can typically see a fifth
+  // of a lap, so most of that work is thrown away.
+  //
+  // Chunking by CONSECUTIVE pieces rather than by a spatial grid: pieces chain
+  // end to end, so a run of them is already spatially tight, and it costs no
+  // bookkeeping.
+  //
+  // Measured on the 37-piece Apex preset in drive mode, triangles submitted per
+  // frame across BOTH passes (the merged track casts shadows, so every triangle
+  // it keeps is paid twice):
+  //
+  //   never culled (one mesh)   764,736     86 draws
+  //   chunk = 10                624,416     72 draws    −18%
+  //   chunk = 4                 535,568     82 draws    −30%
+  //
+  // The merged track is only 109k triangles, so −229k means it is now almost
+  // fully culled when off screen — near the theoretical ceiling, and 4 is past
+  // the knee. Ten extra draws is nothing in WebGPU next to 89k triangles.
+  // Worth revisiting for much longer circuits, where this many chunks starts to
+  // add up: 80 pieces would be 20 chunks × the roles present.
+  const MERGE_CHUNK_PIECES = 4;
+
   function buildMergedTrack() {
     disposeMergedTrack();
     scene.updateMatrixWorld(true);
-    for (const role of MERGE_ROLES) {
-      const geos = [];
-      for (const p of builder.pieces) {
-        const m = role.pick(p);
-        if (!m || m.userData.noRender || !m.geometry) continue;
-        const g = m.geometry.clone();
-        g.applyMatrix4(m.matrixWorld); // bake to world space
-        geos.push(g);
+    const pieces = builder.pieces;
+    for (let start = 0; start < pieces.length; start += MERGE_CHUNK_PIECES) {
+      const chunk = pieces.slice(start, start + MERGE_CHUNK_PIECES);
+      for (const role of MERGE_ROLES) {
+        const geos = [];
+        for (const p of chunk) {
+          const m = role.pick(p);
+          if (!m || m.userData.noRender || !m.geometry) continue;
+          const g = m.geometry.clone();
+          g.applyMatrix4(m.matrixWorld); // bake to world space
+          geos.push(g);
+        }
+        if (!geos.length) continue;
+        const merged = mergeGeometries(geos, false);
+        for (const g of geos) g.dispose();
+        if (!merged) continue;
+        // mergeGeometries does not carry bounds across, and without them three
+        // culls against a stale or missing sphere — chunks would pop or never
+        // cull at all.
+        merged.computeBoundingSphere();
+        const mesh = new THREE.Mesh(merged, role.mat());
+        mesh.castShadow = role.cast;
+        mesh.receiveShadow = true;
+        mergedGroup.add(mesh);
       }
-      if (!geos.length) continue;
-      const merged = mergeGeometries(geos, false);
-      for (const g of geos) g.dispose();
-      if (!merged) continue;
-      const mesh = new THREE.Mesh(merged, role.mat());
-      mesh.castShadow = role.cast;
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = false; // one big mesh spanning the track
-      mergedGroup.add(mesh);
     }
   }
 
@@ -1736,16 +1782,32 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   // ── TRACK SAVE / LOAD (JSON — deliberately separate from world.v3proj) ──
-  const trackCtx = () => ({
-    builder,
-    props,
-    movers,
-    portals,
-    roadParams,
-    guardrailParams,
-    pieceParams,
-    portalParams: portals.params,
-  });
+  //
+  // `roadLook` is a MIRROR of the material's uniforms, not the source of truth:
+  // the dev panel's colour pickers write straight through to the uniforms, so
+  // tracking edits would mean intercepting every one of them. Re-reading on
+  // every ctx() instead means a save always captures whatever is on screen,
+  // however it got there.
+  const roadLook = readRoadLook(roadMaterial);
+  const trackCtx = () => {
+    Object.assign(roadLook, readRoadLook(roadMaterial));
+    return {
+      builder,
+      props,
+      movers,
+      portals,
+      roadParams,
+      guardrailParams,
+      pieceParams,
+      portalParams: portals.params,
+      roadLook,
+    };
+  };
+
+  /** Push the mirror at the material — after any import that touched it. */
+  function applyRoadLook() {
+    syncRoadUniforms(roadMaterial, roadLook);
+  }
 
   onClick("road-save", () => {
     // `spawn` is wrapped around the lab's track format rather than folded into
@@ -1787,12 +1849,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   syncSnapBtn();
 
   const trackFileInput = createTrackFileInput((data) => {
+    // The same button also takes a LOOK file exported from road-piece-lab.html.
+    // It is not a track — it repaints the one already loaded and leaves the
+    // layout alone — so it has to be caught before importTrack, which would
+    // reject it as an unknown format.
+    if (data?.format === ROAD_LOOK_FORMAT) {
+      Object.assign(roadLook, data.roadLook ?? {});
+      applyRoadLook();
+      devPanel?.refresh?.();
+      paletteUi.refreshStatus();
+      console.info("[ModularRoad-v3] road look applied from file");
+      return;
+    }
     const res = importTrack(data, trackCtx());
     if (!res.ok) {
       console.warn("[ModularRoad-v3] track load failed:", res.error);
       alert(`Could not load track: ${res.error}`);
       return;
     }
+    applyRoadLook();
     gameSpawn = data.spawn ?? null;
     updateSpawnMarker();
     bakeCollision();
@@ -1820,6 +1895,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       const data = await res.json();
       const out = importTrack(data, trackCtx());
       if (!out.ok) throw new Error(out.error);
+      applyRoadLook();
       gameSpawn = data.spawn ?? null;
       updateSpawnMarker();
       bakeCollision();
@@ -2730,6 +2806,13 @@ ${e.message}`);
     toggleMode,
     get mode() { return mode; },
     world: boot,
+    /** Surface look as plain JSON — the same object a track save carries and
+     *  road-piece-lab.html exports. */
+    getRoadLook: () => readRoadLook(roadMaterial),
+    setRoadLook: (l) => {
+      Object.assign(roadLook, l ?? {});
+      applyRoadLook();
+    },
   };
   window.__roadGame = handle; // console debugging (window.__road is just the engine app)
   return handle;

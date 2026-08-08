@@ -55,19 +55,40 @@ export function createRoadMaterial(opts = {}) {
     /** 0 = kerbs painted solid railA (the default look); 1 = railA/railB hazard
      *  stripes. Turn pieces will opt into stripes later — keep the machinery. */
     railStriped: uniform(opts.railStriped ?? 0),
-    sideColor: uniform(lin(opts.sideColor ?? 0x3a3d42)),
+    /** Slab edge + underside. Defaults to the KERB colour, so a piece reads as
+     *  one painted object from any angle instead of a red-topped grey slab. */
+    sideColor: uniform(lin(opts.sideColor ?? 0xd0342c)),
     centerHalf: uniform(opts.centerHalf ?? 0.045), // half-width of centre line (lateral units)
     centerSoft: uniform(opts.centerSoft ?? 0.02),
     centerDash: uniform(opts.centerDash ?? 0.18), // dashes per meter along
     edgePos: uniform(opts.edgePos ?? 0.82), // |lateral| where edge lines sit
-    edgeWidth: uniform(opts.edgeWidth ?? 0.05),
+    /** Half-width of the SOLID paint, in lateral units (1 = half the deck). */
+    edgeWidth: uniform(opts.edgeWidth ?? 0.022),
+    /** Feather outside that core. Small — the pixel-size floor takes over at
+     *  distance, so this only has to soften the near view. */
+    edgeSoft: uniform(opts.edgeSoft ?? 0.004),
     railDash: uniform(opts.railDash ?? 0.5), // paint bands per meter
     /** Contrast of the asphalt tone around its midpoint. NOTE: this used to cap
      *  the dark→light mix (tone × grainScale, so 0.55 meant the deck could never
      *  reach asphaltLight — part of why it read so dark). It is now a symmetric
      *  contrast multiplier, 1.0 = the full authored range. */
     grainScale: uniform(opts.grainScale ?? 1.0),
-    /** Cycles per metre of the slow tonal drift (resurfacing patches, bleaching). */
+    /**
+     * ANISOTROPY — how many times longer surface features are ALONG the road
+     * than across it. This is the single thing that separates "road" from
+     * "gravel": asphalt is laid in strips by a paver and then worn, polished and
+     * rain-streaked along the direction of travel, so its variation is
+     * directional. Sampling `along` and `across` at the same frequency — which
+     * is what this material did — is isotropic by construction and reads as
+     * marble or shingle no matter how it is tuned.
+     *
+     * Free to follow corners: uv.x is arc length along the piece's centreline,
+     * so the streaks bend with the road without anything else being computed.
+     * 1 restores the old isotropic fields.
+     */
+    streak: uniform(opts.streak ?? 14),
+    /** Cycles per metre ACROSS the road of the slow tonal drift (paver strips,
+     *  resurfacing patches, bleaching). Along the road it is `streak`× longer. */
     macroScale: uniform(opts.macroScale ?? 0.06),
     /** Cycles per metre of the aggregate speckle. 5 ⇒ ~20 cm chips. */
     aggScale: uniform(opts.aggScale ?? 5.0),
@@ -83,7 +104,12 @@ export function createRoadMaterial(opts = {}) {
     wheelDarken: uniform(opts.wheelDarken ?? 0.10),
     // Centre + edge paint lines. Default OFF — the clean Apex-Rush deck look;
     // the dev panel's "Road lines" toggle flips the uniform live.
-    linesOn: uniform(opts.linesOn ?? 0), // 1 = draw centre + edge lines, 0 = plain deck
+    linesOn: uniform(opts.linesOn ?? 0), // master: 1 = paint lines, 0 = plain deck
+    // Which lines the master switch draws. Both default ON, so `linesOn` alone
+    // behaves exactly as it always has; drop one to get edges-only (a race
+    // circuit) or centre-only (a two-way road) without a second material.
+    centerOn: uniform(opts.centerOn ?? 1),
+    edgeOn: uniform(opts.edgeOn ?? 1),
     // Rideable tubes (aZone 3 = inner wall, 4 = outer shell) — their own look,
     // clearly not asphalt, plus emissive neon rings inside that bloom.
     tubeInner: uniform(lin(opts.tubeInner ?? 0x24303c)), // dark blue-steel interior
@@ -111,7 +137,9 @@ export function createRoadMaterial(opts = {}) {
   // 16-sampler cap), no VRAM, no streaming, and it tiles infinitely along a
   // track of any length.
   const surface = Fn(() => {
-    const along = uv().x; // metres along the path
+    // Stretched along the path, so every field below comes out as streaks that
+    // run WITH the road rather than blobs sitting on it.
+    const along = uv().x.div(u.streak); // metres along the path, anisotropic
     const across = uv().y; // metres across the developed profile
     const lateral = attribute("aLateral", "float");
 
@@ -163,9 +191,16 @@ export function createRoadMaterial(opts = {}) {
     deckBase = deckBase.mul(oneMinus(wheelPath.mul(u.wheelDarken)));
     deckBase = deckBase.mul(u.deckBrightness);
 
-    // Dashed centre line.
+    // Feather floor of about a pixel. Painted lines are hard-edged in reality,
+    // but a hard edge in a shader aliases into a dashed crawl at distance — the
+    // exact range you spend most of a lap looking at. fwidth(lateral) is
+    // lateral-units-per-pixel, so this keeps both lines crisp AND stable at any
+    // distance without the author having to pick a blur that works everywhere.
+    const lateralAA = fwidth(lateral).mul(0.75);
+
+    // Dashed centre line — solid core out to centerHalf, then feathered.
     const centerMask = smoothstep(
-      u.centerHalf.add(u.centerSoft),
+      u.centerHalf.add(max(u.centerSoft, lateralAA)),
       u.centerHalf,
       abs(lateral),
     );
@@ -173,14 +208,25 @@ export function createRoadMaterial(opts = {}) {
     const centerLine = centerMask.mul(dash);
 
     // Solid edge lines on both sides.
+    //
+    // WAS smoothstep(edgeWidth, 0, d): a pure gradient from full at the centre
+    // of the line to nothing at edgeWidth, i.e. NO solid core — the whole line
+    // was falloff. That is why it read soft and why widening it only made it
+    // blurrier. Same shape as the centre line now: solid to edgeWidth, then a
+    // short feather. `edgeWidth` therefore changed meaning from "how far the
+    // gradient reaches" to "half-width of the paint", so its default came down
+    // to keep the line about the width it looked before.
     const edgeMask = smoothstep(
+      u.edgeWidth.add(max(u.edgeSoft, lateralAA)),
       u.edgeWidth,
-      float(0.0),
       abs(abs(lateral).sub(u.edgePos)),
     );
 
-    // Global lines toggle × per-piece plain flag (platforms suppress lines).
-    const lineAmt = clamp(centerLine.add(edgeMask), 0.0, 1.0).mul(u.linesOn).mul(float(1).sub(plain));
+    // Per-line switches, then the global toggle × per-piece plain flag
+    // (platforms suppress lines).
+    const lineAmt = clamp(
+      centerLine.mul(u.centerOn).add(edgeMask.mul(u.edgeOn)), 0.0, 1.0,
+    ).mul(u.linesOn).mul(float(1).sub(plain));
     const deckCol = mix(deckBase, u.lineColor, lineAmt);
 
     // Kerbs: solid red by default; hazard stripes only when railStriped is on
@@ -298,20 +344,79 @@ export function createDecorMaterial() {
   });
 }
 
-/** Apply hex colors / numeric uniforms from a plain params object. */
+/* ------------------------------------------------------------------------- */
+/* THE LOOK — the authored half of this material, as plain JSON                */
+/*                                                                            */
+/* Two lists, and every uniform above must be in exactly one of them. That is  */
+/* what makes the look portable: road-piece-lab.html tunes a plain object,     */
+/* writes it to a file, and the game applies it to a live material. Anything   */
+/* missing from these lists is invisible to that whole path — it silently      */
+/* stops being tunable, which is exactly what happened to `linesOn`.           */
+/* tools/roadUniformSyncTest.mjs asserts the lists stay complete.              */
+/* ------------------------------------------------------------------------- */
+
+/** File format written by the lab's "Export look" and accepted by the game. */
+export const ROAD_LOOK_FORMAT = "modular-road-look";
+export const ROAD_LOOK_VERSION = 1;
+
+/** Uniforms authored as sRGB hex numbers. */
+export const ROAD_LOOK_COLORS = [
+  "asphaltDark", "asphaltLight", "lineColor", "railA", "railB",
+  "sideColor", "tubeInner", "tubeOuter", "neonColor",
+];
+
+/** Uniforms authored as plain numbers (on/off flags included, as 0/1). */
+export const ROAD_LOOK_NUMBERS = [
+  "centerHalf", "centerSoft", "centerDash", "edgePos", "edgeWidth", "edgeSoft",
+  "linesOn", "centerOn", "edgeOn", "railDash", "railStriped", "grainScale", "streak",
+  "neonIntensity", "neonSpacing", "neonWidth",
+  "deckBrightness", "macroScale", "aggScale", "deckRough", "roughVary",
+  "wheelPolish", "wheelDarken",
+];
+
+export const ROAD_LOOK_KEYS = [...ROAD_LOOK_COLORS, ...ROAD_LOOK_NUMBERS];
+
+const _readColor = new THREE.Color();
+
+/**
+ * Apply hex colors / numeric uniforms from a plain params object.
+ *
+ * Partial objects are fine and expected — the lab does not expose the tube and
+ * neon uniforms, so a look it exports simply leaves those alone.
+ *
+ * Booleans are coerced because the flags read as on/off at the call site while
+ * the uniform is a float, and assigning `false` to it does not mean "off", it
+ * corrupts the value.
+ */
 export function syncRoadUniforms(mat, p) {
-  const u = mat._roadUniforms;
-  if (!u) return;
-  if (p.asphaltDark != null) u.asphaltDark.value.copy(lin(p.asphaltDark));
-  if (p.asphaltLight != null) u.asphaltLight.value.copy(lin(p.asphaltLight));
-  if (p.lineColor != null) u.lineColor.value.copy(lin(p.lineColor));
-  if (p.railA != null) u.railA.value.copy(lin(p.railA));
-  if (p.railB != null) u.railB.value.copy(lin(p.railB));
-  if (p.sideColor != null) u.sideColor.value.copy(lin(p.sideColor));
-  if (p.tubeInner != null) u.tubeInner.value.copy(lin(p.tubeInner));
-  if (p.tubeOuter != null) u.tubeOuter.value.copy(lin(p.tubeOuter));
-  if (p.neonColor != null) u.neonColor.value.copy(lin(p.neonColor));
-  for (const k of ["centerHalf", "centerSoft", "centerDash", "edgePos", "edgeWidth", "railDash", "railStriped", "grainScale", "neonIntensity", "neonSpacing", "neonWidth", "deckBrightness", "macroScale", "aggScale", "deckRough", "roughVary", "wheelPolish", "wheelDarken"]) {
-    if (p[k] != null) u[k].value = p[k];
+  const u = mat?._roadUniforms;
+  if (!u || !p) return;
+  for (const k of ROAD_LOOK_COLORS) {
+    if (p[k] != null) u[k].value.copy(lin(p[k]));
   }
+  for (const k of ROAD_LOOK_NUMBERS) {
+    if (p[k] != null) u[k].value = typeof p[k] === "boolean" ? (p[k] ? 1 : 0) : p[k];
+  }
+}
+
+/**
+ * Read the current look back out as a plain, JSON-safe object.
+ *
+ * The exact inverse of syncRoadUniforms, which matters more than it looks:
+ * `lin()` runs the sRGB→linear transfer function on a Color that three has
+ * ALREADY moved into the working colour space, so a hand-rolled "convert back"
+ * that only undoes one of those steps would darken every colour a little on
+ * each save→load cycle. `convertLinearToSRGB()` undoes `convertSRGBToLinear()`
+ * and `getHex()` undoes the constructor, so the pair round-trips whatever
+ * ColorManagement is set to.
+ */
+export function readRoadLook(mat) {
+  const u = mat?._roadUniforms;
+  if (!u) return null;
+  const out = {};
+  for (const k of ROAD_LOOK_COLORS) {
+    out[k] = _readColor.copy(u[k].value).convertLinearToSRGB().getHex();
+  }
+  for (const k of ROAD_LOOK_NUMBERS) out[k] = u[k].value;
+  return out;
 }

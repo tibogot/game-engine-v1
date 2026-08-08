@@ -292,6 +292,212 @@ function boostRingGroup() {
 }
 
 /* ----------------------------------------------------------------------- */
+/* Hole walls — the straight menu's Hole Road, stood up                     */
+/* ----------------------------------------------------------------------- */
+
+/**
+ * The two hole walls, as numbers. One builder makes both (buildHoleWall) —
+ * they are the same object with a different port and a different frame, and
+ * duplicating the geometry would only let the two drift apart.
+ *
+ * `bottom`/`top` are the plate's extent in METRES ABOVE THE DECK, because that
+ * is the difference between the two: the drive-through wall is planted in the
+ * road (bottom is negative — a skirt buried in the 0.8 m slab) while the air
+ * gate floats clear of it and you pass UNDER as easily as through.
+ *
+ * `mouthY` is the flat chord that cuts the port open at the bottom, or `null`
+ * for a full circle. That single field is what makes one wall drivable and the
+ * other jump-only — see buildHoleWall.
+ */
+const HOLE_WALL = {
+  width: 22, // plate width (m) — spans a default 16 m road with room either side
+  bottom: -0.55, // skirt below the deck (m), buried in the 0.8 m road slab
+  top: 11, // plate top above the deck (m)
+  depth: 0.9, // plate thickness along travel (m)
+  radius: 5.2, // port radius (m)
+  centerY: 2.9, // port centre height (m) — BELOW `radius`, so the port opens at the deck
+  mouthY: -0.06, // chord that cuts the port open (m) — see buildHoleWall
+  rim: 0.42, // width of the glowing rim band (m)
+  footed: true, // plinths at the base rather than a bottom beam
+};
+const HOLE_WALL_AIR = {
+  width: 17,
+  bottom: 2.6, // floats: the plate starts well above the deck
+  top: 17.4,
+  depth: 0.9,
+  radius: 5, // full circle, so this is the clearance in EVERY direction
+  centerY: 10, // same height as the ring gates — what a big jump actually reaches
+  mouthY: null, // FULL circle: no chord, no way through but the air
+  rim: 0.42,
+  footed: false, // framed all round instead — nothing to stand on
+};
+const HOLE_WALL_GLOW = 0xffb02e;
+
+/**
+ * The port outline: a circle of radius `R` about (0, `cfg.centerY`), optionally
+ * cut off by a flat chord at `bottomY` and closed across it.
+ *
+ * Called twice per wall with the SAME centre — once for the hole in the plate,
+ * once for the rim band's outer edge with both radius and chord pushed out by
+ * the rim width, which keeps the band an even thickness the whole way round.
+ *
+ * @param {THREE.Path|THREE.Shape} target path to append to (Shape for an outer
+ *   contour, Path for a hole — three needs the distinction, not the maths).
+ * @param {number} bottomY chord height, or `null` for an uncut circle.
+ */
+function holeWallPort(target, cfg, R, bottomY) {
+  const cy = cfg.centerY;
+  if (bottomY == null) {
+    target.absarc(0, cy, R, 0, Math.PI * 2, false);
+    return target;
+  }
+  // Keep every point with y ≥ bottomY, i.e. sinθ ≥ (bottomY − cy)/R.
+  const s = THREE.MathUtils.clamp((bottomY - cy) / R, -1, 1);
+  const a0 = Math.asin(s); // right-hand crossing (θ < 0)
+  target.absarc(0, cy, R, a0, Math.PI - a0, false); // CCW over the top to the left crossing
+  target.lineTo(Math.cos(a0) * R, cy + Math.sin(a0) * R); // flat chord back to the start
+  target.closePath();
+  return target;
+}
+
+/**
+ * The straight menu's HOLE ROAD, turned through 90°.
+ *
+ * There, a deck with a circular hole punched through it is a trap you drop into;
+ * here the same slab stands ACROSS the track, and the hole is the only way past.
+ * Same construction idea (one slab, one round hole, no boolean anywhere — the
+ * hole is a contour the triangulator is told to leave empty), opposite job.
+ *
+ * VERTICAL IS THE AUTHORED POSE, not a rotation you apply after dropping it: the
+ * plate is built in the XY plane with its depth along Z, and −Z is the props'
+ * travel direction (the same forward the boost pads' chevrons point down), so a
+ * freshly placed wall already faces oncoming traffic.
+ *
+ * `cfg.mouthY` picks which of the two walls this is, and the choice is entirely
+ * about where the port sits relative to the car:
+ *
+ *  • A CHORD (the drive-through wall) clips the circle just under the road. A
+ *    full circle at driving height would leave a ledge below it at exactly wheel
+ *    height — you would hit the wall instead of driving through the hole. Cut at
+ *    6 cm LOW rather than at 0 on purpose: cut exactly at deck level and the
+ *    sill's top face is coplanar with the road and z-fights across the mouth.
+ *  • NULL (the air gate) leaves the circle whole and lifts it out of reach, so
+ *    the only way in is a jump. Nothing is clipped because nothing needs to be —
+ *    at 10 m up there is no wheel to catch on the bottom of the ring.
+ *
+ * Collision is `solid` for both and needs nothing special, for the same reason
+ * the holed deck needs nothing special: the bake only ever contains triangles
+ * that exist, so the port is genuinely empty space and the plate is genuinely a
+ * wall.
+ */
+function buildHoleWall(cfg, name) {
+  const { width: W, bottom: B, top: T, depth: D, radius: R, mouthY, rim } = cfg;
+  const hw = W / 2;
+  const g = new THREE.Group();
+  g.name = name;
+
+  const plateMat = mat(0x2b3038, { roughness: 0.62, metalness: 0.38 });
+  const extrude = (shape, depth) => {
+    const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 48 });
+    geo.translate(0, 0, -depth / 2); // extrude runs 0→depth; centre it on the pivot
+    return geo;
+  };
+
+  // ── NO PART IS EVER FLUSH WITH ANOTHER ─────────────────────────────────────
+  // Every trim piece here was first authored the obvious way — rim on the port
+  // radius, columns aligned with the plate's edge, cap beam the plate's width
+  // with its top at the plate's top, footings resting on y = 0 — and every one
+  // of those is a pair of EXACTLY COPLANAR faces. The depth buffer cannot order
+  // them, so which one wins is decided by floating-point noise that changes with
+  // the camera: the whole edge crawls and flickers as you drive past. Distance
+  // makes it worse, not better, which is exactly when you see these props.
+  //
+  // The fix is not a depth-bias or a polygon offset, it is not authoring the
+  // coincidence: each part either sinks INSIDE the volume of the part it trims
+  // or clears it by BITE, so no two surfaces are ever candidates for the same
+  // pixel. BITE is well above float precision at these distances and well below
+  // anything the eye reads as a gap.
+  const BITE = 0.1;
+  // Same idea against the ROAD, and the same 6 cm the port's mouth chord uses:
+  // anything resting exactly on the deck z-fights with the deck.
+  const SINK = 0.06;
+
+  // ── Plate: rectangle minus the port ────────────────────────────────────────
+  const outline = new THREE.Shape();
+  outline.moveTo(-hw, B);
+  outline.lineTo(hw, B);
+  outline.lineTo(hw, T);
+  outline.lineTo(-hw, T);
+  outline.closePath();
+  outline.holes.push(holeWallPort(new THREE.Path(), cfg, R, mouthY));
+  g.add(new THREE.Mesh(extrude(outline, D), plateMat));
+
+  // ── Rim: the same curve as a band, standing proud of both faces ────────────
+  // On the drive-through wall its lower ends run below the deck, so what you see
+  // is a horseshoe of light around the mouth; on the air gate it closes into a
+  // full ring, which is the whole aiming cue for a jump.
+  //
+  // Its inner edge BITES INTO the port rather than sitting on it. Built on the
+  // same radius the two share one cylindrical surface all the way round the
+  // hole — the worst case of the note above, and a ring of flicker exactly where
+  // the eye is aimed. A hair narrower and the plate's port wall is buried inside
+  // the rim's solid instead, which is a plain intersection the depth buffer has
+  // no trouble with. It costs 6 cm off a 10 m opening.
+  const rimShape = holeWallPort(new THREE.Shape(), cfg, R + rim, mouthY == null ? null : mouthY - rim);
+  rimShape.holes.push(holeWallPort(new THREE.Path(), cfg, R - SINK, mouthY));
+  g.add(new THREE.Mesh(
+    extrude(rimShape, D + 0.24),
+    mat(HOLE_WALL_GLOW, {
+      roughness: 0.35,
+      metalness: 0.1,
+      emissive: HOLE_WALL_GLOW,
+      emissiveIntensity: 3.5,
+    }),
+  ));
+
+  // ── Hazard columns down both ends ──────────────────────────────────────────
+  // Painted, not stacked rings — same reasoning as the pole's bands, and it
+  // keeps both columns on one material so they merge into a single draw.
+  // Inset by BITE on all three axes, so neither the outer face nor either end
+  // face lands on one of the plate's. The ends are hidden under the beams
+  // anyway, but "hidden by another part" is a fact about the CURRENT numbers —
+  // moving a beam later would expose a coincidence nobody knew was there.
+  const colGeo = new THREE.BoxGeometry(0.6, T - B - 2 * BITE, D + 0.16);
+  const colMat = mat(0xffffff, { roughness: 0.55, metalness: 0.2, map: poleBandTexture() });
+  for (const x of [-(hw - 0.3 - BITE), hw - 0.3 - BITE]) {
+    const col = new THREE.Mesh(colGeo, colMat);
+    col.position.set(x, (T + B) / 2, 0);
+    g.add(col);
+  }
+
+  // ── Beams: a cap on top always, and either footings or a matching bottom ───
+  // Wider than the plate and overhanging it by BITE in `dir`, so the plate's top
+  // (or bottom) face and both its side faces end up INSIDE the beam rather than
+  // level with it. The columns' end faces are swallowed the same way.
+  const beam = (edgeY, dir) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(W + 2 * BITE, 0.5, D + 0.34), plateMat);
+    m.position.y = edgeY + dir * (BITE - 0.25);
+    g.add(m);
+  };
+  beam(T, +1);
+  if (cfg.footed) {
+    // Plinths, so it reads as bolted down rather than dropped in. Kept clear of
+    // the mouth (half-width 4.3 m at deck level) so nothing sits in the driving
+    // line — the inner edge lands at 5.0 m. Sunk into the road for the same
+    // reason the mouth chord is: a base resting exactly on y = 0 fights the deck.
+    for (const x of [-(hw - 3.4), hw - 3.4]) {
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.42, D + 2.6), plateMat);
+      foot.position.set(x, 0.21 - SINK, 0);
+      g.add(foot);
+    }
+  } else {
+    beam(B, -1); // nothing to bolt to up there — close the frame instead
+  }
+
+  return g;
+}
+
+/* ----------------------------------------------------------------------- */
 /* Prop catalog                                                             */
 /* ----------------------------------------------------------------------- */
 
@@ -760,6 +966,37 @@ export const PROP_CATALOG = [
       m.geometry.translate(0, 2, 0); // rest on the ground
       return m;
     },
+  },
+  {
+    id: "holewall",
+    label: "Hole wall",
+    /**
+     * `solid`, exactly like the Wall it is a variant of: the plate stops the
+     * chassis and the port is empty space in the bake, so aiming is the whole
+     * gameplay. Not `both` — the only thing to land on is a 0.9 m cap beam 11 m
+     * up, which is not a feature anyone would use on purpose.
+     */
+    collision: "solid",
+    make: () => buildHoleWall(HOLE_WALL, "HoleWall"),
+  },
+  {
+    id: "holewall_air",
+    label: "Hole gate (air)",
+    /**
+     * The same wall with its port left as a FULL circle and lifted to ring-gate
+     * height: there is no way through it on the ground, so it only pays off
+     * placed over a jump — thread the ring in mid-air or bounce off the plate.
+     *
+     * The plate floats (its bottom edge is 2.6 m up) rather than reaching the
+     * deck. Reaching down would make it a wall with an unreachable hole, i.e.
+     * a dead end; floating leaves the driver a choice — go under and lose the
+     * line, or commit to the jump.
+     *
+     * `solid` again, and again the port needs no special case: it is empty space
+     * in the bake, so a car that threads it touches nothing at all.
+     */
+    collision: "solid",
+    make: () => buildHoleWall(HOLE_WALL_AIR, "HoleGateAir"),
   },
   {
     id: "ramp",
