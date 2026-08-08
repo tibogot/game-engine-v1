@@ -1683,7 +1683,12 @@ export function createRoadDevPanel({ app, game, params }) {
   const refSpdEl = $("#dv-refspd");
   const refSpdVal = $("#dv-refspd-v");
   if (refSpdEl) {
-    refSpdEl.value = game.getRefSpeed();
+    // CAP AT TOP SPEED. The markup's static max of 60 let you draw an arc for a
+    // speed the car cannot physically reach — and range goes as v², so a 60 m/s
+    // arc on a car that tops out near 48 marks a landing 55% too far away, which
+    // reads as "the preview lies" rather than "that slider is unreachable".
+    refSpdEl.max = TIRE.topSpeed;
+    refSpdEl.value = Math.min(game.getRefSpeed(), TIRE.topSpeed);
     refSpdVal.textContent = `${game.getRefSpeed()} m/s`;
     refSpdEl.addEventListener("input", () => {
       game.setRefSpeed(+refSpdEl.value);

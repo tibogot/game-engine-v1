@@ -10,6 +10,7 @@ import {
   initialConnector,
   socketMatrix,
 } from "./modularRoadKit.js";
+import { solveGapArc } from "./gapArc.js";
 
 /** Shared empty geometry used to drop the selection-highlight's reference to a
  *  piece geometry without disposing that (shared) geometry. */
@@ -52,30 +53,20 @@ function _makeBranchMarkerGeometry() {
   return geo;
 }
 
-/** Ballistic landing for demo jumps — same math as GapPreview.update().
- *  Connector Z column is −travel, so launch dir is the negated Z axis. */
-function _ballisticLanding(connector, speed, g, landingDrop) {
+/** Ballistic landing for demo jumps — THE SAME SOLVER the red arc draws, so a
+ *  generated demo track lands where the preview says it would. It used to be a
+ *  hand-rolled copy of the parabola here, which silently stopped matching the
+ *  moment the preview learned about drag.
+ *
+ *  `dragK` is passed rather than imported so this module keeps no dependency on
+ *  the vehicle; the caller supplies AERO.drag / CHASSIS.mass. */
+function _ballisticLanding(connector, speed, g, landingDrop, dragK = 0) {
+  const land = solveGapArc(connector, speed, { gravity: g, dragK, landingDrop });
+  if (!land) return null;
   const e = connector.elements;
-  const exit = new THREE.Vector3().setFromMatrixPosition(connector);
   const dir = new THREE.Vector3(-e[8], -e[9], -e[10]).normalize();
-  const v0 = dir.clone().multiplyScalar(speed);
-  const targetY = exit.y - landingDrop;
-  const dt = 1 / 60;
-  let prevY = exit.y;
-  for (let t = dt; t < 12; t += dt) {
-    const y = exit.y + v0.y * t - 0.5 * g * t * t;
-    if (prevY > targetY && y <= targetY) {
-      const x = exit.x + v0.x * t;
-      const z = exit.z + v0.z * t;
-      // Match beginNewChain yaw: travel = R_y(yaw)·(0,0,-1) = (−sin, 0, −cos).
-      return {
-        pos: new THREE.Vector3(x, targetY, z),
-        yaw: Math.atan2(-dir.x, -dir.z),
-      };
-    }
-    prevY = y;
-  }
-  return null;
+  // Match beginNewChain yaw: travel = R_y(yaw)·(0,0,-1) = (−sin, 0, −cos).
+  return { pos: land.pos, yaw: Math.atan2(-dir.x, -dir.z) };
 }
 
 /**
@@ -1832,17 +1823,20 @@ export class ModularRoadBuilder {
    * use a fresh level chain for the far side), a tunnel, a narrow, then finish.
    * Avoids loops / tubes / wall-rides / twists — those need hand-tuned placement.
    *
-   * @param {{ startPos?: THREE.Vector3, yaw?: number, refSpeed?: number }} [opts]
+   * @param {{ startPos?: THREE.Vector3, yaw?: number, refSpeed?: number,
+   *           dragK?: number }} [opts]
    *        `startPos` seats the anchor in the sky (terrain + buildHeight from the
    *        game). Without it the track starts at the origin like the old demo.
    *        `refSpeed` is the approach speed the jump landing is sized for —
    *        keep it BELOW top speed; after a climb you rarely arrive at 40+.
+   *        `dragK` is AERO.drag / CHASSIS.mass; the game passes it so the demo's
+   *        landing platform sits where the red arc says it will (0 = vacuum).
    */
   loadDemo(opts = {}) {
     this.clear();
     // 28 m/s ≈ 100 km/h: reachable after the climb. A long platform then covers
     // overshoot up to ~40 m/s so a hot approach still lands on deck.
-    const { startPos = null, yaw = 0, refSpeed = 28 } = opts;
+    const { startPos = null, yaw = 0, refSpeed = 28, dragK = 0 } = opts;
     if (startPos) {
       this.freePlaceMode = true;
       this._gizmoTarget = "chain";
@@ -1886,8 +1880,8 @@ export class ModularRoadBuilder {
     // chain; the far side is a NEW level chain seated on the ballistic landing.
     put("straight", { straightLength: 30 }); // longer run-up so you can build speed
     put("jump", { jumpLength: 18, jumpAngle: 12 });
-    const landNear = _ballisticLanding(this.currentConnector, refSpeed, 9.81, 0);
-    const landFar = _ballisticLanding(this.currentConnector, Math.max(refSpeed + 12, 40), 9.81, 0);
+    const landNear = _ballisticLanding(this.currentConnector, refSpeed, 9.81, 0, dragK);
+    const landFar = _ballisticLanding(this.currentConnector, Math.max(refSpeed + 12, 40), 9.81, 0, dragK);
     if (landNear) {
       const snapWas = this.snapEnabled;
       this.snapEnabled = false; // keep the ballistic point exact (grid would nudge it)

@@ -643,7 +643,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       const x = s.x;
       const z = s.z;
       const y = app.getWorldHeight(x, z) + buildHeight;
-      builder.loadDemo({ startPos: new THREE.Vector3(x, y, z), yaw: s.yaw });
+      builder.loadDemo({
+        startPos: new THREE.Vector3(x, y, z), yaw: s.yaw,
+        dragK: AERO.drag / CHASSIS.mass, // same arc the red preview draws
+      });
       if (controls.target) {
         controls.target.set(x, y, z);
         controls.update?.();
@@ -2167,8 +2170,44 @@ ${e.message}`);
 
   // ── GAP PREVIEW (jump authoring) ────────────────────────────────────────────
   // Ballistic arc from the open connector at a reference speed → shows where a
-  // jump lands so you can place the landing. Gravity matches the vehicle's.
-  const gapPreview = new GapPreview({ scene, gravity: GRAVITY });
+  // jump lands so you can place the landing. Gravity AND drag match the
+  // vehicle's — a vacuum parabola over-shoots the real car by 2–5% of range
+  // (tools/gapPreviewAccuracyTest.mjs), which is 10 m on a big jump. Both AERO
+  // and CHASSIS are dev-panel-tunable, so `dragK` is refreshed per update rather
+  // than captured here.
+  //
+  // `gapSurfaceHit` is what stops the arc being a line into the void. The plane
+  // at (launch height − landingDrop) can only ever fire if the launch CLIMBS, so
+  // off a level open end — the commonest thing to be looking at in build mode —
+  // the old preview drew 459 m of red line through the terrain and marked
+  // nothing. Now the arc lands on whatever is actually there.
+  const _gapFrom = new THREE.Vector3();
+  const _gapDir = new THREE.Vector3();
+  const _gapHit = new THREE.Vector3();
+  function gapSurfaceHit(from, to) {
+    // 1) ROAD DECKS FIRST — a platform you might land on sits above the terrain,
+    //    so testing terrain first would mark the ground underneath it.
+    _gapDir.copy(to).sub(from);
+    const len = _gapDir.length();
+    if (len < 1e-6) return null;
+    _gapDir.divideScalar(len);
+    if (deckBvh?.baked) {
+      const hit = deckBvh.raycastFirst(from, _gapDir, len);
+      if (hit) return hit.point;
+    }
+    // 2) TERRAIN — a heightfield, so a segment test is just the sign change of
+    //    (arc y − ground y) at the two ends. No raycast needed, and at ~1.3 m of
+    //    arc per segment the linear crossing is well inside the marker's radius.
+    const gTo = app.getWorldHeight(to.x, to.z);
+    if (to.y > gTo) return null;
+    const gFrom = app.getWorldHeight(from.x, from.z);
+    const d0 = from.y - gFrom;
+    if (d0 <= 0) return _gapHit.copy(to); // already underground — land here
+    const d1 = to.y - gTo;
+    return _gapHit.copy(from).lerp(to, d0 / (d0 - d1));
+  }
+
+  const gapPreview = new GapPreview({ scene, gravity: GRAVITY, surfaceHit: gapSurfaceHit });
   let gapPreviewOn = true;
   // ~80% of TIRE.topSpeed — the speed you realistically hit a ramp at. Scale it
   // with top speed or the previewed arc will under-shoot every jump you build.
@@ -2623,6 +2662,8 @@ ${e.message}`);
       setRefSpeed: (v) => { refSpeed = v; },
       getLandingDrop: () => landingDrop,
       setLandingDrop: (v) => { landingDrop = v; },
+      /** Dial the arc/marker glow live, e.g. setGapGlow({ arc: 14 }). */
+      setGapGlow: (g) => gapPreview.setGlow(g),
       snapLanding,
       // Race
       setRaceRespawn: (on) => { raceRespawn = !!on; },
@@ -2747,6 +2788,7 @@ ${e.message}`);
       // (a few hundred vec ops); build mode isn't perf-critical.
       if (gapPreviewOn) {
         gapPreview.setVisible(true);
+        gapPreview.dragK = AERO.drag / CHASSIS.mass;
         lastLanding = gapPreview.update(builder.currentConnector, refSpeed, landingDrop);
       } else {
         gapPreview.setVisible(false);
