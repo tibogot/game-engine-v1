@@ -724,6 +724,106 @@ export function decimateFrames(frames, maxDist, maxAngleDeg) {
 }
 
 /** @param {Array} frames the piece's own transport frames (buildPiece.frames) */
+/** Sweep an OPEN section along frames straight into shared buffers. Position and
+ *  index only — a BVH reads nothing else, so normals and UVs are pure waste. */
+function sweepCollisionSheet(frames, section, baseLat, zSign, positions, indices) {
+  const F = frames.length;
+  const S = section.length;
+  const base = positions.length / 3;
+  for (let i = 0; i < F; i++) {
+    const fr = frames[i];
+    for (let j = 0; j < S; j++) {
+      const s = section[j];
+      const lat = baseLat + zSign * s.z;
+      positions.push(
+        fr.pos.x + fr.right.x * lat + fr.up.x * s.y,
+        fr.pos.y + fr.right.y * lat + fr.up.y * s.y,
+        fr.pos.z + fr.right.z * lat + fr.up.z * s.y,
+      );
+    }
+  }
+  for (let i = 0; i < F - 1; i++) {
+    const r0 = base + i * S;
+    const r1 = base + (i + 1) * S;
+    for (let j = 0; j < S - 1; j++) {
+      indices.push(r0 + j, r1 + j, r0 + j + 1, r0 + j + 1, r1 + j, r1 + j + 1);
+    }
+  }
+}
+
+/**
+ * COLLISION PROXY — what the chassis actually hits.
+ *
+ * A guardrail's collision job is small: stop the car leaving sideways, scrape
+ * believably, never trap it, and shed it if it lands on top. Nothing in that
+ * list needs corrugation, posts, bolts or a back plate, and the previous proxy
+ * (the kit's old W-beam sheet plus box posts, 696 tris a piece) paid for all
+ * four. Two reasons they are not merely wasted:
+ *
+ *  - Guardrails are in the SOLIDS bvh, which only the CHASSIS HULL touches —
+ *    wheels never probe them. And the hull is SAMPLED against triangles, so
+ *    surface detail finer than the sample spacing is invisible at best and
+ *    something for a sample to snag on at worst. A flat face slides cleanly.
+ *  - The posts sit on the FIELD side, behind the beam. The only way to reach
+ *    one is to already be through the rail.
+ *
+ * So: one wall at the beam's traffic face, run from the kerb (no ledge under
+ * the beam for a sample to catch), capped with a 45° tent.
+ *
+ * THE TENT IS NOT OPTIONAL. The rail top stands 1.2 m over the deck and this is
+ * a stunt game, so cars land on it. See wBeamProfile in modularRoadKit.js: a
+ * flat or knife-edged top leaves a car neither supported nor rejected, and with
+ * no wheels on the deck it has no drive, no steering and no way off. The tent
+ * gives every landing a direction to fall.
+ *
+ * Derived from the VISIBLE rail's own profile and swept along the SAME
+ * decimated frames, so the two can never drift apart. They already had: the
+ * proxy was a separate parameter set whose beam was 0.1 m deep against the
+ * visible 0.26, leaving the car colliding 8 cm short of the rail it could see.
+ *
+ * DO NOT "FIX" THIS BY MAKING IT DOUBLE-SIDED. An open sheet with no thickness
+ * looks like something a car could pass through from behind, and it is not: the
+ * chassis only ever queries the solids BVH via `closestPointWithNormal`, which
+ * re-orients the face normal toward the query point (modularRoadBvh.js). The
+ * push-out direction therefore comes from which side you are on, not from
+ * winding. Emitting reversed triangles would double the collision mesh and
+ * change nothing. Held by tools/railCollisionSideTest.mjs.
+ */
+export function buildRailCollision(frames, rp, r = railParams) {
+  if (r.height <= 0 || !frames?.length) return null;
+  const hw = rp.width / 2;
+  const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
+  const kerbTop = rp.railHeight;
+  const edgeAbs = hw - rw * 0.5;
+  const centerV = kerbTop + r.gap + r.height * 0.5;
+  const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
+
+  const beamTop = centerV + prof.height * 0.5;
+  const half = prof.depth * 0.5;
+  const zBack = prof.backZ; // field side
+  const zFace = -prof.backZ; // traffic side — the surface the car should meet
+
+  const section = [
+    { y: kerbTop, z: zFace }, // stands on the kerb
+    { y: beamTop - half, z: zFace }, // up the traffic face
+    { y: beamTop, z: 0 }, // ridge
+    { y: beamTop - half, z: zBack }, // and down the back
+  ];
+
+  const positions = [];
+  const indices = [];
+  const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle);
+  for (const side of [-1, 1]) {
+    const zSign = r.mirrorSides ? side : 1;
+    sweepCollisionSheet(sweepFrames, section, side * edgeAbs, zSign, positions, indices);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeBoundingSphere();
+  return geo;
+}
+
 export function buildRailGeometry(frames, rp, r = railParams) {
   if (r.height <= 0 || !frames?.length) return null;
   const hw = rp.width / 2;

@@ -11,12 +11,12 @@
 import * as THREE from "three";
 import {
   decimateFrames,
-  railParams, railProfile, sweepRail, buildPostTemplate, placePosts,
+  railParams, railProfile, sweepRail, buildPostTemplate, placePosts, buildRailCollision,
   buildRailGeometry, straightFrames, signedArea,
 } from "../games/modular-road-v3/modularRoadRail.js";
 
 const lab = {
-  railParams, railProfile, sweepRail, buildPostTemplate, placePosts,
+  railParams, railProfile, sweepRail, buildPostTemplate, placePosts, buildRailCollision,
   buildRailGeometry, straightFrames, signedArea,
 };
 
@@ -341,6 +341,70 @@ for (const [len, spacing] of [[32, 2.8], [32, 6], [12, 2.8]]) {
   const want = Math.max(2, Math.round(len / spacing) + 1);
   check(out.length === want, `${len} m @ ${spacing} m spacing → ${out.length} posts (want ${want})`);
   for (const g of out) g.dispose();
+}
+
+/* ── 3b. the collision proxy ────────────────────────────────────────────── */
+//
+// The car must hit the rail it can SEE. These were two independent parameter
+// sets before (proxy beam 0.1 m deep against the visible 0.26), so the chassis
+// stopped 8 cm short of the barrier and sank into it. The proxy is now derived
+// from the same profile, and this is what holds that.
+console.log("\n— collision proxy —");
+{
+  const RPW = { ...RP, railWidth: 0.75 };
+  const vis = lab.buildRailGeometry(FRAMES, RPW, railParams);
+  const col = buildRailCollision(FRAMES, RPW, railParams);
+  check(col != null, "proxy builds");
+
+  const cb = new THREE.Box3().setFromBufferAttribute(col.attributes.position);
+  const vt = Math.round(vis.index.count / 3);
+  const ct = Math.round(col.index.count / 3);
+  note(`${ct} tris vs ${vt} visible (${(vt / ct).toFixed(1)}× lighter), was 696`);
+
+  // The face the car meets is the INNERMOST surface of the right-hand rail, so
+  // it has to be measured per side — a bounding box over both rails reports the
+  // outboard posts and says nothing about where the car stops.
+  const innerFace = (geo) => {
+    const p = geo.attributes.position;
+    let m = Infinity;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i);
+      if (x > 0) m = Math.min(m, x); // right-hand rail only
+    }
+    return m;
+  };
+  check(
+    Math.abs(innerFace(vis) - innerFace(col)) < 0.002,
+    `traffic face aligned (visible ${innerFace(vis).toFixed(3)} vs proxy ${innerFace(col).toFixed(3)})`,
+  );
+
+  // Against the BEAM top, not the visible rail's highest point: posts stand
+  // `postRise` proud of the beam, and 6 cm nubs every 3.6 m are pure snag risk
+  // in a collision mesh for nothing a driver would ever feel.
+  const beamTop = RPW.railHeight + railParams.gap + railParams.height;
+  check(
+    Math.abs(cb.max.y - beamTop) < 0.002,
+    `capped at the beam top (proxy ${cb.max.y.toFixed(3)} vs beam ${beamTop.toFixed(3)})`,
+  );
+  check(
+    cb.min.y >= RPW.railHeight - 1e-6,
+    `nothing below the kerb top (${cb.min.y.toFixed(3)} ≥ ${RPW.railHeight})`,
+  );
+  check(ct < vt / 10, `at least 10× cheaper than the visible rail (${(vt / ct).toFixed(1)}×)`);
+
+  // The tent: a car landing on top must find a slope, never a plateau. Every
+  // triangle at the ridge height has to fall away toward one side or the other.
+  const pos = col.attributes.position;
+  const idx = col.index;
+  let flatOnTop = 0;
+  for (let i = 0; i < idx.count; i += 3) {
+    const ys = [0, 1, 2].map((k) => pos.getY(idx.getX(i + k)));
+    if (ys.every((y) => y > cb.max.y - 1e-4)) flatOnTop++;
+  }
+  check(flatOnTop === 0, `no flat plateau at the ridge (${flatOnTop} level triangles)`);
+
+  vis.dispose();
+  col.dispose();
 }
 
 /* ── 4. every toggle still builds ───────────────────────────────────────── */

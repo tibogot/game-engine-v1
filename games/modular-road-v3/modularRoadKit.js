@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { buildRailGeometry } from "./modularRoadRail.js";
+import { buildRailGeometry, buildRailCollision } from "./modularRoadRail.js";
 
 /**
  * Modular Road kit — parametric track pieces built by sweeping a single shared
@@ -136,6 +136,10 @@ export const pieceParams = {
   // Rideable tube (the tube wall IS the road — drive inside, loop the walls):
   tubeRadius: 8, // interior radius (m)
   tubeWall: 0.6, // wall thickness (m) — visible at the open ends
+  // Half tube — the same rideable ring with the top cut away (see
+  // buildHalfTubeProfile). Shares tubeRadius/tubeWall so a half tube seams onto
+  // a full tube of the same size.
+  halfTubeSpan: 180, // arc of the surviving arc (deg), centred on the floor
   // Half-pipe channel shell (open-top quarter-pipe walls):
   channelRadius: 4, // wall fillet radius = wall height (m)
   // Quarter-pipe (concave ramp curving up a vertical-plane arc to a wall):
@@ -236,6 +240,55 @@ function buildTubeProfile(pp = pieceParams) {
   }
   for (let k = N; k >= 0; k--) {
     const a = -Math.PI / 2 + (2 * Math.PI * k) / N;
+    pts.push({ x: Math.cos(a) * Ro, y: Ri + Math.sin(a) * Ro, zone: 4 });
+  }
+  return { pts, hw: Ri };
+}
+
+/**
+ * Half-tube cross-section: the rideable tube with the top cut away.
+ *
+ * NOT the same thing as the half-pipe CHANNEL, which is why both exist. The
+ * channel is a shell: a flat road with a quarter-pipe fillet outside each kerb,
+ * baked into SOLIDS, so the walls stop the chassis but the wheels never leave
+ * the flat deck. This is a PROFILE, like the full tube — the arc IS the road, it
+ * lands in the deck BVH, and the wheels drive up it. You can carry a line up to
+ * vertical and back down; a channel just bounces you off.
+ *
+ * Cut from the same circle as buildTubeProfile, on the same centre (y = Ri, so
+ * the floor sits at y = 0 and a flat piece feeds straight in) and out of the
+ * same tubeRadius/tubeWall — so a half tube seams onto a full tube of the same
+ * size, and the transition is the roof simply ending.
+ *
+ * `halfTubeSpan` is the arc that SURVIVES, centred on the floor: 180° is a true
+ * half, and past that the rim curls back over you, which is where the piece
+ * stops being a valley and starts being a tube you can fall out of. The clamp
+ * ends at 300° rather than 360° because a closed ring is the tube piece's job,
+ * and the closing arc would collapse the two rim caps onto each other.
+ *
+ * Outline order matches buildTubeProfile: the inner (drivable) arc first in the
+ * direction of increasing angle, then the outer arc back — so the closed loop's
+ * two remaining edges are the RIM CAPS, one at each lip, which is what gives the
+ * open edges their visible wall thickness.
+ */
+function buildHalfTubeProfile(pp = pieceParams) {
+  const Ri = Math.max(3, pp.tubeRadius ?? 8);
+  const tw = Math.max(0.15, pp.tubeWall ?? 0.6);
+  const Ro = Ri + tw;
+  const span = THREE.MathUtils.degToRad(
+    THREE.MathUtils.clamp(pp.halfTubeSpan ?? 180, 60, 300),
+  );
+  const a0 = -Math.PI / 2 - span / 2; // left lip
+  // Keep the full tube's angular resolution (48 steps for 360°) so the two
+  // pieces facet identically and a half-to-full seam has matching vertices.
+  const N = Math.max(8, Math.round((48 * span) / (2 * Math.PI)));
+  const pts = [];
+  for (let k = 0; k <= N; k++) {
+    const a = a0 + (span * k) / N;
+    pts.push({ x: Math.cos(a) * Ri, y: Ri + Math.sin(a) * Ri, zone: 3 });
+  }
+  for (let k = N; k >= 0; k--) {
+    const a = a0 + (span * k) / N;
     pts.push({ x: Math.cos(a) * Ro, y: Ri + Math.sin(a) * Ro, zone: 4 });
   }
   return { pts, hw: Ri };
@@ -2256,6 +2309,28 @@ export const PIECE_CATALOG = [
     plain: true,
   },
   {
+    id: "half_tube",
+    label: "Half tube",
+    hint: "Rideable U — drive up the walls, open sky",
+    swatch: "#16a0c0",
+    key: "",
+    points: straightPoints,
+    profile: buildHalfTubeProfile,
+    noKerb: true,
+    plain: true,
+  },
+  {
+    id: "half_tube_curve",
+    label: "Half tube curve",
+    hint: "Rideable U on a flat curve (R flips L/R)",
+    swatch: "#16a0c0",
+    key: "",
+    points: curvePoints,
+    profile: buildHalfTubeProfile,
+    noKerb: true,
+    plain: true,
+  },
+  {
     id: "channel",
     label: "Half-pipe channel",
     hint: "Open-top U walls — funnels the car",
@@ -2355,9 +2430,11 @@ const _END_TANGENTS = {
   wallride: flatEndTangents,
   tunnel: flatEndTangents,
   tube: flatEndTangents,
+  half_tube: flatEndTangents,
   channel: flatEndTangents,
   tunnel_curve: curveEndTangents,
   tube_curve: curveEndTangents,
+  half_tube_curve: curveEndTangents,
   channel_curve: curveEndTangents,
   twist: flatEndTangents,
   banktilt: flatEndTangents,
@@ -2635,18 +2712,13 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   const geometry = def.geometry
     ? def.geometry(pp, rpForProfile)
     : buildSweepGeometry(frames, profileData, { plain: def.plain });
-  // TWO rails, deliberately.
-  //
-  // `railGeometry` is what you SEE (modularRoadRail.js — corrugated, rolled
-  // edges, posts). `railCollision` is the old flat-sheet builder, kept because a
-  // BVH wants the cheapest possible triangles: bolts, chamfers and a bull-nose
-  // radius contribute nothing to a chassis sweep, and bakeCollision() reruns on
-  // every single track edit. Measured: 3,688 tris vs 696 for the same piece.
+  // TWO rails, deliberately: one to look at, one to hit. Both come out of
+  // modularRoadRail.js and share a profile, so the collision surface tracks the
+  // visible one automatically instead of being a second set of numbers that
+  // drifts. See buildRailCollision for why it is as bare as it is.
   const wantsRail = useKerbs && !def.noMesh && !def.profile && !def.geometry;
   const railGeometry = wantsRail ? buildRailGeometry(frames, rpForProfile) : null;
-  const railCollision = wantsRail
-    ? buildGuardrailGeometry(frames, profileData, gp, rpForProfile)
-    : null;
+  const railCollision = wantsRail ? buildRailCollision(frames, rpForProfile) : null;
   const shellGeometry = def.shell ? buildShellGeometry(def.shell, frames, profileData, pp) : null;
   // Decor is the vertex-coloured overlay mesh: game lines build theirs from the
   // frames, junctions paint their own markings from their outline.
