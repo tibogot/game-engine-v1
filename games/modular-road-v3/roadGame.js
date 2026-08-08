@@ -1514,7 +1514,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         if (brush) { if (lastPointer) updateBrush(lastPointer.x, lastPointer.y); placeBrush(); }
         else builder.place();
         break;
-      case "backspace": builder.undo(); break;
+      // Backspace / Shift+Backspace are the LAYOUT-PROOF pair: Backspace has no
+      // letter on it, so it is in the same place and means the same thing on
+      // QWERTY, AZERTY, QWERTZ and Dvorak alike. Ctrl+Z is the shortcut people
+      // reach for, this is the one that cannot be moved out from under them.
+      case "backspace":
+        if (e.shiftKey ? builder.redo() : builder.undo()) bakeCollision();
+        break;
       case "keyn": seedChainAtSpawn({ atCursor: true }); break; // new chain at the sky cursor
       case "bracketleft": builder.cycleChain(-1); break;
       case "bracketright": builder.cycleChain(1); break;
@@ -1552,6 +1558,34 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // Recording here is safe: the guard below still declines to SWALLOW the
     // event, so Ctrl+S / Ctrl+R and the rest reach the browser exactly as before.
     keys[code] = true;
+
+    // UNDO / REDO — the one modifier combo this editor claims, so it has to be
+    // handled ABOVE the pass-through guard below. Ctrl+Y and Ctrl+Shift+Z are
+    // both redo because both conventions are in the wild and neither is worth
+    // being wrong about. Build mode only: Ctrl+Z while driving should do nothing.
+    //
+    // MATCHED ON `e.key`, NOT `e.code`, AND THAT IS NOT A STYLE CHOICE.
+    // `e.code` names the PHYSICAL key by its US-QWERTY position, so on an AZERTY
+    // keyboard the key labelled Z reports `KeyW` — and the key that does report
+    // `KeyZ` is the one labelled W, i.e. Ctrl+W, i.e. CLOSE THE TAB. Browsers do
+    // not let preventDefault() stop that, so a code-based match does not merely
+    // fail to undo, it loses the user's work. `e.key` follows the printed label,
+    // which is what "press Ctrl+Z" means to anyone on any layout.
+    //
+    // Driving stays on `e.code` on purpose — there WASD is a hand SHAPE, and
+    // physical positions are what put it under the same fingers as ZQSD.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && mode === "build") {
+      const k = (e.key || "").toLowerCase();
+      const redo = k === "y" || (k === "z" && e.shiftKey);
+      if (redo || k === "z") {
+        e.preventDefault();
+        if (redo ? builder.redo() : builder.undo()) {
+          bakeCollision();
+          paletteUi?.refreshStatus?.();
+        }
+        return;
+      }
+    }
 
     // Let Ctrl/Meta/Alt combos through (browser + OS shortcuts). The editor's own
     // shortcuts are all unmodified, so this still blocks every one of them.
