@@ -102,6 +102,28 @@ export function createRoadMaterial(opts = {}) {
     wheelPolish: uniform(opts.wheelPolish ?? 0.22),
     /** Albedo darkening in the wheel paths (rubber deposit). */
     wheelDarken: uniform(opts.wheelDarken ?? 0.10),
+    // ── HISTORICAL DRIFT MARKS ────────────────────────────────────────────
+    // Rubber laid down BEFORE the race — track history, not the player's own
+    // marks. Those stay a ribbon (modularRoadTireMarks.js): a live mark is an
+    // EVENT on an arbitrary path and has to be geometry. This is surface
+    // CONDITION, so it belongs in the road itself — no draw calls, no
+    // z-fighting, and it conforms to banks, loops and the inside of tubes,
+    // which a decal quad cannot. Driven by `aCurve`, so it concentrates in
+    // corners on its own instead of being placed by hand.
+    driftAmount: uniform(opts.driftAmount ?? 1.4), // 0 = a freshly laid track
+    driftWidth: uniform(opts.driftWidth ?? 0.42), // half-width of the band (lateral)
+    driftBias: uniform(opts.driftBias ?? 0.35), // how far toward the corner's OUTSIDE
+    /** Curvature (1/m) at which marks reach full strength. 0.05 ≈ a 20 m radius. */
+    driftCurveRef: uniform(opts.driftCurveRef ?? 0.05),
+    /** Roughness removed where rubber sits — it is glossier than asphalt, and
+     *  that gloss is what makes it read as rubber rather than as a dark stain. */
+    driftGloss: uniform(opts.driftGloss ?? 0.25),
+    /** Streaks per lateral unit — 20 puts them roughly a tyre-width apart on a
+     *  16 m deck. */
+    driftLines: uniform(opts.driftLines ?? 20),
+    /** How far the macro field pushes those streaks sideways as they run, so
+     *  they wander like driven lines instead of looking machined. */
+    driftWander: uniform(opts.driftWander ?? 2.5),
     // Centre + edge paint lines. Default OFF — the clean Apex-Rush deck look;
     // the dev panel's "Road lines" toggle flips the uniform live.
     linesOn: uniform(opts.linesOn ?? 0), // master: 1 = paint lines, 0 = plain deck
@@ -171,6 +193,51 @@ export function createRoadMaterial(opts = {}) {
     return vec4(macro, agg, wheelPath, aggFade);
   })();
 
+  /**
+   * Where old rubber sits, 0..1. Built ONCE like `surface` above and referenced
+   * by both colorNode and roughnessNode, so the graph emits it a single time.
+   *
+   * Costs NO new noise: the breakup reuses the macro and aggregate fields that
+   * the deck already computes, and those are anisotropically stretched along
+   * the road (see `streak`), which is exactly the shape a skid wants anyway.
+   * The whole effect is a handful of ALU on top of what was already there.
+   */
+  const driftField = Fn(() => {
+    const lateral = attribute("aLateral", "float");
+    // aCurve is signed: + is a right-hand corner. One clamp gives both how hard
+    // the corner is and which way it goes.
+    const k = clamp(attribute("aCurve", "float").div(u.driftCurveRef), -1.0, 1.0);
+    const corner = abs(k);
+    // Cars drift wide, so the band sits toward the corner's OUTSIDE — the
+    // opposite side to the way it turns.
+    const centre = k.negate().mul(u.driftBias);
+    const band = smoothstep(
+      u.driftWidth, u.driftWidth.mul(0.35), abs(lateral.sub(centre)),
+    );
+    // INDIVIDUAL STREAKS, from a ripple across the road rather than from noise.
+    //
+    // Reusing the deck's own fields for this does not work and it is worth
+    // saying why: `macro` runs at ~16 m across a 16 m road, so it is one broad
+    // gradient — thresholding it gives a vague dark half, not marks. `agg` is
+    // the right size (~0.2 m, about a tyre) but it is deliberately faded out
+    // with distance by aggFade to stop it aliasing, so marks built on it would
+    // evaporate down the straight. A third noise at the right frequency would
+    // cost a full extra evaluation per fragment across most of the screen.
+    //
+    // A triangle wave in `lateral` costs a handful of ALU instead, and it is
+    // closer to the truth anyway: skid marks ARE roughly parallel lines a tyre
+    // apart. `macro` then displaces them sideways so they wander down the road
+    // instead of looking machined, and modulates them along it so they break
+    // into segments rather than running unbroken for the whole piece.
+    const wander = surface.x.sub(0.5).mul(u.driftWander);
+    const ripple = abs(fract(lateral.mul(u.driftLines).add(wander)).sub(0.5)).mul(2.0);
+    const streaks = smoothstep(0.8, 0.25, ripple);
+    const patchy = smoothstep(0.34, 0.62, surface.x);
+    // Saturated so `driftAmount` can be pushed past 1 for a filthy track
+    // without breaking the darkening bound colorNode relies on.
+    return saturate(band.mul(corner).mul(streaks).mul(patchy).mul(u.driftAmount));
+  })();
+
   mat.colorNode = Fn(() => {
     const lateral = attribute("aLateral", "float");
     const zone = attribute("aZone", "float");
@@ -189,6 +256,11 @@ export function createRoadMaterial(opts = {}) {
     const shaped = saturate(tone.sub(0.5).mul(u.grainScale).add(0.5));
     let deckBase = mix(u.asphaltDark, u.asphaltLight, shaped);
     deckBase = deckBase.mul(oneMinus(wheelPath.mul(u.wheelDarken)));
+    // Old rubber. BOUNDED at 0.55 on purpose: the player's live skid ribbon
+    // draws on top of this, and two independent darkenings multiply — an
+    // unbounded one would turn every re-drift over an old mark into a black
+    // hole. Capped, the worst case is dark rubber on dark rubber.
+    deckBase = deckBase.mul(oneMinus(driftField.mul(0.55)));
     deckBase = deckBase.mul(u.deckBrightness);
 
     // Feather floor of about a pixel. Painted lines are hard-edged in reality,
@@ -265,7 +337,11 @@ export function createRoadMaterial(opts = {}) {
     let deck = u.deckRough
       .add(macro.sub(0.5).mul(u.roughVary))
       .add(agg.sub(0.5).mul(u.roughVary).mul(0.5))
-      .sub(wheelPath.mul(u.wheelPolish));
+      .sub(wheelPath.mul(u.wheelPolish))
+      // Same field as the albedo above, referenced not recomputed. Rubber is
+      // glossier than the asphalt around it, and that sheen is most of what
+      // sells it as rubber rather than as a dark patch of paint.
+      .sub(driftField.mul(u.driftGloss));
     deck = clamp(deck, 0.05, 1.0);
 
     let r = float(0.9); // sides / underside
@@ -372,6 +448,8 @@ export const ROAD_LOOK_NUMBERS = [
   "neonIntensity", "neonSpacing", "neonWidth",
   "deckBrightness", "macroScale", "aggScale", "deckRough", "roughVary",
   "wheelPolish", "wheelDarken",
+  "driftAmount", "driftWidth", "driftBias", "driftCurveRef", "driftGloss",
+  "driftLines", "driftWander",
 ];
 
 export const ROAD_LOOK_KEYS = [...ROAD_LOOK_COLORS, ...ROAD_LOOK_NUMBERS];

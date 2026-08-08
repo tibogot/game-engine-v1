@@ -734,9 +734,19 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   function bakeCollision() {
     scene.updateMatrixWorld(true);
-    const decks = builder.pieces
-      .map((p) => p.mesh)
-      .filter((m) => m && !m.userData.noCollision);
+    const decks = [];
+    for (const p of builder.pieces) {
+      const m = p.mesh;
+      if (!m || m.userData.noCollision) continue;
+      // A deck can hand the BVH a stand-in the same way a rail does. The half
+      // tubes use it to keep their rim caps OUT of the drive surface — a 0.6 m
+      // horizontal shelf at exactly lip height, which is what stopped the car
+      // ever getting air off a half pipe. See buildOpenLipCollision.
+      const proxy = m.userData.collisionGeometry;
+      decks.push(proxy
+        ? { geometry: proxy, matrixWorld: m.matrixWorld, updateMatrixWorld() {} }
+        : m);
+    }
     const solids = [];
     for (const p of builder.pieces) {
       if (p.railMesh) {

@@ -32,7 +32,7 @@ const KIT_SRC = readFileSync(KIT, "utf8");
 let fail = 0;
 const check = (n, c, d = "") => { console.log(`${c ? "PASS" : "FAIL"}  ${n}${d ? "  — " + d : ""}`); if (!c) fail++; };
 
-const { PIECE_BY_ID, pieceParams, computeFrames, buildSweepGeometry } =
+const { PIECE_BY_ID, pieceParams, computeFrames, buildSweepGeometry, buildPiece, initialConnector } =
   await import(new URL("../games/modular-road-v3/modularRoadKit.js", import.meta.url).href);
 
 const RI = 8;
@@ -178,6 +178,72 @@ check("the surface climbs towards the walls (an arc, not a flat road)",
   yEdge - yMid > 1.0, `floor ${yMid.toFixed(2)} m vs ${(RI - 1.5).toFixed(1)} m out: ${yEdge.toFixed(2)} m`);
 check("the floor is at deck height, so it seams with a flat piece",
   Math.abs(yMid) < 1e-6, `${yMid.toFixed(4)} m`);
+
+/* ══ The lip is a launch edge, not a shelf ════════════════════════════════ */
+//
+// The piece shipped drivable but unusable: the car climbed the wall fine and
+// then could not get air off the rim, topping out at ~9.7 m on an 8 m lip at
+// every speed. The cause was this piece's own rim caps — the bands that close
+// the profile outline between the bore and the outer shell. On the full tube
+// they hide at the floor seam; here they land at the lips, and at a 180° span
+// the wall thickness runs horizontally, so each one is a flat 0.6 m ledge at
+// exactly rim height for the whole length of the piece. In the deck BVH that is
+// indistinguishable from road. See buildOpenLipCollision and, for the driving
+// numbers, tools/halfTubeAirMeshRepro.mjs.
+console.log("\n— the lip —");
+const builtHalf = buildPiece("half_tube", initialConnector(), pp());
+check("the half tube ships a deck collision proxy", !!builtHalf.deckCollision,
+  "the visible mesh keeps its rim caps; the BVH gets a copy without them");
+check("a full tube does NOT need one (its caps hide at the floor seam)",
+  !buildPiece("tube", initialConnector(), pp()).deckCollision);
+check("a plain road piece does NOT get one either",
+  !buildPiece("straight", initialConnector(), pp()).deckCollision,
+  "zone 0 means the structural SIDES there, which must stay collidable");
+
+{
+  const vis = builtHalf.geometry.getIndex().count / 3;
+  const col = builtHalf.deckCollision.getIndex().count / 3;
+  // Two lip caps, two triangles per ring.
+  const rings = computeFrames(half.points(pp())).length - 1;
+  check("exactly the two lip caps are dropped, nothing else",
+    vis - col === 4 * rings, `${vis} → ${col} tris over ${rings} rings`);
+}
+
+const asMesh = (geo) => {
+  const m = new THREE.Mesh(geo);
+  m.applyMatrix4(builtHalf.world);
+  m.updateMatrixWorld(true);
+  return m;
+};
+const visMesh = asMesh(builtHalf.geometry);
+const colMesh = asMesh(builtHalf.deckCollision);
+const zProbe = -13;
+const dropAt = (mesh, x) => {
+  ray.set(new THREE.Vector3(x, RI + 12, zProbe), down);
+  const hit = ray.intersectObject(mesh, false)[0];
+  return hit ? hit.point.y : null;
+};
+
+// The ledge is gone…
+check("the rim ledge is no longer a drive surface",
+  dropAt(visMesh, -(RI + TW / 2)) !== null && dropAt(colMesh, -(RI + TW / 2)) === null,
+  `visible mesh answers at y ${dropAt(visMesh, -(RI + TW / 2))}, collision answers nothing`);
+// …and NOTHING ELSE changed. This is the half of the check that matters: the
+// bore is the road, and stripping the caps must not have touched one triangle
+// of it.
+{
+  let probed = 0, differ = 0;
+  for (let x = -RI + 0.1; x <= RI - 0.1; x += 0.1) {
+    const a = dropAt(visMesh, x), b = dropAt(colMesh, x);
+    probed++;
+    if ((a === null) !== (b === null) || (a !== null && Math.abs(a - b) > 1e-6)) differ++;
+  }
+  check("the drivable valley is bit-identical to the visible mesh", differ === 0,
+    `${probed} probes across the bore, ${differ} differ`);
+}
+check("the outer shell is still collidable (you can land on the OUTSIDE)",
+  dropAt(colMesh, 0) !== null && Math.abs(dropAt(colMesh, 0)) < 1e-6,
+  "floor still at y 0; the shell below it is what the bore rests on");
 
 /* ══ Palette wiring ═══════════════════════════════════════════════════════ */
 console.log("\n— palette —");

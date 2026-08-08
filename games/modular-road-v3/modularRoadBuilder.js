@@ -1073,6 +1073,9 @@ export class ModularRoadBuilder {
     const built = buildPiece(id, connectorIn, pp, roadParams, guardrailParams, edges);
     const mesh = this._makeMesh(built.geometry, this.material, built.world);
     mesh.userData.pieceId = id;
+    // Deck collision proxy — only the half tubes have one (rim caps stripped).
+    // Same three-birth-sites rule as the rail proxy below.
+    mesh.userData.collisionGeometry = built.deckCollision ?? null;
     if (built.def.noMesh) {
       mesh.userData.noCollision = true;
       mesh.userData.noRender = true; // gap spacer: no road, no instance/merge
@@ -1430,6 +1433,7 @@ export class ModularRoadBuilder {
   _removePiece(p) {
     this.root.remove(p.mesh);
     p.mesh.geometry.dispose();
+    p.mesh.userData.collisionGeometry?.dispose();
     if (p.railMesh) {
       this.root.remove(p.railMesh);
       p.railMesh.geometry.dispose();
@@ -1660,6 +1664,8 @@ export class ModularRoadBuilder {
     p.mesh.geometry.dispose();
     p.mesh.geometry = built.geometry;
     p.mesh.matrix.copy(built.world);
+    p.mesh.userData.collisionGeometry?.dispose();
+    p.mesh.userData.collisionGeometry = built.deckCollision ?? null;
     // Branch sockets are world matrices, so they move with the piece.
     p.branches = built.branchesOut ?? [];
 
@@ -1725,6 +1731,7 @@ export class ModularRoadBuilder {
       const built = buildPiece(e.id, connectorIn, pp, roadParams, guardrailParams, edges);
       const mesh = this._makeMesh(built.geometry, this.material, built.world);
       mesh.userData.pieceId = e.id;
+      mesh.userData.collisionGeometry = built.deckCollision ?? null;
       if (built.def.noMesh) {
         mesh.userData.noCollision = true;
         mesh.userData.noRender = true;

@@ -408,6 +408,74 @@ function _setFrameTangent(fr, t) {
  * (x = meters along path, y = meters across developed profile), aLateral
  * (x / halfWidth, for centre/edge lines), aZone (0 side, 1 deck, 2 rail).
  */
+/**
+ * Signed curvature (1/m) at each frame. Positive = turning RIGHT, matching
+ * pieceParams.curveDir, so the shader can tell which side of the road is the
+ * inside of the corner.
+ *
+ * Central difference on the tangent, projected onto `up`: the component of the
+ * turn that is actually a corner, as opposed to a piece that climbs or rolls.
+ */
+function frameCurvature(frames) {
+  const F = frames.length;
+  const out = new Float32Array(F);
+  for (let i = 0; i < F; i++) {
+    const a = frames[Math.max(0, i - 1)];
+    const b = frames[Math.min(F - 1, i + 1)];
+    const ds = a.pos.distanceTo(b.pos);
+    if (ds < 1e-6) continue;
+    // cross(tA, tB)·up is NEGATIVE for a right turn, hence the minus.
+    const s = Math.max(-1, Math.min(1, -_kx.crossVectors(a.tangent, b.tangent).dot(a.up)));
+    out[i] = Math.asin(s) / ds;
+  }
+  return out;
+}
+const _kx = new V3();
+
+/**
+ * Per-piece values every road geometry must carry, stamped in ONE place.
+ *
+ * Not three copies, because these are attributes on a material whose pieces are
+ * later MERGED: a builder that forgets one makes mergeGeometries return `null`
+ * and the entire merged track vanishes in drive mode with no error whatsoever.
+ * That failure has already happened three times in this codebase. Adding a
+ * per-piece value here reaches every builder at once.
+ *
+ * `aCurve` is signed curvature FADED TO ZERO at both ends of the piece. Pieces
+ * do not know their neighbours, so a raw value would step from 0 to 0.038 at
+ * the seam where a straight meets a curve and draw a hard line across the road.
+ * Faded, both sides of every seam agree at zero, and the effects it drives
+ * (drift marks, kerbs, the racing line) concentrate mid-corner where they
+ * belong. The fade is derived from the geometry's OWN uv.x range, so it needs
+ * no knowledge of vertex ordering and works for every builder.
+ */
+function stampPieceAttributes(geo, { plain = 1, curvature = 0 } = {}) {
+  const vcount = geo.getAttribute("position").count;
+  geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(new Float32Array(vcount).fill(plain), 1));
+
+  const curve = new Float32Array(vcount);
+  const uv = geo.getAttribute("uv");
+  if (curvature !== 0 && uv) {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < vcount; i++) {
+      const x = uv.getX(i);
+      if (x < lo) lo = x;
+      if (x > hi) hi = x;
+    }
+    const span = hi - lo;
+    const FADE = 0.18; // fraction of the piece spent easing in and out
+    for (let i = 0; i < vcount; i++) {
+      const t = span > 1e-6 ? (uv.getX(i) - lo) / span : 0.5;
+      const e = Math.min(t, 1 - t) / FADE;
+      const w = e >= 1 ? 1 : e * e * (3 - 2 * e); // smoothstep
+      curve[i] = curvature * w;
+    }
+  }
+  geo.setAttribute("aCurve", new THREE.Float32BufferAttribute(curve, 1));
+  return geo;
+}
+
 export function buildSweepGeometry(frames, profileData = buildProfile(), opts = {}) {
   const { pts: profile, hw } = profileData;
   const plain = opts.plain ? 1 : 0; // 1 = suppress centre/edge lines (platforms)
@@ -419,6 +487,15 @@ export function buildSweepGeometry(frames, profileData = buildProfile(), opts = 
   for (let i = 1; i < F; i++) {
     along[i] = along[i - 1] + frames[i].pos.distanceTo(frames[i - 1].pos);
   }
+
+  // How hard this piece corners, as one number. The kit's turns are
+  // constant-radius so the mean IS the curvature; averaging only matters for
+  // pieces that ease in and out, where it gives the honest average rather than
+  // whatever the first frame happened to be.
+  const kappa = frameCurvature(frames);
+  let meanCurvature = 0;
+  for (let i = 0; i < F; i++) meanCurvature += kappa[i];
+  meanCurvature /= Math.max(1, F);
 
   // Cumulative developed distance across the closed profile (for uv.y).
   const dev = new Float32Array(M + 1);
@@ -474,13 +551,95 @@ export function buildSweepGeometry(frames, profileData = buildProfile(), opts = 
   geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(lateral, 1));
   geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zone, 1));
-  // Constant per piece, but a real attribute so it survives geometry merging
-  // (all pieces carry it → merge stays valid). Platforms set it to suppress lines.
-  const vcount = positions.length / 3;
-  geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(new Float32Array(vcount).fill(plain), 1));
+  // Per-piece constants — see stampPieceAttributes for why they live there.
+  stampPieceAttributes(geo, { plain, curvature: meanCurvature });
   geo.setIndex(indices);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
+  return geo;
+}
+
+/**
+ * Collision copy of an OPEN-LIPPED swept piece with the rim caps deleted.
+ *
+ * WHY THIS EXISTS — the half tube would not let the car get air, measured by
+ * tools/halfTubeAirRepro.mjs (analytic arc) against
+ * tools/halfTubeAirMeshRepro.mjs (this kit's real mesh). Same car, same physics:
+ *
+ *     35 m/s straight at the wall     analytic arc  32 m     real piece  9.7 m
+ *     35 m/s, nose 60° off axis       analytic arc  41 m     real piece  9.1 m
+ *
+ * 9.7 m is the lip (8 m) plus the car's own length stood on end. The car climbs
+ * the wall perfectly, reaches the rim at 28 m/s, and in ONE 16 ms tick drops to
+ * 2.4 m/s and then hangs there — "the maximum it does is be at the edges".
+ *
+ * THE CAUSE IS NOT THE PHYSICS, IT IS THIS PIECE'S OWN GEOMETRY. buildSweepGeometry
+ * closes the profile outline, so the two edges that join the inner arc to the
+ * outer arc are swept too. On the full tube those land at the floor seam, buried
+ * under the bore where nothing can touch them. On the HALF tube they land at the
+ * lips — and because the wall thickness runs radially, at a 180° span that is a
+ * flat 0.6 m HORIZONTAL LEDGE at exactly rim height, running the whole length of
+ * the piece. It goes into the deck BVH with everything else, the wheel probes
+ * cannot tell it from road, and a car leaving the wall vertically at 28 m/s puts
+ * its wheels onto a horizontal shelf whose normal has just flipped 90°. The tyre
+ * model scrubs the entire climb away against it (~170 g in one tick) and the car
+ * stays "grounded" on the rim instead of flying.
+ *
+ * Measured with only these caps removed from the BVH (the outer shell kept, so a
+ * car can still land on the OUTSIDE of a tube): 9.7 m → 49.7 m of air.
+ *
+ * Zone 0 is the exact test. buildSweepGeometry stamps a band with its endpoints'
+ * shared zone and falls back to 0 when they disagree, and a tube profile only
+ * ever uses zones 3 (bore) and 4 (outer shell) — so on these pieces the zone-0
+ * bands ARE the rim caps and nothing else. They still RENDER; they just stop
+ * being a driving surface.
+ *
+ * WHAT THIS GIVES UP, deliberately: a vertical probe onto the 0.6 m rim strip
+ * now finds nothing until the outer shell ~2 m below, so the rim reads as a
+ * narrow slot rather than a ledge. That strip is a decoration 8 m up with a
+ * sheer drop on the far side — the only thing that ever arrives there is a car
+ * leaving the pipe, which is the exact case this is unblocking. It is also
+ * narrower than the car's track, so it can never swallow more than one wheel.
+ * The bore itself is untouched: 159 vertical probes across the valley return the
+ * identical surface before and after (tools/halfTubeTest.mjs).
+ *
+ * Position-only and re-indexed, because RoadBvh.bakeFromMeshes reads nothing
+ * else.
+ *
+ * @returns {THREE.BufferGeometry|null} null when there is nothing to strip, which
+ *   means "just bake the visible mesh" to every caller.
+ */
+export function buildOpenLipCollision(geometry) {
+  const zone = geometry?.getAttribute("aZone");
+  const pos = geometry?.getAttribute("position");
+  const idx = geometry?.getIndex();
+  if (!zone || !pos || !idx) return null;
+
+  const remap = new Int32Array(pos.count).fill(-1);
+  const positions = [];
+  const indices = [];
+  const push = (v) => {
+    if (remap[v] < 0) {
+      remap[v] = positions.length / 3;
+      positions.push(pos.getX(v), pos.getY(v), pos.getZ(v));
+    }
+    return remap[v];
+  };
+
+  let dropped = 0;
+  for (let i = 0; i < idx.count; i += 3) {
+    const a = idx.getX(i), b = idx.getX(i + 1), c = idx.getX(i + 2);
+    if (zone.getX(a) === 0 && zone.getX(b) === 0 && zone.getX(c) === 0) {
+      dropped++;
+      continue;
+    }
+    indices.push(push(a), push(b), push(c));
+  }
+  if (!dropped) return null;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
   return geo;
 }
 
@@ -574,8 +733,7 @@ export function buildHoledDeckGeometry(pp = pieceParams, rp = roadParams) {
   geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(lateral, 1));
   geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zone, 1));
-  const vcount = positions.length / 3;
-  geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(new Float32Array(vcount).fill(1), 1));
+  stampPieceAttributes(geo, { plain: 1 });
   geo.setIndex(indices);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
@@ -1692,8 +1850,7 @@ function buildJunctionPlate(shape, rp = roadParams) {
   geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(lateral, 1));
   geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zone, 1));
-  const vcount = positions.length / 3;
-  geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(new Float32Array(vcount).fill(1), 1));
+  stampPieceAttributes(geo, { plain: 1 });
   geo.setIndex(indices);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
@@ -2318,6 +2475,9 @@ export const PIECE_CATALOG = [
     profile: buildHalfTubeProfile,
     noKerb: true,
     plain: true,
+    // The rim caps render but are NOT road — without this the car cannot get
+    // air off the lip. See buildOpenLipCollision.
+    openLips: true,
   },
   {
     id: "half_tube_curve",
@@ -2329,6 +2489,7 @@ export const PIECE_CATALOG = [
     profile: buildHalfTubeProfile,
     noKerb: true,
     plain: true,
+    openLips: true,
   },
   {
     id: "channel",
@@ -2719,6 +2880,10 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   const wantsRail = useKerbs && !def.noMesh && !def.profile && !def.geometry;
   const railGeometry = wantsRail ? buildRailGeometry(frames, rpForProfile) : null;
   const railCollision = wantsRail ? buildRailCollision(frames, rpForProfile) : null;
+  // Same trick as the rail: one deck to look at, a slightly different one to
+  // drive on. Open-lipped pieces (the half tubes) hand the BVH a copy with the
+  // rim caps deleted so the lip is a launch edge, not a shelf.
+  const deckCollision = def.openLips ? buildOpenLipCollision(geometry) : null;
   const shellGeometry = def.shell ? buildShellGeometry(def.shell, frames, profileData, pp) : null;
   // Decor is the vertex-coloured overlay mesh: game lines build theirs from the
   // frames, junctions paint their own markings from their outline.
@@ -2766,7 +2931,7 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // experimental guardrail that way. Recomputing them outside would mean
   // duplicating every centreline function in here and watching the two drift.
   return {
-    def, geometry, railGeometry, railCollision, shellGeometry, decorGeometry,
+    def, geometry, deckCollision, railGeometry, railCollision, shellGeometry, decorGeometry,
     frames, world, connectorOut, branchesOut,
   };
 }
