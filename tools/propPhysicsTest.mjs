@@ -575,6 +575,20 @@ console.log("\n=== SAVED WITH THE TRACK, AND OUT OF THE COLLISION BAKE ===");
   check("physics re-syncs after a track import (positions become the new home)",
     /propPhysics\.sync\(\)/.test(game));
   check("props reset with everything else on respawn", /propPhysics\.reset\(\)/.test(game));
+  // AND AFTER A GIZMO EDIT, which is the one that was missing. The sim captures
+  // the authored transform once as `home` and then writes `home × swing` onto the
+  // root every frame, so moving or rotating a simulated prop without re-syncing
+  // leaves `home` at the pose it was first dropped in — and physics puts it back
+  // there the instant play starts. Reported as a swing gate that ignored its
+  // rotation on entering play mode. Only cones and gates could ever show it,
+  // which is why every other prop moved fine.
+  {
+    const cb = game.match(/onChange:\s*\(\)\s*=>\s*\{[^}]*flags\?\.sync\(\)[^}]*\}/s)?.[0] ?? "";
+    check("physics re-syncs after a prop is MOVED or ROTATED with the gizmo",
+      /propPhysics\??\.sync\(\)/.test(cb),
+      "the PropManager onChange fires on add/delete/gizmo-release — flags.sync() is "
+      + "already there for the same class of bug, propPhysics.sync() must be too");
+  }
   check("physics ticks on the FIXED step, not the render frame",
     /propPhysics\.tick\(FIXED_DT/.test(game));
 }

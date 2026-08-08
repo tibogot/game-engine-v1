@@ -230,7 +230,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // Fires on add / delete / gizmo release. `flags.sync()` belongs here rather
     // than only on add: its self-heal watches the prop COUNT, so dragging an
     // existing flag would otherwise leave its cloth behind at the old spot.
-    onChange: () => { bakeCollision(); flags?.sync(); paletteUi?.refreshStatus?.(); },
+    //
+    // `propPhysics.sync()` is here for the SAME reason, and its absence was a bug:
+    // the sim captures the authored transform once (its `home`) and then writes
+    // `home × swing` onto the prop's root every frame. Move or rotate a simulated
+    // prop with the gizmo and only the root changes — `home` stays at the pose it
+    // was placed in — so the moment physics starts running it puts the prop back
+    // where it was FIRST dropped. Reported as a swing gate that ignores its
+    // rotation the instant you enter play mode.
+    //
+    // Only simulated props could show it (`PHYSICS_PROP_TYPES`: cones and gates),
+    // which is why every other object moved fine. Re-syncing costs nothing here —
+    // the gizmo is disabled while driving (`props.setEnabled(!driving)`), so this
+    // cannot re-seat a gate mid-swing.
+    onChange: () => {
+      bakeCollision(); flags?.sync(); propPhysics?.sync(); paletteUi?.refreshStatus?.();
+    },
     onSelect: () => { movers.deselect(); portals.deselect?.(); builder.deselectPlacement?.(); },
     // The panel's livery swatches ARE the current selection's palette, so they
     // have to follow it — and this fires AFTER the selection settles, which

@@ -88,8 +88,14 @@ console.log("\n=== PLACEMENT COMES FROM THE PROPS SYSTEM ===");
     /id: "flag"[\s\S]{0,200}?collision: "none"/.test(PROPS));
   // Self-heal only watches the prop COUNT, so a MOVE needs the onChange hook or
   // the cloth is left behind at the old position.
+  // Matched against the callback's BODY rather than its exact source line: the
+  // old pattern pinned the whole thing to one particular formatting of
+  // `onChange: () => { bakeCollision(); flags?.sync()` and broke the moment
+  // another call was added to it — a failure that says nothing about flags.
   check("onChange re-syncs the cloth, so dragging a flag moves its banner",
-    /onChange: \(\) => \{ bakeCollision\(\); flags\?\.sync\(\)/.test(GAME));
+    /flags\??\.sync\(\)/.test(
+      GAME.match(/onChange:\s*\(\)\s*=>\s*\{[^}]*bakeCollision\(\)[^}]*\}/gs)
+        ?.find((cb) => /flags\??\.sync\(\)/.test(cb)) ?? ""));
   check("the wave advances on the RENDER frame, not the physics step",
     /flags\.update\(dt\)/.test(GAME) && !/flags\.update\(FIXED_DT/.test(GAME));
 }
