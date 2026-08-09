@@ -1323,7 +1323,7 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="prop-row">
             <span class="prop-label">Smoke amount</span>
             <div class="prop-value">
-              <input type="range" id="dv-smk-rate" min="8" max="140" step="2" />
+              <input type="range" id="dv-smk-rate" min="8" max="400" step="2" />
               <span class="prop-num" id="dv-smk-rate-v"></span>
             </div>
           </div>
@@ -1367,6 +1367,41 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-smk-sun" min="0" max="1" step="0.02" />
               <span class="prop-num" id="dv-smk-sun-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Puff detail</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-noise" min="0.3" max="3" step="0.05" />
+              <span class="prop-num" id="dv-smk-noise-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Churn</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-drift" min="0" max="0.6" step="0.01" />
+              <span class="prop-num" id="dv-smk-drift-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Dissolve</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-erode" min="0.2" max="1.6" step="0.01" />
+              <span class="prop-num" id="dv-smk-erode-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wispiness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-esoft" min="0.03" max="1" step="0.01" />
+              <span class="prop-num" id="dv-smk-esoft-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Depth fade</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-soft" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-smk-soft-v"></span>
             </div>
           </div>
         </div>
@@ -2117,6 +2152,11 @@ export function createRoadDevPanel({ app, game, params }) {
     slider("dv-smk-turb", smk, "turbulence");
     slider("dv-smk-buoy", smk, "buoyancy");
     slider("dv-smk-sun", smk, "sunTint");
+    slider("dv-smk-noise", smk, "noiseScale");
+    slider("dv-smk-drift", smk, "noiseDrift");
+    slider("dv-smk-erode", smk, "erodeEnd");
+    slider("dv-smk-esoft", smk, "erodeSoft");
+    slider("dv-smk-soft", smk, "softDepth", (v) => v.toFixed(2) + "m");
   }
 
   // ── Live readouts ───────────────────────────────────────────────────────────

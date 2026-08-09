@@ -1,18 +1,59 @@
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three";
+import {
+  attribute, cameraFar, cameraNear, Discard, float, Fn, length, max, mix,
+  perspectiveDepthToViewZ, positionView, saturate, screenUV, smoothstep,
+  texture, uniform, uv, viewportDepthTexture,
+} from "three/tsl";
 
 /**
  * Rear-wheel drift smoke for modular-road test drive.
- * Recreated from v2 play-mode DriftSmoke (camera-facing billboards, pooled
- * particles) — standalone, no v2 imports.
+ *
+ * Camera-facing billboards, pooled, one draw call. The SHAPE of each puff is
+ * procedural (see `makeSmokeNoiseTexture`) rather than a sprite: there is no
+ * smoke .png any more, and deliberately so.
+ *
+ * ── WHY THE SPRITE WENT AWAY ──────────────────────────────────────────────────
+ * The old texture was a 3.6 KB featureless white gaussian. The eye reads "volume"
+ * almost entirely from internal contrast at several scales, and a radial gradient
+ * has none — so no amount of simulation tuning could make it look like anything
+ * but a stack of grey dots. Three things replace it, and together they are most
+ * of what separates this from the old look:
+ *
+ *   1. EROSION, not fading. Each puff's alpha is a threshold against a lumpy
+ *      density field, and the threshold RISES over life. So a puff dissolves
+ *      from its thin edges inward and breaks into wisps, the way smoke actually
+ *      disperses, instead of uniformly dimming like a sprite on a fade curve.
+ *      This is the single biggest contributor — more than the texture itself.
+ *   2. A per-particle noise frame (random offset + scale, drifting slowly over
+ *      life). Every puff therefore has its own silhouette AND churns internally,
+ *      where before all 256 were the same circle at different rotations.
+ *   3. SOFT DEPTH FADE against the scene depth buffer. Untouched, the quads
+ *      intersect the road deck along a razor line, which is the single most
+ *      obvious "these are cards" tell in the whole effect.
+ *
+ * Alongside those: many more, much thinner particles. Volumetric appearance comes
+ * from accumulated overlap of near-transparent layers; the old settings had few,
+ * thick layers, which is exactly the confetti look.
  */
 
-export const DEFAULT_DRIFT_SMOKE_TEXTURE = "/textures/smoke.png";
+/**
+ * Scene depth grab, shared by every smoke system (there is only ever one, but a
+ * ViewportTextureNode issues its own full-res framebuffer copy per render, so it
+ * lives at module scope on principle — same reasoning as v3's water).
+ */
+const _sceneDepthTex = /*#__PURE__*/ viewportDepthTexture();
 
 export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
   enabled: true,
-  emitRate: 64,
+  emitRate: 150,
   trigger: 0.04,
-  opacity: 0.5,
+  /**
+   * Per-puff peak alpha. LOW on purpose. Density is meant to come from many
+   * overlapping thin layers, not from a few opaque ones — at 0.5 (the old value)
+   * you can pick out every individual quad.
+   */
+  opacity: 0.22,
   sizeMin: 0.42,
   sizeMax: 0.85,
   sizeGrowth: 3.4,
@@ -33,6 +74,12 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
    */
   colorHot: "#4a4a52",   // fresh at the contact patch
   colorCool: "#b4b8c2",  // thinned out and drifting
+  /**
+   * Per-particle brightness spread, ±fraction. Even with the hot→cool ramp,
+   * two puffs of the same age are otherwise the exact same colour, which the
+   * eye picks up as a repeat.
+   */
+  tintJitter: 0.12,
   /**
    * Fraction of life spent fading IN. Without it every particle appears at full
    * opacity, which pops visibly at the emitter — the single most obvious tell.
@@ -55,12 +102,43 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
    * flat sprites from something that looks lit.
    */
   sunTint: 0.42,
+
+  // ── SHAPE ─────────────────────────────────────────────────────────────────
+  /**
+   * Noise tiles across the quad. ~1 means the puff spans roughly one tile, so
+   * the lobes are a quarter of the puff across — cauliflower, not static.
+   * Higher gets wispier and busier, lower gets blobbier.
+   */
+  noiseScale: 1.0,
+  /** Tiles/second the noise frame slides over a puff's life. This is the
+   *  internal churn: 0 freezes each puff's pattern the moment it is born. */
+  noiseDrift: 0.12,
+  /** Erosion threshold at birth. Above ~0.3 puffs are born already ragged. */
+  erodeStart: 0.06,
+  /**
+   * Erosion threshold at death. Must exceed peak density (~1.27) for a puff to
+   * vanish completely on its own; the alpha tail covers it if not.
+   */
+  erodeEnd: 1.25,
+  /** Width of the erosion ramp. Small = crisp torn edges, large = soft haze. */
+  erodeSoft: 0.3,
+  /**
+   * Metres over which a puff fades out as it approaches whatever is behind it.
+   * This is what stops the quads slicing the tarmac along a hard line. 0 off.
+   */
+  softDepth: 0.9,
 };
 
-const POOL_SIZE = 256;
+/**
+ * Pool size. 4× the old 256, which was SATURATED during a real drift (128
+ * emits/s across both wheels × 1.9 s life ≈ 243 alive), meaning any lifetime
+ * increase silently starved the emitter instead of lasting longer.
+ */
+const POOL_SIZE = 1024;
 const VERTS_PER_PARTICLE = 6;
 const FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 3;
-const COLOR_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 4;
+const TINT_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 4;
+const NOISE_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 4;
 const UV_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 2;
 
 const EMIT_RATE = 48;
@@ -115,17 +193,140 @@ const _wheelFwd = new THREE.Vector3();
 const _wheelRight = new THREE.Vector3();
 const _rearPoints = [_rearContact0, _rearContact1];
 
+// ─── Procedural puff shape ────────────────────────────────────────────────────
+
+const NOISE_SIZE = 256;
+/** Baked once, shared by every instance. ~10 ms, one time, 256 KB on the GPU. */
+let _noiseTexture = null;
+
+/** Integer hash → [0,1). Math.imul keeps the multiplies in 32-bit. */
+function ihash(x, y, seed) {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(seed | 0, 1442695041);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967295;
+}
+
+/**
+ * Value noise on a lattice that WRAPS at `period`. Tileability is not a nicety
+ * here: puffs sample the texture at arbitrary offsets with RepeatWrapping, so a
+ * non-tiling texture would put a visible seam through random puffs.
+ */
+function pvnoise(x, y, period, seed) {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const x0 = ((ix % period) + period) % period;
+  const y0 = ((iy % period) + period) % period;
+  const x1 = (x0 + 1) % period;
+  const y1 = (y0 + 1) % period;
+  const n00 = ihash(x0, y0, seed);
+  const n10 = ihash(x1, y0, seed);
+  const n01 = ihash(x0, y1, seed);
+  const n11 = ihash(x1, y1, seed);
+  const a = n00 + (n10 - n00) * sx;
+  const b = n01 + (n11 - n01) * sx;
+  return a + (b - a) * sy;
+}
+
+/**
+ * Billowy turbulence — sum of |2n-1|, inverted. The absolute value creases the
+ * noise at every zero crossing, which is what gives smoke and cumulus their
+ * cauliflower lobes; plain FBM is far too smooth and reads as fog.
+ */
+function billow(u, v, basePeriod, octaves, seed) {
+  let amp = 1;
+  let norm = 0;
+  let sum = 0;
+  let p = basePeriod;
+  for (let o = 0; o < octaves; o++) {
+    sum += amp * Math.abs(pvnoise(u * p, v * p, p, seed + o * 101) * 2 - 1);
+    norm += amp;
+    amp *= 0.5;
+    p *= 2;
+  }
+  return 1 - sum / norm;
+}
+
+/** Plain tileable FBM, used only for the fine edge fray. */
+function fbm(u, v, basePeriod, octaves, seed) {
+  let amp = 1;
+  let norm = 0;
+  let sum = 0;
+  let p = basePeriod;
+  for (let o = 0; o < octaves; o++) {
+    sum += amp * pvnoise(u * p, v * p, p, seed + o * 71);
+    norm += amp;
+    amp *= 0.5;
+    p *= 2;
+  }
+  return sum / norm;
+}
+
+/**
+ * R = coarse billow (the lobes), G = fine detail (the fray at the eroded edge).
+ * Both are normalised across the whole image rather than by their theoretical
+ * range: turbulence never reaches its bounds, so an analytic remap would waste
+ * most of the 8 bits and the erosion thresholds would all bunch up.
+ */
+function makeSmokeNoiseTexture() {
+  if (_noiseTexture) return _noiseTexture;
+  const n = NOISE_SIZE;
+  const coarse = new Float32Array(n * n);
+  const fine = new Float32Array(n * n);
+  let cMin = Infinity, cMax = -Infinity, fMin = Infinity, fMax = -Infinity;
+  for (let y = 0; y < n; y++) {
+    const v = y / n;
+    for (let x = 0; x < n; x++) {
+      const u = x / n;
+      const i = y * n + x;
+      const c = billow(u, v, 4, 4, 1337);
+      const f = fbm(u, v, 12, 3, 8501);
+      coarse[i] = c;
+      fine[i] = f;
+      if (c < cMin) cMin = c;
+      if (c > cMax) cMax = c;
+      if (f < fMin) fMin = f;
+      if (f > fMax) fMax = f;
+    }
+  }
+  const cScale = 255 / Math.max(cMax - cMin, 1e-6);
+  const fScale = 255 / Math.max(fMax - fMin, 1e-6);
+  const data = new Uint8Array(n * n * 4);
+  for (let i = 0; i < n * n; i++) {
+    data[i * 4] = (coarse[i] - cMin) * cScale;
+    data[i * 4 + 1] = (fine[i] - fMin) * fScale;
+    data[i * 4 + 2] = 0;
+    data[i * 4 + 3] = 255;
+  }
+  const tex = new THREE.DataTexture(data, n, n, THREE.RGBAFormat);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  // Data, not colour: an sRGB decode here would crush the low end of the
+  // density field and shift every erosion threshold.
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.needsUpdate = true;
+  _noiseTexture = tex;
+  return tex;
+}
+
 export class ModularRoadDriftSmoke {
   /**
    * @param {THREE.Scene} scene
    * @param {typeof DEFAULT_DRIFT_SMOKE_SETTINGS} [settings]
-   * @param {string} [textureUrl]
    */
-  constructor(scene, settings = DEFAULT_DRIFT_SMOKE_SETTINGS, textureUrl = DEFAULT_DRIFT_SMOKE_TEXTURE) {
+  constructor(scene, settings = DEFAULT_DRIFT_SMOKE_SETTINGS) {
     this.settings = settings;
 
     const positions = new Float32Array(POOL_SIZE * FLOATS_PER_PARTICLE);
-    const colors = new Float32Array(POOL_SIZE * COLOR_FLOATS_PER_PARTICLE);
+    const tints = new Float32Array(POOL_SIZE * TINT_FLOATS_PER_PARTICLE);
+    const noise = new Float32Array(POOL_SIZE * NOISE_FLOATS_PER_PARTICLE);
     const uvs = new Float32Array(POOL_SIZE * UV_FLOATS_PER_PARTICLE);
     for (let i = 0; i < POOL_SIZE; i++) {
       uvs.set(_smokeUvs, i * UV_FLOATS_PER_PARTICLE);
@@ -135,28 +336,29 @@ export class ModularRoadDriftSmoke {
     const posAttr = new THREE.BufferAttribute(positions, 3);
     posAttr.setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute("position", posAttr);
-    const colorAttr = new THREE.BufferAttribute(colors, 4);
-    colorAttr.setUsage(THREE.DynamicDrawUsage);
-    geometry.setAttribute("color", colorAttr);
+    // Named `aTint`, not `color`: a node material treats a `color` attribute as
+    // the built-in vertex-colour slot, and this one is driven entirely by hand.
+    const tintAttr = new THREE.BufferAttribute(tints, 4);
+    tintAttr.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute("aTint", tintAttr);
+    const noiseAttr = new THREE.BufferAttribute(noise, 4);
+    noiseAttr.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute("aNoise", noiseAttr);
     geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
     geometry.setDrawRange(0, 0);
 
-    const map = new THREE.TextureLoader().load(
-      textureUrl,
-      undefined,
-      undefined,
-      (err) => console.warn("[modular-road] drift smoke texture failed:", textureUrl, err),
-    );
-    map.colorSpace = THREE.SRGBColorSpace;
+    this.noiseMap = makeSmokeNoiseTexture();
+    this.uSoftDepth = uniform(settings.softDepth ?? 0.9);
+    this.uErodeSoft = uniform(Math.max(0.01, settings.erodeSoft ?? 0.3));
 
-    const material = new THREE.MeshBasicMaterial({
-      map,
-      color: 0xffffff,
+    const material = new MeshBasicNodeMaterial({
       transparent: true,
-      vertexColors: true,
       depthWrite: false,
       side: THREE.DoubleSide,
+      fog: false,
     });
+    material.colorNode = attribute("aTint", "vec4").xyz;
+    material.opacityNode = this._buildOpacityNode();
 
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.frustumCulled = false;
@@ -165,10 +367,10 @@ export class ModularRoadDriftSmoke {
     scene.add(this.mesh);
 
     this.positions = positions;
-    this.colors = colors;
+    this.tints = tints;
+    this.noise = noise;
     this.geometry = geometry;
     this.material = material;
-    this.map = map;
     this.particles = Array.from({ length: POOL_SIZE }, () => ({
       life: 0,
       maxLife: 1,
@@ -179,9 +381,63 @@ export class ModularRoadDriftSmoke {
       spin: 0,
       turbPhase: 0,
       turbFreq: 3,
+      noiseU: 0,
+      noiseV: 0,
+      noiseDu: 0,
+      noiseDv: 0,
+      noiseScale: 1,
+      tintMul: 1,
     }));
     this.emitIndex = 0;
     this.emitAccum = [0, 0];
+  }
+
+  /**
+   * Alpha = erosion threshold against a lumpy density field, then a soft depth
+   * fade. Everything colour-side is precomputed per particle on the CPU and
+   * arrives in `aTint`, so this stays the only per-pixel work.
+   */
+  _buildOpacityNode() {
+    const st = uv();
+    const tint = attribute("aTint", "vec4");
+    /** xy = noise frame offset, z = noise tiles per quad, w = erosion threshold. */
+    const nParams = attribute("aNoise", "vec4");
+    const softDepth = this.uSoftDepth;
+    const erodeSoft = this.uErodeSoft;
+    const noiseMap = this.noiseMap;
+
+    return Fn(() => {
+      // Round soft mask. Written as 1-smoothstep rather than a reversed-edge
+      // smoothstep because WGSL leaves edge0 > edge1 undefined.
+      const r = length(st.sub(0.5)).mul(2);
+      const falloff = float(1).sub(smoothstep(0.22, 1.0, r));
+
+      const n = texture(noiseMap, st.mul(nParams.z).add(nParams.xy));
+      // Coarse lobes carry the shape; a little fine detail keeps the torn edge
+      // from looking like a smooth contour line of the coarse field.
+      const detail = mix(n.r, n.g, 0.35);
+      const density = falloff.mul(float(0.32).add(detail.mul(0.95)));
+
+      // The threshold rises over life (CPU side), so the puff erodes away from
+      // its thin edges inward instead of dimming uniformly.
+      const thresh = nParams.w;
+      const alpha = smoothstep(thresh, thresh.add(erodeSoft), density)
+        .mul(tint.w)
+        .toVar();
+
+      // Soft particles: fade as the quad approaches whatever is behind it, so
+      // the billboard never shows a hard intersection line with the tarmac.
+      const sceneDist = perspectiveDepthToViewZ(
+        _sceneDepthTex.sample(screenUV).r, cameraNear, cameraFar,
+      ).negate();
+      const fragDist = positionView.z.negate();
+      alpha.mulAssign(saturate(sceneDist.sub(fragDist).div(max(softDepth, float(1e-3)))));
+
+      // Most of a puff's quad is eroded away; discarding those pixels is worth
+      // real time when ~600 large overlapping quads are on screen.
+      Discard(alpha.lessThan(0.003));
+      return alpha;
+    })();
   }
 
   reset() {
@@ -290,6 +546,8 @@ export class ModularRoadDriftSmoke {
   update(dt, rearPoints, emit, intensity, velocityX, velocityZ, camera) {
     const s = this.settings;
     if (s.enabled === false) emit = false;
+    this.uSoftDepth.value = Math.max(1e-3, s.softDepth ?? 0.9);
+    this.uErodeSoft.value = Math.max(0.01, s.erodeSoft ?? 0.3);
 
     if (emit) {
       const emitRate =
@@ -311,6 +569,10 @@ export class ModularRoadDriftSmoke {
     camera.updateMatrixWorld();
     _smokeRight.set(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
     _smokeUp.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+
+    const erodeStart = s.erodeStart ?? 0.06;
+    const erodeEnd = s.erodeEnd ?? 1.25;
+    const noiseDrift = s.noiseDrift ?? 0.12;
 
     let alive = 0;
     for (const p of this.particles) {
@@ -341,10 +603,12 @@ export class ModularRoadDriftSmoke {
       // balloons, all expanding at the same steady rate.
       const size = p.size * (1 + Math.sqrt(age) * (s.sizeGrowth ?? SIZE_GROWTH));
 
-      // Fade IN over the first slice of life, then the quadratic fade out.
+      // Fade IN over the first slice of life. The fade OUT is mostly the erosion
+      // threshold below; this tail only guarantees a clean zero at death for
+      // whatever erode settings are dialled in.
       const fadeIn = s.fadeIn ?? 0;
       const rampIn = fadeIn > 0 ? Math.min(1, age / fadeIn) : 1;
-      const alpha = (s.opacity ?? OPACITY) * rampIn * (1 - age) * (1 - age);
+      const alpha = (s.opacity ?? OPACITY) * rampIn * Math.pow(1 - age, 0.6);
 
       // Dense/dark fresh → pale/thin as it disperses.
       if (s.colorHot && s.colorCool) {
@@ -355,8 +619,20 @@ export class ModularRoadDriftSmoke {
         _smokeTint.setHex(SMOKE_COLOR_HEX);
         if (s.color) _smokeTint.set(s.color);
       }
+      _smokeTint.multiplyScalar(p.tintMul);
 
-      this._writeParticle(alive++, p.position, size, p.rotation, alpha);
+      // Erosion eats in from the thin edges, slowly at first: age^1.3 keeps the
+      // puff coherent while it is still being thrown off the tyre, then opens it
+      // up as it drifts. A linear ramp starts shredding it immediately.
+      const elapsed = p.maxLife - p.life;
+      const thresh = erodeStart + (erodeEnd - erodeStart) * Math.pow(age, 1.3);
+
+      this._writeParticle(
+        alive++, p.position, size, p.rotation, alpha, thresh,
+        p.noiseU + p.noiseDu * elapsed * noiseDrift,
+        p.noiseV + p.noiseDv * elapsed * noiseDrift,
+        p.noiseScale,
+      );
     }
 
     const vertCount = alive * VERTS_PER_PARTICLE;
@@ -366,9 +642,12 @@ export class ModularRoadDriftSmoke {
       const posAttr = this.geometry.attributes.position;
       posAttr.addUpdateRange(0, alive * FLOATS_PER_PARTICLE);
       posAttr.needsUpdate = true;
-      const colorAttr = this.geometry.attributes.color;
-      colorAttr.addUpdateRange(0, alive * COLOR_FLOATS_PER_PARTICLE);
-      colorAttr.needsUpdate = true;
+      const tintAttr = this.geometry.attributes.aTint;
+      tintAttr.addUpdateRange(0, alive * TINT_FLOATS_PER_PARTICLE);
+      tintAttr.needsUpdate = true;
+      const noiseAttr = this.geometry.attributes.aNoise;
+      noiseAttr.addUpdateRange(0, alive * NOISE_FLOATS_PER_PARTICLE);
+      noiseAttr.needsUpdate = true;
     }
   }
 
@@ -409,6 +688,17 @@ export class ModularRoadDriftSmoke {
     // turbulence.
     p.turbPhase = Math.random() * Math.PI * 2;
     p.turbFreq = 2.2 + Math.random() * 3.4;
+
+    // A random window into the tiling noise: this is what gives every puff its
+    // own silhouette. The drift direction then churns that window over life.
+    p.noiseU = Math.random() * 8;
+    p.noiseV = Math.random() * 8;
+    const driftAngle = Math.random() * Math.PI * 2;
+    p.noiseDu = Math.cos(driftAngle);
+    p.noiseDv = Math.sin(driftAngle);
+    p.noiseScale = (s.noiseScale ?? 1) * (0.78 + Math.random() * 0.55);
+    const jitter = s.tintJitter ?? 0;
+    p.tintMul = 1 + (Math.random() - 0.5) * 2 * jitter;
   }
 
   /** Sun direction, pointing TOWARD the sun. Drives the per-billboard gradient. */
@@ -417,12 +707,13 @@ export class ModularRoadDriftSmoke {
   }
 
   /** `_smokeTint` is set by the caller (age ramp) before this runs. */
-  _writeParticle(index, center, size, rotation, alpha) {
+  _writeParticle(index, center, size, rotation, alpha, thresh, nu, nv, nScale) {
     const half = size * 0.5;
     const cosR = Math.cos(rotation);
     const sinR = Math.sin(rotation);
     const posOffset = index * FLOATS_PER_PARTICLE;
-    const colorOffset = index * COLOR_FLOATS_PER_PARTICLE;
+    const tintOffset = index * TINT_FLOATS_PER_PARTICLE;
+    const noiseOffset = index * NOISE_FLOATS_PER_PARTICLE;
 
     // FAKE DIRECTIONAL LIGHTING. The billboard has no normals to light, but it
     // does have two known axes — so project the sun onto them and shade ACROSS
@@ -450,11 +741,17 @@ export class ModularRoadDriftSmoke {
       // Corner direction is the UNROTATED (x, y): the texture rotates with the
       // quad but the lighting must stay fixed in world space.
       const lit = 1 + sunTint * (x * sr + y * su);
-      const co = colorOffset + i * 4;
-      this.colors[co] = _smokeTint.r * lit;
-      this.colors[co + 1] = _smokeTint.g * lit;
-      this.colors[co + 2] = _smokeTint.b * lit;
-      this.colors[co + 3] = alpha;
+      const to = tintOffset + i * 4;
+      this.tints[to] = _smokeTint.r * lit;
+      this.tints[to + 1] = _smokeTint.g * lit;
+      this.tints[to + 2] = _smokeTint.b * lit;
+      this.tints[to + 3] = alpha;
+
+      const no = noiseOffset + i * 4;
+      this.noise[no] = nu;
+      this.noise[no + 1] = nv;
+      this.noise[no + 2] = nScale;
+      this.noise[no + 3] = thresh;
     }
   }
 }
