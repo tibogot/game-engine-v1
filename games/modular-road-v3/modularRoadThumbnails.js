@@ -94,6 +94,7 @@ export async function bakeRoadThumbnails({ renderer, materials, items, environme
         addMesh(built.railGeometry, materials.rail);
         addMesh(built.shellGeometry, materials.shell);
         addMesh(built.decorGeometry, materials.decor);
+        addMesh(built.glassGeometry, materials.glass);
       }
 
       if (!group.children.length) continue;

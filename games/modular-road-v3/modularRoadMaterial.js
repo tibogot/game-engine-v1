@@ -17,6 +17,7 @@ import {
   fwidth,
   saturate,
   oneMinus,
+  normalView,
   mx_noise_float,
   mx_fractal_noise_float,
 } from "three/tsl";
@@ -140,6 +141,12 @@ export function createRoadMaterial(opts = {}) {
     neonIntensity: uniform(opts.neonIntensity ?? 3.0), // >1 so bloom picks it up
     neonSpacing: uniform(opts.neonSpacing ?? 8.0), // meters between rings
     neonWidth: uniform(opts.neonWidth ?? 0.35), // ring width (m)
+    // Lacquered panel (aZone 5) — the glass road's deck. A ZONE rather than its
+    // own material, which is the whole reason it is cheap: the piece stays one
+    // mesh on the shared road material, so it still instances with every other
+    // road piece instead of adding a draw call per placement.
+    panelColor: uniform(lin(opts.panelColor ?? 0xb3121f)), // deep lacquer red
+    panelRough: uniform(opts.panelRough ?? 0.09), // wet-looking, not mirror
   };
 
   const mat = new THREE.MeshStandardNodeMaterial({
@@ -311,11 +318,16 @@ export function createRoadMaterial(opts = {}) {
     const ringMask = tubeRingMask(u, along);
     const tubeInnerCol = mix(u.tubeInner, u.neonColor, ringMask);
 
-    // Select by zone: 0 side, 1 deck, 2 rail, 3 tube inner, 4 tube outer.
+    // Select by zone: 0 side, 1 deck, 2 rail, 3 tube inner, 4 tube outer,
+    // 5 lacquered panel. The panel deliberately REPLACES the asphalt rather than
+    // tinting it — no aggregate, no wheel paths, no old rubber, because none of
+    // that belongs on a painted panel. It is the one zone that wants to look
+    // manufactured.
     let col = mix(u.sideColor, deckCol, step(0.5, zone));
     col = mix(col, railCol, step(1.5, zone));
     col = mix(col, tubeInnerCol, step(2.5, zone));
     col = mix(col, u.tubeOuter, step(3.5, zone));
+    col = mix(col, u.panelColor, step(4.5, zone));
     return col;
   })();
 
@@ -349,6 +361,7 @@ export function createRoadMaterial(opts = {}) {
     r = mix(r, float(0.5), step(1.5, zone)); // kerb paint
     r = mix(r, float(0.82), step(2.5, zone)); // tube inner
     r = mix(r, float(0.55), step(3.5, zone)); // tube shell paint
+    r = mix(r, u.panelRough, step(4.5, zone)); // lacquered panel
     return r;
   })();
 
@@ -366,6 +379,100 @@ export function createRoadMaterial(opts = {}) {
   applyBloomMRT(mat, neonNode);
 
   mat._roadUniforms = u;
+  return mat;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Glass                                                                      */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Shared look for the glass road's pane.
+ *
+ * REAL TRANSMISSION, and that is a reversal worth writing down, because
+ * chassisModel.js sets `cheapGlass` on the car's windows for what look like the
+ * same reasons. The car is right and so is this; they are different cases.
+ *
+ * Transmission makes three render a backdrop pass, which is a per-pixel cost
+ * that scales with how much SCREEN the transmissive surface covers. The car's
+ * six windows are on screen 100% of the time, every frame of every session — a
+ * standing tax. A pane in the road is on screen for the second or two you are
+ * over it. Measured in the editor with a pane filling a third of the view:
+ * 17.9 ms/frame with transmission, 18.7 ms without, i.e. both pinned at the
+ * vsync cap and the difference is noise.
+ *
+ * And it buys something alpha cannot. Under alpha blending the specular
+ * reflection is multiplied by the same opacity as everything else, so a pane
+ * clear enough to see through has no reflections left and reads as coloured
+ * plastic — which is exactly how the first version of this looked, a turquoise
+ * puddle in the road. Transmission keeps the surface response at full strength
+ * and puts the see-through in its own term, which is the whole point of it.
+ *
+ * `ROAD_GLASS.transmission = 0` falls back to the cheap path (see below) if a
+ * heavier scene ever changes that arithmetic.
+ */
+export const ROAD_GLASS = {
+  color: 0xeef7f7, // near-neutral; a saturated tint is what made it read plastic
+  roughness: 0.02,
+  ior: 1.5,
+  thickness: 0.25, // how far light travels inside the pane — drives the tint depth
+  transmission: 1,
+  envIntensity: 1.6,
+  // Only used when transmission is 0 — see createRoadGlassMaterial.
+  opacity: 0.14, // face-on: almost clear
+  edgeOpacity: 0.9, // grazing: nearly a mirror
+};
+
+/**
+ * The glass road's pane.
+ *
+ * MeshPhysicalNodeMaterial, not Standard: `ior`, `transmission`, `thickness` and
+ * clearcoat are all physical-only, and together they are the difference between
+ * glass and a tinted film. Reflections are real — `scene.environment` is a PMREM
+ * of the live sky, so every pane on the track tracks the time of day for free.
+ *
+ * `side: DoubleSide` because you can be under the track looking up, which is
+ * half the appeal of a glass floor.
+ */
+export function createRoadGlassMaterial(opts = {}) {
+  const g = { ...ROAD_GLASS, ...opts };
+  const transmissive = (g.transmission ?? 0) > 0;
+  const mat = new THREE.MeshPhysicalNodeMaterial({
+    color: lin(g.color),
+    metalness: 0,
+    roughness: g.roughness,
+    ior: g.ior,
+    thickness: g.thickness,
+    transmission: g.transmission,
+    specularIntensity: 1,
+    clearcoat: 1,
+    clearcoatRoughness: 0.02,
+    // A transmissive surface is OPAQUE as far as sorting goes — three composites
+    // it against a copy of the backdrop, so it still writes depth and does not
+    // join the transparent queue. Mixing the two modes is what produces glass
+    // that vanishes behind other glass.
+    transparent: !transmissive,
+    depthWrite: transmissive,
+    side: THREE.DoubleSide,
+  });
+  mat.envMapIntensity = g.envIntensity;
+
+  const u = { opacity: uniform(g.opacity), edgeOpacity: uniform(g.edgeOpacity) };
+  if (!transmissive) {
+    // Fallback path: fake the transparency with a Fresnel alpha, from the
+    // VIEW-space normal's z — the same idiom the collectibles use
+    // (v3/props/collectibles.js), so it is proven against this renderer.
+    //
+    // The exponent is 5, matching Schlick, and it is not a taste knob: at 4
+    // it went 50% opaque at a 40° view angle, where real glass reflects about
+    // 4% and is essentially clear. A gentle curve does not read as "less
+    // glassy", it reads as plastic.
+    mat.opacityNode = Fn(() => {
+      const fres = oneMinus(abs(normalView.z)).pow(5);
+      return mix(u.opacity, u.edgeOpacity, fres);
+    })();
+  }
+  mat._glassUniforms = u;
   return mat;
 }
 
@@ -438,7 +545,7 @@ export const ROAD_LOOK_VERSION = 1;
 /** Uniforms authored as sRGB hex numbers. */
 export const ROAD_LOOK_COLORS = [
   "asphaltDark", "asphaltLight", "lineColor", "railA", "railB",
-  "sideColor", "tubeInner", "tubeOuter", "neonColor",
+  "sideColor", "tubeInner", "tubeOuter", "neonColor", "panelColor",
 ];
 
 /** Uniforms authored as plain numbers (on/off flags included, as 0/1). */
@@ -450,6 +557,7 @@ export const ROAD_LOOK_NUMBERS = [
   "wheelPolish", "wheelDarken",
   "driftAmount", "driftWidth", "driftBias", "driftCurveRef", "driftGloss",
   "driftLines", "driftWander",
+  "panelRough",
 ];
 
 export const ROAD_LOOK_KEYS = [...ROAD_LOOK_COLORS, ...ROAD_LOOK_NUMBERS];

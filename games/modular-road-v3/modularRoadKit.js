@@ -160,6 +160,16 @@ export const pieceParams = {
   splitStart: 8, // where along the run the slip road peels off (m)
   roundaboutRadius: 22, // ring CENTRELINE radius (m)
   roundaboutStub: 10, // stub length outside the ring (m)
+  // Glass road (lacquered deck with a glazed square window — see
+  // buildGlassDeckGeometry). Its own sizes rather than the hole road's, because
+  // the two are tuned against different things: that one wants a gap you can
+  // fall through, this one wants a window you can look through.
+  glassLength: 32, // run of the piece (m)
+  glassWidth: 16, // deck width (m)
+  glassHole: 9, // side of the square window (m)
+  glassRecess: 0.025, // how far the pane sits below the deck (m)
+  glassFlange: 0.15, // how far the pane tucks UNDER the deck on each side (m)
+  glassThick: 0.18, // pane thickness (m)
   // Hole road (straight deck with a big circular hole punched through it):
   holedLength: 32, // run of the piece (m)
   holedWidth: 16, // deck width (m) — widen for a bigger hole with real ledges
@@ -741,6 +751,150 @@ export function buildHoledDeckGeometry(pp = pieceParams, rp = roadParams) {
 }
 
 /* ----------------------------------------------------------------------- */
+/* Glass road (lacquer deck with a glazed square window)                    */
+/* ----------------------------------------------------------------------- */
+
+/**
+ * A straight deck in lacquered red with a SQUARE window cut through it — and the
+ * window is glazed, not open. It reads as the hole road's evil twin: same
+ * silhouette, same "there is nothing under me" jolt, except the car stays on the
+ * road and you watch the world go past underneath.
+ *
+ * THREE PIECES OF GEOMETRY, and which is which matters:
+ *
+ *  • this deck — the thing you SEE, with a real hole through the slab, so you
+ *    can look through the window from above AND from underneath;
+ *  • the same builder with `solid`, which is the thing you DRIVE on. It is
+ *    handed to the deck BVH as `deckCollision` (the mechanism the half tubes'
+ *    rim caps already use), and it simply has no window: the wheels find an
+ *    unbroken slab across the whole piece.
+ *  • buildGlassPaneGeometry — the pane, rendered on its own transparent
+ *    material and collided by NOTHING.
+ *
+ * That split is what makes the piece cheap AND safe. The alternative, putting
+ * the pane in the collision bake, means the wheels probe a surface that has to
+ * line up with the deck to the millimetre or the car trips on the frame; here
+ * the collision surface is flat, continuous and 12 triangles.
+ *
+ * The deck itself is one zone-5 band, so it stays on the SHARED road material
+ * and instances with every other road piece — no per-piece material, no extra
+ * draw call. See `panelColor` in modularRoadMaterial.js.
+ */
+export function buildGlassDeckGeometry(pp = pieceParams, rp = roadParams, opts = {}) {
+  const L = Math.max(8, pp.glassLength ?? 32);
+  const hw = Math.max(3, (pp.glassWidth ?? rp.width) / 2);
+  const t = Math.max(0.05, rp.thickness);
+  // Keep at least a 1 m frame on the sides and 1.5 m at the ends, so the window
+  // can never eat the piece and leave a rim you cannot land on.
+  const h = opts.solid
+    ? 0
+    : THREE.MathUtils.clamp((pp.glassHole ?? 9) / 2, 0.5, Math.min(hw - 1, L / 2 - 1.5));
+  const cz = -L / 2; // window centre (piece-local z)
+
+  const positions = [];
+  const uvs = [];
+  const lateral = [];
+  const zone = [];
+  const indices = [];
+  const quad = (pa, pb, pc, pd, zn) => {
+    const base = positions.length / 3;
+    for (const p of [pa, pb, pc, pd]) {
+      positions.push(p[0], p[1], p[2]);
+      uvs.push(-p[2], p[0]); // uv.x = metres along path, uv.y = across
+      lateral.push(p[0] / hw);
+      zone.push(zn);
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+  /** Axis-aligned patch at height y, wound for a +Y (up) or −Y (down) normal. */
+  const slab = (x0, x1, z0, z1, y, up, zn) => {
+    const a = [x0, y, z0], b = [x1, y, z0], c = [x1, y, z1], d = [x0, y, z1];
+    if (up) quad(d, c, b, a, zn); else quad(a, b, c, d, zn);
+  };
+
+  const DECK = 5; // lacquered panel — see createRoadMaterial's zone chain
+  if (h <= 0) {
+    // COLLISION FORM: an unbroken slab. This is the surface the wheels meet.
+    slab(-hw, hw, -L, 0, 0, true, DECK);
+    slab(-hw, hw, -L, 0, -t, false, 0);
+  } else {
+    // Deck and underside as a frame of four bands around the window.
+    const bands = [
+      [-hw, hw, cz + h, 0], // near of the window
+      [-hw, hw, -L, cz - h], // far of the window
+      [-hw, -h, cz - h, cz + h], // left of it
+      [h, hw, cz - h, cz + h], // right of it
+    ];
+    for (const [x0, x1, z0, z1] of bands) {
+      slab(x0, x1, z0, z1, 0, true, DECK);
+      slab(x0, x1, z0, z1, -t, false, 0);
+    }
+    // Window reveal — the four faces you see the slab's thickness through.
+    quad([-h, 0, cz - h], [h, 0, cz - h], [h, -t, cz - h], [-h, -t, cz - h], 0);
+    quad([h, 0, cz + h], [-h, 0, cz + h], [-h, -t, cz + h], [h, -t, cz + h], 0);
+    quad([-h, 0, cz + h], [-h, 0, cz - h], [-h, -t, cz - h], [-h, -t, cz + h], 0);
+    quad([h, 0, cz - h], [h, 0, cz + h], [h, -t, cz + h], [h, -t, cz - h], 0);
+  }
+
+  // Outer perimeter walls (both forms have them — the collision slab wants a
+  // closed volume so a chassis sample can never end up inside it).
+  quad([-hw, 0, 0], [hw, 0, 0], [hw, -t, 0], [-hw, -t, 0], 0);
+  quad([hw, 0, -L], [-hw, 0, -L], [-hw, -t, -L], [hw, -t, -L], 0);
+  quad([-hw, 0, -L], [-hw, 0, 0], [-hw, -t, 0], [-hw, -t, -L], 0);
+  quad([hw, 0, 0], [hw, 0, -L], [hw, -t, -L], [hw, -t, 0], 0);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(lateral, 1));
+  geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zone, 1));
+  stampPieceAttributes(geo, { plain: 1 });
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/**
+ * The pane that fills the glass road's window.
+ *
+ * NOT flush, and not the same size as the hole — both on purpose, and both for
+ * the reason the hole walls learned the hard way: two surfaces on the same plane
+ * z-fight, and the flicker crawls as the camera moves.
+ *
+ *  • RECESSED by `glassRecess`, so the pane's top face is a couple of
+ *    centimetres under the road rather than level with it. Nothing is coplanar,
+ *    and the car never touches the pane anyway — it rides the flat collision
+ *    slab above it (see buildGlassDeckGeometry).
+ *  • OVERSIZE by `glassFlange` on every side, so its edges tuck UNDER the deck
+ *    instead of meeting the reveal face-to-face. That also means there is no
+ *    sliver of daylight around the frame when you look along the road.
+ *
+ * The result reads as a pane bedded into a rebate, which is how real glazing
+ * sits, and it needs no frame geometry to sell it.
+ */
+export function buildGlassPaneGeometry(pp = pieceParams, rp = roadParams) {
+  const L = Math.max(8, pp.glassLength ?? 32);
+  const hw = Math.max(3, (pp.glassWidth ?? rp.width) / 2);
+  const t = Math.max(0.05, rp.thickness);
+  const h = THREE.MathUtils.clamp((pp.glassHole ?? 9) / 2, 0.5, Math.min(hw - 1, L / 2 - 1.5));
+  const f = Math.max(0.02, pp.glassFlange ?? 0.15);
+  const top = -Math.max(0.005, pp.glassRecess ?? 0.025);
+  // Clamped so the pane can never reach the underside of the slab — down there
+  // it would be coplanar with the piece's own bottom face, which is the flicker
+  // the recess exists to avoid.
+  const thick = Math.min(Math.max(0.02, pp.glassThick ?? 0.18), t + top - 0.05);
+  const bot = top - thick;
+  const cz = -L / 2;
+  const s = h + f; // half-side including the flange under the deck
+
+  const geo = new THREE.BoxGeometry(2 * s, thick, 2 * s);
+  geo.translate(0, (top + bot) / 2, cz);
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/* ----------------------------------------------------------------------- */
 /* Guardrail (W-beam + posts) along the kerb tops                           */
 /* ----------------------------------------------------------------------- */
 
@@ -1024,6 +1178,14 @@ function platformPoints(pp) {
 }
 
 /** Hole-road centerline: only the connectors matter (geometry is custom). */
+function glassPoints(pp) {
+  const L = Math.max(8, pp.glassLength ?? 32);
+  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
+  const pts = [];
+  for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
+  return pts;
+}
+
 function holedPoints(pp) {
   const L = Math.max(8, pp.holedLength ?? 32);
   const n = Math.max(2, Math.ceil(L / roadParams.segLen));
@@ -2237,6 +2399,22 @@ export const PIECE_CATALOG = [
     width: (pp) => pp.narrowWidth, // narrower than the road profile (keeps lines/kerbs)
   },
   {
+    id: "glass_road",
+    label: "Glass road",
+    hint: "Lacquer deck with a glazed window — drive over the void",
+    swatch: "#c0392b",
+    key: "",
+    points: glassPoints,
+    width: (pp) => pp.glassWidth,
+    geometry: (pp, rp) => buildGlassDeckGeometry(pp, rp),
+    // The window is a hole to LOOK through, not to fall through — the wheels get
+    // an unbroken slab. Same mechanism the half tubes use for their rim caps.
+    deckCollision: (pp, rp) => buildGlassDeckGeometry(pp, rp, { solid: true }),
+    glass: (pp, rp) => buildGlassPaneGeometry(pp, rp),
+    noKerb: true,
+    plain: true,
+  },
+  {
     id: "holed",
     label: "Hole road",
     hint: "Straight deck with a big circular hole — don't fall in",
@@ -2588,6 +2766,7 @@ const _END_TANGENTS = {
   platform: flatEndTangents,
   narrow: flatEndTangents,
   holed: flatEndTangents,
+  glass_road: flatEndTangents,
   wallride: flatEndTangents,
   tunnel: flatEndTangents,
   tube: flatEndTangents,
@@ -2883,7 +3062,16 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // Same trick as the rail: one deck to look at, a slightly different one to
   // drive on. Open-lipped pieces (the half tubes) hand the BVH a copy with the
   // rim caps deleted so the lip is a launch edge, not a shelf.
-  const deckCollision = def.openLips ? buildOpenLipCollision(geometry) : null;
+  // …and a piece can supply that stand-in outright rather than deriving it from
+  // what it drew: the glass road's window is a hole in the MESH only, so its
+  // collision form is the same slab with no window in it at all.
+  const deckCollision = def.deckCollision
+    ? def.deckCollision(pp, rpForProfile)
+    : def.openLips
+      ? buildOpenLipCollision(geometry)
+      : null;
+  // Glazing: rendered on its own transparent material, collided by nothing.
+  const glassGeometry = def.glass ? def.glass(pp, rpForProfile) : null;
   const shellGeometry = def.shell ? buildShellGeometry(def.shell, frames, profileData, pp) : null;
   // Decor is the vertex-coloured overlay mesh: game lines build theirs from the
   // frames, junctions paint their own markings from their outline.
@@ -2932,6 +3120,7 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // duplicating every centreline function in here and watching the two drift.
   return {
     def, geometry, deckCollision, railGeometry, railCollision, shellGeometry, decorGeometry,
+    glassGeometry,
     frames, world, connectorOut, branchesOut,
   };
 }

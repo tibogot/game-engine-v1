@@ -55,6 +55,7 @@ import {
   createGuardrailMaterial,
   createTunnelMaterial,
   createDecorMaterial,
+  createRoadGlassMaterial,
   readRoadLook,
   syncRoadUniforms,
   ROAD_LOOK_FORMAT,
@@ -190,6 +191,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const railMaterial = createGuardrailMaterial();
   const shellMaterial = createTunnelMaterial();
   const decorMaterial = createDecorMaterial();
+  // One pane material for every glass road on the track — it reflects
+  // `scene.environment` (the live sky PMREM), so all of them stay in step with
+  // the time of day for free.
+  const glassMaterial = createRoadGlassMaterial();
 
   let mode = "build"; // "build" | "drive"
   // Declared up here (not with the input handlers below) because the audio setup
@@ -210,6 +215,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     railMaterial,
     shellMaterial,
     decorMaterial,
+    glassMaterial,
     camera,
     domElement: renderer.domElement,
     orbit: controls,
@@ -329,7 +335,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   try {
     roadThumbnails = await bakeRoadThumbnails({
       renderer,
-      materials: { road: roadMaterial, rail: railMaterial, shell: shellMaterial, decor: decorMaterial },
+      materials: {
+        road: roadMaterial, rail: railMaterial, shell: shellMaterial,
+        decor: decorMaterial,
+        // NOT the live pane material. Transmission composites against a copy of
+        // the backdrop, and a thumbnail is rendered into a bare RT with no
+        // backdrop to copy — the pane comes out black, so the tile advertises a
+        // hole rather than a window. The cheap Fresnel-alpha build of the same
+        // material needs nothing behind it and reads as glass at tile size.
+        glass: createRoadGlassMaterial({ transmission: 0, opacity: 0.32 }),
+      },
       items: thumbItems,
       environment: scene.environment,
       size: 192,

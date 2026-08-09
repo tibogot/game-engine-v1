@@ -83,6 +83,7 @@ export class ModularRoadBuilder {
    * @param {THREE.Material} [o.railMaterial] shared guardrail material
    * @param {THREE.Material} [o.shellMaterial] shared tunnel-shell material
    * @param {THREE.Material} [o.decorMaterial] start/finish/checkpoint decor
+   * @param {THREE.Material} [o.glassMaterial] shared pane material (glass road)
    * @param {THREE.Camera} [o.camera] for free-placement gizmo
    * @param {HTMLElement} [o.domElement] canvas element for gizmo input
    * @param {import("three/addons/controls/OrbitControls.js").OrbitControls} [o.orbit]
@@ -95,6 +96,7 @@ export class ModularRoadBuilder {
     railMaterial = null,
     shellMaterial = null,
     decorMaterial = null,
+    glassMaterial = null,
     camera = null,
     domElement = null,
     orbit = null,
@@ -106,6 +108,7 @@ export class ModularRoadBuilder {
     this.railMaterial = railMaterial;
     this.shellMaterial = shellMaterial;
     this.decorMaterial = decorMaterial;
+    this.glassMaterial = glassMaterial;
     this.orbit = orbit;
     this.isBuildMode = isBuildMode;
     this.onChange = onChange;
@@ -128,7 +131,7 @@ export class ModularRoadBuilder {
     this.snapYawDeg = 15;
 
     this.activePieceId = PIECE_CATALOG[0].id;
-    /** @type {{id:string, chainId:number, pp:object, mesh:THREE.Mesh, railMesh:THREE.Mesh|null, shellMesh:THREE.Mesh|null, decorMesh:THREE.Mesh|null, connectorIn:THREE.Matrix4, connectorOut:THREE.Matrix4}[]} */
+    /** @type {{id:string, chainId:number, pp:object, mesh:THREE.Mesh, railMesh:THREE.Mesh|null, shellMesh:THREE.Mesh|null, decorMesh:THREE.Mesh|null, glassMesh:THREE.Mesh|null, connectorIn:THREE.Matrix4, connectorOut:THREE.Matrix4}[]} */
     this.pieces = [];
 
     /**
@@ -996,7 +999,7 @@ export class ModularRoadBuilder {
   setInstancing(on) {
     this.instancingEnabled = !!on;
     for (const p of this.pieces) {
-      for (const m of [p.mesh, p.railMesh, p.shellMesh, p.decorMesh]) {
+      for (const m of [p.mesh, p.railMesh, p.shellMesh, p.decorMesh, p.glassMesh]) {
         if (m) m.visible = m.userData.noRender ? true : !this.instancingEnabled;
       }
     }
@@ -1048,6 +1051,7 @@ export class ModularRoadBuilder {
       add(p.railMesh, this.railMaterial, "rail");
       add(p.shellMesh, this.shellMaterial, "shell");
       add(p.decorMesh, this.decorMaterial, "decor");
+      add(p.glassMesh, this.glassMaterial, "glass");
     }
     for (const grp of groups.values()) {
       const im = new THREE.InstancedMesh(grp.geometry, grp.material, grp.mats.length);
@@ -1055,7 +1059,9 @@ export class ModularRoadBuilder {
       im.instanceMatrix.needsUpdate = true;
       im.matrixAutoUpdate = false; // root/instGroup at origin → instance mats are world
       im.frustumCulled = false; // a track spans a large area; skip per-mesh culling
-      im.castShadow = grp.role !== "decor";
+      // Neither flat markings nor a window should cast — see the note where the
+      // per-piece glass mesh is born.
+      im.castShadow = grp.role !== "decor" && grp.role !== "glass";
       im.receiveShadow = true;
       this.instGroup.add(im);
       this._instMeshes.push(im);
@@ -1098,6 +1104,13 @@ export class ModularRoadBuilder {
         ? this._makeMesh(built.decorGeometry, this.decorMaterial, built.world)
         : null;
     if (decorMesh) decorMesh.castShadow = false; // flat markings don't cast
+    const glassMesh =
+      built.glassGeometry && this.glassMaterial
+        ? this._makeMesh(built.glassGeometry, this.glassMaterial, built.world)
+        : null;
+    // A transparent pane casting an opaque shadow would put a black square on
+    // whatever is under the road — the exact opposite of what a window does.
+    if (glassMesh) glassMesh.castShadow = false;
 
     const piece = {
       /** Stable identity across a history restore — array position is not one,
@@ -1111,6 +1124,7 @@ export class ModularRoadBuilder {
       railMesh,
       shellMesh,
       decorMesh,
+      glassMesh,
       connectorIn: connectorIn.clone(),
       connectorOut: built.connectorOut.clone(),
       /** Junction side sockets in WORLD space (empty for every other piece). */
@@ -1124,7 +1138,7 @@ export class ModularRoadBuilder {
       /** @type {THREE.Matrix4|null} absolute entry seam while detached. */
       pinnedIn: null,
     };
-    for (const m of [mesh, railMesh, shellMesh, decorMesh]) {
+    for (const m of [mesh, railMesh, shellMesh, decorMesh, glassMesh]) {
       if (m) m.userData.piece = piece;
     }
     // Record what this geometry was built FROM, exactly as rebuildAll does.
@@ -1446,6 +1460,10 @@ export class ModularRoadBuilder {
       this.root.remove(p.decorMesh);
       p.decorMesh.geometry.dispose();
     }
+    if (p.glassMesh) {
+      this.root.remove(p.glassMesh);
+      p.glassMesh.geometry.dispose();
+    }
   }
 
   // ══ HISTORY ════════════════════════════════════════════════════════════════
@@ -1699,6 +1717,21 @@ export class ModularRoadBuilder {
       p.shellMesh = null;
     }
 
+    if (built.glassGeometry && this.glassMaterial) {
+      if (p.glassMesh) {
+        p.glassMesh.geometry.dispose();
+        p.glassMesh.geometry = built.glassGeometry;
+        p.glassMesh.matrix.copy(built.world);
+      } else {
+        p.glassMesh = this._makeMesh(built.glassGeometry, this.glassMaterial, built.world);
+        p.glassMesh.castShadow = false;
+      }
+    } else if (p.glassMesh) {
+      this.root.remove(p.glassMesh);
+      p.glassMesh.geometry.dispose();
+      p.glassMesh = null;
+    }
+
     if (built.decorGeometry && this.decorMaterial) {
       if (p.decorMesh) {
         p.decorMesh.geometry.dispose();
@@ -1755,6 +1788,11 @@ export class ModularRoadBuilder {
           ? this._makeMesh(built.decorGeometry, this.decorMaterial, built.world)
           : null;
       if (decorMesh) decorMesh.castShadow = false;
+      const glassMesh =
+        built.glassGeometry && this.glassMaterial
+          ? this._makeMesh(built.glassGeometry, this.glassMaterial, built.world)
+          : null;
+      if (glassMesh) glassMesh.castShadow = false;
 
       const piece = {
         id: e.id,
@@ -1765,6 +1803,7 @@ export class ModularRoadBuilder {
         railMesh,
         shellMesh,
         decorMesh,
+        glassMesh,
         connectorIn,
         connectorOut: built.connectorOut.clone(),
         branches: built.branchesOut ?? [],
@@ -1775,7 +1814,7 @@ export class ModularRoadBuilder {
           ? new THREE.Matrix4().fromArray(e.pinnedIn)
           : null,
       };
-      for (const m of [mesh, railMesh, shellMesh, decorMesh]) {
+      for (const m of [mesh, railMesh, shellMesh, decorMesh, glassMesh]) {
         if (m) m.userData.piece = piece;
       }
       this.pieces.push(piece);
@@ -2057,6 +2096,7 @@ const PIECE_TO_CATEGORY = {
   platform: "straight",
   narrow: "straight",
   holed: "straight",
+  glass_road: "straight",
   tunnel: "tubes",
   tunnel_curve: "tubes",
   tube: "tubes",
@@ -2378,6 +2418,20 @@ export const CATEGORY_PRESETS = {
       base: "narrow",
       params: { straightLength: 24, narrowWidth: 8 },
       preview: `<svg viewBox="0 0 80 80"><rect x="34" y="10" width="12" height="60" rx="1" ${_RB}/><line x1="40" y1="14" x2="40" y2="66" ${_RS}/></svg>`,
+    },
+    {
+      id: "glass_str",
+      label: "Glass Road",
+      base: "glass_road",
+      params: { glassLength: 32, glassWidth: 16, glassHole: 9 },
+      preview: `<svg viewBox="0 0 80 80"><rect x="24" y="8" width="32" height="64" rx="2" fill="#7d1420" stroke="#e0555f" stroke-width="1.8"/><rect x="29" y="27" width="22" height="26" rx="1" fill="#8fd3e4" fill-opacity="0.42" stroke="#cfeef7" stroke-width="1.6"/><path d="M31 50 L47 29" stroke="#ffffff" stroke-opacity="0.55" stroke-width="2" stroke-linecap="round"/></svg>`,
+    },
+    {
+      id: "glass_str_wide",
+      label: "Glass Road XL",
+      base: "glass_road",
+      params: { glassLength: 36, glassWidth: 26, glassHole: 16 },
+      preview: `<svg viewBox="0 0 80 80"><rect x="16" y="8" width="48" height="64" rx="2" fill="#7d1420" stroke="#e0555f" stroke-width="1.8"/><rect x="21" y="21" width="38" height="38" rx="1" fill="#8fd3e4" fill-opacity="0.42" stroke="#cfeef7" stroke-width="1.6"/><path d="M24 55 L52 24" stroke="#ffffff" stroke-opacity="0.55" stroke-width="2" stroke-linecap="round"/></svg>`,
     },
     {
       id: "hole_road",
