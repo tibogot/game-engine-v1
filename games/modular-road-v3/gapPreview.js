@@ -132,6 +132,27 @@ export class GapPreview {
   update(connector, refSpeed, landingDrop = 0) {
     const pos = this._positions;
     let n = 0;
+    // NOTHING IS DRAWN FROM A NON-FINITE INPUT. The arc is a pure function of
+    // the connector and the speed, so one NaN in either makes every one of the
+    // 400 vertices NaN — and three then reports it once per frame from a place
+    // that says nothing about where it came from:
+    //
+    //   "computeBoundingSphere(): Computed radius is NaN. The position
+    //    attribute is likely to have NaN values."
+    //
+    // Both inputs come from outside: `connector` is the builder's open end,
+    // which is derived from the last piece's exit matrix (and from the ORBIT
+    // TARGET when a chain is reseeded at the cursor — that target tracks the car
+    // in drive mode, so a NaN car poisons the builder too), and `refSpeed` is a
+    // dev-panel number. Refusing here keeps a bad value a hidden aid instead of
+    // a per-frame stack trace, and leaves the last good arc's data alone.
+    if (!Number.isFinite(refSpeed) || !Number.isFinite(landingDrop)
+        || !connector || connector.elements.some((v) => !Number.isFinite(v))) {
+      this.line.geometry.setDrawRange(0, 0);
+      this.landing = null;
+      this.marker.visible = false;
+      return null;
+    }
     const landing = solveGapArc(connector, refSpeed, {
       gravity: this.gravity,
       dragK: this.dragK,

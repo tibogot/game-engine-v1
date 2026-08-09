@@ -140,6 +140,10 @@ export const pieceParams = {
   // buildHalfTubeProfile). Shares tubeRadius/tubeWall so a half tube seams onto
   // a full tube of the same size.
   halfTubeSpan: 180, // arc of the surviving arc (deg), centred on the floor
+  // Snowboard half-pipe (flat + transition + vert — see buildHalfPipeProfile).
+  // Transition radius is tubeRadius; wall thickness is tubeWall.
+  halfPipeFlat: 12, // flat bottom between the two transitions (m)
+  halfPipeVert: 3, // straight vertical wall above the transition (m)
   // Half-pipe channel shell (open-top quarter-pipe walls):
   channelRadius: 4, // wall fillet radius = wall height (m)
   // Quarter-pipe (concave ramp curving up a vertical-plane arc to a wall):
@@ -302,6 +306,86 @@ function buildHalfTubeProfile(pp = pieceParams) {
     pts.push({ x: Math.cos(a) * Ro, y: Ri + Math.sin(a) * Ro, zone: 4 });
   }
   return { pts, hw: Ri };
+}
+
+/**
+ * SNOWBOARD HALF-PIPE cross-section: flat bottom, transition, then VERT.
+ *
+ * Not the same shape as a half tube, and the difference is the whole point. A
+ * half tube is one circular arc, so the only place its wall is vertical is a
+ * single point at the very top. Ride up a bare arc and where you leave it
+ * decides which way you get thrown:
+ *
+ *   span < 180°  you leave before vertical, still moving OUTWARD  -> over the
+ *                deck and gone
+ *   span = 180°  vertical for an instant — the right answer, but it is a knife
+ *                edge; leave a fraction early and it is the case above
+ *   span > 180°  the rim has curled back over, so you leave moving INWARD and
+ *                get thrown across the pipe into the flat
+ *
+ * The 200° Park Pipe was the third case and it was reported as exactly that:
+ * "the car falls back at the centre of the pipe, it should fall on the slope."
+ * Which is right — in a real pipe a rider who comes down in the flat has taken
+ * the whole drop onto level ground, and that is how legs get broken.
+ *
+ * A real pipe solves it with a VERT: the transition curves up to vertical and
+ * then the wall simply carries ON straight up for the last stretch. Through the
+ * whole vert the rider's sideways velocity is zero, so they leave the lip going
+ * STRAIGHT UP, float, and drop back onto the same wall just under the lip —
+ * landing on the transition, which is exactly what a transition is for. The vert
+ * turns the knife edge into a section with margin: anywhere in it gives the same
+ * vertical launch.
+ *
+ * Geometry, floor at y = 0 so a flat piece feeds straight in (as the half tube
+ * does). Transition centre sits at (±flat/2, Rt), so
+ *     p(θ) = (±(flat/2 + Rt·sinθ), Rt·(1 − cosθ)),  θ = 0 … 90°
+ * which is tangent to the floor at θ=0 and vertical at θ=90°, then the vert runs
+ * straight from y = Rt to y = Rt + vert.
+ *
+ * Outline order follows buildHalfTubeProfile — the whole inner (drivable)
+ * surface first, then the outer shell back — so the two closing edges are the
+ * RIM CAPS at the lips. They carry mixed zones, become zone 0, and
+ * buildOpenLipCollision strips them, without which the lip is a shelf and the
+ * car cannot leave the pipe at all.
+ */
+function buildHalfPipeProfile(pp = pieceParams) {
+  const Rt = Math.max(3, pp.tubeRadius ?? 8); // transition radius
+  const tw = Math.max(0.15, pp.tubeWall ?? 0.6);
+  const hf = Math.max(0, pp.halfPipeFlat ?? 0) / 2; // half the flat bottom
+  const vert = Math.max(0, pp.halfPipeVert ?? 0); // straight wall above the arc
+  const N = 16; // steps per transition quadrant
+  const inner = [];
+  const outer = [];
+  // Left lip down to the floor, then up the right side. `s` is the side sign.
+  for (const s of [-1, 1]) {
+    const arc = [];
+    for (let k = 0; k <= N; k++) {
+      const th = (Math.PI / 2) * (k / N);
+      arc.push({
+        i: { x: s * (hf + Rt * Math.sin(th)), y: Rt * (1 - Math.cos(th)) },
+        // Outer shell is the same arc grown by the wall thickness about the same
+        // centre, so the wall keeps an even thickness all the way round.
+        o: { x: s * (hf + (Rt + tw) * Math.sin(th)), y: Rt - (Rt + tw) * Math.cos(th) },
+      });
+    }
+    const lip = { i: { x: s * (hf + Rt), y: Rt + vert },
+      o: { x: s * (hf + Rt + tw), y: Rt + vert } };
+    if (s < 0) {
+      // Left side runs lip -> floor, so vert first and the arc reversed.
+      if (vert > 0) { inner.push(lip.i); outer.push(lip.o); }
+      for (let k = N; k >= 0; k--) { inner.push(arc[k].i); outer.push(arc[k].o); }
+    } else {
+      // Right side runs floor -> lip. Skip k=0: it is the same point the left
+      // side finished on when there is no flat, and a duplicated outline vertex
+      // is what turns an ear-clipped band into a zero-area triangle.
+      for (let k = hf > 1e-6 ? 0 : 1; k <= N; k++) { inner.push(arc[k].i); outer.push(arc[k].o); }
+      if (vert > 0) { inner.push(lip.i); outer.push(lip.o); }
+    }
+  }
+  const pts = [];
+  for (const p of inner) pts.push({ x: p.x, y: p.y, zone: 3 });
+  for (let k = outer.length - 1; k >= 0; k--) pts.push({ x: outer[k].x, y: outer[k].y, zone: 4 });
+  return { pts, hw: hf + Rt };
 }
 
 /* ----------------------------------------------------------------------- */
@@ -2670,6 +2754,32 @@ export const PIECE_CATALOG = [
     openLips: true,
   },
   {
+    id: "half_pipe",
+    label: "Half-pipe",
+    hint: "Snowboard pipe — flat, transition, vert; carve up and drop back in",
+    swatch: "#16a0c0",
+    key: "",
+    points: straightPoints,
+    profile: buildHalfPipeProfile,
+    noKerb: true,
+    plain: true,
+    // Without this the rim caps are a shelf at lip height and the car cannot
+    // leave the pipe at all. See buildOpenLipCollision.
+    openLips: true,
+  },
+  {
+    id: "half_pipe_curve",
+    label: "Half-pipe curve",
+    hint: "Snowboard pipe on a flat curve (R flips L/R)",
+    swatch: "#16a0c0",
+    key: "",
+    points: curvePoints,
+    profile: buildHalfPipeProfile,
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
+  {
     id: "channel",
     label: "Half-pipe channel",
     hint: "Open-top U walls — funnels the car",
@@ -2771,10 +2881,12 @@ const _END_TANGENTS = {
   tunnel: flatEndTangents,
   tube: flatEndTangents,
   half_tube: flatEndTangents,
+  half_pipe: flatEndTangents,
   channel: flatEndTangents,
   tunnel_curve: curveEndTangents,
   tube_curve: curveEndTangents,
   half_tube_curve: curveEndTangents,
+  half_pipe_curve: curveEndTangents,
   channel_curve: curveEndTangents,
   twist: flatEndTangents,
   banktilt: flatEndTangents,

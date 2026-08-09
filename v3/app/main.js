@@ -2270,15 +2270,45 @@ export async function startV3App(opts = {}) {
     await syncHeightmapToCPU();
   }
 
+  /**
+   * Bilinear CPU height read, CLAMP-TO-EDGE outside the map.
+   *
+   * The clamping is not tidiness — off-map used to return NaN, and a NaN ground
+   * height is fatal to the whole session. It reaches the car through
+   * Vehicle.getFloorY, where `if (cornerY >= floorY) continue` is FALSE against
+   * NaN, so the corner-contact spring runs on a NaN penetration and poisons the
+   * body's force accumulator. From there NaN is in body.pos, so the chase camera
+   * matrix is NaN (black screen), the HUD reads NaN (speedometer), and
+   * `y < FALL_Y` — also false against NaN — never fires the auto-respawn.
+   *
+   * MEASURED on the shipping 2048 m / 1024-texel terrain, i.e. a map spanning
+   * ±1024 m, over a terrain sloping in both axes:
+   *
+   *     (   0, 1024)   101.2 m      last texel, fine
+   *     (   0, 1025)   NaN          y0 = 1024 indexes PAST the Float32Array;
+   *     (   0, 1100)   NaN          a typed array reads `undefined`, not 0
+   *     (1023, 1023)   126.7 m
+   *     (1025,    0)    62.8 m      x0 = 1024 WRAPS onto the next texel ROW —
+   *     (1100,    0)    89.3 m      64 m of ground vanishing in one metre
+   *     (  -1100, 0)    60.9 m      tx = −88: linear EXTRAPOLATION off the edge
+   *     (-2000,-2000)   12.5 m      unbounded — far enough out it is a ravine
+   *
+   * Only x0/y0 were clamped low and x1/y1 high, so every failure above is a case
+   * neither clamp covered. Clamping the ORIGIN texel and the weights makes the
+   * terrain read flat past its border, which is also what the GPU heightmap
+   * sampler does, so the CPU and shader now agree out there instead of diverging.
+   */
   function sampleHeightNormalized(u, v) {
     const fu = u * HEIGHTMAP_SIZE - 0.5;
     const fv = v * HEIGHTMAP_SIZE - 0.5;
-    const x0 = Math.max(0, Math.floor(fu));
-    const y0 = Math.max(0, Math.floor(fv));
+    const x0 = Math.min(HEIGHTMAP_SIZE - 1, Math.max(0, Math.floor(fu)));
+    const y0 = Math.min(HEIGHTMAP_SIZE - 1, Math.max(0, Math.floor(fv)));
     const x1 = Math.min(x0 + 1, HEIGHTMAP_SIZE - 1);
     const y1 = Math.min(y0 + 1, HEIGHTMAP_SIZE - 1);
-    const tx = fu - x0;
-    const ty = fv - y0;
+    // Clamped so the OUTSIDE of the map is the edge value rather than a linear
+    // extrapolation of the last two texels — see the −1100 / −2000 rows above.
+    const tx = Math.min(1, Math.max(0, fu - x0));
+    const ty = Math.min(1, Math.max(0, fv - y0));
     const i00 = y0 * HEIGHTMAP_SIZE + x0;
     const i10 = y0 * HEIGHTMAP_SIZE + x1;
     const i01 = y1 * HEIGHTMAP_SIZE + x0;

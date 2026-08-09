@@ -4013,7 +4013,14 @@ export class Vehicle {
     for (const corner of this.CHASSIS_CORNERS) {
       this._geomToWorld(corner, this._cWorld);
       const floorY = this.getFloorY ? this.getFloorY(this._cWorld.x, this._cWorld.z) : 0;
-      if (this._cWorld.y >= floorY) continue;
+      // Written as "not below" rather than ">=" so a NaN floor SKIPS the corner
+      // instead of driving it. `getFloorY` is a host-supplied terrain sampler
+      // (v3 hands over its CPU heightmap read), and every comparison against
+      // NaN is false — so the ">=" form treated an unsampleable floor as a hit,
+      // computed a NaN penetration, and pushed a NaN force into the body. One
+      // such corner is enough to make pos/vel NaN permanently, which is a black
+      // screen and a NaN speedometer. No floor is not the same as a floor here.
+      if (!(this._cWorld.y < floorY)) continue;
       const pen = floorY - this._cWorld.y;
       body.getVelocityAtPoint(this._cWorld, this._cVel);
       const dampMag = Math.max(0, -this._cVel.y) * this.CORNER_DAMPER;

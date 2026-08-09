@@ -1357,7 +1357,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   function checkFall() {
-    const y = vehicle.body.pos.y;
+    const p = vehicle.body.pos;
+    const y = p.y;
+
+    // NaN BACKSTOP, and it has to be FIRST because every other test here is a
+    // `<` — and every `<` against NaN is false, so a NaN car falls through all
+    // of them and is never recovered. That is the difference between a bad frame
+    // and a dead session: once body.pos is NaN the chase camera matrix is NaN
+    // (black screen) and the HUD reads NaN, and the only thing that was ever
+    // going to put the car back was this function.
+    //
+    // The known producer was an off-map terrain height (fixed at source in
+    // sampleHeightNormalized), but a NaN pose is never recoverable in place
+    // whatever made it, so it is worth catching here permanently rather than
+    // trusting that no future sampler ever divides by zero.
+    if (!Number.isFinite(y) || !Number.isFinite(p.x) || !Number.isFinite(p.z)) {
+      console.warn("[roadGame] vehicle pose went non-finite — respawning");
+      respawn();
+      return;
+    }
 
     if (y < FALL_Y) { respawn(); return; } // lost below the world
 
@@ -2725,7 +2743,7 @@ ${e.message}`);
   let last = performance.now();
   let simAccum = 0;
   let autoLightAccum = 0;
-  const tick = () => {
+  const frame = () => {
     const now = performance.now();
     const dt = Math.min((now - last) / 1000, 0.05);
     last = now;
@@ -2856,7 +2874,44 @@ ${e.message}`);
       if (wasOn !== headlightsOn) devPanel?.refresh();
     }
 
+  };
+
+  /**
+   * THE NEXT FRAME IS BOOKED BEFORE THIS ONE RUNS, and that ordering is the
+   * whole point of this wrapper.
+   *
+   * It used to be the last statement inside the frame body, so ONE throw
+   * anywhere in it — sim, HUD, camera, a bad geometry — never reached the
+   * re-schedule and the loop stopped for good. Nothing on screen said so. The
+   * keyboard handler is registered separately and kept firing, so R and B still
+   * ran `respawn()` and `toggleMode()` perfectly; they just had no frame left to
+   * draw the result in. The bug reads as "the game ignores every key", which
+   * sends you looking at input handling, which is fine.
+   *
+   * Scheduling first means a throwing frame costs a frame instead of the
+   * session. The error is deliberately NOT swallowed — it goes to the console
+   * uncaught, where it is the actual diagnostic — but a frame that throws every
+   * time would spam without end, so a run of them gives up loudly rather than
+   * silently.
+   */
+  const MAX_CONSECUTIVE_FRAME_ERRORS = 120; // ~2 s at 60 Hz
+  let frameErrors = 0;
+  const tick = () => {
     app._roadRaf = requestAnimationFrame(tick);
+    try {
+      frame();
+      frameErrors = 0;
+    } catch (err) {
+      console.error("[roadGame] frame failed", err);
+      if (++frameErrors >= MAX_CONSECUTIVE_FRAME_ERRORS) {
+        cancelAnimationFrame(app._roadRaf);
+        app._roadRaf = null;
+        console.error(
+          `[roadGame] ${frameErrors} consecutive failed frames — stopping the loop. Reload the page.`,
+        );
+        onStatus("crashed — see console");
+      }
+    }
   };
   app._roadRaf = requestAnimationFrame(tick);
 

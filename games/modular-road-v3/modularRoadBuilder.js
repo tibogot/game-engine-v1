@@ -2103,6 +2103,8 @@ const PIECE_TO_CATEGORY = {
   tube_curve: "tubes",
   half_tube: "tubes",
   half_tube_curve: "tubes",
+  half_pipe: "tubes",
+  half_pipe_curve: "tubes",
   channel: "tubes",
   channel_curve: "tubes",
   curve: "turns",
@@ -2353,6 +2355,69 @@ export const CATEGORY_PRESETS = {
       base: "half_tube",
       params: { straightLength: 26, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 240 },
       preview: `<svg viewBox="0 0 80 80"><path d="M19 28 A24 24 0 1 0 61 28" fill="none" stroke="#6a7580" stroke-width="5"/><path d="M24 31 A18 18 0 1 0 56 31" fill="none" stroke="#3f4650" stroke-width="2"/><rect x="30" y="53" width="20" height="5" rx="2" fill="#2a2e36"/></svg>`,
+    },
+    {
+      // THE SNOWBOARD PIPE. Same piece as the half tubes above — this is not a
+      // new shape, it is the only SCALE at which the shape behaves like a pipe.
+      //
+      // What makes a pipe different from a quarter-pipe is that you ride ALONG
+      // it and carve UP it, so only the sideways part of your speed becomes
+      // height; the speed down the pipe is kept. That is why a pipe gives 1–2 s
+      // pops at any speed while a bowl gives one 6 s rocket — and why it needs a
+      // wall the car can only just reach. At the stock tubeRadius of 8 the wall
+      // is 8 m, a car carving into it has 60+ m of climb in hand, and it simply
+      // leaves: MEASURED at R=8, the car escaped the pipe at every speed and
+      // every steering input tried.
+      //
+      // A PIPE IS NOT AN ARC, and that is the whole reason this uses half_pipe
+      // rather than the half tube next to it. On a bare arc the only vertical
+      // point is the very top, so where you leave it decides where you go — and
+      // the first version of this preset was a 200° half tube, which curls the
+      // rim back over you so you leave moving INWARD. MEASURED, launch x against
+      // landing x on a 26 m pipe: leaves at +25.4, lands at -21.4. It threw the
+      // car clean across the pipe to the far wall, which is what got reported:
+      // "the car falls back at the centre, it should fall on the slope."
+      //
+      // With a VERT — the wall carrying on straight up above the transition —
+      // sideways velocity is zero for the whole last stretch, so the car leaves
+      // going straight up and drops back onto the wall it left: leaves at -31.1,
+      // lands at -30.6. Same wall, just under the lip, on the transition. That is
+      // what a snowboarder does, and it is why real pipes have vert.
+      //
+      // THE VERT HEIGHT IS ALSO THE HEIGHT CONTROL, because the flight only
+      // starts at the lip. The car arrives with a fixed amount of climb in it
+      // (it apexes at 47–52 m however the pipe is built), so raising the lip
+      // eats the difference. MEASURED at Rt=26, apex over the lip / air time:
+      //
+      //     vert  4    +17.7 to +21.4 m    4.2–4.7 s
+      //     vert 12    +9.8 to +13.4 m     2.7–4.0 s
+      //     vert 17    +4.3 to +9.3 m      1.4–2.4 s   <- this preset
+      //     vert 20    +3.8 to +5.4 m      1.2–1.7 s, but 28 m/s can't reach it
+      //
+      // Held over a 12-run grid of 28/34/40 m/s against carves from 0.3 to 0.9:
+      // 10 of 12 land back on the same wall at the lip. The two that do not are
+      // both the shallowest carve, and that is authentic rather than a defect —
+      // going up at a lazy angle is a wall-ride, not a pipe hit, and it fires you
+      // out over the deck on snow too. Turn INTO the wall.
+      id: "half_pipe_park",
+      label: "Park Pipe",
+      base: "half_pipe",
+      params: { straightLength: 60, tubeRadius: 26, tubeWall: 0.6, halfPipeFlat: 12, halfPipeVert: 17 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M12 8 L12 30 A22 22 0 0 0 34 52 L46 52 A22 22 0 0 0 68 30 L68 8" fill="none" stroke="#6a7580" stroke-width="5"/><path d="M19 10 L19 30 A15 15 0 0 0 34 45 L46 45 A15 15 0 0 0 61 30 L61 10" fill="none" stroke="#3f4650" stroke-width="2"/><rect x="32" y="47" width="16" height="4" rx="1" fill="#2a2e36"/></svg>`,
+    },
+    {
+      id: "half_pipe_park_long",
+      label: "Park Pipe Long",
+      base: "half_pipe",
+      params: { straightLength: 110, tubeRadius: 26, tubeWall: 0.6, halfPipeFlat: 12, halfPipeVert: 17 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M8 10 L8 28 A18 18 0 0 0 26 46 L34 46 A18 18 0 0 0 52 28 L52 10" fill="none" stroke="#6a7580" stroke-width="4"/><path d="M30 24 L30 40 A14 14 0 0 0 44 54 L52 54 A14 14 0 0 0 66 40 L66 24" fill="none" stroke="#6a7580" stroke-width="3"/><path d="M8 10 L30 24 M52 10 L66 24" stroke="#6a7580" stroke-width="2.5"/></svg>`,
+    },
+    {
+      id: "half_pipe_park_turn",
+      label: "Park Pipe Turn",
+      base: "half_pipe_curve",
+      params: { curveRadius: 60, curveAngle: 60, curveDir: 1, tubeRadius: 26, tubeWall: 0.6, halfPipeFlat: 12, halfPipeVert: 17 },
+      preview: `<svg viewBox="0 0 80 80"><path d="M14 72 L14 46 Q14 22 38 22 L68 22" ${_RS}/><path d="M30 20 L30 40 A14 14 0 0 0 44 54 L52 54 A14 14 0 0 0 66 40 L66 20" fill="none" stroke="#6a7580" stroke-width="4"/><path d="M36 22 L36 40 A9 9 0 0 0 45 49 L51 49 A9 9 0 0 0 60 40 L60 22" fill="none" stroke="#3f4650" stroke-width="2"/></svg>`,
     },
     {
       id: "tunnel_str",
@@ -2871,6 +2936,38 @@ export const CATEGORY_PRESETS = {
       // 60 m is the middle of that window. Scale it to the speed you want to
       // arrive at: roughly half to three-quarters of v²/(2g). Too small and you
       // fly past the ramp; too large and you never leave the surface.
+      //
+      // THE LIP STAYS AT 90°, AND THE LANDING STAYS ON THE COPING. That reads
+      // like the known defect it is — the back tyre grazes the top edge on the
+      // way back in — so here is why the obvious fix is not one, measured, to
+      // stop it being tried a third time.
+      //
+      // A vertical lip throws the car STRAIGHT up, so it comes straight back
+      // down onto the lip it just left: landing point 0.99–1.00 along the face
+      // at every radius from 40 m to 78 m and every speed. Instrumented at R=60
+      // the car arrives nose-up at 85° and the rear tyres touch at y = 59.98
+      // against a lip at 60.00 — the last two centimetres of ramp. Not tuning
+      // noise; it is what a vertical launch means, and no radius changes it.
+      //
+      // Tipping the lip past vertical DOES move the landing down the face, and
+      // it is far too coarse to be useful, because near the lip the face is
+      // vertical — a few centimetres of backward drift means falling the whole
+      // vertical section before finding surface. MEASURED at R=60, how far under
+      // the lip the car touches down (negative = on top of the rim):
+      //
+      //                 46 m/s    42 m/s
+      //     A=90.0°     -1.6 m    -1.6 m     on the rim, both
+      //     A=90.5°     +6.3 m    -1.7 m     fixed fast, unchanged slow
+      //     A=91.0°    +14.3 m    -1.6 m
+      //     A=92.0°    +23.4 m   +11.8 m
+      //     A=96.0°    +42.0 m   +27.3 m     shipped once; "falls back far
+      //                                      from the top, doesn't feel nice"
+      //
+      // There is no angle that lands it a few metres under the rim at BOTH
+      // speeds. Half a degree swings the fast case from on-the-rim to 6 m under.
+      // The landing point is not the lever — the lip GEOMETRY is, and that is a
+      // change to quarterPipePoints (a rounded coping or a deck at the top), not
+      // to this number.
       id: "quarterpipe_bowl",
       label: "Park bowl",
       base: "quarterpipe",
@@ -2902,11 +2999,50 @@ export const CATEGORY_PRESETS = {
       //
       // The apex does NOT shrink with the bowl — that is v²/(2g), with the ramp
       // height cancelling out. Only arriving slower lowers the flight.
+      //
+      // 90°, and it lands on the coping like the big one — see the measured
+      // table there for why an over-vertical lip cannot fix that without
+      // throwing the car most of the way back down the face.
       id: "quarterpipe_bowl_small",
       label: "Park bowl (small)",
       base: "quarterpipe",
       params: { qpRadius: 40, qpAngle: 90 },
       preview: `<svg viewBox="0 0 80 80"><line x1="4" y1="66" x2="46" y2="66" stroke="#c0392b" stroke-width="1.2"/><path d="M10 66 Q52 66 56 26" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M46 40 a9 9 0 0 1 -6 15" stroke="#16a0c0" stroke-width="1.6" fill="none" stroke-dasharray="3 2"/></svg>`,
+    },
+    {
+      // THE SHORT-FLIGHT BOWL. The two above launch the car 90 m up and hold it
+      // there for 6–7 s, which reads as a rocket rather than a trick.
+      //
+      // The apex above the GROUND cannot be tuned — it is v²/(2g), ~90 m at the
+      // 47 m/s the car arrives at, and it measures 90–96 m at every radius from
+      // 40 m to 78 m. What CAN be tuned is how much of that climb happens on the
+      // ramp instead of in the air, because the flight only starts at the lip:
+      // apex above the lip is v²/(2g) − R. A taller wall eats more of the speed
+      // before letting go. MEASURED at full throttle:
+      //
+      //     R=60   35.6 m over the lip   5.3 s of air
+      //     R=66   28.3 m                4.7 s
+      //     R=70   23.5 m                4.2 s
+      //     R=74   18.6 m                3.7 s      <- this preset
+      //     R=78   13.8 m                3.1 s
+      //
+      // The cost, and it is a real one: the stall point is v²/(2g) minus what
+      // friction takes over a 116 m arc, and MEASURED that lands right on top of
+      // the speeds the car actually arrives at — 46 m/s gives 18.6 m and 3.7 s,
+      // 44 m/s only 6.5 m and 2.0 s, and 42 m/s stalls outright (the car climbs,
+      // runs out short of the lip and rolls back down). Authentic, but it means
+      // this preset only pops when the car arrives flat out, and the size of the
+      // pop is very sensitive to how flat out that is. Use the 60 m bowl wherever
+      // the approach is not guaranteed.
+      //
+      // It does NOT fix the rear tyre grazing the coping on the way back in —
+      // nothing does; see the note on "Park bowl" above. It only shortens the
+      // flight.
+      id: "quarterpipe_bowl_tall",
+      label: "Park bowl XL",
+      base: "quarterpipe",
+      params: { qpRadius: 74, qpAngle: 90 },
+      preview: `<svg viewBox="0 0 80 80"><line x1="4" y1="74" x2="34" y2="74" stroke="#c0392b" stroke-width="1.2"/><path d="M8 74 Q58 74 60 6" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M60 6 l5 -2" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M56 20 a10 10 0 0 1 -7 17" stroke="#16a0c0" stroke-width="1.6" fill="none" stroke-dasharray="3 2"/></svg>`,
     },
     {
       id: "quarterpipe_down",

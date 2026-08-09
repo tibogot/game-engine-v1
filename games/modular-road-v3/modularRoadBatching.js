@@ -161,8 +161,22 @@ export function mergeByMaterial(root) {
   const m4 = new THREE.Matrix4();
   for (const { material, meshes } of groups.values()) {
     if (meshes.length < 2) continue;
-    const keys = Object.keys(meshes[0].geometry.attributes).sort().join(",");
-    if (!meshes.every((m) => Object.keys(m.geometry.attributes).sort().join(",") === keys)) continue;
+    // INDEXED-NESS IS PART OF THE COMPATIBILITY KEY, not just the attribute
+    // names. mergeGeometries needs the index to be present on all of its inputs
+    // or on none, and it says so in the console when it isn't:
+    //
+    //   "failed with geometry at index 1. All geometries must have compatible
+    //    attributes; make sure index attribute exists among all geometries, or
+    //    in none of them."
+    //
+    // That warning was this guard missing the case it exists to skip — the names
+    // matched, so the group went to the merge anyway, which returned null and
+    // left a stack trace behind. The merge failure was harmless (a null merge
+    // keeps the original meshes, by design — see above) but the noise is not:
+    // it is indistinguishable in the log from the real merge bugs it hides.
+    const shapeKey = (g) => `${g.index ? "i" : "n"}|${Object.keys(g.attributes).sort().join(",")}`;
+    const keys = shapeKey(meshes[0].geometry);
+    if (!meshes.every((m) => shapeKey(m.geometry) === keys)) continue;
 
     const geos = meshes.map((m) => {
       const g = m.geometry.clone();
