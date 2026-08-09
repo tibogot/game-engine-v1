@@ -1226,6 +1226,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // autoHeadlights gate. Behind it, turning auto headlights off would also
     // freeze the smoke's lighting at whatever the sun was doing at the time.
     driftSmoke.setSunDirection(_sunDir);
+    driftSmoke.setSunColor(sunLight.color, sunLight.intensity);
     if (!autoHeadlights) return;
     if (!headlightsOn && sinElev < 0.10) setHeadlights(true);
     else if (headlightsOn && sinElev > 0.16) setHeadlights(false);
@@ -2656,7 +2657,7 @@ ${e.message}`);
         tireMarks.setStyle(tireMarks.style === "textured" ? "solid" : "textured"),
       setDriftSmokeEnabled: (on) => {
         driftSmoke.settings.enabled = !!on;
-        driftSmoke.mesh.visible = !!on;
+        driftSmoke.setVisible(!!on);
         if (!on) driftSmoke.reset();
       },
       cameraParams: chase.params,

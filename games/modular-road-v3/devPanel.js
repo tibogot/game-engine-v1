@@ -1370,6 +1370,27 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Ambient</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-amb" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-smk-amb-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Scatter (rim)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-scat" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-smk-scat-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Self-shadow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-abs" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-smk-abs-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Puff detail</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-noise" min="0.3" max="3" step="0.05" />
@@ -1402,6 +1423,68 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-smk-soft" min="0" max="4" step="0.05" />
               <span class="prop-num" id="dv-smk-soft-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Fuse (world noise)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-fuse" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-smk-fuse-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Fuse scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-fscale" min="0.1" max="2" step="0.02" />
+              <span class="prop-num" id="dv-smk-fscale-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lingering bank</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-smk-haze" type="button" aria-label="Lingering smoke bank">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bank amount</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-hrate" min="0" max="60" step="1" />
+              <span class="prop-num" id="dv-smk-hrate-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bank opacity</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-hop" min="0.005" max="0.25" step="0.005" />
+              <span class="prop-num" id="dv-smk-hop-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bank life</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-hlife" min="2" max="20" step="0.5" />
+              <span class="prop-num" id="dv-smk-hlife-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bank size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-hsize" min="0.6" max="6" step="0.1" />
+              <span class="prop-num" id="dv-smk-hsize-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bank growth</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-hgrow" min="0.5" max="9" step="0.1" />
+              <span class="prop-num" id="dv-smk-hgrow-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bank hold</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-hhold" min="0" max="0.9" step="0.02" />
+              <span class="prop-num" id="dv-smk-hhold-v"></span>
             </div>
           </div>
         </div>
@@ -2152,11 +2235,29 @@ export function createRoadDevPanel({ app, game, params }) {
     slider("dv-smk-turb", smk, "turbulence");
     slider("dv-smk-buoy", smk, "buoyancy");
     slider("dv-smk-sun", smk, "sunTint");
+    slider("dv-smk-amb", smk, "ambient");
+    slider("dv-smk-scat", smk, "scatter");
+    slider("dv-smk-abs", smk, "absorb");
     slider("dv-smk-noise", smk, "noiseScale");
     slider("dv-smk-drift", smk, "noiseDrift");
     slider("dv-smk-erode", smk, "erodeEnd");
     slider("dv-smk-esoft", smk, "erodeSoft");
     slider("dv-smk-soft", smk, "softDepth", (v) => v.toFixed(2) + "m");
+    slider("dv-smk-fuse", smk, "worldNoiseMix");
+    slider("dv-smk-fscale", smk, "worldNoiseScale");
+    if (smk.haze) {
+      const hz = smk.haze;
+      toggle("dv-smk-haze", hz.enabled !== false, (on) => { hz.enabled = on; });
+      slider("dv-smk-hrate", hz, "emitRate", (v) => v.toFixed(0));
+      slider("dv-smk-hop", hz, "opacity", (v) => v.toFixed(3));
+      // lifeMin trails lifeMax, same as the puff life slider above.
+      slider("dv-smk-hlife", hz, "lifeMax", (v) => v.toFixed(1) + "s",
+        (v) => { hz.lifeMin = v * 0.5; });
+      slider("dv-smk-hsize", hz, "sizeMax", (v) => v.toFixed(1) + "m",
+        (v) => { hz.sizeMin = v * 0.59; });
+      slider("dv-smk-hgrow", hz, "sizeGrowth", (v) => "x" + v.toFixed(1));
+      slider("dv-smk-hhold", hz, "fadeOutStart");
+    }
   }
 
   // ── Live readouts ───────────────────────────────────────────────────────────
