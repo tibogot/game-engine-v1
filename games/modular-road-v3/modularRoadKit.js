@@ -73,6 +73,21 @@ export const pieceParams = {
   slopeRise: 9, // vertical rise over the run (m); negative = downhill
   // Banked pieces (reuse curveRadius/curveAngle/curveDir):
   bankAngle: 22, // lean in degrees (turns HOLD it; Bank up/down ease it in/out)
+  // CURL — how far the deck EDGE lifts above the flat chord, in metres, at full
+  // bank. This is what makes a banked piece a different SHAPE from a straight
+  // rather than the same flat plate rolled over: see buildBankProfile.
+  // 0 restores the old flat plate exactly.
+  bankCurl: 0.9,
+  bankCurlSteps: 12, // deck samples across the width (shading resolution)
+  // RAMP LENGTH — how much road the Bank in / Bank out transitions get to do
+  // their work in. Its OWN number rather than the straight piece's
+  // `straightLength`, which is what it used to borrow: those two want opposite
+  // things. A straight is a building block you want short so you can compose
+  // with it; a bank ramp is a transition that has to be LONG or the deck snaps
+  // over instead of rolling. Sharing one slider meant you could not have both,
+  // and at the straight's 22 m the ramp rolled 22° and lifted its edge 0.8 m in
+  // under a second at speed — it read as a fold, not a bank.
+  bankRampLength: 40,
   // ── Jump / launch ramp ────────────────────────────────────────────────────
   // TAKEOFF ANGLE IS TIED TO TOP SPEED. Ballistic range is v²·sin(2θ)/g, so it
   // scales with the SQUARE of speed — raising TIRE.topSpeed 30 → 50 m/s made
@@ -223,6 +238,87 @@ export function buildProfile(p = roadParams, withKerbs = true) {
     { x: hw, y: -t, zone: 0 }, // underside, right
     { x: -hw, y: -t, zone: 0 }, // underside, left
   ];
+  return { pts, hw };
+}
+
+/**
+ * CURLED (banked) cross-section — a deck that CURVES across its width instead of
+ * being a flat plate.
+ *
+ * WHY THIS EXISTS. Every bank piece used to sweep `buildProfile`, i.e. the exact
+ * same flat slab a straight uses, tipped over by `bankRoll`. Measured on the
+ * shipping kit, the drivable deck of a long banked turn was 120 triangles and a
+ * bank-in was 30 — ONE quad across the full 14.5 m width, for the whole piece.
+ * A single quad has a single normal, so the entire deck shades as one uniform
+ * tone: no gradient, no highlight travelling across it as the bank rolls in,
+ * nothing for the eye to read the curvature from. That is the "low poly / bad
+ * looking" banked piece, and the polygon count is only half of it — the other
+ * half is that a flat plate is genuinely the wrong SHAPE. Real banking curls.
+ *
+ * THE CURVE. A parabola in the piece's own lateral axis,
+ *     y(x) = curl · (x / hw)²
+ * so the deck is flat at the centreline and lifts by exactly `curl` at each outer
+ * edge. Symmetric in LOCAL space on purpose:
+ *   - it flips L/R for free, which the whole kit relies on (`pp.curveDir`);
+ *   - once the piece is rolled by `bankAngle` it stops being symmetric in WORLD
+ *     space — the outer edge ends up steep and the inner edge nearly flat, which
+ *     is the asymmetry a banked corner actually has. Authoring that asymmetry
+ *     into the profile instead would double it up and break the flip.
+ *
+ * The kerbs ride ON the curve (they sit at the deck height under them, not at a
+ * flat y = 0), and the underside is the same curve offset down by `thickness`,
+ * so the slab keeps an even depth and reads as a shell rather than a wedge.
+ *
+ * `smooth: true` on the deck and underside points is what stops the curve
+ * faceting — see the welding pass in buildSweepGeometry. Without it this returns
+ * a 12-sided polygon with 12 visible creases, which looks WORSE than the flat
+ * plate it replaces. The kerb corners are deliberately left un-flagged: those
+ * are meant to be crisp.
+ *
+ * @param {object} p road cross-section params
+ * @param {boolean} withKerbs false = flat deck only (no raised kerbs)
+ * @param {number} curl metres of edge lift; <= 0 falls straight back to
+ *   buildProfile, so a curl of 0 is byte-for-byte the old geometry
+ * @param {number} steps deck samples across the width
+ */
+export function buildBankProfile(p = roadParams, withKerbs = true, curl = 0, steps = 12) {
+  const hw = p.width / 2;
+  // Strictly > 0, not > epsilon: the morph callback drives `curl` to (almost)
+  // zero at a flat seam, and it needs the SAME POINT COUNT there as at full
+  // curl. A near-zero curl gives a subdivided-but-flat deck, which is coincident
+  // with the 8-point section a straight sweeps — so the seam still matches.
+  if (!(curl > 0)) return buildProfile(p, withKerbs);
+  const t = Math.max(0.05, p.thickness);
+  const N = Math.max(2, Math.round(steps));
+  const y = (x) => curl * (x / hw) * (x / hw);
+
+  // Deck run, edge to edge. Kerbs eat `rw` off each side when they are on.
+  const rw = withKerbs ? Math.min(Math.max(0.0, p.railWidth), hw * 0.45) : 0;
+  const rh = withKerbs ? Math.max(0.0, p.railHeight) : 0;
+  const dx = hw - rw; // deck half-width, inside the kerbs
+
+  // Same clockwise outline as buildProfile: across the top, down the right face,
+  // back along the underside, up the left face.
+  const pts = [];
+  if (withKerbs) {
+    pts.push({ x: -hw, y: y(-hw) + rh, zone: 2 });
+    pts.push({ x: -dx, y: y(-dx) + rh, zone: 2 });
+  }
+  for (let k = 0; k <= N; k++) {
+    const x = -dx + (2 * dx * k) / N;
+    // Endpoints stay hard: they are where the deck meets the kerb (or the slab
+    // edge), and smoothing across that corner would round the kerb into the road.
+    pts.push({ x, y: y(x), zone: 1, smooth: k > 0 && k < N });
+  }
+  if (withKerbs) {
+    pts.push({ x: dx, y: y(dx) + rh, zone: 2 });
+    pts.push({ x: hw, y: y(hw) + rh, zone: 2 });
+  }
+  // Underside: the same curve, `t` lower, walked back the other way.
+  for (let k = N; k >= 0; k--) {
+    const x = -hw + (2 * hw * k) / N;
+    pts.push({ x, y: y(x) - t, zone: 0, smooth: k > 0 && k < N });
+  }
   return { pts, hw };
 }
 
@@ -570,11 +666,38 @@ function stampPieceAttributes(geo, { plain = 1, curvature = 0 } = {}) {
   return geo;
 }
 
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.plain] suppress centre/edge lines (platforms)
+ * @param {(t:number, i:number) => {pts:Array}} [opts.profileAt] MORPH the section
+ *   along the piece. Called once per frame with t = 0..1; must return the same
+ *   point COUNT every time (only the x/y move). This is how a bank-in grows its
+ *   curl from a flat entry to a fully curled exit in step with `bankInRoll`, so
+ *   both of its seams match whatever they mate with. `profileData` stays the
+ *   reference section — zones, uv.y and aLateral all come from it, so the deck
+ *   markings do not swim while the shape moves under them.
+ */
 export function buildSweepGeometry(frames, profileData = buildProfile(), opts = {}) {
   const { pts: profile, hw } = profileData;
   const plain = opts.plain ? 1 : 0; // 1 = suppress centre/edge lines (platforms)
   const M = profile.length;
   const F = frames.length;
+
+  // Per-frame sections, or null for the ordinary constant-section sweep.
+  let morph = null;
+  if (opts.profileAt) {
+    morph = new Array(F);
+    for (let i = 0; i < F; i++) {
+      const pd = opts.profileAt(F > 1 ? i / (F - 1) : 0, i);
+      const pts = pd?.pts;
+      if (!pts || pts.length !== M) {
+        throw new Error(
+          `profileAt must keep the point count (${M}); frame ${i} returned ${pts?.length}`,
+        );
+      }
+      morph[i] = pts;
+    }
+  }
 
   // Cumulative distance along the path (for uv.x).
   const along = new Float32Array(F);
@@ -621,8 +744,12 @@ export function buildSweepGeometry(frames, profileData = buildProfile(), opts = 
 
     for (let i = 0; i < F; i++) {
       const fr = frames[i];
-      pa.copy(fr.pos).addScaledVector(fr.right, a.x).addScaledVector(fr.up, a.y);
-      pb.copy(fr.pos).addScaledVector(fr.right, b.x).addScaledVector(fr.up, b.y);
+      // Shape comes from this frame's section when morphing; zone / uv / lateral
+      // below always come from the reference one.
+      const ai = morph ? morph[i][k] : a;
+      const bi = morph ? morph[i][(k + 1) % M] : b;
+      pa.copy(fr.pos).addScaledVector(fr.right, ai.x).addScaledVector(fr.up, ai.y);
+      pb.copy(fr.pos).addScaledVector(fr.right, bi.x).addScaledVector(fr.up, bi.y);
       positions.push(pa.x, pa.y, pa.z, pb.x, pb.y, pb.z);
       uvs.push(along[i], devA, along[i], devB);
       lateral.push(a.x / hw, b.x / hw);
@@ -649,8 +776,57 @@ export function buildSweepGeometry(frames, profileData = buildProfile(), opts = 
   stampPieceAttributes(geo, { plain, curvature: meanCurvature });
   geo.setIndex(indices);
   geo.computeVertexNormals();
+  weldSmoothProfileNormals(geo, profile, F);
   geo.computeBoundingSphere();
   return geo;
+}
+
+/**
+ * Average normals across profile points flagged `smooth`.
+ *
+ * THE SWEEP IS BUILT FROM UN-SHARED BANDS ON PURPOSE — one strip per profile
+ * EDGE, its own vertices, so each face keeps a constant `aZone` and the slab
+ * corners stay crisp. The cost is that `computeVertexNormals` can only ever
+ * produce FLAT shading across the section: it smooths along the sweep (those
+ * vertices really are shared) but every profile point is a hard crease, because
+ * the two bands meeting there do not share a single vertex.
+ *
+ * That is invisible on the old 8-point section — every one of its corners is
+ * meant to be sharp. It is fatal the moment a section CURVES: buildBankProfile's
+ * 12-segment deck would come out as twelve flat facets with eleven visible
+ * creases, which reads WORSE than the flat plate it replaces. Adding polygons
+ * without this makes the piece look more low-poly, not less.
+ *
+ * So: for each flagged point, find the two vertices sitting on it — band k-1's
+ * far column and band k's near column — and give both their average. The vertex
+ * layout is fully deterministic (band k starts at k·F·2; frame i within it is at
+ * +i·2 near and +i·2+1 far), so this is index arithmetic — no spatial hashing,
+ * no epsilon to get wrong, and no cost to pieces that flag nothing.
+ */
+function weldSmoothProfileNormals(geo, profile, F) {
+  const M = profile.length;
+  let any = false;
+  for (let k = 0; k < M; k++) if (profile[k].smooth) { any = true; break; }
+  if (!any) return;
+
+  const nrm = geo.getAttribute("normal");
+  for (let k = 0; k < M; k++) {
+    if (!profile[k].smooth) continue;
+    // Point k is the FAR end of band k-1 and the NEAR end of band k.
+    const prevBase = ((k - 1 + M) % M) * F * 2;
+    const curBase = k * F * 2;
+    for (let i = 0; i < F; i++) {
+      const va = prevBase + i * 2 + 1;
+      const vb = curBase + i * 2;
+      const x = nrm.getX(va) + nrm.getX(vb);
+      const y = nrm.getY(va) + nrm.getY(vb);
+      const z = nrm.getZ(va) + nrm.getZ(vb);
+      const l = Math.hypot(x, y, z) || 1;
+      nrm.setXYZ(va, x / l, y / l, z / l);
+      nrm.setXYZ(vb, x / l, y / l, z / l);
+    }
+  }
+  nrm.needsUpdate = true;
 }
 
 /**
@@ -1389,15 +1565,42 @@ function bankOutRoll(t, pp) {
  *     still match because they all share the same raised/rolled cross-section.
  */
 
+/*
+ * CURL FRACTION — how much of `pp.bankCurl` this piece's deck is carrying at t.
+ *
+ * Each one MUST be the same easing as that piece's ROLL function, or the deck
+ * curls at a different rate than it leans and the two disagree in the middle of
+ * the piece. Pairs: bankCurlIn↔bankInRoll, bankCurlOut↔bankOutRoll,
+ * bankCurlHold↔bankRoll. They are unsigned — the curl is symmetric about the
+ * centreline, so unlike the roll it does not care which way the corner goes.
+ */
+function bankCurlHold() {
+  return 1;
+}
+function bankCurlIn(t) {
+  return smoother(t);
+}
+function bankCurlOut(t) {
+  return 1 - smoother(t);
+}
+
 /** Low-edge raise for a given lean (m above the connector plane). */
 function bankRaise(pp, frac = 1) {
   const bank = THREE.MathUtils.degToRad(Math.abs(pp.bankAngle));
   return (roadParams.width / 2) * Math.sin(bank * frac);
 }
 
+/** How long a Bank in / Bank out ramp is. Falls back to `straightLength` for
+ *  tracks saved before bankRampLength existed — those pieces were authored at
+ *  the straight's length and must reload at exactly that, or every bank
+ *  transition in an old track changes size and the chain after it moves. */
+function bankRampLength(pp) {
+  return Math.max(1, pp.bankRampLength ?? pp.straightLength);
+}
+
 /** Bank-in straight: deck curls up 0 → bankAngle (C2, matches bankInRoll). */
 function bankInPoints(pp) {
-  const L = Math.max(1, pp.straightLength);
+  const L = bankRampLength(pp);
   const bank = THREE.MathUtils.degToRad(Math.abs(pp.bankAngle));
   const n = stepsFor(L, bank, 12);
   const pts = [];
@@ -1410,7 +1613,7 @@ function bankInPoints(pp) {
 
 /** Bank-out straight: deck settles bankAngle → 0 (C2, matches bankOutRoll). */
 function bankOutPoints(pp) {
-  const L = Math.max(1, pp.straightLength);
+  const L = bankRampLength(pp);
   const bank = THREE.MathUtils.degToRad(Math.abs(pp.bankAngle));
   const n = stepsFor(L, bank, 12);
   const pts = [];
@@ -1449,9 +1652,20 @@ function bankedHoldCurvePoints(pp) {
   return pts;
 }
 
-/** Level sockets for the straight bank pieces (entry plane → exit plane). */
+/** Level sockets for a HELD-bank straight (entry plane → exit plane). */
 function bankStraightSockets(pp) {
-  const L = Math.max(1, pp.straightLength);
+  return bankLevelSockets(Math.max(1, pp.straightLength));
+}
+
+/** Level sockets for a bank RAMP — same thing at the ramp's own length. Not
+ *  shared with the held-bank straight above, because the two pieces no longer
+ *  measure themselves with the same number, and a socket that disagrees with
+ *  its piece's geometry puts the whole rest of the chain in the wrong place. */
+function bankRampSockets(pp) {
+  return bankLevelSockets(bankRampLength(pp));
+}
+
+function bankLevelSockets(L) {
   const fwd = new V3(0, 0, -1);
   return { entryPos: new V3(0, 0, 0), entryDir: fwd.clone(), exitPos: new V3(0, 0, -L), exitDir: fwd.clone() };
 }
@@ -2545,6 +2759,7 @@ export const PIECE_CATALOG = [
     key: "4",
     points: bankedHoldCurvePoints,
     roll: bankRoll,
+    curl: bankCurlHold,
     sockets: bankedCurveSockets,
   },
   {
@@ -2554,6 +2769,7 @@ export const PIECE_CATALOG = [
     swatch: "#8e6fc0",
     points: bankHoldPoints,
     roll: bankRoll,
+    curl: bankCurlHold,
     sockets: bankStraightSockets,
   },
   {
@@ -2564,7 +2780,8 @@ export const PIECE_CATALOG = [
     key: "8",
     points: bankInPoints,
     roll: bankInRoll,
-    sockets: bankStraightSockets,
+    curl: bankCurlIn,
+    sockets: bankRampSockets,
   },
   {
     id: "bankout",
@@ -2574,7 +2791,8 @@ export const PIECE_CATALOG = [
     key: "9",
     points: bankOutPoints,
     roll: bankOutRoll,
-    sockets: bankStraightSockets,
+    curl: bankCurlOut,
+    sockets: bankRampSockets,
   },
   {
     id: "scurve",
@@ -3156,14 +3374,58 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   const pieceWidth = def.width ? def.width(pp) : rp.width;
   const rpForProfile = pieceWidth !== rp.width ? { ...rp, width: pieceWidth } : rp;
   const useKerbs = edges && !def.noKerb;
+  // CURL — the bank family sweeps a deck that CURVES across its width rather
+  // than the flat plate everything else uses (see buildBankProfile). `def.curl`
+  // is the easing; `pp.bankCurl` is the amount, and 0 gives back the old flat
+  // piece exactly, so this is a look you can dial out.
+  // Falls back to the KIT DEFAULT, not to 0: every piece in a track saved
+  // before the curl existed carries a `pp` snapshot with no bankCurl in it, and
+  // `?? 0` would quietly reload all of them as the old flat plates. An explicit
+  // 0 is still an explicit 0 and is still honoured.
+  const curlAmt = def.curl ? Math.max(0, pp.bankCurl ?? pieceParams.bankCurl ?? 0) : 0;
+  const curling = curlAmt > 1e-4;
+  const curlSteps = pp.bankCurlSteps ?? 12;
   // A piece can swap the whole cross-section (rideable tubes sweep an annulus
   // instead of the road profile); everything downstream just sweeps it.
-  const profileData = def.profile ? def.profile(pp) : buildProfile(rpForProfile, useKerbs);
+  const profileData = def.profile
+    ? def.profile(pp)
+    : curling
+      ? buildBankProfile(rpForProfile, useKerbs, curlAmt, curlSteps)
+      : buildProfile(rpForProfile, useKerbs);
+  // MORPH the section along the piece when the curl eases (bank in / bank out),
+  // so a bank-in leaves a flat seam behind it and a fully curled one in front.
+  // Held-bank pieces need no morph — their curl is constant, and skipping it
+  // keeps them on the plain constant-section path.
+  const sweepOpts = { plain: def.plain };
+  if (curling && def.curl !== bankCurlHold) {
+    sweepOpts.profileAt = (t) => buildBankProfile(
+      rpForProfile,
+      useKerbs,
+      // Floored, never zero: buildBankProfile falls back to the 8-point flat
+      // section at a true zero and the sweep needs one stable point count.
+      Math.max(1e-6, curlAmt * def.curl(t, pp)),
+      curlSteps,
+    );
+  }
+  // The kerb — and so the guardrail standing on it — rides UP with the curl.
+  // Stamped on the frames themselves rather than passed alongside, because the
+  // rail sweeps a DECIMATED copy of them (see decimateFrames) and carrying the
+  // lift on the frame is the only way it survives that thinning in step.
+  if (curling) {
+    const hwP = rpForProfile.width / 2;
+    const rwP = Math.min(Math.max(0, rpForProfile.railWidth), hwP * 0.45);
+    const kerbFrac = (hwP - rwP * 0.5) / hwP; // deck curve is y = curl·(x/hw)²
+    const lift = curlAmt * kerbFrac * kerbFrac;
+    const F = frames.length;
+    for (let i = 0; i < F; i++) {
+      frames[i].deckLift = lift * def.curl(F > 1 ? i / (F - 1) : 0, pp);
+    }
+  }
   // A piece can also skip the sweep entirely and author its own geometry
   // (the hole road punches a circle through its slab — impossible as a sweep).
   const geometry = def.geometry
     ? def.geometry(pp, rpForProfile)
-    : buildSweepGeometry(frames, profileData, { plain: def.plain });
+    : buildSweepGeometry(frames, profileData, sweepOpts);
   // TWO rails, deliberately: one to look at, one to hit. Both come out of
   // modularRoadRail.js and share a profile, so the collision surface tracks the
   // visible one automatically instead of being a second set of numbers that

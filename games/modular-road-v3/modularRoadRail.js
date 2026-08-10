@@ -319,6 +319,10 @@ export function sweepRail(frames, prof, baseLat, zSign, centerV) {
   const F = frames.length;
   const R = prof.pts.length;
   const V = R + 1; // seam column duplicated so the UVs don't wrap
+  // A curled bank deck lifts its own kerb, so the rail standing on it has to
+  // lift too — per frame, because the curl EASES along a bank-in. Stamped on
+  // the frame by buildPiece; every other piece leaves it undefined and gets 0.
+  const liftAt = (fr) => fr.deckLift ?? 0;
 
   const along = [0];
   for (let i = 1; i < F; i++) {
@@ -352,10 +356,11 @@ export function sweepRail(frames, prof, baseLat, zSign, centerV) {
 
   for (let i = 0; i < F; i++) {
     const fr = frames[i];
+    const lift = liftAt(fr);
     for (let j = 0; j < V; j++) {
       const p = prof.pts[j % R];
       const n = prof.normals[j % R];
-      push(fr, baseLat + zSign * p.z, centerV + p.y, zSign * n.z, n.y, along[i], arcV[j]);
+      push(fr, baseLat + zSign * p.z, centerV + p.y + lift, zSign * n.z, n.y, along[i], arcV[j]);
     }
   }
   const flipWind = zSign < 0;
@@ -388,12 +393,13 @@ export function sweepRail(frames, prof, baseLat, zSign, centerV) {
     const fr = frames[i];
     const base = positions.length / 3;
     const t = fr.tangent;
+    const v0 = centerV + liftAt(fr);
     for (const p of prof.pts) {
       const lat = baseLat + zSign * p.z;
       positions.push(
-        fr.pos.x + fr.right.x * lat + fr.up.x * (centerV + p.y),
-        fr.pos.y + fr.right.y * lat + fr.up.y * (centerV + p.y),
-        fr.pos.z + fr.right.z * lat + fr.up.z * (centerV + p.y),
+        fr.pos.x + fr.right.x * lat + fr.up.x * (v0 + p.y),
+        fr.pos.y + fr.right.y * lat + fr.up.y * (v0 + p.y),
+        fr.pos.z + fr.right.z * lat + fr.up.z * (v0 + p.y),
       );
       normals.push(t.x * dir, t.y * dir, t.z * dir);
       uvs.push(p.z, p.y);
@@ -666,9 +672,11 @@ export function placePosts(frames, template, baseLat, zSign, spacing, out) {
     const t = span > 1e-6 ? Math.min(1, Math.max(0, (d - cum[seg]) / span)) : 0;
 
     // Anchor on the CHORD the beam actually spans, offset included, so the post
-    // meets the beam wherever it lands between two frames.
-    _pa.copy(a.pos).addScaledVector(a.right, baseLat);
-    _pb.copy(b.pos).addScaledVector(b.right, baseLat);
+    // meets the beam wherever it lands between two frames. `deckLift` rides
+    // along: on a curled bank the kerb the post stands on is above the
+    // centreline plane, and it eases, so it is lerped like everything else.
+    _pa.copy(a.pos).addScaledVector(a.right, baseLat).addScaledVector(a.up, a.deckLift ?? 0);
+    _pb.copy(b.pos).addScaledVector(b.right, baseLat).addScaledVector(b.up, b.deckLift ?? 0);
     _pos.lerpVectors(_pa, _pb, t);
 
     // Re-orthogonalised, since lerping two orthonormal bases does not give one.
@@ -699,24 +707,76 @@ export function placePosts(frames, template, baseLat, zSign, spacing, out) {
  *
  * First and last frames are kept exactly, so the rail still starts and
  * ends flush with the piece's sockets.
+ *
+ * MEASURE THE RAIL'S PATH, NOT THE CENTRELINE'S. `lat` is the lateral offset the
+ * rail being thinned actually sits at, and passing it is not optional polish on
+ * any piece that ROLLS. A rail stands ~7.6 m out from the centre, so when a
+ * bank-in rolls its deck 22° the rail swings through ~2.9 m of vertical arc —
+ * while the centreline is a dead straight line whose tangent never moves at all
+ * and whose `up` only turns those same 22°. Judged on the centreline the piece
+ * looks nearly frame-free, the distance rule alone survives, and an 18 m
+ * transition keeps about SIX frames to describe a 3 m climb. That is what the
+ * rising rail on a bank-in looked like: a row of straight chords with a visible
+ * kink at each one.
+ *
+ * `deckLift` (the curled bank deck raising its own kerb — see buildBankProfile)
+ * rides in the same measurement for the same reason.
+ *
+ * @param {number} [lat=0] lateral offset of this rail; 0 measures the
+ *   centreline, which is right for a piece with no roll and wrong for one with.
  */
-export function decimateFrames(frames, maxDist, maxAngleDeg) {
+export function decimateFrames(frames, maxDist, maxAngleDeg, lat = 0) {
   if (frames.length <= 2 || maxDist <= 0) return frames;
   const maxAngle = THREE.MathUtils.degToRad(Math.max(0.5, maxAngleDeg));
   const ang = (a, b) => Math.acos(Math.min(1, Math.max(-1, a.dot(b))));
+
+  // Where this rail actually runs, and which way it is heading there.
+  const railPos = (f) => f.pos.clone()
+    .addScaledVector(f.right, lat)
+    .addScaledVector(f.up, f.deckLift ?? 0);
+  const path = frames.map(railPos);
+  const dir = path.map((_, i) => {
+    const a = path[Math.max(0, i - 1)];
+    const b = path[Math.min(path.length - 1, i + 1)];
+    const d = b.clone().sub(a);
+    return d.lengthSq() < 1e-12 ? frames[i].tangent.clone() : d.normalize();
+  });
+
+  // Roll counts as much as yaw — a twist piece turns its `up` while the tangent
+  // barely moves, and dropping those frames would untwist it.
+  const budget = (a, i) => Math.max(
+    ang(frames[a].tangent, frames[i].tangent),
+    ang(frames[a].up, frames[i].up),
+    ang(dir[a], dir[i]),
+  );
+
   const out = [frames[0]];
   let run = 0;
-  let anchor = frames[0];
+  let anchor = 0;
   for (let i = 1; i < frames.length - 1; i++) {
-    const f = frames[i];
-    run += f.pos.distanceTo(frames[i - 1].pos);
-    // Roll counts as much as yaw — a twist piece turns its `up` while the
-    // tangent barely moves, and dropping those frames would untwist it.
-    const turned = Math.max(ang(anchor.tangent, f.tangent), ang(anchor.up, f.up));
-    if (run >= maxDist || turned >= maxAngle) {
-      out.push(f);
+    // Distance along the RAIL, not the centreline — the outer rail of a curve
+    // is genuinely longer and wants its frames spaced on its own run.
+    run += path[i].distanceTo(path[i - 1]);
+    // THE ANGLE TEST LOOKS ONE FRAME AHEAD; the distance test does not.
+    //
+    // Asking "have I exceeded it yet?" commits frame i only once the limit is
+    // already past, so the gap left behind is however far the path moved in the
+    // step that tripped it — unbounded, and worst exactly where the motion is
+    // fastest. For ANGLE that is a visible defect: on a bank-in the roll rate
+    // peaks mid-transition and it measured 14.9° between consecutive rail
+    // frames against a stated 7° limit, which is a corner you can see in the
+    // beam. Looking ahead makes the limit an actual limit (7.7°, the remainder
+    // being chord-vs-tangent).
+    //
+    // DISTANCE is left alone deliberately. Overshooting it on a straight run
+    // costs nothing to look at — the direction has not changed, so a longer
+    // chord is still exactly on the path — and tightening it there is pure
+    // triangles: measured +14% on every rail in the kit (3288 → 3744 tris on a
+    // 32 m straight) to fix a kink that only curved and rolling pieces have.
+    if (run >= maxDist || budget(anchor, i + 1) > maxAngle) {
+      out.push(frames[i]);
       run = 0;
-      anchor = f;
+      anchor = i;
     }
   }
   out.push(frames[frames.length - 1]);
@@ -732,13 +792,17 @@ function sweepCollisionSheet(frames, section, baseLat, zSign, positions, indices
   const base = positions.length / 3;
   for (let i = 0; i < F; i++) {
     const fr = frames[i];
+    // Same per-frame kerb lift the visible rail uses — the proxy has to track
+    // it or the chassis collides with a barrier that is not where it looks.
+    const lift = fr.deckLift ?? 0;
     for (let j = 0; j < S; j++) {
       const s = section[j];
       const lat = baseLat + zSign * s.z;
+      const y = s.y + lift;
       positions.push(
-        fr.pos.x + fr.right.x * lat + fr.up.x * s.y,
-        fr.pos.y + fr.right.y * lat + fr.up.y * s.y,
-        fr.pos.z + fr.right.z * lat + fr.up.z * s.y,
+        fr.pos.x + fr.right.x * lat + fr.up.x * y,
+        fr.pos.y + fr.right.y * lat + fr.up.y * y,
+        fr.pos.z + fr.right.z * lat + fr.up.z * y,
       );
     }
   }
@@ -812,9 +876,11 @@ export function buildRailCollision(frames, rp, r = railParams) {
 
   const positions = [];
   const indices = [];
-  const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle);
   for (const side of [-1, 1]) {
     const zSign = r.mirrorSides ? side : 1;
+    // Thinned on THIS rail's own path (see decimateFrames) so the proxy keeps
+    // following the visible beam on a rolling piece.
+    const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle, side * edgeAbs);
     sweepCollisionSheet(sweepFrames, section, side * edgeAbs, zSign, positions, indices);
   }
   const geo = new THREE.BufferGeometry();
@@ -832,9 +898,6 @@ export function buildRailGeometry(frames, rp, r = railParams) {
   const edgeAbs = hw - rw * 0.5;
   const centerV = kerbTop + r.gap + r.height * 0.5;
   const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
-  // Beam AND posts both use the thinned frames. They have to be the same
-  // polyline or the posts stand off the beam on curves — see placePosts.
-  const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle);
 
   // Post space is centred on the kerb, so the kerb's outer edge is at rw/2.
   const template = r.posts
@@ -844,6 +907,12 @@ export function buildRailGeometry(frames, rp, r = railParams) {
   for (const side of [-1, 1]) {
     const zSign = r.mirrorSides ? side : 1;
     const baseLat = side * edgeAbs;
+    // PER SIDE, on this rail's own path — the two rails of a rolling or curving
+    // piece do not travel the same distance or turn through the same angles, so
+    // one shared thinning has to be wrong for at least one of them.
+    // Beam AND posts still use the SAME polyline, which is the constraint that
+    // actually matters, or the posts stand off the beam — see placePosts.
+    const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle, baseLat);
     geos.push(sweepRail(sweepFrames, prof, baseLat, zSign, centerV));
     if (template) placePosts(sweepFrames, template, baseLat, zSign, r.postSpacing, geos);
   }

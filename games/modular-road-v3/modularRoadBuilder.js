@@ -2227,68 +2227,76 @@ export const CATEGORY_PRESETS = {
   // The Apex-Rush Banks palette: Up/Down transitions curl the deck up from the
   // plane, Straight/Turn tiles HOLD the lean. Level sockets keep every piece
   // upright wherever it's dropped.
+  //
+  // SIZED LONG ON PURPOSE. The Up/Down tiles were 18 m, which is 18 m to roll
+  // the deck 22° AND lift its edge 0.8 m — the transition arrived and was over
+  // before it read as one, and it looked like a corner had been folded rather
+  // than banked. A bank is a shape you see develop; at 40 m the roll rate more
+  // than halves and the curl has room to grow. The turns are opened out for the
+  // same reason: a banked sweeper is a long piece, and a tight one just reads
+  // as a tipped-over curve.
   banked: [
     {
       id: "bank_up_right",
       label: "Up Right",
       base: "bankin",
-      params: { straightLength: 18, bankAngle: 22, curveDir: 1 },
+      params: { bankRampLength: 44, bankAngle: 22, curveDir: 1 },
       preview: `<svg viewBox="0 0 80 80"><rect x="10" y="40" width="26" height="10" rx="1" ${_RB}/><rect x="38" y="32" width="32" height="10" rx="1" transform="rotate(-16 54 37)" ${_RB}/></svg>`,
     },
     {
       id: "bank_up_left",
       label: "Up Left",
       base: "bankin",
-      params: { straightLength: 18, bankAngle: 22, curveDir: -1 },
+      params: { bankRampLength: 44, bankAngle: 22, curveDir: -1 },
       preview: `<svg viewBox="0 0 80 80"><rect x="10" y="40" width="26" height="10" rx="1" ${_RB}/><rect x="38" y="32" width="32" height="10" rx="1" transform="rotate(16 54 37)" ${_RB}/></svg>`,
     },
     {
       id: "bank_straight_right",
       label: "Straight Right",
       base: "banktilt",
-      params: { straightLength: 22, bankAngle: 22, curveDir: 1 },
+      params: { straightLength: 32, bankAngle: 22, curveDir: 1 },
       preview: `<svg viewBox="0 0 80 80"><rect x="10" y="34" width="60" height="12" rx="2" transform="rotate(-16 40 40)" ${_RB}/></svg>`,
     },
     {
       id: "bank_straight_left",
       label: "Straight Left",
       base: "banktilt",
-      params: { straightLength: 22, bankAngle: 22, curveDir: -1 },
+      params: { straightLength: 32, bankAngle: 22, curveDir: -1 },
       preview: `<svg viewBox="0 0 80 80"><rect x="10" y="34" width="60" height="12" rx="2" transform="rotate(16 40 40)" ${_RB}/></svg>`,
     },
     {
       id: "bank_road_tilted",
       label: "Road Tilted",
       base: "banktilt",
-      params: { straightLength: 22, bankAngle: 35, curveDir: 1 },
+      params: { straightLength: 32, bankAngle: 35, curveDir: 1 },
       preview: `<svg viewBox="0 0 80 80"><rect x="10" y="34" width="60" height="12" rx="2" transform="rotate(-26 40 40)" ${_RB}/></svg>`,
     },
     {
       id: "bank_down_right",
       label: "Down Right",
       base: "bankout",
-      params: { straightLength: 18, bankAngle: 22, curveDir: 1 },
+      params: { bankRampLength: 44, bankAngle: 22, curveDir: 1 },
       preview: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="32" height="10" rx="1" transform="rotate(-16 26 37)" ${_RB}/><rect x="44" y="40" width="26" height="10" rx="1" ${_RB}/></svg>`,
     },
     {
       id: "bank_down_left",
       label: "Down Left",
       base: "bankout",
-      params: { straightLength: 18, bankAngle: 22, curveDir: -1 },
+      params: { bankRampLength: 44, bankAngle: 22, curveDir: -1 },
       preview: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="32" height="10" rx="1" transform="rotate(16 26 37)" ${_RB}/><rect x="44" y="40" width="26" height="10" rx="1" ${_RB}/></svg>`,
     },
     {
       id: "bank_short_turn",
       label: "Short Turn",
       base: "banked",
-      params: { curveRadius: 20, curveAngle: 60, bankAngle: 22, curveDir: 1 },
+      params: { curveRadius: 34, curveAngle: 60, bankAngle: 22, curveDir: 1 },
       preview: `<svg viewBox="0 0 80 80"><path d="M22 68 L22 40 Q22 22 44 22 L66 22" ${_RS}/><rect x="30" y="30" width="34" height="11" rx="2" transform="rotate(-16 47 36)" ${_RB}/></svg>`,
     },
     {
       id: "bank_long_turn",
       label: "Long Turn",
       base: "banked",
-      params: { curveRadius: 30, curveAngle: 90, bankAngle: 22, curveDir: 1 },
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, curveDir: 1 },
       preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><rect x="30" y="30" width="34" height="11" rx="2" transform="rotate(-16 47 36)" ${_RB}/></svg>`,
     },
     {
