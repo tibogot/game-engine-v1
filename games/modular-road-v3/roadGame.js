@@ -94,6 +94,7 @@ import { createChaseCamera } from "./chaseCamera.js";
 import { createDebugCamera } from "./debugCamera.js";
 import { createGamepadInput } from "./gamepadInput.js";
 import { createGearbox, GEARBOX } from "./gearbox.js";
+import { createSegmentDash } from "./segmentDash.js";
 import { createDriftScore, DRIFT_SCORE } from "./driftScore.js";
 import { loadWheelModel } from "./wheelModel.js";
 import {
@@ -2334,9 +2335,18 @@ ${e.message}`);
   const hudBest = document.getElementById("race-best");
   const hudFlash = document.getElementById("race-flash");
   const hudSplit = document.getElementById("race-split");
+  // The arc speedo's three elements. Its markup is commented out in road.html
+  // (the segment dash replaced it), so these are null and every use below is
+  // guarded — uncomment the markup and the arc drives itself again.
   const hudSpeed = document.querySelector("#race-speed .v");
   const hudGaugeVal = document.getElementById("gauge-val");
   const hudGear = document.getElementById("race-gear");
+  // Segment dash (speed bar + 7-seg speed/gear + tach ladder). Full scale is
+  // rounded UP from top speed to the next tick step so a downhill overspeed
+  // still has bar left to light instead of pinning.
+  const dash = createSegmentDash(document.getElementById("race-dash"), {
+    speedMaxKmh: Math.ceil((TIRE.topSpeed * 3.6 * 1.1) / 20) * 20,
+  });
   // Auto gearbox is DISPLAY-ONLY — the car has no transmission (see gearbox.js).
   const gearbox = createGearbox();
   // Drift scoring — always on, no mode. See driftScore.js.
@@ -2419,6 +2429,16 @@ ${e.message}`);
     // the box can tell reversing from sliding backwards — a magnitude can't.
     _hudFwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat);
     const g = gearbox.update(speedMs, TIRE.topSpeed, vehicle.body.vel.dot(_hudFwd));
+
+    // Segment dash. Same numbers as the arc speedo drove — only the drawing
+    // changed — so the two can run side by side if the old markup comes back.
+    dash.update(dt, {
+      speedKmh: speedMs * 3.6,
+      gearLabel: g.label,
+      rpm: g.rpm,
+      reverse: g.reverse,
+      redline: GEARBOX.redline,
+    });
 
     if (hudGaugeVal) {
       // pathLength=100 on the arc ⇒ dashoffset is just "100 − percent".

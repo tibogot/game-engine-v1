@@ -58,7 +58,9 @@
          HUD is hidden in build mode and this has to survive independently, and a
          debug readout should never be mistaken for part of the game UI. */
       #debug-cam {
-        position: fixed; left: 12px; bottom: 12px; z-index: 60;
+        /* Right of the segment dash (20px + 336px wide), not on top of it — the
+           dash grew taller than the arc speedo it replaced and swallowed this. */
+        position: fixed; left: 372px; bottom: 12px; z-index: 60;
         display: none; pointer-events: none;
         font: 11px/1.55 ui-monospace, "Cascadia Mono", Consolas, monospace;
         color: #cfe4ff; background: rgba(8, 12, 20, 0.72);
@@ -113,15 +115,20 @@
       #race-split.show { opacity: 1; }
       #race-split.ahead { color: #7cffb4; }
       #race-split.behind { color: #ff9a8c; }
-      /* Speedo + tach — BOTTOM-LEFT. Deliberately clear of the dev panel (right,
-         300px) and the perf stats (top-left). */
+      /* ── OLD ARC SPEEDO — REPLACED BY THE SEGMENT DASH (#race-dash) ────────
+         Kept, commented out, so the sweeping-arc look is one uncomment away
+         (both this and its markup further down). roadGame.js still looks these
+         IDs up and every use of them is null-guarded, so it just goes quiet.
+         NOTE: CSS comments do not nest — the inner explanatory comments were
+         unwrapped when this was commented out.
+
       #race-speed {
         position: absolute; left: 22px; bottom: 20px; width: 208px; height: 132px;
         color: #fff; pointer-events: none;
       }
       #race-speed svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-      /* The sweeping value arc. stroke-dashoffset is the only thing animated per
-         frame — no layout, no DOM churn. */
+      The sweeping value arc. stroke-dashoffset is the only thing animated per
+      frame — no layout, no DOM churn.
       #gauge-val { transition: stroke 120ms linear; }
       #race-speed .readout {
         position: absolute; left: 0; right: 0; bottom: 30px; text-align: center;
@@ -133,6 +140,8 @@
       #race-speed .u {
         font-size: 10px; letter-spacing: 2.5px; color: #9fb0c4; text-transform: uppercase;
       }
+      */
+
       /* Drift chain — right of centre, clear of the speedo (left) and the lap
          clock (top-centre). Only visible while a chain is live or flashing. */
       #race-drift {
@@ -157,7 +166,9 @@
       }
       #race-drift-bank.show { opacity: 1; }
 
-      /* Gear badge sits in the mouth of the arc. */
+      /* ── OLD GEAR BADGE (sat in the mouth of the arc) — commented out with
+         the arc speedo above. The gear now has its own red 7-seg digit.
+
       #race-gear {
         position: absolute; left: 50%; bottom: -2px; transform: translateX(-50%);
         min-width: 34px; padding: 2px 9px; border-radius: 7px;
@@ -166,11 +177,89 @@
         font-variant-numeric: tabular-nums;
         transition: color 90ms linear, border-color 90ms linear, box-shadow 90ms linear;
       }
-      /* Flashes on an upshift, and turns hot at redline. */
+      Flashes on an upshift, and turns hot at redline.
       #race-gear.shift { color: #7cffb4; border-color: rgba(124, 255, 180, 0.55); }
       #race-gear.redline { color: #ff8a6b; border-color: rgba(255, 138, 107, 0.6);
         box-shadow: 0 0 14px rgba(255, 90, 60, 0.4); }
       #race-gear.reverse { color: #ffd24a; border-color: rgba(255, 210, 74, 0.5); }
+      */
+
+      /* ── SEGMENT DASH (#race-dash) ─────────────────────────────────────────
+         The rally-dash panel: 16-segment speed bar, white 7-seg speed digits,
+         red 7-seg gear digit, tach ladder + shift lights. Geometry is built by
+         segmentDash.js; everything here is colour and glow.
+
+         THE GHOST IS THE POINT. Unlit segments are drawn at low alpha rather
+         than hidden — that dim "88" behind the live number is what makes the
+         panel read as a physical display instead of a web font. Keep the .sd-seg
+         base fills non-zero.
+
+         Glow lives on .sd-digit (a group) and never on .sd-tbar: the digits
+         repaint a few times a second, the tach ladder repaints EVERY frame, and
+         an SVG filter forces a re-raster of whatever carries it. */
+      /* `width` is THE size knob — the panel is one SVG viewBox, so everything
+         inside scales with it. 264px puts the speed digits at ~56px tall: still
+         readable at a glance, ~a third smaller than the first pass, and the
+         whole panel is now shorter than the drift readout is tall. */
+      #race-dash {
+        position: absolute; left: 20px; bottom: 16px;
+        width: 264px; pointer-events: none;
+        padding: 8px 10px 7px; border-radius: 9px;
+        background: rgba(6, 10, 15, 0.55);
+        border: 1px solid rgba(140, 175, 215, 0.13);
+        backdrop-filter: blur(3px);
+      }
+      #race-dash svg { display: block; width: 100%; height: auto; }
+
+      /* Small print — labels, tick scale, captions. These sizes are in viewBox
+         units, so they shrink with the panel: they were bumped ~1px when the
+         dash was scaled down, to land on the same on-screen pixel size. */
+      #race-dash .sd-label {
+        font-size: 12px; font-weight: 700; letter-spacing: 2px;
+        fill: #cfe0f5; text-transform: uppercase;
+      }
+      /* Lower-cased deliberately: "SPEED km/h" reads as label + unit, which is
+         what the real panels print. */
+      #race-dash .sd-dim { fill: #7d93ad; letter-spacing: 1px; text-transform: none; }
+      /* Smaller than the other small print on purpose: ten labels have to fit
+         across the bar, and these are a static reference you glance at, not a
+         value you read. */
+      #race-dash .sd-tick {
+        font-size: 10px; font-weight: 600; fill: #8ea6c0;
+        text-anchor: middle; font-variant-numeric: tabular-nums;
+      }
+      #race-dash .sd-cap {
+        font-size: 11px; font-weight: 700; letter-spacing: 2px;
+        fill: #8ea6c0; text-anchor: middle;
+      }
+      #race-dash .sd-rpm {
+        font-size: 12px; font-weight: 700; fill: #b9cbe0; text-anchor: middle;
+      }
+      #race-dash .sd-rpm.hot { fill: #ff5a44; }
+
+      /* Speed bar. */
+      #race-dash .sd-bseg { fill: rgba(70, 255, 140, 0.09); }
+      #race-dash .sd-bseg.on { fill: #2ce35f; }
+
+      /* 7-seg digits — one filter per digit group, applied to lit + ghost alike
+         (the ghost is dim enough that the bloom on it is invisible). */
+      #race-dash .sd-digit { filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.20)); }
+      #race-dash .sd-seg { fill: rgba(190, 215, 255, 0.06); }
+      #race-dash .sd-white .sd-seg.on { fill: #f4f8ff; }
+      #race-dash .sd-red .sd-seg { fill: rgba(255, 60, 40, 0.09); }
+      #race-dash .sd-red .sd-seg.on { fill: #ff3b28; }
+      #race-dash .sd-red { filter: drop-shadow(0 0 6px rgba(255, 60, 40, 0.35)); }
+      #race-dash .sd-amber .sd-seg { fill: rgba(255, 175, 40, 0.10); }
+      #race-dash .sd-amber .sd-seg.on { fill: #ffb020; }
+      #race-dash .sd-amber { filter: drop-shadow(0 0 6px rgba(255, 175, 40, 0.35)); }
+
+      /* Tach ladder — no filter here, see the note above. */
+      #race-dash .sd-tbar { fill: rgba(255, 255, 255, 0.055); }
+      #race-dash .sd-tbar.z-green.on { fill: #2ce35f; }
+      #race-dash .sd-tbar.z-amber.on { fill: #ffa41c; }
+      #race-dash .sd-tbar.z-red.on { fill: #ff3324; }
+      #race-dash .sd-shift { fill: rgba(255, 50, 36, 0.12); }
+      #race-dash .sd-shift.on { fill: #ff2a18; }
 
       #boot {
         position: fixed; inset: 0; z-index: 9999;
@@ -338,24 +427,31 @@
         <div class="lbl">drift</div>
       </div>
 
-      <!-- Speedo + tach. The arc is a single path reused four times; pathLength
-           ="100" lets every dash figure below be a plain percentage, independent
-           of the actual arc geometry, so retuning the sweep needs no maths. -->
+      <!-- Segment dash. Empty on purpose — segmentDash.js builds the whole panel
+           (speed bar, 7-seg digits, tach ladder, shift lights) into it once, and
+           then only ever toggles classes. -->
+      <div id="race-dash"></div>
+
+      <!-- OLD ARC SPEEDO + GEAR BADGE — replaced by #race-dash above, kept here
+           (and in the <style> block) so the arc look can come straight back.
+           roadGame.js still queries #race-speed .v / #gauge-val / #race-gear and
+           null-guards every use, so with this commented out it simply no-ops.
+
       <div id="race-speed">
         <svg viewBox="0 0 208 132" aria-hidden="true">
           <defs>
             <path id="gauge-arc" pathLength="100" fill="none"
                   d="M 48.3 127 A 68 68 0 1 1 159.7 127" />
           </defs>
-          <!-- track -->
+          track
           <use href="#gauge-arc" stroke="rgba(255,255,255,0.10)" stroke-width="9" stroke-linecap="round" />
-          <!-- redline zone: the last 12% of the sweep -->
+          redline zone: the last 12% of the sweep
           <use href="#gauge-arc" stroke="rgba(255,90,60,0.30)" stroke-width="9"
                stroke-dasharray="12 88" stroke-dashoffset="-88" />
-          <!-- ticks -->
+          ticks
           <use href="#gauge-arc" stroke="rgba(255,255,255,0.20)" stroke-width="9"
                stroke-dasharray="0.7 9.3" />
-          <!-- value (JS drives stroke-dashoffset + stroke) -->
+          value (JS drives stroke-dashoffset + stroke)
           <use id="gauge-val" href="#gauge-arc" stroke="#4a9eff" stroke-width="9"
                stroke-linecap="round" stroke-dasharray="100" stroke-dashoffset="100" />
         </svg>
@@ -364,6 +460,7 @@
         </div>
         <div id="race-gear">1</div>
       </div>
+      -->
     </div>
 
     <script type="module">

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Segment dash lab</title>
+    <!--
+      DEV LAB for the race HUD's segment dash (segmentDash.js). Booting the game
+      to look at the dashboard means loading the whole v3 engine, placing a
+      track and driving it up to redline; this shows the panel on its own in a
+      few milliseconds, so the look can be tuned in a tight loop.
+
+      It pulls the REAL <style> out of road.html rather than copying it, so what
+      you see here is what ships. Not a build entry (see vite.config.js) — dev
+      server only, like road-piece-lab.html.
+
+        ?s=<km/h> &g=<gear> &r=<rpm 0..1> &rev=1     freeze one state
+        (no params)                                  auto sweep 0 → top → 0
+    -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      /* A mid grey-blue stands in for "some random bit of terrain" — the panel
+         has to stay readable against whatever the track throws behind it. */
+      body { margin: 0; background: #23303a; height: 100vh; overflow: hidden; }
+      /* NOTE: road.html's own rules are injected AFTER these, so anything they
+         also set (e.g. `#race-hud { display: none }`) wins — that's why the HUD
+         is shown by adding the game's real `.on` class, not by display here. */
+      #race-hud {
+        position: fixed; inset: 0;
+        font-family: "Oxanium", system-ui, sans-serif; font-weight: 600;
+      }
+      #lab-readout {
+        position: fixed; top: 10px; left: 12px; color: #9fb6cc;
+        font: 12px/1.6 ui-monospace, Consolas, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- .on is the game's own "drive mode" class — the HUD is display:none without it. -->
+    <div id="race-hud" class="on"><div id="race-dash"></div></div>
+    <div id="lab-readout"></div>
+    <script type="module">
+      const html = await (await fetch("./road.html")).text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const st = document.createElement("style");
+      st.textContent = [...doc.querySelectorAll("style")].map((s) => s.textContent).join("\n");
+      document.head.appendChild(st);
+
+      const { createSegmentDash } = await import("./segmentDash.js");
+      const { createGearbox, GEARBOX } = await import("./gearbox.js");
+
+      const TOP_MS = 50; // TIRE.topSpeed
+      const MAX_KMH = Math.ceil((TOP_MS * 3.6 * 1.1) / 20) * 20;
+      const dash = createSegmentDash(document.getElementById("race-dash"), { speedMaxKmh: MAX_KMH });
+      const readout = document.getElementById("lab-readout");
+      const p = new URLSearchParams(location.search);
+
+      if (p.has("s") || p.has("g") || p.has("r")) {
+        // Frozen state — for screenshots and pixel comparisons.
+        const v = {
+          speedKmh: Number(p.get("s") ?? 0),
+          gearLabel: p.get("g") ?? "1",
+          rpm: Number(p.get("r") ?? 0),
+          reverse: p.get("rev") === "1",
+          redline: GEARBOX.redline,
+        };
+        dash.update(0.016, v);
+        readout.textContent = JSON.stringify(v);
+      } else {
+        // Auto sweep through the whole range, driven by the REAL gearbox, so the
+        // shift sawtooth and the redline blink are the ones the game produces.
+        const gearbox = createGearbox();
+        let t = 0, last = performance.now();
+        const loop = (now) => {
+          const dt = Math.min(0.05, (now - last) / 1000);
+          last = now;
+          t += dt * 0.16;
+          const speedMs = TOP_MS * (0.5 - 0.5 * Math.cos(t * Math.PI * 2));
+          const g = gearbox.update(speedMs, TOP_MS, speedMs);
+          dash.update(dt, {
+            speedKmh: speedMs * 3.6,
+            gearLabel: g.label,
+            rpm: g.rpm,
+            reverse: g.reverse,
+            redline: GEARBOX.redline,
+          });
+          readout.textContent =
+            `${(speedMs * 3.6).toFixed(0)} km/h · gear ${g.label} · rpm ${g.rpm.toFixed(2)}`;
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+      }
+    </script>
+  </body>
+</html>
