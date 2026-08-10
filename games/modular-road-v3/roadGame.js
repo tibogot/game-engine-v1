@@ -629,6 +629,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       if (stack && placed) {
         placed.root.quaternion.copy(stack.quaternion);
         placed.root.position.copy(stack.position);
+        // add() already recorded an authored pose, but that was the pre-stack
+        // one — this alignment is the placement the user actually made, so it
+        // has to replace it or the prop saves at the spot it never sat in.
+        props.captureAuthored(placed);
       }
       propPhysics.sync();
       propInstancer.sync();
@@ -2493,6 +2497,14 @@ ${e.message}`);
       builder.setGhostVisible(true);
       vehicle.enabled = false;
       ghostMesh.visible = false;
+      // THE EDITOR SHOWS THE AUTHORED STATE. Nothing else put props back on the
+      // way IN to build mode — only respawn/lap-reset did, which are drive-mode
+      // events — so a gate you had just driven through stayed hanging open and a
+      // punted cone stayed on its side while you edited around them. Saving is a
+      // build-mode act, so what you were looking at was also what you were about
+      // to save (the save itself is now immune — see PropManager.exportInstances
+      // — but showing a pose the file does not contain is its own bug).
+      propPhysics.reset();
     }
     // The debug cam only exists in drive mode. Its ON state SURVIVES a trip to
     // build mode (you go there to move a ramp and come straight back), so

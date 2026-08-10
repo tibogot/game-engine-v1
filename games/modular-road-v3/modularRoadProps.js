@@ -1314,7 +1314,12 @@ export class PropManager {
       if (this.gizmo.mode === "translate") this.snapToSurface(this.selected);
       this.selBox.setFromObject(this.selected.root);
     });
-    this.gizmo.addEventListener("mouseUp", () => this.onChange?.());
+    // A gizmo drag is an AUTHORING act, so the pose it lands on becomes the new
+    // authored one — see captureAuthored.
+    this.gizmo.addEventListener("mouseUp", () => {
+      this.captureAuthored(this.selected);
+      this.onChange?.();
+    });
 
     domElement.addEventListener("pointerdown", (e) => {
       if (!this.enabled) return;
@@ -1480,6 +1485,7 @@ export class PropManager {
     if (!this.snapToSurface(inst) && SURFACE_SNAP.mode !== "free") {
       this.snapToSurface(inst, "auto");
     }
+    this.captureAuthored(inst);
     this._select(inst);
     this.onChange?.();
     return inst;
@@ -1501,6 +1507,7 @@ export class PropManager {
     root.userData.propInstance = inst;
     this.instances.push(inst);
     this.snapToSurface(inst); // the +4,+4 offset may have landed on a different surface
+    this.captureAuthored(inst);
     this._select(inst);
     this.onChange?.();
   }
@@ -1555,7 +1562,41 @@ export class PropManager {
     const y = this.getSurfaceY(p.x, p.y, p.z, mode);
     if (y === null || y === undefined || !Number.isFinite(y)) return false;
     p.y = y + (inst.restY ?? 0);
+    // Snapping is an EDITOR move, so the height it lands on is authored — see
+    // captureAuthored. Captured here rather than at each call site because
+    // there are four of them (add, duplicate, the live gizmo drag, snapAll) plus
+    // the game's own snap-mode shortcut, and the two that were missed —
+    // snapAll() after a track load, and re-snapping the selection when the
+    // placement mode changes — would have silently saved the OLD height.
+    // Nothing outside the editor calls this: the sims move roots directly.
+    this.captureAuthored(inst);
     return true;
+  }
+
+  /**
+   * Record where the EDITOR just put this prop — its authored pose.
+   *
+   * THE ROOT TRANSFORM IS NOT THE AUTHORED POSE for anything PropPhysics
+   * simulates. The hinge sim writes `home × swing` onto a gate's root every
+   * tick, and the body sim writes a knocked cone's tumbling pose, so the root is
+   * "where this prop happens to be right now". Only the editor's own placements
+   * are authorship, and they are exactly the call sites of this method.
+   *
+   * Without the distinction, `exportInstances()` saved the LIVE root and the
+   * displacement became permanent. Reported as a swing gate that comes back from
+   * a saved track "not in the rotation I placed it, and with no collision":
+   * drive through a gate, switch to build (nothing resets props on the way in),
+   * save — and the panel's swing angle was baked into the saved rotation. On
+   * load that pose became the new `home`, so the gate stood permanently part-open
+   * across the track instead of closed over it, which is what "no collision"
+   * was: the panel is no longer where the doorway is. MEASURED in
+   * tools/gateSaveLoadTest.mjs — a gate placed at 37° and saved with the panel
+   * 51.6° open reloaded at 88.6°.
+   */
+  captureAuthored(inst) {
+    if (!inst) return;
+    inst.authoredPos = inst.root.position.clone();
+    inst.authoredQuat = inst.root.quaternion.clone();
   }
 
   /** Liveries available on the selection, or [] — drives the panel swatches. */
@@ -1728,11 +1769,17 @@ export class PropManager {
   }
 
   /** @returns {{type:string, position:number[], quaternion:number[], scale:number[]}[]} */
+  /**
+   * A track saves where props were PUT, not where the sim has shoved them —
+   * see captureAuthored. The fallback to the live root keeps props that predate
+   * authored poses (and any prop nothing has ever authored) exporting exactly as
+   * before, so this cannot change a save that was already correct.
+   */
   exportInstances() {
     return this.instances.map((inst) => ({
       type: inst.id,
-      position: inst.root.position.toArray(),
-      quaternion: inst.root.quaternion.toArray(),
+      position: (inst.authoredPos ?? inst.root.position).toArray(),
+      quaternion: (inst.authoredQuat ?? inst.root.quaternion).toArray(),
       scale: inst.root.scale.toArray(),
       // Only written when the prop actually has variants, so existing tracks
       // round-trip byte-identical and an older file simply loads as variant 0.
@@ -1767,6 +1814,8 @@ export class PropManager {
       setVariant(inst, item.variant ?? 0);
       inst.decal = !!item.decal;
       root.userData.propInstance = inst;
+      // A loaded pose IS the authored pose — the file is the authorship.
+      this.captureAuthored(inst);
       this.instances.push(inst);
     }
     this.onChange?.();

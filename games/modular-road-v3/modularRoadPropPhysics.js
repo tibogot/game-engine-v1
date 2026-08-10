@@ -232,9 +232,16 @@ export class PropPhysics {
     for (const inst of this.props.instances ?? []) {
       const profile = PHYSICS_PROP_TYPES[inst.id];
       if (!profile) continue;
+      // HOME IS THE AUTHORED POSE, not the live root — PropManager keeps the
+      // two apart precisely because this class overwrites the root every tick
+      // (see PropManager._captureAuthored). Re-syncing from the root re-homed a
+      // gate to whatever angle it was swung to at that instant, so a sync
+      // triggered mid-drive by the prop-count self-heal below could leave a
+      // gate permanently part-open. The fallback keeps callers that build a
+      // PropManager-shaped object by hand working unchanged.
       const home = {
-        pos: inst.root.position.clone(),
-        quat: inst.root.quaternion.clone(),
+        pos: (inst.authoredPos ?? inst.root.position).clone(),
+        quat: (inst.authoredQuat ?? inst.root.quaternion).clone(),
       };
       if (profile.kind === "body") {
         const body = new RigidBody({
