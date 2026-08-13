@@ -109,10 +109,11 @@ import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 
-/** Preset track shipped with the game (Load Apex track). Kept as its own
- *  constants so renaming the file is a one-line change. */
+/** Preset tracks shipped with the game. Kept as their own constants so
+ *  renaming a file is a one-line change. */
 const TRACK_DIR = "/games/modular-road-v3";
 const PRESET_TRACK_FILE = "modular-road-track (1).json";
+const RUSHLINE_TRACK_FILE = "rushline.json";
 import { createRoadDevPanel } from "./devPanel.js";
 
 /** Cap on physics ticks per frame — a long stall must not queue a huge backlog. */
@@ -1931,40 +1932,44 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   document.body.appendChild(trackFileInput);
   onClick("road-load", () => trackFileInput.click());
 
-  // ── SHIPPED PRESET TRACK ────────────────────────────────────────────────────
+  // ── SHIPPED PRESET TRACKS ───────────────────────────────────────────────────
   // Same importTrack path as the file picker above, just fetched instead of
   // read from disk — so a preset can never diverge from a hand-loaded save.
   //
-  // encodeURI because the filename carries a space and parentheses; without it
-  // the fetch 404s and the button silently does nothing.
-  const PRESET_TRACK_URL = encodeURI(`${TRACK_DIR}/${PRESET_TRACK_FILE}`);
-  onClick("road-preset", async () => {
-    const btn = document.getElementById("road-preset");
-    if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
-    try {
-      const res = await fetch(PRESET_TRACK_URL);
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const data = await res.json();
-      const out = importTrack(data, trackCtx());
-      if (!out.ok) throw new Error(out.error);
-      applyRoadLook();
-      gameSpawn = data.spawn ?? null;
-      updateSpawnMarker();
-      bakeCollision();
-      propPhysics.sync();
-      propInstancer.sync();
-    flags.sync();
-      paletteUi.refreshStatus();
-      devPanel?.refresh();
-      console.info(`[ModularRoad-v3] preset track loaded: ${data.pieces?.length ?? 0} pieces`);
-    } catch (e) {
-      console.warn("[ModularRoad-v3] preset track failed:", PRESET_TRACK_URL, e);
-      alert(`Could not load the preset track:
+  // encodeURI because Apex's filename carries a space and parentheses; without
+  // it the fetch 404s and the button silently does nothing.
+  const loadPresetTrack = (btnId, file, idleLabel) => {
+    const url = encodeURI(`${TRACK_DIR}/${file}`);
+    onClick(btnId, async () => {
+      const btn = document.getElementById(btnId);
+      if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        const data = await res.json();
+        const out = importTrack(data, trackCtx());
+        if (!out.ok) throw new Error(out.error);
+        applyRoadLook();
+        gameSpawn = data.spawn ?? null;
+        updateSpawnMarker();
+        bakeCollision();
+        propPhysics.sync();
+        propInstancer.sync();
+        flags.sync();
+        paletteUi.refreshStatus();
+        devPanel?.refresh();
+        console.info(`[ModularRoad-v3] preset track loaded (${file}): ${data.pieces?.length ?? 0} pieces`);
+      } catch (e) {
+        console.warn("[ModularRoad-v3] preset track failed:", url, e);
+        alert(`Could not load the preset track:
 ${e.message}`);
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = "Load Apex track"; }
-    }
-  });
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = idleLabel; }
+      }
+    });
+  };
+  loadPresetTrack("road-preset", PRESET_TRACK_FILE, "Load Apex track");
+  loadPresetTrack("road-preset-rushline", RUSHLINE_TRACK_FILE, "Load Rushline track");
 
   const gamepad = createGamepadInput();
   /** Set by readControls() when the pad's respawn button goes down this frame. */
