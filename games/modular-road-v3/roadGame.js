@@ -2370,6 +2370,16 @@ ${e.message}`);
    * in.
    */
   let hitSolidThisFrame = false;
+  /**
+   * Did the car land on its ROOF hard this frame? Same per-tick-pulse problem as
+   * `hitSolidThisFrame`, so it is OR-ed the same way.
+   *
+   * Separate from `hitSolid` because it is a different event: a rail is
+   * something you clip, a roof landing is a crash. It breaks the drift chain for
+   * the same reason a rail does — the risk is what makes a long chain worth
+   * holding — and the vehicle's own STUCK detector still owns the respawn.
+   */
+  let roofHitThisFrame = false;
   const hudDrift = document.getElementById("race-drift");
   const hudDriftPts = document.getElementById("race-drift-pts");
   const hudDriftMul = document.getElementById("race-drift-mul");
@@ -2456,7 +2466,8 @@ ${e.message}`);
       slip: vehicle.slipAngle,
       speed: speedMs,
       grounded: vehicle.groundedCount > 0,
-      hitSolid: hitSolidThisFrame,
+      // Landing on the lid ends a chain exactly as hitting a rail does.
+      hitSolid: hitSolidThisFrame || roofHitThisFrame,
     });
     const banked = drift.consumeBanked();
     if (banked > 0) {
@@ -2806,6 +2817,7 @@ ${e.message}`);
       // (framerate above the 120 Hz sim rate) reports no contact, which is
       // correct: no physics happened, so nothing new was hit.
       hitSolidThisFrame = false;
+      roofHitThisFrame = false;
       for (let i = 0; i < ticks; i++) {
         movers.update(FIXED_DT);
         if (hasMovers) {
@@ -2818,6 +2830,8 @@ ${e.message}`);
         }
         vehicle.tick(input);
         if (vehicle.hitSolid) hitSolidThisFrame = true;
+        // Same per-tick pulse, same reason it has to be OR-ed across the frame.
+        if (vehicle.roofImpact) roofHitThisFrame = true;
         props.applyFields(vehicle, FIXED_DT);      // boost pads etc.
         propPhysics.tick(FIXED_DT, vehicle);       // cones, gates
         portals.updateDrive(FIXED_DT, vehicle);

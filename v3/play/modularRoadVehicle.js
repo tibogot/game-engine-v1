@@ -103,6 +103,53 @@ export const CHASSIS_HULL = {
 };
 
 /**
+ * THE DECK CONTACT SHAPE — what the car is collided as against ROAD SURFACES
+ * (the deck BVH) and the terrain heightmap.
+ *
+ * The third shape, and the reason it exists: `CHASSIS` and `CHASSIS_HULL`
+ * disagree about where the roof is, and until now the deck resolver used the
+ * WRONG one.
+ *
+ *     CHASSIS      roof at +0.30   (half of a box sized for inertia + ride height)
+ *     CHASSIS_HULL roof at +0.76   (the actual roofline, measured off the GLB)
+ *
+ * So a car landing inverted, or pressed against a loop's ceiling, or driving
+ * under an overpass, sank 46 cm of bodywork into the slab before anything
+ * resisted — the deck saw a roof that is nearly half a metre inside the car.
+ *
+ * The floor is UNCHANGED and must stay that way: −0.30 is pinned by ride height
+ * (see CHASSIS), and the four bottom corners are the ones every landing, ramp
+ * and kerb already behaves against. This shape only raises the LID.
+ *
+ * The footprint also stays at the core box's 1.8 × 3.6 rather than growing to
+ * the hull's 2.10 × 4.85. Widening it is not free — the corners are what catch
+ * on ramp crests and kerb lips — and 15 cm of overhang either side of the roof
+ * changes nothing about whether you clip a ceiling.
+ */
+export const DECK_CONTACT = {
+  /** Roof height in chassis-local metres. Tracks the hull, so re-measuring the
+   *  body in chassisModel.js moves both together. */
+  get roofY() { return CHASSIS_HULL.offsetY + CHASSIS_HULL.height / 2; },
+  /**
+   * Spacing of the EXTRA roof samples between the four top corners (m); 0 falls
+   * back to corners only.
+   *
+   * WHY THE ROOF NEEDS MORE THAN CORNERS. A deck contact only registers when the
+   * surface is within `DECK.skin` (5 cm) of a sample. The top corners are 1.8 m
+   * and 3.6 m apart, so anything narrow crossing the MIDDLE of the roof — a beam,
+   * a catwalk, the edge of an overpass — passes between them and is not there at
+   * all. Wide slabs were fine (the whole roof plane arrives at once), which is
+   * why this stayed invisible.
+   *
+   * 0.9 m catches anything ≳ 0.85 m across and costs 15 samples on the roof
+   * instead of 4. That is deliberately COARSER than the hull's 0.45: the solids
+   * BVH is where thin obstacles belong, and every sample here is a BVH query per
+   * substep. See tools/roofContactTest.mjs for the measured cost.
+   */
+  roofSampleSpacing: 0.9,
+};
+
+/**
  * Hub |x| — HALF the track width, and the one wheel-layout number that is
  * genuinely a look-vs-feel tradeoff, so it is live-tunable (dev panel → Track
  * width) rather than baked into WHEEL_LOCAL.
@@ -1115,14 +1162,109 @@ export const SURFACE_GRIP = {
 };
 
 /** Chassis shell vs the deck BVH — stops the body clipping into elevated track
- *  (ramps, loops, hard landings). Bottom corners get pushed out along the deck
- *  normal once they sink within `skin` of the surface. */
+ *  (ramps, loops, hard landings). Contact points (DECK_CONTACT) get pushed out
+ *  along the deck normal once they sink within `skin` of the surface. */
 export const DECK = {
   enabled: true,
   skin: 0.05,
   searchRadius: 0.8,
   stiffness: 220000,
   damper: 9000,
+};
+
+/**
+ * ROOF-DOWN deck contact — the car on its lid, against a road surface.
+ *
+ * Split out because a roof contact is not a floor contact rotated. Two things
+ * were missing and both are gameplay, not realism:
+ *
+ *  • NO TANGENTIAL LOSS. Deck contact is a pure normal spring (the wheels own
+ *    friction), so an inverted car slid along the road forever at landing speed.
+ *    A roof is not a wheel; sliding on it has to cost you.
+ *
+ *  • NO SIGNAL. Roof contact was indistinguishable from a rail scrape, so the
+ *    game could not react to it. `roofTouch` / `roofImpactSpeed` are the hooks —
+ *    roadGame breaks the drift chain on them, and STUCK still owns the eventual
+ *    respawn.
+ *
+ * A contact counts as "roof" purely by geometry: the surface normal opposing
+ * chassis-up. That is orientation-based, not corner-based, so it is also true
+ * of the car pressed sideways into a ceiling, which is the same situation.
+ */
+export const ROOF = {
+  enabled: true,
+  /** Contact is roof-down when (deck normal · chassis up) is below this. −0.5 is
+   *  60° off vertical — well past anything a wheel could still be holding. */
+  dot: -0.5,
+  /** Coulomb-ish drag along the surface, as a fraction of the normal force. Low
+   *  next to a tyre (TIRE grip is ~1.7) — bodywork slides, it does not grip. */
+  friction: 0.55,
+  /** Ramps friction in below this sliding speed (m/s), so a car nudging its way
+   *  out from under something is not glued in place. */
+  frictionFullSpeed: 4.0,
+  /** Hard ceiling on the roof drag, in car weights. The normal force it scales
+   *  off is a 220 kN/m penetration spring, which spikes enormously for a substep
+   *  on any hard contact — see the note at the application site. */
+  maxFrictionG: 1.5,
+  /** Closing speed (m/s) above which a roof touch reports as a real HIT rather
+   *  than a rest. Below it the car is just lying there and the game should not
+   *  keep firing impact events. */
+  impactSpeed: 2.5,
+  /**
+   * OFF. While the roof is pinned against a road surface, stop the SUSPENSION
+   * pushing the car further into it (see the ceiling-guard block in Tire.apply).
+   *
+   * IT WORKS, AND IT COSTS LOOPS. Turn it on and an inverted car comes to rest
+   * exactly on its roofline and stays there — measured y 0.81 against a 0.76 m
+   * roof, never sinking a millimetre, for a drop, a 15 m/s landing and a 40 m/s
+   * slam alike (tools/roofContactTest.mjs). Off, all three sink through the deck
+   * and fall to the respawn floor.
+   *
+   * But it also arms at the TOP OF A LOOP — measured at y 48–49.7, car inverted
+   * (chassis-up.y −0.97), against a surface whose normal points UP (n.y 1.00)
+   * within 5 cm of a roof sample. Every loop in tools/loopSpeedReadoutTest.mjs
+   * then fails to crest. Which surface that is has not been identified: it is
+   * not the slab the wheels are on (that faces down at the car), and the loop's
+   * outer face is ~1.7 m away, well outside DECK.searchRadius.
+   *
+   * Two narrower discriminators were tried and measured:
+   *   • roof contact alone           armed at every loop ENTRY, which runs under
+   *                                  the loop's own descending slab — 4/7 loops
+   *                                  lost. Fixed by the guardUpMin test below.
+   *   • "wheel contact is behind the
+   *      plane the roof rests on"    never fires: the probe starts 0.6 m along
+   *                                  chassis-up, which inverted is INSIDE the
+   *                                  slab, so it reports a hit at hub −0.28 with
+   *                                  a contact point ABOVE the plane.
+   *
+   * So the trade today is: loops (constant, core gameplay) against inverted
+   * landings (rare, and already handled — the car falls through, FALL_Y catches
+   * it, STUCK respawns it). Loops win, exactly as the note in Tire.apply
+   * concluded for the same reason.
+   *
+   * What is NOT in question: everything else in this block ships on. The roof
+   * reaches the real roofline, ceilings no longer tunnel, roof contact is
+   * reported to the game, and a lid-slide costs speed.
+   */
+  suspensionGuard: false,
+  /**
+   * The guard only arms when the surface under the roof faces UP by at least
+   * this much (world +Y) — i.e. the car is LYING on it, not driving under it.
+   * See the measurement at the arming site: without this, every loop entry armed
+   * the guard, because a loop passes under its own descending slab.
+   */
+  guardUpMin: 0.2,
+  /**
+   * Seconds a roof contact keeps the guard armed (s).
+   *
+   * MUST outlive one tick. Deck contact runs AFTER the tyres inside a substep,
+   * so a flag cleared per tick is false for the first substep of every tick —
+   * the wheels then push into the road half the time, which is most of the way
+   * to not fixing it at all. A short hold makes the state continuous while a car
+   * is lying on its lid, and it still clears within a couple of frames of being
+   * flipped back over.
+   */
+  guardHold: 0.1,
 };
 
 /**
@@ -1615,6 +1757,10 @@ class Tire {
     this._smoothNormal = new THREE.Vector3(0, 1, 0);
     /** Was this tire on a surface last tick? Drives snap-vs-filter. */
     this._hadGround = false;
+    /** Set by the Vehicle each substep: is the car LYING on its roof? The one
+     *  bit that tells an inverted car from a loaded strut in a tube — see the
+     *  ceiling-guard block in apply(). */
+    this.roofPinned = false;
 
     this._tireVel = new THREE.Vector3();
     this._up = new THREE.Vector3();
@@ -1714,6 +1860,17 @@ class Tire {
     return bestDist === Infinity ? null : { dist: bestDist, point: bestPoint };
   }
 
+  /** Drop to the airborne state. Shared by "no probe hit" and the roof guard —
+   *  `overDemand` in particular MUST be cleared here, or a tyre keeps the last
+   *  value it had on the ground and starts smoking again the instant it lands. */
+  _clearContact() {
+    this.grounded = false;
+    this.compression = 0;
+    this.overDemand = 0;
+    this.hitDistance = TIRE.rayLength;
+    this._hadGround = false; // next contact snaps instead of easing in
+  }
+
   apply(body, dt, steerAngle, throttle, handbrake, castGround, castSphereSweep, driveScale = 1) {
     this.worldPos
       .copy(this.localPos)
@@ -1742,17 +1899,7 @@ class Tire {
     this.lastSteering.set(0, 0, 0);
     this.lastAccel.set(0, 0, 0);
 
-    if (!probe) {
-      this.grounded = false;
-      this.compression = 0;
-      // Airborne this returns before the force block, so it must be cleared here
-      // or a tyre keeps the last value it had on the ground and starts smoking
-      // again the instant it touches down.
-      this.overDemand = 0;
-      this.hitDistance = TIRE.rayLength;
-      this._hadGround = false; // next contact snaps instead of easing in
-      return;
-    }
+    if (!probe) { this._clearContact(); return; }
 
     const bestDist = probe.dist;
     this.grounded = true;
@@ -1783,12 +1930,43 @@ class Tire {
 
     const distFromHub = bestDist - pad;
 
+    // ── CEILING GUARD, WITH THE DISCRIMINATOR THE NOTE BELOW WAS MISSING ─────
+    //
+    // A contact BEHIND the hub (negative distance) is ambiguous from inside the
+    // chassis frame — see the note. It is either an inverted car finding the
+    // road through its own roof, or a strut bottomed out against a tube wall.
+    //
+    // The deck resolver supplies what the chassis frame cannot: whether the car
+    // is LYING ON ITS ROOF right now. With that, a negative hub distance stops
+    // being ambiguous and becomes exactly what it looks like.
+    //
+    // MEASURED, car on its lid on a flat deck: the probe starts 0.6 m along
+    // chassis-up, which inverted is 0.6 m BELOW the car — inside the slab it is
+    // lying on. The sweep therefore reports contact immediately, at hub −0.28,
+    // and the suspension extends "down" toward it, which is up through the road.
+    // Four wheels' worth of that beats the roof spring and the car sinks.
+    //
+    // `roofPinned` is what keeps this from being the guard the note below says
+    // was removed. It is armed only by a surface the roof is RESTING on (see
+    // _applyDeckContact), so every case that killed the previous attempt is
+    // excluded before the hub distance is even looked at:
+    //   • tube / loop   strut bottomed out, contact just above the hub — but
+    //                   nothing is against the roof, so this never fires
+    //   • loop ENTRY    runs under the loop's own descending slab, so the roof
+    //                   IS touching — but that is a CEILING, and a ceiling
+    //                   deliberately arms nothing
+    if (ROOF.enabled && ROOF.suspensionGuard && this.roofPinned && distFromHub < 0) {
+      this._clearContact();
+      return;
+    }
 
     this.hitDistance = distFromHub;
     this.compression = TIRE.restLength - distFromHub;
 
     // NOTE — a 'ceiling guard' was tried here and REMOVED. Do not re-add one
-    // without reading this.
+    // without reading this. (The guard above is NOT that guard: it fires only
+    // while the roof is pinned, which is the discriminator this note says was
+    // missing. Everything below still applies to the unguarded case.)
     //
     // The probe starts `pad` (0.6 m) along chassis-UP and casts along
     // chassis-DOWN, so a car that is inverted or under a slab can hit a road
@@ -2508,6 +2686,13 @@ export class Vehicle {
       { pos: new THREE.Vector3(), dir: new THREE.Vector3(-1, 0, 0) },
     ];
     for (let i = 0; i < 8; i++) this.CHASSIS_CORNERS.push(new THREE.Vector3());
+    /**
+     * Deck/terrain contact points: the 8 CHASSIS_CORNERS plus the roof in-fill.
+     * Rebuilt (and resized) by _refreshDeckContactPoints. The corners come FIRST
+     * and share their Vector3 instances with CHASSIS_CORNERS, so there is one
+     * copy of each point and nothing can drift out of sync.
+     */
+    this.DECK_CONTACT_POINTS = [];
     /** Surface samples on CHASSIS_HULL for the solids BVH. Rebuilt (and resized)
      *  by _refreshLocalFrames — the count follows the hull and its spacing. */
     this.SOLID_BOX_SAMPLES = [];
@@ -2566,6 +2751,14 @@ export class Vehicle {
     this._solidT = new THREE.Vector3();
     this._solidPoint = new THREE.Vector3();
     this._solidApproachN = new THREE.Vector3();
+    // Roof-down deck contact — see the ROOF block.
+    this._roofTouch = false;
+    this._roofImpactSpeed = 0;
+    /** Countdown that keeps the suspension guard armed across substeps. */
+    this._roofGuard = 0;
+    this._deckUp = new THREE.Vector3();
+    this._deckRoofApproachN = new THREE.Vector3();
+    this._roofT = new THREE.Vector3();
     this._stuckUp = new THREE.Vector3();
     this._stuckFwd = new THREE.Vector3();
     /** Seconds trapped against geometry while asking to move — see _updateStuck. */
@@ -2684,16 +2877,55 @@ export class Vehicle {
     const hw = (this._hw = CHASSIS.width / 2);
     const hh = (this._hh = CHASSIS.height / 2);
     const hl = (this._hl = CHASSIS.length / 2);
+    // FLOOR at −hh (the core box, untouched); ROOF at the real roofline. See
+    // DECK_CONTACT for why these two are not the same box any more.
+    const roofY = DECK_CONTACT.roofY;
     const c = this.CHASSIS_CORNERS;
     c[0].set(-hw, -hh, -hl); c[1].set(hw, -hh, -hl);
-    c[2].set(-hw, hh, -hl); c[3].set(hw, hh, -hl);
+    c[2].set(-hw, roofY, -hl); c[3].set(hw, roofY, -hl);
     c[4].set(-hw, -hh, hl); c[5].set(hw, -hh, hl);
-    c[6].set(-hw, hh, hl); c[7].set(hw, hh, hl);
+    c[6].set(-hw, roofY, hl); c[7].set(hw, roofY, hl);
     this.PROBE_LOCALS[0].pos.set(0, 0, hl);
     this.PROBE_LOCALS[1].pos.set(0, 0, -hl);
     this.PROBE_LOCALS[2].pos.set(hw, 0, 0);
     this.PROBE_LOCALS[3].pos.set(-hw, 0, 0);
+    this._refreshDeckContactPoints(hw, hl, roofY);
     this._refreshHullSamples();
+  }
+
+  /**
+   * Corners + roof in-fill, as one array for the deck resolver to walk.
+   *
+   * Only the ROOF gets extra points. The underside is already covered by four
+   * wheels probing the surface directly, and adding mid-floor samples would put
+   * new contact points over ramp crests and kerb lips — the exact geometry the
+   * core box's size was tuned around. The roof has no wheels and no tuning
+   * history, so it is the half that needs the density.
+   */
+  _refreshDeckContactPoints(hw, hl, roofY) {
+    const pts = this.DECK_CONTACT_POINTS;
+    pts.length = 0;
+    // Shared instances, not copies — _refreshLocalFrames writes the corners
+    // above and the deck resolver reads them here.
+    for (const c of this.CHASSIS_CORNERS) pts.push(c);
+
+    const s = DECK_CONTACT.roofSampleSpacing;
+    if (!(s > 0)) return;
+    const nx = Math.max(2, Math.ceil((hw * 2) / s) + 1);
+    const nz = Math.max(2, Math.ceil((hl * 2) / s) + 1);
+    for (let i = 0; i < nx; i++) {
+      for (let k = 0; k < nz; k++) {
+        // Skip the four corners — they are already in the list.
+        const cornerX = i === 0 || i === nx - 1;
+        const cornerZ = k === 0 || k === nz - 1;
+        if (cornerX && cornerZ) continue;
+        pts.push(new THREE.Vector3(
+          -hw + (hw * 2 * i) / (nx - 1),
+          roofY,
+          -hl + (hl * 2 * k) / (nz - 1),
+        ));
+      }
+    }
   }
 
   /**
@@ -2906,6 +3138,8 @@ export class Vehicle {
 
     this._solidTouch = false; // set by _resolveSolidBvh during the step
     this._solidImpactSpeed = 0;
+    this._roofTouch = false;  // set by _applyDeckContact during the step
+    this._roofImpactSpeed = 0;
     this._physicsStep(FIXED_DT);
     this._depenetrateFromWalls();
     this._updateStuck();
@@ -3022,6 +3256,15 @@ export class Vehicle {
       // Up and along the car's own forward: lifts it off whatever it is balanced
       // on and gives it somewhere to go.
       this._stuckUp.set(0, 1, 0).applyQuaternion(this.body.quat);
+      // NUDGE "UP" MEANS AGAINST GRAVITY, NOT ALONG THE CAR'S OWN UP AXIS.
+      //
+      // Chassis-up is right for the case this was written for — a car beached on
+      // a guardrail is roughly level, and lifting along its own up tips it off.
+      // Inverted, chassis-up points STRAIGHT DOWN, so the nudge fired the car
+      // through the road it was lying on. Nothing saw it before because an
+      // inverted car fell through the deck anyway; now that it rests there, this
+      // is what a car on its lid actually hits. Identical for every upright case.
+      if (this._stuckUp.y < 0) this._stuckUp.set(0, 1, 0);
       this._stuckFwd.set(0, 0, 1).applyQuaternion(this.body.quat);
       this.body.vel
         .addScaledVector(this._stuckUp, STUCK.nudgeUp)
@@ -3040,6 +3283,22 @@ export class Vehicle {
   /** World-space contact point of the last solid hit (guardrail, tunnel wall).
    *  Only meaningful while  is true. */
   get solidPoint() { return this._solidPoint; }
+
+  /**
+   * Is a ROAD SURFACE pressing on the car's roof this tick? Per-tick pulse, same
+   * shape as `hitSolid` — so read it every tick and OR it across the frame, do
+   * not sample it once at render rate (see the LATCHED block below for why).
+   *
+   * True for landing on the lid, sliding along inverted, and scraping a ceiling.
+   * NOT true for a guardrail or a wall, however you hit them — those are solids
+   * and `hitSolid` already covers them.
+   */
+  get roofTouch() { return this._roofTouch; }
+  /** Speed the roof was closing on the surface at, m/s. ~0 while merely resting
+   *  upside down; compare against ROOF.impactSpeed to tell a slam from a rest. */
+  get roofImpactSpeed() { return this._roofImpactSpeed; }
+  /** Landed on the lid HARD this tick, as opposed to lying on it. */
+  get roofImpact() { return this._roofTouch && this._roofImpactSpeed >= ROOF.impactSpeed; }
 
   // ── LATCHED contact, for anything sampling at RENDER rate ───────────────────
   // Use THESE from visuals/audio, not the raw solid* above. The raw flag is a
@@ -3250,7 +3509,13 @@ export class Vehicle {
       this._gravityF.set(0, -GRAVITY * body.mass, 0);
       body.addForce(this._gravityF);
       this._applyAero();
+      // Armed by _applyDeckContact, which runs LATER in this same substep — so
+      // the tyres always read the previous substep's answer (1/240 s stale).
+      // That lag is why the flag is a hold rather than a per-substep boolean.
+      const roofPinned = this._roofGuard > 0;
+      if (this._roofGuard > 0) this._roofGuard = Math.max(0, this._roofGuard - subDt);
       for (const tire of this.tires) {
+        tire.roofPinned = roofPinned;
         const driveScale = tire.isFront ? fScale : rScale;
         tire.apply(
           body,
@@ -4208,9 +4473,14 @@ export class Vehicle {
     // an inverted car fell through the road.
     const band = Math.max(skin, body.vel.length() * dt * SOLID.sweepMargin);
     let approach = 0;
+    let approachRoof = 0;
     this._solidApproachN.set(0, 0, 0);
+    this._deckRoofApproachN.set(0, 0, 0);
+    // Chassis-up, once. Every contact below is classified against it: a deck
+    // whose outward normal opposes this is a surface pressing down on the car.
+    this._deckUp.set(0, 1, 0).applyQuaternion(body.quat);
 
-    for (const corner of this.CHASSIS_CORNERS) {
+    for (const corner of this.DECK_CONTACT_POINTS) {
       this._geomToWorld(corner, this._cWorld);
       const res = this.groundBvh.closestPointWithNormal(
         this._cWorld.x, this._cWorld.y, this._cWorld.z, DECK.searchRadius, this._deckN,
@@ -4230,8 +4500,37 @@ export class Vehicle {
         body.getVelocityAtPoint(this._cWorld, this._cVel);
         const closing = -this._cVel.dot(this._deckN);
         if (closing > 0 && closing * dt > sd - skin) {
-          this._solidApproachN.addScaledVector(this._deckN, closing);
-          approach = Math.max(approach, closing);
+          // ROOF APPROACHES ARE KEPT SEPARATE, because the gate below is wrong
+          // for them — see the note there.
+          if (this._deckN.dot(this._deckUp) < ROOF.dot) {
+            this._deckRoofApproachN.addScaledVector(this._deckN, closing);
+            approachRoof = Math.max(approachRoof, closing);
+            // ARM THE GUARD ON THE APPROACH, NOT ONLY ON CONTACT.
+            //
+            // The suspension gets to act BEFORE the deck resolver each substep,
+            // and an inverted car's wheels are pushing DOWN at up to 20 m/s. If
+            // the guard waits for the roof to be inside `skin`, the wheels drive
+            // the car through those 5 cm in a single substep and out the far
+            // side — where there is no roof contact to be had any more, so the
+            // guard never arms at all and the car keeps accelerating downward.
+            // MEASURED: caught at the right height for 4 ticks, then driven
+            // clean through the deck at −21 m/s.
+            //
+            // The same "resting on it, not pressed by it" test as below, so a
+            // ceiling approach still arms nothing.
+            if (ROOF.enabled && this._deckN.y > ROOF.guardUpMin) {
+              this._roofGuard = ROOF.guardHold;
+              // THE SLAM SPEED IS MEASURED HERE, not at the contact below.
+              // The clamp on the next line kills the closing velocity BEFORE
+              // anything penetrates — which is the point — so by the time the
+              // roof is inside `skin` it is closing at ~0 and an impact sampled
+              // there reads 0.1 m/s for a 40 m/s slam.
+              this._roofImpactSpeed = Math.max(this._roofImpactSpeed, closing);
+            }
+          } else {
+            this._solidApproachN.addScaledVector(this._deckN, closing);
+            approach = Math.max(approach, closing);
+          }
         }
         continue; // corner clear of the deck → the wheels have it
       }
@@ -4242,10 +4541,54 @@ export class Vehicle {
       const forceMag = pen * DECK.stiffness + dampMag;
       this._cF.copy(this._deckN).multiplyScalar(forceMag);
       body.addForceAtPoint(this._cF, this._cWorld);
+
+      // ── ROOF-DOWN ─────────────────────────────────────────────────────────
+      if (!ROOF.enabled || this._deckN.dot(this._deckUp) >= ROOF.dot) continue;
+      this._roofTouch = true;
+      this._roofImpactSpeed = Math.max(this._roofImpactSpeed, Math.max(0, inward));
+
+      // RESTING ON IT vs PRESSED BY IT — the distinction the rest of this block
+      // turns on, and it is not the same question as "is the roof touching".
+      //
+      //   RESTING ON IT   the car is on its lid; the face under the roof is a
+      //                   road's TOP surface, so its outward normal points UP.
+      //   PRESSED BY IT   a ceiling is overhead; that face is an UNDERSIDE, its
+      //                   normal points DOWN, and the wheels have the road
+      //                   perfectly well.
+      //
+      // MEASURED: a loop's entry runs directly under its own descending slab, so
+      // the second case happens on EVERY loop approach (normal.y −0.98, 4/4
+      // wheels down). Treating it as the first cost 4 of 7 loops.
+      //
+      // A ceiling still reports `roofTouch` — the game should know you are
+      // scraping one — it just gets neither of the two responses below.
+      if (this._deckN.y <= ROOF.guardUpMin) continue;
+
+      // 1) The wheels may be lying. See the ceiling-guard block in Tire.apply.
+      this._roofGuard = ROOF.guardHold;
+
+      // 2) Sliding on the lid costs speed. Coulomb-shaped, the same as the
+      //    terrain corners in _applyChassisGroundContact.
+      //
+      //    CAPPED, because `forceMag` is a 220 kN/m penetration spring: one deep
+      //    substep (a hard landing, a seam) spikes it to tens of car-weights, and
+      //    an uncapped fraction of that is a brick wall rather than a scrape. The
+      //    cap is what keeps this a friction model instead of a speed deleter.
+      if (ROOF.friction <= 0) continue;
+      this._roofT.copy(this._cVel).addScaledVector(this._deckN, -this._cVel.dot(this._deckN));
+      const slide = this._roofT.length();
+      if (slide <= 0.01) continue;
+      const ramp = Math.min(1, slide / Math.max(0.01, ROOF.frictionFullSpeed));
+      const drag = Math.min(
+        ROOF.friction * forceMag * ramp,
+        ROOF.maxFrictionG * CHASSIS.mass * GRAVITY,
+      );
+      this._roofT.multiplyScalar(-drag / slide);
+      body.addForceAtPoint(this._roofT, this._cWorld);
     }
 
     // Velocity-only, so it cannot lift the car or change ride height — it just
-    // stops a corner crossing the surface between substeps.
+    // stops a contact point crossing the surface between substeps.
     //
     // Gated on the wheels NOT already holding the car. This is a backstop for
     // orientations the suspension cannot handle — on its side, inverted, under a
@@ -4256,6 +4599,25 @@ export class Vehicle {
       this._solidApproachN.normalize();
       const vIn = body.vel.dot(this._solidApproachN);
       if (vIn < 0) body.vel.addScaledVector(this._solidApproachN, -vIn);
+    }
+
+    // ROOF APPROACHES ARE NOT GATED ON THE WHEELS.
+    //
+    // `groundedCount < 3` was protecting one thing: a kerb or piece seam under
+    // the car reading as an imminent crossing and braking a normal lap. Those
+    // are surfaces the car is DRIVING ON, and their normals point up — so the
+    // classification above already excludes them, and the gate was doing no work
+    // for the roof while blocking the one case it was supposedly there for.
+    //
+    // What it blocked: 4 wheels on the road, full speed, into a low overpass.
+    // At 30 m/s a point advances 0.25 m per substep against a 0.05 m skin, so
+    // the roof went straight through the slab and only the far side stopped it
+    // (if anything did). That is the one deck contact with no sweep protection
+    // at all, and it is the exact geometry a stunt track is made of.
+    if (approachRoof > 0 && this._deckRoofApproachN.lengthSq() > 1e-10) {
+      this._deckRoofApproachN.normalize();
+      const vIn = body.vel.dot(this._deckRoofApproachN);
+      if (vIn < 0) body.vel.addScaledVector(this._deckRoofApproachN, -vIn);
     }
   }
 
