@@ -108,13 +108,12 @@ import { preloadTireWall } from "./modularRoadTireWall.js";
 import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
-
-/** Preset tracks shipped with the game. Kept as their own constants so
- *  renaming a file is a one-line change. */
-const TRACK_DIR = "/games/modular-road-v3";
-const PRESET_TRACK_FILE = "modular-road-track (1).json";
-const RUSHLINE_TRACK_FILE = "rushline.json";
 import { createRoadDevPanel } from "./devPanel.js";
+// Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
+// /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
+// imported assets — the source folder itself is not published.
+import apexTrackUrl from "./modular-road-track (1).json?url";
+import rushlineTrackUrl from "./rushline.json?url";
 
 /** Cap on physics ticks per frame — a long stall must not queue a huge backlog. */
 const MAX_SIM_TICKS = 8;
@@ -1936,10 +1935,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Same importTrack path as the file picker above, just fetched instead of
   // read from disk — so a preset can never diverge from a hand-loaded save.
   //
-  // encodeURI because Apex's filename carries a space and parentheses; without
-  // it the fetch 404s and the button silently does nothing.
-  const loadPresetTrack = (btnId, file, idleLabel) => {
-    const url = encodeURI(`${TRACK_DIR}/${file}`);
+  // road.html sets <base href="/v3/">, so a relative Vite asset URL would
+  // resolve under /v3/ and 404. Absolute /assets/... URLs are left alone.
+  const presetFetchUrl = (imported) => {
+    if (/^(?:https?:)?\/\//.test(imported) || imported.startsWith("/")) return imported;
+    return new URL(imported, `${window.location.origin}/`).href;
+  };
+  const loadPresetTrack = (btnId, importedUrl, idleLabel) => {
+    const url = presetFetchUrl(importedUrl);
     onClick(btnId, async () => {
       const btn = document.getElementById(btnId);
       if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
@@ -1958,7 +1961,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         flags.sync();
         paletteUi.refreshStatus();
         devPanel?.refresh();
-        console.info(`[ModularRoad-v3] preset track loaded (${file}): ${data.pieces?.length ?? 0} pieces`);
+        console.info(`[ModularRoad-v3] preset track loaded: ${data.pieces?.length ?? 0} pieces`);
       } catch (e) {
         console.warn("[ModularRoad-v3] preset track failed:", url, e);
         alert(`Could not load the preset track:
@@ -1968,8 +1971,8 @@ ${e.message}`);
       }
     });
   };
-  loadPresetTrack("road-preset", PRESET_TRACK_FILE, "Load Apex track");
-  loadPresetTrack("road-preset-rushline", RUSHLINE_TRACK_FILE, "Load Rushline track");
+  loadPresetTrack("road-preset", apexTrackUrl, "Load Apex track");
+  loadPresetTrack("road-preset-rushline", rushlineTrackUrl, "Load Rushline track");
 
   const gamepad = createGamepadInput();
   /** Set by readControls() when the pad's respawn button goes down this frame. */
