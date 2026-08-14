@@ -3119,12 +3119,24 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   let activePropId = null;
   let activeMoverId = null;
   let activePresetId = null;
+  /** Swappable: on a cold cache the game paints the palette with the SVG
+   *  fallbacks immediately and hands the baked tiles over later, through
+   *  setThumbnails(), rather than making startup wait for the bake. */
+  let thumbs = thumbnails;
 
   function categoryIconMarkup(catId) {
     const key = categoryThumbnailKey(catId, propCatalog, moverCatalog);
-    const thumb = key ? thumbnails?.get(key) : null;
+    const thumb = key ? thumbs?.get(key) : null;
     if (thumb) return `<img src="${thumb}" alt="" draggable="false">`;
     return categoryIconSvg(catId);
+  }
+
+  function thumbImg(src, label) {
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = label;
+    img.draggable = false;
+    return img;
   }
 
   function piecesInCategory(catId) {
@@ -3188,13 +3200,9 @@ export function buildRoadPaletteUI(builder, opts = {}) {
 
       const preview = document.createElement("div");
       preview.className = "piece-tile-preview";
-      const thumb = thumbnails?.get(item.id);
+      const thumb = thumbs?.get(item.id);
       if (thumb) {
-        const img = document.createElement("img");
-        img.src = thumb;
-        img.alt = item.label;
-        img.draggable = false;
-        preview.appendChild(img);
+        preview.appendChild(thumbImg(thumb, item.label));
       } else {
         preview.innerHTML = item.isPreset ? item.preview : piecePreviewSvg(item.id);
       }
@@ -3478,6 +3486,30 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     return true;
   }
 
+  /**
+   * Adopt a (re)baked thumbnail set — Map(id -> image src).
+   *
+   * Patches the live DOM in place instead of calling renderPieces(): the bake
+   * lands a couple of seconds into the session, by which time a prop brush may
+   * be armed, and a re-render clears activePropId/activeMoverId — the tiles
+   * would change under a brush that then had no highlight.
+   */
+  function setThumbnails(next) {
+    thumbs = next;
+    for (const [id, btn] of catBtns) {
+      const icon = btn.querySelector(".cat-btn-icon");
+      if (icon) icon.innerHTML = categoryIconMarkup(id);
+    }
+    for (const [key, btn] of pieceTiles) {
+      const id = key.replace(/:(prop|mover|preset)$/, "");
+      const src = thumbs?.get(id);
+      if (!src) continue;
+      const preview = btn.querySelector(".piece-tile-preview");
+      const label = btn.querySelector(".piece-tile-name")?.textContent ?? id;
+      preview?.replaceChildren(thumbImg(src, label));
+    }
+  }
+
   /** Drop the prop/mover brush highlight — the game calls this when the brush
    *  is cancelled from its side (Escape, right-click, leaving build mode). */
   function clearBrushHighlight() {
@@ -3487,5 +3519,5 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     refreshStatus();
   }
 
-  return { refreshStatus, renderPieces, syncEdgesBtn, selectPieceById, clearBrushHighlight };
+  return { refreshStatus, renderPieces, syncEdgesBtn, selectPieceById, clearBrushHighlight, setThumbnails };
 }

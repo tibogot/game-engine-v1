@@ -67,7 +67,13 @@ import {
   pieceParams,
   guardrailParams,
 } from "./modularRoadKit.js";
-import { bakeRoadThumbnails } from "./modularRoadThumbnails.js";
+import { bakeRoadThumbnails, blobsToUrls } from "./modularRoadThumbnails.js";
+import {
+  thumbnailSignature,
+  loadThumbnailCache,
+  saveThumbnailCache,
+  clearThumbnailCache,
+} from "./modularRoadThumbnailCache.js";
 import {
   PropManager, PROP_CATALOG, PROP_BY_ID, glowPropParams, SURFACE_SNAP, SURFACE_SNAP_MODES, DECAL_URL,
 } from "./modularRoadProps.js";
@@ -318,7 +324,6 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     preloadDecal(DECAL_URL).then(() => settleDecals()),
   ]);
 
-  onStatus("Baking piece thumbnails…");
   const thumbItems = [];
   for (const p of PIECE_CATALOG) thumbItems.push({ key: p.id, pieceId: p.id, params: {} });
   for (const presets of Object.values(CATEGORY_PRESETS)) {
@@ -332,27 +337,80 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     key: "portal_door",
     make: () => buildPortalMesh(DEFAULT_PORTAL_PARAMS, DEFAULT_PORTAL_PARAMS.colorA, "a").root,
   });
+  // ── THUMBNAILS: CACHED, AND NEVER ON THE CRITICAL PATH ─────────────────────
+  // Baking all ~175 tiles costs a GPU readback + a PNG encode EACH, which used
+  // to be seconds of startup on every single load for output that changes only
+  // when the catalog, the look or the geometry code does. So:
+  //   • hit  → read the Blobs back out of IndexedDB (~15 ms) and the palette is
+  //            correct on its first paint;
+  //   • miss → the palette opens on its SVG fallbacks and the bake runs AFTER
+  //            the first frame, swapping tiles in as it finishes. A cold cache
+  //            (or a rebake) therefore costs no startup time at all, it just
+  //            leaves the tiles hand-drawn for a second or two.
+  // `?rebake=1` and the dev panel's Rebake button force the miss path.
+  const THUMB_SIZE = 192;
+  const forceRebake = new URLSearchParams(location.search).has("rebake");
+  // The look is in the signature because these are the REAL road materials —
+  // recolour the asphalt and every cached tile is wrong.
+  const thumbSig = thumbnailSignature(thumbItems, {
+    size: THUMB_SIZE,
+    look: readRoadLook(roadMaterial),
+  });
+  const thumbMaterials = {
+    road: roadMaterial, rail: railMaterial, shell: shellMaterial,
+    decor: decorMaterial,
+    // NOT the live pane material. Transmission composites against a copy of
+    // the backdrop, and a thumbnail is rendered into a bare RT with no
+    // backdrop to copy — the pane comes out black, so the tile advertises a
+    // hole rather than a window. The cheap Fresnel-alpha build of the same
+    // material needs nothing behind it and reads as glass at tile size.
+    glass: createRoadGlassMaterial({ transmission: 0, opacity: 0.32 }),
+  };
+
+  /** key -> object URL, handed to the palette. Replaced wholesale by a bake. */
   let roadThumbnails = new Map();
-  try {
-    roadThumbnails = await bakeRoadThumbnails({
-      renderer,
-      materials: {
-        road: roadMaterial, rail: railMaterial, shell: shellMaterial,
-        decor: decorMaterial,
-        // NOT the live pane material. Transmission composites against a copy of
-        // the backdrop, and a thumbnail is rendered into a bare RT with no
-        // backdrop to copy — the pane comes out black, so the tile advertises a
-        // hole rather than a window. The cheap Fresnel-alpha build of the same
-        // material needs nothing behind it and reads as glass at tile size.
-        glass: createRoadGlassMaterial({ transmission: 0, opacity: 0.32 }),
-      },
-      items: thumbItems,
-      environment: scene.environment,
-      size: 192,
-    });
-  } catch (e) {
-    console.warn("[ModularRoad-v3] thumbnail bake skipped", e);
+  if (forceRebake) await clearThumbnailCache();
+  else {
+    try {
+      const cached = await loadThumbnailCache(thumbSig);
+      if (cached) roadThumbnails = blobsToUrls(cached);
+    } catch (e) {
+      console.warn("[ModularRoad-v3] thumbnail cache read failed", e);
+    }
   }
+  const thumbsWereCached = roadThumbnails.size > 0;
+
+  let thumbBakeRunning = false;
+  /** Bake every tile and hand the result to the palette + the cache. Safe to
+   *  call at any time; the palette adopts the new set in place. */
+  async function bakeAndCacheThumbnails() {
+    if (thumbBakeRunning) return;
+    thumbBakeRunning = true;
+    try {
+      const tiles = await bakeRoadThumbnails({
+        renderer,
+        materials: thumbMaterials,
+        items: thumbItems,
+        environment: scene.environment,
+        size: THUMB_SIZE,
+      });
+      if (!tiles.size) return;
+      roadThumbnails = blobsToUrls(tiles, roadThumbnails);
+      paletteUi?.setThumbnails?.(roadThumbnails);
+      await saveThumbnailCache(thumbSig, tiles);
+    } catch (e) {
+      console.warn("[ModularRoad-v3] thumbnail bake skipped", e);
+    } finally {
+      thumbBakeRunning = false;
+    }
+  }
+  // Dev-panel button and console escape hatch — the signature can see the
+  // catalog and the look, but not edits to buildPiece() or a prop's make().
+  async function rebakeThumbnails() {
+    await clearThumbnailCache();
+    await bakeAndCacheThumbnails();
+  }
+  window.rebakeRoadThumbnails = rebakeThumbnails;
 
   // ── PLACEMENT BRUSH (props / movers) ───────────────────────────────────────
   // Picking a prop in the palette ARMS a brush: a translucent ghost follows the
@@ -2633,6 +2691,7 @@ ${e.message}`);
       toggleMode,
       respawn,
       bakeCollision,
+      rebakeThumbnails,
       setCollisionDebug,
       setFreeLook: (on) => {
         freeLook = !!on;
@@ -2978,6 +3037,15 @@ ${e.message}`);
   app._roadRaf = requestAnimationFrame(tick);
 
   onStatus("ready");
+
+  // Cold cache (or ?rebake=1): bake now that the editor is up and drawing. Two
+  // frames of slack first so the bake's GPU readbacks queue behind a frame that
+  // has actually been presented — starting it here rather than above is the
+  // difference between "the palette fills in while you look at it" and "the
+  // loading screen sits there for a few seconds".
+  if (!thumbsWereCached) {
+    requestAnimationFrame(() => requestAnimationFrame(() => { bakeAndCacheThumbnails(); }));
+  }
 
   const handle = {
     app,

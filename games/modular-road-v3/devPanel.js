@@ -1031,6 +1031,14 @@ export function createRoadDevPanel({ app, game, params }) {
             Deck BVH is <b>red</b>, solids (rails/shells) <b>blue</b>. Rebake if
             the car falls through something you just moved.
           </div>
+          <button class="action-btn" id="dv-rebake-thumbs" type="button">Rebake palette thumbnails</button>
+          <div class="dv-hint">
+            Palette tiles are baked once and cached in the browser (IndexedDB), so
+            reloading does not pay for ~175 renders again. The cache invalidates
+            itself when a piece, a preset or the road look changes — but it cannot
+            see edits to the geometry <i>code</i>, so use this after changing how a
+            piece is built.
+          </div>
         </div>
       </div>
 
@@ -2131,6 +2139,20 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-showcol", false, (on) => game.setCollisionDebug(on));
   toggle("dv-inst", true, (on) => game.setInstancing(on));
   $("#dv-rebake").addEventListener("click", () => game.bakeCollision());
+  // The bake takes seconds and nothing else on screen moves while it runs, so
+  // the button IS the progress indicator.
+  $("#dv-rebake-thumbs")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Baking thumbnails…";
+    try {
+      await game.rebakeThumbnails?.();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  });
 
   // ── Lights ──────────────────────────────────────────────────────────────────
   const lightsToggle = toggle("dv-lights", false, (on) => {

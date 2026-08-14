@@ -10,9 +10,14 @@ import {
 /**
  * Live thumbnail baker. Renders a small 3/4 view of each road piece / preset
  * with the REAL road materials, so palette tiles match what actually gets built
- * (replacing the hand-drawn SVG silhouettes). Runs once at startup and returns
- * Map(key -> PNG data-URL); no files to manage. The same render path can later
- * be promoted to an offline PNG bake for the v2 port.
+ * (replacing the hand-drawn SVG silhouettes). Returns Map(key -> PNG Blob); no
+ * files to manage. The same render path can later be promoted to an offline PNG
+ * bake for the v2 port.
+ *
+ * Blobs, not data-URLs, because the result is persisted: modularRoadThumbnailCache
+ * keeps them in IndexedDB as binary, and the palette wants object URLs anyway —
+ * see blobsToUrls(). This is the expensive path (a GPU readback per item); the
+ * cache is what keeps it off the startup sequence.
  *
  * @param {object} o
  * @param {THREE.WebGPURenderer} o.renderer
@@ -20,9 +25,11 @@ import {
  * @param {{key:string, pieceId?:string, params?:object, make?:()=>THREE.Object3D}[]} o.items
  * @param {THREE.Texture} [o.environment] optional IBL (the main scene's PMREM) for correct lighting
  * @param {number} [o.size=128]
- * @returns {Promise<Map<string,string>>}
+ * @returns {Promise<Map<string,Blob>>}
  */
-export async function bakeRoadThumbnails({ renderer, materials, items, environment = null, size = 128 }) {
+export async function bakeRoadThumbnails({
+  renderer, materials, items, environment = null, size = 128,
+}) {
   const out = new Map();
   if (!renderer || !materials?.road || !Array.isArray(items)) return out;
 
@@ -52,9 +59,13 @@ export async function bakeRoadThumbnails({ renderer, materials, items, environme
   const center = new THREE.Vector3();
   const camDir = new THREE.Vector3(0.78, 0.82, 0.95).normalize();
 
-  const prevTarget = renderer.getRenderTarget();
-  const prevClearAlpha = renderer.getClearAlpha();
-  renderer.setClearColor(0x000000, 0); // transparent thumbnails
+  // Renderer state is borrowed FOR ONE SYNCHRONOUS RENDER AT A TIME and handed
+  // straight back (see the per-item block below), never held across an await.
+  // This bake now runs in the background with the editor's own frame loop live,
+  // and the loop draws in the gaps between tiles: leaving the thumbnail RT bound
+  // — or the transparent clear colour set — across an await means those frames
+  // land in a 192px offscreen buffer instead of on screen.
+  const prevClear = new THREE.Color();
 
   const clearGroup = () => {
     while (group.children.length) {
@@ -110,27 +121,39 @@ export async function bakeRoadThumbnails({ renderer, materials, items, environme
       camera.lookAt(center);
       camera.updateMatrixWorld(true);
 
+      const prevTarget = renderer.getRenderTarget();
+      renderer.getClearColor(prevClear);
+      const prevClearAlpha = renderer.getClearAlpha();
       renderer.setRenderTarget(rt);
+      renderer.setClearColor(0x000000, 0); // transparent thumbnails
       renderer.render(scene, camera); // renderer already init()-ed (renderAsync is deprecated)
+      renderer.setRenderTarget(prevTarget);
+      renderer.setClearColor(prevClear, prevClearAlpha);
+
+      // Readback takes `rt` explicitly, so it does not need the target bound —
+      // which is what lets the state go back before this await yields a frame.
       // r0.184: returns the pixel buffer (Uint8Array for UnsignedByteType).
       const buf = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, size, size);
-      out.set(item.key, pixelsToDataURL(new Uint8Array(buf.buffer ?? buf), size));
+      const blob = await pixelsToBlob(new Uint8Array(buf.buffer ?? buf), size);
+      if (blob) out.set(item.key, blob);
     }
   } catch (err) {
     console.warn("[modular-road] thumbnail bake failed; falling back to SVG.", err);
   } finally {
     clearGroup();
-    renderer.setRenderTarget(prevTarget);
-    renderer.setClearColor(0x000000, prevClearAlpha);
     rt.dispose();
   }
 
   return out;
 }
 
-/** RGBA byte buffer → PNG data-URL via a 2D canvas. WebGPU readRenderTargetPixelsAsync
- *  returns top-first rows (same as canvas ImageData); do not flip Y (that was for WebGL). */
-function pixelsToDataURL(buf, size) {
+/** RGBA byte buffer → PNG Blob via a 2D canvas. WebGPU readRenderTargetPixelsAsync
+ *  returns top-first rows (same as canvas ImageData); do not flip Y (that was for WebGL).
+ *
+ *  toBlob, not toDataURL: the PNG encode is the second-biggest cost per tile and
+ *  toDataURL runs it synchronously on the main thread, then base64s the result
+ *  (a third bigger, and it would go into IndexedDB that way too). */
+function pixelsToBlob(buf, size) {
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
@@ -138,5 +161,23 @@ function pixelsToDataURL(buf, size) {
   const img = ctx.createImageData(size, size);
   img.data.set(buf.subarray(0, size * size * 4));
   ctx.putImageData(img, 0, 0);
-  return canvas.toDataURL("image/png");
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+/**
+ * Map(key -> Blob) → Map(key -> object URL) for use as an <img src>, revoking
+ * whatever a previous call handed out.
+ *
+ * The palette holds these for the life of the page, so the only leak that
+ * matters is a rebake replacing a live set — hence `previous`.
+ *
+ * @param {Map<string,Blob>} tiles
+ * @param {Map<string,string>|null} [previous] URLs to revoke once replaced
+ * @returns {Map<string,string>}
+ */
+export function blobsToUrls(tiles, previous = null) {
+  const urls = new Map();
+  for (const [key, blob] of tiles) urls.set(key, URL.createObjectURL(blob));
+  if (previous) for (const url of previous.values()) URL.revokeObjectURL(url);
+  return urls;
 }
