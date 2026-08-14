@@ -2202,17 +2202,25 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-smoke", true, (on) => game.setDriftSmokeEnabled(on));
   // Smoke look.  is driven directly and lifeMin follows at 45% of it —
   // two independent life sliders is a fiddly way to say "longer plume".
-  // Stochastic terrain tiling. road.html defaults it OFF before the engine
-  // loads; this is the way back. It costs ~5ms of GPU (35 texture fetches per
-  // terrain pixel vs 14) to hide texture repetition. The shader graph is built
-  // at module load, so flipping it RELOADS the page — hence a button, not a
-  // toggle switch that would appear to do nothing.
+  // Stochastic terrain tiling — OPT-IN, off unless the key is exactly "true".
+  //
+  // MUST MATCH stochasticTex.js's own test (`=== "true"`), which is the source
+  // of truth: it is read once at module load and decides whether the extra taps
+  // are compiled into the shader at all. This used to read `!== "false"`, the
+  // old default, so with the key unset the button claimed "On" while the shader
+  // had been built with it OFF — a toggle that lied about the state it toggles.
+  //
+  // The label no longer quotes ~5ms: measured on this project it is 0.13 ms
+  // (4.98 vs 4.85 ms). It is off because it is unused, not because it is dear.
+  //
+  // Flipping RELOADS the page, since the graph is built at load — hence a
+  // button rather than a switch that would appear to do nothing.
   const stochBtn = $("#dv-stoch");
   if (stochBtn) {
-    const stochOn = () => localStorage.getItem("terrain_stochastic") !== "false";
-    stochBtn.textContent = stochOn() ? "On (~5ms)" : "Off";
+    const stochOn = () => localStorage.getItem("terrain_stochastic") === "true";
+    stochBtn.textContent = stochOn() ? "On" : "Off";
     stochBtn.classList.toggle("primary", stochOn());
-    stochBtn.title = "Hides terrain texture repetition. Costs ~5ms GPU. Reloads the page.";
+    stochBtn.title = "Hides terrain texture repetition (~0.13 ms). Reloads the page.";
     stochBtn.addEventListener("click", () => {
       localStorage.setItem("terrain_stochastic", stochOn() ? "false" : "true");
       location.reload();

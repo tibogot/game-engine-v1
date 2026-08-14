@@ -137,6 +137,7 @@ import { buildRoadPanel } from "../ui/buildRoadPanel.js";
 import { buildPlayPhysicsPanel } from "../ui/buildPlayPhysicsPanel.js";
 import { buildPlayFlightPanel } from "../ui/buildPlayFlightPanel.js";
 import { createFlyHud } from "../ui/flyHud.js";
+import { createGpuStatsPanel } from "../render/gpuStatsPanel.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -220,6 +221,22 @@ export async function startV3App(opts = {}) {
 
   const drawPanel   = stats.addPanel(new Stats.Panel("DRAW", "#f0f", "#202"));
   const triPanel    = stats.addPanel(new Stats.Panel("KTRI", "#f90", "#210"));
+
+  // SECOND GPU READOUT, RUNNING ALONGSIDE stats-gl ON PURPOSE.
+  //
+  // stats-gl shows `renderer.info.render.timestamp`, which is not a per-frame
+  // number: three publishes the last frame in a resolve batch even when that
+  // frame is still mid-flight and has only recorded some of its passes. This
+  // project renders 18 passes per frame with ONE of them ~92% of the cost, so a
+  // snapshot that misses it reports the frame as nearly free. Measured on a
+  // completely static scene: the stats-gl value swung 4.46–17.76 ms, and while
+  // driving it read 0.33 ms for a frame this panel measures at 4.65 ms.
+  //
+  // The two are deliberately kept side by side (the new panel prints stats-gl's
+  // own value as `raw`) so the difference is visible rather than asserted —
+  // retire stats-gl only once you have watched them disagree.
+  const gpuStats = hasTimestamps ? createGpuStatsPanel(renderer) : null;
+  window.__v3GpuStats = gpuStats; // console probe: __v3GpuStats.sample()
   let _maxDraw = 1;
   let _maxTri  = 1;
   renderer.info.autoReset = false;
@@ -468,6 +485,11 @@ export async function startV3App(opts = {}) {
   // surface with trail compression near the player.
   const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, groundProc);
   scene.add(lod.group);
+  // Console handle for terrain shader A/Bs — `buildVariant()` compiles a second
+  // feature set and `setVariant()` swaps it in, so two shaders can be compared
+  // within the same second and therefore at the same GPU clock. See the note on
+  // buildVariant for why a reload-based comparison is not trustworthy here.
+  window.__v3TerrainLOD = lod;
   // Terrain starts flat (createHeightmapTexture initializes all-zeros).
   // User can generate terrain manually via the Procedural panel.
 

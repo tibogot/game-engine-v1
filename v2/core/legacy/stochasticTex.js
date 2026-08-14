@@ -36,8 +36,26 @@ import {
 import { hash22 } from "./tsl-utils.js";
 
 // ── preference (read once at module load, drives node-graph construction) ──────
+//
+// OPT-IN, NOT OPT-OUT. This used to be `!== "false"`, i.e. ON for any browser
+// that had never explicitly turned it off — and nothing in v3 ever wrote the
+// key, so a fresh profile opening the editor got the expensive path by default.
+// The GAME worked around it by writing "false" itself at boot, which meant the
+// editor's cost silently depended on whether you had opened the game first on
+// that origin (localStorage is per-origin, not per-page).
+//
+// Defaulting off is safe because the disabled path is a COMPILE-TIME choice,
+// not a uniform: `stochasticSampleArray` returns a plain `texture()` node when
+// this is false, so the extra taps are not in the shader at all and cost
+// exactly zero. Everything below is kept intact for the day it is wanted —
+// flip it from the v3 terrain panel (or `toggleStochastic()`), which persists
+// the choice and reloads to rebuild the graph.
+//
+// NOTE the old claim that this costs ~5 ms per frame is WRONG and was measured
+// on a different scene; on this project it is 0.13 ms (4.98 vs 4.85 ms, 2.7%).
+// It is defaulted off because it is unused, not because it is expensive.
 const _LS_KEY = "terrain_stochastic";
-export const STOCHASTIC_ENABLED = localStorage.getItem(_LS_KEY) !== "false";
+export const STOCHASTIC_ENABLED = localStorage.getItem(_LS_KEY) === "true";
 
 /** Flip the persisted stochastic preference and reload (shader graph is built at load). */
 export function toggleStochastic() {

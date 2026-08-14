@@ -26,17 +26,48 @@ const NUM_LAYERS = 7;
 const LUM        = vec3(0.299, 0.587, 0.114);
 
 /**
+ * COMPILE-TIME feature set. Every one of these used to be present in the shader
+ * unconditionally and switched off by a uniform through `mix()` — which does not
+ * skip anything: both sides are evaluated and the unwanted one is multiplied by
+ * zero. So an author using none of these still paid for all of them, on every
+ * pixel, forever.
+ *
+ * Turning a flag off here removes the nodes from the graph entirely, so the
+ * instructions are never generated. The uniforms are still created and still
+ * exported either way, so callers, the dev panel and the save format do not
+ * change shape — a disabled feature simply stops being wired into the output.
+ *
+ * Defaults are ALL ON, i.e. bit-for-bit the previous shader. The editor keeps
+ * them; a game build turns off what it cannot reach.
+ */
+export const SPLAT_FEATURES = {
+  /** Slope/height auto-material rules. Costs 5 heightmap taps + an FBM noise. */
+  autoPaint: true,
+  /** UE-style luminance height blending between layers (uHeightBlend). */
+  heightBlend: true,
+  /** Single-layer greyscale visualisation — EDITOR ONLY, never used in a game. */
+  solo: true,
+  /** Per-layer tangent-space normal mapping from ORM.ba. */
+  normalMap: true,
+};
+
+/**
  * @param {object[]} layerSlots  — 7 objects, each with TSL uniforms:
  *   { uUVScale, uNormalStr, uAOStr, uRoughStr }
  * @param {THREE.DataArrayTexture} albedoArrayTex — 7-layer albedo array
  * @param {THREE.DataArrayTexture} ormArrayTex    — 7-layer ORM array
  *   ORM packing: R=roughness, G=AO, B=normalX_encoded, A=normalY_encoded
  * @param {THREE.DataArrayTexture} splatTex       — SplatMap.tex (2-slice weight map)
+ * @param {?object} heightTexNode
+ * @param {object} [features] — COMPILE-TIME switches; see SPLAT_FEATURES.
  */
-export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, splatTex, heightTexNode = null) {
+export function createSplatOverlay(
+  layerSlots, albedoArrayTex, ormArrayTex, splatTex, heightTexNode = null, features = {},
+) {
   if (layerSlots.length !== NUM_LAYERS) {
     throw new Error(`createSplatOverlay: need ${NUM_LAYERS} layer slots, got ${layerSlots.length}`);
   }
+  const F = { ...SPLAT_FEATURES, ...features };
 
   const invWS = float(1.0 / WORLD_SIZE);
 
@@ -101,7 +132,7 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
   const uAutoHighEnd   = uniform(280.0);
   const uAutoNoise     = uniform(0.25);  // threshold breakup 0..1
 
-  if (heightTexNode) {
+  if (heightTexNode && F.autoPaint) {
     // Terrain normal.y from the same heightmap gradient the terrain mesh uses.
     const texel = float(1.0 / HEIGHTMAP_SIZE);
     const hC = texture(heightTexNode, splatUV).r;
@@ -165,29 +196,36 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
   // ── Blend functions (called from terrainLOD material) ────────────────────────
 
   function blendColor(baseColor) {
-    // Linear weight blend
+    // Linear weight blend — the one path that is always needed.
     let blended = baseColor.mul(nw[0]);
     for (let i = 0; i < NUM_LAYERS; i++) blended = blended.add(layerColors[i].mul(nw[i+1]));
 
-    // Height-based blend (UE-style: luminance as height proxy)
-    const baseH  = baseColor.dot(LUM);
-    const layerH = layerColors.map(c => c.dot(LUM));
-    let maxWH = nw[0].mul(baseH);
-    for (let i = 0; i < NUM_LAYERS; i++) maxWH = max(maxWH, nw[i+1].mul(layerH[i]));
-    const thresh = maxWH.sub(uHeightContrast);
+    let finalColor = blended;
 
-    const aw = [max(float(0), nw[0].mul(baseH).sub(thresh))];
-    for (let i = 0; i < NUM_LAYERS; i++) aw.push(max(float(0), nw[i+1].mul(layerH[i]).sub(thresh)));
-    let totalAW = aw[0];
-    for (let i = 1; i <= NUM_LAYERS; i++) totalAW = totalAW.add(aw[i]);
-    totalAW = max(float(1e-5), totalAW);
+    // Height-based blend (UE-style: luminance as height proxy). ~40 ALU ops that
+    // were previously computed even at uHeightBlend 0 and then mixed out.
+    if (F.heightBlend) {
+      const baseH  = baseColor.dot(LUM);
+      const layerH = layerColors.map(c => c.dot(LUM));
+      let maxWH = nw[0].mul(baseH);
+      for (let i = 0; i < NUM_LAYERS; i++) maxWH = max(maxWH, nw[i+1].mul(layerH[i]));
+      const thresh = maxWH.sub(uHeightContrast);
 
-    let hBlended = baseColor.mul(aw[0].div(totalAW));
-    for (let i = 0; i < NUM_LAYERS; i++) hBlended = hBlended.add(layerColors[i].mul(aw[i+1].div(totalAW)));
+      const aw = [max(float(0), nw[0].mul(baseH).sub(thresh))];
+      for (let i = 0; i < NUM_LAYERS; i++) aw.push(max(float(0), nw[i+1].mul(layerH[i]).sub(thresh)));
+      let totalAW = aw[0];
+      for (let i = 1; i <= NUM_LAYERS; i++) totalAW = totalAW.add(aw[i]);
+      totalAW = max(float(1e-5), totalAW);
 
-    const finalColor = mix(blended, hBlended, uHeightBlend);
+      let hBlended = baseColor.mul(aw[0].div(totalAW));
+      for (let i = 0; i < NUM_LAYERS; i++) hBlended = hBlended.add(layerColors[i].mul(aw[i+1].div(totalAW)));
 
-    // Solo mode (grayscale single-layer visualisation)
+      finalColor = mix(blended, hBlended, uHeightBlend);
+    }
+
+    // Solo mode (greyscale single-layer visualisation) — an EDITOR affordance.
+    // A game can never set uSoloLayer, so it was 7 mixes of pure dead weight.
+    if (!F.solo) return finalColor;
     const isSolo = step(float(0), uSoloLayer);
     let soloW = nw[NUM_LAYERS];
     for (let i = NUM_LAYERS - 1; i >= 0; i--) {
@@ -211,6 +249,9 @@ export function createSplatOverlay(layerSlots, albedoArrayTex, ormArrayTex, spla
    * Terrain TBN: T=(1,0,0)  B=(0,0,1)  N=geomWorldNormal  (XZ-plane world UV mapping).
    */
   function blendNormal(geomWorldNormal) {
+    // 7 × (normalize + sqrt) per pixel. With no layer normal maps in use the
+    // whole chain collapses to the geometric normal it was blending toward.
+    if (!F.normalMap) return geomWorldNormal;
     let accumN = geomWorldNormal.mul(nw[0]);
     for (let i = 0; i < NUM_LAYERS; i++) {
       const orm = layerOrms[i];

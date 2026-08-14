@@ -49,6 +49,37 @@ export const LOD_LEVELS = Math.max(
   Math.ceil(Math.log2((2 * WORLD_SIZE) / (GRID_N * BASE_STEP))) + 1,
 );
 
+/**
+ * COMPILE-TIME feature set for the terrain material.
+ *
+ * WHY THIS IS NOT A SET OF UNIFORMS. Every one of these was already switchable
+ * — and switched off by multiplying its finished result by zero, through a
+ * `mix()` or a `.mul(uOn)`. That skips nothing: the GPU evaluates both sides of
+ * a mix, so a project with no snow, no lake and no procedural ground still ran
+ * all three on every pixel of every frame, then threw the answers away.
+ *
+ * MEASURED (back-to-back A/B, immune to GPU clock drift): the terrain material
+ * is ~87% of the editor's GPU frame, and ONE render pass is ~93% of the frame.
+ * Within that, no single feature dominates — each removal is worth 3–8% — which
+ * is the signature of a shader that is simply too big, so the win has to come
+ * from removing SEVERAL at once rather than finding a hotspot.
+ *
+ * Defaults are ALL ON = bit-for-bit the previous shader; the editor keeps them.
+ * A game passes only what its project actually uses. Uniforms are still created
+ * regardless, so the dev panel, the save format and every caller keep working —
+ * a disabled feature just stops being wired into the output.
+ */
+export const TERRAIN_FEATURES = {
+  /** Brush ring + mask projection. EDITOR ONLY — a game cannot move the cursor. */
+  cursor: true,
+  /** v2 procedural ground TSL under the splat layers (groundProc.uOn). */
+  groundProc: true,
+  /** Painted snow: coverage, albedo, roughness and the sparkle emissive. */
+  snow: true,
+  /** Underwater lakebed tint + caustics. */
+  lakebed: true,
+};
+
 // ── Full grid (level 0) ───────────────────────────────────────────────────────
 
 function buildFullGrid(N, step) {
@@ -220,7 +251,8 @@ function buildRingGrid(N, step) {
 
 // ── Material ──────────────────────────────────────────────────────────────────
 
-function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null, lakebed = null, groundProc = null) {
+function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null, lakebed = null, groundProc = null, features = {}) {
+  const F = { ...TERRAIN_FEATURES, ...features };
   const mat = createTileMaterial({
     roughness:     0.95,
     textureScale:  400,
@@ -270,51 +302,63 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   // Painted coverage × slope, from the same shared functions the deform tile
   // uses — snow can never look different on the two surfaces. Node reused
   // below for color/roughness/emissive, so it's evaluated once per pixel.
-  const snowCov = snowShared ? snowShared.covBlend(wxz) : null;
+  const useSnow = !!snowShared && F.snow;
+  const snowCov = useSnow ? snowShared.covBlend(wxz) : null;
   // Snow smooths the ground: ease the lighting normal toward up where covered.
-  const litWorldN = snowShared
+  const litWorldN = useSnow
     ? normalize(mix(blendedWorldN, vec3(0, 1, 0), snowCov.mul(float(0.45))))
     : blendedWorldN;
   mat.normalNode = normalize(mul(cameraViewMatrix, vec4(litWorldN, 0)).xyz);
   const baseRoughness = splatOverlay ? splatOverlay.blendRoughness(float(0.95)) : float(0.95);
 
-  // Cursor ring (boundary) + mask projection (filled shape preview)
-  const d    = length(hmUV.sub(uCursorUV));
-  const ring = step(uCursorRadius.sub(float(0.003)), d)
-             .mul(step(d, uCursorRadius.add(float(0.003))));
+  // Cursor ring (boundary) + mask projection (filled shape preview).
+  //
+  // EDITOR-ONLY, and previously compiled into every shipped game: a texture
+  // fetch, a smoothstep, two rotations and six steps per pixel, drawing a brush
+  // cursor that a game has no way to move and no reason to show.
+  let ring = null;
+  let maskOverlay = null;
+  if (F.cursor) {
+    const d    = length(hmUV.sub(uCursorUV));
+    ring = step(uCursorRadius.sub(float(0.003)), d)
+         .mul(step(d, uCursorRadius.add(float(0.003))));
 
-  const brushLocalUV = hmUV.sub(uCursorUV).div(uCursorRadius.mul(float(2))).add(float(0.5));
-  const mc           = brushLocalUV.sub(float(0.5));
-  const cosR         = cos(uMaskRotation);
-  const sinR         = sin(uMaskRotation);
-  const rotBrushUV   = vec2(
-    mc.x.mul(cosR).sub(mc.y.mul(sinR)).add(float(0.5)),
-    mc.x.mul(sinR).add(mc.y.mul(cosR)).add(float(0.5)),
-  );
-  const inBoundsX    = step(float(0), rotBrushUV.x).mul(step(rotBrushUV.x, float(1)));
-  const inBoundsY    = step(float(0), rotBrushUV.y).mul(step(rotBrushUV.y, float(1)));
-  // Soft radial fade: clips the overlay to a smooth circle so non-circle brushes
-  // (square, diamond, etc.) don't produce hard straight boundary lines on far LOD.
-  const radialFade   = smoothstep(uCursorRadius, uCursorRadius.mul(float(0.8)), d);
-  const maskOverlay  = texture(uBrushMaskNode, rotBrushUV).r.mul(inBoundsX).mul(inBoundsY).mul(radialFade);
+    const brushLocalUV = hmUV.sub(uCursorUV).div(uCursorRadius.mul(float(2))).add(float(0.5));
+    const mc           = brushLocalUV.sub(float(0.5));
+    const cosR         = cos(uMaskRotation);
+    const sinR         = sin(uMaskRotation);
+    const rotBrushUV   = vec2(
+      mc.x.mul(cosR).sub(mc.y.mul(sinR)).add(float(0.5)),
+      mc.x.mul(sinR).add(mc.y.mul(cosR)).add(float(0.5)),
+    );
+    const inBoundsX    = step(float(0), rotBrushUV.x).mul(step(rotBrushUV.x, float(1)));
+    const inBoundsY    = step(float(0), rotBrushUV.y).mul(step(rotBrushUV.y, float(1)));
+    // Soft radial fade: clips the overlay to a smooth circle so non-circle brushes
+    // (square, diamond, etc.) don't produce hard straight boundary lines on far LOD.
+    const radialFade   = smoothstep(uCursorRadius, uCursorRadius.mul(float(0.8)), d);
+    maskOverlay = texture(uBrushMaskNode, rotBrushUV).r.mul(inBoundsX).mul(inBoundsY).mul(radialFade);
+  }
 
   // Splat overlay blends on top of base colour; painted snow shades on top
   // with the shared snow functions (compression = 0: only the deform tile
   // shows grooves; out here the trail RT doesn't exist).
   // groundProc (v2 procedural ground TSL, uniform-gated) replaces the grey
   // tile base when enabled — the splat layers still paint over it.
-  const tileBase = groundProc
+  // `mix(base, proc, uOn)` EVALUATES BOTH SIDES — a uniform at 0 does not skip
+  // the procedural ground, it computes it and multiplies the result away. So a
+  // project that never enables it still paid for it on every pixel.
+  const tileBase = (groundProc && F.groundProc)
     ? mix(mat.colorNode, groundProc.colorAt(wxz, worldNormal.y, terrainY), groundProc.uOn)
     : mat.colorNode;
   let baseColor = splatOverlay ? splatOverlay.blendColor(tileBase) : tileBase;
   // Paintable meadow TSL (layer card 8): its splat-mask channel blends the
   // procedural meadow color over the image layers wherever it's painted.
-  if (groundProc?.meadowAt && splatOverlay) {
+  if (groundProc?.meadowAt && splatOverlay && F.groundProc) {
     baseColor = splatOverlay.blendMeadow(baseColor, groundProc.meadowAt);
   }
   let finalColor = baseColor;
   let finalRoughness = baseRoughness;
-  if (snowShared) {
+  if (useSnow) {
     const zeroComp = float(0);
     finalColor     = mix(baseColor, snowShared.snowAlbedo(zeroComp), snowCov);
     finalRoughness = mix(baseRoughness, snowShared.snowRoughness(zeroComp), snowCov);
@@ -324,13 +368,17 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   // Underwater lakebed treatment (sand + depth tint + caustics) sits on top of
   // splat and snow — water covers everything — but under the cursor ring, which
   // is editor UI and must stay visible over a submerged brush target.
-  if (lakebed) finalColor = lakebed.apply(finalColor);
+  if (lakebed && F.lakebed) finalColor = lakebed.apply(finalColor);
 
-  mat.colorNode = mix(
-    finalColor,
-    vec3(float(1.0), float(0.95), float(0.2)),
-    ring.mul(float(0.9)).add(maskOverlay.mul(float(0.28))),
-  );
+  // The cursor tint is the ONLY consumer of ring/maskOverlay, so with the
+  // cursor compiled out the colour passes straight through.
+  mat.colorNode = F.cursor
+    ? mix(
+        finalColor,
+        vec3(float(1.0), float(0.95), float(0.2)),
+        ring.mul(float(0.9)).add(maskOverlay.mul(float(0.28))),
+      )
+    : finalColor;
   mat.roughnessNode = finalRoughness;
   mat.needsUpdate = true;
 
@@ -339,7 +387,7 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null, lakebed = null, groundProc = null) {
+export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null, lakebed = null, groundProc = null, features = {}) {
   const group  = new THREE.Group();
   const levels = [];
 
@@ -348,7 +396,7 @@ export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrush
     // Level 0 = full grid; levels 1-4 = stitched rings (no overlap, no polygon offset needed).
     const geo     = lod === 0 ? buildFullGrid(GRID_N, step) : buildRingGrid(GRID_N, step);
     const uCenter = uniform(new THREE.Vector2(0, 0));
-    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed, groundProc);
+    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed, groundProc, features);
     const mesh    = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
     mesh.receiveShadow = true;
@@ -364,5 +412,37 @@ export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrush
     }
   }
 
-  return { group, update };
+  /**
+   * Build a SECOND material set at a different feature level, without touching
+   * the live one.
+   *
+   * Exists because a feature flag is compile-time, so comparing two of them
+   * would otherwise need a page reload — and a reload cannot be compared
+   * against the previous one on a laptop GPU whose clock moves between runs
+   * (measured: the same scene ran 60 fps / 4 ms and later 1.3 fps / 64 ms with
+   * no code change, purely from the GPU sitting at 15% clock). Pre-building
+   * both sets and swapping them in the same second makes the A/B immune to
+   * that: the two measurements share a clock.
+   *
+   * The uCenter uniform is SHARED with the live material rather than recreated,
+   * so a swapped-in variant keeps following the camera exactly as before.
+   *
+   * @param {object} features see TERRAIN_FEATURES
+   * @returns {THREE.Material[]} one per LOD level, index-aligned with `levels`
+   */
+  function buildVariant(features) {
+    return levels.map(({ uCenter }) => createLODMaterial(
+      heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode,
+      uMaskRotation, splatOverlay, snowShared, lakebed, groundProc, features,
+    ));
+  }
+
+  /** Swap a set built by buildVariant() onto the live meshes. */
+  function setVariant(mats) {
+    if (!Array.isArray(mats) || mats.length !== levels.length) return false;
+    for (let i = 0; i < levels.length; i++) levels[i].mesh.material = mats[i];
+    return true;
+  }
+
+  return { group, update, levels, buildVariant, setVariant };
 }
