@@ -284,6 +284,18 @@
         image-rendering: auto;
         pointer-events: none;
       }
+      /* A baked thumbnail is one square cell of a sprite sheet, painted as a
+         background (modularRoadThumbnails.js sets image/size/position). The
+         aspect-ratio pair is what `object-fit: contain` did for the <img> this
+         replaced: stay square, and fit whichever side of the box is shorter. */
+      .tile-sprite {
+        aspect-ratio: 1;
+        height: 100%;
+        max-width: 100%;
+        max-height: 100%;
+        margin: auto;
+        pointer-events: none;
+      }
       .piece-tile-name {
         position: absolute;
         left: 0;

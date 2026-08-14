@@ -67,7 +67,7 @@ import {
   pieceParams,
   guardrailParams,
 } from "./modularRoadKit.js";
-import { bakeRoadThumbnails, blobsToUrls } from "./modularRoadThumbnails.js";
+import { bakeRoadThumbnails, createThumbnailSprites } from "./modularRoadThumbnails.js";
 import {
   thumbnailSignature,
   loadThumbnailCache,
@@ -338,9 +338,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     make: () => buildPortalMesh(DEFAULT_PORTAL_PARAMS, DEFAULT_PORTAL_PARAMS.colorA, "a").root,
   });
   // ── THUMBNAILS: CACHED, AND NEVER ON THE CRITICAL PATH ─────────────────────
-  // Baking all ~175 tiles costs a GPU readback + a PNG encode EACH, which used
-  // to be seconds of startup on every single load for output that changes only
-  // when the catalog, the look or the geometry code does. So:
+  // Baking all ~175 tiles is over a second of GPU and canvas work, which used
+  // to be spent on every single load for output that changes only when the
+  // catalog, the look or the geometry code does. So:
   //   • hit  → read the Blobs back out of IndexedDB (~15 ms) and the palette is
   //            correct on its first paint;
   //   • miss → the palette opens on its SVG fallbacks and the bake runs AFTER
@@ -367,18 +367,19 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     glass: createRoadGlassMaterial({ transmission: 0, opacity: 0.32 }),
   };
 
-  /** key -> object URL, handed to the palette. Replaced wholesale by a bake. */
-  let roadThumbnails = new Map();
+  /** Sprite index over the baked sheet, handed to the palette. Null until a
+   *  cache hit or a bake produces one. */
+  let roadThumbnails = null;
   if (forceRebake) await clearThumbnailCache();
   else {
     try {
       const cached = await loadThumbnailCache(thumbSig);
-      if (cached) roadThumbnails = blobsToUrls(cached);
+      if (cached) roadThumbnails = createThumbnailSprites(cached);
     } catch (e) {
       console.warn("[ModularRoad-v3] thumbnail cache read failed", e);
     }
   }
-  const thumbsWereCached = roadThumbnails.size > 0;
+  const thumbsWereCached = !!roadThumbnails;
 
   let thumbBakeRunning = false;
   /** Bake every tile and hand the result to the palette + the cache. Safe to
@@ -387,17 +388,17 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     if (thumbBakeRunning) return;
     thumbBakeRunning = true;
     try {
-      const tiles = await bakeRoadThumbnails({
+      const baked = await bakeRoadThumbnails({
         renderer,
         materials: thumbMaterials,
         items: thumbItems,
         environment: scene.environment,
         size: THUMB_SIZE,
       });
-      if (!tiles.size) return;
-      roadThumbnails = blobsToUrls(tiles, roadThumbnails);
+      if (!baked) return;
+      roadThumbnails = createThumbnailSprites(baked, roadThumbnails);
       paletteUi?.setThumbnails?.(roadThumbnails);
-      await saveThumbnailCache(thumbSig, tiles);
+      await saveThumbnailCache(thumbSig, baked);
     } catch (e) {
       console.warn("[ModularRoad-v3] thumbnail bake skipped", e);
     } finally {

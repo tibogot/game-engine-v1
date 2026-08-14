@@ -161,8 +161,11 @@ check("palette thumbnails include the pane", /materials\.glass/.test(THUMB_SRC))
 check("glass_road lands on the Straight tab", /\n  glass_road: "straight",/.test(BUILDER_SRC));
 for (const id of ["glass_str", "glass_str_wide"]) {
   const tile = BUILDER_SRC.match(new RegExp(`\\{[^{}]*id: "${id}"[\\s\\S]*?\\n    \\},`))?.[0] ?? "";
+  // No `preview:` artwork any more — the tile is a render of the pane itself,
+  // baked off base + params (see tools/thumbnailCacheTest.mjs), which is why
+  // "palette thumbnails include the pane" above is the check that matters.
   check(`"${id}" is a Straight tile on the glass piece`,
-    tile.length > 0 && /base: "glass_road"/.test(tile) && /preview: `<svg/.test(tile));
+    tile.length > 0 && /base: "glass_road"/.test(tile));
 }
 check("the pane material exists and is physical (ior/transmission are physical-only)",
   /MeshPhysicalNodeMaterial/.test(MAT_SRC) && /ior: g\.ior/.test(MAT_SRC));

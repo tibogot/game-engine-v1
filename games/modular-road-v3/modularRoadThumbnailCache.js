@@ -1,13 +1,12 @@
 /**
  * Persistent store for the palette's baked piece thumbnails (IndexedDB).
  *
- * The bake in modularRoadThumbnails.js renders ~175 tiles, and every one of
- * them costs a GPU→CPU readback plus a PNG encode. Doing that on every page
- * load is seconds of startup for output that only changes when the catalog,
- * the road look or the geometry code changes — so it is baked once and read
- * back from here.
+ * The bake in modularRoadThumbnails.js renders ~175 tiles and encodes them into
+ * a sprite sheet. Doing that on every page load is seconds of work for output
+ * that only changes when the catalog, the road look or the geometry code
+ * changes — so it is baked once and read back from here.
  *
- * NOT localStorage: 175 PNGs is a few MB, well past its ~5 MB quota once the
+ * NOT localStorage: the sheet is a couple of MB, past its ~5 MB quota once the
  * bytes are base64'd into strings. Blobs in IndexedDB stay binary.
  *
  * ── Invalidation ───────────────────────────────────────────────────────────
@@ -27,8 +26,9 @@ const DB_VERSION = 1;
 const STORE = "bakes";
 
 /** Bump BY HAND after changing piece geometry, a prop's make(), or the baker's
- *  own camera/lighting — see the invalidation note above. */
-export const THUMB_CACHE_VERSION = 1;
+ *  own camera/lighting — see the invalidation note above. It also covers the
+ *  stored SHAPE: v2 is the sprite sheet, v1 was one Blob per tile. */
+export const THUMB_CACHE_VERSION = 2;
 
 /** FNV-1a, 32-bit. Only needs to change when its input changes; not a hash
  *  anything depends on for security. */
@@ -80,9 +80,16 @@ function openDb() {
   });
 }
 
+/** A bake is only usable if the sheets AND the index survived the round trip;
+ *  a half-written record has to read as a miss, not as an empty palette. */
+const isBake = (b) =>
+  !!b && Array.isArray(b.sheets) && b.sheets.length > 0
+  && b.sheets.every((s) => s?.blob instanceof Blob)
+  && b.cells instanceof Map && b.cells.size > 0;
+
 /**
  * @param {string} sig from thumbnailSignature()
- * @returns {Promise<Map<string,Blob>|null>} null on a miss OR any failure
+ * @returns {Promise<object|null>} the bake, or null on a miss OR any failure
  */
 export async function loadThumbnailCache(sig) {
   const db = await openDb();
@@ -99,8 +106,7 @@ export async function loadThumbnailCache(sig) {
       req.onsuccess = () => resolve(req.result ?? null);
       req.onerror = () => resolve(null);
     });
-    const tiles = rec?.tiles;
-    return tiles instanceof Map && tiles.size ? tiles : null;
+    return isBake(rec?.bake) ? rec.bake : null;
   } finally {
     db.close();
   }
@@ -108,13 +114,13 @@ export async function loadThumbnailCache(sig) {
 
 /**
  * Store one bake, dropping every older one — a stale signature is dead weight
- * (each bake is a few MB) and there is nothing to go back to.
+ * (a bake is a couple of MB) and there is nothing to go back to.
  *
  * @param {string} sig
- * @param {Map<string,Blob>} tiles
+ * @param {object} bake as returned by bakeRoadThumbnails()
  */
-export async function saveThumbnailCache(sig, tiles) {
-  if (!(tiles instanceof Map) || !tiles.size) return false;
+export async function saveThumbnailCache(sig, bake) {
+  if (!isBake(bake)) return false;
   const db = await openDb();
   if (!db) return false;
   try {
@@ -128,7 +134,7 @@ export async function saveThumbnailCache(sig, tiles) {
       }
       const store = tx.objectStore(STORE);
       store.clear();
-      store.put({ sig, tiles, savedAt: Date.now() });
+      store.put({ sig, bake, savedAt: Date.now() });
       tx.oncomplete = () => resolve(true);
       tx.onerror = () => resolve(false);
       tx.onabort = () => resolve(false);

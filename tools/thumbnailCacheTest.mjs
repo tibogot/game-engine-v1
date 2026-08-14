@@ -20,6 +20,9 @@ const GAME = join(ROOT, "games/modular-road-v3");
 let fail = 0;
 const check = (n, c, d = "") => { console.log(`${c ? "PASS" : "FAIL"}  ${n}${d ? "  — " + d : ""}`); if (!c) fail++; };
 const src = (f) => readFileSync(join(GAME, f), "utf8");
+/** Comments in this module quote the very calls under test ("NOT setViewport()",
+ *  "a readback per tile"), so anything counting call sites has to read code only. */
+const code = (f) => src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 const { thumbnailSignature, THUMB_CACHE_VERSION } = await import(
   pathToFileURL(join(GAME, "modularRoadThumbnailCache.js")).href);
@@ -101,35 +104,82 @@ console.log("\n=== THE BAKE IS OFF THE STARTUP PATH ===");
   check("a second bake cannot start while one is running", /if \(thumbBakeRunning\) return;/.test(game));
 }
 
+console.log("\n=== BATCHED: ONE READBACK PER PAGE, ONE ENCODE PER SHEET ===");
+{
+  // Both costs are PER CALL, not per pixel. Measured 2026-08-14 on 174 tiles:
+  // readback ~20 ms each, PNG encode ~57 ms each (a 182x bigger sheet: 84 ms),
+  // total 6.8 s for the one-target-per-tile shape this replaced.
+  const bake = code("modularRoadThumbnails.js");
+  const run = bake.slice(bake.indexOf("const drawRun ="), bake.indexOf("const finishSheet ="));
+  check("tiles are drawn into cells of one big target",
+    /rt\.viewport\.set\(x, y, cell, cell\)/.test(run) && /rt\.scissor\.set\(x, y, cell, cell\)/.test(run));
+  // A bound target takes its rect from renderTarget.viewport, NOT setViewport().
+  check("...via the target's own viewport, which is what a bound RT reads",
+    !/renderer\.setViewport\(/.test(bake));
+  // WebGPU's viewport origin is top-left and three passes the rect through
+  // unflipped; measuring y up from the bottom mirrors the grid and silently
+  // hands tiles each other's pictures.
+  check("row 0 is the TOP row, matching the top-first readback",
+    /const y = row \* cell;/.test(run) && !/atlas - \(row \+ 1\)/.test(run));
+  check("the page is cleared once, then loaded", /if \(first === 0\)[\s\S]{0,120}renderer\.clear\(\)/.test(run));
+  check("...so later tiles cannot wipe their neighbours", /renderer\.autoClear = false;/.test(run));
+  check("exactly one readback per page",
+    (bake.match(/readRenderTargetPixelsAsync/g) || []).length === 1);
+  check("...outside the draw run", bake.indexOf("readRenderTargetPixelsAsync") > bake.indexOf("const sliceAtlas ="));
+  check("pages are capped under the max texture size", /MAX_ATLAS = 4096/.test(bake));
+  // A resolve covers the WHOLE attachment, so an MSAA atlas would resolve
+  // 3840² once per tile — measured 17-24 s, worse than what it replaced.
+  check("the atlas is NOT multisampled", !/samples:/.test(bake));
+  check("...it supersamples and box-filters down instead", /const SS = 2;/.test(bake));
+  check("one PNG encode per sheet, not per tile",
+    (bake.match(/toBlob\(/g) || []).length === 1
+    && bake.indexOf("toBlob(") > bake.indexOf("const finishSheet ="));
+}
+
 console.log("\n=== THE RUNNING EDITOR KEEPS THE RENDERER ===");
 {
-  const bake = src("modularRoadThumbnails.js");
-  const body = bake.slice(bake.indexOf("for (const item of items)"));
-  const iBind = body.indexOf("renderer.setRenderTarget(rt)");
-  const iRestore = body.indexOf("renderer.setRenderTarget(prevTarget)");
-  const iRead = body.indexOf("readRenderTargetPixelsAsync");
-  check("the thumbnail target is bound per tile", iBind > 0);
-  check("...and released BEFORE the first await", iRestore > iBind && iRestore < iRead,
-    "an await yields a frame; a bound 192px RT would swallow it");
-  check("the clear colour is restored with it",
-    body.indexOf("renderer.setClearColor(prevClear, prevClearAlpha)") < iRead);
-  check("the real clear colour is saved, not assumed black",
-    /renderer\.getClearColor\(prevClear\)/.test(body));
+  const bake = code("modularRoadThumbnails.js");
+  const run = bake.slice(bake.indexOf("const drawRun ="), bake.indexOf("const finishSheet ="));
+  // The bake runs in the background with the frame loop live. Every borrowed
+  // piece of renderer state has to be back before anything yields, or the
+  // editor draws into the atlas.
+  check("the draw run never awaits", !/\bawait\b/.test(run),
+    "an await here yields a frame with the atlas still bound");
+  for (const [what, saved, restored] of [
+    ["render target", "renderer.getRenderTarget()", "renderer.setRenderTarget(prevTarget)"],
+    ["clear colour", "renderer.getClearColor(prevClear)", "renderer.setClearColor(prevClear, prevAlpha)"],
+    ["autoClear", "renderer.autoClear;", "renderer.autoClear = prevAutoClear;"],
+    ["scissor test", "renderer.getScissorTest()", "renderer.setScissorTest(prevScissorTest)"],
+  ]) {
+    check(`${what} is saved and handed back`, run.includes(saved) && run.includes(restored));
+  }
+  check("the editor gets a frame between runs", /await nextFrame\(\)/.test(bake));
+  check("...and the run length is what bounds the freeze", /runLength = 8/.test(bake));
+  // Filtering 175 tiles back to back blocks just as hard as drawing them does.
+  check("the slice yields too", /if \(written % SLICE_RUN === 0\) await nextFrame\(\);/.test(bake));
   check("nothing is left bound after the loop instead",
     !/finally\s*\{[^}]*setRenderTarget/.test(bake));
 }
 
-console.log("\n=== TILES TRAVEL AS BLOBS, NOT DATA-URLS ===");
+console.log("\n=== THE PALETTE PAINTS FROM THE SHEET ===");
 {
   const bake = src("modularRoadThumbnails.js");
   const builder = src("modularRoadBuilder.js");
-  // ~175 PNGs is a few MB; base64 in localStorage would be ~33% bigger again and
-  // over its quota, and toDataURL encodes synchronously on the main thread.
-  check("the baker returns Blobs", /canvas\.toBlob\(resolve, "image\/png"\)/.test(bake));
-  check("...and nothing still encodes through toDataURL", !/canvas\.toDataURL\(/.test(bake));
-  check("object URLs are minted for the palette", /export function blobsToUrls/.test(bake));
-  check("...and the previous set is revoked on a rebake",
-    /URL\.revokeObjectURL\(url\)/.test(bake));
+  const css = src("palette.css");
+  check("nothing encodes through toDataURL", !/canvas\.toDataURL\(/.test(bake));
+  check("sprites are handed out, not one image per tile",
+    /export function createThumbnailSprites/.test(bake));
+  check("...and the previous sheet's URLs are revoked on a rebake",
+    /previous\?\.revoke\(\)/.test(bake) && /URL\.revokeObjectURL\(url\)/.test(bake));
+  // Percentage background-position is a ratio, not an offset: the divisor is
+  // the number of GAPS, and a single-column sheet has none.
+  check("cell offsets use the gap-count form", /\(cols - 1\)/.test(bake) && /\(rows - 1\)/.test(bake));
+  check("...and a 1-wide sheet does not divide by zero",
+    /cols > 1 \?/.test(bake) && /rows > 1 \?/.test(bake));
+  check("the tile element is styled square", /\.tile-sprite\s*\{[^}]*aspect-ratio: 1;/.test(css),
+    "a sprite cell is square; the preview box is not");
+  check("the palette falls back for unbaked keys",
+    /if \(sprite\) \{[\s\S]{0,80}\} else \{[\s\S]{0,120}placeholderSvg\(\)/.test(builder));
   check("the palette can adopt a set after it was built",
     /function setThumbnails\(next\)/.test(builder));
   check("...and is exported", /return \{[^}]*setThumbnails[^}]*\};/.test(builder));
@@ -138,6 +188,40 @@ console.log("\n=== TILES TRAVEL AS BLOBS, NOT DATA-URLS ===");
   const setFn = builder.slice(builder.indexOf("function setThumbnails(next)"));
   check("...without re-rendering the grid under a live brush",
     !setFn.slice(0, setFn.indexOf("\n  }")).includes("renderPieces()"));
+}
+
+console.log("\n=== ONE PLACEHOLDER, NOT 130 HAND-DRAWN SILHOUETTES ===");
+{
+  // Measured 2026-08-14 by walking all 13 category tabs in the running editor:
+  // 135 distinct tiles displayed, 135 with a baked sprite, ZERO falling back.
+  // The drawings were only ever on screen during a cold bake, and every new
+  // piece needed one more of them.
+  const builder = code("modularRoadBuilder.js");
+  check("there is exactly one SVG left in the palette",
+    (builder.match(/<svg/g) || []).length === 1);
+  check("...and it is the bake-failed placeholder", /function placeholderSvg\(\)/.test(builder));
+  check("presets carry no artwork", !/\bpreview:\s*`/.test(builder),
+    "a preset's tile is a render of what its params actually build");
+  check("...and nothing still reads pr.preview", !/pr\.preview/.test(builder));
+  // The label under the tile is what keeps a failed bake usable, so it is not
+  // optional decoration.
+  check("every tile is still labelled", /class = "piece-tile-name"|piece-tile-name/.test(builder));
+  check("both fallback paths go through the placeholder",
+    (builder.match(/placeholderSvg\(\)/g) || []).length === 3, "tiles + category icons + the definition");
+}
+
+console.log("\n=== THE CACHE STORES A WHOLE BAKE OR NOTHING ===");
+{
+  const cache = code("modularRoadThumbnailCache.js");
+  check("the stored shape is validated on the way in AND out",
+    /isBake\(rec\?\.bake\)/.test(cache) && /if \(!isBake\(bake\)\) return false;/.test(cache));
+  check("...so a half-written record reads as a miss, not an empty palette",
+    /return isBake\(rec\?\.bake\) \? rec\.bake : null;/.test(cache));
+  check("the sheet Blobs have to have survived the round trip",
+    /s\?\.blob instanceof Blob/.test(cache));
+  check("...and so does the index", /b\.cells instanceof Map && b\.cells\.size > 0/.test(cache));
+  check("the version covers the stored shape, not just the pixels",
+    THUMB_CACHE_VERSION >= 2, `at v${THUMB_CACHE_VERSION} (v1 was one Blob per tile)`);
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nall green");

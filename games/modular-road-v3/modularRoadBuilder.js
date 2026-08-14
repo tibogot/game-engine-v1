@@ -2089,7 +2089,9 @@ export class ModularRoadBuilder {
 }
 
 /**
- * TrackMania-style palette categories + SVG silhouette previews (no 3D thumbnails yet).
+ * TrackMania-style palette categories. Tiles are baked 3D thumbnails — see
+ * modularRoadThumbnails.js — with placeholderSvg() standing in only when a bake
+ * has not happened or has failed.
  */
 const PIECE_TO_CATEGORY = {
   straight: "straight",
@@ -2154,64 +2156,27 @@ export const PALETTE_CATEGORIES = [
   { id: "loop", label: "Loop" },
 ];
 
-/** Shared road stroke for preview SVGs. */
-const _RS = 'stroke="#e8eaed" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"';
-const _RB = 'fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"';
-/** Junction previews are drawn as DECKS, not centrelines — a fork only reads as
- *  a fork if you can see the two lanes share a surface. _JR = the deck (a fat
- *  stroke), _JC = the through route, _JB = the branch. */
-const _JR = 'fill="none" stroke="#2a2e36" stroke-width="16" stroke-linecap="butt"';
-const _JC = 'fill="none" stroke="#e8eaed" stroke-width="1.6" stroke-dasharray="6 5"';
-const _JB = 'fill="none" stroke="#f39c12" stroke-width="2" stroke-dasharray="4 3"';
-function categoryIconSvg(id) {
-  const icons = {
-    straight: `<svg viewBox="0 0 48 48"><rect x="6" y="20" width="36" height="10" rx="1" ${_RB}/><line x1="8" y1="25" x2="40" y2="25" ${_RS}/></svg>`,
-    turns: `<svg viewBox="0 0 48 48"><path d="M8 34 L8 18 Q8 8 22 8 L34 8" ${_RS}/><rect x="6" y="16" width="28" height="8" rx="1" ${_RB} opacity="0.85"/></svg>`,
-    game: `<svg viewBox="0 0 48 48"><rect x="10" y="22" width="28" height="8" rx="1" ${_RB}/><line x1="16" y1="12" x2="16" y2="22" stroke="#fff" stroke-width="2"/><polygon points="16,8 12,14 20,14" fill="#fff"/><line x1="32" y1="12" x2="32" y2="22" stroke="#fff" stroke-width="2"/><polygon points="32,8 28,14 36,14" fill="#fff"/></svg>`,
-    ramps: `<svg viewBox="0 0 48 48"><polygon points="8,36 40,36 40,14" fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"/><line x1="10" y1="34" x2="38" y2="16" ${_RS}/></svg>`,
-    slopes: `<svg viewBox="0 0 48 48"><polygon points="6,36 42,36 42,12" fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"/><line x1="8" y1="34" x2="40" y2="14" ${_RS}/></svg>`,
-    banked: `<svg viewBox="0 0 48 48"><path d="M6 30 L42 18" ${_RS}/><rect x="8" y="16" width="32" height="8" rx="1" transform="rotate(-12 24 20)" ${_RB}/></svg>`,
-    tubes: `<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" fill="none" stroke="#6a7580" stroke-width="3"/><rect x="12" y="28" width="24" height="6" rx="1" ${_RB}/></svg>`,
-    obstacles: `<svg viewBox="0 0 48 48"><rect x="12" y="14" width="14" height="22" rx="1" fill="#6a7580" stroke="#999" stroke-width="1.5"/><ellipse cx="34" cy="28" rx="8" ry="10" fill="none" stroke="#dce622" stroke-width="2"/></svg>`,
-    scenery: `<svg viewBox="0 0 48 48"><rect x="8" y="10" width="26" height="15" rx="1" fill="#2a2e36" stroke="#dce622" stroke-width="1.8"/><line x1="14" y1="25" x2="14" y2="38" stroke="#999" stroke-width="2"/><line x1="28" y1="25" x2="28" y2="38" stroke="#999" stroke-width="2"/><circle cx="40" cy="16" r="4" fill="none" stroke="#f0c419" stroke-width="2"/><line x1="40" y1="20" x2="40" y2="38" stroke="#999" stroke-width="2"/></svg>`,
-    moving: `<svg viewBox="0 0 48 48"><rect x="8" y="22" width="32" height="6" rx="1" fill="#e8c040" stroke="#999" stroke-width="1.2"/><path d="M24 8 L24 18 M24 32 L24 42" stroke="#dce622" stroke-width="2" stroke-linecap="round"/><path d="M18 8 L24 14 L30 8" fill="none" stroke="#dce622" stroke-width="2" stroke-linecap="round"/></svg>`,
-    loop: `<svg viewBox="0 0 48 48"><circle cx="24" cy="26" r="14" fill="none" stroke="#c0392b" stroke-width="1.8"/><path d="M10 38 L10 26 Q10 12 24 12 Q38 12 38 26 L38 38" ${_RS}/></svg>`,
-    junctions: `<svg viewBox="0 0 48 48"><path d="M19 44 L19 26 Q19 20 25 20 L44 20 M29 44 L29 4" fill="none" stroke="#3a3f48" stroke-width="9" stroke-linecap="butt"/><path d="M24 44 L24 4 M24 24 L44 24" fill="none" stroke="#f39c12" stroke-width="2" stroke-dasharray="4 3"/></svg>`,
-  };
-  return icons[id] ?? icons.straight;
-}
-
-function piecePreviewSvg(pieceId) {
-  const p = {
-    straight: `<svg viewBox="0 0 80 80"><rect x="8" y="32" width="64" height="16" rx="2" ${_RB}/><line x1="12" y1="40" x2="68" y2="40" ${_RS}/></svg>`,
-    tunnel: `<svg viewBox="0 0 80 80"><rect x="8" y="32" width="64" height="16" rx="2" ${_RB}/><path d="M8 32 Q40 8 72 32" fill="none" stroke="#6a7580" stroke-width="3"/></svg>`,
-    curve: `<svg viewBox="0 0 80 80"><path d="M12 68 L12 28 Q12 12 36 12 L68 12" ${_RS}/><path d="M14 66 L14 30 Q14 16 34 16 L66 16" fill="#2a2e36" stroke="#c0392b" stroke-width="1.5"/></svg>`,
-    scurve: `<svg viewBox="0 0 80 80"><path d="M12 68 L12 48 Q12 28 32 28 L48 28 Q68 28 68 12" ${_RS}/></svg>`,
-    slope: `<svg viewBox="0 0 80 80"><polygon points="8,64 72,64 72,20" fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"/><line x1="12" y1="60" x2="68" y2="24" ${_RS}/></svg>`,
-    crest: `<svg viewBox="0 0 80 80"><path d="M8 56 L24 24 L40 56 L56 24 L72 56" ${_RS}/><line x1="8" y1="56" x2="72" y2="56" stroke="#c0392b" stroke-width="1.5"/></svg>`,
-    spiral: `<svg viewBox="0 0 80 80"><path d="M14 66 L14 40 Q14 20 36 16 Q58 12 62 36" ${_RS}/><line x1="14" y1="66" x2="14" y2="50" stroke="#dce622" stroke-width="1.5" opacity="0.7"/></svg>`,
-    banked: `<svg viewBox="0 0 80 80"><path d="M8 52 L72 28" ${_RS}/><rect x="10" y="30" width="60" height="12" rx="2" transform="rotate(-14 40 36)" ${_RB}/></svg>`,
-    bankin: `<svg viewBox="0 0 80 80"><rect x="10" y="38" width="28" height="10" rx="1" ${_RB}/><rect x="38" y="32" width="32" height="10" rx="1" transform="rotate(-16 54 37)" ${_RB}/></svg>`,
-    bankout: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="32" height="10" rx="1" transform="rotate(-16 26 37)" ${_RB}/><rect x="42" y="38" width="28" height="10" rx="1" ${_RB}/></svg>`,
-    jump: `<svg viewBox="0 0 80 80"><polygon points="8,60 72,60 72,28" fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"/><line x1="10" y1="58" x2="70" y2="30" ${_RS}/></svg>`,
-    dive: `<svg viewBox="0 0 80 80"><polygon points="8,20 72,52 8,52" fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"/><line x1="10" y1="22" x2="70" y2="50" ${_RS}/></svg>`,
-    gap: `<svg viewBox="0 0 80 80"><rect x="8" y="48" width="24" height="8" rx="1" ${_RB}/><rect x="48" y="56" width="24" height="8" rx="1" ${_RB}/><path d="M32 52 L48 58" stroke="#dce622" stroke-width="1.5" stroke-dasharray="4 3"/></svg>`,
-    landing: `<svg viewBox="0 0 80 80"><polygon points="8,36 72,36 72,60" fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"/><line x1="10" y1="38" x2="70" y2="58" ${_RS}/></svg>`,
-    brow: `<svg viewBox="0 0 80 80"><polygon points="8,52 72,20 72,52" fill="#2a2e36" stroke="#c0392b" stroke-width="1.8"/><line x1="10" y1="50" x2="70" y2="22" ${_RS}/></svg>`,
-    twist: `<svg viewBox="0 0 80 80"><path d="M12 40 Q40 12 68 40 Q40 68 12 40" ${_RS}/><rect x="30" y="34" width="20" height="8" rx="1" transform="rotate(30 40 38)" ${_RB}/></svg>`,
-    loop: `<svg viewBox="0 0 80 80"><path d="M40 68 Q16 68 16 40 Q16 12 40 12 Q64 12 64 40 Q64 68 40 68" ${_RS}/></svg>`,
-    loop_half: `<svg viewBox="0 0 80 80"><path d="M40 68 Q16 68 16 40 Q16 12 40 12" ${_RS}/></svg>`,
-    loop_spiral: `<svg viewBox="0 0 80 80"><line x1="12" y1="62" x2="28" y2="62" stroke="#c0392b" stroke-width="1.5"/><path d="M28 62 Q22 48 26 34 Q34 18 48 14 Q58 24 54 38 Q48 52 36 58" ${_RS}/></svg>`,
-    start: `<svg viewBox="0 0 80 80"><rect x="10" y="34" width="60" height="12" rx="2" ${_RB}/><rect x="14" y="20" width="8" height="24" fill="#fff"/><rect x="14" y="20" width="16" height="8" fill="#fff"/><rect x="12" y="38" width="8" height="4" fill="#111"/><rect x="20" y="38" width="8" height="4" fill="#fff"/></svg>`,
-    checkpoint: `<svg viewBox="0 0 80 80"><rect x="10" y="34" width="60" height="12" rx="2" ${_RB}/><line x1="28" y1="18" x2="28" y2="34" stroke="#fff" stroke-width="3"/><polygon points="28,12 22,20 34,20" fill="#fff"/><line x1="52" y1="18" x2="52" y2="34" stroke="#fff" stroke-width="3"/><polygon points="52,12 46,20 58,20" fill="#fff"/><polygon points="40,42 34,48 46,48" fill="#ffcc00"/></svg>`,
-    finish: `<svg viewBox="0 0 80 80"><rect x="10" y="34" width="60" height="12" rx="2" ${_RB}/><rect x="36" y="16" width="8" height="28" fill="#fff"/><polygon points="36,12 32,20 40,20" fill="#fff"/><rect x="12" y="38" width="8" height="4" fill="#111"/><rect x="20" y="38" width="8" height="4" fill="#fff"/><rect x="52" y="38" width="8" height="4" fill="#111"/><rect x="60" y="38" width="8" height="4" fill="#fff"/></svg>`,
-    box: `<svg viewBox="0 0 80 80"><rect x="22" y="28" width="36" height="28" rx="2" fill="#6a7580" stroke="#999" stroke-width="1.5"/></svg>`,
-    ramp: `<svg viewBox="0 0 80 80"><polygon points="12,60 68,60 68,24" fill="#e8912d" stroke="#c0392b" stroke-width="1.5"/></svg>`,
-    tube: `<svg viewBox="0 0 80 80"><ellipse cx="40" cy="40" rx="28" ry="14" fill="none" stroke="#3a7bd5" stroke-width="3"/></svg>`,
-    ring: `<svg viewBox="0 0 80 80"><ellipse cx="40" cy="40" rx="26" ry="26" fill="none" stroke="#dce622" stroke-width="4"/></svg>`,
-    airtunnel: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="60" height="16" rx="2" ${_RB}/><path d="M10 32 Q40 10 70 32" fill="none" stroke="#6a7580" stroke-width="3"/></svg>`,
-  };
-  return p[pieceId] ?? p.straight;
+/**
+ * The one placeholder a tile shows when it has no baked thumbnail.
+ *
+ * There used to be ~130 hand-drawn SVGs here — a bespoke silhouette per piece,
+ * per preset and per category. Every one of them was dead art: with the bake
+ * cached, all 135 tiles the palette can show come up as sprites, so the
+ * drawings were only ever on screen for the ~1.5 s of a cold bake, and the
+ * real cost was that adding a piece meant drawing one more of them (which
+ * nobody would ever check against what the piece actually builds).
+ *
+ * What is left is the thing that mattered: if the bake FAILS the palette still
+ * has to be usable, and a tile with a plate and its name under it is that. The
+ * label was always there — see .piece-tile-name.
+ */
+function placeholderSvg() {
+  return `<svg viewBox="0 0 80 80" aria-hidden="true">
+    <rect x="14" y="30" width="52" height="20" rx="3"
+          fill="#2a2e36" stroke="#4a515c" stroke-width="1.6"/>
+    <line x1="20" y1="40" x2="60" y2="40"
+          stroke="#5c6470" stroke-width="2" stroke-dasharray="6 5"/>
+  </svg>`;
 }
 
 /**
@@ -2221,7 +2186,10 @@ function piecePreviewSvg(pieceId) {
  * same local geometry, so they're instancing-friendly later. Categories listed
  * here render presets instead of raw parametric pieces; categories absent here
  * fall back to the raw PIECE_CATALOG (converted step by step).
- * @type {Record<string, {id:string,label:string,base:string,params:object,preview:string}[]>}
+ *
+ * A preset needs no artwork: its palette tile is a render of the piece these
+ * params actually build, baked by modularRoadThumbnails.js off `base` + `params`.
+ * @type {Record<string, {id:string,label:string,base:string,params:object}[]>}
  */
 export const CATEGORY_PRESETS = {
   // The Apex-Rush Banks palette: Up/Down transitions curl the deck up from the
@@ -2241,77 +2209,66 @@ export const CATEGORY_PRESETS = {
       label: "Up Right",
       base: "bankin",
       params: { bankRampLength: 44, bankAngle: 22, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="40" width="26" height="10" rx="1" ${_RB}/><rect x="38" y="32" width="32" height="10" rx="1" transform="rotate(-16 54 37)" ${_RB}/></svg>`,
     },
     {
       id: "bank_up_left",
       label: "Up Left",
       base: "bankin",
       params: { bankRampLength: 44, bankAngle: 22, curveDir: -1 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="40" width="26" height="10" rx="1" ${_RB}/><rect x="38" y="32" width="32" height="10" rx="1" transform="rotate(16 54 37)" ${_RB}/></svg>`,
     },
     {
       id: "bank_straight_right",
       label: "Straight Right",
       base: "banktilt",
       params: { straightLength: 32, bankAngle: 22, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="34" width="60" height="12" rx="2" transform="rotate(-16 40 40)" ${_RB}/></svg>`,
     },
     {
       id: "bank_straight_left",
       label: "Straight Left",
       base: "banktilt",
       params: { straightLength: 32, bankAngle: 22, curveDir: -1 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="34" width="60" height="12" rx="2" transform="rotate(16 40 40)" ${_RB}/></svg>`,
     },
     {
       id: "bank_road_tilted",
       label: "Road Tilted",
       base: "banktilt",
       params: { straightLength: 32, bankAngle: 35, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="34" width="60" height="12" rx="2" transform="rotate(-26 40 40)" ${_RB}/></svg>`,
     },
     {
       id: "bank_down_right",
       label: "Down Right",
       base: "bankout",
       params: { bankRampLength: 44, bankAngle: 22, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="32" height="10" rx="1" transform="rotate(-16 26 37)" ${_RB}/><rect x="44" y="40" width="26" height="10" rx="1" ${_RB}/></svg>`,
     },
     {
       id: "bank_down_left",
       label: "Down Left",
       base: "bankout",
       params: { bankRampLength: 44, bankAngle: 22, curveDir: -1 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="32" width="32" height="10" rx="1" transform="rotate(16 26 37)" ${_RB}/><rect x="44" y="40" width="26" height="10" rx="1" ${_RB}/></svg>`,
     },
     {
       id: "bank_short_turn",
       label: "Short Turn",
       base: "banked",
       params: { curveRadius: 34, curveAngle: 60, bankAngle: 22, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M22 68 L22 40 Q22 22 44 22 L66 22" ${_RS}/><rect x="30" y="30" width="34" height="11" rx="2" transform="rotate(-16 47 36)" ${_RB}/></svg>`,
     },
     {
       id: "bank_long_turn",
       label: "Long Turn",
       base: "banked",
       params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><rect x="30" y="30" width="34" height="11" rx="2" transform="rotate(-16 47 36)" ${_RB}/></svg>`,
     },
     {
       id: "wall_ride_right",
       label: "Wall Ride R",
       base: "wallride",
       params: { wallRideLength: 70, wallAngle: 70, wallRamp: 0.38, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M14 66 Q26 66 30 40 Q34 14 46 14" fill="none" stroke="#8e6fc0" stroke-width="8" stroke-linecap="round"/></svg>`,
     },
     {
       id: "wall_ride_left",
       label: "Wall Ride L",
       base: "wallride",
       params: { wallRideLength: 70, wallAngle: 70, wallRamp: 0.38, curveDir: -1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M66 66 Q54 66 50 40 Q46 14 34 14" fill="none" stroke="#8e6fc0" stroke-width="8" stroke-linecap="round"/></svg>`,
     },
   ],
   tubes: [
@@ -2320,49 +2277,42 @@ export const CATEGORY_PRESETS = {
       label: "Tube",
       base: "tube",
       params: { straightLength: 26, tubeRadius: 8, tubeWall: 0.6 },
-      preview: `<svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="26" fill="none" stroke="#6a7580" stroke-width="5"/><circle cx="40" cy="40" r="20" fill="none" stroke="#3f4650" stroke-width="2"/><rect x="30" y="56" width="20" height="5" rx="2" fill="#2a2e36"/></svg>`,
     },
     {
       id: "tube_long",
       label: "Tube Long",
       base: "tube",
       params: { straightLength: 44, tubeRadius: 8, tubeWall: 0.6 },
-      preview: `<svg viewBox="0 0 80 80"><ellipse cx="26" cy="40" rx="12" ry="22" fill="none" stroke="#6a7580" stroke-width="4"/><path d="M26 18 L66 22 M26 62 L66 58" stroke="#6a7580" stroke-width="3"/><ellipse cx="66" cy="40" rx="7" ry="18" fill="none" stroke="#6a7580" stroke-width="3"/></svg>`,
     },
     {
       id: "tube_turn",
       label: "Tube Turn",
       base: "tube_curve",
       params: { curveRadius: 26, curveAngle: 90, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><circle cx="52" cy="52" r="16" fill="none" stroke="#6a7580" stroke-width="4"/><circle cx="52" cy="52" r="11" fill="none" stroke="#3f4650" stroke-width="2"/></svg>`,
     },
     {
       id: "half_tube_str",
       label: "Half Tube",
       base: "half_tube",
       params: { straightLength: 26, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M14 24 A26 26 0 0 0 66 24" fill="none" stroke="#6a7580" stroke-width="5"/><path d="M20 24 A20 20 0 0 0 60 24" fill="none" stroke="#3f4650" stroke-width="2"/><rect x="30" y="39" width="20" height="5" rx="2" fill="#2a2e36"/></svg>`,
     },
     {
       id: "half_tube_long",
       label: "Half Tube Long",
       base: "half_tube",
       params: { straightLength: 44, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M14 26 A22 22 0 0 0 58 26" fill="none" stroke="#6a7580" stroke-width="4"/><path d="M46 32 A14 14 0 0 0 74 32" fill="none" stroke="#6a7580" stroke-width="3"/><path d="M14 26 L46 32 M58 26 L74 32" stroke="#6a7580" stroke-width="3"/></svg>`,
     },
     {
       id: "half_tube_turn",
       label: "Half Tube Turn",
       base: "half_tube_curve",
       params: { curveRadius: 26, curveAngle: 90, curveDir: 1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><path d="M36 46 A16 16 0 0 0 68 46" fill="none" stroke="#6a7580" stroke-width="4"/><path d="M41 46 A11 11 0 0 0 63 46" fill="none" stroke="#3f4650" stroke-width="2"/></svg>`,
     },
     {
       id: "half_tube_deep",
       label: "Deep Half Tube",
       base: "half_tube",
       params: { straightLength: 26, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 240 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M19 28 A24 24 0 1 0 61 28" fill="none" stroke="#6a7580" stroke-width="5"/><path d="M24 31 A18 18 0 1 0 56 31" fill="none" stroke="#3f4650" stroke-width="2"/><rect x="30" y="53" width="20" height="5" rx="2" fill="#2a2e36"/></svg>`,
     },
     {
       // THE SNOWBOARD PIPE. Same piece as the half tubes above — this is not a
@@ -2411,49 +2361,42 @@ export const CATEGORY_PRESETS = {
       label: "Park Pipe",
       base: "half_pipe",
       params: { straightLength: 60, tubeRadius: 26, tubeWall: 0.6, halfPipeFlat: 12, halfPipeVert: 17 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M12 8 L12 30 A22 22 0 0 0 34 52 L46 52 A22 22 0 0 0 68 30 L68 8" fill="none" stroke="#6a7580" stroke-width="5"/><path d="M19 10 L19 30 A15 15 0 0 0 34 45 L46 45 A15 15 0 0 0 61 30 L61 10" fill="none" stroke="#3f4650" stroke-width="2"/><rect x="32" y="47" width="16" height="4" rx="1" fill="#2a2e36"/></svg>`,
     },
     {
       id: "half_pipe_park_long",
       label: "Park Pipe Long",
       base: "half_pipe",
       params: { straightLength: 110, tubeRadius: 26, tubeWall: 0.6, halfPipeFlat: 12, halfPipeVert: 17 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M8 10 L8 28 A18 18 0 0 0 26 46 L34 46 A18 18 0 0 0 52 28 L52 10" fill="none" stroke="#6a7580" stroke-width="4"/><path d="M30 24 L30 40 A14 14 0 0 0 44 54 L52 54 A14 14 0 0 0 66 40 L66 24" fill="none" stroke="#6a7580" stroke-width="3"/><path d="M8 10 L30 24 M52 10 L66 24" stroke="#6a7580" stroke-width="2.5"/></svg>`,
     },
     {
       id: "half_pipe_park_turn",
       label: "Park Pipe Turn",
       base: "half_pipe_curve",
       params: { curveRadius: 60, curveAngle: 60, curveDir: 1, tubeRadius: 26, tubeWall: 0.6, halfPipeFlat: 12, halfPipeVert: 17 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M14 72 L14 46 Q14 22 38 22 L68 22" ${_RS}/><path d="M30 20 L30 40 A14 14 0 0 0 44 54 L52 54 A14 14 0 0 0 66 40 L66 20" fill="none" stroke="#6a7580" stroke-width="4"/><path d="M36 22 L36 40 A9 9 0 0 0 45 49 L51 49 A9 9 0 0 0 60 40 L60 22" fill="none" stroke="#3f4650" stroke-width="2"/></svg>`,
     },
     {
       id: "tunnel_str",
       label: "Arch Tunnel",
       base: "tunnel",
       params: { straightLength: 26, tunnelHeight: 7 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="8" y="34" width="64" height="14" rx="2" ${_RB}/><path d="M8 34 Q40 8 72 34" fill="none" stroke="#6a7580" stroke-width="3"/></svg>`,
     },
     {
       id: "tunnel_turn",
       label: "Arch Turn",
       base: "tunnel_curve",
       params: { curveRadius: 26, curveAngle: 90, curveDir: 1, tunnelHeight: 7 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><path d="M30 52 Q30 30 52 30" fill="none" stroke="#6a7580" stroke-width="6" stroke-linecap="round"/></svg>`,
     },
     {
       id: "channel_str",
       label: "Half-pipe",
       base: "channel",
       params: { straightLength: 26, channelRadius: 4 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M12 28 Q16 46 40 46 Q64 46 68 28" fill="none" stroke="#3a7bd5" stroke-width="4"/><rect x="26" y="42" width="28" height="7" rx="1" ${_RB}/></svg>`,
     },
     {
       id: "channel_turn",
       label: "Half-pipe Turn",
       base: "channel_curve",
       params: { curveRadius: 26, curveAngle: 90, curveDir: 1, channelRadius: 4 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M18 70 L18 40 Q18 18 40 18 L70 18" ${_RS}/><path d="M32 56 Q32 32 56 32" fill="none" stroke="#3a7bd5" stroke-width="6" stroke-linecap="round"/></svg>`,
     },
   ],
   straight: [
@@ -2462,63 +2405,54 @@ export const CATEGORY_PRESETS = {
       label: "Short",
       base: "straight",
       params: { straightLength: 14 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="26" y="32" width="28" height="16" rx="2" ${_RB}/><line x1="30" y1="40" x2="50" y2="40" ${_RS}/></svg>`,
     },
     {
       id: "straight_long",
       label: "Long",
       base: "straight",
       params: { straightLength: 32 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="8" y="32" width="64" height="16" rx="2" ${_RB}/><line x1="12" y1="40" x2="68" y2="40" ${_RS}/></svg>`,
     },
     {
       id: "straight_tunnel",
       label: "Tunnel",
       base: "tunnel",
       params: { straightLength: 22, tunnelHeight: 7 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="8" y="34" width="64" height="14" rx="2" ${_RB}/><path d="M8 34 Q40 8 72 34" fill="none" stroke="#6a7580" stroke-width="3"/></svg>`,
     },
     {
       id: "platform_pad",
       label: "Platform",
       base: "platform",
       params: { platformLength: 24, platformWidth: 44 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="10" y="22" width="60" height="36" rx="2" fill="#565f6b" stroke="#8a929c" stroke-width="1.5"/></svg>`,
     },
     {
       id: "narrow_run",
       label: "Narrow",
       base: "narrow",
       params: { straightLength: 24, narrowWidth: 8 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="34" y="10" width="12" height="60" rx="1" ${_RB}/><line x1="40" y1="14" x2="40" y2="66" ${_RS}/></svg>`,
     },
     {
       id: "glass_str",
       label: "Glass Road",
       base: "glass_road",
       params: { glassLength: 32, glassWidth: 16, glassHole: 9 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="24" y="8" width="32" height="64" rx="2" fill="#7d1420" stroke="#e0555f" stroke-width="1.8"/><rect x="29" y="27" width="22" height="26" rx="1" fill="#8fd3e4" fill-opacity="0.42" stroke="#cfeef7" stroke-width="1.6"/><path d="M31 50 L47 29" stroke="#ffffff" stroke-opacity="0.55" stroke-width="2" stroke-linecap="round"/></svg>`,
     },
     {
       id: "glass_str_wide",
       label: "Glass Road XL",
       base: "glass_road",
       params: { glassLength: 36, glassWidth: 26, glassHole: 16 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="16" y="8" width="48" height="64" rx="2" fill="#7d1420" stroke="#e0555f" stroke-width="1.8"/><rect x="21" y="21" width="38" height="38" rx="1" fill="#8fd3e4" fill-opacity="0.42" stroke="#cfeef7" stroke-width="1.6"/><path d="M24 55 L52 24" stroke="#ffffff" stroke-opacity="0.55" stroke-width="2" stroke-linecap="round"/></svg>`,
     },
     {
       id: "hole_road",
       label: "Hole Road",
       base: "holed",
       params: { holedLength: 32, holedWidth: 16, holeRadius: 5 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="24" y="8" width="32" height="64" rx="2" ${_RB}/><circle cx="40" cy="40" r="11" fill="#12151a" stroke="#dce622" stroke-width="1.5"/></svg>`,
     },
     {
       id: "hole_road_xl",
       label: "Hole Road XL",
       base: "holed",
       params: { holedLength: 36, holedWidth: 26, holeRadius: 9 },
-      preview: `<svg viewBox="0 0 80 80"><rect x="16" y="8" width="48" height="64" rx="2" ${_RB}/><circle cx="40" cy="40" r="17" fill="#12151a" stroke="#dce622" stroke-width="1.5"/></svg>`,
     },
   ],
   ramps: [
@@ -2527,126 +2461,108 @@ export const CATEGORY_PRESETS = {
       label: "Ramp 10",
       base: "jump",
       params: { jumpLength: 12, jumpAngle: 18 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="62" x2="72" y2="62" stroke="#c0392b" stroke-width="1.5"/><path d="M14 62 Q46 62 64 40" ${_RS}/></svg>`,
     },
     {
       id: "ramp_20",
       label: "Ramp 20",
       base: "jump",
       params: { jumpLength: 18, jumpAngle: 24 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="62" x2="72" y2="62" stroke="#c0392b" stroke-width="1.5"/><path d="M12 62 Q44 62 66 32" ${_RS}/></svg>`,
     },
     {
       id: "ramp_40",
       label: "Ramp 40",
       base: "jump",
       params: { jumpLength: 26, jumpAngle: 30 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="64" x2="72" y2="64" stroke="#c0392b" stroke-width="1.5"/><path d="M12 64 Q42 64 66 24" ${_RS}/></svg>`,
     },
     {
       id: "ramp_100",
       label: "Ramp 100",
       base: "jump",
       params: { jumpLength: 44, jumpAngle: 36 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="66" x2="72" y2="66" stroke="#c0392b" stroke-width="1.5"/><path d="M10 66 Q40 66 68 16" ${_RS}/></svg>`,
     },
     {
       id: "ramp_mega",
       label: "Mega ramp",
       base: "jump",
       params: { jumpLength: 56, jumpAngle: 44 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="6" y1="70" x2="74" y2="70" stroke="#c0392b" stroke-width="1.5"/><path d="M8 70 Q44 70 70 8" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
     },
     {
       id: "dive_10",
       label: "Dive 10",
       base: "dive",
       params: { diveLength: 12, diveAngle: 18 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="18" x2="72" y2="18" stroke="#c0392b" stroke-width="1.5"/><path d="M14 18 Q46 18 64 40" ${_RS}/></svg>`,
     },
     {
       id: "dive_20",
       label: "Dive 20",
       base: "dive",
       params: { diveLength: 18, diveAngle: 24 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="18" x2="72" y2="18" stroke="#c0392b" stroke-width="1.5"/><path d="M12 18 Q44 18 66 48" ${_RS}/></svg>`,
     },
     {
       id: "dive_40",
       label: "Dive 40",
       base: "dive",
       params: { diveLength: 26, diveAngle: 30 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="16" x2="72" y2="16" stroke="#c0392b" stroke-width="1.5"/><path d="M12 16 Q42 16 66 56" ${_RS}/></svg>`,
     },
     {
       id: "dive_100",
       label: "Dive 100",
       base: "dive",
       params: { diveLength: 44, diveAngle: 36 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="14" x2="72" y2="14" stroke="#c0392b" stroke-width="1.5"/><path d="M10 14 Q40 14 68 64" ${_RS}/></svg>`,
     },
     {
       id: "drop_vert",
       label: "Vert drop",
       base: "dive",
       params: { diveLength: 30, diveAngle: 78 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="12" x2="72" y2="12" stroke="#c0392b" stroke-width="1.5"/><path d="M14 12 Q40 12 44 70" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
     },
     {
       id: "land_10",
       label: "Land 10",
       base: "landing",
       params: { landLength: 12, landAngle: 18 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="62" x2="72" y2="62" stroke="#c0392b" stroke-width="1.5"/><path d="M16 40 Q34 62 66 62" ${_RS}/></svg>`,
     },
     {
       id: "land_20",
       label: "Land 20",
       base: "landing",
       params: { landLength: 18, landAngle: 24 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="62" x2="72" y2="62" stroke="#c0392b" stroke-width="1.5"/><path d="M14 32 Q36 62 68 62" ${_RS}/></svg>`,
     },
     {
       id: "land_40",
       label: "Land 40",
       base: "landing",
       params: { landLength: 26, landAngle: 30 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="64" x2="72" y2="64" stroke="#c0392b" stroke-width="1.5"/><path d="M14 24 Q38 64 68 64" ${_RS}/></svg>`,
     },
     {
       id: "land_100",
       label: "Land 100",
       base: "landing",
       params: { landLength: 44, landAngle: 36 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="66" x2="72" y2="66" stroke="#c0392b" stroke-width="1.5"/><path d="M12 16 Q40 66 70 66" ${_RS}/></svg>`,
     },
     {
       id: "brow_10",
       label: "Brow 10",
       base: "brow",
       params: { browLength: 12, browAngle: 18 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="18" x2="72" y2="18" stroke="#c0392b" stroke-width="1.5"/><path d="M16 40 Q34 18 66 18" ${_RS}/></svg>`,
     },
     {
       id: "brow_20",
       label: "Brow 20",
       base: "brow",
       params: { browLength: 18, browAngle: 24 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="18" x2="72" y2="18" stroke="#c0392b" stroke-width="1.5"/><path d="M14 48 Q36 18 68 18" ${_RS}/></svg>`,
     },
     {
       id: "brow_40",
       label: "Brow 40",
       base: "brow",
       params: { browLength: 26, browAngle: 30 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="16" x2="72" y2="16" stroke="#c0392b" stroke-width="1.5"/><path d="M14 56 Q38 16 68 16" ${_RS}/></svg>`,
     },
     {
       id: "brow_100",
       label: "Brow 100",
       base: "brow",
       params: { browLength: 44, browAngle: 36 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="8" y1="14" x2="72" y2="14" stroke="#c0392b" stroke-width="1.5"/><path d="M12 64 Q40 14 70 14" ${_RS}/></svg>`,
     },
   ],
   slopes: [
@@ -2656,21 +2572,18 @@ export const CATEGORY_PRESETS = {
       label: "Up Gentle",
       base: "slope",
       params: { slopeLength: 30, slopeRise: 5 },
-      preview: `<svg viewBox="0 0 80 80"><polygon points="10,64 70,64 70,48" ${_RB}/><line x1="12" y1="62" x2="68" y2="50" ${_RS}/></svg>`,
     },
     {
       id: "slope_up_medium",
       label: "Up Medium",
       base: "slope",
       params: { slopeLength: 28, slopeRise: 10 },
-      preview: `<svg viewBox="0 0 80 80"><polygon points="10,64 70,64 70,34" ${_RB}/><line x1="12" y1="62" x2="68" y2="36" ${_RS}/></svg>`,
     },
     {
       id: "slope_up_steep",
       label: "Up Steep",
       base: "slope",
       params: { slopeLength: 26, slopeRise: 16 },
-      preview: `<svg viewBox="0 0 80 80"><polygon points="10,64 70,64 70,20" ${_RB}/><line x1="12" y1="62" x2="68" y2="22" ${_RS}/></svg>`,
     },
     // Descents — same shape, negative rise.
     {
@@ -2678,21 +2591,18 @@ export const CATEGORY_PRESETS = {
       label: "Down Gentle",
       base: "slope",
       params: { slopeLength: 30, slopeRise: -5 },
-      preview: `<svg viewBox="0 0 80 80"><polygon points="10,48 10,64 70,64" ${_RB}/><line x1="12" y1="50" x2="68" y2="62" ${_RS}/></svg>`,
     },
     {
       id: "slope_down_medium",
       label: "Down Medium",
       base: "slope",
       params: { slopeLength: 28, slopeRise: -10 },
-      preview: `<svg viewBox="0 0 80 80"><polygon points="10,34 10,64 70,64" ${_RB}/><line x1="12" y1="36" x2="68" y2="62" ${_RS}/></svg>`,
     },
     {
       id: "slope_down_steep",
       label: "Down Steep",
       base: "slope",
       params: { slopeLength: 26, slopeRise: -16 },
-      preview: `<svg viewBox="0 0 80 80"><polygon points="10,20 10,64 70,64" ${_RB}/><line x1="12" y1="22" x2="68" y2="62" ${_RS}/></svg>`,
     },
     // Crests — net-zero bump / dip (rise to the middle, level at both ends).
     {
@@ -2700,14 +2610,12 @@ export const CATEGORY_PRESETS = {
       label: "Hill",
       base: "crest",
       params: { slopeLength: 32, slopeRise: 8 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M10 64 L10 52 Q40 18 70 52 L70 64 Z" ${_RB}/><path d="M12 52 Q40 24 68 52" fill="none" ${_RS}/></svg>`,
     },
     {
       id: "slope_dip",
       label: "Dip",
       base: "crest",
       params: { slopeLength: 32, slopeRise: -8 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M10 34 Q40 70 70 34 L70 64 L10 64 Z" ${_RB}/><path d="M10 34 Q40 66 70 34" fill="none" ${_RS}/></svg>`,
     },
     // Climbing turn — stack to gain height.
     {
@@ -2715,7 +2623,6 @@ export const CATEGORY_PRESETS = {
       label: "Helix",
       base: "spiral",
       params: { spiralRadius: 18, spiralAngle: 180, spiralRise: 10, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M20 64 L20 44 Q20 26 40 26 Q60 26 60 44" ${_RS}/><path d="M26 54 Q40 40 56 48" fill="none" stroke="#c0392b" stroke-width="1.4" opacity="0.7"/></svg>`,
     },
   ],
   turns: [
@@ -2724,49 +2631,42 @@ export const CATEGORY_PRESETS = {
       label: "Smooth Small",
       base: "curve",
       params: { curveRadius: 24, curveAngle: 45, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M20 70 L20 46 Q20 30 40 26 L62 22" ${_RS}/></svg>`,
     },
     {
       id: "turn_smooth_long",
       label: "Smooth Long",
       base: "curve",
       params: { curveRadius: 24, curveAngle: 90, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M20 70 L20 40 Q20 20 40 20 L70 20" ${_RS}/></svg>`,
     },
     {
       id: "turn_smooth_longer",
       label: "Smooth Longer",
       base: "curve",
       params: { curveRadius: 30, curveAngle: 135, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M22 70 L22 38 Q22 16 44 16 Q62 16 64 36" ${_RS}/></svg>`,
     },
     {
       id: "turn_smooth_longest",
       label: "Smooth Longest",
       base: "curve",
       params: { curveRadius: 34, curveAngle: 180, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M20 70 L20 40 Q20 14 42 14 Q64 14 64 40 L64 70" ${_RS}/></svg>`,
     },
     {
       id: "turn_sharp_small",
       label: "Sharp Small",
       base: "curve",
       params: { curveRadius: 12, curveAngle: 90, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M22 70 L22 36 Q22 22 36 22 L70 22" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
     },
     {
       id: "turn_s_left",
       label: "S Left",
       base: "scurve",
       params: { curveRadius: 20, curveAngle: 38, curveDir: -1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M58 70 L58 50 Q58 34 40 34 Q22 34 22 18 L22 10" ${_RS}/></svg>`,
     },
     {
       id: "turn_s_right",
       label: "S Right",
       base: "scurve",
       params: { curveRadius: 20, curveAngle: 38, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M22 70 L22 50 Q22 34 40 34 Q58 34 58 18 L58 10" ${_RS}/></svg>`,
     },
   ],
   // JUNCTIONS. Every tile is the same handful of plate shapes at different
@@ -2778,98 +2678,84 @@ export const CATEGORY_PRESETS = {
       label: "Split R",
       base: "junction_split",
       params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M40 46 Q50 38 70 18" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M42 48 Q52 40 68 22" ${_JB}/></svg>`,
     },
     {
       id: "junction_split_l",
       label: "Split L",
       base: "junction_split",
       params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: -1 },
-      preview: `<svg viewBox="0 0 80 80"><g transform="translate(80,0) scale(-1,1)"><path d="M40 76 L40 6" ${_JR}/><path d="M40 46 Q50 38 70 18" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M42 48 Q52 40 68 22" ${_JB}/></g></svg>`,
     },
     {
       id: "junction_split_wide",
       label: "Split wide",
       base: "junction_split",
       params: { splitAngle: 40, splitLength: 44, splitArm: 34, splitStart: 6, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M40 50 L74 24" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M42 52 L72 28" ${_JB}/></svg>`,
     },
     {
       id: "junction_merge_r",
       label: "Merge R",
       base: "junction_merge",
       params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M40 34 Q50 42 70 62" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M68 58 Q52 40 42 32" ${_JB}/></svg>`,
     },
     {
       id: "junction_merge_l",
       label: "Merge L",
       base: "junction_merge",
       params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: -1 },
-      preview: `<svg viewBox="0 0 80 80"><g transform="translate(80,0) scale(-1,1)"><path d="M40 76 L40 6" ${_JR}/><path d="M40 34 Q50 42 70 62" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M68 58 Q52 40 42 32" ${_JB}/></g></svg>`,
     },
     {
       id: "junction_y_r",
       label: "Y fork R",
       base: "junction_y",
       params: { forkAngle: 30, forkArm: 34, forkThroat: 6, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 44" ${_JR}/><path d="M40 44 L68 10" ${_JR}/><path d="M40 44 L12 10" ${_JR}/><path d="M40 76 L40 46 L66 14" ${_JC}/><path d="M38 46 L14 16" ${_JB}/></svg>`,
     },
     {
       id: "junction_y_l",
       label: "Y fork L",
       base: "junction_y",
       params: { forkAngle: 30, forkArm: 34, forkThroat: 6, curveDir: -1 },
-      preview: `<svg viewBox="0 0 80 80"><g transform="translate(80,0) scale(-1,1)"><path d="M40 76 L40 44" ${_JR}/><path d="M40 44 L68 10" ${_JR}/><path d="M40 44 L12 10" ${_JR}/><path d="M40 76 L40 46 L66 14" ${_JC}/><path d="M38 46 L14 16" ${_JB}/></g></svg>`,
     },
     {
       id: "junction_y_wide",
       label: "Y fork wide",
       base: "junction_y",
       params: { forkAngle: 55, forkArm: 30, forkThroat: 4, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 50" ${_JR}/><path d="M40 50 L74 26" ${_JR}/><path d="M40 50 L6 26" ${_JR}/><path d="M40 76 L40 52 L70 30" ${_JC}/><path d="M38 52 L10 32" ${_JB}/></svg>`,
     },
     {
       id: "junction_t_r",
       label: "T right",
       base: "junction_t",
       params: { junctionLength: 34, junctionStub: 24, junctionFillet: 6, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M40 40 L74 40" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M44 38 L72 38" ${_JB}/></svg>`,
     },
     {
       id: "junction_t_l",
       label: "T left",
       base: "junction_t",
       params: { junctionLength: 34, junctionStub: 24, junctionFillet: 6, curveDir: -1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M6 40 L40 40" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M8 38 L36 38" ${_JB}/></svg>`,
     },
     {
       id: "junction_cross_std",
       label: "Crossroads",
       base: "junction_cross",
       params: { junctionLength: 34, junctionStub: 24, junctionFillet: 6 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M40 76 L40 6" ${_JR}/><path d="M6 40 L74 40" ${_JR}/><path d="M40 76 L40 6" ${_JC}/><path d="M6 38 L74 38" ${_JB}/></svg>`,
     },
     {
       id: "junction_cross_big",
       label: "Crossroads XL",
       base: "junction_cross",
       params: { junctionLength: 48, junctionStub: 36, junctionFillet: 10 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M40 78 L40 2" fill="none" stroke="#2a2e36" stroke-width="22"/><path d="M2 40 L78 40" fill="none" stroke="#2a2e36" stroke-width="22"/><path d="M40 78 L40 2" ${_JC}/><path d="M2 38 L78 38" ${_JB}/></svg>`,
     },
     {
       id: "junction_roundabout_std",
       label: "Roundabout",
       base: "junction_roundabout",
       params: { roundaboutRadius: 22, roundaboutStub: 10 },
-      preview: `<svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="22" fill="none" stroke="#2a2e36" stroke-width="14"/><path d="M40 78 L40 62 M40 18 L40 2 M2 40 L18 40 M62 40 L78 40" ${_JR}/><circle cx="40" cy="40" r="15" fill="#12151a" stroke="#f39c12" stroke-width="1.4"/><path d="M52 24 a20 20 0 0 1 6 12" fill="none" stroke="#f39c12" stroke-width="2" stroke-dasharray="4 3"/></svg>`,
     },
     {
       id: "junction_roundabout_big",
       label: "Roundabout XL",
       base: "junction_roundabout",
       params: { roundaboutRadius: 34, roundaboutStub: 14 },
-      preview: `<svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="27" fill="none" stroke="#2a2e36" stroke-width="12"/><path d="M40 78 L40 68 M40 12 L40 2 M2 40 L12 40 M68 40 L78 40" ${_JR}/><circle cx="40" cy="40" r="21" fill="#12151a" stroke="#f39c12" stroke-width="1.4"/></svg>`,
     },
   ],
   loop: [
@@ -2878,49 +2764,42 @@ export const CATEGORY_PRESETS = {
       label: "Looping",
       base: "loop",
       params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopLean: 0, loopTighten: 0, loopHalf: "full", curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M14 66 Q14 14 40 14 Q66 14 66 50 Q66 66 50 66" ${_RS}/><line x1="8" y1="66" x2="72" y2="66" stroke="#c0392b" stroke-width="1.2"/></svg>`,
     },
     {
       id: "loop_half_right",
       label: "Ring half (in)",
       base: "loop_half",
       params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopHalf: "in", curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M40 68 Q18 68 18 40 Q18 14 40 14" ${_RS}/></svg>`,
     },
     {
       id: "loop_half_left",
       label: "Ring half (out)",
       base: "loop_half",
       params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopHalf: "out", curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><path d="M40 14 Q62 14 62 40 Q62 68 40 68" ${_RS}/></svg>`,
     },
     {
       id: "loop_spiral_right",
       label: "Spiral ramp (R)",
       base: "loop_spiral",
       params: { loopSpiralRadius: 12, loopSpiralTurns: 1, loopSpiralRise: 32, curveDir: 1 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="10" y1="62" x2="26" y2="62" stroke="#c0392b" stroke-width="1.5"/><path d="M26 62 Q20 46 24 32 Q32 16 46 12 Q56 22 52 36 Q46 50 34 56" ${_RS}/></svg>`,
     },
     {
       id: "loop_spiral_left",
       label: "Spiral ramp (L)",
       base: "loop_spiral",
       params: { loopSpiralRadius: 12, loopSpiralTurns: 1, loopSpiralRise: 32, curveDir: -1 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="70" y1="62" x2="54" y2="62" stroke="#c0392b" stroke-width="1.5"/><path d="M54 62 Q60 46 56 32 Q48 16 34 12 Q24 22 28 36 Q34 50 46 56" ${_RS}/></svg>`,
     },
     {
       id: "quarterpipe_full",
       label: "Quarter-pipe",
       base: "quarterpipe",
       params: { qpRadius: 16, qpAngle: 90 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="6" y1="66" x2="74" y2="66" stroke="#c0392b" stroke-width="1.2"/><path d="M14 66 Q52 66 56 16" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
     },
     {
       id: "quarterpipe_kick",
       label: "Wall kicker",
       base: "quarterpipe",
       params: { qpRadius: 13, qpAngle: 72 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="6" y1="66" x2="74" y2="66" stroke="#c0392b" stroke-width="1.2"/><path d="M14 66 Q48 66 62 26" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
     },
     {
       // SKATEPARK RE-ENTRY: ride up, pop off the lip, drop back onto the SAME
@@ -2980,7 +2859,6 @@ export const CATEGORY_PRESETS = {
       label: "Park bowl",
       base: "quarterpipe",
       params: { qpRadius: 60, qpAngle: 90 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="4" y1="70" x2="40" y2="70" stroke="#c0392b" stroke-width="1.2"/><path d="M8 70 Q56 70 62 8" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M50 30 a13 13 0 0 1 -9 22" stroke="#16a0c0" stroke-width="1.6" fill="none" stroke-dasharray="3 2"/></svg>`,
     },
     {
       // The same re-entry on a smaller wall — and 40 m IS the smallest that works.
@@ -3015,7 +2893,6 @@ export const CATEGORY_PRESETS = {
       label: "Park bowl (small)",
       base: "quarterpipe",
       params: { qpRadius: 40, qpAngle: 90 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="4" y1="66" x2="46" y2="66" stroke="#c0392b" stroke-width="1.2"/><path d="M10 66 Q52 66 56 26" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M46 40 a9 9 0 0 1 -6 15" stroke="#16a0c0" stroke-width="1.6" fill="none" stroke-dasharray="3 2"/></svg>`,
     },
     {
       // THE SHORT-FLIGHT BOWL. The two above launch the car 90 m up and hold it
@@ -3050,14 +2927,12 @@ export const CATEGORY_PRESETS = {
       label: "Park bowl XL",
       base: "quarterpipe",
       params: { qpRadius: 74, qpAngle: 90 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="4" y1="74" x2="34" y2="74" stroke="#c0392b" stroke-width="1.2"/><path d="M8 74 Q58 74 60 6" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M60 6 l5 -2" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M56 20 a10 10 0 0 1 -7 17" stroke="#16a0c0" stroke-width="1.6" fill="none" stroke-dasharray="3 2"/></svg>`,
     },
     {
       id: "quarterpipe_down",
       label: "Quarter-pipe down",
       base: "quarterpipe_down",
       params: { qpRadius: 16, qpAngle: 90 },
-      preview: `<svg viewBox="0 0 80 80"><line x1="6" y1="14" x2="74" y2="14" stroke="#c0392b" stroke-width="1.2"/><path d="M14 14 Q52 14 56 64" stroke="#e8eaed" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
     },
   ],
 };
@@ -3124,19 +2999,24 @@ export function buildRoadPaletteUI(builder, opts = {}) {
    *  setThumbnails(), rather than making startup wait for the bake. */
   let thumbs = thumbnails;
 
-  function categoryIconMarkup(catId) {
-    const key = categoryThumbnailKey(catId, propCatalog, moverCatalog);
-    const thumb = key ? thumbs?.get(key) : null;
-    if (thumb) return `<img src="${thumb}" alt="" draggable="false">`;
-    return categoryIconSvg(catId);
+  /**
+   * A baked tile is one cell of a sprite sheet, so it is painted as a
+   * background on its own square element rather than being an <img> — see
+   * createThumbnailSprites(). Returns null when nothing was baked for `key`,
+   * which is the caller's cue to fall back to the hand-drawn SVG.
+   */
+  function thumbSprite(key) {
+    if (!thumbs?.has(key)) return null;
+    const el = document.createElement("div");
+    el.className = "tile-sprite";
+    return thumbs.apply(el, key) ? el : null;
   }
 
-  function thumbImg(src, label) {
-    const img = document.createElement("img");
-    img.src = src;
-    img.alt = label;
-    img.draggable = false;
-    return img;
+  function fillCategoryIcon(el, catId) {
+    const key = categoryThumbnailKey(catId, propCatalog, moverCatalog);
+    const sprite = key ? thumbSprite(key) : null;
+    if (sprite) el.replaceChildren(sprite);
+    else el.innerHTML = placeholderSvg();
   }
 
   function piecesInCategory(catId) {
@@ -3162,7 +3042,6 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         label: pr.label,
         isPreset: true,
         preset: pr,
-        preview: pr.preview,
       }));
     }
     return PIECE_CATALOG.filter((p) => PIECE_TO_CATEGORY[p.id] === catId);
@@ -3200,11 +3079,11 @@ export function buildRoadPaletteUI(builder, opts = {}) {
 
       const preview = document.createElement("div");
       preview.className = "piece-tile-preview";
-      const thumb = thumbs?.get(item.id);
-      if (thumb) {
-        preview.appendChild(thumbImg(thumb, item.label));
+      const sprite = thumbSprite(item.id);
+      if (sprite) {
+        preview.appendChild(sprite);
       } else {
-        preview.innerHTML = item.isPreset ? item.preview : piecePreviewSvg(item.id);
+        preview.innerHTML = placeholderSvg();
       }
 
       const name = document.createElement("span");
@@ -3356,9 +3235,10 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       btn.className = "cat-btn";
       btn.dataset.categoryId = cat.id;
       btn.innerHTML = `
-        <span class="cat-btn-icon">${categoryIconMarkup(cat.id)}</span>
+        <span class="cat-btn-icon"></span>
         <span class="cat-btn-label">${cat.label}</span>
       `;
+      fillCategoryIcon(btn.querySelector(".cat-btn-icon"), cat.id);
       btn.addEventListener("click", () => {
         activeCategory = cat.id;
         renderPieces();
@@ -3498,15 +3378,11 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     thumbs = next;
     for (const [id, btn] of catBtns) {
       const icon = btn.querySelector(".cat-btn-icon");
-      if (icon) icon.innerHTML = categoryIconMarkup(id);
+      if (icon) fillCategoryIcon(icon, id);
     }
     for (const [key, btn] of pieceTiles) {
-      const id = key.replace(/:(prop|mover|preset)$/, "");
-      const src = thumbs?.get(id);
-      if (!src) continue;
-      const preview = btn.querySelector(".piece-tile-preview");
-      const label = btn.querySelector(".piece-tile-name")?.textContent ?? id;
-      preview?.replaceChildren(thumbImg(src, label));
+      const sprite = thumbSprite(key.replace(/:(prop|mover|preset)$/, ""));
+      if (sprite) btn.querySelector(".piece-tile-preview")?.replaceChildren(sprite);
     }
   }
 
