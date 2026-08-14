@@ -61,7 +61,12 @@ export const DEFAULT_VEHICLE_AUDIO_SETTINGS = {
 };
 
 const DEFAULT_PATHS = {
-  engine: "/v2/static/sounds/vehicle/joao_janz__synth-car-engine-loop.wav",
+  // UNDER public/, NOT next to this file. Vite publishes public/ and imported
+  // assets only — a raw URL into the SOURCE folder resolves in dev (the dev
+  // server serves the project tree) and 404s on deploy, so the engine would go
+  // silent on Vercel and nowhere else. Same trap the track JSON hit; that one
+  // was fixed with a `?url` import, which is the other valid answer here.
+  engine: "/sounds/testengine2-loop.wav",
   wind: "/v2/static/sounds/vehicle/wind-speed.mp3",
   nitro: "/v2/static/sounds/vehicle/nitro-activation.mp3",
   wheels: "/v2/static/sounds/vehicle/wheels-surface.mp3",

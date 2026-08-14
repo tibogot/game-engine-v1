@@ -29,6 +29,7 @@
 // ============================================================================
 import * as THREE from "three";
 import { mergeByMaterial } from "./modularRoadBatching.js";
+import { enableMeshShadows } from "./modularRoadParkour.js";
 import { decalMaterial, decalGeometry } from "./modularRoadDecals.js";
 
 /** Reused for "no tint" — three multiplies instanceColor in, so white is the
@@ -58,7 +59,7 @@ export class PropInstancer {
     this.group.visible = false;
     scene.add(this.group);
 
-    /** id -> [{ geometry, material, castShadow }] — built once per type. */
+    /** id -> [{ geometry, material, castShadow, receiveShadow }] — built once per type. */
     this._templates = new Map();
     /** id -> { insts, meshes } */
     this._batches = new Map();
@@ -82,6 +83,14 @@ export class PropInstancer {
     let parts = null;
     if (def) {
       const root = def.make();
+      // SAME TREATMENT THE LOOSE PROP GETS. PropManager.add()/duplicateSelected()
+      // run this over every root they build; `make()` on its own leaves three's
+      // defaults, which are cast=false receive=false. Without it the template is
+      // a prop that neither casts nor catches light — and since the instancer
+      // takes over rendering for EVERY id, that was every obstacle on the track:
+      // drive onto a container and the car's shadow vanished, because the thing
+      // it landed on was not a receiver.
+      enableMeshShadows(root);
       root.updateMatrixWorld(true);
       mergeByMaterial(root); // geometry comes back in ROOT-local space
       parts = [];
@@ -96,7 +105,8 @@ export class PropInstancer {
           root.matrixWorld.clone().invert(), o.matrixWorld,
         ));
         parts.push({
-          geometry: g, material: o.material, castShadow: o.castShadow,
+          geometry: g, material: o.material,
+          castShadow: o.castShadow, receiveShadow: o.receiveShadow,
           // Marked by the prop's own builder — the container's shell and door
           // take a livery, its frame rails do not.
           tintable: !!o.userData.tintable,
@@ -162,7 +172,11 @@ export class PropInstancer {
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); // rewritten every frame
         im.userData.tintable = p.tintable;
         im.castShadow = p.castShadow;
-        im.receiveShadow = false;
+        // An InstancedMesh receives shadows exactly like a plain Mesh — instancing
+        // only changes the VERTEX stage, and the shadow lookup is a fragment-stage
+        // branch keyed off this flag. So this is the whole switch; there is nothing
+        // instancing-specific to work around.
+        im.receiveShadow = p.receiveShadow;
         im.count = insts.length;
         // A knocked cone can end up anywhere; culling the whole batch on a
         // bounding box computed from wherever they started would pop them out.

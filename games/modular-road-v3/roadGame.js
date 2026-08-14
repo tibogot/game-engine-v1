@@ -1702,8 +1702,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
     if (mode === "drive") {
       if (code === "keyr") respawn();
-      // DEBUG ORBIT CAM. None of these collide with driving: the drive keymap is
-      // WASD / arrows / QE / space / shift / ctrl only (see the input block).
+      // DEBUG ORBIT CAM. Recentre used to be X — that is air-roll now, so
+      // recentre moved to 0 with the other view presets. Remaining debug keys
+      // still miss the drive keymap (WASD / arrows / QE / ZX / space / shift / ctrl).
       else if (code === "keyc") setDebugCam(!debugCamOn);
       else if (code === "keyh") {
         // Manual headlight toggle — same as the Lights panel: takes over from auto.
@@ -1713,7 +1714,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       }
       else if (debugCamActive()) {
         if (code === "keyv") debugCam.toggleFrame();
-        else if (code === "keyx") debugCam.recenter();
+        else if (code === "digit0") debugCam.recenter();
         // Canned angles. Side-on at eye level is the one that reads a jump's
         // pitch profile, which is why they're on the number row where a thumb
         // can reach them mid-flight.
@@ -2000,6 +2001,11 @@ ${e.message}`);
     const kbSteer = (left ? 1 : 0) - (right ? 1 : 0);
     const kbThrottle = (fwd ? 1 : 0) - (back ? 1 : 0);
     const kbYaw = (keys.keye ? 1 : 0) - (keys.keyq ? 1 : 0);
+    // AIR ROLL ON ITS OWN KEYS — Z = roll left, X = roll right. Left/right
+    // (A/D / arrows) stays the steering rack, including in the air, so a small
+    // jump can still aim the tyres for the landing. Same sign as steerTarget
+    // (+1 left); the vehicle negates it so press-right rolls right.
+    const kbRoll = (keys.keyz ? 1 : 0) - (keys.keyx ? 1 : 0);
     // AIR PITCH ON ITS OWN KEYS — Shift = nose up (backflip), Ctrl = nose down
     // (frontflip). Deliberately NOT the throttle: the gas is held almost all the
     // time, so sharing it made every jump a forced flip (see the note in
@@ -2013,6 +2019,7 @@ ${e.message}`);
     if (!gp) {
       return {
         steerTarget: kbSteer,
+        rollTarget: kbRoll,
         throttle: kbThrottle,
         handbrake: !!keys.space,
         yaw: kbYaw,
@@ -2022,6 +2029,7 @@ ${e.message}`);
     }
     return {
       steerTarget: kbSteer !== 0 ? kbSteer : gp.steerTarget,
+      rollTarget: kbRoll !== 0 ? kbRoll : gp.steerTarget,
       throttle: kbThrottle !== 0 ? kbThrottle : gp.throttle,
       handbrake: !!keys.space || gp.handbrake,
       yaw: kbYaw !== 0 ? kbYaw : gp.yaw,

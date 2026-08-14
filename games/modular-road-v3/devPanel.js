@@ -202,10 +202,10 @@ export function createRoadDevPanel({ app, game, params }) {
               <b>LMB</b> gizmo / place · <b>Enter</b> place · <b>Backspace</b> undo
             </span>
             <span class="hint-drive">
-              <b>B</b> build · <b>WASD</b>/<b>Arrows</b> drive ·
-              <b>Space</b> handbrake · <b>R</b> respawn · <b>H</b> headlights ·
-              <b>C</b> debug cam
-              <br>in air: <b>Shift</b>/<b>Ctrl</b> flip · <b>A/D</b> roll · <b>Q/E</b> spin
+              <b data-keys="KeyB">B</b> build · <b data-keys="KeyW,KeyA,KeyS,KeyD">WASD</b>/<b>Arrows</b> drive ·
+              <b>Space</b> handbrake · <b data-keys="KeyR">R</b> respawn · <b data-keys="KeyH">H</b> headlights ·
+              <b data-keys="KeyC">C</b> debug cam
+              <br>in air: <b>Shift</b>/<b>Ctrl</b> flip · <b data-keys="KeyZ">Z</b>/<b data-keys="KeyX">X</b> roll · <b data-keys="KeyQ">Q</b>/<b data-keys="KeyE">E</b> spin
             </span>
           </div>
         </div>
@@ -622,6 +622,35 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-land-yield" min="0" max="1" step="0.05" />
               <span class="prop-num" id="dv-land-yield-v"></span>
+            </div>
+          </div>
+          <!-- THE NEED GATE — how wrong the landing has to be before the assist
+               acts at all. Raising the deadband makes the car feel less
+               "magnetic" on ordinary jumps; at 0 the assist is back to firing on
+               every landing whatever the attitude. -->
+          <div class="prop-row">
+            <span class="prop-label">Assist deadband</span>
+            <div class="prop-value">
+              <input type="range" id="dv-land-errdead" min="0" max="0.6" step="0.01" />
+              <span class="prop-num" id="dv-land-errdead-v"></span>
+            </div>
+          </div>
+          <!-- Roll error at which the assist reaches full authority. -->
+          <div class="prop-row">
+            <span class="prop-label">Assist full at</span>
+            <div class="prop-value">
+              <input type="range" id="dv-land-errfull" min="0.05" max="1.2" step="0.01" />
+              <span class="prop-num" id="dv-land-errfull-v"></span>
+            </div>
+          </div>
+          <!-- Roll RATE that arms the assist regardless of attitude — this is
+               what keeps barrel rolls covered, since a rolling car sweeps back
+               through level twice per rotation. -->
+          <div class="prop-row">
+            <span class="prop-label">Assist roll-rate arm</span>
+            <div class="prop-value">
+              <input type="range" id="dv-land-ratedead" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-land-ratedead-v"></span>
             </div>
           </div>
           <!-- Fraction of the flight-path angle the nose tracks in the air:
@@ -1494,6 +1523,34 @@ export function createRoadDevPanel({ app, game, params }) {
   `;
   document.body.appendChild(root);
 
+  /**
+   * Relabel the key hints for the keyboard the player ACTUALLY has.
+   *
+   * Driving is bound by `e.code` — physical position — which is right, and is
+   * why WASD lands on the same three-finger cluster everywhere. But `e.code` is
+   * NAMED for US QWERTY, so on any other layout the printed letter differs and
+   * a hardcoded hint is simply wrong. AZERTY is the case that bites here:
+   * `KeyZ` is the key printed **W**, and the key printed **Z** is `KeyW` — the
+   * THROTTLE. So "Z/X roll" told an AZERTY player to press the gas to roll left.
+   * QWERTZ has the same problem one key over (Z is printed Y).
+   *
+   * `navigator.keyboard.getLayoutMap()` maps code → printed label, so the hint
+   * can just tell the truth. Chromium-only; everywhere else the markup's own
+   * QWERTY text stands, which is exactly today's behaviour.
+   */
+  (async () => {
+    try {
+      const map = await navigator.keyboard?.getLayoutMap?.();
+      if (!map) return;
+      for (const el of root.querySelectorAll("[data-keys]")) {
+        const labels = el.dataset.keys.split(",").map((c) => map.get(c)?.toUpperCase());
+        // All or nothing — a half-translated "WASD" would be worse than none.
+        if (labels.some((l) => !l)) continue;
+        el.textContent = labels.join("");
+      }
+    } catch { /* layout API unavailable or blocked — keep the QWERTY labels */ }
+  })();
+
   const style = document.createElement("style");
   style.textContent = `
     #road-dev {
@@ -1919,6 +1976,11 @@ export function createRoadDevPanel({ app, game, params }) {
   // 0 keeps the nose down for a front-first landing; 1 is the old flatten.
   slider("dv-land-pitch", TIRE, "airLandPitchLevel", (v) => `${Math.round(v * 100)}%`);
   slider("dv-land-yield", TIRE, "airLandInputYield", (v) => `${Math.round(v * 100)}%`);
+  // Shown in DEGREES — the constants are radians, but "the car is 6° off" is the
+  // thing you can actually see out of the window.
+  slider("dv-land-errdead", TIRE, "airLandErrDead", (v) => `${(v * 57.2958).toFixed(0)}°`);
+  slider("dv-land-errfull", TIRE, "airLandErrFull", (v) => `${(v * 57.2958).toFixed(0)}°`);
+  slider("dv-land-ratedead", TIRE, "airLandRateDead", (v) => `${v.toFixed(2)} rad/s`);
   slider("dv-air-arcfrac", TIRE, "airAlignFraction", (v) => `${Math.round(v * 100)}%`);
   // Track width is the hub |x|; the readout shows the FULL track so it can be
   // compared against the body width directly.

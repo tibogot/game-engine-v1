@@ -413,8 +413,8 @@ export const TIRE = {
    *  lag the player can feel directly. */
   steerAnalogRate: 30.0,
   /**
-   * AIR ROLL ramp (1/s) — the steering keys' rate while AIRBORNE, where they
-   * drive roll instead of the front wheels.
+   * AIR ROLL ramp (1/s) — Z/X (or the pad stick) while airborne. Independent
+   * of the tyre rack, which is why this is not `steerAttack`.
    *
    * The air axis used to read `input.steer` directly, i.e. the value shaped for
    * the TYRES: `steerAttack` 7/s, cut a further 30% by `steerRateSpeedDrop` at
@@ -447,11 +447,12 @@ export const TIRE = {
    */
   airSteerRate: 18.0,
 
-  // ── THE STEERING RACK MUST NOT WIND UP IN THE AIR ───────────────────────
-  // A/D is TWO controls on one key: roll in the air, front wheels on the ground.
-  // `_smoothSteer` runs every tick regardless of contact, so every millisecond
-  // spent rolling was also winding the RACK toward full lock. Touch down and the
-  // tyres are handed all of it at once. MEASURED off a 35 m/s jump with the key
+  // ── THE STEERING RACK MUST NOT WIND UP FROM A ROLL INPUT ───────────────
+  // Keyboard roll is on Z/X, so A/D is free to keep aiming the tyres through a
+  // jump (including landing already turned into a corner). The pad stick is
+  // still BOTH steer and roll, and callers that omit `rollTarget` still feed
+  // the same axis to both — `_smoothSteer` only centres the rack in those
+  // dual-use cases. MEASURED off a 35 m/s jump with the (then shared) key
   // RELEASED at touchdown (tools/landingSteerRepro.mjs):
   //     rack at land 1.00   front wheels 19.6°   heading swing 27.9°
   // and with the rack frozen, the same jump swings 0.1°. It is not that the car
@@ -478,10 +479,9 @@ export const TIRE = {
    * it under 5% of full lock in ~0.5 s, so anything that reads as a jump lands
    * with the wheels straight.
    *
-   * The player does not lose the ability to steer on landing: hold the key and
-   * the rack winds back up on `steerAttack` from the ground, which is ordinary
-   * turn-in. The point is that the wheels follow what you ask AFTER you land,
-   * rather than arriving pre-turned by an input that meant "roll".
+   * Only used while roll still shares the steer axis (analog stick, or a
+   * caller that omitted `rollTarget`). Dedicated Z/X roll leaves the rack
+   * tracking A/D in the air, so you can land already turned into a corner.
    */
   airSteerCenterRate: 6.0,
   /** Fraction the ATTACK rate is cut by at `steerSpeedRef` and above, so the
@@ -653,7 +653,7 @@ export const TIRE = {
   // fighting toward world-up); `stabilizerDamp` damps the roll/pitch rate.
   stabilizerStrength: 9000,
   stabilizerDamp: 2600,
-  // ── AIRBORNE CONTROL — RATE-BASED (Shift/Ctrl pitch, A/D roll, Q/E yaw) ──
+  // ── AIRBORNE CONTROL — RATE-BASED (Shift/Ctrl pitch, Z/X roll, Q/E yaw) ──
   //
   // Hold a direction and the car rotates AT `…Rate`; release and it stops. This
   // is what arcade stunt racers do, and it replaced a TORQUE model that was the
@@ -681,7 +681,7 @@ export const TIRE = {
    * that means you are inverted before you intended to commit to anything.
    *   3.6 / resp 9 → 90% rate in 300ms, 0.3s tap = 91°, 0.5s press = 158°
    *   3.0 / resp 5 → 90% rate in 508ms, 0.3s tap = 74°, 0.5s press =  89°
-   * Roll stays at 3.6: it is on the steering keys, it self-corrects visually,
+   * Roll stays at 3.6: it is on dedicated Z/X keys, it self-corrects visually,
    * and nobody complained about it.
    *
    * FLOOR: this must stay ABOVE `airAlignMaxSpin` (2.5) or the nose-follows-arc
@@ -1056,6 +1056,44 @@ export const TIRE = {
    *     yield 0.0 → tilt 53°, heading snap  −1.1°
    */
   airLandInputYield: 1.0,
+
+  // ── THE ASSIST ONLY ACTS WHEN THE LANDING WOULD ACTUALLY GO WRONG ────────
+  // It used to engage on time-to-impact ALONE: within airLandTime of the ground
+  // it ran at full authority whatever the car's attitude, so a plain jump —
+  // no roll input, arriving a few degrees off — was clamped flat by the same
+  // 32 kN·m that exists to save a blown barrel roll. Reported as "feels like a
+  // magnet that repositions the car". MEASURED (tools/landingMagnetRepro.mjs),
+  // roll attitude the car changed BY ITSELF in flight, zero input:
+  //     6° residual tilt   → rolled itself 5.7° flat
+  //     12° residual tilt  → rolled itself 11.4° flat
+  //     0.4 rad/s ramp-edge roll rate → corrected 8.7° in-air
+  // None of those landings needed saving: the stabilizer and the touchdown
+  // damping already own errors that small the instant the tyres load.
+  //
+  // So engagement is scaled by NEED — the worse of two signals:
+  //   • ROLL ERROR vs the surface about to be hit. A normal jump sits under
+  //     the deadband and gets NOTHING; a car arriving 30°+ rolled gets full
+  //     authority, exactly as before.
+  //   • ROLL RATE. The error test alone would flicker OFF mid-barrel-roll —
+  //     a rolling car sweeps through level twice per rotation — precisely when
+  //     the car is rotating at 3.6 rad/s toward a bad landing. Rate keeps the
+  //     assist solid through the whole roll, so the trick cases are untouched.
+  // Input is deliberately NOT a signal here (airLandInputYield already handles
+  // the held-roll case): need-based also catches a car knocked crooked by a
+  // rail clip mid-air, which has no input to key on.
+  /** Roll error (rad) vs the landing surface below which the assist is silent.
+   *  0.10 ≈ 5.7° — above anything a clean jump arrives with, below anything
+   *  that would dig a wheel and shove the car sideways. */
+  airLandErrDead: 0.10,
+  /** …and at which it reaches full authority. 0.30 ≈ 17°. */
+  airLandErrFull: 0.30,
+  /** Roll rate (rad/s) below which the rate signal is silent. Ramp edges leave
+   *  ~0.3–0.4 rad/s (measured, 20° ramp) and airSettle removes that on its own;
+   *  a deliberate roll runs at 3.6. 0.5 sits between. */
+  airLandRateDead: 0.5,
+  /** …and full authority. Well under airRollRate so a roll released early in
+   *  the flight still keeps the assist while the rate bleeds off. */
+  airLandRateFull: 1.5,
 
 };
 
@@ -2163,8 +2201,8 @@ export class Vehicle {
 
     this.body = new RigidBody({ mass: CHASSIS.mass, size: CHASSIS });
     this.tires = WHEEL_LOCAL.map((w) => new Tire({ name: w.name, localPos: w.pos, steer: w.steer, drive: w.drive }));
-    // `steer` is shaped for the TYRES; `airSteer` is the same stick/key shaped
-    // for the AIR ROLL axis, which has no steering rack to give weight. See
+    // `steer` is shaped for the TYRES (A/D / stick). `airSteer` is the ROLL
+    // axis (Z/X, or the same stick when the caller omitted `rollTarget`). See
     // TIRE.airSteerRate.
     this.input = { steer: 0, airSteer: 0, throttle: 0, handbrake: false, yaw: 0, pitch: 0 };
 
@@ -2696,6 +2734,12 @@ export class Vehicle {
     /** Surface samples on CHASSIS_HULL for the solids BVH. Rebuilt (and resized)
      *  by _refreshLocalFrames — the count follows the hull and its spacing. */
     this.SOLID_BOX_SAMPLES = [];
+    /** Bounding sphere of those samples, in chassis-local space — the
+     *  broad-phase for _resolveSolidBvh. Written by _refreshHullSamples. */
+    this._hullCentreLocal = new THREE.Vector3();
+    this._hullRadius = 0;
+    this._hullCentreW = new THREE.Vector3();
+    this._bpN = new THREE.Vector3();
     /** Exact analytic colliders — see setSolidCapsules. */
     this.solidCapsules = [];
     this._sphC = new THREE.Vector3();
@@ -2788,6 +2832,7 @@ export class Vehicle {
     this._landTilt = new THREE.Vector3();
     this._landTorque = new THREE.Vector3();
     this._landRight = new THREE.Vector3(); // chassis right — the PITCH axis of the assist
+    this._landFwd = new THREE.Vector3();   // chassis forward — the ROLL axis of the need gate
     this._landDir = new THREE.Vector3();
     /** Grounded wheel count last substep — drives the touchdown edge. */
     this._prevGrounded = 0;
@@ -2857,6 +2902,8 @@ export class Vehicle {
      * before the wheels arrived. See _isSupported().
      */
     this._rackAirTime = 0;
+    /** When true, airborne steering centres the rack — roll still shares A/D / the stick. */
+    this._centerSteerInAir = true;
     _syncComOffset();
   }
 
@@ -2965,6 +3012,11 @@ export class Vehicle {
       }
     }
     sb.length = n;
+    // BROAD-PHASE BOUND for _resolveSolidBvh — the sphere that contains every
+    // sample just laid out, about the hull's own centre. Derived here so it can
+    // never disagree with the samples it bounds.
+    this._hullCentreLocal.set(0, H.offsetY, H.offsetZ);
+    this._hullRadius = 0.5 * Math.hypot(H.width, H.height, H.length);
   }
 
   /** Re-derive inertia + local frames + visual box after mass/size/CoM edits. */
@@ -3120,7 +3172,7 @@ export class Vehicle {
   /**
    * Advance exactly one fixed physics tick (FIXED_DT). Drive this from an
    * accumulator loop, then call syncVisuals(renderDt, alpha) once per frame.
-   * @param {{steerTarget:number, throttle:number, handbrake:boolean, yaw:number}} controls
+   * @param {{steerTarget:number, rollTarget?:number, throttle:number, handbrake:boolean, yaw:number, analog?:boolean}} controls
    */
   tick(controls) {
     if (!this.enabled) return;
@@ -3129,8 +3181,18 @@ export class Vehicle {
     // Time since the car was actually SUPPORTED — see _rackAirTime. Computed
     // from last tick's tyre state, before _smoothSteer reads it.
     this._rackAirTime = this._isSupported() ? 0 : this._rackAirTime + FIXED_DT;
-    this.input.steer = this._smoothSteer(controls.steerTarget ?? 0, !!controls.analog);
-    this.input.airSteer = this._smoothAirSteer(controls.steerTarget ?? 0, !!controls.analog);
+    const analog = !!controls.analog;
+    const steerTarget = controls.steerTarget ?? 0;
+    // Dedicated roll (Z/X) is passed as `rollTarget`, including 0. Callers that
+    // omit it — the repro tools — still mean "steer keys are also the roll".
+    const dedicatedRoll = "rollTarget" in controls;
+    const rollTarget = dedicatedRoll ? (controls.rollTarget ?? 0) : steerTarget;
+    // Centre the rack in the air only when roll still shares the steer axis:
+    // analog stick (pad), or a legacy caller with no `rollTarget`. Keyboard
+    // Z/X is independent, so A/D keeps aiming the tyres through a jump.
+    this._centerSteerInAir = dedicatedRoll ? analog : true;
+    this.input.steer = this._smoothSteer(steerTarget, analog);
+    this.input.airSteer = this._smoothAirSteer(rollTarget, analog);
     this.input.throttle = controls.throttle ?? 0;
     this.input.handbrake = !!controls.handbrake;
     this.input.yaw = controls.yaw ?? 0;
@@ -3345,12 +3407,12 @@ export class Vehicle {
 
   _smoothSteer(target, analog) {
     const cur = this.input.steer;
-    // AIRBORNE, PAST THE GRACE: the steering keys are driving ROLL, so there is
-    // no ground-steering intent for the rack to follow — anything it does here is
+    // AIRBORNE, PAST THE GRACE, AND ROLL STILL SHARES THIS AXIS: there is no
+    // ground-steering intent for the rack to follow — anything it does here is
     // an input the player did not make. Return it to centre instead of tracking
-    // `target`. See TIRE.airSteerCenterDelay for why this is a delay rather than
-    // a slower ease, and `input.airSteer` for the channel the roll actually uses.
-    if (this._rackAirTime > TIRE.airSteerCenterDelay) {
+    // `target`. Dedicated Z/X roll leaves `_centerSteerInAir` false, so A/D
+    // keeps the tyres aimed for landing. See TIRE.airSteerCenterDelay.
+    if (this._centerSteerInAir && this._rackAirTime > TIRE.airSteerCenterDelay) {
       return cur + (0 - cur) * (1 - Math.exp(-TIRE.airSteerCenterRate * FIXED_DT));
     }
     let rate;
@@ -3796,7 +3858,6 @@ export class Vehicle {
     const landingReassert = body.vel.y < 0 ? engage : 0;
     engage *= 1 - TIRE.airLandInputYield * rollInput * (1 - landingReassert);
     if (engage <= 1e-3) return;
-    this._landEngage = engage;
 
     if (hit.normal) this._landN.set(hit.normal.x, hit.normal.y, hit.normal.z);
     else if (hit.face?.normal) this._landN.copy(hit.face.normal);
@@ -3807,9 +3868,45 @@ export class Vehicle {
     if (this._landN.dot(this._landDir) > 0) this._landN.negate();
 
     this._landUp.set(0, 1, 0).applyQuaternion(body.quat);
-    this._landTorque
-      .crossVectors(this._landUp, this._landN)
-      .multiplyScalar(TIRE.airLandTorque * engage * TIRE.airLandAssist);
+    // UNSCALED tilt axis first: cross(up, N) has magnitude sin(tilt) and lies in
+    // the chassis' right/forward plane, so its components ARE the pitch and roll
+    // errors the need gate reads. The torque scale goes on after the gate.
+    this._landTorque.crossVectors(this._landUp, this._landN);
+
+    // ── NEED GATE — see the airLandErrDead block on TIRE. Silent on a landing
+    // that was already going to be fine; full authority on one that was not.
+    // `_landFwd` is the chassis forward axis, i.e. the ROLL axis. Its own scratch
+    // rather than reusing `_landDir`: that one still holds the probe direction
+    // the normal was oriented against three lines up, and a later edit moving
+    // either use would break the other silently.
+    this._landFwd.set(0, 0, 1).applyQuaternion(body.quat);
+    this._landRight.set(1, 0, 0).applyQuaternion(body.quat);
+    const keepPitch = THREE.MathUtils.clamp(TIRE.airLandPitchLevel, 0, 1);
+    // MEASURE THE ERROR WITH atan2, NOT asin. |cross(up, N)| is sin(tilt), which
+    // FOLDS BACK past 90° — an inverted car reads sin(180°) = 0, i.e. "perfectly
+    // aligned", and the assist would switch off exactly where it is needed most.
+    // MEASURED with the asin form (tools/landingSlideRepro.mjs), lateral slide on
+    // a 160° roll landing: 7.54 m against 6.12 m before the gate existed. Pairing
+    // the sine component with cos(tilt) = up·N makes the angle monotonic all the
+    // way to 180°, so deep rolls read as the emergency they are.
+    //
+    // Pitch counts only for the fraction the assist would act on — at the default
+    // airLandPitchLevel 0 this is roll-only, so the arc assist's deliberate
+    // nose-down approach must never arm it.
+    const cosTilt = this._landUp.dot(this._landN);
+    const errRoll = Math.abs(Math.atan2(this._landTorque.dot(this._landFwd), cosTilt));
+    const errPitch = Math.abs(Math.atan2(this._landTorque.dot(this._landRight), cosTilt));
+    const errAngle = Math.max(errRoll, errPitch * keepPitch);
+    const rollRate = Math.abs(body.angVel.dot(this._landFwd));
+    const need = Math.max(
+      THREE.MathUtils.smoothstep(errAngle, TIRE.airLandErrDead, TIRE.airLandErrFull),
+      THREE.MathUtils.smoothstep(rollRate, TIRE.airLandRateDead, TIRE.airLandRateFull),
+    );
+    if (need <= 1e-3) return;
+    engage *= need;
+    this._landEngage = engage;
+
+    this._landTorque.multiplyScalar(TIRE.airLandTorque * engage * TIRE.airLandAssist);
     const wYaw = body.angVel.dot(this._landUp);
     this._landTilt.copy(body.angVel).addScaledVector(this._landUp, -wYaw);
 
@@ -3820,9 +3917,7 @@ export class Vehicle {
     // the right component down therefore levels the car side-to-side (which is
     // what saves the landing) while leaving the nose wherever the arc assist put
     // it (which is what makes the landing look right).
-    const keepPitch = THREE.MathUtils.clamp(TIRE.airLandPitchLevel, 0, 1);
     if (keepPitch < 1) {
-      this._landRight.set(1, 0, 0).applyQuaternion(body.quat);
       const pitchTq = this._landTorque.dot(this._landRight);
       this._landTorque.addScaledVector(this._landRight, -pitchTq * (1 - keepPitch));
       // The damping is split the same way, or it would bleed off the arc
@@ -3907,8 +4002,9 @@ export class Vehicle {
       // hacks this file used to carry (`airControlDelay`, and the long
       // `airGroundLockout`) existed only to paper over that.
       //
-      // Steering does not have the problem — while airborne it does nothing for
-      // driving, so there is no competing intent and roll can stay on it.
+      // Roll used to share A/D with the tyres, which stole landing steer on
+      // every small jump. It is on Z/X now. `input.airSteer` is that channel,
+      // not `steer`.
       //
       // `input.pitch` is +1 for NOSE UP. A positive rotation about the chassis'
       // +X axis pitches the nose DOWN (+X is the chassis' left; rotating +Z
@@ -4739,20 +4835,60 @@ export class Vehicle {
   _resolveSolidBvh(bvh, surfaceVelFn, dt = FIXED_DT / this.SUBSTEPS) {
     const body = this.body;
     const skin = SOLID.skin;
-    // Detection band widens with speed so a fast sample can never step over the
-    // skin between substeps — see SOLID.sweepMargin. Push-out still uses `skin`.
-    const band = Math.max(skin, body.vel.length() * dt * SOLID.sweepMargin);
-    let deepest = 0;
-    let hits = 0;
-    let approach = 0; // deepest imminent (band-only) contact
+    // QUERY RADIUS IS THE SKIN, and deliberately not a speed-scaled band.
+    //
+    // This used to widen with speed (`vel · dt · sweepMargin`) to feed an
+    // anti-tunnel velocity clamp — and that clamp was removed, for the measured
+    // reason in the loop below (it braked the car on every fast rail graze). The
+    // widening outlived it: `approach` was left initialised to 0 and never
+    // assigned again, so the block it guarded below was unreachable, while every
+    // sample still paid for the bigger search. At 50 m/s the band is 0.33 m
+    // against an 0.08 m skin — a >4× radius on ~208 samples per substep, 240
+    // times a second, for results the very next line threw away
+    // (`res.distance >= skin` → continue).
+    //
+    // Behaviour is unchanged, including at the boundary: a hit at exactly `skin`
+    // was discarded by that test before and is discarded by it now (three-mesh-
+    // bvh rejects only distances strictly greater than maxDist).
+    // Reset BEFORE the broad phase, not after. These are shared scratch, and the
+    // pre-broad-phase code cleared them on every call including the ones that
+    // found nothing — so skipping the clear would quietly change what a LATER
+    // reader sees (a no-hit mover pass currently wipes the static rail's normal
+    // out from under _updateScrapeLatch). That is arguably a bug, but it is not
+    // this change's bug to fix: a perf edit that also alters behaviour is one
+    // nobody can trust. Same order as before, minus the work.
     this._solidN.set(0, 0, 0);
     this._solidPoint.set(0, 0, 0);
-    this._solidApproachN.set(0, 0, 0);
+
+    // ── BROAD PHASE ─────────────────────────────────────────────────────────
+    // ONE query for the whole hull before the ~208 per-sample ones. Every sample
+    // lies inside the hull's bounding sphere, so if the nearest surface is
+    // further than that sphere plus the skin, not one of them can be within
+    // `skin` and the loop is guaranteed to find nothing. Skipping it is
+    // therefore exact, not an approximation — same answer, minus the work.
+    //
+    // Worth doing because the loop is the car's most expensive routine and it is
+    // almost always answering "no": it runs at 240 Hz (2 substeps × 120 Hz), each
+    // sample costs a quaternion transform plus a BVH descent, and in v3 that
+    // descent fans out across up to FOUR bvhs (road solids, mover solids, cliffs,
+    // trees — see createVehicleGround). A car mid-road or mid-air is nowhere near
+    // any of them, which is most of a lap.
+    if (this._hullRadius > 0) {
+      this._geomToWorld(this._hullCentreLocal, this._hullCentreW);
+      const near = bvh.closestPointWithNormal(
+        this._hullCentreW.x, this._hullCentreW.y, this._hullCentreW.z,
+        this._hullRadius + skin, this._bpN,
+      );
+      if (!near) return;
+    }
+
+    let deepest = 0;
+    let hits = 0;
 
     for (const sp of this.SOLID_BOX_SAMPLES) {
       this._geomToWorld(sp, this._sphC);
       const res = bvh.closestPointWithNormal(
-        this._sphC.x, this._sphC.y, this._sphC.z, band, this._sphN,
+        this._sphC.x, this._sphC.y, this._sphC.z, skin, this._sphN,
       );
       if (!res) continue;
       // Close but not overlapping. NO anti-tunnel clamp here, deliberately:
@@ -4770,19 +4906,10 @@ export class Vehicle {
       this._solidPoint.add(this._sphC);
       if (pen > deepest) deepest = pen;
     }
-    if (!hits) {
-      // No real overlap, but something is close and we are closing on it: kill
-      // just the inward velocity so the next substep lands ON the surface
-      // instead of beyond it. No positional change, so this cannot lift the car
-      // off anything or affect ride height — it only removes the ability to
-      // teleport through a wall.
-      if (approach > 0 && this._solidApproachN.lengthSq() > 1e-10) {
-        this._solidApproachN.normalize();
-        const vIn = body.vel.dot(this._solidApproachN);
-        if (vIn < 0) body.vel.addScaledVector(this._solidApproachN, -vIn);
-      }
-      return;
-    }
+    // Nothing overlapping. There is no "closing on it" branch here on purpose —
+    // see the query-radius note above; the deck resolver is what carries the
+    // anti-tunnel clamp, and rails rely on the skin plus projection.
+    if (!hits) return;
     this._solidPoint.multiplyScalar(1 / hits);
 
     // Opposing normals cancel here, which is CORRECT: wedged between two
