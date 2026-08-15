@@ -1682,6 +1682,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         break;
       case "keyn": seedChainAtSpawn({ atCursor: true }); break; // new chain at the sky cursor
       case "keyk": goToBranch(); return;                        // hop to a junction branch
+      // H = the OTHER END of this chain (tail <-> head). Safe on `e.code` unlike
+      // its neighbours here: H sits in the same physical slot on AZERTY as on
+      // QWERTY, so the printed label and the code agree either way.
+      case "keyh": toggleBuildEnd(); return;
       case "bracketleft": builder.cycleChain(-1); break;
       case "bracketright": builder.cycleChain(1); break;
       default: return;
@@ -1879,7 +1883,26 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   onClick("road-prev-chain", () => { builder.cycleChain(-1); paletteUi.refreshStatus(); });
   onClick("road-next-chain", () => { builder.cycleChain(1); paletteUi.refreshStatus(); });
   onClick("road-branch", () => { goToBranch(); });
+  onClick("road-other-end", () => { toggleBuildEnd(); });
   onClick("road-rebake", () => bakeCollision());
+
+  /** Flip which END of the active chain the next piece goes on (button + H). */
+  function toggleBuildEnd() {
+    if (builder.toggleBuildEnd()) {
+      paletteUi?.refreshStatus?.();
+      return;
+    }
+    // Same pattern as goToBranch: say WHY nothing happened rather than looking
+    // like a dead key. A head that is welded to a junction branch or to another
+    // chain's tail is not an open end, so there is nothing to build backwards
+    // from — see _openConnectors.
+    const el = document.getElementById("road-status");
+    if (el) {
+      el.textContent = builder.count
+        ? "This chain's start is joined to something — nothing to build backwards from"
+        : "Nothing placed yet — the first piece has only one end";
+    }
+  }
 
   /** Jump the ghost to the nearest free junction branch (button + K key). */
   function goToBranch() {

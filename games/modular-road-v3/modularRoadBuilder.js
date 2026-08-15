@@ -27,7 +27,16 @@ const _A_Q2 = new THREE.Quaternion();
 const _A_V = new THREE.Vector3();
 const _A_V2 = new THREE.Vector3();
 const _UNIT_SCALE = new THREE.Vector3(1, 1, 1);
+/** Never mutated — the entry pose a piece is built at to read back its own
+ *  entry→exit transform. See `_localTransform`. */
+const _IDENTITY = new THREE.Matrix4();
 const _isIdentityQuat = (q) => Math.abs(q.w) > 0.9999999;
+
+/** How close a chain's head has to sit to a branch socket or another chain's
+ *  tail to count as JOINED there (and so not an open end you may prepend onto).
+ *  Same tolerance the branch "used" test has always applied, for the same
+ *  reason: seams are welded by position, not by a stored link. */
+const HEAD_JOIN_EPS = 1.0;
 
 /**
  * Flat chevron for a junction branch marker, in socket-local space: a socket's
@@ -186,6 +195,15 @@ export class ModularRoadBuilder {
     this._ghostQuat = new THREE.Quaternion();
     /** True while the ghost is parked on a junction branch (see branchConnectors). */
     this.ghostOnBranch = false;
+    /**
+     * WHICH END of the active chain the ghost is working on: "tail" appends (the
+     * original and still the default), "head" PREPENDS — the piece goes in front
+     * of the chain and the anchor moves back to meet it.
+     * @type {"tail"|"head"}
+     */
+    this.ghostEnd = "tail";
+    /** @type {Map<string, THREE.Matrix4>} memo for `_localTransform`. */
+    this._localXfCache = new Map();
 
     // Seeded HERE, not up with the stacks: a snapshot carries the placement
     // cursor, and every field it reads is declared above this line.
@@ -374,7 +392,10 @@ export class ModularRoadBuilder {
       // the gizmo while the ghost itself stayed tilted.
       if (this.ghostOnBranch) this.placementPivot.quaternion.copy(this._ghostQuat);
     } else {
-      this._syncGizmoToOpenEnd();
+      // Keep the END you were building from. Picking a different SHAPE is not a
+      // decision about where it goes, and defaulting to the tail here quietly
+      // threw you back to the far end of the chain mid-prepend.
+      this._syncGizmoToOpenEnd({ end: this.ghostEnd });
     }
   }
 
@@ -467,6 +488,43 @@ export class ModularRoadBuilder {
     this._notify();
   }
 
+  /**
+   * Flip which END of the active chain the next piece goes on — the keyboard
+   * counterpart to dragging the ghost onto the other end.
+   *
+   * Refuses on a chain whose head is already joined to something (a junction
+   * branch, or another chain's tail): `_openConnectors` does not offer that head
+   * as open, and prepending there would tear the chain off what it was built
+   * onto. Returns false so the caller can say why nothing happened.
+   */
+  toggleBuildEnd() {
+    if (this._gizmoTarget === "piece") this.deselectPiece();
+    if (this.ghostEnd === "head") {
+      this._syncGizmoToOpenEnd({ end: "tail" });
+      this.refreshGhost();
+      this._notify();
+      return true;
+    }
+    const canHead = this._openConnectors()
+      .some((oc) => oc.chainId === this.activeChainId && oc.end === "head");
+    if (!canHead) return false;
+    this._syncGizmoToOpenEnd({ end: "head" });
+    this.refreshGhost();
+    this._notify();
+    return true;
+  }
+
+  /** Which end the next piece lands on — for the status line. */
+  get buildEnd() {
+    return this.ghostDetached ? "free" : this.ghostEnd;
+  }
+
+  /** Can the active chain be grown from its head? (button enablement) */
+  get canBuildFromHead() {
+    return this._openConnectors()
+      .some((oc) => oc.chainId === this.activeChainId && oc.end === "head");
+  }
+
   /** Cycle the active chain (dir -1 = previous, +1 = next). */
   cycleChain(dir = -1) {
     if (this.chains.length < 2) return;
@@ -504,17 +562,87 @@ export class ModularRoadBuilder {
     return this._gizmoTarget;
   }
 
-  /** Open end (last piece's exit, or the anchor) of every chain, PLUS every
-   *  junction branch that nothing has been built on yet. Both are places a piece
-   *  can legally go, which is exactly what the ghost's magnet wants. */
+  // ── BUILDING FROM EITHER END ───────────────────────────────────────────────
+  // A chain is a linear array walked FORWARD from its anchor, so for a long time
+  // the only place a piece could go was the tail. Growing the head is the same
+  // walk run one step earlier: put the piece at the front of the array and move
+  // the anchor back by exactly that piece's own transform, so its exit lands on
+  // the old anchor and everything downstream is untouched.
+  //
+  // That works because a piece's exit is a fixed local transform of its entry —
+  // `exit = entry · L`, with L a pure function of (id, params). Measured across
+  // all 45 kit pieces at 6 random entry poses: worst elementwise drift 5.7e-14.
+  // So the new anchor is exactly `oldHead · L⁻¹`, with no fitting or search.
+
+  /**
+   * `L` — a piece's entry→exit transform, in the entry's local frame.
+   *
+   * CACHED, because the only way to get it is to build the piece, and the ghost
+   * asks for it on every drag frame while it is parked on a head. The cache key
+   * is the params by value: `pieceParams` is a live object that the sliders
+   * mutate in place, so a reference key would go stale silently.
+   */
+  _localTransform(id, pp, edges) {
+    const key = `${id}|${edges ? 1 : 0}|${JSON.stringify(pp)}`;
+    let L = this._localXfCache.get(key);
+    if (!L) {
+      L = buildPiece(id, _IDENTITY, pp, roadParams, guardrailParams, edges).connectorOut.clone();
+      // Bounded: params change continuously while a slider is dragged, so this
+      // would otherwise grow without limit over a session.
+      if (this._localXfCache.size > 128) this._localXfCache.clear();
+      this._localXfCache.set(key, L);
+    }
+    return L;
+  }
+
+  /**
+   * Where a chain BEGINS, as a connector pointing into the chain.
+   *
+   * Not simply `chain.anchor`: if the first piece is DETACHED it ignores the
+   * anchor and sits at its own `pinnedIn` (see rebuildAll), so that pin is the
+   * real head. Prepending against the anchor there would leave the new piece
+   * dangling in front of a piece that had already jumped elsewhere.
+   */
+  _chainHead(chainId) {
+    const chain = this.chains.find((c) => c.id === chainId);
+    if (!chain) return null;
+    const first = this._chainPieces(chainId)[0];
+    return first?.detached && first.pinnedIn ? first.pinnedIn : chain.anchor;
+  }
+
+  /**
+   * Open ends: every chain's TAIL and HEAD, plus every junction branch nothing
+   * has been built on. These are the places a piece can legally go, which is
+   * exactly what the ghost's magnet wants.
+   *
+   * A head only counts as open when nothing is already joined to it — a chain
+   * that starts on a junction branch, or head-to-tail against another chain, is
+   * CONNECTED there, and offering to prepend would silently tear it off the
+   * thing it was built onto. An empty chain has no head distinct from its tail,
+   * so it publishes one entry, not two.
+   */
   _openConnectors() {
     const out = [];
+    const p = new THREE.Vector3();
+    const q = new THREE.Vector3();
+    const branches = this.branchConnectors();
     for (const chain of this.chains) {
       const last = this._lastPieceOfChain(chain.id);
-      out.push({ chainId: chain.id, matrix: last ? last.connectorOut : chain.anchor });
+      out.push({ chainId: chain.id, end: "tail", matrix: last ? last.connectorOut : chain.anchor });
+      if (!last) continue; // empty chain: head IS the tail, already published
+      const head = this._chainHead(chain.id);
+      p.setFromMatrixPosition(head);
+      const joined =
+        branches.some((b) => b.pos.distanceTo(p) < HEAD_JOIN_EPS) ||
+        this.chains.some((c) => {
+          if (c.id === chain.id) return false;
+          const l = this._lastPieceOfChain(c.id);
+          return q.setFromMatrixPosition(l ? l.connectorOut : c.anchor).distanceTo(p) < HEAD_JOIN_EPS;
+        });
+      if (!joined) out.push({ chainId: chain.id, end: "head", matrix: head });
     }
-    for (const b of this.branchConnectors()) {
-      if (!b.used) out.push({ chainId: null, matrix: b.matrix, branch: b });
+    for (const b of branches) {
+      if (!b.used) out.push({ chainId: null, end: "branch", matrix: b.matrix, branch: b });
     }
     return out;
   }
@@ -561,6 +689,7 @@ export class ModularRoadBuilder {
    *  on a banked chain hands its own tilt to the side road). */
   _putGhostOnBranch(matrix) {
     this._gizmoTarget = "ghost";
+    this.ghostEnd = "tail"; // a branch starts a NEW chain — nothing to prepend to
     // DETACHED, deliberately: place() forks a new chain wherever a detached
     // ghost sits, which is precisely what starting a side road means.
     this.ghostDetached = true;
@@ -645,9 +774,14 @@ export class ModularRoadBuilder {
    * state after selecting or placing a piece). Empty chains keep the "chain"
    * anchor target instead — same pose, and dragging it is what N expects.
    */
-  _syncGizmoToOpenEnd() {
+  _syncGizmoToOpenEnd({ end } = {}) {
+    // Default back to the tail — the caller has to ASK to stay on the head, so
+    // that selecting a piece or switching chains cannot leave the ghost silently
+    // prepending when the user expects to append.
+    this.ghostEnd = end === "head" ? "head" : "tail";
     const last = this._lastPieceOfChain(this.activeChainId);
     if (!last) {
+      this.ghostEnd = "tail"; // an empty chain has only the one end
       this._gizmoTarget = "chain";
       this.ghostDetached = false;
       this._showPlacementGizmo();
@@ -655,8 +789,13 @@ export class ModularRoadBuilder {
     }
     this._gizmoTarget = "ghost";
     this.ghostDetached = false;
-    this._ghostPos.setFromMatrixPosition(this.currentConnector);
-    this._setGhostYaw(new THREE.Euler().setFromRotationMatrix(this.currentConnector, "YXZ").y);
+    // The gizmo sits on the SOCKET at either end; on a head the piece previews
+    // behind it (see _placementConnector).
+    const socket = this.ghostEnd === "head"
+      ? this._chainHead(this.activeChainId)
+      : this.currentConnector;
+    this._ghostPos.setFromMatrixPosition(socket);
+    this._setGhostYaw(new THREE.Euler().setFromRotationMatrix(socket, "YXZ").y);
     this._showGizmoAt(this._ghostPos, this._ghostYaw);
   }
 
@@ -803,13 +942,19 @@ export class ModularRoadBuilder {
         return; // ghost moves never touch placed geometry — no rebuild/rebake
       }
       if (hit && hit.dist <= magnet) {
+        // Snapping onto a chain end also picks WHICH END: drop the ghost on a
+        // head and the next piece is prepended, on a tail and it is appended.
+        // That is the whole "build from either end" gesture — no mode to switch.
         this.activeChainId = hit.chainId;
+        this.ghostEnd = hit.end === "head" ? "head" : "tail";
         this._syncCurrentConnector();
         this.ghostDetached = false;
-        this._ghostPos.setFromMatrixPosition(this.currentConnector);
-        this._setGhostYaw(new THREE.Euler().setFromRotationMatrix(this.currentConnector, "YXZ").y);
+        const socket = this.ghostEnd === "head" ? this._chainHead(hit.chainId) : this.currentConnector;
+        this._ghostPos.setFromMatrixPosition(socket);
+        this._setGhostYaw(new THREE.Euler().setFromRotationMatrix(socket, "YXZ").y);
       } else {
         this.ghostDetached = true;
+        this.ghostEnd = "tail";
         this._ghostPos.copy(pos);
         this.snapPos(this._ghostPos);
         this._setGhostYaw(this.snapYaw(this.placementPivot.rotation.y));
@@ -950,12 +1095,32 @@ export class ModularRoadBuilder {
     g.showZ = !rot || fullTilt;
   }
 
+  /**
+   * The seam the next piece would be BUILT from — which is not the same as the
+   * socket the ghost is parked on when prepending.
+   *
+   * Appending, the two coincide: the piece starts at the open end and grows
+   * forward. Prepending, the piece has to END on the chain's head, so it starts
+   * one piece-length back at `head · L⁻¹`. Previewing at the head itself would
+   * draw a piece heading off in the wrong direction and — worse for a curve —
+   * the wrong shape entirely, since the curve that ARRIVES at a seam is the
+   * mirror of the one that leaves it.
+   */
+  _placementConnector() {
+    if (this._gizmoTarget === "ghost" && this.ghostDetached) return this._anchorFromGhost();
+    if (this._gizmoTarget === "ghost" && this.ghostEnd === "head") {
+      const head = this._chainHead(this.activeChainId);
+      if (head && this._chainPieces(this.activeChainId).length) {
+        const L = this._localTransform(this.activePieceId, pieceParams, guardrailParams.enabled);
+        return head.clone().multiply(_A_M.copy(L).invert());
+      }
+    }
+    return this.currentConnector;
+  }
+
   /** Rebuild the translucent ghost at the open connector (or the detached pose). */
   refreshGhost() {
-    const conn =
-      this._gizmoTarget === "ghost" && this.ghostDetached
-        ? this._anchorFromGhost()
-        : this.currentConnector;
+    const conn = this._placementConnector();
     const { geometry, world } = buildPiece(
       this.activePieceId,
       conn,
@@ -1169,13 +1334,63 @@ export class ModularRoadBuilder {
     p.mesh.visible = gap ? true : !this.instancingEnabled;
   }
 
-  /** Place the active piece — onto the open end, or wherever the detached
-   *  ghost sits (which starts a new chain there, Apex-style). */
+  /**
+   * Put the active piece IN FRONT of its chain: it becomes the new first piece,
+   * and the anchor moves back by exactly this piece's own transform so the
+   * piece's exit lands on the old head. Nothing downstream moves — this is the
+   * whole point, and it is what `insertPieceBefore` on the first piece could
+   * never do (that pins the head and shoves the entire track forward instead).
+   */
+  _prepend() {
+    const chainId = this.activeChainId;
+    const chain = this.chains.find((c) => c.id === chainId);
+    const first = this._chainPieces(chainId)[0];
+    if (!chain || !first) return null;
+
+    const pp = this._snapshotParams();
+    const edges = guardrailParams.enabled;
+    const head = this._chainHead(chainId).clone();
+    // entry = head · L⁻¹ ⇒ entry · L = head, i.e. the new piece ENDS on the old
+    // head. Exact, not fitted: see the note above _localTransform.
+    const entry = head.multiply(
+      _A_M.copy(this._localTransform(this.activePieceId, pp, edges)).invert(),
+    );
+
+    const piece = this._makePieceEntry(this.activePieceId, chainId, entry, pp, edges);
+    // The anchor is where rebuildAll STARTS the walk, so it has to become the new
+    // piece's entry — even when the old first piece was detached and the head
+    // came from its pin instead. The pinned piece still resets the running
+    // connector to that pin, which is precisely where this piece now ends.
+    chain.anchor = entry.clone();
+    this.pieces.splice(this.pieces.indexOf(first), 0, piece);
+    return piece;
+  }
+
+  /** Place the active piece — onto the open end (either end of the chain), or
+   *  wherever the detached ghost sits (which starts a new chain there). */
   place() {
     // Record the aim BEFORE placing moves it — undo then returns the ghost to
     // the pose this piece was placed from, so pressing place again puts the
     // same piece back in the same spot.
     this._markCursor();
+    // PREPEND: growing the chain backwards from its head. Everything else about
+    // placement is unchanged, including the history step and the rebuild.
+    // Gated on the GHOST target, not on `ghostEnd` alone: the "chain" target
+    // (an empty chain, N, or a chain picked with [ / ]) means the gizmo is on
+    // the anchor, and a stale `head` must not silently prepend there.
+    if (this._gizmoTarget === "ghost" && !this.ghostDetached && this.ghostEnd === "head") {
+      const piece = this._prepend();
+      if (piece) {
+        this.rebuildAll();
+        this._refreshBranchMarkers();
+        this._syncGizmoToOpenEnd({ end: "head" }); // stay on the head, ready for the next
+        this.refreshGhost();
+        this._commit();
+        this._notify();
+        return piece.mesh;
+      }
+      this.ghostEnd = "tail"; // empty chain: nothing to prepend to, so append
+    }
     if (this._gizmoTarget === "ghost" && this.ghostDetached) {
       const id = this.chainSeq++;
       const anchor = this._anchorFromGhost();
@@ -1522,6 +1737,7 @@ export class ModularRoadBuilder {
       gizmoTarget: this._gizmoTarget,
       ghostDetached: this.ghostDetached,
       ghostOnBranch: this.ghostOnBranch,
+      ghostEnd: this.ghostEnd,
       ghostPos: this._ghostPos.clone(),
       ghostQuat: this._ghostQuat.clone(),
       freePos: this._freePos.clone(),
@@ -1540,6 +1756,7 @@ export class ModularRoadBuilder {
     this._gizmoTarget = c.gizmoTarget;
     this.ghostDetached = c.ghostDetached;
     this.ghostOnBranch = c.ghostOnBranch;
+    this.ghostEnd = c.ghostEnd ?? "tail";
     this._ghostPos.copy(c.ghostPos);
     this._ghostQuat.copy(c.ghostQuat);
     this._ghostYaw = _A_E.setFromQuaternion(this._ghostQuat, "YXZ").y;
@@ -1560,8 +1777,9 @@ export class ModularRoadBuilder {
       this.refreshGhost();
     } else {
       // Attached ghost (or a "piece" target whose selection is gone): the open
-      // end IS the right answer, and it just moved.
-      this._syncGizmoToOpenEnd();
+      // end IS the right answer, and it just moved. `ghostEnd` came back with
+      // the cursor, so an undo lands you on the end you were building from.
+      this._syncGizmoToOpenEnd({ end: this.ghostEnd });
     }
   }
 
@@ -1806,9 +2024,9 @@ export class ModularRoadBuilder {
     this._rebuildInstances();
     this._syncCurrentConnector();
     // A rebuild moves the open end; if the gizmo is riding the (attached)
-    // ghost, keep it glued to the new end.
+    // ghost, keep it glued to the new end — the SAME end, head or tail.
     if (this._gizmoTarget === "ghost" && !this.ghostDetached && this.placementGizmo?.visible) {
-      this._syncGizmoToOpenEnd();
+      this._syncGizmoToOpenEnd({ end: this.ghostEnd });
     }
     // The selected piece may have moved (an anchor drag or an upstream edit flows
     // down the chain), so keep its highlight glued to it.
@@ -3317,6 +3535,16 @@ export function buildRoadPaletteUI(builder, opts = {}) {
               ? "free piece — drag near an open end to snap"
               : "drag gizmo to move the piece anywhere"
           : "anchor gizmo drags whole chain";
+      // WHICH END the next piece lands on. Named even when it is the ordinary
+      // tail: the whole point of being able to build backwards is that "where
+      // does this go" now has two answers, and a label that only appears in the
+      // unusual case leaves you guessing in the usual one.
+      const endInfo =
+        builder.gizmoMode === "ghost" && !builder.ghostDetached
+          ? builder.buildEnd === "head"
+            ? " · ◂ HEAD (building backwards, H)"
+            : builder.canBuildFromHead ? " · TAIL ▸ (H for the other end)" : " · TAIL ▸"
+          : "";
       // Only mentioned when there ARE loose branches: a floating arrow on screen
       // with nothing telling you what it is, or how to get to it, is worse than
       // no marker at all.
@@ -3324,7 +3552,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       const branchInfo = open && !builder.ghostOnBranch ? ` · ${open} open branch${open > 1 ? "es" : ""} (K)` : "";
       statusEl.textContent = `${builder.count} placed · ${label}${
         curveIds.has(builder.activePieceId) ? " (" + dir + ")" : ""
-      }${chainInfo}${branchInfo} · ${gizmoHint}`;
+      }${chainInfo}${endInfo}${branchInfo} · ${gizmoHint}`;
     }
     syncTiles();
   }

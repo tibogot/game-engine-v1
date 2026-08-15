@@ -325,6 +325,9 @@
             <button id="road-branch" class="palette-btn palette-btn-wide" type="button">
               Go to branch (K)
             </button>
+            <button id="road-other-end" class="palette-btn palette-btn-wide" type="button">
+              Other end of chain (H)
+            </button>
             <button id="road-flip" class="palette-btn" type="button">Flip L/R (R)</button>
             <button id="road-undo" class="palette-btn" type="button">Undo</button>
             <button id="road-save" class="palette-btn" type="button">Save track</button>
@@ -354,6 +357,16 @@
             <kbd>N</kbd> new chain &bull; <kbd>[</kbd>/<kbd>]</kbd> select chain
             (gizmo then drags the whole chain) &bull;
             <kbd>LMB</kbd>/<kbd>Enter</kbd> place.
+            <br><br>
+            <b>Either end:</b> a chain grows from its <b>tail</b> or its
+            <b>head</b> — press <kbd>H</kbd> (or drag the ghost onto the far end)
+            to switch, and the status line always says which one you are on.
+            Building backwards <i>prepends</i>: the piece goes in front and the
+            chain's start moves back to meet it, so <b>nothing already placed
+            moves</b> — you can extend a finished run backwards to a new start
+            line without breaking a single seam you had aligned. A start that is
+            already joined to a junction branch or to another chain is not an
+            open end, so <kbd>H</kbd> will decline there and say so.
             <br><br>
             <b>Junctions:</b> a fork, T, crossroads or roundabout is an ordinary
             chain piece — the chain drives in one end and out the other. Its
