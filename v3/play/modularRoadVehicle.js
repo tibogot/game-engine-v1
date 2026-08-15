@@ -541,6 +541,36 @@ export const TIRE = {
    * (the user's own 60 km/h corner), so the boost is long gone by then.
    */
   lowSpeedLockRef: 14,
+
+  // ── ACKERMANN — THE TWO FRONT WHEELS DO NOT WANT THE SAME ANGLE ──────────
+  // Both front tyres were steered to one identical angle. That is only correct
+  // for a car turning about a point infinitely far away; in a real turn the
+  // inside wheel traces a TIGHTER circle than the outside one and must be
+  // turned further, or the two fight each other and scrub.
+  //
+  // The error is proportional to lock, so it is invisible in ordinary cornering
+  // and enormous at the standstill lock this car runs for donuts. Geometry for
+  // this chassis (wheelbase 2.8 m, track 1.84 m), against the single angle both
+  // wheels currently receive:
+  //     commanded   ideal inner   ideal outer   spread
+  //        5.7°         5.9°          5.5°       0.4°
+  //       11.5°        12.3°         10.8°       1.5°
+  //       31.5°        37.5°         27.0°      10.5°
+  //       54.4°        68.9°         43.8°      25.1°   <- full donut lock
+  // So at full lock the inner tyre is 14.5° short and the outer 10.6° over, and
+  // both spend their grip budget scrubbing sideways instead of turning the car.
+  //
+  // NOT A FREE WIN TO CRANK UP: correcting the geometry makes the front axle
+  // bite harder at low speed, which changes the donut the low-speed lock boost
+  // was tuned against. Hence a 0..1 blend rather than a hard switch — 0 is
+  // bit-for-bit the old parallel steering, 1 is true Ackermann.
+  //
+  // The yaw assist's reference yaw rate deliberately keeps using the CENTRE
+  // angle (`_steerAngle()`): that is a bicycle-model quantity and the bicycle's
+  // single front wheel sits on the centreline, so per-wheel angles would be the
+  // wrong input for it.
+  /** 0 = parallel steering (old behaviour), 1 = true Ackermann geometry. */
+  ackermann: 1.0,
   // ── LATERAL GRIP FADES AS THE CAR TIPS OVER ─────────────────────────────
   // A tyre only makes cornering force through a contact PATCH that is flat on
   // the road. Tip the car onto its shoulder and there is no patch — but the
@@ -580,6 +610,34 @@ export const TIRE = {
   lateralAlignFull: 0.45,
   /** …and at/below which it is gone entirely. 0.15 ≈ 81°, i.e. flat on its side. */
   lateralAlignZero: 0.15,
+  // ── WHERE THE TYRE FORCES ARE APPLIED ───────────────────────────────────
+  // A tyre makes its lateral and longitudinal force at the CONTACT PATCH, on
+  // the road. This model applied both at the wheel HUB, 0.46 m higher, and that
+  // one choice is most of why the car reads weightless.
+  //
+  // The vertical arm from the CoM is what turns a cornering force into a roll
+  // moment and therefore into load transfer:
+  //     hub    0.10 m below CoM ->   746 N of transfer per side at 1 g
+  //     patch  0.46 m below CoM ->  3434 N          "
+  // i.e. the roll moment is understated 4.6x. Load transfer feeds straight back
+  // into grip here (`Fmax` is derived from the dynamic `suspMag`), so this is
+  // not only a cosmetic flatness — the outer tyres never gain the bite, and the
+  // inner ones never lose it, that a real car's do.
+  //
+  // BLENDED, NOT SWITCHED, because the entire handling tune was measured with
+  // hub application: 0 is bit-for-bit the old car, 1 is the correct geometry.
+  // Raising it makes the car roll and transfer weight for real, which also means
+  // BODYLEAN is then double-counting — turn its `rollPerG` down as this goes up.
+  //
+  // SUSPENSION FORCE IS DELIBERATELY LEFT AT THE HUB: the spring genuinely does
+  // push the body from the strut mount, so that one is already right.
+  //
+  // The application point is taken along the suspension axis at the measured
+  // contact distance rather than from `hitPoint`. `hitPoint` is whichever ring
+  // ray won this tick, so it jitters fore/aft between rays — and fore/aft offset
+  // is the YAW lever, which would inject steering noise on every seam.
+  /** 0 = force at the hub (old), 1 = at the contact patch (correct). */
+  contactPatchForces: 0,
   frictionCoeff: 1.5,
   maxAngVel: 9.0,
   // Contact-normal low-pass rate (1/s). ~55 ms time constant: at 30 m/s that
@@ -1813,6 +1871,8 @@ class Tire {
     this._rayOff = new THREE.Vector3();
     this._bestP = new THREE.Vector3();
     this._bestN = new THREE.Vector3(0, 1, 0);
+    /** Where tyre force is applied — hub..contact patch, see TIRE.contactPatchForces. */
+    this._patch = new THREE.Vector3();
   }
 
   /** Cast rays + optional sphere sweep; keep the closest ground hit. */
@@ -2166,12 +2226,19 @@ class Tire {
       Fy *= s;
     }
 
+    // TYRE forces act at the contact patch, not the hub — see the block on TIRE.
+    // Down the suspension axis by the measured contact distance, so the point is
+    // steady even while the winning ring ray flickers between samples.
+    const patchK = TIRE.contactPatchForces;
+    this._patch.copy(this.worldPos);
+    if (patchK > 0) this._patch.addScaledVector(this._up, -distFromHub * patchK);
+
     this._F.copy(this._wheelRight).multiplyScalar(Fy);
-    body.addForceAtPoint(this._F, this.worldPos);
+    body.addForceAtPoint(this._F, this._patch);
     this.lastSteering.copy(this._F);
 
     this._F.copy(this._wheelFwd).multiplyScalar(Fx);
-    body.addForceAtPoint(this._F, this.worldPos);
+    body.addForceAtPoint(this._F, this._patch);
     this.lastAccel.copy(this._F);
   }
 }
@@ -3551,6 +3618,39 @@ export class Vehicle {
     return this.input.steer * (TIRE.maxSteerAngle * factor + boost);
   }
 
+  /**
+   * Per-wheel steer angle — see the ACKERMANN block on TIRE.
+   *
+   * `centre` is the bicycle-model angle from `_steerAngle()`; the turn radius it
+   * implies is R = wheelbase / tan(centre), measured to the centreline. The
+   * inside wheel runs at R − track/2 and the outside at R + track/2, so each
+   * gets its own atan.
+   *
+   * WHICH WHEEL IS INSIDE is decided by sign, and the sign convention here is
+   * the one already documented on the yaw assist: a POSITIVE rotation about the
+   * chassis up-axis turns the nose toward +X, so a positive steer angle puts the
+   * inside wheel on +X. (WHEEL_LOCAL's "R" labels are the opposite way round —
+   * see the note on the air-roll axis — which is exactly why this keys off the
+   * sign of `localX` rather than off the wheel's name.)
+   *
+   * @param {number} centre steer angle at the centreline (rad)
+   * @param {number} localX wheel hub x in chassis-local metres
+   */
+  _wheelSteerAngle(centre, localX) {
+    const k = TIRE.ackermann;
+    if (k <= 0 || centre === 0 || localX === 0) return centre;
+    const mag = Math.abs(centre);
+    const R = WHEELBASE / Math.tan(mag);
+    const halfTrack = Math.abs(localX);
+    const inside = (centre > 0) === (localX > 0);
+    // Clamped so a lock past the geometric limit (R <= track/2, i.e. the inside
+    // wheel's circle collapsing onto the axle) cannot divide toward zero and
+    // snap the wheel to 90°.
+    const arm = inside ? Math.max(0.15, R - halfTrack) : R + halfTrack;
+    const ideal = Math.atan(WHEELBASE / arm);
+    return Math.sign(centre) * (mag + (ideal - mag) * k);
+  }
+
   /** Rear power fraction from the drivetrain layout (FWD=0, RWD=1, AWD=bias). */
   _driveBias() {
     if (DRIVETRAIN.layout === "FWD") return 0;
@@ -3579,10 +3679,13 @@ export class Vehicle {
       for (const tire of this.tires) {
         tire.roofPinned = roofPinned;
         const driveScale = tire.isFront ? fScale : rScale;
+        // Ackermann: the inside wheel turns further than the outside one. Only
+        // the steered axle differs; Tire.apply ignores the angle on a wheel that
+        // cannot steer, so passing the centre angle there is harmless.
         tire.apply(
           body,
           subDt,
-          steerAngle,
+          tire.canSteer ? this._wheelSteerAngle(steerAngle, tire.localPos.x) : steerAngle,
           this.input.throttle,
           this.input.handbrake,
           this._castGround,
@@ -5081,10 +5184,16 @@ export class Vehicle {
 
     // Visual steer INCLUDES the drift countersteer overlay. The TYRES used the
     // plain _steerAngle() back in _physicsStep — this only turns meshes.
-    const steerAngle = this._visualSteerAngle(dt);
+    const steerCentre = this._visualSteerAngle(dt);
     for (let i = 0; i < this.tires.length; i++) {
       const t = this.tires[i];
       const cfg = WHEEL_LOCAL[i];
+      // Ackermann on the DRAWN wheels too, or the physics and the picture
+      // disagree by up to 25° at full lock — which is very visible parked on
+      // full lock, the one place you can study the front wheels at leisure.
+      const steerAngle = cfg.steer
+        ? this._wheelSteerAngle(steerCentre, t.localPos.x)
+        : steerCentre;
       this._wheelUp.copy(this._yAxis).applyQuaternion(this._renderQuat);
       // Decided up front by _updateWheelExtensions, because the body lift above
       // depends on it. May be NEGATIVE (wheel above its hub) on a deep hit —
@@ -5270,9 +5379,19 @@ export class Vehicle {
     arrow.setLength(visLen, Math.min(0.25, visLen * 0.18), Math.min(0.16, visLen * 0.12));
   }
 
-  /** Signed km/h forward speed for a HUD. */
+  /**
+   * Signed km/h FORWARD speed for a HUD — negative in reverse.
+   *
+   * The body was `vel.length() * 3.6`, which is neither signed nor forward: it
+   * is the full 3-D speed, so reversing read positive and a car in free fall
+   * showed a speed it was not travelling over the ground. Nothing consumed it
+   * (roadGame's HUD computes its own), so this is a dormant accessor being made
+   * to match the contract its own doc-comment states, rather than a behaviour
+   * change — but a future caller would have been misled by it.
+   */
   get speedKmh() {
-    return this.body.vel.length() * 3.6;
+    this._steerFwd.set(0, 0, 1).applyQuaternion(this.body.quat);
+    return this.body.vel.dot(this._steerFwd) * 3.6;
   }
 
   get groundedCount() {
