@@ -46,11 +46,18 @@
       #viewport { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; }
 
       /* Engine perf stats (stats-gl) — the engine pins it bottom-left on every
-         resize, so `!important` moves it clear of the game's HUD. */
+         resize, so `!important` moves it clear of the game's HUD.
+
+         CLEAR OF THE PALETTE, which is the point of the 360px. At left:8px this
+         panel (240x48, z-index 10000 against the palette's 20) sat directly on
+         top of the palette header: it hid the category title and covered the
+         top half of the Edges On/Off button, so the button could not be read OR
+         clicked. 360px is past the palette's right edge (~347px) and still left
+         of the drive-mode race clock, which is centred. */
       #perf-stats {
         top: 8px !important;
         bottom: auto !important;
-        left: 8px !important;
+        left: 360px !important;
       }
 
       /* ── DEBUG ORBIT CAM (C) ───────────────────────────────────────────────
@@ -326,7 +333,7 @@
               Go to branch (K)
             </button>
             <button id="road-other-end" class="palette-btn palette-btn-wide" type="button">
-              Other end of chain (H)
+              Other end of chain (O)
             </button>
             <button id="road-flip" class="palette-btn" type="button">Flip L/R (R)</button>
             <button id="road-undo" class="palette-btn" type="button">Undo</button>
@@ -359,14 +366,14 @@
             <kbd>LMB</kbd>/<kbd>Enter</kbd> place.
             <br><br>
             <b>Either end:</b> a chain grows from its <b>tail</b> or its
-            <b>head</b> — press <kbd>H</kbd> (or drag the ghost onto the far end)
+            <b>head</b> — press <kbd>O</kbd> (or drag the ghost onto the far end)
             to switch, and the status line always says which one you are on.
             Building backwards <i>prepends</i>: the piece goes in front and the
             chain's start moves back to meet it, so <b>nothing already placed
             moves</b> — you can extend a finished run backwards to a new start
             line without breaking a single seam you had aligned. A start that is
             already joined to a junction branch or to another chain is not an
-            open end, so <kbd>H</kbd> will decline there and say so.
+            open end, so <kbd>O</kbd> will decline there and say so.
             <br><br>
             <b>Junctions:</b> a fork, T, crossroads or roundabout is an ordinary
             chain piece — the chain drives in one end and out the other. Its

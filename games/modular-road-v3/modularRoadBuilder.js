@@ -428,15 +428,29 @@ export class ModularRoadBuilder {
     this.freePlaceMode = true;
     this._gizmoTarget = "chain";
     this.ghostDetached = false;
+    this.ghostEnd = "tail";
     this.freeYaw = this.snapYaw(yaw != null ? yaw : 0);
     this._freeQuat.setFromAxisAngle(_YUP, this.freeYaw); // new chains start level
     if (atPos) this._freePos.copy(atPos);
     else if (this.orbit?.target) this._freePos.copy(this.orbit.target);
     this.snapPos(this._freePos); // land the new chain on the build grid
-    const id = this.chainSeq++;
+    // REUSE AN EMPTY CHAIN INSTEAD OF STACKING ANOTHER ONE ON TOP OF IT.
+    // A chain with no pieces is nothing but an anchor, so "start a new chain
+    // here" and "move the empty chain I already have here" are the same act.
+    // Without this the boot seeded a second chain over the constructor's own
+    // empty chain 0, and a fresh editor opened reading "chain 2/2" with nothing
+    // placed — an empty chain that could never be reached, filled or removed,
+    // and that every [ / ] cycle then stepped through forever.
+    const reuse = this.chains.find((c) => !this.pieces.some((p) => p.chainId === c.id));
     const anchor = this._anchorFromFree();
-    this.chains.push({ id, anchor });
-    this.activeChainId = id;
+    if (reuse) {
+      reuse.anchor = anchor;
+      this.activeChainId = reuse.id;
+    } else {
+      const id = this.chainSeq++;
+      this.chains.push({ id, anchor });
+      this.activeChainId = id;
+    }
     this.currentConnector = anchor.clone();
     this._showPlacementGizmo();
     this.refreshGhost();
@@ -3542,8 +3556,8 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       const endInfo =
         builder.gizmoMode === "ghost" && !builder.ghostDetached
           ? builder.buildEnd === "head"
-            ? " · ◂ HEAD (building backwards, H)"
-            : builder.canBuildFromHead ? " · TAIL ▸ (H for the other end)" : " · TAIL ▸"
+            ? " · ◂ HEAD (building backwards, O)"
+            : builder.canBuildFromHead ? " · TAIL ▸ (O for the other end)" : " · TAIL ▸"
           : "";
       // Only mentioned when there ARE loose branches: a floating arrow on screen
       // with nothing telling you what it is, or how to get to it, is worse than

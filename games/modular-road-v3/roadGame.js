@@ -1682,10 +1682,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         break;
       case "keyn": seedChainAtSpawn({ atCursor: true }); break; // new chain at the sky cursor
       case "keyk": goToBranch(); return;                        // hop to a junction branch
-      // H = the OTHER END of this chain (tail <-> head). Safe on `e.code` unlike
-      // its neighbours here: H sits in the same physical slot on AZERTY as on
-      // QWERTY, so the printed label and the code agree either way.
-      case "keyh": toggleBuildEnd(); return;
+      // O = the OTHER END of this chain (tail <-> head).
+      //
+      // CHECK PIECE_CATALOG BEFORE ADDING A KEY HERE. The piece-hotkey lookup at
+      // the top of this function runs FIRST and returns, so any letter a piece
+      // already claims is dead on arrival down here — this shortcut shipped as H
+      // and did nothing at all, because H selects the spiral/helix piece.
+      // Free letters at time of writing: a i j m o u x y z.
+      //
+      // O is also positionally identical on AZERTY and QWERTY, so matching it on
+      // `e.code` gives the key with the same LABEL on both — unlike its
+      // neighbours in this switch (see the note on the undo shortcut).
+      case "keyo": toggleBuildEnd(); return;
       case "bracketleft": builder.cycleChain(-1); break;
       case "bracketright": builder.cycleChain(1); break;
       default: return;
@@ -2661,6 +2669,11 @@ ${e.message}`);
   // Put the build anchor on the ground rather than at origin/y=0, but leave the
   // gizmo hidden until the user actually starts placing (see seedChainAtSpawn).
   seedChainAtSpawn({ showGizmo: false });
+  // BOOTING IS NOT AN EDIT. Seeding the anchor commits, so without this a fresh
+  // editor opened with a step already on the undo stack and the very first
+  // Ctrl+Z — before the user had done anything at all — yanked the build anchor
+  // back to the origin. Same rule as loading a track (see resetHistory).
+  builder.resetHistory();
   bakeCollision();
   updateSpawnMarker();
   if (paletteEl) paletteEl.style.display = ""; // boots in build mode
