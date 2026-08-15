@@ -137,7 +137,9 @@ import { buildRoadPanel } from "../ui/buildRoadPanel.js";
 import { buildPlayPhysicsPanel } from "../ui/buildPlayPhysicsPanel.js";
 import { buildPlayFlightPanel } from "../ui/buildPlayFlightPanel.js";
 import { createFlyHud } from "../ui/flyHud.js";
-import { createGpuStatsPanel } from "../render/gpuStatsPanel.js";
+// OFF by default — the custom GPU stats panel. Uncomment this line AND its
+// block further down (search "GPU STATS PANEL — OFF") to bring it back.
+// import { createGpuStatsPanel } from "../render/gpuStatsPanel.js";
 
 /** Request adapter features (incl. timestamp-query) and raised limits — matches v2. */
 async function createWebGpuDevice() {
@@ -222,6 +224,12 @@ export async function startV3App(opts = {}) {
   const drawPanel   = stats.addPanel(new Stats.Panel("DRAW", "#f0f", "#202"));
   const triPanel    = stats.addPanel(new Stats.Panel("KTRI", "#f90", "#210"));
 
+  // ── GPU STATS PANEL — OFF ──────────────────────────────────────────────────
+  // Commented out, not deleted: it is a diagnostic you turn on when you are
+  // chasing a frame-time question, and it costs screen space the rest of the
+  // time. To bring it back, uncomment the two lines at the end of this block
+  // AND the `createGpuStatsPanel` import at the top of the file.
+  //
   // SECOND GPU READOUT, RUNNING ALONGSIDE stats-gl ON PURPOSE.
   //
   // stats-gl shows `renderer.info.render.timestamp`, which is not a per-frame
@@ -235,8 +243,11 @@ export async function startV3App(opts = {}) {
   // The two are deliberately kept side by side (the new panel prints stats-gl's
   // own value as `raw`) so the difference is visible rather than asserted —
   // retire stats-gl only once you have watched them disagree.
-  const gpuStats = hasTimestamps ? createGpuStatsPanel(renderer) : null;
-  window.__v3GpuStats = gpuStats; // console probe: __v3GpuStats.sample()
+  //
+  // NOTE while it is off: the numbers in the stats-gl GPU panel are the ones
+  // this panel exists to distrust. Turn it back on before believing them.
+  // const gpuStats = hasTimestamps ? createGpuStatsPanel(renderer) : null;
+  // window.__v3GpuStats = gpuStats; // console probe: __v3GpuStats.sample()
   let _maxDraw = 1;
   let _maxTri  = 1;
   renderer.info.autoReset = false;
