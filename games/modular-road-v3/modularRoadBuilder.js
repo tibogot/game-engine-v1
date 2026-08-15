@@ -39,6 +39,18 @@ const _isIdentityQuat = (q) => Math.abs(q.w) > 0.9999999;
 const HEAD_JOIN_EPS = 1.0;
 
 /**
+ * How near the cursor has to be to an open end, IN SCREEN PIXELS, for the next
+ * piece to jump there (see `aimAtCursor`).
+ *
+ * Pixels, not metres, on purpose. The gizmo's own magnet is a 6 m sphere, which
+ * on a kit of 22–44 m pieces is about a quarter of one straight — invisibly
+ * small when the camera is pulled back over a whole circuit, and clumsily large
+ * when you are nosed right up to a seam. A screen radius is the same gesture at
+ * every zoom: "near the thing I am looking at".
+ */
+const AIM_PIXEL_RADIUS = 90;
+
+/**
  * Flat chevron for a junction branch marker, in socket-local space: a socket's
  * −Z axis is the way out (see socketMatrix), so the arrow is drawn pointing −Z
  * and floats a little above the deck.
@@ -204,6 +216,9 @@ export class ModularRoadBuilder {
     this.ghostEnd = "tail";
     /** @type {Map<string, THREE.Matrix4>} memo for `_localTransform`. */
     this._localXfCache = new Map();
+    /** Which open end the cursor last snapped to, so a mousemove that stays on
+     *  the same one does no work at all. @type {string|null} */
+    this._lastAimKey = null;
 
     // Seeded HERE, not up with the stacks: a snapshot carries the placement
     // cursor, and every field it reads is declared above this line.
@@ -724,13 +739,109 @@ export class ModularRoadBuilder {
   }
 
   /**
-   * Jump the ghost to the nearest unused branch (the K key / palette button).
+   * Park the ghost on one open end — the single place that decides what
+   * "snapped to the track" means. Shared by the gizmo's magnet and by pointing
+   * at it with the mouse, so the two can never drift apart.
+   */
+  _snapGhostTo(oc) {
+    if (oc.branch) {
+      // A junction branch takes the ghost pose and all, and stays DETACHED, so
+      // placing forks a new chain there.
+      this._putGhostOnBranch(oc.matrix);
+      return;
+    }
+    this.activeChainId = oc.chainId;
+    this.ghostEnd = oc.end === "head" ? "head" : "tail";
+    this._syncCurrentConnector();
+    this.ghostDetached = false;
+    const socket = this.ghostEnd === "head" ? this._chainHead(oc.chainId) : this.currentConnector;
+    this._ghostPos.setFromMatrixPosition(socket);
+    this._setGhostYaw(new THREE.Euler().setFromRotationMatrix(socket, "YXZ").y);
+    if (this.placementGizmo?.visible) {
+      this.placementPivot.position.copy(this._ghostPos);
+      this.placementPivot.rotation.set(0, this._ghostYaw, 0);
+    }
+    this.refreshGhost();
+  }
+
+  /**
+   * AIM BY POINTING AT THE TRACK — the interaction props have always had (their
+   * ghost rides the cursor) and road pieces never did.
+   *
+   * Until this, the only way to move the next piece was to drag the placement
+   * gizmo, which translates on the three WORLD axes and has nothing to do with
+   * the road's direction, and then hope to land inside a 6 m magnet sphere — on
+   * a kit whose pieces are 22–44 m long, with a grid step of 8 m that divides
+   * none of them. It read as "free-fly the piece in 3D", not as snapping.
+   *
+   * So: hover within `AIM_PIXEL_RADIUS` of any open end (either end of any
+   * chain, or a free junction branch) and the ghost goes there. Measuring in
+   * SCREEN PIXELS rather than world metres is the point — a fixed world radius
+   * is enormous zoomed in and unhittable zoomed out, while "near the thing I can
+   * see" is the same gesture at every zoom.
+   *
+   * Nothing near the cursor leaves the ghost exactly where it is, so a piece you
+   * deliberately free-placed is not stolen back by an idle mouse move, and the
+   * gizmo remains the tool for putting a piece somewhere there is no track yet.
+   *
+   * @returns {boolean} true only when the aim actually MOVED — the caller uses
+   *   that to refresh the status line without doing DOM work on every mousemove.
+   */
+  aimAtCursor(clientX, clientY) {
+    if (!this._camera || !this._domElement) return false;
+    if (!this.isBuildMode()) return false;
+    // A live gizmo drag owns the ghost, and editing a placed piece is a
+    // different mode entirely — neither wants the cursor second-guessing it.
+    if (this._gizmoTarget === "piece" || this.isUsingPlacementGizmo()) return false;
+
+    const rect = this._domElement.getBoundingClientRect();
+    let best = null;
+    for (const oc of this._openConnectors()) {
+      _A_V.setFromMatrixPosition(oc.matrix).project(this._camera);
+      if (_A_V.z > 1) continue; // behind the camera: the projection wraps around
+      const sx = rect.left + (_A_V.x * 0.5 + 0.5) * rect.width;
+      const sy = rect.top + (-_A_V.y * 0.5 + 0.5) * rect.height;
+      const d = Math.hypot(sx - clientX, sy - clientY);
+      if (d <= AIM_PIXEL_RADIUS && (!best || d < best.d)) best = { oc, d };
+    }
+    if (!best) return false;
+
+    const key = `${best.oc.chainId}|${best.oc.end}|${
+      best.oc.branch ? best.oc.branch.pos.toArray().join(",") : ""}`;
+    if (key === this._lastAimKey) return false; // same end, nothing to redraw
+    this._lastAimKey = key;
+    this._snapGhostTo(best.oc);
+    return true;
+  }
+
+  /**
+   * Jump the ghost to the next unused branch (the K key / palette button).
    * Dragging the ghost onto a branch marker does the same thing; this is the
    * version that needs no aim.
    */
   snapGhostToNearestBranch() {
     const free = this.branchConnectors().filter((b) => !b.used);
     if (!free.length) return false;
+
+    // IT CYCLES. It used to re-pick the branch nearest `currentConnector` every
+    // time — and jumping to a branch does not move `currentConnector`, so
+    // pressing K three times on a crossroads landed on the SAME arm three times
+    // (measured). The second arm was unreachable from the keyboard until you had
+    // built on the first one and it stopped counting as free.
+    //
+    // `branchConnectors()` walks pieces in placement order, so its order is
+    // stable frame to frame, which is what makes stepping through it coherent.
+    if (this.ghostOnBranch) {
+      const at = free.findIndex((b) => b.pos.distanceTo(this._ghostPos) < HEAD_JOIN_EPS);
+      if (at >= 0) {
+        const next = free[(at + 1) % free.length];
+        this._putGhostOnBranch(next.matrix);
+        this._notify();
+        return true;
+      }
+    }
+    // Not on a branch yet: the nearest one to where you are building is the
+    // right first answer.
     const from = new THREE.Vector3().setFromMatrixPosition(this.currentConnector);
     let best = free[0];
     for (const b of free) if (b.pos.distanceTo(from) < best.pos.distanceTo(from)) best = b;
@@ -949,32 +1060,23 @@ export class ModularRoadBuilder {
       const pos = this.placementPivot.position;
       const hit = this._nearestOpenConnector(pos);
       const magnet = Math.max(4, this.snapEnabled ? this.snapStep * 0.75 : 4);
-      if (hit?.branch && hit.dist <= magnet) {
-        // A JUNCTION BRANCH takes the ghost exactly as it is — pose and all —
-        // and leaves it "detached", so placing forks a new chain there.
-        this._putGhostOnBranch(hit.matrix);
-        return; // ghost moves never touch placed geometry — no rebuild/rebake
-      }
       if (hit && hit.dist <= magnet) {
         // Snapping onto a chain end also picks WHICH END: drop the ghost on a
         // head and the next piece is prepended, on a tail and it is appended.
         // That is the whole "build from either end" gesture — no mode to switch.
-        this.activeChainId = hit.chainId;
-        this.ghostEnd = hit.end === "head" ? "head" : "tail";
-        this._syncCurrentConnector();
-        this.ghostDetached = false;
-        const socket = this.ghostEnd === "head" ? this._chainHead(hit.chainId) : this.currentConnector;
-        this._ghostPos.setFromMatrixPosition(socket);
-        this._setGhostYaw(new THREE.Euler().setFromRotationMatrix(socket, "YXZ").y);
-      } else {
-        this.ghostDetached = true;
-        this.ghostEnd = "tail";
-        this._ghostPos.copy(pos);
-        this.snapPos(this._ghostPos);
-        this._setGhostYaw(this.snapYaw(this.placementPivot.rotation.y));
+        // Shared with the cursor aim so the two agree by construction.
+        this._snapGhostTo(hit);
+        this._lastAimKey = null; // a drag overrides where the cursor last aimed
+        return; // ghost moves never touch placed geometry — no rebuild/rebake
       }
+      this.ghostDetached = true;
+      this.ghostEnd = "tail";
+      this._ghostPos.copy(pos);
+      this.snapPos(this._ghostPos);
+      this._setGhostYaw(this.snapYaw(this.placementPivot.rotation.y));
       this.placementPivot.position.copy(this._ghostPos);
       this.placementPivot.rotation.set(0, this._ghostYaw, 0);
+      this._lastAimKey = null;
       this.refreshGhost();
       return; // ghost moves never touch placed geometry — no rebuild/rebake
     }

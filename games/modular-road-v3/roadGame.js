@@ -1829,8 +1829,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // The brush ghost tracks the cursor. Cheap: one BVH ray plus one terrain pick.
   renderer.domElement.addEventListener("pointermove", (e) => {
     lastPointer = { x: e.clientX, y: e.clientY };
-    if (!brush || mode !== "build") return;
-    updateBrush(e.clientX, e.clientY);
+    if (mode !== "build") return;
+    if (brush) { updateBrush(e.clientX, e.clientY); return; }
+    // NO BRUSH ⇒ the ROAD PIECE tracks the cursor, the same way a prop ghost
+    // does. Point near any open end and the next piece jumps there; point at
+    // nothing and it stays put, so a deliberately free-placed piece is not
+    // dragged off by an idle mouse move. Returns true only when the aim actually
+    // changed, which is what keeps the status refresh off the hot path.
+    if (builder.aimAtCursor(e.clientX, e.clientY)) paletteUi?.refreshStatus?.();
   });
   // Leaving the canvas hides the ghost rather than freezing it at the last edge
   // position, which otherwise looks like a stuck object.
@@ -1853,6 +1859,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       placeBrush();
       return;
     }
+    builder.aimAtCursor(e.clientX, e.clientY); // same reason: it may have moved
     builder.place();
     paletteUi.refreshStatus();
   });
