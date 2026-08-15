@@ -50,6 +50,15 @@ export const LOD_LEVELS = Math.max(
 );
 
 /**
+ * Quantum the clipmap centre is snapped to — the COARSEST ring's grid step.
+ * See the note on `update()` for why snapping is mandatory and why it has to be
+ * this value rather than a constant. Derived, so it follows any change to
+ * WORLD_SIZE / HEIGHTMAP_SIZE instead of going stale.
+ * Shipped 2048/1024 config: steps are 2, 4, 8, 16, 32 → snap 32.
+ */
+export const LOD_CENTRE_SNAP = BASE_STEP * Math.pow(2, LOD_LEVELS - 1);
+
+/**
  * COMPILE-TIME feature set for the terrain material.
  *
  * WHY THIS IS NOT A SET OF UNIFORMS. Every one of these was already switchable
@@ -404,11 +413,49 @@ export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrush
     levels.push({ mesh, uCenter });
   }
 
-  // Pass controls.target for orbit cameras; camera.position for first-person.
+  /**
+   * Re-centre the clipmap. Pass controls.target for orbit cameras,
+   * camera.position for first-person.
+   *
+   * THE CENTRE IS SNAPPED TO THE GRID, AND THAT IS NOT OPTIONAL.
+   *
+   * Every ring vertex sits at a fixed offset from this centre, so if the centre
+   * slides continuously each vertex lands somewhere slightly new every frame,
+   * re-samples the heightmap there, and gets a slightly different height. The
+   * mesh swims through the heightfield. On flat ground the height barely changes
+   * and nobody notices; on a CLIFF the same few centimetres of slide is a large
+   * height change, so the surface visibly ripples — and because the textures are
+   * world-anchored (positionWorld.xz) while the geometry moves underneath them,
+   * it reads as the texture crawling across the rock. Reported as "the terrain
+   * texture really morphs", and mistaken for the stochastic-tiling artefact,
+   * which swims the same way for an unrelated reason (its camera-distance
+   * crossfade).
+   *
+   * Snapping fixes it because a jump of exactly one grid step puts every vertex
+   * where its neighbour just was, so the sampled surface is IDENTICAL before and
+   * after — the centre moves and the terrain does not budge.
+   *
+   * WHY THE COARSEST STEP AND NOT A CONSTANT. The levels use steps
+   * BASE_STEP × 2^lod (2, 4, 8, 16, 32 at the shipped 2048/1024 config).
+   * Snapping to the coarsest one lands EVERY level on its own grid, because each
+   * finer step divides it, and keeps all the rings on a common lattice so no
+   * seam can open between them. v3/app/main.js's play path had its own
+   * `LOD_SNAP = 16`, which is a step too small — it left the outermost ring
+   * sliding half a step — and only ran in playMode, so the modular-road game
+   * (which uses its own vehicle, not playMode) fell through to the raw,
+   * unsnapped call and got the full artefact.
+   *
+   * Doing it HERE rather than at the call sites means no caller can get it
+   * wrong; snapping an already-snapped value is idempotent, so the play path's
+   * own rounding is now simply redundant.
+   */
   function update(center) {
+    const q = LOD_CENTRE_SNAP;
+    const cx = Math.round(center.x / q) * q;
+    const cz = Math.round(center.z / q) * q;
     for (const { mesh, uCenter } of levels) {
-      mesh.position.set(center.x, 0, center.z);
-      uCenter.value.set(center.x, center.z);
+      mesh.position.set(cx, 0, cz);
+      uCenter.value.set(cx, cz);
     }
   }
 
