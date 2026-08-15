@@ -121,7 +121,22 @@ export const PHYSICS_PROP_TYPES = {
       height: 0.9 * CONE_SCALE,
       length: 0.54 * CONE_SCALE,
     },
-    comY: -0.27 * CONE_SCALE, // low CoM so it rights itself and settles base-down
+    /**
+     * CoM offset — INERT TODAY, and the comment here used to claim otherwise
+     * ("low CoM so it rights itself and settles base-down"). Nothing rights a
+     * cone: `size` and `comY` reach `RigidBody._setInertia` and stop there,
+     * because `_tickBody` integrates position and orientation directly and
+     * never calls `integrate()`, never reads `localInvInertia`, and never
+     * accumulates torque. A knocked cone therefore keeps whatever attitude the
+     * angular damping froze it at, which can be tip-down.
+     *
+     * Kept rather than deleted because it is the correct value the moment
+     * anyone routes these bodies through `RigidBody.integrate()` — but it
+     * should not be read as describing current behaviour. To actually get
+     * self-righting, the cheap route is a gravity torque toward upright while
+     * awake, not a switch to full rigid-body dynamics.
+     */
+    comY: -0.27 * CONE_SCALE,
   },
   gate: {
     kind: "hinge",
@@ -387,9 +402,11 @@ export class PropPhysics {
   /**
    * Car → prop impulse. ONE-WAY: the car is never touched.
    *
-   * Sphere (prop) vs oriented box (chassis). The contact point is offset from
-   * the prop's centre, so `addForceAtPoint`-style torque falls out naturally and
-   * the cone cartwheels rather than sliding away flat.
+   * Sphere (prop) vs oriented box (chassis). The tumble is written DIRECTLY into
+   * `angVel` from the push direction (see the TUMBLE block below) — it does not
+   * "fall out naturally" from an off-centre force, as this comment used to say.
+   * Nothing here goes through `addForceAtPoint`, and the body's inertia tensor
+   * is never consulted; see the note on `comY`.
    */
   _carImpulse(s, car, vehicle) {
     const P = PROP_PHYSICS;
