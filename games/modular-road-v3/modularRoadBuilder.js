@@ -150,12 +150,12 @@ export class ModularRoadBuilder {
     // redo returns to, and what the next commit pushes onto the undo stack.
     /** @type {object[]} */ this._undoStack = [];
     /** @type {object[]} */ this._redoStack = [];
-    /** Seeded immediately: the first edit must have a state to return TO, or
-     *  it can never be undone and the whole stack sits one step behind. */
+    /** Seeded below, once the placement cursor exists: the first edit must have
+     *  a state to return TO, or it can never be undone and the whole stack sits
+     *  one step behind. */
     this._baseline = null;
     /** While true, edits do not commit — see `_asOneEdit`. */
     this._histSuspend = false;
-    this._baseline = this._snapshot();
 
     /** Anchor gizmo state for the active chain. `_freeQuat` is the FULL
      *  orientation (pitch/roll/yaw) — this is what lets an anchor tilt, e.g. a
@@ -186,6 +186,10 @@ export class ModularRoadBuilder {
     this._ghostQuat = new THREE.Quaternion();
     /** True while the ghost is parked on a junction branch (see branchConnectors). */
     this.ghostOnBranch = false;
+
+    // Seeded HERE, not up with the stacks: a snapshot carries the placement
+    // cursor, and every field it reads is declared above this line.
+    this._baseline = this._snapshot();
 
     this.root = new THREE.Group();
     this.root.name = "ModularRoad";
@@ -399,6 +403,7 @@ export class ModularRoadBuilder {
 
   /** Start a new disconnected chain at `atPos` and make it active. */
   beginNewChain(atPos = null, yaw = null) {
+    this._markCursor();
     this.freePlaceMode = true;
     this._gizmoTarget = "chain";
     this.ghostDetached = false;
@@ -1078,16 +1083,9 @@ export class ModularRoadBuilder {
   _makePieceEntry(id, chainId, connectorIn, pp, edges) {
     const built = buildPiece(id, connectorIn, pp, roadParams, guardrailParams, edges);
     const mesh = this._makeMesh(built.geometry, this.material, built.world);
-    mesh.userData.pieceId = id;
     // Deck collision proxy — only the half tubes have one (rim caps stripped).
     // Same three-birth-sites rule as the rail proxy below.
     mesh.userData.collisionGeometry = built.deckCollision ?? null;
-    if (built.def.noMesh) {
-      mesh.userData.noCollision = true;
-      mesh.userData.noRender = true; // gap spacer: no road, no instance/merge
-      mesh.material = this.gapMaterial; // ...but a faint build-time marker
-      mesh.visible = true;
-    }
     const railMesh =
       built.railGeometry && this.railMaterial
         ? this._makeMesh(built.railGeometry, this.railMaterial, built.world)
@@ -1141,6 +1139,7 @@ export class ModularRoadBuilder {
     for (const m of [mesh, railMesh, shellMesh, decorMesh, glassMesh]) {
       if (m) m.userData.piece = piece;
     }
+    this._applyPiecePresence(piece);
     // Record what this geometry was built FROM, exactly as rebuildAll does.
     // Without it a freshly placed piece looks un-built to the reuse check, so the
     // first restore after any placement rebuilds the whole track — measured as
@@ -1149,9 +1148,34 @@ export class ModularRoadBuilder {
     return piece;
   }
 
+  /**
+   * Sync the flags that live on the MESH rather than in the geometry: whether
+   * this piece renders and whether it collides at all. They follow `p.id`, and
+   * `rebuildAll`/`_applyBuilt` only ever swap geometry — so anything that
+   * changes a piece's TYPE has to call this.
+   *
+   * Two callers, and the second is the one that was missing: `replacePiece`
+   * (which had these lines inline) and `_restore`. Undoing a makeGap therefore
+   * put `p.id` back to "straight" while the mesh kept noRender + noCollision +
+   * the gap material — road you cannot see and fall straight through, saved to
+   * the track file in that state.
+   */
+  _applyPiecePresence(p) {
+    const gap = !!PIECE_BY_ID.get(p.id)?.noMesh;
+    p.mesh.userData.pieceId = p.id;
+    p.mesh.userData.noCollision = gap;
+    p.mesh.userData.noRender = gap;   // gap spacer: no road, no instance/merge
+    p.mesh.material = gap ? this.gapMaterial : this.material; // faint build marker
+    p.mesh.visible = gap ? true : !this.instancingEnabled;
+  }
+
   /** Place the active piece — onto the open end, or wherever the detached
    *  ghost sits (which starts a new chain there, Apex-style). */
   place() {
+    // Record the aim BEFORE placing moves it — undo then returns the ghost to
+    // the pose this piece was placed from, so pressing place again puts the
+    // same piece back in the same spot.
+    this._markCursor();
     if (this._gizmoTarget === "ghost" && this.ghostDetached) {
       const id = this.chainSeq++;
       const anchor = this._anchorFromGhost();
@@ -1282,6 +1306,7 @@ export class ModularRoadBuilder {
   deletePiece(p) {
     const idx = this.pieces.indexOf(p);
     if (idx < 0) return false;
+    this._markCursor(); // this moves the append target; undo has to move it back
     // Drop the highlight's reference to p's geometry BEFORE _removePiece disposes
     // it, or a frame could draw a disposed buffer.
     if (this.selectedPiece === p) {
@@ -1300,16 +1325,12 @@ export class ModularRoadBuilder {
    *  of the chain re-flows from the new piece's exit. */
   replacePiece(p, newId, pp = this._snapshotParams()) {
     if (this.pieces.indexOf(p) < 0 || !PIECE_BY_ID.has(newId)) return false;
-    const def = PIECE_BY_ID.get(newId);
+    this._markCursor();
     p.id = newId;
     p.pp = { ...pp };
-    p.mesh.userData.pieceId = newId;
     // A piece can gain/lose its render+collision presence across the swap (e.g.
     // to/from a gap) — rebuildAll only replaces geometry, not these flags.
-    p.mesh.userData.noCollision = !!def.noMesh;
-    p.mesh.userData.noRender = !!def.noMesh;
-    p.mesh.material = def.noMesh ? this.gapMaterial : this.material;
-    p.mesh.visible = def.noMesh ? true : !this.instancingEnabled;
+    this._applyPiecePresence(p);
     this.rebuildAll();
     this._updateSelectionHighlight();
     this._commit();
@@ -1346,8 +1367,7 @@ export class ModularRoadBuilder {
     _A_V2.setFromMatrixPosition(p.connectorOut);
     const len = _A_V.distanceTo(_A_V2);
     const pp = { ...this._snapshotParams(), gapLength: Math.max(4, len), gapDrop: 0 };
-    return this.replacePiece(p, "gap", pp);
-      this._commit();
+    return this.replacePiece(p, "gap", pp); // replacePiece commits
   }
 
   /** Turn this piece's guardrails/kerbs on or off — PER PIECE, independent of
@@ -1433,6 +1453,7 @@ export class ModularRoadBuilder {
   insertPieceBefore(p, newId, pp = this._snapshotParams()) {
     const idx = this.pieces.indexOf(p);
     if (idx < 0 || !PIECE_BY_ID.has(newId)) return false;
+    this._markCursor();
     // rebuildAll re-derives the transform from the chain walk, so p.connectorIn
     // here is only a placeholder for the initial build.
     const entry = this._makePieceEntry(newId, p.chainId, p.connectorIn, pp, guardrailParams.enabled);
@@ -1480,10 +1501,102 @@ export class ModularRoadBuilder {
   // one rebuilds only the pieces that actually differ (see `reuse` above), which
   // for a normal edit is one.
 
+  /**
+   * WHERE THE USER IS, as opposed to what the track is: the placement gizmo's
+   * target, the ghost's pose, the free anchor, and which chain new pieces append
+   * to. None of it is geometry, and all of it decides where the NEXT piece goes.
+   *
+   * It rides in the snapshot but is NOT part of `_sameStructure`, which gives
+   * the two behaviours you want out of one mechanism:
+   *  • moving the ghost is not an edit, so it never adds an undo step;
+   *  • undoing an edit puts the cursor back where it was when you made it, so
+   *    pressing place again rebuilds the SAME piece in the SAME spot.
+   * Without it, `_restore` fell through to `_syncGizmoToOpenEnd()` and threw the
+   * ghost onto whatever chain happened to be active — so the piece you undid
+   * came back somewhere else entirely.
+   */
+  _cursor() {
+    return {
+      activeChainId: this.activeChainId,
+      freePlaceMode: this.freePlaceMode,
+      gizmoTarget: this._gizmoTarget,
+      ghostDetached: this.ghostDetached,
+      ghostOnBranch: this.ghostOnBranch,
+      ghostPos: this._ghostPos.clone(),
+      ghostQuat: this._ghostQuat.clone(),
+      freePos: this._freePos.clone(),
+      freeQuat: this._freeQuat.clone(),
+    };
+  }
+
+  _applyCursor(c) {
+    if (!c) return;
+    // The chain may have been deleted by the state we are restoring INTO (undo
+    // of a free placement drops the chain it created), so never trust the id.
+    this.activeChainId = this.chains.some((ch) => ch.id === c.activeChainId)
+      ? c.activeChainId
+      : (this.chains.at(-1)?.id ?? 0);
+    this.freePlaceMode = c.freePlaceMode;
+    this._gizmoTarget = c.gizmoTarget;
+    this.ghostDetached = c.ghostDetached;
+    this.ghostOnBranch = c.ghostOnBranch;
+    this._ghostPos.copy(c.ghostPos);
+    this._ghostQuat.copy(c.ghostQuat);
+    this._ghostYaw = _A_E.setFromQuaternion(this._ghostQuat, "YXZ").y;
+    this._freePos.copy(c.freePos);
+    this._freeQuat.copy(c.freeQuat);
+    this.freeYaw = _A_E.setFromQuaternion(this._freeQuat, "YXZ").y;
+  }
+
+  /** Re-seat the placement gizmo on the cursor we just restored. The plain
+   *  `_syncGizmoToOpenEnd()` cannot do this: it means "forget where you were
+   *  and go to the chain end", which is the bug this exists to avoid. */
+  _showGizmoForCursor() {
+    if (this._gizmoTarget === "ghost" && this.ghostDetached) {
+      this._showGizmoAt(this._ghostPos, this._ghostYaw);
+      this.refreshGhost();
+    } else if (this._gizmoTarget === "chain") {
+      this._showPlacementGizmo();
+      this.refreshGhost();
+    } else {
+      // Attached ghost (or a "piece" target whose selection is gone): the open
+      // end IS the right answer, and it just moved.
+      this._syncGizmoToOpenEnd();
+    }
+  }
+
+  /** True when two snapshots describe the same TRACK — cursor ignored. Used to
+   *  keep cursor-only commits (every gizmo drag-end fires one) off the stack. */
+  _sameStructure(a, b) {
+    if (!a || !b) return false;
+    if (a.chainSeq !== b.chainSeq) return false;
+    if (a.chains.length !== b.chains.length) return false;
+    if (a.pieces.length !== b.pieces.length) return false;
+    for (let i = 0; i < a.chains.length; i++) {
+      if (a.chains[i].id !== b.chains[i].id) return false;
+      if (!a.chains[i].anchor.equals(b.chains[i].anchor)) return false;
+    }
+    for (let i = 0; i < a.pieces.length; i++) {
+      const x = a.pieces[i], y = b.pieces[i];
+      // `pp` by reference, exactly as the rebuild's reuse check compares it —
+      // params are cloned once at placement and never mutated in place.
+      if (x.uid !== y.uid || x.id !== y.id || x.chainId !== y.chainId
+        || x.edges !== y.edges || x.pp !== y.pp || x.detached !== y.detached) return false;
+      if (!x.tilt.equals(y.tilt)) return false;
+      if (!!x.pinnedIn !== !!y.pinnedIn) return false;
+      if (x.pinnedIn && !x.pinnedIn.equals(y.pinnedIn)) return false;
+    }
+    return true;
+  }
+
   /** Structural state — everything `rebuildAll` needs, and nothing derived. */
   _snapshot() {
     return {
-      activeChainId: this.activeChainId,
+      cursor: this._cursor(),
+      // Restored too: `clear()` resets it to 1, so without this an undo of Clear
+      // brought back chains 1..n while the next new chain was handed id 1 again,
+      // and two chains sharing an id silently merge.
+      chainSeq: this.chainSeq,
       chains: this.chains.map((c) => ({ id: c.id, anchor: c.anchor.clone() })),
       // `pp` by reference: cloned once at placement, never mutated, so sharing it
       // is safe and keeps a snapshot to a few hundred bytes instead of 50 numbers
@@ -1504,7 +1617,8 @@ export class ModularRoadBuilder {
     for (const p of this.pieces) if (!keep.has(p.uid)) this._removePiece(p);
 
     this.chains = snap.chains.map((c) => ({ id: c.id, anchor: c.anchor.clone() }));
-    this.activeChainId = snap.activeChainId;
+    this.chainSeq = snap.chainSeq ?? this.chainSeq;
+    this._applyCursor(snap.cursor);
     this.pieces = snap.pieces.map((e) => {
       let p = byUid.get(e.uid);
       if (!p) {
@@ -1517,12 +1631,18 @@ export class ModularRoadBuilder {
       p.tilt.copy(e.tilt);
       p.detached = e.detached;
       p.pinnedIn = e.pinnedIn ? e.pinnedIn.clone() : null;
+      // The id may have changed under us (undo of a replace / makeGap), and the
+      // render + collision flags follow the id, not the geometry.
+      this._applyPiecePresence(p);
       return p;
     });
 
     if (this.selectedPiece && !keep.has(this.selectedPiece.uid)) this.deselectPiece();
     this.rebuildAll({ reuse: true });
-    this._syncGizmoToOpenEnd();
+    // rebuildAll re-derives `currentConnector` from the restored active chain and
+    // may have dragged an ATTACHED ghost with it, so put the cursor back last.
+    this._applyCursor(snap.cursor);
+    this._showGizmoForCursor();
   }
 
   /**
@@ -1532,12 +1652,32 @@ export class ModularRoadBuilder {
    */
   _commit() {
     if (this._histSuspend) return;
+    const now = this._snapshot();
+    // CURSOR-ONLY CHANGE ⇒ NOT AN EDIT. Every gizmo drag-end commits, and most
+    // drags only move the ghost — which used to push a snapshot identical to the
+    // baseline, so Ctrl+Z spent step after step appearing to do nothing at all.
+    // Fold it into the baseline instead: the cursor recorded there is now the
+    // one the user was at, and the next REAL edit carries it onto the stack.
+    if (this._sameStructure(this._baseline, now)) {
+      if (this._baseline) this._baseline.cursor = now.cursor;
+      return;
+    }
     if (this._baseline) {
       this._undoStack.push(this._baseline);
       if (this._undoStack.length > HISTORY_LIMIT) this._undoStack.shift();
     }
-    this._baseline = this._snapshot();
+    this._baseline = now;
     this._redoStack.length = 0; // a new edit forks the timeline
+  }
+
+  /**
+   * Stamp the CURRENT cursor onto the outgoing baseline. Call at the top of any
+   * edit that moves the cursor as a side effect (placing hands the ghost to the
+   * next open end), so the undo step records where you were when you acted
+   * rather than where the edit left you.
+   */
+  _markCursor() {
+    if (!this._histSuspend && this._baseline) this._baseline.cursor = this._cursor();
   }
 
   /** Drop the history — for a load/import, where "undo" across the boundary
@@ -1580,6 +1720,7 @@ export class ModularRoadBuilder {
   }
 
   clear() {
+    this._markCursor();
     this.selectedPiece = null;
     this._updateSelectionHighlight();
     for (const p of this.pieces) this._removePiece(p);
@@ -1759,64 +1900,25 @@ export class ModularRoadBuilder {
     for (const e of entries) {
       if (!PIECE_BY_ID.has(e.id) || !Array.isArray(e.connectorIn) || e.connectorIn.length !== 16) continue;
       const connectorIn = new THREE.Matrix4().fromArray(e.connectorIn);
-      const edges = e.edges ?? true;
-      const pp = { ...e.pp };
-      const built = buildPiece(e.id, connectorIn, pp, roadParams, guardrailParams, edges);
-      const mesh = this._makeMesh(built.geometry, this.material, built.world);
-      mesh.userData.pieceId = e.id;
-      mesh.userData.collisionGeometry = built.deckCollision ?? null;
-      if (built.def.noMesh) {
-        mesh.userData.noCollision = true;
-        mesh.userData.noRender = true;
-        mesh.material = this.gapMaterial;
-        mesh.visible = true;
-      }
-      const railMesh =
-        built.railGeometry && this.railMaterial
-          ? this._makeMesh(built.railGeometry, this.railMaterial, built.world)
-          : null;
-      // Third place a rail mesh is born (this one is the track IMPORT path) —
-      // the collision proxy has to be attached at every one of them or the BVH
-      // silently falls back to baking the full-detail rail.
-      if (railMesh) railMesh.userData.collisionGeometry = built.railCollision ?? null;
-      const shellMesh =
-        built.shellGeometry && this.shellMaterial
-          ? this._makeMesh(built.shellGeometry, this.shellMaterial, built.world)
-          : null;
-      const decorMesh =
-        built.decorGeometry && this.decorMaterial
-          ? this._makeMesh(built.decorGeometry, this.decorMaterial, built.world)
-          : null;
-      if (decorMesh) decorMesh.castShadow = false;
-      const glassMesh =
-        built.glassGeometry && this.glassMaterial
-          ? this._makeMesh(built.glassGeometry, this.glassMaterial, built.world)
-          : null;
-      if (glassMesh) glassMesh.castShadow = false;
-
-      const piece = {
-        id: e.id,
-        chainId: e.chainId ?? 0,
-        pp,
-        edges,
-        mesh,
-        railMesh,
-        shellMesh,
-        decorMesh,
-        glassMesh,
-        connectorIn,
-        connectorOut: built.connectorOut.clone(),
-        branches: built.branchesOut ?? [],
-        tilt: new THREE.Quaternion(),
-        _baseIn: connectorIn.clone(),
-        detached: !!e.detached,
-        pinnedIn: Array.isArray(e.pinnedIn) && e.pinnedIn.length === 16
-          ? new THREE.Matrix4().fromArray(e.pinnedIn)
-          : null,
-      };
-      for (const m of [mesh, railMesh, shellMesh, decorMesh, glassMesh]) {
-        if (m) m.userData.piece = piece;
-      }
+      // THROUGH _makePieceEntry, NOT A HAND-BUILT LITERAL. This used to assemble
+      // the piece record inline — the same forty lines as _makePieceEntry, kept in
+      // step by hand — and it had silently fallen behind on the two fields that
+      // are not geometry: `uid` and `_builtFrom`.
+      //
+      // A missing uid is not cosmetic. _restore keys the entire rebuild off it
+      // (`byUid.get(e.uid)`), so with every loaded piece at `undefined` one undo
+      // mapped all 41 slots of rushline onto ONE piece object: the track came back
+      // scrambled, and 40 of the 41 meshes vanished from pickPiece's raycast set,
+      // which is why right-click stopped selecting anything. It only ever affected
+      // tracks loaded from disk, so the history tests — which build with place() —
+      // never saw it.
+      const piece = this._makePieceEntry(e.id, e.chainId ?? 0, connectorIn, e.pp, e.edges ?? true);
+      // Saved absolute pin for a free-placed piece; the tilt recovery below reads
+      // it, and rebuildAll uses it in place of the running connector.
+      piece.detached = !!e.detached;
+      piece.pinnedIn = Array.isArray(e.pinnedIn) && e.pinnedIn.length === 16
+        ? new THREE.Matrix4().fromArray(e.pinnedIn)
+        : null;
       this.pieces.push(piece);
     }
     this._rebuildInstances();
