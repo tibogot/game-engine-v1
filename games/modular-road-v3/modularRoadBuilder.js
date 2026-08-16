@@ -277,13 +277,46 @@ export class ModularRoadBuilder {
     // chain starts there. Build-mode only — drive mode hides builder.root, and
     // this group rides it.
     this.branchMarkers = new THREE.Group();
-    this.branchMarkers.name = "ModularRoadBranchMarkers";
+    this.branchMarkers.name = "ModularRoadEndMarkers";
     this.root.add(this.branchMarkers);
     this.branchMarkerGeo = _makeBranchMarkerGeometry();
-    this.branchMarkerMat = new THREE.MeshBasicMaterial({
-      color: 0xffc93c, transparent: true, opacity: 0.55,
-      depthWrite: false, side: THREE.DoubleSide,
-    });
+    /**
+     * One arrow per OPEN END, coloured by what it is. Branches have always had
+     * a marker; chain ends never did, so the only way to find out where you
+     * could build was to move the cursor around and watch the ghost twitch —
+     * which got worse, not better, once pointing at an end started doing
+     * something (see `aimAtCursor`).
+     *
+     * Every arrow points the way a piece placed there would GROW, which is why
+     * a head's socket has to be turned around before it is drawn: a head faces
+     * INTO its chain, and an arrow pointing back down the road you already built
+     * would say the opposite of what prepending does.
+     */
+    this.endMarkerMats = {
+      /** Junction side exit — start a new chain here. */
+      branch: new THREE.MeshBasicMaterial({
+        color: 0xffc93c, transparent: true, opacity: 0.55,
+        depthWrite: false, side: THREE.DoubleSide,
+      }),
+      /** Chain tail — the ordinary "keep going this way" end. */
+      tail: new THREE.MeshBasicMaterial({
+        color: 0x54d6ff, transparent: true, opacity: 0.42,
+        depthWrite: false, side: THREE.DoubleSide,
+      }),
+      /** Chain head — building here PREPENDS, so it gets its own colour. */
+      head: new THREE.MeshBasicMaterial({
+        color: 0xb98cff, transparent: true, opacity: 0.42,
+        depthWrite: false, side: THREE.DoubleSide,
+      }),
+      /** Whichever end the next piece is actually aimed at. Opaque and drawn on
+       *  top: of all the arrows on screen, this is the one that answers "where
+       *  will this piece land if I click now". */
+      aimed: new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.95,
+        depthWrite: false, depthTest: false, side: THREE.DoubleSide,
+      }),
+    };
+    this.branchMarkerMat = this.endMarkerMats.branch; // back-compat for disposal
 
     /** Pivot + gizmo for free-chain placement (N). */
     this.placementPivot = new THREE.Object3D();
@@ -548,6 +581,30 @@ export class ModularRoadBuilder {
     return this.ghostDetached ? "free" : this.ghostEnd;
   }
 
+  /**
+   * How far the active piece would take you: `span` is entry→exit distance in
+   * metres, `rise` the height it gains.
+   *
+   * MEASURED, not looked up. Every piece is a different shape and there is no
+   * one parameter that means "size" across 45 of them — but they all have an
+   * exit, and `_localTransform` already knows where it is (memoised, so this is
+   * free after the first call per parameter set).
+   *
+   * Worth showing because the palette tiles are PRESETS over one shared
+   * `pieceParams`: "Short" and "Long" are the same `straight` piece with
+   * `straightLength` set to 14 or 32, `Object.assign`ed into that shared object
+   * and never put back. So the piece the editor boots on is 22 m, no tile
+   * offers 22, and clicking an unrelated tile (a Banked preset also writes
+   * `straightLength: 32`) silently resizes your next straight. With the number
+   * on screen that is obvious; without it, it is invisible — a circuit that
+   * refuses to close by exactly one piece length, for no reason you can see.
+   */
+  get activePieceMetrics() {
+    const L = this._localTransform(this.activePieceId, pieceParams, guardrailParams.enabled);
+    const v = new THREE.Vector3().setFromMatrixPosition(L);
+    return { span: v.length(), rise: v.y };
+  }
+
   /** Can the active chain be grown from its head? (button enablement) */
   get canBuildFromHead() {
     return this._openConnectors()
@@ -735,6 +792,7 @@ export class ModularRoadBuilder {
       this.placementGizmo.visible = true;
       this._applyGizmoAxes();
     }
+    this._refreshBranchMarkers();
     this.refreshGhost();
   }
 
@@ -761,6 +819,7 @@ export class ModularRoadBuilder {
       this.placementPivot.position.copy(this._ghostPos);
       this.placementPivot.rotation.set(0, this._ghostYaw, 0);
     }
+    this._refreshBranchMarkers(); // the white "you are aimed here" arrow moved
     this.refreshGhost();
   }
 
@@ -850,23 +909,70 @@ export class ModularRoadBuilder {
     return true;
   }
 
-  /** One floating arrow per FREE branch; they disappear as branches get used. */
+  /**
+   * Which open end the next piece is currently aimed at, as a stable key.
+   *
+   * Read off the LIVE ghost state rather than remembered from the last aim, so
+   * it stays right however the ghost got there — cursor, gizmo magnet, K, O,
+   * chain cycling, or an undo restoring the cursor.
+   */
+  _aimedEndKey() {
+    if (this._gizmoTarget !== "ghost") return null;
+    if (this.ghostOnBranch) return `branch|${this._ghostPos.x.toFixed(2)},${this._ghostPos.z.toFixed(2)}`;
+    if (this.ghostDetached) return null; // parked in free space, on no end at all
+    return `${this.activeChainId}|${this.ghostEnd}`;
+  }
+
+  /** Key for one entry of `_openConnectors()`, in the same shape. */
+  _endKey(oc) {
+    if (oc.branch) return `branch|${oc.branch.pos.x.toFixed(2)},${oc.branch.pos.z.toFixed(2)}`;
+    return `${oc.chainId}|${oc.end}`;
+  }
+
+  /**
+   * A floating arrow on EVERY open end — both ends of every chain plus each
+   * free junction branch — with the one you are aimed at picked out in white.
+   *
+   * This is what makes the cursor aim legible. Without it the next piece jumped
+   * whenever the pointer strayed within 90 px of something invisible, which
+   * reads as a glitch rather than as a tool.
+   */
   _refreshBranchMarkers() {
     const g = this.branchMarkers;
     if (!g) return;
-    const free = this.branchConnectors().filter((b) => !b.used);
-    while (g.children.length > free.length) {
+    const ends = this._openConnectors();
+    const aimed = this._aimedEndKey();
+    while (g.children.length > ends.length) {
       g.remove(g.children[g.children.length - 1]);
     }
-    while (g.children.length < free.length) {
-      const m = new THREE.Mesh(this.branchMarkerGeo, this.branchMarkerMat);
+    while (g.children.length < ends.length) {
+      const m = new THREE.Mesh(this.branchMarkerGeo, this.endMarkerMats.branch);
       m.matrixAutoUpdate = false;
       m.frustumCulled = false;
       m.castShadow = m.receiveShadow = false;
       g.add(m);
     }
-    for (let i = 0; i < free.length; i++) g.children[i].matrix.copy(free[i].matrix);
-    g.visible = this.isBuildMode() && free.length > 0;
+    for (let i = 0; i < ends.length; i++) {
+      const oc = ends[i];
+      const mesh = g.children[i];
+      const isAimed = aimed !== null && this._endKey(oc) === aimed;
+      const kind = oc.branch ? "branch" : oc.end === "head" ? "head" : "tail";
+      mesh.material = isAimed ? this.endMarkerMats.aimed : this.endMarkerMats[kind];
+      // The aimed arrow also draws over the road (depthTest off on its material),
+      // so it stays findable when the camera is low and the deck is in the way.
+      mesh.renderOrder = isAimed ? 998 : 0;
+      mesh.matrix.copy(oc.matrix);
+      // A HEAD faces into its chain; turn it round so the arrow points the way a
+      // prepended piece would actually grow.
+      if (!oc.branch && oc.end === "head") {
+        mesh.matrix.multiply(_A_M.makeRotationY(Math.PI));
+      }
+      // The aimed arrow is bigger as well as brighter. Colour alone was not
+      // enough to pick it out: the spawn marker is another pale arrow floating
+      // over the deck, and at a glance the two read the same.
+      if (isAimed) mesh.matrix.multiply(_A_M.makeScale(1.6, 1.6, 1.6));
+    }
+    g.visible = this.isBuildMode() && ends.length > 0;
   }
 
   _nearestOpenConnector(pos) {
@@ -922,6 +1028,7 @@ export class ModularRoadBuilder {
     this._ghostPos.setFromMatrixPosition(socket);
     this._setGhostYaw(new THREE.Euler().setFromRotationMatrix(socket, "YXZ").y);
     this._showGizmoAt(this._ghostPos, this._ghostYaw);
+    this._refreshBranchMarkers();
   }
 
   _showGizmoAt(pos, yaw) {
@@ -1077,6 +1184,7 @@ export class ModularRoadBuilder {
       this.placementPivot.position.copy(this._ghostPos);
       this.placementPivot.rotation.set(0, this._ghostYaw, 0);
       this._lastAimKey = null;
+      this._refreshBranchMarkers(); // no end is aimed any more — drop the white one
       this.refreshGhost();
       return; // ghost moves never touch placed geometry — no rebuild/rebake
     }
@@ -2519,7 +2627,7 @@ export class ModularRoadBuilder {
     this.ghostMat.dispose();
     this.branchMarkers?.clear();
     this.branchMarkerGeo?.dispose();
-    this.branchMarkerMat?.dispose();
+    for (const m of Object.values(this.endMarkerMats ?? {})) m.dispose();
     this.scene.remove(this.root);
   }
 }
@@ -3661,6 +3769,20 @@ export function buildRoadPaletteUI(builder, opts = {}) {
             ? " · ◂ HEAD (building backwards, O)"
             : builder.canBuildFromHead ? " · TAIL ▸ (O for the other end)" : " · TAIL ▸"
           : "";
+      // HOW BIG THE PIECE ACTUALLY IS. The tiles are presets over one shared
+      // pieceParams — "Short" and "Long" are the same `straight` with a
+      // different `straightLength`, written into that shared object and never
+      // put back — so the size of the piece named in this line depends on which
+      // tile you last clicked, including tiles for completely different pieces.
+      // Printing it is the cheap half of the fix: it turns "my circuit refuses
+      // to close by exactly one piece length" from a mystery into a number you
+      // watched change.
+      let sizeInfo = "";
+      try {
+        const { span, rise } = builder.activePieceMetrics;
+        if (span >= 0.05) sizeInfo = ` · ${span.toFixed(span < 10 ? 1 : 0)} m`;
+        if (Math.abs(rise) >= 0.5) sizeInfo += `${sizeInfo ? " " : " · "}${rise > 0 ? "↑" : "↓"}${Math.abs(rise).toFixed(0)} m`;
+      } catch { /* a piece that cannot build right now simply has no readout */ }
       // Only mentioned when there ARE loose branches: a floating arrow on screen
       // with nothing telling you what it is, or how to get to it, is worse than
       // no marker at all.
@@ -3668,7 +3790,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       const branchInfo = open && !builder.ghostOnBranch ? ` · ${open} open branch${open > 1 ? "es" : ""} (K)` : "";
       statusEl.textContent = `${builder.count} placed · ${label}${
         curveIds.has(builder.activePieceId) ? " (" + dir + ")" : ""
-      }${chainInfo}${endInfo}${branchInfo} · ${gizmoHint}`;
+      }${sizeInfo}${chainInfo}${endInfo}${branchInfo} · ${gizmoHint}`;
     }
     syncTiles();
   }

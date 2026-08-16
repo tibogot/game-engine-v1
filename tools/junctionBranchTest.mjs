@@ -27,6 +27,15 @@ function fresh() {
 }
 const put = (b, id) => { b.setActivePiece(id); return b.place(); };
 
+// MARKERS NOW COVER EVERY OPEN END, not just branches — chain heads and tails
+// draw one too (see endMarkersTest.mjs), because a floating arrow on a junction
+// and nothing at all on the end you are actually building from was the reason
+// nobody could find where the track could grow. So count BRANCH markers by
+// material rather than counting the whole group.
+const branchMarkerCount = (b) =>
+  b.branchMarkers.children.filter((m) => m.material === b.endMarkerMats.branch
+    || (m.material === b.endMarkerMats.aimed && b.ghostOnBranch)).length;
+
 // ── a crossroads publishes two branches, and they start out free ────────────
 {
   const b = fresh();
@@ -36,7 +45,7 @@ const put = (b, id) => { b.setActivePiece(id); return b.place(); };
   check("crossroads publishes 2 branches", b.branchConnectors().length === 2, `${b.branchConnectors().length}`);
   check("both branches start free", b.openBranchCount === 2, `${b.openBranchCount}`);
   check("a plain straight publishes none", (b.pieces[0].branches ?? []).length === 0);
-  check("one marker per free branch", b.branchMarkers.children.length === 2, `${b.branchMarkers.children.length}`);
+  check("one marker per free branch", branchMarkerCount(b) === 2, `${branchMarkerCount(b)} branch markers of ${b.branchMarkers.children.length} total`);
   check("the through line still chains", posOf(b.pieces[1].connectorOut).distanceTo(posOf(b.pieces[2].connectorIn)) < 1e-6);
 }
 
@@ -57,7 +66,7 @@ const put = (b, id) => { b.setActivePiece(id); return b.place(); };
   check("placing on a branch forks a new chain", b.chainCount === chainsBefore + 1, `${chainsBefore} → ${b.chainCount}`);
   check("the side road starts AT the branch", posOf(side.userData.piece.connectorIn).distanceTo(target.pos) < 1e-6);
   check("the branch now reads as used", b.openBranchCount === 0, `${b.openBranchCount} free`);
-  check("its marker is gone", b.branchMarkers.children.length === 0);
+  check("its marker is gone", branchMarkerCount(b) === 0, `${branchMarkerCount(b)} branch markers of ${b.branchMarkers.children.length} total`);
   check("ghost is off the branch after placing", b.ghostOnBranch === false);
 
   // The side road must run the way the socket points, not down the main line.
@@ -79,7 +88,7 @@ const put = (b, id) => { b.setActivePiece(id); return b.place(); };
   check("before undo: 1 branch used", b.openBranchCount === 1, `${b.openBranchCount}`);
   b.undo();
   check("undo frees the branch again", b.openBranchCount === 2, `${b.openBranchCount}`);
-  check("undo restores the marker", b.branchMarkers.children.length === 2);
+  check("undo restores the marker", branchMarkerCount(b) === 2, `${branchMarkerCount(b)} branch markers of ${b.branchMarkers.children.length} total`);
   b.redo();
   check("redo re-uses it", b.openBranchCount === 1, `${b.openBranchCount}`);
 }
