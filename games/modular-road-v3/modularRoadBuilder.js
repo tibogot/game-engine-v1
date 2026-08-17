@@ -183,6 +183,18 @@ export class ModularRoadBuilder {
     this.snapEnabled = true;
     this.snapStep = 8;
     this.snapYawDeg = 15;
+    /**
+     * Which axes the placement gizmo drags on: "world" (aligned with the build
+     * grid, and the right frame for dropping a chain somewhere tidy) or "local"
+     * (along the connector's own travel / lateral / up — what you want after a
+     * jump). See setPlacementGizmoSpace.
+     *
+     * Declared HERE and not beside the gizmo, because the gizmo only exists when
+     * a camera and a DOM element were supplied — headless there is none, and
+     * `_snapDelta` reads this either way.
+     * @type {"world"|"local"}
+     */
+    this.gizmoSpace = "world";
 
     this.activePieceId = PIECE_CATALOG[0].id;
     /**
@@ -365,7 +377,7 @@ export class ModularRoadBuilder {
     if (camera && domElement) {
       this.placementGizmo = new TransformControls(camera, domElement);
       this.placementGizmo.setMode("translate");
-      this.placementGizmo.setSpace("world");
+      this.placementGizmo.setSpace(this.gizmoSpace);
       this.placementGizmo.enabled = false;
       this.placementGizmo.visible = false;
       this.placementGizmo.size = 1.15;
@@ -428,8 +440,17 @@ export class ModularRoadBuilder {
     //
     // rotationSnap is left on for every target — TransformControls snaps the
     // rotation ANGLE of the drag, which is already relative.
-    const editingPiece = this._gizmoTarget === "piece";
-    g.translationSnap = this.snapEnabled && !editingPiece ? this.snapStep : null;
+    // ONLY THE CHAIN ANCHOR ROUNDS ITS ABSOLUTE POSITION, and that is the whole
+    // authored-vs-derived distinction: dropping a new chain somewhere tidy is
+    // authoring, and landing it on a cell is exactly what lets two separately
+    // built chains meet. A selected PIECE and the next-piece GHOST are both
+    // already somewhere — put there by the chain, or seated on a computed
+    // ballistic landing — so rounding them absolutely teleports them off it.
+    // Those two snap the DRAG DELTA instead (see _onPieceGizmoChange and the
+    // detach branch of _onPlacementGizmoChange), which keeps them where they are
+    // and still moves in tidy steps.
+    const absoluteSnapOk = this._gizmoTarget === "chain";
+    g.translationSnap = this.snapEnabled && absoluteSnapOk ? this.snapStep : null;
     g.rotationSnap = this.snapEnabled ? THREE.MathUtils.degToRad(this.snapYawDeg) : null;
   }
 
@@ -439,6 +460,23 @@ export class ModularRoadBuilder {
     const s = this.snapStep;
     v.set(Math.round(v.x / s) * s, Math.round(v.y / s) * s, Math.round(v.z / s) * s);
     return v;
+  }
+
+  /**
+   * Snap a DRAG DELTA (in place).
+   *
+   * World space rounds each component, which is what "move in grid steps" means
+   * when the axes are the grid's. LOCAL space cannot: a drag along a local axis
+   * has arbitrary world components, and rounding them separately knocks the move
+   * off the very axis the handle was there to hold. So round the DISTANCE and
+   * keep the direction.
+   */
+  _snapDelta(v) {
+    if (!this.snapEnabled) return v;
+    if (this.gizmoSpace !== "local") return this.snapPos(v);
+    const len = v.length();
+    if (len < 1e-6) return v;
+    return v.setLength(Math.round(len / this.snapStep) * this.snapStep);
   }
 
   /** Snap a yaw (radians) onto the angle grid. */
@@ -523,18 +561,30 @@ export class ModularRoadBuilder {
     this._notify();
   }
 
-  /** Start a new disconnected chain at `atPos` and make it active. */
-  beginNewChain(atPos = null, yaw = null) {
+  /**
+   * Start a new disconnected chain at `atPos` and make it active.
+   *
+   * `exact` skips the build grid, and the distinction it draws is the important
+   * part: grid snapping is right for a point you are AUTHORING (drop a chain
+   * somewhere tidy so two of them can meet) and wrong for a point that was
+   * DERIVED (this is where the car lands). One global `snapEnabled` used to
+   * govern both, so a computed ballistic landing was rounded to the nearest 8 m
+   * cell and 15° — measured at 2.95 m and 4.44 m out on ordinary jumps, up to
+   * 5.66 m horizontally and 7.5° in the worst case. The pad ended up metres from
+   * where the car actually comes down. See snapLanding() in roadGame.js.
+   */
+  beginNewChain(atPos = null, yaw = null, { exact = false } = {}) {
     this._markCursor();
     this.freePlaceMode = true;
     this._gizmoTarget = "chain";
     this.ghostDetached = false;
     this.ghostEnd = "tail";
-    this.freeYaw = this.snapYaw(yaw != null ? yaw : 0);
+    const y = yaw != null ? yaw : 0;
+    this.freeYaw = exact ? y : this.snapYaw(y);
     this._freeQuat.setFromAxisAngle(_YUP, this.freeYaw); // new chains start level
     if (atPos) this._freePos.copy(atPos);
     else if (this.orbit?.target) this._freePos.copy(this.orbit.target);
-    this.snapPos(this._freePos); // land the new chain on the build grid
+    if (!exact) this.snapPos(this._freePos); // land the new chain on the build grid
     // REUSE AN EMPTY CHAIN INSTEAD OF STACKING ANOTHER ONE ON TOP OF IT.
     // A chain with no pieces is nothing but an anchor, so "start a new chain
     // here" and "move the empty chain I already have here" are the same act.
@@ -805,6 +855,31 @@ export class ModularRoadBuilder {
     // convention. See _applyGizmoAxes.
     this._applyGizmoAxes();
     this._notify();
+  }
+
+  /**
+   * WORLD or LOCAL axes for the placement gizmo.
+   *
+   * World was the only option, and after a jump it is the wrong one. A takeoff
+   * points wherever the last corner left you, so "slide the landing pad a bit
+   * further along the flight line" came out as a mix of an X drag and a Z drag
+   * with no way to hold the line. In local space the blue arrow IS the direction
+   * of travel, the red one is lateral, and the green one is up — so nudging a
+   * pad along the arc, or widening a gap, is one drag on one axis.
+   *
+   * World stays the default: it is the right frame for the ordinary job of
+   * dropping a chain on the build grid, and the grid is world-aligned.
+   */
+  setPlacementGizmoSpace(space) {
+    if (!this.placementGizmo) return;
+    this.gizmoSpace = space === "local" ? "local" : "world";
+    this.placementGizmo.setSpace(this.gizmoSpace);
+    this._notify();
+  }
+
+  togglePlacementGizmoSpace() {
+    this.setPlacementGizmoSpace(this.gizmoSpace === "local" ? "world" : "local");
+    return this.gizmoSpace;
   }
 
   /** "chain" (gizmo moves the whole chain) or "ghost" (gizmo moves the next piece). */
@@ -1287,7 +1362,7 @@ export class ModularRoadBuilder {
       _A_Q2.copy(this.placementPivot.quaternion);
       if (this.snapEnabled) {
         _A_V.sub(this._dragStartPos);
-        this.snapPos(_A_V);
+        this._snapDelta(_A_V);   // world = per-axis, local = along the drag
         _A_V.add(this._dragStartPos);
 
         const step = THREE.MathUtils.degToRad(this.snapYawDeg || 15);
@@ -1352,8 +1427,19 @@ export class ModularRoadBuilder {
       }
       this.ghostDetached = true;
       this.ghostEnd = "tail";
-      this._ghostPos.copy(pos);
-      this.snapPos(this._ghostPos);
+      // SNAP THE DELTA, NOT THE ABSOLUTE POSE — the same lesson `_applyGizmoSnap`
+      // and `_onPieceGizmoChange` already learned for a SELECTED piece, which
+      // this path never got.
+      //
+      // Rounding the absolute position is right while you are inventing a spot
+      // out of nothing, and destructive the moment the ghost is somewhere it was
+      // PUT: a landing pad seated on a computed ballistic point is never on a
+      // grid cell, so one touch of the gizmo yanked it back onto the lattice and
+      // away from where the car comes down. Snapping the movement keeps it put
+      // and still moves in tidy steps.
+      _A_V.copy(pos).sub(this._dragStartPos);
+      this._snapDelta(_A_V);
+      this._ghostPos.copy(this._dragStartPos).add(_A_V);
       this._setGhostYaw(this.snapYaw(this.placementPivot.rotation.y));
       this.placementPivot.position.copy(this._ghostPos);
       this.placementPivot.rotation.set(0, this._ghostYaw, 0);
@@ -2651,10 +2737,9 @@ export class ModularRoadBuilder {
     const landNear = _ballisticLanding(this.currentConnector, refSpeed, 9.81, 0, dragK);
     const landFar = _ballisticLanding(this.currentConnector, Math.max(refSpeed + 12, 40), 9.81, 0, dragK);
     if (landNear) {
-      const snapWas = this.snapEnabled;
-      this.snapEnabled = false; // keep the ballistic point exact (grid would nudge it)
-      this.beginNewChain(landNear.pos, landNear.yaw);
-      this.snapEnabled = snapWas;
+      // `exact` for the reason this used to toggle snapEnabled by hand: the grid
+      // would nudge a computed ballistic point off the place the car lands.
+      this.beginNewChain(landNear.pos, landNear.yaw, { exact: true });
       this.deselectPlacement?.();
       // Platform long enough that a faster jump still lands on it, not past it.
       const span = landFar

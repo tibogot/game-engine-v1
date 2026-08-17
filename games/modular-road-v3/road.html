@@ -336,6 +336,9 @@
             <button id="road-link" class="palette-btn" type="button">Join (J)</button>
             <button id="road-branch" class="palette-btn" type="button">Go to branch (K)</button>
             <button id="road-flip" class="palette-btn" type="button">Flip L/R (R)</button>
+            <button id="road-gizmo-space" class="palette-btn palette-btn-wide" type="button">
+              Axes: World (X)
+            </button>
             <button id="road-new-chain" class="palette-btn palette-btn-wide" type="button">
               New chain (N)
             </button>
@@ -387,7 +390,8 @@
               <span><kbd>R</kbd> flip L/R</span><span><kbd>B</kbd> drive</span>
               <span><kbd>W</kbd> move gizmo</span><span><kbd>Shift+E</kbd> rotate</span>
               <span><kbd>Q</kbd><kbd>E</kbd> yaw</span><span><kbd>RMB</kbd> select piece</span>
-              <span><kbd>Ctrl+Z</kbd> undo</span><span><kbd>Esc</kbd> cancel</span>
+              <span><kbd>X</kbd> world/local axes</span><span><kbd>Ctrl+Z</kbd> undo</span>
+              <span><kbd>Esc</kbd> cancel</span><span><kbd>?</kbd> manual</span>
             </div>
             <button id="road-help-link" type="button">Open the manual (?)</button>
           </div>
@@ -450,6 +454,16 @@
               <kbd>Q</kbd>/<kbd>E</kbd> yaw nudge &bull;
               <kbd>N</kbd> new chain &bull; <kbd>[</kbd>/<kbd>]</kbd> select chain
               (gizmo then drags the whole chain).
+              <br>
+              <b>After a jump, press <kbd>X</kbd> for LOCAL axes.</b> World axes
+              line up with the build grid, which is the right frame for dropping
+              a chain somewhere tidy — but a takeoff points wherever your last
+              corner left it, so nudging a landing pad along the flight line
+              becomes a mix of two drags with no way to hold the line. In local
+              axes the blue arrow <i>is</i> the direction of travel, red is
+              sideways and green is up: one drag, one axis. Grid snap follows the
+              choice — world rounds each axis onto a cell, local rounds the
+              <i>distance</i> you moved.
               <br><br>
               <b>Either end:</b> a chain grows from its <b>tail</b> or its
               <b>head</b> — press <kbd>O</kbd> (or drag the ghost onto the far end)

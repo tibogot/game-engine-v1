@@ -1697,6 +1697,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // J = JOIN: close the gap from this end to the nearest other open end.
       // Free letter, and same physical key on AZERTY and QWERTY.
       case "keyj": linkToNearest(); return;
+      // X = the gizmo's AXES: world (grid-aligned) or local (along travel).
+      // Free letter — no piece claims it, and drive mode's air-roll is a
+      // different handler entirely.
+      case "keyx": toggleGizmoSpace(); return;
       case "bracketleft": builder.cycleChain(-1); break;
       case "bracketright": builder.cycleChain(1); break;
       default: return;
@@ -1931,7 +1935,31 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   onClick("road-branch", () => { goToBranch(); });
   onClick("road-other-end", () => { toggleBuildEnd(); });
   onClick("road-link", () => { linkToNearest(); });
+  onClick("road-gizmo-space", () => toggleGizmoSpace());
   onClick("road-rebake", () => bakeCollision());
+
+  /**
+   * Flip the placement gizmo between world and local axes (button + X).
+   *
+   * Local is what you want after a jump: the takeoff heading is whatever the
+   * last corner left you with, so in world axes "slide the landing pad further
+   * along the flight line" is a mix of two drags with no way to hold the line.
+   */
+  function toggleGizmoSpace() {
+    const space = builder.togglePlacementGizmoSpace();
+    syncGizmoSpaceBtn();
+    const el = document.getElementById("road-status");
+    if (el) {
+      el.textContent = space === "local"
+        ? "Gizmo axes: LOCAL — blue = along travel, red = sideways, green = up"
+        : "Gizmo axes: WORLD — aligned with the build grid";
+    }
+  }
+  function syncGizmoSpaceBtn() {
+    const btn = document.getElementById("road-gizmo-space");
+    if (btn) btn.textContent = `Axes: ${builder.gizmoSpace === "local" ? "Local" : "World"} (X)`;
+  }
+  syncGizmoSpaceBtn();
 
   // Two ways in — the header's "?" and the link under the key legend.
   onClick("road-help", () => setHelp(!isHelpOpen()));
@@ -2447,7 +2475,14 @@ ${e.message}`);
     // beginNewChain's freeYaw maps to travel = (0,0,-1) rotated by yaw, so this
     // yaw makes the new chain head along the landing's horizontal velocity.
     const yaw = Math.atan2(-v.x, -v.z);
-    builder.beginNewChain(lastLanding.pos.clone(), yaw);
+    // EXACT — do not put a computed landing point on the build grid. This is the
+    // one place in the editor where the position is physics, not authoring: the
+    // grid was rounding it to the nearest 8 m cell and 15°, which put the pad
+    // measurably away from where the car comes down (2.95 m and 4.44 m on two
+    // ordinary jumps; 5.66 m horizontal and 7.5° worst case). The demo-track
+    // builder had always switched snapping off around the same call — this
+    // button never did.
+    builder.beginNewChain(lastLanding.pos.clone(), yaw, { exact: true });
     if (controls.target) { controls.target.copy(lastLanding.pos); controls.update?.(); }
     builder.refreshGhost?.();
     paletteUi?.refreshStatus?.();
