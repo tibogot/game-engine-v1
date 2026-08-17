@@ -196,6 +196,11 @@ export class ModularRoadBuilder {
      */
     this.gizmoSpace = "world";
 
+    /** @type {object|null} The gizmo's piece, and the end a range measures from. */
+    this.selectedPiece = null;
+    /** @type {object[]} Everything selected, INCLUDING the anchor. Single-select
+     *  is just this with one entry, so every bulk op has one code path. */
+    this.selectedPieces = [];
     this.activePieceId = PIECE_CATALOG[0].id;
     /**
      * The numbers the NEXT piece will be built from — this selection's own copy,
@@ -552,6 +557,23 @@ export class ModularRoadBuilder {
     this._notify();
   }
 
+  /**
+   * Set the active GAP's span and drop directly (metres).
+   *
+   * On the selection, like every other tile parameter — the shared `pieceParams`
+   * is not written. Exists because a gap's size is the one thing that should be
+   * MEASURED rather than picked: see gapToLanding in roadGame.js.
+   */
+  setGapSize(length, drop) {
+    this.activeParams = {
+      ...this.activeParams,
+      gapLength: Math.max(2, length),
+      gapDrop: drop,
+    };
+    this.refreshGhost();
+    this._notify();
+  }
+
   /** Flip curve direction (only meaningful for the curve piece). */
   flip() {
     // On THIS SELECTION, not the shared params — flipping a turn must not
@@ -823,6 +845,197 @@ export class ModularRoadBuilder {
       if (!best || d < best.d) best = { t, d };
     }
     return this.linkTo(best.t);
+  }
+
+  // ── BULK EDITS ON A SELECTION ──────────────────────────────────────────────
+  // Each of these is ONE undo step and ONE rebuild, not one per piece: the
+  // history is snapshot-based, so a bulk op is naturally atomic, and rebuilding
+  // per piece on a 40-piece selection would be forty full chain walks.
+
+  /** Delete everything selected. */
+  deleteSelected() {
+    const doomed = this.selectedPieces.filter((p) => this.pieces.includes(p));
+    if (!doomed.length) return 0;
+    this._markCursor();
+    this.activeChainId = doomed[0].chainId;
+    this.selectedPiece = null;
+    this.selectedPieces = [];
+    this._updateSelectionHighlight(); // drop the geometry refs BEFORE disposing
+    for (const p of doomed) {
+      const i = this.pieces.indexOf(p);
+      if (i >= 0) this.pieces.splice(i, 1);
+      this._removePiece(p);
+    }
+    this.rebuildAll();
+    this._commit();
+    this._notify();
+    return doomed.length;
+  }
+
+  /** Guardrails and kerbs on or off, per piece, across the selection. */
+  setSelectedEdges(on) {
+    const sel = this.selectedPieces.filter((p) => this.pieces.includes(p));
+    if (!sel.length) return 0;
+    for (const p of sel) p.edges = !!on;
+    this.rebuildAll();
+    this._updateSelectionHighlight();
+    this._commit();
+    this._notify();
+    return sel.length;
+  }
+
+  /** Zero every selected tilt. Safe and unambiguous — no compounding question,
+   *  which is why it is the one bulk angle op with nothing to decide. */
+  levelSelected() {
+    const sel = this.selectedPieces.filter((p) => this.pieces.includes(p));
+    if (!sel.length) return 0;
+    for (const p of sel) p.tilt.identity();
+    this.rebuildAll();
+    this._updateSelectionHighlight();
+    this._commit();
+    this._notify();
+    return sel.length;
+  }
+
+  /** Swap every selected piece's TYPE, keeping its slot in the chain. */
+  replaceSelected(newId, pp = this._snapshotParams()) {
+    if (!PIECE_BY_ID.has(newId)) return 0;
+    const sel = this.selectedPieces.filter((p) => this.pieces.includes(p));
+    if (!sel.length) return 0;
+    this._markCursor();
+    for (const p of sel) {
+      p.id = newId;
+      p.pp = { ...pp };
+      this._applyPiecePresence(p);
+    }
+    this.rebuildAll();
+    this._updateSelectionHighlight();
+    this._commit();
+    this._notify();
+    return sel.length;
+  }
+
+  /**
+   * BANK / PITCH / YAW A WHOLE SECTION — enter the turn at the start, come out
+   * of it at the end.
+   *
+   * WHY NOT JUST WRITE THE ANGLE ON EVERY PIECE. A piece's `tilt` is applied at
+   * its entry seam and the running connector carries it forward (see rebuildAll),
+   * so tilts ACCUMULATE down a chain. Setting roll = 15° on five pieces gives
+   * 15, 30, 45, 60, 75 — you ask for a banked section and get a corkscrew.
+   *
+   * So the section gets the angle ONCE, at its first piece, which is all it takes
+   * — propagation banks the rest for free. The piece immediately AFTER the run
+   * gets the inverse, which brings the track back level past the section instead
+   * of leaving the whole remaining chain tipped over. That is what a real banked
+   * corner is: roll in, roll out.
+   *
+   * A delta, not an absolute, so it composes with repeated presses exactly like
+   * the single-piece nudge does.
+   */
+  tiltSection(axis, radians) {
+    const sel = this._selectionInOrder();
+    if (!sel.length) return { ok: false, reason: "nothing selected" };
+    const chainId = sel[0].chainId;
+    if (sel.some((p) => p.chainId !== chainId)) {
+      return { ok: false, reason: "a section has to be within one chain" };
+    }
+    const local = axis === "pitch" ? _A_V.set(1, 0, 0)
+      : axis === "roll" ? _A_V.set(0, 0, 1)
+        : _A_V.set(0, 1, 0);
+    _A_Q.setFromAxisAngle(local, radians);
+
+    const first = sel[0];
+    const after = this._nextInChain(sel[sel.length - 1]);
+    this._markCursor();
+    first.tilt.multiply(_A_Q);
+    // Only if the run has something after it — a section that ends the chain has
+    // nothing left to bring back level.
+    if (after) after.tilt.multiply(_A_Q2.copy(_A_Q).invert());
+    this.rebuildAll();
+    this._updateSelectionHighlight();
+    this._commit();
+    this._notify();
+    return {
+      ok: true, target: "section", count: sel.length, levelledAfter: !!after,
+      ...this.pieceTiltDeg(first),
+    };
+  }
+
+  // ── NUDGING AN ANGLE FROM THE KEYBOARD ─────────────────────────────────────
+  // Yaw already had Q/E. Pitch and roll had nothing but a gizmo drag, which is
+  // the imprecise half of the editor: banking a landing strip to a repeatable
+  // angle meant dragging and reading a number back. Arrow keys give all three
+  // axes an exact, countable step — press it three times at 15° and you have 45.
+  //
+  // The step is `snapYawDeg`, the SAME setting the rotate gizmo snaps to. Q/E
+  // were hardcoded to 15° and so disagreed with the gizmo the moment you touched
+  // the Angle step slider.
+
+  /** The angle step in radians — one press, one gizmo snap increment. */
+  get angleStep() {
+    return THREE.MathUtils.degToRad(this.snapYawDeg || 15);
+  }
+
+  /**
+   * Turn whatever the gizmo is on by one step about a LOCAL axis.
+   *
+   * `axis` is "yaw" | "pitch" | "roll", which in a connector's own frame are Y,
+   * X and Z — travel is −Z, so roll is about travel and pitch about the lateral
+   * axis, matching what the rotate gizmo produces.
+   *
+   * Routes by target, because "rotate" means three different things here:
+   *  • a selected PIECE  → its entry tilt, which banks it AND everything after
+   *    it in the chain (that is the banked-landing-strip tool, not a bug)
+   *  • a chain ANCHOR    → the whole chain turns rigidly
+   *  • the GHOST         → yaw only, because every socket in the kit is level by
+   *    convention and a pitched ghost would hand the next piece a seam it cannot
+   *    honour. Pitch/roll there are declined rather than silently ignored.
+   *
+   * @returns {{ok:boolean, target?:string, reason?:string, pitch?:number, roll?:number, yaw?:number}}
+   */
+  nudgeAngle(axis, dir = 1) {
+    const step = this.angleStep * (dir < 0 ? -1 : 1);
+    const local = axis === "pitch" ? _A_V.set(1, 0, 0)
+      : axis === "roll" ? _A_V.set(0, 0, 1)
+        : _A_V.set(0, 1, 0);
+    _A_Q.setFromAxisAngle(local, step);
+
+    // A SECTION turns as a section — angle in at the front, out at the back —
+    // rather than the same angle written onto every piece, which would compound
+    // down the chain into a corkscrew. Same keys, so the gesture scales.
+    if (this.selectedPieces.length > 1) return this.tiltSection(axis, step);
+
+    const p = this.selectedPiece;
+    if (p) {
+      // Compose on the RIGHT: the tilt is expressed in the seam's own frame, so
+      // this turns the piece about its own axes rather than the world's.
+      _A_Q2.copy(p.tilt).multiply(_A_Q);
+      this.setPieceTilt(p, _A_Q2);
+      const t = this.pieceTiltDeg(p);
+      return { ok: true, target: "piece", ...t };
+    }
+
+    if (this._gizmoTarget === "ghost") {
+      if (axis !== "yaw") {
+        return { ok: false, reason: "the next piece is yaw-only — kit sockets are level" };
+      }
+      this.rotateFreeYaw(step);
+      return { ok: true, target: "ghost", yaw: THREE.MathUtils.radToDeg(this._ghostYaw) };
+    }
+
+    if (!this.freePlaceMode) return { ok: false, reason: "nothing selected" };
+    if (axis === "yaw") {
+      this.rotateFreeYaw(step); // spins about WORLD up, preserving any bank
+    } else {
+      this._freeQuat.multiply(_A_Q);
+      this.freeYaw = _A_E.setFromQuaternion(this._freeQuat, "YXZ").y;
+      if (this.placementGizmo) this.placementPivot.quaternion.copy(this._freeQuat);
+      const chain = this._activeChain();
+      if (chain) { chain.anchor = this._anchorFromFree(); this.rebuildAll(); }
+    }
+    this._commit();
+    return { ok: true, target: "chain", ...this.anchorTiltDeg() };
   }
 
   /** Cycle the active chain (dir -1 = previous, +1 = next). */
@@ -1941,6 +2154,7 @@ export class ModularRoadBuilder {
    *  to tilt the piece + downstream; translate (W) to move the whole chain. */
   selectPiece(p) {
     this.selectedPiece = p && this.pieces.includes(p) ? p : null;
+    this.selectedPieces = this.selectedPiece ? [this.selectedPiece] : [];
     if (this.selectedPiece) {
       this.activeChainId = this.selectedPiece.chainId;
       this._syncCurrentConnector();
@@ -1950,9 +2164,74 @@ export class ModularRoadBuilder {
     this._notify();
   }
 
+  // ── SELECTING A SECTION ────────────────────────────────────────────────────
+  // The editor had exactly two granularities: one piece, or a whole chain.
+  // "This section" — the thing you actually want to delete, un-rail, or bank —
+  // could not be said at all.
+  //
+  // A RANGE, not a pick-list, because a chain is a linear array: the pieces
+  // between two indices IS the natural unit, and it takes one gesture instead of
+  // one per piece. Ctrl+click is there for the odd exception.
+
+  /**
+   * Extend the selection to `p`, taking everything between it and the anchor.
+   * Both have to be in the same chain — a "range" across two chains has no
+   * meaning, so that falls back to a plain select rather than guessing.
+   */
+  selectRangeTo(p) {
+    if (!p || !this.pieces.includes(p)) return false;
+    const from = this.selectedPiece;
+    if (!from || from.chainId !== p.chainId) { this.selectPiece(p); return true; }
+    const run = this._chainPieces(p.chainId);
+    const a = run.indexOf(from);
+    const b = run.indexOf(p);
+    if (a < 0 || b < 0) { this.selectPiece(p); return true; }
+    this.selectedPieces = run.slice(Math.min(a, b), Math.max(a, b) + 1);
+    // The anchor stays put, so Shift+clicking again re-measures from the same
+    // end rather than walking away from it.
+    this._updateSelectionHighlight();
+    this._notify();
+    return true;
+  }
+
+  /** Add or remove one piece from the selection (Ctrl+click). */
+  toggleSelected(p) {
+    if (!p || !this.pieces.includes(p)) return false;
+    const i = this.selectedPieces.indexOf(p);
+    if (i >= 0) {
+      this.selectedPieces.splice(i, 1);
+      if (this.selectedPiece === p) this.selectedPiece = this.selectedPieces[0] ?? null;
+      if (!this.selectedPiece) { this.deselectPiece(); return true; }
+      this._showPieceGizmo(this.selectedPiece);
+    } else {
+      if (!this.selectedPiece) return this.selectPiece(p), true;
+      this.selectedPieces.push(p);
+    }
+    this._updateSelectionHighlight();
+    this._notify();
+    return true;
+  }
+
+  /** The selection in CHAIN ORDER, which is the order every bulk op needs. */
+  _selectionInOrder() {
+    const byChain = new Map();
+    for (const p of this.selectedPieces) {
+      if (!byChain.has(p.chainId)) byChain.set(p.chainId, this._chainPieces(p.chainId));
+    }
+    return [...this.selectedPieces].sort((x, y) => {
+      if (x.chainId !== y.chainId) return x.chainId - y.chainId;
+      return byChain.get(x.chainId).indexOf(x) - byChain.get(y.chainId).indexOf(y);
+    });
+  }
+
+  get selectionCount() {
+    return this.selectedPieces.length;
+  }
+
   deselectPiece() {
-    if (!this.selectedPiece) return;
+    if (!this.selectedPiece && !this.selectedPieces.length) return;
     this.selectedPiece = null;
+    this.selectedPieces = [];
     this._updateSelectionHighlight();
     // Hand the gizmo back to the next-piece / anchor.
     this._syncGizmoToOpenEnd();
@@ -1977,28 +2256,43 @@ export class ModularRoadBuilder {
    *  (depthTest off) so it reads through other geometry. Shares the piece's
    *  geometry — never disposes it. */
   _updateSelectionHighlight() {
-    const p = this.selectedPiece;
-    if (!this._selMesh) {
-      this._selMesh = new THREE.Mesh(
-        new THREE.BufferGeometry(),
-        new THREE.MeshBasicMaterial({
-          color: 0xffd24a, transparent: true, opacity: 0.4,
-          depthWrite: false, depthTest: false, side: THREE.DoubleSide,
-        }),
-      );
-      this._selMesh.matrixAutoUpdate = false;
-      this._selMesh.renderOrder = 999;
-      this._selMesh.frustumCulled = false;
-      this.scene.add(this._selMesh);
+    if (!this._selGroup) {
+      this._selGroup = new THREE.Group();
+      this._selGroup.name = "ModularRoadSelection";
+      this.scene.add(this._selGroup);
+      // Two materials: the ANCHOR of the selection (the piece the gizmo is on,
+      // and the one a range extends FROM) is brighter than the rest, so a
+      // multi-piece selection still tells you where the next Shift+click will
+      // measure from.
+      this._selMatAnchor = new THREE.MeshBasicMaterial({
+        color: 0xffd24a, transparent: true, opacity: 0.4,
+        depthWrite: false, depthTest: false, side: THREE.DoubleSide,
+      });
+      this._selMatMember = new THREE.MeshBasicMaterial({
+        color: 0xff9a3c, transparent: true, opacity: 0.26,
+        depthWrite: false, depthTest: false, side: THREE.DoubleSide,
+      });
     }
-    if (p && p.mesh?.geometry) {
-      this._selMesh.geometry = p.mesh.geometry; // shared — do NOT dispose
-      this._selMesh.matrix.copy(p.mesh.matrix);
-      this._selMesh.visible = true;
-    } else {
-      this._selMesh.geometry = _EMPTY_GEO; // drop the reference
-      this._selMesh.visible = false;
+    const g = this._selGroup;
+    const sel = this.selectedPieces.filter((p) => p.mesh?.geometry);
+    // Pooled, like the end markers: a selection changes on every right-click and
+    // allocating meshes per click would churn.
+    while (g.children.length > sel.length) g.remove(g.children[g.children.length - 1]);
+    while (g.children.length < sel.length) {
+      const m = new THREE.Mesh(_EMPTY_GEO, this._selMatMember);
+      m.matrixAutoUpdate = false;
+      m.renderOrder = 999;
+      m.frustumCulled = false;
+      g.add(m);
     }
+    for (let i = 0; i < sel.length; i++) {
+      const m = g.children[i];
+      m.geometry = sel[i].mesh.geometry; // SHARED — never dispose these
+      m.matrix.copy(sel[i].mesh.matrix);
+      m.material = sel[i] === this.selectedPiece ? this._selMatAnchor : this._selMatMember;
+      m.visible = true;
+    }
+    g.visible = sel.length > 0;
   }
 
   /** Remove a placed piece; everything downstream in its chain reconnects. */
@@ -3385,6 +3679,46 @@ export const CATEGORY_PRESETS = {
       base: "brow",
       params: { browLength: 44, browAngle: 36 },
     },
+    // ── GAPS ────────────────────────────────────────────────────────────────
+    // Every other family in this category had a row of sizes and the Gap had
+    // NONE — `G` gave you the base piece at a flat 44 m × 6 m drop, and no UI
+    // anywhere could change either number. Labelled in METRES, unlike the ramps'
+    // size classes, because that is what the piece is: a measured hole.
+    //
+    // Sizes are a starting point, not the answer. A gap's length is a
+    // consequence of the jump, not a choice — "Gap → jump" in the Gap/Jump panel
+    // measures it off the real trajectory, which is what you want whenever the
+    // car has to land somewhere specific.
+    {
+      id: "gap_20",
+      label: "Gap 20 m",
+      base: "gap",
+      params: { gapLength: 20, gapDrop: 0 },
+    },
+    {
+      id: "gap_40",
+      label: "Gap 40 m",
+      base: "gap",
+      params: { gapLength: 40, gapDrop: 0 },
+    },
+    {
+      id: "gap_60",
+      label: "Gap 60 m",
+      base: "gap",
+      params: { gapLength: 60, gapDrop: 0 },
+    },
+    {
+      id: "gap_drop",
+      label: "Gap 40 ↓8",
+      base: "gap",
+      params: { gapLength: 40, gapDrop: 8 },
+    },
+    {
+      id: "gap_chasm",
+      label: "Gap 90 ↓20",
+      base: "gap",
+      params: { gapLength: 90, gapDrop: 20 },
+    },
   ],
   slopes: [
     // Climbs — slope base levels off (smoothstep) at both ends, so they chain cleanly.
@@ -4028,6 +4362,11 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       ]);
       const chainInfo =
         builder.chainCount > 1 ? ` · chain ${builder.activeChainIndex + 1}/${builder.chainCount}` : "";
+      // A MULTI-SELECTION CHANGES WHAT THE KEYS DO — Del, Enter, L, U and the
+      // arrows all act on the whole run — so the count has to be on screen.
+      const selInfo = builder.selectionCount > 1
+        ? ` · ${builder.selectionCount} pieces selected (Del · Enter replace · L level · U edges · arrows bank)`
+        : "";
       const gizmoHint =
         builder.gizmoMode === "ghost"
           ? builder.ghostOnBranch
@@ -4067,7 +4406,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       const branchInfo = open && !builder.ghostOnBranch ? ` · ${open} open branch${open > 1 ? "es" : ""} (K)` : "";
       statusEl.textContent = `${builder.count} placed · ${label}${
         curveIds.has(builder.activePieceId) ? " (" + dir + ")" : ""
-      }${sizeInfo}${chainInfo}${endInfo}${branchInfo} · ${gizmoHint}`;
+      }${sizeInfo}${chainInfo}${selInfo}${endInfo}${branchInfo} · ${gizmoHint}`;
     }
     syncTiles();
   }
@@ -4106,6 +4445,26 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   });
 
   renderPieces();
+
+  // THE PIECE HOTKEYS, GENERATED FROM THE CATALOG. Typed by hand this list is
+  // guaranteed to rot — it already had: the panel advertised "1…9 0 pieces" and
+  // said nothing at all about the ten LETTER keys (C D F G H L M P S T), so the
+  // Gap spacer on `G` looked like a bug rather than a shortcut.
+  const legendKeys = document.getElementById("legend-piece-keys");
+  if (legendKeys) {
+    const withKeys = PIECE_CATALOG.filter((p) => p.key);
+    const digits = withKeys.filter((p) => /[0-9]/.test(p.key));
+    const letters = withKeys.filter((p) => !/[0-9]/.test(p.key));
+    const kbd = (k) => `<kbd>${k.toUpperCase()}</kbd>`;
+    legendKeys.innerHTML =
+      `pieces ${digits.map((p) => kbd(p.key)).join("")}` +
+      `${letters.map((p) => kbd(p.key)).join("")}` +
+      ` <span class="legend-dim">— hover a tile, or ? for the list</span>`;
+    // The tooltip names every one, so the panel can stay a single line.
+    legendKeys.title = withKeys
+      .map((p) => `${p.key.toUpperCase()}  ${p.label ?? p.id}`)
+      .join("\n");
+  }
 
   document.getElementById("road-place")?.addEventListener("click", () => {
     builder.place();

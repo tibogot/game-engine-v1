@@ -355,6 +355,7 @@
             <button id="road-load" class="palette-btn" type="button">Load track</button>
             <button id="road-preset" class="palette-btn palette-btn-wide" type="button">Load Apex track</button>
             <button id="road-preset-rushline" class="palette-btn palette-btn-wide" type="button">Load Rushline track</button>
+            <button id="road-preset-parkour" class="palette-btn palette-btn-wide" type="button">Load Apex Parkour</button>
             <button id="road-demo" class="palette-btn" type="button">Demo</button>
             <button id="road-circuit" class="palette-btn" type="button">Big circuit</button>
           </div>
@@ -390,8 +391,17 @@
               <span><kbd>R</kbd> flip L/R</span><span><kbd>B</kbd> drive</span>
               <span><kbd>W</kbd> move gizmo</span><span><kbd>Shift+E</kbd> rotate</span>
               <span><kbd>Q</kbd><kbd>E</kbd> yaw</span><span><kbd>RMB</kbd> select piece</span>
-              <span><kbd>X</kbd> world/local axes</span><span><kbd>Ctrl+Z</kbd> undo</span>
-              <span><kbd>Esc</kbd> cancel</span><span><kbd>?</kbd> manual</span>
+              <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> yaw step</span><span><kbd>&uarr;</kbd><kbd>&darr;</kbd> pitch step</span>
+              <span><kbd>Shift</kbd>+<kbd>&larr;&rarr;</kbd> roll</span><span><kbd>X</kbd> world/local axes</span>
+              <span><kbd>Shift</kbd>+<kbd>RMB</kbd> select section</span><span><kbd>Ctrl+Z</kbd> undo</span>
+              <span><kbd>Del</kbd> delete sel.</span><span><kbd>L</kbd> level sel.</span>
+              <span><kbd>U</kbd> edges sel.</span><span><kbd>Esc</kbd> cancel</span>
+              <span><kbd>?</kbd> all shortcuts</span>
+              <!-- FILLED FROM PIECE_CATALOG at build time (buildRoadPaletteUI), not
+                   typed here: this list is the one thing in the panel guaranteed to
+                   go stale, and the letter keys were missing from it entirely while
+                   the digits were not. -->
+              <span id="legend-piece-keys" class="legend-wide"></span>
             </div>
             <button id="road-help-link" type="button">Open the manual (?)</button>
           </div>
@@ -422,6 +432,127 @@
           <button id="build-help-close" type="button" aria-label="Close">&times;</button>
         </div>
         <div id="build-help-body">
+              <h3 class="help-h">Building a jump</h3>
+              <p>
+                Lay your run-up, place a ramp from the <b>Ramps</b> tab, and the
+                chain's open end is now the lip. From there you have two ways to
+                cross the gap, and they are not interchangeable.
+              </p>
+              <p>
+                <b>The car flies to a separate landing</b> — the usual case. Open
+                the dev panel's <b>Gap / jump</b> section, set <b>Launch speed</b>
+                to the speed you expect the car to arrive at and <b>Landing
+                drop</b> to how far below the lip you want it to come down, then
+                press <b>Snap landing &rarr; new chain</b>. That solves the real
+                trajectory and starts a new chain exactly where the car lands,
+                heading down-arc — no grid rounding, because that position is
+                physics, not authoring. Put a <b>Landing ramp</b>
+                (<kbd>L</kbd>) or a <b>Platform</b> there to catch it.
+              </p>
+              <p>
+                <b>You fly straight over a hole and land back on the same line</b>
+                — that is the <b>Gap</b> piece (<kbd>G</kbd>, Ramps tab). It
+                builds no road at all: it just advances the chain by its length
+                and drops it, leaving air in between. Sizes are on the tiles
+                (Gap 20 / 40 / 60 m, and two with drops), but the honest way is
+                <b>Size the Gap piece to this jump</b> in the Gap / jump panel —
+                it measures the same trajectory and sets the length and drop to
+                match, so the hole is one the car can actually clear. It declines
+                if the jump lands off to one side, because a gap can only run
+                straight on.
+              </p>
+              <p>
+                Both buttons solve the arc when you press them, so they work
+                whether or not <b>Arc preview</b> is ticked. And size the landing
+                generously: the car will not always arrive at exactly your launch
+                speed, so a long platform beats a tight ramp.
+              </p>
+              <h3 class="help-h">Every shortcut</h3>
+              <p>
+                <b>Pieces.</b> These pick a BASE piece at the kit's own numbers —
+                the fast way to a shape you use constantly without hunting through
+                categories.
+              </p>
+              <div class="help-keys">
+                <span><kbd>0</kbd> S-curve</span>
+                <span><kbd>1</kbd> Straight</span>
+                <span><kbd>2</kbd> Curve</span>
+                <span><kbd>3</kbd> Slope / Ramp</span>
+                <span><kbd>4</kbd> Banked turn</span>
+                <span><kbd>5</kbd> Jump ramp</span>
+                <span><kbd>6</kbd> Loop half</span>
+                <span><kbd>8</kbd> Bank in</span>
+                <span><kbd>9</kbd> Bank out</span>
+                <span><kbd>C</kbd> Crest / dip</span>
+                <span><kbd>D</kbd> Dive / down ramp</span>
+                <span><kbd>F</kbd> Finish</span>
+                <span><kbd>G</kbd> Gap spacer</span>
+                <span><kbd>H</kbd> Spiral / helix</span>
+                <span><kbd>L</kbd> Landing ramp</span>
+                <span><kbd>M</kbd> Brow / hill top</span>
+                <span><kbd>P</kbd> Checkpoint</span>
+                <span><kbd>S</kbd> Start</span>
+                <span><kbd>T</kbd> Tunnel</span>
+              </div>
+              <p>
+                Two notes. With a piece selected, <kbd>L</kbd> <i>levels</i> the
+                selection instead of picking the landing ramp — piece editing gets
+                the keyboard first. And <kbd>B</kbd> is the build/drive toggle, so
+                it is not available as a piece key (the Brow was on <kbd>B</kbd>
+                and could never fire; it is on <kbd>M</kbd> now).
+              </p>
+              <p><b>Building.</b></p>
+              <div class="help-keys">
+                <span><kbd>LMB</kbd> / <kbd>Enter</kbd> place</span>
+                <span><kbd>RMB</kbd> select a piece</span>
+                <span><kbd>Shift</kbd>+<kbd>RMB</kbd> select the section between</span>
+                <span><kbd>Ctrl</kbd>+<kbd>RMB</kbd> add / remove one piece</span>
+                <span><kbd>O</kbd> other end of the chain</span>
+                <span><kbd>J</kbd> join the gap to the nearest end</span>
+                <span><kbd>K</kbd> next junction arrow</span>
+                <span><kbd>N</kbd> new chain where you are looking</span>
+                <span><kbd>[</kbd> / <kbd>]</kbd> previous / next chain</span>
+                <span><kbd>R</kbd> flip left / right</span>
+                <span><kbd>W</kbd> gizmo: move</span>
+                <span><kbd>Shift</kbd>+<kbd>E</kbd> gizmo: rotate</span>
+                <span><kbd>X</kbd> gizmo axes: world / local</span>
+                <span><kbd>Q</kbd> / <kbd>E</kbd> yaw by one step</span>
+              </div>
+              <p>
+                <b>With something selected.</b> All of these act on the whole
+                selection, as one undo step.
+              </p>
+              <div class="help-keys">
+                <span><kbd>Del</kbd> / <kbd>Backspace</kbd> delete</span>
+                <span><kbd>Enter</kbd> replace with the palette piece</span>
+                <span><kbd>I</kbd> insert the palette piece before it</span>
+                <span><kbd>L</kbd> level (zero the tilt)</span>
+                <span><kbd>U</kbd> guardrails &amp; kerbs on / off</span>
+                <span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> yaw by one step</span>
+                <span><kbd>&uarr;</kbd> <kbd>&darr;</kbd> pitch by one step</span>
+                <span><kbd>Shift</kbd>+<kbd>&larr;&rarr;</kbd> roll / bank the section</span>
+                <span><kbd>W</kbd> gizmo: move the chain</span>
+                <span><kbd>E</kbd> gizmo: tilt this piece</span>
+                <span><kbd>Esc</kbd> deselect</span>
+              </div>
+              <p><b>Undo, testing and help.</b></p>
+              <div class="help-keys">
+                <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Backspace</kbd> undo</span>
+                <span><kbd>Ctrl</kbd>+<kbd>Y</kbd> redo</span>
+                <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redo</span>
+                <span><kbd>Shift</kbd>+<kbd>Backspace</kbd> redo</span>
+                <span><kbd>B</kbd> build / test drive</span>
+                <span><kbd>?</kbd> this manual, <kbd>Esc</kbd> closes it</span>
+              </div>
+              <p>
+                <b>While driving</b> (<kbd>B</kbd>): <kbd>WASD</kbd> or the arrows
+                to drive, <kbd>Space</kbd> handbrake,
+                <kbd>Shift</kbd>/<kbd>Ctrl</kbd> air pitch, <kbd>R</kbd> respawn,
+                <kbd>H</kbd> headlights, <kbd>C</kbd> debug orbit camera (then
+                <kbd>V</kbd> frame, <kbd>1</kbd>&ndash;<kbd>4</kbd> angles,
+                <kbd>0</kbd> recentre, <kbd>+</kbd>/<kbd>&minus;</kbd> zoom).
+              </p>
+              <h3 class="help-h">How it works</h3>
               <b>Props &amp; movers:</b> pick one above and a ghost follows your
               mouse — <kbd>LMB</kbd> to place (keeps going, so you can lay a run of
               cones), <kbd>Esc</kbd> or <kbd>RMB</kbd> to put it down. The
@@ -464,6 +595,45 @@
               sideways and green is up: one drag, one axis. Grid snap follows the
               choice — world rounds each axis onto a cell, local rounds the
               <i>distance</i> you moved.
+              <br><br>
+              <b>Selecting a section.</b> Right-click a piece, then
+              <kbd>Shift</kbd>+right-click another in the same chain and
+              everything between them is selected — one gesture for "this
+              stretch". <kbd>Ctrl</kbd>+right-click adds or removes a single
+              piece. The brighter highlight is the anchor, the end a range
+              measures from, so shift-clicking again re-measures from there.
+              <br>
+              Everything then acts on the whole run, as ONE undo step:
+              <kbd>Del</kbd> delete, <kbd>Enter</kbd> replace with the palette
+              piece, <kbd>L</kbd> level, <kbd>U</kbd> guardrails on/off, and the
+              arrows <b>bank the section</b>.
+              <br>
+              Banking a section is not the same as tilting each piece in it. A
+              tilt is applied at a piece's seam and carried down the chain, so
+              writing 15&deg; onto five pieces would give you 15, 30, 45, 60,
+              75&deg; — a corkscrew. Instead the angle goes on once at the front
+              and comes off again at the back: a constant bank through the
+              section, level track past it. Roll in, roll out.
+              <br><br>
+              <b>Exact angles — use the arrow keys.</b> Dragging the rotate gizmo
+              is fine for eyeballing, hopeless for repeating. The arrows turn
+              whatever is selected by exactly one <b>Angle step</b> (the dev
+              panel's Grid Snap setting, 15&deg; by default), so three presses is
+              45&deg; every time and pressing back returns you to precisely zero:
+              <kbd>&larr;</kbd><kbd>&rarr;</kbd> yaw,
+              <kbd>&uarr;</kbd><kbd>&darr;</kbd> pitch (<kbd>&uarr;</kbd> is nose
+              up), <kbd>Shift</kbd>+<kbd>&larr;&rarr;</kbd> roll. The status line
+              shows the angle you are now at. <kbd>Q</kbd>/<kbd>E</kbd> use the
+              same step.
+              <br>
+              The axes are the <i>piece's</i>, not the world's — roll is about the
+              direction of travel, so banking a corner never changes where it
+              points. Which thing turns depends on what you have: a piece you
+              right-clicked tilts (and <b>banks everything after it in the
+              chain</b> — that is the banked-landing-strip tool; <kbd>L</kbd>
+              levels it again), a chain you picked with <kbd>[</kbd>/<kbd>]</kbd>
+              turns rigidly, and the next-piece ghost takes yaw only, because
+              every socket in the kit is level by convention.
               <br><br>
               <b>Either end:</b> a chain grows from its <b>tail</b> or its
               <b>head</b> — press <kbd>O</kbd> (or drag the ghost onto the far end)

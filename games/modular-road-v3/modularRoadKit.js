@@ -3195,7 +3195,12 @@ export const PIECE_CATALOG = [
     label: "Brow / hill top",
     hint: "Up-pitch easing to flat (mirror of landing)",
     swatch: "#3fa07d",
-    key: "b",
+    // WAS "b", WHICH COULD NEVER FIRE. roadGame's outer key handler intercepts
+    // `keyb` for the build/drive toggle and returns, several steps before the
+    // piece-hotkey lookup ever runs — so this piece had a shortcut on paper and
+    // no shortcut in fact. "m" is free (checked against every piece key and
+    // every editor binding).
+    key: "m",
     points: browPoints,
   },
   // ── Junctions ────────────────────────────────────────────────────────────

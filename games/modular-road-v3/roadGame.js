@@ -120,6 +120,7 @@ import { createRoadDevPanel } from "./devPanel.js";
 // imported assets — the source folder itself is not published.
 import apexTrackUrl from "./modular-road-track (1).json?url";
 import rushlineTrackUrl from "./rushline.json?url";
+import parkourTrackUrl from "./apex-parkour.json?url";
 
 /** Cap on physics ticks per frame — a long stall must not queue a huge backlog. */
 const MAX_SIM_TICKS = 8;
@@ -1607,6 +1608,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     "keyw", "keya", "keys", "keyd", "keyq", "keye", "space",
     "arrowup", "arrowdown", "arrowleft", "arrowright",
   ]);
+  // Only the SPAWN brush still uses a fixed step: it aims a car, not a piece, so
+  // it has nothing to line up with the build grid's angle setting. Everything
+  // that turns geometry goes through builder.angleStep.
   const DEG15 = Math.PI / 12;
 
   const isFormField = (t) =>
@@ -1626,12 +1630,29 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         case "escape": builder.deselectPiece(); paletteUi?.refreshStatus?.(); devPanel?.refresh(); return;
         case "keyw": builder.setPlacementGizmoMode("translate"); return; // move the whole chain
         case "keye": builder.setPlacementGizmoMode("rotate"); return;    // tilt this piece + downstream
-        case "keyl": builder.levelPiece(sel); devPanel?.refresh(); return; // reset tilt
-        case "delete": case "backspace":
-          builder.deletePiece(sel); paletteUi?.refreshStatus?.(); devPanel?.refresh(); return;
-        case "enter": // replace the selected piece with the active palette piece
-          builder.replacePiece(sel, builder.activePieceId);
-          paletteUi?.refreshStatus?.(); devPanel?.refresh(); return;
+        // These all act on THE WHOLE SELECTION. Single-select is a selection of
+        // one, so there is one code path and no behaviour change when you have
+        // just right-clicked a single piece.
+        case "keyl": builder.levelSelected(); devPanel?.refresh(); return; // reset tilt
+        // U, not G: `g` is the gap piece's hotkey, and this switch runs BEFORE
+        // the piece-hotkey lookup, so a case here would shadow it whenever
+        // something was selected. Free letters left: a y z.
+        case "keyu": { // guardrails/kerbs off, then on — per piece
+          const anyOn = builder.selectedPieces.some((p) => p.edges !== false);
+          const n = builder.setSelectedEdges(!anyOn);
+          setSelectionStatus(`Edges ${anyOn ? "off" : "on"} for ${n} piece${n > 1 ? "s" : ""}`);
+          devPanel?.refresh(); return;
+        }
+        case "delete": case "backspace": {
+          const n = builder.deleteSelected();
+          setSelectionStatus(`Deleted ${n} piece${n > 1 ? "s" : ""}`);
+          devPanel?.refresh(); return;
+        }
+        case "enter": { // replace the selection with the active palette piece
+          const n = builder.replaceSelected(builder.activePieceId);
+          setSelectionStatus(`Replaced ${n} piece${n > 1 ? "s" : ""}`);
+          devPanel?.refresh(); return;
+        }
         case "keyi": // insert the active piece just before the selection
           builder.insertPieceBefore(sel, builder.activePieceId);
           paletteUi?.refreshStatus?.(); devPanel?.refresh(); return;
@@ -1659,13 +1680,26 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
     switch (code) {
       case "keyr": builder.flip(); break;
-      case "keyq": if (builder.freePlaceMode) builder.rotateFreeYaw(DEG15); break;
+      // Q/E use the ANGLE STEP, not a hardcoded 15°. They used to disagree with
+      // the rotate gizmo the moment you touched the Angle step slider.
+      case "keyq": if (builder.freePlaceMode) builder.rotateFreeYaw(builder.angleStep); break;
       case "keye":
         if (builder.freePlaceMode) {
           if (e.shiftKey) builder.setPlacementGizmoMode("rotate");
-          else builder.rotateFreeYaw(-DEG15);
+          else builder.rotateFreeYaw(-builder.angleStep);
         }
         break;
+      // ARROWS TURN THINGS BY EXACT STEPS — the precision half of rotating, which
+      // only a gizmo drag could do before. Free in build mode: arrows are read
+      // only by the DRIVE branch. Shift swaps yaw for roll so all three axes fit
+      // on four keys.
+      case "arrowleft": case "arrowright": case "arrowup": case "arrowdown": {
+        const up = code === "arrowup" || code === "arrowdown";
+        const axis = up ? "pitch" : (e.shiftKey ? "roll" : "yaw");
+        const dir = (code === "arrowright" || code === "arrowup") ? 1 : -1;
+        nudgeAngle(axis, dir);
+        return;
+      }
       case "keyw": if (builder.freePlaceMode) builder.setPlacementGizmoMode("translate"); break;
       // Enter/Space follow the left button: with a brush armed they place the
       // PROP at the cursor, not a road piece at the chain's open end.
@@ -1915,8 +1949,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // live brush consumes it rather than also selecting whatever is behind it.
     if (brush) { clearBrush(); return; }
     const picked = builder.pickPiece(e.clientX, e.clientY);
-    if (picked) builder.selectPiece(picked);
-    else builder.deselectPiece();
+    if (!picked) { builder.deselectPiece(); paletteUi.refreshStatus(); devPanel?.refresh(); return; }
+    // SHIFT = the SECTION between here and the anchor, which is the unit you
+    // actually want (delete this stretch, un-rail it, bank it). A chain is a
+    // linear array, so a range is one gesture instead of one click per piece.
+    // CTRL = add/remove a single piece, for the exception.
+    if (e.shiftKey) builder.selectRangeTo(picked);
+    else if (e.ctrlKey || e.metaKey) builder.toggleSelected(picked);
+    else builder.selectPiece(picked);
     paletteUi.refreshStatus();
     devPanel?.refresh();
   });
@@ -1937,6 +1977,45 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   onClick("road-link", () => { linkToNearest(); });
   onClick("road-gizmo-space", () => toggleGizmoSpace());
   onClick("road-rebake", () => bakeCollision());
+
+  /** Say what a bulk edit just did, then let the normal status line take over on
+   *  the next builder change. Without this a five-piece delete is silent. */
+  function setSelectionStatus(text) {
+    const el = document.getElementById("road-status");
+    if (el) el.textContent = text;
+  }
+
+  /**
+   * Turn the selected piece / chain / next piece by one angle step (arrow keys).
+   *
+   * The readout is the point as much as the rotation is: an exact step is only
+   * useful if you can see what you have got, and the numbers were previously
+   * buried in the dev panel. Says WHAT it turned too, because a tilt on an
+   * attached piece banks everything after it in the chain — that is the
+   * banked-landing-strip tool working as designed, but it should not be a
+   * surprise.
+   */
+  function nudgeAngle(axis, dir) {
+    const r = builder.nudgeAngle(axis, dir);
+    const el = document.getElementById("road-status");
+    if (!r.ok) { if (el) el.textContent = `Can't turn: ${r.reason}`; return; }
+    bakeCollision();
+    devPanel?.refresh();
+    if (!el) return;
+    const deg = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}°`;
+    if (r.target === "section") {
+      el.textContent = `Banked a ${r.count}-piece section — pitch ${deg(r.pitch)} ` +
+        `roll ${deg(r.roll)} in` +
+        (r.levelledAfter ? ", back to level after it" : " (nothing after it to level)");
+    } else if (r.target === "piece") {
+      el.textContent = `Piece tilt — pitch ${deg(r.pitch)} roll ${deg(r.roll)}` +
+        `  (banks the rest of the chain too; L to level)`;
+    } else if (r.target === "chain") {
+      el.textContent = `Chain anchor — pitch ${deg(r.pitch)} roll ${deg(r.roll)}`;
+    } else {
+      el.textContent = `Next piece heading ${r.yaw.toFixed(1)}°`;
+    }
+  }
 
   /**
    * Flip the placement gizmo between world and local axes (button + X).
@@ -2162,6 +2241,8 @@ ${e.message}`);
   };
   loadPresetTrack("road-preset", apexTrackUrl, "Load Apex track");
   loadPresetTrack("road-preset-rushline", rushlineTrackUrl, "Load Rushline track");
+  // Generated by tools/buildParkourTrack.mjs — rebuild it there, do not hand-edit.
+  loadPresetTrack("road-preset-parkour", parkourTrackUrl, "Load Apex Parkour");
 
   const gamepad = createGamepadInput();
   /** Set by readControls() when the pad's respawn button goes down this frame. */
@@ -2468,9 +2549,39 @@ ${e.message}`);
   let landingDrop = 0;     // m below launch height to mark the landing
   let lastLanding = null;  // last computed landing (for Snap landing)
 
+  /**
+   * The ballistic landing off the chain's open end — solved ON DEMAND.
+   *
+   * `lastLanding` is a by-product of the render loop, and only when the arc is
+   * being drawn. So with "Arc preview" unticked every button that needs a
+   * landing did nothing at all and said nothing about why. `update()` is
+   * independent of visibility, so ask it directly rather than depending on a
+   * checkbox — and turn the preview on, because the answer is worth seeing.
+   */
+  function solveLanding() {
+    // ALWAYS RE-SOLVE. `lastLanding` is a by-product of the render loop and it
+    // only updates while the arc is being drawn — so with the preview off it is
+    // whatever the open end used to be, which is a plausible-looking number for
+    // a completely different jump. Re-solving is a few hundred vec ops.
+    if (!gapPreviewOn) {
+      gapPreviewOn = true;
+      gapPreview.setVisible(true);
+      devPanel?.refresh();
+    }
+    gapPreview.dragK = AERO.drag / CHASSIS.mass;
+    lastLanding = gapPreview.update(builder.currentConnector, refSpeed, landingDrop);
+    return lastLanding;
+  }
+
   /** Start a new chain on the previewed landing point, heading down-arc. */
   function snapLanding() {
-    if (!lastLanding) return;
+    const landing = solveLanding();
+    if (!landing) {
+      const el = document.getElementById("road-status");
+      if (el) el.textContent = "No landing to snap to — the arc never comes down (check Launch speed)";
+      return;
+    }
+    lastLanding = landing;
     const v = lastLanding.vel;
     // beginNewChain's freeYaw maps to travel = (0,0,-1) rotated by yaw, so this
     // yaw makes the new chain head along the landing's horizontal velocity.
@@ -2486,6 +2597,64 @@ ${e.message}`);
     if (controls.target) { controls.target.copy(lastLanding.pos); controls.update?.(); }
     builder.refreshGhost?.();
     paletteUi?.refreshStatus?.();
+  }
+
+  /**
+   * Size the GAP piece from the same solve, and select it.
+   *
+   * The Gap is the one piece whose size should never be picked off a menu: a
+   * ramp's angle is a choice, but a gap's length is a consequence — how far the
+   * car actually flies from this lip at this speed. Its kit default is a flat
+   * 44 m × 6 m drop, which suits a jump only by luck.
+   *
+   * ONLY FOR A JUMP THAT FLIES STRAIGHT ON. A gap keeps the chain going in a
+   * straight line, so it can only express a landing that is dead ahead. Come off
+   * a curve and the car lands off to one side, which no gap length can describe
+   * — that is what "Snap landing → new chain" is for, and this says so rather
+   * than quietly building a gap to the wrong place.
+   */
+  function gapToLanding() {
+    const el = document.getElementById("road-status");
+    const landing = solveLanding();
+    if (!landing) {
+      if (el) el.textContent = "No landing to measure — the arc never comes down";
+      return;
+    }
+    // IN THE LIP'S OWN FRAME, not the horizontal one. `gapPoints` lays its
+    // centreline out as (0, −drop·t², −L·t) in piece-local space, so L runs along
+    // the connector's TRAVEL direction — and a ramp's lip is pitched up. Measured
+    // horizontally instead, a 137 m gap off a 30° lip climbed 68 m into the sky
+    // (measured: the track topped out at 148 m). Local coordinates give L and the
+    // drop directly, and the gap's endpoint is then exactly the landing point.
+    const local = landing.pos.clone()
+      .applyMatrix4(new THREE.Matrix4().copy(builder.currentConnector).invert());
+    const along = -local.z;          // down the lip's travel
+    const drop = -local.y;           // below it
+    const across = Math.abs(local.x); // sideways, which a gap cannot express
+    if (along < 1) {
+      if (el) el.textContent = "That jump does not clear anything — check Launch speed";
+      return;
+    }
+    if (across > Math.max(2, along * 0.08)) {
+      if (el) {
+        el.textContent = `That jump lands ${across.toFixed(0)} m off to the side — ` +
+          `a gap only goes straight on. Use "Snap landing → new chain".`;
+      }
+      return;
+    }
+    // THROUGH THE PALETTE, AND IN THIS ORDER. selectPieceById is the one entry
+    // point that also clears the active preset and switches the visible category
+    // — `renderPieces` does not clear `activePresetId`, so the status line went
+    // on calling this a "Ramp 40" while the piece under the cursor was a gap,
+    // which is the exact lie selectPieceById was written to stop.
+    // It also resets the params to the kit defaults, so it has to come BEFORE
+    // the size is written or the measurement is thrown away.
+    if (!paletteUi?.selectPieceById?.("gap")) builder.setActivePiece("gap");
+    builder.setGapSize(along, drop);
+    if (el) {
+      el.textContent = `Gap sized to the jump — ${along.toFixed(0)} m across, ` +
+        `${drop.toFixed(0)} m down. Place it, then put a landing after it.`;
+    }
   }
 
   /**
@@ -2887,11 +3056,11 @@ ${e.message}`);
       getSelectedPieceId: () => builder.selectedPiece?.id ?? null,
       deselectPiece: () => { builder.deselectPiece(); paletteUi.refreshStatus(); },
       deleteSelected: () => {
-        if (builder.selectedPiece) builder.deletePiece(builder.selectedPiece);
+        builder.deleteSelected();
         paletteUi.refreshStatus();
       },
       replaceSelected: () => {
-        if (builder.selectedPiece) builder.replacePiece(builder.selectedPiece, builder.activePieceId);
+        builder.replaceSelected(builder.activePieceId);
         paletteUi.refreshStatus();
       },
       insertBeforeSelected: () => {
@@ -2900,11 +3069,13 @@ ${e.message}`);
       },
       getSelectedTilt: () =>
         builder.selectedPiece ? builder.pieceTiltDeg(builder.selectedPiece) : { pitch: 0, roll: 0 },
-      levelSelected: () => { if (builder.selectedPiece) builder.levelPiece(builder.selectedPiece); },
+      // The whole selection, not just the anchor — the dev panel's buttons
+      // should mean the same thing the keys do.
+      levelSelected: () => { builder.levelSelected(); },
       getSelectedEdges: () => builder.selectedPiece?.edges ?? true,
       toggleSelectedEdges: () => {
-        const sp = builder.selectedPiece;
-        if (sp) builder.setPieceEdges(sp, !(sp.edges ?? true));
+        const any = builder.selectedPieces.some((p) => p.edges !== false);
+        builder.setSelectedEdges(!any);
       },
       isSelectedDetached: () => !!builder.selectedPiece?.detached,
       toggleSelectedDetached: () => {
@@ -2969,6 +3140,7 @@ ${e.message}`);
       /** Dial the arc/marker glow live, e.g. setGapGlow({ arc: 14 }). */
       setGapGlow: (g) => gapPreview.setGlow(g),
       snapLanding,
+      gapToLanding,
       // Race
       setRaceRespawn: (on) => { raceRespawn = !!on; },
       getRaceRespawn: () => raceRespawn,

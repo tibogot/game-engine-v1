@@ -177,10 +177,17 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <button class="action-btn primary" id="dv-snap-landing" type="button">Snap landing → new chain</button>
+          <button class="action-btn" id="dv-gap-to-landing" type="button">Size the Gap piece to this jump</button>
           <div class="dv-hint">
             The red arc is where a jump at <b>launch speed</b> lands (green ring).
             <b>Snap landing</b> starts a new chain there, heading down-arc — then
-            place a landing / dive piece to catch the car.
+            place a landing / dive piece to catch the car. Both buttons solve the
+            arc on demand, so they work whether or not the preview is ticked.
+            <br><br>
+            <b>Size the Gap</b> measures the same jump and sets the Gap piece to
+            match, keeping everything in ONE chain — good for a hole you fly
+            straight over. It declines if the car lands off to one side, because
+            a gap can only run straight on; use <b>Snap landing</b> for those.
           </div>
         </div>
       </div>
@@ -1862,7 +1869,10 @@ export function createRoadDevPanel({ app, game, params }) {
   }
 
   // ── Gap / jump ──────────────────────────────────────────────────────────────
-  toggle("dv-gap", game.getGapPreview(), (on) => game.setGapPreview(on));
+  // HANDLE KEPT, not discarded: "Snap landing" and "Size the Gap" solve the arc
+  // on demand and turn the preview on themselves, so the button has to be able
+  // to catch up with a change it did not make. Same reason lightsToggle is kept.
+  const gapToggle = toggle("dv-gap", game.getGapPreview(), (on) => game.setGapPreview(on));
   const refSpdEl = $("#dv-refspd");
   const refSpdVal = $("#dv-refspd-v");
   if (refSpdEl) {
@@ -1889,6 +1899,7 @@ export function createRoadDevPanel({ app, game, params }) {
     });
   }
   $("#dv-snap-landing").addEventListener("click", () => game.snapLanding());
+  $("#dv-gap-to-landing")?.addEventListener("click", () => game.gapToLanding?.());
 
   // ── Spawn ─────────────────────────────────────────────────────────────────
   const spawnSrc = $("#dv-spawn-src");
@@ -2414,6 +2425,8 @@ export function createRoadDevPanel({ app, game, params }) {
     // Auto mode flips the headlights from outside the panel — keep the toggle
     // showing the truth rather than the last thing that was clicked.
     lightsToggle.set(game.getHeadlights());
+    // Ditto the arc: solving a landing switches it on behind the panel's back.
+    gapToggle.set(game.getGapPreview());
     autoToggle.set(game.getAutoHeadlights?.() ?? true);
     // The wheel and chassis GLBs finish loading after the panel is built and
     // call refresh().

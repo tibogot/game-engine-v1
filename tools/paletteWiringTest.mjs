@@ -11,7 +11,7 @@
 // run for real, and neither is available here. Reading both sides and comparing
 // the id sets catches the failure that actually happens.
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, dirname } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -89,9 +89,15 @@ console.log("\n=== THE MANUAL OVERLAY ===");
     /#palette, #inspector, #build-help \{/.test(read("palette.css")),
     "palette.css scopes its variables; without #build-help in that list every " +
     "var() in the overlay resolves to nothing");
-  check("the prose really moved (the panel is not still a wall of text)",
-    (html.split('id="build-hints"')[1] ?? "").split("</div>")[0].length < 1200,
-    "#build-hints should now hold the key legend, not paragraphs");
+  // WORDS, not characters: the legend is mostly <kbd> markup, so a character
+  // budget flags an honest key list as a wall of prose. What we actually care
+  // about is that the panel holds LABELS, not paragraphs.
+  const panelText = (html.split('id="build-hints"')[1] ?? "").split("</div>")[0]
+    .replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]+>/g, " ")
+    .replace(/&[a-z]+;/gi, " ").trim();
+  const panelWords = panelText ? panelText.split(/\s+/).length : 0;
+  check(`the panel holds a key list, not prose (${panelWords} words)`, panelWords < 90,
+    `${panelWords} words — the ~700-word manual belongs behind "?"`);
   check("...and landed in the manual", html.split('id="build-help-body"')[1]?.includes("Junctions"),
     "the junction section should be in the overlay now");
 }
@@ -109,6 +115,58 @@ console.log("\n=== THE KEY LEGEND MATCHES THE REAL SHORTCUTS ===");
       `legend:${inLegend} handler(case "${code}"):${inCode}`);
   }
   check('"B" (drive) is handled', /code === "keyb"/.test(game));
+}
+
+console.log("\n=== EVERY SHORTCUT IS DOCUMENTED ===");
+{
+  // This is the check that pays for moving the manual out of sight. Docs behind
+  // a "?" rot precisely because nobody sees them go stale, so the bindings are
+  // read out of the CODE and every one has to appear in the manual.
+  const manual = html.split('id="build-help-body"')[1] ?? "";
+
+  // 1. PIECE HOTKEYS — from the REAL catalog, not scraped. A regex over the kit
+  //    paired ids with the wrong keys (the id/key pattern spans entries), which
+  //    is exactly the sort of wrong-but-confident answer a test should not give.
+  const { PIECE_CATALOG } = await import(
+    pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadKit.js")).href);
+  const pieceKeys = PIECE_CATALOG.filter((p) => p.key).map((p) => ({ id: p.id, key: p.key }));
+  check(`the catalog declares piece hotkeys (${pieceKeys.length})`, pieceKeys.length > 10);
+  const undocumented = pieceKeys.filter(
+    (k) => !new RegExp(`<kbd>${k.key.toUpperCase()}</kbd>`, "i").test(manual));
+  check("every piece hotkey appears in the manual", undocumented.length === 0,
+    `missing: ${undocumented.map((k) => `${k.key} (${k.id})`).join(", ")}`);
+  const dupes = pieceKeys.filter((k, i) => pieceKeys.findIndex((o) => o.key === k.key) !== i);
+  check("...and no two pieces share one", dupes.length === 0,
+    `duplicated: ${dupes.map((k) => k.key).join(", ")}`);
+
+  // 2. NO PIECE KEY IS DEAD. The outer handler runs before the piece lookup and
+  //    RETURNS on what it claims, so anything it takes there is unreachable as a
+  //    piece key — the Brow sat on `b` (the build/drive toggle) for a while with
+  //    a shortcut that could never fire. Only the region above the drive branch
+  //    counts: `keyc` and `keyh` are also matched inside `if (mode === "drive")`,
+  //    which cannot shadow a build-mode key.
+  const outer = game.slice(
+    game.indexOf("if (PREVENT_DEFAULT.has(code))"),
+    game.indexOf('if (mode === "drive") {', game.indexOf("if (PREVENT_DEFAULT.has(code))")),
+  );
+  check("the shadow-check region was found", outer.length > 20 && outer.length < 2000,
+    `${outer.length} chars — the handler was restructured, re-anchor this`);
+  const eaten = pieceKeys.filter((k) => new RegExp(`code === "key${k.key}"`).test(outer));
+  check("no piece hotkey is intercepted before the piece lookup", eaten.length === 0,
+    `dead keys: ${eaten.map((k) => `${k.key} (${k.id})`).join(", ")} — the outer ` +
+    `handler returns on these, so the piece can never be selected by keyboard`);
+
+  // 3. EVERY EDITOR BINDING in the build-mode handler is documented too.
+  const cases = [...game.matchAll(/case "key([a-z])":/g)].map((m) => m[1]);
+  const editorUndoc = [...new Set(cases)].filter(
+    (c) => !new RegExp(`<kbd>${c.toUpperCase()}</kbd>`, "i").test(manual));
+  check(`every editor letter binding is in the manual (${new Set(cases).size} distinct)`,
+    editorUndoc.length === 0, `missing: ${editorUndoc.join(", ")}`);
+
+  // 4. ...and the arrows, which are the newest and easiest to forget.
+  for (const [name, entity] of [["left", "&larr;"], ["right", "&rarr;"], ["up", "&uarr;"], ["down", "&darr;"]]) {
+    check(`arrow ${name} is documented`, manual.includes(entity), `no ${entity} in the manual`);
+  }
 }
 
 console.log(fail ? `\n${fail} FAILURE(S)\n` : "\nall green\n");
