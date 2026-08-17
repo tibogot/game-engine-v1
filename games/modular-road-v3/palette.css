@@ -3,7 +3,11 @@
  * palette + inspector, so they cannot leak into the v3 editor chrome that
  * road.html injects (v3/styles/editor.css defines its own look).
  */
-#palette, #inspector {
+/* #build-help is in the scope list because the manual overlay lives OUTSIDE
+ * #palette (it is a full-screen sibling), and these variables are deliberately
+ * scoped rather than global — without this every var() in the overlay would
+ * resolve to nothing. */
+#palette, #inspector, #build-help {
         --bg-dark: #222222;
         --bg-panel: #2a2a2a;
         --bg-item: #333333;
@@ -413,4 +417,177 @@
         font-family: var(--font-mono);
         font-size: 9px;
         color: var(--text);
+      }
+
+      /* ── TOOLBAR GROUPS ──────────────────────────────────────────────────
+         Each group is its own .palette-toolbar, so it inherits the existing
+         separator rule and the flex wrapping unchanged. */
+      .palette-group-label {
+        flex: 1 1 100%;
+        margin: 0 0 2px;
+        font-family: var(--font-display);
+        font-size: 8px;
+        font-weight: 800;
+        font-style: italic;
+        letter-spacing: 1.4px;
+        text-transform: uppercase;
+        color: #5d6470;
+      }
+      /* Clear is the one button that throws work away, so it does not get to
+         look like Save sitting next to it. */
+      .palette-toolbar-danger { border-top-color: rgba(255, 110, 90, 0.22); }
+      .palette-btn-danger {
+        color: #ff8f7a;
+        border-color: rgba(255, 110, 90, 0.32);
+      }
+      .palette-btn-danger:hover {
+        background: rgba(255, 110, 90, 0.14);
+        border-color: rgba(255, 110, 90, 0.6);
+        color: #ffb3a3;
+      }
+
+      /* ── HEADER BUTTONS + THE "?" ────────────────────────────────────── */
+      #palette-header-btns { display: flex; align-items: center; gap: 6px; }
+      #road-help {
+        width: 22px; height: 22px; padding: 0;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 50%;
+        color: #aab2c0;
+        cursor: pointer;
+        font-family: var(--font-display);
+        font-size: 12px; font-weight: 800; line-height: 1;
+      }
+      #road-help:hover {
+        background: rgba(220, 230, 34, 0.15);
+        border-color: var(--tm-yellow);
+        color: var(--tm-yellow);
+      }
+
+      /* ── KEY LEGEND (what replaced the wall of prose) ─────────────────── */
+      #key-legend {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2px 8px;
+        margin-bottom: 6px;
+      }
+      #key-legend span {
+        display: flex; align-items: center; gap: 3px;
+        font-size: 9px; color: #7c8492;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      #road-help-link {
+        width: 100%;
+        background: none;
+        border: 1px dashed rgba(255, 255, 255, 0.16);
+        border-radius: 2px;
+        padding: 4px 0;
+        color: #8892a0;
+        cursor: pointer;
+        font-family: var(--font-display);
+        font-size: 9px; font-weight: 700; font-style: italic;
+        text-transform: uppercase; letter-spacing: 0.6px;
+      }
+      #road-help-link:hover { color: var(--tm-yellow); border-color: var(--tm-yellow); }
+
+      /* ── MANUAL OVERLAY ──────────────────────────────────────────────────
+         Above everything, including the engine's perf panel (z-index 10000).
+         `hidden` does the showing/hiding, so there is no state to keep in sync
+         with a class. */
+      #build-help {
+        position: fixed; inset: 0; z-index: 10050;
+        display: flex; align-items: center; justify-content: center;
+        padding: 32px;
+        background: rgba(8, 10, 14, 0.72);
+        backdrop-filter: blur(3px);
+      }
+      #build-help[hidden] { display: none; }
+      #build-help-panel {
+        display: flex; flex-direction: column;
+        width: min(780px, 100%); max-height: 100%;
+        background: var(--bg-panel, #2a2a2a);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 4px;
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+      }
+      #build-help-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 14px 18px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      #build-help-title {
+        margin: 0;
+        font-family: var(--font-display);
+        font-size: 18px; font-weight: 900; font-style: italic;
+        text-transform: uppercase; letter-spacing: 0.5px;
+        color: #fff;
+      }
+      #build-help-close {
+        width: 26px; height: 26px; padding: 0;
+        background: none; border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 2px; color: #aab2c0; cursor: pointer;
+        font-size: 16px; line-height: 1;
+      }
+      #build-help-close:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+      #build-help-body {
+        overflow-y: auto;
+        padding: 16px 18px 20px;
+        font-size: 12px; line-height: 1.65; color: #9aa3b2;
+      }
+      #build-help-body b { color: #dfe5ee; }
+      #build-help-body kbd {
+        display: inline-block; padding: 0 5px;
+        border-radius: 3px;
+        background: var(--bg-input, #1e1e1e);
+        border: 1px solid var(--border, #3a3a3a);
+        font-family: var(--font-mono);
+        font-size: 11px; color: var(--text, #ddd);
+      }
+
+      /* ── COLLAPSIBLE GROUPS ──────────────────────────────────────────────
+         Native <details>, so open/closed state needs no JS and nothing to keep
+         in sync. Build stays open (it is what you use while building); Track and
+         Test fold away, because the panel cannot fit everything — the piece grid
+         alone is ~580px of a ~780px viewport, so this scrolls no matter what.
+         The point is not to remove the scroll, it is to stop burying the
+         controls you reach for most. */
+      .palette-group {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .palette-group > summary {
+        cursor: pointer;
+        list-style: none;
+        margin: 0;
+        user-select: none;
+      }
+      .palette-group > summary::-webkit-details-marker { display: none; }
+      .palette-group > summary::after {
+        content: " ▸";
+        color: #4a505a;
+      }
+      .palette-group[open] > summary::after { content: " ▾"; }
+      .palette-group > summary:hover { color: #aab2c0; }
+      /* Inside a group the separator is the <details> border, not the toolbar's. */
+      .palette-toolbar-sub {
+        margin-top: 6px;
+        padding-top: 0;
+        border-top: none;
+      }
+
+      /* ── THE STATUS LINE IS PINNED ───────────────────────────────────────
+         It is the most-read thing in the editor — what piece, how big, which
+         end, how many open branches — and it was sitting second from LAST in a
+         panel that scrolls, i.e. permanently off screen. Sticky keeps it in
+         view wherever you have scrolled to. It needs an opaque background of its
+         own, or the content underneath shows through as it passes. */
+      #road-status {
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+        margin-top: 10px;
+        padding: 8px 0 6px;
+        background: var(--bg-panel, #2a2a2a);
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
       }

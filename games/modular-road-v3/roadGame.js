@@ -1712,6 +1712,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     "space", "arrowup", "arrowdown", "arrowleft", "arrowright", "backspace",
   ]);
 
+  // ── MANUAL OVERLAY ─────────────────────────────────────────────────────────
+  // The ~700 words that used to sit under the toolbar, moved behind "?".
+  // `hidden` is the single source of truth — no class to fall out of sync with.
+  //
+  // LOOKED UP LAZILY, not captured once: the keydown handler below is registered
+  // here, while the buttons that also drive it are wired much further down, and
+  // a `const` element captured at this point would be a temporal-dead-zone
+  // reference from inside the handler. A getElementById per keypress is free.
+  const helpEl = () => document.getElementById("build-help");
+  const isHelpOpen = () => { const el = helpEl(); return !!el && !el.hidden; };
+  const setHelp = (on) => { const el = helpEl(); if (el) el.hidden = !on; };
+
   addEventListener("keydown", (e) => {
     if (isFormField(e.target)) return; // let the dev panel / any text field type
     const code = e.code.toLowerCase();
@@ -1760,6 +1772,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         }
         return;
       }
+    }
+
+    // MANUAL: "?" opens it, Esc closes it — handled up here, above everything
+    // else, for two reasons. "?" is Shift+/ on QWERTY but Shift+, on AZERTY, so
+    // it has to match `e.key` (the printed label) like the undo shortcut does,
+    // not `e.code`. And while the manual is open Esc belongs to it, ahead of the
+    // brush and the piece selection further down.
+    if ((e.key === "?" || (e.key === "/" && e.shiftKey)) && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      setHelp(!isHelpOpen());
+      return;
+    }
+    if (code === "escape" && isHelpOpen()) {
+      e.preventDefault();
+      setHelp(false);
+      return;
     }
 
     // Let Ctrl/Meta/Alt combos through (browser + OS shortcuts). The editor's own
@@ -1904,6 +1932,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   onClick("road-other-end", () => { toggleBuildEnd(); });
   onClick("road-link", () => { linkToNearest(); });
   onClick("road-rebake", () => bakeCollision());
+
+  // Two ways in — the header's "?" and the link under the key legend.
+  onClick("road-help", () => setHelp(!isHelpOpen()));
+  onClick("road-help-link", () => setHelp(true));
+  onClick("build-help-close", () => setHelp(false));
+  // Backdrop only: a click that started inside the panel must not close it.
+  helpEl()?.addEventListener("pointerdown", (e) => {
+    if (e.target === helpEl()) setHelp(false);
+  });
 
   /**
    * Close the gap from the end you are building on to the nearest other open

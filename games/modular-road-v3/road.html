@@ -311,123 +311,85 @@
       <div id="palette-panel">
         <div id="palette-panel-header">
           <h2 id="category-title">Straight</h2>
-          <button id="build-mode-toggle" class="active" type="button">
-            Build On
-          </button>
+          <div id="palette-header-btns">
+            <button id="build-mode-toggle" class="active" type="button">
+              Build On
+            </button>
+            <!-- Up here rather than at the end of the toolbar because the
+                 toolbar runs off the bottom of the screen — help you cannot
+                 find is not help. -->
+            <button id="road-help" type="button" title="Manual (?)" aria-label="Manual">?</button>
+          </div>
         </div>
         <div id="palette-body">
           <div id="piece-grid"></div>
+          <!-- GROUPED, and every id kept exactly as it was: buildRoadPaletteUI()
+               and roadGame.js look all of these up by hand, so a rename here is
+               a button that silently stops working. tools/paletteWiringTest.mjs
+               checks every wired id still exists in this file. -->
           <div class="palette-toolbar">
-            <button id="road-drive" class="palette-btn palette-btn-wide" type="button">
-              Test drive (B)
-            </button>
+            <span class="palette-group-label">Build</span>
             <button id="road-place" class="palette-btn palette-btn-wide palette-btn-primary" type="button">
               Place (Enter)
             </button>
+            <button id="road-other-end" class="palette-btn" type="button">Other end (O)</button>
+            <button id="road-link" class="palette-btn" type="button">Join (J)</button>
+            <button id="road-branch" class="palette-btn" type="button">Go to branch (K)</button>
+            <button id="road-flip" class="palette-btn" type="button">Flip L/R (R)</button>
             <button id="road-new-chain" class="palette-btn palette-btn-wide" type="button">
               New chain (N)
             </button>
             <button id="road-prev-chain" class="palette-btn" type="button">◂ Prev chain ([)</button>
             <button id="road-next-chain" class="palette-btn" type="button">Next chain (]) ▸</button>
-            <button id="road-branch" class="palette-btn palette-btn-wide" type="button">
-              Go to branch (K)
+            <button id="road-undo" class="palette-btn palette-btn-wide" type="button">
+              Undo (Ctrl+Z) · right-click to redo
             </button>
-            <button id="road-other-end" class="palette-btn palette-btn-wide" type="button">
-              Other end of chain (O)
-            </button>
-            <button id="road-link" class="palette-btn palette-btn-wide" type="button">
-              Join to nearest end (J)
-            </button>
-            <button id="road-flip" class="palette-btn" type="button">Flip L/R (R)</button>
-            <button id="road-undo" class="palette-btn" type="button">Undo</button>
+          </div>
+          <details class="palette-group">
+            <summary class="palette-group-label">Track</summary>
+            <div class="palette-toolbar palette-toolbar-sub">
             <button id="road-save" class="palette-btn" type="button">Save track</button>
             <button id="road-load" class="palette-btn" type="button">Load track</button>
-            <button id="road-rebake" class="palette-btn" type="button">Rebake collision</button>
-            <button id="road-snap" class="palette-btn palette-btn-wide" type="button">Snap: Auto</button>
             <button id="road-preset" class="palette-btn palette-btn-wide" type="button">Load Apex track</button>
             <button id="road-preset-rushline" class="palette-btn palette-btn-wide" type="button">Load Rushline track</button>
             <button id="road-demo" class="palette-btn" type="button">Demo</button>
             <button id="road-circuit" class="palette-btn" type="button">Big circuit</button>
-            <button id="road-clear" class="palette-btn" type="button">Clear</button>
+          </div>
+          </details>
+          <details class="palette-group">
+            <summary class="palette-group-label">Test</summary>
+            <div class="palette-toolbar palette-toolbar-sub">
+            <button id="road-drive" class="palette-btn palette-btn-wide" type="button">
+              Test drive (B)
+            </button>
+            <button id="road-snap" class="palette-btn" type="button">Snap: Auto</button>
+            <button id="road-rebake" class="palette-btn" type="button">Rebake collision</button>
+          </div>
+          </details>
+          <!-- On its own, and marked. It used to be an identical-looking button
+               sitting directly beside "Load track". -->
+          <div class="palette-toolbar palette-toolbar-danger">
+            <button id="road-clear" class="palette-btn palette-btn-wide palette-btn-danger" type="button">
+              Clear track
+            </button>
           </div>
           <div id="road-status">0 placed</div>
+          <!-- WHAT STAYS IN THE PANEL: the keys, as a lookup. The 700 words of
+               prose that used to live here moved to the manual overlay (?) —
+               a manual in a 340px sidebar is a manual nobody reads, and the
+               daily question is "what was the key for the other end again?",
+               which is a lookup, not a paragraph. -->
           <div id="build-hints">
-            <b>Props &amp; movers:</b> pick one above and a ghost follows your
-            mouse — <kbd>LMB</kbd> to place (keeps going, so you can lay a run of
-            cones), <kbd>Esc</kbd> or <kbd>RMB</kbd> to put it down. The
-            <b>Snap</b> button picks the surface it rides: Ground = terrain, Road
-            = decks only (ghost turns red off the road), Auto = whichever you are
-            pointing at. Placed something already? Right-click it to select and
-            fine-tune with the gizmo.
-            <br><br>
-            <b>Road pieces — point at the track.</b> The next piece follows your
-            mouse, just like a prop ghost: move the cursor near <i>any</i> open
-            end and the piece jumps there, switching chains for you.
-            <kbd>LMB</kbd>/<kbd>Enter</kbd> places it. Point at nothing and the
-            piece stays exactly where it is, so a piece you positioned by hand is
-            never dragged off by a stray mouse move.
-            <br>
-            <b>The floating arrows are the open ends</b>, and each points the way
-            a piece placed there would grow:
-            <span style="color:#54d6ff">blue = a chain's end</span> (keep going),
-            <span style="color:#b98cff">purple = a chain's start</span> (builds
-            backwards),
-            <span style="color:#ffc93c">gold = a junction exit</span> (starts a
-            side road). The big <b>white</b> one is where the piece will actually
-            land if you click now.
-            <br><br>
-            <b>The gizmo is for empty space.</b> Use it when you want a piece
-            somewhere there is no track yet — drag to move it anywhere
-            (<kbd>Y</kbd> axis = height), and it still magnets onto an open end
-            if you drop it close enough.
-            <kbd>W</kbd> move <kbd>Shift+E</kbd> rotate &bull;
-            <kbd>Q</kbd>/<kbd>E</kbd> yaw nudge &bull;
-            <kbd>N</kbd> new chain &bull; <kbd>[</kbd>/<kbd>]</kbd> select chain
-            (gizmo then drags the whole chain).
-            <br><br>
-            <b>Either end:</b> a chain grows from its <b>tail</b> or its
-            <b>head</b> — press <kbd>O</kbd> (or drag the ghost onto the far end)
-            to switch, and the status line always says which one you are on.
-            Building backwards <i>prepends</i>: the piece goes in front and the
-            chain's start moves back to meet it, so <b>nothing already placed
-            moves</b> — you can extend a finished run backwards to a new start
-            line without breaking a single seam you had aligned. A start that is
-            already joined to a junction branch or to another chain is not an
-            open end, so <kbd>O</kbd> will decline there and say so.
-            <br><br>
-            <b>Junctions — one arm continues by itself.</b> A fork, T, crossroads
-            or roundabout is an ordinary chain piece: the chain drives in one end
-            and out the far side, so <i>you do not have to do anything</i> to
-            keep going on the main arm — just place the next piece.
-            <br>
-            The EXTRA exits are the floating yellow arrows. Point at one (or press
-            <kbd>K</kbd>) and place, and the side road starts as its own chain;
-            the arrow disappears once something is built on it. A crossroads and a
-            roundabout have two arrows — <kbd>K</kbd> steps through them one press
-            at a time, and pointing at one goes straight to it.
-            <kbd>R</kbd> flips which side a Split / T uses and which arm of a Y
-            fork the chain follows. A roundabout's island is a hole — cut across
-            the middle and you drop through it.
-            <br><br>
-            <b>Splitting and rejoining:</b> build the alternate route off a
-            Split's arrow, run it where you like, then press <kbd>J</kbd> (Join)
-            to close the gap back into a <b>Merge</b>. A chain is a rigid run of
-            pieces, so nothing you place by hand will ever land on both ends at
-            once — <kbd>J</kbd> generates a <i>link</i> shaped to whatever is
-            left over, meeting the far end exactly in position <i>and</i>
-            heading. It tells you the gap it closed and the tightest radius, and
-            refuses outright if the only curve that would fit is a hairpin —
-            build a little further out and try again.
-            <br><br>
-            <b>Undo:</b> <kbd>Backspace</kbd> or <kbd>Ctrl</kbd>+<kbd>Z</kbd>
-            steps back through every edit — placing, deleting, replacing, tilting,
-            dragging, even <b>Clear</b>. <kbd>Shift</kbd>+<kbd>Backspace</kbd>,
-            <kbd>Ctrl</kbd>+<kbd>Y</kbd> or
-            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redoes; right-click the
-            Undo button for the same. The shortcuts follow the letter PRINTED on
-            your key, so Ctrl+Z is Ctrl+Z on AZERTY too — and
-            <kbd>Backspace</kbd> works on any layout at all. A gizmo drag is one
-            step, not one per frame; loading a track starts a fresh history.
+            <div id="key-legend">
+              <span><kbd>LMB</kbd> place</span><span><kbd>O</kbd> other end</span>
+              <span><kbd>J</kbd> join gap</span><span><kbd>K</kbd> branch</span>
+              <span><kbd>N</kbd> new chain</span><span><kbd>[</kbd><kbd>]</kbd> chain</span>
+              <span><kbd>R</kbd> flip L/R</span><span><kbd>B</kbd> drive</span>
+              <span><kbd>W</kbd> move gizmo</span><span><kbd>Shift+E</kbd> rotate</span>
+              <span><kbd>Q</kbd><kbd>E</kbd> yaw</span><span><kbd>RMB</kbd> select piece</span>
+              <span><kbd>Ctrl+Z</kbd> undo</span><span><kbd>Esc</kbd> cancel</span>
+            </div>
+            <button id="road-help-link" type="button">Open the manual (?)</button>
           </div>
         </div>
       </div>
@@ -437,6 +399,103 @@
         title="Collapse palette"
         aria-label="Collapse palette"
       ></button>
+    </div>
+
+    <!-- ── MANUAL ─────────────────────────────────────────────────────────────
+         Everything that used to be a wall of text under the toolbar. Opened with
+         ? or the header's "?" button, closed with Esc, the X, or a click on the
+         backdrop.
+
+         KEEP THIS IN STEP WITH THE CODE. Being out of sight is exactly why help
+         overlays rot: the shortcuts are defined in roadGame.js (the build-mode
+         `switch (code)` and the Ctrl+Z block above it), and the piece hotkeys in
+         PIECE_CATALOG in modularRoadKit.js. Change a key in either and change it
+         here too. -->
+    <div id="build-help" hidden>
+      <div id="build-help-panel" role="dialog" aria-modal="true" aria-labelledby="build-help-title">
+        <div id="build-help-head">
+          <h2 id="build-help-title">Track builder manual</h2>
+          <button id="build-help-close" type="button" aria-label="Close">&times;</button>
+        </div>
+        <div id="build-help-body">
+              <b>Props &amp; movers:</b> pick one above and a ghost follows your
+              mouse — <kbd>LMB</kbd> to place (keeps going, so you can lay a run of
+              cones), <kbd>Esc</kbd> or <kbd>RMB</kbd> to put it down. The
+              <b>Snap</b> button picks the surface it rides: Ground = terrain, Road
+              = decks only (ghost turns red off the road), Auto = whichever you are
+              pointing at. Placed something already? Right-click it to select and
+              fine-tune with the gizmo.
+              <br><br>
+              <b>Road pieces — point at the track.</b> The next piece follows your
+              mouse, just like a prop ghost: move the cursor near <i>any</i> open
+              end and the piece jumps there, switching chains for you.
+              <kbd>LMB</kbd>/<kbd>Enter</kbd> places it. Point at nothing and the
+              piece stays exactly where it is, so a piece you positioned by hand is
+              never dragged off by a stray mouse move.
+              <br>
+              <b>The floating arrows are the open ends</b>, and each points the way
+              a piece placed there would grow:
+              <span style="color:#54d6ff">blue = a chain's end</span> (keep going),
+              <span style="color:#b98cff">purple = a chain's start</span> (builds
+              backwards),
+              <span style="color:#ffc93c">gold = a junction exit</span> (starts a
+              side road). The big <b>white</b> one is where the piece will actually
+              land if you click now.
+              <br><br>
+              <b>The gizmo is for empty space.</b> Use it when you want a piece
+              somewhere there is no track yet — drag to move it anywhere
+              (<kbd>Y</kbd> axis = height), and it still magnets onto an open end
+              if you drop it close enough.
+              <kbd>W</kbd> move <kbd>Shift+E</kbd> rotate &bull;
+              <kbd>Q</kbd>/<kbd>E</kbd> yaw nudge &bull;
+              <kbd>N</kbd> new chain &bull; <kbd>[</kbd>/<kbd>]</kbd> select chain
+              (gizmo then drags the whole chain).
+              <br><br>
+              <b>Either end:</b> a chain grows from its <b>tail</b> or its
+              <b>head</b> — press <kbd>O</kbd> (or drag the ghost onto the far end)
+              to switch, and the status line always says which one you are on.
+              Building backwards <i>prepends</i>: the piece goes in front and the
+              chain's start moves back to meet it, so <b>nothing already placed
+              moves</b> — you can extend a finished run backwards to a new start
+              line without breaking a single seam you had aligned. A start that is
+              already joined to a junction branch or to another chain is not an
+              open end, so <kbd>O</kbd> will decline there and say so.
+              <br><br>
+              <b>Junctions — one arm continues by itself.</b> A fork, T, crossroads
+              or roundabout is an ordinary chain piece: the chain drives in one end
+              and out the far side, so <i>you do not have to do anything</i> to
+              keep going on the main arm — just place the next piece.
+              <br>
+              The EXTRA exits are the floating yellow arrows. Point at one (or press
+              <kbd>K</kbd>) and place, and the side road starts as its own chain;
+              the arrow disappears once something is built on it. A crossroads and a
+              roundabout have two arrows — <kbd>K</kbd> steps through them one press
+              at a time, and pointing at one goes straight to it.
+              <kbd>R</kbd> flips which side a Split / T uses and which arm of a Y
+              fork the chain follows. A roundabout's island is a hole — cut across
+              the middle and you drop through it.
+              <br><br>
+              <b>Splitting and rejoining:</b> build the alternate route off a
+              Split's arrow, run it where you like, then press <kbd>J</kbd> (Join)
+              to close the gap back into a <b>Merge</b>. A chain is a rigid run of
+              pieces, so nothing you place by hand will ever land on both ends at
+              once — <kbd>J</kbd> generates a <i>link</i> shaped to whatever is
+              left over, meeting the far end exactly in position <i>and</i>
+              heading. It tells you the gap it closed and the tightest radius, and
+              refuses outright if the only curve that would fit is a hairpin —
+              build a little further out and try again.
+              <br><br>
+              <b>Undo:</b> <kbd>Backspace</kbd> or <kbd>Ctrl</kbd>+<kbd>Z</kbd>
+              steps back through every edit — placing, deleting, replacing, tilting,
+              dragging, even <b>Clear</b>. <kbd>Shift</kbd>+<kbd>Backspace</kbd>,
+              <kbd>Ctrl</kbd>+<kbd>Y</kbd> or
+              <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redoes; right-click the
+              Undo button for the same. The shortcuts follow the letter PRINTED on
+              your key, so Ctrl+Z is Ctrl+Z on AZERTY too — and
+              <kbd>Backspace</kbd> works on any layout at all. A gizmo drag is one
+              step, not one per frame; loading a track starts a fresh history.
+        </div>
+      </div>
     </div>
 
     <!-- Debug orbit cam readout — roadGame toggles #debug-cam.on with the C key.
