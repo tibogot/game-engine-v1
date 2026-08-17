@@ -27,6 +27,7 @@ import {
   buildSlopeLabGroup,
   buildJumpLabGroup,
   enableMeshShadows,
+  attachDeckProxy,
 } from "./modularRoadParkour.js";
 
 /**
@@ -69,10 +70,15 @@ function rampGeometry(L = 18, H = 6, W = 14) {
   const zF = -L / 2; // far (high) edge
   const Al = [-hw, 0, zN], Bl = [-hw, 0, zF], Cl = [-hw, H, zF];
   const Ar = [hw, 0, zN], Br = [hw, 0, zF], Cr = [hw, H, zF];
-  const pos = [];
+  // Sloped top on its own — it is the only drivable face, and the vertical back
+  // is this shape's lip cap. See attachDeckProxy in modularRoadParkour.js.
+  const deckPos = [];
+  const deckQuad = (a, b, c, d) => deckPos.push(...a, ...b, ...c, ...a, ...c, ...d);
+  deckQuad(Al, Ar, Cr, Cl); // sloped top (drive surface)
+
+  const pos = deckPos.slice();
   const quad = (a, b, c, d) => pos.push(...a, ...b, ...c, ...a, ...c, ...d);
   const tri = (a, b, c) => pos.push(...a, ...b, ...c);
-  quad(Al, Ar, Cr, Cl); // sloped top (drive surface)
   quad(Al, Bl, Br, Ar); // bottom
   quad(Bl, Cl, Cr, Br); // vertical back
   tri(Al, Cl, Bl); // left cap
@@ -81,7 +87,7 @@ function rampGeometry(L = 18, H = 6, W = 14) {
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
-  return geo;
+  return attachDeckProxy(geo, deckPos);
 }
 
 /** A short run of tunnel arch (reuses the kit's shell sweep) on a straight line. */
@@ -1754,7 +1760,29 @@ export class PropManager {
         // a primitive instead (see collisionCapsules), and having it in both
         // channels would resolve the same contact twice.
         if (o.userData.noCollide || o.userData.capsule) return;
-        if (inst.collision === "deck" || inst.collision === "both") deck.push(o);
+        if (inst.collision === "deck" || inst.collision === "both") {
+          // A DECK-ONLY STAND-IN, when the shape has one.
+          //
+          // "both" means drive on top AND be blocked at the sides, and it used
+          // to express that by putting the identical closed solid in both
+          // channels — so every band that merely CLOSES the mesh (a ramp's
+          // underside, its flanks, the vertical cap at its lip) became a
+          // surface the wheels probe and the deck-contact spring pushes off.
+          // Measured on the jump ramp: 11–16 kN out of the end cap at the exact
+          // moment of takeoff (tools/jumpRampChannels.mjs).
+          //
+          // Same stand-in pattern the road pieces and rails already use in
+          // roadGame's bakeCollision, and the same shape of object — bakeFromMeshes
+          // reads only `.geometry` and `.matrixWorld`, and calls
+          // updateMatrixWorld() — so the world transform is still the prop's own,
+          // live, by reference.
+          const proxy = o.geometry?.userData?.deckGeometry;
+          deck.push(proxy
+            ? { geometry: proxy, matrixWorld: o.matrixWorld, updateMatrixWorld() {} }
+            : o);
+        }
+        // SOLIDS KEEP THE WHOLE SOLID. Driving into a ramp's flank or its end
+        // wall should stop you; only probing them as GROUND was ever wrong.
         if (inst.collision === "solid" || inst.collision === "both") solids.push(o);
       });
     }
@@ -1943,7 +1971,12 @@ export class PropManager {
   _disposeInstance(inst) {
     this.group.remove(inst.root);
     inst.root.traverse((o) => {
-      if (o.isMesh) o.geometry?.dispose?.();
+      if (!o.isMesh) return;
+      // The deck stand-in is a second geometry riding on the first (see
+      // collisionMeshes), so disposing only the visible one leaks it — and
+      // importInstances disposes EVERY prop on every track load.
+      o.geometry?.userData?.deckGeometry?.dispose?.();
+      o.geometry?.dispose?.();
     });
   }
 }

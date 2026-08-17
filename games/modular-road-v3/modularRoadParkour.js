@@ -19,6 +19,41 @@ export function enableMeshShadows(root) {
 /* Geometry helpers                                                         */
 /* ----------------------------------------------------------------------- */
 
+/**
+ * Hang a DRIVE-SURFACE-ONLY stand-in off a closed solid's geometry.
+ *
+ * A `collision: "both"` prop is baked into the DECK BVH — what the wheels
+ * probe and what the chassis deck-contact spring measures against — as well as
+ * the solids BVH. With no stand-in, both channels get the same closed solid, so
+ * every band whose only job is to CLOSE the mesh becomes a driving surface: an
+ * underside, a flank, and worst of all the vertical cap at a ramp's lip, which
+ * on the jump ramp is an 8 m wall standing exactly where the car takes off.
+ *
+ * MEASURED (tools/jumpRampChannels.mjs): crossing that lip, the deck-contact
+ * spring fired 11–16 kN off the cap — horizontally, the cap's normal being
+ * horizontal — while the car's own suspension carried at most 45 kN. Nothing
+ * else on the ramp produced a deck force at all. Same shape of bug as the half
+ * tube's rim caps (see buildOpenLipCollision): a closing band has no business
+ * being ground.
+ *
+ * Carried on the GEOMETRY rather than the mesh, so it cannot come unstuck from
+ * the shape it stands in for and a prop's make() needs to do nothing to opt in.
+ * PropManager.collisionMeshes routes it to the deck channel; SOLIDS still get
+ * the whole solid, because driving into a ramp's flank or its end wall should
+ * of course still stop you. Only probing them as GROUND was ever wrong.
+ *
+ * @param {THREE.BufferGeometry} geo the closed solid, returned unchanged
+ * @param {number[]} deckPositions flat xyz triples of the drive surface only
+ */
+export function attachDeckProxy(geo, deckPositions) {
+  const deck = new THREE.BufferGeometry();
+  deck.setAttribute("position", new THREE.Float32BufferAttribute(deckPositions, 3));
+  deck.computeVertexNormals();
+  deck.computeBoundingSphere();
+  geo.userData.deckGeometry = deck;
+  return geo;
+}
+
 /** Drive ramp: low edge at y=0, z=0 (local); rises toward -Z. */
 export function rampGeometry(w, l, angleRad) {
   const H = l * Math.sin(angleRad);
@@ -31,10 +66,15 @@ export function rampGeometry(w, l, angleRad) {
   const Ar = [hw, 0, zN],
     Br = [hw, 0, zF],
     Cr = [hw, H, zF];
-  const pos = [];
+  // The sloped top on its own first — see attachDeckProxy. The vertical back
+  // (Bl-Cl-Cr-Br) is this shape's lip cap and must not be drivable.
+  const deckPos = [];
+  const deckQuad = (a, b, c, d) => deckPos.push(...a, ...b, ...c, ...a, ...c, ...d);
+  deckQuad(Al, Ar, Cr, Cl);
+
+  const pos = deckPos.slice();
   const quad = (a, b, c, d) => pos.push(...a, ...b, ...c, ...a, ...c, ...d);
   const tri = (a, b, c) => pos.push(...a, ...b, ...c);
-  quad(Al, Ar, Cr, Cl);
   quad(Al, Bl, Br, Ar);
   quad(Bl, Cl, Cr, Br);
   tri(Al, Cl, Bl);
@@ -43,7 +83,7 @@ export function rampGeometry(w, l, angleRad) {
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
-  return geo;
+  return attachDeckProxy(geo, deckPos);
 }
 
 /** Five side-by-side test ramps (15°–55°), centred on XZ with feet on y=0. */
@@ -190,14 +230,19 @@ function curveRampGeometry(w, radius, angleDeg, rise, curveDir = 1, segments = 3
   return geo;
 }
 
-/** Solid extruded kicker: flat entry z=0, profile supplied by heightAt(t) where t∈[0,1]. */
+/**
+ * Solid extruded kicker: flat entry z=0, profile supplied by heightAt(t) where t∈[0,1].
+ *
+ * Returns the closed solid, with the DRIVE SURFACE ALONE hung off
+ * `geo.userData.deckGeometry` — see attachDeckProxy for why that is not a
+ * micro-optimisation but the difference between a ramp that launches you and a
+ * ramp that shoves you.
+ */
 function solidKickerExtrusion(w, length, rise, segments, heightAt) {
   const hw = w / 2;
   const n = Math.max(8, segments);
   const L = Math.max(4, length);
   const H = Math.max(0.5, rise);
-  const pos = [];
-  const quad = (a, b, c, d) => pos.push(...a, ...b, ...c, ...a, ...c, ...d);
 
   const topL = [];
   const topR = [];
@@ -214,7 +259,16 @@ function solidKickerExtrusion(w, length, rise, segments, heightAt) {
     botR.push([hw, 0, z]);
   }
 
-  for (let i = 0; i < n; i++) quad(topL[i], topR[i], topR[i + 1], topL[i + 1]);
+  // THE DRIVE SURFACE, BUILT ON ITS OWN FIRST — see attachDeckProxy. The bands
+  // below it (underside, both flanks, and the vertical END CAP that closes the
+  // profile at the lip) close the solid and must not be drivable.
+  const deckPos = [];
+  const deckQuad = (a, b, c, d) => deckPos.push(...a, ...b, ...c, ...a, ...c, ...d);
+  for (let i = 0; i < n; i++) deckQuad(topL[i], topR[i], topR[i + 1], topL[i + 1]);
+
+  // The visible solid IS that surface, closed with a shell.
+  const pos = deckPos.slice();
+  const quad = (a, b, c, d) => pos.push(...a, ...b, ...c, ...a, ...c, ...d);
   for (let i = 0; i < n; i++) quad(botL[i], botL[i + 1], botR[i + 1], botR[i]);
   for (let i = 0; i < n; i++) quad(botL[i], topL[i], topL[i + 1], botL[i + 1]);
   for (let i = 0; i < n; i++) quad(botR[i], botR[i + 1], topR[i + 1], topR[i]);
@@ -224,7 +278,7 @@ function solidKickerExtrusion(w, length, rise, segments, heightAt) {
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
-  return geo;
+  return attachDeckProxy(geo, deckPos);
 }
 
 /**
