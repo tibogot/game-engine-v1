@@ -146,10 +146,11 @@ export class PortalManager {
     });
     this.gizmo.addEventListener("mouseUp", () => this.onChange?.());
 
-    domElement.addEventListener("pointerdown", (e) => {
-      if (!this.buildEnabled) return;
-      if (e.button === 2) this._pickAt(e);
-    });
+    // NO RIGHT-CLICK LISTENER HERE ANY MORE. This used to select on its own,
+    // on pointerDOWN, while the road builder selected on pointerUP — so a
+    // right-click on something sitting on the road selected BOTH, and the
+    // road's handler ran second and took the gizmo. roadGame now arbitrates
+    // one right-click across every system via hitTest/selectHit.
 
     window.addEventListener("keydown", (e) => this._onKey(e), true);
   }
@@ -417,23 +418,71 @@ export class PortalManager {
     this.selBox.visible = true;
   }
 
-  _pickAt(e) {
+  /**
+   * Nearest portal under the cursor and HOW FAR AWAY it is — no selecting.
+   *
+   * Right-click selection is arbitrated in one place now (see roadGame): props,
+   * movers, portals and the road builder each answer this, and whatever is
+   * nearest the camera wins. Four independent pickers is what put a boost pad
+   * and the road beneath it both into selection at once — and on two different
+   * events, so the road's ran second and stole the gizmo the prop had claimed.
+   *
+   * Iterates the hits rather than taking [0]: the first intersection may be a
+   * child with no instance ancestor, and giving up on it would report "nothing
+   * here" for something plainly under the pointer.
+   */
+  hitTest(clientX, clientY) {
+    if (!this.enabled) return null;
     const rect = this.domElement.getBoundingClientRect();
     this._ndc.set(
-      ((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(this._ndc, this.camera);
-    const hits = this.raycaster.intersectObjects(this.group.children, true);
-    if (hits.length) {
-      let o = hits[0].object;
+    for (const h of this.raycaster.intersectObjects(this.group.children, true)) {
+      let o = h.object;
       while (o && !o.userData.portalDoor) o = o.parent;
-      if (o?.userData.portalDoor) {
-        this._select(o.userData.portalDoor);
-        return;
-      }
+      if (o?.userData.portalDoor) return { dist: h.distance, hit: o.userData.portalDoor };
     }
-    this.deselect();
+    return null;
+  }
+
+  /** Select what `hitTest` found (or clear, with null). Used by the arbiter. */
+  selectHit(hit) {
+    if (hit) this._select(hit);
+    else this.deselect();
+  }
+
+  /**
+   * Turn the selection by an EXACT angle about one of its own axes.
+   *
+   * Road pieces got arrow-key steps; obstacles had only a gizmo drag, so a portal
+   * you wanted at exactly 45° was a matter of dragging and squinting. The step
+   * comes from roadGame (the builder's Angle step), so an obstacle and a road
+   * piece turn by the same amount — one setting, not two.
+   *
+   * LOCAL axes, composed on the right, matching what the rotate gizmo produces
+   * in its default local space and what the road's own nudge does.
+   *
+   * `captureAuthored` is optional-chained because only the prop system has one:
+   * a gate's panel ANIMATES, so its authored pose has to be snapshotted apart
+   * from the live one. Movers and portals serialise `root.quaternion` directly.
+   *
+   * @param {"yaw"|"pitch"|"roll"} axis
+   * @param {number} radians
+   */
+  rotateSelectedBy(axis, radians) {
+    const inst = this.selected;
+    if (!inst) return false;
+    const v = axis === "pitch" ? new THREE.Vector3(1, 0, 0)
+      : axis === "roll" ? new THREE.Vector3(0, 0, 1)
+        : new THREE.Vector3(0, 1, 0);
+    const root = inst.root ?? inst;
+    root.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(v, radians));
+    root.updateMatrixWorld(true);
+    this.captureAuthored?.(inst);
+    this.onChange?.();
+    return true;
   }
 
   _onKey(e) {
@@ -450,7 +499,10 @@ export class PortalManager {
       case "KeyR":
         this.setMode("scale");
         break;
-      case "KeyQ":
+      // X, NOT Q. Q is the road builder's yaw nudge; having it mean "toggle
+      // axes" whenever an obstacle happened to be selected was one key with
+      // two meanings. X is world/local everywhere now.
+      case "KeyX":
         this.gizmo.setSpace(this.gizmo.space === "local" ? "world" : "local");
         break;
       case "Delete":

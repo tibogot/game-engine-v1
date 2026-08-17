@@ -1321,10 +1321,11 @@ export class PropManager {
       this.onChange?.();
     });
 
-    domElement.addEventListener("pointerdown", (e) => {
-      if (!this.enabled) return;
-      if (e.button === 2) this._pickAt(e); // right-click select / deselect
-    });
+    // NO RIGHT-CLICK LISTENER HERE ANY MORE. This used to select on its own,
+    // on pointerDOWN, while the road builder selected on pointerUP — so a
+    // right-click on something sitting on the road selected BOTH, and the
+    // road's handler ran second and took the gizmo. roadGame now arbitrates
+    // one right-click across every system via hitTest/selectHit.
 
     // Gizmo hotkeys run in the capture phase so they take priority over the
     // builder's bubble-phase shortcuts (e.g. R = flip, Backspace = undo).
@@ -1593,6 +1594,38 @@ export class PropManager {
    * tools/gateSaveLoadTest.mjs — a gate placed at 37° and saved with the panel
    * 51.6° open reloaded at 88.6°.
    */
+  /**
+   * Turn the selection by an EXACT angle about one of its own axes.
+   *
+   * Road pieces got arrow-key steps; obstacles had only a gizmo drag, so a boost
+   * pad you wanted at exactly 45° was a matter of dragging and squinting. The
+   * step itself comes from roadGame (the builder's Angle step), so a prop and
+   * a road piece turn by the same amount — there is one setting, not two.
+   *
+   * LOCAL axes, composed on the right, matching what the rotate gizmo produces
+   * in its default local space and what the road's own nudge does.
+   *
+   * @param {"yaw"|"pitch"|"roll"} axis
+   * @param {number} radians
+   */
+  rotateSelectedBy(axis, radians) {
+    const inst = this.selected;
+    if (!inst) return false;
+    const v = axis === "pitch" ? new THREE.Vector3(1, 0, 0)
+      : axis === "roll" ? new THREE.Vector3(0, 0, 1)
+        : new THREE.Vector3(0, 1, 0);
+    const root = inst.root ?? inst;
+    root.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(v, radians));
+    root.updateMatrixWorld(true);
+    // Same bookkeeping a gizmo drag does on mouseUp, or the pose is lost on save.
+    // Optional-chained so all three systems share one shape: only props HAVE an
+    // authored snapshot (a gate's panel animates, so its authored pose has to be
+    // kept apart from the live one).
+    this.captureAuthored?.(inst);
+    this.onChange?.();
+    return true;
+  }
+
   captureAuthored(inst) {
     if (!inst) return;
     inst.authoredPos = inst.root.position.clone();
@@ -1837,23 +1870,39 @@ export class PropManager {
     this.onSelectionChange?.(inst);
   }
 
-  _pickAt(e) {
+  /**
+   * Nearest prop under the cursor and HOW FAR AWAY it is — no selecting.
+   *
+   * Right-click selection is arbitrated in one place now (see roadGame): props,
+   * movers, portals and the road builder each answer this, and whatever is
+   * nearest the camera wins. Four independent pickers is what put a boost pad
+   * and the road beneath it both into selection at once — and on two different
+   * events, so the road's ran second and stole the gizmo the prop had claimed.
+   *
+   * Iterates the hits rather than taking [0]: the first intersection may be a
+   * child with no instance ancestor, and giving up on it would report "nothing
+   * here" for something plainly under the pointer.
+   */
+  hitTest(clientX, clientY) {
+    if (!this.enabled) return null;
     const rect = this.domElement.getBoundingClientRect();
     this._ndc.set(
-      ((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(this._ndc, this.camera);
-    const hits = this.raycaster.intersectObjects(this.group.children, true);
-    if (hits.length) {
-      let o = hits[0].object;
+    for (const h of this.raycaster.intersectObjects(this.group.children, true)) {
+      let o = h.object;
       while (o && !o.userData.propInstance) o = o.parent;
-      if (o?.userData.propInstance) {
-        this._select(o.userData.propInstance);
-        return;
-      }
+      if (o?.userData.propInstance) return { dist: h.distance, hit: o.userData.propInstance };
     }
-    this.deselect();
+    return null;
+  }
+
+  /** Select what `hitTest` found (or clear, with null). Used by the arbiter. */
+  selectHit(hit) {
+    if (hit) this._select(hit);
+    else this.deselect();
   }
 
   _onKey(e) {
@@ -1862,9 +1911,14 @@ export class PropManager {
     let handled = true;
     switch (e.code) {
       case "KeyW": this.setMode("translate"); break;
+      // Shift+E too: that is the road builder's "rotate" and the habit
+      // should not stop working because you clicked an obstacle.
       case "KeyE": this.setMode("rotate"); break;
       case "KeyR": this.setMode("scale"); break;
-      case "KeyQ": this.gizmo.setSpace(this.gizmo.space === "local" ? "world" : "local"); break;
+      // X, NOT Q. Q is the road builder's yaw nudge; having it mean
+      // "toggle axes" whenever an obstacle happened to be selected was one
+      // key with two meanings. X is world/local everywhere now.
+      case "KeyX": this.gizmo.setSpace(this.gizmo.space === "local" ? "world" : "local"); break;
       case "Delete": case "Backspace": this.deleteSelected(); break;
       case "Escape": this.deselect(); break;
       case "KeyD": if (e.ctrlKey || e.metaKey) this.duplicateSelected(); else handled = false; break;

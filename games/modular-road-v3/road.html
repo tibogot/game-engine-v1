@@ -393,6 +393,7 @@
               <span><kbd>Q</kbd><kbd>E</kbd> yaw</span><span><kbd>RMB</kbd> select piece</span>
               <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> yaw step</span><span><kbd>&uarr;</kbd><kbd>&darr;</kbd> pitch step</span>
               <span><kbd>Shift</kbd>+<kbd>&larr;&rarr;</kbd> roll</span><span><kbd>X</kbd> world/local axes</span>
+              <span><kbd>RMB</kbd> select — nearest wins</span>
               <span><kbd>Shift</kbd>+<kbd>RMB</kbd> select section</span><span><kbd>Ctrl+Z</kbd> undo</span>
               <span><kbd>Del</kbd> delete sel.</span><span><kbd>L</kbd> level sel.</span>
               <span><kbd>U</kbd> edges sel.</span><span><kbd>Esc</kbd> cancel</span>
@@ -535,6 +536,36 @@
                 <span><kbd>E</kbd> gizmo: tilt this piece</span>
                 <span><kbd>Esc</kbd> deselect</span>
               </div>
+              <p>
+                <b>Obstacles, movers and portals</b> — anything that is not road.
+                Pick one from the palette and a ghost follows your mouse;
+                <kbd>LMB</kbd> places it and the brush stays armed, so you can lay
+                a run of cones. <kbd>RMB</kbd> selects a placed one — and
+                <b>whatever is nearest the camera wins</b>, so a boost pad sitting
+                on a road selects the pad, and the deck beside it selects the
+                road. Right-<i>dragging</i> pans the camera and selects nothing.
+              </p>
+              <div class="help-keys">
+                <span><kbd>W</kbd> move</span>
+                <span><kbd>E</kbd> rotate</span>
+                <span><kbd>R</kbd> scale</span>
+                <span><kbd>X</kbd> world / local axes</span>
+                <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> yaw by one step</span>
+                <span><kbd>&uarr;</kbd><kbd>&darr;</kbd> pitch by one step</span>
+                <span><kbd>Shift</kbd>+<kbd>&larr;&rarr;</kbd> roll</span>
+                <span><kbd>C</kbd> next livery</span>
+                <span><kbd>V</kbd> decal on / off</span>
+                <span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate</span>
+                <span><kbd>Del</kbd> delete</span>
+                <span><kbd>Esc</kbd> deselect</span>
+              </div>
+              <p>
+                The arrow steps are the <i>same</i> Angle step the road uses, so a
+                pad and a banked piece turn by the same amount from one setting.
+                <kbd>X</kbd> is world/local everywhere — it used to be <kbd>Q</kbd>
+                on obstacles, which is the road's yaw nudge, so one key meant two
+                things depending on what happened to be selected.
+              </p>
               <p><b>Undo, testing and help.</b></p>
               <div class="help-keys">
                 <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Backspace</kbd> undo</span>

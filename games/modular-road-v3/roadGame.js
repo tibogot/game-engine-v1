@@ -1948,18 +1948,58 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // Right-click is the usual "put the tool down" gesture in an editor, so a
     // live brush consumes it rather than also selecting whatever is behind it.
     if (brush) { clearBrush(); return; }
-    const picked = builder.pickPiece(e.clientX, e.clientY);
-    if (!picked) { builder.deselectPiece(); paletteUi.refreshStatus(); devPanel?.refresh(); return; }
-    // SHIFT = the SECTION between here and the anchor, which is the unit you
-    // actually want (delete this stretch, un-rail it, bank it). A chain is a
+    selectUnderCursor(e);
+  });
+
+  /**
+   * ONE RIGHT-CLICK, ARBITRATED — whatever is nearest the camera wins.
+   *
+   * There used to be FOUR right-click selectors on this canvas: props, movers
+   * and portals each listened on pointerDOWN and raycast their own group, while
+   * the road builder listened on pointerUP. Right-click a boost pad sitting on a
+   * road and both fired — the pad got selected, then the road's ray went straight
+   * through it, hit the deck underneath and selected that too, taking the gizmo
+   * the pad had just claimed. Nothing was wrong with any one of them; there was
+   * simply nobody deciding between them.
+   *
+   * Front-most wins, which is what every editor does and what a pointer means.
+   * Running it on pointerUP behind the pan test also gets the props something
+   * they never had: right-dragging the camera past an obstacle no longer selects
+   * it, because that is a drag, not a click.
+   */
+  function selectUnderCursor(e) {
+    const x = e.clientX, y = e.clientY;
+    const cands = [
+      { who: "prop", sys: props, hit: props.hitTest?.(x, y) },
+      { who: "mover", sys: movers, hit: movers.hitTest?.(x, y) },
+      { who: "portal", sys: portals, hit: portals.hitTest?.(x, y) },
+      { who: "road", sys: null, hit: builder.pickPieceHit?.(x, y) },
+    ].filter((c) => c.hit);
+    cands.sort((a, b) => a.hit.dist - b.hit.dist);
+    const win = cands[0] ?? null;
+
+    // Everything that did not win loses its selection, so there is never more
+    // than one gizmo live.
+    for (const sys of [props, movers, portals]) {
+      if (!win || win.sys !== sys) sys.selectHit?.(null);
+    }
+    if (!win || win.who !== "road") {
+      builder.deselectPiece();
+      if (win) win.sys.selectHit(win.hit.hit);
+      paletteUi.refreshStatus();
+      devPanel?.refresh();
+      return;
+    }
+    // ROAD. Shift takes the SECTION between here and the anchor — a chain is a
     // linear array, so a range is one gesture instead of one click per piece.
-    // CTRL = add/remove a single piece, for the exception.
+    // Ctrl adds or removes a single piece, for the exception.
+    const picked = win.hit.hit;
     if (e.shiftKey) builder.selectRangeTo(picked);
     else if (e.ctrlKey || e.metaKey) builder.toggleSelected(picked);
     else builder.selectPiece(picked);
     paletteUi.refreshStatus();
     devPanel?.refresh();
-  });
+  }
   // Suppress the browser context menu in build mode so right-click is ours.
   renderer.domElement.addEventListener("contextmenu", (e) => {
     if (mode === "build") e.preventDefault();
@@ -1996,6 +2036,26 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * surprise.
    */
   function nudgeAngle(axis, dir) {
+    // AN OBSTACLE FIRST, IF ONE IS SELECTED. Exact angle steps used to exist only
+    // for road pieces, so a boost pad you wanted at exactly 45° meant dragging
+    // the gizmo and squinting at it. Routed here rather than inside each system
+    // because this is the one place that knows about all of them AND owns the
+    // angle step — a pad and a road piece now turn by the same amount, from the
+    // same setting.
+    for (const sys of [props, movers, portals]) {
+      if (!sys.selected) continue;
+      if (sys.rotateSelectedBy?.(axis, builder.angleStep * (dir < 0 ? -1 : 1))) {
+        const el = document.getElementById("road-status");
+        if (el) {
+          const q = (sys.selected.root ?? sys.selected).quaternion;
+          const e = new THREE.Euler().setFromQuaternion(q, "YXZ");
+          const d = (v) => `${v >= 0 ? "+" : ""}${THREE.MathUtils.radToDeg(v).toFixed(1)}°`;
+          el.textContent = `Rotated — yaw ${d(e.y)} pitch ${d(e.x)} roll ${d(e.z)}`;
+        }
+        devPanel?.refresh();
+        return;
+      }
+    }
     const r = builder.nudgeAngle(axis, dir);
     const el = document.getElementById("road-status");
     if (!r.ok) { if (el) el.textContent = `Can't turn: ${r.reason}`; return; }

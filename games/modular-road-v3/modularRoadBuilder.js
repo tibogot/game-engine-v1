@@ -2149,6 +2149,35 @@ export class ModularRoadBuilder {
     return hits.length ? hits[0].object.userData.piece ?? null : null;
   }
 
+  /**
+   * The same pick, but reporting HOW FAR the hit is — the road's answer to the
+   * shared right-click arbiter (see roadGame). Props, movers, portals and this
+   * all answer in the same shape and the nearest one wins, so a boost pad on a
+   * road selects the pad and the deck beside it selects the road.
+   */
+  pickPieceHit(clientX, clientY) {
+    if (!this._camera || !this._domElement) return null;
+    const rect = this._domElement.getBoundingClientRect();
+    this._pickNdc.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this._raycaster.setFromCamera(this._pickNdc, this._camera);
+    this.root.updateMatrixWorld(true);
+    const targets = [];
+    for (const p of this.pieces) {
+      if (p.mesh?.geometry?.attributes?.position) targets.push(p.mesh);
+      for (const m of [p.railMesh, p.shellMesh]) {
+        if (m && !m.userData.noRender && m.geometry?.attributes?.position) targets.push(m);
+      }
+    }
+    for (const h of this._raycaster.intersectObjects(targets, false)) {
+      const piece = h.object.userData.piece;
+      if (piece) return { dist: h.distance, hit: piece };
+    }
+    return null;
+  }
+
   /** Highlight a placed piece and put the transform gizmo ON it (null clears).
    *  Focuses the piece's chain so appends/gizmo follow it. Rotate the gizmo (E)
    *  to tilt the piece + downstream; translate (W) to move the whole chain. */
