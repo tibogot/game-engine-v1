@@ -10,7 +10,6 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const { ModularRoadBuilder } = await import(pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadBuilder.js")).href);
-const { pieceParams } = await import(pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadKit.js")).href);
 
 let fail = 0;
 const check = (n, c, d = "") => { console.log(`${c ? "PASS" : "FAIL"}  ${n}${d ? "  — " + d : ""}`); if (!c) fail++; };
@@ -123,15 +122,18 @@ const branchMarkerCount = (b) =>
 
 // ── R flips the side a T / split uses ───────────────────────────────────────
 {
+  // Driven through flip() — the actual R key — rather than by poking the shared
+  // `pieceParams`. A tile is a block now: selecting a piece resolves its numbers
+  // from the kit defaults into the builder's own `activeParams`, so writing the
+  // global no longer reaches the piece about to be placed (that WAS the bug).
   const b = fresh();
-  pieceParams.curveDir = 1;
   put(b, "junction_t");
   const right = b.branchConnectors()[0].pos.x;
   b.clear();
-  pieceParams.curveDir = -1;
-  put(b, "junction_t");
+  b.setActivePiece("junction_t");
+  b.flip();
+  b.place();
   const left = b.branchConnectors()[0].pos.x;
-  pieceParams.curveDir = 1;
   check("R mirrors the T's arm", right > 1 && left < -1 && Math.abs(right + left) < 1e-6,
     `x ${right.toFixed(1)} vs ${left.toFixed(1)}`);
 }

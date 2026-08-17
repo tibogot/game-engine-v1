@@ -12,6 +12,25 @@ import {
 } from "./modularRoadKit.js";
 import { solveGapArc } from "./gapArc.js";
 
+/**
+ * THE KIT'S SHIPPED NUMBERS, snapshotted at import — before anything can write
+ * to the live `pieceParams`, which a track load does.
+ *
+ * A TILE IS A BLOCK. Every palette tile now resolves to `{...PIECE_DEFAULTS,
+ * ...tile.params}`, so clicking "Long" gives a 32 m straight every time,
+ * whatever you clicked before it. It used to `Object.assign` its numbers into
+ * the one shared `pieceParams` and leave them there, which made a tile's effect
+ * depend on click history: fourteen tiles that are not straights at all write
+ * `straightLength`, so picking Banked → "Straight Right" silently turned your
+ * next Straight from 22 m into 32 m. On a point-to-point stunt track that is a
+ * run-up length — i.e. the speed you arrive at a jump with — changing under you
+ * with nothing on screen to say so.
+ *
+ * `pieceParams` itself is left alone: the piece lab drives it, and the save
+ * format still carries it. Nothing on the PLACEMENT path reads it any more.
+ */
+const PIECE_DEFAULTS = { ...pieceParams };
+
 /** Shared empty geometry used to drop the selection-highlight's reference to a
  *  piece geometry without disposing that (shared) geometry. */
 const _EMPTY_GEO = new THREE.BufferGeometry();
@@ -152,6 +171,12 @@ export class ModularRoadBuilder {
     this.snapYawDeg = 15;
 
     this.activePieceId = PIECE_CATALOG[0].id;
+    /**
+     * The numbers the NEXT piece will be built from — this selection's own copy,
+     * never the shared `pieceParams`. See PIECE_DEFAULTS: this is what makes a
+     * palette tile mean one fixed thing instead of an edit to global state.
+     */
+    this.activeParams = { ...PIECE_DEFAULTS };
     /** @type {{id:string, chainId:number, pp:object, mesh:THREE.Mesh, railMesh:THREE.Mesh|null, shellMesh:THREE.Mesh|null, decorMesh:THREE.Mesh|null, glassMesh:THREE.Mesh|null, connectorIn:THREE.Matrix4, connectorOut:THREE.Matrix4}[]} */
     this.pieces = [];
 
@@ -414,16 +439,25 @@ export class ModularRoadBuilder {
   }
 
   _snapshotParams() {
-    return { ...pieceParams };
+    return { ...this.activeParams };
   }
 
   _notify() {
     this.onChange?.();
   }
 
+  /**
+   * Select a BASE piece — the canonical block, at the kit's own numbers.
+   *
+   * Resetting to PIECE_DEFAULTS is the point, not a side effect: this is what
+   * makes "Straight" mean 22 m however you got here. Before, it only set the id
+   * and inherited whatever the last preset had written globally, so the same
+   * hotkey gave a different-sized piece depending on click history.
+   */
   setActivePiece(id) {
     if (!PIECE_BY_ID.has(id)) return;
     this.activePieceId = id;
+    this.activeParams = { ...PIECE_DEFAULTS };
     this._ensureGizmoOnGhost();
     this.refreshGhost();
     this._notify();
@@ -448,16 +482,19 @@ export class ModularRoadBuilder {
   }
 
   /**
-   * Select a curated kit preset: apply its frozen params onto the shared
-   * pieceParams, then make its base piece active. The generator is unchanged —
-   * a preset is just a named param snapshot, so placing it builds identical
-   * local geometry every time (instancing-friendly).
+   * Select a palette tile: its base piece, at ITS OWN numbers over the kit
+   * defaults. The generator is unchanged — a tile is a named param snapshot, so
+   * placing it builds identical local geometry every time (instancing-friendly).
+   *
+   * Resolved fresh from PIECE_DEFAULTS rather than layered onto whatever is
+   * current, so a tile that only sets `straightLength` cannot inherit a
+   * `curveRadius` from the tile you clicked before it.
    * @param {{base:string, params:object}} preset
    */
   setActivePreset(preset) {
     if (!preset || !PIECE_BY_ID.has(preset.base)) return;
-    Object.assign(pieceParams, preset.params);
     this.activePieceId = preset.base;
+    this.activeParams = { ...PIECE_DEFAULTS, ...preset.params };
     this._ensureGizmoOnGhost();
     this.refreshGhost();
     this._notify();
@@ -465,7 +502,9 @@ export class ModularRoadBuilder {
 
   /** Flip curve direction (only meaningful for the curve piece). */
   flip() {
-    pieceParams.curveDir = pieceParams.curveDir >= 0 ? -1 : 1;
+    // On THIS SELECTION, not the shared params — flipping a turn must not
+    // reach out and reverse the next piece someone else picks.
+    this.activeParams.curveDir = this.activeParams.curveDir >= 0 ? -1 : 1;
     this.refreshGhost();
     this._notify();
   }
@@ -600,7 +639,7 @@ export class ModularRoadBuilder {
    * refuses to close by exactly one piece length, for no reason you can see.
    */
   get activePieceMetrics() {
-    const L = this._localTransform(this.activePieceId, pieceParams, guardrailParams.enabled);
+    const L = this._localTransform(this.activePieceId, this.activeParams, guardrailParams.enabled);
     const v = new THREE.Vector3().setFromMatrixPosition(L);
     return { span: v.length(), rise: v.y };
   }
@@ -1335,7 +1374,7 @@ export class ModularRoadBuilder {
     if (this._gizmoTarget === "ghost" && this.ghostEnd === "head") {
       const head = this._chainHead(this.activeChainId);
       if (head && this._chainPieces(this.activeChainId).length) {
-        const L = this._localTransform(this.activePieceId, pieceParams, guardrailParams.enabled);
+        const L = this._localTransform(this.activePieceId, this.activeParams, guardrailParams.enabled);
         return head.clone().multiply(_A_M.copy(L).invert());
       }
     }
@@ -1348,7 +1387,7 @@ export class ModularRoadBuilder {
     const { geometry, world } = buildPiece(
       this.activePieceId,
       conn,
-      pieceParams,
+      this.activeParams,
       roadParams,
       guardrailParams,
       guardrailParams.enabled,
@@ -2442,9 +2481,13 @@ export class ModularRoadBuilder {
       this.currentConnector = anchor.clone();
     }
 
-    const saved = { ...pieceParams };
+    // Each piece resolves from the KIT DEFAULTS plus its own overrides, so a
+    // demo track builds the same shape no matter what the palette was set to
+    // when you pressed the button. (It used to layer overrides onto the live
+    // shared params, which meant the demo inherited your last tile click.)
+    const saved = { ...this.activeParams };
     const put = (id, overrides = {}) => {
-      Object.assign(pieceParams, overrides);
+      this.activeParams = { ...PIECE_DEFAULTS, ...overrides };
       this.activePieceId = id;
       this.place();
     };
@@ -2502,7 +2545,7 @@ export class ModularRoadBuilder {
     put("straight", { straightLength: 24 });
     put("finish", { gameLineLength: 18 });
 
-    Object.assign(pieceParams, saved);
+    this.activeParams = saved;
     this.activePieceId = PIECE_CATALOG[0].id;
     this.deselectPlacement?.();
     this.refreshGhost();
@@ -2540,9 +2583,13 @@ export class ModularRoadBuilder {
       this.currentConnector = anchor.clone();
     }
 
-    const saved = { ...pieceParams };
+    // Each piece resolves from the KIT DEFAULTS plus its own overrides, so a
+    // demo track builds the same shape no matter what the palette was set to
+    // when you pressed the button. (It used to layer overrides onto the live
+    // shared params, which meant the demo inherited your last tile click.)
+    const saved = { ...this.activeParams };
     const put = (id, overrides = {}) => {
-      Object.assign(pieceParams, overrides);
+      this.activeParams = { ...PIECE_DEFAULTS, ...overrides };
       this.activePieceId = id;
       this.place();
     };
@@ -2583,7 +2630,7 @@ export class ModularRoadBuilder {
     half("start");
     half("finish");
 
-    Object.assign(pieceParams, saved);
+    this.activeParams = saved;
     this.activePieceId = PIECE_CATALOG[0].id;
     this.deselectPlacement?.();
     this.refreshGhost();
@@ -2944,6 +2991,16 @@ export const CATEGORY_PRESETS = {
     },
   ],
   straight: [
+    {
+      // THE DEFAULT BLOCK, and it had no tile at all. The editor boots holding
+      // this piece at the kit's 22 m, but the palette only offered 14 (Short)
+      // and 32 (Long) — so the moment you clicked either one, the size your
+      // first pieces were built at was off the menu for good.
+      id: "straight_std",
+      label: "Straight",
+      base: "straight",
+      params: { straightLength: 22 },
+    },
     {
       id: "straight_short",
       label: "Short",
@@ -3744,7 +3801,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         const def = PIECE_BY_ID.get(builder.activePieceId);
         label = def?.label ?? builder.activePieceId;
       }
-      const dir = pieceParams.curveDir >= 0 ? "R" : "L";
+      const dir = builder.activeParams.curveDir >= 0 ? "R" : "L";
       const curveIds = new Set([
         "curve", "banked", "scurve", "spiral", "loop_half", "loop_spiral",
         "junction_split", "junction_merge", "junction_y", "junction_t",

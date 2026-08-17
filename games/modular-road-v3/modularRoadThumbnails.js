@@ -8,6 +8,18 @@ import {
 } from "./modularRoadKit.js";
 
 /**
+ * The kit's shipped numbers, snapshotted at import.
+ *
+ * Tiles are baked against THESE, not against the live `pieceParams`, because
+ * the live object is mutable — a track load writes into it — so a tile's
+ * PICTURE would be rendered from whatever it happened to hold at bake time
+ * while the tile PLACES from its own frozen params. Two different moments, and
+ * a tile that does not fully specify its shape could be pictured as one thing
+ * and build as another. Same rule as PIECE_DEFAULTS in modularRoadBuilder.js.
+ */
+const THUMB_DEFAULTS = { ...pieceParams };
+
+/**
  * Live thumbnail baker. Renders a small 3/4 view of each road piece / preset
  * with the REAL road materials, so palette tiles match what actually gets built
  * (replacing the hand-drawn SVG silhouettes). Produces ONE PNG sprite sheet plus
@@ -104,7 +116,7 @@ export async function bakeRoadThumbnails({
     if (item.make) {
       group.add(item.make());
     } else {
-      const pp = { ...pieceParams, ...(item.params || {}) };
+      const pp = { ...THUMB_DEFAULTS, ...(item.params || {}) };
       let built;
       try {
         built = buildPiece(

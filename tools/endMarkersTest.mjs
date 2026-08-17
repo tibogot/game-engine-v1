@@ -164,20 +164,25 @@ console.log("\n=== 4. THE SIZE READOUT ===");
   check("clicking Short changes it again", Math.abs(b.activePieceMetrics.span - 14) < 0.01,
     `${b.activePieceMetrics.span.toFixed(2)} m, wanted 14`);
 
-  // THE POINT. No tile whose base is `straight` offers the 22 m the editor
-  // starts on — Short is 14, Long is 32 — so once you touch either, the length
-  // your first pieces were built at is not on the menu any more.
+  // THE DEFAULT BLOCK IS ON THE MENU. It was not: Short is 14 and Long is 32,
+  // so the 22 m the editor boots on had no tile, and the moment you clicked
+  // either one the size your first pieces used was gone for good.
   const straightTiles = straights.filter((p) => (p.preset ?? p).base === "straight");
-  check("no Straight tile restores the 22 m the editor boots on",
-    !straightTiles.some((p) => (p.preset ?? p).params?.straightLength === 22),
-    `one does: ${straightTiles.map((p) => p.id + "=" + (p.preset ?? p).params?.straightLength).join(", ")}`);
+  check("a Straight tile restores the 22 m the editor boots on",
+    straightTiles.some((p) => (p.preset ?? p).params?.straightLength === 22),
+    `none does — tiles offer ${straightTiles
+      .map((p) => (p.preset ?? p).params?.straightLength).join(", ")}`);
   console.log(`        (Straight tiles offer: ${straightTiles
-    .map((p) => `${p.label} ${(p.preset ?? p).params?.straightLength}m`).join(", ")} — default is 22)`);
+    .map((p) => `${p.label} ${(p.preset ?? p).params?.straightLength}m`).join(", ")})`);
 }
 {
-  // AN UNRELATED TILE MOVES IT, which is the surprising part. Sixteen presets
-  // across three categories write `straightLength`, and most of them are not
-  // straights at all — a Banked tile, a Tube, a half-pipe (which sets 110 m).
+  // AND AN UNRELATED TILE NO LONGER MOVES IT. Fourteen tiles that are not
+  // straights at all carry a `straightLength` — a Banked tile, a Tube, a
+  // half-pipe that sets 110 m — and each used to write it into the one shared
+  // parameter object, resizing whatever you picked next. Tiles are blocks now,
+  // so the readout below stays put. (tileIsABlockTest.mjs owns this properly;
+  // it is re-checked here because the readout is the thing that made it
+  // visible in the first place.)
   resetParams();
   const writers = [];
   for (const [cat, list] of Object.entries(CATEGORY_PRESETS)) {
@@ -188,9 +193,7 @@ console.log("\n=== 4. THE SIZE READOUT ===");
       }
     }
   }
-  console.log(`        (${writers.length} NON-straight tiles rewrite straightLength: ` +
-    `${writers.slice(0, 4).map((w) => `${w.label} ${w.len}m`).join(", ")}, …)`);
-  check("setup: at least one non-straight tile writes straightLength", writers.length > 0);
+  check("setup: at least one non-straight tile carries a straightLength", writers.length > 0);
 
   const b = fresh();
   b.setActivePiece("straight");
@@ -199,12 +202,10 @@ console.log("\n=== 4. THE SIZE READOUT ===");
   b.setActivePreset(w.preset);
   b.setActivePiece("straight");             // back to a plain straight
   const after = b.activePieceMetrics.span;
-  check(`clicking "${w.label}" (${w.cat}) silently resizes your next straight`,
-    Math.abs(after - before) > 0.5,
-    `${before.toFixed(1)} -> ${after.toFixed(1)} m. If these ever match, the shared ` +
-    `pieceParams problem has been fixed and this check can go.`);
-  console.log(`        (straight was ${before.toFixed(0)} m, is ${after.toFixed(0)} m ` +
-    `after clicking "${w.label}" — the readout is what makes that visible)`);
+  check(`clicking "${w.label}" (${w.cat}) leaves your next straight alone`,
+    Math.abs(after - before) < 1e-9,
+    `${before.toFixed(1)} -> ${after.toFixed(1)} m — a tile must not resize a ` +
+    `different tile; that is what made a track come out one piece length short`);
 }
 {
   resetParams();
