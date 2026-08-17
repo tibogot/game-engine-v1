@@ -1694,6 +1694,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // `e.code` gives the key with the same LABEL on both — unlike its
       // neighbours in this switch (see the note on the undo shortcut).
       case "keyo": toggleBuildEnd(); return;
+      // J = JOIN: close the gap from this end to the nearest other open end.
+      // Free letter, and same physical key on AZERTY and QWERTY.
+      case "keyj": linkToNearest(); return;
       case "bracketleft": builder.cycleChain(-1); break;
       case "bracketright": builder.cycleChain(1); break;
       default: return;
@@ -1899,7 +1902,30 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   onClick("road-next-chain", () => { builder.cycleChain(1); paletteUi.refreshStatus(); });
   onClick("road-branch", () => { goToBranch(); });
   onClick("road-other-end", () => { toggleBuildEnd(); });
+  onClick("road-link", () => { linkToNearest(); });
   onClick("road-rebake", () => bakeCollision());
+
+  /**
+   * Close the gap from the end you are building on to the nearest other open
+   * end (button + J). This is how an alternate route rejoins a merge: a chain is
+   * a rigid sequence, so nothing you place by hand will land on both ends at
+   * once — the link solves for whatever is left over.
+   */
+  function linkToNearest() {
+    const res = builder.linkToNearestEnd();
+    const el = document.getElementById("road-status");
+    if (res.ok) {
+      paletteUi?.refreshStatus?.();
+      // Say what it did, including the radius — a legal join can still be too
+      // tight to enjoy, and that is the number that tells you.
+      if (el) {
+        el.textContent = `Joined — closed a ${res.gap.toFixed(0)} m gap` +
+          (res.radius < 200 ? `, tightest radius ${res.radius.toFixed(0)} m` : ", straight");
+      }
+      return;
+    }
+    if (el) el.textContent = `Can't join: ${res.reason}`;
+  }
 
   /** Flip which END of the active chain the next piece goes on (button + H). */
   function toggleBuildEnd() {

@@ -193,6 +193,21 @@ export const pieceParams = {
   holedLength: 32, // run of the piece (m)
   holedWidth: 16, // deck width (m) — widen for a bigger hole with real ledges
   holeRadius: 5, // hole radius (m) — clamped so ledges never vanish
+  // ── LINK: the piece that CLOSES A GAP between two ends built separately ────
+  // Every other piece has a shape and lands wherever it lands. This one is the
+  // other way round: you give it where it has to END and it works out the shape.
+  // Its target is stored in the ENTRY'S LOCAL FRAME, so the piece stays a pure
+  // function of its params (rebuildAll re-derives its world pose like any other)
+  // and it saves and loads with no format change.
+  linkX: 0, // target offset right (m), in the entry frame
+  linkY: 0, // target offset up (m)
+  linkZ: -48, // target offset ALONG TRAVEL (m; travel is −Z, so this is negative)
+  linkYawDeg: 0, // heading the road must be pointing when it arrives (deg)
+  // Multiplier on the tangent length a circular arc of the same chord and turn
+  // would use (see _linkTangentScale). 1 = arc-like, which is what you want
+  // almost always. Higher runs straighter out of each end and bulges in the
+  // middle; lower turns harder near the ends and eventually cusps.
+  linkTension: 1,
   onChange: null,
 };
 
@@ -1695,6 +1710,128 @@ function wallRideRoll(t, pp) {
 }
 
 /** Chicane: turn `curveAngle` one way then back the other, ending parallel. */
+/**
+ * LINK — road that joins the end you are building from to a fixed end somewhere
+ * else, hitting BOTH position and heading exactly.
+ *
+ * Why this piece has to exist at all: a chain is a RIGID sequence, so its
+ * end-to-end transform is fixed by the pieces in it. You can weld one end to a
+ * target (`anchor = target · T⁻¹`) but not both — unless the pieces you happened
+ * to place add up to exactly the right span AND heading. Rejoining a merge pins
+ * both ends, so something in the middle has to solve for whatever is left over.
+ *
+ * A CUBIC HERMITE, not a Dubins arc–straight–arc. Hermite interpolation hits
+ * both endpoints with both tangents by construction, in closed form, with no
+ * solver to converge and no case analysis — and it takes a height difference in
+ * its stride, which a planar Dubins solution does not. What it gives up is
+ * constant curvature: the arc is not the tightest possible path, and a hard ask
+ * (target behind you, or far off to one side) bunches the curvature near the
+ * ends. `linkCurvature` reports the worst radius so a caller can say "that is
+ * too tight to drive" instead of silently building a hairpin.
+ *
+ * The tangents are scaled by `linkTension × distance`. That is the standard
+ * Cardinal-spline trick: scaling both by the chord keeps the shape similar as
+ * the gap grows, so one tension value works at 20 m and at 200 m.
+ */
+function _linkTarget(pp) {
+  const yaw = THREE.MathUtils.degToRad(pp.linkYawDeg ?? 0);
+  return {
+    p1: new V3(pp.linkX ?? 0, pp.linkY ?? 0, pp.linkZ ?? -48),
+    // Travel direction for a heading, matching the convention every other piece
+    // uses (see sCurvePoints): yaw 0 is −Z.
+    d1: new V3(-Math.sin(yaw), 0, -Math.cos(yaw)),
+  };
+}
+
+/**
+ * Tangent magnitude for the Hermite — DERIVED FROM THE TURN, not a flat
+ * fraction of the distance.
+ *
+ * This is the whole difference between a usable link and a cusp. A cubic hits
+ * its endpoint tangents whatever magnitude you give them, but too SHORT and it
+ * has to whip round near the ends to make up the heading: at 0.55 × distance a
+ * 48° join over 26 m measured a 2.4 m radius at t=0 (second derivative), while
+ * the curve through the middle looked perfectly reasonable. The geometry was
+ * fine; the parameterisation was starved.
+ *
+ * So take the magnitude a circular arc would want. For a chord `d` subtending a
+ * turn θ the arc radius is d / (2 sin(θ/2)), and the classic cubic-Bézier
+ * approximation to an arc puts its control points (4/3)·R·tan(θ/4) along the
+ * tangents — three times that for a Hermite, since P'(0) = 3(P₁ − P₀) for a
+ * Bézier. It degenerates correctly: as θ → 0 it tends to the chord length (a
+ * straight line), and at θ → π it tops out at 2 d.
+ */
+function _linkTangentScale(dist, turn) {
+  if (turn < 1e-3) return dist;
+  const R = dist / (2 * Math.sin(turn / 2));
+  return 4 * R * Math.tan(turn / 4);
+}
+
+function linkPoints(pp) {
+  const { p1, d1 } = _linkTarget(pp);
+  const d0 = new V3(0, 0, -1); // entry travel
+  const dist = Math.max(1e-3, p1.length());
+  const turn0 = Math.acos(THREE.MathUtils.clamp(d0.dot(d1), -1, 1));
+  const k = THREE.MathUtils.clamp(pp.linkTension ?? 1, 0.1, 3)
+    * _linkTangentScale(dist, turn0);
+  const m0 = d0.clone().multiplyScalar(k);
+  const m1 = d1.clone().multiplyScalar(k);
+
+  // Segment count from the chord plus the total heading change, so a tight
+  // join is tessellated as finely as a long lazy one.
+  const turn = Math.acos(THREE.MathUtils.clamp(d0.dot(d1), -1, 1));
+  const n = stepsFor(dist * 1.35, turn, 6);
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    // Standard cubic Hermite basis.
+    const h00 = 2 * t3 - 3 * t2 + 1;
+    const h10 = t3 - 2 * t2 + t;
+    const h01 = -2 * t3 + 3 * t2;
+    const h11 = t3 - t2;
+    pts.push(new V3(
+      h10 * m0.x + h01 * p1.x + h11 * m1.x,
+      h10 * m0.y + h01 * p1.y + h11 * m1.y,
+      h00 * 0 + h10 * m0.z + h01 * p1.z + h11 * m1.z,
+    ));
+  }
+  // Land the ends on EXACTLY the poses asked for — floating point in the basis
+  // sum is not worth arguing with when the whole point is a seam that closes.
+  pts[0].set(0, 0, 0);
+  pts[pts.length - 1].copy(p1);
+  return pts;
+}
+
+/** Declared sockets, so the exit IS the target rather than whatever the swept
+ *  frames happened to end at. This is what makes the seam exact. */
+function linkSockets(pp) {
+  const { p1, d1 } = _linkTarget(pp);
+  return {
+    entryPos: new V3(0, 0, 0), entryDir: new V3(0, 0, -1),
+    exitPos: p1.clone(), exitDir: d1.clone(),
+  };
+}
+
+/**
+ * Tightest radius along a link, in metres (Infinity for a straight one).
+ * Lets the editor refuse — or at least warn about — a join no car could take.
+ */
+export function linkCurvature(pp) {
+  const pts = linkPoints(pp);
+  let worst = Infinity;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+    const ab = a.distanceTo(b), bc = b.distanceTo(c), ca = c.distanceTo(a);
+    // Menger curvature: R = abc / 4A, with A from the cross product.
+    const area = new V3().subVectors(b, a).cross(new V3().subVectors(c, a)).length() / 2;
+    if (area < 1e-9) continue; // collinear here — locally straight
+    worst = Math.min(worst, (ab * bc * ca) / (4 * area));
+  }
+  return worst;
+}
+
 function sCurvePoints(pp) {
   const R = Math.max(2, pp.curveRadius);
   const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.curveAngle, 1, 120));
@@ -2801,6 +2938,19 @@ export const PIECE_CATALOG = [
     swatch: "#16a085",
     key: "0",
     points: sCurvePoints,
+  },
+  {
+    // NOT A PALETTE TILE. You never pick a Link and place it blind — its whole
+    // shape comes from the gap it has to close, so the builder computes the
+    // params and places it for you (see linkToNearestEnd). It lives in the
+    // catalog because it still has to be a real piece: buildPiece, rebuildAll,
+    // save/load and undo all key off PIECE_BY_ID.
+    id: "link",
+    label: "Link",
+    hint: "Closes the gap to another open end",
+    swatch: "#2ecc71",
+    points: linkPoints,
+    sockets: linkSockets,
   },
   {
     id: "crest",

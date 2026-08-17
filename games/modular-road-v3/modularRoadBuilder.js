@@ -9,6 +9,7 @@ import {
   buildPiece,
   initialConnector,
   socketMatrix,
+  linkCurvature,
 } from "./modularRoadKit.js";
 import { solveGapArc } from "./gapArc.js";
 
@@ -68,6 +69,19 @@ const HEAD_JOIN_EPS = 1.0;
  * every zoom: "near the thing I am looking at".
  */
 const AIM_PIXEL_RADIUS = 90;
+
+/**
+ * Tightest corner radius (m) a generated link may have before the builder
+ * declines to make it.
+ *
+ * This is a GEOMETRY guard, not a driveability one — below a few metres the
+ * swept deck folds through itself and the result is not a road at all, which is
+ * what a Hermite gives you when the target sits behind you (measured: 0.1–1.5 m
+ * on hairpin asks). Whether a legal join is *comfortable* is a separate
+ * question, and `linkTo` returns the radius so the caller can say so; the kit's
+ * own sharpest authored turn is 12 m for reference.
+ */
+const LINK_MIN_RADIUS = 6;
 
 /**
  * Flat chevron for a junction branch marker, in socket-local space: a socket's
@@ -650,6 +664,117 @@ export class ModularRoadBuilder {
       .some((oc) => oc.chainId === this.activeChainId && oc.end === "head");
   }
 
+  // ── CLOSING A GAP: the LINK ────────────────────────────────────────────────
+  // A chain is a rigid sequence, so its end-to-end transform is fixed by the
+  // pieces in it: you can weld ONE end onto a target and not the other. Joining
+  // an alternate route back into a merge pins both, so something has to solve
+  // for the leftover — that is the `link` piece, and this is what aims it.
+
+  /**
+   * Every open end a link could legally aim AT, from the end you are on now.
+   * Excludes the active chain's own ends: a road cannot close a gap to itself,
+   * and offering it just puts a degenerate piece in the list.
+   */
+  linkTargets() {
+    return this._openConnectors().filter((oc) => oc.chainId !== this.activeChainId);
+  }
+
+  /**
+   * Build a link from the active chain's open end to `target`, and append it.
+   *
+   * The gap is measured in the ENTRY'S LOCAL FRAME (`T = A⁻¹·B`), which is
+   * exactly the form the piece's params want — so the link stays a pure function
+   * of its params and rebuildAll re-derives it like anything else.
+   *
+   * @returns {{ok:boolean, reason?:string, gap?:number, radius?:number}}
+   */
+  /**
+   * The pose a road must be in to ARRIVE at an open end, as opposed to leave it.
+   *
+   * Every open connector has an OUTWARD direction — the way a piece placed there
+   * would grow. A tail and a junction branch point outward already; a head faces
+   * into its chain, so its outward is the reverse (the same 180° the head marker
+   * is drawn with). Arriving is outward reversed, so:
+   *
+   *   tail / branch → matrix · 180°     head → matrix
+   *
+   * Getting this wrong is not a cosmetic detail. Aimed ALONG a merge socket
+   * instead of into it, the link has to leave the route going one way and arrive
+   * going back up the track — a hairpin, measured at a 0 m radius, i.e. a cusp.
+   * Reversed, the same join is an ordinary sweeping curve.
+   */
+  _arrivalPose(oc) {
+    const m = oc.matrix.clone();
+    return oc.end === "head" ? m : m.multiply(_A_M.makeRotationY(Math.PI));
+  }
+
+  linkTo(target) {
+    if (!target?.matrix) return { ok: false, reason: "no target" };
+    if (this.ghostEnd === "head") {
+      // Prepending grows the chain backwards; a link has to leave FROM an end,
+      // and the head's outward direction is the reverse of the chain's travel.
+      // Rather than guess, say so — the tail is what you want to link from.
+      return { ok: false, reason: "switch to the chain's far end (O) before linking" };
+    }
+    const A = this.currentConnector.clone();
+    const T = A.invert().multiply(this._arrivalPose(target)); // gap in A's local frame
+
+    _A_V.setFromMatrixPosition(T);
+    _A_M.extractRotation(T);
+    // Heading of the target IN A's FRAME. Travel is −Z (socketMatrix), so the
+    // yaw that reproduces it is atan2(−x, −z) of the rotated travel axis.
+    _A_TRAVEL.set(0, 0, -1).applyMatrix4(_A_M);
+    const yaw = Math.atan2(-_A_TRAVEL.x, -_A_TRAVEL.z);
+
+    const pp = {
+      ...this.activeParams,
+      linkX: _A_V.x, linkY: _A_V.y, linkZ: _A_V.z,
+      linkYawDeg: THREE.MathUtils.radToDeg(yaw),
+    };
+    const gap = _A_V.length();
+    if (gap < 0.5) return { ok: false, reason: "those ends are already touching" };
+
+    // REFUSE A CUSP. Two poses can always be joined by a Hermite, but if the
+    // target sits behind you — or barely to one side — the only curve that hits
+    // both is a hairpin, and the sweep of a 1 m radius is a self-intersecting
+    // mess no car could take. Measured on a two-piece stub 18.5 m from a merge
+    // it pointed away from: radius 1 m. The fix is not a cleverer solver, it is
+    // to build a bit further before joining, so say that.
+    const radius = linkCurvature(pp);
+    if (radius < LINK_MIN_RADIUS) {
+      return {
+        ok: false,
+        gap,
+        radius,
+        reason: `too tight to bridge (${radius.toFixed(0)} m radius) — build further before linking`,
+      };
+    }
+
+    this._markCursor();
+    const piece = this._makePieceEntry(
+      "link", this.activeChainId, this.currentConnector, pp, guardrailParams.enabled);
+    this.pieces.push(piece);
+    this.rebuildAll();
+    this._syncGizmoToOpenEnd();
+    this._commit();
+    this._notify();
+    return { ok: true, gap, radius };
+  }
+
+  /** Link to the nearest legal end — the no-aim version, for a key or button. */
+  linkToNearestEnd() {
+    const targets = this.linkTargets();
+    if (!targets.length) return { ok: false, reason: "nothing else to join to" };
+    const from = _A_V2.setFromMatrixPosition(this.currentConnector);
+    let best = null;
+    const p = new THREE.Vector3();
+    for (const t of targets) {
+      const d = p.setFromMatrixPosition(t.matrix).distanceTo(from);
+      if (!best || d < best.d) best = { t, d };
+    }
+    return this.linkTo(best.t);
+  }
+
   /** Cycle the active chain (dir -1 = previous, +1 = next). */
   cycleChain(dir = -1) {
     if (this.chains.length < 2) return;
@@ -796,8 +921,18 @@ export class ModularRoadBuilder {
         bp.setFromMatrixPosition(b.matrix);
         let used = false;
         for (const c of this.chains) {
-          if (!this._chainPieces(c.id).length) continue; // an empty chain claims nothing
-          if (cp.setFromMatrixPosition(c.anchor).distanceTo(bp) < 1.0) { used = true; break; }
+          const ps = this._chainPieces(c.id);
+          if (!ps.length) continue; // an empty chain claims nothing
+          // EITHER END COUNTS. A branch is taken whether a road STARTS there
+          // (its anchor lands on the socket) or ARRIVES there (its last exit
+          // does) — which is exactly what a merge is, and what the link piece
+          // builds. Testing only the anchor left a merge that a route had
+          // already joined still advertising itself as free, arrow and all.
+          if (cp.setFromMatrixPosition(c.anchor).distanceTo(bp) < HEAD_JOIN_EPS
+            || cp.setFromMatrixPosition(ps[ps.length - 1].connectorOut).distanceTo(bp) < HEAD_JOIN_EPS) {
+            used = true;
+            break;
+          }
         }
         out.push({ piece: p, label: b.label, matrix: b.matrix, pos: bp.clone(), used });
       }

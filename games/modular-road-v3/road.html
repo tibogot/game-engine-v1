@@ -335,6 +335,9 @@
             <button id="road-other-end" class="palette-btn palette-btn-wide" type="button">
               Other end of chain (O)
             </button>
+            <button id="road-link" class="palette-btn palette-btn-wide" type="button">
+              Join to nearest end (J)
+            </button>
             <button id="road-flip" class="palette-btn" type="button">Flip L/R (R)</button>
             <button id="road-undo" class="palette-btn" type="button">Undo</button>
             <button id="road-save" class="palette-btn" type="button">Save track</button>
@@ -405,6 +408,16 @@
             <kbd>R</kbd> flips which side a Split / T uses and which arm of a Y
             fork the chain follows. A roundabout's island is a hole — cut across
             the middle and you drop through it.
+            <br><br>
+            <b>Splitting and rejoining:</b> build the alternate route off a
+            Split's arrow, run it where you like, then press <kbd>J</kbd> (Join)
+            to close the gap back into a <b>Merge</b>. A chain is a rigid run of
+            pieces, so nothing you place by hand will ever land on both ends at
+            once — <kbd>J</kbd> generates a <i>link</i> shaped to whatever is
+            left over, meeting the far end exactly in position <i>and</i>
+            heading. It tells you the gap it closed and the tightest radius, and
+            refuses outright if the only curve that would fit is a hairpin —
+            build a little further out and try again.
             <br><br>
             <b>Undo:</b> <kbd>Backspace</kbd> or <kbd>Ctrl</kbd>+<kbd>Z</kbd>
             steps back through every edit — placing, deleting, replacing, tilting,
