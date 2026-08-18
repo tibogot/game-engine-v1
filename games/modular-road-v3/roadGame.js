@@ -52,6 +52,11 @@ import { RoadBvh } from "../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../v3/play/modularRoadGround.js";
 import { isSharedGeometry } from "./modularRoadScenery.js";
 import {
+  createCarReflection,
+  lightReflection,
+  REFLECT_LAYER,
+} from "./modularRoadReflection.js";
+import {
   createRoadMaterial,
   createGuardrailMaterial,
   createTunnelMaterial,
@@ -170,6 +175,29 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   const { scene, camera, controls, renderer } = app;
 
+  /* ── WET ROAD + CAR REFLECTION ───────────────────────────────────────────
+   *
+   * Built here because createRoadMaterial only compiles the projection if it is
+   * handed a texture at construction — the same reason `wet` is a constructor
+   * flag rather than a uniform (three compiles the clearcoat lobe only when
+   * clearcoatNode is set, so a dry track would otherwise pay for a lobe
+   * multiplied by zero).
+   *
+   * `wetAmount` still defaults to 0, so nothing about an existing track changes
+   * until something turns the weather up — see setWet() on the returned handle
+   * and the dev panel's Wet road slider. It rides ROAD_LOOK, so a track saves
+   * its own conditions.
+   */
+  const carReflection = createCarReflection({
+    renderer,
+    scene,
+    width: Math.max(64, Math.round(innerWidth * 0.5)),
+    height: Math.max(64, Math.round(innerHeight * 0.5)),
+  });
+  /** Runtime switch. The material always carries the projection; this is what
+   *  decides whether a mirror is rendered and sampled. */
+  let reflectionEnabled = true;
+
   // 2) ── LOAD THE WORLD ─────────────────────────────────────────────────────
   const boot = await loadBootWorld(app, { onStatus });
   // Rivers/lakes carve the heightmap AFTER the project's own height sync, so
@@ -196,7 +224,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   // 3) ── THE TRACK ──────────────────────────────────────────────────────────
   onStatus("Building track…");
-  const roadMaterial = createRoadMaterial();
+  const roadMaterial = createRoadMaterial({
+    wet: true,
+    reflectionTexture: carReflection.texture,
+  });
   const railMaterial = createGuardrailMaterial();
   const shellMaterial = createTunnelMaterial();
   const decorMaterial = createDecorMaterial();
@@ -769,11 +800,94 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     .then(({ object, radius, width }) => {
       vehicle.setWheelModel(object, { radius, thickness: width });
       vehicle.setWheelStyle("glb");
+      applyCarReflectionMembers();
       devPanel?.refresh();
     })
     .catch((e) => {
       console.warn("[ModularRoad-v3] wheel model failed to load — staying procedural", e);
     });
+
+
+  /* ── THE MIRROR ──────────────────────────────────────────────────────────── */
+
+  /**
+   * What the reflection pass is allowed to draw.
+   *
+   * Meshes ENABLE the layer rather than moving to it, so the car keeps rendering
+   * normally in the main view with no clone and nothing to keep in sync. The
+   * ROAD is never a member: it would reflect itself, and it is the largest thing
+   * on screen.
+   *
+   * Re-applied after each background model load, because setChassisModel and
+   * setWheelStyle replace the meshes this walked.
+   */
+  const REFLECT_DROP = ["misc", "badges", "rotor", "caliper"];
+  function applyCarReflectionMembers() {
+    if (!vehicleRef?.group) return;
+    vehicleRef.group.traverse((o) => {
+      if (o.isLight) { lightReflection(o); return; }
+      if (!o.isMesh) return;
+      // The interior, the badges and the brake internals are 40% of the body's
+      // triangles and none of it survives a roughness-0.16 reflection — measured
+      // in wet-road-lab, where dropping them cost nothing visible.
+      const name = (o.name || "").toLowerCase();
+      if (REFLECT_DROP.some((k) => name.includes(k))) o.layers.disable(REFLECT_LAYER);
+      else o.layers.enable(REFLECT_LAYER);
+    });
+  }
+
+  /** Scene lights have to see the reflect layer or the mirrored car is a
+   *  silhouette — three tests light.layers against the object's. */
+  function lightReflectionAll() {
+    scene.traverse((o) => { if (o.isLight) lightReflection(o); });
+  }
+
+  const _mirrorPoint = new THREE.Vector3();
+  const _mirrorNormal = new THREE.Vector3();
+
+  /**
+   * Drive the mirror, once per frame, BEFORE the scene is drawn.
+   *
+   * The plane is the average of the GROUNDED tyre contacts — their hitPoint and
+   * hitNormal — not the chassis transform. The body rolls and pitches on its
+   * suspension; the reflection has to follow the ROAD or it swims under braking.
+   * It is also what makes this work on a stunt track: a banked hold and the
+   * inside of a loop both have a perfectly good local plane, it just is not
+   * horizontal.
+   *
+   * Airborne (no contacts) the plane is undefined, so the reflection fades out —
+   * which is also when nobody is looking at the road surface anyway.
+   */
+  function updateCarReflection() {
+    const ru = roadMaterial._reflectUniforms;
+    if (!ru) return;
+    if (mode !== "drive" || !reflectionEnabled || !vehicleRef) {
+      ru.reflectOn.value = 0;
+      return;
+    }
+    let n = 0;
+    _mirrorPoint.set(0, 0, 0);
+    _mirrorNormal.set(0, 0, 0);
+    for (const t of vehicleRef.tires ?? []) {
+      if (!t.grounded) continue;
+      _mirrorPoint.add(t.hitPoint);
+      _mirrorNormal.add(t.hitNormal);
+      n++;
+    }
+    if (!n || _mirrorNormal.lengthSq() < 1e-8) {
+      ru.reflectOn.value = 0;
+      return;
+    }
+    _mirrorPoint.multiplyScalar(1 / n);
+    _mirrorNormal.normalize();
+
+    const ok = carReflection.update(camera, _mirrorPoint, _mirrorNormal);
+    ru.reflectOn.value = ok ? 1 : 0;
+    if (!ok) return;
+    ru.reflectMatrix.value.copy(carReflection.textureMatrix);
+    ru.reflectCenter.value.copy(_mirrorPoint);
+    ru.reflectNormal.value.copy(_mirrorNormal);
+  }
 
   // GLB body, same deal. This one changes NO physics — the collision box stays
   // CHASSIS.width/height/length either way — so it is a pure visual swap and the
@@ -793,6 +907,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // is deliberately in the background). Now that the real body exists, swap
       // the silhouette for it — otherwise the marker stays a box for the session.
       rebuildSpawnMarkerCar();
+      applyCarReflectionMembers();
       devPanel?.refresh();
     })
     .catch((e) => {
@@ -3417,6 +3532,15 @@ ${e.message}`);
   };
   app._roadRaf = requestAnimationFrame(tick);
 
+  // The mirror has to be rendered BEFORE the scene that samples it, and roadGame
+  // runs its own rAF for the sim rather than owning the draw — so it hangs off
+  // v3's pre-render hook, which fires immediately before worldEnv renders the
+  // frame. Registering it in `tick` instead would project the PREVIOUS frame's
+  // mirror onto a camera that has already moved.
+  lightReflectionAll();
+  applyCarReflectionMembers();
+  app.addPreRenderHook?.(updateCarReflection);
+
   onStatus("ready");
 
   // Cold cache (or ?rebake=1): bake now that the editor is up and drawing. Two
@@ -3442,6 +3566,17 @@ ${e.message}`);
     world: boot,
     /** Surface look as plain JSON — the same object a track save carries and
      *  road-piece-lab.html exports. */
+    /** What the mirror is allowed to see, and whether it runs at all. */
+    setReflection: (on) => {
+      reflectionEnabled = !!on;
+      if (!on && roadMaterial._reflectUniforms) {
+        roadMaterial._reflectUniforms.reflectOn.value = 0;
+      }
+    },
+    getReflection: () => reflectionEnabled,
+    /** Master weather, 0..1. Rides ROAD_LOOK, so a track saves its own. */
+    setWet: (v) => { roadMaterial._roadUniforms.wetAmount.value = Math.max(0, Math.min(1, v)); },
+    getWet: () => roadMaterial._roadUniforms.wetAmount.value,
     getRoadLook: () => readRoadLook(roadMaterial),
     setRoadLook: (l) => {
       Object.assign(roadLook, l ?? {});
