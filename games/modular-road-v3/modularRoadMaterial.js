@@ -196,6 +196,7 @@ export function createRoadMaterial(opts = {}) {
     reflectFresnel: uniform(opts.reflectFresnel ?? WET_DEFAULTS.reflectFresnel),
     reflectDistort: uniform(opts.reflectDistort ?? WET_DEFAULTS.reflectDistort),
     reflectFade: uniform(opts.reflectFade ?? WET_DEFAULTS.reflectFade),
+    kerbWet: uniform(opts.kerbWet ?? WET_DEFAULTS.kerbWet),
   };
 
   /**
@@ -400,7 +401,18 @@ export function createRoadMaterial(opts = {}) {
     // Kerbs: solid red by default; hazard stripes only when railStriped is on
     // (reserved for the turn pieces later).
     const railBand = step(0.5, fract(along.mul(u.railDash)));
-    const railCol = mix(u.railA, u.railB, railBand.mul(u.railStriped));
+    let railCol = mix(u.railA, u.railB, railBand.mul(u.railStriped));
+    // The kerb gets wet too, at `kerbWet` of the deck's dose — paint is close to
+    // non-porous, so it darkens less than open aggregate. Leaving it out (the
+    // first version did) removed the WETTEST strip of the road, because the
+    // drainage model pools against the kerb by construction: |aLateral| near 1
+    // is the bottom of the camber.
+    if (wet) {
+      const kw = wet.film.mul(u.kerbWet);
+      railCol = railCol
+        .mul(mix(float(1), u.wetDarken, kw))
+        .mul(mix(vec3(1, 1, 1), u.wetTint, kw));
+    }
 
     // Tube interior: base color + a lit strip where the neon rings sit so the
     // glow reads as a fixture, not just bloom haze.
@@ -450,7 +462,11 @@ export function createRoadMaterial(opts = {}) {
 
     let r = float(0.9); // sides / underside
     r = mix(r, deck, step(0.5, zone)); // deck asphalt
-    r = mix(r, float(0.5), step(1.5, zone)); // kerb paint
+    // Kerb paint, wetted by the same film at `kerbWet` strength.
+    const kerbR = wet
+      ? mix(float(0.5), wet.substrateRough, wet.film.mul(u.kerbWet))
+      : float(0.5);
+    r = mix(r, kerbR, step(1.5, zone)); // kerb paint
     r = mix(r, float(0.82), step(2.5, zone)); // tube inner
     r = mix(r, float(0.55), step(3.5, zone)); // tube shell paint
     r = mix(r, u.panelRough, step(4.5, zone)); // lacquered panel
@@ -466,12 +482,17 @@ export function createRoadMaterial(opts = {}) {
   // DECK ONLY (aZone 1). Kerbs and rails get soaked in life too and they are
   // the brightest thing in a wet corner — but their albedo and roughness come
   // from constants above rather than from the deck's terms, so wetting them
-  // means giving them their own darkening as well. Next pass, not this one.
+  // means giving them their own darkening as well — which `kerbWet` now does
+  // for the kerb. The RAILS themselves are still dry; they are a separate
+  // material and a separate job.
   if (wet) {
     mat.clearcoatNode = Fn(() => {
       const zone = attribute("aZone", "float");
-      const deckOnly = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
-      return wet.coat.mul(deckOnly);
+      // Deck (1) AND kerb (2), the kerb scaled by `kerbWet` so one knob moves
+      // its albedo, its roughness and its gloss together.
+      const isDeck = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
+      const isKerb = step(1.5, zone).mul(oneMinus(step(2.5, zone)));
+      return wet.coat.mul(isDeck.add(isKerb.mul(u.kerbWet)));
     })();
     mat.clearcoatRoughnessNode = wet.coatRough;
     mat.clearcoatNormalNode = wetClearcoatNormal(wet);
@@ -550,6 +571,12 @@ export function createRoadMaterial(opts = {}) {
       const dist = length(positionWorld.sub(r.reflectCenter));
       const near = oneMinus(smoothstep(u.reflectFade.mul(0.45), u.reflectFade, dist));
       const facing = saturate(dot(normalWorld, r.reflectNormal));
+      // Deck + kerb, matching the clearcoat gate. A guardrail's reflection lands
+      // mostly on the strip nearest it, and that strip IS the kerb — gating this
+      // to the deck alone deleted the very reflection the rails were added for.
+      const rzone = attribute("aZone", "float");
+      const onRoad = step(0.5, rzone).mul(oneMinus(step(1.5, rzone)))
+        .add(step(1.5, rzone).mul(oneMinus(step(2.5, rzone))).mul(u.kerbWet));
 
       // ...and only inside the target. Off the edge there is no data, so it has
       // to go to zero rather than clamp a stretched border pixel down the road.
@@ -557,7 +584,7 @@ export function createRoadMaterial(opts = {}) {
       const inside = oneMinus(smoothstep(0.86, 1.0, max(e.x, e.y)));
 
       return col.rgb.mul(col.a)
-        .mul(fres).mul(wet.coat).mul(near).mul(facing).mul(inside)
+        .mul(fres).mul(wet.coat).mul(near).mul(facing).mul(inside).mul(onRoad)
         .mul(u.reflectStrength).mul(r.reflectOn);
     })();
 

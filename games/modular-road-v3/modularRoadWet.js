@@ -265,6 +265,18 @@ export const WET_DEFAULTS = {
    * asphalt around it smears.
    */
   reflectDistort: 0.05,
+  /**
+   * How much of the wet treatment the KERB gets, relative to the deck.
+   *
+   * Below 1 because a painted kerb is not asphalt: paint is close to
+   * non-porous, so it neither darkens as much nor holds water in its surface
+   * the way open aggregate does. But it is emphatically not 0, which is what it
+   * was — kerbs were excluded entirely, and since the drainage model pools
+   * water against them (|aLateral| near 1 is the bottom of the camber) that
+   * removed the wettest strip of the road. It also deleted the guardrail's
+   * reflection, which lands mostly on that strip.
+   */
+  kerbWet: 0.6,
   /** Metres from the car's contact point at which the reflection has faded to
    *  nothing. The mirror is only geometrically right ON its plane, and a deck
    *  that banks or loops leaves that plane quickly — so it is faded out rather
@@ -284,6 +296,7 @@ export const WET_NUMBERS = [
   "wetSlopeMin", "wetSlopeMax", "wetWheelClear",
   "rippleAmp", "rippleScale", "rippleSpeed", "rippleStretch", "rippleDamp",
   "reflectStrength", "reflectFresnel", "reflectDistort", "reflectFade",
+  "kerbWet",
 ];
 
 export const WET_KEYS = [...WET_COLORS, ...WET_NUMBERS];
