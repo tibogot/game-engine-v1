@@ -19,6 +19,19 @@ import fs from "node:fs";
 const FILE = "games/modular-road-v3/modularRoadMaterial.js";
 const src = fs.readFileSync(new URL(`../${FILE}`, import.meta.url), "utf8");
 
+/**
+ * Sources the sync lists may be assembled from. The wet-road model owns its own
+ * key lists (modularRoadWet.js) and ROAD_LOOK_* spreads them in, so resolving a
+ * `...NAME` means looking there too. Its uniforms are still DECLARED in
+ * createRoadMaterial's `u` block, which is what keeps the check below honest.
+ */
+const SOURCES = {
+  [FILE]: src,
+  "games/modular-road-v3/modularRoadWet.js": fs.readFileSync(
+    new URL("../games/modular-road-v3/modularRoadWet.js", import.meta.url), "utf8",
+  ),
+};
+
 let failed = 0;
 const check = (ok, msg) => {
   if (!ok) failed++;
@@ -54,11 +67,24 @@ function declaredUniforms() {
   return keys;
 }
 
-/** Contents of an exported `const NAME = [ "a", "b" ]` list. */
-function list(name) {
-  const m = new RegExp(`export const ${name}\\s*=\\s*\\[([\\s\\S]*?)\\]`).exec(src);
-  if (!m) throw new Error(`${FILE}: cannot find ${name}`);
-  return new Set([...m[1].matchAll(/"([\w$]+)"/g)].map((x) => x[1]));
+/**
+ * Contents of an exported `const NAME = [ "a", "b", ...OTHER ]` list, with any
+ * spread of another exported list resolved recursively across SOURCES.
+ */
+function list(name, seen = new Set()) {
+  if (seen.has(name)) throw new Error(`circular list spread at ${name}`);
+  seen.add(name);
+  for (const [file, text] of Object.entries(SOURCES)) {
+    const m = new RegExp(`export const ${name}\\s*=\\s*\\[([\\s\\S]*?)\\]`).exec(text);
+    if (!m) continue;
+    const out = new Set([...m[1].matchAll(/"([\w$]+)"/g)].map((x) => x[1]));
+    for (const [, spread] of m[1].matchAll(/\.\.\.([A-Z][\w$]*)/g)) {
+      for (const k of list(spread, seen)) out.add(k);
+    }
+    if (out.size === 0) throw new Error(`${file}: ${name} resolved to nothing`);
+    return out;
+  }
+  throw new Error(`cannot find ${name} in ${Object.keys(SOURCES).join(", ")}`);
 }
 
 const declared = declaredUniforms();
@@ -76,6 +102,32 @@ check(stale.length === 0, `no sync entry names a uniform that no longer exists${
 
 const both = [...numbers].filter((k) => colours.has(k));
 check(both.length === 0, `no uniform synced as both colour and number${both.length ? ` — ${both.join(", ")}` : ""}`);
+
+/* The same trap one level down: modularRoadWet.js documents its knobs on
+ * WET_DEFAULTS and lists them in WET_COLORS/WET_NUMBERS. A key in the defaults
+ * but not the lists never reaches a uniform; a key in the lists but not the
+ * defaults reaches one with `undefined` and the uniform quietly keeps whatever
+ * the material's own fallback was. */
+const wetKeys = new Set([...list("WET_COLORS"), ...list("WET_NUMBERS")]);
+const wetDefaults = (() => {
+  const text = SOURCES["games/modular-road-v3/modularRoadWet.js"];
+  const open = text.indexOf("export const WET_DEFAULTS = {");
+  const close = text.indexOf("\n};", open);
+  if (open < 0 || close < 0) throw new Error("cannot find WET_DEFAULTS");
+  return new Set(
+    [...text.slice(open, close).matchAll(/^\s{2}([A-Za-z_$][\w$]*)\s*:/gm)].map((x) => x[1]),
+  );
+})();
+const wetUnlisted = [...wetDefaults].filter((k) => !wetKeys.has(k));
+const wetUndefaulted = [...wetKeys].filter((k) => !wetDefaults.has(k));
+check(
+  wetUnlisted.length === 0,
+  `every WET_DEFAULTS key is listed${wetUnlisted.length ? ` — missing: ${wetUnlisted.join(", ")}` : ""}`,
+);
+check(
+  wetUndefaulted.length === 0,
+  `every listed wet key has a default${wetUndefaulted.length ? ` — missing: ${wetUndefaulted.join(", ")}` : ""}`,
+);
 
 // The specific regression: the lab passes plain booleans for the on/off flags,
 // and assigning `false` to a float uniform does not read as 0.

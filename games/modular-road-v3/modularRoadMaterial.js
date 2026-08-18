@@ -18,10 +18,22 @@ import {
   saturate,
   oneMinus,
   normalView,
+  normalWorld,
+  positionWorld,
+  texture,
+  length,
+  dot,
   mx_noise_float,
   mx_fractal_noise_float,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
+import {
+  WET_DEFAULTS,
+  WET_COLORS,
+  WET_NUMBERS,
+  createWetShading,
+  wetClearcoatNormal,
+} from "./modularRoadWet.js";
 
 function lin(hex) {
   return new THREE.Color(hex).convertSRGBToLinear();
@@ -147,13 +159,73 @@ export function createRoadMaterial(opts = {}) {
     // road piece instead of adding a draw call per placement.
     panelColor: uniform(lin(opts.panelColor ?? 0xb3121f)), // deep lacquer red
     panelRough: uniform(opts.panelRough ?? 0.09), // wet-looking, not mirror
+    // ── WET ROAD ─────────────────────────────────────────────────────────
+    // Declared unconditionally, even when `opts.wet` is off, so that a look
+    // file always round-trips the full set and a dry material can be swapped
+    // for a wet one without the authored weather being lost. What each of
+    // these MEANS is documented on WET_DEFAULTS in modularRoadWet.js; the
+    // model itself lives there too. `wetAmount` defaults to 0, so a wet
+    // material with no weather applied is identical to a dry one.
+    wetAmount: uniform(opts.wetAmount ?? WET_DEFAULTS.wetAmount),
+    wetCoatStrength: uniform(opts.wetCoatStrength ?? WET_DEFAULTS.wetCoatStrength),
+    wetDarken: uniform(opts.wetDarken ?? WET_DEFAULTS.wetDarken),
+    wetRough: uniform(opts.wetRough ?? WET_DEFAULTS.wetRough),
+    wetCoatRough: uniform(opts.wetCoatRough ?? WET_DEFAULTS.wetCoatRough),
+    wetTint: uniform(lin(opts.wetTint ?? WET_DEFAULTS.wetTint)),
+    puddleAmount: uniform(opts.puddleAmount ?? WET_DEFAULTS.puddleAmount),
+    puddleScale: uniform(opts.puddleScale ?? WET_DEFAULTS.puddleScale),
+    puddleStreak: uniform(opts.puddleStreak ?? WET_DEFAULTS.puddleStreak),
+    puddleThreshold: uniform(opts.puddleThreshold ?? WET_DEFAULTS.puddleThreshold),
+    puddleSoft: uniform(opts.puddleSoft ?? WET_DEFAULTS.puddleSoft),
+    puddleDarken: uniform(opts.puddleDarken ?? WET_DEFAULTS.puddleDarken),
+    puddleCoatRough: uniform(opts.puddleCoatRough ?? WET_DEFAULTS.puddleCoatRough),
+    wetDrainStart: uniform(opts.wetDrainStart ?? WET_DEFAULTS.wetDrainStart),
+    wetCamber: uniform(opts.wetCamber ?? WET_DEFAULTS.wetCamber),
+    wetBank: uniform(opts.wetBank ?? WET_DEFAULTS.wetBank),
+    wetCurveRef: uniform(opts.wetCurveRef ?? WET_DEFAULTS.wetCurveRef),
+    wetDrainStrength: uniform(opts.wetDrainStrength ?? WET_DEFAULTS.wetDrainStrength),
+    wetSlopeMin: uniform(opts.wetSlopeMin ?? WET_DEFAULTS.wetSlopeMin),
+    wetSlopeMax: uniform(opts.wetSlopeMax ?? WET_DEFAULTS.wetSlopeMax),
+    wetWheelClear: uniform(opts.wetWheelClear ?? WET_DEFAULTS.wetWheelClear),
+    rippleAmp: uniform(opts.rippleAmp ?? WET_DEFAULTS.rippleAmp),
+    rippleScale: uniform(opts.rippleScale ?? WET_DEFAULTS.rippleScale),
+    rippleSpeed: uniform(opts.rippleSpeed ?? WET_DEFAULTS.rippleSpeed),
+    rippleStretch: uniform(opts.rippleStretch ?? WET_DEFAULTS.rippleStretch),
+    rippleDamp: uniform(opts.rippleDamp ?? WET_DEFAULTS.rippleDamp),
+    reflectStrength: uniform(opts.reflectStrength ?? WET_DEFAULTS.reflectStrength),
+    reflectDistort: uniform(opts.reflectDistort ?? WET_DEFAULTS.reflectDistort),
+    reflectFade: uniform(opts.reflectFade ?? WET_DEFAULTS.reflectFade),
   };
 
-  const mat = new THREE.MeshStandardNodeMaterial({
-    roughness: opts.roughness ?? 0.92,
-    metalness: opts.metalness ?? 0.0,
-    side: THREE.DoubleSide,
-  });
+  /**
+   * WET is a build-time choice, not a uniform, and that is on purpose.
+   *
+   * A water film is a clearcoat — a second specular lobe with its own normal —
+   * and three decides whether to compile that lobe at all from whether
+   * `clearcoatNode` is set. Driving clearcoat from a uniform that happens to be
+   * 0 would keep the lobe, the extra Fresnel and the extra env sample in every
+   * dry frame for nothing. Choosing the material class instead means a dry
+   * track pays literally zero: same MeshStandardNodeMaterial, same graph as
+   * before this existed.
+   *
+   * The cost of that: turning the weather on is a material rebuild, not a
+   * uniform poke. For a road with ONE shared material that is a single
+   * `createRoadMaterial` call and a reassign, which is the right trade — rain
+   * starting is a rare event and a dry frame is the common one.
+   */
+  const wetOn = Boolean(opts.wet);
+
+  const mat = wetOn
+    ? new THREE.MeshPhysicalNodeMaterial({
+        roughness: opts.roughness ?? 0.92,
+        metalness: opts.metalness ?? 0.0,
+        side: THREE.DoubleSide,
+      })
+    : new THREE.MeshStandardNodeMaterial({
+        roughness: opts.roughness ?? 0.92,
+        metalness: opts.metalness ?? 0.0,
+        side: THREE.DoubleSide,
+      });
 
   // ── SHARED ASPHALT SURFACE ────────────────────────────────────────────────
   // Built ONCE here and referenced by both colorNode and roughnessNode below.
@@ -245,6 +317,16 @@ export function createRoadMaterial(opts = {}) {
     return saturate(band.mul(corner).mul(streaks).mul(patchy).mul(u.driftAmount));
   })();
 
+  /**
+   * Surface WATER, or null when this material was not built wet.
+   *
+   * Built here, once, from `surface.z` — the wheel-path mask the deck already
+   * computes — and then referenced by colorNode, roughnessNode and the three
+   * clearcoat nodes below. Same discipline as `surface` and `driftField`: one
+   * node instance shared five ways emits one evaluation per fragment.
+   */
+  const wet = wetOn ? createWetShading(u, surface.z) : null;
+
   mat.colorNode = Fn(() => {
     const lateral = attribute("aLateral", "float");
     const zone = attribute("aZone", "float");
@@ -269,6 +351,12 @@ export function createRoadMaterial(opts = {}) {
     // hole. Capped, the worst case is dark rubber on dark rubber.
     deckBase = deckBase.mul(oneMinus(driftField.mul(0.55)));
     deckBase = deckBase.mul(u.deckBrightness);
+
+    // WATER, and it goes here — after every dry term, before the paint. Water
+    // darkens the road it is lying on, not the lines painted on top of it, and
+    // it darkens the old rubber and the wheel-path deposit along with the
+    // asphalt because it is sitting over all of them.
+    if (wet) deckBase = deckBase.mul(wet.albedoScale).mul(wet.tint);
 
     // Feather floor of about a pixel. Painted lines are hard-edged in reality,
     // but a hard edge in a shader aliases into a dashed crawl at distance — the
@@ -354,6 +442,9 @@ export function createRoadMaterial(opts = {}) {
       // glossier than the asphalt around it, and that sheen is most of what
       // sells it as rubber rather than as a dark patch of paint.
       .sub(driftField.mul(u.driftGloss));
+    // Water fills the pores, so the SUBSTRATE smooths out some — but only some.
+    // The mirror is the coat, not this; see wetRough in modularRoadWet.js.
+    if (wet) deck = mix(deck, wet.substrateRough, wet.film);
     deck = clamp(deck, 0.05, 1.0);
 
     let r = float(0.9); // sides / underside
@@ -365,6 +456,26 @@ export function createRoadMaterial(opts = {}) {
     return r;
   })();
 
+  // ── THE WATER FILM ITSELF ─────────────────────────────────────────────────
+  // A clearcoat is the correct model and not an approximation: a smooth
+  // dielectric layer, with its own normal, lying over a rough one. three's
+  // clearcoat lobe also darkens the base by the coat's Fresnel for free, which
+  // is a second helping of the albedo drop that sells the whole effect.
+  //
+  // DECK ONLY (aZone 1). Kerbs and rails get soaked in life too and they are
+  // the brightest thing in a wet corner — but their albedo and roughness come
+  // from constants above rather than from the deck's terms, so wetting them
+  // means giving them their own darkening as well. Next pass, not this one.
+  if (wet) {
+    mat.clearcoatNode = Fn(() => {
+      const zone = attribute("aZone", "float");
+      const deckOnly = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
+      return wet.coat.mul(deckOnly);
+    })();
+    mat.clearcoatRoughnessNode = wet.coatRough;
+    mat.clearcoatNormalNode = wetClearcoatNormal(wet);
+  }
+
   // Neon rings inside tubes — emissive, and routed into the emissive MRT
   // buffer so v3's SELECTIVE bloom picks them up (plain emissive alone does not
   // bloom here; see the note in roadGame.js). BloomMRTNode also keeps this
@@ -375,10 +486,85 @@ export function createRoadMaterial(opts = {}) {
     const innerMask = step(2.5, zone).mul(float(1).sub(step(3.5, zone)));
     return u.neonColor.mul(tubeRingMask(u, along)).mul(u.neonIntensity).mul(innerMask);
   })();
-  mat.emissiveNode = neonNode;
+  // ── PLANAR CAR REFLECTION ─────────────────────────────────────────────────
+  // Additive, through emissive, and both of those are deliberate.
+  //
+  // ADDITIVE because the reflection target is cleared TRANSPARENT and holds the
+  // car on nothing: `rgb * a` therefore adds the car and leaves every other
+  // pixel of the deck exactly as the clearcoat's environment reflection already
+  // had it. There is a small double-count where the car sits — the env term
+  // still shows the sky the car is occluding — but that sky is the dim part of
+  // the dome at a grazing angle, and the alternative is a full-screen occlusion
+  // pass to subtract something nobody can see.
+  //
+  // EMISSIVE because a reflection is not albedo. Folding it into colorNode
+  // would put it through the diffuse lighting term and make the car's
+  // reflection brighten and dim with the sun, which is precisely wrong.
+  let reflectNode = null;
+  if (wet && opts.reflectionTexture) {
+    const r = {
+      /** biasMatrix · virtualCamera.projection · virtualCamera.viewInverse. */
+      reflectMatrix: uniform(new THREE.Matrix4()),
+      /** World-space contact point the fade is measured from. */
+      reflectCenter: uniform(new THREE.Vector3()),
+      /** The mirror plane's normal, for the facing test. */
+      reflectNormal: uniform(new THREE.Vector3(0, 1, 0)),
+      /** 0 while the pass is skipped (camera under the plane) so the road fades
+       *  out instead of projecting a stale frame. */
+      reflectOn: uniform(0),
+    };
+
+    reflectNode = Fn(() => {
+      const clip = r.reflectMatrix.mul(vec4(positionWorld, 1.0));
+      const projUv = clip.xy.div(max(clip.w, float(1e-4)));
+
+      // Break it up with the water surface — the same normal the clearcoat
+      // uses, so the distortion agrees with the highlight sitting on top of it,
+      // and `coatNormalGain` means a flat puddle reflects sharply while damp
+      // asphalt smears. Without this the reflection reads as a pasted-on decal.
+      const wob = wet.coatNormalPacked.xy.sub(0.5).mul(2.0)
+        .mul(u.reflectDistort).mul(wet.coatNormalGain);
+      const reflUv = projUv.add(wob);
+
+      const col = texture(opts.reflectionTexture, reflUv);
+
+      // Fresnel. Same shape as the glass pane above: near-nothing looking
+      // straight down, near-total at the grazing angle a chase camera lives at.
+      const fres = oneMinus(abs(normalView.z)).pow(4.0);
+
+      // Valid only on the plane, and only on surfaces facing along it.
+      const dist = length(positionWorld.sub(r.reflectCenter));
+      const near = oneMinus(smoothstep(u.reflectFade.mul(0.45), u.reflectFade, dist));
+      const facing = saturate(dot(normalWorld, r.reflectNormal));
+
+      // ...and only inside the target. Off the edge there is no data, so it has
+      // to go to zero rather than clamp a stretched border pixel down the road.
+      const e = reflUv.sub(0.5).abs().mul(2.0);
+      const inside = oneMinus(smoothstep(0.86, 1.0, max(e.x, e.y)));
+
+      return col.rgb.mul(col.a)
+        .mul(fres).mul(wet.coat).mul(near).mul(facing).mul(inside)
+        .mul(u.reflectStrength).mul(r.reflectOn);
+    })();
+
+    mat._reflectUniforms = r;
+  }
+
+  mat.emissiveNode = reflectNode ? neonNode.add(reflectNode) : neonNode;
+  // Neon only. A reflection that blooms turns every wet frame into a haze.
   applyBloomMRT(mat, neonNode);
 
   mat._roadUniforms = u;
+  /** The raw vec2(film, pond) field, or null when dry. Exposed so wet-road-lab
+   *  can render the drainage model as false colour without re-deriving the
+   *  wheel-path mask it is built from — a second copy of that expression is
+   *  exactly the kind of quiet divergence that makes a debug view lie. */
+  mat._wetField = wet ? wet.field : null;
+  /** The planar-reflection contribution on its own, or null. Same reason as
+   *  `_wetField`: a debug view that re-derives the projection can disagree with
+   *  the one being debugged, and "is the mirror empty or is it just dim?" is
+   *  exactly the question you cannot answer by looking at the lit result. */
+  mat._reflectNode = reflectNode;
   return mat;
 }
 
@@ -546,6 +732,7 @@ export const ROAD_LOOK_VERSION = 1;
 export const ROAD_LOOK_COLORS = [
   "asphaltDark", "asphaltLight", "lineColor", "railA", "railB",
   "sideColor", "tubeInner", "tubeOuter", "neonColor", "panelColor",
+  ...WET_COLORS,
 ];
 
 /** Uniforms authored as plain numbers (on/off flags included, as 0/1). */
@@ -558,6 +745,7 @@ export const ROAD_LOOK_NUMBERS = [
   "driftAmount", "driftWidth", "driftBias", "driftCurveRef", "driftGloss",
   "driftLines", "driftWander",
   "panelRough",
+  ...WET_NUMBERS,
 ];
 
 export const ROAD_LOOK_KEYS = [...ROAD_LOOK_COLORS, ...ROAD_LOOK_NUMBERS];

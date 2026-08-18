@@ -1,0 +1,1489 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wet Road Lab</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f16; color: #e6ecf5;
+                   font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10;
+        min-width: 260px; max-width: 340px;
+        padding: 12px 14px;
+        background: rgba(10, 15, 24, 0.72);
+        border: 1px solid rgba(150, 180, 220, 0.18);
+        border-radius: 10px;
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+      }
+      #hud h1 {
+        margin: 0 0 4px; font-size: 12px; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #7f93ad; font-weight: 700;
+      }
+      #hud .title { margin: 0 0 8px; font-size: 18px; font-weight: 650; color: #f2f6fb; }
+      #hud .meta { color: #9fb0c6; font-size: 12px; }
+      #hud .meta b { color: #f2f6fb; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #hud .wet { color: #6fd3ff; }
+      #hud .dry { color: #ffab6b; }
+      #hud .keys {
+        margin-top: 10px; padding-top: 8px;
+        border-top: 1px solid rgba(150, 180, 220, 0.16);
+        color: #7f93ad; font-size: 11px; line-height: 1.55;
+      }
+      #hud .keys b { color: #cfe0f2; font-weight: 600; }
+      #err {
+        position: fixed; left: 12px; bottom: 12px; z-index: 20;
+        max-width: 560px; padding: 10px 12px; display: none;
+        background: rgba(60, 12, 12, 0.92); border: 1px solid #a44;
+        border-radius: 8px; color: #ffb0b0; white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Wet road lab</h1>
+      <div class="title" id="s-title">—</div>
+      <div class="meta">
+        Surface <b id="s-wet">—</b> · Env <b id="s-env">—</b><br />
+        View <b id="s-cam">—</b> · Triangles <b id="s-tris">—</b><br />
+        Mirror <b id="s-refl">—</b><br />
+        GPU <b id="s-gpu">—</b> · <b id="s-fps">—</b> fps
+      </div>
+      <div class="keys">
+        <b>1–5</b> dry / damp / wet / soaked / drying line<br />
+        <b>W</b> wet on/off (rebuilds the material — the honest A/B)<br />
+        <b>E</b> cycle sky · <b>C</b> cycle view · <b>P</b> drive the car<br />
+        <b>X</b> car reflection on/off · <b>D</b> drainage debug (red/green)<br />
+        <b>F</b> fill test — deck covers the frame, so GPU ms is the ROAD<br />
+        <b>R</b> reset view · orbit: drag / wheel
+      </div>
+    </div>
+    <div id="err"></div>
+
+    <script type="module">
+      /**
+       * WET ROAD LOOK-DEV.
+       *
+       * A fork of road-piece-lab.html rather than another folder in it, because
+       * wet needs things the dry look lab deliberately does not have, and every
+       * one of them changes the answer:
+       *
+       *   A GRAZING CAMERA, by default. Fresnel reflectance on a water film goes
+       *   from almost nothing at normal incidence to ~1 at 5°, and the game's
+       *   chase camera lives at the far end of that curve. Tuning wetness from
+       *   an orbit camera looking down at 40° is tuning the one angle the player
+       *   never sees. The dry look lab could get away with a turntable; this
+       *   cannot.
+       *
+       *   SOMETHING TO REFLECT. An empty sky over an empty road makes a correct
+       *   wet shader look broken. There is a car, there are lamp posts, and the
+       *   environment carries lamp blobs of its own so the road still has
+       *   something to mirror when they are off screen.
+       *
+       *   THREE SKIES. Wet asphalt is a mirror, so it looks like three different
+       *   materials under overcast, sunset and sodium-lit night — and night is
+       *   what this game actually is. A look tuned under one is not tuned.
+       *
+       *   A BANKED PIECE. Puddle placement is driven by drainage, and drainage
+       *   on a bank runs to one side instead of two. On a straight that half of
+       *   the model is invisible.
+       *
+       * The shading itself is imported, not reimplemented: modularRoadWet.js and
+       * createRoadMaterial are the same code the game ships, so nothing tuned
+       * here can drift from what runs.
+       */
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "three/addons/libs/lil-gui.module.min.js";
+      import { Fn, vec3, attribute, step, oneMinus, pow } from "three/tsl";
+      import {
+        buildPiece,
+        roadParams as kitRoadParams,
+        pieceParams as kitPieceParams,
+        guardrailParams as kitGuardrailParams,
+      } from "./modularRoadKit.js";
+      import {
+        createRoadMaterial,
+        createGuardrailMaterial,
+        syncRoadUniforms,
+        ROAD_LOOK_KEYS,
+        ROAD_LOOK_FORMAT,
+        ROAD_LOOK_VERSION,
+      } from "./modularRoadMaterial.js";
+      import { WET_DEFAULTS } from "./modularRoadWet.js";
+      import { buildRailGeometry, railParams } from "./modularRoadRail.js";
+      import { loadChassisModel, chassisGlbMounts, CHASSIS_GLB } from "./chassisModel.js";
+      import { WHEEL_LOCAL, WHEEL_LAYOUT } from "../../v3/play/modularRoadVehicle.js";
+      import { loadWheelModel } from "./wheelModel.js";
+      import {
+        createCarReflection,
+        lightReflection,
+        REFLECT_LAYER as REFLECT_LAYER_ID,
+      } from "./modularRoadReflection.js";
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => {
+        const el = $("err");
+        el.style.display = "block";
+        el.textContent = e?.stack || String(e);
+        console.error(e);
+      };
+
+      /* ===================================================================== *
+       * PRESETS                                                               *
+       * ===================================================================== */
+
+      const PIECES = {
+        straight: {
+          label: "Straight · 48 m",
+          base: "straight",
+          params: { straightLength: 48 },
+        },
+        curve: {
+          label: "Curve · 90° R26",
+          base: "curve",
+          params: { curveRadius: 26, curveAngle: 90, curveDir: 1 },
+        },
+        banked: {
+          label: "Banked · 90° R26",
+          base: "banked",
+          params: { curveRadius: 26, curveAngle: 90, curveDir: 1 },
+        },
+        hairpin: {
+          label: "Hairpin · 150° R14",
+          base: "curve",
+          params: { curveRadius: 14, curveAngle: 150, curveDir: 1 },
+        },
+      };
+
+      /**
+       * Weather, as overrides on the look. Deliberately few and far apart —
+       * these are the states worth A/B-ing, not a continuum, and the master
+       * slider covers everything between.
+       *
+       * `drying` is the one to look at last: the rain has stopped, the racing
+       * line has been squeegeed clear by tyres and the rest of the road has not.
+       * It is one uniform (wetWheelClear) rather than a second system, and it is
+       * the most convincing wet-road state in any racing game.
+       */
+      const WEATHER = {
+        dry: { wetAmount: 0 },
+        damp: {
+          wetAmount: 0.5, wetCoatStrength: 0.24, puddleAmount: 0.2,
+          puddleThreshold: 0.72, wetWheelClear: 0.7,
+        },
+        wet: {
+          wetAmount: 0.9, wetCoatStrength: 0.45, puddleAmount: 0.8,
+          puddleThreshold: 0.58, wetWheelClear: 0.45,
+        },
+        soaked: {
+          wetAmount: 1.0, wetCoatStrength: 0.62, puddleAmount: 1.0,
+          puddleThreshold: 0.46, wetWheelClear: 0.2,
+        },
+        drying: {
+          wetAmount: 0.75, wetCoatStrength: 0.4, puddleAmount: 0.6,
+          puddleThreshold: 0.64, wetWheelClear: 1.0,
+        },
+      };
+      const WEATHER_ORDER = ["dry", "damp", "wet", "soaked", "drying"];
+
+      /**
+       * Skies. Each drives the environment equirect, the scene lights, the fog
+       * and the exposure together — changing one without the others is how you
+       * end up with a night scene lit like an afternoon.
+       *
+       * `lamps` puts warm blobs in the environment ring itself. That is not
+       * decoration: with no screen-space reflections yet, everything the wet
+       * road mirrors comes from this texture, and a night sky with nothing in it
+       * gives a puddle nothing to be. The real lamp posts in the scene light the
+       * road; these are what the road reflects.
+       */
+      const ENVS = {
+        overcast: {
+          label: "Overcast",
+          zenith: [0.40, 0.45, 0.53], horizon: [0.66, 0.70, 0.75], ground: [0.26, 0.26, 0.27],
+          sunDir: [18, 26, 12], sunColor: 0xdde6f2, sunIntensity: 1.1,
+          sunSharp: 26, sunGlow: 6, sunPunch: 3,
+          hemiSky: 0xdce8f7, hemiGround: 0x8d8b86, hemi: 1.6, ambient: 0.22,
+          fogNear: 70, fogFar: 300, exposure: 1.0, lamps: 0, lampsOn: false,
+        },
+        sunset: {
+          label: "Sunset",
+          zenith: [0.10, 0.15, 0.32], horizon: [0.98, 0.46, 0.20], ground: [0.14, 0.10, 0.10],
+          sunDir: [30, 4.2, -16], sunColor: 0xffab60, sunIntensity: 3.4,
+          sunSharp: 1200, sunGlow: 26, sunPunch: 42,
+          hemiSky: 0xffb478, hemiGround: 0x2a2028, hemi: 0.5, ambient: 0.08,
+          fogNear: 55, fogFar: 280, exposure: 1.05, lamps: 0, lampsOn: false,
+        },
+        night: {
+          label: "Sodium night",
+          zenith: [0.010, 0.014, 0.030], horizon: [0.055, 0.062, 0.098], ground: [0.008, 0.008, 0.012],
+          sunDir: [-22, 30, -14], sunColor: 0x9fbaff, sunIntensity: 0.28,
+          sunSharp: 2600, sunGlow: 40, sunPunch: 6,
+          hemiSky: 0x2a3a58, hemiGround: 0x140f0a, hemi: 0.16, ambient: 0.035,
+          fogNear: 40, fogFar: 200, exposure: 1.0, lamps: 9, lampsOn: true,
+        },
+      };
+      const ENV_ORDER = ["overcast", "sunset", "night"];
+
+      const CAM_MODES = ["chase", "orbit", "hood"];
+
+      /**
+       * Reflection level of detail, as a name filter on the car's sub-meshes.
+       *
+       * The Emira GT4 body is 41.7k triangles across 10 draws with the wheels
+       * already excluded, and MEASURED per mesh most of that is not reflectable:
+       * `misc` alone is 13.4k and is the interior — a cockpit that a reflection
+       * seen from below the car never shows — and `badges` is another 2.1k of
+       * logos that a roughness-0.16 surface turns into a smudge. Dropping those
+       * two is 37% of the pass for no visible difference, which is exactly the
+       * kind of saving a decimated proxy would buy without having to author one.
+       *
+       * `lights` is the night-only extreme: at 0.7k triangles it reflects the
+       * lamps and nothing else, and in a dark scene that is most of what the
+       * road was showing anyway.
+       */
+      const REFLECT_DETAIL = {
+        full: null,
+        lean: ["misc", "badges", "rotor", "caliper"],
+        lights: ["misc", "badges", "rotor", "caliper", "ext", "chassis", "wheel", "tyre"],
+      };
+
+      /** Candela per headlight, and per street lamp bulb. Both are far lower
+       *  than "realistic" on purpose — see the note where the spot is built. */
+      const HEADLIGHT_CD = 140;
+      const LAMP_CD = 95;
+
+      /* ===================================================================== *
+       * STATE                                                                 *
+       * ===================================================================== */
+
+      /**
+       * The authored look. Wet keys come straight from WET_DEFAULTS so the lab
+       * cannot open on a different starting point than the material would build
+       * on its own — the second set of defaults that silently drifts from the
+       * first is the classic look-dev bug.
+       */
+      const look = {
+        asphaltDark: 0x5c626a,
+        asphaltLight: 0x8a919a,
+        deckBrightness: 1.0,
+        streak: 14,
+        lineColor: 0xf2f2f2,
+        railA: 0xd0342c,
+        railB: 0xf0f0f0,
+        sideColor: 0xd0342c,
+        linesOn: false,
+        centerOn: true,
+        edgeOn: true,
+        railStriped: false,
+        grainScale: 1.0,
+        macroScale: 0.06,
+        aggScale: 5.0,
+        deckRough: 0.93,
+        roughVary: 0.1,
+        wheelPolish: 0.22,
+        wheelDarken: 0.1,
+        driftAmount: 1.4,
+        driftWidth: 0.42,
+        driftBias: 0.35,
+        driftCurveRef: 0.05,
+        driftGloss: 0.25,
+        driftLines: 20,
+        driftWander: 2.5,
+        ...WET_DEFAULTS,
+      };
+      /** Opening on a soaked road: the point of the lab is the wet state. */
+      Object.assign(look, WEATHER.wet);
+
+      const LOOK_FLAGS = ["linesOn", "centerOn", "edgeOn", "railStriped"];
+
+      const geom = { piece: "straight", guardrails: true };
+
+      const sceneCtl = {
+        env: "night",
+        weather: "wet",
+        wetOn: true,
+        debugView: "off",
+        exposure: ENVS.night.exposure,
+        shadows: true,
+        car: true,
+        carDrive: false,
+        carS: 0.45,
+        lampsOn: true,
+        headlights: true,
+        /** Planar car reflection. Build-time like `wetOn` — the material only
+         *  compiles the projection when it is handed a texture. */
+        reflectOn: true,
+        /** Fraction of the viewport the reflection target is rendered at. It
+         *  lands on a surface at roughness 0.02–0.22, so it is blurred either
+         *  way; this is the cheapest knob in the lab. */
+        reflectScale: 0.5,
+        /** Wheels in the reflection. The cheap LOD lever — a wheel is a rim, a
+         *  tyre, a rotor and a caliper, and none of it survives the blur. */
+        reflectWheels: true,
+        /** How much of the BODY goes in. See REFLECT_DETAIL. */
+        reflectDetail: "lean",
+      };
+
+      const cam = {
+        mode: "chase",
+        /** Metres behind the car. */
+        distance: 7.5,
+        /** Metres above the deck. This plus `distance` IS the grazing angle,
+         *  and the grazing angle is the entire reason this lab exists. */
+        height: 1.55,
+        /** Where the camera looks, in metres ahead of the car. Long, so the eye
+         *  is on the far road surface where the reflection stretches out. */
+        lookAhead: 26,
+        aimHeight: 0.6,
+        fov: 52,
+        driveSpeed: 0.055, // fraction of the piece per second
+      };
+
+      /* ===================================================================== *
+       * ENVIRONMENT                                                           *
+       * ===================================================================== */
+
+      /**
+       * Procedural equirect sky, prefiltered to a PMREM by three on first use.
+       *
+       * HalfFloat rather than Float32: rgba32float is not linearly filterable in
+       * WebGPU without an optional feature and the PMREM chain filters. 512×256
+       * because this is also the visible backdrop, not just a reflection source
+       * — at the 128×64 the dry lab uses for its rail env the sun disc reads as
+       * a staircase across the sky.
+       */
+      function buildEnv(spec) {
+        const W = 512;
+        const H = 256;
+        const data = new Uint16Array(W * H * 4);
+        const half = THREE.DataUtils.toHalfFloat;
+        const sunDir = new THREE.Vector3(...spec.sunDir).normalize();
+        const sunCol = new THREE.Color(spec.sunColor).convertSRGBToLinear();
+        const d = new THREE.Vector3();
+
+        // Sodium lamps around the horizon ring — see the note on ENVS.
+        const lamps = [];
+        for (let i = 0; i < (spec.lamps || 0); i++) {
+          const a = (i / spec.lamps) * Math.PI * 2 + 0.4;
+          lamps.push(new THREE.Vector3(Math.cos(a), 0.055 + 0.03 * Math.sin(i * 2.3), Math.sin(a)).normalize());
+        }
+
+        for (let y = 0; y < H; y++) {
+          const phi = ((y + 0.5) / H) * Math.PI;
+          for (let x = 0; x < W; x++) {
+            const theta = ((x + 0.5) / W) * Math.PI * 2;
+            const sp = Math.sin(phi);
+            d.set(sp * Math.cos(theta), Math.cos(phi), sp * Math.sin(theta));
+
+            let r;
+            let g;
+            let b;
+            if (d.y >= 0) {
+              const t = Math.pow(d.y, 0.5);
+              r = spec.horizon[0] * (1 - t) + spec.zenith[0] * t;
+              g = spec.horizon[1] * (1 - t) + spec.zenith[1] * t;
+              b = spec.horizon[2] * (1 - t) + spec.zenith[2] * t;
+            } else {
+              const t = Math.min(1, -d.y * 2.4);
+              r = spec.horizon[0] * (1 - t) + spec.ground[0] * t;
+              g = spec.horizon[1] * (1 - t) + spec.ground[1] * t;
+              b = spec.horizon[2] * (1 - t) + spec.ground[2] * t;
+            }
+
+            const s = Math.max(0, d.dot(sunDir));
+            const sun = Math.pow(s, spec.sunSharp) * spec.sunPunch
+              + Math.pow(s, spec.sunGlow) * 0.35;
+            r += sun * sunCol.r;
+            g += sun * sunCol.g;
+            b += sun * sunCol.b;
+
+            for (const L of lamps) {
+              const k = Math.max(0, d.dot(L));
+              const v = Math.pow(k, 5200) * 26 + Math.pow(k, 260) * 0.22;
+              r += v * 1.0;
+              g += v * 0.62;
+              b += v * 0.24;
+            }
+
+            const i = (y * W + x) * 4;
+            data[i] = half(r);
+            data[i + 1] = half(g);
+            data[i + 2] = half(b);
+            data[i + 3] = half(1);
+          }
+        }
+
+        const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.HalfFloatType);
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        tex.colorSpace = THREE.LinearSRGBColorSpace; // already radiance
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
+        tex.needsUpdate = true;
+        return tex;
+      }
+
+      /* ===================================================================== *
+       * SCENE                                                                 *
+       * ===================================================================== */
+
+      let renderer, scene, camera, controls;
+      let sun, hemi, ambient;
+      let pieceRoot, ground, roadMesh, railMesh, roadMat, railMat, fieldMat, reflectDebugMat;
+      let carRig = null;
+      let carReflection = null;
+      let reflectCost = { draws: 0, tris: 0 };
+      let headlights = [];
+      let lampGroup = null;
+      let gui = null;
+      let hasTimestamps = false;
+      const envCache = new Map();
+      /** Frames of the current piece, already moved into lab space. */
+      let frames = [];
+      let orbitTarget = new THREE.Vector3();
+
+      const perf = { gpuSum: 0, gpuN: 0, since: 0, gpu: 0, fps: 0, frames: 0 };
+      const timer = new THREE.Timer();
+
+      async function createTimingDevice() {
+        if (!navigator.gpu) return null;
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) return null;
+          return await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+        } catch (e) {
+          console.warn("[wet-lab] no timestamp device; GPU ms will read —", e);
+          return null;
+        }
+      }
+
+      async function init() {
+        const device = await createTimingDevice();
+        hasTimestamps = Boolean(device?.features?.has("timestamp-query"));
+
+        renderer = new THREE.WebGPURenderer({
+          antialias: true,
+          trackTimestamp: true,
+          ...(device ? { device } : {}),
+        });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = sceneCtl.exposure;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(cam.fov, innerWidth / innerHeight, 0.1, 800);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 3;
+        controls.maxDistance = 160;
+
+        hemi = new THREE.HemisphereLight(0xffffff, 0x808080, 1);
+        scene.add(hemi);
+        ambient = new THREE.AmbientLight(0xffffff, 0.2);
+        scene.add(ambient);
+
+        sun = new THREE.DirectionalLight(0xffffff, 1);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.camera.near = 1;
+        sun.shadow.camera.far = 160;
+        sun.shadow.camera.left = -50;
+        sun.shadow.camera.right = 50;
+        sun.shadow.camera.top = 50;
+        sun.shadow.camera.bottom = -50;
+        sun.shadow.bias = -0.0006;
+        sun.shadow.normalBias = 0.03;
+        scene.add(sun);
+        scene.add(sun.target);
+
+        // Wet ground around the piece, so the deck is not a lit ribbon floating
+        // in a void. Kept dull — it must not compete with the road.
+        ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(600, 600),
+          new THREE.MeshStandardMaterial({ color: 0x22262c, roughness: 0.95, metalness: 0 }),
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.35;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        pieceRoot = new THREE.Group();
+        scene.add(pieceRoot);
+
+        railMat = createGuardrailMaterial();
+        railMat.shadowSide = THREE.FrontSide;
+
+        // Before buildMaterial: the road only compiles the projection if it is
+        // handed a texture at construction, so the target has to exist first.
+        carReflection = createCarReflection({ renderer, scene, ...reflectSize() });
+        // Every light has to see the reflection layer or the car is a
+        // silhouette in the mirror. Easy to miss, because the main view of the
+        // same car looks perfectly fine.
+        for (const l of [hemi, ambient, sun]) lightReflection(l);
+
+        buildMaterial();
+        rebuildPiece();
+        applyEnv();
+        buildLampPosts();
+        await buildCar();
+        buildGui();
+        resetView();
+
+        addEventListener("resize", onResize);
+        addEventListener("keydown", onKey);
+
+        window.__wetRoadLab = {
+          renderer, scene, camera, controls, look, geom, sceneCtl, cam,
+          applyLook, applyEnv, buildMaterial, rebuildPiece, exportLook, perf,
+          get roadMat() { return roadMat; },
+          get carReflection() { return carReflection; },
+          get carRig() { return carRig; },
+        };
+
+        renderer.setAnimationLoop(frame);
+      }
+
+      /* ---------------------------------------------------------------- look */
+
+      function lookUniforms(extra = {}) {
+        const out = { ...look, ...extra };
+        for (const k of LOOK_FLAGS) out[k] = out[k] ? 1 : 0;
+        return out;
+      }
+
+      function applyLook() {
+        syncRoadUniforms(roadMat, lookUniforms());
+      }
+
+      /**
+       * Build (or rebuild) the road material.
+       *
+       * Wet is a CONSTRUCTOR flag, not a uniform — see the note in
+       * createRoadMaterial. That makes the dry state genuinely free rather than
+       * a clearcoat lobe multiplied by zero, and it makes the `W` key an honest
+       * A/B: the dry material really is the one the game ships today.
+       */
+      const reflectSize = () => ({
+        width: Math.max(64, Math.round(innerWidth * sceneCtl.reflectScale)),
+        height: Math.max(64, Math.round(innerHeight * sceneCtl.reflectScale)),
+      });
+
+      function buildMaterial() {
+        const old = roadMat;
+        roadMat = createRoadMaterial(lookUniforms({
+          wet: sceneCtl.wetOn,
+          reflectionTexture: (sceneCtl.wetOn && sceneCtl.reflectOn)
+            ? carReflection?.texture
+            : null,
+        }));
+        fieldMat = buildFieldMaterial(roadMat);
+        reflectDebugMat = buildReflectDebugMaterial(roadMat);
+        if (roadMesh) roadMesh.material = currentDeckMaterial();
+        old?.dispose?.();
+      }
+
+      /**
+       * False-colour view of the drainage model: red = film, green = ponding.
+       *
+       * Reads `_wetField` off the road material rather than rebuilding the field
+       * here, so it shares both the node graph and the uniform bag. A debug view
+       * assembled from its own copy of the expression is a debug view that can
+       * disagree with the thing it is debugging.
+       */
+      function buildFieldMaterial(src) {
+        const field = src._wetField;
+        const m = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
+        // A debug view has to show the NUMBER, and by default it would not:
+        // ACES compresses the top end and the output transform gamma-lifts the
+        // bottom, so 0.42 and 0.85 both arrive on screen as "bright red" and the
+        // wheel-path clearing looks like it is not happening. Switching tone
+        // mapping off and pre-applying the inverse transfer function makes the
+        // displayed channel equal the field value to within a rounding error.
+        m.toneMapped = false;
+        m.colorNode = Fn(() => {
+          const zone = attribute("aZone", "float");
+          const deckOnly = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
+          if (!field) return vec3(0.06, 0.06, 0.08);
+          const v = vec3(field.x, field.y, 0.0).mul(deckOnly);
+          return pow(v.add(0.02), 2.2);
+        })();
+        return m;
+      }
+
+      /**
+       * Raw planar-reflection contribution, unlit and untone-mapped.
+       *
+       * Worth its own view for the same reason the drainage one is: when the
+       * mirror looks empty, "the target has no car in it", "the projection
+       * lands off the edge" and "it is there but multiplied down to nothing"
+       * all look identical in the final image and have completely different
+       * fixes.
+       */
+      function buildReflectDebugMaterial(src) {
+        const node = src._reflectNode;
+        const m = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
+        m.toneMapped = false;
+        m.colorNode = node
+          ? vec3(node).add(vec3(0.03, 0.03, 0.04))
+          : vec3(0.25, 0.0, 0.0);
+        return m;
+      }
+
+      /** off → drainage → reflection → off. */
+      const DEBUG_VIEWS = ["off", "drainage", "reflection"];
+      const currentDeckMaterial = () => {
+        if (sceneCtl.debugView === "drainage") return fieldMat;
+        if (sceneCtl.debugView === "reflection") return reflectDebugMat;
+        return roadMat;
+      };
+
+      /* --------------------------------------------------------------- piece */
+
+      function rebuildPiece() {
+        if (roadMesh) {
+          pieceRoot.remove(roadMesh);
+          roadMesh.geometry.dispose();
+          roadMesh = null;
+        }
+        if (railMesh) {
+          pieceRoot.remove(railMesh);
+          railMesh.geometry.dispose();
+          railMesh = null;
+        }
+
+        const preset = PIECES[geom.piece] ?? PIECES.straight;
+        const rp = { ...kitRoadParams };
+        const pp = { ...kitPieceParams, ...preset.params };
+        const gp = { ...kitGuardrailParams, enabled: true };
+
+        const built = buildPiece(preset.base, new THREE.Matrix4(), pp, rp, gp, true);
+
+        let railGeo = null;
+        if (geom.guardrails) {
+          built.railGeometry?.dispose();
+          railGeo = buildRailGeometry(built.frames, rp, railParams);
+        } else {
+          built.railGeometry?.dispose();
+        }
+
+        // Centre the piece on the origin, and move the FRAMES with it — the
+        // chase camera and the car both ride those, so a geometry-only offset
+        // would leave the car driving alongside the road it is meant to be on.
+        const box = new THREE.Box3().setFromBufferAttribute(
+          built.geometry.getAttribute("position"),
+        );
+        const centre = box.getCenter(new THREE.Vector3());
+        const offset = new THREE.Matrix4().makeTranslation(-centre.x, -centre.y, -centre.z);
+        built.geometry.applyMatrix4(offset);
+        if (railGeo) railGeo.applyMatrix4(offset);
+        frames = built.frames.map((f) => ({
+          pos: f.pos.clone().sub(centre),
+          tangent: f.tangent.clone(),
+          up: f.up.clone(),
+          right: f.right.clone(),
+        }));
+
+        roadMesh = new THREE.Mesh(built.geometry, currentDeckMaterial());
+        roadMesh.castShadow = roadMesh.receiveShadow = sceneCtl.shadows;
+        pieceRoot.add(roadMesh);
+
+        if (railGeo) {
+          railMesh = new THREE.Mesh(railGeo, railMat);
+          railMesh.castShadow = sceneCtl.shadows;
+          railMesh.receiveShadow = sceneCtl.shadows;
+          pieceRoot.add(railMesh);
+        }
+
+        sun.target.position.set(0, 0, 0);
+        sun.target.updateMatrixWorld();
+
+        const tris = (built.geometry.index
+          ? built.geometry.index.count
+          : built.geometry.attributes.position.count) / 3
+          + (railGeo
+            ? (railGeo.index ? railGeo.index.count : railGeo.attributes.position.count) / 3
+            : 0);
+
+        $("s-title").textContent = preset.label;
+        $("s-tris").textContent = Math.round(tris).toLocaleString();
+        buildLampPosts();
+      }
+
+      /** Frame at 0..1 along the piece, with the ends clamped. */
+      function frameAt(s) {
+        if (!frames.length) return null;
+        const t = Math.min(0.9999, Math.max(0, s)) * (frames.length - 1);
+        const i = Math.floor(t);
+        const j = Math.min(frames.length - 1, i + 1);
+        const k = t - i;
+        const a = frames[i];
+        const b = frames[j];
+        return {
+          pos: a.pos.clone().lerp(b.pos, k),
+          tangent: a.tangent.clone().lerp(b.tangent, k).normalize(),
+          up: a.up.clone().lerp(b.up, k).normalize(),
+          right: a.right.clone().lerp(b.right, k).normalize(),
+        };
+      }
+
+      /* ------------------------------------------------------------- fixtures */
+
+      /**
+       * Lamp posts down the outside of the piece. They light the road (point
+       * lights) and they are the bright shapes the wet deck has to smear —
+       * without something small and bright above it, a wet road under a smooth
+       * sky just reads as slightly darker asphalt.
+       */
+      function buildLampPosts() {
+        if (lampGroup) {
+          scene.remove(lampGroup);
+          lampGroup.traverse((o) => o.geometry?.dispose?.());
+          lampGroup = null;
+        }
+        if (!frames.length) return;
+
+        lampGroup = new THREE.Group();
+        const postMat = new THREE.MeshStandardMaterial({
+          color: 0x2b3038, roughness: 0.55, metalness: 0.6,
+        });
+        const headMat = new THREE.MeshStandardMaterial({
+          color: 0x140d05,
+          emissive: new THREE.Color(0xffb54a).convertSRGBToLinear(),
+          emissiveIntensity: sceneCtl.lampsOn ? 7 : 0,
+          roughness: 0.4,
+        });
+        const postGeo = new THREE.CylinderGeometry(0.09, 0.13, 7.2, 8);
+        const armGeo = new THREE.BoxGeometry(1.7, 0.12, 0.12);
+        const headGeo = new THREE.BoxGeometry(0.75, 0.16, 0.34);
+
+        const COUNT = 6;
+        const half = kitRoadParams.width * 0.5;
+        for (let i = 0; i < COUNT; i++) {
+          const f = frameAt((i + 0.5) / COUNT);
+          const side = i % 2 === 0 ? 1 : -1;
+          const base = f.pos.clone().addScaledVector(f.right, side * (half + 2.2));
+
+          const post = new THREE.Mesh(postGeo, postMat);
+          post.position.copy(base).addScaledVector(f.up, 3.6);
+          post.castShadow = sceneCtl.shadows;
+          lampGroup.add(post);
+
+          const armPos = base.clone().addScaledVector(f.up, 7.0)
+            .addScaledVector(f.right, -side * 0.85);
+          const arm = new THREE.Mesh(armGeo, postMat);
+          arm.position.copy(armPos);
+          arm.quaternion.copy(basisQuat(f));
+          lampGroup.add(arm);
+
+          const headPos = base.clone().addScaledVector(f.up, 6.9)
+            .addScaledVector(f.right, -side * 1.65);
+          const head = new THREE.Mesh(headGeo, headMat);
+          head.position.copy(headPos);
+          head.quaternion.copy(basisQuat(f));
+          lampGroup.add(head);
+
+          const bulb = new THREE.PointLight(0xffb54a, sceneCtl.lampsOn ? LAMP_CD : 0, 30, 2);
+          bulb.position.copy(headPos).addScaledVector(f.up, -0.2);
+          lampGroup.add(bulb);
+        }
+        lampGroup.userData.headMat = headMat;
+        scene.add(lampGroup);
+      }
+
+      /** Orientation matrix for a frame, as a quaternion. */
+      function basisQuat(f) {
+        const m = new THREE.Matrix4().makeBasis(
+          f.right.clone(), f.up.clone(), f.tangent.clone().negate(),
+        );
+        return new THREE.Quaternion().setFromRotationMatrix(m);
+      }
+
+      /**
+       * The CAR's orientation, which is the frame basis turned around.
+       *
+       * Not a sign slip worth hiding: the chassis GLB's nose points along its
+       * local +Z, not the −Z that three treats as forward, so aiming the
+       * object's −Z down the tangent parks it facing the chase camera. Kept as
+       * its own function rather than a negated tangent inside basisQuat because
+       * the lamp posts want the untwisted frame.
+       */
+      function carQuat(f) {
+        const m = new THREE.Matrix4().makeBasis(
+          f.right.clone().negate(), f.up.clone(), f.tangent.clone(),
+        );
+        return new THREE.Quaternion().setFromRotationMatrix(m);
+      }
+
+      /**
+       * The car. Loaded from the shipping chassis GLB when it is there, because
+       * the shape of the thing being reflected matters — a box reflects like a
+       * box. Falls back to a proxy rather than failing: the lab is about the
+       * road, and it must still open if the model has moved.
+       */
+      async function buildCar() {
+        const rig = new THREE.Group();
+        let mounts = [];
+        /** Set when the GLB supplied its own brake lamps, so the proxy pair
+         *  below is not stacked on top of bodywork that already has them. */
+        let glbTails = false;
+        /** Bodywork extents in RIG space, filled in once the body is placed.
+         *  The wheels are laid out from this rather than from v2's CHASSIS
+         *  constants: those describe the COLLISION BOX (1.8 × 3.6), and the
+         *  model is 2.31 × 4.97, so wheels placed on the collision box vanish
+         *  inside the bodywork. */
+        let bodyBox = null;
+
+        // THE WHEEL LOADS FIRST, because its radius sets the ride height that
+        // the body and the hubs both hang off. In the game that height comes
+        // out of the suspension at rest; the lab has no suspension, so it
+        // derives the equivalent: put the tyre on the deck and work back up.
+        let wheelTemplate = null;
+        let wheelRadius = 0.36; // WHEEL_PROCEDURAL's, if the GLB is missing
+        try {
+          const w = await loadWheelModel(renderer);
+          wheelTemplate = w.object;
+          wheelRadius = w.radius;
+        } catch (e) {
+          console.warn("[wet-lab] wheel model unavailable", e);
+        }
+        /** Chassis anchor height above the deck. Hubs sit at WHEEL_LOCAL.y
+         *  (−0.1) relative to it, and a resting tyre's centre is one radius up,
+         *  so the anchor is radius + 0.1 above the road. */
+        const ANCHOR_Y = wheelRadius + Math.abs(WHEEL_LOCAL[0].pos.y);
+
+        try {
+          const loaded = await loadChassisModel(renderer);
+          loaded.object.traverse((o) => {
+            if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+          });
+          rig.add(loaded.object);
+          mounts = chassisGlbMounts(loaded.headlampMountsLocal ?? []);
+
+          // The model has brake lamps in the right places already. Lighting the
+          // ones that are there beats bolting boxes onto bodywork that was not
+          // measured for them — the first attempt put a pair of glowing slabs
+          // through the rear wing.
+          for (const m of loaded.brakeLights ?? []) {
+            const mat = m.material?.clone?.();
+            if (!mat) continue;
+            mat.emissive = new THREE.Color(0xff2418).convertSRGBToLinear();
+            mat.emissiveIntensity = 2.6;
+            m.material = mat;
+            glbTails = true;
+          }
+
+          // SIT IT ON THE ROAD THE WAY THE GAME DOES.
+          //
+          // The first version measured the model's own bounding box and put its
+          // lowest point on the deck. That stops the car being buried, but it
+          // is NOT the game's fit, and it showed: the wheels came out wider and
+          // further forward than in road.html. The real chain is
+          //
+          //     deck  →  ANCHOR_Y  →  chassis anchor (the physics body origin)
+          //     anchor + CHASSIS_GLB.offsetY  →  bodywork
+          //     anchor + WHEEL_LOCAL[i].pos   →  each hub
+          //
+          // so the lab now reproduces exactly that, from the shipping constants
+          // rather than from anything it measured. The one number the lab has
+          // to supply is ANCHOR_Y, because the game gets it from suspension at
+          // rest and there is no suspension here.
+          loaded.object.position.y = ANCHOR_Y + CHASSIS_GLB.offsetY;
+          mounts = mounts.map((p) => p.clone().setY(p.y + ANCHOR_Y));
+          const box = new THREE.Box3().setFromObject(loaded.object);
+          bodyBox = box.clone();
+        } catch (e) {
+          console.warn("[wet-lab] chassis GLB unavailable, using a proxy body", e);
+          const body = new THREE.Mesh(
+            new THREE.BoxGeometry(1.9, 0.62, 4.3),
+            new THREE.MeshStandardMaterial({ color: 0x9a2230, roughness: 0.28, metalness: 0.5 }),
+          );
+          body.position.y = 0.62;
+          body.castShadow = true;
+          rig.add(body);
+          const cabin = new THREE.Mesh(
+            new THREE.BoxGeometry(1.62, 0.5, 2.0),
+            new THREE.MeshStandardMaterial({ color: 0x11161d, roughness: 0.1, metalness: 0.2 }),
+          );
+          cabin.position.set(0, 1.14, -0.15);
+          cabin.castShadow = true;
+          rig.add(cabin);
+          // +Z is the nose — see carQuat.
+          mounts = [
+            new THREE.Vector3(-0.66, ANCHOR_Y + 0.18, 2.05),
+            new THREE.Vector3(0.66, ANCHOR_Y + 0.18, 2.05),
+          ];
+        }
+
+        // Headlights. In a night scene these are most of what the road has to
+        // reflect and nearly all of what lights it directly, so they get real
+        // spot lights and emissive lenses rather than being faked.
+        headlights = [];
+        const lensMat = new THREE.MeshStandardMaterial({
+          color: 0x111111,
+          emissive: new THREE.Color(0xfff0d0).convertSRGBToLinear(),
+          emissiveIntensity: 9,
+          roughness: 0.2,
+        });
+        const lensGeo = new THREE.SphereGeometry(0.13, 12, 8);
+        for (const m of (mounts.length ? mounts : [new THREE.Vector3(-0.66, 0.68, 2.05)])) {
+          const lens = new THREE.Mesh(lensGeo, lensMat);
+          lens.position.copy(m);
+          rig.add(lens);
+
+          // Dipped, and not very bright. A headlight strong enough to light the
+          // whole deck flattens it to an even wash, which is the one thing a wet
+          // road must not be — the effect lives in the CONTRAST between dark
+          // asphalt and small bright things smeared across it.
+          const spot = new THREE.SpotLight(0xfff0d0, HEADLIGHT_CD, 55, 0.34, 0.4, 1.6);
+          spot.position.copy(m);
+          spot.target.position.copy(m).add(new THREE.Vector3(0, -0.9, 14));
+          rig.add(spot);
+          rig.add(spot.target);
+          headlights.push({ spot, lens });
+        }
+
+        // Tail lamps — a red smear behind the car is the reflection the chase
+        // camera sees most, since the headlights point the other way. Only for
+        // the proxy body; the GLB's own lamps were lit above.
+        if (!glbTails) {
+          const tailMat = new THREE.MeshStandardMaterial({
+            color: 0x1a0304,
+            emissive: new THREE.Color(0xff2418).convertSRGBToLinear(),
+            emissiveIntensity: 2.6,
+            roughness: 0.3,
+          });
+          for (const sx of [-0.7, 0.7]) {
+            const tail = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.13, 0.08), tailMat);
+            tail.position.set(sx, 0.78, -2.05);
+            rig.add(tail);
+          }
+        }
+
+        // WHEELS. The chassis GLB is bodywork only — the game bolts wheels on
+        // from a separate model at runtime (roadGame.js), so a lab that loads
+        // just the chassis gets a car floating on its arches. They matter here
+        // beyond looking right: the tyres are the darkest, closest thing to the
+        // deck, and the contact patch is where a reflection has to start if it
+        // is going to look attached to the car rather than under it.
+        if (wheelTemplate) {
+          // STRAIGHT FROM THE SHIPPING LAYOUT. `WHEEL_LOCAL` is the hub table
+          // the vehicle drives, and `WHEEL_LAYOUT.halfTrack` is the live-tunable
+          // |x| that Vehicle.applyWheelLayout() writes into it — its own comment
+          // says "read it, don't hardcode it", which is exactly what the lab's
+          // first attempt at deriving hubs from the bodywork got wrong.
+          for (const hub of WHEEL_LOCAL) {
+            const w = wheelTemplate.clone(true);
+            const sx = Math.sign(hub.pos.x) || 1;
+            w.position.set(
+              sx * WHEEL_LAYOUT.halfTrack,
+              ANCHOR_Y + hub.pos.y,
+              hub.pos.z,
+            );
+            // The disc lies in YZ with +X as the axle, so the right-hand pair is
+            // the model as authored and the left is its mirror.
+            if (sx < 0) w.rotation.y = Math.PI;
+            w.name = "WheelModelGLB";
+            w.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+            rig.add(w);
+          }
+        }
+
+        rig.visible = sceneCtl.car;
+        carRig = rig;
+        scene.add(rig);
+        applyHeadlights();
+        // Headlight spots are parented to the rig, so they need the reflection
+        // layer too — otherwise the mirrored car sits in its own beam's shadow.
+        for (const h of headlights) lightReflection(h.spot);
+        applyReflectionMembers();
+      }
+
+      function applyHeadlights() {
+        for (const h of headlights) {
+          h.spot.intensity = sceneCtl.headlights ? HEADLIGHT_CD : 0;
+          h.lens.material.emissiveIntensity = sceneCtl.headlights ? 9 : 0.2;
+        }
+      }
+
+      function placeCar() {
+        if (!carRig || !frames.length) return;
+        const f = frameAt(sceneCtl.carS);
+        carRig.position.copy(f.pos).addScaledVector(f.up, 0.05);
+        carRig.quaternion.copy(carQuat(f));
+      }
+
+      const _planePoint = new THREE.Vector3();
+      const _planeNormal = new THREE.Vector3();
+
+      /**
+       * Render the mirror and hand the road its projection.
+       *
+       * The plane is the DECK FRAME UNDER THE CAR, not the world's y=0 and not
+       * the piece as a whole. That is the whole reason this survives a stunt
+       * track: the inside of a loop and a banked hold both have a perfectly
+       * good local plane, it just is not horizontal, and the game already
+       * computes exactly this frame for the vehicle's contact patch.
+       */
+      function updateReflection() {
+        const r = roadMat?._reflectUniforms;
+        if (!carReflection || !r) return;
+        if (!sceneCtl.reflectOn || !sceneCtl.car || !frames.length) {
+          r.reflectOn.value = 0;
+          return;
+        }
+        const f = frameAt(sceneCtl.carS);
+        _planePoint.copy(f.pos);
+        _planeNormal.copy(f.up);
+
+        const ok = carReflection.update(camera, _planePoint, _planeNormal);
+        r.reflectOn.value = ok ? 1 : 0;
+        if (!ok) return;
+        r.reflectMatrix.value.copy(carReflection.textureMatrix);
+        r.reflectCenter.value.copy(_planePoint);
+        r.reflectNormal.value.copy(_planeNormal);
+      }
+
+      /** Which parts of the car go into the mirror. */
+      function applyReflectionMembers() {
+        if (!carRig) return;
+        const drop = REFLECT_DETAIL[sceneCtl.reflectDetail] ?? null;
+        for (const child of carRig.children) {
+          const isWheel = child.name === "WheelModelGLB";
+          const wanted = isWheel ? sceneCtl.reflectWheels : true;
+          child.traverse((o) => {
+            // MESHES ONLY. An earlier version cleared the layer across the whole
+            // rig first, which also stripped it from the headlight SpotLights
+            // parented to the car — leaving the mirrored car sitting in its own
+            // unlit shadow at night, which reads as the reflection being broken
+            // rather than as a lighting problem.
+            if (!o.isMesh) return;
+            const name = (o.name || "").toLowerCase();
+            const dropped = drop && drop.some((k) => name.includes(k));
+            if (wanted && !dropped) o.layers.enable(REFLECT_LAYER_ID);
+            else o.layers.disable(REFLECT_LAYER_ID);
+          });
+        }
+        reportReflectionCost();
+      }
+
+      /** Draws and triangles actually in the reflection pass — deterministic,
+       *  unlike a GPU timestamp on a laptop that downclocks between samples. */
+      function reportReflectionCost() {
+        let draws = 0;
+        let tris = 0;
+        scene.traverse((o) => {
+          if (!o.isMesh || !o.geometry || !o.layers.test({ mask: 1 << REFLECT_LAYER_ID })) return;
+          draws++;
+          const g = o.geometry;
+          tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+        });
+        reflectCost = { draws, tris: Math.round(tris) };
+      }
+
+      /* ----------------------------------------------------------------- env */
+
+      function applyEnv() {
+        const spec = ENVS[sceneCtl.env] ?? ENVS.overcast;
+        if (!envCache.has(sceneCtl.env)) envCache.set(sceneCtl.env, buildEnv(spec));
+        const tex = envCache.get(sceneCtl.env);
+
+        scene.environment = tex;
+        scene.background = tex;
+
+        const horizon = new THREE.Color(...spec.horizon);
+        scene.fog = new THREE.Fog(horizon.getHex(), spec.fogNear, spec.fogFar);
+
+        hemi.color.set(spec.hemiSky);
+        hemi.groundColor.set(spec.hemiGround);
+        hemi.intensity = spec.hemi;
+        ambient.intensity = spec.ambient;
+
+        sun.color.set(spec.sunColor);
+        sun.intensity = spec.sunIntensity;
+        sun.position.set(...spec.sunDir).normalize().multiplyScalar(90);
+
+        sceneCtl.exposure = spec.exposure;
+        renderer.toneMappingExposure = spec.exposure;
+
+        sceneCtl.lampsOn = spec.lampsOn;
+        applyLamps();
+
+        $("s-env").textContent = spec.label;
+      }
+
+      function applyLamps() {
+        if (!lampGroup) return;
+        lampGroup.userData.headMat.emissiveIntensity = sceneCtl.lampsOn ? 7 : 0;
+        lampGroup.traverse((o) => {
+          if (o.isPointLight) o.intensity = sceneCtl.lampsOn ? LAMP_CD : 0;
+        });
+      }
+
+      /* -------------------------------------------------------------- camera */
+
+      function resetView() {
+        if (cam.mode === "orbit") {
+          const f = frameAt(0.5);
+          orbitTarget.copy(f ? f.pos : new THREE.Vector3());
+          controls.target.copy(orbitTarget);
+          camera.position.copy(orbitTarget).add(new THREE.Vector3(24, 16, 24));
+          controls.update();
+        }
+        camera.fov = cam.fov;
+        camera.updateProjectionMatrix();
+      }
+
+      function updateCamera(dt) {
+        controls.enabled = cam.mode === "orbit";
+        if (cam.mode === "orbit") {
+          controls.update();
+          return;
+        }
+        if (!frames.length) return;
+
+        if (sceneCtl.carDrive) {
+          sceneCtl.carS += dt * cam.driveSpeed;
+          if (sceneCtl.carS > 1) sceneCtl.carS -= 1;
+        }
+
+        const f = frameAt(sceneCtl.carS);
+        // Aim WELL down the road, not at the car. The stretched reflection on
+        // the far deck is the whole effect, and framing the car puts it in the
+        // bottom third where it cannot be judged.
+        const aheadS = Math.min(0.999, sceneCtl.carS + cam.lookAhead / pieceLength());
+        const a = frameAt(aheadS);
+
+        if (cam.mode === "hood") {
+          camera.position.copy(f.pos).addScaledVector(f.up, 1.05)
+            .addScaledVector(f.tangent, 1.2);
+        } else {
+          camera.position.copy(f.pos)
+            .addScaledVector(f.up, cam.height)
+            .addScaledVector(f.tangent, -cam.distance);
+        }
+        const target = a.pos.clone().addScaledVector(a.up, cam.aimHeight);
+        camera.up.copy(f.up);
+        camera.lookAt(target);
+      }
+
+      function pieceLength() {
+        if (frames.length < 2) return 1;
+        let L = 0;
+        for (let i = 1; i < frames.length; i++) L += frames[i].pos.distanceTo(frames[i - 1].pos);
+        return Math.max(1, L);
+      }
+
+      /**
+       * Fill test — park the camera so the deck covers the frame, so the GPU ms
+       * readout is measuring the road shader and not the sky. The wet/dry A/B is
+       * only worth anything next to this number.
+       */
+      function fillCamera() {
+        cam.mode = "orbit";
+        controls.enabled = true;
+        const f = frameAt(0.5);
+        controls.target.copy(f.pos);
+        camera.position.copy(f.pos).addScaledVector(f.up, 5.2).addScaledVector(f.tangent, 0.001);
+        camera.up.copy(f.tangent);
+        controls.update();
+        $("s-cam").textContent = "fill test";
+      }
+
+      /* ------------------------------------------------------------------ io */
+
+      function lookPayload() {
+        const params = lookUniforms();
+        const roadLook = {};
+        for (const k of ROAD_LOOK_KEYS) {
+          if (params[k] != null) roadLook[k] = params[k];
+        }
+        return {
+          format: ROAD_LOOK_FORMAT,
+          version: ROAD_LOOK_VERSION,
+          savedAt: new Date().toISOString(),
+          roadLook,
+        };
+      }
+
+      function exportLook() {
+        const blob = new Blob([JSON.stringify(lookPayload(), null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "modular-road-look.json";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function importLook(data) {
+        const src = data?.roadLook ?? (data?.format ? null : data);
+        if (!src || typeof src !== "object") {
+          alert("Not a road look file.");
+          return;
+        }
+        for (const k of ROAD_LOOK_KEYS) {
+          if (src[k] == null || !(k in look)) continue;
+          look[k] = typeof look[k] === "boolean" ? !!src[k] : src[k];
+        }
+        applyLook();
+        refreshGui();
+      }
+
+      const lookFileInput = (() => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".json,application/json";
+        input.hidden = true;
+        input.addEventListener("change", async () => {
+          const file = input.files?.[0];
+          input.value = "";
+          if (!file) return;
+          try {
+            importLook(JSON.parse(await file.text()));
+          } catch (err) {
+            showErr(err);
+          }
+        });
+        document.body.appendChild(input);
+        return input;
+      })();
+
+      /* ----------------------------------------------------------------- gui */
+
+      const refreshGui = () => gui?.controllersRecursive().forEach((c) => c.updateDisplay());
+
+      function applyWeather(name) {
+        sceneCtl.weather = name;
+        Object.assign(look, WEATHER[name] ?? WEATHER.wet);
+        if (name !== "dry" && !sceneCtl.wetOn) {
+          sceneCtl.wetOn = true;
+          buildMaterial();
+        }
+        applyLook();
+        refreshGui();
+      }
+
+      function buildGui() {
+        gui = new GUI({ title: "Wet road", width: 320 });
+
+        const fw = gui.addFolder("Weather");
+        fw.add(sceneCtl, "weather", WEATHER_ORDER).name("preset").onChange(applyWeather);
+        fw.add(sceneCtl, "wetOn").name("wet shading (W)").onChange(() => {
+          buildMaterial();
+          updateHud();
+        });
+        fw.add(look, "wetAmount", 0, 1, 0.01).name("wetness").onChange(applyLook);
+        fw.add(look, "wetCoatStrength", 0, 1, 0.01).name("film coat strength").onChange(applyLook);
+        fw.add(look, "wetDarken", 0.2, 1, 0.01).name("albedo ×").onChange(applyLook);
+        fw.add(look, "wetRough", 0, 1, 0.01).name("substrate rough").onChange(applyLook);
+        fw.add(look, "wetCoatRough", 0, 0.5, 0.005).name("film coat rough").onChange(applyLook);
+        fw.addColor(look, "wetTint").name("wet tint").onChange(applyLook);
+        fw.add(look, "wetWheelClear", 0, 1, 0.01).name("wheel clearing").onChange(applyLook);
+
+        const fp = gui.addFolder("Puddles");
+        fp.add(look, "puddleAmount", 0, 1, 0.01).name("amount").onChange(applyLook);
+        fp.add(look, "puddleScale", 0.02, 0.4, 0.005).name("scale (cyc/m)").onChange(applyLook);
+        fp.add(look, "puddleStreak", 1, 12, 0.1).name("elongation").onChange(applyLook);
+        fp.add(look, "puddleThreshold", 0.2, 0.9, 0.01).name("threshold").onChange(applyLook);
+        fp.add(look, "puddleSoft", 0.005, 0.25, 0.005).name("edge feather").onChange(applyLook);
+        fp.add(look, "puddleDarken", 0.1, 1, 0.01).name("albedo ×").onChange(applyLook);
+        fp.add(look, "puddleCoatRough", 0, 0.2, 0.002).name("coat rough").onChange(applyLook);
+
+        const fd = gui.addFolder("Drainage");
+        fd.add(sceneCtl, "debugView", DEBUG_VIEWS).name("debug view (D)").onChange(() => {
+          if (roadMesh) roadMesh.material = currentDeckMaterial();
+        }).listen();
+        fd.add(look, "wetDrainStart", 0, 1, 0.01).name("pooling starts").onChange(applyLook);
+        fd.add(look, "wetCamber", 0, 2, 0.01).name("camber weight").onChange(applyLook);
+        fd.add(look, "wetBank", 0, 2, 0.01).name("bank weight").onChange(applyLook);
+        fd.add(look, "wetCurveRef", 0.005, 0.12, 0.001).name("bank curve ref").onChange(applyLook);
+        fd.add(look, "wetDrainStrength", 0, 0.8, 0.01).name("drain → ponding").onChange(applyLook);
+        fd.add(look, "wetSlopeMin", 0, 1, 0.01).name("wall cutoff").onChange(applyLook);
+        fd.add(look, "wetSlopeMax", 0, 1, 0.01).name("flat enough").onChange(applyLook);
+
+        const fr = gui.addFolder("Ripple");
+        fr.add(look, "rippleAmp", 0, 0.3, 0.002).name("amplitude").onChange(applyLook);
+        fr.add(look, "rippleScale", 0.1, 6, 0.02).name("scale (cyc/m)").onChange(applyLook);
+        fr.add(look, "rippleStretch", 1, 10, 0.1).name("elongation").onChange(applyLook);
+        fr.add(look, "rippleDamp", 0, 1, 0.01).name("puddles flatten it").onChange(applyLook);
+        // Last, and 0 by default: standing water on a road has no current, and
+        // a reflection that crawls reads as a river. See rippleSpeed's note.
+        fr.add(look, "rippleSpeed", 0, 3, 0.02).name("drift (0 = still)").onChange(applyLook);
+
+        const fx = gui.addFolder("Car reflection");
+        fx.add(sceneCtl, "reflectOn").name("enabled (X)").onChange(() => {
+          buildMaterial();
+          updateHud();
+        });
+        fx.add(sceneCtl, "reflectScale", 0.125, 1, 0.125).name("target scale")
+          .onChange(() => carReflection?.setSize(reflectSize().width, reflectSize().height));
+        fx.add(sceneCtl, "reflectWheels").name("include wheels").onChange(applyReflectionMembers);
+        fx.add(sceneCtl, "reflectDetail", Object.keys(REFLECT_DETAIL))
+          .name("body detail").onChange(applyReflectionMembers);
+        fx.add(look, "reflectStrength", 0, 3, 0.02).name("strength").onChange(applyLook);
+        fx.add(look, "reflectDistort", 0, 0.25, 0.002).name("water distortion").onChange(applyLook);
+        fx.add(look, "reflectFade", 4, 80, 0.5).name("fade radius (m)").onChange(applyLook);
+
+        const fs = gui.addFolder("Scene");
+        fs.add(sceneCtl, "env", ENV_ORDER).name("sky (E)").onChange(applyEnv);
+        fs.add(sceneCtl, "exposure", 0.2, 3, 0.01).name("exposure")
+          .onChange((v) => { renderer.toneMappingExposure = v; }).listen();
+        fs.add(geom, "piece", Object.keys(PIECES)).name("piece").onChange(() => {
+          rebuildPiece();
+          resetView();
+        });
+        fs.add(geom, "guardrails").name("guardrails").onChange(rebuildPiece);
+        fs.add(sceneCtl, "lampsOn").name("street lamps").onChange(applyLamps);
+        fs.add(sceneCtl, "car").name("car").onChange(() => { if (carRig) carRig.visible = sceneCtl.car; });
+        fs.add(sceneCtl, "headlights").name("headlights").onChange(applyHeadlights);
+        fs.add(sceneCtl, "carDrive").name("drive (P)");
+        fs.add(sceneCtl, "carS", 0, 1, 0.001).name("position").listen();
+
+        const fc = gui.addFolder("View");
+        fc.add(cam, "mode", CAM_MODES).name("mode (C)").onChange(resetView).listen();
+        fc.add(cam, "height", 0.4, 8, 0.05).name("cam height");
+        fc.add(cam, "distance", 2, 30, 0.1).name("cam distance");
+        fc.add(cam, "lookAhead", 4, 90, 0.5).name("look ahead");
+        fc.add(cam, "fov", 25, 100, 1).name("fov")
+          .onChange((v) => { camera.fov = v; camera.updateProjectionMatrix(); });
+        fc.add({ fill: fillCamera }, "fill").name("fill test (F)");
+
+        const fio = gui.addFolder("Look I/O");
+        fio.add({ e: exportLook }, "e").name("Export look .json");
+        fio.add({ i: () => lookFileInput.click() }, "i").name("Import look .json");
+
+        fp.close();
+        fr.close();
+        fio.close();
+      }
+
+      /* --------------------------------------------------------------- input */
+
+      function onKey(e) {
+        const k = e.key.toLowerCase();
+        const n = Number(k);
+        if (Number.isInteger(n) && n >= 1 && n <= WEATHER_ORDER.length) {
+          applyWeather(WEATHER_ORDER[n - 1]);
+          return;
+        }
+        // Matched on e.key (the printed label) rather than e.code, so these land
+        // in the same place on an AZERTY keyboard as on a QWERTY one.
+        switch (k) {
+          case "w":
+            sceneCtl.wetOn = !sceneCtl.wetOn;
+            buildMaterial();
+            refreshGui();
+            break;
+          case "e":
+            sceneCtl.env = ENV_ORDER[(ENV_ORDER.indexOf(sceneCtl.env) + 1) % ENV_ORDER.length];
+            applyEnv();
+            refreshGui();
+            break;
+          case "c":
+            cam.mode = CAM_MODES[(CAM_MODES.indexOf(cam.mode) + 1) % CAM_MODES.length];
+            resetView();
+            refreshGui();
+            break;
+          case "p":
+            sceneCtl.carDrive = !sceneCtl.carDrive;
+            refreshGui();
+            break;
+          case "x":
+            sceneCtl.reflectOn = !sceneCtl.reflectOn;
+            buildMaterial();
+            refreshGui();
+            break;
+          case "d":
+            sceneCtl.debugView = DEBUG_VIEWS[
+              (DEBUG_VIEWS.indexOf(sceneCtl.debugView) + 1) % DEBUG_VIEWS.length
+            ];
+            if (roadMesh) roadMesh.material = currentDeckMaterial();
+            refreshGui();
+            break;
+          case "f":
+            fillCamera();
+            refreshGui();
+            break;
+          case "r":
+            resetView();
+            break;
+          default:
+            break;
+        }
+      }
+
+      function onResize() {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+        const { width, height } = reflectSize();
+        carReflection?.setSize(width, height);
+      }
+
+      /* --------------------------------------------------------------- frame */
+
+      function updateHud() {
+        $("s-wet").innerHTML = sceneCtl.wetOn
+          ? `<span class="wet">wet · ${look.wetAmount.toFixed(2)}</span>`
+          : `<span class="dry">dry (baseline)</span>`;
+        $("s-cam").textContent = cam.mode;
+        $("s-refl").textContent = sceneCtl.reflectOn
+          ? `${reflectCost.draws} draws · ${reflectCost.tris.toLocaleString()} tris `
+            + `· ${Math.round(sceneCtl.reflectScale * 100)}%`
+          : "off";
+      }
+
+      function frame() {
+        timer.update();
+        const dt = Math.min(0.05, timer.getDelta());
+
+        updateCamera(dt);
+        placeCar();
+        // BEFORE the main render — the road samples this frame's mirror, and
+        // rendering it after would project the previous frame onto a camera
+        // that has already moved.
+        updateReflection();
+        renderer.render(scene, camera);
+
+        // Fire-and-forget, exactly as v3/app/main.js and the dry lab do it: the
+        // resolve lands a frame or two later and writes info.render.timestamp,
+        // so awaiting it here would only stall the loop to read a stale number.
+        if (hasTimestamps) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+
+        const now = performance.now();
+        if (!perf.since) perf.since = now;
+        perf.frames++;
+        const ts = renderer.info.render.timestamp;
+        if (ts > 0) { perf.gpuSum += ts; perf.gpuN++; }
+        if (now - perf.since >= 500) {
+          perf.fps = (perf.frames * 1000) / (now - perf.since);
+          perf.gpu = perf.gpuN ? perf.gpuSum / perf.gpuN : 0;
+          $("s-fps").textContent = perf.fps.toFixed(0);
+          $("s-gpu").textContent = perf.gpuN ? `${perf.gpu.toFixed(2)} ms` : "n/a";
+          perf.frames = 0;
+          perf.gpuSum = 0;
+          perf.gpuN = 0;
+          perf.since = now;
+          updateHud();
+        }
+      }
+
+      init().catch(showErr);
+    </script>
+  </body>
+</html>
