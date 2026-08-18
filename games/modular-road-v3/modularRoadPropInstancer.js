@@ -31,6 +31,7 @@ import * as THREE from "three";
 import { mergeByMaterial } from "./modularRoadBatching.js";
 import { enableMeshShadows } from "./modularRoadParkour.js";
 import { decalMaterial, decalGeometry } from "./modularRoadDecals.js";
+import { isSharedGeometry } from "./modularRoadScenery.js";
 
 /** Reused for "no tint" — three multiplies instanceColor in, so white is the
  *  identity and an unset entry would render black. */
@@ -112,8 +113,13 @@ export class PropInstancer {
           tintable: !!o.userData.tintable,
         });
       });
-      // The template tree itself is scaffolding; only the parts are kept.
-      root.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
+      // The template tree itself is scaffolding; only the parts are kept —
+      // except where `make()` handed back a clone of a SHARED template (all of
+      // the scenery catalogue does), in which case the scaffolding's geometry is
+      // the one every placement of that type renders with.
+      root.traverse((o) => {
+        if (o.isMesh && !isSharedGeometry(o.geometry)) o.geometry.dispose();
+      });
     }
     this._templates.set(id, parts);
     return parts;

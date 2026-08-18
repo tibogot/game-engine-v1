@@ -9,7 +9,7 @@ import {
   GATE_POST_RADIUS,
   GATE_POST_HEIGHT,
 } from "./modularRoadPropPhysics.js";
-import { SCENERY_CATALOG, makeSceneryProp } from "./modularRoadScenery.js";
+import { SCENERY_CATALOG, makeSceneryProp, isSharedGeometry } from "./modularRoadScenery.js";
 import { makeContainer, CONTAINER_LIVERIES, CONTAINER_SIZE } from "./modularRoadContainer.js";
 import { makeTireWall } from "./modularRoadTireWall.js";
 import { DECAL_OFFSET } from "./modularRoadDecals.js";
@@ -1976,7 +1976,9 @@ export class PropManager {
       // collisionMeshes), so disposing only the visible one leaks it — and
       // importInstances disposes EVERY prop on every track load.
       o.geometry?.userData?.deckGeometry?.dispose?.();
-      o.geometry?.dispose?.();
+      // Scenery clones share one cached geometry per type, so deleting a single
+      // floodlight must not free the buffers the others are still drawing with.
+      if (!isSharedGeometry(o.geometry)) o.geometry?.dispose?.();
     });
   }
 }

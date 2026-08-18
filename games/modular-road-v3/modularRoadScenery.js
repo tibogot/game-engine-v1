@@ -188,7 +188,41 @@ function buildTemplate(def) {
     marker.userData.capsule = { radius: c.radius, height: c.height };
     root.add(marker);
   }
+
+  // ── MARK THE GEOMETRY AS NOT-YOURS ────────────────────────────────────────
+  //
+  // `makeSceneryProp` hands out `template.clone()`, and Object3D.clone() copies
+  // the node but SHARES the BufferGeometry by reference. Every placement of a
+  // floodlight, every brush ghost of one, and the prop instancer's own scratch
+  // copy therefore all point at the geometry created right here — while three
+  // separate places dispose geometry as if the object they were handed owned it
+  // (roadGame's clearBrush, PropManager._disposeInstance, and the instancer's
+  // template teardown).
+  //
+  // Any one of them frees the GPU buffer out from under every other scenery
+  // prop of that type, and the failure is invisible until the next draw:
+  // `dispose()` releases the buffer but leaves the CPU-side arrays intact, so
+  // the geometry still reports a healthy index and position count and nothing
+  // looks wrong until WebGPU is handed a null buffer —
+  //
+  //   TypeError: Failed to execute 'setIndexBuffer' ... not of type 'GPUBuffer'
+  //
+  // repeating every frame from whichever object happened to reference it.
+  //
+  // The flag is the contract: hold this geometry, never free it. `disposeScenery`
+  // is the one owner, for a full teardown. roadGame already had the same idea in
+  // the spawn brush's `disposeGeo` flag, for the same reason (the car GLB is
+  // shared) — this generalises it to the source instead of the call site.
+  root.traverse((o) => {
+    if (o.isMesh && o.geometry) o.geometry.userData.sharedTemplate = true;
+  });
   return root;
+}
+
+/** True when this geometry belongs to a shared template and must not be freed
+ *  by whoever happens to be holding a clone of it. */
+export function isSharedGeometry(geometry) {
+  return !!geometry?.userData?.sharedTemplate;
 }
 
 const _templates = new Map();

@@ -50,6 +50,7 @@ import {
 } from "../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../v3/play/modularRoadGround.js";
+import { isSharedGeometry } from "./modularRoadScenery.js";
 import {
   createRoadMaterial,
   createGuardrailMaterial,
@@ -564,7 +565,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     if (!brush) return;
     scene.remove(brush.root);
     if (brush.disposeGeo !== false) {
-      brush.root.traverse((o) => { if (o.isMesh) o.geometry?.dispose(); });
+      // Skip anything a shared template owns. Scenery hands out clones that
+      // reference one cached geometry per type (makeSceneryProp), so freeing a
+      // floodlight ghost's buffers here also killed every floodlight already on
+      // the track — and the next ghost, since it clones the same dead geometry.
+      brush.root.traverse((o) => {
+        if (o.isMesh && !isSharedGeometry(o.geometry)) o.geometry?.dispose();
+      });
     }
     const wasSpawn = brush.kind === "spawn";
     brush = null;
