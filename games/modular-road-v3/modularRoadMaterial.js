@@ -515,6 +515,19 @@ export function createRoadMaterial(opts = {}) {
       reflectOn: uniform(0),
     };
 
+    /**
+     * ONE texture node, sampled with `.sample(uv)` rather than `texture(t, uv)`.
+     *
+     * The reflection is double-buffered (see modularRoadReflection.js — the road
+     * cannot sample a target the mirror pass is writing in the same WebGPU sync
+     * scope), so the texture the material must read CHANGES IDENTITY every
+     * frame. `texture(t, uv)` bakes `t` in at build time; the `.sample()` form
+     * keeps `.value` assignable, which is what lets the caller point it at
+     * whichever buffer was written last.
+     */
+    const reflectTex = texture(opts.reflectionTexture);
+    mat._reflectTextureNode = reflectTex;
+
     reflectNode = Fn(() => {
       const clip = r.reflectMatrix.mul(vec4(positionWorld, 1.0));
       const projUv = clip.xy.div(max(clip.w, float(1e-4)));
@@ -527,7 +540,7 @@ export function createRoadMaterial(opts = {}) {
         .mul(u.reflectDistort).mul(wet.coatNormalGain);
       const reflUv = projUv.add(wob);
 
-      const col = texture(opts.reflectionTexture, reflUv);
+      const col = reflectTex.sample(reflUv);
 
       // Fresnel. Same shape as the glass pane above: near-nothing looking
       // straight down, near-total at the grazing angle a chase camera lives at.

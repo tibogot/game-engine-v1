@@ -1064,6 +1064,11 @@
         const ok = carReflection.update(camera, _planePoint, _planeNormal);
         r.reflectOn.value = ok ? 1 : 0;
         if (!ok) return;
+        // Follow the ping-pong — see modularRoadReflection.js. The lab does not
+        // hit the WebGPU sync-scope conflict (it renders straight to the canvas)
+        // but it has to track the swap or it samples last frame's buffer.
+        const texNode = roadMat._reflectTextureNode;
+        if (texNode) texNode.value = carReflection.texture;
         r.reflectMatrix.value.copy(carReflection.textureMatrix);
         r.reflectCenter.value.copy(_planePoint);
         r.reflectNormal.value.copy(_planeNormal);

@@ -79,21 +79,47 @@ export function createCarReflection({
   width = 512,
   height = 512,
 } = {}) {
-  // HalfFloat, not the default 8-bit: headlights, brake lamps and the neon
-  // tubes are all well above 1.0, and an LDR target would clip them to white
-  // before the road ever sees them — losing exactly the part of the reflection
-  // that reads at night.
-  const target = new THREE.RenderTarget(width, height, {
-    type: THREE.HalfFloatType,
-    depthBuffer: true,
-    samples: 0,
-  });
-  target.texture.name = "CarReflection";
-  target.texture.minFilter = THREE.LinearFilter;
-  target.texture.magFilter = THREE.LinearFilter;
-  target.texture.generateMipmaps = false;
-  target.texture.wrapS = THREE.ClampToEdgeWrapping;
-  target.texture.wrapT = THREE.ClampToEdgeWrapping;
+  // TWO TARGETS, PING-PONGED, AND THIS IS NOT AN OPTIMISATION.
+  //
+  // The road SAMPLES this texture and the mirror pass WRITES it, and WebGPU
+  // forbids a texture being bound readable and writable in the same
+  // synchronization scope:
+  //
+  //   [Texture "CarReflection"] usage (TextureBinding|RenderAttachment) includes
+  //   writable usage and another usage in the same synchronization scope.
+  //   [Invalid CommandBuffer] is invalid due to a previous error.
+  //
+  // The whole command buffer is then discarded. It cost a long time to find
+  // because it is a WARNING, not a throw, and because the symptom is a
+  // reflection that is simply never there — indistinguishable from one that is
+  // too dim, mis-projected or multiplied to zero.
+  //
+  // It does NOT reproduce in wet-road-lab, which renders straight to the canvas
+  // and so gets a natural boundary between the two passes. road.html runs the
+  // v3 post pipeline, which batches the mirror pass and the scene that samples
+  // it into one command encoder — same scope, instant conflict.
+  //
+  // So: write into the back buffer, hand the front one to the material, swap.
+  // The material samples a texture nothing is writing this frame, which is the
+  // standard fix and the reason every planar-reflection implementation
+  // double-buffers.
+  const makeTarget = (i) => {
+    const t = new THREE.RenderTarget(width, height, {
+      type: THREE.HalfFloatType,
+      depthBuffer: true,
+      samples: 0,
+    });
+    t.texture.name = `CarReflection${i}`;
+    t.texture.minFilter = THREE.LinearFilter;
+    t.texture.magFilter = THREE.LinearFilter;
+    t.texture.generateMipmaps = false;
+    t.texture.wrapS = THREE.ClampToEdgeWrapping;
+    t.texture.wrapT = THREE.ClampToEdgeWrapping;
+    return t;
+  };
+  const targets = [makeTarget(0), makeTarget(1)];
+  /** Index of the target the material should SAMPLE — the one written last. */
+  let front = 0;
 
   const virtualCamera = new THREE.PerspectiveCamera();
   virtualCamera.layers.set(REFLECT_LAYER);
@@ -112,16 +138,21 @@ export function createCarReflection({
   let enabled = true;
 
   return {
-    texture: target.texture,
+    /** The texture to SAMPLE this frame. Changes identity every frame, so the
+     *  material must follow it — see `_reflectTextureNode` on the road material
+     *  and the `.sample(uv)` form that makes a swappable texture node legal. */
+    get texture() { return targets[front].texture; },
     /** Exposed for readback when debugging an empty mirror. */
-    target,
+    get target() { return targets[front]; },
     textureMatrix,
     camera: virtualCamera,
     get enabled() { return enabled; },
     set enabled(v) { enabled = v; },
 
     setSize(w, h) {
-      target.setSize(Math.max(2, w | 0), Math.max(2, h | 0));
+      const W = Math.max(2, w | 0);
+      const H = Math.max(2, h | 0);
+      for (const t of targets) t.setSize(W, H);
     },
 
     /**
@@ -200,9 +231,12 @@ export function createCarReflection({
       scene.fog = null;
       renderer.shadowMap.autoUpdate = false;
       renderer.setClearColor(0x000000, 0);
-      renderer.setRenderTarget(target);
+      // Write to the BACK buffer; the material is still sampling the front one.
+      const back = front ^ 1;
+      renderer.setRenderTarget(targets[back]);
       renderer.clear();
       renderer.render(scene, virtualCamera);
+      front = back;
 
       renderer.setRenderTarget(prevTarget);
       renderer.setClearColor(prevClear, prevAlpha);
@@ -213,7 +247,7 @@ export function createCarReflection({
     },
 
     dispose() {
-      target.dispose();
+      for (const t of targets) t.dispose();
     },
   };
 }

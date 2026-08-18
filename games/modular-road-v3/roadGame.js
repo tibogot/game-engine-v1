@@ -923,6 +923,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const ok = carReflection.update(camera, _mirrorPoint, _mirrorNormal);
     ru.reflectOn.value = ok ? 1 : 0;
     if (!ok) return;
+    // Follow the ping-pong: `carReflection.texture` is whichever buffer was
+    // just written, and the material must sample THAT one — never the buffer
+    // the mirror pass is still writing (see modularRoadReflection.js).
+    const texNode = roadMaterial._reflectTextureNode;
+    if (texNode) texNode.value = carReflection.texture;
     ru.reflectMatrix.value.copy(carReflection.textureMatrix);
     ru.reflectCenter.value.copy(_mirrorPoint);
     ru.reflectNormal.value.copy(_mirrorNormal);
