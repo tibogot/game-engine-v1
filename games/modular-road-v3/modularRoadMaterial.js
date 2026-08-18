@@ -193,6 +193,7 @@ export function createRoadMaterial(opts = {}) {
     rippleStretch: uniform(opts.rippleStretch ?? WET_DEFAULTS.rippleStretch),
     rippleDamp: uniform(opts.rippleDamp ?? WET_DEFAULTS.rippleDamp),
     reflectStrength: uniform(opts.reflectStrength ?? WET_DEFAULTS.reflectStrength),
+    reflectFresnel: uniform(opts.reflectFresnel ?? WET_DEFAULTS.reflectFresnel),
     reflectDistort: uniform(opts.reflectDistort ?? WET_DEFAULTS.reflectDistort),
     reflectFade: uniform(opts.reflectFade ?? WET_DEFAULTS.reflectFade),
   };
@@ -530,7 +531,7 @@ export function createRoadMaterial(opts = {}) {
 
       // Fresnel. Same shape as the glass pane above: near-nothing looking
       // straight down, near-total at the grazing angle a chase camera lives at.
-      const fres = oneMinus(abs(normalView.z)).pow(4.0);
+      const fres = oneMinus(abs(normalView.z)).pow(u.reflectFresnel);
 
       // Valid only on the plane, and only on surfaces facing along it.
       const dist = length(positionWorld.sub(r.reflectCenter));

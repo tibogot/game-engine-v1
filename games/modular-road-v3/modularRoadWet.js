@@ -229,8 +229,34 @@ export const WET_DEFAULTS = {
   // (see modularRoadReflection.js). These are the AUTHORED half; the plane and
   // its matrix are per-frame runtime state and live in `mat._reflectUniforms`,
   // deliberately outside the look so a saved track cannot pin a stale matrix.
-  /** Overall reflection brightness. 1 = as rendered. */
-  reflectStrength: 1.0,
+  /**
+   * Overall reflection brightness. 1 = exactly what the mirror rendered.
+   *
+   * Above 1 by default, and that is a deliberate cheat rather than a fudge for a
+   * bug. See reflectFresnel: at the angle a chase camera actually sits at, the
+   * physically correct reflectance is about a tenth, and a tenth of a dark car
+   * on a lit road is invisible. Every racing game pushes this.
+   */
+  reflectStrength: 1.4,
+  /**
+   * Fresnel falloff exponent. LOWER = the reflection survives at steeper
+   * viewing angles.
+   *
+   * This exists because of a measured gap between the lab and the game.
+   * wet-road-lab's camera sits 1.55 m up at 7.5 m back — about 12 degrees off
+   * the deck, cos(theta) 0.20 — where the reflection is obvious. road.html's
+   * chase camera is 3.8 m up at 8.7 m back, about 24 degrees, cos(theta) 0.44.
+   * At the original hard-coded exponent of 4 that is 0.101 against the lab's
+   * 0.406: four times weaker, which took the same correct, correctly-placed
+   * reflection from clearly visible to not visible at all.
+   *
+   * Schlick says 5 (with an F0 floor), so 4 was already generous and dropping to
+   * 2.5 is frankly artistic licence. It is the right kind of licence: the real
+   * cue a wet road gives you is that SOMETHING is mirrored in it, and a curve
+   * tuned for a camera lying on the tarmac does not deliver that from a chase
+   * camera. Raise it back toward 4-5 for a physically tighter falloff.
+   */
+  reflectFresnel: 2.5,
   /**
    * How far the water surface pushes the reflection around, in UV. This is what
    * stops it looking like a decal: a reflection that lands on a rippled film
@@ -257,7 +283,7 @@ export const WET_NUMBERS = [
   "wetDrainStart", "wetCamber", "wetBank", "wetCurveRef", "wetDrainStrength",
   "wetSlopeMin", "wetSlopeMax", "wetWheelClear",
   "rippleAmp", "rippleScale", "rippleSpeed", "rippleStretch", "rippleDamp",
-  "reflectStrength", "reflectDistort", "reflectFade",
+  "reflectStrength", "reflectFresnel", "reflectDistort", "reflectFade",
 ];
 
 export const WET_KEYS = [...WET_COLORS, ...WET_NUMBERS];

@@ -260,7 +260,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     domElement: renderer.domElement,
     orbit: controls,
     isBuildMode: () => mode === "build",
-    onChange: () => { bakeCollision(); paletteUi?.refreshStatus?.(); },
+    onChange: () => {
+      bakeCollision();
+      // The builder rebuilds its instanced layer on every change, so the mirror
+      // would quietly lose the rails without this.
+      applyRailReflectionMembers();
+      paletteUi?.refreshStatus?.();
+    },
   });
 
   // ── PROPS / MOVERS / PORTALS ───────────────────────────────────────────────
@@ -840,6 +846,39 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    *  silhouette — three tests light.layers against the object's. */
   function lightReflectionAll() {
     scene.traverse((o) => { if (o.isLight) lightReflection(o); });
+  }
+
+  /**
+   * GUARDRAILS IN THE MIRROR, and they matter more than the car does.
+   *
+   * The car's own reflection lands directly UNDERNEATH the car, where the car
+   * hides it — and at the chase camera's 3.8 m the little that escapes is
+   * compressed into a sliver at the tyres and falls off the bottom of the
+   * frame. wet-road-lab flatters it by sitting at 1.55 m, where the same
+   * reflection stretches back toward the viewer across open deck.
+   *
+   * The rail does not have that problem: it runs alongside the car, so it
+   * mirrors onto the middle of the road, which is the part of the screen the
+   * player is looking at. Measured in the lab it was also the cheapest thing in
+   * the pass by a distance — one merged sweep, +1 draw.
+   *
+   * Membership goes on whatever actually renders. The builder swaps between
+   * per-piece proxies and one InstancedMesh per (role, geometry) depending on
+   * `instancingEnabled`, so this keys off MATERIAL IDENTITY rather than trying
+   * to track which of the two is live.
+   */
+  let railsInMirror = true;
+  function applyRailReflectionMembers() {
+    const apply = (root) => {
+      root?.traverse((o) => {
+        if (!o.isMesh && !o.isInstancedMesh) return;
+        if (o.material !== railMaterial) { o.layers.disable(REFLECT_LAYER); return; }
+        if (railsInMirror) o.layers.enable(REFLECT_LAYER);
+        else o.layers.disable(REFLECT_LAYER);
+      });
+    };
+    apply(builder?.instGroup);
+    apply(builder?.root);
   }
 
   const _mirrorPoint = new THREE.Vector3();
@@ -3539,6 +3578,7 @@ ${e.message}`);
   // mirror onto a camera that has already moved.
   lightReflectionAll();
   applyCarReflectionMembers();
+  applyRailReflectionMembers();
   app.addPreRenderHook?.(updateCarReflection);
 
   onStatus("ready");
@@ -3574,6 +3614,14 @@ ${e.message}`);
       }
     },
     getReflection: () => reflectionEnabled,
+    setRailsInMirror: (on) => { railsInMirror = !!on; applyRailReflectionMembers(); },
+    getRailsInMirror: () => railsInMirror,
+    /** The mirror itself — exposed for the same reason the lab exposes it: when
+     *  a reflection is missing, "the target is empty", "the projection lands off
+     *  the edge" and "it is there but multiplied to nothing" look identical on
+     *  screen and have completely different fixes. */
+    carReflection,
+    roadMaterial,
     /** Master weather, 0..1. Rides ROAD_LOOK, so a track saves its own. */
     setWet: (v) => { roadMaterial._roadUniforms.wetAmount.value = Math.max(0, Math.min(1, v)); },
     getWet: () => roadMaterial._roadUniforms.wetAmount.value,
