@@ -868,6 +868,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * to track which of the two is live.
    */
   let railsInMirror = true;
+  /** Set once buildMergedTrack's group exists — see the note in `apply`. */
+  let _mergedGroupRef = null;
   function applyRailReflectionMembers() {
     const apply = (root) => {
       root?.traverse((o) => {
@@ -879,6 +881,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     };
     apply(builder?.instGroup);
     apply(builder?.root);
+    // Drive mode's merged track — see buildMergedTrack. Tagging only the
+    // editable proxies tags the copies that are hidden the moment you drive.
+    //
+    // Late-bound on purpose: this function is hoisted and the builder's
+    // onChange calls it during construction, before `mergedGroup` exists.
+    // Naming the const directly there is a temporal-dead-zone throw.
+    apply(_mergedGroupRef);
   }
 
   const _mirrorPoint = new THREE.Vector3();
@@ -1283,6 +1292,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   mergedGroup.name = "ModularRoadMerged";
   mergedGroup.visible = false;
   scene.add(mergedGroup);
+  _mergedGroupRef = mergedGroup;
 
   const MERGE_ROLES = [
     { pick: (p) => p.mesh, mat: () => roadMaterial, cast: true },
@@ -1352,6 +1362,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         mergedGroup.add(mesh);
       }
     }
+    // THE MERGED MESHES ARE THE ONES THAT ACTUALLY DRAW IN DRIVE MODE, so they
+    // are the ones the mirror needs. Without this the guardrail was never
+    // reflected in the game while reflecting perfectly in wet-road-lab, which
+    // does not batch: membership had been applied to the per-piece proxies,
+    // and drive mode then hides those and draws these instead. Measured on a
+    // live track — 32 rail meshes on the reflect layer, all hidden; 8 visible,
+    // none on the layer.
+    applyRailReflectionMembers();
   }
 
   // ── INSTANCED PROPS ────────────────────────────────────────────────────────
