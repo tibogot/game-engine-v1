@@ -328,6 +328,10 @@
         reflectWheels: true,
         /** How much of the BODY goes in. See REFLECT_DETAIL. */
         reflectDetail: "lean",
+        /** Guardrails in the mirror. */
+        reflectRails: true,
+        /** Lamp posts + their emissive heads in the mirror. */
+        reflectLamps: true,
       };
 
       const cam = {
@@ -551,6 +555,8 @@
           get roadMat() { return roadMat; },
           get carReflection() { return carReflection; },
           get carRig() { return carRig; },
+          applyReflectionMembers,
+          get reflectCost() { return reflectCost; },
         };
 
         renderer.setAnimationLoop(frame);
@@ -797,10 +803,17 @@
 
           const bulb = new THREE.PointLight(0xffb54a, sceneCtl.lampsOn ? LAMP_CD : 0, 30, 2);
           bulb.position.copy(headPos).addScaledVector(f.up, -0.2);
+          // Always a member, whatever `reflectLamps` does to the POSTS: these
+          // are what light the reflected car and rails at night, and a mirror
+          // lit by nothing is a silhouette.
+          lightReflection(bulb);
           lampGroup.add(bulb);
         }
         lampGroup.userData.headMat = headMat;
         scene.add(lampGroup);
+        // Both this and the rail are rebuilt whenever the piece changes, so
+        // membership has to be re-applied or the mirror quietly empties out.
+        applyReflectionMembers();
       }
 
       /** Orientation matrix for a frame, as a quaternion. */
@@ -1057,25 +1070,50 @@
       }
 
       /** Which parts of the car go into the mirror. */
+      /**
+       * WHAT GOES IN THE MIRROR.
+       *
+       * The whole argument for a planar reflection over SSR is that this is a
+       * list you choose rather than whatever the ray march happens to hit, so
+       * the list is the feature. Everything here is a separate toggle because
+       * the question "how much of the full-reflection feeling do we get without
+       * SSR at all" is answered by turning them on one at a time and watching
+       * the draw/triangle counter in the HUD move.
+       *
+       * The ROAD is deliberately never a member: it would reflect itself, and
+       * it is the largest thing in the scene.
+       */
       function applyReflectionMembers() {
-        if (!carRig) return;
         const drop = REFLECT_DETAIL[sceneCtl.reflectDetail] ?? null;
-        for (const child of carRig.children) {
-          const isWheel = child.name === "WheelModelGLB";
-          const wanted = isWheel ? sceneCtl.reflectWheels : true;
-          child.traverse((o) => {
-            // MESHES ONLY. An earlier version cleared the layer across the whole
-            // rig first, which also stripped it from the headlight SpotLights
-            // parented to the car — leaving the mirrored car sitting in its own
-            // unlit shadow at night, which reads as the reflection being broken
-            // rather than as a lighting problem.
+
+        const setMembership = (obj, wanted, filtered = false) => {
+          obj?.traverse((o) => {
+            // MESHES ONLY. An earlier version cleared the layer across a whole
+            // rig, which also stripped it from the headlight SpotLights parented
+            // to the car — leaving the mirrored car sitting in its own unlit
+            // shadow at night, which reads as the reflection being broken rather
+            // than as a lighting problem.
             if (!o.isMesh) return;
             const name = (o.name || "").toLowerCase();
-            const dropped = drop && drop.some((k) => name.includes(k));
+            const dropped = filtered && drop && drop.some((k) => name.includes(k));
             if (wanted && !dropped) o.layers.enable(REFLECT_LAYER_ID);
             else o.layers.disable(REFLECT_LAYER_ID);
           });
+        };
+
+        for (const child of carRig?.children ?? []) {
+          const isWheel = child.name === "WheelModelGLB";
+          setMembership(child, isWheel ? sceneCtl.reflectWheels : true, true);
         }
+        // Guardrail: the longest thing beside the car, and the one most likely
+        // to show the mirror's edge — it runs past `reflectFade` on a straight,
+        // so if the fade is going to read as a seam anywhere it is here.
+        setMembership(railMesh, sceneCtl.reflectRails);
+        // Lamp posts: the masts are dull, but the emissive heads are the
+        // brightest small things in the scene, and a bright small thing smeared
+        // down a wet road is most of what sells this at night.
+        setMembership(lampGroup, sceneCtl.reflectLamps);
+
         reportReflectionCost();
       }
 
@@ -1335,6 +1373,8 @@
         fx.add(sceneCtl, "reflectWheels").name("include wheels").onChange(applyReflectionMembers);
         fx.add(sceneCtl, "reflectDetail", Object.keys(REFLECT_DETAIL))
           .name("body detail").onChange(applyReflectionMembers);
+        fx.add(sceneCtl, "reflectRails").name("+ guardrails").onChange(applyReflectionMembers);
+        fx.add(sceneCtl, "reflectLamps").name("+ lamp posts").onChange(applyReflectionMembers);
         fx.add(look, "reflectStrength", 0, 3, 0.02).name("strength").onChange(applyLook);
         fx.add(look, "reflectDistort", 0, 0.25, 0.002).name("water distortion").onChange(applyLook);
         fx.add(look, "reflectFade", 4, 80, 0.5).name("fade radius (m)").onChange(applyLook);
