@@ -253,8 +253,13 @@ const tubesTab = BUILDER_SRC.match(/\n  tubes: \[([\s\S]*?)\n  \],/)?.[1] ?? "";
 for (const id of ["half_tube_str", "half_tube_long", "half_tube_turn", "half_tube_deep"]) {
   const tile = tubesTab.match(new RegExp(`\\{[^{}]*id: "${id}"[\\s\\S]*?\\n    \\},`))?.[0] ?? "";
   const base = tile.match(/base: "(\w+)"/)?.[1];
+  // WAS also asserting `preview: <svg`. That is gone on purpose: the palette
+  // dropped ~130 hand-drawn tile silhouettes for baked 3D thumbnails, so the
+  // artwork a tile shows now comes from `base` + `params` and there is nothing
+  // to draw by hand. What still has to hold is that the tile names a piece the
+  // kit really builds, and carries the params it is a preset OF.
   check(`"${id}" is a Tubes tile on an existing piece`,
-    tile.length > 0 && PIECE_BY_ID.has(base) && /preview: `<svg/.test(tile), base ?? "no base");
+    tile.length > 0 && PIECE_BY_ID.has(base) && /params: \{/.test(tile), base ?? "no base");
 }
 
 console.log(fail === 0 ? "\nAll half-tube checks passed." : `\n${fail} check(s) FAILED.`);
