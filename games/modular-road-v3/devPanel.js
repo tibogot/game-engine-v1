@@ -1155,6 +1155,52 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Weather</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Wetness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wet" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-wet-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Puddles</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wet-puddle" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-wet-puddle-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Dry line</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wet-wheel" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-wet-wheel-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Car reflection</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-reflect" type="button" aria-label="Car reflection">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Reflect rails</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-reflect-rails" type="button" aria-label="Reflect guardrails">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Reflection strength</span>
+            <div class="prop-value">
+              <input type="range" id="dv-reflect-str" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-reflect-str-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Bloom</div>
         <div class="section-body">
           <div class="prop-row">
@@ -2174,6 +2220,25 @@ export function createRoadDevPanel({ app, game, params }) {
   const autoToggle = toggle("dv-lights-auto", true, (on) => game.setAutoHeadlights(on));
   slider("dv-lamp", HEADLIGHTS, "lampEmissive", (v) => v.toFixed(1), () => game.refreshLights());
   slider("dv-beam", HEADLIGHTS, "intensity", (v) => v.toFixed(0), () => game.refreshLights());
+
+  // ── Weather ─────────────────────────────────────────────────────────────────
+  // `wetAmount` at 0 is not merely invisible, it decides which MATERIAL the road
+  // is built from (see setWet in roadGame): crossing 0 swaps a plain Standard
+  // material for a Physical one with a clearcoat lobe, and back. So the slider
+  // is a build trigger at one end of its range and a uniform everywhere else.
+  const weather = {
+    wet: game.getWet?.() ?? 0,
+    puddles: game.getPuddles?.() ?? 1,
+    dryLine: game.getWheelClear?.() ?? 0.45,
+    reflectStrength: game.getReflectStrength?.() ?? 1.4,
+  };
+  slider("dv-wet", weather, "wet", (v) => v.toFixed(2), (v) => game.setWet?.(v));
+  slider("dv-wet-puddle", weather, "puddles", (v) => v.toFixed(2), (v) => game.setPuddles?.(v));
+  slider("dv-wet-wheel", weather, "dryLine", (v) => v.toFixed(2), (v) => game.setWheelClear?.(v));
+  toggle("dv-reflect", true, (on) => game.setReflection?.(on));
+  toggle("dv-reflect-rails", true, (on) => game.setRailsInMirror?.(on));
+  slider("dv-reflect-str", weather, "reflectStrength", (v) => v.toFixed(2),
+    (v) => game.setReflectStrength?.(v));
 
   // ── Bloom ───────────────────────────────────────────────────────────────────
   const bloom = { strength: 0.9, radius: 0.5 };

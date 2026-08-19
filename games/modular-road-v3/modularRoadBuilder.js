@@ -2022,6 +2022,25 @@ export class ModularRoadBuilder {
    * the gap material — road you cannot see and fall straight through, saved to
    * the track file in that state.
    */
+  /**
+   * Swap the road material on every existing piece.
+   *
+   * Exists because the road's material CLASS is not fixed: a dry track runs on
+   * MeshStandardNodeMaterial and a wet one on MeshPhysicalNodeMaterial, since
+   * three only compiles the clearcoat lobe when `clearcoatNode` is set (see
+   * createRoadMaterial). Turning the weather on therefore replaces the object,
+   * not a uniform, and every piece has to be re-pointed at it.
+   *
+   * Routed through `_applyPiecePresence` rather than assigning `mesh.material`
+   * directly so the gap-spacer rule survives the swap — those pieces wear
+   * `gapMaterial` and must keep wearing it.
+   */
+  setRoadMaterial(material) {
+    if (!material || material === this.material) return;
+    this.material = material;
+    for (const p of this.pieces) if (p.mesh) this._applyPiecePresence(p);
+  }
+
   _applyPiecePresence(p) {
     const gap = !!PIECE_BY_ID.get(p.id)?.noMesh;
     p.mesh.userData.pieceId = p.id;

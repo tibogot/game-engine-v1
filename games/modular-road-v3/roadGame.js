@@ -224,10 +224,21 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   // 3) ── THE TRACK ──────────────────────────────────────────────────────────
   onStatus("Building track…");
-  const roadMaterial = createRoadMaterial({
-    wet: true,
-    reflectionTexture: carReflection.texture,
-  });
+  /**
+   * THE ROAD MATERIAL, and it is a `let` because its CLASS is not fixed.
+   *
+   * three compiles the clearcoat lobe only when `clearcoatNode` is set, so a
+   * material built wet pays for that lobe on every deck pixel forever —
+   * `wetAmount` at 0 makes it invisible, not free. A dry track therefore gets a
+   * plain MeshStandardNodeMaterial, byte-identical to what shipped before any
+   * of this existed, and crossing 0 on the weather slider REBUILDS it.
+   * `applyRoadMaterial` below is what makes that swap safe.
+   *
+   * Built dry at boot: a track that wants weather turns it on when its look
+   * loads, and the overwhelmingly common case is a dry track that should pay
+   * nothing at all.
+   */
+  let roadMaterial = createRoadMaterial();
   const railMaterial = createGuardrailMaterial();
   const shellMaterial = createTunnelMaterial();
   const decorMaterial = createDecorMaterial();
@@ -906,6 +917,46 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * Airborne (no contacts) the plane is undefined, so the reflection fades out —
    * which is also when nobody is looking at the road surface anyway.
    */
+  /**
+   * Swap in a differently-built road material and re-point everything at it.
+   *
+   * Every holder has to move together or the track renders in two materials at
+   * once: the builder's per-piece meshes, the merged drive-mode track (its
+   * MERGE_ROLES entry reads `roadMaterial` through a getter, so it only needs a
+   * rebuild), and the authored look, which lives in uniforms the new material
+   * does not have yet.
+   */
+  function applyRoadMaterial(next) {
+    if (!next || next === roadMaterial) return;
+    const prev = roadMaterial;
+    roadMaterial = next;
+    syncRoadUniforms(roadMaterial, roadLook);
+    builder.setRoadMaterial(roadMaterial);
+    if (mergedGroup.visible) { disposeMergedTrack(); buildMergedTrack(); }
+    // Only after nothing references it any more.
+    prev?.dispose?.();
+  }
+
+  /**
+   * Master weather. Crossing 0 changes which material the road is built from —
+   * see the note on `roadMaterial` — so this is a rebuild at one end of its
+   * range and a uniform poke everywhere else.
+   */
+  function setRoadWet(v) {
+    const wet = Math.max(0, Math.min(1, v || 0));
+    roadLook.wetAmount = wet;
+    const wantWet = wet > 0;
+    const isWet = !!roadMaterial._reflectUniforms || roadMaterial.isMeshPhysicalNodeMaterial;
+    if (wantWet !== isWet) {
+      applyRoadMaterial(createRoadMaterial({
+        ...roadLook,
+        wet: wantWet,
+        reflectionTexture: wantWet ? carReflection.texture : null,
+      }));
+    }
+    roadMaterial._roadUniforms.wetAmount.value = wet;
+  }
+
   function updateCarReflection() {
     const ru = roadMaterial._reflectUniforms;
     if (!ru) return;
@@ -3335,8 +3386,37 @@ ${e.message}`);
         if (builder.selectedPiece) builder.makeGap(builder.selectedPiece);
         paletteUi.refreshStatus();
       },
-      roadUniforms: roadMaterial._roadUniforms,
+      // A GETTER, not a snapshot: the weather slider can replace the whole
+      // material (see applyRoadMaterial), and a captured uniform bag would go on
+      // pointing at the discarded one — every road control in the panel would
+      // silently stop working the first time you crossed 0.
+      get roadUniforms() { return roadMaterial._roadUniforms; },
       railMaterial,
+      // ── Weather ──────────────────────────────────────────────────────────
+      setWet: setRoadWet,
+      getWet: () => roadMaterial._roadUniforms.wetAmount.value,
+      setPuddles: (v) => {
+        roadLook.puddleAmount = v;
+        roadMaterial._roadUniforms.puddleAmount.value = v;
+      },
+      getPuddles: () => roadMaterial._roadUniforms.puddleAmount.value,
+      setWheelClear: (v) => {
+        roadLook.wetWheelClear = v;
+        roadMaterial._roadUniforms.wetWheelClear.value = v;
+      },
+      getWheelClear: () => roadMaterial._roadUniforms.wetWheelClear.value,
+      setReflectStrength: (v) => {
+        roadLook.reflectStrength = v;
+        roadMaterial._roadUniforms.reflectStrength.value = v;
+      },
+      getReflectStrength: () => roadMaterial._roadUniforms.reflectStrength.value,
+      setReflection: (on) => {
+        reflectionEnabled = !!on;
+        if (!on && roadMaterial._reflectUniforms) {
+          roadMaterial._reflectUniforms.reflectOn.value = 0;
+        }
+      },
+      setRailsInMirror: (on) => { railsInMirror = !!on; applyRailReflectionMembers(); },
       getLinesOn: () => roadMaterial._roadUniforms.linesOn.value > 0.5,
       setLinesOn: (on) => { roadMaterial._roadUniforms.linesOn.value = on ? 1 : 0; },
       setTireMarksEnabled: (on) => {
@@ -3644,9 +3724,9 @@ ${e.message}`);
      *  the edge" and "it is there but multiplied to nothing" look identical on
      *  screen and have completely different fixes. */
     carReflection,
-    roadMaterial,
+    get roadMaterial() { return roadMaterial; },
     /** Master weather, 0..1. Rides ROAD_LOOK, so a track saves its own. */
-    setWet: (v) => { roadMaterial._roadUniforms.wetAmount.value = Math.max(0, Math.min(1, v)); },
+    setWet: setRoadWet,
     getWet: () => roadMaterial._roadUniforms.wetAmount.value,
     getRoadLook: () => readRoadLook(roadMaterial),
     setRoadLook: (l) => {
