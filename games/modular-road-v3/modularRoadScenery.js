@@ -1,6 +1,6 @@
 // ============================================================================
-// SCENERY — the v2 objects-lab pieces (LED board, billboard, floodlight) as
-// placeable road-builder props.
+// SCENERY — the v2 objects-lab pieces (LED board, billboard, street lamp,
+// floodlight) as placeable road-builder props.
 //
 // The builders in v2/objects/ are already the right code and are shared with the
 // lab and the v2 editor, so this does NOT re-implement them. It ADAPTS them, and
@@ -39,6 +39,7 @@ import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { flattenInstanced, mergeByMaterial } from "./modularRoadBatching.js";
 import { buildLedMatrixMesh } from "../../v2/objects/ledMatrix.js";
 import { buildBillboardMesh } from "../../v2/objects/billboard.js";
+import { buildStreetLampMesh } from "../../v2/objects/streetLamp.js";
 import { buildFloodlightMesh } from "../../v2/objects/floodlight.js";
 
 /** Single point at the origin on flat ground — the prop root does the placing. */
@@ -87,6 +88,30 @@ export const SCENERY_CATALOG = [
     ],
   },
   {
+    id: "streetlamp",
+    label: "Street lamp",
+    build: buildStreetLampMesh,
+    params: {
+      // castLight OFF, and this is the prop where that matters most. A
+      // floodlight you place three of; street lamps you line a whole straight
+      // with, so a real PointLight each is the one cost that scales with how
+      // much you like the look. The builder's own default is `true` — this
+      // overrides it for placed scenery.
+      castLight: false,
+      // ...but the GROUND POOL stays, and it is why turning the light off is
+      // affordable: an additive radial decal on the deck, one extra quad, no
+      // light. On a wet road the pool plus the lamp head's reflection is most
+      // of what a real light would have given us.
+      groundPool: true,
+      poolRadius: 2.4,
+      poolStrength: 0.5,
+    },
+    // The pole only. Arm, lantern and pool overhang the road and are
+    // deliberately NOT solid — you drive under the light, not into it.
+    // baseHeight 0.34 + poleHeight 4.4 in STREET_LAMP_DEFAULTS.
+    capsules: [{ x: 0, radius: 0.14, height: 4.74 }],
+  },
+  {
     id: "floodlight",
     label: "Floodlight",
     build: buildFloodlightMesh,
@@ -126,6 +151,13 @@ function toNodeMaterial(m) {
   n.transparent = m.transparent;
   n.opacity = m.opacity;
   n.depthWrite = m.depthWrite;
+  // BLENDING TOO. The street lamp's ground pool is an AdditiveBlending quad,
+  // and dropping the blend mode here turns a glow into a flat grey disc lying
+  // on the road — the material still works, it just looks wrong, which is the
+  // hardest kind of omission to spot.
+  n.blending = m.blending;
+  n.alphaMap = m.alphaMap ?? null;
+  n.alphaTest = m.alphaTest;
   if (m.roughness !== undefined && n.roughness !== undefined) n.roughness = m.roughness;
   if (m.metalness !== undefined && n.metalness !== undefined) n.metalness = m.metalness;
   if (m.emissive && n.emissive) {
