@@ -277,6 +277,22 @@ export const WET_DEFAULTS = {
    * reflection, which lands mostly on that strip.
    */
   kerbWet: 0.6,
+  /**
+   * Metres a surface may sit OFF the mirror plane before its reflection is gone.
+   *
+   * This is the fade that matters on a curve, and the original had only a
+   * spherical distance falloff, which is the wrong criterion. A planar mirror is
+   * exact only ON its plane; the error in a reflected position grows with how
+   * far the surface has left it. A straight deck IS the plane, so deviation is
+   * ~0 and the reflection can run for tens of metres. An R26 curve deviates
+   * roughly d²/2R — about 0.5 m at 5 m out and 1.9 m at 10 m — so it should die
+   * within a few metres, which a radius fade tuned for straights never did.
+   * That mismatch is exactly the smeared, morphed guardrail on curves.
+   *
+   * Self-tuning as a result: one number gives long reflections on straights and
+   * short ones through corners, with no per-piece authoring.
+   */
+  reflectPlaneTol: 0.7,
   /** Metres from the car's contact point at which the reflection has faded to
    *  nothing. The mirror is only geometrically right ON its plane, and a deck
    *  that banks or loops leaves that plane quickly — so it is faded out rather
@@ -296,6 +312,7 @@ export const WET_NUMBERS = [
   "wetSlopeMin", "wetSlopeMax", "wetWheelClear",
   "rippleAmp", "rippleScale", "rippleSpeed", "rippleStretch", "rippleDamp",
   "reflectStrength", "reflectFresnel", "reflectDistort", "reflectFade",
+  "reflectPlaneTol",
   "kerbWet",
 ];
 

@@ -196,6 +196,7 @@ export function createRoadMaterial(opts = {}) {
     reflectFresnel: uniform(opts.reflectFresnel ?? WET_DEFAULTS.reflectFresnel),
     reflectDistort: uniform(opts.reflectDistort ?? WET_DEFAULTS.reflectDistort),
     reflectFade: uniform(opts.reflectFade ?? WET_DEFAULTS.reflectFade),
+    reflectPlaneTol: uniform(opts.reflectPlaneTol ?? WET_DEFAULTS.reflectPlaneTol),
     kerbWet: uniform(opts.kerbWet ?? WET_DEFAULTS.kerbWet),
   };
 
@@ -568,9 +569,22 @@ export function createRoadMaterial(opts = {}) {
       const fres = oneMinus(abs(normalView.z)).pow(u.reflectFresnel);
 
       // Valid only on the plane, and only on surfaces facing along it.
-      const dist = length(positionWorld.sub(r.reflectCenter));
+      const toFrag = positionWorld.sub(r.reflectCenter);
+      const dist = length(toFrag);
       const near = oneMinus(smoothstep(u.reflectFade.mul(0.45), u.reflectFade, dist));
-      const facing = saturate(dot(normalWorld, r.reflectNormal));
+      // OFF-PLANE FALLOFF — the one that matters on a curve. A planar mirror is
+      // exact only on its plane, and the perpendicular distance from it is a
+      // direct measure of how wrong this fragment's reflection is. See
+      // reflectPlaneTol: a straight deck reads ~0 here and keeps its reflection,
+      // a corner leaves the plane fast and loses it before it can smear.
+      const offPlane = abs(dot(toFrag, r.reflectNormal));
+      const onPlane = oneMinus(smoothstep(
+        u.reflectPlaneTol.mul(0.35), u.reflectPlaneTol, offPlane,
+      ));
+      // ...and sharpened, because a raw dot stays near 1 through a gentle bank
+      // and so attenuated nothing exactly where the deck had begun to rotate
+      // away from the plane.
+      const facing = smoothstep(0.82, 0.98, dot(normalWorld, r.reflectNormal));
       // Deck + kerb, matching the clearcoat gate. A guardrail's reflection lands
       // mostly on the strip nearest it, and that strip IS the kerb — gating this
       // to the deck alone deleted the very reflection the rails were added for.
@@ -584,7 +598,7 @@ export function createRoadMaterial(opts = {}) {
       const inside = oneMinus(smoothstep(0.86, 1.0, max(e.x, e.y)));
 
       return col.rgb.mul(col.a)
-        .mul(fres).mul(wet.coat).mul(near).mul(facing).mul(inside).mul(onRoad)
+        .mul(fres).mul(wet.coat).mul(near).mul(onPlane).mul(facing).mul(inside).mul(onRoad)
         .mul(u.reflectStrength).mul(r.reflectOn);
     })();
 
