@@ -25,8 +25,18 @@
 // ============================================================================
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-// Vite bundles this and injects it — see the note in road.html for why it isn't
-// a <link> tag.
+// Vite bundles these and injects them — see the note in road.html for why they
+// are not <link> tags.
+//
+// editor.css FIRST: the dev panel is built out of the v3 editor's own classes
+// (.inspector-section / .prop-row / .action-btn — see devPanel.js) and its
+// :root variables, so without this sheet the panel renders as raw unstyled
+// markup. It used to be a <link href="./styles/editor.css"> in road.html,
+// which worked in dev only because <base href="/v3/"> pointed the browser at
+// the source file; Vite resolves HTML hrefs relative to the HTML FILE, found
+// no games/modular-road-v3/styles/, and left the tag alone — so the built site
+// asked for /v3/styles/editor.css and got a 404.
+import "../../v3/styles/editor.css";
 import "./palette.css";
 import { startV3App } from "../../v3/app/main.js";
 import {
@@ -880,7 +890,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * `instancingEnabled`, so this keys off MATERIAL IDENTITY rather than trying
    * to track which of the two is live.
    */
-  let railsInMirror = true;
+  /**
+   * Guardrails in the PLANAR mirror — OFF, because the rail is the one object a
+   * single mirror plane can never get right. It runs the whole length of the
+   * road, so on any piece that bends it is metres off the plane and its flipped
+   * image runs the wrong way: measured on Apex Parkour's dip, rails 20-40 m out
+   * sit up to 12 m off-plane, and the reflection descends while the rail climbs.
+   *
+   * It is drawn ANALYTICALLY in the road shader instead (railReflection() in
+   * modularRoadWet.js), solved in each fragment's own tangent frame, so it
+   * follows the road through crests, dips and banks by construction. Turning
+   * this back on is only sensible on a genuinely flat circuit, and even then
+   * the analytic one should be turned off to avoid drawing the rail twice.
+   */
+  let railsInMirror = false;
   /** Roadside scenery (lamps, boards) in the mirror — see the note below. */
   let sceneryInMirror = true;
   /** Late-bound for the same reason as `_mergedGroupRef`: the builder's

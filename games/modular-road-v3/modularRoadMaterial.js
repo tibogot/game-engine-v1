@@ -34,6 +34,7 @@ import {
   WET_NUMBERS,
   createWetShading,
   wetClearcoatNormal,
+  railReflection,
 } from "./modularRoadWet.js";
 
 function lin(hex) {
@@ -199,6 +200,13 @@ export function createRoadMaterial(opts = {}) {
     reflectFade: uniform(opts.reflectFade ?? WET_DEFAULTS.reflectFade),
     reflectPlaneTol: uniform(opts.reflectPlaneTol ?? WET_DEFAULTS.reflectPlaneTol),
     reflectErrTol: uniform(opts.reflectErrTol ?? WET_DEFAULTS.reflectErrTol),
+    railReflect: uniform(opts.railReflect ?? WET_DEFAULTS.railReflect),
+    railReflectLat: uniform(opts.railReflectLat ?? WET_DEFAULTS.railReflectLat),
+    deckHalfWidth: uniform(opts.deckHalfWidth ?? WET_DEFAULTS.deckHalfWidth),
+    railKerbTop: uniform(opts.railKerbTop ?? WET_DEFAULTS.railKerbTop),
+    railBeamLo: uniform(opts.railBeamLo ?? WET_DEFAULTS.railBeamLo),
+    railBeamHi: uniform(opts.railBeamHi ?? WET_DEFAULTS.railBeamHi),
+    railBeamColor: uniform(lin(opts.railBeamColor ?? WET_DEFAULTS.railBeamColor)),
     kerbWet: uniform(opts.kerbWet ?? WET_DEFAULTS.kerbWet),
   };
 
@@ -617,7 +625,27 @@ export function createRoadMaterial(opts = {}) {
     mat._reflectUniforms = r;
   }
 
-  mat.emissiveNode = reflectNode ? neonNode.add(reflectNode) : neonNode;
+  // The rail's reflection is ANALYTIC — solved in the road shader rather than
+  // rendered into the planar mirror, because one mirror plane cannot follow a
+  // road that bends and the rail is the one object that always bends with it.
+  // See railReflection() in modularRoadWet.js. Deck only: a reflection on the
+  // kerb itself would be reflecting the thing it is standing on.
+  let railNode = null;
+  if (wet) {
+    railNode = Fn(() => {
+      const zone = attribute("aZone", "float");
+      const deckOnly = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
+      // Same gates as any other reflection here: only where there is water, and
+      // only as strongly as the grazing angle allows.
+      const fres = oneMinus(abs(normalView.z)).pow(u.reflectFresnel);
+      return railReflection(u).mul(wet.coat).mul(fres).mul(deckOnly);
+    })();
+  }
+
+  let emissive = neonNode;
+  if (reflectNode) emissive = emissive.add(reflectNode);
+  if (railNode) emissive = emissive.add(railNode);
+  mat.emissiveNode = emissive;
   // Neon only. A reflection that blooms turns every wet frame into a haze.
   applyBloomMRT(mat, neonNode);
 

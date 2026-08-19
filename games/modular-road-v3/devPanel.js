@@ -1185,9 +1185,9 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Reflect rails</span>
+            <span class="prop-label">Rails in mirror</span>
             <div class="prop-value">
-              <button class="prop-toggle checked" id="dv-reflect-rails" type="button" aria-label="Reflect guardrails">${CHECK_SVG}</button>
+              <button class="prop-toggle" id="dv-reflect-rails" type="button" aria-label="Guardrails in the planar mirror">${CHECK_SVG}</button>
             </div>
           </div>
           <div class="prop-row">
@@ -2260,7 +2260,7 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-wet-puddle", weather, "puddles", (v) => v.toFixed(2), (v) => game.setPuddles?.(v));
   slider("dv-wet-wheel", weather, "dryLine", (v) => v.toFixed(2), (v) => game.setWheelClear?.(v));
   toggle("dv-reflect", true, (on) => game.setReflection?.(on));
-  toggle("dv-reflect-rails", true, (on) => game.setRailsInMirror?.(on));
+  toggle("dv-reflect-rails", false, (on) => game.setRailsInMirror?.(on));
   slider("dv-reflect-str", weather, "reflectStrength", (v) => v.toFixed(2),
     (v) => game.setReflectStrength?.(v));
   // The two knobs that decide where a planar mirror is allowed to be believed.
