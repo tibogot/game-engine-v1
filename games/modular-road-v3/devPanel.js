@@ -1197,6 +1197,20 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-reflect-str-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Flatness needed</span>
+            <div class="prop-value">
+              <input type="range" id="dv-reflect-flat" min="0.9" max="1" step="0.001" />
+              <span class="prop-num" id="dv-reflect-flat-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Off-plane range (m)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-reflect-plane" min="0.05" max="4" step="0.05" />
+              <span class="prop-num" id="dv-reflect-plane-v"></span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2231,6 +2245,8 @@ export function createRoadDevPanel({ app, game, params }) {
     puddles: game.getPuddles?.() ?? 1,
     dryLine: game.getWheelClear?.() ?? 0.45,
     reflectStrength: game.getReflectStrength?.() ?? 1.4,
+    reflectFlat: game.getReflectFlat?.() ?? 0.985,
+    reflectPlane: game.getReflectPlane?.() ?? 0.7,
   };
   slider("dv-wet", weather, "wet", (v) => v.toFixed(2), (v) => game.setWet?.(v));
   slider("dv-wet-puddle", weather, "puddles", (v) => v.toFixed(2), (v) => game.setPuddles?.(v));
@@ -2239,6 +2255,13 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-reflect-rails", true, (on) => game.setRailsInMirror?.(on));
   slider("dv-reflect-str", weather, "reflectStrength", (v) => v.toFixed(2),
     (v) => game.setReflectStrength?.(v));
+  // The two knobs that decide where a planar mirror is allowed to be believed.
+  // Flatness is the one for wobble on banks and slopes: it is a cosine, so 0.985
+  // is about 10 degrees of divergence from the plane before the reflection goes.
+  slider("dv-reflect-flat", weather, "reflectFlat", (v) => v.toFixed(3),
+    (v) => game.setReflectFlat?.(v));
+  slider("dv-reflect-plane", weather, "reflectPlane", (v) => v.toFixed(2),
+    (v) => game.setReflectPlane?.(v));
 
   // ── Bloom ───────────────────────────────────────────────────────────────────
   const bloom = { strength: 0.9, radius: 0.5 };

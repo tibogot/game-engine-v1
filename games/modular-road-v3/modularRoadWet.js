@@ -293,6 +293,25 @@ export const WET_DEFAULTS = {
    * short ones through corners, with no per-piece authoring.
    */
   reflectPlaneTol: 0.7,
+  /**
+   * How COPLANAR a surface must be with the mirror plane to show a reflection,
+   * as a cosine. 0.985 is about 10 degrees of divergence.
+   *
+   * `reflectPlaneTol` fades by the receiving fragment's DISTANCE from the plane,
+   * and on a banked or sloped piece that term never fires: the deck under the
+   * car is exactly where the plane was fitted, so it reads ~0 deviation and
+   * keeps a full-strength reflection. Meanwhile the GUARDRAIL is a metre above
+   * that deck and following the bank, so it is badly off-plane, and its mirror
+   * image is displaced by an amount that varies along its length. That is the
+   * wobble — the error is in the reflected OBJECT, not the receiving surface,
+   * which is why fading on the surface's own offset could not fix it.
+   *
+   * The deck's ORIENTATION is the usable proxy. Where the road has rotated away
+   * from the plane, anything standing on it is off-plane too, so killing the
+   * reflection there kills the misplacement with it. Tighten toward 1 for less
+   * reflection and less wobble; loosen for longer reflections on flat ground.
+   */
+  reflectFlatTol: 0.985,
   /** Metres from the car's contact point at which the reflection has faded to
    *  nothing. The mirror is only geometrically right ON its plane, and a deck
    *  that banks or loops leaves that plane quickly — so it is faded out rather
@@ -312,7 +331,7 @@ export const WET_NUMBERS = [
   "wetSlopeMin", "wetSlopeMax", "wetWheelClear",
   "rippleAmp", "rippleScale", "rippleSpeed", "rippleStretch", "rippleDamp",
   "reflectStrength", "reflectFresnel", "reflectDistort", "reflectFade",
-  "reflectPlaneTol",
+  "reflectPlaneTol", "reflectFlatTol",
   "kerbWet",
 ];
 
