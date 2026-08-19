@@ -1198,9 +1198,9 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Flatness needed</span>
+            <span class="prop-label">Max error (m)</span>
             <div class="prop-value">
-              <input type="range" id="dv-reflect-flat" min="0.9" max="1" step="0.001" />
+              <input type="range" id="dv-reflect-flat" min="0.05" max="4" step="0.05" />
               <span class="prop-num" id="dv-reflect-flat-v"></span>
             </div>
           </div>
@@ -2245,7 +2245,7 @@ export function createRoadDevPanel({ app, game, params }) {
     puddles: game.getPuddles?.() ?? 1,
     dryLine: game.getWheelClear?.() ?? 0.45,
     reflectStrength: game.getReflectStrength?.() ?? 1.4,
-    reflectFlat: game.getReflectFlat?.() ?? 0.985,
+    reflectFlat: game.getReflectFlat?.() ?? 0.8,
     reflectPlane: game.getReflectPlane?.() ?? 0.7,
   };
   slider("dv-wet", weather, "wet", (v) => v.toFixed(2), (v) => game.setWet?.(v));
@@ -2256,9 +2256,10 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-reflect-str", weather, "reflectStrength", (v) => v.toFixed(2),
     (v) => game.setReflectStrength?.(v));
   // The two knobs that decide where a planar mirror is allowed to be believed.
-  // Flatness is the one for wobble on banks and slopes: it is a cosine, so 0.985
-  // is about 10 degrees of divergence from the plane before the reflection goes.
-  slider("dv-reflect-flat", weather, "reflectFlat", (v) => v.toFixed(3),
+  // "Max error" is the one for banks, crests and dips: metres of reflection
+  // displacement tolerated before the reflection fades. Turn it DOWN if
+  // guardrails look inverted or smeared on sloped pieces.
+  slider("dv-reflect-flat", weather, "reflectFlat", (v) => v.toFixed(2),
     (v) => game.setReflectFlat?.(v));
   slider("dv-reflect-plane", weather, "reflectPlane", (v) => v.toFixed(2),
     (v) => game.setReflectPlane?.(v));

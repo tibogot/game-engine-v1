@@ -23,6 +23,7 @@ import {
   texture,
   length,
   dot,
+  sqrt,
   mx_noise_float,
   mx_fractal_noise_float,
 } from "three/tsl";
@@ -197,7 +198,7 @@ export function createRoadMaterial(opts = {}) {
     reflectDistort: uniform(opts.reflectDistort ?? WET_DEFAULTS.reflectDistort),
     reflectFade: uniform(opts.reflectFade ?? WET_DEFAULTS.reflectFade),
     reflectPlaneTol: uniform(opts.reflectPlaneTol ?? WET_DEFAULTS.reflectPlaneTol),
-    reflectFlatTol: uniform(opts.reflectFlatTol ?? WET_DEFAULTS.reflectFlatTol),
+    reflectErrTol: uniform(opts.reflectErrTol ?? WET_DEFAULTS.reflectErrTol),
     kerbWet: uniform(opts.kerbWet ?? WET_DEFAULTS.kerbWet),
   };
 
@@ -585,11 +586,17 @@ export function createRoadMaterial(opts = {}) {
       // ...and sharpened, because a raw dot stays near 1 through a gentle bank
       // and so attenuated nothing exactly where the deck had begun to rotate
       // away from the plane.
-      // Coplanarity, not just facing — see reflectFlatTol. The old
-      // smoothstep(0.82, 0.98) only began fading at 11 degrees of divergence
-      // and survived to 35, which on a bank is long past the point where
-      // anything standing on the deck is being mirrored to the wrong place.
-      const facing = smoothstep(u.reflectFlatTol, 1.0, dot(normalWorld, r.reflectNormal));
+      // HOW MANY METRES WRONG IS THE REFLECTION HERE — see reflectErrTol. An
+      // angle alone does not answer that: 8 degrees of divergence is nothing on
+      // its own and 1.4 m of displacement at 10 m away, which is why a
+      // coplanarity threshold let the inverted guardrail through on a crest.
+      // Distance and angle only mean something multiplied.
+      const cosT = saturate(dot(normalWorld, r.reflectNormal));
+      const sinT = sqrt(saturate(oneMinus(cosT.mul(cosT))));
+      const err = dist.mul(sinT);
+      const facing = oneMinus(smoothstep(
+        u.reflectErrTol.mul(0.4), u.reflectErrTol, err,
+      ));
       // Deck + kerb, matching the clearcoat gate. A guardrail's reflection lands
       // mostly on the strip nearest it, and that strip IS the kerb — gating this
       // to the deck alone deleted the very reflection the rails were added for.

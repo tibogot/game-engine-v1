@@ -294,24 +294,26 @@ export const WET_DEFAULTS = {
    */
   reflectPlaneTol: 0.7,
   /**
-   * How COPLANAR a surface must be with the mirror plane to show a reflection,
-   * as a cosine. 0.985 is about 10 degrees of divergence.
+   * METRES of reflection displacement a fragment may show before it is faded
+   * out. This is the term that governs banks, crests and dips.
    *
-   * `reflectPlaneTol` fades by the receiving fragment's DISTANCE from the plane,
-   * and on a banked or sloped piece that term never fires: the deck under the
-   * car is exactly where the plane was fitted, so it reads ~0 deviation and
-   * keeps a full-strength reflection. Meanwhile the GUARDRAIL is a metre above
-   * that deck and following the bank, so it is badly off-plane, and its mirror
-   * image is displaced by an amount that varies along its length. That is the
-   * wobble — the error is in the reflected OBJECT, not the receiving surface,
-   * which is why fading on the surface's own offset could not fix it.
+   * Two earlier attempts measured the wrong thing. `reflectPlaneTol` fades by
+   * the fragment's own distance from the plane, which on a bank never fires —
+   * the deck under the car IS the plane. Then a coplanarity cosine, which does
+   * not fire either: over a crest the deck's normal diverges by only 5-8
+   * degrees, comfortably inside any sane angular threshold, while the reflected
+   * guardrail is already displaced by metres. The visible symptom is not a
+   * wobble but an INVERSION — the mirrored rail descends while the real rail
+   * climbs — because the road ahead is being told it sits at the car's height
+   * and angle when it has since risen.
    *
-   * The deck's ORIENTATION is the usable proxy. Where the road has rotated away
-   * from the plane, anything standing on it is off-plane too, so killing the
-   * reflection there kills the misplacement with it. Tighten toward 1 for less
-   * reflection and less wobble; loosen for longer reflections on flat ground.
+   * Distance and angle only matter multiplied together. A point `d` away on a
+   * surface whose normal has turned by `t` from the plane has its reflection
+   * displaced by roughly `d * sin(t)`: 8 degrees at 10 m is 1.4 m of error,
+   * which is exactly the scale of the artefact. Fading on that number fades on
+   * the thing you can actually see.
    */
-  reflectFlatTol: 0.985,
+  reflectErrTol: 0.8,
   /** Metres from the car's contact point at which the reflection has faded to
    *  nothing. The mirror is only geometrically right ON its plane, and a deck
    *  that banks or loops leaves that plane quickly — so it is faded out rather
@@ -331,7 +333,7 @@ export const WET_NUMBERS = [
   "wetSlopeMin", "wetSlopeMax", "wetWheelClear",
   "rippleAmp", "rippleScale", "rippleSpeed", "rippleStretch", "rippleDamp",
   "reflectStrength", "reflectFresnel", "reflectDistort", "reflectFade",
-  "reflectPlaneTol", "reflectFlatTol",
+  "reflectPlaneTol", "reflectErrTol",
   "kerbWet",
 ];
 

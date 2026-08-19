@@ -3455,10 +3455,10 @@ ${e.message}`);
       },
       getReflectStrength: () => roadMaterial._roadUniforms.reflectStrength.value,
       setReflectFlat: (v) => {
-        roadLook.reflectFlatTol = v;
-        roadMaterial._roadUniforms.reflectFlatTol.value = v;
+        roadLook.reflectErrTol = v;
+        roadMaterial._roadUniforms.reflectErrTol.value = v;
       },
-      getReflectFlat: () => roadMaterial._roadUniforms.reflectFlatTol.value,
+      getReflectFlat: () => roadMaterial._roadUniforms.reflectErrTol.value,
       setReflectPlane: (v) => {
         roadLook.reflectPlaneTol = v;
         roadMaterial._roadUniforms.reflectPlaneTol.value = v;
