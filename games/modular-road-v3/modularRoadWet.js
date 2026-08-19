@@ -80,10 +80,12 @@ import {
   oneMinus,
   cos,
   normalWorld,
-  bitangentWorld,
   positionWorld,
   cameraPosition,
   dot,
+  length,
+  dFdx,
+  dFdy,
   normalMap,
   time,
   mx_fractal_noise_float,
@@ -259,8 +261,9 @@ export const WET_DEFAULTS = {
   // the rail's COLOUR BANDS, stacked at the right heights. At a wet road's
   // roughness and a chase camera's grazing angle a true reflection of a rail is
   // a blurred colour streak anyway, which is what this draws.
-  /** Master, 0 = off. */
-  railReflect: 1.0,
+  /** Master, 0 = off. Below 1 because at full strength the bands read as
+   *  painted stripes rather than something the road is reflecting. */
+  railReflect: 0.55,
   /** |aLateral| of the reflecting face — the inner side of the kerb/beam. */
   railReflectLat: 0.93,
   /** Deck half-width in metres, to convert lateral units to metres. Must match
@@ -274,7 +277,7 @@ export const WET_DEFAULTS = {
   railBeamHi: 1.20,
   /** Galvanised beam colour. The kerb band reuses `railA`, so a track that
    *  repaints its kerbs gets a matching reflection for free. */
-  railBeamColor: 0xc9d2dc,
+  railBeamColor: 0xa8b2bd,
 
   // ── PLANAR REFLECTION ─────────────────────────────────────────────────────
   // Only does anything when the material was built with a reflection texture
@@ -518,10 +521,10 @@ export function wetRippleNormal(u) {
  *                   \      |         is mirrored here: kerb, gap, or beam.
  *                    \     |
  *
- * `bitangentWorld` is the across-road direction (uv.y is metres across the
- * developed profile) and `normalWorld` is the local up. Both are per fragment,
- * which is the entire reason this survives slopes: on a crest the deck and its
- * rail rise together, so in this frame nothing has moved.
+ * The across-road direction comes from the screen-space gradient of `aLateral`
+ * and the local up from `normalWorld`. Both are per fragment, which is the
+ * entire reason this survives slopes: on a crest the deck and its rail rise
+ * together, so in this frame nothing has moved.
  *
  * @returns {Node<vec3>} colour to ADD, already banded into kerb and beam.
  */
@@ -529,10 +532,28 @@ export function railReflection(u) {
   return Fn(() => {
     const lateral = attribute("aLateral", "float");
     const toCam = cameraPosition.sub(positionWorld);
+
+    // ACROSS-ROAD DIRECTION, from the screen-space gradient of `aLateral`.
+    //
+    // NOT `bitangentWorld`, which is the obvious choice and does not work here:
+    // it is built from `tangentWorld`, which is carried as a VARYING and falls
+    // back to a derivative frame only when the geometry has a tangent
+    // attribute to begin with. The road has none, so it came back degenerate
+    // and the whole term evaluated to zero — invisible even at 60x strength.
+    //
+    // The gradient of a per-vertex scalar is available directly in the fragment
+    // stage and cannot be degenerate on a surface that has any extent: the
+    // direction in which `aLateral` grows fastest IS across the road, by
+    // definition, whatever the piece is doing in 3D.
+    const dPx = dFdx(positionWorld);
+    const dPy = dFdy(positionWorld);
+    const grad = dPx.mul(dFdx(lateral)).add(dPy.mul(dFdy(lateral)));
+    const latDir = grad.div(max(length(grad), float(1e-9)));
+
     // Camera height above THIS fragment's tangent plane, and its offset across
     // the road from here. The 2D problem lives in these two numbers.
     const hCam = dot(toCam, normalWorld);
-    const xCam = dot(toCam, bitangentWorld);
+    const xCam = dot(toCam, latDir);
 
     const myX = lateral.mul(u.deckHalfWidth);
     const wallX = u.railReflectLat.mul(u.deckHalfWidth);

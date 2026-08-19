@@ -1205,6 +1205,13 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Rail reflection</span>
+            <div class="prop-value">
+              <input type="range" id="dv-rail-reflect" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-rail-reflect-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Mirror slab (m)</span>
             <div class="prop-value">
               <input type="range" id="dv-reflect-slab" min="0.5" max="12" step="0.25" />
@@ -2255,6 +2262,7 @@ export function createRoadDevPanel({ app, game, params }) {
     reflectFlat: game.getReflectFlat?.() ?? 0.8,
     reflectPlane: game.getReflectPlane?.() ?? 0.7,
     reflectSlab: game.getReflectSlab?.() ?? 3.0,
+    railReflect: game.getRailReflect?.() ?? 0.55,
   };
   slider("dv-wet", weather, "wet", (v) => v.toFixed(2), (v) => game.setWet?.(v));
   slider("dv-wet-puddle", weather, "puddles", (v) => v.toFixed(2), (v) => game.setPuddles?.(v));
@@ -2276,6 +2284,10 @@ export function createRoadDevPanel({ app, game, params }) {
   // so it can never be reflected to the wrong place. Lower = stricter.
   slider("dv-reflect-slab", weather, "reflectSlab", (v) => v.toFixed(2),
     (v) => game.setReflectSlab?.(v));
+  // The guardrail's reflection, drawn analytically in the road shader rather
+  // than rendered into the mirror — see railReflection() in modularRoadWet.js.
+  slider("dv-rail-reflect", weather, "railReflect", (v) => v.toFixed(2),
+    (v) => game.setRailReflect?.(v));
 
   // ── Bloom ───────────────────────────────────────────────────────────────────
   const bloom = { strength: 0.9, radius: 0.5 };

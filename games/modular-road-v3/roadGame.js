@@ -3489,6 +3489,11 @@ ${e.message}`);
       getReflectPlane: () => roadMaterial._roadUniforms.reflectPlaneTol.value,
       setReflectSlab: (v) => { carReflection.slab = v; },
       getReflectSlab: () => carReflection.slab,
+      setRailReflect: (v) => {
+        roadLook.railReflect = v;
+        roadMaterial._roadUniforms.railReflect.value = v;
+      },
+      getRailReflect: () => roadMaterial._roadUniforms.railReflect.value,
       setReflection: (on) => {
         reflectionEnabled = !!on;
         if (!on && roadMaterial._reflectUniforms) {
