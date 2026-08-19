@@ -81,8 +81,19 @@ function emissiveMat(p) {
 }
 
 let _poolTex = null;
+/**
+ * The ground pool's radial falloff, painted once into a canvas.
+ *
+ * Returns null where there is no DOM. The headless builders (tools/*.mjs) drive
+ * the real scenery catalogue to check that every type builds, and this was the
+ * one type that reached for `document` on the way — so registering the lamp
+ * turned sceneryTest from green into a ReferenceError. A material with a null
+ * map is still a valid material; it just draws the pool untextured, which
+ * nothing headless ever looks at.
+ */
 function getPoolTexture() {
   if (_poolTex) return _poolTex;
+  if (typeof document === "undefined") return null;
   const s = 128;
   const c = document.createElement("canvas");
   c.width = c.height = s;
