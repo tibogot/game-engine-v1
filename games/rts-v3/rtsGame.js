@@ -11,6 +11,13 @@
 // drop the resulting file here as `rts.v3proj`. This game reloads it on boot.
 // ============================================================================
 
+// The dev panel is built out of the v3 editor'''s own classes and :root
+// variables (see devPanel.js), so this sheet is required. Imported here rather
+// than <link>ed in rts.html: <base> is /v3/ so a relative href resolves against
+// /v3/ in the browser but against THIS FILE'''S DIRECTORY when Vite scans the
+// HTML at build time, and Vite therefore bundles nothing and the deployed site
+// 404s on /v3/styles/editor.css.
+import "../../v3/styles/editor.css";
 import { startV3App } from "../../v3/app/main.js";
 import { createRtsCamera } from "./rtsCamera.js";
 import { createUnits } from "./units.js";

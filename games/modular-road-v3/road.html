@@ -15,15 +15,18 @@
     -->
     <base href="/v3/" />
     <title>Modular Road (v3)</title>
-    <link rel="stylesheet" href="./styles/editor.css" />
     <!-- Oxanium: geometric game HUD face — sharp digits without the GTA condensed
          look. Absolute Google URLs so <base href="/v3/"> can't rewrite them. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <!-- palette.css is imported from roadGame.js, NOT linked here: <base> is
-         /v3/ so a relative href would resolve wrong, and an absolute one isn't
-         bundled by Vite (it would 404 in a production build). -->
+    <!-- STYLESHEETS ARE IMPORTED FROM roadGame.js, NOT LINKED HERE (both
+         palette.css and v3/styles/editor.css). <base> is /v3/, so a relative
+         href resolves against /v3/ in the browser but against THIS FILE'''S
+         DIRECTORY when Vite scans the HTML at build time — the two disagree.
+         Vite then finds nothing to bundle, leaves the tag verbatim, and the
+         deployed site 404s on /v3/styles/editor.css. An absolute href is not
+         bundled either. A JS import is the only form both agree on. -->
     <!-- NO LUCIDE HERE, deliberately. v3/editor.html loads it from unpkg for its
          toolbar/panel icons, and this page used to copy that <script> along with
          the rest of the head. It was never doing anything: the only `data-lucide`
