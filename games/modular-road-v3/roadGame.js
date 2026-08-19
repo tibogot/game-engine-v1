@@ -892,7 +892,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * to track which of the two is live.
    */
   /**
-   * Guardrails in the reflection — ON, and NOT through the planar mirror.
+   * Guardrails in the reflection — OFF by default, and NOT through the planar
+   * mirror when it is on.
+   *
+   * OFF is a taste call, not a technical one: the car, the lamps and the rest
+   * of the scenery reflect regardless, and they are the reflections that read
+   * as wet tarmac. The rail is a long, bright, continuous object running the
+   * whole length of the road, so its reflection is a stripe down both edges of
+   * every wet frame — correct, but a lot. The dev panel's "Rails in mirror"
+   * turns it on, and off costs nothing at all: no pass, no geometry, and the
+   * sample is not even compiled into the road shader (syncRoadMaterialFeatures).
    *
    * The rail is the one object a single mirror plane can never get right. It
    * runs the whole length of the road, so on any piece that bends it is metres
@@ -909,7 +918,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * what a reflection is before anyone thought of mirroring cameras. No plane,
    * so nothing to be off it by.
    */
-  let railsInMirror = true;
+  let railsInMirror = false;
   /** The whole track's mirrored rail, merged, on PREMIRROR_LAYER. One mesh —
    *  it is only ever drawn by the reflection pass, which does not cull. */
   const mirrorRailGroup = new THREE.Group();
@@ -3634,6 +3643,10 @@ ${e.message}`);
         rebuildMirrorRails();
       },
       setRailsInMirror: (on) => setRailsInMirrorFlag(on),
+      // The panel seeds its checkbox from this. Without it the seed falls back
+      // to a literal and the box can disagree with the flag — which is exactly
+      // the bug that made the toggle look inert.
+      getRailsInMirror: () => railsInMirror,
       getLinesOn: () => roadMaterial._roadUniforms.linesOn.value > 0.5,
       setLinesOn: (on) => { roadMaterial._roadUniforms.linesOn.value = on ? 1 : 0; },
       setTireMarksEnabled: (on) => {
