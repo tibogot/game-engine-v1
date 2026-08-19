@@ -177,6 +177,11 @@ export class PropInstancer {
         const im = new THREE.InstancedMesh(p.geometry, p.material, capacity);
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); // rewritten every frame
         im.userData.tintable = p.tintable;
+        // Which prop this batch is, so callers can pick batches out by type —
+        // the wet road's mirror wants the scenery (lamps, boards) and not the
+        // cones. Instancing is all-or-nothing per batch, so this is the only
+        // granularity available and it is the right one.
+        im.userData.propId = id;
         im.castShadow = p.castShadow;
         // An InstancedMesh receives shadows exactly like a plain Mesh — instancing
         // only changes the VERTEX stage, and the shadow lookup is a fragment-stage

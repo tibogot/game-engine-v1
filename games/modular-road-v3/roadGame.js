@@ -50,7 +50,7 @@ import {
 } from "../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../v3/play/modularRoadGround.js";
-import { isSharedGeometry } from "./modularRoadScenery.js";
+import { isSharedGeometry, SCENERY_MAP } from "./modularRoadScenery.js";
 import {
   createCarReflection,
   lightReflection,
@@ -752,6 +752,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       }
       propPhysics.sync();
       propInstancer.sync();
+      // sync() can rebuild the batches, which drops their layer membership.
+      applyRailReflectionMembers();
       flags.sync();
     } else {
       movers.add(brush.id, brush.point);
@@ -879,6 +881,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * to track which of the two is live.
    */
   let railsInMirror = true;
+  /** Roadside scenery (lamps, boards) in the mirror — see the note below. */
+  let sceneryInMirror = true;
+  /** Late-bound for the same reason as `_mergedGroupRef`: the builder's
+   *  onChange calls the membership pass during construction, before the
+   *  instancer exists, and naming a later `const` there is a TDZ throw. */
+  let _propInstancerRef = null;
   /** Set once buildMergedTrack's group exists — see the note in `apply`. */
   let _mergedGroupRef = null;
   function applyRailReflectionMembers() {
@@ -892,6 +900,26 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     };
     apply(builder?.instGroup);
     apply(builder?.root);
+
+    // SCENERY IN THE MIRROR — lamps, boards, floodlights. Their emissive heads
+    // are the brightest small things beside a night track, and a bright small
+    // thing smeared down wet tarmac is most of what sells it.
+    //
+    // Cheap for the same reason the props themselves are: the instancer has
+    // already collapsed every copy of a type into one InstancedMesh, so a
+    // straight lined with a dozen lamps adds a couple of draws to the mirror
+    // pass, not a dozen. That also fixes the granularity — membership is
+    // per-BATCH, so individual lamps cannot be distance-culled out of the
+    // mirror. Given the cost, they do not need to be.
+    //
+    // Scenery only. Cones, tyre walls and containers are dull, low and legion;
+    // they would add triangles to the mirror for nothing.
+    _propInstancerRef?.group?.traverse((o) => {
+      if (!o.isMesh && !o.isInstancedMesh) return;
+      const isScenery = SCENERY_MAP.has(o.userData.propId);
+      if (isScenery && sceneryInMirror) o.layers.enable(REFLECT_LAYER);
+      else o.layers.disable(REFLECT_LAYER);
+    });
     // Drive mode's merged track — see buildMergedTrack. Tagging only the
     // editable proxies tags the copies that are hidden the moment you drive.
     //
@@ -1431,6 +1459,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // re-merged all hundred). Measured before: 100 poles cost 648 draws while
   // building against 58 driving. Now both are flat.
   const propInstancer = new PropInstancer(scene, props, PROP_CATALOG, () => true);
+  _propInstancerRef = propInstancer;
   // Live glow tuning writes to the loose roots; the templates hold their own
   // copies of those materials, so they have to be rebuilt to be seen.
   props.onGlowChange = (ids) => propInstancer.refreshTemplates(ids);
@@ -2499,6 +2528,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     bakeCollision();
     propPhysics.sync();
     propInstancer.sync();
+    // sync() can rebuild the batches, which drops their layer membership.
+    applyRailReflectionMembers();
     flags.sync();
     paletteUi.refreshStatus();
   });
@@ -2532,6 +2563,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         bakeCollision();
         propPhysics.sync();
         propInstancer.sync();
+        // sync() can rebuild the batches, which drops their layer membership.
+        applyRailReflectionMembers();
         flags.sync();
         paletteUi.refreshStatus();
         devPanel?.refresh();
