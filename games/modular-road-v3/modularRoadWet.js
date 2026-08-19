@@ -231,53 +231,38 @@ export const WET_DEFAULTS = {
    */
   rippleDamp: 0.9,
 
-  // ── ANALYTIC RAIL REFLECTION ──────────────────────────────────────────────
+  // ── MIRRORED-GEOMETRY RAIL REFLECTION ─────────────────────────────────────
   //
-  // The guardrail's reflection, computed IN THE ROAD SHADER instead of rendered
-  // into the planar mirror — because a single mirror plane cannot follow a road
-  // that bends, and the rail is the one object that always bends with it.
+  // The guardrail's reflection, drawn as a mirrored COPY of the rail seen by
+  // the ordinary camera — not as a mirrored camera, and not solved in the
+  // shader. Both of those shipped here first and both failed the same way.
   //
   // A planar mirror flips the world about ONE plane, fitted under the car. That
   // is exact for water, which never bends. On a crest the road climbs above
   // that plane while the flipped image always goes down, so the reflected rail
   // descends as the real rail climbs — measured on Apex Parkour's dip, rails
   // 20-40 m out sit up to 12 m off the plane, displacing their images by twice
-  // that. No fade fixes it; the technique simply does not extend to curved
-  // surfaces.
+  // that. No fade on the RECEIVING fragment fixes that, because the error is in
+  // the mirror's CONTENT; three of them were tried and all three failed.
   //
-  // But the guardrail is not an arbitrary object. It runs PARALLEL to the road,
-  // at a fixed lateral offset and a fixed height above the deck, on every piece,
-  // by construction. So each deck pixel can just ask "if I reflect my view ray
-  // about MY OWN local surface, does it hit the wall beside me, and at what
-  // height?" — a line/plane intersection in the fragment's own tangent frame.
+  // The analytic replacement was correct — it solved a line/plane intersection
+  // in each fragment's own tangent frame, so it followed any slope — but it
+  // could only draw the rail's colour BANDS, and a flat band of colour at a
+  // constant height reads as paint on the road, not as a reflection.
   //
-  // Because the frame is per-fragment, a slope, bank or dip carries the deck and
-  // its rail together and the relationship never changes. It is correct on every
-  // piece shape by construction, costs a handful of ALU, needs no pass, no
-  // target and no sampler, and it cannot wobble, invert or pop because nothing
-  // about it lives in screen space or plane space.
+  // What is left is the oldest trick there is: build the reflected object and
+  // look at it normally. buildMirroredRailGeometry flips each rail vertex about
+  // the deck AT ITS OWN STATION, so a crest, a dip, a bank and the inside of a
+  // loop all mirror correctly — there is no plane in the method to be off. The
+  // real camera then renders it, which puts it at the screen position where the
+  // reflection belongs, so the road samples it at screenUV with no projection.
   //
-  // What it is NOT is a pixel-accurate mirror of the lit rail geometry — it is
-  // the rail's COLOUR BANDS, stacked at the right heights. At a wet road's
-  // roughness and a chase camera's grazing angle a true reflection of a rail is
-  // a blurred colour streak anyway, which is what this draws.
-  /** Master, 0 = off. Below 1 because at full strength the bands read as
-   *  painted stripes rather than something the road is reflecting. */
-  railReflect: 0.55,
-  /** |aLateral| of the reflecting face — the inner side of the kerb/beam. */
-  railReflectLat: 0.93,
-  /** Deck half-width in metres, to convert lateral units to metres. Must match
-   *  roadParams.width / 2; there is no per-fragment way to recover it. */
-  deckHalfWidth: 8.0,
-  /** Kerb top, metres above the deck (roadParams.railHeight). */
-  railKerbTop: 0.22,
-  /** Beam bottom / top, metres above the deck. From railParams: kerb 0.22 +
-   *  gap 0.18 = 0.40, plus beam height 0.8 = 1.20. */
-  railBeamLo: 0.40,
-  railBeamHi: 1.20,
-  /** Galvanised beam colour. The kerb band reuses `railA`, so a track that
-   *  repaints its kerbs gets a matching reflection for free. */
-  railBeamColor: 0xa8b2bd,
+  // The cost is one extra pass over one merged mesh, skipped entirely when the
+  // road is dry. What it still cannot do is occlusion: it is an image of the
+  // mirrored rail with nothing in front of it, so it shows through the car.
+  /** Master, 0 = off. 1 = exactly the mirrored rail as rendered; unlike the
+   *  colour bands this replaced, that is the physically right answer. */
+  railReflect: 1.0,
 
   // ── PLANAR REFLECTION ─────────────────────────────────────────────────────
   // Only does anything when the material was built with a reflection texture
@@ -377,7 +362,7 @@ export const WET_DEFAULTS = {
 };
 
 /** Wet uniforms authored as sRGB hex numbers. */
-export const WET_COLORS = ["wetTint", "railBeamColor"];
+export const WET_COLORS = ["wetTint"];
 
 /** Wet uniforms authored as plain numbers. */
 export const WET_NUMBERS = [
@@ -389,8 +374,7 @@ export const WET_NUMBERS = [
   "rippleAmp", "rippleScale", "rippleSpeed", "rippleStretch", "rippleDamp",
   "reflectStrength", "reflectFresnel", "reflectDistort", "reflectFade",
   "reflectPlaneTol", "reflectErrTol",
-  "railReflect", "railReflectLat", "deckHalfWidth",
-  "railKerbTop", "railBeamLo", "railBeamHi",
+  "railReflect",
   "kerbWet",
 ];
 
@@ -506,93 +490,6 @@ export function wetRippleNormal(u) {
   })();
 }
 
-/**
- * The guardrail's reflection, solved per fragment in its OWN tangent frame.
- *
- * Reflecting the view ray about the local surface is the same as looking
- * STRAIGHT at a mirrored copy of the rail hanging below the deck. So the whole
- * problem is a 2D line/wall intersection in the road's cross-section:
- *
- *      camera  o                     the ray from the camera THROUGH this
- *               \                    fragment, continued, drops below the
- *      ==========X=========|         deck. Where it crosses the rail's
- *      deck       \        |         lateral position, its depth below the
- *                  \       | wall    plane tells you WHICH PART of the rail
- *                   \      |         is mirrored here: kerb, gap, or beam.
- *                    \     |
- *
- * The across-road direction comes from the screen-space gradient of `aLateral`
- * and the local up from `normalWorld`. Both are per fragment, which is the
- * entire reason this survives slopes: on a crest the deck and its rail rise
- * together, so in this frame nothing has moved.
- *
- * @returns {Node<vec3>} colour to ADD, already banded into kerb and beam.
- */
-export function railReflection(u) {
-  return Fn(() => {
-    const lateral = attribute("aLateral", "float");
-    const toCam = cameraPosition.sub(positionWorld);
-
-    // ACROSS-ROAD DIRECTION, from the screen-space gradient of `aLateral`.
-    //
-    // NOT `bitangentWorld`, which is the obvious choice and does not work here:
-    // it is built from `tangentWorld`, which is carried as a VARYING and falls
-    // back to a derivative frame only when the geometry has a tangent
-    // attribute to begin with. The road has none, so it came back degenerate
-    // and the whole term evaluated to zero — invisible even at 60x strength.
-    //
-    // The gradient of a per-vertex scalar is available directly in the fragment
-    // stage and cannot be degenerate on a surface that has any extent: the
-    // direction in which `aLateral` grows fastest IS across the road, by
-    // definition, whatever the piece is doing in 3D.
-    const dPx = dFdx(positionWorld);
-    const dPy = dFdy(positionWorld);
-    const grad = dPx.mul(dFdx(lateral)).add(dPy.mul(dFdy(lateral)));
-    const latDir = grad.div(max(length(grad), float(1e-9)));
-
-    // Camera height above THIS fragment's tangent plane, and its offset across
-    // the road from here. The 2D problem lives in these two numbers.
-    const hCam = dot(toCam, normalWorld);
-    const xCam = dot(toCam, latDir);
-
-    const myX = lateral.mul(u.deckHalfWidth);
-    const wallX = u.railReflectLat.mul(u.deckHalfWidth);
-
-    // Ray direction across the road, continuing PAST the fragment. Clamped away
-    // from zero: looking straight down the road the ray never leaves the centre
-    // line, and t would blow up rather than simply missing.
-    const dir = xCam.negate();
-    const safeDir = mix(dir, sign(dir).mul(0.02), step(abs(dir), float(0.02)));
-
-    // Both walls; only the one the ray travels toward gives t > 0.
-    const solve = (target) => {
-      const t = target.sub(myX).div(safeDir);
-      // Depth below the plane at the crossing. hCam > 0 for a camera above the
-      // road, so this is positive where the mirrored rail actually is.
-      return vec2(t, t.mul(hCam));
-    };
-    const hitR = solve(wallX);
-    const hitL = solve(wallX.negate());
-    const useR = step(0.0, hitR.x);
-    const depth = mix(hitL.y, hitR.y, useR);
-    const tHit = mix(hitL.x, hitR.x, useR);
-
-    // Bands, softened by roughly a centimetre so the edges do not alias into a
-    // crawling line at distance.
-    const soft = float(0.03);
-    const band = (lo, hi) => smoothstep(lo.sub(soft), lo.add(soft), depth)
-      .mul(oneMinus(smoothstep(hi.sub(soft), hi.add(soft), depth)));
-
-    const kerb = band(float(0.0), u.railKerbTop);
-    const beam = band(u.railBeamLo, u.railBeamHi);
-
-    // Behind the camera, or so far out it is past the end of the world.
-    const valid = step(0.0, tHit).mul(oneMinus(smoothstep(60.0, 90.0, tHit)));
-
-    return u.railA.mul(kerb).add(u.railBeamColor.mul(beam))
-      .mul(valid).mul(u.railReflect);
-  })();
-}
 
 /**
  * Everything the caller needs to shade a wet deck, built from one field.

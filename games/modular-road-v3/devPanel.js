@@ -2262,7 +2262,7 @@ export function createRoadDevPanel({ app, game, params }) {
     reflectFlat: game.getReflectFlat?.() ?? 0.8,
     reflectPlane: game.getReflectPlane?.() ?? 0.7,
     reflectSlab: game.getReflectSlab?.() ?? 3.0,
-    railReflect: game.getRailReflect?.() ?? 0.55,
+    railReflect: game.getRailReflect?.() ?? 1.0,
   };
   slider("dv-wet", weather, "wet", (v) => v.toFixed(2), (v) => game.setWet?.(v));
   slider("dv-wet-puddle", weather, "puddles", (v) => v.toFixed(2), (v) => game.setPuddles?.(v));
@@ -2284,8 +2284,10 @@ export function createRoadDevPanel({ app, game, params }) {
   // so it can never be reflected to the wrong place. Lower = stricter.
   slider("dv-reflect-slab", weather, "reflectSlab", (v) => v.toFixed(2),
     (v) => game.setReflectSlab?.(v));
-  // The guardrail's reflection, drawn analytically in the road shader rather
-  // than rendered into the mirror — see railReflection() in modularRoadWet.js.
+  // The guardrail's reflection, drawn as MIRRORED GEOMETRY seen by the normal
+  // camera rather than through the mirror — see modularRoadWet.js. 1 is the
+  // physically right answer here; the "Rails in mirror" toggle above turns the
+  // whole extra pass off.
   slider("dv-rail-reflect", weather, "railReflect", (v) => v.toFixed(2),
     (v) => game.setRailReflect?.(v));
 

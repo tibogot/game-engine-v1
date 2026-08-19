@@ -1955,6 +1955,10 @@ export class ModularRoadBuilder {
     // The cheap stand-in the BVH bakes instead of the rail you can see — rides
     // along on the mesh so nothing downstream needs a new field to plumb.
     if (railMesh) railMesh.userData.collisionGeometry = built.railCollision ?? null;
+    // ...and the rail's mirror image, riding along for the same reason. Nothing
+    // in the builder draws it; roadGame merges every piece's copy into the one
+    // mesh the wet road's reflection pass renders.
+    if (railMesh) railMesh.userData.mirrorGeometry = built.railMirrorGeometry ?? null;
     const shellMesh =
       built.shellGeometry && this.shellMaterial
         ? this._makeMesh(built.shellGeometry, this.shellMaterial, built.world)
@@ -2513,6 +2517,7 @@ export class ModularRoadBuilder {
     if (p.railMesh) {
       this.root.remove(p.railMesh);
       p.railMesh.geometry.dispose();
+      p.railMesh.userData.mirrorGeometry?.dispose();
     }
     if (p.shellMesh) {
       this.root.remove(p.shellMesh);
@@ -2882,9 +2887,12 @@ export class ModularRoadBuilder {
       }
       p.railMesh.userData.collisionGeometry?.dispose();
       p.railMesh.userData.collisionGeometry = built.railCollision ?? null;
+      p.railMesh.userData.mirrorGeometry?.dispose();
+      p.railMesh.userData.mirrorGeometry = built.railMirrorGeometry ?? null;
     } else if (p.railMesh) {
       this.root.remove(p.railMesh);
       p.railMesh.geometry.dispose();
+      p.railMesh.userData.mirrorGeometry?.dispose();
       p.railMesh = null;
     }
 
@@ -3256,8 +3264,12 @@ const PIECE_TO_CATEGORY = {
   tunnel_curve: "tubes",
   tube: "tubes",
   tube_curve: "tubes",
+  tube_in: "tubes",
+  tube_out: "tubes",
   half_tube: "tubes",
   half_tube_curve: "tubes",
+  half_tube_in: "tubes",
+  half_tube_out: "tubes",
   half_pipe: "tubes",
   half_pipe_curve: "tubes",
   channel: "tubes",
@@ -3425,6 +3437,18 @@ export const CATEGORY_PRESETS = {
     },
   ],
   tubes: [
+    // ENTRY FIRST, because that is the order you build in. A tube dropped
+    // straight off a flat road is a 14.5 m plate butted onto an 8 m bore: a
+    // step at the seam and a wall the car meets with no warning. These two
+    // roll the deck up into the bore and back out of it, and they carry the
+    // SAME tubeRadius / tubeWall as the tubes beside them so the far seam
+    // matches vertex for vertex — change one, change all of them.
+    {
+      id: "tube_entry",
+      label: "Tube Entry",
+      base: "tube_in",
+      params: { tubeEntryLength: 26, tubeRadius: 8, tubeWall: 0.6 },
+    },
     {
       id: "tube_str",
       label: "Tube",
@@ -3442,6 +3466,18 @@ export const CATEGORY_PRESETS = {
       label: "Tube Turn",
       base: "tube_curve",
       params: { curveRadius: 26, curveAngle: 90, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    {
+      id: "tube_exit",
+      label: "Tube Exit",
+      base: "tube_out",
+      params: { tubeEntryLength: 26, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    {
+      id: "half_tube_entry",
+      label: "Half Tube Entry",
+      base: "half_tube_in",
+      params: { tubeEntryLength: 26, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
     },
     {
       id: "half_tube_str",
@@ -3466,6 +3502,12 @@ export const CATEGORY_PRESETS = {
       label: "Deep Half Tube",
       base: "half_tube",
       params: { straightLength: 26, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 240 },
+    },
+    {
+      id: "half_tube_exit",
+      label: "Half Tube Exit",
+      base: "half_tube_out",
+      params: { tubeEntryLength: 26, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
     },
     {
       // THE SNOWBOARD PIPE. Same piece as the half tubes above — this is not a

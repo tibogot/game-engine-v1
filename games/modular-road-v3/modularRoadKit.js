@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { buildRailGeometry, buildRailCollision } from "./modularRoadRail.js";
+import {
+  buildRailGeometry,
+  buildMirroredRailGeometry,
+  buildRailCollision,
+} from "./modularRoadRail.js";
 
 /**
  * Modular Road kit — parametric track pieces built by sweeping a single shared
@@ -155,6 +159,12 @@ export const pieceParams = {
   // buildHalfTubeProfile). Shares tubeRadius/tubeWall so a half tube seams onto
   // a full tube of the same size.
   halfTubeSpan: 180, // arc of the surviving arc (deg), centred on the floor
+  // Tube entry / exit funnel — the flat road rolls up into the tube bore over
+  // this length (see buildTubeMorphProfile). Long on purpose: the curl has to
+  // read as a shape developing, and a short one just looks like the road got
+  // pinched. Radius / wall / span come from the tube params above, so an entry
+  // seams onto whatever tube it is placed against.
+  tubeEntryLength: 26,
   // Snowboard half-pipe (flat + transition + vert — see buildHalfPipeProfile).
   // Transition radius is tubeRadius; wall thickness is tubeWall.
   halfPipeFlat: 12, // flat bottom between the two transitions (m)
@@ -497,6 +507,119 @@ function buildHalfPipeProfile(pp = pieceParams) {
   for (const p of inner) pts.push({ x: p.x, y: p.y, zone: 3 });
   for (let k = outer.length - 1; k >= 0; k--) pts.push({ x: outer[k].x, y: outer[k].y, zone: 4 });
   return { pts, hw: hf + Rt };
+}
+
+/**
+ * TUBE ENTRY / EXIT cross-section — one section that MORPHS from a flat road
+ * into a tube bore (or back out of one).
+ *
+ * WHY THIS EXISTS. Every tube in the kit starts as a tube: an 8 m bore butted
+ * straight onto a 14.5 m flat plate. The seam is a step, the car arrives at a
+ * wall that appeared out of nothing, and the two pieces do not even share a
+ * width. Real stunt kits (this is the Apex Rush shape) put a FUNNEL in between —
+ * the deck edges lift, curl inward, and by the far seam they have wrapped into
+ * the bore. That is what this builds.
+ *
+ * THE SHAPE IS ALWAYS A CIRCULAR ARC, tangent to horizontal at the floor
+ * centreline. Two numbers describe it: the half-angle it subtends, `phi`, and
+ * the SPAN OF THE SECTION IN PLAN, `hw` — how wide the piece is looking down on
+ * it. Radius follows. Walk both from road to tube:
+ *
+ *     phi:  0             -> span/2   (flat plate -> the tube's own arc)
+ *     hw:   road half-width -> Ri      (the bore at its widest)
+ *
+ * so R goes from infinity (a straight line) to exactly Ri. t = 0 returns the
+ * road's own flat section — same width, same slab thickness, so it seams onto a
+ * straight with nothing to line up by hand — and t = 1 returns the SAME points
+ * buildTubeProfile / buildHalfTubeProfile would (same N, same angles, verified
+ * by tools/tubeEntryTest.mjs), so the far seam matches a tube of the same params
+ * vertex for vertex. Nothing in between can self-intersect: an arc is
+ * single-valued about its own centre however far it wraps.
+ *
+ * WIDTH, NOT ARC LENGTH, IS THE PARAMETER, and that choice is visible from the
+ * car. The first version interpolated developed (arc) length instead, which
+ * also hits both ends exactly — but width is then R·sin(phi), and MEASURED on
+ * the stock kit that ballooned the funnel to 11.3 m half-width at the middle of
+ * a 8 -> 8 m transition: the road bellied out like a trumpet and pinched back
+ * in. Driving through a bulge that is not going anywhere reads as a mistake.
+ * Holding the plan width instead means the road keeps the width it had; only
+ * its edges lift and curl inward, which is the shape the reference kit has and
+ * the one that looks like the road became the tube. At the kit's numbers
+ * (16 m road, R 8 m bore) the width does not change at all.
+ *
+ * Interpolating (phi, hw) rather than lerping the two OUTLINES point by point
+ * is the other half of it. A point-wise lerp between a line and a circle is not
+ * an arc at any t — for the full ring it is not even a simple curve. Every
+ * intermediate section here is a real, drivable arc.
+ *
+ * `wall` is interpolated too (road thickness -> tubeWall) so the underside is
+ * flush with the slab behind it at one end and with the tube shell at the other.
+ *
+ * The easing is a smoothstep, so the section's rate of change is ZERO at both
+ * seams. Without it the curl starts at full rate the instant the piece begins
+ * and there is a visible crease where it meets the straight.
+ *
+ * Outline order follows the tube profiles — the whole inner (drivable) arc,
+ * then the outer shell back — so the two closing edges are the rim caps and
+ * `openLips` strips them from the BVH exactly as it does on a half tube.
+ *
+ * @param {object} pp piece params (tubeRadius / tubeWall / halfTubeSpan)
+ * @param {object} rp road cross-section params (width / thickness at t = 0)
+ * @param {number} t 0 = flat road, 1 = tube
+ * @param {boolean} fullRing true = wrap all the way to a closed tube; false =
+ *   stop at `halfTubeSpan`, i.e. feed a half tube
+ */
+function buildTubeMorphProfile(pp = pieceParams, rp = roadParams, t = 1, fullRing = false) {
+  const Ri = Math.max(3, pp.tubeRadius ?? 8);
+  const tw = Math.max(0.15, pp.tubeWall ?? 0.6);
+  const span = fullRing
+    ? Math.PI * 2
+    : THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.halfTubeSpan ?? 180, 60, 300));
+  // Same angular resolution as the piece this feeds, so the seam vertices land
+  // on each other instead of near each other.
+  const N = fullRing ? 48 : Math.max(8, Math.round((48 * span) / (2 * Math.PI)));
+  const W = Math.max(1, rp.width);
+  const th = Math.max(0.05, rp.thickness);
+
+  const u0 = THREE.MathUtils.clamp(t, 0, 1);
+  const e = u0 * u0 * (3 - 2 * u0);
+  const phi = (span / 2) * e;
+  // How wide the finished piece is in plan. Past a quarter turn the arc has
+  // passed its own equator, so the widest point is the equator itself (R) and
+  // not the lip — which is why a 360° ring and a 180° half tube are both Ri
+  // wide, and why this stays continuous as phi crosses 90°.
+  const hwT = W / 2 + (Ri * Math.sin(Math.min(span / 2, Math.PI / 2)) - W / 2) * e;
+  const wall = th + (tw - th) * e;
+  // Below this the radius is astronomical and sin/cos underflow to the straight
+  // line they are approaching anyway — so take the limit forms directly.
+  const flat = phi < 1e-6;
+  const R = flat ? 0 : phi < Math.PI / 2 ? hwT / Math.sin(phi) : hwT;
+  const Ro = R + wall;
+
+  const inner = [];
+  const outer = [];
+  for (let k = 0; k <= N; k++) {
+    const u = -1 + (2 * k) / N; // -1 = left lip, +1 = right lip
+    if (flat) {
+      inner.push({ x: hwT * u, y: 0 });
+      outer.push({ x: hwT * u, y: -wall });
+    } else {
+      const a = phi * u;
+      // Centre at (0, R): floor touches y = 0 at the centreline, so a flat piece
+      // feeds straight in — the same convention the tube profiles use.
+      inner.push({ x: R * Math.sin(a), y: R * (1 - Math.cos(a)) });
+      outer.push({ x: Ro * Math.sin(a), y: R - Ro * Math.cos(a) });
+    }
+  }
+
+  const pts = [];
+  let hw = 0;
+  for (const p of inner) {
+    pts.push({ x: p.x, y: p.y, zone: 3 });
+    hw = Math.max(hw, Math.abs(p.x));
+  }
+  for (let k = N; k >= 0; k--) pts.push({ x: outer[k].x, y: outer[k].y, zone: 4 });
+  return { pts, hw };
 }
 
 /* ----------------------------------------------------------------------- */
@@ -1439,6 +1562,15 @@ function stepsFor(arcLen, totalAngle = 0, minSteps = 2) {
 function straightPoints(pp) {
   const L = Math.max(1, pp.straightLength);
   const n = Math.max(2, Math.ceil(L / roadParams.segLen));
+  const pts = [];
+  for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
+  return pts;
+}
+
+/** Tube entry / exit funnel centreline — a straight of its own length. */
+function tubeEntryPoints(pp) {
+  const L = Math.max(4, pp.tubeEntryLength ?? 26);
+  const n = Math.max(4, Math.ceil(L / roadParams.segLen));
   const pts = [];
   for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
   return pts;
@@ -3121,6 +3253,66 @@ export const PIECE_CATALOG = [
     plain: true,
     openLips: true,
   },
+  // ── Tube entries. The missing link: a flat road cannot butt onto a bore. ──
+  // All four share one morph (buildTubeMorphProfile) and differ only in which
+  // way `t` runs and how far the section wraps. `profile` is the t = 1 section
+  // in every case, because the sweep takes zones / uv / lateral from the
+  // REFERENCE outline and those want to be the tube's the whole way through —
+  // this piece is the tube's mouth, not a stretch of road that happens to curl.
+  {
+    id: "tube_in",
+    label: "Tube entry",
+    hint: "Flat road curls up and wraps into a full tube",
+    swatch: "#16a0c0",
+    key: "",
+    points: tubeEntryPoints,
+    profile: (pp, rp) => buildTubeMorphProfile(pp, rp, 1, true),
+    profileAt: (t, pp, rp) => buildTubeMorphProfile(pp, rp, t, true),
+    noKerb: true,
+    plain: true,
+    // Open until the very last frame, so the rim caps are a ledge for almost
+    // the whole piece — exactly the case buildOpenLipCollision exists for.
+    openLips: true,
+  },
+  {
+    id: "tube_out",
+    label: "Tube exit",
+    hint: "Full tube unwraps back down to flat road",
+    swatch: "#16a0c0",
+    key: "",
+    points: tubeEntryPoints,
+    profile: (pp, rp) => buildTubeMorphProfile(pp, rp, 1, true),
+    profileAt: (t, pp, rp) => buildTubeMorphProfile(pp, rp, 1 - t, true),
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
+  {
+    id: "half_tube_in",
+    label: "Half tube entry",
+    hint: "Flat road flares up into a rideable U",
+    swatch: "#16a0c0",
+    key: "",
+    points: tubeEntryPoints,
+    profile: (pp, rp) => buildTubeMorphProfile(pp, rp, 1, false),
+    profileAt: (t, pp, rp) => buildTubeMorphProfile(pp, rp, t, false),
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
+  {
+    id: "half_tube_out",
+    label: "Half tube exit",
+    hint: "Rideable U flattens back out to road",
+    swatch: "#16a0c0",
+    key: "",
+    points: tubeEntryPoints,
+    profile: (pp, rp) => buildTubeMorphProfile(pp, rp, 1, false),
+    profileAt: (t, pp, rp) => buildTubeMorphProfile(pp, rp, 1 - t, false),
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
   {
     id: "half_pipe",
     label: "Half-pipe",
@@ -3253,7 +3445,11 @@ const _END_TANGENTS = {
   wallride: flatEndTangents,
   tunnel: flatEndTangents,
   tube: flatEndTangents,
+  tube_in: flatEndTangents,
+  tube_out: flatEndTangents,
   half_tube: flatEndTangents,
+  half_tube_in: flatEndTangents,
+  half_tube_out: flatEndTangents,
   half_pipe: flatEndTangents,
   channel: flatEndTangents,
   tunnel_curve: curveEndTangents,
@@ -3543,7 +3739,7 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // A piece can swap the whole cross-section (rideable tubes sweep an annulus
   // instead of the road profile); everything downstream just sweeps it.
   const profileData = def.profile
-    ? def.profile(pp)
+    ? def.profile(pp, rpForProfile)
     : curling
       ? buildBankProfile(rpForProfile, useKerbs, curlAmt, curlSteps)
       : buildProfile(rpForProfile, useKerbs);
@@ -3552,7 +3748,14 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // Held-bank pieces need no morph — their curl is constant, and skipping it
   // keeps them on the plain constant-section path.
   const sweepOpts = { plain: def.plain };
-  if (curling && def.curl !== bankCurlHold) {
+  // A piece can drive the section itself, frame by frame — the tube entries
+  // morph a flat road into a bore that way. Same contract as the bank morph
+  // below: the point count must not change, so `profile` (the reference) and
+  // `profileAt` have to be two views of one parametric section, never two
+  // different outlines.
+  if (def.profileAt) {
+    sweepOpts.profileAt = (t) => def.profileAt(t, pp, rpForProfile);
+  } else if (curling && def.curl !== bankCurlHold) {
     sweepOpts.profileAt = (t) => buildBankProfile(
       rpForProfile,
       useKerbs,
@@ -3588,6 +3791,16 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   const wantsRail = useKerbs && !def.noMesh && !def.profile && !def.geometry;
   const railGeometry = wantsRail ? buildRailGeometry(frames, rpForProfile) : null;
   const railCollision = wantsRail ? buildRailCollision(frames, rpForProfile) : null;
+  // ...and a THIRD: the rail flipped under its own deck, which is what its
+  // reflection in a wet road looks like. Built here because this is the only
+  // place the piece's frames exist — once the sweep is over, the geometry has
+  // no memory of which way was up at each station, and mirroring it about any
+  // single plane is the approximation this exists to avoid. It is carried on
+  // the rail mesh's userData like the collision proxy and only ever drawn into
+  // the reflection target. See buildMirroredRailGeometry.
+  const railMirrorGeometry = wantsRail
+    ? buildMirroredRailGeometry(frames, rpForProfile)
+    : null;
   // Same trick as the rail: one deck to look at, a slightly different one to
   // drive on. Open-lipped pieces (the half tubes) hand the BVH a copy with the
   // rim caps deleted so the lip is a launch edge, not a shelf.
@@ -3648,7 +3861,8 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // experimental guardrail that way. Recomputing them outside would mean
   // duplicating every centreline function in here and watching the two drift.
   return {
-    def, geometry, deckCollision, railGeometry, railCollision, shellGeometry, decorGeometry,
+    def, geometry, deckCollision, railGeometry, railCollision, railMirrorGeometry,
+    shellGeometry, decorGeometry,
     glassGeometry,
     frames, world, connectorOut, branchesOut,
   };

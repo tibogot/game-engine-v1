@@ -26,6 +26,7 @@ import {
   sqrt,
   mx_noise_float,
   mx_fractal_noise_float,
+  screenUV,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import {
@@ -34,7 +35,7 @@ import {
   WET_NUMBERS,
   createWetShading,
   wetClearcoatNormal,
-  railReflection,
+  wetRippleNormal,
 } from "./modularRoadWet.js";
 
 function lin(hex) {
@@ -201,12 +202,6 @@ export function createRoadMaterial(opts = {}) {
     reflectPlaneTol: uniform(opts.reflectPlaneTol ?? WET_DEFAULTS.reflectPlaneTol),
     reflectErrTol: uniform(opts.reflectErrTol ?? WET_DEFAULTS.reflectErrTol),
     railReflect: uniform(opts.railReflect ?? WET_DEFAULTS.railReflect),
-    railReflectLat: uniform(opts.railReflectLat ?? WET_DEFAULTS.railReflectLat),
-    deckHalfWidth: uniform(opts.deckHalfWidth ?? WET_DEFAULTS.deckHalfWidth),
-    railKerbTop: uniform(opts.railKerbTop ?? WET_DEFAULTS.railKerbTop),
-    railBeamLo: uniform(opts.railBeamLo ?? WET_DEFAULTS.railBeamLo),
-    railBeamHi: uniform(opts.railBeamHi ?? WET_DEFAULTS.railBeamHi),
-    railBeamColor: uniform(lin(opts.railBeamColor ?? WET_DEFAULTS.railBeamColor)),
     kerbWet: uniform(opts.kerbWet ?? WET_DEFAULTS.kerbWet),
   };
 
@@ -625,20 +620,46 @@ export function createRoadMaterial(opts = {}) {
     mat._reflectUniforms = r;
   }
 
-  // The rail's reflection is ANALYTIC — solved in the road shader rather than
-  // rendered into the planar mirror, because one mirror plane cannot follow a
-  // road that bends and the rail is the one object that always bends with it.
-  // See railReflection() in modularRoadWet.js. Deck only: a reflection on the
-  // kerb itself would be reflecting the thing it is standing on.
+  // ── THE RAIL'S REFLECTION ──────────────────────────────────────────────────
+  //
+  // Not a mirrored camera, and not solved analytically either. Both of those
+  // shipped and both were wrong in the same way: they assume the road is a
+  // plane. A planar mirror is only truthful ON its plane, and an analytic band
+  // has to invent the road's shape to solve against. On a bank, a crest or a
+  // dip the reflection then travels the wrong way — the rail climbs and its
+  // reflection descends, which is not a blur you can tune away but a direction.
+  //
+  // So the rail is mirrored as GEOMETRY (buildMirroredRailGeometry) about the
+  // deck at each of its own stations, and drawn with the REAL camera. That puts
+  // the mirrored rail at the screen position where its reflection belongs, for
+  // any road shape at all, so here there is no projection to compute: sample at
+  // this fragment's own screenUV and the two agree by construction.
+  //
+  // What it still cannot do is occlusion — this is an image of the mirrored
+  // rail with nothing in front of it, so it will show through the car. On a
+  // reflection multiplied by Fresnel and the water's roughness that is a much
+  // smaller lie than the one it replaces.
   let railNode = null;
-  if (wet) {
+  if (wet && opts.mirrorTexture) {
+    const mirrorTex = texture(opts.mirrorTexture);
+    // Same double-buffering as the planar mirror, so the node has to follow a
+    // texture whose identity changes every frame — hence `.sample()`.
+    mat._mirrorTextureNode = mirrorTex;
+
     railNode = Fn(() => {
       const zone = attribute("aZone", "float");
       const deckOnly = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
-      // Same gates as any other reflection here: only where there is water, and
-      // only as strongly as the grazing angle allows.
+
+      // The same normal-driven wobble the car's reflection gets. Sampling
+      // straight is what makes a reflection read as a decal: real water is
+      // never flat enough to return a clean image.
+      const distort = wetRippleNormal(u).xz
+        .mul(u.reflectDistort).mul(wet.coatNormalGain);
+      const col = mirrorTex.sample(screenUV.add(distort));
+
       const fres = oneMinus(abs(normalView.z)).pow(u.reflectFresnel);
-      return railReflection(u).mul(wet.coat).mul(fres).mul(deckOnly);
+      return col.rgb.mul(col.a)
+        .mul(wet.coat).mul(fres).mul(deckOnly).mul(u.railReflect);
     })();
   }
 

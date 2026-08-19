@@ -680,10 +680,26 @@ export function placePosts(frames, template, baseLat, zSign, spacing, out) {
     _pos.lerpVectors(_pa, _pb, t);
 
     // Re-orthogonalised, since lerping two orthonormal bases does not give one.
+    //
+    // GRAM-SCHMIDT, NOT CROSS PRODUCTS, and the difference is the whole reason
+    // the mirrored rail works. Rebuilding an axis as the cross of the other two
+    // derives its SIGN from them: the old `right = cross(tangent, up)` tied the
+    // post's side of the road to the sign of `up`, and `up = cross(right, fwd)`
+    // tied its facing to the sign of `right`. Both are true for any frame this
+    // kit transports and both break the moment a caller hands in a frame with
+    // `up` deliberately flipped — buildMirroredRailGeometry, which is a mirror
+    // and so genuinely has determinant −1. Measured on that path: posts landed
+    // 0.74 m across the road, then 0.21 m along it once the first was fixed.
+    //
+    // Orthogonalising each axis against the others by SUBTRACTION keeps every
+    // sign the caller asked for, mirror or not, and is identical to the cross
+    // products for the ordinary frames that make up every other call.
     _fwd.lerpVectors(a.tangent, b.tangent, t).normalize();
+    _right.lerpVectors(a.right, b.right, t).normalize();
+    _right.addScaledVector(_fwd, -_right.dot(_fwd)).normalize();
     _up.lerpVectors(a.up, b.up, t).normalize();
-    _right.crossVectors(_fwd, _up).normalize(); // the kit's right = cross(tangent, up)
-    _up.crossVectors(_right, _fwd).normalize();
+    _up.addScaledVector(_fwd, -_up.dot(_fwd))
+      .addScaledVector(_right, -_up.dot(_right)).normalize();
 
     // (right, up, tangent) is LEFT-handed here, so negate the third axis to keep
     // the template's winding intact; the post is symmetric along travel, so the
@@ -888,6 +904,44 @@ export function buildRailCollision(frames, rp, r = railParams) {
   geo.setIndex(indices);
   geo.computeBoundingSphere();
   return geo;
+}
+
+/**
+ * The guardrail's MIRROR IMAGE, as real geometry.
+ *
+ * A reflection is the mirrored object seen from the real camera — so if you can
+ * build the mirrored object, you can skip mirroring the camera entirely, and
+ * with it every problem that comes from mirroring about a single global plane.
+ *
+ * Mirroring is done to the FRAMES, not the profile: negate `up`, and the rail
+ * swept at `pos + right*lat + up*height` lands at `pos + right*lat - up*height`
+ * instead — reflected about the deck AT THAT STATION, not about some plane
+ * fitted under the car. A crest, a dip, a bank and the inside of a loop all
+ * mirror correctly because each vertex is mirrored in its own local frame.
+ *
+ * `right` is deliberately left alone, which is what keeps the rail on its own
+ * side of the road. That only works because placePosts treats `right` as the
+ * authority rather than rebuilding it from cross(tangent, up) — it used to, and
+ * the flipped `up` sent every post 0.74 m across the road, under the opposite
+ * rail. decimateFrames only ever compares frames to each other, so a uniform
+ * flip leaves its choices identical and the two geometries stay vertex-for-
+ * vertex comparable.
+ *
+ * The guardrail material is DoubleSide, so the inverted winding costs nothing.
+ * Normals come out flipped, which means the mirrored rail is lit from the wrong
+ * side — an error, but a far smaller one than a reflection that runs downhill
+ * while the rail climbs, and largely invisible once Fresnel and the water's
+ * roughness have had their way with it.
+ *
+ * `deckLift` is deliberately NOT compensated. It is nonzero only on a curled
+ * bank, where it is centimetres, and carrying it would mean mirroring about a
+ * plane offset from the frame origin — reintroducing exactly the kind of
+ * special case this approach exists to avoid.
+ */
+export function buildMirroredRailGeometry(frames, rp, r = railParams) {
+  if (!frames?.length) return null;
+  const flipped = frames.map((f) => ({ ...f, up: f.up.clone().negate() }));
+  return buildRailGeometry(flipped, rp, r);
 }
 
 export function buildRailGeometry(frames, rp, r = railParams) {

@@ -55,6 +55,25 @@ import * as THREE from "three";
 export const REFLECT_LAYER = 1;
 
 /**
+ * The layer for geometry that is ALREADY MIRRORED, drawn with the REAL camera.
+ *
+ * A planar mirror is a camera trick, and camera tricks are only true on the
+ * plane. The alternative is older and has no plane in it at all: build the
+ * reflected object, and look at it with the ordinary eye. Whatever shape the
+ * road is, a mirrored guardrail sits where its reflection belongs, because it
+ * was mirrored per-vertex about the deck at its own station rather than about
+ * one plane fitted under the car. See buildMirroredRailGeometry.
+ *
+ * Because the real camera renders it, the result lands at the fragment's own
+ * screen position — so the road samples this target at screenUV, with no
+ * texture matrix and no projection to get wrong.
+ *
+ * Objects here SET the layer instead of enabling it: a mirrored rail must never
+ * appear in the main view.
+ */
+export const PREMIRROR_LAYER = 2;
+
+/**
  * Clip → 0..1 texture space, WITH V FLIPPED.
  *
  * The −0.5 in the second row is the WebGPU difference and it is not optional.
@@ -121,6 +140,12 @@ export function createCarReflection({
   /** Index of the target the material should SAMPLE — the one written last. */
   let front = 0;
 
+  // Second pair, for the pre-mirrored pass. Ping-ponged for the same
+  // read/write-in-one-scope reason as the first; the road samples this one too.
+  const preTargets = [makeTarget("Pre0"), makeTarget("Pre1")];
+  let preFront = 0;
+  let preActive = false;
+
   const virtualCamera = new THREE.PerspectiveCamera();
   virtualCamera.layers.set(REFLECT_LAYER);
 
@@ -185,6 +210,9 @@ export function createCarReflection({
       const W = Math.max(2, w | 0);
       const H = Math.max(2, h | 0);
       for (const t of targets) t.setSize(W, H);
+      // The pre-mirrored pass is sampled at screenUV, so unlike the planar
+      // mirror it wants the VIEW's aspect ratio, not just some small square.
+      for (const t of preTargets) t.setSize(W, H);
     },
 
     /**
@@ -288,8 +316,61 @@ export function createCarReflection({
       return true;
     },
 
+    /** The pre-mirrored target to SAMPLE this frame (screenUV, not textureMatrix). */
+    get mirrorTexture() { return preTargets[preFront].texture; },
+
+    /**
+     * Draw the pre-mirrored geometry from the REAL camera.
+     *
+     * Independent of `update()` and of the mirror plane: there is no plane in
+     * this path. It is skipped only when nothing is on the layer, which is the
+     * common case (rails off) and costs one flag test.
+     *
+     * The camera's layer mask is swapped rather than a second camera built, so
+     * the projection, the near/far and anything else the caller has done to it
+     * match the main pass by construction — the failure mode of a rebuilt
+     * camera is a reflection offset by a fraction of a degree, which reads as
+     * the rail sliding as you steer.
+     */
+    updatePreMirrored(camera) {
+      if (!enabled || !preActive) return false;
+
+      const prevTarget = renderer.getRenderTarget();
+      const prevBackground = scene.background;
+      const prevFog = scene.fog;
+      const prevAlpha = renderer.getClearAlpha();
+      const prevClear = renderer.getClearColor(new THREE.Color());
+      const prevShadowAuto = renderer.shadowMap.autoUpdate;
+      const prevMask = camera.layers.mask;
+
+      scene.background = null;
+      scene.fog = null;
+      renderer.shadowMap.autoUpdate = false;
+      renderer.setClearColor(0x000000, 0);
+      camera.layers.set(PREMIRROR_LAYER);
+
+      const back = preFront ^ 1;
+      renderer.setRenderTarget(preTargets[back]);
+      renderer.clear();
+      renderer.render(scene, camera);
+      preFront = back;
+
+      camera.layers.mask = prevMask;
+      renderer.setRenderTarget(prevTarget);
+      renderer.setClearColor(prevClear, prevAlpha);
+      renderer.shadowMap.autoUpdate = prevShadowAuto;
+      scene.background = prevBackground;
+      scene.fog = prevFog;
+      return true;
+    },
+
+    /** Whether anything is on the pre-mirror layer worth a pass. */
+    get preMirrorActive() { return preActive; },
+    set preMirrorActive(v) { preActive = !!v; },
+
     dispose() {
       for (const t of targets) t.dispose();
+      for (const t of preTargets) t.dispose();
     },
   };
 }
@@ -309,7 +390,14 @@ export function addToReflection(object, on = true) {
   });
 }
 
-/** Lights must see the reflection layer or everything in the mirror is black. */
+/**
+ * Lights must see the reflection layers or everything in the mirror is black.
+ *
+ * BOTH layers: three tests `light.layers` against the object's, so a sun left
+ * on layer 0 lights the real rail and leaves its mirrored twin unlit — which
+ * looks exactly like the pre-mirrored pass having failed to run.
+ */
 export function lightReflection(light) {
   light.layers.enable(REFLECT_LAYER);
+  light.layers.enable(PREMIRROR_LAYER);
 }

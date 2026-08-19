@@ -65,6 +65,7 @@ import {
   createCarReflection,
   lightReflection,
   REFLECT_LAYER,
+  PREMIRROR_LAYER,
 } from "./modularRoadReflection.js";
 import {
   createRoadMaterial,
@@ -891,19 +892,85 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * to track which of the two is live.
    */
   /**
-   * Guardrails in the PLANAR mirror — OFF, because the rail is the one object a
-   * single mirror plane can never get right. It runs the whole length of the
-   * road, so on any piece that bends it is metres off the plane and its flipped
-   * image runs the wrong way: measured on Apex Parkour's dip, rails 20-40 m out
-   * sit up to 12 m off-plane, and the reflection descends while the rail climbs.
+   * Guardrails in the reflection — ON, and NOT through the planar mirror.
    *
-   * It is drawn ANALYTICALLY in the road shader instead (railReflection() in
-   * modularRoadWet.js), solved in each fragment's own tangent frame, so it
-   * follows the road through crests, dips and banks by construction. Turning
-   * this back on is only sensible on a genuinely flat circuit, and even then
-   * the analytic one should be turned off to avoid drawing the rail twice.
+   * The rail is the one object a single mirror plane can never get right. It
+   * runs the whole length of the road, so on any piece that bends it is metres
+   * off the plane and its flipped image runs the wrong way: measured on Apex
+   * Parkour's dip, rails 20-40 m out sit up to 12 m off-plane, and the
+   * reflection descends while the rail climbs. Clipping, fading and an analytic
+   * band were all tried against that and all failed, the first three because
+   * they measured the RECEIVING fragment when the error was in the mirror's
+   * CONTENT, the last because a flat colour band reads as paint.
+   *
+   * So the rail is not put in the mirror at all. A mirrored COPY of it is built
+   * (buildMirroredRailGeometry — each vertex flipped about the deck at its own
+   * station) and drawn with the ordinary camera into the same target, which is
+   * what a reflection is before anyone thought of mirroring cameras. No plane,
+   * so nothing to be off it by.
    */
-  let railsInMirror = false;
+  let railsInMirror = true;
+  /** The whole track's mirrored rail, merged, on PREMIRROR_LAYER. One mesh —
+   *  it is only ever drawn by the reflection pass, which does not cull. */
+  const mirrorRailGroup = new THREE.Group();
+  mirrorRailGroup.name = "MirroredRails";
+  mirrorRailGroup.layers.set(PREMIRROR_LAYER);
+  mirrorRailGroup.matrixAutoUpdate = false;
+  scene.add(mirrorRailGroup);
+
+  function disposeMirrorRails() {
+    for (const m of mirrorRailGroup.children) m.geometry?.dispose();
+    mirrorRailGroup.clear();
+  }
+
+  /**
+   * Rebuild the mirrored rail from what the builder is holding.
+   *
+   * Reads the per-piece `railMesh.userData.mirrorGeometry` the kit stashed, in
+   * PIECE space, and bakes each into world space — the same shape as
+   * buildMergedTrack, and merged for the same reason: the reflection pass would
+   * otherwise redraw every piece of the track separately.
+   *
+   * Driven off `builder.pieces` rather than off the merged group, so it is
+   * identical in build and drive mode. The merged track hides the per-piece
+   * meshes but the piece RECORDS are still there, which is what this needs.
+   */
+  function rebuildMirrorRails() {
+    disposeMirrorRails();
+    // Dry road, reflections off, or rails off: nothing to draw and, more to the
+    // point, no pass to pay for — `preMirrorActive` false skips it entirely.
+    // Read the wetness off the MATERIAL, not off `roadLook`: this runs from the
+    // builder's onChange during construction, and `roadLook` is not declared
+    // until much further down — naming it here is a temporal-dead-zone throw,
+    // the same trap `_mergedGroupRef` exists to dodge.
+    const wet = roadMaterial?._roadUniforms?.wetAmount?.value ?? 0;
+    const on = railsInMirror && reflectionEnabled && wet > 0;
+    carReflection.preMirrorActive = false;
+    if (!on || !builder?.pieces?.length) return;
+    scene.updateMatrixWorld(true);
+    const geos = [];
+    for (const p of builder.pieces) {
+      const g = p.railMesh?.userData?.mirrorGeometry;
+      if (!g) continue;
+      const c = g.clone();
+      c.applyMatrix4(p.railMesh.matrixWorld);
+      geos.push(c);
+    }
+    if (!geos.length) return;
+    const merged = mergeGeometries(geos, false);
+    for (const g of geos) g.dispose();
+    if (!merged) return;
+    merged.computeBoundingSphere();
+    const mesh = new THREE.Mesh(merged, railMaterial);
+    // No shadows either way: this mesh exists below the road, is never lit by
+    // the main pass, and casting from it would put rail shadows underground.
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = false;
+    mesh.layers.set(PREMIRROR_LAYER);
+    mirrorRailGroup.add(mesh);
+    carReflection.preMirrorActive = true;
+  }
   /** Roadside scenery (lamps, boards) in the mirror — see the note below. */
   let sceneryInMirror = true;
   /** Late-bound for the same reason as `_mergedGroupRef`: the builder's
@@ -913,12 +980,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   /** Set once buildMergedTrack's group exists — see the note in `apply`. */
   let _mergedGroupRef = null;
   function applyRailReflectionMembers() {
+    // Nothing of the TRACK goes in the planar mirror any more. The rail's
+    // reflection comes from mirrored geometry instead (rebuildMirrorRails), so
+    // this pass only has to make sure no stale membership survives a reload.
     const apply = (root) => {
       root?.traverse((o) => {
         if (!o.isMesh && !o.isInstancedMesh) return;
-        if (o.material !== railMaterial) { o.layers.disable(REFLECT_LAYER); return; }
-        if (railsInMirror) o.layers.enable(REFLECT_LAYER);
-        else o.layers.disable(REFLECT_LAYER);
+        o.layers.disable(REFLECT_LAYER);
       });
     };
     apply(builder?.instGroup);
@@ -950,6 +1018,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // onChange calls it during construction, before `mergedGroup` exists.
     // Naming the const directly there is a temporal-dead-zone throw.
     apply(_mergedGroupRef);
+
+    rebuildMirrorRails();
   }
 
   const _mirrorPoint = new THREE.Vector3();
@@ -1003,14 +1073,33 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         ...roadLook,
         wet: wantWet,
         reflectionTexture: wantWet ? carReflection.texture : null,
+        mirrorTexture: wantWet ? carReflection.mirrorTexture : null,
       }));
     }
     roadMaterial._roadUniforms.wetAmount.value = wet;
+    // Crossing 0 in either direction changes whether the mirrored rail is worth
+    // building at all, and the material it draws with has just been replaced.
+    rebuildMirrorRails();
   }
 
   function updateCarReflection() {
     const ru = roadMaterial._reflectUniforms;
     if (!ru) return;
+
+    // THE MIRRORED RAIL, first and INDEPENDENTLY. It has no plane, no contact
+    // patch and no need of the car, so it survives everything that makes the
+    // planar mirror bail out — including being airborne, which is exactly when
+    // you are looking down at the road from a height and the rails are the only
+    // thing in frame worth reflecting.
+    // The mode gate lives HERE and nowhere else. `preMirrorActive` means "there
+    // is mirrored geometry worth a pass" and is owned by rebuildMirrorRails;
+    // clearing it from this side left it false after a build→drive switch, so
+    // the reflection only came back if something happened to rebuild the track.
+    if (mode === "drive" && reflectionEnabled && carReflection.updatePreMirrored(camera)) {
+      const mirrorNode = roadMaterial._mirrorTextureNode;
+      if (mirrorNode) mirrorNode.value = carReflection.mirrorTexture;
+    }
+
     if (mode !== "drive" || !reflectionEnabled || !vehicleRef) {
       ru.reflectOn.value = 0;
       return;
@@ -3499,6 +3588,7 @@ ${e.message}`);
         if (!on && roadMaterial._reflectUniforms) {
           roadMaterial._reflectUniforms.reflectOn.value = 0;
         }
+        rebuildMirrorRails();
       },
       setRailsInMirror: (on) => { railsInMirror = !!on; applyRailReflectionMembers(); },
       getLinesOn: () => roadMaterial._roadUniforms.linesOn.value > 0.5,
@@ -3799,6 +3889,7 @@ ${e.message}`);
       if (!on && roadMaterial._reflectUniforms) {
         roadMaterial._reflectUniforms.reflectOn.value = 0;
       }
+      rebuildMirrorRails();
     },
     getReflection: () => reflectionEnabled,
     setRailsInMirror: (on) => { railsInMirror = !!on; applyRailReflectionMembers(); },
