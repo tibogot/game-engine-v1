@@ -124,6 +124,34 @@ export function createCarReflection({
   const virtualCamera = new THREE.PerspectiveCamera();
   virtualCamera.layers.set(REFLECT_LAYER);
 
+  // ── THE SLAB ───────────────────────────────────────────────────────────────
+  //
+  // A planar mirror is only truthful about geometry NEAR its plane. Reflecting
+  // something `h` above the plane puts its image `h` below; if the surface it
+  // lands on has meanwhile curved away, the image is wrong by roughly 2h — and
+  // wrong in a direction, not a blur. That is the inverted guardrail: measured
+  // on Apex Parkour's banked dip, rails 20-40 m from the car sit up to 12 m off
+  // the plane, so their reflections are displaced by ~24 m and run downhill
+  // while the real rail climbs.
+  //
+  // No fade applied to the RECEIVING fragment can fix this. The floor near the
+  // car is legitimately on the plane; it is the content of the mirror that does
+  // not belong there. Three successive fades — plane distance, coplanarity
+  // angle, metres of error — all measured the wrong end and all failed.
+  //
+  // So the mirror pass clips to a slab around the plane. Geometry outside it is
+  // never drawn into the target, which is both correct and cheaper. The car
+  // lives at the plane by construction and always survives; a guardrail
+  // survives while the road is locally flat and drops out the moment the piece
+  // starts to curve away, which is exactly when its reflection stopped being
+  // true.
+  const _slabAbove = new THREE.Plane();
+  const _slabBelow = new THREE.Plane();
+  const _slabPoint = new THREE.Vector3();
+  /** Half-height of that slab, in metres. Comfortably clears a car (~1.3 m) and
+   *  cuts rails once a crest, dip or bank has lifted them away. */
+  let slabHalf = 3.0;
+
   const textureMatrix = new THREE.Matrix4();
 
   const _planePoint = new THREE.Vector3();
@@ -148,6 +176,10 @@ export function createCarReflection({
     camera: virtualCamera,
     get enabled() { return enabled; },
     set enabled(v) { enabled = v; },
+
+    /** Half-height of the clipping slab around the mirror plane, in metres. */
+    get slab() { return slabHalf; },
+    set slab(v) { slabHalf = Math.max(0.2, +v || 0.2); },
 
     setSize(w, h) {
       const W = Math.max(2, w | 0);
@@ -227,8 +259,17 @@ export function createCarReflection({
       // about to redo a millisecond later. The main render re-enables it.
       const prevShadowAuto = renderer.shadowMap.autoUpdate;
 
+      const prevClipping = renderer.clippingPlanes;
+
+      // Clip to the slab — see the note where the planes are declared.
+      _slabPoint.copy(_planePoint).addScaledVector(_normal, slabHalf);
+      _slabAbove.setFromNormalAndCoplanarPoint(_normal.clone().negate(), _slabPoint);
+      _slabPoint.copy(_planePoint).addScaledVector(_normal, -slabHalf);
+      _slabBelow.setFromNormalAndCoplanarPoint(_normal, _slabPoint);
+
       scene.background = null;
       scene.fog = null;
+      renderer.clippingPlanes = [_slabAbove, _slabBelow];
       renderer.shadowMap.autoUpdate = false;
       renderer.setClearColor(0x000000, 0);
       // Write to the BACK buffer; the material is still sampling the front one.
@@ -240,6 +281,7 @@ export function createCarReflection({
 
       renderer.setRenderTarget(prevTarget);
       renderer.setClearColor(prevClear, prevAlpha);
+      renderer.clippingPlanes = prevClipping;
       renderer.shadowMap.autoUpdate = prevShadowAuto;
       scene.background = prevBackground;
       scene.fog = prevFog;

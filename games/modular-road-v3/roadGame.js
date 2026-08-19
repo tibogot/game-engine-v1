@@ -3464,6 +3464,8 @@ ${e.message}`);
         roadMaterial._roadUniforms.reflectPlaneTol.value = v;
       },
       getReflectPlane: () => roadMaterial._roadUniforms.reflectPlaneTol.value,
+      setReflectSlab: (v) => { carReflection.slab = v; },
+      getReflectSlab: () => carReflection.slab,
       setReflection: (on) => {
         reflectionEnabled = !!on;
         if (!on && roadMaterial._reflectUniforms) {
@@ -3773,6 +3775,10 @@ ${e.message}`);
     getReflection: () => reflectionEnabled,
     setRailsInMirror: (on) => { railsInMirror = !!on; applyRailReflectionMembers(); },
     getRailsInMirror: () => railsInMirror,
+    /** Half-height of the mirror's clipping slab, metres — see
+     *  modularRoadReflection.js. The knob for inverted reflections on slopes. */
+    setReflectSlab: (v) => { carReflection.slab = v; },
+    getReflectSlab: () => carReflection.slab,
     /** The mirror itself — exposed for the same reason the lab exposes it: when
      *  a reflection is missing, "the target is empty", "the projection lands off
      *  the edge" and "it is there but multiplied to nothing" look identical on
