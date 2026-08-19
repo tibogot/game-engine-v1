@@ -1187,7 +1187,7 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="prop-row">
             <span class="prop-label">Rails in mirror</span>
             <div class="prop-value">
-              <button class="prop-toggle" id="dv-reflect-rails" type="button" aria-label="Guardrails in the planar mirror">${CHECK_SVG}</button>
+              <button class="prop-toggle" id="dv-reflect-rails" type="button" aria-label="Guardrail reflection (mirrored geometry)">${CHECK_SVG}</button>
             </div>
           </div>
           <div class="prop-row">
@@ -2268,7 +2268,12 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-wet-puddle", weather, "puddles", (v) => v.toFixed(2), (v) => game.setPuddles?.(v));
   slider("dv-wet-wheel", weather, "dryLine", (v) => v.toFixed(2), (v) => game.setWheelClear?.(v));
   toggle("dv-reflect", true, (on) => game.setReflection?.(on));
-  toggle("dv-reflect-rails", false, (on) => game.setRailsInMirror?.(on));
+  // SEEDED FROM THE GAME, not from a literal. It was hard-coded `false` while
+  // roadGame defaults it on, so the box read unchecked with the reflection
+  // plainly visible — and the first click then "turned on" what was already on
+  // and appeared to do nothing at all.
+  toggle("dv-reflect-rails", game.getRailsInMirror?.() ?? true,
+    (on) => game.setRailsInMirror?.(on));
   slider("dv-reflect-str", weather, "reflectStrength", (v) => v.toFixed(2),
     (v) => game.setReflectStrength?.(v));
   // The two knobs that decide where a planar mirror is allowed to be believed.

@@ -646,6 +646,14 @@ export function createRoadMaterial(opts = {}) {
     // texture whose identity changes every frame — hence `.sample()`.
     mat._mirrorTextureNode = mirrorTex;
 
+    // DID THE PASS RUN THIS FRAME? Runtime state, so it lives here and not in
+    // ROAD_LOOK — a saved track must not be able to pin it. Without it, a
+    // stopped pass leaves the road sampling whatever the ping-pong buffer held
+    // last, which is a FROZEN reflection rather than no reflection: turning
+    // "Rails in mirror" off looked like it did nothing at all.
+    const railOn = uniform(0);
+    mat._railMirrorOn = railOn;
+
     railNode = Fn(() => {
       const zone = attribute("aZone", "float");
       const deckOnly = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
@@ -659,7 +667,7 @@ export function createRoadMaterial(opts = {}) {
 
       const fres = oneMinus(abs(normalView.z)).pow(u.reflectFresnel);
       return col.rgb.mul(col.a)
-        .mul(wet.coat).mul(fres).mul(deckOnly).mul(u.railReflect);
+        .mul(wet.coat).mul(fres).mul(deckOnly).mul(u.railReflect).mul(railOn);
     })();
   }
 

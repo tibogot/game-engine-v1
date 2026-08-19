@@ -1059,30 +1059,72 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   /**
+   * Rebuild the road material if the FEATURES it was compiled with no longer
+   * match what is switched on.
+   *
+   * Two things change the shader rather than a uniform. Wetness crossing 0
+   * swaps Standard for Physical (the clearcoat lobe only compiles if there is a
+   * clearcoatNode). "Rails in mirror" decides whether the mirrored-rail sample
+   * is in the shader at all — and that is the difference between a term
+   * multiplied by zero and a term that is not there.
+   *
+   * Multiplying by zero is what the runtime gate does, and it is right for the
+   * cases that change per FRAME (build mode, no contact patch): the fragment
+   * still pays for the texture fetch, which is the price of being able to come
+   * back next frame. A toggle is not per frame, so it can afford a rebuild and
+   * buy a genuinely free "off" — no sample, no node, nothing left in the
+   * compiled shader to cost anything.
+   *
+   * The rebuild is the same one wetness already does, hitch included (it
+   * re-merges the drive-mode track), which is why this only ever runs from a
+   * toggle and never from the render loop.
+   */
+  function syncRoadMaterialFeatures() {
+    const wantWet = (roadLook.wetAmount ?? 0) > 0;
+    const wantRail = wantWet && railsInMirror;
+    const isWet = !!roadMaterial._reflectUniforms || roadMaterial.isMeshPhysicalNodeMaterial;
+    const hasRail = !!roadMaterial._mirrorTextureNode;
+    if (wantWet === isWet && wantRail === hasRail) return;
+    applyRoadMaterial(createRoadMaterial({
+      ...roadLook,
+      wet: wantWet,
+      reflectionTexture: wantWet ? carReflection.texture : null,
+      mirrorTexture: wantRail ? carReflection.mirrorTexture : null,
+    }));
+  }
+
+  /**
    * Master weather. Crossing 0 changes which material the road is built from —
-   * see the note on `roadMaterial` — so this is a rebuild at one end of its
-   * range and a uniform poke everywhere else.
+   * see syncRoadMaterialFeatures — so this is a rebuild at one end of its range
+   * and a uniform poke everywhere else.
    */
   function setRoadWet(v) {
     const wet = Math.max(0, Math.min(1, v || 0));
     roadLook.wetAmount = wet;
-    const wantWet = wet > 0;
-    const isWet = !!roadMaterial._reflectUniforms || roadMaterial.isMeshPhysicalNodeMaterial;
-    if (wantWet !== isWet) {
-      applyRoadMaterial(createRoadMaterial({
-        ...roadLook,
-        wet: wantWet,
-        reflectionTexture: wantWet ? carReflection.texture : null,
-        mirrorTexture: wantWet ? carReflection.mirrorTexture : null,
-      }));
-    }
+    syncRoadMaterialFeatures();
     roadMaterial._roadUniforms.wetAmount.value = wet;
     // Crossing 0 in either direction changes whether the mirrored rail is worth
-    // building at all, and the material it draws with has just been replaced.
+    // building at all, and the material it draws with may just have been
+    // replaced.
     rebuildMirrorRails();
   }
 
+  /** The guardrail reflection, off to on. Rebuilds the material so that "off"
+   *  costs nothing at all rather than costing a sample multiplied by zero. */
+  function setRailsInMirrorFlag(on) {
+    railsInMirror = !!on;
+    syncRoadMaterialFeatures();
+    applyRailReflectionMembers();
+  }
+
   function updateCarReflection() {
+    // OFF FIRST, ON ONLY ON SUCCESS. The mirrored-rail target is ping-ponged,
+    // so a pass that does not run leaves a perfectly good image of last frame's
+    // rails sitting in it — and a road that keeps sampling that shows a FROZEN
+    // reflection, which is indistinguishable from the toggle doing nothing.
+    const railOn = roadMaterial._railMirrorOn;
+    if (railOn) railOn.value = 0;
+
     const ru = roadMaterial._reflectUniforms;
     if (!ru) return;
 
@@ -1098,6 +1140,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     if (mode === "drive" && reflectionEnabled && carReflection.updatePreMirrored(camera)) {
       const mirrorNode = roadMaterial._mirrorTextureNode;
       if (mirrorNode) mirrorNode.value = carReflection.mirrorTexture;
+      if (railOn) railOn.value = 1;
     }
 
     if (mode !== "drive" || !reflectionEnabled || !vehicleRef) {
@@ -3590,7 +3633,7 @@ ${e.message}`);
         }
         rebuildMirrorRails();
       },
-      setRailsInMirror: (on) => { railsInMirror = !!on; applyRailReflectionMembers(); },
+      setRailsInMirror: (on) => setRailsInMirrorFlag(on),
       getLinesOn: () => roadMaterial._roadUniforms.linesOn.value > 0.5,
       setLinesOn: (on) => { roadMaterial._roadUniforms.linesOn.value = on ? 1 : 0; },
       setTireMarksEnabled: (on) => {
@@ -3892,7 +3935,7 @@ ${e.message}`);
       rebuildMirrorRails();
     },
     getReflection: () => reflectionEnabled,
-    setRailsInMirror: (on) => { railsInMirror = !!on; applyRailReflectionMembers(); },
+    setRailsInMirror: (on) => setRailsInMirrorFlag(on),
     getRailsInMirror: () => railsInMirror,
     /** Half-height of the mirror's clipping slab, metres — see
      *  modularRoadReflection.js. The knob for inverted reflections on slopes. */
