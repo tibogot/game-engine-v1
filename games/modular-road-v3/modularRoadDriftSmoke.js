@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
 import {
   attribute, cameraFar, cameraNear, cameraPosition, Discard, dot, exp, float,
-  Fn, length, max, min, mix, normalize, normalWorld, perspectiveDepthToViewZ,
+  Fn, length, max, min, mix, normalize, perspectiveDepthToViewZ,
   positionView, positionWorld, pow, saturate, screenUV, smoothstep, sqrt,
   texture, uniform, uv, vec2, vec3, vec4, viewportDepthTexture,
 } from "three/tsl";
@@ -285,10 +285,53 @@ const CLASS_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 2;
  * The quad has to circumscribe the SPHERE'S SCREEN PROJECTION, not the sphere.
  * A sphere of radius R at distance d subtends asin(R/d); a quad of half-width R
  * only spans atan(R/d), which is smaller — so an exactly-sized quad clips its
- * own sphere's silhouette, and worse the closer you get. 1.2 covers R/d ≈ 0.55.
- * The extra area costs almost nothing: it misses the sphere and discards.
+ * own sphere's silhouette, and worse the closer you get.
+ *
+ * This used to be a flat 1.2× fudge. That is exact at R/d ≈ 0.55 and wrong
+ * everywhere else, in both directions:
+ *   • far away it is 20% too big, and quad area is pure overdraw — the corners
+ *     miss the sphere and discard, but they are rasterised and shaded first;
+ *   • close up it is far too small. A grown puff reaches R ≈ 2.3 m and the chase
+ *     camera passes within a metre of it, so the SQUARE quad boundary cut
+ *     straight through the ROUND silhouette. That is the "I can see flat planes"
+ *     artifact, and it was never the shading — it was the quad running out.
+ *
+ * The exact half-width is R / √(1 − (R/d)²). (The silhouette circle has radius
+ * R·√(d²−R²)/d at distance (d²−R²)/d; projecting it back onto the plane
+ * through the centre gives R·d/√(d²−R²).) It tends to R at distance — so most
+ * puffs on screen now get a SMALLER quad than before, which is free overdraw
+ * back — and diverges as the camera reaches the surface, which is what this cap
+ * and the proximity fade below are for.
  */
-const QUAD_OVERSIZE = 1.2;
+const K_MAX = 0.9;
+/**
+ * Camera-proximity fade for the puffs, in two terms, whichever is smaller.
+ *
+ * A billboard is a plane at the particle's CENTRE, so the moment that centre
+ * crosses the camera's near plane (0.5 m in this engine) the entire quad is
+ * clipped along a straight line. The chase camera trails 7.5 m behind the car
+ * and puffs live 0.8–1.9 s, so at speed it flies through the plume continuously
+ * — this was firing constantly and nothing handled it.
+ *
+ * Fading before the clip is what every shipped particle system does, and it is
+ * also what keeps K_MAX honest: by the time the exact quad would need to be
+ * 2.3× the sphere radius, the particle is already invisible.
+ */
+const K_FADE_START = 0.6;
+/** Centre distance (m) at which a puff is fully gone — comfortably outside the
+ *  0.5 m near plane — and at which it is back to full strength. */
+const NEAR_FADE_OUT = 0.55;
+const NEAR_FADE_IN = 1.2;
+/**
+ * The bank's equivalent, in units of its OWN radius rather than metres. A bank
+ * sphere is up to 14 m across and the camera is inside one for most of a drift,
+ * so an absolute fade would delete the bank outright. This only retires a sphere
+ * once the camera is WELL inside it (40% of the radius from the centre), which
+ * stops the innermost few from flat-greying the screen while every other sphere
+ * around the camera keeps rendering.
+ */
+const BANK_FADE_IN = 1.0;
+const BANK_FADE_OUT = 0.4;
 const UV_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 2;
 
 const EMIT_RATE = 48;
@@ -331,6 +374,9 @@ const SUN_REFERENCE_INTENSITY = 2.5;
 
 const _smokeRight = new THREE.Vector3();
 const _smokeUp = new THREE.Vector3();
+/** Camera world position, refreshed once per frame in `update`. Drives the
+ *  exact quad size and the proximity fade. */
+const _camPos = new THREE.Vector3();
 const _smokeCorner = new THREE.Vector3();
 const _smokeHalfRight = new THREE.Vector3();
 const _smokeHalfUp = new THREE.Vector3();
@@ -531,6 +577,13 @@ export class ModularRoadDriftSmoke {
     const material = new MeshBasicNodeMaterial({
       transparent: true,
       depthWrite: false,
+      // The shader already does EXACT per-pixel occlusion — the chord is clipped
+      // by scene depth, so anything behind solid geometry comes out with zero
+      // thickness and discards. The depth TEST on top of that is pure downside:
+      // it accepts or rejects the WHOLE quad on the depth of its centre plane,
+      // so a puff whose centre is behind a guardrail vanishes even when its near
+      // half is plainly in front of it. That is the popping at wall edges.
+      depthTest: false,
       side: THREE.DoubleSide,
       fog: false,
     });
@@ -586,6 +639,10 @@ export class ModularRoadDriftSmoke {
     /** World-noise frequency / mix of the class currently being stepped. */
     this._worldScaleMul = 1;
     this._worldMixMul = 1;
+    /** Camera→centre distance of the particle currently being written. Set by
+     *  `_stepPool` for the same reason `_smokeTint` is — it is already in hand
+     *  up there, and `_writeParticle` needs it to size the quad exactly. */
+    this._camDist = 1;
     /** Master visibility. Both meshes also hide themselves when empty, so this
      *  is ANDed in rather than written straight to `mesh.visible`. */
     this._visible = true;
@@ -608,8 +665,8 @@ export class ModularRoadDriftSmoke {
    * enough that you drive around it, and a card has no silhouette of its own and
    * no honest depth. Spheres cost nothing here (320 tris × ~200 = 64k, noise
    * next to the track's 500k) because the price of smoke is overdraw, not
-   * vertices — and a FrontSide sphere actually covers LESS screen than the
-   * 1.2×-oversized quad it replaces.
+   * vertices — and a sphere covers less screen than the oversized quad it
+   * replaces.
    *
    * Deliberately no `positionNode`: the lumpy silhouette comes entirely from the
    * alpha erosion carving the sphere, which is how claude-zelda's smoke does it
@@ -630,13 +687,29 @@ export class ModularRoadDriftSmoke {
     const threshAttr = new THREE.InstancedBufferAttribute(thresholds, 1);
     threshAttr.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute("iThresh", threshAttr);
+    // The sphere the shell stands for: centre.xyz + radius. The mesh is only a
+    // bounding surface now — thickness, the density sample and the lighting
+    // normal all come from intersecting the view ray with THIS, exactly as the
+    // puffs do. See `_buildBankNode`.
+    const spheres = new Float32Array(HAZE_POOL_SIZE * 4);
+    const sphereAttr = new THREE.InstancedBufferAttribute(spheres, 4);
+    sphereAttr.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute("iSphere", sphereAttr);
 
     const mat = new MeshBasicNodeMaterial({
       transparent: true,
       depthWrite: false,
-      // FrontSide, not Double: a closed sphere would otherwise blend twice per
-      // pixel, doubling both the cost and the density.
-      side: THREE.FrontSide,
+      // BackSide — the FAR hemisphere. See `_buildBankNode` for the whole
+      // argument; the short version is that FrontSide made the sphere delete
+      // itself the moment the camera got inside it, which is most of a drift.
+      side: THREE.BackSide,
+      // Required by BackSide, and correct on its own merits. The shader does
+      // EXACT per-pixel occlusion (the chord is clipped by scene depth, so
+      // anything behind solid geometry comes out with zero thickness and
+      // discards). The depth test on top of that only decides the whole
+      // triangle on its own depth — and the far hemisphere of a sphere resting
+      // on the road is BELOW the tarmac, so it would be rejected wholesale.
+      depthTest: false,
       fog: false,
     });
     const shaded = this._buildBankNode().toVar();
@@ -655,15 +728,39 @@ export class ModularRoadDriftSmoke {
     this.bankMesh = mesh;
     this.bankTints = tints;
     this.bankThresholds = thresholds;
+    this.bankSpheres = spheres;
   }
 
   /**
-   * Bank shading. Same lighting model as the puffs, but everything geometric
-   * comes from the real surface instead of being reconstructed from a quad.
+   * Bank shading. Same lighting model as the puffs, and now the same ANALYTIC
+   * ray-sphere geometry — the mesh alone could not survive the camera being
+   * inside it.
+   *
+   * ── WHY THIS IS BackSide ───────────────────────────────────────────
+   * It was FrontSide, on the sound reasoning that a closed sphere would
+   * otherwise blend twice per pixel. But front-facing means the NEAR hemisphere,
+   * and the chase camera is inside these spheres for most of a drift (they reach
+   * 14 m across; the boom is 7.5 m). Once the camera crosses the surface every
+   * triangle is back-facing and the sphere DISAPPEARS — the bank was deleting
+   * itself exactly when it should have been filling the frame. On the way in,
+   * the 0.5 m near plane sliced the near cap off first, and a sphere cut by the
+   * near plane is a flat disc across the screen.
+   *
+   * The far hemisphere projects to exactly the same silhouette disc from
+   * outside, and wraps the camera from inside, so BackSide covers both cases
+   * with no double blend and nothing left for the near plane to cut.
+   *
+   * The surface is then only a bounding shell: thickness, the density sample and
+   * the lighting normal all come from intersecting the view ray with `iSphere`,
+   * the way the puffs already do. That also buys the road intersection properly
+   * — the chord is clipped by scene depth, so a bank sphere sitting on the
+   * tarmac is half-buried like a ball instead of softly faded against it.
    */
   _buildBankNode() {
     const tint = attribute("iTint", "vec4");
     const thresh = attribute("iThresh", "float");
+    /** The VOLUME this shell stands for: xyz = centre in world space, w = radius. */
+    const sphere = attribute("iSphere", "vec4");
     const noiseMap = this.noiseMap;
     const softDepth = this.uSoftDepth;
     const erodeSoft = this.uErodeSoft;
@@ -673,43 +770,75 @@ export class ModularRoadDriftSmoke {
     } = this;
 
     return Fn(() => {
-      const N = normalize(normalWorld).toVar();
-      const toCam = cameraPosition.sub(positionWorld);
-      const dist = length(toCam).toVar();
-      const V = toCam.div(dist).toVar();   // toward the camera
-      const rd = V.negate();
+      const camToFrag = positionWorld.sub(cameraPosition);
+      const dist = length(camToFrag).toVar();
+      const rd = camToFrag.div(dist).toVar();   // unit ray, camera → fragment
+      const centre = sphere.xyz;
+      const radius = sphere.w;
 
-      // Triplanar, in WORLD space. Two things fall out of that: it is genuinely
-      // 3D so it parallaxes as you move (the whole point of leaving billboards
-      // behind), and neighbouring spheres address the same field, so they erode
-      // along shared filaments and fuse into one mass instead of reading as a
-      // bag of balls.
+      const oc = cameraPosition.sub(centre);
+      const b = dot(oc, rd);
+      const cTerm = dot(oc, oc).sub(radius.mul(radius));
+      const h = b.mul(b).sub(cTerm);
+      // Only reachable through numerical slop at the silhouette — we are shading
+      // the sphere's own surface, so the ray hits by construction.
+      Discard(h.lessThan(0));
+      const sq = sqrt(max(h, float(0)));
+      const t0 = b.negate().sub(sq);   // entry — NEGATIVE when the camera is inside
+      const t1 = b.negate().add(sq);   // exit
+
+      // How far the scene is ALONG THIS RAY. positionView.z is measured down the
+      // view axis, so it needs the 1/cos rescale before it can be compared
+      // against ray parameters.
+      const sceneViewZ = perspectiveDepthToViewZ(
+        _sceneDepthTex.sample(screenUV).r, cameraNear, cameraFar,
+      ).negate();
+      const fragViewZ = positionView.z.negate();
+      const sceneT = sceneViewZ.mul(dist).div(max(fragViewZ, float(1e-4)));
+
+      // The VISIBLE chord: clipped at the near side by the camera and at the far
+      // side by solid geometry. `tEnter` collapses to 0 whenever the camera is
+      // inside, which is also what makes that case safe on its own — the chord
+      // shrinks toward zero in the direction of the surface you are standing
+      // next to, so the fragments the near plane could still cut are the ones
+      // that were already going to be transparent.
+      const tEnter = max(t0, float(0)).toVar();
+      const tExit = min(t1, sceneT).toVar();
+      const chord = max(tExit.sub(tEnter), float(0));
+      const thick = saturate(chord.div(radius.mul(2)));
+
+      // Lighting normal at the point the ray ENTERS the smoke, i.e. the lit
+      // side. Real world-space normal, so it dots straight against the sun.
+      const N = normalize(cameraPosition.add(rd.mul(tEnter)).sub(centre)).toVar();
+
+      // Triplanar, in WORLD space — 3D, so it parallaxes as you move, and shared
+      // between neighbours, so they erode along the same filaments and fuse into
+      // one mass instead of reading as a bag of balls.
+      //
+      // Sampled at the chord MIDPOINT rather than on the shell. That point is a
+      // function of the view ray, which is the parallax cue; and it stays
+      // well-defined from inside, where the entry point collapses onto the
+      // camera and would paint the whole sphere one flat colour.
+      const mid = cameraPosition.add(rd.mul(tEnter.add(tExit).mul(0.5))).toVar();
       const aN = N.abs();
       const bl = aN.div(aN.x.add(aN.y).add(aN.z).add(0.0001));
-      const wp = positionWorld.mul(uWorldScale.mul(uBankScale));
+      const wp = mid.mul(uWorldScale.mul(uBankScale));
       const off = uWorldDrift;
       const sX = texture(noiseMap, wp.yz.add(off)).r;
       const sY = texture(noiseMap, wp.xz.add(off)).r;
       const sZ = texture(noiseMap, wp.xy.add(off)).r;
       const detail = sX.mul(bl.x).add(sY.mul(bl.y)).add(sZ.mul(bl.z));
 
-      // Thickness through the sphere, for free. How square-on the surface faces
-      // you IS the chord length: 1 through the middle, 0 at the silhouette. No
-      // ray-sphere maths needed once the geometry is really there.
-      const facing = saturate(dot(N, V));
-      const density = facing.mul(float(0.32).add(detail.mul(0.95))).toVar();
+      const density = thick.mul(float(0.32).add(detail.mul(0.95))).toVar();
 
       const alpha = smoothstep(thresh, thresh.add(erodeSoft), density)
         .mul(tint.w)
         .toVar();
 
-      // Soft particles, same as the puffs: without it a sphere resting on the
-      // road cuts a hard circle into the tarmac.
-      const sceneDist = perspectiveDepthToViewZ(
-        _sceneDepthTex.sample(screenUV).r, cameraNear, cameraFar,
-      ).negate();
-      const fragDist = positionView.z.negate();
-      alpha.mulAssign(saturate(sceneDist.sub(fragDist).div(max(softDepth, float(1e-3)))));
+      // The chord clip above already handles the intersection properly; this
+      // only feathers the last few centimetres, where depth-buffer quantisation
+      // can still show a seam.
+      alpha.mulAssign(saturate(sceneT.sub(t0).div(max(softDepth, float(1e-3)))));
       Discard(alpha.lessThan(0.003));
 
       const ndl = dot(N, uSunWorld);
@@ -1028,6 +1157,9 @@ export class ModularRoadDriftSmoke {
     }
 
     camera.updateMatrixWorld();
+    // Both classes need this before they step: it sizes each billboard exactly
+    // and drives the proximity fade that keeps the near plane away from them.
+    _camPos.setFromMatrixPosition(camera.matrixWorld);
     _smokeRight.set(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
     _smokeUp.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
     // Lighting is now done against real world-space sphere normals, so the sun
@@ -1045,6 +1177,7 @@ export class ModularRoadDriftSmoke {
         this.bankMesh.instanceMatrix.needsUpdate = true;
         this.bankMesh.geometry.attributes.iTint.needsUpdate = true;
         this.bankMesh.geometry.attributes.iThresh.needsUpdate = true;
+        this.bankMesh.geometry.attributes.iSphere.needsUpdate = true;
       }
     }
 
@@ -1153,6 +1286,44 @@ export class ModularRoadDriftSmoke {
       // balloons. The bank overrides it towards linear so it keeps expanding
       // for its whole life instead of reaching full size in two seconds.
       const size = p.size * (1 + Math.pow(age, growthPower) * growth);
+      const radius = size * 0.5;
+
+      // ── CAMERA PROXIMITY ──────────────────────────────────────────
+      // Distance to the particle's centre, which decides two things: how big the
+      // billboard has to be to circumscribe its sphere (K_MAX), and whether the
+      // particle is close enough that it has to be retired before the near plane
+      // cuts it. Everything near-camera used to be unhandled, and the chase rig
+      // flies through the plume continuously at speed.
+      const camDist = _camPos.distanceTo(p.position);
+      let fade;
+      if (isBank) {
+        // Relative to the sphere's OWN radius — see BANK_FADE_*. An absolute
+        // fade would delete the bank, because the camera lives inside it.
+        fade = THREE.MathUtils.clamp(
+          (camDist - radius * BANK_FADE_OUT) /
+            Math.max(radius * (BANK_FADE_IN - BANK_FADE_OUT), 1e-4),
+          0,
+          1,
+        );
+      } else {
+        // Two terms, whichever is smaller. The first retires a puff before its
+        // quad would have to blow up past K_MAX; the second is the near-plane
+        // guard, and it works on the CENTRE distance because that is where the
+        // billboard's plane actually sits.
+        const k = radius / Math.max(camDist, 1e-4);
+        fade = Math.min(
+          THREE.MathUtils.clamp((K_MAX - k) / (K_MAX - K_FADE_START), 0, 1),
+          THREE.MathUtils.clamp(
+            (camDist - NEAR_FADE_OUT) / (NEAR_FADE_IN - NEAR_FADE_OUT),
+            0,
+            1,
+          ),
+        );
+      }
+      // Fully faded costs nothing at all: no buffer write, no quad, no overdraw.
+      // The particle stays alive and comes back as the camera pulls away.
+      if (fade <= 0) continue;
+      this._camDist = camDist;
 
       // Fade IN over the first slice of life, then hold, then fade OUT.
       //
@@ -1164,7 +1335,7 @@ export class ModularRoadDriftSmoke {
       const outT = fadeOutStart > 0
         ? Math.max(0, (age - fadeOutStart) / (1 - fadeOutStart))
         : age;
-      const alpha = opacity * rampIn * Math.pow(1 - outT, tailPower);
+      const alpha = opacity * rampIn * Math.pow(1 - outT, tailPower) * fade;
 
       // Dense/dark fresh → pale/thin as it disperses.
       _smokeTint.copy(_smokeHot).lerp(_smokeCool, Math.sqrt(age));
@@ -1205,6 +1376,12 @@ export class ModularRoadDriftSmoke {
     m[o + 4] = 0; m[o + 5] = r;  m[o + 6] = 0;   m[o + 7] = 0;
     m[o + 8] = 0; m[o + 9] = 0;  m[o + 10] = r;  m[o + 11] = 0;
     m[o + 12] = center.x; m[o + 13] = center.y; m[o + 14] = center.z; m[o + 15] = 1;
+
+    const s = index * 4;
+    this.bankSpheres[s] = center.x;
+    this.bankSpheres[s + 1] = center.y;
+    this.bankSpheres[s + 2] = center.z;
+    this.bankSpheres[s + 3] = r;
 
     const t = index * 4;
     this.bankTints[t] = _smokeTint.r;
@@ -1290,9 +1467,14 @@ export class ModularRoadDriftSmoke {
 
   /** `_smokeTint` is set by the caller (age ramp) before this runs. */
   _writeParticle(index, center, size, rotation, alpha, thresh, nu, nv, nScale) {
-    // The sphere is the particle; the quad only has to cover its projection.
+    // The sphere is the particle; the quad only has to cover its projection —
+    // EXACTLY, which is R / √(1 − (R/d)²). See K_MAX for the derivation and for
+    // why the old flat 1.2× was both wasteful far away and short up close. The
+    // cap is what stops it diverging as the camera reaches the surface; by then
+    // the proximity fade in `_stepPool` has already taken the alpha to zero.
     const radius = size * 0.5;
-    const half = radius * QUAD_OVERSIZE;
+    const k = Math.min(radius / Math.max(this._camDist, 1e-4), K_MAX);
+    const half = radius / Math.sqrt(1 - k * k);
     const cosR = Math.cos(rotation);
     const sinR = Math.sin(rotation);
     const posOffset = index * FLOATS_PER_PARTICLE;
