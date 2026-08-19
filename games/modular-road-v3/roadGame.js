@@ -2419,8 +2419,19 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     };
   };
 
-  /** Push the mirror at the material — after any import that touched it. */
+  /**
+   * Push the mirror at the material — after any import that touched it.
+   *
+   * WETNESS GOES THROUGH setRoadWet, not straight at the uniform, because it
+   * decides the material CLASS (see the note on `roadMaterial`). The game boots
+   * dry on a MeshStandardNodeMaterial, so loading a track or a look file with
+   * `wetAmount > 0` used to set a uniform that nothing in that material reads —
+   * the track simply rendered dry, with no error and nothing to notice.
+   * Rebuild first, then push the rest of the look onto whatever material we
+   * ended up with.
+   */
   function applyRoadLook() {
+    setRoadWet(roadLook.wetAmount ?? 0);
     syncRoadUniforms(roadMaterial, roadLook);
   }
 
