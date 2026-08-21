@@ -43,6 +43,7 @@ const _A_UP = new THREE.Vector3();
 const _A_Q = new THREE.Quaternion();
 const _A_E = new THREE.Euler();
 const _A_M = new THREE.Matrix4();
+const _POSE = new THREE.Matrix4();
 const _A_Q2 = new THREE.Quaternion();
 const _A_V = new THREE.Vector3();
 const _A_V2 = new THREE.Vector3();
@@ -169,6 +170,8 @@ export class ModularRoadBuilder {
     this.orbit = orbit;
     this.isBuildMode = isBuildMode;
     this.onChange = onChange;
+    /** True when a gizmo drag rebuilt the track but deferred bakeCollision. */
+    this._collisionDeferred = false;
     // Kept for click-to-pick (delete / replace / insert). The placement gizmo
     // below also uses them, but only when both are present.
     this._camera = camera;
@@ -414,6 +417,13 @@ export class ModularRoadBuilder {
         } else {
           this._histSuspend = false;
           this._commit();
+          // Piece/chain drags rebuild every frame but skip the BVH until the
+          // pointer comes up — see rebuildAll. Ghost-only drags never set the
+          // flag, so this does not rebake on a cursor nudge.
+          if (this._collisionDeferred) {
+            this._collisionDeferred = false;
+            this._notify();
+          }
         }
       });
       this.placementGizmo.addEventListener("change", () => this._onPlacementGizmoChange());
@@ -502,8 +512,8 @@ export class ModularRoadBuilder {
     return { ...this.activeParams };
   }
 
-  _notify() {
-    this.onChange?.();
+  _notify(info = {}) {
+    this.onChange?.(info);
   }
 
   /**
@@ -520,7 +530,7 @@ export class ModularRoadBuilder {
     this.activeParams = { ...PIECE_DEFAULTS };
     this._ensureGizmoOnGhost();
     this.refreshGhost();
-    this._notify();
+    this._notify({ collision: false });
   }
 
   /** Selecting a shape summons the gizmo on it (Apex-style) — at the open end,
@@ -557,7 +567,7 @@ export class ModularRoadBuilder {
     this.activeParams = { ...PIECE_DEFAULTS, ...preset.params };
     this._ensureGizmoOnGhost();
     this.refreshGhost();
-    this._notify();
+    this._notify({ collision: false });
   }
 
   /**
@@ -574,7 +584,7 @@ export class ModularRoadBuilder {
       gapDrop: drop,
     };
     this.refreshGhost();
-    this._notify();
+    this._notify({ collision: false });
   }
 
   /** Flip curve direction (only meaningful for the curve piece). */
@@ -583,7 +593,7 @@ export class ModularRoadBuilder {
     // reach out and reverse the next piece someone else picks.
     this.activeParams.curveDir = this.activeParams.curveDir >= 0 ? -1 : 1;
     this.refreshGhost();
-    this._notify();
+    this._notify({ collision: false });
   }
 
   /**
@@ -631,7 +641,7 @@ export class ModularRoadBuilder {
     this._showPlacementGizmo();
     this.refreshGhost();
     this._commit();
-    this._notify();
+    this._notify({ collision: false });
   }
 
   _activeChain() {
@@ -675,7 +685,7 @@ export class ModularRoadBuilder {
     this._syncCurrentConnector();
     this._showPlacementGizmo();
     this.refreshGhost();
-    this._notify();
+    this._notify({ collision: false });
   }
 
   /**
@@ -692,7 +702,7 @@ export class ModularRoadBuilder {
     if (this.ghostEnd === "head") {
       this._syncGizmoToOpenEnd({ end: "tail" });
       this.refreshGhost();
-      this._notify();
+      this._notify({ collision: false });
       return true;
     }
     const canHead = this._openConnectors()
@@ -700,7 +710,7 @@ export class ModularRoadBuilder {
     if (!canHead) return false;
     this._syncGizmoToOpenEnd({ end: "head" });
     this.refreshGhost();
-    this._notify();
+    this._notify({ collision: false });
     return true;
   }
 
@@ -829,7 +839,7 @@ export class ModularRoadBuilder {
     const piece = this._makePieceEntry(
       "link", this.activeChainId, this.currentConnector, pp, guardrailParams.enabled);
     this.pieces.push(piece);
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     this._syncGizmoToOpenEnd();
     this._commit();
     this._notify();
@@ -869,7 +879,7 @@ export class ModularRoadBuilder {
       if (i >= 0) this.pieces.splice(i, 1);
       this._removePiece(p);
     }
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     this._commit();
     this._notify();
     return doomed.length;
@@ -880,7 +890,7 @@ export class ModularRoadBuilder {
     const sel = this.selectedPieces.filter((p) => this.pieces.includes(p));
     if (!sel.length) return 0;
     for (const p of sel) p.edges = !!on;
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     this._updateSelectionHighlight();
     this._commit();
     this._notify();
@@ -893,7 +903,7 @@ export class ModularRoadBuilder {
     const sel = this.selectedPieces.filter((p) => this.pieces.includes(p));
     if (!sel.length) return 0;
     for (const p of sel) p.tilt.identity();
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     this._updateSelectionHighlight();
     this._commit();
     this._notify();
@@ -911,7 +921,7 @@ export class ModularRoadBuilder {
       p.pp = { ...pp };
       this._applyPiecePresence(p);
     }
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     this._updateSelectionHighlight();
     this._commit();
     this._notify();
@@ -955,7 +965,7 @@ export class ModularRoadBuilder {
     // Only if the run has something after it — a section that ends the chain has
     // nothing left to bring back level.
     if (after) after.tilt.multiply(_A_Q2.copy(_A_Q).invert());
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     this._updateSelectionHighlight();
     this._commit();
     this._notify();
@@ -1035,7 +1045,7 @@ export class ModularRoadBuilder {
       this.freeYaw = _A_E.setFromQuaternion(this._freeQuat, "YXZ").y;
       if (this.placementGizmo) this.placementPivot.quaternion.copy(this._freeQuat);
       const chain = this._activeChain();
-      if (chain) { chain.anchor = this._anchorFromFree(); this.rebuildAll(); }
+      if (chain) { chain.anchor = this._anchorFromFree(); this.rebuildAll({ reuse: true }); }
     }
     this._commit();
     return { ok: true, target: "chain", ...this.anchorTiltDeg() };
@@ -1070,7 +1080,7 @@ export class ModularRoadBuilder {
     // PIECE stays yaw-only because every socket in the kit is level by
     // convention. See _applyGizmoAxes.
     this._applyGizmoAxes();
-    this._notify();
+    this._notify({ collision: false });
   }
 
   /**
@@ -1090,7 +1100,7 @@ export class ModularRoadBuilder {
     if (!this.placementGizmo) return;
     this.gizmoSpace = space === "local" ? "local" : "world";
     this.placementGizmo.setSpace(this.gizmoSpace);
-    this._notify();
+    this._notify({ collision: false });
   }
 
   togglePlacementGizmoSpace() {
@@ -1360,7 +1370,7 @@ export class ModularRoadBuilder {
       if (at >= 0) {
         const next = free[(at + 1) % free.length];
         this._putGhostOnBranch(next.matrix);
-        this._notify();
+        this._notify({ collision: false });
         return true;
       }
     }
@@ -1370,7 +1380,7 @@ export class ModularRoadBuilder {
     let best = free[0];
     for (const b of free) if (b.pos.distanceTo(from) < best.pos.distanceTo(from)) best = b;
     this._putGhostOnBranch(best.matrix);
-    this._notify();
+    this._notify({ collision: false });
     return true;
   }
 
@@ -1597,7 +1607,7 @@ export class ModularRoadBuilder {
       p.pinnedIn.compose(_A_V, _A_Q2, _UNIT_SCALE);
     }
 
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     // Re-seat the pivot on the piece's new pose (rebuild moved it).
     this.placementPivot.position.setFromMatrixPosition(p.connectorIn);
     _A_M.extractRotation(p.connectorIn);
@@ -1681,7 +1691,7 @@ export class ModularRoadBuilder {
     const chain = this._activeChain();
     if (chain) {
       chain.anchor = this._anchorFromFree();
-      this.rebuildAll();
+      this.rebuildAll({ reuse: true });
     } else {
       this._syncCurrentConnector();
       this.refreshGhost();
@@ -1698,7 +1708,7 @@ export class ModularRoadBuilder {
     this.placementPivot.quaternion.copy(this._freeQuat);
     const chain = this._activeChain();
     if (chain) chain.anchor = this._anchorFromFree();
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
   }
 
   rotateFreeYaw(delta) {
@@ -1726,7 +1736,7 @@ export class ModularRoadBuilder {
     this.placementPivot.quaternion.copy(this._freeQuat);
     const chain = this._activeChain();
     if (chain) chain.anchor = this._anchorFromFree();
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
   }
 
   /** Reset the active chain's anchor tilt to level (keeps position + yaw). */
@@ -1735,7 +1745,7 @@ export class ModularRoadBuilder {
     this._freeQuat.setFromAxisAngle(_YUP, this.freeYaw);
     if (this.placementGizmo) this.placementPivot.quaternion.copy(this._freeQuat);
     const chain = this._activeChain();
-    if (chain) { chain.anchor = this._anchorFromFree(); this.rebuildAll(); }
+    if (chain) { chain.anchor = this._anchorFromFree(); this.rebuildAll({ reuse: true }); }
     return true;
   }
 
@@ -2014,7 +2024,8 @@ export class ModularRoadBuilder {
     // Without it a freshly placed piece looks un-built to the reuse check, so the
     // first restore after any placement rebuilds the whole track — measured as
     // undo costing 100–243 ms while redo, on identical data, cost 1 ms.
-    piece._builtFrom = { conn: connectorIn.clone(), id, pp: piece.pp, edges };
+    piece._builtFrom = this._stampBuiltFrom(
+      connectorIn, id, piece.pp, edges, built.world, built.connectorOut, built.branchesOut);
     return piece;
   }
 
@@ -2116,7 +2127,7 @@ export class ModularRoadBuilder {
     if (this._gizmoTarget === "ghost" && !this.ghostDetached && this.ghostEnd === "head") {
       const piece = this._prepend();
       if (piece) {
-        this.rebuildAll();
+        this.rebuildAll({ reuse: true });
         this._refreshBranchMarkers();
         this._syncGizmoToOpenEnd({ end: "head" }); // stay on the head, ready for the next
         this.refreshGhost();
@@ -2228,7 +2239,7 @@ export class ModularRoadBuilder {
       this._showPieceGizmo(this.selectedPiece);
     }
     this._updateSelectionHighlight();
-    this._notify();
+    this._notify({ collision: false });
   }
 
   // ── SELECTING A SECTION ────────────────────────────────────────────────────
@@ -2257,7 +2268,7 @@ export class ModularRoadBuilder {
     // The anchor stays put, so Shift+clicking again re-measures from the same
     // end rather than walking away from it.
     this._updateSelectionHighlight();
-    this._notify();
+    this._notify({ collision: false });
     return true;
   }
 
@@ -2275,7 +2286,7 @@ export class ModularRoadBuilder {
       this.selectedPieces.push(p);
     }
     this._updateSelectionHighlight();
-    this._notify();
+    this._notify({ collision: false });
     return true;
   }
 
@@ -2302,7 +2313,7 @@ export class ModularRoadBuilder {
     this._updateSelectionHighlight();
     // Hand the gizmo back to the next-piece / anchor.
     this._syncGizmoToOpenEnd();
-    this._notify();
+    this._notify({ collision: false });
   }
 
   /** Attach the transform gizmo to a selected piece, at its entry connector. */
@@ -2376,7 +2387,7 @@ export class ModularRoadBuilder {
     this.activeChainId = p.chainId;
     this.pieces.splice(idx, 1);
     this._removePiece(p);
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     this._commit();
     return true;
   }
@@ -2391,7 +2402,7 @@ export class ModularRoadBuilder {
     // A piece can gain/lose its render+collision presence across the swap (e.g.
     // to/from a gap) — rebuildAll only replaces geometry, not these flags.
     this._applyPiecePresence(p);
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     this._updateSelectionHighlight();
     this._commit();
     return true;
@@ -2405,7 +2416,7 @@ export class ModularRoadBuilder {
   setPieceTilt(p, q) {
     if (this.pieces.indexOf(p) < 0) return false;
     p.tilt.copy(q);
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     if (this.selectedPiece === p) this._updateSelectionHighlight();
     this._commit();
     return true;
@@ -2435,7 +2446,7 @@ export class ModularRoadBuilder {
   setPieceEdges(p, on) {
     if (this.pieces.indexOf(p) < 0) return false;
     p.edges = !!on;
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     if (this.selectedPiece === p) this._updateSelectionHighlight();
     this._commit();
     return true;
@@ -2485,7 +2496,7 @@ export class ModularRoadBuilder {
     if (this.pieces.indexOf(p) < 0 || !p.detached) return false;
     p.detached = false;
     p.pinnedIn = null;
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     if (this.selectedPiece === p) this._updateSelectionHighlight();
     this._commit();
     return true;
@@ -2495,7 +2506,7 @@ export class ModularRoadBuilder {
   levelPiece(p) {
     if (this.pieces.indexOf(p) < 0) return false;
     p.tilt.identity();
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     if (this.selectedPiece === p) this._updateSelectionHighlight();
     this._commit();
     return true;
@@ -2519,7 +2530,7 @@ export class ModularRoadBuilder {
     const entry = this._makePieceEntry(newId, p.chainId, p.connectorIn, pp, guardrailParams.enabled);
     this.pieces.splice(idx, 0, entry);
     this.activeChainId = p.chainId;
-    this.rebuildAll();
+    this.rebuildAll({ reuse: true });
     this.selectPiece(entry);
     this._commit();
     return true;
@@ -2808,23 +2819,20 @@ export class ModularRoadBuilder {
   }
 
   /**
-   * Rebuild every chain from its anchor: pieces are re-chained sequentially
-   * (each piece's entry = the previous piece's exit), so moving a chain anchor
-   * or editing a piece flows correctly down the rest of that chain.
-   */
-  /**
    * Re-walk every chain and rebuild the pieces from it.
    *
-   * `reuse` skips the buildPiece call for any piece whose INPUTS are unchanged
-   * (entry seam, id, params, edges) and keeps the geometry it already has. That
-   * is what makes undo/redo instant: restoring a snapshot usually differs by one
-   * piece, and rebuilding all of them costs 150 ms on a 300-piece track and
-   * 480 ms if it is full of loops and tubes — measured, and far too slow to sit
-   * behind Ctrl+Z.
+   * Pieces are re-chained sequentially (each entry = the previous exit), so
+   * moving a chain anchor or editing a piece flows down the rest of that chain.
+   *
+   * `reuse` skips `buildPiece` when a piece's shape is unchanged (id, params,
+   * edges). Same entry seam ⇒ keep the mesh as-is. New entry seam ⇒ restamp
+   * world matrices from the stored local pose (the deck is authored in piece
+   * space; only the connector moved). That is what makes a prepend, a mid-chain
+   * delete, or a tilt cheap: downstream pieces slide, they are not remeshed.
    *
    * OFF BY DEFAULT, deliberately. The signature cannot see `roadParams` or
    * `guardrailParams`, so a plain `rebuildAll()` — which is what every width,
-   * kerb and rail slider calls — must still rebuild unconditionally or the track
+   * kerb and rail slider calls — must still remesh unconditionally or the track
    * would silently ignore them. Only callers that know nothing global changed
    * pass `reuse`.
    */
@@ -2855,15 +2863,20 @@ export class ModularRoadBuilder {
         // `pp` is compared by REFERENCE, which is sound because a piece's params
         // are cloned once at placement and never mutated afterwards.
         const b = p._builtFrom;
-        if (reuse && b && b.id === p.id && b.edges === edges && b.pp === p.pp
-          && b.conn.equals(conn)) {
+        const sameShape = reuse && b && b.id === p.id && b.edges === edges && b.pp === p.pp;
+        if (sameShape && b.conn.equals(conn)) {
+          conn = p.connectorOut.clone();
+          continue;
+        }
+        if (sameShape && this._relocatePiece(p, conn)) {
           conn = p.connectorOut.clone();
           continue;
         }
         const built = buildPiece(p.id, conn, p.pp, roadParams, guardrailParams, edges);
         this._applyBuilt(p, built);
         p.connectorOut = built.connectorOut.clone();
-        p._builtFrom = { conn: conn.clone(), id: p.id, pp: p.pp, edges };
+        p._builtFrom = this._stampBuiltFrom(
+          conn, p.id, p.pp, edges, built.world, built.connectorOut, built.branchesOut);
         conn = built.connectorOut.clone();
       }
     }
@@ -2879,7 +2892,54 @@ export class ModularRoadBuilder {
     if (this.selectedPiece) this._updateSelectionHighlight();
     this._refreshBranchMarkers();
     this.refreshGhost();
-    this._notify();
+    // Live gizmo drags rebuild every frame. The BVH bake is the expensive half
+    // and nothing drives on a stale tree mid-drag, so defer it until pointerup
+    // (see dragging-changed). Palette / ghost notifies pass collision: false
+    // themselves; this path is the one that actually moved the road.
+    if (this.placementGizmo?.dragging) this._collisionDeferred = true;
+    this._notify({ collision: !this.placementGizmo?.dragging });
+  }
+
+  /**
+   * Local pose of a built piece, relative to the connector it was swept at.
+   * `world = conn · fromConn`, so a later walk can restamp matrices without
+   * calling buildPiece when only the chain moved.
+   */
+  _stampBuiltFrom(conn, id, pp, edges, world, connectorOut, branches) {
+    const inv = conn.clone().invert();
+    return {
+      conn: conn.clone(),
+      id,
+      pp,
+      edges,
+      fromConn: inv.clone().multiply(world),
+      outFromConn: inv.clone().multiply(connectorOut),
+      branchFromConn: (branches ?? []).map((br) => inv.clone().multiply(br.matrix)),
+    };
+  }
+
+  /**
+   * Move an existing piece to a new entry seam without remeshing. Geometry is
+   * piece-local; only world matrices and world-space sockets change.
+   */
+  _relocatePiece(p, conn) {
+    const b = p._builtFrom;
+    if (!b?.fromConn || !b.outFromConn) return false;
+    const br = p.branches ?? [];
+    const locals = b.branchFromConn ?? [];
+    if (br.length !== locals.length) return false;
+    const world = _POSE.copy(conn).multiply(b.fromConn);
+    p.mesh.matrix.copy(world);
+    p.mesh.matrixWorldNeedsUpdate = true;
+    for (const m of [p.railMesh, p.shellMesh, p.decorMesh, p.glassMesh]) {
+      if (!m) continue;
+      m.matrix.copy(world);
+      m.matrixWorldNeedsUpdate = true;
+    }
+    p.connectorOut.copy(conn).multiply(b.outFromConn);
+    for (let i = 0; i < br.length; i++) br[i].matrix.copy(conn).multiply(locals[i]);
+    b.conn.copy(conn);
+    return true;
   }
 
   /** Update a placed piece's meshes from a freshly built result. */
@@ -2887,6 +2947,7 @@ export class ModularRoadBuilder {
     p.mesh.geometry.dispose();
     p.mesh.geometry = built.geometry;
     p.mesh.matrix.copy(built.world);
+    p.mesh.matrixWorldNeedsUpdate = true;
     p.mesh.userData.collisionGeometry?.dispose();
     p.mesh.userData.collisionGeometry = built.deckCollision ?? null;
     // Branch sockets are world matrices, so they move with the piece.
@@ -2897,6 +2958,7 @@ export class ModularRoadBuilder {
         p.railMesh.geometry.dispose();
         p.railMesh.geometry = built.railGeometry;
         p.railMesh.matrix.copy(built.world);
+        p.railMesh.matrixWorldNeedsUpdate = true;
       } else {
         p.railMesh = this._makeMesh(built.railGeometry, this.railMaterial, built.world);
       }
@@ -2916,6 +2978,7 @@ export class ModularRoadBuilder {
         p.shellMesh.geometry.dispose();
         p.shellMesh.geometry = built.shellGeometry;
         p.shellMesh.matrix.copy(built.world);
+        p.shellMesh.matrixWorldNeedsUpdate = true;
       } else {
         p.shellMesh = this._makeMesh(built.shellGeometry, this.shellMaterial, built.world);
       }
@@ -2930,6 +2993,7 @@ export class ModularRoadBuilder {
         p.glassMesh.geometry.dispose();
         p.glassMesh.geometry = built.glassGeometry;
         p.glassMesh.matrix.copy(built.world);
+        p.glassMesh.matrixWorldNeedsUpdate = true;
       } else {
         p.glassMesh = this._makeMesh(built.glassGeometry, this.glassMaterial, built.world);
         p.glassMesh.castShadow = false;
@@ -2945,6 +3009,7 @@ export class ModularRoadBuilder {
         p.decorMesh.geometry.dispose();
         p.decorMesh.geometry = built.decorGeometry;
         p.decorMesh.matrix.copy(built.world);
+        p.decorMesh.matrixWorldNeedsUpdate = true;
       } else {
         p.decorMesh = this._makeMesh(built.decorGeometry, this.decorMaterial, built.world);
         p.decorMesh.castShadow = false;

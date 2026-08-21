@@ -176,12 +176,16 @@ console.log("\n=== THE REBUILD IS INCREMENTAL (why this is affordable) ===");
 }
 {
   const b = fresh(40);
+  const fp = fingerprint(b);
   b.deletePiece(b.pieces[0]);           // first piece: the whole chain re-flows
-  const geoms = new Map(b.pieces.map((p) => [p.uid, p.mesh.geometry]));
+  const restGeoms = new Map(b.pieces.map((p) => [p.uid, p.mesh.geometry]));
   b.undo();
-  const rebuilt = b.pieces.filter((p) => geoms.get(p.uid) !== p.mesh.geometry).length;
-  check("undoing the FIRST piece does rebuild the chain (it genuinely moved)",
-    rebuilt > 20, `${rebuilt} of 40 — correctness beats laziness here`);
+  const remeshedRest = b.pieces.slice(1)
+    .filter((p) => restGeoms.has(p.uid) && restGeoms.get(p.uid) !== p.mesh.geometry).length;
+  check("undoing the FIRST piece restores the track exactly", fingerprint(b) === fp,
+    "the chain moved; relocate has to restamp every seam, not skip it");
+  check("...without remeshing the pieces that only slid", remeshedRest === 0,
+    `${remeshedRest} of 39 remeshed — they moved, but only the restored piece is new geometry`);
 }
 
 console.log("\n=== UIDs ARE STABLE ===");

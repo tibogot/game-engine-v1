@@ -886,6 +886,118 @@ export function syncTubeUniforms(mat, p) {
 }
 
 /**
+ * Cheap dedicated shader for asphalt decks.
+ *
+ * The shared road material paints every pixel with fractal noise, aggregate
+ * speckle, historical drift rubber, tube/panel branches and bloom MRT — then
+ * a flat straight throws almost all of that away. Tubes already left that
+ * graph; this is the same idea for a deck: zone colours, optional paint lines,
+ * a wheel-path darken, standard lighting. FrontSide by default.
+ *
+ * NOT wired into the game. asphalt-lab.html is the A/B — tune there, then
+ * decide. A look file from that lab is lab-only.
+ */
+export function createCheapAsphaltMaterial(opts = {}) {
+  const u = {
+    asphaltDark: uniform(lin(opts.asphaltDark ?? 0x5c626a)),
+    asphaltLight: uniform(lin(opts.asphaltLight ?? 0x8a919a)),
+    deckBrightness: uniform(opts.deckBrightness ?? 1.0),
+    lineColor: uniform(lin(opts.lineColor ?? 0xf2f2f2)),
+    railA: uniform(lin(opts.railA ?? 0xd0342c)),
+    railB: uniform(lin(opts.railB ?? 0xf0f0f0)),
+    railStriped: uniform(opts.railStriped ?? 0),
+    sideColor: uniform(lin(opts.sideColor ?? 0xd0342c)),
+    centerHalf: uniform(opts.centerHalf ?? 0.045),
+    centerSoft: uniform(opts.centerSoft ?? 0.02),
+    centerDash: uniform(opts.centerDash ?? 0.18),
+    edgePos: uniform(opts.edgePos ?? 0.82),
+    edgeWidth: uniform(opts.edgeWidth ?? 0.022),
+    edgeSoft: uniform(opts.edgeSoft ?? 0.004),
+    railDash: uniform(opts.railDash ?? 0.5),
+    linesOn: uniform(opts.linesOn ?? 0),
+    centerOn: uniform(opts.centerOn ?? 1),
+    edgeOn: uniform(opts.edgeOn ?? 1),
+    wheelDarken: uniform(opts.wheelDarken ?? 0.10),
+    deckRough: uniform(opts.deckRough ?? 0.93),
+  };
+
+  const mat = new THREE.MeshStandardNodeMaterial({
+    roughness: opts.roughness ?? 0.92,
+    metalness: opts.metalness ?? 0.0,
+    side: THREE.FrontSide,
+  });
+
+  mat.colorNode = Fn(() => {
+    const lateral = attribute("aLateral", "float");
+    const zone = attribute("aZone", "float");
+    const plain = attribute("aPlain", "float");
+    const along = uv().x;
+
+    // Flat mix — no fractal, no aggregate. The two authored greys still give
+    // a readable deck; the expensive graph is what this is measuring against.
+    const mid = mix(u.asphaltDark, u.asphaltLight, 0.45).mul(u.deckBrightness);
+    const wheelPath = smoothstep(0.18, 0.42, abs(lateral))
+      .mul(oneMinus(smoothstep(0.55, 0.8, abs(lateral))));
+    let deckBase = mid.mul(oneMinus(wheelPath.mul(u.wheelDarken)));
+
+    const lateralAA = fwidth(lateral).mul(0.75);
+    const centerMask = smoothstep(
+      u.centerHalf.add(max(u.centerSoft, lateralAA)),
+      u.centerHalf,
+      abs(lateral),
+    );
+    const dash = step(0.5, fract(along.mul(u.centerDash)));
+    const edgeMask = smoothstep(
+      u.edgeWidth.add(max(u.edgeSoft, lateralAA)),
+      u.edgeWidth,
+      abs(abs(lateral).sub(u.edgePos)),
+    );
+    const lineAmt = clamp(
+      centerMask.mul(dash).mul(u.centerOn).add(edgeMask.mul(u.edgeOn)), 0.0, 1.0,
+    ).mul(u.linesOn).mul(float(1).sub(plain));
+    const deckCol = mix(deckBase, u.lineColor, lineAmt);
+
+    const railBand = step(0.5, fract(along.mul(u.railDash)));
+    const railCol = mix(u.railA, u.railB, railBand.mul(u.railStriped));
+
+    let col = mix(u.sideColor, deckCol, step(0.5, zone));
+    col = mix(col, railCol, step(1.5, zone));
+    return col;
+  })();
+
+  mat.roughnessNode = Fn(() => {
+    const zone = attribute("aZone", "float");
+    let r = float(0.9);
+    r = mix(r, u.deckRough, step(0.5, zone));
+    r = mix(r, float(0.5), step(1.5, zone));
+    return r;
+  })();
+
+  mat._cheapAsphaltUniforms = u;
+  return mat;
+}
+
+export const CHEAP_ASPHALT_COLORS = [
+  "asphaltDark", "asphaltLight", "lineColor", "railA", "railB", "sideColor",
+];
+export const CHEAP_ASPHALT_NUMBERS = [
+  "deckBrightness", "centerHalf", "centerSoft", "centerDash",
+  "edgePos", "edgeWidth", "edgeSoft", "railDash", "railStriped",
+  "linesOn", "centerOn", "edgeOn", "wheelDarken", "deckRough",
+];
+
+export function syncCheapAsphaltUniforms(mat, p) {
+  const u = mat?._cheapAsphaltUniforms;
+  if (!u || !p) return;
+  for (const k of CHEAP_ASPHALT_COLORS) {
+    if (p[k] != null) u[k].value.copy(lin(p[k]));
+  }
+  for (const k of CHEAP_ASPHALT_NUMBERS) {
+    if (p[k] != null) u[k].value = typeof p[k] === "boolean" ? (p[k] ? 1 : 0) : p[k];
+  }
+}
+
+/**
  * Guardrail beams + posts.
  *
  * This was `metalness 0.92` — near-pure metal — and that is why the rails read

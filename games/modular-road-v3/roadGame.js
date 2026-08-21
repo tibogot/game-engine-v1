@@ -297,8 +297,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     domElement: renderer.domElement,
     orbit: controls,
     isBuildMode: () => mode === "build",
-    onChange: () => {
-      bakeCollision();
+    onChange: (info = {}) => {
+      if (info.collision !== false) bakeCollision();
       // The builder rebuilds its instanced layer on every change, so the mirror
       // would quietly lose the rails without this.
       applyRailReflectionMembers();
@@ -3651,7 +3651,7 @@ ${e.message}`);
         const sp = builder.selectedPiece;
         if (!sp) return;
         if (sp.detached) builder.attachPiece(sp);
-        else { builder.detachPiece(sp); builder.rebuildAll(); }
+        else { builder.detachPiece(sp); builder.rebuildAll({ reuse: true }); }
       },
       isSelectedGap: () => builder.selectedPiece?.id === "gap",
       makeSelectedGap: () => {

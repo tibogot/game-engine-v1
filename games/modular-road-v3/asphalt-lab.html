@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Asphalt Lab — FrontSide + cheap shader</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #c8d0da; color: #1a2230;
+                   font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10;
+        min-width: 270px; max-width: 380px;
+        padding: 12px 14px;
+        background: rgba(10, 15, 24, 0.72);
+        border: 1px solid rgba(150, 180, 220, 0.18);
+        border-radius: 10px;
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+      }
+      #hud h1 {
+        margin: 0 0 4px; font-size: 12px; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #7f93ad; font-weight: 700;
+      }
+      #hud .title { margin: 0 0 8px; font-size: 18px; font-weight: 650; color: #f2f6fb; }
+      #hud .meta { color: #9fb0c6; font-size: 12px; }
+      #hud .meta b { color: #f2f6fb; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #hud .game { color: #ffab6b; }
+      #hud .lab { color: #6fd3ff; }
+      #hud .keys {
+        margin-top: 10px; padding-top: 8px;
+        border-top: 1px solid rgba(150, 180, 220, 0.16);
+        color: #7f93ad; font-size: 11px; line-height: 1.55;
+      }
+      #hud .keys b { color: #cfe0f2; font-weight: 600; }
+      #err {
+        position: fixed; left: 12px; bottom: 12px; z-index: 20;
+        max-width: 560px; padding: 10px 12px; display: none;
+        background: rgba(60, 12, 12, 0.92); border: 1px solid #a44;
+        border-radius: 8px; color: #ffb0b0; white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Asphalt lab</h1>
+      <div class="title" id="s-title">Straight · 26 m · raised</div>
+      <div class="meta">
+        Shader <b id="s-shader">—</b> · Side <b id="s-side">—</b><br />
+        View <b id="s-cam">orbit</b> · Tris <b id="s-tris">—</b> · Draws <b id="s-draws">—</b><br />
+        GPU <b id="s-gpu">—</b> · <b id="s-fps">—</b> fps
+      </div>
+      <div class="keys">
+        <b>1</b> game (full asphalt graph) · <b>2</b> lab (cheap paint)<br />
+        <b>D</b> FrontSide / DoubleSide · <b>F</b> fill (deck = the frame)<br />
+        <b>U</b> under the slab · <b>R</b> orbit · drag / wheel to look<br />
+        Game files are not touched. Tune here, then decide.
+      </div>
+    </div>
+    <div id="err"></div>
+
+    <script type="module">
+      /**
+       * ASPHALT LOOK + COST LAB.
+       *
+       * Two independent A/Bs, same kit mesh, same lights, same camera:
+       *   1 game = createRoadMaterial — noise, aggregate, drift, bloom MRT
+       *   2 lab  = createCheapAsphaltMaterial — zone colours + lines, no noise
+       *   D      = FrontSide vs DoubleSide (the fill tax, not the paint)
+       *
+       * The "texture" is procedural, not a bitmap: fractal + speckle + old
+       * rubber, every pixel, even on a flat straight. F fills the frame so
+       * GPU ms is that graph, not sky. U is why DoubleSide exists — looking
+       * up at a raised slab. If FrontSide still shows the underside, the
+       * winding is already correct and DoubleSide is only overdraw.
+       *
+       * Bloom is off on purpose. This lab measures the MAIN material.
+       */
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "three/addons/libs/lil-gui.module.min.js";
+      import {
+        buildPiece,
+        roadParams as kitRoadParams,
+        pieceParams as kitPieceParams,
+        guardrailParams as kitGuardrailParams,
+      } from "./modularRoadKit.js";
+      import {
+        createRoadMaterial,
+        syncRoadUniforms,
+        createCheapAsphaltMaterial,
+        syncCheapAsphaltUniforms,
+      } from "./modularRoadMaterial.js";
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => {
+        const el = $("err");
+        el.style.display = "block";
+        el.textContent = e?.stack || String(e);
+        console.error(e);
+      };
+
+      const PIECE = { base: "straight", straightLength: 26 };
+
+      const look = {
+        asphaltDark: 0x5c626a,
+        asphaltLight: 0x8a919a,
+        deckBrightness: 1.0,
+        lineColor: 0xf2f2f2,
+        railA: 0xd0342c,
+        railB: 0xf0f0f0,
+        sideColor: 0xd0342c,
+        linesOn: 0,
+        centerOn: 1,
+        edgeOn: 1,
+        wheelDarken: 0.10,
+        deckRough: 0.93,
+        grainScale: 1.0,
+        streak: 14,
+        macroScale: 0.06,
+        aggScale: 5.0,
+        roughVary: 0.10,
+        wheelPolish: 0.22,
+        driftAmount: 1.4,
+      };
+
+      const ctl = {
+        shader: "game",
+        doubleSide: false,
+        shadows: true,
+        showGround: true,
+        sunIntensity: 3.2,
+        hemiIntensity: 1.15,
+        fillIntensity: 1.35,
+        rimIntensity: 0.7,
+        exposure: 1.05,
+      };
+
+      const sceneCtl = { shadowBias: -0.0004, shadowNormalBias: 0.04 };
+
+      let renderer, scene, camera, controls, sun, hemi, fill, rim, ground, grid;
+      let gui, hasTimestamps = false;
+      let pieceRoot, roadMesh = null;
+      let gameMat, cheapMat;
+      let viewName = "orbit";
+      let deckY = 3.3;
+      let slabMinY = 2.5;
+      const perf = { frames: 0, gpuSum: 0, gpuN: 0, since: 0, gpu: 0, fps: 0 };
+
+      async function createTimingDevice() {
+        if (!navigator.gpu) return null;
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) return null;
+          return await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+        } catch (e) {
+          console.warn("[asphalt-lab] timestamp device unavailable; GPU ms will read —", e);
+          return null;
+        }
+      }
+
+      function activeMat() {
+        return ctl.shader === "lab" ? cheapMat : gameMat;
+      }
+
+      function applyLook() {
+        syncRoadUniforms(gameMat, look);
+        syncCheapAsphaltUniforms(cheapMat, look);
+      }
+
+      function applyShader() {
+        const mat = activeMat();
+        if (roadMesh) roadMesh.material = mat;
+        const el = $("s-shader");
+        if (ctl.shader === "lab") {
+          el.textContent = "lab · cheap paint";
+          el.className = "lab";
+        } else {
+          el.textContent = "game · full graph";
+          el.className = "game";
+        }
+        applySide();
+      }
+
+      function applySide() {
+        const side = ctl.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
+        for (const m of [gameMat, cheapMat]) {
+          if (!m) continue;
+          m.side = side;
+          m.needsUpdate = true;
+        }
+        $("s-side").textContent = ctl.doubleSide ? "DoubleSide" : "FrontSide";
+      }
+
+      function applyShadows() {
+        renderer.shadowMap.enabled = ctl.shadows;
+        sun.castShadow = ctl.shadows;
+        if (roadMesh) {
+          roadMesh.castShadow = ctl.shadows;
+          roadMesh.receiveShadow = ctl.shadows;
+        }
+      }
+
+      function buildRoadGeometry() {
+        const pp = { ...kitPieceParams, straightLength: PIECE.straightLength };
+        const built = buildPiece(
+          PIECE.base,
+          new THREE.Matrix4(),
+          pp,
+          kitRoadParams,
+          { ...kitGuardrailParams, enabled: false },
+          true,
+        );
+        built.shellGeometry?.dispose();
+        built.decorGeometry?.dispose();
+        built.glassGeometry?.dispose();
+        const geo = built.geometry;
+        geo.applyMatrix4(built.world);
+        const box = new THREE.Box3().setFromBufferAttribute(geo.getAttribute("position"));
+        const center = box.getCenter(new THREE.Vector3());
+        // Sit the SLAB in the air so U can look at the underside. Ground stays
+        // at y=0. Deck top is box.max.y after this lift.
+        const lift = 2.5 - box.min.y;
+        geo.applyMatrix4(new THREE.Matrix4().makeTranslation(-center.x, lift, -center.z));
+        box.setFromBufferAttribute(geo.getAttribute("position"));
+        slabMinY = box.min.y;
+        deckY = box.max.y;
+        return { geo, rail: built.railGeometry ?? null };
+      }
+
+      function clearPiece() {
+        if (!roadMesh) return;
+        pieceRoot.remove(roadMesh);
+        roadMesh.geometry.dispose();
+        roadMesh = null;
+      }
+
+      function rebuildPiece() {
+        clearPiece();
+        const { geo, rail } = buildRoadGeometry();
+        roadMesh = new THREE.Mesh(geo, activeMat());
+        pieceRoot.add(roadMesh);
+        rail?.dispose();
+        const g = roadMesh.geometry;
+        const tris = (g.index ? g.index.count : g.attributes.position.count) / 3;
+        $("s-tris").textContent = Math.round(tris).toLocaleString();
+        applyShadows();
+        applyShader();
+        sun.target.position.set(0, deckY, 0);
+        sun.target.updateMatrixWorld();
+      }
+
+      function setView(name) {
+        viewName = name;
+        $("s-cam").textContent = name;
+      }
+
+      function resetCamera() {
+        camera.position.set(18, deckY + 8, 24);
+        controls.target.set(0, deckY, 0);
+        controls.update();
+        setView("orbit");
+      }
+
+      /**
+       * Deck fills the frame so GPU ms is the ASPHALT shader, not sky.
+       * Bumper-height, looking down the road — the chase-cam fill pose.
+       */
+      function fillCamera() {
+        camera.position.set(0, deckY + 0.55, 10);
+        controls.target.set(0, deckY, -8);
+        controls.update();
+        setView("fill");
+      }
+
+      /** Looking up at the underside. The reason DoubleSide exists. */
+      function underCamera() {
+        camera.position.set(0, 0.35, 4);
+        controls.target.set(0, slabMinY, -2);
+        controls.update();
+        setView("under");
+      }
+
+      function exportLook() {
+        const payload = {
+          format: "modular-asphalt-lab-look",
+          version: 1,
+          savedAt: new Date().toISOString(),
+          note: "Lab only. Not applied to the game.",
+          look: { ...look },
+          ctl: { shader: ctl.shader, doubleSide: ctl.doubleSide },
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "asphalt-look.json";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+
+      function importLook(file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const data = JSON.parse(reader.result);
+            if (data.look) Object.assign(look, data.look);
+            if (data.ctl) {
+              if (data.ctl.shader) ctl.shader = data.ctl.shader;
+              if (data.ctl.doubleSide != null) ctl.doubleSide = !!data.ctl.doubleSide;
+            }
+            applyLook();
+            applyShader();
+            gui?.controllersRecursive?.().forEach((c) => c.updateDisplay?.());
+          } catch (e) {
+            showErr(e);
+          }
+        };
+        reader.readAsText(file);
+      }
+
+      const lookFileInput = Object.assign(document.createElement("input"), {
+        type: "file",
+        accept: "application/json",
+      });
+      lookFileInput.addEventListener("change", () => {
+        const f = lookFileInput.files?.[0];
+        lookFileInput.value = "";
+        if (f) importLook(f);
+      });
+
+      function buildGui() {
+        gui = new GUI({ title: "Asphalt lab" });
+
+        const fAb = gui.addFolder("A/B — shader (same kit mesh)");
+        fAb.add(ctl, "shader", {
+          "game (full graph)": "game",
+          "lab (cheap paint)": "lab",
+        })
+          .name("Version")
+          .onChange(applyShader);
+        fAb.add(ctl, "doubleSide").name("Double-sided").onChange(applySide);
+        fAb.open();
+
+        const fLook = gui.addFolder("Look (both versions)");
+        fLook.addColor(look, "asphaltDark").name("Asphalt dark").onChange(applyLook);
+        fLook.addColor(look, "asphaltLight").name("Asphalt light").onChange(applyLook);
+        fLook.add(look, "deckBrightness", 0.4, 1.6, 0.01).name("Brightness").onChange(applyLook);
+        fLook.addColor(look, "sideColor").name("Kerb / side").onChange(applyLook);
+        fLook.addColor(look, "railA").name("Kerb paint").onChange(applyLook);
+        fLook.add(look, "linesOn", 0, 1, 1).name("Paint lines").onChange(applyLook);
+        fLook.add(look, "wheelDarken", 0, 0.4, 0.01).name("Wheel darken").onChange(applyLook);
+        fLook.add(look, "deckRough", 0.2, 1, 0.01).name("Deck roughness").onChange(applyLook);
+        fLook.open();
+
+        const fFull = gui.addFolder("Full graph only (game)");
+        fFull.add(look, "grainScale", 0, 2, 0.01).name("Grain contrast").onChange(applyLook);
+        fFull.add(look, "streak", 1, 24, 0.5).name("Anisotropy").onChange(applyLook);
+        fFull.add(look, "aggScale", 1, 12, 0.1).name("Aggregate / m").onChange(applyLook);
+        fFull.add(look, "driftAmount", 0, 3, 0.05).name("Old rubber").onChange(applyLook);
+        fFull.add(look, "wheelPolish", 0, 0.5, 0.01).name("Wheel polish").onChange(applyLook);
+
+        const fSh = gui.addFolder("Shadows");
+        fSh.add(ctl, "shadows").name("Shadows on").onChange(applyShadows);
+        fSh.add(sceneCtl, "shadowBias", -0.005, 0.005, 0.0001).name("Bias").onChange((v) => {
+          sun.shadow.bias = v;
+        });
+        fSh.add(sceneCtl, "shadowNormalBias", 0, 0.2, 0.005).name("Normal bias").onChange((v) => {
+          sun.shadow.normalBias = v;
+        });
+
+        const fSc = gui.addFolder("Scene");
+        fSc.add(ctl, "showGround").name("Ground").onChange((v) => {
+          ground.visible = v;
+          grid.visible = v;
+        });
+        fSc.add(ctl, "sunIntensity", 0, 6, 0.05).name("Sun").onChange((v) => {
+          sun.intensity = v;
+        });
+        fSc.add(ctl, "hemiIntensity", 0, 3, 0.05).name("Sky / bounce").onChange((v) => {
+          hemi.intensity = v;
+        });
+        fSc.add(ctl, "fillIntensity", 0, 3, 0.05).name("Fill").onChange((v) => {
+          fill.intensity = v;
+        });
+        fSc.add(ctl, "rimIntensity", 0, 3, 0.05).name("Rim").onChange((v) => {
+          rim.intensity = v;
+        });
+        fSc.add(ctl, "exposure", 0.4, 2, 0.05).name("Exposure").onChange((v) => {
+          renderer.toneMappingExposure = v;
+        });
+
+        const fCam = gui.addFolder("Camera");
+        fCam.add({ resetCamera }, "resetCamera").name("Orbit (R)");
+        fCam.add({ fillCamera }, "fillCamera").name("Fill test (F)");
+        fCam.add({ underCamera }, "underCamera").name("Under slab (U)");
+        fCam.open();
+
+        const fIo = gui.addFolder("Look file (lab only)");
+        fIo.add({ exportLook }, "exportLook").name("Export asphalt-look.json");
+        fIo.add({ load: () => lookFileInput.click() }, "load").name("Import .json");
+      }
+
+      function buildStudioEnv() {
+        const W = 128;
+        const H = 64;
+        const data = new Uint16Array(W * H * 4);
+        const sunDir = new THREE.Vector3(28, 48, 20).normalize();
+        const d = new THREE.Vector3();
+        const half = THREE.DataUtils.toHalfFloat;
+        for (let y = 0; y < H; y++) {
+          const phi = ((y + 0.5) / H) * Math.PI;
+          for (let x = 0; x < W; x++) {
+            const theta = ((x + 0.5) / W) * Math.PI * 2;
+            const sp = Math.sin(phi);
+            d.set(sp * Math.cos(theta), Math.cos(phi), sp * Math.sin(theta));
+            let r, g, b;
+            if (d.y >= 0) {
+              const t = Math.pow(d.y, 0.55);
+              r = 0.56 * (1 - t) + 0.34 * t;
+              g = 0.61 * (1 - t) + 0.43 * t;
+              b = 0.69 * (1 - t) + 0.57 * t;
+            } else {
+              const t = Math.min(1, -d.y * 2.2);
+              r = 0.56 * (1 - t) + 0.36 * t;
+              g = 0.56 * (1 - t) + 0.33 * t;
+              b = 0.55 * (1 - t) + 0.28 * t;
+            }
+            const s = Math.max(0, d.dot(sunDir));
+            const sunAmt = Math.pow(s, 340) * 80 + Math.pow(s, 14) * 0.4;
+            const i = (y * W + x) * 4;
+            data[i] = half(r + sunAmt);
+            data[i + 1] = half(g + sunAmt * 0.96);
+            data[i + 2] = half(b + sunAmt * 0.86);
+            data[i + 3] = half(1);
+          }
+        }
+        const tex = new THREE.DataTexture(
+          data, W, H, THREE.RGBAFormat, THREE.HalfFloatType,
+        );
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        tex.colorSpace = THREE.LinearSRGBColorSpace;
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
+        tex.needsUpdate = true;
+        return tex;
+      }
+
+      async function init() {
+        const device = await createTimingDevice();
+        hasTimestamps = Boolean(device?.features?.has("timestamp-query"));
+        renderer = new THREE.WebGPURenderer({
+          antialias: true,
+          trackTimestamp: true,
+          ...(device ? { device } : {}),
+        });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setClearColor(0xb8c4d2);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = ctl.exposure;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xb8c4d2);
+        scene.fog = new THREE.Fog(0xb8c4d2, 70, 160);
+        scene.environment = buildStudioEnv();
+
+        camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 400);
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 0.3;
+        controls.maxDistance = 120;
+
+        hemi = new THREE.HemisphereLight(0xf0f5ff, 0xd2c4b0, ctl.hemiIntensity);
+        scene.add(hemi);
+
+        sun = new THREE.DirectionalLight(0xfff6e8, ctl.sunIntensity);
+        sun.position.set(28, 48, 20);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.camera.near = 1;
+        sun.shadow.camera.far = 120;
+        sun.shadow.camera.left = -40;
+        sun.shadow.camera.right = 40;
+        sun.shadow.camera.top = 40;
+        sun.shadow.camera.bottom = -40;
+        sun.shadow.bias = sceneCtl.shadowBias;
+        sun.shadow.normalBias = sceneCtl.shadowNormalBias;
+        scene.add(sun);
+        scene.add(sun.target);
+
+        fill = new THREE.DirectionalLight(0xdde8ff, ctl.fillIntensity);
+        fill.position.set(-24, 18, -20);
+        scene.add(fill);
+
+        rim = new THREE.DirectionalLight(0xffffff, ctl.rimIntensity);
+        rim.position.set(6, 16, 32);
+        scene.add(rim);
+
+        ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(200, 200),
+          new THREE.MeshStandardMaterial({ color: 0xd8dde6, roughness: 0.92, metalness: 0 }),
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.02;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        grid = new THREE.GridHelper(80, 40, 0x8a96a8, 0xb8c0cc);
+        grid.position.y = 0.001;
+        scene.add(grid);
+
+        pieceRoot = new THREE.Group();
+        scene.add(pieceRoot);
+
+        gameMat = createRoadMaterial(look);
+        cheapMat = createCheapAsphaltMaterial(look);
+        gameMat.shadowSide = THREE.FrontSide;
+        cheapMat.shadowSide = THREE.FrontSide;
+        applyLook();
+        applySide();
+
+        rebuildPiece();
+        resetCamera();
+        buildGui();
+
+        addEventListener("resize", onResize);
+        addEventListener("keydown", onKey);
+
+        window.__asphaltLab = {
+          renderer, scene, camera, controls, look, ctl,
+          rebuildPiece, applyShader, applyLook, applySide, exportLook,
+          resetCamera, fillCamera, underCamera, perf,
+          gameMat, cheapMat, roadMesh,
+        };
+
+        renderer.setAnimationLoop(frame);
+      }
+
+      function onKey(e) {
+        if (e.target?.matches?.("input, textarea")) return;
+        const k = e.key.toLowerCase();
+        if (k === "1") {
+          ctl.shader = "game";
+          applyShader();
+          gui?.controllersRecursive?.().forEach((c) => c.updateDisplay?.());
+        }
+        if (k === "2") {
+          ctl.shader = "lab";
+          applyShader();
+          gui?.controllersRecursive?.().forEach((c) => c.updateDisplay?.());
+        }
+        if (k === "d") {
+          ctl.doubleSide = !ctl.doubleSide;
+          applySide();
+          gui?.controllersRecursive?.().forEach((c) => c.updateDisplay?.());
+        }
+        if (k === "r") resetCamera();
+        if (k === "f") fillCamera();
+        if (k === "u") underCamera();
+      }
+
+      function onResize() {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      }
+
+      function frame() {
+        controls.update();
+        renderer.render(scene, camera);
+
+        if (hasTimestamps) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+
+        const now = performance.now();
+        if (!perf.since) perf.since = now;
+        perf.frames++;
+        const ts = renderer.info.render.timestamp;
+        if (ts > 0) { perf.gpuSum += ts; perf.gpuN++; }
+        if (now - perf.since >= 500) {
+          perf.fps = (perf.frames * 1000) / (now - perf.since);
+          perf.gpu = perf.gpuN ? perf.gpuSum / perf.gpuN : 0;
+          $("s-fps").textContent = perf.fps.toFixed(0);
+          $("s-gpu").textContent = perf.gpuN ? `${perf.gpu.toFixed(2)} ms` : "n/a";
+          $("s-draws").textContent = String(renderer.info.render.drawCalls);
+          perf.frames = 0; perf.gpuSum = 0; perf.gpuN = 0; perf.since = now;
+        }
+      }
+
+      init().catch(showErr);
+    </script>
+  </body>
+</html>
