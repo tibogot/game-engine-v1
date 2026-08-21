@@ -4,6 +4,9 @@ import {
   buildRailGeometry,
   buildMirroredRailGeometry,
   buildRailCollision,
+  buildRailAlongPath,
+  buildRailCollisionAlongPath,
+  buildMirroredRailAlongPath,
 } from "./modularRoadRail.js";
 
 /**
@@ -203,6 +206,8 @@ export const pieceParams = {
   holedLength: 32, // run of the piece (m)
   holedWidth: 16, // deck width (m) — widen for a bigger hole with real ledges
   holeRadius: 5, // hole radius (m) — clamped so ledges never vanish
+  // Rounded end (short terminus with a semicircle nose):
+  roundEndLength: 8, // straight run before the nose (m)
   // ── LINK: the piece that CLOSES A GAP between two ends built separately ────
   // Every other piece has a shape and lands wherever it lands. This one is the
   // other way round: you give it where it has to END and it works out the shape.
@@ -1262,6 +1267,216 @@ export function buildHoledDeckGeometry(pp = pieceParams, rp = roadParams) {
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
   return geo;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Rounded end — short terminus with a semicircle nose                      */
+/* ----------------------------------------------------------------------- */
+
+/**
+ * Flat mating face on one end, semicircle free end on the other.
+ * Guardrail is one U along the kerb centreline (see roundedEndRailFrames).
+ *
+ * The STUB is a normal road sweep so asphalt UVs / zones / kerbs match the piece
+ * it joins. Only the semicircle nose is a custom plate, with uv.x continuing
+ * from the stub and uv.y on the same developed-deck scale.
+ *
+ * TWO VARIANTS off the same code, `atStart` picking between them:
+ *   - rounded END   — nose past the exit  (stub v = 0 → L, tip at v = L + R)
+ *   - rounded START — nose behind the entry (tip at v = 0, stub v = R → R + L)
+ * Both keep the SAME sockets, so a rounded start is just a piece you prepend to
+ * the head of a chain (its entry connects to nothing, which is the point).
+ * Mirroring in v reverses triangle orientation, hence the `tri` helper.
+ */
+function _roundedEndSizes(pp, rp) {
+  const hw = rp.width / 2;
+  const L = Math.max(2, pp.roundEndLength ?? 8);
+  const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
+  const rh = Math.max(0, rp.railHeight);
+  return { hw, L, rw, rh, tipV: L + hw };
+}
+
+/**
+ * Semicircle nose only.
+ *
+ * EVERY BAND IS A STRIP WITH SHARED COLUMNS, deliberately. Built as loose quads
+ * (four fresh verts per segment) computeVertexNormals has nothing to average
+ * across, so a 180° arc shades as a flat-faceted polygon while the straight it
+ * joins is smooth — that is the "looks wrong, maybe the normals?" read. Sharing
+ * the arc columns inside a band and NOT between bands smooths around the curve
+ * and keeps the kerb corners crisp, which is exactly what weldSmoothProfileNormals
+ * does for the swept pieces.
+ *
+ * The kerb is a full ring: top, OUTER face and INNER face. The inner face was
+ * missing, so from the deck you looked straight through the kerb (backfaces are
+ * culled) and the band appeared to float. Likewise the underside fan runs to the
+ * OUTER radius, not the deck rim, or the slab is open all round its foot.
+ */
+function buildRoundedEndNose(pp, rp, withKerbs, atStart = false) {
+  const { hw, L, rw, rh } = _roundedEndSizes(pp, rp);
+  const t = Math.max(0.05, rp.thickness);
+  const R = hw;
+  const Ri = withKerbs && rw > 1e-4 ? Math.max(0.5, hw - rw) : hw;
+  const arcSteps = Math.max(16, Math.round(R * 3));
+  const dir = atStart ? -1 : 1; // which way the nose bulges out of the diameter
+  const v0 = atStart ? R : L; // plane of the diameter, in piece v-space
+  const along0 = atStart ? 0 : L; // uv.x on that plane = the stub's own uv.x
+  // Developed-deck uv.y so the nose matches a swept deck at the diameter:
+  // profile walks left-kerb then deck from x=-(hw-rw) … +(hw-rw) starting at
+  // dev ≈ rw + rh.
+  const deckDev0 = rw + rh;
+  const deckHalf = hw - (withKerbs ? rw : 0);
+
+  const positions = [];
+  const uvs = [];
+  const lateral = [];
+  const zone = [];
+  const indices = [];
+  const push = (u, v, y, zn) => {
+    positions.push(u, y, -v);
+    // uv.x continues through the diameter (it runs NEGATIVE on a rounded start,
+    // which the procedural asphalt does not care about); uv.y mirrors sweep
+    // deck developed coords.
+    const uy = zn === 1
+      ? deckDev0 + (u + deckHalf)
+      : deckDev0 + (u + hw); // kerb / side: keep across-scale similar
+    uvs.push(along0 + (v - v0), uy);
+    lateral.push(hw > 0 ? u / hw : 0);
+    zone.push(zn);
+    return positions.length / 3 - 1;
+  };
+  // Wound for dir = +1; a mirrored nose needs every triangle flipped.
+  const tri = (a, b, c) => {
+    if (dir > 0) indices.push(a, b, c);
+    else indices.push(a, c, b);
+  };
+  const quad = (a, b, c, d) => { tri(a, b, c); tri(a, c, d); };
+
+  // Arc points a = 0 (right) → π (left), including endpoints.
+  const outer = [];
+  const inner = [];
+  for (let k = 0; k <= arcSteps; k++) {
+    const a = Math.PI * (k / arcSteps);
+    const s = dir * Math.sin(a);
+    outer.push({ u: R * Math.cos(a), v: v0 + R * s });
+    inner.push({ u: Ri * Math.cos(a), v: v0 + Ri * s });
+  }
+  const column = (pts, y, zn) => pts.map((p) => push(p.u, p.v, y, zn));
+
+  // Semicircle deck (fan from the diameter centre). The diameter itself is left
+  // open — the sweep already owns that end, and the two halves of the fan edge
+  // are collinear with the stub's single deck edge, so there is no crack.
+  const origin = push(0, v0, 0, 1);
+  const rim = column(withKerbs ? inner : outer, 0, 1);
+  for (let i = 0; i < rim.length - 1; i++) tri(origin, rim[i], rim[i + 1]);
+
+  // Underside — always at the OUTER radius so it closes against the slab wall.
+  const originB = push(0, v0, -t, 0);
+  const rimB = column(outer, -t, 0);
+  for (let i = 0; i < rimB.length - 1; i++) tri(originB, rimB[i + 1], rimB[i]);
+
+  if (withKerbs && Ri < R - 1e-4) {
+    const oTop = column(outer, rh, 2);
+    const iTop = column(inner, rh, 2);
+    for (let i = 0; i < arcSteps; i++) quad(oTop[i], oTop[i + 1], iTop[i + 1], iTop[i]);
+    const oHi = column(outer, rh, 0);
+    const oLo = column(outer, 0, 0);
+    for (let i = 0; i < arcSteps; i++) quad(oHi[i], oLo[i], oLo[i + 1], oHi[i + 1]);
+    const iLo = column(inner, 0, 0);
+    const iHi = column(inner, rh, 0);
+    for (let i = 0; i < arcSteps; i++) quad(iLo[i], iHi[i], iHi[i + 1], iLo[i + 1]);
+  }
+
+  // Outer slab wall under the nose (and under the kerb foot).
+  const sHi = column(outer, 0, 0);
+  const sLo = column(outer, -t, 0);
+  for (let i = 0; i < arcSteps; i++) quad(sHi[i], sLo[i], sLo[i + 1], sHi[i + 1]);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(lateral, 1));
+  geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zone, 1));
+  stampPieceAttributes(geo, { plain: 1 });
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function buildRoundedEndGeometry(pp = pieceParams, rp = roadParams, withKerbs = true, atStart = false) {
+  const { hw, L } = _roundedEndSizes(pp, rp);
+  // Stub = ordinary straight sweep → identical asphalt / kerbs / seam as
+  // neighbours. On a rounded start it begins at v = hw, past the nose, and its
+  // own uv.x still starts at 0 there — which is what the nose's `along0` matches.
+  const v0 = atStart ? hw : 0;
+  const stubFrames = computeFrames(
+    [new V3(0, 0, -v0), new V3(0, 0, -(v0 + L))],
+    _up,
+  );
+  const profile = buildProfile(rp, withKerbs);
+  const stub = buildSweepGeometry(stubFrames, profile, { plain: true });
+  const nose = buildRoundedEndNose(pp, rp, withKerbs, atStart);
+  const merged = mergeGeometries([stub, nose], false);
+  nose.dispose();
+  if (!merged) return stub; // attribute mismatch — keep the stub rather than nothing
+  stub.dispose();
+  merged.computeBoundingSphere();
+  return merged;
+}
+
+/**
+ * Kerb-centreline frames for the U-rail: entry-left → nose → entry-right.
+ * Uses the kit's parallel-transport frames as-is (up = +Y). Do NOT rebuild the
+ * basis — flipping `right` to "outward" inverted `up` and hung the rail upside down.
+ */
+function roundedEndRailFrames(pp = pieceParams, rp = roadParams, atStart = false) {
+  const { hw, L, rw } = _roundedEndSizes(pp, rp);
+  const lat = hw - rw * 0.5;
+  if (lat < 0.4) return [];
+  const arcSteps = Math.max(10, Math.round(lat * 1.6));
+  const pts = [];
+  // The U is walked so the DECK IS ALWAYS ON +right (buildRailAlongPath relies
+  // on it for which face the corrugation shows). Mirroring the piece therefore
+  // also reverses the traversal: a rounded start runs right kerb → nose → left.
+  if (atStart) {
+    const vD = hw; // diameter plane; the tip is at v = 0
+    const vEnd = hw + L;
+    pts.push(new V3(lat, 0, -vEnd));
+    pts.push(new V3(lat, 0, -vD));
+    for (let k = 1; k < arcSteps; k++) {
+      const a = (Math.PI * k) / arcSteps; // 0 at right → π at left
+      pts.push(new V3(lat * Math.cos(a), 0, -(vD - lat * Math.sin(a))));
+    }
+    pts.push(new V3(-lat, 0, -vD));
+    pts.push(new V3(-lat, 0, -vEnd));
+    return computeFrames(pts, _up);
+  }
+  pts.push(new V3(-lat, 0, 0));
+  pts.push(new V3(-lat, 0, -L));
+  for (let k = 1; k < arcSteps; k++) {
+    const a = Math.PI - (Math.PI * k) / arcSteps; // π at left → 0 at right
+    pts.push(new V3(lat * Math.cos(a), 0, -(L + lat * Math.sin(a))));
+  }
+  pts.push(new V3(lat, 0, -L));
+  pts.push(new V3(lat, 0, 0));
+  return computeFrames(pts, _up);
+}
+
+function roundedEndPoints(pp) {
+  const L = Math.max(2, pp.roundEndLength ?? 8);
+  const hw = roadParams.width / 2;
+  return straightLinePoints(L + hw);
+}
+
+function roundedEndSockets(pp) {
+  const L = Math.max(2, pp.roundEndLength ?? 8);
+  const hw = roadParams.width / 2;
+  return {
+    entryPos: new V3(0, 0, 0),
+    entryDir: new V3(0, 0, -1),
+    exitPos: new V3(0, 0, -(L + hw)),
+    exitDir: new V3(0, 0, -1),
+  };
 }
 
 /* ----------------------------------------------------------------------- */
@@ -3104,6 +3319,33 @@ export const PIECE_CATALOG = [
     plain: true,
   },
   {
+    id: "rounded_end",
+    label: "Rounded end",
+    hint: "Short terminus — semicircle nose, rails wrap the U",
+    swatch: "#4a9eff",
+    key: "",
+    points: roundedEndPoints,
+    sockets: roundedEndSockets,
+    geometry: (pp, rp, edges = true) => buildRoundedEndGeometry(pp, rp, edges),
+    // One open polyline on the kerb centreline: left → nose → right.
+    railPath: (pp, rp) => roundedEndRailFrames(pp, rp),
+    plain: true,
+  },
+  {
+    id: "rounded_start",
+    label: "Rounded start",
+    hint: "Same terminus mirrored — the nose is BEHIND the entry, so it caps the head of a chain",
+    swatch: "#4a9eff",
+    key: "",
+    // Identical sockets to the rounded end: the nose lives between the entry
+    // and the stub, so the piece still measures L + hw from entry to exit.
+    points: roundedEndPoints,
+    sockets: roundedEndSockets,
+    geometry: (pp, rp, edges = true) => buildRoundedEndGeometry(pp, rp, edges, true),
+    railPath: (pp, rp) => roundedEndRailFrames(pp, rp, true),
+    plain: true,
+  },
+  {
     id: "wallride",
     label: "Wall ride",
     hint: "Flat → wall → flat (self-contained)",
@@ -3907,26 +4149,31 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   }
   // A piece can also skip the sweep entirely and author its own geometry
   // (the hole road punches a circle through its slab — impossible as a sweep).
+  // Third arg is kerbs-on: the rounded end draws its kerb band from it.
   const geometry = def.geometry
-    ? def.geometry(pp, rpForProfile)
+    ? def.geometry(pp, rpForProfile, useKerbs)
     : buildSweepGeometry(frames, profileData, sweepOpts);
   // TWO rails, deliberately: one to look at, one to hit. Both come out of
   // modularRoadRail.js and share a profile, so the collision surface tracks the
   // visible one automatically instead of being a second set of numbers that
   // drifts. See buildRailCollision for why it is as bare as it is.
+  //
+  // `railPath` is for pieces whose rail is NOT ±offset from the centreline —
+  // the rounded end wraps left + nose + right as one open U.
   const wantsRail = useKerbs && !def.noMesh && !def.profile && !def.geometry;
-  const railGeometry = wantsRail ? buildRailGeometry(frames, rpForProfile) : null;
-  const railCollision = wantsRail ? buildRailCollision(frames, rpForProfile) : null;
-  // ...and a THIRD: the rail flipped under its own deck, which is what its
-  // reflection in a wet road looks like. Built here because this is the only
-  // place the piece's frames exist — once the sweep is over, the geometry has
-  // no memory of which way was up at each station, and mirroring it about any
-  // single plane is the approximation this exists to avoid. It is carried on
-  // the rail mesh's userData like the collision proxy and only ever drawn into
-  // the reflection target. See buildMirroredRailGeometry.
-  const railMirrorGeometry = wantsRail
-    ? buildMirroredRailGeometry(frames, rpForProfile)
-    : null;
+  let railGeometry = null;
+  let railCollision = null;
+  let railMirrorGeometry = null;
+  if (def.railPath && useKerbs) {
+    const railFrames = def.railPath(pp, rpForProfile);
+    railGeometry = buildRailAlongPath(railFrames, rpForProfile);
+    railCollision = buildRailCollisionAlongPath(railFrames, rpForProfile);
+    railMirrorGeometry = buildMirroredRailAlongPath(railFrames, rpForProfile);
+  } else if (wantsRail) {
+    railGeometry = buildRailGeometry(frames, rpForProfile);
+    railCollision = buildRailCollision(frames, rpForProfile);
+    railMirrorGeometry = buildMirroredRailGeometry(frames, rpForProfile);
+  }
   // Same trick as the rail: one deck to look at, a slightly different one to
   // drive on. Open-lipped pieces (the half tubes) hand the BVH a copy with the
   // rim caps deleted so the lip is a launch edge, not a shelf.

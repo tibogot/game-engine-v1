@@ -976,3 +976,79 @@ export function buildRailGeometry(frames, rp, r = railParams) {
   if (merged) merged.computeBoundingSphere();
   return merged;
 }
+
+/**
+ * One rail swept along frames that ALREADY sit on the kerb centreline.
+ *
+ * Used by the rounded end / start: left kerb, semicircle nose, right kerb are
+ * one open polyline, not a centreline with ±edge offsets.
+ *
+ * WHICH SIDE THE SECTION HANGS ON IS `zSign`, NOT the frame basis. sweepRail
+ * places every vertex at `baseLat + zSign · p.z`, and the profile's traffic face
+ * is at NEGATIVE z (`zCrest = −depth/2`, see railProfile) — the beam is the
+ * innermost surface, with the blockout and posts reaching ~0.37 m back behind
+ * it. So zSign = +1 means "the deck is on −right", which is how buildRailGeometry
+ * uses it for the RIGHT-hand rail.
+ *
+ * This path walks with the deck on +right the whole way round (that is what
+ * keeps the U on one hand), so it is the LEFT-hand case and needs zSign = −1.
+ * With +1 the whole section mirrors about the kerb centreline: measured, the
+ * beam face sat 0.13 m OUTBOARD and the posts stuck 0.37 m into the road.
+ * Do not "fix" that by flipping `up` or rebuilding `right` — that is a mirror
+ * (determinant −1) and it is what hung the rail upside down last time.
+ */
+export function buildRailAlongPath(frames, rp, r = railParams) {
+  if (r.height <= 0 || !frames?.length) return null;
+  const kerbTop = rp.railHeight;
+  const centerV = kerbTop + r.gap + r.height * 0.5;
+  const rw = Math.min(Math.max(0, rp.railWidth), rp.width * 0.45);
+  const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
+  const template = r.posts
+    ? buildPostTemplate(prof, r, kerbTop, centerV, rw * 0.5)
+    : null;
+  const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle, 0);
+  const zSign = -1; // deck on +right → left-hand rail (see above)
+  const geos = [sweepRail(sweepFrames, prof, 0, zSign, centerV)];
+  if (template) placePosts(sweepFrames, template, 0, zSign, r.postSpacing, geos);
+  template?.dispose();
+  const merged = mergeGeometries(geos, false);
+  for (const g of geos) g.dispose();
+  if (merged) merged.computeBoundingSphere();
+  return merged;
+}
+
+/** Collision stand-in for {@link buildRailAlongPath} — same path, cheap sheet. */
+export function buildRailCollisionAlongPath(frames, rp, r = railParams) {
+  if (r.height <= 0 || !frames?.length) return null;
+  const kerbTop = rp.railHeight;
+  const centerV = kerbTop + r.gap + r.height * 0.5;
+  const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
+  const beamTop = centerV + prof.height * 0.5;
+  const half = prof.depth * 0.5;
+  // Same section as buildRailCollision, traffic face first — the side it lands
+  // on is zSign's job, exactly as it is for the visible beam. Writing it
+  // back-to-front here instead was the same mirror bug in a second place, so the
+  // proxy agreed with the wrong-side beam and hid it from the car.
+  const section = [
+    { y: kerbTop, z: -prof.backZ },
+    { y: beamTop - half, z: -prof.backZ },
+    { y: beamTop, z: 0 },
+    { y: beamTop - half, z: prof.backZ },
+  ];
+  const positions = [];
+  const indices = [];
+  const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle, 0);
+  sweepCollisionSheet(sweepFrames, section, 0, -1, positions, indices);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/** Mirror of {@link buildRailAlongPath} for the wet-road reflection pass. */
+export function buildMirroredRailAlongPath(frames, rp, r = railParams) {
+  if (!frames?.length) return null;
+  const flipped = frames.map((f) => ({ ...f, up: f.up.clone().negate() }));
+  return buildRailAlongPath(flipped, rp, r);
+}

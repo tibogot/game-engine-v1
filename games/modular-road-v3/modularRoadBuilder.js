@@ -3340,6 +3340,8 @@ const PIECE_TO_CATEGORY = {
   narrow: "straight",
   holed: "straight",
   glass_road: "straight",
+  rounded_end: "straight",
+  rounded_start: "straight",
   tunnel: "tubes",
   tunnel_curve: "tubes",
   tube: "tubes",
@@ -3690,6 +3692,18 @@ export const CATEGORY_PRESETS = {
       label: "Short",
       base: "straight",
       params: { straightLength: 14 },
+    },
+    {
+      id: "rounded_end",
+      label: "Rounded end",
+      base: "rounded_end",
+      params: { roundEndLength: 8 },
+    },
+    {
+      id: "rounded_start",
+      label: "Rounded start",
+      base: "rounded_start",
+      params: { roundEndLength: 8 },
     },
     {
       id: "straight_long",
