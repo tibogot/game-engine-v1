@@ -504,6 +504,10 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   )();
   const restQuad = new QuadMesh(restMat);
 
+  // Bumped on every render into rtMain; see _render(). Consumers that cache
+  // anything derived from the heightmap poll this instead of guessing.
+  let _mainVersion = 0;
+
   // ── Render helpers ────────────────────────────────────────────────────────
   // rect is in logical texel coords ({x, y, w, h}, y = row index in uv space).
   // On WebGPU, QuadMesh uvs are pre-flipped (uv.y=0 at NDC top) and WGSL never
@@ -512,6 +516,11 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   // OFF for scissored passes: WebGPU's clear loadOp ignores scissor and would
   // wipe the rest of the map.
   function _render(quad, dstRT, rect) {
+    // Every write to the canonical heightmap funnels through here — brushes,
+    // erosion, hydro, undo/redo restore, blitFull, the generator pass. Bumping
+    // the version here (rather than at each call site) is what lets derived
+    // GPU data (the baked normal map) invalidate without any caller opting in.
+    if (dstRT === rtMain) _mainVersion++;
     const prevAutoClear = renderer.autoClear;
     renderer.autoClear = false;
     if (rect) {
@@ -860,5 +869,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     uHydroStrength,
     hydroConfig,
     getCurrentRT: () => rtMain,
+    /** Monotonic counter — changes whenever the heightmap RT is written. */
+    getHeightVersion: () => _mainVersion,
   };
 }

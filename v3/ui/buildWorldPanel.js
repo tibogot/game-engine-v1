@@ -1816,6 +1816,20 @@ export function buildWorldPanel(app) {
 
       // --- Terrain / streaming LOD (was Tweakpane "Terrain/LOD") ---
       const cfg = app.config;
+      // --- Rendering (resolution scale) ---
+      if (app.renderQuality) {
+        const renderBody = _section(container, "Rendering", false);
+        _slider(renderBody, app.renderQuality, "scale", {
+          label: "Render scale",
+          min: 0.5,
+          max: 2,
+          step: 0.05,
+          hint: "Multiplier on the device pixel ratio. The frame is fragment-bound, "
+            + "so 0.75 costs roughly half the GPU time of 1.0. Saved per browser.",
+          onChange: () => app.onRenderScaleChanged?.(),
+        });
+      }
+
       const lodWorldBody = _section(container, "Terrain / LOD", false);
       _toggle(lodWorldBody, cfg.lod, "enabled", {
         label: "LOD enabled",

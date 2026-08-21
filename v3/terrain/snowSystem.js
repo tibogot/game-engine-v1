@@ -166,11 +166,11 @@ function buildWarpedTileGeometry(N) {
 }
 
 // ── Main factory ─────────────────────────────────────────────────────────────
-export function createSnowSystem(renderer, scene, initialHeightTex) {
+export function createSnowSystem(renderer, scene, initialHeightTex, sharedHeightNode = null, terrainNormals = null) {
   const params = { ...SNOW_PARAMS_DEFAULTS };
 
   // Shared surface definition — also handed to the terrain LOD material.
-  const shared = createSnowShared(initialHeightTex, params);
+  const shared = createSnowShared(initialHeightTex, params, sharedHeightNode, terrainNormals);
   shared.u.uTileHalf.value    = TILE_HALF;
   shared.u.uTileFeather.value = TILE_FEATHER;
 

@@ -45,7 +45,7 @@ const SPARKLE_FADE_FAR  = 130;
 const SNOW_BASE   = vec3(0.88, 0.93, 0.98);   // pristine: cool blue-white
 const SNOW_PACKED = vec3(0.60, 0.66, 0.76);   // compressed: blue-grey
 
-export function createSnowShared(initialHeightTex, defaults) {
+export function createSnowShared(initialHeightTex, defaults, sharedHeightNode = null, terrainNormals = null) {
   const u = {
     uBaseDepth:        uniform(defaults.baseDepth),
     uNoiseFreq1:       uniform(defaults.noiseFreq1),
@@ -72,7 +72,13 @@ export function createSnowShared(initialHeightTex, defaults) {
 
   // Heightmap node — sculptBrush's rtMain is canonical and never swapped, but
   // setHeightTex stays available for save/load flows.
-  const heightNode = texture(initialHeightTex);
+  //
+  // SHARE THE CALLER'S NODE WHEN OFFERED. Building a second TextureNode over the
+  // same texture costs a second SAMPLER BINDING in every shader that reads both
+  // — and the terrain material reads both. WebGPU caps a stage at 16 samplers
+  // (the reason CSM is pinned to 3 cascades), so that duplicate was one of the
+  // scarcest resources in the engine, spent on nothing.
+  const heightNode = sharedHeightNode ?? texture(initialHeightTex);
 
   // Snow coverage paint mask — 1×1 black until setMaskTex(snowMap.tex).
   const _defMaskData = new Uint8Array([0]);
@@ -80,9 +86,15 @@ export function createSnowShared(initialHeightTex, defaults) {
   _defMaskTex.needsUpdate = true;
   const maskNode = texture(_defMaskTex);
 
-  // Terrain height (metres) from the GPU heightmap at world XZ
+  // Terrain height (metres) from the GPU heightmap at world XZ.
+  //
+  // Prefers the baked surface texture when the caller supplies one. That is a
+  // sampler-budget decision as much as a speed one: the terrain material reads
+  // both this and its own height, and WebGPU allows a stage only 16 samplers.
+  // Reading the bake keeps the heightmap out of the fragment stage entirely.
   const getTerrainH = Fn(([wxz]) => {
     const hUV = wxz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)).clamp(0, 1);
+    if (terrainNormals) return terrainNormals.heightAt(hUV).mul(float(MAX_HEIGHT));
     // .sample() so setHeightTex/setMaskTex swaps keep working after the
     // shaders are built (texture(node, uv) bakes the build-time texture in).
     return heightNode.sample(hUV).r.mul(float(MAX_HEIGHT));
@@ -90,7 +102,15 @@ export function createSnowShared(initialHeightTex, defaults) {
 
   // Terrain-only normal (snow depth intentionally excluded: steep cliffs
   // reject snow before any deformation is applied).
+  //
+  // The baked normal IS this cross product, evaluated per heightmap texel — at
+  // the shipped 2048 m / 1024 config one texel is 2 m, exactly the eps every
+  // caller passes. Reading it costs one tap instead of three height samples.
   const terrainNormal = Fn(([wxz, eps]) => {
+    if (terrainNormals) {
+      const nUV = wxz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)).clamp(0, 1);
+      return terrainNormals.normalAt(nUV);
+    }
     const hA = getTerrainH(wxz);
     const hX = getTerrainH(wxz.add(vec2(eps, float(0))));
     const hZ = getTerrainH(wxz.add(vec2(float(0), eps.negate())));

@@ -34,6 +34,7 @@ import { HuskyOnFoot } from "../../v2/play/huskyOnFoot.js";
 import { FoxOnFoot } from "../play/foxOnFoot.js";
 import { SplatMap } from "../terrain/splatMap.js";
 import { createSplatOverlay } from "../terrain/splatOverlayTsl.js";
+import { createTerrainNormalMap } from "../terrain/terrainNormalMap.js";
 import { TextureLibrary } from "../terrain/textureLibrary.js";
 import { PaintSystem } from "../tools/paintSystem.js";
 import { BrushMask } from "../../v2/core/paint/brushMask.js";
@@ -290,14 +291,35 @@ export async function startV3App(opts = {}) {
 
   let worldEnv = null;
 
+  // ── Render scale ───────────────────────────────────────────────────────────
+  // The terrain frame is fragment-bound (one render pass is ~93% of it), so
+  // resolution is the single most direct quality/perf trade available — halving
+  // the pixel count halves the dominant cost. Kept as a multiplier on top of the
+  // device pixel ratio so 1.0 always means "native", whatever the display is.
+  // Persisted per browser, not per project: it describes the MACHINE.
+  const RENDER_SCALE_KEY = "v3.renderScale";
+  const _basePixelRatio  = Math.min(devicePixelRatio, 2);
+  const renderQuality = {
+    scale: (() => {
+      const v = parseFloat(localStorage.getItem(RENDER_SCALE_KEY));
+      return Number.isFinite(v) ? Math.max(0.5, Math.min(2, v)) : 1;
+    })(),
+  };
+
   function resizeRenderer() {
     const w = viewport.clientWidth;
     const h = viewport.clientHeight;
     camera.aspect = w / Math.max(h, 1);
     camera.updateProjectionMatrix();
+    renderer.setPixelRatio(_basePixelRatio * renderQuality.scale);
     renderer.setSize(w, h);
     worldEnv?.setSize(w, h);
     layoutStatsOverlay();
+  }
+
+  function applyRenderScale() {
+    localStorage.setItem(RENDER_SCALE_KEY, String(renderQuality.scale));
+    resizeRenderer();
   }
 
   resizeRenderer();
@@ -370,12 +392,21 @@ export async function startV3App(opts = {}) {
   // sculptBrush uploads the CPU heightmap to its RT and sets heightTexNode.value.
   const sculpt = createSculptBrush(renderer, initialTex, heightTexNode, defaultMaskTex);
 
+  // Baked terrain normals — the heightmap's finite difference, computed once per
+  // EDIT instead of four taps per pixel per frame. Must exist before any terrain
+  // material is built (it supplies the node they sample) and it self-bakes on
+  // construction, so the first frame never reads an empty target.
+  const terrainNormals = createTerrainNormalMap({ heightTexNode, renderer });
+  let _lastNormalBakeVersion = -1;
+
   // GPU procedural terrain generator — full-map pass through sculpt.runGeneratorPass.
   const genPass = createProceduralGenPass();
 
   // ── Snow system ────────────────────────────────────────────────────────────
   // heightTexNode.value is now the live GPU RT set by sculptBrush above.
-  const snowSystem = createSnowSystem(renderer, scene, heightTexNode.value);
+  // Pass the shared height NODE, not just the texture: a second node over the
+  // same texture would burn a second sampler binding in the terrain material.
+  const snowSystem = createSnowSystem(renderer, scene, heightTexNode.value, heightTexNode, terrainNormals);
   const snowMap    = new SnowMap();
   snowSystem.setSnowMaskTex(snowMap.tex);
 
@@ -387,7 +418,11 @@ export async function startV3App(opts = {}) {
     textureLib.albedoArrayTex,
     textureLib.ormArrayTex,
     splatMap.tex,
-    heightTexNode, // live heights → slope/height auto-paint updates while sculpting
+    heightTexNode, // fallback height source when no baked surface is supplied
+    {},
+    // Live slope+height for auto-paint, from the baked surface texture: one tap
+    // instead of five, and it keeps the heightmap out of the fragment stage.
+    terrainNormals,
   );
 
   // ── Procedural ground (v2 groundTsl port) ──────────────────────────────────
@@ -475,7 +510,7 @@ export async function startV3App(opts = {}) {
   // the terrain look onto cliff surfaces. Shared deps for every cliff blend
   // material (procedural presets, imported GLBs, their LODs).
   const cliffPaintMask = new CliffPaintMask(512);
-  const cliffBlendDeps = { heightTexNode, splatOverlay, cliffPaintTex: cliffPaintMask.texture };
+  const cliffBlendDeps = { heightTexNode, splatOverlay, cliffPaintTex: cliffPaintMask.texture, terrainNormals };
 
   // ── Water-surface map + lakebed shading ────────────────────────────────────
   // A top-down bake of every water surface's world Y (lakes + River+ ribbons).
@@ -494,12 +529,14 @@ export async function startV3App(opts = {}) {
   // and the snow surface definition (snowSystem.shared): painted snow displaces
   // the terrain itself with real volume; the deform tile only refines the same
   // surface with trail compression near the player.
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, groundProc);
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, groundProc, {}, terrainNormals);
   scene.add(lod.group);
   // Console handle for terrain shader A/Bs — `buildVariant()` compiles a second
-  // feature set and `setVariant()` swaps it in, so two shaders can be compared
-  // within the same second and therefore at the same GPU clock. See the note on
-  // buildVariant for why a reload-based comparison is not trustworthy here.
+  // feature set and `setVariant()` swaps it onto the clipmap, so two shaders can
+  // be compared within the same second and therefore at the same GPU clock. See
+  // the note on buildVariant for why a reload-based comparison is not
+  // trustworthy here. The clipmap is ONE merged mesh with one material now, so
+  // both take/return a single material rather than one per LOD ring.
   window.__v3TerrainLOD = lod;
   // Terrain starts flat (createHeightmapTexture initializes all-zeros).
   // User can generate terrain manually via the Procedural panel.
@@ -811,6 +848,8 @@ export async function startV3App(opts = {}) {
       rebuildInteriorVolumes: () => worldEnv?.rebuildInteriorVolumes(),
       worldOceanChanged: () => worldEnv?.worldOceanChanged(),
       onConfigChanged: () => {},
+      renderQuality,
+      onRenderScaleChanged: () => applyRenderScale(),
       ui: { refreshLiveSliders: () => {} },
     });
     if (typeof lucide !== "undefined") lucide.createIcons();
@@ -2685,6 +2724,16 @@ export async function startV3App(opts = {}) {
       splatOverlay.uHasPaint.value = splatMap.hasAnyPaint() ? 1 : 0;
       snowSystem.shared.u.uHasSnow.value = snowMap.hasAnySnow() ? 1 : 0;
 
+      // Re-bake the terrain normal map only when the heightmap actually
+      // changed. getHeightVersion() counts every write to the canonical height
+      // RT, so sculpting, erosion, undo/redo and project loads all invalidate
+      // it without any of them having to know this exists.
+      const _hv = sculpt.getHeightVersion();
+      if (_hv !== _lastNormalBakeVersion && !_rendererSideWork) {
+        _lastNormalBakeVersion = _hv;
+        terrainNormals.bake();
+      }
+
       bakeGrassTintIfNeeded();
       waterSurfaceMap.bakeIfNeeded(renderer);
       if (grassRings) {
@@ -2724,7 +2773,9 @@ export async function startV3App(opts = {}) {
       roadSystem?.update();
 
       tickPerf(perf, now, dt * 1000);
-      perf.activeChunks = lod.group.children.length;
+      // The clipmap rings are merged into one mesh, so children.length is always
+      // 1 now; report the ring count, which is what this readout meant.
+      perf.activeChunks = LOD_LEVELS;
       worldEnv?.updateFrame(dt);
       treeEnv.updateFrame(camera, worldEnv?.getSunDir?.(), now * 0.001);
       foliageEnv.updateFrame(camera, worldEnv?.getSunDir?.(), now * 0.001);
@@ -6358,6 +6409,7 @@ export async function startV3App(opts = {}) {
       get grassTintRT() { return grassTintRT; },
       get susukiSystem() { return susukiSystem; },
       renderer,
+      terrainNormals,
       grassTintScene,
       grassTintCam,
       forceGrassTintBake() {

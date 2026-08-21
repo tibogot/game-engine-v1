@@ -263,7 +263,11 @@ function buildRingGrid(N, step) {
 
 // ── Material ──────────────────────────────────────────────────────────────────
 
-function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null, lakebed = null, groundProc = null, features = {}) {
+function createLODMaterial({
+  heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation,
+  splatOverlay, snowShared = null, lakebed = null, groundProc = null,
+  terrainNormals = null, features = {},
+}) {
   const F = { ...TERRAIN_FEATURES, ...features };
   const mat = createTileMaterial({
     roughness:     0.95,
@@ -299,17 +303,32 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   // the deform tile's footprint groundDepth hands the surface over to the
   // high-res tile so footprint grooves are never covered by coarse terrain.
   const wxz = vec2(worldX, worldZ);
-  const terrainY = h.mul(MAX_HEIGHT);
-  const displacedY = snowShared ? terrainY.add(snowShared.groundDepth(wxz)) : terrainY;
+  const vertexY = h.mul(MAX_HEIGHT);
+  const displacedY = snowShared ? vertexY.add(snowShared.groundDepth(wxz)) : vertexY;
   mat.positionNode = vec3(positionLocal.x, displacedY, positionLocal.z);
 
-  // Per-pixel gradient normal (always from fine UV — stays smooth across levels)
-  const hL  = texture(heightTexNode, vec2(hmU.sub(texel), hmV)).r;
-  const hR  = texture(heightTexNode, vec2(hmU.add(texel), hmV)).r;
-  const hD  = texture(heightTexNode, vec2(hmU, hmV.sub(texel))).r;
-  const hUp = texture(heightTexNode, vec2(hmU, hmV.add(texel))).r;
-  const flatScale   = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
-  const worldNormal = normalize(vec3(hL.sub(hR), flatScale, hD.sub(hUp)));
+  // FRAGMENT-side height comes from the baked surface texture, not the
+  // heightmap. Sharing one node across both stages would put the heightmap
+  // sampler in the fragment stage too — and that stage is at WebGPU's 16-sampler
+  // ceiling, which is the whole reason the bake carries height in .w.
+  const terrainY = terrainNormals
+    ? terrainNormals.heightAt(hmUV).mul(hmInBounds).mul(MAX_HEIGHT)
+    : vertexY;
+
+  // Lighting normal. The heightmap only changes when the user sculpts, so the
+  // finite difference is baked into its own texture (terrainNormalMap.js) and
+  // read back with ONE tap — the four neighbour taps below only survive as the
+  // fallback for callers that pass no baked map. Baking is also smoother: see
+  // the QUALITY note in terrainNormalMap.js.
+  const worldNormal = terrainNormals
+    ? terrainNormals.normalAt(hmUV)
+    : normalize(vec3(
+        texture(heightTexNode, vec2(hmU.sub(texel), hmV)).r
+          .sub(texture(heightTexNode, vec2(hmU.add(texel), hmV)).r),
+        float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT)),
+        texture(heightTexNode, vec2(hmU, hmV.sub(texel))).r
+          .sub(texture(heightTexNode, vec2(hmU, hmV.add(texel))).r),
+      ));
   const useSnow = !!snowShared && F.snow;
 
   // Cursor ring (boundary) + mask projection (filled shape preview).
@@ -442,22 +461,84 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared = null, lakebed = null, groundProc = null, features = {}) {
-  const group  = new THREE.Group();
-  const levels = [];
+/**
+ * Concatenate the clipmap rings into ONE geometry.
+ *
+ * Every level sits at the same transform (update() moves them together) and now
+ * shares one material, so keeping them as five meshes bought five draw calls and
+ * nothing else — they are never culled independently (frustumCulled = false) and
+ * never drawn apart. All inputs carry the same attribute layout (position +
+ * normal + index), which is the condition a merge silently fails on.
+ */
+function _mergeClipmapGeometries(geos) {
+  let vCount = 0;
+  let iCount = 0;
+  for (const g of geos) {
+    vCount += g.attributes.position.count;
+    iCount += g.index.count;
+  }
 
+  const positions = new Float32Array(vCount * 3);
+  const normals   = new Float32Array(vCount * 3);
+  const indices   = new Uint32Array(iCount);
+
+  let vBase = 0;
+  let iBase = 0;
+  for (const g of geos) {
+    const p = g.attributes.position.array;
+    const n = g.attributes.normal.array;
+    const gi = g.index.array;
+    positions.set(p, vBase * 3);
+    normals.set(n, vBase * 3);
+    // Indices are per-geometry; rebase each onto its slice of the merged buffer.
+    for (let i = 0; i < gi.length; i++) indices[iBase + i] = gi[i] + vBase;
+    vBase += g.attributes.position.count;
+    iBase += gi.length;
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute("normal",   new THREE.BufferAttribute(normals,   3));
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+  return geo;
+}
+
+export function createTerrainLOD(
+  heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation,
+  splatOverlay, snowShared = null, lakebed = null, groundProc = null,
+  features = {}, terrainNormals = null,
+) {
+  const group = new THREE.Group();
+
+  // Build every ring, then merge. The rings themselves are unchanged — level 0
+  // is the full grid, 1..n are stitched rings — only their packaging is.
+  const parts = [];
   for (let lod = 0; lod < LOD_LEVELS; lod++) {
     const step = BASE_STEP * Math.pow(2, lod);
-    // Level 0 = full grid; levels 1-4 = stitched rings (no overlap, no polygon offset needed).
-    const geo     = lod === 0 ? buildFullGrid(GRID_N, step) : buildRingGrid(GRID_N, step);
-    const uCenter = uniform(new THREE.Vector2(0, 0));
-    const mat     = createLODMaterial(heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed, groundProc, features);
-    const mesh    = new THREE.Mesh(geo, mat);
-    mesh.frustumCulled = false;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-    levels.push({ mesh, uCenter });
+    parts.push(lod === 0 ? buildFullGrid(GRID_N, step) : buildRingGrid(GRID_N, step));
   }
+  const geometry = _mergeClipmapGeometries(parts);
+  for (const g of parts) g.dispose();
+
+  // ONE uniform and ONE material for the whole clipmap. update() always wrote
+  // the same centre into all five, and every level was built from identical
+  // arguments, so the five materials were five compiles of one shader — five
+  // times the pipeline-compile cost at boot for no behavioural difference.
+  const uCenter = uniform(new THREE.Vector2(0, 0));
+  const matArgs = {
+    heightTexNode, uCenterXZ: uCenter, uCursorUV, uCursorRadius,
+    uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed,
+    groundProc, terrainNormals,
+  };
+
+  const mesh = new THREE.Mesh(geometry, createLODMaterial({ ...matArgs, features }));
+  mesh.frustumCulled = false;
+  mesh.receiveShadow = true;
+  mesh.name = "TerrainClipmap";
+  group.add(mesh);
+
+  // Kept for callers that iterated levels; the clipmap is one mesh now.
+  const levels = [{ mesh, uCenter }];
 
   /**
    * Re-centre the clipmap. Pass controls.target for orbit cameras,
@@ -482,7 +563,7 @@ export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrush
    * after — the centre moves and the terrain does not budge.
    *
    * WHY THE COARSEST STEP AND NOT A CONSTANT. The levels use steps
-   * BASE_STEP × 2^lod (2, 4, 8, 16, 32 at the shipped 2048/1024 config).
+   * BASE_STEP x 2^lod (2, 4, 8, 16, 32 at the shipped 2048/1024 config).
    * Snapping to the coarsest one lands EVERY level on its own grid, because each
    * finer step divides it, and keeps all the rings on a common lattice so no
    * seam can open between them. v3/app/main.js's play path had its own
@@ -499,43 +580,39 @@ export function createTerrainLOD(heightTexNode, uCursorUV, uCursorRadius, uBrush
     const q = LOD_CENTRE_SNAP;
     const cx = Math.round(center.x / q) * q;
     const cz = Math.round(center.z / q) * q;
-    for (const { mesh, uCenter } of levels) {
-      mesh.position.set(cx, 0, cz);
-      uCenter.value.set(cx, cz);
-    }
+    mesh.position.set(cx, 0, cz);
+    uCenter.value.set(cx, cz);
   }
 
   /**
-   * Build a SECOND material set at a different feature level, without touching
-   * the live one.
+   * Build a SECOND material at a different feature level, without touching the
+   * live one.
    *
    * Exists because a feature flag is compile-time, so comparing two of them
    * would otherwise need a page reload — and a reload cannot be compared
    * against the previous one on a laptop GPU whose clock moves between runs
    * (measured: the same scene ran 60 fps / 4 ms and later 1.3 fps / 64 ms with
    * no code change, purely from the GPU sitting at 15% clock). Pre-building
-   * both sets and swapping them in the same second makes the A/B immune to
-   * that: the two measurements share a clock.
+   * both and swapping them in the same second makes the A/B immune to that:
+   * the two measurements share a clock.
    *
    * The uCenter uniform is SHARED with the live material rather than recreated,
    * so a swapped-in variant keeps following the camera exactly as before.
    *
    * @param {object} features see TERRAIN_FEATURES
-   * @returns {THREE.Material[]} one per LOD level, index-aligned with `levels`
+   * @returns {THREE.Material}
    */
   function buildVariant(features) {
-    return levels.map(({ uCenter }) => createLODMaterial(
-      heightTexNode, uCenter, uCursorUV, uCursorRadius, uBrushMaskNode,
-      uMaskRotation, splatOverlay, snowShared, lakebed, groundProc, features,
-    ));
+    return createLODMaterial({ ...matArgs, features });
   }
 
-  /** Swap a set built by buildVariant() onto the live meshes. */
-  function setVariant(mats) {
-    if (!Array.isArray(mats) || mats.length !== levels.length) return false;
-    for (let i = 0; i < levels.length; i++) levels[i].mesh.material = mats[i];
+  /** Swap a material built by buildVariant() onto the live clipmap. */
+  function setVariant(mat) {
+    const next = Array.isArray(mat) ? mat[0] : mat;
+    if (!next?.isMaterial) return false;
+    mesh.material = next;
     return true;
   }
 
-  return { group, update, levels, buildVariant, setVariant };
+  return { group, mesh, uCenter, update, levels, buildVariant, setVariant };
 }

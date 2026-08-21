@@ -55,7 +55,7 @@ const LUM = vec3(0.299, 0.587, 0.114);
  *   cliffPaintTex — optional CliffPaintMask texture (R = strength); painted
  *                   areas force the terrain look regardless of slope/height
  */
-export function applyCliffTerrainBlend(mat, { heightTexNode, splatOverlay, cliffPaintTex = null }) {
+export function applyCliffTerrainBlend(mat, { heightTexNode, splatOverlay, cliffPaintTex = null, terrainNormals = null }) {
   const uTopStart     = uniform(0.6);  // normalWorld.y where grass starts
   const uTopFull      = uniform(0.85); // normalWorld.y where grass is full
   const uTopNoiseScale = uniform(0.06); // world-XZ noise frequency on the top edge (v2 parity)
@@ -82,12 +82,17 @@ export function applyCliffTerrainBlend(mat, { heightTexNode, splatOverlay, cliff
 
   const terrainY = texture(heightTexNode, hmUV).r.mul(float(MAX_HEIGHT));
 
-  const hL  = texture(heightTexNode, vec2(hmU.sub(texel), hmV)).r;
-  const hR  = texture(heightTexNode, vec2(hmU.add(texel), hmV)).r;
-  const hD  = texture(heightTexNode, vec2(hmU, hmV.sub(texel))).r;
-  const hUp = texture(heightTexNode, vec2(hmU, hmV.add(texel))).r;
-  const flatScale     = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
-  const terrainWorldN = normalize(vec3(hL.sub(hR), flatScale, hD.sub(hUp)));
+  // Same baked normal the terrain itself reads (one tap instead of four), so
+  // the contact band cannot disagree with the ground it is blending into.
+  const terrainWorldN = terrainNormals
+    ? terrainNormals.normalAt(hmUV)
+    : normalize(vec3(
+        texture(heightTexNode, vec2(hmU.sub(texel), hmV)).r
+          .sub(texture(heightTexNode, vec2(hmU.add(texel), hmV)).r),
+        float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT)),
+        texture(heightTexNode, vec2(hmU, hmV.sub(texel))).r
+          .sub(texture(heightTexNode, vec2(hmU, hmV.add(texel))).r),
+      ));
   const terrainViewN  = normalize(mul(cameraViewMatrix, vec4(terrainWorldN, 0)).xyz);
 
   // ── Terrain look at this XZ (painted splat over the plain base) ────────────

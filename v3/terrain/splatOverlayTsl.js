@@ -79,6 +79,7 @@ export const SPLAT_FEATURES = {
  */
 export function createSplatOverlay(
   layerSlots, albedoArrayTex, ormArrayTex, splatTex, heightTexNode = null, features = {},
+  terrainNormals = null,
 ) {
   if (layerSlots.length !== NUM_LAYERS) {
     throw new Error(`createSplatOverlay: need ${NUM_LAYERS} layer slots, got ${layerSlots.length}`);
@@ -157,16 +158,26 @@ export function createSplatOverlay(
 
   // Auto-rule ingredient nodes — referenced only inside blend()'s auto sub-branch.
   let autoIngredients = null;
-  if (heightTexNode && F.autoPaint) {
-    // Terrain normal.y from the same heightmap gradient the terrain mesh uses.
-    const texel = float(1.0 / HEIGHTMAP_SIZE);
-    const hC = texture(heightTexNode, splatUV).r;
-    const hL = texture(heightTexNode, vec2(splatUV.x.sub(texel), splatUV.y)).r;
-    const hR = texture(heightTexNode, vec2(splatUV.x.add(texel), splatUV.y)).r;
-    const hD = texture(heightTexNode, vec2(splatUV.x, splatUV.y.sub(texel))).r;
-    const hU = texture(heightTexNode, vec2(splatUV.x, splatUV.y.add(texel))).r;
-    const flatScale = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
-    const ny = flatScale.div(length(vec3(hL.sub(hR), flatScale, hD.sub(hU))));
+  if ((terrainNormals || heightTexNode) && F.autoPaint) {
+    // Slope and height for the rules. The baked surface texture carries BOTH
+    // (normal in .xyz, height in .w) so this is one tap where it used to be
+    // five — and, more importantly, it keeps the heightmap's sampler out of the
+    // fragment stage, which sits at WebGPU's 16-sampler ceiling.
+    let hC, ny;
+    if (terrainNormals) {
+      const surf = terrainNormals.surfaceAt(splatUV);
+      hC = surf.w;
+      ny = normalize(surf.xyz).y;
+    } else {
+      const texel = float(1.0 / HEIGHTMAP_SIZE);
+      hC = texture(heightTexNode, splatUV).r;
+      const hL = texture(heightTexNode, vec2(splatUV.x.sub(texel), splatUV.y)).r;
+      const hR = texture(heightTexNode, vec2(splatUV.x.add(texel), splatUV.y)).r;
+      const hD = texture(heightTexNode, vec2(splatUV.x, splatUV.y.sub(texel))).r;
+      const hU = texture(heightTexNode, vec2(splatUV.x, splatUV.y.add(texel))).r;
+      const flatScale = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
+      ny = flatScale.div(length(vec3(hL.sub(hR), flatScale, hD.sub(hU))));
+    }
 
     // World-anchored FBM breakup so the slope/height thresholds meander
     // organically instead of tracing clean contour lines.
