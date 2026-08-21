@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { color, uniform } from "three/tsl";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { solveGapArc } from "./gapArc.js";
 
@@ -90,17 +91,20 @@ export class GapPreview {
     this.line.renderOrder = 3;
 
     // Landing marker: a flat ring + a short pole so it reads against the sky.
-    this.marker = new THREE.Group();
+    // One mesh: they share a material, so two objects were a free extra draw.
     const ringMat = new THREE.MeshBasicNodeMaterial({
       color: MARKER_COLOR, transparent: true, opacity: 0.9,
       depthWrite: false, toneMapped: false,
     });
     applyBloomMRT(ringMat, color(MARKER_COLOR).mul(this._markerGlow));
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.22, 8, 32), ringMat);
-    ring.rotation.x = Math.PI / 2;
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 4, 6), ringMat);
-    pole.position.y = 2;
-    this.marker.add(ring, pole);
+    const ringGeo = new THREE.TorusGeometry(2.6, 0.22, 8, 32);
+    ringGeo.rotateX(Math.PI / 2);
+    const poleGeo = new THREE.CylinderGeometry(0.12, 0.12, 4, 6);
+    poleGeo.translate(0, 2, 0);
+    const markerGeo = mergeGeometries([ringGeo, poleGeo], false);
+    ringGeo.dispose();
+    poleGeo.dispose();
+    this.marker = new THREE.Mesh(markerGeo, ringMat);
     this.marker.name = "GapLanding";
     this.marker.visible = false;
 
