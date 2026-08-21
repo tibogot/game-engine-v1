@@ -1000,6 +1000,43 @@ export const TIRE = {
   /** Fraction of the pitch/roll RATE killed on touchdown. Yaw is deliberately
    *  untouched, so landing mid-spin still carries the spin. */
   landingAngDamp: 0.4,
+  /**
+   * Seconds of PROBE contact to wait for real wheel load before conceding that
+   * the wheels are never going to take any, and firing the touchdown response
+   * anyway. THIS IS WHAT MAKES "ARRIVAL" AN HONEST EDGE.
+   *
+   * Both halves below used to fire on first PROBE contact, and a tyre reports
+   * `grounded` the moment its ray finds a surface — long before the wheel
+   * touches. MEASURED (tools/landingAbsorbTiming.mjs), the upward velocity step
+   * absorption took while NO wheel carried any load at all:
+   *     14 m @ 30 m/s   8.47 m/s deleted, 92 ms and 2.75 m before support
+   *     14 m @ 45 m/s   8.49 m/s deleted, 92 ms and 4.12 m before support
+   *     30 m @ 30 m/s  12.95 m/s deleted, 58 ms and 1.75 m before support
+   * i.e. on every real jump the car lost most of its fall speed about a metre
+   * up and then GLIDED down the rest at half rate. That is the reported "magnet
+   * that repositions the car", and it fired on every landing regardless of what
+   * the player was doing — nothing to do with the barrel-roll assist.
+   *
+   * FIRING IT LATE ALSO MAKES IT WORK BETTER, which is not obvious: the impulse
+   * now takes its cut of a full-speed arrival instead of one it already spent
+   * half its budget on up in the air. Peak suspension compression FELL despite
+   * the springs seeing nearly double the closing speed:
+   *     gentle   v@load  −7.9 → −14.4    compression 0.204 → 0.176 m
+   *     fast     v@load  −8.1 → −14.0    compression 0.251 → 0.198 m
+   *     high     v@load −11.0 → −21.7    compression 0.272 → 0.256 m
+   * against a bottom-out knee at 0.385 m (bottomOutThresh × restLength), so
+   * there is MORE headroom on a hard landing than before, not less.
+   *
+   * The wait cannot simply be dropped, because one arrival never produces wheel
+   * load at all: land across a GUARDRAIL and the tyres find nothing to compress,
+   * since rails live in the SOLIDS bvh and the wheels only probe the DECK. That
+   * landing is violent and still needs absorbing, so the grace concedes to it.
+   *
+   * 0.15 s is chosen from the measured probe lead: the longest real landing
+   * takes 92 ms to load, so this never pre-empts one, and it is short enough
+   * that the rail case is caught essentially on arrival.
+   */
+  landingSupportGrace: 0.15,
   //
   // (b) PREDICTIVE ALIGNMENT. While falling, look ahead down the flight path and
   //     ease the chassis' up-axis toward the surface it's about to hit. This is
@@ -2906,9 +2943,15 @@ export class Vehicle {
     /** Was the car SUPPORTED last substep? This is what drives the touchdown
      *  edge — see _isSupported() for why probe contact is not good enough. */
     this._wasSupported = false;
-    /** Has the tilt damping already fired for THIS landing? Support and hard
-     *  first-contact are two different edges and must not stack. */
+    /** Has the tilt damping already fired for THIS landing? */
     this._landDamped = false;
+    /** Seconds of probe contact WITHOUT wheel load. Resets the instant a wheel
+     *  compresses, so it can only run up on a contact that never loads — see
+     *  TIRE.landingSupportGrace. */
+    this._contactAge = 0;
+    /** Has the arrival edge already been consumed for THIS landing? Only the
+     *  never-loads path needs the latch (support gives a natural edge). */
+    this._landArrived = false;
     this._leanRight = new THREE.Vector3();
     this._leanFwd = new THREE.Vector3();
     this._leanQRoll = new THREE.Quaternion();
@@ -3162,6 +3205,8 @@ export class Vehicle {
     this._prevGrounded = 0;
     this._wasSupported = false;
     this._landDamped = false;
+    this._contactAge = 0;
+    this._landArrived = false;
     this._leanRoll = 0;
     this._leanPitch = 0;
     this._archLift = 0;
@@ -3708,7 +3753,7 @@ export class Vehicle {
       // before the tyres and it would be working off last substep's contacts.
       this._applySurfaceGrip(subDt);
       this._applyYawAssist();
-      this._applyLandingAssist();
+      this._applyLandingAssist(subDt);
       this._applyStabilizer(subDt);
       body.integrate(subDt);
       const wMax = TIRE.maxAngVel;
@@ -3799,7 +3844,7 @@ export class Vehicle {
    * Landing help — touchdown absorption, and predictive alignment while falling.
    * See the LANDINGS block on TIRE for what each half is for.
    */
-  _applyLandingAssist() {
+  _applyLandingAssist(dt = FIXED_DT / this.SUBSTEPS) {
     const body = this.body;
     let grounded = 0;
     this._landN.set(0, 0, 0);
@@ -3810,36 +3855,63 @@ export class Vehicle {
     }
 
     if (grounded > 0) {
-      // ── Touchdown: fires on the airborne→SUPPORTED edge ──
+      // ── Touchdown: fires on ARRIVAL, which means WHEEL LOAD ──
       //
-      // On SUPPORT, not on `grounded > 0`. A tyre reports grounded the moment
-      // its probe finds a surface, which on a descent is up to 0.12 s and 1.6 m
-      // before the wheel actually touches (see _isSupported). The edge was being
-      // consumed up there, in free flight, and by the time the car really
-      // arrived `_prevGrounded` was already non-zero so it could never fire
-      // again. MEASURED: sweeping landingAngDamp 0 → 1.0 moved the roll rate at
-      // touchdown by 0.4 rad/s out of 8 — i.e. it was doing essentially nothing.
-      // TWO EDGES, because the two halves below want different moments.
+      // NOT on `grounded > 0`. A tyre reports grounded the moment its probe RAY
+      // finds a surface, which on a descent is 58–92 ms and 1–4 m before the
+      // wheel actually touches (see _isSupported). Both halves below used to
+      // fire on that early edge and then latch, so by the time the car really
+      // arrived they had already been spent, up in free flight:
+      //   • ABSORPTION deleted 8.5–13 m/s of fall speed about a metre up, and
+      //     the car glided down the remainder at half rate. That is the
+      //     "magnet" — measured in tools/landingAbsorbTiming.mjs.
+      //   • TILT DAMPING was documented as fixed by moving to the support edge,
+      //     and was not: its `hardArrival` escape hatch tested closing speed at
+      //     FIRST CONTACT, which every hard landing passes, so the early edge
+      //     won on exactly the landings that mattered.
       //
-      // ABSORPTION is about the IMPACT, and it must fire even when the wheels
-      // never load at all: land across a guardrail and the tyres find nothing to
-      // compress, because rails live in the SOLIDS bvh and the wheels only probe
-      // the DECK. Gating it on support cost exactly that case — the rail landing
-      // arrived at full speed and bounced off the track (measured: fell to
-      // y = −39). So absorption keeps the original first-contact edge.
+      // So both now wait for `_isSupported()` — a wheel actually carrying load.
       //
-      // TILT DAMPING is about the car's ATTITUDE as the tyres take load, so it
-      // wants real support — on probe contact it fires up to 0.12 s early, in
-      // free flight, and is latched off by the time the car actually arrives.
-      const justContact = this._prevGrounded === 0;
+      // THE ONE ARRIVAL THAT NEVER LOADS A WHEEL is a guardrail landing: rails
+      // live in the SOLIDS bvh and the wheels only probe the DECK, so the tyres
+      // find nothing to compress and support never comes. Gating naively on
+      // support cost exactly that case (measured: the rail landing arrived at
+      // full speed, bounced, and fell to y = −39). Rather than reintroduce the
+      // early edge for everyone, that case is detected for what it IS — probe
+      // contact that has persisted without ever producing load — and conceded to
+      // after `landingSupportGrace`. A real landing loads inside 92 ms and never
+      // reaches it.
       this._prevGrounded = grounded;
       const supported = this._isSupported();
       const justSupported = supported && !this._wasSupported;
       this._wasSupported = supported;
+      // Age the contact only while it is NOT producing load; a normal landing
+      // resets to 0 the instant a wheel compresses, so the grace can only ever
+      // expire on a contact that is going nowhere.
+      this._contactAge = supported ? 0 : this._contactAge + dt;
+      // NORMALIZE BEFORE THE CLOSING TEST BELOW READS IT. `_landN` is the SUM of
+      // up to four unit normals, so an un-normalized dot would report up to four
+      // times the real closing speed and blow straight through landingMinSpeed.
       if (this._landN.lengthSq() < 1e-8) return;
       this._landN.normalize();
-
-      if (!justContact && !justSupported) return;
+      // The wheels are never going to take load here.
+      //
+      // CLOSING SPEED IS PART OF THE TEST, not just a gate on the absorption
+      // below. Persistent probe contact without load is not unique to a rail
+      // landing: crest a rise and the wheels can hang light for longer than the
+      // grace while the deck is still inside their probe range. That is not an
+      // arrival and must not fire the tilt damping — the car would visibly
+      // stiffen mid-crest. A rail landing is distinguished by being an IMPACT,
+      // so it is asked to look like one. Gentle arrivals on the deck are
+      // unaffected: they produce load, so they take the justSupported path,
+      // which deliberately has no speed gate at all.
+      const neverLoads = !supported
+        && this._contactAge >= TIRE.landingSupportGrace
+        && !this._landArrived
+        && body.vel.dot(this._landN) < -TIRE.landingMinSpeed;
+      const arrived = justSupported || neverLoads;
+      if (!arrived) return;
+      this._landArrived = true;
 
       // (a) KILL THE TILT RATE. Unconditional, and that is the fix: this used to
       // sit BEHIND the closing-speed gate below, so a car that arrived gently
@@ -3853,17 +3925,9 @@ export class Vehicle {
       // sometimes, because it depends on where in the roll you happen to land.
       //
       // Tilt rate only. Stripping yaw out keeps a landing mid-flat-spin spinning.
-      // ONCE PER LANDING, at whichever edge actually represents arrival.
-      //
-      // Support is the right moment and is what fixed the barrel-roll landing —
-      // but a car that comes down across a GUARDRAIL never becomes supported at
-      // all (the wheels cannot probe it), so it would get no damping ever. Those
-      // arrivals are violent, so the hard-impact branch below catches them at
-      // first contact instead, which is the same instant in practice when you
-      // are closing at 30 m/s. `_landDamped` keeps the two from stacking.
-      const hardArrival = justContact && TIRE.landingAbsorb > 0
-        && body.vel.dot(this._landN) < -TIRE.landingMinSpeed;
-      if (!this._landDamped && (justSupported || hardArrival) && TIRE.landingAngDamp > 0) {
+      // ONCE PER LANDING, on the arrival edge resolved above — which is wheel
+      // load for a normal landing and the expired grace for a rail one.
+      if (!this._landDamped && TIRE.landingAngDamp > 0) {
         this._landDamped = true;
         this._landUp.set(0, 1, 0).applyQuaternion(body.quat);
         const wYaw = body.angVel.dot(this._landUp);
@@ -3873,7 +3937,7 @@ export class Vehicle {
 
       // (b) ABSORB THE IMPACT. This half IS about how hard you hit, so it keeps
       // the speed gate: ordinary driving over kerbs must not be touched.
-      if (justContact && TIRE.landingAbsorb > 0) {
+      if (TIRE.landingAbsorb > 0) {
         const vN = body.vel.dot(this._landN); // negative = still closing
         if (vN < -TIRE.landingMinSpeed) {
           body.vel.addScaledVector(this._landN, -vN * TIRE.landingAbsorb);
@@ -3885,6 +3949,8 @@ export class Vehicle {
     this._prevGrounded = 0;
     this._wasSupported = false;
     this._landDamped = false;
+    this._contactAge = 0;
+    this._landArrived = false;
     // Published for the air control: how strongly this assist owns the attitude
     // right now. The arc-follow fades out against it, so the nose tracks the
     // flight path in mid-air and then LEVELS to the surface for touchdown.
