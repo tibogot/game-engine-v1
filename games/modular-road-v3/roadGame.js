@@ -60,7 +60,8 @@ import {
 } from "../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../v3/play/modularRoadGround.js";
-import { isSharedGeometry, SCENERY_MAP } from "./modularRoadScenery.js";
+import { SCENERY_MAP } from "./modularRoadScenery.js";
+import { isSharedGeometry } from "./modularRoadBatching.js";
 import {
   createCarReflection,
   lightReflection,
@@ -2969,13 +2970,14 @@ ${e.message}`);
     if (spawnMarkerCar) {
       spawnMarker.remove(spawnMarkerCar);
       // Only the primitive fallback owns its geometry; the baked glyph is shared
-      // with the spawn brush.
-      if (!spawnMarkerCar.userData.sharedGeo) {
-        spawnMarkerCar.traverse((o) => { if (o.isMesh) o.geometry?.dispose(); });
-      }
+      // with the spawn brush and the lap ghost, and carries the mark that says so
+      // (applyGhostCarTemplate) — the same rule every other clone-a-template prop
+      // follows, rather than a second per-object flag saying the same thing.
+      spawnMarkerCar.traverse((o) => {
+        if (o.isMesh && !isSharedGeometry(o.geometry)) o.geometry?.dispose();
+      });
     }
     spawnMarkerCar = buildSpawnGhost(SPAWN_MARKER_MAT, "RoadSpawnMarkerCar");
-    spawnMarkerCar.userData.sharedGeo = !!spawnGhostGeo;
     // Lift by the same SPAWN_LIFT respawn() uses, so the silhouette stands
     // exactly where the body will.
     spawnMarkerCar.position.y = SPAWN_LIFT;

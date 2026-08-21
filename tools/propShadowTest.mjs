@@ -39,7 +39,7 @@ function bareInstancer() {
 }
 
 // Things you can land on, or that stand tall enough to shade something.
-const OBSTACLES = ["box", "wall", "ramp", "kickerramp", "jumpkicker",
+const OBSTACLES = ["box", "wall", "roadblock", "ramp", "kickerramp", "jumpkicker",
                    "pole", "cone", "tube"];
 
 // GLB-backed, and there is no fetch here — their make() returns an empty group

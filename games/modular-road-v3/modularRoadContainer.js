@@ -32,7 +32,7 @@
 import * as THREE from "three";
 import { materialColor } from "three/tsl";
 import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
-import { mergeByMaterial, dequantize } from "./modularRoadBatching.js";
+import { mergeByMaterial, dequantize, markSharedGeometry } from "./modularRoadBatching.js";
 
 export const CONTAINER_URL = "/models/container01_compressed.glb";
 
@@ -213,6 +213,15 @@ function normalise(scene) {
   proxy.visible = false;
   proxy.userData.noRender = true;
   root.add(proxy);
+
+  // NOT YOURS TO FREE. `makeContainer` hands out `child.clone()` per placement,
+  // which shares this geometry by reference — so does every brush ghost of a
+  // container, and so does the prop instancer's throwaway template copy. All
+  // three used to dispose it, which killed the buffer for every container on the
+  // track and for the next one placed. Symptom: "setIndexBuffer ... not of type
+  // 'GPUBuffer'" every frame, from a mesh whose arrays still look perfectly fine.
+  // Same rule the scenery templates carry; see markSharedGeometry.
+  markSharedGeometry(root);
   return root;
 }
 

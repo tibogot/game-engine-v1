@@ -13,7 +13,7 @@ import {
   getSharedGltfLoader,
   initGlbLoaderRenderer,
 } from "../../v2/core/foliage/glbLoader.js";
-import { mergeByMaterial, dequantize } from "./modularRoadBatching.js";
+import { mergeByMaterial, dequantize, markSharedGeometry } from "./modularRoadBatching.js";
 
 export const TIRE_WALL_URL = "/models/race_track_tire_wall_compressed.glb";
 
@@ -107,6 +107,9 @@ function normalise(scene) {
   proxy.userData.noRender = true;
   root.add(proxy);
 
+  // Shared with every placement and every ghost — see markSharedGeometry, and
+  // the container, which had the identical bug.
+  markSharedGeometry(root);
   return root;
 }
 

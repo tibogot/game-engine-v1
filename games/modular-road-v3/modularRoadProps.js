@@ -9,7 +9,8 @@ import {
   GATE_POST_RADIUS,
   GATE_POST_HEIGHT,
 } from "./modularRoadPropPhysics.js";
-import { SCENERY_CATALOG, makeSceneryProp, isSharedGeometry } from "./modularRoadScenery.js";
+import { SCENERY_CATALOG, makeSceneryProp } from "./modularRoadScenery.js";
+import { isSharedGeometry } from "./modularRoadBatching.js";
 import { makeContainer, CONTAINER_LIVERIES, CONTAINER_SIZE } from "./modularRoadContainer.js";
 import { makeTireWall } from "./modularRoadTireWall.js";
 import { DECAL_OFFSET } from "./modularRoadDecals.js";
@@ -20,7 +21,6 @@ export const DECAL_URL = "/games/modular-road-v3/rondcarre.png";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { materialEmissive, materialColor } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
-import { computeFrames, buildProfile, buildTunnelGeometry } from "./modularRoadKit.js";
 import {
   kickerRampGeometry,
   jumpRampGeometry,
@@ -32,14 +32,14 @@ import {
 
 /**
  * Free-placement props for the modular road. Unlike auto-chained track pieces,
- * props are standalone objects (box, wall, ramp, cylinders, ring gate, air tunnel)
+ * props are standalone objects (box, wall, ramp, cylinders, ring gate)
  * positioned by hand with a shared TransformControls gizmo — the same pattern as
  * the v2 editor props mode (W/E/R = move/rotate/scale, right-click select).
  *
  * Each prop carries a `collision` role so the page can bake it into the right
  * BVH:
  *   - "deck"  → drive surface (wheel raycasts): ramps, the floor of a tube
- *   - "solid" → chassis wall collision only (no wheel ground): wall panels, air-tunnel shell
+ *   - "solid" → chassis wall collision only (no wheel ground): wall panels
  *   - "both"  → drive on top AND blocked at the sides: boxes
  *   - "none"  → pure decoration you pass through: ring gates
  */
@@ -90,43 +90,98 @@ function rampGeometry(L = 18, H = 6, W = 14) {
   return attachDeckProxy(geo, deckPos);
 }
 
-/** A short run of tunnel arch (reuses the kit's shell sweep) on a straight line. */
-function airTunnelGeometry(length = 36, height = 9) {
-  const n = Math.max(2, Math.ceil(length / 2));
-  const pts = [];
-  for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -length * (i / n)));
-  const frames = computeFrames(pts);
-  const profileData = buildProfile();
-  const geo = buildTunnelGeometry(frames, profileData, { tunnelHeight: height });
-  // Re-centre on Z so the gizmo pivot sits in the middle of the run.
-  geo.translate(0, 0, length / 2);
-  geo.computeBoundingSphere();
-  return geo;
-}
-
-/** Thick-walled pipe: outer shell, inner liner, and annular end caps (still hollow to drive through). */
+/** Thick-walled pipe, still hollow to drive through.
+ *
+ * One Lathe of the wall rectangle (inner → outer → inner) instead of four
+ * Cylinder/Ring meshes. Point order is load-bearing: FrontSide then shows the
+ * bore from inside and the skin from outside, so we do not pay DoubleSide.
+ * 40 radial steps stay — this mesh is the deck the wheels probe, and a coarser
+ * ring reads as a prism. */
 function openTubeGroup(outerR = 9, length = 30, wall = 0.65, segments = 40) {
   const innerR = outerR - wall;
   const half = length / 2;
-  const tubeMat = mat(0x3a7bd5, { metalness: 0.55, roughness: 0.4, side: THREE.DoubleSide });
-  const innerMat = mat(0x3a7bd5, { metalness: 0.55, roughness: 0.4, side: THREE.BackSide });
-
+  const geo = new THREE.LatheGeometry([
+    new THREE.Vector2(innerR, -half),
+    new THREE.Vector2(outerR, -half),
+    new THREE.Vector2(outerR,  half),
+    new THREE.Vector2(innerR,  half),
+    new THREE.Vector2(innerR, -half),
+  ], segments);
   const root = new THREE.Group();
   root.name = "OpenCylinder";
-
-  root.add(new THREE.Mesh(new THREE.CylinderGeometry(outerR, outerR, length, segments, 1, true), tubeMat));
-  root.add(new THREE.Mesh(new THREE.CylinderGeometry(innerR, innerR, length, segments, 1, true), innerMat));
-
-  for (const y of [half, -half]) {
-    const cap = new THREE.Mesh(new THREE.RingGeometry(innerR, outerR, segments), tubeMat);
-    cap.rotation.x = -Math.PI / 2;
-    cap.position.y = y;
-    root.add(cap);
-  }
-
+  root.add(new THREE.Mesh(geo, mat(0x3a7bd5, { metalness: 0.55, roughness: 0.4 })));
   root.rotation.x = Math.PI / 2;
   root.position.set(0, outerR, 0); // bottom of the pipe rests on the ground
   return root;
+}
+
+/**
+ * Plastic water-filled road block — jersey silhouette, handle trough on top.
+ *
+ * One extruded prism, FrontSide, stripes in a 1-D texture. The trough is part
+ * of the same ring (not a second mesh), so a row of these is one instanced
+ * draw. ~50 triangles; the wheels never probe it (`solid`).
+ *
+ * Long axis is X so a drop onto a −Z straight blocks the lane; rotate 90° to
+ * line a shoulder.
+ */
+function roadBlockGeometry(length = 2.2, height = 1.06) {
+  // Jersey in XY (x = thickness, y = height), extruded along Z, then spun so
+  // the long axis is X. The trough is concave; ExtrudeGeometry earcuts the
+  // caps, which a fan from one corner would invert.
+  const shape = new THREE.Shape();
+  const ring = [
+    [ 0.28, 0.00],
+    [ 0.28, 0.06],
+    [ 0.20, 0.28],
+    [ 0.095, height - 0.08],
+    [ 0.095, height],
+    [ 0.038, height],
+    [ 0.038, height - 0.09],
+    [-0.038, height - 0.09],
+    [-0.038, height],
+    [-0.095, height],
+    [-0.095, height - 0.08],
+    [-0.20, 0.28],
+    [-0.28, 0.06],
+    [-0.28, 0.00],
+  ];
+  shape.moveTo(ring[0][0], ring[0][1]);
+  for (let i = 1; i < ring.length; i++) shape.lineTo(ring[i][0], ring[i][1]);
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: length, bevelEnabled: false, curveSegments: 1, steps: 1,
+  });
+  geo.translate(0, 0, -length / 2);
+  geo.rotateY(Math.PI / 2);
+  geo.computeVertexNormals();
+  const pos = geo.attributes.position;
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    uv[i * 2] = 0;
+    uv[i * 2 + 1] = height > 0 ? pos.getY(i) / height : 0;
+  }
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  geo.computeBoundingSphere();
+  geo.computeBoundingBox();
+  return geo;
+}
+
+/** Solid white / solid red — instance tint, same cost as one colour. */
+export const ROAD_BLOCK_COLORS = [
+  0xf4f4f6, // white
+  0xd62424, // red
+];
+
+function makeRoadBlock() {
+  // White base: instanceColor multiplies in, so tint × 1 = the chosen colour.
+  const m = new THREE.Mesh(
+    roadBlockGeometry(),
+    mat(0xffffff, { roughness: 0.42, metalness: 0.04 }),
+  );
+  m.name = "RoadBlock";
+  m.userData.tintable = true;
+  return m;
 }
 
 /**
@@ -974,6 +1029,21 @@ export const PROP_CATALOG = [
     },
   },
   {
+    id: "roadblock",
+    label: "Road block",
+    /**
+     * Static jersey — you steer around it, not over it. The top trough is 8 cm
+     * across; treating that as a deck would be a 2.2 m tightrope nobody asked
+     * for. `solid` matches Wall.
+     *
+     * White or red per placement via instance tint — no second material, no
+     * extra draw (same path as container liveries).
+     */
+    collision: "solid",
+    variants: ROAD_BLOCK_COLORS,
+    make: () => makeRoadBlock(),
+  },
+  {
     id: "holewall",
     label: "Hole wall",
     /**
@@ -1224,12 +1294,6 @@ export const PROP_CATALOG = [
       m.userData.isGlow = true;
       return m;
     },
-  },
-  {
-    id: "airtunnel",
-    label: "Tunnel (air)",
-    collision: "solid",
-    make: () => new THREE.Mesh(airTunnelGeometry(36, 9), mat(0x5b6168, { roughness: 0.92, side: THREE.DoubleSide })),
   },
 
   // ── SCENERY ────────────────────────────────────────────────────────────────
@@ -1976,8 +2040,9 @@ export class PropManager {
       // collisionMeshes), so disposing only the visible one leaks it — and
       // importInstances disposes EVERY prop on every track load.
       o.geometry?.userData?.deckGeometry?.dispose?.();
-      // Scenery clones share one cached geometry per type, so deleting a single
-      // floodlight must not free the buffers the others are still drawing with.
+      // Template-backed props (scenery, container, tire wall) hand out clones
+      // that share ONE cached geometry per type, so deleting a single floodlight
+      // must not free the buffers the others are still drawing with.
       if (!isSharedGeometry(o.geometry)) o.geometry?.dispose?.();
     });
   }

@@ -28,10 +28,9 @@
 // working on exactly the objects they always did.
 // ============================================================================
 import * as THREE from "three";
-import { mergeByMaterial } from "./modularRoadBatching.js";
+import { mergeByMaterial, isSharedGeometry } from "./modularRoadBatching.js";
 import { enableMeshShadows } from "./modularRoadParkour.js";
 import { decalMaterial, decalGeometry } from "./modularRoadDecals.js";
-import { isSharedGeometry } from "./modularRoadScenery.js";
 
 /** Reused for "no tint" — three multiplies instanceColor in, so white is the
  *  identity and an unset entry would render black. */

@@ -36,7 +36,7 @@
 import * as THREE from "three";
 import { materialColor } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
-import { flattenInstanced, mergeByMaterial } from "./modularRoadBatching.js";
+import { flattenInstanced, mergeByMaterial, markSharedGeometry } from "./modularRoadBatching.js";
 import { buildLedMatrixMesh } from "../../v2/objects/ledMatrix.js";
 import { buildBillboardMesh } from "../../v2/objects/billboard.js";
 import { buildStreetLampMesh } from "../../v2/objects/streetLamp.js";
@@ -223,38 +223,14 @@ function buildTemplate(def) {
 
   // ── MARK THE GEOMETRY AS NOT-YOURS ────────────────────────────────────────
   //
-  // `makeSceneryProp` hands out `template.clone()`, and Object3D.clone() copies
-  // the node but SHARES the BufferGeometry by reference. Every placement of a
-  // floodlight, every brush ghost of one, and the prop instancer's own scratch
-  // copy therefore all point at the geometry created right here — while three
-  // separate places dispose geometry as if the object they were handed owned it
-  // (roadGame's clearBrush, PropManager._disposeInstance, and the instancer's
-  // template teardown).
-  //
-  // Any one of them frees the GPU buffer out from under every other scenery
-  // prop of that type, and the failure is invisible until the next draw:
-  // `dispose()` releases the buffer but leaves the CPU-side arrays intact, so
-  // the geometry still reports a healthy index and position count and nothing
-  // looks wrong until WebGPU is handed a null buffer —
-  //
-  //   TypeError: Failed to execute 'setIndexBuffer' ... not of type 'GPUBuffer'
-  //
-  // repeating every frame from whichever object happened to reference it.
-  //
-  // The flag is the contract: hold this geometry, never free it. `disposeScenery`
-  // is the one owner, for a full teardown. roadGame already had the same idea in
-  // the spawn brush's `disposeGeo` flag, for the same reason (the car GLB is
-  // shared) — this generalises it to the source instead of the call site.
-  root.traverse((o) => {
-    if (o.isMesh && o.geometry) o.geometry.userData.sharedTemplate = true;
-  });
+  // `makeSceneryProp` hands out `template.clone()`, which shares the geometry by
+  // reference with every placement, every brush ghost, and the prop instancer's
+  // scratch copy — all of which have code that frees geometry they think they
+  // own. `disposeScenery` stays the one owner. See markSharedGeometry for the
+  // full account of what freeing it looks like (a null GPUBuffer at draw, every
+  // frame, from an object that still reports a healthy index count).
+  markSharedGeometry(root);
   return root;
-}
-
-/** True when this geometry belongs to a shared template and must not be freed
- *  by whoever happens to be holding a clone of it. */
-export function isSharedGeometry(geometry) {
-  return !!geometry?.userData?.sharedTemplate;
 }
 
 const _templates = new Map();

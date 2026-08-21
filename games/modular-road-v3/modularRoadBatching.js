@@ -9,12 +9,57 @@
 //   flattenInstanced  undo instancing that is costing more than it saves
 //   mergeByMaterial   collapse a rigid tree to one mesh per material
 //
+// Plus the ownership rule they all have to respect — markSharedGeometry /
+// isSharedGeometry — because every one of these moves is handed a tree it did
+// not build, and half of them free geometry when they are done with it.
+//
 // None of this applies to anything that moves independently. A merged mesh bakes
 // world (or root-local) transforms into vertices, so the pieces inside it can
 // never move relative to each other again. That is the whole trade.
 // ============================================================================
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+
+/**
+ * MARK A TEMPLATE'S GEOMETRY AS NOT-YOURS-TO-FREE.
+ *
+ * Every "load once, clone per placement" prop (scenery, the container, the tire
+ * wall) hands out `template.clone()`, and Object3D.clone() copies the node but
+ * SHARES the BufferGeometry by reference. So every placement of a type, every
+ * brush ghost of one, and the prop instancer's own scratch copy all point at the
+ * single cached geometry — while several places free geometry as if the object
+ * they were handed owned it (roadGame's clearBrush, PropManager._disposeInstance,
+ * PropInstancer._template's scaffolding teardown, and mergeByMaterial below).
+ *
+ * Any one of them frees the GPU buffer out from under every other prop of that
+ * type, and the failure is invisible until the next draw: `dispose()` releases
+ * the buffer but leaves the CPU-side arrays intact, so the geometry still reports
+ * a healthy index and position count and nothing looks wrong until WebGPU is
+ * handed a null buffer —
+ *
+ *   TypeError: Failed to execute 'setIndexBuffer' ... not of type 'GPUBuffer'
+ *
+ * repeating every frame from whichever object happened to reference it.
+ *
+ * The flag is the contract: hold this geometry, never free it. Whoever built the
+ * template stays the one owner, for a full teardown. It lives HERE rather than
+ * with any one prop because it is a property of the clone-a-template pattern,
+ * and the three modules that use that pattern already import this file — putting
+ * it beside them meant the container and the tire wall each shipped the bug
+ * again after scenery was fixed.
+ */
+export function markSharedGeometry(root) {
+  root.traverse((o) => {
+    if (o.isMesh && o.geometry) o.geometry.userData.sharedTemplate = true;
+  });
+  return root;
+}
+
+/** True when this geometry belongs to a shared template and must not be freed
+ *  by whoever happens to be holding a clone of it. */
+export function isSharedGeometry(geometry) {
+  return !!geometry?.userData?.sharedTemplate;
+}
 
 /**
  * Merge key for a material — a SIGNATURE, not its identity.
@@ -197,7 +242,10 @@ export function mergeByMaterial(root) {
     if (meshes[0].userData.tintable) mesh.userData.tintable = true;
     for (const m of meshes) {
       m.removeFromParent();
-      m.geometry.dispose();
+      // A shared template's geometry outlives this tree — the instancer merges a
+      // throwaway CLONE of a container/scenery prop, whose meshes point at the
+      // one cached geometry every placement of that type draws with.
+      if (!isSharedGeometry(m.geometry)) m.geometry.dispose();
       removed++;
     }
     root.add(mesh);

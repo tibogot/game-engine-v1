@@ -1901,6 +1901,11 @@ class Tire {
     this._right = new THREE.Vector3();
     this._wheelFwd = new THREE.Vector3();
     this._wheelRight = new THREE.Vector3();
+    /** Wheel velocity and the RIGHT axis projected into the CONTACT PLANE — see
+     *  the slip block in apply(). Identity while the car is square to the
+     *  surface. Longitudinal deliberately stays on the raw axis. */
+    this._planeVel = new THREE.Vector3();
+    this._planeRight = new THREE.Vector3();
     this._steerQuat = new THREE.Quaternion();
     this._F = new THREE.Vector3();
     this._down = new THREE.Vector3();
@@ -2193,7 +2198,43 @@ class Tire {
     // 2) Lateral grip — slip-based brush model. Force rises linearly with the
     // lateral slip ratio (≈ tan slip angle) up to the friction limit, then the
     // tire SLIDES (force saturates) instead of perfectly cancelling velocity.
-    const vLat = this._tireVel.dot(this._wheelRight);
+    //
+    // THE LATERAL SLIP IS MEASURED IN THE CONTACT PLANE, NOT ALONG THE RAW
+    // CHASSIS RIGHT AXIS. This is the same error the damper above had, on the
+    // lateral axis: dotting the full 3-D wheel velocity into `_wheelRight` is
+    // only the honest slip while the car is square to the road. Tilt it and the
+    // INTO-SURFACE closing velocity — which on a landing is the dominant
+    // component — leaks straight into the cornering demand.
+    //
+    // MEASURED at touchdown out of a barrel roll (tools/landingSlideTrace.mjs),
+    // worst grounded wheel, raw vs the honest in-plane slip:
+    //     tilt 31°   raw −1.50   in-plane −4.46   phantom +2.97
+    //     tilt 38°   raw +1.82   in-plane −5.80   phantom +7.62
+    // At 38° the phantom term does not merely distort the number, it OVERWHELMS
+    // it and flips the sign — so the tyre was commanded to push the car INTO its
+    // slide rather than arrest it. Over a dense sweep of roll-landing release
+    // angles (tools/landingSlideSweep.mjs) fixing it halves the tail:
+    //     worst 14.04 → 6.61 m,  90th pct 4.98 → 4.00 m,  mean 1.79 → 1.49 m
+    //
+    // LONGITUDINAL IS DELIBERATELY LEFT ON THE RAW AXIS, for the same reason the
+    // lateral-align fade leaves it alone. Projecting it too broke parkPipeTest:
+    // riding a pipe wall the chassis is never square to the surface, and the
+    // into-surface component of the drive force was helping press the car onto
+    // the wall. Removing it costs enough exit speed that the vert pops short.
+    // Drive and braking are not a yaw lever and were not the bug — vLat was.
+    this._planeVel.copy(this._tireVel)
+      .addScaledVector(this.hitNormal, -this._tireVel.dot(this.hitNormal));
+    this._planeRight.copy(this._wheelRight)
+      .addScaledVector(this.hitNormal, -this._wheelRight.dot(this.hitNormal));
+    // A projected axis collapses to nothing when that axis is parallel to the
+    // normal — a car lying exactly on its side has no lateral direction in the
+    // contact plane at all. There is no force to make there, and `latGrip` below
+    // is already ~0, so fall back to the raw axis rather than normalizing noise
+    // up to unit length.
+    const rightLen = this._planeRight.length();
+    if (rightLen > 1e-4) this._planeRight.multiplyScalar(1 / rightLen);
+    else this._planeRight.copy(this._wheelRight);
+    const vLat = this._planeVel.dot(this._planeRight);
     const vLong = this._tireVel.dot(this._wheelFwd);
     const vRef = Math.max(Math.abs(vLong), TIRE.lowSpeedRef);
     let latNorm = -(vLat / vRef) * TIRE.tireStiffness;
@@ -2270,7 +2311,12 @@ class Tire {
     this._patch.copy(this.worldPos);
     if (patchK > 0) this._patch.addScaledVector(this._up, -distFromHub * patchK);
 
-    this._F.copy(this._wheelRight).multiplyScalar(Fy);
+    // The LATERAL force acts along the in-plane axis its slip was measured on.
+    // Applying it along the raw chassis axis instead would push a slice of every
+    // cornering force straight into the surface — an artificial load the
+    // suspension never asked for. Identity whenever the car is square to the
+    // road. Longitudinal keeps the raw axis, see the slip block above.
+    this._F.copy(this._planeRight).multiplyScalar(Fy);
     body.addForceAtPoint(this._F, this._patch);
     this.lastSteering.copy(this._F);
 
