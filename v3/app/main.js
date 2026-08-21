@@ -924,6 +924,7 @@ export async function startV3App(opts = {}) {
 
   let grassRings = null;
   let _grassBuilding = false;
+  let _grassRingsEnabled = false;
   let cliffGrassRings = null;   // second ring set, cliffMode — grass on cliff tops
   let _cliffGrassBuilding = false;
   let _cliffRingsEnabled = false;
@@ -1067,9 +1068,13 @@ export async function startV3App(opts = {}) {
     if (grassRings || _grassBuilding) return;
     _grassBuilding = true;
     try {
+      // Built DISABLED, same as the cliff set: the render loop enables them on
+      // the next frame if any density is painted. Entering grass mode to start
+      // painting therefore costs nothing until the first stroke lands.
       const rings = await _buildGrassRingSet("Hybrid", {});
-      for (const r of rings) r.setEnabled(true);
+      for (const r of rings) r.setEnabled(false);
       grassRings = rings;
+      _grassRingsEnabled = false;
     } catch (err) {
       console.error("[V3 Grass] build failed:", err);
     } finally {
@@ -2756,8 +2761,20 @@ export async function startV3App(opts = {}) {
       bakeGrassTintIfNeeded();
       waterSurfaceMap.bakeIfNeeded(renderer);
       if (grassRings) {
-        const _grassAnchor = playMode.active ? playMode.playerPosition : camera.position;
-        for (const r of grassRings) r.update(_grassAnchor, camera);
+        // Only spend compute + draws when there is grass to show. update() is
+        // what dispatches the per-ring compute, and it early-returns while the
+        // ring is disabled — measured 4 compute dispatches/frame -> 0, and the
+        // 4 indirect draws go with them. Edge-triggered so setEnabled is only
+        // touched when the answer actually changes.
+        const wantGrass = grassTerrainData.hasGrassData;
+        if (wantGrass !== _grassRingsEnabled) {
+          _grassRingsEnabled = wantGrass;
+          for (const r of grassRings) r.setEnabled(wantGrass);
+        }
+        if (wantGrass) {
+          const _grassAnchor = playMode.active ? playMode.playerPosition : camera.position;
+          for (const r of grassRings) r.update(_grassAnchor, camera);
+        }
       }
       if (cliffGrassRings) {
         // Only spend compute when there's both a baked cliff surface and paint.

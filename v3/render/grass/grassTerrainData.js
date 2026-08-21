@@ -83,10 +83,20 @@ export class GrassTerrainData {
     this.susukiDensityTex.needsUpdate = true;
     this._hasSusukiData = false;
 
+    this._hasGrassData    = false; // any terrain density painted
     this._hasCliffData    = false; // any cliff density painted
     this._hasCliffSurface = false; // any valid cliff-top height baked
     this.cliffSurfaceGen  = -1;    // propStore.gen at last surface bake (staleness check)
   }
+
+  /**
+   * True once ANY terrain grass density is painted. Same contract as
+   * hasSusukiData/hasCliffData: the render loop uses it to skip the ring
+   * compute + draws entirely while the field is empty. Erasing with the brush
+   * deliberately does NOT clear it (a partial erase can't prove the map is
+   * empty without a full rescan) — Clear all / a restore does.
+   */
+  get hasGrassData() { return this._hasGrassData; }
 
   get hasSusukiData() { return this._hasSusukiData; }
 
@@ -190,12 +200,13 @@ export class GrassTerrainData {
       }
     }
     this.densityTex.needsUpdate = true;
+    if (!erase) this._hasGrassData = true;
   }
 
   getDensitySnapshot()        { return new Uint8Array(this.densityTex.image.data); }
-  restoreDensitySnapshot(s)   { this.densityTex.image.data.set(s); this.densityTex.needsUpdate = true; }
-  fillDensity()               { this.densityTex.image.data.fill(255); this.densityTex.needsUpdate = true; }
-  clearDensity()              { this.densityTex.image.data.fill(0);   this.densityTex.needsUpdate = true; }
+  restoreDensitySnapshot(s)   { this.densityTex.image.data.set(s); this.densityTex.needsUpdate = true; this._hasGrassData = s.some((v) => v > 0); }
+  fillDensity()               { this.densityTex.image.data.fill(255); this.densityTex.needsUpdate = true; this._hasGrassData = true; }
+  clearDensity()              { this.densityTex.image.data.fill(0);   this.densityTex.needsUpdate = true; this._hasGrassData = false; }
 
   // ── Susuki paint layer ───────────────────────────────────────────────────
 
