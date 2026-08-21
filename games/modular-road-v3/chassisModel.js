@@ -413,3 +413,102 @@ export function resetChassisGlbFit(object) {
   applyChassisGlbTransform(object);
   return CHASSIS_GLB;
 }
+
+/**
+ * One BufferGeometry of the car as a placement / replay glyph.
+ *
+ * Outer body + aero only (the same parts the live car casts shadows from), in
+ * chassis-anchor space under the CURRENT fit, plus four rest-pose wheel discs
+ * at `hubs`. Glass, lamps, badges and the cabin are dropped — a translucent
+ * ghost does not need them, and they were the extra draws of a full GLB clone.
+ *
+ * Position-only: MeshBasicMaterial ignores the rest, and a common attribute set
+ * is what lets the body and the cylinders merge into a single draw.
+ *
+ * Callers SHARE the result (spawn marker, spawn brush, lap ghost).
+ * Rebake after a fit-slider edit; the fit is baked into the vertices.
+ *
+ * @returns {THREE.BufferGeometry|null}
+ */
+export function bakeGhostCarGeometry(object, {
+  hubs = [],
+  radius = 0.36,
+  thickness = 0.24,
+  wheelSegments = 12,
+} = {}) {
+  if (!object) return null;
+  object.updateMatrixWorld(true);
+  // Parent space is chassis-anchor / body space once the model is mounted;
+  // unparented, the object's own matrixWorld already is that space.
+  if (object.parent) _m4a.copy(object.parent.matrixWorld).invert();
+  else _m4a.identity();
+
+  const geos = [];
+  object.traverse((o) => {
+    if (!o.isMesh || !o.geometry) return;
+    if (!RE_SILHOUETTE.test(label(o))) return;
+    const g = o.geometry.clone();
+    dequantizeGeometry(g);
+    g.applyMatrix4(_m4b.multiplyMatrices(_m4a, o.matrixWorld));
+    stripNonPosition(g);
+    geos.push(g);
+  });
+
+  if (hubs.length && radius > 0 && thickness > 0) {
+    const disc = new THREE.CylinderGeometry(radius, radius, thickness, wheelSegments);
+    disc.rotateZ(Math.PI / 2); // cylinder axis +Y → +X, the hub axis
+    stripNonPosition(disc);
+    for (const h of hubs) {
+      const p = h.pos ?? h;
+      const g = disc.clone();
+      g.translate(p.x, p.y, p.z);
+      geos.push(g);
+    }
+    disc.dispose();
+  }
+
+  return collapseGeometries(geos);
+}
+
+/** Ghosts are MeshBasic — drop UVs/normals/tangents so body + discs can merge. */
+function stripNonPosition(g) {
+  for (const k of Object.keys(g.attributes)) {
+    if (k !== "position") g.deleteAttribute(k);
+  }
+  g.morphAttributes = {};
+}
+
+/**
+ * Merge a list of already-cloned geometries, disposing the inputs.
+ * Same compatibility rules as mergeMeshes (attribute intersection, indexed-ness).
+ */
+function collapseGeometries(geos) {
+  if (!geos.length) return null;
+  if (geos.length === 1) {
+    geos[0].computeBoundingSphere();
+    return geos[0];
+  }
+
+  let common = new Set(Object.keys(geos[0].attributes));
+  for (const g of geos.slice(1)) {
+    common = new Set([...common].filter((k) => k in g.attributes));
+  }
+  for (const g of geos) {
+    for (const k of Object.keys(g.attributes)) if (!common.has(k)) g.deleteAttribute(k);
+    g.morphAttributes = {};
+  }
+  if (!geos.every((g) => g.index)) {
+    for (let i = 0; i < geos.length; i++) {
+      if (geos[i].index) { const n = geos[i].toNonIndexed(); geos[i].dispose(); geos[i] = n; }
+    }
+  }
+
+  const merged = mergeGeometries(geos, false);
+  for (const g of geos) g.dispose();
+  if (!merged) {
+    console.warn("[ModularRoad-v3] chassis: ghost bake could not merge — no glyph");
+    return null;
+  }
+  merged.computeBoundingSphere();
+  return merged;
+}

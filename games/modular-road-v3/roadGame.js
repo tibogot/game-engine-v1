@@ -122,6 +122,7 @@ import { createDriftScore, DRIFT_SCORE } from "./driftScore.js";
 import { loadWheelModel } from "./wheelModel.js";
 import {
   loadChassisModel, CHASSIS_GLB, applyChassisGlbTransform, resetChassisGlbFit, chassisGlbMounts,
+  bakeGhostCarGeometry,
 } from "./chassisModel.js";
 import { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } from "./modularRoadSparks.js";
 import { PropPhysics, PROP_PHYSICS, PHYSICS_PROP_TYPES } from "./modularRoadPropPhysics.js";
@@ -523,12 +524,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   /**
    * Car-shaped ghost for the SPAWN tool.
    *
-   * Prefers a clone of the real GLB body, so what you line up is literally the
-   * car you are about to drive — including whatever the dev panel's fit sliders
-   * did to it, since those author the GLB's own transform and `clone(true)`
-   * carries it. Falls back to primitives sized from CHASSIS/WHEEL_LOCAL while the
-   * model is still loading in the background (see loadChassisModel below), so the
-   * tool is usable from the first frame instead of silently doing nothing.
+   * Prefers the baked silhouette (one mesh: outer body + rest-pose wheels) so
+   * the marker is the car you drive without paying the live GLB's draw list.
+   * Falls back to primitives sized from CHASSIS/WHEEL_LOCAL while the model is
+   * still loading, so the tool is usable from the first frame.
    *
    * Both variants are built in CAR-LOCAL space — body centred on the origin, hubs
    * at WHEEL_LOCAL — which is the frame `respawn()` places the body in. The
@@ -539,14 +538,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const root = new THREE.Group();
     root.name = name;
 
-    if (chassisGlbObject) {
-      const car = chassisGlbObject.clone(true);
-      car.traverse((o) => {
-        if (!o.isMesh) return;
-        o.material = material;
-        o.castShadow = false;
-        o.receiveShadow = false;
-      });
+    if (spawnGhostGeo) {
+      const car = new THREE.Mesh(spawnGhostGeo, material);
+      car.castShadow = false;
+      car.receiveShadow = false;
       root.add(car);
     } else {
       const body = new THREE.Mesh(
@@ -576,7 +571,6 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       }
     }
 
-    root.traverse((o) => { o.frustumCulled = false; });
     return root;
   }
 
@@ -612,9 +606,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // Until you touch Q/E the ghost keeps snapping to the down-track direction
       // of whatever piece is under it; after that your angle is yours to keep.
       facingLocked: false,
-      // The GLB clone SHARES its geometry with the car you drive. Disposing it
-      // in clearBrush would delete the player's own body mesh.
-      disposeGeo: !chassisGlbObject,
+      // The baked silhouette is shared with the spawn marker. Disposing it
+      // in clearBrush would delete the marker's body too.
+      disposeGeo: !spawnGhostGeo,
     };
     devPanel?.refresh();
     return true;
@@ -1191,6 +1185,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Kept so the dev-panel fit sliders have something to re-transform.
   let chassisGlbObject = null;
   let chassisLampsLocal = null;
+  /** Shared car glyph (spawn marker, spawn brush, lap ghost). Not the live car. */
+  let spawnGhostGeo = null;
   loadChassisModel(renderer)
     .then((m) => {
       const { object, brakeLights, headlampLenses } = m;
@@ -1199,10 +1195,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       vehicle.setHeadlampMounts(chassisGlbMounts(chassisLampsLocal));
       vehicle.setChassisModel(object, { brakeLights, headlampLenses });
       vehicle.setChassisStyle("glb");
-      // The spawn marker was built from the primitive stand-in at boot (this load
-      // is deliberately in the background). Now that the real body exists, swap
-      // the silhouette for it — otherwise the marker stays a box for the session.
-      rebuildSpawnMarkerCar();
+      // The spawn marker was a primitive stand-in at boot (this load is
+      // deliberately in the background). Bake the cheap silhouette now — do NOT
+      // clone the driving GLB; that was 8 translucent draws for a glyph.
+      applyGhostCarTemplate();
       applyCarReflectionMembers();
       devPanel?.refresh();
     })
@@ -2898,23 +2894,69 @@ ${e.message}`);
   scene.add(spawnMarker);
 
   /**
+   * Bake (or rebake) the shared car glyph: spawn marker, spawn brush, lap ghost.
+   *
+   * Called when the GLB arrives and again when the fit sliders move — those
+   * offsets are baked into the vertices, so a stale bake would sit at the old
+   * ride height. The previous geometry is disposed only after every user has
+   * been swapped off it.
+   */
+  function applyGhostCarTemplate() {
+    const prev = spawnGhostGeo;
+    spawnGhostGeo = chassisGlbObject
+      ? bakeGhostCarGeometry(chassisGlbObject, {
+        hubs: WHEEL_LOCAL,
+        radius: WHEEL.radius,
+        thickness: WHEEL.thickness,
+      })
+      : null;
+    if (spawnGhostGeo) spawnGhostGeo.userData.sharedTemplate = true;
+    rebuildSpawnMarkerCar();
+    if (brush?.kind === "spawn") {
+      const old = brush.root;
+      const next = buildSpawnGhost();
+      next.visible = old.visible;
+      next.position.copy(old.position);
+      next.rotation.copy(old.rotation);
+      scene.remove(old);
+      if (brush.disposeGeo !== false) {
+        old.traverse((o) => {
+          if (o.isMesh && !isSharedGeometry(o.geometry)) o.geometry?.dispose();
+        });
+      }
+      scene.add(next);
+      brush.root = next;
+      brush.disposeGeo = !spawnGhostGeo;
+    }
+    // Lap ghost is a Mesh, not a clone tree — swap the buffer in place so the
+    // pose/visibility already on it stay put. The box fallback is disposed here
+    // once the silhouette exists.
+    if (spawnGhostGeo && ghostMesh.geometry !== spawnGhostGeo) {
+      const oldGeo = ghostMesh.geometry;
+      ghostMesh.geometry = spawnGhostGeo;
+      if (oldGeo && oldGeo !== prev && !isSharedGeometry(oldGeo)) oldGeo.dispose();
+    }
+    if (prev && prev !== spawnGhostGeo && ghostMesh.geometry !== prev) prev.dispose();
+  }
+
+  /**
    * (Re)build the marker's car silhouette.
    *
-   * Called once at boot and AGAIN when the chassis GLB finishes loading — the
-   * marker is created long before the model arrives, so without the second call
-   * it would keep the primitive stand-in for the whole session.
+   * Called once at boot and AGAIN when the baked glyph is ready or rebaked —
+   * the marker is created long before the model arrives, so without the second
+   * call it would keep the primitive stand-in for the whole session.
    */
   function rebuildSpawnMarkerCar() {
     if (spawnMarkerCar) {
       spawnMarker.remove(spawnMarkerCar);
-      // Only the primitive fallback owns its geometry; a GLB clone shares the
-      // player car's buffers. Same rule as the placement brush.
+      // Only the primitive fallback owns its geometry; the baked glyph is shared
+      // with the spawn brush.
       if (!spawnMarkerCar.userData.sharedGeo) {
         spawnMarkerCar.traverse((o) => { if (o.isMesh) o.geometry?.dispose(); });
       }
     }
     spawnMarkerCar = buildSpawnGhost(SPAWN_MARKER_MAT, "RoadSpawnMarkerCar");
-    spawnMarkerCar.userData.sharedGeo = !!chassisGlbObject;
+    spawnMarkerCar.userData.sharedGeo = !!spawnGhostGeo;
     // Lift by the same SPAWN_LIFT respawn() uses, so the silhouette stands
     // exactly where the body will.
     spawnMarkerCar.position.y = SPAWN_LIFT;
@@ -3522,7 +3564,10 @@ ${e.message}`);
       setChassisStyle: (s) => vehicle.setChassisStyle(s),
       // Live fit. The panel mutates CHASSIS_GLB in place (that's what slider()
       // does) and then asks for a re-transform.
-      applyWheelLayout: () => vehicle.applyWheelLayout(),
+      applyWheelLayout: () => {
+        vehicle.applyWheelLayout();
+        applyGhostCarTemplate();
+      },
       getDriftSmokeSettings: () => driftSmoke.settings,
       getSparkSettings: () => sparks.settings,
       // Banner flags. One image for ALL of them — that is the cost of a single
@@ -3547,10 +3592,12 @@ ${e.message}`);
         applyChassisGlbTransform(chassisGlbObject);
         // Beams live on the anchor, not the model, so they need re-deriving.
         vehicle.setHeadlampMounts(chassisGlbMounts(chassisLampsLocal));
+        applyGhostCarTemplate();
       },
       resetChassisFit: () => {
         const r = resetChassisGlbFit(chassisGlbObject);
         vehicle.setHeadlampMounts(chassisGlbMounts(chassisLampsLocal));
+        applyGhostCarTemplate();
         return r;
       },
       hasWheelModel: () => vehicle.hasWheelModel,

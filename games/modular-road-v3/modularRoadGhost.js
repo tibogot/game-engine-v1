@@ -145,7 +145,12 @@ export class GhostTrack {
   }
 }
 
-/** A translucent stand-in car for the ghost (same box as the chassis visual). */
+/**
+ * Translucent lap-ghost mesh. Boots as a box so a record can play before the
+ * chassis GLB bakes; roadGame then swaps `mesh.geometry` to the shared
+ * silhouette (body + rest-pose wheels, one draw). Pose is chassis-anchor space,
+ * same as GhostTrack's samples — no extra spawn lift.
+ */
 export function createGhostMesh(width, height, length, color = 0x66ccff) {
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(width, height, length),

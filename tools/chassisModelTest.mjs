@@ -325,6 +325,10 @@ console.log("\n=== DRAW-CALL BUDGET (classification vs the real GLB) ===");
   console.log(`  draws/frame at 3 cascades:  ${before} → ${after}   (procedural box = 4)`);
   check("the optimisation actually removes draw calls", after < before, `${before} → ${after}`);
   check("drawn meshes account for every kept part", drawn === 8, `${drawn}`);
+  check("ghost bake is a dedicated export — spawn must not clone the live GLB",
+    /export function bakeGhostCarGeometry/.test(src));
+  check("ghost bake keys off the silhouette regex (body+aero only)",
+    /bakeGhostCarGeometry[\s\S]*RE_SILHOUETTE\.test/.test(src));
 }
 
 console.log("\n=== MERGE SAFETY (KHR_mesh_quantization) ===");
