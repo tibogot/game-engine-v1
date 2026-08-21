@@ -73,8 +73,10 @@ import {
   createTunnelMaterial,
   createDecorMaterial,
   createRoadGlassMaterial,
+  createTubeMaterial,
   readRoadLook,
   syncRoadUniforms,
+  syncTubeUniforms,
   ROAD_LOOK_FORMAT,
 } from "./modularRoadMaterial.js";
 import { ModularRoadBuilder, buildRoadPaletteUI, CATEGORY_PRESETS } from "./modularRoadBuilder.js";
@@ -254,6 +256,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const railMaterial = createGuardrailMaterial();
   const shellMaterial = createTunnelMaterial();
   const decorMaterial = createDecorMaterial();
+  // Cheap dedicated tube shader — tubes used to ride createRoadMaterial, so
+  // every pixel of a bore evaluated the asphalt graph. Same look (inner/outer
+  // + neon), FrontSide. Weather rebuilds the ROAD material; this one stays.
+  const tubeMaterial = createTubeMaterial();
   // One pane material for every glass road on the track — it reflects
   // `scene.environment` (the live sky PMREM), so all of them stay in step with
   // the time of day for free.
@@ -279,6 +285,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     shellMaterial,
     decorMaterial,
     glassMaterial,
+    tubeMaterial,
     camera,
     domElement: renderer.domElement,
     orbit: controls,
@@ -421,6 +428,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const thumbMaterials = {
     road: roadMaterial, rail: railMaterial, shell: shellMaterial,
     decor: decorMaterial,
+    tube: tubeMaterial,
     // NOT the live pane material. Transmission composites against a copy of
     // the backdrop, and a thumbnail is rendered into a bare RT with no
     // backdrop to copy — the pane comes out black, so the tile advertises a
@@ -1055,6 +1063,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const prev = roadMaterial;
     roadMaterial = next;
     syncRoadUniforms(roadMaterial, roadLook);
+    syncTubeUniforms(tubeMaterial, roadLook);
     builder.setRoadMaterial(roadMaterial);
     if (mergedGroup.visible) { disposeMergedTrack(); buildMergedTrack(); }
     // Only after nothing references it any more.
@@ -1524,8 +1533,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // draw — but a diverse stunt track (every curve/bank/jump a unique shape) gets
   // ~1 draw per piece, i.e. 80+ for a 2-min circuit. For DRIVING we don't need
   // per-piece editing, so we MERGE every piece's geometry per material into one
-  // static mesh: the whole track becomes ~4 draws (road + rail + shell + decor)
-  // no matter how many or how varied the pieces are. Build mode keeps the
+  // static mesh: a handful of draws per chunk (road + tube + rail + shell +
+  // decor — tube only when the chunk has a rideable tube) no matter how many
+  // or how varied the pieces are. Build mode keeps the
   // editable instanced/proxy meshes; drive mode swaps to the merged ones.
   const mergedGroup = new THREE.Group();
   mergedGroup.name = "ModularRoadMerged";
@@ -1534,7 +1544,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   _mergedGroupRef = mergedGroup;
 
   const MERGE_ROLES = [
-    { pick: (p) => p.mesh, mat: () => roadMaterial, cast: true },
+    { pick: (p) => (p.mesh?.material === tubeMaterial ? null : p.mesh), mat: () => roadMaterial, cast: true },
+    { pick: (p) => (p.mesh?.material === tubeMaterial ? p.mesh : null), mat: () => tubeMaterial, cast: true },
     { pick: (p) => p.railMesh, mat: () => railMaterial, cast: true },
     { pick: (p) => p.shellMesh, mat: () => shellMaterial, cast: true },
     { pick: (p) => p.decorMesh, mat: () => decorMaterial, cast: false },
@@ -2622,6 +2633,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function applyRoadLook() {
     setRoadWet(roadLook.wetAmount ?? 0);
     syncRoadUniforms(roadMaterial, roadLook);
+    syncTubeUniforms(tubeMaterial, roadLook);
   }
 
   onClick("road-save", () => {

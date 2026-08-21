@@ -53,7 +53,7 @@
         GPU <b id="s-gpu">—</b> · <b id="s-fps">—</b> fps
       </div>
       <div class="keys">
-        <b>1</b> game piece (kit mesh + asphalt) · <b>2</b> lab piece (thick + cheap)<br />
+        <b>1</b> game kit mesh · <b>2</b> lab lathe (same cheap shader)<br />
         <b>I</b> inside the bore · <b>F</b> fill test (wall = the frame)<br />
         <b>R</b> orbit outside · drag / wheel to look around<br />
         Game files are not touched. Tune here, then decide.
@@ -65,17 +65,10 @@
       /**
        * TUBE LOOK + COST LAB.
        *
-       * Does not edit road.html, the kit, or the shipping road material.
-       *
-       * The GAME tube is two swept skins with a hollow lip. This lab builds a
-       * NEW thick-walled pipe (lathe of a rectangular wall profile): inner,
-       * outer and solid end rings are one mesh, so the mouth has real depth
-       * and nothing to leak a gap. Same radii as the kit stock tube.
-       *
-       * A/B is shape AND shader:
-       *   1 game = the kit's real 26 m tube (hollow lips) + asphalt material
-       *   2 lab  = the new thick-walled pipe + cheap shader
-       * Same lights and camera so the mouths can be compared in place.
+       * A/B is now SHAPE, on the shipping cheap shader (createTubeMaterial):
+       *   1 game = the kit's swept 26 m tube (capped mouths)
+       *   2 lab  = the lathe thick-walled pipe (2 rings along the length)
+       * Same lights, camera, and material so GPU ms is geometry, not paint.
        *
        * Bloom is off on purpose. This lab measures the MAIN material. The
        * game's bloom pyramid is a fixed extra; rings still write emissive so
@@ -85,16 +78,12 @@
       import { OrbitControls } from "three/addons/controls/OrbitControls.js";
       import GUI from "three/addons/libs/lil-gui.module.min.js";
       import {
-        Fn, uniform, attribute, uv, float, mix, abs, fract, smoothstep, step,
-      } from "three/tsl";
-      import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
-      import {
         buildPiece,
         roadParams as kitRoadParams,
         pieceParams as kitPieceParams,
         guardrailParams as kitGuardrailParams,
       } from "./modularRoadKit.js";
-      import { createRoadMaterial } from "./modularRoadMaterial.js";
+      import { createTubeMaterial, syncTubeUniforms } from "./modularRoadMaterial.js";
 
       const $ = (id) => document.getElementById(id);
       const showErr = (e) => {
@@ -103,10 +92,6 @@
         el.textContent = e?.stack || String(e);
         console.error(e);
       };
-
-      function lin(hex) {
-        return new THREE.Color(hex).convertSRGBToLinear();
-      }
 
       /** Stock game tube. One shape, on purpose. */
       const TUBE = {
@@ -119,7 +104,8 @@
       const look = {
         tubeInner: 0x24303c,
         tubeOuter: 0xd9662a,
-        neonColor: 0x35e0ff,
+        // neonColor: 0x35e0ff, // cyan glow + bloom
+        neonColor: 0xffffff,
         neonIntensity: 3.0,
         neonSpacing: 8.0,
         neonWidth: 0.35,
@@ -146,6 +132,7 @@
       let renderer, scene, camera, controls, sun, hemi, fill, rim, boreLight, ground, grid;
       let gui, hasTimestamps = false;
       let pieceRoot, gameMesh = null, labMesh = null;
+      let tubeMat;
       let gameMat, labMat;
       let viewName = "orbit";
       /** World Y of the tube axis after sitting the shell on the floor. */
@@ -165,88 +152,11 @@
       }
 
       /* ------------------------------------------------------------------ */
-      /* Cheap tube shader — lab only. No asphalt, no lines, no wet.        */
+      /* Shipping tube shader — same function the game uses.                */
       /* ------------------------------------------------------------------ */
 
-      function tubeRingMask(u, along) {
-        const halfW = u.neonWidth.mul(0.5).div(u.neonSpacing);
-        const cyc = fract(along.div(u.neonSpacing));
-        const d = abs(cyc.sub(0.5));
-        return smoothstep(halfW.add(0.02), halfW, d);
-      }
-
-      function createLabTubeMaterial(opts = {}) {
-        const u = {
-          tubeInner: uniform(lin(opts.tubeInner ?? 0x24303c)),
-          tubeOuter: uniform(lin(opts.tubeOuter ?? 0xd9662a)),
-          neonColor: uniform(lin(opts.neonColor ?? 0x35e0ff)),
-          neonIntensity: uniform(opts.neonIntensity ?? 3.0),
-          neonSpacing: uniform(opts.neonSpacing ?? 8.0),
-          neonWidth: uniform(opts.neonWidth ?? 0.35),
-          innerRough: uniform(opts.innerRough ?? 0.82),
-          outerRough: uniform(opts.outerRough ?? 0.55),
-          metalness: uniform(opts.metalness ?? 0.0),
-        };
-
-        const mat = new THREE.MeshStandardNodeMaterial({
-          roughness: 0.7,
-          metalness: 0,
-          side: ctl.doubleSide ? THREE.DoubleSide : THREE.FrontSide,
-        });
-
-        // Inner (aZone 3) / outer (aZone 4). Ring tint on the inner albedo so
-        // the band reads as a fixture, not only as bloom — same idea as the
-        // game shader, without the asphalt graph sitting underneath.
-        mat.colorNode = Fn(() => {
-          const zone = attribute("aZone", "float");
-          const along = uv().x;
-          const ring = tubeRingMask(u, along);
-          const innerCol = mix(u.tubeInner, u.neonColor, ring);
-          return mix(innerCol, u.tubeOuter, step(3.5, zone));
-        })();
-
-        mat.roughnessNode = Fn(() => {
-          const zone = attribute("aZone", "float");
-          return mix(u.innerRough, u.outerRough, step(3.5, zone));
-        })();
-
-        mat.metalnessNode = u.metalness;
-
-        const neonNode = Fn(() => {
-          const zone = attribute("aZone", "float");
-          const along = uv().x;
-          const innerMask = step(2.5, zone).mul(float(1).sub(step(3.5, zone)));
-          return u.neonColor.mul(tubeRingMask(u, along)).mul(u.neonIntensity).mul(innerMask);
-        })();
-        mat.emissiveNode = neonNode;
-        applyBloomMRT(mat, neonNode);
-
-        mat._labUniforms = u;
-        return mat;
-      }
-
       function applyLook() {
-        const ru = gameMat?._roadUniforms;
-        if (ru) {
-          ru.tubeInner.value.copy(lin(look.tubeInner));
-          ru.tubeOuter.value.copy(lin(look.tubeOuter));
-          ru.neonColor.value.copy(lin(look.neonColor));
-          ru.neonIntensity.value = look.neonIntensity;
-          ru.neonSpacing.value = look.neonSpacing;
-          ru.neonWidth.value = look.neonWidth;
-        }
-        const lu = labMat?._labUniforms;
-        if (lu) {
-          lu.tubeInner.value.copy(lin(look.tubeInner));
-          lu.tubeOuter.value.copy(lin(look.tubeOuter));
-          lu.neonColor.value.copy(lin(look.neonColor));
-          lu.neonIntensity.value = look.neonIntensity;
-          lu.neonSpacing.value = look.neonSpacing;
-          lu.neonWidth.value = look.neonWidth;
-          lu.innerRough.value = look.innerRough;
-          lu.outerRough.value = look.outerRough;
-          lu.metalness.value = look.metalness;
-        }
+        syncTubeUniforms(tubeMat, look);
       }
 
       function applyShader() {
@@ -255,10 +165,10 @@
         if (gameMesh) gameMesh.visible = !isLab;
         const el = $("s-shader");
         if (isLab) {
-          el.textContent = "lab · thick wall + cheap";
+          el.textContent = "lab · lathe + cheap";
           el.className = "lab";
         } else {
-          el.textContent = "game · kit mesh + asphalt";
+          el.textContent = "game · kit mesh + cheap";
           el.className = "game";
         }
         const mesh = isLab ? labMesh : gameMesh;
@@ -271,9 +181,9 @@
 
       function applySide() {
         const side = ctl.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
-        if (labMat) {
-          labMat.side = side;
-          labMat.needsUpdate = true;
+        if (tubeMat) {
+          tubeMat.side = side;
+          tubeMat.needsUpdate = true;
         }
       }
 
@@ -512,10 +422,10 @@
       function buildGui() {
         gui = new GUI({ title: "Tube lab" });
 
-        const fAb = gui.addFolder("A/B — piece + shader");
+        const fAb = gui.addFolder("A/B — mesh (same cheap shader)");
         fAb.add(ctl, "shader", {
-          "game (kit tube + asphalt)": "game",
-          "lab (thick wall + cheap)": "lab",
+          "game (kit sweep)": "game",
+          "lab (lathe)": "lab",
         })
           .name("Version")
           .onChange(applyShader);
@@ -530,7 +440,7 @@
         fLook.add(look, "neonWidth", 0.05, 1.2, 0.01).name("Ring width m").onChange(applyLook);
         fLook.open();
 
-        const fLab = gui.addFolder("Lab shader only");
+        const fLab = gui.addFolder("Shader");
         fLab.add(look, "innerRough", 0.05, 1, 0.01).name("Inner roughness").onChange(applyLook);
         fLab.add(look, "outerRough", 0.05, 1, 0.01).name("Outer roughness").onChange(applyLook);
         fLab.add(look, "metalness", 0, 1, 0.01).name("Metalness").onChange(applyLook);
@@ -710,15 +620,9 @@
         pieceRoot = new THREE.Group();
         scene.add(pieceRoot);
 
-        gameMat = createRoadMaterial({
-          tubeInner: look.tubeInner,
-          tubeOuter: look.tubeOuter,
-          neonColor: look.neonColor,
-          neonIntensity: look.neonIntensity,
-          neonSpacing: look.neonSpacing,
-          neonWidth: look.neonWidth,
-        });
-        labMat = createLabTubeMaterial(look);
+        tubeMat = createTubeMaterial(look);
+        gameMat = labMat = tubeMat;
+        applyLook();
         applySide();
 
         rebuildPiece();

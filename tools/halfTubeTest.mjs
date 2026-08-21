@@ -185,17 +185,18 @@ check("the floor is at deck height, so it seams with a flat piece",
 // then could not get air off the rim, topping out at ~9.7 m on an 8 m lip at
 // every speed. The cause was this piece's own rim caps — the bands that close
 // the profile outline between the bore and the outer shell. On the full tube
-// they hide at the floor seam; here they land at the lips, and at a 180° span
-// the wall thickness runs horizontally, so each one is a flat 0.6 m ledge at
-// exactly rim height for the whole length of the piece. In the deck BVH that is
-// indistinguishable from road. See buildOpenLipCollision and, for the driving
-// numbers, tools/halfTubeAirMeshRepro.mjs.
+// those length-wise bands hide at the floor seam (its MOUTH rings are a
+// different proxy — see tubeEndCapTest.mjs); here they land at the lips, and
+// at a 180° span the wall thickness runs horizontally, so each one is a flat
+// 0.6 m ledge at exactly rim height for the whole length of the piece. In the
+// deck BVH that is indistinguishable from road. See buildOpenLipCollision and,
+// for the driving numbers, tools/halfTubeAirMeshRepro.mjs.
 console.log("\n— the lip —");
 const builtHalf = buildPiece("half_tube", initialConnector(), pp());
 check("the half tube ships a deck collision proxy", !!builtHalf.deckCollision,
   "the visible mesh keeps its rim caps; the BVH gets a copy without them");
-check("a full tube does NOT need one (its caps hide at the floor seam)",
-  !buildPiece("tube", initialConnector(), pp()).deckCollision);
+check("a full tube also ships a proxy (uncapped sweep — mouth rings are visual)",
+  !!buildPiece("tube", initialConnector(), pp()).deckCollision);
 check("a plain road piece does NOT get one either",
   !buildPiece("straight", initialConnector(), pp()).deckCollision,
   "zone 0 means the structural SIDES there, which must stay collidable");

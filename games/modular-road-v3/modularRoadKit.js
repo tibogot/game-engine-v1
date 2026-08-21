@@ -31,7 +31,7 @@ export const roadParams = {
   // railWidth), but the kerb wants to be genuinely wide enough to carry a post.
   railWidth: 0.75,
   railHeight: 0.22, // kerb height above the deck (m) — low; guardrail sits on top
-  segLen: 1.6, // target sweep step length along the path (m)
+  segLen: 1.6, // sweep step on curves / morphs (m). Constant straights use 2 frames.
   onChange: null,
 };
 
@@ -919,6 +919,122 @@ export function buildSweepGeometry(frames, profileData = buildProfile(), opts = 
   return geo;
 }
 
+const _capPt = new V3();
+
+/**
+ * Inner / outer rings of a closed tube profile, unique angles, same order.
+ *
+ * `buildTubeProfile` walks the inner circle then the outer in reverse, and both
+ * loops repeat the seam point. Drop those duplicates and re-index the outer so
+ * inner[k] faces outer[k] — the pairing the end-cap quads need.
+ */
+function tubeAnnulusRings(pts) {
+  const innerAll = [];
+  const outerAll = [];
+  for (const p of pts) {
+    if (p.zone === 3) innerAll.push(p);
+    else if (p.zone === 4) outerAll.push(p);
+  }
+  if (innerAll.length < 9 || outerAll.length !== innerAll.length) return null;
+  const inner = innerAll.slice(0, -1);
+  const n = inner.length;
+  const outer = new Array(n);
+  outer[0] = outerAll[0];
+  for (let j = 1; j < n; j++) outer[n - j] = outerAll[j];
+  return { inner, outer };
+}
+
+/**
+ * Close the hollow mouths of a full-tube sweep.
+ *
+ * The sweep is an extruded annulus: inner circle + outer circle, joined only at
+ * a hidden bottom seam. Length ends stay open, so you look into the wall cavity.
+ * These rings fill that gap at the first and last frames — both faces, so
+ * FrontSide (or DoubleSide) shows the lip from outside and from the bore.
+ *
+ * Visual only. Callers must keep the uncapped sweep as `deckCollision` so the
+ * rings are not a driveable shelf across the mouth. Same idea as half-tube
+ * `openLips`.
+ *
+ * Mutates `geo` in place (appends verts / indices, leaves existing normals).
+ */
+function appendTubeEndCaps(geo, frames, profileData) {
+  const rings = tubeAnnulusRings(profileData?.pts);
+  if (!rings || frames.length < 2) return geo;
+  const { inner, outer } = rings;
+  const n = inner.length;
+
+  const pos = geo.getAttribute("position");
+  const uv = geo.getAttribute("uv");
+  const lat = geo.getAttribute("aLateral");
+  const zn = geo.getAttribute("aZone");
+  const plain = geo.getAttribute("aPlain");
+  const curve = geo.getAttribute("aCurve");
+  const nrm = geo.getAttribute("normal");
+  const idx = geo.getIndex();
+  if (!pos || !uv || !lat || !zn || !plain || !curve || !nrm || !idx) return geo;
+
+  const positions = Array.from(pos.array);
+  const uvs = Array.from(uv.array);
+  const laterals = Array.from(lat.array);
+  const zones = Array.from(zn.array);
+  const plains = Array.from(plain.array);
+  const curves = Array.from(curve.array);
+  const normals = Array.from(nrm.array);
+  const indices = Array.from(idx.array);
+
+  let alongN = 0;
+  for (let i = 1; i < frames.length; i++) {
+    alongN += frames[i].pos.distanceTo(frames[i - 1].pos);
+  }
+
+  const emitCap = (fr, alongX, ox, oy, oz) => {
+    const pushPt = (p, nx, ny, nz) => {
+      _capPt.copy(fr.pos).addScaledVector(fr.right, p.x).addScaledVector(fr.up, p.y);
+      positions.push(_capPt.x, _capPt.y, _capPt.z);
+      uvs.push(alongX, 0);
+      laterals.push(0);
+      zones.push(4);
+      plains.push(1);
+      curves.push(0);
+      normals.push(nx, ny, nz);
+    };
+    const emitFace = (nx, ny, nz, flip) => {
+      const base = positions.length / 3;
+      for (let k = 0; k < n; k++) pushPt(inner[k], nx, ny, nz);
+      for (let k = 0; k < n; k++) pushPt(outer[k], nx, ny, nz);
+      for (let k = 0; k < n; k++) {
+        const k1 = (k + 1) % n;
+        const i0 = base + k;
+        const i1 = base + k1;
+        const o0 = base + n + k;
+        const o1 = base + n + k1;
+        if (flip) indices.push(i0, o1, o0, i0, i1, o1);
+        else indices.push(i0, o0, o1, i0, o1, i1);
+      }
+    };
+    emitFace(ox, oy, oz, false);
+    emitFace(-ox, -oy, -oz, true);
+  };
+
+  const f0 = frames[0];
+  const fN = frames[frames.length - 1];
+  // Entry faces backward (travel goes into the piece); exit faces forward.
+  emitCap(f0, 0, -f0.tangent.x, -f0.tangent.y, -f0.tangent.z);
+  emitCap(fN, alongN, fN.tangent.x, fN.tangent.y, fN.tangent.z);
+
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(laterals, 1));
+  geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zones, 1));
+  geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(plains, 1));
+  geo.setAttribute("aCurve", new THREE.Float32BufferAttribute(curves, 1));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geo.setIndex(indices);
+  geo.computeBoundingSphere();
+  return geo;
+}
+
 /**
  * Average normals across profile points flagged `smooth`.
  *
@@ -1559,15 +1675,26 @@ function stepsFor(arcLen, totalAngle = 0, minSteps = 2) {
   );
 }
 
-function straightPoints(pp) {
-  const L = Math.max(1, pp.straightLength);
-  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
-  const pts = [];
-  for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
-  return pts;
+/**
+ * Constant-section straight centreline: entry and exit only.
+ *
+ * The sweep between two frames is a prism. Extra stations every `segLen` were
+ * copies of the same ring — they inflated tubes and straights to the density
+ * curves need. UVs still run 0…L (along is the chord). Rails and posts
+ * interpolate along that chord. Do NOT use this where heading, roll, or the
+ * profile changes between the ends (curves, morphing entries, bank in/out).
+ */
+function straightLinePoints(length, y = 0) {
+  const L = Math.max(1, length);
+  return [new V3(0, y, 0), new V3(0, y, -L)];
 }
 
-/** Tube entry / exit funnel centreline — a straight of its own length. */
+function straightPoints(pp) {
+  return straightLinePoints(pp.straightLength);
+}
+
+/** Tube entry / exit funnel centreline — a straight of its own length.
+ *  Kept dense: the SECTION morphs along t, so the sweep needs the stations. */
 function tubeEntryPoints(pp) {
   const L = Math.max(4, pp.tubeEntryLength ?? 26);
   const n = Math.max(4, Math.ceil(L / roadParams.segLen));
@@ -1577,28 +1704,16 @@ function tubeEntryPoints(pp) {
 }
 
 function platformPoints(pp) {
-  const L = Math.max(4, pp.platformLength);
-  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
-  const pts = [];
-  for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
-  return pts;
+  return straightLinePoints(Math.max(4, pp.platformLength));
 }
 
-/** Hole-road centerline: only the connectors matter (geometry is custom). */
+/** Hole-road / glass centerline: only the connectors matter (geometry is custom). */
 function glassPoints(pp) {
-  const L = Math.max(8, pp.glassLength ?? 32);
-  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
-  const pts = [];
-  for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
-  return pts;
+  return straightLinePoints(Math.max(8, pp.glassLength ?? 32));
 }
 
 function holedPoints(pp) {
-  const L = Math.max(8, pp.holedLength ?? 32);
-  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
-  const pts = [];
-  for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
-  return pts;
+  return straightLinePoints(Math.max(8, pp.holedLength ?? 32));
 }
 
 /** Quintic smootherstep — C2, so slope AND curvature are zero at both ends.
@@ -1773,12 +1888,7 @@ function bankOutPoints(pp) {
 
 /** Held-bank straight: constant lean, centreline held at the full raise. */
 function bankHoldPoints(pp) {
-  const L = Math.max(1, pp.straightLength);
-  const n = Math.max(2, Math.ceil(L / roadParams.segLen));
-  const y = bankRaise(pp);
-  const pts = [];
-  for (let i = 0; i <= n; i++) pts.push(new V3(0, y, -L * (i / n)));
-  return pts;
+  return straightLinePoints(pp.straightLength, bankRaise(pp));
 }
 
 /** Held-bank turn: flat arc at the full raise, constant lean (Short/Long Turn). */
@@ -3215,6 +3325,9 @@ export const PIECE_CATALOG = [
     profile: buildTubeProfile,
     noKerb: true,
     plain: true,
+    // Close the hollow wall-cavity at both mouths. Visual only — buildPiece
+    // keeps the uncapped sweep as deckCollision so the rings are not a shelf.
+    tubeEndCaps: true,
   },
   {
     id: "tube_curve",
@@ -3226,6 +3339,7 @@ export const PIECE_CATALOG = [
     profile: buildTubeProfile,
     noKerb: true,
     plain: true,
+    tubeEndCaps: true,
   },
   {
     id: "half_tube",
@@ -3483,6 +3597,18 @@ const _END_TANGENTS = {
 for (const def of PIECE_CATALOG) {
   const fn = _END_TANGENTS[def.id];
   if (fn) def.endTangents = fn;
+}
+
+// Rideable-tube family: dedicated cheap shader, not the asphalt graph. Same
+// list the Tubes tab is built from — channel/quarter-pipe stay on the road
+// material (they are a deck + shell, not an annulus).
+for (const id of [
+  "tube", "tube_curve", "tube_in", "tube_out",
+  "half_tube", "half_tube_curve", "half_tube_in", "half_tube_out",
+  "half_pipe", "half_pipe_curve",
+]) {
+  const def = PIECE_BY_ID.get(id);
+  if (def) def.tubeShader = true;
 }
 
 /* ----------------------------------------------------------------------- */
@@ -3807,11 +3933,17 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // …and a piece can supply that stand-in outright rather than deriving it from
   // what it drew: the glass road's window is a hole in the MESH only, so its
   // collision form is the same slab with no window in it at all.
-  const deckCollision = def.deckCollision
+  let deckCollision = def.deckCollision
     ? def.deckCollision(pp, rpForProfile)
     : def.openLips
       ? buildOpenLipCollision(geometry)
       : null;
+  // Full-tube mouths: cap the wall cavity on the MESH, keep the open sweep as
+  // the thing the wheels hit. Clone first so the BVH never sees the rings.
+  if (def.tubeEndCaps && !def.geometry) {
+    if (!deckCollision) deckCollision = geometry.clone();
+    appendTubeEndCaps(geometry, frames, profileData);
+  }
   // Glazing: rendered on its own transparent material, collided by nothing.
   const glassGeometry = def.glass ? def.glass(pp, rpForProfile) : null;
   const shellGeometry = def.shell ? buildShellGeometry(def.shell, frames, profileData, pp) : null;

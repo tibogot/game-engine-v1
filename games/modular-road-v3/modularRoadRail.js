@@ -714,12 +714,12 @@ export function placePosts(frames, template, baseLat, zSign, spacing, out) {
 /**
  * Thin a piece's frames for the RAIL SWEEP ONLY.
  *
- * The deck is stepped at roadParams.segLen (1.6 m) because its SURFACE
- * needs that resolution, and curves are capped at 1.5°/step so the kerb
- * silhouette does not facet. A rail is a smooth tube 0.26 m across — it
- * needs nothing like that. Measured: a 32 m straight goes 21 frames → 9,
- * and a 90° R26 curve 61 → ~16, which is most of the beam's triangle cost
- * gone for no visible change at any speed you drive at.
+ * The deck of a CURVE is stepped at roadParams.segLen (1.6 m) / 1.5° because
+ * its SURFACE needs that resolution. Constant-section straights only keep the
+ * two end frames — a prism does not need copies of the same ring down the
+ * length. A rail is a smooth tube 0.26 m across — it needs nothing like that.
+ * Measured: a 90° R26 curve goes 61 frames → ~16, which is most of the beam's
+ * triangle cost gone for no visible change at any speed you drive at.
  *
  * First and last frames are kept exactly, so the rail still starts and
  * ends flush with the piece's sockets.

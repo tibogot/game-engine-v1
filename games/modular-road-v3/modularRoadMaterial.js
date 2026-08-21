@@ -152,7 +152,10 @@ export function createRoadMaterial(opts = {}) {
     // clearly not asphalt, plus emissive neon rings inside that bloom.
     tubeInner: uniform(lin(opts.tubeInner ?? 0x24303c)), // dark blue-steel interior
     tubeOuter: uniform(lin(opts.tubeOuter ?? 0xd9662a)), // hot-wheels orange shell
-    neonColor: uniform(lin(opts.neonColor ?? 0x35e0ff)), // cyan glow rings
+    // Was cyan glow rings (0x35e0ff) + bloom. Parked: we may go back to a black
+    // stripe that reuses this blue as the emissive. White paint for now.
+    // neonColor: uniform(lin(opts.neonColor ?? 0x35e0ff)),
+    neonColor: uniform(lin(opts.neonColor ?? 0xffffff)),
     neonIntensity: uniform(opts.neonIntensity ?? 3.0), // >1 so bloom picks it up
     neonSpacing: uniform(opts.neonSpacing ?? 8.0), // meters between rings
     neonWidth: uniform(opts.neonWidth ?? 0.35), // ring width (m)
@@ -792,6 +795,94 @@ function tubeRingMask(u, along) {
   const cyc = fract(along.div(u.neonSpacing));
   const d = abs(cyc.sub(0.5)); // distance from ring centre (in cycle units)
   return smoothstep(halfW.add(0.02), halfW, d);
+}
+
+/**
+ * Cheap dedicated shader for rideable tubes.
+ *
+ * The shared road material still HAS a tube branch (so a look file round-trips
+ * the colours), but every pixel of a tube used to evaluate the whole asphalt
+ * graph — noise, lines, wet, PBR, MRT mix — then throw it away. Measured in
+ * tube-lab.html: that fill, not triangle count or shadows, is what hitching
+ * inside a bore costs. This is the lab graph: inner/outer colour, neon rings,
+ * standard lighting. FrontSide — inner and outer walls face the right way, and
+ * full-tube mouths emit both cap faces — so those pixels do not run twice.
+ *
+ * Zone 0 (rim caps / hidden seam webs) paints as outer: it is wall thickness,
+ * not the bore.
+ */
+export function createTubeMaterial(opts = {}) {
+  const u = {
+    tubeInner: uniform(lin(opts.tubeInner ?? 0x24303c)),
+    tubeOuter: uniform(lin(opts.tubeOuter ?? 0xd9662a)),
+    // neonColor: uniform(lin(opts.neonColor ?? 0x35e0ff)), // cyan glow + bloom
+    neonColor: uniform(lin(opts.neonColor ?? 0xffffff)),
+    neonIntensity: uniform(opts.neonIntensity ?? 3.0),
+    neonSpacing: uniform(opts.neonSpacing ?? 8.0),
+    neonWidth: uniform(opts.neonWidth ?? 0.35),
+    innerRough: uniform(opts.innerRough ?? 0.82),
+    outerRough: uniform(opts.outerRough ?? 0.55),
+    metalness: uniform(opts.metalness ?? 0.0),
+  };
+
+  const mat = new THREE.MeshStandardNodeMaterial({
+    roughness: 0.7,
+    metalness: 0,
+    side: THREE.FrontSide,
+  });
+
+  mat.colorNode = Fn(() => {
+    const zone = attribute("aZone", "float");
+    const along = uv().x;
+    const ring = tubeRingMask(u, along);
+    const innerCol = mix(u.tubeInner, u.neonColor, ring);
+    let col = u.tubeOuter;
+    col = mix(col, innerCol, step(2.5, zone));
+    col = mix(col, u.tubeOuter, step(3.5, zone));
+    return col;
+  })();
+
+  mat.roughnessNode = Fn(() => {
+    const zone = attribute("aZone", "float");
+    let r = u.outerRough;
+    r = mix(r, u.innerRough, step(2.5, zone));
+    r = mix(r, u.outerRough, step(3.5, zone));
+    return r;
+  })();
+
+  mat.metalnessNode = u.metalness;
+
+  // Bloom + emissive glow parked — rings are white paint on the inner albedo
+  // for now. Restore these (and the cyan neonColor default) for the old fixture.
+  // const neonNode = Fn(() => {
+  //   const zone = attribute("aZone", "float");
+  //   const along = uv().x;
+  //   const innerMask = step(2.5, zone).mul(float(1).sub(step(3.5, zone)));
+  //   return u.neonColor.mul(tubeRingMask(u, along)).mul(u.neonIntensity).mul(innerMask);
+  // })();
+  // mat.emissiveNode = neonNode;
+  // applyBloomMRT(mat, neonNode);
+
+  mat._tubeUniforms = u;
+  return mat;
+}
+
+/** Colour / neon keys shared with ROAD_LOOK so a saved look still drives tubes. */
+export const TUBE_LOOK_COLORS = ["tubeInner", "tubeOuter", "neonColor"];
+export const TUBE_LOOK_NUMBERS = ["neonIntensity", "neonSpacing", "neonWidth"];
+
+export function syncTubeUniforms(mat, p) {
+  const u = mat?._tubeUniforms;
+  if (!u || !p) return;
+  for (const k of TUBE_LOOK_COLORS) {
+    if (p[k] != null) u[k].value.copy(lin(p[k]));
+  }
+  for (const k of TUBE_LOOK_NUMBERS) {
+    if (p[k] != null) u[k].value = typeof p[k] === "boolean" ? (p[k] ? 1 : 0) : p[k];
+  }
+  if (p.innerRough != null) u.innerRough.value = p.innerRough;
+  if (p.outerRough != null) u.outerRough.value = p.outerRough;
+  if (p.metalness != null) u.metalness.value = p.metalness;
 }
 
 /**

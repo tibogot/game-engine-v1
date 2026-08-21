@@ -138,6 +138,7 @@ export class ModularRoadBuilder {
    * @param {THREE.Material} [o.shellMaterial] shared tunnel-shell material
    * @param {THREE.Material} [o.decorMaterial] start/finish/checkpoint decor
    * @param {THREE.Material} [o.glassMaterial] shared pane material (glass road)
+   * @param {THREE.Material} [o.tubeMaterial] cheap dedicated shader for rideable tubes
    * @param {THREE.Camera} [o.camera] for free-placement gizmo
    * @param {HTMLElement} [o.domElement] canvas element for gizmo input
    * @param {import("three/addons/controls/OrbitControls.js").OrbitControls} [o.orbit]
@@ -151,6 +152,7 @@ export class ModularRoadBuilder {
     shellMaterial = null,
     decorMaterial = null,
     glassMaterial = null,
+    tubeMaterial = null,
     camera = null,
     domElement = null,
     orbit = null,
@@ -163,6 +165,7 @@ export class ModularRoadBuilder {
     this.shellMaterial = shellMaterial;
     this.decorMaterial = decorMaterial;
     this.glassMaterial = glassMaterial;
+    this.tubeMaterial = tubeMaterial;
     this.orbit = orbit;
     this.isBuildMode = isBuildMode;
     this.onChange = onChange;
@@ -1914,7 +1917,7 @@ export class ModularRoadBuilder {
       grp.mats.push(proxy.matrix);
     };
     for (const p of this.pieces) {
-      add(p.mesh, this.material, "road");
+      add(p.mesh, this._deckMaterial(p.id), this._isTubePiece(p.id) ? "tube" : "road");
       add(p.railMesh, this.railMaterial, "rail");
       add(p.shellMesh, this.shellMaterial, "shell");
       add(p.decorMesh, this.decorMaterial, "decor");
@@ -1944,8 +1947,9 @@ export class ModularRoadBuilder {
    */
   _makePieceEntry(id, chainId, connectorIn, pp, edges) {
     const built = buildPiece(id, connectorIn, pp, roadParams, guardrailParams, edges);
-    const mesh = this._makeMesh(built.geometry, this.material, built.world);
-    // Deck collision proxy — only the half tubes have one (rim caps stripped).
+    const mesh = this._makeMesh(built.geometry, this._deckMaterial(id), built.world);
+    // Deck collision proxy — half tubes strip rim caps; full tubes keep the
+    // uncapped sweep so the new end rings are visual-only.
     // Same three-birth-sites rule as the rail proxy below.
     mesh.userData.collisionGeometry = built.deckCollision ?? null;
     const railMesh =
@@ -2045,12 +2049,23 @@ export class ModularRoadBuilder {
     for (const p of this.pieces) if (p.mesh) this._applyPiecePresence(p);
   }
 
+  _isTubePiece(id) {
+    return !!PIECE_BY_ID.get(id)?.tubeShader;
+  }
+
+  /** Deck draw material: gap marker, cheap tube shader, or the shared asphalt. */
+  _deckMaterial(id) {
+    if (PIECE_BY_ID.get(id)?.noMesh) return this.gapMaterial;
+    if (this._isTubePiece(id) && this.tubeMaterial) return this.tubeMaterial;
+    return this.material;
+  }
+
   _applyPiecePresence(p) {
     const gap = !!PIECE_BY_ID.get(p.id)?.noMesh;
     p.mesh.userData.pieceId = p.id;
     p.mesh.userData.noCollision = gap;
     p.mesh.userData.noRender = gap;   // gap spacer: no road, no instance/merge
-    p.mesh.material = gap ? this.gapMaterial : this.material; // faint build marker
+    p.mesh.material = this._deckMaterial(p.id);
     p.mesh.visible = gap ? true : !this.instancingEnabled;
   }
 
