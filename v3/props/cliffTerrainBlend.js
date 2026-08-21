@@ -51,7 +51,7 @@ const LUM = vec3(0.299, 0.587, 0.114);
  * @param {THREE.MeshStandardNodeMaterial} mat — from createMaterialForLibrary
  * @param {{ heightTexNode: object, splatOverlay: object, cliffPaintTex?: THREE.Texture }} deps
  *   heightTexNode — the shared TSL texture node whose .value sculptBrush swaps
- *   splatOverlay  — return of createSplatOverlay (blendColor/blendRoughness)
+ *   splatOverlay  — return of createSplatOverlay (blend())
  *   cliffPaintTex — optional CliffPaintMask texture (R = strength); painted
  *                   areas force the terrain look regardless of slope/height
  */
@@ -91,8 +91,14 @@ export function applyCliffTerrainBlend(mat, { heightTexNode, splatOverlay, cliff
   const terrainViewN  = normalize(mul(cameraViewMatrix, vec4(terrainWorldN, 0)).xyz);
 
   // ── Terrain look at this XZ (painted splat over the plain base) ────────────
-  const terrainColor = splatOverlay.blendColor(uTerrainBase);
-  const terrainRough = splatOverlay.blendRoughness(float(0.95));
+  // One blend() call per material — color and roughness come back as members of
+  // one gated struct (see splatOverlayTsl.js), never as separate blend calls.
+  const terrainBlend = splatOverlay.blend({
+    baseColor: uTerrainBase,
+    baseRough: float(0.95),
+  });
+  const terrainColor = terrainBlend.color;
+  const terrainRough = terrainBlend.rough;
 
   // ── Masks ──────────────────────────────────────────────────────────────────
   // World-XZ noise wobbles the slope threshold so the grass edge on tops is

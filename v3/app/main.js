@@ -442,7 +442,7 @@ export async function startV3App(opts = {}) {
       return col;
     },
     uOn: uGroundTslOn,
-    // Paintable meadow color (mask-gated via splatOverlay.blendMeadow)
+    // Paintable meadow color (mask-gated via splatOverlay.blend meadowColor)
     meadowAt: () => meadowBundle.meadowProc(),
   };
   // ── Meadow (paintable TSL) — v2 chunkMeadowTsl, gated by the splatmap's
@@ -922,9 +922,11 @@ export async function startV3App(opts = {}) {
       groundProc.colorAt(positionWorld.xz, tintNy, thC.mul(float(MAX_HEIGHT))),
       uGroundTslOn,
     );
-    let tintCol = splatOverlay.blendColor(tintBase);
     // Painted meadow TSL tints the grass exactly like it tints the terrain
-    tintCol = splatOverlay.blendMeadow(tintCol, groundProc.meadowAt);
+    let tintCol = splatOverlay.blend({
+      baseColor: tintBase,
+      meadowColor: groundProc.meadowAt(),
+    }).color;
     const snowShared = snowSystem?.shared;
     if (snowShared) {
       tintCol = mix(
@@ -2676,6 +2678,12 @@ export async function startV3App(opts = {}) {
         // Sculpting under the marker must not bury it — re-drape every frame.
         spawnSystem.refreshHeight();
       }
+
+      // Branch gates: the terrain shader skips the splat and snow blocks
+      // entirely while their maps are empty. The checks are cached CPU flags —
+      // a scan only runs on the first frame after an edit invalidates one.
+      splatOverlay.uHasPaint.value = splatMap.hasAnyPaint() ? 1 : 0;
+      snowSystem.shared.u.uHasSnow.value = snowMap.hasAnySnow() ? 1 : 0;
 
       bakeGrassTintIfNeeded();
       waterSurfaceMap.bakeIfNeeded(renderer);

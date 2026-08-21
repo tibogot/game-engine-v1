@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import {
+  Fn,
+  If,
   float,
+  struct,
   vec2,
   vec3,
   vec4,
@@ -307,18 +310,7 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
   const hUp = texture(heightTexNode, vec2(hmU, hmV.add(texel))).r;
   const flatScale   = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
   const worldNormal = normalize(vec3(hL.sub(hR), flatScale, hD.sub(hUp)));
-  const blendedWorldN = splatOverlay ? splatOverlay.blendNormal(worldNormal) : worldNormal;
-  // Painted coverage × slope, from the same shared functions the deform tile
-  // uses — snow can never look different on the two surfaces. Node reused
-  // below for color/roughness/emissive, so it's evaluated once per pixel.
   const useSnow = !!snowShared && F.snow;
-  const snowCov = useSnow ? snowShared.covBlend(wxz) : null;
-  // Snow smooths the ground: ease the lighting normal toward up where covered.
-  const litWorldN = useSnow
-    ? normalize(mix(blendedWorldN, vec3(0, 1, 0), snowCov.mul(float(0.45))))
-    : blendedWorldN;
-  mat.normalNode = normalize(mul(cameraViewMatrix, vec4(litWorldN, 0)).xyz);
-  const baseRoughness = splatOverlay ? splatOverlay.blendRoughness(float(0.95)) : float(0.95);
 
   // Cursor ring (boundary) + mask projection (filled shape preview).
   //
@@ -348,47 +340,101 @@ function createLODMaterial(heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, u
     maskOverlay = texture(uBrushMaskNode, rotBrushUV).r.mul(inBoundsX).mul(inBoundsY).mul(radialFade);
   }
 
-  // Splat overlay blends on top of base colour; painted snow shades on top
-  // with the shared snow functions (compression = 0: only the deform tile
-  // shows grooves; out here the trail RT doesn't exist).
-  // groundProc (v2 procedural ground TSL, uniform-gated) replaces the grey
-  // tile base when enabled — the splat layers still paint over it.
-  // `mix(base, proc, uOn)` EVALUATES BOTH SIDES — a uniform at 0 does not skip
-  // the procedural ground, it computes it and multiplies the result away. So a
-  // project that never enables it still paid for it on every pixel.
-  const tileBase = (groundProc && F.groundProc)
-    ? mix(mat.colorNode, groundProc.colorAt(wxz, worldNormal.y, terrainY), groundProc.uOn)
-    : mat.colorNode;
-  let baseColor = splatOverlay ? splatOverlay.blendColor(tileBase) : tileBase;
-  // Paintable meadow TSL (layer card 8): its splat-mask channel blends the
-  // procedural meadow color over the image layers wherever it's painted.
-  if (groundProc?.meadowAt && splatOverlay && F.groundProc) {
-    baseColor = splatOverlay.blendMeadow(baseColor, groundProc.meadowAt);
-  }
-  let finalColor = baseColor;
-  let finalRoughness = baseRoughness;
-  if (useSnow) {
-    const zeroComp = float(0);
-    finalColor     = mix(baseColor, snowShared.snowAlbedo(zeroComp), snowCov);
-    finalRoughness = mix(baseRoughness, snowShared.snowRoughness(zeroComp), snowCov);
-    mat.emissiveNode = snowShared.snowSparkle(wxz, zeroComp).mul(snowCov);
-  }
+  // ── Surface assembly — one Fn, real branches ───────────────────────────────
+  //
+  // groundProc, the splat layers and snow used to be composed as straight-line
+  // `mix()` chains, which EVALUATE BOTH SIDES — a uniform at 0 does not skip
+  // the feature, it computes it and multiplies the result away. Each block now
+  // sits inside a WGSL `if` on a uniform gate (uniform control flow, so the
+  // texture taps inside are legal), and the GPU genuinely skips it: an empty
+  // scene pays for none of them. Lakebed already branches internally.
+  //
+  // Everything the branches share (wxz, the geometric normal, the base color)
+  // is materialized as a var in UNCONDITIONAL flow first. That is load-bearing:
+  // var declarations are hoisted but assignments stay in flow order, so a node
+  // whose first generation lands inside a skipped `if` reads as garbage
+  // everywhere else. Never reference a shared node for the first time inside a
+  // branch.
+  //
+  // color/roughness/emissive/normal come back as one struct so the material
+  // slots share a single computation instead of quadruplicating the taps.
+  const tileColorNode = mat.colorNode; // capture the tile look before overwrite
+  const SurfaceOut = struct(
+    { col: "vec3", rough: "float", emis: "vec3", nrm: "vec3" },
+    "TerrainSurface",
+  );
 
-  // Underwater lakebed treatment (sand + depth tint + caustics) sits on top of
-  // splat and snow — water covers everything — but under the cursor ring, which
-  // is editor UI and must stay visible over a submerged brush target.
-  if (lakebed && F.lakebed) finalColor = lakebed.apply(finalColor);
+  const surface = Fn(() => {
+    // Unconditional shared ingredients.
+    const wxzV    = vec2(worldX, worldZ).toVar();
+    const nrmGeom = worldNormal.toVar();
 
-  // The cursor tint is the ONLY consumer of ring/maskOverlay, so with the
-  // cursor compiled out the colour passes straight through.
-  mat.colorNode = F.cursor
-    ? mix(
-        finalColor,
+    const col   = vec3(tileColorNode).toVar();
+    const rough = float(0.95).toVar();
+    const emis  = vec3(0).toVar();
+
+    // Procedural ground TSL replaces the grey tile base when enabled — the
+    // splat layers still paint over it.
+    if (groundProc && F.groundProc) {
+      If(groundProc.uOn.greaterThan(0.0), () => {
+        col.assign(mix(col, groundProc.colorAt(wxzV, nrmGeom.y, terrainY), groundProc.uOn));
+      });
+    }
+
+    // Painted splat layers + meadow (branch-gated inside blend()). The meadow
+    // TSL (layer card 8) blends over the image layers wherever it's painted.
+    const nrmLit = vec3(nrmGeom).toVar();
+    if (splatOverlay) {
+      const sb = splatOverlay.blend({
+        baseColor:   col,
+        baseRough:   rough,
+        geomNormal:  nrmGeom,
+        meadowColor: (groundProc?.meadowAt && F.groundProc) ? groundProc.meadowAt() : null,
+      });
+      col.assign(sb.color);
+      rough.assign(sb.rough);
+      nrmLit.assign(sb.nrm);
+    }
+
+    // Painted snow shades on top with the shared snow functions (compression =
+    // 0: only the deform tile shows grooves; out here the trail RT doesn't
+    // exist). Skipped entirely while the snow map is empty (uHasSnow).
+    if (useSnow) {
+      If(snowShared.u.uHasSnow.greaterThan(0.0), () => {
+        const zeroComp = float(0);
+        // Painted coverage × slope, from the same shared functions the deform
+        // tile uses — snow can never look different on the two surfaces.
+        const cov = snowShared.covBlend(wxzV).toVar();
+        // Snow smooths the ground: ease the lighting normal toward up.
+        nrmLit.assign(normalize(mix(nrmLit, vec3(0, 1, 0), cov.mul(float(0.45)))));
+        col.assign(mix(col, snowShared.snowAlbedo(zeroComp), cov));
+        rough.assign(mix(rough, snowShared.snowRoughness(zeroComp), cov));
+        emis.assign(snowShared.snowSparkle(wxzV, zeroComp).mul(cov));
+      });
+    }
+
+    // Underwater lakebed treatment (sand + depth tint + caustics) sits on top
+    // of splat and snow — water covers everything — but under the cursor ring,
+    // which is editor UI and must stay visible over a submerged brush target.
+    if (lakebed && F.lakebed) col.assign(lakebed.apply(col));
+
+    // The cursor tint is the ONLY consumer of ring/maskOverlay, so with the
+    // cursor compiled out the colour passes straight through.
+    if (F.cursor) {
+      col.assign(mix(
+        col,
         vec3(float(1.0), float(0.95), float(0.2)),
         ring.mul(float(0.9)).add(maskOverlay.mul(float(0.28))),
-      )
-    : finalColor;
-  mat.roughnessNode = finalRoughness;
+      ));
+    }
+
+    return SurfaceOut(col, rough, emis, nrmLit);
+  })();
+
+  mat.colorNode     = surface.get("col");
+  mat.roughnessNode = surface.get("rough");
+  if (useSnow) mat.emissiveNode = surface.get("emis");
+  mat.normalNode    = normalize(mul(cameraViewMatrix, vec4(surface.get("nrm"), 0)).xyz);
   mat.needsUpdate = true;
 
   return mat;

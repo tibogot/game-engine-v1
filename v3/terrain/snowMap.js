@@ -14,6 +14,10 @@ export const SNOW_MAP_RES = Math.min(2048, Math.max(256, HEIGHTMAP_SIZE / 2));
 export class SnowMap {
   constructor() {
     this._data = new Uint8Array(SNOW_MAP_RES * SNOW_MAP_RES);
+    // hasAnySnow() cache — drives the terrain shader's uHasSnow branch gate.
+    this._hasSnow      = false; // buffer starts zeroed
+    this._hasSnowDirty = false;
+    this._dataU32      = new Uint32Array(this._data.buffer);
 
     this.tex = new THREE.DataTexture(
       this._data,
@@ -74,8 +78,29 @@ export class SnowMap {
       }
     }
 
-    if (touched) this.tex.needsUpdate = true;
+    if (touched) {
+      this.tex.needsUpdate = true;
+      // Painting adds snow; only erasing could have removed the last of it.
+      if (erase) this._hasSnowDirty = true;
+      else { this._hasSnow = true; this._hasSnowDirty = false; }
+    }
     return touched;
+  }
+
+  /**
+   * True if any coverage texel is non-zero. Cached; mutators mark it dirty and
+   * the next call rescans (u32-wide, early-exit — sub-ms worst case).
+   */
+  hasAnySnow() {
+    if (this._hasSnowDirty) {
+      this._hasSnowDirty = false;
+      this._hasSnow = false;
+      const u32 = this._dataU32;
+      for (let i = 0; i < u32.length; i++) {
+        if (u32[i] !== 0) { this._hasSnow = true; break; }
+      }
+    }
+    return this._hasSnow;
   }
 
   snapshot() {
@@ -85,6 +110,7 @@ export class SnowMap {
   restoreSnapshot(snap) {
     this._data.set(snap);
     this.tex.needsUpdate = true;
+    this._hasSnowDirty = true;
   }
 
   /**
@@ -136,10 +162,14 @@ export class SnowMap {
   clearAll() {
     this._data.fill(0);
     this.tex.needsUpdate = true;
+    this._hasSnow = false;
+    this._hasSnowDirty = false;
   }
 
   fillAll() {
     this._data.fill(255);
     this.tex.needsUpdate = true;
+    this._hasSnow = true;
+    this._hasSnowDirty = false;
   }
 }

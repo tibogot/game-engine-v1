@@ -65,6 +65,9 @@ export function createSnowShared(initialHeightTex, defaults) {
     uTileHalf:         uniform(25),
     uTileFeather:      uniform(10),
     uTileOn:           uniform(0),
+    // 0 = the snow map is empty — the terrain material skips its whole snow
+    // branch. Driven per frame from SnowMap.hasAnySnow() (cached CPU flag).
+    uHasSnow:          uniform(0),
   };
 
   // Heightmap node — sculptBrush's rtMain is canonical and never swapped, but

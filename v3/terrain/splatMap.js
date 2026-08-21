@@ -68,6 +68,26 @@ export class SplatMap {
     this.data0       = new Uint8Array(this._combined.buffer, 0,     bytes);
     this.data1       = new Uint8Array(this._combined.buffer, bytes, bytes);
     this.tex         = _makeDataArrayTex(this._combined);
+    // hasAnyPaint() cache — drives the terrain shader's uHasPaint branch gate.
+    this._hasPaint      = false; // buffers start zeroed
+    this._hasPaintDirty = false;
+    this._combinedU32   = new Uint32Array(this._combined.buffer);
+  }
+
+  /**
+   * True if any weight or meadow texel is non-zero. Cached; mutators mark it
+   * dirty and the next call rescans (u32-wide, early-exit — sub-ms worst case).
+   */
+  hasAnyPaint() {
+    if (this._hasPaintDirty) {
+      this._hasPaintDirty = false;
+      this._hasPaint = false;
+      const u32 = this._combinedU32;
+      for (let i = 0; i < u32.length; i++) {
+        if (u32[i] !== 0) { this._hasPaint = true; break; }
+      }
+    }
+    return this._hasPaint;
   }
 
   applySplatStroke(stroke) {
@@ -189,6 +209,9 @@ export class SplatMap {
         this.tex.addLayerUpdate(1);
       }
       this.tex.needsUpdate = true;
+      // Painting adds paint; only erasing could have removed the last of it.
+      if (isEraser) this._hasPaintDirty = true;
+      else { this._hasPaint = true; this._hasPaintDirty = false; }
     }
     // Touched rect in splat texel coords — used for rect-based undo entries.
     return anyTouched ? { x: u0, y: v0, w: u1 - u0 + 1, h: v1 - v0 + 1 } : null;
@@ -220,6 +243,7 @@ export class SplatMap {
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
+    this._hasPaintDirty = true;
   }
 
   /** Both slices as one contiguous buffer (project save / splat export). */
@@ -231,6 +255,7 @@ export class SplatMap {
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
+    this._hasPaintDirty = true;
   }
 
   /**
@@ -253,6 +278,7 @@ export class SplatMap {
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
+    this._hasPaintDirty = true;
   }
 
   snapshot() {
@@ -263,17 +289,22 @@ export class SplatMap {
     this.data0.set(snap.d0);
     this.data1.set(snap.d1);
     this.tex.needsUpdate = true;
+    this._hasPaintDirty = true;
   }
 
   clearAll() {
     this.data0.fill(0);
     this.data1.fill(0);
     this.tex.needsUpdate = true;
+    this._hasPaint = false;
+    this._hasPaintDirty = false;
   }
 
   fillAllWithLayer(activeLayer) {
     this.data0.fill(0);
     this.data1.fill(0);
+    this._hasPaint = activeLayer !== 0;
+    this._hasPaintDirty = false;
     if (activeLayer === 0) { this.tex.needsUpdate = true; return; }
     let buf, chan;
     if (activeLayer <= 4) { buf = this.data0; chan = activeLayer - 1; }
@@ -338,6 +369,7 @@ export class SplatMap {
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
+    this._hasPaintDirty = true;
   }
 }
 

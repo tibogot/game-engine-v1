@@ -12,11 +12,25 @@
  *   albedoArrayNode = 1 binding (7 depth slices)
  *   ormArrayNode    = 1 binding (7 depth slices)
  *   → 3 additional bindings for the full 7-layer paint system
+ *
+ * RUNTIME BRANCH GATE. The whole layer system — 7 albedo + 7 ORM array taps,
+ * the splat weights, auto-paint's 5 heightmap taps + FBM — lives inside a real
+ * WGSL `if` on `uHasPaint` (+ the auto-paint / solo uniforms). A branch on a
+ * uniform value is uniform control flow, so texture sampling inside it is
+ * legal and the GPU genuinely skips the work — unlike the old `mix()`-to-zero
+ * gating, which evaluated everything and multiplied the answer away. An empty
+ * splatmap now costs one uniform compare per pixel instead of ~16 taps.
+ * main.js drives uHasPaint from SplatMap.hasAnyPaint() (cached CPU flag).
+ *
+ * Because every splat node generates inside that one branch, the blend is a
+ * single `blend()` call returning a struct — callers must not spread it over
+ * separate color/roughness/normal calls, or a node's first generation could
+ * land inside one branch and be read (stale) from another.
  */
 import * as THREE from "three";
 import { stochasticSampleArray } from "../../v2/core/legacy/stochasticTex.js";
 import {
-  Fn, float, int, vec2, vec3,
+  Fn, If, float, int, struct, vec2, vec3,
   texture, mix, max, clamp, sqrt, uniform, step, normalize,
   positionWorld, smoothstep, abs, length, mx_noise_float,
 } from "three/tsl";
@@ -38,7 +52,9 @@ const LUM        = vec3(0.299, 0.587, 0.114);
  * change shape — a disabled feature simply stops being wired into the output.
  *
  * Defaults are ALL ON, i.e. bit-for-bit the previous shader. The editor keeps
- * them; a game build turns off what it cannot reach.
+ * them; a game build turns off what it cannot reach. On top of these, the
+ * runtime branch gate (see header) skips the compiled-in features per frame
+ * whenever the splatmap is empty and auto-paint/solo are off.
  */
 export const SPLAT_FEATURES = {
   /** Slope/height auto-material rules. Costs 5 heightmap taps + an FBM noise. */
@@ -71,6 +87,11 @@ export function createSplatOverlay(
 
   const invWS = float(1.0 / WORLD_SIZE);
 
+  // ── Branch gate ──────────────────────────────────────────────────────────────
+  // 1 while the splatmap holds ANY paint (weights or meadow). Driven per frame
+  // from SplatMap.hasAnyPaint(); 0 skips the entire layer system per pixel.
+  const uHasPaint = uniform(0.0);
+
   // ── Splatmap (weight map) ────────────────────────────────────────────────────
   // World UV: world[-1024..1024] → [0..1]
   const splatUV        = positionWorld.xz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE));
@@ -89,6 +110,8 @@ export function createSplatOverlay(
   const uHeightContrast = uniform(0.5);
 
   // ── Layer texture samples — 2 DataArrayTexture bindings for 7 layers ─────────
+  // Node objects are built eagerly but only REFERENCED inside blend()'s branch,
+  // so their code generates inside the gated `if` and costs nothing when skipped.
   const albedoArrNode = texture(albedoArrayTex);
   const ormArrNode    = texture(ormArrayTex);
 
@@ -100,7 +123,7 @@ export function createSplatOverlay(
     layerOrms.push(ormArrNode.sample(uv).depth(int(i)));
   }
 
-  // ── Weight extraction ─────────────────────────────────────────────────────────
+  // ── Weight extraction (pre-auto-paint) ────────────────────────────────────────
   const rw1 = splatSlice0.r.mul(inBounds), rw2 = splatSlice0.g.mul(inBounds);
   const rw3 = splatSlice0.b.mul(inBounds), rw4 = splatSlice0.a.mul(inBounds);
   const rw5 = splatSlice1.r.mul(inBounds), rw6 = splatSlice1.g.mul(inBounds), rw7 = splatSlice1.b.mul(inBounds);
@@ -110,7 +133,7 @@ export function createSplatOverlay(
   const w0raw  = max(float(0), float(1).sub(sum7));
   const totalW = max(float(1e-5), w0raw.add(sum7));
 
-  const nw = [
+  const nwExpr = [
     w0raw.div(totalW),
     rw1.div(totalW), rw2.div(totalW), rw3.div(totalW), rw4.div(totalW),
     rw5.div(totalW), rw6.div(totalW), rw7.div(totalW),
@@ -132,6 +155,8 @@ export function createSplatOverlay(
   const uAutoHighEnd   = uniform(280.0);
   const uAutoNoise     = uniform(0.25);  // threshold breakup 0..1
 
+  // Auto-rule ingredient nodes — referenced only inside blend()'s auto sub-branch.
+  let autoIngredients = null;
   if (heightTexNode && F.autoPaint) {
     // Terrain normal.y from the same heightmap gradient the terrain mesh uses.
     const texel = float(1.0 / HEIGHTMAP_SIZE);
@@ -157,128 +182,176 @@ export function createSplatOverlay(
       .mul(float(1).sub(cliffW)).mul(highOn);
     const flatW  = float(1).sub(cliffW).sub(highW);
 
-    // Redistribute w0 to the chosen layers (gated to heightmap bounds so the
-    // far LOD ring keeps the base material instead of smearing edge texels).
-    // Full-preview mode instead replaces ALL weights with the auto rules —
-    // a live stand-in for what "Bake to splatmap" will write (bake replaces
-    // every paint layer too), so tuning the rules needs no bake round-trips.
-    // A rule set to -1 ("Base (TSL)") assigns NO layer: only the fraction that
-    // actually went to a layer leaves w0, so those areas keep the base — this
-    // is how "procedural TSL ground + image cliffs" composes.
     const eq = (u, i) => step(abs(u.sub(float(i))), float(0.5));
     const hasFlat   = step(float(-0.5), uAutoFlat);
     const hasCliff  = step(float(-0.5), uAutoCliff);
     // highW is already gated by its own -1 check (highOn) where it's computed.
     const assignedW = cliffW.mul(hasCliff).add(flatW.mul(hasFlat)).add(highW);
-    const baseShare = nw[0].mul(uAutoEnabled).mul(inBounds);
-    const fullPrev  = uAutoFull.mul(inBounds);
-    for (let i = 0; i < NUM_LAYERS; i++) {
-      const autoW = cliffW.mul(eq(uAutoCliff, i))
-        .add(flatW.mul(eq(uAutoFlat, i)))
-        .add(highW.mul(eq(uAutoHigh, i)));
-      nw[i + 1] = mix(nw[i + 1].add(baseShare.mul(autoW)), autoW, fullPrev);
-    }
-    nw[0] = mix(
-      nw[0].sub(baseShare.mul(assignedW)),
-      float(1).sub(assignedW),
-      fullPrev,
-    );
+
+    autoIngredients = { cliffW, highW, flatW, eq, assignedW };
   }
 
-  // ── Layer colors (albedo × AO) ────────────────────────────────────────────────
-  const layerColors = [];
-  for (let i = 0; i < NUM_LAYERS; i++) {
-    layerColors.push(
-      layerAlbedos[i].rgb.mul(mix(float(1), layerOrms[i].g, layerSlots[i].uAOStr)),
-    );
-  }
+  // ── The blend (called once per material from terrainLOD / cliff / tint) ──────
 
-  // ── Blend functions (called from terrainLOD material) ────────────────────────
-
-  function blendColor(baseColor) {
-    // Linear weight blend — the one path that is always needed.
-    let blended = baseColor.mul(nw[0]);
-    for (let i = 0; i < NUM_LAYERS; i++) blended = blended.add(layerColors[i].mul(nw[i+1]));
-
-    let finalColor = blended;
-
-    // Height-based blend (UE-style: luminance as height proxy). ~40 ALU ops that
-    // were previously computed even at uHeightBlend 0 and then mixed out.
-    if (F.heightBlend) {
-      const baseH  = baseColor.dot(LUM);
-      const layerH = layerColors.map(c => c.dot(LUM));
-      let maxWH = nw[0].mul(baseH);
-      for (let i = 0; i < NUM_LAYERS; i++) maxWH = max(maxWH, nw[i+1].mul(layerH[i]));
-      const thresh = maxWH.sub(uHeightContrast);
-
-      const aw = [max(float(0), nw[0].mul(baseH).sub(thresh))];
-      for (let i = 0; i < NUM_LAYERS; i++) aw.push(max(float(0), nw[i+1].mul(layerH[i]).sub(thresh)));
-      let totalAW = aw[0];
-      for (let i = 1; i <= NUM_LAYERS; i++) totalAW = totalAW.add(aw[i]);
-      totalAW = max(float(1e-5), totalAW);
-
-      let hBlended = baseColor.mul(aw[0].div(totalAW));
-      for (let i = 0; i < NUM_LAYERS; i++) hBlended = hBlended.add(layerColors[i].mul(aw[i+1].div(totalAW)));
-
-      finalColor = mix(blended, hBlended, uHeightBlend);
-    }
-
-    // Solo mode (greyscale single-layer visualisation) — an EDITOR affordance.
-    // A game can never set uSoloLayer, so it was 7 mixes of pure dead weight.
-    if (!F.solo) return finalColor;
-    const isSolo = step(float(0), uSoloLayer);
-    let soloW = nw[NUM_LAYERS];
-    for (let i = NUM_LAYERS - 1; i >= 0; i--) {
-      soloW = mix(nw[i], soloW, step(float(i + 0.5), uSoloLayer));
-    }
-    return mix(finalColor, vec3(soloW, soloW, soloW), isSolo);
-  }
-
-  function blendRoughness(baseRough) {
-    let result = baseRough.mul(nw[0]);
-    for (let i = 0; i < NUM_LAYERS; i++) {
-      const lr = mix(float(0.88), layerOrms[i].r, layerSlots[i].uRoughStr);
-      result = result.add(lr.mul(nw[i+1]));
-    }
-    return clamp(result, float(0.04), float(1));
-  }
+  const SplatBlendStruct = struct(
+    { color: "vec3", rough: "float", nrm: "vec3" },
+    "SplatBlend",
+  );
 
   /**
-   * Decode per-layer tangent-space normals from ORM.ba and blend with splatmap weights.
-   * Returns a world-space normalized direction — caller transforms to view space.
-   * Terrain TBN: T=(1,0,0)  B=(0,0,1)  N=geomWorldNormal  (XZ-plane world UV mapping).
+   * Blend the painted layers over the given base values, all inside one gated
+   * branch. Returns { color, rough, nrm } nodes (struct members — computed
+   * together, so the 7 ORM taps are shared between color's AO, roughness and
+   * the normal decode instead of being duplicated).
+   *
+   * Call ONCE per material. Passing an input opts it in:
+   *   baseColor   (required) vec3 — what unpainted ground looks like
+   *   baseRough   (optional) float — pass to get the roughness blend
+   *   geomNormal  (optional) vec3 world normal — pass to get ORM.ba normal
+   *               mapping (needs F.normalMap)
+   *   meadowColor (optional) vec3 — blended over the layers by the painted
+   *               meadow mask (layer card 8)
    */
-  function blendNormal(geomWorldNormal) {
-    // 7 × (normalize + sqrt) per pixel. With no layer normal maps in use the
-    // whole chain collapses to the geometric normal it was blending toward.
-    if (!F.normalMap) return geomWorldNormal;
-    let accumN = geomWorldNormal.mul(nw[0]);
-    for (let i = 0; i < NUM_LAYERS; i++) {
-      const orm = layerOrms[i];
-      const nx  = orm.b.mul(float(2.0)).sub(float(1.0));
-      const ny  = orm.a.mul(float(2.0)).sub(float(1.0));
-      const nz  = sqrt(max(float(0.0), float(1.0).sub(nx.mul(nx)).sub(ny.mul(ny))));
-      // TBN transform: T*nx + B*ny + N*nz  →  (nx, 0, ny) + geomN*nz
-      const worldN = normalize(vec3(nx, float(0), ny).add(geomWorldNormal.mul(nz)));
-      // Lerp between pure geometric normal and normal-mapped based on per-layer strength
-      const layerN = mix(geomWorldNormal, worldN, layerSlots[i].uNormalStr);
-      accumN = accumN.add(layerN.mul(nw[i + 1]));
-    }
-    return normalize(accumN);
-  }
+  function blend({ baseColor, baseRough = null, geomNormal = null, meadowColor = null }) {
+    const wantRough = baseRough !== null;
+    const wantNrm   = geomNormal !== null && F.normalMap;
 
-  function blendMeadow(col, meadowFn) {
-    return mix(col, meadowFn(), meadowW);
+    const res = Fn(() => {
+      const colV   = vec3(baseColor).toVar();
+      const roughV = float(wantRough ? baseRough : 0.95).toVar();
+      const nrmV   = vec3(geomNormal !== null ? geomNormal : vec3(0, 1, 0)).toVar();
+
+      // Skipping the branch must equal running it with zero weights: weights
+      // all 0 ⇒ w0 = 1 ⇒ every output collapses to its base value. Verified
+      // path by path below (linear, heightBlend, rough clamp, normal, meadow).
+      let gateSum = uHasPaint.add(uAutoEnabled).add(uAutoFull);
+      if (F.solo) gateSum = gateSum.add(step(float(0), uSoloLayer));
+
+      If(gateSum.greaterThan(0.0), () => {
+        const baseC = vec3(colV).toVar(); // pristine base for w0 + heightBlend
+        const w = nwExpr.map((n) => float(n).toVar());
+
+        // Auto-material redistributes w0 to the rule layers (uAutoEnabled), or
+        // replaces ALL weights with the rules (uAutoFull preview). Both off is
+        // the common case — skip the 5 heightmap taps + FBM entirely.
+        if (autoIngredients) {
+          If(uAutoEnabled.add(uAutoFull).greaterThan(0.0), () => {
+            const { cliffW, highW, flatW, eq, assignedW } = autoIngredients;
+            // baseShare snapshots w0 BEFORE any weight is reassigned.
+            const baseShare = w[0].mul(uAutoEnabled).mul(inBounds).toVar();
+            const fullPrev  = uAutoFull.mul(inBounds).toVar();
+            for (let i = 0; i < NUM_LAYERS; i++) {
+              const autoW = cliffW.mul(eq(uAutoCliff, i))
+                .add(flatW.mul(eq(uAutoFlat, i)))
+                .add(highW.mul(eq(uAutoHigh, i)));
+              w[i + 1].assign(mix(w[i + 1].add(baseShare.mul(autoW)), autoW, fullPrev));
+            }
+            w[0].assign(mix(
+              w[0].sub(baseShare.mul(assignedW)),
+              float(1).sub(assignedW),
+              fullPrev,
+            ));
+          });
+        }
+
+        // Layer colors (albedo × AO)
+        const layerColors = [];
+        for (let i = 0; i < NUM_LAYERS; i++) {
+          layerColors.push(
+            layerAlbedos[i].rgb.mul(mix(float(1), layerOrms[i].g, layerSlots[i].uAOStr)),
+          );
+        }
+
+        // Linear weight blend — the one path that is always needed.
+        let linSum = baseC.mul(w[0]);
+        for (let i = 0; i < NUM_LAYERS; i++) linSum = linSum.add(layerColors[i].mul(w[i + 1]));
+        const linear = linSum.toVar();
+        colV.assign(linear);
+
+        // Height-based blend (UE-style: luminance as height proxy) — ~40 ALU,
+        // branch-skipped at the default uHeightBlend 0.
+        if (F.heightBlend) {
+          If(uHeightBlend.greaterThan(0.0), () => {
+            const baseH  = baseC.dot(LUM);
+            const layerH = layerColors.map(c => c.dot(LUM));
+            let maxWH = w[0].mul(baseH);
+            for (let i = 0; i < NUM_LAYERS; i++) maxWH = max(maxWH, w[i + 1].mul(layerH[i]));
+            const thresh = maxWH.sub(uHeightContrast);
+
+            const aw = [max(float(0), w[0].mul(baseH).sub(thresh))];
+            for (let i = 0; i < NUM_LAYERS; i++) aw.push(max(float(0), w[i + 1].mul(layerH[i]).sub(thresh)));
+            let totalAW = aw[0];
+            for (let i = 1; i <= NUM_LAYERS; i++) totalAW = totalAW.add(aw[i]);
+            totalAW = max(float(1e-5), totalAW);
+
+            let hBlended = baseC.mul(aw[0].div(totalAW));
+            for (let i = 0; i < NUM_LAYERS; i++) hBlended = hBlended.add(layerColors[i].mul(aw[i + 1].div(totalAW)));
+
+            colV.assign(mix(linear, hBlended, uHeightBlend));
+          });
+        }
+
+        // Solo mode (greyscale single-layer visualisation) — an EDITOR affordance.
+        if (F.solo) {
+          If(uSoloLayer.greaterThanEqual(float(0)), () => {
+            let soloW = w[NUM_LAYERS];
+            for (let i = NUM_LAYERS - 1; i >= 0; i--) {
+              soloW = mix(w[i], soloW, step(float(i + 0.5), uSoloLayer));
+            }
+            colV.assign(vec3(soloW, soloW, soloW));
+          });
+        }
+
+        // Paintable meadow TSL (layer card 8) — over the layers (and solo view),
+        // exactly where its mask is painted. Applied after solo, like before.
+        if (meadowColor !== null) {
+          colV.assign(mix(colV, meadowColor, meadowW));
+        }
+
+        if (wantRough) {
+          let rSum = roughV.mul(w[0]);
+          for (let i = 0; i < NUM_LAYERS; i++) {
+            const lr = mix(float(0.88), layerOrms[i].r, layerSlots[i].uRoughStr);
+            rSum = rSum.add(lr.mul(w[i + 1]));
+          }
+          roughV.assign(clamp(rSum, float(0.04), float(1)));
+        }
+
+        // Decode per-layer tangent-space normals from ORM.ba and blend by weight.
+        // Terrain TBN: T=(1,0,0)  B=(0,0,1)  N=geomWorldNormal (XZ world UV mapping).
+        if (wantNrm) {
+          let accumN = nrmV.mul(w[0]);
+          for (let i = 0; i < NUM_LAYERS; i++) {
+            const orm = layerOrms[i];
+            const nx  = orm.b.mul(float(2.0)).sub(float(1.0));
+            const ny  = orm.a.mul(float(2.0)).sub(float(1.0));
+            const nz  = sqrt(max(float(0.0), float(1.0).sub(nx.mul(nx)).sub(ny.mul(ny))));
+            // TBN transform: T*nx + B*ny + N*nz  →  (nx, 0, ny) + geomN*nz
+            const worldN = normalize(vec3(nx, float(0), ny).add(nrmV.mul(nz)));
+            // Lerp between pure geometric normal and normal-mapped based on per-layer strength
+            const layerN = mix(nrmV, worldN, layerSlots[i].uNormalStr);
+            accumN = accumN.add(layerN.mul(w[i + 1]));
+          }
+          nrmV.assign(normalize(accumN));
+        }
+      });
+
+      return SplatBlendStruct(colV, roughV, nrmV);
+    })();
+
+    return {
+      color: res.get("color"),
+      rough: res.get("rough"),
+      nrm:   res.get("nrm"),
+    };
   }
 
   return {
+    uHasPaint,
     uSoloLayer,
     uHeightBlend,
     uHeightContrast,
-    blendColor,
-    blendRoughness,
-    blendNormal,
-    blendMeadow,
+    blend,
     auto: {
       uAutoEnabled, uAutoFull, uAutoFlat, uAutoCliff, uAutoHigh,
       uAutoSlopeHiY, uAutoSlopeLoY, uAutoHighStart, uAutoHighEnd, uAutoNoise,
