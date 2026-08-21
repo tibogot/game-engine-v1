@@ -78,6 +78,13 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   const app = await startV3App({
     csm: { cascades, maxFar: 300 },
     light: { shadowNormalBias: 0.12 },
+    // Editor-only terrain shader features. A game has no sculpt brush to move
+    // and no paint panel, so both are dead code here — and `cursor` also costs a
+    // sampler binding for the brush mask, in a fragment stage that sits at
+    // WebGPU's 16-sampler ceiling. Project-dependent features (snow, lakebed,
+    // groundProc, autoPaint...) stay ON: the .v3proj decides those.
+    terrainFeatures: { cursor: false },
+    splatFeatures:   { solo: false },
   });
   window.__rts = app; // handy for console debugging
 

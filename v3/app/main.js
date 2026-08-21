@@ -413,13 +413,32 @@ export async function startV3App(opts = {}) {
   // ── Paint system (splatmap + texture library + overlay) ───────────────────
   const splatMap   = new SplatMap();
   const textureLib = new TextureLibrary();
+  // ── Boot-time terrain shader features ─────────────────────────────────────
+  // startV3App({ terrainFeatures: { cursor: false }, splatFeatures: { solo: false } }).
+  //
+  // These are COMPILE-TIME: a disabled feature's nodes are never built, so the
+  // instructions and any texture bindings they need are absent from the shader
+  // entirely. That makes this a boot decision, and it has to be read HERE rather
+  // than with the csm/light overrides further down — the terrain materials are
+  // built a few lines below, long before that point.
+  //
+  // Defaults are all-on, so the editor and any caller that passes nothing keep
+  // the full shader. A GAME turns off what it cannot reach: `cursor` draws the
+  // sculpt brush ring (and costs a sampler for the brush mask — the terrain
+  // fragment stage is at WebGPU's 16 limit), `solo` is the paint panel's
+  // single-layer greyscale view. Do NOT blanket-disable snow/lakebed/groundProc/
+  // autoPaint/heightBlend/normalMap here: those are project-dependent, and a
+  // saved world that uses one would silently render wrong.
+  const terrainFeatureOverrides = opts.terrainFeatures ?? {};
+  const splatFeatureOverrides   = opts.splatFeatures   ?? {};
+
   const splatOverlay = createSplatOverlay(
     textureLib.getLayerUniforms(),
     textureLib.albedoArrayTex,
     textureLib.ormArrayTex,
     splatMap.tex,
     heightTexNode, // fallback height source when no baked surface is supplied
-    {},
+    splatFeatureOverrides,
     // Live slope+height for auto-paint, from the baked surface texture: one tap
     // instead of five, and it keeps the heightmap out of the fragment stage.
     terrainNormals,
@@ -529,7 +548,7 @@ export async function startV3App(opts = {}) {
   // and the snow surface definition (snowSystem.shared): painted snow displaces
   // the terrain itself with real volume; the deform tile only refines the same
   // surface with trail compression near the player.
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, groundProc, {}, terrainNormals);
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, groundProc, terrainFeatureOverrides, terrainNormals);
   scene.add(lod.group);
   // Console handle for terrain shader A/Bs — `buildVariant()` compiles a second
   // feature set and `setVariant()` swaps it onto the clipmap, so two shaders can

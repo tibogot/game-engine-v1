@@ -184,6 +184,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       dirIntensity: 2.6,
       exposure: 1.0,
     },
+    // Editor-only terrain shader features. A game has no sculpt brush to move
+    // and no paint panel, so both are dead code here — and `cursor` also costs a
+    // sampler binding for the brush mask, in a fragment stage that sits at
+    // WebGPU's 16-sampler ceiling. Project-dependent features (snow, lakebed,
+    // groundProc, autoPaint...) stay ON: the .v3proj decides those.
+    terrainFeatures: { cursor: false },
+    splatFeatures:   { solo: false },
   });
   window.__road = app; // handy for console debugging
 
