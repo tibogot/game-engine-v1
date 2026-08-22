@@ -130,34 +130,69 @@ console.log("\n=== RAIL IS ON THE RIGHT SIDE OF THE KERB ===");
 {
   const rw = Math.min(Math.max(0, roadParams.railWidth), hw * 0.45);
   const edgeAbs = hw - rw * 0.5; // kerb centreline, where both rails stand
+  /**
+   * Every vertex of the rail the player actually sees.
+   *
+   * THE POSTS ARE NO LONGER IN `railGeometry` — they are instanced, so buildPiece
+   * hands back a beam plus a template and a list of transforms (see `railPosts`).
+   * That matters here and not just cosmetically: this whole section detects a
+   * MIRRORED rail by its asymmetry, and the beam on its own is symmetric about
+   * the kerb line (±0.130). Reading `railGeometry` alone would leave every check
+   * below comparing ±0.130 against ±0.130 — passing, and proving nothing.
+   *
+   * So the posts are put back for the measurement. What is under test is where
+   * the rail sits, and the rail is both halves.
+   */
+  const railVerts = (built) => {
+    const out = [];
+    const push = (geo, mat) => {
+      const p = geo.getAttribute("position");
+      const v = new THREE.Vector3();
+      for (let i = 0; i < p.count; i++) {
+        v.set(p.getX(i), p.getY(i), p.getZ(i));
+        if (mat) v.applyMatrix4(mat);
+        out.push(v.clone());
+      }
+    };
+    if (built.railGeometry) push(built.railGeometry, null);
+    const rp2 = built.railPosts;
+    if (rp2?.template) for (const m of rp2.matrices) push(rp2.template, m);
+    return out;
+  };
   /** Lateral spread of rail verts about their own kerb line, + = toward the deck. */
-  const spread = (geo, pick, atY = null) => {
-    const p = geo.getAttribute("position");
+  const spread = (verts, pick, atY = null) => {
     let lo = 1e9, hi = -1e9;
-    for (let i = 0; i < p.count; i++) {
-      if (atY !== null && Math.abs(p.getY(i) - atY) > 1e-3) continue;
-      const d = pick(p.getX(i), p.getZ(i));
+    for (const v of verts) {
+      if (atY !== null && Math.abs(v.y - atY) > 1e-3) continue;
+      const d = pick(v.x, v.z);
       if (d === null) continue;
       lo = Math.min(lo, d); hi = Math.max(hi, d);
     }
     return { lo, hi };
   };
+  /** Adapter for the collision proxies, which are still plain geometries. */
+  const geoVerts = (geo) => {
+    const p = geo.getAttribute("position");
+    const out = [];
+    for (let i = 0; i < p.count; i++) out.push(new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i)));
+    return out;
+  };
   const straight = buildPiece("straight", initialConnector(), { ...pieceParams, straightLength: 30 });
-  const ref = spread(straight.railGeometry, (x) => (x < 0 ? x + edgeAbs : null));
+  const ref = spread(railVerts(straight), (x) => (x < 0 ? x + edgeAbs : null));
   // The proxy's SPREAD is symmetric (±backZ), so a mirrored one looks identical.
   // Its foot is not: only the traffic face reaches down to the kerb top.
-  const refCol = spread(straight.railCollision, (x) => (x < 0 ? x + edgeAbs : null), roadParams.railHeight);
+  const refCol = spread(geoVerts(straight.railCollision), (x) => (x < 0 ? x + edgeAbs : null), roadParams.railHeight);
   check("reference straight has its beam inboard of its posts",
     ref.hi > 0 && ref.lo < -0.1 && ref.hi < -ref.lo,
     `left rail spans ${ref.lo.toFixed(3)} .. ${ref.hi.toFixed(3)}`);
 
   for (const [id, legZ] of [["rounded_end", (z) => z > -pp.roundEndLength + 1], ["rounded_start", (z) => z < -hw - 1]]) {
     const piece = buildPiece(id, initialConnector(), pp);
-    const got = spread(piece.railGeometry, (x, z) => (legZ(z) && x < 0 ? x + edgeAbs : null));
+    const got = spread(railVerts(piece), (x, z) => (legZ(z) && x < 0 ? x + edgeAbs : null));
     check(`${id}: beam faces the road like a straight's does`,
       Math.abs(got.lo - ref.lo) < 0.01 && Math.abs(got.hi - ref.hi) < 0.01,
       `${got.lo.toFixed(3)}..${got.hi.toFixed(3)} vs ${ref.lo.toFixed(3)}..${ref.hi.toFixed(3)}`);
-    const col = spread(piece.railCollision, (x, z) => (legZ(z) && x < 0 ? x + edgeAbs : null), roadParams.railHeight);
+    const col = spread(geoVerts(piece.railCollision), (x, z) => (legZ(z) && x < 0 ? x + edgeAbs : null), roadParams.railHeight);
     check(`${id}: collision proxy foot is on the same side as the beam`,
       Math.abs(col.lo - refCol.lo) < 0.01 && Math.abs(col.hi - refCol.hi) < 0.01,
       `${col.lo.toFixed(3)}..${col.hi.toFixed(3)} vs ${refCol.lo.toFixed(3)}..${refCol.hi.toFixed(3)}`);

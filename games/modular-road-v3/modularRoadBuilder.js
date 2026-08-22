@@ -51,6 +51,10 @@ const _UNIT_SCALE = new THREE.Vector3(1, 1, 1);
 /** Never mutated — the entry pose a piece is built at to read back its own
  *  entry→exit transform. See `_localTransform`. */
 const _IDENTITY = new THREE.Matrix4();
+
+/** Spare instance slots kept in every road batch, so appending one piece to a
+ *  chain rewrites matrices instead of reallocating the buffer. */
+const INSTANCE_SLACK = 8;
 const _isIdentityQuat = (q) => Math.abs(q.w) > 0.9999999;
 
 /** How close a chain's head has to sit to a branch socket or another chain's
@@ -278,6 +282,23 @@ export class ModularRoadBuilder {
     this.ghostEnd = "tail";
     /** @type {Map<string, THREE.Matrix4>} memo for `_localTransform`. */
     this._localXfCache = new Map();
+    /**
+     * Memo for `refreshGhost` — see the note there.
+     *
+     * `{ geometry, fromConn }` per (piece id + params + edges). A piece's
+     * geometry is authored in PIECE space and does not depend on the connector
+     * it is placed at (that is the same property `_relocatePiece` exploits), so
+     * moving the ghost is a matrix multiply, not a rebuild.
+     *
+     * The GHOST DOES NOT OWN what it draws once this is live: every geometry it
+     * holds belongs to this map, so `refreshGhost` must not dispose the outgoing
+     * one and eviction must not free the one currently on screen.
+     * @type {Map<string, {geometry: THREE.BufferGeometry, fromConn: THREE.Matrix4}>}
+     */
+    this._ghostGeoCache = new Map();
+    /** Evicted-but-still-drawn ghost geometry, freed on the next refresh.
+     *  @type {THREE.BufferGeometry|null} */
+    this._ghostOrphanGeo = null;
     /** Which open end the cursor last snapped to, so a mousemove that stays on
      *  the same one does no work at all. @type {string|null} */
     this._lastAimKey = null;
@@ -299,6 +320,10 @@ export class ModularRoadBuilder {
     this.root.add(this.instGroup);
     /** @type {THREE.InstancedMesh[]} */
     this._instMeshes = [];
+    /** The same batches, by (role + geometry hash), so a rebuild can find and
+     *  REUSE one instead of allocating a new buffer — see _rebuildInstances.
+     *  @type {Map<string, THREE.InstancedMesh>} */
+    this._instByKey = new Map();
     /**
      * Default OFF: draw the per-piece meshes directly (each frustum-culled
      * individually, which CSM shadow cascades rely on). Instancing-by-type
@@ -316,7 +341,11 @@ export class ModularRoadBuilder {
       depthWrite: false,
       side: THREE.DoubleSide,
     });
-    this.ghost = new THREE.Mesh(new THREE.BufferGeometry(), this.ghostMat);
+    /** Empty stand-in until the first `refreshGhost`. Held so teardown can free
+     *  it: from that point on the ghost only ever borrows cache-owned geometry
+     *  and must not dispose what it is holding. */
+    this._ghostPlaceholderGeo = new THREE.BufferGeometry();
+    this.ghost = new THREE.Mesh(this._ghostPlaceholderGeo, this.ghostMat);
     this.ghost.name = "ModularRoadGhost";
     this.ghost.matrixAutoUpdate = false;
     scene.add(this.ghost);
@@ -1828,21 +1857,113 @@ export class ModularRoadBuilder {
     return this.currentConnector;
   }
 
-  /** Rebuild the translucent ghost at the open connector (or the detached pose). */
+  /**
+   * Re-pose the translucent ghost at the open connector (or the detached pose).
+   *
+   * MOVING THE GHOST IS A MATRIX WRITE, NOT A REBUILD. This used to call a full
+   * `buildPiece` and keep only `geometry`, and it is called from ~24 places —
+   * including the end of `rebuildAll`, which the placement gizmo's `change`
+   * event fires EVERY FRAME of a drag. So dragging a piece rebuilt its deck,
+   * its guardrail, that rail's collision stand-in, that rail's mirror image, the
+   * tunnel shell, the decor overlay, the glazing and the deck collision proxy,
+   * sixty times a second, and threw all but the deck away.
+   *
+   * Measured (tools/perfAudit2.mjs): 2.7 ms a frame for a straight, 10.1 ms for
+   * a loop, 84–99% of it guardrail the ghost does not even have.
+   *
+   * Two independent halves, both needed:
+   *
+   *   `deckOnly` stops building what is discarded          → 9–90× (kit-side)
+   *   this memo stops rebuilding what has not changed      → the rest
+   *
+   * The memo is the one that matters for a DRAG. A drag moves the connector and
+   * changes nothing else, and geometry is connector-independent, so every frame
+   * after the first is `world = conn · fromConn` and a matrix copy. It also
+   * stops handing three a brand-new BufferGeometry every frame, which on WebGPU
+   * means a new vertex buffer and a new bind group every frame — the same churn
+   * `_rebuildInstances` was guilty of.
+   *
+   * Keyed by VALUE, not by object identity, matching `_localTransform` above:
+   * `toggleCurveDirection` mutates `activeParams` in place, so a reference key
+   * would miss the one edit most likely to be spammed from the keyboard.
+   */
   refreshGhost() {
     const conn = this._placementConnector();
-    const { geometry, world } = buildPiece(
-      this.activePieceId,
-      conn,
-      this.activeParams,
-      roadParams,
-      guardrailParams,
-      guardrailParams.enabled,
-    );
-    this.ghost.geometry.dispose();
-    this.ghost.geometry = geometry;
-    this.ghost.matrix.copy(world);
+    const edges = guardrailParams.enabled;
+    const key = `${this.activePieceId}|${edges ? 1 : 0}|${JSON.stringify(this.activeParams)}`;
+
+    let hit = this._ghostGeoCache.get(key);
+    if (!hit) {
+      // Built at IDENTITY so `world` comes back as the piece-local entry
+      // transform directly — no inverse needed to recover `fromConn`.
+      const built = buildPiece(
+        this.activePieceId,
+        _IDENTITY,
+        this.activeParams,
+        roadParams,
+        guardrailParams,
+        edges,
+        { deckOnly: true },
+      );
+      hit = { geometry: built.geometry, fromConn: built.world.clone() };
+      // Bounded for the same reason `_localXfCache` is: params change
+      // continuously while a slider is dragged. Never evict what is on screen.
+      if (this._ghostGeoCache.size > 32) this._evictGhostGeoCache();
+      this._ghostGeoCache.set(key, hit);
+    }
+
+    // NOT disposed — it belongs to the cache, and the ghost is only borrowing.
+    this.ghost.geometry = hit.geometry;
+    this.ghost.matrix.copy(conn).multiply(hit.fromConn);
     this.ghost.visible = this.isBuildMode();
+
+    // FREE THE ORPHAN LAST, AND READ IT HERE RATHER THAN AT THE TOP.
+    //
+    // An eviction parks the geometry the ghost was mid-draw of (see
+    // _evictGhostGeoCache), and eviction can happen inside THIS call — the miss
+    // branch above trips the size cap. Latching the pointer on entry would then
+    // leave `_ghostOrphanGeo` still holding a buffer this call already freed,
+    // and the next refresh would free it a second time. Reading it after the
+    // swap means the pointer and the release always come from the same moment.
+    //
+    // The identity test is what makes it safe at all: the ghost is pointed at
+    // `hit.geometry` two lines up, so anything else is genuinely unreachable.
+    const orphan = this._ghostOrphanGeo;
+    this._ghostOrphanGeo = null;
+    if (orphan && orphan !== this.ghost.geometry) orphan.dispose();
+  }
+
+  /**
+   * Empty the ghost memo.
+   *
+   * EVERY entry leaves the map, including the one currently on screen — a
+   * survivor would be handed straight back by the `refreshGhost` that follows,
+   * which is the whole reason the cache is being dropped. Its BUFFER cannot go
+   * with it (the ghost is still drawing it this instant), so it is parked in
+   * `_ghostOrphanGeo` and freed at the end of the next `refreshGhost`, once the
+   * ghost has been pointed at something else.
+   */
+  _evictGhostGeoCache() {
+    const live = this.ghost?.geometry;
+    for (const v of this._ghostGeoCache.values()) {
+      if (v.geometry === live) this._ghostOrphanGeo = v.geometry;
+      else v.geometry.dispose();
+    }
+    this._ghostGeoCache.clear();
+  }
+
+  /**
+   * Forget every memo derived from the GLOBAL road/guardrail params.
+   *
+   * Neither cache key can see `roadParams` or `guardrailParams` — they are
+   * module state in the kit, not arguments — so a width or kerb change makes
+   * both stale. `rebuildAll()` without `reuse` is exactly the signal that
+   * something global moved (see the note on its `reuse` flag), so it clears
+   * them there rather than every caller having to remember.
+   */
+  _invalidateShapeCaches() {
+    this._localXfCache.clear();
+    this._evictGhostGeoCache();
   }
 
   setGhostVisible(v) {
@@ -1907,12 +2028,10 @@ export class ModularRoadBuilder {
    * per-geometry hash is cached so repeats are O(pieces).
    */
   _rebuildInstances() {
-    for (const im of this._instMeshes) {
-      this.instGroup.remove(im);
-      im.dispose();
+    if (!this.instancingEnabled) {
+      this._dropInstances(); // proxies render directly instead
+      return;
     }
-    this._instMeshes.length = 0;
-    if (!this.instancingEnabled) return; // proxies render directly instead
 
     const groups = new Map(); // key -> { geometry, material, role, mats: Matrix4[] }
     const add = (proxy, material, role) => {
@@ -1933,19 +2052,75 @@ export class ModularRoadBuilder {
       add(p.decorMesh, this.decorMaterial, "decor");
       add(p.glassMesh, this.glassMaterial, "glass");
     }
-    for (const grp of groups.values()) {
-      const im = new THREE.InstancedMesh(grp.geometry, grp.material, grp.mats.length);
-      for (let i = 0; i < grp.mats.length; i++) im.setMatrixAt(i, grp.mats[i]);
+    // ── REUSE THE BATCHES, REWRITE THE MATRICES ──────────────────────────────
+    //
+    // This used to dispose every InstancedMesh and build a fresh set on each
+    // call — and it is called from the end of `rebuildAll`, which the placement
+    // gizmo drives EVERY FRAME of a drag. So a drag destroyed and recreated all
+    // ~30-50 batches sixty times a second.
+    //
+    // On WebGPU that is worse than the allocation it looks like. A new
+    // InstancedMesh is a new instance buffer, which means a new GPU buffer and a
+    // new bind group, per batch, per frame — the backend has to re-record work
+    // it had already prepared, and there is nothing to reuse across the frame
+    // boundary because the objects it was keyed on no longer exist.
+    //
+    // A drag changes only WHERE the pieces are. Geometry identity is stable
+    // (`_relocatePiece` restamps matrices and never touches `p.mesh.geometry`),
+    // so the grouping is stable too, and the whole update collapses to writing
+    // the same matrices into buffers that are already there.
+    //
+    // A batch is reusable when its geometry AND material are the same objects
+    // and its buffer is big enough. Anything else — a piece replaced, the kerbs
+    // toggled, a remesh from a width change — falls back to building it, which
+    // is the old path and is still correct.
+    const keep = new Set();
+    for (const [key, grp] of groups) {
+      const n = grp.mats.length;
+      let im = this._instByKey.get(key);
+      const capacity = im?.instanceMatrix?.count ?? 0;
+      if (!im || im.geometry !== grp.geometry || im.material !== grp.material || capacity < n) {
+        if (im) { this.instGroup.remove(im); im.dispose(); }
+        // SLACK, so appending one piece to a chain does not reallocate the whole
+        // batch — placing pieces one after another is the single most common
+        // thing anyone does in here.
+        im = new THREE.InstancedMesh(grp.geometry, grp.material, n + INSTANCE_SLACK);
+        im.matrixAutoUpdate = false; // root/instGroup at origin → instance mats are world
+        im.frustumCulled = false; // a track spans a large area; skip per-mesh culling
+        // Neither flat markings nor a window should cast — see the note where
+        // the per-piece glass mesh is born.
+        im.castShadow = grp.role !== "decor" && grp.role !== "glass";
+        im.receiveShadow = true;
+        this.instGroup.add(im);
+        this._instByKey.set(key, im);
+      }
+      for (let i = 0; i < n; i++) im.setMatrixAt(i, grp.mats[i]);
+      // Draw only the live ones; the slack tail is allocated, not rendered.
+      im.count = n;
       im.instanceMatrix.needsUpdate = true;
-      im.matrixAutoUpdate = false; // root/instGroup at origin → instance mats are world
-      im.frustumCulled = false; // a track spans a large area; skip per-mesh culling
-      // Neither flat markings nor a window should cast — see the note where the
-      // per-piece glass mesh is born.
-      im.castShadow = grp.role !== "decor" && grp.role !== "glass";
-      im.receiveShadow = true;
-      this.instGroup.add(im);
-      this._instMeshes.push(im);
+      keep.add(key);
     }
+
+    // Batches whose shape no longer exists on the track at all.
+    for (const [key, im] of this._instByKey) {
+      if (keep.has(key)) continue;
+      this.instGroup.remove(im);
+      im.dispose();
+      this._instByKey.delete(key);
+    }
+
+    this._instMeshes.length = 0;
+    for (const im of this._instByKey.values()) this._instMeshes.push(im);
+  }
+
+  /** Tear every instanced batch down — instancing switched off, or a clear. */
+  _dropInstances() {
+    for (const im of this._instByKey.values()) {
+      this.instGroup.remove(im);
+      im.dispose();
+    }
+    this._instByKey.clear();
+    this._instMeshes.length = 0;
   }
 
   /**
@@ -1969,10 +2144,15 @@ export class ModularRoadBuilder {
     // The cheap stand-in the BVH bakes instead of the rail you can see — rides
     // along on the mesh so nothing downstream needs a new field to plumb.
     if (railMesh) railMesh.userData.collisionGeometry = built.railCollision ?? null;
-    // ...and the rail's mirror image, riding along for the same reason. Nothing
-    // in the builder draws it; roadGame merges every piece's copy into the one
-    // mesh the wet road's reflection pass renders.
-    if (railMesh) railMesh.userData.mirrorGeometry = built.railMirrorGeometry ?? null;
+    // NOTHING HOLDS A MIRRORED RAIL any more. It used to ride along here for the
+    // life of the piece — 280,330 vertices across a track, ~8.5 MB, sampled only
+    // while the road is wet AND only while driving (see buildPiece's note). It is
+    // now built on demand by `buildMirrorRails` and thrown away after the merge.
+    // ...and the POSTS, which are poses rather than geometry now — see
+    // `railPosts` in buildPiece. They ride on the piece rather than the mesh
+    // because roadGame draws them from `builder.pieces`, in both modes, and the
+    // per-piece rail mesh is hidden while driving.
+    if (railMesh) railMesh.userData.railPosts = built.railPosts ?? null;
     const shellMesh =
       built.shellGeometry && this.shellMaterial
         ? this._makeMesh(built.shellGeometry, this.shellMaterial, built.world)
@@ -2543,7 +2723,6 @@ export class ModularRoadBuilder {
     if (p.railMesh) {
       this.root.remove(p.railMesh);
       p.railMesh.geometry.dispose();
-      p.railMesh.userData.mirrorGeometry?.dispose();
     }
     if (p.shellMesh) {
       this.root.remove(p.shellMesh);
@@ -2837,6 +3016,11 @@ export class ModularRoadBuilder {
    * pass `reuse`.
    */
   rebuildAll({ reuse = false } = {}) {
+    // A full remesh is the one moment we know a GLOBAL param may have changed —
+    // that is precisely why `reuse` defaults to false. The shape memos key on
+    // piece id + params only and cannot see roadParams/guardrailParams, so this
+    // is where they have to be dropped. See _invalidateShapeCaches.
+    if (!reuse) this._invalidateShapeCaches();
     for (const chain of this.chains) {
       let conn = chain.anchor.clone();
       for (const p of this.pieces) {
@@ -2898,6 +3082,50 @@ export class ModularRoadBuilder {
     // themselves; this path is the one that actually moved the road.
     if (this.placementGizmo?.dragging) this._collisionDeferred = true;
     this._notify({ collision: !this.placementGizmo?.dragging });
+  }
+
+  /**
+   * The mirrored guardrail for every piece, built HERE AND NOW.
+   *
+   * Transient by contract: the caller owns every geometry it gets back and must
+   * dispose it. Nothing is cached, and nothing is kept on the pieces — that is
+   * the whole point. A mirrored rail is 280,330 vertices across a 41-piece
+   * track (ten times the visible rail, now the posts are instanced), it is only
+   * sampled while the road is WET, and only while DRIVING, and the one consumer
+   * merges the lot into a single mesh and never looks at the parts again.
+   *
+   * Returned with the piece's world matrix rather than pre-transformed so the
+   * caller can bake it in place — it owns the geometry, so it does not need the
+   * defensive clone the old path made.
+   *
+   * @returns {{geometry: THREE.BufferGeometry, matrix: THREE.Matrix4}[]}
+   */
+  buildMirrorRails() {
+    const out = [];
+    for (const p of this.pieces) {
+      // A gap spacer draws no rail, so it reflects none either.
+      if (!p.railMesh || p.railMesh.userData.noRender) continue;
+      const built = buildPiece(
+        p.id, p.connectorIn, p.pp, roadParams, guardrailParams, p.edges ?? true,
+        { mirrorOnly: true },
+      );
+      // mirrorOnly still sweeps the deck (it is cheap and shares the frames),
+      // so free it rather than leaking one per piece per pass.
+      built.geometry?.dispose();
+      if (built.railMirrorGeometry) {
+        // matrixWorld, not matrix — `root` is at the origin today, so they agree,
+        // but the old path read matrixWorld and there is no reason to make this
+        // quietly depend on the root never moving. The caller refreshes it.
+        out.push({
+          geometry: built.railMirrorGeometry,
+          matrix: p.railMesh.matrixWorld,
+          // Posts, as poses. `posts.template` is the SHARED one — do not free it
+          // with the geometry beside it.
+          posts: built.railMirrorPosts,
+        });
+      }
+    }
+    return out;
   }
 
   /**
@@ -2964,12 +3192,12 @@ export class ModularRoadBuilder {
       }
       p.railMesh.userData.collisionGeometry?.dispose();
       p.railMesh.userData.collisionGeometry = built.railCollision ?? null;
-      p.railMesh.userData.mirrorGeometry?.dispose();
-      p.railMesh.userData.mirrorGeometry = built.railMirrorGeometry ?? null;
+      // Poses, not geometry — nothing to dispose. The template they point at is
+      // shared and owned by modularRoadRail.js's cache.
+      p.railMesh.userData.railPosts = built.railPosts ?? null;
     } else if (p.railMesh) {
       this.root.remove(p.railMesh);
       p.railMesh.geometry.dispose();
-      p.railMesh.userData.mirrorGeometry?.dispose();
       p.railMesh = null;
     }
 
@@ -3315,12 +3543,24 @@ export class ModularRoadBuilder {
 
   dispose() {
     this.clear();
+    // `clear()` empties the batches through _rebuildInstances, but only while
+    // instancing is ON. Explicit here so a teardown from the OFF state does not
+    // strand the buffers.
+    this._dropInstances();
     this._hidePlacementGizmo();
     this.placementGizmo?.dispose();
     this.scene.remove(this.placementGizmo?.getHelper());
     this.scene.remove(this.placementPivot);
     this.scene.remove(this.ghost);
-    this.ghost.geometry.dispose();
+    // The ghost BORROWS its geometry from `_ghostGeoCache` (see refreshGhost),
+    // so freeing `this.ghost.geometry` here would double-free whichever entry it
+    // happens to be showing. Drop the cache instead — it owns every one of them,
+    // including the one on screen, which is why the eviction guard is skipped.
+    for (const v of this._ghostGeoCache.values()) v.geometry.dispose();
+    this._ghostGeoCache.clear();
+    this._ghostOrphanGeo?.dispose();
+    this._ghostOrphanGeo = null;
+    this._ghostPlaceholderGeo.dispose();
     this.ghostMat.dispose();
     this.branchMarkers?.clear();
     this.branchMarkerGeo?.dispose();

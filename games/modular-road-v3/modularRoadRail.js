@@ -624,6 +624,56 @@ export function buildPostTemplate(prof, r, kerbTop, centerV, kerbHalf = Infinity
   return merged;
 }
 
+/**
+ * ONE post geometry per distinct shape, shared by every piece that wants it.
+ *
+ * `buildPostTemplate` was called (and thrown away) once per piece per rail
+ * build, producing the identical ~324-vertex object 41 times over on a 41-piece
+ * track. Nothing about it varies along a rail, and across pieces it varies only
+ * with the rail params and three numbers derived from the road profile — so it
+ * is cached on exactly those.
+ *
+ * The cache OWNS every template in it. Callers borrow: `postTemplate` hands back
+ * a geometry that must never be disposed by the receiver, which is the same
+ * contract `markSharedGeometry` states for the prop templates.
+ *
+ * Bounded because the lab drives `railParams` from live sliders, so the key
+ * space is continuous while anyone is dragging one.
+ * @type {Map<string, THREE.BufferGeometry>}
+ */
+const _postTemplates = new Map();
+const POST_TEMPLATE_CACHE_MAX = 16;
+
+/**
+ * The shared post for this rail + road profile, and a key identifying its shape.
+ *
+ * The key is what lets a caller group posts from DIFFERENT pieces into one
+ * instanced draw: two pieces share a post only when every input that shapes it
+ * agrees. They usually do — but not always, and the exception is real: a
+ * platform is wider than the road, `kerbHalf` is clamped against the kerb it
+ * actually gets, so a wide piece can seat its post differently from a narrow
+ * one. Grouping on the key rather than assuming one post per track is what keeps
+ * that correct.
+ */
+export function postTemplate(rp, r = railParams) {
+  const hw = rp.width / 2;
+  const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
+  const kerbTop = rp.railHeight;
+  const centerV = kerbTop + r.gap + r.height * 0.5;
+  const kerbHalf = rw * 0.5;
+  const key = `${JSON.stringify(r)}|${kerbTop}|${centerV}|${kerbHalf}`;
+  let template = _postTemplates.get(key);
+  if (!template) {
+    const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
+    template = buildPostTemplate(prof, r, kerbTop, centerV, kerbHalf);
+    if (_postTemplates.size >= POST_TEMPLATE_CACHE_MAX) {
+      for (const [k, g] of _postTemplates) { g.dispose(); _postTemplates.delete(k); }
+    }
+    _postTemplates.set(key, template);
+  }
+  return { key, template };
+}
+
 const _pa = new THREE.Vector3();
 const _pb = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -649,8 +699,31 @@ const _fwdS = new THREE.Vector3();
  * come out at 4 m or 8 m).
  */
 export function placePosts(frames, template, baseLat, zSign, spacing, out) {
+  for (const m of postTransforms(frames, baseLat, zSign, spacing)) {
+    out.push(template.clone().applyMatrix4(m));
+  }
+}
+
+/**
+ * WHERE the posts go, without building any of them.
+ *
+ * Split out of `placePosts` because a post is the same object ~600 times over —
+ * one template under a rigid transform — and baking 600 copies of it into the
+ * merged rail geometry is what makes the guardrail 89% of the track's vertices.
+ * Measured on a 32 m straight: the deck is 32 vertices, the rail is 6,148, and
+ * `posts: false` takes that to 308. Handed the transforms instead, the caller
+ * can draw all of them as one instanced mesh.
+ *
+ * `placePosts` above is unchanged and still merges them, because the labs and
+ * the thumbnail baker want a single self-contained rail geometry — only the
+ * game has somewhere to put an InstancedMesh.
+ *
+ * @returns {THREE.Matrix4[]} post poses, in the frames' own space.
+ */
+export function postTransforms(frames, baseLat, zSign, spacing) {
+  const out = [];
   const F = frames.length;
-  if (F < 2) return;
+  if (F < 2) return out;
   // Arc length measured AT THIS RAIL'S lateral offset, not on the centreline —
   // the outer rail of a curve is genuinely longer and wants more posts.
   const cum = [0];
@@ -706,9 +779,11 @@ export function placePosts(frames, template, baseLat, zSign, spacing, out) {
     // flip costs nothing.
     _rightS.copy(_right).multiplyScalar(zSign);
     _fwdS.copy(_fwd).multiplyScalar(-zSign);
-    _m.makeBasis(_rightS, _up, _fwdS).setPosition(_pos);
-    out.push(template.clone().applyMatrix4(_m));
+    // A fresh Matrix4 per post, not the shared scratch — these are handed to the
+    // caller and outlive this loop.
+    out.push(new THREE.Matrix4().makeBasis(_rightS, _up, _fwdS).setPosition(_pos));
   }
+  return out;
 }
 
 /**
@@ -938,13 +1013,29 @@ export function buildRailCollision(frames, rp, r = railParams) {
  * plane offset from the frame origin — reintroducing exactly the kind of
  * special case this approach exists to avoid.
  */
-export function buildMirroredRailGeometry(frames, rp, r = railParams) {
+export function buildMirroredRailGeometry(frames, rp, r = railParams, opts = {}) {
   if (!frames?.length) return null;
   const flipped = frames.map((f) => ({ ...f, up: f.up.clone().negate() }));
-  return buildRailGeometry(flipped, rp, r);
+  // `opts` passes straight through, so a caller can take the mirrored POSTS as
+  // transforms too — see the postSink note on buildRailGeometry. The mirrored
+  // poses come out of the flipped frames on their own; no second code path.
+  return buildRailGeometry(flipped, rp, r, opts);
 }
 
-export function buildRailGeometry(frames, rp, r = railParams) {
+/**
+ * @param {object} [opts]
+ * @param {{key: string, template: THREE.BufferGeometry|null, matrices: THREE.Matrix4[]}}
+ *   [opts.postSink] When given, the posts are NOT merged into the returned
+ *   geometry — their poses are collected here instead, for the caller to draw
+ *   as one instanced mesh. See `postTransforms` for why.
+ *
+ *   Off by default on purpose: the labs and the thumbnail baker want one
+ *   self-contained rail they can drop into a scene, and only the game has
+ *   anywhere to put an InstancedMesh. Passing a sink is opting IN to owning the
+ *   posts, and the caller that does must draw them or they simply will not be
+ *   there.
+ */
+export function buildRailGeometry(frames, rp, r = railParams, opts = {}) {
   if (r.height <= 0 || !frames?.length) return null;
   const hw = rp.width / 2;
   const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
@@ -954,9 +1045,11 @@ export function buildRailGeometry(frames, rp, r = railParams) {
   const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
 
   // Post space is centred on the kerb, so the kerb's outer edge is at rw/2.
-  const template = r.posts
-    ? buildPostTemplate(prof, r, kerbTop, centerV, rw * 0.5)
-    : null;
+  // Shared and cached — never disposed here; see postTemplate.
+  const post = r.posts ? postTemplate(rp, r) : null;
+  const sink = opts.postSink ?? null;
+  if (post && sink) { sink.key = post.key; sink.template = post.template; }
+
   const geos = [];
   for (const side of [-1, 1]) {
     const zSign = r.mirrorSides ? side : 1;
@@ -968,9 +1061,14 @@ export function buildRailGeometry(frames, rp, r = railParams) {
     // actually matters, or the posts stand off the beam — see placePosts.
     const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle, baseLat);
     geos.push(sweepRail(sweepFrames, prof, baseLat, zSign, centerV));
-    if (template) placePosts(sweepFrames, template, baseLat, zSign, r.postSpacing, geos);
+    if (!post) continue;
+    if (sink) {
+      const ms = postTransforms(sweepFrames, baseLat, zSign, r.postSpacing);
+      for (const m of ms) sink.matrices.push(m);
+    } else {
+      placePosts(sweepFrames, post.template, baseLat, zSign, r.postSpacing, geos);
+    }
   }
-  template?.dispose();
   const merged = mergeGeometries(geos, false);
   for (const g of geos) g.dispose();
   if (merged) merged.computeBoundingSphere();
@@ -997,20 +1095,28 @@ export function buildRailGeometry(frames, rp, r = railParams) {
  * Do not "fix" that by flipping `up` or rebuilding `right` — that is a mirror
  * (determinant −1) and it is what hung the rail upside down last time.
  */
-export function buildRailAlongPath(frames, rp, r = railParams) {
+export function buildRailAlongPath(frames, rp, r = railParams, opts = {}) {
   if (r.height <= 0 || !frames?.length) return null;
   const kerbTop = rp.railHeight;
   const centerV = kerbTop + r.gap + r.height * 0.5;
-  const rw = Math.min(Math.max(0, rp.railWidth), rp.width * 0.45);
   const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
-  const template = r.posts
-    ? buildPostTemplate(prof, r, kerbTop, centerV, rw * 0.5)
-    : null;
+  // NOTE the kerb clamp here uses rp.width, not hw — that is this path's own
+  // convention and is left alone. postTemplate re-derives it from `rp` the same
+  // way buildRailGeometry does, so a rounded end and a straight of the same road
+  // profile share one post, one key and therefore one instanced draw.
+  const post = r.posts ? postTemplate(rp, r) : null;
+  const sink = opts.postSink ?? null;
+  if (post && sink) { sink.key = post.key; sink.template = post.template; }
   const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle, 0);
   const zSign = -1; // deck on +right → left-hand rail (see above)
   const geos = [sweepRail(sweepFrames, prof, 0, zSign, centerV)];
-  if (template) placePosts(sweepFrames, template, 0, zSign, r.postSpacing, geos);
-  template?.dispose();
+  if (post) {
+    if (sink) {
+      for (const m of postTransforms(sweepFrames, 0, zSign, r.postSpacing)) sink.matrices.push(m);
+    } else {
+      placePosts(sweepFrames, post.template, 0, zSign, r.postSpacing, geos);
+    }
+  }
   const merged = mergeGeometries(geos, false);
   for (const g of geos) g.dispose();
   if (merged) merged.computeBoundingSphere();
@@ -1047,8 +1153,8 @@ export function buildRailCollisionAlongPath(frames, rp, r = railParams) {
 }
 
 /** Mirror of {@link buildRailAlongPath} for the wet-road reflection pass. */
-export function buildMirroredRailAlongPath(frames, rp, r = railParams) {
+export function buildMirroredRailAlongPath(frames, rp, r = railParams, opts = {}) {
   if (!frames?.length) return null;
   const flipped = frames.map((f) => ({ ...f, up: f.up.clone().negate() }));
-  return buildRailAlongPath(flipped, rp, r);
+  return buildRailAlongPath(flipped, rp, r, opts);
 }

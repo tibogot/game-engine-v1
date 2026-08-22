@@ -23,6 +23,9 @@ const _triC = new THREE.Vector3();
 const _v = new THREE.Vector3();
 const _hitTriInfo = {};
 const _hitNormal = new THREE.Vector3();
+/** Float → its exact 32-bit pattern, for hashing poses without rounding. */
+const _f32 = new Float32Array(1);
+const _u32 = new Uint32Array(_f32.buffer);
 
 export class RoadBvh {
   constructor() {
@@ -30,62 +33,195 @@ export class RoadBvh {
     this._bvh = null;
     this.geometry = null;
     this.triCount = 0;
+    /** Content signature of the meshes this tree was built from — see
+     *  `_signature`. Null means "no tree", which never matches. */
+    this._sig = null;
   }
 
   invalidate() {
     this.baked = false;
+    this._sig = null; // force the next bake to actually run
   }
 
-  /** Merge `meshes` (using their world matrices) into one double-sided BVH. */
-  bakeFromMeshes(meshes) {
-    const positions = [];
-    const indices = [];
-    let vertexOffset = 0;
-
+  /**
+   * A cheap, exact description of what a bake WOULD read.
+   *
+   * `bakeFromMeshes` only ever looks at each mesh's geometry and its world
+   * matrix, so two calls with the same geometries at the same poses must
+   * produce the same tree — and rebuilding it is pure waste.
+   *
+   * That is not a rare case, it is most calls. `bakeCollision` is wired to the
+   * onChange of the builder, the prop manager, the MOVER manager and the portal
+   * manager, and it rebuilds the road's deck and solids trees unconditionally.
+   * Movers and portals are not in either of those trees at all (movers live in
+   * their own per-tick BVH), so releasing a mover gizmo rebuilt the whole road
+   * for nothing — measured at 52 ms on a 41-piece track.
+   *
+   * A signature is the right shape of fix rather than gating each caller,
+   * because it cannot be wrong about what changed: it is derived from the exact
+   * inputs the bake consumes.
+   *
+   * Geometry is identified by `uuid`, which is sound here because nothing
+   * mutates a geometry in place after handing it over — the builder's
+   * `_applyBuilt` assigns a NEW BufferGeometry (and so a new uuid) whenever a
+   * piece is remeshed, and a piece that merely MOVED keeps its geometry and
+   * changes its matrix, which this reads too.
+   */
+  _signature(meshes) {
+    // FNV-1a over the fields, plus an independent length/count tally so a hash
+    // collision has to beat both.
+    let h = 2166136261;
+    let n = 0;
+    const mix = (x) => { h = Math.imul(h ^ x, 16777619); };
+    const mixNum = (v) => {
+      // Exact for the float bit pattern, not a rounded value: a 1 mm pose
+      // change must not hash the same as no change at all.
+      _f32[0] = v;
+      mix(_u32[0]);
+    };
     for (const mesh of meshes) {
       if (!mesh) continue;
       const geo = mesh.geometry;
       const posAttr = geo?.getAttribute("position");
       if (!posAttr) continue;
       mesh.updateMatrixWorld(true);
-      const m = mesh.matrixWorld;
-      const idx = geo.getIndex();
+      n += posAttr.count;
+      const uuid = geo.uuid;
+      for (let i = 0; i < uuid.length; i++) mix(uuid.charCodeAt(i));
+      mix(posAttr.count);
+      const e = mesh.matrixWorld.elements;
+      for (let i = 0; i < 16; i++) mixNum(e[i]);
+    }
+    return `${h >>> 0}:${n}`;
+  }
 
-      for (let i = 0; i < posAttr.count; i++) {
-        _v.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(m);
-        positions.push(_v.x, _v.y, _v.z);
-      }
-      if (idx) {
-        for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + vertexOffset);
-      } else {
-        for (let i = 0; i < posAttr.count; i++) indices.push(i + vertexOffset);
-      }
-      vertexOffset += posAttr.count;
+  /**
+   * Merge `meshes` (using their world matrices) into one double-sided BVH.
+   *
+   * @param {object[]} meshes anything with `.geometry` + `.matrixWorld` — the
+   *   road hands in lightweight stand-ins as well as real Meshes, so this must
+   *   not assume Object3D beyond `updateMatrixWorld()`.
+   * @param {object} [opts]
+   * @param {boolean} [opts.force] rebuild even if the inputs are unchanged.
+   */
+  bakeFromMeshes(meshes, { force = false } = {}) {
+    // ── UNCHANGED INPUTS ⇒ THE TREE WE ALREADY HAVE ─────────────────────────
+    // Note this runs `updateMatrixWorld` on every mesh as it goes, so the poses
+    // it hashes are the current ones and a skip can never be based on stale
+    // matrices.
+    const sig = this._signature(meshes);
+    if (!force && this.baked && sig === this._sig) return true;
+
+    // ── SIZE FIRST, THEN FILL ───────────────────────────────────────────────
+    // This used to build `positions` and `indices` as plain JS arrays, one
+    // element per `push` — ~100k pushes for a 33k-vertex track — and then copy
+    // the whole thing again into a Float32Array. Counting first means each
+    // buffer is allocated once, at the right size, and written straight into.
+    let vertCount = 0;
+    let indexCount = 0;
+    for (const mesh of meshes) {
+      if (!mesh) continue;
+      const posAttr = mesh.geometry?.getAttribute("position");
+      if (!posAttr) continue;
+      vertCount += posAttr.count;
+      const idx = mesh.geometry.getIndex();
+      indexCount += idx ? idx.count : posAttr.count;
     }
 
-    if (positions.length === 0) {
+    if (vertCount === 0) {
+      this._bvh?.geometry?.dispose?.();
       this.baked = false;
       this._bvh = null;
       this.geometry = null;
       this.triCount = 0;
+      this._sig = null;
       return false;
     }
 
+    const positions = new Float32Array(vertCount * 3);
+    // Doubled, because every triangle is about to get a winding-flipped twin.
+    // 16-bit indices only when every index fits, matching what
+    // BufferGeometry.setIndex would have chosen from a plain array.
+    const indices = vertCount > 65535
+      ? new Uint32Array(indexCount * 2)
+      : new Uint16Array(indexCount * 2);
+
+    let pw = 0; // position write cursor (floats)
+    let iw = 0; // index write cursor
+    let vertexOffset = 0;
+    for (const mesh of meshes) {
+      if (!mesh) continue;
+      const geo = mesh.geometry;
+      const posAttr = geo?.getAttribute("position");
+      if (!posAttr) continue;
+      // Already done by _signature above, but this method has to stay correct
+      // when called with force:true on a caller that skipped it.
+      mesh.updateMatrixWorld(true);
+      const e = mesh.matrixWorld.elements;
+      const count = posAttr.count;
+
+      // Read straight out of the backing array where the layout allows it. An
+      // interleaved or normalized attribute goes the accessor route — slower,
+      // but the road does hand this arbitrary prop geometry.
+      const flat = !posAttr.isInterleavedBufferAttribute
+        && posAttr.itemSize === 3 && !posAttr.normalized
+        ? posAttr.array
+        : null;
+
+      for (let i = 0; i < count; i++) {
+        let x, y, z;
+        if (flat) {
+          const o = i * 3;
+          x = flat[o]; y = flat[o + 1]; z = flat[o + 2];
+        } else {
+          x = posAttr.getX(i); y = posAttr.getY(i); z = posAttr.getZ(i);
+        }
+        // Vector3.applyMatrix4, inlined — including the perspective divide, so
+        // this is bit-for-bit what the old path produced even though every
+        // matrix the road uses is affine (w = 1).
+        const w = 1 / (e[3] * x + e[7] * y + e[11] * z + e[15]);
+        positions[pw++] = (e[0] * x + e[4] * y + e[8] * z + e[12]) * w;
+        positions[pw++] = (e[1] * x + e[5] * y + e[9] * z + e[13]) * w;
+        positions[pw++] = (e[2] * x + e[6] * y + e[10] * z + e[14]) * w;
+      }
+
+      const idx = geo.getIndex();
+      if (idx) {
+        const ia = idx.array;
+        for (let i = 0; i < idx.count; i++) indices[iw++] = ia[i] + vertexOffset;
+      } else {
+        for (let i = 0; i < count; i++) indices[iw++] = i + vertexOffset;
+      }
+      vertexOffset += count;
+    }
+
     // Duplicate every triangle with flipped winding → double-sided collision.
-    const origLen = indices.length;
-    for (let i = 0; i < origLen; i += 3) {
-      indices.push(indices[i], indices[i + 2], indices[i + 1]);
+    //
+    // NOT REMOVABLE, however much it looks like it. It doubles the triangle
+    // count and every argument for dropping it is superficially sound —
+    // raycastFirst already passes DoubleSide, closest-point is a distance
+    // question, spherecast is sign-agnostic. It still changes answers:
+    // tools/bvhWindingProbe.mjs measures 319 hit/miss and 35 distance
+    // disagreements (max 4.11 m) across 2888 closest-point probes, against a
+    // control of 0/0. Closest-point is what deck contact and the solids
+    // resolver are built on. Read that file before touching this.
+    const half = iw;
+    for (let i = 0; i < half; i += 3) {
+      indices[iw++] = indices[i];
+      indices[iw++] = indices[i + 2];
+      indices[iw++] = indices[i + 1];
     }
 
     const merged = new THREE.BufferGeometry();
-    merged.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-    merged.setIndex(indices);
+    merged.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    merged.setIndex(new THREE.BufferAttribute(indices, 1));
 
     this._bvh?.geometry?.dispose?.();
     this._bvh = new MeshBVH(merged);
     this.geometry = merged;
-    this.triCount = indices.length / 3;
+    this.triCount = iw / 3;
     this.baked = true;
+    this._sig = sig;
     return true;
   }
 

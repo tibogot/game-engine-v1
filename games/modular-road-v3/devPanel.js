@@ -912,6 +912,24 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">· Centre dashes</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-lines-center" type="button" aria-label="Centre dashes">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">· Edge lines</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-lines-edge" type="button" aria-label="Edge lines">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">· Lines bloom</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-lines-bloom" type="button" aria-label="Lines bloom">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Asphalt dark</span>
             <div class="prop-value">
               <input type="color" id="dv-road-dark" />
@@ -2199,6 +2217,9 @@ export function createRoadDevPanel({ app, game, params }) {
   const selTiltEl = $("#dv-sel-tilt");
 
   toggle("dv-lines", game.getLinesOn(), (on) => game.setLinesOn(on));
+  toggle("dv-lines-center", game.getCenterLinesOn?.() ?? true, (on) => game.setCenterLinesOn?.(on));
+  toggle("dv-lines-edge", game.getEdgeLinesOn?.() ?? true, (on) => game.setEdgeLinesOn?.(on));
+  toggle("dv-lines-bloom", game.getLinesBloom?.() ?? false, (on) => game.setLinesBloom?.(on));
   // Road-surface uniforms are TSL `uniform()` objects, so the slider / colour
   // helpers drive their `.value` directly — every change is live, no rebuild.
   // Colours live in linear space in the shader; the picker shows sRGB.

@@ -285,6 +285,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   /** Same `let … = null` reason as devPanel: bakeCollision hands these to the
    *  vehicle, and `const vehicle` below would be in TDZ on an early bake. */
   let vehicleRef = null;
+  /**
+   * Same late-bind as `_propInstancerRef` / `_mergedGroupRef`, and needed for
+   * the same reason: the builder fires `onChange` from inside its own
+   * constructor, so anything that handler reaches must survive being called
+   * before `const builder` — and before the post batches further down — exist.
+   * Guarding on this ref is what lets `rebuildRailPosts` bail out cleanly
+   * instead of throwing on a temporal dead zone.
+   */
+  let builderRef = null;
 
   const builder = new ModularRoadBuilder({
     scene,
@@ -299,13 +308,36 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     orbit: controls,
     isBuildMode: () => mode === "build",
     onChange: (info = {}) => {
-      if (info.collision !== false) bakeCollision();
-      // The builder rebuilds its instanced layer on every change, so the mirror
-      // would quietly lose the rails without this.
-      applyRailReflectionMembers();
+      // `collision: false` is the builder saying "this notify is mid-drag or
+      // cursor-only — the track has not settled". BOTH of the expensive settle
+      // jobs hang off it, not just the BVH.
+      //
+      // The mirror used to be outside this gate, and it is the more expensive
+      // half: applyRailReflectionMembers ends in rebuildMirrorRails, which does
+      // a full scene.updateMatrixWorld(true) and then clones, world-bakes and
+      // merges every piece's mirror rail — 280,330 vertices on rushline
+      // (tools/perfAudit.mjs). The placement gizmo's `change` event fires every
+      // frame of a drag, so dragging one piece re-merged the whole track sixty
+      // times a second.
+      //
+      // Nothing is lost by waiting. Layer membership only has to be true by the
+      // time the frame is drawn, and the drag's own end-of-drag notify (see
+      // `_collisionDeferred` in the builder) is what re-runs both.
+      if (info.collision !== false) {
+        bakeCollision();
+        // The builder rebuilds its instanced layer on every change, so the
+        // mirror would quietly lose the rails without this.
+        applyRailReflectionMembers();
+      }
+      // OUTSIDE the settle gate, unlike the two above. Posts are VISIBLE, so
+      // holding them until pointer-up would leave every one of them standing
+      // where the rail used to be for the whole length of a drag. One matrix
+      // multiply per post is affordable per frame; a 280k-vertex merge is not.
+      rebuildRailPosts();
       paletteUi?.refreshStatus?.();
     },
   });
+  builderRef = builder; // see the note on the declaration — TDZ guard for onChange
 
   // ── PROPS / MOVERS / PORTALS ───────────────────────────────────────────────
   // Track content beyond the road surface: obstacles and boost pads (props),
@@ -937,23 +969,194 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   mirrorRailGroup.matrixAutoUpdate = false;
   scene.add(mirrorRailGroup);
 
+  // ── GUARDRAIL POSTS ────────────────────────────────────────────────────────
+  //
+  // One InstancedMesh per post SHAPE, holding every post on the track.
+  //
+  // A post is a single ~324-vertex object repeated about 600 times, and it used
+  // to be baked into each piece's merged rail geometry. That is what made the
+  // guardrail 89% of the track's vertices — measured on rushline
+  // (tools/perfAudit.mjs): 280,330 rail vertices against a 35,600-vertex deck,
+  // and `posts: false` on a single 32 m straight takes its rail from 6,148
+  // vertices to 308.
+  //
+  // BE CLEAR ABOUT WHAT THIS BUYS, because it is not what "195k fewer vertices"
+  // sounds like. The same posts still rasterise and still run the vertex shader
+  // once per instance vertex — instancing removes the DUPLICATION, not the
+  // drawing. What it actually saves is memory (one template instead of ~600
+  // baked copies), the mergeGeometries pass over those copies on every remesh,
+  // and the size of the drive-mode merged track. tools/railBudget.mjs made the
+  // same point before any of this was written; it is worth re-reading before
+  // anyone expects a frame-rate number from it.
+  //
+  // In the SCENE, not under builder.root: drive mode hides that root and draws
+  // the merged track instead, and the posts have to survive both modes.
+  const postGroup = new THREE.Group();
+  postGroup.name = "GuardrailPosts";
+  scene.add(postGroup);
+  /** key -> InstancedMesh, reused across rebuilds like the builder's batches. */
+  const postBatches = new Map();
+  /** Scratch, so a rebuild allocates nothing per post. */
+  const _postWorld = new THREE.Matrix4();
+  /** Spare instance slots, so placing one more piece rewrites rather than
+   *  reallocates — same reasoning as INSTANCE_SLACK in the builder. */
+  const POST_SLACK = 64;
+  /**
+   * Edge of the world cell posts are batched into, in metres.
+   *
+   * The knob trades draw calls against culling granularity, the same trade
+   * MERGE_CHUNK_EXTENT makes for the track, and it wants to be the same order of
+   * magnitude: small enough that looking down a straight culls most of the
+   * track's posts, large enough that a lap is not a hundred batches.
+   */
+
+  /**
+   * Re-pose every guardrail post from the current pieces.
+   *
+   * Cheap enough to run on EVERY builder notify, mid-drag included, and it has
+   * to be: the posts are visible, so deferring them to pointer-up the way the
+   * BVH and the mirror are deferred would leave them standing where the rail
+   * used to be for the whole length of a drag. It is one matrix multiply per
+   * post — ~600 of them — against a 16 ms frame.
+   */
+  function rebuildRailPosts() {
+    // MUST be the first statement: the builder's constructor fires onChange, so
+    // this runs once before `builder` — and before `postBatches` below it — has
+    // been initialised. Touching either would be a TDZ throw. The rebuild that
+    // follows construction covers the pieces this call skips.
+    if (!builderRef) return;
+    // Group by post SHAPE. Two pieces share a draw only if they share a template
+    // key; a platform is wider than the road and can seat its post differently,
+    // so this is not always one group (see postTemplate).
+    //
+    // NOT ALSO BY REGION, and that is a measured decision rather than an
+    // omission. Instrumenting real frames (onBeforeRender over 120 frames of
+    // driving rushline) found this batch was 359k triangles a frame — 44% of
+    // everything drawn, more than the merged track and the whole terrain
+    // clipmap combined. Splitting it into world cells so it could frustum-cull
+    // was the obvious fix and it does not work: sweeping the cell size showed
+    // the triangles barely move, because a chase camera looking down a track
+    // sees nearly all of it.
+    //
+    //   cell size   batches   draws/frame   KTris/frame
+    //     one           4          4            89.8
+    //     240           7          6            78.1
+    //     120          13         12            78.1
+    //      80          19         18            78.1
+    //
+    // Only ~13% ever culls, so the split buys ~12k triangles for 11 extra draws
+    // — the wrong direction on a frame that is CPU-bound at 99% main-thread
+    // utilisation. The whole win was `castShadow` below. Left as one batch.
+    const wanted = new Map(); // key -> { template, mats: Matrix4[] }
+    for (const p of builderRef.pieces) {
+      const rm = p.railMesh;
+      const rp = rm?.userData?.railPosts;
+      if (!rp?.template || !rp.matrices?.length) continue;
+      // Hidden pieces (gap spacers) draw no rail, so they get no posts either.
+      if (rm.userData.noRender) continue;
+      let g = wanted.get(rp.key);
+      if (!g) { g = { template: rp.template, mats: [] }; wanted.set(rp.key, g); }
+      // Post poses are PIECE-LOCAL; the piece's own matrix puts them in the world.
+      for (const m of rp.matrices) g.mats.push(_postWorld.multiplyMatrices(rm.matrix, m).clone());
+    }
+
+    for (const [key, g] of wanted) {
+      const n = g.mats.length;
+      let im = postBatches.get(key);
+      if (!im || im.geometry !== g.template || (im.instanceMatrix?.count ?? 0) < n) {
+        if (im) { postGroup.remove(im); im.dispose(); }
+        im = new THREE.InstancedMesh(g.template, railMaterial, n + POST_SLACK);
+        // NO SHADOWS, and this is the other half of the 359k. A caster is drawn
+        // once per cascade as well as once for the view, so with three cascades
+        // the posts were paying 4× — and what they buy is the shadow of a 0.15 m
+        // post standing on a kerb, under a rail beam that already casts one.
+        // Measured share of the frame's triangles: 44% with this on, 11% with it
+        // off — 359k a frame down to 90k, and it is the entire win here.
+        // Flip it back if the look turns out to want them.
+        im.castShadow = false;
+        im.receiveShadow = true;
+        // One batch spans the track, so a bounding sphere round it is in frustum
+        // essentially always — the cull would cost a sphere recomputed over 863
+        // instances on every rebuild (which is every frame of a gizmo drag) to
+        // answer "yes". See the sweep above.
+        im.frustumCulled = false;
+        postGroup.add(im);
+        postBatches.set(key, im);
+      }
+      for (let i = 0; i < n; i++) im.setMatrixAt(i, g.mats[i]);
+      im.count = n;
+      im.instanceMatrix.needsUpdate = true;
+    }
+    for (const [key, im] of postBatches) {
+      if (wanted.has(key)) continue;
+      postGroup.remove(im);
+      im.dispose();
+      postBatches.delete(key);
+    }
+  }
+
   function disposeMirrorRails() {
-    for (const m of mirrorRailGroup.children) m.geometry?.dispose();
+    for (const m of mirrorRailGroup.children) {
+      if (m.isInstancedMesh) {
+        // POSTS. Their geometry is the SHARED template from
+        // modularRoadRail.js's cache — the same object the VISIBLE posts are
+        // drawing with. Freeing it here would pull the buffer out from under
+        // them, and the failure would not show until the next draw handed
+        // WebGPU a null buffer. `InstancedMesh.dispose()` releases the instance
+        // buffer and leaves the geometry alone, which is exactly right.
+        m.dispose();
+        continue;
+      }
+      m.geometry?.dispose(); // the merged beam — built for this pass, ours to free
+    }
     mirrorRailGroup.clear();
   }
 
   /**
-   * Rebuild the mirrored rail from what the builder is holding.
+   * Rebuild the mirrored rail, building the geometry for it as we go.
    *
-   * Reads the per-piece `railMesh.userData.mirrorGeometry` the kit stashed, in
-   * PIECE space, and bakes each into world space — the same shape as
-   * buildMergedTrack, and merged for the same reason: the reflection pass would
-   * otherwise redraw every piece of the track separately.
+   * Asks the builder for a mirrored rail per piece, bakes each into world space,
+   * merges the lot into one mesh, and FREES THE PARTS. Merged for the same
+   * reason buildMergedTrack merges: the reflection pass would otherwise redraw
+   * every piece of the track separately.
    *
-   * Driven off `builder.pieces` rather than off the merged group, so it is
-   * identical in build and drive mode. The merged track hides the per-piece
-   * meshes but the piece RECORDS are still there, which is what this needs.
+   * NOTHING IS RETAINED between passes. The per-piece mirrored rails used to be
+   * built by every `buildPiece` call and kept on the pieces for the life of the
+   * track — 280,330 vertices, ~8.5 MB — even though this function's own output
+   * is the only thing ever drawn from them.
+   *
+   * DRIVE MODE ONLY, which is new and is where most of the saving comes from.
+   * `updateCarReflection` runs the pre-mirror pass under `mode === "drive"` and
+   * pins the road's rail-mirror uniform to 0 otherwise, so a mirrored rail built
+   * while editing could never be sampled. Building it anyway meant every piece
+   * you placed on a wet track paid a full-track re-merge — measured at 240 ms —
+   * for something invisible.
    */
+  /**
+   * Whether the mirrored rail was BUILT last time we looked.
+   *
+   * The geometry depends on the track and on nothing else — `wetAmount` decides
+   * only whether it is drawn at all, not what it looks like. So a weather slider
+   * needs a rebuild exactly twice across its whole range, at the two ends. See
+   * `syncMirrorRails`.
+   */
+  let mirrorRailsBuilt = false;
+
+  /**
+   * Is a mirrored rail worth having right now?
+   *
+   * One predicate, so `rebuildMirrorRails` and `syncMirrorRails` cannot drift —
+   * the whole point of `mirrorRailsBuilt` is that the two agree about what the
+   * answer was last time.
+   *
+   * `mode === "drive"` is the load-bearing term. See the note on
+   * rebuildMirrorRails: the pre-mirror pass does not run in build mode, so
+   * geometry built there is never sampled.
+   */
+  function mirrorRailsWanted(wet) {
+    return mode === "drive" && railsInMirror && reflectionEnabled && wet > 0;
+  }
+
   function rebuildMirrorRails() {
     disposeMirrorRails();
     // Dry road, reflections off, or rails off: nothing to draw and, more to the
@@ -963,17 +1166,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // until much further down — naming it here is a temporal-dead-zone throw,
     // the same trap `_mergedGroupRef` exists to dodge.
     const wet = roadMaterial?._roadUniforms?.wetAmount?.value ?? 0;
-    const on = railsInMirror && reflectionEnabled && wet > 0;
+    const on = mirrorRailsWanted(wet);
     carReflection.preMirrorActive = false;
+    mirrorRailsBuilt = false;
     if (!on || !builder?.pieces?.length) return;
     scene.updateMatrixWorld(true);
+    // Built to order, and OURS — so the transform goes in place. The old path
+    // cloned first because the geometry belonged to the piece and had to survive.
     const geos = [];
-    for (const p of builder.pieces) {
-      const g = p.railMesh?.userData?.mirrorGeometry;
-      if (!g) continue;
-      const c = g.clone();
-      c.applyMatrix4(p.railMesh.matrixWorld);
-      geos.push(c);
+    /** key -> { template, mats } — the mirrored POSTS, instanced like the real
+     *  ones rather than merged into the beam. See the note below. */
+    const postGroups = new Map();
+    for (const { geometry, matrix, posts } of builder.buildMirrorRails()) {
+      geometry.applyMatrix4(matrix);
+      geos.push(geometry);
+      if (!posts?.template || !posts.matrices.length) continue;
+      let grp = postGroups.get(posts.key);
+      if (!grp) { grp = { template: posts.template, mats: [] }; postGroups.set(posts.key, grp); }
+      // Piece-local → world, same as the visible posts.
+      for (const m of posts.matrices) grp.mats.push(_postWorld.multiplyMatrices(matrix, m).clone());
     }
     if (!geos.length) return;
     const merged = mergeGeometries(geos, false);
@@ -988,7 +1199,57 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     mesh.frustumCulled = false;
     mesh.layers.set(PREMIRROR_LAYER);
     mirrorRailGroup.add(mesh);
+
+    // ── MIRRORED POSTS ───────────────────────────────────────────────────────
+    //
+    // Same move as the visible rail's, and the same reason: a post is one shape
+    // repeated hundreds of times, and merging every copy into the beam is what
+    // made this the largest geometry in the game. It shares the visible rail's
+    // TEMPLATE — `postTemplate` keys on the rail and road params, and mirroring
+    // changes neither — but needs its own mesh, because this one lives on the
+    // pre-mirror layer and the other does not.
+    //
+    // These instance matrices have a NEGATIVE DETERMINANT: they come from frames
+    // with `up` negated, which is a reflection. That is fine here and is not a
+    // new compromise — the merged path baked exactly the same reflection into
+    // the vertices. The guardrail material is DoubleSide so the flipped winding
+    // costs nothing, and the flipped normals are the error
+    // buildMirroredRailGeometry already documents and accepts.
+    for (const [, grp] of postGroups) {
+      const im = new THREE.InstancedMesh(grp.template, railMaterial, grp.mats.length);
+      for (let i = 0; i < grp.mats.length; i++) im.setMatrixAt(i, grp.mats[i]);
+      im.instanceMatrix.needsUpdate = true;
+      im.castShadow = false;
+      im.receiveShadow = false;
+      im.frustumCulled = false;
+      im.layers.set(PREMIRROR_LAYER);
+      mirrorRailGroup.add(im);
+    }
+
     carReflection.preMirrorActive = true;
+    mirrorRailsBuilt = true;
+  }
+
+  /**
+   * The mirrored rail, for callers that changed WHETHER it is shown rather than
+   * WHAT it is.
+   *
+   * `rebuildMirrorRails` clones, world-bakes and merges every piece's mirror
+   * geometry — 280,330 vertices on rushline (tools/perfAudit.mjs) — and it was
+   * wired straight to `setRoadWet`, which the weather slider calls on every
+   * `input` event. Dragging that slider re-merged the whole track per pointer
+   * move, for a result that is identical at every value: the geometry does not
+   * depend on wetness, only its visibility does.
+   *
+   * So this rebuilds only when the on/off answer actually flips. Anything that
+   * changes the TRACK still calls `rebuildMirrorRails` directly — this is not a
+   * general-purpose "refresh if needed", it cannot see geometry changes.
+   */
+  function syncMirrorRails() {
+    const wet = roadMaterial?._roadUniforms?.wetAmount?.value ?? 0;
+    const want = mirrorRailsWanted(wet) && !!builder?.pieces?.length;
+    if (want === mirrorRailsBuilt) return;
+    rebuildMirrorRails();
   }
   /** Roadside scenery (lamps, boards) in the mirror — see the note below. */
   let sceneryInMirror = true;
@@ -1124,9 +1385,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     syncRoadMaterialFeatures();
     roadMaterial._roadUniforms.wetAmount.value = wet;
     // Crossing 0 in either direction changes whether the mirrored rail is worth
-    // building at all, and the material it draws with may just have been
-    // replaced.
-    rebuildMirrorRails();
+    // building at all — and ONLY that. The rail's mirror geometry is a function
+    // of the track, and it draws with `railMaterial`, which this never touches
+    // (the material `syncRoadMaterialFeatures` may have just swapped is the
+    // ROAD's). So this is a rebuild at the two ends of the slider's range and
+    // nothing at all in between — which matters, because the panel calls this on
+    // every `input` event and the rebuild merges the whole track.
+    syncMirrorRails();
   }
 
   /** The guardrail reflection, off to on. Rebuilds the material so that "off"
@@ -1557,6 +1822,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     { pick: (p) => p.railMesh, mat: () => railMaterial, cast: true },
     { pick: (p) => p.shellMesh, mat: () => shellMaterial, cast: true },
     { pick: (p) => p.decorMesh, mat: () => decorMaterial, cast: false },
+    // GLAZING. Its absence here was not a missed optimisation, it was a hole in
+    // the road: drive mode hides the per-piece meshes and draws this list
+    // instead, so a glass road's pane simply stopped existing the moment you
+    // pressed B — you drove over an open frame and saw the terrain through it.
+    // Build mode was fine, which is why it survived.
+    //
+    // `cast: false` for the same reason the per-piece mesh sets it: an opaque
+    // shadow from a transparent pane puts a black rectangle on whatever is under
+    // the road, which is the opposite of what a window does.
+    //
+    // Merging transparent geometry means a chunk cannot sort against itself.
+    // That is tolerable here and nowhere near a general rule: panes sit flat in
+    // the deck, a chunk is a short run of consecutive pieces, and two of them
+    // are almost never overlapping in view. If glass ever becomes something you
+    // can stack, this is the line that breaks.
+    { pick: (p) => p.glassMesh, mat: () => glassMaterial, cast: false },
   ];
 
   function disposeMergedTrack() {
@@ -1564,39 +1845,104 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     mergedGroup.clear();
   }
 
-  // Pieces per merged chunk.
-  //
-  // ONE mesh per material was the obvious win and it is half a win: 4 draws, but
-  // a single mesh spanning the whole circuit has to be `frustumCulled = false`,
-  // so every triangle on the track is submitted every frame no matter where you
-  // are looking — and again for the shadow pass. You can typically see a fifth
-  // of a lap, so most of that work is thrown away.
-  //
-  // Chunking by CONSECUTIVE pieces rather than by a spatial grid: pieces chain
-  // end to end, so a run of them is already spatially tight, and it costs no
-  // bookkeeping.
-  //
-  // Measured on the 37-piece Apex preset in drive mode, triangles submitted per
-  // frame across BOTH passes (the merged track casts shadows, so every triangle
-  // it keeps is paid twice):
-  //
-  //   never culled (one mesh)   764,736     86 draws
-  //   chunk = 10                624,416     72 draws    −18%
-  //   chunk = 4                 535,568     82 draws    −30%
-  //
-  // The merged track is only 109k triangles, so −229k means it is now almost
-  // fully culled when off screen — near the theoretical ceiling, and 4 is past
-  // the knee. Ten extra draws is nothing in WebGPU next to 89k triangles.
-  // Worth revisiting for much longer circuits, where this many chunks starts to
-  // add up: 80 pieces would be 20 chunks × the roles present.
-  const MERGE_CHUNK_PIECES = 4;
+  /**
+   * How big a merged chunk is allowed to get, in METRES.
+   *
+   * ONE mesh per material was the obvious win and it is half a win: 4 draws, but
+   * a single mesh spanning the whole circuit has to be `frustumCulled = false`,
+   * so every triangle on the track is submitted every frame no matter where you
+   * are looking — and again for each shadow cascade. You can typically see a
+   * fifth of a lap, so most of that work is thrown away.
+   *
+   * ── WHY EXTENT AND NOT A PIECE COUNT ─────────────────────────────────────
+   *
+   * This used to be `MERGE_CHUNK_PIECES = 4`, tuned on the Apex preset. A piece
+   * count is a poor proxy for the thing that actually decides culling, which is
+   * how much WORLD a chunk covers — and this kit's pieces are nowhere near the
+   * same size. A 22 m straight and a 100 m loop both count as one.
+   *
+   * The piece count also cannot be tuned reliably. A first sweep put 12 pieces
+   * per chunk BEHIND 16 on both axes — more draws and more triangles — which is
+   * not something a track can do. The boundaries had simply landed differently
+   * (41/12 splits 12·12·12·5, 41/16 splits 16·16·9), and that non-monotonicity
+   * is the proxy admitting it measures the wrong quantity.
+   *
+   * ── WHAT IT ACTUALLY BUYS, MEASURED ──────────────────────────────────────
+   *
+   * Averaged over fixed stations along each track — parked, not driving, because
+   * sampling while accelerating made the same config swing 37% between passes
+   * and swamped the effect. Repeats of the numbers below agree to ~0.3%.
+   *
+   *   rushline (41 pieces, mixed sizes — has a loop and wide platforms)
+   *     count 4      96.4 draws   875 KTris
+   *     extent 180   84.1 draws   832 KTris     ← better on BOTH
+   *
+   *   apex-parkour (55 pieces, more uniform)
+   *     count 4      79.8 draws   857 KTris
+   *     extent 180   80.1 draws   874 KTris     ← a wash, marginally worse
+   *
+   * So: a real win where piece sizes vary, and nothing where they do not —
+   * which is exactly what the theory predicts, since a uniform track makes the
+   * piece count an accurate proxy for extent already. It is kept for the case it
+   * helps and for two properties the count never had: the knob means something
+   * (how far you must look away before a chunk can be culled), and it degrades
+   * sensibly on a long circuit instead of silently growing the chunk list.
+   *
+   * Do not expect a frame-rate change from this. At ~11 ms CPU and ~3 ms GPU the
+   * frame has room for both sides of the trade; this is headroom, not FPS.
+   */
+  const MERGE_CHUNK_EXTENT = 180;
+
+  /**
+   * Group consecutive pieces into runs no bigger than MERGE_CHUNK_EXTENT.
+   *
+   * CONSECUTIVE, not a spatial grid: pieces chain end to end, so a run of them
+   * is already spatially tight and this costs one bounding box per piece. A grid
+   * would split a single piece across cells, which merging cannot express.
+   *
+   * The bound is on the running box's LONGEST AXIS rather than its diagonal, so
+   * a chunk that climbs is judged the same as one that runs flat — a loop is
+   * tall, not sprawling, and should not be broken up for it.
+   *
+   * A piece bigger than the limit on its own becomes its own chunk instead of an
+   * empty one: `cur.length` is what guarantees forward progress.
+   */
+  function chunkPiecesByExtent(pieces) {
+    const chunks = [];
+    let cur = [];
+    const box = new THREE.Box3();
+    const pieceBox = new THREE.Box3();
+    const test = new THREE.Box3();
+    const size = new THREE.Vector3();
+    for (const p of pieces) {
+      const m = p.mesh;
+      if (!m?.geometry) continue;
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      pieceBox.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);
+      if (!cur.length) {
+        cur.push(p);
+        box.copy(pieceBox);
+        continue;
+      }
+      test.copy(box).union(pieceBox);
+      test.getSize(size);
+      if (Math.max(size.x, size.y, size.z) > MERGE_CHUNK_EXTENT) {
+        chunks.push(cur);
+        cur = [p];
+        box.copy(pieceBox);
+      } else {
+        cur.push(p);
+        box.copy(test);
+      }
+    }
+    if (cur.length) chunks.push(cur);
+    return chunks;
+  }
 
   function buildMergedTrack() {
     disposeMergedTrack();
     scene.updateMatrixWorld(true);
-    const pieces = builder.pieces;
-    for (let start = 0; start < pieces.length; start += MERGE_CHUNK_PIECES) {
-      const chunk = pieces.slice(start, start + MERGE_CHUNK_PIECES);
+    for (const chunk of chunkPiecesByExtent(builder.pieces)) {
       for (const role of MERGE_ROLES) {
         const geos = [];
         for (const p of chunk) {
@@ -1829,15 +2175,19 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
   }
 
-  /** Per-tick: record the safe pose while grounded (deterministic). */
+  /** Per-tick: record the safe pose while the car can actually drive.
+   *
+   *  `groundedCount > 0` is not enough. A car hanging off a rail still has 1–2
+   *  wheels on the deck, so the old test saved the raised/tilted trap as "safe"
+   *  and recover-from-stuck teleported right back onto it. Same bar as the
+   *  stuck detector: 3+ wheels on a drive surface. */
   function trackSafePose() {
-    if (vehicle.groundedCount > 0) {
-      const b = vehicle.body;
-      lastSafePos.copy(b.pos);
-      lastSafeQuat.copy(b.quat);
-      lastSafeY = b.pos.y;
-      hasSafe = true;
-    }
+    if (vehicle.groundedCount < 3) return;
+    const b = vehicle.body;
+    lastSafePos.copy(b.pos);
+    lastSafeQuat.copy(b.quat);
+    lastSafeY = b.pos.y;
+    hasSafe = true;
   }
 
   /**
@@ -1857,8 +2207,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function recoverToSafePose() {
     if (!hasSafe) { respawn(); return; }
     _respawnPos.copy(lastSafePos); _respawnPos.y += 0.5; // small lift so wheels clear
-    vehicle.setSpawn(_respawnPos, lastSafeQuat);
-    vehicle.respawn();
+    // respawnAt, not setSpawn+respawn: overwriting spawn made the next R (or a
+    // recover loop) reuse this lifted pose, stacking +0.5 m until the car sat
+    // on the lap ghost. Race start stays whatever resolveSpawn says.
+    vehicle.respawnAt(_respawnPos, lastSafeQuat);
     chase.reset(); tireMarks.reset(); driftSmoke.reset(); sparks.reset();
     propPhysics.reset();  // knocked cones stand back up on a lap reset
     simAccum = 0;
@@ -1893,7 +2245,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // no traction up there to drive out with). The Vehicle already tried a nudge;
     // this is the give-up path. Independent of `raceRespawn` because being
     // trapped is never a playable state, in free-drive or a race.
-    if (STUCK.enabled && vehicle.stuckTime >= STUCK.respawnAfter) {
+    //
+    // BOTH the timer AND isBeached: a stale stuckTime after R used to recover
+    // every frame (lifting last-safe each time) even once the car was at the
+    // start. respawnAt clears the timer; this is the belt.
+    if (STUCK.enabled && vehicle.isBeached && vehicle.stuckTime >= STUCK.respawnAfter) {
       recoverToSafePose();
       return;
     }
@@ -3461,6 +3817,11 @@ ${e.message}`);
       bakeCollision(); // drive the track as it stands right now
       setMergedTrack(true); // ~4 draws for the whole track instead of ~1/piece
       builder.setGhostVisible(false);
+      // THE MIRRORED RAIL IS BUILT HERE, not while editing — the pre-mirror pass
+      // is drive-only, so this is the first moment it can be seen. Sits beside
+      // the merged-track build because it is the same kind of cost, paid at the
+      // same transition, and neither is paid per edit any more.
+      syncMirrorRails();
       builder.deselectPlacement?.();
       builder.deselectPiece?.(); // clear any edit selection before racing
       props.deselect();
@@ -3471,6 +3832,8 @@ ${e.message}`);
       beginRace(); // gates from the current track + load its record
     } else {
       setMergedTrack(false); // back to editable pieces
+      // ...and freed here, for the same reason. Nothing in build mode samples it.
+      syncMirrorRails();
       builder.setGhostVisible(true);
       vehicle.enabled = false;
       ghostMesh.visible = false;
@@ -3515,6 +3878,10 @@ ${e.message}`);
   // back to the origin. Same rule as loading a track (see resetHistory).
   builder.resetHistory();
   bakeCollision();
+  // The notify that fired during the builder's own construction was skipped by
+  // the TDZ guard, so this is the first chance the posts get. Everything after
+  // boot comes through onChange.
+  rebuildRailPosts();
   updateSpawnMarker();
   if (paletteEl) paletteEl.style.display = ""; // boots in build mode
   paletteUi.refreshStatus();
@@ -3708,7 +4075,7 @@ ${e.message}`);
         if (!on && roadMaterial._reflectUniforms) {
           roadMaterial._reflectUniforms.reflectOn.value = 0;
         }
-        rebuildMirrorRails();
+        syncMirrorRails();
       },
       setRailsInMirror: (on) => setRailsInMirrorFlag(on),
       // The panel seeds its checkbox from this. Without it the seed falls back
@@ -3716,7 +4083,29 @@ ${e.message}`);
       // the bug that made the toggle look inert.
       getRailsInMirror: () => railsInMirror,
       getLinesOn: () => roadMaterial._roadUniforms.linesOn.value > 0.5,
-      setLinesOn: (on) => { roadMaterial._roadUniforms.linesOn.value = on ? 1 : 0; },
+      setLinesOn: (on) => {
+        const v = on ? 1 : 0;
+        roadMaterial._roadUniforms.linesOn.value = v;
+        roadLook.linesOn = v;
+      },
+      getCenterLinesOn: () => roadMaterial._roadUniforms.centerOn.value > 0.5,
+      setCenterLinesOn: (on) => {
+        const v = on ? 1 : 0;
+        roadMaterial._roadUniforms.centerOn.value = v;
+        roadLook.centerOn = v;
+      },
+      getEdgeLinesOn: () => roadMaterial._roadUniforms.edgeOn.value > 0.5,
+      setEdgeLinesOn: (on) => {
+        const v = on ? 1 : 0;
+        roadMaterial._roadUniforms.edgeOn.value = v;
+        roadLook.edgeOn = v;
+      },
+      getLinesBloom: () => roadMaterial._roadUniforms.linesBloom.value > 0.5,
+      setLinesBloom: (on) => {
+        const v = on ? 1 : 0;
+        roadMaterial._roadUniforms.linesBloom.value = v;
+        roadLook.linesBloom = v;
+      },
       setTireMarksEnabled: (on) => {
         tireMarks.mesh.visible = !!on;
         if (!on) tireMarks.reset();
@@ -3977,6 +4366,63 @@ ${e.message}`);
   // v3's pre-render hook, which fires immediately before worldEnv renders the
   // frame. Registering it in `tick` instead would project the PREVIOUS frame's
   // mirror onto a camera that has already moved.
+  /**
+   * A TRANSFORM GIZMO IS IN THE SCENE ONLY WHILE IT IS IN USE.
+   *
+   * There are five TransformControls on this canvas — the road builder's
+   * placement gizmo, plus one each for props, movers and portals, plus the v3
+   * editor's own — and every one of them adds its helper to the scene at
+   * construction and never takes it out again. Each helper is ~78 objects, so
+   * they are 390 of the scene's 1015 nodes: 38% of the graph, permanently.
+   *
+   * `visible = false` does NOT make them free, and the reason is worth stating
+   * because it is the whole point of this. `Object3D.updateMatrixWorld` recurses
+   * into children regardless of visibility, and BOTH of TransformControls'
+   * overrides — `TransformControlsRoot.updateMatrixWorld` and
+   * `TransformControlsGizmo.updateMatrixWorld` — run their full per-frame work
+   * with no visibility guard at all: matrix decomposes, a camera update, an eye
+   * vector, and then a loop over every handle of the current mode setting its
+   * position, quaternion and scale. Five hidden gizmos did all of that on every
+   * frame of every lap.
+   *
+   * Measured (profiling a 48 s drive on rushline): `scene.updateMatrixWorld()`
+   * costs 0.592 ms with them attached and 0.246 ms without — about 0.35 ms a
+   * frame, or ~2.3% of the ~15.4 ms of JS this game spends per frame, for
+   * objects nobody can see. It showed up in the trace as `updateMatrixWorld`
+   * being the single largest self-time entry in the whole profile (5.5%), with
+   * TransformControls' own override a further 2.2%.
+   *
+   * `_root.visible` is the exact signal, and it is not the same thing as the
+   * `gizmo.visible = …` those four systems write: TransformControls has no
+   * `visible` property, so those assignments land on the Controls object and are
+   * read by nothing. `attach()` sets `_root.visible = true` and `detach()` sets
+   * it false, so the root's own flag is what actually tracks "in use" — which is
+   * why this reads that rather than trusting the callers.
+   *
+   * Done generically, from the scene, instead of in each of the four systems:
+   * the rule is a property of TransformControls, not of any one tool, and this
+   * way it also covers the engine's gizmo without reaching into v3.
+   *
+   * Detaching cannot break interaction. Both pointer handlers return early on
+   * `this.object === undefined`, which is precisely the state in which the root
+   * is out of the scene.
+   */
+  const gizmoRoots = [];
+  scene.traverse((o) => { if (o.isTransformControlsRoot) gizmoRoots.push(o); });
+  function syncGizmoAttachment() {
+    for (const root of gizmoRoots) {
+      if (root.visible) { if (!root.parent) scene.add(root); }
+      else if (root.parent) root.parent.remove(root);
+    }
+  }
+  // Registered BEFORE the mirror pass so the graph is settled before anything
+  // renders from it, and on the pre-render hook rather than in `frame()`
+  // because roadGame's sim runs on its own rAF — only this hook is guaranteed
+  // to fire after the edit that attached a gizmo and before the draw that
+  // would need it.
+  syncGizmoAttachment();
+  app.addPreRenderHook?.(syncGizmoAttachment);
+
   lightReflectionAll();
   applyCarReflectionMembers();
   applyRailReflectionMembers();
@@ -4013,7 +4459,7 @@ ${e.message}`);
       if (!on && roadMaterial._reflectUniforms) {
         roadMaterial._reflectUniforms.reflectOn.value = 0;
       }
-      rebuildMirrorRails();
+      syncMirrorRails();
     },
     getReflection: () => reflectionEnabled,
     setRailsInMirror: (on) => setRailsInMirrorFlag(on),

@@ -14,6 +14,7 @@ import { isSharedGeometry } from "./modularRoadBatching.js";
 import { makeContainer, CONTAINER_LIVERIES, CONTAINER_SIZE } from "./modularRoadContainer.js";
 import { makeTireWall } from "./modularRoadTireWall.js";
 import { DECAL_OFFSET } from "./modularRoadDecals.js";
+import { roadParams } from "./modularRoadKit.js";
 
 /** The one decal there is so far. Lives beside the game rather than in
  *  public/models because it is track dressing, not a shared engine asset. */
@@ -350,6 +351,86 @@ function boostRingGroup() {
   );
   m.geometry.translate(0, 10, 0); // lift so the hole clears the ground
   return m;
+}
+
+/**
+ * Angular neon checkpoint gate — square goalpost with 45° chamfered top corners,
+ * NOT a torus. Spans `roadParams.width` so a drop on a straight sits on the kerbs.
+ *
+ * Same selective-bloom path as Glow box (`mat` + emissiveIntensity > 1 → MRT).
+ * Fixed sky-cyan (the reference look); not wired to the orange glowPropParams.
+ *
+ * The dark break in the top bar is real geometry, not a texture: a non-emissive
+ * insert so the bloom does not fill the gap back in.
+ */
+const NEON_GATE_GLOW = 0x5ad8ff;
+function neonGateGroup() {
+  const W = roadParams.width; // kerb-to-kerb — place centred on a road piece
+  const T = 0.72; // frame thickness in the arch plane
+  const D = 0.38; // depth along travel
+  const C = 1.85; // 45° chamfer run on each top corner
+  const clearH = 7.2; // headroom under the bar
+  const H = clearH + T;
+  const hw = W / 2;
+  const iw = W / 2 - T;
+  const ih = clearH;
+  // Same sink as hole walls — resting exactly on y=0 z-fights the deck.
+  const SINK = 0.06;
+
+  const g = new THREE.Group();
+  g.name = "NeonGate";
+
+  const outline = new THREE.Shape();
+  outline.moveTo(-hw, -SINK);
+  outline.lineTo(-hw, H - C);
+  outline.lineTo(-hw + C, H);
+  outline.lineTo(hw - C, H);
+  outline.lineTo(hw, H - C);
+  outline.lineTo(hw, -SINK);
+  outline.closePath();
+
+  // Hole winds opposite the outline (three requires it) — CW vs outline CCW.
+  const hole = new THREE.Path();
+  hole.moveTo(-iw, -SINK);
+  hole.lineTo(-iw, ih - C);
+  hole.lineTo(-iw + C, ih);
+  hole.lineTo(iw - C, ih);
+  hole.lineTo(iw, ih - C);
+  hole.lineTo(iw, -SINK);
+  hole.closePath();
+  outline.holes.push(hole);
+
+  const geo = new THREE.ExtrudeGeometry(outline, {
+    depth: D,
+    bevelEnabled: false,
+    curveSegments: 1,
+  });
+  geo.translate(0, 0, -D / 2);
+
+  const frame = new THREE.Mesh(
+    geo,
+    mat(NEON_GATE_GLOW, {
+      roughness: 0.4,
+      metalness: 0.05,
+      emissive: NEON_GATE_GLOW,
+      emissiveIntensity: 5.5,
+    }),
+  );
+  frame.userData.isGlow = true;
+  g.add(frame);
+
+  // Centre gap on the top bar — dark insert proud of both faces so it reads
+  // through the bloom instead of washing out into one continuous strip.
+  const gapW = 1.4;
+  const gap = new THREE.Mesh(
+    new THREE.BoxGeometry(gapW, T * 0.92, D + 0.08),
+    mat(0x12161c, { roughness: 0.85, metalness: 0.2, bloom: false }),
+  );
+  gap.position.set(0, ih + T * 0.5, 0);
+  gap.userData.noCollide = true;
+  g.add(gap);
+
+  return g;
 }
 
 /* ----------------------------------------------------------------------- */
@@ -1294,6 +1375,17 @@ export const PROP_CATALOG = [
       m.userData.isGlow = true;
       return m;
     },
+  },
+  {
+    id: "neongate",
+    label: "Neon gate",
+    /**
+     * Angular checkpoint arch (chamfered corners, not a torus). Drive-through
+     * only — `none` like the ring gates. Width follows `roadParams.width` so a
+     * centred drop lands on the kerbs of a default straight.
+     */
+    collision: "none",
+    make: () => neonGateGroup(),
   },
 
   // ── SCENERY ────────────────────────────────────────────────────────────────

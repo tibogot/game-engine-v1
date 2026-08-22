@@ -1747,6 +1747,17 @@ export const STUCK = {
    * gets judged on where the car lands.
    */
   nudgeHold: 1.8,
+  /**
+   * Seconds after a teleport during which beaching is ignored.
+   *
+   * respawn() used to leave `_stuckTime` untouched. Pressing R with the timer
+   * already past `respawnAfter` made roadGame recover on the SAME FRAME, then
+   * again every frame after, each time lifting last-safe by 0.5 m — which is
+   * how a restart parked the car on the lap ghost's roof. Clearing the timer
+   * is the real fix; this window covers the few ticks of settling (vel ≈ 0,
+   * < 3 wheels down) that would otherwise immediately start a new count.
+   */
+  ignoreAfterTeleport: 0.4,
 };
 
 /** Cached each rebuild — offset from box center to CoM in chassis-local space. */
@@ -2960,6 +2971,8 @@ export class Vehicle {
     this._stuckNudged = false;
     /** Countdown that stops our own nudge reading as an escape — see STUCK.nudgeHold. */
     this._stuckNudgeHold = 0;
+    /** Countdown after a teleport — see STUCK.ignoreAfterTeleport. */
+    this._stuckIgnore = 0;
     this._solidTouch = false;
     // Render-layer contact latch — see _updateScrapeLatch.
     this._scrapeHold = 0;
@@ -3234,10 +3247,15 @@ export class Vehicle {
     if (quat) this.spawnQuat.copy(quat);
   }
 
-  respawn() {
-    this.body.pos.copy(this.spawnPos);
+  /**
+   * Snap to a pose and drop all motion / contact / stuck state. Does NOT change
+   * `spawnPos` — recover-from-stuck uses this so a later R still goes to the
+   * race start rather than the last-safe pose.
+   */
+  respawnAt(pos, quat) {
+    this.body.pos.copy(pos);
     this.body.vel.set(0, 0, 0);
-    this.body.quat.copy(this.spawnQuat);
+    if (quat) this.body.quat.copy(quat);
     this.body.angVel.set(0, 0, 0);
     this._airTime = 0;
     this._airYawRateState = 0;
@@ -3245,7 +3263,9 @@ export class Vehicle {
     this._rackAirTime = 0;
     // Drop the contact-normal history — the first probe after a teleport must
     // snap to the new surface, not ease over from wherever the car just was.
-    for (const t of this.tires) t._hadGround = false;
+    // Compression too: leftover spring load from a rail crush would fire on
+    // the first tick at the new pose.
+    for (const t of this.tires) t._clearContact();
     // Likewise the landing edge and the visual lean: a respawn is not a landing,
     // and the body should appear settled the instant it arrives.
     this._prevGrounded = 0;
@@ -3256,10 +3276,24 @@ export class Vehicle {
     this._leanRoll = 0;
     this._leanPitch = 0;
     this._archLift = 0;
+    this._scrapeHold = 0;
+    this._scrapeSpeed = 0;
+    this._clearStuck();
     this._resetInterpolation();
     // Keep the render pose in step with the teleport (syncVisuals hasn't run yet).
     this._renderPos.copy(this.body.pos);
     this._renderQuat.copy(this.body.quat);
+  }
+
+  respawn() {
+    this.respawnAt(this.spawnPos, this.spawnQuat);
+  }
+
+  _clearStuck() {
+    this._stuckTime = 0;
+    this._stuckNudged = false;
+    this._stuckNudgeHold = 0;
+    this._stuckIgnore = STUCK.ignoreAfterTeleport;
   }
 
   /** Interpolated render pose — the pose the MESH is drawn at (syncVisuals lerps
@@ -3414,8 +3448,19 @@ export class Vehicle {
    * this only exposes `stuckTime` for roadGame to escalate on.
    */
   _updateStuck() {
-    if (!STUCK.enabled) { this._stuckTime = 0; this._stuckNudged = false; return; }
-    const sp = Math.hypot(this.body.vel.x, this.body.vel.z);
+    if (!STUCK.enabled) {
+      this._stuckTime = 0;
+      this._stuckNudged = false;
+      this._stuckNudgeHold = 0;
+      return;
+    }
+    if (this._stuckIgnore > 0) {
+      this._stuckIgnore -= FIXED_DT;
+      this._stuckTime = 0;
+      this._stuckNudged = false;
+      this._stuckNudgeHold = 0;
+      return;
+    }
     // Fewer than 3 wheels down means the car is NOT properly on the road — it is
     // balanced on an edge or a rail. Measured: a car resting on a guardrail has
     // 2/4 (some wheels reach the kerb) and 0.5 m/s, so requiring exactly 0 missed
@@ -3449,9 +3494,7 @@ export class Vehicle {
     //
     // 3-D speed, so a car falling past the rail is never mistaken for a stopped
     // one, and a fast wall-ride (0 wheels, touching a solid) stays well clear.
-    const trapped =
-      this.groundedCount < 3 &&
-      this.body.vel.length() < STUCK.beachedSpeed;
+    const trapped = this.isBeached;
 
     if (!trapped) {
       // OUR OWN NUDGE IS NOT AN ESCAPE. It throws the car upward on purpose, so
@@ -3495,6 +3538,13 @@ export class Vehicle {
   /** Seconds the car has been trapped against geometry while asking to move; 0
    *  whenever it is free. The game escalates past STUCK.respawnAfter. */
   get stuckTime() { return this._stuckTime; }
+
+  /** Currently beached: too few driveable wheels and barely moving.
+   *  Independent of the timer — roadGame must require BOTH this and
+   *  stuckTime >= respawnAfter, or a stale timer after R recovers forever. */
+  get isBeached() {
+    return this.groundedCount < 3 && this.body.vel.length() < STUCK.beachedSpeed;
+  }
 
   /** Did the chassis touch a solid (guardrail / wall) during the last tick?
    *  Drift scoring breaks a chain on contact — that risk is what makes holding

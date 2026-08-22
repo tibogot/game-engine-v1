@@ -43,6 +43,11 @@ const _ZERO = new THREE.Matrix4().set(0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0);
 /** Growth headroom so placing one more cone does not rebuild every buffer. */
 const SLACK = 8;
 
+/** Below this total height (metres) a prop counts as lying flat on the road and
+ *  stops casting shadows — see the note in `_template`. Comfortably under a
+ *  traffic cone (~0.7 m) and over any painted decal. */
+const FLAT_PROP_HEIGHT = 0.12;
+
 export class PropInstancer {
   /**
    * @param {THREE.Scene} scene
@@ -112,6 +117,36 @@ export class PropInstancer {
           tintable: !!o.userData.tintable,
         });
       });
+      /**
+       * A PROP THAT LIES FLAT ON THE ROAD CASTS NOTHING WORTH DRAWING.
+       *
+       * `enableMeshShadows` turns casting on for every part of every prop, which
+       * is right for a cone or a gate and wrong for paint. A boost decal is a
+       * few triangles lying in the deck: its shadow is coplanar with the surface
+       * it sits on, so it contributes nothing but a shadow-map draw — and with
+       * three cascades a caster is drawn FOUR times, once per cascade plus once
+       * for the view. Measured on bench-current.json, the boost decal was 8 draw
+       * calls to render 5 triangles.
+       *
+       * `_syncDecals` already states this rule for sticker batches ("a flat
+       * sticker casting a shadow reads as a bug"); this is the same rule applied
+       * to props whose own geometry is flat.
+       *
+       * Decided from the geometry rather than a catalogue flag so it stays true
+       * for props nobody has annotated, and measured on the Y extent
+       * specifically: "thin" is not the test, "lying down" is. A sign panel is
+       * thin in Z but tall in Y, and it should still cast.
+       */
+      const bb = new THREE.Box3();
+      const pb = new THREE.Box3();
+      for (const p of parts) {
+        p.geometry.computeBoundingBox();
+        bb.union(pb.copy(p.geometry.boundingBox));
+      }
+      if (parts.length && bb.max.y - bb.min.y < FLAT_PROP_HEIGHT) {
+        for (const p of parts) p.castShadow = false;
+      }
+
       // The template tree itself is scaffolding; only the parts are kept —
       // except where `make()` handed back a clone of a SHARED template (all of
       // the scenery catalogue does), in which case the scaffolding's geometry is
@@ -188,9 +223,26 @@ export class PropInstancer {
         // instancing-specific to work around.
         im.receiveShadow = p.receiveShadow;
         im.count = insts.length;
-        // A knocked cone can end up anywhere; culling the whole batch on a
-        // bounding box computed from wherever they started would pop them out.
-        im.frustumCulled = false;
+        /**
+         * CULLED — and the objection this used to carry is now handled.
+         *
+         * It read: "a knocked cone can end up anywhere; culling the whole batch
+         * on a bounding box computed from wherever they started would pop them
+         * out." That is true of a bound computed ONCE. `update()` now discards
+         * `boundingSphere` every time it rewrites the matrices, so three rebuilds
+         * it from where the props actually are, this frame. A cone can roll
+         * wherever it likes and the bound follows it.
+         *
+         * Worth doing because props are the cheapest geometry and the most
+         * expensive draws in the game. Measured on bench-current.json — 6 props,
+         * the whole obstacle set of a real track — they were 36 draws a frame,
+         * 42% of the entire frame's draw calls, to render 5,900 triangles. One
+         * boost decal alone was 8 draws for 5 triangles. They are small, local,
+         * and off-screen most of the time, which is exactly the case frustum
+         * culling is for (and exactly what the guardrail posts, spread along the
+         * whole track, were NOT — see the sweep in roadGame's rebuildRailPosts).
+         */
+        im.frustumCulled = true;
         this.group.add(im);
         return im;
       });
@@ -242,6 +294,13 @@ export class PropInstancer {
       im.castShadow = false;   // a flat sticker casting a shadow reads as a bug
       im.receiveShadow = true; // but it must darken with the wall it is on
       im.count = need;
+      // NOT culled, unlike the prop batches above, and the reason is this
+      // batch's fixed stride. Instances for props that wear no sticker are
+      // collapsed with `_ZERO` — and they sit INSIDE `count`, which is what
+      // computeBoundingSphere walks. Every one of them would union a sphere at
+      // the world origin into the bound, stretching it across the map and
+      // culling nothing. Decals are a handful of quads, so the fix is not worth
+      // the compaction it would need.
       im.frustumCulled = false;
       im.renderOrder = 1;      // after the wall it sits on
       this.group.add(im);
@@ -266,7 +325,15 @@ export class PropInstancer {
         root.updateWorldMatrix(false, false);
         for (const m of meshes) m.setMatrixAt(i, root.matrixWorld);
       }
-      for (const m of meshes) m.instanceMatrix.needsUpdate = true;
+      for (const m of meshes) {
+        m.instanceMatrix.needsUpdate = true;
+        // THE BOUNDS MOVED, SO THROW THEM AWAY. three recomputes a null
+        // boundingSphere on the next frustum test, from the CURRENT instance
+        // matrices, which is what makes culling safe for props that move — see
+        // the note where frustumCulled is set. It walks `count`, not the
+        // allocated capacity, so the SLACK instances cannot inflate it.
+        m.boundingSphere = null;
+      }
 
       // COLOURS ONLY WHEN THEY CHANGE. Matrices are rewritten every frame because
       // props move; a livery is picked once at placement and then sits there, so

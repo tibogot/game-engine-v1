@@ -148,6 +148,10 @@ export function createRoadMaterial(opts = {}) {
     // circuit) or centre-only (a two-way road) without a second material.
     centerOn: uniform(opts.centerOn ?? 1),
     edgeOn: uniform(opts.edgeOn ?? 1),
+    // Optional neon paint: write the same line mask into emissive + bloom MRT.
+    // Off by default (day look); night tracks flip `linesBloom` without a rebuild.
+    linesBloom: uniform(opts.linesBloom ?? 0),
+    linesBloomIntensity: uniform(opts.linesBloomIntensity ?? 3.0),
     // Rideable tubes (aZone 3 = inner wall, 4 = outer shell) — their own look,
     // clearly not asphalt, plus emissive neon rings inside that bloom.
     tubeInner: uniform(lin(opts.tubeInner ?? 0x24303c)), // dark blue-steel interior
@@ -338,37 +342,14 @@ export function createRoadMaterial(opts = {}) {
    */
   const wet = wetOn ? createWetShading(u, surface.z) : null;
 
-  mat.colorNode = Fn(() => {
+  /**
+   * Paint-line coverage (0..1). Shared by albedo and the optional bloom write —
+   * one node instance, one evaluation per fragment when both paths reference it.
+   */
+  const lineAmt = Fn(() => {
     const lateral = attribute("aLateral", "float");
-    const zone = attribute("aZone", "float");
     const plain = attribute("aPlain", "float"); // 1 on platforms → no lines
     const along = uv().x;
-
-    const macro = surface.x;
-    const agg = surface.y;
-    const wheelPath = surface.z;
-
-    // Weighted toward the macro layer: large-scale variation is what the eye
-    // reads as "a road surface", the speckle is the close-up detail on top.
-    const tone = macro.mul(0.6).add(agg.mul(0.4));
-    // Symmetric contrast about the midpoint, so grainScale can push or pull
-    // variation without dragging the average brightness down with it.
-    const shaped = saturate(tone.sub(0.5).mul(u.grainScale).add(0.5));
-    let deckBase = mix(u.asphaltDark, u.asphaltLight, shaped);
-    deckBase = deckBase.mul(oneMinus(wheelPath.mul(u.wheelDarken)));
-    // Old rubber. BOUNDED at 0.55 on purpose: the player's live skid ribbon
-    // draws on top of this, and two independent darkenings multiply — an
-    // unbounded one would turn every re-drift over an old mark into a black
-    // hole. Capped, the worst case is dark rubber on dark rubber.
-    deckBase = deckBase.mul(oneMinus(driftField.mul(0.55)));
-    deckBase = deckBase.mul(u.deckBrightness);
-
-    // WATER, and it goes here — after every dry term, before the paint. Water
-    // darkens the road it is lying on, not the lines painted on top of it, and
-    // it darkens the old rubber and the wheel-path deposit along with the
-    // asphalt because it is sitting over all of them.
-    if (wet) deckBase = deckBase.mul(wet.albedoScale).mul(wet.tint);
-
     // Feather floor of about a pixel. Painted lines are hard-edged in reality,
     // but a hard edge in a shader aliases into a dashed crawl at distance — the
     // exact range you spend most of a lap looking at. fwidth(lateral) is
@@ -402,9 +383,40 @@ export function createRoadMaterial(opts = {}) {
 
     // Per-line switches, then the global toggle × per-piece plain flag
     // (platforms suppress lines).
-    const lineAmt = clamp(
+    return clamp(
       centerLine.mul(u.centerOn).add(edgeMask.mul(u.edgeOn)), 0.0, 1.0,
     ).mul(u.linesOn).mul(float(1).sub(plain));
+  })();
+
+  mat.colorNode = Fn(() => {
+    const zone = attribute("aZone", "float");
+    const along = uv().x;
+
+    const macro = surface.x;
+    const agg = surface.y;
+    const wheelPath = surface.z;
+
+    // Weighted toward the macro layer: large-scale variation is what the eye
+    // reads as "a road surface", the speckle is the close-up detail on top.
+    const tone = macro.mul(0.6).add(agg.mul(0.4));
+    // Symmetric contrast about the midpoint, so grainScale can push or pull
+    // variation without dragging the average brightness down with it.
+    const shaped = saturate(tone.sub(0.5).mul(u.grainScale).add(0.5));
+    let deckBase = mix(u.asphaltDark, u.asphaltLight, shaped);
+    deckBase = deckBase.mul(oneMinus(wheelPath.mul(u.wheelDarken)));
+    // Old rubber. BOUNDED at 0.55 on purpose: the player's live skid ribbon
+    // draws on top of this, and two independent darkenings multiply — an
+    // unbounded one would turn every re-drift over an old mark into a black
+    // hole. Capped, the worst case is dark rubber on dark rubber.
+    deckBase = deckBase.mul(oneMinus(driftField.mul(0.55)));
+    deckBase = deckBase.mul(u.deckBrightness);
+
+    // WATER, and it goes here — after every dry term, before the paint. Water
+    // darkens the road it is lying on, not the lines painted on top of it, and
+    // it darkens the old rubber and the wheel-path deposit along with the
+    // asphalt because it is sitting over all of them.
+    if (wet) deckBase = deckBase.mul(wet.albedoScale).mul(wet.tint);
+
     const deckCol = mix(deckBase, u.lineColor, lineAmt);
 
     // Kerbs: solid red by default; hazard stripes only when railStriped is on
@@ -674,12 +686,19 @@ export function createRoadMaterial(opts = {}) {
     })();
   }
 
-  let emissive = neonNode;
+  // Optional paint-line glow for night. Uniform-gated (no material rebuild):
+  // same mask as the albedo paint, written into emissive (self-light) AND the
+  // selective bloom MRT (the halo). Costs almost nothing on top of lines that
+  // are already drawn — bloom's fullscreen pyramid already runs for neon/props.
+  const lineGlow = lineAmt.mul(u.lineColor).mul(u.linesBloomIntensity).mul(u.linesBloom);
+
+  let emissive = neonNode.add(lineGlow);
   if (reflectNode) emissive = emissive.add(reflectNode);
   if (railNode) emissive = emissive.add(railNode);
   mat.emissiveNode = emissive;
-  // Neon only. A reflection that blooms turns every wet frame into a haze.
-  applyBloomMRT(mat, neonNode);
+  // Neon + optional line glow. Reflections stay out — blooming them hazes every
+  // wet frame.
+  applyBloomMRT(mat, neonNode.add(lineGlow));
 
   mat._roadUniforms = u;
   /** The raw vec2(film, pond) field, or null when dry. Exposed so wet-road-lab
@@ -1065,7 +1084,8 @@ export const ROAD_LOOK_COLORS = [
 /** Uniforms authored as plain numbers (on/off flags included, as 0/1). */
 export const ROAD_LOOK_NUMBERS = [
   "centerHalf", "centerSoft", "centerDash", "edgePos", "edgeWidth", "edgeSoft",
-  "linesOn", "centerOn", "edgeOn", "railDash", "railStriped", "grainScale", "streak",
+  "linesOn", "centerOn", "edgeOn", "linesBloom", "linesBloomIntensity",
+  "railDash", "railStriped", "grainScale", "streak",
   "neonIntensity", "neonSpacing", "neonWidth",
   "deckBrightness", "macroScale", "aggScale", "deckRough", "roughVary",
   "wheelPolish", "wheelDarken",

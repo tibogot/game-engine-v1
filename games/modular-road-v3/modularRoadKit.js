@@ -4073,10 +4073,69 @@ export function initialConnector() {
  * @param {object} [pp] piece params snapshot
  * @param {object} [gp] guardrail params snapshot
  * @param {boolean} [edges] kerbs + guardrails; defaults to gp.enabled
+ * @param {object} [opts]
+ * @param {boolean} [opts.deckOnly] Skip every output but `geometry` (and the
+ *   connectors, which are nearly free). See the note on DECK-ONLY below.
+ * @param {boolean} [opts.mirrorOnly] Build ONLY `railMirrorGeometry` (plus the
+ *   deck, which is cheap and shares the frames). See the note on the mirror.
+ * @param {boolean} [opts.mirrorRail] Include `railMirrorGeometry` in an
+ *   otherwise-normal build. Off by default — see the note on the mirror.
  */
-export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roadParams, gp = guardrailParams, edges = gp.enabled) {
+export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roadParams, gp = guardrailParams, edges = gp.enabled, opts = {}) {
   const def = PIECE_BY_ID.get(pieceId);
   if (!def) throw new Error(`Unknown road piece: ${pieceId}`);
+
+  /**
+   * DECK-ONLY — build the surface you can see and nothing else.
+   *
+   * The placement GHOST needs `geometry` and `world`; it draws one translucent
+   * deck and has no rail, no collision, no mirror image and no branches. It was
+   * paying for all of them anyway, and paying every frame of a gizmo drag,
+   * because `rebuildAll` ends in `refreshGhost` and the gizmo's `change` event
+   * fires per frame.
+   *
+   * That is not a small tail. Measured (tools/perfAudit2.mjs, 20 runs each):
+   *
+   *   straight     full 2.72 ms   deckOnly 0.03 ms
+   *   curve        full 2.06 ms   deckOnly 0.13 ms
+   *   quarterpipe  full 4.03 ms   deckOnly 0.18 ms
+   *   loop        full 10.11 ms   deckOnly 0.58 ms
+   *
+   * i.e. 84–99% of a ghost refresh was the guardrail — swept three times over
+   * (visible beam, collision stand-in, mirror image), for an object that has no
+   * guardrail. Dragging with a loop selected cost 10 ms a frame on geometry
+   * nobody would ever see.
+   *
+   * Deliberately NOT a separate entry point. A second function would be a
+   * second copy of the centreline/frames/profile setup above, and the two would
+   * drift the first time a piece gained a feature — which is exactly how the
+   * ghost ended up building mirror rails in the first place.
+   */
+  const deckOnly = !!opts.deckOnly;
+
+  /**
+   * THE MIRRORED RAIL IS OPT-IN, AND IT IS THE ONLY OUTPUT THAT IS.
+   *
+   * It used to be built on every single call and then kept on the piece for the
+   * life of the track: 280,330 vertices across rushline — TEN TIMES the visible
+   * rail now that the posts are instanced — for about 8.5 MB of attribute data
+   * that is used only while the road is wet.
+   *
+   * And only while DRIVING. `updateCarReflection` runs the pre-mirror pass under
+   * `mode === "drive"`, and pins the road's `railMirrorOn` uniform to 0
+   * otherwise, so in build mode none of it is ever sampled. Every remesh while
+   * editing was therefore sweeping a second full guardrail, per piece, that
+   * nothing could look at.
+   *
+   * So: nobody gets it unless they ask. `mirrorOnly` is how the one caller that
+   * wants it — roadGame's mirror pass, via the builder — asks for it and
+   * nothing else, and it treats what it gets as TRANSIENT: merge it, then throw
+   * it away. Nothing holds a mirrored rail between passes any more.
+   */
+  const mirrorOnly = !!opts.mirrorOnly;
+  const wantMirror = mirrorOnly || !!opts.mirrorRail;
+  /** Both partial modes skip everything that is neither deck nor mirror. */
+  const skipExtras = deckOnly || mirrorOnly;
 
   const points = def.points(pp);
   const frames = computeFrames(points, _up);
@@ -4160,19 +4219,50 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   //
   // `railPath` is for pieces whose rail is NOT ±offset from the centreline —
   // the rounded end wraps left + nose + right as one open U.
-  const wantsRail = useKerbs && !def.noMesh && !def.profile && !def.geometry;
+  const wantsRail = !skipExtras && useKerbs && !def.noMesh && !def.profile && !def.geometry;
+  /** Same test as `wantsRail`, but for the mirror — which `mirrorOnly` wants
+   *  and `deckOnly` does not, so the two cannot share one flag. */
+  const mirrorRailOk = wantMirror && useKerbs && !def.noMesh && !def.profile && !def.geometry;
   let railGeometry = null;
   let railCollision = null;
   let railMirrorGeometry = null;
-  if (def.railPath && useKerbs) {
+  /**
+   * The guardrail's POSTS, as poses rather than as geometry.
+   *
+   * A post is one shape repeated ~600 times over a track, and baking every copy
+   * into the merged rail is what made the guardrail 89% of the track's vertices
+   * (280,330 of 316,190 on rushline — tools/perfAudit.mjs). `postSink` takes the
+   * transforms instead, in PIECE-LOCAL space, and whoever owns the piece draws
+   * them as one instanced mesh.
+   *
+   * Purely a rendering split: `buildRailCollision` is a bare swept sheet and has
+   * never contained posts, so nothing the car can hit moves.
+   *
+   * The MIRRORED rail deliberately keeps its posts merged. It is built from
+   * flipped frames, so its poses are a second, different set, and it now lives
+   * The MIRRORED rail gets the same treatment through `railMirrorPosts`. Its
+   * poses are a SECOND, different set — they come out of the flipped frames, so
+   * each is a reflection of its twin about the deck at its own station — but the
+   * TEMPLATE is the same object, because `postTemplate` keys on the rail and
+   * road params and a mirror changes neither.
+   */
+  const railPosts = { key: "", template: null, matrices: [] };
+  const railMirrorPosts = { key: "", template: null, matrices: [] };
+  const alongPath = def.railPath && useKerbs;
+  if (alongPath && !skipExtras) {
     const railFrames = def.railPath(pp, rpForProfile);
-    railGeometry = buildRailAlongPath(railFrames, rpForProfile);
+    railGeometry = buildRailAlongPath(railFrames, rpForProfile, undefined, { postSink: railPosts });
     railCollision = buildRailCollisionAlongPath(railFrames, rpForProfile);
-    railMirrorGeometry = buildMirroredRailAlongPath(railFrames, rpForProfile);
   } else if (wantsRail) {
-    railGeometry = buildRailGeometry(frames, rpForProfile);
+    railGeometry = buildRailGeometry(frames, rpForProfile, undefined, { postSink: railPosts });
     railCollision = buildRailCollision(frames, rpForProfile);
-    railMirrorGeometry = buildMirroredRailGeometry(frames, rpForProfile);
+  }
+  // Separately, because `mirrorOnly` wants exactly this and nothing above it.
+  if (mirrorRailOk) {
+    const o = { postSink: railMirrorPosts };
+    railMirrorGeometry = alongPath
+      ? buildMirroredRailAlongPath(def.railPath(pp, rpForProfile), rpForProfile, undefined, o)
+      : buildMirroredRailGeometry(frames, rpForProfile, undefined, o);
   }
   // Same trick as the rail: one deck to look at, a slightly different one to
   // drive on. Open-lipped pieces (the half tubes) hand the BVH a copy with the
@@ -4180,27 +4270,37 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // …and a piece can supply that stand-in outright rather than deriving it from
   // what it drew: the glass road's window is a hole in the MESH only, so its
   // collision form is the same slab with no window in it at all.
-  let deckCollision = def.deckCollision
-    ? def.deckCollision(pp, rpForProfile)
-    : def.openLips
-      ? buildOpenLipCollision(geometry)
-      : null;
+  let deckCollision = skipExtras
+    ? null
+    : def.deckCollision
+      ? def.deckCollision(pp, rpForProfile)
+      : def.openLips
+        ? buildOpenLipCollision(geometry)
+        : null;
   // Full-tube mouths: cap the wall cavity on the MESH, keep the open sweep as
   // the thing the wheels hit. Clone first so the BVH never sees the rings.
+  //
+  // The CAPS themselves are visual, so they are built deck-only too — skipping
+  // them would hand the ghost an open-ended tube that does not match the piece
+  // it is previewing. Only the collision clone is dropped.
   if (def.tubeEndCaps && !def.geometry) {
-    if (!deckCollision) deckCollision = geometry.clone();
+    if (!deckCollision && !skipExtras) deckCollision = geometry.clone();
     appendTubeEndCaps(geometry, frames, profileData);
   }
   // Glazing: rendered on its own transparent material, collided by nothing.
-  const glassGeometry = def.glass ? def.glass(pp, rpForProfile) : null;
-  const shellGeometry = def.shell ? buildShellGeometry(def.shell, frames, profileData, pp) : null;
+  const glassGeometry = skipExtras || !def.glass ? null : def.glass(pp, rpForProfile);
+  const shellGeometry = skipExtras || !def.shell
+    ? null
+    : buildShellGeometry(def.shell, frames, profileData, pp);
   // Decor is the vertex-coloured overlay mesh: game lines build theirs from the
   // frames, junctions paint their own markings from their outline.
-  const decorGeometry = def.game
-    ? buildGameDecorGeometry(frames, profileData, def.game)
-    : def.decor
-      ? def.decor(pp, rpForProfile)
-      : null;
+  const decorGeometry = skipExtras
+    ? null
+    : def.game
+      ? buildGameDecorGeometry(frames, profileData, def.game)
+      : def.decor
+        ? def.decor(pp, rpForProfile)
+        : null;
 
   const f0 = frames[0];
   const fN = frames[frames.length - 1];
@@ -4243,6 +4343,13 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
     def, geometry, deckCollision, railGeometry, railCollision, railMirrorGeometry,
     shellGeometry, decorGeometry,
     glassGeometry,
+    // `matrices` is piece-local — the owner combines it with the piece's world
+    // matrix. `template` is SHARED and cached in modularRoadRail.js; never free
+    // it. Empty `matrices` means this piece has no posts.
+    railPosts,
+    // The same, for the mirrored rail. Only filled when the mirror was asked
+    // for; shares `railPosts.template` when both are present.
+    railMirrorPosts,
     frames, world, connectorOut, branchesOut,
   };
 }
