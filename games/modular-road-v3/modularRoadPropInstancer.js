@@ -28,6 +28,8 @@
 // working on exactly the objects they always did.
 // ============================================================================
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { attribute } from "three/tsl";
 import { mergeByMaterial, isSharedGeometry } from "./modularRoadBatching.js";
 import { enableMeshShadows } from "./modularRoadParkour.js";
 import { decalMaterial, decalGeometry } from "./modularRoadDecals.js";
@@ -47,6 +49,157 @@ const SLACK = 8;
  *  stops casting shadows — see the note in `_template`. Comfortably under a
  *  traffic cone (~0.7 m) and over any painted decal. */
 const FLAT_PROP_HEIGHT = 0.12;
+
+/**
+ * The attribute set a part must have to join the shared plain material. Merging
+ * demands identical attributes across every geometry, so parts are normalised to
+ * exactly this — extras dropped, missing ones filled — before they are combined.
+ */
+const PLAIN_ATTRS = ["position", "normal", "uv"];
+
+/**
+ * ONE MATERIAL FOR EVERY PLAIN OPAQUE PROP PART, with the colour, roughness and
+ * metalness moved into vertex attributes.
+ *
+ * A draw call is one material, so a prop costs a batch per distinct LOOK. A
+ * traffic cone is three: orange body (rough 0.55), white collars (0.35, a little
+ * metal), black base (0.9). Nothing about those needs its own shader — they
+ * differ only in numbers a vertex can carry.
+ *
+ * Measured across the whole catalogue (tools/propMaterialProbe.mjs): 64 distinct
+ * batches become 48. The cone goes 3 -> 1, the lab ramps 5 -> 1, the flag 3 -> 1.
+ *
+ * DELIBERATELY NOT USED FOR:
+ *   - transparent / faded parts — they need their own sorted draw regardless
+ *   - anything with a map — a texture cannot be a vertex attribute
+ *   - emissive parts — they route through applyBloomMRT for selective bloom, so
+ *     folding them in means handling that buffer too. Worth another 5 batches
+ *     catalogue-wide; left for later rather than risked here.
+ *   - TINTABLE parts — the instancer writes a per-instance livery through
+ *     `instanceColor`, and three only multiplies that into the default diffuse
+ *     path. Overriding `colorNode` would silently drop the livery, so liveried
+ *     parts keep their own material.
+ */
+let _plainPropMaterial = null;
+function plainPropMaterial() {
+  if (_plainPropMaterial) return _plainPropMaterial;
+  const m = new THREE.MeshStandardNodeMaterial();
+  // `aColor`, not `color`: three treats a `color` attribute as the vertex-colour
+  // path and would multiply it in a second time.
+  m.colorNode = attribute("aColor", "vec3");
+  m.roughnessNode = attribute("aRough", "float");
+  m.metalnessNode = attribute("aMetal", "float");
+  m.name = "PropPlainVertex";
+  _plainPropMaterial = m;
+  return m;
+}
+
+/** What forces a part to keep its own draw, beyond colour/roughness/metalness. */
+function plainGroupKey(p) {
+  const m = p.material;
+  if (!m) return null;
+  if (m.transparent || (m.opacity ?? 1) < 1) return null;
+  if (m.map || m.normalMap || m.roughnessMap || m.metalnessMap || m.emissiveMap || m.alphaMap) return null;
+  const e = m.emissive;
+  if (e && (e.r + e.g + e.b) > 1e-6) return null;
+  if (p.tintable) return null;
+  if (typeof m.roughness !== "number" || typeof m.metalness !== "number") return null;
+  // castShadow / receiveShadow live on the MESH, not the material, so two parts
+  // that shade identically still cannot share a draw if one casts and the other
+  // does not.
+  return `${m.side}|${p.castShadow ? 1 : 0}|${p.receiveShadow ? 1 : 0}`;
+}
+
+/**
+ * Normalise one geometry to exactly PLAIN_ATTRS + the three baked ones.
+ *
+ * `mergeGeometries` returns NULL when the inputs disagree on attributes, and it
+ * does so silently — the codebase has been bitten by that before, which is why
+ * this drops extras rather than hoping every prop builder happens to agree. A
+ * BoxGeometry and a LatheGeometry both carry position/normal/uv, but anything a
+ * builder added on top would poison the merge.
+ */
+function bakePlainAttrs(src, material) {
+  const g = new THREE.BufferGeometry();
+  const pos = src.getAttribute("position");
+  g.setAttribute("position", pos.clone());
+  g.setAttribute("normal", src.getAttribute("normal")?.clone()
+    ?? new THREE.Float32BufferAttribute(new Float32Array(pos.count * 3), 3));
+  g.setAttribute("uv", src.getAttribute("uv")?.clone()
+    ?? new THREE.Float32BufferAttribute(new Float32Array(pos.count * 2), 2));
+  if (src.getIndex()) g.setIndex(src.getIndex().clone());
+
+  const n = pos.count;
+  const col = new Float32Array(n * 3);
+  const rough = new Float32Array(n);
+  const metal = new Float32Array(n);
+  // The material's colour is already linear — `mat()` builds it through
+  // THREE.Color from a hex the callers author in linear space — so it goes
+  // straight into the attribute with no conversion.
+  const c = material.color ?? { r: 1, g: 1, b: 1 };
+  for (let i = 0; i < n; i++) {
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    rough[i] = material.roughness;
+    metal[i] = material.metalness;
+  }
+  g.setAttribute("aColor", new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute("aRough", new THREE.Float32BufferAttribute(rough, 1));
+  g.setAttribute("aMetal", new THREE.Float32BufferAttribute(metal, 1));
+  return g;
+}
+
+/**
+ * Collapse every group of plain opaque parts into a single vertex-shaded part.
+ *
+ * Runs on the TEMPLATE, once per prop type, so the cost is paid at first
+ * placement and never again. Parts that cannot join keep their own entry
+ * untouched, in their original order.
+ */
+function collapsePlainParts(parts) {
+  const groups = new Map();
+  const out = [];
+  for (const p of parts) {
+    const key = plainGroupKey(p);
+    if (key === null) { out.push(p); continue; }
+    let g = groups.get(key);
+    if (!g) { g = []; groups.set(key, g); }
+    g.push(p);
+  }
+  for (const [key, group] of groups) {
+    // A lone part gains nothing from the shared material and would only lose its
+    // own (possibly hand-tuned) one, so leave it exactly as it was.
+    if (group.length < 2) { out.push(...group); continue; }
+    const baked = group.map((p) => bakePlainAttrs(p.geometry, p.material));
+    const merged = mergeGeometries(baked, false);
+    for (const b of baked) b.dispose();
+    if (!merged) {
+      // Refused the merge — keep the originals rather than lose the prop. Silent
+      // null is exactly the failure mode bakePlainAttrs exists to prevent, so if
+      // this ever fires the normalisation missed something.
+      console.warn("[PropInstancer] plain-part merge refused; keeping separate parts");
+      out.push(...group);
+      continue;
+    }
+    merged.computeBoundingSphere();
+    for (const p of group) if (!isSharedGeometry(p.geometry)) p.geometry.dispose();
+    const [side, cast, recv] = key.split("|");
+    const mat = plainPropMaterial();
+    out.push({
+      geometry: merged,
+      material: Number(side) === THREE.FrontSide ? mat : (() => {
+        // A DoubleSide group needs its own material object — `side` is a
+        // material property, not something a vertex can carry.
+        const c = mat.clone();
+        c.side = Number(side);
+        return c;
+      })(),
+      castShadow: cast === "1",
+      receiveShadow: recv === "1",
+      tintable: false,
+    });
+  }
+  return out;
+}
 
 export class PropInstancer {
   /**
@@ -146,6 +299,11 @@ export class PropInstancer {
       if (parts.length && bb.max.y - bb.min.y < FLAT_PROP_HEIGHT) {
         for (const p of parts) p.castShadow = false;
       }
+
+      // AFTER the shadow decision above, deliberately: the group key includes
+      // castShadow, so collapsing first would split a flat prop's parts on a
+      // flag that is about to become uniform anyway.
+      parts = collapsePlainParts(parts);
 
       // The template tree itself is scaffolding; only the parts are kept —
       // except where `make()` handed back a clone of a SHARED template (all of
