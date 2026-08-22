@@ -50,7 +50,10 @@ function bareManager() {
   m.onSelect = null;
   m.onSelectionChange = null;
   m.getSurfaceY = null;             // "free" placement: no snapping to fight
-  m.gizmo = { attach() {}, detach() {}, enabled: false, visible: false };
+  // getHelper() is what actually shows/hides the arrows, so the stand-in needs a
+  // stable helper — PropManager pushes its suspend state onto it (suspendGizmo).
+  m.gizmo = { attach() {}, detach() {}, enabled: false, visible: false, axis: null,
+    _helper: { visible: false }, getHelper() { return this._helper; } };
   m.selBox = { setFromObject() {}, visible: false };
   m._disposeInstance = () => {};
   return m;

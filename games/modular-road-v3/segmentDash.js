@@ -126,13 +126,29 @@ function makeDigit(parent, x, y, w, h, t, gap, extraClass) {
   return {
     els,
     group: g,
-    /** Light exactly the segments this character needs. No-op if unchanged. */
+    /**
+     * Light exactly the segments this character needs. No-op if unchanged.
+     *
+     * Touches only the segments that actually DIFFER from the glyph before it.
+     * The speed digits change several times a second while driving, and most
+     * neighbouring glyphs share most of their bars — 8 to 9 moves one segment,
+     * 3 to 8 moves two — so rewriting all seven meant roughly five pointless
+     * `classList.toggle` calls per digit per change. Profiling a drift on
+     * audittest.json put `toggle` at 1.6% of the main thread.
+     */
     set(ch) {
       if (ch === last) return;
+      // `last === null` means invalidate() ran and the DOM state is unknown, so
+      // every segment has to be written rather than diffed against a glyph we
+      // can no longer trust.
+      const prev = last === null ? null : (GLYPHS[last] ?? "");
       last = ch;
       const on = GLYPHS[ch] ?? "";
       for (let i = 0; i < 7; i++) {
-        els[i].classList.toggle("on", on.includes(SEG_ORDER[i]));
+        const want = on.includes(SEG_ORDER[i]);
+        if (prev === null || want !== prev.includes(SEG_ORDER[i])) {
+          els[i].classList.toggle("on", want);
+        }
       }
     },
     /** Force the next set() to rewrite (used when the colour class changes). */

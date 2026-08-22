@@ -59,8 +59,23 @@ export const railParams = {
   webT: 0.018,
   postRise: 0.06,
   blockout: 0.07, // spacer beam→post; wider pushes the post off the kerb
-  basePlate: true,
-  bolts: true,
+  /**
+   * BASE PLATE AND BOLTS: OFF.
+   *
+   * Both are millimetre-scale hardware on a 0.15 m post, and the post is
+   * instanced ~863 times across a track and drawn every frame without culling
+   * (see rebuildRailPosts). They are half the post's triangles for detail that
+   * is sub-pixel at any speed you drive at.
+   *
+   * Measured, tools/railBudget.mjs: 104 tris a post with them, 54 without.
+   * On bench-current.json that is 40.6 KTris a frame down to ~21 — about 5% of
+   * everything drawn, for hardware nobody can resolve.
+   *
+   * They are still built when switched on, and the lab still tunes them; this is
+   * only the shipping default. Flip either back if a close-up ever wants them.
+   */
+  basePlate: false,
+  bolts: false,
   boltRadius: 0.034,
   bevel: 0.006,
 };

@@ -1440,6 +1440,8 @@ export class PropManager {
     this.onSelect = onSelect;
     this.onSelectionChange = onSelectionChange;
     this.enabled = false;
+    /** Handles down while a placement brush owns the pointer. See suspendGizmo. */
+    this._gizmoSuspended = false;
 
     /** @type {{id:string, def:object, root:THREE.Object3D, collision:string}[]} */
     this.instances = [];
@@ -1506,6 +1508,49 @@ export class PropManager {
   setEnabled(on) {
     this.enabled = on;
     if (!on) this.deselect();
+  }
+
+  /**
+   * PUT THE MOVE TOOL DOWN WHILE A PLACEMENT BRUSH IS UP — without losing the
+   * selection.
+   *
+   * TransformControls' pickers are INVISIBLE meshes far fatter than the drawn
+   * arrows, and they scale to a constant screen size (`factor * size / 4`, i.e.
+   * 0.2375 * size * canvasHeight pixels per gizmo unit). At size 0.9 on a 900 px
+   * canvas that is a plus-shaped region ~230 px across, ~38 px thick, plus a
+   * 38 px blob dead centre — and the picker raycast ignores occlusion, so a
+   * handle behind a hill still counts. Merely HOVERING it sets `gizmo.axis`,
+   * which is what `isUsingGizmo()` reports and what makes roadGame refuse the
+   * place-click. Placing a prop right beside an already-selected one was
+   * therefore impossible, and since `add()` selects what it just placed, laying
+   * down a RUN of props re-armed the trap on every click.
+   *
+   * `setEnabled(false)` cannot be used for this: it deselects, and the whole
+   * point is that the selection survives the brush.
+   */
+  suspendGizmo(on) {
+    this._gizmoSuspended = !!on;
+    // `pointerHover` early-returns while disabled, so a handle the pointer was
+    // already over would stay latched in `axis` and keep eating clicks for as
+    // long as the brush is armed.
+    if (on) this.gizmo.axis = null;
+    this._applyGizmoSuspend();
+  }
+
+  /**
+   * Push the suspend state onto the gizmo. Called after every attach, because
+   * `attach()` unconditionally shows the helper.
+   *
+   * `gizmo.visible` is NOT what hides it — TransformControls is a Controls, not
+   * an Object3D; the helper returned by `getHelper()` owns visibility, and
+   * attach/detach are what normally drive it.
+   */
+  _applyGizmoSuspend() {
+    const attached = this.gizmo.object != null;
+    const live = attached && !this._gizmoSuspended;
+    this.gizmo.enabled = live;
+    this.gizmo.getHelper().visible = live;
+    this.selBox.visible = attached && !!this.selected;
   }
 
   setMode(mode) {
@@ -1681,7 +1726,7 @@ export class PropManager {
     this.selected = null;
     this.gizmo.detach();
     this.gizmo.enabled = false;
-    this.gizmo.visible = false;
+    this.gizmo.getHelper().visible = false;
     this.selBox.visible = false;
     this.onChange?.();
   }
@@ -1698,7 +1743,7 @@ export class PropManager {
     this.selected = null;
     this.gizmo.detach();
     this.gizmo.enabled = false;
-    this.gizmo.visible = false;
+    this.gizmo.getHelper().visible = false;
     this.selBox.visible = false;
     if (had) this.onSelectionChange?.(null);
   }
@@ -2044,10 +2089,11 @@ export class PropManager {
     this.onSelect?.();
     this.selected = inst;
     this.gizmo.attach(inst.root);
-    this.gizmo.enabled = true;
-    this.gizmo.visible = true;
     this.selBox.setFromObject(inst.root);
-    this.selBox.visible = true;
+    // Not `enabled = true` outright: placing a prop SELECTS it, and if a brush
+    // is still armed that fresh gizmo would sit exactly where the next click is
+    // going. See suspendGizmo.
+    this._applyGizmoSuspend();
     // AFTER the assignment, unlike onSelect — which fires first because its job
     // is to clear the other gizmos, and so still sees the previous selection.
     // Anything that renders the selection needs this one.

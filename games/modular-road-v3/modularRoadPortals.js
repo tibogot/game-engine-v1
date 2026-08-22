@@ -110,6 +110,8 @@ export class PortalManager {
     this.onChange = onChange;
     this.onActivate = onActivate;
     this.buildEnabled = false;
+    /** Handles down while a placement brush owns the pointer. See suspendGizmo. */
+    this._gizmoSuspended = false;
 
     /** @type {{id:number,a:object,b:object,enabled:boolean,cooldown:number}[]} */
     this.pairs = [];
@@ -158,6 +160,27 @@ export class PortalManager {
   setBuildEnabled(on) {
     this.buildEnabled = on;
     if (!on) this.deselect();
+  }
+
+  /**
+   * Put the move tool down while a placement brush owns the pointer, KEEPING the
+   * selection. `setBuildEnabled(false)` deselects, which is the opposite of what
+   * this needs. See PropManager.suspendGizmo for why hovering a gizmo used to eat
+   * the place-click.
+   */
+  suspendGizmo(on) {
+    this._gizmoSuspended = !!on;
+    // pointerHover early-returns while disabled, so an axis the pointer was
+    // already over would stay latched and keep eating clicks.
+    if (on) this.gizmo.axis = null;
+    this._applyGizmoSuspend();
+  }
+
+  /** Push the suspend state onto the gizmo — `attach()` always shows the helper. */
+  _applyGizmoSuspend() {
+    const live = this.gizmo.object != null && !this._gizmoSuspended;
+    this.gizmo.enabled = live;
+    this.gizmo.getHelper().visible = live;
   }
 
   isUsingGizmo() {
@@ -251,7 +274,7 @@ export class PortalManager {
     this.selected = null;
     this.gizmo.detach();
     this.gizmo.enabled = false;
-    this.gizmo.visible = false;
+    this.gizmo.getHelper().visible = false;
     this.selBox.visible = false;
   }
 
@@ -412,10 +435,11 @@ export class PortalManager {
     this.onActivate?.();
     this.selected = door;
     this.gizmo.attach(door.root);
-    this.gizmo.enabled = true;
-    this.gizmo.visible = true;
     this.selBox.setFromObject(door.root);
     this.selBox.visible = true;
+    // Not `enabled = true` outright — a brush may own the pointer. See
+    // suspendGizmo.
+    this._applyGizmoSuspend();
   }
 
   /**

@@ -206,6 +206,9 @@ export class ModularRoadBuilder {
      */
     this.gizmoSpace = "world";
 
+    /** Handles down while a placement brush owns the pointer. See suspendGizmo. */
+    this._gizmoSuspended = false;
+
     /** @type {object|null} The gizmo's piece, and the end a range measures from. */
     this.selectedPiece = null;
     /** @type {object[]} Everything selected, INCLUDING the anchor. Single-select
@@ -1292,8 +1295,7 @@ export class ModularRoadBuilder {
       this.placementPivot.position.copy(this._ghostPos);
       this.placementPivot.quaternion.copy(this._ghostQuat);
       this.placementGizmo.attach(this.placementPivot);
-      this.placementGizmo.enabled = true;
-      this.placementGizmo.visible = true;
+      this._applyGizmoSuspend();
       this._applyGizmoAxes();
     }
     this._refreshBranchMarkers();
@@ -1540,9 +1542,47 @@ export class ModularRoadBuilder {
     this.placementPivot.position.copy(pos);
     this.placementPivot.rotation.set(0, yaw, 0);
     this.placementGizmo.attach(this.placementPivot);
-    this.placementGizmo.enabled = true;
-    this.placementGizmo.visible = true;
+    this._applyGizmoSuspend();
     this._applyGizmoAxes();
+  }
+
+  /**
+   * Put the placement handles down while a PROP BRUSH owns the pointer, without
+   * losing the chain/piece the gizmo is on.
+   *
+   * TransformControls' pickers are invisible meshes far fatter than the drawn
+   * arrows, scaled to a constant screen size (`factor * size / 4`, i.e.
+   * 0.2375 * size * canvasHeight px per gizmo unit). At size 1.15 on a 900 px
+   * canvas the arms reach ~147 px and are ~49 px thick — and merely HOVERING one
+   * sets `axis`, which is what isUsingPlacementGizmo() reports and what makes
+   * roadGame refuse the place-click. Dropping a cone next to the build cursor was
+   * therefore impossible.
+   */
+  suspendGizmo(on) {
+    this._gizmoSuspended = !!on;
+    if (!this.placementGizmo) return;
+    // pointerHover early-returns while disabled, so an axis the pointer was
+    // already over would stay latched and keep eating clicks.
+    if (on) this.placementGizmo.axis = null;
+    this._applyGizmoSuspend();
+  }
+
+  /** Push the suspend state onto the gizmo — `attach()` always shows the helper. */
+  _applyGizmoSuspend() {
+    const g = this.placementGizmo;
+    if (!g) return;
+    const live = g.object != null && !this._gizmoSuspended;
+    // `enabled` BEFORE `visible`: writing `enabled` dispatches TransformControls'
+    // "change", and _onPlacementGizmoChange gates on `visible` to ignore exactly
+    // that setup traffic. Flipping the order would let the show-time event
+    // through as if it were a drag.
+    g.enabled = live;
+    // NOT a TransformControls property — a flag of ours that rides along on the
+    // controls object, and the one _onPlacementGizmoChange reads. The HELPER is
+    // what actually hides the arrows (and what roadGame's syncGizmoAttachment
+    // watches to keep an idle gizmo out of updateMatrixWorld).
+    g.visible = live;
+    g.getHelper().visible = live;
   }
 
   /** True while dragging / hovering the placement gizmo (suppress LMB place).
@@ -1562,8 +1602,7 @@ export class ModularRoadBuilder {
     this.placementPivot.position.copy(this._freePos);
     this.placementPivot.quaternion.copy(this._freeQuat);
     this.placementGizmo.attach(this.placementPivot);
-    this.placementGizmo.enabled = true;
-    this.placementGizmo.visible = true;
+    this._applyGizmoSuspend();
     this._applyGizmoAxes();
   }
 
@@ -1571,7 +1610,8 @@ export class ModularRoadBuilder {
     if (!this.placementGizmo) return;
     this.placementGizmo.detach();
     this.placementGizmo.enabled = false;
-    this.placementGizmo.visible = false;
+    this.placementGizmo.visible = false; // read by _onPlacementGizmoChange
+    this.placementGizmo.getHelper().visible = false;
   }
 
   /**
@@ -2505,8 +2545,7 @@ export class ModularRoadBuilder {
     _A_M.extractRotation(p.connectorIn);
     this.placementPivot.quaternion.setFromRotationMatrix(_A_M);
     this.placementGizmo.attach(this.placementPivot);
-    this.placementGizmo.enabled = true;
-    this.placementGizmo.visible = true;
+    this._applyGizmoSuspend();
     this._applyGizmoAxes();
   }
 

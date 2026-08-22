@@ -8,6 +8,27 @@ import { TIRE } from "../../v3/play/modularRoadVehicle.js";
 
 const RATE_MIN = 0.5;
 const RATE_MAX = 4;
+
+/**
+ * Smallest change in volume or playback rate worth pushing at Howler.
+ *
+ * `update` runs every frame over every layer and used to call `howl.volume()`,
+ * `howl.mute()` and `howl.rate()` unconditionally on all of them. Each one pokes
+ * a Web Audio AudioParam, and that showed up in a real profile — a 35 s drift on
+ * audittest.json — as **`setValueAtTime` at 2.0% of the entire main thread**,
+ * more than every visual effect in the game put together.
+ *
+ * Most of those writes said nothing. Layers that are muted, idle, or holding a
+ * steady note re-sent the identical value sixty times a second.
+ *
+ * An EPSILON rather than an exact compare, because these are smoothed floats
+ * that technically never settle. 1e-3 is below what anyone can hear: on volume
+ * it is a thousandth of full scale, and on rate it is 0.1% of pitch — about 1.7
+ * cents, where the ear needs roughly 5-10 to notice. So this skips only writes
+ * that were inaudible anyway, and a layer genuinely sweeping still writes every
+ * frame.
+ */
+const AUDIO_EPS = 1e-3;
 const DRIFT_ANGLE_MIN = 0.1;
 const DRIFT_ENTRY_SPEED = 8;
 
@@ -115,6 +136,21 @@ export function createModularRoadAudioSystem({ mixerState }) {
 
   document.addEventListener("visibilitychange", onVisibility);
 
+  /**
+   * FORGET WHAT WE THINK HOWLER IS SET TO.
+   *
+   * `play()` builds a NEW sound node with its own gain and playbackRate, so the
+   * cached "last written" values describe a node that no longer exists. Leave
+   * them and `update`'s epsilon compare will skip the first write, stranding the
+   * layer at whatever the fresh node defaulted to — a silent engine, or a squeal
+   * stuck at the wrong pitch. Must be called after EVERY play(). See AUDIO_EPS.
+   */
+  function forgetAudioParams(item) {
+    item._lastVol = -1;
+    item._lastRate = -1;
+    item._lastMute = null;
+  }
+
   function tryStartPlayback(item) {
     if (
       disposed ||
@@ -128,7 +164,10 @@ export function createModularRoadAudioSystem({ mixerState }) {
     try {
       const id =
         item._spritePlayId != null ? h.play(item._spritePlayId) : h.play();
-      if (id != null) item._playbackStarted = true;
+      if (id != null) {
+        item._playbackStarted = true;
+        forgetAudioParams(item);
+      }
     } catch (_) {
       /* autoplay policy */
     }
@@ -152,6 +191,17 @@ export function createModularRoadAudioSystem({ mixerState }) {
       onPlaying: options.onPlaying ?? null,
       _startWhenUnlocked: startWhenUnlocked,
       _playbackStarted: false,
+      /**
+       * Last values actually pushed at Howler — see the note on AUDIO_EPS.
+       *
+       * Seeded OUT OF RANGE, not at the item's starting values: volume is 0..1
+       * and rate is clamped to RATE_MIN..RATE_MAX, so −1 can never compare equal
+       * and the first update is guaranteed to write. `null` for mute so the
+       * first boolean also lands.
+       */
+      _lastVol: -1,
+      _lastRate: -1,
+      _lastMute: null,
       _spritePlayId: useSprite ? spritePlayId : null,
       howl: new Howl({
         src: Array.isArray(options.src) ? options.src : [options.src],
@@ -208,7 +258,9 @@ export function createModularRoadAudioSystem({ mixerState }) {
     if (!sounds || !sounds.length) return;
     for (const s of sounds) {
       const node = s?._node;
-      if (node && node.gain) node.gain.value = gain;
+      if (node && node.gain && Math.abs(node.gain.value - gain) >= AUDIO_EPS) {
+        node.gain.value = gain;
+      }
     }
   }
 
@@ -222,14 +274,24 @@ export function createModularRoadAudioSystem({ mixerState }) {
       const busScalar = getEffectiveBusScalar(item.bus);
       const desired = Math.max(0, item.volume * busScalar); // may exceed 1
       const base = Math.min(1, desired);
-      item.howl.volume(base);
-      item.howl.mute(base < 1e-4);
+      if (Math.abs(base - item._lastVol) >= AUDIO_EPS) {
+        item.howl.volume(base);
+        item._lastVol = base;
+      }
+      const wantMute = base < 1e-4;
+      if (wantMute !== item._lastMute) {
+        item.howl.mute(wantMute);
+        item._lastMute = wantMute;
+      }
       // Per-sound node gain = the howl's linear volume (Howler's global
       // volume is applied downstream at masterGain). Set it absolutely to the
       // above-unity target so there's no frame-to-frame compounding.
       if (desired > 1.0001) applyAbsoluteGain(item.howl, desired);
       const r = Math.max(RATE_MIN, Math.min(RATE_MAX, item.rate));
-      item.howl.rate(r);
+      if (Math.abs(r - item._lastRate) >= AUDIO_EPS) {
+        item.howl.rate(r);
+        item._lastRate = r;
+      }
     }
   }
 
@@ -500,6 +562,7 @@ export function setupModularRoadVehicleAudio(audioSystem, ctx) {
           /* ignore */
         }
         item.howl.play();
+        forgetAudioParams(item); // new sound node — see forgetAudioParams
       }
       item._nitroPrevActive = active;
     }),

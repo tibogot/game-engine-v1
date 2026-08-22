@@ -309,6 +309,8 @@ export class MoverPropManager {
     this.onChange = onChange;
     this.onSelect = onSelect;
     this.enabled = false;
+    /** Handles down while a placement brush owns the pointer. See suspendGizmo. */
+    this._gizmoSuspended = false;
 
     /** @type {{id:string, def:object, root:THREE.Object3D, collision:string, params:object, mover:ParkourMover|null}[]} */
     this.instances = [];
@@ -364,6 +366,27 @@ export class MoverPropManager {
   setEnabled(on) {
     this.enabled = on;
     if (!on) this.deselect();
+  }
+
+  /**
+   * Put the move tool down while a placement brush owns the pointer, KEEPING the
+   * selection. `setEnabled(false)` deselects, which is the opposite of what this
+   * needs. See PropManager.suspendGizmo for why hovering a gizmo used to eat the
+   * place-click.
+   */
+  suspendGizmo(on) {
+    this._gizmoSuspended = !!on;
+    // pointerHover early-returns while disabled, so an axis the pointer was
+    // already over would stay latched and keep eating clicks.
+    if (on) this.gizmo.axis = null;
+    this._applyGizmoSuspend();
+  }
+
+  /** Push the suspend state onto the gizmo — `attach()` always shows the helper. */
+  _applyGizmoSuspend() {
+    const live = this.gizmo.object != null && !this._gizmoSuspended;
+    this.gizmo.enabled = live;
+    this.gizmo.getHelper().visible = live;
   }
 
   setMode(mode) {
@@ -458,7 +481,7 @@ export class MoverPropManager {
     this.selected = null;
     this.gizmo.detach();
     this.gizmo.enabled = false;
-    this.gizmo.visible = false;
+    this.gizmo.getHelper().visible = false;
     this.selBox.visible = false;
     this.onChange?.();
   }
@@ -474,7 +497,7 @@ export class MoverPropManager {
     this.selected = null;
     this.gizmo.detach();
     this.gizmo.enabled = false;
-    this.gizmo.visible = false;
+    this.gizmo.getHelper().visible = false;
     this.selBox.visible = false;
   }
 
@@ -560,10 +583,12 @@ export class MoverPropManager {
     this.onSelect?.();
     this.selected = inst;
     this.gizmo.attach(inst.root);
-    this.gizmo.enabled = true;
-    this.gizmo.visible = true;
     this.selBox.setFromObject(inst.root);
     this.selBox.visible = true;
+    // Not `enabled = true` outright: add() selects what it just placed, and with
+    // a brush still armed that fresh gizmo would sit right where the next click
+    // is going.
+    this._applyGizmoSuspend();
   }
 
   /**

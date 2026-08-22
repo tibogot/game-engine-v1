@@ -192,6 +192,32 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // groundProc, autoPaint...) stay ON: the .v3proj decides those.
     terrainFeatures: { cursor: false },
     splatFeatures:   { solo: false },
+    /**
+     * TWO SHADOW CASCADES, NOT THREE.
+     *
+     * A BOOT decision and it has to be: changing `cascades` live is broken on
+     * three r184 (the old CSMShadowNode's compiled pipeline keeps re-adding its
+     * cascade lights every frame while the replacement never compiles), which is
+     * why v3's `app.shadows.set()` refuses it. See the opts.csm block in
+     * v3/app/main.js. Scoped here rather than in the engine, so the v3 editor and
+     * rts-v3 keep their three.
+     *
+     * WHY IT IS AFFORDABLE. Every shadow caster is drawn once per cascade ON TOP
+     * of once for the view, so a cascade is a flat multiplier on the most
+     * expensive half of the frame. Instrumented on bench-current.json
+     * (onBeforeRender over 120 frames), shadow passes were roughly half the draw
+     * calls and a third of the triangles.
+     *
+     * WHY THE QUALITY HOLDS. `maxFar` is 80 m, so two cascades cover ~40 m each
+     * at 2048² — about 50 texels per metre, on a chase camera that never
+     * inspects a distant shadow edge. Three cascades was never a quality
+     * decision anyway: the config comment in v2/app/config.js says it is a
+     * SAMPLER BUDGET ceiling ("3 cascades (not 4): Windows WebGPU caps
+     * samplers/stage at 16"), and each cascade spends one. Dropping to two hands
+     * a binding back to the scarcest resource in the engine — the same ceiling
+     * that made `terrainFeatures.cursor` worth switching off above.
+     */
+    csm: { cascades: 2 },
   });
   window.__road = app; // handy for console debugging
 
@@ -386,6 +412,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
      * is already sitting flush still find the surface it is resting on.
      */
     getSurfaceY: (x, y, z, mode) => {
+      ensureCollision(); // reads the deck tree — see the note on bakeCollision
       if (mode !== "ground" && deckBvh?.baked) {
         _snapOrigin.set(x, y + 2, z);
         const hit = deckBvh.raycastFirst(_snapOrigin, _snapDown, 400);
@@ -623,6 +650,28 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   /**
+   * A PLACEMENT BRUSH OWNS THE POINTER — so every editing gizmo puts its handles
+   * down for as long as one is armed.
+   *
+   * The LMB handler refuses to place while any gizmo reports `isUsingGizmo()`,
+   * and those report true on HOVER, not just on drag. TransformControls' pickers
+   * are invisible meshes much fatter than the drawn arrows and scale to a
+   * constant screen size, so a selected object came with a ~230-300 px
+   * plus-shaped hole you could not drop anything into. Worse, placing a prop
+   * SELECTS it (PropManager.add), so laying down a run re-armed the trap under
+   * the cursor on every single click.
+   *
+   * Suspending rather than deselecting: the selection, and its highlight box,
+   * survive the brush — you get the tool you asked for without losing your place.
+   */
+  function setGizmosSuspended(on) {
+    props.suspendGizmo?.(on);
+    movers.suspendGizmo?.(on);
+    portals.suspendGizmo?.(on);
+    builder.suspendGizmo?.(on);
+  }
+
+  /**
    * Arm the spawn ghost. `snapMode` is 'road' or 'ground' — the two surfaces a
    * car can start on, and the only thing this tool needs to know.
    *
@@ -658,6 +707,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // in clearBrush would delete the marker's body too.
       disposeGeo: !spawnGhostGeo,
     };
+    setGizmosSuspended(true);
     devPanel?.refresh();
     return true;
   }
@@ -676,6 +726,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
     const wasSpawn = brush.kind === "spawn";
     brush = null;
+    setGizmosSuspended(false);
     if (!silent) paletteUi?.clearBrushHighlight?.();
     if (wasSpawn) devPanel?.refresh();
   }
@@ -692,6 +743,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     root.visible = false; // until the mouse says where
     scene.add(root);
     brush = { kind, id, root, restY, point: null };
+    setGizmosSuspended(true);
   }
 
   /**
@@ -713,6 +765,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     _brushRay.setFromCamera(_brushNdc, camera);
 
     let deck = null;
+    ensureCollision(); // reads the deck tree — see the note on bakeCollision
     if (mode !== "ground" && deckBvh?.baked) {
       const hit = deckBvh.raycastFirst(_brushRay.ray.origin, _brushRay.ray.direction, 5000);
       if (hit?.point) deck = _brushPoint.set(hit.point.x, hit.point.y, hit.point.z).clone();
@@ -1508,7 +1561,64 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * terrain is analytic inside createVehicleGround, so decks contains ONLY road
    * geometry — pushing a ground mesh would double up the surface.
    */
+  /**
+   * DEFERRED: an edit marks the tree stale, the next QUERY builds it.
+   *
+   * Rebuilding is 60 ms on a 24-piece track and 72% of that is `new MeshBVH()`,
+   * which no build option makes cheaper (measured across strategy and leaf-size
+   * in tools/bvhBakeProfile.mjs). So the lever is not doing it, and the reason
+   * that works is what the deck tree is actually FOR:
+   *
+   *   - the prop brush raycast          (build mode, pointer-driven)
+   *   - prop snap-to-surface            (build mode, on placement)
+   *   - the gap-preview landing arc     (build mode, only while it is on)
+   *   - the car                         (drive mode)
+   *
+   * PLACING ROAD PIECES — the commonest thing anyone does in here — queries it
+   * not at all. So laying down a run of ten pieces used to pay ten full rebuilds
+   * for a tree nothing read, and now pays none: the first brush move, gap-arc
+   * frame or press of B builds it once.
+   *
+   * Marking is deliberately cheap and idempotent, so every existing caller can
+   * keep calling `bakeCollision()` wherever it does today.
+   */
+  let collisionStale = true;
+
   function bakeCollision() {
+    collisionStale = true;
+    // The UI half is NOT deferred. The spawn marker follows the Start piece and
+    // the dev panel shows live counts; both must track an edit immediately, and
+    // neither touches a BVH.
+    updateSpawnMarker();
+    devPanel?.refresh();
+  }
+
+  /**
+   * Build the collision trees if an edit has invalidated them.
+   *
+   * Call before ANY read of `deckBvh` / `solidsBvh`, or of the ground adapter
+   * the vehicle holds. Free when nothing changed — one boolean.
+   */
+  function ensureCollision() {
+    if (!collisionStale) return;
+    collisionStale = false;
+    rebuildCollisionNow();
+  }
+
+  /**
+   * Rebuild NOW, whatever the flag says.
+   *
+   * Deferring is an optimisation for EDITS — the caller did not ask for a tree,
+   * it just changed something. An explicit rebake did ask: the dev panel's
+   * button, and the `bakeCollision` on the public handle, both mean "do it", and
+   * a button that silently sets a flag reads as a broken button.
+   */
+  function bakeCollisionNow() {
+    bakeCollision();
+    ensureCollision();
+  }
+
+  function rebuildCollisionNow() {
     scene.updateMatrixWorld(true);
     const decks = [];
     for (const p of builder.pieces) {
@@ -1567,10 +1677,6 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     refreshCollisionDebug();
     // Movers and physics props can have been added/removed by the same edit.
     buildDynamicDebug();
-    // The default spawn tracks the Start/first piece, so keep the marker on it as
-    // the track changes (no-op cost when a custom spawn is set).
-    updateSpawnMarker();
-    devPanel?.refresh();
   }
 
   /**
@@ -1796,6 +1902,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function setCollisionDebug(on) {
     debugOn = !!on;
     debugGroup.visible = debugOn;
+    // The wireframe IS the collision tree, so switching it on is a read — and
+    // with the bake deferred (see bakeCollision) the tree may be a few edits
+    // behind. Showing a stale outline of the collision would be worse than
+    // showing none.
+    if (debugOn) ensureCollision();
     refreshCollisionDebug();
     buildDynamicDebug();
     updateDynamicDebug();
@@ -2815,7 +2926,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   onClick("road-other-end", () => { toggleBuildEnd(); });
   onClick("road-link", () => { linkToNearest(); });
   onClick("road-gizmo-space", () => toggleGizmoSpace());
-  onClick("road-rebake", () => bakeCollision());
+  onClick("road-rebake", () => bakeCollisionNow());
 
   /** Say what a bulk edit just did, then let the normal status line take over on
    *  the next builder change. Without this a five-piece delete is silent. */
@@ -3447,6 +3558,7 @@ ${e.message}`);
     const len = _gapDir.length();
     if (len < 1e-6) return null;
     _gapDir.divideScalar(len);
+    ensureCollision(); // reads the deck tree — see the note on bakeCollision
     if (deckBvh?.baked) {
       const hit = deckBvh.raycastFirst(from, _gapDir, len);
       if (hit) return hit.point;
@@ -3703,22 +3815,61 @@ ${e.message}`);
     splitTimer = 2.0;
   }
 
+  /**
+   * WRITE A DOM STRING ONLY WHEN IT CHANGES.
+   *
+   * `updateRaceHud` runs every frame and used to assign five `textContent`s and
+   * a `className` unconditionally. Four of those change about once a LAP — the
+   * lap counter, the best time, the next-checkpoint label, and the timer itself
+   * whenever no lap is running.
+   *
+   * Assigning the same string still costs: it is a setter that goes through the
+   * DOM binding and dirties the node. Profiling a real drive
+   * (bench-current.json), `set textContent` came out at **5.1% of the entire
+   * main thread** — the second-largest named entry in the whole trace, behind
+   * only `(program)`, and larger than `updateMatrixWorld`.
+   *
+   * The last value is cached ON the element rather than in a Map so there is
+   * nothing to keep in sync when the HUD is rebuilt — a fresh node simply has no
+   * cached value and takes the first write.
+   *
+   * `segmentDash.js` has done this since it was written, which is why the dash
+   * never showed up in the profile while the race HUD beside it did.
+   */
+  const setText = (el, v) => {
+    if (!el || el._lastText === v) return;
+    el._lastText = v;
+    el.textContent = v;
+  };
+  const setClass = (el, v) => {
+    if (!el || el._lastClass === v) return;
+    el._lastClass = v;
+    el.className = v;
+  };
+  const setAttr = (el, name, v) => {
+    if (!el) return;
+    const k = `_last_${name}`;
+    if (el[k] === v) return;
+    el[k] = v;
+    el.setAttribute(name, v);
+  };
+
   function updateRaceHud(dt) {
     if (!hud) return;
-    hudTime.textContent = formatLapTime(lap.running ? lap.currentTime : 0);
-    hudLap.textContent = `Lap ${lap.currentLapNumber}/${lap.targetLaps}`;
-    hudNext.textContent = lap.hasCourse
+    setText(hudTime, formatLapTime(lap.running ? lap.currentTime : 0));
+    setText(hudLap, `Lap ${lap.currentLapNumber}/${lap.targetLaps}`);
+    setText(hudNext, lap.hasCourse
       ? lap.nextLabel
-      : "No timing — place a Start piece";
-    hudBest.textContent = `Best ${formatLapTime(lap.bestLap)}`;
+      : "No timing — place a Start piece");
+    setText(hudBest, `Best ${formatLapTime(lap.bestLap)}`);
 
     // Centre flash mirrors the LapTracker's own message (GO! / RECORD / FINISH).
     if (lap.messageTimer > 0 && lap.message) {
-      hudFlash.textContent = lap.message;
+      setText(hudFlash, lap.message);
       const good = /RECORD|GO|FINISH/.test(lap.message);
-      hudFlash.className = `show ${good ? "good" : ""}`;
+      setClass(hudFlash, `show ${good ? "good" : ""}`);
     } else {
-      hudFlash.className = "";
+      setClass(hudFlash, "");
     }
 
     if (splitTimer > 0) {
@@ -3735,7 +3886,7 @@ ${e.message}`);
     // clean loop is 108 km/h (tools/loopSpeedReadoutTest.mjs).
     // Same applies to quarter-pipes, wall-rides and tubes.
     const speedMs = vehicle.body.vel.length();
-    if (hudSpeed) hudSpeed.textContent = String(Math.round(speedMs * 3.6));
+    setText(hudSpeed, String(Math.round(speedMs * 3.6)));
 
     // Tach + gear. Forward speed is SIGNED (dot with the car's own forward) so
     // the box can tell reversing from sliding backwards — a magnitude can't.
@@ -3754,8 +3905,13 @@ ${e.message}`);
 
     if (hudGaugeVal) {
       // pathLength=100 on the arc ⇒ dashoffset is just "100 − percent".
+      //
+      // Quantised to a tenth before the compare. The raw value is a float that
+      // changes every frame the throttle is open, so an exact compare would
+      // never skip; a tenth of one percent of a ~100 px arc is a tenth of a
+      // pixel, and it makes the attribute hold still whenever the revs do.
       const shown = Math.min(1, g.rpm);
-      hudGaugeVal.setAttribute("stroke-dashoffset", String(100 - shown * 100));
+      setAttr(hudGaugeVal, "stroke-dashoffset", (100 - shown * 100).toFixed(1));
       const hot = g.rpm >= GEARBOX.redline;
       const stroke = g.reverse ? "#ffd24a" : hot ? "#ff6b45" : "#4a9eff";
       // Only touch the attribute on change — this runs every frame.
@@ -3786,9 +3942,9 @@ ${e.message}`);
       const show = drift.drifting || drift.pending > 0 || driftBankFlash > 0;
       if (show !== _driftShown) { hudDrift.classList.toggle("on", show); _driftShown = show; }
       if (show) {
-        if (hudDriftPts) hudDriftPts.textContent = drift.pending.toLocaleString();
-        if (hudDriftMul) hudDriftMul.textContent = `x${drift.multiplier}`;
-        if (hudDriftBank) hudDriftBank.className = driftBankFlash > 0 ? "show" : "";
+        setText(hudDriftPts, drift.pending.toLocaleString());
+        setText(hudDriftMul, `x${drift.multiplier}`);
+        setClass(hudDriftBank, driftBankFlash > 0 ? "show" : "");
       }
     }
 
@@ -3814,7 +3970,12 @@ ${e.message}`);
     portals.setBuildEnabled(!driving);
 
     if (driving) {
-      bakeCollision(); // drive the track as it stands right now
+      // THE CAR IS ABOUT TO READ THE TREE, so this is where a deferred edit is
+      // finally paid for — see the note on bakeCollision. Deliberately here and
+      // not in `frame()`: the vehicle holds the ground adapter directly, so a
+      // stale tree would be a car falling through the road rather than an
+      // obvious error.
+      ensureCollision();
       setMergedTrack(true); // ~4 draws for the whole track instead of ~1/piece
       builder.setGhostVisible(false);
       // THE MIRRORED RAIL IS BUILT HERE, not while editing — the pre-mirror pass
@@ -3934,7 +4095,7 @@ ${e.message}`);
       getMode: () => mode,
       toggleMode,
       respawn,
-      bakeCollision,
+      bakeCollision: bakeCollisionNow,
       rebakeThumbnails,
       setCollisionDebug,
       setFreeLook: (on) => {
@@ -4446,7 +4607,7 @@ ${e.message}`);
     props,
     movers,
     portals,
-    bakeCollision,
+    bakeCollision: bakeCollisionNow,
     respawn,
     toggleMode,
     get mode() { return mode; },
