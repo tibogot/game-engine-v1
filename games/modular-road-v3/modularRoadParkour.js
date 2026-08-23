@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { RoadBvh } from "../../v3/play/modularRoadBvh.js";
+import { RigidBvh } from "../../v3/play/modularRoadRigidBvh.js";
 
 /**
  * Shared geometry + ParkourMover — used by placeable static props and moving obstacles.
@@ -297,24 +297,41 @@ export function jumpRampGeometry(w, length, rise, segments = 32) {
 }
 
 /* ----------------------------------------------------------------------- */
-/* Dynamic movers — rebaked each frame, push the chassis via surface velocity */
+/* Dynamic movers — a pose per tick, and a collision tree that never rebuilds */
 /* ----------------------------------------------------------------------- */
 
 const _pivotW = new THREE.Vector3();
 const _r = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _liftInv = new THREE.Matrix4();
+const _liftLocal = new THREE.Vector3();
+
+/** Lift ramp, m/s². Gentle enough that a parked car's springs follow it. */
+const LIFT_ACCEL = 3.2;
+/** Seconds the deck stays put after the car leaves before it starts back down. */
+const LIFT_DWELL = 0.8;
+/** Plan-outline slack when deciding the car is aboard, metres (half a car wide). */
+const CARRY_MARGIN = 1.2;
+/** How far above the deck still counts as riding it. */
+const CARRY_HEADROOM = 3.5;
 
 export class ParkourMover {
   /**
    * @param {object} o
    * @param {THREE.Mesh} o.mesh collision + visual mesh
-   * @param {"spin-y"|"spin-z"|"slide-z"|"slide-y"|"pendulum-x"} o.mode
+   * @param {"spin-y"|"spin-z"|"slide-z"|"slide-y"|"pendulum-x"|"lift"} o.mode
+   *        `lift` is CALLED rather than cyclic — see _updateLift
    * @param {number} o.speed rad/s or phase speed
    * @param {THREE.Object3D} [o.pivot] required for spin-y / pendulum-x
    * @param {number} [o.amplitude] slide distance (m) or swing angle (rad)
    * @param {THREE.Vector3} [o.origin] rest position for slide modes
-   * @param {boolean} [o.isDeck] when true, mesh is rebaked into the wheel deck BVH each frame
+   * @param {boolean} [o.isDeck] when true, the mesh is a DRIVE SURFACE (wheel
+   *        probes + deck contact) rather than a wall the chassis bounces off
    * @param {number} [o.phase0] initial motion phase (e.g. −π/2 starts elevator at bottom)
+   * @param {THREE.BufferGeometry} [o.collisionGeometry] low-poly stand-in to
+   *        collide against instead of the visual geometry
+   * @param {THREE.Mesh} [o.solidMesh] descendant of `mesh` that acts as a WALL
+   *        while `mesh` itself is the drive surface
    */
   constructor({
     mesh,
@@ -325,6 +342,8 @@ export class ParkourMover {
     origin = null,
     isDeck = false,
     phase0 = 0,
+    collisionGeometry = null,
+    solidMesh = null,
   }) {
     this.mesh = mesh;
     this.pivot = pivot;
@@ -333,15 +352,48 @@ export class ParkourMover {
     this.amplitude = amplitude;
     this.origin = origin ? origin.clone() : mesh.position.clone();
     this.isDeck = isDeck;
+    /** Authored start phase, kept so a run can always begin from it. */
+    this.phase0 = phase0;
     this.phase = phase0;
-    this.bvh = new RoadBvh();
     this.label = mesh.name || mode;
+
+    // ── THE TREE IS BUILT ONCE, IN THE MESH'S OWN FRAME ─────────────────────
+    // A mover is a rigid body, so its triangles never move relative to each
+    // other and the tree it needs is the same tree every tick. This used to be
+    // a world-space `RoadBvh` rebuilt inside `update()` — 9.8 ms a tick for the
+    // rotating tube, times up to 8 ticks a frame. RigidBvh bakes here and
+    // transforms the QUERY instead; see that file for the measurements.
+    this.bvh = new RigidBvh(mesh, collisionGeometry);
+    /**
+     * Optional SECOND tree, for a mover that is both a drive surface and a wall
+     * (the elevator: you ride the deck, you bounce off the cage sides). It must
+     * be a descendant of `mesh` so one animated transform carries both.
+     */
+    this.solidBvh = solidMesh ? new RigidBvh(solidMesh) : null;
 
     this._linVel = new THREE.Vector3();
     this._angVelW = new THREE.Vector3();
+
+    // ── LIFT STATE ────────────────────────────────────────────────────────
+    // Height above `origin`, not a phase: a called lift has no cycle to be at a
+    // point in. See _updateLift.
+    this._liftY = 0;
+    this._liftVel = 0;
+    this._emptyFor = Infinity;
   }
 
-  update(dt) {
+  /**
+   * @param {number} dt seconds
+   * @param {THREE.Vector3|null} [rider] the car's world position, for the modes
+   *        that react to it. Null in build mode (there is no car) and for every
+   *        mode that ignores it.
+   */
+  update(dt, rider = null) {
+    if (this.mode === "lift") {
+      this._updateLift(dt, rider);
+      this.mesh.updateMatrixWorld(true);
+      return;
+    }
     this.phase += this.speed * dt;
     if (this.mode === "spin-y" && this.pivot) {
       this.pivot.rotation.x = 0;
@@ -372,8 +424,114 @@ export class ParkourMover {
       this._angVelW.set(angSpeed, 0, 0).applyQuaternion(this.pivot.getWorldQuaternion(_q));
       this._linVel.set(0, 0, 0);
     }
+    // The BVH needs no work here at all — it reads `mesh.matrixWorld` live.
     this.mesh.updateMatrixWorld(true);
-    if (!this.isDeck) this.bvh.bakeFromMeshes([this.mesh]);
+  }
+
+  /**
+   * CALLED LIFT: parked at the bottom until the car drives on, parked at the top
+   * until it drives off.
+   *
+   * The other modes are open-loop sine waves, which is right for an obstacle you
+   * time your run against — but wrong for an elevator, which is a piece of TRACK.
+   * A platform that cycles regardless means the only way up is to arrive at the
+   * right moment, and the only way to leave the top is to be standing on it when
+   * it happens to be there. Neither is a thing you can build a route through.
+   *
+   * Motion is a trapezoid — accelerate, cruise, brake to a stop on the target —
+   * rather than a step to full speed. A lift that starts at 2 m/s instantly
+   * yanks the suspension out from under a parked car; ramping over `LIFT_ACCEL`
+   * lets the springs follow it. The brake test is the standard one: start
+   * slowing when the remaining distance is no more than v²/2a.
+   *
+   * @param {THREE.Vector3|null} rider the car, or null when there is none
+   */
+  _updateLift(dt, rider) {
+    const height = Math.max(0.1, this.amplitude);
+    const vMax = Math.max(0.1, Math.abs(this.speed));
+    const occupied = !!rider && this.isCarriedPointInside(rider);
+
+    // A short dwell before it starts back down, so clipping the edge of the deck
+    // on the way off does not immediately drop the platform under the car's rear
+    // wheels. Rising is not delayed — you want it to answer at once.
+    if (occupied) this._emptyFor = 0;
+    else this._emptyFor += dt;
+    const wantTop = occupied || this._emptyFor < LIFT_DWELL;
+
+    const target = wantTop ? height : 0;
+    const remaining = target - this._liftY;
+    const dir = Math.sign(remaining);
+
+    if (Math.abs(remaining) < 1e-4 && Math.abs(this._liftVel) < 1e-3) {
+      this._liftY = target;
+      this._liftVel = 0;
+    } else {
+      const brakeDist = (this._liftVel * this._liftVel) / (2 * LIFT_ACCEL);
+      if (dir !== Math.sign(this._liftVel) && this._liftVel !== 0) {
+        // Target moved to the other side mid-trip (the car got back on): brake
+        // through zero rather than teleporting the velocity.
+        this._liftVel += dir * LIFT_ACCEL * dt;
+      } else if (Math.abs(remaining) <= brakeDist) {
+        const next = Math.abs(this._liftVel) - LIFT_ACCEL * dt;
+        this._liftVel = dir * Math.max(0, next);
+      } else {
+        const next = Math.min(vMax, Math.abs(this._liftVel) + LIFT_ACCEL * dt);
+        this._liftVel = dir * next;
+      }
+      this._liftY += this._liftVel * dt;
+      // Never overshoot the ends — a trapezoid that lands a millimetre past the
+      // top would sit there jittering between the two brake branches.
+      if (this._liftY > height) { this._liftY = height; this._liftVel = 0; }
+      if (this._liftY < 0) { this._liftY = 0; this._liftVel = 0; }
+    }
+
+    this.mesh.position.set(this.origin.x, this.origin.y + this._liftY, this.origin.z);
+    this._linVel.set(0, this._liftVel, 0);
+    this._angVelW.set(0, 0, 0);
+  }
+
+  /**
+   * Is `worldPoint` standing ON this mover's deck?
+   *
+   * Tested in the deck's own local space against its geometry bounds, so it
+   * follows the platform without anyone having to declare a footprint: a point
+   * counts when it is inside the plan outline (plus a margin for the car's
+   * width at the edge) and within head height above the top face.
+   */
+  isCarriedPointInside(worldPoint) {
+    const geo = this.mesh.geometry;
+    if (!geo) return false;
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    _liftInv.copy(this.mesh.matrixWorld).invert();
+    _liftLocal.copy(worldPoint).applyMatrix4(_liftInv);
+    return (
+      _liftLocal.x > bb.min.x - CARRY_MARGIN && _liftLocal.x < bb.max.x + CARRY_MARGIN &&
+      _liftLocal.z > bb.min.z - CARRY_MARGIN && _liftLocal.z < bb.max.z + CARRY_MARGIN &&
+      _liftLocal.y > bb.max.y - 0.5 && _liftLocal.y < bb.max.y + CARRY_HEADROOM
+    );
+  }
+
+  /**
+   * Back to the authored start pose.
+   *
+   * Movers animate in BUILD mode now, so by the time you hit drive the phase is
+   * wherever the editing session left it. A race has to start from the same
+   * board every time — otherwise a lap time depends on how long you spent
+   * building, and a ghost replays against obstacles that are somewhere else.
+   */
+  resetPhase() {
+    this.phase = this.phase0;
+    this._liftY = 0;
+    this._liftVel = 0;
+    this._emptyFor = Infinity;
+    this.update(0);
+  }
+
+  /** Free the collision trees. Call when the mover is deleted. */
+  dispose() {
+    this.bvh?.dispose();
+    this.solidBvh?.dispose();
   }
 
   /** Surface velocity at a world-space contact point (for chassis coupling). */
