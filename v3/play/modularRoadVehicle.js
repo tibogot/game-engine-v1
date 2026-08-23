@@ -185,7 +185,41 @@ export const TIRE = {
   /** Legacy forward/lateral offsets — used only when rayRingCount < 3. */
   rayForwardBias: 0.6,
   rayLateralBias: 1.0,
-  /** Rays around the bottom semicircle of the tire (longitudinal × vertical plane). */
+  /**
+   * Rays around the bottom semicircle of the tire (longitudinal × vertical
+   * plane). Costs rayRingCount × 4 tyres × SUBSTEPS raycasts per tick — 80 at
+   * this setting.
+   *
+   * DROPPING THIS TO 6 WAS TRIED AND REVERTED. It is safe but it is not
+   * faster, and the measurements are recorded here so the idea is not retried
+   * from scratch:
+   *
+   *  • SPEED: none. Timed over an IDENTICAL pose set (60 poses, 12 reps, 5
+   *    alternating passes, medians) 10 vs 6 came out at +0.2% inside the tube
+   *    and -0.9% on open road. Noise.
+   *
+   *  • The "-33% on open road / -19% in the tube" first measured for this was
+   *    WRONG, in two compounding ways worth remembering. A different ring
+   *    count sends the car down a DIFFERENT TRAJECTORY (measured: 245 m of
+   *    divergence over 30 s), so per-region tick averages were sampling
+   *    different geometry rather than the same work done cheaper. And wrapping
+   *    each BVH call in performance.now() to attribute cost inflated the tube
+   *    tick from ~1.2 ms to 3.2 ms — most of the "1.25 ms of raycasts" that
+   *    made the ring look like the biggest line item was the instrumentation.
+   *
+   *  • SAFETY (this part held up): replaying 800 poses from a full lap gave a
+   *    max contact error of 12 mm with zero grounded-flag mismatches, and
+   *    tools/tireRingEdgeTest.mjs finds no grounded flip away from an edge on
+   *    a `gap` or `jump` lip swept at 5 cm.
+   *
+   * The reason coarsening is harmless is also the reason it is pointless: THE
+   * RING IS NOT WHAT RESOLVES AN EDGE, `useSphereSweep` is. The sweep is a
+   * 0.33 m ball that bridges anything narrower than the contact patch — the
+   * physically right answer, since a 0.37 m wheel should not drop into a 0.2 m
+   * slot. Turn the sweep off and the ring count matters immediately (the edge
+   * test's control shows 228 differing samples). So if the sweep is ever
+   * disabled, this number becomes load-bearing again.
+   */
   rayRingCount: 10,
   rayRingScale: 0.92, // × wheel radius
   /** Swept-sphere cast along the probe (catches ramp lips between discrete rays). */
