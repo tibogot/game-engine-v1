@@ -1,5 +1,11 @@
 // ============================================================================
-// GLB WHEEL — loads models/wheellotus_compressed.glb as the car's wheel visual.
+// GLB WHEEL — loads models/newwheels2_compressed.glb as the car's wheel visual.
+//
+// Swapped from wheellotus_compressed.glb after tools/wheelGlbCompare.mjs
+// verified the two are interchangeable: radius 0.37419 and width 0.29306 to
+// five decimals on BOTH, and the same bbox centre, so the tire probe's ray ring
+// and sphere sweep are untouched. Re-run that script before any future swap —
+// those two numbers are physics, not decoration.
 //
 // The file is a Lotus Emira GT4 FRONT-LEFT assembly: four nodes (tyre, rim,
 // brake rotor, caliper) with four materials, Draco-compressed and quantized
@@ -28,7 +34,7 @@ import {
   initGlbLoaderRenderer,
 } from "../../v2/core/foliage/glbLoader.js";
 
-export const WHEEL_GLB_URL = "/models/wheellotus_compressed.glb";
+export const WHEEL_GLB_URL = "/models/newwheels2_compressed.glb";
 
 /**
  * @param {THREE.WebGPURenderer} renderer needed once, for KTX2 transcoder support detection
