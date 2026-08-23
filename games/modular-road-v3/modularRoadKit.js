@@ -3788,6 +3788,45 @@ export const PIECE_CATALOG = [
 
 export const PIECE_BY_ID = new Map(PIECE_CATALOG.map((p) => [p.id, p]));
 
+/**
+ * Pieces that can be snapped SIDE BY SIDE into a genuinely wider road.
+ *
+ * Two conditions, both measured — see tools/lateralSnapProbe.mjs, which fails
+ * if this list ever stops matching the geometry:
+ *
+ *  1. THE EDGES MATE. `aLateral` is x / halfWidth, so a lateral copy fits only
+ *     when the left edge translated by the piece's width lands exactly on the
+ *     right edge. True of anything whose centreline is straight in plan. FALSE
+ *     of every curve, bank, loop, spiral and twist: their two edges are arcs of
+ *     radius R-hw and R+hw, so a copy opens a wedge that grows along the arc
+ *     (measured at up to 18.95 m on `curve`). That is not a tuning problem —
+ *     the neighbour would have to be a DIFFERENT piece, same swept angle at
+ *     radius R+W, which is a separate feature.
+ *
+ *  2. THE DECK CONTINUES. Mating edges alone are not enough. A full tube's
+ *     widest points are its bore equator and also sit at aLateral = +-1, so two
+ *     tubes "mate" by kissing along a tangent line with two separate bores and
+ *     nothing drivable between them. `tube`, `half_tube`, `half_pipe` and
+ *     `glass_road` are excluded for that reason, not because they miss.
+ *
+ * `tunnel` and `channel` are in: their decks are ordinary slabs, so the result
+ * is a twin-bore tunnel, which is a look to choose rather than a defect.
+ */
+export const LATERAL_TILEABLE = new Set([
+  "straight", "platform", "narrow", "holed",
+  "rounded_start", "rounded_end",
+  "slope", "link", "crest", "jump", "dive", "gap", "landing", "brow",
+  "quarterpipe", "quarterpipe_down",
+  "start", "checkpoint", "finish",
+  "tunnel", "channel",
+  "junction_y", "junction_t", "junction_cross",
+]);
+
+/** Can this piece take a lateral neighbour? */
+export function isLaterallyTileable(pieceId) {
+  return LATERAL_TILEABLE.has(pieceId);
+}
+
 // Attach analytic end tangents so each piece's connectors hit their exact angle
 // (see applyEndTangents). Loops are intentionally omitted — they use fixFrames
 // and keep the transported end frames. Keeping this as a side-table avoids
@@ -4350,6 +4389,11 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
     // The same, for the mirrored rail. Only filled when the mirror was asked
     // for; shares `railPosts.template` when both are present.
     railMirrorPosts,
+    // Half-width of the section this piece actually swept. Lateral snapping
+    // offsets a neighbour by 2*hw, and that has to be the PIECE's own width —
+    // `narrow` is 8 m and `platform` 44 m, so the global roadParams.width is
+    // the wrong number for them. Null for pieces that build their own plate.
+    hw: profileData?.hw ?? null,
     frames, world, connectorOut, branchesOut,
   };
 }

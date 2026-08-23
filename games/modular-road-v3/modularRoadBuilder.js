@@ -10,6 +10,7 @@ import {
   initialConnector,
   socketMatrix,
   linkCurvature,
+  isLaterallyTileable,
 } from "./modularRoadKit.js";
 import { solveGapArc } from "./gapArc.js";
 
@@ -74,6 +75,17 @@ const HEAD_JOIN_EPS = 1.0;
  * every zoom: "near the thing I am looking at".
  */
 const AIM_PIXEL_RADIUS = 90;
+
+/**
+ * How far out from a piece's centreline the cursor must be, as a fraction of
+ * its half-width, before pointing at it means "put one BESIDE this".
+ *
+ * Pointing at the middle of a road means you are looking at the road, and
+ * snapping the ghost sideways there would make it skitter across the track
+ * every time the cursor crossed it. The outer third is unambiguous: nothing
+ * else in the builder claims that gesture.
+ */
+const LATERAL_EDGE_FRACTION = 0.66;
 
 /**
  * Tightest corner radius (m) a generated link may have before the builder
@@ -276,6 +288,15 @@ export class ModularRoadBuilder {
     this._ghostQuat = new THREE.Quaternion();
     /** True while the ghost is parked on a junction branch (see branchConnectors). */
     this.ghostOnBranch = false;
+    /** True while the ghost is parked on a piece's SIDE socket (lateral snap). */
+    this.ghostOnLateral = false;
+    /** @type {{side:string,piece:object,matrix:THREE.Matrix4}|null} the socket
+     *  the ghost is parked on, so placement knows which side to open up. */
+    this.lateralNeighbour = null;
+    /** Half-width of the piece the ghost is currently previewing (see refreshGhost). */
+    this._ghostHw = null;
+    /** Point at a piece's edge to place one beside it. Off = the old behaviour. */
+    this.lateralSnapEnabled = true;
     /**
      * WHICH END of the active chain the ghost is working on: "tail" appends (the
      * original and still the default), "head" PREPENDS — the piece goes in front
@@ -1302,6 +1323,126 @@ export class ModularRoadBuilder {
     this.refreshGhost();
   }
 
+  // ── LATERAL SNAP (side-by-side pieces) ─────────────────────────────────────
+  // Snapping a copy of a piece one deck-width across turns two ramps into one
+  // wide ramp. The whole feature is a CONNECTOR POSE, exactly like a junction
+  // branch: `world = currentConnector * entryLocal^-1`, so feeding buildPiece an
+  // entry seam shifted along its own X gives the same piece, same orientation,
+  // one width over. Nothing about the chain model or the save format changes —
+  // a lateral neighbour is simply a new chain that happens to start beside an
+  // old one.
+  //
+  // WHY THIS IS NOT A BRANCH. Branches are enumerated by branchConnectors(),
+  // which is O(pieces x branches x chains x chain-length) and runs on EVERY
+  // pointer move via aimAtCursor. That is affordable only because junctions are
+  // rare. Publishing two sockets on every piece would put ~400k operations on
+  // each mouse move of a 200-piece track, so side sockets are never enumerated
+  // globally — they are derived on demand for the ONE piece under the cursor.
+
+  /** Is `p` something a neighbour can sit beside at all? */
+  _lateralWidth(p) {
+    return p && isLaterallyTileable(p.id) && p.hw > 0 ? p.hw * 2 : 0;
+  }
+
+  /**
+   * Centre-to-centre distance from `p` to a neighbour placed beside it.
+   *
+   * Their two half-widths, NOT twice one of them: `narrow` (hw 4) beside
+   * `straight` (hw 8) must land 12 m over, and 2*p.hw would leave a 4 m seam.
+   * Falls back to the piece's own width until the ghost has been built once.
+   */
+  _lateralOffset(p) {
+    const gw = this._ghostHw > 0 ? this._ghostHw : p.hw;
+    return p.hw + gw;
+  }
+
+  /**
+   * The two side sockets of one placed piece: its entry seam translated a full
+   * width along its own lateral axis, orientation untouched.
+   * @returns {{side:"left"|"right", matrix:THREE.Matrix4, piece:object}[]}
+   */
+  lateralSockets(p) {
+    const W = this._lateralWidth(p);
+    if (!W) return [];
+    // The seam BEFORE any tilt would put the neighbour somewhere the piece is
+    // not; connectorIn is where the piece actually sits.
+    const d = this._lateralOffset(p);
+    return [-1, 1].map((s) => ({
+      side: s < 0 ? "left" : "right",
+      piece: p,
+      matrix: p.connectorIn.clone().multiply(new THREE.Matrix4().makeTranslation(s * d, 0, 0)),
+    }));
+  }
+
+  /**
+   * Which side socket the cursor is over, or null.
+   *
+   * Deliberately only fires in the OUTER HALF of a piece: pointing at the
+   * middle of the road means "I am looking at the road", and hijacking the
+   * ghost there would make it skitter sideways whenever the cursor crossed the
+   * track. Pointing at its edge is an unambiguous "put one next to this".
+   */
+  lateralAimAt(clientX, clientY) {
+    if (!this._camera || !this._domElement) return null;
+    const rect = this._domElement.getBoundingClientRect();
+    this._pickNdc.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this._raycaster.setFromCamera(this._pickNdc, this._camera);
+    this.root.updateMatrixWorld(true);
+    // Reused, not reallocated — this runs on every pointer move.
+    const targets = (this._lateralPickTargets ??= []);
+    targets.length = 0;
+    for (const p of this.pieces) {
+      if (this._lateralWidth(p) && p.mesh?.geometry?.attributes?.position) targets.push(p.mesh);
+    }
+    if (!targets.length) return null;
+    for (const h of this._raycaster.intersectObjects(targets, false)) {
+      const p = h.object.userData.piece;
+      if (!p) continue;
+      const W = this._lateralWidth(p);
+      if (!W) continue;
+      // Hit point in the piece's own entry frame: x is lateral, by construction
+      // of socketMatrix (x = up cross z).
+      const local = _A_V.copy(h.point).applyMatrix4(_A_M.copy(p.connectorIn).invert());
+      const half = W / 2;
+      if (Math.abs(local.x) < half * LATERAL_EDGE_FRACTION) return null; // middle of the road
+      const side = local.x < 0 ? -1 : 1;
+      const d = this._lateralOffset(p);
+      return {
+        side: side < 0 ? "left" : "right",
+        piece: p,
+        matrix: p.connectorIn.clone().multiply(new THREE.Matrix4().makeTranslation(side * d, 0, 0)),
+      };
+    }
+    return null;
+  }
+
+  /** Park the ghost on a side socket. Detached, so place() forks a new chain
+   *  beside the piece — the same mechanism a junction branch uses. */
+  _putGhostOnLateral(sock) {
+    this._gizmoTarget = "ghost";
+    this.ghostEnd = "tail";
+    this.ghostDetached = true;
+    this.ghostOnBranch = false;
+    this.ghostOnLateral = true;
+    this.lateralNeighbour = sock;
+    this._ghostPos.setFromMatrixPosition(sock.matrix);
+    _A_M.extractRotation(sock.matrix);
+    this._ghostQuat.setFromRotationMatrix(_A_M);
+    this.freeYaw = this._ghostYaw = _A_E.setFromQuaternion(this._ghostQuat, "YXZ").y;
+    if (this.placementGizmo) {
+      this.placementPivot.position.copy(this._ghostPos);
+      this.placementPivot.quaternion.copy(this._ghostQuat);
+      this.placementGizmo.attach(this.placementPivot);
+      this._applyGizmoSuspend();
+      this._applyGizmoAxes();
+    }
+    this._refreshBranchMarkers();
+    this.refreshGhost();
+  }
+
   /**
    * Park the ghost on one open end — the single place that decides what
    * "snapped to the track" means. Shared by the gizmo's magnet and by pointing
@@ -1369,12 +1510,27 @@ export class ModularRoadBuilder {
       const d = Math.hypot(sx - clientX, sy - clientY);
       if (d <= AIM_PIXEL_RADIUS && (!best || d < best.d)) best = { oc, d };
     }
-    if (!best) return false;
+    // NO OPEN END IN RANGE ⇒ ARE WE POINTING AT THE SIDE OF A PIECE?
+    //
+    // Deliberately a fallback and not a peer: an open end is always the more
+    // likely intent, and the raycast is the more expensive test, so it only
+    // runs when the cheap screen-space search has already come up empty.
+    if (!best) {
+      if (!this.lateralSnapEnabled) return false;
+      const sock = this.lateralAimAt(clientX, clientY);
+      if (!sock) return false;
+      const lkey = `lateral|${sock.piece.uid}|${sock.side}`;
+      if (lkey === this._lastAimKey) return false;
+      this._lastAimKey = lkey;
+      this._putGhostOnLateral(sock);
+      return true;
+    }
 
     const key = `${best.oc.chainId}|${best.oc.end}|${
       best.oc.branch ? best.oc.branch.pos.toArray().join(",") : ""}`;
     if (key === this._lastAimKey) return false; // same end, nothing to redraw
     this._lastAimKey = key;
+    this._clearLateral();
     this._snapGhostTo(best.oc);
     return true;
   }
@@ -1496,6 +1652,15 @@ export class ModularRoadBuilder {
     this._ghostYaw = yaw;
     this._ghostQuat.setFromAxisAngle(_YUP, yaw);
     this.ghostOnBranch = false;
+    // Turning the ghost by hand takes it off the side socket too: the socket's
+    // whole meaning is "parallel to that piece", which a yaw edit contradicts.
+    this._clearLateral();
+  }
+
+  /** Forget the side socket the ghost was parked on. */
+  _clearLateral() {
+    this.ghostOnLateral = false;
+    this.lateralNeighbour = null;
   }
 
   /** Connector matrix from the detached ghost pose. Yaw-only for free
@@ -1945,13 +2110,18 @@ export class ModularRoadBuilder {
         edges,
         { deckOnly: true },
       );
-      hit = { geometry: built.geometry, fromConn: built.world.clone() };
+      // `hw` rides along because the lateral snap needs the GHOST's half-width
+      // as well as the neighbour's: the gap between two pieces of different
+      // widths is p.hw + ghost.hw, and using 2*p.hw would silently leave a
+      // seam (or an overlap) whenever they differ — `narrow` beside `straight`.
+      hit = { geometry: built.geometry, fromConn: built.world.clone(), hw: built.hw ?? null };
       // Bounded for the same reason `_localXfCache` is: params change
       // continuously while a slider is dragged. Never evict what is on screen.
       if (this._ghostGeoCache.size > 32) this._evictGhostGeoCache();
       this._ghostGeoCache.set(key, hit);
     }
 
+    this._ghostHw = hit.hw;
     // NOT disposed — it belongs to the cache, and the ghost is only borrowing.
     this.ghost.geometry = hit.geometry;
     this.ghost.matrix.copy(conn).multiply(hit.fromConn);
@@ -2227,6 +2397,10 @@ export class ModularRoadBuilder {
       connectorOut: built.connectorOut.clone(),
       /** Junction side sockets in WORLD space (empty for every other piece). */
       branches: built.branchesOut ?? [],
+      /** Half-width of the section this piece swept — the lateral snap offsets
+       *  a neighbour by 2*hw, and `narrow` (8 m) and `platform` (44 m) are not
+       *  the global road width. Null on pieces that build their own plate. */
+      hw: built.hw ?? null,
       /** Per-piece entry tilt (local-frame rotation, propagates downstream). */
       tilt: new THREE.Quaternion(),
       /** Entry seam BEFORE the tilt — filled by rebuildAll, used by the edit gizmo. */
@@ -2375,6 +2549,7 @@ export class ModularRoadBuilder {
     this.pieces.push(piece);
     this.currentConnector = piece.connectorOut.clone();
     this.ghostOnBranch = false; // the branch (if that's where this went) is taken
+    this._clearLateral();       // and the side socket is now occupied
     this._rebuildInstances();
     this._refreshBranchMarkers();
     // Hand the gizmo to the NEXT piece at the fresh open end.
@@ -3097,6 +3272,7 @@ export class ModularRoadBuilder {
         }
         const built = buildPiece(p.id, conn, p.pp, roadParams, guardrailParams, edges);
         this._applyBuilt(p, built);
+        p.hw = built.hw ?? null; // params can change the section, so re-read it
         p.connectorOut = built.connectorOut.clone();
         p._builtFrom = this._stampBuiltFrom(
           conn, p.id, p.pp, edges, built.world, built.connectorOut, built.branchesOut);
