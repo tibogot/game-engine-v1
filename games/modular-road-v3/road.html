@@ -326,6 +326,27 @@
         </div>
         <div id="palette-body">
           <div id="piece-grid"></div>
+          <!-- SELECTED MOVER. Hidden until one is picked (right-click / place),
+               because it is the only palette block that is about a thing rather
+               than about the catalog. Speed and travel are the two numbers that
+               decide whether an elevator is a lift or a launcher, and until this
+               existed they were only editable by hand-editing a saved track. -->
+          <div id="mover-inspector" hidden>
+            <div class="palette-group-label">
+              Moving obstacle · <span id="mover-insp-name">—</span>
+            </div>
+            <label class="mover-row">
+              <span>Speed</span>
+              <input id="mover-speed" type="range" min="-2" max="2" step="0.01" />
+              <b id="mover-speed-val">0.00</b>
+            </label>
+            <label class="mover-row" id="mover-amp-row">
+              <span id="mover-amp-label">Travel</span>
+              <input id="mover-amp" type="range" min="0.5" max="24" step="0.1" />
+              <b id="mover-amp-val">0.0</b>
+            </label>
+            <div id="mover-insp-hint"></div>
+          </div>
           <!-- GROUPED, and every id kept exactly as it was: buildRoadPaletteUI()
                and roadGame.js look all of these up by hand, so a rename here is
                a button that silently stops working. tools/paletteWiringTest.mjs

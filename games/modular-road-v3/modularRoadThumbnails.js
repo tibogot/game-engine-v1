@@ -6,6 +6,7 @@ import {
   guardrailParams,
   pieceParams,
 } from "./modularRoadKit.js";
+import { isSharedGeometry } from "./modularRoadBatching.js";
 
 /**
  * The kit's shipped numbers, snapshotted at import.
@@ -106,7 +107,14 @@ export async function bakeRoadThumbnails({
     while (group.children.length) {
       const c = group.children.pop();
       c.traverse?.((o) => {
-        if (o.isMesh) o.geometry?.dispose?.();
+        // NOT the shared templates. `item.make()` for scenery, the elevator and
+        // the container hands back a `clone()` of a cached template, and in three
+        // a clone SHARES its geometry by reference — so freeing it here destroys
+        // the buffers every future placement of that type draws from. The
+        // symptom is the nasty one: a mesh that still reports a healthy index
+        // count, drawing a null GPUBuffer, every frame, long after the bake.
+        // Only bites on a cold thumbnail cache, which is why it hid.
+        if (o.isMesh && !isSharedGeometry(o.geometry)) o.geometry?.dispose?.();
       });
     }
   };

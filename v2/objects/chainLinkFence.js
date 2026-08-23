@@ -74,8 +74,14 @@ const _texCache = new Map();
 /**
  * Draw one diamond-mesh tile to a canvas → alpha-tested repeating texture.
  * One tile = one diamond pitch, so UV repeat maps 1 unit → 1 diamond.
+ *
+ * Exported because the diamond weave is the LOOK, not just this builder's
+ * internals: the modular-road elevator cages its platform in the same mesh, and
+ * the cache key means both share one 64×64 texture rather than drawing a canvas
+ * each. Anything reusing it must also reuse `disposeChainLinkTextures` as the
+ * single owner — never dispose the returned texture directly.
  */
-function chainLinkTexture(color, wireFrac) {
+export function chainLinkTexture(color, wireFrac) {
   if (typeof document === "undefined") return null; // node (bbox/thumbnail probes)
   const key = `${color}|${wireFrac.toFixed(3)}`;
   const hit = _texCache.get(key);
