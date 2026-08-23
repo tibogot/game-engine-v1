@@ -59,6 +59,7 @@ import {
   GRAVITY,
 } from "../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../v3/play/modularRoadBvh.js";
+import { BvhSet } from "../../v3/play/modularRoadRigidBvh.js";
 import { createVehicleGround } from "../../v3/play/modularRoadGround.js";
 import { SCENERY_MAP } from "./modularRoadScenery.js";
 import { isSharedGeometry } from "./modularRoadBatching.js";
@@ -97,7 +98,10 @@ import {
 import {
   PropManager, PROP_CATALOG, PROP_BY_ID, glowPropParams, SURFACE_SNAP, SURFACE_SNAP_MODES, DECAL_URL,
 } from "./modularRoadProps.js";
-import { MoverPropManager, MOVER_CATALOG, MOVER_BY_ID } from "./modularRoadMoverProps.js";
+import {
+  MoverPropManager, MOVER_CATALOG, MOVER_BY_ID, preloadWindmillModel,
+  createMoverInspector,
+} from "./modularRoadMoverProps.js";
 import { PortalManager, DEFAULT_PORTAL_PARAMS, buildPortalMesh } from "./modularRoadPortals.js";
 import { GapPreview } from "./gapPreview.js";
 import { LapTracker, formatLapTime } from "./modularRoadLap.js";
@@ -424,6 +428,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       return app.getWorldHeight(x, z);
     },
   });
+  // Built BEFORE the manager: the manager takes `show` as its selection
+  // callback, so a const still in its temporal dead zone would throw the first
+  // time anything was picked.
+  const moverInspector = createMoverInspector(() => movers, {
+    getSnapStep: () => builder.snapStep,
+  });
   const movers = new MoverPropManager({
     scene,
     camera,
@@ -431,6 +441,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     orbit: controls,
     onChange: () => { bakeCollision(); paletteUi?.refreshStatus?.(); },
     onSelect: () => { props.deselect(); portals.deselect?.(); builder.deselectPlacement?.(); },
+    onSelectionChange: (inst) => moverInspector.show(inst),
   });
   const portals = new PortalManager({
     scene,
@@ -458,6 +469,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     preloadContainer(),
     preloadTireWall(renderer),
     preloadDecal(DECAL_URL).then(() => settleDecals()),
+    // The wind turbine's GLB. Here rather than lazily on first placement so the
+    // mover catalog's `make()` can stay synchronous — and so the palette bakes a
+    // real thumbnail for it instead of an empty tile it would then CACHE.
+    preloadWindmillModel().catch(() => {}),
   ]);
 
   const thumbItems = [];
@@ -1546,8 +1561,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const solidsBvh = new RoadBvh(); // guardrails + tunnel shells → chassis collision
   // DYNAMIC collision — moving platforms / walls only. Rebaked every physics
   // tick, which is affordable precisely BECAUSE the static track isn't in here.
-  const moverDeckBvh = new RoadBvh();
-  const moverSolidsBvh = new RoadBvh();
+  // One tree per mover, not one merged tree for all of them — see BvhSet.
+  const moverDeckBvh = new BvhSet();
+  const moverSolidsBvh = new BvhSet();
 
   const ground = createVehicleGround({
     getTerrainHeight: (x, z) => app.getWorldHeight(x, z),
@@ -1660,7 +1676,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     solidCapsules = props.collisionCapsules();
     vehicleRef?.setSolidCapsules(solidCapsules);
 
-    rebakeMovers();
+    syncMoverBvhs();
 
     if (decks.length) {
       deckBvh.bakeFromMeshes(decks);
@@ -1680,35 +1696,29 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   /**
-   * Rebake ONLY the moving geometry, at its current pose.
+   * Point the ground adapter at the movers' collision trees.
    *
-   * A moving platform's mesh travels, so a BVH baked once goes stale the moment
-   * it moves and the wheels probe empty space. The lab solved this by rebuilding
-   * the ENTIRE deck BVH (whole track included) every tick — O(track size) work,
-   * up to 8× per frame here, which dominates the frame on any real track.
+   * A moving platform's mesh travels, so a WORLD-SPACE tree baked once goes
+   * stale the moment it moves and the wheels probe empty space. The lab solved
+   * that by rebuilding the entire deck BVH (whole track included) every tick;
+   * this file then narrowed it to a merged mover-only tree, rebuilt per tick.
    *
-   * Instead the movers live in their own BVH that the ground adapter queries
-   * alongside the static one, so this rebuild is proportional to the number of
-   * moving platforms (usually 1–3 meshes) and independent of track size.
+   * Narrower, but still O(mover triangles) of tree CONSTRUCTION per tick, up to
+   * 8 ticks a frame — measured at 11.76 ms a tick with six movers placed, of
+   * which 9.81 ms was the rotating tube alone. And all of it rebuilding, from
+   * scratch, a tree that in the body's own frame had not changed at all.
+   *
+   * So each mover now owns a RigidBvh baked ONCE in its local space, and the
+   * query is transformed instead of the geometry (v3/play/modularRoadRigidBvh.js).
+   * Nothing here runs per tick any more: this only re-collects the LIST, which
+   * changes when a mover is added, deleted or rebuilt.
    */
-  function rebakeMovers() {
-    const moverCol = movers.collisionMeshes();
-    const decks = [...moverCol.deck];
-    for (const dm of movers.getDeckMovers()) {
-      if (dm.mesh && !decks.includes(dm.mesh)) decks.push(dm.mesh);
-    }
-    if (decks.length) {
-      moverDeckBvh.bakeFromMeshes(decks);
-      ground.setMoverBvh(moverDeckBvh.baked ? moverDeckBvh : null);
-    } else {
-      ground.setMoverBvh(null);
-    }
-    if (moverCol.solids.length) {
-      moverSolidsBvh.bakeFromMeshes(moverCol.solids);
-      ground.setMoverSolidsBvh(moverSolidsBvh.baked ? moverSolidsBvh : null);
-    } else {
-      ground.setMoverSolidsBvh(null);
-    }
+  function syncMoverBvhs() {
+    const { deck, solids } = movers.collisionBvhs();
+    moverDeckBvh.set(deck);
+    moverSolidsBvh.set(solids);
+    ground.setMoverBvh(deck.length ? moverDeckBvh : null);
+    ground.setMoverSolidsBvh(solids.length ? moverSolidsBvh : null);
   }
 
   // ── COLLISION DEBUG ────────────────────────────────────────────────────────
@@ -3807,6 +3817,8 @@ ${e.message}`);
     tireMarks.reset();
     driftSmoke.reset();
     sparks.reset();
+    // Same board every run — see ParkourMover.resetPhase.
+    movers.resetPhases();
     simAccum = 0;
   }
 
@@ -4032,6 +4044,115 @@ ${e.message}`);
     }
   }
 
+  /**
+   * DRAW THE WHOLE TRACK ONCE, BEHIND A COVER, BEFORE THE FLAG DROPS.
+   *
+   * ── THE BUG ──────────────────────────────────────────────────────────────
+   * WebGPU builds a render pipeline the FIRST TIME an object is actually drawn
+   * and caches it for the life of the page. The engine warms up at boot
+   * (v3/app/main.js calls renderer.compileAsync) — but the track does not exist
+   * yet at that point, and `buildMergedTrack()` has just created brand-new
+   * meshes it has never seen. So every merged chunk, rail, prop and car
+   * material paid its compile on the first frame it became VISIBLE, mid-race.
+   *
+   * On audittest that landed at the tube. Inside the bore almost nothing else
+   * is on screen (measured: 23 draws inside against 42+ in the open); coming
+   * round the last curve toward `tube_out` reveals a straight corridor, a slope,
+   * a loop 184 m away and an emissive boost decal all at once. MEASURED: 20
+   * pipelines compiled on that single frame, which took 1052 ms.
+   *
+   * It matched the report exactly — always the same spot (that is where the
+   * reveal happens), only on the first run after a refresh (pipelines are
+   * cached afterwards), and gone after R (restarting the race does not toggle
+   * the mode, so the merged meshes and their pipelines survive).
+   *
+   * ── TWO THINGS THAT DO NOT WORK, BOTH MEASURED ───────────────────────────
+   *  1. `renderer.compileAsync(scene, camera)`. Tried first; it compiled 45
+   *     pipelines at the transition and the tube frame STILL compiled its 20.
+   *     A pipeline is per material PER RENDER-PASS STATE, and compileAsync only
+   *     prepares the default pass — the labels showed the same material
+   *     (PropPlainVertex, brakeLight, mm_windows) compiling more than once,
+   *     which is the emissive/MRT variants it never reaches.
+   *  2. Warming into an offscreen RenderTarget, to dodge the flicker. It
+   *     compiled 38 pipelines into the target and the canvas route then
+   *     compiled its 16 + 20 anyway: pipelines are keyed to the target's
+   *     format, so a warm-up only counts if it renders to the REAL canvas.
+   *
+   * So this draws to the canvas and hides it behind an opaque cover. Measured
+   * after: ZERO pipelines compiled anywhere on the route, worst frame 7.2 ms
+   * against 1052 ms.
+   *
+   * Only the first entry into drive mode is slow (~2.5 s); later ones re-render
+   * the same poses in a few ms because the pipelines are already cached, so
+   * this deliberately does not try to detect "already warm".
+   */
+  let warmingUp = false;
+  async function warmUpTrackPipelines() {
+    if (warmingUp) return;
+    const pieces = builder.pieces ?? [];
+    if (!pieces.length) return;
+    warmingUp = true;
+    // A CLONE, so the live chase camera is never touched — the engine's own
+    // frame loop keeps rendering the real view underneath the cover.
+    const warmCam = camera.clone();
+    const cover = document.createElement("div");
+    cover.className = "road-warmup-cover";
+    cover.textContent = "Preparing track…";
+    document.body.appendChild(cover);
+    const _p = new THREE.Vector3();
+    const _f = new THREE.Vector3();
+    try {
+      // Yield once so the cover actually paints before the canvas starts
+      // flashing through the track behind it.
+      await new Promise((res) => requestAnimationFrame(() => res()));
+      // EVERY piece gets a pose, not a strided sample. Striding to 14 was tried
+      // and measured: 6 pipelines still compiled mid-route, because a material
+      // that appears on only one piece is invisible from every pose that skips
+      // it. Poses are cheap once the pipelines exist (a few ms), so the cost of
+      // being exhaustive is paid only on the first entry. Capped so a
+      // pathological 500-piece track cannot stall for a minute.
+      const MAX_POSES = 60;
+      const stride = Math.max(1, Math.ceil(pieces.length / MAX_POSES));
+      for (let i = 0; i < pieces.length; i += stride) {
+        const m = pieces[i].connectorIn;
+        _p.setFromMatrixPosition(m);
+        // -Z is travel, matching socketMatrix; stand back and look along it so
+        // the frame contains the piece AND whatever it leads to.
+        _f.set(0, 0, -1).transformDirection(m);
+        warmCam.position.copy(_p).addScaledVector(_f, -12).setY(_p.y + 5);
+        warmCam.lookAt(_p.x + _f.x * 40, _p.y + _f.y * 40, _p.z + _f.z * 40);
+        warmCam.updateMatrixWorld(true);
+        renderer.render(scene, warmCam);
+        // YIELD BETWEEN POSES, but with a TASK and not requestAnimationFrame.
+        // Without a yield at all this is one ~2.5 s blocking turn and the cover
+        // never even paints. With rAF it becomes hostage to frame pacing: in a
+        // backgrounded or occluded tab rAF drops to ~1 Hz, and the same warm-up
+        // measured 13.7 s instead of 2.5 s. Pipelines are built by render()
+        // itself, so there is nothing here that needs to wait for a frame.
+        await new Promise((res) => setTimeout(res, 0));
+      }
+      // One overhead pass for anything the ground-level poses cannot see —
+      // undersides, scenery, and props parked off the racing line.
+      const bounds = new THREE.Box3().setFromObject(mergedGroup.visible ? mergedGroup : builder.root);
+      if (!bounds.isEmpty()) {
+        const c = bounds.getCenter(new THREE.Vector3());
+        const size = bounds.getSize(new THREE.Vector3());
+        warmCam.position.set(c.x, c.y + Math.max(size.x, size.z) * 0.9 + 40, c.z + 0.01);
+        warmCam.lookAt(c.x, c.y, c.z);
+        warmCam.updateMatrixWorld(true);
+        renderer.render(scene, warmCam);
+        await new Promise((res) => setTimeout(res, 0));
+      }
+    } catch (e) {
+      // A warm-up is an optimisation. If it fails the game still runs, it just
+      // stutters once on first reveal — never let it take the race down.
+      console.warn("[road] pipeline warm-up skipped:", e);
+    } finally {
+      cover.remove();
+      warmingUp = false;
+    }
+  }
+
   function toggleMode() {
     mode = mode === "build" ? "drive" : "build";
     const driving = mode === "drive";
@@ -4056,6 +4177,7 @@ ${e.message}`);
       // the merged-track build because it is the same kind of cost, paid at the
       // same transition, and neither is paid per edit any more.
       syncMirrorRails();
+      warmUpTrackPipelines();
       builder.deselectPlacement?.();
       builder.deselectPiece?.(); // clear any edit selection before racing
       props.deselect();
@@ -4453,14 +4575,15 @@ ${e.message}`);
       hitSolidThisFrame = false;
       roofHitThisFrame = false;
       for (let i = 0; i < ticks; i++) {
-        movers.update(FIXED_DT);
+        // The car's pose is what CALLS an elevator — see ParkourMover._updateLift.
+        movers.update(FIXED_DT, vehicle.body.pos);
         if (hasMovers) {
-          // Only the movers' own (small) BVH — the static track BVH is untouched.
-          // And only the movers' subtree is re-transformed: scene.updateMatrixWorld
-          // would walk the whole world (terrain, foliage, props) every tick to
-          // pick up a couple of platforms.
+          // The ONLY per-tick collision work the movers need. Their BVHs read
+          // `matrixWorld` live, so refreshing the poses IS the update — there is
+          // no bake left to do. Only the movers' subtree is re-transformed:
+          // scene.updateMatrixWorld would walk the whole world (terrain,
+          // foliage, props) every tick to pick up a couple of platforms.
           movers.group.updateMatrixWorld(true);
-          rebakeMovers();
         }
         vehicle.tick(input);
         if (vehicle.hitSolid) hitSolidThisFrame = true;
@@ -4508,7 +4631,15 @@ ${e.message}`);
       // (matches the camera) so nothing stair-steps.
       controls.target.copy(vehicle.renderPos);
     } else {
-      // BUILD mode — refresh the jump arc from the current open connector. Cheap
+      // MOVERS RUN IN BUILD MODE TOO. They used to sit frozen at their start
+      // pose, which makes an elevator's travel and a pendulum's swing — the two
+      // things you are actually placing — invisible until you hit drive. Purely
+      // visual here: no collision work, because there is no car. `respawn()`
+      // puts every phase back so a run still starts from the authored board.
+      // (Portals had the same omission; the fix is the line below theirs.)
+      movers.update(dt);
+
+      // Refresh the jump arc from the current open connector. Cheap
       // (a few hundred vec ops); build mode isn't perf-critical.
       if (gapPreviewOn) {
         gapPreview.setVisible(true);

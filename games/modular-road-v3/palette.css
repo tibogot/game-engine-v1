@@ -395,6 +395,46 @@
         border-color: rgba(220, 230, 34, 0.55);
         color: var(--tm-yellow);
       }
+      /* ── SELECTED-MOVER INSPECTOR ─────────────────────────────────────
+         Same visual weight as a .palette-toolbar group (it sits between the
+         grid and the Build group), but rows rather than buttons: each is a
+         label, a range and a live readout on one line, so three of them still
+         fit the 340px rail without wrapping. */
+      #mover-inspector {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .mover-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 4px 0;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: #8892a0;
+      }
+      .mover-row > span { flex: 0 0 46px; }
+      .mover-row > input[type="range"] {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 14px;
+        accent-color: #d8b02a;
+      }
+      .mover-row > b {
+        flex: 0 0 42px;
+        text-align: right;
+        color: #d6dbe4;
+        font-weight: 600;
+      }
+      #mover-insp-hint {
+        margin-top: 2px;
+        font-family: var(--font-mono);
+        font-size: 9px;
+        line-height: 1.45;
+        color: #5d6470;
+      }
+
       #road-status {
         margin-top: 8px;
         font-size: 10px;
@@ -627,3 +667,25 @@
         cursor: help;
       }
       #key-legend .legend-dim { color: #5d6470; }
+
+/* ── PIPELINE WARM-UP COVER ────────────────────────────────────────────────
+   Hides the canvas while warmUpTrackPipelines() draws the whole track once to
+   force WebGPU to build its render pipelines (see the long note in roadGame.js).
+   That warm-up MUST render to the real canvas — an offscreen target produces
+   pipelines the canvas cannot reuse — so the track visibly flashes past behind
+   this. Opaque, on top of everything, and it swallows pointer events so a click
+   during the ~2.5 s first entry cannot land on the builder underneath. */
+.road-warmup-cover {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0b0d10;
+  color: #8a929e;
+  font: 500 13px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  pointer-events: all;
+}
