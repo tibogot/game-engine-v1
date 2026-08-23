@@ -9,6 +9,7 @@ import {
   renderOutput,
   texture,
   uniform,
+  vec4,
 } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
@@ -22,6 +23,34 @@ import {
   resolveDisplayMode,
 } from "n8ao-webgpu";
 import { createPolishUniforms, polish } from "./polishNode.js";
+
+/**
+ * Blend mode for the `emissive` MRT attachment: "blend this target exactly the
+ * way the material blends its colour".
+ *
+ * r184 blends ONLY the `output` attachment by default (`MRTNode.blendModes`);
+ * every other attachment falls back to `NoBlending`, i.e. the fragment REPLACES
+ * whatever was there. That is right for an opaque surface and catastrophic for
+ * a transparent one: a drift-smoke puff (`transparent`, `depthWrite:false`,
+ * `depthTest:false`) contributes almost nothing to the beauty buffer, but it
+ * still stamps its emissive — zero, since smoke does not glow — flat over the
+ * emissive buffer. Selective bloom reads that buffer alone, so every glowing
+ * thing behind the smoke silently stops blooming, however faint the smoke is.
+ *
+ * With `MaterialBlending` the attachment inherits the material's own blend
+ * state, which for an opaque material is still "no blending" (three only emits
+ * a blend state for `transparent` or non-normal blending materials), so opaque
+ * geometry keeps overwriting the glow behind it exactly as before. A
+ * transparent surface now composites instead: smoke OCCLUDES the glow in
+ * proportion to its own opacity, and additive things (sparks) accumulate.
+ *
+ * The blend state is read from the render context's MRT node — the scene MRT
+ * set here — and NOT from a material's own `mrtNode`, so setting it once here
+ * covers every material in the scene, including the `applyBloomMRT` ones.
+ * (`MRTNode.merge()` would drop it anyway: it writes the merged modes to a
+ * `blendings` property that nothing reads.)
+ */
+const _emissiveBlend = /*@__PURE__*/ new THREE.BlendMode(THREE.MaterialBlending);
 
 /**
  * v2 Post FX pipeline (WebGPU/TSL).
@@ -70,6 +99,7 @@ import { createPolishUniforms, polish } from "./polishNode.js";
  *  display chain to canvas. The standalone cloud path (`tryRenderFrame`) is
  *  unchanged when post-FX is off.
  */
+
 export class PostFxPipeline {
   constructor({ renderer, scene, camera }) {
     this.renderer = renderer;
@@ -564,8 +594,13 @@ export class PostFxPipeline {
       diffuseColor,
       normal: directionToColor(normalView),
     };
-    if (this._bloomSelective) targets.emissive = emissive;
-    this._scenePass.setMRT(mrt(targets));
+    // The emissive member carries the fragment's OWN coverage in .a, and the
+    // attachment is told to blend like the material does. Both halves are
+    // needed, and only together — see `_emissiveBlend` at the top of the file.
+    if (this._bloomSelective) targets.emissive = vec4(emissive, output.a);
+    const sceneMRT = mrt(targets);
+    if (this._bloomSelective) sceneMRT.setBlendMode("emissive", _emissiveBlend);
+    this._scenePass.setMRT(sceneMRT);
     this._scenePass.getTexture("diffuseColor").type = THREE.UnsignedByteType;
     this._scenePass.getTexture("normal").type = THREE.UnsignedByteType;
   }

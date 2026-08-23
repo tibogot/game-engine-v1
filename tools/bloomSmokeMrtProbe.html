@@ -1,0 +1,112 @@
+<!--
+  Regression probe for "transparent surfaces kill selective bloom".
+
+  Two identical glowing cubes; the right one sits behind a 12%-opacity quad
+  standing in for one drift-smoke layer. Serve the repo (npm run dev) and open:
+
+    /tools/bloomSmokeMrtProbe.html?mode=old      r184 stock MRT behaviour
+    /tools/bloomSmokeMrtProbe.html?mode=fixed    the pipeline as it ships
+    /tools/bloomSmokeMrtProbe.html?mode=nosmoke  reference, no quad at all
+
+  `window.__probe` holds a halo sample from each side after 8 frames. Measured:
+    old   left [19,155,123]  right [57, 82, 79]   <- glow gone behind the quad
+    fixed left [20,162,129]  right [60,164,137]   <- glow survives, smoke tints
+-->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>bloom vs transparent MRT probe</title>
+<style>html,body{margin:0;height:100%;background:#000}canvas{display:block}</style></head>
+<body>
+<script type="module">
+import * as THREE from "three";
+import { color, output, vec4 } from "three/tsl";
+import { PostFxPipeline } from "/v2/render/post/postFxPipeline.js";
+import { applyBloomMRT } from "/v3/render/bloomMRT.js";
+
+const params = new URLSearchParams(location.search);
+const MODE = params.get("mode") || "fixed"; // fixed | old | nosmoke
+
+const renderer = new THREE.WebGPURenderer({ antialias: false });
+renderer.setSize(640, 360);
+renderer.setPixelRatio(1);
+document.body.appendChild(renderer.domElement);
+await renderer.init();
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05070c);
+const camera = new THREE.PerspectiveCamera(50, 640 / 360, 0.1, 100);
+camera.position.set(0, 0, 6);
+
+// two identical glowing boxes
+for (const x of [-1.6, 1.6]) {
+  const mat = new THREE.MeshBasicNodeMaterial({ color: 0x000000 });
+  mat.colorNode = color(0x22ffcc).mul(2.5);
+  applyBloomMRT(mat, color(0x22ffcc).mul(2.5));
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), mat);
+  m.position.set(x, 0, 0);
+  scene.add(m);
+}
+
+// a "smoke" quad in front of the RIGHT box only: transparent, faint, no depth
+if (MODE !== "nosmoke") {
+  const smokeMat = new THREE.MeshBasicNodeMaterial({
+    transparent: true, depthWrite: false, depthTest: false,
+    side: THREE.DoubleSide, fog: false,
+  });
+  smokeMat.colorNode = color(0x9aa3b0);
+  smokeMat.opacity = 0.12;          // faint, like one smoke layer
+  const q = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 3.0), smokeMat);
+  q.position.set(1.6, 0, 2.0);
+  q.renderOrder = 22;
+  scene.add(q);
+}
+
+const postFx = new PostFxPipeline({ renderer, scene, camera });
+
+// "old" mode restores r184's stock behaviour: emissive member is a vec3 (alpha
+// padded to 1) and the attachment gets no blend mode at all.
+if (MODE === "old") {
+  const { mrt, emissive, diffuseColor, directionToColor, normalView } = await import("three/tsl");
+  PostFxPipeline.prototype._applySceneMRT = function () {
+    const targets = { output, diffuseColor, normal: directionToColor(normalView) };
+    if (this._bloomSelective) targets.emissive = emissive;
+    this._scenePass.setMRT(mrt(targets));
+    this._scenePass.getTexture("diffuseColor").type = THREE.UnsignedByteType;
+    this._scenePass.getTexture("normal").type = THREE.UnsignedByteType;
+  };
+}
+
+postFx.setBloomParams({ strength: 1.6, radius: 0.7, threshold: 0.0 });
+postFx.setBloomEnabled(true);
+postFx.setBloomSelective(true);
+postFx.setSsaoEnabled(false);
+postFx.setFxaaEnabled(false);
+postFx.setEnabled(true);
+
+let frames = 0;
+renderer.setAnimationLoop(async () => {
+  if (postFx.isActive()) await postFx.render();
+  else await renderer.renderAsync(scene, camera);
+  frames++;
+  if (frames === 8) {
+    // sample the glow halo just OUTSIDE each box, left vs right
+    const gl = renderer.domElement;
+    const c2 = document.createElement("canvas");
+    c2.width = gl.width; c2.height = gl.height;
+    const ctx = c2.getContext("2d");
+    ctx.drawImage(gl, 0, 0);
+    const read = (nx, ny) => {
+      const d = ctx.getImageData(Math.round(nx * gl.width), Math.round(ny * gl.height), 1, 1).data;
+      return [d[0], d[1], d[2]];
+    };
+    // halo band ~ just above each cube
+    const left = read(0.335, 0.30);
+    const right = read(0.665, 0.30);
+    window.__probe = { mode: MODE, left, right,
+      leftLum: left[0] + left[1] + left[2], rightLum: right[0] + right[1] + right[2] };
+    console.log("PROBE " + JSON.stringify(window.__probe));
+  }
+});
+</script>
+</body>
+</html>
