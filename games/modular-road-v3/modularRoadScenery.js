@@ -41,9 +41,24 @@ import { buildLedMatrixMesh } from "../../v2/objects/ledMatrix.js";
 import { buildBillboardMesh } from "../../v2/objects/billboard.js";
 import { buildStreetLampMesh } from "../../v2/objects/streetLamp.js";
 import { buildFloodlightMesh } from "../../v2/objects/floodlight.js";
+import { buildChainLinkFenceMesh } from "../../v2/objects/chainLinkFence.js";
+import { buildBarbWireMesh } from "../../v2/objects/barbWire.js";
 
 /** Single point at the origin on flat ground — the prop root does the placing. */
 const AT_ORIGIN = { points: [{ x: 0, y: 0, z: 0 }], getWorldHeight: () => 0 };
+
+/**
+ * A straight RUN through the origin, for the builders that take a spline rather
+ * than a point (fences, wire). Along Z, because that is the axis a road piece
+ * runs down, so a fence dropped beside a straight lines up with it instead of
+ * crossing it.
+ *
+ * @param {number} len metres, centred on the origin
+ */
+const alongZ = (len) => ({
+  points: [{ x: 0, y: 0, z: -len / 2 }, { x: 0, y: 0, z: len / 2 }],
+  getWorldHeight: () => 0,
+});
 
 /**
  * Placeable scenery. `params` deliberately override the lab defaults that only
@@ -128,6 +143,61 @@ export const SCENERY_CATALOG = [
     // One fat mast. `height` spans the whole thing so a car cannot pass under it.
     capsules: [{ x: 0, radius: 0.30, height: 13 }],
   },
+
+  // ── SPLINE OBJECTS AS A FIXED RUN ─────────────────────────────────────────
+  // These three take a PATH in the lab. Here each is one placeable object, so
+  // the path is a fixed straight run through the origin and the prop root
+  // supplies the real position and heading — rotate it with the gizmo to line it
+  // up with whatever it is fencing off.
+  {
+    id: "chainlinkfence",
+    label: "Chain-link fence",
+    build: buildChainLinkFenceMesh,
+    source: () => alongZ(24),
+    params: {
+      height: 2.6,
+      pathSegments: 40,
+      postSpacing: 3.0,
+      topRail: true,
+      arms: true,
+      armSide: "out",
+      strands: 3,
+      // Concertina off by default: it is ~16k rings of swept wire on a 24 m run,
+      // which is the whole object's triangle budget spent on something you read
+      // as "coil" from two pixels of silhouette.
+      coil: false,
+    },
+    // ── A WALL, NOT CAPSULES ────────────────────────────────────────────────
+    // Every other scenery type is a point object with one or two round masts,
+    // which is exactly the case capsules exist for. A 24 m fence is not: capsules
+    // dense enough to actually stop a car along that whole run would be twenty
+    // primitives, and three of them (one per end, one mid-span) is a fence with
+    // 8 m gaps you drive straight through — worse than no collider, because it
+    // looks like it should stop you.
+    //
+    // A fence line IS a thin wall, so it gets one: an invisible box in the solid
+    // bake, spanning the run. The curtain quad and the metalwork are excluded
+    // (see solidWall in buildTemplate) so only this one shape is collided.
+    solidWall: { thickness: 0.2, height: 2.6, length: 24 },
+  },
+  {
+    id: "barbwire",
+    label: "Barbed wire",
+    build: buildBarbWireMesh,
+    source: () => alongZ(20),
+    params: {
+      stacking: "pyramid",
+      coilRadius: 0.55,
+      coilPitch: 0.34,
+      segsPerRev: 8, // the lab default of 12 triples the ring count for no gain here
+      stakes: true,
+      stakeSpacing: 4,
+    },
+    // Same wall treatment as the fence, and lower: a pyramid coil on picket
+    // stakes stands about waist height, so this stops a car without pretending
+    // to be a 2.6 m barrier.
+    solidWall: { thickness: 0.5, height: 1.5, length: 20 },
+  },
 ];
 
 export const SCENERY_MAP = new Map(SCENERY_CATALOG.map((s) => [s.id, s]));
@@ -174,7 +244,7 @@ function toNodeMaterial(m) {
  * where it is meant to glow, capsule colliders attached.
  */
 function buildTemplate(def) {
-  const root = def.build({ ...AT_ORIGIN, params: def.params });
+  const root = def.build({ ...(def.source ? def.source() : AT_ORIGIN), params: def.params });
   if (!root) return null;
   root.name = `Scenery_${def.id}`;
 
@@ -210,6 +280,21 @@ function buildTemplate(def) {
   flattenInstanced(root);
   mergeByMaterial(root);
 
+  // ── A SOLID WALL, FOR THE RUN OBJECTS ─────────────────────────────────────
+  // An invisible box in the SOLID bake, and every visible mesh opted out of it,
+  // so the chassis is stopped by one clean shape instead of by a chain-link
+  // curtain that is a single flat quad (which the hull sampling walks through)
+  // or by 9k triangles of barbed wire (which it should not have to test).
+  if (def.solidWall) {
+    const { thickness, height, length } = def.solidWall;
+    root.traverse((o) => { if (o.isMesh) o.userData.noCollide = true; });
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(thickness, height, length));
+    wall.name = "SceneryWall";
+    wall.position.y = height / 2;
+    wall.visible = false;
+    root.add(wall);
+  }
+
   // Colliders. Declared on the DEF rather than scraped off the meshes because
   // the builders emit InstancedMeshes (a floodlight's lamps, an LED board's
   // legs), whose object origin is the unit, not the individual leg.
@@ -243,7 +328,15 @@ const _templates = new Map();
 export function makeSceneryProp(id) {
   const def = SCENERY_MAP.get(id);
   if (!def) return null;
-  if (!_templates.has(id)) _templates.set(id, buildTemplate(def));
+  if (!_templates.has(id)) {
+    const built = buildTemplate(def);
+    // A null template is NOT cached. Every builder here is synchronous today, so
+    // null means the builder genuinely made nothing — but caching it would turn
+    // a one-off failure into a permanently dead palette tile, and the moment one
+    // of these grows an async dependency that is exactly the bug you get.
+    if (!built) return null;
+    _templates.set(id, built);
+  }
   const t = _templates.get(id);
   return t ? t.clone() : null;
 }

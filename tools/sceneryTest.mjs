@@ -30,6 +30,17 @@ const { SCENERY_CATALOG, makeSceneryProp } =
   await import(pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadScenery.js")).href);
 
 const meshesOf = (o) => { const a = []; o.traverse((c) => { if (c.isMesh) a.push(c); }); return a; };
+/**
+ * Meshes that actually DRAW.
+ *
+ * The fog-freeze rule below is about rendering: three's WebGPU backend refuses
+ * to re-upload a static object's uniforms unless its material carries a node,
+ * so a plain material on something that never moves keeps its first frame's fog
+ * forever. An INVISIBLE mesh has no frames to keep. The run objects' collision
+ * wall is one of those, and holding it to a rendering rule would mean handing a
+ * shader to a box that exists only for the BVH.
+ */
+const drawnMeshesOf = (o) => meshesOf(o).filter((m) => m.visible);
 
 console.log("=== EVERY SCENERY TYPE BUILDS ===");
 for (const def of SCENERY_CATALOG) {
@@ -44,7 +55,7 @@ console.log("\n=== NOTHING STATIC KEEPS A PLAIN MATERIAL (THE FOG FREEZE) ===");
   let plain = 0, total = 0;
   const offenders = [];
   for (const def of SCENERY_CATALOG) {
-    for (const m of meshesOf(makeSceneryProp(def.id))) {
+    for (const m of drawnMeshesOf(makeSceneryProp(def.id))) {
       total++;
       // `isNodeMaterial` is the flag the backend's observer actually keys off.
       if (!m.material?.isNodeMaterial) { plain++; offenders.push(`${def.id}/${m.name || m.type}`); }
@@ -58,7 +69,7 @@ console.log("\n=== NOTHING STATIC KEEPS A PLAIN MATERIAL (THE FOG FREEZE) ===");
   // enough and the colorNode is the actual fix.
   let noNode = 0;
   for (const def of SCENERY_CATALOG) {
-    for (const m of meshesOf(makeSceneryProp(def.id))) {
+    for (const m of drawnMeshesOf(makeSceneryProp(def.id))) {
       const has = !!(m.material.colorNode || m.material.fragmentNode
         || m.material.positionNode || m.material.outputNode || m.material.mrtNode);
       if (!has) noNode++;
@@ -160,15 +171,38 @@ console.log("\n=== MASTS AND LEGS ARE CAPSULES ===");
 for (const def of SCENERY_CATALOG) {
   const g = makeSceneryProp(def.id);
   const caps = [];
-  g.traverse((o) => { if (o.userData?.capsule) caps.push(o); });
-  check(`"${def.id}" declares capsule colliders`, caps.length === (def.capsules?.length ?? 0)
-    && caps.length > 0, `${caps.length}`);
+  let wall = null;
+  g.traverse((o) => {
+    if (o.userData?.capsule) caps.push(o);
+    if (o.name === "SceneryWall") wall = o;
+  });
+  // TWO LEGAL ANSWERS, and which is right depends on the shape.
+  //   A POINT object (lamp, board, floodlight) declares capsules on its masts.
+  //   A RUN object (fence, wire) declares one thin solid wall down the line,
+  //   because capsules dense enough to stop a car along 24 m would be twenty
+  //   primitives, and the three you would actually write leave 8 m holes in a
+  //   fence, which is worse than no collider: it looks like it should stop you.
+  check(`"${def.id}" declares a collider`, caps.length > 0 || !!wall,
+    caps.length ? `${caps.length} capsule(s)` : wall ? "solid wall" : "NONE");
+  check(`  ...and as many capsules as the def asked for`,
+    caps.length === (def.capsules?.length ?? 0), `${caps.length}`);
   check(`  ...each with a real radius and height`,
     caps.every((c) => c.userData.capsule.radius > 0 && c.userData.capsule.height > 0));
   // The marker sits at the capsule's MID-HEIGHT, because collisionCapsules()
   // builds the axis symmetrically about the marker's world position.
   check(`  ...sitting at mid-height so the capsule spans the ground up`,
     caps.every((c) => Math.abs(c.position.y - c.userData.capsule.height / 2) < 1e-6));
+  if (def.solidWall) {
+    // The wall has to be the ONLY thing left in the solid bake. A chain-link
+    // curtain quad in there is a collider the hull walks straight through, and
+    // 9k triangles of barbed wire is a bake nobody should be paying for.
+    let collidable = 0;
+    g.traverse((o) => { if (o.isMesh && !o.userData.noCollide && !o.userData.capsule) collidable++; });
+    check(`  ...with the wall as the only mesh left in the solid bake`,
+      collidable === 1, `${collidable}`);
+    check(`  ...standing on the ground rather than centred on it`,
+      Math.abs(wall.position.y - def.solidWall.height / 2) < 1e-6);
+  }
 }
 
 console.log("\n=== THE CATALOG WIRES INTO THE PALETTE ===");

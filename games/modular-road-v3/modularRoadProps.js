@@ -1401,7 +1401,12 @@ export const PROP_CATALOG = [
   ...SCENERY_CATALOG.map((s) => ({
     id: s.id,
     label: s.label,
-    collision: "none",
+    // "none" unless the entry declares a solid wall — the RUN objects (fence,
+    // wire) are lines you should not be able to drive through, and a line is the
+    // one scenery shape capsules cannot cover. Their visible meshes opt out
+    // per-mesh, so only the wall is in the bake. See solidWall in the scenery
+    // module for why this is not just more capsules.
+    collision: s.solidWall ? "solid" : "none",
     category: "scenery",
     make: () => makeSceneryProp(s.id) ?? new THREE.Group(),
   })),
