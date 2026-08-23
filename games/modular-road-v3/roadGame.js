@@ -2823,14 +2823,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     if (brush) { brush.root.visible = false; brush.point = null; }
   });
 
-  renderer.domElement.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || mode !== "build") return;
-    if (
-      props.isUsingGizmo?.() ||
-      movers.isUsingGizmo?.() ||
-      portals.isUsingGizmo?.() ||
-      builder.isUsingPlacementGizmo?.()
-    ) return;
+  function placeAtPointer(e) {
     // A live brush owns the left button: click places the PROP under the cursor,
     // not a road piece at the chain's open end.
     if (brush) {
@@ -2841,6 +2834,86 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     builder.aimAtCursor(e.clientX, e.clientY); // same reason: it may have moved
     builder.place();
     paletteUi.refreshStatus();
+  }
+
+  const anyGizmoUnderPointer = () =>
+    props.isUsingGizmo?.() ||
+    movers.isUsingGizmo?.() ||
+    portals.isUsingGizmo?.() ||
+    builder.isUsingPlacementGizmo?.();
+
+  /**
+   * Every TransformControls root in the scene. FILLED further down, once every
+   * system that owns a gizmo has been built — declared up here so a pointer
+   * event during setup reads an empty list rather than a temporal-dead-zone
+   * ReferenceError. Shared by gizmoPoseKey and syncGizmoAttachment.
+   * @type {THREE.Object3D[]}
+   */
+  const gizmoRoots = [];
+
+  /**
+   * Where every live gizmo's object is RIGHT NOW, as a comparable string.
+   *
+   * Read off the TransformControls roots rather than from the four systems: the
+   * rule is a property of the gizmo, not of any one tool, and this way it also
+   * covers the engine's own. (`gizmoRoots` is collected further down — only ever
+   * read here from inside an event, long after setup.)
+   */
+  function gizmoPoseKey() {
+    let key = "";
+    for (const root of gizmoRoots) {
+      const o = root.controls?.object;
+      if (!o) continue;
+      const p = o.position, q = o.quaternion;
+      key += `${p.x},${p.y},${p.z},${q.x},${q.y},${q.z},${q.w};`;
+    }
+    return key;
+  }
+
+  /**
+   * A PRESS THAT LANDS ON A GIZMO IS NOT NECESSARILY A GRAB.
+   *
+   * The build cursor's gizmo is parked on the chain's open end — which is
+   * exactly where the next piece goes — and its pickers are invisible meshes far
+   * fatter than the drawn arrows, scaled to a constant screen size (~150 px of
+   * reach, ~50 px thick). So the one spot you most want to click was a hole, and
+   * the workaround was to zoom in until the handles were small enough to aim
+   * around. Refusing the click outright (which is what this handler used to do)
+   * is only correct if touching a handle always means "drag me".
+   *
+   * Decided on pointerUP by whether anything actually happened, the same way the
+   * right button already tells a pan from a select: the press goes to the gizmo,
+   * and if the pointer then sits still AND nothing moved, it was a click after
+   * all and it places. A real drag moves the pose and is left alone.
+   *
+   * Both tests are needed. Pixels alone are not enough — 6 px on a far-out
+   * camera is metres of chain — and pose alone is not either, since a snapped
+   * drag can end exactly where it started.
+   */
+  let lmbHeldByGizmo = null;
+  const CLICK_SLOP_PX = 6; // same as the RMB pan/select test below
+
+  renderer.domElement.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || mode !== "build") return;
+    if (anyGizmoUnderPointer()) {
+      // TransformControls' own listener runs first (registered at construction)
+      // so the drag, if this is one, has already started.
+      lmbHeldByGizmo = { x: e.clientX, y: e.clientY, pose: gizmoPoseKey() };
+      return;
+    }
+    placeAtPointer(e);
+  });
+
+  renderer.domElement.addEventListener("pointerup", (e) => {
+    if (e.button !== 0) return;
+    const held = lmbHeldByGizmo;
+    lmbHeldByGizmo = null;
+    if (!held || mode !== "build") return;
+    if (Math.hypot(e.clientX - held.x, e.clientY - held.y) > CLICK_SLOP_PX) return;
+    if (gizmoPoseKey() !== held.pose) return;
+    // TransformControls clears `dragging`/`axis` in its own pointerup, which ran
+    // before this one — so aimAtCursor is free to move the ghost again.
+    placeAtPointer(e);
   });
 
   // RIGHT-CLICK selects a placed piece to edit (tilt / delete / replace /
@@ -4568,7 +4641,6 @@ ${e.message}`);
    * `this.object === undefined`, which is precisely the state in which the root
    * is out of the scene.
    */
-  const gizmoRoots = [];
   scene.traverse((o) => { if (o.isTransformControlsRoot) gizmoRoots.push(o); });
   function syncGizmoAttachment() {
     for (const root of gizmoRoots) {
