@@ -61,8 +61,15 @@ console.log("\n=== THE BUTTONS THE TOOLBAR REGROUPING TOUCHED ===");
   const mustExist = [
     "road-place", "road-other-end", "road-link", "road-branch", "road-flip",
     "road-new-chain", "road-prev-chain", "road-next-chain", "road-undo",
-    "road-save", "road-load", "road-preset", "road-preset-rushline",
-    "road-demo", "road-circuit", "road-drive", "road-snap", "road-rebake",
+    // ONE preset. `road-preset` (Apex), `road-preset-rushline`,
+    // `road-preset-parkour`, `road-demo` and `road-circuit` were deliberately
+    // removed: every one of them was authored against OLDER roadParams, so
+    // pieces loaded from them are built to a cross-section the kit no longer
+    // ships — misleading to debug against. audittest.json is the single
+    // reference track. The JSON files themselves stay on disk as TEST FIXTURES
+    // (rushline.json alone is read by nine tools).
+    "road-save", "road-load", "road-preset-audit",
+    "road-drive", "road-snap", "road-rebake",
     "road-clear", "road-status", "build-mode-toggle", "edges-toggle",
     "category-list", "piece-grid", "category-title", "palette-collapse-tab",
   ];

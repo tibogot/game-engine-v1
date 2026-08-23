@@ -4766,10 +4766,6 @@ export function buildRoadPaletteUI(builder, opts = {}) {
      *  brush, so the game can put a live cursor brush down. */
     onPickPiece = null,
     onEdgesChange = null,
-    /** Optional: seat the demo in the sky (terrain + buildHeight). */
-    onLoadDemo = null,
-    /** Optional: seat the big circuit in the sky. */
-    onLoadCircuit = null,
   } = opts;
   const catList = document.getElementById("category-list");
   const grid = document.getElementById("piece-grid");
@@ -5124,16 +5120,15 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     builder.redo();
     refreshStatus();
   });
-  document.getElementById("road-demo")?.addEventListener("click", () => {
-    if (onLoadDemo) onLoadDemo();
-    else builder.loadDemo();
-    refreshStatus();
-  });
-  document.getElementById("road-circuit")?.addEventListener("click", () => {
-    if (onLoadCircuit) onLoadCircuit();
-    else builder.loadBigCircuit();
-    refreshStatus();
-  });
+  // NO Demo / Big-circuit buttons any more — they, and the three JSON presets
+  // beside them, were all authored against OLDER roadParams and so are
+  // misleading to debug against. audittest.json is the single reference track.
+  //
+  // `builder.loadDemo()` and `builder.loadBigCircuit()` REMAIN, and must: they
+  // are procedural (not stale saved geometry), which makes them good
+  // deterministic fixtures, and three tests build their world with them —
+  // tools/builderHistoryTest.mjs, tools/landingPlacementTest.mjs and
+  // tools/tileIsABlockTest.mjs. Only the UI wiring is gone.
   document.getElementById("road-clear")?.addEventListener("click", () => {
     builder.clear();
     refreshStatus();

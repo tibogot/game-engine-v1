@@ -377,11 +377,17 @@
             <div class="palette-toolbar palette-toolbar-sub">
             <button id="road-save" class="palette-btn" type="button">Save track</button>
             <button id="road-load" class="palette-btn" type="button">Load track</button>
-            <button id="road-preset" class="palette-btn palette-btn-wide" type="button">Load Apex track</button>
-            <button id="road-preset-rushline" class="palette-btn palette-btn-wide" type="button">Load Rushline track</button>
-            <button id="road-preset-parkour" class="palette-btn palette-btn-wide" type="button">Load Apex Parkour</button>
-            <button id="road-demo" class="palette-btn" type="button">Demo</button>
-            <button id="road-circuit" class="palette-btn" type="button">Big circuit</button>
+            <!-- ONE preset, deliberately.
+                 There used to be five (Apex, Rushline, Apex Parkour, Demo, Big
+                 circuit). They were all authored against OLDER roadParams, so a
+                 piece loaded from one is built to a cross-section the kit no
+                 longer ships — which makes them actively misleading to debug
+                 against: you measure a problem the current kit does not have.
+                 audittest.json is the current reference track (32 pieces: tube,
+                 banked, loop, junction, props) and is the one to EDIT when a
+                 repro needs new geometry, so the thing everyone debugs against
+                 stays one file. -->
+            <button id="road-preset-audit" class="palette-btn palette-btn-wide" type="button">Load audit track</button>
           </div>
           </details>
           <details class="palette-group">
