@@ -1714,6 +1714,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     moverSolidsBvh.set(solids);
     ground.setMoverBvh(deck.length ? moverDeckBvh : null);
     ground.setMoverSolidsBvh(solids.length ? moverSolidsBvh : null);
+    vehicleRef?.setDeckCarryMovers(movers.getMovers().filter((m) => m.deckCarry));
   }
 
   // ── COLLISION DEBUG ────────────────────────────────────────────────────────

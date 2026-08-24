@@ -112,6 +112,100 @@ function rotoTubeGeometries(Ri, wall, L, holes) {
   return { shell: toGeo(shell), rims: toGeo(rims) };
 }
 
+/**
+ * Hole grid for the optimized spin barrel — configurable resolution.
+ *
+ * @param {boolean} [opts.innerOnly] inner wall quads only (cheap collider)
+ * @param {boolean} [opts.rimsOnly] hole-border quads only (glow rims)
+ */
+function spinBarrelHoleGrid(Ri, wall, L, holes, { A = 32, NZ = 16, innerOnly = false, rimsOnly = false } = {}) {
+  const Ro = Ri + wall;
+  const da = (2 * Math.PI) / A;
+  const dz = L / NZ;
+
+  const rects = holes.map((h) => {
+    const na = Math.max(2, Math.round(h.span / da));
+    const nz = Math.max(2, Math.round(h.len / dz));
+    return {
+      ia0: ((Math.round(h.a / da - na / 2) % A) + A) % A,
+      na,
+      iz0: Math.max(0, Math.min(NZ - nz, Math.round((h.z + L / 2) / dz - nz / 2))),
+      nz,
+    };
+  });
+  const isHole = (ia, iz) =>
+    rects.some((r) => ((ia - r.ia0 + A) % A) < r.na && iz >= r.iz0 && iz < r.iz0 + r.nz);
+
+  const pt = (ia, R, iz) => {
+    const th = ia * da;
+    return [R * Math.sin(th), -R * Math.cos(th), -L / 2 + iz * dz];
+  };
+
+  const mkEmit = () => ({ pos: [], idx: [] });
+  const quad = (part, a, b, c, d) => {
+    const base = part.pos.length / 3;
+    part.pos.push(...a, ...b, ...c, ...d);
+    part.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+  const shell = mkEmit();
+  const rims = mkEmit();
+
+  for (let ia = 0; ia < A; ia++) {
+    const ja = (ia + 1) % A;
+    for (let iz = 0; iz < NZ; iz++) {
+      if (isHole(ia, iz)) {
+        if (!isHole((ia - 1 + A) % A, iz)) quad(rims, pt(ia, Ri, iz), pt(ia, Ri, iz + 1), pt(ia, Ro, iz + 1), pt(ia, Ro, iz));
+        if (!isHole(ja, iz)) quad(rims, pt(ja, Ri, iz), pt(ja, Ro, iz), pt(ja, Ro, iz + 1), pt(ja, Ri, iz + 1));
+        if (iz === 0 || !isHole(ia, iz - 1)) quad(rims, pt(ia, Ri, iz), pt(ia, Ro, iz), pt(ja, Ro, iz), pt(ja, Ri, iz));
+        if (iz === NZ - 1 || !isHole(ia, iz + 1)) quad(rims, pt(ia, Ri, iz + 1), pt(ja, Ri, iz + 1), pt(ja, Ro, iz + 1), pt(ia, Ro, iz + 1));
+        continue;
+      }
+      if (!rimsOnly) {
+        quad(shell, pt(ia, Ri, iz), pt(ja, Ri, iz), pt(ja, Ri, iz + 1), pt(ia, Ri, iz + 1));
+        if (!innerOnly) quad(shell, pt(ia, Ro, iz), pt(ia, Ro, iz + 1), pt(ja, Ro, iz + 1), pt(ja, Ro, iz));
+      }
+    }
+    if (!rimsOnly) {
+      if (!isHole(ia, 0)) quad(shell, pt(ia, Ri, 0), pt(ia, Ro, 0), pt(ja, Ro, 0), pt(ja, Ri, 0));
+      if (!isHole(ia, NZ - 1)) quad(shell, pt(ia, Ri, NZ), pt(ja, Ri, NZ), pt(ja, Ro, NZ), pt(ia, Ro, NZ));
+    }
+  }
+
+  const toGeo = (part) => {
+    if (!part.idx.length) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(part.pos, 3));
+    g.setIndex(part.idx);
+    g.computeVertexNormals();
+    g.computeBoundingSphere();
+    return g;
+  };
+  return { shell: toGeo(shell), rims: toGeo(rims) };
+}
+
+/** Smooth lathe barrel shell — same trick as openTubeGroup (FrontSide, one mesh). */
+function spinBarrelLatheShell(Ri, wall, L, segments = 36) {
+  const Ro = Ri + wall;
+  const half = L / 2;
+  return new THREE.LatheGeometry([
+    new THREE.Vector2(Ri, -half),
+    new THREE.Vector2(Ro, -half),
+    new THREE.Vector2(Ro, half),
+    new THREE.Vector2(Ri, half),
+    new THREE.Vector2(Ri, -half),
+  ], segments);
+}
+
+/** Shared hole layout — matches the classic rotating tube obstacle. */
+function spinBarrelHoles(deg) {
+  return [
+    { a: deg(0), span: deg(80), z: -12, len: 7 },
+    { a: deg(100), span: deg(70), z: -4, len: 7 },
+    { a: deg(200), span: deg(90), z: 4, len: 7 },
+    { a: deg(300), span: deg(70), z: 12, len: 7 },
+  ];
+}
+
 /** @param {THREE.Object3D} root */
 function bindMover(root, bind) {
   root.userData.moverBind = bind;
@@ -279,6 +373,71 @@ export const MOVER_CATALOG = [
       mesh.add(new THREE.Mesh(rims, rimMat)); // child ⇒ visual only, no collision
       pivot.add(mesh);
       return bindMover(root, { mesh, pivot, mode: "spin-z", speed: 0.55, amplitude: 8, isDeck: true });
+    },
+  },
+  {
+    id: "spinbarrel",
+    label: "Spin barrel",
+    collision: "deck",
+    defaults: { speed: 0.55, amplitude: 8 },
+    make: () => {
+      // Optimized sibling of the classic rotating tube — lathe shell (~160 tris)
+      // instead of a 64×32 cell grid (~7k tris), FrontSide, inner-wall-only
+      // collider (~600 tris), and deck-carry so the car turns with the barrel
+      // when you are not steering. Glowing rims mark the holes; physics holes
+      // live only in the low-poly collider.
+      const Ri = 8;
+      const wall = 0.6;
+      const L = 40;
+      const deg = THREE.MathUtils.degToRad;
+      const holes = spinBarrelHoles(deg);
+      const { shell: collShell } = spinBarrelHoleGrid(Ri, wall, L, holes, { A: 24, NZ: 12, innerOnly: true });
+      const { rims } = spinBarrelHoleGrid(Ri, wall, L, holes, { A: 32, NZ: 16, rimsOnly: true });
+
+      const root = new THREE.Group();
+      root.name = "SpinBarrel";
+      const pivot = new THREE.Object3D();
+      pivot.position.set(0, Ri, 0);
+      root.add(pivot);
+
+      const shellGeo = spinBarrelLatheShell(Ri, wall, L, 36);
+      const mesh = new THREE.Mesh(
+        shellGeo,
+        new THREE.MeshStandardMaterial({
+          color: 0x7aa8be,
+          metalness: 0.82,
+          roughness: 0.2,
+          side: THREE.FrontSide,
+        }),
+      );
+      mesh.name = "SpinBarrelShell";
+      shellGeo.rotateX(Math.PI / 2);
+
+      if (rims) {
+        const rimMat = new THREE.MeshStandardNodeMaterial({
+          color: new THREE.Color(0xff5a1e),
+          emissive: new THREE.Color(0xff5a1e),
+          emissiveIntensity: 3.5,
+          roughness: 0.4,
+          side: THREE.FrontSide,
+        });
+        applyBloomMRT(rimMat, materialEmissive);
+        const rimMesh = new THREE.Mesh(rims, rimMat);
+        rimMesh.userData.noCollide = true;
+        mesh.add(rimMesh);
+      }
+
+      pivot.add(mesh);
+      return bindMover(root, {
+        mesh,
+        pivot,
+        mode: "spin-z",
+        speed: 0.55,
+        amplitude: 8,
+        isDeck: true,
+        deckCarry: true,
+        collisionGeometry: collShell,
+      });
     },
   },
   {
@@ -714,6 +873,7 @@ export class MoverPropManager {
       // elevator's cage sides. It rides the deck mesh as a child, so it needs no
       // animation of its own, only its own tree.
       solidMesh: b.solidMesh ?? null,
+      deckCarry: b.deckCarry ?? false,
     };
     if (b.mode === "slide-z" || b.mode === "slide-y") {
       cfg.origin = (b.slideOrigin ?? b.mesh.position).clone();

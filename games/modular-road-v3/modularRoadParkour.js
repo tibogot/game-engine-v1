@@ -307,6 +307,8 @@ const _r = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _liftInv = new THREE.Matrix4();
 const _liftLocal = new THREE.Vector3();
+const _carryV = new THREE.Vector3();
+const _carryAxis = new THREE.Vector3();
 
 /** Lift ramp, m/s². Gentle enough that a parked car's springs follow it. */
 const LIFT_ACCEL = 3.2;
@@ -334,6 +336,8 @@ export class ParkourMover {
    *        collide against instead of the visual geometry
    * @param {THREE.Mesh} [o.solidMesh] descendant of `mesh` that acts as a WALL
    *        while `mesh` itself is the drive surface
+   * @param {boolean} [o.deckCarry] when true, spin deck movers impart surface
+   *        velocity to a grounded car (see applyDeckCarry)
    */
   constructor({
     mesh,
@@ -346,6 +350,7 @@ export class ParkourMover {
     phase0 = 0,
     collisionGeometry = null,
     solidMesh = null,
+    deckCarry = false,
   }) {
     this.mesh = mesh;
     this.pivot = pivot;
@@ -354,6 +359,8 @@ export class ParkourMover {
     this.amplitude = amplitude;
     this.origin = origin ? origin.clone() : mesh.position.clone();
     this.isDeck = isDeck;
+    /** Spinning deck surfaces that should carry the car when it is not steering. */
+    this.deckCarry = deckCarry;
     /** Authored start phase, kept so a run can always begin from it. */
     this.phase0 = phase0;
     this.phase = phase0;
@@ -534,6 +541,42 @@ export class ParkourMover {
   dispose() {
     this.bvh?.dispose();
     this.solidBvh?.dispose();
+  }
+
+  /**
+   * Couple a grounded car to a spinning deck — barrel-roll carry.
+   *
+   * When throttle and steer are idle the car picks up the surface's tangential
+   * velocity and spins about the tube axis with it; active input weakens the
+   * coupling so you can still fight the barrel.
+   *
+   * @param {import("../../v3/play/modularRoadVehicle.js").RigidBody} body
+   * @param {THREE.Vector3} riderPos car centre of mass, world space
+   * @param {number} throttle −1…1
+   * @param {number} steer −1…1
+   * @param {number} groundedCount wheels with ground contact this substep
+   * @param {number} dt substep seconds
+   */
+  applyDeckCarry(body, riderPos, throttle, steer, groundedCount, dt) {
+    if (!this.deckCarry || groundedCount < 1) return;
+    if (!riderPos || !this.isCarriedPointInside(riderPos)) return;
+    if (this.mode !== "spin-z" && this.mode !== "spin-y") return;
+
+    const idle = Math.abs(throttle) < 0.08 && Math.abs(steer) < 0.08;
+    const inputMag = Math.min(1, Math.abs(throttle) + Math.abs(steer) * 0.65);
+    const strength = idle ? 1 : Math.max(0.12, 1 - inputMag * 0.88);
+    const k = 1 - Math.exp(-14 * dt);
+
+    this.velocityAt(riderPos, _carryV);
+    body.vel.lerp(_carryV, strength * k);
+
+    if (this.pivot) {
+      const axis = this.mode === "spin-z" ? _carryAxis.set(0, 0, 1) : _carryAxis.set(0, 1, 0);
+      axis.applyQuaternion(this.pivot.getWorldQuaternion(_q));
+      const wAlong = body.angVel.dot(axis);
+      const targetW = this._angVelW.dot(axis);
+      body.angVel.addScaledVector(axis, (targetW - wAlong) * strength * k);
+    }
   }
 
   /** Surface velocity at a world-space contact point (for chassis coupling). */

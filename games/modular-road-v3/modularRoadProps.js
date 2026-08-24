@@ -1003,7 +1003,8 @@ export const PROP_CATALOG = [
   {
     id: "flag",
     label: "Banner flag",
-    collision: "none",
+    category: "scenery",
+    collision: "none", // triangle bake off — thin pole uses a capsule instead
     // Just the POLE. The CLOTH is drawn by ModularRoadFlags as a single
     // instanced mesh across every flag on the track — see that file for why it
     // is a shader wave rather than the engine's Verlet cloth. The pole stays a
@@ -1012,21 +1013,28 @@ export const PROP_CATALOG = [
     make: () => {
       const g = new THREE.Group();
       g.name = "BannerFlag";
+      const POLE_H = 6;
+      const POLE_R = 0.08;
       const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.07, 0.09, 6, 10),
+        new THREE.CylinderGeometry(0.07, 0.09, POLE_H, 10),
         mat(0xb9c0c8, { roughness: 0.35, metalness: 0.75 }),
       );
-      pole.position.y = 3;
+      pole.position.y = POLE_H / 2;
+      // Exact capsule — same pattern as gate post / scenery masts; the hull
+      // sampler cannot see a pole this thin reliably.
+      pole.userData.capsule = { radius: POLE_R, height: POLE_H };
       const finial = new THREE.Mesh(
         new THREE.SphereGeometry(0.11, 10, 8),
         mat(0xd8dee6, { roughness: 0.25, metalness: 0.85 }),
       );
-      finial.position.y = 6.05;
+      finial.position.y = POLE_H + 0.05;
+      finial.userData.noCollide = true;
       const base = new THREE.Mesh(
         new THREE.CylinderGeometry(0.34, 0.42, 0.16, 12),
         mat(0x23262b, { roughness: 0.85 }),
       );
       base.position.y = 0.08;
+      base.userData.noCollide = true;
       g.add(base, pole, finial);
       return g;
     },
@@ -1249,6 +1257,7 @@ export const PROP_CATALOG = [
   {
     id: "ramp",
     label: "Slope ramp",
+    category: "parkour",
     collision: "both",
     // Rise 8 m — same as jump ramp / box, so a slope can meet a platform flush.
     make: () => new THREE.Mesh(rampGeometry(18, 8, 14), mat(0xe8912d, { roughness: 0.8 })),
@@ -1256,12 +1265,14 @@ export const PROP_CATALOG = [
   {
     id: "slopelab",
     label: "Slope lab",
+    category: "parkour",
     collision: "both",
     make: () => buildSlopeLabGroup(),
   },
   {
     id: "jumplab",
     label: "Jump lab",
+    category: "parkour",
     collision: "both",
     make: () => buildJumpLabGroup(),
   },
@@ -1417,6 +1428,7 @@ export const PROP_CATALOG = [
   {
     id: "kickerramp",
     label: "Convex kicker",
+    category: "parkour",
     collision: "both",
     make: () =>
       new THREE.Mesh(
@@ -1427,6 +1439,7 @@ export const PROP_CATALOG = [
   {
     id: "jumpkicker",
     label: "Jump ramp",
+    category: "parkour",
     collision: "both",
     make: () =>
       new THREE.Mesh(

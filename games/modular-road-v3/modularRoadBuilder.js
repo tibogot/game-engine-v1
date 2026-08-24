@@ -3852,6 +3852,7 @@ export const PALETTE_CATEGORIES = [
   { id: "banked", label: "Banked" },
   { id: "tubes", label: "Tubes" },
   { id: "obstacles", label: "Obstacles" },
+  { id: "parkour", label: "Parkour" },
   { id: "scenery", label: "Scenery" },
   { id: "moving", label: "Moving" },
   { id: "portals", label: "Portals" },
@@ -4739,7 +4740,7 @@ let _uidSeq = 0;
 /** Thumbnail map key for the first tile shown in a palette category. */
 export function categoryThumbnailKey(catId, propCatalog = [], moverCatalog = []) {
   if (catId === "moving") return moverCatalog[0]?.id ?? null;
-  if (catId === "obstacles" || catId === "scenery") {
+  if (catId === "obstacles" || catId === "scenery" || catId === "parkour") {
     return propCatalog.find((p) => (p.category ?? "obstacles") === catId)?.id ?? null;
   }
   if (catId === "portals") return "portal_door";
@@ -4810,10 +4811,8 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   }
 
   function piecesInCategory(catId) {
-    // Props split across two tabs by their own `category`, defaulting to
-    // obstacles — so adding a prop needs no edit here, and an older catalog
-    // entry with no category still lands where it always did.
-    if (catId === "obstacles" || catId === "scenery") {
+    // Props split across tabs by their own `category`, defaulting to obstacles.
+    if (catId === "obstacles" || catId === "scenery" || catId === "parkour") {
       return propCatalog
         .filter((p) => (p.category ?? "obstacles") === catId)
         .map((p) => ({ id: p.id, label: p.label, isProp: true, hint: "" }));

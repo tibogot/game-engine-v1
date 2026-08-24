@@ -2388,8 +2388,10 @@ export class Vehicle {
      *  floor follows the heightfield instead of pinning the car to world y=0.
      *  @type {((x:number,z:number)=>number) | null} */
     this.getFloorY = null;
-    /** @type {import("./modularRoadParkour.js").ParkourMover[]} */
+    /** @type {import("../../games/modular-road-v3/modularRoadParkour.js").ParkourMover[]} */
     this.dynamicMovers = [];
+    /** @type {import("../../games/modular-road-v3/modularRoadParkour.js").ParkourMover[]} */
+    this.deckCarryMovers = [];
     this.enabled = false;
     this.spawnPos = new THREE.Vector3(0, 0.7, -4);
     this.spawnQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
@@ -3276,6 +3278,11 @@ export class Vehicle {
     this.dynamicMovers = movers ? movers.slice() : [];
   }
 
+  /** Spinning deck movers that impart barrel-roll carry (see ParkourMover.deckCarry). */
+  setDeckCarryMovers(movers) {
+    this.deckCarryMovers = movers ? movers.slice() : [];
+  }
+
   setSpawn(pos, quat) {
     this.spawnPos.copy(pos);
     if (quat) this.spawnQuat.copy(quat);
@@ -3868,6 +3875,7 @@ export class Vehicle {
           driveScale,
         );
       }
+      if (this.deckCarryMovers.length) this._applyDeckCarry(subDt);
       if (this.walls.length) this._applyWallProbes();
       // Gated on SOLID.enabled only — _resolveSolids picks its own channels. It
       // used to require a baked solidsBvh here, which silently disabled the
@@ -5024,6 +5032,16 @@ export class Vehicle {
       if (mover.bvh?.baked) {
         this._resolveSolidBvh(mover.bvh, (p, out) => mover.velocityAt(p, out), dt);
       }
+    }
+  }
+
+  /** Barrel-roll carry from spinning deck movers (Spin barrel, etc.). */
+  _applyDeckCarry(dt) {
+    if (this.groundedCount < 1) return;
+    const body = this.body;
+    const { throttle, steer } = this.input;
+    for (const mover of this.deckCarryMovers) {
+      mover.applyDeckCarry(body, body.pos, throttle, steer, this.groundedCount, dt);
     }
   }
 
