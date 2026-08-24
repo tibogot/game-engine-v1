@@ -3865,11 +3865,15 @@ export const PALETTE_CATEGORIES = [
   { id: "slopes", label: "Slopes" },
   { id: "banked", label: "Banked" },
   { id: "tubes", label: "Tubes" },
+  // Loop belongs with the other things you ride the INSIDE of, not at the end
+  // of the rail past the scenery. It was last because it was added last; tubes,
+  // loops and quarter-pipes are one family and you pick between them by reading
+  // them together.
+  { id: "loop", label: "Loop" },
   { id: "obstacles", label: "Obstacles" },
   { id: "parkour", label: "Parkour" },
   { id: "scenery", label: "Scenery" },
   { id: "moving", label: "Moving" },
-  { id: "loop", label: "Loop" },
 ];
 
 /**
@@ -5227,6 +5231,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   const titleEl = document.getElementById("category-title");
   const statusEl = document.getElementById("road-status");
   const selectedNameEl = document.getElementById("selected-piece-name");
+  const selectedCatEl = document.getElementById("selected-piece-cat");
   const edgesBtn = document.getElementById("edges-toggle");
   const collapseTab = document.getElementById("palette-collapse-tab");
   const palette = document.getElementById("palette");
@@ -5258,11 +5263,19 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     return thumbs.apply(el, key) ? el : null;
   }
 
+  /**
+   * A category's icon is a baked thumbnail of the first tile in it, so it can
+   * fail exactly the way a piece tile's can — and a rail of 14 identical grey
+   * placeholder plates with no captions is unusable in the same way. `unbaked`
+   * is the same flag the tiles use and buys the same fallback: the name comes
+   * back only while the picture cannot do its job. See .cat-btn.unbaked.
+   */
   function fillCategoryIcon(el, catId) {
     const key = categoryThumbnailKey(catId, propCatalog, moverCatalog);
     const sprite = key ? thumbSprite(key) : null;
     if (sprite) el.replaceChildren(sprite);
     else el.innerHTML = placeholderSvg();
+    el.closest(".cat-btn")?.classList.toggle("unbaked", !sprite);
   }
 
   function piecesInCategory(catId) {
@@ -5459,10 +5472,38 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     return PIECE_BY_ID.get(builder.activePieceId)?.label ?? builder.activePieceId;
   }
 
+  /**
+   * The category the SELECTED PIECE belongs to — which is not always the tab
+   * you are looking at.
+   *
+   * DERIVED FROM THE SELECTION, never read off `activeCategory`, and that is the
+   * whole point of the function. Browsing to Tubes without clicking anything
+   * leaves the junction you picked as the thing you will place, so a strip
+   * driven by the visible tab would say "TUBES · Split R" — confidently wrong
+   * about the half you cannot otherwise check. Deriving it also means the strip
+   * stays right for selections the tabs never made: a piece hotkey, the `R`
+   * flip, or selectPieceById from a right-click on the track.
+   */
+  function activeCategoryLabel() {
+    let id;
+    if (activePropId) {
+      id = propCatalog.find((p) => p.id === activePropId)?.category ?? "obstacles";
+    } else if (activeMoverId) {
+      id = "moving";
+    } else if (activePresetId) {
+      id = Object.keys(CATEGORY_PRESETS)
+        .find((cat) => CATEGORY_PRESETS[cat].some((p) => p.id === activePresetId));
+    } else {
+      id = PIECE_TO_CATEGORY[builder.activePieceId];
+    }
+    return PALETTE_CATEGORIES.find((c) => c.id === id)?.label ?? "";
+  }
+
   function refreshStatus() {
     // Set before the branches below, so the strip is right in every mode —
     // including the prop/mover early return.
     if (selectedNameEl) selectedNameEl.textContent = activeLabel();
+    if (selectedCatEl) selectedCatEl.textContent = activeCategoryLabel();
 
     // A prop/mover brush is a MODE, and the status line is the only thing that
     // says so — without this it goes on naming the road piece while the mouse is
@@ -5539,10 +5580,15 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       btn.type = "button";
       btn.className = "cat-btn";
       btn.dataset.categoryId = cat.id;
+      // The label is the bake-failed fallback (CSS hides it otherwise); `title`
+      // is how you get the name of a category you have NOT selected, since
+      // #category-title only ever names the active one.
+      btn.title = cat.label;
       btn.innerHTML = `
         <span class="cat-btn-icon"></span>
         <span class="cat-btn-label">${cat.label}</span>
       `;
+      // After innerHTML, so `unbaked` can find the button via closest().
       fillCategoryIcon(btn.querySelector(".cat-btn-icon"), cat.id);
       btn.addEventListener("click", () => {
         activeCategory = cat.id;

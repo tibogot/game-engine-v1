@@ -27,8 +27,16 @@
            a 304px body, so a tile is 96px — and with the name band gone the
            thumbnail inside it is 88px against the 93px the old two-column
            layout gave. Same picture, half again as many per row, for 72px of
-           viewport. */
-        --palette-width: 420px;
+           viewport.
+
+           436 rather than 420 because the rail grew by the same 16 (see
+           --rail-width): the extra goes to the rail, so the piece grid keeps
+           exactly the 332px panel — and the same 93px tiles — it had at 420. */
+        --palette-width: 436px;
+        /* A CATEGORY IS A TILE TOO. 104 − 12 of padding = a 92px thumbnail,
+           which is the piece tiles' 93px. Change one and change the other, or
+           the rail and the grid stop matching. */
+        --rail-width: 104px;
         --palette-inset-y: 28px;
         --font: "Segoe UI", system-ui, -apple-system, sans-serif;
         --font-mono: "Cascadia Code", "Fira Code", "Consolas", monospace;
@@ -53,7 +61,7 @@
         transform: translateX(calc(-1 * var(--palette-width) + 14px));
       }
       #palette-rail {
-        width: 88px;
+        width: var(--rail-width);
         min-height: 0;
         flex-shrink: 0;
         background: var(--tm-rail);
@@ -91,53 +99,81 @@
       #edges-toggle:hover {
         background: rgba(255, 255, 255, 0.08);
       }
+      /*
+       * A CATEGORY BUTTON IS A PIECE TILE.
+       *
+       * It used to be a different thing that happened to hold a thumbnail: a
+       * full-width transparent ROW with a 76px icon box inside it, a permanent
+       * caption, and its own selection language (row tint plus a 3px left bar)
+       * — sitting a few pixels from a grid of 93px bordered tiles that select
+       * with a yellow outline and corner brackets. Two visual systems for the
+       * same gesture, side by side.
+       *
+       * So the box below is deliberately `.piece-tile`'s box, state for state,
+       * and the caption is gone for the same reason it went from the tiles: the
+       * selected category is already named in #category-title, which is the
+       * rail's equivalent of #selected-piece. `unbaked` is honoured here too —
+       * see .cat-btn.unbaked further down.
+       */
       .cat-btn {
         position: relative;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 3px;
-        width: 100%;
-        min-height: 88px;
-        padding: 6px 4px;
-        background: transparent;
-        border: none;
-        border-top: 1px solid rgba(255, 255, 255, 0.04);
+        display: block;
+        width: calc(var(--rail-width) - 12px);
+        margin: 0 6px 8px;
+        padding: 0;
+        aspect-ratio: 1;
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 2px;
         cursor: pointer;
+        overflow: hidden;
         color: #aab2c0;
         transition:
-          background 0.12s,
-          color 0.12s;
+          border-color 0.12s,
+          box-shadow 0.12s;
       }
       .cat-btn:hover {
-        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.28);
+        background: rgba(255, 255, 255, 0.04);
         color: #fff;
       }
       .cat-btn.active {
         color: #fff;
-        background: rgba(220, 230, 34, 0.06);
+        border-color: var(--tm-yellow);
+        box-shadow:
+          0 0 0 1px var(--tm-yellow),
+          inset 0 0 20px rgba(220, 230, 34, 0.08);
       }
-      /* Single left accent — top+bottom bars sat on shared borders and looked like
-         double yellow lines between the selected row and its neighbors. */
-      .cat-btn.active::before {
+      /* The same two corner brackets the selected piece tile draws. */
+      .cat-btn.active::before,
+      .cat-btn.active::after {
         content: "";
         position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        width: 3px;
-        background: var(--tm-yellow);
+        width: 10px;
+        height: 10px;
+        border: 2px solid var(--tm-yellow);
+        pointer-events: none;
+        z-index: 2;
+      }
+      .cat-btn.active::before {
+        top: 3px;
+        left: 3px;
+        border-right: none;
+        border-bottom: none;
+      }
+      .cat-btn.active::after {
+        bottom: 3px;
+        right: 3px;
+        border-left: none;
+        border-top: none;
       }
       .cat-btn-icon {
-        width: 76px;
-        height: 76px;
+        position: absolute;
+        inset: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        border-radius: 2px;
-        background: rgba(0, 0, 0, 0.35);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 4px;
       }
       .cat-btn-icon svg,
       .cat-btn-icon img {
@@ -146,15 +182,63 @@
         object-fit: contain;
         pointer-events: none;
       }
+      /*
+       * A CATEGORY NAMES ITSELF WHEN IT IS THE ONE YOU ARE IN — and only then.
+       *
+       * This is where the rail and the grid legitimately differ, rather than
+       * drifting. A piece tile never captions itself, because you are choosing
+       * between fourteen shapes at once and the name of the one you land on is
+       * in #selected-piece. But there is only ever ONE selected category, its
+       * name is a heading rather than a caption, and dropping it entirely left
+       * the rail as fourteen anonymous thumbnails.
+       *
+       * ACROSS THE MIDDLE, not in a band at the bottom: the bottom is where a
+       * caption goes, and putting it there would read as "this tile is called
+       * Tubes" — the exact thing the piece tiles stopped doing. Centred over a
+       * scrim it reads as a label ON the rail, which is what it is.
+       */
       .cat-btn-label {
+        display: none;
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 3px 2px;
         font-size: 8px;
         font-weight: 800;
         font-style: italic;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.02em;
         text-align: center;
-        line-height: 1.1;
-        max-width: 76px;
+        color: #fff;
+        background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+        line-height: 1.15;
+        overflow-wrap: anywhere;
+      }
+      .cat-btn.active .cat-btn-label {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        inset: 0;
+        padding: 4px;
+        font-size: 11px;
+        letter-spacing: 0.05em;
+        color: var(--tm-yellow);
+        /* Dark enough to read the name over any thumbnail, light enough that
+           you can still see which shape you picked underneath it. */
+        background: rgba(0, 0, 0, 0.5);
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+        z-index: 1;
+      }
+      /* Same bargain as the piece tiles: on an UNSELECTED button the caption is
+         the bake-failed fallback, not furniture. Without a sprite all fourteen
+         categories are the same grey plate, and the name is the only thing
+         telling them apart. See .piece-tile-name. */
+      .cat-btn.unbaked:not(.active) .cat-btn-label {
+        display: block;
+      }
+      .cat-btn.unbaked:not(.active) .cat-btn-icon {
+        padding-bottom: 17px;
       }
       #palette-panel {
         flex: 1;
@@ -412,6 +496,20 @@
         text-transform: uppercase;
         color: #6b7382;
         flex-shrink: 0;
+      }
+      /* The category, so the strip reads SELECTED · JUNCTIONS · Split R. Dimmer
+         and lighter than the piece: it is the context, not the answer, and at
+         equal weight the eye cannot tell which half is which. */
+      #selected-piece-cat {
+        font-family: var(--font-display);
+        font-size: 11px;
+        font-weight: 800;
+        font-style: italic;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #7f8899;
+        flex-shrink: 0;
+        white-space: nowrap;
       }
       #selected-piece-name {
         font-family: var(--font-display);

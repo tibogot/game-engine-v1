@@ -234,6 +234,50 @@ console.log("\n=== ONE PLACEHOLDER, NOT 130 HAND-DRAWN SILHOUETTES ===");
     "#selected-piece must be a sibling of #palette-body, not a child");
   check("every tile names itself on hover whatever its state",
     /btn\.title = item\.label/.test(builder));
+
+  // A CATEGORY BUTTON IS A PIECE TILE, and its icon is a baked thumbnail of the
+  // first tile in that category — so it fails the same way, and a rail of 14
+  // identical grey placeholder plates with no captions is unusable in exactly
+  // the same way. Same flag, same fallback, same hover name.
+  check("the rail honours the same bake-failed fallback",
+    /closest\("\.cat-btn"\)\?\.classList\.toggle\("unbaked", !sprite\)/.test(builder),
+    "fillCategoryIcon runs on the first render AND on setThumbnails, so one call site covers both");
+  check("...gated by CSS the same way the tiles are",
+    /\.cat-btn\.unbaked:not\(\.active\) \.cat-btn-label\s*\{\s*display: block/.test(css)
+    && /\.cat-btn-label\s*\{\s*display: none/.test(css));
+  check("...and names itself on hover", /btn\.title = cat\.label/.test(builder));
+  // The one place the rail SHOULD differ from the grid: there is only ever one
+  // selected category, its name is a heading rather than a caption, and without
+  // it the rail is fourteen anonymous thumbnails. Centred, not a bottom band —
+  // a band at the bottom reads as "this tile is called Tubes", which is exactly
+  // what the piece tiles stopped doing.
+  check("the SELECTED category names itself across its thumbnail",
+    /\.cat-btn\.active \.cat-btn-label \{[^}]*inset: 0/.test(css)
+    && /\.cat-btn\.active \.cat-btn-label \{[^}]*justify-content: center/.test(css));
+  check("...and an unselected one still does not",
+    /\.cat-btn\.unbaked:not\(\.active\) \.cat-btn-label/.test(css),
+    "the bake-failed caption must not fight the selected label for the same box");
+  // The strip carries BOTH halves: SELECTED · <category> · <piece>.
+  check("the strip names the category as well as the piece",
+    /id="selected-piece-cat"/.test(html)
+    && /getElementById\("selected-piece-cat"\)/.test(builder)
+    && /#selected-piece-cat \{/.test(css));
+  // Derived from the SELECTION, never from the visible tab — browse away without
+  // clicking and the tab and the selection disagree.
+  check("...resolved from the selection, not the tab being browsed",
+    /function activeCategoryLabel\(\)/.test(builder)
+    && !/activeCategoryLabel[\s\S]{0,400}?\bid = activeCategory\b/.test(builder),
+    "activeCategoryLabel must not read activeCategory");
+  // Same box, same selection language. These drifted apart once already: the
+  // rail was a transparent full-width ROW with a 76px icon and a 3px left bar,
+  // beside a grid of bordered tiles that select with brackets.
+  check("the rail and the grid share one selection treatment",
+    /\.cat-btn\.active::before,\s*\n?\s*\.cat-btn\.active::after/.test(css)
+    && /\.cat-btn\.active \{[^}]*border-color: var\(--tm-yellow\)/.test(css));
+  check("...and one size, derived from the rail width",
+    /--rail-width:/.test(css) && /width: var\(--rail-width\)/.test(css)
+    && /\.cat-btn \{[^}]*width: calc\(var\(--rail-width\) - 12px\)/.test(css),
+    "the 92px thumbnail is the rail width minus its padding");
   // One resolver for "what is selected", or the strip and the status line drift.
   check("the strip and the status line read the same source",
     (builder.match(/activeLabel\(\)/g) || []).length >= 3,
