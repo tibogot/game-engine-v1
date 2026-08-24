@@ -30,6 +30,7 @@ import {
   buildJumpLabGroup,
   enableMeshShadows,
   attachDeckProxy,
+  thickWallTubeGeometry,
 } from "./modularRoadParkour.js";
 
 /**
@@ -94,21 +95,13 @@ function rampGeometry(L = 18, H = 6, W = 14) {
 
 /** Thick-walled pipe, still hollow to drive through.
  *
- * One Lathe of the wall rectangle (inner → outer → inner) instead of four
- * Cylinder/Ring meshes. Point order is load-bearing: FrontSide then shows the
- * bore from inside and the skin from outside, so we do not pay DoubleSide.
- * 40 radial steps stay — this mesh is the deck the wheels probe, and a coarser
- * ring reads as a prism. */
+ * Open inner + outer cylinders and flat RingGeometry end caps — see
+ * thickWallTubeGeometry for why this replaced a single Lathe profile.
+ * FrontSide, no DoubleSide. 40 radial steps — this mesh is the deck the wheels
+ * probe, and a coarser ring reads as a prism. */
 function openTubeGroup(outerR = 9, length = 30, wall = 0.65, segments = 40) {
   const innerR = outerR - wall;
-  const half = length / 2;
-  const geo = new THREE.LatheGeometry([
-    new THREE.Vector2(innerR, -half),
-    new THREE.Vector2(outerR, -half),
-    new THREE.Vector2(outerR,  half),
-    new THREE.Vector2(innerR,  half),
-    new THREE.Vector2(innerR, -half),
-  ], segments);
+  const geo = thickWallTubeGeometry(innerR, outerR, length, segments);
   const root = new THREE.Group();
   root.name = "OpenCylinder";
   root.add(new THREE.Mesh(geo, mat(0x3a7bd5, { metalness: 0.55, roughness: 0.4 })));

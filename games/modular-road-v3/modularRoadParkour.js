@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RigidBvh } from "../../v3/play/modularRoadRigidBvh.js";
 
 /**
@@ -86,6 +87,51 @@ export function rampGeometry(w, l, angleRad) {
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
   return attachDeckProxy(geo, deckPos);
+}
+
+/**
+ * Thick-walled tube shell — smooth curved walls + flat end rings.
+ *
+ * A single Lathe of a rectangular profile shares vertices at the 90° corners
+ * where the annular end meets the inner/outer walls, so averaged normals shade
+ * the rim blotchy. This builds four pieces instead (open outer + flipped inner
+ * cylinders, two RingGeometry caps), merges them, and keeps FrontSide: bore from
+ * inside, skin from outside, flat caps with clean normals.
+ *
+ * Axis along +Y, centred on the origin. Callers rotate to the final pose
+ * (openTubeGroup and Spin barrel use rotateX(π/2) for a Z-axis tube).
+ *
+ * @param {number} innerR interior radius (m)
+ * @param {number} outerR exterior radius (m)
+ * @param {number} length tube length (m)
+ * @param {number} [segments] radial segments around the bore
+ */
+export function thickWallTubeGeometry(innerR, outerR, length, segments = 40) {
+  const half = length / 2;
+  const segs = Math.max(8, segments);
+  const parts = [];
+
+  parts.push(new THREE.CylinderGeometry(outerR, outerR, length, segs, 1, true));
+
+  const inner = new THREE.CylinderGeometry(innerR, innerR, length, segs, 1, true);
+  inner.scale(-1, 1, 1); // inward normals so FrontSide reads from inside the bore
+  parts.push(inner);
+
+  const botCap = new THREE.RingGeometry(innerR, outerR, segs);
+  botCap.rotateX(Math.PI / 2);
+  botCap.translate(0, -half, 0);
+  parts.push(botCap);
+
+  const topCap = new THREE.RingGeometry(innerR, outerR, segs);
+  topCap.rotateX(-Math.PI / 2);
+  topCap.translate(0, half, 0);
+  parts.push(topCap);
+
+  const geo = mergeGeometries(parts, false);
+  for (const p of parts) p.dispose();
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  return geo;
 }
 
 /** Five side-by-side test ramps (15°–55°), centred on XZ with feet on y=0. */

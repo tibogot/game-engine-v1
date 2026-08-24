@@ -183,19 +183,6 @@ function spinBarrelHoleGrid(Ri, wall, L, holes, { A = 32, NZ = 16, innerOnly = f
   return { shell: toGeo(shell), rims: toGeo(rims) };
 }
 
-/** Smooth lathe barrel shell — same trick as openTubeGroup (FrontSide, one mesh). */
-function spinBarrelLatheShell(Ri, wall, L, segments = 36) {
-  const Ro = Ri + wall;
-  const half = L / 2;
-  return new THREE.LatheGeometry([
-    new THREE.Vector2(Ri, -half),
-    new THREE.Vector2(Ro, -half),
-    new THREE.Vector2(Ro, half),
-    new THREE.Vector2(Ri, half),
-    new THREE.Vector2(Ri, -half),
-  ], segments);
-}
-
 /** Shared hole layout — matches the classic rotating tube obstacle. */
 function spinBarrelHoles(deg) {
   return [
@@ -381,18 +368,16 @@ export const MOVER_CATALOG = [
     collision: "deck",
     defaults: { speed: 0.55, amplitude: 8 },
     make: () => {
-      // Optimized sibling of the classic rotating tube — lathe shell (~160 tris)
-      // instead of a 64×32 cell grid (~7k tris), FrontSide, inner-wall-only
-      // collider (~600 tris), and deck-carry so the car turns with the barrel
-      // when you are not steering. Glowing rims mark the holes; physics holes
-      // live only in the low-poly collider.
+      // Optimized sibling of the classic rotating tube — same hole layout, but
+      // 48×20 grid, matte dark shell (hides faceting vs glossy metal), cyan rims,
+      // inner-wall-only collider (~600 tris), and deck-carry.
       const Ri = 8;
       const wall = 0.6;
       const L = 40;
       const deg = THREE.MathUtils.degToRad;
       const holes = spinBarrelHoles(deg);
+      const { shell, rims } = spinBarrelHoleGrid(Ri, wall, L, holes, { A: 48, NZ: 20 });
       const { shell: collShell } = spinBarrelHoleGrid(Ri, wall, L, holes, { A: 24, NZ: 12, innerOnly: true });
-      const { rims } = spinBarrelHoleGrid(Ri, wall, L, holes, { A: 32, NZ: 16, rimsOnly: true });
 
       const root = new THREE.Group();
       root.name = "SpinBarrel";
@@ -400,32 +385,31 @@ export const MOVER_CATALOG = [
       pivot.position.set(0, Ri, 0);
       root.add(pivot);
 
-      const shellGeo = spinBarrelLatheShell(Ri, wall, L, 36);
       const mesh = new THREE.Mesh(
-        shellGeo,
+        shell,
         new THREE.MeshStandardMaterial({
-          color: 0x7aa8be,
-          metalness: 0.82,
-          roughness: 0.2,
-          side: THREE.FrontSide,
+          // Matte dark barrel — not the rotating tube's glossy blue metal. High
+          // roughness softens the low-poly facets; low metalness kills the sharp
+          // specular stripes that made each face read so hard.
+          color: 0x2a2e32,
+          metalness: 0.12,
+          roughness: 0.78,
+          // DoubleSide — FrontSide alone reads as a flat skin from inside the bore.
+          side: THREE.DoubleSide,
         }),
       );
       mesh.name = "SpinBarrelShell";
-      shellGeo.rotateX(Math.PI / 2);
 
-      if (rims) {
-        const rimMat = new THREE.MeshStandardNodeMaterial({
-          color: new THREE.Color(0xff5a1e),
-          emissive: new THREE.Color(0xff5a1e),
-          emissiveIntensity: 3.5,
-          roughness: 0.4,
-          side: THREE.FrontSide,
-        });
-        applyBloomMRT(rimMat, materialEmissive);
-        const rimMesh = new THREE.Mesh(rims, rimMat);
-        rimMesh.userData.noCollide = true;
-        mesh.add(rimMesh);
-      }
+      // Cyan bloom rims — rotating tube uses orange; this keeps holes readable.
+      const rimMat = new THREE.MeshStandardNodeMaterial({
+        color: new THREE.Color(0x38e8d8),
+        emissive: new THREE.Color(0x38e8d8),
+        emissiveIntensity: 4,
+        roughness: 0.45,
+        side: THREE.DoubleSide,
+      });
+      applyBloomMRT(rimMat, materialEmissive);
+      mesh.add(new THREE.Mesh(rims, rimMat)); // child ⇒ visual only, no collision
 
       pivot.add(mesh);
       return bindMover(root, {
