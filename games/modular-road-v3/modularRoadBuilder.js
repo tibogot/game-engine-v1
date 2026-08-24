@@ -3869,7 +3869,6 @@ export const PALETTE_CATEGORIES = [
   { id: "parkour", label: "Parkour" },
   { id: "scenery", label: "Scenery" },
   { id: "moving", label: "Moving" },
-  { id: "portals", label: "Portals" },
   { id: "loop", label: "Loop" },
 ];
 
@@ -5199,7 +5198,6 @@ export function categoryThumbnailKey(catId, propCatalog = [], moverCatalog = [])
   if (catId === "obstacles" || catId === "scenery" || catId === "parkour") {
     return propCatalog.find((p) => (p.category ?? "obstacles") === catId)?.id ?? null;
   }
-  if (catId === "portals") return "portal_door";
   const presets = CATEGORY_PRESETS[catId];
   if (presets?.length) return presets[0].id;
   const piece = PIECE_CATALOG.find((p) => PIECE_TO_CATEGORY[p.id] === catId);
@@ -5270,16 +5268,23 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   function piecesInCategory(catId) {
     // Props split across tabs by their own `category`, defaulting to obstacles.
     if (catId === "obstacles" || catId === "scenery" || catId === "parkour") {
-      return propCatalog
+      const items = propCatalog
         .filter((p) => (p.category ?? "obstacles") === catId)
         .map((p) => ({ id: p.id, label: p.label, isProp: true, hint: "" }));
+      // Portal doors use their own placement system, but they belong with
+      // obstacles — not a whole palette tab for one tile.
+      if (catId === "obstacles") {
+        items.push({
+          id: "portal_door",
+          label: "Portal door",
+          isPortal: true,
+          hint: "Adds a door (pairs up in twos)",
+        });
+      }
+      return items;
     }
     if (catId === "moving") {
       return moverCatalog.map((m) => ({ id: m.id, label: m.label, isMover: true, hint: "" }));
-    }
-    if (catId === "portals") {
-      // Teleport doors are placed, not chained — one tile that drops a door pair.
-      return [{ id: "portal_door", label: "Portal door", isPortal: true, hint: "Adds a door (pairs up in twos)" }];
     }
     // Curated kit: if this category has presets, show those instead of raw pieces.
     if (CATEGORY_PRESETS[catId]) {

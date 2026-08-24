@@ -480,8 +480,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
   for (const p of PROP_CATALOG) thumbItems.push({ key: p.id, make: p.make });
   for (const m of MOVER_CATALOG) thumbItems.push({ key: m.id, make: m.make });
-  // The portals palette tile is synthetic (id "portal_door" in buildRoadPaletteUI),
-  // not a catalog entry — bake it a real door thumbnail under that key.
+  // Portal door thumbnail — tile lives in Obstacles, still uses PortalManager.
   thumbItems.push({
     key: "portal_door",
     make: () => buildPortalMesh(DEFAULT_PORTAL_PARAMS, DEFAULT_PORTAL_PARAMS.colorA, "a").root,
