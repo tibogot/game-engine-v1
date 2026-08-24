@@ -4291,6 +4291,41 @@ for (const def of PIECE_CATALOG) {
   if (fn) def.endTangents = fn;
 }
 
+/**
+ * HANDED PIECES — the ones `curveDir` actually does something to.
+ *
+ * The palette no longer ships an L tile beside every R tile; it carries ONE
+ * sticky hand that it applies to whatever you pick (see ModularRoadBuilder.hand),
+ * which halves the Banked and Turns tabs. For that to read honestly the UI has
+ * to know when the control is inert, because 41 of the 66 pieces ignore
+ * curveDir entirely and a hand toggle that silently does nothing on a straight
+ * is worse than no toggle.
+ *
+ * DERIVED BY MEASUREMENT, not by reading the piece functions: build each piece
+ * both ways and see whether anything moves. That is how `junction_y` got in —
+ * a Y fork's PLATE is symmetric, so its deck is identical either way and only
+ * the BRANCHES swap sides. A hand-maintained list would have called it unhanded
+ * and the tile would have stopped flipping. tools/handedTest.mjs re-runs that
+ * comparison against this list, so a new piece that reads curveDir cannot
+ * quietly go missing from it.
+ */
+const HANDED_PIECES = new Set([
+  "curve", "scurve", "spiral",
+  "banked", "banked_climb", "banktilt", "bankin", "bankout", "wallride",
+  "loop", "loop_half", "loop_spiral",
+  "tunnel_curve", "channel_curve",
+  "tube_curve", "half_tube_curve", "half_pipe_curve",
+  "tube_scurve", "half_tube_scurve", "tube_spiral", "half_tube_spiral",
+  "junction_split", "junction_merge", "junction_t",
+  "junction_y", // branches only — the plate is symmetric
+]);
+for (const def of PIECE_CATALOG) def.handed = HANDED_PIECES.has(def.id);
+
+/** Does `curveDir` change anything about this piece? */
+export function isHandedPiece(pieceId) {
+  return HANDED_PIECES.has(pieceId);
+}
+
 // Rideable-tube family: dedicated cheap shader, not the asphalt graph. Same
 // list the Tubes tab is built from — channel/quarter-pipe stay on the road
 // material (they are a deck + shell, not an annulus).

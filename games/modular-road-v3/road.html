@@ -309,6 +309,13 @@
         <button id="edges-toggle" class="on" type="button">
           Edges<br />On/Off
         </button>
+        <!-- WHICH WAY CORNERS GO, as a mode. The palette used to ship an L tile
+             beside every R tile because the R key's flip died on the next tile
+             click; now the hand sticks and one tile per shape is enough. Greys
+             out when the selected piece ignores curveDir — 41 of 66 do. -->
+        <button id="hand-toggle" type="button" title="Which way corners go (R)">
+          Hand<br /><b id="hand-toggle-val">R</b>
+        </button>
         <div id="category-list"></div>
       </div>
       <div id="palette-panel">

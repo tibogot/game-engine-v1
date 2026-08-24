@@ -54,6 +54,23 @@ const tile = (id) => {
 };
 /** Place `n` of a palette tile. */
 const put = (id, n = 1) => { b.setActivePreset(tile(id)); for (let i = 0; i < n; i++) b.place(); };
+/**
+ * Place a tile with an EXPLICIT hand.
+ *
+ * Palette tiles stopped carrying `curveDir` when the hand became a sticky mode
+ * (see ModularRoadBuilder.flip), which is right for the editor and wrong for a
+ * generator: a track that builds itself differently depending on which way the
+ * editor happened to be pointing is not a track. Naming the direction takes the
+ * documented escape hatch in setActivePreset — an explicit curveDir wins over
+ * the mode — and leaves `b.hand` alone, so nothing leaks into the next call.
+ * This replaces the old `setActivePreset(...); flip()` pairs, which now toggle
+ * the mode and would leak.
+ */
+const putDir = (id, dir, n = 1) => {
+  const t = tile(id);
+  b.setActivePreset({ ...t, params: { ...t.params, curveDir: dir } });
+  for (let i = 0; i < n; i++) b.place();
+};
 /** Place `n` of a BASE piece at kit defaults. */
 const putBase = (id, n = 1) => { b.setActivePiece(id); for (let i = 0; i < n; i++) b.place(); };
 /** Place a base piece with explicit params (for the pieces with no tile). */
@@ -112,8 +129,12 @@ put("straight_long");
 
 // ── 3. CHICANE ───────────────────────────────────────────────────────────────
 console.log("3. chicane");
-put("turn_s_left");
-put("turn_s_right");
+// One S each way. These were the tiles `turn_s_left` / `turn_s_right`; the pair
+// collapsed to one tile when the hand became a mode, so the direction is named
+// here instead. (`scurve`'s hand is inverted against the rest of the kit — a
+// known bug — so -1 is the one that used to be called "S Left".)
+putDir("turn_s_right", -1);
+putDir("turn_s_right", 1);
 put("straight_long");
 
 // ── 4. CLIMB TO THE FIRST LAUNCH ─────────────────────────────────────────────
@@ -183,7 +204,7 @@ for (const [name, before, turnBack, after = []] of SIDE_SHAPES) {
   const mark = b._undoStack.length;
   b._putGhostOnBranch(splitBranch.matrix);
   for (const id of before) put(id);
-  if (turnBack) { b.setActivePreset(tile("turn_smooth_small")); b.flip(); b.place(); }
+  if (turnBack) { putDir("turn_smooth_small", -1); }
   for (const id of after) put(id);
   const chain = b.activeChainId;
   const target = b.linkTargets().find((t) => t.branch && t.branch.piece.id === "junction_merge");
@@ -202,7 +223,7 @@ if (!best || best.link.radius < MIN_LINK_RADIUS) {
 const [, wBefore, wTurn, wAfter = []] = SIDE_SHAPES.find((x) => x[0] === best.name);
 b._putGhostOnBranch(splitBranch.matrix);
 for (const id of wBefore) put(id);
-if (wTurn) { b.setActivePreset(tile("turn_smooth_small")); b.flip(); b.place(); }
+if (wTurn) { putDir("turn_smooth_small", -1); }
 for (const id of wAfter) put(id);
 const sideChain = b.activeChainId;
 const link = b.linkTo(
@@ -225,9 +246,13 @@ put("straight_long");
 
 // ── 8. BANKED HAIRPIN ────────────────────────────────────────────────────────
 console.log("8. hairpin");
-put("bank_up_left");
-put("bank_long_turn", 2);
-put("bank_down_left");
+// Was `bank_up_left` / `bank_long_turn` / `bank_down_left`, before the L twins
+// collapsed into the hand mode. Reproduced exactly, mismatch included: the
+// transitions lean LEFT while the held turn goes right, which is how this
+// section has always been generated.
+putDir("bank_up_right", -1);
+putDir("bank_long_turn", 1, 2);
+putDir("bank_down_right", -1);
 put("straight_long", 2);
 
 // ── 9. SECOND JUMP, THIS ONE DROPS ───────────────────────────────────────────

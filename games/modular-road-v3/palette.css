@@ -99,6 +99,37 @@
       #edges-toggle:hover {
         background: rgba(255, 255, 255, 0.08);
       }
+      /* THE HAND. Same chip as Edges — it is the same kind of thing: a mode that
+         sits above the tiles and colours whatever you pick. */
+      #hand-toggle {
+        margin: 0 6px 10px;
+        padding: 6px 4px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-color: var(--tm-yellow);
+        color: var(--tm-yellow);
+        font-size: 9px;
+        font-weight: 800;
+        font-style: italic;
+        line-height: 1.25;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        cursor: pointer;
+      }
+      #hand-toggle b {
+        font-size: 13px;
+        font-style: normal;
+      }
+      #hand-toggle:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+      /* INERT, and saying so. 41 of the 66 pieces ignore curveDir; a live-looking
+         toggle that does nothing to a straight is worse than no toggle. */
+      #hand-toggle.inert {
+        border-color: rgba(255, 255, 255, 0.1);
+        color: #5c6470;
+        opacity: 0.55;
+      }
       /*
        * A CATEGORY BUTTON IS A PIECE TILE.
        *

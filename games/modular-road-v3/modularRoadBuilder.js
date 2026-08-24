@@ -3,6 +3,7 @@ import { TransformControls } from "three/addons/controls/TransformControls.js";
 import {
   PIECE_CATALOG,
   PIECE_BY_ID,
+  isHandedPiece,
   roadParams,
   pieceParams,
   guardrailParams,
@@ -265,6 +266,17 @@ export class ModularRoadBuilder {
      * palette tile mean one fixed thing instead of an edit to global state.
      */
     this.activeParams = { ...PIECE_DEFAULTS };
+    /**
+     * WHICH WAY CORNERS GO — a mode, not a property of the selection.
+     *
+     * +1 right, -1 left, applied to every handed piece you pick until you flip
+     * it (R). This is what lets the palette ship one tile per shape instead of a
+     * mirror pair: see flip(). Editor state, deliberately NOT saved with a track
+     * — each piece already stores its own `curveDir` in its params snapshot, so
+     * a track's corners are fixed by the track, not by how the editor was set
+     * when it was reopened.
+     */
+    this.hand = 1;
     /** @type {{id:string, chainId:number, pp:object, mesh:THREE.Mesh, railMesh:THREE.Mesh|null, shellMesh:THREE.Mesh|null, decorMesh:THREE.Mesh|null, glassMesh:THREE.Mesh|null, connectorIn:THREE.Matrix4, connectorOut:THREE.Matrix4}[]} */
     this.pieces = [];
 
@@ -648,6 +660,9 @@ export class ModularRoadBuilder {
     if (!PIECE_BY_ID.has(id)) return;
     this.activePieceId = id;
     this.activeParams = { ...PIECE_DEFAULTS };
+    // The hand outlives the selection — that is what makes it a mode. Without
+    // this line every pick would silently snap back to right-handed.
+    this.activeParams.curveDir = this.hand;
     this._ensureGizmoOnGhost();
     this.refreshGhost();
     this._notify({ collision: false });
@@ -685,6 +700,12 @@ export class ModularRoadBuilder {
     if (!preset || !PIECE_BY_ID.has(preset.base)) return;
     this.activePieceId = preset.base;
     this.activeParams = { ...PIECE_DEFAULTS, ...preset.params };
+    // AN EXPLICIT curveDir WINS. Palette tiles no longer carry one, so they take
+    // the sticky hand — but the demo/track loaders below (loadBigCircuit,
+    // loadPresetTrack, tools/buildParkourTrack) name the direction they want,
+    // and a track that builds itself differently depending on which way the
+    // editor happened to be pointing is not a track.
+    if (preset.params?.curveDir === undefined) this.activeParams.curveDir = this.hand;
     this._ensureGizmoOnGhost();
     this.refreshGhost();
     this._notify({ collision: false });
@@ -707,13 +728,42 @@ export class ModularRoadBuilder {
     this._notify({ collision: false });
   }
 
-  /** Flip curve direction (only meaningful for the curve piece). */
+  /**
+   * Flip the sticky HAND — and it is the hand, not just this selection.
+   *
+   * It used to write `activeParams.curveDir` and nothing else, which meant the
+   * flip survived exactly until your next tile click: `setActivePreset` replaces
+   * activeParams wholesale, and every tile shipped `curveDir: 1`. So "press R
+   * once, then build a run of left-handers" did not work — you had to press R
+   * again after every single click. That is why the palette carried an L tile
+   * beside every R tile: 94 of 195 tiles were one half of a mirror pair, and
+   * pairs were the only way left-handed building was usable at all.
+   *
+   * Now the hand is a MODE the palette applies to whatever you pick, so one
+   * tile per shape is enough (195 → 148) and one keypress covers the whole run.
+   */
   flip() {
-    // On THIS SELECTION, not the shared params — flipping a turn must not
-    // reach out and reverse the next piece someone else picks.
-    this.activeParams.curveDir = this.activeParams.curveDir >= 0 ? -1 : 1;
+    this.hand = this.hand >= 0 ? -1 : 1;
+    this.activeParams.curveDir = this.hand;
     this.refreshGhost();
     this._notify({ collision: false });
+  }
+
+  /** Set the hand outright. Scripts that build a fixed track want this rather
+   *  than counting flips. */
+  setHand(dir) {
+    const h = dir >= 0 ? 1 : -1;
+    if (h === this.hand) return;
+    this.hand = h;
+    this.activeParams.curveDir = h;
+    this.refreshGhost();
+    this._notify({ collision: false });
+  }
+
+  /** Is the hand doing anything to what is selected? The toggle greys out when
+   *  it is not — an inert control that looks live is worse than no control. */
+  get activePieceHanded() {
+    return isHandedPiece(this.activePieceId);
   }
 
   /**
@@ -4182,71 +4232,39 @@ export const CATEGORY_PRESETS = {
   banked: [
     {
       id: "bank_up_right",
-      label: "Up Right",
+      label: "Up",
       base: "bankin",
-      params: { bankRampLength: 44, bankAngle: 22, curveDir: 1 },
-    },
-    {
-      id: "bank_up_left",
-      label: "Up Left",
-      base: "bankin",
-      params: { bankRampLength: 44, bankAngle: 22, curveDir: -1 },
+      params: { bankRampLength: 44, bankAngle: 22 },
     },
     {
       id: "bank_straight_right",
-      label: "Straight Right",
+      label: "Straight",
       base: "banktilt",
-      params: { straightLength: 32, bankAngle: 22, curveDir: 1 },
-    },
-    {
-      id: "bank_straight_left",
-      label: "Straight Left",
-      base: "banktilt",
-      params: { straightLength: 32, bankAngle: 22, curveDir: -1 },
+      params: { straightLength: 32, bankAngle: 22 },
     },
     {
       id: "bank_road_tilted",
       label: "Road Tilted",
       base: "banktilt",
-      params: { straightLength: 32, bankAngle: 35, curveDir: 1 },
+      params: { straightLength: 32, bankAngle: 35 },
     },
     {
       id: "bank_down_right",
-      label: "Down Right",
+      label: "Down",
       base: "bankout",
-      params: { bankRampLength: 44, bankAngle: 22, curveDir: 1 },
-    },
-    {
-      id: "bank_down_left",
-      label: "Down Left",
-      base: "bankout",
-      params: { bankRampLength: 44, bankAngle: 22, curveDir: -1 },
+      params: { bankRampLength: 44, bankAngle: 22 },
     },
     {
       id: "bank_short_turn",
-      label: "Short Turn R",
+      label: "Short Turn",
       base: "banked",
-      params: { curveRadius: 34, curveAngle: 60, bankAngle: 22, curveDir: 1 },
-    },
-    {
-      // These two were the only tiles in the tab with no left-hand twin — the
-      // `R` key flips them, but every other pair here ships both.
-      id: "bank_short_turn_l",
-      label: "Short Turn L",
-      base: "banked",
-      params: { curveRadius: 34, curveAngle: 60, bankAngle: 22, curveDir: -1 },
+      params: { curveRadius: 34, curveAngle: 60, bankAngle: 22 },
     },
     {
       id: "bank_long_turn",
-      label: "Long Turn R",
+      label: "Long Turn",
       base: "banked",
-      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, curveDir: 1 },
-    },
-    {
-      id: "bank_long_turn_l",
-      label: "Long Turn L",
-      base: "banked",
-      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, curveDir: -1 },
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22 },
     },
     // CLIMBING BANKS. Until now a banked corner held one altitude for its whole
     // length, so every banked section in a track sat on a single flat plane and
@@ -4255,27 +4273,15 @@ export const CATEGORY_PRESETS = {
     // level — chain one straight onto a held-bank turn.
     {
       id: "bank_climb_right",
-      label: "Climb Turn R",
+      label: "Climb Turn",
       base: "banked_climb",
-      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, bankRise: 14, curveDir: 1 },
-    },
-    {
-      id: "bank_climb_left",
-      label: "Climb Turn L",
-      base: "banked_climb",
-      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, bankRise: 14, curveDir: -1 },
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, bankRise: 14 },
     },
     {
       id: "bank_drop_right",
-      label: "Drop Turn R",
+      label: "Drop Turn",
       base: "banked_climb",
-      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, bankRise: -14, curveDir: 1 },
-    },
-    {
-      id: "bank_drop_left",
-      label: "Drop Turn L",
-      base: "banked_climb",
-      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, bankRise: -14, curveDir: -1 },
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, bankRise: -14 },
     },
     // QUICK TRANSITIONS. bankRampLength 44 is sized so the curl reads as a shape
     // developing, and that is right for a sweeper — but it also meant a section
@@ -4284,27 +4290,15 @@ export const CATEGORY_PRESETS = {
     // is now a choice instead of the absence of one.
     {
       id: "bank_up_right_quick",
-      label: "Up Right Quick",
+      label: "Up Quick",
       base: "bankin",
-      params: { bankRampLength: 20, bankAngle: 22, curveDir: 1 },
-    },
-    {
-      id: "bank_up_left_quick",
-      label: "Up Left Quick",
-      base: "bankin",
-      params: { bankRampLength: 20, bankAngle: 22, curveDir: -1 },
+      params: { bankRampLength: 20, bankAngle: 22 },
     },
     {
       id: "bank_down_right_quick",
-      label: "Down Right Quick",
+      label: "Down Quick",
       base: "bankout",
-      params: { bankRampLength: 20, bankAngle: 22, curveDir: 1 },
-    },
-    {
-      id: "bank_down_left_quick",
-      label: "Down Left Quick",
-      base: "bankout",
-      params: { bankRampLength: 20, bankAngle: 22, curveDir: -1 },
+      params: { bankRampLength: 20, bankAngle: 22 },
     },
 
     // ── THE ANGLE LADDER ──────────────────────────────────────────────────
@@ -4325,115 +4319,61 @@ export const CATEGORY_PRESETS = {
     // reads as a corner you drop into rather than a wall you climb.
     {
       id: "bank_up_right_gentle",
-      label: "Up Right 12°",
+      label: "Up 12°",
       base: "bankin",
-      params: { bankRampLength: 32, bankAngle: 12, curveDir: 1 },
-    },
-    {
-      id: "bank_up_left_gentle",
-      label: "Up Left 12°",
-      base: "bankin",
-      params: { bankRampLength: 32, bankAngle: 12, curveDir: -1 },
+      params: { bankRampLength: 32, bankAngle: 12 },
     },
     {
       id: "bank_straight_right_gentle",
-      label: "Straight Right 12°",
+      label: "Straight 12°",
       base: "banktilt",
-      params: { straightLength: 32, bankAngle: 12, curveDir: 1 },
-    },
-    {
-      id: "bank_straight_left_gentle",
-      label: "Straight Left 12°",
-      base: "banktilt",
-      params: { straightLength: 32, bankAngle: 12, curveDir: -1 },
+      params: { straightLength: 32, bankAngle: 12 },
     },
     {
       id: "bank_turn_right_gentle",
-      label: "Turn R 12°",
+      label: "Turn 12°",
       base: "banked",
-      params: { curveRadius: 58, curveAngle: 90, bankAngle: 12, curveDir: 1 },
-    },
-    {
-      id: "bank_turn_left_gentle",
-      label: "Turn L 12°",
-      base: "banked",
-      params: { curveRadius: 58, curveAngle: 90, bankAngle: 12, curveDir: -1 },
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 12 },
     },
     {
       id: "bank_down_right_gentle",
-      label: "Down Right 12°",
+      label: "Down 12°",
       base: "bankout",
-      params: { bankRampLength: 32, bankAngle: 12, curveDir: 1 },
-    },
-    {
-      id: "bank_down_left_gentle",
-      label: "Down Left 12°",
-      base: "bankout",
-      params: { bankRampLength: 32, bankAngle: 12, curveDir: -1 },
+      params: { bankRampLength: 32, bankAngle: 12 },
     },
     // The steep set gets LONGER transitions, not shorter: the ramp has to roll
     // 38° instead of 22° in the same piece, so holding 44 m would raise the roll
     // rate by three quarters — the exact fold this length exists to avoid.
     {
       id: "bank_up_right_steep",
-      label: "Up Right 38°",
+      label: "Up 38°",
       base: "bankin",
-      params: { bankRampLength: 56, bankAngle: 38, curveDir: 1 },
-    },
-    {
-      id: "bank_up_left_steep",
-      label: "Up Left 38°",
-      base: "bankin",
-      params: { bankRampLength: 56, bankAngle: 38, curveDir: -1 },
+      params: { bankRampLength: 56, bankAngle: 38 },
     },
     {
       id: "bank_straight_right_steep",
-      label: "Straight Right 38°",
+      label: "Straight 38°",
       base: "banktilt",
-      params: { straightLength: 32, bankAngle: 38, curveDir: 1 },
-    },
-    {
-      id: "bank_straight_left_steep",
-      label: "Straight Left 38°",
-      base: "banktilt",
-      params: { straightLength: 32, bankAngle: 38, curveDir: -1 },
+      params: { straightLength: 32, bankAngle: 38 },
     },
     {
       id: "bank_turn_right_steep",
-      label: "Turn R 38°",
+      label: "Turn 38°",
       base: "banked",
-      params: { curveRadius: 44, curveAngle: 90, bankAngle: 38, curveDir: 1 },
-    },
-    {
-      id: "bank_turn_left_steep",
-      label: "Turn L 38°",
-      base: "banked",
-      params: { curveRadius: 44, curveAngle: 90, bankAngle: 38, curveDir: -1 },
+      params: { curveRadius: 44, curveAngle: 90, bankAngle: 38 },
     },
     {
       id: "bank_down_right_steep",
-      label: "Down Right 38°",
+      label: "Down 38°",
       base: "bankout",
-      params: { bankRampLength: 56, bankAngle: 38, curveDir: 1 },
-    },
-    {
-      id: "bank_down_left_steep",
-      label: "Down Left 38°",
-      base: "bankout",
-      params: { bankRampLength: 56, bankAngle: 38, curveDir: -1 },
+      params: { bankRampLength: 56, bankAngle: 38 },
     },
 
     {
       id: "wall_ride_right",
-      label: "Wall Ride R",
+      label: "Wall Ride",
       base: "wallride",
-      params: { wallRideLength: 70, wallAngle: 70, wallRamp: 0.38, curveDir: 1 },
-    },
-    {
-      id: "wall_ride_left",
-      label: "Wall Ride L",
-      base: "wallride",
-      params: { wallRideLength: 70, wallAngle: 70, wallRamp: 0.38, curveDir: -1 },
+      params: { wallRideLength: 70, wallAngle: 70, wallRamp: 0.38 },
     },
     // SHORT wall ride — `wallRamp` is a FRACTION of the piece, so the same 0.38
     // still spends the same share of the length getting up and off the wall.
@@ -4441,15 +4381,9 @@ export const CATEGORY_PRESETS = {
     // than a section: it fits between two corners.
     {
       id: "wall_ride_short_right",
-      label: "Wall Ride Short R",
+      label: "Wall Ride Short",
       base: "wallride",
-      params: { wallRideLength: 34, wallAngle: 70, wallRamp: 0.38, curveDir: 1 },
-    },
-    {
-      id: "wall_ride_short_left",
-      label: "Wall Ride Short L",
-      base: "wallride",
-      params: { wallRideLength: 34, wallAngle: 70, wallRamp: 0.38, curveDir: -1 },
+      params: { wallRideLength: 34, wallAngle: 70, wallRamp: 0.38 },
     },
     // TRUE VERTICAL. Stops at 88° rather than 90° on purpose: at exactly 90 the
     // deck's own normal has no horizontal component left, so nothing holds the
@@ -4457,15 +4391,9 @@ export const CATEGORY_PRESETS = {
     // degrees of lean is what keeps it a wall ride.
     {
       id: "wall_ride_vert_right",
-      label: "Wall Ride 88° R",
+      label: "Wall Ride 88°",
       base: "wallride",
-      params: { wallRideLength: 70, wallAngle: 88, wallRamp: 0.42, curveDir: 1 },
-    },
-    {
-      id: "wall_ride_vert_left",
-      label: "Wall Ride 88° L",
-      base: "wallride",
-      params: { wallRideLength: 70, wallAngle: 88, wallRamp: 0.42, curveDir: -1 },
+      params: { wallRideLength: 70, wallAngle: 88, wallRamp: 0.42 },
     },
   ],
   tubes: [
@@ -4497,7 +4425,7 @@ export const CATEGORY_PRESETS = {
       id: "tube_turn",
       label: "Tube Turn",
       base: "tube_curve",
-      params: { curveRadius: 26, curveAngle: 90, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
+      params: { curveRadius: 26, curveAngle: 90, tubeRadius: 8, tubeWall: 0.6 },
     },
     // TURN SIZES. There used to be exactly ONE tube corner in the game — 90° at
     // R26 — so every tube corner anyone had ever built was the same corner.
@@ -4507,34 +4435,28 @@ export const CATEGORY_PRESETS = {
       id: "tube_turn_45",
       label: "Tube Turn 45",
       base: "tube_curve",
-      params: { curveRadius: 26, curveAngle: 45, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
+      params: { curveRadius: 26, curveAngle: 45, tubeRadius: 8, tubeWall: 0.6 },
     },
     {
       id: "tube_turn_30",
       label: "Tube Turn 30",
       base: "tube_curve",
-      params: { curveRadius: 26, curveAngle: 30, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
+      params: { curveRadius: 26, curveAngle: 30, tubeRadius: 8, tubeWall: 0.6 },
     },
     {
       id: "tube_turn_wide",
       label: "Tube Turn Wide",
       base: "tube_curve",
-      params: { curveRadius: 48, curveAngle: 90, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
+      params: { curveRadius: 48, curveAngle: 90, tubeRadius: 8, tubeWall: 0.6 },
     },
     // S-BENDS. A pure sidestep: out by 40° and back, so the heading the piece
     // hands on is the heading it was given. Dodging something used to cost two
     // 45° corners, which leaves the whole rest of the chain rotated.
     {
       id: "tube_s_right",
-      label: "Tube S R",
+      label: "Tube S",
       base: "tube_scurve",
-      params: { curveRadius: 26, curveAngle: 40, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
-    },
-    {
-      id: "tube_s_left",
-      label: "Tube S L",
-      base: "tube_scurve",
-      params: { curveRadius: 26, curveAngle: 40, curveDir: -1, tubeRadius: 8, tubeWall: 0.6 },
+      params: { curveRadius: 26, curveAngle: 40, tubeRadius: 8, tubeWall: 0.6 },
     },
     // VERTICALITY. Level at both ends (smoothstep), so these drop into an
     // existing tube run without rotating anything — which is the whole point:
@@ -4568,15 +4490,9 @@ export const CATEGORY_PRESETS = {
       // car carries without losing the run — and the climb eases flat at both
       // ends, so two of these stack to exactly 28 m with an upright exit.
       id: "tube_helix_r",
-      label: "Tube Helix R",
+      label: "Tube Helix",
       base: "tube_spiral",
-      params: { loopSpiralRadius: 26, loopSpiralTurns: 0.5, loopSpiralRise: 14, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
-    },
-    {
-      id: "tube_helix_l",
-      label: "Tube Helix L",
-      base: "tube_spiral",
-      params: { loopSpiralRadius: 26, loopSpiralTurns: 0.5, loopSpiralRise: 14, curveDir: -1, tubeRadius: 8, tubeWall: 0.6 },
+      params: { loopSpiralRadius: 26, loopSpiralTurns: 0.5, loopSpiralRise: 14, tubeRadius: 8, tubeWall: 0.6 },
     },
     {
       id: "tube_exit",
@@ -4616,7 +4532,7 @@ export const CATEGORY_PRESETS = {
       id: "big_tube_turn",
       label: "Big Tube Turn",
       base: "tube_curve",
-      params: { curveRadius: 34, curveAngle: 90, curveDir: 1, tubeRadius: 12, tubeWall: 0.6 },
+      params: { curveRadius: 34, curveAngle: 90, tubeRadius: 12, tubeWall: 0.6 },
     },
     {
       id: "big_tube_exit",
@@ -4658,7 +4574,7 @@ export const CATEGORY_PRESETS = {
       id: "half_tube_turn",
       label: "Half Tube Turn",
       base: "half_tube_curve",
-      params: { curveRadius: 26, curveAngle: 90, curveDir: 1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+      params: { curveRadius: 26, curveAngle: 90, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
     },
     {
       id: "half_tube_deep",
@@ -4670,13 +4586,13 @@ export const CATEGORY_PRESETS = {
       id: "half_tube_turn_45",
       label: "Half Tube Turn 45",
       base: "half_tube_curve",
-      params: { curveRadius: 26, curveAngle: 45, curveDir: 1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+      params: { curveRadius: 26, curveAngle: 45, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
     },
     {
       id: "half_tube_turn_wide",
       label: "Half Tube Turn Wide",
       base: "half_tube_curve",
-      params: { curveRadius: 48, curveAngle: 90, curveDir: 1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+      params: { curveRadius: 48, curveAngle: 90, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
     },
     {
       id: "half_tube_up",
@@ -4704,27 +4620,15 @@ export const CATEGORY_PRESETS = {
     },
     {
       id: "half_tube_helix_r",
-      label: "Half Tube Helix R",
+      label: "Half Tube Helix",
       base: "half_tube_spiral",
-      params: { loopSpiralRadius: 26, loopSpiralTurns: 0.5, loopSpiralRise: 14, curveDir: 1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
-    },
-    {
-      id: "half_tube_helix_l",
-      label: "Half Tube Helix L",
-      base: "half_tube_spiral",
-      params: { loopSpiralRadius: 26, loopSpiralTurns: 0.5, loopSpiralRise: 14, curveDir: -1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+      params: { loopSpiralRadius: 26, loopSpiralTurns: 0.5, loopSpiralRise: 14, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
     },
     {
       id: "half_tube_s_right",
-      label: "Half Tube S R",
+      label: "Half Tube S",
       base: "half_tube_scurve",
-      params: { curveRadius: 26, curveAngle: 40, curveDir: 1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
-    },
-    {
-      id: "half_tube_s_left",
-      label: "Half Tube S L",
-      base: "half_tube_scurve",
-      params: { curveRadius: 26, curveAngle: 40, curveDir: -1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+      params: { curveRadius: 26, curveAngle: 40, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
     },
     {
       id: "half_tube_exit",
@@ -4820,7 +4724,7 @@ export const CATEGORY_PRESETS = {
       id: "half_pipe_park_turn",
       label: "Park Pipe Turn",
       base: "half_pipe_curve",
-      params: { curveRadius: 60, curveAngle: 60, curveDir: 1, tubeRadius: 26, tubeWall: 0.6, halfPipeFlat: 12, halfPipeVert: 17 },
+      params: { curveRadius: 60, curveAngle: 60, tubeRadius: 26, tubeWall: 0.6, halfPipeFlat: 12, halfPipeVert: 17 },
     },
     {
       id: "tunnel_str",
@@ -4832,7 +4736,7 @@ export const CATEGORY_PRESETS = {
       id: "tunnel_turn",
       label: "Arch Turn",
       base: "tunnel_curve",
-      params: { curveRadius: 26, curveAngle: 90, curveDir: 1, tunnelHeight: 7 },
+      params: { curveRadius: 26, curveAngle: 90, tunnelHeight: 7 },
     },
     {
       id: "channel_str",
@@ -4844,7 +4748,7 @@ export const CATEGORY_PRESETS = {
       id: "channel_turn",
       label: "Half-pipe Turn",
       base: "channel_curve",
-      params: { curveRadius: 26, curveAngle: 90, curveDir: 1, channelRadius: 4 },
+      params: { curveRadius: 26, curveAngle: 90, channelRadius: 4 },
     },
   ],
   straight: [
@@ -5127,56 +5031,195 @@ export const CATEGORY_PRESETS = {
       base: "crest",
       params: { slopeLength: 32, slopeRise: -8 },
     },
-    // Climbing turn — stack to gain height.
+    /*
+     * CLIMBING TURNS — stack to gain height, and now they actually do.
+     *
+     * This tile used to ride `spiral`, whose own hint says "stack to gain
+     * height" and which does not. `spiralPoints` climbs at a CONSTANT rate, so
+     * its entry tangent is pitched up; dropped on a level connector, buildPiece
+     * rotates the whole piece to bring that tangent down and tips the helix axis
+     * off vertical. MEASURED at this tile's exact old params (R18 / 180° /
+     * rise 10), stacking three:
+     *
+     *     after 1   y = 9.77   up = (-0.52, 0.81, -0.29)   <- 36° of roll
+     *     after 2   y = 0.75   <- climbed, then came back DOWN
+     *     after 3   y = 9.13
+     *
+     * `loop_spiral` is the same shape built the way that works: the climb is
+     * smoothstepped so both ends are level, and loopSpiralFixFrames pins up to
+     * world-up so no roll can accumulate. Same size, same half turn, same 10 m,
+     * and it measures 10 → 20 → 30 with an upright exit every time. (It is what
+     * the Loop tab's "Spiral ramp" already used; the two tabs were offering the
+     * working and the broken version of one idea.)
+     *
+     * The `spiral` PIECE stays in the catalog — a track saved outside this repo
+     * may contain one, and dropping a catalog entry is how those stop loading.
+     * It just has no tile any more. See tools/turnLadderTest.mjs for the guard.
+     */
     {
-      id: "slope_helix",
-      label: "Helix",
-      base: "spiral",
-      params: { spiralRadius: 18, spiralAngle: 180, spiralRise: 10, curveDir: 1 },
+      id: "slope_helix", // id kept: it is the tile people have muscle memory for
+      label: "Helix Up",
+      base: "loop_spiral",
+      params: { loopSpiralRadius: 18, loopSpiralTurns: 0.5, loopSpiralRise: 10 },
+    },
+    {
+      id: "slope_helix_down_r",
+      label: "Helix Down",
+      base: "loop_spiral",
+      params: { loopSpiralRadius: 18, loopSpiralTurns: 0.5, loopSpiralRise: -10 },
     },
   ],
   turns: [
+    /*
+     * THE CORNER LADDER — five radii, and the radius IS the corner speed.
+     *
+     * A flat corner is grip-limited: v_max = sqrt(R · a). MEASURED on the real
+     * vehicle over a flat plane, holding a steering angle and reading v·omega
+     * once it settles (tools/turnLadderTest.mjs), sustained cornering is
+     * 1.26–1.30 g — flat across every speed from 15 to 40 m/s. The vehicle
+     * file's own comment assumes 1.5 g, so its corner speeds are ~7% optimistic;
+     * the numbers below use the measured 1.3. Anything much above that in a rig
+     * like this is a PIROUETTE — an early version of the measurement reported
+     * 8.4 g at a 3 m radius, which is a car rotating on the spot, not a corner.
+     *
+     * That gives the ladder its reason to exist, because the old tab could not
+     * span the car. The straights run to 48.3 m/s (174 km/h) and the widest
+     * corner on offer was R34 — an 81 km/h corner. EVERY corner in the game was
+     * a heavy brake zone, with nothing between "brake hard" and "straight". A
+     * corner you can take flat out needs R ≈ 183 m; the Kink at 130 gets within
+     * a lift of it.
+     *
+     *     R= 12   12.4 m/s    45 km/h   Hairpin — stop-and-go, big brake zone
+     *     R= 24   17.5 m/s    63 km/h   Tight   — second-gear corner
+     *     R= 40   22.6 m/s    81 km/h   Medium  — the old tab's widest
+     *     R= 70   29.9 m/s   108 km/h   Sweeper — a corner you carry speed through
+     *     R=130   40.7 m/s   147 km/h   Kink    — a lift, not a brake
+     *
+     * BOTH HANDS, EVERY RUNG. This tab had exactly one left-hand tile (and that
+     * one is mislabelled — see the S-curves at the bottom). `R` flips curveDir
+     * live, but every other tab ships pairs, and a corner you have to remember
+     * to flip is a corner you get wrong.
+     *
+     * The angles per rung are the ones that suit it: a hairpin is 90° or more
+     * or it is not a hairpin, and a kink is 45° or less or you have built a
+     * quarter of a circle 130 m across.
+     */
+    // ── Hairpin, R12 — 45 km/h ───────────────────────────────────────────
     {
-      id: "turn_smooth_small",
-      label: "Smooth Small",
+      id: "turn_sharp_small", // kept: the id `buildParkourTrack` reaches for
+      label: "Hairpin 90",
       base: "curve",
-      params: { curveRadius: 24, curveAngle: 45, curveDir: 1 },
+      params: { curveRadius: 12, curveAngle: 90 },
+    },
+    {
+      id: "turn_hairpin_135_r",
+      label: "Hairpin 135",
+      base: "curve",
+      params: { curveRadius: 12, curveAngle: 135 },
+    },
+    {
+      id: "turn_hairpin_180_r",
+      label: "Hairpin 180",
+      base: "curve",
+      params: { curveRadius: 12, curveAngle: 180 },
+    },
+    // ── Tight, R24 — 63 km/h ─────────────────────────────────────────────
+    {
+      id: "turn_smooth_small", // kept: `buildParkourTrack` reaches for this one
+      label: "Tight 45",
+      base: "curve",
+      params: { curveRadius: 24, curveAngle: 45 },
     },
     {
       id: "turn_smooth_long",
-      label: "Smooth Long",
+      label: "Tight 90",
       base: "curve",
-      params: { curveRadius: 24, curveAngle: 90, curveDir: 1 },
+      params: { curveRadius: 24, curveAngle: 90 },
     },
     {
-      id: "turn_smooth_longer",
-      label: "Smooth Longer",
+      id: "turn_tight_135_r",
+      label: "Tight 135",
       base: "curve",
-      params: { curveRadius: 30, curveAngle: 135, curveDir: 1 },
+      params: { curveRadius: 24, curveAngle: 135 },
+    },
+    // ── Medium, R40 — 81 km/h ────────────────────────────────────────────
+    {
+      id: "turn_medium_30_r",
+      label: "Medium 30",
+      base: "curve",
+      params: { curveRadius: 40, curveAngle: 30 },
     },
     {
-      id: "turn_smooth_longest",
-      label: "Smooth Longest",
+      id: "turn_medium_45_r",
+      label: "Medium 45",
       base: "curve",
-      params: { curveRadius: 34, curveAngle: 180, curveDir: 1 },
+      params: { curveRadius: 40, curveAngle: 45 },
     },
     {
-      id: "turn_sharp_small",
-      label: "Sharp Small",
+      id: "turn_medium_90_r",
+      label: "Medium 90",
       base: "curve",
-      params: { curveRadius: 12, curveAngle: 90, curveDir: 1 },
+      params: { curveRadius: 40, curveAngle: 90 },
+    },
+    // ── Sweeper, R70 — 108 km/h ──────────────────────────────────────────
+    {
+      id: "turn_sweeper_30_r",
+      label: "Sweeper 30",
+      base: "curve",
+      params: { curveRadius: 70, curveAngle: 30 },
     },
     {
-      id: "turn_s_left",
-      label: "S Left",
-      base: "scurve",
-      params: { curveRadius: 20, curveAngle: 38, curveDir: -1 },
+      id: "turn_sweeper_45_r",
+      label: "Sweeper 45",
+      base: "curve",
+      params: { curveRadius: 70, curveAngle: 45 },
     },
+    {
+      id: "turn_sweeper_90_r",
+      label: "Sweeper 90",
+      base: "curve",
+      params: { curveRadius: 70, curveAngle: 90 },
+    },
+    // ── Kink, R130 — 147 km/h ────────────────────────────────────────────
+    {
+      id: "turn_kink_15_r",
+      label: "Kink 15",
+      base: "curve",
+      params: { curveRadius: 130, curveAngle: 15 },
+    },
+    {
+      id: "turn_kink_30_r",
+      label: "Kink 30",
+      base: "curve",
+      params: { curveRadius: 130, curveAngle: 30 },
+    },
+    {
+      id: "turn_kink_45_r",
+      label: "Kink 45",
+      base: "curve",
+      params: { curveRadius: 130, curveAngle: 45 },
+    },
+    /*
+     * ⚠ THESE TWO ARE EACH OTHER'S, and they are left that way ON PURPOSE.
+     *
+     * `sCurvePoints` is handed the opposite way round from every other piece in
+     * the kit. MEASURED at R20 / 38° / curveDir +1, exit x: `curve` and `banked`
+     * land at +4.24 (right — travel is −Z and up is +Y, so right is +X) while
+     * `scurve` lands at −8.48. So "S Right" below builds a left-hand S-bend.
+     *
+     * The fix is a sign flip in sCurvePoints, not a swap here — but it mirrors
+     * the two scurve pieces in apex-parkour.json and everything downstream of
+     * them, which is a call for whoever owns that track. Until then the tiles
+     * stay consistent with the piece rather than with their own names, and the
+     * tube S-bends in the Tubes tab follow the same convention so at least the
+     * whole palette is wrong in one direction. No further S-curve sizes are
+     * added here for the same reason: more tiles is more to re-label later.
+     */
     {
       id: "turn_s_right",
-      label: "S Right",
+      label: "S-bend",
       base: "scurve",
-      params: { curveRadius: 20, curveAngle: 38, curveDir: 1 },
+      params: { curveRadius: 20, curveAngle: 38 },
     },
   ],
   // JUNCTIONS. Every tile is the same handful of plate shapes at different
@@ -5185,63 +5228,39 @@ export const CATEGORY_PRESETS = {
   junctions: [
     {
       id: "junction_split_r",
-      label: "Split R",
+      label: "Split",
       base: "junction_split",
-      params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: 1 },
-    },
-    {
-      id: "junction_split_l",
-      label: "Split L",
-      base: "junction_split",
-      params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: -1 },
+      params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8 },
     },
     {
       id: "junction_split_wide",
       label: "Split wide",
       base: "junction_split",
-      params: { splitAngle: 40, splitLength: 44, splitArm: 34, splitStart: 6, curveDir: 1 },
+      params: { splitAngle: 40, splitLength: 44, splitArm: 34, splitStart: 6 },
     },
     {
       id: "junction_merge_r",
-      label: "Merge R",
+      label: "Merge",
       base: "junction_merge",
-      params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: 1 },
-    },
-    {
-      id: "junction_merge_l",
-      label: "Merge L",
-      base: "junction_merge",
-      params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8, curveDir: -1 },
+      params: { splitAngle: 24, splitLength: 40, splitArm: 30, splitStart: 8 },
     },
     {
       id: "junction_y_r",
-      label: "Y fork R",
+      label: "Y fork",
       base: "junction_y",
-      params: { forkAngle: 30, forkArm: 34, forkThroat: 6, curveDir: 1 },
-    },
-    {
-      id: "junction_y_l",
-      label: "Y fork L",
-      base: "junction_y",
-      params: { forkAngle: 30, forkArm: 34, forkThroat: 6, curveDir: -1 },
+      params: { forkAngle: 30, forkArm: 34, forkThroat: 6 },
     },
     {
       id: "junction_y_wide",
       label: "Y fork wide",
       base: "junction_y",
-      params: { forkAngle: 55, forkArm: 30, forkThroat: 4, curveDir: 1 },
+      params: { forkAngle: 55, forkArm: 30, forkThroat: 4 },
     },
     {
       id: "junction_t_r",
-      label: "T right",
+      label: "T",
       base: "junction_t",
-      params: { junctionLength: 34, junctionStub: 24, junctionFillet: 6, curveDir: 1 },
-    },
-    {
-      id: "junction_t_l",
-      label: "T left",
-      base: "junction_t",
-      params: { junctionLength: 34, junctionStub: 24, junctionFillet: 6, curveDir: -1 },
+      params: { junctionLength: 34, junctionStub: 24, junctionFillet: 6 },
     },
     {
       id: "junction_cross_std",
@@ -5273,31 +5292,25 @@ export const CATEGORY_PRESETS = {
       id: "looping_full",
       label: "Looping",
       base: "loop",
-      params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopLean: 0, loopTighten: 0, loopHalf: "full", curveDir: 1 },
+      params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopLean: 0, loopTighten: 0, loopHalf: "full" },
     },
     {
       id: "loop_half_right",
       label: "Ring half (in)",
       base: "loop_half",
-      params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopHalf: "in", curveDir: 1 },
+      params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopHalf: "in" },
     },
     {
       id: "loop_half_left",
       label: "Ring half (out)",
       base: "loop_half",
-      params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopHalf: "out", curveDir: 1 },
+      params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopHalf: "out" },
     },
     {
       id: "loop_spiral_right",
-      label: "Spiral ramp (R)",
+      label: "Spiral ramp",
       base: "loop_spiral",
-      params: { loopSpiralRadius: 12, loopSpiralTurns: 1, loopSpiralRise: 32, curveDir: 1 },
-    },
-    {
-      id: "loop_spiral_left",
-      label: "Spiral ramp (L)",
-      base: "loop_spiral",
-      params: { loopSpiralRadius: 12, loopSpiralTurns: 1, loopSpiralRise: 32, curveDir: -1 },
+      params: { loopSpiralRadius: 12, loopSpiralTurns: 1, loopSpiralRise: 32 },
     },
     {
       id: "quarterpipe_full",
@@ -5488,6 +5501,8 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   const statusEl = document.getElementById("road-status");
   const selectedNameEl = document.getElementById("selected-piece-name");
   const selectedCatEl = document.getElementById("selected-piece-cat");
+  const handBtn = document.getElementById("hand-toggle");
+  const handVal = document.getElementById("hand-toggle-val");
   const edgesBtn = document.getElementById("edges-toggle");
   const collapseTab = document.getElementById("palette-collapse-tab");
   const palette = document.getElementById("palette");
@@ -5755,10 +5770,32 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     return PALETTE_CATEGORIES.find((c) => c.id === id)?.label ?? "";
   }
 
+  /**
+   * The hand chip, and the hand suffix on the strip.
+   *
+   * The suffix is the whole reason dropping the L tiles is safe: the tile no
+   * longer names a direction, so this is the only place that says which way the
+   * thing you are about to place will go (the ghost shows it, but the strip is
+   * where you read it). It appears ONLY on pieces the hand does anything to —
+   * "Straight L" would be a lie.
+   */
+  function refreshHand() {
+    const on = !activePropId && !activeMoverId && builder.activePieceHanded;
+    if (handVal) handVal.textContent = builder.hand >= 0 ? "R" : "L";
+    if (handBtn) {
+      handBtn.classList.toggle("inert", !on);
+      handBtn.title = on
+        ? `Corners go ${builder.hand >= 0 ? "right" : "left"} — press R to flip`
+        : "This piece has no left or right";
+    }
+    return on ? (builder.hand >= 0 ? " R" : " L") : "";
+  }
+
   function refreshStatus() {
     // Set before the branches below, so the strip is right in every mode —
     // including the prop/mover early return.
-    if (selectedNameEl) selectedNameEl.textContent = activeLabel();
+    const hand = refreshHand();
+    if (selectedNameEl) selectedNameEl.textContent = activeLabel() + hand;
     if (selectedCatEl) selectedCatEl.textContent = activeCategoryLabel();
 
     // A prop/mover brush is a MODE, and the status line is the only thing that
@@ -5773,11 +5810,12 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     }
     if (statusEl) {
       const label = activeLabel();
-      const dir = builder.activeParams.curveDir >= 0 ? "R" : "L";
-      const curveIds = new Set([
-        "curve", "banked", "scurve", "spiral", "loop_half", "loop_spiral",
-        "junction_split", "junction_merge", "junction_y", "junction_t",
-      ]);
+      // ONE SOURCE FOR "IS THIS PIECE HANDED", shared with the hand chip and the
+      // strip. This used to be a hand-typed list of ten ids that had drifted:
+      // it missed the whole tube family, the bank ramps, wallride and the loop,
+      // so the status line silently stopped reporting the direction for half the
+      // pieces it applies to. isHandedPiece is derived and covered by a test.
+      const dir = builder.hand >= 0 ? "R" : "L";
       const chainInfo =
         builder.chainCount > 1 ? ` · chain ${builder.activeChainIndex + 1}/${builder.chainCount}` : "";
       // A MULTI-SELECTION CHANGES WHAT THE KEYS DO — Del, Enter, L, U and the
@@ -5823,7 +5861,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       const open = builder.openBranchCount;
       const branchInfo = open && !builder.ghostOnBranch ? ` · ${open} open branch${open > 1 ? "es" : ""} (K)` : "";
       statusEl.textContent = `${builder.count} placed · ${label}${
-        curveIds.has(builder.activePieceId) ? " (" + dir + ")" : ""
+        builder.activePieceHanded ? " (" + dir + ")" : ""
       }${sizeInfo}${chainInfo}${selInfo}${endInfo}${branchInfo} · ${gizmoHint}`;
     }
     syncTiles();
@@ -5854,6 +5892,11 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       catBtns.set(cat.id, btn);
     }
   }
+
+  handBtn?.addEventListener("click", () => {
+    builder.flip();
+    refreshStatus();
+  });
 
   edgesBtn?.addEventListener("click", () => {
     guardrailParams.enabled = !guardrailParams.enabled;
