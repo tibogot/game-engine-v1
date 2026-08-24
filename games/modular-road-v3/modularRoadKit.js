@@ -1962,11 +1962,34 @@ function rotateY(v, ang) {
  *  guardrail silhouettes show every facet), so curved pieces cap the per-step
  *  turn/roll too. Pass the TOTAL angle the piece sweeps (yaw + roll). */
 const MAX_STEP_ANGLE = THREE.MathUtils.degToRad(1.5);
-function stepsFor(arcLen, totalAngle = 0, minSteps = 2) {
+/**
+ * How many stations to sweep, and `pp.maxStepDeg` is how a piece opts out of the
+ * default density.
+ *
+ * 1.5° EXISTS FOR KERBS. It was chosen because "length-only stepping put ~5° of
+ * pitch per step on a typical slope and the kerbs showed every facet" — a road's
+ * kerb is a narrow ridge running along the piece, so it catches the light on
+ * every crease. The rideable tubes have no kerbs (`noKerb`), and they pay for
+ * that density across a 98-point annulus instead of an 8-point road section.
+ *
+ * MEASURED on a 90° R26 tube, sagitta of the flat it leaves behind:
+ *
+ *     along the sweep  1.5°/step -> 0.22 cm     (faceting radius = centreline, 26 m)
+ *     around the bore  48 segs   -> 1.71 cm     (faceting radius = bore, 8 m)
+ *
+ * The frames are EIGHT TIMES finer than the cross-section they are sweeping, so
+ * the extra stations buy nothing you can see — the profile's own faceting swamps
+ * them. See `def.stepDeg` on the tube family.
+ */
+function stepsFor(arcLen, totalAngle = 0, minSteps = 2, pp = null) {
+  // ONE KNOB, because both terms are over-tight for the same reason. Relaxing
+  // only the angle would leave `arcLen / segLen` (1.6 m stations) setting the
+  // density on anything long and gently curved, which is most of a tube run.
+  const relax = Math.max(1, pp?.stepRelax ?? 1);
   return Math.max(
     minSteps,
-    Math.ceil(arcLen / roadParams.segLen),
-    Math.ceil(Math.abs(totalAngle) / MAX_STEP_ANGLE),
+    Math.ceil(arcLen / (roadParams.segLen * relax)),
+    Math.ceil(Math.abs(totalAngle) / (MAX_STEP_ANGLE * relax)),
   );
 }
 
@@ -1992,7 +2015,9 @@ function straightPoints(pp) {
  *  Kept dense: the SECTION morphs along t, so the sweep needs the stations. */
 function tubeEntryPoints(pp) {
   const L = Math.max(4, pp.tubeEntryLength ?? 26);
-  const n = Math.max(4, Math.ceil(L / roadParams.segLen));
+  // Rolls its whole section from flat road to bore along the way, so it keeps a
+  // floor of 4 stations however far `stepRelax` opens the spacing up.
+  const n = Math.max(4, Math.ceil(L / (roadParams.segLen * Math.max(1, pp.stepRelax ?? 1))));
   const pts = [];
   for (let i = 0; i <= n; i++) pts.push(new V3(0, 0, -L * (i / n)));
   return pts;
@@ -2015,7 +2040,7 @@ function tubeEntryPoints(pp) {
 function tubeLaunchPoints(pp) {
   const L = Math.max(4, pp.tubeEntryLength ?? 26);
   const ang = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.jumpAngle, 0, 80));
-  const n = stepsFor(L, ang, 8);
+  const n = stepsFor(L, ang, 8, pp);
   const ds = L / n;
   const cur = new V3(0, 0, 0);
   const pts = [cur.clone()];
@@ -2084,7 +2109,7 @@ function curvePoints(pp) {
   const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.curveAngle, 1, 180));
   const dir = pp.curveDir >= 0 ? 1 : -1;
   const arc = R * A;
-  const n = stepsFor(arc, A);
+  const n = stepsFor(arc, A, 2, pp);
   const center = new V3(dir * R, 0, 0);
   const radius0 = new V3(-dir * R, 0, 0); // origin - center
   const pts = [];
@@ -2102,7 +2127,7 @@ function slopePoints(pp) {
   // the total direction change through stepsFor — length-only stepping put ~5°
   // of pitch per step on a typical slope and the kerbs showed every facet.
   const swing = 2 * Math.atan((1.5 * Math.abs(H)) / L);
-  const n = stepsFor(L, swing, 8);
+  const n = stepsFor(L, swing, 8, pp);
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const tt = i / n;
@@ -2135,6 +2160,29 @@ function bankOutRoll(t, pp) {
   const dir = pp.curveDir >= 0 ? 1 : -1;
   const a = THREE.MathUtils.degToRad(pp.bankAngle);
   return dir * a * (1 - smoother(t));
+}
+
+/**
+ * CHICANE: the lean crosses sides without the road ever flattening out.
+ *
+ * The only way to get from a right-hand banked turn to a left-hand one was
+ * Bank out → Bank in: settle the deck to flat, then roll it up the other way.
+ * That is two pieces and, more to the point, a stretch of FLAT ROAD in the
+ * middle of what should be one continuous change of direction — the car
+ * un-banks, drives level, and re-banks. This is the same swap as one motion.
+ *
+ * Same easing as the other two so it seams with them: `smoother` is C2, so the
+ * roll rate is zero at both ends and a chicane butts onto a held-bank turn with
+ * no crease.
+ */
+function bankSwapRoll(t, pp) {
+  const dir = pp.curveDir >= 0 ? 1 : -1;
+  const a = THREE.MathUtils.degToRad(pp.bankAngle);
+  return dir * a * (1 - 2 * smoother(t)); // +a → −a
+}
+/** Curl fraction for the chicane — unsigned, so it dips to flat at the swap. */
+function bankCurlSwap(t) {
+  return Math.abs(1 - 2 * smoother(t));
 }
 
 /*
@@ -2214,6 +2262,42 @@ function bankOutPoints(pp) {
 /** Held-bank straight: constant lean, centreline held at the full raise. */
 function bankHoldPoints(pp) {
   return straightLinePoints(pp.straightLength, bankRaise(pp));
+}
+
+/**
+ * Chicane centreline — HELD AT THE FULL RAISE, not dipped to the plane.
+ *
+ * The obvious reading of rule 1 (centreline rises by hw·sin lean) says the raise
+ * should follow the lean MAGNITUDE, dipping to the plane where the deck passes
+ * through flat. It should not, and the reason is that |lean| has a corner where
+ * the lean crosses zero: raise ∝ |1 − 2·smoother(t)| is a V, and the centreline
+ * inherits it. MEASURED at the kit's 22° over a 44 m ramp (tools/bankChicaneTest.mjs),
+ * that V bends the centreline through 29.2° at the crossing — a crease you can
+ * see and a bump the car hits, in the one spot the whole piece exists to smooth
+ * out. The shipped centreline measures 0.000°.
+ *
+ * Holding the centreline flat at `bankRaise` removes every absolute value from
+ * the geometry: the deck simply rotates about its own axis and the two edges
+ * trade places, each tracing hw·sin(θ(t)) — smooth, because θ is smooth and
+ * nothing takes its magnitude. It also matches the neighbours exactly, since a
+ * bank-in ends at the full raise and a held-bank turn sits at it.
+ *
+ * The cost is that the low edge lifts to the raise at the crossover instead of
+ * staying on the plane. That is the correct trade: the deck is momentarily flat
+ * there, so there is no "low edge" to keep down, and rule 1 has nothing to say.
+ *
+ * Stations rather than the two-point straight, because the ROLL varies along it
+ * — see the warning on straightLinePoints.
+ */
+function bankSwapPoints(pp) {
+  const L = bankRampLength(pp);
+  const bank = THREE.MathUtils.degToRad(Math.abs(pp.bankAngle));
+  // It rolls through twice the angle (+a → −a), so it earns twice the stations.
+  const n = stepsFor(L, 2 * bank, 12);
+  const y = bankRaise(pp);
+  const pts = [];
+  for (let i = 0; i <= n; i++) pts.push(new V3(0, y, -L * (i / n)));
+  return pts;
 }
 
 /** Held-bank turn: flat arc at the full raise, constant lean (Short/Long Turn). */
@@ -2453,7 +2537,7 @@ function sCurvePoints(pp) {
   const R = Math.max(2, pp.curveRadius);
   const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.curveAngle, 1, 120));
   const dir = pp.curveDir >= 0 ? 1 : -1;
-  const half = stepsFor(R * A, A);
+  const half = stepsFor(R * A, A, 2, pp);
   const ds = (R * A) / half;
   const dth = A / half;
   const pts = [new V3(0, 0, 0)];
@@ -2479,7 +2563,7 @@ function crestPoints(pp) {
   // sin² profile: peak grade π·H/L, and the pitch swings up-over-down-out —
   // ~4× the peak angle of total direction change. Cap per-step bend via stepsFor.
   const swing = 4 * Math.atan((Math.PI * Math.abs(H)) / L);
-  const n = stepsFor(L, swing, 8);
+  const n = stepsFor(L, swing, 8, pp);
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const tt = i / n;
@@ -2661,7 +2745,7 @@ function loopSpiralPoints(pp) {
   const center = new V3(dir * R, 0, 0); // turn centre (origin starts on the rim)
   const radius0 = new V3(-dir * R, 0, 0); // origin - center
   const smooth = (u) => u * u * (3 - 2 * u); // ease climb in/out → flat ends
-  const n = stepsFor(R * A, A, 64); // A can exceed 540° — angle cap must apply
+  const n = stepsFor(R * A, A, 64, pp); // A can exceed 540° — angle cap must apply
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const u = i / n;
@@ -3555,6 +3639,17 @@ export const PIECE_CATALOG = [
     sockets: bankedClimbSockets,
   },
   {
+    id: "bankswap",
+    label: "Bank chicane",
+    hint: "Lean crosses sides without flattening — joins opposite banked turns",
+    swatch: "#8e6fc0",
+    key: "",
+    points: bankSwapPoints,
+    roll: bankSwapRoll,
+    curl: bankCurlSwap,
+    sockets: bankRampSockets,
+  },
+  {
     id: "banktilt",
     label: "Banked straight",
     hint: "Held lean (straight) — chain freely",
@@ -4289,6 +4384,7 @@ const _END_TANGENTS = {
   twist: flatEndTangents,
   banktilt: flatEndTangents,
   bankin: flatEndTangents,
+  bankswap: flatEndTangents,
   bankout: flatEndTangents,
   slope: flatEndTangents,
   crest: flatEndTangents,
@@ -4318,6 +4414,48 @@ for (const def of PIECE_CATALOG) {
   if (fn) def.endTangents = fn;
 }
 
+/*
+ * TUBE TESSELLATION — the rideable-tube family sweeps a 98-point annulus, and
+ * it was doing it at the density chosen for an 8-point road section.
+ *
+ * 1.5°/station exists for KERBS: a road's kerb is a narrow ridge running along
+ * the piece, so it catches the light on every crease, and the comment on
+ * MAX_STEP_ANGLE records that coarser stepping "showed every facet". Tubes have
+ * no kerbs (`noKerb`) and pay that density across twelve times the section.
+ *
+ * MEASURED on a 90° R26 tube, the sagitta of the flat each step leaves behind:
+ *
+ *     along the sweep   1.5°/step   0.22 cm    (faceting radius = centreline, 26 m)
+ *     around the bore   48 segs     1.71 cm    (faceting radius = bore, 8 m)
+ *
+ * The frames are EIGHT TIMES finer than the cross-section they carry, so the
+ * extra stations are invisible under the profile's own faceting. At relax 2.5
+ * the sweep contributes 1.4 cm — still under what the section already costs —
+ * and a tube corner drops from 61 stations to 24.
+ *
+ * NOT THE OUTER SHELL. The obvious cut is the outside of the tube, which is half
+ * the triangles and "nobody looks at" — except you can LAND on top of a tube and
+ * drive along it, which the kit says out loud ("so a car can still land on the
+ * OUTSIDE of a tube"). Decimating the profile would coarsen that roof ACROSS the
+ * car's width, where 24 segments means 6.8 cm steps. Relaxing the sweep instead
+ * leaves every cross-section exactly as round as it was and only lengthens the
+ * spacing along the direction of travel — the direction a wheelbase smooths out.
+ * tools/tubeDensityTest.mjs drives the roof to check that claim rather than
+ * asserting it.
+ */
+for (const id of [
+  "tube", "tube_curve", "tube_in", "tube_out",
+  "half_tube", "half_tube_curve", "half_tube_in", "half_tube_out",
+  "half_pipe", "half_pipe_curve",
+  "tube_slope", "tube_crest", "tube_spiral",
+  "half_tube_slope", "half_tube_crest", "half_tube_spiral",
+  "half_pipe_slope", "tube_scurve", "half_tube_scurve",
+  "tube_launch", "half_tube_launch", "tube_reduce", "half_tube_reduce",
+]) {
+  const def = PIECE_BY_ID.get(id);
+  if (def) def.stepRelax = 2.5;
+}
+
 /**
  * HANDED PIECES — the ones `curveDir` actually does something to.
  *
@@ -4338,7 +4476,7 @@ for (const def of PIECE_CATALOG) {
  */
 const HANDED_PIECES = new Set([
   "curve", "scurve", "spiral",
-  "banked", "banked_climb", "banktilt", "bankin", "bankout", "wallride",
+  "banked", "banked_climb", "banktilt", "bankin", "bankout", "bankswap", "wallride",
   "loop", "loop_half", "loop_spiral",
   "tunnel_curve", "channel_curve",
   "tube_curve", "half_tube_curve", "half_pipe_curve",
@@ -4697,7 +4835,24 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   /** Both partial modes skip everything that is neither deck nor mirror. */
   const skipExtras = deckOnly || mirrorOnly;
 
-  const points = def.points(pp);
+  /*
+   * TESSELLATION DENSITY IS A PROPERTY OF THE PIECE, not of the track.
+   *
+   * Injected here rather than living in `pp` so it never lands in a save file:
+   * how finely a tube is meshed is a rendering decision that should follow the
+   * kit, and a track saved today must pick up a better answer tomorrow rather
+   * than freezing today's. (It also keeps `stepRelax` out of the thumbnail cache
+   * signature and out of every piece's params snapshot.)
+   *
+   * Safe to change because it does NOT move connectors: every points function
+   * computes its END POSITION analytically from the piece's own parameters, and
+   * applyEndTangents snaps the end frames to exact analytic tangents — neither
+   * depends on how many stations sit in between. Verified in
+   * tools/tubeDensityTest.mjs, which rebuilds at several densities and compares
+   * exits to 1e-9.
+   */
+  const ppSteps = def.stepRelax ? { ...pp, stepRelax: def.stepRelax } : pp;
+  const points = def.points(ppSteps);
   const frames = computeFrames(points, _up);
   // Snap end frames to exact analytic tangents (before roll, so banking rolls
   // about the corrected tangent) so connectors hit their labelled angle exactly.

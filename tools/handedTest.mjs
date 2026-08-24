@@ -81,8 +81,24 @@ const named = tiles.filter((t) => isHandedPiece(t.base)
 ok(named.length === 0, "no handed tile names a direction in its label",
   named.map((t) => t.label).join(", ") || "checked every handed tile");
 
-// The pairs really are gone, and the count is the one that was promised.
-ok(tiles.length === 148, "the palette is 148 tiles", `was 195 — 47 mirror twins dropped`);
+/*
+ * THE PAIRS ARE GONE — asserted as the invariant, not as a tile count.
+ *
+ * This was `tiles.length === 148`, which broke the moment the chicane added
+ * three. A magic total tells you the palette CHANGED; it does not tell you the
+ * thing worth protecting, which is that no two tiles differ only by a hand.
+ */
+const pairKey = (t) => `${t.base}|` + JSON.stringify(
+  Object.fromEntries(Object.entries(t.params).filter(([k]) => k !== "curveDir").sort()));
+const seen = new Map();
+const twins = [];
+for (const t of tiles) {
+  const k = pairKey(t);
+  if (seen.has(k)) twins.push(`${seen.get(k)} + ${t.id}`);
+  else seen.set(k, t.id);
+}
+ok(twins.length === 0, "no two tiles differ only by a hand",
+  twins.join(", ") || `${tiles.length} tiles, ${seen.size} distinct shapes`);
 const perTab = Object.entries(CATEGORY_PRESETS).map(([c, t]) => `${c} ${t.length}`).join("  ");
 console.log(`   ${perTab}`);
 

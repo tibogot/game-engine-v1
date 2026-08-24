@@ -4215,6 +4215,7 @@ const PIECE_TO_CATEGORY = {
   banktilt: "banked",
   wallride: "banked",
   bankin: "banked",
+  bankswap: "banked",
   bankout: "banked",
   loop: "loop",
   loop_half: "loop",
@@ -4353,6 +4354,40 @@ export const CATEGORY_PRESETS = {
       label: "Drop Turn",
       base: "banked_climb",
       params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, bankRise: -14 },
+    },
+    /*
+     * THE CHICANE. Right-hand banked turn → this → left-hand banked turn, with
+     * the deck never passing through flat road.
+     *
+     * The alternative was Bank down → Bank up: settle the lean to nothing, drive
+     * a stretch of level road, then roll it up the other way. Two pieces, twice
+     * the length, and a flat spot in the middle of what should read as one
+     * continuous change of direction.
+     *
+     * Sized at 44 m like the other transitions, but it does twice the work in
+     * that length — 22° to −22° instead of 22° to 0 — so the roll rate is double
+     * a Bank up. That is the piece's character rather than a defect: a chicane
+     * is a flick. The 12° tile is there for when it should not be.
+     */
+    {
+      id: "bank_chicane",
+      label: "Chicane",
+      base: "bankswap",
+      params: { bankRampLength: 44, bankAngle: 22 },
+    },
+    {
+      id: "bank_chicane_gentle",
+      label: "Chicane 12°",
+      base: "bankswap",
+      params: { bankRampLength: 40, bankAngle: 12 },
+    },
+    {
+      id: "bank_chicane_steep",
+      label: "Chicane 38°",
+      base: "bankswap",
+      // LONGER, for the same reason the 38° transitions are: rolling 76° of
+      // total swap in 44 m is a snap, not a lean.
+      params: { bankRampLength: 64, bankAngle: 38 },
     },
     // QUICK TRANSITIONS. bankRampLength 44 is sized so the curl reads as a shape
     // developing, and that is right for a sweeper — but it also meant a section

@@ -325,12 +325,32 @@ for (const [id, extra] of [["tube_launch", {}], ["half_tube_launch", { halfTubeS
     ok(near(got, ang, 1e-4), `${id} @ ${ang}°: exit pitch is exact`, `${got.toFixed(6)}°`);
     ok(c.pos.y > 0, `${id} @ ${ang}°: the mouth is above the bore`, `y=${c.pos.y.toFixed(2)}`);
   }
-  // The bore end must still be a bore — this is a tube EXIT that happens to
-  // climb, so its t = 1 section is the tube's, exactly as on tube_out.
-  const flat = build(id.replace("launch", "out"), { tubeEntryLength: 26, tubeRadius: 8, tubeWall: 0.6, ...extra });
-  const lift = build(id, { tubeEntryLength: 26, jumpAngle: 18, tubeRadius: 8, tubeWall: 0.6, ...extra });
-  ok(flat.geometry.getAttribute("position").count === lift.geometry.getAttribute("position").count,
-    `${id}: same section count as the flat exit it is built from`);
+  /*
+   * The bore end must still be a bore — this is a tube EXIT that happens to
+   * climb, so its t = 1 section is the tube's, exactly as on tube_out.
+   *
+   * COMPARE THE SECTION, NOT THE VERTEX COUNT. This used to compare total
+   * vertices, which conflates the cross-section with how many stations the piece
+   * happens to sweep — and those two decoupled the moment `stepRelax` arrived:
+   * `tubeEntryPoints` and `tubeLaunchPoints` size their run differently, so the
+   * launch came out one station longer and a test about SEAMS started failing
+   * over tessellation. The seam only cares that both sweep the same outline.
+   */
+  const outId = id.replace("launch", "out");
+  const params = { ...DEF, tubeEntryLength: 26, tubeRadius: 8, tubeWall: 0.6, ...extra };
+  const flatSec = PIECE_BY_ID.get(outId).profile(params, rp);
+  const liftSec = PIECE_BY_ID.get(id).profile(params, rp);
+  let worst = 0;
+  const same = flatSec.pts.length === liftSec.pts.length;
+  if (same) {
+    for (let i = 0; i < flatSec.pts.length; i++) {
+      worst = Math.max(worst,
+        Math.abs(flatSec.pts[i].x - liftSec.pts[i].x),
+        Math.abs(flatSec.pts[i].y - liftSec.pts[i].y));
+    }
+  }
+  ok(same && worst < 1e-12, `${id}: sweeps the same bore section as the flat exit`,
+    `${liftSec.pts.length} pts, worst Δ=${worst.toExponential(2)} m`);
 }
 
 /* ----------------------------------------------------------------------- */
