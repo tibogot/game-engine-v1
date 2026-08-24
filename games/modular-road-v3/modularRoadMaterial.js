@@ -27,6 +27,8 @@ import {
   mx_noise_float,
   mx_fractal_noise_float,
   screenUV,
+  materialColor,
+  materialEmissive,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import {
@@ -1056,6 +1058,53 @@ export function createDecorMaterial() {
     roughness: 0.62,
     metalness: 0.04,
     side: THREE.DoubleSide,
+  });
+}
+
+/** Matte frame for the start_new extruded gantry. */
+export function createStartGateBodyMaterial() {
+  const m = new THREE.MeshStandardNodeMaterial({
+    color: new THREE.Color(0x0a0c10),
+    roughness: 0.55,
+    metalness: 0.35,
+  });
+  m.colorNode = materialColor;
+  m.userData.batchKey = "startGateBody";
+  return m;
+}
+
+/** Emissive start gantry stroke — selective bloom via MRT. */
+export function createStartGateGlowMaterial() {
+  const m = new THREE.MeshStandardNodeMaterial({
+    color: new THREE.Color(0x3dff8a),
+    roughness: 0.3,
+    metalness: 0.05,
+    emissive: new THREE.Color(0x3dff8a),
+    emissiveIntensity: 5.5,
+  });
+  m.colorNode = materialColor;
+  applyBloomMRT(m, materialEmissive);
+  m.userData.bloom = true;
+  m.userData.batchKey = "startGateGlow";
+  return m;
+}
+
+/** Plain materials for palette thumbnail bakes (no MRT — emissive reads directly). */
+export function createStartGateBodyMaterialForThumb() {
+  return new THREE.MeshStandardMaterial({
+    color: 0x0a0c10,
+    roughness: 0.55,
+    metalness: 0.35,
+  });
+}
+
+export function createStartGateGlowMaterialForThumb() {
+  return new THREE.MeshStandardMaterial({
+    color: 0x3dff8a,
+    emissive: 0x3dff8a,
+    emissiveIntensity: 3,
+    roughness: 0.3,
+    metalness: 0.05,
   });
 }
 

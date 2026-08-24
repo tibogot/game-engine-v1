@@ -46,7 +46,7 @@ const THUMB_DEFAULTS = { ...pieceParams };
  *
  * @param {object} o
  * @param {THREE.WebGPURenderer} o.renderer
- * @param {{road:THREE.Material, rail?:THREE.Material, shell?:THREE.Material, decor?:THREE.Material, glass?:THREE.Material, tube?:THREE.Material}} o.materials
+ * @param {{road:THREE.Material, rail?:THREE.Material, shell?:THREE.Material, decor?:THREE.Material, decorGate?:THREE.Material, decorGlow?:THREE.Material, glass?:THREE.Material, tube?:THREE.Material}} o.materials
  * @param {{key:string, pieceId?:string, params?:object, make?:()=>THREE.Object3D}[]} o.items
  * @param {THREE.Texture} [o.environment] optional IBL (the main scene's PMREM) for correct lighting
  * @param {number} [o.size=128]
@@ -149,6 +149,8 @@ export async function bakeRoadThumbnails({
       addMesh(built.railGeometry, materials.rail);
       addMesh(built.shellGeometry, materials.shell);
       addMesh(built.decorGeometry, materials.decor);
+      addMesh(built.decorGateGeometry, materials.decorGate);
+      addMesh(built.decorGlowGeometry, materials.decorGlow);
       addMesh(built.glassGeometry, materials.glass);
     }
     return group.children.length > 0;

@@ -187,6 +187,8 @@ export class ModularRoadBuilder {
    * @param {THREE.Material} [o.railMaterial] shared guardrail material
    * @param {THREE.Material} [o.shellMaterial] shared tunnel-shell material
    * @param {THREE.Material} [o.decorMaterial] start/finish/checkpoint decor
+   * @param {THREE.Material} [o.decorGateMaterial] start_new gantry frame
+   * @param {THREE.Material} [o.decorGlowMaterial] start_new gantry bloom stroke
    * @param {THREE.Material} [o.glassMaterial] shared pane material (glass road)
    * @param {THREE.Material} [o.tubeMaterial] cheap dedicated shader for rideable tubes
    * @param {THREE.Camera} [o.camera] for free-placement gizmo
@@ -201,6 +203,8 @@ export class ModularRoadBuilder {
     railMaterial = null,
     shellMaterial = null,
     decorMaterial = null,
+    decorGateMaterial = null,
+    decorGlowMaterial = null,
     glassMaterial = null,
     tubeMaterial = null,
     camera = null,
@@ -214,6 +218,8 @@ export class ModularRoadBuilder {
     this.railMaterial = railMaterial;
     this.shellMaterial = shellMaterial;
     this.decorMaterial = decorMaterial;
+    this.decorGateMaterial = decorGateMaterial;
+    this.decorGlowMaterial = decorGlowMaterial;
     this.glassMaterial = glassMaterial;
     this.tubeMaterial = tubeMaterial;
     this.orbit = orbit;
@@ -277,7 +283,7 @@ export class ModularRoadBuilder {
      * when it was reopened.
      */
     this.hand = 1;
-    /** @type {{id:string, chainId:number, pp:object, mesh:THREE.Mesh, railMesh:THREE.Mesh|null, shellMesh:THREE.Mesh|null, decorMesh:THREE.Mesh|null, glassMesh:THREE.Mesh|null, connectorIn:THREE.Matrix4, connectorOut:THREE.Matrix4}[]} */
+    /** @type {{id:string, chainId:number, pp:object, mesh:THREE.Mesh, railMesh:THREE.Mesh|null, shellMesh:THREE.Mesh|null, decorMesh:THREE.Mesh|null, decorGateMesh:THREE.Mesh|null, decorGlowMesh:THREE.Mesh|null, glassMesh:THREE.Mesh|null, connectorIn:THREE.Matrix4, connectorOut:THREE.Matrix4}[]} */
     this.pieces = [];
 
     /**
@@ -2327,7 +2333,7 @@ export class ModularRoadBuilder {
   setInstancing(on) {
     this.instancingEnabled = !!on;
     for (const p of this.pieces) {
-      for (const m of [p.mesh, p.railMesh, p.shellMesh, p.decorMesh, p.glassMesh]) {
+      for (const m of [p.mesh, p.railMesh, p.shellMesh, p.decorMesh, p.decorGateMesh, p.decorGlowMesh, p.glassMesh]) {
         if (m) m.visible = m.userData.noRender ? true : !this.instancingEnabled;
       }
     }
@@ -2377,6 +2383,8 @@ export class ModularRoadBuilder {
       add(p.railMesh, this.railMaterial, "rail");
       add(p.shellMesh, this.shellMaterial, "shell");
       add(p.decorMesh, this.decorMaterial, "decor");
+      add(p.decorGateMesh, this.decorGateMaterial, "decorGate");
+      add(p.decorGlowMesh, this.decorGlowMaterial, "decorGlow");
       add(p.glassMesh, this.glassMaterial, "glass");
     }
     // ── REUSE THE BATCHES, REWRITE THE MATRICES ──────────────────────────────
@@ -2489,6 +2497,23 @@ export class ModularRoadBuilder {
         ? this._makeMesh(built.decorGeometry, this.decorMaterial, built.world)
         : null;
     if (decorMesh) decorMesh.castShadow = false; // flat markings don't cast
+    const decorGateMesh =
+      built.decorGateGeometry && this.decorGateMaterial
+        ? this._makeMesh(built.decorGateGeometry, this.decorGateMaterial, built.world)
+        : null;
+    if (decorGateMesh) {
+      decorGateMesh.castShadow = true;
+      decorGateMesh.receiveShadow = false;
+    }
+    const decorGlowMesh =
+      built.decorGlowGeometry && this.decorGlowMaterial
+        ? this._makeMesh(built.decorGlowGeometry, this.decorGlowMaterial, built.world)
+        : null;
+    if (decorGlowMesh) {
+      decorGlowMesh.castShadow = false;
+      decorGlowMesh.receiveShadow = false;
+      decorGlowMesh.userData.isGlow = true;
+    }
     const glassMesh =
       built.glassGeometry && this.glassMaterial
         ? this._makeMesh(built.glassGeometry, this.glassMaterial, built.world)
@@ -2509,6 +2534,8 @@ export class ModularRoadBuilder {
       railMesh,
       shellMesh,
       decorMesh,
+      decorGateMesh,
+      decorGlowMesh,
       glassMesh,
       connectorIn: connectorIn.clone(),
       connectorOut: built.connectorOut.clone(),
@@ -2527,7 +2554,7 @@ export class ModularRoadBuilder {
       /** @type {THREE.Matrix4|null} absolute entry seam while detached. */
       pinnedIn: null,
     };
-    for (const m of [mesh, railMesh, shellMesh, decorMesh, glassMesh]) {
+    for (const m of [mesh, railMesh, shellMesh, decorMesh, decorGateMesh, decorGlowMesh, glassMesh]) {
       if (m) m.userData.piece = piece;
     }
     this._applyPiecePresence(piece);
@@ -3062,6 +3089,14 @@ export class ModularRoadBuilder {
     if (p.decorMesh) {
       this.root.remove(p.decorMesh);
       p.decorMesh.geometry.dispose();
+    }
+    if (p.decorGateMesh) {
+      this.root.remove(p.decorGateMesh);
+      p.decorGateMesh.geometry.dispose();
+    }
+    if (p.decorGlowMesh) {
+      this.root.remove(p.decorGlowMesh);
+      p.decorGlowMesh.geometry.dispose();
     }
     if (p.glassMesh) {
       this.root.remove(p.glassMesh);
@@ -3680,7 +3715,7 @@ export class ModularRoadBuilder {
     const world = _POSE.copy(conn).multiply(b.fromConn);
     p.mesh.matrix.copy(world);
     p.mesh.matrixWorldNeedsUpdate = true;
-    for (const m of [p.railMesh, p.shellMesh, p.decorMesh, p.glassMesh]) {
+    for (const m of [p.railMesh, p.shellMesh, p.decorMesh, p.decorGateMesh, p.decorGlowMesh, p.glassMesh]) {
       if (!m) continue;
       m.matrix.copy(world);
       m.matrixWorldNeedsUpdate = true;
@@ -3767,6 +3802,41 @@ export class ModularRoadBuilder {
       this.root.remove(p.decorMesh);
       p.decorMesh.geometry.dispose();
       p.decorMesh = null;
+    }
+
+    if (built.decorGateGeometry && this.decorGateMaterial) {
+      if (p.decorGateMesh) {
+        p.decorGateMesh.geometry.dispose();
+        p.decorGateMesh.geometry = built.decorGateGeometry;
+        p.decorGateMesh.matrix.copy(built.world);
+        p.decorGateMesh.matrixWorldNeedsUpdate = true;
+      } else {
+        p.decorGateMesh = this._makeMesh(built.decorGateGeometry, this.decorGateMaterial, built.world);
+        p.decorGateMesh.castShadow = true;
+        p.decorGateMesh.receiveShadow = false;
+      }
+    } else if (p.decorGateMesh) {
+      this.root.remove(p.decorGateMesh);
+      p.decorGateMesh.geometry.dispose();
+      p.decorGateMesh = null;
+    }
+
+    if (built.decorGlowGeometry && this.decorGlowMaterial) {
+      if (p.decorGlowMesh) {
+        p.decorGlowMesh.geometry.dispose();
+        p.decorGlowMesh.geometry = built.decorGlowGeometry;
+        p.decorGlowMesh.matrix.copy(built.world);
+        p.decorGlowMesh.matrixWorldNeedsUpdate = true;
+      } else {
+        p.decorGlowMesh = this._makeMesh(built.decorGlowGeometry, this.decorGlowMaterial, built.world);
+        p.decorGlowMesh.castShadow = false;
+        p.decorGlowMesh.receiveShadow = false;
+        p.decorGlowMesh.userData.isGlow = true;
+      }
+    } else if (p.decorGlowMesh) {
+      this.root.remove(p.decorGlowMesh);
+      p.decorGlowMesh.geometry.dispose();
+      p.decorGlowMesh = null;
     }
   }
 
@@ -4152,6 +4222,7 @@ const PIECE_TO_CATEGORY = {
   quarterpipe: "loop",
   quarterpipe_down: "loop",
   start: "game",
+  start_new: "game",
   checkpoint: "game",
   finish: "game",
   junction_split: "junctions",
@@ -4163,10 +4234,10 @@ const PIECE_TO_CATEGORY = {
 };
 
 export const PALETTE_CATEGORIES = [
+  { id: "game", label: "Game" },
   { id: "straight", label: "Straight" },
   { id: "turns", label: "Turns" },
   { id: "junctions", label: "Junctions" },
-  { id: "game", label: "Game" },
   { id: "ramps", label: "Ramps" },
   { id: "slopes", label: "Slopes" },
   { id: "banked", label: "Banked" },
@@ -5512,7 +5583,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   /** @type {Map<string, HTMLButtonElement>} */
   const catBtns = new Map();
 
-  let activeCategory = "straight";
+  let activeCategory = "game";
   let activePropId = null;
   let activeMoverId = null;
   let activePresetId = null;

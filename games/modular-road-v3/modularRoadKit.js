@@ -8,6 +8,7 @@ import {
   buildRailCollisionAlongPath,
   buildMirroredRailAlongPath,
 } from "./modularRoadRail.js";
+import { buildStartNewGateGeometries } from "./modularRoadStartGate.js";
 
 /**
  * Modular Road kit — parametric track pieces built by sweeping a single shared
@@ -134,6 +135,12 @@ export const pieceParams = {
   loopSpiralRise: 32, // total height climbed over the helix (m)
   // Game line pieces (start / checkpoint / finish):
   gameLineLength: 16,
+  /** Longer stub on start_new (rounded terminus + gantry). */
+  gameStartStub: 14,
+  /** How far past the nose diameter the start line + gantry sit (m). */
+  gameStartLineOffset: 6,
+  /** Car spawn sits this many metres before the start line on start_new. */
+  gameStartSpawnBackset: 4,
   // Twist / barrel roll (straight centreline that rolls):
   twistLength: 26,
   twistTurns: 1, // full 360° rolls over the length
@@ -1544,6 +1551,12 @@ function roundedEndSockets(pp) {
     exitPos: new V3(0, 0, -(L + hw)),
     exitDir: new V3(0, 0, -1),
   };
+}
+
+/** Params snapshot for start_new — longer stub by default. */
+function _startNewParams(pp) {
+  const stub = Math.max(4, pp.gameStartStub ?? pp.roundEndLength ?? 14);
+  return pp.roundEndLength === stub ? pp : { ...pp, roundEndLength: stub };
 }
 
 /* ----------------------------------------------------------------------- */
@@ -3646,6 +3659,19 @@ export const PIECE_CATALOG = [
     game: "finish",
   },
   {
+    id: "start_new",
+    label: "Start (new)",
+    hint: "Rounded terminus + neon start gantry at the line",
+    swatch: "#27ae60",
+    key: "",
+    points: (pp) => roundedEndPoints(_startNewParams(pp)),
+    sockets: (pp) => roundedEndSockets(_startNewParams(pp)),
+    geometry: (pp, rp, edges = true) => buildRoundedEndGeometry(_startNewParams(pp), rp, edges, true),
+    railPath: (pp, rp) => roundedEndRailFrames(_startNewParams(pp), rp, true),
+    plain: true,
+    game: "start_new",
+  },
+  {
     id: "quarterpipe",
     label: "Quarter-pipe",
     hint: "Concave ramp curving up to a vertical wall",
@@ -4205,7 +4231,7 @@ export const LATERAL_TILEABLE = new Set([
   "rounded_start", "rounded_end",
   "slope", "link", "crest", "jump", "dive", "gap", "landing", "brow",
   "quarterpipe", "quarterpipe_down",
-  "start", "checkpoint", "finish",
+  "start", "start_new", "checkpoint", "finish",
   "tunnel", "channel",
   "junction_y", "junction_t", "junction_cross",
 ]);
@@ -4268,6 +4294,7 @@ const _END_TANGENTS = {
   crest: flatEndTangents,
   scurve: flatEndTangents,
   start: flatEndTangents,
+  start_new: flatEndTangents,
   checkpoint: flatEndTangents,
   finish: flatEndTangents,
   curve: curveEndTangents,
@@ -4352,6 +4379,48 @@ const _DECO_BLACK = new THREE.Color(0x111111);
 const _DECO_WHITE = new THREE.Color(0xf4f4f4);
 const _DECO_GREY = new THREE.Color(0xd8d8d8);
 const _DECO_YELLOW = new THREE.Color(0xffcc00);
+
+/** Interpolate a transport frame at `dist` metres from the piece entry. */
+function _frameAtArcLength(frames, dist) {
+  if (!frames.length) return frames[0];
+  if (dist <= 0) return frames[0];
+  let acc = 0;
+  for (let i = 1; i < frames.length; i++) {
+    const seg = frames[i].pos.distanceTo(frames[i - 1].pos);
+    if (acc + seg >= dist - 1e-6) {
+      const t = seg > 1e-6 ? (dist - acc) / seg : 0;
+      const pos = frames[i - 1].pos.clone().lerp(frames[i].pos, t);
+      const tangent = frames[i - 1].tangent.clone().lerp(frames[i].tangent, t).normalize();
+      const up = frames[i - 1].up.clone().lerp(frames[i].up, t).normalize();
+      const right = new V3().crossVectors(tangent, up);
+      if (right.lengthSq() < 1e-10) right.crossVectors(new V3(0, 1, 0), tangent);
+      right.normalize();
+      up.crossVectors(right, tangent).normalize();
+      return { pos, tangent, up, right };
+    }
+    acc += seg;
+  }
+  const f = frames[frames.length - 1];
+  return {
+    pos: f.pos.clone(),
+    tangent: f.tangent.clone(),
+    up: f.up.clone(),
+    right: f.right.clone(),
+  };
+}
+
+/** Metres from the piece entry to the start line / gantry on start_new. */
+export function startNewLineDist(pp, hw) {
+  return hw + Math.max(2, pp.gameStartLineOffset ?? pieceParams.gameStartLineOffset ?? 6);
+}
+
+/** Deck markings for start_new — checker at the start line only. */
+function buildStartNewMarkingsGeometry(frames, profileData, pp) {
+  const hw = profileData.hw;
+  const gateFr = _frameAtArcLength(frames, startNewLineDist(pp, hw));
+  const part = _checkerPart(gateFr, hw, 3.2, 8, 2);
+  return _partToGeo(part);
+}
 
 function _deckPt(fr, rx, rz, lift = 0.04) {
   return fr.pos
@@ -4785,13 +4854,24 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
     : buildShellGeometry(def.shell, frames, profileData, pp);
   // Decor is the vertex-coloured overlay mesh: game lines build theirs from the
   // frames, junctions paint their own markings from their outline.
-  const decorGeometry = skipExtras
-    ? null
-    : def.game
-      ? buildGameDecorGeometry(frames, profileData, def.game)
-      : def.decor
-        ? def.decor(pp, rpForProfile)
-        : null;
+  // start_new adds extruded gate body + bloom glow on separate materials.
+  let decorGeometry = null;
+  let decorGateGeometry = null;
+  let decorGlowGeometry = null;
+  if (!skipExtras) {
+    if (def.game === "start_new") {
+      const lineDist = startNewLineDist(pp, profileData.hw);
+      const gateFr = _frameAtArcLength(frames, lineDist);
+      decorGeometry = buildStartNewMarkingsGeometry(frames, profileData, pp);
+      const gate = buildStartNewGateGeometries(gateFr, profileData.hw * 2);
+      decorGateGeometry = gate.body;
+      decorGlowGeometry = gate.glow;
+    } else if (def.game) {
+      decorGeometry = buildGameDecorGeometry(frames, profileData, def.game);
+    } else if (def.decor) {
+      decorGeometry = def.decor(pp, rpForProfile);
+    }
+  }
 
   const f0 = frames[0];
   const fN = frames[frames.length - 1];
@@ -4832,7 +4912,7 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // duplicating every centreline function in here and watching the two drift.
   return {
     def, geometry, deckCollision, railGeometry, railCollision, railMirrorGeometry,
-    shellGeometry, decorGeometry,
+    shellGeometry, decorGeometry, decorGateGeometry, decorGlowGeometry,
     glassGeometry,
     // `matrices` is piece-local — the owner combines it with the piece's world
     // matrix. `template` is SHARED and cached in modularRoadRail.js; never free

@@ -74,6 +74,10 @@ import {
   createGuardrailMaterial,
   createTunnelMaterial,
   createDecorMaterial,
+  createStartGateBodyMaterial,
+  createStartGateGlowMaterial,
+  createStartGateBodyMaterialForThumb,
+  createStartGateGlowMaterialForThumb,
   createRoadGlassMaterial,
   createTubeMaterial,
   readRoadLook,
@@ -87,6 +91,7 @@ import {
   roadParams,
   pieceParams,
   guardrailParams,
+  startNewLineDist,
 } from "./modularRoadKit.js";
 import { bakeRoadThumbnails, createThumbnailSprites } from "./modularRoadThumbnails.js";
 import {
@@ -292,6 +297,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const railMaterial = createGuardrailMaterial();
   const shellMaterial = createTunnelMaterial();
   const decorMaterial = createDecorMaterial();
+  const startGateBodyMaterial = createStartGateBodyMaterial();
+  const startGateGlowMaterial = createStartGateGlowMaterial();
   // Cheap dedicated tube shader — tubes used to ride createRoadMaterial, so
   // every pixel of a bore evaluated the asphalt graph. Same look (inner/outer
   // + neon), FrontSide. Weather rebuilds the ROAD material; this one stays.
@@ -329,6 +336,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     railMaterial,
     shellMaterial,
     decorMaterial,
+    decorGateMaterial: startGateBodyMaterial,
+    decorGlowMaterial: startGateGlowMaterial,
     glassMaterial,
     tubeMaterial,
     camera,
@@ -545,6 +554,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const thumbMaterials = {
     road: roadMaterial, rail: railMaterial, shell: shellMaterial,
     decor: decorMaterial,
+    decorGate: createStartGateBodyMaterialForThumb(),
+    decorGlow: createStartGateGlowMaterialForThumb(),
     tube: tubeMaterial,
     // NOT the live pane material. Transmission composites against a copy of
     // the backdrop, and a thumbnail is rendered into a bare RT with no
@@ -1976,6 +1987,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     { pick: (p) => p.railMesh, mat: () => railMaterial, cast: true },
     { pick: (p) => p.shellMesh, mat: () => shellMaterial, cast: true },
     { pick: (p) => p.decorMesh, mat: () => decorMaterial, cast: false },
+    { pick: (p) => p.decorGateMesh, mat: () => startGateBodyMaterial, cast: true },
+    { pick: (p) => p.decorGlowMesh, mat: () => startGateGlowMaterial, cast: false },
     // GLAZING. Its absence here was not a missed optimisation, it was a hole in
     // the road: drive mode hides the per-piece meshes and draws this list
     // instead, so a glass road's pane simply stopped existing the moment you
@@ -3473,10 +3486,35 @@ ${e.message}`);
     };
   }
 
+  /**
+   * start_new has its entry at the rounded nose tip — poseFromPiece's +2 m lands
+   * on the curve against the guardrail. Spawn on the flat stub just before the
+   * start line instead.
+   */
+  function poseFromStartNewPiece(p) {
+    _inPos.setFromMatrixPosition(p.connectorIn);
+    _outPos.setFromMatrixPosition(p.connectorOut);
+    _fwd.copy(_outPos).sub(_inPos);
+    if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
+    _fwd.normalize();
+    const hw = p.hw ?? roadParams.width / 2;
+    const lineDist = startNewLineDist(p.pp ?? {}, hw);
+    const backset = p.pp?.gameStartSpawnBackset ?? pieceParams.gameStartSpawnBackset ?? 4;
+    const spawnDist = Math.max(hw + 1.5, lineDist - backset);
+    return {
+      x: _inPos.x + _fwd.x * spawnDist,
+      y: _inPos.y,
+      z: _inPos.z + _fwd.z * spawnDist,
+      yaw: Math.atan2(_fwd.x, _fwd.z) - Math.PI,
+    };
+  }
+
   function resolveSpawn() {
     if (gameSpawn) return gameSpawn;
-    const start = builder.pieces.find((p) => p.id === "start");
-    if (start) return poseFromPiece(start);
+    const start = builder.pieces.find((p) => p.id === "start" || p.id === "start_new");
+    if (start) {
+      return start.id === "start_new" ? poseFromStartNewPiece(start) : poseFromPiece(start);
+    }
     if (builder.pieces.length) return poseFromPiece(builder.pieces[0]);
     const sp = app.getSpawnPoint?.() ?? null;
     if (sp) return { x: sp.x, y: sp.y, z: sp.z, yaw: sp.yaw ?? 0 };

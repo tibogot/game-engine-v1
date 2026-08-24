@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { startNewLineDist } from "./modularRoadKit.js";
 
 /**
  * Lap timing + checkpoint validation for the modular road's drive mode.
@@ -25,7 +26,8 @@ const _inPos = new THREE.Vector3();
 const _outPos = new THREE.Vector3();
 const _yAxis = new THREE.Vector3(0, 1, 0);
 
-const GAME_LABEL = { start: "START", checkpoint: "CHECKPOINT", finish: "FINISH" };
+const GAME_LABEL = { start: "START", start_new: "START", checkpoint: "CHECKPOINT", finish: "FINISH" };
+const LAP_LINE_TYPES = new Set(["start", "start_new"]);
 
 /** Format seconds as m:ss.mmm (or ss.mmm under a minute). */
 export function formatLapTime(t) {
@@ -64,16 +66,22 @@ export class LapTracker {
       if (!GAME_LABEL[p.id]) continue;
       _inPos.setFromMatrixPosition(p.connectorIn);
       _outPos.setFromMatrixPosition(p.connectorOut);
-      const pos = _inPos.clone().add(_outPos).multiplyScalar(0.5);
       const fwd = _outPos.clone().sub(_inPos);
       if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
       fwd.normalize();
+      let pos;
+      if (p.id === "start_new") {
+        const hw = p.hw ?? this.halfWidth - 2;
+        pos = _inPos.clone().addScaledVector(fwd, startNewLineDist(p.pp ?? {}, hw));
+      } else {
+        pos = _inPos.clone().add(_outPos).multiplyScalar(0.5);
+      }
       const yaw = Math.atan2(fwd.x, fwd.z); // local +Z rotated by yaw → fwd
       const quat = new THREE.Quaternion().setFromAxisAngle(_yAxis, yaw);
       this.gates.push({ type: p.id, label: GAME_LABEL[p.id], pos, fwd, quat, yaw });
     }
     // Lap line = first start, else first finish, else first gate.
-    this.startIndex = this.gates.findIndex((g) => g.type === "start");
+    this.startIndex = this.gates.findIndex((g) => LAP_LINE_TYPES.has(g.type));
     if (this.startIndex < 0) this.startIndex = this.gates.findIndex((g) => g.type === "finish");
     if (this.startIndex < 0 && this.gates.length) this.startIndex = 0;
     this.reset();
