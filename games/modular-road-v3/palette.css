@@ -22,7 +22,13 @@
         --tm-yellow: #dce622;
         --tm-panel: rgba(18, 22, 30, 0.94);
         --tm-rail: rgba(12, 14, 20, 0.97);
-        --palette-width: 348px;
+        /* WIDER TO PAY FOR THE THIRD COLUMN. At 348 three columns gave 72px
+           tiles, which is small enough that the shape stops reading. 420 leaves
+           a 304px body, so a tile is 96px — and with the name band gone the
+           thumbnail inside it is 88px against the 93px the old two-column
+           layout gave. Same picture, half again as many per row, for 72px of
+           viewport. */
+        --palette-width: 420px;
         --palette-inset-y: 28px;
         --font: "Segoe UI", system-ui, -apple-system, sans-serif;
         --font-mono: "Cascadia Code", "Fira Code", "Consolas", monospace;
@@ -213,10 +219,16 @@
         background: rgba(255, 255, 255, 0.14);
         border-radius: 3px;
       }
+      /* THREE ACROSS. Two columns was sized for a palette of a few dozen tiles;
+         the Tubes and Banked tabs are 50 and 41 on their own now, and at two
+         wide those are a long scroll to read a tab you are trying to survey.
+         The panel body is 232px (348 palette − 88 rail − 28 padding), so three
+         columns with an 8px gap gives 72px tiles against the old 111px — half
+         again as many tiles per row for a third off the thumbnail. */
       #piece-grid {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
       }
       .piece-tile {
         position: relative;
@@ -273,7 +285,9 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 4px 4px 14px;
+        /* Square now — nothing is reserved at the bottom, because the name has
+           moved to #selected-piece. The unbaked fallback below puts it back. */
+        padding: 4px;
       }
       .piece-tile-preview svg {
         width: 100%;
@@ -300,12 +314,35 @@
         margin: auto;
         pointer-events: none;
       }
+      /*
+       * THE NAME IS OFF THE TILE — with one exception that matters.
+       *
+       * A tile is a picture you recognise, and at 167 of them a caption on every
+       * one is a band of 8px text covering the bottom fifth of every thumbnail
+       * for something you read once. The selected piece's name lives in
+       * #selected-piece instead, and hovering any tile gives you its `title`.
+       *
+       * THE EXCEPTION: if the thumbnail bake FAILS every tile falls back to one
+       * identical grey plate (placeholderSvg), and without a caption they are
+       * 167 buttons nobody can tell apart. So `unbaked` — set by renderPieces
+       * when a tile has no sprite, cleared by setThumbnails when one arrives —
+       * puts the label back exactly when the picture cannot do its job.
+       */
+      .piece-tile-name {
+        display: none;
+      }
+      .piece-tile.unbaked .piece-tile-name {
+        display: block;
+      }
+      .piece-tile.unbaked .piece-tile-preview {
+        padding-bottom: 17px;
+      }
       .piece-tile-name {
         position: absolute;
         left: 0;
         right: 0;
         bottom: 0;
-        padding: 3px 4px;
+        padding: 3px 2px;
         font-size: 8px;
         font-weight: 800;
         font-style: italic;
@@ -313,8 +350,12 @@
         text-align: center;
         color: #fff;
         background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
-        letter-spacing: 0.03em;
+        letter-spacing: 0.02em;
         line-height: 1.15;
+        /* "QUARTER-PIPE" and "ROUNDABOUT" are wider than a 72px tile's text box.
+           Without this they wrap by WORD only and the overflow is clipped, so a
+           tile silently loses the end of its name. */
+        overflow-wrap: anywhere;
       }
       .piece-tile-key {
         position: absolute;
@@ -341,6 +382,51 @@
         color: rgba(255, 255, 255, 0.35);
         letter-spacing: 0.12em;
         pointer-events: none;
+      }
+      /*
+       * SELECTED PIECE — where the tile captions went.
+       *
+       * A SIBLING OF #palette-body, not a child, and that is the whole point:
+       * the body scrolls (50 tiles in the Tubes tab), so a readout inside it
+       * would sit under a screen and a half of grid. As a flex sibling of the
+       * scrolling area it is pinned to the bottom of the panel and is on screen
+       * whichever tile you are looking at.
+       *
+       * #road-status further down says the same name inside a compound status
+       * string with the count, the span, the chain and the gizmo hint. This is
+       * the same fact at a glance instead of at a read.
+       */
+      #selected-piece {
+        flex-shrink: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 9px 14px 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.09);
+        background: rgba(0, 0, 0, 0.28);
+      }
+      #selected-piece-label {
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: #6b7382;
+        flex-shrink: 0;
+      }
+      #selected-piece-name {
+        font-family: var(--font-display);
+        font-size: 14px;
+        font-weight: 800;
+        font-style: italic;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        color: var(--tm-yellow);
+        /* One line. A long name shortens rather than reflowing the strip and
+           shoving the grid up as you click along a row. */
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
       }
       #palette-collapse-tab {
         position: absolute;

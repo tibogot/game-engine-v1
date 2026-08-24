@@ -274,13 +274,61 @@ for (const id of IDS) {
 for (const preset of ["tube_entry", "tube_exit", "half_tube_entry", "half_tube_exit"]) {
   check(`preset ${preset} exists`, new RegExp(`id: "${preset}"`).test(BUILDER_SRC));
 }
-// A preset whose radius drifts from the tube beside it is a step at the seam
-// that nothing in the geometry can catch.
-const tubesTab = BUILDER_SRC.slice(BUILDER_SRC.indexOf("  tubes: ["));
-const entryBlock = tubesTab.slice(0, tubesTab.indexOf("half_pipe_park"));
-const radii = [...entryBlock.matchAll(/tubeRadius: (\d+)/g)].map((m) => m[1]);
-check("every tube-family preset shares one radius", new Set(radii).size === 1,
-  `radii seen: ${[...new Set(radii)].join(", ")}`);
+/*
+ * EVERY BORE HAS A WAY IN AND A WAY OUT.
+ *
+ * This used to assert that the whole tab shared ONE radius, which was the right
+ * guard while there was only one size: a preset whose radius drifted from the
+ * tube beside it is a step at the seam that nothing in the geometry can catch.
+ * A second size family (the R12 Big Tube) makes that literal check wrong while
+ * leaving its intent exactly as important, so this is the intent, stated
+ * structurally over the real preset table rather than scraped out of the source:
+ *
+ *   • every radius that has a BORE has a MOUTH at that radius (an entry / exit /
+ *     launch), or a REDUCER joining it to a radius that does — otherwise the
+ *     size is an island you can see in the palette and never drive into;
+ *   • a reducer never tapers to a radius nothing is built at, which would be the
+ *     same step at the seam by a longer route.
+ *
+ * The half-pipes are deliberately not in either list: `tubeRadius` is their
+ * TRANSITION radius, not a bore, which is why the old scrape had to stop at
+ * `half_pipe_park` by hand.
+ */
+const { CATEGORY_PRESETS } = await import(
+  new URL("../games/modular-road-v3/modularRoadBuilder.js", import.meta.url).href
+);
+const BORE = new Set([
+  "tube", "tube_curve", "tube_slope", "tube_crest", "tube_spiral", "tube_scurve",
+  "half_tube", "half_tube_curve", "half_tube_slope", "half_tube_crest",
+  "half_tube_spiral", "half_tube_scurve",
+]);
+const MOUTH = new Set([
+  "tube_in", "tube_out", "tube_launch",
+  "half_tube_in", "half_tube_out", "half_tube_launch",
+]);
+const REDUCER = new Set(["tube_reduce", "half_tube_reduce"]);
+
+const radiusOf = (t) => t.params.tubeRadius ?? RI;
+const bores = new Set();
+const mouths = new Set();
+const tapers = [];
+for (const t of CATEGORY_PRESETS.tubes) {
+  if (BORE.has(t.base)) bores.add(radiusOf(t));
+  else if (MOUTH.has(t.base)) mouths.add(radiusOf(t));
+  else if (REDUCER.has(t.base)) tapers.push([radiusOf(t), t.params.tubeRadius2 ?? radiusOf(t)]);
+}
+
+check("the tab offers more than one bore size", bores.size >= 1, `bores at R ${[...bores].join(", ")}`);
+for (const R of [...bores].sort((a, b) => a - b)) {
+  const direct = mouths.has(R);
+  const viaTaper = tapers.some(([a, b]) => (a === R && mouths.has(b)) || (b === R && mouths.has(a)));
+  check(`R${R} bore can be entered and left`, direct || viaTaper,
+    direct ? "has its own entry/exit" : "reachable through a reducer");
+}
+for (const [a, b] of tapers) {
+  check(`reducer R${a} → R${b} joins two real sizes`, bores.has(a) && bores.has(b),
+    `bores at R ${[...bores].join(", ")}`);
+}
 
 console.log(`\n${fail === 0 ? "ALL PASS" : `${fail} FAILED`}`);
 process.exit(fail === 0 ? 0 : 1);

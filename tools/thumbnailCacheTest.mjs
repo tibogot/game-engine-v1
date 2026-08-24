@@ -203,9 +203,41 @@ console.log("\n=== ONE PLACEHOLDER, NOT 130 HAND-DRAWN SILHOUETTES ===");
   check("presets carry no artwork", !/\bpreview:\s*`/.test(builder),
     "a preset's tile is a render of what its params actually build");
   check("...and nothing still reads pr.preview", !/pr\.preview/.test(builder));
-  // The label under the tile is what keeps a failed bake usable, so it is not
-  // optional decoration.
-  check("every tile is still labelled", /class = "piece-tile-name"|piece-tile-name/.test(builder));
+  // THE FAILED-BAKE FALLBACK IS STILL A CAPTION, it is just no longer on every
+  // tile. The grid went to three columns and the names moved to #selected-piece,
+  // because at 167 tiles a band of 8px text over the bottom fifth of every
+  // thumbnail costs more than it tells you. What has NOT changed is why the
+  // caption existed: if the bake fails every tile is the same grey plate, and
+  // without a name they are 167 buttons nobody can tell apart. So the label is
+  // now conditional on there being no sprite — and all three parts of that have
+  // to hold together, which is what these check.
+  check("the tile caption still exists", /piece-tile-name/.test(builder));
+  check("...and is applied exactly when the bake did not produce a sprite",
+    /if \(!sprite\) btn\.classList\.add\("unbaked"\)/.test(builder),
+    "renderPieces must mark tiles that fell back to the placeholder");
+  check("...and is dropped when a bake lands later",
+    /classList\.remove\("unbaked"\)/.test(builder),
+    "setThumbnails patches the live DOM, so it has to clear the flag too");
+  const css = src("palette.css");
+  const html = src("road.html");
+  check("...and the CSS only shows it on those tiles",
+    /\.piece-tile\.unbaked \.piece-tile-name\s*\{\s*display: block/.test(css)
+    && /\.piece-tile-name\s*\{\s*display: none/.test(css));
+  check("the name the tiles gave up has somewhere to live",
+    /id="selected-piece-name"/.test(html) && /getElementById\("selected-piece-name"\)/.test(builder));
+  // OUTSIDE the scrolling body, or it sits a screen and a half below the tile
+  // you just clicked. Checked as ordering plus the flex property that pins it —
+  // a text test cannot prove nesting, and the real check is that you can see it.
+  check("...pinned after everything the grid scrolls",
+    html.indexOf('id="selected-piece"') > html.indexOf('id="build-hints"')
+    && /#selected-piece \{[^}]*flex-shrink: 0/.test(css),
+    "#selected-piece must be a sibling of #palette-body, not a child");
+  check("every tile names itself on hover whatever its state",
+    /btn\.title = item\.label/.test(builder));
+  // One resolver for "what is selected", or the strip and the status line drift.
+  check("the strip and the status line read the same source",
+    (builder.match(/activeLabel\(\)/g) || []).length >= 3,
+    "definition + #selected-piece + both status branches");
   check("both fallback paths go through the placeholder",
     (builder.match(/placeholderSvg\(\)/g) || []).length === 3, "tiles + category icons + the definition");
 }

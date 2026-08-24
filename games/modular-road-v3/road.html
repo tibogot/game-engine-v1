@@ -437,6 +437,15 @@
             <button id="road-help-link" type="button">Open the manual (?)</button>
           </div>
         </div>
+        <!-- SELECTED PIECE. Deliberately OUTSIDE #palette-body: the body is the
+             scrolling area and the Tubes tab is 50 tiles, so a readout inside it
+             would be a screen and a half below the tile you just clicked. As a
+             sibling it is pinned to the bottom of the panel and always visible.
+             This is where the per-tile captions went — see .piece-tile-name. -->
+        <div id="selected-piece">
+          <span id="selected-piece-label">Selected</span>
+          <span id="selected-piece-name">Straight</span>
+        </div>
       </div>
       <button
         id="palette-collapse-tab"

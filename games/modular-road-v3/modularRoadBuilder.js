@@ -3809,6 +3809,19 @@ const PIECE_TO_CATEGORY = {
   half_tube_out: "tubes",
   half_pipe: "tubes",
   half_pipe_curve: "tubes",
+  tube_slope: "tubes",
+  tube_crest: "tubes",
+  tube_spiral: "tubes",
+  half_tube_slope: "tubes",
+  half_tube_crest: "tubes",
+  half_tube_spiral: "tubes",
+  half_pipe_slope: "tubes",
+  tube_scurve: "tubes",
+  half_tube_scurve: "tubes",
+  tube_launch: "tubes",
+  half_tube_launch: "tubes",
+  tube_reduce: "tubes",
+  half_tube_reduce: "tubes",
   channel: "tubes",
   channel_curve: "tubes",
   curve: "turns",
@@ -3822,6 +3835,7 @@ const PIECE_TO_CATEGORY = {
   crest: "slopes",
   spiral: "slopes",
   banked: "banked",
+  banked_climb: "banked",
   banktilt: "banked",
   wallride: "banked",
   bankin: "banked",
@@ -3951,16 +3965,205 @@ export const CATEGORY_PRESETS = {
     },
     {
       id: "bank_short_turn",
-      label: "Short Turn",
+      label: "Short Turn R",
       base: "banked",
       params: { curveRadius: 34, curveAngle: 60, bankAngle: 22, curveDir: 1 },
     },
     {
+      // These two were the only tiles in the tab with no left-hand twin — the
+      // `R` key flips them, but every other pair here ships both.
+      id: "bank_short_turn_l",
+      label: "Short Turn L",
+      base: "banked",
+      params: { curveRadius: 34, curveAngle: 60, bankAngle: 22, curveDir: -1 },
+    },
+    {
       id: "bank_long_turn",
-      label: "Long Turn",
+      label: "Long Turn R",
       base: "banked",
       params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, curveDir: 1 },
     },
+    {
+      id: "bank_long_turn_l",
+      label: "Long Turn L",
+      base: "banked",
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, curveDir: -1 },
+    },
+    // CLIMBING BANKS. Until now a banked corner held one altitude for its whole
+    // length, so every banked section in a track sat on a single flat plane and
+    // you had to un-bank, climb, and re-bank to leave it. 14 m over a 91 m arc
+    // is a 23% peak grade, and the climb is smoothstepped so the exit is still
+    // level — chain one straight onto a held-bank turn.
+    {
+      id: "bank_climb_right",
+      label: "Climb Turn R",
+      base: "banked_climb",
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, bankRise: 14, curveDir: 1 },
+    },
+    {
+      id: "bank_climb_left",
+      label: "Climb Turn L",
+      base: "banked_climb",
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, bankRise: 14, curveDir: -1 },
+    },
+    {
+      id: "bank_drop_right",
+      label: "Drop Turn R",
+      base: "banked_climb",
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, bankRise: -14, curveDir: 1 },
+    },
+    {
+      id: "bank_drop_left",
+      label: "Drop Turn L",
+      base: "banked_climb",
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 22, bankRise: -14, curveDir: -1 },
+    },
+    // QUICK TRANSITIONS. bankRampLength 44 is sized so the curl reads as a shape
+    // developing, and that is right for a sweeper — but it also meant a section
+    // shorter than ~90 m could not be banked at all, because the two transitions
+    // alone did not fit. 20 m folds rather than rolls; that is the trade, and it
+    // is now a choice instead of the absence of one.
+    {
+      id: "bank_up_right_quick",
+      label: "Up Right Quick",
+      base: "bankin",
+      params: { bankRampLength: 20, bankAngle: 22, curveDir: 1 },
+    },
+    {
+      id: "bank_up_left_quick",
+      label: "Up Left Quick",
+      base: "bankin",
+      params: { bankRampLength: 20, bankAngle: 22, curveDir: -1 },
+    },
+    {
+      id: "bank_down_right_quick",
+      label: "Down Right Quick",
+      base: "bankout",
+      params: { bankRampLength: 20, bankAngle: 22, curveDir: 1 },
+    },
+    {
+      id: "bank_down_left_quick",
+      label: "Down Left Quick",
+      base: "bankout",
+      params: { bankRampLength: 20, bankAngle: 22, curveDir: -1 },
+    },
+
+    // ── THE ANGLE LADDER ──────────────────────────────────────────────────
+    //
+    // Everything above is 22°, so every banked corner in every track anyone has
+    // built leans by the same amount. These are the same four pieces at a
+    // gentler and a steeper lean.
+    //
+    // A COMPLETE SET PER ANGLE, deliberately — Up, Straight, Turn and Down, in
+    // both hands. A bank section is Up → (Straight | Turn)* → Down and every
+    // piece in it has to carry the SAME bankAngle, or the deck steps at the
+    // seam: the held-bank pieces share one raised/rolled cross-section and that
+    // section is a function of the angle. Half a ladder would be tiles that look
+    // usable and are not.
+    //
+    // 12° is highway camber — enough to feel, not enough to commit to. 38° is a
+    // step short of the 70° wall rides below and past the 35° Road Tilted, so it
+    // reads as a corner you drop into rather than a wall you climb.
+    {
+      id: "bank_up_right_gentle",
+      label: "Up Right 12°",
+      base: "bankin",
+      params: { bankRampLength: 32, bankAngle: 12, curveDir: 1 },
+    },
+    {
+      id: "bank_up_left_gentle",
+      label: "Up Left 12°",
+      base: "bankin",
+      params: { bankRampLength: 32, bankAngle: 12, curveDir: -1 },
+    },
+    {
+      id: "bank_straight_right_gentle",
+      label: "Straight Right 12°",
+      base: "banktilt",
+      params: { straightLength: 32, bankAngle: 12, curveDir: 1 },
+    },
+    {
+      id: "bank_straight_left_gentle",
+      label: "Straight Left 12°",
+      base: "banktilt",
+      params: { straightLength: 32, bankAngle: 12, curveDir: -1 },
+    },
+    {
+      id: "bank_turn_right_gentle",
+      label: "Turn R 12°",
+      base: "banked",
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 12, curveDir: 1 },
+    },
+    {
+      id: "bank_turn_left_gentle",
+      label: "Turn L 12°",
+      base: "banked",
+      params: { curveRadius: 58, curveAngle: 90, bankAngle: 12, curveDir: -1 },
+    },
+    {
+      id: "bank_down_right_gentle",
+      label: "Down Right 12°",
+      base: "bankout",
+      params: { bankRampLength: 32, bankAngle: 12, curveDir: 1 },
+    },
+    {
+      id: "bank_down_left_gentle",
+      label: "Down Left 12°",
+      base: "bankout",
+      params: { bankRampLength: 32, bankAngle: 12, curveDir: -1 },
+    },
+    // The steep set gets LONGER transitions, not shorter: the ramp has to roll
+    // 38° instead of 22° in the same piece, so holding 44 m would raise the roll
+    // rate by three quarters — the exact fold this length exists to avoid.
+    {
+      id: "bank_up_right_steep",
+      label: "Up Right 38°",
+      base: "bankin",
+      params: { bankRampLength: 56, bankAngle: 38, curveDir: 1 },
+    },
+    {
+      id: "bank_up_left_steep",
+      label: "Up Left 38°",
+      base: "bankin",
+      params: { bankRampLength: 56, bankAngle: 38, curveDir: -1 },
+    },
+    {
+      id: "bank_straight_right_steep",
+      label: "Straight Right 38°",
+      base: "banktilt",
+      params: { straightLength: 32, bankAngle: 38, curveDir: 1 },
+    },
+    {
+      id: "bank_straight_left_steep",
+      label: "Straight Left 38°",
+      base: "banktilt",
+      params: { straightLength: 32, bankAngle: 38, curveDir: -1 },
+    },
+    {
+      id: "bank_turn_right_steep",
+      label: "Turn R 38°",
+      base: "banked",
+      params: { curveRadius: 44, curveAngle: 90, bankAngle: 38, curveDir: 1 },
+    },
+    {
+      id: "bank_turn_left_steep",
+      label: "Turn L 38°",
+      base: "banked",
+      params: { curveRadius: 44, curveAngle: 90, bankAngle: 38, curveDir: -1 },
+    },
+    {
+      id: "bank_down_right_steep",
+      label: "Down Right 38°",
+      base: "bankout",
+      params: { bankRampLength: 56, bankAngle: 38, curveDir: 1 },
+    },
+    {
+      id: "bank_down_left_steep",
+      label: "Down Left 38°",
+      base: "bankout",
+      params: { bankRampLength: 56, bankAngle: 38, curveDir: -1 },
+    },
+
     {
       id: "wall_ride_right",
       label: "Wall Ride R",
@@ -3972,6 +4175,38 @@ export const CATEGORY_PRESETS = {
       label: "Wall Ride L",
       base: "wallride",
       params: { wallRideLength: 70, wallAngle: 70, wallRamp: 0.38, curveDir: -1 },
+    },
+    // SHORT wall ride — `wallRamp` is a FRACTION of the piece, so the same 0.38
+    // still spends the same share of the length getting up and off the wall.
+    // At 34 m that is ~13 m each way instead of ~27, which is a flick rather
+    // than a section: it fits between two corners.
+    {
+      id: "wall_ride_short_right",
+      label: "Wall Ride Short R",
+      base: "wallride",
+      params: { wallRideLength: 34, wallAngle: 70, wallRamp: 0.38, curveDir: 1 },
+    },
+    {
+      id: "wall_ride_short_left",
+      label: "Wall Ride Short L",
+      base: "wallride",
+      params: { wallRideLength: 34, wallAngle: 70, wallRamp: 0.38, curveDir: -1 },
+    },
+    // TRUE VERTICAL. Stops at 88° rather than 90° on purpose: at exactly 90 the
+    // deck's own normal has no horizontal component left, so nothing holds the
+    // car against the wall and the piece becomes a ceiling you fall off. Two
+    // degrees of lean is what keeps it a wall ride.
+    {
+      id: "wall_ride_vert_right",
+      label: "Wall Ride 88° R",
+      base: "wallride",
+      params: { wallRideLength: 70, wallAngle: 88, wallRamp: 0.42, curveDir: 1 },
+    },
+    {
+      id: "wall_ride_vert_left",
+      label: "Wall Ride 88° L",
+      base: "wallride",
+      params: { wallRideLength: 70, wallAngle: 88, wallRamp: 0.42, curveDir: -1 },
     },
   ],
   tubes: [
@@ -4005,11 +4240,142 @@ export const CATEGORY_PRESETS = {
       base: "tube_curve",
       params: { curveRadius: 26, curveAngle: 90, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
     },
+    // TURN SIZES. There used to be exactly ONE tube corner in the game — 90° at
+    // R26 — so every tube corner anyone had ever built was the same corner.
+    // These are the identical piece at the sizes the flat Turns tab already
+    // offers; `curveDir` is what "R flips L/R" acts on.
+    {
+      id: "tube_turn_45",
+      label: "Tube Turn 45",
+      base: "tube_curve",
+      params: { curveRadius: 26, curveAngle: 45, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    {
+      id: "tube_turn_30",
+      label: "Tube Turn 30",
+      base: "tube_curve",
+      params: { curveRadius: 26, curveAngle: 30, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    {
+      id: "tube_turn_wide",
+      label: "Tube Turn Wide",
+      base: "tube_curve",
+      params: { curveRadius: 48, curveAngle: 90, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    // S-BENDS. A pure sidestep: out by 40° and back, so the heading the piece
+    // hands on is the heading it was given. Dodging something used to cost two
+    // 45° corners, which leaves the whole rest of the chain rotated.
+    {
+      id: "tube_s_right",
+      label: "Tube S R",
+      base: "tube_scurve",
+      params: { curveRadius: 26, curveAngle: 40, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    {
+      id: "tube_s_left",
+      label: "Tube S L",
+      base: "tube_scurve",
+      params: { curveRadius: 26, curveAngle: 40, curveDir: -1, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    // VERTICALITY. Level at both ends (smoothstep), so these drop into an
+    // existing tube run without rotating anything — which is the whole point:
+    // rotating a piece rotates its exit plane and drags the rest of the chain.
+    {
+      id: "tube_up",
+      label: "Tube Up",
+      base: "tube_slope",
+      params: { slopeLength: 32, slopeRise: 10, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    {
+      id: "tube_down",
+      label: "Tube Down",
+      base: "tube_slope",
+      params: { slopeLength: 32, slopeRise: -10, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    {
+      id: "tube_hill",
+      label: "Tube Hill",
+      base: "tube_crest",
+      params: { slopeLength: 36, slopeRise: 8, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    {
+      id: "tube_dip",
+      label: "Tube Dip",
+      base: "tube_crest",
+      params: { slopeLength: 36, slopeRise: -8, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    {
+      // Half a turn at R26 is 82 m of bore for 14 m of climb — a 17% grade the
+      // car carries without losing the run — and the climb eases flat at both
+      // ends, so two of these stack to exactly 28 m with an upright exit.
+      id: "tube_helix_r",
+      label: "Tube Helix R",
+      base: "tube_spiral",
+      params: { loopSpiralRadius: 26, loopSpiralTurns: 0.5, loopSpiralRise: 14, curveDir: 1, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    {
+      id: "tube_helix_l",
+      label: "Tube Helix L",
+      base: "tube_spiral",
+      params: { loopSpiralRadius: 26, loopSpiralTurns: 0.5, loopSpiralRise: 14, curveDir: -1, tubeRadius: 8, tubeWall: 0.6 },
+    },
     {
       id: "tube_exit",
       label: "Tube Exit",
       base: "tube_out",
       params: { tubeEntryLength: 26, tubeRadius: 8, tubeWall: 0.6 },
+    },
+    {
+      // THE CANNON. Every tube run used to end by putting you back on level
+      // road; this is the same unwrap on a ramp. 18° is a shade over the jump's
+      // 12° because you arrive with the bore's speed already in hand.
+      id: "tube_cannon",
+      label: "Tube Launch",
+      base: "tube_launch",
+      params: { tubeEntryLength: 26, jumpAngle: 18, tubeRadius: 8, tubeWall: 0.6 },
+    },
+
+    // ── THE BIG BORE (R12) ────────────────────────────────────────────────
+    // A second SIZE, which the tab could not have before: with no way to get
+    // from one radius to another, a big tube would have been an island. The
+    // reducers below are what make it a family rather than a novelty — and the
+    // radii here are exactly the two the reducers join, so a Big Tube always has
+    // a way back down to the R8 run everything else is built at.
+    {
+      id: "big_tube_entry",
+      label: "Big Tube Entry",
+      base: "tube_in",
+      params: { tubeEntryLength: 34, tubeRadius: 12, tubeWall: 0.6 },
+    },
+    {
+      id: "big_tube_str",
+      label: "Big Tube",
+      base: "tube",
+      params: { straightLength: 34, tubeRadius: 12, tubeWall: 0.6 },
+    },
+    {
+      id: "big_tube_turn",
+      label: "Big Tube Turn",
+      base: "tube_curve",
+      params: { curveRadius: 34, curveAngle: 90, curveDir: 1, tubeRadius: 12, tubeWall: 0.6 },
+    },
+    {
+      id: "big_tube_exit",
+      label: "Big Tube Exit",
+      base: "tube_out",
+      params: { tubeEntryLength: 34, tubeRadius: 12, tubeWall: 0.6 },
+    },
+    {
+      id: "tube_expand",
+      label: "Tube 8 → 12",
+      base: "tube_reduce",
+      params: { tubeEntryLength: 30, tubeRadius: 8, tubeRadius2: 12, tubeWall: 0.6 },
+    },
+    {
+      id: "tube_narrow",
+      label: "Tube 12 → 8",
+      base: "tube_reduce",
+      params: { tubeEntryLength: 30, tubeRadius: 12, tubeRadius2: 8, tubeWall: 0.6 },
     },
     {
       id: "half_tube_entry",
@@ -4042,10 +4408,88 @@ export const CATEGORY_PRESETS = {
       params: { straightLength: 26, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 240 },
     },
     {
+      id: "half_tube_turn_45",
+      label: "Half Tube Turn 45",
+      base: "half_tube_curve",
+      params: { curveRadius: 26, curveAngle: 45, curveDir: 1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_turn_wide",
+      label: "Half Tube Turn Wide",
+      base: "half_tube_curve",
+      params: { curveRadius: 48, curveAngle: 90, curveDir: 1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_up",
+      label: "Half Tube Up",
+      base: "half_tube_slope",
+      params: { slopeLength: 32, slopeRise: 10, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_down",
+      label: "Half Tube Down",
+      base: "half_tube_slope",
+      params: { slopeLength: 32, slopeRise: -10, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_hill",
+      label: "Half Tube Hill",
+      base: "half_tube_crest",
+      params: { slopeLength: 36, slopeRise: 8, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_dip",
+      label: "Half Tube Dip",
+      base: "half_tube_crest",
+      params: { slopeLength: 36, slopeRise: -8, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_helix_r",
+      label: "Half Tube Helix R",
+      base: "half_tube_spiral",
+      params: { loopSpiralRadius: 26, loopSpiralTurns: 0.5, loopSpiralRise: 14, curveDir: 1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_helix_l",
+      label: "Half Tube Helix L",
+      base: "half_tube_spiral",
+      params: { loopSpiralRadius: 26, loopSpiralTurns: 0.5, loopSpiralRise: 14, curveDir: -1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_s_right",
+      label: "Half Tube S R",
+      base: "half_tube_scurve",
+      params: { curveRadius: 26, curveAngle: 40, curveDir: 1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_s_left",
+      label: "Half Tube S L",
+      base: "half_tube_scurve",
+      params: { curveRadius: 26, curveAngle: 40, curveDir: -1, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
       id: "half_tube_exit",
       label: "Half Tube Exit",
       base: "half_tube_out",
       params: { tubeEntryLength: 26, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_cannon",
+      label: "Half Tube Launch",
+      base: "half_tube_launch",
+      params: { tubeEntryLength: 26, jumpAngle: 18, tubeRadius: 8, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_expand",
+      label: "Half Tube 8 → 12",
+      base: "half_tube_reduce",
+      params: { tubeEntryLength: 30, tubeRadius: 8, tubeRadius2: 12, tubeWall: 0.6, halfTubeSpan: 180 },
+    },
+    {
+      id: "half_tube_narrow",
+      label: "Half Tube 12 → 8",
+      base: "half_tube_reduce",
+      params: { tubeEntryLength: 30, tubeRadius: 12, tubeRadius2: 8, tubeWall: 0.6, halfTubeSpan: 180 },
     },
     {
       // THE SNOWBOARD PIPE. Same piece as the half tubes above — this is not a
@@ -4102,6 +4546,18 @@ export const CATEGORY_PRESETS = {
       params: { straightLength: 110, tubeRadius: 26, tubeWall: 0.6, halfPipeFlat: 12, halfPipeVert: 17 },
     },
     {
+      // THE PIPE THAT KEEPS YOUR SPEED. The Park Pipes above are dead flat, so
+      // a run of hits gets slower every time — every carve up the wall is speed
+      // spent and the floor gives nothing back. Real pipes are cut into a
+      // hillside at 16-18° for exactly this reason. 16 m over 90 m smoothsteps
+      // to a 27% peak grade (15°), and it still enters and leaves level so it
+      // drops into a flat run without pitching anything after it.
+      id: "half_pipe_park_slope",
+      label: "Park Pipe Slope",
+      base: "half_pipe_slope",
+      params: { slopeLength: 90, slopeRise: -16, tubeRadius: 26, tubeWall: 0.6, halfPipeFlat: 12, halfPipeVert: 17 },
+    },
+    {
       id: "half_pipe_park_turn",
       label: "Park Pipe Turn",
       base: "half_pipe_curve",
@@ -4150,13 +4606,13 @@ export const CATEGORY_PRESETS = {
       params: { straightLength: 14 },
     },
     {
-      id: "rounded_end",
+      id: "straight_rounded_end",
       label: "Rounded end",
       base: "rounded_end",
       params: { roundEndLength: 8 },
     },
     {
-      id: "rounded_start",
+      id: "straight_rounded_start",
       label: "Rounded start",
       base: "rounded_start",
       params: { roundEndLength: 8 },
@@ -4724,7 +5180,7 @@ export const CATEGORY_PRESETS = {
       params: { qpRadius: 74, qpAngle: 90 },
     },
     {
-      id: "quarterpipe_down",
+      id: "quarterpipe_down_std",
       label: "Quarter-pipe down",
       base: "quarterpipe_down",
       params: { qpRadius: 16, qpAngle: 90 },
@@ -4772,6 +5228,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   const grid = document.getElementById("piece-grid");
   const titleEl = document.getElementById("category-title");
   const statusEl = document.getElementById("road-status");
+  const selectedNameEl = document.getElementById("selected-piece-name");
   const edgesBtn = document.getElementById("edges-toggle");
   const collapseTab = document.getElementById("palette-collapse-tab");
   const palette = document.getElementById("palette");
@@ -4878,6 +5335,13 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       const name = document.createElement("span");
       name.className = "piece-tile-name";
       name.textContent = item.label;
+      // The caption is now the BAKE-FAILED fallback, not furniture: with a
+      // sprite the tile is a picture you recognise and the name lives in
+      // #selected-piece, but a placeholder plate with no name is one of 167
+      // identical grey buttons. setThumbnails() clears this when a bake lands.
+      if (!sprite) btn.classList.add("unbaked");
+      // So the name is always one hover away, whichever state the tile is in.
+      btn.title = item.label;
 
       btn.appendChild(preview);
       btn.appendChild(name);
@@ -4967,28 +5431,46 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     }
   }
 
+  /**
+   * The name of whatever the palette is currently holding — prop brush, mover
+   * brush, preset tile or raw piece, in the order they take precedence.
+   *
+   * Its own function because two places need the same answer and used to derive
+   * it separately: the status line, and #selected-piece (where the per-tile
+   * captions went when the grid went to three columns). Two copies of this is
+   * how you get a strip that says "Straight" while the status line says you are
+   * carrying a traffic cone.
+   */
+  function activeLabel() {
+    if (activePropId || activeMoverId) {
+      const src = activePropId ? propCatalog : moverCatalog;
+      const id = activePropId ?? activeMoverId;
+      return src.find((p) => p.id === id)?.label ?? id;
+    }
+    if (activePresetId) {
+      const all = Object.values(CATEGORY_PRESETS).flat();
+      return all.find((p) => p.id === activePresetId)?.label ?? activePresetId;
+    }
+    return PIECE_BY_ID.get(builder.activePieceId)?.label ?? builder.activePieceId;
+  }
+
   function refreshStatus() {
+    // Set before the branches below, so the strip is right in every mode —
+    // including the prop/mover early return.
+    if (selectedNameEl) selectedNameEl.textContent = activeLabel();
+
     // A prop/mover brush is a MODE, and the status line is the only thing that
     // says so — without this it goes on naming the road piece while the mouse is
     // carrying a cone, which is the same class of lie selectPieceById fixed.
     if (statusEl && (activePropId || activeMoverId)) {
-      const src = activePropId ? propCatalog : moverCatalog;
-      const id = activePropId ?? activeMoverId;
-      const label = src.find((p) => p.id === id)?.label ?? id;
+      const label = activeLabel();
       statusEl.textContent =
         `${builder.count} placed · ${label} — click to place, Esc to cancel`;
       syncTiles();
       return;
     }
     if (statusEl) {
-      let label;
-      if (activePresetId) {
-        const all = Object.values(CATEGORY_PRESETS).flat();
-        label = all.find((p) => p.id === activePresetId)?.label ?? activePresetId;
-      } else {
-        const def = PIECE_BY_ID.get(builder.activePieceId);
-        label = def?.label ?? builder.activePieceId;
-      }
+      const label = activeLabel();
       const dir = builder.activeParams.curveDir >= 0 ? "R" : "L";
       const curveIds = new Set([
         "curve", "banked", "scurve", "spiral", "loop_half", "loop_spiral",
@@ -5219,7 +5701,12 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     }
     for (const [key, btn] of pieceTiles) {
       const sprite = thumbSprite(key.replace(/:(prop|mover|preset)$/, ""));
-      if (sprite) btn.querySelector(".piece-tile-preview")?.replaceChildren(sprite);
+      if (sprite) {
+        btn.querySelector(".piece-tile-preview")?.replaceChildren(sprite);
+        // The picture can speak for itself now, so drop the caption it was
+        // standing in for. Tiles the bake could not produce keep theirs.
+        btn.classList.remove("unbaked");
+      }
     }
   }
 

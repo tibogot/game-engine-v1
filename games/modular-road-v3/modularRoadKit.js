@@ -95,6 +95,12 @@ export const pieceParams = {
   // and at the straight's 22 m the ramp rolled 22° and lifted its edge 0.8 m in
   // under a second at speed — it read as a fold, not a bank.
   bankRampLength: 40,
+  // CLIMB — height gained across a banked TURN (see bankedClimbCurvePoints).
+  // Smoothstepped like `slope`, so the piece enters and leaves horizontal and
+  // the rest of the chain does not tilt; negative descends. Sized per tile,
+  // because the grade is rise / arc length and a 60° R34 turn is a third of the
+  // road a 90° R58 one is.
+  bankRise: 10,
   // ── Jump / launch ramp ────────────────────────────────────────────────────
   // TAKEOFF ANGLE IS TIED TO TOP SPEED. Ballistic range is v²·sin(2θ)/g, so it
   // scales with the SQUARE of speed — raising TIRE.topSpeed 30 → 50 m/s made
@@ -168,6 +174,10 @@ export const pieceParams = {
   // pinched. Radius / wall / span come from the tube params above, so an entry
   // seams onto whatever tube it is placed against.
   tubeEntryLength: 26,
+  // Far-end radius of a tube REDUCER (see buildTubeReducerProfile) — the piece
+  // that lets a second size family exist at all. Defaults to tubeRadius, i.e.
+  // no taper, so a reducer with nothing set is just a length of tube.
+  tubeRadius2: 12,
   // Snowboard half-pipe (flat + transition + vert — see buildHalfPipeProfile).
   // Transition radius is tubeRadius; wall thickness is tubeWall.
   halfPipeFlat: 12, // flat bottom between the two transitions (m)
@@ -625,6 +635,63 @@ function buildTubeMorphProfile(pp = pieceParams, rp = roadParams, t = 1, fullRin
   }
   for (let k = N; k >= 0; k--) pts.push({ x: outer[k].x, y: outer[k].y, zone: 4 });
   return { pts, hw };
+}
+
+/**
+ * TUBE REDUCER cross-section — the same bore at a different SIZE.
+ *
+ * Every tube in the kit was locked to one radius, and for a good reason: a
+ * preset whose radius drifts from the tube beside it is a step at the seam that
+ * nothing in the geometry can catch. That made a second size family impossible
+ * rather than merely unwired — there was no piece that could get you from one
+ * bore to another. This is that piece's section.
+ *
+ * It is deliberately NOT buildTubeMorphProfile with different numbers. That one
+ * morphs a flat ROAD into a bore, so its arc angle opens from 0 while its radius
+ * chases whatever keeps the plan width continuous. Here both ends are already
+ * tubes: the angle is fixed at the full span and only the radius moves, which
+ * means the section stays a true circle the whole way and the floor stays at
+ * y = 0 (centre at y = Ri, the same convention buildTubeProfile uses).
+ *
+ * EXACT AT BOTH ENDS, which is the only thing that makes it safe: t = 0 is
+ * literally the point set buildTubeProfile / buildHalfTubeProfile produce from
+ * `tubeRadius`, and t = 1 is the same from `tubeRadius2`. The angular
+ * resolution is the tube's own (48 steps for 360°), so both seams land vertex
+ * for vertex on the pieces either side. Point count is constant in t —
+ * buildSweepGeometry throws if it is not, and that throw is a build-time crash.
+ *
+ * Smoothstepped so the wall has no crease where it starts and stops tapering.
+ *
+ * @param {object} pp piece params (tubeRadius -> tubeRadius2, tubeWall, halfTubeSpan)
+ * @param {object} rp unused — kept so the signature matches the other sections
+ * @param {number} t 0 = tubeRadius, 1 = tubeRadius2
+ * @param {boolean} fullRing true = closed tube; false = the halfTubeSpan arc
+ */
+function buildTubeReducerProfile(pp = pieceParams, rp = roadParams, t = 1, fullRing = true) {
+  const R0 = Math.max(3, pp.tubeRadius ?? 8);
+  const R1 = Math.max(3, pp.tubeRadius2 ?? R0);
+  const tw = Math.max(0.15, pp.tubeWall ?? 0.6);
+  const span = fullRing
+    ? Math.PI * 2
+    : THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.halfTubeSpan ?? 180, 60, 300));
+  const N = fullRing ? 48 : Math.max(8, Math.round((48 * span) / (2 * Math.PI)));
+  // A closed ring starts at the floor and wraps; an arc is centred on the floor.
+  const a0 = fullRing ? -Math.PI / 2 : -Math.PI / 2 - span / 2;
+
+  const u = THREE.MathUtils.clamp(t, 0, 1);
+  const Ri = R0 + (R1 - R0) * (u * u * (3 - 2 * u));
+  const Ro = Ri + tw;
+
+  const pts = [];
+  for (let k = 0; k <= N; k++) {
+    const a = a0 + (span * k) / N;
+    pts.push({ x: Math.cos(a) * Ri, y: Ri + Math.sin(a) * Ri, zone: 3 });
+  }
+  for (let k = N; k >= 0; k--) {
+    const a = a0 + (span * k) / N;
+    pts.push({ x: Math.cos(a) * Ro, y: Ri + Math.sin(a) * Ro, zone: 4 });
+  }
+  return { pts, hw: Ri };
 }
 
 /* ----------------------------------------------------------------------- */
@@ -1918,6 +1985,36 @@ function tubeEntryPoints(pp) {
   return pts;
 }
 
+/**
+ * TUBE CANNON — a tube exit that pitches UP as it unwraps.
+ *
+ * The flat `tube_out` is the only way out of a bore, so every tube run in the
+ * game ends by putting you back on level road. This is the same unwrap over the
+ * same `tubeEntryLength`, on the jump ramp's centreline: the bore opens into
+ * road while the road tilts, and you leave the mouth flying.
+ *
+ * Shares `jumpAngle` with the ramps rather than owning a number, because it IS
+ * a launch and the takeoff angle is tied to top speed the same way (ballistic
+ * range goes as v²·sin 2θ — see the jump defaults). That also means
+ * `jumpEndTangents` describes this piece exactly: it only reads jumpAngle, so
+ * the connector hits its labelled pitch whatever length the unwrap is given.
+ */
+function tubeLaunchPoints(pp) {
+  const L = Math.max(4, pp.tubeEntryLength ?? 26);
+  const ang = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.jumpAngle, 0, 80));
+  const n = stepsFor(L, ang, 8);
+  const ds = L / n;
+  const cur = new V3(0, 0, 0);
+  const pts = [cur.clone()];
+  for (let i = 1; i <= n; i++) {
+    const ph = ang * (i / n) * (i / n); // ease-in: level in the bore, pitched at the mouth
+    cur.y += Math.sin(ph) * ds;
+    cur.z += -Math.cos(ph) * ds;
+    pts.push(cur.clone());
+  }
+  return pts;
+}
+
 function platformPoints(pp) {
   return straightLinePoints(Math.max(4, pp.platformLength));
 }
@@ -2124,6 +2221,46 @@ function bankedHoldCurvePoints(pp) {
   return pts;
 }
 
+/**
+ * Held-bank turn that ALSO climbs — the one thing the bank family could not do.
+ *
+ * `bankedHoldCurvePoints` pins the centreline at a constant `bankRaise`, so a
+ * banked corner can never change altitude: every banked section in a track sits
+ * on one flat plane and has to be un-banked, climbed, and re-banked to get off
+ * it. This is the same arc with the raise plus a rise on top.
+ *
+ * SMOOTHSTEPPED, not linear, and that is deliberate — it is the `slope` trick
+ * rather than the `spiral` one. dy/dt is zero at both ends, so the piece enters
+ * and leaves HORIZONTAL: `curveEndTangents` stays exact, the level sockets below
+ * stay honest, and dropping one between a Bank in and a Bank out gains height
+ * without pitching anything downstream. A constant-grade helix would stack more
+ * cleanly, but `spiral` already covers that for flat road and it would pitch the
+ * exit connector — which is the whole thing we are avoiding.
+ */
+function bankedClimbCurvePoints(pp) {
+  const R = Math.max(2, pp.curveRadius);
+  const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.curveAngle, 1, 180));
+  const dir = pp.curveDir >= 0 ? 1 : -1;
+  const rise = pp.bankRise ?? 0;
+  const arc = R * A;
+  // The pitch swings 0 → peak → 0 on top of the plan turn, so both go through
+  // stepsFor or a steep short climb facets the deck (same reason as slopePoints).
+  const swing = A + 2 * Math.atan((1.5 * Math.abs(rise)) / Math.max(1, arc));
+  const n = stepsFor(arc, swing, 24);
+  const y0 = bankRaise(pp);
+  const center = new V3(dir * R, 0, 0);
+  const radius0 = new V3(-dir * R, 0, 0); // origin - center
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const pt = center.clone().add(rotateY(radius0, -dir * A * t));
+    const sm = t * t * (3 - 2 * t); // smoothstep — horizontal tangents at both ends
+    pt.y = y0 + rise * sm; // rotateY preserves y, so set the climb after
+    pts.push(pt);
+  }
+  return pts;
+}
+
 /** Level sockets for a HELD-bank straight (entry plane → exit plane). */
 function bankStraightSockets(pp) {
   return bankLevelSockets(Math.max(1, pp.straightLength));
@@ -2155,6 +2292,16 @@ function bankedCurveSockets(pp) {
     exitPos,
     exitDir: rotateY(new V3(0, 0, -1), -dir * A),
   };
+}
+
+/** Level sockets for the CLIMBING banked turn: the same projected arc, with the
+ *  exit lifted by the height the piece actually gained. Its own function rather
+ *  than a flag on the one above, because a socket that disagrees with its
+ *  piece's geometry puts the whole rest of the chain in the wrong place. */
+function bankedClimbSockets(pp) {
+  const s = bankedCurveSockets(pp);
+  s.exitPos.y += pp.bankRise ?? 0;
+  return s;
 }
 
 /** Wall-ride: flat → up to (near-)vertical → HOLD → back to flat, all in one
@@ -3384,6 +3531,17 @@ export const PIECE_CATALOG = [
     sockets: bankedCurveSockets,
   },
   {
+    id: "banked_climb",
+    label: "Banked climb turn",
+    hint: "Held lean that also gains height (negative bankRise descends)",
+    swatch: "#a86fd0",
+    key: "",
+    points: bankedClimbCurvePoints,
+    roll: bankRoll,
+    curl: bankCurlHold,
+    sockets: bankedClimbSockets,
+  },
+  {
     id: "banktilt",
     label: "Banked straight",
     hint: "Held lean (straight) — chain freely",
@@ -3695,6 +3853,236 @@ export const PIECE_CATALOG = [
     plain: true,
     openLips: true,
   },
+  // ── Tube S-bend: sidestep without turning ────────────────────────────────
+  // `sCurvePoints` turns out by curveAngle and back again, so the heading it
+  // hands on is the heading it was given and the piece is a pure lateral offset.
+  // That is the one shape a tube run had no way to make: dodging an obstacle
+  // meant two 45° corners, which leaves the whole rest of the chain rotated.
+  {
+    id: "tube_scurve",
+    label: "Tube S-bend",
+    hint: "Rideable tube that sidesteps and comes back parallel (R flips L/R)",
+    swatch: "#16a0c0",
+    key: "",
+    points: sCurvePoints,
+    profile: buildTubeProfile,
+    noKerb: true,
+    plain: true,
+    tubeEndCaps: true,
+  },
+  {
+    id: "half_tube_scurve",
+    label: "Half tube S-bend",
+    hint: "Rideable U that sidesteps and comes back parallel (R flips L/R)",
+    swatch: "#16a0c0",
+    key: "",
+    points: sCurvePoints,
+    profile: buildHalfTubeProfile,
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
+  // ── Tube cannon: the exit that fires you out ─────────────────────────────
+  // Same morph as tube_out / half_tube_out (`profile` is the t = 1 tube section
+  // in both cases, because the sweep takes zones / uv / lateral from the
+  // reference outline), on a centreline that pitches up. `openLips` for the
+  // same reason the exits have it: the rim caps run almost the whole length.
+  {
+    id: "tube_launch",
+    label: "Tube launch",
+    hint: "Full tube unwraps to road while pitching up — leave the mouth flying",
+    swatch: "#16a0c0",
+    key: "",
+    points: tubeLaunchPoints,
+    profile: (pp, rp) => buildTubeMorphProfile(pp, rp, 1, true),
+    profileAt: (t, pp, rp) => buildTubeMorphProfile(pp, rp, 1 - t, true),
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
+  {
+    id: "half_tube_launch",
+    label: "Half tube launch",
+    hint: "Rideable U flattens out while pitching up — a ramp you can see out of",
+    swatch: "#16a0c0",
+    key: "",
+    points: tubeLaunchPoints,
+    profile: (pp, rp) => buildTubeMorphProfile(pp, rp, 1, false),
+    profileAt: (t, pp, rp) => buildTubeMorphProfile(pp, rp, 1 - t, false),
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
+  // ── Tube reducer: the piece that makes a second SIZE family possible ─────
+  //
+  // NO `tubeEndCaps`, and that is not an oversight. appendTubeEndCaps closes
+  // both mouths from the ONE reference outline, so on a piece whose two ends are
+  // different radii it would fit a `tubeRadius2`-sized annulus onto the
+  // `tubeRadius` mouth. A reducer lives between two tubes and both of those cap
+  // their own mouths at the shared seam's radius, so the join is closed anyway —
+  // the same way `tube_in` / `tube_out` rely on their neighbours.
+  {
+    id: "tube_reduce",
+    label: "Tube reducer",
+    hint: "Tube that tapers from tubeRadius to tubeRadius2",
+    swatch: "#16a0c0",
+    key: "",
+    points: tubeEntryPoints,
+    profile: (pp, rp) => buildTubeReducerProfile(pp, rp, 1, true),
+    profileAt: (t, pp, rp) => buildTubeReducerProfile(pp, rp, t, true),
+    noKerb: true,
+    plain: true,
+  },
+  {
+    id: "half_tube_reduce",
+    label: "Half tube reducer",
+    hint: "Rideable U that tapers from tubeRadius to tubeRadius2",
+    swatch: "#16a0c0",
+    key: "",
+    points: tubeEntryPoints,
+    profile: (pp, rp) => buildTubeReducerProfile(pp, rp, 1, false),
+    profileAt: (t, pp, rp) => buildTubeReducerProfile(pp, rp, t, false),
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
+
+  /* ── Tubes that go somewhere vertically ────────────────────────────────────
+   *
+   * A piece in this kit is a CROSS PRODUCT: `points` is the centreline, `profile`
+   * is the cross-section. Verticality lives in the centreline, tube-ness in the
+   * section — and until now every single tube piece used `straightPoints` or
+   * `curvePoints`, both dead flat. So a tube run could never change altitude,
+   * and the only way to make one climb was to rotate a piece, which rotates its
+   * EXIT PLANE and therefore drags every piece after it.
+   *
+   * These are not new geometry. They pair centrelines that already existed
+   * (`slopePoints`, `crestPoints`, `spiralPoints`) with sections that already
+   * existed. What makes them safe to drop mid-chain is that the first three
+   * carry `flatEndTangents`: smoothstep / sin² put a horizontal tangent at BOTH
+   * ends, so the piece gains 12 m and still hands the next one a level frame.
+   *
+   * Every one of them keeps its family's collision flag — `tubeEndCaps` on the
+   * closed bores, `openLips` on anything with a rim — or the mouth caps become
+   * an invisible shelf the car cannot leave. See buildOpenLipCollision.
+   */
+  {
+    id: "tube_slope",
+    label: "Tube slope",
+    hint: "Rideable tube that climbs or drops — level at both ends",
+    swatch: "#16a0c0",
+    key: "",
+    points: slopePoints,
+    profile: buildTubeProfile,
+    noKerb: true,
+    plain: true,
+    tubeEndCaps: true,
+  },
+  {
+    id: "half_tube_slope",
+    label: "Half tube slope",
+    hint: "Rideable U that climbs or drops — level at both ends",
+    swatch: "#16a0c0",
+    key: "",
+    points: slopePoints,
+    profile: buildHalfTubeProfile,
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
+  {
+    id: "tube_crest",
+    label: "Tube crest",
+    hint: "Hump or dip inside a tube — net-zero height, level at both ends",
+    swatch: "#16a0c0",
+    key: "",
+    points: crestPoints,
+    profile: buildTubeProfile,
+    noKerb: true,
+    plain: true,
+    tubeEndCaps: true,
+  },
+  {
+    id: "half_tube_crest",
+    label: "Half tube crest",
+    hint: "Hump or dip in a rideable U — net-zero height",
+    swatch: "#16a0c0",
+    key: "",
+    points: crestPoints,
+    profile: buildHalfTubeProfile,
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
+  /*
+   * THE HELIXES RIDE `loopSpiralPoints`, NOT `spiralPoints`, and that is a
+   * measured choice rather than a stylistic one.
+   *
+   * `spiralPoints` climbs at a CONSTANT rate, so its entry tangent is pitched
+   * up. Drop one on a level connector and buildPiece rotates the WHOLE piece to
+   * bring that tangent down to the connector — which tips the helix axis off
+   * vertical. The exit then leaves at double the intended pitch, and parallel
+   * transport around a tilted helix accumulates roll. MEASURED on the shipped
+   * Slopes → Helix tile (R18 / 180° / rise 10), stacking three:
+   *
+   *     after 1   y =  9.77   up = (-0.52, 0.81, -0.29)   <- 36° of roll
+   *     after 2   y =  0.75   <- climbed, then came back DOWN
+   *     after 3   y =  9.13
+   *
+   * i.e. `spiral` does not stack, despite its own hint saying "stack to gain
+   * height". That bug is left alone here — changing it would move the geometry
+   * of every saved track containing one — but it is not a foundation to build a
+   * tube family on.
+   *
+   * `loopSpiralPoints` smoothsteps the climb so both ends are LEVEL, and
+   * `loopSpiralFixFrames` pins up to world-up so no roll can accumulate. Two
+   * stack to exactly double the height with an upright exit. The price is a
+   * flat spot in the grade at each seam, which is the same trade every other
+   * piece in this block makes and the reason any of them can be dropped
+   * mid-chain at all.
+   */
+  {
+    id: "tube_spiral",
+    label: "Tube helix",
+    hint: "Climbing tube turn — stack to corkscrew up (R flips L/R)",
+    swatch: "#16a0c0",
+    key: "",
+    points: loopSpiralPoints,
+    fixFrames: loopSpiralFixFrames,
+    profile: buildTubeProfile,
+    noKerb: true,
+    plain: true,
+    tubeEndCaps: true,
+  },
+  {
+    id: "half_tube_spiral",
+    label: "Half tube helix",
+    hint: "Climbing rideable U — stack to corkscrew up (R flips L/R)",
+    swatch: "#16a0c0",
+    key: "",
+    points: loopSpiralPoints,
+    fixFrames: loopSpiralFixFrames,
+    profile: buildHalfTubeProfile,
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
+  {
+    // A REAL PIPE IS CUT INTO A HILLSIDE. Snowboard pipes run at a 16-18° grade
+    // and that grade is where the speed comes from — the flat Park Pipe only
+    // ever bleeds it, so a run of them gets slower every hit. Same section, same
+    // vert, on a slope centreline.
+    id: "half_pipe_slope",
+    label: "Half-pipe slope",
+    hint: "Snowboard pipe on a grade — the descent is what keeps your speed",
+    swatch: "#16a0c0",
+    key: "",
+    points: slopePoints,
+    profile: buildHalfPipeProfile,
+    noKerb: true,
+    plain: true,
+    openLips: true,
+  },
   {
     id: "channel",
     label: "Half-pipe channel",
@@ -3847,6 +4235,26 @@ const _END_TANGENTS = {
   half_tube_out: flatEndTangents,
   half_pipe: flatEndTangents,
   channel: flatEndTangents,
+  // Vertical tube family — level at both ends (smoothstep / sin²), so they take
+  // the SAME flat tangents as the straights they seam onto.
+  tube_slope: flatEndTangents,
+  half_tube_slope: flatEndTangents,
+  tube_crest: flatEndTangents,
+  half_tube_crest: flatEndTangents,
+  half_pipe_slope: flatEndTangents,
+  // S-bends turn out and back, so the exit heading is the entry heading.
+  tube_scurve: flatEndTangents,
+  half_tube_scurve: flatEndTangents,
+  // Reducers are straight; only the section moves.
+  tube_reduce: flatEndTangents,
+  half_tube_reduce: flatEndTangents,
+  // The cannons take the ramp's tangents — jumpEndTangents reads only jumpAngle.
+  tube_launch: jumpEndTangents,
+  half_tube_launch: jumpEndTangents,
+  // Eased climb about a vertical axis: the ends are horizontal, so these are the
+  // turn's plan tangents. fixFrames runs after and only re-levels up/right.
+  tube_spiral: loopSpiralEndTangents,
+  half_tube_spiral: loopSpiralEndTangents,
   tunnel_curve: curveEndTangents,
   tube_curve: curveEndTangents,
   half_tube_curve: curveEndTangents,
@@ -3864,6 +4272,9 @@ const _END_TANGENTS = {
   finish: flatEndTangents,
   curve: curveEndTangents,
   banked: curveEndTangents,
+  // Exact, because the climb is smoothstepped: dy/dt is 0 at both ends, so the
+  // end tangents are the flat arc's after all.
+  banked_climb: curveEndTangents,
   jump: jumpEndTangents,
   dive: diveEndTangents,
   landing: landingEndTangents,
@@ -3887,6 +4298,12 @@ for (const id of [
   "tube", "tube_curve", "tube_in", "tube_out",
   "half_tube", "half_tube_curve", "half_tube_in", "half_tube_out",
   "half_pipe", "half_pipe_curve",
+  "tube_slope", "tube_crest", "tube_spiral",
+  "half_tube_slope", "half_tube_crest", "half_tube_spiral",
+  "half_pipe_slope",
+  "tube_scurve", "half_tube_scurve",
+  "tube_launch", "half_tube_launch",
+  "tube_reduce", "half_tube_reduce",
 ]) {
   const def = PIECE_BY_ID.get(id);
   if (def) def.tubeShader = true;
