@@ -1848,14 +1848,18 @@ export function buildGuardrailGeometry(frames, profileData = buildProfile(), gp 
 /** Sweep one open (x, y) profile polyline along the frames into one surface
  *  (rendered double-sided; baked into the SOLIDS BVH so the chassis collides
  *  with it while the wheels still probe the deck underneath). */
-function _sweepShellProfile(frames, prof) {
+function _sweepShellProfile(frames, prof, opts = {}) {
   const F = frames.length;
   const P = prof.length;
   const along = new Float32Array(F);
   for (let i = 1; i < F; i++) along[i] = along[i - 1] + frames[i].pos.distanceTo(frames[i - 1].pos);
+  const uvAlong0 = opts.uvAlong0 ?? 0;
+  const uvUScale = opts.uvWorld ? 1 : 0.12;
 
   const positions = [];
   const uvs = [];
+  const colors = opts.color ? [] : null;
+  const cr = opts.color?.r ?? 0, cg = opts.color?.g ?? 0, cb = opts.color?.b ?? 0;
   const indices = [];
   const p = new V3();
   for (let i = 0; i < F; i++) {
@@ -1864,19 +1868,25 @@ function _sweepShellProfile(frames, prof) {
       const pr = prof[j];
       p.copy(fr.pos).addScaledVector(fr.right, pr.x).addScaledVector(fr.up, pr.y);
       positions.push(p.x, p.y, p.z);
-      uvs.push(along[i] * 0.12, j / (P - 1));
+      uvs.push((uvAlong0 + along[i]) * uvUScale, j / (P - 1));
+      if (colors) colors.push(cr, cg, cb);
     }
   }
   for (let i = 0; i < F - 1; i++) {
     const r0 = i * P;
     const r1 = (i + 1) * P;
     for (let j = 0; j < P - 1; j++) {
-      indices.push(r0 + j, r1 + j, r0 + j + 1, r0 + j + 1, r1 + j, r1 + j + 1);
+      if (opts.reverse) {
+        indices.push(r0 + j, r0 + j + 1, r1 + j, r0 + j + 1, r1 + j + 1, r1 + j);
+      } else {
+        indices.push(r0 + j, r1 + j, r0 + j + 1, r0 + j + 1, r1 + j, r1 + j + 1);
+      }
     }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  if (colors) geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geo.setIndex(indices);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
@@ -1909,6 +1919,221 @@ export function buildTunnelGeometry(frames, profileData = buildProfile(), pp = p
   }
   prof.push({ x: xo, y: skirtY });
   return _sweepShellProfile(frames, prof);
+}
+
+const _VAULT_IN = new THREE.Color(0x5c6168);
+const _VAULT_OUT = new THREE.Color(0x8a9098);
+const _VAULT_LIP = new THREE.Color(0xc5c9ce);
+const _VAULT_RIB = new THREE.Color(0x3a3e44);
+const _VAULT_THICK = 0.78;
+const _VAULT_PORTAL = 0.72;
+const _VAULT_RIB_SPACING = 13;
+const _VAULT_LIGHT_SPACING = 13;
+const _VAULT_LIGHT_MARGIN = 6.5;
+
+/**
+ * Horseshoe vault — the new road tunnel. Inner + outer concrete, inset mouth
+ * bulkheads (so chained pieces don't z-fight), a few inner ribs, and discrete
+ * neon bars. NOT the old `arch` shell: that stays until we delete it on purpose.
+ *
+ * Perf: FrontSide (both faces exist), subsampled sweep (deck stays dense),
+ * cheaper inner-only collision, glow is a handful of boxes not a strip on
+ * every metre and not a shader on every shell pixel.
+ */
+export function buildVaultTunnel(frames, profileData = buildProfile(), pp = pieceParams) {
+  const visual = _subsampleFrames(frames, 2.5);
+  const coll = _subsampleFrames(frames, 5.2);
+  const inner = _vaultInnerProfile(profileData.hw, pp.tunnelHeight ?? 7.2);
+  const outer = _offsetProfile(inner, _VAULT_THICK);
+  const total = _pathLength(frames);
+  const portal = Math.min(_VAULT_PORTAL, total * 0.2);
+  const innerFrames = _pulledFrames(visual, portal);
+  const shellParts = [
+    _sweepShellProfile(innerFrames, inner, { color: _VAULT_IN, reverse: false, uvWorld: true }),
+    _sweepShellProfile(visual, outer, { color: _VAULT_OUT, reverse: true, uvWorld: true }),
+    // 3D portal reveal: outer starts at the mouth, inner is set back. A
+    // planar cap here was FrontSide-culled from 3/4 and the vault read as a
+    // paper cutout. The slanted ring is visible from every angle.
+    _vaultMouthBevel(visual[0], innerFrames[0], outer, inner, _VAULT_LIP, false),
+    _vaultMouthBevel(visual[visual.length - 1], innerFrames[innerFrames.length - 1], outer, inner, _VAULT_LIP, true),
+  ];
+  for (let s = _VAULT_RIB_SPACING; s < total - 1.6; s += _VAULT_RIB_SPACING) {
+    shellParts.push(_vaultRib(_frameAtArcLength(frames, s), inner));
+  }
+  const shell = mergeGeometries(shellParts, false);
+  for (const g of shellParts) g.dispose();
+  if (shell) shell.computeBoundingSphere();
+  const collision = _sweepShellProfile(coll, inner, { reverse: false });
+  const glow = _vaultGlowGeometry(frames, inner, total);
+  return { shell, collision, glow };
+}
+
+function _subsampleFrames(frames, maxStep) {
+  const n = frames.length;
+  if (n <= 2) return frames;
+  const out = [frames[0]];
+  let acc = 0;
+  for (let i = 1; i < n - 1; i++) {
+    acc += frames[i].pos.distanceTo(frames[i - 1].pos);
+    if (acc >= maxStep) {
+      out.push(frames[i]);
+      acc = 0;
+    }
+  }
+  if (out[out.length - 1] !== frames[n - 1]) out.push(frames[n - 1]);
+  return out;
+}
+
+/** Flattened horseshoe: tall vertical walls, elliptical crown. Real motorway
+ *  vault, not a semicircle balanced on two posts. */
+function _vaultInnerProfile(hw, apex) {
+  const xo = hw + 0.34;
+  const spring = Math.min(2.85, Math.max(2.2, apex * 0.38));
+  const rx = xo;
+  const ry = Math.max(2.2, apex - spring);
+  const skirtY = -(roadParams.thickness + 0.4);
+  const ARC = 12;
+  const prof = [
+    { x: -xo, y: skirtY },
+    { x: -xo, y: spring },
+  ];
+  for (let k = 1; k <= ARC; k++) {
+    const a = Math.PI * (1 - k / ARC);
+    prof.push({ x: Math.cos(a) * rx, y: spring + Math.sin(a) * ry });
+  }
+  prof.push({ x: xo, y: skirtY });
+  return prof;
+}
+
+function _pathLength(frames) {
+  let t = 0;
+  for (let i = 1; i < frames.length; i++) t += frames[i].pos.distanceTo(frames[i - 1].pos);
+  return t;
+}
+
+function _shiftFrame(fr, dist) {
+  return {
+    pos: fr.pos.clone().addScaledVector(fr.tangent, dist),
+    tangent: fr.tangent,
+    up: fr.up,
+    right: fr.right,
+  };
+}
+
+/** Parallel offset with clamped miters so 90° skirt/wall corners don't spike. */
+function _offsetProfile(prof, dist) {
+  const n = prof.length;
+  const segN = [];
+  for (let i = 0; i < n - 1; i++) {
+    const dx = prof[i + 1].x - prof[i].x;
+    const dy = prof[i + 1].y - prof[i].y;
+    const len = Math.hypot(dx, dy) || 1;
+    // Profile walks left-up-over-right around the U. The bore stays on the
+    // RIGHT of that walk, so outward (into the mountain) is LEFT of the tangent.
+    segN.push({ x: -dy / len, y: dx / len });
+  }
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let nx, ny;
+    if (i === 0) {
+      nx = segN[0].x;
+      ny = segN[0].y;
+    } else if (i === n - 1) {
+      nx = segN[n - 2].x;
+      ny = segN[n - 2].y;
+    } else {
+      nx = segN[i - 1].x + segN[i].x;
+      ny = segN[i - 1].y + segN[i].y;
+      const len = Math.hypot(nx, ny) || 1;
+      nx /= len;
+      ny /= len;
+      const miter = Math.min(2, 1 / Math.max(0.35, nx * segN[i].x + ny * segN[i].y));
+      nx *= miter;
+      ny *= miter;
+    }
+    out[i] = { x: prof[i].x + nx * dist, y: prof[i].y + ny * dist };
+  }
+  return out;
+}
+
+function _pulledFrames(frames, inset) {
+  if (frames.length < 2 || inset <= 1e-4) return frames;
+  const a = _shiftFrame(frames[0], inset);
+  const b = _shiftFrame(frames[frames.length - 1], -inset);
+  if (frames.length === 2) return [a, b];
+  return [a, ...frames.slice(1, -1), b];
+}
+
+/** Slanted portal ring: inner profile on `frInner`, outer on `frOuter`. */
+function _vaultMouthBevel(frOuter, frInner, outer, inner, color, reverse) {
+  const P = inner.length;
+  const positions = [];
+  const colors = [];
+  const uvs = [];
+  const indices = [];
+  const p = new V3();
+  const cr = color.r, cg = color.g, cb = color.b;
+  const push = (fr, pr) => {
+    p.copy(fr.pos).addScaledVector(fr.right, pr.x).addScaledVector(fr.up, pr.y);
+    positions.push(p.x, p.y, p.z);
+    colors.push(cr, cg, cb);
+    uvs.push(4, 0);
+  };
+  for (let j = 0; j < P; j++) push(frInner, inner[j]);
+  for (let j = 0; j < P; j++) push(frOuter, outer[j]);
+  for (let j = 0; j < P - 1; j++) {
+    const i0 = j, i1 = j + 1, o0 = P + j, o1 = P + j + 1;
+    if (reverse) indices.push(i0, o0, i1, i1, o0, o1);
+    else indices.push(i0, i1, o0, i1, o1, o0);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/** Short inward ridge on the inner wall — expansion joint, not a full portal. */
+function _vaultRib(fr, inner) {
+  const a = _shiftFrame(fr, -0.08);
+  const b = _shiftFrame(fr, 0.08);
+  const ridge = _offsetProfile(inner, -0.05);
+  return _sweepShellProfile([a, b], ridge, {
+    color: _VAULT_RIB, reverse: false, uvWorld: true, uvAlong0: 4,
+  });
+}
+
+/**
+ * Discrete wall neon bars. Real tunnels light a few fixtures, not a Tron ring
+ * every metre — two bars every ~13 m, both walls, same stations so they pair.
+ */
+function _vaultGlowGeometry(frames, inner, total) {
+  const left = inner[1];
+  const right = inner[inner.length - 2];
+  const y = left.y - 0.32;
+  const xl = left.x + 0.028;
+  const xr = right.x - 0.028;
+  const parts = [];
+  for (let s = _VAULT_LIGHT_MARGIN; s <= total - _VAULT_LIGHT_MARGIN + 0.05; s += _VAULT_LIGHT_SPACING) {
+    const fr = _frameAtArcLength(frames, s);
+    parts.push(_neonBar(fr, xl, y));
+    parts.push(_neonBar(fr, xr, y));
+  }
+  if (!parts.length) return null;
+  const glow = mergeGeometries(parts, false);
+  for (const g of parts) g.dispose();
+  if (glow) glow.computeBoundingSphere();
+  return glow;
+}
+
+function _neonBar(fr, x, y) {
+  const geo = new THREE.BoxGeometry(0.04, 0.075, 1.35);
+  _pos.copy(fr.pos).addScaledVector(fr.right, x).addScaledVector(fr.up, y);
+  _m.makeBasis(fr.right, fr.up, fr.tangent).setPosition(_pos);
+  geo.applyMatrix4(_m);
+  return geo;
 }
 
 /**
@@ -1944,6 +2169,7 @@ export function buildChannelGeometry(frames, profileData = buildProfile(), pp = 
  *  (def.profile = buildTubeProfile), so it lands in the deck BVH, not solids. */
 export function buildShellGeometry(kind, frames, profileData, pp) {
   if (kind === "channel") return buildChannelGeometry(frames, profileData, pp);
+  if (kind === "vault") return null; // buildVaultTunnel — own mesh + glow + collision
   return buildTunnelGeometry(frames, profileData, pp);
 }
 
@@ -3823,7 +4049,7 @@ export const PIECE_CATALOG = [
     label: "Tunnel",
     hint: "Enclosed straight (arch)",
     swatch: "#7f8c8d",
-    key: "t",
+    key: "",
     points: straightPoints,
     shell: "arch",
   },
@@ -3835,6 +4061,24 @@ export const PIECE_CATALOG = [
     key: "",
     points: curvePoints,
     shell: "arch",
+  },
+  {
+    id: "tunnel_lit",
+    label: "Road tunnel",
+    hint: "Vaulted concrete tunnel, wall LEDs",
+    swatch: "#4a5560",
+    key: "t",
+    points: straightPoints,
+    shell: "vault",
+  },
+  {
+    id: "tunnel_lit_curve",
+    label: "Road tunnel curve",
+    hint: "Vaulted tunnel on a flat curve (R flips L/R)",
+    swatch: "#4a5560",
+    key: "",
+    points: curvePoints,
+    shell: "vault",
   },
   {
     id: "tube",
@@ -4328,6 +4572,7 @@ export const LATERAL_TILEABLE = new Set([
   "quarterpipe", "quarterpipe_down",
   "start", "start_new", "checkpoint", "finish",
   "tunnel", "channel",
+  "tunnel_lit",
   "junction_y", "junction_t", "junction_cross",
 ]);
 
@@ -4348,6 +4593,7 @@ const _END_TANGENTS = {
   glass_road: flatEndTangents,
   wallride: flatEndTangents,
   tunnel: flatEndTangents,
+  tunnel_lit: flatEndTangents,
   tube: flatEndTangents,
   tube_in: flatEndTangents,
   tube_out: flatEndTangents,
@@ -4377,6 +4623,7 @@ const _END_TANGENTS = {
   tube_spiral: loopSpiralEndTangents,
   half_tube_spiral: loopSpiralEndTangents,
   tunnel_curve: curveEndTangents,
+  tunnel_lit_curve: curveEndTangents,
   tube_curve: curveEndTangents,
   half_tube_curve: curveEndTangents,
   half_pipe_curve: curveEndTangents,
@@ -4478,7 +4725,7 @@ const HANDED_PIECES = new Set([
   "curve", "scurve", "spiral",
   "banked", "banked_climb", "banktilt", "bankin", "bankout", "bankswap", "wallride",
   "loop", "loop_half", "loop_spiral",
-  "tunnel_curve", "channel_curve",
+  "tunnel_curve", "tunnel_lit_curve", "channel_curve",
   "tube_curve", "half_tube_curve", "half_pipe_curve",
   "tube_scurve", "half_tube_scurve", "tube_spiral", "half_tube_spiral",
   "junction_split", "junction_merge", "junction_t",
@@ -5004,16 +5251,20 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   }
   // Glazing: rendered on its own transparent material, collided by nothing.
   const glassGeometry = skipExtras || !def.glass ? null : def.glass(pp, rpForProfile);
-  const shellGeometry = skipExtras || !def.shell
-    ? null
-    : buildShellGeometry(def.shell, frames, profileData, pp);
-  // Decor is the vertex-coloured overlay mesh: game lines build theirs from the
-  // frames, junctions paint their own markings from their outline.
-  // start_new adds extruded gate body + bloom glow on separate materials.
+  let shellGeometry = null;
+  let shellCollision = null;
   let decorGeometry = null;
   let decorGateGeometry = null;
   let decorGlowGeometry = null;
   if (!skipExtras) {
+    if (def.shell === "vault") {
+      const vault = buildVaultTunnel(frames, profileData, pp);
+      shellGeometry = vault.shell;
+      shellCollision = vault.collision;
+      decorGlowGeometry = vault.glow;
+    } else if (def.shell) {
+      shellGeometry = buildShellGeometry(def.shell, frames, profileData, pp);
+    }
     if (def.game === "start_new") {
       const lineDist = startNewLineDist(pp, profileData.hw);
       const gateFr = _frameAtArcLength(frames, lineDist);
@@ -5069,6 +5320,7 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
     def, geometry, deckCollision, railGeometry, railCollision, railMirrorGeometry,
     shellGeometry, decorGeometry, decorGateGeometry, decorGlowGeometry,
     glassGeometry,
+    shellCollision,
     // `matrices` is piece-local — the owner combines it with the piece's world
     // matrix. `template` is SHARED and cached in modularRoadRail.js; never free
     // it. Empty `matrices` means this piece has no posts.

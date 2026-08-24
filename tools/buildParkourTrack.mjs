@@ -265,7 +265,7 @@ put("straight_long", 2);
 
 // ── 10. TUNNEL AND FINISH ────────────────────────────────────────────────────
 console.log("10. run-out");
-put("straight_tunnel");
+put("vault_str");
 put("turn_smooth_small");
 put("slope_down_gentle", 2);   // keep descending into the finish
 put("straight_long", 2);

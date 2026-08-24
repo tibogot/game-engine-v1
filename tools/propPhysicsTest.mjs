@@ -195,6 +195,11 @@ console.log("\n=== A PLACED CONE SITS ON THE GROUND ===");
   check("geometry is dropped by that radius", /position\.y -= R/.test(cone));
   check("and the ROOT is lifted by it, so the base lands on y=0",
     /g\.position\.y = R/.test(cone));
+  const tyre = src.slice(src.indexOf('id: "tyre"'), src.indexOf('id: "flag"'));
+  check("the tyre exists as a physics prop, not only the static tire wall",
+    /id: "tyre"/.test(tyre) && /stack: TIRE_SIZE/.test(tyre));
+  check("the tyre's rest height is half its thickness, so it lies flat on y=0",
+    /g\.position\.y = hw/.test(tyre));
 
   // Net effect: base at 0, body centre at +radius — exactly where the ground
   // contact wants to hold it, so a resting cone never jumps when it wakes.

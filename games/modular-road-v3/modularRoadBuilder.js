@@ -186,6 +186,8 @@ export class ModularRoadBuilder {
    * @param {THREE.Material} o.material shared road material
    * @param {THREE.Material} [o.railMaterial] shared guardrail material
    * @param {THREE.Material} [o.shellMaterial] shared tunnel-shell material
+   * @param {THREE.Material} [o.vaultShellMaterial] vaulted road-tunnel shell
+   * @param {THREE.Material} [o.tunnelGlowMaterial] vault LED battens (bloom)
    * @param {THREE.Material} [o.decorMaterial] start/finish/checkpoint decor
    * @param {THREE.Material} [o.decorGateMaterial] start_new gantry frame
    * @param {THREE.Material} [o.decorGlowMaterial] start_new gantry bloom stroke
@@ -202,6 +204,8 @@ export class ModularRoadBuilder {
     material,
     railMaterial = null,
     shellMaterial = null,
+    vaultShellMaterial = null,
+    tunnelGlowMaterial = null,
     decorMaterial = null,
     decorGateMaterial = null,
     decorGlowMaterial = null,
@@ -217,6 +221,8 @@ export class ModularRoadBuilder {
     this.material = material;
     this.railMaterial = railMaterial;
     this.shellMaterial = shellMaterial;
+    this.vaultShellMaterial = vaultShellMaterial;
+    this.tunnelGlowMaterial = tunnelGlowMaterial;
     this.decorMaterial = decorMaterial;
     this.decorGateMaterial = decorGateMaterial;
     this.decorGlowMaterial = decorGlowMaterial;
@@ -2381,10 +2387,13 @@ export class ModularRoadBuilder {
     for (const p of this.pieces) {
       add(p.mesh, this._deckMaterial(p.id), this._isTubePiece(p.id) ? "tube" : "road");
       add(p.railMesh, this.railMaterial, "rail");
-      add(p.shellMesh, this.shellMaterial, "shell");
+      add(p.shellMesh, p.shellMesh?.userData.vault ? this.vaultShellMaterial : this.shellMaterial,
+        p.shellMesh?.userData.vault ? "vaultShell" : "shell");
       add(p.decorMesh, this.decorMaterial, "decor");
       add(p.decorGateMesh, this.decorGateMaterial, "decorGate");
-      add(p.decorGlowMesh, this.decorGlowMaterial, "decorGlow");
+      add(p.decorGlowMesh,
+        p.decorGlowMesh?.userData.glowKind === "tunnel" ? this.tunnelGlowMaterial : this.decorGlowMaterial,
+        p.decorGlowMesh?.userData.glowKind === "tunnel" ? "tunnelGlow" : "decorGlow");
       add(p.glassMesh, this.glassMaterial, "glass");
     }
     // ── REUSE THE BATCHES, REWRITE THE MATRICES ──────────────────────────────
@@ -2488,10 +2497,14 @@ export class ModularRoadBuilder {
     // because roadGame draws them from `builder.pieces`, in both modes, and the
     // per-piece rail mesh is hidden while driving.
     if (railMesh) railMesh.userData.railPosts = built.railPosts ?? null;
-    const shellMesh =
-      built.shellGeometry && this.shellMaterial
-        ? this._makeMesh(built.shellGeometry, this.shellMaterial, built.world)
-        : null;
+    const shellMat = built.def.shell === "vault"
+      ? (this.vaultShellMaterial || this.shellMaterial)
+      : this.shellMaterial;
+    const shellMesh = built.shellGeometry && shellMat
+      ? this._makeMesh(built.shellGeometry, shellMat, built.world)
+      : null;
+    if (shellMesh && built.def.shell === "vault") shellMesh.userData.vault = true;
+    if (shellMesh) shellMesh.userData.collisionGeometry = built.shellCollision ?? null;
     const decorMesh =
       built.decorGeometry && this.decorMaterial
         ? this._makeMesh(built.decorGeometry, this.decorMaterial, built.world)
@@ -2505,14 +2518,17 @@ export class ModularRoadBuilder {
       decorGateMesh.castShadow = true;
       decorGateMesh.receiveShadow = false;
     }
-    const decorGlowMesh =
-      built.decorGlowGeometry && this.decorGlowMaterial
-        ? this._makeMesh(built.decorGlowGeometry, this.decorGlowMaterial, built.world)
-        : null;
+    const glowMat = built.def.shell === "vault"
+      ? (this.tunnelGlowMaterial || this.decorGlowMaterial)
+      : this.decorGlowMaterial;
+    const decorGlowMesh = built.decorGlowGeometry && glowMat
+      ? this._makeMesh(built.decorGlowGeometry, glowMat, built.world)
+      : null;
     if (decorGlowMesh) {
       decorGlowMesh.castShadow = false;
       decorGlowMesh.receiveShadow = false;
       decorGlowMesh.userData.isGlow = true;
+      if (built.def.shell === "vault") decorGlowMesh.userData.glowKind = "tunnel";
     }
     const glassMesh =
       built.glassGeometry && this.glassMaterial
@@ -3085,6 +3101,7 @@ export class ModularRoadBuilder {
     if (p.shellMesh) {
       this.root.remove(p.shellMesh);
       p.shellMesh.geometry.dispose();
+      p.shellMesh.userData.collisionGeometry?.dispose();
     }
     if (p.decorMesh) {
       this.root.remove(p.decorMesh);
@@ -3757,18 +3774,28 @@ export class ModularRoadBuilder {
       p.railMesh = null;
     }
 
-    if (built.shellGeometry && this.shellMaterial) {
+    if (built.shellGeometry) {
+      const shellMat = built.def.shell === "vault"
+        ? (this.vaultShellMaterial || this.shellMaterial)
+        : this.shellMaterial;
       if (p.shellMesh) {
         p.shellMesh.geometry.dispose();
+        p.shellMesh.userData.collisionGeometry?.dispose();
         p.shellMesh.geometry = built.shellGeometry;
+        p.shellMesh.material = shellMat;
         p.shellMesh.matrix.copy(built.world);
         p.shellMesh.matrixWorldNeedsUpdate = true;
-      } else {
-        p.shellMesh = this._makeMesh(built.shellGeometry, this.shellMaterial, built.world);
+      } else if (shellMat) {
+        p.shellMesh = this._makeMesh(built.shellGeometry, shellMat, built.world);
+      }
+      if (p.shellMesh) {
+        p.shellMesh.userData.vault = built.def.shell === "vault";
+        p.shellMesh.userData.collisionGeometry = built.shellCollision ?? null;
       }
     } else if (p.shellMesh) {
       this.root.remove(p.shellMesh);
       p.shellMesh.geometry.dispose();
+      p.shellMesh.userData.collisionGeometry?.dispose();
       p.shellMesh = null;
     }
 
@@ -3821,17 +3848,24 @@ export class ModularRoadBuilder {
       p.decorGateMesh = null;
     }
 
-    if (built.decorGlowGeometry && this.decorGlowMaterial) {
+    if (built.decorGlowGeometry) {
+      const glowMat = built.def.shell === "vault"
+        ? (this.tunnelGlowMaterial || this.decorGlowMaterial)
+        : this.decorGlowMaterial;
       if (p.decorGlowMesh) {
         p.decorGlowMesh.geometry.dispose();
         p.decorGlowMesh.geometry = built.decorGlowGeometry;
+        p.decorGlowMesh.material = glowMat;
         p.decorGlowMesh.matrix.copy(built.world);
         p.decorGlowMesh.matrixWorldNeedsUpdate = true;
-      } else {
-        p.decorGlowMesh = this._makeMesh(built.decorGlowGeometry, this.decorGlowMaterial, built.world);
+      } else if (glowMat) {
+        p.decorGlowMesh = this._makeMesh(built.decorGlowGeometry, glowMat, built.world);
         p.decorGlowMesh.castShadow = false;
         p.decorGlowMesh.receiveShadow = false;
         p.decorGlowMesh.userData.isGlow = true;
+      }
+      if (p.decorGlowMesh) {
+        p.decorGlowMesh.userData.glowKind = built.def.shell === "vault" ? "tunnel" : null;
       }
     } else if (p.decorGlowMesh) {
       this.root.remove(p.decorGlowMesh);
@@ -4002,7 +4036,7 @@ export class ModularRoadBuilder {
 
     // ── Flow section ────────────────────────────────────────────────────────
     put("scurve", { curveRadius: 18, curveAngle: 40, curveDir: 1 });
-    put("tunnel", { straightLength: 28 });
+    put("tunnel_lit", { straightLength: 28, tunnelHeight: 7.2 });
     put("curve", { curveRadius: R, curveAngle: 90, curveDir: -1 });
 
     // ── Precision + exit ────────────────────────────────────────────────────
@@ -4063,7 +4097,7 @@ export class ModularRoadBuilder {
       this.place();
     };
 
-    // Radii / lengths match CATEGORY_PRESETS tiles (Tube Turn, Arch Turn, etc.).
+    // Radii / lengths match CATEGORY_PRESETS tiles (Tube Turn, Road Tunnel Turn, etc.).
     const R = 26;
     const tubeR = 8;
     const chanR = 4;
@@ -4084,12 +4118,12 @@ export class ModularRoadBuilder {
       put("scurve", { curveRadius: 20, curveAngle: 38, curveDir: 1 }); // Turns → S Right
       put("checkpoint", { gameLineLength: 16 });
 
-      // Tubes → Arch Tunnel, another Tube, then Arch Turn
-      put("tunnel", { straightLength: 26, tunnelHeight: 7 });
+      // Tubes → Road Tunnel, another Tube, then Road Tunnel Turn
+      put("tunnel_lit", { straightLength: 26, tunnelHeight: 7.2 });
       put("tube", { straightLength: 26, tubeRadius: tubeR, tubeWall: 0.6 });
       put("straight", { straightLength: 14 }); // Straight → Short
-      put("tunnel_curve", {
-        curveRadius: R, curveAngle: 90, curveDir: 1, tunnelHeight: 7,
+      put("tunnel_lit_curve", {
+        curveRadius: R, curveAngle: 90, curveDir: 1, tunnelHeight: 7.2,
       }); // 90°
 
       put("narrow", { straightLength: 24, narrowWidth: 8 }); // Straight → Narrow
@@ -4175,6 +4209,8 @@ const PIECE_TO_CATEGORY = {
   rounded_start: "straight",
   tunnel: "tubes",
   tunnel_curve: "tubes",
+  tunnel_lit: "tubes",
+  tunnel_lit_curve: "tubes",
   tube: "tubes",
   tube_curve: "tubes",
   tube_in: "tubes",
@@ -4833,16 +4869,16 @@ export const CATEGORY_PRESETS = {
       params: { curveRadius: 60, curveAngle: 60, tubeRadius: 26, tubeWall: 0.6, halfPipeFlat: 12, halfPipeVert: 17 },
     },
     {
-      id: "tunnel_str",
-      label: "Arch Tunnel",
-      base: "tunnel",
-      params: { straightLength: 26, tunnelHeight: 7 },
+      id: "vault_str",
+      label: "Road Tunnel",
+      base: "tunnel_lit",
+      params: { straightLength: 26, tunnelHeight: 7.2 },
     },
     {
-      id: "tunnel_turn",
-      label: "Arch Turn",
-      base: "tunnel_curve",
-      params: { curveRadius: 26, curveAngle: 90, tunnelHeight: 7 },
+      id: "vault_turn",
+      label: "Road Tunnel Turn",
+      base: "tunnel_lit_curve",
+      params: { curveRadius: 26, curveAngle: 90, tunnelHeight: 7.2 },
     },
     {
       id: "channel_str",
@@ -4891,12 +4927,6 @@ export const CATEGORY_PRESETS = {
       label: "Long",
       base: "straight",
       params: { straightLength: 32 },
-    },
-    {
-      id: "straight_tunnel",
-      label: "Tunnel",
-      base: "tunnel",
-      params: { straightLength: 22, tunnelHeight: 7 },
     },
     {
       id: "platform_pad",

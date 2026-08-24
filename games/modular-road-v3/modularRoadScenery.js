@@ -40,6 +40,7 @@ import { flattenInstanced, mergeByMaterial, markSharedGeometry } from "./modular
 import { buildLedMatrixMesh } from "../../v2/objects/ledMatrix.js";
 import { buildBillboardMesh } from "../../v2/objects/billboard.js";
 import { buildStreetLampMesh } from "../../v2/objects/streetLamp.js";
+import { buildRoadLampMesh } from "../../v2/objects/roadLamp.js";
 import { buildFloodlightMesh } from "../../v2/objects/floodlight.js";
 import { buildChainLinkFenceMesh } from "../../v2/objects/chainLinkFence.js";
 import { buildBarbWireMesh } from "../../v2/objects/barbWire.js";
@@ -125,6 +126,19 @@ export const SCENERY_CATALOG = [
     // deliberately NOT solid — you drive under the light, not into it.
     // baseHeight 0.34 + poleHeight 4.4 in STREET_LAMP_DEFAULTS.
     capsules: [{ x: 0, radius: 0.14, height: 4.74 }],
+  },
+  {
+    id: "roadlamp",
+    label: "Road lamp",
+    build: buildRoadLampMesh,
+    params: {
+      // Same post / arm / sodium head as wet-road-lab.html. castLight OFF for
+      // the same reason as Street lamp: you plant a row of these, and a real
+      // PointLight each is the cost that grows with how many you like.
+      castLight: false,
+    },
+    // Pole only — you drive under the arm, not into it. postHeight 7.2.
+    capsules: [{ x: 0, radius: 0.14, height: 7.2 }],
   },
   {
     id: "floodlight",

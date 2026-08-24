@@ -14,6 +14,7 @@ import {
   smoothstep,
   step,
   max,
+  min,
   fwidth,
   saturate,
   oneMinus,
@@ -1048,6 +1049,77 @@ export function createTunnelMaterial(opts = {}) {
     roughness: opts.roughness ?? 0.92,
     metalness: opts.metalness ?? 0.0,
     side: THREE.DoubleSide,
+  });
+}
+
+/**
+ * Vaulted road-tunnel shell. Vertex colours paint inner (dark) vs outer
+ * (lighter) vs lip/rib; a cheap TSL concrete (noise + 8 m joints + crown soot)
+ * sits on top. FrontSide because both faces exist as real geometry.
+ *
+ * Zero textures — same sampler-budget reason as the asphalt. Shared `surface`
+ * node so color and roughness don't evaluate the noise twice.
+ */
+export function createVaultTunnelMaterial() {
+  const surface = Fn(() => {
+    const along = uv().x;
+    const across = uv().y;
+    const texel = max(fwidth(along), fwidth(across));
+    const aggFade = saturate(oneMinus(texel.mul(6.0)));
+    const agg = mx_noise_float(vec3(along.mul(3.2), across.mul(12.0), 0.0))
+      .mul(0.5).mul(aggFade);
+    const macro = mx_noise_float(vec3(along.mul(0.07), across.mul(1.4), 1.7))
+      .mul(0.5).add(0.5);
+    const f = fract(along.div(8.0));
+    const dJoint = min(f, oneMinus(f)).mul(8.0);
+    const joint = oneMinus(smoothstep(0.05, 0.18, dJoint));
+    const soot = smoothstep(0.18, 0.92, oneMinus(abs(across.sub(0.5)).mul(2.0)));
+    return vec4(macro, agg, joint, soot);
+  })();
+
+  const m = new THREE.MeshStandardNodeMaterial({
+    roughness: 0.86,
+    metalness: 0.03,
+    vertexColors: true,
+    side: THREE.FrontSide,
+  });
+  m.colorNode = Fn(() => {
+    const s = surface;
+    const base = attribute("color", "vec3");
+    const tone = mix(float(0.8), float(1.1), s.x).add(s.y.mul(0.18));
+    return base.mul(tone).mul(oneMinus(s.w.mul(0.12))).mul(oneMinus(s.z.mul(0.32)));
+  })();
+  m.roughnessNode = Fn(() => {
+    const s = surface;
+    return float(0.78).add(s.x.mul(0.12)).add(s.z.mul(0.1));
+  })();
+  m.userData.batchKey = "vaultShell";
+  return m;
+}
+
+/** Sparse neon bars inside the vault tunnel — selective bloom via MRT. */
+export function createTunnelGlowMaterial() {
+  const m = new THREE.MeshStandardNodeMaterial({
+    color: new THREE.Color(0xc8e8ff),
+    roughness: 0.22,
+    metalness: 0.02,
+    emissive: new THREE.Color(0xc8e8ff),
+    emissiveIntensity: 6.0,
+  });
+  m.colorNode = materialColor;
+  applyBloomMRT(m, materialEmissive);
+  m.userData.bloom = true;
+  m.userData.batchKey = "tunnelGlow";
+  return m;
+}
+
+export function createTunnelGlowMaterialForThumb() {
+  return new THREE.MeshStandardMaterial({
+    color: 0xc8e8ff,
+    emissive: 0xc8e8ff,
+    emissiveIntensity: 3.2,
+    roughness: 0.22,
+    metalness: 0.02,
   });
 }
 

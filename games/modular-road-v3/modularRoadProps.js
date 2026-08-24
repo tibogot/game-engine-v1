@@ -4,6 +4,10 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
   PHYSICS_PROP_TYPES,
   CONE_SCALE,
+  TIRE_SCALE,
+  TIRE_OUTER_R,
+  TIRE_TUBE_R,
+  TIRE_SIZE,
   GATE_WIDTH,
   GATE_HEIGHT,
   GATE_BASE_Y,
@@ -14,6 +18,7 @@ import { SCENERY_CATALOG, makeSceneryProp } from "./modularRoadScenery.js";
 import { isSharedGeometry } from "./modularRoadBatching.js";
 import { makeContainer, CONTAINER_LIVERIES, CONTAINER_SIZE } from "./modularRoadContainer.js";
 import { makeTireWall } from "./modularRoadTireWall.js";
+import { makeCrane } from "./modularRoadCrane.js";
 import { DECAL_OFFSET } from "./modularRoadDecals.js";
 import { roadParams } from "./modularRoadKit.js";
 
@@ -60,6 +65,7 @@ const _fieldLocal = new V3();
 const _fieldFwd = new V3();
 // Scratch for stackSnap — see PropManager.stackSnap.
 const _stackLocal = new V3();
+const _stackOff = new V3();
 const _stackQuat = new THREE.Quaternion();
 
 /* ----------------------------------------------------------------------- */
@@ -942,6 +948,8 @@ function setVariant(inst, index) {
  *   block the car. Scenery is the case that needs it: its meshes are decor and
  *   only its masts and legs are solid.
  * @property {string} [category] Palette tab. Defaults to "obstacles".
+ * @property {{length:number, height:number, width:number}} [stack] Footprint +
+ *   course height for PropManager.stackSnap (containers, tyres).
  * @property {() => THREE.Object3D} make
  */
 /** @type {PropDef[]} */
@@ -1023,6 +1031,58 @@ export const PROP_CATALOG = [
       const R = PHYSICS_PROP_TYPES.cone.radius;
       g.children.forEach((c) => { c.position.y -= R; });
       g.position.y = R;
+      return g;
+    },
+  },
+  {
+    id: "tyre",
+    label: "Tyre",
+    collision: "none",
+    /**
+     * Knockable barrier tyre — not the static Tire wall segment. Lies FLAT
+     * (hole up) so a stack is a column of pancakes, the way a real tyre wall
+     * is built. Click on one to add a course, click beside one to extend the
+     * row.
+     */
+    stack: TIRE_SIZE,
+    make: () => {
+      const g = new THREE.Group();
+      g.name = "Tyre";
+      const S = TIRE_SCALE;
+      const outer = TIRE_OUTER_R;
+      const hw = TIRE_TUBE_R;
+      const inner = outer - hw * 1.55;
+      // Lathe around Y — hole up, lying flat. That is the default pose: you
+      // stack them like pancakes, not on their tread.
+      const profile = [
+        new THREE.Vector2(inner, -hw * 0.88),
+        new THREE.Vector2(inner + 0.02 * S, -hw),
+        new THREE.Vector2(outer - 0.07 * S, -hw),
+        new THREE.Vector2(outer - 0.012 * S, -hw * 0.5),
+        new THREE.Vector2(outer, -hw * 0.22),
+        new THREE.Vector2(outer - 0.01 * S, -0.04 * S),
+        new THREE.Vector2(outer, 0),
+        new THREE.Vector2(outer - 0.01 * S,  0.04 * S),
+        new THREE.Vector2(outer,  hw * 0.22),
+        new THREE.Vector2(outer - 0.012 * S,  hw * 0.5),
+        new THREE.Vector2(outer - 0.07 * S,  hw),
+        new THREE.Vector2(inner + 0.02 * S,  hw),
+        new THREE.Vector2(inner,  hw * 0.88),
+        new THREE.Vector2(inner, -hw * 0.88),
+      ];
+      const body = new THREE.Mesh(
+        new THREE.LatheGeometry(profile, 28),
+        mat(0x1a1a1c, { roughness: 0.94, metalness: 0.02 }),
+      );
+      const rim = new THREE.Mesh(
+        new THREE.TorusGeometry(inner + 0.012 * S, 0.016 * S, 8, 24),
+        mat(0x3c3c42, { roughness: 0.5, metalness: 0.28 }),
+      );
+      rim.rotation.x = Math.PI / 2; // torus hole is Z; match the lathe's Y hole
+      g.add(body, rim);
+      // Lathe is centred on the origin. Lift by half-thickness so the bottom
+      // sidewall sits on y=0 and physics rotates about the middle.
+      g.position.y = hw;
       return g;
     },
   },
@@ -1212,6 +1272,17 @@ export const PROP_CATALOG = [
      */
     collision: "solid",
     make: () => makeTireWall(),
+  },
+  {
+    id: "crane",
+    label: "Crane",
+    /**
+     * Solid obstacle — drive around it. Collision is the visual mesh, not a
+     * box: a bounding box would fill the empty air under the boom. 3433 tris
+     * is fine for a few of these; it is not a yard of containers.
+     */
+    collision: "solid",
+    make: () => makeCrane(),
   },
   {
     id: "box",
@@ -2054,47 +2125,126 @@ export class PropManager {
   /**
    * Snap a placement onto the prop it is landing on, if they stack.
    *
-   * Containers are the case that needs it: they are the one prop you place in
-   * runs and towers, and a stack is only convincing if the boxes line up
-   * exactly. The vertical half already works for free — a container is
-   * `collision: "both"`, so its roof is in the deck BVH and the placement ray
-   * lands on it — but the horizontal half does not, and eyeballing x/z to the
-   * centimetre is not something anyone should be asked to do.
+   * Containers are the original case: they are the one prop you place in runs
+   * and towers, and a stack is only convincing if the boxes line up exactly.
+   * Tyres use the same path so you can build a wall — click ON one to add a
+   * course, click BESIDE one to extend the row.
    *
-   * Snapping to the SUPPORTING PROP rather than to a world grid is what makes it
-   * work at any angle: a rotated stack lines up just as well as an axis-aligned
-   * one, because the alignment is copied from what is underneath rather than
-   * computed from world axes.
+   * The vertical half is free for anything in the deck bake (a container roof
+   * is a placement hit). Physics props are `collision: "none"` so the ray goes
+   * through them onto the road; those use the footprint in XZ instead, and a
+   * side pad for the neighbour slot.
+   *
+   * Snapping to the SUPPORTING PROP rather than to a world grid is what makes
+   * it work at any angle: a rotated stack lines up just as well as an
+   * axis-aligned one, because the alignment is copied from what is underneath.
    *
    * @param {string} typeId what is being placed
    * @param {THREE.Vector3} point where the placement ray hit
+   * @param {THREE.Raycaster} [ray] the view ray — used to hit physics-prop
+   *   meshes that the deck BVH cannot see
    * @returns {{position: THREE.Vector3, quaternion: THREE.Quaternion}|null}
    */
-  stackSnap(typeId, point) {
+  stackSnap(typeId, point, ray = null) {
     const def = PROP_BY_ID.get(typeId);
     const size = def?.stack;
     if (!size || !point) return null;
-    let best = null;
+    const baked = def.collision && def.collision !== "none";
+    const hx = size.length / 2;
+    const hz = size.width / 2;
+    const slack = Math.max(0.45, Math.min(hx, hz) * 0.25);
+
+    // Physics props are invisible to the placement ray, so from a shallow
+    // editor camera the ground hit through a tyre is often a metre behind it.
+    // If we can see the MESH, that is the stack target — and we sit on the
+    // tallest in that column so a 3-high wall keeps growing from the top.
+    if (!baked && ray) {
+      let bestMesh = null;
+      let bestDist = Infinity;
+      for (const inst of this.instances) {
+        if (inst.id !== typeId) continue;
+        const hits = ray.intersectObject(inst.root, true);
+        const h = hits[0];
+        if (!h || h.distance >= bestDist) continue;
+        bestDist = h.distance;
+        bestMesh = inst;
+      }
+      if (bestMesh) {
+        let topInst = bestMesh;
+        let top = bestMesh.root.position.y + size.height;
+        const bx = bestMesh.root.position.x;
+        const bz = bestMesh.root.position.z;
+        for (const inst of this.instances) {
+          if (inst.id !== typeId) continue;
+          const dx = inst.root.position.x - bx;
+          const dz = inst.root.position.z - bz;
+          if (dx * dx + dz * dz > 0.05) continue;
+          const t = inst.root.position.y + size.height;
+          if (t > top) { top = t; topInst = inst; }
+        }
+        return {
+          position: new THREE.Vector3(topInst.root.position.x, top, topInst.root.position.z),
+          quaternion: topInst.root.quaternion.clone(),
+        };
+      }
+    }
+
+    let bestRoof = null;
+    let bestSide = null;
+    let bestSideD2 = Infinity;
     for (const inst of this.instances) {
       if (inst.id !== typeId) continue;
       const base = inst.root.position;
       const top = base.y + size.height;
-      // Landing ON its roof, within a hand's width vertically.
-      if (Math.abs(point.y - top) > 0.25) continue;
-      // ...and inside its footprint, tested in the SUPPORTING prop's own frame
-      // so a rotated container still reads as a rectangle.
       _stackLocal.copy(point).sub(base).applyQuaternion(
         _stackQuat.copy(inst.root.quaternion).invert(),
       );
-      if (Math.abs(_stackLocal.x) > size.length / 2 || Math.abs(_stackLocal.z) > size.width / 2) continue;
-      // Nearest roof wins, so a tower stacks on its own top course.
-      if (!best || top > best.top) best = { inst, top };
+      const ax = Math.abs(_stackLocal.x);
+      const az = Math.abs(_stackLocal.z);
+      const inside = ax <= hx && az <= hz;
+
+      if (inside) {
+        // Baked props: the ray has to actually hit the roof. Physics props are
+        // invisible to the placement ray, so "inside the footprint" from above
+        // is the stack cue — the hit is the ground THROUGH them.
+        const yOk = baked
+          ? Math.abs(point.y - top) <= 0.25
+          : point.y <= top + 0.25;
+        if (yOk && (!bestRoof || top > bestRoof.top)) bestRoof = { inst, top };
+      }
+
+      const feetY = base.y - (inst.restY ?? 0);
+      if (Math.abs(point.y - feetY) > 0.4) continue;
+      if (ax > hx + slack || az > hz + slack) continue;
+      if (inside) continue;
+      let dx = 0, dz = 0;
+      if (ax > hx) dx = Math.sign(_stackLocal.x) * size.length;
+      if (az > hz) dz = Math.sign(_stackLocal.z) * size.width;
+      if (dx === 0 && dz === 0) continue;
+      const d2 = (point.x - base.x) ** 2 + (point.z - base.z) ** 2;
+      if (d2 < bestSideD2) {
+        bestSideD2 = d2;
+        bestSide = { inst, dx, dz };
+      }
     }
-    if (!best) return null;
-    return {
-      position: new THREE.Vector3(best.inst.root.position.x, best.top, best.inst.root.position.z),
-      quaternion: best.inst.root.quaternion.clone(),
-    };
+    if (bestRoof) {
+      return {
+        position: new THREE.Vector3(bestRoof.inst.root.position.x, bestRoof.top, bestRoof.inst.root.position.z),
+        quaternion: bestRoof.inst.root.quaternion.clone(),
+      };
+    }
+    if (bestSide) {
+      _stackOff.set(bestSide.dx, 0, bestSide.dz).applyQuaternion(bestSide.inst.root.quaternion);
+      return {
+        position: new THREE.Vector3(
+          bestSide.inst.root.position.x + _stackOff.x,
+          bestSide.inst.root.position.y,
+          bestSide.inst.root.position.z + _stackOff.z,
+        ),
+        quaternion: bestSide.inst.root.quaternion.clone(),
+      };
+    }
+    return null;
   }
 
   /** Re-snap every prop — after a track load, or a snap-mode change. */

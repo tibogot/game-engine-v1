@@ -98,6 +98,7 @@ export async function bakeRoadThumbnails({
   scene.add(group);
 
   const box = new THREE.Box3();
+  const meshBox = new THREE.Box3();
   const sphere = new THREE.Sphere();
   const center = new THREE.Vector3();
   const camDir = new THREE.Vector3(0.78, 0.82, 0.95).normalize();
@@ -147,19 +148,33 @@ export async function bakeRoadThumbnails({
         addMesh(built.geometry, deck);
       }
       addMesh(built.railGeometry, materials.rail);
-      addMesh(built.shellGeometry, materials.shell);
+      addMesh(built.shellGeometry, built.def.shell === "vault" && materials.vaultShell
+        ? materials.vaultShell : materials.shell);
       addMesh(built.decorGeometry, materials.decor);
       addMesh(built.decorGateGeometry, materials.decorGate);
-      addMesh(built.decorGlowGeometry, materials.decorGlow);
+      addMesh(built.decorGlowGeometry, built.def.shell === "vault" && materials.tunnelGlow
+        ? materials.tunnelGlow : materials.decorGlow);
       addMesh(built.glassGeometry, materials.glass);
     }
     return group.children.length > 0;
   };
 
   /** Frame by bounding sphere so every piece (long straight, wide curve, tall
-   *  loop) is centred and fully visible at a uniform 3/4 angle. */
+   *  loop) is centred and fully visible at a uniform 3/4 angle. Hidden
+   *  collision meshes are skipped — a 26 m stand-in cylinder used to yank the
+   *  camera back until the wind turbine looked like a speck. */
   const frameItem = () => {
-    box.setFromObject(group);
+    box.makeEmpty();
+    group.updateMatrixWorld(true);
+    group.traverse((o) => {
+      if (!o.isMesh || o.visible === false || o.userData.boundsIgnore) return;
+      const geo = o.geometry;
+      if (!geo) return;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      meshBox.copy(geo.boundingBox).applyMatrix4(o.matrixWorld);
+      box.union(meshBox);
+    });
+    if (box.isEmpty()) box.setFromObject(group);
     box.getBoundingSphere(sphere);
     center.copy(sphere.center);
     const r = Math.max(sphere.radius, 0.5);

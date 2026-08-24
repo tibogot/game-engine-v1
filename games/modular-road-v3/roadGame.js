@@ -73,6 +73,9 @@ import {
   createRoadMaterial,
   createGuardrailMaterial,
   createTunnelMaterial,
+  createVaultTunnelMaterial,
+  createTunnelGlowMaterial,
+  createTunnelGlowMaterialForThumb,
   createDecorMaterial,
   createStartGateBodyMaterial,
   createStartGateGlowMaterial,
@@ -141,6 +144,7 @@ import { PropPhysics, PROP_PHYSICS, PHYSICS_PROP_TYPES } from "./modularRoadProp
 import { PropInstancer } from "./modularRoadPropInstancer.js";
 import { preloadContainer } from "./modularRoadContainer.js";
 import { preloadTireWall } from "./modularRoadTireWall.js";
+import { preloadCrane } from "./modularRoadCrane.js";
 import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
@@ -296,6 +300,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let roadMaterial = createRoadMaterial();
   const railMaterial = createGuardrailMaterial();
   const shellMaterial = createTunnelMaterial();
+  const vaultShellMaterial = createVaultTunnelMaterial();
+  const tunnelGlowMaterial = createTunnelGlowMaterial();
   const decorMaterial = createDecorMaterial();
   const startGateBodyMaterial = createStartGateBodyMaterial();
   const startGateGlowMaterial = createStartGateGlowMaterial();
@@ -335,6 +341,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     material: roadMaterial,
     railMaterial,
     shellMaterial,
+    vaultShellMaterial,
+    tunnelGlowMaterial,
     decorMaterial,
     decorGateMaterial: startGateBodyMaterial,
     decorGlowMaterial: startGateGlowMaterial,
@@ -402,7 +410,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // where it was FIRST dropped. Reported as a swing gate that ignores its
     // rotation the instant you enter play mode.
     //
-    // Only simulated props could show it (`PHYSICS_PROP_TYPES`: cones and gates),
+    // Only simulated props could show it (`PHYSICS_PROP_TYPES`: cones, tyres, gates),
     // which is why every other object moved fine. Re-syncing costs nothing here —
     // the gizmo is disabled while driving (`props.setEnabled(!driving)`), so this
     // cannot re-seat a gate mid-swing.
@@ -513,6 +521,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   await Promise.all([
     preloadContainer(),
     preloadTireWall(renderer),
+    preloadCrane(),
     preloadDecal(DECAL_URL).then(() => settleDecals()),
     // The wind turbine's GLB. Here rather than lazily on first placement so the
     // mover catalog's `make()` can stay synchronous — and so the palette bakes a
@@ -553,6 +562,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   });
   const thumbMaterials = {
     road: roadMaterial, rail: railMaterial, shell: shellMaterial,
+    vaultShell: vaultShellMaterial,
+    tunnelGlow: createTunnelGlowMaterialForThumb(),
     decor: decorMaterial,
     decorGate: createStartGateBodyMaterialForThumb(),
     decorGlow: createStartGateGlowMaterialForThumb(),
@@ -882,7 +893,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // ghost is positioned from the hit either way so it keeps tracking the mouse.
     brush.point = hit?.valid ? hit.point : null;
     brush.root.visible = !!hit;
-    if (hit) brush.root.position.set(hit.point.x, hit.point.y + brush.restY, hit.point.z);
+    if (hit) {
+      const stack = brush.kind === "prop" ? props.stackSnap(brush.id, hit.point, _brushRay) : null;
+      if (stack) {
+        brush.root.position.copy(stack.position);
+        brush.root.quaternion.copy(stack.quaternion);
+      } else {
+        brush.root.position.set(hit.point.x, hit.point.y + brush.restY, hit.point.z);
+        if (brush.kind === "prop") brush.root.quaternion.identity();
+      }
+    }
     // The spawn ghost also carries a FACING. Left to itself it points down-track
     // off whatever piece is under the cursor — which is the answer you want
     // ~every time on a road — and holds still once Q/E have had their say.
@@ -928,7 +948,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // Landing on another one of these? Line up with it exactly. See
       // PropManager.stackSnap — the ray already found the roof, this is the
       // horizontal half.
-      const stack = props.stackSnap(brush.id, brush.point);
+      const stack = props.stackSnap(brush.id, brush.point, _brushRay);
       const placed = props.add(brush.id, stack?.position ?? brush.point);
       if (stack && placed) {
         placed.root.quaternion.copy(stack.quaternion);
@@ -1704,7 +1724,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
           ? { geometry: proxy, matrixWorld: p.railMesh.matrixWorld, updateMatrixWorld() {} }
           : p.railMesh);
       }
-      if (p.shellMesh) solids.push(p.shellMesh);
+      if (p.shellMesh) {
+        const proxy = p.shellMesh.userData.collisionGeometry;
+        solids.push(proxy
+          ? { geometry: proxy, matrixWorld: p.shellMesh.matrixWorld, updateMatrixWorld() {} }
+          : p.shellMesh);
+      }
     }
 
     // Props are static during a run (they only move via the build-mode gizmo, and
@@ -1894,9 +1919,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     for (const sim of propPhysics.sims ?? []) {
       const p = sim.profile;
       if (p.kind === "body") {
-        // The sphere PROXY, not the cone mesh — the whole point is to show that
-        // the sim collides a sphere at the centre of mass.
-        dbgProps.push({ line: line(new THREE.SphereGeometry(p.radius, 10, 6), DBG_LINE.prop), sim });
+        // Draw the PROXY the sim uses, not the mesh — that is the whole point.
+        const g = p.proxy === "cylinder"
+          ? new THREE.CylinderGeometry(p.size.length * 0.5, p.size.length * 0.5, p.size.height, 16)
+          : new THREE.SphereGeometry(p.radius, 10, 6);
+        dbgProps.push({ line: line(g, DBG_LINE.prop), sim });
       } else if (p.kind === "hinge") {
         const g = new THREE.BoxGeometry(p.width, p.height, 0.1);
         // Panel extends +X from the hinge and its BOTTOM sits `baseY` above the
@@ -1985,10 +2012,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     { pick: (p) => (p.mesh?.material === tubeMaterial ? null : p.mesh), mat: () => roadMaterial, cast: true },
     { pick: (p) => (p.mesh?.material === tubeMaterial ? p.mesh : null), mat: () => tubeMaterial, cast: true },
     { pick: (p) => p.railMesh, mat: () => railMaterial, cast: true },
-    { pick: (p) => p.shellMesh, mat: () => shellMaterial, cast: true },
+    { pick: (p) => (p.shellMesh?.userData.vault ? null : p.shellMesh), mat: () => shellMaterial, cast: true },
+    { pick: (p) => (p.shellMesh?.userData.vault ? p.shellMesh : null), mat: () => vaultShellMaterial, cast: true },
     { pick: (p) => p.decorMesh, mat: () => decorMaterial, cast: false },
     { pick: (p) => p.decorGateMesh, mat: () => startGateBodyMaterial, cast: true },
-    { pick: (p) => p.decorGlowMesh, mat: () => startGateGlowMaterial, cast: false },
+    { pick: (p) => (p.decorGlowMesh?.userData.glowKind === "tunnel" ? null : p.decorGlowMesh), mat: () => startGateGlowMaterial, cast: false },
+    { pick: (p) => (p.decorGlowMesh?.userData.glowKind === "tunnel" ? p.decorGlowMesh : null), mat: () => tunnelGlowMaterial, cast: false },
     // GLAZING. Its absence here was not a missed optimisation, it was a hole in
     // the road: drive mode hides the per-piece meshes and draws this list
     // instead, so a glass road's pane simply stopped existing the moment you
@@ -2179,7 +2208,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const tireMarks = new ModularRoadTireMarks(scene);
   const driftSmoke = new ModularRoadDriftSmoke(scene, { ...DEFAULT_DRIFT_SMOKE_SETTINGS });
   const sparks = new ModularRoadSparks(scene, { ...DEFAULT_SPARK_SETTINGS });
-  // Cones and gates. Physics props carry collision:"none" so they stay OUT of the
+  // Cones, tyres, gates. Physics props carry collision:"none" so they stay OUT of the
   // static bake — see the note on PROP_CATALOG — and are simulated instead.
   const propPhysics = new PropPhysics({
     props,

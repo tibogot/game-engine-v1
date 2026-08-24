@@ -27,93 +27,52 @@ function moverMat(color) {
   });
 }
 
+const _visMeshBox = new THREE.Box3();
+
 /**
- * Rotating-tube shell + hole-rim geometry.
- *
- * A drive-through tube (axis along local Z, centred on the origin) whose wall
- * has rectangular holes punched through it. Built as an (angle × length) grid
- * of cells; holes are INTEGER cell ranges, so hole borders align with the grid
- * and the rims come out as clean curved rectangles. Solid cells emit an inner
- * and an outer wall quad; every hole↔solid boundary emits a radial rim quad.
- * Rims are returned separately so they can glow (you need to see the holes
- * coming while the tube spins).
- *
- * θ = 0 is the tube BOTTOM; position on the circle = (R·sinθ, −R·cosθ, z).
- *
- * @param {number} Ri inner (drivable) radius
- * @param {number} wall wall thickness
- * @param {number} L tube length
- * @param {{a:number, span:number, z:number, len:number}[]} holes
- *        a/span = angular centre/width (rad), z/len = centre/length (m)
- * @returns {{shell: THREE.BufferGeometry, rims: THREE.BufferGeometry}}
+ * World AABB of meshes the player can see. Hidden collision stand-ins
+ * (`visible === false` / `userData.boundsIgnore`) used to inflate the
+ * selection box — the wind turbine's old 26 m cylinder stuck a wireframe
+ * well above the real tower.
  */
-function rotoTubeGeometries(Ri, wall, L, holes) {
-  const Ro = Ri + wall;
-  const A = 64; // angular cells
-  const NZ = Math.max(8, Math.round(L / 1.25)); // length cells
-  const da = (2 * Math.PI) / A;
-  const dz = L / NZ;
-
-  // Holes as integer cell ranges (angular range wraps).
-  const rects = holes.map((h) => {
-    const na = Math.max(2, Math.round(h.span / da));
-    const nz = Math.max(2, Math.round(h.len / dz));
-    return {
-      ia0: ((Math.round(h.a / da - na / 2) % A) + A) % A,
-      na,
-      iz0: Math.max(0, Math.min(NZ - nz, Math.round((h.z + L / 2) / dz - nz / 2))),
-      nz,
-    };
+function visibleWorldBox(root, out) {
+  out.makeEmpty();
+  root.traverse((o) => {
+    if (!o.isMesh || o.visible === false || o.userData.boundsIgnore) return;
+    const geo = o.geometry;
+    if (!geo) return;
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    _visMeshBox.copy(geo.boundingBox).applyMatrix4(o.matrixWorld);
+    out.union(_visMeshBox);
   });
-  const isHole = (ia, iz) =>
-    rects.some((r) => ((ia - r.ia0 + A) % A) < r.na && iz >= r.iz0 && iz < r.iz0 + r.nz);
+  return out;
+}
 
-  const pt = (ia, R, iz) => {
-    const th = ia * da;
-    return [R * Math.sin(th), -R * Math.cos(th), -L / 2 + iz * dz];
-  };
-
-  const mkEmit = () => ({ pos: [], idx: [] });
-  const quad = (part, a, b, c, d) => {
-    const base = part.pos.length / 3;
-    part.pos.push(...a, ...b, ...c, ...d);
-    part.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-  };
-  const shell = mkEmit();
-  const rims = mkEmit();
-
-  for (let ia = 0; ia < A; ia++) {
-    const ja = (ia + 1) % A;
-    for (let iz = 0; iz < NZ; iz++) {
-      if (isHole(ia, iz)) {
-        // Rim quads on every edge shared with a solid neighbour.
-        if (!isHole((ia - 1 + A) % A, iz)) quad(rims, pt(ia, Ri, iz), pt(ia, Ri, iz + 1), pt(ia, Ro, iz + 1), pt(ia, Ro, iz));
-        if (!isHole(ja, iz)) quad(rims, pt(ja, Ri, iz), pt(ja, Ro, iz), pt(ja, Ro, iz + 1), pt(ja, Ri, iz + 1));
-        if (iz === 0 || !isHole(ia, iz - 1)) quad(rims, pt(ia, Ri, iz), pt(ia, Ro, iz), pt(ja, Ro, iz), pt(ja, Ri, iz));
-        if (iz === NZ - 1 || !isHole(ia, iz + 1)) quad(rims, pt(ia, Ri, iz + 1), pt(ja, Ri, iz + 1), pt(ja, Ro, iz + 1), pt(ia, Ro, iz + 1));
-        continue;
-      }
-      quad(shell, pt(ia, Ri, iz), pt(ja, Ri, iz), pt(ja, Ri, iz + 1), pt(ia, Ri, iz + 1)); // inner wall
-      quad(shell, pt(ia, Ro, iz), pt(ia, Ro, iz + 1), pt(ja, Ro, iz + 1), pt(ja, Ro, iz)); // outer wall
-    }
-    // Annular end caps (solid cells only — a hole reaching an end stays open).
-    if (!isHole(ia, 0)) quad(shell, pt(ia, Ri, 0), pt(ia, Ro, 0), pt(ja, Ro, 0), pt(ja, Ri, 0));
-    if (!isHole(ia, NZ - 1)) quad(shell, pt(ia, Ri, NZ), pt(ja, Ri, NZ), pt(ja, Ro, NZ), pt(ia, Ro, NZ));
-  }
-
-  const toGeo = (part) => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(part.pos, 3));
-    g.setIndex(part.idx);
-    g.computeVertexNormals();
-    g.computeBoundingSphere();
-    return g;
-  };
-  return { shell: toGeo(shell), rims: toGeo(rims) };
+function fitTowerCollider(visualRoot) {
+  const towerVis = visualRoot.getObjectByName("Circle");
+  const box = new THREE.Box3();
+  if (towerVis) box.setFromObject(towerVis);
+  else box.setFromObject(visualRoot);
+  const height = Math.max(0.5, box.max.y - box.min.y);
+  const radius = Math.max(
+    (box.max.x - box.min.x) * 0.5,
+    (box.max.z - box.min.z) * 0.5,
+    0.35,
+  ) * 1.25;
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 1.15, height, 10));
+  mesh.name = "WindmillTower";
+  mesh.position.set(
+    (box.min.x + box.max.x) * 0.5,
+    (box.min.y + box.max.y) * 0.5,
+    (box.min.z + box.max.z) * 0.5,
+  );
+  mesh.visible = false;
+  mesh.userData.boundsIgnore = true;
+  return mesh;
 }
 
 /**
- * Hole grid for the optimized spin barrel — configurable resolution.
+ * Hole grid for the spin barrel — configurable resolution.
  *
  * @param {boolean} [opts.innerOnly] inner wall quads only (cheap collider)
  * @param {boolean} [opts.rimsOnly] hole-border quads only (glow rims)
@@ -183,7 +142,7 @@ function spinBarrelHoleGrid(Ri, wall, L, holes, { A = 32, NZ = 16, innerOnly = f
   return { shell: toGeo(shell), rims: toGeo(rims) };
 }
 
-/** Shared hole layout — matches the classic rotating tube obstacle. */
+/** Four staggered wall openings along the spin barrel. */
 function spinBarrelHoles(deg) {
   return [
     { a: deg(0), span: deg(80), z: -12, len: 7 },
@@ -311,66 +270,14 @@ export const MOVER_CATALOG = [
     },
   },
   {
-    id: "rototube",
-    label: "Rotating tube",
-    collision: "deck",
-    defaults: { speed: 0.55, amplitude: 8 },
-    make: () => {
-      // Drive-through barrel that spins about its own axis. The wall is the
-      // road (inner radius matches the kit's rideable tube, so it lines up with
-      // Tube pieces), and rectangular holes are punched through it — as the
-      // tube turns, a hole sweeping under the car is bare sky. isDeck: the
-      // shell rebakes into the wheel BVH every tick, so the missing cells are
-      // really missing for physics too.
-      const Ri = 8;
-      const wall = 0.6;
-      const L = 40;
-      const deg = THREE.MathUtils.degToRad;
-      const { shell, rims } = rotoTubeGeometries(Ri, wall, L, [
-        { a: deg(0), span: deg(80), z: -12, len: 7 },
-        { a: deg(100), span: deg(70), z: -4, len: 7 },
-        { a: deg(200), span: deg(90), z: 4, len: 7 },
-        { a: deg(300), span: deg(70), z: 12, len: 7 },
-      ]);
-      const root = new THREE.Group();
-      root.name = "RotoTube";
-      const pivot = new THREE.Object3D();
-      pivot.position.set(0, Ri, 0); // inner floor rests on y = 0
-      root.add(pivot);
-      // Glossy metal barrel — low roughness so the spin reads in the highlights.
-      const mesh = new THREE.Mesh(
-        shell,
-        new THREE.MeshStandardMaterial({
-          color: 0x8fb6cc,
-          metalness: 0.85,
-          roughness: 0.16,
-          side: THREE.DoubleSide,
-        }),
-      );
-      mesh.name = "RotoTubeShell";
-      // Emissive hole rims (bloomed) — you must SEE the holes coming around.
-      const rimMat = new THREE.MeshStandardNodeMaterial({
-        color: new THREE.Color(0xff5a1e),
-        emissive: new THREE.Color(0xff5a1e),
-        emissiveIntensity: 4,
-        roughness: 0.4,
-        side: THREE.DoubleSide,
-      });
-      applyBloomMRT(rimMat, materialEmissive);
-      mesh.add(new THREE.Mesh(rims, rimMat)); // child ⇒ visual only, no collision
-      pivot.add(mesh);
-      return bindMover(root, { mesh, pivot, mode: "spin-z", speed: 0.55, amplitude: 8, isDeck: true });
-    },
-  },
-  {
     id: "spinbarrel",
     label: "Spin barrel",
     collision: "deck",
     defaults: { speed: 0.55, amplitude: 8 },
     make: () => {
-      // Optimized sibling of the classic rotating tube — same hole layout, but
-      // 48×20 grid, matte dark shell (hides faceting vs glossy metal), cyan rims,
-      // inner-wall-only collider (~600 tris), and deck-carry.
+      // Drive-through barrel that spins about its own axis. Inner radius matches
+      // the kit's rideable tube. 48×20 visual grid, matte dark shell (hides
+      // faceting), cyan rims, inner-wall-only collider (~600 tris), and deck-carry.
       const Ri = 8;
       const wall = 0.6;
       const L = 40;
@@ -388,9 +295,8 @@ export const MOVER_CATALOG = [
       const mesh = new THREE.Mesh(
         shell,
         new THREE.MeshStandardMaterial({
-          // Matte dark barrel — not the rotating tube's glossy blue metal. High
-          // roughness softens the low-poly facets; low metalness kills the sharp
-          // specular stripes that made each face read so hard.
+          // High roughness softens the low-poly facets; low metalness kills the
+          // sharp specular stripes that made each face read so hard.
           color: 0x2a2e32,
           metalness: 0.12,
           roughness: 0.78,
@@ -400,7 +306,7 @@ export const MOVER_CATALOG = [
       );
       mesh.name = "SpinBarrelShell";
 
-      // Cyan bloom rims — rotating tube uses orange; this keeps holes readable.
+      // Cyan bloom rims keep the holes readable while the barrel spins.
       const rimMat = new THREE.MeshStandardNodeMaterial({
         color: new THREE.Color(0x38e8d8),
         emissive: new THREE.Color(0x38e8d8),
@@ -464,28 +370,28 @@ export const MOVER_CATALOG = [
       // makes every disposal path in the game skip it (see modularRoadBatching).
       markSharedGeometry(built);
       root.add(built);
+      root.updateMatrixWorld(true);
 
       const pivot = built.getObjectByName("WindmillRotor");
       // The rotor group is the spin pivot; the mesh under it is what turns.
       const mesh = pivot?.children.find((c) => c.isMesh || c.children.length) ?? pivot;
 
-      // The TOWER is the collider, not the blades. A blade tip sweeps 30 m up
-      // and nothing can reach it, while the tower is the thing you crash into —
-      // and it must not spin, so it cannot be the bind mesh.
-      const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 2.1, 26, 10));
-      tower.name = "WindmillTower";
-      tower.position.y = 13;
-      tower.visible = false;
+      // The TOWER is the collider, not the blades. Fitted to the Circle mesh
+      // (~9 m at catalog scale, ~0.5 m radius). A hardcoded 26 m × 4 m cylinder
+      // used to dwarf the visual and inflate the selection box / thumbnail.
+      const tower = fitTowerCollider(built);
       root.add(tower);
 
       if (!pivot || !mesh) return root;
+      // Bind the TOWER as the collision mesh. The rotor still spins because it
+      // is `pivot`; using the blades as `mesh` would bake a huge spinning BVH
+      // and make the car bounce off empty air above the pole.
       return bindMover(root, {
-        mesh,
+        mesh: tower,
         pivot,
         mode: "spin-z",
         speed: 0.45,
         amplitude: 8,
-        solidMesh: tower,
       });
     },
   },
@@ -536,7 +442,8 @@ export class MoverPropManager {
     this.gizmo.size = 0.9;
     scene.add(this.gizmo.getHelper());
 
-    this.selBox = new THREE.BoxHelper(new THREE.Object3D(), 0xff8866);
+    this._selBounds = new THREE.Box3();
+    this.selBox = new THREE.Box3Helper(this._selBounds, 0xff8866);
     this.selBox.visible = false;
     scene.add(this.selBox);
 
@@ -544,7 +451,7 @@ export class MoverPropManager {
       if (this.orbit) this.orbit.enabled = !e.value && this.enabled;
     });
     this.gizmo.addEventListener("change", () => {
-      if (this.selected) this.selBox.setFromObject(this.selected.root);
+      if (this.selected) this._syncSelBox(this.selected.root);
     });
     this.gizmo.addEventListener("mouseUp", () => {
       this.rebuildMovers();
@@ -865,12 +772,19 @@ export class MoverPropManager {
     return cfg;
   }
 
+  _syncSelBox(root) {
+    root.updateMatrixWorld(true);
+    visibleWorldBox(root, this._selBounds);
+    this.selBox.visible = !this._selBounds.isEmpty();
+    this.selBox.updateMatrixWorld(true);
+  }
+
   _select(inst) {
     this.onSelect?.();
     this.selected = inst;
     this.gizmo.attach(inst.root);
-    this.selBox.setFromObject(inst.root);
-    this.selBox.visible = true;
+    this._syncSelBox(inst.root);
+    this.selBox.visible = !this._selBounds.isEmpty();
     // Not `enabled = true` outright: add() selects what it just placed, and with
     // a brush still armed that fresh gizmo would sit right where the next click
     // is going.

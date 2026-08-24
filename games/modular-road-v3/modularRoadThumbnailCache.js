@@ -28,7 +28,7 @@ const STORE = "bakes";
 /** Bump BY HAND after changing piece geometry, a prop's make(), or the baker's
  *  own camera/lighting — see the invalidation note above. It also covers the
  *  stored SHAPE: v2 is the sprite sheet, v1 was one Blob per tile. */
-export const THUMB_CACHE_VERSION = 19;
+export const THUMB_CACHE_VERSION = 28;
 
 /** FNV-1a, 32-bit. Only needs to change when its input changes; not a hash
  *  anything depends on for security. */

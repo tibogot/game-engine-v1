@@ -10,11 +10,11 @@
 //
 // TWO TIERS, because they are different problems:
 //
-//  • CONE — a free rigid body. This is the well-behaved 80% of rigid-body
+//  • CONE / TYRE — a free rigid body. This is the well-behaved 80% of rigid-body
 //    dynamics: take an impulse, tumble, settle, sleep. What general engines are
-//    HARD at — stacking, resting contact stability, constraint graphs — none of
-//    it is needed. (Which is also why a pile of cones resting on each other is
-//    explicitly not supported.)
+//    HARD at — stacking, resting contact stability, constraint graphs — is
+//    approximated with a cheap sphere-sphere pass so a tyre wall can sit on
+//    itself until the car smashes through it. It is not a general stack solver.
 //
 //  • GATE — ONE degree of freedom. Simulated directly as hinge angle + angular
 //    velocity + spring + damping, NOT as a rigid body with a hinge constraint.
@@ -72,6 +72,27 @@ export const PROP_PHYSICS = {
  * the cone ended up half-buried; see the note in the cone's make()).
  */
 export const CONE_SCALE = 3;
+/**
+ * Linear scale of a barrier tyre, against a real ~0.70 m OD / ~0.22 m wide
+ * racing tyre. 2 puts it at 1.4 m across — still a tyre, not a doughnut the
+ * car is. Lying flat, three-high is a ~1.3 m wall, which is how a real tyre
+ * barrier is built. Shared with the mesh in modularRoadProps.js so the visual,
+ * the stack snap, and the collision proxy cannot drift.
+ */
+export const TIRE_SCALE = 2;
+/** Outer radius of the disc (m). Horizontal: this is the footprint radius. */
+export const TIRE_OUTER_R = 0.35 * TIRE_SCALE;
+/** Half-thickness of a tyre lying flat (m). Also `restY` and the ground-proxy
+ *  radius — a stack of N is `N * 2 * TIRE_TUBE_R` tall. */
+export const TIRE_TUBE_R = 0.112 * TIRE_SCALE;
+/** Footprint + course height for editor stacking. Root sits at the centre
+ *  (`restY = TIRE_TUBE_R`), so `height` is the thickness: the next tyre's
+ *  centre lands on `base.y + height` and the sidewalls touch. */
+export const TIRE_SIZE = {
+  length: 2 * TIRE_OUTER_R,
+  height: 2 * TIRE_TUBE_R,
+  width: 2 * TIRE_OUTER_R,
+};
 /**
  * Panel reach of the swing gate, from its hinge (m).
  *
@@ -137,6 +158,31 @@ export const PHYSICS_PROP_TYPES = {
      * awake, not a switch to full rigid-body dynamics.
      */
     comY: -0.27 * CONE_SCALE,
+  },
+  tyre: {
+    kind: "body",
+    /**
+     * Heavier than a cone (rubber vs hollow PVC) but still arcade: square
+     * scaling, not cube, so a wall of them is spectacular to smash rather than
+     * a row of bollards. ~32 kg at TIRE_SCALE 2.
+     */
+    mass: 8 * TIRE_SCALE * TIRE_SCALE,
+    /**
+     * Ground / rest proxy: half the thickness. A sphere of the OUTER radius
+     * would sit the pancake in mid-air and, stacked, explode the pile (centres
+     * are only `2 * TIRE_TUBE_R` apart).
+     */
+    radius: TIRE_TUBE_R,
+    /** What the car actually hits — the disc's outer radius. */
+    hitRadius: TIRE_OUTER_R,
+    /** Lying-flat cylinder, Y up. Sphere-sphere cannot represent a pancake. */
+    proxy: "cylinder",
+    size: {
+      width: TIRE_SIZE.width,
+      height: TIRE_SIZE.height,
+      length: TIRE_SIZE.length,
+    },
+    comY: 0,
   },
   gate: {
     kind: "hinge",
@@ -218,6 +264,8 @@ const _right = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _down = new THREE.Vector3(0, -1, 0);
 const _up = new THREE.Vector3(0, 1, 0);
+const _pairN = new THREE.Vector3();
+const _pairV = new THREE.Vector3();
 
 export class PropPhysics {
   /**
@@ -328,9 +376,20 @@ export class PropPhysics {
       if (s.profile.kind === "hinge") this._tickHinge(s, dt, car, vehicle);
       else this._tickBody(s, dt, car, vehicle);
     }
+    // Sphere contacts AFTER every body has integrated, otherwise a stacked tyre
+    // is snapped onto the road (through the one underneath) before its neighbour
+    // has had a chance to support it.
+    this._bodyContacts();
+    for (const s of this.sims) {
+      if (!s.body || s.asleep) continue;
+      this._groundContact(s, dt);
+      this._sleepBody(s, dt);
+      s.inst.root.position.copy(s.body.pos);
+      s.inst.root.quaternion.copy(s.body.quat);
+    }
   }
 
-  // ── FREE BODY (cones) ───────────────────────────────────────────────────────
+  // ── FREE BODY (cones / tyres) ───────────────────────────────────────────────
 
   _tickBody(s, dt, car, vehicle) {
     const P = PROP_PHYSICS;
@@ -349,9 +408,12 @@ export class PropPhysics {
       b.quat.set(b.quat.x + _q.x, b.quat.y + _q.y, b.quat.z + _q.z, b.quat.w + _q.w).normalize();
       w.multiplyScalar(Math.max(0, 1 - P.angularDamping * dt));
     }
+  }
 
-    this._groundContact(s, dt);
-
+  _sleepBody(s, dt) {
+    const P = PROP_PHYSICS;
+    const b = s.body;
+    const w = b.angVel;
     // SLEEP — needs BOTH linear and angular stillness held for a while. Either
     // alone false-triggers: a cone spinning on the spot has no velocity, and one
     // sliding flat has no spin.
@@ -365,12 +427,120 @@ export class PropPhysics {
     } else {
       s.stillFor = 0;
     }
-
-    s.inst.root.position.copy(b.pos);
-    s.inst.root.quaternion.copy(b.quat);
   }
 
-  /** Rest on whatever the car drives on, using the same BVH. */
+  /**
+   * Hitting one tyre in a wall has to wake the ones resting on it, or the
+   * struck tyre flies off and the rest hang in the air at their authored pose.
+   */
+  _wakeCluster(s) {
+    const q = [s];
+    s.asleep = false;
+    s.stillFor = 0;
+    for (let i = 0; i < q.length; i++) {
+      const cur = q[i];
+      for (const o of this.sims) {
+        if (!o.body || o === cur) continue;
+        let seen = false;
+        for (let k = 0; k < q.length; k++) if (q[k] === o) { seen = true; break; }
+        if (seen) continue;
+        if (!this._bodiesNearby(cur, o, 0.2)) continue;
+        o.asleep = false;
+        o.stillFor = 0;
+        q.push(o);
+      }
+    }
+  }
+
+  /** True if two body proxies overlap with `pad` metres of slack. */
+  _bodiesNearby(a, b, pad) {
+    if (a.profile.proxy === "cylinder" && b.profile.proxy === "cylinder") {
+      const ra = a.profile.size.length * 0.5, rb = b.profile.size.length * 0.5;
+      const ha = a.profile.size.height * 0.5, hb = b.profile.size.height * 0.5;
+      const dx = b.body.pos.x - a.body.pos.x;
+      const dz = b.body.pos.z - a.body.pos.z;
+      const dy = b.body.pos.y - a.body.pos.y;
+      return Math.hypot(dx, dz) < ra + rb + pad && Math.abs(dy) < ha + hb + pad;
+    }
+    const max = a.profile.radius + b.profile.radius + pad;
+    return a.body.pos.distanceToSquared(b.body.pos) < max * max;
+  }
+
+  /** Separate overlapping body-proxies. Asleep bodies act as infinite mass. */
+  _bodyContacts() {
+    const bodies = this.sims;
+    const n = bodies.length;
+    for (let i = 0; i < n; i++) {
+      const a = bodies[i];
+      if (!a.body) continue;
+      for (let j = i + 1; j < n; j++) {
+        const b = bodies[j];
+        if (!b.body) continue;
+        if (a.asleep && b.asleep) continue;
+        if (a.profile.proxy === "cylinder" && b.profile.proxy === "cylinder") {
+          this._cylinderPair(a, b);
+        } else {
+          this._spherePair(a, b);
+        }
+      }
+    }
+  }
+
+  _spherePair(a, b) {
+    const ra = a.profile.radius, rb = b.profile.radius;
+    const sum = ra + rb;
+    _pairN.copy(b.body.pos).sub(a.body.pos);
+    const d2 = _pairN.lengthSq();
+    if (d2 >= sum * sum) return;
+    if (d2 < 1e-10) _pairN.set(0, 1, 0);
+    else _pairN.multiplyScalar(1 / Math.sqrt(d2));
+    const dist = d2 < 1e-10 ? 0 : Math.sqrt(d2);
+    this._resolveAlong(a, b, _pairN.x, _pairN.y, _pairN.z, sum - dist);
+  }
+
+  /**
+   * Lying-flat tyre vs tyre. A sphere the size of the disc would shove a
+   * pancake stack apart vertically (centres are only a thickness apart).
+   * SAT on a Y-cylinder: separate on the axis of least penetration.
+   */
+  _cylinderPair(a, b) {
+    const ra = a.profile.size.length * 0.5, rb = b.profile.size.length * 0.5;
+    const ha = a.profile.size.height * 0.5, hb = b.profile.size.height * 0.5;
+    const dx = b.body.pos.x - a.body.pos.x;
+    const dz = b.body.pos.z - a.body.pos.z;
+    const dy = b.body.pos.y - a.body.pos.y;
+    const horiz = Math.hypot(dx, dz);
+    const overlapH = ra + rb - horiz;
+    const overlapY = ha + hb - Math.abs(dy);
+    if (overlapH <= 0 || overlapY <= 0) return;
+    if (overlapY <= overlapH) {
+      this._resolveAlong(a, b, 0, dy >= 0 ? 1 : -1, 0, overlapY);
+    } else if (horiz < 1e-8) {
+      this._resolveAlong(a, b, 1, 0, 0, overlapH);
+    } else {
+      this._resolveAlong(a, b, dx / horiz, 0, dz / horiz, overlapH);
+    }
+  }
+
+  _resolveAlong(a, b, nx, ny, nz, pen) {
+    const invA = a.asleep ? 0 : 1;
+    const invB = b.asleep ? 0 : 1;
+    const inv = invA + invB;
+    if (inv === 0) return;
+    const s = pen / inv;
+    _pairN.set(nx, ny, nz);
+    if (invA) a.body.pos.addScaledVector(_pairN, -s);
+    if (invB) b.body.pos.addScaledVector(_pairN, s);
+    _pairV.copy(b.body.vel).sub(a.body.vel);
+    const rel = _pairV.x * nx + _pairV.y * ny + _pairV.z * nz;
+    if (rel < 0) {
+      const j = -rel / inv;
+      if (invA) a.body.vel.addScaledVector(_pairN, -j);
+      if (invB) b.body.vel.addScaledVector(_pairN, j);
+    }
+  }
+
+  /** Rest on the deck, or on another body underneath — using the same BVH. */
   _groundContact(s, dt) {
     const bvh = this.getGroundBvh?.();
     const b = s.body;
@@ -383,14 +553,39 @@ export class PropPhysics {
       );
       if (hit) floorY = hit.point.y;
     }
+    // Other bodies as extra floors. Without this a stacked tyre is snapped
+    // onto the road through the one it is sitting on, in a single frame.
+    let fromBody = false;
+    for (const o of this.sims) {
+      if (!o.body || o === s) continue;
+      if (o.body.pos.y >= b.pos.y - 1e-4) continue;
+      const dx = b.pos.x - o.body.pos.x;
+      const dz = b.pos.z - o.body.pos.z;
+      const horiz2 = dx * dx + dz * dz;
+      let impliedFloor;
+      if (s.profile.proxy === "cylinder" && o.profile.proxy === "cylinder") {
+        const rx = s.profile.size.length * 0.5 + o.profile.size.length * 0.5;
+        if (horiz2 >= rx * rx) continue;
+        impliedFloor = o.body.pos.y + o.profile.size.height * 0.5;
+      } else {
+        const sum = r + o.profile.radius;
+        if (horiz2 >= sum * sum) continue;
+        const restCenterY = o.body.pos.y + Math.sqrt(Math.max(0, sum * sum - horiz2));
+        impliedFloor = restCenterY - r;
+      }
+      if (floorY === null || impliedFloor > floorY) {
+        floorY = impliedFloor;
+        fromBody = true;
+      }
+    }
     if (floorY === null) return;      // off the track: let it fall away
 
     const pen = floorY + r - b.pos.y;
     if (pen <= 0) return;
     b.pos.y = floorY + r;
     if (b.vel.y < 0) {
-      b.vel.y = -b.vel.y * PROP_PHYSICS.restitution;
-      // A bounce should also scrub some spin, or cones skitter forever.
+      // Resting on another tyre must not bounce — a wall would jitter apart.
+      b.vel.y = fromBody ? 0 : -b.vel.y * PROP_PHYSICS.restitution;
       b.angVel.multiplyScalar(0.7);
     }
     // Tangential friction — this is what actually brings it to rest.
@@ -411,7 +606,7 @@ export class PropPhysics {
   _carImpulse(s, car, vehicle) {
     const P = PROP_PHYSICS;
     const b = s.body;
-    const r = s.profile.radius;
+    const r = s.profile.hitRadius ?? s.profile.radius;
 
     // Prop centre in chassis-local space.
     _qi.copy(car.quat).invert();
@@ -472,6 +667,7 @@ export class PropPhysics {
 
     s.asleep = false;
     s.stillFor = 0;
+    this._wakeCluster(s);
     return true;
   }
 
