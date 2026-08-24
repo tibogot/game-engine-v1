@@ -2212,20 +2212,56 @@ export class PropManager {
     }));
   }
 
-  /** @param {{type:string, position:number[], quaternion:number[], scale:number[]}[]} list */
+  /**
+   * @param {{type:string, position:number[], quaternion:number[], scale:number[]}[]} list
+   *
+   * REUSES THE PROPS IT ALREADY HAS, matched by type, instead of disposing every
+   * instance and re-`make()`ing the lot.
+   *
+   * This used to be a load-only path, where a 13 ms rebuild is invisible. It is
+   * now also how UNDO restores the prop layer (see registerHistoryLayer in
+   * roadGame), and there it sits behind Ctrl+Z: measured at **0.675 ms per
+   * prop**, so undoing a single cone drag on a 20-prop track cost 13.5 ms and a
+   * 300-prop track would have hitched for ~200 ms. Almost all of that is
+   * `def.make()` building geometry that is about to be identical.
+   *
+   * Undo is the case this is shaped for: the list is the SAME props in the same
+   * order with one transform different, so every one of them is pooled and the
+   * work drops to writing a position.
+   *
+   * Reuse needs the item to carry a full pose — `exportInstances` always writes
+   * one, so this is every real save. A hand-trimmed entry missing its quaternion
+   * or scale falls through to a fresh `make()` rather than inheriting whatever
+   * the pooled prop happened to be wearing.
+   */
   importInstances(list) {
     this.deselect();
-    for (const inst of this.instances) this._disposeInstance(inst);
+    /** Leftovers from the outgoing layout, bucketed by type. @type {Map<string, object[]>} */
+    const pool = new Map();
+    for (const inst of this.instances) {
+      const bucket = pool.get(inst.id);
+      if (bucket) bucket.push(inst);
+      else pool.set(inst.id, [inst]);
+    }
     this.instances = [];
-    if (!Array.isArray(list)) return;
-    for (const item of list) {
+    for (const item of (Array.isArray(list) ? list : [])) {
       const def = PROP_BY_ID.get(item.type);
       if (!def || !Array.isArray(item.position)) continue;
-      const root = def.make();
-      enableMeshShadows(root);
-      root.userData.isProp = true;
-      // Read the authored rest offset BEFORE the saved position overwrites it.
-      const restY = root.position.y;
+      const hasFullPose = Array.isArray(item.quaternion) && item.quaternion.length === 4
+        && Array.isArray(item.scale) && item.scale.length === 3;
+      let inst = hasFullPose ? pool.get(item.type)?.pop() : null;
+      if (!inst) {
+        const root = def.make();
+        enableMeshShadows(root);
+        root.userData.isProp = true;
+        // Read the authored rest offset BEFORE the saved position overwrites it.
+        inst = { id: item.type, def, root, collision: def.collision, restY: root.position.y };
+        this.group.add(root);
+      }
+      // NOT recomputed for a pooled prop: `restY` is the offset its `make()` left
+      // on the root, and the root is currently wearing a SAVED position. Reading
+      // it here would bake the last placement's height in as the rest offset.
+      const { root } = inst;
       root.position.fromArray(item.position);
       if (Array.isArray(item.quaternion) && item.quaternion.length === 4) {
         root.quaternion.fromArray(item.quaternion);
@@ -2233,8 +2269,8 @@ export class PropManager {
       if (Array.isArray(item.scale) && item.scale.length === 3) {
         root.scale.fromArray(item.scale);
       }
-      this.group.add(root);
-      const inst = { id: item.type, def, root, collision: def.collision, restY };
+      // Both are plain fields on the instance — no mesh to rebuild — so they
+      // re-apply to a pooled prop exactly as they do to a fresh one.
       setVariant(inst, item.variant ?? 0);
       inst.decal = !!item.decal;
       root.userData.propInstance = inst;
@@ -2242,6 +2278,8 @@ export class PropManager {
       this.captureAuthored(inst);
       this.instances.push(inst);
     }
+    // Whatever the incoming layout had no use for.
+    for (const bucket of pool.values()) for (const inst of bucket) this._disposeInstance(inst);
     this.onChange?.();
   }
 

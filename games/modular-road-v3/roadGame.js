@@ -399,6 +399,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // cannot re-seat a gate mid-swing.
     onChange: () => {
       bakeCollision(); flags?.sync(); propPhysics?.sync(); paletteUi?.refreshStatus?.();
+      // Props are a history layer now (see registerHistoryLayer below), so this
+      // is also the commit point — same "end of a user-visible edit" contract
+      // the road builder's own commits keep. No-ops while an undo is being
+      // applied, which is what stops it committing its own restore.
+      builder.commitLayerEdit("props");
     },
     onSelect: () => { movers.deselect(); portals.deselect?.(); builder.deselectPlacement?.(); },
     // The panel's livery swatches ARE the current selection's palette, so they
@@ -437,7 +442,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     camera,
     domElement: renderer.domElement,
     orbit: controls,
-    onChange: () => { bakeCollision(); paletteUi?.refreshStatus?.(); },
+    onChange: () => {
+      bakeCollision(); paletteUi?.refreshStatus?.();
+      builder.commitLayerEdit("movers");
+    },
     onSelect: () => { props.deselect(); portals.deselect?.(); builder.deselectPlacement?.(); },
     onSelectionChange: (inst) => moverInspector.show(inst),
   });
@@ -447,8 +455,38 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     domElement: renderer.domElement,
     orbit: controls,
     params: { ...DEFAULT_PORTAL_PARAMS },
-    onChange: () => paletteUi?.refreshStatus?.(),
+    onChange: () => { paletteUi?.refreshStatus?.(); builder.commitLayerEdit("portals"); },
     onActivate: () => { props.deselect(); movers.deselect(); builder.deselectPlacement?.(); },
+  });
+
+  // ── ONE HISTORY FOR THE WHOLE TRACK ────────────────────────────────────────
+  // Undo used to be the road builder's alone, so Ctrl+Z after deleting an
+  // obstacle undid a ROAD PIECE somewhere else, and "Clear track" left the props
+  // hanging in the air. Registering the three object managers as history layers
+  // is what makes Ctrl+Z / Ctrl+Y / Clear mean the same thing everywhere.
+  //
+  // capture/restore are the SAVE FILE's own serializers, deliberately: the
+  // format is already the canonical description of each layer, and a second,
+  // history-only encoding is how the two would drift apart.
+  builder.registerHistoryLayer("props", {
+    capture: () => props.exportInstances(),
+    restore: (v) => props.importInstances(v),
+    clear: () => props.clear(),
+    count: () => props.instances.length,
+  });
+  builder.registerHistoryLayer("movers", {
+    capture: () => movers.exportInstances(),
+    restore: (v) => movers.importInstances(v),
+    clear: () => movers.clear(),
+    count: () => movers.instances.length,
+  });
+  builder.registerHistoryLayer("portals", {
+    capture: () => portals.exportLayout(),
+    restore: (v) => portals.importLayout(v),
+    clear: () => portals.clear(),
+    // A pair is two doors, and the count exists to tell the user what Clear is
+    // about to delete — so count what they can see and click.
+    count: () => portals.pairs.length * 2,
   });
 
   // Live-bake real 3/4 thumbnails for every piece + preset so palette tiles show

@@ -141,6 +141,38 @@ function _ballisticLanding(connector, speed, g, landingDrop, dragK = 0) {
 }
 
 /**
+ * Deep equality over PLAIN JSON-ish data — what the history layers serialize to
+ * (arrays of `{type, position:[…], quaternion:[…], …}`), and nothing else.
+ *
+ * Exists to answer "did this layer really change?", which a reference compare
+ * cannot: a manager fires its change callback on every gizmo mouseUp, including
+ * the one where you clicked a handle and let go without dragging. Left alone
+ * that pushed an undo step in which nothing differs, so Ctrl+Z did nothing —
+ * the same dead-step bug `_sameStructure` was written to keep off the stack.
+ *
+ * Exact number equality is the point: bit-identical means the user did not move
+ * it. Only ever called on a layer that reported a change, so it costs nothing on
+ * the road edits that make up most commits.
+ */
+function plainEqual(a, b) {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!plainEqual(a[i], b[i])) return false;
+    return true;
+  }
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) {
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+    if (!plainEqual(a[k], b[k])) return false;
+  }
+  return true;
+}
+
+/**
  * Auto-chain modular road builder. Pieces always snap onto the track's current
  * open exit connector — no grid. Each placed entry stores the piece id and a
  * snapshot of its geometry params so the whole chain can be rebuilt (e.g. when
@@ -258,6 +290,41 @@ export class ModularRoadBuilder {
     this._baseline = null;
     /** While true, edits do not commit — see `_asOneEdit`. */
     this._histSuspend = false;
+
+    /**
+     * EXTERNAL HISTORY LAYERS — props, movers, portals.
+     *
+     * The track is FOUR authored layers, not one, and only this class owned a
+     * history. So Ctrl+Z after moving an obstacle undid a ROAD PIECE somewhere
+     * else on the map, and "Clear track" left every prop hanging in the air over
+     * the road it used to sit on.
+     *
+     * They are folded in here rather than into a new history object above the
+     * builder because the commit rules are already all here — `_sameStructure`,
+     * `_markCursor`, `_asOneEdit`, the cursor-only fold — and duplicating them
+     * one level up is how the two histories would drift apart again.
+     *
+     * Each layer supplies capture/restore/clear. The managers already had the
+     * first two under other names (`exportInstances` / `importInstances`), which
+     * is what makes this cheap: a layer snapshot is the same plain array the
+     * save file holds.
+     *
+     * PERFORMANCE, and the reason for `dirty`/`cache`: `capture()` allocates one
+     * plain object per instance, and a commit fires on EVERY piece placement and
+     * EVERY gizmo drag-end. Serializing three hundred props each time a road
+     * piece is laid would be pure waste, since they did not move. So a layer is
+     * only re-serialized after it says it changed; otherwise the snapshot takes
+     * the previous array BY REFERENCE. That makes "did this layer change?" a
+     * pointer compare, and lets `_restore` skip layers that are already correct —
+     * the same reuse discipline `rebuildAll({reuse})` uses for pieces.
+     * @type {{name:string, capture:()=>any, restore:(v:any)=>void, clear:(()=>void)|null, cache:any, dirty:boolean}[]}
+     */
+    this._histLayers = [];
+    /** True while `_restore` is putting a snapshot back. Layer restores make the
+     *  managers fire their own change callbacks, and those call
+     *  `commitLayerEdit` — which would push the state we are restoring FROM back
+     *  onto the stack, mid-undo. */
+    this._histRestoring = false;
 
     /** Anchor gizmo state for the active chain. `_freeQuat` is the FULL
      *  orientation (pitch/roll/yaw) — this is what lets an anchor tilt, e.g. a
@@ -3033,9 +3100,107 @@ export class ModularRoadBuilder {
     }
   }
 
+  /**
+   * Put a non-road layer (props / movers / portals) under this history.
+   *
+   * @param {string} name stable key — it is what a snapshot stores the layer under
+   * @param {object} o
+   * @param {() => any} o.capture serialize the layer (the manager's export*)
+   * @param {(v:any) => void} o.restore put a captured value back (the manager's import*)
+   * @param {() => void} [o.clear] wipe the layer for `clearAll()`
+   * @param {() => number} [o.count] how many objects it holds, for `trackCounts()`
+   */
+  registerHistoryLayer(name, { capture, restore, clear = null, count = null }) {
+    if (this._histLayers.some((l) => l.name === name)) return;
+    this._histLayers.push({ name, capture, restore, clear, count, cache: null, dirty: true });
+    // The baseline was seeded in the constructor, BEFORE this layer existed, so
+    // its `layers` has no entry for it. Left alone, the first prop edit would
+    // commit a baseline whose props are `undefined`, and undoing back to it
+    // would restore nothing — the layer would silently sit outside history for
+    // exactly one step. Re-capture so the starting state is complete.
+    if (this._baseline) this._baseline.layers = this._captureLayers();
+  }
+
+  /**
+   * A registered layer changed — record it as an edit.
+   *
+   * This is what the managers' `onChange` calls. It must run at the END of a
+   * user-visible edit for the same reason `_commit` does: a gizmo drag that
+   * committed every frame would bury the stack.
+   */
+  commitLayerEdit(name) {
+    // Mid-undo. The manager is only firing because WE just restored it.
+    if (this._histRestoring) return;
+    const layer = this._histLayers.find((l) => l.name === name);
+    if (!layer) return;
+    layer.dirty = true;
+    this._commit();
+  }
+
+  /** True while an undo/redo is being applied — for callers whose change
+   *  handlers want to skip work the undo itself will do once at the end. */
+  get isRestoringHistory() { return this._histRestoring; }
+
+  /** Serialize every layer that says it changed; reuse the rest by reference. */
+  _captureLayers() {
+    if (!this._histLayers.length) return null;
+    const out = {};
+    for (const layer of this._histLayers) {
+      if (layer.dirty) {
+        const next = layer.capture();
+        // KEEP THE OLD REFERENCE when the data is identical. A gizmo mouseUp
+        // with no drag reports a change but moved nothing; holding the previous
+        // array is what makes `_sameLayers` see "no edit" and fold the commit
+        // away, instead of pushing a step that undoes to the same picture.
+        if (!plainEqual(layer.cache, next)) layer.cache = next;
+        layer.dirty = false;
+      }
+      out[layer.name] = layer.cache;
+    }
+    return out;
+  }
+
+  /** Reference compare per layer — see the `dirty`/`cache` note in the ctor. */
+  _sameLayers(a, b) {
+    for (const layer of this._histLayers) {
+      if (a?.layers?.[layer.name] !== b?.layers?.[layer.name]) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Re-import only the layers that actually differ from what is on screen.
+   *
+   * The skip matters: `importInstances` disposes and re-`make()`s every instance
+   * in the layer, so restoring all three on every undo would rebuild hundreds of
+   * props to undo a road piece that never touched them.
+   */
+  _restoreLayers(snap) {
+    if (!snap.layers) return;
+    for (const layer of this._histLayers) {
+      const v = snap.layers[layer.name];
+      if (v === undefined) continue;
+      // `dirty` means the layer moved since we last serialized it, so `cache` is
+      // stale and cannot vouch for what is on screen — restore regardless.
+      if (!layer.dirty && layer.cache === v) continue;
+      layer.restore(v);
+      // Set AFTER the restore: the manager's change callback fires from inside
+      // it, and `_histRestoring` is what stops that re-dirtying the layer.
+      layer.cache = v;
+      layer.dirty = false;
+    }
+  }
+
   /** True when two snapshots describe the same TRACK — cursor ignored. Used to
    *  keep cursor-only commits (every gizmo drag-end fires one) off the stack. */
   _sameStructure(a, b) {
+    return this._sameRoad(a, b) && this._sameLayers(a, b);
+  }
+
+  /** True when two snapshots describe the same ROAD — layers and cursor ignored.
+   *  Split out from `_sameStructure` so an undo can tell an object-only step
+   *  from one that moved the track, and skip the road rebuild for the former. */
+  _sameRoad(a, b) {
     if (!a || !b) return false;
     if (a.chainSeq !== b.chainSeq) return false;
     if (a.chains.length !== b.chains.length) return false;
@@ -3066,6 +3231,9 @@ export class ModularRoadBuilder {
       // and two chains sharing an id silently merge.
       chainSeq: this.chainSeq,
       chains: this.chains.map((c) => ({ id: c.id, anchor: c.anchor.clone() })),
+      // Props / movers / portals. Unchanged layers come back by reference, so
+      // this line is free on the road edits that make up most commits.
+      layers: this._captureLayers(),
       // `pp` by reference: cloned once at placement, never mutated, so sharing it
       // is safe and keeps a snapshot to a few hundred bytes instead of 50 numbers
       // per piece.
@@ -3078,8 +3246,32 @@ export class ModularRoadBuilder {
     };
   }
 
-  /** Put the track back into a snapshotted state, rebuilding only what moved. */
-  _restore(snap) {
+  /**
+   * Put the track back into a snapshotted state, rebuilding only what moved.
+   *
+   * @param {object} snap
+   * @param {boolean} [restoreRoad] false for an OBJECT-ONLY step (a prop moved,
+   *   nothing on the road did). Skipping the road there is not a micro-saving:
+   *   `rebuildAll` ends in a full notify, and the listener's half of that is
+   *   `applyRailReflectionMembers` — which world-bakes and merges every piece's
+   *   mirrored rail, 280,330 vertices on rushline. Undoing a cone drag has no
+   *   business re-merging the guardrails.
+   */
+  _restore(snap, restoreRoad = true) {
+    const outer = this._histRestoring;
+    this._histRestoring = true;
+    try { this._restoreInner(snap, restoreRoad); } finally { this._histRestoring = outer; }
+  }
+
+  _restoreInner(snap, restoreRoad) {
+    if (!restoreRoad) {
+      // The cursor still travels with the step even when the road does not —
+      // it is where the user WAS, and it is cheap.
+      this._applyCursor(snap.cursor);
+      this._showGizmoForCursor();
+      this._restoreLayers(snap);
+      return;
+    }
     const byUid = new Map(this.pieces.map((p) => [p.uid, p]));
     const keep = new Set(snap.pieces.map((e) => e.uid));
     for (const p of this.pieces) if (!keep.has(p.uid)) this._removePiece(p);
@@ -3111,6 +3303,11 @@ export class ModularRoadBuilder {
     // may have dragged an ATTACHED ghost with it, so put the cursor back last.
     this._applyCursor(snap.cursor);
     this._showGizmoForCursor();
+
+    // AFTER the road, not before: a layer's restore fires the manager's change
+    // callback, which is where the collision re-bake and the flag/physics
+    // re-sync hang — and those should see the rebuilt deck, not the old one.
+    this._restoreLayers(snap);
   }
 
   /**
@@ -3153,6 +3350,12 @@ export class ModularRoadBuilder {
   resetHistory() {
     this._undoStack.length = 0;
     this._redoStack.length = 0;
+    // Force a fresh serialize of every layer. A load replaces the props and
+    // movers wholesale, and the caller may well have imported them without ever
+    // going through `commitLayerEdit` — so the cached arrays describe the
+    // PREVIOUS track. Re-capturing costs one pass per layer, once per load, and
+    // is what stops the new baseline from being a lie.
+    for (const layer of this._histLayers) layer.dirty = true;
     this._baseline = this._snapshot();
   }
 
@@ -3169,22 +3372,39 @@ export class ModularRoadBuilder {
 
   undo() {
     if (!this._undoStack.length) return false;
-    this._redoStack.push(this._baseline ?? this._snapshot());
-    const snap = this._undoStack.pop();
-    this._restore(snap);
-    this._baseline = snap;
-    this._notify();
+    const from = this._baseline ?? this._snapshot();
+    this._redoStack.push(from);
+    this._applyStep(from, this._undoStack.pop());
     return true;
   }
 
   redo() {
     if (!this._redoStack.length) return false;
-    this._undoStack.push(this._baseline ?? this._snapshot());
-    const snap = this._redoStack.pop();
-    this._restore(snap);
-    this._baseline = snap;
-    this._notify();
+    const from = this._baseline ?? this._snapshot();
+    this._undoStack.push(from);
+    this._applyStep(from, this._redoStack.pop());
     return true;
+  }
+
+  /**
+   * Walk from one committed state to another — the shared half of undo/redo.
+   *
+   * `_baseline` is by contract what is on screen, so comparing it with the step
+   * we are moving to says whether the ROAD is involved at all. An object-only
+   * step (the common one once props are in history) then costs a layer import
+   * and nothing else.
+   */
+  _applyStep(from, to) {
+    const roadChanged = !this._sameRoad(from, to);
+    this._restore(to, roadChanged);
+    this._baseline = to;
+    // `rebuildAll` fires its own full notify, so re-firing one here would merge
+    // the mirror rails TWICE per undo. The one case it cannot cover is an undo
+    // pressed mid-drag, where it deliberately passes `collision: false`.
+    // Everything else only needs the cheap half — the status line and the rail
+    // posts — since the geometry it would recompute did not move.
+    const alreadySettled = !roadChanged || !this.placementGizmo?.dragging;
+    this._notify(alreadySettled ? { collision: false } : {});
   }
 
   clear() {
@@ -3209,6 +3429,42 @@ export class ModularRoadBuilder {
     this.refreshGhost();
     this._commit();
     this._notify();
+  }
+
+  /** What is on the track right now, split the way the user thinks about it:
+   *  road pieces vs everything standing on them.
+   *  @returns {{pieces:number, objects:number}} */
+  trackCounts() {
+    let objects = 0;
+    for (const layer of this._histLayers) objects += layer.count?.() ?? 0;
+    return { pieces: this.pieces.length, objects };
+  }
+
+  /**
+   * WIPE THE WHOLE TRACK — road pieces AND every registered layer — as ONE undo
+   * step. This is what the palette's "Clear track" button means.
+   *
+   * `clear()` stays road-only on purpose: `importTrackPieces`, `loadDemo`,
+   * `loadBigCircuit` and `dispose` all call it as an internal "reset the
+   * chains" step, and a load that wiped the props a moment before importing
+   * them would be a race waiting to happen.
+   *
+   * @returns {{pieces:number, objects:number}} what was removed
+   */
+  clearAll() {
+    const removed = this.trackCounts();
+    // Out here, not inside: `clear()` does this itself, but `_asOneEdit` has
+    // suspended history by then and `_markCursor` deliberately no-ops while
+    // suspended — so the undo step would record the post-clear cursor.
+    this._markCursor();
+    // ONE entry, not one per layer: `clear()` commits, and so does every
+    // manager's change callback, so without this a single button press would
+    // cost four presses of Ctrl+Z to walk back.
+    this._asOneEdit(() => {
+      this.clear();
+      for (const layer of this._histLayers) layer.clear?.();
+    });
+    return removed;
   }
 
   /**
@@ -5662,7 +5918,22 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   // tools/builderHistoryTest.mjs, tools/landingPlacementTest.mjs and
   // tools/tileIsABlockTest.mjs. Only the UI wiring is gone.
   document.getElementById("road-clear")?.addEventListener("click", () => {
-    builder.clear();
+    // CLEARS THE OBJECTS TOO. It used to take only the road pieces, which left
+    // every prop, mover and portal hanging in the air over the track that used
+    // to hold them up — "clear track" has to mean the track.
+    //
+    // The confirm appears ONLY when there is something beyond the road to lose.
+    // A road-only clear feels exactly as it always did (this button gets pressed
+    // a lot while iterating), and the dialog shows up precisely in the case that
+    // used to surprise people — naming the object count is what teaches them the
+    // button reaches both.
+    const { pieces, objects } = builder.trackCounts();
+    if (objects > 0) {
+      const parts = [`${pieces} road piece${pieces === 1 ? "" : "s"}`,
+        `${objects} object${objects === 1 ? "" : "s"}`];
+      if (!window.confirm(`Clear ${parts.join(" and ")}?\n\nCtrl+Z undoes this.`)) return;
+    }
+    builder.clearAll();
     refreshStatus();
   });
 

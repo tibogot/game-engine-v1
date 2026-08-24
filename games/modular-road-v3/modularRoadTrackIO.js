@@ -93,6 +93,14 @@ export function importTrack(data, ctx) {
   if (ctx.movers) ctx.movers.importInstances(data.movers);
   ctx.portals.importLayout(data.portals);
 
+  // AFTER the objects, not before. `importTrackPieces` resets the history itself
+  // — correctly, for the pieces — but props/movers/portals are history layers
+  // now and they are imported on the lines above it, so that baseline described
+  // the road from the NEW track and the objects from the OLD one. The first
+  // object edit after a load then committed a step whose undo dragged the
+  // previous track's props back onto the map. Re-seed once everything has landed.
+  ctx.builder.resetHistory?.();
+
   return { ok: true, pieceCount: ctx.builder.count };
 }
 
