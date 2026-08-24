@@ -342,6 +342,65 @@ function boostTubeGroup(r = 7.3, len = 5.2, color = 0x18ffd0) {
   return g;
 }
 
+/**
+ * Optimized tube booster: purple chevron band only — no translucent sleeve, no
+ * mouth toruses. The old `boostTubeGroup` draws filled triangles; this one draws
+ * real open chevrons (`>` stroke) in a few rows around the cylinder, still a
+ * single emissive mesh. Same rest-offset / snap convention as the original.
+ *
+ * (The "sleeve" on the old prop was a faint dark glass cylinder behind the
+ * arrows — dropped here; chevrons alone carry the read.)
+ */
+function boostTubeGroupNew(r = 7.3, len = 5.2, color = 0xb44dff) {
+  const g = new THREE.Group();
+  g.name = "BoostTubeNew";
+
+  // Circumference count × rows along −Z → racing `>>>` wrapped into a hoop.
+  const K = 8;
+  const ROWS = 3;
+  const halfArc = 1.65; // outer arm half-width along the wall (m)
+  const strokeArc = 0.45; // how thick the V stroke is along the wall (m)
+  const rowPitch = len * 0.28;
+  const row0 = -rowPitch;
+
+  const pos = [];
+  const push = (ph, z) => {
+    pos.push(Math.cos(ph) * r, Math.sin(ph) * r, z);
+  };
+  const tri = (ph0, z0, ph1, z1, ph2, z2) => {
+    push(ph0, z0); push(ph1, z1); push(ph2, z2);
+  };
+
+  for (let row = 0; row < ROWS; row++) {
+    const zTip = row0 + row * rowPitch;
+    const zBack = zTip + len * 0.2;
+    // Inner tip sits part-way back so the notch opens toward +Z (entry side).
+    const zInner = zTip + (zBack - zTip) * 0.48;
+    const dphi = halfArc / r;
+    const dphiIn = Math.max(0.08, (halfArc - strokeArc) / r);
+    for (let k = 0; k < K; k++) {
+      const phi = (2 * Math.PI * k) / K;
+      // Right arm quad (oTip → oR → iR → iTip), then left mirror.
+      // iR/iL stay close to the outer arms so the middle stays open.
+      tri(phi, zTip, phi + dphi, zBack, phi + dphiIn, zBack);
+      tri(phi, zTip, phi + dphiIn, zBack, phi, zInner);
+      tri(phi, zTip, phi, zInner, phi - dphiIn, zBack);
+      tri(phi, zTip, phi - dphiIn, zBack, phi - dphi, zBack);
+    }
+  }
+
+  const chevGeo = new THREE.BufferGeometry();
+  chevGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  chevGeo.computeVertexNormals();
+  g.add(new THREE.Mesh(
+    chevGeo,
+    mat(color, { roughness: 0.3, emissive: color, emissiveIntensity: 5, side: THREE.DoubleSide }),
+  ));
+
+  g.position.y = r;
+  return g;
+}
+
 /** Functional boost ring: an emissive cyan torus gate that slingshots the car
  *  forward when driven through. Distinct cyan glow (vs the orange Glow ring). */
 function boostRingGroup() {
@@ -1296,6 +1355,24 @@ export const PROP_CATALOG = [
       apply(vehicle, dt, fwd) {
         const body = vehicle.body;
         const target = 68; // punchier than the flat pad — tubes eat speed
+        const along = body.vel.dot(fwd);
+        if (along < target) body.vel.addScaledVector(fwd, Math.min(400 * dt, target - along));
+      },
+    },
+  },
+  {
+    id: "boosttubenew",
+    label: "BOOSTER tube new",
+    collision: "none",
+    make: () => boostTubeGroupNew(),
+    // Same trigger footprint / punch as the original tube booster — only the
+    // look differs (purple open chevrons, no sleeve / mouth rings).
+    field: {
+      center: [0, 0, 0],
+      half: [7.6, 7.6, 3],
+      apply(vehicle, dt, fwd) {
+        const body = vehicle.body;
+        const target = 68;
         const along = body.vel.dot(fwd);
         if (along < target) body.vel.addScaledVector(fwd, Math.min(400 * dt, target - along));
       },
