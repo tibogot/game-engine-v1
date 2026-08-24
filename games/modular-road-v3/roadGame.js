@@ -2169,6 +2169,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // to match. `worldToolState.light.sunElevation` isn't on the app's public API,
   // so the sun's DirectionalLight is located in the scene and its direction used
   // — no engine source touched.
+  //
+  // The car's two SpotLights are the ONLY punctual lights in the game — the rest
+  // of the world is the sun plus ambient — so they are also the only thing that
+  // can change the scene's light SET, and changing that set costs a full-scene
+  // shader rebuild. They no longer do; see HEADLIGHTS in modularRoadVehicle.js.
   let sunLight = null;
   scene.traverse((o) => { if (!sunLight && o.isDirectionalLight) sunLight = o; });
 
@@ -2184,12 +2189,24 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   /**
    * Sun height → lights. Hysteresis (on below 0.10, off above 0.16) so the lamps
    * don't strobe when the sun sits right on the threshold.
+   *
+   * Flipping the beams is a uniform write now (see HEADLIGHTS in
+   * v3/play/modularRoadVehicle.js), so this is free to fire whenever it likes.
+   * It used to toggle `SpotLight.visible`, which rebuilt every shader in the
+   * world — which is why dragging the world panel's sun through dusk froze the
+   * game harder than pressing H did: the stall arrived unasked, mid-drive, on the
+   * same frame as the sun move that caused it.
    */
   function updateAutoHeadlights() {
     if (!sunLight) return;
     _sunDir.copy(sunLight.position);
     if (sunLight.target) _sunDir.sub(sunLight.target.position);
-    if (_sunDir.lengthSq() < 1e-8) return;
+    // Written as `!(len > eps)`, NOT `len < eps`: a NaN sun — which this scene
+    // has been seen to produce mid-play — fails every comparison, so the old
+    // guard passed it straight through and the elevation test below then
+    // answered "false" to BOTH branches. Auto headlights would quietly stop
+    // tracking time of day for the rest of the session with nothing to show why.
+    if (!(_sunDir.lengthSq() > 1e-8)) return;
     const sinElev = _sunDir.normalize().y;
     // The same normalised vector drives the smoke's per-billboard shading, and
     // the sun moves with time of day — so this is computed BEFORE the

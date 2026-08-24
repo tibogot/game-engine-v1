@@ -1577,9 +1577,35 @@ export const WHEEL = {
  *  any model-derived size. */
 export const WHEEL_PROCEDURAL = { radius: 0.36, thickness: 0.24 };
 
-/** Forward-facing headlights (cheap, no shadows). Two SpotLights parented to the
- *  chassis mesh so they follow position + orientation for free. Mount/aim offsets
- *  are chassis-local meters: +Z front, +Y up, +X right. */
+/**
+ * Forward-facing headlights (cheap, no shadows). Two SpotLights parented to the
+ * chassis mesh so they follow position + orientation for free. Mount/aim offsets
+ * are chassis-local meters: +Z front, +Y up, +X right.
+ *
+ * THEY ARE SWITCHED WITH `intensity`, NEVER WITH `visible` — and that is not a
+ * style choice, it is the difference between an instant toggle and a stall of
+ * several hundred milliseconds.
+ *
+ * three's WebGPU renderer skips invisible objects when it builds the render list
+ * (`Renderer._projectObject`: `if (object.visible === false) return`), so hiding
+ * a light REMOVES IT FROM THE SCENE'S LIGHT SET. That set is hashed into
+ * `LightsNode.customCacheKey()` (one entry per light id), which is folded into
+ * `NodeManager.getCacheKey()`, which is folded into EVERY RenderObject's dynamic
+ * cache key. Change it and every visible material in the world — terrain, grass,
+ * trees, road, props, clouds, the car — is rebuilt on that one frame: new node
+ * graph, new WGSL, new GPUShaderModule, new GPURenderPipeline, created through
+ * the SYNCHRONOUS `device.createRenderPipeline` (the async path only runs inside
+ * `compileAsync`). And it is not a one-off: switching back off drops the
+ * pipelines' `usedTimes` to zero and releases them, so the next switch-on pays
+ * again. These are the only punctual lights in the game, so the delta is the
+ * worst possible one — zero spot lights to two.
+ *
+ * `intensity` is pure uniform data (`AnalyticLightNode.update` folds it into the
+ * light-colour uniform each frame), so it is in no cache key at all. The price
+ * is that two spot-light terms are compiled into every lit shader permanently,
+ * including at noon — no shadows, no map, no colour node, so it is a couple of
+ * ALU ops per fragment against a guaranteed multi-frame freeze.
+ */
 export const HEADLIGHTS = {
   enabled: false,
   color: "#fff2d6",
@@ -2688,7 +2714,12 @@ export class Vehicle {
       this.chassisMesh.add(light);
       this.chassisMesh.add(target);
       light.target = target;
-      light.visible = H.enabled;
+      // Permanently in the render list — see HEADLIGHTS. `visible` is what the
+      // renderer reads to decide whether this light is part of the scene's light
+      // set, and changing that set recompiles every shader in the world. Off is
+      // intensity 0, and only intensity 0.
+      light.visible = true;
+      light.intensity = H.enabled ? H.intensity : 0;
       this.headlights.push(light);
       this.headlightTargets.push(target);
 
@@ -2713,9 +2744,37 @@ export class Vehicle {
     }
   }
 
+  /**
+   * Switch the beams. This is a UNIFORM WRITE and nothing else — no scene-graph
+   * change, no material touched, so it costs the same whether it happens while
+   * parked on an empty plate or at 200 km/h with the whole world on screen. See
+   * HEADLIGHTS for what the `visible`-based version used to cost.
+   */
   setHeadlights(on) {
     HEADLIGHTS.enabled = !!on;
-    this.applyHeadlightParams();
+    // Unconditional, with no early-out on "already in that state": HEADLIGHTS is
+    // module-level and shared, so a fresh Vehicle can inherit `enabled` from a
+    // previous one. The caller's setHeadlights(false) at boot has to actually
+    // reach the rig, or the game and the beams disagree about what is lit.
+    this._syncHeadlightSwitch();
+  }
+
+  /**
+   * Push HEADLIGHTS.enabled onto the rig — beam intensity and lamp-face
+   * visibility, deliberately nothing else. No colour parsing, no re-mounting:
+   * those only change when a slider moves, and that goes through
+   * applyHeadlightParams().
+   */
+  _syncHeadlightSwitch() {
+    const H = HEADLIGHTS;
+    const beam = H.enabled ? H.intensity : 0;
+    for (const l of this.headlights) l.intensity = beam;
+    // The GLB body carries its own lamp lenses (lit from _updateTaillights), so
+    // the procedural faces stay hidden in that style — showing both puts two
+    // sets of lamps inside one bonnet. This is the ONE place that decides it;
+    // _applyChassisStyle used to set it and then have this overwrite the answer.
+    const showLamps = H.enabled && this._chassisStyle !== "glb";
+    for (const m of this.headlamps) m.visible = showLamps;
   }
 
   /**
@@ -2737,7 +2796,12 @@ export class Vehicle {
     this.applyHeadlightParams();
   }
 
-  /** Re-sync the headlight rig after editing HEADLIGHTS params live. */
+  /**
+   * Re-sync the headlight rig after editing HEADLIGHTS params live (the Lights
+   * panel sliders, or a chassis-style / mount change). This is the SLOW path —
+   * it re-parses colours and re-places every mount. The on/off switch does NOT
+   * come through here; see setHeadlights.
+   */
   applyHeadlightParams() {
     const H = HEADLIGHTS;
     // Only the GLB has real lamps to sit in; the box gets the tuned constants.
@@ -2746,12 +2810,10 @@ export class Vehicle {
       const s = i === 0 ? -1 : 1;
       const l = this.headlights[i];
       l.color.set(H.color);
-      l.intensity = H.intensity;
       l.distance = H.distance;
       l.angle = H.angle;
       l.penumbra = H.penumbra;
       l.decay = H.decay;
-      l.visible = H.enabled;
       const mx = mounts ? mounts[i].x : s * H.side;
       const my = mounts ? mounts[i].y : H.height;
       const mz = mounts ? mounts[i].z : H.forward;
@@ -2765,8 +2827,10 @@ export class Vehicle {
       m.material.emissive.set(H.color);
       m.material.emissiveIntensity = H.lampEmissive;
       m.position.set(s * H.side, H.height, H.forward + 0.02);
-      m.visible = H.enabled;
     }
+    // Intensity and lamp visibility are owned by the switch, so that moving the
+    // beam slider with the lights OFF stores the new value without lighting them.
+    this._syncHeadlightSwitch();
   }
 
   _buildTaillights() {
@@ -2902,8 +2966,8 @@ export class Vehicle {
     // the model's own emissive parts. The SpotLights stay either way — they light
     // the road, which no amount of emissive geometry does.
     for (const m of this.taillights) if (useGlb) m.visible = false;
-    for (const m of this.headlamps) m.visible = useGlb ? false : HEADLIGHTS.enabled;
-    // The mounts only apply in glb style, so the beams have to be re-placed.
+    // The mounts only apply in glb style, so the beams have to be re-placed —
+    // and this also re-runs the lamp-face visibility rule for the new style.
     this.applyHeadlightParams();
   }
 
