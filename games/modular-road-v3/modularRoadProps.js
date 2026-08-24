@@ -180,45 +180,64 @@ function makeRoadBlock() {
 }
 
 /**
- * Flush deck pad: dark slab + bright emissive chevrons pointing along local −Z
- * (the "forward" the car is meant to enter from). The effect (boost / launch)
- * comes from the prop's `field` trigger zone (see PropManager.applyFields), not
- * the geometry — this is just the look. Used by both the boost and launch pads.
+ * Arcade boost decal: `>>>` from true square pixels on a uniform XZ grid.
+ *
+ * Each lit cell is a square (equal X and Z extent) with a fixed gap — the old
+ * version stepped diagonally with stacked offsets, which read as rectangles.
+ * Still one merged mesh.
  */
-function flatPadGroup(w, d, color, name = "Pad") {
-  const g = new THREE.Group();
-  g.name = name;
-  const base = new THREE.Mesh(
-    new THREE.BoxGeometry(w, BOOST_H, d),
-    mat(0x0d1116, { roughness: 0.5, metalness: 0.25, emissive: 0x0a1f24, emissiveIntensity: 0.5 }),
-  );
-  base.position.y = BOOST_H / 2 + 0.04; // sit flush just above the deck
-  g.add(base);
+function pixelChevronRunMesh(w, d, color, y = 0.06) {
+  const cell = 0.34; // square side (m) — same on X and Z
+  const gap = 0.07;
+  const step = cell + gap;
+  const rows = 10; // rows per chevron (tip + arm length)
+  const stroke = 2; // arm thickness in grid cells
+  const count = 3;
+  const span = d * 0.74;
+  const z0 = span * 0.5;
+  const chevLen = (rows - 1) * step;
+  const chevGap = count > 1 ? Math.max(step * 1.5, (span - chevLen) / (count - 1)) : 0;
+  const half = cell * 0.5;
 
-  const y = BOOST_H + 0.06;
-  const hw = w * 0.34;
-  const aLen = Math.min(3.4, d * 0.22); // arrowhead length
-  const gap = d * 0.24;
-  const pos = [];
-  for (let i = 0; i < 3; i++) {
-    const zBack = gap - i * gap; // base edge; tip is aLen further forward (−Z)
-    pos.push(0, y, zBack - aLen, hw, y, zBack, -hw, y, zBack); // tip, right, left
+  const lit = new Set();
+  for (let c = 0; c < count; c++) {
+    const tipZ = z0 - (count <= 1 ? 0 : c * (chevLen + chevGap));
+    for (let r = 0; r < rows; r++) {
+      const cz = tipZ + r * step;
+      const place = (ix) => {
+        if (Math.abs(ix) * step > w * 0.46) return;
+        lit.add(`${ix * step},${cz}`);
+      };
+      if (r === 0) place(0);
+      else {
+        for (let t = 0; t < stroke; t++) {
+          const ix = r - t;
+          place(ix);
+          place(-ix);
+        }
+      }
+    }
   }
-  const chevGeo = new THREE.BufferGeometry();
-  chevGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  chevGeo.computeVertexNormals();
-  const chev = new THREE.Mesh(
-    chevGeo,
+
+  const pos = [];
+  for (const key of lit) {
+    const [cx, cz] = key.split(",").map(Number);
+    pos.push(
+      cx - half, y, cz - half, cx + half, y, cz - half, cx + half, y, cz + half,
+      cx - half, y, cz - half, cx + half, y, cz + half, cx - half, y, cz + half,
+    );
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  return new THREE.Mesh(
+    geo,
     mat(color, { roughness: 0.3, emissive: color, emissiveIntensity: 5, side: THREE.DoubleSide }),
   );
-  g.add(chev);
-  return g;
 }
 
-/**
- * Emissive chevrons pointing along local −Z, laid flat at deck level.
- * Shared arrow-drawing for the pad decals (no slab — see flatDecalGroup).
- */
+/** Emissive triangle chevrons — used by the raised boost / launch pads only. */
 function chevronRunMesh(w, d, color, y = 0.06) {
   const hw = w * 0.34;
   const aLen = Math.min(3.4, d * 0.22);
@@ -238,25 +257,39 @@ function chevronRunMesh(w, d, color, y = 0.06) {
 }
 
 /**
- * TRUE flat decal: emissive chevrons only, hugging the deck like paint. No
- * raised slab (see flatPadGroup) and no translucent tint plane — one mesh, one
- * bloom batch. Same trigger-field effects as the pad props; use this when the
- * raised pad base would read as an obstacle (banked decks, tube floors, narrow
- * roads).
+ * Flush deck pad: dark slab + bright emissive chevrons pointing along local −Z
+ * (the "forward" the car is meant to enter from). The effect (boost / launch)
+ * comes from the prop's `field` trigger zone (see PropManager.applyFields), not
+ * the geometry — this is just the look. Used by both the boost and launch pads.
  */
-function flatDecalGroup(w, d, color, name = "Decal") {
+function flatPadGroup(w, d, color, name = "Pad") {
   const g = new THREE.Group();
   g.name = name;
-  g.add(chevronRunMesh(w, d, color));
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(w, BOOST_H, d),
+    mat(0x0d1116, { roughness: 0.5, metalness: 0.25, emissive: 0x0a1f24, emissiveIntensity: 0.5 }),
+  );
+  base.position.y = BOOST_H / 2 + 0.04; // sit flush just above the deck
+  g.add(base);
+  g.add(chevronRunMesh(w, d, color, BOOST_H + 0.06));
   return g;
 }
 
 /**
- * Circular launch decal: concentric orange rings (not the boost strip). One
- * merged emissive mesh — no tint disk, no per-ring materials. Ghost footprint
- * still comes from the brush when placing.
+ * TRUE flat decal: pixel-square chevrons only, hugging the deck like paint. No
+ * raised slab (see flatPadGroup). Decals only — pads keep triangle chevrons.
  */
-function launchDecalGroup(radius = 5.5, color = 0xffae33) {
+function flatDecalGroup(w, d, color, name = "Decal") {
+  const g = new THREE.Group();
+  g.name = name;
+  g.add(pixelChevronRunMesh(w, d, color));
+  return g;
+}
+
+/**
+ * Circular launch decal: concentric blue rings. One merged emissive mesh.
+ */
+function launchDecalGroup(radius = 5.5, color = 0x4ad2ff) {
   const g = new THREE.Group();
   g.name = "LaunchDecal";
   const parts = [];
@@ -1350,7 +1383,7 @@ export const PROP_CATALOG = [
     id: "boostdecal",
     label: "Boost decal",
     collision: "none", // pure paint — chevrons only, zero slab / tint
-    make: () => flatDecalGroup(BOOST_W, BOOST_D, 0x18ffd0, "BoostDecal"),
+    make: () => flatDecalGroup(BOOST_W, BOOST_D, 0xffe048, "BoostDecal"),
     field: {
       center: [0, 1.5, 0],
       half: [BOOST_W / 2, 2.5, BOOST_D / 2],
@@ -1365,8 +1398,8 @@ export const PROP_CATALOG = [
   {
     id: "launchdecal",
     label: "Launch decal",
-    collision: "none", // circular rings — one merged emissive mesh
-    make: () => launchDecalGroup(5.5, 0xffae33),
+    collision: "none", // circular blue rings — one merged emissive mesh
+    make: () => launchDecalGroup(5.5, 0x4ad2ff),
     field: {
       center: [0, 1.5, 0],
       half: [5.5, 2.5, 5.5],
