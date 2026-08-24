@@ -596,6 +596,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * node materials, several are emissive, and a ghost has to read as "not placed
    * yet" at a glance. One shared basic material also means the ghost costs
    * nothing and can be recoloured to show whether the spot is valid.
+   *
+   * Flat paint props (boost/launch decals) are near-invisible as ghosts — their
+   * real mesh is a few triangles on the deck. If the def has a trigger field,
+   * stamp a footprint plane sized to that zone so the brush still reads.
    */
   function buildBrushGhost(def) {
     const root = def.make();
@@ -605,6 +609,23 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       o.castShadow = false;
       o.receiveShadow = false;
     });
+    const half = def.field?.half;
+    if (half) {
+      const box = new THREE.Box3().setFromObject(root);
+      const h = box.max.y - box.min.y;
+      // Only for paint-thin visuals — a real box/ramp already ghosts fine.
+      if (h < 0.25) {
+        const pad = new THREE.Mesh(
+          new THREE.PlaneGeometry(half[0] * 2, half[2] * 2),
+          GHOST_OK,
+        );
+        pad.rotation.x = -Math.PI / 2;
+        pad.position.y = 0.05;
+        pad.castShadow = false;
+        pad.receiveShadow = false;
+        root.add(pad);
+      }
+    }
     root.frustumCulled = false;
     return root;
   }

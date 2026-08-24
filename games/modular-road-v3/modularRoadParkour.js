@@ -5,11 +5,13 @@ import { RigidBvh } from "../../v3/play/modularRoadRigidBvh.js";
  * Shared geometry + ParkourMover — used by placeable static props and moving obstacles.
  */
 
-/** Enable directional-light shadows on every mesh under root. */
+/** Enable directional-light shadows on every mesh under root.
+ *  Meshes marked `userData.noCastShadow` still receive, but never cast
+ *  (glow rings, paint — shadow cost with nothing useful on the ground). */
 export function enableMeshShadows(root) {
   root.traverse((o) => {
     if (o.isMesh) {
-      o.castShadow = true;
+      if (!o.userData.noCastShadow) o.castShadow = true;
       o.receiveShadow = true;
     }
   });

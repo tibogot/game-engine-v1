@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 // Collision radius is shared so the visual offset and the body can never drift.
 import {
   PHYSICS_PROP_TYPES,
@@ -244,46 +245,41 @@ function chevronRunMesh(w, d, color, y = 0.06) {
 }
 
 /**
- * TRUE flat decal: no slab at all — just the emissive chevrons plus a faint
- * translucent tint rectangle, hugging the deck like paint. Same trigger-field
- * effects as the pad props; use this version when the raised pad base would
- * read as an obstacle (banked decks, tube floors, narrow roads).
+ * TRUE flat decal: emissive chevrons only, hugging the deck like paint. No
+ * raised slab (see flatPadGroup) and no translucent tint plane — one mesh, one
+ * bloom batch. Same trigger-field effects as the pad props; use this when the
+ * raised pad base would read as an obstacle (banked decks, tube floors, narrow
+ * roads).
  */
 function flatDecalGroup(w, d, color, name = "Decal") {
   const g = new THREE.Group();
   g.name = name;
-  const tint = new THREE.Mesh(
-    new THREE.PlaneGeometry(w, d),
-    mat(0x0d1116, { roughness: 0.55, opacity: 0.45, side: THREE.DoubleSide }),
-  );
-  tint.rotation.x = -Math.PI / 2;
-  tint.position.y = 0.03;
-  g.add(tint, chevronRunMesh(w, d, color));
+  g.add(chevronRunMesh(w, d, color));
   return g;
 }
 
 /**
- * Circular launch decal: concentric emissive rings painted flat on the deck
- * (reads as a vertical-launch target rather than a directional strip).
+ * Circular launch decal: concentric orange rings (not the boost strip). One
+ * merged emissive mesh — no tint disk, no per-ring materials. Ghost footprint
+ * still comes from the brush when placing.
  */
 function launchDecalGroup(radius = 5.5, color = 0xffae33) {
   const g = new THREE.Group();
   g.name = "LaunchDecal";
-  const tint = new THREE.Mesh(
-    new THREE.CircleGeometry(radius, 40),
-    mat(0x0d1116, { roughness: 0.55, opacity: 0.45, side: THREE.DoubleSide }),
-  );
-  tint.rotation.x = -Math.PI / 2;
-  tint.position.y = 0.03;
-  g.add(tint);
-  for (const [rFrac, i] of [[0.92, 4], [0.6, 3.2], [0.28, 2.4]]) {
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(radius * rFrac - 0.35, radius * rFrac, 40),
-      mat(color, { roughness: 0.3, emissive: color, emissiveIntensity: i, side: THREE.DoubleSide }),
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.06;
-    g.add(ring);
+  const parts = [];
+  for (const rFrac of [0.92, 0.6, 0.28]) {
+    const ring = new THREE.RingGeometry(radius * rFrac - 0.35, radius * rFrac, 32);
+    ring.rotateX(-Math.PI / 2);
+    ring.translate(0, 0.06, 0);
+    parts.push(ring);
+  }
+  const geo = mergeGeometries(parts, false);
+  for (const p of parts) p.dispose();
+  if (geo) {
+    g.add(new THREE.Mesh(
+      geo,
+      mat(color, { roughness: 0.3, emissive: color, emissiveIntensity: 4, side: THREE.DoubleSide }),
+    ));
   }
   return g;
 }
@@ -416,13 +412,40 @@ function boostRingGroup() {
  * Angular neon checkpoint gate — square goalpost with 45° chamfered top corners,
  * NOT a torus. Spans `roadParams.width` so a drop on a straight sits on the kerbs.
  *
+ * Dark frame + a thin sky-cyan neon stroke down the MEDIAL of the arch (follows
+ * the posts, chamfers and top bar). Only the stroke blooms; the body stays matte
+ * black. A gap on the top bar breaks the line so it does not read as one solid
+ * strip through the bloom.
+ *
  * Same selective-bloom path as Glow box (`mat` + emissiveIntensity > 1 → MRT).
  * Fixed sky-cyan (the reference look); not wired to the orange glowPropParams.
- *
- * The dark break in the top bar is real geometry, not a texture: a non-emissive
- * insert so the bloom does not fill the gap back in.
  */
 const NEON_GATE_GLOW = 0x5ad8ff;
+const NEON_GATE_BODY = 0x0a0c10;
+
+/** Thin strip Shape along a 2-D polyline (XY), half-width `halfW`. */
+function neonStrokeShape(pts, halfW) {
+  const left = [];
+  const right = [];
+  for (let i = 0; i < pts.length; i++) {
+    const prev = pts[Math.max(0, i - 1)];
+    const next = pts[Math.min(pts.length - 1, i + 1)];
+    const dx = next.x - prev.x;
+    const dy = next.y - prev.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = (-dy / len) * halfW;
+    const ny = (dx / len) * halfW;
+    left.push({ x: pts[i].x + nx, y: pts[i].y + ny });
+    right.push({ x: pts[i].x - nx, y: pts[i].y - ny });
+  }
+  const shape = new THREE.Shape();
+  shape.moveTo(left[0].x, left[0].y);
+  for (let i = 1; i < left.length; i++) shape.lineTo(left[i].x, left[i].y);
+  for (let i = right.length - 1; i >= 0; i--) shape.lineTo(right[i].x, right[i].y);
+  shape.closePath();
+  return shape;
+}
+
 function neonGateGroup() {
   const W = roadParams.width; // kerb-to-kerb — place centred on a road piece
   const T = 0.72; // frame thickness in the arch plane
@@ -435,6 +458,8 @@ function neonGateGroup() {
   const ih = clearH;
   // Same sink as hole walls — resting exactly on y=0 z-fights the deck.
   const SINK = 0.06;
+  const gapW = 1.4; // break in the top neon (and visual centre cue)
+  const neonHalf = 0.07; // half-width of the glowing stroke
 
   const g = new THREE.Group();
   g.name = "NeonGate";
@@ -466,28 +491,51 @@ function neonGateGroup() {
   });
   geo.translate(0, 0, -D / 2);
 
-  const frame = new THREE.Mesh(
+  // Matte body — the neon is a separate stroke, not the whole frame.
+  g.add(new THREE.Mesh(
     geo,
-    mat(NEON_GATE_GLOW, {
-      roughness: 0.4,
-      metalness: 0.05,
-      emissive: NEON_GATE_GLOW,
-      emissiveIntensity: 5.5,
-    }),
-  );
-  frame.userData.isGlow = true;
-  g.add(frame);
+    mat(NEON_GATE_BODY, { roughness: 0.55, metalness: 0.35, bloom: false }),
+  ));
 
-  // Centre gap on the top bar — dark insert proud of both faces so it reads
-  // through the bloom instead of washing out into one continuous strip.
-  const gapW = 1.4;
-  const gap = new THREE.Mesh(
-    new THREE.BoxGeometry(gapW, T * 0.92, D + 0.08),
-    mat(0x12161c, { roughness: 0.85, metalness: 0.2, bloom: false }),
-  );
-  gap.position.set(0, ih + T * 0.5, 0);
-  gap.userData.noCollide = true;
-  g.add(gap);
+  // Medial path of the arch (centre of the frame thickness).
+  const cxL = -hw + T / 2;
+  const cxR = hw - T / 2;
+  const cyTop = ih + T / 2;
+  const cChamferY = cyTop - C;
+
+  const leftPts = [
+    { x: cxL, y: -SINK },
+    { x: cxL, y: cChamferY },
+    { x: cxL + C, y: cyTop },
+    { x: -gapW / 2, y: cyTop },
+  ];
+  const rightPts = [
+    { x: gapW / 2, y: cyTop },
+    { x: cxR - C, y: cyTop },
+    { x: cxR, y: cChamferY },
+    { x: cxR, y: -SINK },
+  ];
+
+  const neonMat = mat(NEON_GATE_GLOW, {
+    roughness: 0.3,
+    metalness: 0.05,
+    emissive: NEON_GATE_GLOW,
+    emissiveIntensity: 5.5,
+  });
+  // Slightly proud of both faces so the stroke reads from either approach.
+  const neonDepth = D + 0.1;
+  for (const pts of [leftPts, rightPts]) {
+    const stroke = new THREE.ExtrudeGeometry(neonStrokeShape(pts, neonHalf), {
+      depth: neonDepth,
+      bevelEnabled: false,
+      curveSegments: 1,
+    });
+    stroke.translate(0, 0, -neonDepth / 2);
+    const mesh = new THREE.Mesh(stroke, neonMat);
+    mesh.userData.isGlow = true;
+    mesh.userData.noCollide = true;
+    g.add(mesh);
+  }
 
   return g;
 }
@@ -797,38 +845,33 @@ function mat(color, opts = {}) {
 }
 
 /**
- * The swing gate's red panel with its white hazard band, as a 1-D texture.
- *
- * Built once and shared by every gate ever placed: it is 4×64 pixels, so the
- * cost of caching it is nil next to handing each gate its own. `v` runs up the
- * panel on a BoxGeometry's ±Z faces, which is exactly the axis the band needs.
+ * Was the swing gate's red/white hazard band (1-D texture). Panel is solid bright
+ * red now — kept for restore.
  */
-let _gateStripeTex = null;
-function gateStripeTexture() {
-  if (_gateStripeTex) return _gateStripeTex;
-  const H = 64;
-  const band = Math.round((0.26 / GATE_HEIGHT) * H); // same 0.26 m band as before
-  const data = new Uint8Array(H * 4);
-  for (let i = 0; i < H; i++) {
-    // v=0 is the BOTTOM of the face, so the band lands mid-panel either way.
-    const inBand = Math.abs(i - H / 2) < band / 2;
-    const c = inBand ? [244, 244, 244] : [226, 59, 46];
-    data[i * 4] = c[0]; data[i * 4 + 1] = c[1]; data[i * 4 + 2] = c[2]; data[i * 4 + 3] = 255;
-  }
-  // 1 px wide: the band only varies vertically, and the GPU samples a 1×64 the
-  // same as a 4×64 for a third of the memory.
-  _gateStripeTex = new THREE.DataTexture(data, 1, H);
-  _gateStripeTex.colorSpace = THREE.SRGBColorSpace;
-  _gateStripeTex.wrapS = _gateStripeTex.wrapT = THREE.ClampToEdgeWrapping;
-  _gateStripeTex.needsUpdate = true;
-  return _gateStripeTex;
-}
+// let _gateStripeTex = null;
+// function gateStripeTexture() {
+//   if (_gateStripeTex) return _gateStripeTex;
+//   const H = 64;
+//   const band = Math.round((0.26 / GATE_HEIGHT) * H);
+//   const data = new Uint8Array(H * 4);
+//   for (let i = 0; i < H; i++) {
+//     const inBand = Math.abs(i - H / 2) < band / 2;
+//     const c = inBand ? [244, 244, 244] : [226, 59, 46];
+//     data[i * 4] = c[0]; data[i * 4 + 1] = c[1]; data[i * 4 + 2] = c[2]; data[i * 4 + 3] = 255;
+//   }
+//   _gateStripeTex = new THREE.DataTexture(data, 1, H);
+//   _gateStripeTex.colorSpace = THREE.SRGBColorSpace;
+//   _gateStripeTex.wrapS = _gateStripeTex.wrapT = THREE.ClampToEdgeWrapping;
+//   _gateStripeTex.needsUpdate = true;
+//   return _gateStripeTex;
+// }
 
 /**
  * Diagonal-free hazard banding for the pole — yellow/black rings up its length.
  *
- * Same shared-and-painted approach as the gate stripe: stacking real ring meshes
- * would be a draw call each AND put every ring's cap coplanar with the shaft.
+ * Same shared-and-painted approach as the (former) gate stripe: stacking real
+ * ring meshes would be a draw call each AND put every ring's cap coplanar with
+ * the shaft.
  */
 let _poleBandTex = null;
 function poleBandTexture() {
@@ -1024,23 +1067,11 @@ export const PROP_CATALOG = [
       // thinner than the chassis hull's sample spacing, so the sampled path
       // cannot see it reliably. See PropManager.collisionCapsules().
       post.userData.capsule = { radius: GATE_POST_RADIUS, height: GATE_POST_HEIGHT };
-      // THE STRIPE IS PAINTED, NOT BUILT.
-      //
-      // It used to be a second box 2 cm proud of the panel and exactly as wide,
-      // which put its ±X end caps EXACTLY coplanar with the panel's — guaranteed
-      // z-fighting, and the 2 cm front offset is below depth-buffer resolution
-      // once the gate is any distance away, so the whole band shimmered. Insetting
-      // the box would only push the flicker further out, never remove it.
-      //
-      // A texture removes the second surface entirely, so there is nothing left to
-      // fight, and it drops the gate from three meshes to two. The texture is
-      // built once for the whole catalog, not per gate.
+      // Solid bright red panel — the white hazard stripe was dropped (one colour
+      // is enough). No map: keeps the gate at two meshes / one plain material.
       const panel = new THREE.Mesh(
         new THREE.BoxGeometry(W, H, 0.09),
-        mat(0xffffff, {
-          roughness: 0.65, emissive: 0x3a0a06, emissiveIntensity: 0.4,
-          map: gateStripeTexture(),
-        }),
+        mat(0xff1a1a, { roughness: 0.55, metalness: 0.05 }),
       );
       panel.position.set(W / 2, Y, 0); // extends along +X from the hinge
       // The moving half stays out of the static bake — see `collision` above.
@@ -1153,8 +1184,9 @@ export const PROP_CATALOG = [
     label: "Box",
     collision: "both",
     make: () => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 8), mat(0x8a9099, { roughness: 0.85 }));
-      m.geometry.translate(0, 2, 0); // sit on the ground
+      // Height matches jump ramp rise (8 m) so boxes stack as platforms off a jump.
+      const m = new THREE.Mesh(new THREE.BoxGeometry(8, 8, 8), mat(0x8fd99a, { roughness: 0.85 }));
+      m.geometry.translate(0, 4, 0); // sit on the ground
       return m;
     },
   },
@@ -1218,7 +1250,8 @@ export const PROP_CATALOG = [
     id: "ramp",
     label: "Slope ramp",
     collision: "both",
-    make: () => new THREE.Mesh(rampGeometry(18, 6, 14), mat(0xe8912d, { roughness: 0.8 })),
+    // Rise 8 m — same as jump ramp / box, so a slope can meet a platform flush.
+    make: () => new THREE.Mesh(rampGeometry(18, 8, 14), mat(0xe8912d, { roughness: 0.8 })),
   },
   {
     id: "slopelab",
@@ -1287,30 +1320,32 @@ export const PROP_CATALOG = [
       },
     },
   },
-  {
-    id: "boostring",
-    label: "Boost ring",
-    collision: "none",
-    make: () => boostRingGroup(),
-    // Slingshot forward when flying through the hole (trigger sits at the lifted
-    // ring centre, a thin slab along the ring's axis).
-    field: {
-      // Tall, thin slab spanning the ring's vertical plane (ground → hole), so it
-      // fires whether you drive through the arch or fly through the hole mid-jump.
-      center: [0, 7, 0],
-      half: [8, 9, 3.5],
-      apply(vehicle, dt, fwd) {
-        const body = vehicle.body;
-        const target = 70; // strong punch through the gate
-        const along = body.vel.dot(fwd);
-        if (along < target) body.vel.addScaledVector(fwd, Math.min(700 * dt, target - along));
-      },
-    },
-  },
+  // Hidden from the Obstacles palette — same forward-boost role as BOOSTER tube
+  // new (target ~70 vs ~68); kept for reference / restore.
+  // {
+  //   id: "boostring",
+  //   label: "Boost ring",
+  //   collision: "none",
+  //   make: () => boostRingGroup(),
+  //   // Slingshot forward when flying through the hole (trigger sits at the lifted
+  //   // ring centre, a thin slab along the ring's axis).
+  //   field: {
+  //     // Tall, thin slab spanning the ring's vertical plane (ground → hole), so it
+  //     // fires whether you drive through the arch or fly through the hole mid-jump.
+  //     center: [0, 7, 0],
+  //     half: [8, 9, 3.5],
+  //     apply(vehicle, dt, fwd) {
+  //       const body = vehicle.body;
+  //       const target = 70; // strong punch through the gate
+  //       const along = body.vel.dot(fwd);
+  //       if (along < target) body.vel.addScaledVector(fwd, Math.min(700 * dt, target - along));
+  //     },
+  //   },
+  // },
   {
     id: "boostdecal",
     label: "Boost decal",
-    collision: "none", // pure paint — chevrons + tint, zero slab
+    collision: "none", // pure paint — chevrons only, zero slab / tint
     make: () => flatDecalGroup(BOOST_W, BOOST_D, 0x18ffd0, "BoostDecal"),
     field: {
       center: [0, 1.5, 0],
@@ -1326,7 +1361,7 @@ export const PROP_CATALOG = [
   {
     id: "launchdecal",
     label: "Launch decal",
-    collision: "none",
+    collision: "none", // circular rings — one merged emissive mesh
     make: () => launchDecalGroup(5.5, 0xffae33),
     field: {
       center: [0, 1.5, 0],
@@ -1341,25 +1376,26 @@ export const PROP_CATALOG = [
       },
     },
   },
-  {
-    id: "boosttube",
-    label: "Booster (tube)",
-    collision: "none",
-    make: () => boostTubeGroup(),
-    // The band's axis sits at the group origin (make() lifts the root by the
-    // tube radius), so the field is a fat slab across the whole cross-section:
-    // boost fires wherever you are on the tube wall — floor, side, or ceiling.
-    field: {
-      center: [0, 0, 0],
-      half: [7.6, 7.6, 3],
-      apply(vehicle, dt, fwd) {
-        const body = vehicle.body;
-        const target = 68; // punchier than the flat pad — tubes eat speed
-        const along = body.vel.dot(fwd);
-        if (along < target) body.vel.addScaledVector(fwd, Math.min(400 * dt, target - along));
-      },
-    },
-  },
+  // Hidden from the Obstacles palette — kept for reference / restore.
+  // {
+  //   id: "boosttube",
+  //   label: "Booster (tube)",
+  //   collision: "none",
+  //   make: () => boostTubeGroup(),
+  //   // The band's axis sits at the group origin (make() lifts the root by the
+  //   // tube radius), so the field is a fat slab across the whole cross-section:
+  //   // boost fires wherever you are on the tube wall — floor, side, or ceiling.
+  //   field: {
+  //     center: [0, 0, 0],
+  //     half: [7.6, 7.6, 3],
+  //     apply(vehicle, dt, fwd) {
+  //       const body = vehicle.body;
+  //       const target = 68; // punchier than the flat pad — tubes eat speed
+  //       const along = body.vel.dot(fwd);
+  //       if (along < target) body.vel.addScaledVector(fwd, Math.min(400 * dt, target - along));
+  //     },
+  //   },
+  // },
   {
     id: "boosttubenew",
     label: "BOOSTER tube new",
@@ -1420,27 +1456,30 @@ export const PROP_CATALOG = [
       return m;
     },
   },
-  {
-    id: "ring",
-    label: "Ring (gate)",
-    collision: "none",
-    make: () => {
-      const m = new THREE.Mesh(
-        new THREE.TorusGeometry(9, 1, 18, 56),
-        mat(0xf1c40f, { metalness: 0.7, roughness: 0.3, emissive: 0x6b5300, emissiveIntensity: 0.4 }),
-      );
-      m.geometry.translate(0, 10, 0); // lift so the hole is off the ground
-      return m;
-    },
-  },
+  // Hidden from the Obstacles palette — same pass-through torus as Glow ring,
+  // only a quiet gold look; kept for reference / restore.
+  // {
+  //   id: "ring",
+  //   label: "Ring (gate)",
+  //   collision: "none",
+  //   make: () => {
+  //     const m = new THREE.Mesh(
+  //       new THREE.TorusGeometry(9, 1, 18, 56),
+  //       mat(0xf1c40f, { metalness: 0.7, roughness: 0.3, emissive: 0x6b5300, emissiveIntensity: 0.4 }),
+  //     );
+  //     m.geometry.translate(0, 10, 0); // lift so the hole is off the ground
+  //     return m;
+  //   },
+  // },
   {
     id: "glowring",
     label: "Glow ring",
     collision: "none",
     make: () => {
       // Orange emissive gate ring — same live-tuned glow params as the Glow box.
+      // Leaner torus (was 18×56 / tube 1): still reads round at chase distance.
       const m = new THREE.Mesh(
-        new THREE.TorusGeometry(9, 1, 18, 56),
+        new THREE.TorusGeometry(9, 0.45, 10, 36),
         mat(glowPropParams.color, {
           roughness: 0.45,
           metalness: 0.0,
@@ -1450,6 +1489,8 @@ export const PROP_CATALOG = [
       );
       m.geometry.translate(0, 10, 0); // lift so the hole clears the ground
       m.userData.isGlow = true;
+      m.userData.noCastShadow = true;
+      m.castShadow = false;
       return m;
     },
   },
