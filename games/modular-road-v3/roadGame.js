@@ -39,6 +39,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import "../../v3/styles/editor.css";
 import "./palette.css";
 import { startV3App } from "../../v3/app/main.js";
+import { createModularRoadClouds } from "./modularRoadClouds.js";
 import {
   Vehicle,
   FIXED_DT,
@@ -280,6 +281,53 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   app.postFx?.setEnabled(true);
   app.postFx?.setBloomSelective(true);
   app.postFx?.setBloom({ enabled: true, strength: 0.9, threshold: 0.0, radius: 0.5 });
+
+  /* ── VOLUMETRIC CLOUDS ─────────────────────────────────────────────────────
+   *
+   * The game's OWN cloud system, not the v3 editor's deck. This one sits at ~260 m so a
+   * sky track can actually reach it, and is built to be flown through; the editor's is a
+   * 1900 m ceiling meant to be looked at from the ground. Registering it here makes
+   * worldEnvironment render this instead of its own deck — the editor's is untouched and
+   * still runs everywhere else.
+   *
+   * STARTS OFF. Nothing is baked, no buffers are allocated and no shader is compiled until
+   * something calls setClouds(true), so a player who never turns them on pays nothing.
+   */
+  const clouds = createModularRoadClouds({
+    renderer, scene, camera,
+    params: { enabled: false },
+  });
+  scene.add(clouds.mesh);
+  app.clouds?.setSystem(clouds);
+
+  /** Drive the deck from the engine's live sun/sky so clouds match time of day. */
+  const _cloudSun = new THREE.Vector3();
+  const _cloudFrame = {
+    sunDir: _cloudSun,
+    sunColor: 0xfff2dc,
+    skyZenith: 0x3f78c8,
+    skyHorizon: 0xc9dcef,
+    hazeColor: 0xc9dcef,
+  };
+  function updateClouds(dt) {
+    if (!clouds.enabled) return;
+    const s = app.sky?.state;
+    const li = app.light?.state;
+    if (li) {
+      // worldEnvironment keeps the sun as azimuth/elevation degrees; rebuild the vector.
+      const el = THREE.MathUtils.degToRad(li.sunElevation ?? 40);
+      const az = THREE.MathUtils.degToRad(li.sunAzimuth ?? 60);
+      _cloudSun.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az));
+    }
+    if (s) {
+      _cloudFrame.sunColor = s.sunColor ?? 0xfff2dc;
+      _cloudFrame.skyZenith = s.zenithDay ?? 0x3f78c8;
+      _cloudFrame.skyHorizon = s.horizonDay ?? 0xc9dcef;
+      _cloudFrame.hazeColor = s.horizonDay ?? 0xc9dcef;
+    }
+    clouds.update(dt, _cloudFrame);
+  }
+  app.addPreRenderHook?.(updateClouds);
 
   // 3) ── THE TRACK ──────────────────────────────────────────────────────────
   onStatus("Building track…");
@@ -4380,6 +4428,9 @@ ${e.message}`);
     app,
     params: { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, WHEEL_LAYOUT, DRIFT, glowPropParams },
     game: {
+      /** Volumetric clouds. Off releases every buffer and runs no pass. */
+      setClouds: (on) => clouds.setEnabled(!!on),
+      getClouds: () => clouds.enabled,
       setSpawnToCar,
       clearSpawn,
       hasSpawn: () => gameSpawn != null,
@@ -4943,6 +4994,13 @@ ${e.message}`);
     toggleMode,
     get mode() { return mode; },
     world: boot,
+    /** Volumetric clouds on/off. OFF is free: every render target is released, no pass
+     *  runs, and the noise bake never starts until the first enable. */
+    setClouds: (on) => clouds.setEnabled(!!on),
+    getClouds: () => clouds.enabled,
+    /** Cloud density at a world point (0 until the bake lands) — for HUD/audio rules. */
+    cloudDensityAt: (x, y, z) => clouds.densityAt(x, y, z),
+    cloudParams: clouds.params,
     /** Surface look as plain JSON — the same object a track save carries and
      *  road-piece-lab.html exports. */
     /** What the mirror is allowed to see, and whether it runs at all. */

@@ -47,6 +47,16 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value"><span class="prop-num dv-world-name" id="dv-world"></span></div>
           </div>
           <button class="action-btn" id="dv-load-world" type="button">Load .v3proj…</button>
+          <div class="prop-row">
+            <span class="prop-label">Clouds</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-clouds" type="button" aria-label="Volumetric clouds">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Volumetric clouds you can fly through, at ~260 m. Off costs nothing — no
+            buffers, no passes. The first enable bakes noise in a worker (a few seconds).
+          </div>
           <div class="dv-hint">
             Author worlds in <b>v3/editor.html</b>, Save Project, then drop the file
             here as <code>world.v3proj</code> to make it the default.
@@ -2220,6 +2230,7 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-lines-center", game.getCenterLinesOn?.() ?? true, (on) => game.setCenterLinesOn?.(on));
   toggle("dv-lines-edge", game.getEdgeLinesOn?.() ?? true, (on) => game.setEdgeLinesOn?.(on));
   toggle("dv-lines-bloom", game.getLinesBloom?.() ?? false, (on) => game.setLinesBloom?.(on));
+  toggle("dv-clouds", game.getClouds?.() ?? false, (on) => game.setClouds?.(on));
   // Road-surface uniforms are TSL `uniform()` objects, so the slider / colour
   // helpers drive their `.value` directly — every change is live, no rebuild.
   // Colours live in linear space in the shader; the picker shows sRGB.

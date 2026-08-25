@@ -6581,6 +6581,13 @@ export async function startV3App(opts = {}) {
         worldEnv?.postFxPipeline?.setSceneColorModifier(fn);
       },
     },
+    // ── Game-owned cloud system ───────────────────────────────────────────────
+    // A game can render its own volumetric clouds instead of the editor's deck. The
+    // editor's `dayNightCloudLayer` is untouched and still runs when nothing is
+    // registered here. See worldEnvironment.setCustomCloudSystem for the contract.
+    clouds: {
+      setSystem(system) { worldEnv?.setCustomCloudSystem(system); },
+    },
     // ── Shadow override ───────────────────────────────────────────────────────
     // CSM lives in worldToolState.csm and is NOT stored in .v3proj, so a game
     // can own it. Every shadow caster is re-drawn once per cascade per frame —

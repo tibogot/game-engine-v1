@@ -419,6 +419,20 @@ export class PostFxPipeline {
     this._applyDofUniforms();
   }
 
+  /**
+   * The scene pass's depth texture, or null before the pipeline is built.
+   *
+   * ADDITIVE ACCESSOR, no behaviour change. A cloud system compositing through
+   * `renderWithClouds()` needs scene depth to occlude clouds behind geometry. Without this
+   * it has to render the whole scene a second time just to produce a depth buffer — which
+   * is exactly what the older cloud path does in its `prepareFrame()`. Handing out the
+   * depth the scene pass already wrote lets a cloud system march AFTER the solids pass and
+   * skip that duplicate render entirely.
+   */
+  getSceneDepthTexture() {
+    return this._scenePass?.renderTarget?.depthTexture ?? null;
+  }
+
   /** Resize the linear HDR RT used by `renderWithClouds()`. */
   setSize(/* w, h */) {
     this._resizeLinearRT();

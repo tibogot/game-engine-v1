@@ -1020,8 +1020,42 @@ export async function createWorldEnvironment({
     }
   }
 
+  /**
+   * A GAME-SUPPLIED cloud system, or null (the default, and the editor's state).
+   *
+   * ADDITIVE HOOK — inert unless a game registers something, and it changes nothing about
+   * the editor's own deck, which is still the `dayNightCloudLayer` path below.
+   *
+   * It exists because the two use cases genuinely differ: the editor's deck is a ceiling
+   * viewed from far below, while games/modular-road-v3 flies a car THROUGH its clouds and
+   * needs a completely different step schedule, noise frequency and coverage model. Rather
+   * than bend one shader into serving both, a game can own its own and register it here.
+   *
+   * Contract: `{ enabled, update(dt, frame), renderFrame(), prepareFrame(),
+   *              compositeOntoLinearHDR(renderer, rt), setDepthSource(tex) }`.
+   */
+  let customCloudSystem = null;
+  function setCustomCloudSystem(system) {
+    customCloudSystem = system ?? null;
+  }
+
   function renderFrame(dtSec) {
     const cloudFollowAnchor = playMode?.active ? playMode.playerPosition : controls.target;
+
+    // Game clouds take priority over the editor deck when registered AND enabled. Disabled
+    // costs nothing: we fall straight through to the normal path below.
+    if (customCloudSystem?.enabled) {
+      if (postFxPipeline.isActive()) {
+        // Hand it the depth the solids pass already wrote so it can march afterwards
+        // instead of re-rendering the scene to make its own.
+        customCloudSystem.setDepthSource?.(postFxPipeline.getSceneDepthTexture?.() ?? null);
+        postFxPipeline.renderWithClouds(customCloudSystem, cloudFollowAnchor, dtSec);
+        return;
+      }
+      customCloudSystem.setDepthSource?.(null); // owns-the-frame path uses its own buffer
+      if (customCloudSystem.renderFrame()) return;
+    }
+
     const dncOn =
       toolState.skyMode === "procedural" && toolState.volumetricCloudDayNight.enabled;
 
@@ -1066,6 +1100,7 @@ export async function createWorldEnvironment({
     postFxPipeline,
     sunDir,
     getEffectiveLightDir: () => _effectiveLightDir,
+    setCustomCloudSystem,
     syncCsm,
     syncCsmFromToolState,
     setCsmEnabled,
