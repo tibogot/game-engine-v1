@@ -2786,6 +2786,68 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     mb.RIGHT = mode === "build" ? THREE.MOUSE.PAN : null;
   }
 
+  // ── ORBIT ORIGIN (`.` / numpad `.`) ────────────────────────────────────────
+  // OrbitControls turns around `controls.target`, which is otherwise only moved
+  // by RMB pan — easy to leave behind on a long elevated track. Blender's
+  // Frame Selected is the same idea; we MOVE THE PIVOT and keep the current
+  // distance/angle (framing a single 8 m straight would slam the camera in).
+  // Double-click is the editor's terrain-focus, and LMB places, so this is
+  // the road-game path: right-click to select, then `.`.
+  const _focusPt = new THREE.Vector3();
+  const _focusOff = new THREE.Vector3();
+  const _focusTmp = new THREE.Vector3();
+  const _focusBox = new THREE.Box3();
+
+  function _expandMeshBox(mesh) {
+    if (!mesh?.geometry) return;
+    mesh.updateWorldMatrix(true, false);
+    _focusBox.expandByObject(mesh);
+  }
+
+  /** World point to orbit, or null if nothing is selected. */
+  function selectionOrbitPoint() {
+    const pieces = builder.selectedPieces.filter((p) => builder.pieces.includes(p));
+    if (pieces.length) {
+      _focusBox.makeEmpty();
+      for (const p of pieces) _expandMeshBox(p.mesh);
+      if (!_focusBox.isEmpty()) return _focusBox.getCenter(_focusPt);
+      // Gap spacers have no deck mesh worth boxing — chord of the connectors.
+      _focusPt.set(0, 0, 0);
+      let n = 0;
+      for (const p of pieces) {
+        if (p.connectorIn) {
+          _focusPt.add(_focusTmp.setFromMatrixPosition(p.connectorIn));
+          n++;
+        }
+        if (p.connectorOut) {
+          _focusPt.add(_focusTmp.setFromMatrixPosition(p.connectorOut));
+          n++;
+        }
+      }
+      return n ? _focusPt.multiplyScalar(1 / n) : null;
+    }
+    const inst = props.selected ?? movers.selected ?? portals.selected;
+    const root = inst?.root;
+    if (!root) return null;
+    root.updateWorldMatrix(true, false);
+    _focusBox.setFromObject(root);
+    if (!_focusBox.isEmpty()) return _focusBox.getCenter(_focusPt);
+    return _focusPt.copy(root.position);
+  }
+
+  /** Put the orbit pivot on the selection. No-op with nothing selected. */
+  function focusOrbitOnSelection() {
+    if (mode !== "build" && !freeLook) return false;
+    const point = selectionOrbitPoint();
+    if (!point || !controls.target) return false;
+    _focusOff.subVectors(camera.position, controls.target);
+    if (_focusOff.lengthSq() < 1e-8) _focusOff.set(0.65, 0.35, 0.65).setLength(24);
+    controls.target.copy(point);
+    camera.position.copy(point).add(_focusOff);
+    controls.update?.();
+    return true;
+  }
+
   // 6) ── INPUT (the game OWNS the keyboard) ─────────────────────────────────
   // The v3 editor binds its shortcuts on window in the BUBBLE phase, gated only
   // on `!playMode.active` — and this game isn't play mode, so every editor
@@ -2817,6 +2879,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // most likely thing you want, and it is the only way to cancel it from the
     // keyboard.
     if (code === "escape" && brush) { clearBrush(); return; }
+    // `.` / numpad `.` — orbit around the current selection (road, prop, mover
+    // or portal). Lives here, not in the editor camera: the game swallows keys
+    // in capture, and the editor's own Period focuses TERRAIN at screen centre.
+    // Match `e.key === "."` as well as the codes: AZERTY types `.` via Shift+;
+    // (`e.code` is Semicolon), and numpad `.` is NumpadDecimal on every layout.
+    if ((code === "period" || code === "numpaddecimal" || e.key === ".") && !e.repeat) {
+      focusOrbitOnSelection();
+      return;
+    }
     // Piece editing takes precedence while a placed piece is selected (right-click).
     const sel = builder.selectedPiece;
     if (sel) {

@@ -228,7 +228,8 @@ export function createRoadDevPanel({ app, game, params }) {
           <div id="hint" data-mode="build">
             <span class="hint-build">
               <b>B</b> test drive · <b>MMB</b> orbit · <b>RMB</b> pan ·
-              <b>LMB</b> gizmo / place · <b>Enter</b> place · <b>Backspace</b> undo
+              <b>.</b> orbit selection · <b>LMB</b> gizmo / place ·
+              <b>Enter</b> place · <b>Backspace</b> undo
             </span>
             <span class="hint-drive">
               <b data-keys="KeyB">B</b> build · <b data-keys="KeyW,KeyA,KeyS,KeyD">WASD</b>/<b>Arrows</b> drive ·

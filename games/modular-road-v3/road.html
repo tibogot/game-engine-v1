@@ -433,7 +433,8 @@
               <span><kbd>RMB</kbd> select — nearest wins</span>
               <span><kbd>Shift</kbd>+<kbd>RMB</kbd> select section</span><span><kbd>Ctrl+Z</kbd> undo</span>
               <span><kbd>Del</kbd> delete sel.</span><span><kbd>L</kbd> level sel.</span>
-              <span><kbd>U</kbd> edges sel.</span><span><kbd>Esc</kbd> cancel</span>
+              <span><kbd>U</kbd> edges sel.</span><span><kbd>.</kbd> orbit sel.</span>
+              <span><kbd>Esc</kbd> cancel</span>
               <span><kbd>?</kbd> all shortcuts</span>
               <!-- FILLED FROM PIECE_CATALOG at build time (buildRoadPaletteUI), not
                    typed here: this list is the one thing in the panel guaranteed to
@@ -584,8 +585,15 @@
                 <span><kbd>Shift</kbd>+<kbd>&larr;&rarr;</kbd> roll / bank the section</span>
                 <span><kbd>W</kbd> gizmo: move the chain</span>
                 <span><kbd>E</kbd> gizmo: tilt this piece</span>
+                <span><kbd>.</kbd> orbit around the selection</span>
                 <span><kbd>Esc</kbd> deselect</span>
               </div>
+              <p>
+                <kbd>.</kbd> (main keyboard or numpad) moves the orbit pivot onto
+                whatever is selected and keeps your current distance — it does not
+                zoom in. Right-click a piece, then <kbd>.</kbd>, then middle-drag
+                to turn around it.
+              </p>
               <p>
                 <b>Obstacles, movers and portals</b> — anything that is not road.
                 Pick one from the palette and a ghost follows your mouse;
@@ -607,6 +615,7 @@
                 <span><kbd>V</kbd> decal on / off</span>
                 <span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate</span>
                 <span><kbd>Del</kbd> delete</span>
+                <span><kbd>.</kbd> orbit around the selection</span>
                 <span><kbd>Esc</kbd> deselect</span>
               </div>
               <p>

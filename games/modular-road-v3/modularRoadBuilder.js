@@ -5971,7 +5971,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       // A MULTI-SELECTION CHANGES WHAT THE KEYS DO — Del, Enter, L, U and the
       // arrows all act on the whole run — so the count has to be on screen.
       const selInfo = builder.selectionCount > 1
-        ? ` · ${builder.selectionCount} pieces selected (Del · Enter replace · L level · U edges · arrows bank)`
+        ? ` · ${builder.selectionCount} pieces selected (Del · Enter replace · L level · U edges · arrows bank · . orbit)`
         : "";
       const gizmoHint =
         builder.gizmoMode === "ghost"
