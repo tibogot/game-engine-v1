@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Road Surface Lab — A/B wipe</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%; overflow: hidden;
+        background: #0b0f16; color: #e8eef6;
+        font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;
+        user-select: none;
+      }
+      canvas { display: block; width: 100%; height: 100%; }
+
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10;
+        min-width: 288px; max-width: 360px;
+        padding: 12px 14px;
+        background: rgba(10, 15, 24, 0.74);
+        border: 1px solid rgba(150, 180, 220, 0.18);
+        border-radius: 10px;
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+      }
+      #hud h1 {
+        margin: 0 0 6px; font-size: 11px; letter-spacing: 0.09em;
+        text-transform: uppercase; color: #7f93ad; font-weight: 700;
+      }
+      #hud .title { margin: 0 0 8px; font-size: 17px; font-weight: 650; color: #f2f6fb; }
+      #hud .meta { color: #9fb0c6; font-size: 12px; }
+      #hud .meta b { color: #f2f6fb; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #hud .warn { color: #ffc98a; }
+      #hud .ok { color: #86e0a8; }
+      #hud .keys {
+        margin-top: 10px; padding-top: 8px;
+        border-top: 1px solid rgba(150, 180, 220, 0.16);
+        color: #7f93ad; font-size: 11px; line-height: 1.6;
+      }
+      #hud .keys b { color: #cfe0f2; font-weight: 600; }
+
+      /* Pane name tags, positioned from JS to sit over each slice. */
+      .tag {
+        position: fixed; bottom: 20px; z-index: 9;
+        transform: translateX(-50%);
+        padding: 5px 12px; border-radius: 999px;
+        font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
+        text-transform: uppercase;
+        pointer-events: none; white-space: nowrap;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+      }
+      .tag.a { background: rgba(255, 171, 107, 0.92); color: #2a1706; }
+      .tag.b { background: rgba(111, 211, 255, 0.92); color: #04222f; }
+      .tag.c { background: rgba(168, 230, 140, 0.92); color: #10240a; }
+      .tag.off { background: rgba(120, 132, 148, 0.85); color: #0d1219; }
+
+      /* The divider itself — a hairline the pointer can grab. */
+      .split {
+        position: fixed; top: 0; bottom: 0; z-index: 8;
+        width: 15px; margin-left: -7px;
+        cursor: ew-resize;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .split::before {
+        content: ""; width: 1px; height: 100%;
+        background: rgba(255, 255, 255, 0.55);
+        box-shadow: 0 0 8px rgba(0, 0, 0, 0.6);
+      }
+      .split .grip {
+        position: absolute; width: 15px; height: 40px; border-radius: 8px;
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
+      }
+      body.nosplit .split { display: none; }
+
+      #err {
+        position: fixed; left: 12px; bottom: 12px; z-index: 20;
+        max-width: 620px; padding: 10px 12px; display: none;
+        background: rgba(60, 12, 12, 0.94); border: 1px solid #a44;
+        border-radius: 8px; color: #ffb0b0; white-space: pre-wrap;
+        font: 12px/1.5 ui-monospace, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Road surface lab</h1>
+      <div class="title" id="s-piece">Straight ×3</div>
+      <div class="meta">
+        View <b id="s-cam">chase</b> · deck angle <b id="s-angle">—</b><br />
+        Tris <b id="s-tris">—</b> · Draws <b id="s-draws">—</b> · Scale <b id="s-scale">1.00</b><br />
+        GPU <b id="s-gpu">—</b> · <b id="s-mpx">—</b> · <b id="s-fps">—</b> fps<br />
+        <span id="s-measure" class="warn">split view — ms is both panes</span>
+      </div>
+      <div class="keys">
+        <b>1/2/3</b> solo A / B / C · <b>W</b> wipe on/off · drag the divider<br />
+        <b>[ ]</b> cycle piece · <b>C</b> chase cam · <b>R</b> orbit · <b>F</b> fill · <b>U</b> under<br />
+        <b>S</b> sweep the sun · <b>G</b> ground on/off<br />
+        A is the shipping <i>createRoadMaterial</i>. <b>Match A</b> collapses B onto it.
+      </div>
+    </div>
+
+    <div class="split" id="split"><div class="grip"></div></div>
+    <div id="err"></div>
+
+    <script type="module">
+      /**
+       * ROAD SURFACE LAB — A/B/C wipe over the real kit pieces.
+       *
+       * WHAT THIS PAGE IS FOR, and how it differs from asphalt-lab.html.
+       *
+       * asphalt-lab answers a COST question: full graph vs cheap paint, and
+       * FrontSide vs DoubleSide fill. That is still a live question and that
+       * page still owns it.
+       *
+       * This page answers a LOOK question: does candidate B beat the road we
+       * ship, at the angle the game is actually played from, across the piece
+       * shapes the track is actually made of. Three rules follow from that and
+       * all three are load-bearing:
+       *
+       * 1. A IS THE GAME MATERIAL. Not a copy, not a re-tune — the same
+       *    `createRoadMaterial` call roadGame.js makes, fed defaults read back
+       *    out of a freshly built material. asphalt-lab keeps a hand-written
+       *    `look` object of 18 keys against the ~60 in ROAD_LOOK_KEYS, and every
+       *    key it omits silently falls back to a constructor default the game
+       *    may not be using. One source, no drift.
+       *
+       * 2. SIDE BY SIDE, NOT TOGGLED. Flipping between key presses is how you
+       *    fail to notice a 5% change — the eye adapts in the gap. A surface is
+       *    all micro-contrast and how light rakes across it, so the panes have
+       *    to be on screen together, same camera, same sun, same pixels.
+       *
+       * 3. B CAN BE COLLAPSED ONTO A ON DEMAND. "Match A" in the B folder zeroes
+       *    every feature B adds, and the divider must then be invisible. That is
+       *    the harness's own unit test — if you can see the seam with B matched,
+       *    nothing measured afterward is worth anything.
+       *
+       *    It is a BUTTON and not the starting state, which is a correction. It
+       *    was the starting state, on the reasoning that the identity check
+       *    should be the first thing you see. In use that is simply a page that
+       *    opens showing two copies of the material the candidate replaces, with
+       *    nothing to say which of "identical by design" and "the candidate is
+       *    not wired up" you are looking at. An invisible default is not a
+       *    demonstration, it is indistinguishable from a bug.
+       *
+       * The piece rack (straight ×3, curve, banked, slope, loop) is chosen for
+       * the reflection work that comes later as much as for the surface: bank,
+       * slope and loop are exactly the shapes where a planar mirror stops being
+       * true, and they will be needed again.
+       */
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "three/addons/libs/lil-gui.module.min.js";
+      import {
+        buildPiece,
+        initialConnector,
+        roadParams as kitRoadParams,
+        pieceParams as kitPieceParams,
+        guardrailParams as kitGuardrailParams,
+      } from "./modularRoadKit.js";
+      import {
+        createRoadMaterial,
+        createGuardrailMaterial,
+        readRoadLook,
+        syncRoadUniforms,
+      } from "./modularRoadMaterial.js";
+      import {
+        createRoadSurfaceV2,
+        syncSurfaceV2Uniforms,
+        surfaceV2NeedsRebuild,
+        SURFACE_V2_DEFAULTS,
+      } from "./modularRoadSurfaceV2.js";
+      import { WET_DEFAULTS, WET_NUMBERS, WET_COLORS } from "./modularRoadWet.js";
+      import { vec3, float } from "three/tsl";
+      import { CHASE_CAM } from "./chaseCamera.js";
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => {
+        const el = $("err");
+        el.style.display = "block";
+        el.textContent = e?.stack || String(e);
+        console.error(e);
+      };
+
+      /* ------------------------------------------------------------------ */
+      /* The piece rack                                                      */
+      /* ------------------------------------------------------------------ */
+
+      /**
+       * Each entry is a CHAIN, not a piece, because one of the questions only a
+       * chain can answer.
+       *
+       * `buildSweepGeometry` restarts `along` (uv.x) at 0 for every piece, and
+       * uv.x is what feeds the noise — so the macro blotches, the drift-mark
+       * wander and the puddle blobs all repeat identically at every seam. On a
+       * single piece that is invisible. On three straights in a row it is the
+       * first thing you see, which is why the default view is three of them.
+       */
+      const RACK = [
+        {
+          id: "straights",
+          label: "Straight ×3",
+          why: "tiling + the per-piece pattern restart at each seam",
+          chain: ["straight", "straight", "straight"],
+        },
+        {
+          id: "curve",
+          label: "Curve",
+          why: "does the anisotropic streak follow the bend? (uv.x is arc length)",
+          chain: ["straight", "curve", "straight"],
+        },
+        {
+          id: "banked",
+          label: "Banked turn",
+          why: "deck normal rotates through the piece — drainage + reflection case",
+          chain: ["straight", "banked", "straight"],
+        },
+        {
+          id: "slope",
+          label: "Slope",
+          why: "the crest/dip that broke the rail reflection",
+          chain: ["straight", "slope", "straight"],
+        },
+        {
+          id: "loop",
+          label: "Loop",
+          why: "deck normal nowhere near any mirror plane",
+          chain: ["straight", "loop", "straight"],
+        },
+      ];
+
+      /* ------------------------------------------------------------------ */
+      /* Look state                                                          */
+      /* ------------------------------------------------------------------ */
+
+      /**
+       * THE SINGLE SOURCE OF THE GAME'S DEFAULTS.
+       *
+       * Build one throwaway material with no options and read every uniform
+       * back out. Whatever `createRoadMaterial` decides a default is, this has
+       * it — including keys nobody has thought to put in a GUI yet. A
+       * hand-maintained object cannot make that promise for longer than a week.
+       */
+      const BASE_LOOK = (() => {
+        const probe = createRoadMaterial();
+        const look = readRoadLook(probe);
+        probe.dispose();
+        return look;
+      })();
+
+      /** Shared look — both panes get it, so the wipe only ever shows the
+       *  difference under test rather than two different tunings. */
+      const look = { ...BASE_LOOK };
+      /** B's extra knobs, on top of `look`. */
+      /**
+       * B's extra knobs, on top of `look`.
+       *
+       * THE CHIPS ARE ON HERE, and the module default is off. That split is
+       * deliberate and it is worth being clear about which is which.
+       *
+       * `SURFACE_V2_DEFAULTS.chipsOn = 0` is a promise about the MODULE: build
+       * V2 with nothing set and you get exactly the shipping material, which is
+       * what the test suite checks and what makes "the wipe is invisible" mean
+       * something.
+       *
+       * The LAB wants the opposite. A page whose whole purpose is to show you a
+       * candidate should not open showing you two copies of the thing the
+       * candidate replaces — that is not a neutral default, it is a page that
+       * looks broken. So the lab turns the candidate on and offers "Match A" to
+       * put it back, which is the identity check as a one-click action rather
+       * than as a silent starting state nobody can tell apart from a bug.
+       */
+      // CHIPS OFF. They are kept as a switch, not as the direction.
+      //
+      // The cellular field is a correct model of what asphalt IS and the wrong
+      // answer for what this track should LOOK like. Race and kart circuits read
+      // as long directional grain — laid, dragged and polished along the
+      // direction of travel — and that streak is the look being aimed at, not an
+      // artefact to be removed. Replacing it with round stones threw away the
+      // thing that was right about A in order to fix the thing that was wrong.
+      //
+      // What was actually wrong with A is that its streaks are MUSHY: one octave
+      // of gradient noise smeared 14:1 gives soft blobs rather than fine drawn
+      // lines. The job is a better streak, not a different material.
+      // Both of B's features ON. The module defaults are 0 (that is the
+      // "Match A" promise the tests assert); the LAB has to show the candidate.
+      const v2 = {
+        ...SURFACE_V2_DEFAULTS,
+        streakSharp: 0.6,
+        bumpAmount: 0.045, // subtle on purpose — race asphalt, not chip seal
+      };
+
+      /**
+       * WEATHER. Shared by both panes, like `look` — the wet model is not what
+       * B is changing, so both sides must get the same dose or the wipe stops
+       * isolating the surface underneath it.
+       *
+       * `wetAmount` 0 is dry, and dry is a DIFFERENT MATERIAL CLASS: a water
+       * film is a clearcoat, and three decides whether to compile that second
+       * specular lobe from whether `clearcoatNode` is set at all. So crossing 0
+       * is a rebuild, exactly as roadGame's setRoadWet does it — see syncPanes.
+       */
+      const wet = { ...WET_DEFAULTS };
+
+      /**
+       * DRAINAGE DEBUG. Paints the raw wet field as false colour instead of a
+       * lit road: red = film (how wet), green = ponding (standing water).
+       *
+       * Reads `mat._wetField` — the same node instance the shading uses, which
+       * is exactly why it is exposed. A debug view that re-derives the model can
+       * disagree with the model, and "is the puddle missing or just dim?" is the
+       * one question you cannot answer by looking at the lit result.
+       */
+      let wetDebug = false;
+
+      /** Everything in B that can differ from A, and its A-matching value. Used
+       *  by the "Match A" button; kept in one place so a new B feature cannot be
+       *  left out of the identity check by accident. */
+      const V2_OFF = { chipsOn: 0, streakSharp: 0, bumpAmount: 0, jointSpacing: 0 };
+
+      const ctl = {
+        piece: 0,
+        wipe: true,
+        solo: -1, // -1 = all panes, else index
+        split: 0.5, // 0..1 across the canvas
+        renderScale: 1,
+        ground: true,
+        rails: true,
+        shadows: true,
+        sunElevation: 38,
+        sunAzimuth: 34,
+        sunSweep: false,
+        sunIntensity: 3.2,
+        hemiIntensity: 1.15,
+        fillIntensity: 1.35,
+        exposure: 1.05,
+      };
+
+      /* ------------------------------------------------------------------ */
+
+      let renderer, scene, camera, controls, sun, hemi, fill, ground, grid;
+      let gui, hasTimestamps = false;
+      let pieceRoot, roadMesh = null, railMesh = null;
+      const railMaterial = createGuardrailMaterial();
+      let viewName = "chase";
+      let deckY = 0, slabMinY = 0, chasePose = null;
+      /** Bounding radius of the current chain. The rack spans two orders of
+       *  magnitude — a straight is 22 m of flat slab, a loop is a 25 m ring
+       *  standing on end — so a fixed orbit pose puts the camera inside the
+       *  loop. Frame the bounds instead. */
+      let rackRadius = 20;
+      const perf = { frames: 0, gpuSum: 0, gpuN: 0, since: 0, gpu: 0, fps: 0 };
+
+      /**
+       * THE PANES. An array from the start, with C already declared, so adding
+       * the baked-texture version later is a `build` function and nothing else
+       * — not a rewrite of the wipe, the HUD or the key handling.
+       */
+      const PANES = [
+        {
+          key: "A",
+          label: "A · shipping",
+          cls: "a",
+          build: () => createRoadMaterial({ ...look, ...wet, wet: wetOn() }),
+          sync: (m) => syncRoadUniforms(m, { ...look, ...wet }),
+          needsRebuild: (m) => wetNeedsRebuild(m),
+          material: null,
+        },
+        {
+          key: "B",
+          label: "B · surface v2",
+          cls: "b",
+          build: () => createRoadSurfaceV2({ ...look, ...wet, ...v2, wet: wetOn() }),
+          sync: (m) => {
+            syncRoadUniforms(m, { ...look, ...wet });
+            syncSurfaceV2Uniforms(m, v2);
+          },
+          needsRebuild: (m) => wetNeedsRebuild(m) || surfaceV2NeedsRebuild(m, v2),
+          material: null,
+        },
+        {
+          key: "C",
+          label: "C · baked (not built)",
+          cls: "c",
+          build: null, // ← the LOD/baked slot. Fill this in and it appears.
+          sync: () => {},
+          material: null,
+        },
+      ];
+
+      /**
+       * SHADOW SIDE — BackSide, and this is a bug fix, not a preference.
+       *
+       * Both labs shipped `shadowSide = FrontSide` on the road material and it
+       * produced a fan of faint diagonal lines converging on the vanishing
+       * point, across the deck AND the kerb — including the kerb, which has no
+       * noise in its shader at all. It is textbook self-shadow ACNE.
+       *
+       * Why FrontSide causes it: the deck writes ITS OWN lit top surface into
+       * the shadow map, so every fragment then compares its depth against a
+       * quantised copy of itself. Wherever the stored texel rounds slightly
+       * nearer than the fragment, the surface shadows itself. On a large flat
+       * plane at a grazing sun angle those failures form bands along the
+       * iso-depth contours, and on a receding plane those contours converge at
+       * the vanishing point — hence a fan, not a grid.
+       *
+       * BackSide is three's own default for a DoubleSide material for exactly
+       * this reason: the road slab is a CLOSED solid, so the depth written is
+       * its UNDERSIDE, a good half-metre behind the surface being lit. There is
+       * then nothing for the top to self-shadow against, and it costs nothing —
+       * the same triangles are drawn either way.
+       *
+       * It also keeps casting and receiving fully on, which a track with loops
+       * and inverted road genuinely needs. Bias tuning is the wrong lever here:
+       * a bias big enough to hide this detaches contact shadows everywhere else.
+       */
+      /** Is the weather on at all? Drives the material CLASS, not a uniform. */
+      function wetOn() {
+        return (wet.wetAmount ?? 0) > 0;
+      }
+
+      /**
+       * True when `mat` was built for the wrong weather, or is showing the wrong
+       * debug mode. Both are build-time facts — the clearcoat lobe is compiled
+       * in or it is not, and the debug view replaces colorNode — so neither can
+       * be reached by poking a uniform.
+       */
+      function wetNeedsRebuild(mat) {
+        const isWet = !!mat._roadUniforms && mat.isMeshPhysicalNodeMaterial;
+        if (isWet !== wetOn()) return true;
+        return !!mat.userData.wetDebug !== (wetDebug && wetOn());
+      }
+
+      /**
+       * Repaint a material as the raw drainage field instead of a lit road.
+       *
+       * Applied to the built material rather than baked into
+       * createRoadMaterial, because it is a lab instrument and has no business
+       * in the shipping shader. It writes emissive as well as colour so the
+       * result is self-lit: a false-colour map that still responds to the sun
+       * is unreadable, because you cannot tell a dim puddle from a shaded one.
+       */
+      function applyWetDebug(material) {
+        const field = material?._wetField;
+        material.userData.wetDebug = false;
+        if (!field || !wetDebug || !wetOn()) return;
+        const falseColour = vec3(field.x, field.y, float(0.08));
+        material.colorNode = falseColour;
+        material.emissiveNode = falseColour;
+        material.userData.wetDebug = true;
+        material.needsUpdate = true;
+      }
+
+      function applyShadowSide(material) {
+        if (material) material.shadowSide = THREE.BackSide;
+      }
+
+      /** Panes that actually have a material — C drops out until it is built. */
+      function livePanes() {
+        const live = PANES.filter((p) => p.material);
+        if (ctl.solo >= 0) {
+          const solo = PANES[ctl.solo];
+          return solo?.material ? [solo] : live;
+        }
+        return ctl.wipe ? live : live.slice(0, 1);
+      }
+
+      function buildPanes() {
+        for (const p of PANES) {
+          if (p.material) {
+            p.material.dispose();
+            p.material = null;
+          }
+          if (!p.build) continue;
+          p.material = p.build();
+          applyShadowSide(p.material);
+          applyWetDebug(p.material);
+        }
+      }
+
+      function syncPanes() {
+        for (const p of PANES) {
+          if (!p.material) continue;
+          if (p.needsRebuild?.(p.material)) {
+            // Crossing a build-time gate (B's bumpAmount through 0). Rare by
+            // design — see the note in modularRoadSurfaceV2.
+            p.material.dispose();
+            p.material = p.build();
+            applyShadowSide(p.material);
+            applyWetDebug(p.material);
+          } else {
+            p.sync(p.material);
+          }
+        }
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Geometry                                                            */
+      /* ------------------------------------------------------------------ */
+
+      function buildRack() {
+        const entry = RACK[ctl.piece];
+        const pp = { ...kitPieceParams };
+        // GUARDRAILS. Needed for the reflection work: a wet deck with nothing
+        // above it has nothing to mirror, and the specific bug to reproduce —
+        // a rail whose reflection travels the wrong way on a slope or a crest —
+        // cannot be seen without the rail. `enabled` also gates the KERBS, so
+        // turning this off changes the deck edge too; that is the kit's own
+        // coupling, not something to work around here.
+        //
+        // No `postSink` is passed, so buildRailGeometry MERGES the posts into
+        // the returned geometry (see its docstring) — one self-contained rail,
+        // which is what a lab wants and what the game deliberately does not do.
+        const gp = { ...kitGuardrailParams, enabled: ctl.rails };
+        let connector = initialConnector();
+        const geos = [];
+        const railGeos = [];
+
+        for (const id of entry.chain) {
+          const built = buildPiece(id, connector, pp, kitRoadParams, gp, true);
+          if (ctl.rails && built.railGeometry) {
+            built.railGeometry.applyMatrix4(built.world);
+            railGeos.push(built.railGeometry);
+          } else {
+            built.railGeometry?.dispose();
+          }
+          built.railMirrorGeometry?.dispose();
+          built.deckCollision?.dispose();
+          built.railCollision?.dispose();
+          built.shellGeometry?.dispose();
+          built.shellCollision?.dispose();
+          built.decorGeometry?.dispose();
+          built.decorGateGeometry?.dispose();
+          built.decorGlowGeometry?.dispose();
+          built.glassGeometry?.dispose();
+
+          const g = built.geometry;
+          g.applyMatrix4(built.world);
+          geos.push(g);
+          connector = built.connectorOut;
+        }
+
+        // Merge by hand rather than importing mergeGeometries: every piece in
+        // the kit emits the same attribute set, and doing it here keeps the
+        // failure mode obvious if one ever does not.
+        const merged = mergeSameShape(geos);
+        for (const g of geos) g.dispose();
+
+        // Centre the chain on the origin and lift it clear of the ground, so
+        // the "under" view has something to look up at and the orbit target is
+        // always sensible whatever the piece.
+        const box = new THREE.Box3().setFromBufferAttribute(
+          merged.getAttribute("position"),
+        );
+        const c = box.getCenter(new THREE.Vector3());
+        // Captured BEFORE the translate, because `box` is reused below and the
+        // rail has to receive the identical transform.
+        const lift = 2.5 - box.min.y;
+        merged.applyMatrix4(new THREE.Matrix4().makeTranslation(-c.x, lift, -c.z));
+        merged.computeBoundingSphere();
+        box.setFromBufferAttribute(merged.getAttribute("position"));
+        slabMinY = box.min.y;
+        rackRadius = Math.max(12, merged.boundingSphere?.radius ?? 20);
+
+        // DECK HEIGHT, measured on the deck rather than on the bounding box.
+        // A loop's box.max.y is the top of the ring, which would put the chase
+        // camera fifty metres in the air looking at nothing.
+        deckY = deckHeightNearOrigin(merged);
+
+        // Same centring transform the deck got, or the rail floats where the
+        // chain used to be.
+        let rail = null;
+        if (railGeos.length) {
+          rail = mergeSameShape(railGeos);
+          for (const g of railGeos) g.dispose();
+          if (rail) {
+            rail.applyMatrix4(
+              new THREE.Matrix4().makeTranslation(-c.x, lift, -c.z),
+            );
+            rail.computeBoundingSphere();
+          }
+        }
+        return { deck: merged, rail };
+      }
+
+      /** Merge geometries that are known to share an attribute set. */
+      function mergeSameShape(geos) {
+        if (geos.length === 1) return geos[0].clone();
+        const names = Object.keys(geos[0].attributes);
+        const out = new THREE.BufferGeometry();
+        let vTotal = 0, iTotal = 0;
+        for (const g of geos) {
+          vTotal += g.attributes.position.count;
+          iTotal += g.index ? g.index.count : g.attributes.position.count;
+        }
+        for (const name of names) {
+          const size = geos[0].attributes[name].itemSize;
+          const arr = new Float32Array(vTotal * size);
+          let o = 0;
+          for (const g of geos) {
+            arr.set(g.attributes[name].array, o);
+            o += g.attributes[name].count * size;
+          }
+          out.setAttribute(name, new THREE.BufferAttribute(arr, size));
+        }
+        const idx = new Uint32Array(iTotal);
+        let io = 0, vo = 0;
+        for (const g of geos) {
+          const gi = g.index;
+          const n = gi ? gi.count : g.attributes.position.count;
+          for (let i = 0; i < n; i++) idx[io + i] = (gi ? gi.getX(i) : i) + vo;
+          io += n;
+          vo += g.attributes.position.count;
+        }
+        out.setIndex(new THREE.BufferAttribute(idx, 1));
+        return out;
+      }
+
+      /**
+       * Height of the DRIVEABLE deck near the origin.
+       *
+       * `aZone === 1` is the deck, and taking the highest such vertex within a
+       * few metres of the origin gives the surface the camera should be framing
+       * — on a loop that is the floor of the ring, not the roof.
+       */
+      function deckHeightNearOrigin(geo) {
+        const pos = geo.getAttribute("position");
+        const zone = geo.getAttribute("aZone");
+        let best = null;
+        for (let i = 0; i < pos.count; i++) {
+          if (zone && Math.abs(zone.getX(i) - 1) > 0.25) continue;
+          const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+          if (x * x + z * z > 100) continue; // within 10 m of the origin
+          if (best === null || y < best) best = y;
+        }
+        return best ?? 2.5;
+      }
+
+      function rebuildPiece() {
+        for (const m of [roadMesh, railMesh]) {
+          if (!m) continue;
+          pieceRoot.remove(m);
+          m.geometry.dispose();
+        }
+        roadMesh = null;
+        railMesh = null;
+        const { deck: geo, rail } = buildRack();
+        roadMesh = new THREE.Mesh(geo, PANES[0].material);
+        roadMesh.castShadow = ctl.shadows;
+        roadMesh.receiveShadow = ctl.shadows;
+        pieceRoot.add(roadMesh);
+
+        if (rail) {
+          // ONE material, shared across panes and never swapped by the wipe.
+          // The rail is not what B changes; giving each pane its own would put a
+          // difference in the frame that has nothing to do with the surface.
+          railMesh = new THREE.Mesh(rail, railMaterial);
+          railMesh.castShadow = ctl.shadows;
+          railMesh.receiveShadow = ctl.shadows;
+          pieceRoot.add(railMesh);
+        }
+
+        const tris = (geo.index ? geo.index.count : geo.attributes.position.count) / 3;
+        $("s-tris").textContent = Math.round(tris).toLocaleString();
+        const entry = RACK[ctl.piece];
+        $("s-piece").textContent = entry.label;
+        $("s-piece").title = entry.why;
+
+        sun.target.position.set(0, deckY, 0);
+        sun.target.updateMatrixWorld();
+        if (viewName === "chase") chaseCam();
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Cameras                                                             */
+      /* ------------------------------------------------------------------ */
+
+      /**
+       * THE POSE THE GAME IS ACTUALLY PLAYED FROM, and the default for a reason.
+       *
+       * modularRoadWet.js documents the gap this closes, in the note on
+       * reflectFresnel: wet-road-lab's camera sits 1.55 m up at 7.5 m back —
+       * about 12° off the deck — while road.html's chase camera is 3.8 m up at
+       * 8.7 m back, about 24°. At the original Fresnel exponent that was 0.101
+       * against the lab's 0.406: "the same correct, correctly-placed reflection
+       * from clearly visible to not visible at all."
+       *
+       * A micro-normal has exactly the same sensitivity — grazing light is the
+       * whole effect — so a lab that orbits by default will sell you a bump map
+       * that sings at 12° and disappears in the game. Numbers come from CHASE
+       * so they cannot drift from chaseCamera.js.
+       */
+      function chaseCam() {
+        const carY = deckY + 0.6; // car centre above the deck
+        const eyeY = deckY + CHASE_CAM.height + 0.6;
+        camera.position.set(0, eyeY, CHASE_CAM.dist);
+        controls.target.set(0, carY, 0);
+        controls.update();
+        chasePose = { rise: eyeY - deckY, run: CHASE_CAM.dist };
+        setView("chase");
+      }
+
+      function orbitCam() {
+        // Framed off the chain's own bounds, because the rack spans a 22 m
+        // straight and a 25 m loop standing on end. A fixed pose that suits one
+        // is inside the other.
+        const d = rackRadius * 1.9;
+        camera.position.set(d * 0.55, deckY + d * 0.42, d * 0.8);
+        controls.target.set(0, deckY + rackRadius * 0.25, 0);
+        controls.update();
+        setView("orbit");
+      }
+
+      /** Deck fills the frame, so GPU ms is the ASPHALT and not the sky. */
+      function fillCam() {
+        camera.position.set(0, deckY + 0.5, 9);
+        controls.target.set(0, deckY, -10);
+        controls.update();
+        setView("fill");
+      }
+
+      /** Up at the underside — the one view DoubleSide exists for. */
+      function underCam() {
+        camera.position.set(0, 0.35, 5);
+        controls.target.set(0, slabMinY, -2);
+        controls.update();
+        setView("under");
+      }
+
+      function setView(name) {
+        viewName = name;
+        $("s-cam").textContent = name;
+        if (name === "chase" && chasePose) {
+          const deg = (Math.atan2(chasePose.rise, chasePose.run) * 180) / Math.PI;
+          $("s-angle").textContent = `${deg.toFixed(1)}°`;
+        } else {
+          $("s-angle").textContent = "—";
+        }
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Sun                                                                 */
+      /* ------------------------------------------------------------------ */
+
+      /**
+       * A normal map is invisible at high sun and screams at low sun, so this is
+       * the primary instrument on the page, not a scene nicety. Judge amplitude
+       * by sweeping, never at one elevation.
+       */
+      function applySun() {
+        const el = THREE.MathUtils.degToRad(ctl.sunElevation);
+        const az = THREE.MathUtils.degToRad(ctl.sunAzimuth);
+        const r = 60;
+        sun.position.set(
+          r * Math.cos(el) * Math.sin(az),
+          Math.max(1.5, r * Math.sin(el)),
+          r * Math.cos(el) * Math.cos(az),
+        );
+        sun.target.position.set(0, deckY, 0);
+        sun.target.updateMatrixWorld();
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* GUI                                                                 */
+      /* ------------------------------------------------------------------ */
+
+      function refreshGui() {
+        gui?.controllersRecursive?.().forEach((c) => c.updateDisplay?.());
+      }
+
+      function buildGui() {
+        gui = new GUI({ title: "Road surface lab" });
+
+        const fAb = gui.addFolder("A / B / C");
+        fAb.add(ctl, "solo", { "all (wipe)": -1, "A only": 0, "B only": 1, "C only": 2 })
+          .name("Solo")
+          .onChange(() => { layoutTags(); updateMeasureNote(); });
+        fAb.add(ctl, "wipe").name("Wipe divider").onChange(() => {
+          document.body.classList.toggle("nosplit", !ctl.wipe);
+          layoutTags();
+        });
+        fAb.open();
+
+        const fPiece = gui.addFolder("Piece");
+        fPiece
+          .add(ctl, "piece", Object.fromEntries(RACK.map((r, i) => [r.label, i])))
+          .name("Rack")
+          .onChange(rebuildPiece);
+        // Rails are what a wet deck has to reflect — see the reflection notes in
+        // modularRoadWet. Also gates the KERBS (the kit couples the two).
+        fPiece.add(ctl, "rails").name("Guardrails + kerbs").onChange(rebuildPiece);
+        fPiece.open();
+
+        // ── B's knobs. The only folder that should ever make the wipe visible.
+        const fV2 = gui.addFolder("B — surface");
+        // The harness check, as an action. Press it and the divider must vanish.
+        fV2.add({
+          match: () => {
+            Object.assign(v2, V2_OFF);
+            syncPanes();
+            refreshGui();
+          },
+        }, "match").name("↺ Match A (wipe must vanish)");
+        fV2.add(v2, "streakScale", 0.6, 12, 0.1)
+          .name("Line width (low = wider)").onChange(syncPanes);
+        fV2.add(v2, "streakStraight", 14, 400, 2)
+          .name("Straightness (A = 14)").onChange(syncPanes);
+        fV2.add(v2, "streakSharp", 0, 1, 0.01)
+          .name("Streak definition").onChange(syncPanes);
+        fV2.add(v2, "streakFade", 0.5, 5, 0.1)
+          .name("· distance fade").onChange(syncPanes);
+        fV2.add(v2, "chipsOn", 0, 1, 1)
+          .name("Cellular chips (not the look)").onChange(syncPanes);
+        // B-owned so the wipe keeps isolating the change — the shared
+        // "Aggregate / m" and "Aggregate weight" below drive A only while the
+        // chips are on. See chipScale / chipWeight in modularRoadSurfaceV2.
+        fV2.add(v2, "chipScale", 3, 40, 0.5).name("· chips / m").onChange(syncPanes);
+        fV2.add(v2, "chipWeight", 0, 1, 0.01).name("· tone weight").onChange(syncPanes);
+        fV2.add(v2, "chipStretch", 1, 14, 0.1).name("· stretch (A = 14)").onChange(syncPanes);
+        fV2.add(v2, "chipSharp", 0, 1, 0.01).name("· sharpness").onChange(syncPanes);
+        fV2.add(v2, "binderDepth", 0, 1.5, 0.01).name("· binder depth").onChange(syncPanes);
+        fV2.add(v2, "chipVary", 0, 1, 0.01).name("· stone variation").onChange(syncPanes);
+        fV2.add(v2, "chipJitter", 0, 1, 0.01).name("· jitter").onChange(syncPanes);
+        fV2.add(v2, "chipFade", 1, 8, 0.1).name("· distance fade").onChange(syncPanes);
+        fV2.add(v2, "gritScale", 6, 60, 1).name("Grit / m").onChange(syncPanes);
+        fV2.add(v2, "gritAmount", 0, 1, 0.01).name("· amount").onChange(syncPanes);
+        fV2.add(v2, "gritFade", 0.5, 6, 0.1).name("· fade").onChange(syncPanes);
+        fV2.open();
+
+        const fBump = gui.addFolder("B — normal");
+        fBump.add(v2, "bumpAmount", 0, 0.5, 0.005)
+          .name("Bump amount")
+          .onChange(syncPanes);
+        fBump.add(v2, "bumpAgg", 0, 2, 0.01).name("· aggregate").onChange(syncPanes);
+        fBump.add(v2, "bumpMacro", 0, 2, 0.01).name("· macro swell").onChange(syncPanes);
+        fBump.add(v2, "bumpFade", 0.2, 3, 0.05).name("· distance fade").onChange(syncPanes);
+        fBump.add(v2, "jointSpacing", 0, 30, 0.5).name("Joints every (m)").onChange(syncPanes);
+        fBump.add(v2, "jointWidth", 0.01, 0.3, 0.005).name("· width").onChange(syncPanes);
+        fBump.add(v2, "jointDepth", 0, 4, 0.05).name("· depth").onChange(syncPanes);
+        fBump.open();
+
+        const fLook = gui.addFolder("Shared look (both panes)");
+        fLook.addColor(look, "asphaltDark").name("Asphalt dark").onChange(syncPanes);
+        fLook.addColor(look, "asphaltLight").name("Asphalt light").onChange(syncPanes);
+        fLook.add(look, "deckBrightness", 0.4, 1.6, 0.01).name("Brightness").onChange(syncPanes);
+        fLook.add(look, "grainScale", 0, 2, 0.01).name("Grain contrast").onChange(syncPanes);
+        fLook.add(look, "streak", 1, 24, 0.5).name("Anisotropy").onChange(syncPanes);
+        fLook.add(look, "aggScale", 1, 12, 0.1).name("Aggregate / m").onChange(syncPanes);
+        fLook.add(look, "aggWeight", 0, 1, 0.01).name("Aggregate weight").onChange(syncPanes);
+        fLook.add(look, "macroScale", 0.01, 0.4, 0.005).name("Macro / m").onChange(syncPanes);
+        fLook.add(look, "deckRough", 0.2, 1, 0.01).name("Deck roughness").onChange(syncPanes);
+        fLook.add(look, "roughVary", 0, 0.4, 0.01).name("Rough variation").onChange(syncPanes);
+        fLook.add(look, "wheelPolish", 0, 0.5, 0.01).name("Wheel polish").onChange(syncPanes);
+        fLook.add(look, "driftAmount", 0, 3, 0.05).name("Old rubber").onChange(syncPanes);
+        fLook.add(look, "linesOn", 0, 1, 1).name("Paint lines").onChange(syncPanes);
+
+        // ── WEATHER ──────────────────────────────────────────────────────
+        //
+        // WHAT THIS LAB CANNOT SHOW YOU, stated up front: reflection CONTENT.
+        // The car's planar mirror and the mirrored guardrail both need render
+        // targets the game owns, so here the clearcoat reflects only the studio
+        // sky. That is the honest half of a wet road at distance — sun glint and
+        // sky sheen — but the near-field "there is a car in that puddle" cue is
+        // absent by design, and reflection is the last job anyway. Do not tune
+        // reflectStrength/Fresnel here; they will lie.
+        const fWet = gui.addFolder("Wet (both panes)");
+        fWet.add(wet, "wetAmount", 0, 1, 0.01).name("Weather").onChange(syncPanes);
+        fWet.add({ d: false }, "d").name("Drainage debug (R=film G=pond)")
+          .onChange((v) => { wetDebug = v; syncPanes(); });
+        fWet.add(wet, "wetDarken", 0.2, 1, 0.01).name("Film darkens").onChange(syncPanes);
+        fWet.add(wet, "wetCoatStrength", 0, 1, 0.01).name("Coat strength").onChange(syncPanes);
+        fWet.add(wet, "wetRough", 0.05, 1, 0.01).name("Substrate rough").onChange(syncPanes);
+        fWet.add(wet, "wetCoatRough", 0.005, 0.4, 0.005).name("Coat rough").onChange(syncPanes);
+        fWet.addColor(wet, "wetTint").name("Film tint").onChange(syncPanes);
+        fWet.add(wet, "kerbWet", 0, 1, 0.01).name("Kerb gets").onChange(syncPanes);
+        fWet.open();
+
+        const fPuddle = gui.addFolder("Puddles");
+        fPuddle.add(wet, "puddleAmount", 0, 1, 0.01).name("Amount").onChange(syncPanes);
+        fPuddle.add(wet, "puddleScale", 0.05, 1, 0.01).name("Size / m").onChange(syncPanes);
+        fPuddle.add(wet, "puddleStreak", 1, 10, 0.1).name("Stretch along").onChange(syncPanes);
+        fPuddle.add(wet, "puddleThreshold", 0.2, 0.9, 0.01).name("Threshold").onChange(syncPanes);
+        fPuddle.add(wet, "puddleSoft", 0.005, 0.2, 0.005).name("Edge soft").onChange(syncPanes);
+        fPuddle.add(wet, "puddleDarken", 0.2, 1, 0.01).name("Darkens").onChange(syncPanes);
+        fPuddle.add(wet, "puddleCoatRough", 0.002, 0.2, 0.002).name("Mirror-ness").onChange(syncPanes);
+        fPuddle.open();
+
+        // Where the water RUNS. This is the half that makes puddles land in
+        // believable places instead of being noise blobs — see modularRoadWet.
+        const fDrain = gui.addFolder("Drainage (where water goes)");
+        fDrain.add(wet, "wetDrainStart", 0, 1, 0.01).name("Pooling starts").onChange(syncPanes);
+        fDrain.add(wet, "wetDrainStrength", 0, 0.6, 0.01).name("Downhill bonus").onChange(syncPanes);
+        fDrain.add(wet, "wetCamber", 0, 2, 0.01).name("Camber (both gutters)").onChange(syncPanes);
+        fDrain.add(wet, "wetBank", 0, 2, 0.01).name("Bank (one side)").onChange(syncPanes);
+        fDrain.add(wet, "wetCurveRef", 0.005, 0.12, 0.005).name("Corner ref 1/m").onChange(syncPanes);
+        fDrain.add(wet, "wetWheelClear", 0, 1, 0.01).name("Tyres clear").onChange(syncPanes);
+        fDrain.add(wet, "wetSlopeMin", 0, 1, 0.01).name("Walls shed from").onChange(syncPanes);
+        fDrain.add(wet, "wetSlopeMax", 0, 1, 0.01).name("...to").onChange(syncPanes);
+
+        const fRipple = gui.addFolder("Surface break-up");
+        fRipple.add(wet, "rippleAmp", 0, 0.3, 0.005).name("Amount").onChange(syncPanes);
+        fRipple.add(wet, "rippleScale", 0.2, 6, 0.1).name("Scale / m").onChange(syncPanes);
+        fRipple.add(wet, "rippleStretch", 1, 12, 0.1).name("Stretch along").onChange(syncPanes);
+        fRipple.add(wet, "rippleDamp", 0, 1, 0.01).name("Puddles flatten it").onChange(syncPanes);
+        fRipple.add(wet, "rippleSpeed", 0, 2, 0.01).name("Drift (0 = still)").onChange(syncPanes);
+
+        const fSun = gui.addFolder("Sun (judge the bump here)");
+        fSun.add(ctl, "sunElevation", 2, 85, 0.5).name("Elevation °").onChange(applySun);
+        fSun.add(ctl, "sunAzimuth", 0, 360, 1).name("Azimuth °").onChange(applySun);
+        fSun.add(ctl, "sunSweep").name("Auto sweep (S)");
+        fSun.add(ctl, "sunIntensity", 0, 6, 0.05).name("Sun").onChange((x) => { sun.intensity = x; });
+        fSun.add(ctl, "hemiIntensity", 0, 3, 0.05).name("Sky").onChange((x) => { hemi.intensity = x; });
+        fSun.add(ctl, "fillIntensity", 0, 3, 0.05).name("Fill").onChange((x) => { fill.intensity = x; });
+        fSun.add(ctl, "exposure", 0.4, 2, 0.05).name("Exposure")
+          .onChange((x) => { renderer.toneMappingExposure = x; });
+        fSun.open();
+
+        const fCam = gui.addFolder("Camera");
+        fCam.add({ chaseCam }, "chaseCam").name("Chase — game pose (C)");
+        fCam.add({ orbitCam }, "orbitCam").name("Orbit (R)");
+        fCam.add({ fillCam }, "fillCam").name("Fill the frame (F)");
+        fCam.add({ underCam }, "underCam").name("Under the slab (U)");
+        fCam.open();
+
+        const fPerf = gui.addFolder("Measurement");
+        fPerf.add(ctl, "renderScale", 0.25, 2, 0.05).name("Render scale").onChange(onResize);
+        fPerf.add(ctl, "shadows").name("Shadows").onChange(applyShadows);
+        fPerf.add(ctl, "ground").name("Ground").onChange((v) => {
+          ground.visible = v;
+          grid.visible = v;
+        });
+      }
+
+      function applyShadows() {
+        renderer.shadowMap.enabled = ctl.shadows;
+        sun.castShadow = ctl.shadows;
+        for (const m of [roadMesh, railMesh]) {
+          if (!m) continue;
+          m.castShadow = ctl.shadows;
+          m.receiveShadow = ctl.shadows;
+        }
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Pane tags + divider                                                 */
+      /* ------------------------------------------------------------------ */
+
+      const tags = [];
+      function layoutTags() {
+        const panes = livePanes();
+        const w = innerWidth;
+        for (const t of tags) t.remove();
+        tags.length = 0;
+        const bounds = paneBounds(panes.length, w);
+        panes.forEach((p, i) => {
+          const el = document.createElement("div");
+          el.className = `tag ${p.build ? p.cls : "off"}`;
+          el.textContent = p.label;
+          el.style.left = `${(bounds[i][0] + bounds[i][1]) / 2}px`;
+          document.body.appendChild(el);
+          tags.push(el);
+        });
+        const split = $("split");
+        split.style.left = `${ctl.split * w}px`;
+        document.body.classList.toggle(
+          "nosplit", !ctl.wipe || ctl.solo >= 0 || panes.length < 2,
+        );
+      }
+
+      /**
+       * Where each pane's slice starts and ends, in CSS pixels.
+       * Two panes split at the draggable divider; three split it evenly, since
+       * one draggable handle cannot express two independent boundaries.
+       */
+      function paneBounds(n, w) {
+        if (n <= 1) return [[0, w]];
+        if (n === 2) {
+          const x = Math.round(ctl.split * w);
+          return [[0, x], [x, w]];
+        }
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          out.push([Math.round((i * w) / n), Math.round(((i + 1) * w) / n)]);
+        }
+        return out;
+      }
+
+      function initDivider() {
+        const split = $("split");
+        let dragging = false;
+        const move = (e) => {
+          if (!dragging) return;
+          ctl.split = Math.min(0.95, Math.max(0.05, e.clientX / innerWidth));
+          layoutTags();
+        };
+        split.addEventListener("pointerdown", (e) => {
+          dragging = true;
+          split.setPointerCapture(e.pointerId);
+          e.stopPropagation();
+        });
+        split.addEventListener("pointermove", move);
+        split.addEventListener("pointerup", (e) => {
+          dragging = false;
+          split.releasePointerCapture(e.pointerId);
+        });
+      }
+
+      function updateMeasureNote() {
+        const el = $("s-measure");
+        if (ctl.solo >= 0) {
+          el.className = "ok";
+          el.textContent = `solo ${PANES[ctl.solo].key} — ms is this material`;
+        } else {
+          el.className = "warn";
+          el.textContent = "split view — ms is all panes";
+        }
+      }
+
+      /* ------------------------------------------------------------------ */
+
+      function buildStudioEnv() {
+        // Small procedural sky, matching asphalt-lab's so the two pages agree.
+        // A road material with nothing to reflect reads as flat paint no matter
+        // how it is tuned — see the guardrail note in modularRoadMaterial.
+        const W = 128, H = 64;
+        const data = new Uint16Array(W * H * 4);
+        const sunDir = new THREE.Vector3(28, 48, 20).normalize();
+        const d = new THREE.Vector3();
+        const half = THREE.DataUtils.toHalfFloat;
+        for (let y = 0; y < H; y++) {
+          const phi = ((y + 0.5) / H) * Math.PI;
+          for (let x = 0; x < W; x++) {
+            const theta = ((x + 0.5) / W) * Math.PI * 2;
+            const sp = Math.sin(phi);
+            d.set(sp * Math.cos(theta), Math.cos(phi), sp * Math.sin(theta));
+            let r, g, b;
+            if (d.y >= 0) {
+              const t = Math.pow(d.y, 0.55);
+              r = 0.56 * (1 - t) + 0.34 * t;
+              g = 0.61 * (1 - t) + 0.43 * t;
+              b = 0.69 * (1 - t) + 0.57 * t;
+            } else {
+              const t = Math.min(1, -d.y * 2.2);
+              r = 0.56 * (1 - t) + 0.36 * t;
+              g = 0.56 * (1 - t) + 0.33 * t;
+              b = 0.55 * (1 - t) + 0.28 * t;
+            }
+            const s = Math.max(0, d.dot(sunDir));
+            const sunAmt = Math.pow(s, 340) * 80 + Math.pow(s, 14) * 0.4;
+            const i = (y * W + x) * 4;
+            data[i] = half(r + sunAmt);
+            data[i + 1] = half(g + sunAmt * 0.96);
+            data[i + 2] = half(b + sunAmt * 0.86);
+            data[i + 3] = half(1);
+          }
+        }
+        const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.HalfFloatType);
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        tex.colorSpace = THREE.LinearSRGBColorSpace;
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
+        tex.needsUpdate = true;
+        return tex;
+      }
+
+      async function createTimingDevice() {
+        if (!navigator.gpu) return null;
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) return null;
+          return await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+        } catch (e) {
+          console.warn("[road-surface-lab] no timestamp device; GPU ms reads n/a", e);
+          return null;
+        }
+      }
+
+      async function init() {
+        const device = await createTimingDevice();
+        hasTimestamps = Boolean(device?.features?.has("timestamp-query"));
+
+        renderer = new THREE.WebGPURenderer({
+          antialias: true,
+          trackTimestamp: true,
+          ...(device ? { device } : {}),
+        });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setClearColor(0xb8c4d2);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = ctl.exposure;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xb8c4d2);
+        scene.fog = new THREE.Fog(0xb8c4d2, 90, 260);
+        scene.environment = buildStudioEnv();
+
+        camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 600);
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 0.3;
+        controls.maxDistance = 260;
+
+        hemi = new THREE.HemisphereLight(0xf0f5ff, 0xd2c4b0, ctl.hemiIntensity);
+        scene.add(hemi);
+
+        sun = new THREE.DirectionalLight(0xfff6e8, ctl.sunIntensity);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.camera.near = 1;
+        sun.shadow.camera.far = 220;
+        sun.shadow.camera.left = -70;
+        sun.shadow.camera.right = 70;
+        sun.shadow.camera.top = 70;
+        sun.shadow.camera.bottom = -70;
+        sun.shadow.bias = -0.0004;
+        sun.shadow.normalBias = 0.04;
+        scene.add(sun);
+        scene.add(sun.target);
+
+        fill = new THREE.DirectionalLight(0xdde8ff, ctl.fillIntensity);
+        fill.position.set(-24, 18, -20);
+        scene.add(fill);
+
+        ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(600, 600),
+          new THREE.MeshStandardMaterial({ color: 0xd8dde6, roughness: 0.92, metalness: 0 }),
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.02;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        grid = new THREE.GridHelper(200, 100, 0x8a96a8, 0xb8c0cc);
+        grid.position.y = 0.001;
+        scene.add(grid);
+
+        pieceRoot = new THREE.Group();
+        scene.add(pieceRoot);
+
+        buildPanes();
+        rebuildPiece();
+        applySun();
+        chaseCam();
+        buildGui();
+        initDivider();
+        layoutTags();
+        updateMeasureNote();
+
+        addEventListener("resize", onResize);
+        addEventListener("keydown", onKey);
+
+        window.__roadSurfaceLab = {
+          renderer, scene, camera, controls,
+          look, v2, wet, ctl, PANES, RACK, perf,
+          rebuildPiece, syncPanes, buildPanes, applySun, layoutTags, refreshGui,
+          chaseCam, orbitCam, fillCam, underCam,
+        };
+
+        renderer.setAnimationLoop(frame);
+      }
+
+      function onKey(e) {
+        if (e.target?.matches?.("input, textarea")) return;
+        const k = e.key.toLowerCase();
+        if (k === "1" || k === "2" || k === "3") {
+          const i = Number(k) - 1;
+          ctl.solo = ctl.solo === i ? -1 : i;
+          layoutTags();
+          updateMeasureNote();
+          refreshGui();
+        }
+        if (k === "w") {
+          ctl.wipe = !ctl.wipe;
+          layoutTags();
+          refreshGui();
+        }
+        if (k === "[" || k === "]") {
+          const d = k === "]" ? 1 : -1;
+          ctl.piece = (ctl.piece + d + RACK.length) % RACK.length;
+          rebuildPiece();
+          refreshGui();
+        }
+        if (k === "c") chaseCam();
+        if (k === "r") orbitCam();
+        if (k === "f") fillCam();
+        if (k === "u") underCam();
+        if (k === "s") {
+          ctl.sunSweep = !ctl.sunSweep;
+          refreshGui();
+        }
+        if (k === "g") {
+          ctl.ground = !ctl.ground;
+          ground.visible = ctl.ground;
+          grid.visible = ctl.ground;
+          refreshGui();
+        }
+      }
+
+      function onResize() {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2) * ctl.renderScale);
+        renderer.setSize(innerWidth, innerHeight);
+        $("s-scale").textContent = ctl.renderScale.toFixed(2);
+        layoutTags();
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Frame                                                               */
+      /* ------------------------------------------------------------------ */
+
+      /**
+       * ONE SCENE, ONE CAMERA, N SCISSORED PASSES.
+       *
+       * Same geometry, same lights, same pixels — the only variable is which
+       * material is on the mesh. Anything else (two meshes side by side, two
+       * cameras) gives each pane a different light angle, which contaminates
+       * the exact thing this page exists to judge.
+       *
+       * The clear is handled by making the FIRST pass a normal one — it clears
+       * the whole attachment and then draws only inside its own scissor — and
+       * every pass after it load-and-draws into a region the first never
+       * touched. That is correct whether or not the backend happens to honour
+       * the scissor rect for the clear itself, which is worth not depending on.
+       */
+      function renderPanes() {
+        const panes = livePanes();
+        if (!panes.length || !roadMesh) return;
+        const w = renderer.domElement.width;
+        const h = renderer.domElement.height;
+        const bounds = paneBounds(panes.length, innerWidth);
+        const px = w / innerWidth; // CSS px → device px
+
+        renderer.setScissorTest(true);
+        for (let i = 0; i < panes.length; i++) {
+          const [x0, x1] = bounds[i];
+          roadMesh.material = panes[i].material;
+          renderer.autoClear = i === 0;
+          renderer.setScissor(
+            Math.round(x0 * px), 0, Math.max(1, Math.round((x1 - x0) * px)), h,
+          );
+          renderer.render(scene, camera);
+        }
+        renderer.autoClear = true;
+        renderer.setScissorTest(false);
+      }
+
+      function frame() {
+        controls.update();
+
+        if (ctl.sunSweep) {
+          ctl.sunElevation = 4 + 40 * (0.5 + 0.5 * Math.sin(performance.now() * 0.00035));
+          applySun();
+        }
+
+        renderPanes();
+
+        if (hasTimestamps) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+
+        const now = performance.now();
+        if (!perf.since) perf.since = now;
+        perf.frames++;
+        const ts = renderer.info.render.timestamp;
+        if (ts > 0) { perf.gpuSum += ts; perf.gpuN++; }
+        if (now - perf.since >= 500) {
+          perf.fps = (perf.frames * 1000) / (now - perf.since);
+          perf.gpu = perf.gpuN ? perf.gpuSum / perf.gpuN : 0;
+          $("s-fps").textContent = perf.fps.toFixed(0);
+          $("s-gpu").textContent = perf.gpuN ? `${perf.gpu.toFixed(2)} ms` : "n/a";
+          // ms per megapixel. The number that stays comparable when you move
+          // the render-scale slider — if it does NOT hold roughly steady as you
+          // scale, the cost is not fill and you are measuring the wrong thing.
+          const mpx = (renderer.domElement.width * renderer.domElement.height) / 1e6;
+          $("s-mpx").textContent = perf.gpuN && mpx
+            ? `${(perf.gpu / mpx).toFixed(2)} ms/Mpx`
+            : "—";
+          $("s-draws").textContent = String(renderer.info.render.drawCalls);
+          perf.frames = 0; perf.gpuSum = 0; perf.gpuN = 0; perf.since = now;
+        }
+      }
+
+      init().catch(showErr);
+    </script>
+  </body>
+</html>

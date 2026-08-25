@@ -602,7 +602,9 @@
         pieceRoot = new THREE.Group();
         scene.add(pieceRoot);
 
-        roadMat = createRoadMaterial(lookUniforms());
+        // tubeZones: this lab previews ANY piece on the road material, tubes
+        // included, with no builder to route them to createTubeMaterial.
+        roadMat = createRoadMaterial({ ...lookUniforms(), tubeZones: true });
         railEnv = buildStudioEnv();
         railMat = createLabRailMaterial(railEnv);
         kitRailMat = createGuardrailMaterial();

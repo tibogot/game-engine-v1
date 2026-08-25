@@ -21,6 +21,10 @@ import {
   normalView,
   normalWorld,
   positionWorld,
+  positionView,
+  cameraNear,
+  cameraFar,
+  perspectiveDepthToViewZ,
   texture,
   length,
   dot,
@@ -38,7 +42,6 @@ import {
   WET_NUMBERS,
   createWetShading,
   wetClearcoatNormal,
-  wetRippleNormal,
 } from "./modularRoadWet.js";
 
 function lin(hex) {
@@ -111,6 +114,19 @@ export function createRoadMaterial(opts = {}) {
     macroScale: uniform(opts.macroScale ?? 0.06),
     /** Cycles per metre of the aggregate speckle. 5 ⇒ ~20 cm chips. */
     aggScale: uniform(opts.aggScale ?? 5.0),
+    /**
+     * How much of the deck's tone comes from the AGGREGATE rather than from the
+     * macro drift. 0.4 was hard-coded as `macro*0.6 + agg*0.4`; this is the same
+     * number, made adjustable.
+     *
+     * It matters more than it looks once the aggregate is something you can
+     * actually see. With the built-in surface the two layers are both smooth
+     * gradient noise, so the split is a mood knob. With a CELLULAR aggregate
+     * (see modularRoadSurfaceV2) it is the balance between "a road with stones
+     * in it" and "a grey field with a hint of texture", and 0.4 is well short of
+     * what reads correctly close up.
+     */
+    aggWeight: uniform(opts.aggWeight ?? 0.4),
     /** Base deck roughness before variation. */
     deckRough: uniform(opts.deckRough ?? 0.93),
     /** How much the noise modulates roughness. This is what makes the deck read
@@ -212,6 +228,8 @@ export function createRoadMaterial(opts = {}) {
     reflectPlaneTol: uniform(opts.reflectPlaneTol ?? WET_DEFAULTS.reflectPlaneTol),
     reflectErrTol: uniform(opts.reflectErrTol ?? WET_DEFAULTS.reflectErrTol),
     railReflect: uniform(opts.railReflect ?? WET_DEFAULTS.railReflect),
+    railDepthTol: uniform(opts.railDepthTol ?? WET_DEFAULTS.railDepthTol),
+    railDepthSoft: uniform(opts.railDepthSoft ?? WET_DEFAULTS.railDepthSoft),
     kerbWet: uniform(opts.kerbWet ?? WET_DEFAULTS.kerbWet),
   };
 
@@ -232,6 +250,32 @@ export function createRoadMaterial(opts = {}) {
    * starting is a rare event and a dry frame is the common one.
    */
   const wetOn = Boolean(opts.wet);
+
+  /**
+   * DO THE RIDEABLE-TUBE ZONES (3 = inner bore, 4 = outer shell) NEED SHADING?
+   *
+   * DEFAULT FALSE, because on the shipping track they are unreachable. Every
+   * tube piece carries `def.tubeShader`, and modularRoadBuilder._deckMaterial
+   * hands those to createTubeMaterial instead of this material — all 23 of
+   * them. Verified exhaustively by building every piece in the kit and reading
+   * its aZone attribute: tools/roadZoneUsageAudit.mjs.
+   *
+   * What that dead branch was costing, on EVERY road fragment of every straight:
+   * `tubeRingMask` evaluated TWICE (once in colorNode for the lit ring strip,
+   * once in neonNode for the emissive) because the two call sites build separate
+   * node graphs, plus two zone mixes in colorNode, two in roughnessNode, and the
+   * whole neon emissive path feeding the bloom MRT.
+   *
+   * `zone 5` (the glass road's lacquered panel) is NOT gated — that one is live,
+   * on `glass_road`.
+   *
+   * The uniforms stay declared unconditionally either way, so a look file still
+   * round-trips tubeInner/tubeOuter/neon* and a tube lab can set them.
+   *
+   * road-piece-lab.html passes `tubeZones: true`: it previews any piece in the
+   * kit on this material, tubes included, with no builder to route them.
+   */
+  const tubeZones = Boolean(opts.tubeZones);
 
   const mat = wetOn
     ? new THREE.MeshPhysicalNodeMaterial({
@@ -255,7 +299,26 @@ export function createRoadMaterial(opts = {}) {
   // Still zero textures: no sampler slots (v3 is already near the Windows WebGPU
   // 16-sampler cap), no VRAM, no streaming, and it tiles infinitely along a
   // track of any length.
-  const surface = Fn(() => {
+  //
+  // ── THE SURFACE IS REPLACEABLE ────────────────────────────────────────────
+  // `opts.buildSurface(u)` swaps this field for another one, and the CONTRACT
+  // is the vec4 packing below: x = macro tone 0..1, y = aggregate tone 0..1,
+  // z = wheel-path mask 0..1, w = the aggregate's own distance fade.
+  //
+  // It exists so a candidate surface can be A/B'd against this one without
+  // forking the six hundred lines underneath — the zone chain, the paint lines,
+  // the old rubber, the drainage model and the wet coat all consume that vec4
+  // and none of them should have to be copied to try a different asphalt. Every
+  // consumer's assumptions live in that contract, so honour it:
+  //
+  //   .x MUST stay LOW-FREQUENCY. driftField takes its streak wander and its
+  //      patchiness from it, and a chip-scale .x makes skid marks jitter per
+  //      stone instead of wandering down the road.
+  //   .z is the wheel path and is what the wet film's squeegee term is built
+  //      from — it is geometry (|aLateral|), not noise, so keep it as-is.
+  //   .w must reach 0 wherever .y is undersampled, or the aggregate aliases
+  //      into crawling static at distance.
+  const surface = opts.buildSurface ? opts.buildSurface(u) : Fn(() => {
     // Stretched along the path, so every field below comes out as streaks that
     // run WITH the road rather than blobs sitting on it.
     const along = uv().x.div(u.streak); // metres along the path, anisotropic
@@ -346,6 +409,31 @@ export function createRoadMaterial(opts = {}) {
   const wet = wetOn ? createWetShading(u, surface.z) : null;
 
   /**
+   * HOW FAR THE WATER SURFACE PUSHES A REFLECTION AROUND, in UV. One node,
+   * shared by the car's planar mirror and the guardrail's mirrored geometry.
+   *
+   * UNPACKING MATTERS AND WAS WRONG IN ONE OF THE TWO. `coatNormalPacked` is a
+   * normal stored for `normalMap` — `n * 0.5 + 0.5`, so it lives in 0..1 with
+   * z ≈ 1 on a near-flat surface. The car's reflection unpacked it correctly;
+   * the rail's read `.xz` raw, which is not a zero-mean wobble at all but a
+   * near-CONSTANT offset of about (0.5, 1.0) × reflectDistort × coatNormalGain.
+   * At the default 0.05 that is up to (0.025, 0.05) of UV — roughly 54 px of
+   * vertical shift at 1080p, always the same direction, and growing with how
+   * wet the road is. A reflection that sits a fixed distance from the object
+   * casting it reads exactly like a mirror that is aimed wrong, which is what
+   * made the mirrored-rail approach look broken on slopes.
+   *
+   * Shared rather than duplicated for the second half of the same bug: the rail
+   * called `wetRippleNormal(u)` again instead of reusing this field, and a
+   * second call builds a second graph — six trig functions evaluated twice per
+   * wet fragment for an identical result.
+   */
+  const coatWobble = wet
+    ? wet.coatNormalPacked.xy.sub(0.5).mul(2.0)
+        .mul(u.reflectDistort).mul(wet.coatNormalGain)
+    : null;
+
+  /**
    * Paint-line coverage (0..1). Shared by albedo and the optional bloom write —
    * one node instance, one evaluation per fragment when both paths reference it.
    */
@@ -401,7 +489,7 @@ export function createRoadMaterial(opts = {}) {
 
     // Weighted toward the macro layer: large-scale variation is what the eye
     // reads as "a road surface", the speckle is the close-up detail on top.
-    const tone = macro.mul(0.6).add(agg.mul(0.4));
+    const tone = macro.mul(oneMinus(u.aggWeight)).add(agg.mul(u.aggWeight));
     // Symmetric contrast about the midpoint, so grainScale can push or pull
     // variation without dragging the average brightness down with it.
     const shaped = saturate(tone.sub(0.5).mul(u.grainScale).add(0.5));
@@ -438,11 +526,6 @@ export function createRoadMaterial(opts = {}) {
         .mul(mix(vec3(1, 1, 1), u.wetTint, kw));
     }
 
-    // Tube interior: base color + a lit strip where the neon rings sit so the
-    // glow reads as a fixture, not just bloom haze.
-    const ringMask = tubeRingMask(u, along);
-    const tubeInnerCol = mix(u.tubeInner, u.neonColor, ringMask);
-
     // Select by zone: 0 side, 1 deck, 2 rail, 3 tube inner, 4 tube outer,
     // 5 lacquered panel. The panel deliberately REPLACES the asphalt rather than
     // tinting it — no aggregate, no wheel paths, no old rubber, because none of
@@ -450,8 +533,13 @@ export function createRoadMaterial(opts = {}) {
     // manufactured.
     let col = mix(u.sideColor, deckCol, step(0.5, zone));
     col = mix(col, railCol, step(1.5, zone));
-    col = mix(col, tubeInnerCol, step(2.5, zone));
-    col = mix(col, u.tubeOuter, step(3.5, zone));
+    if (tubeZones) {
+      // Tube interior: base colour plus a lit strip where the neon rings sit,
+      // so the glow reads as a fixture rather than as bloom haze.
+      const tubeInnerCol = mix(u.tubeInner, u.neonColor, tubeRingMask(u, along));
+      col = mix(col, tubeInnerCol, step(2.5, zone));
+      col = mix(col, u.tubeOuter, step(3.5, zone));
+    }
     col = mix(col, u.panelColor, step(4.5, zone));
     return col;
   })();
@@ -491,8 +579,10 @@ export function createRoadMaterial(opts = {}) {
       ? mix(float(0.5), wet.substrateRough, wet.film.mul(u.kerbWet))
       : float(0.5);
     r = mix(r, kerbR, step(1.5, zone)); // kerb paint
-    r = mix(r, float(0.82), step(2.5, zone)); // tube inner
-    r = mix(r, float(0.55), step(3.5, zone)); // tube shell paint
+    if (tubeZones) {
+      r = mix(r, float(0.82), step(2.5, zone)); // tube inner
+      r = mix(r, float(0.55), step(3.5, zone)); // tube shell paint
+    }
     r = mix(r, u.panelRough, step(4.5, zone)); // lacquered panel
     return r;
   })();
@@ -526,12 +616,17 @@ export function createRoadMaterial(opts = {}) {
   // buffer so v3's SELECTIVE bloom picks them up (plain emissive alone does not
   // bloom here; see the note in roadGame.js). BloomMRTNode also keeps this
   // material safe in plain-RT renders (thumbnail bakes).
-  const neonNode = Fn(() => {
-    const zone = attribute("aZone", "float");
-    const along = uv().x;
-    const innerMask = step(2.5, zone).mul(float(1).sub(step(3.5, zone)));
-    return u.neonColor.mul(tubeRingMask(u, along)).mul(u.neonIntensity).mul(innerMask);
-  })();
+  // Null when the tube zones are gated off — see `tubeZones`. This is the
+  // second of the two tubeRingMask evaluations every road fragment was paying
+  // for, and the one that also dragged the whole neon path into the bloom MRT.
+  const neonNode = tubeZones
+    ? Fn(() => {
+        const zone = attribute("aZone", "float");
+        const along = uv().x;
+        const innerMask = step(2.5, zone).mul(float(1).sub(step(3.5, zone)));
+        return u.neonColor.mul(tubeRingMask(u, along)).mul(u.neonIntensity).mul(innerMask);
+      })()
+    : null;
   // ── PLANAR CAR REFLECTION ─────────────────────────────────────────────────
   // Additive, through emissive, and both of those are deliberate.
   //
@@ -581,9 +676,7 @@ export function createRoadMaterial(opts = {}) {
       // uses, so the distortion agrees with the highlight sitting on top of it,
       // and `coatNormalGain` means a flat puddle reflects sharply while damp
       // asphalt smears. Without this the reflection reads as a pasted-on decal.
-      const wob = wet.coatNormalPacked.xy.sub(0.5).mul(2.0)
-        .mul(u.reflectDistort).mul(wet.coatNormalGain);
-      const reflUv = projUv.add(wob);
+      const reflUv = projUv.add(coatWobble);
 
       const col = reflectTex.sample(reflUv);
 
@@ -672,20 +765,75 @@ export function createRoadMaterial(opts = {}) {
     const railOn = uniform(0);
     mat._railMirrorOn = railOn;
 
+    /**
+     * THE OCCLUSION GATE. Null when no depth texture was supplied, so an older
+     * caller still gets exactly the previous behaviour.
+     *
+     * The pre-mirror pass draws the mirrored rail with NOTHING in front of it —
+     * only that geometry is on PREMIRROR_LAYER — so at any pixel the road shows
+     * whatever mirrored rail happens to be there. Over a crest that is the
+     * mirrored rail of the road BEYOND the hill, drawn straight through it.
+     *
+     * Depth-testing the pass itself cannot fix that: the mirrored rail sits
+     * BELOW its own deck, so the deck occludes its own reflection and testing
+     * against the real road deletes everything. See the long note in
+     * modularRoadReflection.
+     *
+     * What DOES separate the two is distance. A correct reflection lies a metre
+     * or two from the fragment showing it — the rail is about that far above
+     * its deck, so its mirror is about that far below. A see-through is tens of
+     * metres. So: linearise both depths to metres and fade out on the gap.
+     * Same question `reflectErrTol` asks of the planar mirror — how many metres
+     * wrong is this fragment — asked of a different failure.
+     */
+    const mirrorDepthTex = opts.mirrorDepthTexture
+      ? texture(opts.mirrorDepthTexture)
+      : null;
+    mat._mirrorDepthTextureNode = mirrorDepthTex;
+
     railNode = Fn(() => {
       const zone = attribute("aZone", "float");
       const deckOnly = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
 
-      // The same normal-driven wobble the car's reflection gets. Sampling
-      // straight is what makes a reflection read as a decal: real water is
-      // never flat enough to return a clean image.
-      const distort = wetRippleNormal(u).xz
-        .mul(u.reflectDistort).mul(wet.coatNormalGain);
-      const col = mirrorTex.sample(screenUV.add(distort));
+      // The same normal-driven wobble the car's reflection gets — literally the
+      // same node now, not a second copy of the expression. Sampling straight is
+      // what makes a reflection read as a decal: real water is never flat enough
+      // to return a clean image.
+      const uvSample = screenUV.add(coatWobble);
+      const col = mirrorTex.sample(uvSample);
+
+      let occlude = float(1);
+      if (mirrorDepthTex) {
+        // Sample the SAME uv the colour came from, or the gate would judge a
+        // different pixel than the one being displayed.
+        const raw = mirrorDepthTex.sample(uvSample).r;
+        // Both to metres in front of the eye. positionView.z is negative going
+        // away from the camera, hence the negate.
+        const mirrorZ = perspectiveDepthToViewZ(raw, cameraNear, cameraFar).negate();
+        const fragZ = positionView.z.negate();
+        // A depth of 1 (nothing drawn) linearises to `far`; the gap is then
+        // enormous and the fragment is rejected, which is correct — no mirrored
+        // rail there means no reflection to show.
+        const gap = abs(mirrorZ.sub(fragZ));
+        // HOW ABRUPTLY the reflection ends at the crest line.
+        //
+        // A wide band dissolves the reflection instead of ending it, and a
+        // dissolving rail reads as one SINKING INTO the deck rather than one
+        // going out of view behind a hill. Some truncation at a crest is
+        // correct — a real mirror stops showing the rail once the surface
+        // carrying the image has curved away — so the goal is a clean edge, not
+        // a gentle one. `railDepthSoft` is the fraction of the tolerance the
+        // fade occupies: 0.15 is a crisp edge, 0.5 was the mush.
+        const soft = u.railDepthTol.mul(u.railDepthSoft);
+        occlude = oneMinus(smoothstep(
+          u.railDepthTol.sub(soft), u.railDepthTol, gap,
+        ));
+      }
 
       const fres = oneMinus(abs(normalView.z)).pow(u.reflectFresnel);
       return col.rgb.mul(col.a)
-        .mul(wet.coat).mul(fres).mul(deckOnly).mul(u.railReflect).mul(railOn);
+        .mul(wet.coat).mul(fres).mul(deckOnly).mul(u.railReflect)
+        .mul(occlude).mul(railOn);
     })();
   }
 
@@ -695,15 +843,29 @@ export function createRoadMaterial(opts = {}) {
   // are already drawn — bloom's fullscreen pyramid already runs for neon/props.
   const lineGlow = lineAmt.mul(u.lineColor).mul(u.linesBloomIntensity).mul(u.linesBloom);
 
-  let emissive = neonNode.add(lineGlow);
+  let emissive = neonNode ? neonNode.add(lineGlow) : lineGlow;
   if (reflectNode) emissive = emissive.add(reflectNode);
   if (railNode) emissive = emissive.add(railNode);
   mat.emissiveNode = emissive;
   // Neon + optional line glow. Reflections stay out — blooming them hazes every
   // wet frame.
-  applyBloomMRT(mat, neonNode.add(lineGlow));
+  applyBloomMRT(mat, neonNode ? neonNode.add(lineGlow) : lineGlow);
 
   mat._roadUniforms = u;
+  /**
+   * The packed asphalt surface — vec4(macro, aggregate, wheelPath, aggFade).
+   *
+   * Exposed for the same reason as `_wetField` and `_reflectNode` below: anyone
+   * building ON this surface has to reference the SAME node instance rather
+   * than a second copy of the expression, or the two quietly diverge and the
+   * derived thing stops agreeing with the deck it is supposed to describe.
+   *
+   * modularRoadSurfaceV2 is the caller. It takes a bump normal out of `.y` and
+   * `.x` and fades it with `.w`, and because it holds this node the whole normal
+   * costs two screen-space derivatives instead of a second set of noise
+   * evaluations. See the note there on why `bumpMap()` cannot do this.
+   */
+  mat._surfaceNode = surface;
   /** The raw vec2(film, pond) field, or null when dry. Exposed so wet-road-lab
    *  can render the drainage model as false colour without re-deriving the
    *  wheel-path mask it is built from — a second copy of that expression is
@@ -1208,7 +1370,7 @@ export const ROAD_LOOK_NUMBERS = [
   "linesOn", "centerOn", "edgeOn", "linesBloom", "linesBloomIntensity",
   "railDash", "railStriped", "grainScale", "streak",
   "neonIntensity", "neonSpacing", "neonWidth",
-  "deckBrightness", "macroScale", "aggScale", "deckRough", "roughVary",
+  "deckBrightness", "macroScale", "aggScale", "aggWeight", "deckRough", "roughVary",
   "wheelPolish", "wheelDarken",
   "driftAmount", "driftWidth", "driftBias", "driftCurveRef", "driftGloss",
   "driftLines", "driftWander",

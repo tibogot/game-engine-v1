@@ -263,6 +263,33 @@ export const WET_DEFAULTS = {
   /** Master, 0 = off. 1 = exactly the mirrored rail as rendered; unlike the
    *  colour bands this replaced, that is the physically right answer. */
   railReflect: 1.0,
+  /**
+   * METRES between a mirrored rail and the fragment showing it, before that
+   * reflection is treated as belonging to somewhere else and faded out.
+   *
+   * The pre-mirror pass has no occluders (see modularRoadReflection), so
+   * without this the road shows the mirrored rail of a section hidden behind a
+   * crest — the reflection draws straight through the hill. A correct
+   * reflection sits a metre or two from its own deck; a see-through is tens of
+   * metres, so almost any value in between separates them.
+   *
+   * 4 m is deliberately loose. The rail stands ~0.8 m above the deck and the
+   * mirror the same below, but on a bank or the inside of a loop the receiving
+   * fragment can be a couple of metres off along the view ray without being
+   * wrong. Tighten it if see-through survives near the crest line; loosen it if
+   * legitimate reflections cut off early on banked pieces.
+   */
+  railDepthTol: 4.0,
+  /**
+   * Fraction of `railDepthTol` the cutoff fades across. Small = a clean edge.
+   *
+   * This is the crest knob. Wide fades do not hide the limitation, they change
+   * what it looks like: a reflection that dissolves reads as a rail sinking
+   * into the road, while one that stops reads as a rail passing out of sight
+   * behind the hill — which is what is actually happening. Raise it only if the
+   * edge starts to look cut with scissors.
+   */
+  railDepthSoft: 0.15,
 
   // ── PLANAR REFLECTION ─────────────────────────────────────────────────────
   // Only does anything when the material was built with a reflection texture
@@ -374,7 +401,7 @@ export const WET_NUMBERS = [
   "rippleAmp", "rippleScale", "rippleSpeed", "rippleStretch", "rippleDamp",
   "reflectStrength", "reflectFresnel", "reflectDistort", "reflectFade",
   "reflectPlaneTol", "reflectErrTol",
-  "railReflect",
+  "railReflect", "railDepthTol", "railDepthSoft",
   "kerbWet",
 ];
 

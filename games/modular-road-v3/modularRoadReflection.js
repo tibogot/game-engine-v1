@@ -122,12 +122,26 @@ export function createCarReflection({
   // The material samples a texture nothing is writing this frame, which is the
   // standard fix and the reason every planar-reflection implementation
   // double-buffers.
-  const makeTarget = (i) => {
+  /**
+   * @param {boolean} [readableDepth] attach a DepthTexture, so a shader can
+   *   sample how far away what it drew actually was. Only the PRE-MIRROR pass
+   *   needs it — see the occlusion note on `preTargets`.
+   */
+  const makeTarget = (i, readableDepth = false) => {
     const t = new THREE.RenderTarget(width, height, {
       type: THREE.HalfFloatType,
       depthBuffer: true,
       samples: 0,
     });
+    if (readableDepth) {
+      // FLOAT, not the default unsigned int: the road linearises this back to
+      // metres and compares it against its own view depth, and a 24-bit integer
+      // depth quantises hard enough at distance to make that comparison jitter.
+      const d = new THREE.DepthTexture(width, height);
+      d.type = THREE.FloatType;
+      d.name = `MirrorDepth${i}`;
+      t.depthTexture = d;
+    }
     t.texture.name = `CarReflection${i}`;
     t.texture.minFilter = THREE.LinearFilter;
     t.texture.magFilter = THREE.LinearFilter;
@@ -142,7 +156,32 @@ export function createCarReflection({
 
   // Second pair, for the pre-mirrored pass. Ping-ponged for the same
   // read/write-in-one-scope reason as the first; the road samples this one too.
-  const preTargets = [makeTarget("Pre0"), makeTarget("Pre1")];
+  /**
+   * THE PRE-MIRROR PASS HAS NO OCCLUDERS, and that is why it needs readable
+   * depth.
+   *
+   * `updatePreMirrored` sets the camera to PREMIRROR_LAYER, on which ONLY the
+   * mirrored rail lives — no road, no terrain, nothing. So the pass cannot hide
+   * anything behind anything, and the road then samples it at screenUV with no
+   * test: whatever mirrored rail lands on a pixel is shown by whatever deck
+   * fragment is at that pixel. Over a crest that means the mirrored rail of the
+   * road BEYOND the hill draws straight through the hill.
+   *
+   * Depth-testing the pass against the real road does NOT fix it, and the
+   * reason is worth writing down because it is the obvious thing to try: the
+   * mirrored rail sits BELOW its own deck (buildMirroredRailGeometry negates
+   * `up`), so the deck is between the eye and its own reflection. Testing
+   * against the real road would occlude every reflection, the correct ones
+   * included. Ignoring depth is not an oversight in this pass, it is required.
+   *
+   * What separates the two cases is HOW FAR the mirrored geometry is from the
+   * fragment displaying it. A correct reflection is a metre or two away — the
+   * rail is about that far above its deck, so its mirror is about that far
+   * below. A see-through is tens of metres. So the road samples this depth and
+   * rejects anything too far from its own, which is the same "how many metres
+   * wrong is this" test `reflectErrTol` already applies to the planar mirror.
+   */
+  const preTargets = [makeTarget("Pre0", true), makeTarget("Pre1", true)];
   let preFront = 0;
   let preActive = false;
 
@@ -212,7 +251,16 @@ export function createCarReflection({
       for (const t of targets) t.setSize(W, H);
       // The pre-mirrored pass is sampled at screenUV, so unlike the planar
       // mirror it wants the VIEW's aspect ratio, not just some small square.
-      for (const t of preTargets) t.setSize(W, H);
+      for (const t of preTargets) {
+        t.setSize(W, H);
+        // RenderTarget.setSize resizes an attached depthTexture, but its image
+        // dimensions are what the sampler uses — keep them in step explicitly.
+        if (t.depthTexture) {
+          t.depthTexture.image.width = W;
+          t.depthTexture.image.height = H;
+          t.depthTexture.needsUpdate = true;
+        }
+      }
     },
 
     /**
@@ -318,6 +366,10 @@ export function createCarReflection({
 
     /** The pre-mirrored target to SAMPLE this frame (screenUV, not textureMatrix). */
     get mirrorTexture() { return preTargets[preFront].texture; },
+    /** Depth of whatever the pre-mirror pass drew, for the road's occlusion
+     *  test. Follows the same ping-pong as `mirrorTexture` — always the buffer
+     *  written LAST, never the one being written now. */
+    get mirrorDepthTexture() { return preTargets[preFront].depthTexture; },
 
     /**
      * Draw the pre-mirrored geometry from the REAL camera.

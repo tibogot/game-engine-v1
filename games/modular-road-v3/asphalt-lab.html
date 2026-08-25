@@ -522,8 +522,14 @@
 
         gameMat = createRoadMaterial(look);
         cheapMat = createCheapAsphaltMaterial(look);
-        gameMat.shadowSide = THREE.FrontSide;
-        cheapMat.shadowSide = THREE.FrontSide;
+        // BackSide, not FrontSide — see the long note in road-surface-lab.html.
+        // FrontSide makes the deck write its own lit top surface into the shadow
+        // map, so it self-shadows against a quantised copy of itself and throws a
+        // fan of diagonal acne lines toward the vanishing point. The slab is a
+        // closed solid, so BackSide stores the underside instead and there is
+        // nothing left to self-shadow against. Costs nothing, keeps shadows on.
+        gameMat.shadowSide = THREE.BackSide;
+        cheapMat.shadowSide = THREE.BackSide;
         applyLook();
         applySide();
 

@@ -1502,6 +1502,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       wet: wantWet,
       reflectionTexture: wantWet ? carReflection.texture : null,
       mirrorTexture: wantRail ? carReflection.mirrorTexture : null,
+      // Feeds railNode's occlusion gate — without it the mirrored rail of a
+      // section hidden behind a crest draws through the crest.
+      mirrorDepthTexture: wantRail ? carReflection.mirrorDepthTexture : null,
     }));
   }
 
@@ -1556,6 +1559,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     if (mode === "drive" && reflectionEnabled && carReflection.updatePreMirrored(camera)) {
       const mirrorNode = roadMaterial._mirrorTextureNode;
       if (mirrorNode) mirrorNode.value = carReflection.mirrorTexture;
+      // Follow the same ping-pong as the colour, or the gate judges last
+      // frame's depth against this frame's image.
+      const mirrorDepthNode = roadMaterial._mirrorDepthTextureNode;
+      if (mirrorDepthNode) mirrorDepthNode.value = carReflection.mirrorDepthTexture;
       if (railOn) railOn.value = 1;
     }
 
