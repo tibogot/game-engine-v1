@@ -54,7 +54,7 @@ import {
   float, vec2, vec3, vec4, Fn, If, Loop, Break, uniform, uv, texture, texture3D,
   positionWorld, cameraPosition, screenUV, screenCoordinate,
   cameraViewMatrix, cameraProjectionMatrix,
-  normalize, dot, max, min, mix, smoothstep, pow, exp, abs, sign, clamp, sin, cos,
+  normalize, dot, max, min, mix, smoothstep, pow, exp, abs, sign, clamp, sin, cos, floor,
   saturate, interleavedGradientNoise,
 } from "three/tsl";
 import {
@@ -161,8 +161,12 @@ export const CLOUD_DEFAULTS = {
   // ── Quality ──────────────────────────────────────────────────────────────────────
   /** Cloud buffer scale vs. the drawing buffer. 0.5 = half res. */
   bufferScale: 0.5,
-  /** Depth-aware upsample strength. 0 = plain bilinear (haloes), higher = more rejection. */
-  upsampleDepthReject: 6.0,
+  /** How readily the upsample switches from bilinear to nearest-depth at a silhouette.
+   *  It scales the RELATIVE depth difference across the 2x2 footprint, so it is
+   *  resolution- and distance-independent. 0 = always bilinear (ragged object edges);
+   *  higher = crisper edges but more 2x2 blockiness on steep smooth surfaces. Free —
+   *  it is arithmetic inside a pass that already runs. */
+  upsampleDepthReject: 8.0,
   /** Temporal accumulation: fraction of the reprojected history kept per frame. 0 = off
    *  (raw march, visibly dithered), 0.9 = a ~10-frame running average. Neighbourhood
    *  clamping keeps this from ghosting. */
@@ -218,22 +222,41 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   let _ready = false;
   let _bakeMs = 0;
   let _fade = 0; // eases in once the bake lands so the deck does not pop
+  let _bakeStarted = false;
+  let _worker = null;
 
-  const readyPromise = bakeInWorker(seed)
-    .then((res) => {
-      // Copy INTO the existing buffers — never reassign `.image`. See makeVolume().
-      refill(baseTexture, res.base);
-      refill(detailTexture, res.detail);
-      refill(nearTexture, res.near);
-      refill(weatherTexture, res.weather);
-      _bakeMs = res.ms;
-      _ready = true;
-      return { ms: res.ms };
-    })
-    .catch((err) => {
-      console.warn("[ModularRoadClouds] noise bake failed:", err);
-      return { ms: 0, error: err };
-    });
+  // `ready` is handed out at construction but only settles once a bake actually runs, so a
+  // caller can await it without forcing the system to be on.
+  let _resolveReady;
+  const readyPromise = new Promise((res) => { _resolveReady = res; });
+
+  /**
+   * Kick the noise bake. Deferred until the clouds are first ENABLED — this is the
+   * expensive half of the system (a few seconds of worker CPU and ~10 MB of transferred
+   * buffers), and a player who never turns clouds on should never pay for it.
+   */
+  function startBake() {
+    if (_bakeStarted) return readyPromise;
+    _bakeStarted = true;
+    bakeInWorker(seed, (w) => { _worker = w; })
+      .then((res) => {
+        // Copy INTO the existing buffers — never reassign `.image`. See makeVolume().
+        refill(baseTexture, res.base);
+        refill(detailTexture, res.detail);
+        refill(nearTexture, res.near);
+        refill(weatherTexture, res.weather);
+        _bakeMs = res.ms;
+        _ready = true;
+        _worker = null;
+        _resolveReady({ ms: res.ms });
+      })
+      .catch((err) => {
+        console.warn("[ModularRoadClouds] noise bake failed:", err);
+        _worker = null;
+        _resolveReady({ ms: 0, error: err });
+      });
+    return readyPromise;
+  }
 
   function refill(tex, data) {
     const dst = tex.image.data;
@@ -307,6 +330,13 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     magFilter: THREE.LinearFilter,
     type: THREE.HalfFloatType,
   });
+  // MATCH THE RENDERER'S MSAA. `antialias: true` only anti-aliases the CANVAS — a render
+  // target you create yourself defaults to samples = 0. Without this, turning clouds on
+  // reroutes the scene through this target and every geometry edge in the frame silently
+  // loses 4x MSAA, which reads as the clouds having "bad edges" when the clouds are not
+  // involved at all. Only affects the owns-the-frame path; on the post-FX path the
+  // pipeline's own scene pass already carries the renderer's sample count.
+  sceneRT.samples = renderer.samples ?? 0;
   sceneRT.depthTexture = new THREE.DepthTexture(1, 1);
   const depthTex = texture(sceneRT.depthTexture);
   const sceneTex = texture(sceneRT.texture);
@@ -547,7 +577,23 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     // has a closed form. Clamping tFar once here replaces a projection + compare at every
     // step. Sky pixels hold the cleared far-plane depth, so gate on real geometry or every
     // sky ray gets clipped at the far plane and the deck vanishes.
-    const rawDepth = depthTex.sample(screenUV).r;
+    // CONSERVATIVE DEPTH. This pixel is half-res, so it covers a 2x2 block of full-res
+    // pixels. Sampling depth once at its centre means a texel straddling a silhouette can
+    // pick up the FAR (sky) depth and march straight past the object — drawing cloud over
+    // the car's edge. Taking the NEAREST depth in the block instead makes the march stop at
+    // the closest geometry in its footprint, so the error can only ever be slightly too
+    // little cloud just outside an object, which the nearest-depth upsample then recovers.
+    // Nearest is min for a normal depth buffer and max for a reversed one.
+    const ft = uFullTexel;
+    const q0 = depthTex.sample(screenUV.add(vec2(ft.x.mul(-0.5), ft.y.mul(-0.5)))).r;
+    const q1 = depthTex.sample(screenUV.add(vec2(ft.x.mul(0.5), ft.y.mul(-0.5)))).r;
+    const q2 = depthTex.sample(screenUV.add(vec2(ft.x.mul(-0.5), ft.y.mul(0.5)))).r;
+    const q3 = depthTex.sample(screenUV.add(vec2(ft.x.mul(0.5), ft.y.mul(0.5)))).r;
+    const rawDepth = mix(
+      min(min(q0, q1), min(q2, q3)),
+      max(max(q0, q1), max(q2, q3)),
+      uReversed,
+    ).toVar();
     const skyDepth = uReversed.oneMinus(); // cleared value: 1 normal, 0 reversed
     const hasGeo = abs(rawDepth.sub(skyDepth)).greaterThan(0.0001);
     If(hasGeo, () => {
@@ -718,6 +764,10 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
   postScene.add(postQuad);
   const uCloudTexel = uniform(new THREE.Vector2());
+  /** Cloud buffer resolution in pixels — for snapping to exact texel centres. */
+  const uCloudRes = uniform(new THREE.Vector2(1, 1));
+  /** Full-res texel size in UV, for the march's conservative 2x2 depth fetch. */
+  const uFullTexel = uniform(new THREE.Vector2());
 
   // ── Temporal resolve ───────────────────────────────────────────────────────────────
   const uPrevViewProj = uniform(new THREE.Matrix4());
@@ -803,6 +853,59 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   resolveMat.blending = THREE.NoBlending; // write the resolved value verbatim
 
   /**
+   * NEAREST-DEPTH UPSAMPLE of the half-res cloud buffer.
+   *
+   * Replaces a 5-tap bilateral blur that had a real flaw: the centre tap carried a FIXED
+   * 0.5 weight with no depth test, so at a silhouette half the result always came from a
+   * texel that might be on the wrong side of the edge — and no amount of
+   * `upsampleDepthReject` could touch it, because the reject only weighted the other half.
+   * That is what made every object meeting a cloud (the car, guardrails, kerbs) come out
+   * with a ragged, notched outline.
+   *
+   * (The blur was added to soften raymarch grain BEFORE temporal accumulation existed. Once
+   * temporal landed, the grain was gone and the blur was pure downside — a workaround that
+   * outlived the problem it solved.)
+   *
+   * How this works: find the four half-res texels around this pixel, snap to their exact
+   * centres, and compare the scene depth AT each centre with this pixel's depth. Where the
+   * depths agree there is no silhouette, so plain bilinear is used and the result stays
+   * smooth. Where they disagree, the single best-matching texel is taken whole — no
+   * blending across the edge, so the silhouette stays crisp.
+   *
+   * Cost: 4 depth + 5 cloud fetches, versus the old 5 + 5. Slightly CHEAPER, and it is the
+   * actual fix — raising `bufferScale` only hides the symptom at 4x the march cost.
+   */
+  const upsampleCloud = Fn(([fuv]) => {
+    const dC = depthDist(depthTex.sample(fuv).r).toVar();
+
+    // Texel-space position of this pixel, then the base corner of the surrounding 2x2.
+    const base = floor(fuv.mul(uCloudRes).sub(0.5));
+    const bestUv = fuv.toVar();
+    const bestDiff = float(1e9).toVar();
+    const spread = float(0.0).toVar();
+
+    for (const o of [vec2(0, 0), vec2(1, 0), vec2(0, 1), vec2(1, 1)]) {
+      // Exact texel centre: bilinear sampling here returns that texel verbatim.
+      const cuv = base.add(o).add(0.5).div(uCloudRes);
+      // Relative depth difference — scale-free, so one threshold works near and far.
+      const diff = abs(depthDist(depthTex.sample(cuv).r).sub(dC)).div(dC.max(1.0));
+      spread.assign(max(spread, diff));
+      If(diff.lessThan(bestDiff), () => {
+        bestDiff.assign(diff);
+        bestUv.assign(cuv);
+      });
+    }
+
+    // No depth discontinuity in the footprint -> keep bilinear (smooth, no 2x2 blockiness).
+    // A discontinuity -> take the best-matching texel whole (crisp silhouette).
+    return mix(
+      cloudTex.sample(fuv),
+      cloudTex.sample(bestUv),
+      saturate(spread.mul(uUpsampleReject)),
+    );
+  });
+
+  /**
    * Depth-aware upsample. A flat blur of a half-res cloud buffer is fine for a ceiling
    * 2 km away, and produces a visible bright fringe around every near object once the deck
    * sits at gameplay altitude — the classic half-res halo, which would frame the car and
@@ -816,27 +919,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const compositeColor = Fn(() => {
     // Render-target sampling is Y-flipped versus the canvas under WebGPU.
     const fuv = vec2(uv().x, uv().y.oneMinus());
-    const o = uCloudTexel;
-
-    const dC = depthDist(depthTex.sample(fuv).r).toVar();
-    const acc = vec4(0.0).toVar();
-    const wsum = float(0.0).toVar();
-
-    const taps = [
-      vec2(o.x, o.y), vec2(o.x.negate(), o.y),
-      vec2(o.x, o.y.negate()), vec2(o.x.negate(), o.y.negate()),
-    ];
-    for (const tp of taps) {
-      const suv = fuv.add(tp);
-      // Relative depth difference: scale-free, so one reject value works near and far.
-      const rel = abs(depthDist(depthTex.sample(suv).r).sub(dC)).div(dC.max(1.0));
-      const w = float(1.0).div(rel.mul(uUpsampleReject).add(1.0));
-      acc.addAssign(cloudTex.sample(suv).mul(w));
-      wsum.addAssign(w);
-    }
-    // Centre tap keeps half the weight; the neighbours soften raymarch grain.
-    const cloud = cloudTex.sample(fuv).mul(0.5).add(acc.div(wsum.max(1e-4)).mul(0.5));
-
+    const cloud = upsampleCloud(fuv);
     const sceneCol = sceneTex.sample(fuv).rgb;
     return vec4(sceneCol.mul(cloud.a.oneMinus()).add(cloud.rgb), 1.0); // premultiplied over
   });
@@ -847,6 +930,29 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   compositeMat.depthWrite = false;
   compositeMat.fog = false;
   postQuad.material = compositeMat;
+
+  /**
+   * Post-FX variant of the composite: emits the upsampled cloud PREMULTIPLIED and lets the
+   * blender lay it over whatever the solids pass already wrote, instead of sampling a scene
+   * colour we do not own. Same bilateral weights, so the anti-halo behaviour is identical.
+   */
+  const linearCompositeColor = Fn(() => {
+    return upsampleCloud(vec2(uv().x, uv().y.oneMinus()));
+  });
+
+  const linearCompositeMat = new THREE.MeshBasicNodeMaterial();
+  linearCompositeMat.colorNode = linearCompositeColor();
+  linearCompositeMat.depthTest = false;
+  linearCompositeMat.depthWrite = false;
+  linearCompositeMat.fog = false;
+  linearCompositeMat.toneMapped = false; // stays linear; the display chain tone-maps
+  linearCompositeMat.transparent = true;
+  // Premultiplied over: dst = src.rgb + dst * (1 - src.a).
+  linearCompositeMat.blending = THREE.CustomBlending;
+  linearCompositeMat.blendSrc = THREE.OneFactor;
+  linearCompositeMat.blendDst = THREE.OneMinusSrcAlphaFactor;
+  linearCompositeMat.blendSrcAlpha = THREE.OneFactor;
+  linearCompositeMat.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
 
   // ── Frame ──────────────────────────────────────────────────────────────────────────
 
@@ -865,7 +971,8 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     const fh = Math.max(1, Math.floor(_bufSize.y));
     if (fw !== fullW || fh !== fullH) {
       fullW = fw; fullH = fh;
-      sceneRT.setSize(fw, fh);
+      uFullTexel.value.set(1 / fw, 1 / fh);
+      if (_ownsFrame) sceneRT.setSize(fw, fh);
     }
     const w = Math.max(1, Math.floor(fw * P.bufferScale));
     const h = Math.max(1, Math.floor(fh * P.bufferScale));
@@ -875,9 +982,55 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
       historyRT[0].setSize(w, h);
       historyRT[1].setSize(w, h);
       uCloudTexel.value.set(1 / w, 1 / h);
+      uCloudRes.value.set(w, h);
       // The old accumulation is at the wrong resolution — start it over rather than
       // blending against a stretched copy of the previous size.
       uHasHistory.value = 0;
+    }
+  }
+
+  /**
+   * Give back every render target. Called on disable so a switched-off deck holds no VRAM.
+   *
+   * Shrinking to 1x1 rather than disposing: the TSL nodes are bound to these specific
+   * RenderTarget objects, so disposing them would leave the material pointing at dead
+   * textures and re-enabling would need the whole node graph rebuilt. 1x1 is ~nothing and
+   * re-enabling just resizes back.
+   */
+  function releaseBuffers() {
+    sceneRT.setSize(1, 1);
+    cloudRT.setSize(1, 1);
+    historyRT[0].setSize(1, 1);
+    historyRT[1].setSize(1, 1);
+    fullW = fullH = rtW = rtH = 0; // force ensureSize() to rebuild on re-enable
+    uHasHistory.value = 0;
+  }
+
+  /**
+   * Turn the deck on or off.
+   *
+   * OFF IS MEANT TO BE FREE, not cheap:
+   *   - `renderFrame()` returns false immediately, so the caller falls back to its own
+   *     render — no scene RT, no march, no resolve, no composite. Zero GPU passes.
+   *   - the render targets are released, so no VRAM is held.
+   *   - the mesh is hidden, so it is not traversed or drawn.
+   *   - the noise bake never starts unless the deck has been enabled at least once, so a
+   *     player who leaves clouds off never pays the worker seconds or the ~10 MB.
+   *   - the cloud shaders never compile, because nothing ever renders them.
+   * The only residue is the zero-filled CPU-side volume arrays (~9.7 MB), which are not
+   * uploaded to the GPU until something actually samples them.
+   */
+  function setEnabled(on) {
+    const want = !!on;
+    if (want === P.enabled) return;
+    P.enabled = want;
+    if (want) {
+      startBake();
+    } else {
+      mesh.visible = false;
+      _fade = 0;
+      uFade.value = 0;
+      releaseBuffers();
     }
   }
 
@@ -886,6 +1039,10 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
    * @param {object} frame { sunDir, sunColor, skyZenith, skyHorizon, hazeColor }
    */
   function update(dt, frame = {}) {
+    // Tolerate `params.enabled` being flipped directly (the lab's sliders do this) — the
+    // bake still has to be kicked, and disabling still has to give the buffers back.
+    if (P.enabled && !_bakeStarted) startBake();
+    if (!P.enabled && rtW > 1) releaseBuffers();
     mesh.visible = P.enabled;
     if (!P.enabled) return;
     mesh.position.copy(camera.position);
@@ -1011,10 +1168,81 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     return true;
   }
 
+  // ── Post-FX integration ────────────────────────────────────────────────────────────
+  // Used when the engine's post-FX chain is active, so bloom/FXAA still apply and the game
+  // does NOT lose its selective-bloom neon. Two phases, matching what PostFxPipeline's
+  // `renderWithClouds()` already expects:
+  //
+  //   prepareFrame()            — deliberately does nothing but say "yes, go ahead".
+  //   compositeOntoLinearHDR()  — runs AFTER the solids pass, which is the whole point:
+  //                               the scene depth exists by then, so the march can read it
+  //                               instead of re-rendering the scene to manufacture one.
+  //
+  // `setDepthSource()` points the shared depth sampler at the pipeline's scene-pass depth.
+  // Same material either way — only the texture bound to the sampler changes — so this
+  // does not fork the shader.
+  let _ownsFrame = true;
+
+  function setDepthSource(tex) {
+    depthTex.value = tex ?? sceneRT.depthTexture;
+    _ownsFrame = !tex;
+    if (!_ownsFrame) sceneRT.setSize(1, 1); // the pipeline owns the scene buffer now
+  }
+
+  function prepareFrame() {
+    return !!P.enabled;
+  }
+
+  function compositeOntoLinearHDR(rendererArg, targetRT) {
+    if (!P.enabled) return;
+    ensureSize();
+    uReversed.value = camera.reversedDepth ? 1 : 0;
+
+    const prevMask = camera.layers.mask;
+    renderer.getClearColor(_prevClear);
+    const prevClearA = renderer.getClearAlpha();
+
+    // 1) March the deck alone into the half-res buffer, reading the pipeline's depth.
+    camera.layers.set(CLOUD_LAYER);
+    renderer.setRenderTarget(cloudRT);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
+    renderer.render(scene, camera);
+    camera.layers.mask = prevMask;
+    renderer.setClearColor(_prevClear, prevClearA);
+
+    // 2) Temporal resolve.
+    _viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    uInvViewProj.value.copy(_viewProj).invert();
+    uCamPos.value.copy(camera.position);
+    const write = histWrite, read = 1 - write;
+    histTex.value = historyRT[read].texture;
+    postQuad.material = resolveMat;
+    renderer.setRenderTarget(historyRT[write]);
+    renderer.render(postScene, postCam);
+
+    // 3) Blend the resolved cloud over the pipeline's linear HDR buffer.
+    cloudTex.value = historyRT[write].texture;
+    postQuad.material = linearCompositeMat;
+    const prevAuto = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.setRenderTarget(targetRT);
+    renderer.render(postScene, postCam);
+    renderer.autoClear = prevAuto;
+    postQuad.material = compositeMat;
+
+    histWrite = read;
+    uPrevViewProj.value.copy(_viewProj);
+    uHasHistory.value = 1;
+  }
+
   function dispose() {
+    // A bake in flight would otherwise keep a worker (and ~10 MB) alive past teardown.
+    if (_worker) { _worker.terminate(); _worker = null; }
     mesh.geometry.dispose();
     material.dispose();
     compositeMat.dispose();
+    linearCompositeMat.dispose();
     postQuad.geometry.dispose();
     sceneRT.dispose();
     cloudRT.dispose();
@@ -1032,6 +1260,12 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     mesh,
     update,
     renderFrame,
+    setEnabled,
+    get enabled() { return P.enabled; },
+    // Post-FX path (PostFxPipeline.renderWithClouds) — keeps bloom/FXAA working.
+    setDepthSource,
+    prepareFrame,
+    compositeOntoLinearHDR,
     dispose,
     /**
      * Cloud density at a world point, on the CPU. Zero until the bake lands.
@@ -1064,7 +1298,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
 }
 
 /** Spawn the bake worker and resolve with the four buffers. */
-function bakeInWorker(seed) {
+function bakeInWorker(seed, onSpawn) {
   return new Promise((resolve, reject) => {
     let worker;
     try {
@@ -1076,6 +1310,7 @@ function bakeInWorker(seed) {
       reject(err);
       return;
     }
+    onSpawn?.(worker);
     worker.onmessage = (e) => {
       const d = e.data;
       worker.terminate();
