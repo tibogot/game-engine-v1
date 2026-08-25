@@ -149,6 +149,7 @@ export async function startCloudLab() {
     if (k === "2") applyView("inside");
     if (k === "3") applyView("above");
     if (k === "4") applyView("grazing");
+    if (k === "c") clouds.setEnabled(!clouds.enabled);   // zero-cost disable test
     if (k === "h") {
       const h = document.getElementById("hud");
       h.style.display = h.style.display === "none" ? "" : "none";
@@ -213,7 +214,7 @@ export async function startCloudLab() {
       ["__sunElev", 2, 88, 1], ["__sunAzim", 0, 360, 1],
     ],
     "g-qual": [
-      ["bufferScale", 0.25, 1, 0.05], ["upsampleDepthReject", 0, 30, 0.5],
+      ["bufferScale", 0.25, 1, 0.05], ["upsampleDepthReject", 0, 40, 0.5],
       ["historyBlend", 0, 0.97, 0.01],
     ],
   };
@@ -305,8 +306,12 @@ export async function startCloudLab() {
 
   let last = performance.now();
   let fpsAcc = 0, fpsN = 0, gpuAcc = 0, gpuN = 0, hudT = 0;
+  // The benchmark drives its own render calls; the idle loop must stand down or every
+  // measured frame gets a second, untimed render mixed into it.
+  let paused = false;
 
   renderer.setAnimationLoop(() => {
+    if (paused) return;
     const now = performance.now();
     const dt = Math.min((now - last) / 1000, 0.05);
     last = now;
@@ -348,6 +353,30 @@ export async function startCloudLab() {
   });
 
   // Expose for automated inspection / screenshots.
+  // ── A/B benchmark (lazy) ───────────────────────────────────────────────────────────
+  // The editor deck's constructor bakes its volumes synchronously (~3.3 s), so the harness
+  // is only imported and built when a benchmark is actually requested.
+  let bench = null;
+  async function getBenchmark() {
+    if (bench) return bench;
+    const { createCloudBenchmark } = await import("./cloudBenchmark.js");
+    bench = createCloudBenchmark({
+      renderer, scene, camera, clouds,
+      sunDir: _sunDir,
+      skyColors: { zenith: SKY_ZENITH, horizon: SKY_HORIZON },
+    });
+    return bench;
+  }
+
+  /** Position the camera from a viewpoint descriptor (name or explicit pose). */
+  function applyPose(v) {
+    if (typeof v === "string") applyView(v);
+    else { camera.position.set(...v.pos); cam.yaw = v.yaw; cam.pitch = v.pitch; }
+    // The idle loop is paused during a benchmark, so drive the camera matrix and the
+    // scale-reference boxes here or they keep the pose from before the pause.
+    flyStep(0);
+  }
+
   /** Point the free-fly camera at a world position (used by scripted captures). */
   function lookAtPoint(x, y, z) {
     const dx = x - camera.position.x, dy = y - camera.position.y, dz = z - camera.position.z;
@@ -357,7 +386,8 @@ export async function startCloudLab() {
 
   window.__cloudLab = {
     clouds, camera, renderer, scene, applyView, params: P, extra, syncSun, THREE,
-    cam, lookAtPoint,
+    cam, lookAtPoint, getBenchmark, applyPose, VIEWPOINTS,
+    setPaused: (v) => { paused = !!v; },
   };
   return window.__cloudLab;
 }
