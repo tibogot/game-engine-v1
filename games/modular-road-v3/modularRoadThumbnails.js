@@ -162,12 +162,14 @@ export async function bakeRoadThumbnails({
   /** Frame by bounding sphere so every piece (long straight, wide curve, tall
    *  loop) is centred and fully visible at a uniform 3/4 angle. Hidden
    *  collision meshes are skipped — a 26 m stand-in cylinder used to yank the
-   *  camera back until the wind turbine looked like a speck. */
+   *  camera back until the wind turbine looked like a speck. `thumbIgnore`
+   *  skips visual meshes that are real but should not drive the camera (the
+   *  palm's bole — otherwise the sphere is empty air and the crown is a speck). */
   const frameItem = () => {
     box.makeEmpty();
     group.updateMatrixWorld(true);
     group.traverse((o) => {
-      if (!o.isMesh || o.visible === false || o.userData.boundsIgnore) return;
+      if (!o.isMesh || o.visible === false || o.userData.boundsIgnore || o.userData.thumbIgnore) return;
       const geo = o.geometry;
       if (!geo) return;
       if (!geo.boundingBox) geo.computeBoundingBox();
@@ -178,7 +180,15 @@ export async function bakeRoadThumbnails({
     box.getBoundingSphere(sphere);
     center.copy(sphere.center);
     const r = Math.max(sphere.radius, 0.5);
-    const dist = (r / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2)) * 1.12;
+    // `thumbFit` < 1 pulls the camera in. A bounding SPHERE around a tall thin
+    // tree is mostly empty air, so the same 3/4 framing that fills a tile with
+    // a container leaves a palm as a speck. Default 1 keeps road-piece framing.
+    let fit = 1;
+    group.traverse((o) => {
+      const v = o.userData?.thumbFit;
+      if (typeof v === "number" && v > 0) fit = v;
+    });
+    const dist = (r / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2)) * 1.12 * fit;
     camera.position.copy(center).addScaledVector(camDir, dist);
     camera.lookAt(center);
     camera.updateMatrixWorld(true);

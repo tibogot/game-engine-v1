@@ -146,6 +146,7 @@ import { PropInstancer } from "./modularRoadPropInstancer.js";
 import { preloadContainer } from "./modularRoadContainer.js";
 import { preloadTireWall } from "./modularRoadTireWall.js";
 import { preloadCrane } from "./modularRoadCrane.js";
+import { preloadPalm } from "./modularRoadPalm.js";
 import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
@@ -624,6 +625,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     preloadContainer(),
     preloadTireWall(renderer),
     preloadCrane(),
+    preloadPalm(),
     preloadDecal(DECAL_URL).then(() => settleDecals()),
     // The wind turbine's GLB. Here rather than lazily on first placement so the
     // mover catalog's `make()` can stay synchronous — and so the palette bakes a
@@ -741,7 +743,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const GHOST_BAD = new THREE.MeshBasicMaterial({
     color: 0xff6b6b, transparent: true, opacity: 0.35, depthWrite: false,
   });
-  /** @type {{kind:"prop"|"mover", id:string, root:THREE.Object3D, restY:number, point:THREE.Vector3|null}|null} */
+  /** @type {{kind:"prop"|"mover"|"portal"|"spawn", id:string, root:THREE.Object3D, restY:number, restQuat?:THREE.Quaternion, point:THREE.Vector3|null}|null} */
   let brush = null;
   /** Last cursor position over the canvas, so the ghost can be re-picked without
    *  waiting for a mouse move (e.g. right after the snap mode changes). */
@@ -928,16 +930,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   function armBrush(kind, id) {
     clearBrush({ silent: true });
-    const def = kind === "prop" ? PROP_BY_ID.get(id) : MOVER_BY_ID.get(id);
+    const def = kind === "portal"
+      ? { make: () => buildPortalMesh(DEFAULT_PORTAL_PARAMS, DEFAULT_PORTAL_PARAMS.colorA, "a").root }
+      : kind === "prop" ? PROP_BY_ID.get(id) : MOVER_BY_ID.get(id);
     if (!def) return;
     const root = buildBrushGhost(def);
     // make() authors the rest offset on the ROOT (a cone sits a collision radius
     // up so its base is flush), so the ghost has to keep it when it rides a
     // surface — otherwise the preview sits a radius lower than what you place.
+    // Same for the rest ROTATION: the open cylinder lies down with rotation.x
+    // on the group. Identity-ing the ghost (to drop a leftover stack tilt)
+    // stood that pipe up while add() kept the quat and placed it horizontal.
     const restY = root.position.y;
+    const restQuat = root.quaternion.clone();
     root.visible = false; // until the mouse says where
     scene.add(root);
-    brush = { kind, id, root, restY, point: null };
+    brush = { kind, id, root, restY, restQuat, point: null };
     setGizmosSuspended(true);
   }
 
@@ -1002,7 +1010,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         brush.root.quaternion.copy(stack.quaternion);
       } else {
         brush.root.position.set(hit.point.x, hit.point.y + brush.restY, hit.point.z);
-        if (brush.kind === "prop") brush.root.quaternion.identity();
+        // Rest pose, not identity: identity dropped make()'s rest rotation
+        // (the open cylinder's lie-down) while still clearing a leftover
+        // stack-snap tilt, which is the job restQuat does now.
+        if (brush.kind === "prop" || brush.kind === "portal") brush.root.quaternion.copy(brush.restQuat);
       }
     }
     // The spawn ghost also carries a FACING. Left to itself it points down-track
@@ -1065,6 +1076,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // sync() can rebuild the batches, which drops their layer membership.
       applyRailReflectionMembers();
       flags.sync();
+    } else if (brush.kind === "portal") {
+      portals.addDoor(brush.point);
     } else {
       movers.add(brush.id, brush.point);
     }
@@ -1080,7 +1093,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     thumbnails: roadThumbnails,
     onAddProp: (id) => armBrush("prop", id),
     onAddMover: (id) => armBrush("mover", id),
-    onAddPortal: () => { portals.addDoor(); paletteUi?.refreshStatus?.(); },
+    onAddPortal: () => armBrush("portal", "portal_door"),
     onPickPiece: () => clearBrush({ silent: true }),
     onEdgesChange: () => bakeCollision(),
     // onLoadDemo / onLoadCircuit are gone with their buttons — see the note in

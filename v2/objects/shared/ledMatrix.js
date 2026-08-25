@@ -321,7 +321,10 @@ export function makeLedMatrixMaterial({
 
   const chevY = cuv.y.sub(0.5).abs();
   const phase = cuv.x.mul(u.chevronCount).add(chevY.mul(u.skew)).sub(scroll);
-  const chevLit = smoothstep(u.duty, u.duty.sub(0.04), phase.fract());
+  // AA the band edge in screen space. A fixed 0.04 UV falloff is a hard
+  // sawtooth on a large panel — that is the flicker on the LED box.
+  const chevFw = fwidth(phase).max(float(0.02));
+  const chevLit = smoothstep(u.duty.add(chevFw), u.duty.sub(chevFw), phase.fract());
 
   const colIdx = cuv.x.mul(5.0).floor();
   const band = smoothstep(0.3, 0.26, cuv.y.sub(0.5).abs());

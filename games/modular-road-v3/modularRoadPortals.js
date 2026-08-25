@@ -196,14 +196,16 @@ export class PortalManager {
   }
 
   /** Spawn a door; auto-pairs with the previous unpaired door. */
-  addDoor() {
+  addDoor(worldPos = null) {
     const side = this._pending ? "b" : "a";
     const color = side === "b" ? this.params.colorB : this.params.colorA;
     const { root, surfaceMat } = buildPortalMesh(this.params, color, side);
     root.userData.isPortal = true;
 
-    if (this.orbit?.target) {
-      root.position.set(this.orbit.target.x, 0, this.orbit.target.z);
+    if (worldPos) {
+      root.position.copy(worldPos);
+    } else if (this.orbit?.target) {
+      root.position.set(this.orbit.target.x, this.orbit.target.y, this.orbit.target.z);
     }
 
     const door = {
@@ -456,7 +458,10 @@ export class PortalManager {
    * here" for something plainly under the pointer.
    */
   hitTest(clientX, clientY) {
-    if (!this.enabled) return null;
+    // buildEnabled, not `.enabled` — this class never had that flag (props do).
+    // The arbiter called hitTest on every right-click, got null, and the door
+    // was the one obstacle you could not pick.
+    if (!this.buildEnabled) return null;
     const rect = this.domElement.getBoundingClientRect();
     this._ndc.set(
       ((clientX - rect.left) / rect.width) * 2 - 1,

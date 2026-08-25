@@ -38,6 +38,7 @@ import { materialColor } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { flattenInstanced, mergeByMaterial, markSharedGeometry } from "./modularRoadBatching.js";
 import { buildLedMatrixMesh } from "../../v2/objects/ledMatrix.js";
+import { buildLedChevronBoxMesh } from "./modularRoadLedBox.js";
 import { buildBillboardMesh } from "../../v2/objects/billboard.js";
 import { buildStreetLampMesh } from "../../v2/objects/streetLamp.js";
 import { buildRoadLampMesh } from "../../v2/objects/roadLamp.js";
@@ -88,6 +89,20 @@ export const SCENERY_CATALOG = [
       { x: -7.2 * 0.42, radius: 0.13, height: 2.6 },
       { x: +7.2 * 0.42, radius: 0.13, height: 2.6 },
     ],
+  },
+  {
+    id: "ledbox",
+    label: "LED box",
+    build: buildLedChevronBoxMesh,
+    // Square cabinet, no masts. Same square-pixel chevrons as the boost pads;
+    // materials match other props so the instancer does not bleach the face.
+    params: {},
+    solidWall: {
+      thickness: 2.8,
+      height: 2.8,
+      length: 0.38,
+      z: -0.38 / 2 - 0.02,
+    },
   },
   {
     id: "billboard",
@@ -300,12 +315,17 @@ function buildTemplate(def) {
   // curtain that is a single flat quad (which the hull sampling walks through)
   // or by 9k triangles of barbed wire (which it should not have to test).
   if (def.solidWall) {
-    const { thickness, height, length } = def.solidWall;
+    const { thickness, height, length, z = 0 } = def.solidWall;
     root.traverse((o) => { if (o.isMesh) o.userData.noCollide = true; });
     const wall = new THREE.Mesh(new THREE.BoxGeometry(thickness, height, length));
     wall.name = "SceneryWall";
-    wall.position.y = height / 2;
+    wall.position.set(0, height / 2, z);
+    // Invisible is not enough. The prop instancer templates every mesh it
+    // finds and ignores `visible`, so a default-white collider overlapping the
+    // LED box cabinet drew as a white slab and z-fought the black face.
+    // Same `noRender` rule as the container collision proxy.
     wall.visible = false;
+    wall.userData.noRender = true;
     root.add(wall);
   }
 

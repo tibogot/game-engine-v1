@@ -5652,6 +5652,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   let activePropId = null;
   let activeMoverId = null;
   let activePresetId = null;
+  let activePortalId = null;
   /** Swappable: on a cold cache the game paints the palette with the SVG
    *  fallbacks immediately and hands the baked tiles over later, through
    *  setThumbnails(), rather than making startup wait for the bake. */
@@ -5691,8 +5692,9 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       const items = propCatalog
         .filter((p) => (p.category ?? "obstacles") === catId)
         .map((p) => ({ id: p.id, label: p.label, isProp: true, hint: "" }));
-      // Portal doors use their own placement system, but they belong with
-      // obstacles — not a whole palette tab for one tile.
+      // Portal doors use their own pairing system, but they belong with
+      // obstacles — not a whole palette tab for one tile. Placement is the
+      // same cursor brush as the other obstacles.
       if (catId === "obstacles") {
         items.push({
           id: "portal_door",
@@ -5730,6 +5732,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     pieceTiles.clear();
     activePropId = null;
     activeMoverId = null;
+    activePortalId = null;
 
     const items = piecesInCategory(activeCategory);
     const catLabel = PALETTE_CATEGORIES.find((c) => c.id === activeCategory)?.label ?? activeCategory;
@@ -5746,6 +5749,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       }
       if (item.isProp) btn.dataset.isProp = "1";
       if (item.isMover) btn.dataset.isMover = "1";
+      if (item.isPortal) btn.dataset.isPortal = "1";
       if (item.isPreset) btn.dataset.isPreset = "1";
 
       const preview = document.createElement("div");
@@ -5788,6 +5792,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         if (item.isProp && onAddProp) {
           activePropId = item.id;
           activeMoverId = null;
+          activePortalId = null;
           activePresetId = null;
           builder.setActivePiece(builder.activePieceId);
           onAddProp(item.id);
@@ -5797,6 +5802,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         if (item.isMover && onAddMover) {
           activeMoverId = item.id;
           activePropId = null;
+          activePortalId = null;
           activePresetId = null;
           builder.setActivePiece(builder.activePieceId);
           onAddMover(item.id);
@@ -5804,10 +5810,11 @@ export function buildRoadPaletteUI(builder, opts = {}) {
           return;
         }
         if (item.isPortal && onAddPortal) {
+          activePortalId = item.id;
           activePropId = null;
           activeMoverId = null;
           activePresetId = null;
-          onPickPiece?.(); // a door is placed immediately — drop any live brush
+          builder.setActivePiece(builder.activePieceId);
           onAddPortal();
           refreshStatus();
           return;
@@ -5815,6 +5822,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         if (item.isPreset) {
           activePropId = null;
           activeMoverId = null;
+          activePortalId = null;
           activePresetId = item.id;
           onPickPiece?.();
           builder.setActivePreset(item.preset);
@@ -5823,6 +5831,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         }
         activePropId = null;
         activeMoverId = null;
+        activePortalId = null;
         activePresetId = null;
         onPickPiece?.(); // choosing a road piece cancels a prop brush
         builder.setActivePiece(item.id);
@@ -5830,7 +5839,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       });
 
       grid.appendChild(btn);
-      const suffix = item.isProp ? ":prop" : item.isMover ? ":mover" : item.isPreset ? ":preset" : "";
+      const suffix = item.isProp ? ":prop" : item.isMover ? ":mover" : item.isPortal ? ":portal" : item.isPreset ? ":preset" : "";
       pieceTiles.set(item.id + suffix, btn);
     }
     refreshStatus();
@@ -5844,10 +5853,12 @@ export function buildRoadPaletteUI(builder, opts = {}) {
         active = activePropId === key.slice(0, -5);
       } else if (key.endsWith(":mover")) {
         active = activeMoverId === key.slice(0, -6);
+      } else if (key.endsWith(":portal")) {
+        active = activePortalId === key.slice(0, -7);
       } else if (key.endsWith(":preset")) {
         active = activePresetId === key.slice(0, -7);
       } else {
-        active = !activePropId && !activeMoverId && !activePresetId && key === builder.activePieceId;
+        active = !activePropId && !activeMoverId && !activePortalId && !activePresetId && key === builder.activePieceId;
       }
       btn.classList.toggle("active", active);
     }
@@ -5867,6 +5878,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
    * carrying a traffic cone.
    */
   function activeLabel() {
+    if (activePortalId) return "Portal door";
     if (activePropId || activeMoverId) {
       const src = activePropId ? propCatalog : moverCatalog;
       const id = activePropId ?? activeMoverId;
@@ -5897,6 +5909,8 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       id = propCatalog.find((p) => p.id === activePropId)?.category ?? "obstacles";
     } else if (activeMoverId) {
       id = "moving";
+    } else if (activePortalId) {
+      id = "obstacles";
     } else if (activePresetId) {
       id = Object.keys(CATEGORY_PRESETS)
         .find((cat) => CATEGORY_PRESETS[cat].some((p) => p.id === activePresetId));
@@ -5916,7 +5930,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
    * "Straight L" would be a lie.
    */
   function refreshHand() {
-    const on = !activePropId && !activeMoverId && builder.activePieceHanded;
+    const on = !activePropId && !activeMoverId && !activePortalId && builder.activePieceHanded;
     if (handVal) handVal.textContent = builder.hand >= 0 ? "R" : "L";
     if (handBtn) {
       handBtn.classList.toggle("inert", !on);
@@ -5937,7 +5951,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     // A prop/mover brush is a MODE, and the status line is the only thing that
     // says so — without this it goes on naming the road piece while the mouse is
     // carrying a cone, which is the same class of lie selectPieceById fixed.
-    if (statusEl && (activePropId || activeMoverId)) {
+    if (statusEl && (activePropId || activeMoverId || activePortalId)) {
       const label = activeLabel();
       statusEl.textContent =
         `${builder.count} placed · ${label} — click to place, Esc to cancel`;
@@ -6121,6 +6135,8 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     const byKey = PIECE_CATALOG.find((p) => p.key === e.key);
     if (byKey) {
       activePropId = null;
+      activeMoverId = null;
+      activePortalId = null;
       activePresetId = null;
       activeCategory = PIECE_TO_CATEGORY[byKey.id] ?? activeCategory;
       renderPieces();
@@ -6178,6 +6194,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     onPickPiece?.(); // hotkeys cancel a live prop brush, same as clicking a tile
     activePropId = null;
     activeMoverId = null;
+    activePortalId = null;
     activePresetId = null;
     activeCategory = PIECE_TO_CATEGORY[id] ?? activeCategory;
     builder.setActivePiece(id);
@@ -6201,7 +6218,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       if (icon) fillCategoryIcon(icon, id);
     }
     for (const [key, btn] of pieceTiles) {
-      const sprite = thumbSprite(key.replace(/:(prop|mover|preset)$/, ""));
+      const sprite = thumbSprite(key.replace(/:(prop|mover|portal|preset)$/, ""));
       if (sprite) {
         btn.querySelector(".piece-tile-preview")?.replaceChildren(sprite);
         // The picture can speak for itself now, so drop the caption it was
@@ -6214,9 +6231,10 @@ export function buildRoadPaletteUI(builder, opts = {}) {
   /** Drop the prop/mover brush highlight — the game calls this when the brush
    *  is cancelled from its side (Escape, right-click, leaving build mode). */
   function clearBrushHighlight() {
-    if (!activePropId && !activeMoverId) return;
+    if (!activePropId && !activeMoverId && !activePortalId) return;
     activePropId = null;
     activeMoverId = null;
+    activePortalId = null;
     refreshStatus();
   }
 

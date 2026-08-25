@@ -66,7 +66,7 @@ const _out = new THREE.Matrix4();
 
 const LEG_Z = -0.05;
 const LEG_SPREAD = 0.35; // fraction of board width
-const FRAME_Z = -0.08;
+const FRAME_FRONT = 0.03; // just behind PANEL_Z; FRAME_Z is derived from depth
 const PANEL_Z = 0.04;
 
 /** Content texture + its own aspect for the current source. */
@@ -110,8 +110,9 @@ export function buildLedMatrixMesh({
     .multiply(new THREE.Matrix4().makeTranslation(0, -cy, 0));
 
   const pad = p.framePad;
+  const frameZ = FRAME_FRONT - p.frameDepth / 2;
   const frameGeo = new THREE.BoxGeometry(W + pad * 2, H + pad * 2, p.frameDepth);
-  frameGeo.translate(0, cy, FRAME_Z);
+  frameGeo.translate(0, cy, frameZ);
   frameGeo.applyMatrix4(tiltAboutCenter);
 
   const panelGeo = new THREE.PlaneGeometry(W, H);

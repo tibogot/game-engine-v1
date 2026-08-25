@@ -19,6 +19,7 @@ import { isSharedGeometry } from "./modularRoadBatching.js";
 import { makeContainer, CONTAINER_LIVERIES, CONTAINER_SIZE } from "./modularRoadContainer.js";
 import { makeTireWall } from "./modularRoadTireWall.js";
 import { makeCrane } from "./modularRoadCrane.js";
+import { makePalm } from "./modularRoadPalm.js";
 import { DECAL_OFFSET } from "./modularRoadDecals.js";
 import { roadParams } from "./modularRoadKit.js";
 
@@ -36,6 +37,7 @@ import {
   enableMeshShadows,
   attachDeckProxy,
   thickWallTubeGeometry,
+  thickWallVaultGeometry,
 } from "./modularRoadParkour.js";
 
 /**
@@ -572,6 +574,36 @@ function neonGateGroup() {
   return g;
 }
 
+/**
+ * Short orange vault — a half-pipe tunnel you drive through, a bit narrower
+ * than the default deck so a centred drop sits inside the kerbs.
+ *
+ * Built like the open cylinder (split inner/outer shells + end rings), not as
+ * an extrusion. ExtrudeGeometry shares the vault with the end caps, so
+ * averaged normals facet the curve even at the same vertex count; the
+ * cylinder pieces already carry radial normals and the caps stay flat.
+ */
+function roadArchGroup() {
+  const Ro = roadParams.width * 0.44; // ~7.0 m → outer span ~14 m on a 16 m road
+  const wall = 0.95;
+  const Ri = Ro - wall;
+  const depth = 6; // metres along travel — a short tunnel, not a hoop
+  const SINK = 0.08;
+
+  const geo = thickWallVaultGeometry(Ri, Ro, depth, 40);
+  geo.rotateX(Math.PI / 2);
+  geo.translate(0, -SINK, 0);
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+
+  const m = new THREE.Mesh(
+    geo,
+    mat(0xf07020, { roughness: 0.78, metalness: 0 }),
+  );
+  m.name = "RoadArch";
+  return m;
+}
+
 /* ----------------------------------------------------------------------- */
 /* Hole walls — the straight menu's Hole Road, stood up                     */
 /* ----------------------------------------------------------------------- */
@@ -599,7 +631,6 @@ const HOLE_WALL = {
   centerY: 2.9, // port centre height (m) — BELOW `radius`, so the port opens at the deck
   mouthY: -0.06, // chord that cuts the port open (m) — see buildHoleWall
   rim: 0.42, // width of the glowing rim band (m)
-  footed: true, // plinths at the base rather than a bottom beam
 };
 const HOLE_WALL_AIR = {
   width: 17,
@@ -610,7 +641,6 @@ const HOLE_WALL_AIR = {
   centerY: 10, // same height as the ring gates — what a big jump actually reaches
   mouthY: null, // FULL circle: no chord, no way through but the air
   rim: 0.42,
-  footed: false, // framed all round instead — nothing to stand on
 };
 const HOLE_WALL_GLOW = 0xffb02e;
 
@@ -751,7 +781,7 @@ function buildHoleWall(cfg, name) {
     g.add(col);
   }
 
-  // ── Beams: a cap on top always, and either footings or a matching bottom ───
+  // ── Beams: a cap on top always; the air gate also gets a matching bottom ───
   // Wider than the plate and overhanging it by BITE in `dir`, so the plate's top
   // (or bottom) face and both its side faces end up INSIDE the beam rather than
   // level with it. The columns' end faces are swallowed the same way.
@@ -761,19 +791,7 @@ function buildHoleWall(cfg, name) {
     g.add(m);
   };
   beam(T, +1);
-  if (cfg.footed) {
-    // Plinths, so it reads as bolted down rather than dropped in. Kept clear of
-    // the mouth (half-width 4.3 m at deck level) so nothing sits in the driving
-    // line — the inner edge lands at 5.0 m. Sunk into the road for the same
-    // reason the mouth chord is: a base resting exactly on y = 0 fights the deck.
-    for (const x of [-(hw - 3.4), hw - 3.4]) {
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.42, D + 2.6), plateMat);
-      foot.position.set(x, 0.21 - SINK, 0);
-      g.add(foot);
-    }
-  } else {
-    beam(B, -1); // nothing to bolt to up there — close the frame instead
-  }
+  if (mouthY == null) beam(B, -1); // floating ring — close the frame
 
   return g;
 }
@@ -1285,6 +1303,17 @@ export const PROP_CATALOG = [
     make: () => makeCrane(),
   },
   {
+    id: "palm",
+    label: "Palm tree",
+    /**
+     * Triangle bake off: the fronds must not be a leafy wall, and the trunk is
+     * a round post — the hull sampler's case for a capsule, same as a gate
+     * post. The capsule lives on the template (see modularRoadPalm.js).
+     */
+    collision: "none",
+    make: () => makePalm(),
+  },
+  {
     id: "box",
     label: "Box",
     collision: "both",
@@ -1350,6 +1379,16 @@ export const PROP_CATALOG = [
      */
     collision: "solid",
     make: () => buildHoleWall(HOLE_WALL_AIR, "HoleGateAir"),
+  },
+  {
+    id: "roadarch",
+    label: "Arch",
+    /**
+     * Short orange vault. `solid`: the shell is a wall you can clip, the
+     * opening is empty space in the bake.
+     */
+    collision: "solid",
+    make: () => roadArchGroup(),
   },
   {
     id: "ramp",

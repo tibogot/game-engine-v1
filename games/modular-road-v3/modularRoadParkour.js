@@ -134,6 +134,68 @@ export function thickWallTubeGeometry(innerR, outerR, length, segments = 40) {
   return geo;
 }
 
+/**
+ * Upper half of thickWallTubeGeometry — a vault you drive through.
+ *
+ * Same split as the open cylinder (inner + outer open cylinders, two end
+ * rings, two ground feet). CylinderGeometry already carries radial normals,
+ * and keeping the caps on their own verts means those never get averaged
+ * into the curve. An extruded horseshoe shares the wall with the end faces,
+ * so computeVertexNormals facets the vault even at the same segment count.
+ *
+ * Axis along +Y, feet in the XY plane at z = 0. Callers rotateX(π/2) for a
+ * Z-axis tunnel that sits on y = 0.
+ */
+export function thickWallVaultGeometry(innerR, outerR, length, segments = 40) {
+  const half = length / 2;
+  const segs = Math.max(8, segments);
+  // CylinderGeometry is x = R sin θ, z = R cos θ (θ = 0 at +Z). θ = π/2 → 3π/2
+  // is the z ≤ 0 semicircle; after rotateX(π/2) that is y ≥ 0. RingGeometry is
+  // x = R cos φ, y = R sin φ; the −Y end uses φ = π → 2π, the +Y end uses
+  // φ = 0 → π so rotateX(−π/2) still lands on that same half.
+  const cylStart = Math.PI / 2;
+  const ringStart = Math.PI;
+  const sweep = Math.PI;
+  const parts = [];
+
+  parts.push(new THREE.CylinderGeometry(
+    outerR, outerR, length, segs, 1, true, cylStart, sweep,
+  ));
+
+  const inner = new THREE.CylinderGeometry(
+    innerR, innerR, length, segs, 1, true, cylStart, sweep,
+  );
+  inner.scale(-1, 1, 1); // inward normals so FrontSide reads from inside the bore
+  parts.push(inner);
+
+  const botCap = new THREE.RingGeometry(innerR, outerR, segs, 1, ringStart, sweep);
+  botCap.rotateX(Math.PI / 2);
+  botCap.translate(0, -half, 0);
+  parts.push(botCap);
+
+  // rotateX(-π/2) mirrors the ring's Y into -Z, so this cap needs the y ≥ 0
+  // half (φ = 0 → π) to land on the same z ≤ 0 vault as the shells.
+  const topCap = new THREE.RingGeometry(innerR, outerR, segs, 1, 0, sweep);
+  topCap.rotateX(-Math.PI / 2);
+  topCap.translate(0, half, 0);
+  parts.push(topCap);
+
+  const wall = outerR - innerR;
+  const mid = (innerR + outerR) / 2;
+  const leftFoot = new THREE.PlaneGeometry(wall, length);
+  leftFoot.translate(-mid, 0, 0);
+  parts.push(leftFoot);
+  const rightFoot = new THREE.PlaneGeometry(wall, length);
+  rightFoot.translate(mid, 0, 0);
+  parts.push(rightFoot);
+
+  const geo = mergeGeometries(parts, false);
+  for (const p of parts) p.dispose();
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
 /** Five side-by-side test ramps (15°–55°), centred on XZ with feet on y=0. */
 export function buildSlopeLabGroup() {
   const group = new THREE.Group();

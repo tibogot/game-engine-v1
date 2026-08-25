@@ -122,11 +122,7 @@ function boxPartsOf(cfg) {
     box("column-", -(hw - 0.3 - BITE), (T + B) / 2, 0, 0.6, T - B - 2 * BITE, D + 0.16),
     box("beamTop", 0, T + (BITE - 0.25), 0, cfg.width + 2 * BITE, 0.5, D + 0.34),
   ];
-  if (cfg.footed) {
-    for (const s of [1, -1]) {
-      parts.push(box(`foot${s > 0 ? "+" : "-"}`, s * (hw - 3.4), 0.21 - SINK, 0, 5.2, 0.42, D + 2.6));
-    }
-  } else {
+  if (cfg.mouthY == null) {
     parts.push(box("beamBottom", 0, B - (BITE - 0.25), 0, cfg.width + 2 * BITE, 0.5, D + 0.34));
   }
   return parts;
@@ -224,10 +220,6 @@ const gFirst = firstBlockedX(gWall, 0.001);
 check("blocking starts exactly where the car's flank leaves the port",
   gFirst !== null && Math.abs(gFirst - (mouthHalf - HALF_CAR)) < 0.25,
   `first blocked at x=${gFirst?.toFixed(1)} m (port edge ${mouthHalf.toFixed(2)} − half a car)`);
-
-const footInner = GROUND.width / 2 - 3.4 - 5.2 / 2;
-check("footings clear the mouth", footInner > mouthHalf,
-  `inner edge ${footInner.toFixed(2)} m vs port half-width ${mouthHalf.toFixed(2)} m`);
 
 /* ══ Hole gate (air) — jump into it ═══════════════════════════════════════ */
 console.log("\n— Hole gate (air) —");

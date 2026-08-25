@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materialEmissive } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { ParkourMover, enableMeshShadows } from "./modularRoadParkour.js";
@@ -279,6 +280,23 @@ function spinBarrelHoles(deg) {
   ];
 }
 
+/**
+ * Two bars at 90° around a hub — a turnstile that sweeps the lane.
+ * One merged mesh so RigidBvh sees both arms (it bakes `mesh.geometry` only).
+ */
+function makeTourniquetGeo({ span = 18, thick = 0.95, tall = 1.55, hubR = 0.7 } = {}) {
+  const armX = new THREE.BoxGeometry(span, tall, thick);
+  const armZ = new THREE.BoxGeometry(thick, tall, span);
+  const hub = new THREE.CylinderGeometry(hubR, hubR, tall + 0.15, 12);
+  const geo = mergeGeometries([armX, armZ, hub], false);
+  armX.dispose();
+  armZ.dispose();
+  hub.dispose();
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
 /** @param {THREE.Object3D} root */
 function bindMover(root, bind) {
   root.userData.moverBind = bind;
@@ -317,6 +335,30 @@ export const MOVER_CATALOG = [
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(20, 1.4, 1.4), moverMat(0xc07030));
       pivot.add(mesh);
       return bindMover(root, { mesh, pivot, mode: "spin-y", speed: -1.1, amplitude: 8 });
+    },
+  },
+  {
+    id: "tourniquet",
+    label: "Tourniquet",
+    collision: "solid",
+    defaults: { speed: 0.8, amplitude: 8 },
+    make: () => {
+      const root = new THREE.Group();
+      root.name = "Tourniquet";
+      const tall = 1.55;
+      const clearance = 0.4;
+      const pivot = new THREE.Object3D();
+      // Car-height so the arms actually hit the chassis instead of spinning
+      // over the roof the way the high spin bar does.
+      pivot.position.set(0, clearance + tall / 2, 0);
+      root.add(pivot);
+      const mesh = new THREE.Mesh(
+        makeTourniquetGeo({ span: 18, thick: 0.95, tall }),
+        moverMat(0xe85a3a),
+      );
+      mesh.name = "TourniquetCross";
+      pivot.add(mesh);
+      return bindMover(root, { mesh, pivot, mode: "spin-y", speed: 0.8, amplitude: 8 });
     },
   },
   {

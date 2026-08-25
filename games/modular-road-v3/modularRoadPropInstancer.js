@@ -253,7 +253,7 @@ export class PropInstancer {
       mergeByMaterial(root); // geometry comes back in ROOT-local space
       parts = [];
       root.traverse((o) => {
-        if (!o.isMesh || !o.geometry || o.userData.noRender) return;
+        if (!o.isMesh || !o.geometry || o.userData.noRender || o.visible === false) return;
         // Anything still carrying a local transform gets it baked in, so the
         // instance matrix is exactly the prop root's world matrix and nothing
         // downstream has to remember a per-part offset.
