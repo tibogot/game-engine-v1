@@ -550,6 +550,13 @@ export async function startV3App(opts = {}) {
   // surface with trail compression near the player.
   const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, groundProc, terrainFeatureOverrides, terrainNormals);
   scene.add(lod.group);
+  /**
+   * Terrain visibility — see the `terrain` block on the returned handle.
+   *
+   * Declared HERE (not down with the handle) because the animate loop's grass
+   * gates read it, and those run long before anything can call setVisible.
+   */
+  let _terrainVisible = true;
   // Console handle for terrain shader A/Bs — `buildVariant()` compiles a second
   // feature set and `setVariant()` swaps it onto the clipmap, so two shaders can
   // be compared within the same second and therefore at the same GPU clock. See
@@ -2766,7 +2773,12 @@ export async function startV3App(opts = {}) {
         // ring is disabled — measured 4 compute dispatches/frame -> 0, and the
         // 4 indirect draws go with them. Edge-triggered so setEnabled is only
         // touched when the answer actually changes.
-        const wantGrass = grassTerrainData.hasGrassData;
+        // `_terrainVisible` is in here rather than only on the mesh's .visible
+        // because grass costs COMPUTE, not just draws — a hidden ring that still
+        // ran update() would keep dispatching for blades nobody can see, and
+        // grass with no ground under it is the one thing that looks broken
+        // rather than absent.
+        const wantGrass = grassTerrainData.hasGrassData && _terrainVisible;
         if (wantGrass !== _grassRingsEnabled) {
           _grassRingsEnabled = wantGrass;
           for (const r of grassRings) r.setEnabled(wantGrass);
@@ -2778,7 +2790,7 @@ export async function startV3App(opts = {}) {
       }
       if (cliffGrassRings) {
         // Only spend compute when there's both a baked cliff surface and paint.
-        const wantCliff = grassTerrainData.hasCliffData && grassTerrainData.hasCliffSurface;
+        const wantCliff = grassTerrainData.hasCliffData && grassTerrainData.hasCliffSurface && _terrainVisible;
         if (wantCliff !== _cliffRingsEnabled) {
           _cliffRingsEnabled = wantCliff;
           for (const r of cliffGrassRings) r.setEnabled(wantCliff);
@@ -6501,6 +6513,44 @@ export async function startV3App(opts = {}) {
       /** How hard collectibles blaze into the selective-bloom buffer (needs Post FX on). */
       getBloom: () => collectibleUniforms.bloom.value,
       setBloom: (v) => { collectibleUniforms.bloom.value = v; },
+    },
+
+    // ── Terrain visibility ────────────────────────────────────────────────────
+    /**
+     * Hide the ground entirely — for a game whose level is in the sky, and as
+     * the cleanest perf baseline there is.
+     *
+     * WHAT THIS COSTS AND WHY IT IS WORTH A SWITCH. The clipmap is ONE draw with
+     * `frustumCulled = false`, so it is submitted every frame wherever the camera
+     * looks, and the terrain frame is fragment-bound (see the render-scale note
+     * at the top of this file — one render pass is ~93% of it). Hiding the mesh
+     * therefore removes almost the whole cost, and it removes the part that does
+     * not scale with the game's own content: a game measuring its own systems is
+     * otherwise reading them through a constant terrain-shaped offset.
+     *
+     * Toggling a MESH is safe to do live. Toggling a LIGHT is not — three hashes
+     * the scene's light set into every material's shader cache key, so hiding one
+     * rebuilds every material in the world. Nothing like that happens here; this
+     * is a visibility flag and a grass gate, and it recompiles nothing.
+     *
+     * NOT COVERED: trees and water. Their renderers have no single visibility
+     * switch to flip, and a game flying above a flat, empty world has neither.
+     * Load a treed world with the terrain hidden and the trees will hang in the
+     * air — hide them at the source (empty tree store) rather than expecting
+     * this to do it.
+     *
+     * COLLISION IS THE CALLER'S JOB. getWorldHeight keeps answering — the CPU
+     * heightmap is still there and this is a render switch. A game that wants
+     * the ground to stop being solid has to stop feeding that sampler to its
+     * physics; both of modularRoadGround's terrain hooks already treat a
+     * non-finite height as "no terrain here", so returning NaN is the way.
+     */
+    terrain: {
+      get visible() { return _terrainVisible; },
+      setVisible(on) {
+        _terrainVisible = !!on;
+        lod.group.visible = _terrainVisible;
+      },
     },
 
     // ── Terrain modification ──────────────────────────────────────────────────

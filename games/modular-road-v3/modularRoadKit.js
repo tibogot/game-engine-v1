@@ -378,6 +378,35 @@ export function buildBankProfile(p = roadParams, withKerbs = true, curl = 0, ste
  * The closed outline runs the inner circle, jumps to the outer wall at the
  * bottom seam, and runs back — the two radial webs sit hidden at the seam.
  */
+/**
+ * Flag the INTERIOR of every run of same-zone points as smooth-shaded.
+ *
+ * One rule for all the curved sections, because hand-flagging each one is how
+ * you smooth a corner that was meant to be a corner. A point belongs to a
+ * continuous surface exactly when both its neighbours are on the same surface,
+ * and `zone` already says which surface that is — bore (3) or outer shell (4).
+ *
+ * It falls out correctly everywhere it is used:
+ *   • a full tube's two arc ends border the radial webs, so they stay crisp;
+ *   • a half tube's lips border the rim caps, so those stay crisp;
+ *   • the half-pipe's vert-to-transition and transition-to-floor joins are
+ *     tangent-continuous and interior to the bore run, so they smooth;
+ *   • a flat road section (zones 0/1/2) has no run longer than its own corners,
+ *     so nothing is flagged and weldSmoothProfileNormals returns immediately.
+ *
+ * The outline is a closed loop, so the neighbour lookup wraps.
+ */
+function flagSmoothRuns(pts) {
+  const M = pts.length;
+  for (let k = 0; k < M; k++) {
+    const z = pts[k].zone;
+    const prev = pts[(k - 1 + M) % M].zone;
+    const next = pts[(k + 1) % M].zone;
+    if (prev === z && next === z) pts[k].smooth = true;
+  }
+  return pts;
+}
+
 function buildTubeProfile(pp = pieceParams) {
   const Ri = Math.max(3, pp.tubeRadius ?? 8);
   const tw = Math.max(0.15, pp.tubeWall ?? 0.6);
@@ -399,6 +428,12 @@ function buildTubeProfile(pp = pieceParams) {
     const a = -Math.PI / 2 + (2 * Math.PI * k) / N;
     pts.push({ x: Math.cos(a) * Ro, y: Ri + Math.sin(a) * Ro, zone: 4 });
   }
+  flagSmoothRuns(pts);
+  // The bore is a closed circle whose two ends sit on top of each other at the
+  // bottom, 96 indices apart in the outline — pair them so the floor the car
+  // drives on closes too.
+  pts[0].seam = N; pts[N].seam = 0;
+  pts[N + 1].seam = 2 * N + 1; pts[2 * N + 1].seam = N + 1;
   return { pts, hw: Ri };
 }
 
@@ -448,6 +483,7 @@ function buildHalfTubeProfile(pp = pieceParams) {
     const a = a0 + (span * k) / N;
     pts.push({ x: Math.cos(a) * Ro, y: Ri + Math.sin(a) * Ro, zone: 4 });
   }
+  flagSmoothRuns(pts);
   return { pts, hw: Ri };
 }
 
@@ -528,6 +564,7 @@ function buildHalfPipeProfile(pp = pieceParams) {
   const pts = [];
   for (const p of inner) pts.push({ x: p.x, y: p.y, zone: 3 });
   for (let k = outer.length - 1; k >= 0; k--) pts.push({ x: outer[k].x, y: outer[k].y, zone: 4 });
+  flagSmoothRuns(pts);
   return { pts, hw: hf + Rt };
 }
 
@@ -641,6 +678,10 @@ function buildTubeMorphProfile(pp = pieceParams, rp = roadParams, t = 1, fullRin
     hw = Math.max(hw, Math.abs(p.x));
   }
   for (let k = N; k >= 0; k--) pts.push({ x: outer[k].x, y: outer[k].y, zone: 4 });
+  flagSmoothRuns(pts);
+  // A full ring closes on itself; the weld checks per frame whether the two
+  // points really are coincident, so this is inert while the section is open.
+  if (fullRing) { pts[0].seam = N; pts[N].seam = 0; pts[N + 1].seam = 2 * N + 1; pts[2 * N + 1].seam = N + 1; }
   return { pts, hw };
 }
 
@@ -698,6 +739,10 @@ function buildTubeReducerProfile(pp = pieceParams, rp = roadParams, t = 1, fullR
     const a = a0 + (span * k) / N;
     pts.push({ x: Math.cos(a) * Ro, y: Ri + Math.sin(a) * Ro, zone: 4 });
   }
+  flagSmoothRuns(pts);
+  // Both ends are closed rings, so pair the seam at each. See the seam block
+  // in weldSmoothProfileNormals.
+  if (fullRing) { pts[0].seam = N; pts[N].seam = 0; pts[N + 1].seam = 2 * N + 1; pts[2 * N + 1].seam = N + 1; }
   return { pts, hw: Ri };
 }
 
@@ -1091,11 +1136,38 @@ function tubeAnnulusRings(pts) {
  *
  * Mutates `geo` in place (appends verts / indices, leaves existing normals).
  */
-function appendTubeEndCaps(geo, frames, profileData) {
-  const rings = tubeAnnulusRings(profileData?.pts);
-  if (!rings || frames.length < 2) return geo;
-  const { inner, outer } = rings;
-  const n = inner.length;
+/**
+ * Is this section a CLOSED ring — a bore with a mouth that needs shutting?
+ *
+ * `tubeAnnulusRings` cannot answer this on its own: it drops what it assumes is
+ * a duplicated seam point, which is true of a full tube and false of everything
+ * else. buildTubeMorphProfile in particular emits zones 3/4 at EVERY value of t,
+ * so at t = 0 a flat road plate looks exactly like an annulus to it — cap that
+ * and you weld a ring across the road.
+ *
+ * The honest test is geometric: the drivable arc is closed iff its last point
+ * lands back on its first. A full tube wraps −π…+π; a morph part-way in, a half
+ * tube, and a flat plate all stop short.
+ */
+function sectionIsClosedRing(profileData) {
+  const pts = profileData?.pts;
+  if (!pts) return false;
+  const inner = pts.filter((p) => p.zone === 3);
+  if (inner.length < 9) return false;
+  const a = inner[0], b = inner[inner.length - 1];
+  return Math.hypot(a.x - b.x, a.y - b.y) < 1e-6;
+}
+
+/**
+ * @param {THREE.BufferGeometry} geo
+ * @param {object[]} frames
+ * @param {object} entrySection section at the first frame, or null to leave open
+ * @param {object} exitSection  section at the last frame, or null to leave open
+ */
+function appendTubeEndCaps(geo, frames, entrySection, exitSection) {
+  const capEntry = sectionIsClosedRing(entrySection);
+  const capExit = sectionIsClosedRing(exitSection);
+  if ((!capEntry && !capExit) || frames.length < 2) return geo;
 
   const pos = geo.getAttribute("position");
   const uv = geo.getAttribute("uv");
@@ -1121,7 +1193,15 @@ function appendTubeEndCaps(geo, frames, profileData) {
     alongN += frames[i].pos.distanceTo(frames[i - 1].pos);
   }
 
-  const emitCap = (fr, alongX, ox, oy, oz) => {
+  const emitCap = (fr, alongX, ox, oy, oz, section) => {
+    // PER-END RINGS. This used to take one reference section and stamp it on
+    // both mouths, which is right only while the two ends are the same shape.
+    // A reducer's ends are different radii and an entry's ends are a road and a
+    // bore, so a shared ring fits one of them and is wrong on the other.
+    const rings = tubeAnnulusRings(section?.pts);
+    if (!rings) return;
+    const { inner, outer } = rings;
+    const n = inner.length;
     const pushPt = (p, nx, ny, nz) => {
       _capPt.copy(fr.pos).addScaledVector(fr.right, p.x).addScaledVector(fr.up, p.y);
       positions.push(_capPt.x, _capPt.y, _capPt.z);
@@ -1152,9 +1232,12 @@ function appendTubeEndCaps(geo, frames, profileData) {
 
   const f0 = frames[0];
   const fN = frames[frames.length - 1];
-  // Entry faces backward (travel goes into the piece); exit faces forward.
-  emitCap(f0, 0, -f0.tangent.x, -f0.tangent.y, -f0.tangent.z);
-  emitCap(fN, alongN, fN.tangent.x, fN.tangent.y, fN.tangent.z);
+  // Entry faces backward (travel goes into the piece); exit faces forward. Each
+  // end is capped only if ITS OWN section is a closed bore — so a tube caps
+  // both, an entry caps only the mouth it opens into, and an exit caps only the
+  // one it comes out of.
+  if (capEntry) emitCap(f0, 0, -f0.tangent.x, -f0.tangent.y, -f0.tangent.z, entrySection);
+  if (capExit) emitCap(fN, alongN, fN.tangent.x, fN.tangent.y, fN.tangent.z, exitSection);
 
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
@@ -1197,6 +1280,7 @@ function weldSmoothProfileNormals(geo, profile, F) {
   if (!any) return;
 
   const nrm = geo.getAttribute("normal");
+  const posAttr = geo.getAttribute("position");
   for (let k = 0; k < M; k++) {
     if (!profile[k].smooth) continue;
     // Point k is the FAR end of band k-1 and the NEAR end of band k.
@@ -1205,6 +1289,57 @@ function weldSmoothProfileNormals(geo, profile, F) {
     for (let i = 0; i < F; i++) {
       const va = prevBase + i * 2 + 1;
       const vb = curBase + i * 2;
+      const x = nrm.getX(va) + nrm.getX(vb);
+      const y = nrm.getY(va) + nrm.getY(vb);
+      const z = nrm.getZ(va) + nrm.getZ(vb);
+      const l = Math.hypot(x, y, z) || 1;
+      nrm.setXYZ(va, x / l, y / l, z / l);
+      nrm.setXYZ(vb, x / l, y / l, z / l);
+    }
+  }
+
+  /*
+   * THE SEAM — two points at the SAME PLACE that are not neighbours.
+   *
+   * A closed bore's outline cannot be a topological circle: it has to run the
+   * inner surface, jump to the outer wall and walk back, so the section starts
+   * and ends at the same angle with the whole outer arc in between. Those two
+   * coincident points are adjacent in SPACE and 96 indices apart in the OUTLINE,
+   * so the pass above can never pair them — it only ever looks at k−1 and k.
+   *
+   * Left alone that is one hard crease running the length of the tube, and on
+   * the full tube it lands at the very bottom: straight down the middle of the
+   * floor the car drives on. `seam` names the partner index so the two get the
+   * same average, which closes the ring properly.
+   */
+  for (let k = 0; k < M; k++) {
+    const j = profile[k].seam;
+    if (j === undefined || j < k) continue; // pair once, from the lower index
+    const aBase = k * F * 2;                    // band k — point k is its NEAR end
+    const bBase = ((j - 1 + M) % M) * F * 2;    // band j−1 — point j is its FAR end
+    for (let i = 0; i < F; i++) {
+      /*
+       * ONLY WHERE THE TWO POINTS REALLY ARE COINCIDENT, checked per frame.
+       *
+       * A MORPHING section closes only at one end of the piece: a tube entry is
+       * a full ring at the bore and a flat plate at the road, so its seam points
+       * sit on top of each other at the last station and a road-width apart at
+       * the first. The flags come from one reference outline and cannot know
+       * that, so the geometry is asked instead — welding normals across a gap
+       * would smear the road's two edges into each other.
+       */
+      const pa = aBase + i * 2, pb = bBase + i * 2 + 1;
+      const dx = posAttr.getX(pa) - posAttr.getX(pb);
+      const dy = posAttr.getY(pa) - posAttr.getY(pb);
+      const dz = posAttr.getZ(pa) - posAttr.getZ(pb);
+      if (dx * dx + dy * dy + dz * dz > 1e-8) continue;
+      // The outline LEAVES the seam at point k and ARRIVES at point j, so the
+      // two columns lying on the shared surface are k's near and (j−1)'s far.
+      // Using band j here instead of j−1 averages the floor against the radial
+      // web on the far side of the seam: measured 43° of error at the tube's
+      // bottom, in the middle of the drivable floor.
+      const va = aBase + i * 2;
+      const vb = bBase + i * 2 + 1;
       const x = nrm.getX(va) + nrm.getX(vb);
       const y = nrm.getY(va) + nrm.getY(vb);
       const z = nrm.getZ(va) + nrm.getZ(vb);
@@ -4205,6 +4340,9 @@ export const PIECE_CATALOG = [
     plain: true,
     // Open until the very last frame, so the rim caps are a ledge for almost
     // the whole piece — exactly the case buildOpenLipCollision exists for.
+    // Caps the BORE mouth only — its other end is flat road, and
+    // sectionIsClosedRing is what tells the two apart.
+    tubeEndCaps: true,
     openLips: true,
   },
   {
@@ -4218,6 +4356,7 @@ export const PIECE_CATALOG = [
     profileAt: (t, pp, rp) => buildTubeMorphProfile(pp, rp, 1 - t, true),
     noKerb: true,
     plain: true,
+    tubeEndCaps: true,
     openLips: true,
   },
   {
@@ -4317,6 +4456,7 @@ export const PIECE_CATALOG = [
     profileAt: (t, pp, rp) => buildTubeMorphProfile(pp, rp, 1 - t, true),
     noKerb: true,
     plain: true,
+    tubeEndCaps: true,
     openLips: true,
   },
   {
@@ -4334,14 +4474,14 @@ export const PIECE_CATALOG = [
   },
   // ── Tube reducer: the piece that makes a second SIZE family possible ─────
   //
-  // NO `tubeEndCaps`, and that is not an oversight. appendTubeEndCaps closes
-  // both mouths from the ONE reference outline, so on a piece whose two ends are
-  // different radii it would fit a `tubeRadius2`-sized annulus onto the
-  // `tubeRadius` mouth. A reducer lives between two tubes and both of those cap
-  // their own mouths at the shared seam's radius, so the join is closed anyway —
-  // the same way `tube_in` / `tube_out` rely on their neighbours.
+  // It used to ship with NO `tubeEndCaps`, because appendTubeEndCaps closed both
+  // mouths from the ONE reference outline — so on a piece whose ends are
+  // different radii it would have fitted a `tubeRadius2` annulus onto the
+  // `tubeRadius` mouth. That limit is gone: the caps are now built from each
+  // end's OWN section, which is exactly the case a reducer needs.
   {
     id: "tube_reduce",
+    tubeEndCaps: true,
     label: "Tube reducer",
     hint: "Tube that tapers from tubeRadius to tubeRadius2",
     swatch: "#16a0c0",
@@ -4743,6 +4883,20 @@ for (const def of PIECE_CATALOG) {
  * spacing along the direction of travel — the direction a wheelbase smooths out.
  * tools/tubeDensityTest.mjs drives the roof to check that claim rather than
  * asserting it.
+ *
+ * NOT A MORPHING PIECE EITHER, and this one was learned the hard way. All of the
+ * above reasons why the stations are surplus assume the CROSS-SECTION IS THE
+ * SAME AT EVERY ONE of them: then a station only exists to approximate the
+ * centreline, and the centreline is a 26 m arc that barely needs them. The
+ * entries, exits, launches and reducers are the opposite kind of piece — their
+ * section is rebuilt at every station by `profileAt`, rolling a flat plate up
+ * into a bore, so the stations ARE the shape rather than a sampling of it.
+ * Relaxing those took the tube entry from 17 stations to 7 and it went visibly
+ * blocky: reported as "the tube entry looks very cheap, not smooth at all".
+ *
+ * So the list is filtered by `profileAt` rather than hand-curated, because the
+ * hand-curated version is exactly what got this wrong — and the next morphing
+ * tube piece someone adds would have been added straight back into it.
  */
 for (const id of [
   "tube", "tube_curve", "tube_in", "tube_out",
@@ -4754,7 +4908,7 @@ for (const id of [
   "tube_launch", "half_tube_launch", "tube_reduce", "half_tube_reduce",
 ]) {
   const def = PIECE_BY_ID.get(id);
-  if (def) def.stepRelax = 2.5;
+  if (def && !def.profileAt) def.stepRelax = 2.5;
 }
 
 /**
@@ -5301,7 +5455,11 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // it is previewing. Only the collision clone is dropped.
   if (def.tubeEndCaps && !def.geometry) {
     if (!deckCollision && !skipExtras) deckCollision = geometry.clone();
-    appendTubeEndCaps(geometry, frames, profileData);
+    // A morphing piece has a DIFFERENT section at each end, so ask it for both.
+    // Everything else sweeps one section and hands the same one over twice.
+    const entrySection = def.profileAt ? def.profileAt(0, pp, rpForProfile) : profileData;
+    const exitSection = def.profileAt ? def.profileAt(1, pp, rpForProfile) : profileData;
+    appendTubeEndCaps(geometry, frames, entrySection, exitSection);
   }
   // Glazing: rendered on its own transparent material, collided by nothing.
   const glassGeometry = skipExtras || !def.glass ? null : def.glass(pp, rpForProfile);

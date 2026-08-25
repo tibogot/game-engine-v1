@@ -50,9 +50,28 @@ console.log("— catalog —");
 const tube = PIECE_BY_ID.get("tube");
 const turn = PIECE_BY_ID.get("tube_curve");
 check("tube and tube_curve flag tubeEndCaps", tube?.tubeEndCaps === true && turn?.tubeEndCaps === true);
-check("entries and half tubes stay off this path",
-  !PIECE_BY_ID.get("tube_in")?.tubeEndCaps
-  && !PIECE_BY_ID.get("half_tube")?.tubeEndCaps
+/*
+ * ENTRIES ARE ON THIS PATH NOW — this used to assert the opposite, and the
+ * opposite was the bug.
+ *
+ * The reasoning was that an entry's rim caps "already close it along the
+ * length", which is true of the HALF tubes (their lips sweep the whole way and
+ * you see wall thickness from the side) and false of the full-ring ones: at the
+ * bore end a `tube_in` is an open annulus, and standing at the mouth you look
+ * straight into the wall cavity. Reported as "missing the face that makes the
+ * depth at the exit". It was only ever hidden when the neighbouring `tube`
+ * happened to cap the shared seam.
+ *
+ * What decides it is now per-END, not per-piece: appendTubeEndCaps caps an end
+ * iff THAT end's own section is a closed ring (sectionIsClosedRing). So an entry
+ * caps the bore it opens into and leaves its flat-road end alone, and the half
+ * tubes stay off the path because an arc never closes.
+ */
+check("full-ring entries and exits cap their bore mouth",
+  PIECE_BY_ID.get("tube_in")?.tubeEndCaps === true
+  && PIECE_BY_ID.get("tube_out")?.tubeEndCaps === true);
+check("half tubes stay off this path — an arc has no mouth to close",
+  !PIECE_BY_ID.get("half_tube")?.tubeEndCaps
   && !PIECE_BY_ID.get("half_tube_in")?.tubeEndCaps);
 check("the flag is on the piece defs, not a one-off in buildPiece",
   /tubeEndCaps: true/.test(KIT_SRC));
@@ -110,9 +129,60 @@ check("half_tube still uses openLips, not tubeEndCaps",
 check("half_tube collision is the stripped-lip copy, not a clone of the whole mesh",
   half.deckCollision && half.deckCollision.getIndex().count < half.geometry.getIndex().count);
 
+/* ══ Per-end capping ══════════════════════════════════════════════════════ */
+console.log("\n— each end is judged on its own section —");
+
+/** Triangles lying flat in the plane of the near (z max) and far (z min) end. */
+function endFaces(geo) {
+  const pos = geo.getAttribute("position"), idx = geo.getIndex();
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    lo = Math.min(lo, pos.getZ(i)); hi = Math.max(hi, pos.getZ(i));
+  }
+  let near = 0, far = 0;
+  for (let i = 0; i < idx.count; i += 3) {
+    const z = [idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)].map((v) => pos.getZ(v));
+    if (z.every((v) => Math.abs(v - hi) < 1e-4)) near++;
+    if (z.every((v) => Math.abs(v - lo) < 1e-4)) far++;
+  }
+  return { near, far };
+}
+
 const entry = buildPiece("tube_in", initialConnector(), pp());
-check("tube_in is not end-capped (its rims already close along the length)",
-  !PIECE_BY_ID.get("tube_in").tubeEndCaps && entry.deckCollision);
+const eFaces = endFaces(entry.geometry);
+check("tube_in caps the BORE end", eFaces.far > 0, `${eFaces.far} triangles`);
+check("...and leaves its flat-road end open", eFaces.near === 0);
+check("...and the caps are visual only — the BVH still has no shelf",
+  entry.deckCollision && endFaces(entry.deckCollision).far === 0);
+
+const exit = buildPiece("tube_out", initialConnector(), pp());
+const xFaces = endFaces(exit.geometry);
+check("tube_out caps the bore end it comes OUT of", xFaces.near > 0, `${xFaces.near} triangles`);
+check("...and leaves its flat-road end open", xFaces.far === 0);
+
+// THE CASE A SHARED REFERENCE SECTION COULD NOT DO: two mouths, two radii.
+const red = buildPiece("tube_reduce", initialConnector(),
+  { ...pp(), tubeEntryLength: 30, tubeRadius: 8, tubeRadius2: 12 });
+const rFaces = endFaces(red.geometry);
+check("a reducer caps BOTH mouths", rFaces.near > 0 && rFaces.far > 0);
+const rp2 = red.geometry.getAttribute("position");
+let lo = Infinity, hi = -Infinity;
+for (let i = 0; i < rp2.count; i++) {
+  lo = Math.min(lo, rp2.getZ(i)); hi = Math.max(hi, rp2.getZ(i));
+}
+const spanAt = (z, cy) => {
+  let a = Infinity, b = 0;
+  for (let i = 0; i < rp2.count; i++) {
+    if (Math.abs(rp2.getZ(i) - z) > 1e-4) continue;
+    const r = Math.hypot(rp2.getX(i), rp2.getY(i) - cy);
+    a = Math.min(a, r); b = Math.max(b, r);
+  }
+  return { a, b };
+};
+const nearR = spanAt(hi, 8), farR = spanAt(lo, 12);
+check("...each at its OWN radius, which one shared section could never do",
+  Math.abs(nearR.a - 8) < 1e-3 && Math.abs(farR.a - 12) < 1e-3,
+  `near ${nearR.a.toFixed(2)}–${nearR.b.toFixed(2)}, far ${farR.a.toFixed(2)}–${farR.b.toFixed(2)}`);
 
 console.log(fail === 0 ? "\nAll tube end-cap checks passed." : `\n${fail} check(s) FAILED.`);
 process.exit(fail === 0 ? 0 : 1);

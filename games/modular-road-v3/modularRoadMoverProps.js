@@ -76,8 +76,20 @@ function fitTowerCollider(visualRoot) {
  *
  * @param {boolean} [opts.innerOnly] inner wall quads only (cheap collider)
  * @param {boolean} [opts.rimsOnly] hole-border quads only (glow rims)
+ * @param {boolean} [opts.smoothShell] give the CYLINDER WALLS analytic radial
+ *   normals instead of face normals, so they shade as a curve rather than as A
+ *   flat strips. Off by default: the original barrel's faceted look is wanted.
+ *
+ *   Welding is not an option here the way it is for the swept road pieces —
+ *   every quad pushes four fresh vertices, so nothing is shared and there is
+ *   nothing to average. But a cylinder does not need averaging: the true normal
+ *   at any point is radial, and the vertex position gives the angle. Only the
+ *   walls get it; the end rings and the hole borders are real edges and keep
+ *   their face normals.
  */
-function spinBarrelHoleGrid(Ri, wall, L, holes, { A = 32, NZ = 16, innerOnly = false, rimsOnly = false } = {}) {
+function spinBarrelHoleGrid(Ri, wall, L, holes, {
+  A = 32, NZ = 16, innerOnly = false, rimsOnly = false, smoothShell = false,
+} = {}) {
   const Ro = Ri + wall;
   const da = (2 * Math.PI) / A;
   const dz = L / NZ;
@@ -100,11 +112,32 @@ function spinBarrelHoleGrid(Ri, wall, L, holes, { A = 32, NZ = 16, innerOnly = f
     return [R * Math.sin(th), -R * Math.cos(th), -L / 2 + iz * dz];
   };
 
-  const mkEmit = () => ({ pos: [], idx: [] });
-  const quad = (part, a, b, c, d) => {
+  /** Outward radial unit at grid angle `ia`; `sign` −1 gives the inward one. */
+  const radial = (ia, sign) => {
+    const th = ia * da;
+    return [sign * Math.sin(th), -sign * Math.cos(th), 0];
+  };
+  /** Flat-shaded fallback: one face normal repeated for all four corners. */
+  const faceNormal = (a, b, c) => {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    return [nx / l, ny / l, nz / l];
+  };
+
+  const mkEmit = () => ({ pos: [], idx: [], nrm: [] });
+  /** `ns` = per-corner normals; omitted means flat (the face's own normal). */
+  const quad = (part, a, b, c, d, ns = null) => {
     const base = part.pos.length / 3;
     part.pos.push(...a, ...b, ...c, ...d);
     part.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    if (!smoothShell) return; // originals keep computeVertexNormals, untouched
+    if (ns) part.nrm.push(...ns[0], ...ns[1], ...ns[2], ...ns[3]);
+    else {
+      const n = faceNormal(a, b, c);
+      part.nrm.push(...n, ...n, ...n, ...n);
+    }
   };
   const shell = mkEmit();
   const rims = mkEmit();
@@ -120,8 +153,25 @@ function spinBarrelHoleGrid(Ri, wall, L, holes, { A = 32, NZ = 16, innerOnly = f
         continue;
       }
       if (!rimsOnly) {
-        quad(shell, pt(ia, Ri, iz), pt(ja, Ri, iz), pt(ja, Ri, iz + 1), pt(ia, Ri, iz + 1));
-        if (!innerOnly) quad(shell, pt(ia, Ro, iz), pt(ia, Ro, iz + 1), pt(ja, Ro, iz + 1), pt(ja, Ro, iz));
+        // Corner order is (ia, ja, ja, ia) inside and (ia, ia, ja, ja) outside,
+        // so the normals have to follow suit.
+        //
+        // THE SIGNS MATCH THE WINDING, NOT INTUITION. Reading the shape, the
+        // bore's surface "should" face the axis — but these quads are wound so
+        // that the face normal points the other way, and the shell is drawn
+        // DoubleSide, which flips the normal for back faces in the shader. An
+        // analytic normal anti-parallel to the face it belongs to therefore
+        // inverts the lighting rather than smoothing it. MEASURED against the
+        // faceted barrel's own normals, the first attempt came out at a uniform
+        // 176.25° — that is 180° minus half a facet, i.e. exactly backwards.
+        const [inA, inB] = [radial(ia, 1), radial(ja, 1)];
+        quad(shell, pt(ia, Ri, iz), pt(ja, Ri, iz), pt(ja, Ri, iz + 1), pt(ia, Ri, iz + 1),
+          [inA, inB, inB, inA]);
+        const [outA, outB] = [radial(ia, -1), radial(ja, -1)];
+        if (!innerOnly) {
+          quad(shell, pt(ia, Ro, iz), pt(ia, Ro, iz + 1), pt(ja, Ro, iz + 1), pt(ja, Ro, iz),
+            [outA, outA, outB, outB]);
+        }
       }
     }
     if (!rimsOnly) {
@@ -135,11 +185,88 @@ function spinBarrelHoleGrid(Ri, wall, L, holes, { A = 32, NZ = 16, innerOnly = f
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(part.pos, 3));
     g.setIndex(part.idx);
-    g.computeVertexNormals();
+    // The analytic normals are only built when they were asked for, so the
+    // original barrel takes exactly the path it always did.
+    if (smoothShell && part.nrm.length === part.pos.length) {
+      g.setAttribute("normal", new THREE.Float32BufferAttribute(part.nrm, 3));
+    } else {
+      g.computeVertexNormals();
+    }
     g.computeBoundingSphere();
     return g;
   };
   return { shell: toGeo(shell), rims: toGeo(rims) };
+}
+
+/**
+ * Drive-through barrel that spins about its own axis.
+ *
+ * Inner radius matches the kit's rideable tube. 48×20 visual grid, matte dark
+ * shell, glowing rims, inner-wall-only collider (~600 tris), and deck-carry.
+ *
+ * ONE BUILDER, TWO TILES. The smooth variant is the same barrel with analytic
+ * wall normals and a different rim colour, so keeping it as options rather than
+ * a copy is what stops the two drifting the next time the barrel is tuned.
+ *
+ * @param {boolean} [opts.smooth] shade the cylinder walls as a curve
+ * @param {number} [opts.rimColor] bloom colour of the hole rims
+ */
+function makeSpinBarrel({ smooth = false, rimColor = 0x38e8d8 } = {}) {
+  const Ri = 8;
+  const wall = 0.6;
+  const L = 40;
+  const deg = THREE.MathUtils.degToRad;
+  const holes = spinBarrelHoles(deg);
+  const { shell, rims } = spinBarrelHoleGrid(Ri, wall, L, holes, {
+    A: 48, NZ: 20, smoothShell: smooth,
+  });
+  // The collider is unaffected by shading — same cheap grid either way.
+  const { shell: collShell } = spinBarrelHoleGrid(Ri, wall, L, holes, {
+    A: 24, NZ: 12, innerOnly: true,
+  });
+
+  const root = new THREE.Group();
+  root.name = smooth ? "SpinBarrelSmooth" : "SpinBarrel";
+  const pivot = new THREE.Object3D();
+  pivot.position.set(0, Ri, 0);
+  root.add(pivot);
+
+  const mesh = new THREE.Mesh(
+    shell,
+    new THREE.MeshStandardMaterial({
+      // High roughness softens the low-poly facets; low metalness kills the
+      // sharp specular stripes that made each face read so hard.
+      color: 0x2a2e32,
+      metalness: 0.12,
+      roughness: 0.78,
+      // DoubleSide — FrontSide alone reads as a flat skin from inside the bore.
+      side: THREE.DoubleSide,
+    }),
+  );
+  mesh.name = "SpinBarrelShell";
+
+  // Bloom rims keep the holes readable while the barrel spins.
+  const rimMat = new THREE.MeshStandardNodeMaterial({
+    color: new THREE.Color(rimColor),
+    emissive: new THREE.Color(rimColor),
+    emissiveIntensity: 4,
+    roughness: 0.45,
+    side: THREE.DoubleSide,
+  });
+  applyBloomMRT(rimMat, materialEmissive);
+  mesh.add(new THREE.Mesh(rims, rimMat)); // child ⇒ visual only, no collision
+
+  pivot.add(mesh);
+  return bindMover(root, {
+    mesh,
+    pivot,
+    mode: "spin-z",
+    speed: 0.55,
+    amplitude: 8,
+    isDeck: true,
+    deckCarry: true,
+    collisionGeometry: collShell,
+  });
 }
 
 /** Four staggered wall openings along the spin barrel. */
@@ -274,61 +401,26 @@ export const MOVER_CATALOG = [
     label: "Spin barrel",
     collision: "deck",
     defaults: { speed: 0.55, amplitude: 8 },
-    make: () => {
-      // Drive-through barrel that spins about its own axis. Inner radius matches
-      // the kit's rideable tube. 48×20 visual grid, matte dark shell (hides
-      // faceting), cyan rims, inner-wall-only collider (~600 tris), and deck-carry.
-      const Ri = 8;
-      const wall = 0.6;
-      const L = 40;
-      const deg = THREE.MathUtils.degToRad;
-      const holes = spinBarrelHoles(deg);
-      const { shell, rims } = spinBarrelHoleGrid(Ri, wall, L, holes, { A: 48, NZ: 20 });
-      const { shell: collShell } = spinBarrelHoleGrid(Ri, wall, L, holes, { A: 24, NZ: 12, innerOnly: true });
-
-      const root = new THREE.Group();
-      root.name = "SpinBarrel";
-      const pivot = new THREE.Object3D();
-      pivot.position.set(0, Ri, 0);
-      root.add(pivot);
-
-      const mesh = new THREE.Mesh(
-        shell,
-        new THREE.MeshStandardMaterial({
-          // High roughness softens the low-poly facets; low metalness kills the
-          // sharp specular stripes that made each face read so hard.
-          color: 0x2a2e32,
-          metalness: 0.12,
-          roughness: 0.78,
-          // DoubleSide — FrontSide alone reads as a flat skin from inside the bore.
-          side: THREE.DoubleSide,
-        }),
-      );
-      mesh.name = "SpinBarrelShell";
-
-      // Cyan bloom rims keep the holes readable while the barrel spins.
-      const rimMat = new THREE.MeshStandardNodeMaterial({
-        color: new THREE.Color(0x38e8d8),
-        emissive: new THREE.Color(0x38e8d8),
-        emissiveIntensity: 4,
-        roughness: 0.45,
-        side: THREE.DoubleSide,
-      });
-      applyBloomMRT(rimMat, materialEmissive);
-      mesh.add(new THREE.Mesh(rims, rimMat)); // child ⇒ visual only, no collision
-
-      pivot.add(mesh);
-      return bindMover(root, {
-        mesh,
-        pivot,
-        mode: "spin-z",
-        speed: 0.55,
-        amplitude: 8,
-        isDeck: true,
-        deckCarry: true,
-        collisionGeometry: collShell,
-      });
-    },
+    make: () => makeSpinBarrel(),
+  },
+  {
+    /*
+     * THE SAME BARREL, SHADED SMOOTH — and it is a second tile rather than a
+     * replacement because the faceted one is a look somebody wants.
+     *
+     * The walls get analytic radial normals (see spinBarrelHoleGrid's
+     * smoothShell); everything else about it is identical, down to the matte
+     * 0.78-roughness shell. Worth knowing: that roughness was chosen to HIDE the
+     * faceting, so it is also damping the thing this variant exists to show —
+     * dropping it would make the smoothness read harder, if you want that.
+     *
+     * Pink rims so the two are one glance apart in a track full of both.
+     */
+    id: "spinbarrel_smooth",
+    label: "Spin barrel (smooth)",
+    collision: "deck",
+    defaults: { speed: 0.55, amplitude: 8 },
+    make: () => makeSpinBarrel({ smooth: true, rimColor: 0xff3ea5 }),
   },
   {
     id: "windmill",

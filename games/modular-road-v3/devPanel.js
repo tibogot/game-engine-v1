@@ -48,6 +48,18 @@ export function createRoadDevPanel({ app, game, params }) {
           </div>
           <button class="action-btn" id="dv-load-world" type="button">Load .v3proj…</button>
           <div class="prop-row">
+            <span class="prop-label">Terrain</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-terrain" type="button" aria-label="Terrain (off = sky mode)">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Off is <b>sky mode</b>: no ground drawn, none to land on — the car falls
+            past where it was and respawns. For races that live in the air, and for
+            reading the game's own frame time without the terrain's fixed ~2.5&nbsp;ms
+            sitting on top of every measurement. Safe to flip while driving.
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Clouds</span>
             <div class="prop-value">
               <button class="prop-toggle" id="dv-clouds" type="button" aria-label="Volumetric clouds">${CHECK_SVG}</button>
@@ -2230,6 +2242,7 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-lines-center", game.getCenterLinesOn?.() ?? true, (on) => game.setCenterLinesOn?.(on));
   toggle("dv-lines-edge", game.getEdgeLinesOn?.() ?? true, (on) => game.setEdgeLinesOn?.(on));
   toggle("dv-lines-bloom", game.getLinesBloom?.() ?? false, (on) => game.setLinesBloom?.(on));
+  toggle("dv-terrain", game.getTerrain?.() ?? true, (on) => game.setTerrain?.(on));
   toggle("dv-clouds", game.getClouds?.() ?? false, (on) => game.setClouds?.(on));
   // Road-surface uniforms are TSL `uniform()` objects, so the slider / colour
   // helpers drive their `.value` directly — every change is live, no rebuild.

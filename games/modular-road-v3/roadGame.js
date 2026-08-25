@@ -162,6 +162,10 @@ const FALL_Y = -60;
 /** Air-stunt: dropping this far BELOW the last grounded height counts as a fall
  *  (relative to the track, so it works at any track altitude). */
 const FALL_DROP = 12;
+/** Sky mode: how far below the LOWEST track piece the void backstop sits. Far
+ *  enough that a deliberate drop off a high loop is not cut short, near enough
+ *  that a missed jump is a snappy retry rather than a long fall to nowhere. */
+const SKY_FALL_MARGIN = 50;
 /** How far above the terrain a freshly seeded chain's first piece sits. */
 const ROAD_SEED_CLEARANCE = 0.5;
 /** Lift applied to a resolved spawn so the wheels settle onto the deck. */
@@ -234,6 +238,49 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   window.__road = app; // handy for console debugging
 
   const { scene, camera, controls, renderer } = app;
+
+  /* ── SKY MODE (terrain off) ────────────────────────────────────────────────
+   *
+   * Some races run on the ground; some are a ribbon of track in open sky with no
+   * world under them at all. For the second kind the terrain is not a cost to
+   * optimise, it is a thing that should not exist — so this turns it off for
+   * real: hidden, not solid, and not paid for.
+   *
+   * It doubles as the measurement baseline. The clipmap is one always-submitted,
+   * fragment-bound draw whose cost is fixed no matter how big the track gets, so
+   * every frame-time reading the game takes otherwise carries a constant terrain
+   * offset that can mask a regression in the game's own systems.
+   *
+   * WHAT SKY MODE IS NOT: it is not a speed-up for the track or the physics.
+   * Terrain is fragment cost; pieces and physics are CPU and geometry cost. This
+   * does not make them faster, it stops them being hidden.
+   *
+   * Nothing is unloaded — the heightmap, its render targets and the compiled
+   * terrain pipelines all stay resident, and boot still pays for them. This is a
+   * frame-time switch, not a memory or load-time one.
+   *
+   * TWO SAMPLERS, DELIBERATELY, because "no terrain" has two different right
+   * answers and picking the wrong one per call site is how this breaks:
+   *
+   *   terrainH()    → NaN. For PHYSICS. Both terrain hooks in modularRoadGround
+   *                   already treat a non-finite height as "no ground here" (one
+   *                   by an isFinite guard, one by a deliberately inverted
+   *                   comparison), so NaN removes terrain from collision without
+   *                   a single new branch in the vehicle.
+   *   groundBaseY() → 0. For AUTHORING. Build anchors and spawns need a real
+   *                   number to sit above; NaN there is a NaN track.
+   */
+  let terrainOn = true;
+
+  /** Terrain height for PHYSICS — NaN in sky mode means "no ground here". */
+  function terrainH(x, z) {
+    return terrainOn ? app.getWorldHeight(x, z) : NaN;
+  }
+
+  /** Terrain height for AUTHORING — sky mode measures from y=0, never NaN. */
+  function groundBaseY(x, z) {
+    return terrainOn ? app.getWorldHeight(x, z) : 0;
+  }
 
   /* ── WET ROAD + CAR REFLECTION ───────────────────────────────────────────
    *
@@ -369,6 +416,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Assigned near the end of setup, but bakeCollision() runs before that and
   // pokes it — `let … = null` so the early call sees null instead of a TDZ throw.
   let devPanel = null;
+  /** Sky-mode kill floor cache — see fallFloorY(). Up here for the SAME reason
+   *  as devPanel: bakeCollision() clears it, and the builder's own callbacks
+   *  bake during construction, long before the fall-handling code below. */
+  let trackBottomY = null;
   /** Exact round colliders (gate posts) — see PropManager.collisionCapsules(). */
   let solidCapsules = [];
   /** Same `let … = null` reason as devPanel: bakeCollision hands these to the
@@ -493,6 +544,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // Road-only and there is no road here: refuse rather than silently
       // dropping the prop to the terrain, which would look like a bug.
       if (mode === "road") return null;
+      // Same refusal in sky mode: there is no ground to drop to, and answering
+      // 0 would rain props onto an invisible plane far below the track.
+      if (!terrainOn) return null;
       return app.getWorldHeight(x, z);
     },
   });
@@ -1037,7 +1091,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // 4) ── THE CAR ────────────────────────────────────────────────────────────
   const vehicle = new Vehicle({ scene, showArrows: false });
   // Chassis-corner safety floor follows the terrain instead of pinning to y=0.
-  vehicle.getFloorY = (x, z) => app.getWorldHeight(x, z);
+  // terrainH, not getWorldHeight: in sky mode this must return NaN so
+  // _applyChassisGroundContact skips the corner. Its `!(y < floorY)` test is
+  // written that way on purpose — a NaN floor is no floor, not a floor at zero.
+  vehicle.getFloorY = (x, z) => terrainH(x, z);
   // Adopt whatever a bake that ran before this point already worked out.
   vehicleRef = vehicle;
   vehicle.setSolidCapsules(solidCapsules);
@@ -1684,7 +1741,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const moverSolidsBvh = new BvhSet();
 
   const ground = createVehicleGround({
-    getTerrainHeight: (x, z) => app.getWorldHeight(x, z),
+    // In sky mode this returns NaN and raycastFirst's `isFinite(terrainY)` guard
+    // drops terrain out of the wheel probes — the car falls through open air
+    // instead of landing on an invisible surface.
+    getTerrainHeight: (x, z) => terrainH(x, z),
   });
   vehicle.setBvh(ground.ground, ground.solids);
 
@@ -1720,6 +1780,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   function bakeCollision() {
     collisionStale = true;
+    trackBottomY = null; // the track moved — the sky-mode kill floor moves with it
     // The UI half is NOT deferred. The spawn marker follows the Start piece and
     // the dev panel shows live counts; both must track an edit immediately, and
     // neither touches a BVH.
@@ -2380,6 +2441,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let lastSafeY = 0;
   let hasSafe = false;
   const _respawnPos = new THREE.Vector3();
+  const _fallProbe = new THREE.Vector3(); // sky-mode kill floor — see fallFloorY
 
   const recKey = () => RACE_KEY + lap.courseSignature();
 
@@ -2471,6 +2533,58 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * off the track and lands on the terrain, which is drivable — no respawn. The
    * old always-on version looped: respawn at the edge → fall → repeat.
    */
+  /**
+   * The absolute backstop height, which is not a constant in sky mode.
+   *
+   * FALL_Y is -60: written when the track sat on terrain near y=0, where "below
+   * minus sixty" means "gone". A sky track floats at DEFAULT_BUILD_HEIGHT (40 m)
+   * and can be built hundreds of metres up, so the same fixed floor makes the car
+   * fall the whole way past zero before the game notices — four or five seconds
+   * of watching nothing after every missed jump. So in sky mode the floor
+   * follows the TRACK instead of the world.
+   *
+   * It REPLACES FALL_Y rather than combining with it. The first version took
+   * `Math.min` of the two, meaning to keep the world floor as a backstop — but
+   * min picks the DEEPER floor, so a track at 200 m got min(-60, 150) = -60 and
+   * the feature did nothing at exactly the altitude it was written for. There is
+   * no world in sky mode, so there is no second floor to defer to.
+   */
+  function fallFloorY() {
+    if (terrainOn) return FALL_Y;
+    if (trackBottomY === null) {
+      // Cheap and rare (once per track edit), but O(pieces) — hence the cache
+      // rather than doing it in checkFall, which runs every frame.
+      let lo = Infinity;
+      for (const p of builder.pieces) {
+        if (!p.connectorIn) continue;
+        _fallProbe.setFromMatrixPosition(p.connectorIn);
+        if (_fallProbe.y < lo) lo = _fallProbe.y;
+      }
+      trackBottomY = Number.isFinite(lo) ? lo : 0;
+    }
+    return trackBottomY - SKY_FALL_MARGIN;
+  }
+
+  /**
+   * Sky mode on/off. One switch for all three halves of it — the terrain stops
+   * drawing, stops being solid, and stops being what heights are measured from.
+   *
+   * Nothing here needs a rebuild or a rebake: the samplers are read live through
+   * terrainH/groundBaseY, and hiding a mesh recompiles nothing. So this is safe
+   * to flip mid-drive, which is the whole point of it being a switch and not a
+   * boot flag — A/B the same session, at the same GPU clock.
+   */
+  function setTerrain(on) {
+    const next = !!on;
+    if (next === terrainOn) return;
+    terrainOn = next;
+    app.terrain?.setVisible(terrainOn);
+    // The kill-floor RULE changed (world-absolute vs track-relative), so the
+    // cached value is stale even though the track itself never moved.
+    trackBottomY = null;
+    devPanel?.refresh();
+  }
+
   /** Put the car back on the last pose where it was properly on the track. */
   function recoverToSafePose() {
     if (!hasSafe) { respawn(); return; }
@@ -2505,7 +2619,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       return;
     }
 
-    if (y < FALL_Y) { respawn(); return; } // lost below the world
+    if (y < fallFloorY()) { respawn(); return; } // lost below the world
 
     // STUCK — always on, unlike the air-stunt rule below. Some traps have no
     // solution in the contact model at all (landing balanced on a guardrail: the
@@ -3602,7 +3716,7 @@ ${e.message}`);
     if (builder.pieces.length) return poseFromPiece(builder.pieces[0]);
     const sp = app.getSpawnPoint?.() ?? null;
     if (sp) return { x: sp.x, y: sp.y, z: sp.z, yaw: sp.yaw ?? 0 };
-    return { x: 0, y: app.getWorldHeight(0, 0), z: 0, yaw: 0 };
+    return { x: 0, y: groundBaseY(0, 0), z: 0, yaw: 0 };
   }
 
   // Marker so the spawn is visible while building. Build-mode only.
@@ -3825,6 +3939,12 @@ ${e.message}`);
     // 2) TERRAIN — a heightfield, so a segment test is just the sign change of
     //    (arc y − ground y) at the two ends. No raycast needed, and at ~1.3 m of
     //    arc per segment the linear crossing is well inside the marker's radius.
+    //
+    //    Sky mode returns null rather than going through terrainH: every test
+    //    below is a `<` or `>` against the sampled height, all of which are false
+    //    for NaN, so a NaN height would slip past them into the final lerp and
+    //    put the landing marker at NaN — an invisible marker, not a missing one.
+    if (!terrainOn) return null;
     const gTo = app.getWorldHeight(to.x, to.z);
     if (to.y > gTo) return null;
     const gFrom = app.getWorldHeight(from.x, from.z);
@@ -3965,7 +4085,7 @@ ${e.message}`);
       const s = resolveSpawn();
       x = s.x; z = s.z; yaw = s.yaw;
     }
-    const y = app.getWorldHeight(x, z) + buildHeight;
+    const y = groundBaseY(x, z) + buildHeight;
     builder.beginNewChain(new THREE.Vector3(x, y, z), yaw);
     // Frame the anchor so building in the sky doesn't leave you staring at bare
     // ground far below it.
@@ -4431,6 +4551,9 @@ ${e.message}`);
       /** Volumetric clouds. Off releases every buffer and runs no pass. */
       setClouds: (on) => clouds.setEnabled(!!on),
       getClouds: () => clouds.enabled,
+      /** Sky mode: terrain hidden, not solid, heights measured from y=0. */
+      setTerrain,
+      getTerrain: () => terrainOn,
       setSpawnToCar,
       clearSpawn,
       hasSpawn: () => gameSpawn != null,
@@ -4998,6 +5121,10 @@ ${e.message}`);
      *  runs, and the noise bake never starts until the first enable. */
     setClouds: (on) => clouds.setEnabled(!!on),
     getClouds: () => clouds.enabled,
+    /** Sky mode — terrain hidden, not solid, and not paid for. A track saved in
+     *  sky mode is just a track; this is a runtime mode, not track data. */
+    setTerrain,
+    getTerrain: () => terrainOn,
     /** Cloud density at a world point (0 until the bake lands) — for HUD/audio rules. */
     cloudDensityAt: (x, y, z) => clouds.densityAt(x, y, z),
     cloudParams: clouds.params,

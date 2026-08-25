@@ -36,7 +36,7 @@ const { Vehicle, WHEEL, FIXED_DT } = await import(pathToFileURL(TMP).href);
 unlinkSync(TMP);
 
 const kit = await import(new URL("../games/modular-road-v3/modularRoadKit.js", import.meta.url).href);
-const { buildPiece, pieceParams, roadParams, guardrailParams, initialConnector, PIECE_BY_ID } = kit;
+const { buildPiece, pieceParams, roadParams, guardrailParams, initialConnector, PIECE_BY_ID, PIECE_CATALOG } = kit;
 const { RoadBvh } = await import(new URL("../v3/play/modularRoadBvh.js", import.meta.url).href);
 const { createVehicleGround } = await import(new URL("../v3/play/modularRoadGround.js", import.meta.url).href);
 
@@ -250,6 +250,35 @@ for (const id of ["curve", "slope", "banked", "crest", "loop"]) {
 const road = buildPiece("curve", initialConnector(),
   { ...DEF, curveRadius: 26, curveAngle: 90 }, rp, gp, gp.enabled);
 ok(tri(road.geometry) > 0, "a road curve still builds", `${tri(road.geometry)} tris`);
+
+/* ---------------------------------------------------------------------- */
+console.log("\n6. AND NEITHER ARE THE MORPHING PIECES\n");
+
+/*
+ * THE ONE THIS GOT WRONG. Every argument above for the stations being surplus
+ * assumes the CROSS-SECTION IS THE SAME AT ALL OF THEM — then a station only
+ * approximates the centreline, and a 26 m arc barely needs them.
+ *
+ * A piece with `profileAt` is the opposite kind of thing: its section is rebuilt
+ * at every station, rolling a flat plate up into a bore, so the stations ARE the
+ * shape. Relaxing those took the tube entry from 17 stations to 7 and it went
+ * visibly blocky — reported as "the tube entry looks very cheap, not smooth at
+ * all". They were in the opt-in list because it was hand-written; it is filtered
+ * by `profileAt` now, so the next morphing tube piece cannot be added back in.
+ */
+const morphing = PIECE_CATALOG.filter((d) => d.profileAt);
+ok(morphing.length > 0, "there are morphing pieces to protect",
+  morphing.map((d) => d.id).join(", "));
+for (const def of morphing) {
+  ok(!def.stepRelax, `${def.id} keeps every station — its section changes at each one`);
+}
+// And the saving is still real on the pieces that legitimately take it.
+const relaxed = PIECE_CATALOG.filter((d) => d.stepRelax);
+ok(relaxed.length > 0 && relaxed.every((d) => !d.profileAt),
+  "the relaxed set is exactly the constant-section tubes", `${relaxed.length} pieces`);
+const entryStations = PIECE_BY_ID.get("tube_in").points({ ...DEF }).length - 1;
+ok(entryStations >= 16, "a 26 m tube entry still samples its morph finely",
+  `${entryStations} stations`);
 
 console.log(fail === 0 ? "\nALL PASS\n" : `\n${fail} FAILURE(S)\n`);
 process.exit(fail === 0 ? 0 : 1);
