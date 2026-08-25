@@ -421,7 +421,10 @@ export const WET_KEYS = [...WET_COLORS, ...WET_NUMBERS];
 export function createWetField(u, wheelPath) {
   return Fn(() => {
     const lateral = attribute("aLateral", "float");
-    const along = uv().x; // metres along the path
+    // Same per-piece phase the deck uses — otherwise the identical puddle
+    // appears at the same spot on every piece of a given length, which is very
+    // hard to un-see once the ponding is turned up. See stampAlongOffset.
+    const along = uv().x.add(attribute("aAlongOffset", "float"));
     const across = uv().y; // metres across the developed profile
 
     // WALLS SHED. The one term that makes this work on a stunt track: a loop's

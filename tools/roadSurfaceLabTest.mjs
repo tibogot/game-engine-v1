@@ -254,9 +254,28 @@ console.log("\n=== THE ATTRIBUTES THE BUMP READS ===");
   let minU2 = Infinity;
   const uv2 = second.geometry.getAttribute("uv");
   for (let i = 0; i < uv2.count; i++) minU2 = Math.min(minU2, uv2.getX(i));
-  check("KNOWN: piece 2's uv.x restarts at 0 (the seam artifact)",
+  check("piece 2's uv.x still restarts at 0",
     Math.abs(minU2) < 1e-6,
-    "the rack's straight ×3 is what makes this visible");
+    "uv.x is left alone on purpose — dashes/kerb bands/rings keep their phase");
+
+  // ...and the repeat it used to cause is now broken by a per-piece phase that
+  // rides alongside uv.x rather than inside it. This is the check that flipped.
+  const offA = built.geometry.getAttribute("aAlongOffset");
+  const offB = second.geometry.getAttribute("aAlongOffset");
+  check("both pieces carry a noise phase", !!offA && !!offB);
+  check("neighbouring pieces get DIFFERENT phases",
+    offA && offB && Math.abs(offA.getX(0) - offB.getX(0)) > 1e-3,
+    offA && offB ? `${offA.getX(0).toFixed(1)} vs ${offB.getX(0).toFixed(1)} m` : "");
+  check("the phase is constant within a piece",
+    offA && Array.from({ length: offA.count }, (_, i) => offA.getX(i))
+      .every((v) => Math.abs(v - offA.getX(0)) < 1e-9),
+    "must be constant, or it would show up in fwidth and skew the distance fade");
+  // Same piece, same place, twice: a phase that shimmered between rebuilds
+  // would repaint the deck on every edit.
+  const again = buildPiece("straight", initialConnector(), pieceParams, roadParams,
+    { ...guardrailParams, enabled: false }, true);
+  check("the phase is stable for a given placement",
+    Math.abs(again.geometry.getAttribute("aAlongOffset").getX(0) - offA.getX(0)) < 1e-9);
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nall good");

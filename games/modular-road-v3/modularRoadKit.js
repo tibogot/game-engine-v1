@@ -856,6 +856,60 @@ const _kx = new V3();
  * belong. The fade is derived from the geometry's OWN uv.x range, so it needs
  * no knowledge of vertex ordering and works for every builder.
  */
+/**
+ * Span of the per-piece noise phase, in metres.
+ *
+ * Large enough to decorrelate any surface frequency the deck uses: the streak
+ * field's period along the road is `streakStraight / streakScale`, about 54 m
+ * at the defaults, so a phase drawn from a 1 km span puts neighbouring pieces
+ * essentially anywhere in the pattern.
+ */
+const ALONG_OFFSET_SPAN = 1000;
+
+/**
+ * PER-PIECE NOISE PHASE. Without it every piece of a given length is painted
+ * with a byte-identical patch of asphalt.
+ *
+ * buildSweepGeometry starts `along` (uv.x) at 0 on every piece, and uv.x is
+ * what feeds the deck's noise, the drift-mark wander and the puddle field. So a
+ * track built from 22 m straights repeats the same tonal blotches, the same
+ * skid wander and the same puddles every 22 m, with a hard break at each seam.
+ * Visible immediately on three straights in a row.
+ *
+ * WHY A HASH OF THE WORLD POSITION AND NOT CUMULATIVE ARC LENGTH. Arc length
+ * down the chain is the better answer on paper — it removes the repeat AND the
+ * seam discontinuity, because `along` becomes continuous over the whole track.
+ * It is also unaffordable: `rebuildAll({reuse})` skips pieces whose inputs have
+ * not changed, and a running total makes every piece depend on every piece
+ * before it. Inserting one piece at the head would then remesh the entire
+ * chain, and a straight costs ~2.7 ms to build (tools/deckOnlyTest.mjs), so a
+ * 100-piece track would hitch for a quarter of a second on every edit.
+ *
+ * A hash of the piece's own world position depends on nothing else, so it
+ * survives the reuse fast path untouched. It kills the repeat, which is the
+ * visible artefact. It does NOT remove the seam discontinuity — but that
+ * discontinuity is already there today (`along` jumps from the piece length
+ * back to 0), so this makes it no worse, and raising `streakStraight` shrinks
+ * it for free by making the field vary more slowly along the road.
+ *
+ * Quantised to a centimetre so that a piece re-placed at a numerically
+ * near-identical spot keeps the same phase rather than shimmering to a new one.
+ */
+function stampAlongOffset(geo, world) {
+  if (!geo?.getAttribute) return geo;
+  const pos = geo.getAttribute("position");
+  if (!pos) return geo;
+  const e = world.elements;
+  const q = (v) => Math.round(v * 100);
+  const h = Math.sin(q(e[12]) * 12.9898 + q(e[13]) * 78.233 + q(e[14]) * 37.719) * 43758.5453;
+  const offset = (h - Math.floor(h)) * ALONG_OFFSET_SPAN;
+  geo.setAttribute(
+    "aAlongOffset",
+    new THREE.Float32BufferAttribute(new Float32Array(pos.count).fill(offset), 1),
+  );
+  return geo;
+}
+
 function stampPieceAttributes(geo, { plain = 1, curvature = 0 } = {}) {
   const vcount = geo.getAttribute("position").count;
   geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(new Float32Array(vcount).fill(plain), 1));
@@ -5297,6 +5351,12 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   }
 
   const world = currentConnector.clone().multiply(entryLocal.clone().invert());
+  // Every piece gets its own noise phase — see stampAlongOffset. Stamped HERE,
+  // after `world` exists and after any end caps have been appended, so it
+  // reaches every builder (sweeps, custom plates, capped tubes) with one call
+  // and can never disagree with the vertex count.
+  stampAlongOffset(geometry, world);
+  if (deckCollision && deckCollision !== geometry) stampAlongOffset(deckCollision, world);
   const connectorOut = world.clone().multiply(exitLocal);
 
   // EXTRA WAYS OUT (junctions). Same connector convention as `connectorOut`, so

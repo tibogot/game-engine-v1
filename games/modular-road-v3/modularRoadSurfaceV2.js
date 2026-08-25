@@ -329,7 +329,10 @@ export const SURFACE_V2_NUMBERS = Object.keys(SURFACE_V2_DEFAULTS);
  */
 function buildSurfaceV2(u, v, { chips }) {
   return Fn(() => {
-    const alongRaw = uv().x; // metres along the path
+    // Per-piece noise phase, so neighbouring pieces are not painted with the
+    // same patch of asphalt. See stampAlongOffset in modularRoadKit. Constant
+    // per piece, so it cannot affect the fwidth-based fades below.
+    const alongRaw = uv().x.add(attribute("aAlongOffset", "float"));
     const across = uv().y; // metres across the developed profile
     const lateral = attribute("aLateral", "float");
 

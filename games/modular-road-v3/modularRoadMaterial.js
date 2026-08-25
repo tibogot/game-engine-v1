@@ -321,7 +321,15 @@ export function createRoadMaterial(opts = {}) {
   const surface = opts.buildSurface ? opts.buildSurface(u) : Fn(() => {
     // Stretched along the path, so every field below comes out as streaks that
     // run WITH the road rather than blobs sitting on it.
-    const along = uv().x.div(u.streak); // metres along the path, anisotropic
+    // `aAlongOffset` is a per-piece constant that decorrelates the noise from
+    // its neighbours — without it every piece of the same length is painted
+    // with the identical patch of asphalt. See stampAlongOffset in the kit.
+    // It rides HERE and not on uv.x itself, so the paint-line dashes, the kerb
+    // bands and the tube rings keep their existing phase relative to each
+    // piece's start. Being constant per piece it also drops out of fwidth, so
+    // the aggregate's distance fade is unaffected.
+    const along = uv().x.add(attribute("aAlongOffset", "float"))
+      .div(u.streak); // metres along the path, anisotropic
     const across = uv().y; // metres across the developed profile
     const lateral = attribute("aLateral", "float");
 
