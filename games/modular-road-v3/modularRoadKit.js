@@ -5385,7 +5385,7 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // TWO rails, deliberately: one to look at, one to hit. Both come out of
   // modularRoadRail.js and share a profile, so the collision surface tracks the
   // visible one automatically instead of being a second set of numbers that
-  // drifts. See buildRailCollision for why it is as bare as it is.
+  // drifts. See buildRailCollision for the slab (thick wall, not a sheet).
   //
   // `railPath` is for pieces whose rail is NOT ±offset from the centreline —
   // the rounded end wraps left + nose + right as one open U.
@@ -5405,7 +5405,7 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
    * transforms instead, in PIECE-LOCAL space, and whoever owns the piece draws
    * them as one instanced mesh.
    *
-   * Purely a rendering split: `buildRailCollision` is a bare swept sheet and has
+   * Purely a rendering split: `buildRailCollision` is a swept slab and has
    * never contained posts, so nothing the car can hit moves.
    *
    * The MIRRORED rail deliberately keeps its posts merged. It is built from

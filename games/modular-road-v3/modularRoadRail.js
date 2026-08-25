@@ -5,10 +5,10 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
  * MODULAR ROAD GUARDRAIL — the shipping rail.
  *
  * Replaces the kit's original `buildGuardrailGeometry`, which is kept and still
- * used, but now only as the COLLISION PROXY: it is a handful of quads, which is
- * exactly what a BVH wants, while this file is what you look at. Bolts, base
- * plates, chamfers and a rolled bull-nose have no business in a collision mesh,
- * and `bakeCollision()` runs on every track edit.
+ * used, but now only as the COLLISION PROXY: a short thick slab (see
+ * `buildRailCollision`), which is exactly what a BVH wants, while this file is
+ * what you look at. Bolts, base plates, chamfers and a rolled bull-nose have no
+ * business in a collision mesh, and `bakeCollision()` runs on every track edit.
  *
  * Authored in road-piece-lab.html, which imports from here — so the lab tunes
  * the same code the game runs, rather than a copy that drifts.
@@ -922,63 +922,66 @@ function sweepCollisionSheet(frames, section, baseLat, zSign, positions, indices
 }
 
 /**
+ * Minimum collision thickness (m) and solid-ridge height (m).
+ *
+ * The chassis samples the solids BVH with an 8 cm skin and no sweep. At 50 m/s
+ * that is 21 cm per substep, so a paper sheet is stepped over in one tick and
+ * the car ends up inside the rail. 0.38 m is enough that the entry face is
+ * still the closest surface after a missed frame. The visible beam is 0.26 m;
+ * the extra depth goes into the FIELD (posts already live there), so the
+ * traffic face — the one the car can see — does not move.
+ *
+ * The ridge is a FILLED cap, not the old hollow tent: landing still gets a
+ * slope to fall off, but there is no pocket between the faces to sit in.
+ */
+const RAIL_COLLISION_DEPTH = 0.38;
+const RAIL_COLLISION_CAP = 0.20;
+
+/**
+ * Cross-section of the collision slab in (y vertical, z lateral) about the
+ * kerb centreline. OPEN polyline: traffic wall, ridge, back wall. No bottom
+ * edge — a floor triangle is what closest-point uses to throw the car up once
+ * a sample is overlapping. Ends of the sweep stay open too: a cap at every
+ * piece socket would face along the road, which is the graze that used to
+ * brake the car on every seam.
+ *
+ * Traffic face stays at the visible beam's traffic face (`-prof.backZ`).
+ */
+function railCollisionSection(rp, r) {
+  const kerbTop = rp.railHeight;
+  const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
+  const beamTop = kerbTop + r.gap + r.height * 0.5 + prof.height * 0.5;
+  const zFace = -prof.backZ;
+  const depth = Math.max(prof.depth, RAIL_COLLISION_DEPTH);
+  const zBack = zFace + (prof.backZ < 0 ? -depth : depth);
+  const cap = Math.min(RAIL_COLLISION_CAP, Math.max(0.12, (beamTop - kerbTop) * 0.22));
+  const midZ = (zFace + zBack) * 0.5;
+  return [
+    { y: kerbTop, z: zFace },
+    { y: beamTop - cap, z: zFace },
+    { y: beamTop, z: midZ },
+    { y: beamTop - cap, z: zBack },
+    { y: kerbTop, z: zBack },
+  ];
+}
+
+/**
  * COLLISION PROXY — what the chassis actually hits.
  *
- * A guardrail's collision job is small: stop the car leaving sideways, scrape
- * believably, never trap it, and shed it if it lands on top. Nothing in that
- * list needs corrugation, posts, bolts or a back plate, and the previous proxy
- * (the kit's old W-beam sheet plus box posts, 696 tris a piece) paid for all
- * four. Two reasons they are not merely wasted:
+ * A short WALL, not a sheet. Same solids path as the Wall prop: vertical
+ * thickness the hull cannot step through, a solid ridge so a landing sheds,
+ * no floor, no posts, no corrugation. Swept along the SAME decimated frames
+ * as the visible beam so the traffic face cannot drift (tools/labGuardrailTest.mjs).
  *
- *  - Guardrails are in the SOLIDS bvh, which only the CHASSIS HULL touches —
- *    wheels never probe them. And the hull is SAMPLED against triangles, so
- *    surface detail finer than the sample spacing is invisible at best and
- *    something for a sample to snag on at worst. A flat face slides cleanly.
- *  - The posts sit on the FIELD side, behind the beam. The only way to reach
- *    one is to already be through the rail.
- *
- * So: one wall at the beam's traffic face, run from the kerb (no ledge under
- * the beam for a sample to catch), capped with a 45° tent.
- *
- * THE TENT IS NOT OPTIONAL. The rail top stands 1.2 m over the deck and this is
- * a stunt game, so cars land on it. See wBeamProfile in modularRoadKit.js: a
- * flat or knife-edged top leaves a car neither supported nor rejected, and with
- * no wheels on the deck it has no drive, no steering and no way off. The tent
- * gives every landing a direction to fall.
- *
- * Derived from the VISIBLE rail's own profile and swept along the SAME
- * decimated frames, so the two can never drift apart. They already had: the
- * proxy was a separate parameter set whose beam was 0.1 m deep against the
- * visible 0.26, leaving the car colliding 8 cm short of the rail it could see.
- *
- * DO NOT "FIX" THIS BY MAKING IT DOUBLE-SIDED. An open sheet with no thickness
- * looks like something a car could pass through from behind, and it is not: the
- * chassis only ever queries the solids BVH via `closestPointWithNormal`, which
- * re-orients the face normal toward the query point (modularRoadBvh.js). The
- * push-out direction therefore comes from which side you are on, not from
- * winding. Emitting reversed triangles would double the collision mesh and
- * change nothing. Held by tools/railCollisionSideTest.mjs.
+ * Held by tools/railCollisionSideTest.mjs (blocks from both sides) and the
+ * proxy block of labGuardrailTest.mjs (face alignment, no floor, no plateau).
  */
 export function buildRailCollision(frames, rp, r = railParams) {
   if (r.height <= 0 || !frames?.length) return null;
   const hw = rp.width / 2;
   const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
-  const kerbTop = rp.railHeight;
   const edgeAbs = hw - rw * 0.5;
-  const centerV = kerbTop + r.gap + r.height * 0.5;
-  const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
-
-  const beamTop = centerV + prof.height * 0.5;
-  const half = prof.depth * 0.5;
-  const zBack = prof.backZ; // field side
-  const zFace = -prof.backZ; // traffic side — the surface the car should meet
-
-  const section = [
-    { y: kerbTop, z: zFace }, // stands on the kerb
-    { y: beamTop - half, z: zFace }, // up the traffic face
-    { y: beamTop, z: 0 }, // ridge
-    { y: beamTop - half, z: zBack }, // and down the back
-  ];
+  const section = railCollisionSection(rp, r);
 
   const positions = [];
   const indices = [];
@@ -1138,24 +1141,14 @@ export function buildRailAlongPath(frames, rp, r = railParams, opts = {}) {
   return merged;
 }
 
-/** Collision stand-in for {@link buildRailAlongPath} — same path, cheap sheet. */
+/** Collision stand-in for {@link buildRailAlongPath} — same slab as {@link buildRailCollision}. */
 export function buildRailCollisionAlongPath(frames, rp, r = railParams) {
   if (r.height <= 0 || !frames?.length) return null;
-  const kerbTop = rp.railHeight;
-  const centerV = kerbTop + r.gap + r.height * 0.5;
-  const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
-  const beamTop = centerV + prof.height * 0.5;
-  const half = prof.depth * 0.5;
   // Same section as buildRailCollision, traffic face first — the side it lands
   // on is zSign's job, exactly as it is for the visible beam. Writing it
   // back-to-front here instead was the same mirror bug in a second place, so the
   // proxy agreed with the wrong-side beam and hid it from the car.
-  const section = [
-    { y: kerbTop, z: -prof.backZ },
-    { y: beamTop - half, z: -prof.backZ },
-    { y: beamTop, z: 0 },
-    { y: beamTop - half, z: prof.backZ },
-  ];
+  const section = railCollisionSection(rp, r);
   const positions = [];
   const indices = [];
   const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle, 0);

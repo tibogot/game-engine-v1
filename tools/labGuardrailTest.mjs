@@ -392,15 +392,29 @@ console.log("\n— collision proxy —");
   );
   check(ct < vt / 10, `at least 10× cheaper than the visible rail (${(vt / ct).toFixed(1)}×)`);
 
-  // The tent: a car landing on top must find a slope, never a plateau. Every
-  // triangle at the ridge height has to fall away toward one side or the other.
+  // Slab, not a sheet: thick enough that a 50 m/s substep cannot step through.
+  let rMin = Infinity, rMax = -Infinity;
+  {
+    const p = col.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i);
+      if (x > 0) { rMin = Math.min(rMin, x); rMax = Math.max(rMax, x); }
+    }
+  }
+  check(rMax - rMin >= 0.37, `slab thickness ${(rMax - rMin).toFixed(3)} m (≥ 0.38)`);
+
+  // No floor: a horizontal triangle at the kerb is what closest-point uses to
+  // throw the car up once a sample is overlapping. The section is an open U.
   const pos = col.attributes.position;
   const idx = col.index;
+  let floorTris = 0;
   let flatOnTop = 0;
   for (let i = 0; i < idx.count; i += 3) {
     const ys = [0, 1, 2].map((k) => pos.getY(idx.getX(i + k)));
+    if (ys.every((y) => y < RPW.railHeight + 1e-4)) floorTris++;
     if (ys.every((y) => y > cb.max.y - 1e-4)) flatOnTop++;
   }
+  check(floorTris === 0, `no floor at the kerb (${floorTris} level triangles)`);
   check(flatOnTop === 0, `no flat plateau at the ridge (${flatOnTop} level triangles)`);
 
   vis.dispose();

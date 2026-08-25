@@ -3522,14 +3522,20 @@ export class Vehicle {
    * `SOLID.scrapeHold` so a flickering contact reads as the continuous scrape it
    * physically is — while still ending promptly once the car leaves the rail.
    *
+   * Point and normal are snapshotted in `_applySolidContact`, not copied from
+   * `_solidPoint` here. `_resolveSolidBvh` clears those scratch vectors at the
+   * start of every pass, including a later substep or mover query that finds
+   * nothing — so a scrape that pushes the hull out of the 8 cm skin in substep 1
+   * used to latch (0,0,0) and the sparks spawned at the world origin. A thick
+   * rail slab makes that clean separation the common case; the thin sheet often
+   * stayed overlapping for both substeps and hid the bug.
+   *
    * `_solidTouch` itself is deliberately left raw: the stuck detector wants the
    * instantaneous truth, not a smoothed one.
    */
   _updateScrapeLatch() {
     if (this._solidTouch) {
       this._scrapeHold = SOLID.scrapeHold;
-      this._scrapePoint.copy(this._solidPoint);
-      this._scrapeNormal.copy(this._solidN);
       // TANGENTIAL speed — sliding ALONG the rail is what throws sparks, and a
       // head-on nudge (all velocity along the normal) should throw almost none.
       this._scrapeVel.copy(this.body.vel);
@@ -5315,6 +5321,10 @@ export class Vehicle {
   _applySolidContact(deepest, surfaceVelFn, dt) {
     const body = this.body;
     this._solidTouch = true; // feeds the stuck detector in tick()
+    // Snapshot for sparks BEFORE a later substep / mover / capsule pass clears
+    // `_solidPoint`. See _updateScrapeLatch.
+    this._scrapePoint.copy(this._solidPoint);
+    this._scrapeNormal.copy(this._solidN);
 
     // Sampled AFTER the normal is resolved and normalised, but BEFORE the push
     // below cancels the inward velocity — a frame later it always reads ~0.

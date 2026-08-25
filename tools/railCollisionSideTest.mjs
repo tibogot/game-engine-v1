@@ -1,17 +1,12 @@
 /**
  * The guardrail collision proxy must push the car out from EITHER side.
  *
- * The proxy is an open sheet — one wall, no thickness — which looks like it
- * would let a car through from behind. It does not, and this pins down why:
- * the chassis only ever queries the solids BVH through `closestPointWithNormal`
- * (see modularRoadGround.js), and that re-orients the face normal toward the
- * query point, so the push-out direction is derived from which side you are on
- * rather than from the triangle's winding. Sidedness is a property of the QUERY
- * here, not of the mesh.
- *
- * Worth a test rather than a comment: "make it double-sided" is the obvious
- * reaction to an open sheet, and doing it would double the collision triangles
- * for nothing.
+ * The proxy is a thick slab (traffic face + back face). Closest-point on the
+ * solids BVH re-orients the face normal toward the query, so a probe OUTSIDE
+ * either wall is pushed back out — not through. This used to pin down why an
+ * open sheet still blocked from behind; it now pins the same contract on the
+ * slab, probing from outside each face (inside the volume is a different
+ * question, and the thickness is what keeps a fast car from getting there).
  *
  *   node tools/railCollisionSideTest.mjs
  */
@@ -32,10 +27,21 @@ const bvh = new RoadBvh();
 bvh.bakeFromMeshes([{ geometry: geo, matrixWorld: new THREE.Matrix4(), updateMatrixWorld() {} }]);
 check(bvh.baked, `proxy bakes into a BVH (${Math.round(geo.index.count / 3)} tris)`);
 
-// The right-hand rail's traffic face, and a height mid-beam.
-const hw = RP.width / 2;
-const rw = Math.min(RP.railWidth, hw * 0.45);
-const faceX = hw - rw * 0.5 - railParams.depth * 0.5; // = edgeAbs + zFace
+const p = geo.attributes.position;
+let rightMin = Infinity, rightMax = -Infinity;
+let leftMin = Infinity, leftMax = -Infinity;
+for (let i = 0; i < p.count; i++) {
+  const x = p.getX(i);
+  if (x > 0) {
+    rightMin = Math.min(rightMin, x);
+    rightMax = Math.max(rightMax, x);
+  } else {
+    leftMin = Math.min(leftMin, x);
+    leftMax = Math.max(leftMax, x);
+  }
+}
+check(rightMax - rightMin >= 0.37, `right slab is thick (${(rightMax - rightMin).toFixed(3)} m)`);
+
 const y = RP.railHeight + railParams.gap + railParams.height * 0.5;
 const z = -12; // well inside the piece
 
@@ -53,21 +59,16 @@ const probe = (px, label, wantSign) => {
   );
 };
 
-console.log(`\ntraffic face of the right rail at x = ${faceX.toFixed(3)}\n`);
+console.log(`\nright rail ${rightMin.toFixed(3)} .. ${rightMax.toFixed(3)}\n`);
 
-// From the TRACK (inboard, smaller x) → must be pushed back toward the track.
-probe(faceX - 0.25, "from the track side ", -1);
-// From BEHIND (outboard, larger x) → must be pushed back out, not through.
-probe(faceX + 0.25, "from behind the rail", +1);
-
-// And the same on the left-hand rail, where the signs mirror.
-const leftFaceX = -faceX;
-probe(leftFaceX + 0.25, "left rail, track side", +1);
-probe(leftFaceX - 0.25, "left rail, behind   ", -1);
+probe(rightMin - 0.25, "from the track side ", -1);
+probe(rightMax + 0.25, "from behind the rail", +1);
+probe(leftMax + 0.25, "left rail, track side", +1);
+probe(leftMin - 0.25, "left rail, behind   ", -1);
 
 console.log(
   failed
     ? `\n${failed} check(s) failed`
-    : "\nthe open sheet blocks from both sides — no need to double it",
+    : "\nthe slab blocks from both sides",
 );
 process.exit(failed ? 1 : 0);
