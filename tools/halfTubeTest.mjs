@@ -204,10 +204,16 @@ check("a plain road piece does NOT get one either",
 {
   const vis = builtHalf.geometry.getIndex().count / 3;
   const col = builtHalf.deckCollision.getIndex().count / 3;
-  // Two lip caps, two triangles per ring.
+  // Collision drops the two longitudinal lip caps (2 tris each per ring). The
+  // visible mesh ALSO has the mouth strips that close the wall cavity at each
+  // end (visual-only — see tubeEndCapTest.mjs), so the gap is lips + mouths.
   const rings = computeFrames(half.points(pp())).length - 1;
-  check("exactly the two lip caps are dropped, nothing else",
-    vis - col === 4 * rings, `${vis} → ${col} tris over ${rings} rings`);
+  const nSeg = half.profile(pp()).pts.filter((p) => p.zone === 3).length - 1;
+  const lipTris = 4 * rings;
+  const mouthTris = 2 * 2 * nSeg * 2; // 2 ends × 2 faces × n quads × 2 tris
+  check("lip caps dropped from collision; mouth caps stay on the mesh",
+    vis - col === lipTris + mouthTris,
+    `${vis} → ${col} tris (lips ${lipTris} + mouths ${mouthTris})`);
 }
 
 const asMesh = (geo) => {

@@ -1100,50 +1100,45 @@ export function buildSweepGeometry(frames, profileData = buildProfile(), opts = 
 const _capPt = new V3();
 
 /**
- * Inner / outer rings of a closed tube profile, unique angles, same order.
+ * Inner / outer wall rings, paired at matching angles.
  *
- * `buildTubeProfile` walks the inner circle then the outer in reverse, and both
- * loops repeat the seam point. Drop those duplicates and re-index the outer so
- * inner[k] faces outer[k] — the pairing the end-cap quads need.
+ * `buildTubeProfile` walks the inner arc then the outer in reverse. A CLOSED
+ * ring repeats the seam point on both loops — drop those duplicates and wrap.
+ * An OPEN wall (half tube, half-pipe) has two distinct lips: keep every point
+ * and do not wrap, or the last quad chords across the sky between the rims.
  */
-function tubeAnnulusRings(pts) {
+function tubeWallRings(pts, closed) {
   const innerAll = [];
   const outerAll = [];
   for (const p of pts) {
     if (p.zone === 3) innerAll.push(p);
     else if (p.zone === 4) outerAll.push(p);
   }
-  if (innerAll.length < 9 || outerAll.length !== innerAll.length) return null;
-  const inner = innerAll.slice(0, -1);
-  const n = inner.length;
+  if (outerAll.length !== innerAll.length) return null;
+  if (closed) {
+    if (innerAll.length < 9) return null;
+    const inner = innerAll.slice(0, -1);
+    const n = inner.length;
+    const outer = new Array(n);
+    outer[0] = outerAll[0];
+    for (let j = 1; j < n; j++) outer[n - j] = outerAll[j];
+    return { inner, outer };
+  }
+  if (innerAll.length < 3) return null;
+  const n = innerAll.length;
   const outer = new Array(n);
-  outer[0] = outerAll[0];
-  for (let j = 1; j < n; j++) outer[n - j] = outerAll[j];
-  return { inner, outer };
+  for (let k = 0; k < n; k++) outer[k] = outerAll[n - 1 - k];
+  return { inner: innerAll, outer };
 }
 
 /**
- * Close the hollow mouths of a full-tube sweep.
- *
- * The sweep is an extruded annulus: inner circle + outer circle, joined only at
- * a hidden bottom seam. Length ends stay open, so you look into the wall cavity.
- * These rings fill that gap at the first and last frames — both faces, so
- * FrontSide (or DoubleSide) shows the lip from outside and from the bore.
- *
- * Visual only. Callers must keep the uncapped sweep as `deckCollision` so the
- * rings are not a driveable shelf across the mouth. Same idea as half-tube
- * `openLips`.
- *
- * Mutates `geo` in place (appends verts / indices, leaves existing normals).
- */
-/**
  * Is this section a CLOSED ring — a bore with a mouth that needs shutting?
  *
- * `tubeAnnulusRings` cannot answer this on its own: it drops what it assumes is
- * a duplicated seam point, which is true of a full tube and false of everything
- * else. buildTubeMorphProfile in particular emits zones 3/4 at EVERY value of t,
- * so at t = 0 a flat road plate looks exactly like an annulus to it — cap that
- * and you weld a ring across the road.
+ * `tubeWallRings` cannot answer this on its own: the closed path drops what it
+ * assumes is a duplicated seam point, which is true of a full tube and false of
+ * everything else. buildTubeMorphProfile in particular emits zones 3/4 at EVERY
+ * value of t, so at t = 0 a flat road plate looks exactly like an annulus to it
+ * — wrap that and you weld a ring across the road.
  *
  * The honest test is geometric: the drivable arc is closed iff its last point
  * lands back on its first. A full tube wraps −π…+π; a morph part-way in, a half
@@ -1159,14 +1154,59 @@ function sectionIsClosedRing(profileData) {
 }
 
 /**
+ * Is this section an OPEN thick wall — a U whose mouth still shows the cavity?
+ *
+ * A half tube's lips already sweep along the length, so you see wall thickness
+ * from the side. Looking AT either end you still look into the 0.6 m gap
+ * between bore and shell, the same hollow a full tube has. This is that shape:
+ * inner and outer arcs that do not meet, with real height (a U, not a plate).
+ *
+ * The height check is what keeps a morph's FLAT-ROAD end uncapped. At t = 0
+ * every inner point sits at y = 0; fill that and you plate the slab end, which
+ * is the road's job to leave open so it seams onto a straight.
+ */
+function sectionIsOpenWall(profileData) {
+  if (sectionIsClosedRing(profileData)) return false;
+  const pts = profileData?.pts;
+  if (!pts) return false;
+  const inner = pts.filter((p) => p.zone === 3);
+  const outer = pts.filter((p) => p.zone === 4);
+  if (inner.length < 3 || outer.length !== inner.length) return false;
+  let minY = Infinity, maxY = -Infinity;
+  for (const p of inner) {
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return maxY - minY > 1e-3;
+}
+
+function sectionNeedsEndCap(profileData) {
+  return sectionIsClosedRing(profileData) || sectionIsOpenWall(profileData);
+}
+
+/**
+ * Close the hollow wall cavity at a sweep's mouths.
+ *
+ * The sweep is an extruded thick wall: inner surface + outer surface. Length
+ * ends stay open, so you look into the cavity. These strips fill that gap at
+ * the first and last frames — both faces, so FrontSide shows the lip from
+ * outside and from the bore. A closed tube gets a ring; a half tube gets the
+ * same ring with the open arc left out, so the sky between the lips stays sky.
+ *
+ * Visual only. Callers must keep the uncapped sweep as `deckCollision` so the
+ * caps are not a driveable shelf across the mouth. Same idea as half-tube
+ * `openLips`.
+ *
+ * Mutates `geo` in place (appends verts / indices, leaves existing normals).
+ *
  * @param {THREE.BufferGeometry} geo
  * @param {object[]} frames
  * @param {object} entrySection section at the first frame, or null to leave open
  * @param {object} exitSection  section at the last frame, or null to leave open
  */
 function appendTubeEndCaps(geo, frames, entrySection, exitSection) {
-  const capEntry = sectionIsClosedRing(entrySection);
-  const capExit = sectionIsClosedRing(exitSection);
+  const capEntry = sectionNeedsEndCap(entrySection);
+  const capExit = sectionNeedsEndCap(exitSection);
   if ((!capEntry && !capExit) || frames.length < 2) return geo;
 
   const pos = geo.getAttribute("position");
@@ -1198,7 +1238,8 @@ function appendTubeEndCaps(geo, frames, entrySection, exitSection) {
     // both mouths, which is right only while the two ends are the same shape.
     // A reducer's ends are different radii and an entry's ends are a road and a
     // bore, so a shared ring fits one of them and is wrong on the other.
-    const rings = tubeAnnulusRings(section?.pts);
+    const closed = sectionIsClosedRing(section);
+    const rings = tubeWallRings(section?.pts, closed);
     if (!rings) return;
     const { inner, outer } = rings;
     const n = inner.length;
@@ -1216,8 +1257,11 @@ function appendTubeEndCaps(geo, frames, entrySection, exitSection) {
       const base = positions.length / 3;
       for (let k = 0; k < n; k++) pushPt(inner[k], nx, ny, nz);
       for (let k = 0; k < n; k++) pushPt(outer[k], nx, ny, nz);
-      for (let k = 0; k < n; k++) {
-        const k1 = (k + 1) % n;
+      // A closed ring wraps the last quad back to 0. An open U must not —
+      // that wrap is a chord across the sky between the lips.
+      const segs = closed ? n : n - 1;
+      for (let k = 0; k < segs; k++) {
+        const k1 = closed ? (k + 1) % n : k + 1;
         const i0 = base + k;
         const i1 = base + k1;
         const o0 = base + n + k;
@@ -1233,9 +1277,9 @@ function appendTubeEndCaps(geo, frames, entrySection, exitSection) {
   const f0 = frames[0];
   const fN = frames[frames.length - 1];
   // Entry faces backward (travel goes into the piece); exit faces forward. Each
-  // end is capped only if ITS OWN section is a closed bore — so a tube caps
-  // both, an entry caps only the mouth it opens into, and an exit caps only the
-  // one it comes out of.
+  // end is capped only if ITS OWN section is a thick wall (closed ring OR open
+  // U) — so a tube caps both, a half tube caps both, an entry caps only the
+  // mouth it opens into, and an exit caps only the one it comes out of.
   if (capEntry) emitCap(f0, 0, -f0.tangent.x, -f0.tangent.y, -f0.tangent.z, entrySection);
   if (capExit) emitCap(fN, alongN, fN.tangent.x, fN.tangent.y, fN.tangent.z, exitSection);
 
@@ -4305,9 +4349,13 @@ export const PIECE_CATALOG = [
     profile: buildHalfTubeProfile,
     noKerb: true,
     plain: true,
-    // The rim caps render but are NOT road — without this the car cannot get
-    // air off the lip. See buildOpenLipCollision.
+    // The longitudinal rim caps render but are NOT road — without this the car
+    // cannot get air off the lip. See buildOpenLipCollision.
+    // Mouth caps too: looking at either end you still see into the hollow wall,
+    // the same cavity a full tube has. Visual only — added after the collision
+    // clone, so they cannot become a shelf.
     openLips: true,
+    tubeEndCaps: true,
   },
   {
     id: "half_tube_curve",
@@ -4320,6 +4368,7 @@ export const PIECE_CATALOG = [
     noKerb: true,
     plain: true,
     openLips: true,
+    tubeEndCaps: true,
   },
   // ── Tube entries. The missing link: a flat road cannot butt onto a bore. ──
   // All four share one morph (buildTubeMorphProfile) and differ only in which
@@ -4341,7 +4390,7 @@ export const PIECE_CATALOG = [
     // Open until the very last frame, so the rim caps are a ledge for almost
     // the whole piece — exactly the case buildOpenLipCollision exists for.
     // Caps the BORE mouth only — its other end is flat road, and
-    // sectionIsClosedRing is what tells the two apart.
+    // sectionNeedsEndCap is what tells the two apart (a plate has no height).
     tubeEndCaps: true,
     openLips: true,
   },
@@ -4371,6 +4420,7 @@ export const PIECE_CATALOG = [
     noKerb: true,
     plain: true,
     openLips: true,
+    tubeEndCaps: true,
   },
   {
     id: "half_tube_out",
@@ -4384,6 +4434,7 @@ export const PIECE_CATALOG = [
     noKerb: true,
     plain: true,
     openLips: true,
+    tubeEndCaps: true,
   },
   {
     id: "half_pipe",
@@ -4398,6 +4449,7 @@ export const PIECE_CATALOG = [
     // Without this the rim caps are a shelf at lip height and the car cannot
     // leave the pipe at all. See buildOpenLipCollision.
     openLips: true,
+    tubeEndCaps: true,
   },
   {
     id: "half_pipe_curve",
@@ -4410,6 +4462,7 @@ export const PIECE_CATALOG = [
     noKerb: true,
     plain: true,
     openLips: true,
+    tubeEndCaps: true,
   },
   // ── Tube S-bend: sidestep without turning ────────────────────────────────
   // `sCurvePoints` turns out by curveAngle and back again, so the heading it
@@ -4439,6 +4492,7 @@ export const PIECE_CATALOG = [
     noKerb: true,
     plain: true,
     openLips: true,
+    tubeEndCaps: true,
   },
   // ── Tube cannon: the exit that fires you out ─────────────────────────────
   // Same morph as tube_out / half_tube_out (`profile` is the t = 1 tube section
@@ -4471,6 +4525,7 @@ export const PIECE_CATALOG = [
     noKerb: true,
     plain: true,
     openLips: true,
+    tubeEndCaps: true,
   },
   // ── Tube reducer: the piece that makes a second SIZE family possible ─────
   //
@@ -4504,6 +4559,7 @@ export const PIECE_CATALOG = [
     noKerb: true,
     plain: true,
     openLips: true,
+    tubeEndCaps: true,
   },
 
   /* ── Tubes that go somewhere vertically ────────────────────────────────────
@@ -4521,9 +4577,10 @@ export const PIECE_CATALOG = [
    * carry `flatEndTangents`: smoothstep / sin² put a horizontal tangent at BOTH
    * ends, so the piece gains 12 m and still hands the next one a level frame.
    *
-   * Every one of them keeps its family's collision flag — `tubeEndCaps` on the
-   * closed bores, `openLips` on anything with a rim — or the mouth caps become
-   * an invisible shelf the car cannot leave. See buildOpenLipCollision.
+   * Every one of them keeps `openLips` on anything with a rim (so the lip is a
+   * launch edge, not a shelf — see buildOpenLipCollision) and `tubeEndCaps` so
+   * the hollow wall is closed at each mouth. Caps are visual-only: they go on
+   * after the collision clone, so they cannot become a shelf.
    */
   {
     id: "tube_slope",
@@ -4548,6 +4605,7 @@ export const PIECE_CATALOG = [
     noKerb: true,
     plain: true,
     openLips: true,
+    tubeEndCaps: true,
   },
   {
     id: "tube_crest",
@@ -4572,6 +4630,7 @@ export const PIECE_CATALOG = [
     noKerb: true,
     plain: true,
     openLips: true,
+    tubeEndCaps: true,
   },
   /*
    * THE HELIXES RIDE `loopSpiralPoints`, NOT `spiralPoints`, and that is a
@@ -4625,6 +4684,7 @@ export const PIECE_CATALOG = [
     noKerb: true,
     plain: true,
     openLips: true,
+    tubeEndCaps: true,
   },
   {
     // A REAL PIPE IS CUT INTO A HILLSIDE. Snowboard pipes run at a 16-18° grade
@@ -4641,6 +4701,7 @@ export const PIECE_CATALOG = [
     noKerb: true,
     plain: true,
     openLips: true,
+    tubeEndCaps: true,
   },
   {
     id: "channel",
@@ -5447,8 +5508,9 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
       : def.openLips
         ? buildOpenLipCollision(geometry)
         : null;
-  // Full-tube mouths: cap the wall cavity on the MESH, keep the open sweep as
-  // the thing the wheels hit. Clone first so the BVH never sees the rings.
+  // Tube / half-tube mouths: cap the wall cavity on the MESH, keep the open
+  // sweep as the thing the wheels hit. Clone first so the BVH never sees the
+  // rings. An open U gets the same fill as a closed ring, minus the wrap.
   //
   // The CAPS themselves are visual, so they are built deck-only too — skipping
   // them would hand the ghost an open-ended tube that does not match the piece

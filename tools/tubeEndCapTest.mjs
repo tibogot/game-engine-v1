@@ -1,12 +1,14 @@
-// Full-tube end caps — close the hollow wall cavity at both mouths.
+// Tube end caps — close the hollow wall cavity at both mouths.
 //
-// Tube / tube-long / tube-turn sweep a closed annulus. The length ends were
-// open, so you looked into the 0.6 m wall. Caps fill that ring at the first
-// and last frames, both faces, painted as outer (zone 4).
+// Tube / tube-long / tube-turn sweep a closed annulus. Half tubes sweep the
+// same wall as an open U. Length ends were open, so you looked into the 0.6 m
+// wall. Caps fill that strip at the first and last frames, both faces, painted
+// as outer (zone 4). A closed tube gets a ring; a half tube gets the ring with
+// the open arc left out, so the sky between the lips stays sky.
 //
 // They must NOT be a driveable shelf: the deck BVH keeps the uncapped sweep.
-// Entries / half tubes already have rim caps along the length and stay off
-// this path (they still use openLips).
+// Half tubes still use openLips as well (the longitudinal rims are a launch
+// edge, not a shelf).
 import * as THREE from "three";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -45,34 +47,48 @@ const attrCount = (geo) => {
   return { n, bad: null };
 };
 
+/** Triangles lying flat in the plane of the near (z max) and far (z min) end. */
+function endFaces(geo) {
+  const pos = geo.getAttribute("position"), idx = geo.getIndex();
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    lo = Math.min(lo, pos.getZ(i)); hi = Math.max(hi, pos.getZ(i));
+  }
+  let near = 0, far = 0;
+  for (let i = 0; i < idx.count; i += 3) {
+    const z = [idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)].map((v) => pos.getZ(v));
+    if (z.every((v) => Math.abs(v - hi) < 1e-4)) near++;
+    if (z.every((v) => Math.abs(v - lo) < 1e-4)) far++;
+  }
+  return { near, far };
+}
+
 /* ══ Catalog ══════════════════════════════════════════════════════════════ */
 console.log("— catalog —");
 const tube = PIECE_BY_ID.get("tube");
 const turn = PIECE_BY_ID.get("tube_curve");
 check("tube and tube_curve flag tubeEndCaps", tube?.tubeEndCaps === true && turn?.tubeEndCaps === true);
 /*
- * ENTRIES ARE ON THIS PATH NOW — this used to assert the opposite, and the
- * opposite was the bug.
+ * ENTRIES AND HALF TUBES ARE ON THIS PATH NOW — this used to assert they
+ * stayed off, and that was the bug.
  *
- * The reasoning was that an entry's rim caps "already close it along the
- * length", which is true of the HALF tubes (their lips sweep the whole way and
- * you see wall thickness from the side) and false of the full-ring ones: at the
- * bore end a `tube_in` is an open annulus, and standing at the mouth you look
- * straight into the wall cavity. Reported as "missing the face that makes the
- * depth at the exit". It was only ever hidden when the neighbouring `tube`
- * happened to cap the shared seam.
+ * The first miss was entries: their rim caps close the wall along the length,
+ * but at the bore end a `tube_in` is an open annulus, and standing at the mouth
+ * you look straight into the cavity. The second miss was half tubes: the same
+ * cavity, just a U not a ring. Looking at either end of a `half_tube` you see
+ * into the 0.6 m wall; the lips only hide it from the side.
  *
- * What decides it is now per-END, not per-piece: appendTubeEndCaps caps an end
- * iff THAT end's own section is a closed ring (sectionIsClosedRing). So an entry
- * caps the bore it opens into and leaves its flat-road end alone, and the half
- * tubes stay off the path because an arc never closes.
+ * What decides it is per-END, not per-piece: appendTubeEndCaps caps an end iff
+ * THAT end's own section is a thick wall (closed ring OR open U with height).
+ * So an entry caps the mouth it opens into and leaves its flat-road end alone,
+ * and a half tube caps both ends without chord-ing across the sky.
  */
 check("full-ring entries and exits cap their bore mouth",
   PIECE_BY_ID.get("tube_in")?.tubeEndCaps === true
   && PIECE_BY_ID.get("tube_out")?.tubeEndCaps === true);
-check("half tubes stay off this path — an arc has no mouth to close",
-  !PIECE_BY_ID.get("half_tube")?.tubeEndCaps
-  && !PIECE_BY_ID.get("half_tube_in")?.tubeEndCaps);
+check("half tubes cap their mouths too — the wall is still hollow at the ends",
+  PIECE_BY_ID.get("half_tube")?.tubeEndCaps === true
+  && PIECE_BY_ID.get("half_tube_in")?.tubeEndCaps === true);
 check("the flag is on the piece defs, not a one-off in buildPiece",
   /tubeEndCaps: true/.test(KIT_SRC));
 
@@ -121,32 +137,54 @@ const longExtra = long.geometry.getIndex().count / 3 - long.deckCollision.getInd
 check("a long tube adds the same cap triangles (length does not grow the rings)",
   longExtra === expected, `${longExtra} extra`);
 
-/* ══ Neighbours unchanged ═════════════════════════════════════════════════ */
-console.log("\n— neighbours stay as they were —");
+/* ══ Half tube — same cavity, open U ══════════════════════════════════════ */
+console.log("\n— half tube —");
 const half = buildPiece("half_tube", initialConnector(), pp());
-check("half_tube still uses openLips, not tubeEndCaps",
-  PIECE_BY_ID.get("half_tube").openLips === true && !PIECE_BY_ID.get("half_tube").tubeEndCaps);
+check("half_tube still strips lips from collision (openLips)",
+  PIECE_BY_ID.get("half_tube").openLips === true);
+check("half_tube also caps its mouths (tubeEndCaps)",
+  PIECE_BY_ID.get("half_tube").tubeEndCaps === true);
 check("half_tube collision is the stripped-lip copy, not a clone of the whole mesh",
   half.deckCollision && half.deckCollision.getIndex().count < half.geometry.getIndex().count);
 
+const halfFaces = endFaces(half.geometry);
+check("half_tube caps BOTH mouths", halfFaces.near > 0 && halfFaces.far > 0,
+  `near ${halfFaces.near}, far ${halfFaces.far}`);
+check("...and those caps are visual only — the BVH still has no shelf",
+  half.deckCollision && endFaces(half.deckCollision).near === 0
+  && endFaces(half.deckCollision).far === 0);
+
+const halfN = PIECE_BY_ID.get("half_tube").profile(pp()).pts.filter((p) => p.zone === 3).length - 1;
+const halfExpected = 2 * 2 * halfN * 2; // 2 ends × 2 faces × n quads × 2 tris
+check("half_tube extra end-plane triangles are the two two-sided U strips",
+  halfFaces.near + halfFaces.far === halfExpected,
+  `${halfFaces.near + halfFaces.far} end tris, expected ${halfExpected} (${halfN} segs)`);
+
+// Wall cavity on the left 45° of the U — between inner and outer radius.
+const aWall = -Math.PI * 0.75;
+const rMid = RI + TW / 2;
+const halfOrigin = new THREE.Vector3(Math.cos(aWall) * rMid, RI + Math.sin(aWall) * rMid, 1);
+const halfDir = new THREE.Vector3(0, 0, -1);
+const halfVisHit = hitZ(half.geometry, halfOrigin, halfDir);
+const halfColHit = hitZ(half.deckCollision, halfOrigin, halfDir);
+check("a ray into the half-tube wall cavity hits the visible lip",
+  halfVisHit !== null && Math.abs(halfVisHit) < 0.05,
+  halfVisHit === null ? "missed" : `z=${halfVisHit.toFixed(4)}`);
+check("the same ray misses collision (no shelf across the mouth)", halfColHit === null,
+  halfColHit === null ? "" : `hit z=${halfColHit.toFixed(4)}`);
+
+// The wrap we must not do: a chord across the open sky between the lips.
+const skyOrigin = new THREE.Vector3(0, RI + TW / 2, 1);
+const skyHit = hitZ(half.geometry, skyOrigin, halfDir);
+check("the open sky between the lips is not capped", skyHit === null,
+  skyHit === null ? "" : `hit z=${skyHit.toFixed(4)}`);
+
+const halfAttr = attrCount(half.geometry);
+check("capped half-tube keeps every sweep attribute in count", !halfAttr.bad,
+  halfAttr.bad ? `${halfAttr.bad} is ${halfAttr.got} not ${halfAttr.n}` : `${halfAttr.n} verts`);
+
 /* ══ Per-end capping ══════════════════════════════════════════════════════ */
 console.log("\n— each end is judged on its own section —");
-
-/** Triangles lying flat in the plane of the near (z max) and far (z min) end. */
-function endFaces(geo) {
-  const pos = geo.getAttribute("position"), idx = geo.getIndex();
-  let lo = Infinity, hi = -Infinity;
-  for (let i = 0; i < pos.count; i++) {
-    lo = Math.min(lo, pos.getZ(i)); hi = Math.max(hi, pos.getZ(i));
-  }
-  let near = 0, far = 0;
-  for (let i = 0; i < idx.count; i += 3) {
-    const z = [idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)].map((v) => pos.getZ(v));
-    if (z.every((v) => Math.abs(v - hi) < 1e-4)) near++;
-    if (z.every((v) => Math.abs(v - lo) < 1e-4)) far++;
-  }
-  return { near, far };
-}
 
 const entry = buildPiece("tube_in", initialConnector(), pp());
 const eFaces = endFaces(entry.geometry);
@@ -159,6 +197,16 @@ const exit = buildPiece("tube_out", initialConnector(), pp());
 const xFaces = endFaces(exit.geometry);
 check("tube_out caps the bore end it comes OUT of", xFaces.near > 0, `${xFaces.near} triangles`);
 check("...and leaves its flat-road end open", xFaces.far === 0);
+
+const halfEntry = buildPiece("half_tube_in", initialConnector(), pp());
+const heFaces = endFaces(halfEntry.geometry);
+check("half_tube_in caps the U end", heFaces.far > 0, `${heFaces.far} triangles`);
+check("...and leaves its flat-road end open", heFaces.near === 0);
+
+const halfExit = buildPiece("half_tube_out", initialConnector(), pp());
+const hxFaces = endFaces(halfExit.geometry);
+check("half_tube_out caps the U end it comes OUT of", hxFaces.near > 0, `${hxFaces.near} triangles`);
+check("...and leaves its flat-road end open", hxFaces.far === 0);
 
 // THE CASE A SHARED REFERENCE SECTION COULD NOT DO: two mouths, two radii.
 const red = buildPiece("tube_reduce", initialConnector(),
