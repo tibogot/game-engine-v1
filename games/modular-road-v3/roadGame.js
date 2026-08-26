@@ -2983,7 +2983,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       case "backspace":
         if (e.shiftKey ? builder.redo() : builder.undo()) bakeCollision();
         break;
-      case "keyn": seedChainAtSpawn({ atCursor: true }); break; // new chain at the sky cursor
+      case "keyn": seedChainAtSpawn({ atCursor: true }); break; // new chain near selection / tip
       case "keyk": goToBranch(); return;                        // hop to a junction branch
       // O = the OTHER END of this chain (tail <-> head).
       //
@@ -4159,21 +4159,70 @@ ${e.message}`);
   }
 
   /**
-   * Seat a fresh chain floating at `buildHeight` above terrain.
+   * Where N / "New chain" should seat the anchor when the user is already
+   * building: the exit of the right-clicked selection, else the active chain's
+   * open tip. Returns null when neither exists (empty track / no focus) so the
+   * caller can fall back to camera look-at or spawn.
    *
-   * `atCursor` seeds where the orbit camera is looking (build where you're
-   * looking); otherwise at the spawn XZ. Height is always terrain + buildHeight,
-   * so the anchor is in the sky and the whole chain floats from it.
+   * Offset one snap step along travel so the new chain is next to the seam,
+   * not on top of it — still free to yaw / tilt as its own chain.
+   */
+  function resolveNewChainFocus() {
+    const sel = builder.selectedPiece;
+    let mat = null;
+    if (sel && builder.pieces.includes(sel)) {
+      mat = sel.connectorOut;
+    } else {
+      const tip = [...builder.pieces].reverse().find((p) => p.chainId === builder.activeChainId);
+      if (tip) mat = tip.connectorOut;
+    }
+    if (!mat) return null;
+
+    const e = mat.elements;
+    // Travel = −Z column of the connector (same basis beginNewChain / snapLanding use).
+    let dx = -e[8], dy = -e[9], dz = -e[10];
+    const len = Math.hypot(dx, dy, dz) || 1;
+    dx /= len; dy /= len; dz /= len;
+
+    const step = builder.snapStep || 8;
+    const pos = new THREE.Vector3().setFromMatrixPosition(mat);
+    pos.x += dx * step;
+    pos.y += dy * step;
+    pos.z += dz * step;
+    // Horizontal heading only — new chains start level; yaw matches travel.
+    const yaw = Math.atan2(-dx, -dz);
+    return { pos, yaw };
+  }
+
+  /**
+   * Seat a fresh chain for authoring.
+   *
+   * With `atCursor` (N / New chain button): prefer the selected piece's exit,
+   * else the active chain tip, else where the orbit camera is looking.
+   * Without it (boot / world load): spawn XZ at terrain + buildHeight.
+   *
+   * Focus seeds keep the connector's height so a mid-air tip does not drop the
+   * new chain back to buildHeight; camera/spawn seeds still float at buildHeight.
    */
   function seedChainAtSpawn({ showGizmo = true, atCursor = false } = {}) {
-    let x, z, yaw;
-    if (atCursor && controls.target) {
-      x = controls.target.x; z = controls.target.z; yaw = builder.freeYaw ?? 0;
+    let x, y, z, yaw;
+    let fromFocus = false;
+    if (atCursor) {
+      const focus = resolveNewChainFocus();
+      if (focus) {
+        x = focus.pos.x; y = focus.pos.y; z = focus.pos.z; yaw = focus.yaw;
+        fromFocus = true;
+      } else if (controls.target) {
+        x = controls.target.x; z = controls.target.z; yaw = builder.freeYaw ?? 0;
+      } else {
+        const s = resolveSpawn();
+        x = s.x; z = s.z; yaw = s.yaw;
+      }
     } else {
       const s = resolveSpawn();
       x = s.x; z = s.z; yaw = s.yaw;
     }
-    const y = groundBaseY(x, z) + buildHeight;
+    if (!fromFocus) y = groundBaseY(x, z) + buildHeight;
     builder.beginNewChain(new THREE.Vector3(x, y, z), yaw);
     // Frame the anchor so building in the sky doesn't leave you staring at bare
     // ground far below it.
