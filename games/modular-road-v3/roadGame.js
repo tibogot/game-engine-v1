@@ -147,6 +147,7 @@ import { preloadContainer } from "./modularRoadContainer.js";
 import { preloadTireWall } from "./modularRoadTireWall.js";
 import { preloadCrane } from "./modularRoadCrane.js";
 import { preloadPalm } from "./modularRoadPalm.js";
+import { preloadBarrel } from "./modularRoadBarrel.js";
 import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
@@ -626,6 +627,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     preloadTireWall(renderer),
     preloadCrane(),
     preloadPalm(),
+    preloadBarrel(),
     preloadDecal(DECAL_URL).then(() => settleDecals()),
     // The wind turbine's GLB. Here rather than lazily on first placement so the
     // mover catalog's `make()` can stay synchronous — and so the palette bakes a

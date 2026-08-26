@@ -116,6 +116,14 @@ export const GATE_BASE_Y = 0.15;
  *  hinge sim — see the gate entry in modularRoadProps.js. */
 export const GATE_POST_RADIUS = 0.11;
 export const GATE_POST_HEIGHT = 1.9;
+/**
+ * Target height of the oil barrel mesh (m). A real 200 L drum is ~0.88 m; at
+ * true scale it reads as street furniture beside a 4.85 m car. 1.5 m keeps it
+ * an obstacle you aim at — same reason CONE_SCALE exists — without matching
+ * the cone's cartoon bulk. Shared with modularRoadBarrel.js so the look and
+ * the collision proxy cannot drift.
+ */
+export const BARREL_HEIGHT = 1.5;
 
 /** Per-type physics profile. `kind` selects the simulation, not the look. */
 export const PHYSICS_PROP_TYPES = {
@@ -181,6 +189,38 @@ export const PHYSICS_PROP_TYPES = {
       width: TIRE_SIZE.width,
       height: TIRE_SIZE.height,
       length: TIRE_SIZE.length,
+    },
+    comY: 0,
+  },
+  barrel: {
+    kind: "body",
+    /**
+     * Heavier than a cone or tyre on purpose: a steel drum should scoot and
+     * tumble, not cartwheel like PVC. Mass alone does not change the throw
+     * (impulse is velocity-based — see `hitScale`); it is kept honest for the
+     * RigidBody and for anything that later routes through real inertia.
+     * ~120 kg — arcade "half-full drum", not a hollow cone (~20 kg).
+     */
+    mass: 120,
+    /**
+     * Fraction of the global hitImpulse / loft / spin. Well under 1 so a barrel
+     * shrugs a clip that would punt a cone across the deck.
+     */
+    hitScale: 0.28,
+    /** Extra ground drag vs the global friction — heavy drums don't skate. */
+    frictionScale: 1.8,
+    /**
+     * Sphere proxy about the centre — a drum tumbles end-over-end, so the
+     * tyre's Y-up cylinder rest would float it once it lands on its side.
+     * Numbers are seeded from BARREL_HEIGHT and refined by modularRoadBarrel
+     * once the GLB is measured.
+     */
+    radius: BARREL_HEIGHT * 0.5,
+    hitRadius: BARREL_HEIGHT * 0.5,
+    size: {
+      width: BARREL_HEIGHT * 0.66,
+      height: BARREL_HEIGHT,
+      length: BARREL_HEIGHT * 0.66,
     },
     comY: 0,
   },
@@ -589,7 +629,8 @@ export class PropPhysics {
       b.angVel.multiplyScalar(0.7);
     }
     // Tangential friction — this is what actually brings it to rest.
-    const k = Math.exp(-PROP_PHYSICS.friction * dt);
+    const friction = PROP_PHYSICS.friction * (s.profile.frictionScale ?? 1);
+    const k = Math.exp(-friction * dt);
     b.vel.x *= k;
     b.vel.z *= k;
   }
@@ -649,7 +690,10 @@ export class PropPhysics {
 
     const closing = speed;
 
-    const j = closing * P.hitImpulse;
+    // Per-type scale: barrels stay put-ish; cones stay spectacular. Default 1
+    // keeps every existing prop on the same throw as before this field existed.
+    const scale = s.profile.hitScale ?? 1;
+    const j = closing * P.hitImpulse * scale;
     b.vel.addScaledVector(_n, j);
     b.vel.y += Math.abs(j) * P.hitLoft; // a little loft — flat-sliding cones look dead
 

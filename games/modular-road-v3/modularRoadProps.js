@@ -22,6 +22,7 @@ import { makeContainer, CONTAINER_LIVERIES, CONTAINER_SIZE } from "./modularRoad
 import { makeTireWall } from "./modularRoadTireWall.js";
 import { makeCrane } from "./modularRoadCrane.js";
 import { makePalm } from "./modularRoadPalm.js";
+import { makeBarrel } from "./modularRoadBarrel.js";
 import { DECAL_OFFSET } from "./modularRoadDecals.js";
 import { roadParams } from "./modularRoadKit.js";
 
@@ -1136,6 +1137,17 @@ export const PROP_CATALOG = [
       g.position.y = R;
       return g;
     },
+  },
+  {
+    id: "barrel",
+    label: "Oil barrel",
+    collision: "none",
+    /**
+     * Knockable steel drum — same PropPhysics free-body path as the cone, with
+     * a heavier hitScale so it scoots rather than flies. Visual is the GLB;
+     * collision is a sphere proxy (see PHYSICS_PROP_TYPES.barrel).
+     */
+    make: () => makeBarrel(),
   },
   {
     id: "tyre",
