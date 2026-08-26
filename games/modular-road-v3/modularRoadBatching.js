@@ -196,7 +196,9 @@ export function mergeByMaterial(root) {
   /** key -> { material, meshes } */
   const groups = new Map();
   root.traverse((o) => {
-    if (!o.isMesh || o.isInstancedMesh || !o.geometry || o.userData.noRender) return;
+    // `noMerge`: parts that still have to move (tri-vision slats). Baking their
+    // transforms into a parent mesh would freeze the flip.
+    if (!o.isMesh || o.isInstancedMesh || !o.geometry || o.userData.noRender || o.userData.noMerge) return;
     const key = materialKey(o.material);
     if (!groups.has(key)) groups.set(key, { material: o.material, meshes: [] });
     groups.get(key).meshes.push(o);

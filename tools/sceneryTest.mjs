@@ -142,7 +142,7 @@ console.log("\n=== NOTHING BLOCKS THE DRIVE-MODE MERGE ===");
   const game = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
   const batching = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadBatching.js"), "utf8");
   check("scenery is drawn through the shared prop instancer",
-    /new PropInstancer\(scene, props, PROP_CATALOG, \(\) => true\)/.test(game));
+    /new PropInstancer\(scene, props, PROP_CATALOG,/.test(game));
   // Keying the merge on material IDENTITY merges almost nothing, because every
   // prop's make() builds its own material objects — twenty poles are twenty
   // distinct-but-identical materials. Measured: poles stayed at 8.0 draws each

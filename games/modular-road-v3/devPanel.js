@@ -121,6 +121,38 @@ export function createRoadDevPanel({ app, game, params }) {
               <button class="prop-toggle" id="dv-decal" type="button" aria-label="Decal">${CHECK_SVG}</button>
             </div>
           </div>
+          <div class="prop-row" id="dv-advert-row" style="display:none">
+            <span class="prop-label" id="dv-advert-label">Advert</span>
+            <div class="prop-value" style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="action-btn" id="dv-advert-upload" type="button">Upload image</button>
+              <button class="action-btn" id="dv-advert-clear" type="button">Clear</button>
+              <input id="dv-advert-file" type="file" accept="image/*" hidden>
+            </div>
+          </div>
+          <div id="dv-advert-prism-row" style="display:none">
+            <div class="prop-row">
+              <span class="prop-label">Face 1</span>
+              <div class="prop-value" style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="action-btn" id="dv-advert-f0" type="button">Upload</button>
+                <button class="action-btn" id="dv-advert-c0" type="button">Clear</button>
+              </div>
+            </div>
+            <div class="prop-row">
+              <span class="prop-label">Face 2</span>
+              <div class="prop-value" style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="action-btn" id="dv-advert-f1" type="button">Upload</button>
+                <button class="action-btn" id="dv-advert-c1" type="button">Clear</button>
+              </div>
+            </div>
+            <div class="prop-row">
+              <span class="prop-label">Face 3</span>
+              <div class="prop-value" style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="action-btn" id="dv-advert-f2" type="button">Upload</button>
+                <button class="action-btn" id="dv-advert-c2" type="button">Clear</button>
+              </div>
+            </div>
+            <input id="dv-advert-prism-file" type="file" accept="image/*" hidden>
+          </div>
           <div class="prop-row">
             <span class="prop-label">All of this type</span>
             <div class="prop-value">
@@ -133,7 +165,8 @@ export function createRoadDevPanel({ app, game, params }) {
             containers in seven colours with logos are five draw calls rather
             than forty. Right-click a prop to select it, then click a swatch or
             press <b>C</b> (<b>Shift+C</b> to go back); <b>V</b> toggles the
-            decal. Both save with the track.
+            decal. Ad billboards take an uploaded image the same way; the prism
+            board takes three, one per rotating face. Both save with the track.
           </div>
         </div>
       </div>
@@ -2547,6 +2580,41 @@ export function createRoadDevPanel({ app, game, params }) {
 
   const decalRow = $("#dv-decal-row");
   const decalToggle = toggle("dv-decal", false, (on) => { game.setPropDecal?.(on); });
+  const advertRow = $("#dv-advert-row");
+  const advertFile = $("#dv-advert-file");
+  $("#dv-advert-upload")?.addEventListener("click", () => advertFile?.click());
+  advertFile?.addEventListener("change", async () => {
+    const file = advertFile.files?.[0];
+    advertFile.value = "";
+    if (!file) return;
+    await game.setPropAdvertFile?.(file);
+    refresh();
+  });
+  $("#dv-advert-clear")?.addEventListener("click", () => {
+    game.clearPropAdvert?.();
+    refresh();
+  });
+
+  const prismRow = $("#dv-advert-prism-row");
+  const prismFile = $("#dv-advert-prism-file");
+  let prismFace = 0;
+  for (let i = 0; i < 3; i++) {
+    $(`#dv-advert-f${i}`)?.addEventListener("click", () => {
+      prismFace = i;
+      prismFile?.click();
+    });
+    $(`#dv-advert-c${i}`)?.addEventListener("click", () => {
+      game.clearPropAdvert?.(i);
+      refresh();
+    });
+  }
+  prismFile?.addEventListener("change", async () => {
+    const file = prismFile.files?.[0];
+    prismFile.value = "";
+    if (!file) return;
+    await game.setPropAdvertFile?.(file, prismFace);
+    refresh();
+  });
 
   function renderLiveries() {
     if (!liverySwatches || !liveryName) return;
@@ -2557,12 +2625,25 @@ export function createRoadDevPanel({ app, game, params }) {
     // rather than sitting there dead.
     if (decalRow) decalRow.style.display = sel?.hasDecal ? "" : "none";
     if (sel?.hasDecal) decalToggle?.set?.(!!sel.decal);
+    if (advertRow) advertRow.style.display = (sel?.hasAdvert && (sel.advertFaces ?? 1) <= 1) ? "" : "none";
+    if (prismRow) prismRow.style.display = (sel?.advertFaces ?? 0) > 1 ? "" : "none";
+    if (advertRow) {
+      const lab = $("#dv-advert-label");
+      if (lab) lab.textContent = sel?.hasAdvertImage ? "Advert · set" : "Advert";
+    }
+    if (prismRow) {
+      const slots = sel?.advertSlots ?? [];
+      for (let i = 0; i < 3; i++) {
+        const b = $(`#dv-advert-f${i}`);
+        if (b) b.textContent = slots[i] ? "Replace" : "Upload";
+      }
+    }
     if (!sel) {
       liveryName.textContent = "No prop selected";
       return;
     }
     if (!list.length) {
-      liveryName.textContent = sel.hasDecal ? sel.label : `${sel.label} — no liveries`;
+      liveryName.textContent = (sel.hasDecal || sel.hasAdvert) ? sel.label : `${sel.label} — no liveries`;
       return;
     }
     liveryName.textContent = `${sel.label} — ${sel.variant + 1}/${list.length}`;

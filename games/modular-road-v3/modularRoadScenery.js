@@ -39,6 +39,8 @@ import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { flattenInstanced, mergeByMaterial, markSharedGeometry } from "./modularRoadBatching.js";
 import { buildLedMatrixMesh } from "../../v2/objects/ledMatrix.js";
 import { buildLedChevronBoxMesh } from "./modularRoadLedBox.js";
+import { buildAdBillboardMesh, buildAdTotemMesh, AD_BILLBOARD, AD_TOTEM } from "./modularRoadAdBillboard.js";
+import { buildAdPrismMesh, uniquifyAdPrismMaterial, AD_PRISM } from "./modularRoadAdPrism.js";
 import { buildBillboardMesh } from "../../v2/objects/billboard.js";
 import { buildStreetLampMesh } from "../../v2/objects/streetLamp.js";
 import { buildRoadLampMesh } from "../../v2/objects/roadLamp.js";
@@ -103,6 +105,50 @@ export const SCENERY_CATALOG = [
       length: 0.38,
       z: -0.38 / 2 - 0.02,
     },
+  },
+  {
+    id: "adboard",
+    label: "Ad billboard",
+    build: buildAdBillboardMesh,
+    // Per-placement poster image. Cloned off the shared template so one upload
+    // cannot retint every board; also kept out of the prop instancer.
+    advert: true,
+    uniquePoster: true,
+    params: {},
+    capsules: [
+      { x: -AD_BILLBOARD.panelW * 0.34, z: -0.38, radius: 0.16, height: AD_BILLBOARD.panelBottom + AD_BILLBOARD.panelH + 0.55 },
+      { x: +AD_BILLBOARD.panelW * 0.34, z: -0.38, radius: 0.16, height: AD_BILLBOARD.panelBottom + AD_BILLBOARD.panelH + 0.55 },
+    ],
+  },
+  {
+    id: "adtotem",
+    label: "Ad totem",
+    build: buildAdTotemMesh,
+    advert: true,
+    uniquePoster: true,
+    params: {},
+    // Thin cabinet on the ground — one wall, not capsules.
+    solidWall: {
+      thickness: AD_TOTEM.panelW + AD_TOTEM.frame * 2,
+      height: AD_TOTEM.baseH + AD_TOTEM.panelH + AD_TOTEM.frame,
+      length: AD_TOTEM.depth + 0.06,
+      z: 0,
+    },
+  },
+  {
+    id: "adprism",
+    label: "Ad prism",
+    build: buildAdPrismMesh,
+    advert: true,
+    uniquePoster: true,
+    advertFaces: 3,
+    // Slats rotate every few seconds, so this type stays off the instancer
+    // (a baked instance matrix cannot carry the stagger).
+    params: {},
+    capsules: [
+      { x: -AD_PRISM.panelW * 0.34 * AD_PRISM.scale, z: -0.38 * AD_PRISM.scale, radius: 0.16 * AD_PRISM.scale, height: (AD_PRISM.panelBottom + AD_PRISM.panelH + 0.55) * AD_PRISM.scale },
+      { x: +AD_PRISM.panelW * 0.34 * AD_PRISM.scale, z: -0.38 * AD_PRISM.scale, radius: 0.16 * AD_PRISM.scale, height: (AD_PRISM.panelBottom + AD_PRISM.panelH + 0.55) * AD_PRISM.scale },
+    ],
   },
   {
     id: "billboard",
@@ -372,7 +418,25 @@ export function makeSceneryProp(id) {
     _templates.set(id, built);
   }
   const t = _templates.get(id);
-  return t ? t.clone() : null;
+  const clone = t ? t.clone() : null;
+  // The poster map is per placement. clone() shares the material, so an upload
+  // on one board would rewrite every other board of this type.
+  if (clone && def.uniquePoster) {
+    clone.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      if (o.userData.adPrism) {
+        uniquifyAdPrismMaterial(o);
+        return;
+      }
+      if (o.userData.adPoster) {
+        const src = o.material;
+        o.material = src.clone();
+        o.material.map = src.map;
+        o.material.colorNode = src.colorNode;
+      }
+    });
+  }
+  return clone;
 }
 
 /** Free the shared templates — for a full teardown, not per placement. */

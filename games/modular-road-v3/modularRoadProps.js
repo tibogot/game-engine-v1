@@ -15,6 +15,8 @@ import {
   GATE_POST_HEIGHT,
 } from "./modularRoadPropPhysics.js";
 import { SCENERY_CATALOG, makeSceneryProp } from "./modularRoadScenery.js";
+import { setAdPosterImage, advertFileToDataUrl } from "./modularRoadAdBillboard.js";
+import { setAdPrismImages, isAdPrism } from "./modularRoadAdPrism.js";
 import { isSharedGeometry } from "./modularRoadBatching.js";
 import { makeContainer, CONTAINER_LIVERIES, CONTAINER_SIZE } from "./modularRoadContainer.js";
 import { makeTireWall } from "./modularRoadTireWall.js";
@@ -1675,11 +1677,18 @@ export const PROP_CATALOG = [
     // module for why this is not just more capsules.
     collision: s.solidWall ? "solid" : "none",
     category: "scenery",
+    advert: !!s.advert,
+    advertFaces: s.advertFaces || (s.advert ? 1 : 0),
     make: () => makeSceneryProp(s.id) ?? new THREE.Group(),
   })),
 ];
 
 export const PROP_BY_ID = new Map(PROP_CATALOG.map((p) => [p.id, p]));
+
+function applyAdvert(root, advert) {
+  if (isAdPrism(root)) setAdPrismImages(root, advert);
+  else setAdPosterImage(root, advert);
+}
 
 /* ----------------------------------------------------------------------- */
 /* Manager                                                                  */
@@ -1944,6 +1953,7 @@ export class PropManager {
     // tell what you asked for from what the dice gave you. Turn it on per prop
     // (panel toggle or V), or on everything of a type at once.
     inst.decal = false;
+    inst.advert = null;
     root.userData.propInstance = inst;
     this.instances.push(inst);
     // A PROP YOU JUST ADDED MUST NEVER BE LEFT HANGING IN MID-AIR.
@@ -1984,6 +1994,8 @@ export class PropManager {
     const inst = { id: src.id, def: src.def, root, collision: src.collision, restY: src.restY ?? 0 };
     setVariant(inst, src.variant ?? 0); // a duplicate keeps its original's livery
     inst.decal = !!src.decal;
+    inst.advert = Array.isArray(src.advert) ? src.advert.slice() : (src.advert ?? null);
+    if (inst.advert) applyAdvert(root, inst.advert);
     root.userData.propInstance = inst;
     this.instances.push(inst);
     this.snapToSurface(inst); // the +4,+4 offset may have landed on a different surface
@@ -2139,6 +2151,41 @@ export class PropManager {
     this.selected.decal = !!on;
     this.onVariantChange?.(this.selected);
     return true;
+  }
+
+  /**
+   * Put an uploaded advert on the selected ad board, or clear it.
+   * `dataUrl` is a JPEG data URL already fitted to the poster.
+   * Prism boards take `face` 0..2; a single-poster board ignores it.
+   */
+  setSelectedAdvert(dataUrl, face = 0) {
+    if (!this.selected?.def?.advert) return false;
+    if ((this.selected.def.advertFaces ?? 1) > 1) {
+      const n = this.selected.def.advertFaces;
+      const prev = Array.isArray(this.selected.advert) ? this.selected.advert : [];
+      const faces = Array.from({ length: n }, (_, i) => prev[i] || null);
+      faces[face] = dataUrl || null;
+      this.selected.advert = faces.some(Boolean) ? faces : null;
+      setAdPrismImages(this.selected.root, faces);
+    } else {
+      this.selected.advert = dataUrl || null;
+      setAdPosterImage(this.selected.root, this.selected.advert);
+    }
+    this.onChange?.();
+    this.onSelectionChange?.(this.selected);
+    return true;
+  }
+
+  async setSelectedAdvertFile(file, face = 0) {
+    if (!this.selected?.def?.advert || !file) return false;
+    const poster = this.selected.root && (() => {
+      let p = null;
+      this.selected.root.traverse((o) => { if (o.userData?.adPoster) p = o; });
+      return p;
+    })();
+    const [tw, th] = poster?.userData?.adPx ?? [1024, 576];
+    const dataUrl = await advertFileToDataUrl(file, tw, th);
+    return this.setSelectedAdvert(dataUrl, face);
   }
 
   /** Step the selected prop's livery. `dir` −1 or +1. */
@@ -2398,6 +2445,7 @@ export class PropManager {
       // round-trip byte-identical and an older file simply loads as variant 0.
       ...(inst.def?.variants?.length ? { variant: inst.variant } : {}),
       ...(inst.decal ? { decal: true } : {}),
+      ...(inst.advert ? { advert: inst.advert } : {}),
     }));
   }
 
@@ -2462,6 +2510,8 @@ export class PropManager {
       // re-apply to a pooled prop exactly as they do to a fresh one.
       setVariant(inst, item.variant ?? 0);
       inst.decal = !!item.decal;
+      inst.advert = item.advert || null;
+      if (inst.def?.advert) applyAdvert(root, inst.advert);
       root.userData.propInstance = inst;
       // A loaded pose IS the authored pose — the file is the authorship.
       this.captureAuthored(inst);
@@ -2571,6 +2621,10 @@ export class PropManager {
       // that share ONE cached geometry per type, so deleting a single floodlight
       // must not free the buffers the others are still drawing with.
       if (!isSharedGeometry(o.geometry)) o.geometry?.dispose?.();
+      if (o.userData.adPoster && o.material) {
+        if (o.material.map?.userData?.adOwned) o.material.map.dispose();
+        o.material.dispose();
+      }
     });
   }
 }

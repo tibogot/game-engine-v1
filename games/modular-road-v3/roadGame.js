@@ -2308,7 +2308,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // every edit invalidates the whole bake (so dragging one prop of a hundred
   // re-merged all hundred). Measured before: 100 poles cost 648 draws while
   // building against 58 driving. Now both are flat.
-  const propInstancer = new PropInstancer(scene, props, PROP_CATALOG, () => true);
+  // Ad boards keep a unique poster map per placement — instancing would pin
+  // every copy to one image (and hide the live mesh that actually wears it).
+  const propInstancer = new PropInstancer(scene, props, PROP_CATALOG, (id) => id !== "adboard" && id !== "adtotem" && id !== "adprism");
   _propInstancerRef = propInstancer;
   // Live glow tuning writes to the loose roots; the templates hold their own
   // copies of those materials, so they have to be rebuilt to be seen.
@@ -4668,10 +4670,18 @@ ${e.message}`);
           variants: s.def?.variants ?? [],
           hasDecal: !!s.def?.decal,
           decal: !!s.decal,
+          hasAdvert: !!s.def?.advert,
+          advertFaces: s.def?.advertFaces || (s.def?.advert ? 1 : 0),
+          hasAdvertImage: Array.isArray(s.advert) ? s.advert.some(Boolean) : !!s.advert,
+          advertSlots: Array.isArray(s.advert)
+            ? [0, 1, 2].map((i) => !!s.advert[i])
+            : [!!s.advert, false, false],
         };
       },
       setPropVariant: (i) => props.setSelectedVariant(i),
       setPropDecal: (on) => props.setSelectedDecal(on),
+      setPropAdvertFile: (file, face) => props.setSelectedAdvertFile(file, face),
+      clearPropAdvert: (face) => props.setSelectedAdvert(null, face ?? 0),
       randomisePropVariants: () => props.randomiseVariants(props.selected?.id ?? null),
       getMode: () => mode,
       toggleMode,
