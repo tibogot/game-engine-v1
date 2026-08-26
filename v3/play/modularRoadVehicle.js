@@ -1412,8 +1412,29 @@ export const ROOF = {
    * What is NOT in question: everything else in this block ships on. The roof
    * reaches the real roofline, ceilings no longer tunnel, roof contact is
    * reported to the game, and a lid-slide costs speed.
+   *
+   * Inverted landings on TERRAIN are a separate path (Tire.apply skips the
+   * heightfield probe when chassis-up.y < `dot`; chassis corners hold the lid).
+   * That does not use this flag, so loops stay safe.
+   *
+   * The heightfield is a vertical spring, not a mesh, so a lid slam pogos
+   * unless we absorb the closing speed and keep the airborne landing assist
+   * off for a beat after contact. Those knobs live here because they are the
+   * terrain-lid half of the same roof-down problem — not a third system.
    */
   suspensionGuard: false,
+  /** Fraction of downward speed removed the instant roof corners first hit
+   *  dirt. The corner springs are 180 kN/m and underdamped (they exist to
+   *  catch a chassis that has already sunk past the wheels); without this,
+   *  an inverted drop launches the car and the landing assist then un-flips
+   *  it in the air. Wheels-down landings never set `_terrainLid`. */
+  terrainAbsorb: 0.8,
+  /** Extra corner damper while the lid is the support, as a multiple of
+   *  CORNER_DAMPER. Four corners at 1× are ~2.6× under critical. */
+  terrainDamperMult: 3,
+  /** Seconds the landing assist stays off after the last lid contact. A
+   *  one-substep bounce must not re-arm the un-flip. */
+  terrainLidHold: 0.35,
   /**
    * The guard only arms when the surface under the roof faces UP by at least
    * this much (world +Y) — i.e. the car is LYING on it, not driving under it.
@@ -1795,6 +1816,12 @@ export const STUCK = {
    *
    * Kept under a wall-ride's speed — sliding a wall at 4 m/s is gameplay, and
    * must never be mistaken for being stuck on one.
+   *
+   * Also excluded: roof-down on open ground. Inverted wheels skip the
+   * heightfield on purpose, so groundedCount is 0 by design and the <3 rule
+   * would recover-to-ramp after `respawnAfter`. That is a crash rest, not a
+   * trap — R still teleports if the player wants out. Wedged inverted against
+   * a solid still qualifies.
    */
   beachedSpeed: 2.5,
   /**
@@ -1847,6 +1874,33 @@ export const STUCK = {
    * < 3 wheels down) that would otherwise immediately start a new count.
    */
   ignoreAfterTeleport: 0.4,
+};
+
+/**
+ * Crash yield — after a REAL crash, the landing assists go quiet so the car
+ * can tumble. They stay on for ordinary jumps.
+ *
+ * Wall hits are dead on purpose (`SOLID.restitution` 0.05 / `spin` 0.15).
+ * Raising those globally would bounce every scrape. The next pass may raise
+ * them ONLY while this hold is active. This block is the gate, not the bounce.
+ *
+ * Armed by a hard solid close-speed or an inverted roof slam. Cleared as soon
+ * as the car is back on enough wheels and upright. Slightly crooked jumps
+ * never qualify.
+ */
+export const CRASH = {
+  enabled: true,
+  /** Closing speed into a solid (m/s) that counts as a crash. Tangential
+   *  scrapes and wall-rides are well under this; a head-on clip is well over. */
+  wallSpeed: 14,
+  /** Roof closing speed (m/s) while inverted that counts as a slam, not a rest.
+   *  Above ROOF.impactSpeed so lying on the lid does not re-arm every tick. */
+  roofSpeed: 6,
+  /** Seconds assists stay quiet after the event, unless recovered earlier. */
+  hold: 1.8,
+  /** Chassis-up.y above this, with enough wheels down, is a recovery. */
+  recoverUp: 0.5,
+  recoverWheels: 3,
 };
 
 /** Cached each rebuild — offset from box center to CoM in chassis-local space. */
@@ -2026,6 +2080,7 @@ class Tire {
 
     let bestDist = Infinity;
     let bestPoint = null;
+    let bestSource = null;
 
     // `dist` lets a caller pass a distance already normalized back to the hub
     // (ring rays / sphere sweep start BELOW the hub, so their raw hit distance
@@ -2042,6 +2097,7 @@ class Tire {
       else if (hit.normal) this._bestN.set(hit.normal.x, hit.normal.y, hit.normal.z);
       else if (hit.face?.normal) this._bestN.copy(hit.face.normal);
       else this._bestN.set(0, 1, 0);
+      bestSource = hit.source || null;
     };
 
     const sample = (dirVec, off) => {
@@ -2097,7 +2153,7 @@ class Tire {
       }
     }
 
-    return bestDist === Infinity ? null : { dist: bestDist, point: bestPoint };
+    return bestDist === Infinity ? null : { dist: bestDist, point: bestPoint, source: bestSource };
   }
 
   /** Drop to the airborne state. Shared by "no probe hit" and the roof guard —
@@ -2140,6 +2196,19 @@ class Tire {
     this.lastAccel.set(0, 0, 0);
 
     if (!probe) { this._clearContact(); return; }
+
+    // Inverted wheels vs the TERRAIN heightfield.
+    //
+    // That probe is a vertical projection regardless of ray direction, so an
+    // inverted origin (0.6 m along chassis-up = into the dirt) still "hits"
+    // the ground and the strut pushes along chassis-up — into the world. That
+    // is the jitter / under-terrain bug. Loops and tubes are ROAD meshes, so
+    // they do not carry `source: "terrain"` and are untouched. Do NOT reuse
+    // ROOF.suspensionGuard for this: that flag also armed at the top of a loop.
+    if (probe.source === "terrain" && this._up.y < ROOF.dot) {
+      this._clearContact();
+      return;
+    }
 
     const bestDist = probe.dist;
     this.grounded = true;
@@ -3093,6 +3162,12 @@ export class Vehicle {
     this._roofImpactSpeed = 0;
     /** Countdown that keeps the suspension guard armed across substeps. */
     this._roofGuard = 0;
+    /** Roof corners are resting on the TERRAIN heightfield this substep. */
+    this._terrainLid = false;
+    this._wasTerrainLid = false;
+    this._terrainLidHold = 0;
+    /** Seconds of crash yield remaining — see CRASH. */
+    this._crashYield = 0;
     this._deckUp = new THREE.Vector3();
     this._deckRoofApproachN = new THREE.Vector3();
     this._roofT = new THREE.Vector3();
@@ -3416,6 +3491,7 @@ export class Vehicle {
     this._scrapeHold = 0;
     this._scrapeSpeed = 0;
     this._clearStuck();
+    this._crashYield = 0;
     this._resetInterpolation();
     // Keep the render pose in step with the teleport (syncVisuals hasn't run yet).
     this._renderPos.copy(this.body.pos);
@@ -3457,6 +3533,7 @@ export class Vehicle {
     this.body.angVel.set(0, 0, 0);
     this.body.vel.y = 0;
     this.body.pos.y += 0.6;
+    this._crashYield = 0;
     this._resetInterpolation();
   }
 
@@ -3529,7 +3606,7 @@ export class Vehicle {
 
     this._solidTouch = false; // set by _resolveSolidBvh during the step
     this._solidImpactSpeed = 0;
-    this._roofTouch = false;  // set by _applyDeckContact during the step
+    this._roofTouch = false;  // set by _applyDeckContact / terrain lid during the step
     this._roofImpactSpeed = 0;
     this._physicsStep(FIXED_DT);
     this._depenetrateFromWalls();
@@ -3687,10 +3764,16 @@ export class Vehicle {
    *  stuckTime >= respawnAfter, or a stale timer after R recovers forever. */
   get isBeached() {
     if (this.body.vel.length() >= STUCK.beachedSpeed) return false;
+    this._stuckUp.set(0, 1, 0).applyQuaternion(this.body.quat);
+    // Roof-down on open ground is a rest, not a rail trap — see STUCK.
+    if (this._stuckUp.y < ROOF.dot && !this._solidTouch) return false;
     if (this.groundedCount < 3) return true;
     // Perched on a solid lid while the tyres still see the road.
     return this._solidTouch && this._scrapeNormal.y > STUCK.sitUpMin;
   }
+
+  /** Seconds of crash yield remaining. >0 means landing assists are quiet. */
+  get crashYield() { return this._crashYield; }
 
   /** Did the chassis touch a solid (guardrail / wall) during the last tick?
    *  Drift scoring breaks a chain on contact — that risk is what makes holding
@@ -3987,7 +4070,8 @@ export class Vehicle {
       // capsule colliders and the movers on any track with no static solids.
       if (SOLID.enabled) this._resolveSolids(subDt);
       if (DECK.enabled && this.groundBvh && this.groundBvh.baked) this._applyDeckContact(subDt);
-      this._applyChassisGroundContact();
+      this._applyChassisGroundContact(subDt);
+      this._armCrashYield(subDt);
       // After the tires (their contact normals are what both of these read) and
       // before integrate(), so the torques land in this substep.
       //
@@ -4084,11 +4168,49 @@ export class Vehicle {
   }
 
   /**
+   * Arm / decay crash yield. Must run AFTER solids + roof contacts (they write
+   * the impact speeds) and BEFORE landing assist / stabilizer (they read it).
+   */
+  _armCrashYield(dt = FIXED_DT / this.SUBSTEPS) {
+    if (!CRASH.enabled) {
+      this._crashYield = 0;
+      return;
+    }
+    this._stuckUp.set(0, 1, 0).applyQuaternion(this.body.quat);
+    const inverted = this._stuckUp.y < ROOF.dot;
+    if (
+      this._solidImpactSpeed >= CRASH.wallSpeed
+      || (inverted && this._roofImpactSpeed >= CRASH.roofSpeed)
+    ) {
+      this._crashYield = CRASH.hold;
+    }
+    if (
+      this._crashYield > 0
+      && this.groundedCount >= CRASH.recoverWheels
+      && this._stuckUp.y > CRASH.recoverUp
+    ) {
+      this._crashYield = 0;
+      return;
+    }
+    if (this._crashYield > 0) {
+      this._crashYield = Math.max(0, this._crashYield - dt);
+    }
+  }
+
+  /**
    * Landing help — touchdown absorption, and predictive alignment while falling.
    * See the LANDINGS block on TIRE for what each half is for.
    */
   _applyLandingAssist(dt = FIXED_DT / this.SUBSTEPS) {
     const body = this.body;
+    // On the lid on dirt: the tyres are deliberately not contacting, so this
+    // would look "airborne" and try to roll the car wheels-down. Leave it.
+    // The hold covers a one-substep bounce off the corner springs. Upright
+    // jumps still get the assist — they never set `_terrainLid`.
+    if (this._terrainLid || this._terrainLidHold > 0) return;
+    // A real crash: do not un-flip or magnet-absorb. Crooked jumps never arm
+    // this — see _armCrashYield.
+    if (this._crashYield > 0) return;
     let grounded = 0;
     this._landN.set(0, 0, 0);
     for (const t of this.tires) {
@@ -4379,7 +4501,7 @@ export class Vehicle {
       // Unchanged at four wheels, so the existing on-track tune carries over.
       const align = grounded >= 2 ? grounded * 0.25 : 0;
       this._stabTorque.set(0, 0, 0);
-      if (align > 0) {
+      if (align > 0 && this._crashYield <= 0) {
         this._stabCross.crossVectors(this._stabUp, this._stabN);
         this._stabTorque.addScaledVector(this._stabCross, TIRE.stabilizerStrength * align);
       }
@@ -4390,6 +4512,9 @@ export class Vehicle {
       this._stabTorque.addScaledVector(this._stabWTilt, -TIRE.stabilizerDamp);
       body.torqueAccum.add(this._stabTorque);
     } else {
+      // On the dirt-lid: no tyre contact, so this branch would treat a rest as
+      // a trick and the arc assist would pitch the car off its roof.
+      if (this._terrainLid || this._terrainLidHold > 0) return;
       // ── Airborne: RATE-BASED control (see the AIRBORNE CONTROL block on TIRE) ──
       // Per axis: pick a target rotation RATE from the input, then push the
       // actual rate toward it. Torque is scaled by that axis's inertia so the
@@ -4781,8 +4906,11 @@ export class Vehicle {
     }
   }
 
-  _applyChassisGroundContact() {
+  _applyChassisGroundContact(dt = FIXED_DT / this.SUBSTEPS) {
     const body = this.body;
+    this._terrainLid = false;
+    this._deckUp.set(0, 1, 0).applyQuaternion(body.quat);
+    const inverted = this._deckUp.y < ROOF.dot;
     for (const corner of this.CHASSIS_CORNERS) {
       this._geomToWorld(corner, this._cWorld);
       const floorY = this.getFloorY ? this.getFloorY(this._cWorld.x, this._cWorld.z) : 0;
@@ -4796,7 +4924,9 @@ export class Vehicle {
       if (!(this._cWorld.y < floorY)) continue;
       const pen = floorY - this._cWorld.y;
       body.getVelocityAtPoint(this._cWorld, this._cVel);
-      const dampMag = Math.max(0, -this._cVel.y) * this.CORNER_DAMPER;
+      const lidCorner = inverted && corner.y > 0;
+      const damper = this.CORNER_DAMPER * (lidCorner ? ROOF.terrainDamperMult : 1);
+      const dampMag = Math.max(0, -this._cVel.y) * damper;
       const upMag = pen * this.CORNER_SPRING + dampMag;
       this._cF.set(0, upMag, 0);
       body.addForceAtPoint(this._cF, this._cWorld);
@@ -4808,7 +4938,25 @@ export class Vehicle {
         this._cF.set(this._cVelHoriz.x * fricMag, 0, this._cVelHoriz.z * fricMag);
         body.addForceAtPoint(this._cF, this._cWorld);
       }
+      // Roof corners on the dirt: the lid is the support, not the wheels.
+      // Landing assist would otherwise treat this as still airborne (no tyre
+      // load) and try to roll the car wheels-down against the corner springs.
+      if (lidCorner) {
+        this._terrainLid = true;
+        this._roofTouch = true;
+        this._roofImpactSpeed = Math.max(this._roofImpactSpeed, Math.max(0, -this._cVel.y));
+      }
     }
+    if (this._terrainLid) {
+      // Edge-triggered: only the arrival, not every substep of a rest.
+      if (!this._wasTerrainLid && body.vel.y < 0) {
+        body.vel.y *= (1 - ROOF.terrainAbsorb);
+      }
+      this._terrainLidHold = ROOF.terrainLidHold;
+    } else if (this._terrainLidHold > 0) {
+      this._terrainLidHold = Math.max(0, this._terrainLidHold - dt);
+    }
+    this._wasTerrainLid = this._terrainLid;
   }
 
   _applyWallProbes() {

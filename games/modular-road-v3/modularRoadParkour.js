@@ -57,6 +57,25 @@ export function attachDeckProxy(geo, deckPositions) {
   return geo;
 }
 
+/**
+ * Hang a SOLIDS-ONLY stand-in off a closed solid.
+ *
+ * `collision: "both"` still bakes the whole mesh into the solids BVH when this
+ * is missing — including the drive surface and the vertical lip cap. Hull
+ * samples that dip into the wedge at takeoff then get shoved out that cap
+ * (and along the steep last deck triangles), which is the "straight up at
+ * the tip" pop. PropManager.collisionMeshes already honours
+ * `geometry.userData.solidGeometry` the same way it honours the deck proxy.
+ */
+export function attachSolidProxy(geo, solidPositions) {
+  const solid = new THREE.BufferGeometry();
+  solid.setAttribute("position", new THREE.Float32BufferAttribute(solidPositions, 3));
+  solid.computeVertexNormals();
+  solid.computeBoundingSphere();
+  geo.userData.solidGeometry = solid;
+  return geo;
+}
+
 /** Drive ramp: low edge at y=0, z=0 (local); rises toward -Z. */
 export function rampGeometry(w, l, angleRad) {
   const H = l * Math.sin(angleRad);
@@ -369,11 +388,21 @@ function curveRampGeometry(w, radius, angleDeg, rise, curveDir = 1, segments = 3
 /**
  * Solid extruded kicker: flat entry z=0, profile supplied by heightAt(t) where t∈[0,1].
  *
- * Returns the closed solid, with the DRIVE SURFACE ALONE hung off
- * `geo.userData.deckGeometry` — see attachDeckProxy for why that is not a
- * micro-optimisation but the difference between a ramp that launches you and a
- * ramp that shoves you.
+ * The VISIBLE mesh is the closed wedge. Collision is split:
+ *   deck   — drive surface only (attachDeckProxy)
+ *   solids — flanks + a short inset backstop (attachSolidProxy)
+ * The full-height lip cap stays visual. Putting it in solids is what launched
+ * the car straight up at takeoff on the taller Jump lab lanes.
  */
+/** Lip backstop height (m). Above the roof, well below even Jump lab's
+ *  smallest takeoff (~4 m), so the hull never meets it as a wall on the way
+ *  off. A ground-level charge from behind still hits a wall. */
+const KICKER_SOLID_CAP_H = 1.7;
+/** Metres the backstop sits inboard of the visual lip. Takeoff is then past
+ *  the collider; driving into the back clips 1.4 m of visual, which is the
+ *  trade for not having an 8–18 m wall at the kicker. */
+const KICKER_SOLID_CAP_INSET = 1.4;
+
 function solidKickerExtrusion(w, length, rise, segments, heightAt) {
   const hw = w / 2;
   const n = Math.max(8, segments);
@@ -410,11 +439,27 @@ function solidKickerExtrusion(w, length, rise, segments, heightAt) {
   for (let i = 0; i < n; i++) quad(botR[i], botR[i + 1], topR[i + 1], topR[i]);
   quad(botL[n], topL[n], topR[n], botR[n]);
 
+  // SOLIDS: flanks plus a short inset backstop. Not the drive surface, not
+  // the full-height lip cap — those are what launched the car at takeoff.
+  const solidPos = [];
+  const squad = (a, b, c, d) => solidPos.push(...a, ...b, ...c, ...a, ...c, ...d);
+  for (let i = 0; i < n; i++) {
+    squad(botL[i], topL[i], topL[i + 1], botL[i + 1]);
+    squad(botR[i], botR[i + 1], topR[i + 1], topR[i]);
+  }
+  const inset = Math.min(KICKER_SOLID_CAP_INSET, L * 0.25);
+  const tCap = 1 - inset / L;
+  const yDeck = heightAt(tCap, H);
+  const yCap = Math.max(0.2, Math.min(KICKER_SOLID_CAP_H, yDeck * 0.8));
+  const zCap = -L * tCap;
+  squad([-hw, 0, zCap], [-hw, yCap, zCap], [hw, yCap, zCap], [hw, 0, zCap]);
+
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
-  return attachDeckProxy(geo, deckPos);
+  attachDeckProxy(geo, deckPos);
+  return attachSolidProxy(geo, solidPos);
 }
 
 /**

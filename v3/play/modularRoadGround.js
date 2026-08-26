@@ -111,6 +111,11 @@ export function createVehicleGround({
             distance: vertDist,
             point: { x: origin.x, y: terrainY, z: origin.z },
             normal: terrainNormal(origin.x, origin.z, _terrN),
+            // The heightfield probe is a VERTICAL projection, not a ray along
+            // `dir`. An inverted wheel origin still "hits" it, and the strut
+            // then pushes into the world. Tire.apply skips this source when
+            // the car is on its lid — loops/tubes are ROAD meshes, not this.
+            source: "terrain",
           };
         }
       }

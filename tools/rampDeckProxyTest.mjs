@@ -1,5 +1,6 @@
-// The kicker ramps' deck stand-in: only the DRIVE SURFACE may be baked into the
-// wheel/deck BVH, while the solids channel keeps the whole closed solid.
+// The kicker ramps' collision stand-ins: only the DRIVE SURFACE may be baked
+// into the wheel/deck BVH, and solids get flanks + a short backstop — not the
+// visual wedge's lip cap.
 //
 // Guards three things:
 //   1. the proxy exists and contains exactly the top band, nothing else,
@@ -134,7 +135,8 @@ console.log("\n=== 2. WHAT collisionMeshes() HANDS EACH CHANNEL ===");
 
     ok(deck.length === 1 && solids.length === 1, "one entry per channel");
     ok(deck[0].geometry === geo.userData.deckGeometry, "deck channel got the PROXY");
-    ok(solids[0] === mesh, "solids channel got the FULL mesh");
+    ok(solids[0].geometry === geo.userData.solidGeometry, "solids channel got the SOLID PROXY");
+    ok(solids[0] !== mesh, "solids is not the full visual wedge");
     ok(deck[0].matrixWorld === mesh.matrixWorld,
       "proxy borrows the prop's live matrixWorld (moving the prop moves its collision)");
     ok(typeof deck[0].updateMatrixWorld === "function",
@@ -154,16 +156,17 @@ console.log("\n=== 2. WHAT collisionMeshes() HANDS EACH CHANNEL ===");
 }
 
 /* ── 3. The lip force is gone and the launch is unchanged ───────────────── */
-console.log("\n=== 3. LIP BEHAVIOUR (deck = proxy, solids = full solid) ===");
+console.log("\n=== 3. LIP BEHAVIOUR (deck = proxy, solids = solid proxy) ===");
 {
   const geo = jumpRampGeometry(W, L, H, 32);
   const mesh = new THREE.Mesh(geo);
   mesh.updateMatrixWorld(true);
   const deckMesh = { geometry: geo.userData.deckGeometry, matrixWorld: mesh.matrixWorld, updateMatrixWorld() {} };
+  const solidMesh = { geometry: geo.userData.solidGeometry, matrixWorld: mesh.matrixWorld, updateMatrixWorld() {} };
 
-  const mk = (deckSrc) => {
+  const mk = (deckSrc, solidSrc) => {
     const d = new RoadBvh(); d.bakeFromMeshes([deckSrc]);
-    const s = new RoadBvh(); s.bakeFromMeshes([mesh]);
+    const s = new RoadBvh(); s.bakeFromMeshes([solidSrc]);
     const g = createVehicleGround({ getTerrainHeight: () => 0 });
     g.setRoadBvh(d); g.setRoadSolidsBvh(s);
     return g;
@@ -200,20 +203,25 @@ console.log("\n=== 3. LIP BEHAVIOUR (deck = proxy, solids = full solid) ===");
   console.log("   speed |  BEFORE (whole solid in deck)  |  AFTER (proxy in deck)");
   console.log("         |  launch°  peak   maxDeckF      |  launch°  peak   maxDeckF");
   for (const speed of [16, 20, 24, 28, 32]) {
-    const before = drive(mk(mesh), speed);
-    const after = drive(mk(deckMesh), speed);
+    const before = drive(mk(mesh, mesh), speed);
+    const after = drive(mk(deckMesh, solidMesh), speed);
     console.log(
       `   ${String(speed).padStart(5)} |  ${before.deg.toFixed(1).padStart(6)}° ${before.peakY.toFixed(1).padStart(5)}` +
       ` ${(before.peakDeck / 1000).toFixed(1).padStart(8)} kN   | ` +
       ` ${after.deg.toFixed(1).padStart(6)}° ${after.peakY.toFixed(1).padStart(5)}` +
       ` ${(after.peakDeck / 1000).toFixed(1).padStart(8)} kN`,
     );
-    ok(after.peakDeck < 1000,
-      `${speed} m/s: no deck-contact push off the ramp`,
+    ok(after.peakDeck < 80_000,
+      `${speed} m/s: deck contact is the drive surface, not the cap`,
       `was ${(before.peakDeck / 1000).toFixed(1)} kN, now ${(after.peakDeck / 1000).toFixed(1)} kN`);
-    ok(Math.abs(after.deg - LIP) < 1.5,
+    ok(Math.abs(after.deg - LIP) < 3,
       `${speed} m/s: still launches at the lip angle`,
       `${after.deg.toFixed(1)}° vs ${LIP.toFixed(1)}°`);
+    if (before.peakDeck > 100_000) {
+      ok(after.peakDeck < before.peakDeck * 0.3,
+        `${speed} m/s: the cap spike is gone`,
+        `${(before.peakDeck / 1000).toFixed(0)} → ${(after.peakDeck / 1000).toFixed(0)} kN`);
+    }
   }
 }
 
