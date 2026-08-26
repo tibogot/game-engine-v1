@@ -363,7 +363,7 @@
           key: "A",
           label: "A · shipping",
           cls: "a",
-          build: () => createRoadMaterial({ ...look, ...wet, wet: wetOn() }),
+          build: () => createRoadMaterial({ ...look, ...wet, wet: wetOn(), shadowLight: sun }),
           sync: (m) => syncRoadUniforms(m, { ...look, ...wet }),
           needsRebuild: (m) => wetNeedsRebuild(m),
           material: null,
@@ -372,7 +372,7 @@
           key: "B",
           label: "B · surface v2",
           cls: "b",
-          build: () => createRoadSurfaceV2({ ...look, ...wet, ...v2, wet: wetOn() }),
+          build: () => createRoadSurfaceV2({ ...look, ...wet, ...v2, wet: wetOn(), shadowLight: sun }),
           sync: (m) => {
             syncRoadUniforms(m, { ...look, ...wet });
             syncSurfaceV2Uniforms(m, v2);

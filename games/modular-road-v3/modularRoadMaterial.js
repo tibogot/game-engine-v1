@@ -34,6 +34,7 @@ import {
   screenUV,
   materialColor,
   materialEmissive,
+  shadow,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import {
@@ -46,6 +47,24 @@ import {
 
 function lin(hex) {
   return new THREE.Color(hex).convertSRGBToLinear();
+}
+
+/**
+ * The sun's shadow factor as a TSL node, or null.
+ *
+ * Prefers an explicit `opts.shadowNode`, then the light's existing
+ * `shadow.shadowNode` (CSM in the game). If the light has no node yet, one is
+ * installed on it so the lighting path reuses it instead of compiling a
+ * second sampler that would re-render the map.
+ */
+function resolveWetShadowNode(opts) {
+  if (opts.shadowNode) return opts.shadowNode;
+  const light = opts.shadowLight;
+  if (!light?.castShadow || !light.shadow) return null;
+  if (light.shadow.shadowNode) return light.shadow.shadowNode;
+  const node = shadow(light, light.shadow);
+  light.shadow.shadowNode = node;
+  return node;
 }
 
 /**
@@ -197,6 +216,7 @@ export function createRoadMaterial(opts = {}) {
     // material with no weather applied is identical to a dry one.
     wetAmount: uniform(opts.wetAmount ?? WET_DEFAULTS.wetAmount),
     wetCoatStrength: uniform(opts.wetCoatStrength ?? WET_DEFAULTS.wetCoatStrength),
+    wetShadow: uniform(opts.wetShadow ?? WET_DEFAULTS.wetShadow),
     wetDarken: uniform(opts.wetDarken ?? WET_DEFAULTS.wetDarken),
     wetRough: uniform(opts.wetRough ?? WET_DEFAULTS.wetRough),
     wetCoatRough: uniform(opts.wetCoatRough ?? WET_DEFAULTS.wetCoatRough),
@@ -620,6 +640,22 @@ export function createRoadMaterial(opts = {}) {
     mat.clearcoatNormalNode = wetClearcoatNormal(wet);
   }
 
+  /**
+   * SHADOW THE WET EXTRAS. Direct sun on the deck is already in the lighting
+   * model. What washes a car shadow off a soaked road is everything that is
+   * NOT: the clearcoat's environment (PhysicalLightingModel multiplies that
+   * by `aoNode`) and the planar/rail reflections, which ride emissive so they
+   * never saw a shadow map. `shadowGate` is 1 on a dry pixel and leans toward
+   * the sun's shadow factor as the coat comes up — see `wetShadow`.
+   *
+   * CSM returns vec4; a basic ShadowNode returns float. `.r` is valid on both.
+   */
+  const wetShadowNode = wet ? resolveWetShadowNode(opts) : null;
+  const shadowGate = wetShadowNode
+    ? mix(float(1), saturate(wetShadowNode.r), saturate(wet.coat.mul(u.wetShadow)))
+    : float(1);
+  if (wet && wetShadowNode) mat.aoNode = shadowGate;
+
   // Neon rings inside tubes — emissive, and routed into the emissive MRT
   // buffer so v3's SELECTIVE bloom picks them up (plain emissive alone does not
   // bloom here; see the note in roadGame.js). BloomMRTNode also keeps this
@@ -648,7 +684,10 @@ export function createRoadMaterial(opts = {}) {
   //
   // EMISSIVE because a reflection is not albedo. Folding it into colorNode
   // would put it through the diffuse lighting term and make the car's
-  // reflection brighten and dim with the sun, which is precisely wrong.
+  // reflection brighten and dim with the sun, which is precisely wrong. It is
+  // then multiplied by `shadowGate` below: the IMAGE of the car should not
+  // Lambert-shade with the road, but it also must not flood the umbra as
+  // self-light, which is what an un-gated emissive does to a wet shadow.
   let reflectNode = null;
   if (wet && opts.reflectionTexture) {
     const r = {
@@ -852,8 +891,8 @@ export function createRoadMaterial(opts = {}) {
   const lineGlow = lineAmt.mul(u.lineColor).mul(u.linesBloomIntensity).mul(u.linesBloom);
 
   let emissive = neonNode ? neonNode.add(lineGlow) : lineGlow;
-  if (reflectNode) emissive = emissive.add(reflectNode);
-  if (railNode) emissive = emissive.add(railNode);
+  if (reflectNode) emissive = emissive.add(reflectNode.mul(shadowGate));
+  if (railNode) emissive = emissive.add(railNode.mul(shadowGate));
   mat.emissiveNode = emissive;
   // Neon + optional line glow. Reflections stay out — blooming them hazes every
   // wet frame.

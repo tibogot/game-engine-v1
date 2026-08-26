@@ -397,7 +397,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * Built dry at boot: a track that wants weather turns it on when its look
    * loads, and the overwhelmingly common case is a dry track that should pay
    * nothing at all.
+   *
+   * The wet rebuild is handed the scene's shadow-casting DirectionalLight so
+   * the coat IBL and emissive reflections can sit in the umbra instead of
+   * painting over it. Scene-root on purpose: CSM's cascade placeholders are
+   * Object3Ds, not extra DirectionalLights.
    */
+  function sceneShadowLight() {
+    return scene.children.find((o) => o.isDirectionalLight && o.castShadow) ?? null;
+  }
   let roadMaterial = createRoadMaterial();
   const railMaterial = createGuardrailMaterial();
   const shellMaterial = createTunnelMaterial();
@@ -1630,6 +1638,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     applyRoadMaterial(createRoadMaterial({
       ...roadLook,
       wet: wantWet,
+      shadowLight: sceneShadowLight(),
       reflectionTexture: wantWet ? carReflection.texture : null,
       mirrorTexture: wantRail ? carReflection.mirrorTexture : null,
       // Feeds railNode's occlusion gate — without it the mirrored rail of a

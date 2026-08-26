@@ -120,6 +120,18 @@ export const WET_DEFAULTS = {
    * Darkening is not optional and must not be gated by a gloss control.
    */
   wetCoatStrength: 0.45,
+  /**
+   * How hard the sun's shadow is allowed to darken the WET extras — the
+   * clearcoat's environment and the planar/rail reflections that are added as
+   * emissive. Direct sun on the asphalt is already shadowed; these terms are
+   * not, and they are what wash a car-shaped shadow off a soaked road.
+   *
+   * 0 = previous look (coat IBL and reflections ignore the shadow map).
+   * 1 = those terms go fully dark in umbra, which reads as a black puddle.
+   * 0.7 keeps a readable shadow without crushing the sky still sitting in the
+   * water. Scales with the coat, so a dry pixel on a wet material is untouched.
+   */
+  wetShadow: 0.7,
   /** Albedo multiplier at full film. ~0.55 matches the measured "wet asphalt is
    *  about half as bright as dry asphalt". This is the single most important
    *  number in the file. */
@@ -393,7 +405,7 @@ export const WET_COLORS = ["wetTint"];
 
 /** Wet uniforms authored as plain numbers. */
 export const WET_NUMBERS = [
-  "wetAmount", "wetCoatStrength", "wetDarken", "wetRough", "wetCoatRough",
+  "wetAmount", "wetCoatStrength", "wetShadow", "wetDarken", "wetRough", "wetCoatRough",
   "puddleAmount", "puddleScale", "puddleStreak", "puddleThreshold",
   "puddleSoft", "puddleDarken", "puddleCoatRough",
   "wetDrainStart", "wetCamber", "wetBank", "wetCurveRef", "wetDrainStrength",
