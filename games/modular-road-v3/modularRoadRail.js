@@ -922,7 +922,7 @@ function sweepCollisionSheet(frames, section, baseLat, zSign, positions, indices
 }
 
 /**
- * Minimum collision thickness (m) and solid-ridge height (m).
+ * Minimum collision thickness (m).
  *
  * The chassis samples the solids BVH with an 8 cm skin and no sweep. At 50 m/s
  * that is 21 cm per substep, so a paper sheet is stepped over in one tick and
@@ -931,57 +931,68 @@ function sweepCollisionSheet(frames, section, baseLat, zSign, positions, indices
  * the extra depth goes into the FIELD (posts already live there), so the
  * traffic face — the one the car can see — does not move.
  *
- * The ridge is a FILLED cap, not the old hollow tent: landing still gets a
- * slope to fall off, but there is no pocket between the faces to sit in.
+ * No ridge, no floor: a top face is a lid the hull parks on, a bottom face is
+ * what closest-point uses to throw the car up. Two vertical walls, wound so
+ * each geometric normal points OUT of the slab, and the vehicle's inside
+ * recovery spat a sample that skipped the skin back onto the road.
  */
 const RAIL_COLLISION_DEPTH = 0.38;
-const RAIL_COLLISION_CAP = 0.20;
 
 /**
- * Cross-section of the collision slab in (y vertical, z lateral) about the
- * kerb centreline. OPEN polyline: traffic wall, ridge, back wall. No bottom
- * edge — a floor triangle is what closest-point uses to throw the car up once
- * a sample is overlapping. Ends of the sweep stay open too: a cap at every
- * piece socket would face along the road, which is the graze that used to
- * brake the car on every seam.
+ * The two vertical walls of the collision slab, in (y vertical, z lateral)
+ * about the kerb centreline.
+ *
+ * Geometric normals point OUT of the slab (traffic toward the track, back
+ * toward the field). The left rail's traffic strip is reversed — measured in
+ * tools/railCollisionSideTest.mjs — so `behind` means inside on both rails.
+ *
+ * No top, no bottom, no end caps. A cap at every piece socket would face
+ * along the road, which is the graze that used to brake the car on every seam.
  *
  * Traffic face stays at the visible beam's traffic face (`-prof.backZ`).
  */
-function railCollisionSection(rp, r) {
+function railCollisionWalls(rp, r, zSign) {
   const kerbTop = rp.railHeight;
   const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
   const beamTop = kerbTop + r.gap + r.height * 0.5 + prof.height * 0.5;
   const zFace = -prof.backZ;
   const depth = Math.max(prof.depth, RAIL_COLLISION_DEPTH);
   const zBack = zFace + (prof.backZ < 0 ? -depth : depth);
-  const cap = Math.min(RAIL_COLLISION_CAP, Math.max(0.12, (beamTop - kerbTop) * 0.22));
-  const midZ = (zFace + zBack) * 0.5;
-  return [
+  const trafficUp = [
     { y: kerbTop, z: zFace },
-    { y: beamTop - cap, z: zFace },
-    { y: beamTop, z: midZ },
-    { y: beamTop - cap, z: zBack },
+    { y: beamTop, z: zFace },
+  ];
+  const backDown = [
+    { y: beamTop, z: zBack },
     { y: kerbTop, z: zBack },
   ];
+  // Measured (tools/railCollisionSideTest.mjs): the left rail's traffic strip
+  // comes out inverted relative to the right. The back strip does not. Reverse
+  // only that one, or `behind` on the inboard face would mean "outside" and
+  // inside-recovery would push a car on the road into the rail.
+  if (zSign < 0) {
+    return { traffic: trafficUp.slice().reverse(), back: backDown };
+  }
+  return { traffic: trafficUp, back: backDown };
 }
 
 /**
  * COLLISION PROXY — what the chassis actually hits.
  *
- * A short WALL, not a sheet. Same solids path as the Wall prop: vertical
- * thickness the hull cannot step through, a solid ridge so a landing sheds,
- * no floor, no posts, no corrugation. Swept along the SAME decimated frames
- * as the visible beam so the traffic face cannot drift (tools/labGuardrailTest.mjs).
+ * Two vertical walls, not a sheet and not a lid. Same solids path as the Wall
+ * prop: thickness the hull cannot step through, no floor, no posts, no
+ * corrugation. Swept along the SAME decimated frames as the visible beam so
+ * the traffic face cannot drift (tools/labGuardrailTest.mjs).
  *
- * Held by tools/railCollisionSideTest.mjs (blocks from both sides) and the
- * proxy block of labGuardrailTest.mjs (face alignment, no floor, no plateau).
+ * Held by tools/railCollisionSideTest.mjs (blocks from both sides, cavity is
+ * behind) and the proxy block of labGuardrailTest.mjs (face alignment, no
+ * floor, no plateau).
  */
 export function buildRailCollision(frames, rp, r = railParams) {
   if (r.height <= 0 || !frames?.length) return null;
   const hw = rp.width / 2;
   const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
   const edgeAbs = hw - rw * 0.5;
-  const section = railCollisionSection(rp, r);
 
   const positions = [];
   const indices = [];
@@ -990,7 +1001,9 @@ export function buildRailCollision(frames, rp, r = railParams) {
     // Thinned on THIS rail's own path (see decimateFrames) so the proxy keeps
     // following the visible beam on a rolling piece.
     const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle, side * edgeAbs);
-    sweepCollisionSheet(sweepFrames, section, side * edgeAbs, zSign, positions, indices);
+    const walls = railCollisionWalls(rp, r, zSign);
+    sweepCollisionSheet(sweepFrames, walls.traffic, side * edgeAbs, zSign, positions, indices);
+    sweepCollisionSheet(sweepFrames, walls.back, side * edgeAbs, zSign, positions, indices);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
@@ -1148,11 +1161,12 @@ export function buildRailCollisionAlongPath(frames, rp, r = railParams) {
   // on is zSign's job, exactly as it is for the visible beam. Writing it
   // back-to-front here instead was the same mirror bug in a second place, so the
   // proxy agreed with the wrong-side beam and hid it from the car.
-  const section = railCollisionSection(rp, r);
+  const walls = railCollisionWalls(rp, r, -1);
   const positions = [];
   const indices = [];
   const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle, 0);
-  sweepCollisionSheet(sweepFrames, section, 0, -1, positions, indices);
+  sweepCollisionSheet(sweepFrames, walls.traffic, 0, -1, positions, indices);
+  sweepCollisionSheet(sweepFrames, walls.back, 0, -1, positions, indices);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geo.setIndex(indices);

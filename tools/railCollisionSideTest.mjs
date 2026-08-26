@@ -5,8 +5,8 @@
  * solids BVH re-orients the face normal toward the query, so a probe OUTSIDE
  * either wall is pushed back out — not through. This used to pin down why an
  * open sheet still blocked from behind; it now pins the same contract on the
- * slab, probing from outside each face (inside the volume is a different
- * question, and the thickness is what keeps a fast car from getting there).
+ * the slab, probing from outside each face. A probe in the cavity between the
+ * two walls must report `behind` so the vehicle can spat the car out.
  *
  *   node tools/railCollisionSideTest.mjs
  */
@@ -57,6 +57,10 @@ const probe = (px, label, wantSign) => {
     `${label}: pushed ${n.x > 0 ? "outward (+x)" : "inward (−x)"} ` +
     `(normal.x ${n.x.toFixed(3)}, surface ${hit.distance.toFixed(3)} m away)`,
   );
+  check(
+    hit.behind !== true,
+    `${label}: outside contact is not behind (behind=${hit.behind})`,
+  );
 };
 
 console.log(`\nright rail ${rightMin.toFixed(3)} .. ${rightMax.toFixed(3)}\n`);
@@ -65,6 +69,38 @@ probe(rightMin - 0.25, "from the track side ", -1);
 probe(rightMax + 0.25, "from behind the rail", +1);
 probe(leftMax + 0.25, "left rail, track side", +1);
 probe(leftMin - 0.25, "left rail, behind   ", -1);
+
+const cavity = (lo, hi, label) => {
+  const mid = (lo + hi) * 0.5;
+  const hit = bvh.closestPointWithNormal(mid, y, z, 0.6, n);
+  check(!!hit, `${label} cavity query finds a face (${hit ? hit.distance.toFixed(3) : "none"} m)`);
+  if (!hit) return;
+  check(hit.behind === true, `${label} cavity is behind the face (behind=${hit.behind})`);
+  check(hit.distance < 0.22, `${label} cavity is ~half thickness (${hit.distance.toFixed(3)} m)`);
+};
+cavity(rightMin, rightMax, "right");
+cavity(leftMin, leftMax, "left");
+
+const away = new THREE.Vector3();
+const from = new THREE.Vector3();
+const cavityRay = (lo, hi, label) => {
+  const mid = (lo + hi) * 0.5;
+  const hit = bvh.closestPointWithNormal(mid, y, z, 1.0, away);
+  if (!hit) {
+    check(false, `${label} cavity ray: no closest face`);
+    return;
+  }
+  from.set(mid, y, z).addScaledVector(away, 0.002);
+  const blocked = bvh.raycastFirst(from, away, 1.0);
+  check(!!blocked, `${label} cavity ray hits the far wall`);
+};
+cavityRay(rightMin, rightMax, "right");
+cavityRay(leftMin, leftMax, "left");
+
+from.set(rightMin - 0.25, y, z);
+bvh.closestPointWithNormal(from.x, from.y, from.z, 1.0, away);
+from.addScaledVector(away, 0.002);
+check(!bvh.raycastFirst(from, away, 1.0), "outside the rail, away-ray is open air");
 
 console.log(
   failed

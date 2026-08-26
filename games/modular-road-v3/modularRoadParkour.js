@@ -196,6 +196,32 @@ export function thickWallVaultGeometry(innerR, outerR, length, segments = 40) {
   return geo;
 }
 
+/**
+ * Filled stand-in for {@link thickWallVaultGeometry}.
+ *
+ * The visual vault is two shells plus paper end-rings: at speed the hull skips
+ * the 8 cm skin and sits in the 0.95 m empty wall. Two solid boxes for the
+ * feet (THREE.BoxGeometry, outward winding) in the same Y-up / Z-along-tunnel
+ * pose the visual has AFTER `rotateX(π/2)`, so the mesh's matrixWorld applies
+ * to both. An ExtrudeGeometry horseshoe looked right and wound the sides
+ * inward, which would have sucked a nearby car into the wall.
+ */
+export function filledVaultCollisionGeometry(innerR, outerR, length) {
+  const wall = outerR - innerR;
+  const mid = (innerR + outerR) / 2;
+  const left = new THREE.BoxGeometry(wall, outerR, length);
+  left.translate(-mid, outerR / 2, 0);
+  const right = new THREE.BoxGeometry(wall, outerR, length);
+  right.translate(mid, outerR / 2, 0);
+  const geo = mergeGeometries([left, right], false);
+  left.dispose();
+  right.dispose();
+  geo.computeVertexNormals();
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
 /** Five side-by-side test ramps (15°–55°), centred on XZ with feet on y=0. */
 export function buildSlopeLabGroup() {
   const group = new THREE.Group();

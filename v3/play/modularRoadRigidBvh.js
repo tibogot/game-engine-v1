@@ -186,11 +186,16 @@ export class RigidBvh {
     _p.set(px, py, pz).applyMatrix4(this._inv);
     const r = this._bvh.closestPointWithNormal(_p.x, _p.y, _p.z, maxDist / s, _localNormal);
     if (!r) return null;
-    _n.copy(_localNormal).transformDirection(this.mesh.matrixWorld).normalize();
     _p.set(r.x, r.y, r.z).applyMatrix4(this.mesh.matrixWorld);
-    if ((px - _p.x) * _n.x + (py - _p.y) * _n.y + (pz - _p.z) * _n.z < 0) _n.negate();
+    // Recompute `behind` in WORLD space from the geometric (unflipped) normal.
+    // A mirrored matrix flips handedness, so the local flag cannot be trusted.
+    if (r.behind) _localNormal.negate();
+    _n.copy(_localNormal).transformDirection(this.mesh.matrixWorld).normalize();
+    const toward = (px - _p.x) * _n.x + (py - _p.y) * _n.y + (pz - _p.z) * _n.z;
+    const behind = toward < 0;
+    if (behind) _n.negate();
     outNormal.copy(_n);
-    return { x: _p.x, y: _p.y, z: _p.z, distance: r.distance * s };
+    return { x: _p.x, y: _p.y, z: _p.z, distance: r.distance * s, behind };
   }
 
   /** Swept-sphere cast (world space). */

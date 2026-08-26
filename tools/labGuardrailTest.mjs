@@ -415,7 +415,7 @@ console.log("\n— collision proxy —");
     if (ys.every((y) => y > cb.max.y - 1e-4)) flatOnTop++;
   }
   check(floorTris === 0, `no floor at the kerb (${floorTris} level triangles)`);
-  check(flatOnTop === 0, `no flat plateau at the ridge (${flatOnTop} level triangles)`);
+  check(flatOnTop === 0, `no flat plateau (${flatOnTop} level triangles at the top)`);
 
   vis.dispose();
   col.dispose();

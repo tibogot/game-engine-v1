@@ -1703,6 +1703,29 @@ export const SOLID = {
   /** Contact skin (m). This IS the collider inflation — keep it small. */
   skin: 0.08,
   /**
+   * How far inside a solid a hull sample may sit and still be recovered (m).
+   *
+   * The skin is 8 cm; at 50 m/s a substep is 21 cm, so a sample can skip the
+   * band and land in a cavity (the U of a rail, the 0.95 m arch wall). Distance
+   * to the nearest face is then > skin, the overlap test misses, and the car
+   * stays in the wall.
+   *
+   * A sample in that band is treated as inside ONLY if a ray along the away
+   * normal (or a horizontal perpendicular, for an end-cap punch down a long
+   * solid) hits another face — the car is walled in. A sample in open air
+   * next to a wall does not get pulled in. 1 m covers a 0.95 m arch wall from
+   * just inside the end cap. `behind` is not used: the solids bake is
+   * double-sided, so that flag is a coin flip.
+   */
+  insideReach: 1.0,
+  /**
+   * Skip a solid contact whose normal's |Y| exceeds this. Solids are walls;
+   * a mostly-up hit is a lid the hull can park on while the wheels still see
+   * the road (rail ridge, hole-wall rim, jersey trough). 0.45 ≈ 63° from
+   * horizontal.
+   */
+  sitNormalMaxY: 0.45,
+  /**
    * Anti-tunnel margin, as a multiple of the distance travelled per substep.
    *
    * A skin alone cannot stop a fast car: at 30 m/s the body advances 0.125 m per
@@ -1774,6 +1797,12 @@ export const STUCK = {
    * must never be mistaken for being stuck on one.
    */
   beachedSpeed: 2.5,
+  /**
+   * Hull sitting on an undriveable lid while 3–4 wheels still see the road.
+   * The old rule required groundedCount < 3, so a car perched on a rail or
+   * hole-wall rim with tyres raycasting the deck never qualified.
+   */
+  sitUpMin: 0.45,
   /** Seconds of that before a nudge, and before giving up entirely. */
   nudgeAfter: 0.8,
   respawnAfter: 2.5,
@@ -3001,6 +3030,9 @@ export class Vehicle {
     this._hullRadius = 0;
     this._hullCentreW = new THREE.Vector3();
     this._bpN = new THREE.Vector3();
+    this._deepestN = new THREE.Vector3();
+    this._cavityFrom = new THREE.Vector3();
+    this._cavitySide = new THREE.Vector3();
     /** Exact analytic colliders — see setSolidCapsules. */
     this.solidCapsules = [];
     this._sphC = new THREE.Vector3();
@@ -3654,7 +3686,10 @@ export class Vehicle {
    *  Independent of the timer — roadGame must require BOTH this and
    *  stuckTime >= respawnAfter, or a stale timer after R recovers forever. */
   get isBeached() {
-    return this.groundedCount < 3 && this.body.vel.length() < STUCK.beachedSpeed;
+    if (this.body.vel.length() >= STUCK.beachedSpeed) return false;
+    if (this.groundedCount < 3) return true;
+    // Perched on a solid lid while the tyres still see the road.
+    return this._solidTouch && this._scrapeNormal.y > STUCK.sitUpMin;
   }
 
   /** Did the chassis touch a solid (guardrail / wall) during the last tick?
@@ -5211,60 +5246,36 @@ export class Vehicle {
    * Resolve CHASSIS_HULL against one BVH by PROJECTION — see the SOLID block
    * for why this replaced penetration springs.
    *
-   * Two passes. First gather every overlapping sample into one aggregate
-   * contact: a penetration-weighted mean normal, the deepest overlap, and the
-   * mean contact point (for the torque). Then apply the correction ONCE.
-   * Resolving per-sample is what let the samples stack into a launcher; one
-   * aggregate correction cannot exceed the actual overlap no matter how many
-   * agree — which matters more now than it did, since the hull carries ~200
-   * samples rather than the 26 this was written against.
+   * Two passes. First gather every overlapping (or trapped-inside) sample into
+   * one aggregate contact: a penetration-weighted mean normal, the deepest
+   * overlap, and the mean contact point (for the torque). Then apply the
+   * correction ONCE. Resolving per-sample is what let the samples stack into a
+   * launcher; one aggregate correction cannot exceed the actual overlap no
+   * matter how many agree — which matters more now than it did, since the hull
+   * carries ~200 samples rather than the 26 this was written against.
    */
   _resolveSolidBvh(bvh, surfaceVelFn, dt = FIXED_DT / this.SUBSTEPS) {
-    const body = this.body;
     const skin = SOLID.skin;
-    // QUERY RADIUS IS THE SKIN, and deliberately not a speed-scaled band.
-    //
-    // This used to widen with speed (`vel · dt · sweepMargin`) to feed an
-    // anti-tunnel velocity clamp — and that clamp was removed, for the measured
-    // reason in the loop below (it braked the car on every fast rail graze). The
-    // widening outlived it: `approach` was left initialised to 0 and never
-    // assigned again, so the block it guarded below was unreachable, while every
-    // sample still paid for the bigger search. At 50 m/s the band is 0.33 m
-    // against an 0.08 m skin — a >4× radius on ~208 samples per substep, 240
-    // times a second, for results the very next line threw away
-    // (`res.distance >= skin` → continue).
-    //
-    // Behaviour is unchanged, including at the boundary: a hit at exactly `skin`
-    // was discarded by that test before and is discarded by it now (three-mesh-
-    // bvh rejects only distances strictly greater than maxDist).
-    // Reset BEFORE the broad phase, not after. These are shared scratch, and the
-    // pre-broad-phase code cleared them on every call including the ones that
-    // found nothing — so skipping the clear would quietly change what a LATER
-    // reader sees (a no-hit mover pass currently wipes the static rail's normal
-    // out from under _updateScrapeLatch). That is arguably a bug, but it is not
-    // this change's bug to fix: a perf edit that also alters behaviour is one
-    // nobody can trust. Same order as before, minus the work.
+    const reach = Math.max(skin, SOLID.insideReach);
+    const sitY = SOLID.sitNormalMaxY;
+    // QUERY RADIUS is `insideReach`, not the skin. A sample that skipped the
+    // 8 cm band and landed in a cavity is still found; the loop then IGNORES
+    // any outside contact beyond the skin unless a ray along the away normal
+    // hits another face (walled in). See SOLID.insideReach.
     this._solidN.set(0, 0, 0);
     this._solidPoint.set(0, 0, 0);
+    this._deepestN.set(0, 0, 0);
 
     // ── BROAD PHASE ─────────────────────────────────────────────────────────
     // ONE query for the whole hull before the ~208 per-sample ones. Every sample
     // lies inside the hull's bounding sphere, so if the nearest surface is
-    // further than that sphere plus the skin, not one of them can be within
-    // `skin` and the loop is guaranteed to find nothing. Skipping it is
-    // therefore exact, not an approximation — same answer, minus the work.
-    //
-    // Worth doing because the loop is the car's most expensive routine and it is
-    // almost always answering "no": it runs at 240 Hz (2 substeps × 120 Hz), each
-    // sample costs a quaternion transform plus a BVH descent, and in v3 that
-    // descent fans out across up to FOUR bvhs (road solids, mover solids, cliffs,
-    // trees — see createVehicleGround). A car mid-road or mid-air is nowhere near
-    // any of them, which is most of a lap.
+    // further than that sphere plus the recovery reach, not one of them can be
+    // inside a wall and the loop is guaranteed to find nothing.
     if (this._hullRadius > 0) {
       this._geomToWorld(this._hullCentreLocal, this._hullCentreW);
       const near = bvh.closestPointWithNormal(
         this._hullCentreW.x, this._hullCentreW.y, this._hullCentreW.z,
-        this._hullRadius + skin, this._bpN,
+        this._hullRadius + reach, this._bpN,
       );
       if (!near) return;
     }
@@ -5275,35 +5286,65 @@ export class Vehicle {
     for (const sp of this.SOLID_BOX_SAMPLES) {
       this._geomToWorld(sp, this._sphC);
       const res = bvh.closestPointWithNormal(
-        this._sphC.x, this._sphC.y, this._sphC.z, skin, this._sphN,
+        this._sphC.x, this._sphC.y, this._sphC.z, reach, this._sphN,
       );
       if (!res) continue;
-      // Close but not overlapping. NO anti-tunnel clamp here, deliberately:
-      // rails are thin, fast grazes are constant, and clamping on them braked
-      // the car on every pass (a 30 m/s graze fell to 0, because the posts and
-      // piece seams present faces whose normals point along travel). The
-      // tunnel-prone geometry a stunt track actually has — road decks and tube
-      // walls — all lives in the DECK bvh, which does carry the clamp. Rails
-      // rely on the skin plus projection.
-      if (res.distance >= skin) continue;
-      const pen = skin - res.distance;
+      // `_sphN` is flipped toward the query (away from the closest face).
+      let nx = this._sphN.x;
+      let ny = this._sphN.y;
+      let nz = this._sphN.z;
+      let pen;
+      if (res.distance < skin) {
+        pen = skin - res.distance;
+      } else if (bvh.raycastFirst) {
+        // Close but not overlapping. A ray along the away normal that hits
+        // another face means the sample is walled in (rail U, hollow wall).
+        // End-cap punch: away runs down the middle of a long solid and misses,
+        // so a horizontal perpendicular is tried too (arch pillar).
+        this._cavityFrom.copy(this._sphC).addScaledVector(this._sphN, 0.002);
+        let blocked = bvh.raycastFirst(this._cavityFrom, this._sphN, reach);
+        if (!blocked) {
+          const px = -nz, pz = nx;
+          const plen = Math.hypot(px, pz);
+          if (plen > 0.1) {
+            this._cavitySide.set(px / plen, 0, pz / plen);
+            blocked = bvh.raycastFirst(this._cavityFrom, this._cavitySide, reach)
+              || bvh.raycastFirst(this._cavityFrom, this._cavitySide.negate(), reach);
+          }
+        }
+        if (!blocked) continue;
+        nx = -nx;
+        ny = -ny;
+        nz = -nz;
+        pen = res.distance + skin;
+      } else {
+        continue;
+      }
       if (pen <= 0) continue;
+      // Solids are walls. A mostly-up (or down) normal is a lid the hull can
+      // park on while the wheels still see the road. Skip it: either a wall
+      // sample will spat the car out, or it falls through onto the deck.
+      if (Math.abs(ny) > sitY) continue;
+
       hits++;
+      this._sphN.set(nx, ny, nz);
       this._solidN.addScaledVector(this._sphN, pen);
       this._solidPoint.add(this._sphC);
-      if (pen > deepest) deepest = pen;
+      if (pen > deepest) {
+        deepest = pen;
+        this._deepestN.set(nx, ny, nz);
+      }
     }
-    // Nothing overlapping. There is no "closing on it" branch here on purpose —
-    // see the query-radius note above; the deck resolver is what carries the
-    // anti-tunnel clamp, and rails rely on the skin plus projection.
     if (!hits) return;
     this._solidPoint.multiplyScalar(1 / hits);
 
-    // Opposing normals cancel here, which is CORRECT: wedged between two
-    // surfaces there is no meaningful "out", so pushing along the near-zero
-    // mean would be pushing in a direction made of rounding noise. Bail and
-    // leave the car free to drive itself out.
-    if (this._solidN.lengthSq() < 1e-10) return;
+    // Opposing walls in a cavity cancel the mean. Pushing along rounding noise
+    // is worse than picking the deepest sample's out — that is the shortest
+    // exit, and it is what gets the car out of the centre of a guardrail.
+    if (this._solidN.lengthSq() < 1e-10) {
+      if (this._deepestN.lengthSq() < 1e-10) return;
+      this._solidN.copy(this._deepestN);
+    }
     this._solidN.normalize();
     this._applySolidContact(deepest, surfaceVelFn, dt);
   }
@@ -5356,7 +5397,7 @@ export class Vehicle {
 
     // 3) TANGENTIAL — scraping costs speed, ramped in so a car crawling out of
     //    somewhere it is trapped is not drained of the little it has.
-    if (SOLID.friction > 0 && dt > 0) {
+    if (SOLID.friction > 0 && dt > 0 && this._solidN.y < SOLID.sitNormalMaxY) {
       const vn2 = body.vel.dot(this._solidN);
       this._solidT.copy(body.vel).addScaledVector(this._solidN, -vn2);
       const vT = this._solidT.length();

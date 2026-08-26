@@ -5446,7 +5446,7 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // TWO rails, deliberately: one to look at, one to hit. Both come out of
   // modularRoadRail.js and share a profile, so the collision surface tracks the
   // visible one automatically instead of being a second set of numbers that
-  // drifts. See buildRailCollision for the slab (thick wall, not a sheet).
+  // drifts. See buildRailCollision for the slab (two vertical walls, not a sheet).
   //
   // `railPath` is for pieces whose rail is NOT ±offset from the centreline —
   // the rounded end wraps left + nose + right as one open U.

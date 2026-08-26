@@ -270,15 +270,26 @@ export class RoadBvh {
     };
   }
 
-  /** Nearest surface point + face normal (oriented toward the query point). */
+  /**
+   * Nearest surface point + face normal (oriented toward the query point).
+   *
+   * `behind` is true when the query sits on the interior side of the geometric
+   * face (before the flip). The vehicle uses that to recover from a cavity
+   * the 8 cm skin stepped over, instead of treating the sample as "not
+   * overlapping" and leaving the car inside the wall.
+   */
   closestPointWithNormal(px, py, pz, maxDist, outNormal) {
     const res = this.closestPointToPoint(px, py, pz, maxDist);
     if (!res) return null;
     this._normalAtHit(_closestTarget.point, _closestTarget.faceIndex, outNormal);
+    const toward =
+      (px - res.x) * outNormal.x +
+      (py - res.y) * outNormal.y +
+      (pz - res.z) * outNormal.z;
+    const behind = toward < 0;
     // Orient toward the query point so it points "out of" the surface.
-    if ((px - res.x) * outNormal.x + (py - res.y) * outNormal.y + (pz - res.z) * outNormal.z < 0) {
-      outNormal.negate();
-    }
+    if (behind) outNormal.negate();
+    res.behind = behind;
     return res;
   }
 

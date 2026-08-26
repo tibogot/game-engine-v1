@@ -11,7 +11,7 @@ import * as THREE from "three";
  * `groundBvh` / `solidsBvh` surface the Vehicle calls into:
  *
  *   ground:  baked, raycastFirst, spherecast, closestPointWithNormal
- *   solids:  baked, closestPointWithNormal
+ *   solids:  baked, closestPointWithNormal, raycastFirst
  *
  * so the car drives on terrain AND road with no changes to the Vehicle. Terrain
  * is handled analytically (cheap, no ramp-lips so sphere-sweep is unneeded
@@ -203,6 +203,7 @@ export function createVehicleGround({
           _cliffN.set(px - r.x, py - r.y, pz - r.z);
           if (_cliffN.lengthSq() < 1e-10) _cliffN.set(0, 1, 0);
           else _cliffN.normalize();
+          r.behind = false;
           best = r;
           outNormal.copy(_cliffN);
         }
@@ -217,11 +218,30 @@ export function createVehicleGround({
           _treeN.set(px - r.x, 0, pz - r.z);
           if (_treeN.lengthSq() < 1e-10) _treeN.set(0, 1, 0);
           else _treeN.normalize();
+          r.behind = false;
           best = r;
           outNormal.copy(_treeN);
         }
       }
 
+      return best;
+    },
+
+    /**
+     * First hit along a ray. Used by the chassis to tell a cavity (walled in)
+     * from open air next to a wall. Cliffs/trees are not hollow shells, so
+     * they are not queried here.
+     */
+    raycastFirst(origin, dir, far) {
+      let best = null;
+      if (state.roadSolidsBvh?.baked && state.roadSolidsBvh.raycastFirst) {
+        const h = state.roadSolidsBvh.raycastFirst(origin, dir, far);
+        if (h) best = h;
+      }
+      if (state.moverSolidsBvh?.baked && state.moverSolidsBvh.raycastFirst) {
+        const h = state.moverSolidsBvh.raycastFirst(origin, dir, far);
+        if (h && (!best || h.distance < best.distance)) best = h;
+      }
       return best;
     },
   };

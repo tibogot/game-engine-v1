@@ -41,6 +41,7 @@ import {
   attachDeckProxy,
   thickWallTubeGeometry,
   thickWallVaultGeometry,
+  filledVaultCollisionGeometry,
 } from "./modularRoadParkour.js";
 
 /**
@@ -187,6 +188,12 @@ function makeRoadBlock() {
   );
   m.name = "RoadBlock";
   m.userData.tintable = true;
+  // Vertical box, not the jersey slope/trough. The trough is a lid the hull
+  // parks on; the slope launches. Same footprint as the visual (0.56 × 1.06 ×
+  // 2.2 after the visual's rotateY).
+  const box = new THREE.BoxGeometry(2.2, 1.06, 0.56);
+  box.translate(0, 1.06 / 2, 0);
+  m.userData.collisionGeometry = box;
   return m;
 }
 
@@ -687,6 +694,11 @@ function roadArchGroup() {
     mat(0xf07020, { roughness: 0.78, metalness: 0 }),
   );
   m.name = "RoadArch";
+  // Visual is a hollow shell; collision is the filled horseshoe so a fast hit
+  // on the end-cap cannot land the hull inside the 0.95 m wall.
+  const solid = filledVaultCollisionGeometry(Ri, Ro, depth);
+  solid.translate(0, -SINK, 0);
+  m.userData.collisionGeometry = solid;
   return m;
 }
 
@@ -782,10 +794,9 @@ function holeWallPort(target, cfg, R, bottomY) {
  *    the only way in is a jump. Nothing is clipped because nothing needs to be —
  *    at 10 m up there is no wheel to catch on the bottom of the ring.
  *
- * Collision is `solid` for both and needs nothing special, for the same reason
- * the holed deck needs nothing special: the bake only ever contains triangles
- * that exist, so the port is genuinely empty space and the plate is genuinely a
- * wall.
+ * Collision is `solid` for both. The glowing rim is `noCollide` — it stands
+ * proud of the plate as a lid the hull used to park on around the mouth. The
+ * plate is the wall; the port is empty space in the bake.
  */
 function buildHoleWall(cfg, name) {
   const { width: W, bottom: B, top: T, depth: D, radius: R, mouthY, rim } = cfg;
@@ -842,7 +853,7 @@ function buildHoleWall(cfg, name) {
   // no trouble with. It costs 6 cm off a 10 m opening.
   const rimShape = holeWallPort(new THREE.Shape(), cfg, R + rim, mouthY == null ? null : mouthY - rim);
   rimShape.holes.push(holeWallPort(new THREE.Path(), cfg, R - SINK, mouthY));
-  g.add(new THREE.Mesh(
+  const rimMesh = new THREE.Mesh(
     extrude(rimShape, D + 0.24),
     mat(HOLE_WALL_GLOW, {
       roughness: 0.35,
@@ -850,7 +861,11 @@ function buildHoleWall(cfg, name) {
       emissive: HOLE_WALL_GLOW,
       emissiveIntensity: 3.5,
     }),
-  ));
+  );
+  // Glow band stands proud of the plate — a lid the hull parks on around the
+  // mouth. The plate is the wall; this is paint.
+  rimMesh.userData.noCollide = true;
+  g.add(rimMesh);
 
   // ── Hazard columns down both ends ──────────────────────────────────────────
   // Painted, not stacked rings — same reasoning as the pole's bands, and it
@@ -2484,9 +2499,17 @@ export class PropManager {
             ? { geometry: proxy, matrixWorld: o.matrixWorld, updateMatrixWorld() {} }
             : o);
         }
-        // SOLIDS KEEP THE WHOLE SOLID. Driving into a ramp's flank or its end
-        // wall should stop you; only probing them as GROUND was ever wrong.
-        if (inst.collision === "solid" || inst.collision === "both") solids.push(o);
+        // SOLIDS: a stand-in when the visual is a hollow shell or a sit-on
+        // lid (arch wall, jersey trough) — same shape of object the deck
+        // channel already uses, so bakeFromMeshes still reads `.geometry` and
+        // `.matrixWorld`.
+        if (inst.collision === "solid" || inst.collision === "both") {
+          const proxy = o.userData.collisionGeometry
+            ?? o.geometry?.userData?.solidGeometry;
+          solids.push(proxy
+            ? { geometry: proxy, matrixWorld: o.matrixWorld, updateMatrixWorld() {} }
+            : o);
+        }
       });
     }
     return { deck, solids };
@@ -2721,6 +2744,8 @@ export class PropManager {
       // collisionMeshes), so disposing only the visible one leaks it — and
       // importInstances disposes EVERY prop on every track load.
       o.geometry?.userData?.deckGeometry?.dispose?.();
+      o.geometry?.userData?.solidGeometry?.dispose?.();
+      o.userData.collisionGeometry?.dispose?.();
       // Template-backed props (scenery, container, tire wall) hand out clones
       // that share ONE cached geometry per type, so deleting a single floodlight
       // must not free the buffers the others are still drawing with.
