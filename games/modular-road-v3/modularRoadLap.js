@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { startNewLineDist } from "./modularRoadKit.js";
+import { startNewLineDist, finishNewLineDist, straightGameLineDist } from "./modularRoadKit.js";
 
 /**
  * Lap timing + checkpoint validation for the modular road's drive mode.
@@ -26,7 +26,11 @@ const _inPos = new THREE.Vector3();
 const _outPos = new THREE.Vector3();
 const _yAxis = new THREE.Vector3(0, 1, 0);
 
-const GAME_LABEL = { start: "START", start_new: "START", checkpoint: "CHECKPOINT", finish: "FINISH" };
+const GAME_LABEL = {
+  start: "START", start_new: "START",
+  checkpoint: "CHECKPOINT", checkpoint_new: "CHECKPOINT",
+  finish: "FINISH", finish_new: "FINISH",
+};
 const LAP_LINE_TYPES = new Set(["start", "start_new"]);
 
 /** Format seconds as m:ss.mmm (or ss.mmm under a minute). */
@@ -70,9 +74,13 @@ export class LapTracker {
       if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
       fwd.normalize();
       let pos;
-      if (p.id === "start_new") {
+      if (p.id === "start_new" || p.id === "finish_new" || p.id === "start" || p.id === "finish") {
         const hw = p.hw ?? this.halfWidth - 2;
-        pos = _inPos.clone().addScaledVector(fwd, startNewLineDist(p.pp ?? {}, hw));
+        let dist;
+        if (p.id === "finish_new") dist = finishNewLineDist(p.pp ?? {}, hw);
+        else if (p.id === "start_new") dist = startNewLineDist(p.pp ?? {}, hw);
+        else dist = straightGameLineDist(p.pp ?? {}, p.id === "finish");
+        pos = _inPos.clone().addScaledVector(fwd, dist);
       } else {
         pos = _inPos.clone().add(_outPos).multiplyScalar(0.5);
       }
@@ -82,7 +90,9 @@ export class LapTracker {
     }
     // Lap line = first start, else first finish, else first gate.
     this.startIndex = this.gates.findIndex((g) => LAP_LINE_TYPES.has(g.type));
-    if (this.startIndex < 0) this.startIndex = this.gates.findIndex((g) => g.type === "finish");
+    if (this.startIndex < 0) {
+      this.startIndex = this.gates.findIndex((g) => g.type === "finish" || g.type === "finish_new");
+    }
     if (this.startIndex < 0 && this.gates.length) this.startIndex = 0;
     this.reset();
   }

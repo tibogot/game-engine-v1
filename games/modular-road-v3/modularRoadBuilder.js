@@ -189,8 +189,10 @@ export class ModularRoadBuilder {
    * @param {THREE.Material} [o.vaultShellMaterial] vaulted road-tunnel shell
    * @param {THREE.Material} [o.tunnelGlowMaterial] vault LED battens (bloom)
    * @param {THREE.Material} [o.decorMaterial] start/finish/checkpoint decor
-   * @param {THREE.Material} [o.decorGateMaterial] start_new gantry frame
+   * @param {THREE.Material} [o.decorGateMaterial] start_new / finish_new gantry frame
    * @param {THREE.Material} [o.decorGlowMaterial] start_new gantry bloom stroke
+   * @param {THREE.Material} [o.finishGlowMaterial] finish_new gantry bloom stroke (pink)
+   * @param {THREE.Material} [o.checkpointGlowMaterial] checkpoint_new yellow line
    * @param {THREE.Material} [o.glassMaterial] shared pane material (glass road)
    * @param {THREE.Material} [o.tubeMaterial] cheap dedicated shader for rideable tubes
    * @param {THREE.Camera} [o.camera] for free-placement gizmo
@@ -209,6 +211,8 @@ export class ModularRoadBuilder {
     decorMaterial = null,
     decorGateMaterial = null,
     decorGlowMaterial = null,
+    finishGlowMaterial = null,
+    checkpointGlowMaterial = null,
     glassMaterial = null,
     tubeMaterial = null,
     camera = null,
@@ -226,6 +230,8 @@ export class ModularRoadBuilder {
     this.decorMaterial = decorMaterial;
     this.decorGateMaterial = decorGateMaterial;
     this.decorGlowMaterial = decorGlowMaterial;
+    this.finishGlowMaterial = finishGlowMaterial;
+    this.checkpointGlowMaterial = checkpointGlowMaterial;
     this.glassMaterial = glassMaterial;
     this.tubeMaterial = tubeMaterial;
     this.orbit = orbit;
@@ -2319,6 +2325,26 @@ export class ModularRoadBuilder {
   }
 
   /**
+   * Glow stroke material + kind for a piece. Vault LEDs, start gantry (green)
+   * and finish gantry (pink) share the decorGlow mesh slot, so the kind is what
+   * instancing and drive-mode merge key off.
+   */
+  _glowKind(def) {
+    if (def?.shell === "vault") return "tunnel";
+    if (def?.game === "finish" || def?.game === "finish_new") return "finish";
+    if (def?.game === "checkpoint_new") return "checkpoint";
+    return null;
+  }
+
+  _glowMaterial(def) {
+    const kind = this._glowKind(def);
+    if (kind === "tunnel") return this.tunnelGlowMaterial || this.decorGlowMaterial;
+    if (kind === "finish") return this.finishGlowMaterial || this.decorGlowMaterial;
+    if (kind === "checkpoint") return this.checkpointGlowMaterial || this.decorGlowMaterial;
+    return this.decorGlowMaterial;
+  }
+
+  /**
    * Build a per-piece mesh. It is kept (in root, but INVISIBLE) purely as a
    * collision / undo / edit handle — `bakeFromMeshes` reads its geometry +
    * matrixWorld, and undo/rebuild dispose its geometry. Visible rendering is the
@@ -2391,9 +2417,11 @@ export class ModularRoadBuilder {
         p.shellMesh?.userData.vault ? "vaultShell" : "shell");
       add(p.decorMesh, this.decorMaterial, "decor");
       add(p.decorGateMesh, this.decorGateMaterial, "decorGate");
-      add(p.decorGlowMesh,
-        p.decorGlowMesh?.userData.glowKind === "tunnel" ? this.tunnelGlowMaterial : this.decorGlowMaterial,
-        p.decorGlowMesh?.userData.glowKind === "tunnel" ? "tunnelGlow" : "decorGlow");
+      add(p.decorGlowMesh, this._glowMaterial(PIECE_BY_ID.get(p.id)),
+        p.decorGlowMesh?.userData.glowKind === "tunnel" ? "tunnelGlow"
+          : p.decorGlowMesh?.userData.glowKind === "finish" ? "finishGlow"
+            : p.decorGlowMesh?.userData.glowKind === "checkpoint" ? "checkpointGlow"
+              : "decorGlow");
       add(p.glassMesh, this.glassMaterial, "glass");
     }
     // ── REUSE THE BATCHES, REWRITE THE MATRICES ──────────────────────────────
@@ -2518,9 +2546,7 @@ export class ModularRoadBuilder {
       decorGateMesh.castShadow = true;
       decorGateMesh.receiveShadow = false;
     }
-    const glowMat = built.def.shell === "vault"
-      ? (this.tunnelGlowMaterial || this.decorGlowMaterial)
-      : this.decorGlowMaterial;
+    const glowMat = this._glowMaterial(built.def);
     const decorGlowMesh = built.decorGlowGeometry && glowMat
       ? this._makeMesh(built.decorGlowGeometry, glowMat, built.world)
       : null;
@@ -2528,7 +2554,8 @@ export class ModularRoadBuilder {
       decorGlowMesh.castShadow = false;
       decorGlowMesh.receiveShadow = false;
       decorGlowMesh.userData.isGlow = true;
-      if (built.def.shell === "vault") decorGlowMesh.userData.glowKind = "tunnel";
+      const kind = this._glowKind(built.def);
+      if (kind) decorGlowMesh.userData.glowKind = kind;
     }
     const glassMesh =
       built.glassGeometry && this.glassMaterial
@@ -3849,9 +3876,7 @@ export class ModularRoadBuilder {
     }
 
     if (built.decorGlowGeometry) {
-      const glowMat = built.def.shell === "vault"
-        ? (this.tunnelGlowMaterial || this.decorGlowMaterial)
-        : this.decorGlowMaterial;
+      const glowMat = this._glowMaterial(built.def);
       if (p.decorGlowMesh) {
         p.decorGlowMesh.geometry.dispose();
         p.decorGlowMesh.geometry = built.decorGlowGeometry;
@@ -3865,7 +3890,7 @@ export class ModularRoadBuilder {
         p.decorGlowMesh.userData.isGlow = true;
       }
       if (p.decorGlowMesh) {
-        p.decorGlowMesh.userData.glowKind = built.def.shell === "vault" ? "tunnel" : null;
+        p.decorGlowMesh.userData.glowKind = this._glowKind(built.def);
       }
     } else if (p.decorGlowMesh) {
       this.root.remove(p.decorGlowMesh);
@@ -3883,7 +3908,8 @@ export class ModularRoadBuilder {
     this.clear();
     if (!Array.isArray(entries)) return;
     for (const e of entries) {
-      if (!PIECE_BY_ID.has(e.id) || !Array.isArray(e.connectorIn) || e.connectorIn.length !== 16) continue;
+      const id = e.id === "checkpoint" ? "checkpoint_new" : e.id;
+      if (!PIECE_BY_ID.has(id) || !Array.isArray(e.connectorIn) || e.connectorIn.length !== 16) continue;
       const connectorIn = new THREE.Matrix4().fromArray(e.connectorIn);
       // THROUGH _makePieceEntry, NOT A HAND-BUILT LITERAL. This used to assemble
       // the piece record inline — the same forty lines as _makePieceEntry, kept in
@@ -3895,9 +3921,9 @@ export class ModularRoadBuilder {
       // mapped all 41 slots of rushline onto ONE piece object: the track came back
       // scrambled, and 40 of the 41 meshes vanished from pickPiece's raycast set,
       // which is why right-click stopped selecting anything. It only ever affected
-      // tracks loaded from disk, so the history tests — which build with place() —
-      // never saw it.
-      const piece = this._makePieceEntry(e.id, e.chainId ?? 0, connectorIn, e.pp, e.edges ?? true);
+      // tracks loaded from disk, so the history tests — which build with place()
+      // — never saw it.
+      const piece = this._makePieceEntry(id, e.chainId ?? 0, connectorIn, e.pp, e.edges ?? true);
       // Saved absolute pin for a free-placed piece; the tilt recovery below reads
       // it, and rebuildAll uses it in place of the running connector.
       piece.detached = !!e.detached;
@@ -4009,7 +4035,7 @@ export class ModularRoadBuilder {
     // ── Climb into the sky a bit more ───────────────────────────────────────
     put("slope", { slopeLength: 30, slopeRise: 8 });
     put("straight", { straightLength: 18 });
-    put("checkpoint", { gameLineLength: 16 });
+    put("checkpoint_new", { gameLineLength: 16 });
     put("curve", { curveRadius: R, curveAngle: 90, curveDir: 1 });
 
     // ── Signature jump → empty air → fresh landing chain ────────────────────
@@ -4116,7 +4142,7 @@ export class ModularRoadBuilder {
 
       put("channel", { straightLength: 26, channelRadius: chanR }); // Tubes → Half-pipe
       put("scurve", { curveRadius: 20, curveAngle: 38, curveDir: 1 }); // Turns → S Right
-      put("checkpoint", { gameLineLength: 16 });
+      put("checkpoint_new", { gameLineLength: 16 });
 
       // Tubes → Road Tunnel, another Tube, then Road Tunnel Turn
       put("tunnel_lit", { straightLength: 26, tunnelHeight: 7.2 });
@@ -4260,8 +4286,9 @@ const PIECE_TO_CATEGORY = {
   quarterpipe_down: "loop",
   start: "game",
   start_new: "game",
-  checkpoint: "game",
+  checkpoint_new: "game",
   finish: "game",
+  finish_new: "game",
   junction_split: "junctions",
   junction_merge: "junctions",
   junction_y: "junctions",

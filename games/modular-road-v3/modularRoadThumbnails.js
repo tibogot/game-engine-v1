@@ -46,7 +46,7 @@ const THUMB_DEFAULTS = { ...pieceParams };
  *
  * @param {object} o
  * @param {THREE.WebGPURenderer} o.renderer
- * @param {{road:THREE.Material, rail?:THREE.Material, shell?:THREE.Material, decor?:THREE.Material, decorGate?:THREE.Material, decorGlow?:THREE.Material, glass?:THREE.Material, tube?:THREE.Material}} o.materials
+ * @param {{road:THREE.Material, rail?:THREE.Material, shell?:THREE.Material, decor?:THREE.Material, decorGate?:THREE.Material, decorGlow?:THREE.Material, finishGlow?:THREE.Material, checkpointGlow?:THREE.Material, glass?:THREE.Material, tube?:THREE.Material}} o.materials
  * @param {{key:string, pieceId?:string, params?:object, make?:()=>THREE.Object3D}[]} o.items
  * @param {THREE.Texture} [o.environment] optional IBL (the main scene's PMREM) for correct lighting
  * @param {number} [o.size=128]
@@ -153,7 +153,12 @@ export async function bakeRoadThumbnails({
       addMesh(built.decorGeometry, materials.decor);
       addMesh(built.decorGateGeometry, materials.decorGate);
       addMesh(built.decorGlowGeometry, built.def.shell === "vault" && materials.tunnelGlow
-        ? materials.tunnelGlow : materials.decorGlow);
+        ? materials.tunnelGlow
+        : (built.def.game === "finish" || built.def.game === "finish_new") && materials.finishGlow
+          ? materials.finishGlow
+          : built.def.game === "checkpoint_new" && materials.checkpointGlow
+            ? materials.checkpointGlow
+            : materials.decorGlow);
       addMesh(built.glassGeometry, materials.glass);
     }
     return group.children.length > 0;

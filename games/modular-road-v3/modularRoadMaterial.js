@@ -1293,12 +1293,12 @@ export function createTunnelGlowMaterialForThumb() {
   });
 }
 
-/** Vertex-colored material for start/finish/checkpoint decor meshes. */
+/** Vertex-colored material for start/finish/checkpoint decor meshes.
+ *  Unlit on purpose: Standard + IBL + ACES turns checker white grey and lifts
+ *  the black. These are graphics on the road, not painted asphalt. */
 export function createDecorMaterial() {
-  return new THREE.MeshStandardMaterial({
+  return new THREE.MeshBasicMaterial({
     vertexColors: true,
-    roughness: 0.62,
-    metalness: 0.04,
     side: THREE.DoubleSide,
   });
 }
@@ -1347,6 +1347,63 @@ export function createStartGateGlowMaterialForThumb() {
     emissiveIntensity: 3,
     roughness: 0.3,
     metalness: 0.05,
+  });
+}
+
+/** Emissive finish gantry stroke — pink neon, same bloom path as start. */
+export function createFinishGateGlowMaterial() {
+  const m = new THREE.MeshStandardNodeMaterial({
+    color: new THREE.Color(0xff4ec8),
+    roughness: 0.3,
+    metalness: 0.05,
+    emissive: new THREE.Color(0xff4ec8),
+    emissiveIntensity: 5.5,
+  });
+  m.colorNode = materialColor;
+  applyBloomMRT(m, materialEmissive);
+  m.userData.bloom = true;
+  m.userData.batchKey = "finishGateGlow";
+  return m;
+}
+
+export function createFinishGateGlowMaterialForThumb() {
+  return new THREE.MeshStandardMaterial({
+    color: 0xff4ec8,
+    emissive: 0xff4ec8,
+    emissiveIntensity: 3,
+    roughness: 0.3,
+    metalness: 0.05,
+  });
+}
+
+/** Emissive checkpoint stripe — yellow neon, same bloom path as the gantries. */
+export function createCheckpointGlowMaterial() {
+  const m = new THREE.MeshStandardNodeMaterial({
+    color: new THREE.Color(0xffe14a),
+    roughness: 0.3,
+    metalness: 0.05,
+    emissive: new THREE.Color(0xffe14a),
+    emissiveIntensity: 6.5,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -4,
+    polygonOffsetUnits: -4,
+  });
+  m.colorNode = materialColor;
+  applyBloomMRT(m, materialEmissive);
+  m.userData.bloom = true;
+  m.userData.batchKey = "checkpointGlow";
+  return m;
+}
+
+export function createCheckpointGlowMaterialForThumb() {
+  return new THREE.MeshStandardMaterial({
+    color: 0xffe14a,
+    emissive: 0xffe14a,
+    emissiveIntensity: 4,
+    roughness: 0.3,
+    metalness: 0.05,
+    side: THREE.DoubleSide,
   });
 }
 

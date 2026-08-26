@@ -3,6 +3,8 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
 /** Start gantry neon — green, distinct from checkpoint cyan. */
 const START_GATE_GLOW = 0x3dff8a;
+/** Finish gantry neon — pink, so Finish (rounded) reads apart from Start (rounded). */
+const FINISH_GATE_GLOW = 0xff4ec8;
 
 /** Thin strip Shape along a 2-D polyline (XY), half-width `halfW`. */
 function neonStrokeShape(pts, halfW) {
@@ -161,4 +163,26 @@ export function buildStartNewGateGeometries(fr, roadWidth) {
   return { body, glow: glow ?? body.clone() };
 }
 
-export { START_GATE_GLOW };
+/**
+ * Semicircle neon arch for checkpoint_new — yellow bloom, no posts or deck line.
+ * Centreline is a half-ring of radius ~ road half-width, so the feet sit on the
+ * kerbs and the apex clears the car by several metres.
+ *
+ * @param {{pos:THREE.Vector3,tangent:THREE.Vector3,up:THREE.Vector3,right:THREE.Vector3}} fr
+ * @param {number} roadWidth kerb-to-kerb (m)
+ * @returns {THREE.BufferGeometry}
+ */
+export function buildCheckpointArchGeometry(fr, roadWidth) {
+  const hw = roadWidth / 2;
+  const R = hw + 0.15;
+  const tube = 0.14;
+  const SINK = 0.08;
+  const geo = new THREE.TorusGeometry(R, tube, 10, 36, Math.PI);
+  geo.translate(0, -SINK, 0);
+  applyGateFrame(geo, fr);
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+export { START_GATE_GLOW, FINISH_GATE_GLOW };

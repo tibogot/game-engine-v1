@@ -80,8 +80,12 @@ import {
   createDecorMaterial,
   createStartGateBodyMaterial,
   createStartGateGlowMaterial,
+  createFinishGateGlowMaterial,
+  createCheckpointGlowMaterial,
   createStartGateBodyMaterialForThumb,
   createStartGateGlowMaterialForThumb,
+  createFinishGateGlowMaterialForThumb,
+  createCheckpointGlowMaterialForThumb,
   createRoadGlassMaterial,
   createTubeMaterial,
   readRoadLook,
@@ -402,6 +406,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const decorMaterial = createDecorMaterial();
   const startGateBodyMaterial = createStartGateBodyMaterial();
   const startGateGlowMaterial = createStartGateGlowMaterial();
+  const finishGateGlowMaterial = createFinishGateGlowMaterial();
+  const checkpointGlowMaterial = createCheckpointGlowMaterial();
   // Cheap dedicated tube shader — tubes used to ride createRoadMaterial, so
   // every pixel of a bore evaluated the asphalt graph. Same look (inner/outer
   // + neon), FrontSide. Weather rebuilds the ROAD material; this one stays.
@@ -447,6 +453,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     decorMaterial,
     decorGateMaterial: startGateBodyMaterial,
     decorGlowMaterial: startGateGlowMaterial,
+    finishGlowMaterial: finishGateGlowMaterial,
+    checkpointGlowMaterial,
     glassMaterial,
     tubeMaterial,
     camera,
@@ -673,6 +681,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     decor: decorMaterial,
     decorGate: createStartGateBodyMaterialForThumb(),
     decorGlow: createStartGateGlowMaterialForThumb(),
+    finishGlow: createFinishGateGlowMaterialForThumb(),
+    checkpointGlow: createCheckpointGlowMaterialForThumb(),
     tube: tubeMaterial,
     // NOT the live pane material. Transmission composites against a copy of
     // the backdrop, and a thumbnail is rendered into a bare RT with no
@@ -2147,7 +2157,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     { pick: (p) => (p.shellMesh?.userData.vault ? p.shellMesh : null), mat: () => vaultShellMaterial, cast: true },
     { pick: (p) => p.decorMesh, mat: () => decorMaterial, cast: false },
     { pick: (p) => p.decorGateMesh, mat: () => startGateBodyMaterial, cast: true },
-    { pick: (p) => (p.decorGlowMesh?.userData.glowKind === "tunnel" ? null : p.decorGlowMesh), mat: () => startGateGlowMaterial, cast: false },
+    { pick: (p) => (!p.decorGlowMesh || p.decorGlowMesh.userData.glowKind ? null : p.decorGlowMesh), mat: () => startGateGlowMaterial, cast: false },
+    { pick: (p) => (p.decorGlowMesh?.userData.glowKind === "finish" ? p.decorGlowMesh : null), mat: () => finishGateGlowMaterial, cast: false },
+    { pick: (p) => (p.decorGlowMesh?.userData.glowKind === "checkpoint" ? p.decorGlowMesh : null), mat: () => checkpointGlowMaterial, cast: false },
     { pick: (p) => (p.decorGlowMesh?.userData.glowKind === "tunnel" ? p.decorGlowMesh : null), mat: () => tunnelGlowMaterial, cast: false },
     // GLAZING. Its absence here was not a missed optimisation, it was a hole in
     // the road: drive mode hides the per-piece meshes and draws this list

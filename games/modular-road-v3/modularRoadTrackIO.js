@@ -82,7 +82,15 @@ export function importTrack(data, ctx) {
   assignPlainParams(ctx.roadParams, data.roadParams);
   assignPlainParams(ctx.guardrailParams, data.guardrailParams);
   assignPlainParams(ctx.pieceParams, data.pieceParams);
-  if (ctx.portalParams && data.portalParams) assignPlainParams(ctx.portalParams, data.portalParams);
+  if (ctx.portalParams && data.portalParams) {
+    assignPlainParams(ctx.portalParams, data.portalParams);
+    // Pre-scale tracks stored the 3.5 × 4.5 door the car did not fit through.
+    if (ctx.portalParams.width === 3.5 && ctx.portalParams.height === 4.5) {
+      ctx.portalParams.width = 6.5;
+      ctx.portalParams.height = 8;
+      if (ctx.portalParams.exitOffset === 2.75) ctx.portalParams.exitOffset = 4;
+    }
+  }
   // Filled in for the caller to push at its material — importTrack does not
   // touch the renderer. Absent in pre-look saves, and left untouched then, so
   // loading an old track does not reset a look the user just dialled in.

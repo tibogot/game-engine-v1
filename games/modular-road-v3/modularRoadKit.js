@@ -8,7 +8,7 @@ import {
   buildRailCollisionAlongPath,
   buildMirroredRailAlongPath,
 } from "./modularRoadRail.js";
-import { buildStartNewGateGeometries } from "./modularRoadStartGate.js";
+import { buildStartNewGateGeometries, buildCheckpointArchGeometry } from "./modularRoadStartGate.js";
 
 /**
  * Modular Road kit — parametric track pieces built by sweeping a single shared
@@ -135,9 +135,9 @@ export const pieceParams = {
   loopSpiralRise: 32, // total height climbed over the helix (m)
   // Game line pieces (start / checkpoint / finish):
   gameLineLength: 16,
-  /** Longer stub on start_new (rounded terminus + gantry). */
+  /** Longer stub on start_new / finish_new (rounded terminus + gantry). */
   gameStartStub: 14,
-  /** How far past the nose diameter the start line + gantry sit (m). */
+  /** How far past the nose diameter the start / finish line + gantry sit (m). */
   gameStartLineOffset: 6,
   /** Car spawn sits this many metres before the start line on start_new. */
   gameStartSpawnBackset: 4,
@@ -1786,7 +1786,7 @@ function roundedEndSockets(pp) {
   };
 }
 
-/** Params snapshot for start_new — longer stub by default. */
+/** Params snapshot for start_new / finish_new — longer stub by default. */
 function _startNewParams(pp) {
   const stub = Math.max(4, pp.gameStartStub ?? pp.roundEndLength ?? 14);
   return pp.roundEndLength === stub ? pp : { ...pp, roundEndLength: stub };
@@ -4188,25 +4188,16 @@ export const PIECE_CATALOG = [
   {
     id: "start",
     label: "Start",
-    hint: "Start line + arch",
+    hint: "Straight — neon start gantry at the line",
     swatch: "#2ecc71",
     key: "s",
     points: gameLinePoints,
     game: "start",
   },
   {
-    id: "checkpoint",
-    label: "Checkpoint",
-    hint: "Arch + direction arrows",
-    swatch: "#3498db",
-    key: "p",
-    points: gameLinePoints,
-    game: "checkpoint",
-  },
-  {
     id: "finish",
     label: "Finish",
-    hint: "Checkered line + arch (both ends)",
+    hint: "Straight — neon finish gantry at the line",
     swatch: "#e74c3c",
     key: "f",
     points: gameLinePoints,
@@ -4214,7 +4205,7 @@ export const PIECE_CATALOG = [
   },
   {
     id: "start_new",
-    label: "Start (new)",
+    label: "Start (rounded)",
     hint: "Rounded terminus + neon start gantry at the line",
     swatch: "#27ae60",
     key: "",
@@ -4224,6 +4215,28 @@ export const PIECE_CATALOG = [
     railPath: (pp, rp) => roundedEndRailFrames(_startNewParams(pp), rp, true),
     plain: true,
     game: "start_new",
+  },
+  {
+    id: "finish_new",
+    label: "Finish (rounded)",
+    hint: "Same rounded terminus as Start (rounded), nose past the exit + neon finish gantry",
+    swatch: "#ff4ec8",
+    key: "",
+    points: (pp) => roundedEndPoints(_startNewParams(pp)),
+    sockets: (pp) => roundedEndSockets(_startNewParams(pp)),
+    geometry: (pp, rp, edges = true) => buildRoundedEndGeometry(_startNewParams(pp), rp, edges, false),
+    railPath: (pp, rp) => roundedEndRailFrames(_startNewParams(pp), rp, false),
+    plain: true,
+    game: "finish_new",
+  },
+  {
+    id: "checkpoint_new",
+    label: "Checkpoint",
+    hint: "Straight — yellow neon semicircle arch",
+    swatch: "#ffe14a",
+    key: "p",
+    points: gameLinePoints,
+    game: "checkpoint_new",
   },
   {
     id: "quarterpipe",
@@ -4825,7 +4838,7 @@ export const LATERAL_TILEABLE = new Set([
   "rounded_start", "rounded_end",
   "slope", "link", "crest", "jump", "dive", "gap", "landing", "brow",
   "quarterpipe", "quarterpipe_down",
-  "start", "start_new", "checkpoint", "finish",
+  "start", "start_new", "checkpoint_new", "finish", "finish_new",
   "tunnel", "channel",
   "tunnel_lit",
   "junction_y", "junction_t", "junction_cross",
@@ -4893,8 +4906,9 @@ const _END_TANGENTS = {
   scurve: flatEndTangents,
   start: flatEndTangents,
   start_new: flatEndTangents,
-  checkpoint: flatEndTangents,
+  checkpoint_new: flatEndTangents,
   finish: flatEndTangents,
+  finish_new: flatEndTangents,
   curve: curveEndTangents,
   banked: curveEndTangents,
   // Exact, because the climb is smoothstepped: dy/dt is 0 at both ends, so the
@@ -5029,9 +5043,8 @@ for (const id of [
 /* Game-piece decor (checkered lines, arches, arrows)                       */
 /* ----------------------------------------------------------------------- */
 
-const _DECO_BLACK = new THREE.Color(0x111111);
-const _DECO_WHITE = new THREE.Color(0xf4f4f4);
-const _DECO_GREY = new THREE.Color(0xd8d8d8);
+const _DECO_BLACK = new THREE.Color(0x000000);
+const _DECO_WHITE = new THREE.Color(0xffffff);
 const _DECO_YELLOW = new THREE.Color(0xffcc00);
 
 /** Interpolate a transport frame at `dist` metres from the piece entry. */
@@ -5068,10 +5081,33 @@ export function startNewLineDist(pp, hw) {
   return hw + Math.max(2, pp.gameStartLineOffset ?? pieceParams.gameStartLineOffset ?? 6);
 }
 
-/** Deck markings for start_new — checker at the start line only. */
-function buildStartNewMarkingsGeometry(frames, profileData, pp) {
+/** Metres from the piece entry to the finish line / gantry on finish_new.
+ *  Mirror of start_new: same offset in from the rounded nose. */
+export function finishNewLineDist(pp, hw) {
+  const stub = Math.max(4, pp.gameStartStub ?? pp.roundEndLength ?? 14);
+  return Math.max(2, stub + hw - startNewLineDist(pp, hw));
+}
+
+/** Metres from the piece entry to the gantry on a straight start / finish. */
+export function straightGameLineDist(pp, atFinish = false) {
+  const L = Math.max(4, pp.gameLineLength ?? pieceParams.gameLineLength ?? 16);
+  const offset = Math.max(2, pp.gameStartLineOffset ?? pieceParams.gameStartLineOffset ?? 6);
+  return atFinish ? Math.max(2, L - offset) : Math.min(L - 2, offset);
+}
+
+/** Gantry / checker distance for any start or finish piece. */
+export function gameGantryLineDist(gameType, pp, hw) {
+  if (gameType === "finish_new") return finishNewLineDist(pp, hw);
+  if (gameType === "start_new") return startNewLineDist(pp, hw);
+  if (gameType === "finish") return straightGameLineDist(pp, true);
+  return straightGameLineDist(pp, false);
+}
+
+/** Deck markings for start_new / finish_new — checker at the line only. */
+function buildStartNewMarkingsGeometry(frames, profileData, pp, lineDist) {
   const hw = profileData.hw;
-  const gateFr = _frameAtArcLength(frames, startNewLineDist(pp, hw));
+  const dist = lineDist ?? startNewLineDist(pp, hw);
+  const gateFr = _frameAtArcLength(frames, dist);
   const part = _checkerPart(gateFr, hw, 3.2, 8, 2);
   return _partToGeo(part);
 }
@@ -5153,106 +5189,6 @@ function _checkerPart(fr, hw, depth, cols, rows) {
     }
   }
   return part;
-}
-
-function _archPart(fr, hw, height) {
-  const part = _geoPart();
-  const up = fr.up.clone().normalize();
-  const right = fr.right.clone().normalize();
-  const tan = fr.tangent.clone().normalize();
-  const origin = fr.pos.clone();
-  const postH = height * 0.82;
-  const beamR = 0.18;
-  const segs = 14;
-
-  const postW = 0.22;
-  for (const side of [-1, 1]) {
-    const cx = right.clone().multiplyScalar(side * hw);
-    const bl = origin.clone().add(cx).addScaledVector(tan, -postW * 0.5);
-    const br = origin.clone().add(cx).addScaledVector(tan, postW * 0.5);
-    const tl = bl.clone().addScaledVector(up, postH);
-    const tr = br.clone().addScaledVector(up, postH);
-    _pushQuad(part, bl, br, tr, tl, right.clone().multiplyScalar(side), _DECO_WHITE, _DECO_WHITE, _DECO_WHITE, _DECO_WHITE);
-  }
-
-  for (let i = 0; i < segs; i++) {
-    const t0 = (Math.PI * i) / segs;
-    const t1 = (Math.PI * (i + 1)) / segs;
-    const c0 = Math.cos(t0);
-    const s0 = Math.sin(t0);
-    const c1 = Math.cos(t1);
-    const s1 = Math.sin(t1);
-    const p0 = origin.clone().addScaledVector(right, -hw * c0).addScaledVector(up, postH + height * 0.18 * s0);
-    const p1 = origin.clone().addScaledVector(right, -hw * c1).addScaledVector(up, postH + height * 0.18 * s1);
-    const p2 = p1.clone().addScaledVector(up, beamR);
-    const p3 = p0.clone().addScaledVector(up, beamR);
-    const mid = p0.clone().add(p1).multiplyScalar(0.5).sub(origin).normalize();
-    _pushQuad(part, p0, p1, p2, p3, mid, _DECO_GREY, _DECO_GREY, _DECO_GREY, _DECO_GREY);
-  }
-  return part;
-}
-
-function _chevronPart(fr, hw, length, width) {
-  const part = _geoPart();
-  const n = fr.up.clone().normalize();
-  // Tip points ALONG travel (tangent). It used to sit at −length, which aimed
-  // the chevron back up the track.
-  const tip = _deckPt(fr, 0, length);
-  const l = _deckPt(fr, -width, 0);
-  const r = _deckPt(fr, width, 0);
-  // Winding keeps the normal = +up after flipping the tip forward.
-  _pushTri(part, tip, r, l, n, _DECO_YELLOW, _DECO_YELLOW, _DECO_YELLOW);
-  return part;
-}
-
-function _bannerPart(fr, hw, height, textColor) {
-  const part = _geoPart();
-  const up = fr.up.clone().normalize();
-  const right = fr.right.clone().normalize();
-  const tan = fr.tangent.clone().normalize();
-  const origin = fr.pos.clone();
-  const y0 = height * 0.55;
-  const y1 = height * 0.78;
-  const bl = origin.clone().addScaledVector(right, -hw * 0.55).addScaledVector(up, y0).addScaledVector(tan, 0.35);
-  const br = origin.clone().addScaledVector(right, hw * 0.55).addScaledVector(up, y0).addScaledVector(tan, 0.35);
-  const tl = origin.clone().addScaledVector(right, -hw * 0.55).addScaledVector(up, y1).addScaledVector(tan, 0.35);
-  const tr = origin.clone().addScaledVector(right, hw * 0.55).addScaledVector(up, y1).addScaledVector(tan, 0.35);
-  _pushQuad(part, bl, br, tr, tl, tan.clone().negate(), textColor, textColor, textColor, textColor);
-  return part;
-}
-
-/** Visual-only geometry for start / checkpoint / finish pieces. */
-export function buildGameDecorGeometry(frames, profileData, gameType) {
-  const hw = profileData.hw;
-  const parts = [];
-  const f0 = frames[0];
-  const fN = frames[frames.length - 1];
-
-  if (gameType === "start") {
-    parts.push(_checkerPart(f0, hw, 3.2, 8, 2));
-    parts.push(_archPart(f0, hw, 6.5));
-    parts.push(_bannerPart(f0, hw, 6.5, _DECO_WHITE));
-  } else if (gameType === "finish") {
-    parts.push(_checkerPart(f0, hw, 3.2, 8, 2));
-    parts.push(_archPart(f0, hw, 6.5));
-    parts.push(_checkerPart(fN, hw, 3.2, 8, 2));
-    parts.push(_archPart(fN, hw, 6.5));
-    parts.push(_bannerPart(fN, hw, 6.5, _DECO_BLACK));
-  } else if (gameType === "checkpoint") {
-    const mid = frames[Math.floor(frames.length / 2)];
-    parts.push(_archPart(mid, hw, 6));
-    parts.push(_bannerPart(mid, hw, 6, _DECO_YELLOW));
-    const step = Math.max(2, Math.floor(frames.length / 5));
-    for (let i = step; i < frames.length - step * 0.5; i += step) {
-      parts.push(_chevronPart(frames[i], hw * 0.55, 2.8, hw * 0.42));
-    }
-  }
-
-  if (!parts.length) return null;
-  const geos = parts.map(_partToGeo);
-  const merged = mergeGeometries(geos, false);
-  for (const g of geos) g.dispose();
-  return merged;
 }
 
 /* ----------------------------------------------------------------------- */
@@ -5539,15 +5475,16 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
     } else if (def.shell) {
       shellGeometry = buildShellGeometry(def.shell, frames, profileData, pp);
     }
-    if (def.game === "start_new") {
-      const lineDist = startNewLineDist(pp, profileData.hw);
+    if (def.game === "start" || def.game === "start_new" || def.game === "finish" || def.game === "finish_new") {
+      const lineDist = gameGantryLineDist(def.game, pp, profileData.hw);
       const gateFr = _frameAtArcLength(frames, lineDist);
-      decorGeometry = buildStartNewMarkingsGeometry(frames, profileData, pp);
+      decorGeometry = buildStartNewMarkingsGeometry(frames, profileData, pp, lineDist);
       const gate = buildStartNewGateGeometries(gateFr, profileData.hw * 2);
       decorGateGeometry = gate.body;
       decorGlowGeometry = gate.glow;
-    } else if (def.game) {
-      decorGeometry = buildGameDecorGeometry(frames, profileData, def.game);
+    } else if (def.game === "checkpoint_new") {
+      const mid = frames[Math.floor(frames.length / 2)];
+      decorGlowGeometry = buildCheckpointArchGeometry(mid, profileData.hw * 2);
     } else if (def.decor) {
       decorGeometry = def.decor(pp, rpForProfile);
     }

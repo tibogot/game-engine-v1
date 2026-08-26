@@ -1,5 +1,7 @@
 import * as THREE from "three";
+import { materialColor, materialEmissive } from "three/tsl";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
+import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { TIRE } from "../../v3/play/modularRoadVehicle.js";
 
 /**
@@ -9,10 +11,12 @@ import { TIRE } from "../../v3/play/modularRoadVehicle.js";
 
 export const DEFAULT_PORTAL_PARAMS = {
   enabled: true,
-  width: 3.5,
-  height: 4.5,
+  // Opening is sized for the Emira hull (2.10 m wide, 4.85 m long, ~1.3 m tall)
+  // with room to drive through off-centre. The old 3.5 × 4.5 sat under the car.
+  width: 6.5,
+  height: 8,
   /** Local +Z exit offset (m) so the car clears the trigger volume. */
-  exitOffset: 2.75,
+  exitOffset: 4,
   /** Mutual cooldown after a teleport (s). */
   cooldownTime: 2.2,
   /** Min horizontal speed (m/s) toward the portal plane to trigger. */
@@ -30,6 +34,43 @@ const _exitQuat = new THREE.Quaternion();
 const _yAxis = new THREE.Vector3(0, 1, 0);
 const _invMat = new THREE.Matrix4();
 
+function portalMat(hex, opts = {}) {
+  const m = new THREE.MeshStandardNodeMaterial({
+    color: new THREE.Color(hex),
+    roughness: opts.roughness ?? 0.7,
+    metalness: opts.metalness ?? 0.1,
+    emissive: new THREE.Color(opts.emissive ?? 0x000000),
+    emissiveIntensity: opts.emissiveIntensity ?? 1,
+    transparent: !!opts.transparent,
+    opacity: opts.opacity ?? 1,
+    depthWrite: opts.depthWrite ?? true,
+    side: opts.side ?? THREE.FrontSide,
+  });
+  m.envMapIntensity = 0;
+  m.colorNode = materialColor;
+  if (opts.bloom) {
+    applyBloomMRT(m, materialEmissive);
+    m.userData.bloom = true;
+  }
+  return m;
+}
+
+/** Three downward V's — header marker on the live (−Z) face. */
+function entryChevronGeometry(W, beam) {
+  const hw = Math.min(0.48, W * 0.07);
+  const hh = Math.min(0.52, beam * 0.62);
+  const xs = [-W * 0.26, 0, W * 0.26];
+  const pos = [];
+  for (const x of xs) {
+    // CCW from +Z; the mesh is rotated 180° so FrontSide faces the approach.
+    pos.push(x, -hh, 0, x - hw, hh, 0, x + hw, hh, 0);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
 function yawQuatFromObject(obj, out) {
   obj.getWorldQuaternion(out);
   const yaw = Math.atan2(
@@ -39,53 +80,83 @@ function yawQuatFromObject(obj, out) {
   return out.setFromAxisAngle(_yAxis, yaw);
 }
 
-/** Exported for the palette thumbnail bake (roadGame bakes "portal_door"). */
+/** Exported for the palette thumbnail bake (roadGame bakes "portal_door").
+ *  Live face is local −Z (drive toward +Z through the sheet). +Z is the dead back. */
 export function buildPortalMesh(params, colorHex, side) {
   const W = params.width;
   const H = params.height;
   const hw = W / 2;
   const hh = H / 2;
+  const beam = 0.75;
+  const sheet = 0.06;
 
   const root = new THREE.Group();
   root.name = side === "a" ? "PortalA" : side === "b" ? "PortalB" : "PortalDoor";
 
-  const frameMat = new THREE.MeshStandardMaterial({
-    color: 0x1a1030,
+  const frameMat = portalMat(0x1a1030, {
     roughness: 0.4,
     metalness: 0.7,
     emissive: side === "b" ? 0x440066 : 0x003366,
-    emissiveIntensity: 0.45,
+    emissiveIntensity: 0.35,
   });
 
-  const surfaceMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: new THREE.Color(colorHex),
-    emissiveIntensity: 1.35,
+  const surfaceMat = portalMat(colorHex, {
+    roughness: 0.22,
+    metalness: 0.05,
+    emissive: colorHex,
+    emissiveIntensity: 4.2,
     transparent: true,
-    opacity: 0.72,
-    blending: THREE.AdditiveBlending,
+    opacity: 0.78,
     depthWrite: false,
-    side: THREE.DoubleSide,
+    bloom: true,
   });
 
-  const postL = new THREE.Mesh(new THREE.BoxGeometry(0.45, H + 0.5, 0.45), frameMat);
-  postL.position.set(-hw - 0.22, hh + 0.25, 0);
+  const backMat = portalMat(0x08060e, {
+    roughness: 0.88,
+    metalness: 0.25,
+    emissive: new THREE.Color(colorHex).multiplyScalar(0.06).getHex(),
+    emissiveIntensity: 0.4,
+  });
+
+  const chevronMat = portalMat(colorHex, {
+    roughness: 0.22,
+    metalness: 0.05,
+    emissive: colorHex,
+    emissiveIntensity: 5.5,
+    bloom: true,
+  });
+
+  const postL = new THREE.Mesh(new THREE.BoxGeometry(beam, H + 0.7, beam), frameMat);
+  postL.position.set(-hw - beam * 0.5, hh + 0.35, 0);
   postL.castShadow = true;
   root.add(postL);
 
-  const postR = new THREE.Mesh(new THREE.BoxGeometry(0.45, H + 0.5, 0.45), frameMat);
-  postR.position.set(hw + 0.22, hh + 0.25, 0);
+  const postR = new THREE.Mesh(new THREE.BoxGeometry(beam, H + 0.7, beam), frameMat);
+  postR.position.set(hw + beam * 0.5, hh + 0.35, 0);
   postR.castShadow = true;
   root.add(postR);
 
-  const lintel = new THREE.Mesh(new THREE.BoxGeometry(W + 0.9, 0.45, 0.45), frameMat);
-  lintel.position.set(0, H + 0.45, 0);
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(W + beam * 2, beam, beam), frameMat);
+  lintel.position.set(0, H + beam, 0);
   lintel.castShadow = true;
   root.add(lintel);
 
-  const surface = new THREE.Mesh(new THREE.PlaneGeometry(W, H), surfaceMat);
-  surface.position.set(0, hh, 0.06);
+  // Live sheet faces the approach (−Z). FrontSide, so the dead side never sees it.
+  const surface = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.08, H - 0.08), surfaceMat);
+  surface.rotation.y = Math.PI;
+  surface.position.set(0, hh, -sheet);
   root.add(surface);
+
+  // Opaque shutter on +Z — culled from the live side, so the sheet stays see-through.
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(W + 0.04, H + 0.04), backMat);
+  back.position.set(0, hh, sheet);
+  back.castShadow = true;
+  root.add(back);
+
+  const chevrons = new THREE.Mesh(entryChevronGeometry(W, beam), chevronMat);
+  chevrons.rotation.y = Math.PI;
+  chevrons.position.set(0, H + beam * 0.35, -beam * 0.5 - 0.04);
+  root.add(chevrons);
 
   return { root, surfaceMat, frameMat };
 }
@@ -286,8 +357,8 @@ export class PortalManager {
     const t = this._elapsed;
     const pulse = (door, phase) => {
       if (!door?.surfaceMat) return;
-      door.surfaceMat.emissiveIntensity = 1.1 + 0.55 * Math.sin(t * 2.5 + phase);
-      door.surfaceMat.opacity = 0.62 + 0.18 * Math.sin(t * 1.7 + phase * 0.8);
+      door.surfaceMat.emissiveIntensity = 3.6 + 1.2 * Math.sin(t * 2.5 + phase);
+      door.surfaceMat.opacity = 0.68 + 0.14 * Math.sin(t * 1.7 + phase * 0.8);
     };
     for (const pair of this.pairs) {
       pulse(pair.a, 0);
