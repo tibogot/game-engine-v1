@@ -577,6 +577,89 @@ function neonGateGroup() {
 }
 
 /**
+ * Exactly the LEFT HALF of Neon gate, cut at centre. Same numbers, materials,
+ * sink and neon stroke — just one post + half the top bar. No hang tip.
+ * Origin sits on the post (shifted +hw) so a kerb drop plants like the gate.
+ */
+function neonArmGroup() {
+  const W = roadParams.width;
+  const T = 0.72;
+  const D = 0.38;
+  const C = 1.85;
+  const clearH = 7.2;
+  const H = clearH + T;
+  const hw = W / 2;
+  const iw = hw - T;
+  const ih = clearH;
+  const SINK = 0.06;
+  const neonHalf = 0.07;
+
+  const g = new THREE.Group();
+  g.name = "NeonArm";
+
+  // Left half of the gate frame, cut on the centre line (x = 0 in gate space).
+  const outline = new THREE.Shape();
+  outline.moveTo(-hw, -SINK);
+  outline.lineTo(-hw, H - C);
+  outline.lineTo(-hw + C, H);
+  outline.lineTo(0, H);
+  outline.lineTo(0, ih);
+  outline.lineTo(-iw + C, ih);
+  outline.lineTo(-iw, ih - C);
+  outline.lineTo(-iw, -SINK);
+  outline.closePath();
+
+  const geo = new THREE.ExtrudeGeometry(outline, {
+    depth: D,
+    bevelEnabled: false,
+    curveSegments: 1,
+  });
+  geo.translate(hw, 0, -D / 2); // post near x=0 for kerb placement
+
+  g.add(new THREE.Mesh(
+    geo,
+    mat(NEON_GATE_BODY, { roughness: 0.55, metalness: 0.35, bloom: false }),
+  ));
+
+  // Same medial neon as the gate's left stroke — stop short of the cut so the
+  // glowing end-cap does not sit on the tip face.
+  const tipStop = 1.15;
+  const cxL = T / 2;
+  const cyTop = ih + T / 2;
+  const cChamferY = cyTop - C;
+  const neonPts = [
+    { x: cxL, y: -SINK },
+    { x: cxL, y: cChamferY },
+    { x: cxL + C, y: cyTop },
+    { x: hw - tipStop, y: cyTop },
+  ];
+
+  const neonDepth = D + 0.1;
+  const stroke = new THREE.ExtrudeGeometry(neonStrokeShape(neonPts, neonHalf), {
+    depth: neonDepth,
+    bevelEnabled: false,
+    curveSegments: 1,
+  });
+  stroke.translate(0, 0, -neonDepth / 2);
+  const neon = new THREE.Mesh(
+    stroke,
+    mat(NEON_GATE_GLOW, {
+      roughness: 0.3,
+      metalness: 0.05,
+      emissive: NEON_GATE_GLOW,
+      emissiveIntensity: 5.5,
+    }),
+  );
+  neon.userData.isGlow = true;
+  neon.userData.noCollide = true;
+  g.add(neon);
+
+  g.userData.thumbFit = 0.75;
+  return g;
+}
+
+
+/**
  * Short orange vault — a half-pipe tunnel you drive through, a bit narrower
  * than the default deck so a centred drop sits inside the kerbs.
  *
@@ -1655,6 +1738,15 @@ export const PROP_CATALOG = [
      */
     collision: "none",
     make: () => neonGateGroup(),
+  },
+  {
+    id: "neonarm",
+    label: "Neon arm",
+    /**
+     * Left half of Neon gate, cut at centre — one post + half top bar.
+     */
+    collision: "none",
+    make: () => neonArmGroup(),
   },
 
   // ── SCENERY ────────────────────────────────────────────────────────────────
