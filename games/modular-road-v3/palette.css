@@ -15,8 +15,8 @@
         --bg-input: #1e1e1e;
         --border: #3c3c3c;
         --border-light: #4a4a4a;
-        --text: #cccccc;
-        --text-dim: #888888;
+        --text: #f2f4f7;
+        --text-dim: #c5ccd6;
         --accent: #4a9eff;
         --green: #5cb85c;
         --tm-yellow: #dce622;
@@ -308,7 +308,7 @@
         background: rgba(255, 255, 255, 0.06);
         border: 1px solid rgba(255, 255, 255, 0.14);
         border-radius: 2px;
-        color: #aaa;
+        color: #e8eaf0;
         cursor: pointer;
         padding: 4px 10px;
         font-size: 9px;
@@ -525,7 +525,7 @@
         font-weight: 700;
         letter-spacing: 0.09em;
         text-transform: uppercase;
-        color: #6b7382;
+        color: #c4cad4;
         flex-shrink: 0;
       }
       /* The category, so the strip reads SELECTED · JUNCTIONS · Split R. Dimmer
@@ -538,7 +538,7 @@
         font-style: italic;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: #7f8899;
+        color: #e4e8ee;
         flex-shrink: 0;
         white-space: nowrap;
       }
@@ -589,7 +589,7 @@
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 2px;
-        color: #aab2c0;
+        color: #f0f2f6;
         cursor: pointer;
         font-size: 9px;
         font-weight: 700;
@@ -627,7 +627,7 @@
         margin: 4px 0;
         font-family: var(--font-mono);
         font-size: 10px;
-        color: #8892a0;
+        color: #c8d0dc;
       }
       .mover-row > span { flex: 0 0 46px; }
       .mover-row > input[type="range"] {
@@ -647,20 +647,20 @@
         font-family: var(--font-mono);
         font-size: 9px;
         line-height: 1.45;
-        color: #5d6470;
+        color: #a8b2be;
       }
 
       #road-status {
         margin-top: 8px;
         font-size: 10px;
-        color: #8892a0;
+        color: #c8d0dc;
         font-family: var(--font-mono);
         line-height: 1.5;
       }
       #build-hints {
         margin-top: 6px;
         font-size: 10px;
-        color: #8892a0;
+        color: #c8d0dc;
         line-height: 1.55;
       }
       #build-hints kbd {
@@ -686,7 +686,7 @@
         font-style: italic;
         letter-spacing: 1.4px;
         text-transform: uppercase;
-        color: #5d6470;
+        color: #c8ced8;
       }
       /* Clear is the one button that throws work away, so it does not get to
          look like Save sitting next to it. */
@@ -708,7 +708,7 @@
         background: rgba(255, 255, 255, 0.06);
         border: 1px solid rgba(255, 255, 255, 0.14);
         border-radius: 50%;
-        color: #aab2c0;
+        color: #f0f2f6;
         cursor: pointer;
         font-family: var(--font-display);
         font-size: 12px; font-weight: 800; line-height: 1;
@@ -728,7 +728,7 @@
       }
       #key-legend span {
         display: flex; align-items: center; gap: 3px;
-        font-size: 9px; color: #7c8492;
+        font-size: 9px; color: #c2cad6;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
       #road-help-link {
@@ -737,7 +737,7 @@
         border: 1px dashed rgba(255, 255, 255, 0.16);
         border-radius: 2px;
         padding: 4px 0;
-        color: #8892a0;
+        color: #d0d6e0;
         cursor: pointer;
         font-family: var(--font-display);
         font-size: 9px; font-weight: 700; font-style: italic;
@@ -801,11 +801,9 @@
 
       /* ── COLLAPSIBLE GROUPS ──────────────────────────────────────────────
          Native <details>, so open/closed state needs no JS and nothing to keep
-         in sync. Build stays open (it is what you use while building); Track and
-         Test fold away, because the panel cannot fit everything — the piece grid
-         alone is ~580px of a ~780px viewport, so this scrolls no matter what.
-         The point is not to remove the scroll, it is to stop burying the
-         controls you reach for most. */
+         in sync. Track and Test start open (same as Build) so Save / Load /
+         Test drive are visible without a click; they still fold if you want
+         the piece grid more room. */
       .palette-group {
         margin-top: 10px;
         padding-top: 10px;
@@ -820,10 +818,10 @@
       .palette-group > summary::-webkit-details-marker { display: none; }
       .palette-group > summary::after {
         content: " ▸";
-        color: #4a505a;
+        color: #9aa3b0;
       }
       .palette-group[open] > summary::after { content: " ▾"; }
-      .palette-group > summary:hover { color: #aab2c0; }
+      .palette-group > summary:hover { color: #fff; }
       /* Inside a group the separator is the <details> border, not the toolbar's. */
       .palette-toolbar-sub {
         margin-top: 6px;
@@ -881,7 +879,7 @@
         line-height: 1.9;
         cursor: help;
       }
-      #key-legend .legend-dim { color: #5d6470; }
+      #key-legend .legend-dim { color: #a8b2be; }
 
 /* ── PIPELINE WARM-UP COVER ────────────────────────────────────────────────
    Hides the canvas while warmUpTrackPipelines() draws the whole track once to

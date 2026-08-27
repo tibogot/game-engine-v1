@@ -16,9 +16,11 @@ import { formatRunTime } from "./modularRoadRun.js";
 const CHECK_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 
-// Match the v3 editor's --right-w (300px). Narrower than that and prop-rows
-// (label + range + readout) clip on the right edge of the panel.
-const DEV_PANEL_OPEN_W = 300;
+// Wider than the v3 editor's --right-w (300px). At 300, a prop-row of label
+// (90px) + range (browser min ~129px) + readout (52px) plus the scrollbar
+// clipped ~18px off the right edge. 360 matches games/rts-v3/devPanel.js and
+// leaves room for the slider to sit fully inside the panel.
+const DEV_PANEL_OPEN_W = 360;
 
 /**
  * @param {object} o
@@ -1742,9 +1744,18 @@ export function createRoadDevPanel({ app, game, params }) {
       display: flex; flex-direction: column; overflow: hidden;
       font-family: var(--font);
       pointer-events: auto;
+      box-sizing: border-box;
     }
-    /* Readouts like "80 m/s" need more than the editor's default 36px. */
-    #road-dev .prop-num { width: auto; min-width: 52px; }
+    /* Readouts like "80 m/s" need more than the editor's default 36px.
+       min-width: 0 on the row/value/range so Chrome's ~129px range default
+       cannot shove the readout past the panel edge. */
+    #road-dev .prop-row { min-width: 0; }
+    #road-dev .prop-value { min-width: 0; }
+    #road-dev .prop-value input[type="range"] { min-width: 0; }
+    #road-dev .prop-num {
+      width: auto; min-width: 52px; flex-shrink: 0;
+      white-space: nowrap; font-variant-numeric: tabular-nums;
+    }
     #road-dev .prop-label { width: 90px; min-width: 90px; }
     #road-dev .tab-bar { flex: 0 0 auto; }
     #road-dev .tab-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
@@ -1795,10 +1806,10 @@ export function createRoadDevPanel({ app, game, params }) {
     #road-dev #hint[data-mode="build"] .hint-build { display: block; }
     #road-dev #hint[data-mode="drive"] .hint-drive { display: block; }
     #road-dev .dv-world-name {
-      max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     /* NESTED GROUPS. editor.css pads .section-body, so a body inside a body
-       would double-indent and eat the panel's 300px width. The group body
+       would double-indent and eat the panel's width. The group body
        contributes no padding of its own; the children keep theirs. */
     #road-dev .dv-group-body { padding: 0; }
     /* The parent reads as a heading, the children as items under it. */
