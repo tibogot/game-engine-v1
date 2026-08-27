@@ -924,12 +924,15 @@ function sweepCollisionSheet(frames, section, baseLat, zSign, positions, indices
 /**
  * Minimum collision thickness (m).
  *
- * The chassis samples the solids BVH with an 8 cm skin and no sweep. At 50 m/s
- * that is 21 cm per substep, so a paper sheet is stepped over in one tick and
- * the car ends up inside the rail. 0.38 m is enough that the entry face is
- * still the closest surface after a missed frame. The visible beam is 0.26 m;
- * the extra depth goes into the FIELD (posts already live there), so the
- * traffic face — the one the car can see — does not move.
+ * The chassis samples the solids BVH with an 8 cm skin. At 50 m/s that is
+ * 21 cm per substep, so a paper sheet is stepped over in one tick and the
+ * car ends up inside the rail. 0.38 m is enough that the entry face is
+ * still the closest surface after a missed frame. Head-on into a U-nose is
+ * the same slab — thickening it opened a trough the hull parked in (the
+ * hole-wall rim again). Sweep on the solids resolver covers the rest.
+ * The visible beam is 0.26 m; the extra depth goes into the FIELD (posts
+ * already live there), so the traffic face — the one the car can see —
+ * does not move.
  *
  * No ridge, no floor: a top face is a lid the hull parks on, a bottom face is
  * what closest-point uses to throw the car up. Two vertical walls, wound so
@@ -950,13 +953,15 @@ const RAIL_COLLISION_DEPTH = 0.38;
  * along the road, which is the graze that used to brake the car on every seam.
  *
  * Traffic face stays at the visible beam's traffic face (`-prof.backZ`).
+ *
+ * @param {number} [minDepth]
  */
-function railCollisionWalls(rp, r, zSign) {
+function railCollisionWalls(rp, r, zSign, minDepth = RAIL_COLLISION_DEPTH) {
   const kerbTop = rp.railHeight;
   const prof = railProfile({ ...r, humps: r.style, flip: r.flipW });
   const beamTop = kerbTop + r.gap + r.height * 0.5 + prof.height * 0.5;
   const zFace = -prof.backZ;
-  const depth = Math.max(prof.depth, RAIL_COLLISION_DEPTH);
+  const depth = Math.max(prof.depth, minDepth);
   const zBack = zFace + (prof.backZ < 0 ? -depth : depth);
   const trafficUp = [
     { y: kerbTop, z: zFace },
@@ -1154,7 +1159,9 @@ export function buildRailAlongPath(frames, rp, r = railParams, opts = {}) {
   return merged;
 }
 
-/** Collision stand-in for {@link buildRailAlongPath} — same slab as {@link buildRailCollision}. */
+/** Collision stand-in for {@link buildRailAlongPath} — same 0.38 m slab as
+ *  {@link buildRailCollision}. Do not thicken this: a deeper back face is an
+ *  open trough the hull parks in (hole-wall rim). Sweep stops the punch-through. */
 export function buildRailCollisionAlongPath(frames, rp, r = railParams) {
   if (r.height <= 0 || !frames?.length) return null;
   // Same section as buildRailCollision, traffic face first — the side it lands

@@ -150,6 +150,26 @@ function driveThrough(run, gate, vel = velFwd) {
 }
 
 {
+  const run = new RunTracker();
+  run.buildGates([
+    piece("start_new", 0, 0, -20),
+    piece("finish_new", 0, -36, -56),
+  ]);
+  driveThrough(run, run.gates[0]);
+  for (let i = 0; i < 12; i++) {
+    run.update(DT, run.gates[0].pos.clone().addScaledVector(run.gates[0].fwd, 4), velFwd);
+  }
+  const first = driveThrough(run, run.gates[1]);
+  check("first finish is a record with no delta", first.isRecord && !Number.isFinite(first.delta) && run.finishIsRecord);
+  driveThrough(run, run.gates[0]);
+  for (let i = 0; i < 24; i++) {
+    run.update(DT, run.gates[0].pos.clone().addScaledVector(run.gates[0].fwd, 4), velFwd);
+  }
+  const slower = driveThrough(run, run.gates[1]);
+  check("slower finish is not a record and has a +delta", !slower.isRecord && slower.delta > 0);
+}
+
+{
   check("format under a minute", formatRunTime(5.123) === "05.123");
   check("format with minutes", formatRunTime(65.5) === "1:05.500");
   check("format of NaN", formatRunTime(NaN) === "--:--.---");

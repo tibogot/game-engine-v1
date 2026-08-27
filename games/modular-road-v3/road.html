@@ -101,6 +101,8 @@
         display: none;
       }
       #race-clock.on { display: block; }
+      #race-clock.done #race-time { color: #7cffb4; }
+      #race-clock.done.behind #race-time { color: #ffd24a; }
       #race-time {
         font-variant-numeric: tabular-nums; font-weight: 700;
         font-size: 40px; line-height: 1; letter-spacing: 0.5px;
@@ -119,6 +121,34 @@
       #race-flash.show { opacity: 1; }
       #race-flash.good { color: #7cffb4; }
       #race-flash.bad { color: #ff9a8c; }
+      #race-result {
+        position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+        text-align: center; color: #fff;
+        display: none;
+      }
+      #race-result.on { display: block; }
+      #race-result-tag {
+        font-size: 12px; font-weight: 800; letter-spacing: 3.5px;
+        text-transform: uppercase; color: #cfd6e0;
+      }
+      #race-result.record #race-result-tag { color: #7cffb4; }
+      #race-result-time {
+        margin-top: 6px;
+        font-variant-numeric: tabular-nums; font-weight: 800;
+        font-size: 58px; line-height: 1; letter-spacing: 0.5px;
+      }
+      #race-result.record #race-result-time { color: #7cffb4; }
+      #race-result-delta {
+        margin-top: 6px;
+        font-variant-numeric: tabular-nums; font-weight: 700; font-size: 22px;
+        min-height: 26px;
+      }
+      #race-result.ahead #race-result-delta { color: #7cffb4; }
+      #race-result.behind #race-result-delta { color: #ff9a8c; }
+      #race-result-hint {
+        margin-top: 14px; font-size: 12px; font-weight: 600;
+        letter-spacing: 0.4px; color: #9fb0c4;
+      }
       #race-split {
         position: absolute; top: 92px; left: 50%; transform: translateX(-50%);
         font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 700;
@@ -805,6 +835,12 @@
       </div>
       <div id="race-split"></div>
       <div id="race-flash"></div>
+      <div id="race-result">
+        <div id="race-result-tag"></div>
+        <div id="race-result-time"></div>
+        <div id="race-result-delta"></div>
+        <div id="race-result-hint">R or drive through START to retry</div>
+      </div>
       <!-- Drift chain. Hidden (opacity 0) until a chain is live. -->
       <div id="race-drift">
         <div id="race-drift-bank"></div>

@@ -2533,21 +2533,26 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     if (ev.kind === "start") {
       ghost.discard();
       ghost.beginLap();
+      audioSystem.playCue("start");
     } else if (ev.kind === "checkpoint") {
-      if (Number.isFinite(ev.splitDelta)) showSplit(ev.splitDelta);
-      else if (hudSplit && Number.isFinite(ev.time)) {
-        // First run: no PB to delta against, so flash the split clock itself.
+      if (Number.isFinite(ev.splitDelta)) {
+        showSplit(ev.splitDelta);
+        audioSystem.playCue(ev.splitDelta < 0 ? "cpAhead" : "cpBehind");
+      } else if (hudSplit && Number.isFinite(ev.time)) {
         hudSplit.textContent = formatRunTime(ev.time);
         hudSplit.className = "show";
         splitTimer = 2.0;
+        audioSystem.playCue("cp");
       }
     } else if (ev.kind === "finish") {
       if (ev.isRecord) {
         ghost.commit();
         saveRecord();
+        devPanel?.refresh();
       } else {
         ghost.discard();
       }
+      audioSystem.playCue(ev.isRecord ? "record" : "finish");
     }
   }
 
@@ -2572,12 +2577,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * Two separate things:
    *  • Absolute void backstop — ALWAYS on. A car below FALL_Y is truly lost (fell
    *    through the world), so send it back to the start.
-   *  • Air-stunt rule — GAME MODE ONLY (`raceRespawn`). Dropping FALL_DROP below
-   *    the last track contact snaps you back to that safe pose.
+   *  • Air-stunt rule — GAME MODE. Dropping FALL_DROP below the last track
+   *    contact snaps you back to that safe pose. On whenever a sprint course
+   *    exists (start+finish), or when the dev toggle is forced on. Clock keeps
+   *    running — you pay for the miss.
    *
-   * In free-drive (`raceRespawn` off, the default for now) the car simply FALLS
-   * off the track and lands on the terrain, which is drivable — no respawn. The
-   * old always-on version looped: respawn at the edge → fall → repeat.
+   * In free-drive (no course, toggle off) the car simply FALLS off the track
+   * and lands on the terrain, which is drivable — no respawn. The old always-on
+   * version looped: respawn at the edge → fall → repeat.
    */
   /**
    * The absolute backstop height, which is not a constant in sky mode.
@@ -2682,7 +2689,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       return;
     }
 
-    if (!raceRespawn) return; // free-drive: fall to terrain and keep driving
+    if (!(raceRespawn || run.hasCourse)) return; // free-drive: fall to terrain
 
     if (hasSafe && y < lastSafeY - FALL_DROP) recoverToSafePose();
   }
@@ -4302,6 +4309,10 @@ ${e.message}`);
   const hudSub = document.getElementById("race-sub");
   const hudFlash = document.getElementById("race-flash");
   const hudSplit = document.getElementById("race-split");
+  const hudResult = document.getElementById("race-result");
+  const hudResultTag = document.getElementById("race-result-tag");
+  const hudResultTime = document.getElementById("race-result-time");
+  const hudResultDelta = document.getElementById("race-result-delta");
   // The arc speedo's three elements. Its markup is commented out in road.html
   // (the segment dash replaced it), so these are null and every use below is
   // guarded — uncomment the markup and the arc drives itself again.
@@ -4402,21 +4413,43 @@ ${e.message}`);
 
   function updateRaceHud(dt) {
     if (!hud) return;
-    setClass(hudClock, run.hasCourse ? "on" : "");
     if (run.hasCourse) {
       // Frozen after finish, 0.000 while armed, live while running.
       const shown = run.running || run.finished ? run.currentTime : 0;
       setText(hudTime, formatRunTime(shown));
       setText(hudSub, run.subLabel);
+      let clockCls = "on";
+      if (run.finished) {
+        clockCls += run.finishIsRecord || (Number.isFinite(run.finishDelta) && run.finishDelta < 0)
+          ? " done"
+          : " done behind";
+      }
+      setClass(hudClock, clockCls);
+    } else {
+      setClass(hudClock, "");
     }
 
-    // Centre flash mirrors the runner's own message (GO! / NEW BEST / FINISH).
-    if (run.messageTimer > 0 && run.message) {
-      setText(hudFlash, run.message);
-      const good = /BEST|GO|FINISH/.test(run.message);
-      setClass(hudFlash, `show ${good ? "good" : ""}`);
-    } else {
+    // Result card stays up until the next start / R. GO! still uses the flash.
+    if (run.finished) {
       setClass(hudFlash, "");
+      const rec = run.finishIsRecord;
+      const d = run.finishDelta;
+      let resCls = rec ? "on record" : "on";
+      if (Number.isFinite(d)) resCls += d < 0 ? " ahead" : " behind";
+      setClass(hudResult, resCls);
+      setText(hudResultTag, rec ? "NEW BEST" : "FINISHED");
+      setText(hudResultTime, formatRunTime(run.currentTime));
+      setText(hudResultDelta, Number.isFinite(d)
+        ? `${d < 0 ? "−" : "+"}${Math.abs(d).toFixed(3)}`
+        : "");
+    } else {
+      setClass(hudResult, "");
+      if (run.messageTimer > 0 && run.message) {
+        setText(hudFlash, run.message);
+        setClass(hudFlash, /GO/.test(run.message) ? "show good" : "show");
+      } else {
+        setClass(hudFlash, "");
+      }
     }
 
     if (splitTimer > 0) {

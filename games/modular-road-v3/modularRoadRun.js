@@ -60,6 +60,8 @@ export class RunTracker {
     this.subLabel = "";
     this.message = "";
     this.messageTimer = 0;
+    this.finishIsRecord = false;
+    this.finishDelta = NaN;
     this.reset();
   }
 
@@ -122,6 +124,8 @@ export class RunTracker {
     this._splits = null;
     this.message = "";
     this.messageTimer = 0;
+    this.finishIsRecord = false;
+    this.finishDelta = NaN;
     this._resetSides();
     this._refreshSub();
   }
@@ -137,6 +141,8 @@ export class RunTracker {
     this.passed = 0;
     this.nextIndex = this.hasCourse ? this.startIndex : -1;
     this._splits = null;
+    this.finishIsRecord = false;
+    this.finishDelta = NaN;
     this._resetSides();
     this._refreshSub();
   }
@@ -237,15 +243,14 @@ export class RunTracker {
     const isRecord = !Number.isFinite(prevBest) || time < prevBest;
     this.running = false;
     this.finished = true;
+    this.finishIsRecord = isRecord;
+    this.finishDelta = Number.isFinite(prevBest) ? time - prevBest : NaN;
     if (isRecord) {
       this.bestTime = time;
       this.bestSplits = this._splits ? this._splits.slice() : null;
-      this._flash(`NEW BEST  ${formatRunTime(time)}`, 4);
-    } else {
-      this._flash(`FINISH  ${formatRunTime(time)}`, 4);
     }
     this._refreshSub();
-    return { kind: "finish", gate, time, isRecord, prevBest };
+    return { kind: "finish", gate, time, isRecord, prevBest, delta: this.finishDelta };
   }
 
   _beginRun() {
@@ -256,6 +261,8 @@ export class RunTracker {
     this._splits = new Array(this.gates.length);
     for (let i = 0; i < this._splits.length; i++) this._splits[i] = NaN;
     this.nextIndex = this.startIndex + 1;
+    this.finishIsRecord = false;
+    this.finishDelta = NaN;
     this._resetSides();
     this._flash("GO!");
     this._refreshSub();
@@ -281,7 +288,7 @@ export class RunTracker {
     }
     const best = `Best ${formatRunTime(this.bestTime)}`;
     if (this.finished) {
-      this.subLabel = `FINISHED  ·  ${best}`;
+      this.subLabel = best;
       return;
     }
     if (!this.running) {

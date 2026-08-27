@@ -1759,6 +1759,10 @@ export const SOLID = {
    * substep; only things inside the actual SKIN get pushed out positionally.
    * Splitting the two is what keeps the collider tight (shape still matters, no
    * floating) while making it impossible to step over.
+   *
+   * Used by the deck resolver AND the solids BVH. A rounded start/finish nose
+   * is a thin wall hit head-on; without the band the leftover speed after the
+   * first scrape carried the hull through and the back face spat it out.
    */
   sweepMargin: 1.6,
   /** Fraction of the overlap corrected per substep. <1 damps jitter when several
@@ -5431,10 +5435,13 @@ export class Vehicle {
     const skin = SOLID.skin;
     const reach = Math.max(skin, SOLID.insideReach);
     const sitY = SOLID.sitNormalMaxY;
-    // QUERY RADIUS is `insideReach`, not the skin. A sample that skipped the
+    const band = Math.max(skin, this.body.vel.length() * dt * SOLID.sweepMargin);
+    const queryR = Math.max(reach, band);
+    // QUERY RADIUS is at least `insideReach`. A sample that skipped the
     // 8 cm band and landed in a cavity is still found; the loop then IGNORES
     // any outside contact beyond the skin unless a ray along the away normal
-    // hits another face (walled in). See SOLID.insideReach.
+    // hits another face (walled in), OR the sample would cross the skin this
+    // substep (sweep — see SOLID.sweepMargin). See SOLID.insideReach.
     this._solidN.set(0, 0, 0);
     this._solidPoint.set(0, 0, 0);
     this._deepestN.set(0, 0, 0);
@@ -5448,7 +5455,7 @@ export class Vehicle {
       this._geomToWorld(this._hullCentreLocal, this._hullCentreW);
       const near = bvh.closestPointWithNormal(
         this._hullCentreW.x, this._hullCentreW.y, this._hullCentreW.z,
-        this._hullRadius + reach, this._bpN,
+        this._hullRadius + queryR, this._bpN,
       );
       if (!near) return;
     }
@@ -5459,7 +5466,7 @@ export class Vehicle {
     for (const sp of this.SOLID_BOX_SAMPLES) {
       this._geomToWorld(sp, this._sphC);
       const res = bvh.closestPointWithNormal(
-        this._sphC.x, this._sphC.y, this._sphC.z, reach, this._sphN,
+        this._sphC.x, this._sphC.y, this._sphC.z, queryR, this._sphN,
       );
       if (!res) continue;
       // `_sphN` is flipped toward the query (away from the closest face).
@@ -5469,31 +5476,57 @@ export class Vehicle {
       let pen;
       if (res.distance < skin) {
         pen = skin - res.distance;
-      } else if (bvh.raycastFirst) {
-        // Close but not overlapping. A ray along the away normal that hits
-        // another face means the sample is walled in (rail U, hollow wall).
-        // End-cap punch: away runs down the middle of a long solid and misses,
-        // so a horizontal perpendicular is tried too (arch pillar).
-        this._cavityFrom.copy(this._sphC).addScaledVector(this._sphN, 0.002);
-        let blocked = bvh.raycastFirst(this._cavityFrom, this._sphN, reach);
-        if (!blocked) {
-          const px = -nz, pz = nx;
-          const plen = Math.hypot(px, pz);
-          if (plen > 0.1) {
-            this._cavitySide.set(px / plen, 0, pz / plen);
-            blocked = bvh.raycastFirst(this._cavityFrom, this._cavitySide, reach)
-              || bvh.raycastFirst(this._cavityFrom, this._cavitySide.negate(), reach);
+      } else {
+        let recovered = false;
+        if (bvh.raycastFirst) {
+          // Close but not overlapping. A ray along the away normal that hits
+          // another face means the sample is walled in (rail U, hollow wall).
+          // End-cap punch: away runs down the middle of a long solid and misses,
+          // so a horizontal perpendicular is tried too (arch pillar).
+          this._cavityFrom.copy(this._sphC).addScaledVector(this._sphN, 0.002);
+          let blocked = bvh.raycastFirst(this._cavityFrom, this._sphN, reach);
+          if (!blocked) {
+            const px = -nz, pz = nx;
+            const plen = Math.hypot(px, pz);
+            if (plen > 0.1) {
+              this._cavitySide.set(px / plen, 0, pz / plen);
+              blocked = bvh.raycastFirst(this._cavityFrom, this._cavitySide, reach)
+                || bvh.raycastFirst(this._cavityFrom, this._cavitySide.negate(), reach);
+            }
+          }
+          if (blocked) {
+            // Shortest exit is toward the closest face. That is wrong when the
+            // closest face is the FAR wall of a rail slab — pushing that way is
+            // how a sprint into a start/finish nose went out the back. If that
+            // exit continues the motion, take the other wall (the way we came).
+            let ox = -nx, oy = -ny, oz = -nz;
+            this.body.getVelocityAtPoint(this._sphC, this._sphV);
+            if (surfaceVelFn) {
+              surfaceVelFn(this._sphC, this._surfV);
+              this._sphV.sub(this._surfV);
+            }
+            if (this._sphV.x * ox + this._sphV.y * oy + this._sphV.z * oz > 0) {
+              ox = nx; oy = ny; oz = nz;
+            }
+            nx = ox; ny = oy; nz = oz;
+            pen = res.distance + skin;
+            recovered = true;
           }
         }
-        if (!blocked) continue;
-        nx = -nx;
-        ny = -ny;
-        nz = -nz;
-        pen = res.distance + skin;
-      } else {
-        continue;
+        if (!recovered) {
+          // Would this sample CROSS the skin before the next substep?
+          // Without this, a 0.38 m nose slab is entered in one tick at sprint
+          // speed and the back face spits the car into the field.
+          this.body.getVelocityAtPoint(this._sphC, this._sphV);
+          if (surfaceVelFn) {
+            surfaceVelFn(this._sphC, this._surfV);
+            this._sphV.sub(this._surfV);
+          }
+          const closing = -(this._sphV.x * nx + this._sphV.y * ny + this._sphV.z * nz);
+          if (!(closing > 0 && closing * dt > res.distance - skin)) continue;
+          pen = 0;
+        }
       }
-      if (pen <= 0) continue;
       // Solids are walls. A mostly-up (or down) normal is a lid the hull can
       // park on while the wheels still see the road. Skip it: either a wall
       // sample will spat the car out, or it falls through onto the deck.
@@ -5501,7 +5534,10 @@ export class Vehicle {
 
       hits++;
       this._sphN.set(nx, ny, nz);
-      this._solidN.addScaledVector(this._sphN, pen);
+      // Sweep hits have pen 0 (velocity clamp only). They still have to vote
+      // on the aggregate normal or a lone approach would call apply with a
+      // zero vector and do nothing.
+      this._solidN.addScaledVector(this._sphN, Math.max(pen, 0.05));
       this._solidPoint.add(this._sphC);
       if (pen > deepest) {
         deepest = pen;
@@ -5588,7 +5624,12 @@ export class Vehicle {
 
     // 3) TANGENTIAL — scraping costs speed, ramped in so a car crawling out of
     //    somewhere it is trapped is not drained of the little it has.
-    if (SOLID.friction > 0 && dt > 0 && this._solidN.y < SOLID.sitNormalMaxY) {
+    // 3) TANGENTIAL — scraping costs speed, ramped in so a car crawling out of
+    //    somewhere it is trapped is not drained of the little it has.
+    //    Sweep-only contacts (deepest 0) are "would cross next tick", not a
+    //    scrape yet — friction here glued the car to a start/finish nose after
+    //    the anti-tunnel clamp, same feel as parking on a hole-wall rim.
+    if (deepest > 0 && SOLID.friction > 0 && dt > 0 && this._solidN.y < SOLID.sitNormalMaxY) {
       const vn2 = body.vel.dot(this._solidN);
       this._solidT.copy(body.vel).addScaledVector(this._solidN, -vn2);
       const vT = this._solidT.length();

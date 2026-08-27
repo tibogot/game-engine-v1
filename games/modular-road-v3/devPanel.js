@@ -323,9 +323,9 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="dv-hint">
             Place rounded <b>Start</b> + <b>Finish</b> to enable the clock
             (any chains — jumps / new chains are fine). Checkpoints are
-            optional ordered splits. Open start/finish pieces are for a later
-            circuit mode. <b>Fall respawn</b> off = land on the terrain; on =
-            snap back to the last safe spot (clock keeps running).
+            optional ordered splits. A course turns on last-safe fall
+            (clock keeps running). The toggle here forces that even without
+            a course. Open start/finish pieces are for a later circuit mode.
           </div>
         </div>
       </div>

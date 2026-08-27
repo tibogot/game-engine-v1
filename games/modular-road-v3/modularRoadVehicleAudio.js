@@ -311,16 +311,77 @@ export function createModularRoadAudioSystem({ mixerState }) {
     items.length = 0;
   }
 
+  /**
+   * One-shot UI blip for race gates. Oscillator, no sample — muteAll / ui bus
+   * still apply. Cheap: a handful of nodes, torn down on ended.
+   *
+   *   start     rising two-note GO
+   *   cp        neutral tick
+   *   cpAhead   higher tick (green split)
+   *   cpBehind  lower tick (red split)
+   *   finish    three-note resolve
+   *   record    same plus a high confirmation
+   */
+  function playCue(kind) {
+    const scalar = getEffectiveBusScalar("ui");
+    if (scalar <= 0 || disposed) return;
+    const ctx = Howler.ctx;
+    if (!ctx || ctx.state === "suspended") return;
+
+    const notes = CUE_NOTES[kind];
+    if (!notes) return;
+
+    const now = ctx.currentTime;
+    const master = ctx.createGain();
+    master.gain.value = scalar * 0.2;
+    master.connect(ctx.destination);
+
+    let t = now;
+    let lastOsc = null;
+    for (let i = 0; i < notes.length; i++) {
+      const n = notes[i];
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.value = n.f;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(n.a ?? 1, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + n.d);
+      osc.connect(g);
+      g.connect(master);
+      osc.start(t);
+      osc.stop(t + n.d + 0.02);
+      lastOsc = osc;
+      t += n.g ?? n.d * 0.75;
+    }
+    if (lastOsc) {
+      lastOsc.onended = () => {
+        try { master.disconnect(); } catch { /* already gone */ }
+      };
+    }
+  }
+
   return {
     register,
     unregister,
     update,
     dispose,
     unlock,
+    playCue,
     getEffectiveBusScalar,
     Howler,
   };
 }
+
+/** @type {Record<string, {f:number, d:number, a?:number, g?:number}[]>} */
+const CUE_NOTES = {
+  start:    [{ f: 784, d: 0.07 }, { f: 1175, d: 0.14, a: 1.1 }],
+  cp:       [{ f: 880, d: 0.08 }],
+  cpAhead:  [{ f: 1047, d: 0.09, a: 1.1 }],
+  cpBehind: [{ f: 622, d: 0.1 }],
+  finish:   [{ f: 523, d: 0.09 }, { f: 659, d: 0.09 }, { f: 784, d: 0.18, a: 1.15 }],
+  record:   [{ f: 523, d: 0.08 }, { f: 659, d: 0.08 }, { f: 784, d: 0.1 }, { f: 1047, d: 0.22, a: 1.2 }],
+};
 
 function howlerLoopLayerOptions(settings, layer) {
   const start = Math.max(0, Number(settings[`${layer}LoopStartMs`]) || 0);
