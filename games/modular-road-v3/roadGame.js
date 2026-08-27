@@ -165,9 +165,18 @@ import auditTrackUrl from "./audittest.json?url";
 const MAX_SIM_TICKS = 8;
 /** Absolute-Y backstop: below this the car is always respawned. */
 const FALL_Y = -60;
-/** Air-stunt: dropping this far BELOW the last grounded height counts as a fall
- *  (relative to the track, so it works at any track altitude). */
+/** Air-stunt: dropping this far BELOW the last grounded height is a *candidate*
+ *  miss. checkFall then probes the deck along the fall; if there is still road
+ *  to land on, the car keeps falling. Empty sky snaps back to last-safe.
+ *  Relative to the track, so it works at any altitude. */
 const FALL_DROP = 12;
+/** How far ahead (m) the landing-piece test looks. A 30° jump off a 160 m
+ *  drop lands hundreds of metres out — a short ray from the lip never sees it. */
+const FALL_LAND_AHEAD = 600;
+/** Half-width of that corridor (16 m road + aiming slop). */
+const FALL_LAND_HALF = 32;
+/** Radius counted as "the road is under me". */
+const FALL_LAND_NEAR = 40;
 /** Sky mode: how far below the LOWEST track piece the void backstop sits. Far
  *  enough that a deliberate drop off a high loop is not cut short, near enough
  *  that a missed jump is a snappy retry rather than a long fall to nowhere. */
@@ -2460,9 +2469,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Sprint course: rounded start_new + finish_new (optional checkpoint_new),
   // on ANY chains — a jump / new chain / snap-landing is a normal sprint.
   // Open start/finish pieces are ignored until circuit/lap mode. Air-stunt rule:
-  // falling off the track respawns at the LAST SAFE GROUNDED POSE (not a
-  // checkpoint), so a missed jump just puts you back on the takeoff. Timing
-  // gates drive the clock + splits only.
+  // falling into empty sky respawns at the LAST SAFE GROUNDED POSE (not a
+  // checkpoint), so a missed jump puts you back on the takeoff. A drop that
+  // still has track under it is allowed to land. Timing gates drive the clock
+  // + splits only.
   const RACE_KEY = "modular-road-v3.sprint.";
   const run = new RunTracker({ roadWidth: 16 });
   // Slow-mo contract. 1 = realtime. Do not change FIXED_DT to slow the world.
@@ -2484,6 +2494,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let hasSafe = false;
   const _respawnPos = new THREE.Vector3();
   const _fallProbe = new THREE.Vector3(); // sky-mode kill floor — see fallFloorY
+  const _fallDir = new THREE.Vector3();
+  const _fallRight = new THREE.Vector3();
+  const _fallDown = new THREE.Vector3(0, -1, 0);
+  const _fallBox = new THREE.Box3();
 
   const recKey = () => RACE_KEY + run.courseSignature();
 
@@ -2578,9 +2592,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    *  • Absolute void backstop — ALWAYS on. A car below FALL_Y is truly lost (fell
    *    through the world), so send it back to the start.
    *  • Air-stunt rule — GAME MODE. Dropping FALL_DROP below the last track
-   *    contact snaps you back to that safe pose. On whenever a sprint course
-   *    exists (start+finish), or when the dev toggle is forced on. Clock keeps
-   *    running — you pay for the miss.
+   *    contact is a candidate miss. If a deck is still on the fall path, keep
+   *    falling (a jump onto a much lower road is a real landing). Empty sky
+   *    snaps you back to last-safe. On whenever a sprint course exists
+   *    (start+finish), or when the dev toggle is forced on. Clock keeps
+   *    running — you pay for a real miss.
    *
    * In free-drive (no course, toggle off) the car simply FALLS off the track
    * and lands on the terrain, which is drivable — no respawn. The old always-on
@@ -2638,6 +2654,80 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     devPanel?.refresh();
   }
 
+  /** First drive-surface hit along a ray. Terrain is ignored on purpose: landing
+   *  on dirt is a miss when the air-stunt rule is on. Movers are included so an
+   *  elevator under the fall still counts. */
+  function deckAlong(origin, dir, far) {
+    let best = null;
+    if (deckBvh?.baked) {
+      const h = deckBvh.raycastFirst(origin, dir, far);
+      if (h) best = h;
+    }
+    if (moverDeckBvh?.baked) {
+      const h = moverDeckBvh.raycastFirst(origin, dir, far);
+      if (h && (!best || h.distance < best.distance)) best = h;
+    }
+    return best;
+  }
+
+  /**
+   * Is there still a deck this fall can hit, before the kill floor?
+   *
+   * A vertical / ballistic ray is the wrong tool. FALL_DROP fires 12 m under
+   * the lip; a real drop-jump (airjump's first gap is ~160 m down and ~270 m
+   * out) is still over empty sky at that moment, so a ray from the car never
+   * touches the island and the old probe snapped back to the takeoff.
+   *
+   * Instead: look at piece world AABBs. Anything already below the car, either
+   * near it or ahead in a heading corridor, is a landing. O(pieces), and only
+   * after FALL_DROP — not per tick, not while driving. Terrain is not a landing.
+   */
+  function hasLandingBelow() {
+    const p = vehicle.body.pos;
+    const v = vehicle.body.vel;
+    const floor = fallFloorY();
+    const downFar = Math.max(4, p.y - floor + 2);
+    if (deckAlong(p, _fallDown, downFar)) return true;
+
+    // Heading: where the car is actually going, else where it was facing on
+    // the lip (a slow roll-off has almost no XZ speed).
+    _fallDir.set(v.x, 0, v.z);
+    if (_fallDir.lengthSq() < 16) {
+      _fallDir.set(0, 0, 1).applyQuaternion(hasSafe ? lastSafeQuat : vehicle.body.quat);
+      _fallDir.y = 0;
+    }
+    if (_fallDir.lengthSq() < 1e-8) return false;
+    _fallDir.normalize();
+    _fallRight.set(-_fallDir.z, 0, _fallDir.x);
+
+    const nearR2 = FALL_LAND_NEAR * FALL_LAND_NEAR;
+    for (const piece of builder.pieces) {
+      const m = piece.mesh;
+      if (!m || m.userData.noCollision || !m.geometry) continue;
+      m.updateWorldMatrix(true, false);
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      _fallBox.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);
+      if (!(_fallBox.max.y < p.y - 0.5)) continue;
+      if (_fallBox.max.y < floor - 1) continue;
+
+      const qx = p.x < _fallBox.min.x ? _fallBox.min.x : (p.x > _fallBox.max.x ? _fallBox.max.x : p.x);
+      const qz = p.z < _fallBox.min.z ? _fallBox.min.z : (p.z > _fallBox.max.z ? _fallBox.max.z : p.z);
+      const dx = qx - p.x, dz = qz - p.z;
+      if (dx * dx + dz * dz <= nearR2) return true;
+
+      const cx = (_fallBox.min.x + _fallBox.max.x) * 0.5 - p.x;
+      const cz = (_fallBox.min.z + _fallBox.max.z) * 0.5 - p.z;
+      const ahead = cx * _fallDir.x + cz * _fallDir.z;
+      const side = Math.abs(cx * _fallRight.x + cz * _fallRight.z);
+      const pieceHalf = 0.5 * Math.hypot(
+        _fallBox.max.x - _fallBox.min.x,
+        _fallBox.max.z - _fallBox.min.z,
+      );
+      if (ahead > -20 && ahead < FALL_LAND_AHEAD && side < FALL_LAND_HALF + pieceHalf) return true;
+    }
+    return false;
+  }
+
   /** Put the car back on the last pose where it was properly on the track. */
   function recoverToSafePose() {
     if (!hasSafe) { respawn(); return; }
@@ -2691,7 +2781,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
     if (!(raceRespawn || run.hasCourse)) return; // free-drive: fall to terrain
 
-    if (hasSafe && y < lastSafeY - FALL_DROP) recoverToSafePose();
+    if (hasSafe && y < lastSafeY - FALL_DROP && !hasLandingBelow()) recoverToSafePose();
   }
 
   // 5) ── CAMERA ─────────────────────────────────────────────────────────────

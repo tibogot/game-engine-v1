@@ -324,8 +324,10 @@ export function createRoadDevPanel({ app, game, params }) {
             Place rounded <b>Start</b> + <b>Finish</b> to enable the clock
             (any chains — jumps / new chains are fine). Checkpoints are
             optional ordered splits. A course turns on last-safe fall
-            (clock keeps running). The toggle here forces that even without
-            a course. Open start/finish pieces are for a later circuit mode.
+            (clock keeps running): a drop onto lower track still lands, empty
+            sky retries from the last grounded pose. The toggle here forces
+            that even without a course. Open start/finish pieces are for a
+            later circuit mode.
           </div>
         </div>
       </div>
