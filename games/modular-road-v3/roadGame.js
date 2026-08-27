@@ -437,6 +437,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const startGateGlowMaterial = createStartGateGlowMaterial();
   const finishGateGlowMaterial = createFinishGateGlowMaterial();
   const checkpointGlowMaterial = createCheckpointGlowMaterial();
+  // Pre-mirror copies flip local Y (det −1), which reverses winding. Sharing
+  // the FrontSide originals would render those copies inside-out; these are
+  // the same shaders with both faces on, matching the guardrail's own fix.
+  const startGateBodyMaterialMirror = createStartGateBodyMaterial();
+  startGateBodyMaterialMirror.side = THREE.DoubleSide;
+  const startGateGlowMaterialMirror = createStartGateGlowMaterial();
+  startGateGlowMaterialMirror.side = THREE.DoubleSide;
+  const finishGateGlowMaterialMirror = createFinishGateGlowMaterial();
+  finishGateGlowMaterialMirror.side = THREE.DoubleSide;
   // Cheap dedicated tube shader — tubes used to ride createRoadMaterial, so
   // every pixel of a bore evaluated the asphalt graph. Same look (inner/outer
   // + neon), FrontSide. Weather rebuilds the ROAD material; this one stays.
@@ -1249,6 +1258,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * station) and drawn with the ordinary camera into the same target, which is
    * what a reflection is before anyone thought of mirroring cameras. No plane,
    * so nothing to be off it by.
+   *
+   * Tall props (neon arm / neon gate) and the start/finish/checkpoint gantries
+   * are the same failure in miniature: they stand ~8 m off the deck, so the
+   * 3 m slab clips them, and a fraction of a degree of per-frame plane tilt
+   * swims their image. They go through the same pre-mirror path — see
+   * rebuildMirrorProps. Do not put them on REFLECT_LAYER.
    */
   let railsInMirror = false;
   /** The whole track's mirrored rail, merged, on PREMIRROR_LAYER. One mesh —
@@ -1457,9 +1472,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // the same trap `_mergedGroupRef` exists to dodge.
     const wet = roadMaterial?._roadUniforms?.wetAmount?.value ?? 0;
     const on = mirrorRailsWanted(wet);
-    carReflection.preMirrorActive = false;
     mirrorRailsBuilt = false;
-    if (!on || !builder?.pieces?.length) return;
+    if (!on || !builder?.pieces?.length) {
+      syncPreMirrorActive();
+      return;
+    }
     scene.updateMatrixWorld(true);
     // Built to order, and OURS — so the transform goes in place. The old path
     // cloned first because the geometry belonged to the piece and had to survive.
@@ -1476,10 +1493,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // Piece-local → world, same as the visible posts.
       for (const m of posts.matrices) grp.mats.push(_postWorld.multiplyMatrices(matrix, m).clone());
     }
-    if (!geos.length) return;
+    if (!geos.length) {
+      syncPreMirrorActive();
+      return;
+    }
     const merged = mergeGeometries(geos, false);
     for (const g of geos) g.dispose();
-    if (!merged) return;
+    if (!merged) {
+      syncPreMirrorActive();
+      return;
+    }
     merged.computeBoundingSphere();
     const mesh = new THREE.Mesh(merged, railMaterial);
     // No shadows either way: this mesh exists below the road, is never lit by
@@ -1516,8 +1539,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       mirrorRailGroup.add(im);
     }
 
-    carReflection.preMirrorActive = true;
     mirrorRailsBuilt = true;
+    syncPreMirrorActive();
   }
 
   /**
@@ -1541,6 +1564,173 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     if (want === mirrorRailsBuilt) return;
     rebuildMirrorRails();
   }
+
+  /**
+   * TALL STATIC PROPS IN THE PRE-MIRROR, same path as the rail.
+   *
+   * A planar mirror is only true ON its plane. The neon arm stands ~8 m off
+   * the deck, so three things fail at once if it is put on REFLECT_LAYER:
+   * the 3 m slab clips the top bar (and the clip crawls as the tyre-contact
+   * plane is refit); a fraction of a degree of plane tilt displaces the
+   * image of something 30 m away by tens of centimetres; and 0.14 m of neon
+   * in a half-res target shimmers. Close up, dist → 0 and the plane is
+   * locally correct — which is why it looked stable only next to the arm.
+   *
+   * The fix is the rail's: build a copy flipped about the LOCAL deck at the
+   * prop's own anchor (position stays, up negated) and draw it with the real
+   * camera on PREMIRROR_LAYER. No plane, no slab, no per-frame jitter. Props
+   * are static in drive mode, so this is once per edit, not per frame.
+   *
+   * The Y-flip has determinant −1, so winding reverses. The copy is built
+   * DoubleSide (and the piece-gantry copies use the *Mirror materials above)
+   * rather than sharing the FrontSide original.
+   */
+  const PREMIRROR_PROP_IDS = new Set(["neonarm", "neongate"]);
+  /** Stroke width vs the real neon. A wet-asphalt reflection is a blur, so
+   *  a fatter stroke in the half-res target reads more like wet neon than a
+   *  one-texel sparkle. */
+  const MIRROR_NEON_SCALE = 2.5;
+  /**
+   * Depth-gate metres when a tall pre-mirrored prop is in the pass.
+   *
+   * The rail's 4 m gate is right for a 0.8 m rail: a correct image sits a
+   * metre or two from the fragment, a see-through over a crest is tens of
+   * metres. An 8 m arm's virtual top is 8 m below the deck, and at a chase
+   * camera's grazing angle the along-ray gap to that image is ~25–35 m at
+   * driving distance. 4 m would reject the top bar (the part you want) and
+   * leave only the feet. 36 m lets the arm through from typical approach
+   * distances. When rails are also on this is looser than their crest test;
+   * rails default off, and a neon arm is discrete so the leftover see-through
+   * is a rare alignment rather than a stripe down every hill.
+   */
+  const PROP_MIRROR_DEPTH_TOL = 36;
+  const _mirrorFlipY = new THREE.Matrix4().makeScale(1, -1, 1);
+  const mirrorPropGroup = new THREE.Group();
+  mirrorPropGroup.name = "MirroredProps";
+  mirrorPropGroup.layers.set(PREMIRROR_LAYER);
+  mirrorPropGroup.matrixAutoUpdate = false;
+  scene.add(mirrorPropGroup);
+  let mirrorPropsBuilt = false;
+  /** Late-bound: builder onChange can fire during construction, before `props`. */
+  let _propsRef = null;
+  /** Same TDZ trap as `roadLook` itself — see rebuildMirrorRails. */
+  let _roadLookRef = null;
+
+  function hasPremirrorSources() {
+    if (_propsRef?.instances?.some((i) => PREMIRROR_PROP_IDS.has(i.id))) return true;
+    for (const p of builderRef?.pieces ?? []) {
+      if (p.decorGateMesh) return true;
+      const glow = p.decorGlowMesh;
+      if (glow && glow.userData.glowKind !== "tunnel") return true;
+    }
+    return false;
+  }
+
+  function mirrorPropsWanted(wet) {
+    return mode === "drive" && reflectionEnabled && wet > 0 && hasPremirrorSources();
+  }
+
+  function syncPreMirrorActive() {
+    carReflection.preMirrorActive = mirrorRailsBuilt || mirrorPropsBuilt;
+  }
+
+  function syncPreMirrorDepthTol() {
+    const u = roadMaterial?._roadUniforms?.railDepthTol;
+    if (!u) return;
+    const base = _roadLookRef?.railDepthTol ?? 4;
+    u.value = mirrorPropsBuilt ? Math.max(base, PROP_MIRROR_DEPTH_TOL) : base;
+  }
+
+  function disposeMirrorProps() {
+    for (const root of [...mirrorPropGroup.children]) {
+      root.traverse((m) => {
+        if (!m.isMesh) return;
+        if (m.userData.mirrorOwnsGeometry) m.geometry?.dispose();
+        if (m.userData.mirrorOwnsMaterial) {
+          const mats = Array.isArray(m.material) ? m.material : [m.material];
+          for (const mat of mats) mat?.dispose?.();
+        }
+      });
+    }
+    mirrorPropGroup.clear();
+  }
+
+  function stampMirroredMesh(src, material) {
+    src.updateMatrixWorld(true);
+    const mesh = new THREE.Mesh(src.geometry, material);
+    mesh.matrix.copy(src.matrixWorld).multiply(_mirrorFlipY);
+    mesh.matrixAutoUpdate = false;
+    mesh.matrixWorldNeedsUpdate = true;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = false;
+    mesh.layers.set(PREMIRROR_LAYER);
+    mirrorPropGroup.add(mesh);
+  }
+
+  function addMirroredProp(inst) {
+    const make = inst.def?.make;
+    if (typeof make !== "function") return;
+    inst.root.updateMatrixWorld(true);
+    const root = make({ neonScale: MIRROR_NEON_SCALE, side: THREE.DoubleSide });
+    root.matrixAutoUpdate = false;
+    root.matrix.copy(inst.root.matrixWorld).multiply(_mirrorFlipY);
+    root.matrixWorldNeedsUpdate = true;
+    root.traverse((o) => {
+      o.layers.set(PREMIRROR_LAYER);
+      if (!o.isMesh) return;
+      o.castShadow = false;
+      o.receiveShadow = false;
+      o.frustumCulled = false;
+      o.userData.mirrorOwnsGeometry = true;
+      o.userData.mirrorOwnsMaterial = true;
+    });
+    mirrorPropGroup.add(root);
+  }
+
+  function rebuildMirrorProps() {
+    disposeMirrorProps();
+    const wet = roadMaterial?._roadUniforms?.wetAmount?.value ?? 0;
+    const on = mirrorPropsWanted(wet);
+    mirrorPropsBuilt = false;
+    if (!on) {
+      syncPreMirrorActive();
+      syncPreMirrorDepthTol();
+      return;
+    }
+    scene.updateMatrixWorld(true);
+    for (const inst of _propsRef?.instances ?? []) {
+      if (PREMIRROR_PROP_IDS.has(inst.id)) addMirroredProp(inst);
+    }
+    for (const p of builderRef?.pieces ?? []) {
+      if (p.decorGateMesh) stampMirroredMesh(p.decorGateMesh, startGateBodyMaterialMirror);
+      const glow = p.decorGlowMesh;
+      if (!glow || glow.userData.glowKind === "tunnel") continue;
+      const glowMat = glow.userData.glowKind === "finish" ? finishGateGlowMaterialMirror
+        : glow.userData.glowKind === "checkpoint" ? checkpointGlowMaterial
+          : startGateGlowMaterialMirror;
+      stampMirroredMesh(glow, glowMat);
+    }
+    mirrorPropsBuilt = mirrorPropGroup.children.length > 0;
+    syncPreMirrorActive();
+    syncPreMirrorDepthTol();
+  }
+
+  function syncMirrorProps() {
+    const wet = roadMaterial?._roadUniforms?.wetAmount?.value ?? 0;
+    const want = mirrorPropsWanted(wet);
+    if (want === mirrorPropsBuilt) return;
+    rebuildMirrorProps();
+  }
+
+  /** Rails + tall props share the pre-mirror pass; one call so a weather
+   *  slider, a reflection toggle and a build→drive switch cannot rebuild one
+   *  and leave the other stale. */
+  function syncPreMirrored() {
+    syncMirrorRails();
+    syncMirrorProps();
+  }
+
   /** Roadside scenery (lamps, boards) in the mirror — see the note below. */
   let sceneryInMirror = true;
   /** Late-bound for the same reason as `_mergedGroupRef`: the builder's
@@ -1590,6 +1780,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     apply(_mergedGroupRef);
 
     rebuildMirrorRails();
+    rebuildMirrorProps();
   }
 
   const _mirrorPoint = new THREE.Vector3();
@@ -1623,6 +1814,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     roadMaterial = next;
     syncRoadUniforms(roadMaterial, roadLook);
     syncTubeUniforms(tubeMaterial, roadLook);
+    syncPreMirrorDepthTol();
     builder.setRoadMaterial(roadMaterial);
     if (mergedGroup.visible) { disposeMergedTrack(); buildMergedTrack(); }
     // Only after nothing references it any more.
@@ -1635,9 +1827,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    *
    * Two things change the shader rather than a uniform. Wetness crossing 0
    * swaps Standard for Physical (the clearcoat lobe only compiles if there is a
-   * clearcoatNode). "Rails in mirror" decides whether the mirrored-rail sample
-   * is in the shader at all — and that is the difference between a term
-   * multiplied by zero and a term that is not there.
+   * clearcoatNode). The pre-mirror sample (rails and/or tall props) is compiled
+   * in only when something is actually on that layer — and that is the
+   * difference between a term multiplied by zero and a term that is not there.
    *
    * Multiplying by zero is what the runtime gate does, and it is right for the
    * cases that change per FRAME (build mode, no contact patch): the fragment
@@ -1652,19 +1844,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   function syncRoadMaterialFeatures() {
     const wantWet = (roadLook.wetAmount ?? 0) > 0;
-    const wantRail = wantWet && railsInMirror;
+    const wantPreMirror = wantWet && (railsInMirror || hasPremirrorSources());
     const isWet = !!roadMaterial._reflectUniforms || roadMaterial.isMeshPhysicalNodeMaterial;
-    const hasRail = !!roadMaterial._mirrorTextureNode;
-    if (wantWet === isWet && wantRail === hasRail) return;
+    const hasPreMirror = !!roadMaterial._mirrorTextureNode;
+    if (wantWet === isWet && wantPreMirror === hasPreMirror) return;
     applyRoadMaterial(createRoadMaterial({
       ...roadLook,
       wet: wantWet,
       shadowLight: sceneShadowLight(),
       reflectionTexture: wantWet ? carReflection.texture : null,
-      mirrorTexture: wantRail ? carReflection.mirrorTexture : null,
-      // Feeds railNode's occlusion gate — without it the mirrored rail of a
-      // section hidden behind a crest draws through the crest.
-      mirrorDepthTexture: wantRail ? carReflection.mirrorDepthTexture : null,
+      mirrorTexture: wantPreMirror ? carReflection.mirrorTexture : null,
+      // Feeds the pre-mirror occlusion gate — without it the mirrored rail of a
+      // section hidden behind a crest draws through the crest. Tall props share
+      // the same sample; rebuildMirrorProps loosens the metre gate for them.
+      mirrorDepthTexture: wantPreMirror ? carReflection.mirrorDepthTexture : null,
     }));
   }
 
@@ -1678,14 +1871,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     roadLook.wetAmount = wet;
     syncRoadMaterialFeatures();
     roadMaterial._roadUniforms.wetAmount.value = wet;
-    // Crossing 0 in either direction changes whether the mirrored rail is worth
-    // building at all — and ONLY that. The rail's mirror geometry is a function
-    // of the track, and it draws with `railMaterial`, which this never touches
-    // (the material `syncRoadMaterialFeatures` may have just swapped is the
-    // ROAD's). So this is a rebuild at the two ends of the slider's range and
-    // nothing at all in between — which matters, because the panel calls this on
-    // every `input` event and the rebuild merges the whole track.
-    syncMirrorRails();
+    // Crossing 0 in either direction changes whether the pre-mirror content is
+    // worth building at all — and ONLY that. The mirrored geometry is a function
+    // of the track and the props, and it draws with its own materials, which this
+    // never touches (the material `syncRoadMaterialFeatures` may have just swapped
+    // is the ROAD's). So this is a rebuild at the two ends of the slider's range
+    // and nothing at all in between — which matters, because the panel calls this
+    // on every `input` event and a rail rebuild merges the whole track.
+    syncPreMirrored();
   }
 
   /** The guardrail reflection, off to on. Rebuilds the material so that "off"
@@ -1707,11 +1900,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const ru = roadMaterial._reflectUniforms;
     if (!ru) return;
 
-    // THE MIRRORED RAIL, first and INDEPENDENTLY. It has no plane, no contact
-    // patch and no need of the car, so it survives everything that makes the
-    // planar mirror bail out — including being airborne, which is exactly when
-    // you are looking down at the road from a height and the rails are the only
-    // thing in frame worth reflecting.
+    // THE PRE-MIRRORED GEOMETRY, first and INDEPENDENTLY. It has no plane, no
+    // contact patch and no need of the car, so it survives everything that
+    // makes the planar mirror bail out — including being airborne, which is
+    // exactly when you are looking down at the road from a height and the
+    // rails / neon arms are the only thing in frame worth reflecting.
     // The mode gate lives HERE and nowhere else. `preMirrorActive` means "there
     // is mirrored geometry worth a pass" and is owned by rebuildMirrorRails;
     // clearing it from this side left it false after a build→drive switch, so
@@ -2356,6 +2549,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // every copy to one image (and hide the live mesh that actually wears it).
   const propInstancer = new PropInstancer(scene, props, PROP_CATALOG, (id) => id !== "adboard" && id !== "adtotem" && id !== "adprism");
   _propInstancerRef = propInstancer;
+  _propsRef = props;
   // Live glow tuning writes to the loose roots; the templates hold their own
   // copies of those materials, so they have to be rebuilt to be seen.
   props.onGlowChange = (ids) => propInstancer.refreshTemplates(ids);
@@ -3679,6 +3873,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // every ctx() instead means a save always captures whatever is on screen,
   // however it got there.
   const roadLook = readRoadLook(roadMaterial);
+  _roadLookRef = roadLook;
   const trackCtx = () => {
     Object.assign(roadLook, readRoadLook(roadMaterial));
     return {
@@ -3709,6 +3904,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     setRoadWet(roadLook.wetAmount ?? 0);
     syncRoadUniforms(roadMaterial, roadLook);
     syncTubeUniforms(tubeMaterial, roadLook);
+    syncPreMirrorDepthTol();
   }
 
   onClick("road-save", () => {
@@ -4798,13 +4994,17 @@ ${e.message}`);
       // stale tree would be a car falling through the road rather than an
       // obvious error.
       ensureCollision();
+      // Shader first, so a first neon-arm / wet combo compiles the pre-mirror
+      // sample before the merge bakes the track in that material. The merge
+      // itself rebuilds the mirrored copies (applyRailReflectionMembers).
+      syncRoadMaterialFeatures();
       setMergedTrack(true); // ~4 draws for the whole track instead of ~1/piece
       builder.setGhostVisible(false);
-      // THE MIRRORED RAIL IS BUILT HERE, not while editing — the pre-mirror pass
+      // THE PRE-MIRROR CONTENT IS BUILT HERE, not while editing — the pass
       // is drive-only, so this is the first moment it can be seen. Sits beside
       // the merged-track build because it is the same kind of cost, paid at the
       // same transition, and neither is paid per edit any more.
-      syncMirrorRails();
+      syncPreMirrored();
       warmUpTrackPipelines();
       builder.deselectPlacement?.();
       builder.deselectPiece?.(); // clear any edit selection before racing
@@ -4817,7 +5017,7 @@ ${e.message}`);
     } else {
       setMergedTrack(false); // back to editable pieces
       // ...and freed here, for the same reason. Nothing in build mode samples it.
-      syncMirrorRails();
+      syncPreMirrored();
       builder.setGhostVisible(true);
       vehicle.enabled = false;
       ghostMesh.visible = false;
@@ -5073,7 +5273,7 @@ ${e.message}`);
         if (!on && roadMaterial._reflectUniforms) {
           roadMaterial._reflectUniforms.reflectOn.value = 0;
         }
-        syncMirrorRails();
+        syncPreMirrored();
       },
       setRailsInMirror: (on) => setRailsInMirrorFlag(on),
       // The panel seeds its checkbox from this. Without it the seed falls back
@@ -5491,7 +5691,7 @@ ${e.message}`);
       if (!on && roadMaterial._reflectUniforms) {
         roadMaterial._reflectUniforms.reflectOn.value = 0;
       }
-      syncMirrorRails();
+      syncPreMirrored();
     },
     getReflection: () => reflectionEnabled,
     setRailsInMirror: (on) => setRailsInMirrorFlag(on),

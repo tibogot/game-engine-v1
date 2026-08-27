@@ -160,12 +160,13 @@ export function createCarReflection({
    * THE PRE-MIRROR PASS HAS NO OCCLUDERS, and that is why it needs readable
    * depth.
    *
-   * `updatePreMirrored` sets the camera to PREMIRROR_LAYER, on which ONLY the
-   * mirrored rail lives — no road, no terrain, nothing. So the pass cannot hide
-   * anything behind anything, and the road then samples it at screenUV with no
-   * test: whatever mirrored rail lands on a pixel is shown by whatever deck
-   * fragment is at that pixel. Over a crest that means the mirrored rail of the
-   * road BEYOND the hill draws straight through the hill.
+ * `updatePreMirrored` sets the camera to PREMIRROR_LAYER, on which ONLY the
+ * already-mirrored geometry lives (the rail, and tall props like the neon
+ * arm) — no road, no terrain, nothing. So the pass cannot hide
+ * anything behind anything, and the road then samples it at screenUV with no
+ * test: whatever mirrored content lands on a pixel is shown by whatever deck
+ * fragment is at that pixel. Over a crest that means the mirrored rail of the
+ * road BEYOND the hill draws straight through the hill.
    *
    * Depth-testing the pass against the real road does NOT fix it, and the
    * reason is worth writing down because it is the obvious thing to try: the

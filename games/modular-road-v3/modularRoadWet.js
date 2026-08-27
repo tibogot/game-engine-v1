@@ -290,6 +290,10 @@ export const WET_DEFAULTS = {
    * fragment can be a couple of metres off along the view ray without being
    * wrong. Tighten it if see-through survives near the crest line; loosen it if
    * legitimate reflections cut off early on banked pieces.
+   *
+   * Tall pre-mirrored props (neon arm ~8 m) need more: their virtual image is
+   * that far below the deck, so the along-ray gap at a chase-camera angle is
+   * ~25–35 m. roadGame raises this uniform to 36 m while those copies exist.
    */
   railDepthTol: 4.0,
   /**

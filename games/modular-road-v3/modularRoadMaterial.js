@@ -812,27 +812,29 @@ export function createRoadMaterial(opts = {}) {
     const railOn = uniform(0);
     mat._railMirrorOn = railOn;
 
-    /**
-     * THE OCCLUSION GATE. Null when no depth texture was supplied, so an older
-     * caller still gets exactly the previous behaviour.
-     *
-     * The pre-mirror pass draws the mirrored rail with NOTHING in front of it —
-     * only that geometry is on PREMIRROR_LAYER — so at any pixel the road shows
-     * whatever mirrored rail happens to be there. Over a crest that is the
-     * mirrored rail of the road BEYOND the hill, drawn straight through it.
-     *
-     * Depth-testing the pass itself cannot fix that: the mirrored rail sits
-     * BELOW its own deck, so the deck occludes its own reflection and testing
-     * against the real road deletes everything. See the long note in
-     * modularRoadReflection.
-     *
-     * What DOES separate the two is distance. A correct reflection lies a metre
-     * or two from the fragment showing it — the rail is about that far above
-     * its deck, so its mirror is about that far below. A see-through is tens of
-     * metres. So: linearise both depths to metres and fade out on the gap.
-     * Same question `reflectErrTol` asks of the planar mirror — how many metres
-     * wrong is this fragment — asked of a different failure.
-     */
+        /**
+         * THE OCCLUSION GATE. Null when no depth texture was supplied, so an older
+         * caller still gets exactly the previous behaviour.
+         *
+         * The pre-mirror pass draws the mirrored content with NOTHING in front of
+         * it — only that geometry is on PREMIRROR_LAYER — so at any pixel the
+         * road shows whatever mirrored rail or prop happens to be there. Over a
+         * crest that is the mirrored rail of the road BEYOND the hill, drawn
+         * straight through it.
+         *
+         * Depth-testing the pass itself cannot fix that: the mirrored rail sits
+         * BELOW its own deck, so the deck occludes its own reflection and testing
+         * against the real road deletes everything. See the long note in
+         * modularRoadReflection.
+         *
+         * What DOES separate the two is distance. A correct reflection lies a metre
+         * or two from the fragment showing it — the rail is about that far above
+         * its deck, so its mirror is about that far below. A see-through is tens of
+         * metres. So: linearise both depths to metres and fade out on the gap.
+         * Same question `reflectErrTol` asks of the planar mirror — how many metres
+         * wrong is this fragment — asked of a different failure. Tall props need
+         * a looser gate; roadGame raises `railDepthTol` while they are in the pass.
+         */
     const mirrorDepthTex = opts.mirrorDepthTexture
       ? texture(opts.mirrorDepthTexture)
       : null;

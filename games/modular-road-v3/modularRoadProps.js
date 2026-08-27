@@ -490,7 +490,7 @@ function neonStrokeShape(pts, halfW) {
   return shape;
 }
 
-function neonGateGroup() {
+function neonGateGroup(opts = {}) {
   const W = roadParams.width; // kerb-to-kerb — place centred on a road piece
   const T = 0.72; // frame thickness in the arch plane
   const D = 0.38; // depth along travel
@@ -503,7 +503,13 @@ function neonGateGroup() {
   // Same sink as hole walls — resting exactly on y=0 z-fights the deck.
   const SINK = 0.06;
   const gapW = 1.4; // break in the top neon (and visual centre cue)
-  const neonHalf = 0.07; // half-width of the glowing stroke
+  // `neonScale` fattens the stroke for the pre-mirrored wet-road copy: a
+  // roughness-0.2 reflection is a blur, and 0.14 m of neon in a half-res
+  // target is under a texel at driving distance. 2.5× is the wet look, not a
+  // bigger real gate. `side` is DoubleSide on that copy so the Y-flip (det −1)
+  // does not render inside-out.
+  const neonHalf = 0.07 * (opts.neonScale ?? 1);
+  const side = opts.side ?? THREE.FrontSide;
 
   const g = new THREE.Group();
   g.name = "NeonGate";
@@ -538,7 +544,7 @@ function neonGateGroup() {
   // Matte body — the neon is a separate stroke, not the whole frame.
   g.add(new THREE.Mesh(
     geo,
-    mat(NEON_GATE_BODY, { roughness: 0.55, metalness: 0.35, bloom: false }),
+    mat(NEON_GATE_BODY, { roughness: 0.55, metalness: 0.35, bloom: false, side }),
   ));
 
   // Medial path of the arch (centre of the frame thickness).
@@ -565,6 +571,7 @@ function neonGateGroup() {
     metalness: 0.05,
     emissive: NEON_GATE_GLOW,
     emissiveIntensity: 5.5,
+    side,
   });
   // Slightly proud of both faces so the stroke reads from either approach.
   const neonDepth = D + 0.1;
@@ -589,7 +596,7 @@ function neonGateGroup() {
  * sink and neon stroke — just one post + half the top bar. No hang tip.
  * Origin sits on the post (shifted +hw) so a kerb drop plants like the gate.
  */
-function neonArmGroup() {
+function neonArmGroup(opts = {}) {
   const W = roadParams.width;
   const T = 0.72;
   const D = 0.38;
@@ -600,7 +607,9 @@ function neonArmGroup() {
   const iw = hw - T;
   const ih = clearH;
   const SINK = 0.06;
-  const neonHalf = 0.07;
+  // See neonGateGroup — fat stroke + DoubleSide are for the pre-mirrored copy.
+  const neonHalf = 0.07 * (opts.neonScale ?? 1);
+  const side = opts.side ?? THREE.FrontSide;
 
   const g = new THREE.Group();
   g.name = "NeonArm";
@@ -626,7 +635,7 @@ function neonArmGroup() {
 
   g.add(new THREE.Mesh(
     geo,
-    mat(NEON_GATE_BODY, { roughness: 0.55, metalness: 0.35, bloom: false }),
+    mat(NEON_GATE_BODY, { roughness: 0.55, metalness: 0.35, bloom: false, side }),
   ));
 
   // Same medial neon as the gate's left stroke — stop short of the cut so the
@@ -656,6 +665,7 @@ function neonArmGroup() {
       metalness: 0.05,
       emissive: NEON_GATE_GLOW,
       emissiveIntensity: 5.5,
+      side,
     }),
   );
   neon.userData.isGlow = true;
@@ -1764,7 +1774,7 @@ export const PROP_CATALOG = [
      * centred drop lands on the kerbs of a default straight.
      */
     collision: "none",
-    make: () => neonGateGroup(),
+    make: (opts) => neonGateGroup(opts),
   },
   {
     id: "neonarm",
@@ -1773,7 +1783,7 @@ export const PROP_CATALOG = [
      * Left half of Neon gate, cut at centre — one post + half top bar.
      */
     collision: "none",
-    make: () => neonArmGroup(),
+    make: (opts) => neonArmGroup(opts),
   },
 
   // ── SCENERY ────────────────────────────────────────────────────────────────
