@@ -362,13 +362,8 @@ export const TIRE = {
   bottomOutMult: 8,
   // Per-axle friction multipliers (× frictionCoeff). Lower the rear for
   // oversteer, lower the front for understeer. Handbrake swaps the rear out.
-  // Neutral front/rear balance. The rear used to run 1.1 because at topSpeed 80
-  // the driven rear axle saturated its friction circle under power and the tail
-  // walked — but that pressure went away with topSpeed 30, and rear-grippier-
-  // than-front is precisely what produces terminal understeer with nothing to
-  // catch it. The yaw assist now handles what the grip split used to paper over.
   gripFront: 1.0,
-  gripRear: 1.0,
+  gripRear: 1.5,
   gripHandbrake: 0.35,
   // Lateral slip model: force builds linearly with slip then saturates at the
   // friction circle. `tireStiffness` is the slope (≈ 1/peak-slip-angle); higher
@@ -1468,14 +1463,12 @@ export const ROOF = {
  */
 export const BODYLEAN = {
   enabled: true,
-  // HALVED once the GLB body landed. These values were set against the plain
-  // box, where a big lean was the only way to read weight transfer at all. On a
-  // real car silhouette the same angles look like the suspension has failed —
-  // a GT4 rolls ~1.5–2.5°/g, not the 5.7°/g the box was using.
-  /** Radians of roll per g of lateral load. 0.045 ≈ 2.6°/g. */
-  rollPerG: 0.045,
-  /** Radians of pitch per g of longitudinal load (squat / dive). ≈1.7°/g. */
-  pitchPerG: 0.03,
+  // Visual lean only. Kept small so the GLB silhouette doesn't read as a
+  // collapsed suspension — a GT4 rolls ~1.5–2.5°/g; we sit a bit below that.
+  /** Radians of roll per g of lateral load. 0.0192 ≈ 1.1°/g. */
+  rollPerG: 0.0192,
+  /** Radians of pitch per g of longitudinal load (squat / dive). ≈0.6°/g. */
+  pitchPerG: 0.0105,
   maxRoll: 0.08, // ~4.6°
   maxPitch: 0.05, // ~2.9°
   /** Ease rate (1/s) toward the target angles. */
