@@ -2411,7 +2411,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let sunLight = null;
   scene.traverse((o) => { if (!sunLight && o.isDirectionalLight) sunLight = o; });
 
-  let autoHeadlights = true;
+  let autoHeadlights = false;
   let headlightsOn = false;
   const _sunDir = new THREE.Vector3();
 

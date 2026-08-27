@@ -1225,7 +1225,7 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="prop-row">
             <span class="prop-label">Auto (by sun)</span>
             <div class="prop-value">
-              <button class="prop-toggle checked" id="dv-lights-auto" type="button" aria-label="Auto headlights">${CHECK_SVG}</button>
+              <button class="prop-toggle" id="dv-lights-auto" type="button" aria-label="Auto headlights">${CHECK_SVG}</button>
             </div>
           </div>
           <div class="prop-row">
@@ -2346,7 +2346,7 @@ export function createRoadDevPanel({ app, game, params }) {
     autoToggle.set(false);
     game.setHeadlights(on);
   });
-  const autoToggle = toggle("dv-lights-auto", true, (on) => game.setAutoHeadlights(on));
+  const autoToggle = toggle("dv-lights-auto", false, (on) => game.setAutoHeadlights(on));
   slider("dv-lamp", HEADLIGHTS, "lampEmissive", (v) => v.toFixed(1), () => game.refreshLights());
   slider("dv-beam", HEADLIGHTS, "intensity", (v) => v.toFixed(0), () => game.refreshLights());
 
