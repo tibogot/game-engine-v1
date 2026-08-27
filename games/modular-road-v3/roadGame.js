@@ -117,7 +117,7 @@ import {
 } from "./modularRoadMoverProps.js";
 import { PortalManager, DEFAULT_PORTAL_PARAMS, buildPortalMesh } from "./modularRoadPortals.js";
 import { GapPreview } from "./gapPreview.js";
-import { LapTracker, formatLapTime } from "./modularRoadLap.js";
+import { RunTracker, formatRunTime } from "./modularRoadRun.js";
 import { GhostTrack, createGhostMesh } from "./modularRoadGhost.js";
 import { ModularRoadTireMarks } from "./modularRoadTireMarks.js";
 import { ModularRoadDriftSmoke, DEFAULT_DRIFT_SMOKE_SETTINGS } from "./modularRoadDriftSmoke.js";
@@ -2457,12 +2457,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   updateAutoHeadlights(); // match the world we just loaded, before first frame
 
   // 4d) ── RACE (timing · checkpoints · ghost · fall→respawn) ────────────────
-  // Wires the already-built LapTracker + GhostTrack. Air-stunt rule: falling off
-  // the track respawns at the LAST SAFE GROUNDED POSE (not a checkpoint), so a
-  // missed jump just puts you back on the takeoff ramp. Timing checkpoints
-  // (start/checkpoint/finish pieces) drive splits + the lap clock only.
-  const RACE_KEY = "modular-road-v3.rec.";
-  const lap = new LapTracker({ roadWidth: 16, fallY: FALL_Y, targetLaps: 3 });
+  // Sprint course: rounded start_new + finish_new (optional checkpoint_new),
+  // on ANY chains — a jump / new chain / snap-landing is a normal sprint.
+  // Open start/finish pieces are ignored until circuit/lap mode. Air-stunt rule:
+  // falling off the track respawns at the LAST SAFE GROUNDED POSE (not a
+  // checkpoint), so a missed jump just puts you back on the takeoff. Timing
+  // gates drive the clock + splits only.
+  const RACE_KEY = "modular-road-v3.sprint.";
+  const run = new RunTracker({ roadWidth: 16 });
+  // Slow-mo contract. 1 = realtime. Do not change FIXED_DT to slow the world.
+  let timeScale = 1;
   const ghost = new GhostTrack({ sampleHz: 20 });
   const ghostMesh = createGhostMesh(CHASSIS.width, CHASSIS.height, CHASSIS.length);
   scene.add(ghostMesh);
@@ -2481,44 +2485,43 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const _respawnPos = new THREE.Vector3();
   const _fallProbe = new THREE.Vector3(); // sky-mode kill floor — see fallFloorY
 
-  const recKey = () => RACE_KEY + lap.courseSignature();
+  const recKey = () => RACE_KEY + run.courseSignature();
 
   function loadRecord() {
-    if (!lap.hasCourse) return;
+    if (!run.hasCourse) return;
     try {
       const raw = localStorage.getItem(recKey());
       if (!raw) return;
       const rec = JSON.parse(raw);
-      if (Number.isFinite(rec.best)) lap.applyStoredBest(rec.best);
-      if (Array.isArray(rec.splits)) lap.applyStoredSplits(rec.splits);
+      if (Number.isFinite(rec.best)) run.applyStoredBest(rec.best);
+      if (Array.isArray(rec.splits)) run.applyStoredSplits(rec.splits);
       if (rec.ghost) ghost.load(rec.ghost);
     } catch { /* corrupt / disabled — ignore */ }
   }
 
   function saveRecord() {
-    if (!lap.hasCourse) return;
+    if (!run.hasCourse) return;
     try {
       localStorage.setItem(recKey(), JSON.stringify({
-        best: lap.bestLap,
-        splits: lap.bestLapSplits,
+        best: run.bestTime,
+        splits: run.bestSplits,
         ghost: ghost.serialize(),
       }));
     } catch { /* quota / disabled */ }
   }
 
   function clearRecord() {
-    try { if (lap.hasCourse) localStorage.removeItem(recKey()); } catch {}
+    try { if (run.hasCourse) localStorage.removeItem(recKey()); } catch {}
     ghost.clear();
     ghostMesh.visible = false;
-    lap.bestLap = NaN;
-    lap.bestLapSplits = null;
+    run.clearBest();
   }
 
   /** Set up timing for a fresh run — call on entering drive mode. */
   function beginRace() {
     // buildGates() resets timing internally, so load the stored record AFTER it
-    // (reset() clears bestLap/bestLapSplits — loading before it would be wiped).
-    lap.buildGates(builder.pieces);
+    // (reset() clears bestTime — loading before it would be wiped).
+    run.buildGates(builder.pieces);
     drift.reset(); // fresh drift total per run
     ghost.clear();
     loadRecord();
@@ -2526,20 +2529,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     hasSafe = false;
   }
 
-  function handleLapEvent(ev) {
+  function handleRunEvent(ev) {
     if (ev.kind === "start") {
+      ghost.discard();
       ghost.beginLap();
     } else if (ev.kind === "checkpoint") {
-      showSplit(ev.splitDelta);
-    } else if (ev.kind === "lap") {
+      if (Number.isFinite(ev.splitDelta)) showSplit(ev.splitDelta);
+      else if (hudSplit && Number.isFinite(ev.time)) {
+        // First run: no PB to delta against, so flash the split clock itself.
+        hudSplit.textContent = formatRunTime(ev.time);
+        hudSplit.className = "show";
+        splitTimer = 2.0;
+      }
+    } else if (ev.kind === "finish") {
       if (ev.isRecord) {
         ghost.commit();
-        ghostMesh.visible = true;
         saveRecord();
       } else {
         ghost.discard();
       }
-      if (!ev.finished) ghost.beginLap();
     }
   }
 
@@ -3818,10 +3826,10 @@ ${e.message}`);
 
   function resolveSpawn() {
     if (gameSpawn) return gameSpawn;
-    const start = builder.pieces.find((p) => p.id === "start" || p.id === "start_new");
-    if (start) {
-      return start.id === "start_new" ? poseFromStartNewPiece(start) : poseFromPiece(start);
-    }
+    const startNew = builder.pieces.find((p) => p.id === "start_new");
+    if (startNew) return poseFromStartNewPiece(startNew);
+    const start = builder.pieces.find((p) => p.id === "start");
+    if (start) return poseFromPiece(start);
     if (builder.pieces.length) return poseFromPiece(builder.pieces[0]);
     const sp = app.getSpawnPoint?.() ?? null;
     if (sp) return { x: sp.x, y: sp.y, z: sp.z, yaw: sp.yaw ?? 0 };
@@ -4274,6 +4282,13 @@ ${e.message}`);
     // Same board every run — see ParkourMover.resetPhase.
     movers.resetPhases();
     simAccum = 0;
+    // R / void-backstop: full retry. Last-safe recoveries do NOT come through
+    // here, so a missed jump still costs time on the live clock.
+    if (mode === "drive") {
+      run.restart();
+      ghost.discard();
+      drift.reset();
+    }
   }
 
   const paletteEl = document.getElementById("palette");
@@ -4282,10 +4297,9 @@ ${e.message}`);
 
   // ── RACE HUD ────────────────────────────────────────────────────────────────
   const hud = document.getElementById("race-hud");
+  const hudClock = document.getElementById("race-clock");
   const hudTime = document.getElementById("race-time");
-  const hudLap = document.getElementById("race-lap");
-  const hudNext = document.getElementById("race-next");
-  const hudBest = document.getElementById("race-best");
+  const hudSub = document.getElementById("race-sub");
   const hudFlash = document.getElementById("race-flash");
   const hudSplit = document.getElementById("race-split");
   // The arc speedo's three elements. Its markup is commented out in road.html
@@ -4357,16 +4371,9 @@ ${e.message}`);
   /**
    * WRITE A DOM STRING ONLY WHEN IT CHANGES.
    *
-   * `updateRaceHud` runs every frame and used to assign five `textContent`s and
-   * a `className` unconditionally. Four of those change about once a LAP — the
-   * lap counter, the best time, the next-checkpoint label, and the timer itself
-   * whenever no lap is running.
-   *
-   * Assigning the same string still costs: it is a setter that goes through the
-   * DOM binding and dirties the node. Profiling a real drive
-   * (bench-current.json), `set textContent` came out at **5.1% of the entire
-   * main thread** — the second-largest named entry in the whole trace, behind
-   * only `(program)`, and larger than `updateMatrixWorld`.
+   * `updateRaceHud` runs every frame. The live time changes every tick while a
+   * run is going; the subline and clock visibility change only on gate events.
+   * Assigning the same string still costs, so writes are skipped when unchanged.
    *
    * The last value is cached ON the element rather than in a Map so there is
    * nothing to keep in sync when the HUD is rebuilt — a fresh node simply has no
@@ -4395,17 +4402,18 @@ ${e.message}`);
 
   function updateRaceHud(dt) {
     if (!hud) return;
-    setText(hudTime, formatLapTime(lap.running ? lap.currentTime : 0));
-    setText(hudLap, `Lap ${lap.currentLapNumber}/${lap.targetLaps}`);
-    setText(hudNext, lap.hasCourse
-      ? lap.nextLabel
-      : "No timing — place a Start piece");
-    setText(hudBest, `Best ${formatLapTime(lap.bestLap)}`);
+    setClass(hudClock, run.hasCourse ? "on" : "");
+    if (run.hasCourse) {
+      // Frozen after finish, 0.000 while armed, live while running.
+      const shown = run.running || run.finished ? run.currentTime : 0;
+      setText(hudTime, formatRunTime(shown));
+      setText(hudSub, run.subLabel);
+    }
 
-    // Centre flash mirrors the LapTracker's own message (GO! / RECORD / FINISH).
-    if (lap.messageTimer > 0 && lap.message) {
-      setText(hudFlash, lap.message);
-      const good = /RECORD|GO|FINISH/.test(lap.message);
+    // Centre flash mirrors the runner's own message (GO! / NEW BEST / FINISH).
+    if (run.messageTimer > 0 && run.message) {
+      setText(hudFlash, run.message);
+      const good = /BEST|GO|FINISH/.test(run.message);
       setClass(hudFlash, `show ${good ? "good" : ""}`);
     } else {
       setClass(hudFlash, "");
@@ -4979,10 +4987,11 @@ ${e.message}`);
       // Race
       setRaceRespawn: (on) => { raceRespawn = !!on; },
       getRaceRespawn: () => raceRespawn,
-      setTargetLaps: (n) => lap.setTargetLaps(n),
-      getTargetLaps: () => lap.targetLaps,
       clearRecord,
-      getBestLap: () => lap.bestLap,
+      getBestTime: () => run.bestTime,
+      getBestLap: () => run.bestTime,
+      getTimeScale: () => timeScale,
+      setTimeScale: (s) => { timeScale = Math.max(0, +s || 0); },
       getPieceCount: () => builder.pieces.length,
       getCollisionTriCount: () =>
         deckBvh.triCount + solidsBvh.triCount +
@@ -5005,8 +5014,11 @@ ${e.message}`);
 
   // 7) ── THE GAME LOOP ──────────────────────────────────────────────────────
   // One rAF drives game state; the ENGINE renders the scene on its own loop.
-  // Physics advances only in whole FIXED_DT ticks so handling, lap times and
+  // Physics advances only in whole FIXED_DT ticks so handling, race times and
   // ghosts stay framerate-independent; visuals interpolate the leftover.
+  // timeScale is the slow-mo contract: 1 = realtime. Later, hold-to-slow-mo
+  // sets this to ~0.3; race time is += FIXED_DT per tick so the HUD clock
+  // slows with the world. Do not change FIXED_DT itself.
   let last = performance.now();
   let simAccum = 0;
   let autoLightAccum = 0;
@@ -5024,7 +5036,7 @@ ${e.message}`);
       // Pad Y mirrors the keyboard's R. Without it a gamepad player has to reach
       // back to the keyboard after every fall.
       if (padRespawnPressed) respawn();
-      simAccum += dt;
+      simAccum += dt * timeScale;
       let ticks = Math.floor(simAccum / FIXED_DT);
       if (ticks > MAX_SIM_TICKS) {
         ticks = MAX_SIM_TICKS;
@@ -5061,11 +5073,11 @@ ${e.message}`);
         propPhysics.tick(FIXED_DT, vehicle);       // cones, gates
         portals.updateDrive(FIXED_DT, vehicle);
 
-        // Timing runs INSIDE the fixed tick so splits/lap times are quantised to
+        // Timing runs INSIDE the fixed tick so splits/race times are quantised to
         // the deterministic clock (framerate-independent records).
-        const ev = lap.update(FIXED_DT, vehicle.body.pos, vehicle.body.vel);
-        if (ev) handleLapEvent(ev);
-        if (lap.running) ghost.record(lap.currentTime, vehicle.body.pos, vehicle.body.quat);
+        const ev = run.update(FIXED_DT, vehicle.body.pos, vehicle.body.vel);
+        if (ev) handleRunEvent(ev);
+        if (run.running) ghost.record(run.currentTime, vehicle.body.pos, vehicle.body.quat);
         trackSafePose(); // remember where we were last grounded on the track
       }
       vehicle.syncVisuals(dt, simAccum / FIXED_DT);
@@ -5082,12 +5094,12 @@ ${e.message}`);
 
       checkFall(); // air-stunt: dropped off the track → last safe grounded pose
 
-      // Ghost replay: park it at the live lap time. Hidden until a lap is running.
-      if (lap.running && ghost.hasGhost && ghost.sampleAt(lap.currentTime, _ghostPos, _ghostQuat)) {
+      // Ghost replay: park it at the live run time. Hidden until a run is going.
+      if (run.running && ghost.hasGhost && ghost.sampleAt(run.currentTime, _ghostPos, _ghostQuat)) {
         ghostMesh.position.copy(_ghostPos);
         ghostMesh.quaternion.copy(_ghostQuat);
         ghostMesh.visible = true;
-      } else if (ghostMesh.visible && !lap.running) {
+      } else if (ghostMesh.visible && !run.running) {
         ghostMesh.visible = false;
       }
 

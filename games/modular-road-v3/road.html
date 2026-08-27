@@ -98,7 +98,9 @@
       #race-clock {
         position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
         text-align: center; color: #fff;
+        display: none;
       }
+      #race-clock.on { display: block; }
       #race-time {
         font-variant-numeric: tabular-nums; font-weight: 700;
         font-size: 40px; line-height: 1; letter-spacing: 0.5px;
@@ -799,11 +801,7 @@
     <div id="race-hud">
       <div id="race-clock">
         <div id="race-time">0.000</div>
-        <div id="race-sub">
-          <span id="race-lap">Lap 0/3</span> &nbsp;·&nbsp;
-          <span id="race-next">Cross the START line</span> &nbsp;·&nbsp;
-          <span id="race-best">Best --:--.---</span>
-        </div>
+        <div id="race-sub"></div>
       </div>
       <div id="race-split"></div>
       <div id="race-flash"></div>

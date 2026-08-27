@@ -11,6 +11,7 @@
 // track, FX. Player-facing UI is the palette (build); shortcuts live here for
 // now (Mode section) until a dedicated menu exists.
 import * as THREE from "three";
+import { formatRunTime } from "./modularRoadRun.js";
 
 const CHECK_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
@@ -313,21 +314,16 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Target laps</span>
-            <div class="prop-value">
-              <input type="range" id="dv-laps" min="1" max="10" step="1" />
-              <span class="prop-num" id="dv-laps-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Best lap</span>
+            <span class="prop-label">Best time</span>
             <div class="prop-value"><span class="prop-num" id="dv-best">--:--.---</span></div>
           </div>
           <button class="action-btn" id="dv-clear-rec" type="button">Clear record + ghost</button>
           <div class="dv-hint">
-            Place <b>Start</b> / <b>Checkpoint</b> / <b>Finish</b> pieces to enable
-            timing. <b>Fall respawn</b> off (free-drive) = fall off the track and
-            land on the terrain; on = snap back to the last safe spot (game rule).
+            Place rounded <b>Start</b> + <b>Finish</b> to enable the clock
+            (any chains — jumps / new chains are fine). Checkpoints are
+            optional ordered splits. Open start/finish pieces are for a later
+            circuit mode. <b>Fall respawn</b> off = land on the terrain; on =
+            snap back to the last safe spot (clock keeps running).
           </div>
         </div>
       </div>
@@ -2079,18 +2075,7 @@ export function createRoadDevPanel({ app, game, params }) {
   renderSpawnSrc();
 
   // ── Race ────────────────────────────────────────────────────────────────────
-  const lapsEl = $("#dv-laps");
-  const lapsVal = $("#dv-laps-v");
   const bestEl = $("#dv-best");
-  if (lapsEl) {
-    lapsEl.value = game.getTargetLaps();
-    lapsVal.textContent = String(game.getTargetLaps());
-    lapsEl.addEventListener("input", () => {
-      const n = +lapsEl.value;
-      game.setTargetLaps(n);
-      lapsVal.textContent = String(n);
-    });
-  }
   toggle("dv-respawn-on", game.getRaceRespawn(), (on) => game.setRaceRespawn(on));
   $("#dv-clear-rec").addEventListener("click", () => { game.clearRecord(); refresh(); });
 
@@ -2667,8 +2652,8 @@ export function createRoadDevPanel({ app, game, params }) {
     piecesEl.textContent = String(game.getPieceCount());
     trisEl.textContent = game.getCollisionTriCount().toLocaleString();
     if (bestEl) {
-      const b = game.getBestLap();
-      bestEl.textContent = Number.isFinite(b) ? b.toFixed(3) : "--:--.---";
+      const b = game.getBestTime?.() ?? game.getBestLap();
+      bestEl.textContent = formatRunTime(b);
     }
     // Auto mode flips the headlights from outside the panel — keep the toggle
     // showing the truth rather than the last thing that was clicked.
