@@ -69,11 +69,6 @@ export const pieceParams = {
   platformLength: 24,
   platformWidth: 44,
   narrowWidth: 8, // narrow precision road (keeps lines + kerbs)
-  // Wall-ride: one piece that eases flat → steeply banked → hold → flat, and
-  // RISES as it banks so the low edge stays on the original plane.
-  wallRideLength: 70, // long — the lean needs room to read as a smooth curve
-  wallAngle: 70,      // peak lean (deg)
-  wallRamp: 0.38,     // fraction of the length spent easing in / out of the lean
   curveRadius: 26,
   curveAngle: 90, // degrees of arc
   curveDir: 1, // +1 = right turn, -1 = left turn
@@ -2533,36 +2528,6 @@ function smoother(u) {
   return u * u * u * (u * (u * 6 - 15) + 10);
 }
 
-/** Fraction of full lean at t: eases 0→1 over `ramp`, holds, eases back to 0.
- *  Shared by the wall-ride's POINTS and ROLL so the rise and the lean agree. */
-function wallRampFrac(t, ramp) {
-  if (t < ramp) return smoother(t / ramp);
-  if (t > 1 - ramp) return smoother((1 - t) / ramp);
-  return 1;
-}
-
-function wallRidePoints(pp) {
-  const L = Math.max(8, pp.wallRideLength);
-  const ramp = THREE.MathUtils.clamp(pp.wallRamp ?? 0.35, 0.05, 0.5);
-  const hw = roadParams.width / 2;
-  const maxAng = THREE.MathUtils.degToRad(pp.wallAngle);
-  // Torsion-aware density: the lean rolls in AND back out (2× wallAngle of total
-  // roll), plus the centreline rise adds pitch. stepsFor caps the per-step angle
-  // so this scales with the params instead of a hand-picked fixed step.
-  const n = stepsFor(L, 2 * maxAng, 48);
-  const pts = [];
-  for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    const ang = maxAng * wallRampFrac(t, ramp);
-    // RAISE the centreline by hw·sin(lean) so the LOW edge stays on the original
-    // plane and the road banks UP into a wall. Without this the deck rolls about
-    // its centreline — a see-saw blade with half the road swinging below the
-    // track, which is what made it read as a huge dark slab.
-    pts.push(new V3(0, hw * Math.sin(ang), -L * t));
-  }
-  return pts;
-}
-
 function curvePoints(pp) {
   const R = Math.max(2, pp.curveRadius);
   const A = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.curveAngle, 1, 180));
@@ -2858,15 +2823,6 @@ function bankedClimbSockets(pp) {
   const s = bankedCurveSockets(pp);
   s.exitPos.y += pp.bankRise ?? 0;
   return s;
-}
-
-/** Wall-ride: flat → up to (near-)vertical → HOLD → back to flat, all in one
- *  piece, so it chains cleanly off a flat straight (no abrupt twist at the
- *  joints). Ramps over the first/last quarter, holds the wall through the middle. */
-function wallRideRoll(t, pp) {
-  const dir = pp.curveDir >= 0 ? 1 : -1;
-  const ramp = THREE.MathUtils.clamp(pp.wallRamp ?? 0.35, 0.05, 0.5);
-  return dir * THREE.MathUtils.degToRad(pp.wallAngle) * wallRampFrac(t, ramp);
 }
 
 /** Chicane: turn `curveAngle` one way then back the other, ending parallel. */
@@ -4049,17 +4005,6 @@ export const PIECE_CATALOG = [
     plain: true,
   },
   {
-    id: "wallride",
-    label: "Wall ride",
-    hint: "Flat → wall → flat (self-contained)",
-    swatch: "#8e6fc0",
-    key: "",
-    points: wallRidePoints,
-    roll: wallRideRoll,
-    // NO width override — a wall-ride must match the road width or the deck
-    // steps at the connector where it meets a straight.
-  },
-  {
     id: "curve",
     label: "Curve",
     hint: "Flat arc (R flips L/R)",
@@ -4859,7 +4804,6 @@ const _END_TANGENTS = {
   narrow: flatEndTangents,
   holed: flatEndTangents,
   glass_road: flatEndTangents,
-  wallride: flatEndTangents,
   tunnel: flatEndTangents,
   tunnel_lit: flatEndTangents,
   tube: flatEndTangents,
@@ -5006,7 +4950,7 @@ for (const id of [
  */
 const HANDED_PIECES = new Set([
   "curve", "scurve", "spiral",
-  "banked", "banked_climb", "banktilt", "bankin", "bankout", "bankswap", "wallride",
+  "banked", "banked_climb", "banktilt", "bankin", "bankout", "bankswap",
   "loop", "loop_half", "loop_spiral",
   "tunnel_curve", "tunnel_lit_curve", "channel_curve",
   "tube_curve", "half_tube_curve", "half_pipe_curve",

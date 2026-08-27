@@ -3980,7 +3980,7 @@ export class ModularRoadBuilder {
    * one jump with a SECOND chain for the landing (jump→gap in one chain inherits
    * the ramp pitch and climbs forever — the gap preview / jump-debug track both
    * use a fresh level chain for the far side), a tunnel, a narrow, then finish.
-   * Avoids loops / tubes / wall-rides / twists — those need hand-tuned placement.
+   * Avoids loops / tubes / twists — those need hand-tuned placement.
    *
    * @param {{ startPos?: THREE.Vector3, yaw?: number, refSpeed?: number,
    *           dragK?: number }} [opts]
@@ -4275,7 +4275,6 @@ const PIECE_TO_CATEGORY = {
   banked: "banked",
   banked_climb: "banked",
   banktilt: "banked",
-  wallride: "banked",
   bankin: "banked",
   bankswap: "banked",
   bankout: "banked",
@@ -4483,9 +4482,8 @@ export const CATEGORY_PRESETS = {
     // section is a function of the angle. Half a ladder would be tiles that look
     // usable and are not.
     //
-    // 12° is highway camber — enough to feel, not enough to commit to. 38° is a
-    // step short of the 70° wall rides below and past the 35° Road Tilted, so it
-    // reads as a corner you drop into rather than a wall you climb.
+    // 12° is highway camber — enough to feel, not enough to commit to. 38° is
+    // past the 35° Road Tilted, so it reads as a corner you drop into.
     {
       id: "bank_up_right_gentle",
       label: "Up 12°",
@@ -4536,33 +4534,6 @@ export const CATEGORY_PRESETS = {
       label: "Down 38°",
       base: "bankout",
       params: { bankRampLength: 56, bankAngle: 38 },
-    },
-
-    {
-      id: "wall_ride_right",
-      label: "Wall Ride",
-      base: "wallride",
-      params: { wallRideLength: 70, wallAngle: 70, wallRamp: 0.38 },
-    },
-    // SHORT wall ride — `wallRamp` is a FRACTION of the piece, so the same 0.38
-    // still spends the same share of the length getting up and off the wall.
-    // At 34 m that is ~13 m each way instead of ~27, which is a flick rather
-    // than a section: it fits between two corners.
-    {
-      id: "wall_ride_short_right",
-      label: "Wall Ride Short",
-      base: "wallride",
-      params: { wallRideLength: 34, wallAngle: 70, wallRamp: 0.38 },
-    },
-    // TRUE VERTICAL. Stops at 88° rather than 90° on purpose: at exactly 90 the
-    // deck's own normal has no horizontal component left, so nothing holds the
-    // car against the wall and the piece becomes a ceiling you fall off. Two
-    // degrees of lean is what keeps it a wall ride.
-    {
-      id: "wall_ride_vert_right",
-      label: "Wall Ride 88°",
-      base: "wallride",
-      params: { wallRideLength: 70, wallAngle: 88, wallRamp: 0.42 },
     },
   ],
   tubes: [
@@ -5989,7 +5960,7 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       const label = activeLabel();
       // ONE SOURCE FOR "IS THIS PIECE HANDED", shared with the hand chip and the
       // strip. This used to be a hand-typed list of ten ids that had drifted:
-      // it missed the whole tube family, the bank ramps, wallride and the loop,
+      // it missed the whole tube family, the bank ramps and the loop,
       // so the status line silently stopped reporting the direction for half the
       // pieces it applies to. isHandedPiece is derived and covered by a test.
       const dir = builder.hand >= 0 ? "R" : "L";

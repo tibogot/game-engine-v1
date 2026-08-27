@@ -633,7 +633,6 @@ const pieces = {};
 for (const [label, ids] of [
   ["flat straights", RUN],
   ["quarterpipe", [...RUN, "quarterpipe", "straight"]],
-  ["wallride", [...RUN, "wallride", "straight"]],
   ["jump ramp", [...RUN, "jump", "straight", "straight"]],
   ["LOOP", [...RUN, "loop", "straight"]],
   ["LOOP half", [...RUN, "loop_half"]],

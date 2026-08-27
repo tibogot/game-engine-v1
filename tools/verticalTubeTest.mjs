@@ -426,7 +426,7 @@ console.log("\n11. THE ANGLE LADDER is complete, and each rung agrees with itsel
   const byAngle = new Map();
   for (const tile of CATEGORY_PRESETS.banked) {
     const a = tile.params.bankAngle;
-    if (a == null) continue; // wall rides use wallAngle
+    if (a == null) continue;
     if (!byAngle.has(a)) byAngle.set(a, new Set());
     byAngle.get(a).add(tile.base);
   }
@@ -467,32 +467,7 @@ console.log("\n11. THE ANGLE LADDER is complete, and each rung agrees with itsel
 }
 
 /* ----------------------------------------------------------------------- */
-console.log("\n12. WALL RIDES come back down\n");
-
-// A wall ride ramps up, HOLDS, and ramps back — self-contained, so it chains off
-// a flat straight. If the roll does not close, every piece after it is rolled.
-for (const [len, ang, ramp] of [[70, 70, 0.38], [34, 70, 0.38], [70, 88, 0.42]]) {
-  for (const dir of [1, -1]) {
-    const c = readConnector(build("wallride",
-      { wallRideLength: len, wallAngle: ang, wallRamp: ramp, curveDir: dir }).connectorOut);
-    const tag = `${len} m @ ${ang}° ${dir > 0 ? "R" : "L"}`;
-    ok(near(c.up.y, 1, 1e-6), `${tag}: the roll closes back to level`, `up.y=${c.up.y.toFixed(9)}`);
-    ok(near(c.pos.z, -len, 1e-6) && near(c.pos.x, 0, 1e-6) && near(c.pos.y, 0, 1e-6),
-      `${tag}: exit is straight ahead at the piece's length`);
-  }
-}
-// 88° must still lean INTO the road — at exactly 90 the deck normal has no
-// horizontal component and nothing holds the car on.
-{
-  const p = build("wallride", { wallRideLength: 70, wallAngle: 88, wallRamp: 0.42, curveDir: 1 });
-  const mid = p.frames[Math.floor(p.frames.length / 2)];
-  const lean = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(mid.up.y, -1, 1)));
-  ok(near(lean, 88, 0.5) && mid.up.y > 0.01, "88° wall still has a deck normal to hold the car",
-    `lean ${lean.toFixed(2)}°, up.y=${mid.up.y.toFixed(4)}`);
-}
-
-/* ----------------------------------------------------------------------- */
-console.log("\n13. THE PALETTE IS ONE NAMESPACE, and it is easy to forget\n");
+console.log("\n12. THE PALETTE IS ONE NAMESPACE, and it is easy to forget\n");
 
 /*
  * A PRESET MAY NOT BE NAMED AFTER A PIECE. roadGame builds the thumbnail bake

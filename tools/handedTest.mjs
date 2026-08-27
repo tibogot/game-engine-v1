@@ -165,7 +165,7 @@ const src = (await import("node:fs")).readFileSync(
   new URL("../games/modular-road-v3/modularRoadBuilder.js", import.meta.url), "utf8");
 ok(!/const curveIds = new Set/.test(src),
   "the status line's hand-typed curve list is gone",
-  "it had drifted — no tube, no bank ramp, no wallride, no loop");
+  "it had drifted — no tube, no bank ramp, no loop");
 
 console.log(fail === 0 ? "\nALL PASS\n" : `\n${fail} FAILURE(S)\n`);
 process.exit(fail === 0 ? 0 : 1);
