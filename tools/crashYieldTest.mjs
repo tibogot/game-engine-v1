@@ -139,5 +139,60 @@ console.log("\n=== an upright car on all four wheels recovers immediately ===");
     `crashYield ${c.crashYield.toFixed(2)}, wheels ${c.groundedCount}`);
 }
 
+console.log("\n=== yielded airborne slam bounces; a slow on-road clip stays dead ===");
+{
+  const slam = (y, vx) => {
+    const c = makeCar({ solids: wall(3.0) });
+    c.body.pos.set(0, y, 0);
+    c.body.vel.set(vx, 0, 0);
+    c._airTime = 0.2;
+    const n = Math.round(0.25 / FIXED_DT);
+    for (let i = 0; i < n; i++) {
+      c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0 });
+    }
+    return c;
+  };
+  const air = slam(4, 22);
+  check("airborne slam rebounds instead of dying", air.body.vel.x < -4,
+    `vx ${air.body.vel.x.toFixed(1)} m/s`);
+  {
+    const c = makeCar({ solids: wall(6.0) });
+    c.body.pos.set(0, 0.55, 0);
+    for (let i = 0; i < Math.round(0.35 / FIXED_DT); i++) {
+      c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0 });
+    }
+    c.body.vel.set(8, 0, 0);
+    for (let i = 0; i < Math.round(0.9 / FIXED_DT); i++) {
+      c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0 });
+    }
+    check("a slow on-road clip is still a dead barrier",
+      c.body.vel.x > -2 && c.crashYield <= 0,
+      `vx ${c.body.vel.x.toFixed(1)} m/s, yield ${c.crashYield.toFixed(2)}, wheels ${c.groundedCount}`);
+  }
+}
+
+console.log("\n=== a moving solid at wrecking-ball speed arms yield ===");
+{
+  const w = wall(2.5);
+  const c = makeCar();
+  c.dynamicMovers = [{
+    bvh: w,
+    velocityAt(_p, out) { return out.set(-8, 0, 0); },
+  }];
+  c.body.pos.set(1.4, 0.55, 0);
+  c.body.vel.set(0, 0, 0);
+  const n = Math.round(0.2 / FIXED_DT);
+  let armed = false, peak = 0;
+  for (let i = 0; i < n; i++) {
+    c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0 });
+    peak = Math.max(peak, c.solidImpactSpeed);
+    if (c.crashYield > 0) armed = true;
+  }
+  check("relative close-speed counts the mover", peak >= CRASH.moverSpeed,
+    `peak ${peak.toFixed(1)} m/s vs moverSpeed ${CRASH.moverSpeed}`);
+  check("yield stays on even with wheels down (wrecking ball)", armed,
+    `crashYield ${c.crashYield.toFixed(2)}, wheels ${c.groundedCount}`);
+}
+
 console.log(fail ? `\n${fail} check(s) failed` : "\nall green");
 process.exit(fail ? 1 : 0);

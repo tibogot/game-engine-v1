@@ -381,7 +381,9 @@ export const MOVER_CATALOG = [
       const root = new THREE.Group();
       root.name = "Pendulum";
       const pivot = new THREE.Object3D();
-      pivot.position.set(0, 15, 0);
+      // Ball r=2.8 hangs 10.5 m below the pivot. 13.75 puts the rest BOTTOM at
+      // 0.45 m — through the cabin. Was 15 → bottom 1.7 m, over the roof.
+      pivot.position.set(0, 13.75, 0);
       root.add(pivot);
       const arm = new THREE.Mesh(new THREE.BoxGeometry(0.6, 10, 0.6), moverMat(0x555555));
       arm.position.set(0, -5, 0);
@@ -401,7 +403,9 @@ export const MOVER_CATALOG = [
       const root = new THREE.Group();
       root.name = "PendulumSmall";
       const pivot = new THREE.Object3D();
-      pivot.position.set(0, 12, 0);
+      // 3 m cube hangs 7 m below the pivot. 8.95 → rest bottom 0.45 m.
+      // Was 12 → bottom 3.5 m, well above the car.
+      pivot.position.set(0, 8.95, 0);
       root.add(pivot);
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3), moverMat(0xd06050));
       mesh.position.set(0, -7, 0);

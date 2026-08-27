@@ -1881,18 +1881,24 @@ export const STUCK = {
  * can tumble. They stay on for ordinary jumps.
  *
  * Wall hits are dead on purpose (`SOLID.restitution` 0.05 / `spin` 0.15).
- * Raising those globally would bounce every scrape. The next pass may raise
- * them ONLY while this hold is active. This block is the gate, not the bounce.
+ * Raising those globally would bounce every scrape. While this hold is
+ * active — and on a swinging/sliding mover that is already a wrecking-ball
+ * — response uses the values below instead. Static barriers you clip while
+ * driving stay dead.
  *
- * Armed by a hard solid close-speed or an inverted roof slam. Cleared as soon
- * as the car is back on enough wheels and upright. Slightly crooked jumps
- * never qualify.
+ * Armed by a hard solid close-speed, a moving solid at `moverSpeed`, or an
+ * inverted roof slam. Cleared as soon as the car is back on enough wheels
+ * and upright, unless a mover armed it (those keep the hold).
  */
 export const CRASH = {
   enabled: true,
   /** Closing speed into a solid (m/s) that counts as a crash. Tangential
    *  scrapes and wall-rides are well under this; a head-on clip is well over. */
   wallSpeed: 14,
+  /** Relative close-speed (m/s) against a MOVING solid that counts as a crash.
+   *  A pendulum's tip is ~6 m/s — under `wallSpeed`, but it should still wreck
+   *  you. Push-gate peak is ~3.6 and stays a shove. */
+  moverSpeed: 5,
   /** Roof closing speed (m/s) while inverted that counts as a slam, not a rest.
    *  Above ROOF.impactSpeed so lying on the lid does not re-arm every tick. */
   roofSpeed: 6,
@@ -1901,6 +1907,12 @@ export const CRASH = {
   /** Chassis-up.y above this, with enough wheels down, is a recovery. */
   recoverUp: 0.5,
   recoverWheels: 3,
+  /** Bounciness while yielded / wrecking-ball. SOLID.restitution stays 0.05. */
+  restitution: 0.4,
+  /** Off-centre torque fraction while yielded. SOLID.spin stays 0.15. */
+  spin: 0.55,
+  /** rad/s cap while yielded. SOLID.maxSpin stays 2.5 so scrapes cannot wind up. */
+  maxSpin: 6,
 };
 
 /** Cached each rebuild — offset from box center to CoM in chassis-local space. */
@@ -3168,6 +3180,10 @@ export class Vehicle {
     this._terrainLidHold = 0;
     /** Seconds of crash yield remaining — see CRASH. */
     this._crashYield = 0;
+    /** Yield was armed by a moving solid (pendulum, gate). Do not clear on
+     *  "wheels down" — a wrecking ball hits you while you are still driving. */
+    this._crashMover = false;
+    this._solidFromMover = false;
     this._deckUp = new THREE.Vector3();
     this._deckRoofApproachN = new THREE.Vector3();
     this._roofT = new THREE.Vector3();
@@ -3492,6 +3508,7 @@ export class Vehicle {
     this._scrapeSpeed = 0;
     this._clearStuck();
     this._crashYield = 0;
+    this._crashMover = false;
     this._resetInterpolation();
     // Keep the render pose in step with the teleport (syncVisuals hasn't run yet).
     this._renderPos.copy(this.body.pos);
@@ -3534,6 +3551,7 @@ export class Vehicle {
     this.body.vel.y = 0;
     this.body.pos.y += 0.6;
     this._crashYield = 0;
+    this._crashMover = false;
     this._resetInterpolation();
   }
 
@@ -3606,6 +3624,7 @@ export class Vehicle {
 
     this._solidTouch = false; // set by _resolveSolidBvh during the step
     this._solidImpactSpeed = 0;
+    this._solidFromMover = false;
     this._roofTouch = false;  // set by _applyDeckContact / terrain lid during the step
     this._roofImpactSpeed = 0;
     this._physicsStep(FIXED_DT);
@@ -4174,27 +4193,33 @@ export class Vehicle {
   _armCrashYield(dt = FIXED_DT / this.SUBSTEPS) {
     if (!CRASH.enabled) {
       this._crashYield = 0;
+      this._crashMover = false;
       return;
     }
     this._stuckUp.set(0, 1, 0).applyQuaternion(this.body.quat);
     const inverted = this._stuckUp.y < ROOF.dot;
-    if (
+    const recovered = this.groundedCount >= CRASH.recoverWheels
+      && this._stuckUp.y > CRASH.recoverUp;
+    if (this._solidFromMover && this._solidImpactSpeed >= CRASH.moverSpeed) {
+      this._crashYield = CRASH.hold;
+      this._crashMover = true;
+    } else if (
       this._solidImpactSpeed >= CRASH.wallSpeed
       || (inverted && this._roofImpactSpeed >= CRASH.roofSpeed)
     ) {
       this._crashYield = CRASH.hold;
     }
-    if (
-      this._crashYield > 0
-      && this.groundedCount >= CRASH.recoverWheels
-      && this._stuckUp.y > CRASH.recoverUp
-    ) {
+    // A wrecking-ball can hit you with all four wheels still on the road.
+    // Do not treat that as "recovered". Static-wall yield still clears the
+    // moment you are driving again so a barrier clip does not mute assists.
+    if (this._crashYield > 0 && recovered && !this._crashMover) {
       this._crashYield = 0;
       return;
     }
     if (this._crashYield > 0) {
       this._crashYield = Math.max(0, this._crashYield - dt);
     }
+    if (this._crashYield <= 0) this._crashMover = false;
   }
 
   /**
@@ -5514,13 +5539,7 @@ export class Vehicle {
     // `_solidPoint`. See _updateScrapeLatch.
     this._scrapePoint.copy(this._solidPoint);
     this._scrapeNormal.copy(this._solidN);
-
-    // Sampled AFTER the normal is resolved and normalised, but BEFORE the push
-    // below cancels the inward velocity — a frame later it always reads ~0.
-    // Sparks need the difference between a graze and a slam.
-    this._solidImpactSpeed = Math.max(
-      this._solidImpactSpeed, -body.vel.dot(this._solidN),
-    );
+    if (surfaceVelFn) this._solidFromMover = true;
 
     // 1) POSITIONAL — move out of the surface. No force, so no stored energy.
     body.pos.addScaledVector(this._solidN, deepest * SOLID.push);
@@ -5535,8 +5554,32 @@ export class Vehicle {
       this._sphV.sub(this._surfV);
     }
     const vN = this._sphV.dot(this._solidN);
+    // Relative close-speed — movers must count the surface, not world vel.
+    // A parked car hit by a pendulum reads ~0 in world and would never yield.
+    const closing = vN < 0 ? -vN : 0;
+    this._solidImpactSpeed = Math.max(this._solidImpactSpeed, closing);
+
+    this._stuckUp.set(0, 1, 0).applyQuaternion(body.quat);
+    const recovered = this.groundedCount >= CRASH.recoverWheels
+      && this._stuckUp.y > CRASH.recoverUp;
+    const moverSlam = !!surfaceVelFn && closing >= CRASH.moverSpeed;
+    const violent = CRASH.enabled && (
+      moverSlam
+      || this._crashYield > 0
+      || (!recovered && closing >= CRASH.wallSpeed)
+    );
+    if (violent && moverSlam) {
+      this._crashYield = CRASH.hold;
+      this._crashMover = true;
+    } else if (violent && closing >= CRASH.wallSpeed) {
+      this._crashYield = CRASH.hold;
+    }
+    const rest = violent ? CRASH.restitution : SOLID.restitution;
+    const spinK = violent ? CRASH.spin : SOLID.spin;
+    const spinMax = violent ? CRASH.maxSpin : SOLID.maxSpin;
+
     if (vN < 0) {
-      body.vel.addScaledVector(this._solidN, -vN * (1 + SOLID.restitution));
+      body.vel.addScaledVector(this._solidN, -vN * (1 + rest));
     }
     if (surfaceVelFn) {
       const relN = body.vel.dot(this._solidN) - this._surfV.dot(this._solidN);
@@ -5559,10 +5602,10 @@ export class Vehicle {
     // 4) SPIN — an off-centre hit should turn the car a little. Deliberately a
     //    fraction of the physically correct impulse and hard-capped: the wheels
     //    and stabilizer own the car's attitude, a wall only nudges it.
-    if (SOLID.spin > 0 && vN < 0) {
+    if (spinK > 0 && vN < 0) {
       this._solidR.subVectors(this._solidPoint, body.pos);
       this._solidTorque.crossVectors(this._solidR, this._solidN)
-        .multiplyScalar(-vN * SOLID.spin);
+        .multiplyScalar(-vN * spinK);
       const mag = this._solidTorque.length();
       if (mag > 1e-6) {
         // CAP THE RESULT, NOT THE INCREMENT.
@@ -5583,7 +5626,7 @@ export class Vehicle {
         // already spinning that fast.
         this._solidSpinAxis.copy(this._solidTorque).multiplyScalar(1 / mag);
         const cur = body.angVel.dot(this._solidSpinAxis);
-        const room = SOLID.maxSpin - cur;
+        const room = spinMax - cur;
         const add = Math.min(mag, Math.max(0, room));
         if (add > 0) body.angVel.addScaledVector(this._solidSpinAxis, add);
       }
