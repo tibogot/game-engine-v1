@@ -5,10 +5,14 @@ import * as THREE from "three";
  * a translucent car on later laps, synced to the live lap clock.
  *
  * Perf is intentionally tiny:
- *  - Recording = one sample (pos + quat) at a fixed low rate (default 20 Hz);
- *    a 15 s lap is ~300 samples (~7 KB packed). No GPU cost.
- *  - Playback = lerp/slerp between two samples + one extra mesh draw.
- *  - Persistence = compact rounded JSON (~20-30 KB / track) in localStorage.
+ *  - Recording = one sample (pos + quat) at 60 Hz (the live car interpolates a
+ *    120 Hz body; 20 Hz linear keys kink at every sample — visible jitter on
+ *    jumps, landings, and tight corners). A 15 s lap is ~900 samples (~20 KB
+ *    packed). No GPU cost.
+ *  - Playback = lerp/slerp between two samples + one extra mesh draw. Callers
+ *    should sample at the RENDER clock (last tick + leftover alpha), not the
+ *    discrete `run.currentTime`, or the ghost hitch-steps against the camera.
+ *  - Persistence = compact rounded JSON (~40-60 KB / track) in localStorage.
  *
  * One instance owns BOTH the in-progress recording and the committed ghost, plus
  * a moving playback cursor so sampling is O(1) amortised (lap time is monotonic
@@ -18,7 +22,7 @@ const _qa = new THREE.Quaternion();
 const _qb = new THREE.Quaternion();
 
 export class GhostTrack {
-  constructor({ sampleHz = 20 } = {}) {
+  constructor({ sampleHz = 60 } = {}) {
     this.dtSample = 1 / sampleHz;
     // In-progress recording (plain arrays, cheap to push).
     this._recT = null;
@@ -52,7 +56,16 @@ export class GhostTrack {
     if (n === 0 || lapT - this._recT[n - 1] >= this.dtSample) {
       this._recT.push(lapT);
       this._recP.push(pos.x, pos.y, pos.z);
-      this._recQ.push(quat.x, quat.y, quat.z, quat.w);
+      // Keep consecutive quats in the same hemisphere so serialized ghosts do
+      // not store a sign flip (Three's slerp already takes the short path).
+      let qx = quat.x, qy = quat.y, qz = quat.z, qw = quat.w;
+      if (this._recQ.length >= 4) {
+        const k = this._recQ.length - 4;
+        if (this._recQ[k] * qx + this._recQ[k + 1] * qy + this._recQ[k + 2] * qz + this._recQ[k + 3] * qw < 0) {
+          qx = -qx; qy = -qy; qz = -qz; qw = -qw;
+        }
+      }
+      this._recQ.push(qx, qy, qz, qw);
     }
   }
 
@@ -119,12 +132,11 @@ export class GhostTrack {
   /** Compact, rounded JSON for localStorage (returns null if there's no ghost). */
   serialize() {
     if (!this.hasGhost) return null;
-    const r2 = (x) => Math.round(x * 100) / 100; // cm
-    const r3 = (x) => Math.round(x * 1000) / 1000; // ms / quat
+    const r3 = (x) => Math.round(x * 1000) / 1000; // mm / ms / quat
     return JSON.stringify({
       hz: Math.round(1 / this.dtSample),
       t: Array.from(this.times, r3),
-      p: Array.from(this.pos, r2),
+      p: Array.from(this.pos, r3),
       q: Array.from(this.quat, r3),
     });
   }
@@ -157,7 +169,9 @@ export function createGhostMesh(width, height, length, color = 0x66ccff) {
     new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.32,
+      // 0.32 read as a second solid car (unlit cyan + overlapping wheel/body
+      // tris). 0.20 is still a clear silhouette without competing with the live car.
+      opacity: 0.20,
       depthWrite: false,
     }),
   );

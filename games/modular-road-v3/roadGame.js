@@ -167,8 +167,9 @@ const MAX_SIM_TICKS = 8;
 const FALL_Y = -60;
 /** Air-stunt: dropping this far BELOW the last grounded height is a *candidate*
  *  miss. checkFall then probes the deck along the fall; if there is still road
- *  to land on, the car keeps falling. Empty sky snaps back to last-safe.
- *  Relative to the track, so it works at any altitude. */
+   *  to land on, the car keeps falling. Empty sky next to the road you were
+   *  on snaps back to last-safe; a miss after a jump goes to spawn.
+   *  Relative to the track, so it works at any altitude. */
 const FALL_DROP = 12;
 /** How far ahead (m) the landing-piece test looks. A 30° jump off a 160 m
  *  drop lands hundreds of metres out — a short ray from the lip never sees it. */
@@ -177,6 +178,17 @@ const FALL_LAND_AHEAD = 600;
 const FALL_LAND_HALF = 32;
 /** Radius counted as "the road is under me". */
 const FALL_LAND_NEAR = 40;
+/** Last-safe recover is only for slipping off the road you were just on.
+ *  Past this XZ distance (m) from that pose you have left the lip — a fall
+ *  is a fail and goes to spawn, not back onto the jump. */
+const FALL_SAFE_RANGE = 40;
+/** Same idea vertically: a kerb/side fall is ~FALL_DROP; a missed jump is
+ *  tens of metres under the takeoff. */
+const FALL_SAFE_DROP = 28;
+/** Seconds of visible falling after a jump miss, before spawn. Instant
+ *  teleport reads as a glitch; this is the "you lost" beat. Void floor
+ *  still catches earlier if they get there first. */
+const FAIL_FALL_TIME = 1.6;
 /** Sky mode: how far below the LOWEST track piece the void backstop sits. Far
  *  enough that a deliberate drop off a high loop is not cut short, near enough
  *  that a missed jump is a snappy retry rather than a long fall to nowhere. */
@@ -2477,7 +2489,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const run = new RunTracker({ roadWidth: 16 });
   // Slow-mo contract. 1 = realtime. Do not change FIXED_DT to slow the world.
   let timeScale = 1;
-  const ghost = new GhostTrack({ sampleHz: 20 });
+  const ghost = new GhostTrack({ sampleHz: 60 });
   const ghostMesh = createGhostMesh(CHASSIS.width, CHASSIS.height, CHASSIS.length);
   scene.add(ghostMesh);
   const _ghostPos = new THREE.Vector3();
@@ -2492,6 +2504,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const lastSafeQuat = new THREE.Quaternion();
   let lastSafeY = 0;
   let hasSafe = false;
+  let failFallTime = 0;
   const _respawnPos = new THREE.Vector3();
   const _fallProbe = new THREE.Vector3(); // sky-mode kill floor — see fallFloorY
   const _fallDir = new THREE.Vector3();
@@ -2583,6 +2596,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     lastSafeQuat.copy(b.quat);
     lastSafeY = b.pos.y;
     hasSafe = true;
+    failFallTime = 0;
   }
 
   /**
@@ -2594,9 +2608,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    *  • Air-stunt rule — GAME MODE. Dropping FALL_DROP below the last track
    *    contact is a candidate miss. If a deck is still on the fall path, keep
    *    falling (a jump onto a much lower road is a real landing). Empty sky
-   *    snaps you back to last-safe. On whenever a sprint course exists
-   *    (start+finish), or when the dev toggle is forced on. Clock keeps
-   *    running — you pay for a real miss.
+   *    next to the road you were on snaps to last-safe; a miss after a jump
+   *    (air or rail) goes to spawn. On whenever a sprint course exists
+   *    (start+finish), or when the dev toggle is forced on.
    *
    * In free-drive (no course, toggle off) the car simply FALLS off the track
    * and lands on the terrain, which is drivable — no respawn. The old always-on
@@ -2728,9 +2742,24 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     return false;
   }
 
-  /** Put the car back on the last pose where it was properly on the track. */
+  function isJumpMiss() {
+    if (!hasSafe) return false;
+    const p = vehicle.body.pos;
+    const dx = p.x - lastSafePos.x;
+    const dz = p.z - lastSafePos.z;
+    return dx * dx + dz * dz > FALL_SAFE_RANGE * FALL_SAFE_RANGE
+      || lastSafeY - p.y > FALL_SAFE_DROP;
+  }
+
+  /** Put the car back on the last pose where it was properly on the track.
+   *
+   *  That pose is the right retry when you slipped off the road you were on.
+   *  It is the wrong retry after a jump: last-safe is the lip, and sending
+   *  you back there after a miss (rail, air, whatever) just relaunches the
+   *  same jump. Far or deep from that pose → full spawn, like a loss. */
   function recoverToSafePose() {
     if (!hasSafe) { respawn(); return; }
+    if (isJumpMiss()) { respawn(); return; }
     _respawnPos.copy(lastSafePos); _respawnPos.y += 0.5; // small lift so wheels clear
     // respawnAt, not setSpawn+respawn: overwriting spawn made the next R (or a
     // recover loop) reuse this lifted pose, stacking +0.5 m until the car sat
@@ -2741,7 +2770,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     simAccum = 0;
   }
 
-  function checkFall() {
+  function checkFall(dt) {
     const p = vehicle.body.pos;
     const y = p.y;
 
@@ -2781,7 +2810,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
     if (!(raceRespawn || run.hasCourse)) return; // free-drive: fall to terrain
 
-    if (hasSafe && y < lastSafeY - FALL_DROP && !hasLandingBelow()) recoverToSafePose();
+    if (hasSafe && y < lastSafeY - FALL_DROP && !hasLandingBelow()) {
+      // Jump miss: let them fall so the loss reads, then spawn. Local slip
+      // off the road you were on still snaps back to last-safe.
+      if (isJumpMiss()) {
+        failFallTime += dt;
+        if (failFallTime >= FAIL_FALL_TIME) respawn();
+        return;
+      }
+      recoverToSafePose();
+    } else {
+      failFallTime = 0;
+    }
   }
 
   // 5) ── CAMERA ─────────────────────────────────────────────────────────────
@@ -4363,6 +4403,7 @@ ${e.message}`);
 
   /** Drop the car at the resolved spawn (user → Start piece → first piece → …). */
   function respawn() {
+    failFallTime = 0;
     const s = resolveSpawn();
     // Every source resolves to a surface/deck-level pose, so a small constant
     // lift lets the wheels settle onto it (a custom car-pose is already ~COM
@@ -5203,7 +5244,8 @@ ${e.message}`);
         if (run.running) ghost.record(run.currentTime, vehicle.body.pos, vehicle.body.quat);
         trackSafePose(); // remember where we were last grounded on the track
       }
-      vehicle.syncVisuals(dt, simAccum / FIXED_DT);
+      const renderAlpha = simAccum / FIXED_DT;
+      vehicle.syncVisuals(dt, renderAlpha);
 
       // FX are cosmetic, so they run once per FRAME on real dt (not per tick) —
       // they must not affect the deterministic outcome.
@@ -5215,13 +5257,18 @@ ${e.message}`);
       flags.update(dt);
       updateDynamicDebug(); // live collider wireframes, when they are switched on
 
-      checkFall(); // air-stunt: dropped off the track → last safe grounded pose
+      checkFall(dt); // air-stunt: dropped off the track → last safe / spawn
 
-      // Ghost replay: park it at the live run time. Hidden until a run is going.
-      if (run.running && ghost.hasGhost && ghost.sampleAt(run.currentTime, _ghostPos, _ghostQuat)) {
-        ghostMesh.position.copy(_ghostPos);
-        ghostMesh.quaternion.copy(_ghostQuat);
-        ghostMesh.visible = true;
+      // Ghost replay: same RENDER clock as the live car (last tick + leftover),
+      // not discrete `run.currentTime`. Posing on the tick clock hitch-steps
+      // whenever a frame runs 0 or 2 physics ticks.
+      if (run.running && ghost.hasGhost) {
+        const ghostT = Math.max(0, run.currentTime + (renderAlpha - 1) * FIXED_DT);
+        if (ghost.sampleAt(ghostT, _ghostPos, _ghostQuat)) {
+          ghostMesh.position.copy(_ghostPos);
+          ghostMesh.quaternion.copy(_ghostQuat);
+          ghostMesh.visible = true;
+        }
       } else if (ghostMesh.visible && !run.running) {
         ghostMesh.visible = false;
       }
