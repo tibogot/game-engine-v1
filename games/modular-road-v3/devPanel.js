@@ -1084,6 +1084,33 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Bump</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-bump" min="0" max="0.25" step="0.005" />
+              <span class="prop-num" id="dv-road-bump-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Streak sharpness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-streak" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-road-streak-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Paver joints</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-joints" min="0" max="24" step="1" />
+              <span class="prop-num" id="dv-road-joints-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">FrontSide</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-road-front" type="button" aria-label="FrontSide (cull back faces)">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Rail metalness</span>
             <div class="prop-value">
               <input type="range" id="dv-rail-metal" min="0" max="1" step="0.02" />
@@ -1107,6 +1134,17 @@ export function createRoadDevPanel({ app, game, params }) {
             it aliases at distance). <b>Wheel polish</b> smooths the two tyre
             tracks; <b>Wheel darken</b> is the rubber deposit in those same paths
             — pull it down if the lanes look too black.
+            <br><br>
+            <b>Bump</b> is a micro-normal from the same noise (no extra samples).
+            Zero compiles it out. Small values — this is race asphalt, not gravel.
+            <b>Streak sharpness</b> is off by default (the original meandering
+            grain). Turn it up only if you want hard paver lines.
+            <b>Paver joints</b> are grooves every N metres (0 = off). Leave them
+            off unless you want saw-cuts across the deck — they read as seams.
+            <br><br>
+            <b>FrontSide</b> culls back faces. The slab already has an underside,
+            so this is cheaper fill and cleaner shadows. Uncheck (DoubleSide) if
+            looking into an open piece end shows a hole, or to A/B the old look.
             <br><br>
             <b>Rail metalness</b> near 1 means the rail has no diffuse at all and
             only shows reflections of the sky — which is why it looked black. Pull
@@ -1330,6 +1368,13 @@ export function createRoadDevPanel({ app, game, params }) {
               <input type="range" id="dv-reflect-plane" min="0.05" max="4" step="0.05" />
               <span class="prop-num" id="dv-reflect-plane-v"></span>
             </div>
+          </div>
+          <div class="dv-hint">
+            Wet is a water <b>film</b> (darker, sheen) plus <b>puddles</b> (near-mirror
+            in the gutters). The bump on the road is what stops the sheen looking
+            like varnish — chips catch the sun through a thin film, then drown
+            inside standing water. Turn bump up in Road look if a soaked deck
+            still reads plastic.
           </div>
         </div>
       </div>
@@ -2328,6 +2373,15 @@ export function createRoadDevPanel({ app, game, params }) {
     slider("dv-road-polish", ru.wheelPolish, "value", (v) => v.toFixed(2));
     slider("dv-road-wdark", ru.wheelDarken, "value", (v) => v.toFixed(2));
   }
+  const surface = {
+    bump: game.getBump?.() ?? 0.05,
+    streak: game.getStreakSharp?.() ?? 0,
+    joints: game.getJointSpacing?.() ?? 12,
+  };
+  slider("dv-road-bump", surface, "bump", (v) => v.toFixed(3), (v) => game.setBump?.(v));
+  slider("dv-road-streak", surface, "streak", (v) => v.toFixed(2), (v) => game.setStreakSharp?.(v));
+  slider("dv-road-joints", surface, "joints", (v) => v === 0 ? "off" : `${v.toFixed(0)} m`, (v) => game.setJointSpacing?.(v));
+  toggle("dv-road-front", game.getRoadFrontSide?.() ?? true, (on) => game.setRoadFrontSide?.(on));
   // Guardrails are a plain MeshStandardMaterial, so these drive it directly.
   const rm = game.railMaterial;
   if (rm) {

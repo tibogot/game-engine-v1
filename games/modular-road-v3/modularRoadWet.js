@@ -119,7 +119,7 @@ export const WET_DEFAULTS = {
    * difference between "it has rained" and "the road is slightly beige".
    * Darkening is not optional and must not be gated by a gloss control.
    */
-  wetCoatStrength: 0.45,
+  wetCoatStrength: 0.55,
   /**
    * How hard the sun's shadow is allowed to darken the WET extras — the
    * clearcoat's environment and the planar/rail reflections that are added as
@@ -132,19 +132,19 @@ export const WET_DEFAULTS = {
    * water. Scales with the coat, so a dry pixel on a wet material is untouched.
    */
   wetShadow: 0.7,
-  /** Albedo multiplier at full film. ~0.55 matches the measured "wet asphalt is
+  /** Albedo multiplier at full film. ~0.5 matches the measured "wet asphalt is
    *  about half as bright as dry asphalt". This is the single most important
    *  number in the file. */
-  wetDarken: 0.55,
+  wetDarken: 0.48,
   /** SUBSTRATE roughness at full film — the asphalt UNDER the water, not the
    *  water. It drops (pores fill in) but nowhere near to a mirror; the sheen
    *  comes from the coat. Setting this near 0 is the other classic mistake and
    *  it reads as polished stone. */
-  wetRough: 0.38,
+  wetRough: 0.32,
   /** Clearcoat roughness of the film. Damp asphalt has a sheen, not a mirror —
    *  the mirror is reserved for `puddleCoatRough`, and keeping those two far
    *  apart is what stops the road reading as one uniformly varnished slab. */
-  wetCoatRough: 0.16,
+  wetCoatRough: 0.10,
   /** Hue of the wet darkening. Near-neutral by default with a slight cool cast;
    *  push it warm for a sodium-lit street, cool for overcast. */
   wetTint: 0xdfe6ef,
@@ -183,9 +183,9 @@ export const WET_DEFAULTS = {
   /** FURTHER albedo multiplier inside standing water, on top of wetDarken. Deep
    *  water traps nearly everything; the puddle should read close to black with
    *  the sky sitting on it. */
-  puddleDarken: 0.55,
+  puddleDarken: 0.42,
   /** Clearcoat roughness in standing water. This one really is near-glass. */
-  puddleCoatRough: 0.02,
+  puddleCoatRough: 0.012,
 
   // ── DRAINAGE ──────────────────────────────────────────────────────────────
   /** Drainage potential at which pooling starts to be favoured, 0..1. */

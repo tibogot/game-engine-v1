@@ -153,5 +153,42 @@ function bare(Ctor, extra = {}) {
     b.placementGizmo.enabled === false && b.placementGizmo.helper.visible === false);
 }
 
+/* ------------------------------------------ drive-mode leftover helper --- */
+{
+  // B into play used to re-attach the placement arrows: toggleMode hid them,
+  // then deselectPiece handed the gizmo back to the open end, and attach()
+  // always shows the helper. Pressing B twice "fixed" it because the second
+  // trip had nothing selected so deselectPiece returned early.
+  let build = true;
+  const b = new ModularRoadBuilder({
+    scene: new THREE.Scene(), material: new THREE.MeshBasicMaterial(),
+    railMaterial: new THREE.MeshBasicMaterial(), shellMaterial: new THREE.MeshBasicMaterial(),
+    decorMaterial: new THREE.MeshBasicMaterial(),
+    isBuildMode: () => build,
+  });
+  b.placementGizmo = fakeGizmo();
+  b.setActivePiece("straight");
+  b.place();
+  b.selectPiece(b.pieces[0]);
+  check("drive leftover: select in build shows the helper",
+    b.placementGizmo.helper.visible === true && b.placementGizmo.object != null);
+
+  build = false;
+  b.deselectPiece();
+  check("drive leftover: deselect in drive HIDES the helper",
+    b.placementGizmo.helper.visible === false);
+  check("drive leftover: deselect in drive DETACHES",
+    b.placementGizmo.object === undefined);
+  check("drive leftover: selection is gone",
+    b.selectedPiece == null && b.selectionCount === 0);
+
+  b._syncGizmoToOpenEnd();
+  check("drive leftover: sync-to-open-end in drive does not re-attach",
+    b.placementGizmo.helper.visible === false && b.placementGizmo.object === undefined);
+  b._showPlacementGizmo();
+  check("drive leftover: show in drive does not re-attach",
+    b.placementGizmo.helper.visible === false && b.placementGizmo.object === undefined);
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nall good");
 process.exit(fail ? 1 : 0);

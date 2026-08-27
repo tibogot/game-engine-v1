@@ -37,9 +37,8 @@ import {
   fwidth,
   attribute,
   uv,
-  positionView,
-  normalView,
-  faceDirection,
+  sqrt,
+  normalMap,
   mx_noise_float,
   mx_fractal_noise_float,
   mx_worley_noise_float,
@@ -268,43 +267,91 @@ export const SURFACE_V2_DEFAULTS = {
   bumpFade: 1.35,
 };
 
+/**
+ * What road.html actually ships. SURFACE_V2_DEFAULTS stays all-zero so the
+ * surface lab's "B at rest is A" identity (and tools/roadSurfaceLabTest.mjs)
+ * keep meaning something. The game is allowed to turn the candidate on.
+ *
+ * bumpAmount is small on purpose — race asphalt, not chip-seal.
+ *
+ * streakSharp stays 0. The lab candidate hardens the grain into drawn
+ * paver lines (`streakStraight` 120); that is a different material from the
+ * shipping deck, which is stretched noise that still meanders. The game
+ * keeps A's albedo and only adds the bump — including the grit octave,
+ * which lives in the normal so close-up chips still catch the sun.
+ *
+ * jointSpacing stays 0. At 12 m it drew a saw-cut groove across every
+ * straight and those read as mesh seams — especially wet.
+ */
+export const SURFACE_V2_GAME = {
+  streakSharp: 0,
+  bumpAmount: 0.05,
+  jointSpacing: 0,
+};
+
 export const SURFACE_V2_NUMBERS = Object.keys(SURFACE_V2_DEFAULTS);
 
 /**
- * Screen-space surface gradient → perturbed normal. Mikkelsen's method, the
- * same one three's BumpMapNode uses, but fed a value instead of a texture.
+ * UV metres between the three height taps that build the bump normal.
  *
- * WHY NOT `bumpMap()`. It looks like the obvious answer and it silently does
- * nothing here. three's BumpMapNode does not differentiate its input — it
- * RE-SAMPLES it three times, at uv, uv + dFdx(uv) and uv + dFdy(uv), by
- * overriding the texture node's UV through a node context:
- *
- *     textureNode.isolate().context({ getUV: ... })
- *
- * That override is consumed by TextureNode when it resolves its own UV. A
- * procedural height does not resolve a UV through that path — it calls `uv()`
- * directly — so all three samples come back with the same value, the difference
- * is exactly zero, and you get a perfectly flat normal and a shader that costs
- * three times what it should to produce it.
- *
- * Differentiating the already-computed height instead is both correct AND
- * cheaper than bumpMap would have been if it had worked: two derivative
- * instructions on a value that is already in a register, versus three
- * evaluations of the noise chain. The cost of the entire deck normal is
- * therefore two `dFdx`/`dFdy` pairs and a handful of cross products — no new
- * noise, no tangent attribute (the road geometry has none), and no second
- * sampler.
- *
- * @param {Node<float>} height  the scalar to differentiate
- * @param {Node<float>} scale   metres of relief per unit height, roughly
+ * Sized for the GRIT (~18 mm at gritScale 55), not the 20 cm aggregate.
+ * 12 mm was averaging the fines into a swell, which is why the close-up
+ * went flat after the UV-space switch.
  */
+const BUMP_SAMPLE_EPS = 0.004;
+
 /**
- * The replacement asphalt surface, honouring modularRoadMaterial's vec4
- * contract: x = macro tone, y = aggregate tone, z = wheel path, w = agg fade.
+ * Height of the deck at an arbitrary UV, in the same units the bump scale
+ * expects (~−0.5..0.5 from the noise, plus a downward joint).
  *
- * @param {object} u  the base road uniforms (streak, macroScale, aggScale…)
- * @param {object} v  the V2 uniforms
+ * Re-sampled at uv, uv+(ε,0), uv+(0,ε) so the slope is a function of THIS
+ * fragment's UV only. Screen-space `dFdx(height)` is not — that derivative
+ * is per 2×2 pixel quad, and on a triangle edge the helper pixel sits in a
+ * different interpolator, so the slope spikes. Lighting then self-shadows
+ * along those spikes (shadow normalBias follows the shading normal) and you
+ * get repeating stripes and stair-step diagonals. That is what the close-up
+ * "diagonals" were. The piece lab already does this 3-tap; this is that.
+ *
+ * Fade is NOT in the height. `fwidth` is itself a screen derivative, and
+ * baking it into a value you then differentiate puts the aliasing right
+ * back. Fade multiplies the tangent slope after the taps, same as isDeck.
+ *
+ * @param {Node} uvn  vec2(along metres, across metres)
+ * @param {object} ru  the base road uniforms
+ * @param {object} v   the V2 uniforms
+ * @param {Node} gritFade  0..1, computed ONCE at this fragment — not per tap
  */
+function bumpHeightAt(uvn, ru, v, gritFade) {
+  const alongOff = uvn.x.add(attribute("aAlongOffset", "float"));
+  const along = alongOff.div(ru.streak);
+  const across = uvn.y;
+  const macro = mx_fractal_noise_float(
+    vec3(along.mul(ru.macroScale), across.mul(ru.macroScale), 0.0), 3, 2.0, 0.5, 1.0,
+  );
+  const agg = mx_noise_float(
+    vec3(along.mul(ru.aggScale), across.mul(ru.aggScale), 0.0),
+  );
+  const height = agg.mul(0.5).mul(v.bumpAgg).add(macro.mul(0.5).mul(v.bumpMacro));
+
+  // Close-up grain. Unstretched (unlike agg), ~2 cm. Independent of
+  // streakSharp: that knob is the paver LINES, this is the chips between them.
+  // Same weight as the aggregate so it actually reads in the normal; albedo
+  // gritAmount stays the colour-side slider and is not reused here.
+  const grit = mx_noise_float(
+    vec3(alongOff.mul(v.gritScale), across.mul(v.gritScale), 0.0),
+  );
+  const fines = grit.mul(0.5).mul(v.bumpAgg).mul(gritFade);
+
+  const spacing = max(v.jointSpacing, float(0.001));
+  const cyc = fract(uvn.x.div(spacing));
+  const dJoint = abs(cyc.sub(0.5)).mul(spacing);
+  const joint = oneMinus(smoothstep(float(0), v.jointWidth, dJoint))
+    .mul(smoothstep(0.0, 0.001, v.jointSpacing))
+    .mul(v.jointDepth)
+    .negate();
+  return height.add(fines).add(joint);
+}
+
 /**
  * The replacement asphalt surface, honouring modularRoadMaterial's vec4
  * contract: x = macro tone, y = aggregate tone, z = wheel path, w = agg fade.
@@ -447,29 +494,6 @@ function buildSurfaceV2(u, v, { chips }) {
   })();
 }
 
-const perturbFromHeight = /*#__PURE__*/ Fn(([height, scale]) => {
-  // Slope of the height field in SCREEN space. Per 2×2 quad — see bumpFade.
-  const dHdxy = vec2(height.dFdx(), height.dFdy()).mul(scale);
-
-  // Mikkelsen's surface gradient. positionView's derivatives give the two
-  // screen-aligned tangents of whatever surface this fragment sits on, which is
-  // what makes this work with no tangent attribute and on any shape — a loop
-  // and a flat straight go through the same code.
-  const sigmaX = positionView.dFdx();
-  const sigmaY = positionView.dFdy();
-  const vN = normalView;
-
-  const R1 = sigmaY.cross(vN);
-  const R2 = vN.cross(sigmaX);
-  // faceDirection flips the gradient on a back face. The road material is
-  // currently DoubleSide, so this is load-bearing: without it the underside of
-  // a raised slab lights with an inverted normal.
-  const fDet = sigmaX.dot(R1).mul(faceDirection);
-  const vGrad = fDet.sign().mul(dHdxy.x.mul(R1).add(dHdxy.y.mul(R2)));
-
-  return fDet.abs().mul(vN).sub(vGrad).normalize();
-});
-
 /**
  * The road material, plus a deck micro-normal.
  *
@@ -544,11 +568,11 @@ export function createRoadSurfaceV2(opts = {}) {
    * BUILD-TIME GATE, not a uniform multiply — the same reasoning the wet
    * clearcoat uses one file over, and for a stronger reason.
    *
-   * A normalNode set to a flat vec3 still compiles the whole perturbation: four
-   * screen-space derivatives of positionView, three cross products, a
-   * normalize, and — because `normalNode` is present at all — three's own
-   * normal handling changes shape around it. Multiplying that by a zero uniform
-   * pays for all of it to arrive back where it started.
+   * A normalNode set to a flat vec3 still compiles the whole perturbation:
+   * three height taps, a TBN via `normalMap`, and — because `normalNode` is
+   * present at all — three's own normal handling changes shape around it.
+   * Multiplying that by a zero uniform pays for all of it to arrive back
+   * where it started.
    *
    * More importantly it would break the lab's own premise. "B at rest is
    * identical to A" has to mean identical in the compiled shader, or the ms
@@ -564,12 +588,13 @@ export function createRoadSurfaceV2(opts = {}) {
   if (!bumpOn) return mat;
 
   const surface = mat._surfaceNode;
-  if (!surface) {
+  const ru = mat._roadUniforms;
+  if (!surface || !ru) {
     // Loud rather than silently flat: this is the contract with
     // modularRoadMaterial and a rename there would otherwise cost an afternoon.
     throw new Error(
-      "createRoadSurfaceV2: material has no _surfaceNode — modularRoadMaterial "
-      + "must expose its packed surface for the bump normal to reference.",
+      "createRoadSurfaceV2: material has no _surfaceNode / _roadUniforms — "
+      + "modularRoadMaterial must expose both for the bump normal.",
     );
   }
 
@@ -580,36 +605,47 @@ export function createRoadSurfaceV2(opts = {}) {
     // and the panel in particular is supposed to look moulded.
     const isDeck = smoothstep(0.5, 0.6, zone).mul(oneMinus(smoothstep(2.4, 2.5, zone)));
 
-    // HEIGHT, out of fields the deck has already computed. surface is
-    // vec4(macro, aggregate, wheelPath, aggFade) — no new noise here at all.
-    const agg = surface.y.sub(0.5).mul(v.bumpAgg);
-    const macro = surface.x.sub(0.5).mul(v.bumpMacro);
-
-    // Transverse joints. `uv().x` is arc length in metres along the piece, so
-    // the spacing is metres and the groove runs across the road for free.
-    // max() on the spacing keeps the divide safe when the feature is off; the
-    // result is then multiplied out by jointSpacing's own step below.
-    const spacing = max(v.jointSpacing, float(0.001));
-    const cyc = fract(uv().x.div(spacing));
-    const dJoint = abs(cyc.sub(0.5)).mul(spacing); // metres to the nearest joint
-    const joint = oneMinus(smoothstep(float(0), v.jointWidth, dJoint))
-      .mul(smoothstep(0.0, 0.001, v.jointSpacing)) // off when spacing is 0
-      .mul(v.jointDepth)
-      .negate(); // a joint is a groove, so it goes DOWN
-
-    const height = agg.add(macro).add(joint);
-
-    // The fade. surface.w is the deck's own aggFade — already the right shape
-    // (fwidth-derived, so resolution- and angle-independent) and already
-    // computed, so following it costs nothing and guarantees the normal dies in
-    // step with the speckle it describes rather than on its own schedule.
+    // Fade still follows the albedo speckle (surface.w). Strength only —
+    // it must not go into the height being differenced (see bumpHeightAt).
     const fade = saturate(surface.w.mul(v.bumpFade));
-    const scale = v.bumpAmount.mul(fade).mul(isDeck);
+    let scale = v.bumpAmount.mul(fade).mul(isDeck);
 
-    // A zero scale here yields dHdxy = 0, which perturbFromHeight returns as
-    // the unmodified normal — so the non-deck zones and the far distance come
-    // out exactly as A has them, without a branch.
-    return perturbFromHeight(height, scale);
+    // WATER DROWNS RELIEF. A thin film still follows the chips — that is what
+    // makes damp asphalt sparkle instead of looking varnished — but standing
+    // water is a flat surface sitting ON the road, so the substrate bump has
+    // to die inside a puddle or you see gravel lighting through a mirror.
+    // `_wetField` is the same vec2(film, pond) the shading uses; null when
+    // this material was built dry, so the extra mix is not even in the graph.
+    const wetField = mat._wetField;
+    if (wetField) {
+      scale = scale
+        .mul(oneMinus(wetField.x.mul(0.18))) // film fills pores a little
+        .mul(oneMinus(wetField.y.mul(0.9))); // puddles almost geometrically flat
+    }
+
+    const uvn = uv();
+    const alongRaw = uvn.x.add(attribute("aAlongOffset", "float"));
+    // One fade for all three taps. Putting fwidth inside bumpHeightAt would
+    // differentiate the fade itself and bring the glitter back.
+    const gritFade = saturate(oneMinus(
+      max(fwidth(alongRaw), fwidth(uvn.y)).mul(v.gritScale).mul(v.gritFade),
+    ));
+    const eps = float(BUMP_SAMPLE_EPS);
+    const h0 = bumpHeightAt(uvn, ru, v, gritFade);
+    const hx = bumpHeightAt(uvn.add(vec2(eps, 0)), ru, v, gritFade);
+    const hy = bumpHeightAt(uvn.add(vec2(0, eps)), ru, v, gritFade);
+    const tsNx = hx.sub(h0).div(eps).mul(scale).negate();
+    const tsNy = hy.sub(h0).div(eps).mul(scale).negate();
+    const tsNz = sqrt(max(float(1e-4), float(1).sub(tsNx.mul(tsNx).add(tsNy.mul(tsNy)))));
+    // Packed 0..1 the way three's `normalMap` wants it. Scale of (1,1): the
+    // slope already carries bumpAmount, so a second gain here would double-count.
+    // A zero scale yields (0,0,1) → identity, so non-deck / far / puddles match A.
+    const packed = vec3(
+      tsNx.mul(0.5).add(0.5),
+      tsNy.mul(0.5).add(0.5),
+      tsNz.mul(0.5).add(0.5),
+    );
+    return normalMap(packed, vec2(1, 1));
   })();
 
   return mat;

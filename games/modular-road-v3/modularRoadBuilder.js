@@ -1841,6 +1841,13 @@ export class ModularRoadBuilder {
     if (!this.placementGizmo) return;
     this.placementPivot.position.copy(pos);
     this.placementPivot.rotation.set(0, yaw, 0);
+    // attach() always sets the helper visible. Drive mode still wants the
+    // pivot parked on the open end (B back to build should land there), but
+    // not the arrows — see deselectPiece / toggleMode.
+    if (!this.isBuildMode()) {
+      this._hidePlacementGizmo();
+      return;
+    }
     this.placementGizmo.attach(this.placementPivot);
     this._applyGizmoSuspend();
     this._applyGizmoAxes();
@@ -1871,7 +1878,7 @@ export class ModularRoadBuilder {
   _applyGizmoSuspend() {
     const g = this.placementGizmo;
     if (!g) return;
-    const live = g.object != null && !this._gizmoSuspended;
+    const live = g.object != null && !this._gizmoSuspended && this.isBuildMode();
     // `enabled` BEFORE `visible`: writing `enabled` dispatches TransformControls'
     // "change", and _onPlacementGizmoChange gates on `visible` to ignore exactly
     // that setup traffic. Flipping the order would let the show-time event
@@ -1901,6 +1908,10 @@ export class ModularRoadBuilder {
     // not a yaw scalar — or a tilt would be flattened the moment the gizmo shows.
     this.placementPivot.position.copy(this._freePos);
     this.placementPivot.quaternion.copy(this._freeQuat);
+    if (!this.isBuildMode()) {
+      this._hidePlacementGizmo();
+      return;
+    }
     this.placementGizmo.attach(this.placementPivot);
     this._applyGizmoSuspend();
     this._applyGizmoAxes();
@@ -2893,14 +2904,20 @@ export class ModularRoadBuilder {
     this.selectedPiece = null;
     this.selectedPieces = [];
     this._updateSelectionHighlight();
-    // Hand the gizmo back to the next-piece / anchor.
+    // Park the cursor on the open end so B-back-to-build is coherent. In build
+    // mode that also summons the helper (Escape = stop editing, go back to
+    // placing). In drive mode _showGizmoAt/_showPlacementGizmo refuse to
+    // attach — attach() always shows the helper, which is how a selected piece
+    // used to leave arrows on screen for the whole race.
     this._syncGizmoToOpenEnd();
+    if (!this.isBuildMode()) this._hidePlacementGizmo();
     this._notify({ collision: false });
   }
 
   /** Attach the transform gizmo to a selected piece, at its entry connector. */
   _showPieceGizmo(p) {
     if (!this.placementGizmo) return;
+    if (!this.isBuildMode()) return;
     this._gizmoTarget = "piece";
     this.ghostDetached = false;
     this.placementPivot.position.setFromMatrixPosition(p.connectorIn);

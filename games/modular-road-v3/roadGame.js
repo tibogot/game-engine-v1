@@ -71,7 +71,6 @@ import {
   PREMIRROR_LAYER,
 } from "./modularRoadReflection.js";
 import {
-  createRoadMaterial,
   createGuardrailMaterial,
   createTunnelMaterial,
   createVaultTunnelMaterial,
@@ -93,6 +92,13 @@ import {
   syncTubeUniforms,
   ROAD_LOOK_FORMAT,
 } from "./modularRoadMaterial.js";
+import {
+  createRoadSurfaceV2,
+  SURFACE_V2_DEFAULTS,
+  SURFACE_V2_GAME,
+  surfaceV2NeedsRebuild,
+  syncSurfaceV2Uniforms,
+} from "./modularRoadSurfaceV2.js";
 import { ModularRoadBuilder, buildRoadPaletteUI, CATEGORY_PRESETS } from "./modularRoadBuilder.js";
 import {
   PIECE_CATALOG,
@@ -227,6 +233,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       hemiIntensity: 0.6,
       dirIntensity: 2.6,
       exposure: 1.0,
+      // Editor default is 0.02 — fine on terrain, lethal on a flat deck.
+      // The road casts onto itself, and at a chase-camera grazing angle that
+      // self-shadows into repeating stripes / stair-step diagonals (the same
+      // acne rts-v3 hit on armour plates). 0.12 is that game's value.
+      shadowNormalBias: 0.12,
     },
     // Editor-only terrain shader features. A game has no sculpt brush to move
     // and no paint panel, so both are dead code here — and `cursor` also costs a
@@ -427,7 +438,55 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function sceneShadowLight() {
     return scene.children.find((o) => o.isDirectionalLight && o.castShadow) ?? null;
   }
-  let roadMaterial = createRoadMaterial();
+  /**
+   * Surface extras the lab A/B's (bump, streak sharpness, paver joints).
+   * SURFACE_V2_DEFAULTS is all-zero so the lab's "B at rest is A" stays true;
+   * this is the look the game actually ships.
+   */
+  const surfaceLook = { ...SURFACE_V2_DEFAULTS, ...SURFACE_V2_GAME };
+
+  /**
+   * FrontSide vs DoubleSide on the asphalt. The slab is a closed prism, so
+   * FrontSide is the cheap correct call; DoubleSide is the old default and
+   * the thing to flip back to if an open piece-end looks hollow.
+   *
+   * Live poke — `side` is not compiled into the TSL graph. Weather rebuilds
+   * re-apply it via makeRoadMaterial. Remembered across reloads.
+   */
+  const ROAD_FRONT_KEY = "modularRoad.roadFrontSide";
+  function readRoadFrontSide() {
+    try {
+      const v = localStorage.getItem(ROAD_FRONT_KEY);
+      if (v === "0" || v === "false") return false;
+      if (v === "1" || v === "true") return true;
+    } catch { /* private mode */ }
+    return true;
+  }
+  let roadFrontSide = readRoadFrontSide();
+  function roadSide() {
+    return roadFrontSide ? THREE.FrontSide : THREE.DoubleSide;
+  }
+  function applyRoadSide(mat) {
+    if (!mat) return;
+    mat.side = roadSide();
+    // PCF already flips FrontSide → BackSide in the shadow pass. DoubleSide
+    // does not (both faces write) and the deck then self-shadows.
+    mat.shadowSide = roadFrontSide ? null : THREE.BackSide;
+    mat.needsUpdate = true;
+  }
+  function setRoadFrontSide(on) {
+    roadFrontSide = !!on;
+    try { localStorage.setItem(ROAD_FRONT_KEY, roadFrontSide ? "1" : "0"); } catch { /* ignore */ }
+    applyRoadSide(roadMaterial);
+  }
+
+  function makeRoadMaterial(extra = {}) {
+    const mat = createRoadSurfaceV2({ ...surfaceLook, ...extra, side: roadSide() });
+    applyRoadSide(mat);
+    return mat;
+  }
+
+  let roadMaterial = makeRoadMaterial();
   const railMaterial = createGuardrailMaterial();
   const shellMaterial = createTunnelMaterial();
   const vaultShellMaterial = createVaultTunnelMaterial();
@@ -1813,6 +1872,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const prev = roadMaterial;
     roadMaterial = next;
     syncRoadUniforms(roadMaterial, roadLook);
+    syncSurfaceV2Uniforms(roadMaterial, surfaceLook);
     syncTubeUniforms(tubeMaterial, roadLook);
     syncPreMirrorDepthTol();
     builder.setRoadMaterial(roadMaterial);
@@ -1847,8 +1907,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const wantPreMirror = wantWet && (railsInMirror || hasPremirrorSources());
     const isWet = !!roadMaterial._reflectUniforms || roadMaterial.isMeshPhysicalNodeMaterial;
     const hasPreMirror = !!roadMaterial._mirrorTextureNode;
-    if (wantWet === isWet && wantPreMirror === hasPreMirror) return;
-    applyRoadMaterial(createRoadMaterial({
+    const v2Rebuild = surfaceV2NeedsRebuild(roadMaterial, surfaceLook);
+    if (wantWet === isWet && wantPreMirror === hasPreMirror && !v2Rebuild) return;
+    applyRoadMaterial(makeRoadMaterial({
       ...roadLook,
       wet: wantWet,
       shadowLight: sceneShadowLight(),
@@ -1879,6 +1940,17 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // and nothing at all in between — which matters, because the panel calls this
     // on every `input` event and a rail rebuild merges the whole track.
     syncPreMirrored();
+  }
+
+  /**
+   * Surface extras (bump / streak / joints). Crossing bumpAmount or streakSharp
+   * through 0 is a rebuild — those are compiled into the graph, not multiplied
+   * by a uniform — and a poke everywhere else. Same shape as setRoadWet.
+   */
+  function setSurfaceParam(key, v) {
+    surfaceLook[key] = v;
+    syncRoadMaterialFeatures();
+    syncSurfaceV2Uniforms(roadMaterial, surfaceLook);
   }
 
   /** The guardrail reflection, off to on. Rebuilds the material so that "off"
@@ -3903,6 +3975,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function applyRoadLook() {
     setRoadWet(roadLook.wetAmount ?? 0);
     syncRoadUniforms(roadMaterial, roadLook);
+    syncSurfaceV2Uniforms(roadMaterial, surfaceLook);
     syncTubeUniforms(tubeMaterial, roadLook);
     syncPreMirrorDepthTol();
   }
@@ -4999,15 +5072,19 @@ ${e.message}`);
       // itself rebuilds the mirrored copies (applyRailReflectionMembers).
       syncRoadMaterialFeatures();
       setMergedTrack(true); // ~4 draws for the whole track instead of ~1/piece
+      // Clear the piece selection BEFORE hiding the helper. deselectPiece is
+      // a build-mode act ("hand the gizmo back to the open end"), so doing it
+      // after setGhostVisible(false) used to attach() the arrows back onto the
+      // chain for the whole race. Hide last, so even that restore cannot stick.
+      builder.deselectPiece?.();
       builder.setGhostVisible(false);
+      builder.deselectPlacement?.();
       // THE PRE-MIRROR CONTENT IS BUILT HERE, not while editing — the pass
       // is drive-only, so this is the first moment it can be seen. Sits beside
       // the merged-track build because it is the same kind of cost, paid at the
       // same transition, and neither is paid per edit any more.
       syncPreMirrored();
       warmUpTrackPipelines();
-      builder.deselectPlacement?.();
-      builder.deselectPiece?.(); // clear any edit selection before racing
       props.deselect();
       movers.deselect();
       vehicle.enabled = true;
@@ -5241,6 +5318,14 @@ ${e.message}`);
         roadMaterial._roadUniforms.puddleAmount.value = v;
       },
       getPuddles: () => roadMaterial._roadUniforms.puddleAmount.value,
+      setBump: (v) => setSurfaceParam("bumpAmount", Math.max(0, v || 0)),
+      getBump: () => surfaceLook.bumpAmount,
+      setStreakSharp: (v) => setSurfaceParam("streakSharp", Math.max(0, Math.min(1, v ?? 0))),
+      getStreakSharp: () => surfaceLook.streakSharp,
+      setJointSpacing: (v) => setSurfaceParam("jointSpacing", Math.max(0, v || 0)),
+      getJointSpacing: () => surfaceLook.jointSpacing,
+      setRoadFrontSide,
+      getRoadFrontSide: () => roadFrontSide,
       setWheelClear: (v) => {
         roadLook.wetWheelClear = v;
         roadMaterial._roadUniforms.wetWheelClear.value = v;
@@ -5709,6 +5794,14 @@ ${e.message}`);
     /** Master weather, 0..1. Rides ROAD_LOOK, so a track saves its own. */
     setWet: setRoadWet,
     getWet: () => roadMaterial._roadUniforms.wetAmount.value,
+    setBump: (v) => setSurfaceParam("bumpAmount", Math.max(0, v || 0)),
+    getBump: () => surfaceLook.bumpAmount,
+    setStreakSharp: (v) => setSurfaceParam("streakSharp", Math.max(0, Math.min(1, v ?? 0))),
+    getStreakSharp: () => surfaceLook.streakSharp,
+    setJointSpacing: (v) => setSurfaceParam("jointSpacing", Math.max(0, v || 0)),
+    getJointSpacing: () => surfaceLook.jointSpacing,
+    setRoadFrontSide,
+    getRoadFrontSide: () => roadFrontSide,
     getRoadLook: () => readRoadLook(roadMaterial),
     setRoadLook: (l) => {
       Object.assign(roadLook, l ?? {});

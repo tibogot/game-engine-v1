@@ -301,12 +301,16 @@ export function createRoadMaterial(opts = {}) {
     ? new THREE.MeshPhysicalNodeMaterial({
         roughness: opts.roughness ?? 0.92,
         metalness: opts.metalness ?? 0.0,
-        side: THREE.DoubleSide,
+        // Closed prism (deck + sides + underside). FrontSide is enough from
+        // any exterior view and cheaper; DoubleSide is the lab/legacy default
+        // and what you want only if a caller still needs inner faces (open
+        // piece ends). road.html passes FrontSide and has a panel toggle.
+        side: opts.side ?? THREE.DoubleSide,
       })
     : new THREE.MeshStandardNodeMaterial({
         roughness: opts.roughness ?? 0.92,
         metalness: opts.metalness ?? 0.0,
-        side: THREE.DoubleSide,
+        side: opts.side ?? THREE.DoubleSide,
       });
 
   // ── SHARED ASPHALT SURFACE ────────────────────────────────────────────────
@@ -909,10 +913,9 @@ export function createRoadMaterial(opts = {}) {
    * than a second copy of the expression, or the two quietly diverge and the
    * derived thing stops agreeing with the deck it is supposed to describe.
    *
-   * modularRoadSurfaceV2 is the caller. It takes a bump normal out of `.y` and
-   * `.x` and fades it with `.w`, and because it holds this node the whole normal
-   * costs two screen-space derivatives instead of a second set of noise
-   * evaluations. See the note there on why `bumpMap()` cannot do this.
+   * modularRoadSurfaceV2 is the caller. The bump still fades with `.w` so it
+   * dies with the albedo speckle; the height itself is re-sampled in UV metres
+   * (screen-space dFdx of `.x`/`.y` self-shadows into stripes).
    */
   mat._surfaceNode = surface;
   /** The raw vec2(film, pond) field, or null when dry. Exposed so wet-road-lab

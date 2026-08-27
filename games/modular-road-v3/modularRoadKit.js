@@ -35,9 +35,19 @@ export const roadParams = {
   // railWidth), but the kerb wants to be genuinely wide enough to carry a post.
   railWidth: 0.75,
   railHeight: 0.22, // kerb height above the deck (m) — low; guardrail sits on top
-  segLen: 1.6, // sweep step on curves / morphs (m). Constant straights use 2 frames.
+  segLen: 1.6, // sweep step (m). Curves, morphs, AND constant straights.
   onChange: null,
 };
+
+/**
+ * Samples across the drivable deck (and the underside).
+ *
+ * 1 is a single quad. 12 matches buildBankProfile, so a bank-in still meets
+ * a straight vertex-for-vertex across the deck. (Repeating close-up
+ * diagonals on a wet deck were shadow acne + screen-space bump derivatives,
+ * not this tessellation — see roadGame shadowNormalBias and bumpHeightAt.)
+ */
+const DECK_STEPS = 12;
 
 /**
  * Guardrail that sits on top of each kerb (W-beam + posts), adapted from the
@@ -254,32 +264,45 @@ export const pieceParams = {
 export function buildProfile(p = roadParams, withKerbs = true) {
   const hw = p.width / 2;
   const t = Math.max(0.05, p.thickness);
+  const N = DECK_STEPS;
 
   if (!withKerbs) {
-    const pts = [
-      { x: -hw, y: 0, zone: 1 },
-      { x: hw, y: 0, zone: 1 },
-      { x: hw, y: -t, zone: 0 },
-      { x: -hw, y: -t, zone: 0 },
-    ];
+    const pts = [];
+    for (let k = 0; k <= N; k++) {
+      const x = -hw + (2 * hw * k) / N;
+      pts.push({ x, y: 0, zone: 1, smooth: k > 0 && k < N });
+    }
+    for (let k = N; k >= 0; k--) {
+      const x = -hw + (2 * hw * k) / N;
+      pts.push({ x, y: -t, zone: 0, smooth: k > 0 && k < N });
+    }
     return { pts, hw };
   }
 
   const rw = Math.min(Math.max(0.0, p.railWidth), hw * 0.45);
   const rh = Math.max(0.0, p.railHeight);
+  const dx = hw - rw;
 
-  // Clockwise outline (x right, y up): top across, down the right face,
-  // back across the underside, up the left face. Closed (last -> first).
+  // Clockwise outline (x right, y up): kerb, deck, kerb, underside.
+  // The deck used to be TWO points — left edge to right edge, one quad, one
+  // 22 m diagonal. Interior samples are flagged smooth so the flat still
+  // shades as a plane; the kerb corners stay hard.
   const pts = [
-    { x: -hw, y: rh, zone: 2 }, // left rail, outer top
-    { x: -hw + rw, y: rh, zone: 2 }, // left rail, inner top
-    { x: -hw + rw, y: 0, zone: 1 }, // deck, left edge
-    { x: hw - rw, y: 0, zone: 1 }, // deck, right edge
-    { x: hw - rw, y: rh, zone: 2 }, // right rail, inner top
-    { x: hw, y: rh, zone: 2 }, // right rail, outer top
-    { x: hw, y: -t, zone: 0 }, // underside, right
-    { x: -hw, y: -t, zone: 0 }, // underside, left
+    { x: -hw, y: rh, zone: 2 },
+    { x: -hw + rw, y: rh, zone: 2 },
   ];
+  for (let k = 0; k <= N; k++) {
+    const x = -dx + (2 * dx * k) / N;
+    pts.push({ x, y: 0, zone: 1, smooth: k > 0 && k < N });
+  }
+  pts.push(
+    { x: hw - rw, y: rh, zone: 2 },
+    { x: hw, y: rh, zone: 2 },
+  );
+  for (let k = N; k >= 0; k--) {
+    const x = -hw + (2 * hw * k) / N;
+    pts.push({ x, y: -t, zone: 0, smooth: k > 0 && k < N });
+  }
   return { pts, hw };
 }
 
@@ -319,16 +342,17 @@ export function buildProfile(p = roadParams, withKerbs = true) {
  *
  * @param {object} p road cross-section params
  * @param {boolean} withKerbs false = flat deck only (no raised kerbs)
- * @param {number} curl metres of edge lift; <= 0 falls straight back to
- *   buildProfile, so a curl of 0 is byte-for-byte the old geometry
+ * @param {number} curl metres of edge lift; <= 0 falls through to
+ *   buildProfile (now the same DECK_STEPS subdivision, so a bank-in still
+ *   meets a straight across the deck)
  * @param {number} steps deck samples across the width
  */
-export function buildBankProfile(p = roadParams, withKerbs = true, curl = 0, steps = 12) {
+export function buildBankProfile(p = roadParams, withKerbs = true, curl = 0, steps = DECK_STEPS) {
   const hw = p.width / 2;
   // Strictly > 0, not > epsilon: the morph callback drives `curl` to (almost)
   // zero at a flat seam, and it needs the SAME POINT COUNT there as at full
-  // curl. A near-zero curl gives a subdivided-but-flat deck, which is coincident
-  // with the 8-point section a straight sweeps — so the seam still matches.
+  // curl. A near-zero curl keeps this subdivided section; exact 0 falls through
+  // to buildProfile, which now uses the same DECK_STEPS so the seam still matches.
   if (!(curl > 0)) return buildProfile(p, withKerbs);
   const t = Math.max(0.05, p.thickness);
   const N = Math.max(2, Math.round(steps));
@@ -2448,17 +2472,26 @@ function stepsFor(arcLen, totalAngle = 0, minSteps = 2, pp = null) {
 }
 
 /**
- * Constant-section straight centreline: entry and exit only.
+ * Constant-section straight centreline.
  *
- * The sweep between two frames is a prism. Extra stations every `segLen` were
- * copies of the same ring — they inflated tubes and straights to the density
- * curves need. UVs still run 0…L (along is the chord). Rails and posts
- * interpolate along that chord. Do NOT use this where heading, roll, or the
- * profile changes between the ends (curves, morphing entries, bank in/out).
+ * Used to be entry and exit only. A two-frame sweep is one quad per profile
+ * span, and bump / wet lighting reads that quad's triangle diagonal as a
+ * crease — a field of parallel diagonals across the deck, which looks like
+ * shadow acne or a bad normal. Stations every `segLen` keep those quads
+ * roughly square so the diagonal dies in the grain. Heading and the section
+ * are constant, so the extra rings are coincident with the chord; rails and
+ * posts still space themselves by metres, not by frame count.
+ *
+ * Do NOT use this where heading, roll, or the profile changes between the
+ * ends (curves, morphing entries, bank in/out) — those already go through
+ * `stepsFor`.
  */
 function straightLinePoints(length, y = 0) {
   const L = Math.max(1, length);
-  return [new V3(0, y, 0), new V3(0, y, -L)];
+  const n = Math.max(1, Math.ceil(L / roadParams.segLen));
+  const pts = [];
+  for (let i = 0; i <= n; i++) pts.push(new V3(0, y, -L * (i / n)));
+  return pts;
 }
 
 function straightPoints(pp) {
