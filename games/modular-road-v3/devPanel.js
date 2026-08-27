@@ -316,6 +316,12 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Race ghost</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-race-ghost" type="button" aria-label="Race ghost">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Best time</span>
             <div class="prop-value"><span class="prop-num" id="dv-best">--:--.---</span></div>
           </div>
@@ -328,6 +334,9 @@ export function createRoadDevPanel({ app, game, params }) {
             sky retries from the last grounded pose. The toggle here forces
             that even without a course. Open start/finish pieces are for a
             later circuit mode.
+            <br><br>
+            <b>Race ghost</b> hides the replay car without wiping the record
+            (recording still runs so a new best still saves).
           </div>
         </div>
       </div>
@@ -2113,6 +2122,7 @@ export function createRoadDevPanel({ app, game, params }) {
   // ── Race ────────────────────────────────────────────────────────────────────
   const bestEl = $("#dv-best");
   toggle("dv-respawn-on", game.getRaceRespawn(), (on) => game.setRaceRespawn(on));
+  toggle("dv-race-ghost", game.getShowRaceGhost?.() ?? true, (on) => game.setShowRaceGhost?.(on));
   $("#dv-clear-rec").addEventListener("click", () => { game.clearRecord(); refresh(); });
 
   // ── Camera ──────────────────────────────────────────────────────────────────

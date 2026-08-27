@@ -2498,6 +2498,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Air-stunt fall→respawn rule. OFF for now: free-drive lets the car fall off
   // the track onto the terrain and keep driving. Game mode flips this on later.
   let raceRespawn = false;
+  // Visual only — recording / commit / localStorage still run when this is off.
+  let showRaceGhost = true;
 
   // Last pose the car was safely grounded on the track — the air-stunt respawn.
   const lastSafePos = new THREE.Vector3();
@@ -5151,6 +5153,11 @@ ${e.message}`);
       // Race
       setRaceRespawn: (on) => { raceRespawn = !!on; },
       getRaceRespawn: () => raceRespawn,
+      getShowRaceGhost: () => showRaceGhost,
+      setShowRaceGhost: (on) => {
+        showRaceGhost = !!on;
+        if (!showRaceGhost) ghostMesh.visible = false;
+      },
       clearRecord,
       getBestTime: () => run.bestTime,
       getBestLap: () => run.bestTime,
@@ -5262,14 +5269,14 @@ ${e.message}`);
       // Ghost replay: same RENDER clock as the live car (last tick + leftover),
       // not discrete `run.currentTime`. Posing on the tick clock hitch-steps
       // whenever a frame runs 0 or 2 physics ticks.
-      if (run.running && ghost.hasGhost) {
+      if (showRaceGhost && run.running && ghost.hasGhost) {
         const ghostT = Math.max(0, run.currentTime + (renderAlpha - 1) * FIXED_DT);
         if (ghost.sampleAt(ghostT, _ghostPos, _ghostQuat)) {
           ghostMesh.position.copy(_ghostPos);
           ghostMesh.quaternion.copy(_ghostQuat);
           ghostMesh.visible = true;
         }
-      } else if (ghostMesh.visible && !run.running) {
+      } else if (ghostMesh.visible) {
         ghostMesh.visible = false;
       }
 
