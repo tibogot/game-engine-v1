@@ -359,17 +359,40 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">FOV</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cam-fovbase" min="40" max="90" step="1" />
+              <span class="prop-num" id="dv-cam-fovbase-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Speed FOV</span>
             <div class="prop-value">
               <input type="range" id="dv-cam-fov" min="0" max="30" step="1" />
               <span class="prop-num" id="dv-cam-fov-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Full kick at</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cam-fovref" min="5" max="80" step="1" />
+              <span class="prop-num" id="dv-cam-fovref-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">FOV ease</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cam-fovlerp" min="0.5" max="12" step="0.1" />
+              <span class="prop-num" id="dv-cam-fovlerp-v"></span>
+            </div>
+          </div>
           <div class="dv-hint">
             <b>Free look</b> hands the camera to orbit while driving (MMB rotate,
-            RMB pan) — useful for inspecting the car mid-run. <b>Speed FOV</b> is
-            how many extra degrees the view widens at top speed (0 = static, the
-            old behaviour).
+            RMB pan) — useful for inspecting the car mid-run. <b>FOV</b> is the
+            resting lens. <b>Speed FOV</b> is how many extra degrees it widens
+            once you hit <b>Full kick at</b> (0 = static). <b>FOV ease</b> is how
+            quickly that kick arrives — lower is slower; twitchy FOV reads as
+            nausea. The debug orbit (C) stays pinned at 60° on purpose.
           </div>
         </div>
       </div>
@@ -2085,7 +2108,10 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-cam-dist", cam, "dist", (v) => `${v.toFixed(1)}m`);
   slider("dv-cam-height", cam, "height", (v) => `${v.toFixed(1)}m`);
   slider("dv-cam-below", cam, "carBelowCentre", (v) => `${v.toFixed(1)}°`);
+  slider("dv-cam-fovbase", cam, "fovBase", (v) => `${v.toFixed(0)}°`);
   slider("dv-cam-fov", cam, "fovAtSpeed", (v) => (v > 0 ? `+${v.toFixed(0)}°` : "static"));
+  slider("dv-cam-fovref", cam, "fovSpeedRef", (v) => `${v.toFixed(0)} m/s`);
+  slider("dv-cam-fovlerp", cam, "fovLerp", (v) => v.toFixed(1));
 
   // Boom behaviour (live tuning — smoothness is subjective, dial to taste).
   // None of these can move the car on screen; that is `carBelowCentre` alone.
