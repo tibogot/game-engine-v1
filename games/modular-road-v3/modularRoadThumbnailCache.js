@@ -28,7 +28,7 @@ const STORE = "bakes";
 /** Bump BY HAND after changing piece geometry, a prop's make(), or the baker's
  *  own camera/lighting — see the invalidation note above. It also covers the
  *  stored SHAPE: v2 is the sprite sheet, v1 was one Blob per tile. */
-export const THUMB_CACHE_VERSION = 74; // 74: portal live face vs dead back
+export const THUMB_CACHE_VERSION = 75; // 75: parkour ramp materials (painted plastic, not dusty brown)
 
 /** FNV-1a, 32-bit. Only needs to change when its input changes; not a hash
  *  anything depends on for security. */

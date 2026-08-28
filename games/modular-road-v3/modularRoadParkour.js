@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { materialColor } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RigidBvh } from "../../v3/play/modularRoadRigidBvh.js";
 
@@ -241,20 +242,39 @@ export function filledVaultCollisionGeometry(innerR, outerR, length) {
   return geo;
 }
 
+/**
+ * Painted-block material for parkour ramps.
+ *
+ * The faded cardboard look was MeshStandardMaterial + HSL sat 0.42 / lightness
+ * 0.52→0.30 / roughness 0.85 — dusty brown that ate light. This is the same
+ * MeshStandardNodeMaterial every other prop uses (fog via `materialColor`),
+ * with plastic roughness so the colour actually reads.
+ */
+export function parkourMat(color) {
+  const m = new THREE.MeshStandardNodeMaterial({
+    color: new THREE.Color(color),
+    roughness: 0.36,
+    metalness: 0.08,
+  });
+  m.colorNode = materialColor;
+  return m;
+}
+
 /** Five side-by-side test ramps (15°–55°), centred on XZ with feet on y=0. */
 export function buildSlopeLabGroup() {
   const group = new THREE.Group();
   group.name = "SlopeLab";
   const slopeAngles = [15, 25, 35, 45, 55];
+  // Heat map, left→right: shallow yellow → steep red. Saturated on purpose —
+  // the old HSL recipe desaturated them into the same muddy brown.
+  const colors = [0xffe14a, 0xffb020, 0xff8a14, 0xff5a1e, 0xef2030];
   const w = 12;
   const l = 22;
   const z = 48;
   for (let i = 0; i < slopeAngles.length; i++) {
-    const tint = 0.52 - i * 0.055;
-    const color = new THREE.Color().setHSL(0.085, 0.42, tint).getHex();
     const m = new THREE.Mesh(
       rampGeometry(w, l, THREE.MathUtils.degToRad(slopeAngles[i])),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.85, side: THREE.DoubleSide }),
+      parkourMat(colors[i]),
     );
     m.position.set(-42 + i * 21, 0, z);
     m.castShadow = true;
@@ -281,15 +301,15 @@ export function buildJumpLabGroup() {
   const group = new THREE.Group();
   group.name = "JumpLab";
   const rises = [4, 7, 10, 14, 18]; // increasing lip steepness ≈ different takeoff angles
+  // Cool family so a jump-lab row doesn't read as another slope-lab row.
+  const colors = [0x6bff8a, 0x2ee0c0, 0x22c4ff, 0x4a8cff, 0x7a5cff];
   const w = 12;
   const l = 22;
   const z = 48;
   for (let i = 0; i < rises.length; i++) {
-    const tint = 0.52 - i * 0.055;
-    const color = new THREE.Color().setHSL(0.085, 0.42, tint).getHex();
     const m = new THREE.Mesh(
       jumpRampGeometry(w, l, rises[i]),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.85, side: THREE.DoubleSide }),
+      parkourMat(colors[i]),
     );
     m.position.set(-42 + i * 21, 0, z);
     m.castShadow = true;

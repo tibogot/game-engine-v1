@@ -306,6 +306,32 @@ function bindMover(root, bind) {
 /** @type {{id:string,label:string,collision:string,defaults:object,make:()=>THREE.Object3D}[]} */
 export const MOVER_CATALOG = [
   {
+    /*
+     * THE SAME BARREL, SHADED SMOOTH — and it is a second tile rather than a
+     * replacement because the faceted one is a look somebody wants.
+     *
+     * The walls get analytic radial normals (see spinBarrelHoleGrid's
+     * smoothShell); everything else about it is identical, down to the matte
+     * 0.78-roughness shell. Worth knowing: that roughness was chosen to HIDE the
+     * faceting, so it is also damping the thing this variant exists to show —
+     * dropping it would make the smoothness read harder, if you want that.
+     *
+     * Pink rims so the two are one glance apart in a track full of both.
+     */
+    id: "spinbarrel_smooth",
+    label: "Spin barrel (smooth)",
+    collision: "deck",
+    defaults: { speed: 0.55, amplitude: 8 },
+    make: () => makeSpinBarrel({ smooth: true, rimColor: 0xff3ea5 }),
+  },
+  {
+    id: "spinbarrel",
+    label: "Spin barrel",
+    collision: "deck",
+    defaults: { speed: 0.55, amplitude: 8 },
+    make: () => makeSpinBarrel(),
+  },
+  {
     id: "spinbar",
     label: "Spin bar",
     collision: "solid",
@@ -441,32 +467,6 @@ export const MOVER_CATALOG = [
       const { root, bind } = makeElevator();
       return bindMover(root, bind);
     },
-  },
-  {
-    id: "spinbarrel",
-    label: "Spin barrel",
-    collision: "deck",
-    defaults: { speed: 0.55, amplitude: 8 },
-    make: () => makeSpinBarrel(),
-  },
-  {
-    /*
-     * THE SAME BARREL, SHADED SMOOTH — and it is a second tile rather than a
-     * replacement because the faceted one is a look somebody wants.
-     *
-     * The walls get analytic radial normals (see spinBarrelHoleGrid's
-     * smoothShell); everything else about it is identical, down to the matte
-     * 0.78-roughness shell. Worth knowing: that roughness was chosen to HIDE the
-     * faceting, so it is also damping the thing this variant exists to show —
-     * dropping it would make the smoothness read harder, if you want that.
-     *
-     * Pink rims so the two are one glance apart in a track full of both.
-     */
-    id: "spinbarrel_smooth",
-    label: "Spin barrel (smooth)",
-    collision: "deck",
-    defaults: { speed: 0.55, amplitude: 8 },
-    make: () => makeSpinBarrel({ smooth: true, rimColor: 0xff3ea5 }),
   },
   {
     id: "windmill",

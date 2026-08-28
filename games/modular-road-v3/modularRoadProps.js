@@ -37,6 +37,7 @@ import {
   jumpRampGeometry,
   buildSlopeLabGroup,
   buildJumpLabGroup,
+  parkourMat,
   enableMeshShadows,
   attachDeckProxy,
   thickWallTubeGeometry,
@@ -1518,7 +1519,7 @@ export const PROP_CATALOG = [
     category: "parkour",
     collision: "both",
     // Rise 8 m — same as jump ramp / box, so a slope can meet a platform flush.
-    make: () => new THREE.Mesh(rampGeometry(18, 8, 14), mat(0xe8912d, { roughness: 0.8 })),
+    make: () => new THREE.Mesh(rampGeometry(18, 8, 14), parkourMat(0xff8a14)),
   },
   {
     id: "slopelab",
@@ -1691,7 +1692,7 @@ export const PROP_CATALOG = [
     make: () =>
       new THREE.Mesh(
         kickerRampGeometry(14, 20, 7, 32),
-        mat(0xc07840, { roughness: 0.82 }),
+        parkourMat(0xff4b6b),
       ),
   },
   {
@@ -1702,7 +1703,7 @@ export const PROP_CATALOG = [
     make: () =>
       new THREE.Mesh(
         jumpRampGeometry(14, 22, 8, 32),
-        mat(0x886838, { roughness: 0.82 }),
+        parkourMat(0xffd12a),
       ),
   },
   {
