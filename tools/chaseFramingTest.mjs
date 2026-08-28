@@ -263,7 +263,14 @@ function buildRingHalf(runUp = 14) {
       if (!g) continue;
       const c = g.clone(); c.applyMatrix4(p.world); deck.push(c);
     }
-    if (p.railGeometry) { const r = p.railGeometry.clone(); r.applyMatrix4(p.world); rails.push(r); }
+    // THE COLLISION PROXY, not the visible beam — `railCollision` is what
+    // roadGame's bakeCollision puts in the solids tree (the
+    // `userData.collisionGeometry` branch there). Baking the DRAWN W-beam put
+    // the car against corrugation crests and a rolled bull-nose it never meets
+    // in the game, which on the corkscrew — the one piece that presses the car
+    // into its rail — drove a measurably different line from the real one.
+    const proxy = p.railCollision ?? p.railGeometry;
+    if (proxy) { const r = proxy.clone(); r.applyMatrix4(p.world); rails.push(r); }
   };
   for (let i = 0; i < runUp; i++) { const p = buildPiece("straight", conn, pp); push(p); conn = p.connectorOut; }
   push(buildPiece("loop_half", conn, pp));
@@ -474,7 +481,14 @@ function buildTrack(ids) {
       if (!g) continue;
       const c = g.clone(); c.applyMatrix4(p.world); deck.push(c);
     }
-    if (p.railGeometry) { const r = p.railGeometry.clone(); r.applyMatrix4(p.world); rails.push(r); }
+    // THE COLLISION PROXY, not the visible beam — `railCollision` is what
+    // roadGame's bakeCollision puts in the solids tree (the
+    // `userData.collisionGeometry` branch there). Baking the DRAWN W-beam put
+    // the car against corrugation crests and a rolled bull-nose it never meets
+    // in the game, which on the corkscrew — the one piece that presses the car
+    // into its rail — drove a measurably different line from the real one.
+    const proxy = p.railCollision ?? p.railGeometry;
+    if (proxy) { const r = proxy.clone(); r.applyMatrix4(p.world); rails.push(r); }
     conn = p.connectorOut;
   }
   const g = new THREE.PlaneGeometry(400, 500);

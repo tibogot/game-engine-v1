@@ -128,15 +128,34 @@ console.log("\n=== a hard wall hit arms yield ===");
   check("yield armed from that hit", armed, `crashYield ${c.crashYield.toFixed(2)}`);
 }
 
-console.log("\n=== an upright car on all four wheels recovers immediately ===");
+console.log("\n=== driving again ends the crash — but not before minHold ===");
 {
-  const c = makeCar({ solids: wall(4.5) });
-  c.body.pos.set(0, 0.55, 0);
-  c.body.vel.set(0, 0, 18);
-  c._crashYield = CRASH.hold;
-  c.tick({ steerTarget: 0, throttle: 1, handbrake: false, yaw: 0 });
-  check("wheels-down driving clears yield", c.crashYield <= 0,
-    `crashYield ${c.crashYield.toFixed(2)}, wheels ${c.groundedCount}`);
+  // THIS USED TO ASSERT "recovers IMMEDIATELY", and that single tick was the
+  // reason no crash ever happened. `recovered` is evaluated in the same call
+  // that arms the yield, so a hit taken with the wheels down — i.e. every crash
+  // you have while driving — armed and cleared on the same substep. Measured
+  // before the fix: a 60 m/s head-on into a barrier held the crash state for
+  // 0.00 s and rolled the car 1° (tools/crashResponseRepro.mjs).
+  //
+  // The contract now has two halves, and both matter: the crash must survive
+  // long enough to become one, and it must still end as soon as you are driving.
+  const drive = (ticks) => {
+    const c = makeCar({ solids: wall(4.5) });
+    c.body.pos.set(0, 0.55, 0);
+    c.body.vel.set(0, 0, 18);
+    c._crashYield = CRASH.hold;
+    for (let i = 0; i < ticks; i++) {
+      c.tick({ steerTarget: 0, throttle: 1, handbrake: false, yaw: 0 });
+    }
+    return c;
+  };
+  const early = drive(1);
+  check("wheels down does NOT cancel the crash on the spot", early.crashYield > 0,
+    `crashYield ${early.crashYield.toFixed(2)}, wheels ${early.groundedCount}`);
+
+  const late = drive(Math.round((CRASH.minHold + 0.15) / FIXED_DT));
+  check("...but driving clears it once minHold has passed", late.crashYield <= 0,
+    `crashYield ${late.crashYield.toFixed(2)}, wheels ${late.groundedCount}`);
 }
 
 console.log("\n=== yielded airborne slam bounces; a slow on-road clip stays dead ===");
@@ -192,6 +211,41 @@ console.log("\n=== a moving solid at wrecking-ball speed arms yield ===");
     `peak ${peak.toFixed(1)} m/s vs moverSpeed ${CRASH.moverSpeed}`);
   check("yield stays on even with wheels down (wrecking ball)", armed,
     `crashYield ${c.crashYield.toFixed(2)}, wheels ${c.groundedCount}`);
+}
+
+console.log("\n=== a crash while DRIVING actually throws the car about ===");
+{
+  // The end the whole block exists for, asserted on what a player would see
+  // rather than on the flag. Every piece of this was silently zero before: the
+  // yield never survived arming, so `violent` never engaged, so a hit landed
+  // with SOLID's deliberately dead 0.05 restitution and 0.15 spin and the car
+  // simply stopped. Wheels are DOWN throughout — that is the case that was
+  // broken, and the one every real crash happens in.
+  const c = makeCar({ solids: wall(6.0) });
+  c.body.pos.set(0, 0.55, 0);
+  for (let i = 0; i < Math.round(0.3 / FIXED_DT); i++) {
+    c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0 });
+  }
+  // Sideways into it at well over wallSpeed, nose still down the road.
+  c.body.vel.set(26, 0, -20);
+  const fwd = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  let peakSpin = 0, peakRoll = 0, minUpY = 1, armed = false;
+  for (let i = 0; i < Math.round(1.2 / FIXED_DT); i++) {
+    c.tick({ steerTarget: 0, throttle: 0, handbrake: false, yaw: 0 });
+    if (c.crashYield > 0) armed = true;
+    fwd.set(0, 0, 1).applyQuaternion(c.body.quat);
+    up.set(0, 1, 0).applyQuaternion(c.body.quat);
+    peakSpin = Math.max(peakSpin, c.body.angVel.length());
+    peakRoll = Math.max(peakRoll, Math.abs(c.body.angVel.dot(fwd)));
+    minUpY = Math.min(minUpY, up.y);
+  }
+  check("a hard hit while driving arms the crash", armed,
+    `crashYield peaked above 0`);
+  check("...and it genuinely throws the car", peakSpin > 2.0,
+    `peak spin ${peakSpin.toFixed(2)} rad/s (was 0.15–0.47 before the fix)`);
+  check("...including roll, not just a flat spin", peakRoll > 1.5,
+    `peak roll ${peakRoll.toFixed(2)} rad/s, leaned to up.y ${minUpY.toFixed(2)}`);
 }
 
 console.log(fail ? `\n${fail} check(s) failed` : "\nall green");

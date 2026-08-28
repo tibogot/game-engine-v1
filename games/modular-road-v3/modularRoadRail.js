@@ -949,8 +949,19 @@ const RAIL_COLLISION_DEPTH = 0.38;
  * toward the field). The left rail's traffic strip is reversed — measured in
  * tools/railCollisionSideTest.mjs — so `behind` means inside on both rails.
  *
- * No top, no bottom, no end caps. A cap at every piece socket would face
- * along the road, which is the graze that used to brake the car on every seam.
+ * No bottom, no end caps. A cap at every piece socket would face along the
+ * road, which is the graze that used to brake the car on every seam.
+ *
+ * THERE IS A TOP, and it is new. Two vertical walls cannot stop VERTICAL
+ * motion: a car coming down on the beam simply entered the 0.38 m gap between
+ * them, and once the hull (2.10 m wide) had swallowed the slab, every sample
+ * inside it asked the cavity-recovery which way was out and got a different
+ * answer each substep. Measured in tools/railTunnelRepro.mjs: head-on and
+ * oblique hits hold at 60 m/s, but 28 of 72 DESCENTS onto the beam ended up on
+ * the far side of it, crossing at road level — the player's "I go through it
+ * from the top". The lid closes the entry path, and the resolver's sit-skip
+ * (SOLID.sitNormalMaxY) still discards it at rest, so the hull cannot park on
+ * a rail; see SOLID.sitImpactSpeed for the split.
  *
  * Traffic face stays at the visible beam's traffic face (`-prof.backZ`).
  *
@@ -971,14 +982,19 @@ function railCollisionWalls(rp, r, zSign, minDepth = RAIL_COLLISION_DEPTH) {
     { y: beamTop, z: zBack },
     { y: kerbTop, z: zBack },
   ];
+  // The lid, spanning the two walls at beam height.
+  const top = [
+    { y: beamTop, z: zFace },
+    { y: beamTop, z: zBack },
+  ];
   // Measured (tools/railCollisionSideTest.mjs): the left rail's traffic strip
   // comes out inverted relative to the right. The back strip does not. Reverse
   // only that one, or `behind` on the inboard face would mean "outside" and
   // inside-recovery would push a car on the road into the rail.
   if (zSign < 0) {
-    return { traffic: trafficUp.slice().reverse(), back: backDown };
+    return { traffic: trafficUp.slice().reverse(), back: backDown, top };
   }
-  return { traffic: trafficUp, back: backDown };
+  return { traffic: trafficUp, back: backDown, top };
 }
 
 /**
@@ -1009,6 +1025,7 @@ export function buildRailCollision(frames, rp, r = railParams) {
     const walls = railCollisionWalls(rp, r, zSign);
     sweepCollisionSheet(sweepFrames, walls.traffic, side * edgeAbs, zSign, positions, indices);
     sweepCollisionSheet(sweepFrames, walls.back, side * edgeAbs, zSign, positions, indices);
+    sweepCollisionSheet(sweepFrames, walls.top, side * edgeAbs, zSign, positions, indices);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
@@ -1174,6 +1191,7 @@ export function buildRailCollisionAlongPath(frames, rp, r = railParams) {
   const sweepFrames = decimateFrames(frames, r.frameStep, r.frameAngle, 0);
   sweepCollisionSheet(sweepFrames, walls.traffic, 0, -1, positions, indices);
   sweepCollisionSheet(sweepFrames, walls.back, 0, -1, positions, indices);
+  sweepCollisionSheet(sweepFrames, walls.top, 0, -1, positions, indices);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geo.setIndex(indices);

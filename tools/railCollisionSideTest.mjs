@@ -57,10 +57,13 @@ const probe = (px, label, wantSign) => {
     `${label}: pushed ${n.x > 0 ? "outward (+x)" : "inward (−x)"} ` +
     `(normal.x ${n.x.toFixed(3)}, surface ${hit.distance.toFixed(3)} m away)`,
   );
-  check(
-    hit.behind !== true,
-    `${label}: outside contact is not behind (behind=${hit.behind})`,
-  );
+  // `behind` is deliberately NOT asserted. It reports which side of the closest
+  // triangle's winding the query landed on, and the solids bake is double-sided,
+  // so it is a coin flip that closestPointWithNormal has already consumed — it
+  // negates the normal with it, which is why `normal.x` above is the contract
+  // that matters. Nothing in the vehicle reads the flag (the cavity recovery
+  // uses raycasts; see SOLID.insideReach), and it duly flipped on the right rail
+  // the moment the proxy gained a lid without any behaviour changing.
 };
 
 console.log(`\nright rail ${rightMin.toFixed(3)} .. ${rightMax.toFixed(3)}\n`);
@@ -75,7 +78,6 @@ const cavity = (lo, hi, label) => {
   const hit = bvh.closestPointWithNormal(mid, y, z, 0.6, n);
   check(!!hit, `${label} cavity query finds a face (${hit ? hit.distance.toFixed(3) : "none"} m)`);
   if (!hit) return;
-  check(hit.behind === true, `${label} cavity is behind the face (behind=${hit.behind})`);
   check(hit.distance < 0.22, `${label} cavity is ~half thickness (${hit.distance.toFixed(3)} m)`);
 };
 cavity(rightMin, rightMax, "right");
@@ -96,6 +98,24 @@ const cavityRay = (lo, hi, label) => {
 };
 cavityRay(rightMin, rightMax, "right");
 cavityRay(leftMin, leftMax, "left");
+
+// ── THE LID ─────────────────────────────────────────────────────────────────
+// The walls block sideways; only the lid blocks a car coming DOWN. Without it a
+// descent onto the beam entered the cavity between the two walls and was ejected
+// by whichever wall won the substep — measured at 28 of 72 descents crossing to
+// the far side at road level (tools/railTunnelRepro.mjs).
+const beamTop = RP.railHeight + railParams.gap + railParams.height;
+const lid = (px, label) => {
+  const hit = bvh.closestPointWithNormal(px, beamTop + 0.1, z, 0.6, n);
+  check(!!hit, `${label} lid: a face is found above the beam`);
+  if (!hit) return;
+  check(
+    n.y > 0.9,
+    `${label} lid: pushes UP (normal.y ${n.y.toFixed(3)}, surface ${hit.distance.toFixed(3)} m below)`,
+  );
+};
+lid((rightMin + rightMax) * 0.5, "right");
+lid((leftMin + leftMax) * 0.5, "left ");
 
 from.set(rightMin - 0.25, y, z);
 bvh.closestPointWithNormal(from.x, from.y, from.z, 1.0, away);

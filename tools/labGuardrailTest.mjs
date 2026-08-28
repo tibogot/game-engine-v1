@@ -404,7 +404,18 @@ console.log("\n— collision proxy —");
   check(rMax - rMin >= 0.37, `slab thickness ${(rMax - rMin).toFixed(3)} m (≥ 0.38)`);
 
   // No floor: a horizontal triangle at the kerb is what closest-point uses to
-  // throw the car up once a sample is overlapping. The section is an open U.
+  // throw the car up once a sample is overlapping. The section stays open below.
+  //
+  // THERE IS A LID, AND THAT REVERSED. This asserted `flatOnTop === 0` on the
+  // reasoning that a top face is a plateau the hull parks on. It is, at rest —
+  // but two vertical walls cannot stop VERTICAL motion, so a car coming down on
+  // the beam entered the 0.38 m gap between them and was then ejected by the
+  // cavity recovery in whichever direction won that substep. Measured in
+  // tools/railTunnelRepro.mjs: side-on hits hold at 60 m/s, while 28 of 72
+  // descents onto the beam crossed to the far side at ROAD level. The parking
+  // worry is handled where it belongs instead — SOLID.sitImpactSpeed skips a
+  // mostly-up contact below 3 m/s, so the hull still sinks off a rail it is
+  // resting on and only a real arrival is resolved.
   const pos = col.attributes.position;
   const idx = col.index;
   let floorTris = 0;
@@ -415,7 +426,7 @@ console.log("\n— collision proxy —");
     if (ys.every((y) => y > cb.max.y - 1e-4)) flatOnTop++;
   }
   check(floorTris === 0, `no floor at the kerb (${floorTris} level triangles)`);
-  check(flatOnTop === 0, `no flat plateau (${flatOnTop} level triangles at the top)`);
+  check(flatOnTop > 0, `the beam top is closed (${flatOnTop} lid triangles)`);
 
   vis.dispose();
   col.dispose();

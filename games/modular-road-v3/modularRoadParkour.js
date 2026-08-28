@@ -102,6 +102,22 @@ export function rampGeometry(w, l, angleRad) {
   quad(Bl, Cl, Cr, Br);
   tri(Al, Cl, Bl);
   tri(Ar, Br, Cr);
+
+  // NO SOLIDS STAND-IN HERE, DELIBERATELY, and it is worth saying why since the
+  // kicker ramps next door do have one.
+  //
+  // Splitting the drive surface out of solids the way solidKickerExtrusion does
+  // is the obvious tidy-up, and it measures WORSE on this shape. The wedge is a
+  // wide flat plane with vertical flanks, and the surface sitting in the solids
+  // tree holds the hull clear of those flanks; take it out and a car overhanging
+  // the side edge drops until its bodywork grinds along the flank instead.
+  // Measured across the lane/offset sweep in tools/labEdgeStickRepro.mjs:
+  //
+  //   full solid (this)   503 ticks of chassis contact, 2.46 s stalled
+  //   flanks-only proxy  4630 ticks,                    5.13 s stalled
+  //
+  // The kicker gets away with it because its scooped profile never presents a
+  // flat overhangable edge at ride height. Revisit this only with that sweep.
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.computeVertexNormals();

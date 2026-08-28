@@ -1898,6 +1898,49 @@ export const SOLID = {
    */
   sitNormalMaxY: 0.45,
   /**
+   * ...BUT ONLY WHILE THE WHEELS ARE ACTUALLY CARRYING THE CAR.
+   *
+   * Read the rule above again: the lid is skipped so the hull cannot park on it
+   * "while the wheels still see the road". That qualifier is the whole
+   * justification, and it was never tested — every mostly-up contact was thrown
+   * away, including the ones that were the car's ONLY support. A car coming down
+   * on a guardrail has no wheel contact at all (rails live in this BVH and the
+   * tyres only probe the DECK), so discarding its lid contact discarded
+   * everything, and it carried on into the barrier. Measured in
+   * tools/railTunnelTest.mjs before the fix: 28 of 72 descents onto the beam
+   * ended up on the FAR side of it, crossing at road level.
+   *
+   * `_isSupported()` is the honest test rather than `groundedCount` — a tyre
+   * reports grounded up to a metre before it touches, which on a descent is
+   * exactly when this decision is made. So:
+   *
+   *   supported     → skip, unchanged. The hole-wall rim, the jersey trough and
+   *                   the kerb seam all still let the car settle onto the road,
+   *                   and a car merely driving past a rail is untouched.
+   *   not supported → resolve it. Nothing else is holding the car up, so this
+   *                   contact is the difference between landing ON a barrier and
+   *                   passing THROUGH one.
+   *
+   * A car left balanced on a rail is then the stuck detector's problem, which is
+   * what STUCK is for and already handles — a far better failure than a barrier
+   * that does not barrier.
+   *
+   * KNOWN COST, measured rather than guessed. "Not supported" is also true for a
+   * moment at a ramp's side edge, where the wheels hang off — and the Slope lab
+   * ramps put their DRIVE SURFACE in the solids tree (rampGeometry has no solids
+   * stand-in), so there the hull now argues with the ramp top it is driving on.
+   * On one lane of tools/labEdgeStickRepro.mjs's sweep that stretches a stall
+   * from 0.47 s to 2.46 s.
+   *
+   * Two narrower gates were tried and BOTH are worse. Requiring a minimum
+   * closing speed (a slide reads ~0, a landing does not) lets the rail be
+   * crossed again — railTunnelTest and guardrailStuckTest both fail — because a
+   * car settling onto a barrier arrives slowly. Splitting the ramp's drive
+   * surface out of solids the way the kicker ramps do measures 4630 ticks of
+   * chassis contact against 503; see the note in rampGeometry. The barrier
+   * holding is worth more than the lab ramp's edge, so this stands as is.
+   */
+  /**
    * Anti-tunnel margin, as a multiple of the distance travelled per substep.
    *
    * A skin alone cannot stop a fast car: at 30 m/s the body advances 0.125 m per
@@ -2047,9 +2090,21 @@ export const STUCK = {
  */
 export const CRASH = {
   enabled: true,
-  /** Closing speed into a solid (m/s) that counts as a crash. Tangential
-   *  scrapes and wall-rides are well under this; a head-on clip is well over. */
-  wallSpeed: 14,
+  /**
+   * Closing speed into a solid (m/s) that counts as a crash. Tangential scrapes
+   * and wall-rides are well under this; a head-on clip is well over.
+   *
+   * 18, NOT 14, and the difference is one piece. Driving the kit at 40 m/s
+   * (tools/corkscrewCrashProbe.mjs) every piece reports a peak closing speed of
+   * exactly 0.0 — the car never touches a rail on a straight, a quarterpipe, a
+   * jump or a loop — except the CORKSCREW, which presses against the rail as the
+   * road rolls under it and peaks at 14.2. At 14 that made driving a corkscrew
+   * properly into a crash, which cut the assists mid-roll and put the chase
+   * camera through the road for 52 frames. Nothing else on the track lands
+   * between the two numbers, so the gap is real rather than fitted, and 18 m/s
+   * (65 km/h of closing speed into a barrier) is still unambiguously a crash.
+   */
+  wallSpeed: 18,
   /** Relative close-speed (m/s) against a MOVING solid that counts as a crash.
    *  A pendulum's tip is ~6 m/s — under `wallSpeed`, but it should still wreck
    *  you. Push-gate peak is ~3.6 and stays a shove. */
@@ -2059,6 +2114,25 @@ export const CRASH = {
   roofSpeed: 6,
   /** Seconds assists stay quiet after the event, unless recovered earlier. */
   hold: 1.8,
+  /**
+   * Seconds a crash is guaranteed to run before the wheels are allowed to end it.
+   *
+   * WITHOUT THIS THERE ARE NO CRASHES AT ALL, and that was the shipped
+   * behaviour. `recovered` below is evaluated in the same call that arms the
+   * yield, so a crash was armed and cleared on the same substep whenever the car
+   * still had three wheels down — which is every crash you have while DRIVING.
+   * Measured in tools/crashResponseRepro.mjs before the fix: a 60 m/s head-on
+   * into a barrier engaged the crash state for 0.00 s and rolled the car 1°. It
+   * simply stopped dead, which is exactly the "this car doesn't have collision
+   * physics" the player reported.
+   *
+   * A guaranteed window is what lets the tumble develop: the response only
+   * imparts angular velocity, and the stabilizer re-plants the car the instant
+   * the yield ends. At CRASH.maxSpin a half roll takes ~0.5 s, so 0.7 s is
+   * enough for a real barrel roll to commit while staying short enough that a
+   * hard clip you drive out of does not cost you the corner.
+   */
+  minHold: 0.7,
   /** Chassis-up.y above this, with enough wheels down, is a recovery. */
   recoverUp: 0.5,
   recoverWheels: 3,
@@ -2068,6 +2142,77 @@ export const CRASH = {
   spin: 0.55,
   /** rad/s cap while yielded. SOLID.maxSpin stays 2.5 so scrapes cannot wind up. */
   maxSpin: 6,
+  /**
+   * What is left of the stabilizer's roll/pitch damping during a crash.
+   *
+   * Not 0. The damping is the only thing keeping a tumble legible — with none
+   * of it the car spins up to the `TIRE.maxAngVel` ceiling and reads as a
+   * blur — but at full strength it bleeds the roll off before it can commit.
+   * See the damping block in _applyStabilizer.
+   */
+  dampScale: 0.25,
+
+  // ── TRIP-OVER ROLLOVER — the barrel roll ─────────────────────────────────
+  //
+  // A side impact CANNOT roll this car, and that is structural rather than a
+  // tuning problem. The spin impulse is `r × n` about the CENTRE OF MASS, and
+  // for a hit on a flat barrier the contact averages out at roughly CoM height,
+  // so `r` has almost no vertical lever: measured, once the crash state was made
+  // to engage at all, 6–7 rad/s of YAW against 0.1–0.3 of roll at every angle
+  // and speed (tools/crashResponseRepro.mjs).
+  //
+  // Nor can the tyres supply it. TIRE.contactPatchForces is 0, so a tyre's
+  // lateral force is applied AT THE HUB — there is no lever below the CoM, and
+  // therefore no rollover moment anywhere in the model. Setting that to 1 is the
+  // physical fix and changes handling everywhere, so the trip lives here, inside
+  // the crash window, where the assists are already standing down.
+  //
+  // WHAT IT MODELS. With the tyres planted, a car shoved sideways does not
+  // rotate about its CoM — it pivots about the tyre contact line, because that
+  // is what the ground is holding. The barrier pushes at bumper height, the
+  // ground holds the bottom, and the couple rolls the car AWAY from the wall.
+  // Taking the lever from the ground plane instead of the CoM is the whole
+  // difference between a car that spins flat and one that goes over.
+  //
+  // Keyed to the impact, NOT to a sustained sideways slide: a wall reverses the
+  // lateral velocity within one tick (measured: −19.7 → +4.5 m/s), so there is
+  // never a slide left to trip over by the time the response has run.
+  /**
+   * Roll rate (rad/s) gained per m/s of impact closing speed, when planted.
+   *
+   * Stands in for impulse × lever ÷ roll inertia, all three of which are fixed
+   * for this car, so one number is the honest amount of tuning available.
+   * 0.16 puts a 25 m/s clip at 4 rad/s — a committed roll — while an 8 m/s
+   * nudge gets 1.3, which leans the car and drops back onto its wheels.
+   */
+  tripRoll: 0.5,
+  /** Roll-rate ceiling for a trip (rad/s). Above CRASH.maxSpin on purpose —
+   *  see the cap in step 5 of _applySolidContact. */
+  tripMaxRate: 8.5,
+  /** Height of the centre of mass above the tyre contact line (m) — the lever
+   *  the car pivots over. Roughly wheel radius plus ride height. */
+  tripPivotDrop: 0.5,
+  /**
+   * How much of the pivot's linear velocity is actually applied, 0..1.
+   *
+   * 1.0 is the honest rigid-body answer (v = ω × r about the contact line) and
+   * it is deliberately not the default: at full value a hard clip throws the car
+   * clear of the road, because the real thing sheds that energy through tyres
+   * and bodywork that this model does not have. This is the dial between "leans
+   * and recovers" and "goes over" — see tools/crashResponseRepro.mjs.
+   */
+  tripLift: 0.55,
+  /**
+   * What is left of the airborne idle-settle while a crash runs, 0..1.
+   *
+   * TIRE.airSettle drives every un-commanded rotation rate back to zero so a
+   * knock does not leave the car spinning forever. A tumble is exactly that,
+   * which made it the last assist quietly cancelling the crash: the trip would
+   * lift the car onto its side and the air control flattened it before it came
+   * down. 0.1 keeps enough to stop a slow eternal rotation without deleting the
+   * roll the player just earned.
+   */
+  airSettleScale: 0.1,
 };
 
 /** Cached each rebuild — offset from box center to CoM in chassis-local space. */
@@ -3357,6 +3502,15 @@ export class Vehicle {
     this._deepestN = new THREE.Vector3();
     this._cavityFrom = new THREE.Vector3();
     this._cavitySide = new THREE.Vector3();
+    /** Contact point → body centre, for choosing which way out of a solid. */
+    this._escapeRef = new THREE.Vector3();
+    /** Chassis axes + lever for the crash trip-over — see the TRIP-OVER block
+     *  on CRASH and step 5 of _applySolidContact. */
+    this._tripUp = new THREE.Vector3();
+    this._tripRight = new THREE.Vector3();
+    this._tripFwd = new THREE.Vector3();
+    this._tripLever = new THREE.Vector3();
+    this._tripVel = new THREE.Vector3();
     /** Exact analytic colliders — see setSolidCapsules. */
     this.solidCapsules = [];
     this._sphC = new THREE.Vector3();
@@ -4365,6 +4519,11 @@ export class Vehicle {
   _applyYawAssist() {
     const body = this.body;
     if (TIRE.yawAssist <= 0) return;
+    // A crash is the one time the car is MEANT to be pointing the wrong way.
+    // This drives the nose back onto the velocity vector, which is precisely
+    // the spin a wall just gave you, so it has to stand down or the car snaps
+    // straight mid-crash and the hit reads as a bump.
+    if (this._crashYield > 0) return;
 
     // Surface frame from the (already filtered) contact normals.
     let grounded = 0;
@@ -4454,8 +4613,13 @@ export class Vehicle {
     }
     // A wrecking-ball can hit you with all four wheels still on the road.
     // Do not treat that as "recovered". Static-wall yield still clears the
-    // moment you are driving again so a barrier clip does not mute assists.
-    if (this._crashYield > 0 && recovered && !this._crashMover) {
+    // moment you are driving again so a barrier clip does not mute assists —
+    // but NOT before `minHold`, or it clears on the substep that armed it and
+    // there is no crash at all. See CRASH.minHold.
+    if (
+      this._crashYield > 0 && recovered && !this._crashMover
+      && this._crashYield <= CRASH.hold - CRASH.minHold
+    ) {
       this._crashYield = 0;
       return;
     }
@@ -4775,9 +4939,19 @@ export class Vehicle {
       }
       // Roll/pitch damping stays on at ANY contact count — it only removes
       // energy, and it's what stops a one-wheel touch starting a tumble.
+      //
+      // WHICH IS EXACTLY WHY A CRASH HAS TO TURN IT DOWN. During a crash the
+      // tumble is the point, and 2600 of damping bleeds it off before it can
+      // commit — the alignment torque above is already gone by then, so this
+      // was the remaining assist quietly keeping the car flat. Scaled rather
+      // than switched off: a little damping keeps the roll readable instead of
+      // letting it spin up into noise.
+      const damp = this._crashYield > 0
+        ? TIRE.stabilizerDamp * CRASH.dampScale
+        : TIRE.stabilizerDamp;
       const wYaw = body.angVel.dot(this._stabUp);
       this._stabWTilt.copy(body.angVel).addScaledVector(this._stabUp, -wYaw);
-      this._stabTorque.addScaledVector(this._stabWTilt, -TIRE.stabilizerDamp);
+      this._stabTorque.addScaledVector(this._stabWTilt, -damp);
       body.torqueAccum.add(this._stabTorque);
     } else {
       // On the dirt-lid: no tyre contact, so this branch would treat a rest as
@@ -4834,12 +5008,20 @@ export class Vehicle {
       const Iy = 1 / (li[4] || 1e-6);
       const Ir = 1 / (li[8] || 1e-6);
 
+      // Idle-axis convergence. `airSettle` is what stops a car spinning forever
+      // after a knock — and during a CRASH it is the thing erasing the crash. A
+      // tumble that leaves the ground is the whole point of a rollover, and this
+      // drives every rate it did not ask for back to zero, so a car tripped into
+      // the air came down flat. See CRASH.airSettleScale.
+      const settle = this._crashYield > 0
+        ? TIRE.airSettle * CRASH.airSettleScale
+        : TIRE.airSettle;
       const axis = (unit, input, rate, inertia) => {
         const cur = body.angVel.dot(unit);
         const target = input * rate;
         // Softer convergence when the axis is idle, so a knock still tumbles
         // naturally rather than freezing the moment you release.
-        const gain = input !== 0 ? TIRE.airResponse : TIRE.airSettle;
+        const gain = input !== 0 ? TIRE.airResponse : settle;
         this._stabTorque.addScaledVector(unit, (target - cur) * gain * inertia);
       };
 
@@ -4851,7 +5033,7 @@ export class Vehicle {
       let aligning = false; // true when the arc assist is driving pitch, not the player
       let pitchTarget = inP * TIRE.airPitchRate;
       // Pitch uses its OWN response — see airPitchResponse.
-      let pitchGain = inP !== 0 ? TIRE.airPitchResponse : TIRE.airSettle;
+      let pitchGain = inP !== 0 ? TIRE.airPitchResponse : settle;
       if (inP === 0 && TIRE.airTrajectoryAlign > 0) {
         const v = body.vel;
         const horiz = Math.hypot(v.x, v.z);
@@ -5706,6 +5888,7 @@ export class Vehicle {
 
     let deepest = 0;
     let hits = 0;
+    const wheelsCarry = this._isSupported();
 
     for (const sp of this.SOLID_BOX_SAMPLES) {
       this._geomToWorld(sp, this._sphC);
@@ -5739,18 +5922,42 @@ export class Vehicle {
             }
           }
           if (blocked) {
-            // Shortest exit is toward the closest face. That is wrong when the
-            // closest face is the FAR wall of a rail slab — pushing that way is
-            // how a sprint into a start/finish nose went out the back. If that
-            // exit continues the motion, take the other wall (the way we came).
+            // WHICH WAY OUT? The shortest exit is toward the closest face, and
+            // that is wrong exactly when the closest face is the FAR wall of a
+            // thin solid the hull has driven into: pushing that way carries the
+            // car THROUGH it, which is how a sprint into a start/finish nose
+            // went out the back.
+            //
+            // Decided by where the CAR is, not by which wall this one sample is
+            // nearer to — exit toward the side the body's centre sits on, i.e.
+            // back the way the car came. That needs no velocity, and needing
+            // none is the point: the old rule flipped the exit when it "continued
+            // the motion", which reads ~0 on a car at rest, so a parked car with
+            // one hull sample inside a rail was walked straight through it,
+            // 0.27 m per tick, gaining nothing in speed. Measured against the
+            // real rail in tools/railTunnelTest.mjs.
+            //
+            // Velocity stays as the tiebreak for the case the body direction
+            // cannot answer: a hull sitting square on top of a slab, where
+            // centre-to-contact is vertical and both exits are horizontal.
             let ox = -nx, oy = -ny, oz = -nz;
-            this.body.getVelocityAtPoint(this._sphC, this._sphV);
-            if (surfaceVelFn) {
-              surfaceVelFn(this._sphC, this._surfV);
-              this._sphV.sub(this._surfV);
-            }
-            if (this._sphV.x * ox + this._sphV.y * oy + this._sphV.z * oz > 0) {
+            this._escapeRef.set(
+              this.body.pos.x - res.x,
+              this.body.pos.y - res.y,
+              this.body.pos.z - res.z,
+            );
+            const towardBody = this._escapeRef.x * ox + this._escapeRef.y * oy + this._escapeRef.z * oz;
+            if (towardBody < -1e-3) {
               ox = nx; oy = ny; oz = nz;
+            } else if (towardBody <= 1e-3) {
+              this.body.getVelocityAtPoint(this._sphC, this._sphV);
+              if (surfaceVelFn) {
+                surfaceVelFn(this._sphC, this._surfV);
+                this._sphV.sub(this._surfV);
+              }
+              if (this._sphV.x * ox + this._sphV.y * oy + this._sphV.z * oz > 0) {
+                ox = nx; oy = ny; oz = nz;
+              }
             }
             nx = ox; ny = oy; nz = oz;
             pen = res.distance + skin;
@@ -5774,7 +5981,11 @@ export class Vehicle {
       // Solids are walls. A mostly-up (or down) normal is a lid the hull can
       // park on while the wheels still see the road. Skip it: either a wall
       // sample will spat the car out, or it falls through onto the deck.
-      if (Math.abs(ny) > sitY) continue;
+      //
+      // UNLESS THE CAR IS ARRIVING ON IT AND NOTHING ELSE IS HOLDING IT UP — see
+      // the second half of the SOLID.sitNormalMaxY block. `wheelsCarry` is
+      // hoisted out of the loop; it cannot change between samples of one pass.
+      if (Math.abs(ny) > sitY && wheelsCarry) continue;
 
       hits++;
       this._sphN.set(nx, ny, nz);
@@ -5839,14 +6050,16 @@ export class Vehicle {
     const closing = vN < 0 ? -vN : 0;
     this._solidImpactSpeed = Math.max(this._solidImpactSpeed, closing);
 
-    this._stuckUp.set(0, 1, 0).applyQuaternion(body.quat);
-    const recovered = this.groundedCount >= CRASH.recoverWheels
-      && this._stuckUp.y > CRASH.recoverUp;
+    // A HARD HIT IS VIOLENT WHETHER OR NOT THE WHEELS ARE DOWN. This required
+    // `!recovered`, and since you hit things while driving — four wheels on the
+    // road — the boosted restitution and spin were never once applied to a
+    // static barrier. The car took a 60 m/s impact with SOLID's deliberately
+    // dead 0.05 restitution and 0.15 spin and simply stopped. See CRASH.minHold.
     const moverSlam = !!surfaceVelFn && closing >= CRASH.moverSpeed;
     const violent = CRASH.enabled && (
       moverSlam
       || this._crashYield > 0
-      || (!recovered && closing >= CRASH.wallSpeed)
+      || closing >= CRASH.wallSpeed
     );
     if (violent && moverSlam) {
       this._crashYield = CRASH.hold;
@@ -5914,6 +6127,55 @@ export class Vehicle {
         const room = spinMax - cur;
         const add = Math.min(mag, Math.max(0, room));
         if (add > 0) body.angVel.addScaledVector(this._solidSpinAxis, add);
+      }
+    }
+
+    // 5) TRIP-OVER — the barrel roll. See the TRIP-OVER block on CRASH for why
+    //    the spin above can never produce one, and what this stands in for.
+    //
+    //    Only with the tyres actually carrying the car: that is the whole
+    //    premise, since the ground holding the bottom of the car is what turns a
+    //    sideways shove into a rotation instead of a slide. Airborne, a side hit
+    //    keeps tumbling on `r × n` alone, which is correct — there is nothing to
+    //    pivot against up there.
+    if (violent && CRASH.tripRoll > 0 && vN < 0 && this._isSupported()) {
+      this._tripFwd.set(0, 0, 1).applyQuaternion(body.quat);
+      this._tripRight.set(1, 0, 0).applyQuaternion(body.quat);
+      // The car goes over AWAY from the wall, i.e. the way it is being shoved.
+      // `_solidN` points out of the surface, so it already IS the push. A
+      // positive rotation about chassis-forward carries +X up and so tips the
+      // car toward −X, which is why this is negated.
+      const push = -this._solidN.dot(this._tripRight);
+      let dw = push * closing * CRASH.tripRoll;
+      // Same reason the spin above caps the RESULT, not the increment: a scrape
+      // is a contact every substep, and capping each one would let a long rub
+      // wind the car to any roll rate at all.
+      // Capped on its OWN ceiling, not CRASH.maxSpin: getting a car over needs
+      // more roll rate than a spin-out wants to allow. The energy to lift this
+      // car's centre of mass past its tipping point works out at ~5.8 rad/s, so
+      // a cap at maxSpin (6) left every trip marginal — measured, it leaned to
+      // 39° and the springs returned it every time.
+      const curRoll = body.angVel.dot(this._tripFwd);
+      if (dw > 0) dw = Math.min(dw, Math.max(0, CRASH.tripMaxRate - curRoll));
+      else dw = Math.max(dw, Math.min(0, -CRASH.tripMaxRate - curRoll));
+      if (dw !== 0) {
+        body.angVel.addScaledVector(this._tripFwd, dw);
+        // ABOUT THE CONTACT LINE, NOT THE CENTRE OF MASS. Spin a car about its
+        // own centre and the springs simply absorb it — measured, the roll rate
+        // hit the 6 rad/s cap and the car still only leaned 35° before dropping
+        // back. Rotating about the tyres instead is what lifts the CoM over
+        // them, and for a rigid body that means the matching linear velocity
+        // v += ω × r, r running from the contact line up to the centre. That is
+        // where the height to tip over comes from; without it the roll is a
+        // gesture the suspension undoes.
+        this._tripUp.set(0, 1, 0).applyQuaternion(body.quat);
+        // The car pivots on the side it is going over — dw > 0 tips it toward
+        // chassis −X, so the −X tyres are the ones on the ground.
+        this._tripLever
+          .copy(this._tripRight).multiplyScalar(Math.sign(dw) * WHEEL_LAYOUT.halfTrack)
+          .addScaledVector(this._tripUp, CRASH.tripPivotDrop);
+        this._tripVel.copy(this._tripFwd).multiplyScalar(dw).cross(this._tripLever);
+        body.vel.addScaledVector(this._tripVel, CRASH.tripLift);
       }
     }
   }
