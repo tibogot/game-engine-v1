@@ -13,6 +13,10 @@ import {
   socketMatrix,
   linkCurvature,
   isLaterallyTileable,
+  convexVerticalRadius,
+  followSpeed,
+  heldSpeed,
+  isFollowRoad,
 } from "./modularRoadKit.js";
 import { solveGapArc } from "./gapArc.js";
 
@@ -2692,6 +2696,12 @@ export class ModularRoadBuilder {
     // uncapped sweep so the new end rings are visual-only.
     // Same three-birth-sites rule as the rail proxy below.
     mesh.userData.collisionGeometry = built.deckCollision ?? null;
+    // ROAD YOU FOLLOW — the deck BVH bakes this into a per-vertex tag, and the
+    // car uses it to decide whether it may stick to a convex crest instead of
+    // being launched off it. Stamped here because this is the one place that
+    // knows both the piece id and the mesh. See FOLLOW_ROAD in the kit and
+    // ROAD_HOLD in the vehicle.
+    mesh.userData.roadHold = isFollowRoad(id);
     const railMesh =
       built.railGeometry && this.railMaterial
         ? this._makeMesh(built.railGeometry, this.railMaterial, built.world)
@@ -4228,7 +4238,14 @@ export class ModularRoadBuilder {
     put("straight", { straightLength: 22 });
 
     // ── Climb into the sky a bit more ───────────────────────────────────────
-    put("slope", { slopeLength: 30, slopeRise: 8 });
+    // A GRADED climb, not a `slope`. The slope this replaced gained 8 m over
+    // 30 m, which is a 37 m convex crest — a takeoff ramp above ~70 km/h,
+    // under a demo whose own refSpeed is 100. The Tight set holds 112 km/h and
+    // gains more height (~11 m); the middle straight is what climbs, at zero
+    // vertical curvature. See the gradeAngle block in modularRoadKit.js.
+    put("grade_in", { gradeAngle: 14, gradeRadius: 50 });
+    put("grade", { gradeLength: 20 });
+    put("grade_out", { gradeAngle: 14, gradeRadius: 50 });
     put("straight", { straightLength: 18 });
     put("checkpoint_new", { gameLineLength: 16 });
     put("curve", { curveRadius: R, curveAngle: 90, curveDir: 1 });
@@ -4265,7 +4282,11 @@ export class ModularRoadBuilder {
     put("narrow", { straightLength: 22, narrowWidth: 8 });
     put("curve", { curveRadius: Rtight, curveAngle: 45, curveDir: 1 });
     put("curve", { curveRadius: Rtight, curveAngle: 45, curveDir: 1 });
-    put("crest", { slopeLength: 24, slopeRise: 4 });
+    // A brow the car crosses rather than launches off. 24 m / 4 m is an 11 m
+    // radius over the top, which unaided is air above 40 km/h on a straight the
+    // car arrives at 100+ on; road hold carries it to ~155 (see ROAD_HOLD), and
+    // a little length on top of that puts it out of reach entirely.
+    put("crest", { slopeLength: 34, slopeRise: 4 });
     put("straight", { straightLength: 24 });
     put("finish", { gameLineLength: 18 });
 
@@ -4348,7 +4369,12 @@ export class ModularRoadBuilder {
       }); // 90°
 
       put("narrow", { straightLength: 24, narrowWidth: 8 }); // Straight → Narrow
-      put("crest", { slopeLength: 32, slopeRise: 8 }); // Slopes → Hill
+      // Slopes → Hill. 32 m / 8 m (the old figure, now shipped as "Hill Jump")
+      // crests on a 10 m radius, which even with road hold launches the car
+      // above ~149 km/h — fine as a feature, wrong as the thing standing between
+      // two halves of a circuit that has to close. Length is free here: the
+      // halves are identical and each still turns exactly 180°.
+      put("crest", { slopeLength: 44, slopeRise: 4 });
     };
 
     half("start");
@@ -4466,6 +4492,9 @@ const PIECE_TO_CATEGORY = {
   brow: "ramps",
   slope: "slopes",
   crest: "slopes",
+  grade_in: "slopes",
+  grade: "slopes",
+  grade_out: "slopes",
   spiral: "slopes",
   banked: "banked",
   banked_climb: "banked",
@@ -5309,56 +5338,135 @@ export const CATEGORY_PRESETS = {
     },
   ],
   slopes: [
-    // Climbs — slope base levels off (smoothstep) at both ends, so they chain cleanly.
+    /*
+     * THE GRADED CLIMB — Grade in → Climb ×N → Grade out.
+     *
+     * THE TILES TO REACH FOR WHEN YOU ACTUALLY WANT TO CHANGE ALTITUDE, and the
+     * reason they exist is that `slope` cannot do that job at speed. A slope
+     * gains its height and returns to level inside one piece, so its whole rise
+     * is spent turning the car, and what throws the car off a hill is curvature:
+     * holding a convex radius R at v needs v²/R, and past gravity plus
+     * downforce the wheels leave. Every shipped slope crested tighter than 30 m
+     * — a takeoff ramp above 40–60 km/h, in a car that reaches 175.
+     *
+     * Splitting it fixes it. The transitions are sized by RADIUS rather than
+     * length, and the middle is a straight that inherits the grade from the
+     * connector — zero curvature, so it is followable at any speed and it is
+     * what gains the height. Stack as many Climbs as you need.
+     *
+     * Radii, and the speed each holds to (tools/gradeFollowTest.mjs):
+     *   Fast    R 160   the full 175 km/h — use it on a main line
+     *   Medium  R  90   ~130 km/h, two thirds the length
+     *   Tight   R  50   ~95 km/h, compact — a technical climb
+     */
+    {
+      id: "grade_in_fast",
+      label: "Grade in",
+      base: "grade_in",
+      params: { gradeAngle: 10, gradeRadius: 160 },
+    },
+    {
+      id: "grade_climb",
+      label: "Climb",
+      base: "grade",
+      params: { gradeLength: 40 },
+    },
+    {
+      id: "grade_out_fast",
+      label: "Grade out",
+      base: "grade_out",
+      params: { gradeAngle: 10, gradeRadius: 160 },
+    },
+    {
+      id: "grade_in_tight",
+      label: "Grade in Tight",
+      base: "grade_in",
+      params: { gradeAngle: 14, gradeRadius: 50 },
+    },
+    {
+      id: "grade_climb_short",
+      label: "Climb Short",
+      base: "grade",
+      params: { gradeLength: 20 },
+    },
+    {
+      id: "grade_out_tight",
+      label: "Grade out Tight",
+      base: "grade_out",
+      params: { gradeAngle: 14, gradeRadius: 50 },
+    },
+    /*
+     * COMPACT SLOPES — one piece, level to level. Still useful, and no longer
+     * secretly a jump: the profile is two parabolic vertical curves with the
+     * convex half given the long side (see slopeShape), which is ~1.9× gentler
+     * over the crest than the smoothstep it replaced.
+     *
+     * SIZED AGAINST BOTH CEILINGS. Curvature decides whether the car stays on
+     * the road; peak GRADE (2·H/L on this profile) decides whether it can climb
+     * at all, and RWD runs out of rear tyre around 42° (slopeClimbLimit.mjs).
+     * The old Up Steep was 26 m / 16 m — a 43° peak grade the car could not
+     * climb, over a 7 m crest it could not follow above 30 km/h. Both numbers
+     * moved: these trade a little compactness for pieces that work.
+     */
     {
       id: "slope_up_gentle",
       label: "Up Gentle",
       base: "slope",
-      params: { slopeLength: 30, slopeRise: 5 },
+      params: { slopeLength: 34, slopeRise: 5 },
     },
     {
       id: "slope_up_medium",
       label: "Up Medium",
       base: "slope",
-      params: { slopeLength: 28, slopeRise: 10 },
+      params: { slopeLength: 32, slopeRise: 10 },
     },
     {
       id: "slope_up_steep",
       label: "Up Steep",
       base: "slope",
-      params: { slopeLength: 26, slopeRise: 16 },
+      params: { slopeLength: 34, slopeRise: 14 },
     },
-    // Descents — same shape, negative rise.
+    // Descents — same shape, negative rise (the split mirrors with it, so a
+    // descent is exactly the climb driven backwards).
     {
       id: "slope_down_gentle",
       label: "Down Gentle",
       base: "slope",
-      params: { slopeLength: 30, slopeRise: -5 },
+      params: { slopeLength: 34, slopeRise: -5 },
     },
     {
       id: "slope_down_medium",
       label: "Down Medium",
       base: "slope",
-      params: { slopeLength: 28, slopeRise: -10 },
+      params: { slopeLength: 32, slopeRise: -10 },
     },
     {
       id: "slope_down_steep",
       label: "Down Steep",
       base: "slope",
-      params: { slopeLength: 26, slopeRise: -16 },
+      params: { slopeLength: 34, slopeRise: -14 },
     },
     // Crests — net-zero bump / dip (rise to the middle, level at both ends).
+    // A crest MUST turn the car up and back down inside its own length, so it is
+    // a jump if you build it short and tall. Hill is sized not to be; Hill Jump
+    // is the old 32/8 kept on purpose, because sometimes that is what you want.
     {
       id: "slope_hill",
       label: "Hill",
       base: "crest",
-      params: { slopeLength: 32, slopeRise: 8 },
+      params: { slopeLength: 48, slopeRise: 7 },
     },
     {
       id: "slope_dip",
       label: "Dip",
       base: "crest",
-      params: { slopeLength: 32, slopeRise: -8 },
+      params: { slopeLength: 48, slopeRise: -7 },
+    },
+    {
+      id: "slope_hill_jump",
+      label: "Hill Jump",
+      base: "crest",
+      params: { slopeLength: 32, slopeRise: 8 },
     },
     /*
      * CLIMBING TURNS — stack to gain height, and now they actually do.
@@ -5377,9 +5485,13 @@ export const CATEGORY_PRESETS = {
      * `loop_spiral` is the same shape built the way that works: the climb is
      * smoothstepped so both ends are level, and loopSpiralFixFrames pins up to
      * world-up so no roll can accumulate. Same size, same half turn, same 10 m,
-     * and it measures 10 → 20 → 30 with an upright exit every time. (It is what
-     * the Loop tab's "Spiral ramp" already used; the two tabs were offering the
-     * working and the broken version of one idea.)
+     * and it measures 10 → 20 → 30 with an upright exit every time.
+     *
+     * R18 is the compact helix — inner kerb ~10 m on a 16 m road, still a
+     * hairpin on the inside. Helix Wide (R40, half turn, 14 m) is the parking
+     * ramp you can actually carry speed on. The Loop tab used to ship a third
+     * copy at R12 / 1 turn / 32 m, which was a corkscrew; that tile is gone.
+     * The `loop_spiral` PIECE stays in the catalog so old tracks keep loading.
      *
      * The `spiral` PIECE stays in the catalog — a track saved outside this repo
      * may contain one, and dropping a catalog entry is how those stop loading.
@@ -5396,6 +5508,22 @@ export const CATEGORY_PRESETS = {
       label: "Helix Down",
       base: "loop_spiral",
       params: { loopSpiralRadius: 18, loopSpiralTurns: 0.5, loopSpiralRise: -10 },
+    },
+    // R40 is the Turns tab's Medium corner (~81 km/h). Half a turn is ~126 m of
+    // deck for 14 m of climb — ~11% average, ~17% at mid-helix after smoothstep.
+    // Inner kerb sits at R32, so the hole is a hole and the car is not
+    // pirouetting around its own inner wheels.
+    {
+      id: "slope_helix_wide",
+      label: "Helix Wide Up",
+      base: "loop_spiral",
+      params: { loopSpiralRadius: 40, loopSpiralTurns: 0.5, loopSpiralRise: 14 },
+    },
+    {
+      id: "slope_helix_wide_down_r",
+      label: "Helix Wide Down",
+      base: "loop_spiral",
+      params: { loopSpiralRadius: 40, loopSpiralTurns: 0.5, loopSpiralRise: -14 },
     },
   ],
   turns: [
@@ -5634,12 +5762,6 @@ export const CATEGORY_PRESETS = {
       label: "Ring half (out)",
       base: "loop_half",
       params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopHalf: "out" },
-    },
-    {
-      id: "loop_spiral_right",
-      label: "Spiral ramp",
-      base: "loop_spiral",
-      params: { loopSpiralRadius: 12, loopSpiralTurns: 1, loopSpiralRise: 32 },
     },
     {
       id: "quarterpipe_full",
@@ -5913,6 +6035,39 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     return PIECE_CATALOG.filter((p) => PIECE_TO_CATEGORY[p.id] === catId);
   }
 
+  /**
+   * "Up Medium — holds at any speed (crest R 33 m)", for the tile's tooltip.
+   *
+   * THE ONE NUMBER THAT WAS INVISIBLE. A vertical piece looks fine in the
+   * thumbnail and in the editor at walking pace, and then throws the car off at
+   * racing speed — so from the palette there was no way to tell a hill from a
+   * jump ramp except by driving it. This says it before you place it.
+   *
+   * WHICH LIMIT IT QUOTES DEPENDS ON THE PIECE, and it has to. A piece on the
+   * FOLLOW_ROAD list gets road hold, so its limit is what the hold can carry
+   * (heldSpeed) — for anything with a radius over ~23 m that is "any speed", and
+   * saying "follow to 67 km/h" there would be a straight lie about a car that
+   * holds it at 173. A piece off that list is on its own against gravity, so it
+   * gets the unaided figure (followSpeed). Same tooltip, different physics,
+   * because they really are different pieces.
+   *
+   * Only for pieces that HAVE a convex vertical curve; everything else (and
+   * everything meant to launch) gets the plain label, because a follow limit on
+   * a jump ramp is noise. See convexVerticalRadius.
+   */
+  function tileTitle(item) {
+    const pp = item.preset ? { ...PIECE_DEFAULTS, ...item.preset.params } : PIECE_DEFAULTS;
+    const base = item.preset?.base ?? item.id;
+    const R = convexVerticalRadius(base, pp);
+    if (!R) return item.label;
+    const held = isFollowRoad(base);
+    const v = held ? heldSpeed(R) : followSpeed(R);
+    const speed = Number.isFinite(v)
+      ? `${held ? "launches above" : "follow to"} ${Math.round(v * 3.6)} km/h`
+      : "holds at any speed";
+    return `${item.label} — ${speed} (crest R ${Math.round(R)} m)`;
+  }
+
   function syncEdgesBtn() {
     if (!edgesBtn) return;
     const on = guardrailParams.enabled;
@@ -5962,8 +6117,9 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       // #selected-piece, but a placeholder plate with no name is one of 167
       // identical grey buttons. setThumbnails() clears this when a bake lands.
       if (!sprite) btn.classList.add("unbaked");
-      // So the name is always one hover away, whichever state the tile is in.
-      btn.title = item.label;
+      // So the name is always one hover away, whichever state the tile is in —
+      // plus, on a vertical piece, the speed the car can follow it at.
+      btn.title = tileTitle(item);
 
       btn.appendChild(preview);
       btn.appendChild(name);

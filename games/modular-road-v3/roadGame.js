@@ -45,6 +45,7 @@ import {
   FIXED_DT,
   TIRE,
   AERO,
+  ROAD_HOLD,
   DRIVETRAIN,
   DECK,
   SOLID,
@@ -2145,7 +2146,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // ever getting air off a half pipe. See buildOpenLipCollision.
       const proxy = m.userData.collisionGeometry;
       decks.push(proxy
-        ? { geometry: proxy, matrixWorld: m.matrixWorld, updateMatrixWorld() {} }
+        // `userData` rides along because the bake reads `roadHold` off it — a
+        // piece that swaps in a deck proxy must not lose its road-hold tag and
+        // silently become a launch ramp.
+        ? {
+          geometry: proxy,
+          matrixWorld: m.matrixWorld,
+          userData: m.userData,
+          updateMatrixWorld() {},
+        }
         : m);
     }
     const solids = [];
@@ -5155,7 +5164,10 @@ ${e.message}`);
   let worldName = boot.name;
   devPanel = createRoadDevPanel({
     app,
-    params: { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, WHEEL_LAYOUT, DRIFT, glowPropParams },
+    params: {
+      TIRE, AERO, ROAD_HOLD, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS,
+      WHEEL_LAYOUT, DRIFT, glowPropParams,
+    },
     game: {
       /** Volumetric clouds. Off releases every buffer and runs no pass. */
       setClouds: (on) => clouds.setEnabled(!!on),

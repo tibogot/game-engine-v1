@@ -33,6 +33,28 @@ export class RoadBvh {
     this._bvh = null;
     this.geometry = null;
     this.triCount = 0;
+    /**
+     * Per-VERTEX flag: 1 where the source mesh carried `userData.roadHold` —
+     * the deck of a piece the car is meant to STICK to rather than fly off
+     * (see FOLLOW_ROAD in modularRoadKit.js).
+     *
+     * It has to be rebuilt here at all because the bake throws attributes away:
+     * every deck is merged into one buffer with positions only, so anything the
+     * vehicle wants at a hit has to be carried alongside.
+     *
+     * PER VERTEX, NOT PER TRIANGLE, and that is not a style choice. MeshBVH
+     * PERMUTES THE INDEX BUFFER as it builds, so triangle N of the finished tree
+     * is not triangle N of what was handed in — a per-face array would be
+     * silently scrambled, and scrambled in a way that still looks plausible
+     * (most faces near a hit share a tag). Vertices are never reordered, only
+     * referenced differently, so a per-vertex tag reached through the index is
+     * exact. All three corners of a triangle come from one mesh, so the first
+     * corner answers for the face.
+     *
+     * Null until a bake sees a tagged mesh, so a track with no vertical pieces
+     * allocates nothing and pays nothing.
+     */
+    this.vertHold = null;
     /** Content signature of the meshes this tree was built from — see
      *  `_signature`. Null means "no tree", which never matches. */
     this._sig = null;
@@ -89,6 +111,9 @@ export class RoadBvh {
       const uuid = geo.uuid;
       for (let i = 0; i < uuid.length; i++) mix(uuid.charCodeAt(i));
       mix(posAttr.count);
+      // The hold tag is baked into faceHold, so a piece that swapped it without
+      // touching its geometry or pose still has to rebuild the tree.
+      mix(mesh.userData?.roadHold ? 1 : 0);
       const e = mesh.matrixWorld.elements;
       for (let i = 0; i < 16; i++) mixNum(e[i]);
     }
@@ -119,6 +144,7 @@ export class RoadBvh {
     // buffer is allocated once, at the right size, and written straight into.
     let vertCount = 0;
     let indexCount = 0;
+    let anyHold = false;
     for (const mesh of meshes) {
       if (!mesh) continue;
       const posAttr = mesh.geometry?.getAttribute("position");
@@ -126,6 +152,7 @@ export class RoadBvh {
       vertCount += posAttr.count;
       const idx = mesh.geometry.getIndex();
       indexCount += idx ? idx.count : posAttr.count;
+      if (mesh.userData?.roadHold) anyHold = true;
     }
 
     if (vertCount === 0) {
@@ -134,6 +161,7 @@ export class RoadBvh {
       this._bvh = null;
       this.geometry = null;
       this.triCount = 0;
+      this.vertHold = null;
       this._sig = null;
       return false;
     }
@@ -145,6 +173,9 @@ export class RoadBvh {
     const indices = vertCount > 65535
       ? new Uint32Array(indexCount * 2)
       : new Uint16Array(indexCount * 2);
+    // One byte per vertex. Skipped entirely when nothing on the track asked to
+    // be held.
+    const vertHold = anyHold ? new Uint8Array(vertCount) : null;
 
     let pw = 0; // position write cursor (floats)
     let iw = 0; // index write cursor
@@ -192,6 +223,9 @@ export class RoadBvh {
       } else {
         for (let i = 0; i < count; i++) indices[iw++] = i + vertexOffset;
       }
+      if (vertHold && mesh.userData?.roadHold) {
+        vertHold.fill(1, vertexOffset, vertexOffset + count);
+      }
       vertexOffset += count;
     }
 
@@ -211,6 +245,8 @@ export class RoadBvh {
       indices[iw++] = indices[i + 2];
       indices[iw++] = indices[i + 1];
     }
+    // Nothing to do for the tag here: the flipped twin references the SAME
+    // vertices, so it reads the same byte for free.
 
     const merged = new THREE.BufferGeometry();
     merged.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -219,6 +255,7 @@ export class RoadBvh {
     this._bvh?.geometry?.dispose?.();
     this._bvh = new MeshBVH(merged);
     this.geometry = merged;
+    this.vertHold = vertHold;
     this.triCount = iw / 3;
     this.baked = true;
     this._sig = sig;
@@ -239,6 +276,14 @@ export class RoadBvh {
     return outNormal;
   }
 
+  /** Is the face at `faceIndex` road the car is meant to stick to? See vertHold. */
+  holdAtFace(faceIndex) {
+    if (!this.vertHold || faceIndex < 0 || !this.geometry) return false;
+    const idx = this.geometry.getIndex();
+    if (!idx) return false;
+    return this.vertHold[idx.array[faceIndex * 3]] === 1;
+  }
+
   /** First hit along a ray (filtered to `far`). Returns point, distance, faceIndex, normal. */
   raycastFirst(origin, dir, far = Infinity) {
     if (!this.baked) return null;
@@ -252,6 +297,7 @@ export class RoadBvh {
       distance: hit.distance,
       faceIndex: hit.faceIndex,
       normal: _hitNormal.clone(),
+      roadHold: this.holdAtFace(hit.faceIndex),
     };
   }
 
@@ -303,6 +349,7 @@ export class RoadBvh {
     let minT = maxDist;
     let hitPoint = null;
     let hitNormal = null;
+    let hitHold = false;
 
     _sweepBox.min.set(
       Math.min(ox, ox + ndx * maxDist) - radius,
@@ -317,7 +364,7 @@ export class RoadBvh {
 
     this._bvh.shapecast({
       intersectsBounds: (box) => _sweepBox.intersectsBox(box),
-      intersectsTriangle: (tri) => {
+      intersectsTriangle: (tri, triIndex) => {
         const t = this._sphereTriSweep(ox, oy, oz, radius, ndx, ndy, ndz, minT, tri.a, tri.b, tri.c);
         if (t !== null && t < minT) {
           minT = t;
@@ -326,12 +373,16 @@ export class RoadBvh {
           const e2 = _triB.copy(tri.c).sub(tri.a);
           const n = _triC.crossVectors(e1, e2).normalize();
           hitNormal = { x: n.x, y: n.y, z: n.z };
+          // The sweep usually WINS the wheel probe (it is the closest contact
+          // model), so without this the hold tag would read false on exactly
+          // the ticks that matter and the assist would stutter.
+          hitHold = this.holdAtFace(triIndex);
         }
         return false;
       },
     });
 
-    if (hitPoint) return { distance: minT, point: hitPoint, normal: hitNormal };
+    if (hitPoint) return { distance: minT, point: hitPoint, normal: hitNormal, roadHold: hitHold };
     return null;
   }
 

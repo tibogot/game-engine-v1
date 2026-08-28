@@ -29,7 +29,10 @@ const DEV_PANEL_OPEN_W = 360;
  * @param {object} o.params       live-tunable param objects from the vehicle/kit
  */
 export function createRoadDevPanel({ app, game, params }) {
-  const { TIRE, AERO, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, WHEEL_LAYOUT, DRIFT, glowPropParams } = params;
+  const {
+    TIRE, AERO, ROAD_HOLD, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS,
+    WHEEL_LAYOUT, DRIFT, glowPropParams,
+  } = params;
 
   const root = document.createElement("div");
   root.id = "road-dev";
@@ -939,6 +942,43 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="dv-hint">
             <b>Downforce</b> presses the car onto whatever surface it's on — raise
             it if the car falls out of loops.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Car — Road hold</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Hold slopes</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-hold-on" type="button">On</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Strength</span>
+            <div class="prop-value">
+              <input type="range" id="dv-hold-g" min="0" max="16" step="0.5" />
+              <span class="prop-num" id="dv-hold-g-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Settling</span>
+            <div class="prop-value">
+              <input type="range" id="dv-hold-rate" min="6" max="50" step="1" />
+              <span class="prop-num" id="dv-hold-rate-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            On slopes, crests, grades and banks the car is <b>pulled back onto the
+            road</b> when the surface drops away from under a wheel — without it a
+            30 m hill that climbs 10 m throws the car off above ~65 km/h, because
+            following that curve at speed needs several g and gravity brings one.
+            Ramps (jump, dive, gap, quarterpipes) are excluded and launch exactly
+            as before. <b>Strength</b> is the ceiling in car weights: turn it down
+            to feel the crests more, to 0 for the old car. Geometry that needs
+            more than the ceiling still launches — which is what keeps
+            <i>Hill Jump</i> a jump.
           </div>
         </div>
       </div>
@@ -2247,6 +2287,21 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-air-lock", TIRE, "airGroundLockout", (v) => `${v.toFixed(2)}s`);
   slider("dv-drag", AERO, "drag");
   slider("dv-down", AERO, "downforce", (v) => v.toFixed(1));
+
+  // Road hold. `maxG` is the honest knob — the servo saturates against it on any
+  // slope steep enough to matter, so it is what "how magnetic is this" means.
+  slider("dv-hold-g", ROAD_HOLD, "maxG", (v) => (v ? `${v.toFixed(1)}g` : "off"));
+  slider("dv-hold-rate", ROAD_HOLD, "rate", (v) => `${(1000 / v).toFixed(0)} ms`);
+  const holdBtn = $("#dv-hold-on");
+  const syncHold = () => {
+    holdBtn.textContent = ROAD_HOLD.enabled ? "On" : "Off";
+    holdBtn.classList.toggle("on", ROAD_HOLD.enabled);
+  };
+  holdBtn.addEventListener("click", () => {
+    ROAD_HOLD.enabled = !ROAD_HOLD.enabled;
+    syncHold();
+  });
+  syncHold();
 
   const LAYOUTS = ["AWD", "RWD", "FWD"];
   const layoutBtn = $("#dv-layout");

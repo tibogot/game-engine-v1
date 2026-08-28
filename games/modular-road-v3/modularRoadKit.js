@@ -84,6 +84,30 @@ export const pieceParams = {
   curveDir: 1, // +1 = right turn, -1 = left turn
   slopeLength: 26, // horizontal run of the slope (m)
   slopeRise: 9, // vertical rise over the run (m); negative = downhill
+  // ── GRADED CLIMB — Grade in → (straights) → Grade out ─────────────────────
+  //
+  // WHAT DECIDES WHETHER THE CAR FOLLOWS A HILL IS ITS RADIUS, NOT ITS GRADE.
+  // Holding a vertical curve of radius R at speed v needs v²/R of downward
+  // acceleration; past what gravity plus downforce can supply, the wheels
+  // simply leave and the road has become a takeoff ramp. Measured across the
+  // shipped Slopes presets (tools/gradeFollowTest.mjs), every one of them
+  // crested tighter than ~30 m — i.e. a jump above 40–60 km/h, against a car
+  // that tops out near 175. That is the whole of "the slopes are not usable".
+  //
+  // `slope` cannot fix it, because one piece has to gain the height AND come
+  // back to level, so its whole rise is spent turning. This family splits the
+  // job: ONE vertical curve to pick the grade up, ordinary straights (which
+  // inherit the pitch from the connector, so they climb at zero curvature and
+  // are followable at ANY speed) to gain as much height as you like, and ONE
+  // vertical curve to put it back down. Each transition only ever absorbs
+  // `gradeAngle`, so its radius is a free choice instead of a consequence.
+  //
+  // gradeRadius IS the tightest radius the transition contains — see
+  // gradeCurvePoints for why the piece's LENGTH is derived from it rather than
+  // being a parameter of its own.
+  gradeAngle: 10, // the grade the climb holds (deg); negative descends
+  gradeRadius: 160, // tightest vertical radius in a transition (m)
+  gradeLength: 40, // the constant-grade straight between the transitions (m)
   // Banked pieces (reuse curveRadius/curveAngle/curveDir):
   bankAngle: 22, // lean in degrees (turns HOLD it; Bank up/down ease it in/out)
   // CURL — how far the deck EDGE lifts above the flat chord, in metres, at full
@@ -102,8 +126,8 @@ export const pieceParams = {
   // under a second at speed — it read as a fold, not a bank.
   bankRampLength: 40,
   // CLIMB — height gained across a banked TURN (see bankedClimbCurvePoints).
-  // Smoothstepped like `slope`, so the piece enters and leaves horizontal and
-  // the rest of the chain does not tilt; negative descends. Sized per tile,
+  // Smoothstepped, so the piece enters and leaves horizontal and the rest of
+  // the chain does not tilt; negative descends. Sized per tile,
   // because the grade is rise / arc length and a 60° R34 turn is a third of the
   // road a 90° R58 one is.
   bankRise: 10,
@@ -2698,21 +2722,210 @@ function curvePoints(pp) {
   return pts;
 }
 
+/**
+ * Fraction of a slope's run spent on its CONCAVE half — see slopeShape.
+ *
+ * Below 0.5, which is the asymmetry: the convex half gets the long side.
+ */
+const SLOPE_CONCAVE_FRAC = 0.35;
+
+/**
+ * Slope profile — two parabolic vertical curves, convex half given the long side.
+ *
+ * WHAT THIS REPLACED AND WHY. It was a cubic smoothstep, and a smoothstep's
+ * curvature PEAKS AT ITS ENDS (|f''| = 6 there, falling to 0 in the middle) and
+ * then steps discontinuously to the flat road's zero. On a climb that puts the
+ * tightest convex curvature the piece owns exactly on the exit seam, which is
+ * the worst place for it: crossing a convex curve of radius R at speed v needs
+ * v²/R of downward acceleration, so the car unloads hardest where the road has
+ * least warning and then gets released in one step. That is the "the car does
+ * not follow the slope, it jumps off flat" — it is airborne before the top, and
+ * once airborne TIRE.airTrajectoryAlign pitches the nose onto the ballistic arc
+ * rather than the ramp, so it also LOOKS level on the way up.
+ *
+ * A parabola in height is a CONSTANT-curvature vertical curve, which is what
+ * road engineering uses for exactly this problem, and joining two of them is
+ * the minimum-peak-curvature shape for fixed ends and level tangents: |f''| = 4
+ * against the smoothstep's 6. Then spend the length where it buys something —
+ * the two halves are not equally dangerous, since on a climb the first half is
+ * CONCAVE (a compression the suspension and SURFACE_GRIP absorb between them)
+ * and only the second half can throw the car:
+ *
+ *     split   concave |f''|   convex |f''|
+ *      0.50        4.00           4.00
+ *      0.35        5.71           3.08      <- shipped
+ *      0.25        8.00           2.67
+ *
+ * The split flips with the sign of the rise, so a descent gets the same
+ * treatment mirrored (its convex half is the ENTRY).
+ *
+ * WHAT IT ACTUALLY BOUGHT, and it is NOT what the curvature figures predict.
+ * MEASURED by driving each shape at the same size (tools/gradeFollowTest.mjs),
+ * km/h held before the car leaves the deck, smoothstep → this:
+ *
+ *     Up Gentle  34/5    148 → 108     <- the one that trades DOWN
+ *     Up Medium  32/10    72 →  76
+ *     Up Steep   34/14    65 →  72
+ *     Down Gtl   34/-5   108 → 119
+ *     Down Med   32/-10   61 →  68
+ *     Down Stp   34/-14   54 →  61
+ *
+ * A 1.9× curvature advantage bought 6–13%, and on the gentle climb it lost 27%.
+ * The suspension is doing far more of the work than curvature alone accounts
+ * for: a smoothstep's curvature is concentrated near its seams and near-zero in
+ * between, so the unload it produces is BRIEF and 55 cm of travel swallows it
+ * whole. A constant-curvature half sustains that unload for its entire length
+ * and the travel runs out. Where the peak was never over gravity anyway — which
+ * is exactly the gentle climb — brief-and-sharp beats gentle-and-long.
+ *
+ * SHIPPED ANYWAY, because it raises the FLOOR: 54 → 61 km/h on the worst piece,
+ * and the floor is what makes a track unusable. Nobody takes a 5 m rise at
+ * 148 km/h; everybody takes a steep descent at 60. If you are tempted to put the
+ * smoothstep back for climbs and keep this for descents, note that the two are
+ * within 6% at every size except the one nobody drives fast.
+ *
+ * WHAT IT ALSO COSTS: a constant-curvature climb reaches a steeper peak grade
+ * than a smoothstep does for the same rise — 2·H/L against 1.5·H/L — and the
+ * car's own thrust ceiling is ~42° (tools/slopeClimbLimit.mjs). The presets are
+ * sized against that; steeper than about H/L = 0.42 is a hill the car cannot
+ * climb whatever its curvature.
+ *
+ * Endpoints and end tangents are untouched (0,0,0) → (0, H, −L), level at both
+ * ends, so every saved track keeps its connectors exactly and only the shape
+ * between them changes.
+ */
+function slopeShape(t, concaveFrac) {
+  const p = concaveFrac;
+  // f = t²/p up to the join, then 1 − (1−t)²/(1−p). Both branches pass through
+  // (p, p) with slope 2, so f is C1 and f'(0) = f'(1) = 0 exactly.
+  if (t <= p) return (t * t) / p;
+  const d = 1 - t;
+  return 1 - (d * d) / (1 - p);
+}
+
 function slopePoints(pp) {
   const L = Math.max(2, pp.slopeLength);
   const H = pp.slopeRise;
-  // Pitch swings 0 → max grade → 0 (smoothstep peak slope = 1.5·H/L), so pass
-  // the total direction change through stepsFor — length-only stepping put ~5°
-  // of pitch per step on a typical slope and the kerbs showed every facet.
-  const swing = 2 * Math.atan((1.5 * Math.abs(H)) / L);
+  // The convex half always takes the long side; on a descent that is the entry.
+  const p = H >= 0 ? SLOPE_CONCAVE_FRAC : 1 - SLOPE_CONCAVE_FRAC;
+  // Pitch swings 0 → peak grade → 0, and the parabola's peak grade is 2·H/L, so
+  // pass the total direction change through stepsFor — length-only stepping put
+  // ~5° of pitch per step on a typical slope and the kerbs showed every facet.
+  const swing = 2 * Math.atan((2 * Math.abs(H)) / L);
   const n = stepsFor(L, swing, 8, pp);
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const tt = i / n;
-    const sm = tt * tt * (3 - 2 * tt); // smoothstep — horizontal tangents at both ends
-    pts.push(new V3(0, H * sm, -L * tt));
+    pts.push(new V3(0, H * slopeShape(tt, p), -L * tt));
   }
   return pts;
+}
+
+/**
+ * Sweep a centreline by integrating a PITCH angle along it.
+ *
+ * `pitchAt(t)` is the deck's pitch in radians at t = s/L, where s is ARC LENGTH
+ * — so `L` is the length of road, not a horizontal run. That is the right
+ * parameterisation for a piece whose job is a change of DIRECTION (the whole
+ * point of a vertical curve is the angle it absorbs); `slope` and `crest` go the
+ * other way and stay exact functions of the horizontal run, because their
+ * contract is "rise H over run L".
+ *
+ * Midpoint rule rather than the endpoint rule the jump/dive ramps use: it is
+ * second-order, so the exit lands on the analytic tangent instead of drifting
+ * toward it as the step count falls.
+ */
+function integratePitch(L, n, pitchAt) {
+  const ds = L / n;
+  const cur = new V3(0, 0, 0);
+  const pts = [cur.clone()];
+  for (let i = 1; i <= n; i++) {
+    const ph = pitchAt((i - 0.5) / n);
+    cur.y += Math.sin(ph) * ds;
+    cur.z += -Math.cos(ph) * ds;
+    pts.push(cur.clone());
+  }
+  return pts;
+}
+
+/** Grade angle in radians, clamped to what the car can actually climb.
+ *
+ *  The ceiling is the REAR TYRE, not the engine: RWD drive is capped at
+ *  μ·N_rear, which runs out around 42° (tools/slopeClimbLimit.mjs). 35° leaves
+ *  margin for the load the transition's own curvature takes off the axle. */
+function gradeAngleRad(pp) {
+  const a = pp.gradeAngle ?? pieceParams.gradeAngle;
+  return THREE.MathUtils.degToRad(THREE.MathUtils.clamp(a, -35, 35));
+}
+
+/** Length of a grade transition. DERIVED — see gradeCurvePoints. */
+function gradeCurveLength(pp) {
+  const ang = Math.abs(gradeAngleRad(pp));
+  const R = Math.max(10, pp.gradeRadius ?? pieceParams.gradeRadius);
+  return Math.max(4, 2 * ang * R);
+}
+
+/**
+ * VERTICAL CURVE — the piece that turns level road into graded road, or back.
+ *
+ * PARAMETERISED BY RADIUS, because radius is the only number that decides
+ * whether the car can follow it (see the gradeAngle block in pieceParams). The
+ * LENGTH is derived, and has to be: a transition that absorbs θ over length L
+ * has mean curvature θ/L, so L, θ and R cannot all be chosen independently.
+ *
+ * The curvature is a BUMP, not a step:
+ *
+ *     κ(s) = (1/R)·sin²(π·s/L)
+ *
+ * which integrates to a pitch of φ(t) = θ·(t − sin(2πt)/2π) and pins the length
+ * at L = 2·θ·R by requiring φ(1) = θ. Two things fall out of that shape:
+ *
+ *  • κ IS ZERO AT BOTH SEAMS, so the piece is C² against the flat road on one
+ *    side and the constant grade on the other. There is no step in the load the
+ *    tyres carry at either end — which is the failure mode `slope` has and
+ *    cannot avoid, because a slope's curvature has nowhere to go but its seams.
+ *  • THE PEAK IS EXACTLY 1/R, so `gradeRadius` is not a nominal figure: it is
+ *    the tightest radius in the piece, and √(g·R) is the speed it holds to.
+ *
+ * A sine-squared bump costs twice the length of a circular arc turning the same
+ * angle. That is the price of the C² seams and it is worth paying here, because
+ * unlike a slope this piece is not trying to be compact — the STRAIGHTS after it
+ * gain the height, at zero curvature, for as long as you want.
+ */
+function gradeCurvePoints(pp, out) {
+  const ang = gradeAngleRad(pp);
+  const L = gradeCurveLength(pp);
+  const n = stepsFor(L, Math.abs(ang), 8, pp);
+  const TAU = 2 * Math.PI;
+  // φ(t) = θ·(t − sin(2πt)/2π), reversed for the exit transition.
+  const ramp = (t) => ang * (t - Math.sin(TAU * t) / TAU);
+  return integratePitch(L, n, out ? (t) => ang - ramp(t) : ramp);
+}
+
+function gradeInPoints(pp) {
+  return gradeCurvePoints(pp, false);
+}
+
+function gradeOutPoints(pp) {
+  return gradeCurvePoints(pp, true);
+}
+
+/**
+ * The constant-grade straight between the two transitions.
+ *
+ * Deliberately a plain straight in piece-local space. The pitch is not authored
+ * here — it is INHERITED, because `world = currentConnector · entryLocal⁻¹`
+ * carries the incoming connector's full 3-D frame, so dropped after a Grade in
+ * this climbs at exactly that grade with zero vertical curvature. Which is the
+ * whole point: zero curvature is followable at any speed, so this is the piece
+ * that actually gains the height.
+ *
+ * It exists as its own tile rather than telling people to reach for `straight`
+ * for the same reason `banktilt` does next to a rolled straight: the trio reads
+ * as a family in the palette, and "Climb" says what it is for.
+ */
+function gradePoints(pp) {
+  return straightLinePoints(pp.gradeLength ?? pieceParams.gradeLength);
 }
 
 /**
@@ -3125,19 +3338,80 @@ function sCurvePoints(pp) {
   return pts;
 }
 
-/** Smooth crest/dip: rises to slopeRise at the middle, flat (level) at both ends. */
+/**
+ * Fraction of a crest's run given to EACH of its two concave shoulders.
+ *
+ * 0.25 would make all three segments equally curved (the minimum-peak shape for
+ * a symmetric profile); anything below it moves curvature off the convex middle
+ * and onto the shoulders, which is the trade this piece wants — see crestShape.
+ */
+const CREST_SHOULDER_FRAC = 0.18;
+
+/**
+ * Crest / dip profile: a long convex middle between two short concave shoulders.
+ *
+ * A crest has to turn the car up and then back down inside its own length, so
+ * unlike a slope its total direction change is fixed by H and L and no profile
+ * can avoid it. What a profile CAN choose is where the curvature sits, and a
+ * crest's two kinds of curvature are not equally costly: the shoulders are
+ * concave (compression — the suspension and SURFACE_GRIP absorb it) and only the
+ * middle, over the brow, can throw the car off the road.
+ *
+ * This replaced sin², which spread it evenly and so put 19.7·H/L² of convex
+ * curvature over the brow — a 6.5 m crest radius on the shipped Hill preset,
+ * i.e. a takeoff ramp above 29 km/h. Squeezing the shoulders and stretching the
+ * middle buys the brow a bigger radius for a tighter compression:
+ *
+ *     shoulder   shoulder |f''|   brow |f''|
+ *       0.25          16.0           16.0
+ *       0.18          22.2           12.5     <- shipped
+ *       0.10          40.0           10.0
+ *
+ * MEASURED (tools/gradeFollowTest.mjs), km/h held before the car takes off, sin²
+ * → this, at the same size — and unlike `slope` it is a win with no trade:
+ *
+ *     32/8    32 → 47        32/-8 (dip)   36 → 40
+ *     48/7    54 → 65        48/-7 (dip)   58 → 61
+ *     48/4    72 → 79
+ *
+ * The asymmetry is the whole of it: a symmetric three-parabola (shoulder 0.25,
+ * the minimum-PEAK shape) measures 40 / 58 / 72 / 36 / 58 — i.e. barely better
+ * than sin². Moving curvature onto the compression side is what pays.
+ *
+ * The shoulder fraction flips with the sign of the rise, for the same reason
+ * `slope`'s split does: a DIP is this shape upside down, so its convex parts are
+ * the two shoulders and it wants the length spent there instead. Both signs end
+ * up with the same convex curvature, so a Dip is exactly a Hill mirrored.
+ *
+ * Curvature is piecewise constant (three parabolas), so like `slope` this is a
+ * vertical curve in the road-engineering sense. Ends stay at y = 0 and the peak
+ * at exactly H, level tangents at both ends, so saved tracks keep their seams.
+ *
+ * It is still, unavoidably, a jump if you build it short and tall — a crest is
+ * that shape. The Slopes presets are sized so the shipped ones are not, and the
+ * palette tooltip reports the speed each one can actually be followed at.
+ */
+function crestShape(t, q) {
+  const u = t > 0.5 ? 1 - t : t; // symmetric about the brow
+  if (u <= q) return (2 / q) * u * u; // shoulder: f'' = +4/q, reaches f' = 4
+  const d = u - q;
+  return 2 * q + 4 * d - (2 / (0.5 - q)) * d * d; // brow: f'' = −4/(0.5−q)
+}
+
 function crestPoints(pp) {
   const L = Math.max(2, pp.slopeLength);
   const H = pp.slopeRise;
-  // sin² profile: peak grade π·H/L, and the pitch swings up-over-down-out —
-  // ~4× the peak angle of total direction change. Cap per-step bend via stepsFor.
-  const swing = 4 * Math.atan((Math.PI * Math.abs(H)) / L);
+  // Hill: the brow is convex and wants the middle. Dip: the shoulders are.
+  const q = H >= 0 ? CREST_SHOULDER_FRAC : 0.5 - CREST_SHOULDER_FRAC;
+  // Peak grade is 4·H/L (the shoulders run f' up to 4), and the pitch swings
+  // up-over-down-out — ~4× the peak angle of total direction change. Cap the
+  // per-step bend via stepsFor or the kerbs show every facet.
+  const swing = 4 * Math.atan((4 * Math.abs(H)) / L);
   const n = stepsFor(L, swing, 8, pp);
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const tt = i / n;
-    const s = Math.sin(Math.PI * tt);
-    pts.push(new V3(0, H * s * s, -L * tt)); // sin² → horizontal tangents at ends
+    pts.push(new V3(0, H * crestShape(tt, q), -L * tt));
   }
   return pts;
 }
@@ -3506,6 +3780,17 @@ function jumpEndTangents(pp) {
 function diveEndTangents(pp) {
   const a = _deg(THREE.MathUtils.clamp(pp.diveAngle, 0, 80));
   return { entry: new V3(0, 0, -1), exit: new V3(0, -Math.sin(a), -Math.cos(a)) };
+}
+/** Grade in: level entry, exit pitched at the grade. Mirrored for grade out.
+ *  `grade` itself takes flatEndTangents — its pitch is the connector's, not its
+ *  own (see gradePoints). */
+function gradeInEndTangents(pp) {
+  const a = gradeAngleRad(pp);
+  return { entry: new V3(0, 0, -1), exit: new V3(0, Math.sin(a), -Math.cos(a)) };
+}
+function gradeOutEndTangents(pp) {
+  const a = gradeAngleRad(pp);
+  return { entry: new V3(0, Math.sin(a), -Math.cos(a)), exit: new V3(0, 0, -1) };
 }
 function landingEndTangents(pp) {
   const a = _deg(THREE.MathUtils.clamp(pp.landAngle, 0, 80));
@@ -4268,6 +4553,32 @@ export const PIECE_CATALOG = [
     key: "c",
     points: crestPoints,
   },
+  // ── The graded climb, in three tiles ──────────────────────────────────────
+  // Grade in → any number of Climbs (or plain straights) → Grade out. Only the
+  // two transitions curve; the middle is flat-out zero curvature and gains the
+  // height. See the gradeAngle block in pieceParams for why this exists next to
+  // `slope` rather than instead of it.
+  {
+    id: "grade_in",
+    label: "Grade in",
+    hint: "Level → graded, at a radius the car can follow",
+    swatch: "#e8a13d",
+    points: gradeInPoints,
+  },
+  {
+    id: "grade",
+    label: "Climb",
+    hint: "Holds the incoming grade — zero curvature, gains the height",
+    swatch: "#e8b455",
+    points: gradePoints,
+  },
+  {
+    id: "grade_out",
+    label: "Grade out",
+    hint: "Graded → level, at a radius the car can follow",
+    swatch: "#d98f2a",
+    points: gradeOutPoints,
+  },
   {
     id: "jump",
     label: "Jump ramp",
@@ -4936,6 +5247,7 @@ export const LATERAL_TILEABLE = new Set([
   "straight", "platform", "narrow", "holed",
   "rounded_start", "rounded_end",
   "slope", "link", "crest", "jump", "dive", "gap", "landing", "brow",
+  "grade_in", "grade", "grade_out",
   "quarterpipe", "quarterpipe_down",
   "start", "start_new", "checkpoint_new", "finish", "finish_new",
   "tunnel", "channel",
@@ -4946,6 +5258,171 @@ export const LATERAL_TILEABLE = new Set([
 /** Can this piece take a lateral neighbour? */
 export function isLaterallyTileable(pieceId) {
   return LATERAL_TILEABLE.has(pieceId);
+}
+
+/**
+ * The tightest CONVEX vertical radius a piece contains, in metres — the number
+ * that decides whether the car follows the road over it or takes off.
+ *
+ * Convex only, and that is the whole point of the function. A concave curve
+ * presses the car INTO the road, which the suspension and SURFACE_GRIP absorb
+ * between them; a convex one asks gravity to hold the car down, and past
+ * v²/R > g nothing can. So this is the geometry half of "how fast can this be
+ * driven" — the builder pairs it with the car's own numbers to print a speed
+ * (see followSpeedLabel).
+ *
+ * Returns null for pieces with no convex vertical curvature at all (straights,
+ * flat turns, the constant-grade Climb) and for the pieces MEANT to launch —
+ * jump, dive, gap, the tube cannons. A takeoff ramp has no follow limit worth
+ * reporting; that it throws the car is what it is for.
+ *
+ * The curvature figures come from each profile's second derivative, which is
+ * analytic for all three of these shapes — see slopeShape, crestShape and
+ * gradeCurvePoints.
+ */
+export function convexVerticalRadius(pieceId, pp = pieceParams) {
+  const L = Math.max(2, pp.slopeLength ?? pieceParams.slopeLength);
+  const H = Math.abs(pp.slopeRise ?? pieceParams.slopeRise);
+  switch (pieceId) {
+    case "slope":
+    case "tube_slope":
+    case "half_tube_slope":
+    case "half_pipe_slope":
+      // Convex half always gets the long side, whichever way the slope runs.
+      if (H < 1e-6) return null;
+      return ((1 - SLOPE_CONCAVE_FRAC) * L * L) / (2 * H);
+    case "crest":
+    case "tube_crest":
+    case "half_tube_crest":
+      // Hill: the brow. Dip: its shoulders. Same figure either way — the
+      // shoulder fraction flips with the sign so the two shapes mirror.
+      if (H < 1e-6) return null;
+      return ((0.5 - CREST_SHOULDER_FRAC) * L * L) / (4 * H);
+    case "grade_in":
+    case "grade_out":
+      // Exactly the authored radius — that is what the parameterisation is for.
+      // One of the pair is concave and one convex depending on which way the
+      // grade runs, but they are built as a set and sized by the convex one.
+      return Math.max(10, pp.gradeRadius ?? pieceParams.gradeRadius);
+    default:
+      return null;
+  }
+}
+
+/**
+ * ROAD YOU FOLLOW — the pieces whose decks the car is entitled to stick to.
+ *
+ * WHY A LIST AND NOT A MEASUREMENT. SURFACE_GRIP works out curvature from the
+ * spread of the tyres' own contact normals, which needs no geometry at all and
+ * is why tubes, loops, bowls and banks all just work. It cannot help here,
+ * because the thing it would have to decide is not geometric: a slope crest and
+ * a jump lip are the same shape, and the only difference between them is INTENT.
+ * A ramp exists to throw the car; a hill exists to be driven over. No amount of
+ * normal-spread tells you which one you are on, so the author does.
+ *
+ * WHAT BEING ON THE LIST BUYS. Where the deck falls away from under a tyre
+ * faster than the suspension can follow, the wheel is pulled back toward it, so
+ * the car tracks the surface instead of leaving it (see ROAD_HOLD in the
+ * vehicle). Without it, following a radius R at speed v is capped at v = √(g·R)
+ * plus what
+ * downforce adds — about 60–120 km/h on the compact Slopes presets, against a
+ * car that reaches 180. That cap is the whole of "the slopes are unusable": you
+ * cannot build a hill short enough to fit a track and gentle enough to drive.
+ *
+ * WHAT IS DELIBERATELY OFF IT. Everything in the Ramps tab — jump, dive, gap,
+ * landing, brow, the quarterpipes — and the tube cannons. Those are launchers,
+ * and a launcher the car cannot leave is broken. The rule of thumb for adding to
+ * this list: if you would be annoyed to find yourself airborne, it belongs here;
+ * if you placed it to get airborne, it does not.
+ *
+ * Kept next to convexVerticalRadius on purpose — that function answers "how fast
+ * can this be followed without help", and every piece it names is in here.
+ */
+export const FOLLOW_ROAD = new Set([
+  // The vertical-profile road pieces, and their tube / half-tube variants.
+  "slope", "crest", "link",
+  "tube_slope", "tube_crest", "half_tube_slope", "half_tube_crest",
+  "half_pipe_slope",
+  // The graded climb. `grade` is a constant grade with no curvature at all, so
+  // it never asks for the force — it is in the set so a chain of them cannot
+  // flicker the assist off between two transitions that need it.
+  "grade_in", "grade", "grade_out",
+  // Climbing / banked road: a banked climb's crest is convex in the same way.
+  "banked", "banked_climb", "bankswap", "banktilt", "bankin", "bankout",
+]);
+
+/** Is this a piece the car should stick to rather than fly off? See FOLLOW_ROAD. */
+export function isFollowRoad(pieceId) {
+  return FOLLOW_ROAD.has(pieceId);
+}
+
+/**
+ * The car's numbers, for turning a radius into a speed.
+ *
+ * COPIED, NOT IMPORTED, and deliberately. The kit is geometry and is imported by
+ * node tools that cannot load the vehicle module (it pulls in the renderer's
+ * material helpers — see the TMP-file rewrite every tool in tools/ does). So
+ * these three live here and tools/gradeFollowTest.mjs asserts they still match
+ * v3/play/modularRoadVehicle.js, which is what stops them drifting.
+ */
+export const FOLLOW_CAR = { gravity: 9.81, mass: 1400, downforce: 3.0 };
+
+/**
+ * Fastest speed (m/s) at which the car still holds a convex vertical curve of
+ * radius `R`, or Infinity if no speed can lift it off.
+ *
+ * Following the curve needs m·v²/R of downward force. Gravity supplies m·g and
+ * AERO downforce supplies `downforce`·v² — which is itself speed-dependent, so
+ * this is not simply √(g·R):
+ *
+ *     m·v²/R = m·g + k·v²   ⇒   v² = g·R / (1 − k·R/m)
+ *
+ * and the denominator going to zero is real rather than a singularity to guard:
+ * at R ≥ m/k ≈ 467 m the downforce grows at least as fast as the demand does, so
+ * the car can follow the curve at ANY speed. Below that the answer is finite and
+ * this is it.
+ *
+ * Downforce is scaled by wheels-in-contact in the vehicle and acts along chassis
+ * up rather than world up, so on a real crest this reads a little optimistic —
+ * it is a design figure for sizing a piece, not a lap-time prediction.
+ */
+export function followSpeed(radius, car = FOLLOW_CAR) {
+  if (!(radius > 0)) return Infinity;
+  const denom = 1 - (car.downforce * radius) / car.mass;
+  if (denom <= 1e-6) return Infinity;
+  return Math.sqrt((car.gravity * radius) / denom);
+}
+
+/**
+ * Ceiling on the car's ROAD HOLD, in car weights, and its top speed.
+ *
+ * Copied from ROAD_HOLD.maxG and TIRE.topSpeed in v3/play/modularRoadVehicle.js
+ * for the same reason FOLLOW_CAR is copied — the kit is geometry and cannot
+ * import the vehicle. tools/roadHoldTest.mjs asserts both still match.
+ */
+export const FOLLOW_HOLD = { maxG: 16, topSpeed: 50 };
+
+/**
+ * Fastest speed (m/s) at which the car holds a convex vertical curve of radius
+ * `R` WITH road hold — i.e. on a piece the author tagged as road to follow.
+ *
+ * Same balance as followSpeed, with the hold added to what gravity brings:
+ *
+ *     v²/R = g + maxG·g   ⇒   v = √((1 + maxG)·g·R)
+ *
+ * Downforce is left out deliberately. It is a rounding error next to sixteen
+ * car weights, and including it would make this read as a precision figure when it
+ * is a design one — the honest use of this number is "does the piece hold at
+ * the speed people drive", which is a comparison against topSpeed.
+ *
+ * Returns Infinity once the answer passes top speed, because past that the
+ * distinction stops existing for the player: nothing they can do gets the car
+ * off it. See ROAD_HOLD in the vehicle for why the ceiling exists at all.
+ */
+export function heldSpeed(radius, hold = FOLLOW_HOLD, car = FOLLOW_CAR) {
+  if (!(radius > 0)) return Infinity;
+  const v = Math.sqrt((1 + hold.maxG) * car.gravity * radius);
+  return v >= hold.topSpeed ? Infinity : v;
 }
 
 // Attach analytic end tangents so each piece's connectors hit their exact angle
@@ -5001,6 +5478,9 @@ const _END_TANGENTS = {
   bankout: flatEndTangents,
   slope: flatEndTangents,
   crest: flatEndTangents,
+  grade_in: gradeInEndTangents,
+  grade: flatEndTangents,
+  grade_out: gradeOutEndTangents,
   scurve: flatEndTangents,
   start: flatEndTangents,
   start_new: flatEndTangents,

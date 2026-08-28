@@ -216,7 +216,8 @@ console.log("\n5. CLIMBING TURNS STACK — the Slopes Helix, repointed\n");
  * and which does not: constant-rate climb means a pitched entry tangent, so
  * placing it on a level connector rotates the whole helix and tips its axis off
  * vertical. It now rides `loop_spiral` (smoothstepped climb, up pinned to
- * world-up) like the Loop tab's Spiral ramp always did.
+ * world-up). The Loop tab used to ship a corkscrew of the same piece; helices
+ * live only in Slopes now.
  *
  * This asserts the FIX, not the bug: stack three and the height has to be three
  * times one, with nothing rolled. It fails if anyone repoints the tile back —
@@ -259,19 +260,26 @@ for (const [i, s] of fixed.entries()) {
     `y = ${s.y.toFixed(6)}`);
   ok(near(s.upY, 1, 1e-6), `...with no roll after ${i + 1}`, `up.y = ${s.upY.toFixed(9)}`);
 }
-// UP AND DOWN ARE TWO TILES; LEFT AND RIGHT ARE NOT.
+// UP AND DOWN ARE TWO TILES PER SIZE; LEFT AND RIGHT ARE NOT.
 //
 // The sign of `loopSpiralRise` is not a hand — no amount of flipping curveDir
 // turns a climb into a descent — so it stays a tile. `curveDir` is, so it went
 // to the mode with every other pair (see tools/handedTest.mjs). Getting this
 // backwards is the easy mistake: it would either lose the descending helix or
 // re-add a mirror twin nobody needs.
+// Compact (R18) + Wide (R40). The Loop tab used to ship a third corkscrew
+// (R12 / 1 turn); that tile is gone — helices live only in Slopes.
 const helixes = CATEGORY_PRESETS.slopes.filter((t) => t.base === "loop_spiral");
 const signs = new Set(helixes.map((t) => Math.sign(t.params.loopSpiralRise)));
-ok(helixes.length === 2 && signs.size === 2, "one tile up, one tile down",
+const radii = new Set(helixes.map((t) => t.params.loopSpiralRadius));
+ok(helixes.length === 4 && signs.size === 2, "compact + wide, each up and down",
   helixes.map((t) => t.label).join(", "));
+ok(radii.has(18) && radii.has(40), "R18 compact and R40 wide",
+  [...radii].join(", "));
 ok(helixes.every((t) => t.params.curveDir === undefined),
-  "...and neither pins a hand — R flips both");
+  "...and none pin a hand — R flips all four");
+ok(!CATEGORY_PRESETS.loop.some((t) => t.base === "loop_spiral"),
+  "Loop tab no longer offers a helix — that was the corkscrew");
 
 // The PIECE stays even though no tile points at it: a track saved outside this
 // repo may contain one, and dropping a catalog entry is how those stop loading.

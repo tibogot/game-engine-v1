@@ -115,9 +115,11 @@ for (const deg of [10, 15, 20, 25, 27.4, 30, 35, 38, 40, 45]) {
 }
 
 console.log("\n=== WHAT THE KIT ACTUALLY BUILDS ===");
-// slopePoints() uses smootherstep, whose peak derivative is 1.5 x H/L.
+// slopePoints() joins two parabolic vertical curves, whose peak grade is 2 x H/L
+// (it was 1.5 x H/L when the profile was a smoothstep — see slopeShape for why
+// the trade was made and what it measured).
 for (const [L, H] of [[26, 9], [26, 12], [26, 15], [26, 18], [20, 9], [40, 9]]) {
-  const peak = Math.atan(1.5 * H / L) / D2R;
+  const peak = Math.atan(2 * H / L) / D2R;
   console.log(`  slopeLength ${String(L).padStart(2)}  slopeRise ${String(H).padStart(2)}  -> peak grade ${peak.toFixed(1)}°` +
     `${peak > base ? "   OVER THE CEILING" : ""}`);
 }

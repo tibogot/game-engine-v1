@@ -232,8 +232,19 @@ console.log("\n=== ONE PLACEHOLDER, NOT 130 HAND-DRAWN SILHOUETTES ===");
     html.indexOf('id="selected-piece"') > html.indexOf('id="build-hints"')
     && /#selected-piece \{[^}]*flex-shrink: 0/.test(css),
     "#selected-piece must be a sibling of #palette-body, not a child");
+  // The hover text was `item.label` literally. It goes through tileTitle() now,
+  // which adds the speed the car can still follow a VERTICAL piece at — the one
+  // property of a slope or crest that a thumbnail cannot show and that decides
+  // whether the piece is road or a launch ramp. So the check is unchanged in
+  // intent and only moved: the title is still built from the label, and a piece
+  // with no convex vertical curve still gets the bare name.
   check("every tile names itself on hover whatever its state",
-    /btn\.title = item\.label/.test(builder));
+    /btn\.title = tileTitle\(item\)/.test(builder));
+  const titleFn = builder.slice(builder.indexOf("function tileTitle(item)"));
+  const titleBody = titleFn.slice(0, titleFn.indexOf("\n  }"));
+  check("...with the name always the start of it",
+    /return item\.label;/.test(titleBody) && /`\$\{item\.label\} — /.test(titleBody),
+    "tileTitle must fall back to the bare label, and prefix it when it has a speed to add");
 
   // A CATEGORY BUTTON IS A PIECE TILE, and its icon is a baked thumbnail of the
   // first tile in that category — so it fails the same way, and a rail of 14
