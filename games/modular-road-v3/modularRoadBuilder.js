@@ -8,6 +8,7 @@ import {
   pieceParams,
   guardrailParams,
   buildPiece,
+  pieceEndTakesTubeCap,
   initialConnector,
   socketMatrix,
   linkCurvature,
@@ -53,6 +54,8 @@ const _UNIT_SCALE = new THREE.Vector3(1, 1, 1);
 /** Never mutated — the entry pose a piece is built at to read back its own
  *  entry→exit transform. See `_localTransform`. */
 const _IDENTITY = new THREE.Matrix4();
+const _CAP_P = new THREE.Vector3();
+const _CAP_Q = new THREE.Vector3();
 
 /** Spare instance slots kept in every road batch, so appending one piece to a
  *  chain rewrites matrices instead of reallocating the buffer. */
@@ -64,6 +67,35 @@ const _isIdentityQuat = (q) => Math.abs(q.w) > 0.9999999;
  *  Same tolerance the branch "used" test has always applied, for the same
  *  reason: seams are welded by position, not by a stored link. */
 const HEAD_JOIN_EPS = 1.0;
+
+/** Sweep-prism pieces whose open ends need a lid. Tubes close the wall
+ *  cavity on their own path; custom plates and gaps have no prism. */
+function pieceTakesSlabCaps(id) {
+  const def = PIECE_BY_ID.get(id);
+  return !!(def && !def.geometry && !def.profile && !def.tubeEndCaps && !def.noMesh);
+}
+
+function pieceTakesTubeCaps(id) {
+  const def = PIECE_BY_ID.get(id);
+  return !!(def?.tubeEndCaps && !def.geometry);
+}
+
+/** Neighbour must be at least this close in half-width (m) to count as covering
+ *  a mouth. A 44 m platform against a 16 m straight leaves 14 m of wing on each
+ *  side — that leftover prism stays lidded. */
+const SLAB_COVER_EPS = 0.05;
+
+/** Deck half-width the kit would sweep for this piece — same rule as buildPiece. */
+function pieceHalfWidth(id, pp, rp = roadParams) {
+  const def = PIECE_BY_ID.get(id);
+  if (!def || def.noMesh) return 0;
+  if (typeof def.width === "function") return def.width(pp) / 2;
+  if (def.profile) {
+    const data = def.profile(pp, rp);
+    return data?.hw ?? 0;
+  }
+  return rp.width / 2;
+}
 
 /**
  * How near the cursor has to be to an open end, IN SCREEN PIXELS, for the next
@@ -1386,6 +1418,145 @@ export class ModularRoadBuilder {
     return out;
   }
 
+  /**
+   * Which other piece occupies this socket, if any. Same 1 m weld as
+   * `_openConnectors` — seams are by position, not a stored link.
+   * @returns {{ piece: object, end: "entry"|"exit"|"branch" } | null}
+   */
+  _socketMate(matrix, self) {
+    if (!matrix) return null;
+    const p = _CAP_P.setFromMatrixPosition(matrix);
+    for (const o of this.pieces) {
+      if (o === self) continue;
+      if (o.connectorIn && _CAP_Q.setFromMatrixPosition(o.connectorIn).distanceTo(p) < HEAD_JOIN_EPS) {
+        return { piece: o, end: "entry" };
+      }
+      if (o.connectorOut && _CAP_Q.setFromMatrixPosition(o.connectorOut).distanceTo(p) < HEAD_JOIN_EPS) {
+        return { piece: o, end: "exit" };
+      }
+      for (const b of o.branches ?? []) {
+        if (_CAP_Q.setFromMatrixPosition(b.matrix).distanceTo(p) < HEAD_JOIN_EPS) {
+          return { piece: o, end: "branch" };
+        }
+      }
+    }
+    return null;
+  }
+
+  _socketOccupied(matrix, self) {
+    return !!this._socketMate(matrix, self);
+  }
+
+  _endTakesTubeCap(piece, end) {
+    return !!(piece && pieceEndTakesTubeCap(piece.id, end, piece.pp, roadParams));
+  }
+
+  /** Occupied by another thick-wall mouth — the ring would z-fight. A road
+   *  neighbour does not fill the 0.6 m cavity, so that does not count. */
+  _spatialTubeWallMate(matrix, self) {
+    const mate = this._socketMate(matrix, self);
+    if (!mate || mate.end === "branch") return false;
+    return this._endTakesTubeCap(mate.piece, mate.end);
+  }
+
+  _pieceHw(p) {
+    if (p?.hw > 0) return p.hw;
+    return p ? pieceHalfWidth(p.id, p.pp) : 0;
+  }
+
+  /** Does this neighbour's mouth cover `selfHw`? Wider leftover wings stay open
+   *  unless the neighbour is as wide or wider. */
+  _coversSlabMouth(neighbor, selfHw) {
+    if (!(selfHw > 0) || !neighbor) return false;
+    return this._pieceHw(neighbor) + SLAB_COVER_EPS >= selfHw;
+  }
+
+  /**
+   * Lid any mouth the neighbour does not actually fill.
+   * Equal-width joins still drop both lids (the mouths nest). A wider piece
+   * against a narrower one keeps its lid — occupancy alone used to strip it
+   * and leave the extra width looking into the hollow prism.
+   */
+  _slabCapFlags(p, conn) {
+    if (!pieceTakesSlabCaps(p.id)) return { capEntry: false, capExit: false };
+    const run = this._chainPieces(p.chainId);
+    const i = run.indexOf(p);
+    if (i < 0) return { capEntry: false, capExit: false };
+    const prev = i > 0 ? run[i - 1] : null;
+    const next = i < run.length - 1 ? run[i + 1] : null;
+    const hw = this._pieceHw(p);
+    const chainEntry = !p.detached && prev && !prev.detached && this._coversSlabMouth(prev, hw);
+    const chainExit = !p.detached && next && !next.detached && this._coversSlabMouth(next, hw);
+    const mateIn = this._socketMate(conn, p);
+    const mateOut = this._socketMate(p.connectorOut, p);
+    return {
+      capEntry: !chainEntry && !this._coversSlabMouth(mateIn?.piece, hw),
+      capExit: !chainExit && !this._coversSlabMouth(mateOut?.piece, hw),
+    };
+  }
+
+  /**
+   * Tube wall rings: drop only when the facing mouth is also a wall.
+   * Chain neighbours are consulted even before their matrices have walked
+   * forward this rebuild (an insert would otherwise leave a leftover ring
+   * on the piece processed first). Spatial occupancy still catches loops
+   * and two chains butted together. A road neighbour keeps the ring.
+   */
+  _tubeCapFlags(p, conn) {
+    if (!pieceTakesTubeCaps(p.id)) return { capEntry: false, capExit: false };
+    const run = this._chainPieces(p.chainId);
+    const i = run.indexOf(p);
+    if (i < 0) return { capEntry: false, capExit: false };
+    const prev = i > 0 ? run[i - 1] : null;
+    const next = i < run.length - 1 ? run[i + 1] : null;
+    const chainEntry = !p.detached && prev && !prev.detached && this._endTakesTubeCap(prev, "exit");
+    const chainExit = !p.detached && next && !next.detached && this._endTakesTubeCap(next, "entry");
+    return {
+      capEntry: !chainEntry && !this._spatialTubeWallMate(conn, p),
+      capExit: !chainExit && !this._spatialTubeWallMate(p.connectorOut, p),
+    };
+  }
+
+  _endCapFlags(p, conn) {
+    if (pieceTakesSlabCaps(p.id)) return this._slabCapFlags(p, conn);
+    if (pieceTakesTubeCaps(p.id)) return this._tubeCapFlags(p, conn);
+    return { capEntry: false, capExit: false };
+  }
+
+  _ghostCapFlags() {
+    const id = this.activePieceId;
+    if (this.ghostDetached) {
+      if (pieceTakesSlabCaps(id) || pieceTakesTubeCaps(id)) {
+        return { capEntry: true, capExit: true };
+      }
+      return { capEntry: false, capExit: false };
+    }
+    const run = this._chainPieces(this.activeChainId);
+    if (!run.length) {
+      if (pieceTakesSlabCaps(id) || pieceTakesTubeCaps(id)) {
+        return { capEntry: true, capExit: true };
+      }
+      return { capEntry: false, capExit: false };
+    }
+    if (pieceTakesSlabCaps(id)) {
+      const ghostHw = pieceHalfWidth(id, this.activeParams);
+      if (this.ghostEnd === "head") {
+        const host = run[0];
+        return { capEntry: true, capExit: !this._coversSlabMouth(host, ghostHw) };
+      }
+      const host = run[run.length - 1];
+      return { capEntry: !this._coversSlabMouth(host, ghostHw), capExit: true };
+    }
+    if (pieceTakesTubeCaps(id)) {
+      // Keep the ring unless the mouth we are about to mate is also a wall.
+      if (this.ghostEnd === "head") {
+        return { capEntry: true, capExit: !this._endTakesTubeCap(run[0], "entry") };
+      }
+      return { capEntry: !this._endTakesTubeCap(run[run.length - 1], "exit"), capExit: true };
+    }
+    return { capEntry: false, capExit: false };
+  }
+
   // ── JUNCTIONS ──────────────────────────────────────────────────────────────
   // A junction is an ordinary chain piece — the chain flows in its entry and out
   // its exit like any other. What makes it a junction is the EXTRA sockets it
@@ -2241,7 +2412,8 @@ export class ModularRoadBuilder {
   refreshGhost() {
     const conn = this._placementConnector();
     const edges = guardrailParams.enabled;
-    const key = `${this.activePieceId}|${edges ? 1 : 0}|${JSON.stringify(this.activeParams)}`;
+    const caps = this._ghostCapFlags();
+    const key = `${this.activePieceId}|${edges ? 1 : 0}|${caps.capEntry ? 1 : 0}${caps.capExit ? 1 : 0}|${JSON.stringify(this.activeParams)}`;
 
     let hit = this._ghostGeoCache.get(key);
     if (!hit) {
@@ -2254,7 +2426,7 @@ export class ModularRoadBuilder {
         roadParams,
         guardrailParams,
         edges,
-        { deckOnly: true },
+        { deckOnly: true, ...caps },
       );
       // `hw` rides along because the lateral snap needs the GHOST's half-width
       // as well as the neighbour's: the gap between two pieces of different
@@ -2748,7 +2920,9 @@ export class ModularRoadBuilder {
     this.currentConnector = piece.connectorOut.clone();
     this.ghostOnBranch = false; // the branch (if that's where this went) is taken
     this._clearLateral();       // and the side socket is now occupied
-    this._rebuildInstances();
+    // Cap flags on the previous last piece change (it is no longer a free
+    // end), and the new piece needs lids / rings. reuse skips the middles.
+    this.rebuildAll({ reuse: true });
     this._refreshBranchMarkers();
     // Hand the gizmo to the NEXT piece at the fresh open end.
     this._syncGizmoToOpenEnd();
@@ -3659,11 +3833,13 @@ export class ModularRoadBuilder {
         }
         p.connectorIn = conn.clone();
         const edges = p.edges ?? true;
+        const caps = this._endCapFlags(p, conn);
         // Unchanged inputs ⇒ the geometry it already carries is still correct.
         // `pp` is compared by REFERENCE, which is sound because a piece's params
         // are cloned once at placement and never mutated afterwards.
         const b = p._builtFrom;
-        const sameShape = reuse && b && b.id === p.id && b.edges === edges && b.pp === p.pp;
+        const sameShape = reuse && b && b.id === p.id && b.edges === edges && b.pp === p.pp
+          && !!b.capEntry === caps.capEntry && !!b.capExit === caps.capExit;
         if (sameShape && b.conn.equals(conn)) {
           conn = p.connectorOut.clone();
           continue;
@@ -3672,12 +3848,12 @@ export class ModularRoadBuilder {
           conn = p.connectorOut.clone();
           continue;
         }
-        const built = buildPiece(p.id, conn, p.pp, roadParams, guardrailParams, edges);
+        const built = buildPiece(p.id, conn, p.pp, roadParams, guardrailParams, edges, caps);
         this._applyBuilt(p, built);
         p.hw = built.hw ?? null; // params can change the section, so re-read it
         p.connectorOut = built.connectorOut.clone();
         p._builtFrom = this._stampBuiltFrom(
-          conn, p.id, p.pp, edges, built.world, built.connectorOut, built.branchesOut);
+          conn, p.id, p.pp, edges, built.world, built.connectorOut, built.branchesOut, caps);
         conn = built.connectorOut.clone();
       }
     }
@@ -3750,13 +3926,15 @@ export class ModularRoadBuilder {
    * `world = conn · fromConn`, so a later walk can restamp matrices without
    * calling buildPiece when only the chain moved.
    */
-  _stampBuiltFrom(conn, id, pp, edges, world, connectorOut, branches) {
+  _stampBuiltFrom(conn, id, pp, edges, world, connectorOut, branches, caps = {}) {
     const inv = conn.clone().invert();
     return {
       conn: conn.clone(),
       id,
       pp,
       edges,
+      capEntry: !!caps.capEntry,
+      capExit: !!caps.capExit,
       fromConn: inv.clone().multiply(world),
       outFromConn: inv.clone().multiply(connectorOut),
       branchFromConn: (branches ?? []).map((br) => inv.clone().multiply(br.matrix)),

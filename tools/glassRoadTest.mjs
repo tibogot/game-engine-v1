@@ -95,6 +95,31 @@ check("same footprint as any other straight of its length",
   close(bb.min.y, -RP.thickness),
   `${PP.glassWidth} × ${PP.glassLength} m, ${RP.thickness} m thick`);
 
+/* ══ Outer walls face OUT, or FrontSide hides the slab's thickness ═══════ */
+console.log("\n— perimeter faces outward —");
+const along = new THREE.Vector3(1, 0, 0);
+const hitFrom = (geo, origin, dir) => {
+  ray.set(origin, dir);
+  ray.near = 0;
+  ray.far = 4;
+  const hit = ray.intersectObject(meshOf(geo), false)[0];
+  return hit ? hit.point : null;
+};
+const hw = PP.glassWidth / 2;
+const sideY = -RP.thickness / 2;
+const fromLeft = hitFrom(seen, new THREE.Vector3(-hw - 1, sideY, -2), along);
+check("a ray from outside hits the left wall (FrontSide would miss an inward face)",
+  fromLeft !== null && close(fromLeft.x, -hw, 0.02),
+  fromLeft ? `x=${fromLeft.x.toFixed(3)}` : "missed");
+const fromRight = hitFrom(seen, new THREE.Vector3(hw + 1, sideY, -2), along.clone().negate());
+check("…and the right wall from the other side",
+  fromRight !== null && close(fromRight.x, hw, 0.02),
+  fromRight ? `x=${fromRight.x.toFixed(3)}` : "missed");
+const fromEntry = hitFrom(seen, new THREE.Vector3(0, sideY, 1), new THREE.Vector3(0, 0, -1));
+check("the entry end is visible from outside too",
+  fromEntry !== null && close(fromEntry.z, 0, 0.02),
+  fromEntry ? `z=${fromEntry.z.toFixed(3)}` : "missed");
+
 /* ══ The deck is the lacquer zone, not asphalt ════════════════════════════ */
 console.log("\n— lacquer —");
 const zones = seen.getAttribute("aZone").array;

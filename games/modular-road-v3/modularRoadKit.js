@@ -1119,6 +1119,94 @@ export function buildSweepGeometry(frames, profileData = buildProfile(), opts = 
 const _capPt = new V3();
 
 /**
+ * Lid on an OPEN sweep end — the slab is a hollow prism (deck / sides /
+ * underside) with no end faces. FrontSide then looks into the cavity.
+ *
+ * Visual only. Callers clone collision first so the wheels still leave the
+ * lip rather than hitting a wall. Only the un-mated sockets should pass
+ * true: a cap on a joined seam z-fights the neighbour and costs tris for
+ * nothing. Tubes have their own wall-cavity caps; this is the road plate.
+ *
+ * @param {THREE.BufferGeometry} geo
+ * @param {object[]} frames
+ * @param {{ capEntry?: boolean, capExit?: boolean, entryPts: object[], exitPts: object[], plain?: number }} opts
+ */
+function appendRoadEndCaps(geo, frames, opts) {
+  const capEntry = !!opts.capEntry;
+  const capExit = !!opts.capExit;
+  if (!capEntry && !capExit) return geo;
+  if (frames.length < 2) return geo;
+
+  const pos = geo.getAttribute("position");
+  const uv = geo.getAttribute("uv");
+  const lat = geo.getAttribute("aLateral");
+  const zn = geo.getAttribute("aZone");
+  const plainAttr = geo.getAttribute("aPlain");
+  const curve = geo.getAttribute("aCurve");
+  const nrm = geo.getAttribute("normal");
+  const idx = geo.getIndex();
+  if (!pos || !uv || !lat || !zn || !plainAttr || !curve || !nrm || !idx) return geo;
+
+  const positions = Array.from(pos.array);
+  const uvs = Array.from(uv.array);
+  const laterals = Array.from(lat.array);
+  const zones = Array.from(zn.array);
+  const plains = Array.from(plainAttr.array);
+  const curves = Array.from(curve.array);
+  const normals = Array.from(nrm.array);
+  const indices = Array.from(idx.array);
+  const plain = opts.plain ?? plains[0] ?? 0;
+
+  let alongN = 0;
+  for (let i = 1; i < frames.length; i++) {
+    alongN += frames[i].pos.distanceTo(frames[i - 1].pos);
+  }
+
+  const emitCap = (fr, alongX, nx, ny, nz, pts, flip) => {
+    const M = pts?.length ?? 0;
+    if (M < 3) return;
+    const base = positions.length / 3;
+    for (let k = 0; k < M; k++) {
+      const p = pts[k];
+      _capPt.copy(fr.pos).addScaledVector(fr.right, p.x).addScaledVector(fr.up, p.y);
+      positions.push(_capPt.x, _capPt.y, _capPt.z);
+      uvs.push(alongX, 0);
+      laterals.push(0);
+      zones.push(0); // cut face — side/underside paint, not deck asphalt
+      plains.push(plain);
+      curves.push(0);
+      normals.push(nx, ny, nz);
+    }
+    for (let k = 1; k < M - 1; k++) {
+      if (flip) indices.push(base, base + k + 1, base + k);
+      else indices.push(base, base + k, base + k + 1);
+    }
+  };
+
+  const f0 = frames[0];
+  const fN = frames[frames.length - 1];
+  // Entry faces backward (out of the prism). Profile is clockwise looking
+  // along travel, so the fan has to flip to be CCW from outside.
+  if (capEntry) {
+    emitCap(f0, 0, -f0.tangent.x, -f0.tangent.y, -f0.tangent.z, opts.entryPts, true);
+  }
+  if (capExit) {
+    emitCap(fN, alongN, fN.tangent.x, fN.tangent.y, fN.tangent.z, opts.exitPts, false);
+  }
+
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(laterals, 1));
+  geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zones, 1));
+  geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(plains, 1));
+  geo.setAttribute("aCurve", new THREE.Float32BufferAttribute(curves, 1));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geo.setIndex(indices);
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/**
  * Inner / outer wall rings, paired at matching angles.
  *
  * `buildTubeProfile` walks the inner arc then the outer in reverse. A CLOSED
@@ -1204,6 +1292,30 @@ function sectionNeedsEndCap(profileData) {
 }
 
 /**
+ * Whether a piece's entry or exit is a thick-wall mouth that wants a ring.
+ * The builder uses this to drop the ring when that socket is already occupied
+ * by another wall mouth (tube-to-tube). A road neighbour does not fill the
+ * cavity, so the ring stays.
+ *
+ * @param {string} id
+ * @param {"entry"|"exit"} end
+ * @param {object} [pp]
+ * @param {object} [rp]
+ */
+export function pieceEndTakesTubeCap(id, end, pp = pieceParams, rp = roadParams) {
+  const def = PIECE_BY_ID.get(id);
+  if (!def?.tubeEndCaps || def.geometry) return false;
+  const pieceWidth = def.width ? def.width(pp) : rp.width;
+  const rpForProfile = pieceWidth !== rp.width ? { ...rp, width: pieceWidth } : rp;
+  const section = def.profileAt
+    ? def.profileAt(end === "exit" ? 1 : 0, pp, rpForProfile)
+    : def.profile
+      ? def.profile(pp, rpForProfile)
+      : null;
+  return sectionNeedsEndCap(section);
+}
+
+/**
  * Close the hollow wall cavity at a sweep's mouths.
  *
  * The sweep is an extruded thick wall: inner surface + outer surface. Length
@@ -1214,7 +1326,8 @@ function sectionNeedsEndCap(profileData) {
  *
  * Visual only. Callers must keep the uncapped sweep as `deckCollision` so the
  * caps are not a driveable shelf across the mouth. Same idea as half-tube
- * `openLips`.
+ * `openLips`. Occupancy is the caller's job: pass `lids.capEntry` / `capExit`
+ * false to drop a ring on a mouth that already nests against another wall.
  *
  * Mutates `geo` in place (appends verts / indices, leaves existing normals).
  *
@@ -1222,10 +1335,14 @@ function sectionNeedsEndCap(profileData) {
  * @param {object[]} frames
  * @param {object} entrySection section at the first frame, or null to leave open
  * @param {object} exitSection  section at the last frame, or null to leave open
+ * @param {{ capEntry?: boolean, capExit?: boolean }} [lids]
  */
-function appendTubeEndCaps(geo, frames, entrySection, exitSection) {
-  const capEntry = sectionNeedsEndCap(entrySection);
-  const capExit = sectionNeedsEndCap(exitSection);
+function appendTubeEndCaps(geo, frames, entrySection, exitSection, lids = {}) {
+  // Section still decides WHETHER this end is a wall. Occupancy (lids) decides
+  // whether to actually emit the ring: omit the flags (kit / labs / thumbnails)
+  // and a free piece keeps both; pass false to suppress a mated mouth.
+  const capEntry = sectionNeedsEndCap(entrySection) && lids.capEntry !== false;
+  const capExit = sectionNeedsEndCap(exitSection) && lids.capExit !== false;
   if ((!capEntry && !capExit) || frames.length < 2) return geo;
 
   const pos = geo.getAttribute("position");
@@ -1816,7 +1933,7 @@ function _startNewParams(pp) {
 /* ----------------------------------------------------------------------- */
 
 /**
- * A straight deck in lacquered red with a SQUARE window cut through it — and the
+ * A straight deck in lacquered white with a SQUARE window cut through it — and the
  * window is glazed, not open. It reads as the hole road's evil twin: same
  * silhouette, same "there is nothing under me" jolt, except the car stays on the
  * road and you watch the world go past underneath.
@@ -1891,18 +2008,22 @@ export function buildGlassDeckGeometry(pp = pieceParams, rp = roadParams, opts =
       slab(x0, x1, z0, z1, -t, false, 0);
     }
     // Window reveal — the four faces you see the slab's thickness through.
-    quad([-h, 0, cz - h], [h, 0, cz - h], [h, -t, cz - h], [-h, -t, cz - h], 0);
-    quad([h, 0, cz + h], [-h, 0, cz + h], [-h, -t, cz + h], [h, -t, cz + h], 0);
-    quad([-h, 0, cz + h], [-h, 0, cz - h], [-h, -t, cz - h], [-h, -t, cz + h], 0);
-    quad([h, 0, cz - h], [h, 0, cz + h], [h, -t, cz + h], [h, -t, cz - h], 0);
+    // Wound facing INTO the hole so FrontSide shows the frame from the pane.
+    quad([h, 0, cz - h], [-h, 0, cz - h], [-h, -t, cz - h], [h, -t, cz - h], 0);
+    quad([-h, 0, cz + h], [h, 0, cz + h], [h, -t, cz + h], [-h, -t, cz + h], 0);
+    quad([-h, 0, cz - h], [-h, 0, cz + h], [-h, -t, cz + h], [-h, -t, cz - h], 0);
+    quad([h, 0, cz + h], [h, 0, cz - h], [h, -t, cz - h], [h, -t, cz + h], 0);
   }
 
   // Outer perimeter walls (both forms have them — the collision slab wants a
   // closed volume so a chassis sample can never end up inside it).
-  quad([-hw, 0, 0], [hw, 0, 0], [hw, -t, 0], [-hw, -t, 0], 0);
-  quad([hw, 0, -L], [-hw, 0, -L], [-hw, -t, -L], [hw, -t, -L], 0);
-  quad([-hw, 0, -L], [-hw, 0, 0], [-hw, -t, 0], [-hw, -t, -L], 0);
-  quad([hw, 0, 0], [hw, 0, -L], [hw, -t, -L], [hw, -t, 0], 0);
+  // Wound OUTWARD. These used to face the cavity, which DoubleSide hid and
+  // FrontSide made disappear: looking at the piece from the side you saw a
+  // paper-thin deck with no thickness. Same winding as a closed box.
+  quad([hw, 0, 0], [-hw, 0, 0], [-hw, -t, 0], [hw, -t, 0], 0);
+  quad([-hw, 0, -L], [hw, 0, -L], [hw, -t, -L], [-hw, -t, -L], 0);
+  quad([-hw, 0, 0], [-hw, 0, -L], [-hw, -t, -L], [-hw, -t, 0], 0);
+  quad([hw, 0, -L], [hw, 0, 0], [hw, -t, 0], [hw, -t, -L], 0);
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
@@ -3986,7 +4107,7 @@ export const PIECE_CATALOG = [
     id: "glass_road",
     label: "Glass road",
     hint: "Lacquer deck with a glazed window — drive over the void",
-    swatch: "#c0392b",
+    swatch: "#f0f0ee",
     key: "",
     points: glassPoints,
     width: (pp) => pp.glassWidth,
@@ -5207,6 +5328,10 @@ export function initialConnector() {
  *   deck, which is cheap and shares the frames). See the note on the mirror.
  * @param {boolean} [opts.mirrorRail] Include `railMirrorGeometry` in an
  *   otherwise-normal build. Off by default — see the note on the mirror.
+ * @param {boolean} [opts.capEntry] Lid the sweep's entry. Un-mated sockets
+ *   only — slab prism lids and tube wall rings both honour this. Omit to
+ *   keep a tube's section default (cap a wall mouth); pass false to drop it.
+ * @param {boolean} [opts.capExit] Lid the sweep's exit.
  */
 export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roadParams, gp = guardrailParams, edges = gp.enabled, opts = {}) {
   const def = PIECE_BY_ID.get(pieceId);
@@ -5434,7 +5559,31 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
     // Everything else sweeps one section and hands the same one over twice.
     const entrySection = def.profileAt ? def.profileAt(0, pp, rpForProfile) : profileData;
     const exitSection = def.profileAt ? def.profileAt(1, pp, rpForProfile) : profileData;
-    appendTubeEndCaps(geometry, frames, entrySection, exitSection);
+    appendTubeEndCaps(geometry, frames, entrySection, exitSection, {
+      capEntry: opts.capEntry,
+      capExit: opts.capExit,
+    });
+  }
+  // Road-slab lids on un-mated ends. Same visual-only clone as the tube
+  // rings: the BVH keeps the open sweep so you still launch off a lip.
+  // Custom plates, tubes and noMesh pieces skip this — tubes close the
+  // wall cavity on their own path, plates have no prism, gaps have no mesh.
+  const wantsRoadCaps = !def.geometry && !def.profile && !def.tubeEndCaps && !def.noMesh;
+  if (wantsRoadCaps && (opts.capEntry || opts.capExit)) {
+    if (!deckCollision && !skipExtras) deckCollision = geometry.clone();
+    const entrySection = def.profileAt || sweepOpts.profileAt
+      ? (sweepOpts.profileAt ? sweepOpts.profileAt(0) : profileData)
+      : profileData;
+    const exitSection = def.profileAt || sweepOpts.profileAt
+      ? (sweepOpts.profileAt ? sweepOpts.profileAt(1) : profileData)
+      : profileData;
+    appendRoadEndCaps(geometry, frames, {
+      capEntry: !!opts.capEntry,
+      capExit: !!opts.capExit,
+      entryPts: entrySection.pts,
+      exitPts: exitSection.pts,
+      plain: def.plain ? 1 : 0,
+    });
   }
   // Glazing: rendered on its own transparent material, collided by nothing.
   const glassGeometry = skipExtras || !def.glass ? null : def.glass(pp, rpForProfile);

@@ -232,5 +232,13 @@ check("...each at its OWN radius, which one shared section could never do",
   Math.abs(nearR.a - 8) < 1e-3 && Math.abs(farR.a - 12) < 1e-3,
   `near ${nearR.a.toFixed(2)}–${nearR.b.toFixed(2)}, far ${farR.a.toFixed(2)}–${farR.b.toFixed(2)}`);
 
+console.log("\n— occupancy can drop a wall ring without changing the section —");
+const openTube = buildPiece("tube", initialConnector(), pp(), undefined, undefined, true, {
+  capEntry: false, capExit: false,
+});
+check("suppressing both lids leaves the uncapped sweep (collision size)",
+  openTube.geometry.getAttribute("position").count
+    === built.deckCollision.getAttribute("position").count);
+
 console.log(fail === 0 ? "\nAll tube end-cap checks passed." : `\n${fail} check(s) FAILED.`);
 process.exit(fail === 0 ? 0 : 1);
