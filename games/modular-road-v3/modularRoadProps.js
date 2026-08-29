@@ -40,6 +40,7 @@ import {
   parkourMat,
   enableMeshShadows,
   attachDeckProxy,
+  attachWedgeCheekSolids,
   thickWallTubeGeometry,
   thickWallVaultGeometry,
   filledVaultCollisionGeometry,
@@ -103,7 +104,11 @@ function rampGeometry(L = 18, H = 6, W = 14) {
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
-  return attachDeckProxy(geo, deckPos);
+  attachDeckProxy(geo, deckPos);
+  return attachWedgeCheekSolids(geo, W, L, H, (t, rise) => t * rise, {
+    z0: zN,
+    z1: zF,
+  });
 }
 
 /** Thick-walled pipe, still hollow to drive through.

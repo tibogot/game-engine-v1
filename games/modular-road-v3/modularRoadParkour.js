@@ -103,26 +103,12 @@ export function rampGeometry(w, l, angleRad) {
   tri(Al, Cl, Bl);
   tri(Ar, Br, Cr);
 
-  // NO SOLIDS STAND-IN HERE, DELIBERATELY, and it is worth saying why since the
-  // kicker ramps next door do have one.
-  //
-  // Splitting the drive surface out of solids the way solidKickerExtrusion does
-  // is the obvious tidy-up, and it measures WORSE on this shape. The wedge is a
-  // wide flat plane with vertical flanks, and the surface sitting in the solids
-  // tree holds the hull clear of those flanks; take it out and a car overhanging
-  // the side edge drops until its bodywork grinds along the flank instead.
-  // Measured across the lane/offset sweep in tools/labEdgeStickRepro.mjs:
-  //
-  //   full solid (this)   503 ticks of chassis contact, 2.46 s stalled
-  //   flanks-only proxy  4630 ticks,                    5.13 s stalled
-  //
-  // The kicker gets away with it because its scooped profile never presents a
-  // flat overhangable edge at ride height. Revisit this only with that sweep.
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
-  return attachDeckProxy(geo, deckPos);
+  attachDeckProxy(geo, deckPos);
+  return attachWedgeCheekSolids(geo, w, l, H, (t, rise) => t * rise);
 }
 
 /**
@@ -426,7 +412,7 @@ function curveRampGeometry(w, radius, angleDeg, rise, curveDir = 1, segments = 3
  *
  * The VISIBLE mesh is the closed wedge. Collision is split:
  *   deck   — drive surface only (attachDeckProxy)
- *   solids — flanks + a short inset backstop (attachSolidProxy)
+ *   solids — shortened cheeks + a short inset backstop (attachSolidProxy)
  * The full-height lip cap stays visual. Putting it in solids is what launched
  * the car straight up at takeoff on the taller Jump lab lanes.
  */
@@ -438,6 +424,121 @@ const KICKER_SOLID_CAP_H = 1.7;
  *  the collider; driving into the back clips 1.4 m of visual, which is the
  *  trade for not having an 8–18 m wall at the kicker. */
 const KICKER_SOLID_CAP_INSET = 1.4;
+/**
+ * How far below the drive surface the collision flanks stop (m).
+ *
+ * The visual sides are vertical faces up to the deck. Put those in the solids
+ * tree and a car turning ON the ramp drives its hull into them — sparks, an
+ * invisible wall, the car shoved back onto the piece. Slope lab does it at
+ * the entry (the plane is already steep); Jump lab does it in the middle (the
+ * scoop is still flat at the entry and only then steepens). Same wall, different
+ * place. The hull floor sits ~16 cm above the tyres, so a wall that ends ~35 cm
+ * below the deck is invisible to a car on top (you can turn off) and still a
+ * wall to anyone hitting the ramp from the ground.
+ *
+ * Full-height flanks-only was worse than the closed wedge
+ * (tools/labEdgeStickRepro.mjs: 4630 spark ticks vs 503) because the hanging
+ * bodywork ground along the wall. Shortening the top is what that sweep was
+ * missing.
+ */
+const RAMP_FLANK_DROP = 0.35;
+const RAMP_FLANK_MIN = 0.12;
+
+function lerp3(a, b, t) {
+  return [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t,
+  ];
+}
+
+function clipFlankTop(top) {
+  const y = top[1] - RAMP_FLANK_DROP;
+  if (y < RAMP_FLANK_MIN) return null;
+  return [top[0], y, top[2]];
+}
+
+function appendFlankBand(solidPos, topA, topB, botA, botB, left) {
+  const squad = (a, b, c, d) => {
+    solidPos.push(...a, ...b, ...c, ...a, ...c, ...d);
+  };
+  const emit = (b0, t0, t1, b1) => {
+    if (left) squad(b0, t0, t1, b1);
+    else squad(b0, b1, t1, t0);
+  };
+  const c0 = clipFlankTop(topA);
+  const c1 = clipFlankTop(topB);
+  if (c0 && c1) {
+    emit(botA, c0, c1, botB);
+    return;
+  }
+  const y0 = topA[1] - RAMP_FLANK_DROP;
+  const y1 = topB[1] - RAMP_FLANK_DROP;
+  if (y0 < RAMP_FLANK_MIN && y1 >= RAMP_FLANK_MIN) {
+    const t = (RAMP_FLANK_MIN - y0) / (y1 - y0);
+    const topC = lerp3(topA, topB, t);
+    const botC = lerp3(botA, botB, t);
+    const cC = clipFlankTop(topC) ?? [topC[0], RAMP_FLANK_MIN, topC[2]];
+    emit(botC, cC, c1, botB);
+  } else if (y0 >= RAMP_FLANK_MIN && y1 < RAMP_FLANK_MIN) {
+    const t = (y0 - RAMP_FLANK_MIN) / (y0 - y1);
+    const topC = lerp3(topA, topB, t);
+    const botC = lerp3(botA, botB, t);
+    const cC = clipFlankTop(topC) ?? [topC[0], RAMP_FLANK_MIN, topC[2]];
+    emit(botA, c0, cC, botC);
+  }
+}
+
+/**
+ * Collision stand-in for a wedge you drive on: shortened vertical cheeks plus a
+ * short inset backstop. Not the drive surface, not the full-height lip.
+ *
+ * Used by the planar slope ramps (which previously put the whole closed wedge
+ * in solids) and the kicker/jump extrusions.
+ */
+export function attachWedgeCheekSolids(geo, w, length, rise, heightAt, {
+  segments = 16,
+  z0 = 0,
+  z1 = null,
+} = {}) {
+  const zFar = z1 ?? (z0 - length);
+  const hw = w / 2;
+  const n = Math.max(2, segments);
+  const H = Math.max(0.5, rise);
+  const topL = [];
+  const topR = [];
+  const botL = [];
+  const botR = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const z = z0 + (zFar - z0) * t;
+    const y = heightAt(t, H);
+    topL.push([-hw, y, z]);
+    topR.push([hw, y, z]);
+    botL.push([-hw, 0, z]);
+    botR.push([hw, 0, z]);
+  }
+  return attachSolidProxy(geo, wedgeCheekPositions(topL, topR, botL, botR, {
+    heightAt, length, H, hw,
+  }));
+}
+
+function wedgeCheekPositions(topL, topR, botL, botR, { heightAt, length, H, hw }) {
+  const solidPos = [];
+  const n = topL.length - 1;
+  for (let i = 0; i < n; i++) {
+    appendFlankBand(solidPos, topL[i], topL[i + 1], botL[i], botL[i + 1], true);
+    appendFlankBand(solidPos, topR[i], topR[i + 1], botR[i], botR[i + 1], false);
+  }
+  const inset = Math.min(KICKER_SOLID_CAP_INSET, length * 0.25);
+  const tCap = 1 - inset / length;
+  const yDeck = heightAt(tCap, H);
+  const yCap = Math.max(0.2, Math.min(KICKER_SOLID_CAP_H, yDeck * 0.8));
+  const zCap = botL[0][2] + (botL[n][2] - botL[0][2]) * tCap;
+  const squad = (a, b, c, d) => solidPos.push(...a, ...b, ...c, ...a, ...c, ...d);
+  squad([-hw, 0, zCap], [-hw, yCap, zCap], [hw, yCap, zCap], [hw, 0, zCap]);
+  return solidPos;
+}
 
 function solidKickerExtrusion(w, length, rise, segments, heightAt) {
   const hw = w / 2;
@@ -475,27 +576,14 @@ function solidKickerExtrusion(w, length, rise, segments, heightAt) {
   for (let i = 0; i < n; i++) quad(botR[i], botR[i + 1], topR[i + 1], topR[i]);
   quad(botL[n], topL[n], topR[n], botR[n]);
 
-  // SOLIDS: flanks plus a short inset backstop. Not the drive surface, not
-  // the full-height lip cap — those are what launched the car at takeoff.
-  const solidPos = [];
-  const squad = (a, b, c, d) => solidPos.push(...a, ...b, ...c, ...a, ...c, ...d);
-  for (let i = 0; i < n; i++) {
-    squad(botL[i], topL[i], topL[i + 1], botL[i + 1]);
-    squad(botR[i], botR[i + 1], topR[i + 1], topR[i]);
-  }
-  const inset = Math.min(KICKER_SOLID_CAP_INSET, L * 0.25);
-  const tCap = 1 - inset / L;
-  const yDeck = heightAt(tCap, H);
-  const yCap = Math.max(0.2, Math.min(KICKER_SOLID_CAP_H, yDeck * 0.8));
-  const zCap = -L * tCap;
-  squad([-hw, 0, zCap], [-hw, yCap, zCap], [hw, yCap, zCap], [hw, 0, zCap]);
-
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
   attachDeckProxy(geo, deckPos);
-  return attachSolidProxy(geo, solidPos);
+  return attachSolidProxy(geo, wedgeCheekPositions(topL, topR, botL, botR, {
+    heightAt, length: L, H, hw,
+  }));
 }
 
 /**
