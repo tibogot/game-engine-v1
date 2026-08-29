@@ -327,5 +327,28 @@ console.log("\n=== ROUNDED START (nose behind the entry) ===");
   built.railMirrorGeometry?.dispose();
 }
 
+console.log("\n=== U-RAIL MIRROR (custom deck must not veto railPath) ===");
+{
+  for (const id of ["rounded_end", "rounded_start", "start_new", "finish_new"]) {
+    const plain = buildPiece(id, initialConnector(), pp);
+    const asked = buildPiece(id, initialConnector(), pp, roadParams, undefined, true, { mirrorRail: true });
+    check(`${id}: no mirror unless asked`, !plain.railMirrorGeometry);
+    check(`${id}: mirrorRail builds the U`, !!asked.railMirrorGeometry,
+      asked.railMirrorGeometry ? `${asked.railMirrorGeometry.getAttribute("position").count} verts` : "null");
+    if (asked.railMirrorGeometry && asked.railGeometry) {
+      const a = asked.railGeometry.getAttribute("position").count;
+      const b = asked.railMirrorGeometry.getAttribute("position").count;
+      check(`${id}: mirrored U has the same vertex count as the beam`, a === b, `${b} vs ${a}`);
+    }
+    plain.geometry?.dispose();
+    plain.railGeometry?.dispose();
+    plain.railCollision?.dispose();
+    asked.geometry?.dispose();
+    asked.railGeometry?.dispose();
+    asked.railCollision?.dispose();
+    asked.railMirrorGeometry?.dispose();
+  }
+}
+
 console.log(fail === 0 ? "\nAll rounded-end checks passed." : `\n${fail} check(s) FAILED.`);
 process.exit(fail === 0 ? 0 : 1);

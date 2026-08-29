@@ -6019,9 +6019,19 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   // `railPath` is for pieces whose rail is NOT ±offset from the centreline —
   // the rounded end wraps left + nose + right as one open U.
   const wantsRail = !skipExtras && useKerbs && !def.noMesh && !def.profile && !def.geometry;
-  /** Same test as `wantsRail`, but for the mirror — which `mirrorOnly` wants
-   *  and `deckOnly` does not, so the two cannot share one flag. */
-  const mirrorRailOk = wantMirror && useKerbs && !def.noMesh && !def.profile && !def.geometry;
+  /**
+   * Same test as `wantsRail`, but for the mirror — which `mirrorOnly` wants
+   * and `deckOnly` does not, so the two cannot share one flag.
+   *
+   * `!def.geometry` is the sweep-world veto (hole road, glass, junctions have
+   * a custom deck and no centreline rail). It must NOT apply to a piece that
+   * already declares `railPath`: the rounded start/end and start_new /
+   * finish_new author a plate for the semicircle nose, then hang a U-rail on
+   * the kerb. The visible rail takes that door (`alongPath` below); the
+   * mirror used to skip them and "Rails in mirror" left the bulb bare.
+   */
+  const mirrorRailOk = wantMirror && useKerbs && !def.noMesh
+    && (!!def.railPath || (!def.profile && !def.geometry));
   let railGeometry = null;
   let railCollision = null;
   let railMirrorGeometry = null;
