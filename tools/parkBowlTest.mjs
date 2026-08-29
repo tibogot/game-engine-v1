@@ -189,9 +189,23 @@ function drive(radius, angle, target) {
 // at every speed the car actually arrives at. "Does it land on the face" is a
 // knife-edge — one sample of it proves nothing. Read from the palette itself, so
 // retuning a preset retunes the test with it.
+// WHAT SETS THE TOP OF A BAND is the load the face has to supply to hold the
+// car round it, v^2 / R. Measured on the small bowl, which is the only one
+// tight enough to reach the limit: 42 m/s holds (4.50 g) and 43 m/s does not
+// (4.71 g) — and it does not fail gently, it lands 38 m PAST the ramp. So the
+// ceiling is ~4.6 g, and a bowl's fastest usable approach is sqrt(4.6 g R):
+//
+//     R=40  ->  42 m/s      R=60  ->  52 m/s      R=74  ->  58 m/s
+//
+// The car tops out at 48.3 m/s, so 60 and 74 are usable flat out and 40 is not.
+// The small bowl used to claim "everything from full speed down to 34", which is
+// backwards — small means SLOWER, not more forgiving. Its band is its real one
+// now, and BOWL_LIMIT_G below asserts every band against the rule rather than
+// leaving three hand-written lists to drift.
+const BOWL_LIMIT_G = 4.6;
 const CASES = [
   ["quarterpipe_bowl", [46, 42], "full racing speed"],
-  ["quarterpipe_bowl_small", [46, 42, 38, 34], "everything from full speed down to 34 m/s"],
+  ["quarterpipe_bowl_small", [42, 38, 34], "42 m/s and below — v^2/R rules out full speed"],
   // The XL bowl trades the band for the shorter flight — it only pops flat out,
   // by design, so it is tested at the one speed it claims.
   ["quarterpipe_bowl_tall", [46], "full racing speed only"],
@@ -212,6 +226,14 @@ for (const [id, band, blurb] of CASES) {
   check(bad.length === 0,
     `"${preset.label}" catches the car at ${blurb} — it pops off the lip and lands back on the same
          face at EVERY speed in the band${bad.length ? `, FAILED at ${bad.join(", ")} m/s` : ""}`);
+  // The band and the geometry have to agree, or the next preset gets a band
+  // copied from a neighbour with a different radius and fails the same way.
+  const top = Math.max(...band);
+  const load = (top * top) / R / 9.81;
+  check(load <= BOWL_LIMIT_G,
+    `...and the top of that band is within what an R=${R} face can hold `
+    + `— ${top} m/s needs ${load.toFixed(2)} g, ceiling ${BOWL_LIMIT_G} g `
+    + `(fastest usable ≈ ${Math.sqrt(BOWL_LIMIT_G * 9.81 * R).toFixed(0)} m/s)`);
 }
 
 // The dead end, asserted so it cannot be walked into again. An over-vertical lip
