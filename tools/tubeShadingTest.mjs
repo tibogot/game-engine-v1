@@ -123,11 +123,27 @@ for (const [id, params, span] of [
   ok(interiorFlat === 0, `${id}: and every interior point is smoothed`, `${interiorFlat} missed`);
 }
 
-// A flat road section has no run of same-zone points longer than its corners, so
-// nothing is flagged and the weld stays the no-op it always was there.
+// The flat road section used to flag NOTHING: its zones were corner-to-corner,
+// so no point ever had two same-zone neighbours. The deck is sampled across its
+// width now (12 samples, to meet buildBankProfile vertex-for-vertex so a bank-in
+// seams to a straight), which gives it real interior runs — so it is subject to
+// the same rule as the tubes rather than exempt from it. Corners still sharp,
+// interiors still smoothed.
 const roadPts = kit.buildProfile(rp, true).pts;
-ok(roadPts.every((p) => !p.smooth), "a kerbed road section flags nothing — its corners are all real",
-  `${roadPts.length} points`);
+{
+  const M = roadPts.length;
+  let boundarySmoothed = 0, interiorFlat = 0;
+  for (let k = 0; k < M; k++) {
+    const same = roadPts[(k - 1 + M) % M].zone === roadPts[k].zone
+      && roadPts[(k + 1) % M].zone === roadPts[k].zone;
+    if (!same && roadPts[k].smooth) boundarySmoothed++;
+    if (same && !roadPts[k].smooth) interiorFlat++;
+  }
+  ok(boundarySmoothed === 0, "a kerbed road section keeps its real corners sharp",
+    `${boundarySmoothed} wrongly smoothed of ${M} points`);
+  ok(interiorFlat === 0, "...and smooths across the sampled deck",
+    `${interiorFlat} missed of ${M} points`);
+}
 
 /* ---------------------------------------------------------------------- */
 console.log("\n3. IT COSTS NOTHING\n");

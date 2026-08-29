@@ -39,7 +39,9 @@ function fakeGizmo() {
     addEventListener() {}, removeEventListener() {},
   };
 }
-const fakeBox = () => ({ visible: false, setFromObject() {} });
+// Stands in for the Box3Helper. It is an Object3D in the real managers, so it
+// grows Object3D calls over time — _syncSelBox() now also drives its matrix.
+const fakeBox = () => ({ visible: false, setFromObject() {}, updateMatrixWorld() {} });
 
 const { PropManager } = await import(G("modularRoadProps.js"));
 const { MoverPropManager } = await import(G("modularRoadMoverProps.js"));
@@ -51,6 +53,10 @@ function bare(Ctor, extra = {}) {
   const m = Object.create(Ctor.prototype);
   m.gizmo = fakeGizmo();
   m.selBox = fakeBox();
+  // MoverPropManager._syncSelBox() unions the visible meshes into this; it was
+  // added after this stub was written, so without it _select() throws before a
+  // single suspend/resume check gets to run.
+  m._selBounds = new THREE.Box3();
   m.selected = null;
   m._gizmoSuspended = false;
   return Object.assign(m, extra);

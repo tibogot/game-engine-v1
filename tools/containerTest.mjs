@@ -204,13 +204,17 @@ console.log("\n=== CONTAINERS STACK ONTO EACH OTHER ===");
     /stack: CONTAINER_SIZE/.test(props));
   // Snapping to the SUPPORTING PROP rather than a world grid is what makes a
   // rotated stack line up as well as an axis-aligned one.
+  // `best` split into bestRoof/bestSide when side-by-side placement landed, and
+  // stackSnap took an optional placement ray. Match the roof candidate by role
+  // rather than by the old single-candidate name.
   check("placement snaps to the prop underneath, copying its rotation",
-    /stackSnap\(typeId, point\)/.test(props) && /quaternion: best\.inst\.root\.quaternion\.clone\(\)/.test(props));
+    /stackSnap\(typeId, point,/.test(props)
+    && /quaternion: bestRoof\.inst\.root\.quaternion\.clone\(\)/.test(props));
   check("...tested inside that prop's own frame, so rotation does not break it",
     /_stackQuat\.copy\(inst\.root\.quaternion\)\.invert\(\)/.test(props));
   check("...and the highest roof wins, so a tower keeps going up",
-    /if \(!best \|\| top > best\.top\)/.test(props));
-  check("the placement brush uses it", /props\.stackSnap\(brush\.id, brush\.point\)/.test(game));
+    /if \(yOk && \(!bestRoof \|\| top > bestRoof\.top\)\)/.test(props));
+  check("the placement brush uses it", /props\.stackSnap\(brush\.id, brush\.point, _brushRay\)/.test(game));
 }
 
 console.log("\n=== THE DECAL IS A QUAD, NOT A SECOND MAP ===");

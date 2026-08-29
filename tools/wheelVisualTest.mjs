@@ -134,10 +134,20 @@ console.log("=== (1) THE WHEEL CANNOT CLIMB INTO THE BODY ===");
     worstSink = Math.max(worstSink, r.sink);
     rows.push(`${step}m→${(r.gap * 100).toFixed(1)}cm`);
   }
+  // NOT a stale threshold. archLiftBody is 1, so the body is meant to absorb the
+  // WHOLE shortfall — but archLiftMax caps the lift at 12 cm, and a 0.2 m step
+  // drives the wheel to about -5.7 cm extension, needing ~15.7 cm. The cap is
+  // the binding constraint, not the clamp this check names. Either archLiftMax
+  // rises to cover the range the mechanism claims, or the claimed range stops
+  // below 0.2 m — a driving-feel call, so it is reported rather than silently
+  // re-baselined.
+  const needed = TIRE.minSuspExt - (worstGap - TIRE.archLiftMax);
   check(
     "over drivable obstacles the body keeps the wheel-arch gap open",
     worstGap >= TIRE.minSuspExt - 1e-6,
-    `worst gap ${(worstGap * 100).toFixed(1)} cm vs target ${(TIRE.minSuspExt * 100).toFixed(1)} cm`,
+    `worst gap ${(worstGap * 100).toFixed(1)} cm vs target ${(TIRE.minSuspExt * 100).toFixed(1)} cm`
+    + ` — needs ${(needed * 100).toFixed(1)} cm of body lift, archLiftMax caps it at `
+    + `${(TIRE.archLiftMax * 100).toFixed(1)} cm`,
   );
   check(
     "…and the wheel is never drawn below the surface it measured",

@@ -76,11 +76,19 @@ console.log(`  throttle only: ${d.turns.toFixed(1)} turns, radius ${d.r.toFixed(
 const hb = donut({ handbrake: true });
 console.log(`  with handbrake: ${hb.turns.toFixed(1)} turns, radius ${hb.r.toFixed(1)} m, mean slip ${hb.slip.toFixed(0)}°`);
 
-check("pivots in a donut-sized circle (was 6.7 m before the lock fix)", d.r < 4.5, `${d.r.toFixed(1)} m`);
+// NOT a threshold to relax. 4.5 m is what makes the throttle-only donut a
+// donut rather than a wide skid, and the steer boost below is still delivering
+// exactly what it was designed to (+22.9° at a standstill, unchanged). What
+// moved is LATERAL GRIP: tools/turnLadderTest.mjs measures ~2.25 g where it
+// measured ~1.3 g when this was tuned, and a car that grips twice as hard
+// spins about a correspondingly wider circle. Restoring the donut is a tyre /
+// steer-boost retune, which is a driving-feel decision — hence left failing
+// rather than re-baselined, because re-baselining would delete the finding.
+check("pivots in a donut-sized circle (was 6.7 m before the lock fix)", d.r < 4.5,
+  `${d.r.toFixed(1)} m — wider than the 6.7 m this fix was meant to tighten; see grip note above`);
 check("keeps rotating rather than washing out", d.turns >= 1.5, `${d.turns.toFixed(1)} turns`);
 check("handbrake tightens it further (that's how you'd really do it)",
   hb.r < d.r, `${d.r.toFixed(1)} m → ${hb.r.toFixed(1)} m`);
-check("the circle is stable, not spiralling out", d.r < 4.5 && d.turns >= 1.5);
 
 // ── THE WHOLE CURVE, NOT ITS ENDPOINTS ──────────────────────────────────────
 // A previous donut fix raised maxSteerAngle 0.55 → 0.95 and raised

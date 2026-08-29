@@ -516,10 +516,15 @@ console.log("\n=== BUT THE ASSIST MUST STILL SAVE A RELEASED ROLL ===");
     on.tilt < 15 && on.tilt < off.tilt,
     `${on.tilt.toFixed(0)}° tilt with the assist vs ${off.tilt.toFixed(0)}° without`,
   );
+  // Both halves matter, and it is the SECOND that is failing: the assist is
+  // supposed to cost nothing laterally, and right now turning it ON more than
+  // doubles the slide over leaving it OFF. The roll levelling above still works,
+  // so the assist is doing its job on the axis it was written for and paying for
+  // it on the one it was not.
   check(
     "and the car does not get shoved sideways on landing",
     on.lateral < 1.0 && on.lateral <= off.lateral + 0.05,
-    `${on.lateral.toFixed(1)} m slide vs ${off.lateral.toFixed(1)} m`,
+    `${on.lateral.toFixed(1)} m slide with the assist vs ${off.lateral.toFixed(1)} m without it`,
   );
 }
 

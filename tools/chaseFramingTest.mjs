@@ -678,9 +678,13 @@ check(worstSpread < 0.5 && totalOff === 0,
 // the camera in FRONT over the top, looking at the nose. The sideways swing gets
 // the azimuth round through 90° instead, so the camera stays astern the whole way.
 const worstFacing = Math.max(...Object.values(pieces).map((r) => r.facing));
+// Name the offender: "worst 0.51" alone sends you re-reading the loop maths,
+// when the loop is fine and it is the corkscrew that swings the boom forward.
+const worstPiece = Object.entries(pieces)
+  .reduce((a, b) => (b[1].facing > a[1].facing ? b : a))[0];
 check(worstFacing < 0,
   `THE CAMERA STAYS BEHIND THE CAR on every piece, loops included: worst boom·forward ` +
-  `${worstFacing.toFixed(2)} (negative = astern).
+  `${worstFacing.toFixed(2)} on ${worstPiece} (negative = astern).
          It gets round a loop's 180° of heading reversal by swinging out to the SIDE — which is also
          what stops the boom passing through the pole. The tight case is the quarterpipe launch,
          where the boom's smoothing lag briefly puts the camera abeam; that is what caps

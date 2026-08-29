@@ -41,8 +41,11 @@ check("it does not compile the asphalt noise graph",
 check("look sync exists", /export function syncCheapAsphaltUniforms/.test(matSrc));
 
 console.log("\n— the game is unchanged —");
-check("createRoadMaterial is still DoubleSide",
-  /side: THREE\.DoubleSide/.test(roadFn));
+// The side became an option (road.html passes FrontSide and has a panel
+// toggle), so match the DEFAULT rather than a bare literal — the point of the
+// check is that the game still gets DoubleSide when it asks for nothing.
+check("createRoadMaterial still defaults to DoubleSide",
+  /side: opts\.side \?\? THREE\.DoubleSide/.test(roadFn));
 check("the game does not import the cheap asphalt shader",
   !/createCheapAsphaltMaterial/.test(gameSrc)
   && !/syncCheapAsphaltUniforms/.test(gameSrc));

@@ -223,8 +223,18 @@ console.log("\n=== WIRED INTO THE GAME ===");
   // EVERY prop, not just the simulated ones. Merging only ever paid off in drive
   // mode — merged geometry cannot move, and every edit re-bakes the lot — which
   // left the editor scaling linearly at 648 draws for 100 poles.
+  // The gate was `() => true`; ad boards are now held back because each
+  // placement wears its own poster map and instancing would pin every copy to
+  // one image. Match the PREDICATE rather than the old literal, so the check
+  // still catches a slide back to "simulated props only" (the 648-draw editor)
+  // without failing every time a documented exception is added.
+  const ctor = game.split("\n").find((l) => l.includes("new PropInstancer(")) ?? "";
+  check("the instancer is constructed at all", ctor.length > 0);
   check("every prop type is instanced, not just the simulated ones",
-    /new PropInstancer\(scene, props, PROP_CATALOG, \(\) => true\)/.test(game));
+    !/sim|physic|dynamic|movable/i.test(ctor), ctor.trim().slice(0, 120));
+  check("...and the only props held back are the per-poster ad boards",
+    ["adboard", "adtotem", "adprism"].every((id) => ctor.includes(id))
+    || /\(\) => true/.test(ctor));
   check("...in BOTH modes, not on the drive-mode switch",
     /propInstancer\.setEnabled\(true\);/.test(game)
     && !/propInstancer\.setEnabled\(on\)/.test(game));

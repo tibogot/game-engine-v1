@@ -145,9 +145,14 @@ console.log("\n=== 4. FLIP STAYS LOCAL TO THE SELECTION ===");
   check("flip reverses the active piece", b.activeParams.curveDir === -d0);
   b.setActivePiece("straight");
   b.setActivePiece("curve");
-  check("...and picking the piece again gives the kit's direction back",
-    b.activeParams.curveDir === d0,
-    `still ${b.activeParams.curveDir} — a flip must not outlive the selection`);
+  // This used to assert the opposite — that a flip must NOT outlive the
+  // selection. The hand is a MODE now (setActivePiece re-applies `this.hand`),
+  // which is what let the palette drop to one tile per shape instead of one per
+  // shape per hand, 195 -> 148. tools/handedTest.mjs owns that contract; all
+  // this needs to check is that the flip did not leak into some other shape.
+  check("...and picking the piece again keeps the flipped hand (it is a mode)",
+    b.activeParams.curveDir === -d0 && b.hand === -d0,
+    `curveDir ${b.activeParams.curveDir}, hand ${b.hand}`);
 }
 
 console.log("\n=== 5. A LOADED TRACK CANNOT RESIZE YOUR NEXT PIECE ===");

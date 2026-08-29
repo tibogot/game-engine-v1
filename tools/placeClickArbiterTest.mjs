@@ -20,7 +20,12 @@ import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const game = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
+// Normalise line endings: core.autocrlf=true means git hands the working tree
+// CRLF, and the anchors below span line breaks (`\n\n  // RIGHT-CLICK...`), so
+// without this the slice silently misses and every check here reports a false
+// failure that looks like a game regression.
+const game = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8")
+  .replace(/\r\n/g, "\n");
 
 let fail = 0;
 const check = (n, c, d = "") => { console.log(`${c ? "PASS" : "FAIL"}  ${n}${d ? "  — " + d : ""}`); if (!c) fail++; };
