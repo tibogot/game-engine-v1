@@ -17,8 +17,10 @@ import {
   followSpeed,
   heldSpeed,
   isFollowRoad,
+  PIECE_PARAM_DEFAULTS,
 } from "./modularRoadKit.js";
 import { solveGapArc } from "./gapArc.js";
+import { sparse, resolve } from "./modularRoadTrackIO.js";
 
 /**
  * THE KIT'S SHIPPED NUMBERS, snapshotted at import — before anything can write
@@ -36,8 +38,26 @@ import { solveGapArc } from "./gapArc.js";
  *
  * `pieceParams` itself is left alone: the piece lab drives it, and the save
  * format still carries it. Nothing on the PLACEMENT path reads it any more.
+ *
+ * The snapshot now lives in the kit, beside the object it is a snapshot OF, so
+ * that the save format and the placement path diff against the SAME baseline —
+ * two independently-taken copies of "the shipped numbers" is exactly the kind
+ * of near-duplicate that drifts apart quietly. It is frozen and `onChange`-free;
+ * nothing here ever wrote to it, only spread it.
  */
-const PIECE_DEFAULTS = { ...pieceParams };
+const PIECE_DEFAULTS = PIECE_PARAM_DEFAULTS;
+
+/**
+ * A saved piece's sparse `pp`, back to the full set the builder works in.
+ *
+ * @param {object} saved sparse overrides from the track file
+ * @param {Set<string>|null} drop keys to take from the defaults regardless
+ */
+function resolvePieceParams(saved, drop) {
+  const pp = resolve(PIECE_DEFAULTS, saved);
+  if (drop) for (const key of drop) pp[key] = PIECE_DEFAULTS[key];
+  return pp;
+}
 
 /** Shared empty geometry used to drop the selection-highlight's reference to a
  *  piece geometry without disposing that (shared) geometry. */
@@ -4180,7 +4200,18 @@ export class ModularRoadBuilder {
    * stored chainId + connectors).
    * @param {{id:string, chainId?:number, pp:object, edges?:boolean, connectorIn:number[]}[]} entries
    */
-  importTrackPieces(entries) {
+  /**
+   * @param {object[]} entries piece records, already migrated to the current
+   *   track version by modularRoadTrackIO — this method never sees a v1 file.
+   * @param {object} [opts]
+   * @param {Set<string>|null} [opts.dropKeys] params to IGNORE from the file and
+   *   take from PIECE_DEFAULTS instead. This is the "rebase" half of the legacy
+   *   -pin story: a v1 track's defaults-of-the-day snapshot cannot be told apart
+   *   from a real choice once it is loaded, so the decision is made out in
+   *   importTrack (which can still see the v1 shape) and handed down as a key
+   *   list.
+   */
+  importTrackPieces(entries, { dropKeys = null } = {}) {
     this.clear();
     if (!Array.isArray(entries)) return;
     for (const e of entries) {
@@ -4199,7 +4230,13 @@ export class ModularRoadBuilder {
       // which is why right-click stopped selecting anything. It only ever affected
       // tracks loaded from disk, so the history tests — which build with place()
       // — never saw it.
-      const piece = this._makePieceEntry(id, e.chainId ?? 0, connectorIn, e.pp, e.edges ?? true);
+      // RESOLVED TO A FULL SET before it goes anywhere near the piece record.
+      // `pp` is sparse in the FILE only: buildPiece reads plenty of params
+      // without a `?? pieceParams` fallback, and every piece in memory is
+      // expected to carry a complete set, so the sparse shape stops at this
+      // line rather than leaking into the builder.
+      const pp = resolvePieceParams(e.pp, dropKeys);
+      const piece = this._makePieceEntry(id, e.chainId ?? 0, connectorIn, pp, e.edges ?? true);
       // Saved absolute pin for a free-placed piece; the tilt recovery below reads
       // it, and rebuildAll uses it in place of the running connector.
       piece.detached = !!e.detached;
@@ -4467,15 +4504,32 @@ export class ModularRoadBuilder {
    * @returns {{id:string, chainId:number, pp:object, edges:boolean,
    *            connectorIn:number[], detached?:boolean, pinnedIn?:number[]}[]}
    */
+  /**
+   * Piece records in the track-file shape.
+   *
+   * `pp` goes out SPARSE — only the params that differ from PIECE_DEFAULTS.
+   * Every piece record in memory carries the full set (see _makePieceEntry, and
+   * the note on PIECE_DEFAULTS about why a tile resolves to a complete object),
+   * so this is the one place the two representations meet.
+   *
+   * The saving is not the point, though it is large: rushline's 41 pieces wrote
+   * 74 params each and only 10 of those keys ever differed between pieces. The
+   * point is that an OMITTED key means "no opinion", so a later retune of
+   * `bankCurl` or `jumpAngle` reaches this track instead of being overruled by
+   * a copy of the value it happened to have on the day it was saved.
+   *
+   * `edges` is written only when false for the same reason — `?? true` on the
+   * way back in is the default, so storing it means storing a choice.
+   */
   exportTrackPieces() {
     return this.pieces.map((p) => {
       const e = {
         id: p.id,
         chainId: p.chainId ?? 0,
-        pp: { ...p.pp },
-        edges: p.edges ?? true,
+        pp: sparse(p.pp, PIECE_DEFAULTS),
         connectorIn: p.connectorIn.toArray(),
       };
+      if (p.edges === false) e.edges = false;
       if (p.detached && p.pinnedIn) {
         e.detached = true;
         e.pinnedIn = p.pinnedIn.toArray();

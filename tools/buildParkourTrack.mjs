@@ -23,6 +23,8 @@ const GAME = join(ROOT, "games/modular-road-v3");
 const { ModularRoadBuilder, CATEGORY_PRESETS } = await import(
   pathToFileURL(join(GAME, "modularRoadBuilder.js")).href);
 const { solveGapArc } = await import(pathToFileURL(join(GAME, "gapArc.js")).href);
+const { migrateTrack } = await import(pathToFileURL(join(GAME, "modularRoadTrackIO.js")).href);
+const KIT = await import(pathToFileURL(join(GAME, "modularRoadKit.js")).href);
 
 // The car, so the jumps are sized for the thing that will drive them.
 const TOP_SPEED = 50;      // TIRE.topSpeed
@@ -344,7 +346,19 @@ check(`nothing sinks underground (lowest point ${Math.min(...ys).toFixed(0)} m)`
 // Same envelope as the shipped tracks, so "Load track" takes it unchanged. The
 // non-piece settings are copied from rushline rather than invented: they are the
 // look and the road width this kit was tuned at.
-const base = JSON.parse(readFileSync(join(GAME, "rushline.json"), "utf8"));
+//
+// THROUGH THE MIGRATION, not spread raw: rushline is still a v1 file, and
+// copying its envelope verbatim would stamp a v1 version number onto pieces the
+// builder now exports in the v2 sparse shape. Running it up first means this
+// generator emits exactly what the editor's own Save button emits — which is
+// the whole reason it copies a shipped track instead of inventing settings.
+const defaults = {
+  roadParams: KIT.ROAD_PARAM_DEFAULTS,
+  guardrailParams: KIT.GUARDRAIL_PARAM_DEFAULTS,
+  pieceParams: KIT.PIECE_PARAM_DEFAULTS,
+};
+const raw = JSON.parse(readFileSync(join(GAME, "rushline.json"), "utf8"));
+const base = migrateTrack(raw, defaults).data;
 const out = {
   ...base,
   savedAt: new Date().toISOString(),

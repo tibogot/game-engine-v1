@@ -273,6 +273,32 @@ export const pieceParams = {
 };
 
 /* ----------------------------------------------------------------------- */
+/* PRISTINE DEFAULTS — the baseline a saved track is diffed against.        */
+/*                                                                         */
+/* Captured HERE, at module init, because the three objects above are the   */
+/* live, mutable ones the dev panel writes straight into: by the time a     */
+/* save runs, `pieceParams.jumpAngle` is whatever the last slider left it   */
+/* at, and nothing in memory remembers any more what the build shipped      */
+/* with. These frozen copies are that memory.                              */
+/*                                                                         */
+/* They are what lets a track file say "I did not choose this" — see        */
+/* `sparse()` in modularRoadTrackIO.js. A key ABSENT from a save resolves   */
+/* against whatever THIS build thinks is right, so retuning a default flows */
+/* into every track that never overrode it, while a value the user actually */
+/* dialled in differs from the baseline and is written out verbatim.        */
+/*                                                                         */
+/* `onChange` is stripped rather than copied: it is a live callback, never  */
+/* part of the format, and leaving it in would make every diff compare a    */
+/* function against `null`.                                                 */
+/* ----------------------------------------------------------------------- */
+
+const _pristine = (o) => { const c = { ...o }; delete c.onChange; return Object.freeze(c); };
+
+export const ROAD_PARAM_DEFAULTS = _pristine(roadParams);
+export const GUARDRAIL_PARAM_DEFAULTS = _pristine(guardrailParams);
+export const PIECE_PARAM_DEFAULTS = _pristine(pieceParams);
+
+/* ----------------------------------------------------------------------- */
 /* Cross-section profile                                                    */
 /* ----------------------------------------------------------------------- */
 

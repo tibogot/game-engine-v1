@@ -7,9 +7,9 @@
 // or holds it unless someone asks — and that when they do ask, they get exactly
 // what they used to get.
 import { register } from "node:module";
-import { readFileSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
+import { loadTrackFile } from "./loadTrackFile.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 register("./threeWebgpuHook.mjs", import.meta.url);
@@ -174,12 +174,11 @@ const conn = KIT.initialConnector();
 
 // ── 5. What it saves, on a real track ──────────────────────────────────────
 {
-  const track = JSON.parse(readFileSync(join(ROOT, "games/modular-road-v3/rushline.json"), "utf8"));
-  const rp = { ...KIT.roadParams, ...(track.roadParams ?? {}) };
-  const gp = { ...KIT.guardrailParams, ...(track.guardrailParams ?? {}) };
+  // Through loadTrackFile — a v2 track's per-piece params are sparse.
+  const { rp, gp, pieces } = await loadTrackFile(ROOT, "games/modular-road-v3/rushline.json");
   let mirrorVerts = 0;
   const t0 = performance.now();
-  for (const e of track.pieces) {
+  for (const e of pieces) {
     try {
       const b2 = KIT.buildPiece(e.id, new THREE.Matrix4().fromArray(e.connectorIn), e.pp, rp, gp,
         e.edges ?? true, { mirrorRail: true });
@@ -188,7 +187,7 @@ const conn = KIT.initialConnector();
   }
   const withMirror = performance.now() - t0;
   const t1 = performance.now();
-  for (const e of track.pieces) {
+  for (const e of pieces) {
     try { KIT.buildPiece(e.id, new THREE.Matrix4().fromArray(e.connectorIn), e.pp, rp, gp, e.edges ?? true); }
     catch {}
   }

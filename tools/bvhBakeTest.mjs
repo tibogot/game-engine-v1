@@ -5,9 +5,9 @@
 // — every query the car makes reads this buffer — so the assertion is exact
 // equality against a verbatim copy of the previous implementation.
 import { register } from "node:module";
-import { readFileSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
+import { loadTrackFile } from "./loadTrackFile.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 register("./threeWebgpuHook.mjs", import.meta.url);
@@ -57,12 +57,11 @@ function bakeOld(meshes) {
 
 // Real track geometry, plus a couple of awkward shapes the road really does
 // hand in: a non-indexed geometry and a nested/rotated transform.
-const track = JSON.parse(readFileSync(join(ROOT, "games/modular-road-v3/rushline.json"), "utf8"));
-const rp = { ...KIT.roadParams, ...(track.roadParams ?? {}) };
-const gp = { ...KIT.guardrailParams, ...(track.guardrailParams ?? {}) };
+// Through loadTrackFile — a v2 track's per-piece params are sparse.
+const { rp, gp, pieces } = await loadTrackFile(ROOT, "games/modular-road-v3/rushline.json");
 
 const decks = [];
-for (const e of track.pieces) {
+for (const e of pieces) {
   let b;
   try {
     b = KIT.buildPiece(e.id, new THREE.Matrix4().fromArray(e.connectorIn), e.pp, rp, gp, e.edges ?? true);

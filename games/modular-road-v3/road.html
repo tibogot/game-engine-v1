@@ -414,8 +414,10 @@
           <details class="palette-group" open>
             <summary class="palette-group-label">Track</summary>
             <div class="palette-toolbar palette-toolbar-sub">
-            <button id="road-save" class="palette-btn" type="button">Save track</button>
-            <button id="road-load" class="palette-btn" type="button">Load track</button>
+            <button id="road-save" class="palette-btn" type="button"
+              title="Saves the layout exactly, and only the settings you actually changed. Anything you left at its default is not written, so the track picks up later engine tuning instead of being frozen at the values it had today.">Save track</button>
+            <button id="road-load" class="palette-btn" type="button"
+              title="Load a track (or a look file exported from the piece lab).&#10;&#10;Shift+click to REBASE: tracks saved in the old format pinned every setting at the defaults of that day, which is why an old track can keep the shape of things you have changed since. Shift+Load drops those pins and takes the current values — your per-piece edits are kept either way. The console lists what would change.">Load track</button>
             <!-- ONE preset, deliberately.
                  There used to be five (Apex, Rushline, Apex Parkour, Demo, Big
                  circuit). They were all authored against OLDER roadParams, so a

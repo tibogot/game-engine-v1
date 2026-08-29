@@ -6,9 +6,9 @@
 // coincide. A post 4 cm off its beam is the exact bug placePosts already carries
 // a comment about, so "close enough" is not the bar.
 import { register } from "node:module";
-import { readFileSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
+import { loadTrackFile } from "./loadTrackFile.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 register("./threeWebgpuHook.mjs", import.meta.url);
@@ -162,11 +162,10 @@ for (const pieceId of ["straight", "curve", "banked", "loop", "rounded_end"]) {
 
 // ── 4. The whole-track saving ──────────────────────────────────────────────
 {
-  const track = JSON.parse(readFileSync(join(ROOT, "games/modular-road-v3/rushline.json"), "utf8"));
-  const rp = { ...KIT.roadParams, ...(track.roadParams ?? {}) };
-  const gp = { ...KIT.guardrailParams, ...(track.guardrailParams ?? {}) };
+  // Through loadTrackFile — a v2 track's per-piece params are sparse.
+  const { rp, gp, pieces } = await loadTrackFile(ROOT, "games/modular-road-v3/rushline.json");
   let beamVerts = 0, posts = 0, templates = new Set();
-  for (const e of track.pieces) {
+  for (const e of pieces) {
     let b;
     try { b = KIT.buildPiece(e.id, new THREE.Matrix4().fromArray(e.connectorIn), e.pp, rp, gp, e.edges ?? true); }
     catch { continue; }
@@ -182,7 +181,7 @@ for (const pieceId of ["straight", "curve", "banked", "loop", "rounded_end"]) {
   check("rail beam geometry is a fraction of what it was", beamVerts < 280330 * 0.3,
     `${beamVerts} vs 280330`);
   check("the whole track's posts share very few templates", templates.size <= 3,
-    `${templates.size} templates for ${track.pieces.length} pieces`);
+    `${templates.size} templates for ${pieces.length} pieces`);
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nall good");

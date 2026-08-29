@@ -905,6 +905,16 @@ export function createRoadMaterial(opts = {}) {
   applyBloomMRT(mat, neonNode ? neonNode.add(lineGlow) : lineGlow);
 
   mat._roadUniforms = u;
+  // PRISTINE LOOK BASELINE — captured on the first material this session, at the
+  // one instant it is guaranteed untouched: the uniforms exist, and no caller
+  // has had the chance to `syncRoadUniforms` a saved look onto them yet.
+  //
+  // There is no literal table to read this from — the look defaults live spread
+  // through the `uniform(...)` calls above — so reading them back off a fresh
+  // material IS the declaration. Later materials (the wet rebuild swaps the
+  // class) are skipped: by then a look is usually already applied, and the
+  // baseline must describe the BUILD, not the session.
+  if (!_roadLookDefaults) _roadLookDefaults = readRoadLook(mat);
   /**
    * The packed asphalt surface — vec4(macro, aggregate, wheelPath, aggFade).
    *
@@ -1488,6 +1498,21 @@ export const ROAD_LOOK_NUMBERS = [
 ];
 
 export const ROAD_LOOK_KEYS = [...ROAD_LOOK_COLORS, ...ROAD_LOOK_NUMBERS];
+
+/** Filled in by the first makeRoadMaterial — see the note at `_roadUniforms`. */
+let _roadLookDefaults = null;
+
+/**
+ * The look this build ships with, or null before any road material exists.
+ *
+ * The save path diffs against it so a track records only the colours and
+ * numbers you actually changed. Null is handled by the caller (it falls back to
+ * writing the look in full), because a track saved before the deck was built is
+ * not a case worth having a second baseline for.
+ */
+export function roadLookDefaults() {
+  return _roadLookDefaults;
+}
 
 const _readColor = new THREE.Color();
 

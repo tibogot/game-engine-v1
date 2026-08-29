@@ -8,6 +8,7 @@ import { register } from "node:module";
 import { readFileSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
+import { loadTrackFile } from "./loadTrackFile.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 register("./threeWebgpuHook.mjs", import.meta.url);
@@ -15,14 +16,14 @@ const THREE = await import("three/webgpu");
 const { MeshBVH } = await import("three-mesh-bvh");
 const KIT = await import(pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadKit.js")).href);
 
-const track = JSON.parse(
-  readFileSync(join(ROOT, process.argv[2] ?? "games/modular-road-v3/rushline.json"), "utf8"));
-const rp = { ...KIT.roadParams, ...(track.roadParams ?? {}) };
-const gp = { ...KIT.guardrailParams, ...(track.guardrailParams ?? {}) };
+// Through loadTrackFile, not readFileSync: a v2 track stores each piece's
+// params SPARSELY, and buildPiece reads them with no fallback. See that module.
+const { track, rp, gp, pieces } = await loadTrackFile(
+  ROOT, process.argv[2] ?? "games/modular-road-v3/rushline.json");
 
 // Build the deck meshes the way bakeCollision does.
 const meshes = [];
-for (const e of track.pieces) {
+for (const e of pieces) {
   let b;
   try {
     b = KIT.buildPiece(e.id, new THREE.Matrix4().fromArray(e.connectorIn), e.pp, rp, gp, e.edges ?? true);

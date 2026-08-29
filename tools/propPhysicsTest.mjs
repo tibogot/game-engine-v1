@@ -584,9 +584,37 @@ console.log("\n=== SAVED WITH THE TRACK, AND OUT OF THE COLLISION BAKE ===");
   // satisfying this check from inside it.
   check("...and that texture is built once for the whole catalog, not per prop",
     /if \(_poleBandTex\) return _poleBandTex;/.test(uncommented(propsSrc)));
-  const io = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadTrackIO.js"), "utf8");
-  check("track export includes props", /props:\s*props\.exportInstances\(\)/.test(io));
-  check("track import restores them", /importInstances\(data\.props\)/.test(io));
+  // ROUND-TRIPPED, NOT GREPPED. These two used to match the literal source of
+  // exportTrack/importTrack, and they broke the moment that function was
+  // restructured — while still being perfectly true. modularRoadTrackIO has no
+  // runtime imports at all (its manager types are JSDoc-only), so the real
+  // thing runs here against stubs and the assertion survives a refactor.
+  const trackIO = await import(
+    pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadTrackIO.js")).href);
+  const savedProps = [{ type: "cone", position: [1, 2, 3], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] }];
+  const stubMgr = (out) => ({
+    exportInstances: () => out,
+    importInstances(v) { this.got = v; },
+    exportLayout: () => [],
+    importLayout(v) { this.got = v; },
+  });
+  const propsStub = stubMgr(savedProps);
+  const ioCtx = (b, p) => ({
+    builder: b, props: p, movers: stubMgr([]), portals: stubMgr([]),
+    roadParams: {}, guardrailParams: {}, pieceParams: {}, portalParams: {}, roadLook: {},
+  });
+  const savedTrack = trackIO.exportTrack(
+    ioCtx({ exportTrackPieces: () => [] }, propsStub));
+  check("track export includes props",
+    JSON.stringify(savedTrack.props) === JSON.stringify(savedProps));
+
+  const loadedInto = stubMgr([]);
+  const res = trackIO.importTrack(
+    JSON.parse(JSON.stringify(savedTrack)),
+    ioCtx({ importTrackPieces() {}, resetHistory() {}, count: 0 }, loadedInto));
+  check("track import restores them",
+    res.ok && JSON.stringify(loadedInto.got) === JSON.stringify(savedProps),
+    res.ok ? "" : res.error);
   const game = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
   check("physics re-syncs after a track import (positions become the new home)",
     /propPhysics\.sync\(\)/.test(game));

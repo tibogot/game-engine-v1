@@ -89,6 +89,7 @@ import {
   createRoadGlassMaterial,
   createTubeMaterial,
   readRoadLook,
+  roadLookDefaults,
   syncRoadUniforms,
   syncTubeUniforms,
   ROAD_LOOK_FORMAT,
@@ -107,6 +108,9 @@ import {
   pieceParams,
   guardrailParams,
   startNewLineDist,
+  ROAD_PARAM_DEFAULTS,
+  GUARDRAIL_PARAM_DEFAULTS,
+  PIECE_PARAM_DEFAULTS,
 } from "./modularRoadKit.js";
 import { bakeRoadThumbnails, createThumbnailSprites } from "./modularRoadThumbnails.js";
 import {
@@ -3955,6 +3959,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // however it got there.
   const roadLook = readRoadLook(roadMaterial);
   _roadLookRef = roadLook;
+  /**
+   * The pristine baselines a save is diffed against and a load resolves onto.
+   *
+   * Assembled per call rather than once, because `roadLookDefaults()` is null
+   * until the first road material exists — the deck is built during boot, so by
+   * the time anything can press Save it is populated, but a ctx captured at
+   * module scope would have frozen the null.
+   *
+   * A null block is not a failure: modularRoadTrackIO falls back to writing
+   * that block in full, which is exactly what v1 did.
+   */
+  const trackDefaults = () => ({
+    roadParams: ROAD_PARAM_DEFAULTS,
+    guardrailParams: GUARDRAIL_PARAM_DEFAULTS,
+    pieceParams: PIECE_PARAM_DEFAULTS,
+    portalParams: DEFAULT_PORTAL_PARAMS,
+    roadLook: roadLookDefaults(),
+  });
+
   const trackCtx = () => {
     Object.assign(roadLook, readRoadLook(roadMaterial));
     return {
@@ -3967,8 +3990,29 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       pieceParams,
       portalParams: portals.params,
       roadLook,
+      defaults: trackDefaults(),
     };
   };
+
+  /**
+   * Say out loud what a load did to the track beyond placing its pieces.
+   *
+   * This exists because the old format's failures were all SILENT: a track came
+   * back with a param pinned at a value the build had moved on from, or with a
+   * key quietly ignored, and the only symptom was that it drove differently
+   * from how you remembered. A load that changes the numbers has to be able to
+   * name them.
+   */
+  function reportTrackLoad(res, label) {
+    if (!res?.notes?.length) return;
+    for (const n of res.notes) console.info(`[ModularRoad-v3] ${label}: ${n}`);
+    if (res.legacyPins?.length && !res.rebased) {
+      console.info(
+        `[ModularRoad-v3] ${label}: hold Shift while loading to rebase these onto the current build.`,
+      );
+      console.table(res.legacyPins);
+    }
+  }
 
   /**
    * Push the mirror at the material — after any import that touched it.
@@ -4028,6 +4072,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   });
   syncSnapBtn();
 
+  // REBASE opt-in, latched on the button rather than read at load time: the file
+  // input's `change` fires whenever the OS dialog closes, by which point no
+  // modifier is held any more. Shift+Load means "this old track may take the
+  // current build's tuning"; a plain Load never changes a track's shape.
+  let loadRebase = false;
+
   const trackFileInput = createTrackFileInput((data) => {
     // The same button also takes a LOOK file exported from road-piece-lab.html.
     // It is not a track — it repaints the one already loaded and leaves the
@@ -4041,12 +4091,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       console.info("[ModularRoad-v3] road look applied from file");
       return;
     }
-    const res = importTrack(data, trackCtx());
+    // CONSUMED, not just read. The flag is latched on the button and would
+    // otherwise stay true for every later load — including one started some
+    // other way — so a single Shift+Load would quietly become a mode.
+    const rebaseLegacy = loadRebase;
+    loadRebase = false;
+    const res = importTrack(data, trackCtx(), { rebaseLegacy });
     if (!res.ok) {
       console.warn("[ModularRoad-v3] track load failed:", res.error);
       alert(`Could not load track: ${res.error}`);
       return;
     }
+    reportTrackLoad(res, "track");
     applyRoadLook();
     gameSpawn = data.spawn ?? null;
     updateSpawnMarker();
@@ -4059,7 +4115,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     paletteUi.refreshStatus();
   });
   document.body.appendChild(trackFileInput);
-  onClick("road-load", () => trackFileInput.click());
+  onClick("road-load", (e) => {
+    loadRebase = !!e?.shiftKey;
+    trackFileInput.click();
+  });
 
   // ── SHIPPED PRESET TRACKS ───────────────────────────────────────────────────
   // Same importTrack path as the file picker above, just fetched instead of
@@ -4082,6 +4141,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         const data = await res.json();
         const out = importTrack(data, trackCtx());
         if (!out.ok) throw new Error(out.error);
+        reportTrackLoad(out, idleLabel ?? btnId);
         applyRoadLook();
         gameSpawn = data.spawn ?? null;
         updateSpawnMarker();
