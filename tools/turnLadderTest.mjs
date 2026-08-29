@@ -113,12 +113,12 @@ const lo = Math.min(...held), hi = Math.max(...held);
 ok(hi - lo < 0.15, "the car holds a steady g however fast it is going",
   `${lo.toFixed(2)}–${hi.toFixed(2)} g across 15–40 m/s, spread ${(hi - lo).toFixed(2)}`);
 // The number the ladder's tile comment quotes. If the tyre model changes, this
-// is what tells you the comment (and the radii) need revisiting — which is
-// exactly what it did: the figure was 1.3 g when the ladder was built and the
-// car holds ~2.25 g now. The RUNG SPEEDS below did not move with it (they are
-// steering-lock limited at the tight end, not grip limited), so the radii still
-// stand and only the quoted figure needed correcting.
-const A = 2.25;
+// is what tells you the comment (and the radii) need revisiting — and it earned
+// its keep: it caught gripRear being raised 1.0 -> 1.5, which took this to
+// 2.25 g and turned the car into an understeering one that could not pivot.
+// Reverted in the vehicle rather than re-baselined here, because the number was
+// the symptom and not the decision.
+const A = 1.3;
 ok(lo <= A && A <= hi, `${A} g is inside the measured band, so the tile comment is sound`,
   `${lo.toFixed(2)}–${hi.toFixed(2)} g`);
 

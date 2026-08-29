@@ -5615,17 +5615,17 @@ export const CATEGORY_PRESETS = {
      * A flat corner is grip-limited: v_max = sqrt(R · a). MEASURED on the real
      * vehicle over a flat plane, holding a steering angle and reading v·omega
      * once it settles (tools/turnLadderTest.mjs), sustained cornering is
-     * 2.25–2.27 g — flat across every speed from 15 to 40 m/s (measured by
-     * tools/turnLadderTest.mjs, which is what keeps this honest). It read
-     * 1.26–1.30 g when the ladder was first built; the tyre model has since
-     * roughly doubled the lateral grip. Check the measurement is a CORNER and
-     * not a PIROUETTE before believing a high number — an early version of it
-     * reported 8.4 g at a 3 m radius, which is a car rotating on the spot. The
-     * 2.25 figure holds at R≈72 m with sideslip under 15°, so it is real.
+     * 1.26–1.30 g — flat across every speed from 15 to 40 m/s, measured by
+     * tools/turnLadderTest.mjs, which is what keeps this honest. The vehicle
+     * file's own comment assumes 1.5 g, so its corner speeds are ~7% optimistic;
+     * the numbers below use the measured 1.3. Anything much above that in a rig
+     * like this is a PIROUETTE — an early version of the measurement reported
+     * 8.4 g at a 3 m radius, which is a car rotating on the spot.
      *
-     * The rung speeds below did NOT move with it, because at the tight end they
-     * are limited by steering lock rather than by grip — so the radii still
-     * stand as measured.
+     * A high reading can also be a car that has stopped cornering and started
+     * PLOUGHING: gripRear was 1.5 for two days and this measured 2.25 g, but at
+     * a 74 m radius instead of 6 m. Read the radius next to the g before
+     * believing either.
      *
      * That gives the ladder its reason to exist, because the old tab could not
      * span the car. The straights run to 48.3 m/s (174 km/h) and the widest
