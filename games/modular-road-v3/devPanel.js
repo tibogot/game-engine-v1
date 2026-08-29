@@ -956,29 +956,41 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Strength</span>
+            <span class="prop-label">Crest float</span>
             <div class="prop-value">
-              <input type="range" id="dv-hold-g" min="0" max="16" step="0.5" />
-              <span class="prop-num" id="dv-hold-g-v"></span>
+              <input type="range" id="dv-hold-floor" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-hold-floor-v"></span>
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Settling</span>
+            <span class="prop-label">Snap back</span>
             <div class="prop-value">
-              <input type="range" id="dv-hold-rate" min="6" max="50" step="1" />
-              <span class="prop-num" id="dv-hold-rate-v"></span>
+              <input type="range" id="dv-hold-corr" min="0" max="30" step="1" />
+              <span class="prop-num" id="dv-hold-corr-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Ceiling</span>
+            <div class="prop-value">
+              <input type="range" id="dv-hold-g" min="0" max="20" step="0.5" />
+              <span class="prop-num" id="dv-hold-g-v"></span>
             </div>
           </div>
           <div class="dv-hint">
-            On slopes, crests, grades and banks the car is <b>pulled back onto the
-            road</b> when the surface drops away from under a wheel — without it a
-            30 m hill that climbs 10 m throws the car off above ~65 km/h, because
-            following that curve at speed needs several g and gravity brings one.
-            Ramps (jump, dive, gap, quarterpipes) are excluded and launch exactly
-            as before. <b>Strength</b> is the ceiling in car weights: turn it down
-            to feel the crests more, to 0 for the old car. Geometry that needs
-            more than the ceiling still launches — which is what keeps
-            <i>Hill Jump</i> a jump.
+            On slopes, crests, grades and banks the car <b>supplies the
+            centripetal force the curve needs</b> so it tracks the road instead of
+            flying off it — without it a 30 m hill that climbs 10 m launches above
+            ~65 km/h, because following that curve at speed takes several g and
+            gravity brings one. Ramps (jump, dive, gap, quarterpipes) are excluded
+            and launch exactly as before.<br /><br />
+            <b>Crest float</b> is the tyre load left under the car at the top of a
+            brow: <i>low</i> = it goes properly light over crests (0 = weightless,
+            and grip goes with it), <i>high</i> = planted, and at 1 it reads as a
+            magnet. <b>Snap back</b> is how hard the car is put back when it does
+            fall behind the road — turn this down first if crests feel too glued.
+            <b>Ceiling</b> caps the assist in car weights; geometry needing more
+            still launches, which is what keeps <i>Hill Jump</i> a jump. Ceiling 0
+            gives the old car back.
           </div>
         </div>
       </div>
@@ -2288,10 +2300,14 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-drag", AERO, "drag");
   slider("dv-down", AERO, "downforce", (v) => v.toFixed(1));
 
-  // Road hold. `maxG` is the honest knob — the servo saturates against it on any
-  // slope steep enough to matter, so it is what "how magnetic is this" means.
+  // Road hold. `loadFloor` is the one to reach for: the assist asks only for
+  // what the curve demands, so the CEILING is rarely what the car is feeling —
+  // how much load is left on the tyres over the brow is.
+  slider("dv-hold-floor", ROAD_HOLD, "loadFloor",
+    (v) => (v <= 0 ? "weightless" : v >= 1 ? "planted" : `${Math.round(v * 100)}%`));
+  slider("dv-hold-corr", ROAD_HOLD, "correctRate",
+    (v) => (v > 0 ? `${(1000 / v).toFixed(0)} ms` : "off"));
   slider("dv-hold-g", ROAD_HOLD, "maxG", (v) => (v ? `${v.toFixed(1)}g` : "off"));
-  slider("dv-hold-rate", ROAD_HOLD, "rate", (v) => `${(1000 / v).toFixed(0)} ms`);
   const holdBtn = $("#dv-hold-on");
   const syncHold = () => {
     holdBtn.textContent = ROAD_HOLD.enabled ? "On" : "Off";

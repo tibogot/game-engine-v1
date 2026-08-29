@@ -4286,7 +4286,7 @@ export class ModularRoadBuilder {
     // radius over the top, which unaided is air above 40 km/h on a straight the
     // car arrives at 100+ on; road hold carries it to ~155 (see ROAD_HOLD), and
     // a little length on top of that puts it out of reach entirely.
-    put("crest", { slopeLength: 34, slopeRise: 4 });
+    put("crest", { slopeLength: 44, slopeRise: 4 });
     put("straight", { straightLength: 24 });
     put("finish", { gameLineLength: 18 });
 
@@ -5397,16 +5397,27 @@ export const CATEGORY_PRESETS = {
     },
     /*
      * COMPACT SLOPES — one piece, level to level. Still useful, and no longer
-     * secretly a jump: the profile is two parabolic vertical curves with the
-     * convex half given the long side (see slopeShape), which is ~1.9× gentler
-     * over the crest than the smoothstep it replaced.
+     * secretly a jump: the profile is two parabolic vertical curves (slopeShape)
+     * rather than the smoothstep it started as.
      *
-     * SIZED AGAINST BOTH CEILINGS. Curvature decides whether the car stays on
-     * the road; peak GRADE (2·H/L on this profile) decides whether it can climb
-     * at all, and RWD runs out of rear tyre around 42° (slopeClimbLimit.mjs).
-     * The old Up Steep was 26 m / 16 m — a 43° peak grade the car could not
-     * climb, over a 7 m crest it could not follow above 30 km/h. Both numbers
-     * moved: these trade a little compactness for pieces that work.
+     * SIZED AGAINST THREE CEILINGS, and the third one is why these got longer
+     * again after the first pass at them:
+     *
+     *  • CONVEX curvature decides whether the car flies off the crest. ROAD_HOLD
+     *    covers up to 12.7 g of it.
+     *  • CONCAVE curvature decides whether the car is driven THROUGH the road at
+     *    the bottom of the climb. Nothing covers that but the strut, which runs
+     *    out at 14.5 g — and the first version of these presets sailed past it
+     *    (16.3 g on Up Steep) and put the wheels 31 cm inside the deck. See
+     *    SLOPE_CONCAVE_FRAC.
+     *  • peak GRADE (2·H/L here) decides whether the car can climb it at all;
+     *    RWD runs out of rear tyre near 42° (tools/slopeClimbLimit.mjs).
+     *
+     * These sit at 4–7.5 g on the first two with the grade well inside the
+     * third, so nothing is at its limit. That costs length — a 14 m rise wants
+     * 42 m of run rather than 26 — and length is exactly what a compact slope
+     * was trying not to spend. If you want the height without the road, that is
+     * what the graded climb above is for.
      */
     {
       id: "slope_up_gentle",
@@ -5418,13 +5429,13 @@ export const CATEGORY_PRESETS = {
       id: "slope_up_medium",
       label: "Up Medium",
       base: "slope",
-      params: { slopeLength: 32, slopeRise: 10 },
+      params: { slopeLength: 36, slopeRise: 10 },
     },
     {
       id: "slope_up_steep",
       label: "Up Steep",
       base: "slope",
-      params: { slopeLength: 34, slopeRise: 14 },
+      params: { slopeLength: 42, slopeRise: 14 },
     },
     // Descents — same shape, negative rise (the split mirrors with it, so a
     // descent is exactly the climb driven backwards).
@@ -5438,13 +5449,13 @@ export const CATEGORY_PRESETS = {
       id: "slope_down_medium",
       label: "Down Medium",
       base: "slope",
-      params: { slopeLength: 32, slopeRise: -10 },
+      params: { slopeLength: 36, slopeRise: -10 },
     },
     {
       id: "slope_down_steep",
       label: "Down Steep",
       base: "slope",
-      params: { slopeLength: 34, slopeRise: -14 },
+      params: { slopeLength: 42, slopeRise: -14 },
     },
     // Crests — net-zero bump / dip (rise to the middle, level at both ends).
     // A crest MUST turn the car up and back down inside its own length, so it is
@@ -5454,13 +5465,13 @@ export const CATEGORY_PRESETS = {
       id: "slope_hill",
       label: "Hill",
       base: "crest",
-      params: { slopeLength: 48, slopeRise: 7 },
+      params: { slopeLength: 56, slopeRise: 7 },
     },
     {
       id: "slope_dip",
       label: "Dip",
       base: "crest",
-      params: { slopeLength: 48, slopeRise: -7 },
+      params: { slopeLength: 56, slopeRise: -7 },
     },
     {
       id: "slope_hill_jump",

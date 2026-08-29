@@ -41,7 +41,7 @@ const TMP = join(ROOT, `.rh.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, FIXED_DT, ROAD_HOLD, CHASSIS, GRAVITY, TIRE } =
+const { Vehicle, FIXED_DT, ROAD_HOLD, CHASSIS, GRAVITY, TIRE, WHEEL } =
   await import(pathToFileURL(TMP).href);
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
 const {
@@ -155,8 +155,46 @@ console.log("\n═══ WHAT MAY HOLD THE CAR, AND WHAT MAY NOT ═══");
   // palette tooltip can be trusted to describe the car that actually ships.
   check(FOLLOW_HOLD.maxG === ROAD_HOLD.maxG,
     `the kit's copy of the hold ceiling matches the car (${FOLLOW_HOLD.maxG} vs ${ROAD_HOLD.maxG} g)`);
+  check(FOLLOW_HOLD.loadFloor === ROAD_HOLD.loadFloor,
+    `...and its copy of the crest-load floor (${FOLLOW_HOLD.loadFloor} vs ${ROAD_HOLD.loadFloor})`);
   check(FOLLOW_HOLD.topSpeed === TIRE.topSpeed,
     `...and its copy of top speed (${FOLLOW_HOLD.topSpeed} vs ${TIRE.topSpeed} m/s)`);
+
+  // ── THE ONE THAT WOULD HAVE CAUGHT THE FIRST VERSION ─────────────────────
+  //
+  // A hold that can pull harder than the strut can push back is not a hold, it
+  // is a crusher: saturated, it drives the wheel hub through the deck and the
+  // drawn tyre with it. The droop-servo version shipped at maxG 16, which is
+  // 54,936 N at a corner against a strut that produces 49,907 N squashed
+  // absolutely flat — 5 kN on the wrong side of this line, and that is exactly
+  // what the "wheels enter inside the road" report was.
+  //
+  // Nothing in the physics enforces it, so it is enforced here.
+  //
+  // The comparison is against the strut's force at the compression where the
+  // DRAWN WHEEL runs out of room, not at full squash. Full squash is the wrong
+  // bar: with a firm bump stop it is an enormous number the hold could never
+  // approach, so the check would pass while the wheel was already buried. The
+  // wheel is pinned to its contact and the body-lift hack absorbs archLiftMax
+  // of shortfall, so the budget is `radius - archLiftMax` of hub clearance —
+  // i.e. everything up to `restLength -` that much of compression.
+  const visualBudget = TIRE.restLength - (WHEEL.radius - TIRE.archLiftMax);
+  const strutAtBudget = visualBudget * TIRE.springStrength
+    + Math.pow(Math.max(0, visualBudget - TIRE.restLength * TIRE.bottomOutThresh), 2)
+      * TIRE.springStrength * TIRE.bottomOutMult;
+  const holdCap = ROAD_HOLD.maxG * CHASSIS.mass * GRAVITY * 0.25;
+  check(holdCap < strutAtBudget,
+    `a saturated hold cannot push the wheel into the deck: ${(holdCap / 1000).toFixed(1)} kN`
+    + ` per corner against ${(strutAtBudget / 1000).toFixed(1)} kN of strut at the`
+    + ` ${visualBudget.toFixed(2)} m the wheel has to spare`);
+
+  // And the bump stop has to engage INSIDE that budget, or the strut is still on
+  // its soft linear rate when the wheel runs out of room and a sustained load
+  // parks the tyre in the road however strong the stop becomes later.
+  check(TIRE.restLength * TIRE.bottomOutThresh < visualBudget,
+    `the bump stop engages before the wheel runs out of room:`
+    + ` knee ${(TIRE.restLength * TIRE.bottomOutThresh).toFixed(3)} m`
+    + ` < budget ${visualBudget.toFixed(3)} m`);
 }
 
 /* ══ THE DRIVING RIG ══════════════════════════════════════════════════════ */

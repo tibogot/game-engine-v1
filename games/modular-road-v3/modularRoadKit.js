@@ -2725,9 +2725,36 @@ function curvePoints(pp) {
 /**
  * Fraction of a slope's run spent on its CONCAVE half — see slopeShape.
  *
- * Below 0.5, which is the asymmetry: the convex half gets the long side.
+ * 0.5 = symmetric, which is the minimum-peak-curvature shape and what this
+ * ships. IT WAS 0.35 FOR ONE SESSION and that was a mistake worth recording,
+ * because the reasoning behind it sounded right: give the CONVEX half the long
+ * side, since only the convex half can throw the car off the road, and let the
+ * suspension absorb the sharper compression on the concave half.
+ *
+ * The suspension does not absorb it. MEASURED at 48 m/s, the demand each half
+ * makes against what can answer it:
+ *
+ *                     concave       convex
+ *     capacity        14.5 g        12.7 g      (strut fully squashed / ROAD_HOLD)
+ *     Up Medium 32/10 13.1 g         7.1 g      at 0.35
+ *     Up Steep  34/14 16.3 g         8.8 g      at 0.35   ← over capacity
+ *
+ * Past the strut's capacity there is nothing left to give: it bottoms out and
+ * the chassis keeps going, so the HUB ENDS UP BELOW THE DECK and the drawn wheel
+ * with it (0.25–0.31 m under, tools/roadHoldSinkDiag.mjs). That is the "the car
+ * wheels enter inside the road a lot on the slopes" report, and note where it
+ * came from: the entry to a CLIMB, not the crest anybody was looking at.
+ *
+ * So the trade was real but backwards — it spent the concave half's budget,
+ * which was nearly exhausted, to buy margin for the convex half, which had 5 g
+ * to spare and now has ROAD_HOLD besides. Symmetric splits the difference at
+ * 9.2 g / 11.4 g on those two pieces, inside both ceilings.
+ *
+ * (The exactly-balanced-against-capacity split is 0.467 rather than 0.5. That is
+ * a 7% difference on a pair of ceilings that are themselves approximations, so
+ * it is not worth preferring a fitted number over the principled one.)
  */
-const SLOPE_CONCAVE_FRAC = 0.35;
+const SLOPE_CONCAVE_FRAC = 0.5;
 
 /**
  * Slope profile — two parabolic vertical curves, convex half given the long side.
@@ -3341,11 +3368,21 @@ function sCurvePoints(pp) {
 /**
  * Fraction of a crest's run given to EACH of its two concave shoulders.
  *
- * 0.25 would make all three segments equally curved (the minimum-peak shape for
- * a symmetric profile); anything below it moves curvature off the convex middle
- * and onto the shoulders, which is the trade this piece wants — see crestShape.
+ * 0.25 makes all three segments equally curved — the minimum-peak shape.
+ *
+ * IT WAS 0.18, squeezing the shoulders to buy the brow a bigger radius, and it
+ * failed for exactly the reason SLOPE_CONCAVE_FRAC's 0.35 did (read that note
+ * first — it is the same mistake and the same measurement). At 0.18 the Hill
+ * preset's shoulders came out at R 14.8 m, which at 48 m/s is a 15.9 g
+ * compression against a strut that can carry 14.5, so the hub went 0.31 m
+ * through the deck on the way ONTO the crest. The brow it bought — 8.9 g — was
+ * comfortably inside ROAD_HOLD's ceiling either way.
+ *
+ * At 0.25 both come out at 11.4 g on that preset: under the strut's 14.5 and
+ * under the hold's 12.7, which is the only arrangement where neither end of the
+ * piece is over its own budget.
  */
-const CREST_SHOULDER_FRAC = 0.18;
+const CREST_SHOULDER_FRAC = 0.25;
 
 /**
  * Crest / dip profile: a long convex middle between two short concave shoulders.
@@ -5394,24 +5431,26 @@ export function followSpeed(radius, car = FOLLOW_CAR) {
 }
 
 /**
- * Ceiling on the car's ROAD HOLD, in car weights, and its top speed.
+ * The car's ROAD HOLD ceiling and crest-load floor, and its top speed.
  *
- * Copied from ROAD_HOLD.maxG and TIRE.topSpeed in v3/play/modularRoadVehicle.js
- * for the same reason FOLLOW_CAR is copied — the kit is geometry and cannot
- * import the vehicle. tools/roadHoldTest.mjs asserts both still match.
+ * Copied from ROAD_HOLD.maxG, ROAD_HOLD.loadFloor and TIRE.topSpeed in
+ * v3/play/modularRoadVehicle.js for the same reason FOLLOW_CAR is copied — the
+ * kit is geometry and cannot import the vehicle. tools/roadHoldTest.mjs asserts
+ * all three still match.
  */
-export const FOLLOW_HOLD = { maxG: 16, topSpeed: 50 };
+export const FOLLOW_HOLD = { maxG: 14, loadFloor: 0.3, topSpeed: 50 };
 
 /**
  * Fastest speed (m/s) at which the car holds a convex vertical curve of radius
  * `R` WITH road hold — i.e. on a piece the author tagged as road to follow.
  *
- * Same balance as followSpeed, with the hold added to what gravity brings:
+ * The hold supplies the curve's demand less the part of gravity it leaves
+ * carrying the tyres (see ROAD_HOLD.loadFloor), and saturates at maxG:
  *
- *     v²/R = g + maxG·g   ⇒   v = √((1 + maxG)·g·R)
+ *     v²/R = (1 − loadFloor)·g + maxG·g   ⇒   v = √((1 + maxG − loadFloor)·g·R)
  *
- * Downforce is left out deliberately. It is a rounding error next to sixteen
- * car weights, and including it would make this read as a precision figure when it
+ * Downforce is left out deliberately. It is a rounding error next to fourteen car
+ * weights, and including it would make this read as a precision figure when it
  * is a design one — the honest use of this number is "does the piece hold at
  * the speed people drive", which is a comparison against topSpeed.
  *
@@ -5421,7 +5460,7 @@ export const FOLLOW_HOLD = { maxG: 16, topSpeed: 50 };
  */
 export function heldSpeed(radius, hold = FOLLOW_HOLD, car = FOLLOW_CAR) {
   if (!(radius > 0)) return Infinity;
-  const v = Math.sqrt((1 + hold.maxG) * car.gravity * radius);
+  const v = Math.sqrt((1 + hold.maxG - hold.loadFloor) * car.gravity * radius);
   return v >= hold.topSpeed ? Infinity : v;
 }
 

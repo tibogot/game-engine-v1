@@ -308,7 +308,20 @@ export const TIRE = {
   archLiftBody: 1,
   /** Cap on that lift (m). Also caps how far a wheel may be drawn ABOVE its hub,
    *  so a bad probe can never fling the body into the air. */
-  archLiftMax: 0.25,
+  /**
+   * 0.25 SATURATED, and a saturated lift does not read as suspension — it reads
+   * as the body coming off the wheels. Measured driving a Jump lab lane: the
+   * scoop loads the car hard enough to bottom the suspension for the WHOLE
+   * climb, so this pinned at its ceiling for ~0.6 s with all four wheels drawn
+   * 0.25 m above their hubs. The intent is a brief rise over a hit, not a
+   * sustained ride-height change.
+   *
+   * 0.12 still covers ordinary kerbs and landings (the shortfall this exists for
+   * starts around 3.7 cm) while keeping the worst case to something that looks
+   * like travel. Set archLiftBody to 0 to switch the whole behaviour off and get
+   * the old hard clamp back.
+   */
+  archLiftMax: 0.12,
   /**
    * Ease rate (1/s) for the lift coming back DOWN. Going up is instant and
    * deliberately unsmoothed: every frame of delay is a frame of tyre inside the
@@ -358,8 +371,62 @@ export const TIRE = {
    * the old closing-speed damping so an impact is still absorbed.
    */
   damperNormalMinFacing: 0.85,
-  bottomOutThresh: 0.7,
-  bottomOutMult: 8,
+  // ── THE BUMP STOP ───────────────────────────────────────────────────────
+  // Where the spring stops being linear (as a fraction of restLength) and how
+  // hard it fights past that. Force is c·springStrength + (c − knee)²·
+  // springStrength·bottomOutMult.
+  //
+  // IT USED TO BE 0.7 / 8, AND THAT IS TOO LATE AND TOO SOFT TO BE A STOP. The
+  // knee sat at 0.385 m, but the DRAWN wheel runs out of room at 0.31 m of
+  // compression — past that the hub is nearer the road than the tyre is wide
+  // (WHEEL.radius − TIRE.archLiftMax = 0.24 m of clearance left), and the mesh
+  // has nowhere legal to go but inside the deck. So the stop engaged 7 cm after
+  // the point it needed to defend, and then rose so gently that it never really
+  // defended it: a sustained 8 g load settles at 0.463 m on those numbers, and
+  // MEASURED across the Slopes presets at 48 m/s (tools/roadHoldSinkDiag.mjs)
+  // the car rode past the knee for 19–42% of every piece with the wheels drawn
+  // 34–41 cm inside the road for 21–47% of it. Peak compression reached 0.72 m
+  // on a strut whose rest length is 0.55 — i.e. the hub 17 cm BELOW the surface,
+  // the whole car sunk into the deck.
+  //
+  // That is not a slope bug. It is what this car does under ANY sustained high-g
+  // load, and it was invisible until ROAD_HOLD started keeping the wheels on the
+  // road long enough to see it (before, the car was airborne over the same
+  // geometry). Turning both assists off entirely still measures 29.6 cm.
+  //
+  // 0.45 / 120 puts the knee at 0.2475 m — just INSIDE the visual budget, which
+  // is the whole point — and makes it a real stop rather than a soft second
+  // spring. MEASURED over the Slopes presets at 48 m/s, penetration of the drawn
+  // wheel and the share of the piece spent with a wheel in the deck:
+  //
+  //     knee/mult    Up Steep       Dip        Up Medium        Hill
+  //      0.7 /  8    34.5cm 47%   39.1cm 56%   33.5cm 45%   37.5cm 47%
+  //      0.5 /200     3.1cm 27%    5.3cm 35%    2.9cm 28%    4.6cm 30%
+  //      0.45/120     2.2cm  5%    3.7cm 28%    2.0cm  5%    3.3cm 16%  <- shipped
+  //      0.45/200     1.0cm  1%    2.7cm  2%    0.6cm  1%    2.5cm  3%
+  //
+  // and the ride got SMOOTHER doing it, not harsher: RMS vertical jerk over the
+  // same runs fell from 4769 / 18207 / 3740 / 10634 to 2169 / 2057 / 2003 / 2430.
+  // A strut that stops where it is supposed to stop does not have to be caught
+  // later by something else.
+  //
+  // WHY NOT 200, WHICH MEASURES BETTER. A stop that firm makes the car BOUNCE off
+  // a low ramp — brief hops a few centimetres up — and tools/jumpPitchTest.mjs
+  // catches it: its guard against the landing assist arming while the car is
+  // still climbing goes from 0.00 to 0.62, because each micro-hop reads as an
+  // imminent landing. 120 keeps that at 0.00. The extra 1-2 cm of tyre in the
+  // road is not worth re-arming a levelling assist during a deliberate roll.
+  //
+  // NOTHING ELSE REACHES THIS FAR, which is what makes it safe to change:
+  //   • static ride            0.053 m
+  //   • jump landings          0.176 / 0.198 / 0.256 m — TIRE.landingAbsorb
+  //     already caps arrivals (see the LANDINGS block above), and even the
+  //     worst of the three only grazes the knee, picking up under 1 kN.
+  //   • flat road at 173 km/h  measured 0 change in vertical jerk.
+  // Only a SUSTAINED several-g load gets here, which is the case that was
+  // broken and nothing else.
+  bottomOutThresh: 0.45,
+  bottomOutMult: 120,
   // Per-axle friction multipliers (× frictionCoeff). Lower the rear for
   // oversteer, lower the front for understeer. Handbrake swaps the rear out.
   gripFront: 1.0,
@@ -1352,30 +1419,83 @@ export const SURFACE_GRIP = {
  * / Climb / Grade out family builds — but that answers "give me a climb", not
  * "I placed a hill and the car flew off it".
  *
- * SO THE CAR HOLDS THE ROAD. Per wheel, on decks that asked for it: when the
- * ground falls away from under a tyre faster than the suspension can follow, it
- * is pulled back toward the surface. Which is a magnet, and it is chosen with
- * eyes open — the alternative is a Slopes tab whose contents are only usable
- * below a third of top speed.
+ * SO THE CAR SUPPLIES THE MISSING CENTRIPETAL FORCE ITSELF, per wheel, on decks
+ * the author tagged. The force is sized as exactly that — the curve's demand
+ * minus what gravity and downforce already pay — and nothing else.
  *
- * WHY PER WHEEL, AND NOT AS A CONVEX BRANCH OF SURFACE_GRIP (which is where it
- * was tried first, and measured):
+ * ── THE VERSION BEFORE THIS ONE, AND WHY IT HAD TO GO ───────────────────────
  *
- *  • THE FRONT WHEELS LEAVE FIRST. Traced over a 32/10 slope at 48 m/s, front
- *    droop reached −0.56 m while the rears were still at −0.30. A force at the
- *    centre of mass cannot express that, so the car pitches nose-up and takes
- *    off anyway. Applied at the wheel it carries the torque that keeps the nose
- *    down, which is the difference between "follows the slope" and "flies off
- *    it level".
- *  • NO CURVATURE ESTIMATE TO GET WRONG. SURFACE_GRIP infers k from how the
- *    contact normals fan across the wheelbase, and on a slope's brow that
- *    under-reads by about half (2.6 m of baseline, smoothed normals): it saw
- *    R 77 m where the geometry says 33 m, so it asked for less than half the
- *    force needed. Droop is not an estimate — it is the gap, measured.
- *  • NO LAG. SURFACE_GRIP.ease is an 83 ms time constant, and a fast car is on a
- *    short convex section for ~200 ms. The traced assist was still ramping when
- *    the car left. A servo on droop is already at full authority the moment the
- *    gap opens.
+ * The first attempt measured how far the wheel had ALREADY fallen behind the
+ * road (suspension droop) and pulled on that, as a critically-damped servo. It
+ * passed every test in tools/roadHoldTest.mjs and was wrong anyway. Three
+ * reports came back: the car "sticks like a magnet", the ride "doesn't feel
+ * smooth at all", and — the diagnostic one — the sliders did nothing "no matter
+ * the settings except 0". All three are the same defect.
+ *
+ * DROOP IS NOT THE QUANTITY. What decides whether a car follows a crest is
+ * v²/R; how far a strut has extended is a different measurement in different
+ * units, and the two are related only by the accident of both growing when
+ * things go wrong. A force sized by the wrong quantity cannot be right, so it
+ * gets tuned until it is merely big enough to WIN — and the size that always
+ * wins is the size that reads as a magnet.
+ *
+ * AND IT WAS BIGGER THAN THE SUSPENSION. The tuned ceiling landed at
+ * maxG 16 ⇒ 54,936 N at one corner, against a strut that produces 49,907 N
+ * squashed absolutely flat (0.55 m of travel, bottom-out knee included). So
+ * whenever the servo saturated — which was ALWAYS, every preset, the whole way
+ * across — it out-pushed the spring and drove the hub through the deck.
+ * MEASURED at 48 m/s over the shipped Slopes tab (tools/roadHoldSinkDiag.mjs):
+ *
+ *     hub 0.03–0.52 m BELOW the deck surface on all 9 presets
+ *     compression to 0.88 m against 0.55 m of travel
+ *     the arch-lift hack pinned at its 0.12 m cap on all 9
+ *     peak pull 219 kN, on a car that weighs 13.7 kN
+ *
+ * which is the "wheels enter inside the road a lot" report, exactly. It is
+ * structural, not a tuning error: no value of rate, damping or band moves a
+ * ceiling that outranks the spring. Only maxG did, which is why 0 was the only
+ * setting that changed anything.
+ *
+ * ── WHAT IT DOES NOW ────────────────────────────────────────────────────────
+ *
+ * Measure the curvature the tyre is actually on, and pay for it. As the wheel
+ * crosses a vertical curve its contact normal ROTATES, and the rate it rotates
+ * at is the curvature times the speed:
+ *
+ *     ω = (dn/dt)·t̂ = v·κ        so       v²·κ = v·ω
+ *
+ * (t̂ = travel direction along the surface; ω > 0 is convex, see the derivation
+ * in Tire.apply). So the demand comes out as v·ω with no radius to estimate and
+ * no division to guard, and the assist is
+ *
+ *     a = v·ω − (1 − loadFloor)·(what gravity and downforce already supply)
+ *
+ * floored at zero. Everything the old version got wrong falls out of this:
+ *
+ *  • IT CANNOT BOTTOM THE SUSPENSION. The force is spent turning the car along
+ *    the curve, so it is balanced by the curve's own demand rather than by the
+ *    spring. What the spring carries is the LEFTOVER tyre load, and `loadFloor`
+ *    names that directly: at 0.3 the tyres keep 30% of static load over the
+ *    brow, so the strut sits slightly EXTENDED — 1.6 cm of squash against 5.3
+ *    static — instead of being crushed. The ceiling is now checked against the
+ *    strut's own capacity (tools/roadHoldTest.mjs asserts maxG/4 < strut max),
+ *    which the old one failed by 5 kN.
+ *  • IT IS SMOOTH BY CONSTRUCTION. Curvature is continuous along a road, so the
+ *    force is too — it fades in as the brow arrives and out as it leaves, with
+ *    no trigger to sit on. The old one switched on at a threshold that was also
+ *    its own target, which is a relay, which is why it buzzed.
+ *  • THE SLIDERS DO SOMETHING. The car asks only for what the curve demands, so
+ *    it spends its time BELOW the ceiling and changing the ceiling is felt.
+ *  • IT STILL COSTS NOTHING WHERE IT IS NOT NEEDED. Flat road, flat turns and
+ *    banked turns all measure ω ≈ 0 — a bank rotates the normal about the
+ *    TRAVEL axis, and projecting onto t̂ ignores exactly that. A crest gentle
+ *    enough for gravity alone leaves the max() at zero.
+ *
+ * WHY PER WHEEL rather than at the centre of mass: on a brow the front wheels
+ * reach the curvature first, and each wheel paying for the curve under ITSELF
+ * carries the pitch torque that keeps the nose down. A single force at the CoM
+ * cannot express that, and the nose-up pitch is what made the old car look like
+ * it flew off the slope level.
  *
  * WHY IT DOES NOT KILL JUMPS. It fires only where the deck under the tyre
  * carries the hold tag — stamped by the builder from FOLLOW_ROAD, which lists
@@ -1389,94 +1509,127 @@ export const SURFACE_GRIP = {
 export const ROAD_HOLD = {
   enabled: true,
   /**
-   * Stiffness of the pull-back, as the natural frequency (rad/s) of the corner
-   * mass on it. Expressed this way rather than in N/m because it is then
-   * independent of the car's mass and reads as a settling time: at 26 rad/s the
-   * gap is closed inside ~0.1 s, which is under 5 m of road at top speed.
+   * HOW MUCH OF THE CREST FLOAT THE CAR KEEPS — the fraction of normal static
+   * tyre load left on the tyres at the top of a brow, 0..1. This is the "does it
+   * feel like a magnet" knob, and the only one most people should touch.
    *
-   * Turning this DOWN is the knob for "I want to feel the crest": the car goes
-   * light and settles back rather than tracking the surface exactly.
+   * Going light over a crest is REAL and worth keeping: it is most of what a
+   * hill feels like from the driver's seat. So the assist does not supply the
+   * whole v²/R (which would hold the tyres at full load and glue the car to the
+   * road — the complaint about the previous version); it supplies enough to
+   * leave this much load underneath.
+   *
+   *   0    the tyres go exactly weightless at the crest — the car follows the
+   *        road but has no grip while it does, and the strut hangs at full
+   *        droop. Steering and braking vanish over every brow.
+   *   0.3  shipped. Noticeably light, still steerable, strut near rest.
+   *   1    full static load over a crest, i.e. the road pulls as hard as the
+   *        ground pushes. This is the magnet.
+   *
+   * It also sets when the assist starts: below a·(1−loadFloor) of demand the
+   * max() is zero and nothing happens at all, so a gentle crest the car could
+   * always follow is untouched, and the fade-in begins slightly BEFORE the
+   * unaided car would have started to fly rather than at the failure itself.
    */
-  rate: 30,
+  loadFloor: 0.3,
   /**
-   * Damping ratio on the gap's rate of change. 1.0 = critical.
+   * Ceiling on the assist, in car weights, divided evenly per wheel — a corner
+   * may ask at most maxG/4.
    *
-   * THIS IS THE ONE THAT WAS CAUSING THE JITTER, by being applied in one
-   * direction only. The first version damped just the OPENING half, on the
-   * reasoning that the hold should never fight a wheel already coming back down.
-   * That reasoning omits what the wheel is coming back down UNDER: while the
-   * strut is drooped the suspension contributes nothing at all (its spring is
-   * past rest, and its damper is subtracted from a zero spring), so the hold's
-   * own rate term is the ONLY damping in the system. Removing it on the return
-   * stroke left an undamped mass on a spring — the pull slammed the wheel into
-   * compression, the hold cut out, the spring threw it back out, and that cycle
-   * is the jitter, measured at 8-24 engagements per piece.
+   * TWO THINGS BOUND THIS, and they bound it from opposite sides.
    *
-   * Damping both directions makes it a real critically-damped servo. It stays
-   * one-sided as a FORCE (the total is floored at zero — a road-hold that could
-   * push up would be a launcher), but easing the pull off as the gap closes is
-   * enough to kill the overshoot that the floor alone could not.
+   * FROM BELOW: THE FRONT CORNERS NEED MORE THAN A QUARTER EACH. The demand is
+   * shared per wheel, but on a brow the front axle reaches the curvature first
+   * and carries it alone for a moment — traced on Hill, the fronts sat pinned at
+   * the cap while the rears were still asking for half as much. Sized on the
+   * whole car (Hill's 28 m brow asks 8.4 g at top speed) a ceiling of 12 looks
+   * ample and is not: it capped the fronts and let half a metre of droop open
+   * before the rears caught up, and 0.22 m is where droop starts to show,
+   * because that is TIRE.maxDroop — the point past which the DRAWN wheel stops
+   * following the contact and hangs in the air above the road.
+   *
+   * FROM ABOVE: a saturated assist must not by itself push the strut past the
+   * compression where the wheel enters the deck (0.31 m — see
+   * TIRE.bottomOutThresh). The strut answers 50.6 kN there, which caps this at
+   * 14.7, and tools/roadHoldTest.mjs asserts it. The version before this one sat
+   * on the WRONG side of that line by 5 kN, which is what put the wheels inside
+   * the road in the first place.
+   *
+   * So the window is roughly 13 to 14.7, and 14 sits in it. Worst droop across
+   * the Slopes tab at top speed, with the corrector at its shipped 20:
+   *
+   *     maxG 12   0.17 m        maxG 14   0.15 m
+   *
+   * It also keeps "Hill Jump" a jump: a 10 m brow asks 29 g, still twice this,
+   * and it still throws the car 0.44 s into the air at top speed.
    */
-  damping: 1.0,
+  maxG: 14,
   /**
-   * THE ANTI-CHATTER BAND (m of droop), and it is not a nicety — without it this
-   * mechanism oscillates by construction.
+   * Low-pass rate (1/s) on the measured curvature.
    *
-   * The first version simply switched on below rest length. But "below rest
-   * length" is exactly where the servo is trying to get back TO, so the trigger
-   * sat on top of its own equilibrium: the hold came on at full strength, pulled
-   * the wheel into compression, switched off, the spring pushed it back out, and
-   * round again. Measured over the Slopes presets at 48 m/s: 8 to 24 on/off
-   * switches per piece and up to 22,500 m/s³ of vertical jerk — which is what
-   * the player saw as the car jittering while it stuck to the slope.
+   * The deck is faceted, so the raw contact normal STEPS from one triangle to
+   * the next and its difference — which is what the curvature is read from — is
+   * a train of spikes whose MEAN is the real curvature. This averages them.
    *
-   * Ramping the force in across a band of droop removes the discontinuity at
-   * the boundary: the pull leaves zero with zero slope, so crossing rest length
-   * is not an event. Keep it NARROW — it is there to smooth the edge, not to
-   * soften the working range, and widening it to 0.10 m cost enough authority
-   * that Hill, Dip and Down Steep started launching again (0.71 s, 0.04 s and
-   * 0.32 s of air, against 0 before and after).
+   * Deliberately reading the RAW normal rather than the smoothed `hitNormal`:
+   * TIRE.normalSmooth is already an 18/s (55 ms) filter, and differencing its
+   * output then filtering again here would stack to ~88 ms of lag on a car that
+   * crosses a whole crest in ~200 ms. One filter, 33 ms, applied to the quantity
+   * that actually needs it.
    */
-  band: 0.04,
+  curvSmooth: 30,
   /**
-   * Clamp (m/s) on the closing/opening rate the damping term may see, in both
-   * directions. A wheel crossing a tessellation facet can show a large rate for
-   * a single substep, and the rate term is worth ~21 kN per m/s.
+   * Clamp (rad/s) on the curvature rate a single substep may contribute, as a
+   * guard against one bad facet — a seam, a kerb triangle, a wheel clipping the
+   * edge of a piece — spiking through the filter. v·ω is an acceleration, so a
+   * spike here is a shove.
+   *
+   * 8 rad/s is far outside anything real: the tightest road brow in the kit at
+   * top speed is v/R = 50/10 = 5, and that is the piece named "Hill Jump".
+   */
+  maxOmega: 8,
+  /**
+   * Speed (m/s) below which no hold is applied. The demand is v·ω, which already
+   * vanishes as the car stops, so this is not a divide guard — it is there so a
+   * car crawling or parked on a crest is left entirely alone and reads as
+   * ordinary suspension.
+   */
+  minSpeed: 3,
+
+  // ── THE CORRECTOR ────────────────────────────────────────────────────────
+  // Feed-forward pays for the curve; these clean up the error it cannot see.
+  // See the FEEDBACK note in Tire.apply for why a term the first version of
+  // this feature used as its whole mechanism is safe as a corrector.
+  /**
+   * Natural frequency (rad/s) of the droop corrector.
+   *
+   * 20 rad/s is a ~0.15 s settling time. MEASURED, worst droop across the Slopes
+   * tab at top speed with the ceiling at 14: 16 rad/s left 0.21 m, 20 left
+   * 0.15 m, 24 left 0.10 m. Past 20 it stops buying anything that shows — 0.22 m
+   * is where the drawn wheel stops tracking the contact, so anything under that
+   * looks the same — and it starts costing smoothness (RMS vertical jerk 2496 at
+   * 20, 3063 at 24).
+   *
+   * The droop servo this descends from ran at 30 with no feed-forward at all,
+   * so it had to produce the entire 8 g from a gap it first had to let open.
+   * That is what made it saturate, crush the suspension and read as a magnet.
+   * Here the feed-forward is already carrying the curve and this is correcting
+   * centimetres, so a comparable settling speed costs a fraction of the force.
+   */
+  correctRate: 20,
+  /**
+   * Damping ratio is fixed at 1 (critical) in the code — it is not a knob,
+   * because the whole point of the corrector is that it settles without
+   * overshoot. What IS a knob is the clamp on the rate term (m/s): a wheel
+   * crossing a tessellation facet can show a large closing speed for a single
+   * substep, and 2·w is worth ~5.6 kN per m/s at a corner.
    */
   maxRate: 3.0,
   /**
-   * Rate (1/s) the applied pull eases toward its target. Same reasoning as
-   * SURFACE_GRIP.ease, for the same reason: the deck is faceted, so the contact
-   * normal and the droop both step slightly from one triangle to the next, and
-   * a force that follows those steps exactly is a force you can feel stepping.
-   * 45/s is a 22 ms lag — long enough to smooth the facets, far shorter than the
-   * ~200 ms the car spends crossing a crest.
-   */
-  ease: 45,
-  /**
-   * Ceiling on the pull, in car weights, divided evenly per wheel — so a corner
-   * may pull at most maxG/4 and the whole car at most maxG, and only then if all
-   * four struts are drooped.
-   *
-   * WHY IT IS HIGHER THAN THE DEMAND. The demand is v²/R, and the steepest
-   * shipped preset (Hill, a 27 m brow) needs 8.8 g at top speed with gravity
-   * paying 1 of it. 10 looks like ample headroom and is not: ON A BROW THE FRONT
-   * WHEELS DROOP FIRST — traced at −0.56 m front against −0.30 m rear — so for
-   * the moment that decides whether the car leaves, only half the car is
-   * pulling and only half the ceiling exists. At 10 that is 5 g against 7.8
-   * needed, and Hill launched (0.59 s of air) even though the arithmetic on the
-   * whole car said it should not.
-   *
-   * So this is sized for TWO wheels carrying the worst piece, which is what the
-   * geometry actually asks for. The servo still only requests what the droop in
-   * front of it demands; this is the ceiling, not the operating point.
-   */
-  maxG: 16,
-  /**
-   * Droop (m) at which the car is considered to have LEFT rather than to be
-   * going light — past this the pull stops rising, so a wheel that finds the
-   * deck 80 cm below it (a genuine launch off the end of a piece, a seam onto
-   * lower road) is not reeled in from a distance.
+   * Droop (m) past which the corrector stops asking for more. Beyond this the
+   * wheel has genuinely LEFT — the end of a piece, a seam onto lower road — and
+   * reeling it in from a distance is the magnet behaviour this design exists to
+   * avoid. Feed-forward keeps paying for the curve regardless.
    */
   maxGap: 0.35,
 };
@@ -1926,19 +2079,10 @@ export const SOLID = {
    * that does not barrier.
    *
    * KNOWN COST, measured rather than guessed. "Not supported" is also true for a
-   * moment at a ramp's side edge, where the wheels hang off — and the Slope lab
-   * ramps put their DRIVE SURFACE in the solids tree (rampGeometry has no solids
-   * stand-in), so there the hull now argues with the ramp top it is driving on.
-   * On one lane of tools/labEdgeStickRepro.mjs's sweep that stretches a stall
-   * from 0.47 s to 2.46 s.
-   *
-   * Two narrower gates were tried and BOTH are worse. Requiring a minimum
-   * closing speed (a slide reads ~0, a landing does not) lets the rail be
-   * crossed again — railTunnelTest and guardrailStuckTest both fail — because a
-   * car settling onto a barrier arrives slowly. Splitting the ramp's drive
-   * surface out of solids the way the kicker ramps do measures 4630 ticks of
-   * chassis contact against 503; see the note in rampGeometry. The barrier
-   * holding is worth more than the lab ramp's edge, so this stands as is.
+   * moment at a ramp's side edge, where the wheels hang off. Parkour ramps now
+   * use shortened collision cheeks (see attachWedgeCheekSolids) so the hull is
+   * not arguing with a full-height flank there; rails and other lids still need
+   * this gate, which is why it stands.
    */
   /**
    * Anti-tunnel margin, as a multiple of the distance travelled per substep.
@@ -2345,10 +2489,22 @@ class Tire {
     this.hitRoadHold = false;
     /** Newtons of road hold applied last substep — diagnostics only. See ROAD_HOLD. */
     this.roadHoldForce = 0;
-    /** Previous substep's compression, for differencing the droop RATE. Invalid
-     *  across a break in contact — see the droopRate note in apply(). */
+    /** Low-passed contact normal. The rate the surface rotates is read by
+     *  differencing THIS rather than the raw normal, because the raw one is a
+     *  per-facet staircase — see the note in apply(). Invalid across a break in
+     *  contact: a landing puts two unrelated normals either side of the
+     *  difference. */
+    this._holdNS = new THREE.Vector3(0, 1, 0);
+    this._holdNValid = false;
+    /** (dn/dt)·t̂, i.e. v·curvature. Positive = convex. Diagnostics only. */
+    this._holdOmega = 0;
+    /** Previous substep's compression, for the corrector's rate term. Invalid
+     *  across a break in contact — a landing would difference two unrelated
+     *  states. See the FEEDBACK note in apply(). */
     this._prevComp = 0;
     this._prevCompValid = false;
+    /** Scratch for the travel direction along the surface. */
+    this._holdVt = new THREE.Vector3();
     this.worldPos = new THREE.Vector3();
     this.lastSuspension = new THREE.Vector3();
     this.lastSteering = new THREE.Vector3();
@@ -2494,6 +2650,8 @@ class Tire {
     this.overDemand = 0;
     this.hitRoadHold = false;
     this.roadHoldForce = 0;
+    this._holdNValid = false;
+    this._holdOmega = 0;
     this._prevCompValid = false;
     this.hitDistance = TIRE.rayLength;
     this._hadGround = false; // next contact snaps instead of easing in
@@ -2687,66 +2845,151 @@ class Tire {
     body.addForceAtPoint(this._F, this.worldPos);
     this.lastSuspension.copy(this._F);
 
-    // ── ROAD HOLD — pull the wheel back to a deck that is falling away ───────
+    // ── ROAD HOLD — pay for the curvature the tyre is actually on ────────────
     //
-    // See the ROAD_HOLD block for why this exists and why it lives here rather
-    // than in _applySurfaceGrip. In short: over a convex curve the road drops
-    // away faster than the strut can extend, and once the gap opens nothing in
-    // the model is pulling the car back down except gravity — which on a 33 m
-    // crest at 48 m/s is about a seventh of what following it takes.
+    // See the ROAD_HOLD block for what this is and what the droop-servo version
+    // before it got wrong. The whole mechanism is: work out what the curve under
+    // this wheel demands, subtract what gravity and downforce already supply,
+    // and add the difference. Nothing here is tuned to "win" — it asks for the
+    // shortfall and no more, which is why it neither glues the car down nor
+    // crushes the suspension.
     //
-    // Droop past rest length is the measurement: the strut is extended, the
-    // spring is carrying nothing, and the tyre is on its way off the surface.
-    // That is a gap, not an inferred curvature, and it is zero on every piece of
-    // road the car is actually riding on — so this cannot alter ordinary driving
-    // even on a tagged piece.
+    // MEASURING THE CURVATURE. As a wheel crosses a vertical curve its contact
+    // normal rotates. For a convex arc of radius R, taking θ as the arc angle
+    // along travel and t̂ as the travel direction tangent to the surface,
     //
-    // EVERYTHING ABOUT THE SHAPE OF THIS IS ABOUT NOT CHATTERING. It is a servo
-    // rather than a spring so its strength reads as a settling time; it ramps in
-    // over `band` rather than switching at rest length, because that boundary is
-    // its own target and switching there oscillates; the rate term is clamped so
-    // a single facet cannot slam it to the cap; and the result is eased so the
-    // deck's tessellation is not felt. See the ROAD_HOLD block.
+    //     n(θ) = cos θ · up + sin θ · t̂        dn/dθ = −sin θ · up + cos θ · t̂
+    //
+    // so at the contact (θ = 0) dn/dθ = t̂, and with dθ/dt = v/R,
+    //
+    //     ω ≔ (dn/dt)·t̂ = v/R = v·κ     ⇒     v²/R = v·ω
+    //
+    // The demand is therefore v·ω with no radius to estimate, no baseline to
+    // measure it over, and no division by anything that can be zero. ω is SIGNED
+    // exactly the way it needs to be: positive over a crest (the normal tips
+    // forward as the road falls away) and negative in a bowl, which is
+    // SURFACE_GRIP's job and is skipped here.
+    //
+    // Projecting onto t̂ is also what makes a BANK free: banking rotates the
+    // normal about the travel axis, which has no component along t̂, so a banked
+    // turn measures ω ≈ 0 and asks for nothing.
     let holdTarget = 0;
-    if (ROAD_HOLD.enabled && this.hitRoadHold && this.compression < 0) {
-      const droop = -this.compression;
-      // 0 at rest length, 1 once fully drooped — smoothstep rather than linear
-      // so the force leaves zero with zero slope as well as zero value.
-      const x = Math.min(1, droop / Math.max(1e-4, ROAD_HOLD.band));
-      const engage = x * x * (3 - 2 * x);
-      const gap = Math.min(droop, ROAD_HOLD.maxGap);
-      // HOW FAST THE GAP IS CHANGING, by differencing the gap.
-      //
-      // NOT `upVel`, which is what this used and is a different quantity: the
-      // wheel's velocity along chassis-up, in world terms. On a slope that is
-      // dominated by the car's own climb rate — +19 m/s two thirds of the way up
-      // Up Steep at 48 m/s — and it has nothing to do with whether the strut is
-      // extending. Feeding it in as a damping term subtracted the entire pull on
-      // every climb (measured: Up Steep went from 0 to 0.37 s of air) while
-      // ADDING a spurious full-cap boost on every descent, which is why the
-      // chatter was worst on the Down presets.
-      //
-      // Positive = drooping further, i.e. the road is still pulling away. Zero on
-      // the first substep of a contact, where there is no previous gap to
-      // difference against and a landing would otherwise read as infinite rate.
-      const droopRate = this._prevCompValid
-        ? -(this.compression - this._prevComp) / Math.max(1e-5, dt)
-        : 0;
-      const rate = Math.max(-ROAD_HOLD.maxRate,
-        Math.min(ROAD_HOLD.maxRate, droopRate));
-      const w = ROAD_HOLD.rate;
-      // Quarter of the car per corner: this is the mass the servo is moving.
-      const cornerMass = CHASSIS.mass * 0.25;
-      holdTarget = engage * cornerMass * (w * w * gap + 2 * ROAD_HOLD.damping * w * rate);
-      // Floored at zero: this may stop pulling, but it may never push.
-      if (holdTarget < 0) holdTarget = 0;
-      const cap = ROAD_HOLD.maxG * CHASSIS.mass * GRAVITY * 0.25;
-      if (holdTarget > cap) holdTarget = cap;
+    if (ROAD_HOLD.enabled && this.hitRoadHold) {
+      // Travel direction along the surface. The normal component is closing
+      // speed — a bump, not orbital motion — and counting it would read every
+      // landing as curvature.
+      this._holdVt.copy(this._tireVel);
+      this._holdVt.addScaledVector(this.hitNormal, -this._holdVt.dot(this.hitNormal));
+      const vt = this._holdVt.length();
+      if (vt > ROAD_HOLD.minSpeed) {
+        this._holdVt.multiplyScalar(1 / vt);
+        // SMOOTH THE NORMAL, THEN DIFFERENCE IT — in that order, and the order is
+        // the whole trick.
+        //
+        // The deck is faceted, so the raw normal is a STAIRCASE: constant across
+        // a triangle, then a step. Differencing that gives zero on most substeps
+        // and one enormous spike per facet — on Hill's brow, 14 substeps of
+        // nothing and then 22 rad/s, whose mean is the true 1.7. Filtering
+        // afterwards recovers the mean only if nothing eats the spike, and
+        // something did: the outlier clamp. Measured, the assist came out about
+        // three times too small and Hill still launched.
+        //
+        // Filtering FIRST removes the staircase instead of trying to survive it.
+        // A low-pass passes a steady rotation through unchanged, so the mean is
+        // still exactly right, but the signal it is differencing is now
+        // continuous — the per-facet peak lands near 2.6 rad/s rather than 22,
+        // and the clamp goes back to being what it was meant to be: a guard for
+        // genuinely bad geometry that never fires in normal driving.
+        const k = 1 - Math.exp(-ROAD_HOLD.curvSmooth * dt);
+        const before = this._holdNS.dot(this._holdVt);
+        this._holdNS.lerp(this._rawNormal, k);
+        if (this._holdNS.lengthSq() > 1e-8) this._holdNS.normalize();
+        // No previous normal on the first substep of a contact, and a landing
+        // would otherwise read as one huge rotation.
+        let omega = this._holdNValid
+          ? (this._holdNS.dot(this._holdVt) - before) / Math.max(1e-5, dt)
+          : 0;
+        if (omega > ROAD_HOLD.maxOmega) omega = ROAD_HOLD.maxOmega;
+        else if (omega < -ROAD_HOLD.maxOmega) omega = -ROAD_HOLD.maxOmega;
+        this._holdOmega = omega;
+
+        // ── (1) FEED-FORWARD: what the curve costs ─────────────────────────
+        let accel = 0;
+        if (this._holdOmega > 0) {
+          // What the curve demands of this corner, along −n.
+          const demand = vt * this._holdOmega;
+          // What is already being supplied along −n. Gravity contributes by how
+          // far the surface is tilted; downforce acts along −chassis-up, and the
+          // vehicle scales the total by grounded count, which distributes as a
+          // fixed quarter-share per grounded corner — so this corner's share is
+          // AERO.downforce·v²·0.25, i.e. this acceleration on a quarter mass.
+          const supplied = GRAVITY * this.hitNormal.y
+            + (AERO.downforce > 0
+              ? (AERO.downforce * vt * vt / CHASSIS.mass) * Math.max(0, upDotN)
+              : 0);
+          // Leave `loadFloor` of the supply carrying the tyre rather than
+          // turning the car, so the contact keeps load — and so the assist has
+          // faded in before the unaided car would have gone weightless.
+          accel = demand - (1 - ROAD_HOLD.loadFloor) * supplied;
+          if (accel < 0) accel = 0;
+        }
+
+        // ── (2) FEEDBACK: what the car got wrong anyway ─────────────────────
+        //
+        // FEED-FORWARD ALONE IS NOT ENOUGH, and the reason is worth keeping.
+        // It computes the force that would hold a car ALREADY tracking the
+        // surface, and over a crest the car is not: it arrives at the brow with
+        // the strut COMPRESSED by the concave shoulder before it (0.30 m on
+        // Hill) and with the body moving upward from the climb. The spring then
+        // unloads into exactly the moment the road turns away, and throws the
+        // car off. Traced on Hill at 48 m/s, feed-forward only: the assist did
+        // supply what the curve asked (7.5 g of an 8.4 g demand, the rest being
+        // gravity) and the wheels still left, because nothing in it can correct
+        // an error that already existed. Hill kept 0.46 s of air.
+        //
+        // So this term corrects the error rather than paying for the curve — a
+        // critically damped servo on droop, which is precisely the mechanism
+        // the FIRST version of road hold used as its ONLY term. It works here
+        // and did not there because the feed-forward has already done the heavy
+        // lifting: this is left with centimetres to correct instead of the whole
+        // 8 g, so it runs at 8 rad/s instead of 30, never saturates, and the
+        // force stays proportional to a real error instead of pinned at a cap.
+        // That is the difference between a corrector and a magnet.
+        //
+        // Gated on droop because a strut past its rest length is the only state
+        // where the wheel is measurably behind the road; on the way back in the
+        // spring is doing the job itself and does not want help.
+        const droop = -this.compression;
+        if (droop > 0) {
+          const rate = this._prevCompValid
+            ? Math.max(-ROAD_HOLD.maxRate, Math.min(ROAD_HOLD.maxRate,
+              -(this.compression - this._prevComp) / Math.max(1e-5, dt)))
+            : 0;
+          const w = ROAD_HOLD.correctRate;
+          accel += w * w * Math.min(droop, ROAD_HOLD.maxGap) + 2 * w * rate;
+        }
+
+        if (accel > 0) {
+          holdTarget = CHASSIS.mass * 0.25 * accel;
+          const cap = ROAD_HOLD.maxG * CHASSIS.mass * GRAVITY * 0.25;
+          if (holdTarget > cap) holdTarget = cap;
+        }
+      }
+    } else {
+      this._holdOmega = 0;
     }
     this._prevComp = this.compression;
-    this._prevCompValid = true;
-    this.roadHoldForce += (holdTarget - this.roadHoldForce)
-      * (1 - Math.exp(-ROAD_HOLD.ease * dt));
+    this._prevCompValid = this.grounded;
+    // The curvature is already filtered, and the force is a continuous function
+    // of it, so there is deliberately NO second easing on the result here — the
+    // old version needed one because its trigger was a step.
+    this.roadHoldForce = holdTarget;
+    if (this.grounded) {
+      // Seed the filter on the first substep of a contact so it starts ON the
+      // surface rather than easing toward it from whatever it last saw.
+      if (!this._holdNValid) this._holdNS.copy(this._rawNormal);
+      this._holdNValid = true;
+    }
     if (this.roadHoldForce > 1) {
       // Along the surface normal, not chassis-down: on a steep slope or a bank
       // those differ, and it is the surface the car is being held against.

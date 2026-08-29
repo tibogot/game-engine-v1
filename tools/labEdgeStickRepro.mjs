@@ -30,8 +30,7 @@ const SRC = readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
 
 // The one line under test: honouring a mostly-up solid contact when the wheels
 // are not carrying the car.
-const GATE = `      if (Math.abs(ny) > sitY) {
-        if (wheelsCarry) continue;`;
+const GATE = "if (Math.abs(ny) > sitY && wheelsCarry) continue;";
 if (!SRC.includes(GATE)) throw new Error("sit gate not found — source moved");
 
 async function load(tag, src) {
@@ -56,8 +55,7 @@ async function load(tag, src) {
 
 const NOW = await load("now", SRC);
 // "old" = every mostly-up solid contact skipped, which is what shipped before.
-const OLD = await load("old", SRC.replace(GATE, `      if (Math.abs(ny) > sitY) {
-        if (true) continue;`));
+const OLD = await load("old", SRC.replace(GATE, "if (Math.abs(ny) > sitY) continue;"));
 
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
 const parkour = await import(pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadParkour.js")).href);
