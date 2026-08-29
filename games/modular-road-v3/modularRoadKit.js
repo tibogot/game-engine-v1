@@ -1189,9 +1189,20 @@ function appendRoadEndCaps(geo, frames, opts) {
   const emitCap = (fr, alongX, nx, ny, nz, pts, flip) => {
     const M = pts?.length ?? 0;
     if (M < 3) return;
+    // EAR CLIP, not a fan. A banked section is a U (deck y = curl·(x/hw)²) and
+    // is not star-shaped about any vertex — a fan sprays triangles across the
+    // valley, which FrontSide reads as holes and inverted lids. Same reason the
+    // guardrail caps stopped fanning (see modularRoadRail.js).
+    let contour = pts.map((p) => new THREE.Vector2(p.x, p.y));
+    let ring = pts;
+    if (THREE.ShapeUtils.isClockWise(contour)) {
+      contour = contour.slice().reverse();
+      ring = pts.slice().reverse();
+    }
+    const tris = THREE.ShapeUtils.triangulateShape(contour, []);
+    if (!tris.length) return;
     const base = positions.length / 3;
-    for (let k = 0; k < M; k++) {
-      const p = pts[k];
+    for (const p of ring) {
       _capPt.copy(fr.pos).addScaledVector(fr.right, p.x).addScaledVector(fr.up, p.y);
       positions.push(_capPt.x, _capPt.y, _capPt.z);
       uvs.push(alongX, 0);
@@ -1201,9 +1212,9 @@ function appendRoadEndCaps(geo, frames, opts) {
       curves.push(0);
       normals.push(nx, ny, nz);
     }
-    for (let k = 1; k < M - 1; k++) {
-      if (flip) indices.push(base, base + k + 1, base + k);
-      else indices.push(base, base + k, base + k + 1);
+    for (const [a, b, c] of tris) {
+      if (flip) indices.push(base + a, base + b, base + c);
+      else indices.push(base + a, base + c, base + b);
     }
   };
 

@@ -88,6 +88,12 @@ function pieceTakesTubeCaps(id) {
  *  a mouth. A 44 m platform against a 16 m straight leaves 14 m of wing on each
  *  side — that leftover prism stays lidded. */
 const SLAB_COVER_EPS = 0.05;
+/** Metres of edge curl. A held-bank mouth is a 0.9 m U; a straight is flat.
+ *  Same width is not a nest. */
+const SLAB_CURL_EPS = 0.08;
+/** Radians of end lean. Level sockets do not carry roll, so 22° against 0°
+ *  is two different cuts in the same plane. */
+const SLAB_LEAN_EPS = 3 * Math.PI / 180;
 
 /** Deck half-width the kit would sweep for this piece — same rule as buildPiece. */
 function pieceHalfWidth(id, pp, rp = roadParams) {
@@ -99,6 +105,20 @@ function pieceHalfWidth(id, pp, rp = roadParams) {
     return data?.hw ?? 0;
   }
   return rp.width / 2;
+}
+
+function pieceEndCurlM(id, pp, end) {
+  const def = PIECE_BY_ID.get(id);
+  const amt = Math.max(0, pp?.bankCurl ?? pieceParams.bankCurl ?? 0);
+  if (!def?.curl || amt < 1e-4) return 0;
+  const t = end === "exit" ? 1 : 0;
+  return amt * def.curl(t, pp);
+}
+
+function pieceEndLean(id, pp, end) {
+  const def = PIECE_BY_ID.get(id);
+  if (!def?.roll) return 0;
+  return def.roll(end === "exit" ? 1 : 0, pp);
 }
 
 /**
@@ -1476,10 +1496,26 @@ export class ModularRoadBuilder {
   }
 
   /**
+   * Neighbour fills this mouth: same (or wider) cut, AND the same curl and lean.
+   * Width alone treated a held-bank U as a nest against a flat straight.
+   */
+  _neighborFillsEnd(self, selfEnd, neighbor, neighborEnd) {
+    if (!self || !neighbor || !pieceTakesSlabCaps(neighbor.id)) return false;
+    if (!this._coversSlabMouth(neighbor, this._pieceHw(self))) return false;
+    const nEnd = neighborEnd === "exit" ? "exit" : "entry";
+    const sEnd = selfEnd === "exit" ? "exit" : "entry";
+    if (Math.abs(pieceEndCurlM(neighbor.id, neighbor.pp, nEnd)
+      - pieceEndCurlM(self.id, self.pp, sEnd)) > SLAB_CURL_EPS) return false;
+    if (Math.abs(pieceEndLean(neighbor.id, neighbor.pp, nEnd)
+      - pieceEndLean(self.id, self.pp, sEnd)) > SLAB_LEAN_EPS) return false;
+    return true;
+  }
+
+  /**
    * Lid any mouth the neighbour does not actually fill.
-   * Equal-width joins still drop both lids (the mouths nest). A wider piece
-   * against a narrower one keeps its lid — occupancy alone used to strip it
-   * and leave the extra width looking into the hollow prism.
+   * Equal-width joins still drop both lids when the cuts match. A wider piece
+   * against a narrower one keeps its lid; a curled / rolled bank mouth against
+   * a flat one keeps its lid too.
    */
   _slabCapFlags(p, conn) {
     if (!pieceTakesSlabCaps(p.id)) return { capEntry: false, capExit: false };
@@ -1488,14 +1524,15 @@ export class ModularRoadBuilder {
     if (i < 0) return { capEntry: false, capExit: false };
     const prev = i > 0 ? run[i - 1] : null;
     const next = i < run.length - 1 ? run[i + 1] : null;
-    const hw = this._pieceHw(p);
-    const chainEntry = !p.detached && prev && !prev.detached && this._coversSlabMouth(prev, hw);
-    const chainExit = !p.detached && next && !next.detached && this._coversSlabMouth(next, hw);
+    const chainEntry = !p.detached && prev && !prev.detached
+      && this._neighborFillsEnd(p, "entry", prev, "exit");
+    const chainExit = !p.detached && next && !next.detached
+      && this._neighborFillsEnd(p, "exit", next, "entry");
     const mateIn = this._socketMate(conn, p);
     const mateOut = this._socketMate(p.connectorOut, p);
     return {
-      capEntry: !chainEntry && !this._coversSlabMouth(mateIn?.piece, hw),
-      capExit: !chainExit && !this._coversSlabMouth(mateOut?.piece, hw),
+      capEntry: !chainEntry && !this._neighborFillsEnd(p, "entry", mateIn?.piece, mateIn?.end),
+      capExit: !chainExit && !this._neighborFillsEnd(p, "exit", mateOut?.piece, mateOut?.end),
     };
   }
 
@@ -1543,13 +1580,23 @@ export class ModularRoadBuilder {
       return { capEntry: false, capExit: false };
     }
     if (pieceTakesSlabCaps(id)) {
-      const ghostHw = pieceHalfWidth(id, this.activeParams);
+      const ghost = {
+        id,
+        pp: this.activeParams,
+        hw: pieceHalfWidth(id, this.activeParams),
+      };
       if (this.ghostEnd === "head") {
         const host = run[0];
-        return { capEntry: true, capExit: !this._coversSlabMouth(host, ghostHw) };
+        return {
+          capEntry: true,
+          capExit: !this._neighborFillsEnd(ghost, "exit", host, "entry"),
+        };
       }
       const host = run[run.length - 1];
-      return { capEntry: !this._coversSlabMouth(host, ghostHw), capExit: true };
+      return {
+        capEntry: !this._neighborFillsEnd(ghost, "entry", host, "exit"),
+        capExit: true,
+      };
     }
     if (pieceTakesTubeCaps(id)) {
       // Keep the ring unless the mouth we are about to mate is also a wall.

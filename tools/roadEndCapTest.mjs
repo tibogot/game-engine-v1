@@ -138,6 +138,58 @@ check("a straight after a narrow keeps the lid the narrow does not fill",
   verts(nar.pieces[1].mesh.geometry) === straightBoth,
   `${verts(nar.pieces[1].mesh.geometry)} vs both ${straightBoth}`);
 
+console.log("=== BANKED MOUTHS ONLY NEST WHEN THE CUT MATCHES ===");
+const tiltOpen = buildPiece("banktilt", conn, pp);
+const tiltBoth = buildPiece("banktilt", conn, pp, undefined, undefined, true, {
+  capEntry: true, capExit: true,
+});
+const tiltOne = buildPiece("banktilt", conn, pp, undefined, undefined, true, {
+  capEntry: true,
+});
+check("a held-bank piece can still take lids",
+  verts(tiltBoth.geometry) > verts(tiltOpen.geometry));
+
+const tiltMesh = new THREE.Mesh(tiltBoth.geometry);
+tiltMesh.updateMatrixWorld(true);
+const f0 = tiltBoth.frames[0];
+const fromOutside = f0.pos.clone().addScaledVector(f0.tangent, -1).addScaledVector(f0.up, -0.4);
+const intoPiece = f0.tangent.clone();
+const tiltHit = new THREE.Raycaster(fromOutside, intoPiece, 0, 2).intersectObject(tiltMesh)[0];
+check("FrontSide sees the held-bank entry lid from outside",
+  !!tiltHit && tiltHit.distance < 1.2,
+  tiltHit ? `dist ${tiltHit.distance.toFixed(3)}` : "missed");
+
+const flatBank = new ModularRoadBuilder({
+  scene: new THREE.Scene(),
+  material: new THREE.MeshBasicMaterial(),
+  railMaterial: new THREE.MeshBasicMaterial(),
+});
+flatBank.setActivePiece("straight"); flatBank.place();
+flatBank.setActivePiece("banktilt"); flatBank.place();
+check("a held-bank after a straight keeps the joint lids (U vs flat)",
+  verts(flatBank.pieces[0].mesh.geometry) === verts(both.geometry)
+  && verts(flatBank.pieces[1].mesh.geometry) === verts(tiltBoth.geometry),
+  `straight ${verts(flatBank.pieces[0].mesh.geometry)} vs both ${verts(both.geometry)}, bank ${verts(flatBank.pieces[1].mesh.geometry)} vs ${verts(tiltBoth.geometry)}`);
+
+const ramp = new ModularRoadBuilder({
+  scene: new THREE.Scene(),
+  material: new THREE.MeshBasicMaterial(),
+  railMaterial: new THREE.MeshBasicMaterial(),
+});
+ramp.setActivePiece("straight"); ramp.place();
+ramp.setActivePiece("bankin"); ramp.place();
+ramp.setActivePiece("banktilt"); ramp.place();
+const bankinOpen = buildPiece("bankin", conn, ramp.pieces[1].pp);
+check("bank-in onto a straight drops the flat joint",
+  verts(ramp.pieces[0].mesh.geometry) === verts(entry.geometry),
+  `${verts(ramp.pieces[0].mesh.geometry)} vs entry-only ${verts(entry.geometry)}`);
+check("…and keeps a lid on its curled exit until a held-bank occupies it",
+  verts(ramp.pieces[1].mesh.geometry) === verts(bankinOpen.geometry),
+  `${verts(ramp.pieces[1].mesh.geometry)} vs open ${verts(bankinOpen.geometry)}`);
+check("two held-bank mouths of the same lean drop the joint",
+  verts(ramp.pieces[2].mesh.geometry) === verts(tiltOne.geometry),
+  `${verts(ramp.pieces[2].mesh.geometry)} vs one-lid ${verts(tiltOne.geometry)}`);
+
 console.log("=== BUILDER: TUBE RINGS DROP ONLY AT WALL JOINTS ===");
 const tb = new ModularRoadBuilder({
   scene: new THREE.Scene(),
