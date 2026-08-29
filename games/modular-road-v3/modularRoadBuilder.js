@@ -60,6 +60,7 @@ const _UNIT_SCALE = new THREE.Vector3(1, 1, 1);
 const _IDENTITY = new THREE.Matrix4();
 const _CAP_P = new THREE.Vector3();
 const _CAP_Q = new THREE.Vector3();
+const _CAP_M = new THREE.Matrix4();
 
 /** Spare instance slots kept in every road batch, so appending one piece to a
  *  chain rewrites matrices instead of reallocating the buffer. */
@@ -1517,6 +1518,29 @@ export class ModularRoadBuilder {
    * against a narrower one keeps its lid; a curled / rolled bank mouth against
    * a flat one keeps its lid too.
    */
+  /**
+   * Where this piece's exit WILL be once it is rebuilt at `conn`.
+   *
+   * `p.connectorOut` is only restamped AFTER the piece is built, so during a
+   * rebuild walk it still holds the exit from before the chain moved. The cap
+   * flags are decided BEFORE the build, and they ask "is another piece parked
+   * on my exit?" — against a stale exit that lands on whatever now occupies the
+   * old spot, which drops a lid that should have stayed. Undoing a delete at
+   * the head of a chain did exactly this: every piece slid one length forward
+   * and the tail lost its end lid (930 -> 900 verts, a see-through mouth).
+   *
+   * The piece's own entry→exit offset is already stamped and is unaffected by
+   * the move, so `conn x outFromConn` is the exit it is about to have. Only
+   * trusted while the shape is unchanged — otherwise the offset itself is stale
+   * and `connectorOut` is no worse.
+   */
+  _prospectiveExit(p, conn) {
+    const b = p._builtFrom;
+    if (!conn || !b?.outFromConn) return p.connectorOut;
+    if (b.id !== p.id || b.pp !== p.pp || !!b.edges !== !!(p.edges ?? true)) return p.connectorOut;
+    return _CAP_M.copy(conn).multiply(b.outFromConn);
+  }
+
   _slabCapFlags(p, conn) {
     if (!pieceTakesSlabCaps(p.id)) return { capEntry: false, capExit: false };
     const run = this._chainPieces(p.chainId);
@@ -1529,7 +1553,7 @@ export class ModularRoadBuilder {
     const chainExit = !p.detached && next && !next.detached
       && this._neighborFillsEnd(p, "exit", next, "entry");
     const mateIn = this._socketMate(conn, p);
-    const mateOut = this._socketMate(p.connectorOut, p);
+    const mateOut = this._socketMate(this._prospectiveExit(p, conn), p);
     return {
       capEntry: !chainEntry && !this._neighborFillsEnd(p, "entry", mateIn?.piece, mateIn?.end),
       capExit: !chainExit && !this._neighborFillsEnd(p, "exit", mateOut?.piece, mateOut?.end),
@@ -1554,7 +1578,7 @@ export class ModularRoadBuilder {
     const chainExit = !p.detached && next && !next.detached && this._endTakesTubeCap(next, "entry");
     return {
       capEntry: !chainEntry && !this._spatialTubeWallMate(conn, p),
-      capExit: !chainExit && !this._spatialTubeWallMate(p.connectorOut, p),
+      capExit: !chainExit && !this._spatialTubeWallMate(this._prospectiveExit(p, conn), p),
     };
   }
 
@@ -5591,11 +5615,17 @@ export const CATEGORY_PRESETS = {
      * A flat corner is grip-limited: v_max = sqrt(R · a). MEASURED on the real
      * vehicle over a flat plane, holding a steering angle and reading v·omega
      * once it settles (tools/turnLadderTest.mjs), sustained cornering is
-     * 1.26–1.30 g — flat across every speed from 15 to 40 m/s. The vehicle
-     * file's own comment assumes 1.5 g, so its corner speeds are ~7% optimistic;
-     * the numbers below use the measured 1.3. Anything much above that in a rig
-     * like this is a PIROUETTE — an early version of the measurement reported
-     * 8.4 g at a 3 m radius, which is a car rotating on the spot, not a corner.
+     * 2.25–2.27 g — flat across every speed from 15 to 40 m/s (measured by
+     * tools/turnLadderTest.mjs, which is what keeps this honest). It read
+     * 1.26–1.30 g when the ladder was first built; the tyre model has since
+     * roughly doubled the lateral grip. Check the measurement is a CORNER and
+     * not a PIROUETTE before believing a high number — an early version of it
+     * reported 8.4 g at a 3 m radius, which is a car rotating on the spot. The
+     * 2.25 figure holds at R≈72 m with sideslip under 15°, so it is real.
+     *
+     * The rung speeds below did NOT move with it, because at the tight end they
+     * are limited by steering lock rather than by grip — so the radii still
+     * stand as measured.
      *
      * That gives the ladder its reason to exist, because the old tab could not
      * span the car. The straights run to 48.3 m/s (174 km/h) and the widest
