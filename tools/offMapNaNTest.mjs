@@ -175,7 +175,11 @@ console.log("\n═══ roadGame RECOVERY PATHS ═══\n");
 
 const gameSrc = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8")
   .replace(/\r\n/g, "\n");
-const checkFall = gameSrc.match(/function checkFall\(\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+// Match the parameter list loosely — checkFall took `dt` at some point and the
+// bare `()` form stopped matching, which silently emptied the slice and made
+// the NaN-backstop check below fail even though the backstop was still there.
+const checkFall = gameSrc.match(/function checkFall\([^)]*\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+check(checkFall.length > 0, "the checkFall slice actually matched something");
 check(/Number\.isFinite/.test(checkFall),
   `checkFall() tests for a non-finite pose — every other test in it is a "<",
          and "<" against NaN is false, so a NaN car is never recovered without this`);

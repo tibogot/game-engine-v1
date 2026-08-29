@@ -106,12 +106,21 @@ for (const speed of [15, 20, 25, 30, 35, 40]) {
   console.log(`   ${String(speed).padStart(4)}   ${r.g.toFixed(2).padStart(7)} g   ${r.R.toFixed(0).padStart(11)} m`);
 }
 const lo = Math.min(...held), hi = Math.max(...held);
-ok(lo > 1.15 && hi < 1.6, "the car holds a steady ~1.3 g however fast it is going",
-  `${lo.toFixed(2)}–${hi.toFixed(2)} g across 15–40 m/s`);
+// FLATNESS is the property the ladder actually rests on: if grip fell away with
+// speed, v_max = sqrt(R·a) would stop predicting anything and the rungs would
+// not be a ladder. Assert the spread, not just a band, so a tyre model that
+// starts sagging at speed fails here even if it passes through the band.
+ok(hi - lo < 0.15, "the car holds a steady g however fast it is going",
+  `${lo.toFixed(2)}–${hi.toFixed(2)} g across 15–40 m/s, spread ${(hi - lo).toFixed(2)}`);
 // The number the ladder's tile comment quotes. If the tyre model changes, this
-// is what tells you the comment (and the radii) need revisiting.
+// is what tells you the comment (and the radii) need revisiting — and it earned
+// its keep: it caught gripRear being raised 1.0 -> 1.5, which took this to
+// 2.25 g and turned the car into an understeering one that could not pivot.
+// Reverted in the vehicle rather than re-baselined here, because the number was
+// the symptom and not the decision.
 const A = 1.3;
-ok(lo <= A && A <= hi, `1.3 g is inside the measured band, so the tile comment is sound`);
+ok(lo <= A && A <= hi, `${A} g is inside the measured band, so the tile comment is sound`,
+  `${lo.toFixed(2)}–${hi.toFixed(2)} g`);
 
 /* ------------------------------------------------------------------------ */
 console.log("\n2. THE LADDER SPANS THE CAR\n");

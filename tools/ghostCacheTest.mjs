@@ -37,6 +37,12 @@ function makeBuilder(pieceId = "straight") {
   b._gizmoTarget = "chain";
   b.ghostDetached = false;
   b.ghostEnd = "tail";
+  // refreshGhost() grew a _ghostCapFlags() call, which walks the chain to see
+  // whether a neighbour already fills the end. An empty chain is the right
+  // model for a ghost floating at a fresh connector — it just has to exist.
+  b.pieces = [];
+  b.chains = [];
+  b.activeChainId = null;
   b._localXfCache = new Map();
   b._ghostGeoCache = new Map();
   b._ghostOrphanGeo = null;
@@ -57,8 +63,11 @@ function makeBuilder(pieceId = "straight") {
         .makeRotationY(yaw).setPosition(x, y, z);
       let ref;
       try {
+        // Same cap flags the ghost resolves, or the reference is a different
+        // shape: an open chain end caps a slab/tube piece at BOTH ends, and
+        // those lids are real vertices the vertex-count check below counts.
         ref = KIT.buildPiece(def.id, b.currentConnector, b.activeParams,
-          undefined, undefined, KIT.guardrailParams.enabled);
+          undefined, undefined, KIT.guardrailParams.enabled, b._ghostCapFlags());
       } catch { continue; }
       b.refreshGhost();
       for (let i = 0; i < 16; i++) {

@@ -178,14 +178,26 @@ console.log("\n=== THE REBUILD IS INCREMENTAL (why this is affordable) ===");
   const b = fresh(40);
   const fp = fingerprint(b);
   b.deletePiece(b.pieces[0]);           // first piece: the whole chain re-flows
-  const restGeoms = new Map(b.pieces.map((p) => [p.uid, p.mesh.geometry]));
+  const caps = (p) => JSON.stringify(b._endCapFlags(p, null));
+  const restGeoms = new Map(b.pieces.map((p) => [p.uid, { geo: p.mesh.geometry, caps: caps(p) }]));
   b.undo();
-  const remeshedRest = b.pieces.slice(1)
-    .filter((p) => restGeoms.has(p.uid) && restGeoms.get(p.uid) !== p.mesh.geometry).length;
   check("undoing the FIRST piece restores the track exactly", fingerprint(b) === fp,
     "the chain moved; relocate has to restamp every seam, not skip it");
-  check("...without remeshing the pieces that only slid", remeshedRest === 0,
-    `${remeshedRest} of 39 remeshed — they moved, but only the restored piece is new geometry`);
+  // This used to demand ZERO remeshes, which was right before pieces carried end
+  // caps. They do now: deleting piece 0 makes piece 1 the head and gives it an
+  // entry lid, so restoring piece 0 has to take that lid away again. A piece
+  // whose cap flags changed MUST get new geometry. Assert the reason rather than
+  // a count, so a genuinely wasteful remesh still fails.
+  const remeshed = b.pieces.slice(1).filter((p) =>
+    restGeoms.has(p.uid) && restGeoms.get(p.uid).geo !== p.mesh.geometry);
+  const gratuitous = remeshed.filter((p) => restGeoms.get(p.uid).caps === caps(p));
+  check("...remeshing only the pieces whose end caps actually changed",
+    gratuitous.length === 0,
+    gratuitous.length
+      ? `${gratuitous.length} of ${remeshed.length} remeshed with unchanged caps `
+        + `(indices ${gratuitous.map((p) => b.pieces.indexOf(p)).join(", ")}) — `
+        + "they only slid, so the old geometry was still correct"
+      : `${remeshed.length} of 39 remeshed, all cap-driven`);
 }
 
 console.log("\n=== UIDs ARE STABLE ===");

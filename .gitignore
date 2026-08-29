@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Headless-test scratch modules. The text-surgery harnesses in tools/ write a
+# patched copy of a real module NEXT TO IT (relative imports have to resolve),
+# import it, then unlink it. A crashed run leaves one behind, and four were
+# committed by accident in 7c0a65b — a frozen fork of modularRoadScenery.js
+# that sat in the root for a month. The PID keeps parallel runs from colliding.
+.*.[0-9]*.mjs

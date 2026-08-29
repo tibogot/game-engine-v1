@@ -124,20 +124,47 @@ console.log("=== (1) THE WHEEL CANNOT CLIMB INTO THE BODY ===");
     return { gap: minGap, sink };
   };
 
-  // DRIVABLE obstacles — a kerb, a ramp lip. This is the range the mechanism is
-  // specified for, and the range a road deck can actually present.
-  let worstGap = Infinity, worstSink = 0;
+  // DRIVABLE obstacles — a kerb, a ramp lip.
+  //
+  // HOW BIG A STEP THIS COVERS IS SET BY archLiftMax, and that is a LOOKS
+  // decision, not an oversight: 0.25 was tried and pinned at its ceiling for
+  // ~0.6 s on a Jump lab scoop, which reads as the body coming off the wheels
+  // rather than as suspension. 0.12 is the deliberate compromise.
+  //
+  // So this used to over-claim. It asserted a full arch gap up to a 0.20 m step,
+  // which needs ~15.7 cm of lift and can never be met at a 12 cm cap. What the
+  // mechanism actually promises is a full gap up to the step the cap covers, and
+  // a GRACEFUL loss past it — never a wheel through the bodywork, never a wheel
+  // below the ground. Both halves are asserted, and the covered step is measured
+  // rather than hard-coded, so raising archLiftMax extends it here for free.
+  let worstSink = 0;
   const rows = [];
-  for (const step of [0.05, 0.1, 0.2]) {
+  const probes = [0.05, 0.1, 0.14, 0.16, 0.18, 0.2].map((step) => {
     const r = probeStep(step);
-    worstGap = Math.min(worstGap, r.gap);
     worstSink = Math.max(worstSink, r.sink);
     rows.push(`${step}m→${(r.gap * 100).toFixed(1)}cm`);
-  }
+    return { step, ...r };
+  });
+  const full = probes.filter((p) => p.gap >= TIRE.minSuspExt - 1e-6);
+  const covered = full.length ? Math.max(...full.map((p) => p.step)) : 0;
+  // An ordinary kerb strike has to be inside the covered range, or the mechanism
+  // is not earning its complexity.
   check(
-    "over drivable obstacles the body keeps the wheel-arch gap open",
-    worstGap >= TIRE.minSuspExt - 1e-6,
-    `worst gap ${(worstGap * 100).toFixed(1)} cm vs target ${(TIRE.minSuspExt * 100).toFixed(1)} cm`,
+    "the body keeps the full wheel-arch gap over an ordinary kerb strike",
+    covered >= 0.16 - 1e-9,
+    `full ${(TIRE.minSuspExt * 100).toFixed(0)} cm gap held up to a ${(covered * 100).toFixed(0)} cm step `
+    + `(archLiftMax ${(TIRE.archLiftMax * 100).toFixed(0)} cm is what sets this)`,
+  );
+  // Past it the gap closes, but it must CLOSE, not collapse — a zero gap is a
+  // wheel in the arch, which is the defect the whole mechanism exists to stop.
+  const beyond = probes.filter((p) => p.step > covered);
+  const tightest = beyond.length ? Math.min(...beyond.map((p) => p.gap)) : Infinity;
+  check(
+    "…and past that it narrows gracefully instead of collapsing",
+    tightest > 0.04,
+    beyond.length
+      ? `tightest ${(tightest * 100).toFixed(1)} cm at a ${(Math.max(...beyond.map((p) => p.step)) * 100).toFixed(0)} cm step`
+      : "nothing in the drivable range exceeds the cap",
   );
   check(
     "…and the wheel is never drawn below the surface it measured",

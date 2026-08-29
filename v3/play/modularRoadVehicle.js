@@ -430,7 +430,19 @@ export const TIRE = {
   // Per-axle friction multipliers (× frictionCoeff). Lower the rear for
   // oversteer, lower the front for understeer. Handbrake swaps the rear out.
   gripFront: 1.0,
-  gripRear: 1.5,
+  // NEUTRAL, and it has to stay neutral. Rear-grippier-than-front is terminal
+  // understeer with nothing to catch it, and this was 1.5 for two days: the
+  // cornering radius went 6 m -> 74 m, peak sideslip 44° -> 6°, and the car
+  // stopped being able to pivot at all. That silently broke four things —
+  // donuts went wide (7.3 m against a 4.5 m target), the short park pipe threw
+  // the car out at 6 of 9 speeds, the R=40 bowl overshot, and the chase camera
+  // swung ahead of the car on a corkscrew.
+  //
+  // There is NO middle setting to compromise on. 1.1 and 1.2 never settle into
+  // a steady corner at all, so the car is either the rotating one at <=1.05 or
+  // the planted one at >=1.3. Measured with tools/turnLadderTest.mjs; the
+  // ladder's radii in modularRoadBuilder.js are quoted against this value.
+  gripRear: 1.0,
   gripHandbrake: 0.35,
   // Lateral slip model: force builds linearly with slip then saturates at the
   // friction circle. `tireStiffness` is the slope (≈ 1/peak-slip-angle); higher

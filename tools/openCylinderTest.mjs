@@ -45,7 +45,12 @@ console.log("\n=== OPEN CYLINDER IS ONE FRONTSIDE LATHE ===");
   const mesh = meshes[0];
   check("FrontSide (not DoubleSide / BackSide)",
     mesh.material.side === THREE.FrontSide);
-  check("LatheGeometry", mesh.geometry.type === "LatheGeometry");
+  // Was a single Lathe profile; thickWallTubeGeometry replaced it with split
+  // inner/outer shells + flat ring caps merged into one BufferGeometry. The
+  // facing checks below are what actually matter, so pin the replacement
+  // rather than the old class name.
+  check("one merged BufferGeometry, not the old Lathe profile",
+    mesh.geometry.type === "BufferGeometry", mesh.geometry.type);
 
   const geo = mesh.geometry;
   const pos = geo.attributes.position;

@@ -1,8 +1,13 @@
-// Constant-section straights only keep the two end frames.
+// Constant-section straights are stationed every `segLen`, like everything else.
 //
-// A prism is defined by its entry and exit. Extra stations every 1.6 m were
-// copies of the same ring. Curves, morphing entries, and bank in/out still
-// step — their heading or profile actually changes.
+// This used to assert the opposite: a prism is defined by its entry and exit,
+// so straights were collapsed to two frames and the stations in between were
+// dropped as copies of the same ring. 9e391b3 (newcursorroadoptimization) put
+// them back — one 32 m quad interpolates its normal badly and picks up shadow
+// acne, and the vertices are cheap next to that. So the contract this pins now
+// is the SPACING, not a magic count: no gap wider than segLen, and the count
+// that follows from it. What must still hold either way is further down —
+// connectors span the authored length and UVs run the real length.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
@@ -16,14 +21,26 @@ const check = (n, c, d = "") => {
   if (!c) fail++;
 };
 
-const { buildPiece, initialConnector, pieceParams } =
+const { buildPiece, initialConnector, pieceParams, roadParams } =
   await import(new URL("../games/modular-road-v3/modularRoadKit.js", import.meta.url).href);
 
 const pp = (extra = {}) => ({ ...pieceParams, ...extra });
 const framesOf = (id, extra = {}) =>
   buildPiece(id, initialConnector(), pp(extra)).frames.length;
 
-console.log("— prisms are two frames —");
+/** Longest gap between consecutive stations, and the run they span. */
+const spacingOf = (id, extra = {}) => {
+  const frames = buildPiece(id, initialConnector(), pp(extra)).frames;
+  let worst = 0, total = 0;
+  for (let i = 1; i < frames.length; i++) {
+    const d = frames[i].pos.distanceTo(frames[i - 1].pos);
+    if (d > worst) worst = d;
+    total += d;
+  }
+  return { worst, total, n: frames.length };
+};
+
+console.log("— constant straights step at segLen —");
 for (const [id, extra] of [
   ["straight", { straightLength: 32 }],
   ["straight", { straightLength: 14 }],
@@ -37,8 +54,13 @@ for (const [id, extra] of [
   ["channel", {}],
   ["banktilt", { straightLength: 26 }],
 ]) {
-  const n = framesOf(id, extra);
-  check(`${id} ${JSON.stringify(extra)} is 2 frames`, n === 2, `${n} frames`);
+  const { worst, total, n } = spacingOf(id, extra);
+  // ceil(run / segLen) spans + the closing frame. Tolerance on `worst` because
+  // the last span is the remainder, never longer than a full step.
+  const want = Math.ceil(total / roadParams.segLen - 1e-6) + 1;
+  check(`${id} ${JSON.stringify(extra)} steps at segLen`,
+    n === want && worst <= roadParams.segLen + 1e-6,
+    `${n} frames over ${total.toFixed(1)} m, widest gap ${worst.toFixed(3)} m (want ${want})`);
 }
 
 console.log("\n— connectors still span the authored length —");

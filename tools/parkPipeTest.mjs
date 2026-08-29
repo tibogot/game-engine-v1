@@ -198,10 +198,26 @@ for (const id of ["half_pipe_park", "half_pipe_park_long"]) {
     `"${preset.label}" comes down HIGH on the transition, near the lip, not down in the
          bottom${low.length ? ` — landed low at ${low.join(", ")}` : ""}`);
 
-  const long = rows.filter(({ r }) => r.bestAir > 3.0).map(label);
+  // ESCAPES FIRST, and separately — because the two checks above only inspect
+  // runs that LANDED (`landX !== null`), so a run that leaves the pipe entirely
+  // passes both of them vacuously. On the short Park Pipe most of the 34–40 m/s
+  // grid now flies out, and the only thing that used to catch it was the airtime
+  // bound reporting "hung too long" — which reads as a tuning threshold and
+  // invites exactly the re-baselining that would have hidden it.
+  const out = rows.filter(({ r }) => r.escaped || r.landX === null).map(label);
+  check(out.length === 0,
+    `"${preset.label}" keeps the car IN the pipe at every speed on the grid${
+      out.length ? ` — left the pipe at ${out.join(", ")}` : ""}`);
+
+  // Then the hang time, on the runs that stayed in. Comparative by intent — a
+  // pipe pops you short where the bowl floats you — so it is bounded against
+  // the bowl's 5 s rather than frozen at the 3.0 s one tune measured.
+  const BOWL_AIR = 5.0;
+  const CAP = 0.8 * BOWL_AIR;
+  const long = rows.filter(({ r }) => !r.escaped && r.landX !== null && r.bestAir > CAP).map(label);
   check(long.length === 0,
-    `"${preset.label}" pops SHORT — under 3 s, which is what the vert height buys over the
-         park bowl's 5 s${long.length ? `, ${long.join(", ")} hung too long` : ""}`);
+    `"${preset.label}" pops SHORT — comfortably under the park bowl's ${BOWL_AIR} s
+         (cap ${CAP} s)${long.length ? `, ${long.join(", ")} hung too long` : ""}`);
 }
 
 // The failing shape, asserted over the SAME grid rather than one sample. A 200°

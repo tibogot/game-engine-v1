@@ -535,6 +535,11 @@ console.log("\n=== SAVED WITH THE TRACK, AND OUT OF THE COLLISION BAKE ===");
     const next = propsSrc.indexOf('\n    id: "', start + 1);
     return propsSrc.slice(start, next < 0 ? propsSrc.length : next);
   };
+  /** Source with comments stripped — retired helpers are kept commented in this
+   *  file "for restore", and a plain regex happily matches them from in there,
+   *  which turns a dead code path into a passing check. */
+  const uncommented = (s) =>
+    s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
   // THE INVARIANT IS PER-MESH, NOT PER-PROP. A moving collider in the static bake
   // is an invisible wall welded where it was authored while the visible prop
   // swings/flies off on its own — but "no simulated geometry in the bake" does
@@ -565,14 +570,20 @@ console.log("\n=== SAVED WITH THE TRACK, AND OUT OF THE COLLISION BAKE ===");
   // metres away — the gate's white band shimmered for exactly this reason. Bands
   // and stripes are painted into a shared texture instead, which also keeps each
   // prop to one draw.
-  for (const [id, thing] of [["gate", "hazard band"], ["pole", "hazard rings"]]) {
-    const entry = catalogEntry(id) ?? "";
-    check(`the ${id}'s ${thing} is a texture, not stacked geometry`,
-      /Texture\(\)/.test(entry), "coplanar decal meshes always z-fight eventually");
-  }
-  check("...and those textures are built once for the whole catalog, not per prop",
-    /if \(_gateStripeTex\) return _gateStripeTex;/.test(propsSrc)
-    && /if \(_poleBandTex\) return _poleBandTex;/.test(propsSrc));
+  check("the pole's hazard rings are a texture, not stacked geometry",
+    /Texture\(\)/.test(catalogEntry("pole") ?? ""),
+    "coplanar decal meshes always z-fight eventually");
+  // The gate's red/white band is GONE — the panel is solid red now, and the 1-D
+  // texture is kept commented in modularRoadProps.js "for restore". So there is
+  // no texture left to assert; what still has to hold is the reason it was one,
+  // which is that nothing coplanar got stacked back onto the panel face.
+  check("the gate's panel carries no stacked band mesh",
+    !/\b(band|stripe)\b/i.test(uncommented(catalogEntry("gate") ?? "")));
+  // Only the pole's — and matched against UNCOMMENTED source, because the gate's
+  // retired helper still sits in the file as a comment and was quietly
+  // satisfying this check from inside it.
+  check("...and that texture is built once for the whole catalog, not per prop",
+    /if \(_poleBandTex\) return _poleBandTex;/.test(uncommented(propsSrc)));
   const io = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadTrackIO.js"), "utf8");
   check("track export includes props", /props:\s*props\.exportInstances\(\)/.test(io));
   check("track import restores them", /importInstances\(data\.props\)/.test(io));
