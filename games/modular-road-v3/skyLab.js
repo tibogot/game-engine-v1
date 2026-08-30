@@ -6,6 +6,7 @@
  * decide the look include "through the deck" and "does the road reflect it".
  */
 import * as THREE from "three/webgpu";
+import { Fn as TSL_Fn, positionWorld as positionWorldTSL } from "three/tsl";
 import {
   createModularRoadSky,
   SKY_DEFAULTS,
@@ -16,6 +17,7 @@ import {
   moonDirFromTime,
 } from "./modularRoadSky.js";
 import { createModularRoadClouds, CLOUD_LAYER } from "./modularRoadClouds.js";
+import { createSkyAtmosphere } from "./modularRoadSkyAtmosphere.js";
 
 const TRACK_Y = 40;
 
@@ -116,6 +118,34 @@ export async function startSkyLab() {
 
   const sky = createModularRoadSky();
   scene.add(sky.mesh);
+
+  // ── PHYSICAL ATMOSPHERE (A/B against the authored sky above) ───────────────────────
+  // Its own dome on the same geometry, drawn instead of the authored one when enabled.
+  // Kept as a straight swap so the two can be compared on identical frames — the whole
+  // question is whether the physical model actually looks better, and the only honest way
+  // to answer that is to flip between them without anything else changing.
+  const atmo = createSkyAtmosphere({ renderer });
+  const atmoMat = new THREE.MeshBasicNodeMaterial();
+  atmoMat.side = THREE.BackSide;
+  atmoMat.depthWrite = false;
+  atmoMat.fog = false;
+  atmoMat.colorNode = TSL_Fn(() => atmo.skyRadiance(positionWorldTSL))();
+  const atmoDome = new THREE.Mesh(sky.mesh.geometry, atmoMat);
+  atmoDome.frustumCulled = false;
+  atmoDome.visible = false;
+  scene.add(atmoDome);
+
+  let usePhysicalSky = false;
+  function setPhysicalSky(on) {
+    usePhysicalSky = !!on;
+    atmoDome.visible = usePhysicalSky;
+    sky.mesh.visible = !usePhysicalSky;
+    const b = document.getElementById("b-atmo");
+    if (b) {
+      b.textContent = usePhysicalSky ? "Sky: physical" : "Sky: authored";
+      b.classList.toggle("on", usePhysicalSky);
+    }
+  }
   const P = sky.params;
 
   const hemi = new THREE.HemisphereLight(0x8eb0d0, 0x7ea8c4, 0.45);
@@ -298,6 +328,7 @@ export async function startSkyLab() {
       syncPlay();
     }
     if (k === "c") setClouds(!clouds.enabled);
+    if (k === "p") setPhysicalSky(!usePhysicalSky);   // A/B the physical atmosphere
     if (k === "g") {
       grid.visible = !grid.visible;
       track.visible = !track.visible;
@@ -418,6 +449,7 @@ export async function startSkyLab() {
       b.classList.toggle("on", on);
     }
   }
+  document.getElementById("b-atmo")?.addEventListener("click", () => setPhysicalSky(!usePhysicalSky));
   document.getElementById("b-clouds")?.addEventListener("click", () => {
     setClouds(!clouds.enabled);
   });
@@ -509,6 +541,10 @@ export async function startSkyLab() {
 
     flyStep(dt);
     const look = sky.update({ camera, dt });
+    // The atmosphere needs the sun and the camera ALTITUDE — the altitude is half the
+    // point, since the sky genuinely changes as you climb toward and above the deck.
+    atmoDome.position.copy(sky.mesh.position);
+    atmo.update(look.sunDir, Math.max(0, camera.position.y));
     syncLights(look);
     syncClouds(dt, look);
     tickEnvBake(look);
@@ -555,6 +591,7 @@ export async function startSkyLab() {
   });
 
   window.__skyLab = {
+    atmo, setPhysicalSky, get physical() { return usePhysicalSky; },
     sky, clouds, camera, renderer, scene, applyView, setPreset, params: P, VIEWPOINTS, THREE,
   };
   return window.__skyLab;

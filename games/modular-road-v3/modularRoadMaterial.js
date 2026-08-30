@@ -365,10 +365,10 @@ export function createRoadMaterial(opts = {}) {
     // Centre + edge paint lines. Default OFF — the clean Apex-Rush deck look;
     // the dev panel's "Road lines" toggle flips the uniform live.
     linesOn: uniform(opts.linesOn ?? 0), // master: 1 = paint lines, 0 = plain deck
-    // Which lines the master switch draws. Both default ON, so `linesOn` alone
-    // behaves exactly as it always has; drop one to get edges-only (a race
-    // circuit) or centre-only (a two-way road) without a second material.
-    centerOn: uniform(opts.centerOn ?? 1),
+    // Which lines the master switch draws. Edges default ON, centre dashes
+    // OFF — so `linesOn` alone is a race-circuit (edges only). Flip Centre
+    // dashes in the Track menu for a two-way road.
+    centerOn: uniform(opts.centerOn ?? 0),
     edgeOn: uniform(opts.edgeOn ?? 1),
     // Optional neon paint: write the same line mask into emissive + bloom MRT.
     // Off by default (day look); night tracks flip `linesBloom` without a rebuild.
@@ -1582,7 +1582,7 @@ export function createCheapAsphaltMaterial(opts = {}) {
     edgeSoft: uniform(opts.edgeSoft ?? 0.004),
     railDash: uniform(opts.railDash ?? 0.5),
     linesOn: uniform(opts.linesOn ?? 0),
-    centerOn: uniform(opts.centerOn ?? 1),
+    centerOn: uniform(opts.centerOn ?? 0),
     edgeOn: uniform(opts.edgeOn ?? 1),
     wheelDarken: uniform(opts.wheelDarken ?? 0.10),
     deckRough: uniform(opts.deckRough ?? 0.93),

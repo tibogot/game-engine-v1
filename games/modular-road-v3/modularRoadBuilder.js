@@ -4594,6 +4594,7 @@ const PIECE_TO_CATEGORY = {
   narrow: "straight",
   holed: "straight",
   glass_road: "straight",
+  dual: "straight",
   rounded_end: "straight",
   rounded_start: "straight",
   tunnel: "tubes",
@@ -5327,6 +5328,12 @@ export const CATEGORY_PRESETS = {
       label: "Hole Road XL",
       base: "holed",
       params: { holedLength: 36, holedWidth: 26, holeRadius: 9 },
+    },
+    {
+      id: "dual_boards",
+      label: "Dual boards",
+      base: "dual",
+      params: { dualLength: 32, dualWidth: 4.4, dualGap: 0.9 },
     },
   ],
   ramps: [

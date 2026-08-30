@@ -1054,7 +1054,7 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="prop-row">
             <span class="prop-label">· Centre dashes</span>
             <div class="prop-value">
-              <button class="prop-toggle checked" id="dv-lines-center" type="button" aria-label="Centre dashes">${CHECK_SVG}</button>
+              <button class="prop-toggle" id="dv-lines-center" type="button" aria-label="Centre dashes">${CHECK_SVG}</button>
             </div>
           </div>
           <div class="prop-row">
@@ -2769,7 +2769,7 @@ export function createRoadDevPanel({ app, game, params }) {
   const selTiltEl = $("#dv-sel-tilt");
 
   toggle("dv-lines", game.getLinesOn(), (on) => game.setLinesOn(on));
-  toggle("dv-lines-center", game.getCenterLinesOn?.() ?? true, (on) => game.setCenterLinesOn?.(on));
+  toggle("dv-lines-center", game.getCenterLinesOn?.() ?? false, (on) => game.setCenterLinesOn?.(on));
   toggle("dv-lines-edge", game.getEdgeLinesOn?.() ?? true, (on) => game.setEdgeLinesOn?.(on));
   toggle("dv-lines-bloom", game.getLinesBloom?.() ?? false, (on) => game.setLinesBloom?.(on));
   toggle("dv-terrain", game.getTerrain?.() ?? true, (on) => game.setTerrain?.(on));

@@ -1,0 +1,520 @@
+/**
+ * Physical atmosphere for the modular-road sky — Hillaire 2020, lab-owned.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────────────
+ * WHY THIS EXISTS, given `modularRoadSky.js` already produces a sky.
+ *
+ * That one is five authored colour looks (night / dawn / dusk / golden / day) blended by
+ * solar elevation and camera altitude. It is cheap and fully art-directable, and it will
+ * never look physical, because it is not modelling anything: it cannot redden the sun
+ * through real optical depth, cannot fill twilight from multiple scattering, and cannot
+ * know what the sky looks like from 900 m instead of from the ground. Every one of those
+ * is free here.
+ *
+ * NOTHING IS IMPORTED FROM v3. `v3/render/sky/dayNightSky.js` is an existing Hillaire
+ * implementation and was read as a reference for the parameterisation, but this file is
+ * standalone so the lab owns its own sky end to end.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────────────
+ * THE THREE LUTS, AND WHY THE BAKE ORDER IS NOT OPTIONAL.
+ *
+ *   1. TRANSMITTANCE  T(h, cosSunZenith) — how much light survives from a point at
+ *      altitude h to the top of the atmosphere. Depends only on the medium, so it is
+ *      baked ONCE and never again unless the atmosphere parameters change.
+ *   2. MULTI-SCATTER  Ψms(h, cosSunZenith) — everything scattered two or more times,
+ *      with the infinite bounce series closed in one term. NEEDS the transmittance LUT,
+ *      so it bakes second. This is what makes twilight glow and keeps midday zenith a
+ *      deep blue instead of washing it toward white the way an ad-hoc ambient fill does.
+ *   3. SKY-VIEW       L(view direction) — the finished radiance for the current sun, in
+ *      an equirect LUT. NEEDS both of the above. Re-baked only when the sun moves.
+ *
+ * The point of 3 is cost: without it, every sky pixel would march the atmosphere (32
+ * samples, each with a transmittance fetch). With it, a sky pixel is ONE texture fetch,
+ * and the march happens once into a 192x108 target.
+ *
+ * The elevation axis of the sky-view LUT is sqrt-warped around the horizon, because that
+ * is where all the interesting gradient is — a linear axis spends most of its resolution
+ * on empty zenith and bands the sunset.
+ */
+import * as THREE from "three/webgpu";
+import {
+  float, vec2, vec3, vec4, Fn, If, Loop, uniform, uv, texture,
+  normalize, dot, max, min, mix, clamp, exp, sqrt, pow, abs, sign, acos, atan, cos, sin,
+  saturate, smoothstep,
+} from "three/tsl";
+
+/** Metres. Earth-like: 6360 km ground, 100 km of atmosphere. */
+export const RG = 6360000.0;
+export const RT = 6460000.0;
+
+const PI = Math.PI;
+
+export const ATMOSPHERE_DEFAULTS = {
+  /** Rayleigh scattering at sea level, per metre, RGB. Blue scatters ~9x more than red —
+   *  this ratio IS why the sky is blue and the low sun is red. */
+  rayleigh: [5.802e-6, 13.558e-6, 33.1e-6],
+  /** Rayleigh density scale height, metres. */
+  rayleighH: 8000,
+  /** Mie (aerosol) scattering, per metre. Grey — haze has no colour of its own. */
+  mie: 3.996e-6,
+  /** Mie absorption. Aerosols absorb as well as scatter; without this, haze glows. */
+  mieAbsorption: 4.4e-6,
+  /** Mie density scale height, metres. Aerosols hug the ground. */
+  mieH: 1200,
+  /** Mie phase asymmetry. 0.8 = strongly forward — the bright halo round the sun. */
+  mieG: 0.8,
+  /** Ozone absorption, per metre, RGB. Small, but it is what keeps twilight BLUE
+   *  instead of muddy brown once Rayleigh has stopped reaching the viewer. */
+  ozone: [0.650e-6, 1.881e-6, 0.085e-6],
+  /** Ozone layer centre and half-width, metres (a tent function). */
+  ozoneCentre: 25000,
+  ozoneWidth: 15000,
+
+  /** Multiplier on Rayleigh — the "how blue" dial. */
+  rayleighScale: 1.0,
+  /** Multiplier on Mie — the haze/turbidity dial. Weather drives this. */
+  mieScale: 1.0,
+  /** Multiplier on ozone. */
+  ozoneScale: 1.0,
+
+  /** Sun angular radius, degrees. The real sun is 0.27. */
+  sunAngularRadius: 0.27,
+  /** Sun radiance multiplier. */
+  sunIntensity: 20.0,
+  /** Ground albedo — feeds the multi-scatter LUT, so a bright ground lifts the whole sky. */
+  groundAlbedo: 0.1,
+};
+
+/** March step counts. Only ever run inside a LUT bake, never per sky pixel. */
+const TRANS_STEPS = 40;
+const MS_SQRT_SAMPLES = 8;   // 8x8 = 64 directions on the sphere
+const MS_STEPS = 20;
+const SKYVIEW_STEPS = 32;
+
+const TLUT_W = 256, TLUT_H = 64;
+const MSLUT = 32;
+const SKY_W = 192, SKY_H = 108;
+
+/**
+ * @param {object} opts
+ * @param {THREE.WebGPURenderer} opts.renderer
+ * @param {object} [opts.params] merged onto ATMOSPHERE_DEFAULTS
+ */
+export function createSkyAtmosphere({ renderer, params = {} }) {
+  const P = { ...ATMOSPHERE_DEFAULTS, ...params };
+
+  // ── Uniforms ───────────────────────────────────────────────────────────────────────
+  const uRayleigh = uniform(new THREE.Vector3(...P.rayleigh));
+  const uRayleighH = uniform(P.rayleighH);
+  const uMie = uniform(P.mie);
+  const uMieAbs = uniform(P.mieAbsorption);
+  const uMieH = uniform(P.mieH);
+  const uMieG = uniform(P.mieG);
+  const uOzone = uniform(new THREE.Vector3(...P.ozone));
+  const uOzoneC = uniform(P.ozoneCentre);
+  const uOzoneW = uniform(P.ozoneWidth);
+  const uRayScale = uniform(P.rayleighScale);
+  const uMieScale = uniform(P.mieScale);
+  const uOzScale = uniform(P.ozoneScale);
+  const uSunDir = uniform(new THREE.Vector3(0, 1, 0));
+  const uSunIntensity = uniform(P.sunIntensity);
+  const uGroundAlbedo = uniform(P.groundAlbedo);
+  /** Camera altitude above sea level, metres. This is what makes the sky change when you
+   *  climb — a gradient sky cannot do it at all. */
+  const uViewHeight = uniform(0);
+
+  // ── Medium ─────────────────────────────────────────────────────────────────────────
+
+  /** Scattering + extinction at a height above the ground. */
+  const rayleighAt = Fn(([h]) =>
+    uRayleigh.mul(uRayScale).mul(exp(h.div(uRayleighH).negate())),
+  );
+  const mieAt = Fn(([h]) => uMie.mul(uMieScale).mul(exp(h.div(uMieH).negate())));
+  const mieAbsAt = Fn(([h]) => uMieAbs.mul(uMieScale).mul(exp(h.div(uMieH).negate())));
+  /** Ozone is a tent, not an exponential — it lives in a band, not near the ground. */
+  const ozoneAt = Fn(([h]) =>
+    uOzone.mul(uOzScale).mul(abs(h.sub(uOzoneC)).div(uOzoneW).oneMinus().max(0.0)),
+  );
+  /** Total extinction (out-scatter + absorption) at height h. */
+  const extinctionAt = Fn(([h]) =>
+    rayleighAt(h).add(vec3(mieAt(h).add(mieAbsAt(h)))).add(ozoneAt(h)),
+  );
+
+  /**
+   * Distance from a point to the atmosphere top along a ray, or to the ground if it hits.
+   * `r` is distance from planet centre, `mu` is cos(angle between ray and up).
+   */
+  const rayTopDistance = Fn(([r, mu]) => {
+    const disc = r.mul(r).mul(mu.mul(mu).sub(1.0)).add(RT * RT);
+    return disc.max(0.0).sqrt().sub(r.mul(mu)).max(0.0);
+  });
+  const rayGroundDistance = Fn(([r, mu]) => {
+    const disc = r.mul(r).mul(mu.mul(mu).sub(1.0)).add(RG * RG);
+    // Negative discriminant, or looking up, means no ground hit.
+    return disc.max(0.0).sqrt().negate().sub(r.mul(mu));
+  });
+  /** True when the ray from (r, mu) intersects the planet. */
+  const hitsGround = Fn(([r, mu]) =>
+    mu.lessThan(0.0).and(r.mul(r).mul(mu.mul(mu).sub(1.0)).add(RG * RG).greaterThan(0.0)),
+  );
+
+  // ── Phase functions ────────────────────────────────────────────────────────────────
+  const phaseRayleigh = Fn(([c]) => c.mul(c).add(1.0).mul(3.0 / (16.0 * PI)));
+  /** Cornette-Shanks: the standard Mie approximation, and what puts the bright forward
+   *  halo around the sun without a full Mie evaluation. */
+  const phaseMie = Fn(([c]) => {
+    const g = uMieG;
+    const g2 = g.mul(g);
+    const num = g2.oneMinus().mul(c.mul(c).add(1.0)).mul(3.0);
+    const den = g2.mul(2.0).add(2.0).mul(
+      pow(g2.add(1.0).sub(g.mul(c).mul(2.0)).max(1e-4), 1.5),
+    ).mul(8.0 * PI);
+    return num.div(den);
+  });
+
+  // ── Render-target plumbing ─────────────────────────────────────────────────────────
+  const makeRT = (w, h) => {
+    const rt = new THREE.RenderTarget(w, h, {
+      type: THREE.HalfFloatType,
+      format: THREE.RGBAFormat,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      depthBuffer: false,
+    });
+    rt.texture.generateMipmaps = false;
+    return rt;
+  };
+  const transRT = makeRT(TLUT_W, TLUT_H);
+  const msRT = makeRT(MSLUT, MSLUT);
+  const skyRT = makeRT(SKY_W, SKY_H);
+
+  const transTex = texture(transRT.texture);
+  const msTex = texture(msRT.texture);
+  const skyTex = texture(skyRT.texture);
+
+  /**
+   * UV for a LUT bake.
+   *
+   * `uv()` on a fullscreen quad is Y-FLIPPED relative to the way `sample()` later reads
+   * the render target back. Bake with raw `uv()` and every LUT ends up mirrored on its
+   * vertical axis — which silently inverts the meaning of each one: the transmittance LUT
+   * returns the horizon value for a zenith ray, and the sky-view LUT puts the sky where
+   * the sampler looks for ground. The symptom is a completely black sky from LUTs that
+   * read back full of perfectly good numbers.
+   */
+  const bakeUv = Fn(() => vec2(uv().x, uv().y.oneMinus()));
+
+  const bakeScene = new THREE.Scene();
+  const bakeCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const bakeQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+  bakeScene.add(bakeQuad);
+
+  // ── 1. Transmittance LUT ───────────────────────────────────────────────────────────
+  // u = altitude fraction, v = cos(zenith). Upward hemisphere only: a downward ray that
+  // reaches the ground has no transmittance to the sun anyway, and the callers gate it.
+
+  const sampleTransmittance = Fn(([h, mu]) => {
+    const u = saturate(h.div(RT - RG));
+    const v = saturate(mu);
+    return transTex.sample(vec2(u, v)).rgb;
+  });
+
+  const transmittanceColor = Fn(() => {
+    const buv = bakeUv();
+    const h = buv.x.mul(RT - RG);
+    const mu = buv.y;                      // cos(zenith), 0..1
+    const r = float(RG).add(h);
+    const tMax = rayTopDistance(r, mu);
+    const sum = vec3(0.0).toVar();
+    const dt = tMax.div(TRANS_STEPS);
+    Loop(TRANS_STEPS, ({ i }) => {
+      const t = dt.mul(float(i).add(0.5));
+      // Height of the sample: law of cosines from the planet centre.
+      const rr = sqrt(t.mul(t).add(r.mul(r)).add(t.mul(r).mul(mu).mul(2.0)).max(0.0));
+      sum.addAssign(extinctionAt(rr.sub(RG).max(0.0)).mul(dt));
+    });
+    return vec4(exp(sum.negate()), 1.0);
+  });
+
+  // ── 2. Multiple-scattering LUT ─────────────────────────────────────────────────────
+  // Ψms: light that has bounced two or more times, per unit scattering coefficient.
+  // Hillaire closes the infinite series analytically as L2 / (1 - f_ms), which is what
+  // makes this one small texture stand in for every higher scattering order.
+
+  const sampleMs = Fn(([h, muSun]) => {
+    const u = saturate(muSun.mul(0.5).add(0.5));
+    const v = saturate(h.div(RT - RG));
+    return msTex.sample(vec2(u, v)).rgb;
+  });
+
+  const msColor = Fn(() => {
+    const buv = bakeUv();
+    const muSun = buv.x.mul(2.0).sub(1.0);
+    const h = buv.y.mul(RT - RG);
+    const r = float(RG).add(h);
+    const sunDir = vec3(sqrt(muSun.mul(muSun).oneMinus().max(0.0)), muSun, 0.0);
+
+    // L2: second-order scattering gathered over the sphere.
+    // fms: the fraction that would scatter again, which closes the series.
+    const lum = vec3(0.0).toVar();
+    const fms = vec3(0.0).toVar();
+    const invSamples = 1.0 / (MS_SQRT_SAMPLES * MS_SQRT_SAMPLES);
+
+    Loop(MS_SQRT_SAMPLES, ({ i }) => {
+      Loop(MS_SQRT_SAMPLES, ({ i: j }) => {   // nested Loops still yield `i`; alias it
+        // Uniform-ish sphere sampling from the 2D index.
+        const a = float(i).add(0.5).div(MS_SQRT_SAMPLES);
+        const b = float(j).add(0.5).div(MS_SQRT_SAMPLES);
+        const cosT = a.mul(2.0).sub(1.0);
+        const sinT = sqrt(cosT.mul(cosT).oneMinus().max(0.0));
+        const phi = b.mul(2.0 * PI);
+        const dir = vec3(sinT.mul(cos(phi)), cosT, sinT.mul(sin(phi)));
+
+        const ground = hitsGround(r, dir.y);
+        const tMax = ground.select(rayGroundDistance(r, dir.y), rayTopDistance(r, dir.y));
+        const dt = tMax.div(MS_STEPS);
+
+        const throughput = vec3(1.0).toVar();
+        const l2 = vec3(0.0).toVar();
+        const fSum = vec3(0.0).toVar();
+
+        Loop(MS_STEPS, ({ i: k }) => {
+          const t = dt.mul(float(k).add(0.5));
+          const rr = sqrt(
+            t.mul(t).add(r.mul(r)).add(t.mul(r).mul(dir.y).mul(2.0)).max(0.0),
+          );
+          const hh = rr.sub(RG).max(0.0);
+          const sR = rayleighAt(hh);
+          const sM = vec3(mieAt(hh));
+          const scatter = sR.add(sM);
+          const ext = extinctionAt(hh);
+          const stepT = exp(ext.mul(dt).negate());
+
+          // Sun visibility at this sample, and its transmittance to space.
+          const muS = dot(vec3(0.0, 1.0, 0.0), sunDir); // sun zenith at the LUT's frame
+          const shadow = hitsGround(rr, muS).select(float(0.0), float(1.0));
+          const sunT = sampleTransmittance(hh, muS).mul(shadow);
+
+          // Isotropic phase (1/4pi): multiple scattering has lost all directionality.
+          const inScatter = scatter.mul(1.0 / (4.0 * PI)).mul(sunT);
+          l2.addAssign(throughput.mul(inScatter).mul(dt));
+          // Energy that will scatter AGAIN — the closure term.
+          fSum.addAssign(throughput.mul(scatter).mul(1.0 / (4.0 * PI)).mul(dt));
+          throughput.mulAssign(stepT);
+        });
+
+        // Ground bounce: a bright surface lifts the whole sky, so it belongs here.
+        If(ground, () => {
+          const muS = sunDir.y;
+          const gT = sampleTransmittance(float(0.0), muS);
+          l2.addAssign(
+            throughput.mul(gT).mul(uGroundAlbedo).mul(muS.max(0.0)).mul(1.0 / PI),
+          );
+        });
+
+        lum.addAssign(l2.mul(invSamples));
+        fms.addAssign(fSum.mul(invSamples));
+      });
+    });
+
+    // Closed infinite series: L2 * 1/(1 - fms).
+    const psi = lum.div(vec3(1.0).sub(fms).max(vec3(1e-3)));
+    return vec4(psi, 1.0);
+  });
+
+  // ── 3. Sky-view LUT ────────────────────────────────────────────────────────────────
+  // Equirect over the current sun. Elevation is sqrt-warped about the horizon so the
+  // resolution goes where the gradient is; a linear axis bands the sunset badly.
+
+  /** View direction → sky-view LUT uv. */
+  const skyViewUv = Fn(([dir, r]) => {
+    // Angle from zenith down to the horizon at this altitude.
+    const cosHorizon = sqrt(r.mul(r).sub(RG * RG).max(0.0)).div(r);
+    const horizonAngle = acos(clamp(cosHorizon, -1.0, 1.0));
+    const viewAngle = acos(clamp(dir.y, -1.0, 1.0));
+    // Signed offset from the horizon, sqrt-warped.
+    const d = viewAngle.sub(horizonAngle);
+    const half = float(PI * 0.5);
+    const warped = sign(d).mul(sqrt(abs(d).div(half).max(0.0)));
+    const v = saturate(warped.mul(0.5).add(0.5));
+
+    // Azimuth relative to the sun, so the LUT stays valid as the sun rotates in yaw.
+    const sunAz = atan(uSunDir.z, uSunDir.x);
+    const viewAz = atan(dir.z, dir.x);
+    const rel = viewAz.sub(sunAz);
+    const u = saturate(rel.div(2.0 * PI).add(0.5).fract());
+    return vec2(u, v);
+  });
+
+  /** Inverse of skyViewUv, for the bake. */
+  const skyViewDir = Fn(([uvIn, r]) => {
+    const cosHorizon = sqrt(r.mul(r).sub(RG * RG).max(0.0)).div(r);
+    const horizonAngle = acos(clamp(cosHorizon, -1.0, 1.0));
+    const half = float(PI * 0.5);
+    const warped = uvIn.y.mul(2.0).sub(1.0);
+    const d = sign(warped).mul(warped.mul(warped)).mul(half);
+    const viewAngle = horizonAngle.add(d);
+    const cosV = cos(viewAngle);
+    const sinV = sin(viewAngle);
+    const sunAz = atan(uSunDir.z, uSunDir.x);
+    const az = uvIn.x.sub(0.5).mul(2.0 * PI).add(sunAz);
+    return vec3(sinV.mul(cos(az)), cosV, sinV.mul(sin(az)));
+  });
+
+  const skyViewColor = Fn(() => {
+    const r = float(RG).add(uViewHeight);
+    const dir = skyViewDir(bakeUv(), r);
+    const muSun = uSunDir.y;
+    const cosTheta = dot(dir, uSunDir);
+
+    const ground = hitsGround(r, dir.y);
+    const tMax = ground.select(rayGroundDistance(r, dir.y), rayTopDistance(r, dir.y));
+    const dt = tMax.div(SKYVIEW_STEPS);
+
+    const throughput = vec3(1.0).toVar();
+    const acc = vec3(0.0).toVar();
+    const pR = phaseRayleigh(cosTheta);
+    const pM = phaseMie(cosTheta);
+
+    Loop(SKYVIEW_STEPS, ({ i }) => {
+      const t = dt.mul(float(i).add(0.5));
+      const rr = sqrt(t.mul(t).add(r.mul(r)).add(t.mul(r).mul(dir.y).mul(2.0)).max(0.0));
+      const hh = rr.sub(RG).max(0.0);
+      const sR = rayleighAt(hh);
+      const sM = vec3(mieAt(hh));
+      const ext = extinctionAt(hh);
+      const stepT = exp(ext.mul(dt).negate());
+
+      // Sun zenith cosine AT THIS SAMPLE, not at the viewer — that difference is what
+      // makes the terminator and the long red path correct rather than approximate.
+      const up = dir.mul(t).add(vec3(0.0, r, 0.0)).div(rr.max(1.0));
+      const muS = dot(up, uSunDir);
+      const shadow = hitsGround(rr, muS).select(float(0.0), float(1.0));
+      const sunT = sampleTransmittance(hh, muS).mul(shadow);
+
+      // Single scattering, phase-weighted per species.
+      const single = sR.mul(pR).add(sM.mul(pM)).mul(sunT);
+      // Every higher order, from the LUT. Isotropic, so no phase term.
+      const multi = sR.add(sM).mul(sampleMs(hh, muS));
+
+      acc.addAssign(throughput.mul(single.add(multi)).mul(dt));
+      throughput.mulAssign(stepT);
+    });
+
+    return vec4(acc.mul(uSunIntensity), 1.0);
+  });
+
+  // ── Materials ──────────────────────────────────────────────────────────────────────
+  const mkMat = (node) => {
+    const m = new THREE.MeshBasicNodeMaterial();
+    m.colorNode = node();
+    m.depthTest = false;
+    m.depthWrite = false;
+    m.fog = false;
+    m.toneMapped = false;
+    return m;
+  };
+  const transMat = mkMat(transmittanceColor);
+  const msMat = mkMat(msColor);
+  const skyMat = mkMat(skyViewColor);
+
+  // ── Public sampling ────────────────────────────────────────────────────────────────
+
+  /**
+   * Sky radiance for a world-space view direction. ONE texture fetch — the whole point
+   * of the sky-view LUT.
+   */
+  const skyRadiance = Fn(([dir]) => {
+    const r = float(RG).add(uViewHeight);
+    return skyTex.sample(skyViewUv(normalize(dir), r)).rgb;
+  });
+
+  /** Transmittance from the viewer to space toward `dir` — use it to tint the sun disc. */
+  const sunDiscTransmittance = Fn(([dir]) =>
+    sampleTransmittance(uViewHeight, normalize(dir).y),
+  );
+
+  // ── Bake orchestration ─────────────────────────────────────────────────────────────
+  // Order matters: MS reads transmittance, sky-view reads both.
+  let _needStatic = true;   // transmittance + multi-scatter
+  let _needSky = true;      // sky-view (sun moved / altitude changed)
+  let _lastSunKey = "";
+  let _lastHeight = -1;
+
+  function renderTo(rt, material) {
+    const prevTarget = renderer.getRenderTarget();
+    bakeQuad.material = material;
+    renderer.setRenderTarget(rt);
+    renderer.render(bakeScene, bakeCam);
+    renderer.setRenderTarget(prevTarget);
+  }
+
+  /** Re-bake whatever is stale. Cheap when nothing changed. */
+  function bake() {
+    if (_needStatic) {
+      renderTo(transRT, transMat);
+      renderTo(msRT, msMat);
+      _needStatic = false;
+      _needSky = true;
+    }
+    if (_needSky) {
+      renderTo(skyRT, skyMat);
+      _needSky = false;
+    }
+  }
+
+  /**
+   * @param {THREE.Vector3} sunDir  normalised, world space
+   * @param {number} viewHeight     camera altitude above sea level, metres
+   */
+  function update(sunDir, viewHeight = 0) {
+    uSunDir.value.copy(sunDir).normalize();
+    // Only re-bake the sky-view LUT when the sun or the altitude actually moved enough
+    // to matter — a bake per frame would throw away the reason the LUT exists.
+    const key = `${sunDir.x.toFixed(4)},${sunDir.y.toFixed(4)},${sunDir.z.toFixed(4)}`;
+    if (key !== _lastSunKey) { _lastSunKey = key; _needSky = true; }
+    if (Math.abs(viewHeight - _lastHeight) > 15) {
+      _lastHeight = viewHeight;
+      uViewHeight.value = viewHeight;
+      _needSky = true;
+    }
+    bake();
+  }
+
+  /** Push params from the object back into uniforms and force a full re-bake. */
+  function syncParams() {
+    uRayleigh.value.set(...P.rayleigh);
+    uRayleighH.value = P.rayleighH;
+    uMie.value = P.mie;
+    uMieAbs.value = P.mieAbsorption;
+    uMieH.value = P.mieH;
+    uMieG.value = P.mieG;
+    uOzone.value.set(...P.ozone);
+    uOzoneC.value = P.ozoneCentre;
+    uOzoneW.value = P.ozoneWidth;
+    uRayScale.value = P.rayleighScale;
+    uMieScale.value = P.mieScale;
+    uOzScale.value = P.ozoneScale;
+    uSunIntensity.value = P.sunIntensity;
+    uGroundAlbedo.value = P.groundAlbedo;
+    _needStatic = true;
+  }
+
+  function dispose() {
+    transRT.dispose(); msRT.dispose(); skyRT.dispose();
+    transMat.dispose(); msMat.dispose(); skyMat.dispose();
+    bakeQuad.geometry.dispose();
+  }
+
+  return {
+    params: P,
+    skyRadiance,
+    sunDiscTransmittance,
+    update,
+    syncParams,
+    bake,
+    dispose,
+    uniforms: { uSunDir, uViewHeight, uSunIntensity },
+    _debug: { transRT, msRT, skyRT },
+  };
+}

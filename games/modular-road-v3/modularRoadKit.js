@@ -256,6 +256,13 @@ export const pieceParams = {
   holedLength: 32, // run of the piece (m)
   holedWidth: 16, // deck width (m) — widen for a bigger hole with real ledges
   holeRadius: 5, // hole radius (m) — clamped so ledges never vanish
+  // Dual boards: two close planks you straddle like a bridge — left wheels on
+  // one, right on the other, void under the belly. Gap is narrower than the
+  // car's track (~1.84 m) so both boards are in play at once; each plank is
+  // too narrow to hold the whole car, so drifting off-centre drops a side.
+  dualLength: 32,
+  dualWidth: 4.4, // 2×1.75 m boards + 0.9 m gap
+  dualGap: 0.9,
   // Rounded end (short terminus with a semicircle nose):
   roundEndLength: 8, // straight run before the nose (m)
   // ── LINK: the piece that CLOSES A GAP between two ends built separately ────
@@ -1778,6 +1785,82 @@ export function buildHoledDeckGeometry(pp = pieceParams, rp = roadParams) {
 }
 
 /* ----------------------------------------------------------------------- */
+/* Dual boards (two planks, void between — fall through the gap or a side)  */
+/* ----------------------------------------------------------------------- */
+
+/**
+ * Two close parallel planks you straddle like a bridge: left wheels on one,
+ * right on the other, nothing under the belly. Authored as two closed boxes
+ * in piece-local space (origin → −Z, deck top at y = 0) because a sweep cannot
+ * split the deck.
+ *
+ * The gap is narrower than the car's track so both boards are in play at once;
+ * each plank is too narrow to hold the whole car, so a drift drops a side
+ * into the void or off an outer edge. The BVH only contains the planks.
+ */
+export function buildDualDeckGeometry(pp = pieceParams, rp = roadParams) {
+  const L = Math.max(8, pp.dualLength ?? 32);
+  const hw = Math.max(1.2, (pp.dualWidth ?? 4.4) / 2);
+  const t = Math.max(0.05, rp.thickness);
+  const minBoard = 0.7; // wider than a tyre, narrower than the car
+  const gap = THREE.MathUtils.clamp(
+    pp.dualGap ?? 0.9,
+    0.35,
+    Math.max(0.35, 2 * hw - 2 * minBoard),
+  );
+  const inner = gap / 2;
+
+  const positions = [];
+  const uvs = [];
+  const lateral = [];
+  const zone = [];
+  const indices = [];
+  const quad = (pa, pb, pc, pd, zn) => {
+    const base = positions.length / 3;
+    for (const p of [pa, pb, pc, pd]) {
+      positions.push(p[0], p[1], p[2]);
+      uvs.push(-p[2], p[0]);
+      lateral.push(p[0] / hw);
+      zone.push(zn);
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+  const slab = (x0, x1, z0, z1, y, up, zn) => {
+    const a = [x0, y, z0], b = [x1, y, z0], c = [x1, y, z1], d = [x0, y, z1];
+    if (up) quad(d, c, b, a, zn); else quad(a, b, c, d, zn);
+  };
+  const board = (x0, x1) => {
+    slab(x0, x1, -L, 0, 0, true, 1); // deck
+    slab(x0, x1, -L, 0, -t, false, 0); // underside
+    // Outer / inner walls, wound OUTWARD from the plank (into air / into the gap).
+    const outerIsRight = x1 > 0;
+    if (outerIsRight) {
+      quad([x1, 0, -L], [x1, 0, 0], [x1, -t, 0], [x1, -t, -L], 0); // +X outer
+      quad([x0, 0, 0], [x0, 0, -L], [x0, -t, -L], [x0, -t, 0], 0); // −X inner (gap)
+    } else {
+      quad([x0, 0, 0], [x0, 0, -L], [x0, -t, -L], [x0, -t, 0], 0); // −X outer
+      quad([x1, 0, -L], [x1, 0, 0], [x1, -t, 0], [x1, -t, -L], 0); // +X inner (gap)
+    }
+    quad([x1, 0, 0], [x0, 0, 0], [x0, -t, 0], [x1, -t, 0], 0); // near end
+    quad([x0, 0, -L], [x1, 0, -L], [x1, -t, -L], [x0, -t, -L], 0); // far end
+  };
+
+  board(-hw, -inner);
+  board(inner, hw);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(lateral, 1));
+  geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zone, 1));
+  stampPieceAttributes(geo, { plain: 0 });
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/* ----------------------------------------------------------------------- */
 /* Rounded end — short terminus with a semicircle nose                      */
 /* ----------------------------------------------------------------------- */
 
@@ -2737,6 +2820,10 @@ function glassPoints(pp) {
 
 function holedPoints(pp) {
   return straightLinePoints(Math.max(8, pp.holedLength ?? 32));
+}
+
+function dualPoints(pp) {
+  return straightLinePoints(Math.max(8, pp.dualLength ?? 32));
 }
 
 /** Quintic smootherstep — C2, so slope AND curvature are zero at both ends.
@@ -4511,6 +4598,17 @@ export const PIECE_CATALOG = [
     plain: true,
   },
   {
+    id: "dual",
+    label: "Dual boards",
+    hint: "Two close planks — straddle both like a bridge, or fall",
+    swatch: "#4a9eff",
+    key: "",
+    points: dualPoints,
+    width: (pp) => pp.dualWidth,
+    geometry: (pp, rp) => buildDualDeckGeometry(pp, rp),
+    noKerb: true, // rails would turn the drop into a cage
+  },
+  {
     id: "rounded_end",
     label: "Rounded end",
     hint: "Short terminus — semicircle nose, rails wrap the U",
@@ -5531,6 +5629,7 @@ const _END_TANGENTS = {
   narrow: flatEndTangents,
   holed: flatEndTangents,
   glass_road: flatEndTangents,
+  dual: flatEndTangents,
   tunnel: flatEndTangents,
   tunnel_lit: flatEndTangents,
   tube: flatEndTangents,
