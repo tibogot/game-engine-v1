@@ -88,6 +88,7 @@ import {
   createCheckpointGlowMaterialForThumb,
   createRoadGlassMaterial,
   createTubeMaterial,
+  createCheapAsphaltMaterial,
   readRoadLook,
   roadLookDefaults,
   syncRoadUniforms,
@@ -485,10 +486,55 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     applyRoadSide(roadMaterial);
   }
 
+  /**
+   * CHEAP DECK — the A/B switch, for deciding what the full surface is worth.
+   *
+   * createCheapAsphaltMaterial has existed since asphalt-lab and was never
+   * wired in: zone colours, optional paint lines, a wheel-path darken, standard
+   * lighting. No procedural noise at all, so no aggregate, no chip octave, no
+   * bump normal, no tar snakes, no rubber, no wet. That is the point — it is
+   * the floor to measure the real deck against, in the game, on a real track,
+   * rather than in a lab that renders a different scene.
+   *
+   * Remembered across reloads like the FrontSide toggle, because the thing you
+   * want to compare is usually a whole session apart.
+   */
+  const ROAD_CHEAP_KEY = "modularRoad.cheapDeck";
+  let cheapRoad = (() => {
+    try { return localStorage.getItem(ROAD_CHEAP_KEY) === "1"; } catch { return false; }
+  })();
+
   function makeRoadMaterial(extra = {}) {
-    const mat = createRoadSurfaceV2({ ...surfaceLook, ...extra, side: roadSide() });
+    // NO `roadLook` HERE. This runs at boot, from `let roadMaterial =
+    // makeRoadMaterial()`, which is ABOVE the `roadLook` declaration — reading
+    // it is a temporal-dead-zone throw that bricks the game before the first
+    // frame. It only fired once the cheap branch was actually taken (the switch
+    // persists in localStorage), so it hid behind the default until someone
+    // reloaded with it on.
+    //
+    // The look is applied AFTER construction by syncRoadUniforms, which every
+    // caller already does — and whose per-key guard is what lets the cheap
+    // deck take the subset of the look it actually has.
+    const mat = cheapRoad
+      ? createCheapAsphaltMaterial({ side: roadSide() })
+      : createRoadSurfaceV2({ ...surfaceLook, ...extra, side: roadSide() });
     applyRoadSide(mat);
     return mat;
+  }
+
+  /** Swap the deck for the cheap one (or back). Full material rebuild. */
+  function setCheapRoad(on) {
+    const want = !!on;
+    if (want === cheapRoad) return;
+    cheapRoad = want;
+    try { localStorage.setItem(ROAD_CHEAP_KEY, want ? "1" : "0"); } catch { /* private mode */ }
+    applyRoadMaterial(makeRoadMaterial({
+      wet: !want && (roadLook.wetAmount ?? 0) > 0,
+      shadowLight: sceneShadowLight(),
+    }));
+    // The mirrored-rail pass is only worth running for a deck that can sample
+    // it, and the cheap one cannot.
+    syncPreMirrored();
   }
 
   let roadMaterial = makeRoadMaterial();
@@ -1908,6 +1954,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * toggle and never from the render loop.
    */
   function syncRoadMaterialFeatures() {
+    // The cheap deck has no wet lobe, no pre-mirror sample and no V2 surface,
+    // so every feature comparison below would mismatch forever and rebuild the
+    // material — and re-merge the whole track — on every call.
+    if (cheapRoad) return;
     const wantWet = (roadLook.wetAmount ?? 0) > 0;
     const wantPreMirror = wantWet && (railsInMirror || hasPremirrorSources());
     // ASK THE MATERIAL WHAT IT IS, do not infer it from its class. Physical used
@@ -1948,7 +1998,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const wet = Math.max(0, Math.min(1, v || 0));
     roadLook.wetAmount = wet;
     syncRoadMaterialFeatures();
-    roadMaterial._roadUniforms.wetAmount.value = wet;
+    // Optional: the cheap deck's uniform bag is a subset and has no weather.
+    const wetU = roadMaterial._roadUniforms?.wetAmount;
+    if (wetU) wetU.value = wet;
     // A tyre SQUEEGEES standing water, so a wet skid is a light clearing rather
     // than a dark rubber ribbon — see MARK_LOOK in modularRoadTireMarks. The
     // marks are their own mesh and material, so they have to be told.
@@ -5483,6 +5535,8 @@ ${e.message}`);
       getLook,
       setRoadFrontSide,
       getRoadFrontSide: () => roadFrontSide,
+      setCheapRoad,
+      getCheapRoad: () => cheapRoad,
       setWheelClear: (v) => {
         roadLook.wetWheelClear = v;
         roadMaterial._roadUniforms.wetWheelClear.value = v;
@@ -5963,6 +6017,8 @@ ${e.message}`);
     getLook,
     setRoadFrontSide,
     getRoadFrontSide: () => roadFrontSide,
+    setCheapRoad,
+    getCheapRoad: () => cheapRoad,
     getRoadLook: () => readRoadLook(roadMaterial),
     setRoadLook: (l) => {
       Object.assign(roadLook, l ?? {});

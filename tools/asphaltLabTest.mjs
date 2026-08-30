@@ -46,9 +46,26 @@ console.log("\n— the game is unchanged —");
 // check is that the game still gets DoubleSide when it asks for nothing.
 check("createRoadMaterial still defaults to DoubleSide",
   /side: opts\.side \?\? THREE\.DoubleSide/.test(roadFn));
-check("the game does not import the cheap asphalt shader",
-  !/createCheapAsphaltMaterial/.test(gameSrc)
-  && !/syncCheapAsphaltUniforms/.test(gameSrc));
+/* THE GAME NOW IMPORTS IT — deliberately, and this check changed with it.
+ *
+ * It used to assert the opposite ("NOT wired into the game; asphalt-lab is the
+ * A/B"). That was right while the cheap shader was an experiment, and wrong
+ * once the question became "what is the full procedural deck actually worth on
+ * a real track". A lab renders a different scene, so it cannot answer that; a
+ * switch in the game can.
+ *
+ * What still has to hold is that it is an A/B and not a downgrade: it must be
+ * behind a toggle that DEFAULTS OFF, so nobody ships the cheap deck by
+ * accident. `cheapRoad` reads from localStorage with `=== "1"`, i.e. false
+ * unless someone has explicitly turned it on. */
+check("the game wires the cheap deck behind a switch",
+  /createCheapAsphaltMaterial/.test(gameSrc) && /setCheapRoad/.test(gameSrc));
+check("...and that switch defaults OFF",
+  /localStorage\.getItem\(ROAD_CHEAP_KEY\) === "1"/.test(gameSrc),
+  "anything but an explicit opt-in would let the cheap deck ship silently");
+check("...and the full surface is still what builds by default",
+  /cheapRoad\s*\n?\s*\?\s*createCheapAsphaltMaterial[\s\S]{0,200}:\s*createRoadSurfaceV2/.test(gameSrc),
+  "the ternary must fall through to the real deck");
 
 console.log("\n— lab wiring —");
 check("asphalt-lab.html exists and A/Bs both shaders",

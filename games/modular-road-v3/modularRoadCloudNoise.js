@@ -318,22 +318,33 @@ export function bakeWeatherMap(seed = 2029) {
     const ny = y / S;
     for (let x = 0; x < S; x++) {
       const nx = x / S;
-      // Three independent fields from one lattice by offsetting the sample plane in Z.
+      // Independent fields from one lattice by offsetting the sample plane in Z.
       const cov = perlinFbm(perlin, nx, ny, 0.13, 2, 4);
       const typ = perlinFbm(perlin, nx, ny, 0.61, 3, 3);
       const den = perlinFbm(perlin, nx, ny, 0.87, 4, 3);
+      // CLOUD-TOP HEIGHT — how much of the slab this cell's cloud fills.
+      //
+      // This is what turns a layer into clouds. Without it every cell spans the same
+      // height range, so the deck can only ever read as a flat sheet however good the
+      // erosion is: the eye reads "cloud" from silhouettes of DIFFERENT heights standing
+      // next to each other. Frequency 3 makes a cell a few hundred metres across — big
+      // enough that one cloud has a consistent height, small enough that its neighbour
+      // differs. Its own Z offset, so tall cells are not merely the thick ones.
+      const top = perlinFbm(perlin, nx, ny, 0.41, 3, 4);
       // Push coverage toward a bimodal clear/cloudy split so gaps are genuinely open
       // rather than uniformly hazy — smoothstep on the raw FBM flattens the midtones.
       const covS = cov * cov * (3 - 2 * cov);
       out[i++] = covS * 255;
       out[i++] = typ * 255;
       out[i++] = den * 255;
-      out[i++] = 255;
+      out[i++] = top * 255;
     }
   }
   // Coverage especially: this channel IS the `1 - coverage` threshold, so a narrow range
   // here means the whole sky sits on one side of the bar and the slider does nothing.
-  for (let c = 0; c < 3; c++) normalizeChannel(out, 4, c);
+  // Cloud-top needs it for the same reason — a narrow band of heights is precisely the
+  // flat-sheet look the channel exists to break up.
+  for (let c = 0; c < 4; c++) normalizeChannel(out, 4, c);
   return out;
 }
 
@@ -414,9 +425,13 @@ export function densityAtCPU(vols, P, wind, x, y, z, scratch = { b: [0, 0, 0, 0]
   const cov = _clamp01((w[0] + P.coverageBias) * P.coverage);
   const type = _clamp01(w[1] - 0.5 + P.typeBias);
   const denScale = _mix(0.55, 1.45, w[2]);
+  // Per-cell cloud top — see the A channel in bakeWeatherMap. Local height is what gives
+  // neighbouring clouds different heights; the shader does the same rescale.
+  const topFrac = _mix(P.cloudTopMin ?? 0.18, 1, _clamp01(w[3] + (P.cloudTopBias ?? 0)));
+  const hL = h / Math.max(topFrac, 0.05);
 
-  const stratus = _smoothstep(0, 0.07, h) * _smoothstep(0.38, 0.16, h);
-  const cumulus = _smoothstep(0, 0.22, h) * _smoothstep(1.0, 0.62, h);
+  const stratus = _smoothstep(0, 0.07, hL) * _smoothstep(0.38, 0.16, hL);
+  const cumulus = _smoothstep(0, 0.18, hL) * _smoothstep(1.0, 0.80, hL);
   const grad = _mix(stratus, cumulus, type);
 
   const b = sampleVolume3D(
@@ -434,8 +449,9 @@ export function densityAtCPU(vols, P, wind, x, y, z, scratch = { b: [0, 0, 0, 0]
       (z + wind.z * 1.8) / DETAIL_TILE_M, scratch.d,
     );
     const dF = d[0] * 0.625 + d[1] * 0.25 + d[2] * 0.125;
-    const dMod = _mix(dF, 1 - dF, _clamp01(h * 4));
-    shaped = _remapUnit(shaped, dMod * P.erode, 1);
+    const dMod = _mix(dF, 1 - dF, _clamp01(hL * 4));
+    const erodeH = P.erode * _mix(0.65, 1.35, _clamp01(hL));
+    shaped = _remapUnit(shaped, dMod * erodeH, 1);
   }
   return shaped * P.densityMul * denScale;
 }

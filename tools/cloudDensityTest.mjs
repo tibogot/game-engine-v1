@@ -32,8 +32,9 @@ function opticalDepth(vols, P, x, z, slices = 44) {
 
 function main() {
   const P = {
-    base: 260, thickness: 220, coverage: 0.9, coverageBias: 0.0,
+    base: 260, thickness: 620, coverage: 0.9, coverageBias: 0.0,
     densityMul: 0.16, erode: 0.32, typeBias: 0.5,
+    cloudTopMin: 0.18, cloudTopBias: 0.0,
   };
 
   process.stdout.write("baking volumes… ");

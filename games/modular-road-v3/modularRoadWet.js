@@ -199,7 +199,7 @@ export const WET_DEFAULTS = {
   // waterline — and falls to 0 both on the dry side and in the deep. No new
   // field, no second threshold, no extra noise.
   /** Extra albedo darkening at the rim, on top of the wet and puddle terms. */
-  waterlineDark: 0.35,
+  waterlineDark: 0.55,
   /** How TIGHT the rim is. 1 is a broad band across the whole transition; higher
    *  narrows it to a line. Above about 4 it starts to alias on a soft edge. */
   waterlineSharp: 2.5,

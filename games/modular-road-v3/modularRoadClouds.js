@@ -84,7 +84,7 @@ export const CLOUD_DEFAULTS = {
    *  default, so the deck has to be somewhere a car can actually reach. */
   base: 260,
   /** Deck thickness, world metres. */
-  thickness: 220,
+  thickness: 620,
   /** Global multiplier on the weather map's coverage channel. 0 = clear, 1 = as baked. */
   coverage: 0.9,
   /** Bias added to coverage before the multiplier — the "more/less cloud" dial. */
@@ -97,25 +97,60 @@ export const CLOUD_DEFAULTS = {
   nearErode: 0.45,
   /** Metres over which the near-field octave fades out. Past this it costs nothing. */
   nearRange: 320,
+  /**
+   * Metres over which the MID-frequency erosion fades out. This is an anti-aliasing
+   * control, not a look control.
+   *
+   * The march step grows with distance (60 m at the far cap), while the detail volume
+   * carries ~14 m features. Past a few hundred metres we are sampling 14 m detail once
+   * every 50 m — hopeless undersampling, and every pixel lands somewhere different, which
+   * IS the crosshatch speckle at distant cloud edges. Jitter turns that into noise and no
+   * jitter turns it into banding; neither is a fix, because the information was never
+   * sampled. Fading the detail out with distance removes the frequencies the march cannot
+   * resolve — prefiltering, the same reason mipmaps exist. Distant clouds go smoother,
+   * which is also what the eye expects.
+   */
+  detailRange: 1700,
   /** Push the weather map toward cumulus (1) or stratus (0). 0.5 = as baked. */
   typeBias: 0.5,
+  /** Shortest cloud, as a fraction of `thickness`. The spread between this and 1.0 IS the
+   *  towering-vs-flat look: at 1.0 every cloud fills the slab and you get a sheet. */
+  cloudTopMin: 0.18,
+  /** Shifts every cell's top up or down. -0.5 = all shallow, +0.5 = all full height. */
+  cloudTopBias: 0.0,
   /** Metres over which density ramps up from the camera. Keeps a readable bubble around
    *  the car inside a dense core. 0 = physically honest (total whiteout). */
   clearRadius: 55,
   /** Density multiplier AT the camera. 0 = fully clear at zero distance. */
-  clearFloor: 0.12,
+  clearFloor: 0.0,
 
   // ── March ────────────────────────────────────────────────────────────────────────
   /** Finest step, metres — the near-camera step size. */
   minStep: 1.6,
   /** How fast the step grows with distance (metres of step per metre of distance). */
-  stepGrowth: 0.05,
-  /** Step ceiling, metres. */
-  maxStep: 60,
+  stepGrowth: 0.028,
+  /**
+   * Step ceiling, metres. Was 60, which put the far field at ~50 m steps against ~14 m
+   * cloud detail — hopeless undersampling, and the source of the crosshatch speckle at
+   * distant cloud edges. 28 m costs a measured +0.35 ms and is what makes the edges
+   * actually clean; the jitter cap and the detail prefilter alone were not enough.
+   */
+  maxStep: 28,
   /** Hard step-count budget (<= MAX_STEPS). */
   steps: 160,
   /** Empty-space steps are this multiple of the local step. */
   emptyStepMul: 3.0,
+  /**
+   * Cap on the start-of-march dither, in METRES.
+   *
+   * The entry point is jittered so a fixed step start does not band the slab into shells.
+   * Jittering by a FULL step ties the dither amplitude to `maxStep`, which is 60 m far
+   * away — so at a thin cloud edge, neighbouring pixels start up to 60 m apart and can
+   * disagree about whether they hit cloud at all. That is the visible crosshatch, and it
+   * is far too much for a ~10-frame temporal average to hide while the camera is moving.
+   * Capping it keeps the anti-banding benefit at a fraction of the noise.
+   */
+  jitterMaxM: 7.0,
   /** Furthest the march travels, metres. The world is 2 km across; past this the aerial
    *  term has faded the clouds into haze anyway. */
   maxDist: 6000,
@@ -131,7 +166,7 @@ export const CLOUD_DEFAULTS = {
   /** Weight of the forward lobe in the dual-lobe phase. */
   phaseW: 0.72,
   /** Powder / dark-edge term strength. */
-  powder: 0.6,
+  powder: 0.45,
   /** Multi-scatter octaves (Wrenninge): each dimmer, less extincted, broader. */
   msAmount: 0.75,
   msExtinction: 0.55,
@@ -167,6 +202,24 @@ export const CLOUD_DEFAULTS = {
    *  higher = crisper edges but more 2x2 blockiness on steep smooth surfaces. Free —
    *  it is arithmetic inside a pass that already runs. */
   upsampleDepthReject: 8.0,
+  /**
+   * Neighbourhood clamp strength WHILE THE CAMERA IS MOVING. 1 = exact min/max box.
+   *
+   * The clamp exists to reject stale history across a disocclusion. But it also forces
+   * history to track the current frame, and the current frame is a jittered raymarch —
+   * so a permanently-on clamp caps how far the temporal accumulation can converge, and
+   * the raymarch dither never fully averages out. Measured: with the clamp off, a static
+   * camera converges to near-clean; with it on at 1.0, the same stipple survives in the
+   * same places, merely attenuated. That is a spatial smooth, not a temporal average.
+   */
+  historyClampStrength: 1.0,
+  /**
+   * Clamp strength when the camera is STILL. A camera that is not moving cannot
+   * disocclude anything, so there is nothing for the clamp to protect against and it is
+   * pure convergence loss. Relaxing it here is what lets the dither actually average away
+   * while keeping full ghost rejection the moment the camera moves.
+   */
+  historyClampIdle: 0.08,
   /** Temporal accumulation: fraction of the reprojected history kept per frame. 0 = off
    *  (raw march, visibly dithered), 0.9 = a ~10-frame running average. Neighbourhood
    *  clamping keeps this from ghosting. */
@@ -279,7 +332,10 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const uErode = uniform(P.erode);
   const uNearErode = uniform(P.nearErode);
   const uNearRange = uniform(P.nearRange);
+  const uDetailRange = uniform(P.detailRange);
   const uTypeBias = uniform(P.typeBias);
+  const uCloudTopMin = uniform(P.cloudTopMin);
+  const uCloudTopBias = uniform(P.cloudTopBias);
   const uClearRadius = uniform(P.clearRadius);
   const uClearFloor = uniform(P.clearFloor);
 
@@ -288,6 +344,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const uMaxStep = uniform(P.maxStep);
   const uSteps = uniform(P.steps);
   const uEmptyStepMul = uniform(P.emptyStepMul);
+  const uJitterMaxM = uniform(P.jitterMaxM);
   const uMaxDist = uniform(P.maxDist);
 
   const uLightSteps = uniform(P.lightSteps);
@@ -414,17 +471,25 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
    */
   const heightProfile = Fn(([h, type]) => {
     const stratus = smoothstep(0.0, 0.07, h).mul(smoothstep(0.38, 0.16, h));
-    const cumulus = smoothstep(0.0, 0.22, h).mul(smoothstep(1.0, 0.62, h));
+    // Cumulus HOLDS full value to 0.8 of its own height before eroding. It used to start
+    // falling at 0.62, and since the coverage step thresholds `pw * grad`, a gradient that
+    // sags early puts the whole upper half of every cloud below the bar — the deck could
+    // not build anything tall no matter what the cloud-top field said. Measured with
+    // tools/cloudDensityTest.mjs: nothing cleared h = 0.45 before this.
+    const cumulus = smoothstep(0.0, 0.18, h).mul(smoothstep(1.0, 0.80, h));
     return mix(stratus, cumulus, saturate(type));
   });
 
-  /** Weather lookup → vec3(coverage, type, densityScale). */
+  /** Weather lookup → vec4(coverage, type, densityScale, cloudTopFraction). */
   const sampleWeather = Fn(([p]) => {
     const wuv = p.xz.add(uWind.xz.mul(0.35)).div(WEATHER_TILE_M);
     const w = weatherTex.sample(wuv);
     const cov = saturate(w.r.add(uCoverageBias).mul(uCoverage));
     const type = saturate(w.g.sub(0.5).add(uTypeBias));
-    return vec3(cov, type, mix(float(0.55), float(1.45), w.b));
+    // How much of the slab this cell's cloud fills. Floored, or a cell would have no
+    // cloud at all rather than a shallow one.
+    const top = mix(uCloudTopMin, float(1.0), saturate(w.a.add(uCloudTopBias)));
+    return vec4(cov, type, mix(float(0.55), float(1.45), w.b), top);
   });
 
   /**
@@ -444,7 +509,12 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     // Outside the slab there is nothing to sample — cheap guard before any texture fetch.
     If(h.greaterThan(0.0).and(h.lessThan(1.0)), () => {
       const wm = sampleWeather(p);
-      const grad = heightProfile(h, wm.y);
+      // LOCAL height: 0 at the cloud base, 1 at THIS cell's own top. Rescaling here is what
+      // gives neighbouring clouds different heights instead of one flat sheet — the profile
+      // runs its whole shape inside a taller or shorter box per cell, and falls to zero
+      // above that box on its own (both curves reach 0 past h = 1).
+      const hL = h.div(wm.w.max(0.05));
+      const grad = heightProfile(hL, wm.y);
 
       const b4 = baseTex.sample(p.add(uWind).div(BASE_TILE_M));
       const lowFbm = b4.g.mul(0.625).add(b4.b.mul(0.25)).add(b4.a.mul(0.125));
@@ -453,12 +523,19 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
       // Coverage carves the mass: more coverage lowers the bar the base has to clear.
       const shaped = remapUnit(pw.mul(grad), wm.x.oneMinus(), float(1.0)).toVar();
 
-      If(shaped.greaterThan(0.001), () => {
+      // Fade the erosion octaves out with distance — they carry frequencies the far-field
+      // step cannot sample (see detailRange). Gate the fetch too: past the range this is
+      // a no-op, so it should not cost a texture read either.
+      const detailFade = smoothstep(uDetailRange.mul(2.2), uDetailRange.mul(0.45), t);
+      If(shaped.greaterThan(0.001).and(detailFade.greaterThan(0.004)), () => {
         // Mid-frequency erosion, height-inverted: wispy at the base, billowy at the top.
         const d4 = detailTex.sample(p.add(uWind.mul(1.8)).div(DETAIL_TILE_M));
         const dF = d4.r.mul(0.625).add(d4.g.mul(0.25)).add(d4.b.mul(0.125));
-        const dMod = mix(dF, dF.oneMinus(), saturate(h.mul(4.0)));
-        shaped.assign(remapUnit(shaped, dMod.mul(uErode), float(1.0)));
+        const dMod = mix(dF, dF.oneMinus(), saturate(hL.mul(4.0)));
+        // Bite harder toward the cloud's OWN top: that rising erosion is what reads as
+        // cauliflower billows instead of a slab fading out.
+        const erodeH = uErode.mul(mix(float(0.65), float(1.35), saturate(hL))).mul(detailFade);
+        shaped.assign(remapUnit(shaped, dMod.mul(erodeH), float(1.0)));
 
         // NEAR-FIELD OCTAVE — the reason a fly-through reads as cloud and not as fog.
         // Faded by ray distance, so it is a no-op for anything that is not close.
@@ -496,7 +573,8 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     const result = float(0.0).toVar();
     If(h.greaterThan(0.0).and(h.lessThan(1.0)), () => {
       const wm = sampleWeather(p);
-      const grad = heightProfile(h, wm.y);
+      // Must match sampleDensity's local height or self-shadowing fights the shape.
+      const grad = heightProfile(h.div(wm.w.max(0.05)), wm.y);
       const b4 = baseTex.sample(p.add(uWind).div(BASE_TILE_M));
       const lowFbm = b4.g.mul(0.625).add(b4.b.mul(0.25)).add(b4.a.mul(0.125));
       const pw = remapUnit(b4.r, lowFbm.sub(1.0), float(1.0));
@@ -634,7 +712,10 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
        * is what actually makes the edge get sampled.
        */
       const fineHold = float(0.0).toVar();
-      travel.addAssign(jit.mul(clamp(uMinStep.add(tNear.mul(uStepGrowth)), uMinStep, uMaxStep)));
+      // Dither the entry, but only by `jitterMaxM` at most — see jitterMaxM.
+      travel.addAssign(jit.mul(
+        clamp(uMinStep.add(tNear.mul(uStepGrowth)), uMinStep, uMaxStep).min(uJitterMaxM),
+      ));
 
       Loop(MAX_STEPS, ({ i }) => {
         If(float(i).greaterThanEqual(uSteps), () => Break());
@@ -661,8 +742,15 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
             const tauL = lightMarch(p);
             // Powder: thin cloud facing the sun is darker than a naive Beer integral says,
             // because light has not had room to scatter forward into the eye yet.
-            const powder = exp(density.mul(-14.0)).oneMinus()
-              .mul(uPowder).add(uPowder.oneMinus());
+            // POWDER, gated on sun/view geometry. The dark-edge effect is real only when
+          // the sun is BEHIND the viewer: front-lit cloud edges darken. Looking toward
+          // the sun the same edges are the BRIGHTEST part of the sky — the silver
+          // lining. Applying it unconditionally (as before) greyed out every wisp,
+          // which is what made edges look dirty. mu = dot(view, sun), so mu < 0 is
+          // front-lit and mu > 0 is backlit.
+          const pwStrength = uPowder.mul(saturate(mu.negate()));
+          const powder = exp(density.mul(-14.0)).oneMinus()
+              .mul(pwStrength).add(pwStrength.oneMinus());
             const h = saturate(p.y.sub(uBase).div(uThickness));
 
             // Multi-scatter octaves (Wrenninge): each octave is dimmer, extincted less and
@@ -776,6 +864,10 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   /** 0 on the first frame / after a resize, so history is not read from garbage. */
   const uHasHistory = uniform(0);
   const uHistoryBlend = uniform(P.historyBlend);
+  const uHistoryClamp = uniform(P.historyClampStrength);
+  const _prevCamPos = new THREE.Vector3();
+  const _prevCamQuat = new THREE.Quaternion();
+  let _camMotionInit = false;
 
   /**
    * Reproject last frame's cloud buffer and blend it with this frame's march.
@@ -836,7 +928,11 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
         .and(puv.y.greaterThan(0.0)).and(puv.y.lessThan(1.0));
 
       If(inBounds, () => {
-        const hist = histTex.sample(puv).clamp(mn, mx);
+        const raw = histTex.sample(puv);
+        // Widen the box by uHistoryClamp: at 1 it is the exact neighbourhood min/max, at
+        // 0 the bounds run away and history passes untouched.
+        const slack = mx.sub(mn).mul(uHistoryClamp.reciprocal().sub(1.0).max(0.0));
+        const hist = raw.clamp(mn.sub(slack), mx.add(slack));
         out.assign(mix(cur, hist, uHistoryBlend));
       });
     });
@@ -1066,7 +1162,10 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     uErode.value = P.erode;
     uNearErode.value = P.nearErode;
     uNearRange.value = P.nearRange;
+    uDetailRange.value = P.detailRange;
     uTypeBias.value = P.typeBias;
+    uCloudTopMin.value = P.cloudTopMin;
+    uCloudTopBias.value = P.cloudTopBias;
     uClearRadius.value = P.clearRadius;
     uClearFloor.value = P.clearFloor;
 
@@ -1075,6 +1174,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     uMaxStep.value = P.maxStep;
     uSteps.value = Math.min(P.steps, MAX_STEPS);
     uEmptyStepMul.value = P.emptyStepMul;
+    uJitterMaxM.value = P.jitterMaxM;
     uMaxDist.value = P.maxDist;
 
     uLightSteps.value = Math.min(P.lightSteps, MAX_LIGHT_STEPS);
@@ -1097,6 +1197,20 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     uAerialAmount.value = P.aerialAmount;
     uUpsampleReject.value = P.upsampleDepthReject;
     uHistoryBlend.value = P.historyBlend;
+    // Motion-aware clamp: full strength while moving (disocclusion is possible), relaxed
+    // when still (it is not, and the clamp would only be blocking convergence).
+    {
+      const dPos = _camMotionInit ? camera.position.distanceTo(_prevCamPos) : 1e9;
+      const dot = _camMotionInit ? Math.abs(camera.quaternion.dot(_prevCamQuat)) : 0;
+      const dRot = 1 - Math.min(1, dot);
+      const motion = Math.min(1, dPos / 0.35 + dRot * 60);
+      uHistoryClamp.value = THREE.MathUtils.lerp(
+        P.historyClampIdle, P.historyClampStrength, motion,
+      );
+      _prevCamPos.copy(camera.position);
+      _prevCamQuat.copy(camera.quaternion);
+      _camMotionInit = true;
+    }
     uCamNear.value = camera.near;
     uCamFar.value = camera.far;
 

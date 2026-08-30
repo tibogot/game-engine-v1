@@ -1173,41 +1173,41 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="prop-row">
             <span class="prop-label">Tar snakes</span>
             <div class="prop-value">
-              <input type="range" id="dv-road-crack" min="0" max="1" step="0.02" />
-              <span class="prop-num" id="dv-road-crack-v"></span>
+              <input type="range" id="dv-road-tarsnake" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-road-tarsnake-v"></span>
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Crack spacing</span>
+            <span class="prop-label">Snake spacing</span>
             <div class="prop-value">
-              <input type="range" id="dv-road-crackscale" min="1" max="24" step="0.5" />
-              <span class="prop-num" id="dv-road-crackscale-v"></span>
+              <input type="range" id="dv-road-tarsnakescale" min="1" max="24" step="0.5" />
+              <span class="prop-num" id="dv-road-tarsnakescale-v"></span>
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Crack width</span>
+            <span class="prop-label">Snake width</span>
             <div class="prop-value">
-              <input type="range" id="dv-road-crackwidth" min="0.005" max="0.15" step="0.005" />
-              <span class="prop-num" id="dv-road-crackwidth-v"></span>
+              <input type="range" id="dv-road-tarsnakewidth" min="0.005" max="0.15" step="0.005" />
+              <span class="prop-num" id="dv-road-tarsnakewidth-v"></span>
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Crack break-up</span>
+            <span class="prop-label">Snake break-up</span>
             <div class="prop-value">
-              <input type="range" id="dv-road-crackbreak" min="0" max="1" step="0.05" />
-              <span class="prop-num" id="dv-road-crackbreak-v"></span>
+              <input type="range" id="dv-road-tarsnakebreak" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-road-tarsnakebreak-v"></span>
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Crack gloss</span>
+            <span class="prop-label">Snake gloss</span>
             <div class="prop-value">
-              <input type="range" id="dv-road-crackgloss" min="0" max="0.8" step="0.02" />
-              <span class="prop-num" id="dv-road-crackgloss-v"></span>
+              <input type="range" id="dv-road-tarsnakegloss" min="0" max="0.8" step="0.02" />
+              <span class="prop-num" id="dv-road-tarsnakegloss-v"></span>
             </div>
           </div>
           <div class="prop-row">
             <span class="prop-label">Sealant colour</span>
-            <div class="prop-value"><input type="color" id="dv-road-crackcol" /></div>
+            <div class="prop-value"><input type="color" id="dv-road-tarsnakecol" /></div>
           </div>
           <div class="prop-row">
             <span class="prop-label">Old rubber</span>
@@ -1347,6 +1347,12 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-road-joints" min="0" max="24" step="1" />
               <span class="prop-num" id="dv-road-joints-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cheap deck (A/B)</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-road-cheap" type="button" aria-label="Cheap deck — no procedural surface"></button>
             </div>
           </div>
           <div class="prop-row">
@@ -2345,6 +2351,15 @@ export function createRoadDevPanel({ app, game, params }) {
     const el = $(`#${id}`);
     const out = $(`#${id}-v`);
     if (!el) return;
+    // NO BACKING VALUE: hide the row rather than leave a dead control.
+    //
+    // This is what lets the cheap-deck switch prune the panel for free. The
+    // cheap asphalt material is a deliberate SUBSET of the look — no tar
+    // snakes, no historical rubber, no wet, no anisotropy — so those uniforms
+    // simply are not there, and a slider bound to `undefined.value` would
+    // either throw or sit there pretending to do something.
+    if (!obj) { el.closest(".prop-row")?.setAttribute("hidden", ""); return; }
+    el.closest(".prop-row")?.removeAttribute("hidden");
     el.value = obj[key];
     if (out) out.textContent = fmt(obj[key]);
     el.addEventListener("input", () => {
@@ -2729,6 +2744,13 @@ export function createRoadDevPanel({ app, game, params }) {
   // Road-surface uniforms are TSL `uniform()` objects, so the slider / colour
   // helpers drive their `.value` directly — every change is live, no rebuild.
   // Colours live in linear space in the shader; the picker shows sRGB.
+  // WRAPPED so the cheap-deck A/B can re-run it. Swapping the deck builds a
+  // DIFFERENT material with a different uniform bag, and every slider below
+  // closes over the OLD one — rebinding is what makes the knobs follow the
+  // material, and what lets `slider` hide the rows the cheap deck has no
+  // uniform for. The body is left at its original indentation to keep the
+  // diff readable.
+  function bindRoadLook() {
   const ru = game.roadUniforms;
   if (ru) {
     colorUniform("dv-road-dark", ru.asphaltDark);
@@ -2748,13 +2770,13 @@ export function createRoadDevPanel({ app, game, params }) {
     slider("dv-road-linecoat", ru.lineCoat, "value", (v) => `${v.toFixed(2)}×`);
     // Tar snakes. Plain uniforms — no build gate, because the whole field is a
     // fract/abs/smoothstep on `surface.x`, which the deck has already computed.
-    // See the note on crackAmount: there is no noise here to compile out.
-    slider("dv-road-crack", ru.crackAmount, "value", (v) => (v === 0 ? "off" : v.toFixed(2)));
-    slider("dv-road-crackscale", ru.crackScale, "value", (v) => v.toFixed(1));
-    slider("dv-road-crackwidth", ru.crackWidth, "value", (v) => v.toFixed(3));
-    slider("dv-road-crackbreak", ru.crackBreak, "value", (v) => (v === 0 ? "continuous" : v.toFixed(2)));
-    slider("dv-road-crackgloss", ru.crackGloss, "value", (v) => v.toFixed(2));
-    colorUniform("dv-road-crackcol", ru.crackColor);
+    // See the note on tarSnakeAmount: there is no noise here to compile out.
+    slider("dv-road-tarsnake", ru.tarSnakeAmount, "value", (v) => (v === 0 ? "off" : v.toFixed(2)));
+    slider("dv-road-tarsnakescale", ru.tarSnakeScale, "value", (v) => v.toFixed(1));
+    slider("dv-road-tarsnakewidth", ru.tarSnakeWidth, "value", (v) => v.toFixed(3));
+    slider("dv-road-tarsnakebreak", ru.tarSnakeBreak, "value", (v) => (v === 0 ? "continuous" : v.toFixed(2)));
+    slider("dv-road-tarsnakegloss", ru.tarSnakeGloss, "value", (v) => v.toFixed(2));
+    colorUniform("dv-road-tarsnakecol", ru.tarSnakeColor);
     // HISTORICAL RUBBER — the marks that were already on the track before you
     // drove it. These uniforms have existed and shipped ON (driftAmount 1.4)
     // since the field was written; nothing had ever exposed them, so they were
@@ -2772,6 +2794,8 @@ export function createRoadDevPanel({ app, game, params }) {
       (v) => `${(1 / Math.max(v, 1e-4)).toFixed(0)} m`);
     slider("dv-road-driftgloss", ru.driftGloss, "value", (v) => v.toFixed(2));
   }
+  }
+  bindRoadLook();
   const surface = {
     bump: game.getBump?.() ?? 0.05,
     streak: game.getStreakSharp?.() ?? 0,
@@ -2833,6 +2857,13 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-road-streak", surface, "streak", (v) => v.toFixed(2), (v) => game.setStreakSharp?.(v));
   slider("dv-road-joints", surface, "joints", (v) => v === 0 ? "off" : `${v.toFixed(0)} m`, (v) => game.setJointSpacing?.(v));
   toggle("dv-road-front", game.getRoadFrontSide?.() ?? true, (on) => game.setRoadFrontSide?.(on));
+  // A/B against the floor: no procedural surface at all. Rebuilds the material
+  // and re-runs this whole binding pass, so the knobs the cheap deck does not
+  // have hide themselves (see the `!obj` branch in `slider`).
+  toggle("dv-road-cheap", game.getCheapRoad?.() ?? false, (on) => {
+    game.setCheapRoad?.(on);
+    requestAnimationFrame(() => bindRoadLook?.());
+  });
   // Guardrails are a plain MeshStandardMaterial, so these drive it directly.
   const rm = game.railMaterial;
   if (rm) {

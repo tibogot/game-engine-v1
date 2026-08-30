@@ -248,7 +248,7 @@ export function createRoadMaterial(opts = {}) {
     // z-fighting, and it conforms to banks, loops and the inside of tubes,
     // which a decal quad cannot. Driven by `aCurve`, so it concentrates in
     // corners on its own instead of being placed by hand.
-    driftAmount: uniform(opts.driftAmount ?? 1.4), // 0 = a freshly laid track
+    driftAmount: uniform(opts.driftAmount ?? 2.0), // 0 = a freshly laid track
     driftWidth: uniform(opts.driftWidth ?? 0.42), // half-width of the band (lateral)
     driftBias: uniform(opts.driftBias ?? 0.35), // how far toward the corner's OUTSIDE
     /** Curvature (1/m) at which marks reach full strength. 0.05 ≈ a 20 m radius. */
@@ -258,7 +258,7 @@ export function createRoadMaterial(opts = {}) {
     driftGloss: uniform(opts.driftGloss ?? 0.25),
     /** Streaks per lateral unit — 20 puts them roughly a tyre-width apart on a
      *  16 m deck. */
-    driftLines: uniform(opts.driftLines ?? 20),
+    driftLines: uniform(opts.driftLines ?? 8),
     // ── TAR SNAKES (crack sealant) ────────────────────────────────────────
     //
     // The most recognisable thing on a real road surface, and the one detail
@@ -292,31 +292,31 @@ export function createRoadMaterial(opts = {}) {
      * sparse (see the track format note): an absent key means "inherit the
      * current default", which is exactly what stops old tracks freezing at the
      * defaults of the day they were saved. No track has ever written a
-     * `crackAmount`, so every one of them picks this up. Set it to 0 in the
+     * `tarSnakeAmount`, so every one of them picks this up. Set it to 0 in the
      * panel and re-save a track that should stay pristine.
      *
      * Measured at 0.000 ms on the main scene pass — see the note above about
      * why there is no new noise to pay for.
      */
-    crackAmount: uniform(opts.crackAmount ?? 0.7),
+    tarSnakeAmount: uniform(opts.tarSnakeAmount ?? 0.7),
     /** Sealant colour. Near-black and slightly warm — fresh bitumen. Push it
      *  grey-brown for old, sun-bleached repairs. */
-    crackColor: uniform(lin(opts.crackColor ?? 0x141210)),
+    tarSnakeColor: uniform(lin(opts.tarSnakeColor ?? 0x141210)),
     /** Contours per unit of the macro field — this is the SPACING knob. Higher
      *  packs more cracks in; the field's own gradient does the rest, so the
      *  spacing varies naturally instead of being a grid. */
-    crackScale: uniform(opts.crackScale ?? 14.0),
+    tarSnakeScale: uniform(opts.tarSnakeScale ?? 14.0),
     /** Half-width of a snake, in contour units. The pixel-size floor takes over
      *  at distance, so this only sets the near look. */
-    crackWidth: uniform(opts.crackWidth ?? 0.014),
+    tarSnakeWidth: uniform(opts.tarSnakeWidth ?? 0.014),
     /** Roughness REMOVED on the sealant. Bitumen is markedly glossier than the
      *  aggregate around it, and at a grazing angle that sheen is most of what
      *  identifies it — more than the darkness does. */
-    crackGloss: uniform(opts.crackGloss ?? 0.30),
+    tarSnakeGloss: uniform(opts.tarSnakeGloss ?? 0.30),
     /** How fast the snakes fade out with distance. They must die before the
      *  contours get closer than a pixel or the deck crawls — same rule the
      *  aggregate and chip octaves follow. */
-    crackFade: uniform(opts.crackFade ?? 1.6),
+    tarSnakeFade: uniform(opts.tarSnakeFade ?? 1.6),
     /**
      * How broken up the snakes are, 0..1. 0 = every contour sealed end to end.
      *
@@ -334,13 +334,13 @@ export function createRoadMaterial(opts = {}) {
      * macro field — see the note at the call site for why neither of the two
      * fields already in hand can do this job.
      */
-    crackBreak: uniform(opts.crackBreak ?? 0.65),
+    tarSnakeBreak: uniform(opts.tarSnakeBreak ?? 0.65),
     /** Segments per metre along the road. 0.13 gives runs about 8 m long, which
      *  is roughly how sealant is actually laid. */
-    crackBreakScale: uniform(opts.crackBreakScale ?? 0.13),
+    tarSnakeBreakScale: uniform(opts.tarSnakeBreakScale ?? 0.13),
     /** How far the wander field pushes those streaks sideways as they run, so
      *  they wander like driven lines instead of looking machined. */
-    driftWander: uniform(opts.driftWander ?? 2.5),
+    driftWander: uniform(opts.driftWander ?? 3.5),
     /**
      * WAVELENGTH of that sideways drift, in cycles per metre. This is the knob
      * that decides whether the marks read as a driven line or as a slalom.
@@ -692,20 +692,20 @@ export function createRoadMaterial(opts = {}) {
    * depends on the macro field's local gradient, which varies, so a fade derived
    * from the UV footprint alone would be wrong wherever the field is flat.
    */
-  const crackField = Fn(() => {
+  const tarSnakeField = Fn(() => {
     // One contour coordinate from a field the deck has already computed.
-    const c = surface.x.mul(u.crackScale);
+    const c = surface.x.mul(u.tarSnakeScale);
     // Contour units per pixel — both the AA floor and the distance fade.
     const aa = fwidth(c);
     // Distance to the nearest half-integer level set.
     const d = abs(fract(c).sub(0.5));
     // Feathered to at least a pixel, so a snake stays a line instead of
     // dissolving into a dotted crawl down the straight.
-    const line = smoothstep(u.crackWidth.add(max(aa, float(1e-4))), u.crackWidth, d);
+    const line = smoothstep(u.tarSnakeWidth.add(max(aa, float(1e-4))), u.tarSnakeWidth, d);
     // ...and gone entirely once the contours are packed tighter than the
     // sampling rate, or the whole deck turns into moire.
-    const fade = saturate(oneMinus(aa.mul(u.crackFade)));
-    // SEALED RUNS WITH BARE ASPHALT BETWEEN THEM — see crackBreak.
+    const fade = saturate(oneMinus(aa.mul(u.tarSnakeFade)));
+    // SEALED RUNS WITH BARE ASPHALT BETWEEN THEM — see tarSnakeBreak.
     //
     // It has to vary ALONG the snake, and that rules out the two fields already
     // to hand. `surface.y` (the aggregate) was the first attempt and it does
@@ -720,10 +720,10 @@ export function createRoadMaterial(opts = {}) {
     // different stations instead of all being cut across the same line. Same
     // trick, and the same reasoning, as the drift band's `driftWander`.
     const alongOff = uv().x.add(attribute("aAlongOffset", "float"));
-    const phase = alongOff.mul(u.crackBreakScale).add(surface.x.mul(4.0));
+    const phase = alongOff.mul(u.tarSnakeBreakScale).add(surface.x.mul(4.0));
     const wave = abs(fract(phase).sub(0.5)).mul(2.0);
-    const seg = mix(float(1), smoothstep(0.28, 0.72, wave), u.crackBreak);
-    return saturate(line.mul(fade).mul(seg).mul(u.crackAmount));
+    const seg = mix(float(1), smoothstep(0.28, 0.72, wave), u.tarSnakeBreak);
+    return saturate(line.mul(fade).mul(seg).mul(u.tarSnakeAmount));
   })();
 
   /**
@@ -802,7 +802,7 @@ export function createRoadMaterial(opts = {}) {
     // SEALANT, and it REPLACES the asphalt rather than darkening it — a tar
     // snake is a different material lying in the road, not a shadow on it.
     // Before the wet term below, because water sits over the sealant too.
-    deckBase = mix(deckBase, u.crackColor, crackField);
+    deckBase = mix(deckBase, u.tarSnakeColor, tarSnakeField);
     deckBase = deckBase.mul(u.deckBrightness);
 
     // WATER, and it goes here — after every dry term, before the paint. Water
@@ -883,7 +883,7 @@ export function createRoadMaterial(opts = {}) {
       .sub(driftField.mul(u.driftGloss))
       // Sealant is markedly glossier than the aggregate it sits in, and at a
       // grazing angle that sheen identifies it more than the darkness does.
-      .sub(crackField.mul(u.crackGloss));
+      .sub(tarSnakeField.mul(u.tarSnakeGloss));
     // Water fills the pores, so the SUBSTRATE smooths out some — but only some.
     // The mirror is the coat, not this; see wetRough in modularRoadWet.js.
     if (wet) deck = mix(deck, wet.substrateRough, wet.film);
@@ -1586,6 +1586,26 @@ export function createCheapAsphaltMaterial(opts = {}) {
     edgeOn: uniform(opts.edgeOn ?? 1),
     wheelDarken: uniform(opts.wheelDarken ?? 0.10),
     deckRough: uniform(opts.deckRough ?? 0.93),
+    // ── INERT, BUT PRESENT ────────────────────────────────────────────────
+    //
+    // Nothing below reaches this material's graph. They exist because the game
+    // pokes them directly — `roadMaterial._roadUniforms.wetAmount.value = …`
+    // and friends, 22 such sites — and a deck that is missing one throws
+    // before the first frame. Declaring them is a great deal smaller than
+    // guarding every caller, and it keeps the cheap deck a drop-in swap.
+    //
+    // SEEDED AT THEIR REAL DEFAULTS, never at 0. readRoadLook reports whatever
+    // is here, so a look SAVED while the cheap deck is active would otherwise
+    // pin wetDarken and the reflection tolerances to zero and carry that back
+    // onto the full material.
+    linesBloom: uniform(opts.linesBloom ?? 0),
+    wetAmount: uniform(opts.wetAmount ?? WET_DEFAULTS.wetAmount),
+    wetWheelClear: uniform(opts.wetWheelClear ?? WET_DEFAULTS.wetWheelClear),
+    puddleAmount: uniform(opts.puddleAmount ?? WET_DEFAULTS.puddleAmount),
+    railReflect: uniform(opts.railReflect ?? WET_DEFAULTS.railReflect),
+    reflectStrength: uniform(opts.reflectStrength ?? WET_DEFAULTS.reflectStrength),
+    reflectPlaneTol: uniform(opts.reflectPlaneTol ?? WET_DEFAULTS.reflectPlaneTol),
+    reflectErrTol: uniform(opts.reflectErrTol ?? WET_DEFAULTS.reflectErrTol),
   };
 
   const mat = new THREE.MeshStandardNodeMaterial({
@@ -1641,6 +1661,18 @@ export function createCheapAsphaltMaterial(opts = {}) {
   })();
 
   mat._cheapAsphaltUniforms = u;
+  /**
+   * ALSO exposed under the name the rest of the game reads, so the knobs this
+   * material DOES have (zone colours, paint lines, wheel darken, roughness)
+   * keep working when it is swapped in — and a saved look still applies, since
+   * syncRoadUniforms skips the keys that are not here.
+   *
+   * `_roadCheap` is what tells the game which deck it is holding; the class is
+   * MeshStandardNodeMaterial either way, and by now two other features pick
+   * their class independently, so the constructor cannot answer that question.
+   */
+  mat._roadUniforms = u;
+  mat._roadCheap = true;
   return mat;
 }
 
@@ -1900,7 +1932,7 @@ export const ROAD_LOOK_VERSION = 1;
 /** Uniforms authored as sRGB hex numbers. */
 export const ROAD_LOOK_COLORS = [
   "asphaltDark", "asphaltLight", "lineColor", "railA", "railB",
-  "sideColor", "tubeInner", "tubeOuter", "neonColor", "panelColor", "crackColor",
+  "sideColor", "tubeInner", "tubeOuter", "neonColor", "panelColor", "tarSnakeColor",
   ...WET_COLORS,
 ];
 
@@ -1916,7 +1948,7 @@ export const ROAD_LOOK_NUMBERS = [
   "wheelPolish", "wheelDarken",
   "driftAmount", "driftWidth", "driftBias", "driftCurveRef", "driftGloss",
   "driftLines", "driftWander", "driftWanderScale",
-  "crackAmount", "crackScale", "crackWidth", "crackGloss", "crackFade", "crackBreak", "crackBreakScale",
+  "tarSnakeAmount", "tarSnakeScale", "tarSnakeWidth", "tarSnakeGloss", "tarSnakeFade", "tarSnakeBreak", "tarSnakeBreakScale",
   "panelRough",
   ...WET_NUMBERS,
 ];
@@ -1953,11 +1985,16 @@ const _readColor = new THREE.Color();
 export function syncRoadUniforms(mat, p) {
   const u = mat?._roadUniforms;
   if (!u || !p) return;
+  // `u[k]` is checked as well as `p[k]`, because not every material that
+  // exposes a `_roadUniforms` bag carries the WHOLE look: createCheapAsphaltMaterial
+  // is a deliberate subset (zone colours, lines, wheel darken) and has no tar
+  // snakes, rubber, wet or anisotropy. Without the guard, applying a full look
+  // to the cheap deck throws on the first key it does not have.
   for (const k of ROAD_LOOK_COLORS) {
-    if (p[k] != null) u[k].value.copy(lin(p[k]));
+    if (p[k] != null && u[k]) u[k].value.copy(lin(p[k]));
   }
   for (const k of ROAD_LOOK_NUMBERS) {
-    if (p[k] != null) u[k].value = typeof p[k] === "boolean" ? (p[k] ? 1 : 0) : p[k];
+    if (p[k] != null && u[k]) u[k].value = typeof p[k] === "boolean" ? (p[k] ? 1 : 0) : p[k];
   }
 }
 
@@ -1975,10 +2012,21 @@ export function syncRoadUniforms(mat, p) {
 export function readRoadLook(mat) {
   const u = mat?._roadUniforms;
   if (!u) return null;
+  // SKIPS KEYS THE MATERIAL DOES NOT HAVE, the mirror of the guard in
+  // syncRoadUniforms. createCheapAsphaltMaterial exposes a `_roadUniforms` bag
+  // that is a deliberate SUBSET (no tar snakes, rubber, wet or anisotropy), so
+  // reading the full key list off it threw before the first frame.
+  //
+  // A partial look is the right answer rather than a failure: the keys that
+  // ARE present still round-trip, and a look saved from the cheap deck simply
+  // does not pin the knobs it never had — which is exactly what the sparse
+  // save format means by an absent key.
   const out = {};
   for (const k of ROAD_LOOK_COLORS) {
-    out[k] = _readColor.copy(u[k].value).convertLinearToSRGB().getHex();
+    if (u[k]) out[k] = _readColor.copy(u[k].value).convertLinearToSRGB().getHex();
   }
-  for (const k of ROAD_LOOK_NUMBERS) out[k] = u[k].value;
+  for (const k of ROAD_LOOK_NUMBERS) {
+    if (u[k]) out[k] = u[k].value;
+  }
   return out;
 }

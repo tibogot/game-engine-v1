@@ -191,13 +191,14 @@ export async function startCloudLab() {
       ["coverage", 0, 1.4, 0.01], ["coverageBias", -0.4, 0.4, 0.01],
       ["densityMul", 0.01, 0.4, 0.005], ["erode", 0, 0.9, 0.01],
       ["typeBias", 0, 1, 0.01],
+      ["cloudTopMin", 0.05, 1, 0.01], ["cloudTopBias", -0.5, 0.5, 0.01],
       ["clearRadius", 0, 200, 5], ["clearFloor", 0, 1, 0.01],
     ],
     "g-march": [
       ["minStep", 0.4, 12, 0.1], ["stepGrowth", 0, 0.2, 0.002],
       ["maxStep", 8, 160, 1], ["steps", 24, 192, 1],
-      ["emptyStepMul", 1, 8, 0.1], ["maxDist", 800, 8000, 100],
-      ["nearErode", 0, 0.9, 0.01], ["nearRange", 0, 900, 10],
+      ["emptyStepMul", 1, 8, 0.1], ["jitterMaxM", 0, 60, 0.5], ["maxDist", 800, 8000, 100],
+      ["nearErode", 0, 0.9, 0.01], ["nearRange", 0, 900, 10], ["detailRange", 100, 4000, 25],
     ],
     "g-light": [
       ["lightSteps", 1, 6, 1], ["lightConeLength", 10, 400, 5],
@@ -215,7 +216,7 @@ export async function startCloudLab() {
     ],
     "g-qual": [
       ["bufferScale", 0.25, 1, 0.05], ["upsampleDepthReject", 0, 40, 0.5],
-      ["historyBlend", 0, 0.97, 0.01],
+      ["historyBlend", 0, 0.99, 0.01], ["historyClampStrength", 0, 1, 0.05], ["historyClampIdle", 0, 1, 0.02],
     ],
   };
 
