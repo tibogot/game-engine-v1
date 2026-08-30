@@ -1910,10 +1910,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function syncRoadMaterialFeatures() {
     const wantWet = (roadLook.wetAmount ?? 0) > 0;
     const wantPreMirror = wantWet && (railsInMirror || hasPremirrorSources());
-    const isWet = !!roadMaterial._reflectUniforms || roadMaterial.isMeshPhysicalNodeMaterial;
+    // ASK THE MATERIAL WHAT IT IS, do not infer it from its class. Physical used
+    // to mean wet; now anisotropy picks that class too (three declares
+    // anisotropyNode on Physical only), so the old
+    // `isMeshPhysicalNodeMaterial` sniff would call a dry anisotropic road wet,
+    // never agree with the intent, and rebuild — re-merging the whole track —
+    // on every single call.
+    const isWet = roadMaterial._roadWet === true;
     const hasPreMirror = !!roadMaterial._mirrorTextureNode;
     const v2Rebuild = surfaceV2NeedsRebuild(roadMaterial, surfaceLook);
-    if (wantWet === isWet && wantPreMirror === hasPreMirror && !v2Rebuild) return;
+    // Anisotropy is the third build-time feature, for the same reason as the
+    // other two: three swaps in the anisotropic BRDF the moment the node exists,
+    // so "off" has to mean absent, not zero.
+    const wantAniso = (roadLook.anisotropy ?? 0) > 0;
+    const hasAniso = roadMaterial._roadAniso === true;
+    if (wantWet === isWet && wantPreMirror === hasPreMirror && !v2Rebuild
+      && wantAniso === hasAniso) return;
     applyRoadMaterial(makeRoadMaterial({
       ...roadLook,
       wet: wantWet,
@@ -1937,6 +1949,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     roadLook.wetAmount = wet;
     syncRoadMaterialFeatures();
     roadMaterial._roadUniforms.wetAmount.value = wet;
+    // A tyre SQUEEGEES standing water, so a wet skid is a light clearing rather
+    // than a dark rubber ribbon — see MARK_LOOK in modularRoadTireMarks. The
+    // marks are their own mesh and material, so they have to be told.
+    tireMarks.setWetness(wet);
     // Crossing 0 in either direction changes whether the pre-mirror content is
     // worth building at all — and ONLY that. The mirrored geometry is a function
     // of the track and the props, and it draws with its own materials, which this
@@ -1957,6 +1973,71 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     syncRoadMaterialFeatures();
     syncSurfaceV2Uniforms(roadMaterial, surfaceLook);
   }
+
+  /**
+   * Sane ranges for the surface knobs the panel drives generically.
+   *
+   * A table rather than a clamp per accessor, because the alternative is a
+   * matched pair of named setters per knob in BOTH handles below — which is how
+   * `setBump` / `setStreakSharp` / `setJointSpacing` came to be duplicated four
+   * times between them. Anything absent here passes through unclamped.
+   */
+  const SURFACE_BOUNDS = {
+    bumpChip: [0, 4],
+    bumpChipScale: [1, 80],
+    bumpChipStretch: [0.25, 20],
+    bumpChipFade: [0.1, 12],
+    bumpFilter: [0, 1],
+    lineBump: [0, 2],
+    lineFill: [0, 1],
+    bumpGrit: [0, 2],
+    bumpMacro: [0, 4],
+  };
+
+  /**
+   * Generic surface knob access, for anything that does not need its own named
+   * accessor. Goes through setSurfaceParam, so a knob that DOES cross a build
+   * gate still rebuilds correctly, and it lands in `surfaceLook` — which is what
+   * makes it ride the saved look rather than resetting on load.
+   */
+  function setSurface(key, v) {
+    if (!(key in surfaceLook)) return;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return;
+    const b = SURFACE_BOUNDS[key];
+    setSurfaceParam(key, b ? Math.max(b[0], Math.min(b[1], n)) : n);
+  }
+  const getSurface = (key) => surfaceLook[key];
+
+  /** Ranges for the ROAD_LOOK knobs the panel drives generically. */
+  const LOOK_BOUNDS = {
+    anisotropy: [0, 1],
+    anisotropyAngle: [-90, 90],
+    anisoWheel: [0, 3],
+    anisoWet: [0, 1],
+  };
+
+  /**
+   * Generic ROAD_LOOK knob access — the `setSurface` of the base material.
+   *
+   * Routed through syncRoadMaterialFeatures because one of these (`anisotropy`)
+   * is build-time gated: crossing 0 has to swap the material, not poke a uniform
+   * that the compiled shader does not read. The call early-returns for every
+   * other key, so a slider drag costs a couple of comparisons. The uniform is
+   * written afterwards on purpose — a rebuild replaces `roadMaterial`, and the
+   * write has to land on whichever material is current.
+   */
+  function setLook(key, v) {
+    if (!(key in roadLook) && !roadMaterial._roadUniforms?.[key]) return;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return;
+    const b = LOOK_BOUNDS[key];
+    roadLook[key] = b ? Math.max(b[0], Math.min(b[1], n)) : n;
+    syncRoadMaterialFeatures();
+    const un = roadMaterial._roadUniforms?.[key];
+    if (un) un.value = roadLook[key];
+  }
+  const getLook = (key) => roadLook[key] ?? roadMaterial._roadUniforms?.[key]?.value;
 
   /** The guardrail reflection, off to on. Rebuilds the material so that "off"
    *  costs nothing at all rather than costing a sample multiplied by zero. */
@@ -5396,6 +5477,10 @@ ${e.message}`);
       getStreakSharp: () => surfaceLook.streakSharp,
       setJointSpacing: (v) => setSurfaceParam("jointSpacing", Math.max(0, v || 0)),
       getJointSpacing: () => surfaceLook.jointSpacing,
+      setSurface,
+      getSurface,
+      setLook,
+      getLook,
       setRoadFrontSide,
       getRoadFrontSide: () => roadFrontSide,
       setWheelClear: (v) => {
@@ -5872,6 +5957,10 @@ ${e.message}`);
     getStreakSharp: () => surfaceLook.streakSharp,
     setJointSpacing: (v) => setSurfaceParam("jointSpacing", Math.max(0, v || 0)),
     getJointSpacing: () => surfaceLook.jointSpacing,
+    setSurface,
+    getSurface,
+    setLook,
+    getLook,
     setRoadFrontSide,
     getRoadFrontSide: () => roadFrontSide,
     getRoadLook: () => readRoadLook(roadMaterial),

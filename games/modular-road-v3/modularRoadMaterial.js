@@ -4,9 +4,12 @@ import {
   uniform,
   attribute,
   uv,
+  vec2,
   vec3,
   vec4,
   float,
+  cos,
+  sin,
   mix,
   clamp,
   abs,
@@ -108,6 +111,41 @@ export function createRoadMaterial(opts = {}) {
     /** Feather outside that core. Small — the pixel-size floor takes over at
      *  distance, so this only has to soften the near view. */
     edgeSoft: uniform(opts.edgeSoft ?? 0.004),
+    // ── THE PAINT AS A MATERIAL ───────────────────────────────────────────
+    // The lines used to be albedo and nothing else: a white patch wearing the
+    // deck's roughness and, once the bump existed, the deck's aggregate relief
+    // too. That is chalk. Real road marking is a thermoplastic band laid ON the
+    // asphalt — it fills the pores under it, sits a couple of millimetres proud,
+    // and is smoother than what it covers. These give it its own response
+    // without a second material, a second draw or a decal.
+    //
+    // The RELIEF half of that lives in modularRoadSurfaceV2 (`lineBump`,
+    // `lineFill`), because the normal does; these are the shading half.
+    /** Paint roughness, DRY. Below the deck's 0.93 but nowhere near glass —
+     *  marking paint carries anti-skid grit on purpose. */
+    lineRough: uniform(opts.lineRough ?? 0.55),
+    /**
+     * How much of the deck's wet DARKENING the paint takes, 0..1.
+     *
+     * Low, and for the same reason `kerbWet` is below 1: darkening comes from
+     * water filling open pores and trapping light, and paint is close to
+     * non-porous, so it has almost no pores to fill. A wet line stays bright
+     * while the asphalt around it drops to about half — which is exactly why
+     * markings pop so hard in the rain, and why pushing this toward 1 quietly
+     * deletes one of the strongest wet-road cues there is.
+     */
+    lineWet: uniform(opts.lineWet ?? 0.35),
+    /**
+     * Coat gain on the paint, as a multiplier on the deck's coat. ABOVE 1: the
+     * same non-porosity that stops it darkening also means water sits on top as
+     * a continuous film rather than soaking into aggregate, so a wet line is
+     * the most mirror-like thing on the road. Saturated at the call site, so it
+     * cannot push the clearcoat past 1.
+     */
+    lineCoat: uniform(opts.lineCoat ?? 1.4),
+    /** Coat roughness on the paint, as a multiplier on the deck's. Below 1 —
+     *  a film over flat paint is smoother than the same film over chips. */
+    lineCoatRough: uniform(opts.lineCoatRough ?? 0.5),
     railDash: uniform(opts.railDash ?? 0.5), // paint bands per meter
     /** Contrast of the asphalt tone around its midpoint. NOTE: this used to cap
      *  the dark→light mix (tone × grainScale, so 0.55 meant the deck could never
@@ -146,6 +184,52 @@ export function createRoadMaterial(opts = {}) {
      * what reads correctly close up.
      */
     aggWeight: uniform(opts.aggWeight ?? 0.4),
+    // ── ANISOTROPIC SPECULAR ──────────────────────────────────────────────
+    //
+    // A road is not equally rough in every direction and never has been. Tyres
+    // polish the aggregate tops in the direction of travel, the paver drags the
+    // mix the same way, and rain drains along it — so the microfacets are
+    // directional, and a single scalar `roughness` cannot express that at all.
+    // Everything above (`streak`, the wheel paths, the drift band) already says
+    // the surface is anisotropic in its ALBEDO; this is the same claim finally
+    // reaching the specular lobe, which is where the eye actually reads gloss.
+    //
+    // FREE FRAME. three derives its tangent basis from the UV derivatives when
+    // the geometry carries no `tangent` attribute — and this deck's uv IS
+    // (metres along, metres across), so the tangent frame is the road's own
+    // frame with nothing to author. vec2(1,0) is along the road, (0,1) across.
+    //
+    // WHAT IT DOES NOT DO: the clearcoat. three's coat lobe is isotropic, so on
+    // a soaked road — where the mirror IS the coat — this changes little. Its
+    // reach is the DRY and DAMP deck, which is most of the game's screen time:
+    // low sun down a straight, and the substrate under a thin film.
+    /**
+     * Strength, 0..1. 0 compiles the whole anisotropic BRDF out (`useAnisotropy`
+     * turns on the moment an anisotropyNode exists), so off really is free —
+     * same build-time rule as the wet clearcoat. Crossing 0 is a rebuild.
+     */
+    anisotropy: uniform(opts.anisotropy ?? 0),
+    /**
+     * Direction, in DEGREES, of the axis the highlight stretches along.
+     * 0 = along the road, 90 = across it.
+     *
+     * A KNOB RATHER THAN A CONSTANT, because the two defensible answers disagree
+     * and the referee is your eye. Tyre polish argues the surface is SMOOTHER
+     * along the road, which puts the stretch across it; the look everyone means
+     * by "wet road at night" is a smear running away from the viewer, which is
+     * along it. Much of that smear is really grazing-angle projection, which GGX
+     * already gives you for free, so this decides how much the material adds on
+     * top and in which axis. Sweep it and pick.
+     */
+    anisotropyAngle: uniform(opts.anisotropyAngle ?? 0),
+    /** EXTRA anisotropy in the wheel paths, as a fraction. This is the honest
+     *  part of the model — the two strips where tyres actually run are the
+     *  directionally polished ones, and `surface.z` already knows where. */
+    anisoWheel: uniform(opts.anisoWheel ?? 0.6),
+    /** How far standing water SUPPRESSES it, 0..1. Water fills the directional
+     *  micro-grooves, so a soaked substrate is closer to isotropic — and the
+     *  coat above it is isotropic anyway. */
+    anisoWet: uniform(opts.anisoWet ?? 0.7),
     /** Base deck roughness before variation. */
     deckRough: uniform(opts.deckRough ?? 0.93),
     /** How much the noise modulates roughness. This is what makes the deck read
@@ -175,9 +259,109 @@ export function createRoadMaterial(opts = {}) {
     /** Streaks per lateral unit — 20 puts them roughly a tyre-width apart on a
      *  16 m deck. */
     driftLines: uniform(opts.driftLines ?? 20),
-    /** How far the macro field pushes those streaks sideways as they run, so
+    // ── TAR SNAKES (crack sealant) ────────────────────────────────────────
+    //
+    // The most recognisable thing on a real road surface, and the one detail
+    // that is unambiguously ASPHALT rather than "a grey material". Bitumen
+    // poured into cracks and squeegeed flat: near-black, glossier than the
+    // road, 3-8 cm wide, wandering mostly along the direction of travel.
+    //
+    // IT COSTS NO NEW NOISE, which is the whole reason it is affordable at the
+    // measured 0.721 ms the deck's normal already costs. The trick is contour
+    // lines: `fract(field * N)` turns ONE evaluation of a smooth field into N
+    // isolines, and the level set of a noise field is exactly the wandering,
+    // branching, irregularly-spaced curve a crack network is. `surface.x` is
+    // already computed for the deck's tone, so this is a fract, an abs and a
+    // smoothstep on a value that is sitting in a register.
+    //
+    // AND THE CONTOURS RUN THE RIGHT WAY FOR FREE. The macro field is stretched
+    // by `streak`, so it varies fast ACROSS the road and slowly ALONG it. Its
+    // gradient therefore points across, and contours run perpendicular to the
+    // gradient — i.e. along the road, wandering as they go. That is how sealant
+    // actually lies, and nothing had to be authored to get it.
+    //
+    // NOT IN THE NORMAL, deliberately. Putting cracks in the bump would mean
+    // re-adding a macro evaluation to `bumpHeightAt`, and that is a 3-octave
+    // fractal per height tap — precisely the 1.441 ms that was just removed.
+    // Sealant is poured level and squeegeed flush anyway: its signature is a
+    // dark glossy line, not relief. Albedo and roughness only.
+    /**
+     * Master, 0 = a road with no cracks.
+     *
+     * SHIPS ON, and that reaches existing tracks — deliberately. Saves are
+     * sparse (see the track format note): an absent key means "inherit the
+     * current default", which is exactly what stops old tracks freezing at the
+     * defaults of the day they were saved. No track has ever written a
+     * `crackAmount`, so every one of them picks this up. Set it to 0 in the
+     * panel and re-save a track that should stay pristine.
+     *
+     * Measured at 0.000 ms on the main scene pass — see the note above about
+     * why there is no new noise to pay for.
+     */
+    crackAmount: uniform(opts.crackAmount ?? 0.7),
+    /** Sealant colour. Near-black and slightly warm — fresh bitumen. Push it
+     *  grey-brown for old, sun-bleached repairs. */
+    crackColor: uniform(lin(opts.crackColor ?? 0x141210)),
+    /** Contours per unit of the macro field — this is the SPACING knob. Higher
+     *  packs more cracks in; the field's own gradient does the rest, so the
+     *  spacing varies naturally instead of being a grid. */
+    crackScale: uniform(opts.crackScale ?? 14.0),
+    /** Half-width of a snake, in contour units. The pixel-size floor takes over
+     *  at distance, so this only sets the near look. */
+    crackWidth: uniform(opts.crackWidth ?? 0.014),
+    /** Roughness REMOVED on the sealant. Bitumen is markedly glossier than the
+     *  aggregate around it, and at a grazing angle that sheen is most of what
+     *  identifies it — more than the darkness does. */
+    crackGloss: uniform(opts.crackGloss ?? 0.30),
+    /** How fast the snakes fade out with distance. They must die before the
+     *  contours get closer than a pixel or the deck crawls — same rule the
+     *  aggregate and chip octaves follow. */
+    crackFade: uniform(opts.crackFade ?? 1.6),
+    /**
+     * How broken up the snakes are, 0..1. 0 = every contour sealed end to end.
+     *
+     * Worth having for two reasons. The honest one: sealant is poured where a
+     * crack actually IS, so a road has sealed runs with bare asphalt between
+     * them, not an unbroken web — continuous lines read as a pattern.
+     *
+     * The other is that it hides the one artefact this technique has. A contour
+     * is a level set, and level sets CLOSE around local maxima and minima of the
+     * field, so a perfectly continuous version draws occasional rings — which
+     * cracks do not do, and the eye finds them immediately. Breaking the lines
+     * into segments turns a ring into a couple of arcs, which reads fine.
+     *
+     * Built from a triangle wave in arc length whose phase is shifted by the
+     * macro field — see the note at the call site for why neither of the two
+     * fields already in hand can do this job.
+     */
+    crackBreak: uniform(opts.crackBreak ?? 0.65),
+    /** Segments per metre along the road. 0.13 gives runs about 8 m long, which
+     *  is roughly how sealant is actually laid. */
+    crackBreakScale: uniform(opts.crackBreakScale ?? 0.13),
+    /** How far the wander field pushes those streaks sideways as they run, so
      *  they wander like driven lines instead of looking machined. */
     driftWander: uniform(opts.driftWander ?? 2.5),
+    /**
+     * WAVELENGTH of that sideways drift, in cycles per metre. This is the knob
+     * that decides whether the marks read as a driven line or as a slalom.
+     *
+     * It exists because the wander used to ride the deck's macro field, which
+     * was stretched 14:1 along the road — so the lateral offset held for ~233 m
+     * and the streaks ran long and near-parallel, like cars tracking a line.
+     * When that field moved to world space to kill the piece seams it became
+     * isotropic at 16.7 m, and the marks started snaking side to side every
+     * seventeen metres. Correct for a tonal drift; wrong for rubber, because
+     * rubber is laid by cars following a repeatable line and a line does not
+     * slalom.
+     *
+     * Its own low frequency restores the long wavelength WITHOUT going back to
+     * per-piece arc length, which is what produced the seams: world position is
+     * continuous, so there is no phase jump at a joint for the streaks to step
+     * sideways across. 0.006 is a ~170 m period, close to the 233 m the marks
+     * had before, and it does not need to be anisotropic — the whole set of
+     * tracks drifting together is exactly what a racing line looks like.
+     */
+    driftWanderScale: uniform(opts.driftWanderScale ?? 0.006),
     // Centre + edge paint lines. Default OFF — the clean Apex-Rush deck look;
     // the dev panel's "Road lines" toggle flips the uniform live.
     linesOn: uniform(opts.linesOn ?? 0), // master: 1 = paint lines, 0 = plain deck
@@ -228,6 +412,8 @@ export function createRoadMaterial(opts = {}) {
     puddleSoft: uniform(opts.puddleSoft ?? WET_DEFAULTS.puddleSoft),
     puddleDarken: uniform(opts.puddleDarken ?? WET_DEFAULTS.puddleDarken),
     puddleCoatRough: uniform(opts.puddleCoatRough ?? WET_DEFAULTS.puddleCoatRough),
+    waterlineDark: uniform(opts.waterlineDark ?? WET_DEFAULTS.waterlineDark),
+    waterlineSharp: uniform(opts.waterlineSharp ?? WET_DEFAULTS.waterlineSharp),
     wetDrainStart: uniform(opts.wetDrainStart ?? WET_DEFAULTS.wetDrainStart),
     wetCamber: uniform(opts.wetCamber ?? WET_DEFAULTS.wetCamber),
     wetBank: uniform(opts.wetBank ?? WET_DEFAULTS.wetBank),
@@ -272,6 +458,24 @@ export function createRoadMaterial(opts = {}) {
   const wetOn = Boolean(opts.wet);
 
   /**
+   * ANISOTROPY IS THE SECOND REASON TO BE PHYSICAL, and it is not optional.
+   *
+   * `anisotropyNode` and the `useAnisotropy` getter that reads it are declared
+   * on MeshPhysicalNodeMaterial ONLY — MeshStandardNodeMaterial has neither, so
+   * assigning the node to a Standard material is silently ignored: the property
+   * sticks, nothing reads it, and the deck shades exactly as before. That is the
+   * worst possible failure mode for a look knob, because the slider moves, the
+   * uniform updates, and nothing happens.
+   *
+   * So the class is chosen by EITHER feature. A dry anisotropic road gets a
+   * Physical material with no clearcoat, no sheen, no iridescence and no
+   * transmission — PhysicalLightingModel takes those as flags, so the only lobe
+   * it actually adds over Standard is the anisotropic BRDF we are asking for,
+   * plus the bent normal for the environment sample (which IS the effect).
+   */
+  const anisoOn = (opts.anisotropy ?? 0) > 0;
+
+  /**
    * DO THE RIDEABLE-TUBE ZONES (3 = inner bore, 4 = outer shell) NEED SHADING?
    *
    * DEFAULT FALSE, because on the shipping track they are unreachable. Every
@@ -297,7 +501,7 @@ export function createRoadMaterial(opts = {}) {
    */
   const tubeZones = Boolean(opts.tubeZones);
 
-  const mat = wetOn
+  const mat = (wetOn || anisoOn)
     ? new THREE.MeshPhysicalNodeMaterial({
         roughness: opts.roughness ?? 0.92,
         metalness: opts.metalness ?? 0.0,
@@ -359,8 +563,33 @@ export function createRoadMaterial(opts = {}) {
 
     // MACRO — slow tonal drift: resurfacing patches, sun bleaching, old repairs.
     // Low frequency, so it can never alias and needs no LOD handling.
+    // ── MACRO, IN WORLD SPACE — the seam fix ────────────────────────────────
+    //
+    // THE SEAM. `uv.x` restarts at 0 on EVERY piece (buildSweepGeometry), and
+    // `aAlongOffset` then adds a random per-piece phase on top. So any field
+    // driven by arc length is discontinuous at every joint on the track. For the
+    // high-frequency octaves that is invisible — a phase jump in a 6 cm chip has
+    // no coherent structure to break — but this one has a 16.7 m period, so the
+    // jump lands as a TONAL STEP straight across the road at every seam.
+    //
+    // It got worse when the tar snakes arrived: they are contours of THIS field,
+    // and a line that hard-cuts at a joint reads as a bug where a tonal step only
+    // read as variation.
+    //
+    // World position has no seams, by construction. Sampled as a true 3D noise
+    // rather than projected to xz, so a loop, a wall-ride and the inside of a
+    // tube get the same treatment as a flat deck instead of a smeared
+    // projection. Same cost — the fractal already took a vec3.
+    //
+    // THE RULE THIS SETS: low-frequency fields go world-space (seams show,
+    // direction does not matter); high-frequency fields stay on uv (seams are
+    // invisible, and following the road IS the look). `agg` below keeps uv.
+    //
+    // A side effect worth having: this octave is now isotropic, so the tar-snake
+    // contours wander across the road as well as along it — a crack network
+    // instead of the parallel driving lines the streak-stretched field produced.
     const macro = mx_fractal_noise_float(
-      vec3(along.mul(u.macroScale), across.mul(u.macroScale), 0.0), 3, 2.0, 0.5, 1.0,
+      positionWorld.mul(u.macroScale), 3, 2.0, 0.5, 1.0,
     ).mul(0.5).add(0.5);
 
     // AGGREGATE — the chip speckle that actually reads as asphalt up close.
@@ -421,13 +650,80 @@ export function createRoadMaterial(opts = {}) {
     // apart. `macro` then displaces them sideways so they wander down the road
     // instead of looking machined, and modulates them along it so they break
     // into segments rather than running unbroken for the whole piece.
-    const wander = surface.x.sub(0.5).mul(u.driftWander);
+    // The lateral drift, on its OWN long wavelength — see driftWanderScale.
+    // Amplitude is deliberately identical to the old `surface.x - 0.5` form
+    // (mx_noise returns -1..1, so x0.5 is the same +/-0.5): only the wavelength
+    // changes, so `driftWander` keeps the meaning it always had.
+    //
+    // The one new noise evaluation in this field, and it buys the difference
+    // between a driven line and a slalom. `patchy` below still rides the deck's
+    // existing macro — patches of heavier rubber every ~17 m are fine, it is
+    // only the SIDEWAYS motion that had to slow down.
+    const wander = mx_noise_float(positionWorld.mul(u.driftWanderScale))
+      .mul(0.5).mul(u.driftWander);
     const ripple = abs(fract(lateral.mul(u.driftLines).add(wander)).sub(0.5)).mul(2.0);
+    // NOTE: no pixel-size floor here, unlike `lineAmt` and the crack field.
+    // That is a real gap and it may alias at distance — but it has never been
+    // OBSERVED to, and a fix was reverted once for being written against a
+    // misdiagnosis. Demonstrate the aliasing before adding an fwidth here:
+    // band-limiting also makes the streaks fade earlier, which is a look change.
     const streaks = smoothstep(0.8, 0.25, ripple);
     const patchy = smoothstep(0.34, 0.62, surface.x);
     // Saturated so `driftAmount` can be pushed past 1 for a filthy track
     // without breaking the darkening bound colorNode relies on.
     return saturate(band.mul(corner).mul(streaks).mul(patchy).mul(u.driftAmount));
+  })();
+
+  /**
+   * TAR SNAKES, 0..1. Built ONCE and referenced by both colorNode and
+   * roughnessNode — same rule as `surface` and `driftField`, so the graph emits
+   * it a single time per fragment.
+   *
+   * `fwidth` ON A NOISE-DERIVED VALUE, and it is worth saying why that is fine
+   * here when it was explicitly wrong for the bump normal. There, a screen-space
+   * derivative of the height was used to build a DIRECTION, and a helper pixel
+   * sitting in a different interpolator on a triangle edge made the slope spike
+   * — which the lighting then self-shadowed into visible stripes. Here the
+   * derivative only sets an anti-aliasing WIDTH: a bad value at a triangle edge
+   * makes one row of the line a pixel wider, which nothing can see. The deck is
+   * subdivided at ~1.2 x 1.6 m, so those edges are sparse anyway.
+   *
+   * It is also the only honest way to fade this: the contour spacing on screen
+   * depends on the macro field's local gradient, which varies, so a fade derived
+   * from the UV footprint alone would be wrong wherever the field is flat.
+   */
+  const crackField = Fn(() => {
+    // One contour coordinate from a field the deck has already computed.
+    const c = surface.x.mul(u.crackScale);
+    // Contour units per pixel — both the AA floor and the distance fade.
+    const aa = fwidth(c);
+    // Distance to the nearest half-integer level set.
+    const d = abs(fract(c).sub(0.5));
+    // Feathered to at least a pixel, so a snake stays a line instead of
+    // dissolving into a dotted crawl down the straight.
+    const line = smoothstep(u.crackWidth.add(max(aa, float(1e-4))), u.crackWidth, d);
+    // ...and gone entirely once the contours are packed tighter than the
+    // sampling rate, or the whole deck turns into moire.
+    const fade = saturate(oneMinus(aa.mul(u.crackFade)));
+    // SEALED RUNS WITH BARE ASPHALT BETWEEN THEM — see crackBreak.
+    //
+    // It has to vary ALONG the snake, and that rules out the two fields already
+    // to hand. `surface.y` (the aggregate) was the first attempt and it does
+    // nothing: it is deliberately faded toward a flat 0.5 with distance, so at
+    // the chase camera it is nearly uniform and merely dims every snake evenly.
+    // `surface.x` is worse — the contours ARE its level sets, so anything built
+    // from it is constant along a snake and would switch whole snakes on and off
+    // rather than segmenting them.
+    //
+    // A triangle wave in arc length is the cheap thing that varies the right
+    // way, and the macro field shifts its PHASE so neighbouring snakes break at
+    // different stations instead of all being cut across the same line. Same
+    // trick, and the same reasoning, as the drift band's `driftWander`.
+    const alongOff = uv().x.add(attribute("aAlongOffset", "float"));
+    const phase = alongOff.mul(u.crackBreakScale).add(surface.x.mul(4.0));
+    const wave = abs(fract(phase).sub(0.5)).mul(2.0);
+    const seg = mix(float(1), smoothstep(0.28, 0.72, wave), u.crackBreak);
+    return saturate(line.mul(fade).mul(seg).mul(u.crackAmount));
   })();
 
   /**
@@ -469,47 +765,18 @@ export function createRoadMaterial(opts = {}) {
    * Paint-line coverage (0..1). Shared by albedo and the optional bloom write —
    * one node instance, one evaluation per fragment when both paths reference it.
    */
-  const lineAmt = Fn(() => {
-    const lateral = attribute("aLateral", "float");
-    const plain = attribute("aPlain", "float"); // 1 on platforms → no lines
-    const along = uv().x;
+  const lineAmt = Fn(() => lineCoverageAt(
+    u,
+    attribute("aLateral", "float"),
+    uv().x,
     // Feather floor of about a pixel. Painted lines are hard-edged in reality,
     // but a hard edge in a shader aliases into a dashed crawl at distance — the
     // exact range you spend most of a lap looking at. fwidth(lateral) is
     // lateral-units-per-pixel, so this keeps both lines crisp AND stable at any
     // distance without the author having to pick a blur that works everywhere.
-    const lateralAA = fwidth(lateral).mul(0.75);
-
-    // Dashed centre line — solid core out to centerHalf, then feathered.
-    const centerMask = smoothstep(
-      u.centerHalf.add(max(u.centerSoft, lateralAA)),
-      u.centerHalf,
-      abs(lateral),
-    );
-    const dash = step(0.5, fract(along.mul(u.centerDash)));
-    const centerLine = centerMask.mul(dash);
-
-    // Solid edge lines on both sides.
-    //
-    // WAS smoothstep(edgeWidth, 0, d): a pure gradient from full at the centre
-    // of the line to nothing at edgeWidth, i.e. NO solid core — the whole line
-    // was falloff. That is why it read soft and why widening it only made it
-    // blurrier. Same shape as the centre line now: solid to edgeWidth, then a
-    // short feather. `edgeWidth` therefore changed meaning from "how far the
-    // gradient reaches" to "half-width of the paint", so its default came down
-    // to keep the line about the width it looked before.
-    const edgeMask = smoothstep(
-      u.edgeWidth.add(max(u.edgeSoft, lateralAA)),
-      u.edgeWidth,
-      abs(abs(lateral).sub(u.edgePos)),
-    );
-
-    // Per-line switches, then the global toggle × per-piece plain flag
-    // (platforms suppress lines).
-    return clamp(
-      centerLine.mul(u.centerOn).add(edgeMask.mul(u.edgeOn)), 0.0, 1.0,
-    ).mul(u.linesOn).mul(float(1).sub(plain));
-  })();
+    fwidth(attribute("aLateral", "float")).mul(0.75),
+    attribute("aPlain", "float"), // 1 on platforms → no lines
+  ))();
 
   mat.colorNode = Fn(() => {
     const zone = attribute("aZone", "float");
@@ -532,6 +799,10 @@ export function createRoadMaterial(opts = {}) {
     // unbounded one would turn every re-drift over an old mark into a black
     // hole. Capped, the worst case is dark rubber on dark rubber.
     deckBase = deckBase.mul(oneMinus(driftField.mul(0.55)));
+    // SEALANT, and it REPLACES the asphalt rather than darkening it — a tar
+    // snake is a different material lying in the road, not a shadow on it.
+    // Before the wet term below, because water sits over the sealant too.
+    deckBase = mix(deckBase, u.crackColor, crackField);
     deckBase = deckBase.mul(u.deckBrightness);
 
     // WATER, and it goes here — after every dry term, before the paint. Water
@@ -540,7 +811,18 @@ export function createRoadMaterial(opts = {}) {
     // asphalt because it is sitting over all of them.
     if (wet) deckBase = deckBase.mul(wet.albedoScale).mul(wet.tint);
 
-    const deckCol = mix(deckBase, u.lineColor, lineAmt);
+    // THE PAINT, wetted on its OWN terms rather than with the asphalt under it.
+    // `deckBase` has already taken the full albedo drop, and mixing an untouched
+    // line colour in on top of that is what left markings completely unaffected
+    // by the weather. Paint does darken, just far less — see `lineWet`.
+    let lineCol = u.lineColor;
+    if (wet) {
+      const lw = wet.film.mul(u.lineWet);
+      lineCol = lineCol
+        .mul(mix(float(1), u.wetDarken, lw))
+        .mul(mix(vec3(1, 1, 1), u.wetTint, lw));
+    }
+    const deckCol = mix(deckBase, lineCol, lineAmt);
 
     // Kerbs: solid red by default; hazard stripes only when railStriped is on
     // (reserved for the turn pieces later).
@@ -598,10 +880,22 @@ export function createRoadMaterial(opts = {}) {
       // Same field as the albedo above, referenced not recomputed. Rubber is
       // glossier than the asphalt around it, and that sheen is most of what
       // sells it as rubber rather than as a dark patch of paint.
-      .sub(driftField.mul(u.driftGloss));
+      .sub(driftField.mul(u.driftGloss))
+      // Sealant is markedly glossier than the aggregate it sits in, and at a
+      // grazing angle that sheen identifies it more than the darkness does.
+      .sub(crackField.mul(u.crackGloss));
     // Water fills the pores, so the SUBSTRATE smooths out some — but only some.
     // The mirror is the coat, not this; see wetRough in modularRoadWet.js.
     if (wet) deck = mix(deck, wet.substrateRough, wet.film);
+    // PAINT REPLACES the asphalt's roughness rather than tinting it — none of
+    // the terms above (aggregate gloss, wheel polish, old rubber) describe a
+    // thermoplastic band, and leaving them showing through is what made a line
+    // read as a bleached patch of road instead of as something laid on it. Wet
+    // on its own terms too: it starts smoother, so the same film takes it
+    // further. Mixed AFTER the substrate mix so both sides of the blend are
+    // already weather-aware.
+    const paintRough = wet ? mix(u.lineRough, wet.substrateRough, wet.film) : u.lineRough;
+    deck = mix(deck, paintRough, lineAmt);
     deck = clamp(deck, 0.05, 1.0);
 
     let r = float(0.9); // sides / underside
@@ -638,10 +932,55 @@ export function createRoadMaterial(opts = {}) {
       // its albedo, its roughness and its gloss together.
       const isDeck = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
       const isKerb = step(1.5, zone).mul(oneMinus(step(2.5, zone)));
-      return wet.coat.mul(isDeck.add(isKerb.mul(u.kerbWet)));
+      // Paint is the wettest-LOOKING thing out there — see lineCoat. Saturated,
+      // because a clearcoat above 1 is not a stronger mirror, it is invalid.
+      const paintGain = mix(float(1), u.lineCoat, lineAmt);
+      return saturate(wet.coat.mul(isDeck.add(isKerb.mul(u.kerbWet))).mul(paintGain));
     })();
-    mat.clearcoatRoughnessNode = wet.coatRough;
+    // ...and the film on it is smoother than the same film over open aggregate,
+    // which is the half that actually makes it look like a mirror rather than
+    // just a brighter patch.
+    mat.clearcoatRoughnessNode = mix(
+      wet.coatRough, wet.coatRough.mul(u.lineCoatRough), lineAmt,
+    );
     mat.clearcoatNormalNode = wetClearcoatNormal(wet);
+  }
+
+  /**
+   * DIRECTIONAL GLOSS. Build-time gated, and it has to be: three switches the
+   * whole lighting model to the anisotropic BRDF the moment `anisotropyNode` is
+   * non-null (`useAnisotropy = anisotropy > 0 || anisotropyNode !== null`), and
+   * that is extra work in every light loop PLUS a bent normal for the
+   * environment sample rather than the shading normal. A node multiplied to
+   * zero would pay all of it, exactly as a zeroed clearcoat would.
+   *
+   * The vec2 encodes both things at once — three normalises it for the axis and
+   * takes its LENGTH as the strength — so everything below scales one vector.
+   *
+   * DECK ONLY. The kerb is painted, the sides are cast concrete and the panel is
+   * moulded; none of them are dragged in one direction by traffic, and a
+   * stretched highlight on them would read as a shading bug.
+   */
+  if (anisoOn) {
+    mat.anisotropyNode = Fn(() => {
+      const zone = attribute("aZone", "float");
+      const isDeck = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
+
+      // Strongest where tyres actually run — `surface.z` is the wheel-path mask
+      // the deck already computes, so this costs one multiply, not a new field.
+      let amount = u.anisotropy
+        .mul(isDeck)
+        .mul(float(1).add(surface.z.mul(u.anisoWheel)));
+
+      // Water fills the grooves that make the surface directional in the first
+      // place, so a wet substrate relaxes toward isotropic. `film`, not `pond`:
+      // this is about the asphalt being wetted, not about standing water, which
+      // is the coat's business and isotropic regardless.
+      if (wet) amount = amount.mul(oneMinus(wet.film.mul(u.anisoWet)));
+
+      const a = u.anisotropyAngle.mul(Math.PI / 180);
+      return vec2(cos(a), sin(a)).mul(saturate(amount));
+    })();
   }
 
   /**
@@ -904,6 +1243,19 @@ export function createRoadMaterial(opts = {}) {
   // wet frame.
   applyBloomMRT(mat, neonNode ? neonNode.add(lineGlow) : lineGlow);
 
+  /**
+   * WHAT THIS MATERIAL WAS BUILT WITH, stated rather than sniffed.
+   *
+   * The class used to be a reliable proxy for wetness — Physical meant wet —
+   * and callers leaned on `isMeshPhysicalNodeMaterial` to decide whether a
+   * rebuild was needed. Anisotropy breaks that: a DRY anisotropic road is
+   * Physical too, so the sniff would report wet, disagree with the intent on
+   * every check, and rebuild the material (and re-merge the drive-mode track)
+   * on every call. Two features sharing one class means the class can no longer
+   * answer which of them is on.
+   */
+  mat._roadWet = wetOn;
+  mat._roadAniso = anisoOn;
   mat._roadUniforms = u;
   // PRISTINE LOOK BASELINE — captured on the first material this session, at the
   // one instant it is guaranteed untouched: the uniforms exist, and no caller
@@ -928,6 +1280,18 @@ export function createRoadMaterial(opts = {}) {
    * (screen-space dFdx of `.x`/`.y` self-shadows into stripes).
    */
   mat._surfaceNode = surface;
+  /**
+   * Paint coverage at THIS fragment, 0..1 — the same node the albedo and the
+   * bloom write reference, so a fourth consumer costs no extra evaluation.
+   *
+   * modularRoadSurfaceV2 needs both this and `lineCoverageAt`, and the pair is
+   * not redundant: this one is the value HERE (used to suppress asphalt relief
+   * under the paint), while the exported function is what lets the bump
+   * re-evaluate the mask at its three tap offsets to get the paint's own edge
+   * slope. Sharing the node for the first and the function for the second is
+   * what keeps the relief and the albedo agreeing about where a line is.
+   */
+  mat._lineNode = lineAmt;
   /** The raw vec2(film, pond) field, or null when dry. Exposed so wet-road-lab
    *  can render the drainage model as false colour without re-deriving the
    *  wheel-path mask it is built from — a second copy of that expression is
@@ -1033,6 +1397,63 @@ export function createRoadGlassMaterial(opts = {}) {
   }
   mat._glassUniforms = u;
   return mat;
+}
+
+/**
+ * PAINT COVERAGE at an arbitrary point, 0..1.
+ *
+ * A FUNCTION OF ITS INPUTS rather than a node bound to `aLateral` and `uv().x`,
+ * and that is the whole reason it was lifted out of createRoadMaterial. The
+ * deck's bump normal has to know where the paint is — paint fills the aggregate
+ * under it and sits a couple of millimetres proud of it, so a white line wearing
+ * full asphalt relief reads as chalk rather than as thermoplastic. Building that
+ * normal means DIFFERENCING this mask at the bump's tap offsets, which a node
+ * already evaluated at this fragment's own attributes cannot do.
+ *
+ * Same contract as `opts.buildSurface`: the caller supplies the coordinates, so
+ * modularRoadSurfaceV2 can call it three times at three offsets while the
+ * material calls it once at the fragment. One definition, so the relief and the
+ * albedo can never disagree about where a line is — which is the failure this
+ * shape exists to prevent, and the reason `lineAmt` is not simply copied there.
+ *
+ * @param {object} u   the road uniform bag
+ * @param {Node} lateral  aLateral (-1..1 across the deck) at the sample point
+ * @param {Node} along    uv.x, metres along the path, at the sample point
+ * @param {Node} lateralAA  the feather floor. Pass the SAME value to every tap:
+ *   it comes from `fwidth`, and letting it vary per tap differentiates the
+ *   anti-aliasing along with the mask.
+ * @param {Node} plain  aPlain — 1 on platforms, which suppress lines entirely
+ */
+export function lineCoverageAt(u, lateral, along, lateralAA, plain) {
+  // Dashed centre line — solid core out to centerHalf, then feathered.
+  const centerMask = smoothstep(
+    u.centerHalf.add(max(u.centerSoft, lateralAA)),
+    u.centerHalf,
+    abs(lateral),
+  );
+  const dash = step(0.5, fract(along.mul(u.centerDash)));
+  const centerLine = centerMask.mul(dash);
+
+  // Solid edge lines on both sides.
+  //
+  // WAS smoothstep(edgeWidth, 0, d): a pure gradient from full at the centre
+  // of the line to nothing at edgeWidth, i.e. NO solid core — the whole line
+  // was falloff. That is why it read soft and why widening it only made it
+  // blurrier. Same shape as the centre line now: solid to edgeWidth, then a
+  // short feather. `edgeWidth` therefore changed meaning from "how far the
+  // gradient reaches" to "half-width of the paint", so its default came down
+  // to keep the line about the width it looked before.
+  const edgeMask = smoothstep(
+    u.edgeWidth.add(max(u.edgeSoft, lateralAA)),
+    u.edgeWidth,
+    abs(abs(lateral).sub(u.edgePos)),
+  );
+
+  // Per-line switches, then the global toggle × per-piece plain flag
+  // (platforms suppress lines).
+  return clamp(
+    centerLine.mul(u.centerOn).add(edgeMask.mul(u.edgeOn)), 0.0, 1.0,
+  ).mul(u.linesOn).mul(float(1).sub(plain));
 }
 
 /** Soft-edged ring band repeating every `neonSpacing` meters along the path. */
@@ -1479,20 +1900,23 @@ export const ROAD_LOOK_VERSION = 1;
 /** Uniforms authored as sRGB hex numbers. */
 export const ROAD_LOOK_COLORS = [
   "asphaltDark", "asphaltLight", "lineColor", "railA", "railB",
-  "sideColor", "tubeInner", "tubeOuter", "neonColor", "panelColor",
+  "sideColor", "tubeInner", "tubeOuter", "neonColor", "panelColor", "crackColor",
   ...WET_COLORS,
 ];
 
 /** Uniforms authored as plain numbers (on/off flags included, as 0/1). */
 export const ROAD_LOOK_NUMBERS = [
   "centerHalf", "centerSoft", "centerDash", "edgePos", "edgeWidth", "edgeSoft",
+  "lineRough", "lineWet", "lineCoat", "lineCoatRough",
   "linesOn", "centerOn", "edgeOn", "linesBloom", "linesBloomIntensity",
   "railDash", "railStriped", "grainScale", "streak",
   "neonIntensity", "neonSpacing", "neonWidth",
   "deckBrightness", "macroScale", "aggScale", "aggWeight", "deckRough", "roughVary",
+  "anisotropy", "anisotropyAngle", "anisoWheel", "anisoWet",
   "wheelPolish", "wheelDarken",
   "driftAmount", "driftWidth", "driftBias", "driftCurveRef", "driftGloss",
-  "driftLines", "driftWander",
+  "driftLines", "driftWander", "driftWanderScale",
+  "crackAmount", "crackScale", "crackWidth", "crackGloss", "crackFade", "crackBreak", "crackBreakScale",
   "panelRough",
   ...WET_NUMBERS,
 ];

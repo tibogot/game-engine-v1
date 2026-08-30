@@ -73,19 +73,14 @@ import {
   clamp,
   saturate,
   smoothstep,
-  step,
   abs,
   sign,
   max,
   oneMinus,
+  pow,
   cos,
   normalWorld,
   positionWorld,
-  cameraPosition,
-  dot,
-  length,
-  dFdx,
-  dFdy,
   normalMap,
   time,
   mx_fractal_noise_float,
@@ -186,6 +181,28 @@ export const WET_DEFAULTS = {
   puddleDarken: 0.42,
   /** Clearcoat roughness in standing water. This one really is near-glass. */
   puddleCoatRough: 0.012,
+  // ── THE WATERLINE ─────────────────────────────────────────────────────────
+  //
+  // The dark rim at a puddle's edge, and it is what gives standing water DEPTH
+  // instead of reading as a patch of gloss painted on the road. Without it a
+  // puddle is a smooth ramp from damp to mirror with no boundary anywhere, and
+  // the eye takes it for a change of finish rather than a body of water.
+  //
+  // Physically it is the shallowest water there is: a few millimetres over dark
+  // aggregate, too thin to have any depth of its own to brighten it, and the
+  // meniscus tilts away from the sky so it returns less of it. Darker than both
+  // the dry road AND the puddle centre — which is exactly why it draws an
+  // outline rather than a gradient.
+  //
+  // IT COSTS TWO MULTIPLIES. `pond` is already a 0..1 ramp, so 4·pond·(1−pond)
+  // is a parabola that peaks at 1 exactly where pond crosses 0.5 — the
+  // waterline — and falls to 0 both on the dry side and in the deep. No new
+  // field, no second threshold, no extra noise.
+  /** Extra albedo darkening at the rim, on top of the wet and puddle terms. */
+  waterlineDark: 0.35,
+  /** How TIGHT the rim is. 1 is a broad band across the whole transition; higher
+   *  narrows it to a line. Above about 4 it starts to alias on a soft edge. */
+  waterlineSharp: 2.5,
 
   // ── DRAINAGE ──────────────────────────────────────────────────────────────
   /** Drainage potential at which pooling starts to be favoured, 0..1. */
@@ -411,7 +428,7 @@ export const WET_COLORS = ["wetTint"];
 export const WET_NUMBERS = [
   "wetAmount", "wetCoatStrength", "wetShadow", "wetDarken", "wetRough", "wetCoatRough",
   "puddleAmount", "puddleScale", "puddleStreak", "puddleThreshold",
-  "puddleSoft", "puddleDarken", "puddleCoatRough",
+  "puddleSoft", "puddleDarken", "puddleCoatRough", "waterlineDark", "waterlineSharp",
   "wetDrainStart", "wetCamber", "wetBank", "wetCurveRef", "wetDrainStrength",
   "wetSlopeMin", "wetSlopeMax", "wetWheelClear",
   "rippleAmp", "rippleScale", "rippleSpeed", "rippleStretch", "rippleDamp",
@@ -437,11 +454,10 @@ export const WET_KEYS = [...WET_COLORS, ...WET_NUMBERS];
 export function createWetField(u, wheelPath) {
   return Fn(() => {
     const lateral = attribute("aLateral", "float");
-    // Same per-piece phase the deck uses — otherwise the identical puddle
-    // appears at the same spot on every piece of a given length, which is very
-    // hard to un-see once the ponding is turned up. See stampAlongOffset.
-    const along = uv().x.add(attribute("aAlongOffset", "float"));
-    const across = uv().y; // metres across the developed profile
+    // NOTE there is no `along`/`across` here any more. The ponding field used to
+    // ride per-piece arc length plus `aAlongOffset` — a random phase per piece —
+    // which decorrelated neighbouring pieces but guaranteed a hard edge through
+    // every puddle at every joint. It is world-space now; see the blob below.
 
     // WALLS SHED. The one term that makes this work on a stunt track: a loop's
     // deck is the same aZone as a straight's, and without this the inside of
@@ -478,9 +494,20 @@ export function createWetField(u, wheelPath) {
     // at macroScale 0.06 × streak 14 its period is ~16 m across and ~230 m
     // along, i.e. one broad gradient, which thresholds into a vague dark half
     // of the road rather than into puddles.
+    // WORLD SPACE, for the same reason the deck's macro tone is — and here the
+    // symptom is worse. Puddles are ~5 m across and ~15 m long, so a field driven
+    // by per-piece arc length puts a HARD EDGE through standing water at every
+    // joint: half a puddle, then bare road, then the other half offset sideways.
+    // A tonal step can pass as variation; a severed puddle cannot.
+    //
+    // `puddleStreak` therefore no longer stretches this along a per-piece axis —
+    // it now elongates the pond field along WORLD Z. On a straight that is still
+    // "along the road" for the usual track orientation, and on a curve it reads
+    // as water pooling with the terrain rather than with the ribbon, which is
+    // what water actually does.
+    const pw = positionWorld.mul(u.puddleScale);
     const blob = mx_fractal_noise_float(
-      vec3(along.div(u.puddleStreak).mul(u.puddleScale), across.mul(u.puddleScale), 0.0),
-      2, 2.0, 0.5, 1.0,
+      vec3(pw.x, pw.y, pw.z.div(u.puddleStreak)), 2, 2.0, 0.5, 1.0,
     ).mul(0.5).add(0.5);
 
     // Downhill lowers the bar, so water collects where it would actually run.
@@ -561,13 +588,29 @@ export function createWetShading(u, wheelPath) {
   // ponding implies film.
   const coat = saturate(max(film.mul(u.wetCoatStrength), pond));
 
+  /**
+   * The puddle's EDGE, 0..1 — see waterlineDark. Peaks where `pond` crosses
+   * 0.5 and vanishes both on the dry side and in the deep, so it traces the
+   * waterline without needing a second threshold or another noise sample.
+   */
+  const waterline = pow(saturate(pond.mul(oneMinus(pond)).mul(4.0)), u.waterlineSharp);
+
   return {
     field,
     film,
     pond,
     coat,
-    /** Multiply the deck albedo by this. */
-    albedoScale: mix(float(1), u.wetDarken, film).mul(mix(float(1), u.puddleDarken, pond)),
+    waterline,
+    /**
+     * Multiply the deck albedo by this. Three terms, in the order water
+     * actually applies them: the film darkens everything it wets, standing
+     * water darkens further, and the rim darkens further still — a waterline is
+     * the darkest part of a puddle, being too thin to have any depth to
+     * brighten it.
+     */
+    albedoScale: mix(float(1), u.wetDarken, film)
+      .mul(mix(float(1), u.puddleDarken, pond))
+      .mul(oneMinus(waterline.mul(u.waterlineDark))),
     /** ...and by this, for the hue of the darkening. */
     tint: mix(vec3(1, 1, 1), u.wetTint, film),
     /** Blend the deck's own roughness toward this by `film`. */

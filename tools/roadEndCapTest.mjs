@@ -108,12 +108,31 @@ wide.setActivePiece("straight"); wide.place();
 check("platform between two straights keeps BOTH lids",
   verts(wide.pieces[1].mesh.geometry) === verts(platBoth.geometry),
   `${verts(wide.pieces[1].mesh.geometry)} vs both ${verts(platBoth.geometry)}`);
-check("the straight into the platform drops its exit lid",
-  verts(wide.pieces[0].mesh.geometry) === verts(entry.geometry),
-  `${verts(wide.pieces[0].mesh.geometry)} vs entry-only ${verts(entry.geometry)}`);
-check("the straight out of the platform drops its entry lid",
-  verts(wide.pieces[2].mesh.geometry) === verts(exitOnly.geometry),
-  `${verts(wide.pieces[2].mesh.geometry)} vs exit-only ${verts(exitOnly.geometry)}`);
+check("a kerbed straight into a platform keeps the joint lid (kerbs are leftover)",
+  verts(wide.pieces[0].mesh.geometry) === verts(both.geometry),
+  `${verts(wide.pieces[0].mesh.geometry)} vs both ${verts(both.geometry)}`);
+check("…and the straight out keeps its entry lid too",
+  verts(wide.pieces[2].mesh.geometry) === verts(both.geometry),
+  `${verts(wide.pieces[2].mesh.geometry)} vs both ${verts(both.geometry)}`);
+
+const flatInto = new ModularRoadBuilder({
+  scene: new THREE.Scene(),
+  material: new THREE.MeshBasicMaterial(),
+  railMaterial: new THREE.MeshBasicMaterial(),
+});
+flatInto.setActivePiece("straight"); flatInto.place();
+flatInto.setActivePiece("platform"); flatInto.place();
+flatInto.pieces[0].edges = false;
+flatInto.rebuildAll();
+const flatOpen = buildPiece("straight", conn, flatInto.pieces[0].pp, undefined, undefined, false);
+const flatEntry = buildPiece("straight", conn, flatInto.pieces[0].pp, undefined, undefined, false, {
+  capEntry: true,
+});
+check("an edges-off straight into a platform still drops the joint (flat fills flat)",
+  verts(flatInto.pieces[0].mesh.geometry) === verts(flatEntry.geometry),
+  `${verts(flatInto.pieces[0].mesh.geometry)} vs entry-only ${verts(flatEntry.geometry)}`);
+check("…and that lid-less mouth is smaller than a free edges-off piece",
+  verts(flatOpen.geometry) < verts(flatEntry.geometry));
 
 const twoPlat = new ModularRoadBuilder({
   scene: new THREE.Scene(),
@@ -253,6 +272,40 @@ check("tube_in drops its bore ring once a tube occupies it",
 check("the tube after tube_in drops its entry ring",
   verts(entryJoin.pieces[2].mesh.geometry) === tubeOneN,
   `${verts(entryJoin.pieces[2].mesh.geometry)} vs one-ring ${tubeOneN}`);
+
+console.log("=== SAVE / LOAD RE-DERIVES LIDS (NOT STORED IN THE FILE) ===");
+const fresh = () => new ModularRoadBuilder({
+  scene: new THREE.Scene(),
+  material: new THREE.MeshBasicMaterial(),
+  railMaterial: new THREE.MeshBasicMaterial(),
+});
+const saveLoad = (src) => {
+  const json = JSON.parse(JSON.stringify(src.exportTrackPieces()));
+  const dst = fresh();
+  dst.importTrackPieces(json);
+  return { json, dst };
+};
+
+const slabRound = saveLoad(b);
+check("slab JSON does not store cap flags",
+  slabRound.json.every((e) => !("capEntry" in e) && !("capExit" in e)));
+check("reloaded 5-straight: first keeps entry lid",
+  verts(slabRound.dst.pieces[0].mesh.geometry) === verts(entry.geometry),
+  `${verts(slabRound.dst.pieces[0].mesh.geometry)} vs ${verts(entry.geometry)}`);
+check("reloaded 5-straight: middles stay open",
+  [1, 2, 3].every((i) => verts(slabRound.dst.pieces[i].mesh.geometry) === verts(open.geometry)));
+check("reloaded 5-straight: last keeps exit lid",
+  verts(slabRound.dst.pieces[4].mesh.geometry) === verts(exitOnly.geometry),
+  `${verts(slabRound.dst.pieces[4].mesh.geometry)} vs ${verts(exitOnly.geometry)}`);
+
+const tubeRound = saveLoad(tb);
+check("reloaded 5-tube: middles drop both rings",
+  [1, 2, 3].every((i) => verts(tubeRound.dst.pieces[i].mesh.geometry) === tubeNoneN),
+  `mid ${[1, 2, 3].map((i) => verts(tubeRound.dst.pieces[i].mesh.geometry)).join("/")} vs ${tubeNoneN}`);
+check("reloaded 5-tube: first keeps the entry ring",
+  verts(tubeRound.dst.pieces[0].mesh.geometry) === tubeOneN);
+check("reloaded 5-tube: last keeps the exit ring",
+  verts(tubeRound.dst.pieces[4].mesh.geometry) === tubeOneN);
 
 if (fail) {
   console.log(`\n${fail} failed`);

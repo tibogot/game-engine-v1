@@ -142,6 +142,15 @@ function pieceEndLean(id, pp, end) {
   return def.roll(end === "exit" ? 1 : 0, pp);
 }
 
+/** Raised kerb on this mouth — `edges` on and the piece actually sweeps one.
+ *  A platform / plate (`noKerb`) or Edges-Off piece is a flat cut. */
+function pieceHasRaisedKerbs(p, rp = roadParams) {
+  if (!p || p.edges === false) return false;
+  const def = PIECE_BY_ID.get(p.id);
+  if (!def || def.noKerb) return false;
+  return (rp.railHeight ?? 0) > 1e-4;
+}
+
 /**
  * How near the cursor has to be to an open end, IN SCREEN PIXELS, for the next
  * piece to jump there (see `aimAtCursor`).
@@ -1517,8 +1526,10 @@ export class ModularRoadBuilder {
   }
 
   /**
-   * Neighbour fills this mouth: same (or wider) cut, AND the same curl and lean.
-   * Width alone treated a held-bank U as a nest against a flat straight.
+   * Neighbour fills this mouth: same (or wider) cut, same curl and lean, and
+   * the raised kerb if this mouth has one. Width alone treated a held-bank U
+   * as a nest against a flat straight; a platform (or Edges-Off) plate is
+   * wider and flat but does not plug the kerb cavities.
    */
   _neighborFillsEnd(self, selfEnd, neighbor, neighborEnd) {
     if (!self || !neighbor || !pieceTakesSlabCaps(neighbor.id)) return false;
@@ -1529,6 +1540,7 @@ export class ModularRoadBuilder {
       - pieceEndCurlM(self.id, self.pp, sEnd)) > SLAB_CURL_EPS) return false;
     if (Math.abs(pieceEndLean(neighbor.id, neighbor.pp, nEnd)
       - pieceEndLean(self.id, self.pp, sEnd)) > SLAB_LEAN_EPS) return false;
+    if (pieceHasRaisedKerbs(self) && !pieceHasRaisedKerbs(neighbor)) return false;
     return true;
   }
 
@@ -1628,6 +1640,7 @@ export class ModularRoadBuilder {
         id,
         pp: this.activeParams,
         hw: pieceHalfWidth(id, this.activeParams),
+        edges: guardrailParams.enabled,
       };
       if (this.ghostEnd === "head") {
         const host = run[0];
@@ -4245,8 +4258,6 @@ export class ModularRoadBuilder {
         : null;
       this.pieces.push(piece);
     }
-    this._rebuildInstances();
-    this._refreshBranchMarkers();
     // Reconstruct chains from the loaded pieces (anchor = first piece's entry).
     const seen = new Map();
     for (const p of this.pieces) {
@@ -4275,6 +4286,12 @@ export class ModularRoadBuilder {
     this.chains = seen.size ? [...seen.values()] : [{ id: 0, anchor: initialConnector() }];
     this.chainSeq = Math.max(-1, ...this.chains.map((c) => c.id)) + 1;
     this.activeChainId = this.chains[this.chains.length - 1].id;
+    // Caps are derived (occupancy + matching mouths), not stored in the file.
+    // _makePieceEntry built every piece unlidded (tubes: both rings). Without
+    // this remesh a reload looks hollow on free ends and double-lidded on
+    // tube joints. reuse is off: _builtFrom still says "no caps" for tubes
+    // whose mesh already has both rings, so a reuse walk would skip middles.
+    this.rebuildAll();
     this.freePlaceMode = true;
     const a = this.chains[this.chains.length - 1].anchor;
     this._freePos.setFromMatrixPosition(a);

@@ -1143,6 +1143,199 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Chip relief</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-chip" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-road-chip-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Chip size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-chipscale" min="4" max="40" step="1" />
+              <span class="prop-num" id="dv-road-chipscale-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Chip fade</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-chipfade" min="0.5" max="6" step="0.1" />
+              <span class="prop-num" id="dv-road-chipfade-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bump filter</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-bumpfilter" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-road-bumpfilter-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Tar snakes</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-crack" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-road-crack-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Crack spacing</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-crackscale" min="1" max="24" step="0.5" />
+              <span class="prop-num" id="dv-road-crackscale-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Crack width</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-crackwidth" min="0.005" max="0.15" step="0.005" />
+              <span class="prop-num" id="dv-road-crackwidth-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Crack break-up</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-crackbreak" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-road-crackbreak-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Crack gloss</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-crackgloss" min="0" max="0.8" step="0.02" />
+              <span class="prop-num" id="dv-road-crackgloss-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sealant colour</span>
+            <div class="prop-value"><input type="color" id="dv-road-crackcol" /></div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Old rubber</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-drift" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-road-drift-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rubber band width</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-driftw" min="0.05" max="1" step="0.02" />
+              <span class="prop-num" id="dv-road-driftw-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rubber toward outside</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-driftbias" min="-1" max="1" step="0.05" />
+              <span class="prop-num" id="dv-road-driftbias-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Corner sensitivity</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-driftref" min="0.005" max="0.15" step="0.005" />
+              <span class="prop-num" id="dv-road-driftref-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rubber streaks</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-driftlines" min="4" max="40" step="1" />
+              <span class="prop-num" id="dv-road-driftlines-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rubber wander</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-driftwander" min="0" max="6" step="0.1" />
+              <span class="prop-num" id="dv-road-driftwander-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rubber wander scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-driftwscale" min="0.001" max="0.06" step="0.001" />
+              <span class="prop-num" id="dv-road-driftwscale-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rubber gloss</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-driftgloss" min="0" max="0.6" step="0.02" />
+              <span class="prop-num" id="dv-road-driftgloss-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Anisotropy</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-aniso" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-road-aniso-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Aniso angle</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-anisoang" min="-90" max="90" step="5" />
+              <span class="prop-num" id="dv-road-anisoang-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Aniso in wheel paths</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-anisowheel" min="0" max="3" step="0.1" />
+              <span class="prop-num" id="dv-road-anisowheel-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Aniso killed by water</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-anisowet" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-road-anisowet-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Grit (close-up)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-grit" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-road-grit-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Line relief</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-linebump" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-road-linebump-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Line fill</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-linefill" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-road-linefill-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Line roughness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-linerough" min="0.05" max="1" step="0.02" />
+              <span class="prop-num" id="dv-road-linerough-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Line wetness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-linewet" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-road-linewet-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Line gloss (wet)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-linecoat" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-road-linecoat-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Streak sharpness</span>
             <div class="prop-value">
               <input type="range" id="dv-road-streak" min="0" max="1" step="0.05" />
@@ -1189,6 +1382,97 @@ export function createRoadDevPanel({ app, game, params }) {
             <br><br>
             <b>Bump</b> is a micro-normal from the same noise (no extra samples).
             Zero compiles it out. Small values — this is race asphalt, not gravel.
+            <br><br>
+            <b>Chip relief</b> is the octave you can actually SEE from the chase
+            camera. Measured: a pixel covers 7.9&nbsp;mm across the road under the
+            car and 27&nbsp;mm at 20&nbsp;m ahead, so the resolvable band runs
+            about 3–10&nbsp;cm. The old grit (1.8&nbsp;cm) is below it
+            <i>everywhere</i> — the eye has to get within 6.3&nbsp;m and the boom
+            is 8.2&nbsp;m, which is why it only ever showed in the labs — and the
+            aggregate (20&nbsp;cm) is above it. This fills the gap.
+            <b>Chip size</b> is cycles/metre across (16 ≈ 6&nbsp;cm, lower =
+            bigger stones) and <b>Chip fade</b> is how fast it dies with distance
+            (higher = sooner; raise it if the mid-distance crawls).
+            <br><br>
+            <b>Bump filter</b> spreads the three height taps to one pixel's width
+            instead of a fixed 4&nbsp;mm, so the normal measures the average slope
+            rather than point-sampling something finer than the pixel. It also
+            gets the anisotropy for free — at 20&nbsp;m the taps are 8.7× wider
+            along the road than across, so along-road relief decays on its own
+            while transverse screed lines survive. Set it to 0 for the old
+            fixed-spacing look. Note the 4&nbsp;mm floor only governs within
+            ~4&nbsp;m, so the labs look unchanged and the game deck does not.
+            <br><br>
+            <b>Old rubber</b> is track history — marks laid down <i>before</i> you
+            drove, not your own skids (those are a separate mesh). It is driven by
+            <code>aCurve</code>, the signed curvature baked into each piece, so it
+            concentrates in corners by itself and sits toward the corner's
+            <i>outside</i> where cars run wide. <b>You will not see any of it on a
+            straight</b> — the field is multiplied by curvature, so it is exactly
+            zero there. Build a curve to judge it.
+            <br><br>
+            <b>Corner sensitivity</b> is the curvature at which the marks reach
+            full strength, shown as the equivalent radius. <b>Rubber toward
+            outside</b> is signed: negative moves the band to the inside line.
+            <b>Rubber streaks</b> is how many parallel lines across the deck
+            (~a tyre apart at 20) and <b>wander</b> stops them looking machined.
+            <b>Rubber gloss</b> matters more than the darkness — rubber is
+            glossier than asphalt, and at a grazing angle that sheen is what
+            identifies it.
+            <br><br>
+            <b>Anisotropy</b> makes the deck rougher in one direction than the
+            other, which is what a road physically is — tyres polish the
+            aggregate along the direction of travel, the paver drags the mix the
+            same way. Until now only the <i>albedo</i> knew that; this is the
+            same claim reaching the specular lobe, where gloss is actually read.
+            The tangent frame is free: three derives it from UV derivatives, and
+            this deck's UV is already (metres along, metres across).
+            <br><br>
+            <b>Aniso angle</b> is a knob and not a constant because the two
+            defensible answers disagree. Tyre polish says the surface is
+            <i>smoother</i> along the road, putting the stretch across it (90°);
+            the look people mean by "wet road at night" is a smear running away
+            from you (0°). Much of that smear is really grazing-angle projection,
+            which you already get for free — so this decides what the material
+            adds on top. Sweep it and pick.
+            <br><br>
+            <b>Aniso in wheel paths</b> is the honest part: the two strips where
+            tyres run are the polished ones. <b>Aniso killed by water</b> relaxes
+            it toward isotropic as the film builds, since water fills the grooves.
+            Note this affects the base lobe, <i>not</i> the clearcoat — three's
+            coat is isotropic — so its reach is the dry and damp deck, not a
+            puddle mirror. Zero compiles the whole anisotropic BRDF out; crossing
+            0 rebuilds the material.
+            <br><br>
+            <b>Grit (close-up)</b> is the 1.8&nbsp;cm octave, and it ships
+            <b>off</b> — not as a quality cut. It is faded to exactly zero on
+            every pixel this camera can see (the eye must get within
+            6.3&nbsp;m; the boom is 8.2&nbsp;m), so it was three noise
+            evaluations per fragment returning a certain zero. The labs keep it,
+            because their cameras are inside that range. Turn it on here if you
+            add a bonnet or photo camera. Crossing 0 rebuilds the material.
+            <br><br>
+            Together with retiring the macro swell — 0.060° of normal tilt for a
+            three-octave fractal per tap — the bump normal went from
+            <b>18 noise evaluations per fragment to 6</b>.
+            <code>node tools/roadBumpVisibilityTest.mjs</code> prints the whole
+            table and the per-octave cost — run it before changing any of these
+            scales.
+            <br><br>
+            <b>The paint is its own material</b> (needs <b>Road lines</b> on).
+            Marking is a thermoplastic band laid <i>on</i> the asphalt, so it
+            gets its own everything: <b>Line fill</b> is how far it smooths the
+            aggregate underneath (this is the half that stops a line reading as
+            chalk), <b>Line relief</b> lifts it a couple of millimetres proud so
+            the lip catches a low sun, and <b>Line roughness</b> is its dry
+            gloss. Both relief knobs at 0 compiles the paint out of the bump.
+            <br><br>
+            <b>Line wetness</b> is low on purpose — paint is non-porous, so it
+            barely darkens in the rain while the asphalt drops to about half.
+            That contrast is why markings pop in the wet; push it to 1 and you
+            delete the effect. <b>Line gloss (wet)</b> is the other side of the
+            same coin: water sits <i>on</i> paint instead of soaking in, so a
+            wet line is the most mirror-like thing on the road.
             <b>Streak sharpness</b> is off by default (the original meandering
             grain). Turn it up only if you want hard paver lines.
             <b>Paver joints</b> are grooves every N metres (0 = off). Leave them
@@ -1365,6 +1649,20 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-wet-puddle" min="0" max="1" step="0.01" />
               <span class="prop-num" id="dv-wet-puddle-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Waterline</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wet-waterline" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-wet-waterline-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Waterline tightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wet-waterlinew" min="1" max="5" step="0.1" />
+              <span class="prop-num" id="dv-wet-waterlinew-v"></span>
             </div>
           </div>
           <div class="prop-row">
@@ -2443,13 +2741,95 @@ export function createRoadDevPanel({ app, game, params }) {
     slider("dv-road-rvary", ru.roughVary, "value", (v) => v.toFixed(2));
     slider("dv-road-polish", ru.wheelPolish, "value", (v) => v.toFixed(2));
     slider("dv-road-wdark", ru.wheelDarken, "value", (v) => v.toFixed(2));
+    // The paint's SHADING half — plain look uniforms, so they poke live and ride
+    // ROAD_LOOK into the track save. Its RELIEF half is on the surface below.
+    slider("dv-road-linerough", ru.lineRough, "value", (v) => v.toFixed(2));
+    slider("dv-road-linewet", ru.lineWet, "value", (v) => v.toFixed(2));
+    slider("dv-road-linecoat", ru.lineCoat, "value", (v) => `${v.toFixed(2)}×`);
+    // Tar snakes. Plain uniforms — no build gate, because the whole field is a
+    // fract/abs/smoothstep on `surface.x`, which the deck has already computed.
+    // See the note on crackAmount: there is no noise here to compile out.
+    slider("dv-road-crack", ru.crackAmount, "value", (v) => (v === 0 ? "off" : v.toFixed(2)));
+    slider("dv-road-crackscale", ru.crackScale, "value", (v) => v.toFixed(1));
+    slider("dv-road-crackwidth", ru.crackWidth, "value", (v) => v.toFixed(3));
+    slider("dv-road-crackbreak", ru.crackBreak, "value", (v) => (v === 0 ? "continuous" : v.toFixed(2)));
+    slider("dv-road-crackgloss", ru.crackGloss, "value", (v) => v.toFixed(2));
+    colorUniform("dv-road-crackcol", ru.crackColor);
+    // HISTORICAL RUBBER — the marks that were already on the track before you
+    // drove it. These uniforms have existed and shipped ON (driftAmount 1.4)
+    // since the field was written; nothing had ever exposed them, so they were
+    // tunable in a look file and untunable in the game.
+    slider("dv-road-drift", ru.driftAmount, "value", (v) => (v === 0 ? "clean track" : v.toFixed(2)));
+    slider("dv-road-driftw", ru.driftWidth, "value", (v) => v.toFixed(2));
+    slider("dv-road-driftbias", ru.driftBias, "value", (v) => v.toFixed(2));
+    slider("dv-road-driftref", ru.driftCurveRef, "value",
+      (v) => `${v.toFixed(3)} · R${(1 / Math.max(v, 1e-4)).toFixed(0)}m`);
+    slider("dv-road-driftlines", ru.driftLines, "value", (v) => v.toFixed(0));
+    slider("dv-road-driftwander", ru.driftWander, "value", (v) => v.toFixed(1));
+    // Wavelength of the sideways drift, shown as the period in metres — the
+    // number that decides "driven line" vs "slalom". Low = long, straight runs.
+    slider("dv-road-driftwscale", ru.driftWanderScale, "value",
+      (v) => `${(1 / Math.max(v, 1e-4)).toFixed(0)} m`);
+    slider("dv-road-driftgloss", ru.driftGloss, "value", (v) => v.toFixed(2));
   }
   const surface = {
     bump: game.getBump?.() ?? 0.05,
     streak: game.getStreakSharp?.() ?? 0,
     joints: game.getJointSpacing?.() ?? 12,
+    // The chip octave and the tap filter are plain uniforms — no build gate to
+    // cross — so they go through the generic accessor rather than earning four
+    // more named setters. They still land in `surfaceLook`, so they save.
+    chip: game.getSurface?.("bumpChip") ?? 0.7,
+    chipScale: game.getSurface?.("bumpChipScale") ?? 16,
+    chipFade: game.getSurface?.("bumpChipFade") ?? 2.0,
+    bumpFilter: game.getSurface?.("bumpFilter") ?? 1,
+    lineBump: game.getSurface?.("lineBump") ?? 0.4,
+    lineFill: game.getSurface?.("lineFill") ?? 0.85,
+    grit: game.getSurface?.("bumpGrit") ?? 0,
   };
   slider("dv-road-bump", surface, "bump", (v) => v.toFixed(3), (v) => game.setBump?.(v));
+  slider("dv-road-chip", surface, "chip", (v) => v.toFixed(2), (v) => game.setSurface?.("bumpChip", v));
+  slider("dv-road-chipscale", surface, "chipScale",
+    (v) => `${v.toFixed(0)}/m · ${(100 / v).toFixed(0)} cm`,
+    (v) => game.setSurface?.("bumpChipScale", v));
+  slider("dv-road-chipfade", surface, "chipFade", (v) => v.toFixed(1), (v) => game.setSurface?.("bumpChipFade", v));
+  slider("dv-road-bumpfilter", surface, "bumpFilter",
+    (v) => (v === 0 ? "fixed 4 mm" : v.toFixed(2)),
+    (v) => game.setSurface?.("bumpFilter", v));
+  // Crossing 0 on either of these is a material REBUILD, not a poke — the paint
+  // mask is compiled into the height taps or it is not. setSurface handles that.
+  slider("dv-road-linebump", surface, "lineBump",
+    (v) => (v === 0 ? "flat" : v.toFixed(2)),
+    (v) => game.setSurface?.("lineBump", v));
+  slider("dv-road-linefill", surface, "lineFill",
+    (v) => (v === 0 ? "off" : v.toFixed(2)),
+    (v) => game.setSurface?.("lineFill", v));
+  // Ships OFF: the chase camera fades this octave to zero on every pixel, so in
+  // game it was three noise evaluations per fragment returning a certain zero.
+  slider("dv-road-grit", surface, "grit",
+    (v) => (v === 0 ? "off (unseen)" : v.toFixed(2)),
+    (v) => game.setSurface?.("bumpGrit", v));
+
+  // ── ANISOTROPIC SPECULAR ────────────────────────────────────────────────
+  // `anisotropy` crossing 0 REBUILDS the material (three swaps in the
+  // anisotropic BRDF the moment the node exists), so it goes through setLook
+  // rather than poking the uniform. The other three are plain pokes.
+  const aniso = {
+    on: game.getLook?.("anisotropy") ?? 0,
+    angle: game.getLook?.("anisotropyAngle") ?? 0,
+    wheel: game.getLook?.("anisoWheel") ?? 0.6,
+    wet: game.getLook?.("anisoWet") ?? 0.7,
+  };
+  slider("dv-road-aniso", aniso, "on",
+    (v) => (v === 0 ? "off" : v.toFixed(2)),
+    (v) => game.setLook?.("anisotropy", v));
+  slider("dv-road-anisoang", aniso, "angle",
+    (v) => (v === 0 ? "0° along road" : (Math.abs(v) === 90 ? "90° across" : `${v.toFixed(0)}°`)),
+    (v) => game.setLook?.("anisotropyAngle", v));
+  slider("dv-road-anisowheel", aniso, "wheel", (v) => `+${(v * 100).toFixed(0)}%`,
+    (v) => game.setLook?.("anisoWheel", v));
+  slider("dv-road-anisowet", aniso, "wet", (v) => v.toFixed(2),
+    (v) => game.setLook?.("anisoWet", v));
   slider("dv-road-streak", surface, "streak", (v) => v.toFixed(2), (v) => game.setStreakSharp?.(v));
   slider("dv-road-joints", surface, "joints", (v) => v === 0 ? "off" : `${v.toFixed(0)} m`, (v) => game.setJointSpacing?.(v));
   toggle("dv-road-front", game.getRoadFrontSide?.() ?? true, (on) => game.setRoadFrontSide?.(on));
@@ -2505,6 +2885,15 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-wet", weather, "wet", (v) => v.toFixed(2), (v) => game.setWet?.(v));
   slider("dv-wet-puddle", weather, "puddles", (v) => v.toFixed(2), (v) => game.setPuddles?.(v));
   slider("dv-wet-wheel", weather, "dryLine", (v) => v.toFixed(2), (v) => game.setWheelClear?.(v));
+  // The dark rim at a puddle's edge — what gives standing water depth instead of
+  // reading as a patch of gloss. Plain look uniforms, so they poke live.
+  {
+    const ru = game.roadMaterial?._roadUniforms;
+    if (ru?.waterlineDark) {
+      slider("dv-wet-waterline", ru.waterlineDark, "value", (v) => (v === 0 ? "off" : v.toFixed(2)));
+      slider("dv-wet-waterlinew", ru.waterlineSharp, "value", (v) => v.toFixed(1));
+    }
+  }
   toggle("dv-reflect", true, (on) => game.setReflection?.(on));
   // SEEDED FROM THE GAME, not from a literal. It was hard-coded `false` while
   // roadGame defaults it on, so the box read unchecked with the reflection

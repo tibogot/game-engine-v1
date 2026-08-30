@@ -112,6 +112,129 @@ console.log("\n=== B WITH THE BUMP ON ===");
     && b._surfaceV2Uniforms.jointSpacing.value === 12);
 }
 
+/* ── THE PAINT IS ITS OWN MATERIAL ─────────────────────────────────────────
+ *
+ * Road marking is a thermoplastic band laid ON the asphalt: it fills the pores
+ * under it, sits proud of them, is smoother than what it covers, and — because
+ * it is non-porous — barely darkens in the rain while the deck halves. Before
+ * this it was albedo and nothing else, so a line wore the deck's full aggregate
+ * relief and roughness and read as chalk.
+ *
+ * The load-bearing structural claim is that the RELIEF and the ALBEDO ask the
+ * SAME function where the paint is. A second copy of that mask in the bump path
+ * would drift the moment anyone touched `edgeWidth` or the dash phase, and the
+ * symptom — a raised lip a few centimetres beside the white — is exactly the
+ * kind of thing nobody attributes to a duplicated expression. */
+console.log("\n=== THE PAINT AS A MATERIAL ===");
+{
+  const src = readFileSync(join(GAME, "modularRoadMaterial.js"), "utf8");
+  const v2src = readFileSync(join(GAME, "modularRoadSurfaceV2.js"), "utf8");
+
+  check("the mask is a function of its inputs, not a bound node",
+    /export function lineCoverageAt\s*\(/.test(src));
+  check("the material's own lineAmt goes through it",
+    /const lineAmt = Fn\(\(\) => lineCoverageAt\(/.test(src));
+  check("the bump path imports it rather than copying it",
+    /import \{[^}]*lineCoverageAt[^}]*\} from ".\/modularRoadMaterial.js"/.test(v2src));
+  check("...and there is no second edge-mask expression in the bump path",
+    !/u\.edgeWidth|edgePos/.test(v2src),
+    "the V2 file must never name the line uniforms directly — it calls the mask");
+
+  const b = createRoadSurfaceV2({ ...BASE, bumpAmount: 0.12 });
+  check("the base material exposes the line node", !!b._lineNode,
+    "needed to suppress asphalt relief under the paint");
+  check("paint relief ships on", b._surfaceV2PaintOn === true);
+
+  // The build gate has to be REGISTERED, or the sliders appear dead until some
+  // unrelated edit happens to rebuild the material. That is the worst class of
+  // bug to notice, so it gets its own check.
+  // NOTE the full look each time: surfaceV2NeedsRebuild compares the material
+  // against a COMPLETE intended state, so an omitted key reads as its default
+  // (bumpAmount 0) and correctly demands a rebuild. Passing a partial here is a
+  // test bug, not a code one — it cost a red line to rediscover.
+  const on = { ...SURFACE_V2_DEFAULTS, bumpAmount: 0.12 };
+  check("turning both relief knobs off needs a rebuild",
+    surfaceV2NeedsRebuild(b, { ...on, lineBump: 0, lineFill: 0 }) === true);
+  check("changing relief within on does not",
+    surfaceV2NeedsRebuild(b, { ...on, lineBump: 0.8 }) === false);
+  const flat = createRoadSurfaceV2({ ...BASE, bumpAmount: 0.12, lineBump: 0, lineFill: 0 });
+  check("...and the gate records itself the other way", flat._surfaceV2PaintOn === false);
+  check("a gated-off paint still compiles a normal", flat.normalNode != null,
+    "the asphalt bump is independent of the paint relief");
+
+  // The shading half lives on the base material and must ride the saved look.
+  for (const k of ["lineRough", "lineWet", "lineCoat", "lineCoatRough"]) {
+    check(`${k} is a look uniform`, ROAD_LOOK_KEYS.includes(k) && !!b._roadUniforms[k]);
+  }
+  // The physical claim behind lineWet: paint darkens LESS than asphalt. If a
+  // future tune inverts that, the wet-road effect quietly reverses.
+  check("paint takes less wet darkening than the deck",
+    b._roadUniforms.lineWet.value < 1,
+    `${b._roadUniforms.lineWet.value} — a non-porous surface has few pores to fill`);
+  check("...and more coat than the deck",
+    b._roadUniforms.lineCoat.value > 1,
+    `${b._roadUniforms.lineCoat.value}× — water sits on top rather than soaking in`);
+  check("...at a lower coat roughness",
+    b._roadUniforms.lineCoatRough.value < 1,
+    `${b._roadUniforms.lineCoatRough.value}× — a film over flat paint beats one over chips`);
+  check("paint is smoother than asphalt when dry",
+    b._roadUniforms.lineRough.value < b._roadUniforms.deckRough.value,
+    `${b._roadUniforms.lineRough.value} vs ${b._roadUniforms.deckRough.value}`);
+}
+
+/* ── ANISOTROPIC SPECULAR ──────────────────────────────────────────────────
+ *
+ * A road is directionally polished — tyres drag along the direction of travel —
+ * and until now only the ALBEDO knew that. This is the same claim reaching the
+ * specular lobe.
+ *
+ * THE TRAP, and the reason this section exists: `anisotropyNode` and the
+ * `useAnisotropy` getter that reads it are declared on MeshPhysicalNodeMaterial
+ * ONLY. Assign the node to a MeshStandardNodeMaterial and it sticks silently —
+ * the property is there, nothing reads it, the slider moves and the deck does
+ * not change. So the checks below ask THREE whether the lighting model actually
+ * changed, rather than trusting that the assignment landed.
+ *
+ * The knock-on is the second half: two features now pick the Physical class, so
+ * the class can no longer tell you WHICH is on. roadGame used to sniff
+ * `isMeshPhysicalNodeMaterial` to mean "wet"; with a dry anisotropic road that
+ * reads wet, disagrees with the intent forever, and rebuilds the material — and
+ * re-merges the whole drive-mode track — on every check. Hence the flags. */
+console.log("\n=== ANISOTROPIC SPECULAR ===");
+{
+  const dry = createRoadSurfaceV2({ ...BASE });
+  check("off by default", dry.anisotropyNode == null);
+  check("...and still Standard when off", dry.constructor.name === "MeshStandardNodeMaterial",
+    "off must cost nothing — no anisotropic BRDF, no bent normal");
+
+  const aniso = createRoadSurfaceV2({ ...BASE, anisotropy: 0.6 });
+  check("on builds the node", aniso.anisotropyNode != null);
+  check("on forces the Physical class",
+    aniso.constructor.name === "MeshPhysicalNodeMaterial",
+    "anisotropyNode is a Physical-only property — on Standard it is ignored silently");
+  check("three's lighting model actually switches", aniso.useAnisotropy === true,
+    `useAnisotropy=${aniso.useAnisotropy} — this is the check that catches a no-op`);
+  check("a dry anisotropic road has no clearcoat", aniso.clearcoatNode == null,
+    "Physical for the BRDF, not for the coat");
+
+  // The flags that replaced the class sniff.
+  check("the material states whether it is wet", aniso._roadWet === false);
+  check("...and whether it is anisotropic", aniso._roadAniso === true);
+  const wet = createRoadSurfaceV2({ ...BASE, wet: true });
+  check("a wet road reports wet", wet._roadWet === true && wet._roadAniso === false);
+  check("...and both together report both", (() => {
+    const both = createRoadSurfaceV2({ ...BASE, wet: true, anisotropy: 0.4 });
+    return both._roadWet === true && both._roadAniso === true;
+  })());
+  check("the class alone can no longer answer either question",
+    wet.constructor.name === aniso.constructor.name,
+    "wet and dry-anisotropic are both Physical — which is exactly why the flags exist");
+
+  for (const k of ["anisotropy", "anisotropyAngle", "anisoWheel", "anisoWet"]) {
+    check(`${k} is a look uniform`, ROAD_LOOK_KEYS.includes(k) && !!aniso._roadUniforms[k]);
+  }
+}
+
 console.log("\n=== THE SURFACE INJECTION ===");
 {
   // A's default surface must be untouched when nothing is injected.

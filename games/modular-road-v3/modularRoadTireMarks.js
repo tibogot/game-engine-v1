@@ -1,7 +1,40 @@
 import * as THREE from "three";
+import { Fn, uniform, attribute, mix, texture, float } from "three/tsl";
 // Marks are sized from the fitted wheel (see MARK_WIDTH_FRAC). No import cycle:
 // the vehicle module knows nothing about tyre marks.
 import { WHEEL } from "../../v3/play/modularRoadVehicle.js";
+
+function lin(hex) {
+  return new THREE.Color(hex).convertSRGBToLinear();
+}
+
+/**
+ * WHAT A TYRE LEAVES ON A WET ROAD IS A LIGHT LINE, NOT A DARK ONE.
+ *
+ * This was backwards, and it is the sort of thing that reads as "wrong" long
+ * before anyone can say why. A tyre on standing water SQUEEGEES it: the contact
+ * patch pushes the film aside and briefly exposes asphalt that is darker than
+ * dry road but much lighter than the soaked, mirror-flat surface around it. So
+ * a wet skid is a *clearing*. Drawing the dry road's near-black rubber ribbon
+ * over a wet deck gets the sign of the effect exactly wrong.
+ *
+ * Both marks materials now take their colour from these rather than from the
+ * texture, which costs nothing: the skid PNG is PURE BLACK with all of its
+ * detail in the alpha channel, so its RGB never carried information — tinting
+ * it could only ever produce black, which is why this could not be fixed by
+ * setting `color`. Using the map for alpha alone and supplying the colour makes
+ * the wet case expressible and leaves the dry case pixel-identical.
+ */
+const MARK_LOOK = {
+  /** Dry: rubber laid on asphalt. The original flat-ribbon colour. */
+  rubber: 0x111111,
+  /** Wet: asphalt with the water pushed off it. Not dry-road bright — the road
+   *  is still damp under the tyre, just no longer carrying a film. */
+  cleared: 0x8a919a,
+  /** How strongly a cleared line shows, relative to a rubber mark. Lower: a
+   *  squeegeed strip is a subtle tonal break, not a black stripe. */
+  clearedAlpha: 0.55,
+};
 
 /**
  * Rear-wheel skid ribbons for modular-road test drive.
@@ -106,16 +139,27 @@ export class ModularRoadTireMarks {
 
     geometry.setDrawRange(0, 0);
 
-    const material = new THREE.MeshBasicMaterial({
-      color: 0x111111,
+    /**
+     * Shared by BOTH mark materials, so one call to `setWetness` moves the
+     * solid ribbon and the textured one together and they can never disagree
+     * about the weather.
+     */
+    this.markUniforms = {
+      wetness: uniform(0),
+      rubber: uniform(lin(MARK_LOOK.rubber)),
+      cleared: uniform(lin(MARK_LOOK.cleared)),
+      clearedAlpha: uniform(MARK_LOOK.clearedAlpha),
+    };
+
+    const material = new THREE.MeshBasicNodeMaterial({
       transparent: true,
-      vertexColors: true,
       depthWrite: false,
       side: THREE.DoubleSide,
       polygonOffset: true,
       polygonOffsetFactor: -4,
       polygonOffsetUnits: -4,
     });
+    this._applyMarkNodes(material, null);
 
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.frustumCulled = false;
@@ -148,6 +192,45 @@ export class ModularRoadTireMarks {
   }
 
   /**
+   * Colour and opacity for a marks material, wet-aware.
+   *
+   * `vertexColors: true` is gone on purpose. The geometry's colour attribute is
+   * vec4 with rgb pinned to 1 and the FADE carried in alpha — the rgb was never
+   * doing anything — so reading `.a` explicitly says what is actually happening
+   * and frees the colour to come from a uniform. The ring buffer, the fade and
+   * every write into that attribute are untouched.
+   *
+   * @param {THREE.NodeMaterial} mat
+   * @param {THREE.Texture|null} tex  skid map; only its ALPHA is used (the PNG
+   *   is pure black, so its rgb never carried anything)
+   */
+  _applyMarkNodes(mat, tex) {
+    const u = this.markUniforms;
+    const vAlpha = attribute("color", "vec4").w;
+    mat.colorNode = mix(u.rubber, u.cleared, u.wetness);
+    const texA = tex ? texture(tex).a : null;
+    mat.opacityNode = Fn(() => {
+      const base = texA ? vAlpha.mul(texA) : vAlpha;
+      // A squeegeed line is a subtler mark than laid rubber — see clearedAlpha.
+      return base.mul(mix(float(1), u.clearedAlpha, u.wetness));
+    })();
+    // Same convention as the road material's `_roadUniforms`: the bag is
+    // reachable from the material so a panel or a console can poke the look
+    // without going through the owning class.
+    mat._markUniforms = u;
+    mat.needsUpdate = true;
+  }
+
+  /**
+   * How wet the road is, 0..1 — drives marks from "rubber laid down" to "water
+   * pushed aside". Called by the game whenever the weather moves; see the note
+   * on MARK_LOOK for why the sign of this matters so much.
+   */
+  setWetness(v) {
+    this.markUniforms.wetness.value = Math.max(0, Math.min(1, v || 0));
+  }
+
+  /**
    * Swap the look: "solid" (flat dark ribbon) or "textured" (skid_mark01.png).
    * Geometry is shared, so this is a material swap and nothing more — the solid
    * ribbon is always available as a fallback if the texture doesn't convince.
@@ -160,19 +243,22 @@ export class ModularRoadTireMarks {
       return want;
     }
     if (!this._texturedMaterial) {
-      this._texturedMaterial = new THREE.MeshBasicMaterial({
-        // The PNG is pure black with all its detail in ALPHA, so the tint stays
-        // white and the texture carries the look. Vertex alpha still fades the
-        // ribbon in/out with drift intensity, multiplying the texture's own.
-        color: 0xffffff,
+      this._texturedMaterial = new THREE.MeshBasicNodeMaterial({
+        // The PNG is pure black with all its detail in ALPHA, so it is used as
+        // a MASK and the colour comes from the uniforms — which is what makes a
+        // wet mark expressible at all. A tint could never lift pure black, so
+        // the old `color: 0xffffff` × black map was locked to a dark ribbon
+        // whatever the weather did.
         transparent: true,
-        vertexColors: true,
         depthWrite: false,
         side: THREE.DoubleSide,
         polygonOffset: true,
         polygonOffsetFactor: -4,
         polygonOffsetUnits: -4,
       });
+      // Until the PNG arrives the mask is just the vertex fade, so the marks
+      // are a plain ribbon for a frame or two rather than invisible.
+      this._applyMarkNodes(this._texturedMaterial, null);
       new THREE.TextureLoader().load(
         SKID_TEXTURE_URL,
         (tex) => {
@@ -186,8 +272,11 @@ export class ModularRoadTireMarks {
           tex.colorSpace = THREE.SRGBColorSpace;
           tex.anisotropy = 8; // marks are viewed at a very grazing angle
           this._skidTexture = tex;
-          this._texturedMaterial.map = tex;
-          this._texturedMaterial.needsUpdate = true;
+          // Rebuild the graph now the mask exists. `map` is deliberately NOT
+          // set: a NodeMaterial's colorNode replaces the whole diffuse path,
+          // so a map assigned alongside it is simply never read — which would
+          // look exactly like the texture failing to load.
+          this._applyMarkNodes(this._texturedMaterial, tex);
         },
         undefined,
         (err) => {

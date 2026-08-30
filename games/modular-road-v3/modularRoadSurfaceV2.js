@@ -34,6 +34,7 @@ import {
   fract,
   smoothstep,
   max,
+  min,
   fwidth,
   attribute,
   uv,
@@ -44,7 +45,7 @@ import {
   mx_worley_noise_float,
   mx_cell_noise_float,
 } from "three/tsl";
-import { createRoadMaterial } from "./modularRoadMaterial.js";
+import { createRoadMaterial, lineCoverageAt } from "./modularRoadMaterial.js";
 
 /**
  * Authored defaults for everything V2 adds on top of ROAD_LOOK.
@@ -227,11 +228,169 @@ export const SURFACE_V2_DEFAULTS = {
   /** How much of the height comes from the aggregate speckle (surface.y).
    *  This is the term the sun rakes across; it is the effect. */
   bumpAgg: 1.0,
-  /** ...and from the macro drift (surface.x). Long, low swells — paver strips
-   *  and old repairs sitting slightly proud. Subtle by construction: at
-   *  macroScale 0.06 × streak this is a metres-long feature, so it reads as the
-   *  road being slightly unfair rather than as texture. */
-  bumpMacro: 0.35,
+  /**
+   * Amplitude of the GRIT octave in the normal — its own knob now, where it
+   * used to ride `bumpAgg`. Split off because it needed to be switchable
+   * independently, and sharing an amplitude with a layer 30x its size hid that.
+   *
+   * ZERO IN THE GAME (see SURFACE_V2_GAME), non-zero here so the labs keep it.
+   * Not a taste call: at gritScale 55 the octave is faded to exactly 0 on every
+   * pixel the chase camera can see — the eye has to be within 6.3 m of the deck
+   * and the boom is 8.2 m — so in game it was 3 of the normal's 18 noise
+   * evaluations returning a guaranteed zero. Close cameras (the piece lab, the
+   * surface lab, a bonnet or photo camera) are inside that range and do see it,
+   * which is exactly why it is a knob and not a deletion.
+   *
+   * IF YOU ADD A BONNET OR PHOTO CAMERA TO road.html, turn this back on — the
+   * fade will do the right thing from there, and the harness will tell you the
+   * range it is worth.
+   */
+  bumpGrit: 1.0,
+  /**
+   * ...and from the macro drift (surface.x). Long, low swells — paver strips
+   * and old repairs sitting slightly proud.
+   *
+   * RETIRED TO 0, and the measurement is why. "Subtle by construction" (what
+   * this comment used to say) turned out to mean invisible: at macroScale 0.06
+   * the period is 16.7 m, so at amplitude 0.35 the slope is 0.021/m against the
+   * chip octave's 11.2/m. Run through the same bumpAmount and fade, that is a
+   * shading-normal tilt of 0.060 DEGREES — 406x weaker than the chip, and about
+   * a twentieth of a shading step at 8-bit.
+   *
+   * It is not free, though, and that is the point. It is a THREE-OCTAVE fractal
+   * evaluated once per height tap, so it was 9 of the 18 noise evaluations the
+   * normal cost — half the bump's entire budget — to move the normal by six
+   * hundredths of a degree. Gated at build time (see createRoadSurfaceV2), so
+   * at 0 the fractal is not in the compiled shader rather than multiplied away.
+   *
+   * Turn it back up only if you want genuinely visible long swells, and expect
+   * to need a value in the several-units range before anything shows. Measured
+   * by tools/roadBumpVisibilityTest.mjs, which still prints what it would be
+   * worth so this decision stays re-checkable.
+   */
+  bumpMacro: 0,
+  /**
+   * ── THE MID OCTAVE, and the reason the bump was invisible in game ────────
+   *
+   * MEASURED, by tools/roadBumpVisibilityTest.mjs — which prints the whole
+   * table and is the thing to re-run before touching any scale here. At FOV 60
+   * over 1080 px the per-pixel angle is 9.7e-4 rad, and the chase boom is 3.2 m
+   * up / 7.5 m back (chaseCamera.js CHASE_CAM), so the nearest deck fragment on
+   * screen is 8.2 m away. Its footprint there is 7.9 mm ACROSS the road and
+   * 20.1 mm ALONG it — pixels are 2.5x longer along the road, because that is
+   * the grazing axis, and by 20 m ahead that ratio is 8.7x. So the finest relief
+   * the game camera can resolve is roughly 3 cm at the very nearest point and
+   * ~10 cm by the middle distance.
+   *
+   * The two octaves that existed sit either side of that band and neither is in
+   * it: `gritScale` 55 is 1.8 cm — three times too fine, and correctly faded to
+   * zero EVERYWHERE on screen (the eye has to be within 6.3 m of the deck for
+   * it to survive, and the boom is 8.2 m, which is why it only ever showed in
+   * the labs) — while `aggScale` 5 is 20 cm across and, stretched by `streak`,
+   * 2.8 m along, so it is a long smooth swell that reads as tonal variation
+   * rather than as texture.
+   *
+   * That gap is the whole bug. It is not a strength setting and not a fade
+   * rate: there was simply no relief authored at the scale the player's camera
+   * can actually see. This octave fills it.
+   *
+   * Amplitude weight of that layer, relative to the aggregate.
+   */
+  bumpChip: 0.7,
+  /** Cycles per metre ACROSS the road. 16 => ~6 cm, mid-band by construction. */
+  bumpChipScale: 16,
+  /**
+   * How many times longer a chip is along the road than across it. Mild — a
+   * stone polished directionally by tyres, not a 14:1 smear like `streak`.
+   * Keeping it low is what puts variation on the ACROSS axis, which is the
+   * well-sampled one and therefore the one that survives into the distance.
+   */
+  bumpChipStretch: 3.0,
+  /**
+   * Fade rate for that octave, in the same units as `gritFade`.
+   *
+   * BELOW NYQUIST ON PURPOSE, which the older octaves could not afford. A rate
+   * of 2.0 IS Nyquist — the octave dies exactly where a pixel spans half its
+   * period — and that is the right rule when the taps point-sample, because
+   * past that point the "slope" is aliasing. With `bumpFilter` on, the taps
+   * span a pixel and the difference is a real average: at 20 m the across tap
+   * is ~27 mm against a ~62 mm chip, still better than two samples per cycle.
+   * So the fade can run past Nyquist and degrade gently instead of cutting out.
+   *
+   * 1.5 keeps the relief readable to ~20 m and gone by ~35 m, which is the band
+   * a driver actually reads the surface from. Measured, with the table, by
+   * tools/roadBumpVisibilityTest.mjs — raise it if the mid-distance crawls.
+   */
+  bumpChipFade: 1.5,
+  /**
+   * HOW FAR THE THREE HEIGHT TAPS SPREAD as the pixel footprint grows.
+   * 0 = the old fixed 4 mm spacing. 1 = the taps track the footprint exactly.
+   *
+   * This is the filtering fix, and it replaces a fade rather than adding one.
+   * A fixed 4 mm epsilon point-samples the height field; once a pixel covers
+   * 33 mm that is sampling something eight times finer than the pixel, so the
+   * "slope" it returns is aliasing, not slope — which is exactly why it then
+   * had to be faded away to stop the deck glittering. Spreading the taps to one
+   * pixel's width instead makes the finite difference measure the AVERAGE slope
+   * the pixel actually sees, which is what a mip level would give you.
+   *
+   * It buys the anisotropy for free, and that is the part worth noticing. The
+   * two taps are spread independently, so 20 m down a straight the along-road
+   * tap spans 232 mm while the across-road tap spans 27 mm — 8.7:1. The
+   * along-road slope therefore decays on its own (a secant over many cycles of
+   * noise goes as 1/eps) while transverse relief survives. Screed lines running
+   * down the road are exactly what you want left at distance, and they now fall
+   * out of the sampling rather than out of a second per-axis fade.
+   *
+   * THE 4 mm FLOOR IS A FLOOR, NOT A PROMISE OF IDENTITY, and it is worth being
+   * exact about who still gets the old behaviour. The floor wins only where a
+   * pixel covers less than 4 mm of deck, i.e. with the eye within ~4 m — the
+   * piece lab, the surface lab, a bonnet camera. The chase camera's nearest
+   * fragment is 7.9 mm/px, so it is filtered too, and it SHOULD be: that is
+   * precisely the range where a 4 mm tap was reading a field finer than the
+   * pixel. Expect the game deck to look different from the old build at every
+   * distance; expect the labs to look unchanged.
+   *
+   * Never narrows below the floor, so the filter cannot sharpen anything into
+   * aliasing — it only ever widens.
+   */
+  bumpFilter: 1,
+  // ── THE PAINT'S OWN RELIEF ───────────────────────────────────────────────
+  //
+  // Separate from `bumpAmount` on purpose, and this is the knob that was asked
+  // for. Road marking is not asphalt with a different colour: it is a band of
+  // thermoplastic laid ON the asphalt, ~2-3 mm thick, which FILLS the aggregate
+  // under it and is smoother than what it covers. Driving its relief from the
+  // asphalt slider gave a white stripe wearing full chip relief, which reads as
+  // chalk dust or a bleached patch — never as something applied.
+  //
+  // The shading half of this (roughness, wet darkening, coat) lives on the base
+  // material as `lineRough` / `lineWet` / `lineCoat` / `lineCoatRough`; these
+  // two are the geometry half, because the normal is built here.
+  /**
+   * Height of the paint plateau, in the same units as the noise octaves above.
+   *
+   * What you actually SEE of this is the EDGE — a plateau has no slope in its
+   * middle, so the whole effect is the lip where paint meets asphalt catching a
+   * grazing sun. That lip is `edgeSoft`-ish wide (~3 cm), so the slope it makes
+   * is `lineBump / 0.03`: comparable to the chip octave at 0.4, which is what a
+   * 2-3 mm step should look like next to 6 cm stones.
+   *
+   * 0 = flat paint, i.e. the old behaviour with only the fill below.
+   */
+  lineBump: 0.4,
+  /**
+   * How thoroughly the paint SMOOTHS the asphalt under it, 0..1.
+   *
+   * This is the half that matters more, and it is the one a plateau alone does
+   * not give you: paint fills the pores, so the aggregate relief has to go away
+   * beneath it. Without this the line keeps every chip and grain of the deck
+   * and merely sits a little higher, which is not what paint does to a road.
+   *
+   * Not 1 — a thin band does still follow the substrate a little, and a
+   * perfectly flat line inside a rough deck reads as a decal.
+   */
+  lineFill: 0.85,
   /**
    * TRANSVERSE RESURFACING JOINTS, metres apart. 0 = none.
    *
@@ -277,16 +436,25 @@ export const SURFACE_V2_DEFAULTS = {
  * streakSharp stays 0. The lab candidate hardens the grain into drawn
  * paver lines (`streakStraight` 120); that is a different material from the
  * shipping deck, which is stretched noise that still meanders. The game
- * keeps A's albedo and only adds the bump — including the grit octave,
- * which lives in the normal so close-up chips still catch the sun.
+ * keeps A's albedo and only adds the bump.
  *
  * jointSpacing stays 0. At 12 m it drew a saw-cut groove across every
  * straight and those read as mesh seams — especially wet.
+ *
+ * bumpGrit is 0 HERE and 1 in the module defaults, and that split is the whole
+ * point of it: the octave is real and the labs show it, but the chase camera
+ * provably cannot — it is faded to exactly zero on every pixel on screen, so in
+ * game it was three noise evaluations per fragment returning a guaranteed zero.
+ * Together with `bumpMacro` retiring to 0, the normal's cost drops from 18 noise
+ * evaluations per fragment to 6 for a measured 0.060 degrees of change. See
+ * tools/roadBumpVisibilityTest.mjs. Turn it back on here if road.html ever gets
+ * a bonnet or photo camera.
  */
 export const SURFACE_V2_GAME = {
   streakSharp: 0,
   bumpAmount: 0.05,
   jointSpacing: 0,
+  bumpGrit: 0,
 };
 
 export const SURFACE_V2_NUMBERS = Object.keys(SURFACE_V2_DEFAULTS);
@@ -319,28 +487,62 @@ const BUMP_SAMPLE_EPS = 0.004;
  * @param {Node} uvn  vec2(along metres, across metres)
  * @param {object} ru  the base road uniforms
  * @param {object} v   the V2 uniforms
- * @param {Node} gritFade  0..1, computed ONCE at this fragment — not per tap
+ * @param {{grit: Node, chip: Node}} fades  0..1 each, computed ONCE at this
+ *   fragment — NOT per tap. Passing them in is the contract: they are built
+ *   from `fwidth`, and evaluating a screen derivative separately at each of the
+ *   three tap positions would differentiate the fade along with the height and
+ *   put back the aliasing the fade exists to remove.
+ * @param {{lateral: Node, aa: Node, plain: Node}|null} line  where the paint is
+ *   AT THIS TAP. `lateral` is the only part that moves between taps — see the
+ *   call site for why the across-road tap has to shift it and the along-road
+ *   one does not. `aa` follows the same shared-across-taps rule as `fades`.
+ *   Null when there is no paint relief to add, so the mask is not even built.
  */
-function bumpHeightAt(uvn, ru, v, gritFade) {
+function bumpHeightAt(uvn, ru, v, fades, line, on) {
   const alongOff = uvn.x.add(attribute("aAlongOffset", "float"));
   const along = alongOff.div(ru.streak);
   const across = uvn.y;
-  const macro = mx_fractal_noise_float(
-    vec3(along.mul(ru.macroScale), across.mul(ru.macroScale), 0.0), 3, 2.0, 0.5, 1.0,
-  );
   const agg = mx_noise_float(
     vec3(along.mul(ru.aggScale), across.mul(ru.aggScale), 0.0),
   );
-  const height = agg.mul(0.5).mul(v.bumpAgg).add(macro.mul(0.5).mul(v.bumpMacro));
+  let height = agg.mul(0.5).mul(v.bumpAgg);
+
+  // The long swell. Off by default — 0.060 degrees of tilt for a THREE-OCTAVE
+  // fractal per tap, i.e. half the normal's whole noise budget. See bumpMacro.
+  if (on.macro) {
+    const macro = mx_fractal_noise_float(
+      vec3(along.mul(ru.macroScale), across.mul(ru.macroScale), 0.0), 3, 2.0, 0.5, 1.0,
+    );
+    height = height.add(macro.mul(0.5).mul(v.bumpMacro));
+  }
+
+  // THE MID OCTAVE — see bumpChip. ~6 cm across, mildly stretched along, which
+  // puts it in the 4-10 cm band the game camera can actually resolve. This is
+  // the layer that makes the deck read as laid rather than as painted, and it
+  // is the one that survives past the first few metres.
+  //
+  // Stretched on its OWN factor rather than `ru.streak`: at 14:1 it would land
+  // on top of the aggregate it is supposed to sit between, which is how the
+  // gap it fills came to exist in the first place.
+  const chip = mx_noise_float(
+    vec3(alongOff.div(v.bumpChipStretch).mul(v.bumpChipScale),
+      across.mul(v.bumpChipScale), 0.0),
+  );
+  const mid = chip.mul(0.5).mul(v.bumpChip).mul(fades.chip);
 
   // Close-up grain. Unstretched (unlike agg), ~2 cm. Independent of
   // streakSharp: that knob is the paver LINES, this is the chips between them.
-  // Same weight as the aggregate so it actually reads in the normal; albedo
-  // gritAmount stays the colour-side slider and is not reused here.
-  const grit = mx_noise_float(
-    vec3(alongOff.mul(v.gritScale), across.mul(v.gritScale), 0.0),
-  );
-  const fines = grit.mul(0.5).mul(v.bumpAgg).mul(gritFade);
+  //
+  // Below the game camera's resolution EVERYWHERE (see bumpChip and bumpGrit),
+  // so this is explicitly the LAB / bonnet-camera layer and the game compiles it
+  // out. Not dead code: the piece lab, the surface lab and any close camera are
+  // inside the 6.3 m range where it is the finest thing on the deck.
+  if (on.grit) {
+    const grit = mx_noise_float(
+      vec3(alongOff.mul(v.gritScale), across.mul(v.gritScale), 0.0),
+    );
+    height = height.add(grit.mul(0.5).mul(v.bumpGrit).mul(fades.grit));
+  }
 
   const spacing = max(v.jointSpacing, float(0.001));
   const cyc = fract(uvn.x.div(spacing));
@@ -349,7 +551,26 @@ function bumpHeightAt(uvn, ru, v, gritFade) {
     .mul(smoothstep(0.0, 0.001, v.jointSpacing))
     .mul(v.jointDepth)
     .negate();
-  return height.add(fines).add(joint);
+
+  // `height` already carries the aggregate, the optional macro swell and the
+  // optional grit; `mid` is the chip octave. There is deliberately no separate
+  // `fines` term any more — the grit folds into `height` inside its gate.
+  const asphalt = height.add(mid);
+  if (!line) return asphalt.add(joint);
+
+  // ── PAINT ───────────────────────────────────────────────────────────────
+  // Evaluated through the SAME function the albedo uses, so the relief and the
+  // white can never disagree about where a line is (see lineCoverageAt). The
+  // dash phase comes from uvn.x, which the along tap moves, and the across
+  // position from `line.lateral`, which the caller moves — between them the
+  // three taps see the real 2D shape of the paint edge.
+  const paint = lineCoverageAt(ru, line.lateral, uvn.x, line.aa, line.plain);
+  // Fill first, THEN lift. Order matters: the plateau must not be scaled down
+  // by its own fill, or a fully-filled line would also be a flat one and the
+  // lip that is the entire visible effect would vanish at lineFill 1.
+  return asphalt.mul(oneMinus(paint.mul(v.lineFill)))
+    .add(paint.mul(v.lineBump))
+    .add(joint);
 }
 
 /**
@@ -525,7 +746,15 @@ export function createRoadSurfaceV2(opts = {}) {
     gritFade: uniform(opts.gritFade ?? SURFACE_V2_DEFAULTS.gritFade),
     bumpAmount: uniform(opts.bumpAmount ?? SURFACE_V2_DEFAULTS.bumpAmount),
     bumpAgg: uniform(opts.bumpAgg ?? SURFACE_V2_DEFAULTS.bumpAgg),
+    bumpGrit: uniform(opts.bumpGrit ?? SURFACE_V2_DEFAULTS.bumpGrit),
     bumpMacro: uniform(opts.bumpMacro ?? SURFACE_V2_DEFAULTS.bumpMacro),
+    bumpChip: uniform(opts.bumpChip ?? SURFACE_V2_DEFAULTS.bumpChip),
+    bumpChipScale: uniform(opts.bumpChipScale ?? SURFACE_V2_DEFAULTS.bumpChipScale),
+    bumpChipStretch: uniform(opts.bumpChipStretch ?? SURFACE_V2_DEFAULTS.bumpChipStretch),
+    bumpChipFade: uniform(opts.bumpChipFade ?? SURFACE_V2_DEFAULTS.bumpChipFade),
+    bumpFilter: uniform(opts.bumpFilter ?? SURFACE_V2_DEFAULTS.bumpFilter),
+    lineBump: uniform(opts.lineBump ?? SURFACE_V2_DEFAULTS.lineBump),
+    lineFill: uniform(opts.lineFill ?? SURFACE_V2_DEFAULTS.lineFill),
     jointSpacing: uniform(opts.jointSpacing ?? SURFACE_V2_DEFAULTS.jointSpacing),
     jointWidth: uniform(opts.jointWidth ?? SURFACE_V2_DEFAULTS.jointWidth),
     jointDepth: uniform(opts.jointDepth ?? SURFACE_V2_DEFAULTS.jointDepth),
@@ -585,6 +814,39 @@ export function createRoadSurfaceV2(opts = {}) {
    */
   const bumpOn = (opts.bumpAmount ?? SURFACE_V2_DEFAULTS.bumpAmount) > 0;
   mat._surfaceV2BumpOn = bumpOn;
+  /**
+   * Whether the paint relief is compiled in — three extra mask evaluations, one
+   * per height tap. Same build-time gate as the bump, for the same reason, and
+   * REGISTERED in surfaceV2NeedsRebuild below: a gate that a live slider can
+   * cross without triggering a rebuild is worse than no gate at all, because
+   * the knob then appears to do nothing until something else happens to rebuild.
+   *
+   * Note this only matters when the bump itself is on — paint relief is normal
+   * work, so `bumpAmount` 0 already means no normalNode and nothing to gate.
+   */
+  const paintOn = (opts.lineBump ?? SURFACE_V2_DEFAULTS.lineBump) > 0
+    || (opts.lineFill ?? SURFACE_V2_DEFAULTS.lineFill) > 0;
+  mat._surfaceV2PaintOn = paintOn;
+
+  /**
+   * The two octaves that are gated OUT of the height by default.
+   *
+   * Same build-time rule as everything else here, and here it is worth the most:
+   * between them these were 12 of the normal's 18 noise evaluations per fragment
+   * — two thirds of its entire cost — for a combined 0.060 degrees of shading
+   * normal tilt. `macro` is a 3-octave fractal at a 16.7 m period (invisible at
+   * any amplitude you would want); `grit` is a 1.8 cm octave the chase camera
+   * fades to exactly zero everywhere on screen.
+   *
+   * Both are registered in surfaceV2NeedsRebuild, so a slider crossing 0 in
+   * either direction rebuilds rather than silently doing nothing.
+   */
+  const octaves = {
+    macro: (opts.bumpMacro ?? SURFACE_V2_DEFAULTS.bumpMacro) > 0,
+    grit: (opts.bumpGrit ?? SURFACE_V2_DEFAULTS.bumpGrit) > 0,
+  };
+  mat._surfaceV2Octaves = octaves;
+
   if (!bumpOn) return mat;
 
   const surface = mat._surfaceNode;
@@ -625,17 +887,77 @@ export function createRoadSurfaceV2(opts = {}) {
 
     const uvn = uv();
     const alongRaw = uvn.x.add(attribute("aAlongOffset", "float"));
-    // One fade for all three taps. Putting fwidth inside bumpHeightAt would
-    // differentiate the fade itself and bring the glitter back.
-    const gritFade = saturate(oneMinus(
-      max(fwidth(alongRaw), fwidth(uvn.y)).mul(v.gritScale).mul(v.gritFade),
-    ));
-    const eps = float(BUMP_SAMPLE_EPS);
-    const h0 = bumpHeightAt(uvn, ru, v, gritFade);
-    const hx = bumpHeightAt(uvn.add(vec2(eps, 0)), ru, v, gritFade);
-    const hy = bumpHeightAt(uvn.add(vec2(0, eps)), ru, v, gritFade);
-    const tsNx = hx.sub(h0).div(eps).mul(scale).negate();
-    const tsNy = hy.sub(h0).div(eps).mul(scale).negate();
+
+    // THE TWO SAMPLING RATES, in UV metres per pixel, kept SEPARATE.
+    //
+    // They are not close to each other and treating them as one number is what
+    // made the bump invisible. Down a straight at the game's chase camera the
+    // along-road footprint is ~3x the across-road one, because along is the
+    // grazing axis. A `max()` of the two therefore judges every octave by the
+    // worse axis and deletes transverse relief that is still comfortably
+    // resolved — see bumpFilter.
+    const texAlong = fwidth(alongRaw);
+    const texAcross = fwidth(uvn.y);
+
+    // Fades for the two fine octaves. One evaluation each, shared by all three
+    // taps: putting fwidth inside bumpHeightAt would differentiate the fade
+    // itself and bring the glitter back.
+    //
+    // Judged on the BETTER-sampled axis (min), not the worse one. A field that
+    // one axis can still resolve has content worth keeping — the sampling on
+    // the other axis is now handled by the tap spacing below rather than by
+    // deleting the octave outright.
+    const texBest = min(texAlong, texAcross);
+    const gritFade = saturate(oneMinus(texBest.mul(v.gritScale).mul(v.gritFade)));
+    const chipFade = saturate(oneMinus(texBest.mul(v.bumpChipScale).mul(v.bumpChipFade)));
+    const fades = { grit: gritFade, chip: chipFade };
+
+    // TAP SPACING TRACKS THE FOOTPRINT, per axis — the filtering fix. The 4 mm
+    // floor keeps the close-up identical to before; past that the difference
+    // spans one pixel and measures the average slope instead of point-sampling
+    // a field finer than the pixel. `bumpFilter` 0 restores the fixed spacing.
+    const epsFloor = float(BUMP_SAMPLE_EPS);
+    const epsX = max(epsFloor, texAlong.mul(v.bumpFilter));
+    const epsY = max(epsFloor, texAcross.mul(v.bumpFilter));
+
+    // ── WHERE THE PAINT IS, AT EACH TAP ──────────────────────────────────────
+    //
+    // The line mask is a function of `aLateral`, which is an ATTRIBUTE — so
+    // offsetting uv.y by epsY does not move it, and a tap that does not move
+    // across the paint edge measures no edge at all. The conversion needed is
+    // lateral-units per metre of uv.y.
+    //
+    // IT CANNOT BE A CONSTANT OR A UNIFORM. `aLateral` is stamped as x / hw and
+    // hw is the PIECE's own half-width — the kit ships `narrow` at 8 m and
+    // `platform` at 44 m against a default 16 m road — so any single number is
+    // wrong for some piece on the track.
+    //
+    // The ratio of the two fwidths gives it exactly, per fragment, for whatever
+    // piece this is. That is safe here and it is worth saying why, because
+    // differencing in screen space is precisely the bug that produced the
+    // close-up "diagonals": both `aLateral` and `uv.y` are LINEAR interpolants,
+    // so the ratio of their derivatives is a constant across a triangle rather
+    // than a sample of a high-frequency field. It is the same thing `lateralAA`
+    // has always relied on. Guarded against a zero denominator, which a fragment
+    // seen exactly edge-on can produce.
+    const lateral = attribute("aLateral", "float");
+    const latPerMetre = fwidth(lateral).div(max(texAcross, float(1e-6)));
+    // Shared by all three taps, same rule as `fades` — it comes from fwidth.
+    const lineAA = fwidth(lateral).mul(0.75);
+    const plain = attribute("aPlain", "float");
+    const lineAt = (lat) => (paintOn ? { lateral: lat, aa: lineAA, plain } : null);
+
+    const h0 = bumpHeightAt(uvn, ru, v, fades, lineAt(lateral), octaves);
+    // The along tap moves uv.x only — `aLateral` is unchanged by walking down
+    // the road, so the same lateral is correct here. It still sees the dash ends.
+    const hx = bumpHeightAt(uvn.add(vec2(epsX, 0)), ru, v, fades, lineAt(lateral), octaves);
+    // ...and the across tap moves both, which is the whole point of latPerMetre.
+    const hy = bumpHeightAt(
+      uvn.add(vec2(0, epsY)), ru, v, fades,
+      lineAt(lateral.add(epsY.mul(latPerMetre))), octaves,
+    );
+    const tsNx = hx.sub(h0).div(epsX).mul(scale).negate();
+    const tsNy = hy.sub(h0).div(epsY).mul(scale).negate();
     const tsNz = sqrt(max(float(1e-4), float(1).sub(tsNx.mul(tsNx).add(tsNy.mul(tsNy)))));
     // Packed 0..1 the way three's `normalMap` wants it. Scale of (1,1): the
     // slope already carries bumpAmount, so a second gain here would double-count.
@@ -676,7 +998,15 @@ export function surfaceV2NeedsRebuild(mat, p) {
   const wantBump = (p?.bumpAmount ?? SURFACE_V2_DEFAULTS.bumpAmount) > 0;
   const wantChips = (p?.chipsOn ?? SURFACE_V2_DEFAULTS.chipsOn) > 0;
   const wantStreak = (p?.streakSharp ?? SURFACE_V2_DEFAULTS.streakSharp) > 0;
+  const wantPaint = (p?.lineBump ?? SURFACE_V2_DEFAULTS.lineBump) > 0
+    || (p?.lineFill ?? SURFACE_V2_DEFAULTS.lineFill) > 0;
+  const wantMacro = (p?.bumpMacro ?? SURFACE_V2_DEFAULTS.bumpMacro) > 0;
+  const wantGrit = (p?.bumpGrit ?? SURFACE_V2_DEFAULTS.bumpGrit) > 0;
+  const oct = mat._surfaceV2Octaves ?? {};
   return wantBump !== !!mat._surfaceV2BumpOn
     || wantChips !== !!mat._surfaceV2ChipsOn
-    || wantStreak !== !!mat._surfaceV2StreakOn;
+    || wantStreak !== !!mat._surfaceV2StreakOn
+    || wantPaint !== !!mat._surfaceV2PaintOn
+    || wantMacro !== !!oct.macro
+    || wantGrit !== !!oct.grit;
 }
