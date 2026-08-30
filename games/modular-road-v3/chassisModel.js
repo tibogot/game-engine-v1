@@ -110,14 +110,29 @@ export const CHASSIS_GLB = {
   glassOpacity: 0.42,
   /**
    * The file ships a full cabin — seats, door cards, dashboard, steering wheel —
-   * as SIX separate meshes. Behind tinted glass, from a chase camera, at
-   * 170 km/h, none of it is ever legible. Dropping it is a third of the car's
-   * draw calls for nothing visible.
+   * as SIX separate meshes.
    *
-   * Turn it on if you ever add a cockpit camera; it is only ever a waste from
-   * the outside.
+   * THIS USED TO BE FALSE, on the reasoning that behind tinted glass from a
+   * chase camera none of it is ever legible. That is true of the DETAIL and
+   * false of the job it actually does: the glass is transparent (0.42) and the
+   * body is otherwise a hollow shell, so with the cabin gone you look straight
+   * through the windscreen and out of the back of the car. Legibility was the
+   * wrong test; OCCLUSION is what the interior is for, and an empty cockpit
+   * reads as wrong long before anyone tries to make out a seat.
+   *
+   * MEASURED, on a 4-piece track with the headlights on:
+   *     off   49 draws   305k tris   3.080 ms main scene pass
+   *     on    56 draws   338k tris   2.949 ms
+   * i.e. +7 draws and no measurable cost — two timestamp ticks the RIGHT way,
+   * plausibly because an opaque cabin lets early-z reject fragments the
+   * transparent glass was otherwise blending over nothing. The draw-call budget
+   * this was originally traded against is not tight: the frame is ~4 ms of 16.7,
+   * and 88% of it is fill in the main pass, not draw submission.
+   *
+   * They are not shadow casters either — `castShadow` is gated on RE_SILHOUETTE,
+   * which no interior node matches — so this is 6 small meshes and nothing else.
    */
-  showInterior: false,
+  showInterior: true,
   /**
    * Merge meshes that share a material into one draw. Only `mm_windows` is
    * shared here (four windows + two headlight lenses), and the lenses have to
