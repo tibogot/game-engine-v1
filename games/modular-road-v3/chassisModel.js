@@ -35,7 +35,9 @@
 //     here so they can be lit without touching the windows that share it.
 // ============================================================================
 import * as THREE from "three";
-import { materialEmissive } from "three/tsl";
+import {
+  materialEmissive, uniform, positionLocal, smoothstep, oneMinus, vec3, float,
+} from "three/tsl";
 import {
   getSharedGltfLoader,
   initGlbLoaderRenderer,
@@ -131,6 +133,28 @@ export const CHASSIS_GLB = {
 const RE_INTERIOR = /_INT_|INTERIOR|STEERING_WHEEL/i;
 const RE_HEADLIGHT_LENS = /HEADLIGHT_LENS/i;
 const RE_EMISSIVE = /emiss/i;
+/**
+ * THE TAIL LIGHT HOUSING — the big rear lens, and the thing everyone goes
+ * looking for when the car appears to have no back light.
+ *
+ * The model has TWO rear light meshes and only one of them was ever driven:
+ *
+ *   ..._BRAKES_LEFT_mm_lights_emiss_0   caught by RE_EMISSIVE, driven per frame
+ *                                        — the THIN STRIP inside the housing
+ *   ..._BODY_mm_lights_mm_lights_0      matched NOTHING, fell through to the
+ *                                        default body path, never touched
+ *
+ * So the lamp everyone means by "the back light" was in the file the whole
+ * time; nothing is missing from the GLB. It simply had no rule, so it sat there
+ * as an unlit chrome lens while a 20 cm strip inside it did all the glowing.
+ *
+ * IT IS NOT A REAR-ONLY MESH, which is why this cannot just be switched on.
+ * Measured against the car's own forward axis, it spans −2.20 m to +2.24 m —
+ * nearly the whole body — because `mm_lights` is the LENS MATERIAL for every
+ * light surface on the car, front included. Lighting all of it turns the
+ * headlight surrounds red. Hence the mask below.
+ */
+const RE_TAIL_HOUSING = /mm_lights/i;
 const RE_GLASS = /windows/i;
 /** Parts that define the car's OUTER silhouette — the only ones worth casting. */
 const RE_SILHOUETTE = /mm_ext|misc/i;
@@ -240,6 +264,63 @@ function mergeMeshes(meshes, root, name) {
  * materials from the start. Only the properties a lamp needs are carried over —
  * copying wholesale would drag `type`/`uuid` across too.
  */
+/**
+ * Local-Z below which the housing counts as REAR, and the feather either side.
+ *
+ * MEASURED, not guessed. Sampling the mesh's vertices against the car's own
+ * forward axis gives worldForward = −2.221 · localZ + 0.022, and the brake strip
+ * — which is unambiguously the rear lamp — occupies localZ −0.895 to −1.0.
+ * −0.78 therefore takes the strip plus the housing around it and stops well
+ * short of anything at the front. Re-derive it the same way if the model
+ * changes; tools has no fixture for this because it needs the loaded GLB.
+ */
+/** Housing glow, linear RGB. Deeper than the strip's white-hot core — the
+ *  housing is the broad red mass, the strip is the filament inside it. */
+const TAIL_HOUSING_COLOR = [1.0, 0.06, 0.03];
+const TAIL_REAR_Z = -0.78;
+const TAIL_REAR_SOFT = 0.06;
+
+/**
+ * The rear light HOUSING: the model's own lens, lit only across its rear end.
+ *
+ * Rebuilt rather than tweaked because the file ships it as a classic
+ * MeshPhysicalMaterial, and a classic material has no `emissiveNode` to hang a
+ * position mask on. Safe to rebuild — measured, exactly one mesh uses it.
+ *
+ * The map, roughness and metalness are carried across: this is a shiny lens and
+ * it has to keep reading as one when the lights are off. Only the emissive is
+ * new, and it is masked so the front lens surfaces sharing this material stay
+ * dark.
+ */
+function makeTailHousingMaterial(src) {
+  const uTail = uniform(0);
+  const mat = new THREE.MeshStandardNodeMaterial({
+    name: "tailHousing",
+    map: src.map ?? null,
+    color: src.color?.clone() ?? new THREE.Color(0xffffff),
+    roughness: src.roughness ?? 0.1,
+    metalness: src.metalness ?? 0.8,
+    side: src.side ?? THREE.FrontSide,
+    // Same reasoning as the strip: a lamp is a bloom SOURCE, and tone mapping
+    // it first crushes the headroom the bloom keys off.
+    toneMapped: false,
+  });
+  // 1 across the rear end, 0 everywhere forward of it. `positionLocal` because
+  // the mask is a property of the MODEL, not of where the car happens to be.
+  const rear = oneMinus(smoothstep(
+    float(TAIL_REAR_Z), float(TAIL_REAR_Z + TAIL_REAR_SOFT), positionLocal.z,
+  ));
+  const glow = vec3(...TAIL_HOUSING_COLOR).mul(uTail).mul(rear);
+  mat.emissiveNode = glow;
+  applyBloomMRT(mat, glow);
+  /** Driven per frame by Vehicle._updateTaillights, alongside the strip. */
+  mat._tailIntensity = uTail;
+  return mat;
+}
+
+
+
+
 function makeLightMaterial(src, { name, emissive, opacity = 1, transparent = true }) {
   const mat = new THREE.MeshStandardNodeMaterial({
     name,
@@ -339,6 +420,15 @@ export async function loadChassisModel(renderer, url = CHASSIS_GLB_URL) {
         opacity: o.material.opacity ?? 1,
         transparent: o.material.transparent,
       });
+      brakeLights.push(o);
+      continue;
+    }
+
+    // The housing the strip sits inside — see RE_TAIL_HOUSING. Must come AFTER
+    // the RE_EMISSIVE test: the strip's node name contains `mm_lights` too, and
+    // it has already been claimed above.
+    if (RE_TAIL_HOUSING.test(tag)) {
+      o.material = makeTailHousingMaterial(o.material);
       brakeLights.push(o);
       continue;
     }

@@ -3663,7 +3663,14 @@ export class Vehicle {
       const lit = T.enabled
         ? (braking ? L.brakeIntensity : (HEADLIGHTS.enabled ? L.runningIntensity : 0))
         : 0;
-      for (const m of glb.brakeLights) m.material.emissiveIntensity = lit;
+      for (const m of glb.brakeLights) {
+        m.material.emissiveIntensity = lit;
+        // The tail HOUSING drives a uniform instead: its emissive is masked to
+        // the rear of the mesh (the same material covers the front lenses), so
+        // it cannot use the material-wide emissiveIntensity the strip does.
+        // See makeTailHousingMaterial in chassisModel.js.
+        if (m.material._tailIntensity) m.material._tailIntensity.value = lit;
+      }
       const lamp = HEADLIGHTS.enabled ? L.headlampIntensity : 0;
       for (const m of glb.headlampLenses) m.material.emissiveIntensity = lamp;
       return;
