@@ -5908,7 +5908,20 @@ export const CATEGORY_PRESETS = {
       id: "looping_full",
       label: "Looping",
       base: "loop",
-      params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopLean: 0, loopTighten: 0, loopHalf: "full" },
+      params: { loopRadius: 25, loopOffset: 16, loopFlat: 12, loopSpread: 1, loopLean: 0, loopTighten: 0, loopStretch: 0, loopHalf: "full" },
+    },
+    {
+      // TRACKMANIA OFFSET LOOPING: the compact looping's feet sit 16 m apart
+      // under a planar ring, so start and end read as one split circle. This
+      // one is the same generator with the sideways gap opened to several road
+      // widths and spread 0 (even helix, not two feet slid apart). The ring
+      // stays a full circle in YZ — stretching it along the track is what made
+      // the first attempt look MORE compact (the backswing collapsed and the
+      // hole shrank). No half tile yet.
+      id: "looping_offset",
+      label: "Offset looping",
+      base: "loop",
+      params: { loopRadius: 25, loopOffset: 56, loopFlat: 12, loopSpread: 0, loopLean: 0, loopTighten: 0, loopStretch: 0, loopHalf: "full" },
     },
     {
       id: "loop_half_right",

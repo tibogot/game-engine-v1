@@ -31,7 +31,7 @@ const DEV_PANEL_OPEN_W = 360;
 export function createRoadDevPanel({ app, game, params }) {
   const {
     TIRE, AERO, ROAD_HOLD, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS,
-    WHEEL_LAYOUT, DRIFT, glowPropParams,
+    CHASSIS_GLB_LIGHTS, WHEEL_LAYOUT, DRIFT, glowPropParams,
   } = params;
 
   const root = document.createElement("div");
@@ -1633,10 +1633,43 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-beam-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Tail lights</span>
+            <div class="prop-value">
+              <input type="range" id="dv-tail-run" min="0" max="12" step="0.25" />
+              <span class="prop-num" id="dv-tail-run-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Brake lights</span>
+            <div class="prop-value">
+              <input type="range" id="dv-tail-brake" min="0" max="24" step="0.5" />
+              <span class="prop-num" id="dv-tail-brake-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Headlamp faces</span>
+            <div class="prop-value">
+              <input type="range" id="dv-glb-lamp" min="0" max="12" step="0.25" />
+              <span class="prop-num" id="dv-glb-lamp-v"></span>
+            </div>
+          </div>
           <div class="dv-hint">
             <b>Auto</b> switches them on when the v3 sun drops near the horizon.
             Lamps only glow with Bloom on.
-          </div>
+            <br><br>
+            <b>Tail</b> / <b>Brake</b> drive the GLB car's rear light bar. The
+            model has ONE emissive rear node — despite being called
+            <code>BRAKES_LEFT</code> it spans the full 1.73&nbsp;m, so it is both
+            tail lights in one mesh and braking changes its brightness rather
+            than its shape. Nothing is missing; what matters is the RATIO — a
+            real stop lamp is roughly 3× its tail lamp.
+            <br><br>
+            Tail was 1.0 and sat under the bloom's reach while the brake cleared
+            it easily, so the bar only ever glowed when braking. On a wet road
+            these are the brightest thing behind you and both the deck's
+            clearcoat and the planar mirror reflect them — most of the wet-night
+            look is this slider.
         </div>
       </div>
 
@@ -2896,6 +2929,14 @@ export function createRoadDevPanel({ app, game, params }) {
   });
   const autoToggle = toggle("dv-lights-auto", false, (on) => game.setAutoHeadlights(on));
   slider("dv-lamp", HEADLIGHTS, "lampEmissive", (v) => v.toFixed(1), () => game.refreshLights());
+  // The GLB car's own lamps. Plain config objects read by the vehicle every
+  // frame (_updateTaillights), so no refresh call is needed — the next frame
+  // picks them up. Shown with the tail:brake ratio, which is the number that
+  // actually decides whether braking reads.
+  slider("dv-tail-run", CHASSIS_GLB_LIGHTS, "runningIntensity",
+    (v) => `${v.toFixed(2)} · 1:${(CHASSIS_GLB_LIGHTS.brakeIntensity / Math.max(v, 0.01)).toFixed(1)}`);
+  slider("dv-tail-brake", CHASSIS_GLB_LIGHTS, "brakeIntensity", (v) => v.toFixed(1));
+  slider("dv-glb-lamp", CHASSIS_GLB_LIGHTS, "headlampIntensity", (v) => v.toFixed(2));
   slider("dv-beam", HEADLIGHTS, "intensity", (v) => v.toFixed(0), () => game.refreshLights());
 
   // ── Weather ─────────────────────────────────────────────────────────────────

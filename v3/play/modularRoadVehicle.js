@@ -1984,10 +1984,32 @@ export const TAILLIGHTS = {
  * procedural quads need.
  */
 export const CHASSIS_GLB_LIGHTS = {
-  /** Tail lights: dim glow while the headlights are on. */
-  runningIntensity: 1.0,
-  /** Tail lights: flare under brake / handbrake. */
-  brakeIntensity: 5.0,
+  /**
+   * Tail lights while the headlights are on.
+   *
+   * WAS 1.0, AND THAT READ AS "THE TAIL LIGHTS ARE BROKEN". Two things went
+   * wrong at that value and they compounded:
+   *
+   *   - The strip is `toneMapped: false` so it keeps its headroom, but at 1.0
+   *     it still barely lifts off its own albedo through ACES. It looked unlit.
+   *   - It sat under the bloom's reach while the 5.0 brake cleared it easily,
+   *     so the lamp only ever GLOWED when braking — which is precisely the
+   *     "where is the real back light?" symptom. A tail light that only blooms
+   *     on the brakes reads as having no running state at all.
+   *
+   * 3.0 puts the running state comfortably inside the bloom, and the brake step
+   * below keeps the same ~3x ratio a real car has between tail and stop — which
+   * is the ratio that matters, not the absolute.
+   *
+   * THIS MATTERS BEYOND THE CAR. On a wet road the tail lights are the brightest
+   * thing behind you, and the deck's clearcoat and the planar mirror both
+   * reflect them; at 1.0 there was nothing to reflect. Most of the wet-night
+   * look is this number.
+   */
+  runningIntensity: 3.0,
+  /** Tail lights: flare under brake / handbrake. ~3x the running state, which
+   *  is about the real ratio between a tail lamp and a stop lamp. */
+  brakeIntensity: 9.0,
   /** Headlight LENS emissive when lit — the lenses are glass in the file, not
    *  emissive, so this is what makes them read as switched on. 0 = plain glass. */
   headlampIntensity: 3.0,

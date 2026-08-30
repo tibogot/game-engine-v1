@@ -53,6 +53,7 @@ import {
   BODYLEAN,
   WHEEL_LAYOUT,
   HEADLIGHTS,
+  CHASSIS_GLB_LIGHTS,
   CHASSIS,
   CHASSIS_HULL,
   WHEEL,
@@ -5363,7 +5364,7 @@ ${e.message}`);
   devPanel = createRoadDevPanel({
     app,
     params: {
-      TIRE, AERO, ROAD_HOLD, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS,
+      TIRE, AERO, ROAD_HOLD, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, CHASSIS_GLB_LIGHTS,
       WHEEL_LAYOUT, DRIFT, glowPropParams,
     },
     game: {

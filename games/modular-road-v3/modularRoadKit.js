@@ -157,7 +157,11 @@ export const pieceParams = {
   loopHalf: "full", // "full" = whole loop; "in" = entry→top slice; "out" = top→exit slice
   loopLean: 0, // tilt the ring plane toward/away (-1..1); 0 = perfectly vertical
   loopTighten: 0, // teardrop pinch toward the top (0 = round circle, up to 0.7)
-  loopAdvance: 28, // legacy full-loop param (older tracks)
+  loopAdvance: 28, // unused leftover on old saves — do not read; see loopStretch
+  // Forward gap between the ring's entry foot and exit foot (m, along −Z). 0 keeps
+  // the compact looping (feet side-by-side). A positive value stretches the ring
+  // into one turn of a helix so the start and end are not on top of each other.
+  loopStretch: 0,
   // Spiral ring / corkscrew (flat run + climbing wrapped arc):
   loopSpiralRadius: 12, // helix radius (m)
   loopSpiralTurns: 1, // full revolutions about the vertical axis
@@ -3549,7 +3553,10 @@ function loopHalfPoints(pp) {
  * Full drivable LOOPING in one piece. A complete 360° vertical circle (Y/Z plane)
  * that also drifts sideways (X) as it goes around, so the entry foot and exit foot
  * both sit FLAT on the floor (y=0) but separated by `loopOffset` along the red (X)
- * axis — they don't meet. This lateral gap is what makes it a real looping.
+ * axis — they don't meet. `loopStretch` (default 0) also walks the ring forward
+ * along −Z. Stretch 0 keeps the full circular silhouette; a large stretch
+ * collapses the backswing and the hole shrinks. The offset-looping tile opens
+ * the gap with a large `loopOffset` and even `loopSpread` instead.
  */
 function loopPoints(pp) {
   const R = Math.max(6, pp.loopRadius);
@@ -3559,6 +3566,7 @@ function loopPoints(pp) {
   const spread = THREE.MathUtils.clamp(pp.loopSpread ?? 1, 0, 1); // gap concentration at feet
   const lean = THREE.MathUtils.clamp(pp.loopLean ?? 0, -1, 1); // ring-plane tilt
   const pinch = THREE.MathUtils.clamp(pp.loopTighten ?? 0, 0, 0.7); // teardrop pinch
+  const stretch = Math.max(0, pp.loopStretch ?? 0); // forward foot gap along −Z (m)
   // half: undefined/'full' = whole loop; 'in' = entry foot → top; 'out' = top → exit foot.
   const half = pp.loopHalf;
   const segN = Math.max(1, Math.ceil(Math.max(0.001, flat) / roadParams.segLen));
@@ -3581,7 +3589,7 @@ function loopPoints(pp) {
     const theta = 2 * Math.PI * u;
     const r = R * (1 - pinch * Math.sin(Math.PI * u));
     const y = r * (1 - Math.cos(theta));
-    const z = -flat - dir * r * Math.sin(theta) + lean * y;
+    const z = -flat - dir * r * Math.sin(theta) + lean * y - stretch * u;
     return new V3(xAt(u), y, z);
   };
 
@@ -3597,16 +3605,19 @@ function loopPoints(pp) {
   if (half === "out") {
     // Top → exit foot, then flat lead-out continuing -Z (same as the full loop's
     // end). Entry is the inverted top — meant to snap onto an "in" half's top.
-    const exit = ringPt(1); // foot, on the floor at (+gap/2, 0, -flat)
+    const exit = ringPt(1); // foot, on the floor at (+gap/2, 0, -flat − stretch)
     for (let i = 0; i <= hN; i++) pts.push(ringPt(0.5 + 0.5 * (i / hN)));
     for (let i = 1; i <= segN; i++) pts.push(new V3(exit.x, 0, exit.z - flat * (i / segN)));
     return pts;
   }
 
-  // Full loop: flat lead-in, the ring, flat lead-out.
+  // Full loop: flat lead-in, the ring, flat lead-out. Lead-out continues from
+  // the ring's actual exit (which walks forward when stretch > 0) rather than
+  // assuming the compact looping's z = −flat.
+  const exit = ringPt(1);
   for (let i = 0; i < segN; i++) pts.push(new V3(-gap / 2, 0, -flat * (i / segN)));
   for (let i = 0; i <= ringN; i++) pts.push(ringPt(i / ringN));
-  for (let i = 1; i <= segN; i++) pts.push(new V3(gap / 2, 0, -flat - flat * (i / segN)));
+  for (let i = 1; i <= segN; i++) pts.push(new V3(exit.x, 0, exit.z - flat * (i / segN)));
   return pts;
 }
 
@@ -3621,10 +3632,12 @@ function loopPoints(pp) {
 function loopFixFrames(frames, pp) {
   const R = Math.max(6, pp.loopRadius);
   const flat = Math.max(0, pp.loopFlat ?? R * 0.5);
+  const stretch = Math.max(0, pp.loopStretch ?? 0);
   // A frame is "on the ring" when it's clearly above the floor; flat foot leads
   // (y≈0) keep world-up. This works for the full loop AND either half slice
-  // without index bookkeeping. The ring centre sits at y=R, z=-flat, and shares
-  // the frame's own x (the ring is swept sideways rigidly).
+  // without index bookkeeping. The ring centre sits at y=R and shares the
+  // frame's own x (the ring is swept sideways rigidly). With stretch it also
+  // walks forward, recovered from height + whether we are still climbing.
   const worldUp = new V3(0, 1, 0);
   const up = new V3();
   const right = new V3();
@@ -3634,7 +3647,14 @@ function loopFixFrames(frames, pp) {
     if (fr.pos.y <= onRingY) {
       up.copy(worldUp).addScaledVector(T, -worldUp.dot(T)); // flat foot
     } else {
-      up.set(fr.pos.x, R, -flat).sub(fr.pos); // toward ring centre
+      let zCenter = -flat;
+      if (stretch > 0) {
+        const c = THREE.MathUtils.clamp(1 - fr.pos.y / R, -1, 1);
+        let theta = Math.acos(c);
+        if (T.y < 0) theta = 2 * Math.PI - theta;
+        zCenter = -flat - stretch * (theta / (2 * Math.PI));
+      }
+      up.set(fr.pos.x, R, zCenter).sub(fr.pos); // toward ring centre
       up.addScaledVector(T, -up.dot(T));
     }
     if (up.lengthSq() < 1e-9) up.copy(worldUp);
@@ -4741,7 +4761,7 @@ export const PIECE_CATALOG = [
   {
     id: "loop",
     label: "Loop (full)",
-    hint: "Full 360° vertical ring",
+    hint: "Full 360° vertical ring (stretch opens the feet along the track)",
     swatch: "#f1c40f",
     key: "",
     points: loopPoints,
