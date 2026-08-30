@@ -242,6 +242,12 @@ export function mergeByMaterial(root) {
     // to take from the first: the group already shares one material, and
     // tintability is a property of the material.
     if (meshes[0].userData.tintable) mesh.userData.tintable = true;
+    if (meshes[0].userData.ledDisplayFace) {
+      mesh.userData.ledDisplayFace = true;
+      mesh.userData.ledBoardW = meshes[0].userData.ledBoardW;
+      mesh.userData.ledBoardH = meshes[0].userData.ledBoardH;
+      mesh.userData.noCastShadow = true;
+    }
     for (const m of meshes) {
       m.removeFromParent();
       // A shared template's geometry outlives this tree — the instancer merges a

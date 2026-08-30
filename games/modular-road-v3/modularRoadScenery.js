@@ -39,6 +39,7 @@ import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { flattenInstanced, mergeByMaterial, markSharedGeometry } from "./modularRoadBatching.js";
 import { buildLedMatrixMesh } from "../../v2/objects/ledMatrix.js";
 import { buildLedChevronBoxMesh } from "./modularRoadLedBox.js";
+import { LED_DISPLAY_PARAMS, tagLedDisplayFace } from "./modularRoadLedDisplay.js";
 import { buildAdBillboardMesh, buildAdTotemMesh, AD_BILLBOARD, AD_TOTEM } from "./modularRoadAdBillboard.js";
 import { buildAdPrismMesh, uniquifyAdPrismMaterial, AD_PRISM } from "./modularRoadAdPrism.js";
 import { buildBillboardMesh } from "../../v2/objects/billboard.js";
@@ -90,6 +91,19 @@ export const SCENERY_CATALOG = [
     capsules: [
       { x: -7.2 * 0.42, radius: 0.13, height: 2.6 },
       { x: +7.2 * 0.42, radius: 0.13, height: 2.6 },
+    ],
+  },
+  {
+    id: "leddisplay",
+    label: "LED display",
+    build: buildLedMatrixMesh,
+    // Authored content (text / image) is per placement. Default chevron
+    // placements stay on the shared template material and instance with it.
+    ledDisplay: true,
+    params: { ...LED_DISPLAY_PARAMS },
+    capsules: [
+      { x: -LED_DISPLAY_PARAMS.boardW * 0.42, radius: 0.13, height: LED_DISPLAY_PARAMS.standHeight },
+      { x: +LED_DISPLAY_PARAMS.boardW * 0.42, radius: 0.13, height: LED_DISPLAY_PARAMS.standHeight },
     ],
   },
   {
@@ -354,6 +368,7 @@ function buildTemplate(def) {
   // touched either way. Flatten first — an InstancedMesh cannot be merged.
   flattenInstanced(root);
   mergeByMaterial(root);
+  if (def.ledDisplay) tagLedDisplayFace(root);
 
   // ── A SOLID WALL, FOR THE RUN OBJECTS ─────────────────────────────────────
   // An invisible box in the SOLID bake, and every visible mesh opted out of it,
@@ -419,6 +434,15 @@ export function makeSceneryProp(id) {
   }
   const t = _templates.get(id);
   const clone = t ? t.clone() : null;
+  // Remember the shared LED face material on the clone. Authored content
+  // replaces it later; chevron restorations point back at this one. clone()
+  // shares the material, which is the point — twenty default boards, one shader.
+  if (clone && def.ledDisplay) {
+    clone.traverse((o) => {
+      if (!o.userData?.ledDisplayFace || o.userData.ledSharedMaterial) return;
+      o.userData.ledSharedMaterial = o.material;
+    });
+  }
   // The poster map is per placement. clone() shares the material, so an upload
   // on one board would rewrite every other board of this type.
   if (clone && def.uniquePoster) {

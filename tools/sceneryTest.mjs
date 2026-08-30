@@ -218,5 +218,31 @@ console.log("\n=== THE CATALOG WIRES INTO THE PALETTE ===");
     /p\.category \?\? "obstacles"/.test(builder));
 }
 
+console.log("\n=== LED DISPLAY IS A NEW OBJECT, OLD BOARDS UNTOUCHED ===");
+{
+  const neu = SCENERY_CATALOG.find((s) => s.id === "leddisplay");
+  const board = SCENERY_CATALOG.find((s) => s.id === "ledboard");
+  const ad = SCENERY_CATALOG.find((s) => s.id === "adboard");
+  check("LED display is in the catalog", !!neu);
+  check("it is a new id, not a rename of LED board", !!board && board !== neu);
+  check("LED board is still not a live-content object", !board?.ledDisplay);
+  check("Ad billboard still uses the advert path, not this one", !!ad?.advert && !ad?.ledDisplay);
+  check("LED display is flagged for per-placement content", !!neu?.ledDisplay);
+  const g = makeSceneryProp("leddisplay");
+  const faces = [];
+  g.traverse((o) => { if (o.userData?.ledDisplayFace) faces.push(o); });
+  check("the LED panel is tagged so the instancer can split it off", faces.length === 1);
+  const a = makeSceneryProp("leddisplay");
+  const b = makeSceneryProp("leddisplay");
+  const fa = meshesOf(a).find((m) => m.userData.ledDisplayFace);
+  const fb = meshesOf(b).find((m) => m.userData.ledDisplayFace);
+  check("two default placements still share the LED face material", fa && fb && fa.material === fb.material);
+  const game = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
+  check("ad boards stay out of the instancer",
+    /id !== "adboard" && id !== "adtotem" && id !== "adprism"/.test(game));
+  check("LED display is NOT excluded from the instancer",
+    !/id !== "leddisplay"/.test(game));
+}
+
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nall green");
 process.exit(fail ? 1 : 0);

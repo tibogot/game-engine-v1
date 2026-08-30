@@ -159,6 +159,45 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
             <input id="dv-advert-prism-file" type="file" accept="image/*" hidden>
           </div>
+          <div id="dv-led-display" style="display:none">
+            <div class="prop-row">
+              <span class="prop-label">LED source</span>
+              <div class="prop-value">
+                <select id="dv-led-source" class="dv-led-input">
+                  <option value="chevron">Chevron</option>
+                  <option value="text">Text marquee</option>
+                  <option value="image">Image</option>
+                </select>
+              </div>
+            </div>
+            <div class="prop-row" id="dv-led-text-row" style="display:none">
+              <span class="prop-label">Text</span>
+              <div class="prop-value">
+                <input id="dv-led-text" class="dv-led-input" type="text" spellcheck="false" placeholder="RACE  •  CHAMPIONS  •  ">
+              </div>
+            </div>
+            <div class="prop-row" id="dv-led-image-row" style="display:none">
+              <span class="prop-label" id="dv-led-image-label">Image</span>
+              <div class="prop-value" style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="action-btn" id="dv-led-upload" type="button">Upload image</button>
+                <button class="action-btn" id="dv-led-clear" type="button">Clear</button>
+                <input id="dv-led-file" type="file" accept="image/*" hidden>
+              </div>
+            </div>
+            <div class="prop-row" id="dv-led-speed-row" style="display:none">
+              <span class="prop-label">Speed</span>
+              <div class="prop-value">
+                <input id="dv-led-speed" type="range" min="-1.5" max="1.5" step="0.01" value="0.4">
+                <span class="prop-num" id="dv-led-speed-v">0.40</span>
+              </div>
+            </div>
+            <div class="prop-row" id="dv-led-rgb-row" style="display:none">
+              <span class="prop-label">RGB wall</span>
+              <div class="prop-value">
+                <button class="prop-toggle" id="dv-led-rgb" type="button" aria-label="RGB">${CHECK_SVG}</button>
+              </div>
+            </div>
+          </div>
           <div class="prop-row">
             <span class="prop-label">All of this type</span>
             <div class="prop-value">
@@ -173,6 +212,8 @@ export function createRoadDevPanel({ app, game, params }) {
             press <b>C</b> (<b>Shift+C</b> to go back); <b>V</b> toggles the
             decal. Ad billboards take an uploaded image the same way; the prism
             board takes three, one per rotating face. Both save with the track.
+            <b>LED display</b> takes chevron, a text marquee, or an image; default
+            chevrons stay instanced, authored faces do not.
           </div>
         </div>
       </div>
@@ -2197,6 +2238,12 @@ export function createRoadDevPanel({ app, game, params }) {
     #road-dev .prop-row { min-width: 0; }
     #road-dev .prop-value { min-width: 0; }
     #road-dev .prop-value input[type="range"] { min-width: 0; }
+    #road-dev .dv-led-input {
+      width: 100%; min-width: 0;
+      background: var(--bg-input); color: var(--text);
+      border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 6px; font: inherit; font-size: 12px;
+    }
     #road-dev .prop-num {
       width: auto; min-width: 52px; flex-shrink: 0;
       white-space: nowrap; font-variant-numeric: tabular-nums;
@@ -3236,6 +3283,48 @@ export function createRoadDevPanel({ app, game, params }) {
     refresh();
   });
 
+  const ledWrap = $("#dv-led-display");
+  const ledSource = $("#dv-led-source");
+  const ledTextRow = $("#dv-led-text-row");
+  const ledText = $("#dv-led-text");
+  const ledImageRow = $("#dv-led-image-row");
+  const ledFile = $("#dv-led-file");
+  const ledSpeedRow = $("#dv-led-speed-row");
+  const ledSpeed = $("#dv-led-speed");
+  const ledSpeedV = $("#dv-led-speed-v");
+  const ledRgbRow = $("#dv-led-rgb-row");
+  ledSource?.addEventListener("change", () => {
+    const source = ledSource.value;
+    if (source === "chevron") game.setPropLedDisplay?.({ source: "chevron" });
+    else if (source === "text") game.setPropLedDisplay?.({ source: "text" });
+    else game.setPropLedDisplay?.({ source: "image" });
+    refresh();
+  });
+  ledText?.addEventListener("input", () => {
+    game.setPropLedDisplay?.({ source: "text", text: ledText.value }, { immediate: false });
+  });
+  $("#dv-led-upload")?.addEventListener("click", () => ledFile?.click());
+  ledFile?.addEventListener("change", async () => {
+    const file = ledFile.files?.[0];
+    ledFile.value = "";
+    if (!file) return;
+    await game.setPropLedDisplayFile?.(file);
+    refresh();
+  });
+  $("#dv-led-clear")?.addEventListener("click", () => {
+    game.setPropLedDisplay?.({ source: "chevron", image: null });
+    refresh();
+  });
+  ledSpeed?.addEventListener("input", () => {
+    const v = +ledSpeed.value;
+    if (ledSpeedV) ledSpeedV.textContent = v.toFixed(2);
+    game.setPropLedDisplay?.({ panSpeed: v }, { immediate: false });
+  });
+  const ledRgb = toggle("dv-led-rgb", false, (on) => {
+    game.setPropLedDisplay?.({ rgb: on });
+    refresh();
+  });
+
   function renderLiveries() {
     if (!liverySwatches || !liveryName) return;
     const sel = game.getSelectedProp?.();
@@ -3247,6 +3336,28 @@ export function createRoadDevPanel({ app, game, params }) {
     if (sel?.hasDecal) decalToggle?.set?.(!!sel.decal);
     if (advertRow) advertRow.style.display = (sel?.hasAdvert && (sel.advertFaces ?? 1) <= 1) ? "" : "none";
     if (prismRow) prismRow.style.display = (sel?.advertFaces ?? 0) > 1 ? "" : "none";
+    const ledOn = !!sel?.hasLedDisplay;
+    if (ledWrap) ledWrap.style.display = ledOn ? "" : "none";
+    if (ledOn) {
+      const src = sel.ledDisplay?.source ?? "chevron";
+      if (ledSource && document.activeElement !== ledSource) ledSource.value = src;
+      const authored = src === "text" || src === "image";
+      if (ledTextRow) ledTextRow.style.display = src === "text" ? "" : "none";
+      if (ledImageRow) ledImageRow.style.display = src === "image" ? "" : "none";
+      if (ledSpeedRow) ledSpeedRow.style.display = authored ? "" : "none";
+      if (ledRgbRow) ledRgbRow.style.display = authored ? "" : "none";
+      if (ledText && document.activeElement !== ledText) {
+        ledText.value = sel.ledDisplay?.text ?? "";
+      }
+      const imgLab = $("#dv-led-image-label");
+      if (imgLab) imgLab.textContent = sel.ledDisplay?.image ? "Image · set" : "Image";
+      if (ledSpeed && document.activeElement !== ledSpeed) {
+        const sp = sel.ledDisplay?.panSpeed ?? 0.4;
+        ledSpeed.value = String(sp);
+        if (ledSpeedV) ledSpeedV.textContent = Number(sp).toFixed(2);
+      }
+      ledRgb?.set?.(!!sel.ledDisplay?.rgb);
+    }
     if (advertRow) {
       const lab = $("#dv-advert-label");
       if (lab) lab.textContent = sel?.hasAdvertImage ? "Advert · set" : "Advert";
@@ -3263,7 +3374,8 @@ export function createRoadDevPanel({ app, game, params }) {
       return;
     }
     if (!list.length) {
-      liveryName.textContent = (sel.hasDecal || sel.hasAdvert) ? sel.label : `${sel.label} — no liveries`;
+      liveryName.textContent = (sel.hasDecal || sel.hasAdvert || sel.hasLedDisplay)
+        ? sel.label : `${sel.label} — no liveries`;
       return;
     }
     liveryName.textContent = `${sel.label} — ${sel.variant + 1}/${list.length}`;

@@ -33,6 +33,7 @@ import { attribute } from "three/tsl";
 import { mergeByMaterial, isSharedGeometry } from "./modularRoadBatching.js";
 import { enableMeshShadows } from "./modularRoadParkour.js";
 import { decalMaterial, decalGeometry } from "./modularRoadDecals.js";
+import { isLedDisplayUnique } from "./modularRoadLedDisplay.js";
 
 /** Reused for "no tint" — three multiplies instanceColor in, so white is the
  *  identity and an unset entry would render black. */
@@ -196,6 +197,7 @@ function collapsePlainParts(parts) {
       castShadow: cast === "1",
       receiveShadow: recv === "1",
       tintable: false,
+      uniqueFace: false,
     });
   }
   return out;
@@ -268,6 +270,8 @@ export class PropInstancer {
           // Marked by the prop's own builder — the container's shell and door
           // take a livery, its frame rails do not.
           tintable: !!o.userData.tintable,
+          // LED display face — instanced while chevron, live mesh when authored.
+          uniqueFace: !!o.userData.ledDisplayFace,
         });
       });
       /**
@@ -318,6 +322,73 @@ export class PropInstancer {
   }
 
   /**
+   * Hide the live tree while the instancer draws it — except an authored LED
+   * display face, which has to stay visible because it is the one mesh that
+   * left the batch. Scoped to that flag so every other type still disappears
+   * as a whole, the way it always did.
+   */
+  _applyLiveVisibility(inst) {
+    if (!this.isInstanceable(inst.id)) return;
+    if (!this._enabled) {
+      inst.root.visible = true;
+      inst.root.traverse((o) => {
+        if (o.isMesh) o.visible = !o.userData.noRender;
+      });
+      return;
+    }
+    const unique = !!inst.def?.ledDisplay && isLedDisplayUnique(inst.ledDisplay);
+    if (!unique) {
+      inst.root.visible = false;
+      return;
+    }
+    inst.root.visible = true;
+    inst.root.traverse((o) => {
+      if (!o.isMesh) return;
+      o.visible = !!o.userData.ledDisplayFace && !o.userData.noRender;
+    });
+  }
+
+  _dropBatch(key) {
+    const batch = this._batches.get(key);
+    if (!batch || batch.decal) return;
+    for (const m of batch.meshes) this.group.remove(m);
+    this._batches.delete(key);
+  }
+
+  /**
+   * One InstancedMesh per part. `typeId` is what the mirror and stats key off
+   * (always the catalog id, even when `key` is `leddisplay::ledface`).
+   */
+  _ensureBatch(key, typeId, insts, parts) {
+    if (!parts?.length || !insts.length) {
+      this._dropBatch(key);
+      return;
+    }
+    let batch = this._batches.get(key);
+    if (batch && batch.capacity >= insts.length && batch.meshes.length === parts.length) {
+      batch.insts = insts;
+      batch.colorsDirty = true;
+      for (const m of batch.meshes) m.count = insts.length;
+      return;
+    }
+    if (batch) for (const m of batch.meshes) this.group.remove(m);
+    const capacity = insts.length + SLACK;
+    const meshes = parts.map((p) => {
+      const im = new THREE.InstancedMesh(p.geometry, p.material, capacity);
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.userData.tintable = p.tintable;
+      im.userData.propId = typeId;
+      im.castShadow = p.castShadow;
+      im.receiveShadow = p.receiveShadow;
+      im.count = insts.length;
+      im.frustumCulled = true;
+      this.group.add(im);
+      return im;
+    });
+    this._batches.set(key, { insts, meshes, capacity, colorsDirty: true });
+  }
+
+  /**
    * Rebuild the batches from the CURRENT prop set. Cheap enough to call on any
    * add/delete/track load — the per-type templates survive, so this only resizes
    * instance buffers.
@@ -331,7 +402,7 @@ export class PropInstancer {
       // switched on would otherwise stay visible and also get an instance — drawn
       // twice, which reads as the optimisation doing nothing at all (measured:
       // 200 poles at 1152 draws, slightly WORSE than before instancing).
-      inst.root.visible = !this._enabled;
+      this._applyLiveVisibility(inst);
       if (!wanted.has(inst.id)) wanted.set(inst.id, []);
       wanted.get(inst.id).push(inst);
     }
@@ -339,8 +410,11 @@ export class PropInstancer {
     // Drop batches for types that no longer have any props. Decal batches are
     // keyed `<id>::decal` and are never in `wanted`, so they are left to
     // _syncDecals — without this guard they would be torn down every sync.
+    // `::ledface` is the same shape: a satellite of a type still in `wanted`.
     for (const [id, batch] of [...this._batches]) {
-      if (batch.decal || wanted.has(id)) continue;
+      if (batch.decal) continue;
+      const typeId = id.replace(/::ledface$/, "");
+      if (wanted.has(typeId)) continue;
       for (const m of batch.meshes) this.group.remove(m);
       this._batches.delete(id);
     }
@@ -354,57 +428,18 @@ export class PropInstancer {
     for (const [id, insts] of wanted) {
       const parts = this._template(id);
       if (!parts?.length) continue;
-      let batch = this._batches.get(id);
-      // Reuse while the buffers are still big enough — an InstancedMesh's count
-      // can be lowered for free, only growing needs new buffers.
-      if (batch && batch.capacity >= insts.length && batch.meshes.length === parts.length) {
-        batch.insts = insts;
-        batch.colorsDirty = true; // the list changed, so index -> livery did too
-        for (const m of batch.meshes) m.count = insts.length;
-        continue;
+      const shared = parts.filter((p) => !p.uniqueFace);
+      const faces = parts.filter((p) => p.uniqueFace);
+      // Types with no unique-face parts keep the old path: every part in one
+      // batch. LED display splits: frames/legs for every placement, face only
+      // for the chevron ones.
+      if (!faces.length) {
+        this._ensureBatch(id, id, insts, parts);
+      } else {
+        this._ensureBatch(id, id, insts, shared);
+        const chevron = insts.filter((i) => !isLedDisplayUnique(i.ledDisplay));
+        this._ensureBatch(`${id}::ledface`, id, chevron, faces);
       }
-      if (batch) for (const m of batch.meshes) this.group.remove(m);
-      const capacity = insts.length + SLACK;
-      const meshes = parts.map((p) => {
-        const im = new THREE.InstancedMesh(p.geometry, p.material, capacity);
-        im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); // rewritten every frame
-        im.userData.tintable = p.tintable;
-        // Which prop this batch is, so callers can pick batches out by type —
-        // the wet road's planar mirror wants scenery (lamps, boards) plus
-        // deck clutter (cones, barrels). Instancing is all-or-nothing per
-        // batch, so this is the only granularity available and the right one.
-        im.userData.propId = id;
-        im.castShadow = p.castShadow;
-        // An InstancedMesh receives shadows exactly like a plain Mesh — instancing
-        // only changes the VERTEX stage, and the shadow lookup is a fragment-stage
-        // branch keyed off this flag. So this is the whole switch; there is nothing
-        // instancing-specific to work around.
-        im.receiveShadow = p.receiveShadow;
-        im.count = insts.length;
-        /**
-         * CULLED — and the objection this used to carry is now handled.
-         *
-         * It read: "a knocked cone can end up anywhere; culling the whole batch
-         * on a bounding box computed from wherever they started would pop them
-         * out." That is true of a bound computed ONCE. `update()` now discards
-         * `boundingSphere` every time it rewrites the matrices, so three rebuilds
-         * it from where the props actually are, this frame. A cone can roll
-         * wherever it likes and the bound follows it.
-         *
-         * Worth doing because props are the cheapest geometry and the most
-         * expensive draws in the game. Measured on bench-current.json — 6 props,
-         * the whole obstacle set of a real track — they were 36 draws a frame,
-         * 42% of the entire frame's draw calls, to render 5,900 triangles. One
-         * boost decal alone was 8 draws for 5 triangles. They are small, local,
-         * and off-screen most of the time, which is exactly the case frustum
-         * culling is for (and exactly what the guardrail posts, spread along the
-         * whole track, were NOT — see the sweep in roadGame's rebuildRailPosts).
-         */
-        im.frustumCulled = true;
-        this.group.add(im);
-        return im;
-      });
-      this._batches.set(id, { insts, meshes, capacity, colorsDirty: true });
     }
     this._syncDecals(wanted);
     if (this._enabled) this.update();
@@ -522,10 +557,7 @@ export class PropInstancer {
   setEnabled(on) {
     this._enabled = !!on;
     this.group.visible = this._enabled;
-    for (const inst of this.props.instances ?? []) {
-      if (!this.isInstanceable(inst.id)) continue;
-      inst.root.visible = !this._enabled;
-    }
+    for (const inst of this.props.instances ?? []) this._applyLiveVisibility(inst);
     if (this._enabled) { this.sync(); this.update(); }
   }
 
@@ -580,11 +612,8 @@ export class PropInstancer {
     for (const id of ids) {
       for (const p of this._templates.get(id) ?? []) p.geometry.dispose();
       this._templates.delete(id);
-      const batch = this._batches.get(id);
-      if (batch) {
-        for (const m of batch.meshes) this.group.remove(m);
-        this._batches.delete(id);
-      }
+      this._dropBatch(id);
+      this._dropBatch(`${id}::ledface`);
     }
     this.sync();
   }

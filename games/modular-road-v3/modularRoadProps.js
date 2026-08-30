@@ -17,6 +17,12 @@ import {
 import { SCENERY_CATALOG, makeSceneryProp } from "./modularRoadScenery.js";
 import { setAdPosterImage, advertFileToDataUrl } from "./modularRoadAdBillboard.js";
 import { setAdPrismImages, isAdPrism } from "./modularRoadAdPrism.js";
+import {
+  applyLedDisplayContent,
+  isLedDisplayUnique,
+  ledDisplayFileToDataUrl,
+  LED_DISPLAY_CONTENT_DEFAULTS,
+} from "./modularRoadLedDisplay.js";
 import { isSharedGeometry } from "./modularRoadBatching.js";
 import { makeContainer, CONTAINER_LIVERIES, CONTAINER_SIZE } from "./modularRoadContainer.js";
 import { makeTireWall } from "./modularRoadTireWall.js";
@@ -1814,6 +1820,7 @@ export const PROP_CATALOG = [
     category: "scenery",
     advert: !!s.advert,
     advertFaces: s.advertFaces || (s.advert ? 1 : 0),
+    ledDisplay: !!s.ledDisplay,
     make: () => makeSceneryProp(s.id) ?? new THREE.Group(),
   })),
 ];
@@ -2089,6 +2096,7 @@ export class PropManager {
     // (panel toggle or V), or on everything of a type at once.
     inst.decal = false;
     inst.advert = null;
+    inst.ledDisplay = null;
     root.userData.propInstance = inst;
     this.instances.push(inst);
     // A PROP YOU JUST ADDED MUST NEVER BE LEFT HANGING IN MID-AIR.
@@ -2131,6 +2139,8 @@ export class PropManager {
     inst.decal = !!src.decal;
     inst.advert = Array.isArray(src.advert) ? src.advert.slice() : (src.advert ?? null);
     if (inst.advert) applyAdvert(root, inst.advert);
+    inst.ledDisplay = src.ledDisplay ? { ...src.ledDisplay } : null;
+    if (inst.def?.ledDisplay) applyLedDisplayContent(root, inst.ledDisplay);
     root.userData.propInstance = inst;
     this.instances.push(inst);
     this.snapToSurface(inst); // the +4,+4 offset may have landed on a different surface
@@ -2321,6 +2331,36 @@ export class PropManager {
     const [tw, th] = poster?.userData?.adPx ?? [1024, 576];
     const dataUrl = await advertFileToDataUrl(file, tw, th);
     return this.setSelectedAdvert(dataUrl, face);
+  }
+
+  /**
+   * Author the selected LED display's face. Chevron (or null) puts it back on
+   * the shared instanced material; text/image uniquifies the face only.
+   *
+   * `immediate: false` for live text/speed so each keystroke is not its own
+   * undo step and collision bake. Source and image still commit at once.
+   */
+  setSelectedLedDisplay(patch, { immediate = true } = {}) {
+    if (!this.selected?.def?.ledDisplay) return false;
+    const wasUnique = isLedDisplayUnique(this.selected.ledDisplay);
+    const prev = this.selected.ledDisplay ?? { ...LED_DISPLAY_CONTENT_DEFAULTS };
+    const next = { ...LED_DISPLAY_CONTENT_DEFAULTS, ...prev, ...patch };
+    this.selected.ledDisplay = (next.source === "chevron") ? null : next;
+    applyLedDisplayContent(this.selected.root, this.selected.ledDisplay);
+    const nowUnique = isLedDisplayUnique(this.selected.ledDisplay);
+    // Joining or leaving the instanced face batch is the only draw-path change.
+    if (wasUnique !== nowUnique) this.onVariantChange?.(this.selected);
+    else if (immediate) this.onSelectionChange?.(this.selected);
+    clearTimeout(this._ledCommitTimer);
+    if (immediate) this.onChange?.();
+    else this._ledCommitTimer = setTimeout(() => this.onChange?.(), 400);
+    return true;
+  }
+
+  async setSelectedLedDisplayFile(file) {
+    if (!this.selected?.def?.ledDisplay || !file) return false;
+    const dataUrl = await ledDisplayFileToDataUrl(file);
+    return this.setSelectedLedDisplay({ source: "image", image: dataUrl });
   }
 
   /** Step the selected prop's livery. `dir` −1 or +1. */
@@ -2589,6 +2629,8 @@ export class PropManager {
       ...(inst.def?.variants?.length ? { variant: inst.variant } : {}),
       ...(inst.decal ? { decal: true } : {}),
       ...(inst.advert ? { advert: inst.advert } : {}),
+      ...(inst.ledDisplay && isLedDisplayUnique(inst.ledDisplay)
+        ? { ledDisplay: inst.ledDisplay } : {}),
     }));
   }
 
@@ -2655,6 +2697,8 @@ export class PropManager {
       inst.decal = !!item.decal;
       inst.advert = item.advert || null;
       if (inst.def?.advert) applyAdvert(root, inst.advert);
+      inst.ledDisplay = item.ledDisplay ? { ...item.ledDisplay } : null;
+      if (inst.def?.ledDisplay) applyLedDisplayContent(root, inst.ledDisplay);
       root.userData.propInstance = inst;
       // A loaded pose IS the authored pose — the file is the authorship.
       this.captureAuthored(inst);
@@ -2768,6 +2812,11 @@ export class PropManager {
       if (!isSharedGeometry(o.geometry)) o.geometry?.dispose?.();
       if (o.userData.adPoster && o.material) {
         if (o.material.map?.userData?.adOwned) o.material.map.dispose();
+        o.material.dispose();
+      }
+      if (o.userData.ledFaceOwned && o.material) {
+        const tex = o.material.userData?.led?.contentNode?.value;
+        if (tex?.userData?.ledOwned) tex.dispose();
         o.material.dispose();
       }
     });

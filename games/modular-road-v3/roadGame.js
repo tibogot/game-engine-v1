@@ -1890,6 +1890,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       if (want) o.layers.enable(REFLECT_LAYER);
       else o.layers.disable(REFLECT_LAYER);
     });
+    // Authored LED display faces sit on the live prop tree, not the instancer,
+    // so they would otherwise miss the puddle. Other live props stay off this
+    // pass — ads already do, and this is scoped to the tagged face.
+    _propsRef?.group?.traverse((o) => {
+      if (!o.isMesh || !o.userData.ledDisplayFace) return;
+      if (sceneryInMirror && o.visible) o.layers.enable(REFLECT_LAYER);
+      else o.layers.disable(REFLECT_LAYER);
+    });
     // Drive mode's merged track — see buildMergedTrack. Tagging only the
     // editable proxies tags the copies that are hidden the moment you drive.
     //
@@ -2788,7 +2796,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // A livery lives on the prop INSTANCE, not its material, so the instancer has
   // to be told to re-upload the colour buffer — it only does so when dirty,
   // since a colour is picked once and then sits there.
-  props.onVariantChange = () => { propInstancer.markColorsDirty(); devPanel?.refresh(); };
+  props.onVariantChange = () => {
+    propInstancer.markColorsDirty();
+    propInstancer.sync();
+    applyRailReflectionMembers();
+    devPanel?.refresh();
+  };
   propInstancer.setEnabled(true);
 
 
@@ -5418,12 +5431,16 @@ ${e.message}`);
           advertSlots: Array.isArray(s.advert)
             ? [0, 1, 2].map((i) => !!s.advert[i])
             : [!!s.advert, false, false],
+          hasLedDisplay: !!s.def?.ledDisplay,
+          ledDisplay: s.ledDisplay ?? { source: "chevron" },
         };
       },
       setPropVariant: (i) => props.setSelectedVariant(i),
       setPropDecal: (on) => props.setSelectedDecal(on),
       setPropAdvertFile: (file, face) => props.setSelectedAdvertFile(file, face),
       clearPropAdvert: (face) => props.setSelectedAdvert(null, face ?? 0),
+      setPropLedDisplay: (patch, opts) => props.setSelectedLedDisplay(patch, opts),
+      setPropLedDisplayFile: (file) => props.setSelectedLedDisplayFile(file),
       randomisePropVariants: () => props.randomiseVariants(props.selected?.id ?? null),
       getMode: () => mode,
       toggleMode,
