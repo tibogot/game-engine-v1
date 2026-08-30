@@ -45,10 +45,58 @@ import {
  */
 const _sceneDepthTex = /*#__PURE__*/ viewportDepthTexture();
 
+/**
+ * WET SPRAY — the same puff system, wearing a different coat.
+ *
+ * ON A SOAKED ROAD A TYRE DOES NOT SMOKE, IT SPRAYS, and that is why this is a
+ * look SWAP rather than a second particle class running alongside. Rubber smoke
+ * needs a dry, hot, sliding tyre; standing water needs neither heat nor slip —
+ * the contact patch simply throws the film it displaces. So the two are close to
+ * mutually exclusive in reality, and swapping is more truthful than adding.
+ *
+ * It is also what the emitter can actually express. `opacity` is read once per
+ * class in `_stepPool` and the colour ramp is global, so two looks cannot share
+ * one pool without per-particle opacity and tint fields. Blending the CLASS
+ * settings by wetness gets the effect with no new pool, no new mesh, no extra
+ * draw call, and no risk of a heavy spray starving the smoke budget.
+ *
+ * The differences from smoke are all physical:
+ *   - WHITE, not grey. Water scatters; carbon absorbs.
+ *   - THINNER and SHORTER-LIVED. A droplet plume is transparent and falls out
+ *     of the air in well under a second; smoke hangs.
+ *   - THROWN, not risen. Smoke is buoyant and climbs; spray is flung backwards
+ *     by the tread and drops, so `rise` goes down and `drag` up.
+ *   - SMALLER, and many more of them.
+ */
+export const DEFAULT_WET_SPRAY_SETTINGS = {
+  /** Emitted whenever the car is MOVING on a wet road — no drift required.
+   *  This is the whole point: spray is a function of speed and water, not slip. */
+  emitRate: 260,
+  /** Road speed (m/s) at which spray starts. Well below the smoke threshold —
+   *  you kick up water long before you can break traction. */
+  entrySpeed: 4,
+  opacity: 0.12,
+  lifeMin: 0.28,
+  lifeMax: 0.7,
+  sizeMin: 0.22,
+  sizeMax: 0.5,
+  sizeGrowth: 2.4,
+  /** Flung back and DOWN relative to smoke — droplets are not buoyant. */
+  rise: 0.28,
+  drag: 0.55,
+  spread: 0.5,
+  /** Water is white and stays white; there is no hot/cool ageing to it. */
+  colorHot: 0xdfe6ec,
+  colorCool: 0xc8d2dc,
+};
+
 export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
   enabled: true,
   emitRate: 150,
   trigger: 0.04,
+  /** How the puffs look once the road is wet — see DEFAULT_WET_SPRAY_SETTINGS.
+   *  Blended in by `setWetness`, so a dry track is untouched. */
+  wetSpray: { ...DEFAULT_WET_SPRAY_SETTINGS },
   /**
    * Per-puff peak alpha. LOW on purpose. Density is meant to come from many
    * overlapping thin layers, not from a few opaque ones — at 0.5 (the old value)
@@ -347,6 +395,8 @@ const SPEED_DRAG = 0.12;
 const _smokeTint = new THREE.Color();
 const _smokeHot = new THREE.Color();
 const _smokeCool = new THREE.Color();
+/** Scratch for the wet-spray colour cross-fade — see _puffSettings. */
+const _wetTmp = new THREE.Color();
 /** Sun direction (TOWARD the sun), fed in by the game. Identity = straight up. */
 const _smokeSun = new THREE.Vector3(0, 1, 0);
 const SMOKE_COLOR_HEX = 0x6a6c76;
@@ -646,6 +696,56 @@ export class ModularRoadDriftSmoke {
     /** Master visibility. Both meshes also hide themselves when empty, so this
      *  is ANDed in rather than written straight to `mesh.visible`. */
     this._visible = true;
+  }
+
+  /**
+   * How wet the road is, 0..1. Drives the smoke→spray swap; see
+   * DEFAULT_WET_SPRAY_SETTINGS for why it is a swap and not a second class.
+   */
+  setWetness(w) {
+    this._wetness = Math.max(0, Math.min(1, w || 0));
+  }
+
+  /**
+   * The puff settings to emit and step with, given the weather.
+   *
+   * Returns the dry settings OBJECT ITSELF when dry — same reference, so a dry
+   * track is byte-identical to before this existed and pays nothing, not even
+   * an allocation per frame.
+   *
+   * Numbers are interpolated rather than switched so the transition is a
+   * dissolve as the rain comes in; colours cross over on the same ramp.
+   */
+  _puffSettings() {
+    const s = this.settings;
+    const w = this._wetness ?? 0;
+    const spray = s.wetSpray;
+    if (w <= 0 || !spray) return s;
+    const lerp = (a, b) => a + (b - a) * w;
+    const num = (k, dflt) => lerp(s[k] ?? dflt, spray[k] ?? s[k] ?? dflt);
+    // Cached and mutated rather than rebuilt: this runs every frame, and the
+    // pool reads it once per step.
+    const out = this._wetPuff ?? (this._wetPuff = {});
+    Object.assign(out, s);
+    out.emitRate = num("emitRate", 150);
+    out.opacity = num("opacity", 0.22);
+    out.lifeMin = num("lifeMin", 0.65);
+    out.lifeMax = num("lifeMax", 1.45);
+    out.sizeMin = num("sizeMin", 0.42);
+    out.sizeMax = num("sizeMax", 0.85);
+    out.sizeGrowth = num("sizeGrowth", 3.4);
+    out.rise = num("rise", 0.75);
+    out.drag = num("drag", 0.35);
+    out.spread = num("spread", 0.35);
+    // Colour crosses over on the same ramp. `_wetHot/_wetCool` are scratch so
+    // this allocates nothing per frame either.
+    const hot = this._wetHot ?? (this._wetHot = new THREE.Color());
+    const cool = this._wetCool ?? (this._wetCool = new THREE.Color());
+    hot.set(s.colorHot ?? s.color ?? SMOKE_COLOR_HEX).lerp(_wetTmp.set(spray.colorHot), w);
+    cool.set(s.colorCool ?? s.color ?? SMOKE_COLOR_HEX).lerp(_wetTmp.set(spray.colorCool), w);
+    out.colorHot = hot;
+    out.colorCool = cool;
+    return out;
   }
 
   /** Show/hide the whole effect — both the puff quads and the bank spheres. */
@@ -1099,13 +1199,32 @@ export class ModularRoadDriftSmoke {
     const inAir = vehicle.groundedCount === 0;
     const s = this.settings;
     const trigger = s.trigger ?? INTENSITY_MIN;
-    const emitSmoke =
+    let emitSmoke =
       hasRear &&
       !inAir &&
       speed > ENTRY_SPEED * 0.55 &&
       (driftIntensity > trigger ||
         (handbrake && speed > ENTRY_SPEED * 0.55));
-    const smokeIntensity = Math.max(driftIntensity, handbrake ? 0.45 : 0);
+    let smokeIntensity = Math.max(driftIntensity, handbrake ? 0.45 : 0);
+
+    // ── SPRAY NEEDS NO SLIP ───────────────────────────────────────────────
+    //
+    // Every term above measures how hard the tyre is sliding, because that is
+    // what makes rubber smoke. Water does not care: a tyre rolling straight
+    // through standing water throws just as much of it, and at a much lower
+    // speed than it takes to break traction. So on a wet road the gate becomes
+    // "moving and on the ground", and the intensity comes from speed rather
+    // than from slip — with the drift terms still able to raise it, since
+    // sliding does throw more water than rolling.
+    const wet = this._wetness ?? 0;
+    if (wet > 0 && hasRear && !inAir) {
+      const entry = this.settings.wetSpray?.entrySpeed ?? 4;
+      const rolling = THREE.MathUtils.smoothstep(speed, entry, entry * 3.5);
+      if (rolling > 0) {
+        emitSmoke = true;
+        smokeIntensity = Math.max(smokeIntensity, rolling * wet);
+      }
+    }
 
     this.update(
       dt,
@@ -1119,6 +1238,10 @@ export class ModularRoadDriftSmoke {
   }
 
   update(dt, rearPoints, emit, intensity, velocityX, velocityZ, camera) {
+    // THE PUFF CLASS, WEATHERED. Identical object when dry (see _puffSettings),
+    // so nothing about a dry track changes. `this.settings` is still read below
+    // for the shader-wide uniforms, which are shared by both looks.
+    const puff = this._puffSettings();
     const s = this.settings;
     if (s.enabled === false) emit = false;
     this.uSoftDepth.value = Math.max(1e-3, s.softDepth ?? 0.9);
@@ -1143,7 +1266,7 @@ export class ModularRoadDriftSmoke {
     const hazeOn = !!haze && haze.enabled !== false;
 
     if (emit) {
-      this._emit(this.puffEmitter, s, s.emitRate ?? EMIT_RATE,
+      this._emit(this.puffEmitter, puff, puff.emitRate ?? EMIT_RATE,
         rearPoints, intensity, velocityX, velocityZ, dt);
       if (hazeOn) {
         this._emit(this.hazeEmitter, haze, haze.emitRate ?? 12,
@@ -1181,7 +1304,7 @@ export class ModularRoadDriftSmoke {
       }
     }
 
-    const alive = this._stepPool(this.particles, s, dt, false);
+    const alive = this._stepPool(this.particles, puff, dt, false);
     const vertCount = alive * VERTS_PER_PARTICLE;
     this.geometry.setDrawRange(0, vertCount);
     this.mesh.visible = vertCount > 0 && this._visible;

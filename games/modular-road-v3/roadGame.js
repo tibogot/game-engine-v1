@@ -2005,6 +2005,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // than a dark rubber ribbon — see MARK_LOOK in modularRoadTireMarks. The
     // marks are their own mesh and material, so they have to be told.
     tireMarks.setWetness(wet);
+    // ...and it throws the water it displaces. On a wet road the drift puffs
+    // become spray: white, thin, short-lived, and emitted by SPEED rather than
+    // by slip. See DEFAULT_WET_SPRAY_SETTINGS for why that is a swap and not a
+    // second particle system.
+    driftSmoke.setWetness(wet);
     // Crossing 0 in either direction changes whether the pre-mirror content is
     // worth building at all — and ONLY that. The mirrored geometry is a function
     // of the track and the props, and it draws with its own materials, which this
