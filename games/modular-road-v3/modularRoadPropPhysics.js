@@ -62,16 +62,15 @@ export const PROP_PHYSICS = {
 
 /**
  * Linear scale of the traffic cone, against the ~0.93 m motorway cone the
- * geometry is authored at. 3 puts it at ~2.8 m — an obstacle you aim at rather
- * than street furniture you happen to clip, and big enough to actually see the
- * collision happen from the debug cam.
+ * geometry is authored at. 1 is that real size. (A brief 3× experiment put
+ * them at ~2.8 m — cartoon obstacles, not street furniture.)
  *
  * EXPORTED AND SHARED because the cone's size lives in two files: the LOOK in
  * modularRoadProps.js and the collision proxy here. Both read this, so they
  * cannot drift — which they already did once (the hardcoded copy is exactly how
  * the cone ended up half-buried; see the note in the cone's make()).
  */
-export const CONE_SCALE = 3;
+export const CONE_SCALE = 1;
 /**
  * Linear scale of a barrier tyre, against a real ~0.70 m OD / ~0.22 m wide
  * racing tyre. 2 puts it at 1.4 m across — still a tyre, not a doughnut the

@@ -1371,7 +1371,7 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="prop-row">
             <span class="prop-label">Rail roughness</span>
             <div class="prop-value">
-              <input type="range" id="dv-rail-rough" min="0.05" max="1" step="0.02" />
+              <input type="range" id="dv-rail-rough" min="0.05" max="1" step="0.01" />
               <span class="prop-num" id="dv-rail-rough-v"></span>
             </div>
           </div>

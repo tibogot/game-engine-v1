@@ -83,6 +83,9 @@ export const ATMOSPHERE_DEFAULTS = {
   sunIntensity: 20.0,
   /** Ground albedo — feeds the multi-scatter LUT, so a bright ground lifts the whole sky. */
   groundAlbedo: 0.1,
+  /** Extra gain on the sun disc only. The disc is orders of magnitude brighter than the
+   *  sky around it, so it wants its own dial rather than riding sunIntensity alone. */
+  sunDiscBrightness: 60.0,
 };
 
 /** March step counts. Only ever run inside a LUT bake, never per sky pixel. */
@@ -122,6 +125,7 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
   /** Camera altitude above sea level, metres. This is what makes the sky change when you
    *  climb — a gradient sky cannot do it at all. */
   const uViewHeight = uniform(0);
+  const uSunDiscBrightness = uniform(P.sunDiscBrightness);
 
   // ── Medium ─────────────────────────────────────────────────────────────────────────
 
@@ -401,6 +405,21 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
       throughput.mulAssign(stepT);
     });
 
+    // GROUND TERM. Without it every below-horizon direction integrates only the short,
+    // nearly-unscattered path down to the surface and comes out almost black — which
+    // shows in game as a hard dark band under the horizon wherever the scene's own ground
+    // does not reach far enough to cover the dome. Lambertian ground, lit through the
+    // atmosphere and attenuated by the path we just marched, is both the physical answer
+    // and the one that makes the band disappear.
+    If(ground, () => {
+      const hitPos = vec3(0.0, r, 0.0).add(dir.mul(tMax));
+      const up = normalize(hitPos);
+      const muS = dot(up, uSunDir);
+      const sunT = sampleTransmittance(float(0.0), muS.max(0.0));
+      const lambert = uGroundAlbedo.mul(muS.max(0.0)).mul(1.0 / PI);
+      acc.addAssign(throughput.mul(sunT).mul(lambert));
+    });
+
     return vec4(acc.mul(uSunIntensity), 1.0);
   });
 
@@ -433,6 +452,36 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
   const sunDiscTransmittance = Fn(([dir]) =>
     sampleTransmittance(uViewHeight, normalize(dir).y),
   );
+
+  /**
+   * The sun disc, analytic.
+   *
+   * Deliberately NOT in the sky-view LUT: at 192x108 the disc is a fraction of a texel and
+   * would come out as a smeared blob with a hard bilinear edge. Computed per pixel it stays
+   * a crisp disc at any resolution, for a dot product and a smoothstep.
+   *
+   * Tinted by the transmittance along its own ray, which is what reddens and dims it near
+   * the horizon — the same physics that reddens the sky, so the two always agree instead of
+   * being two separately-authored colours that drift apart.
+   */
+  const sunDisc = Fn(([dir]) => {
+    const d = normalize(dir);
+    const cosT = dot(d, uSunDir);
+    const cosR = float(Math.cos((P.sunAngularRadius * Math.PI) / 180));
+    // Soften by roughly a tenth of the radius so the rim is not aliased.
+    const edge = cosR.oneMinus().mul(0.12);
+    const disc = smoothstep(cosR.sub(edge), cosR.add(edge.mul(0.25)), cosT);
+    // Limb darkening: the sun is dimmer at its rim than its centre.
+    const rNorm = saturate(cosT.oneMinus().div(cosR.oneMinus().max(1e-8)));
+    const limb = sqrt(rNorm.mul(rNorm).oneMinus().max(0.0)).mul(0.6).add(0.4);
+    // Below the horizon the disc must not shine through the planet.
+    const above = smoothstep(float(-0.02), float(0.0), d.y);
+    return sunDiscTransmittance(d)
+      .mul(disc.mul(limb).mul(above).mul(uSunIntensity).mul(uSunDiscBrightness));
+  });
+
+  /** Sky plus sun — what a dome material normally wants. */
+  const skyWithSun = Fn(([dir]) => skyRadiance(dir).add(sunDisc(dir)));
 
   // ── Bake orchestration ─────────────────────────────────────────────────────────────
   // Order matters: MS reads transmittance, sky-view reads both.
@@ -497,6 +546,7 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
     uOzScale.value = P.ozoneScale;
     uSunIntensity.value = P.sunIntensity;
     uGroundAlbedo.value = P.groundAlbedo;
+    uSunDiscBrightness.value = P.sunDiscBrightness;
     _needStatic = true;
   }
 
@@ -509,6 +559,8 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
   return {
     params: P,
     skyRadiance,
+    skyWithSun,
+    sunDisc,
     sunDiscTransmittance,
     update,
     syncParams,

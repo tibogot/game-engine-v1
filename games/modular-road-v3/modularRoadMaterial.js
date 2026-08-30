@@ -1713,7 +1713,7 @@ export function syncCheapAsphaltUniforms(mat, p) {
 export function createGuardrailMaterial(opts = {}) {
   return new THREE.MeshStandardMaterial({
     color: lin(opts.color ?? 0xc9d2dc),
-    roughness: opts.roughness ?? 0.42,
+    roughness: opts.roughness ?? 0.20,
     metalness: opts.metalness ?? 0.5,
     side: THREE.DoubleSide,
   });

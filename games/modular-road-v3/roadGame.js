@@ -1844,6 +1844,17 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   /** Roadside scenery (lamps, boards) in the mirror — see the note below. */
   let sceneryInMirror = true;
+  /**
+   * Deck clutter in the planar puddle. Colourful, low, already instanced, and
+   * the sim writes their matrices — so a knocked cone reflects where it is,
+   * not where it was authored. Do not pre-mirror these: that path is a static
+   * flipped copy and would leave a ghost of the standing pose.
+   *
+   * Cones are ~0.93 m (motorway size) and sit well inside the 3 m slab.
+   * Barrels are ~1.5 m. Tyres stay out: black on wet is a lot of triangles
+   * for almost no smear.
+   */
+  const PLANAR_PROP_IDS = new Set(["cone", "barrel"]);
   /** Late-bound for the same reason as `_mergedGroupRef`: the builder's
    *  onChange calls the membership pass during construction, before the
    *  instancer exists, and naming a later `const` there is a TDZ throw. */
@@ -1863,23 +1874,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     apply(builder?.instGroup);
     apply(builder?.root);
 
-    // SCENERY IN THE MIRROR — lamps, boards, floodlights. Their emissive heads
-    // are the brightest small things beside a night track, and a bright small
-    // thing smeared down wet tarmac is most of what sells it.
+    // SCENERY + DECK CLUTTER IN THE MIRROR — lamps, boards, floodlights, then
+    // cones and barrels. Emissive heads sell the wet-night smear; orange cones
+    // and steel drums sell the puddle having things IN it.
     //
     // Cheap for the same reason the props themselves are: the instancer has
     // already collapsed every copy of a type into one InstancedMesh, so a
-    // straight lined with a dozen lamps adds a couple of draws to the mirror
-    // pass, not a dozen. That also fixes the granularity — membership is
-    // per-BATCH, so individual lamps cannot be distance-culled out of the
-    // mirror. Given the cost, they do not need to be.
-    //
-    // Scenery only. Cones, tyre walls and containers are dull, low and legion;
-    // they would add triangles to the mirror for nothing.
+    // yard of cones is +1–2 draws on a pass that already exists, not a draw
+    // per cone. Membership is per-BATCH (propId on the InstancedMesh), which
+    // is the only granularity instancing allows and the right one here.
     _propInstancerRef?.group?.traverse((o) => {
       if (!o.isMesh && !o.isInstancedMesh) return;
-      const isScenery = SCENERY_MAP.has(o.userData.propId);
-      if (isScenery && sceneryInMirror) o.layers.enable(REFLECT_LAYER);
+      const id = o.userData.propId;
+      const want = (SCENERY_MAP.has(id) && sceneryInMirror) || PLANAR_PROP_IDS.has(id);
+      if (want) o.layers.enable(REFLECT_LAYER);
       else o.layers.disable(REFLECT_LAYER);
     });
     // Drive mode's merged track — see buildMergedTrack. Tagging only the

@@ -100,7 +100,7 @@ console.log("\n=== 2. WHAT collisionMeshes() HANDS EACH CHANNEL ===");
   writeFileSync(STUB, [
     "import * as THREE from 'three';",
     "export const PHYSICS_PROP_TYPES = {};",
-    "export const CONE_SCALE = 3;",
+    "export const CONE_SCALE = 1;",
     "export const GATE_WIDTH = 4.4, GATE_HEIGHT = 1.5, GATE_BASE_Y = 0.15;",
     "export const GATE_POST_RADIUS = 0.11, GATE_POST_HEIGHT = 1.9;",
     "export const SCENERY_CATALOG = [];",

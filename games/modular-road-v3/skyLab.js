@@ -129,7 +129,7 @@ export async function startSkyLab() {
   atmoMat.side = THREE.BackSide;
   atmoMat.depthWrite = false;
   atmoMat.fog = false;
-  atmoMat.colorNode = TSL_Fn(() => atmo.skyRadiance(positionWorldTSL))();
+  atmoMat.colorNode = TSL_Fn(() => atmo.skyWithSun(positionWorldTSL))();
   const atmoDome = new THREE.Mesh(sky.mesh.geometry, atmoMat);
   atmoDome.frustumCulled = false;
   atmoDome.visible = false;

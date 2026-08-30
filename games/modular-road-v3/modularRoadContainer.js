@@ -53,8 +53,7 @@ const ISO_20FT = { length: 6.058, height: 2.591, width: 2.438 };
  * body stretched to twice the length, which doubles the spacing of the
  * corrugation ribs and makes it visibly coarser up close. A uniform scale keeps
  * the silhouette and the rib proportions exactly right — it just makes the box
- * bigger, the way the cone is authored at 3x a real motorway cone (CONE_SCALE)
- * for the same reason.
+ * bigger — same idea as scaling a prop up without redrawing its details.
  *
  * ONE NUMBER. Everything downstream — the collider proxy, the stack height, the
  * decal placement — is derived from CONTAINER_SIZE below, so this is the only

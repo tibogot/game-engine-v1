@@ -370,9 +370,9 @@ export class PropInstancer {
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); // rewritten every frame
         im.userData.tintable = p.tintable;
         // Which prop this batch is, so callers can pick batches out by type —
-        // the wet road's mirror wants the scenery (lamps, boards) and not the
-        // cones. Instancing is all-or-nothing per batch, so this is the only
-        // granularity available and it is the right one.
+        // the wet road's planar mirror wants scenery (lamps, boards) plus
+        // deck clutter (cones, barrels). Instancing is all-or-nothing per
+        // batch, so this is the only granularity available and the right one.
         im.userData.propId = id;
         im.castShadow = p.castShadow;
         // An InstancedMesh receives shadows exactly like a plain Mesh — instancing
