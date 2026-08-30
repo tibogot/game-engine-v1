@@ -2010,6 +2010,26 @@ export const CHASSIS_GLB_LIGHTS = {
   /** Tail lights: flare under brake / handbrake. ~3x the running state, which
    *  is about the real ratio between a tail lamp and a stop lamp. */
   brakeIntensity: 9.0,
+  /**
+   * TWO ELEMENTS, TWO JOBS — which is only possible now that the housing is
+   * driven as well as the strip (see makeTailHousingMaterial).
+   *
+   * A real car does not merely get brighter when you brake: it lights a
+   * different AREA, and that change of SHAPE is what you actually recognise in
+   * a mirror. With one mesh there was no shape to change.
+   *
+   *   true  — HOUSING is the tail lamp (on with the headlights, brighter under
+   *           braking) and the STRIP is the stop lamp (dark otherwise, so it
+   *           appears when you brake). This is the modern arrangement and it
+   *           gives the shape change.
+   *   false — both elements follow the same running/brake curve, i.e. the
+   *           behaviour before the housing existed.
+   *
+   * Flip it if the strip reads better as the always-on signature — that is a
+   * real design too, and which one the Emira actually uses is a question for
+   * your eye rather than for this comment.
+   */
+  stripIsStopLamp: true,
   /** Headlight LENS emissive when lit — the lenses are glass in the file, not
    *  emissive, so this is what makes them read as switched on. 0 = plain glass. */
   headlampIntensity: 3.0,
@@ -3663,13 +3683,23 @@ export class Vehicle {
       const lit = T.enabled
         ? (braking ? L.brakeIntensity : (HEADLIGHTS.enabled ? L.runningIntensity : 0))
         : 0;
+      // Split the two elements — see stripIsStopLamp. The housing carries the
+      // tail function, the strip the stop function, so braking changes the lit
+      // AREA and not just its brightness.
+      const stopOnly = L.stripIsStopLamp
+        ? (T.enabled && braking ? L.brakeIntensity : 0)
+        : lit;
       for (const m of glb.brakeLights) {
-        m.material.emissiveIntensity = lit;
-        // The tail HOUSING drives a uniform instead: its emissive is masked to
-        // the rear of the mesh (the same material covers the front lenses), so
-        // it cannot use the material-wide emissiveIntensity the strip does.
+        // The tail HOUSING drives a uniform: its emissive is masked to the rear
+        // of the mesh (the same material covers the front lenses too), so it
+        // cannot use the material-wide emissiveIntensity the strip does.
         // See makeTailHousingMaterial in chassisModel.js.
-        if (m.material._tailIntensity) m.material._tailIntensity.value = lit;
+        if (m.material._tailIntensity) {
+          m.material._tailIntensity.value = lit;
+          m.material.emissiveIntensity = lit;
+        } else {
+          m.material.emissiveIntensity = stopOnly;
+        }
       }
       const lamp = HEADLIGHTS.enabled ? L.headlampIntensity : 0;
       for (const m of glb.headlampLenses) m.material.emissiveIntensity = lamp;

@@ -64,7 +64,25 @@ function stubModel() {
     object.add(m);
     return m;
   };
-  return { object, parts: { brakeLights: [mk()], headlampLenses: [mk(), mk()] } };
+  /**
+   * The rear HOUSING, which the real loader distinguishes by the presence of a
+   * `_tailIntensity` uniform — its emissive is position-masked to the rear of a
+   * mesh whose material also covers the front lenses, so it cannot be driven by
+   * the material-wide emissiveIntensity the strip uses.
+   *
+   * The stub carried only ONE rear mesh, which is why it could not see the
+   * two-element split at all. A plain `{ value }` object stands in for the TSL
+   * uniform: the vehicle only ever writes `.value`.
+   */
+  const mkHousing = () => {
+    const m = mk();
+    m.material._tailIntensity = { value: 0 };
+    return m;
+  };
+  return {
+    object,
+    parts: { brakeLights: [mkHousing(), mk()], headlampLenses: [mk(), mk()] },
+  };
 }
 const mkCar = () => {
   const c = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
@@ -130,13 +148,42 @@ console.log("\n=== THE MODEL'S OWN EMISSIVE PARTS GET DRIVEN ===");
   c._updateTaillights();
   check("headlamp lenses light up with the headlights",
     lens.material.emissiveIntensity === CHASSIS_GLB_LIGHTS.headlampIntensity);
-  check("tail lights show the dim running glow",
-    brake.material.emissiveIntensity === CHASSIS_GLB_LIGHTS.runningIntensity);
+  /* TWO ELEMENTS, TWO JOBS — this assertion changed with the tail housing.
+   *
+   * It used to read `brakeLights[0]` and expect the running glow, which was
+   * right while a single mesh did both functions. It no longer is: the HOUSING
+   * carries the tail lamp and the STRIP is the stop lamp, so the strip is dark
+   * at running and only appears under braking. That is the point — braking now
+   * changes the lit AREA, which is what you recognise in a mirror, rather than
+   * only its brightness.
+   *
+   * The housing is the element carrying `_tailIntensity` (its emissive is
+   * position-masked to the rear, so it cannot use the material-wide intensity
+   * the strip does); identify by that rather than by array order. */
+  const housing = parts.brakeLights.find((m) => m.material._tailIntensity);
+  const strip = parts.brakeLights.find((m) => !m.material._tailIntensity);
+  check("the two rear elements are distinguishable", !!housing && !!strip,
+    "the housing carries a _tailIntensity uniform; the strip does not");
+  if (housing) {
+    check("the HOUSING shows the running glow (it is the tail lamp)",
+      housing.material._tailIntensity.value === CHASSIS_GLB_LIGHTS.runningIntensity);
+  }
+  if (strip && CHASSIS_GLB_LIGHTS.stripIsStopLamp) {
+    check("the STRIP stays dark at running (it is the stop lamp)",
+      strip.material.emissiveIntensity === 0,
+      `${strip.material.emissiveIntensity} — braking must change the lit AREA, not just brightness`);
+  }
 
   c.input.handbrake = true;
   c._updateTaillights();
-  check("tail lights flare under the handbrake",
-    brake.material.emissiveIntensity === CHASSIS_GLB_LIGHTS.brakeIntensity);
+  if (housing) {
+    check("the housing flares under the handbrake",
+      housing.material._tailIntensity.value === CHASSIS_GLB_LIGHTS.brakeIntensity);
+  }
+  if (strip) {
+    check("...and the strip lights up with it",
+      strip.material.emissiveIntensity === CHASSIS_GLB_LIGHTS.brakeIntensity);
+  }
   check("brake flare is brighter than the running glow",
     CHASSIS_GLB_LIGHTS.brakeIntensity > CHASSIS_GLB_LIGHTS.runningIntensity);
 

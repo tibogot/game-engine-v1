@@ -300,7 +300,20 @@ function makeTailHousingMaterial(src) {
     color: src.color?.clone() ?? new THREE.Color(0xffffff),
     roughness: src.roughness ?? 0.1,
     metalness: src.metalness ?? 0.8,
-    side: src.side ?? THREE.FrontSide,
+    /**
+     * FRONT FACES ONLY — and this is a fix, not a tidy-up.
+     *
+     * The file authors this lens DoubleSide, which was harmless while the mesh
+     * was never lit. Once it glows it is not: `showInterior` is false so the
+     * cabin is an empty shell, and the glass is transparent (opacity 0.42,
+     * depthWrite off). Looking at the car head-on you therefore see straight
+     * through the windscreen, through the hollow cabin, and onto the INSIDE of
+     * the rear lamp — which reads as the tail lights shining through the car.
+     *
+     * Culling the back faces removes exactly that and nothing else: from behind,
+     * where the lamp is meant to be seen, only front faces were ever visible.
+     */
+    side: THREE.FrontSide,
     // Same reasoning as the strip: a lamp is a bloom SOURCE, and tone mapping
     // it first crushes the headroom the bloom keys off.
     toneMapped: false,
