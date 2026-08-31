@@ -288,17 +288,13 @@ export function createRoadMaterial(opts = {}) {
     /**
      * Master, 0 = a road with no cracks.
      *
-     * SHIPS ON, and that reaches existing tracks — deliberately. Saves are
-     * sparse (see the track format note): an absent key means "inherit the
-     * current default", which is exactly what stops old tracks freezing at the
-     * defaults of the day they were saved. No track has ever written a
-     * `tarSnakeAmount`, so every one of them picks this up. Set it to 0 in the
-     * panel and re-save a track that should stay pristine.
+     * Off by default. Saves are sparse: an absent key inherits this default.
+     * Turn it up in the TRACK panel when you want the look.
      *
      * Measured at 0.000 ms on the main scene pass — see the note above about
      * why there is no new noise to pay for.
      */
-    tarSnakeAmount: uniform(opts.tarSnakeAmount ?? 0.7),
+    tarSnakeAmount: uniform(opts.tarSnakeAmount ?? 0),
     /** Sealant colour. Near-black and slightly warm — fresh bitumen. Push it
      *  grey-brown for old, sun-bleached repairs. */
     tarSnakeColor: uniform(lin(opts.tarSnakeColor ?? 0x141210)),
