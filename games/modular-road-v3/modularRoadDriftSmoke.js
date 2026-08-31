@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
 import {
   attribute, cameraFar, cameraNear, cameraPosition, Discard, dot, exp, float,
-  Fn, length, max, min, mix, normalize, perspectiveDepthToViewZ,
+  Fn, length, max, min, mix, normalize, oneMinus, perspectiveDepthToViewZ,
   positionView, positionWorld, pow, saturate, screenUV, smoothstep, sqrt,
   texture, uniform, uv, vec2, vec3, vec4, viewportDepthTexture,
 } from "three/tsl";
@@ -69,22 +69,72 @@ const _sceneDepthTex = /*#__PURE__*/ viewportDepthTexture();
  *   - SMALLER, and many more of them.
  */
 export const DEFAULT_WET_SPRAY_SETTINGS = {
+  /**
+   * Separate from the smoke's own `enabled`, and it has to be.
+   *
+   * These are one particle SYSTEM but two EFFECTS, and a switch labelled "drift
+   * smoke" silently taking rain spray with it is a trap. Splitting the gate
+   * costs nothing — same pool, same mesh, same single draw, all of which exist
+   * either way — because the only thing a gate decides here is which particles
+   * get emitted. With both off you get exactly what one flag gave you: nothing
+   * emitted, nothing drawn, pool reset.
+   */
+  enabled: true,
   /** Emitted whenever the car is MOVING on a wet road — no drift required.
    *  This is the whole point: spray is a function of speed and water, not slip. */
-  emitRate: 260,
+  /** Many and thin. Split across four contacts by `_emit`, so the total rate is
+   *  the same whether two wheels are throwing or four. */
+  emitRate: 420,
   /** Road speed (m/s) at which spray starts. Well below the smoke threshold —
    *  you kick up water long before you can break traction. */
   entrySpeed: 4,
-  opacity: 0.12,
-  lifeMin: 0.28,
-  lifeMax: 0.7,
-  sizeMin: 0.22,
-  sizeMax: 0.5,
-  sizeGrowth: 2.4,
+  /**
+   * Very low, because a streak overlaps ITSELF. Successive particles from one
+   * wheel land on nearly the same line, so whatever each one contributes gets
+   * multiplied by however many are stacked along it — at smoke's 0.12 the four
+   * wheels drew four solid white ropes.
+   */
+  opacity: 0.06,
+  lifeMin: 0.22,
+  lifeMax: 0.5,
+  /** Thin ACROSS. With the volume elongated along its travel, the radius is now
+   *  only the streak's width, so this wants to be much smaller than a puff's —
+   *  length comes from `stretch`, not from size. */
+  sizeMin: 0.10,
+  sizeMax: 0.26,
+  sizeGrowth: 3.4,
   /** Flung back and DOWN relative to smoke — droplets are not buoyant. */
   rise: 0.28,
   drag: 0.55,
-  spread: 0.5,
+  spread: 1.0,
+  /**
+   * How far the particle is drawn out along its direction of travel, as a
+   * multiple of its radius. THE SINGLE BIGGEST DIFFERENCE from smoke.
+   *
+   * A puff of smoke is round because it is slow: it leaves the tyre and then
+   * churns in place. Spray leaves at most of the road speed and is gone in half
+   * a second, so within one frame each droplet cluster travels many times its
+   * own width and the eye sees a STREAK. Round white puffs at 100 km/h read as
+   * cotton wool no matter what you do to their colour or opacity.
+   *
+   * Applied to the VOLUME, not the card — the particle here is a ray-traced
+   * sphere, so this makes it a prolate ellipsoid. Stretching only the quad
+   * would achieve nothing: the intersection test would still carve a sphere out
+   * of the middle of it.
+   */
+  stretch: 6.0,
+  /**
+   * Outward fling, m/s, along the car's lateral axis and away from its centre.
+   *
+   * The rooster tail behind the car is only half of what you see in the rain.
+   * The other half is the SHEET each wheel throws sideways, and from a chase
+   * camera the front wheels are the ones doing it in view. Zero here and all
+   * four wheels emit into the same narrow band behind the car.
+   */
+  sideThrow: 3.2,
+  /** A streak must not tumble. Spin reads as a rotating sprite the moment a
+   *  particle stops being round, which is exactly what `stretch` makes it. */
+  spinRate: 0,
   /** Water is white and stays white; there is no hot/cool ageing to it. */
   colorHot: 0xdfe6ec,
   colorCool: 0xc8d2dc,
@@ -441,6 +491,29 @@ const _wheelFwd = new THREE.Vector3();
 const _wheelRight = new THREE.Vector3();
 const _rearPoints = [_rearContact0, _rearContact1];
 
+/**
+ * ── ALL FOUR WHEELS, BUT ONLY IN THE RAIN ────────────────────────────────────
+ *
+ * Rubber smoke is a rear-wheel event on this car, and dry behaviour is left
+ * exactly as it was. Water is not: every tyre in contact displaces the film it
+ * rolls through, and from a chase camera the FRONT wheels are the ones you see
+ * throwing sheets out sideways past the doors. Emitting from the rears only is
+ * most of why the spray reads as a puff of exhaust rather than as a car moving
+ * through standing water.
+ *
+ * `_contactSide` carries which way is outboard for each contact, so a wheel can
+ * fling away from the car's centreline instead of straight back — see
+ * `sideThrow`. +1 is the car's right.
+ */
+const _frontContact0 = new THREE.Vector3();
+const _frontContact1 = new THREE.Vector3();
+const _sprayPoints = [_frontContact0, _frontContact1, _rearContact0, _rearContact1];
+const _contactSide = [1, -1, 1, -1];
+/** Car right, in world space — the axis `sideThrow` flings along. */
+const _sprayRight = new THREE.Vector3(1, 0, 0);
+/** Unit world direction the streaks are drawn out along. */
+const _stretchAxis = new THREE.Vector3(0, 0, 1);
+
 // ─── Procedural puff shape ────────────────────────────────────────────────────
 
 const NOISE_SIZE = 256;
@@ -624,6 +697,32 @@ export class ModularRoadDriftSmoke {
     /** The bank's own world-noise frequency, so it fuses at metre scale. */
     this.uBankScale = uniform(settings.haze?.worldScaleMul ?? 0.4);
 
+    // ── STRETCH: shared, not per particle ──────────────────────────────────
+    //
+    // Every particle is thrown using the SAME `velocityX/velocityZ` (see
+    // `emitAt`), with only ±0.45 m/s of jitter against a launch speed of ~16
+    // m/s at pace. Their directions of travel are therefore near-identical, and
+    // carrying a per-particle axis would mean a fifth vec4 attribute — 1344
+    // slots x 6 verts x 4 floats rewritten and uploaded EVERY FRAME, about a
+    // quarter more vertex traffic, to encode a value that barely varies.
+    //
+    // The price is that live particles re-orient with the car instead of
+    // keeping the heading they were born with, so the plume swings a little
+    // through a hard corner. Bounded by particle life, which is at most 0.7 s.
+    // If that ever reads badly the fix is the attribute, not more tuning.
+    //
+    // Kept as uniforms rather than a build-time gate even though dry road never
+    // uses them: wetness changes while you are driving, and a material rebuild
+    // mid-corner costs a pipeline recompile. At `stretch = 1` the maths below
+    // collapses to exactly the old sphere — see the intersection.
+    /** Unit world direction the spray is drawn out along. */
+    this.uStretchAxis = uniform(new THREE.Vector3(0, 0, 1));
+    /** Elongation along that axis, in radii. 1 = a sphere, i.e. dry smoke. */
+    this.uStretchAmount = uniform(1);
+    /** The same figure on the CPU, where the card is sized to match the volume.
+     *  Initialised to 1 so a dry track never touches the rectangle path. */
+    this._quadStretch = 1;
+
     const material = new MeshBasicNodeMaterial({
       transparent: true,
       depthWrite: false,
@@ -683,8 +782,11 @@ export class ModularRoadDriftSmoke {
      * fractional-emission accumulator (one per rear wheel), which is exactly
      * what keeps the two budgets from interfering.
      */
-    this.puffEmitter = { list: this.particles, size: POOL_SIZE, index: 0, accum: [0, 0] };
-    this.hazeEmitter = { list: this.hazeParticles, size: HAZE_POOL_SIZE, index: 0, accum: [0, 0] };
+    // Four accumulators: the puff emitter runs from all four contacts once the
+    // road is wet (see `_sprayPoints`). The bank stays on the rear pair and
+    // simply never touches slots 2 and 3.
+    this.puffEmitter = { list: this.particles, size: POOL_SIZE, index: 0, accum: [0, 0, 0, 0] };
+    this.hazeEmitter = { list: this.hazeParticles, size: HAZE_POOL_SIZE, index: 0, accum: [0, 0, 0, 0] };
     this._worldDriftPhase = 0;
     /** World-noise frequency / mix of the class currently being stepped. */
     this._worldScaleMul = 1;
@@ -702,8 +804,36 @@ export class ModularRoadDriftSmoke {
    * How wet the road is, 0..1. Drives the smoke→spray swap; see
    * DEFAULT_WET_SPRAY_SETTINGS for why it is a swap and not a second class.
    */
+  /** Drift smoke on its own. Spray is unaffected — see `wetSpray.enabled`. */
+  setSmokeEnabled(on) {
+    this.settings.enabled = !!on;
+    this._syncEnabled();
+  }
+
+  /** Wet spray on its own. Drift smoke is unaffected. */
+  setSprayEnabled(on) {
+    if (this.settings.wetSpray) this.settings.wetSpray.enabled = !!on;
+    this._syncEnabled();
+  }
+
+  /**
+   * Show or hide the meshes and free the pool according to whether ANY source
+   * can still emit. Wetness is part of that: with smoke switched off on a dry
+   * road nothing can produce a particle, so there is no reason to keep drawing.
+   */
+  _syncEnabled() {
+    const smokeOn = this.settings.enabled !== false;
+    const sprayOn = this.settings.wetSpray?.enabled !== false && (this._wetness ?? 0) > 0;
+    const anyOn = smokeOn || sprayOn;
+    this.setVisible(anyOn);
+    if (!anyOn) this.reset();
+  }
+
   setWetness(w) {
     this._wetness = Math.max(0, Math.min(1, w || 0));
+    // Wetness decides whether the spray source can emit at all, so the
+    // visibility gate has to be re-evaluated when it changes.
+    this._syncEnabled();
   }
 
   /**
@@ -737,6 +867,17 @@ export class ModularRoadDriftSmoke {
     out.rise = num("rise", 0.75);
     out.drag = num("drag", 0.35);
     out.spread = num("spread", 0.35);
+    // Spin has to come DOWN to zero as the spray comes in: a stretched particle
+    // that tumbles reads as a rotating sprite, which is the one tell all of this
+    // is trying to lose. `num` cannot express it — `Object.assign` above copies
+    // the dry value and the wet default of 0 would look like "not set".
+    out.spinRate = num("spinRate", 0.35);
+    // Not a blend of two values but of one against ABSENCE: dry smoke has no
+    // `sideThrow` at all, so `num` would read `undefined` and fall through to
+    // the spray value at full strength from the first wet frame. Wired here
+    // because `emitAt` reads the BLENDED object, not `settings.wetSpray` — miss
+    // this and the setting exists, is documented, and does nothing.
+    out.sideThrow = (spray.sideThrow ?? 0) * w;
     // Colour crosses over on the same ramp. `_wetHot/_wetCool` are scratch so
     // this allocates nothing per frame either.
     const hot = this._wetHot ?? (this._wetHot = new THREE.Color());
@@ -983,7 +1124,7 @@ export class ModularRoadDriftSmoke {
     const noiseMap = this.noiseMap;
     const {
       uSunWorld, uLightAmount, uAmbient, uSunStrength, uAbsorb, uScatter, uHgG,
-      uSunColor, uWorldMix, uWorldScale, uWorldDrift,
+      uSunColor, uWorldMix, uWorldScale, uWorldDrift, uStretchAxis, uStretchAmount,
     } = this;
 
     return Fn(() => {
@@ -1001,16 +1142,42 @@ export class ModularRoadDriftSmoke {
       const centre = sphere.xyz;
       const radius = sphere.w;
 
+      // ── …and the sphere is an ELLIPSOID when the spray is moving ───────────
+      //
+      // Rather than intersect a stretched shape, squash the RAY into the space
+      // where that shape is a plain sphere, solve there, and scale the hit
+      // distances back. Removing `1 - 1/k` of the component along the stretch
+      // axis is the inverse of stretching by `k`, so the same two lines undo it
+      // for the ray origin and the ray direction alike.
+      //
+      // At k = 1 (dry) `shrink` is 0, the two subtractions vanish, `rdLen` is
+      // exactly 1, and every line below is the sphere solve it replaced — the
+      // dry look is untouched by construction, not by a branch.
+      const shrink = oneMinus(float(1).div(max(uStretchAmount, float(1e-3))));
+      const axis = uStretchAxis;
       const oc = cameraPosition.sub(centre);
-      const b = dot(oc, rd);
-      const cTerm = dot(oc, oc).sub(radius.mul(radius));
+      const ocL = oc.sub(axis.mul(dot(oc, axis).mul(shrink)));
+      const rdL = rd.sub(axis.mul(dot(rd, axis).mul(shrink)));
+      // Squashing costs the direction its unit length; carrying the scale here
+      // is what lets the solve stay a plain sphere solve.
+      const rdLen = length(rdL).toVar();
+      const rdU = rdL.div(rdLen).toVar();
+
+      const b = dot(ocL, rdU);
+      const cTerm = dot(ocL, ocL).sub(radius.mul(radius));
       const h = b.mul(b).sub(cTerm);
-      // Corners of the quad miss the sphere entirely. Killing them here is also
+      // Corners of the quad miss the volume entirely. Killing them here is also
       // the cheapest overdraw win available — it is ~21% of every quad.
       Discard(h.lessThan(0));
       const sq = sqrt(max(h, float(0)));
-      const t0 = b.negate().sub(sq);   // entry
-      const t1 = b.negate().add(sq);   // exit
+      // Squashed-space hit distances. Thickness is measured HERE, where the
+      // volume is a sphere of the authored radius, so a long streak is not
+      // read as an enormously dense one just for being long.
+      const tL0 = b.negate().sub(sq).toVar();   // entry
+      const tL1 = b.negate().add(sq).toVar();   // exit
+      // …and the world-space entry, for the depth feather, which is the only
+      // thing left that has to be compared against the scene.
+      const t0 = tL0.div(rdLen);
 
       // How far the scene is ALONG THIS RAY. positionView.z is measured down the
       // view axis, so it has to be rescaled by dist/viewZ (= 1/cos) to compare
@@ -1026,8 +1193,11 @@ export class ModularRoadDriftSmoke {
       // geometry is behind it. Clipping here rather than fading the whole quad
       // is why a bank resting on the road looks half-buried like a ball instead
       // of sliced off like a sheet.
-      const tEnter = max(t0, float(0)).toVar();
-      const tExit = min(t1, sceneT);
+      // Measured in squashed space, where the volume is a sphere of `radius` —
+      // so `sceneT` has to come along, scaled by the same factor the hit
+      // distances were.
+      const tEnter = max(tL0, float(0)).toVar();
+      const tExit = min(tL1, sceneT.mul(rdLen));
       const chord = max(tExit.sub(tEnter), float(0));
       const thick = saturate(chord.div(radius.mul(2)));
 
@@ -1042,7 +1212,7 @@ export class ModularRoadDriftSmoke {
       // the noise and the puff's interior shifts against its silhouette, which
       // is the cue the eye reads as depth. Sampled on the quad it would just be
       // a picture that turns to face you.
-      const mid = cameraPosition.add(rd.mul(b.negate()));
+      const mid = cameraPosition.add(rd.mul(b.negate().div(rdLen)));
       const wuv = vec2(
         mid.x.add(mid.y.mul(0.37)),
         mid.z.add(mid.y.mul(0.61)),
@@ -1074,7 +1244,15 @@ export class ModularRoadDriftSmoke {
       // The normal at the point where the ray enters the sphere. Being a real
       // world-space normal, it can be dotted straight against the world sun —
       // no quad basis, no per-particle projection.
-      const nrm = normalize(cameraPosition.add(rd.mul(tEnter)).sub(centre));
+      //
+      // Taken in squashed space and carried back out. A normal does NOT
+      // transform like a point: squashing the surface along the axis makes it
+      // FLATTER there, so the normal tilts AWAY from the axis. Applying the
+      // same shrink a second time is what does that (the transform is
+      // symmetric, so its inverse-transpose is itself), and at k = 1 it is
+      // again a no-op.
+      const hitL = ocL.add(rdU.mul(tEnter));
+      const nrm = normalize(hitL.sub(axis.mul(dot(hitL, axis).mul(shrink))));
       const ndl = dot(nrm, uSunWorld);
 
       // Wrapped diffuse. Smoke is translucent, so it stays lit around the
@@ -1112,8 +1290,7 @@ export class ModularRoadDriftSmoke {
   reset() {
     for (const e of [this.puffEmitter, this.hazeEmitter]) {
       for (const p of e.list) p.life = 0;
-      e.accum[0] = 0;
-      e.accum[1] = 0;
+      e.accum.fill(0);
     }
     this.geometry.setDrawRange(0, 0);
     this.mesh.visible = false;
@@ -1161,16 +1338,38 @@ export class ModularRoadDriftSmoke {
       ? THREE.MathUtils.smoothstep(speed, ENTRY_SPEED, ENTRY_SPEED * 2.2)
       : 0;
 
+    // Car right, in world. Needed before the tyre loop because it decides which
+    // way each contact is outboard, and reused per tyre below.
+    _sprayRight.set(1, 0, 0).applyQuaternion(body.quat);
+
     let rearSlip = 0;
     let rearOver = 0;
     let rearIdx = 0;
+    let frontIdx = 0;
     let hasRear = false;
     for (const tire of vehicle.tires) {
-      if (tire.canSteer) continue;
+      if (tire.canSteer) {
+        // Fronts contribute no smoke and no slip measurement — they exist here
+        // purely as spray emitters, and only while the road is wet.
+        const slot = frontIdx === 0 ? _frontContact0 : _frontContact1;
+        if (tire.grounded && frontIdx < 2) {
+          slot.copy(tire.hitPoint).addScaledVector(tire.hitNormal, MARK_Y_OFFSET);
+          _contactSide[frontIdx] = Math.sign(
+            _scratchVel.subVectors(tire.worldPos, body.pos).dot(_sprayRight),
+          ) || 1;
+        } else if (frontIdx < 2) {
+          slot.set(0, -9999, 0);
+        }
+        frontIdx++;
+        continue;
+      }
       const contact = rearIdx === 0 ? _rearContact0 : _rearContact1;
       if (tire.grounded) {
         hasRear = true;
         contact.copy(tire.hitPoint).addScaledVector(tire.hitNormal, MARK_Y_OFFSET);
+        _contactSide[2 + rearIdx] = Math.sign(
+          _scratchVel.subVectors(tire.worldPos, body.pos).dot(_sprayRight),
+        ) || 1;
         body.getVelocityAtPoint(tire.worldPos, _scratchVel);
         _wheelFwd.set(0, 0, 1).applyQuaternion(body.quat);
         _wheelRight.set(1, 0, 0).applyQuaternion(body.quat);
@@ -1199,13 +1398,17 @@ export class ModularRoadDriftSmoke {
     const inAir = vehicle.groundedCount === 0;
     const s = this.settings;
     const trigger = s.trigger ?? INTENSITY_MIN;
+    // The two sources gate independently — see `wetSpray.enabled`.
+    const smokeOn = s.enabled !== false;
+    const sprayOn = s.wetSpray?.enabled !== false;
     let emitSmoke =
+      smokeOn &&
       hasRear &&
       !inAir &&
       speed > ENTRY_SPEED * 0.55 &&
       (driftIntensity > trigger ||
         (handbrake && speed > ENTRY_SPEED * 0.55));
-    let smokeIntensity = Math.max(driftIntensity, handbrake ? 0.45 : 0);
+    let smokeIntensity = smokeOn ? Math.max(driftIntensity, handbrake ? 0.45 : 0) : 0;
 
     // ── SPRAY NEEDS NO SLIP ───────────────────────────────────────────────
     //
@@ -1217,7 +1420,7 @@ export class ModularRoadDriftSmoke {
     // than from slip — with the drift terms still able to raise it, since
     // sliding does throw more water than rolling.
     const wet = this._wetness ?? 0;
-    if (wet > 0 && hasRear && !inAir) {
+    if (sprayOn && wet > 0 && hasRear && !inAir) {
       const entry = this.settings.wetSpray?.entrySpeed ?? 4;
       const rolling = THREE.MathUtils.smoothstep(speed, entry, entry * 3.5);
       if (rolling > 0) {
@@ -1226,9 +1429,26 @@ export class ModularRoadDriftSmoke {
       }
     }
 
+    // ── STRETCH, DRIVEN BY WHAT ACTUALLY CAUSES IT ────────────────────────
+    //
+    // A streak is a stationary shape smeared by motion, so its length follows
+    // road speed, and it only exists at all on a wet road. Both terms matter:
+    // stationary in the rain the spray should be round (there is nothing to
+    // smear it), and at speed on a dry road there is no spray to stretch.
+    const sprayStretch = s.wetSpray?.stretch ?? 1;
+    const stretchSpeed = THREE.MathUtils.smoothstep(speed, 2, 24);
+    this._quadStretch = 1 + (sprayStretch - 1) * stretchSpeed * wet;
+    this.uStretchAmount.value = this._quadStretch;
+    if (speed > 0.5) {
+      _stretchAxis.set(_velHoriz.x / speed, 0, _velHoriz.z / speed);
+      this.uStretchAxis.value.copy(_stretchAxis);
+    }
+
+    // Four contacts in the rain, the rear pair when dry — see `_sprayPoints`.
+    const points = wet > 0 ? _sprayPoints : (hasRear ? _rearPoints : []);
     this.update(
       dt,
-      hasRear ? _rearPoints : [],
+      points,
       emitSmoke,
       smokeIntensity,
       body.vel.x,
@@ -1237,13 +1457,17 @@ export class ModularRoadDriftSmoke {
     );
   }
 
-  update(dt, rearPoints, emit, intensity, velocityX, velocityZ, camera) {
+  update(dt, points, emit, intensity, velocityX, velocityZ, camera) {
     // THE PUFF CLASS, WEATHERED. Identical object when dry (see _puffSettings),
     // so nothing about a dry track changes. `this.settings` is still read below
     // for the shader-wide uniforms, which are shared by both looks.
     const puff = this._puffSettings();
     const s = this.settings;
-    if (s.enabled === false) emit = false;
+    // Backstop only. Which SOURCE may emit is decided in `updateFromVehicle`,
+    // where the distinction between "sliding on dry tarmac" and "rolling
+    // through water" actually exists; this just catches a direct caller when
+    // nothing at all is switched on.
+    if (s.enabled === false && s.wetSpray?.enabled === false) emit = false;
     this.uSoftDepth.value = Math.max(1e-3, s.softDepth ?? 0.9);
     this.uErodeSoft.value = Math.max(0.01, s.erodeSoft ?? 0.3);
     this.uLightAmount.value = s.sunTint ?? 1;
@@ -1267,10 +1491,13 @@ export class ModularRoadDriftSmoke {
 
     if (emit) {
       this._emit(this.puffEmitter, puff, puff.emitRate ?? EMIT_RATE,
-        rearPoints, intensity, velocityX, velocityZ, dt);
+        points, intensity, velocityX, velocityZ, dt);
       if (hazeOn) {
+        // The bank stays on the REAR pair whatever the weather. It is one slow
+        // mass settling behind the car, not something each wheel throws, and
+        // giving it four sources would just halve each one (see `_emit`).
         this._emit(this.hazeEmitter, haze, haze.emitRate ?? 12,
-          rearPoints, intensity, velocityX, velocityZ, dt);
+          _rearPoints, intensity, velocityX, velocityZ, dt);
       }
     } else {
       this.puffEmitter.accum[0] = 0;
@@ -1332,14 +1559,18 @@ export class ModularRoadDriftSmoke {
    * @param {{list: object[], size: number, index: number, accum: number[]}} emitter
    * @param {object} cfg — the settings block for this class (root, or `haze`)
    */
-  _emit(emitter, cfg, rate, rearPoints, intensity, velocityX, velocityZ, dt) {
-    const perSecond = rate * THREE.MathUtils.clamp(intensity, 0, 1);
-    for (let i = 0; i < rearPoints.length; i++) {
-      const point = rearPoints[i];
+  _emit(emitter, cfg, rate, points, intensity, velocityX, velocityZ, dt) {
+    // Split across however many contacts are emitting, so going from two wheels
+    // to four throws water from all of them rather than doubling the plume and
+    // eating the pool. Density is the settings' business, not the wheel count's.
+    const perSecond = rate * THREE.MathUtils.clamp(intensity, 0, 1)
+      * (2 / Math.max(points.length, 1));
+    for (let i = 0; i < points.length; i++) {
+      const point = points[i];
       if (!point || point.y < -9000) continue;
       emitter.accum[i] += perSecond * dt;
       while (emitter.accum[i] >= 1) {
-        this.emitAt(emitter, cfg, point, intensity, velocityX, velocityZ);
+        this.emitAt(emitter, cfg, point, intensity, velocityX, velocityZ, _contactSide[i]);
         emitter.accum[i] -= 1;
       }
     }
@@ -1418,6 +1649,13 @@ export class ModularRoadDriftSmoke {
       // cuts it. Everything near-camera used to be unhandled, and the chase rig
       // flies through the plume continuously at speed.
       const camDist = _camPos.distanceTo(p.position);
+      // How far the volume REACHES past its centre along the stretch axis. Both
+      // tests below are about the nearest part of the particle, not its middle,
+      // and a streak's nearest part is `stretch` radii out — so without this a
+      // long particle keeps its card at full size while its far end is already
+      // through the near plane, and gets sliced into flat white shards.
+      const reach = isBank ? 0 : radius * (this._quadStretch - 1);
+      const nearDist = Math.max(camDist - reach, 0);
       let fade;
       if (isBank) {
         // Relative to the sphere's OWN radius — see BANK_FADE_*. An absolute
@@ -1433,11 +1671,11 @@ export class ModularRoadDriftSmoke {
         // quad would have to blow up past K_MAX; the second is the near-plane
         // guard, and it works on the CENTRE distance because that is where the
         // billboard's plane actually sits.
-        const k = radius / Math.max(camDist, 1e-4);
+        const k = radius / Math.max(nearDist, 1e-4);
         fade = Math.min(
           THREE.MathUtils.clamp((K_MAX - k) / (K_MAX - K_FADE_START), 0, 1),
           THREE.MathUtils.clamp(
-            (camDist - NEAR_FADE_OUT) / (NEAR_FADE_IN - NEAR_FADE_OUT),
+            (nearDist - NEAR_FADE_OUT) / (NEAR_FADE_IN - NEAR_FADE_OUT),
             0,
             1,
           ),
@@ -1446,7 +1684,9 @@ export class ModularRoadDriftSmoke {
       // Fully faded costs nothing at all: no buffer write, no quad, no overdraw.
       // The particle stays alive and comes back as the camera pulls away.
       if (fade <= 0) continue;
-      this._camDist = camDist;
+      // The card is sized against the same near distance, so it circumscribes
+      // the whole volume rather than a sphere at its centre.
+      this._camDist = nearDist;
 
       // Fade IN over the first slice of life, then hold, then fade OUT.
       //
@@ -1514,7 +1754,7 @@ export class ModularRoadDriftSmoke {
     this.bankThresholds[index] = thresh;
   }
 
-  emitAt(emitter, s, point, intensity, velocityX, velocityZ) {
+  emitAt(emitter, s, point, intensity, velocityX, velocityZ, side = 0) {
     const p = emitter.list[emitter.index];
     emitter.index = (emitter.index + 1) % emitter.size;
 
@@ -1527,10 +1767,18 @@ export class ModularRoadDriftSmoke {
       point.y + 0.02 + Math.random() * 0.1,
       point.z - dirZ * (0.12 + Math.random() * 0.25) - sideJitter * dirX,
     );
+    // Outboard fling, along the car's lateral axis, away from its centreline.
+    // Linear rather than squared: squaring concentrates nearly every droplet at
+    // the wheel and leaves the sheet as narrow as it was without it, which is
+    // what the four solid ropes looked like on the first pass.
+    const throwOut = (s.sideThrow ?? 0) * side;
+    const lateral = throwOut !== 0 ? throwOut * Math.random() : 0;
     p.velocity.set(
-      -dirX * speed * (s.drag ?? SPEED_DRAG) + (Math.random() - 0.5) * 0.45,
+      -dirX * speed * (s.drag ?? SPEED_DRAG) + (Math.random() - 0.5) * 0.45
+        + lateral * _sprayRight.x,
       (s.rise ?? RISE) * (0.65 + Math.random() * 0.7),
-      -dirZ * speed * (s.drag ?? SPEED_DRAG) + (Math.random() - 0.5) * 0.45,
+      -dirZ * speed * (s.drag ?? SPEED_DRAG) + (Math.random() - 0.5) * 0.45
+        + lateral * _sprayRight.z,
     );
 
     const lifeMin = Math.max(0.05, s.lifeMin ?? LIFE_MIN);
@@ -1598,8 +1846,38 @@ export class ModularRoadDriftSmoke {
     const radius = size * 0.5;
     const k = Math.min(radius / Math.max(this._camDist, 1e-4), K_MAX);
     const half = radius / Math.sqrt(1 - k * k);
-    const cosR = Math.cos(rotation);
-    const sinR = Math.sin(rotation);
+
+    // ── A STREAK GETS A RECTANGLE, NOT A BIGGER SQUARE ────────────────────
+    //
+    // The quad only has to cover the volume's silhouette, and a stretched
+    // volume's silhouette is long and thin. Squaring it off to the long axis
+    // would be the easy version and would waste most of the extra area on
+    // pixels the intersection is going to discard anyway — at stretch 3.4 that
+    // is roughly 3.4x the fill for the same picture, on the one effect that is
+    // on screen continuously in the rain.
+    //
+    // So the card is oriented by where the stretch axis LANDS ON SCREEN
+    // (its components in the billboard basis, which is what a projection onto
+    // the camera plane is), long that way and unchanged across. When the axis
+    // points nearly at the camera its screen projection collapses, and so does
+    // the streak — foreshortening for free, and the `hypot` guard is what keeps
+    // the direction defined at exactly that point.
+    let cosR = Math.cos(rotation);
+    let sinR = Math.sin(rotation);
+    let halfLong = half;
+    const stretch = this._quadStretch;
+    if (stretch > 1.001) {
+      const ax = _smokeRight.dot(_stretchAxis);
+      const ay = _smokeUp.dot(_stretchAxis);
+      const len = Math.hypot(ax, ay);
+      if (len > 1e-4) {
+        cosR = ax / len;
+        sinR = ay / len;
+        // `len` is the cosine of the axis against the camera plane, so this
+        // shortens the card exactly as the streak foreshortens.
+        halfLong = half * (1 + (stretch - 1) * len);
+      }
+    }
     const posOffset = index * FLOATS_PER_PARTICLE;
     const tintOffset = index * TINT_FLOATS_PER_PARTICLE;
     const noiseOffset = index * NOISE_FLOATS_PER_PARTICLE;
@@ -1620,10 +1898,12 @@ export class ModularRoadDriftSmoke {
     }
 
     for (let i = 0; i < VERTS_PER_PARTICLE; i++) {
-      const x = _CORNERS[i][0];
-      const y = _CORNERS[i][1];
-      const rx = (x * cosR - y * sinR) * half;
-      const ry = (x * sinR + y * cosR) * half;
+      // Anisotropic FIRST, then rotate: scaling after the rotation would stretch
+      // the card along the screen axes instead of along the streak.
+      const lx = _CORNERS[i][0] * halfLong;
+      const ly = _CORNERS[i][1] * half;
+      const rx = lx * cosR - ly * sinR;
+      const ry = lx * sinR + ly * cosR;
       _smokeHalfRight.copy(_smokeRight).multiplyScalar(rx);
       _smokeHalfUp.copy(_smokeUp).multiplyScalar(ry);
       _smokeCorner.copy(center).add(_smokeHalfRight).add(_smokeHalfUp);

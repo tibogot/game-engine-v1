@@ -2190,6 +2190,92 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-smk-hhold-v"></span>
             </div>
           </div>
+
+          <div class="dv-hint">
+            <b>Wet spray</b> is the same puff system wearing a different coat —
+            these values are blended in by road wetness, so a dry track never
+            sees them and none of this costs a second particle pool or an extra
+            draw. Set <b>Wetness</b> above 0 in WEATHER to see any of it.
+            On a wet road all four wheels throw, not just the rears.
+            It switches <b>independently of Drift smoke</b> above — one system,
+            two effects.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wet spray</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-spray" type="button" aria-label="Wet spray">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spray amount</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spr-rate" min="0" max="900" step="10" />
+              <span class="prop-num" id="dv-spr-rate-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spray opacity</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spr-op" min="0" max="0.3" step="0.005" />
+              <span class="prop-num" id="dv-spr-op-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Streak length</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spr-stretch" min="1" max="14" step="0.2" />
+              <span class="prop-num" id="dv-spr-stretch-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Streak width</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spr-size" min="0.04" max="0.8" step="0.01" />
+              <span class="prop-num" id="dv-spr-size-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Side throw</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spr-side" min="0" max="9" step="0.2" />
+              <span class="prop-num" id="dv-spr-side-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spray life</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spr-life" min="0.1" max="1.6" step="0.02" />
+              <span class="prop-num" id="dv-spr-life-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spray spread</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spr-spread" min="0" max="2.5" step="0.05" />
+              <span class="prop-num" id="dv-spr-spread-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spray rise</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spr-rise" min="-0.5" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-spr-rise-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spray drag</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spr-drag" min="0" max="1.2" step="0.02" />
+              <span class="prop-num" id="dv-spr-drag-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spray entry</span>
+            <div class="prop-value">
+              <input type="range" id="dv-spr-entry" min="0" max="20" step="0.5" />
+              <span class="prop-num" id="dv-spr-entry-v"></span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3233,6 +3319,31 @@ export function createRoadDevPanel({ app, game, params }) {
         (v) => { hz.sizeMin = v * 0.59; });
       slider("dv-smk-hgrow", hz, "sizeGrowth", (v) => "x" + v.toFixed(1));
       slider("dv-smk-hhold", hz, "fadeOutStart");
+    }
+
+    // ── WET SPRAY ───────────────────────────────────────────────────────────
+    //
+    // Same object shape as the puff settings above, because it IS the puff
+    // settings — blended in by wetness rather than driving a second system.
+    // Nothing here does anything on a dry track, which is why the hint in the
+    // markup points at the WEATHER wetness slider.
+    const spr = smk.wetSpray;
+    if (spr) {
+      toggle("dv-spray", spr.enabled !== false, (on) => game.setWetSprayEnabled?.(on));
+      slider("dv-spr-rate", spr, "emitRate", (v) => v.toFixed(0));
+      slider("dv-spr-op", spr, "opacity", (v) => v.toFixed(3));
+      slider("dv-spr-stretch", spr, "stretch", (v) => "x" + v.toFixed(1));
+      // Width is the ACROSS radius now that length comes from `stretch`, so the
+      // min trails the max the same way the puff life slider does.
+      slider("dv-spr-size", spr, "sizeMax", (v) => v.toFixed(2) + "m",
+        (v) => { spr.sizeMin = v * 0.38; });
+      slider("dv-spr-side", spr, "sideThrow", (v) => v.toFixed(1) + " m/s");
+      slider("dv-spr-life", spr, "lifeMax", (v) => v.toFixed(2) + "s",
+        (v) => { spr.lifeMin = v * 0.44; });
+      slider("dv-spr-spread", spr, "spread");
+      slider("dv-spr-rise", spr, "rise");
+      slider("dv-spr-drag", spr, "drag");
+      slider("dv-spr-entry", spr, "entrySpeed", (v) => v.toFixed(1) + " m/s");
     }
   }
 

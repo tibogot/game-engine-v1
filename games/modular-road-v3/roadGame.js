@@ -5695,11 +5695,10 @@ ${e.message}`);
       getSkidStyle: () => tireMarks.style,
       toggleSkidStyle: () =>
         tireMarks.setStyle(tireMarks.style === "textured" ? "solid" : "textured"),
-      setDriftSmokeEnabled: (on) => {
-        driftSmoke.settings.enabled = !!on;
-        driftSmoke.setVisible(!!on);
-        if (!on) driftSmoke.reset();
-      },
+      // Two effects, one system: each gates its own emission, and the smoke
+      // system hides itself only when neither can produce a particle.
+      setDriftSmokeEnabled: (on) => driftSmoke.setSmokeEnabled(on),
+      setWetSprayEnabled: (on) => driftSmoke.setSprayEnabled(on),
       cameraParams: chase.params,
       audioState,
       vehicleAudioSettings,
