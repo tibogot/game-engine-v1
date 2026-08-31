@@ -246,21 +246,6 @@
         line-height: 1.15;
         overflow-wrap: anywhere;
       }
-      .cat-btn.active .cat-btn-label {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        inset: 0;
-        padding: 4px;
-        font-size: 11px;
-        letter-spacing: 0.05em;
-        color: var(--tm-yellow);
-        /* Dark enough to read the name over any thumbnail, light enough that
-           you can still see which shape you picked underneath it. */
-        background: rgba(0, 0, 0, 0.5);
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
-        z-index: 1;
-      }
       /* Same bargain as the piece tiles: on an UNSELECTED button the caption is
          the bake-failed fallback, not furniture. Without a sprite all fourteen
          categories are the same grey plate, and the name is the only thing
@@ -271,12 +256,20 @@
       .cat-btn.unbaked:not(.active) .cat-btn-icon {
         padding-bottom: 17px;
       }
-      /* Name on hover BEFORE the tab commits (the rail dwells ~120ms). Without
-         this the fourteen unselected thumbnails stay anonymous until native
-         `title` pops, which is slower than the switch itself. Bottom band, not
-         the selected overlay — that would look like you were already in it. */
-      .cat-btn:hover:not(.active) .cat-btn-label {
-        display: block;
+      /* Hover and selected use the same centred yellow name. A separate bottom
+         white band used to flash for the ~120ms dwell before `.active` landed. */
+      .cat-btn.active .cat-btn-label,
+      .cat-btn:hover .cat-btn-label {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        inset: 0;
+        padding: 4px;
+        font-size: 11px;
+        letter-spacing: 0.05em;
+        color: #fff14a;
+        background: none;
+        z-index: 1;
       }
       #palette-panel {
         flex: 1;
