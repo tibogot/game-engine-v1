@@ -36,7 +36,7 @@ import { roadParams } from "./modularRoadKit.js";
  *  public/models because it is track dressing, not a shared engine asset. */
 export const DECAL_URL = "/games/modular-road-v3/rondcarre.png";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { materialEmissive, materialColor, positionLocal, float, mix, fract, fwidth, smoothstep, vec3, texture, uv } from "three/tsl";
+import { materialEmissive, materialColor, positionLocal, normalLocal, float, mix, fract, fwidth, smoothstep, vec3, texture, uv, attribute, step, oneMinus, normalMap, vec2 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import {
   kickerRampGeometry,
@@ -228,8 +228,8 @@ export function preloadDiamondPlate() {
   return _diamondPlatePreload;
 }
 
-/** Diamond plate with the same screen-filtered 45° hazard paint on top. */
-function hazardPlatformMat() {
+/** Diamond plate with screen-filtered 45° paint on top. */
+function diamondStripeMat(a, b) {
   const maps = diamondPlateMaps();
   const m = new THREE.MeshStandardNodeMaterial({
     roughness: 1,
@@ -242,16 +242,196 @@ function hazardPlatformMat() {
   const t = positionLocal.x.add(positionLocal.z).div(16);
   const fw = fwidth(t).max(0.002);
   const stripe = smoothstep(float(0.5).sub(fw), float(0.5).add(fw), fract(t));
-  const paint = mix(vec3(0.96, 0.78, 0.06), vec3(0.07, 0.07, 0.08), stripe);
-  // Plate albedo tints the paint so the diamonds still read through the bands.
+  const paint = mix(vec3(a[0], a[1], a[2]), vec3(b[0], b[1], b[2]), stripe);
   m.colorNode = paint.mul(plate.mul(1.35).add(0.22));
   return m;
+}
+
+function hazardPlatformMat() {
+  return diamondStripeMat([0.96, 0.78, 0.06], [0.07, 0.07, 0.08]);
+}
+
+function jumpLabMat() {
+  return diamondStripeMat([0.92, 0.92, 0.94], [0.06, 0.06, 0.07]);
+}
+
+/** Wide road pad: diamond + hazard paint on the deck, road-red on the slab cap. */
+export function hazardPadMat() {
+  const maps = diamondPlateMaps();
+  const m = new THREE.MeshStandardNodeMaterial({
+    roughness: 1,
+    metalness: 0,
+  });
+  const plate = texture(maps.color, uv()).rgb;
+  const t = positionLocal.x.add(positionLocal.z).div(16);
+  const fw = fwidth(t).max(0.002);
+  const stripe = smoothstep(float(0.5).sub(fw), float(0.5).add(fw), fract(t));
+  const paint = mix(vec3(0.96, 0.78, 0.06), vec3(0.07, 0.07, 0.08), stripe);
+  const deck = paint.mul(plate.mul(1.35).add(0.22));
+  const red = new THREE.Color(0xd0342c).convertSRGBToLinear();
+  const cap = vec3(red.r, red.g, red.b);
+  const z = attribute("aZone", "float");
+  const isDeck = step(0.5, z).mul(oneMinus(step(1.5, z)));
+  m.colorNode = mix(cap, deck, isDeck);
+  m.normalNode = mix(normalLocal, normalMap(texture(maps.normal), vec2(1, 1)), isDeck);
+  // Same as the road shader's zone-0 sides: roughness 0.9, metalness 0.
+  // 0.45 / 0.05 was picking up the sky and washing the red to grey.
+  m.roughnessNode = mix(float(0.9), texture(maps.roughness, uv()).r, isDeck);
+  m.metalnessNode = mix(float(0), texture(maps.metalness, uv()).r, isDeck);
+  return m;
+}
+
+function addPlateUvs(geo, tile = 6) {
+  if (geo.getAttribute("uv")) return;
+  const p = geo.getAttribute("position");
+  const n = geo.getAttribute("normal");
+  const uvs = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i++) {
+    const nx = n?.getX(i) ?? 0, ny = n?.getY(i) ?? 1, nz = n?.getZ(i) ?? 0;
+    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    if (ay >= ax && ay >= az) { uvs[i * 2] = x / tile; uvs[i * 2 + 1] = z / tile; }
+    else if (ax >= az) { uvs[i * 2] = z / tile; uvs[i * 2 + 1] = y / tile; }
+    else { uvs[i * 2] = x / tile; uvs[i * 2 + 1] = y / tile; }
+  }
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
 }
 
 function buildHazardPlatform() {
   const m = new THREE.Mesh(hazardPlatformGeometry(), hazardPlatformMat());
   m.name = "HazardPlatform";
   return m;
+}
+
+/** Black diamond plate — same maps as the platform, no hazard paint. */
+function blackDiamondMat() {
+  const maps = diamondPlateMaps();
+  const m = new THREE.MeshStandardNodeMaterial({
+    roughness: 1,
+    metalness: 1,
+    normalMap: maps.normal,
+    roughnessMap: maps.roughness,
+    metalnessMap: maps.metalness,
+  });
+  const plate = texture(maps.color, uv()).rgb;
+  m.colorNode = vec3(0.11, 0.11, 0.12).mul(plate.mul(1.35).add(0.22));
+  return m;
+}
+
+/**
+ * Thin board on two feet at the high end — not a filled wedge.
+ * Shorter / wider / lower than the slope-lab 15° ramp (22×12, rise ≈ 5.7 m).
+ * Plank = diamond, side caps = flat red, feet = flat dark. Collision is one
+ * hidden solid so the extra materials never become drive surfaces.
+ */
+function slopeBoardParts() {
+  const W = 20;
+  const L = 14;
+  const H = 3.5;
+  const T = 0.28;
+  const hw = W / 2;
+  const TILE = 6;
+  const deckPos = [];
+
+  const makeBucket = () => ({ pos: [], nrm: [], uvs: [] });
+  const uvOf = (p, nx, ny, nz) => {
+    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+    if (ay >= ax && ay >= az) return [p[0] / TILE, p[2] / TILE];
+    if (ax >= az) return [p[2] / TILE, p[1] / TILE];
+    return [p[0] / TILE, p[1] / TILE];
+  };
+  const tri = (a, b, c, bucket, drive = false) => {
+    bucket.pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+    const e1x = b[0] - a[0], e1y = b[1] - a[1], e1z = b[2] - a[2];
+    const e2x = c[0] - a[0], e2y = c[1] - a[1], e2z = c[2] - a[2];
+    let nx = e1y * e2z - e1z * e2y;
+    let ny = e1z * e2x - e1x * e2z;
+    let nz = e1x * e2y - e1y * e2x;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    bucket.nrm.push(nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    const ua = uvOf(a, nx, ny, nz);
+    const ub = uvOf(b, nx, ny, nz);
+    const uc = uvOf(c, nx, ny, nz);
+    bucket.uvs.push(ua[0], ua[1], ub[0], ub[1], uc[0], uc[1]);
+    if (drive) deckPos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+  };
+  const quad = (a, b, c, d, bucket, drive = false) => {
+    tri(a, b, c, bucket, drive);
+    tri(a, c, d, bucket, drive);
+  };
+  const box = (x0, y0, z0, x1, y1, z1, bucket) => {
+    quad([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], bucket);
+    quad([x0, y0, z1], [x0, y0, z0], [x1, y0, z0], [x1, y0, z1], bucket);
+    quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], bucket);
+    quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], bucket);
+    quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], bucket);
+    quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], bucket);
+  };
+  const toGeo = (bucket) => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(bucket.pos, 3));
+    geo.setAttribute("normal", new THREE.Float32BufferAttribute(bucket.nrm, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(bucket.uvs, 2));
+    geo.computeBoundingSphere();
+    return geo;
+  };
+
+  const plank = makeBucket();
+  const cap = makeBucket();
+  const feet = makeBucket();
+
+  const Tl = [-hw, T, 0], Tr = [hw, T, 0];
+  const Hl = [-hw, H, -L], Hr = [hw, H, -L];
+  const Bl = [-hw, 0, 0], Br = [hw, 0, 0];
+  const Ul = [-hw, H - T, -L], Ur = [hw, H - T, -L];
+
+  quad(Tl, Tr, Hr, Hl, plank, true);
+  quad(Bl, Ul, Ur, Br, plank);
+  quad(Tl, Hl, Ul, Bl, cap);
+  quad(Tr, Br, Ur, Hr, cap);
+  quad(Tl, Bl, Br, Tr, cap);
+  quad(Hl, Hr, Ur, Ul, cap);
+
+  const footW = 0.55;
+  const footD = 0.85;
+  const inset = 0.45;
+  const z1 = -L + footD;
+  const yTop = H - T;
+  box(-hw + inset, 0, -L, -hw + inset + footW, yTop, z1, feet);
+  box(hw - inset - footW, 0, -L, hw - inset, yTop, z1, feet);
+
+  const collide = {
+    pos: plank.pos.concat(cap.pos, feet.pos),
+    nrm: plank.nrm.concat(cap.nrm, feet.nrm),
+    uvs: plank.uvs.concat(cap.uvs, feet.uvs),
+  };
+  return {
+    plank: toGeo(plank),
+    cap: toGeo(cap),
+    feet: toGeo(feet),
+    collide: attachDeckProxy(toGeo(collide), deckPos),
+  };
+}
+
+function buildSlopeBoard() {
+  const parts = slopeBoardParts();
+  const root = new THREE.Group();
+  root.name = "SlopeBoard";
+
+  const collider = new THREE.Mesh(parts.collide, mat(0x111111));
+  collider.visible = false;
+  collider.userData.noRender = true;
+
+  const plank = new THREE.Mesh(parts.plank, blackDiamondMat());
+  plank.userData.noCollide = true;
+  const cap = new THREE.Mesh(parts.cap, mat(0xe01414, { roughness: 0.45, metalness: 0.05 }));
+  cap.userData.noCollide = true;
+  const feet = new THREE.Mesh(parts.feet, mat(0x9aa0a8, { roughness: 0.32, metalness: 0.82 }));
+  feet.userData.noCollide = true;
+
+  root.add(collider, plank, cap, feet);
+  return root;
 }
 
 /** Right-triangular prism ramp: base on y=0, rising from +Z (low) to -Z (high). */
@@ -1708,6 +1888,13 @@ export const PROP_CATALOG = [
     make: () => new THREE.Mesh(rampGeometry(18, 8, 14), parkourMat(0xff8a14)),
   },
   {
+    id: "boardramp",
+    label: "Board ramp",
+    category: "parkour",
+    collision: "both",
+    make: () => buildSlopeBoard(),
+  },
+  {
     id: "slopelab",
     label: "Slope lab",
     category: "parkour",
@@ -1719,7 +1906,11 @@ export const PROP_CATALOG = [
     label: "Jump lab",
     category: "parkour",
     collision: "both",
-    make: () => buildJumpLabGroup(),
+    make: () => {
+      const g = buildJumpLabGroup(jumpLabMat());
+      g.traverse((o) => { if (o.isMesh) addPlateUvs(o.geometry); });
+      return g;
+    },
   },
   {
     id: "glowbox",

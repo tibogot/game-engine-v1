@@ -123,7 +123,7 @@ import {
 } from "./modularRoadThumbnailCache.js";
 import {
   PropManager, PROP_CATALOG, PROP_BY_ID, glowPropParams, SURFACE_SNAP, SURFACE_SNAP_MODES, DECAL_URL,
-  preloadDiamondPlate,
+  preloadDiamondPlate, hazardPadMat,
 } from "./modularRoadProps.js";
 import {
   MoverPropManager, MOVER_CATALOG, MOVER_BY_ID, preloadWindmillModel,
@@ -562,6 +562,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // every pixel of a bore evaluated the asphalt graph. Same look (inner/outer
   // + neon), FrontSide. Weather rebuilds the ROAD material; this one stays.
   const tubeMaterial = createTubeMaterial();
+  const hazardPadMaterial = hazardPadMat();
   // One pane material for every glass road on the track — it reflects
   // `scene.environment` (the live sky PMREM), so all of them stay in step with
   // the time of day for free.
@@ -607,6 +608,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     checkpointGlowMaterial,
     glassMaterial,
     tubeMaterial,
+    hazardPadMaterial,
     camera,
     domElement: renderer.domElement,
     orbit: controls,
@@ -835,6 +837,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     finishGlow: createFinishGateGlowMaterialForThumb(),
     checkpointGlow: createCheckpointGlowMaterialForThumb(),
     tube: tubeMaterial,
+    hazardPad: hazardPadMaterial,
     // NOT the live pane material. Transmission composites against a copy of
     // the backdrop, and a thumbnail is rendered into a bare RT with no
     // backdrop to copy — the pane comes out black, so the tile advertises a
@@ -2615,8 +2618,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   _mergedGroupRef = mergedGroup;
 
   const MERGE_ROLES = [
-    { pick: (p) => (p.mesh?.material === tubeMaterial ? null : p.mesh), mat: () => roadMaterial, cast: true },
+    { pick: (p) => (p.mesh?.material === tubeMaterial || p.mesh?.material === hazardPadMaterial ? null : p.mesh), mat: () => roadMaterial, cast: true },
     { pick: (p) => (p.mesh?.material === tubeMaterial ? p.mesh : null), mat: () => tubeMaterial, cast: true },
+    { pick: (p) => (p.mesh?.material === hazardPadMaterial ? p.mesh : null), mat: () => hazardPadMaterial, cast: true },
     { pick: (p) => p.railMesh, mat: () => railMaterial, cast: true },
     { pick: (p) => (p.shellMesh?.userData.vault ? null : p.shellMesh), mat: () => shellMaterial, cast: true },
     { pick: (p) => (p.shellMesh?.userData.vault ? p.shellMesh : null), mat: () => vaultShellMaterial, cast: true },

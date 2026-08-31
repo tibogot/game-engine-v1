@@ -144,7 +144,9 @@ export async function bakeRoadThumbnails({
         group.add(new THREE.Mesh(geo, mat));
       };
       if (!built.def.noMesh) {
-        const deck = built.def.tubeShader && materials.tube ? materials.tube : materials.road;
+        const deck = built.def.hazardPad && materials.hazardPad
+          ? materials.hazardPad
+          : built.def.tubeShader && materials.tube ? materials.tube : materials.road;
         addMesh(built.geometry, deck);
       }
       addMesh(built.railGeometry, materials.rail);

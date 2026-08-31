@@ -301,6 +301,7 @@ export class ModularRoadBuilder {
     checkpointGlowMaterial = null,
     glassMaterial = null,
     tubeMaterial = null,
+    hazardPadMaterial = null,
     camera = null,
     domElement = null,
     orbit = null,
@@ -320,6 +321,7 @@ export class ModularRoadBuilder {
     this.checkpointGlowMaterial = checkpointGlowMaterial;
     this.glassMaterial = glassMaterial;
     this.tubeMaterial = tubeMaterial;
+    this.hazardPadMaterial = hazardPadMaterial;
     this.orbit = orbit;
     this.isBuildMode = isBuildMode;
     this.onChange = onChange;
@@ -2946,6 +2948,7 @@ export class ModularRoadBuilder {
   _deckMaterial(id) {
     if (PIECE_BY_ID.get(id)?.noMesh) return this.gapMaterial;
     if (this._isTubePiece(id) && this.tubeMaterial) return this.tubeMaterial;
+    if (PIECE_BY_ID.get(id)?.hazardPad && this.hazardPadMaterial) return this.hazardPadMaterial;
     return this.material;
   }
 
@@ -4591,6 +4594,7 @@ export class ModularRoadBuilder {
 const PIECE_TO_CATEGORY = {
   straight: "straight",
   platform: "straight",
+  platform_hazard: "straight",
   narrow: "straight",
   holed: "straight",
   glass_road: "straight",
@@ -5297,6 +5301,12 @@ export const CATEGORY_PRESETS = {
       id: "platform_pad",
       label: "Platform",
       base: "platform",
+      params: { platformLength: 24, platformWidth: 44 },
+    },
+    {
+      id: "platform_hazard_pad",
+      label: "Hazard pad",
+      base: "platform_hazard",
       params: { platformLength: 24, platformWidth: 44 },
     },
     {

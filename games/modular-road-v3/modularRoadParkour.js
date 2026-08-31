@@ -321,7 +321,7 @@ export function buildSlopeLabGroup(sharedMat = null) {
  * left→right — same flat-entry shape as the "Jump ramp" prop, laid out as a
  * test row. Feet on y = 0, centred on XZ.
  */
-export function buildJumpLabGroup() {
+export function buildJumpLabGroup(sharedMat = null) {
   const group = new THREE.Group();
   group.name = "JumpLab";
   const rises = [4, 7, 10, 14, 18]; // increasing lip steepness ≈ different takeoff angles
@@ -333,7 +333,7 @@ export function buildJumpLabGroup() {
   for (let i = 0; i < rises.length; i++) {
     const m = new THREE.Mesh(
       jumpRampGeometry(w, l, rises[i]),
-      parkourMat(colors[i]),
+      sharedMat ?? parkourMat(colors[i]),
     );
     m.position.set(-42 + i * 21, 0, z);
     m.castShadow = true;

@@ -4561,6 +4561,18 @@ export const PIECE_CATALOG = [
     noKerb: true,                    // no kerbs or guardrails
   },
   {
+    id: "platform_hazard",
+    label: "Hazard pad",
+    hint: "Wide diamond-plate deck — yellow / black stripes, red caps",
+    swatch: "#e8c012",
+    key: "",
+    points: platformPoints,
+    width: (pp) => pp.platformWidth,
+    plain: true,
+    noKerb: true,
+    hazardPad: true,
+  },
+  {
     id: "narrow",
     label: "Narrow",
     hint: "Narrow precision road",
@@ -5436,7 +5448,7 @@ export const PIECE_BY_ID = new Map(PIECE_CATALOG.map((p) => [p.id, p]));
  * is a twin-bore tunnel, which is a look to choose rather than a defect.
  */
 export const LATERAL_TILEABLE = new Set([
-  "straight", "platform", "narrow", "holed",
+  "straight", "platform", "platform_hazard", "narrow", "holed",
   "rounded_start", "rounded_end",
   "slope", "link", "crest", "jump", "dive", "gap", "landing", "brow",
   "grade_in", "grade", "grade_out",
@@ -5626,6 +5638,7 @@ export function heldSpeed(radius, hold = FOLLOW_HOLD, car = FOLLOW_CAR) {
 const _END_TANGENTS = {
   straight: flatEndTangents,
   platform: flatEndTangents,
+  platform_hazard: flatEndTangents,
   narrow: flatEndTangents,
   holed: flatEndTangents,
   glass_road: flatEndTangents,
