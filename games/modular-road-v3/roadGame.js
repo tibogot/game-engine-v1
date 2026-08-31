@@ -653,6 +653,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // Scratch for the prop surface query — allocated once, not per placement.
   const _snapOrigin = new THREE.Vector3();
   const _snapDown = new THREE.Vector3(0, -1, 0);
+  const _snapBox = new THREE.Box3();
+
+  /**
+   * True when a deck hit is this prop sitting on itself.
+   *
+   * A `collision: "both"` prop (board ramp, platform, slope) is baked into the
+   * deck BVH. The snap ray starts 2 m above the origin, so the first hit is
+   * often the prop's OWN drive surface — which then lifts it by that thickness
+   * every time you select or drag it. Hits at the feet are the surface it
+   * rests on (road, terrain, another prop) and must stay.
+   */
+  function hitIsOwnDeck(inst, point) {
+    const root = inst?.root;
+    if (!root) return false;
+    if (point.y <= root.position.y + 0.04) return false;
+    root.updateWorldMatrix(true, true);
+    _snapBox.setFromObject(root);
+    return _snapBox.containsPoint(point);
+  }
 
   const props = new PropManager({
     scene,
@@ -696,12 +715,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
      * finds the terrain, not the deck above it. The +2 m margin lets a prop that
      * is already sitting flush still find the surface it is resting on.
      */
-    getSurfaceY: (x, y, z, mode) => {
+    getSurfaceY: (x, y, z, mode, skipInst) => {
       ensureCollision(); // reads the deck tree — see the note on bakeCollision
       if (mode !== "ground" && deckBvh?.baked) {
         _snapOrigin.set(x, y + 2, z);
-        const hit = deckBvh.raycastFirst(_snapOrigin, _snapDown, 400);
-        if (hit) return hit.point.y;
+        for (let i = 0; i < 8; i++) {
+          const hit = deckBvh.raycastFirst(_snapOrigin, _snapDown, 400);
+          if (!hit) break;
+          if (skipInst && hitIsOwnDeck(skipInst, hit.point)) {
+            _snapOrigin.copy(hit.point);
+            _snapOrigin.y -= 0.02;
+            continue;
+          }
+          return hit.point.y;
+        }
       }
       // Road-only and there is no road here: refuse rather than silently
       // dropping the prop to the terrain, which would look like a bug.

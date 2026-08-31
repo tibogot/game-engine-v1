@@ -2304,10 +2304,11 @@ export class PropManager {
    * @param {import("three/addons/controls/OrbitControls.js").OrbitControls} o.orbit
    * @param {() => void} [o.onChange] fired when props are added/removed/moved (collision is now stale)
    * @param {() => void} [o.onSelect] fired when a prop is selected (deselect other gizmos)
-   * @param {(x:number,y:number,z:number,mode:string)=>number|null} [o.getSurfaceY]
+   * @param {(x:number,y:number,z:number,mode:string,skipInst?:object)=>number|null} [o.getSurfaceY]
    *        surface height under a point for the current snap mode — see
    *        SURFACE_SNAP. `y` is the prop's current height; the search runs
-   *        downward from there.
+   *        downward from there. `skipInst` is the prop being snapped, so the
+   *        query can ignore that prop's own deck.
    */
   constructor({
     scene, camera, domElement, orbit,
@@ -2357,7 +2358,11 @@ export class PropManager {
       // rather than snapping only on release. Translate mode only — during a
       // rotate or scale the position is not what is changing, and re-snapping
       // there would fight a prop deliberately tilted onto banking.
-      if (this.gizmo.mode === "translate") this.snapToSurface(this.selected);
+      //
+      // `dragging` is required: attach() and handle hover also fire `change`,
+      // and snapping then would lift a board-ramp onto its own deck the moment
+      // you right-click it (the origin sits under the lead-in).
+      if (this.gizmo.mode === "translate" && this.gizmo.dragging) this.snapToSurface(this.selected);
       this.selBox.setFromObject(this.selected.root);
     });
     // A gizmo drag is an AUTHORING act, so the pose it lands on becomes the new
@@ -2659,7 +2664,7 @@ export class PropManager {
     // where it already is. That is what makes "auto" behave: a prop sitting on
     // the terrain under an elevated road finds the terrain, not the deck 20 m
     // above it — while dragging the same prop up onto the road finds the deck.
-    const y = this.getSurfaceY(p.x, p.y, p.z, mode);
+    const y = this.getSurfaceY(p.x, p.y, p.z, mode, inst);
     if (y === null || y === undefined || !Number.isFinite(y)) return false;
     p.y = y + (inst.restY ?? 0);
     // Snapping is an EDITOR move, so the height it lands on is authored — see

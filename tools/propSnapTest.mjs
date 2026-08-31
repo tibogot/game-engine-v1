@@ -262,15 +262,20 @@ console.log("\n=== WIRED UP IN THE REAL FILES ===");
   check("…but `free` is exempt from that fallback",
     /!this\.snapToSurface\(inst\) && SURFACE_SNAP\.mode !== "free"/.test(propsSrc));
   // Live during a translate drag, but NOT during rotate/scale — re-snapping
-  // there would fight a prop deliberately tilted onto banking.
+  // there would fight a prop deliberately tilted onto banking — and NOT on
+  // attach/hover `change`, which would lift a board ramp onto its own deck.
   check("snapping runs live while dragging, translate only",
-    /mode === "translate"\) this\.snapToSurface\(this\.selected\)/.test(propsSrc));
+    /mode === "translate" && this\.gizmo\.dragging\) this\.snapToSurface\(this\.selected\)/.test(propsSrc));
+  check("snapToSurface hands the instance to the surface query so it can skip itself",
+    /getSurfaceY\(p\.x, p\.y, p\.z, mode,\s*inst\)/.test(propsSrc));
   check("a saved track is NOT re-snapped on import (positions are already right)",
     !/importInstances[\s\S]{0,900}?snapToSurface/.test(propsSrc));
 
-  check("the game supplies the surface query", /getSurfaceY:\s*\(x, y, z, mode\)/.test(gameSrc));
+  check("the game supplies the surface query", /getSurfaceY:\s*\(x, y, z, mode/.test(gameSrc));
   check("it searches DOWNWARD from the prop's own height",
     /_snapOrigin\.set\(x, y \+ 2, z\)/.test(gameSrc), "or auto finds decks far above a parkour prop");
+  check("a snap ray that hits the prop's own deck continues through it",
+    /hitIsOwnDeck/.test(gameSrc));
   check("road mode returns null rather than falling back",
     /if \(mode === "road"\) return null;/.test(gameSrc));
   check("the control is in the PALETTE, beside what you are placing",
