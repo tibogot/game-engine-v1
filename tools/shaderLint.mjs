@@ -36,6 +36,8 @@ const SHADER_MODULES = [
   // module that is not listed is not checked, and what it can ship is a black
   // material.
   "games/modular-road-v3/chassisModel.js",
+  "games/modular-road-v3/modularRoadRainLens.js",
+  "games/modular-road-v3/rainLab.js",
 ];
 
 const wide = process.argv.includes("--all");

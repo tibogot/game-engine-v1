@@ -4,6 +4,7 @@
 export default Object.fromEntries([
   // Core browser
   "window", "document", "console", "navigator", "location", "performance",
+  "addEventListener", "removeEventListener", "URL",
   "requestAnimationFrame", "cancelAnimationFrame", "setTimeout", "clearTimeout",
   "setInterval", "clearInterval", "queueMicrotask", "structuredClone",
   "fetch", "Request", "Response", "Headers", "AbortController", "URL",
