@@ -255,5 +255,95 @@ console.log("\n=== WIRED INTO THE GAME ===");
     /this\.onGlowChange\?\.\(\["glowbox", "glowring"\]\)/.test(propsSrc));
 }
 
+console.log("\n=== A PROP THAT DID NOT MOVE COSTS NOTHING ===");
+// `update()` used to rewrite and re-upload every instance of every batch every
+// frame. Most props never move: containers, poles, lamps, walls and all the
+// scenery sit where they were placed, and in build mode nothing moves until you
+// drag something. The three costs that bought were a full instance-buffer write
+// per batch, the setMatrixAt loop feeding it, and — the expensive one — nulling
+// `boundingSphere`, which three then recomputes over every instance ONCE PER
+// FRUSTUM TEST, i.e. once for the view plus once per shadow cascade.
+//
+// The saving is only worth having if a prop that DOES move is still picked up
+// with nothing announcing it, so both halves are asserted together.
+{
+  const props = fakeProps(["cone", "cone", "cone"]);
+  const inst = makeInstancer(props);
+  inst.setEnabled(true);          // syncs and does the first, full, update
+  const im = inst.group.children[0];
+
+  // `version` is what three's `needsUpdate` bumps and what the backend keys its
+  // upload off, so it is the honest measure of "was this buffer sent again".
+  const v0 = im.instanceMatrix.version;
+  inst.update();
+  inst.update();
+  check("two idle frames upload nothing",
+    im.instanceMatrix.version === v0, `version ${v0} -> ${im.instanceMatrix.version}`);
+
+  // Bounds survive an idle frame, so three does not re-walk every instance on
+  // each of the view + cascade frustum tests.
+  im.computeBoundingSphere();
+  const sphere = im.boundingSphere;
+  inst.update();
+  check("...and the bounding sphere is not thrown away",
+    im.boundingSphere === sphere);
+
+  // NOTHING ANNOUNCES THIS. No dirty flag is raised, no setter is called — the
+  // sim writes the root transform and that is all. This is the case a
+  // flag-based design loses, and the reason `update()` compares instead.
+  props.instances[2].root.position.set(1.5, 4.2, -30);
+  inst.update();
+  const m = new THREE.Matrix4();
+  const pos = new THREE.Vector3();
+  im.getMatrixAt(2, m);
+  pos.setFromMatrixPosition(m);
+  check("a prop moved with no announcement is still picked up",
+    pos.distanceTo(props.instances[2].root.position) < 1e-4,
+    `${pos.toArray().map((v) => v.toFixed(2))}`);
+  check("...which re-uploads", im.instanceMatrix.version > v0);
+  check("...and re-opens the bounds", im.boundingSphere === null);
+
+  // ONLY the mover's span goes up the wire. The range is what makes a punted
+  // cone cost one instance instead of the whole field.
+  const ranges = im.instanceMatrix.updateRanges;
+  check("...uploading only the span that changed, not the whole batch",
+    ranges.length === 1 && ranges[0].start === 2 * 16 && ranges[0].count === 16,
+    ranges.length ? `start ${ranges[0].start} count ${ranges[0].count}` : "no range");
+
+  // And it settles again rather than staying dirty for good.
+  const v1 = im.instanceMatrix.version;
+  inst.update();
+  check("...then goes quiet again", im.instanceMatrix.version === v1);
+}
+
+console.log("\n=== A REORDERED SET IS NOT MISTAKEN FOR AN IDLE ONE ===");
+// The trap in comparing poses: `sync()` REBUILDS the insts array, so slot i can
+// hold a different prop at the same world position as whoever was there before.
+// Comparing against a snapshot indexed by slot would then see "no change" and
+// leave the batch describing the old set.
+{
+  const props = fakeProps(["cone", "cone"]);
+  const inst = makeInstancer(props);
+  inst.setEnabled(true);
+  const im = inst.group.children[0];
+
+  // Swap the two props' identities without moving either ROOT — same matrices,
+  // different objects at each index.
+  const moved = props.instances[0].root.position.clone();
+  props.instances.reverse();
+  inst.sync();
+  inst.update();
+  const m = new THREE.Matrix4();
+  const pos = new THREE.Vector3();
+  im.getMatrixAt(1, m);
+  pos.setFromMatrixPosition(m);
+  check("a resync re-writes every slot rather than trusting the snapshot",
+    pos.distanceTo(moved) < 1e-4, `${pos.toArray().map((v) => v.toFixed(2))}`);
+  // A full rewrite must NOT carry a partial range, or the backend would upload
+  // a slice of a buffer that changed everywhere.
+  check("...and sends the whole buffer, not a range",
+    im.instanceMatrix.updateRanges.length === 0);
+}
+
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nall green");
 process.exit(fail ? 1 : 0);

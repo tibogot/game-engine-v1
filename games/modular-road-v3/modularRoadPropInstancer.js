@@ -371,6 +371,10 @@ export class PropInstancer {
     if (batch && batch.capacity >= insts.length && batch.meshes.length === parts.length) {
       batch.insts = insts;
       batch.colorsDirty = true;
+      // The array is REBUILT by sync(), so slot i may now hold a different prop
+      // even when the length is unchanged — the cached poses describe whoever
+      // used to be at each index and cannot be compared against.
+      batch.posesValid = false;
       for (const m of batch.meshes) m.count = insts.length;
       return;
     }
@@ -388,7 +392,12 @@ export class PropInstancer {
       this.group.add(im);
       return im;
     });
-    this._batches.set(key, { insts, meshes, capacity, colorsDirty: true });
+    this._batches.set(key, {
+      insts, meshes, capacity, colorsDirty: true,
+      // Float64, matching Matrix4.elements exactly — see the note in update().
+      poses: new Float64Array(capacity * 16),
+      posesValid: false,
+    });
   }
 
   /**
@@ -516,25 +525,93 @@ export class PropInstancer {
     for (const batch of this._batches.values()) {
       const { insts, meshes } = batch;
       if (batch.decal) { this._updateDecals(batch); continue; }
+
+      /*
+       * MATRICES ONLY WHEN THEY ACTUALLY MOVE.
+       *
+       * This used to rewrite and re-upload every instance of every batch on
+       * every frame, unconditionally, with the justification "matrices are
+       * rewritten every frame because props move". Some props move: cones,
+       * tyres, gates and barrels, while PropPhysics is punting them. Most do
+       * not — containers, poles, lamps, walls, ramps, tirewalls and every piece
+       * of scenery sit exactly where they were placed for the whole session,
+       * and in build mode nothing moves at all until you drag something.
+       *
+       * Three separate costs were being paid for those, per batch, per frame:
+       *
+       *   • `setMatrixAt` into the instance array — 16 writes per part per prop
+       *   • `instanceMatrix.needsUpdate` — a FULL GPU buffer write, whole batch
+       *   • `boundingSphere = null` — three then recomputes it by walking every
+       *     instance, and it does that once per FRUSTUM TEST, which is once for
+       *     the view plus once per shadow cascade. That was the expensive one.
+       *
+       * ── WHY A COMPARISON AND NOT A DIRTY FLAG ────────────────────────────
+       *
+       * A flag raised by whoever moves a prop is cheaper and is the wrong shape
+       * for this file, which already says so about the prop SET: "there is no
+       * single choke point a caller can hook to know the set changed" (the
+       * self-heal above). Poses are worse — they are written by PropPhysics, by
+       * three separate gizmos, by track load, by respawn, and by anything that
+       * pokes `inst.root` directly. Missing one call site leaves a prop frozen
+       * at its old pose while the editor insists it moved it, which is a bug
+       * that would survive a long time because it only shows on one prop type.
+       *
+       * Comparing is self-healing: no call site can be forgotten, because the
+       * matrix is the evidence. It costs 16 float compares per prop per frame
+       * against the upload it replaces, and it early-outs on the first
+       * difference. `updateWorldMatrix` still runs for every prop — that is what
+       * produces the value being compared.
+       *
+       * Float64Array, deliberately: `Matrix4.elements` is a plain JS array, so
+       * its values are doubles. Snapshotting them into a Float32Array (which is
+       * what `instanceMatrix.array` is, and the tempting place to compare
+       * against) truncates every one of them, so nothing would ever compare
+       * equal and the whole check would silently do nothing at all.
+       */
+      const poses = batch.poses;
+      const full = !batch.posesValid;
+      let lo = -1, hi = -1;
       for (let i = 0; i < insts.length; i++) {
         const root = insts[i].root;
         root.updateWorldMatrix(false, false);
+        const e = root.matrixWorld.elements;
+        const o = i * 16;
+        if (!full) {
+          let same = true;
+          for (let k = 0; k < 16; k++) {
+            if (poses[o + k] !== e[k]) { same = false; break; }
+          }
+          if (same) continue;
+        }
+        for (let k = 0; k < 16; k++) poses[o + k] = e[k];
         for (const m of meshes) m.setMatrixAt(i, root.matrixWorld);
+        if (lo < 0) lo = i;
+        hi = i;
       }
-      for (const m of meshes) {
-        m.instanceMatrix.needsUpdate = true;
-        // THE BOUNDS MOVED, SO THROW THEM AWAY. three recomputes a null
-        // boundingSphere on the next frustum test, from the CURRENT instance
-        // matrices, which is what makes culling safe for props that move — see
-        // the note where frustumCulled is set. It walks `count`, not the
-        // allocated capacity, so the SLACK instances cannot inflate it.
-        m.boundingSphere = null;
+      batch.posesValid = true;
+      if (lo >= 0) {
+        for (const m of meshes) {
+          // Upload only the span that changed. A punted cone is one instance in
+          // a batch of a hundred; a full rewrite (a resize, a fresh sync) skips
+          // the range so the whole buffer goes. Ranges are added immediately
+          // before `needsUpdate` because the backend clears them on upload and
+          // a range left behind by a write that never happened would truncate
+          // the NEXT one.
+          if (!full) m.instanceMatrix.addUpdateRange(lo * 16, (hi - lo + 1) * 16);
+          m.instanceMatrix.needsUpdate = true;
+          // THE BOUNDS MOVED, SO THROW THEM AWAY. three recomputes a null
+          // boundingSphere on the next frustum test, from the CURRENT instance
+          // matrices, which is what makes culling safe for props that move — see
+          // the note where frustumCulled is set. It walks `count`, not the
+          // allocated capacity, so the SLACK instances cannot inflate it.
+          m.boundingSphere = null;
+        }
       }
 
-      // COLOURS ONLY WHEN THEY CHANGE. Matrices are rewritten every frame because
-      // props move; a livery is picked once at placement and then sits there, so
-      // re-uploading the colour buffer at 60 Hz would be pure waste. Dirty flag
-      // instead, raised by sync() and by any variant change.
+      // COLOURS ONLY WHEN THEY CHANGE. A livery is picked once at placement and
+      // then sits there, so re-uploading the colour buffer at 60 Hz would be
+      // pure waste. Dirty flag instead, raised by sync() and by any variant
+      // change — the same economy the matrices above now make for themselves.
       if (!batch.colorsDirty) continue;
       batch.colorsDirty = false;
       for (const m of meshes) {
@@ -591,6 +668,21 @@ export class PropInstancer {
    *  colours are otherwise only written when a batch is built or resized. */
   markColorsDirty() {
     for (const b of this._batches.values()) b.colorsDirty = true;
+  }
+
+  /**
+   * Force a full matrix rewrite on the next update.
+   *
+   * NOT NEEDED for anything that moves a prop — `update()` compares against the
+   * live world matrix, so a pose change is picked up whether or not anyone said
+   * so. This exists for the case the comparison genuinely cannot see: something
+   * writing straight into `instanceMatrix` behind the batch's back, which would
+   * leave the GPU buffer disagreeing with a snapshot that still looks current.
+   * Nothing does that today. It is here so that the next thing to try it has an
+   * obvious correct move instead of reaching for the comparison itself.
+   */
+  markPosesDirty() {
+    for (const b of this._batches.values()) b.posesValid = false;
   }
 
   /** Draw calls this is currently responsible for — for the stats readout. */

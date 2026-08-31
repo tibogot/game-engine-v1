@@ -36,6 +36,21 @@ export const roadParams = {
   railWidth: 0.75,
   railHeight: 0.22, // kerb height above the deck (m) — low; guardrail sits on top
   segLen: 1.6, // sweep step (m). Curves, morphs, AND constant straights.
+  /**
+   * CHORD ERROR BUDGET for a curved sweep, in metres — how tall a flat any one
+   * step is allowed to leave behind on the deck's OUTER EDGE.
+   *
+   * This is the density rule for everything that bends; `segLen` only sets the
+   * floor on how far apart stations may drift when the piece is barely turning.
+   * See `stepsFor` for why a sagitta and not an angle, and for where 7.5 mm
+   * comes from (it is the value that reproduces the tube family's measured
+   * station count, not a taste pick).
+   *
+   * Sparse in the save format like every other tuning key, so a track that
+   * predates it inherits whatever this says today rather than freezing at the
+   * default of the day it was saved.
+   */
+  stepSagitta: 0.0075,
   onChange: null,
 };
 
@@ -2704,39 +2719,107 @@ function rotateY(v, ang) {
   return new V3(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
 }
 
-/** Max bend per sweep step (rad). Fixed-length stepping alone lets tight arcs
- *  facet visibly (1.6 m steps on an 18 m radius ≈ 5°/step, and the kerb +
- *  guardrail silhouettes show every facet), so curved pieces cap the per-step
- *  turn/roll too. Pass the TOTAL angle the piece sweeps (yaw + roll). */
-const MAX_STEP_ANGLE = THREE.MathUtils.degToRad(1.5);
 /**
- * How many stations to sweep, and `pp.maxStepDeg` is how a piece opts out of the
- * default density.
+ * ABSOLUTE BACKSTOP on the bend per sweep step (rad), NOT the governing term.
  *
- * 1.5° EXISTS FOR KERBS. It was chosen because "length-only stepping put ~5° of
- * pitch per step on a typical slope and the kerbs showed every facet" — a road's
- * kerb is a narrow ridge running along the piece, so it catches the light on
- * every crease. The rideable tubes have no kerbs (`noKerb`), and they pay for
- * that density across a 98-point annulus instead of an 8-point road section.
+ * This used to be 1.5° and it used to decide the density of every curved piece
+ * in the kit. It no longer does — `stepsFor` measures the chord error the
+ * stepping actually leaves behind (see below) — but it is kept, loose, because
+ * a pure angle cap is the one rule that still holds when the sagitta model's
+ * assumptions do not: a piece whose `totalAngle` is a ROLL rather than a bend
+ * has no centreline radius for the model to read, and a degenerate arc (angle
+ * with almost no length) can ask for a step the eye would read as a corner.
+ * At 8° it binds on neither of the shapes in the catalogue; it exists so that
+ * nothing a future piece does can come out arbitrarily coarse.
+ */
+const MAX_STEP_ANGLE = THREE.MathUtils.degToRad(8);
+
+/**
+ * How many stations to sweep.
  *
- * MEASURED on a 90° R26 tube, sagitta of the flat it leaves behind:
+ * ── WHY THIS IS NOT AN ANGLE CAP ANY MORE ─────────────────────────────────
  *
- *     along the sweep  1.5°/step -> 0.22 cm     (faceting radius = centreline, 26 m)
- *     around the bore  48 segs   -> 1.71 cm     (faceting radius = bore, 8 m)
+ * The old rule was a flat 1.5° per step with no radius term, and a constant
+ * angle is the wrong quantity: what shows on a swept surface is the SAGITTA,
+ * the height of the flat each step leaves behind, and that is `r·θ²/8`. Two
+ * pieces stepped at the same angle are not equally faceted — a 45° corner at
+ * R24 and a 45° corner at R4 differ by a factor of six in the only number
+ * anyone can see.
  *
- * The frames are EIGHT TIMES finer than the cross-section they are sweeping, so
- * the extra stations buy nothing you can see — the profile's own faceting swamps
- * them. See `def.stepDeg` on the tube family.
+ * The kit already knew this. The tube family's `stepRelax` note reasons in
+ * exactly these units ("MEASURED on a 90° R26 tube, the sagitta of the flat
+ * each step leaves behind"), and `decimateFrames` in modularRoadRail.js was
+ * fixed for the same class of error — it measured the centreline when the rail
+ * is what facets. This makes that measure the rule instead of a per-family
+ * override reached for after someone notices.
+ *
+ * So: `steps = A·sqrt(r / (8·sagitta))`, from `θ ≤ sqrt(8·sagitta/r)`.
+ *
+ * ── WHICH RADIUS ──────────────────────────────────────────────────────────
+ *
+ * `r` is the OUTER EDGE, not the centreline: `arcLen/A` is the centreline
+ * radius, and the deck's outer edge is half a road width further out, tracing
+ * a bigger arc and faceting harder. Measuring the middle of a 16 m road and
+ * shipping the answer for its edge is precisely the bug `decimateFrames`
+ * documents having shipped once already.
+ *
+ * When `totalAngle` is a ROLL (the bank family, the twists) rather than a bend,
+ * `arcLen/A` is not a radius at all — it is a large meaningless number, and it
+ * makes this term ask for MORE stations than the roll actually needs (the
+ * correct radius for a roll is just the half-width). That is the safe
+ * direction, and in practice it does not arise: on every rolling piece in the
+ * catalogue the LENGTH term is already the larger of the two, so `Math.max`
+ * returns the same count it always did.
+ *
+ * ── WHERE THE 7.5 mm COMES FROM ───────────────────────────────────────────
+ *
+ * It is not a taste pick. It is the number that reproduces the ONE station
+ * count in this file that was arrived at by measurement rather than by the
+ * angle cap: the 90° R26 tube corner at `stepRelax` 2.5, which the tube note
+ * settled at 24 stations after checking the sweep's sagitta against the bore's
+ * own 1.71 cm faceting. Solving `24 = A·sqrt(r/(8·s·relax))` at r = 34 m gives
+ * s = 7.3 mm; 7.5 mm returns 24 exactly. So the tube family's tuning survives
+ * this change bit for bit, and the road pieces inherit the same standard of
+ * evidence instead of a constant nobody could re-derive.
+ *
+ * What it costs the pieces the old cap was over-tightening, at width 16:
+ *
+ *     loop   R25, 360°     240 -> 148 stations   (sagitta 0.74 cm)
+ *     loop   R25, 180°     120 ->  74 stations
+ *     curve  R24,  45°      30 ->  19 stations   (sagitta 0.68 cm)
+ *     curve  R60,  90°      60 ->  59 stations   (length term governs)
+ *     tube   R26,  90°      24 ->  24 stations   (unchanged, by construction)
+ *
+ * Gentle, long pieces are untouched — `arcLen / segLen` was already the larger
+ * term there and still is. The saving lands entirely on tight bends, which are
+ * both the most expensive pieces in the kit and the ones an absolute angle cap
+ * over-tessellates hardest. Every caster is drawn once per shadow cascade on
+ * top of once for the view, so it is worth roughly triple what it reads as.
+ *
+ * `stepRelax` scales the sagitta BUDGET (not the step count) so that a family
+ * saying "my section is coarser than my sweep" says it in the units the budget
+ * is expressed in. `pp.stepRelax` is how a piece opts out; see the tube block
+ * near PIECE_CATALOG.
  */
 function stepsFor(arcLen, totalAngle = 0, minSteps = 2, pp = null) {
   // ONE KNOB, because both terms are over-tight for the same reason. Relaxing
-  // only the angle would leave `arcLen / segLen` (1.6 m stations) setting the
+  // only the sagitta would leave `arcLen / segLen` (1.6 m stations) setting the
   // density on anything long and gently curved, which is most of a tube run.
   const relax = Math.max(1, pp?.stepRelax ?? 1);
+  const A = Math.abs(totalAngle);
+  let sagittaSteps = 0;
+  if (A > 1e-6) {
+    // Outer edge of the deck, so the sagitta is measured where it is worst.
+    const r = arcLen / A + roadParams.width / 2;
+    const budget = Math.max(1e-4, roadParams.stepSagitta * relax);
+    sagittaSteps = Math.ceil(A * Math.sqrt(r / (8 * budget)));
+  }
   return Math.max(
     minSteps,
     Math.ceil(arcLen / (roadParams.segLen * relax)),
-    Math.ceil(Math.abs(totalAngle) / (MAX_STEP_ANGLE * relax)),
+    sagittaSteps,
+    // Backstop only — see MAX_STEP_ANGLE. Never the governing term in this kit.
+    Math.ceil(A / (MAX_STEP_ANGLE * relax)),
   );
 }
 
@@ -5720,20 +5803,27 @@ for (const def of PIECE_CATALOG) {
  * TUBE TESSELLATION — the rideable-tube family sweeps a 98-point annulus, and
  * it was doing it at the density chosen for an 8-point road section.
  *
- * 1.5°/station exists for KERBS: a road's kerb is a narrow ridge running along
- * the piece, so it catches the light on every crease, and the comment on
- * MAX_STEP_ANGLE records that coarser stepping "showed every facet". Tubes have
- * no kerbs (`noKerb`) and pay that density across twelve times the section.
+ * The density rule existed for KERBS: a road's kerb is a narrow ridge running
+ * along the piece, so it catches the light on every crease, and the original
+ * MAX_STEP_ANGLE recorded that coarser stepping "showed every facet". Tubes have
+ * no kerbs (`noKerb`) and paid that density across twelve times the section.
  *
  * MEASURED on a 90° R26 tube, the sagitta of the flat each step leaves behind:
  *
  *     along the sweep   1.5°/step   0.22 cm    (faceting radius = centreline, 26 m)
  *     around the bore   48 segs     1.71 cm    (faceting radius = bore, 8 m)
  *
- * The frames are EIGHT TIMES finer than the cross-section they carry, so the
- * extra stations are invisible under the profile's own faceting. At relax 2.5
+ * The frames were EIGHT TIMES finer than the cross-section they carry, so the
+ * extra stations were invisible under the profile's own faceting. At relax 2.5
  * the sweep contributes 1.4 cm — still under what the section already costs —
  * and a tube corner drops from 61 stations to 24.
+ *
+ * THIS MEASUREMENT OUTLIVED THE RULE IT WAS AN EXCEPTION TO. `stepsFor` now
+ * budgets sagitta directly for every piece, and its 7.5 mm default was chosen
+ * to return this family's 24 stations unchanged — so `stepRelax` here is no
+ * longer a workaround for a cap that could not see radius, it is the honest
+ * statement it always described: this family's SECTION is coarser than its
+ * sweep, so its sweep may be too.
  *
  * NOT THE OUTER SHELL. The obvious cut is the outside of the tube, which is half
  * the triangles and "nobody looks at" — except you can LAND on top of a tube and

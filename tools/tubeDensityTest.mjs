@@ -97,7 +97,27 @@ for (const [id, params] of CASES) {
   base += a; now += b;
   console.log(`   ${id.padEnd(18)} ${String(a).padStart(7)}   ${String(b).padStart(8)}   ${(100 - 100 * b / a).toFixed(0).padStart(4)}%`);
 }
-ok(now < base * 0.55, "the tube family roughly halves",
+/*
+ * 0.75, NOT THE 0.55 THIS SHIPPED WITH — and the threshold moved because the
+ * BASELINE got cheaper, not because the shipped tubes did.
+ *
+ * This measures what `stepRelax` buys ON TOP OF the default density, so it is
+ * only ever as impressive as the default is wasteful. When it was written the
+ * default was a flat 1.5°/station with no radius term, which over-tessellated a
+ * 26 m arc by roughly a factor of two all on its own — so relax 2.5 looked like
+ * it was halving the family when half of that was really the cap's own slack.
+ *
+ * `stepsFor` now budgets chord error directly, so relax 1 is already close to
+ * right and there is correspondingly less left for relax 2.5 to take: measured,
+ * 73,388 → 43,748 tris at relax 1, while the SHIPPED column moved on exactly one
+ * of the five pieces (tube_crest, 9,204 → 7,048 — a gentle vertical arc the old
+ * angle cap was over-stepping). tube_curve, tube_spiral, tube_slope and
+ * half_tube_curve are bit-identical to what they were.
+ *
+ * So this still asserts the thing worth asserting — the family's opt-out earns
+ * its keep — against a baseline that no longer flatters it.
+ */
+ok(now < base * 0.75, "the tube family's stepRelax still earns its keep",
   `${base} → ${now} tris, ${(100 - 100 * now / base).toFixed(0)}% off`);
 
 /* ---------------------------------------------------------------------- */
@@ -243,17 +263,45 @@ for (const relax of [1, 1.5, 2, SHIPPED, 3.5, 5]) {
 // has to sit inside the spread of the others (excluding itself, or the test
 // would be vacuous), and relax 5 has to sit clearly outside it.
 const fine = bore.get(1), shipped = bore.get(SHIPPED);
-const peers = [1, 1.5, 2, 3.5].filter((r) => r !== SHIPPED).map((r) => bore.get(r).jolts);
-const band = Math.max(...peers);
-const coarse = [bore.get(3.5), bore.get(5)]
-  .reduce((a, b) => (b.jolts > a.jolts ? b : a));
 ok(shipped.held >= fine.held - 0.02, "the bore holds the car as well",
   `${(100 * fine.held).toFixed(0)}% → ${(100 * shipped.held).toFixed(0)}%`);
-ok(shipped.jolts <= band, "and the shipped density is inside the noise band",
-  `${shipped.jolts} jolts against ${Math.min(...peers)}–${band} across the densities `
-  + "it is supposed to be equivalent to");
-ok(coarse.jolts > band * 1.25, "...and the measurement can still see a bad density",
-  `worst coarse reading is ${coarse.jolts} jolts vs a ${band}-jolt band — the cliff is past 2.5`);
+
+/*
+ * THE TWO JOLT ASSERTIONS THAT USED TO LIVE HERE ARE GONE, DELIBERATELY, AND
+ * THIS IS A WEAKENED TEST — read this before trusting the section above.
+ *
+ * They were a pair: "the shipped density is inside the noise band" only meant
+ * anything because "the measurement can still see a bad density" proved the
+ * counter was not simply blind. The second one is what broke, and it broke for
+ * a reason that is not a regression.
+ *
+ * Under the old flat 1.5° cap, `stepRelax` divided the station count outright,
+ * so relax 5 produced genuinely broken geometry — 12 stations across a 90° arc
+ * — and the counter saw it: 40 jolts against a 29 band, a clear cliff. Under
+ * the sagitta rule `stepRelax` scales a CHORD-ERROR BUDGET instead, and the
+ * count falls off as 1/sqrt(relax) rather than 1/relax. Measured on this rig,
+ * relax 5 now yields 3,912 verts where it used to yield roughly half that, and
+ * the drive reads 23 jolts / 95% contact — indistinguishable from fine. Pushing
+ * the sweep out to relax 7/10/14/20 does not restore a cliff either (30/40/36/25
+ * jolts, contact never below 95%): the count is dominated by the car's own
+ * oscillation up the bore wall, which this file's own comment above says out
+ * loud, and there is no longer a density in a sane range where facet edges rise
+ * above it.
+ *
+ * That is a real property of the new rule — it bounds the error `stepRelax` can
+ * introduce, so the knob can no longer be turned into a broken tube — but it
+ * leaves the jolt counter with nothing to discriminate. Keeping the first
+ * assertion without its control would be asserting "no degradation" on a
+ * measurement that has been shown unable to detect degradation, which is worse
+ * than asserting nothing.
+ *
+ * WHAT IS STILL COVERED: section 2 pins the exits (density must not move
+ * geometry), section 3 drives the roof, and the contact check above is
+ * unchanged. WHAT IS NOT: nothing here now fails if a future change makes the
+ * shipped bore subtly bumpier. Replacing this wants a direct chord-error
+ * measurement against `roadParams.stepSagitta` — closed-form off the station
+ * count, not sampled off the mesh — rather than another drive-based proxy.
+ */
 
 /* ---------------------------------------------------------------------- */
 console.log("\n5. THE ROAD PIECES ARE UNTOUCHED\n");

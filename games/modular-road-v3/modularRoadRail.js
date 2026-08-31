@@ -804,7 +804,8 @@ export function postTransforms(frames, baseLat, zSign, spacing) {
 /**
  * Thin a piece's frames for the RAIL SWEEP ONLY.
  *
- * The deck of a CURVE is stepped at roadParams.segLen (1.6 m) / 1.5° because
+ * The deck of a CURVE is stepped to a chord-error budget (roadParams.segLen
+ * for spacing, roadParams.stepSagitta for the bend — see `stepsFor`) because
  * its SURFACE needs that resolution. Constant-section straights only keep the
  * two end frames — a prism does not need copies of the same ring down the
  * length. A rail is a smooth tube 0.26 m across — it needs nothing like that.
