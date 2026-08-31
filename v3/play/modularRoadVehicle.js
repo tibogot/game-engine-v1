@@ -3820,6 +3820,8 @@ export class Vehicle {
     this._escapeRef = new THREE.Vector3();
     /** Chassis axes + lever for the crash trip-over — see the TRIP-OVER block
      *  on CRASH and step 5 of _applySolidContact. */
+    /** Chassis up, for the solids lid test — see SOLID.sitNormalMaxY. */
+    this._sitUp = new THREE.Vector3(0, 1, 0);
     this._tripUp = new THREE.Vector3();
     this._tripRight = new THREE.Vector3();
     this._tripFwd = new THREE.Vector3();
@@ -6203,6 +6205,8 @@ export class Vehicle {
     let deepest = 0;
     let hits = 0;
     const wheelsCarry = this._isSupported();
+    // Chassis up, for the lid test below — see SOLID.sitNormalMaxY.
+    this._sitUp.set(0, 1, 0).applyQuaternion(this.body.quat);
 
     for (const sp of this.SOLID_BOX_SAMPLES) {
       this._geomToWorld(sp, this._sphC);
@@ -6299,7 +6303,22 @@ export class Vehicle {
       // UNLESS THE CAR IS ARRIVING ON IT AND NOTHING ELSE IS HOLDING IT UP — see
       // the second half of the SOLID.sitNormalMaxY block. `wheelsCarry` is
       // hoisted out of the loop; it cannot change between samples of one pass.
-      if (Math.abs(ny) > sitY && wheelsCarry) continue;
+      //
+      // MEASURED AGAINST THE CAR'S UP, NOT THE WORLD'S. "A lid the hull can park
+      // on" is a statement about the car, and on a banked or rolled piece the
+      // guardrail is rolled with the road — so its walls stop being vertical in
+      // world space and this test threw them away as lids. Measured on
+      // banked_climb (tools/railNormalProbe.mjs): |n.y| up to 0.93, and 73% of
+      // the rail proxy discarded while the wheels were carrying the car. The
+      // barrier was built correctly and simply not consulted, which is the
+      // "I drove through the guardrail on a climbing turn" report.
+      //
+      // Using chassis-up costs nothing anywhere else: on level ground the two
+      // axes agree, and while the car is unsupported the branch is skipped
+      // entirely, so a tumbling car (whose own up is meaningless) never reaches
+      // this test.
+      const upDot = nx * this._sitUp.x + ny * this._sitUp.y + nz * this._sitUp.z;
+      if (Math.abs(upDot) > sitY && wheelsCarry) continue;
 
       hits++;
       this._sphN.set(nx, ny, nz);
