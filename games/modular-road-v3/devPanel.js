@@ -198,6 +198,36 @@ export function createRoadDevPanel({ app, game, params }) {
               </div>
             </div>
           </div>
+          <div id="dv-flag-prop" style="display:none">
+            <div class="prop-row">
+              <span class="prop-label" id="dv-flag-img-label">Flag image</span>
+              <div class="prop-value" style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="action-btn" id="dv-flag-img" type="button">Upload image</button>
+                <button class="action-btn" id="dv-flag-clear" type="button">Clear</button>
+                <input id="dv-flag-file" type="file" accept="image/*" hidden>
+              </div>
+            </div>
+            <div class="prop-row">
+              <span class="prop-label">Flag colour</span>
+              <div class="prop-value">
+                <input type="color" id="dv-flag-color" />
+              </div>
+            </div>
+            <div class="prop-row">
+              <span class="prop-label">Flag wave</span>
+              <div class="prop-value">
+                <input type="range" id="dv-flag-amp" min="0" max="1.5" step="0.02" />
+                <span class="prop-num" id="dv-flag-amp-v"></span>
+              </div>
+            </div>
+            <div class="prop-row">
+              <span class="prop-label">Flag speed</span>
+              <div class="prop-value">
+                <input type="range" id="dv-flag-speed" min="0" max="8" step="0.1" />
+                <span class="prop-num" id="dv-flag-speed-v"></span>
+              </div>
+            </div>
+          </div>
           <div class="prop-row">
             <span class="prop-label">All of this type</span>
             <div class="prop-value">
@@ -211,9 +241,11 @@ export function createRoadDevPanel({ app, game, params }) {
             than forty. Right-click a prop to select it, then click a swatch or
             press <b>C</b> (<b>Shift+C</b> to go back); <b>V</b> toggles the
             decal. Ad billboards take an uploaded image the same way; the prism
-            board takes three, one per rotating face. Both save with the track.
+            board takes three, one per rotating face.             Both save with the track.
             <b>LED display</b> takes chevron, a text marquee, or an image; default
             chevrons stay instanced, authored faces do not.
+            Right-click a <b>flag</b> to put an image on that one sheet (saves
+            with the track), or tint it; wave is shared by every flag of that shape.
           </div>
         </div>
       </div>
@@ -1965,34 +1997,6 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Flag image</span>
-            <div class="prop-value">
-              <button class="action-btn" id="dv-flag-img" type="button">Load image…</button>
-              <button class="action-btn" id="dv-flag-clear" type="button">Clear</button>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Flag colour</span>
-            <div class="prop-value">
-              <input type="color" id="dv-flag-color" />
-              <span class="prop-num" id="dv-flag-count"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Flag wave</span>
-            <div class="prop-value">
-              <input type="range" id="dv-flag-amp" min="0" max="1.5" step="0.02" />
-              <span class="prop-num" id="dv-flag-amp-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Flag speed</span>
-            <div class="prop-value">
-              <input type="range" id="dv-flag-speed" min="0" max="8" step="0.1" />
-              <span class="prop-num" id="dv-flag-speed-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
             <span class="prop-label">Guardrail sparks</span>
             <div class="prop-value">
               <button class="prop-toggle checked" id="dv-sparks" type="button" aria-label="Guardrail sparks">${CHECK_SVG}</button>
@@ -3146,47 +3150,49 @@ export function createRoadDevPanel({ app, game, params }) {
     });
   }
 
-  // ── Banner flags ────────────────────────────────────────────────────────────
-  // One image and one colour drive EVERY flag, because they are all one
-  // instanced draw. The colour picker is disabled while an image is loaded: the
-  // material multiplies colour × map, so a tinted flag stains the picture (the
-  // RTS base flag hit exactly this).
-  const flagP = game.getFlagParams?.();
-  if (flagP) {
-    const colEl = $("#dv-flag-color");
-    const countEl = $("#dv-flag-count");
-    const syncFlagUi = () => {
-      const tex = !!game.flagHasTexture?.();
-      if (colEl) { colEl.value = flagP.color; colEl.disabled = tex; }
-      if (countEl) countEl.textContent = `${game.flagCount?.() ?? 0} placed${tex ? " · image" : ""}`;
-    };
-    colEl?.addEventListener("input", () => {
-      flagP.color = colEl.value;
-      game.applyFlagParams?.();
-    });
-    // Hidden file input — same shape as the track loader.
-    const flagFile = document.createElement("input");
-    flagFile.type = "file";
-    flagFile.accept = "image/*";
-    flagFile.style.display = "none";
-    flagFile.addEventListener("change", () => {
-      const f = flagFile.files?.[0];
-      if (f) game.setFlagTextureFile?.(f);
-      flagFile.value = "";
-      syncFlagUi();
-    });
-    document.body.appendChild(flagFile);
-    $("#dv-flag-img")?.addEventListener("click", () => flagFile.click());
-    $("#dv-flag-clear")?.addEventListener("click", () => {
-      game.clearFlagTexture?.();
-      syncFlagUi();
-    });
-    slider("dv-flag-amp", flagP, "amplitude", (v) => v.toFixed(2),
-      () => game.applyFlagParams?.());
-    slider("dv-flag-speed", flagP, "speed", (v) => v.toFixed(1),
-      () => game.applyFlagParams?.());
-    syncFlagUi();
-  }
+  // ── Selected-flag cloth (Prop livery) ─────────────────────────────────────
+  // Image and colour are PER FLAG, like a billboard advert. Wave/speed still
+  // tune the shared shader for that shape (banner vs country).
+  const flagWrap = $("#dv-flag-prop");
+  const flagFile = $("#dv-flag-file");
+  const flagCol = $("#dv-flag-color");
+  const flagAmp = $("#dv-flag-amp");
+  const flagAmpV = $("#dv-flag-amp-v");
+  const flagSpeed = $("#dv-flag-speed");
+  const flagSpeedV = $("#dv-flag-speed-v");
+  $("#dv-flag-img")?.addEventListener("click", () => flagFile?.click());
+  flagFile?.addEventListener("change", async () => {
+    const f = flagFile.files?.[0];
+    flagFile.value = "";
+    if (!f) return;
+    await game.setPropFlagFile?.(f);
+    refresh();
+  });
+  $("#dv-flag-clear")?.addEventListener("click", () => {
+    game.clearPropFlagImage?.();
+    refresh();
+  });
+  flagCol?.addEventListener("input", () => {
+    game.setPropFlagColor?.(flagCol.value, { commit: false });
+  });
+  flagCol?.addEventListener("change", () => {
+    game.setPropFlagColor?.(flagCol.value, { commit: true });
+    refresh();
+  });
+  flagAmp?.addEventListener("input", () => {
+    const style = game.getSelectedFlagStyle?.();
+    if (!style) return;
+    style.amplitude = +flagAmp.value;
+    if (flagAmpV) flagAmpV.textContent = style.amplitude.toFixed(2);
+    game.applySelectedFlagParams?.();
+  });
+  flagSpeed?.addEventListener("input", () => {
+    const style = game.getSelectedFlagStyle?.();
+    if (!style) return;
+    style.speed = +flagSpeed.value;
+    if (flagSpeedV) flagSpeedV.textContent = style.speed.toFixed(1);
+    game.applySelectedFlagParams?.();
+  });
 
   const spk = game.getSparkSettings?.();
   if (spk) {
@@ -3358,6 +3364,30 @@ export function createRoadDevPanel({ app, game, params }) {
       }
       ledRgb?.set?.(!!sel.ledDisplay?.rgb);
     }
+    const isFlag = !!sel?.isFlag;
+    if (flagWrap) flagWrap.style.display = isFlag ? "" : "none";
+    if (isFlag) {
+      const tex = !!sel.flagImage;
+      const imgLab = $("#dv-flag-img-label");
+      if (imgLab) imgLab.textContent = tex ? "Flag image · set" : "Flag image";
+      if (flagCol) {
+        flagCol.value = sel.flagColor;
+        flagCol.disabled = tex;
+      }
+      if (flagAmp) flagAmp.closest(".prop-row").style.display = sel.flagVerlet ? "none" : "";
+      if (flagSpeed) flagSpeed.closest(".prop-row").style.display = sel.flagVerlet ? "none" : "";
+      const style = game.getSelectedFlagStyle?.();
+      if (style && !sel.flagVerlet) {
+        if (flagAmp && document.activeElement !== flagAmp) {
+          flagAmp.value = String(style.amplitude);
+          if (flagAmpV) flagAmpV.textContent = Number(style.amplitude).toFixed(2);
+        }
+        if (flagSpeed && document.activeElement !== flagSpeed) {
+          flagSpeed.value = String(style.speed);
+          if (flagSpeedV) flagSpeedV.textContent = Number(style.speed).toFixed(1);
+        }
+      }
+    }
     if (advertRow) {
       const lab = $("#dv-advert-label");
       if (lab) lab.textContent = sel?.hasAdvertImage ? "Advert · set" : "Advert";
@@ -3374,7 +3404,7 @@ export function createRoadDevPanel({ app, game, params }) {
       return;
     }
     if (!list.length) {
-      liveryName.textContent = (sel.hasDecal || sel.hasAdvert || sel.hasLedDisplay)
+      liveryName.textContent = (sel.hasDecal || sel.hasAdvert || sel.hasLedDisplay || sel.isFlag)
         ? sel.label : `${sel.label} — no liveries`;
       return;
     }

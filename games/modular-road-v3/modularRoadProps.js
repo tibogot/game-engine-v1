@@ -30,6 +30,7 @@ import { makeCrane } from "./modularRoadCrane.js";
 import { makePalm } from "./modularRoadPalm.js";
 import { makeBarrel } from "./modularRoadBarrel.js";
 import { DECAL_OFFSET } from "./modularRoadDecals.js";
+import { FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
 import { roadParams } from "./modularRoadKit.js";
 
 /** The one decal there is so far. Lives beside the game rather than in
@@ -327,6 +328,10 @@ function blackDiamondMat() {
  * Shorter / wider / lower than the slope-lab 15° ramp (22×12, rise ≈ 5.7 m).
  * Plank = diamond, side caps = flat red, feet = flat dark. Collision is one
  * hidden solid so the extra materials never become drive surfaces.
+ *
+ * The low end is 28 cm thick. A vertical cap there is a kerb the car cannot
+ * climb, so a short lead-in wedge runs from the ground up onto the plank —
+ * same diamond deck, red cheeks, and it is the drive surface at the toe.
  */
 function slopeBoardParts() {
   const W = 20;
@@ -394,8 +399,42 @@ function slopeBoardParts() {
   quad(Bl, Ul, Ur, Br, plank);
   quad(Tl, Hl, Ul, Bl, cap);
   quad(Tr, Br, Ur, Hr, cap);
-  quad(Tl, Bl, Br, Tr, cap);
+  // No vertical toe cap — that 28 cm wall is what stopped the car. The
+  // high-end lip stays; that is the takeoff.
   quad(Hl, Hr, Ur, Ul, cap);
+
+  // Lead-in: Hermite so the toe is flat (easy to roll onto) and the join
+  // matches the plank slope (no kink). +Z is the approach.
+  const LEAD = 2.8;
+  const SEG = 12;
+  const slope = (H - T) / L;
+  const mJoin = LEAD * slope;
+  const yLead = (u) => {
+    const u2 = u * u;
+    const u3 = u2 * u;
+    return T * (-2 * u3 + 3 * u2) + mJoin * (u3 - u2);
+  };
+  for (let i = 0; i < SEG; i++) {
+    const u0 = i / SEG;
+    const u1 = (i + 1) / SEG;
+    const y0 = yLead(u0);
+    const y1 = yLead(u1);
+    const z0 = LEAD * (1 - u0);
+    const z1 = LEAD * (1 - u1);
+    const a = [-hw, y0, z0];
+    const b = [hw, y0, z0];
+    const c = [hw, y1, z1];
+    const d = [-hw, y1, z1];
+    quad(a, b, c, d, plank, true);
+    // First slice starts on the ground — a side quad would collapse to a line.
+    if (y0 <= 1e-4) {
+      tri(d, [-hw, 0, z1], a, cap);
+      tri(b, [hw, 0, z1], c, cap);
+    } else {
+      quad(a, d, [-hw, 0, z1], [-hw, 0, z0], cap);
+      quad(b, [hw, 0, z0], [hw, 0, z1], c, cap);
+    }
+  }
 
   const footW = 0.55;
   const footD = 0.85;
@@ -1445,6 +1484,70 @@ function setVariant(inst, index) {
  *   course height for PropManager.stackSnap (containers, tyres).
  * @property {() => THREE.Object3D} make
  */
+
+/** Mast + finial + base. Height and thickness follow `style.poleHeight`. */
+function flagPoleGroup(name, style) {
+  const g = new THREE.Group();
+  g.name = name;
+  const POLE_H = style.poleHeight ?? 6;
+  const s = POLE_H / 6;
+  const POLE_R = 0.08 * s;
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.07 * s, 0.09 * s, POLE_H, 10),
+    mat(0xb9c0c8, { roughness: 0.35, metalness: 0.75 }),
+  );
+  pole.position.y = POLE_H / 2;
+  pole.userData.capsule = { radius: POLE_R, height: POLE_H };
+  const finial = new THREE.Mesh(
+    new THREE.SphereGeometry(0.11 * s, 10, 8),
+    mat(0xd8dee6, { roughness: 0.25, metalness: 0.85 }),
+  );
+  finial.position.y = POLE_H + 0.05 * s;
+  finial.userData.noCollide = true;
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.34 * Math.min(s, 1.6), 0.42 * Math.min(s, 1.6), 0.16 * Math.min(s, 1.4), 12),
+    mat(0x23262b, { roughness: 0.85 }),
+  );
+  base.position.y = 0.08 * Math.min(s, 1.4);
+  base.userData.noCollide = true;
+  g.add(base, pole, finial);
+  return g;
+}
+
+/**
+ * Static cloth matching the live instanced plane, for palette thumbnails.
+ * `noRender` keeps it out of the live tree and the instancer (those draw the
+ * waving instance instead). The baker does not skip `noRender`, so the tile
+ * shows a flag rather than a bare pole.
+ */
+function flagClothPreview(style) {
+  const geo = new THREE.PlaneGeometry(style.width, style.height, style.segX, style.segY);
+  geo.translate(style.width / 2, -style.height / 2, 0);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const grip = (pos.getX(i) / style.width) ** 2;
+    pos.setZ(i, Math.sin(pos.getY(i) * style.frequency) * style.amplitude * 0.55 * grip);
+  }
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(
+    geo,
+    mat(style.color, { roughness: 0.82, metalness: 0, side: THREE.DoubleSide }),
+  );
+  mesh.position.y = style.top;
+  mesh.userData.noRender = true;
+  mesh.userData.noCollide = true;
+  return mesh;
+}
+
+function buildFlagProp(name, style) {
+  const g = flagPoleGroup(name, style);
+  g.add(flagClothPreview(style));
+  // A tall thin mast's bounding sphere is mostly empty air — without this the
+  // palette tile is a speck, the same problem the palm had.
+  if ((style.poleHeight ?? 6) > 8) g.userData.thumbFit = 0.52;
+  return g;
+}
+
 /** @type {PropDef[]} */
 export const PROP_CATALOG = [
   // ── PHYSICS PROPS ───────────────────────────────────────────────────────────
@@ -1591,43 +1694,25 @@ export const PROP_CATALOG = [
     },
   },
   {
+    id: "countryflag",
+    label: "Flag",
+    category: "scenery",
+    collision: "none",
+    flag: true,
+    flagVerlet: true,
+    make: () => buildFlagProp("CountryFlag", COUNTRY_FLAG),
+  },
+  {
     id: "flag",
     label: "Banner flag",
     category: "scenery",
     collision: "none", // triangle bake off — thin pole uses a capsule instead
-    // Just the POLE. The CLOTH is drawn by ModularRoadFlags as a single
-    // instanced mesh across every flag on the track — see that file for why it
-    // is a shader wave rather than the engine's Verlet cloth. The pole stays a
-    // real prop mesh so the gizmo has something to grab and right-click picking
-    // still works; an empty root would be unselectable.
-    make: () => {
-      const g = new THREE.Group();
-      g.name = "BannerFlag";
-      const POLE_H = 6;
-      const POLE_R = 0.08;
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.07, 0.09, POLE_H, 10),
-        mat(0xb9c0c8, { roughness: 0.35, metalness: 0.75 }),
-      );
-      pole.position.y = POLE_H / 2;
-      // Exact capsule — same pattern as gate post / scenery masts; the hull
-      // sampler cannot see a pole this thin reliably.
-      pole.userData.capsule = { radius: POLE_R, height: POLE_H };
-      const finial = new THREE.Mesh(
-        new THREE.SphereGeometry(0.11, 10, 8),
-        mat(0xd8dee6, { roughness: 0.25, metalness: 0.85 }),
-      );
-      finial.position.y = POLE_H + 0.05;
-      finial.userData.noCollide = true;
-      const base = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.34, 0.42, 0.16, 12),
-        mat(0x23262b, { roughness: 0.85 }),
-      );
-      base.position.y = 0.08;
-      base.userData.noCollide = true;
-      g.add(base, pole, finial);
-      return g;
-    },
+    flag: true,
+    flagVerlet: true,
+    // Pole + thumbnail preview. Live cloth is Verlet (same sim as the RTS flag),
+    // attached by ModularRoadFlags — see that file for why a shader wave still
+    // read as low-poly even on a dense mesh (normals).
+    make: () => buildFlagProp("BannerFlag", FLAG),
   },
   {
     id: "gate",
@@ -2471,6 +2556,8 @@ export class PropManager {
     inst.decal = false;
     inst.advert = null;
     inst.ledDisplay = null;
+    inst.flagImage = null;
+    inst.flagColor = null;
     root.userData.propInstance = inst;
     this.instances.push(inst);
     // A PROP YOU JUST ADDED MUST NEVER BE LEFT HANGING IN MID-AIR.
@@ -2515,6 +2602,8 @@ export class PropManager {
     if (inst.advert) applyAdvert(root, inst.advert);
     inst.ledDisplay = src.ledDisplay ? { ...src.ledDisplay } : null;
     if (inst.def?.ledDisplay) applyLedDisplayContent(root, inst.ledDisplay);
+    inst.flagImage = src.flagImage ?? null;
+    inst.flagColor = src.flagColor ?? null;
     root.userData.propInstance = inst;
     this.instances.push(inst);
     this.snapToSurface(inst); // the +4,+4 offset may have landed on a different surface
@@ -2735,6 +2824,42 @@ export class PropManager {
     if (!this.selected?.def?.ledDisplay || !file) return false;
     const dataUrl = await ledDisplayFileToDataUrl(file);
     return this.setSelectedLedDisplay({ source: "image", image: dataUrl });
+  }
+
+  /**
+   * Per-flag picture, same contract as a billboard advert: stored on the
+   * instance, saved with the track. The waving cloth leaves the shared
+   * instanced draw while a map is on (one texture per draw).
+   */
+  setSelectedFlagImage(dataUrl) {
+    if (!this.selected?.def?.flag) return false;
+    const was = !!this.selected.flagImage;
+    this.selected.flagImage = dataUrl || null;
+    this.onFlagClothChange?.();
+    if (was !== !!this.selected.flagImage) this.onVariantChange?.(this.selected);
+    this.onChange?.();
+    this.onSelectionChange?.(this.selected);
+    return true;
+  }
+
+  async setSelectedFlagFile(file) {
+    if (!this.selected?.def?.flag || !file) return false;
+    const dataUrl = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(file);
+    });
+    return this.setSelectedFlagImage(dataUrl);
+  }
+
+  setSelectedFlagColor(hex, { commit = true } = {}) {
+    if (!this.selected?.def?.flag) return false;
+    this.selected.flagColor = hex || null;
+    this.onFlagClothChange?.();
+    if (commit) this.onChange?.();
+    this.onSelectionChange?.(this.selected);
+    return true;
   }
 
   /** Step the selected prop's livery. `dir` −1 or +1. */
@@ -3005,6 +3130,8 @@ export class PropManager {
       ...(inst.advert ? { advert: inst.advert } : {}),
       ...(inst.ledDisplay && isLedDisplayUnique(inst.ledDisplay)
         ? { ledDisplay: inst.ledDisplay } : {}),
+      ...(inst.flagImage ? { flagImage: inst.flagImage } : {}),
+      ...(inst.flagColor ? { flagColor: inst.flagColor } : {}),
     }));
   }
 
@@ -3073,6 +3200,8 @@ export class PropManager {
       if (inst.def?.advert) applyAdvert(root, inst.advert);
       inst.ledDisplay = item.ledDisplay ? { ...item.ledDisplay } : null;
       if (inst.def?.ledDisplay) applyLedDisplayContent(root, inst.ledDisplay);
+      inst.flagImage = item.flagImage || null;
+      inst.flagColor = item.flagColor || null;
       root.userData.propInstance = inst;
       // A loaded pose IS the authored pose — the file is the authorship.
       this.captureAuthored(inst);

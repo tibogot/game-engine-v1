@@ -336,15 +336,18 @@ export class PropInstancer {
       });
       return;
     }
-    const unique = !!inst.def?.ledDisplay && isLedDisplayUnique(inst.ledDisplay);
-    if (!unique) {
+    const uniqueLed = !!inst.def?.ledDisplay && isLedDisplayUnique(inst.ledDisplay);
+    const uniqueFlag = !!inst.flagImage || !!inst.def?.flagVerlet;
+    if (!uniqueLed && !uniqueFlag) {
       inst.root.visible = false;
       return;
     }
     inst.root.visible = true;
     inst.root.traverse((o) => {
       if (!o.isMesh) return;
-      o.visible = !!o.userData.ledDisplayFace && !o.userData.noRender;
+      const keep = (uniqueLed && o.userData.ledDisplayFace)
+        || (uniqueFlag && o.userData.flagClothUnique);
+      o.visible = !!keep && !o.userData.noRender;
     });
   }
 

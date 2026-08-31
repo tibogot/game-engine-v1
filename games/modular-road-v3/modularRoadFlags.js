@@ -1,58 +1,63 @@
 // ============================================================================
-// TRACK BANNER FLAGS — the tall vertical banners that line a racing straight.
+// TRACK FLAGS — banner + country flag cloth.
 //
-// ONE DRAW CALL for every cloth on the track, and ZERO CPU to animate them.
+// LIVE CLOTH is the engine Verlet sim (v2/core/props/flagFactory.js), the same
+// one the RTS base flag uses. A shader-displaced plane can be denser and still
+// look cheap: the wave moves verts but lighting keeps (or reconstructs) normals
+// that read as faceted cardboard. Verlet rebuilds smooth vertex normals each
+// frame, which is what Blender's smooth shading is.
 //
-// WHY NOT THE ENGINE'S FLAG. v3 already has a real Verlet cloth
-// (v2/core/props/flagFactory.js, which the RTS base flag uses) and it looks
-// great standing still. But it is a per-flag particle sim with a per-flag
-// DYNAMIC geometry upload every frame — it cannot instance, because every cloth
-// has unique vertex positions. Six of those is six sims and six uploads.
+// Each placed flag is its own sim. That is the cost of looking like cloth.
+// The instanced shader path is still in this file (positionNode + interleaved
+// instances) but both shipped styles set `verlet: true`.
 //
-// A racing banner is passed at 170 km/h. The fold detail a cloth sim buys you is
-// invisible at that speed, so the wave is done in the VERTEX SHADER instead:
-// no CPU, no per-frame upload, and every flag on the track in a single draw.
-// Keep the Verlet flag for a hero flag you park next to.
-//
-// INSTANCING SHAPE — copied from v3/props/collectibleField.js because the
-// obvious approach does not work:
-//   • A custom `positionNode` (which the wave needs) CANNOT be combined with
-//     THREE.InstancedMesh. So this is a plain Mesh over an
-//     InstancedBufferGeometry, reading per-instance data through attribute().
-//   • Instance data is ONE INTERLEAVED buffer, not three. WebGPU allows 8 vertex
-//     buffers per pipeline and separate buffers burn a slot each.
-//   • frustumCulled = false: the mesh sits at the origin while its instances are
-//     spread over the whole track, so three's bounding sphere would cull it all
-//     away the moment you drive off.
-//
-// PLACEMENT is the props system's job, not this file's. A "flag" prop carries
-// the POLE (cheap, visible, pickable, and it gives the gizmo something to grab);
-// this mirrors those props into the instanced cloth. That way flags inherit
-// placement, the surface snap, save/load and undo for free.
+// PLACEMENT is the props system's job. A flag prop carries the POLE plus a
+// static preview cloth for palette thumbnails (`noRender`). This file attaches
+// the live sim to those props.
 // ============================================================================
 import * as THREE from "three";
-import { attribute, uniform, positionLocal, uv, vec3, vec4, sin, float } from "three/tsl";
+import { attribute, uniform, positionLocal, uv, vec3, vec4, sin, float, materialColor, dFdx, dFdy, cross, normalize, positionView } from "three/tsl";
+import { createFlag } from "../../v3/props/liveProps.js";
 
 export const FLAG = {
   /** Cloth size (m). Tall and narrow — a circuit banner, not a pennant. */
   width: 1.15,
   height: 4.2,
-  /** Height of the cloth's TOP above the prop origin. The pole is 6 m. */
+  poleHeight: 6,
+  /** Height of the cloth's TOP above the prop origin. */
   top: 5.75,
-  /** Mesh resolution. Across needs almost nothing (the wave is along the drop);
-   *  down is what makes the ripple smooth. */
-  segX: 3,
+  /** Same Verlet cloth as the RTS flag. A shader wave on a dense plane still
+   *  shades like cardboard: displacement does not write smooth vertex normals
+   *  the way Blender / computeVertexNormals does. */
+  segX: 10,
   segY: 16,
-  /** Wave shape. amplitude is metres at the free edge. */
+  verlet: true,
+  /** Wave shape. Unused while `verlet` is on (wind lives on the sim). */
   amplitude: 0.42,
   frequency: 1.5,
   speed: 2.1,
-  /** How much the cloth also swings sideways — pure wind lean. */
   sway: 0.18,
   color: "#e0342a",
-  /** Tint multiplies the map, so an image on a coloured flag comes out stained.
-   *  Applying a texture forces this to white; clearing restores the colour.
-   *  Same rule the RTS base flag uses. */
+  textureUrl: "",
+};
+
+/**
+ * Country flag — tall mast (not the 6 m banner pole) and a 3:2 sheet. The old
+ * 3.2×1.9 on a 6 m pole was both too short and too wide for the stick.
+ */
+export const COUNTRY_FLAG = {
+  width: 4.8,
+  height: 3.2,
+  poleHeight: 18,
+  top: 17.7,
+  segX: 12,
+  segY: 9,
+  verlet: true,
+  amplitude: 0.32,
+  frequency: 2.0,
+  speed: 2.1,
+  sway: 0.16,
+  color: "#c8322d",
   textureUrl: "",
 };
 
@@ -70,18 +75,22 @@ export class ModularRoadFlags {
   /**
    * @param {THREE.Scene} scene
    * @param {import("./modularRoadProps.js").PropManager} props
+   * @param {{propId?:string, style?:typeof FLAG}} [opts]
    */
-  constructor(scene, props) {
+  constructor(scene, props, opts = {}) {
     this.props = props;
+    this.propId = opts.propId ?? "flag";
+    this.style = opts.style ?? FLAG;
     this.count = 0;
     this._lastPropCount = -1;
+    const S = this.style;
 
     // ── Cloth geometry: a plane pinned along its LEFT edge (x = 0 = the mast) ──
     // Authored with x running 0..width and y running -height..0, so the origin
     // is the TOP of the cloth where it meets the pole. That makes the instance
     // position the pole top, which is the natural thing to place.
-    const plane = new THREE.PlaneGeometry(FLAG.width, FLAG.height, FLAG.segX, FLAG.segY);
-    plane.translate(FLAG.width / 2, -FLAG.height / 2, 0);
+    const plane = new THREE.PlaneGeometry(S.width, S.height, S.segX, S.segY);
+    plane.translate(S.width / 2, -S.height / 2, 0);
 
     const data = new Float32Array(CAPACITY * STRIDE);
     const ib = new THREE.InstancedInterleavedBuffer(data, STRIDE, 1);
@@ -96,10 +105,10 @@ export class ModularRoadFlags {
     geo.instanceCount = 0;
 
     this.uTime = uniform(0);
-    this.uAmp = uniform(FLAG.amplitude);
-    this.uFreq = uniform(FLAG.frequency);
-    this.uSpeed = uniform(FLAG.speed);
-    this.uSway = uniform(FLAG.sway);
+    this.uAmp = uniform(S.amplitude);
+    this.uFreq = uniform(S.frequency);
+    this.uSpeed = uniform(S.speed);
+    this.uSway = uniform(S.sway);
 
     const mat = new THREE.MeshStandardNodeMaterial({
       side: THREE.DoubleSide, // you see the back of a flag constantly
@@ -142,6 +151,10 @@ export class ModularRoadFlags {
     })();
 
     mat.colorNode = vec4(aTint.xyz, 1);
+    // positionNode moves verts; stock normals stay those of the rest pose, so
+    // the sheet shades as a flat card. Reconstruct from screen-space derivatives
+    // of the displaced view position — same trick displaced terrain uses.
+    mat.normalNode = normalize(cross(dFdx(positionView), dFdy(positionView)));
 
     const mesh = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;   // instances are all over the track; the mesh is at the origin
@@ -157,28 +170,42 @@ export class ModularRoadFlags {
     this.data = data;
     this.ib = ib;
     this._plane = plane;
-    this._tex = null;
-    this._objectUrl = null;
+    /** @type {Map<object, {mesh:THREE.Mesh, material:THREE.Material, tex:THREE.Texture|null, url:string}>} */
+    this._uniques = new Map();
   }
 
-  /** Rebuild the instance buffer from the current "flag" props. */
+  /** Rebuild the instance buffer from the current props of this style. */
   sync() {
-    const list = (this.props.instances ?? []).filter((i) => i.id === "flag");
+    const list = (this.props.instances ?? []).filter((i) => i.id === this.propId);
     this._lastPropCount = this.props.instances?.length ?? 0;
-    const n = Math.min(list.length, CAPACITY);
+    const shared = [];
+    const keep = new Set();
+    for (const inst of list) {
+      if (this.style.verlet || inst.flagImage) {
+        keep.add(inst);
+        if (this.style.verlet) this._ensureVerlet(inst);
+        else this._ensureUnique(inst);
+      } else {
+        shared.push(inst);
+        this._dropUnique(inst);
+      }
+    }
+    for (const inst of [...this._uniques.keys()]) {
+      if (!keep.has(inst)) this._dropUnique(inst);
+    }
+
+    const n = Math.min(shared.length, CAPACITY);
     const d = this.data;
-    _col.set(this._tex ? "#ffffff" : FLAG.color);
     for (let i = 0; i < n; i++) {
-      const root = list[i].root;
+      const inst = shared[i];
+      const root = inst.root;
       const o = i * STRIDE;
       d[o] = root.position.x;
-      d[o + 1] = root.position.y + FLAG.top;
+      d[o + 1] = root.position.y + this.style.top;
       d[o + 2] = root.position.z;
-      // Yaw only: a banner pole stands upright even on a banked road.
       d[o + 3] = _yawOf(root.quaternion);
+      _col.set(inst.flagColor || this.style.color);
       d[o + 4] = _col.r; d[o + 5] = _col.g; d[o + 6] = _col.b;
-      // Per-instance phase, derived from position so it is STABLE across
-      // reloads — a random phase would make every flag jump on a track load.
       d[o + 7] = (root.position.x * 0.7 + root.position.z * 1.3) % 6.283;
     }
     this.count = n;
@@ -187,72 +214,145 @@ export class ModularRoadFlags {
     this.mesh.visible = n > 0;
   }
 
-  /** @param {number} dt seconds */
-  update(dt) {
-    if (!this.count) return;
-    // Self-heal like the prop physics: PropManager owns its own Delete key, so
-    // there is no single hook that fires on every set change.
-    const n = this.props.instances?.length ?? 0;
-    if (n !== this._lastPropCount) this.sync();
-    this.uTime.value += dt;
-  }
-
-  /** Re-read FLAG params (colour, wave) into the live uniforms + buffer. */
-  applyParams() {
-    this.uAmp.value = FLAG.amplitude;
-    this.uFreq.value = FLAG.frequency;
-    this.uSpeed.value = FLAG.speed;
-    this.uSway.value = FLAG.sway;
-    this.sync(); // colour lives in the instance buffer
+  /**
+   * RTS cloth: Verlet particles, constraints, gravity, recomputed normals.
+   * Parent to the pole so the gizmo carries it. Cannot instance — every cloth
+   * has unique verts each frame, which is why banners stay on the shader path.
+   */
+  _ensureVerlet(inst) {
+    let u = this._uniques.get(inst);
+    if (!u?.sim) {
+      this._dropUnique(inst);
+      const S = this.style;
+      const sim = createFlag({
+        poleHeight: S.poleHeight ?? 6,
+        poleRadius: (S.poleHeight ?? 6) * 0.013,
+        clothWidth: S.width,
+        clothHeight: S.height,
+        xSegs: S.segX,
+        ySegs: S.segY,
+        flagColor: inst.flagImage ? "#ffffff" : (inst.flagColor || S.color),
+        showPole: false,
+        windIntensity: 300,
+        windSpeed: 1000,
+      });
+      sim.group.traverse((o) => {
+        if (!o.isMesh) return;
+        if (o.visible === false) {
+          o.userData.noRender = true;
+          return;
+        }
+        o.userData.flagClothUnique = true;
+        o.userData.noCollide = true;
+        o.castShadow = false;
+      });
+      inst.root.add(sim.group);
+      for (let i = 0; i < 20; i++) sim.update(1 / 60);
+      u = { sim, url: "" };
+      this._uniques.set(inst, u);
+    }
+    const url = inst.flagImage || "";
+    const color = inst.flagImage ? "#ffffff" : (inst.flagColor || this.style.color);
+    if (url !== u.url) {
+      u.url = url;
+      u.sim.setParam("textureUrl", url);
+    }
+    u.sim.setParam("flagColor", color);
   }
 
   /**
-   * Point every flag at an image. ONE texture for ALL of them — that is the
-   * price of a single draw call; per-flag images would need one draw each or a
-   * texture atlas.
-   *
-   * Tint drops to white while a texture is set: the material multiplies colour ×
-   * map, so a red flag would stain the picture red (the RTS base flag hit this
-   * exact problem).
+   * A flag with its own picture cannot share the instanced cloth (one map for
+   * the draw). The waving sheet is parented to THAT pole so the gizmo moves it,
+   * and `materialColor` multiplies the uploaded map the way a billboard does.
+   * Tint is forced white while a map is on, or a red flag stains the photo.
    */
-  setTextureUrl(url) {
-    if (!url) return this.clearTexture();
+  _ensureUnique(inst) {
+    let u = this._uniques.get(inst);
+    if (!u) {
+      const material = new THREE.MeshStandardNodeMaterial({
+        side: THREE.DoubleSide,
+        roughness: 0.82,
+        metalness: 0,
+        color: new THREE.Color("#ffffff"),
+      });
+      material.colorNode = materialColor;
+      const p = positionLocal;
+      const free = uv().x;
+      const grip = free.mul(free);
+      const t = this.uTime.mul(this.uSpeed);
+      const w1 = sin(p.y.mul(this.uFreq).add(t));
+      const w2 = sin(p.y.mul(this.uFreq.mul(2.3)).sub(t.mul(1.37))).mul(0.35);
+      const flap = w1.add(w2).mul(this.uAmp).mul(grip);
+      const lean = sin(t.mul(0.6)).mul(this.uSway).mul(grip);
+      material.positionNode = vec3(p.x.add(lean), p.y, flap);
+      material.normalNode = normalize(cross(dFdx(positionView), dFdy(positionView)));
+
+      const mesh = new THREE.Mesh(this._plane, material);
+      mesh.position.y = this.style.top;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.userData.flagClothUnique = true;
+      mesh.userData.noCollide = true;
+      inst.root.add(mesh);
+      u = { mesh, material, tex: null, url: "" };
+      this._uniques.set(inst, u);
+    }
+    const url = inst.flagImage;
+    if (url === u.url) return;
+    u.url = url;
     new THREE.TextureLoader().load(
       url,
       (tex) => {
+        if (this._uniques.get(inst) !== u || u.url !== url) {
+          tex.dispose();
+          return;
+        }
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.anisotropy = 4;
-        this._tex?.dispose();
-        this._tex = tex;
-        this.material.map = tex;
-        this.material.needsUpdate = true;
-        this.sync(); // repaint tints white
+        u.tex?.dispose();
+        u.tex = tex;
+        u.material.map = tex;
+        u.material.color.set("#ffffff");
+        u.material.needsUpdate = true;
       },
       undefined,
       (e) => console.warn("[ModularRoad-v3] flag texture failed:", url, e),
     );
-    return true;
   }
 
-  /** Dev panel: swap the banner image from a picked File. */
-  setTextureFile(file) {
-    if (!file) return;
-    if (this._objectUrl) URL.revokeObjectURL(this._objectUrl);
-    this._objectUrl = URL.createObjectURL(file);
-    this.setTextureUrl(this._objectUrl);
+  _dropUnique(inst) {
+    const u = this._uniques.get(inst);
+    if (!u) return;
+    if (u.sim) {
+      u.sim.group.removeFromParent();
+      u.sim.dispose();
+    } else {
+      u.mesh.removeFromParent();
+      u.tex?.dispose();
+      u.material.map = null;
+      u.material.dispose();
+    }
+    this._uniques.delete(inst);
   }
 
-  /** Back to a flat colour. */
-  clearTexture() {
-    this._tex?.dispose();
-    this._tex = null;
-    this.material.map = null;
-    this.material.needsUpdate = true;
-    if (this._objectUrl) { URL.revokeObjectURL(this._objectUrl); this._objectUrl = null; }
+  /** @param {number} dt seconds */
+  update(dt) {
+    const n = this.props.instances?.length ?? 0;
+    if (n !== this._lastPropCount) this.sync();
+    if (!this.count && this._uniques.size === 0) return;
+    this.uTime.value += dt;
+    for (const u of this._uniques.values()) u.sim?.update(dt);
+  }
+
+  /** Re-read style params (colour, wave) into the live uniforms + buffer. */
+  applyParams() {
+    const S = this.style;
+    this.uAmp.value = S.amplitude;
+    this.uFreq.value = S.frequency;
+    this.uSpeed.value = S.speed;
+    this.uSway.value = S.sway;
     this.sync();
   }
-
-  get hasTexture() { return !!this._tex; }
 }
 
 const _e = new THREE.Euler();

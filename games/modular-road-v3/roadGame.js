@@ -167,7 +167,7 @@ import { preloadCrane } from "./modularRoadCrane.js";
 import { preloadPalm } from "./modularRoadPalm.js";
 import { preloadBarrel } from "./modularRoadBarrel.js";
 import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
-import { ModularRoadFlags, FLAG } from "./modularRoadFlags.js";
+import { ModularRoadFlags, FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
@@ -676,7 +676,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // the gizmo is disabled while driving (`props.setEnabled(!driving)`), so this
     // cannot re-seat a gate mid-swing.
     onChange: () => {
-      bakeCollision(); flags?.sync(); propPhysics?.sync(); paletteUi?.refreshStatus?.();
+      bakeCollision(); flags?.sync(); countryFlags?.sync(); propPhysics?.sync(); paletteUi?.refreshStatus?.();
       // Props are a history layer now (see registerHistoryLayer below), so this
       // is also the commit point — same "end of a user-visible edit" contract
       // the road builder's own commits keep. No-ops while an undo is being
@@ -1242,6 +1242,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // sync() can rebuild the batches, which drops their layer membership.
       applyRailReflectionMembers();
       flags.sync();
+      countryFlags.sync();
     } else if (brush.kind === "portal") {
       portals.addDoor(brush.point);
     } else {
@@ -2834,9 +2835,17 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     props,
     getGroundBvh: () => vehicle.groundBvh,
   });
-  // Banner cloths — every flag on the track in ONE instanced draw, waved in the
-  // vertex shader. The poles are ordinary "flag" props; this only owns the cloth.
+  // Banner + country-flag cloths. One instanced draw per style; poles are
+  // ordinary props. This only owns the waving cloth.
   const flags = new ModularRoadFlags(scene, props);
+  const countryFlags = new ModularRoadFlags(scene, props, {
+    propId: "countryflag",
+    style: COUNTRY_FLAG,
+  });
+  props.onFlagClothChange = () => {
+    flags.sync();
+    countryFlags.sync();
+  };
 
   // DEFAULT_MIXER starts muted (muteAll: true) — the lab exposes a mixer panel to
   // unmute. There's no such panel here yet, so start audible; browsers still
@@ -4278,6 +4287,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // sync() can rebuild the batches, which drops their layer membership.
     applyRailReflectionMembers();
     flags.sync();
+    countryFlags.sync();
     paletteUi.refreshStatus();
   });
   document.body.appendChild(trackFileInput);
@@ -4317,6 +4327,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         // sync() can rebuild the batches, which drops their layer membership.
         applyRailReflectionMembers();
         flags.sync();
+        countryFlags.sync();
         paletteUi.refreshStatus();
         devPanel?.refresh();
         console.info(`[ModularRoad-v3] preset track loaded: ${data.pieces?.length ?? 0} pieces`);
@@ -5439,6 +5450,11 @@ ${e.message}`);
             : [!!s.advert, false, false],
           hasLedDisplay: !!s.def?.ledDisplay,
           ledDisplay: s.ledDisplay ?? { source: "chevron" },
+          isFlag: !!s.def?.flag,
+          flagVerlet: !!s.def?.flagVerlet,
+          flagImage: !!s.flagImage,
+          flagColor: s.flagColor
+            || (s.id === "countryflag" ? COUNTRY_FLAG.color : FLAG.color),
         };
       },
       setPropVariant: (i) => props.setSelectedVariant(i),
@@ -5447,6 +5463,20 @@ ${e.message}`);
       clearPropAdvert: (face) => props.setSelectedAdvert(null, face ?? 0),
       setPropLedDisplay: (patch, opts) => props.setSelectedLedDisplay(patch, opts),
       setPropLedDisplayFile: (file) => props.setSelectedLedDisplayFile(file),
+      setPropFlagFile: (file) => props.setSelectedFlagFile(file),
+      clearPropFlagImage: () => props.setSelectedFlagImage(null),
+      setPropFlagColor: (hex, opts) => props.setSelectedFlagColor(hex, opts),
+      getSelectedFlagStyle: () => {
+        const id = props.selected?.id;
+        if (id === "countryflag") return COUNTRY_FLAG;
+        if (id === "flag") return FLAG;
+        return null;
+      },
+      applySelectedFlagParams: () => {
+        const id = props.selected?.id;
+        if (id === "countryflag") countryFlags.applyParams();
+        else if (id === "flag") flags.applyParams();
+      },
       randomisePropVariants: () => props.randomiseVariants(props.selected?.id ?? null),
       getMode: () => mode,
       toggleMode,
@@ -5475,14 +5505,6 @@ ${e.message}`);
       },
       getDriftSmokeSettings: () => driftSmoke.settings,
       getSparkSettings: () => sparks.settings,
-      // Banner flags. One image for ALL of them — that is the cost of a single
-      // instanced draw; per-flag pictures would need a draw each or an atlas.
-      getFlagParams: () => FLAG,
-      applyFlagParams: () => flags.applyParams(),
-      setFlagTextureFile: (file) => flags.setTextureFile(file),
-      clearFlagTexture: () => flags.clearTexture(),
-      flagHasTexture: () => flags.hasTexture,
-      flagCount: () => flags.count,
       getPropPhysics: () => PROP_PHYSICS,
       syncPropPhysics: () => propPhysics.sync(),
       awakeProps: () => propPhysics.awakeCount,
@@ -5795,6 +5817,7 @@ ${e.message}`);
       // Render-rate, not the fixed step: the wave is purely visual and this only
       // advances a uniform — the flags themselves cost no CPU per frame.
       flags.update(dt);
+      countryFlags.update(dt);
       updateDynamicDebug(); // live collider wireframes, when they are switched on
 
       checkFall(dt); // air-stunt: dropped off the track → last safe / spawn

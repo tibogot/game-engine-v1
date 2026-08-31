@@ -65,15 +65,16 @@ console.log("\n=== THE CLOTH IS PINNED TO THE MAST ===");
 
 console.log("\n=== TINT vs IMAGE ===");
 {
-  check("applying an image forces the tint to white",
-    /this\._tex \? "#ffffff" : FLAG\.color/.test(SRC),
+  check("a unique flag's cloth tints white under an image",
+    /color\.set\("#ffffff"\)/.test(SRC),
     "colour x map would otherwise stain the picture");
-  check("an object URL is revoked before being replaced (no leak)",
-    /revokeObjectURL/.test(SRC));
-  check("clearTexture restores the flat colour", /clearTexture\(\)\s*\{[\s\S]{0,300}?map = null/.test(SRC));
+  check("plain flags keep a per-instance colour in the instance buffer",
+    /_col\.set\(inst\.flagColor \|\| this\.style\.color\)/.test(SRC));
   const panel = readFileSync(join(ROOT, "games/modular-road-v3/devPanel.js"), "utf8");
   check("the colour picker is DISABLED while an image is loaded",
-    /colEl\.disabled = tex/.test(panel), "or you would be tinting a photo");
+    /flagCol\.disabled = tex/.test(panel), "or you would be tinting a photo");
+  check("flag image lives on the selected-prop livery, not FX",
+    /dv-flag-prop/.test(panel) && /id="dv-flag-img"/.test(panel));
   check("the panel offers a file picker and a clear",
     /dv-flag-img/.test(panel) && /dv-flag-clear/.test(panel));
 }
@@ -105,15 +106,19 @@ console.log("\n=== IT ACTUALLY RUNS ===");
   // The module needs three/webgpu + TSL; rewrite the bare "three" import the way
   // the other tests do so it can be constructed headlessly.
   const TMP = join(ROOT, `.flag.${process.pid}.mjs`);
-  writeFileSync(TMP, SRC.replace(/^import \* as THREE from "three";$/m,
-    'import * as THREE from "three/webgpu";'));
+  writeFileSync(TMP, SRC
+    .replace(/^import \* as THREE from "three";$/m, 'import * as THREE from "three/webgpu";')
+    .replace(
+      'from "../../v3/props/liveProps.js"',
+      'from "./v3/props/liveProps.js"',
+    ));
   let mod = null;
   try { mod = await import(pathToFileURL(TMP).href); }
   catch (e) { console.log("  (skipped runtime checks: " + e.message.split("\n")[0] + ")"); }
   finally { unlinkSync(TMP); }
 
   if (mod) {
-    const { ModularRoadFlags, FLAG } = mod;
+    const { ModularRoadFlags } = mod;
     const scene = new THREE.Scene();
     const mkProp = (x, z) => {
       const root = new THREE.Object3D();
@@ -124,31 +129,30 @@ console.log("\n=== IT ACTUALLY RUNS ===");
     const flags = new ModularRoadFlags(scene, props);
     flags.sync();
 
-    check("only flag props become instances (the cone is ignored)",
-      flags.count === 3, `${flags.count}`);
-    check("ONE mesh for every banner on the track", scene.children.filter((o) => o.isMesh).length === 1);
-    check("draw count follows the instance count", flags.geometry.instanceCount === 3);
+    check("only flag props get a cloth sim (the cone is ignored)",
+      flags._uniques.size === 3, `${flags._uniques.size}`);
+    check("each of those is the Verlet sim, not the instanced shader sheet",
+      [...flags._uniques.values()].every((u) => u.sim));
+    check("the instanced draw stays empty while Verlet owns the cloth",
+      flags.count === 0 && flags.geometry.instanceCount === 0 && flags.mesh.visible === false);
 
-    // The cloth hangs from the pole top, not from the prop's feet.
-    check("instance y is lifted to the pole top",
-      Math.abs(flags.data[1] - FLAG.top) < 1e-6, `${flags.data[1]} vs top ${FLAG.top}`);
-    check("each instance gets a different phase",
-      flags.data[7] !== flags.data[7 + 8], `${flags.data[7].toFixed(2)} vs ${flags.data[15].toFixed(2)}`);
+    check("the cloth is parented to the pole, so the gizmo carries it",
+      props.instances[0].root.children.length > 0);
 
-    // Removing a prop must drop the instance — a ghost banner would hang in the air.
     props.instances.pop();
     props.instances.pop();
     flags.update(1 / 60);
-    check("a deleted flag's cloth disappears with it", flags.count === 2, `${flags.count}`);
+    check("a deleted flag's cloth disappears with it",
+      flags._uniques.size === 2, `${flags._uniques.size}`);
 
     flags.update(1 / 60);
-    check("time advances, which is the entire per-frame cost", flags.uTime.value > 0);
+    check("the sim steps on the render frame", flags.uTime.value > 0);
 
-    const before = flags.count;
+    const before = flags._uniques.size;
     props.instances.length = 0;
     flags.sync();
-    check("with no flags the mesh is hidden entirely",
-      flags.count === 0 && flags.mesh.visible === false, `was ${before}`);
+    check("with no flags every cloth is gone",
+      flags._uniques.size === 0 && flags.mesh.visible === false, `was ${before}`);
   }
 }
 
