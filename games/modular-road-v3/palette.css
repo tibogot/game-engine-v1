@@ -271,6 +271,13 @@
       .cat-btn.unbaked:not(.active) .cat-btn-icon {
         padding-bottom: 17px;
       }
+      /* Name on hover BEFORE the tab commits (the rail dwells ~120ms). Without
+         this the fourteen unselected thumbnails stay anonymous until native
+         `title` pops, which is slower than the switch itself. Bottom band, not
+         the selected overlay — that would look like you were already in it. */
+      .cat-btn:hover:not(.active) .cat-btn-label {
+        display: block;
+      }
       #palette-panel {
         flex: 1;
         min-width: 0;

@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tube Interior Lab — the look inside the bore</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f16; color: #1a2230;
+                   font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10;
+        min-width: 290px; max-width: 380px;
+        padding: 12px 14px;
+        background: rgba(10, 15, 24, 0.74);
+        border: 1px solid rgba(150, 180, 220, 0.18);
+        border-radius: 10px;
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+      }
+      #hud h1 {
+        margin: 0 0 4px; font-size: 12px; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #7f93ad; font-weight: 700;
+      }
+      #hud .title { margin: 0 0 8px; font-size: 18px; font-weight: 650; color: #f2f6fb; }
+      #hud .meta { color: #9fb0c6; font-size: 12px; }
+      #hud .meta b { color: #f2f6fb; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #hud .ship { color: #ffab6b; }
+      #hud .new { color: #6fd3ff; }
+      #hud .warn { color: #ffd479; }
+      #hud .keys {
+        margin-top: 10px; padding-top: 8px;
+        border-top: 1px solid rgba(150, 180, 220, 0.16);
+        color: #7f93ad; font-size: 11px; line-height: 1.6;
+      }
+      #hud .keys b { color: #cfe0f2; font-weight: 600; }
+      #err {
+        position: fixed; left: 12px; bottom: 12px; z-index: 20;
+        max-width: 620px; padding: 10px 12px; display: none;
+        background: rgba(60, 12, 12, 0.92); border: 1px solid #a44;
+        border-radius: 8px; color: #ffb0b0; white-space: pre-wrap;
+        font: 12px/1.5 ui-monospace, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Tube interior lab</h1>
+      <div class="title" id="s-title">Tube · 3 × 24 m</div>
+      <div class="meta">
+        Shader <b id="s-mode">—</b><br />
+        View <b id="s-cam">orbit</b> · Tris <b id="s-tris">—</b> · Draws <b id="s-draws">—</b><br />
+        GPU <b id="s-gpu">—</b> · <b id="s-fps">—</b> fps<br />
+        Hoops per piece <b id="s-hoops">—</b> <span id="s-hoopwarn" class="warn"></span>
+      </div>
+      <div class="keys">
+        <b>1</b> shipping shader · <b>2</b> new shader (A/B rebuilds the material)<br />
+        <b>R</b> orbit · <b>I</b> inside the bore · <b>F</b> fill test (wall = the frame)<br />
+        <b>P</b> drive down the run — the aliasing test<br />
+        <b>H</b> hide panel<br />
+        Reads the kit and the shipping material. Writes nothing.
+      </div>
+    </div>
+    <div id="err"></div>
+
+    <script type="module">
+      /**
+       * TUBE INTERIOR LAB — why the inside of a bore reads flat, and what fixes it.
+       *
+       * STANDALONE BY CONSTRUCTION. Every import here is read-only: the kit
+       * (buildPiece / PIECE_BY_ID / the params bags) and the SHIPPING tube
+       * material. The candidate shader lives in this file. Nothing in
+       * games/modular-road-v3 is modified by opening this page, so the A side of
+       * every A/B below is literally what the game draws today — not a
+       * reconstruction of it that can drift.
+       *
+       * ── WHAT THIS IS TESTING ────────────────────────────────────────────────
+       *
+       * createTubeMaterial paints the bore a CONSTANT colour per zone. The only
+       * thing that varies across the inside of a tube is `tubeRingMask`, and that
+       * is driven by uv.x alone — so nothing whatsoever changes AROUND the bore.
+       * Combined with `scene.environment` (the sky PMREM) washing a sealed pipe
+       * exactly as brightly as the outside, with no occlusion term anywhere, the
+       * interior has no gradient in any direction. That, not triangle count and
+       * not resolution, is why it reads flat.
+       *
+       * The candidate adds structure in the one direction the shipping shader has
+       * no coordinate for: around the ring. Everything it adds is pure ALU —
+       * no textures (v3 is already near the Windows WebGPU 16-sampler cap), no
+       * extra lights (toggling a light's participation rebuilds every material in
+       * the scene), no extra draws.
+       *
+       * ── THE ONE GEOMETRY CHANGE, PROTOTYPED HERE FIRST ──────────────────────
+       *
+       * `aRing`: 0..1 around the bore, 0 at the floor, 1 at the crown (full
+       * tube) or the lips (half tube). The kit does not write it. This page
+       * derives it from the piece's own reference profile and stamps it onto the
+       * built geometry (see stampRingAttribute) — so the attribute can be judged
+       * on screen before anyone edits modularRoadKit.js. If it earns its place,
+       * that is a ~4-line change in buildTubeProfile / buildHalfTubeProfile plus
+       * one line in buildSweepGeometry, and it costs 4 bytes per vertex.
+       *
+       * ── BLOOM IS OFF, ON PURPOSE ────────────────────────────────────────────
+       *
+       * Same call the existing tube-lab.html makes. This measures the MAIN
+       * material; the game's bloom pyramid is a fixed extra that would only hide
+       * what the shader itself costs. Emissive is shown raw, so a strip that
+       * looks right here will look BRIGHTER in game, not dimmer.
+       */
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "three/addons/libs/lil-gui.module.min.js";
+      import {
+        Fn,
+        uniform,
+        attribute,
+        uv,
+        vec3,
+        float,
+        mix,
+        abs,
+        fract,
+        smoothstep,
+        step,
+        max,
+        fwidth,
+        saturate,
+        oneMinus,
+        normalView,
+        positionView,
+        length,
+        mx_noise_float,
+      } from "three/tsl";
+      import {
+        buildPiece,
+        PIECE_BY_ID,
+        roadParams as kitRoadParams,
+        pieceParams as kitPieceParams,
+        guardrailParams as kitGuardrailParams,
+      } from "./modularRoadKit.js";
+      import { createTubeMaterial, syncTubeUniforms } from "./modularRoadMaterial.js";
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => {
+        const el = $("err");
+        el.style.display = "block";
+        el.textContent = e?.stack || String(e);
+        console.error(e);
+      };
+      const lin = (hex) => new THREE.Color(hex).convertSRGBToLinear();
+
+      /* ==================================================================== */
+      /* State                                                                */
+      /* ==================================================================== */
+
+      /**
+       * The pieces worth judging an interior on. Straights show the length of
+       * the bore (where hoop aliasing lives), curves show the ring coordinate
+       * surviving a swept frame, the half tube proves the same `aRing` mapping
+       * works on an OPEN arc, and the entry proves it on a morphing section
+       * whose shape is flat road at one end.
+       */
+      const PIECES = [
+        { id: "tube", label: "Tube (straight)" },
+        { id: "tube_curve", label: "Tube curve" },
+        { id: "half_tube", label: "Half tube" },
+        { id: "half_tube_curve", label: "Half tube curve" },
+        { id: "tube_in", label: "Tube entry (morph)" },
+      ];
+
+      const build = {
+        piece: "tube",
+        count: 4,
+        straightLength: 24, // 24 / hoopSpacing 8 = exactly 3 hoops, see below
+        tubeRadius: 8,
+        tubeWall: 0.6,
+        curveRadius: 26,
+        curveAngle: 90,
+        halfTubeSpan: 180,
+      };
+
+      /**
+       * Look values. Shared across BOTH shaders where they mean the same thing,
+       * so flipping 1/2 changes the graph and not the palette.
+       *
+       * hoop* map onto the shipping material's neon* — same ring band, different
+       * name — which is what makes the A/B honest rather than a comparison
+       * between two differently-tuned tubes.
+       */
+      const look = {
+        // Base, shared with the shipping shader.
+        tubeInner: 0x24303c,
+        tubeOuter: 0xd9662a,
+        innerRough: 0.82,
+        outerRough: 0.55,
+        metalness: 0.0,
+
+        // Hoops across the bore (= the shipping neon rings).
+        hoopColor: 0xffffff,
+        hoopAmount: 0.9,
+        hoopSpacing: 8.0,
+        hoopWidth: 0.35,
+        hoopEmissive: 0.0, // shipping default is paint, not glow
+        // Band-limiting. The shipping tubeRingMask feathers by a HARDCODED 0.02
+        // in cycle units with no fwidth floor and no distance fade — compare
+        // tarSnakeField in createRoadMaterial, which does both and says why.
+        // Down a long bore at speed those hoops shimmer. Drop this to 0 to see
+        // the shipping behaviour reappear.
+        hoopFade: 26.0,
+
+        // (A) Crown shade — the bore has a top and a bottom.
+        crownShade: 0.62,
+        crownPow: 1.35,
+        // (B) Env occlusion on the bore, via aoNode. Kills the sky leak.
+        envOcclude: 0.85,
+        envIntensity: 1.0,
+
+        // (C) Grazing sheen. You are ALWAYS looking down a bore at a grazing
+        // angle, so this term covers most of the screen inside a tube.
+        fresColor: 0x9fc4e8,
+        fresAmount: 0.16,
+        fresPow: 4.0,
+        fresRough: 0.55, // roughness multiplier at full grazing
+
+        // (D/E) Light strips running ALONG the bore, and the wash they throw.
+        stripOn: 1,
+        stripColor: 0x7fe8ff,
+        stripClock: 0.62, // in |aRing| — 0 floor, 1 crown. 0.62 ≈ 2 & 10 o'clock
+        stripWidth: 0.035,
+        stripIntensity: 2.6,
+        washAmount: 0.55,
+        washRange: 0.5,
+
+        // (F) Panel seams around the ring.
+        seamAmount: 0.55,
+        seamCount: 8.0, // grooves per half-ring
+        seamWidth: 0.012,
+
+        // Depth murk. Deliberately IN the material rather than scene.fog:
+        // three never refreshes scene fog uniforms on a plain material that
+        // never moves, so a live fog slider on a static tube does nothing.
+        murkColor: 0x0d1420,
+        murkAmount: 0.55,
+        murkRange: 90.0,
+      };
+
+      const ctl = {
+        mode: "new", // "ship" | "new"
+        detailNoise: false, // build-time: compiled in or not, so ms is honest
+        noiseAmount: 0.14,
+        noiseScale: 0.55,
+        debug: "off", // off | ring | zone | ao
+        doubleSide: false,
+        boreLight: false, // OFF by default — the point is what the SHADER does
+        boreIntensity: 22,
+        sunIntensity: 3.2,
+        hemiIntensity: 1.15,
+        exposure: 1.05,
+        eyeHeight: 1.6,
+        travelSpeed: 26,
+      };
+
+      let renderer, scene, camera, controls, sun, hemi, boreLight;
+      let gui, hasTimestamps = false;
+      let runRoot, meshes = [];
+      let tubeMat = null;
+      let viewName = "orbit";
+      let travelling = false;
+      let travelDist = 0;
+      /** World-space centreline of the whole run, with each frame's own up. */
+      let path = [];
+      let pathLen = [];
+      let pieceArc = 0; // arc length of ONE piece, for the hoops-per-piece read
+      const perf = { frames: 0, gpuSum: 0, gpuN: 0, since: 0, gpu: 0, fps: 0 };
+
+      async function createTimingDevice() {
+        if (!navigator.gpu) return null;
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) return null;
+          return await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+        } catch (e) {
+          console.warn("[tube-interior-lab] no timestamp device; GPU ms reads n/a", e);
+          return null;
+        }
+      }
+
+      /* ==================================================================== */
+      /* aRing — the prototype attribute                                      */
+      /* ==================================================================== */
+
+      /**
+       * Build `uv.y -> aRing` for one piece, from the piece's OWN reference
+       * profile.
+       *
+       * WHY THE REFERENCE PROFILE AND NOT THE VERTICES. buildSweepGeometry takes
+       * zones, uv and aLateral from the reference outline even when the section
+       * MORPHS along the piece (opts.profileAt). So on a tube entry the geometry
+       * is flat road at one end while its uv.y is already the finished bore's
+       * developed arc length. Deriving the ring coordinate from vertex normals
+       * would therefore disagree with uv and aZone on exactly the pieces where
+       * agreement matters; deriving it from the same outline they came from
+       * cannot.
+       *
+       * The mapping reproduces buildSweepGeometry's `dev` accumulation exactly —
+       * cumulative chord length around the CLOSED outline — because that is what
+       * uv.y holds.
+       *
+       * ── WHY IT IS UNSIGNED ─────────────────────────────────────────────────
+       *
+       * The first version ran -1..1 so the sign carried WHICH SIDE of the bore a
+       * point was on. It has a fold at the crown, and on a real tube that fold
+       * is not free: buildTubeProfile samples 48 angles, so one vertex lands
+       * exactly on the crown at +1 while its neighbour comes back down the other
+       * side at -0.958. Across that one quad band the value interpolates from
+       * +1 through ZERO to -0.958 — and every term here reads |ring|, so a
+       * floor-coloured stripe would run the length of the crown of every full
+       * tube. Measured, not theorised: it is what the headless check reported.
+       *
+       * 0..1 has no fold anywhere — both sides climb to 1 and meet there — and
+       * the sign was only ever used to keep the seam grooves symmetric about the
+       * floor, which mirroring does anyway. If an asymmetric term ever needs a
+       * side, `aLateral` is already exactly cos(angle) on the bore (hw = Ri), for
+       * free, in the buffer the kit writes today.
+       *
+       * @returns {(v:number)=>number} uv.y -> 0..1, 0 at the floor, or null if
+       *   this piece has no bore.
+       */
+      function boreRingMapper(def, pp, rp) {
+        const ref = def?.profile?.(pp, rp);
+        const pts = ref?.pts;
+        if (!pts?.length) return null;
+
+        const M = pts.length;
+        const dev = new Float64Array(M + 1);
+        for (let k = 0; k < M; k++) {
+          const a = pts[k];
+          const b = pts[(k + 1) % M];
+          dev[k + 1] = dev[k] + Math.hypot(b.x - a.x, b.y - a.y);
+        }
+
+        // The bore is zone 3 and it is one contiguous run in every tube profile
+        // in the kit (inner surface first, then the outer shell back).
+        let k0 = -1;
+        let k1 = -1;
+        for (let k = 0; k < M; k++) {
+          if (pts[k].zone !== 3) continue;
+          if (k0 < 0) k0 = k;
+          k1 = k;
+        }
+        if (k0 < 0) return null;
+
+        // The floor is the LOWEST bore point. Every tube profile in the kit puts
+        // the drivable floor at y = 0 on purpose, so a flat piece feeds straight
+        // in — buildTubeProfile centres the circle at y = Ri, buildHalfTubeProfile
+        // centres its span on the floor. Finding it rather than assuming index 0
+        // is what lets the same code serve the morph sections too.
+        let kf = k0;
+        for (let k = k0; k <= k1; k++) if (pts[k].y < pts[kf].y) kf = k;
+
+        const v0 = dev[k0];
+        const v1 = dev[k1];
+        const vf = dev[kf];
+        const span = v1 - v0;
+        if (!(span > 1e-6)) return null;
+
+        // A closed bore's run ends where it began (buildTubeProfile emits
+        // k = 0..N inclusive so the last edge lands back on the seam angle), so
+        // the two endpoints are coincident. A half tube's lips are not.
+        const closed = Math.hypot(
+          pts[k1].x - pts[k0].x, pts[k1].y - pts[k0].y,
+        ) < 1e-6;
+
+        if (closed) {
+          const half = span / 2;
+          return (v) => {
+            // Distance from the floor the SHORT way round, so both sides climb
+            // to 1 at the crown and meet there instead of folding.
+            let d = v - vf;
+            d -= span * Math.round(d / span);
+            return THREE.MathUtils.clamp(Math.abs(d) / half, 0, 1);
+          };
+        }
+        // Open arc: normalise by the longer half so 1 is the lip. Doing it this
+        // way means `stripClock` addresses the same RELATIVE place on a 180°
+        // half tube and a full tube, instead of drifting with halfTubeSpan.
+        const half = Math.max(vf - v0, v1 - vf, 1e-6);
+        return (v) => THREE.MathUtils.clamp(Math.abs(v - vf) / half, 0, 1);
+      }
+
+      /**
+       * Stamp `aRing` onto a built geometry. Zone 3 only — everything else (the
+       * outer shell, the rim caps, the hidden seam webs) gets 0 and is gated out
+       * in the shader anyway, so a wrong value there could not show.
+       */
+      function stampRingAttribute(geo, def, pp, rp) {
+        const pos = geo.getAttribute("position");
+        const zoneAttr = geo.getAttribute("aZone");
+        const uvAttr = geo.getAttribute("uv");
+        const ring = new Float32Array(pos.count);
+        const map = (zoneAttr && uvAttr) ? boreRingMapper(def, pp, rp) : null;
+        if (map) {
+          for (let i = 0; i < pos.count; i++) {
+            if (Math.round(zoneAttr.getX(i)) !== 3) continue;
+            ring[i] = map(uvAttr.getY(i));
+          }
+        }
+        geo.setAttribute("aRing", new THREE.Float32BufferAttribute(ring, 1));
+      }
+
+      /* ==================================================================== */
+      /* The candidate material                                               */
+      /* ==================================================================== */
+
+      /**
+       * Everything below is ALU on attributes the geometry already carries, plus
+       * the one prototype attribute. No sampler, no light, no draw call.
+       *
+       * SHARED SUBEXPRESSIONS ARE BUILT ONCE, outside the Fns, and referenced.
+       * Same discipline createRoadMaterial documents for `surface` /
+       * `driftField` / `tarSnakeField`: the same node instance referenced from
+       * colorNode and emissiveNode emits ONE evaluation per fragment, while
+       * calling the same helper twice builds two graphs and pays twice. The
+       * hoop mask in the shipping material is the counter-example — it is
+       * evaluated once for the albedo ring and again for the emissive one.
+       */
+      function createTubeInteriorMaterial(opts = {}) {
+        const detailOn = Boolean(opts.detailNoise);
+        const debug = opts.debug ?? "off";
+
+        const u = {
+          tubeInner: uniform(lin(look.tubeInner)),
+          tubeOuter: uniform(lin(look.tubeOuter)),
+          innerRough: uniform(look.innerRough),
+          outerRough: uniform(look.outerRough),
+          metalness: uniform(look.metalness),
+
+          hoopColor: uniform(lin(look.hoopColor)),
+          hoopAmount: uniform(look.hoopAmount),
+          hoopSpacing: uniform(look.hoopSpacing),
+          hoopWidth: uniform(look.hoopWidth),
+          hoopEmissive: uniform(look.hoopEmissive),
+          hoopFade: uniform(look.hoopFade),
+
+          crownShade: uniform(look.crownShade),
+          crownPow: uniform(look.crownPow),
+          envOcclude: uniform(look.envOcclude),
+
+          fresColor: uniform(lin(look.fresColor)),
+          fresAmount: uniform(look.fresAmount),
+          fresPow: uniform(look.fresPow),
+          fresRough: uniform(look.fresRough),
+
+          stripOn: uniform(look.stripOn),
+          stripColor: uniform(lin(look.stripColor)),
+          stripClock: uniform(look.stripClock),
+          stripWidth: uniform(look.stripWidth),
+          stripIntensity: uniform(look.stripIntensity),
+          washAmount: uniform(look.washAmount),
+          washRange: uniform(look.washRange),
+
+          seamAmount: uniform(look.seamAmount),
+          seamCount: uniform(look.seamCount),
+          seamWidth: uniform(look.seamWidth),
+
+          murkColor: uniform(lin(look.murkColor)),
+          murkAmount: uniform(look.murkAmount),
+          murkRange: uniform(look.murkRange),
+
+          noiseAmount: uniform(ctl.noiseAmount),
+          noiseScale: uniform(ctl.noiseScale),
+        };
+
+        const mat = new THREE.MeshStandardNodeMaterial({
+          roughness: 0.7,
+          metalness: 0,
+          // FrontSide for the same reason the shipping tube material uses it:
+          // inner and outer walls face the right way and a full-tube mouth emits
+          // both cap faces, so bore pixels are not painted twice.
+          side: ctl.doubleSide ? THREE.DoubleSide : THREE.FrontSide,
+        });
+        mat.envMapIntensity = look.envIntensity;
+
+        // ── Shared fields ──────────────────────────────────────────────────
+        const zone = attribute("aZone", "float");
+        // 1 on zone 3 (the drivable bore) and nothing else. Zone 0 (rim caps,
+        // seam webs) and zone 4 (outer shell) paint as the shell, exactly as
+        // the shipping material does — that is wall thickness, not the bore.
+        const bore = step(2.5, zone).mul(oneMinus(step(3.5, zone)));
+        // 0 at the floor, 1 at the crown / lip. Unsigned by construction — see
+        // boreRingMapper for the crown-stripe bug that forced it.
+        const up = attribute("aRing", "float");
+        const along = uv().x; // metres along the path
+
+        /**
+         * BAND-LIMITED HOOPS. Same band the shipping tubeRingMask draws, with
+         * the two things it is missing: an fwidth feather floor so a hoop stays
+         * a line instead of dissolving into a dotted crawl, and a fade once the
+         * cycles pack tighter than the sampling rate so the far end of a run
+         * does not moire. Lifted straight from tarSnakeField's recipe.
+         */
+        const hoop = Fn(() => {
+          const c = along.div(u.hoopSpacing);
+          const aa = fwidth(c);
+          const halfW = u.hoopWidth.mul(0.5).div(u.hoopSpacing);
+          const d = abs(fract(c).sub(0.5));
+          const line = smoothstep(halfW.add(max(aa, float(1e-4))), halfW, d);
+          const fade = saturate(oneMinus(aa.mul(u.hoopFade)));
+          return line.mul(fade).mul(bore);
+        })();
+
+        /** Light strips running ALONG the bore at a fixed clock position. */
+        const strip = Fn(() => {
+          const d = abs(up.sub(u.stripClock));
+          const aa = fwidth(up);
+          return smoothstep(u.stripWidth.add(max(aa, float(1e-4))), u.stripWidth, d)
+            .mul(bore).mul(u.stripOn);
+        })();
+
+        /**
+         * The wash those strips throw on the wall — a falloff in ANGULAR
+         * distance, not a light. No shadow map, no light-set change (and adding
+         * a real light per tube would rebuild every material in the scene, since
+         * three hashes the light set into every shader's cache key).
+         */
+        const wash = Fn(() => {
+          const d = abs(up.sub(u.stripClock));
+          return smoothstep(u.washRange, 0.0, d).mul(bore).mul(u.stripOn).mul(u.washAmount);
+        })();
+
+        /** Grazing term. Shared by colour and roughness, so it emits once. */
+        const fres = oneMinus(abs(normalView.z)).pow(u.fresPow).mul(bore);
+
+        /** Crown darkening, 0 at the floor to 1 at the top. Shared with aoNode. */
+        const crown = up.pow(u.crownPow);
+
+        mat.colorNode = Fn(() => {
+          if (debug === "ring") {
+            // Floor green, crown red — the attribute, on screen. A hard band at
+            // the crown here means the mapping folded; it should be a smooth
+            // climb from the floor on both sides.
+            return vec3(up, oneMinus(up), float(0)).mul(bore);
+          }
+          if (debug === "zone") {
+            return vec3(step(3.5, zone), bore, oneMinus(step(0.5, zone)));
+          }
+          if (debug === "ao") {
+            const a = oneMinus(crown.mul(u.envOcclude));
+            return vec3(mix(float(1), a, bore));
+          }
+
+          let col = mix(u.tubeOuter, u.tubeInner, bore);
+
+          // (A) The bore gets a top and a bottom. The single biggest readability
+          // win in the list, and about four instructions.
+          col = col.mul(mix(float(1), oneMinus(crown.mul(u.crownShade)), bore));
+
+          // (F) Panel seams AROUND the ring, counted from the floor — so they
+          // land symmetrically on both sides instead of walking round from one
+          // lip, and a half tube and a full tube groove the same way.
+          const s = up.mul(u.seamCount);
+          const aaS = fwidth(s);
+          const dS = abs(fract(s.add(0.5)).sub(0.5));
+          const seam = smoothstep(u.seamWidth.add(max(aaS, float(1e-4))), u.seamWidth, dS)
+            .mul(saturate(oneMinus(aaS.mul(u.hoopFade))))
+            .mul(bore).mul(u.seamAmount);
+          col = col.mul(oneMinus(seam.mul(0.75)));
+
+          // (E) The strips' wash, before the strips themselves so a strip core
+          // still reads as the brightest thing on the wall.
+          col = col.add(u.stripColor.mul(wash));
+
+          // Hoop paint — the shipping look, kept as albedo.
+          col = mix(col, u.hoopColor, hoop.mul(u.hoopAmount));
+
+          // (C) Grazing sheen. Costs ~5 instructions and covers the whole screen
+          // inside a bore, because grazing is the only angle you ever see one at.
+          col = col.add(u.fresColor.mul(fres).mul(u.fresAmount));
+
+          // The ONE optional noise, and it is build-time (a checkbox that
+          // rebuilds the material) rather than an amount slider at 0 — an
+          // amount of 0 still compiles the evaluation and still pays for it, so
+          // a slider would make the GPU ms A/B a lie.
+          if (detailOn) {
+            const n = mx_noise_float(
+              vec3(along.mul(u.noiseScale), uv().y.mul(u.noiseScale), 0.0),
+            ).mul(0.5);
+            col = col.mul(float(1).add(n.mul(u.noiseAmount).mul(bore)));
+          }
+
+          // Depth murk — the far end of a run falls away. In-material on
+          // purpose: see the note on `murkColor` above.
+          const murk = saturate(length(positionView).div(u.murkRange))
+            .mul(u.murkAmount).mul(bore);
+          return mix(col, u.murkColor, murk);
+        })();
+
+        mat.roughnessNode = Fn(() => {
+          const r = mix(u.outerRough, u.innerRough, bore);
+          // Grazing angles read sharper. Same term as the sheen, so it is free.
+          return r.mul(mix(float(1), u.fresRough, fres.mul(u.fresAmount).mul(4.0).min(1.0)));
+        })();
+
+        mat.metalnessNode = u.metalness;
+
+        /**
+         * (B) THE SKY LEAK. `envMapIntensity` is one scalar for the whole
+         * material, so it cannot tell a sealed bore from the outer shell.
+         * `aoNode` can: NodeMaterial feeds it to the indirect diffuse term, so
+         * this is the slot that actually stops the sky PMREM lighting the inside
+         * of a closed pipe as brightly as the outside.
+         */
+        mat.aoNode = mix(float(1), oneMinus(crown.mul(u.envOcclude)), bore);
+
+        /**
+         * Emissive is the strips plus, optionally, glowing hoops. Raw — no
+         * applyBloomMRT here, so what you tune is the surface value and the game
+         * adds its bloom on top. Worth remembering when this lands: on the MRT
+         * path only the `output` attachment blends, so any TRANSPARENT surface
+         * drawn over a glowing strip erases the emissive buffer behind it.
+         */
+        mat.emissiveNode = Fn(() => {
+          if (debug !== "off") return vec3(0);
+          return u.stripColor.mul(strip).mul(u.stripIntensity)
+            .add(u.hoopColor.mul(hoop).mul(u.hoopEmissive));
+        })();
+
+        mat._labUniforms = u;
+        return mat;
+      }
+
+      /** Push every `look` value into whichever material is live. */
+      function applyLook() {
+        if (!tubeMat) return;
+        if (ctl.mode === "ship") {
+          // The shipping bag only knows its own keys; hoop* / stripColor are the
+          // same band under different names, so the A/B compares like with like.
+          syncTubeUniforms(tubeMat, {
+            tubeInner: look.tubeInner,
+            tubeOuter: look.tubeOuter,
+            neonColor: look.hoopColor,
+            neonIntensity: look.hoopEmissive,
+            neonSpacing: look.hoopSpacing,
+            neonWidth: look.hoopWidth,
+            innerRough: look.innerRough,
+            outerRough: look.outerRough,
+            metalness: look.metalness,
+          });
+          tubeMat.envMapIntensity = look.envIntensity;
+          return;
+        }
+        const u = tubeMat._labUniforms;
+        if (!u) return;
+        for (const k of Object.keys(u)) {
+          const v = look[k];
+          if (v == null) continue;
+          if (u[k].value?.isColor) u[k].value.copy(lin(v));
+          else u[k].value = v;
+        }
+        u.noiseAmount.value = ctl.noiseAmount;
+        u.noiseScale.value = ctl.noiseScale;
+        tubeMat.envMapIntensity = look.envIntensity;
+        updateHoopReadout();
+      }
+
+      /**
+       * Build-time changes (which shader, the noise, the debug view, sidedness)
+       * are a REBUILD, not a uniform poke — that is the only way the GPU ms
+       * beside them means anything.
+       */
+      function rebuildMaterial() {
+        const old = tubeMat;
+        tubeMat = ctl.mode === "ship"
+          ? createTubeMaterial({
+              tubeInner: look.tubeInner,
+              tubeOuter: look.tubeOuter,
+              neonColor: look.hoopColor,
+              neonIntensity: look.hoopEmissive,
+              neonSpacing: look.hoopSpacing,
+              neonWidth: look.hoopWidth,
+              innerRough: look.innerRough,
+              outerRough: look.outerRough,
+              metalness: look.metalness,
+            })
+          : createTubeInteriorMaterial({
+              detailNoise: ctl.detailNoise,
+              debug: ctl.debug,
+            });
+        tubeMat.side = ctl.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
+        for (const m of meshes) m.material = tubeMat;
+        old?.dispose?.();
+        applyLook();
+
+        const el = $("s-mode");
+        if (ctl.mode === "ship") {
+          el.textContent = "shipping · createTubeMaterial";
+          el.className = "ship";
+        } else {
+          el.textContent = `new · lab${ctl.detailNoise ? " + noise" : ""}${
+            ctl.debug === "off" ? "" : ` · ${ctl.debug}`}`;
+          el.className = "new";
+        }
+      }
+
+      /* ==================================================================== */
+      /* The run                                                              */
+      /* ==================================================================== */
+
+      function pieceParamsForBuild() {
+        return {
+          ...kitPieceParams,
+          straightLength: build.straightLength,
+          tubeRadius: build.tubeRadius,
+          tubeWall: build.tubeWall,
+          curveRadius: build.curveRadius,
+          curveAngle: build.curveAngle,
+          halfTubeSpan: build.halfTubeSpan,
+          tubeEntryLength: build.straightLength,
+        };
+      }
+
+      function clearRun() {
+        for (const m of meshes) {
+          runRoot.remove(m);
+          m.geometry.dispose();
+        }
+        meshes = [];
+        path = [];
+        pathLen = [];
+      }
+
+      /**
+       * Chain `count` copies end to end using the kit's own connector algebra —
+       * buildPiece hands back `connectorOut`, so the next piece starts exactly
+       * where this one ended, curves included. That matters here: judging an
+       * interior on ONE piece hides the two things that actually go wrong down a
+       * real bore, which are hoop phase at the seams and aliasing at distance.
+       */
+      function rebuildRun() {
+        clearRun();
+        const pp = pieceParamsForBuild();
+        const gp = { ...kitGuardrailParams, enabled: false };
+        let conn = new THREE.Matrix4();
+        const nrm = new THREE.Matrix3();
+
+        for (let i = 0; i < build.count; i++) {
+          const built = buildPiece(build.piece, conn, pp, kitRoadParams, gp, false);
+          // Everything but the deck is dead weight in this lab.
+          built.railGeometry?.dispose();
+          built.railCollision?.dispose?.();
+          built.railMirrorGeometry?.dispose?.();
+          built.shellGeometry?.dispose();
+          built.shellCollision?.dispose?.();
+          built.decorGeometry?.dispose();
+          built.decorGateGeometry?.dispose?.();
+          built.decorGlowGeometry?.dispose?.();
+          built.glassGeometry?.dispose();
+          if (built.deckCollision && built.deckCollision !== built.geometry) {
+            built.deckCollision.dispose();
+          }
+
+          stampRingAttribute(built.geometry, built.def, pp, kitRoadParams);
+
+          const mesh = new THREE.Mesh(built.geometry, tubeMat);
+          mesh.matrixAutoUpdate = false;
+          mesh.matrix.copy(built.world);
+          mesh.matrixWorldNeedsUpdate = true;
+          runRoot.add(mesh);
+          meshes.push(mesh);
+
+          // Centreline for the travel camera, in world space. `frames` is
+          // piece-local (the mesh carries `world`), so both the position and the
+          // frame's own up have to be pushed through it — the up is what keeps
+          // the camera upright inside a bore that rolls.
+          nrm.getNormalMatrix(built.world);
+          if (i === 0) {
+            let arc = 0;
+            for (let f = 1; f < built.frames.length; f++) {
+              arc += built.frames[f].pos.distanceTo(built.frames[f - 1].pos);
+            }
+            pieceArc = arc;
+          }
+          for (let f = 0; f < built.frames.length; f++) {
+            // Skip the duplicated joint frame so the path has no zero-length step.
+            if (i > 0 && f === 0) continue;
+            const fr = built.frames[f];
+            path.push({
+              pos: fr.pos.clone().applyMatrix4(built.world),
+              up: fr.up.clone().applyMatrix3(nrm).normalize(),
+              tangent: fr.tangent.clone().applyMatrix3(nrm).normalize(),
+            });
+          }
+          conn = built.connectorOut;
+        }
+
+        // Cumulative arc length, for the travel camera.
+        pathLen = new Array(path.length).fill(0);
+        for (let i = 1; i < path.length; i++) {
+          pathLen[i] = pathLen[i - 1] + path[i].pos.distanceTo(path[i - 1].pos);
+        }
+
+        let tris = 0;
+        for (const m of meshes) {
+          const g = m.geometry;
+          tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+        }
+        $("s-tris").textContent = Math.round(tris).toLocaleString();
+        const label = PIECES.find((p) => p.id === build.piece)?.label ?? build.piece;
+        $("s-title").textContent = `${label} · ${build.count} × ${pieceArc.toFixed(0)} m`;
+        updateHoopReadout();
+        resetCamera();
+      }
+
+      /**
+       * uv.x RESTARTS AT 0 ON EVERY PIECE (buildSweepGeometry), so a hoop
+       * spacing that does not divide the piece length puts a broken hoop at
+       * every joint. That is a real defect of the shipping ring band and it is
+       * invisible on a single piece, which is why this readout exists.
+       */
+      function updateHoopReadout() {
+        if (!pieceArc) return;
+        const n = pieceArc / look.hoopSpacing;
+        $("s-hoops").textContent = n.toFixed(2);
+        const off = Math.abs(n - Math.round(n));
+        $("s-hoopwarn").textContent = off > 0.02 ? "← breaks at the seams" : "";
+      }
+
+      /* ==================================================================== */
+      /* Cameras                                                              */
+      /* ==================================================================== */
+
+      function setView(name) {
+        viewName = name;
+        $("s-cam").textContent = name;
+      }
+
+      /** Position + up at a distance along the run. */
+      function samplePath(d) {
+        if (!path.length) return null;
+        const total = pathLen[pathLen.length - 1] || 1;
+        let t = d % total;
+        if (t < 0) t += total;
+        let i = 1;
+        while (i < pathLen.length - 1 && pathLen[i] < t) i++;
+        const a = path[i - 1];
+        const b = path[i];
+        const seg = Math.max(1e-5, pathLen[i] - pathLen[i - 1]);
+        const f = THREE.MathUtils.clamp((t - pathLen[i - 1]) / seg, 0, 1);
+        return {
+          pos: a.pos.clone().lerp(b.pos, f),
+          up: a.up.clone().lerp(b.up, f).normalize(),
+        };
+      }
+
+      function resetCamera() {
+        travelling = false;
+        controls.enabled = true;
+        const mid = samplePath((pathLen[pathLen.length - 1] || 0) * 0.5);
+        const c = mid ? mid.pos.clone().addScaledVector(mid.up, build.tubeRadius) : new THREE.Vector3();
+        camera.position.set(c.x + 34, c.y + 22, c.z + 38);
+        controls.target.copy(c);
+        controls.update();
+        setView("orbit");
+      }
+
+      /** On the centreline, looking down the bore. The pose that matters. */
+      function insideCamera() {
+        travelling = false;
+        controls.enabled = true;
+        const a = samplePath(2);
+        const b = samplePath(Math.min(24, (pathLen[pathLen.length - 1] || 24) - 1));
+        if (!a || !b) return;
+        camera.position.copy(a.pos).addScaledVector(a.up, ctl.eyeHeight);
+        controls.target.copy(b.pos).addScaledVector(b.up, ctl.eyeHeight);
+        controls.update();
+        setView("inside");
+      }
+
+      /** Wall fills the frame, so GPU ms is the TUBE shader and not the sky. */
+      function fillCamera() {
+        travelling = false;
+        controls.enabled = true;
+        const a = samplePath(8);
+        if (!a) return;
+        const axis = a.pos.clone().addScaledVector(a.up, build.tubeRadius);
+        const side = new THREE.Vector3(1, 0, 0).cross(a.up).normalize();
+        if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+        camera.position.copy(axis).addScaledVector(side, 1.6);
+        controls.target.copy(axis).addScaledVector(side, build.tubeRadius);
+        controls.update();
+        setView("fill");
+      }
+
+      /**
+       * THE ALIASING TEST. A still frame will never show you a shimmering hoop;
+       * motion down the bore is the only way to see whether the ring bands are
+       * band-limited or crawling. Controls go off while this runs so OrbitControls
+       * is not fighting the camera every frame.
+       */
+      function toggleTravel() {
+        travelling = !travelling;
+        controls.enabled = !travelling;
+        if (travelling) {
+          travelDist = 0;
+          setView("travel");
+        } else {
+          setView("free");
+        }
+      }
+
+      function updateTravel(dt) {
+        const a = samplePath(travelDist);
+        const b = samplePath(travelDist + 14);
+        if (!a || !b) return;
+        camera.position.copy(a.pos).addScaledVector(a.up, ctl.eyeHeight);
+        camera.up.copy(a.up);
+        camera.lookAt(b.pos.clone().addScaledVector(b.up, ctl.eyeHeight));
+        travelDist += ctl.travelSpeed * dt;
+      }
+
+      /* ==================================================================== */
+      /* Scene                                                                */
+      /* ==================================================================== */
+
+      /**
+       * Tiny procedural equirect — sky, ground and a sun blob. Same idea as
+       * road-piece-lab and tube-lab: Standard materials need something to
+       * reflect or roughness does not read at all.
+       *
+       * It is also the thing this lab is arguing about. In game this is the live
+       * sky PMREM, and inside a sealed bore it is pure leak: aoNode is what takes
+       * it back out.
+       */
+      function buildStudioEnv() {
+        const W = 128;
+        const H = 64;
+        const data = new Uint16Array(W * H * 4);
+        const sunDir = new THREE.Vector3(28, 48, 20).normalize();
+        const d = new THREE.Vector3();
+        const half = THREE.DataUtils.toHalfFloat;
+        for (let y = 0; y < H; y++) {
+          const phi = ((y + 0.5) / H) * Math.PI;
+          for (let x = 0; x < W; x++) {
+            const theta = ((x + 0.5) / W) * Math.PI * 2;
+            const sp = Math.sin(phi);
+            d.set(sp * Math.cos(theta), Math.cos(phi), sp * Math.sin(theta));
+            let r, g, b;
+            if (d.y >= 0) {
+              const t = Math.pow(d.y, 0.55);
+              r = 0.42 * (1 - t) + 0.26 * t;
+              g = 0.48 * (1 - t) + 0.34 * t;
+              b = 0.58 * (1 - t) + 0.48 * t;
+            } else {
+              const t = Math.min(1, -d.y * 2.2);
+              r = 0.42 * (1 - t) + 0.20 * t;
+              g = 0.42 * (1 - t) + 0.19 * t;
+              b = 0.44 * (1 - t) + 0.17 * t;
+            }
+            const s = Math.max(0, d.dot(sunDir));
+            const sunAmt = Math.pow(s, 340) * 80 + Math.pow(s, 14) * 0.4;
+            const i = (y * W + x) * 4;
+            data[i] = half(r + sunAmt);
+            data[i + 1] = half(g + sunAmt * 0.96);
+            data[i + 2] = half(b + sunAmt * 0.86);
+            data[i + 3] = half(1);
+          }
+        }
+        const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.HalfFloatType);
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        tex.colorSpace = THREE.LinearSRGBColorSpace;
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
+        tex.needsUpdate = true;
+        return tex;
+      }
+
+      function buildGui() {
+        gui = new GUI({ title: "Tube interior lab" });
+
+        const fAb = gui.addFolder("A / B — the shader");
+        fAb.add(ctl, "mode", { "shipping (1)": "ship", "new (2)": "new" })
+          .name("Shader").onChange(rebuildMaterial);
+        fAb.add(ctl, "detailNoise").name("Detail noise (rebuild)").onChange(rebuildMaterial);
+        fAb.add(ctl, "debug", ["off", "ring", "zone", "ao"])
+          .name("Debug view").onChange(rebuildMaterial);
+        fAb.add(ctl, "doubleSide").name("Double-sided").onChange(rebuildMaterial);
+        fAb.open();
+
+        const fPiece = gui.addFolder("Piece");
+        fPiece.add(build, "piece", Object.fromEntries(PIECES.map((p) => [p.label, p.id])))
+          .name("Kit piece").onChange(rebuildRun);
+        fPiece.add(build, "count", 1, 8, 1).name("Pieces in run").onChange(rebuildRun);
+        fPiece.add(build, "straightLength", 8, 60, 1).name("Length m").onChange(rebuildRun);
+        fPiece.add(build, "tubeRadius", 4, 16, 0.5).name("Bore radius m").onChange(rebuildRun);
+        fPiece.add(build, "curveRadius", 12, 80, 1).name("Curve radius m").onChange(rebuildRun);
+        fPiece.add(build, "curveAngle", 15, 180, 5).name("Curve angle°").onChange(rebuildRun);
+        fPiece.add(build, "halfTubeSpan", 60, 300, 5).name("Half-tube span°").onChange(rebuildRun);
+
+        const fBase = gui.addFolder("Base (both shaders)");
+        fBase.addColor(look, "tubeInner").name("Bore").onChange(applyLook);
+        fBase.addColor(look, "tubeOuter").name("Shell").onChange(applyLook);
+        fBase.add(look, "innerRough", 0.05, 1, 0.01).name("Bore roughness").onChange(applyLook);
+        fBase.add(look, "outerRough", 0.05, 1, 0.01).name("Shell roughness").onChange(applyLook);
+        fBase.add(look, "metalness", 0, 1, 0.01).name("Metalness").onChange(applyLook);
+        fBase.add(look, "envIntensity", 0, 2, 0.02).name("Env intensity").onChange(applyLook);
+
+        const fHoop = gui.addFolder("Hoops across (= shipping rings)");
+        fHoop.addColor(look, "hoopColor").name("Colour").onChange(applyLook);
+        fHoop.add(look, "hoopAmount", 0, 1, 0.01).name("Paint").onChange(applyLook);
+        fHoop.add(look, "hoopEmissive", 0, 8, 0.05).name("Glow").onChange(applyLook);
+        fHoop.add(look, "hoopSpacing", 2, 24, 0.1).name("Spacing m").onChange(applyLook);
+        fHoop.add(look, "hoopWidth", 0.05, 1.5, 0.01).name("Width m").onChange(applyLook);
+        fHoop.add(look, "hoopFade", 0, 80, 1).name("Distance fade (new only)").onChange(applyLook);
+
+        const fA = gui.addFolder("A · Crown shade + env occlusion");
+        fA.add(look, "crownShade", 0, 1, 0.01).name("Crown shade").onChange(applyLook);
+        fA.add(look, "crownPow", 0.3, 4, 0.05).name("Falloff").onChange(applyLook);
+        fA.add(look, "envOcclude", 0, 1, 0.01).name("Occlude env (aoNode)").onChange(applyLook);
+        fA.open();
+
+        const fC = gui.addFolder("C · Grazing sheen");
+        fC.addColor(look, "fresColor").name("Colour").onChange(applyLook);
+        fC.add(look, "fresAmount", 0, 0.8, 0.005).name("Amount").onChange(applyLook);
+        fC.add(look, "fresPow", 1, 8, 0.1).name("Exponent").onChange(applyLook);
+        fC.add(look, "fresRough", 0.1, 1, 0.01).name("Roughness at grazing").onChange(applyLook);
+
+        const fD = gui.addFolder("D / E · Light strips + wash");
+        fD.add(look, "stripOn", 0, 1, 1).name("Strips on").onChange(applyLook);
+        fD.addColor(look, "stripColor").name("Colour").onChange(applyLook);
+        fD.add(look, "stripClock", 0, 1, 0.01).name("Clock (0 floor, 1 top)").onChange(applyLook);
+        fD.add(look, "stripWidth", 0.002, 0.2, 0.002).name("Width").onChange(applyLook);
+        fD.add(look, "stripIntensity", 0, 8, 0.05).name("Emissive").onChange(applyLook);
+        fD.add(look, "washAmount", 0, 2, 0.01).name("Wash").onChange(applyLook);
+        fD.add(look, "washRange", 0.05, 1.5, 0.01).name("Wash range").onChange(applyLook);
+        fD.open();
+
+        const fF = gui.addFolder("F · Ring seams + murk");
+        fF.add(look, "seamAmount", 0, 1, 0.01).name("Seams").onChange(applyLook);
+        fF.add(look, "seamCount", 1, 24, 1).name("Seams per half-ring").onChange(applyLook);
+        fF.add(look, "seamWidth", 0.002, 0.08, 0.001).name("Seam width").onChange(applyLook);
+        fF.add(look, "murkAmount", 0, 1, 0.01).name("Depth murk").onChange(applyLook);
+        fF.add(look, "murkRange", 20, 300, 5).name("Murk range m").onChange(applyLook);
+        fF.addColor(look, "murkColor").name("Murk colour").onChange(applyLook);
+        fF.add(ctl, "noiseAmount", 0, 0.6, 0.01).name("Noise amount").onChange(applyLook);
+        fF.add(ctl, "noiseScale", 0.05, 3, 0.05).name("Noise scale").onChange(applyLook);
+
+        const fSc = gui.addFolder("Scene");
+        fSc.add(ctl, "boreLight").name("Cheat: light in the bore").onChange((v) => {
+          boreLight.intensity = v ? ctl.boreIntensity : 0;
+        });
+        fSc.add(ctl, "boreIntensity", 0, 80, 1).name("Cheat intensity").onChange((v) => {
+          if (ctl.boreLight) boreLight.intensity = v;
+        });
+        fSc.add(ctl, "sunIntensity", 0, 6, 0.05).name("Sun").onChange((v) => { sun.intensity = v; });
+        fSc.add(ctl, "hemiIntensity", 0, 3, 0.05).name("Sky / bounce").onChange((v) => { hemi.intensity = v; });
+        fSc.add(ctl, "exposure", 0.4, 2, 0.05).name("Exposure").onChange((v) => {
+          renderer.toneMappingExposure = v;
+        });
+
+        const fCam = gui.addFolder("Camera");
+        fCam.add({ resetCamera }, "resetCamera").name("Orbit (R)");
+        fCam.add({ insideCamera }, "insideCamera").name("Inside the bore (I)");
+        fCam.add({ fillCamera }, "fillCamera").name("Fill test (F)");
+        fCam.add({ toggleTravel }, "toggleTravel").name("Drive the run (P)");
+        fCam.add(ctl, "eyeHeight", 0.4, 16, 0.1).name("Eye height m");
+        fCam.add(ctl, "travelSpeed", 4, 70, 1).name("Travel m/s");
+        fCam.open();
+
+        const fIo = gui.addFolder("Look file (lab only)");
+        fIo.add({ exportLook }, "exportLook").name("Export tube-interior-look.json");
+        fIo.add({ load: () => lookFileInput.click() }, "load").name("Import .json");
+      }
+
+      function exportLook() {
+        const payload = {
+          format: "modular-tube-interior-look",
+          version: 1,
+          savedAt: new Date().toISOString(),
+          note: "Lab only. Nothing reads this yet.",
+          look: { ...look },
+          build: { ...build },
+          ctl: { detailNoise: ctl.detailNoise, doubleSide: ctl.doubleSide },
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "tube-interior-look.json";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+
+      const lookFileInput = Object.assign(document.createElement("input"), {
+        type: "file",
+        accept: "application/json",
+      });
+      lookFileInput.addEventListener("change", () => {
+        const f = lookFileInput.files?.[0];
+        lookFileInput.value = "";
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const data = JSON.parse(reader.result);
+            if (data.look) Object.assign(look, data.look);
+            if (data.build) Object.assign(build, data.build);
+            rebuildRun();
+            applyLook();
+            gui?.controllersRecursive?.().forEach((c) => c.updateDisplay?.());
+          } catch (e) {
+            showErr(e);
+          }
+        };
+        reader.readAsText(f);
+      });
+
+      async function init() {
+        const device = await createTimingDevice();
+        hasTimestamps = Boolean(device?.features?.has("timestamp-query"));
+        renderer = new THREE.WebGPURenderer({
+          antialias: true,
+          trackTimestamp: true,
+          ...(device ? { device } : {}),
+        });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = ctl.exposure;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x8fa2b8);
+        // NO scene.fog. Depth falloff is a material term here instead — three
+        // never refreshes scene fog uniforms on a plain material that never
+        // moves, so a live fog slider on a static tube silently does nothing.
+        scene.environment = buildStudioEnv();
+
+        camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 600);
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 0.3;
+        controls.maxDistance = 260;
+
+        hemi = new THREE.HemisphereLight(0xdce8ff, 0xb8a894, ctl.hemiIntensity);
+        scene.add(hemi);
+
+        sun = new THREE.DirectionalLight(0xfff4e4, ctl.sunIntensity);
+        sun.position.set(28, 48, 20);
+        scene.add(sun);
+        scene.add(sun.target);
+
+        // The CHEAT, off by default and named that on the panel. A point light in
+        // the bore makes any tube look fine and tells you nothing about the
+        // shader — and in game it is not affordable anyway, because three hashes
+        // the scene's light set into every shader's cache key, so switching one
+        // rebuilds every material on the track.
+        boreLight = new THREE.PointLight(0xfff4e8, 0, 30, 2);
+        scene.add(boreLight);
+
+        runRoot = new THREE.Group();
+        scene.add(runRoot);
+
+        tubeMat = createTubeInteriorMaterial({ detailNoise: ctl.detailNoise, debug: ctl.debug });
+        rebuildRun();
+        rebuildMaterial();
+        buildGui();
+
+        addEventListener("resize", onResize);
+        addEventListener("keydown", onKey);
+
+        window.__tubeInteriorLab = {
+          renderer, scene, camera, controls, look, ctl, build, perf,
+          rebuildRun, rebuildMaterial, applyLook, exportLook,
+          resetCamera, insideCamera, fillCamera, toggleTravel,
+          get material() { return tubeMat; },
+          get meshes() { return meshes; },
+          boreRingMapper,
+        };
+
+        renderer.setAnimationLoop(frame);
+      }
+
+      function onKey(e) {
+        if (e.target?.matches?.("input, textarea")) return;
+        // e.key, not e.code — this keyboard is AZERTY and the printed label is
+        // what the panel promises.
+        const k = e.key.toLowerCase();
+        const sync = () => gui?.controllersRecursive?.().forEach((c) => c.updateDisplay?.());
+        if (k === "1") { ctl.mode = "ship"; rebuildMaterial(); sync(); }
+        if (k === "2") { ctl.mode = "new"; rebuildMaterial(); sync(); }
+        if (k === "r") resetCamera();
+        if (k === "i") insideCamera();
+        if (k === "f") fillCamera();
+        if (k === "p") toggleTravel();
+        if (k === "h") {
+          const hud = $("hud");
+          hud.style.display = hud.style.display === "none" ? "" : "none";
+          if (gui) gui.domElement.style.display = hud.style.display;
+        }
+      }
+
+      function onResize() {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      }
+
+      let last = performance.now();
+      function frame() {
+        const now = performance.now();
+        const dt = Math.min(0.1, (now - last) / 1000);
+        last = now;
+
+        if (travelling) updateTravel(dt);
+        else controls.update();
+        renderer.render(scene, camera);
+
+        if (hasTimestamps) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+
+        if (!perf.since) perf.since = now;
+        perf.frames++;
+        const ts = renderer.info.render.timestamp;
+        if (ts > 0) { perf.gpuSum += ts; perf.gpuN++; }
+        if (now - perf.since >= 500) {
+          perf.fps = (perf.frames * 1000) / (now - perf.since);
+          perf.gpu = perf.gpuN ? perf.gpuSum / perf.gpuN : 0;
+          $("s-fps").textContent = perf.fps.toFixed(0);
+          $("s-gpu").textContent = perf.gpuN ? `${perf.gpu.toFixed(2)} ms` : "n/a";
+          $("s-draws").textContent = String(renderer.info.render.drawCalls);
+          perf.frames = 0; perf.gpuSum = 0; perf.gpuN = 0; perf.since = now;
+        }
+      }
+
+      init().catch(showErr);
+    </script>
+  </body>
+</html>

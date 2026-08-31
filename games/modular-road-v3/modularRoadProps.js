@@ -36,7 +36,7 @@ import { roadParams } from "./modularRoadKit.js";
  *  public/models because it is track dressing, not a shared engine asset. */
 export const DECAL_URL = "/games/modular-road-v3/rondcarre.png";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { materialEmissive, materialColor } from "three/tsl";
+import { materialEmissive, materialColor, positionLocal, float, mix, fract, fwidth, smoothstep, vec3, texture, uv } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import {
   kickerRampGeometry,
@@ -85,6 +85,174 @@ const _stackQuat = new THREE.Quaternion();
 /* ----------------------------------------------------------------------- */
 /* Prop geometry builders                                                   */
 /* ----------------------------------------------------------------------- */
+
+/**
+ * Raised square box + a ramp on each side. One mesh.
+ *
+ * The first version wound the deck the wrong way (normal −Y), so from above
+ * you looked through a hole at the box floor sitting on the ground — a pit,
+ * not a platform. Faces at y=0 also z-fought the world grid. No ground-plane
+ * faces now; the deck faces +Y and meets the four ramp tops at the same height.
+ */
+function hazardPlatformGeometry() {
+  const H = 3.2;
+  const box = 18;
+  const rampL = 12;
+  const hw = box / 2;
+  const TILE = 6; // metres per diamond-plate tile
+  const pos = [];
+  const nrm = [];
+  const uvs = [];
+  const deckPos = [];
+
+  const emit = (p, target) => target.push(p[0], p[1], p[2]);
+  const uvOf = (p, nx, ny, nz) => {
+    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+    if (ay >= ax && ay >= az) return [p[0] / TILE, p[2] / TILE];
+    if (ax >= az) return [p[2] / TILE, p[1] / TILE];
+    return [p[0] / TILE, p[1] / TILE];
+  };
+  const faceNormal = (a, b, c) => {
+    const e1x = b[0] - a[0], e1y = b[1] - a[1], e1z = b[2] - a[2];
+    const e2x = c[0] - a[0], e2y = c[1] - a[1], e2z = c[2] - a[2];
+    let nx = e1y * e2z - e1z * e2y;
+    let ny = e1z * e2x - e1x * e2z;
+    let nz = e1x * e2y - e1y * e2x;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    nrm.push(nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    const ua = uvOf(a, nx, ny, nz);
+    const ub = uvOf(b, nx, ny, nz);
+    const uc = uvOf(c, nx, ny, nz);
+    uvs.push(ua[0], ua[1], ub[0], ub[1], uc[0], uc[1]);
+  };
+  const tri = (a, b, c, target) => {
+    emit(a, target); emit(b, target); emit(c, target);
+    if (target === pos) faceNormal(a, b, c);
+  };
+  const quad = (a, b, c, d, target) => {
+    tri(a, b, c, target);
+    tri(a, c, d, target);
+  };
+  const driveQuad = (a, b, c, d) => {
+    quad(a, b, c, d, pos);
+    quad(a, b, c, d, deckPos);
+  };
+
+  const Tfl = [-hw, H, hw], Tfr = [hw, H, hw], Tbr = [hw, H, -hw], Tbl = [-hw, H, -hw];
+  // CCW from +Y so the deck faces up. Tbl→Tbr→Tfr was −Y and vanished from above.
+  driveQuad(Tbl, Tfl, Tfr, Tbr);
+
+  // Box walls close the corners between ramps. No y=0 lid — that sat on the
+  // world grid and z-fought. −Z is left-bottom → right-bottom from outside.
+  quad([-hw, 0, hw], [hw, 0, hw], Tfr, Tfl, pos);           // +Z
+  quad([-hw, 0, -hw], [hw, 0, -hw], Tbr, Tbl, pos);         // −Z
+  quad([hw, 0, hw], [hw, 0, -hw], Tbr, Tfr, pos);           // +X
+  quad([-hw, 0, -hw], [-hw, 0, hw], Tfl, Tbl, pos);         // −X
+
+  const addRamp = (lowL, lowR, highL, highR, gndL, gndR) => {
+    driveQuad(lowL, lowR, highR, highL);
+    tri(lowL, highL, gndL, pos);
+    tri(lowR, gndR, highR, pos);
+  };
+  addRamp(
+    [-hw, 0, hw + rampL], [hw, 0, hw + rampL],
+    Tfl, Tfr,
+    [-hw, 0, hw], [hw, 0, hw],
+  );
+  addRamp(
+    [hw, 0, -(hw + rampL)], [-hw, 0, -(hw + rampL)],
+    Tbr, Tbl,
+    [hw, 0, -hw], [-hw, 0, -hw],
+  );
+  addRamp(
+    [hw + rampL, 0, hw], [hw + rampL, 0, -hw],
+    Tfr, Tbr,
+    [hw, 0, hw], [hw, 0, -hw],
+  );
+  addRamp(
+    [-(hw + rampL), 0, -hw], [-(hw + rampL), 0, hw],
+    Tbl, Tfl,
+    [-hw, 0, -hw], [-hw, 0, hw],
+  );
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.computeBoundingSphere();
+  return attachDeckProxy(geo, deckPos);
+}
+
+const DIAMOND_PLATE_URL = "/textures/pbr_materials/DiamondPlate-1K/DiamondPlate001_1K-PNG";
+let _diamondPlateMaps = null;
+let _diamondPlatePreload = null;
+
+function diamondPlateMaps() {
+  if (!_diamondPlateMaps) preloadDiamondPlate();
+  return _diamondPlateMaps;
+}
+
+/**
+ * Must be awaited before thumbnails — make() is sync and the baker draws in
+ * the same breath. An unloaded color map made the tile a muddy stand-in.
+ */
+export function preloadDiamondPlate() {
+  if (_diamondPlatePreload) return _diamondPlatePreload;
+  const loader = new THREE.TextureLoader();
+  const pending = [];
+  const load = (suffix, srgb) => {
+    let done;
+    pending.push(new Promise((resolve) => { done = resolve; }));
+    const tex = loader.load(
+      `${DIAMOND_PLATE_URL}_${suffix}.png`,
+      () => done(),
+      undefined,
+      () => {
+        console.warn("[ModularRoad-v3] diamond plate failed to load", suffix);
+        done();
+      },
+    );
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    tex.anisotropy = 8;
+    return tex;
+  };
+  _diamondPlateMaps = {
+    color: load("Color", true),
+    normal: load("NormalGL", false),
+    roughness: load("Roughness", false),
+    metalness: load("Metalness", false),
+  };
+  _diamondPlatePreload = Promise.all(pending).then(() => _diamondPlateMaps);
+  return _diamondPlatePreload;
+}
+
+/** Diamond plate with the same screen-filtered 45° hazard paint on top. */
+function hazardPlatformMat() {
+  const maps = diamondPlateMaps();
+  const m = new THREE.MeshStandardNodeMaterial({
+    roughness: 1,
+    metalness: 1,
+    normalMap: maps.normal,
+    roughnessMap: maps.roughness,
+    metalnessMap: maps.metalness,
+  });
+  const plate = texture(maps.color, uv()).rgb;
+  const t = positionLocal.x.add(positionLocal.z).div(16);
+  const fw = fwidth(t).max(0.002);
+  const stripe = smoothstep(float(0.5).sub(fw), float(0.5).add(fw), fract(t));
+  const paint = mix(vec3(0.96, 0.78, 0.06), vec3(0.07, 0.07, 0.08), stripe);
+  // Plate albedo tints the paint so the diamonds still read through the bands.
+  m.colorNode = paint.mul(plate.mul(1.35).add(0.22));
+  return m;
+}
+
+function buildHazardPlatform() {
+  const m = new THREE.Mesh(hazardPlatformGeometry(), hazardPlatformMat());
+  m.name = "HazardPlatform";
+  return m;
+}
 
 /** Right-triangular prism ramp: base on y=0, rising from +Z (low) to -Z (high). */
 function rampGeometry(L = 18, H = 6, W = 14) {
@@ -1525,6 +1693,13 @@ export const PROP_CATALOG = [
     make: () => roadArchGroup(),
   },
   {
+    id: "hazardplatform",
+    label: "Platform",
+    category: "parkour",
+    collision: "both",
+    make: () => buildHazardPlatform(),
+  },
+  {
     id: "ramp",
     label: "Slope ramp",
     category: "parkour",
@@ -1537,7 +1712,7 @@ export const PROP_CATALOG = [
     label: "Slope lab",
     category: "parkour",
     collision: "both",
-    make: () => buildSlopeLabGroup(),
+    make: () => buildSlopeLabGroup(hazardPlatformMat()),
   },
   {
     id: "jumplab",

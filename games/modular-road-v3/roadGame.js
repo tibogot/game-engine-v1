@@ -123,6 +123,7 @@ import {
 } from "./modularRoadThumbnailCache.js";
 import {
   PropManager, PROP_CATALOG, PROP_BY_ID, glowPropParams, SURFACE_SNAP, SURFACE_SNAP_MODES, DECAL_URL,
+  preloadDiamondPlate,
 } from "./modularRoadProps.js";
 import {
   MoverPropManager, MOVER_CATALOG, MOVER_BY_ID, preloadWindmillModel,
@@ -786,6 +787,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     preloadPalm(),
     preloadBarrel(),
     preloadDecal(DECAL_URL).then(() => settleDecals()),
+    preloadDiamondPlate(),
     // The wind turbine's GLB. Here rather than lazily on first placement so the
     // mover catalog's `make()` can stay synchronous — and so the palette bakes a
     // real thumbnail for it instead of an empty tile it would then CACHE.

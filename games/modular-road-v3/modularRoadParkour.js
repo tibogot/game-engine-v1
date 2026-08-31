@@ -103,8 +103,30 @@ export function rampGeometry(w, l, angleRad) {
   tri(Al, Cl, Bl);
   tri(Ar, Br, Cr);
 
+  const TILE = 6; // same diamond-plate tile as the parkour platform
+  const uvs = [];
+  for (let i = 0; i < pos.length; i += 9) {
+    const a = [pos[i], pos[i + 1], pos[i + 2]];
+    const b = [pos[i + 3], pos[i + 4], pos[i + 5]];
+    const c = [pos[i + 6], pos[i + 7], pos[i + 8]];
+    const e1x = b[0] - a[0], e1y = b[1] - a[1], e1z = b[2] - a[2];
+    const e2x = c[0] - a[0], e2y = c[1] - a[1], e2z = c[2] - a[2];
+    const nx = e1y * e2z - e1z * e2y;
+    const ny = e1z * e2x - e1x * e2z;
+    const nz = e1x * e2y - e1y * e2x;
+    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+    const uvOf = (p) => {
+      if (ay >= ax && ay >= az) return [p[0] / TILE, p[2] / TILE];
+      if (ax >= az) return [p[2] / TILE, p[1] / TILE];
+      return [p[0] / TILE, p[1] / TILE];
+    };
+    const ua = uvOf(a), ub = uvOf(b), uc = uvOf(c);
+    uvs.push(ua[0], ua[1], ub[0], ub[1], uc[0], uc[1]);
+  }
+
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
   attachDeckProxy(geo, deckPos);
@@ -263,7 +285,7 @@ export function parkourMat(color) {
 }
 
 /** Five side-by-side test ramps (15°–55°), centred on XZ with feet on y=0. */
-export function buildSlopeLabGroup() {
+export function buildSlopeLabGroup(sharedMat = null) {
   const group = new THREE.Group();
   group.name = "SlopeLab";
   const slopeAngles = [15, 25, 35, 45, 55];
@@ -276,7 +298,7 @@ export function buildSlopeLabGroup() {
   for (let i = 0; i < slopeAngles.length; i++) {
     const m = new THREE.Mesh(
       rampGeometry(w, l, THREE.MathUtils.degToRad(slopeAngles[i])),
-      parkourMat(colors[i]),
+      sharedMat ?? parkourMat(colors[i]),
     );
     m.position.set(-42 + i * 21, 0, z);
     m.castShadow = true;

@@ -268,6 +268,26 @@ console.log("\n=== ONE PLACEHOLDER, NOT 130 HAND-DRAWN SILHOUETTES ===");
   check("...and an unselected one still does not",
     /\.cat-btn\.unbaked:not\(\.active\) \.cat-btn-label/.test(css),
     "the bake-failed caption must not fight the selected label for the same box");
+  // Hover-to-open, with a dwell: Edges/Hand sit above the list, so a mouse path
+  // from the grid to those chips crosses every category. Instant switch would
+  // rebuild the grid on every flyover and drop a live brush (until browsing
+  // stopped clearing one). Click stays for touch.
+  check("the rail opens a category on hover, not only click",
+    /function setActiveCategory/.test(builder)
+    && /function armCatHover/.test(builder)
+    && /CAT_HOVER_MS/.test(builder));
+  // THE RAIL SCROLLS (13 buttons at ~100px), so a wheel over it drags buttons
+  // under a stationary cursor and each one fires a genuine pointerenter. Arm
+  // the dwell from those and scrolling silently changes category.
+  check("...armed by pointer MOVEMENT, so scrolling the rail cannot switch tabs",
+    /addEventListener\("pointermove"/.test(builder) && !/pointerenter/.test(builder),
+    "the rail overflows; an enter-armed dwell opens whatever the wheel parks under the mouse");
+  check("...and a finger tap on a hybrid laptop goes through the click, not the dwell",
+    /pointerType === "touch"/.test(builder),
+    "(hover: hover) and (pointer: fine) is TRUE on a touchscreen laptop with a mouse");
+  check("...and browsing a tab does not disarm a live brush",
+    !/pieceTiles\.clear\(\);\s*activePropId = null;\s*activeMoverId = null;\s*activePortalId = null/.test(builder),
+    "renderPieces used to null the brush; hover-select would then cancel a cone by sweeping the rail");
   // The strip carries BOTH halves: SELECTED · <category> · <piece>.
   check("the strip names the category as well as the piece",
     /id="selected-piece-cat"/.test(html)

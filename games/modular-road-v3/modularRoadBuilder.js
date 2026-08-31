@@ -6254,12 +6254,21 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     edgesBtn.innerHTML = on ? "Edges<br>On" : "Edges<br>Off";
   }
 
+  function setActiveCategory(catId) {
+    if (activeCategory === catId) return;
+    activeCategory = catId;
+    renderPieces();
+  }
+
   function renderPieces() {
     grid.innerHTML = "";
     pieceTiles.clear();
-    activePropId = null;
-    activeMoverId = null;
-    activePortalId = null;
+    // Browsing a tab must not disarm a prop/mover brush. renderPieces used to
+    // null these, which was invisible on click-to-switch and a landmine once
+    // the rail selects on hover: sweeping the mouse down the rail would drop
+    // a live cone under you. The strip and highlight stay on the selection
+    // (see activeCategoryLabel); only picking a tile in THIS grid, a hotkey,
+    // or clearBrushHighlight cancels the brush.
 
     const items = piecesInCategory(activeCategory);
     const catLabel = PALETTE_CATEGORIES.find((c) => c.id === activeCategory)?.label ?? activeCategory;
@@ -6545,7 +6554,42 @@ export function buildRoadPaletteUI(builder, opts = {}) {
     syncTiles();
   }
 
-  // Category rail
+  // Category rail — hover opens the tab, click still does it immediately.
+  // Instant hover-select is a trap: Edges and Hand sit ABOVE this list, so the
+  // mouse path from the piece grid to those chips crosses every category, and
+  // rebuilding the grid on each flyover is churn nobody asked for. Dwell
+  // filters that. Click stays for touch (no hover) and for "this one, NOW".
+  //
+  // ARMED FROM pointermove, NOT pointerenter — the difference is the scroll.
+  // The rail overflows (13 buttons at ~100px each beat any screen), so a wheel
+  // over it drags buttons UNDER a stationary cursor, and every one of those
+  // fires a real pointerenter. Enter-armed, you change category by scrolling,
+  // having pointed at nothing. Move-armed, you cannot: no movement, no
+  // candidate. It also recovers on the first pixel of genuine movement after
+  // the scroll, where "ignore enters for 250ms" would leave the tab under the
+  // cursor stuck shut — the pointer is already inside it and gets no second
+  // enter until you leave and come back.
+  //
+  // ONE delegated listener on the list, not two per button: it only runs while
+  // the cursor is actually in the 104px rail, and it is a closest() plus a
+  // string compare that returns on all but the first move onto a new button.
+  let catHoverTimer = 0;
+  /** The button the dwell is armed for (or null) — so repeat moves inside one
+   *  button do not keep restarting its own timer, which would mean the tab only
+   *  ever opened once the mouse stopped dead. */
+  let catHoverPending = null;
+  const CAT_HOVER_MS = 120;
+  const catHoverSelects = typeof window !== "undefined"
+    && !!window.matchMedia?.("(hover: hover) and (pointer: fine)")?.matches;
+
+  function armCatHover(catId) {
+    if (catId === catHoverPending) return;
+    clearTimeout(catHoverTimer);
+    catHoverPending = catId;
+    if (!catId || catId === activeCategory) return;
+    catHoverTimer = window.setTimeout(() => setActiveCategory(catId), CAT_HOVER_MS);
+  }
+
   if (catList) {
     for (const cat of PALETTE_CATEGORIES) {
       const btn = document.createElement("button");
@@ -6563,11 +6607,28 @@ export function buildRoadPaletteUI(builder, opts = {}) {
       // After innerHTML, so `unbaked` can find the button via closest().
       fillCategoryIcon(btn.querySelector(".cat-btn-icon"), cat.id);
       btn.addEventListener("click", () => {
-        activeCategory = cat.id;
-        renderPieces();
+        clearTimeout(catHoverTimer);
+        catHoverPending = cat.id;
+        setActiveCategory(cat.id);
       });
       catList.appendChild(btn);
       catBtns.set(cat.id, btn);
+    }
+    if (catHoverSelects) {
+      catList.addEventListener("pointermove", (e) => {
+        // A hybrid touch laptop answers "(hover: hover) and (pointer: fine)"
+        // truthfully — its MOUSE can hover — and then a finger tap comes
+        // through this same handler. Only the click should speak for a finger.
+        if (e.pointerType === "touch") return;
+        const btn = e.target instanceof Element ? e.target.closest(".cat-btn") : null;
+        // The gaps between buttons disarm too: passing over one on the way
+        // somewhere else should not leave a tab opening behind you.
+        armCatHover(btn?.dataset.categoryId ?? null);
+      });
+      catList.addEventListener("pointerleave", () => {
+        clearTimeout(catHoverTimer);
+        catHoverPending = null;
+      });
     }
   }
 
@@ -6709,8 +6770,8 @@ export function buildRoadPaletteUI(builder, opts = {}) {
    * exported {refreshStatus, renderPieces, syncEdgesBtn}. So its hotkey handler
    * called `builder.setActivePiece()` and could do nothing about the rest, and
    * the palette went on describing the PREVIOUS selection:
-   *   • the status line showed the preset's label, because renderPieces() clears
-   *     activePropId and activeMoverId but not activePresetId;
+   *   • the status line showed the preset's label (activePresetId was never
+   *     cleared from outside);
    *   • no tile highlighted, since that test requires all three to be null;
    *   • the grid stayed on the old category, so the piece could be off-screen.
    * You were placing one piece while the UI named another.
@@ -6735,9 +6796,8 @@ export function buildRoadPaletteUI(builder, opts = {}) {
    * Adopt a (re)baked thumbnail set — Map(id -> image src).
    *
    * Patches the live DOM in place instead of calling renderPieces(): the bake
-   * lands a couple of seconds into the session, by which time a prop brush may
-   * be armed, and a re-render clears activePropId/activeMoverId — the tiles
-   * would change under a brush that then had no highlight.
+   * lands a couple of seconds into the session, and a full grid rebuild would
+   * flicker the tiles under a live brush even though browsing no longer disarms it.
    */
   function setThumbnails(next) {
     thumbs = next;
