@@ -255,6 +255,10 @@ function jumpLabMat() {
   return diamondStripeMat([0.92, 0.92, 0.94], [0.06, 0.06, 0.07]);
 }
 
+function kickerMat() {
+  return diamondStripeMat([0.92, 0.92, 0.94], [0.10, 0.32, 0.86]);
+}
+
 /** Wide road pad: diamond + hazard paint on the deck, road-red on the slab cap. */
 export function hazardPadMat() {
   const maps = diamondPlateMaps();
@@ -1885,7 +1889,11 @@ export const PROP_CATALOG = [
     category: "parkour",
     collision: "both",
     // Rise 8 m — same as jump ramp / box, so a slope can meet a platform flush.
-    make: () => new THREE.Mesh(rampGeometry(18, 8, 14), parkourMat(0xff8a14)),
+    make: () => {
+      const geo = rampGeometry(18, 8, 14);
+      addPlateUvs(geo);
+      return new THREE.Mesh(geo, hazardPlatformMat());
+    },
   },
   {
     id: "boardramp",
@@ -2066,22 +2074,22 @@ export const PROP_CATALOG = [
     label: "Convex kicker",
     category: "parkour",
     collision: "both",
-    make: () =>
-      new THREE.Mesh(
-        kickerRampGeometry(14, 20, 7, 32),
-        parkourMat(0xff4b6b),
-      ),
+    make: () => {
+      const geo = kickerRampGeometry(14, 20, 7, 32);
+      addPlateUvs(geo);
+      return new THREE.Mesh(geo, kickerMat());
+    },
   },
   {
     id: "jumpkicker",
     label: "Jump ramp",
     category: "parkour",
     collision: "both",
-    make: () =>
-      new THREE.Mesh(
-        jumpRampGeometry(14, 22, 8, 32),
-        parkourMat(0xffd12a),
-      ),
+    make: () => {
+      const geo = jumpRampGeometry(14, 22, 8, 32);
+      addPlateUvs(geo);
+      return new THREE.Mesh(geo, jumpLabMat());
+    },
   },
   {
     id: "tube",
