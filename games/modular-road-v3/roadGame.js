@@ -2022,20 +2022,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // ── CULLED, unlike the mirrored RAIL ─────────────────────────────────
     //
     // The rail is one merged mesh spanning the whole circuit, so a frustum test
-    // on it can only ever answer "yes" and running it is waste. A gantry is a
-    // discrete object a few metres across, and there are as many mirrored
-    // copies as there are gantries: measured at +28 draws for two and +82 for
-    // twenty, three per copy, because this path builds one copy per instance.
+    // on it can only ever answer "yes" and running it is waste. What comes
+    // through HERE is discrete and a few metres across, so the test can answer
+    // no, and does for most of a circuit.
     //
-    // The main view does not have that problem — PropInstancer batches props,
-    // so its draw count is flat in prop count (79 either way). This pass has no
-    // such batching, which makes the frustum test the one lever available.
+    // WHAT REACHES THIS FUNCTION, as of the prop-instancing work: only the
+    // BUILDER-PIECE gate decor — `decorGateMesh` and `decorGlowMesh`, i.e.
+    // start / finish / checkpoint. That is a handful per track, and both the
+    // geometry and the material are SHARED with the source rather than cloned,
+    // so batching it would buy almost nothing.
     //
-    // MEASURED: twenty gantries behind the camera cost 99 draws against 161 in
-    // front — 62 saved, exactly the 62 mirrored meshes, all culled. It buys
-    // nothing when everything is genuinely ahead of you down a straight, which
-    // is correct rather than disappointing; it pays on a real circuit, where
-    // most of the track is behind or beside the camera.
+    // It is no longer the path PROPS take. Placed props (neonarm / neongate)
+    // now go through `addMirroredProps`, which builds one template per TYPE and
+    // one InstancedMesh per part — flat in placement count. An earlier version
+    // of this note quoted "+28 draws for two gantries and +82 for twenty, three
+    // per copy" and said this pass has no batching: that measured the
+    // pre-instancing behaviour and does not describe what runs here now.
     //
     // Safe under the Y-flip: culling transforms the geometry's bounding SPHERE
     // by matrixWorld, and a mirrored sphere is still a sphere of the same
