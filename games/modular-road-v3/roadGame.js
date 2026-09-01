@@ -484,7 +484,24 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   const clouds = createModularRoadClouds({
     renderer, scene, camera,
-    params: { enabled: false },
+    params: {
+      // ON by default now. Measured in a chase-camera framing, three alternating
+      // runs each: 2.93 ms GPU without, 3.80 ms with — 0.87 ms, holding 60 fps,
+      // with non-overlapping ranges. The noise bake is a worker, so boot pays
+      // nothing on the main thread and the deck fades in when it lands.
+      enabled: true,
+      /**
+       * COVERAGE IS THE WHOLE LOOK, and 0.9 (the module default) is a total
+       * whiteout: a solid sheet from horizon to zenith with no sky left. At 0.45
+       * the same field reads as separate cumulus with blue between them. 0.62 was
+       * tried and already merges back into one mass, so this is not a small
+       * window — it is the difference between "clouds" and "overcast".
+       *
+       * Set here rather than in CLOUD_DEFAULTS so cloud-lab keeps its own tuning
+       * ground and this stays the GAME's art direction.
+       */
+      coverage: 0.45,
+    },
   });
   scene.add(clouds.mesh);
   app.clouds?.setSystem(clouds);
@@ -5760,6 +5777,9 @@ ${e.message}`);
       /** Volumetric clouds. Off releases every buffer and runs no pass. */
       setClouds: (on) => clouds.setEnabled(!!on),
       getClouds: () => clouds.enabled,
+      /** The live params object — `update()` pushes every field into its uniform
+       *  each frame, so the panel can bind sliders straight to it. */
+      cloudParams: clouds.params,
       /** Sky mode: terrain hidden, not solid, heights measured from y=0. */
       setTerrain,
       getTerrain: () => terrainOn,

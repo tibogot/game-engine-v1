@@ -76,16 +76,8 @@ export function createRoadDevPanel({ app, game, params }) {
             reading the game's own frame time without the terrain's fixed ~2.5&nbsp;ms
             sitting on top of every measurement. Safe to flip while driving.
           </div>
-          <div class="prop-row">
-            <span class="prop-label">Clouds</span>
-            <div class="prop-value">
-              <button class="prop-toggle" id="dv-clouds" type="button" aria-label="Volumetric clouds">${CHECK_SVG}</button>
-            </div>
-          </div>
-          <div class="dv-hint">
-            Volumetric clouds you can fly through, at ~260 m. Off costs nothing — no
-            buffers, no passes. The first enable bakes noise in a worker (a few seconds).
-          </div>
+          <!-- The Clouds toggle used to live here, alone. It moved to its own
+               CLOUDS group below, with the rest of the knobs it belongs to. -->
           <div class="dv-hint">
             Author worlds in <b>v3/editor.html</b>, Save Project, then drop the file
             here as <code>world.v3proj</code> to make it the default.
@@ -1793,6 +1785,185 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Clouds — Shape</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            Volumetric clouds you can fly through. Off costs nothing — no buffers,
+            no passes. The first enable bakes noise in a worker (a few seconds, off
+            the main thread), then the deck fades in.
+            <b>Coverage is the whole look</b>: 0.9 is a solid overcast sheet with no
+            sky left, 0.45 reads as separate cumulus. Measured cost with the sky in
+            a chase-camera framing: <b>0.87 ms</b>, holding 60 fps.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Clouds</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-clouds" type="button" aria-label="Volumetric clouds">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Coverage</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-cov" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-cld-cov-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">More / less</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-bias" min="-0.5" max="0.5" step="0.01" />
+              <span class="prop-num" id="dv-cld-bias-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Base height</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-base" min="60" max="1500" step="10" />
+              <span class="prop-num" id="dv-cld-base-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Thickness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-thick" min="100" max="2000" step="10" />
+              <span class="prop-num" id="dv-cld-thick-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Density</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-dens" min="0.02" max="0.6" step="0.005" />
+              <span class="prop-num" id="dv-cld-dens-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cumulus / stratus</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-type" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-cld-type-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Towering</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-topmin" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-cld-topmin-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Towering</b> is the shortest cloud as a fraction of the slab. At 1.0
+            every cell fills the full thickness and you get a flat sheet — the
+            spread between it and 1.0 IS the towering look.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wind speed</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-wind" min="0" max="30" step="0.5" />
+              <span class="prop-num" id="dv-cld-wind-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wind heading</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-winddeg" min="0" max="360" step="1" />
+              <span class="prop-num" id="dv-cld-winddeg-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Clouds — Lighting</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Sun into cloud</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-sun" min="0" max="8" step="0.1" />
+              <span class="prop-num" id="dv-cld-sun-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sky ambient</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-amb" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-cld-amb-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Forward scatter</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-g" min="0" max="0.9" step="0.01" />
+              <span class="prop-num" id="dv-cld-g-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Powder (dark edge)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-powder" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-cld-powder-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Interior glow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-msfloor" min="0" max="0.6" step="0.01" />
+              <span class="prop-num" id="dv-cld-msfloor-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Interior glow</b> is the multiple-scattering floor — the fraction of
+            sun energy surviving as diffuse light deep inside a mass. At 0 you get
+            physically-wrong dark blue interiors; this is what makes flying INTO a
+            cloud a bright whiteout instead of dull fog.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Clouds — Quality</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            The performance knobs. <b>Resolution</b> is the big one — the march runs
+            per cloud-buffer pixel, so it is roughly quadratic. 0.5 is half-res.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Resolution</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-buf" min="0.25" max="1" step="0.05" />
+              <span class="prop-num" id="dv-cld-buf-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Max steps</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-steps" min="40" max="256" step="4" />
+              <span class="prop-num" id="dv-cld-steps-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Step ceiling</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-maxstep" min="8" max="60" step="1" />
+              <span class="prop-num" id="dv-cld-maxstep-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Temporal blend</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-hist" min="0" max="0.95" step="0.01" />
+              <span class="prop-num" id="dv-cld-hist-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Step ceiling</b> is an aliasing control, not a look control: at 60 m
+            the far field samples ~14 m cloud detail once every 50 m, which is the
+            crosshatch speckle on distant edges. <b>Temporal blend</b> is the
+            running average that cleans the march dither — 0 shows the raw march.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Weather</div>
         <div class="section-body">
           <div class="prop-row">
@@ -2661,7 +2832,7 @@ export function createRoadDevPanel({ app, game, params }) {
   // Display text loses the prefix once nested (it is above them now) but the
   // FOLD KEY keeps the full original — otherwise a bare "Power" would be one
   // rename away from colliding with some other section's key in localStorage.
-  const GROUP_PREFIXES = ["Car", "Audio", "FX"];
+  const GROUP_PREFIXES = ["Car", "Audio", "FX", "Clouds"];
   for (const prefix of GROUP_PREFIXES) {
     const sep = `${prefix} — `;
     const secs = [...root.querySelectorAll(".inspector-section")].filter((s) => {
@@ -2742,7 +2913,7 @@ export function createRoadDevPanel({ app, game, params }) {
   // wayfinding aid, not a requirement, and a missing icon must never be a bug.
   const SECTION_ICONS = {
     World: "🌍", Mode: "🕹️", Track: "🛣️", Weather: "🌧️", "Post FX": "✨",
-    Camera: "🎥", Lighting: "💡", Sky: "🌤️", Clouds: "☁️", Terrain: "⛰️",
+    Camera: "🎥", Lighting: "💡", Clouds: "☁️", Terrain: "⛰️",
     Props: "📦", Movers: "⚙️", Portals: "🌀", Audio: "🔊", FX: "💥",
     Physics: "🧪", Debug: "🐞", Car: "🚗", Wheels: "🛞", Tires: "🛞",
     Surface: "🧱", Rails: "🚧", Collision: "🧊", Performance: "📈",
@@ -2764,7 +2935,9 @@ export function createRoadDevPanel({ app, game, params }) {
     "Tyre marks": "🛞", Sparks: "✨", "Drift smoke": "💨",
     "Smoke lighting": "🔦", "Smoke shape": "🌫️", "Lingering bank": "🏳️",
     "Wet spray": "💦", "Terrain texture": "🧱",
-    Sky: "🌌",
+    // `Sky` is defined ONCE, here — it used to also sit in the block above with a
+    // different glyph, where the later key silently won.
+    Sky: "🌌", Shape: "🌥️", Quality: "🎚️",
   };
   for (const hdr of root.querySelectorAll(".section-header")) {
     const key = hdr.dataset.foldKey || hdr.textContent.trim();
@@ -3324,6 +3497,35 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-lines-bloom", game.getLinesBloom?.() ?? false, (on) => game.setLinesBloom?.(on));
   toggle("dv-terrain", game.getTerrain?.() ?? true, (on) => game.setTerrain?.(on));
   toggle("dv-clouds", game.getClouds?.() ?? false, (on) => game.setClouds?.(on));
+
+  // ── Clouds ──────────────────────────────────────────────────────────────────
+  // Bound straight to the live params object: the cloud system's update() copies
+  // every field into its uniform each frame, so there is nothing to sync and no
+  // rebuild — including bufferScale, which re-sizes its render targets when it
+  // sees the value change. `slider` hides any row whose param is missing, so a
+  // renamed field degrades to a missing row rather than a dead control.
+  const CP = game.cloudParams ?? null;
+  slider("dv-cld-cov", CP, "coverage", (v) => v.toFixed(2));
+  slider("dv-cld-bias", CP, "coverageBias", (v) => (v > 0 ? "+" : "") + v.toFixed(2));
+  slider("dv-cld-base", CP, "base", (v) => v.toFixed(0) + " m");
+  slider("dv-cld-thick", CP, "thickness", (v) => v.toFixed(0) + " m");
+  slider("dv-cld-dens", CP, "densityMul", (v) => v.toFixed(3));
+  slider("dv-cld-type", CP, "typeBias",
+    (v) => (v < 0.4 ? "stratus " : v > 0.6 ? "cumulus " : "") + v.toFixed(2));
+  slider("dv-cld-topmin", CP, "cloudTopMin", (v) => v.toFixed(2));
+  slider("dv-cld-wind", CP, "windSpeed", (v) => v.toFixed(1) + " m/s");
+  slider("dv-cld-winddeg", CP, "windDeg", (v) => v.toFixed(0) + "°");
+  slider("dv-cld-sun", CP, "sunIntensity", (v) => v.toFixed(1));
+  slider("dv-cld-amb", CP, "ambientIntensity", (v) => v.toFixed(2));
+  slider("dv-cld-g", CP, "phaseG", (v) => v.toFixed(2));
+  slider("dv-cld-powder", CP, "powder", (v) => v.toFixed(2));
+  slider("dv-cld-msfloor", CP, "msFloor", (v) => v.toFixed(2));
+  slider("dv-cld-buf", CP, "bufferScale",
+    (v) => `${v.toFixed(2)}× · ${(v * v * 100).toFixed(0)}% of the pixels`);
+  slider("dv-cld-steps", CP, "steps", (v) => v.toFixed(0));
+  slider("dv-cld-maxstep", CP, "maxStep", (v) => v.toFixed(0) + " m");
+  slider("dv-cld-hist", CP, "historyBlend",
+    (v) => (v <= 0 ? "off (raw march)" : `${(1 / Math.max(1 - v, 1e-3)).toFixed(0)}-frame avg`));
   // Road-surface uniforms are TSL `uniform()` objects, so the slider / colour
   // helpers drive their `.value` directly — every change is live, no rebuild.
   // Colours live in linear space in the shader; the picker shows sRGB.
