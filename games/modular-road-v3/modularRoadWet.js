@@ -79,6 +79,7 @@ import {
   oneMinus,
   pow,
   cos,
+  fwidth,
   normalWorld,
   positionWorld,
   normalMap,
@@ -557,7 +558,20 @@ export function wetRippleNormal(u) {
       dhb = dhb.add(c.mul(dy));
     }
 
-    const g = u.rippleAmp;
+    // DISTANCE FADE. These sines are ~1.6 cycles/m (and the third wave is
+    // 2.91× that). On a 16 m road the chase camera never sees enough deck
+    // for the undersampling to read as a pattern. On a 200 m lot it fills
+    // the screen at 5–10° and the waves beat against the pixel grid into
+    // horizontal bands — worse with distance, which is the tell.
+    //
+    // Same rule the dry aggregate already uses: once a pixel covers half a
+    // cycle of the HIGHEST wave, the slope is noise, not ripple. Fade the
+    // amplitude to zero rather than let it alias. fwidth is a 2×2 screen
+    // derivative, so triangle size does not matter — a subdivided lot
+    // would band the same way without this.
+    const texel = max(fwidth(a), fwidth(b));
+    const fade = saturate(oneMinus(texel.mul(2.91 * 2.0)));
+    const g = u.rippleAmp.mul(fade);
     const n = vec3(dha.mul(g).negate(), dhb.mul(g).negate(), 1.0).normalize();
     return n.mul(0.5).add(0.5);
   })();
