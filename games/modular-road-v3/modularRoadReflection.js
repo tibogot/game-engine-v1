@@ -97,6 +97,10 @@ export function createCarReflection({
   scene,
   width = 512,
   height = 512,
+  /** Pre-mirror target size. Defaults to the planar size so older callers are
+   *  unchanged; the game passes the FULL view — see the note on `preTargets`. */
+  viewWidth = width,
+  viewHeight = height,
 } = {}) {
   // TWO TARGETS, PING-PONGED, AND THIS IS NOT AN OPTIMISATION.
   //
@@ -127,8 +131,8 @@ export function createCarReflection({
    *   sample how far away what it drew actually was. Only the PRE-MIRROR pass
    *   needs it — see the occlusion note on `preTargets`.
    */
-  const makeTarget = (i, readableDepth = false) => {
-    const t = new THREE.RenderTarget(width, height, {
+  const makeTarget = (i, readableDepth = false, w = width, h = height) => {
+    const t = new THREE.RenderTarget(w, h, {
       type: THREE.HalfFloatType,
       depthBuffer: true,
       samples: 0,
@@ -137,15 +141,32 @@ export function createCarReflection({
       // FLOAT, not the default unsigned int: the road linearises this back to
       // metres and compares it against its own view depth, and a 24-bit integer
       // depth quantises hard enough at distance to make that comparison jitter.
-      const d = new THREE.DepthTexture(width, height);
+      const d = new THREE.DepthTexture(w, h);
       d.type = THREE.FloatType;
       d.name = `MirrorDepth${i}`;
       t.depthTexture = d;
     }
     t.texture.name = `CarReflection${i}`;
-    t.texture.minFilter = THREE.LinearFilter;
+    // ── MIPS, AND WHY A REFLECTION WANTS THEM ────────────────────────────
+    //
+    // A wet road is a ROUGH mirror, not a mirror. Sampling this target at LOD 0
+    // everywhere asks it to carry detail the surface physically cannot, and on
+    // a thin bright source — a neon arch reflected in the deck — the result is
+    // a hard-aliased line in a half-resolution buffer, magnified back onto the
+    // road as a staircase. That is the pixelation, and no amount of resolution
+    // fixes it: the sharpness itself is the artefact.
+    //
+    // With a mip chain the road can ask for a blur that matches its roughness
+    // (see `.blur()` at the sampling sites), which is both what the surface
+    // should look like and, incidentally, the correct antialiasing for it.
+    //
+    // three's WebGPU backend generates these at the END of the pass that wrote
+    // the target — see WebGPUBackend's finishRender — so this costs a small
+    // blit chain per frame on an already-small target and needs no extra pass
+    // of our own.
+    t.texture.minFilter = THREE.LinearMipmapLinearFilter;
     t.texture.magFilter = THREE.LinearFilter;
-    t.texture.generateMipmaps = false;
+    t.texture.generateMipmaps = true;
     t.texture.wrapS = THREE.ClampToEdgeWrapping;
     t.texture.wrapT = THREE.ClampToEdgeWrapping;
     return t;
@@ -182,7 +203,32 @@ export function createCarReflection({
    * rejects anything too far from its own, which is the same "how many metres
    * wrong is this" test `reflectErrTol` already applies to the planar mirror.
    */
-  const preTargets = [makeTarget("Pre0", true), makeTarget("Pre1", true)];
+  /**
+   * FULL RESOLUTION, unlike the planar mirror — and this is the difference that
+   * decides whether reflected neon looks like light or like Lego.
+   *
+   * The planar pass gets projected onto the deck and lands wherever the mirror
+   * matrix says, so half scale costs it a little sharpness and no more. This
+   * pass is sampled at `screenUV`: its texels map ONE TO ONE onto screen
+   * pixels. At half scale that mapping is a guaranteed 2x MAGNIFICATION of a
+   * buffer that was never anti-aliased, so a thin bright tube — exactly what a
+   * neon arch is — arrives as a hard stair-stepped line and then gets doubled.
+   *
+   * Mip-blurring it does not rescue that and made it worse: a mip is a box
+   * downsample, so magnifying one shows its texel grid. Softening a magnified
+   * image cannot add the detail that was thrown away; the only fix is to stop
+   * magnifying it.
+   *
+   * The cost is far smaller than "full resolution" suggests. Only PREMIRROR
+   * geometry is on this layer — the mirrored rail and a handful of tall props,
+   * about ten meshes — over a small part of the screen, on a pass with no road,
+   * no terrain and no sky. What doubles is the target's memory and its clear,
+   * not the shading.
+   */
+  const preTargets = [
+    makeTarget("Pre0", true, viewWidth, viewHeight),
+    makeTarget("Pre1", true, viewWidth, viewHeight),
+  ];
   let preFront = 0;
   let preActive = false;
 
@@ -246,19 +292,22 @@ export function createCarReflection({
     get slab() { return slabHalf; },
     set slab(v) { slabHalf = Math.max(0.2, +v || 0.2); },
 
-    setSize(w, h) {
+    setSize(w, h, vw = w, vh = h) {
       const W = Math.max(2, w | 0);
       const H = Math.max(2, h | 0);
+      const VW = Math.max(2, vw | 0);
+      const VH = Math.max(2, vh | 0);
       for (const t of targets) t.setSize(W, H);
-      // The pre-mirrored pass is sampled at screenUV, so unlike the planar
-      // mirror it wants the VIEW's aspect ratio, not just some small square.
+      // The pre-mirrored pass is sampled at screenUV, so it wants the VIEW's
+      // own pixel count — not the planar mirror's reduced one. Anything less is
+      // a magnification, and a magnified aliased edge is the stair-stepping.
       for (const t of preTargets) {
-        t.setSize(W, H);
+        t.setSize(VW, VH);
         // RenderTarget.setSize resizes an attached depthTexture, but its image
         // dimensions are what the sampler uses — keep them in step explicitly.
         if (t.depthTexture) {
-          t.depthTexture.image.width = W;
-          t.depthTexture.image.height = H;
+          t.depthTexture.image.width = VW;
+          t.depthTexture.image.height = VH;
           t.depthTexture.needsUpdate = true;
         }
       }

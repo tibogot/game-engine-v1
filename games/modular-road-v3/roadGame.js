@@ -347,7 +347,31 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     scene,
     width: Math.max(64, Math.round(innerWidth * 0.5)),
     height: Math.max(64, Math.round(innerHeight * 0.5)),
+    // The pre-mirror pass is sampled 1:1 at screenUV, so it gets the FULL view.
+    viewWidth: Math.max(64, innerWidth),
+    viewHeight: Math.max(64, innerHeight),
   });
+  /**
+   * KEEP THE MIRROR TARGETS THE SIZE OF THE VIEW.
+   *
+   * `setSize` existed and was never called, so the targets stayed at whatever
+   * the window was at boot. The planar mirror survives that (it has its own
+   * projection), but the PRE-MIRRORED pass is sampled at `screenUV` — it only
+   * lines up while its target matches the view's aspect ratio, so resizing the
+   * window slid every mirrored rail and arch sideways until the next reload.
+   *
+   * The engine owns the renderer's own resize (v3/app/main.js); this is the
+   * game's half, and it reads the window rather than being handed sizes so the
+   * two cannot disagree about ordering.
+   */
+  const resizeReflection = () => carReflection.setSize(
+    Math.max(64, Math.round(innerWidth * 0.5)),
+    Math.max(64, Math.round(innerHeight * 0.5)),
+    Math.max(64, innerWidth),
+    Math.max(64, innerHeight),
+  );
+  window.addEventListener("resize", resizeReflection);
+
   /** Runtime switch. The material always carries the projection; this is what
    *  decides whether a mirror is rendered and sampled. */
   let reflectionEnabled = true;
@@ -5646,6 +5670,15 @@ ${e.message}`);
         roadMaterial._roadUniforms.puddleAmount.value = v;
       },
       getPuddles: () => roadMaterial._roadUniforms.puddleAmount.value,
+      // Written through `roadLook` as well as the uniform so it rides in a
+      // track save, same as puddles — a wet look that only lives on the live
+      // material is one reload from being lost.
+      setReflectBlur: (v) => {
+        const n = Math.max(0, Math.min(8, v || 0));
+        roadLook.reflectBlur = n;
+        roadMaterial._roadUniforms.reflectBlur.value = n;
+      },
+      getReflectBlur: () => roadMaterial._roadUniforms.reflectBlur.value,
       setBump: (v) => setSurfaceParam("bumpAmount", Math.max(0, v || 0)),
       getBump: () => surfaceLook.bumpAmount,
       setStreakSharp: (v) => setSurfaceParam("streakSharp", Math.max(0, Math.min(1, v ?? 0))),

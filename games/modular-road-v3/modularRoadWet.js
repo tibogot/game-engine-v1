@@ -367,6 +367,14 @@ export const WET_DEFAULTS = {
    */
   reflectDistort: 0.05,
   /**
+   * How far up the reflection mip chain a rough surface reaches, as a
+   * multiplier on the coat roughness. 1 = a fully rough coat samples the
+   * smallest mip; the shipped coat roughness is 0.012 in a puddle and 0.1 on
+   * damp film, so most of the road sits low in the chain and puddles stay
+   * near-sharp. Zero restores the old always-LOD-0 look, aliasing included.
+   */
+  reflectBlur: 3.2,
+  /**
    * How much of the wet treatment the KERB gets, relative to the deck.
    *
    * Below 1 because a painted kerb is not asphalt: paint is close to
@@ -433,7 +441,7 @@ export const WET_NUMBERS = [
   "wetDrainStart", "wetCamber", "wetBank", "wetCurveRef", "wetDrainStrength",
   "wetSlopeMin", "wetSlopeMax", "wetWheelClear",
   "rippleAmp", "rippleScale", "rippleSpeed", "rippleStretch", "rippleDamp",
-  "reflectStrength", "reflectFresnel", "reflectDistort", "reflectFade",
+  "reflectStrength", "reflectFresnel", "reflectDistort", "reflectBlur", "reflectFade",
   "reflectPlaneTol", "reflectErrTol",
   "railReflect", "railDepthTol", "railDepthSoft",
   "kerbWet",

@@ -426,6 +426,7 @@ export function createRoadMaterial(opts = {}) {
     reflectStrength: uniform(opts.reflectStrength ?? WET_DEFAULTS.reflectStrength),
     reflectFresnel: uniform(opts.reflectFresnel ?? WET_DEFAULTS.reflectFresnel),
     reflectDistort: uniform(opts.reflectDistort ?? WET_DEFAULTS.reflectDistort),
+    reflectBlur: uniform(opts.reflectBlur ?? WET_DEFAULTS.reflectBlur),
     reflectFade: uniform(opts.reflectFade ?? WET_DEFAULTS.reflectFade),
     reflectPlaneTol: uniform(opts.reflectPlaneTol ?? WET_DEFAULTS.reflectPlaneTol),
     reflectErrTol: uniform(opts.reflectErrTol ?? WET_DEFAULTS.reflectErrTol),
@@ -758,6 +759,30 @@ export function createRoadMaterial(opts = {}) {
     : null;
 
   /**
+   * HOW BLURRED THE REFLECTION IS, from the surface's own coat roughness.
+   *
+   * Shared by both reflection paths (the planar mirror and the pre-mirrored
+   * geometry) so they can never disagree about how sharp the world is — one is
+   * the car, the other the rails and arches, and seeing them at two different
+   * sharpnesses in the same puddle is worse than either being wrong.
+   *
+   * `coatRough` already carries the distinction that matters: standing water is
+   * near-flat (`puddleCoatRough` 0.012) and mirrors sharply, while damp asphalt
+   * (`wetCoatRough` 0.1) is microscopically rough and smears. Driving the blur
+   * from it means puddles stay crisp and the film between them softens, which
+   * is both what water does and what hides the reflection target's own
+   * aliasing — the two goals happen to want the same thing here.
+   *
+   * `reflectDistort` was doing neither job: it perturbs the sample POSITION,
+   * which breaks up the shape but scatters an already-aliased source and can
+   * make the stair-stepping worse. It stays, for the ripple; this is the term
+   * that was missing.
+   */
+  const reflectBlurAmount = wet
+    ? saturate(wet.coatRough.mul(u.reflectBlur))
+    : float(0);
+
+  /**
    * Paint-line coverage (0..1). Shared by albedo and the optional bloom write —
    * one node instance, one evaluation per fragment when both paths reference it.
    */
@@ -1064,7 +1089,11 @@ export function createRoadMaterial(opts = {}) {
       // asphalt smears. Without this the reflection reads as a pasted-on decal.
       const reflUv = projUv.add(coatWobble);
 
-      const col = reflectTex.sample(reflUv);
+      // Blurred to match the surface — see `reflectBlur`. `.blur()` sets a mip
+      // BIAS rather than an absolute level, so the hardware's own
+      // derivative-based LOD still runs underneath and this only adds roughness
+      // on top of it.
+      const col = reflectTex.blur(reflectBlurAmount).sample(reflUv);
 
       // Fresnel. Same shape as the glass pane above: near-nothing looking
       // straight down, near-total at the grazing angle a chase camera lives at.
@@ -1188,6 +1217,16 @@ export function createRoadMaterial(opts = {}) {
       // what makes a reflection read as a decal: real water is never flat enough
       // to return a clean image.
       const uvSample = screenUV.add(coatWobble);
+      // NO mip blur on this one, deliberately — the opposite call from the
+      // planar mirror above, for the opposite reason.
+      //
+      // This target is sampled at `screenUV` and is now rendered at the view's
+      // own resolution, so LOD 0 is a 1:1 mapping. Raising the LOD would sample
+      // a box-downsampled mip and magnify it back up, which does not soften the
+      // image — it shows the mip's texel grid. That is what made reflected neon
+      // read as stair-stepped blocks. Sharpness here is free and correct; the
+      // roughness softening this reflection wants comes from `coatWobble`
+      // displacing the sample, not from throwing resolution away.
       const col = mirrorTex.sample(uvSample);
 
       let occlude = float(1);
