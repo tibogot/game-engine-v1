@@ -1803,6 +1803,62 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-reflect-str-v"></span>
             </div>
           </div>
+          <div class="dv-hint">
+            <b>Rain</b> is droplets on the lens, drawn after the scene and before
+            bloom — so a drop that magnifies a neon tube glows from where the
+            drop put it. Off removes the pass entirely rather than fading it to
+            zero, so a dry track pays nothing. It is independent of
+            <b>Wetness</b>: rain can stop while the road stays soaked.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rain</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-rain" type="button" aria-label="Rain on the lens">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rain amount</span>
+            <div class="prop-value">
+              <input type="range" id="dv-rain-amount" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-rain-amount-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Drop density</span>
+            <div class="prop-value">
+              <input type="range" id="dv-rain-density" min="4" max="30" step="0.5" />
+              <span class="prop-num" id="dv-rain-density-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Drop size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-rain-size" min="0.05" max="0.5" step="0.01" />
+              <span class="prop-num" id="dv-rain-size-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Drop blur</span>
+            <div class="prop-value">
+              <input type="range" id="dv-rain-blur" min="0" max="0.05" step="0.001" />
+              <span class="prop-num" id="dv-rain-blur-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Runners</span>
+            <div class="prop-value">
+              <input type="range" id="dv-rain-runners" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-rain-runners-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Speed lean</span>
+            <div class="prop-value">
+              <input type="range" id="dv-rain-lean" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-rain-lean-v"></span>
+            </div>
+          </div>
+
           <div class="prop-row">
             <span class="prop-label">Reflection blur</span>
             <div class="prop-value">
@@ -3123,6 +3179,43 @@ export function createRoadDevPanel({ app, game, params }) {
   // scaled by the coat roughness per fragment, so puddles stay near-sharp while
   // the damp film between them smears — turn it to 0 to get the old always-LOD-0
   // look back, staircased neon and all.
+  // ── Rain on the lens ────────────────────────────────────────────────────
+  //
+  // Bound against the game rather than a local object, because the uniforms
+  // live with the effect — `setRainParam` is a uniform write, so every one of
+  // these is live with no rebuild.
+  toggle("dv-rain", game.getRain?.() ?? false, (on) => game.setRain?.(on));
+  const rainSlider = (id, key, fmt) => {
+    const el = $(`#${id}`);
+    const out = $(`#${id}-v`);
+    if (!el) return;
+    const initial = game.getRainParam?.(key);
+    if (initial != null) el.value = String(initial);
+    if (out) out.textContent = fmt(+el.value);
+    el.addEventListener("input", () => {
+      const v = +el.value;
+      game.setRainParam?.(key, v);
+      if (out) out.textContent = fmt(v);
+    });
+  };
+  rainSlider("dv-rain-amount", "amount", (v) => v.toFixed(2));
+  rainSlider("dv-rain-density", "beadDensity", (v) => v.toFixed(1));
+  rainSlider("dv-rain-size", "beadSize", (v) => v.toFixed(2));
+  rainSlider("dv-rain-blur", "dropBlur", (v) => v.toFixed(3));
+  rainSlider("dv-rain-runners", "runnerFill", (v) => v.toFixed(2));
+  {
+    const el = $("#dv-rain-lean");
+    const out = $("#dv-rain-lean-v");
+    if (el) {
+      el.value = String(game.getRainLean?.() ?? 0.9);
+      if (out) out.textContent = (+el.value).toFixed(2);
+      el.addEventListener("input", () => {
+        game.setRainLean?.(+el.value);
+        if (out) out.textContent = (+el.value).toFixed(2);
+      });
+    }
+  }
+
   if (weather.reflectBlur === undefined) weather.reflectBlur = game.getReflectBlur?.() ?? 3.2;
   slider("dv-reflect-blur", weather, "reflectBlur", (v) => v.toFixed(1),
     (v) => game.setReflectBlur?.(v));

@@ -96,6 +96,10 @@ import {
   syncTubeUniforms,
   ROAD_LOOK_FORMAT,
 } from "./modularRoadMaterial.js";
+import { screenUV, uniform, vec2, vec4 } from "three/tsl";
+import {
+  createRainLensUniforms, rainLensColor, RAIN_LENS_NUMBERS, RAIN_LENS_DEFAULTS,
+} from "./modularRoadRainLens.js";
 import {
   createRoadSurfaceV2,
   SURFACE_V2_DEFAULTS,
@@ -371,6 +375,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     Math.max(64, innerHeight),
   );
   window.addEventListener("resize", resizeReflection);
+  // The rain lens works in aspect-corrected screen space, so drops stay round
+  // rather than stretching with the viewport.
+  window.addEventListener("resize", () => {
+    uRainAspect.value = innerWidth / Math.max(1, innerHeight);
+  });
 
   /** Runtime switch. The material always carries the projection; this is what
    *  decides whether a mirror is rendered and sampled. */
@@ -399,6 +408,63 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   app.postFx?.setEnabled(true);
   app.postFx?.setBloomSelective(true);
   app.postFx?.setBloom({ enabled: true, strength: 0.9, threshold: 0.0, radius: 0.5 });
+
+  /* ── RAIN ON THE LENS ──────────────────────────────────────────────────────
+   *
+   * Droplets on an invisible pane between the camera and the world. See
+   * modularRoadRainLens.js for the effect itself; this is only the wiring.
+   *
+   * WHERE IT SITS IN THE CHAIN. `setSceneColorModifier` runs BEFORE bloom and
+   * DOF, which is the right end for a lens: the drops bend the scene, and then
+   * whatever bright thing a drop magnified blooms from where the drop put it.
+   * Hooking in after bloom would give drops that carry neon with its glow
+   * stripped off, which is the same complaint the reflections had.
+   *
+   * OFF MEANS ABSENT. Disabling clears the modifier entirely rather than
+   * setting `amount` to 0, so a dry track pays nothing at all — no taps, no
+   * hash field, no node in the graph. `amount` stays as the artistic fade for
+   * rain easing off while it is running.
+   */
+  const rainUniforms = createRainLensUniforms();
+  const uRainAspect = uniform(innerWidth / Math.max(1, innerHeight));
+  /** How hard `lean` follows road speed. Airflow drags drops across the glass,
+   *  and that is the cue that reads as "fast" — see `lean` in the lens. */
+  let rainLeanFromSpeed = 0.9;
+  let rainEnabled = false;
+
+  function applyRainLens() {
+    const post = app.postFx;
+    if (!post?.setSceneColorModifier) return;
+    if (!rainEnabled) { post.setSceneColorModifier(null); return; }
+    post.setSceneColorModifier((color) => {
+      const at = (uvIn) => color
+        .sample(uvIn.clamp(vec2(0.001, 0.001), vec2(0.999, 0.999))).rgb;
+      // Four taps on a rotated square, for the out-of-focus smear inside each
+      // drop. They sit behind the lens's coverage test, so they run on the
+      // pixels a drop actually covers rather than the whole screen.
+      const blur = (uvIn, radiusNode) => {
+        const rx = radiusNode.div(uRainAspect);
+        let sum = null;
+        for (let i = 0; i < 4; i++) {
+          const a = (i + 0.5) * (Math.PI / 2);
+          const s = at(uvIn.add(vec2(rx.mul(Math.cos(a)), radiusNode.mul(Math.sin(a)))));
+          sum = sum ? sum.add(s) : s;
+        }
+        return sum.mul(0.25);
+      };
+      return vec4(
+        rainLensColor(at, rainUniforms, screenUV, uRainAspect, { blur }),
+        1.0,
+      );
+    });
+  }
+
+  function setRainEnabled(on) {
+    const next = !!on;
+    if (next === rainEnabled) return;
+    rainEnabled = next;
+    applyRainLens();
+  }
 
   /* ── VOLUMETRIC CLOUDS ─────────────────────────────────────────────────────
    *
@@ -5780,6 +5846,19 @@ ${e.message}`);
         roadMaterial._roadUniforms.reflectBlur.value = n;
       },
       getReflectBlur: () => roadMaterial._roadUniforms.reflectBlur.value,
+      // ── Rain on the lens ─────────────────────────────────────────────────
+      setRain: setRainEnabled,
+      getRain: () => rainEnabled,
+      /** Live tuning for any RAIN_LENS_NUMBERS key. Uniform writes only — no
+       *  rebuild, because every one of them is a uniform by design. */
+      setRainParam: (k, v) => {
+        const u = rainUniforms[k];
+        if (u) u.value = +v;
+      },
+      getRainParam: (k) => rainUniforms[k]?.value ?? RAIN_LENS_DEFAULTS[k],
+      rainParamKeys: RAIN_LENS_NUMBERS,
+      setRainLean: (v) => { rainLeanFromSpeed = Math.max(0, Math.min(3, +v || 0)); },
+      getRainLean: () => rainLeanFromSpeed,
       setBump: (v) => setSurfaceParam("bumpAmount", Math.max(0, v || 0)),
       getBump: () => surfaceLook.bumpAmount,
       setStreakSharp: (v) => setSurfaceParam("streakSharp", Math.max(0, Math.min(1, v ?? 0))),
@@ -6010,6 +6089,13 @@ ${e.message}`);
       // they must not affect the deterministic outcome.
       tireMarks.update(vehicle);
       driftSmoke.updateFromVehicle(vehicle, camera, dt, keys);
+      // Airflow drags the drops across the glass, and that is the whole speed
+      // cue — parked, they fall straight. Only worth computing while the effect
+      // is actually installed.
+      if (rainEnabled) {
+        const spd = Math.hypot(vehicle.body.vel.x, vehicle.body.vel.z);
+        rainUniforms.lean.value = THREE.MathUtils.smoothstep(spd, 2, 45) * rainLeanFromSpeed;
+      }
       sparks.updateFromVehicle(vehicle, camera, dt);
       // Render-rate, not the fixed step: the wave is purely visual and this only
       // advances a uniform — the flags themselves cost no CPU per frame.
