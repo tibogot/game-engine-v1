@@ -2223,8 +2223,8 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="prop-row">
             <span class="prop-label">Streak length</span>
             <div class="prop-value">
-              <input type="range" id="dv-spr-stretch" min="1" max="14" step="0.2" />
-              <span class="prop-num" id="dv-spr-stretch-v"></span>
+              <input type="range" id="dv-spr-streak" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-spr-streak-v"></span>
             </div>
           </div>
           <div class="prop-row">
@@ -3332,7 +3332,7 @@ export function createRoadDevPanel({ app, game, params }) {
       toggle("dv-spray", spr.enabled !== false, (on) => game.setWetSprayEnabled?.(on));
       slider("dv-spr-rate", spr, "emitRate", (v) => v.toFixed(0));
       slider("dv-spr-op", spr, "opacity", (v) => v.toFixed(3));
-      slider("dv-spr-stretch", spr, "stretch", (v) => "x" + v.toFixed(1));
+      slider("dv-spr-streak", spr, "streak", (v) => "x" + v.toFixed(2));
       // Width is the ACROSS radius now that length comes from `stretch`, so the
       // min trails the max the same way the puff life slider does.
       slider("dv-spr-size", spr, "sizeMax", (v) => v.toFixed(2) + "m",

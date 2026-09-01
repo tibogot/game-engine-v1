@@ -82,9 +82,17 @@ export const DEFAULT_WET_SPRAY_SETTINGS = {
   enabled: true,
   /** Emitted whenever the car is MOVING on a wet road — no drift required.
    *  This is the whole point: spray is a function of speed and water, not slip. */
-  /** Many and thin. Split across four contacts by `_emit`, so the total rate is
-   *  the same whether two wheels are throwing or four. */
-  emitRate: 420,
+  /**
+   * Many and thin. Split across four contacts by `_emit`, so the total rate is
+   * the same whether two wheels are throwing or four.
+   *
+   * CEILING: this and `lifeMax` together decide how much of the 1024-slot pool
+   * the spray occupies — steady state is `2 * emitRate * meanLife`. At 800 and
+   * a 0.18–0.42 s life that is ~480 typical and ~670 worst case, which leaves
+   * the drift smoke room to co-exist. Push either much higher and the ring
+   * buffer starts recycling live particles, which reads as the plume flickering.
+   */
+  emitRate: 950,
   /** Road speed (m/s) at which spray starts. Well below the smoke threshold —
    *  you kick up water long before you can break traction. */
   entrySpeed: 4,
@@ -94,18 +102,76 @@ export const DEFAULT_WET_SPRAY_SETTINGS = {
    * multiplied by however many are stacked along it — at smoke's 0.12 the four
    * wheels drew four solid white ropes.
    */
-  opacity: 0.06,
-  lifeMin: 0.22,
-  lifeMax: 0.5,
-  /** Thin ACROSS. With the volume elongated along its travel, the radius is now
-   *  only the streak's width, so this wants to be much smaller than a puff's —
-   *  length comes from `stretch`, not from size. */
-  sizeMin: 0.10,
-  sizeMax: 0.26,
-  sizeGrowth: 3.4,
-  /** Flung back and DOWN relative to smoke — droplets are not buoyant. */
-  rise: 0.28,
-  drag: 0.55,
+  /**
+   * Well above smoke's, which is counter-intuitive until you count area.
+   *
+   * Every time the grain gets finer the plume gets fainter, because what you
+   * see is opacity times the area covered — and area falls with the SQUARE of
+   * the width. Going from a 0.14 m particle to a 0.06 m one is a bit over a
+   * fifth of the cross-section each. So thin lines have to be paid for
+   * per-streak, or they simply disappear; both times the grain came down here,
+   * the first attempt vanished because this number stayed where it was.
+   *
+   * The ceiling is that a streak should still be translucent. Push this much
+   * past ~0.35 and they stop looking like water and start looking like white
+   * scratches drawn on the lens.
+   */
+  opacity: 0.30,
+  lifeMin: 0.18,
+  lifeMax: 0.42,
+  /**
+   * GRAIN. Thin across — with the volume elongated along its travel the radius
+   * is only the streak's width, so length comes from the shutter, not from size.
+   *
+   * And SMALL. This is most of what separates spray from smoke seen from
+   * behind, where elongation alone cannot carry the read: at a
+   * quarter of a metre across, a particle is a blob however white you make it,
+   * and a plume of blobs is cotton wool. Water arrives as a fine mist, and the
+   * only way to say that with billboards is a lot of very small ones.
+   */
+  sizeMin: 0.022,
+  sizeMax: 0.06,
+  /**
+   * Barely grows. Growth is what turns a line back into a smudge — it widens
+   * the streak over its life, and a streak that thickens as it ages stops
+   * reading as a droplet and starts reading as smoke again. Kept just above 1
+   * so the tail of the plume softens rather than staying a hard ribbon.
+   */
+  sizeGrowth: 1.2,
+  // ── THE ROOSTER TAIL ─────────────────────────────────────────────────────
+  //
+  // The shape you actually recognise from behind a car in the rain is a CONE
+  // that climbs out of the wheels and falls away — not a plume hugging the
+  // tarmac. This was two ground-level ropes because the launch was barely off
+  // the road and nothing pulled it back down, so there was no arc to see.
+  //
+  // An arc needs both halves: thrown up hard, then dragged down. Smoke wants
+  // neither, which is why all three of these have to be blended in per-wetness
+  // rather than inherited (see `_puffSettings`).
+  /** Upward launch off the tread, m/s. Nothing like smoke's gentle 0.28 lift. */
+  rise: 2.4,
+  /** Gravity, m/s². NEGATIVE — smoke's `buoyancy` climbs, water falls, and the
+   *  fall is what closes the arc into a tail instead of a fountain. Softer than
+   *  real gravity because these live under half a second and `damp` is already
+   *  taking energy out of them. */
+  buoyancy: -3.5,
+  /** Droplets do not churn the way smoke does; they are pulled apart by air,
+   *  not by their own convection. Well below the smoke value. */
+  turbulence: 0.6,
+  /**
+   * Air drag. Modest, and that is a correction: 2.2 DETACHED the plume.
+   *
+   * `drag` launches a droplet backwards at a fraction of road speed, and damp
+   * is what takes that away again. Strip it fast and the particle simply stops
+   * in world space while the car keeps going at 32 m/s — so the whole plume
+   * separates and there is nothing behind the wheels at all, which is exactly
+   * what it looked like. Keeping most of the launch velocity means the spray
+   * travels WITH the car and trails from it.
+   */
+  damp: 0.9,
+  /** Fraction of road speed a droplet leaves with. High, because a tyre throws
+   *  water into the car's wake rather than into still air. */
+  drag: 0.78,
   spread: 1.0,
   /**
    * How far the particle is drawn out along its direction of travel, as a
@@ -122,7 +188,23 @@ export const DEFAULT_WET_SPRAY_SETTINGS = {
    * would achieve nothing: the intersection test would still carve a sphere out
    * of the middle of it.
    */
-  stretch: 6.0,
+  /**
+   * Shutter multiplier — streak length, as a multiple of BASE_SHUTTER.
+   *
+   * NOT a length in metres and not a stretch factor. Each streak is drawn along
+   * however far its droplet moves ACROSS THE FRAME in one shutter, so length is
+   * a consequence of the motion rather than a number you dial: parked, spray
+   * has no apparent motion and draws dots; at speed the same setting draws
+   * lines.
+   *
+   * This replaced an ellipsoid stretched along the car's heading, which cannot
+   * work from a chase camera — that axis points nearly down the view ray and
+   * projects onto the screen by only ~0.16, so every streak foreshortened back
+   * into a blob however far it was stretched. Apparent motion is largest
+   * exactly where the heading projects to nothing, because a droplet receding
+   * from the lens still sweeps toward the vanishing point.
+   */
+  streak: 1.0,
   /**
    * Outward fling, m/s, along the car's lateral axis and away from its centre.
    *
@@ -133,7 +215,7 @@ export const DEFAULT_WET_SPRAY_SETTINGS = {
    */
   sideThrow: 3.2,
   /** A streak must not tumble. Spin reads as a rotating sprite the moment a
-   *  particle stops being round, which is exactly what `stretch` makes it. */
+   *  particle stops being round, which is exactly what a streak is. */
   spinRate: 0,
   /** Water is white and stays white; there is no hot/cool ageing to it. */
   colorHot: 0xdfe6ec,
@@ -418,6 +500,16 @@ const K_MAX = 0.9;
 const K_FADE_START = 0.6;
 /** Centre distance (m) at which a puff is fully gone — comfortably outside the
  *  0.5 m near plane — and at which it is back to full strength. */
+/**
+ * Base shutter, seconds — the exposure a spray streak represents.
+ *
+ * A streak's length is the distance its droplet covers ACROSS THE FRAME in this
+ * long, so this is the same dial a camera's shutter speed is, and the
+ * `wetSpray.streak` setting is a multiplier on it. Around a 25th of a second:
+ * long enough that spray at speed draws a clear line, short enough that a slow
+ * droplet stays a dot rather than smearing into a scratch.
+ */
+const BASE_SHUTTER = 1 / 25;
 const NEAR_FADE_OUT = 0.55;
 const NEAR_FADE_IN = 1.2;
 /**
@@ -477,6 +569,12 @@ const _smokeUp = new THREE.Vector3();
 /** Camera world position, refreshed once per frame in `update`. Drives the
  *  exact quad size and the proximity fade. */
 const _camPos = new THREE.Vector3();
+const _camPrev = new THREE.Vector3();
+const _camVel = new THREE.Vector3();
+const _smokeFwd = new THREE.Vector3();
+/** Particle velocity relative to the camera — scratch for the streak axis. */
+const _relVel = new THREE.Vector3();
+const _toPart = new THREE.Vector3();
 const _smokeCorner = new THREE.Vector3();
 const _smokeHalfRight = new THREE.Vector3();
 const _smokeHalfUp = new THREE.Vector3();
@@ -511,8 +609,6 @@ const _sprayPoints = [_frontContact0, _frontContact1, _rearContact0, _rearContac
 const _contactSide = [1, -1, 1, -1];
 /** Car right, in world space — the axis `sideThrow` flings along. */
 const _sprayRight = new THREE.Vector3(1, 0, 0);
-/** Unit world direction the streaks are drawn out along. */
-const _stretchAxis = new THREE.Vector3(0, 0, 1);
 
 // ─── Procedural puff shape ────────────────────────────────────────────────────
 
@@ -697,31 +793,15 @@ export class ModularRoadDriftSmoke {
     /** The bank's own world-noise frequency, so it fuses at metre scale. */
     this.uBankScale = uniform(settings.haze?.worldScaleMul ?? 0.4);
 
-    // ── STRETCH: shared, not per particle ──────────────────────────────────
-    //
-    // Every particle is thrown using the SAME `velocityX/velocityZ` (see
-    // `emitAt`), with only ±0.45 m/s of jitter against a launch speed of ~16
-    // m/s at pace. Their directions of travel are therefore near-identical, and
-    // carrying a per-particle axis would mean a fifth vec4 attribute — 1344
-    // slots x 6 verts x 4 floats rewritten and uploaded EVERY FRAME, about a
-    // quarter more vertex traffic, to encode a value that barely varies.
-    //
-    // The price is that live particles re-orient with the car instead of
-    // keeping the heading they were born with, so the plume swings a little
-    // through a hard corner. Bounded by particle life, which is at most 0.7 s.
-    // If that ever reads badly the fix is the attribute, not more tuning.
-    //
-    // Kept as uniforms rather than a build-time gate even though dry road never
-    // uses them: wetness changes while you are driving, and a material rebuild
-    // mid-corner costs a pipeline recompile. At `stretch = 1` the maths below
-    // collapses to exactly the old sphere — see the intersection.
-    /** Unit world direction the spray is drawn out along. */
-    this.uStretchAxis = uniform(new THREE.Vector3(0, 0, 1));
-    /** Elongation along that axis, in radii. 1 = a sphere, i.e. dry smoke. */
-    this.uStretchAmount = uniform(1);
-    /** The same figure on the CPU, where the card is sized to match the volume.
-     *  Initialised to 1 so a dry track never touches the rectangle path. */
-    this._quadStretch = 1;
+    /** True while the spray (streak) shading path is the mesh's material. */
+    this._streakOn = false;
+    /** Shutter, seconds. How much of a droplet's travel one streak represents —
+     *  the same dial a camera's exposure time is. Scaled by `streak`. */
+    this._shutter = 0;
+    /** Apparent (screen-plane) velocity of the particle being written, in m/s.
+     *  Set in `_stepPool`, consumed by `_writeParticle`. */
+    this._streakX = 0;
+    this._streakY = 0;
 
     const material = new MeshBasicNodeMaterial({
       transparent: true,
@@ -742,6 +822,30 @@ export class ModularRoadDriftSmoke {
     const shaded = this._buildShadedNode().toVar();
     material.colorNode = shaded.xyz;
     material.opacityNode = shaded.w;
+
+    /**
+     * The SPRAY material — a second, much cheaper shader over the same
+     * geometry, swapped in by `setWetness`.
+     *
+     * Built here rather than on demand so both pipelines are compiled before
+     * anyone drives: switching a material that is already warm is free, whereas
+     * rebuilding a node graph the first time the road turns wet would stall the
+     * frame mid-corner.
+     *
+     * Why a second material at all: the volumetric solver above can only make
+     * soft round volumes, because that is what it is — a ray-traced sphere with
+     * billow noise, Beer-Lambert absorption and a scattering lobe. Water thrown
+     * off a tyre is thin, fast and linear; there is no setting of a smoke
+     * solver that produces a thin line. See `_buildStreakNode`.
+     */
+    const sprayMaterial = new MeshBasicNodeMaterial({
+      transparent: true, depthWrite: false, depthTest: false,
+      side: THREE.DoubleSide, fog: false,
+    });
+    const streak = this._buildStreakNode().toVar();
+    sprayMaterial.colorNode = streak.xyz;
+    sprayMaterial.opacityNode = streak.w;
+    this.sprayMaterial = sprayMaterial;
 
     this._buildBankMesh(scene);
 
@@ -831,6 +935,19 @@ export class ModularRoadDriftSmoke {
 
   setWetness(w) {
     this._wetness = Math.max(0, Math.min(1, w || 0));
+    // Swap the shading path. Both materials were compiled at construction, so
+    // this is a pointer assignment and not a pipeline build.
+    //
+    // A hard switch rather than a blend, because one mesh can only carry one
+    // material — the settings still dissolve across the threshold, but the
+    // SHADER cannot. Placed at 0.5 so each look owns the half of the range it
+    // is right for; in practice a road is wet or it is not, and drift smoke on
+    // a soaking road is not a case worth splitting a draw call over.
+    const wantStreak = this._wetness >= 0.5;
+    if (wantStreak !== this._streakOn) {
+      this._streakOn = wantStreak;
+      if (this.mesh) this.mesh.material = wantStreak ? this.sprayMaterial : this.material;
+    }
     // Wetness decides whether the spray source can emit at all, so the
     // visibility gate has to be re-evaluated when it changes.
     this._syncEnabled();
@@ -867,6 +984,14 @@ export class ModularRoadDriftSmoke {
     out.rise = num("rise", 0.75);
     out.drag = num("drag", 0.35);
     out.spread = num("spread", 0.35);
+    // The rooster tail's three terms. `_stepPool` reads all of them off the
+    // BLENDED object, so leaving any one out means `Object.assign` hands it the
+    // dry smoke value and the setting quietly does nothing — the exact way
+    // `sideThrow` was dead. Buoyancy in particular flips sign here: smoke
+    // climbs, water falls.
+    out.buoyancy = num("buoyancy", 0.55);
+    out.turbulence = num("turbulence", 1.5);
+    out.damp = num("damp", 0.85);
     // Spin has to come DOWN to zero as the spray comes in: a stretched particle
     // that tumbles reads as a rotating sprite, which is the one tell all of this
     // is trying to lose. `num` cannot express it — `Object.assign` above copies
@@ -1110,6 +1235,72 @@ export class ModularRoadDriftSmoke {
    * reason a puff's dark core lines up with its thick part instead of looking
    * like an unrelated painted-on gradient.
    */
+  /**
+   * SPRAY: a thin motion-blur streak, shaded in the card's own UV.
+   *
+   * The card is already built along the particle's apparent motion and sized by
+   * how far it travels in a shutter (see `_writeParticle`), so all this has to
+   * do is draw a soft lozenge inside it. A unit-disc falloff in UV is exactly
+   * that: on a long thin quad it becomes a long thin line with round ends, and
+   * on a nearly-square one it becomes a dot — which is correct, because a drop
+   * that is not moving across the frame is not a streak.
+   *
+   * WHAT IT DELIBERATELY DOES NOT DO, versus the smoke path:
+   *   • no ray-sphere intersection — there is no volume here, only a mark;
+   *   • no noise texture taps (two of them) — a droplet streak has no internal
+   *     billow structure to sample, and faking one is what made spray read as
+   *     smoke in the first place;
+   *   • no Henyey-Greenstein lobe and no Beer-Lambert self-shadow — a streak is
+   *     optically thin by definition, so there is nothing for light to be
+   *     absorbed by.
+   *
+   * The one thing it keeps is the scene-depth fade, because streaks live at
+   * road level and would otherwise cut into the tarmac along a hard straight
+   * edge. That is one texture tap against the smoke path's four.
+   */
+  _buildStreakNode() {
+    const st = uv();
+    const tint = attribute("aTint", "vec4");
+    /** Reused from the smoke path: .w is the erosion threshold, which here
+     *  simply eats the streak away over its life. */
+    const nParams = attribute("aNoise", "vec4");
+    const softDepth = this.uSoftDepth;
+    const { uSunColor, uAmbient, uSunStrength, uLightAmount } = this;
+
+    return Fn(() => {
+      // Unit disc in card space. The card's own aspect does the elongation, so
+      // this single expression covers dot and line alike.
+      const p = st.sub(0.5).mul(2.0);
+      const d = length(p);
+
+      // Soft edge, and softer along the length than across it: a real streak
+      // fades out at its ends rather than stopping.
+      const core = saturate(oneMinus(d));
+      // Squared, so the falloff is round rather than conical — a linear ramp
+      // reads as a hard-edged diamond once the card gets long.
+      const shape = core.mul(core);
+
+      // Age erodes it. `aNoise.w` climbs over life on the CPU, so subtracting it
+      // thins the streak away instead of just dimming it, which is what keeps
+      // the tail of the plume from looking like it fades as one solid mass.
+      const alpha = saturate(shape.sub(nParams.w.mul(0.35))).mul(tint.w).toVar();
+
+      // Depth fade — the only tap in this shader.
+      const sceneViewZ = perspectiveDepthToViewZ(
+        _sceneDepthTex.sample(screenUV).r, cameraNear, cameraFar,
+      ).negate();
+      const fragViewZ = positionView.z.negate();
+      alpha.mulAssign(saturate(sceneViewZ.sub(fragViewZ).div(max(softDepth, float(1e-3)))));
+
+      Discard(alpha.lessThan(0.003));
+
+      // Flat lighting. Water spray is bright because it scatters a lot, not
+      // because it is shaped — there is no normal here worth lighting.
+      const lit = uSunColor.mul(uSunStrength).add(uAmbient);
+      return vec4(tint.xyz.mul(mix(vec3(1), lit, uLightAmount)), alpha);
+    })();
+  }
+
   _buildShadedNode() {
     const st = uv();
     const tint = attribute("aTint", "vec4");
@@ -1124,7 +1315,7 @@ export class ModularRoadDriftSmoke {
     const noiseMap = this.noiseMap;
     const {
       uSunWorld, uLightAmount, uAmbient, uSunStrength, uAbsorb, uScatter, uHgG,
-      uSunColor, uWorldMix, uWorldScale, uWorldDrift, uStretchAxis, uStretchAmount,
+      uSunColor, uWorldMix, uWorldScale, uWorldDrift,
     } = this;
 
     return Fn(() => {
@@ -1142,42 +1333,16 @@ export class ModularRoadDriftSmoke {
       const centre = sphere.xyz;
       const radius = sphere.w;
 
-      // ── …and the sphere is an ELLIPSOID when the spray is moving ───────────
-      //
-      // Rather than intersect a stretched shape, squash the RAY into the space
-      // where that shape is a plain sphere, solve there, and scale the hit
-      // distances back. Removing `1 - 1/k` of the component along the stretch
-      // axis is the inverse of stretching by `k`, so the same two lines undo it
-      // for the ray origin and the ray direction alike.
-      //
-      // At k = 1 (dry) `shrink` is 0, the two subtractions vanish, `rdLen` is
-      // exactly 1, and every line below is the sphere solve it replaced — the
-      // dry look is untouched by construction, not by a branch.
-      const shrink = oneMinus(float(1).div(max(uStretchAmount, float(1e-3))));
-      const axis = uStretchAxis;
       const oc = cameraPosition.sub(centre);
-      const ocL = oc.sub(axis.mul(dot(oc, axis).mul(shrink)));
-      const rdL = rd.sub(axis.mul(dot(rd, axis).mul(shrink)));
-      // Squashing costs the direction its unit length; carrying the scale here
-      // is what lets the solve stay a plain sphere solve.
-      const rdLen = length(rdL).toVar();
-      const rdU = rdL.div(rdLen).toVar();
-
-      const b = dot(ocL, rdU);
-      const cTerm = dot(ocL, ocL).sub(radius.mul(radius));
+      const b = dot(oc, rd);
+      const cTerm = dot(oc, oc).sub(radius.mul(radius));
       const h = b.mul(b).sub(cTerm);
-      // Corners of the quad miss the volume entirely. Killing them here is also
+      // Corners of the quad miss the sphere entirely. Killing them here is also
       // the cheapest overdraw win available — it is ~21% of every quad.
       Discard(h.lessThan(0));
       const sq = sqrt(max(h, float(0)));
-      // Squashed-space hit distances. Thickness is measured HERE, where the
-      // volume is a sphere of the authored radius, so a long streak is not
-      // read as an enormously dense one just for being long.
-      const tL0 = b.negate().sub(sq).toVar();   // entry
-      const tL1 = b.negate().add(sq).toVar();   // exit
-      // …and the world-space entry, for the depth feather, which is the only
-      // thing left that has to be compared against the scene.
-      const t0 = tL0.div(rdLen);
+      const t0 = b.negate().sub(sq).toVar();   // entry
+      const t1 = b.negate().add(sq).toVar();   // exit
 
       // How far the scene is ALONG THIS RAY. positionView.z is measured down the
       // view axis, so it has to be rescaled by dist/viewZ (= 1/cos) to compare
@@ -1193,11 +1358,8 @@ export class ModularRoadDriftSmoke {
       // geometry is behind it. Clipping here rather than fading the whole quad
       // is why a bank resting on the road looks half-buried like a ball instead
       // of sliced off like a sheet.
-      // Measured in squashed space, where the volume is a sphere of `radius` —
-      // so `sceneT` has to come along, scaled by the same factor the hit
-      // distances were.
-      const tEnter = max(tL0, float(0)).toVar();
-      const tExit = min(tL1, sceneT.mul(rdLen));
+      const tEnter = max(t0, float(0)).toVar();
+      const tExit = min(t1, sceneT);
       const chord = max(tExit.sub(tEnter), float(0));
       const thick = saturate(chord.div(radius.mul(2)));
 
@@ -1212,7 +1374,7 @@ export class ModularRoadDriftSmoke {
       // the noise and the puff's interior shifts against its silhouette, which
       // is the cue the eye reads as depth. Sampled on the quad it would just be
       // a picture that turns to face you.
-      const mid = cameraPosition.add(rd.mul(b.negate().div(rdLen)));
+      const mid = cameraPosition.add(rd.mul(b.negate()));
       const wuv = vec2(
         mid.x.add(mid.y.mul(0.37)),
         mid.z.add(mid.y.mul(0.61)),
@@ -1244,15 +1406,7 @@ export class ModularRoadDriftSmoke {
       // The normal at the point where the ray enters the sphere. Being a real
       // world-space normal, it can be dotted straight against the world sun —
       // no quad basis, no per-particle projection.
-      //
-      // Taken in squashed space and carried back out. A normal does NOT
-      // transform like a point: squashing the surface along the axis makes it
-      // FLATTER there, so the normal tilts AWAY from the axis. Applying the
-      // same shrink a second time is what does that (the transform is
-      // symmetric, so its inverse-transpose is itself), and at k = 1 it is
-      // again a no-op.
-      const hitL = ocL.add(rdU.mul(tEnter));
-      const nrm = normalize(hitL.sub(axis.mul(dot(hitL, axis).mul(shrink))));
+      const nrm = normalize(cameraPosition.add(rd.mul(tEnter)).sub(centre));
       const ndl = dot(nrm, uSunWorld);
 
       // Wrapped diffuse. Smoke is translucent, so it stays lit around the
@@ -1429,20 +1583,15 @@ export class ModularRoadDriftSmoke {
       }
     }
 
-    // ── STRETCH, DRIVEN BY WHAT ACTUALLY CAUSES IT ────────────────────────
+    // ── THE SHUTTER ───────────────────────────────────────────────────────
     //
-    // A streak is a stationary shape smeared by motion, so its length follows
-    // road speed, and it only exists at all on a wet road. Both terms matter:
-    // stationary in the rain the spray should be round (there is nothing to
-    // smear it), and at speed on a dry road there is no spray to stretch.
-    const sprayStretch = s.wetSpray?.stretch ?? 1;
-    const stretchSpeed = THREE.MathUtils.smoothstep(speed, 2, 24);
-    this._quadStretch = 1 + (sprayStretch - 1) * stretchSpeed * wet;
-    this.uStretchAmount.value = this._quadStretch;
-    if (speed > 0.5) {
-      _stretchAxis.set(_velHoriz.x / speed, 0, _velHoriz.z / speed);
-      this.uStretchAxis.value.copy(_stretchAxis);
-    }
+    // Streak length is now a consequence, not a setting: each one is however
+    // far its droplet travels ACROSS THE FRAME in this much time. Nothing here
+    // needs a speed term any more — a parked car's spray has no apparent motion
+    // and draws dots, and a fast one draws lines, from the same number. That
+    // fell out of orienting by apparent motion instead of by the car's heading,
+    // and it is the reason this replaced the ellipsoid rather than tuning it.
+    this._shutter = (s.wetSpray?.streak ?? 1) * BASE_SHUTTER * wet;
 
     // Four contacts in the rain, the rear pair when dry — see `_sprayPoints`.
     const points = wet > 0 ? _sprayPoints : (hasRear ? _rearPoints : []);
@@ -1509,9 +1658,21 @@ export class ModularRoadDriftSmoke {
     camera.updateMatrixWorld();
     // Both classes need this before they step: it sizes each billboard exactly
     // and drives the proximity fade that keeps the near plane away from them.
+    _camPrev.copy(_camPos);
     _camPos.setFromMatrixPosition(camera.matrixWorld);
     _smokeRight.set(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
     _smokeUp.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+    // Forward, and the camera's own velocity. Streaks are motion blur, and
+    // motion blur is relative to the observer — a chase camera travels with the
+    // car, so a droplet that looks fast against the road is nearly stationary
+    // against the lens. Differencing the position is enough and needs nothing
+    // from the caller.
+    _smokeFwd.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+    if (dt > 1e-5 && _camPrev.lengthSq() > 0) {
+      _camVel.subVectors(_camPos, _camPrev).divideScalar(dt);
+    } else {
+      _camVel.set(0, 0, 0);
+    }
     // Lighting is now done against real world-space sphere normals, so the sun
     // goes to the GPU as-is — no projection into any billboard basis.
     this.uSunWorld.value.copy(_smokeSun);
@@ -1649,13 +1810,6 @@ export class ModularRoadDriftSmoke {
       // cuts it. Everything near-camera used to be unhandled, and the chase rig
       // flies through the plume continuously at speed.
       const camDist = _camPos.distanceTo(p.position);
-      // How far the volume REACHES past its centre along the stretch axis. Both
-      // tests below are about the nearest part of the particle, not its middle,
-      // and a streak's nearest part is `stretch` radii out — so without this a
-      // long particle keeps its card at full size while its far end is already
-      // through the near plane, and gets sliced into flat white shards.
-      const reach = isBank ? 0 : radius * (this._quadStretch - 1);
-      const nearDist = Math.max(camDist - reach, 0);
       let fade;
       if (isBank) {
         // Relative to the sphere's OWN radius — see BANK_FADE_*. An absolute
@@ -1671,11 +1825,11 @@ export class ModularRoadDriftSmoke {
         // quad would have to blow up past K_MAX; the second is the near-plane
         // guard, and it works on the CENTRE distance because that is where the
         // billboard's plane actually sits.
-        const k = radius / Math.max(nearDist, 1e-4);
+        const k = radius / Math.max(camDist, 1e-4);
         fade = Math.min(
           THREE.MathUtils.clamp((K_MAX - k) / (K_MAX - K_FADE_START), 0, 1),
           THREE.MathUtils.clamp(
-            (nearDist - NEAR_FADE_OUT) / (NEAR_FADE_IN - NEAR_FADE_OUT),
+            (camDist - NEAR_FADE_OUT) / (NEAR_FADE_IN - NEAR_FADE_OUT),
             0,
             1,
           ),
@@ -1684,9 +1838,42 @@ export class ModularRoadDriftSmoke {
       // Fully faded costs nothing at all: no buffer write, no quad, no overdraw.
       // The particle stays alive and comes back as the camera pulls away.
       if (fade <= 0) continue;
-      // The card is sized against the same near distance, so it circumscribes
-      // the whole volume rather than a sphere at its centre.
-      this._camDist = nearDist;
+      this._camDist = camDist;
+
+      // ── THE STREAK AXIS: APPARENT MOTION, NOT WORLD MOTION ────────────────
+      //
+      // A streak is motion blur, so it runs along where the particle GOES ON
+      // SCREEN over one shutter. That is not the direction it travels in the
+      // world, and the difference is the whole problem: from a chase camera the
+      // spray's world velocity points almost straight down the view axis, which
+      // projects to nothing — measured at 0.16 — so orienting by it produced
+      // foreshortened blobs no matter how far they were stretched.
+      //
+      // Screen velocity is the derivative of the projection. With the particle
+      // at camera-plane offsets X, Y and depth z, the projection is (X/z, Y/z),
+      // so differentiating gives
+      //
+      //     sx = V·right - X * (V·fwd) / z
+      //     sy = V·up    - Y * (V·fwd) / z
+      //
+      // The second term is the one that matters here: it is pure perspective —
+      // a droplet receding straight away from the lens still sweeps across the
+      // frame toward the vanishing point, and it does so FASTER the further it
+      // sits from the view axis. That is exactly the motion the eye reads as
+      // spray, and it is non-zero precisely where the world-space axis dies.
+      //
+      // V is relative to the CAMERA, which is travelling with the car.
+      if (!isBank) {
+        _relVel.copy(p.velocity).sub(_camVel);
+        _toPart.subVectors(p.position, _camPos);
+        const z = Math.max(_toPart.dot(_smokeFwd), 0.05);
+        const vf = _relVel.dot(_smokeFwd) / z;
+        this._streakX = _relVel.dot(_smokeRight) - _toPart.dot(_smokeRight) * vf;
+        this._streakY = _relVel.dot(_smokeUp) - _toPart.dot(_smokeUp) * vf;
+      } else {
+        this._streakX = 0;
+        this._streakY = 0;
+      }
 
       // Fade IN over the first slice of life, then hold, then fade OUT.
       //
@@ -1847,35 +2034,32 @@ export class ModularRoadDriftSmoke {
     const k = Math.min(radius / Math.max(this._camDist, 1e-4), K_MAX);
     const half = radius / Math.sqrt(1 - k * k);
 
-    // ── A STREAK GETS A RECTANGLE, NOT A BIGGER SQUARE ────────────────────
+    // ── THE CARD IS THE STREAK ────────────────────────────────────────────
     //
-    // The quad only has to cover the volume's silhouette, and a stretched
-    // volume's silhouette is long and thin. Squaring it off to the long axis
-    // would be the easy version and would waste most of the extra area on
-    // pixels the intersection is going to discard anyway — at stretch 3.4 that
-    // is roughly 3.4x the fill for the same picture, on the one effect that is
-    // on screen continuously in the rain.
+    // In streak mode the quad is not scaffolding for a volume any more — it IS
+    // the drawn shape, a thin lozenge shaded in its own UV. So it is built
+    // directly: along the particle's apparent motion (see `_streakX/_streakY`),
+    // as long as that motion carries it in one shutter, and `half` wide.
     //
-    // So the card is oriented by where the stretch axis LANDS ON SCREEN
-    // (its components in the billboard basis, which is what a projection onto
-    // the camera plane is), long that way and unchanged across. When the axis
-    // points nearly at the camera its screen projection collapses, and so does
-    // the streak — foreshortening for free, and the `hypot` guard is what keeps
-    // the direction defined at exactly that point.
+    // Nothing is inscribed in anything, which is what makes this immune to the
+    // failure the ellipsoid had — there is no volume that can outgrow its card
+    // and turn into a visible rectangle.
     let cosR = Math.cos(rotation);
     let sinR = Math.sin(rotation);
     let halfLong = half;
-    const stretch = this._quadStretch;
-    if (stretch > 1.001) {
-      const ax = _smokeRight.dot(_stretchAxis);
-      const ay = _smokeUp.dot(_stretchAxis);
-      const len = Math.hypot(ax, ay);
-      if (len > 1e-4) {
-        cosR = ax / len;
-        sinR = ay / len;
-        // `len` is the cosine of the axis against the camera plane, so this
-        // shortens the card exactly as the streak foreshortens.
-        halfLong = half * (1 + (stretch - 1) * len);
+    if (this._streakOn) {
+      const sx = this._streakX;
+      const sy = this._streakY;
+      const sLen = Math.hypot(sx, sy);
+      if (sLen > 1e-4) {
+        cosR = sx / sLen;
+        sinR = sy / sLen;
+        // Distance travelled on screen in one shutter, converted to world units
+        // at this particle's depth — `_streakX/Y` are already camera-plane rates
+        // in metres per second, so the shutter alone does the conversion.
+        // Floored at `half` so a nearly-stationary droplet stays a dot rather
+        // than collapsing to a sliver.
+        halfLong = Math.max(half, half + sLen * this._shutter * 0.5);
       }
     }
     const posOffset = index * FLOATS_PER_PARTICLE;
