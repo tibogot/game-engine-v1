@@ -37,6 +37,7 @@
 import * as THREE from "three";
 import {
   materialEmissive, uniform, positionLocal, smoothstep, oneMinus, vec3, float,
+  normalLocal, normalize, transformNormalToView, mx_noise_float,
 } from "three/tsl";
 import {
   getSharedGltfLoader,
@@ -109,6 +110,41 @@ export const CHASSIS_GLB = {
   cheapGlass: true,
   glassOpacity: 0.42,
   /**
+   * ── CAR PAINT ────────────────────────────────────────────────────────────
+   *
+   * The file gives the shell (`mm_ext`) roughness 0.059, metalness 0 and NO
+   * clearcoat. That is a very glossy DIELECTRIC — plastic. Real car paint is a
+   * metallic basecoat under a clear lacquer, which is two specular lobes: a
+   * broad tinted one from the flake and a tight white one from the coat. With
+   * only the first you get shine without the depth that reads as "paint".
+   *
+   * `mm_ext` is already MeshPhysicalMaterial, so the coat needs no change of
+   * material class — but the orange peel does, because a procedural normal
+   * needs a node material. Both arrive together in `makePaintMaterial`.
+   */
+  paint: true,
+  /** Strength of the clear lacquer. 1 is a show car; slightly under keeps it
+   *  from looking like it is wrapped in cling film. */
+  clearcoat: 0.85,
+  /**
+   * ORANGE PEEL — the fine ripple every sprayed panel has.
+   *
+   * This is the detail that separates a real painted panel from a CG one, and
+   * it is exactly the thing a texture cannot store usefully: it is
+   * high-frequency, view-dependent, and would need a normal map far larger than
+   * the 1K albedo this car already shares across its whole shell. Procedurally
+   * it costs one noise lookup and no VRAM at all.
+   *
+   * Sampled in OBJECT space so it sticks to the panel. Sampled in view space it
+   * would swim across the bodywork as the camera moves, which reads as crawling
+   * rather than as a surface.
+   */
+  orangePeel: 0.55,
+  /** Ripples per metre. Real orange peel is roughly 1–3 mm across; this is
+   *  deliberately coarser, because at 1 mm it aliases into noise at any
+   *  distance the chase camera actually sits at. */
+  orangePeelScale: 90,
+  /**
    * The file ships a full cabin — seats, door cards, dashboard, steering wheel —
    * as SIX separate meshes.
    *
@@ -171,6 +207,9 @@ const RE_EMISSIVE = /emiss/i;
  */
 const RE_TAIL_HOUSING = /mm_lights/i;
 const RE_GLASS = /windows/i;
+/** The painted shell only. NOT `misc` or `mm_chassis` — those are trim and
+ *  structure, and lacquering them would put a showroom shine on the splitter. */
+const RE_PAINT = /mm_ext/i;
 /** Parts that define the car's OUTER silhouette — the only ones worth casting. */
 const RE_SILHOUETTE = /mm_ext|misc/i;
 
@@ -349,6 +388,54 @@ function makeTailHousingMaterial(src) {
 
 
 
+/**
+ * The painted shell: a clear lacquer over the file's basecoat, plus orange peel.
+ *
+ * Rebuilt as a NODE material rather than tweaked in place, because the peel is a
+ * procedural normal and `normalNode` only exists on a node material. Everything
+ * the file authored — the livery map, its roughness and metalness — is carried
+ * across; this only adds the two things the file has no way to express.
+ *
+ * THE NORMAL IS BUILT IN OBJECT SPACE AND CONVERTED. `normalNode` is consumed in
+ * VIEW space (three falls back to `normalView`), so perturbing it directly would
+ * tie the ripple to the camera and make it swim across the bodywork as you drive
+ * — the surface would look like it was crawling. Building the perturbed normal
+ * against `normalLocal` and handing it through `transformNormalToView` keeps the
+ * peel welded to the panel, which is the whole point of it.
+ *
+ * Three decorrelated noise samples rather than a height field and its gradient:
+ * orange peel IS a small random tilt of the surface, so perturbing the normal
+ * directly is both the cheaper and the more faithful model. A height-and-
+ * gradient version would need three extra taps to say the same thing.
+ */
+function makePaintMaterial(src) {
+  const mat = new THREE.MeshPhysicalNodeMaterial({
+    name: src.name || "carPaint",
+    map: src.map ?? null,
+    color: src.color ? src.color.clone() : new THREE.Color(0xffffff),
+    roughness: src.roughness ?? 0.5,
+    metalness: src.metalness ?? 0,
+    clearcoat: CHASSIS_GLB.clearcoat,
+    // Tight, because a lacquer is smoother than the paint beneath it. This is
+    // what makes the coat's highlight read as a separate, sharper lobe sitting
+    // on top of the basecoat's broader one.
+    clearcoatRoughness: 0.06,
+    side: src.side ?? THREE.FrontSide,
+  });
+
+  const amt = CHASSIS_GLB.orangePeel;
+  if (amt > 0) {
+    const p = positionLocal.mul(CHASSIS_GLB.orangePeelScale);
+    const jitter = vec3(
+      mx_noise_float(p),
+      mx_noise_float(p.add(vec3(17.3, 4.1, 29.7))),
+      mx_noise_float(p.add(vec3(51.9, 63.2, 8.5))),
+    ).mul(amt * 0.02);
+    mat.normalNode = transformNormalToView(normalize(normalLocal.add(jitter)));
+  }
+  return mat;
+}
+
 function makeLightMaterial(src, { name, emissive, color, opacity, transparent = true }) {
   const mat = new THREE.MeshStandardNodeMaterial({
     name,
@@ -479,6 +566,11 @@ export async function loadChassisModel(renderer, url = CHASSIS_GLB_URL) {
     if (RE_TAIL_HOUSING.test(tag)) {
       o.material = makeTailHousingMaterial(o.material);
       brakeLights.push(o);
+      continue;
+    }
+
+    if (CHASSIS_GLB.paint && RE_PAINT.test(tag)) {
+      o.material = makePaintMaterial(o.material);
       continue;
     }
 
