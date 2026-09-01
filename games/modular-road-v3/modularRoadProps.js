@@ -47,6 +47,7 @@ import {
   parkourMat,
   enableMeshShadows,
   attachDeckProxy,
+  attachSolidProxy,
   attachWedgeCheekSolids,
   thickWallTubeGeometry,
   thickWallVaultGeometry,
@@ -305,6 +306,142 @@ function addPlateUvs(geo, tile = 6) {
 function buildHazardPlatform() {
   const m = new THREE.Mesh(hazardPlatformGeometry(), hazardPlatformMat());
   m.name = "HazardPlatform";
+  return m;
+}
+
+/**
+ * Drift lot — a closed road slab, not a swept platform piece.
+ *
+ * 200 m square, 0.8 m thick (same `thickness` as the kit roads), feet 8 cm
+ * above y=0 so it sits on v3 terrain without z-fighting the heightfield.
+ * Twelve triangles, FrontSide. The GAME injects the live road material
+ * (`setAsphaltLotMaterial`) so asphalt, wetness, puddles and look knobs are
+ * the same object as the track — not a second shader.
+ *
+ * Road attributes match a kit platform (`aPlain` 1, no lines): uv.x is metres
+ * along Z, uv.y metres across X, aLateral 0 (a 200 m square is not a 16 m
+ * deck — wheel-path bands would be 80 m wide). Ponding is world-space anyway.
+ *
+ * Drive surface is the top only (deck proxy). Solids are the four lips.
+ */
+const ASPHALT_LOT_SIZE = 200;
+const ASPHALT_LOT_THICK = 0.8;
+const ASPHALT_LOT_LIFT = 0.08;
+
+function asphaltLotGeometry() {
+  const hw = ASPHALT_LOT_SIZE / 2;
+  const y0 = ASPHALT_LOT_LIFT;
+  const y1 = ASPHALT_LOT_LIFT + ASPHALT_LOT_THICK;
+  const pos = [];
+  const nrm = [];
+  const uvs = [];
+  const zone = [];
+  const lateral = [];
+  const deckPos = [];
+  const solidPos = [];
+
+  const emit = (p, target) => target.push(p[0], p[1], p[2]);
+  // Same UV contract as a swept deck: x = metres along (−Z → +Z), y = metres
+  // across (−X → +X). Caps use the same along and the vertical as across.
+  const uvOf = (p, nx, ny, nz) => {
+    const along = p[2] + hw;
+    const across = p[0] + hw;
+    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+    if (ay >= ax && ay >= az) return [along, across];
+    if (ax >= az) return [along, p[1]];
+    return [across, p[1]];
+  };
+  const faceNormal = (a, b, c, z) => {
+    const e1x = b[0] - a[0], e1y = b[1] - a[1], e1z = b[2] - a[2];
+    const e2x = c[0] - a[0], e2y = c[1] - a[1], e2z = c[2] - a[2];
+    let nx = e1y * e2z - e1z * e2y;
+    let ny = e1z * e2x - e1x * e2z;
+    let nz = e1x * e2y - e1y * e2x;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    nrm.push(nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    zone.push(z, z, z);
+    lateral.push(0, 0, 0);
+    const ua = uvOf(a, nx, ny, nz);
+    const ub = uvOf(b, nx, ny, nz);
+    const uc = uvOf(c, nx, ny, nz);
+    uvs.push(ua[0], ua[1], ub[0], ub[1], uc[0], uc[1]);
+  };
+  const tri = (a, b, c, target, z) => {
+    emit(a, target); emit(b, target); emit(c, target);
+    if (target === pos) faceNormal(a, b, c, z);
+  };
+  const quad = (a, b, c, d, target, z) => {
+    tri(a, b, c, target, z);
+    tri(a, c, d, target, z);
+  };
+
+  const Tfl = [-hw, y1, hw], Tfr = [hw, y1, hw], Tbr = [hw, y1, -hw], Tbl = [-hw, y1, -hw];
+  const Bfl = [-hw, y0, hw], Bfr = [hw, y0, hw], Bbr = [hw, y0, -hw], Bbl = [-hw, y0, -hw];
+
+  // Deck +Y.
+  quad(Tbl, Tfl, Tfr, Tbr, pos, 1);
+  quad(Tbl, Tfl, Tfr, Tbr, deckPos, 1);
+
+  // Caps, outward winding. The −Z wall must NOT copy the hazard platform's
+  // inner box (that winding faces +Z and FrontSide culled it).
+  quad(Bfl, Bfr, Tfr, Tfl, pos, 0); // +Z → +Z
+  quad(Bbr, Bbl, Tbl, Tbr, pos, 0); // −Z → −Z
+  quad(Bfr, Bbr, Tbr, Tfr, pos, 0); // +X → +X
+  quad(Bbl, Bfl, Tfl, Tbl, pos, 0); // −X → −X
+  quad(Bfl, Bfr, Tfr, Tfl, solidPos, 0);
+  quad(Bbr, Bbl, Tbl, Tbr, solidPos, 0);
+  quad(Bfr, Bbr, Tbr, Tfr, solidPos, 0);
+  quad(Bbl, Bfl, Tfl, Tbl, solidPos, 0);
+
+  // Underside −Y.
+  quad(Bfl, Bbl, Bbr, Bfr, pos, 0);
+
+  const vcount = pos.length / 3;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute("aZone", new THREE.Float32BufferAttribute(zone, 1));
+  geo.setAttribute("aLateral", new THREE.Float32BufferAttribute(lateral, 1));
+  // Platform contract: no centre/edge lines. Curvature 0 — a flat lot is not a
+  // corner, so drainage is the world-space puddle field, not camber gutters.
+  geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(new Float32Array(vcount).fill(1), 1));
+  geo.setAttribute("aCurve", new THREE.Float32BufferAttribute(new Float32Array(vcount), 1));
+  geo.setAttribute("aAlongOffset", new THREE.Float32BufferAttribute(new Float32Array(vcount), 1));
+  geo.computeBoundingSphere();
+  attachDeckProxy(geo, deckPos);
+  return attachSolidProxy(geo, solidPos);
+}
+
+/** Live road material the game owns. Null until `setAsphaltLotMaterial`. */
+let _asphaltLotRoadMaterial = null;
+
+/**
+ * Point every asphalt-lot mesh at the game's road material. Called at boot and
+ * whenever weather rebuilds the shader, so wetness / puddles / look stay one
+ * object with the track.
+ */
+export function setAsphaltLotMaterial(mat) {
+  _asphaltLotRoadMaterial = mat || null;
+}
+
+function asphaltLotFallbackMat() {
+  return new THREE.MeshStandardNodeMaterial({
+    color: 0x6a7078,
+    roughness: 0.92,
+    metalness: 0,
+    side: THREE.FrontSide,
+  });
+}
+
+function buildAsphaltLot() {
+  const m = new THREE.Mesh(asphaltLotGeometry(), _asphaltLotRoadMaterial ?? asphaltLotFallbackMat());
+  m.name = "AsphaltLot";
+  // Ground plane: receive, never cast. A 200 m slab in the shadow map is
+  // self-shadow stripes and four extra draws for a rim nobody sees.
+  m.userData.noCastShadow = true;
+  m.castShadow = false;
   return m;
 }
 
@@ -1967,6 +2104,13 @@ export const PROP_CATALOG = [
     category: "parkour",
     collision: "both",
     make: () => buildHazardPlatform(),
+  },
+  {
+    id: "asphaltlot",
+    label: "Asphalt lot",
+    category: "parkour",
+    collision: "both",
+    make: () => buildAsphaltLot(),
   },
   {
     id: "ramp",

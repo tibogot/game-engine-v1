@@ -123,7 +123,7 @@ import {
 } from "./modularRoadThumbnailCache.js";
 import {
   PropManager, PROP_CATALOG, PROP_BY_ID, glowPropParams, SURFACE_SNAP, SURFACE_SNAP_MODES, DECAL_URL,
-  preloadDiamondPlate, hazardPadMat,
+  preloadDiamondPlate, hazardPadMat, setAsphaltLotMaterial,
 } from "./modularRoadProps.js";
 import {
   MoverPropManager, MOVER_CATALOG, MOVER_BY_ID, preloadWindmillModel,
@@ -145,6 +145,7 @@ import {
   exportTrack,
   importTrack,
   downloadTrackJson,
+  trackDownloadName,
   createTrackFileInput,
 } from "./modularRoadTrackIO.js";
 import { createChaseCamera } from "./chaseCamera.js";
@@ -540,6 +541,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   let roadMaterial = makeRoadMaterial();
+  applyRoadSide(roadMaterial);
+  setAsphaltLotMaterial(roadMaterial);
   const railMaterial = createGuardrailMaterial();
   const shellMaterial = createTunnelMaterial();
   const vaultShellMaterial = createVaultTunnelMaterial();
@@ -1884,10 +1887,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * flipped copy and would leave a ghost of the standing pose.
    *
    * Cones are ~0.93 m (motorway size) and sit well inside the 3 m slab.
-   * Barrels are ~1.5 m. Tyres stay out: black on wet is a lot of triangles
-   * for almost no smear.
+   * Barrels are ~1.5 m. Containers are ~4.9 m — the slab clips the roof and
+   * leaves the bottom in the puddle, which is the part a grazing chase camera
+   * would actually see. Parkour platform (~3.2 m) is almost fully inside the
+   * slab; slope / jump ramps rise ~8 m so only the approach shows, same as
+   * the container. Do not pre-mirror them: a static flipped copy would ghost
+   * the authored pose if anything in this set later moves. Tyres stay out:
+   * black on wet is a lot of triangles for almost no smear.
    */
-  const PLANAR_PROP_IDS = new Set(["cone", "barrel"]);
+  const PLANAR_PROP_IDS = new Set([
+    "cone", "barrel", "container",
+    "hazardplatform", "ramp", "jumpkicker",
+  ]);
   /** Late-bound for the same reason as `_mergedGroupRef`: the builder's
    *  onChange calls the membership pass during construction, before the
    *  instancer exists, and naming a later `const` there is a TDZ throw. */
@@ -1908,8 +1919,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     apply(builder?.root);
 
     // SCENERY + DECK CLUTTER IN THE MIRROR — lamps, boards, floodlights, then
-    // cones and barrels. Emissive heads sell the wet-night smear; orange cones
-    // and steel drums sell the puddle having things IN it.
+    // cones, barrels, containers, parkour platform / slope / jump ramps.
+    // Emissive heads sell the wet-night smear; orange cones, steel drums and
+    // diamond-plate clutter sell things IN the puddle.
     //
     // Cheap for the same reason the props themselves are: the instancer has
     // already collapsed every copy of a type into one InstancedMesh, so a
@@ -1977,6 +1989,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     syncTubeUniforms(tubeMaterial, roadLook);
     syncPreMirrorDepthTol();
     builder.setRoadMaterial(roadMaterial);
+    setAsphaltLotMaterial(roadMaterial);
+    if (props) {
+      for (const inst of props.instances) {
+        if (inst.id !== "asphaltlot") continue;
+        inst.root.traverse((o) => { if (o.isMesh) o.material = roadMaterial; });
+      }
+    }
     if (mergedGroup.visible) { disposeMergedTrack(); buildMergedTrack(); }
     // Only after nothing references it any more.
     prev?.dispose?.();
@@ -2821,7 +2840,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // building against 58 driving. Now both are flat.
   // Ad boards keep a unique poster map per placement — instancing would pin
   // every copy to one image (and hide the live mesh that actually wears it).
-  const propInstancer = new PropInstancer(scene, props, PROP_CATALOG, (id) => id !== "adboard" && id !== "adtotem" && id !== "adprism");
+  // The asphalt lot shares the live road material (wetness / puddles / look),
+  // so it stays a real mesh; one 12-tri pad does not need a batch.
+  const propInstancer = new PropInstancer(scene, props, PROP_CATALOG, (id) => id !== "adboard" && id !== "adtotem" && id !== "adprism" && id !== "asphaltlot");
   _propInstancerRef = propInstancer;
   _propsRef = props;
   // Live glow tuning writes to the loose roots; the templates hold their own
@@ -4236,11 +4257,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   onClick("road-save", () => {
-    // `spawn` is wrapped around the lab's track format rather than folded into
-    // modularRoadTrackIO — keeps that ported module untouched, and old tracks
-    // without a spawn just resolve to the .v3proj start.
-    const track = { ...exportTrack(trackCtx()), spawn: gameSpawn };
-    downloadTrackJson(track, "modular-road-track.json");
+    // `spawn` and `name` wrap the lab's track format rather than folding into
+    // modularRoadTrackIO — keeps that ported module's layout records untouched.
+    const nameEl = document.getElementById("road-track-name");
+    const name = nameEl?.value?.trim() || "";
+    if (nameEl && !name) {
+      nameEl.focus();
+      nameEl.placeholder = "Name this track first";
+      return;
+    }
+    const track = { ...exportTrack(trackCtx()), spawn: gameSpawn, name };
+    downloadTrackJson(track, trackDownloadName(name));
+  });
+  document.getElementById("road-track-name")?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    document.getElementById("road-save")?.click();
+  });
+  document.getElementById("road-track-name")?.addEventListener("input", (e) => {
+    if (e.target.placeholder !== "Track name") e.target.placeholder = "Track name";
   });
 
   // ── PROP SURFACE SNAP ───────────────────────────────────────────────────────
@@ -4307,6 +4342,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     reportTrackLoad(res, "track");
     applyRoadLook();
     gameSpawn = data.spawn ?? null;
+    const nameEl = document.getElementById("road-track-name");
+    if (nameEl) nameEl.value = typeof data.name === "string" ? data.name : "";
     updateSpawnMarker();
     bakeCollision();
     propPhysics.sync();

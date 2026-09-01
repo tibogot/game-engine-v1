@@ -433,6 +433,18 @@ export function downloadTrackJson(track, filename = "modular-road-track.json") {
   URL.revokeObjectURL(url);
 }
 
+/** File name for a track download. Strips characters the OS will not accept. */
+export function trackDownloadName(name) {
+  const cleaned = String(name ?? "")
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "");
+  const base = cleaned || "modular-road-track";
+  return /\.json$/i.test(base) ? base : `${base}.json`;
+}
+
 /**
  * @param {(data: object) => void | Promise<void>} onLoad
  * @returns {HTMLInputElement}

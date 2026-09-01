@@ -605,6 +605,25 @@
       .palette-btn-wide {
         flex: 1 1 100%;
       }
+      .palette-input {
+        box-sizing: border-box;
+        height: 28px;
+        padding: 0 8px;
+        background: var(--bg-input);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 2px;
+        color: #f0f2f6;
+        font-size: 11px;
+        font-family: var(--font-display);
+      }
+      .palette-input::placeholder { color: #8a93a0; }
+      .palette-input:focus {
+        outline: none;
+        border-color: rgba(220, 230, 34, 0.55);
+      }
+      .palette-input-wide {
+        flex: 1 1 100%;
+      }
       .palette-btn-primary {
         background: rgba(220, 230, 34, 0.12);
         border-color: rgba(220, 230, 34, 0.55);
