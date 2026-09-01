@@ -175,6 +175,8 @@ import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
+import { createModularRoadSky } from "./modularRoadSky.js";
+import { createSkyAtmosphere } from "./modularRoadSkyAtmosphere.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
 // imported assets — the source folder itself is not published.
@@ -403,7 +405,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // enough not to swallow a piece of road. `autoAdvance` is false by default, so
   // this is FROZEN — a lap at minute 20 lights the same as a lap at minute 1,
   // which also stops the auto-headlights flicking on mid-race.
-  app.sky?.setTimeOfDay(10.5);
+  // Named because the game-owned sky further down has to start at the SAME hour
+  // to be comparable — two skies at different times of day is not an A/B test.
+  const GAME_TIME_OF_DAY = 10.5;
+  app.sky?.setTimeOfDay(GAME_TIME_OF_DAY);
 
   app.postFx?.setEnabled(true);
   app.postFx?.setBloomSelective(true);
@@ -512,6 +517,84 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     clouds.update(dt, _cloudFrame);
   }
   app.addPreRenderHook?.(updateClouds);
+
+  /* ── GAME-OWNED SKY, SWITCHABLE AGAINST THE ENGINE'S ───────────────────────
+   *
+   * The engine's sky is the EDITOR's sky, and this game wants its own. Rather
+   * than replace it outright, BOTH are kept and switched, because "is the new
+   * one actually better" is a question you should be able to answer by
+   * flipping F8 on the same corner in the same light — not from memory of what
+   * the old one looked like ten minutes ago.
+   *
+   * Wired the additive way the clouds were: nothing below deletes or edits
+   * engine code. With the switch off the cost is exactly ZERO — neither the
+   * dome nor its three atmosphere LUTs are built until you first turn it on,
+   * and the per-frame hook returns on its first line.
+   *
+   * What the switch does NOT change is `scene.environment`, which stays the
+   * engine's sky PMREM. That is deliberate: it keeps the comparison to ONE
+   * variable (what the sky looks like) instead of also relighting the whole
+   * track underneath it. Matching the IBL is the next step, once you have
+   * decided the sky itself is the one you want.
+   */
+  let gameSky = null;   // createModularRoadSky() — built lazily, see setGameSky
+  let gameAtmo = null;  // createSkyAtmosphere()  — ditto
+  let gameSkyOn = false;
+  /** Engine sky meshes we hid, with the visibility each had before we did. */
+  let _engineSkyWas = null;
+
+  /**
+   * The engine adds TWO sky meshes and shows whichever its sky mode selects: a
+   * physical `SkyMesh` and a procedural `DayNightSkyDome`. Measured on this
+   * project the game boots PROCEDURAL, so the dome is the one you actually see
+   * and the SkyMesh is already hidden — which is why this hides whatever is
+   * currently visible and restores exactly that, instead of assuming which of
+   * the two it is and accidentally un-hiding the other on the way back.
+   */
+  function engineSkyMeshes() {
+    return scene.children.filter((c) => c.isSkyMesh || c.name === "DayNightSkyDome");
+  }
+
+  function buildGameSky() {
+    if (gameSky) return;
+    gameAtmo = createSkyAtmosphere({ renderer });
+    // The atmosphere is handed IN rather than added as a second dome, so the
+    // physical sky replaces the authored gradient while keeping the stars, the
+    // moon and the cloud sea that live in the same shader.
+    gameSky = createModularRoadSky({
+      atmosphere: gameAtmo,
+      params: { timeOfDay: GAME_TIME_OF_DAY, autoAdvance: false },
+    });
+    gameSky.mesh.visible = false;
+    scene.add(gameSky.mesh);
+  }
+
+  function setGameSky(on) {
+    on = !!on;
+    if (on === gameSkyOn && (!on || gameSky)) return;
+    gameSkyOn = on;
+    if (on) {
+      buildGameSky();
+      _engineSkyWas = engineSkyMeshes().map((m) => ({ mesh: m, was: m.visible }));
+      for (const e of _engineSkyWas) e.mesh.visible = false;
+      gameSky.mesh.visible = true;
+    } else {
+      if (gameSky) gameSky.mesh.visible = false;
+      for (const e of _engineSkyWas ?? []) e.mesh.visible = e.was;
+      _engineSkyWas = null;
+    }
+  }
+
+  function updateGameSky(dt) {
+    if (!gameSkyOn || !gameSky) return;
+    const look = gameSky.update({ camera, dt });
+    // The atmosphere wants the camera ALTITUDE as well as the sun: half the
+    // point of a physical sky is that it changes as you climb. It re-bakes only
+    // when the sun or the height actually moved, so a frozen time of day costs
+    // nothing per frame.
+    gameAtmo.update(look.sunDir, Math.max(0, camera.position.y), look.moonDir);
+  }
+  app.addPreRenderHook?.(updateGameSky);
 
   // 3) ── THE TRACK ──────────────────────────────────────────────────────────
   onStatus("Building track…");
@@ -3970,6 +4053,19 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
     if (code === "keyb") { toggleMode(); return; }
 
+    // SKY A/B — ABOVE the mode split, because comparing two skies is something
+    // you do while building as much as while driving, and the drive-only branch
+    // below would have made the key silently dead in the editor.
+    //
+    // A function key rather than a letter for two reasons: every letter worth
+    // having is already a drive or builder key, and F8 is the same PHYSICAL key
+    // on AZERTY as on QWERTY — a letter would not have been.
+    if (code === "f8") {
+      setGameSky(!gameSkyOn);
+      devPanel?.refresh();
+      return;
+    }
+
     if (mode === "drive") {
       if (code === "keyr") respawn();
       // DEBUG ORBIT CAM. Recentre used to be X — that is air-roll now, so
@@ -5768,7 +5864,21 @@ ${e.message}`);
       // to recompute the sun's astronomical position.
       getLightState: () => app.light?.state ?? null,
       getSkyState: () => app.sky?.state ?? null,
-      setTimeOfDay: (t) => app.sky?.setTimeOfDay(t),
+      setTimeOfDay: (t) => {
+        app.sky?.setTimeOfDay(t);
+        // Keep the game sky on the same clock, so flipping the A/B compares the
+        // two skies rather than two different hours.
+        gameSky?.setTimeOfDay(t);
+      },
+      // ── Game-owned sky A/B (F8) ─────────────────────────────────────────
+      getGameSky: () => gameSkyOn,
+      setGameSky,
+      /** null until the sky has been switched on once — it is built lazily. */
+      getGameSkyParams: () => gameSky?.params ?? null,
+      /** 0 = authored gradient, 1 = physical atmosphere. A crossfade, not a switch. */
+      getAtmosphereMix: () => gameSky?.getAtmosphereMix() ?? 1,
+      setAtmosphereMix: (x) => gameSky?.setAtmosphereMix(x),
+      setGameSkyTime: (t) => gameSky?.setTimeOfDay(t),
       getChassisFit: () => CHASSIS_GLB,
       applyChassisFit: () => {
         applyChassisGlbTransform(chassisGlbObject);

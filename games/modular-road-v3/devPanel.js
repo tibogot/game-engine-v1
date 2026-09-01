@@ -1759,6 +1759,40 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>  <!-- /Lights. THIS CLOSE WAS MISSING: without it Weather, Bloom, Audio and FX were children of Lights, so collapsing Lights hid all four. -->
 
       <div class="inspector-section">
+        <div class="section-header">Sky</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            The game's own sky, kept side by side with the engine's so you can
+            judge it. <b>F8</b> flips between them — same corner, same light, so
+            the difference is the sky and nothing else. It is built the first
+            time you switch it on and costs nothing until then.
+            <b>Lighting does not change</b> with the switch: the track is still
+            lit by the engine sky's environment map, on purpose, so only one
+            thing differs at a time.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Game sky (F8)</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-gamesky" type="button" aria-label="Game sky">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Atmosphere</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sky-atmo" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-sky-atmo-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            0 is the authored gradient, 1 is the physically-modelled atmosphere
+            (Rayleigh, Mie and ozone through three LUTs). It is a crossfade, not
+            a switch, so you can see which parts of the physical model you
+            actually want. Stars, moon and cloud sea ride on both.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Weather</div>
         <div class="section-body">
           <div class="prop-row">
@@ -2730,6 +2764,7 @@ export function createRoadDevPanel({ app, game, params }) {
     "Tyre marks": "🛞", Sparks: "✨", "Drift smoke": "💨",
     "Smoke lighting": "🔦", "Smoke shape": "🌫️", "Lingering bank": "🏳️",
     "Wet spray": "💦", "Terrain texture": "🧱",
+    Sky: "🌌",
   };
   for (const hdr of root.querySelectorAll(".section-header")) {
     const key = hdr.dataset.foldKey || hdr.textContent.trim();
@@ -3454,6 +3489,20 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-glb-lamp", CHASSIS_GLB_LIGHTS, "headlampIntensity", (v) => v.toFixed(2));
   slider("dv-beam", HEADLIGHTS, "intensity", (v) => v.toFixed(0), () => game.refreshLights());
 
+  // ── Sky (game-owned, A/B against the engine's) ──────────────────────────────
+  // The sky is built lazily on first switch-on, so `game.setAtmosphereMix` is a
+  // no-op until then. The mix therefore lives HERE, in a small holder, and is
+  // pushed into the sky each time it is switched on — otherwise moving the
+  // slider before ever pressing F8 would silently lose the value.
+  const skyAB = { mix: game.getAtmosphereMix?.() ?? 1 };
+  const gameSkyToggle = toggle("dv-gamesky", game.getGameSky?.() ?? false, (on) => {
+    game.setGameSky?.(on);
+    if (on) game.setAtmosphereMix?.(skyAB.mix);
+  });
+  slider("dv-sky-atmo", skyAB, "mix",
+    (v) => (v <= 0 ? "gradient" : v >= 1 ? "physical" : v.toFixed(2)),
+    (v) => game.setAtmosphereMix?.(v));
+
   // ── Weather ─────────────────────────────────────────────────────────────────
   // `wetAmount` at 0 is not merely invisible, it decides which MATERIAL the road
   // is built from (see setWet in roadGame): crossing 0 swaps a plain Standard
@@ -3976,6 +4025,8 @@ export function createRoadDevPanel({ app, game, params }) {
     lightsToggle.set(game.getHeadlights());
     // Ditto the arc: solving a landing switches it on behind the panel's back.
     gapToggle.set(game.getGapPreview());
+    // F8 flips the sky from outside the panel.
+    gameSkyToggle.set(game.getGameSky?.() ?? false);
     autoToggle.set(game.getAutoHeadlights?.() ?? true);
     // The wheel and chassis GLBs finish loading after the panel is built and
     // call refresh().
