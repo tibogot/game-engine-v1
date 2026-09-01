@@ -40,7 +40,7 @@ import * as THREE from "three/webgpu";
 import {
   float, vec2, vec3, vec4, Fn, If, Loop, uniform, uv, texture,
   normalize, dot, max, min, mix, clamp, exp, sqrt, pow, abs, sign, acos, atan, cos, sin,
-  saturate, smoothstep,
+  saturate, smoothstep, screenCoordinate, interleavedGradientNoise,
 } from "three/tsl";
 
 /** Metres. Earth-like: 6360 km ground, 100 km of atmosphere. */
@@ -86,6 +86,23 @@ export const ATMOSPHERE_DEFAULTS = {
   /** Extra gain on the sun disc only. The disc is orders of magnitude brighter than the
    *  sky around it, so it wants its own dial rather than riding sunIntensity alone. */
   sunDiscBrightness: 60.0,
+
+  /** Moon irradiance as a fraction of the sun's. The real ratio is ~1/400000, which is far
+   *  too dark once tone-mapped; this is the "cinematic night" dial, not a physical one. */
+  moonIntensity: 0.0016,
+  /** Moonlight colour — cool, because moonlight is sunlight off a grey rock and the eye
+   *  reads dim scenes as blue (Purkinje). */
+  moonColor: [0.62, 0.72, 1.0],
+  /** Airglow: the faint light a MOONLESS night sky still has. Without it a new moon gives a
+   *  pure black void, which reads as "the renderer broke" rather than as night. */
+  airglow: [0.00035, 0.00060, 0.00110],
+  /** Sub-LSB dither amplitude, linear. Roughly 1/255 in display terms — enough to break
+   *  8-bit and LUT banding, small enough to be invisible as noise. */
+  dither: 0.0025,
+  /** Multiplier on aerial-perspective strength. 1 = physically as computed. Games almost
+   *  always want MORE than physical at short range, because a 2 km world has to read as a
+   *  landscape; this is that exaggeration dial. */
+  aerialScale: 1.0,
 };
 
 /** March step counts. Only ever run inside a LUT bake, never per sky pixel. */
@@ -126,6 +143,12 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
    *  climb — a gradient sky cannot do it at all. */
   const uViewHeight = uniform(0);
   const uSunDiscBrightness = uniform(P.sunDiscBrightness);
+  const uMoonDir = uniform(new THREE.Vector3(0, 1, 0));
+  const uMoonIntensity = uniform(P.moonIntensity);
+  const uMoonColor = uniform(new THREE.Vector3(...P.moonColor));
+  const uAirglow = uniform(new THREE.Vector3(...P.airglow));
+  const uDither = uniform(P.dither);
+  const uAerialScale = uniform(P.aerialScale);
 
   // ── Medium ─────────────────────────────────────────────────────────────────────────
 
@@ -379,6 +402,7 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
     const acc = vec3(0.0).toVar();
     const pR = phaseRayleigh(cosTheta);
     const pM = phaseMie(cosTheta);
+    const cosThetaMoon = dot(dir, uMoonDir);
 
     Loop(SKYVIEW_STEPS, ({ i }) => {
       const t = dt.mul(float(i).add(0.5));
@@ -401,7 +425,18 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
       // Every higher order, from the LUT. Isotropic, so no phase term.
       const multi = sR.add(sM).mul(sampleMs(hh, muS));
 
-      acc.addAssign(throughput.mul(single.add(multi)).mul(dt));
+      // MOONLIGHT — the same scattering maths with a second, much dimmer light. This is
+      // why a moonlit night sky is BLUE rather than grey: it is sunlight off a rock,
+      // Rayleigh-scattered by the same air. Doing it here rather than tinting the result
+      // means the moon lights the sky from its own direction, so the sky brightens on the
+      // moon's side and the terminator behaves.
+      const moonT = hitsGround(rr, dot(up, uMoonDir)).select(float(0.0), float(1.0))
+        .mul(sampleTransmittance(hh, dot(up, uMoonDir)).x);
+      const moonPhase = phaseRayleigh(cosThetaMoon);
+      const moonLit = sR.mul(moonPhase).add(sM.mul(phaseMie(cosThetaMoon)))
+        .mul(moonT).mul(uMoonColor).mul(uMoonIntensity);
+
+      acc.addAssign(throughput.mul(single.add(multi).add(moonLit)).mul(dt));
       throughput.mulAssign(stepT);
     });
 
@@ -420,7 +455,11 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
       acc.addAssign(throughput.mul(sunT).mul(lambert));
     });
 
-    return vec4(acc.mul(uSunIntensity), 1.0);
+    // Airglow floor: brighter toward the horizon, where the line of sight passes through
+    // far more of the emitting layer. Added after the sun scaling so it is an absolute
+    // floor rather than something that scales away with the sun.
+    const horizonBoost = float(1.0).add(saturate(dir.y.abs().oneMinus()).mul(1.6));
+    return vec4(acc.mul(uSunIntensity).add(uAirglow.mul(horizonBoost)), 1.0);
   });
 
   // ── Materials ──────────────────────────────────────────────────────────────────────
@@ -445,7 +484,21 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
    */
   const skyRadiance = Fn(([dir]) => {
     const r = float(RG).add(uViewHeight);
-    return skyTex.sample(skyViewUv(normalize(dir), r)).rgb;
+    const c = skyTex.sample(skyViewUv(normalize(dir), r)).rgb;
+
+    // DITHER. A sky is the worst case for banding: an enormous, almost perfectly smooth
+    // gradient, reconstructed from a 192x108 LUT and then quantised to 8 bits on the way
+    // out. Both stages band, and the eye is far more sensitive to a straight contour on a
+    // flat gradient than to noise of the same amplitude. Sub-LSB triangular dither breaks
+    // the contours into noise below the threshold of vision. The reference WebGPU
+    // implementation calls this out as required, not optional, for LUT-based skies.
+    //
+    // Triangular (two noise samples differenced) rather than uniform: it has no DC bias, so
+    // it cannot shift the colour, only its quantisation.
+    const n1 = interleavedGradientNoise(screenCoordinate.xy);
+    const n2 = interleavedGradientNoise(screenCoordinate.xy.add(vec2(11.0, 7.0)));
+    const tri = n1.sub(n2).mul(uDither);
+    return c.add(tri);
   });
 
   /** Transmittance from the viewer to space toward `dir` — use it to tint the sun disc. */
@@ -483,6 +536,47 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
   /** Sky plus sun — what a dome material normally wants. */
   const skyWithSun = Fn(([dir]) => skyRadiance(dir).add(sunDisc(dir)));
 
+  /**
+   * AERIAL PERSPECTIVE — the haze between the camera and a piece of scene geometry.
+   *
+   * This is the thing that makes distant ground read as distant instead of as flat paint,
+   * and it is the single biggest realism win for a camera that spends its time NEAR THE
+   * GROUND looking along the world.
+   *
+   * Deliberately ANALYTIC rather than Hillaire's froxel LUT. The froxel volume exists to
+   * handle large altitude ranges and tens of kilometres, where the air density along the
+   * view ray changes a lot. This world is ~2 km across and the camera is near the ground,
+   * so density barely varies along any sightline — a single-altitude closed form is within
+   * noise of the volume, costs no 3D texture, no extra bake, and no per-frame revalidation.
+   * If the view distance ever grows to mountain scale, THAT is when the froxel LUT earns
+   * its keep.
+   *
+   * The in-scatter colour is the SKY RADIANCE IN THE SAME DIRECTION. That is not a
+   * shortcut, it is the point: haze is the sky seen through a shorter column, so taking its
+   * colour from the sky LUT means the haze matches the sky automatically — warm toward a
+   * setting sun, blue at noon, dim blue under moonlight — with nothing to keep in sync.
+   *
+   * @returns vec4( inScatteredColour.rgb, transmittance )
+   */
+  const aerialPerspective = Fn(([dir, dist]) => {
+    const d = normalize(dir);
+    const h = uViewHeight;
+    // Grey extinction: colour comes from the in-scatter term, and a per-channel extinction
+    // here would double-count the wavelength dependence already in the sky LUT.
+    const ext = extinctionAt(h);
+    const t = exp(ext.mul(dist.mul(uAerialScale)).negate());
+    const inScatter = skyRadiance(d).mul(vec3(1.0).sub(t));
+    // One transmittance for the geometry to be attenuated by; use the green channel as the
+    // luminance-weighted representative so the surface dims neutrally.
+    return vec4(inScatter, t.y);
+  });
+
+  /** Apply aerial perspective to an already-shaded scene colour. */
+  const applyAerialPerspective = Fn(([sceneColor, dir, dist]) => {
+    const ap = aerialPerspective(dir, dist);
+    return sceneColor.mul(ap.w).add(ap.xyz);
+  });
+
   // ── Bake orchestration ─────────────────────────────────────────────────────────────
   // Order matters: MS reads transmittance, sky-view reads both.
   let _needStatic = true;   // transmittance + multi-scatter
@@ -516,8 +610,16 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
    * @param {THREE.Vector3} sunDir  normalised, world space
    * @param {number} viewHeight     camera altitude above sea level, metres
    */
-  function update(sunDir, viewHeight = 0) {
+  function update(sunDir, viewHeight = 0, moonDir = null) {
     uSunDir.value.copy(sunDir).normalize();
+    if (moonDir) {
+      // The moon moves the sky, so it belongs in the re-bake key alongside the sun.
+      const md = uMoonDir.value;
+      if (Math.abs(md.x - moonDir.x) + Math.abs(md.y - moonDir.y) + Math.abs(md.z - moonDir.z) > 1e-3) {
+        md.copy(moonDir).normalize();
+        _needSky = true;
+      }
+    }
     // Only re-bake the sky-view LUT when the sun or the altitude actually moved enough
     // to matter — a bake per frame would throw away the reason the LUT exists.
     const key = `${sunDir.x.toFixed(4)},${sunDir.y.toFixed(4)},${sunDir.z.toFixed(4)}`;
@@ -547,6 +649,11 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
     uSunIntensity.value = P.sunIntensity;
     uGroundAlbedo.value = P.groundAlbedo;
     uSunDiscBrightness.value = P.sunDiscBrightness;
+    uMoonIntensity.value = P.moonIntensity;
+    uMoonColor.value.set(...P.moonColor);
+    uAirglow.value.set(...P.airglow);
+    uDither.value = P.dither;
+    uAerialScale.value = P.aerialScale;
     _needStatic = true;
   }
 
@@ -561,12 +668,14 @@ export function createSkyAtmosphere({ renderer, params = {} }) {
     skyRadiance,
     skyWithSun,
     sunDisc,
+    aerialPerspective,
+    applyAerialPerspective,
     sunDiscTransmittance,
     update,
     syncParams,
     bake,
     dispose,
-    uniforms: { uSunDir, uViewHeight, uSunIntensity },
+    uniforms: { uSunDir, uMoonDir, uViewHeight, uSunIntensity, uMoonIntensity },
     _debug: { transRT, msRT, skyRT },
   };
 }

@@ -325,7 +325,13 @@ export function skyColorsAt(camY, P = SKY_DEFAULTS) {
   };
 }
 
-export function createModularRoadSky({ params } = {}) {
+/**
+ * @param {object} [opts]
+ * @param {object} [opts.params]
+ * @param {object} [opts.atmosphere] optional `createSkyAtmosphere()` — when supplied, the
+ *   authored gradient can be crossfaded to a physically-modelled sky (see setAtmosphereMix).
+ */
+export function createModularRoadSky({ params, atmosphere } = {}) {
   const P = { ...SKY_DEFAULTS, ...params };
 
   const uCamY = uniform(40);
@@ -343,6 +349,8 @@ export function createModularRoadSky({ params } = {}) {
   const uSunDiscScale = uniform(P.sunDiscScale);
   const uMoonCos = uniform(Math.cos((P.moonSizeDeg * DEG) / 2));
   const uMoonDiscBright = uniform(P.moonDiscBright);
+  /** 0 = authored gradient, 1 = physical atmosphere. See setAtmosphereMix. */
+  const uAtmoMix = uniform(0);
 
   const uZenithBelow = uniform(new THREE.Color());
   const uHorizonBelow = uniform(new THREE.Color());
@@ -442,6 +450,21 @@ export function createModularRoadSky({ params } = {}) {
     const belowH = smoothstep(float(0.04), float(-0.85), up);
     col.assign(mix(col, nadir, pow(belowH, uNadirPow)));
 
+    // PHYSICAL ATMOSPHERE — swapped in for the AUTHORED GRADIENT ONLY.
+    //
+    // Everything below this point (stars, moon, cloud sea) still runs, which is the whole
+    // reason the swap happens here rather than by replacing the dome: a physical
+    // atmosphere is correctly black once the sun is down, so a dome that replaced the
+    // entire sky would throw away the night sky along with the gradient. The model
+    // supplies the daylight; the authored layer keeps everything the model does not
+    // pretend to simulate.
+    //
+    // Crossfaded rather than switched so the authored look can still be dialled back in as
+    // a grade when a scene wants a specific mood the physics will not give you.
+    if (atmosphere) {
+      col.assign(mix(col, atmosphere.skyRadiance(dir), uAtmoMix));
+    }
+
     const tHit = uCloudTop.sub(uCamY).div(min(up, float(-0.001)));
     const hitXZ = vec2(dir.x, dir.z).mul(tHit);
     const n1 = vnoise2(hitXZ.mul(uCloudSeaScale));
@@ -515,6 +538,7 @@ export function createModularRoadSky({ params } = {}) {
     uSunDiscScale.value = P.sunDiscScale;
     uMoonCos.value = Math.cos((P.moonSizeDeg * DEG) / 2);
     uMoonDiscBright.value = P.moonDiscBright;
+    uAtmoMix.value = P.atmosphereMix ?? uAtmoMix.value;
     uZenithBelow.value.copy(look.zenithBelow);
     uHorizonBelow.value.copy(look.horizonBelow);
     uNadirBelow.value.copy(look.nadirBelow);
@@ -575,6 +599,10 @@ export function createModularRoadSky({ params } = {}) {
     update,
     setTimeOfDay,
     setSunDiscScale,
+    /** 0 = authored gradient, 1 = physical atmosphere. Crossfade, not a switch. */
+    setAtmosphereMix: (x) => { uAtmoMix.value = Math.max(0, Math.min(1, x)); },
+    getAtmosphereMix: () => uAtmoMix.value,
+    hasAtmosphere: !!atmosphere,
     getLook: () => _lastLook,
     getColors: (camY) => skyColorsAt(camY ?? uCamY.value, P),
     dispose,

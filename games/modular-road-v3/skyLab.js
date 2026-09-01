@@ -6,7 +6,7 @@
  * decide the look include "through the deck" and "does the road reflect it".
  */
 import * as THREE from "three/webgpu";
-import { Fn as TSL_Fn, positionWorld as positionWorldTSL } from "three/tsl";
+import { Fn as TSL_Fn, positionWorld as positionWorldTSL, cameraPosition as cameraPositionTSL, output as outputTSL, vec4 as vec4TSL } from "three/tsl";
 import {
   createModularRoadSky,
   SKY_DEFAULTS,
@@ -116,36 +116,40 @@ export async function startSkyLab() {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 8192);
 
-  const sky = createModularRoadSky();
+  // The atmosphere is handed to the sky so it can replace the authored GRADIENT while
+  // keeping stars, moon and cloud sea — a separate dome would have lost the night sky.
+  const atmo = createSkyAtmosphere({ renderer });
+  const sky = createModularRoadSky({ atmosphere: atmo });
   scene.add(sky.mesh);
 
-  // ── PHYSICAL ATMOSPHERE (A/B against the authored sky above) ───────────────────────
-  // Its own dome on the same geometry, drawn instead of the authored one when enabled.
-  // Kept as a straight swap so the two can be compared on identical frames — the whole
-  // question is whether the physical model actually looks better, and the only honest way
-  // to answer that is to flip between them without anything else changing.
-  const atmo = createSkyAtmosphere({ renderer });
-  const atmoMat = new THREE.MeshBasicNodeMaterial();
-  atmoMat.side = THREE.BackSide;
-  atmoMat.depthWrite = false;
-  atmoMat.fog = false;
-  atmoMat.colorNode = TSL_Fn(() => atmo.skyWithSun(positionWorldTSL))();
-  const atmoDome = new THREE.Mesh(sky.mesh.geometry, atmoMat);
-  atmoDome.frustumCulled = false;
-  atmoDome.visible = false;
-  scene.add(atmoDome);
-
-  let usePhysicalSky = false;
+  let usePhysicalSky = true;
   function setPhysicalSky(on) {
     usePhysicalSky = !!on;
-    atmoDome.visible = usePhysicalSky;
-    sky.mesh.visible = !usePhysicalSky;
+    sky.setAtmosphereMix(usePhysicalSky ? 1 : 0);
     const b = document.getElementById("b-atmo");
     if (b) {
       b.textContent = usePhysicalSky ? "Sky: physical" : "Sky: authored";
       b.classList.toggle("on", usePhysicalSky);
     }
   }
+  setPhysicalSky(true);
+
+  // ── AERIAL PERSPECTIVE ─────────────────────────────────────────────────────────────
+  // Applied as the SCENE FOG NODE, so every material picks it up without per-material
+  // edits. `setupFog` assigns the shaded colour to TSL's `output` before swapping in this
+  // node, which is how the haze gets something to attenuate.
+  //
+  // Note this sidesteps a known three-WebGPU trap: scene fog uniforms are not reliably
+  // refreshed on static geometry that never moves. The haze colour here comes from the
+  // sky-view LUT — a TEXTURE, re-baked when the sun moves — rather than from a uniform, so
+  // it tracks time of day even on geometry that never updates.
+  scene.fogNode = TSL_Fn(() => {
+    const toCam = positionWorldTSL.sub(cameraPositionTSL);
+    return vec4TSL(
+      atmo.applyAerialPerspective(outputTSL.rgb, toCam.normalize(), toCam.length()),
+      outputTSL.a,
+    );
+  })();
   const P = sky.params;
 
   const hemi = new THREE.HemisphereLight(0x8eb0d0, 0x7ea8c4, 0.45);
@@ -543,8 +547,7 @@ export async function startSkyLab() {
     const look = sky.update({ camera, dt });
     // The atmosphere needs the sun and the camera ALTITUDE — the altitude is half the
     // point, since the sky genuinely changes as you climb toward and above the deck.
-    atmoDome.position.copy(sky.mesh.position);
-    atmo.update(look.sunDir, Math.max(0, camera.position.y));
+    atmo.update(look.sunDir, Math.max(0, camera.position.y), look.moonDir);
     syncLights(look);
     syncClouds(dt, look);
     tickEnvBake(look);
@@ -590,8 +593,14 @@ export async function startSkyLab() {
     }
   });
 
+  /** Aim the free-fly camera along a world direction (for scripted captures). */
+  function lookAlong(x, y, z) {
+    cam.yaw = Math.atan2(x, z);
+    cam.pitch = Math.atan2(y, Math.hypot(x, z));
+  }
+
   window.__skyLab = {
-    atmo, setPhysicalSky, get physical() { return usePhysicalSky; },
+    atmo, setPhysicalSky, get physical() { return usePhysicalSky; }, cam, lookAlong,
     sky, clouds, camera, renderer, scene, applyView, setPreset, params: P, VIEWPOINTS, THREE,
   };
   return window.__skyLab;
