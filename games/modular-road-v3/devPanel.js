@@ -1867,6 +1867,13 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Reflection smear</span>
+            <div class="prop-value">
+              <input type="range" id="dv-reflect-smear" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-reflect-smear-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Max error (m)</span>
             <div class="prop-value">
               <input type="range" id="dv-reflect-flat" min="0.05" max="4" step="0.05" />
@@ -3219,6 +3226,12 @@ export function createRoadDevPanel({ app, game, params }) {
   if (weather.reflectBlur === undefined) weather.reflectBlur = game.getReflectBlur?.() ?? 3.2;
   slider("dv-reflect-blur", weather, "reflectBlur", (v) => v.toFixed(1),
     (v) => game.setReflectBlur?.(v));
+  // How far the reflection is drawn out VERTICALLY, which is what separates a
+  // wet road from a merely blurry one. Scaled per fragment by coat roughness,
+  // so puddles stay crisp while the damp film between them streaks.
+  if (weather.reflectStretch === undefined) weather.reflectStretch = game.getReflectStretch?.() ?? 0.25;
+  slider("dv-reflect-smear", weather, "reflectStretch", (v) => v.toFixed(2),
+    (v) => game.setReflectStretch?.(v));
   // The two knobs that decide where a planar mirror is allowed to be believed.
   // "Max error" is the one for banks, crests and dips: metres of reflection
   // displacement tolerated before the reflection fades. Turn it DOWN if

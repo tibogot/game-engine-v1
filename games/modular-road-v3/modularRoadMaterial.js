@@ -427,6 +427,7 @@ export function createRoadMaterial(opts = {}) {
     reflectFresnel: uniform(opts.reflectFresnel ?? WET_DEFAULTS.reflectFresnel),
     reflectDistort: uniform(opts.reflectDistort ?? WET_DEFAULTS.reflectDistort),
     reflectBlur: uniform(opts.reflectBlur ?? WET_DEFAULTS.reflectBlur),
+    reflectStretch: uniform(opts.reflectStretch ?? WET_DEFAULTS.reflectStretch),
     reflectFade: uniform(opts.reflectFade ?? WET_DEFAULTS.reflectFade),
     reflectPlaneTol: uniform(opts.reflectPlaneTol ?? WET_DEFAULTS.reflectPlaneTol),
     reflectErrTol: uniform(opts.reflectErrTol ?? WET_DEFAULTS.reflectErrTol),
@@ -783,6 +784,34 @@ export function createRoadMaterial(opts = {}) {
     : float(0);
 
   /**
+   * THE VERTICAL SMEAR, which is what a wet road actually does to a reflection.
+   *
+   * A rough mirror does not blur its reflection evenly. On a near-horizontal
+   * surface viewed at a grazing angle — which is every road, from every chase
+   * camera — a small perturbation of the surface normal swings the reflected ray
+   * a long way VERTICALLY and hardly at all across. That is why reflections on
+   * wet tarmac are drawn out into vertical streaks rather than softened into
+   * discs, and it is the difference between "blurry" and "wet".
+   *
+   * Three taps along the screen vertical, weighted 1:2:1. Offsets scale with
+   * `coatRough`, so the same rule as the mip blur applies for free: standing
+   * water is near-flat and barely smears, damp film smears a lot.
+   *
+   * Three rather than more because this runs on every wet road pixel and the
+   * road is the biggest thing on screen. The mip blur is still doing the
+   * isotropic half of the job underneath, so these taps only have to supply the
+   * DIRECTION, not the whole softness.
+   */
+  const smearTap = (texNode, uvNode) => {
+    if (!wet) return texNode.sample(uvNode);
+    const dy = wet.coatRough.mul(u.reflectStretch);
+    const a = texNode.sample(uvNode.add(vec2(0, dy.negate())));
+    const b = texNode.sample(uvNode);
+    const c = texNode.sample(uvNode.add(vec2(0, dy)));
+    return a.add(b.mul(2)).add(c).mul(0.25);
+  };
+
+  /**
    * Paint-line coverage (0..1). Shared by albedo and the optional bloom write —
    * one node instance, one evaluation per fragment when both paths reference it.
    */
@@ -1093,7 +1122,7 @@ export function createRoadMaterial(opts = {}) {
       // BIAS rather than an absolute level, so the hardware's own
       // derivative-based LOD still runs underneath and this only adds roughness
       // on top of it.
-      const col = reflectTex.blur(reflectBlurAmount).sample(reflUv);
+      const col = smearTap(reflectTex.blur(reflectBlurAmount), reflUv);
 
       // Fresnel. Same shape as the glass pane above: near-nothing looking
       // straight down, near-total at the grazing angle a chase camera lives at.
@@ -1227,7 +1256,7 @@ export function createRoadMaterial(opts = {}) {
       // read as stair-stepped blocks. Sharpness here is free and correct; the
       // roughness softening this reflection wants comes from `coatWobble`
       // displacing the sample, not from throwing resolution away.
-      const col = mirrorTex.sample(uvSample);
+      const col = smearTap(mirrorTex, uvSample);
 
       let occlude = float(1);
       if (mirrorDepthTex) {

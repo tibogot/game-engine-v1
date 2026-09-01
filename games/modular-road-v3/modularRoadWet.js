@@ -375,6 +375,18 @@ export const WET_DEFAULTS = {
    */
   reflectBlur: 3.2,
   /**
+   * Vertical smear of the reflection, in screen-uv per unit coat roughness.
+   *
+   * A wet road stretches reflections ALONG the view direction rather than
+   * blurring them evenly — at a grazing angle a small normal perturbation
+   * swings the reflected ray far vertically and barely across. 0.25 puts the
+   * damp film at about 0.025 uv of smear and a puddle at 0.003, so standing
+   * water still mirrors cleanly. Zero collapses it to a plain vertical average
+   * of three identical taps, i.e. the previous look at three times the cost —
+   * turn the taps off in code if you want it truly gone.
+   */
+  reflectStretch: 0.25,
+  /**
    * How much of the wet treatment the KERB gets, relative to the deck.
    *
    * Below 1 because a painted kerb is not asphalt: paint is close to
@@ -441,7 +453,7 @@ export const WET_NUMBERS = [
   "wetDrainStart", "wetCamber", "wetBank", "wetCurveRef", "wetDrainStrength",
   "wetSlopeMin", "wetSlopeMax", "wetWheelClear",
   "rippleAmp", "rippleScale", "rippleSpeed", "rippleStretch", "rippleDamp",
-  "reflectStrength", "reflectFresnel", "reflectDistort", "reflectBlur", "reflectFade",
+  "reflectStrength", "reflectFresnel", "reflectDistort", "reflectBlur", "reflectStretch", "reflectFade",
   "reflectPlaneTol", "reflectErrTol",
   "railReflect", "railDepthTol", "railDepthSoft",
   "kerbWet",

@@ -5846,6 +5846,12 @@ ${e.message}`);
         roadMaterial._roadUniforms.reflectBlur.value = n;
       },
       getReflectBlur: () => roadMaterial._roadUniforms.reflectBlur.value,
+      setReflectStretch: (v) => {
+        const n = Math.max(0, Math.min(1, v || 0));
+        roadLook.reflectStretch = n;
+        roadMaterial._roadUniforms.reflectStretch.value = n;
+      },
+      getReflectStretch: () => roadMaterial._roadUniforms.reflectStretch.value,
       // ── Rain on the lens ─────────────────────────────────────────────────
       setRain: setRainEnabled,
       getRain: () => rainEnabled,
