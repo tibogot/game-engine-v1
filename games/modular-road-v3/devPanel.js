@@ -2052,7 +2052,7 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
-        <div class="section-header">FX</div>
+        <div class="section-header">FX — Tyre marks</div>
         <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Tire marks</span>
@@ -2066,18 +2066,28 @@ export function createRoadDevPanel({ app, game, params }) {
               <button class="action-btn" id="dv-skid-style" type="button">Solid</button>
             </div>
           </div>
-          <div class="prop-row">
-            <span class="prop-label">Drift smoke</span>
-            <div class="prop-value">
-              <button class="prop-toggle checked" id="dv-smoke" type="button" aria-label="Drift smoke">${CHECK_SVG}</button>
-            </div>
-          </div>
+        </div>
+      </div>
+
+      <!-- Not an FX control at all: this is the TERRAIN texture's stochastic
+           tiling (the terrain_stochastic key; reloads the page). It has always lived
+           in FX. Left here rather than moved to World so no one's muscle memory
+           breaks, but named so the filter finds it. -->
+      <div class="inspector-section">
+        <div class="section-header">FX — Terrain texture</div>
+        <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Stochastic tiling</span>
             <div class="prop-value">
               <button class="action-btn" id="dv-stoch" type="button">Off</button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">FX — Sparks</div>
+        <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Guardrail sparks</span>
             <div class="prop-value">
@@ -2103,6 +2113,20 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-spk-str" min="0" max="0.2" step="0.005" />
               <span class="prop-num" id="dv-spk-str-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">FX — Drift smoke</div>
+        <div class="section-body">
+          <!-- The enable toggle was six rows above its own settings, on the far
+               side of the sparks block. Moved down to lead the group it owns. -->
+          <div class="prop-row">
+            <span class="prop-label">Drift smoke</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-smoke" type="button" aria-label="Drift smoke">${CHECK_SVG}</button>
             </div>
           </div>
           <div class="prop-row">
@@ -2147,6 +2171,12 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-smk-buoy-v"></span>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">FX — Smoke lighting</div>
+        <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Sun shading</span>
             <div class="prop-value">
@@ -2175,6 +2205,12 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-smk-abs-v"></span>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">FX — Smoke shape</div>
+        <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Puff detail</span>
             <div class="prop-value">
@@ -2224,6 +2260,12 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-smk-fscale-v"></span>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">FX — Lingering bank</div>
+        <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Lingering bank</span>
             <div class="prop-value">
@@ -2273,6 +2315,12 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
 
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">FX — Wet spray</div>
+        <div class="section-body">
           <div class="dv-hint">
             <b>Wet spray</b> is the same puff system wearing a different coat —
             these values are blended in by road wetness, so a dry track never
@@ -2579,7 +2627,7 @@ export function createRoadDevPanel({ app, game, params }) {
   // Display text loses the prefix once nested (it is above them now) but the
   // FOLD KEY keeps the full original — otherwise a bare "Power" would be one
   // rename away from colliding with some other section's key in localStorage.
-  const GROUP_PREFIXES = ["Car", "Audio"];
+  const GROUP_PREFIXES = ["Car", "Audio", "FX"];
   for (const prefix of GROUP_PREFIXES) {
     const sep = `${prefix} — `;
     const secs = [...root.querySelectorAll(".inspector-section")].filter((s) => {
@@ -2678,6 +2726,10 @@ export function createRoadDevPanel({ app, game, params }) {
     "World light": "🔆",
     // Same reason for the four Audio sections.
     Mixer: "🎚️", Layers: "🧅", "Engine pitch": "🎵",
+    // …and for the eight FX sections the 43-row block was split into.
+    "Tyre marks": "🛞", Sparks: "✨", "Drift smoke": "💨",
+    "Smoke lighting": "🔦", "Smoke shape": "🌫️", "Lingering bank": "🏳️",
+    "Wet spray": "💦", "Terrain texture": "🧱",
   };
   for (const hdr of root.querySelectorAll(".section-header")) {
     const key = hdr.dataset.foldKey || hdr.textContent.trim();
