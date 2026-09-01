@@ -39,9 +39,20 @@ export function createRoadDevPanel({ app, game, params }) {
   root.innerHTML = `
     <div class="tab-bar">
       <button class="tab-btn active" type="button">Dev Controls</button>
+      <button class="tab-btn dv-hints-btn" type="button" title="Show or hide the explanation notes">&#9432;</button>
       <button class="tab-btn dv-expand-all" type="button" title="Expand all sections">⊞</button>
       <button class="tab-btn dv-collapse-all" type="button" title="Collapse all sections">⊟</button>
       <button class="tab-btn dv-collapse" type="button" title="Collapse">–</button>
+    </div>
+    <!-- FIND, rather than READ. With 253 controls across 29 sections, the way
+         to answer "where is the fog slider" is to type "fog" — not to scan
+         paragraphs. The notes stay (they are worth having) but they are no
+         longer the navigation mechanism, which is what made them feel bloated. -->
+    <div class="dv-search">
+      <span class="dv-search-icon">&#128269;</span>
+      <input id="dv-filter" type="search" spellcheck="false" autocomplete="off"
+        placeholder="Filter controls…  (/ to focus, Esc to clear)" />
+      <span class="dv-search-count" id="dv-filter-count"></span>
     </div>
     <div class="tab-content active">
 
@@ -1745,6 +1756,7 @@ export function createRoadDevPanel({ app, game, params }) {
             look is this slider.
         </div>
       </div>
+      </div>  <!-- /Lights. THIS CLOSE WAS MISSING: without it Weather, Bloom, Audio and FX were children of Lights, so collapsing Lights hid all four. -->
 
       <div class="inspector-section">
         <div class="section-header">Weather</div>
@@ -2472,6 +2484,69 @@ export function createRoadDevPanel({ app, game, params }) {
       letter-spacing: 0;
     }
     #road-dev .dv-group-body > .inspector-section:last-child { border-bottom: none; }
+
+    /* ── SEARCH ───────────────────────────────────────────────────────────── */
+    #road-dev .dv-search {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+      background: rgba(0, 0, 0, 0.18);
+    }
+    #road-dev.collapsed .dv-search { display: none; }
+    #road-dev .dv-search-icon { opacity: 0.5; font-size: 11px; line-height: 1; }
+    #road-dev .dv-search input {
+      flex: 1 1 auto; min-width: 0;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 3px;
+      color: #eef2f7; font: inherit; font-size: 11px;
+      padding: 4px 6px;
+    }
+    #road-dev .dv-search input:focus {
+      outline: none; border-color: var(--tm-yellow, #ffd42a);
+    }
+    #road-dev .dv-search input::placeholder { color: #7c8697; }
+    #road-dev .dv-search-count {
+      font-size: 10px; color: #8b95a6; font-variant-numeric: tabular-nums;
+      min-width: 34px; text-align: right;
+    }
+    /* A section the filter emptied, and rows it rejected. Kept as a separate
+       attribute from [hidden] so the filter can never fight a control that
+       hides itself for a real reason — see the note in slider(). */
+    #road-dev [data-filtered] { display: none !important; }
+
+    /* ── HINTS ────────────────────────────────────────────────────────────── */
+    /* Off by default. The notes are genuinely useful — they are why a control
+       you have not touched in a month is still legible — but they were doing
+       the job of navigation, and 30 paragraphs of it turned the panel into a
+       document you scroll rather than a console you use. The ⓘ button brings
+       them all back, and the filter searches their text either way, so nothing
+       written here is lost by hiding it. */
+    #road-dev:not(.dv-hints) .dv-hint { display: none; }
+    #road-dev .dv-hints-btn.on { color: var(--tm-yellow, #ffd42a); }
+    /* A hint the filter matched shows even with hints off, so a search can
+       explain itself. */
+    #road-dev .dv-hint[data-hit] { display: block !important; }
+
+    /* ── SECTION ICONS ────────────────────────────────────────────────────── */
+    /* One glyph per section, so the eye lands on the right block before it has
+       read anything. Purely a marker: the text still carries the meaning. */
+    /* A LEFT COLUMN, not a right-aligned decoration. Right-aligned glyphs sit
+       at a different x on every row because the labels differ in length, so the
+       eye has to read the text to find them — which defeats the point. In a
+       fixed-width column they scan as a single vertical strip. */
+    #road-dev .section-header { display: flex; align-items: center; }
+    #road-dev .section-header .section-arrow { order: -2; }
+    #road-dev .section-header::after {
+      content: attr(data-icon);
+      order: -1;
+      width: 17px;
+      margin-right: 4px;
+      text-align: center;
+      font-size: 12px;
+      line-height: 1;
+      opacity: 0.75;
+    }
   `;
   document.head.appendChild(style);
 
@@ -2576,6 +2651,187 @@ export function createRoadDevPanel({ app, game, params }) {
   };
   $(".dv-expand-all")?.addEventListener("click", () => setAllFolds(true));
   $(".dv-collapse-all")?.addEventListener("click", () => setAllFolds(false));
+
+  // ── SECTION ICONS ───────────────────────────────────────────────────────────
+  //
+  // Matched on the fold KEY, which is the header's original text — the same
+  // string the group rename preserves — so a section moved under "Car" or
+  // "Audio" keeps its glyph. Anything unmatched simply gets none; this is a
+  // wayfinding aid, not a requirement, and a missing icon must never be a bug.
+  const SECTION_ICONS = {
+    World: "🌍", Mode: "🕹️", Track: "🛣️", Weather: "🌧️", "Post FX": "✨",
+    Camera: "🎥", Lighting: "💡", Sky: "🌤️", Clouds: "☁️", Terrain: "⛰️",
+    Props: "📦", Movers: "⚙️", Portals: "🌀", Audio: "🔊", FX: "💥",
+    Physics: "🧪", Debug: "🐞", Car: "🚗", Wheels: "🛞", Tires: "🛞",
+    Surface: "🧱", Rails: "🚧", Collision: "🧊", Performance: "📈",
+    // `Lights` is spelled out because the prefix match is `includes`, and
+    // "Lights" does not contain "Lighting".
+    Lights: "💡", Bloom: "🌟", "Prop livery": "🎨", "Grid snap": "📐",
+    "Gap / jump": "🛫", Spawn: "📍", Race: "🏁", "Edit piece": "✏️",
+    "Camera frame": "🖼️",
+    // The Car block is eight consecutive sections. Left as one repeated 🚗 the
+    // glyph column carries no information exactly where the list is longest, so
+    // each handling group gets its own mark.
+    Power: "⚡", "Grip & Handling": "🛞", "Steering feel": "🎯",
+    "Landing & body": "🪂", "Wall response": "🧱", "Yaw assist": "🌀",
+    "Air control": "🪁", Aero: "🌬️", "Road hold": "🧲",
+    "World light": "🔆",
+    // Same reason for the four Audio sections.
+    Mixer: "🎚️", Layers: "🧅", "Engine pitch": "🎵",
+  };
+  for (const hdr of root.querySelectorAll(".section-header")) {
+    const key = hdr.dataset.foldKey || hdr.textContent.trim();
+    // A fold key is "Family — Own name" ("Audio — Mixer"), so the tail is the
+    // most specific name this section has. Try it, then the visible label, then
+    // the whole key: a section's own glyph must beat its family's.
+    //
+    // The substring pass is only a fallback, and it is genuinely ambiguous —
+    // "Audio — Mixer" contains BOTH "Audio" and "Mixer", both 5 characters, so
+    // longest-wins picked whichever was declared first. That is why the exact
+    // passes run ahead of it rather than relying on the sort.
+    const tail = key.split("—").pop().trim();
+    let icon =
+      SECTION_ICONS[tail] ||
+      SECTION_ICONS[hdr.textContent.trim()] ||
+      SECTION_ICONS[key];
+    if (!icon) {
+      const hit = Object.keys(SECTION_ICONS)
+        .filter((k) => key.toLowerCase().includes(k.toLowerCase()))
+        .sort((a, b) => b.length - a.length)[0];
+      icon = hit ? SECTION_ICONS[hit] : "";
+    }
+    if (icon) hdr.dataset.icon = icon;
+  }
+
+  // ── HINTS ───────────────────────────────────────────────────────────────────
+  const HINTS_KEY = "modular-road-v3.devPanel.hints";
+  let hintsOn = false;
+  try { hintsOn = localStorage.getItem(HINTS_KEY) === "1"; } catch { hintsOn = false; }
+  const hintsBtn = $(".dv-hints-btn");
+  const applyHints = () => {
+    root.classList.toggle("dv-hints", hintsOn);
+    hintsBtn?.classList.toggle("on", hintsOn);
+    if (hintsBtn) {
+      hintsBtn.title = hintsOn ? "Hide the explanation notes" : "Show the explanation notes";
+    }
+  };
+  applyHints();
+  hintsBtn?.addEventListener("click", () => {
+    hintsOn = !hintsOn;
+    applyHints();
+    try { localStorage.setItem(HINTS_KEY, hintsOn ? "1" : "0"); } catch { /* private mode */ }
+  });
+
+  // ── FILTER ──────────────────────────────────────────────────────────────────
+  //
+  // Hides rows whose text does not match, then hides any section left with
+  // nothing in it, and force-opens the ones that still have something — so a
+  // search reads as a short list rather than as a set of closed drawers you
+  // still have to click through.
+  //
+  // `data-filtered` rather than `hidden`, deliberately: `slider()` uses
+  // `hidden` to retire a control with no backing value (the cheap-deck subset),
+  // and the two must not overwrite each other. A row can be legitimately hidden
+  // AND filtered; clearing the search must not resurrect a dead control.
+  const filterInput = $("#dv-filter");
+  const filterCount = $("#dv-filter-count");
+  const filterables = () => root.querySelectorAll(
+    ".tab-content .prop-row, .tab-content .action-btn, .tab-content .dv-hint",
+  );
+  const applyFilter = (raw) => {
+    const q = raw.trim().toLowerCase();
+    for (const el of root.querySelectorAll("[data-hit]")) delete el.dataset.hit;
+
+    if (!q) {
+      for (const el of filterables()) delete el.dataset.filtered;
+      for (const s of root.querySelectorAll(".inspector-section")) delete s.dataset.filtered;
+      // Back to the user's own fold state, not to everything-open.
+      for (const s of sections) s.setOpen(folds[s.key] ?? DEFAULT_OPEN.has(s.key));
+      if (filterCount) filterCount.textContent = "";
+      return;
+    }
+
+    let hits = 0;
+    for (const el of filterables()) {
+      const match = el.textContent.toLowerCase().includes(q);
+      if (match) {
+        delete el.dataset.filtered;
+        hits++;
+        // Let a matching note show itself even when notes are switched off,
+        // so the search can explain what it found.
+        if (el.classList.contains("dv-hint")) el.dataset.hit = "";
+      } else {
+        el.dataset.filtered = "";
+      }
+    }
+    // A SECTION NAME COUNTS AS A MATCH FOR EVERYTHING INSIDE IT.
+    //
+    // Searching "bloom" should show you the Bloom section, but its own controls
+    // are called Strength, Threshold and Radius — none of which contain the
+    // word. Without this the most obvious search in the panel returns one row.
+    // Done before the section pass below so those rows are already alive when
+    // their section is judged.
+    for (const hdr of root.querySelectorAll(".section-header")) {
+      const name = (hdr.dataset.foldKey || hdr.textContent || "").toLowerCase();
+      if (!name.includes(q)) continue;
+      const body = hdr.nextElementSibling;
+      if (!body || !body.classList.contains("section-body")) continue;
+      for (const el of body.querySelectorAll(".prop-row, .action-btn, .dv-hint")) {
+        if (el.dataset.filtered !== undefined) { delete el.dataset.filtered; hits++; }
+      }
+    }
+
+    // DEEPEST FIRST, and stale flags cleared before any of it.
+    //
+    // A group wrapper's verdict depends on its children's, so judging it in
+    // document order reads their state from the PREVIOUS search — the wrapper
+    // sits before them in the DOM. That is how a search for "spray" found 8
+    // matching rows and displayed none: the rows were live, their section was
+    // live, and the "Car"-style wrapper above them was still carrying a
+    // filtered flag left over from the search before it. Reversing resolves
+    // every child before the parent that asks about it.
+    const secs = [...root.querySelectorAll(".inspector-section")];
+    for (const sec of secs) delete sec.dataset.filtered;
+    for (let i = secs.length - 1; i >= 0; i--) {
+      const sec = secs[i];
+      const body = sec.querySelector(":scope > .section-body");
+      if (!body) continue;
+      const alive = [...body.querySelectorAll(".prop-row, .action-btn, .dv-hint")]
+        .some((el) => el.dataset.filtered === undefined);
+      // A group wrapper counts as alive if any nested section survived.
+      const nested = [...body.querySelectorAll(".inspector-section")]
+        .some((s) => s.dataset.filtered === undefined);
+      if (alive || nested) {
+        delete sec.dataset.filtered;
+        const hdr = sec.querySelector(":scope > .section-header");
+        hdr?.classList.remove("collapsed");
+        body.classList.remove("hidden");
+      } else {
+        sec.dataset.filtered = "";
+      }
+    }
+    if (filterCount) filterCount.textContent = hits ? String(hits) : "none";
+  };
+  filterInput?.addEventListener("input", () => applyFilter(filterInput.value));
+  filterInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { filterInput.value = ""; applyFilter(""); filterInput.blur(); }
+    e.stopPropagation();   // the game listens on window; typing must not drive
+  });
+  // `/` focuses the box, the way it does in most tools. Ignored while typing
+  // anywhere, so it can never eat a keystroke meant for a text field —
+  // including the track-name box, which sits outside this panel.
+  const typingIn = (el) => {
+    const t = el?.tagName;
+    return t === "INPUT" || t === "TEXTAREA" || t === "SELECT" || el?.isContentEditable === true;
+  };
+  addEventListener("keydown", (e) => {
+    if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (typingIn(e.target)) return;
+    if (root.classList.contains("collapsed")) return;
+    e.preventDefault();
+    filterInput?.focus();
+    filterInput?.select();
+  });
 
   // ── Collapse ────────────────────────────────────────────────────────────────
   const collapseBtn = $(".dv-collapse");
