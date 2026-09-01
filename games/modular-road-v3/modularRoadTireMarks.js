@@ -176,8 +176,8 @@ export class ModularRoadTireMarks {
     // `dist` is metres laid down since this mark started — it drives u, so the
     // texture flows continuously along the streak instead of per-segment.
     this.states = [
-      { prev: new THREE.Vector3(), active: false, dist: 0 },
-      { prev: new THREE.Vector3(), active: false, dist: 0 },
+      { prev: new THREE.Vector3(), active: false, dist: 0, prevAlpha: 0 },
+      { prev: new THREE.Vector3(), active: false, dist: 0, prevAlpha: 0 },
     ];
 
     this.style = "solid";
@@ -399,7 +399,9 @@ export class ModularRoadTireMarks {
     }
     // Restart the texture run whenever a new mark begins, so every streak opens
     // at u=0 (the texture's faded end) instead of mid-pattern.
-    if (emit && !state.active) state.dist = 0;
+    // Clearing `prevAlpha` too, or a new streak's first segment would ramp from
+    // whatever the LAST one ended on and open with a bright leading edge.
+    if (emit && !state.active) { state.dist = 0; state.prevAlpha = 0; }
     if (emit && state.active) this._addSegment(state.prev, point, intensity, state);
     state.prev.copy(point);
     state.active = emit;
@@ -446,10 +448,26 @@ export class ModularRoadTireMarks {
       0,
       1,
     );
+    // ── ALPHA HAS TO RAMP ACROSS THE SEGMENT, NOT SIT FLAT ON IT ───────────
+    //
+    // One segment is one FRAME of travel, and `intensity` comes from tyre slip,
+    // which jitters frame to frame. Writing this frame's alpha to all six
+    // vertices made every segment a flat patch with a HARD STEP at each join —
+    // a visible ladder of rectangles behind the wheels, and worse the faster you
+    // go, because a segment at 34 m/s is 0.57 m long against 7 cm at walking
+    // pace. It looked like a particle artefact and is nothing of the kind.
+    //
+    // Giving the two leading vertices the previous frame's value makes the
+    // ramp continuous ACROSS joins, because a segment's trailing edge and the
+    // next one's leading edge then carry the same number. Vertex order is
+    // (pL, pR, cL, pR, cR, cL) — indices 0, 1, 3 are the previous edge.
+    const prevAlpha = state.prevAlpha ?? alpha;
+    const PREV_VERTS = [0, 1, 3];
     const colorOffset = this.segmentIndex * COLOR_FLOATS_PER_SEGMENT;
     for (let i = 0; i < VERTS_PER_SEGMENT; i++) {
-      this.colors[colorOffset + i * 4 + 3] = alpha;
+      this.colors[colorOffset + i * 4 + 3] = PREV_VERTS.includes(i) ? prevAlpha : alpha;
     }
+    state.prevAlpha = alpha;
 
     // UVs — u advances with real distance travelled so the texture flows along
     // the streak continuously rather than restarting per segment. Vertex order
