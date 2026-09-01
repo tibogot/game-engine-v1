@@ -349,7 +349,7 @@ function makeTailHousingMaterial(src) {
 
 
 
-function makeLightMaterial(src, { name, emissive, opacity = 1, transparent = true }) {
+function makeLightMaterial(src, { name, emissive, color, opacity, transparent = true }) {
   const mat = new THREE.MeshStandardNodeMaterial({
     name,
     map: src.map ?? null,
@@ -358,10 +358,28 @@ function makeLightMaterial(src, { name, emissive, opacity = 1, transparent = tru
     emissiveMap: src.emissiveMap ?? null,
     emissive: new THREE.Color(emissive),
     emissiveIntensity: 0, // driven per-frame by Vehicle._updateTaillights
+    /**
+     * INHERIT THE FILE'S ALBEDO. Rebuilding used to leave this at
+     * MeshStandardNodeMaterial's default, which is WHITE.
+     *
+     * That is why an unlit headlamp read as a flat white slab: the lens carries
+     * no `map` and no `emissiveMap`, and `emissiveIntensity` is 0 until the
+     * lights come on — so with nothing glowing, the only thing on screen was
+     * that default colour. In the file the lens shares `mm_windows` with the
+     * four windows, whose albedo is BLACK; inheriting it gives back the dark
+     * glass the model actually ships, and the emissive still does the glowing.
+     *
+     * Safe for the brake lamps too, which come through here as well: emissive
+     * is additive and independent of albedo, so a dark lens still lights up.
+     */
+    color: color != null
+      ? new THREE.Color(color)
+      : (src.color ? src.color.clone() : new THREE.Color(0xffffff)),
     roughness: src.roughness ?? 0.5,
     metalness: 0,
     transparent,
-    opacity,
+    // Default to the source's own coverage rather than a hardcoded 1.
+    opacity: opacity ?? src.opacity ?? 1,
     side: src.side ?? THREE.FrontSide,
     // Lamps are a bloom SOURCE; tone mapping them first would crush the very
     // headroom the bloom threshold keys off.
@@ -432,7 +450,10 @@ export async function loadChassisModel(renderer, url = CHASSIS_GLB_URL) {
       o.material = makeLightMaterial(o.material, {
         name: "headlampLens",
         emissive: CHASSIS_GLB_LIGHTS.headlampColor,
-        opacity: 0.85,
+        // Matched to the windows on purpose: in the file this lens IS
+        // `mm_windows`, so it should read as the same glass. Colour comes
+        // through from the source now — see makeLightMaterial.
+        opacity: CHASSIS_GLB.glassOpacity,
       });
       headlampLenses.push(o);
       continue;
