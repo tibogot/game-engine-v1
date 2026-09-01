@@ -580,7 +580,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // moon and the cloud sea that live in the same shader.
     gameSky = createModularRoadSky({
       atmosphere: gameAtmo,
-      params: { timeOfDay: GAME_TIME_OF_DAY, autoAdvance: false },
+      params: {
+        timeOfDay: GAME_TIME_OF_DAY,
+        autoAdvance: false,
+        /**
+         * PHYSICAL, NOT THE GRADIENT FALLBACK.
+         *
+         * `uAtmoMix` is born at 0 inside the module, which is the authored
+         * gradient — a dull, near-desaturated blue (measured: saturation 0.17
+         * against the physical path's 0.45 in the same frame). The panel's
+         * Atmosphere slider used to be the only thing that ever pushed the mix
+         * in, so switching with F8 showed the FALLBACK and made the new sky
+         * look grey next to the engine's. Set here, where both entry points go
+         * through it, and `update()` re-applies it from P every frame.
+         */
+        atmosphereMix: 1,
+      },
     });
     gameSky.mesh.visible = false;
     scene.add(gameSky.mesh);
@@ -5896,8 +5911,15 @@ ${e.message}`);
       /** null until the sky has been switched on once — it is built lazily. */
       getGameSkyParams: () => gameSky?.params ?? null,
       /** 0 = authored gradient, 1 = physical atmosphere. A crossfade, not a switch. */
-      getAtmosphereMix: () => gameSky?.getAtmosphereMix() ?? 1,
-      setAtmosphereMix: (x) => gameSky?.setAtmosphereMix(x),
+      getAtmosphereMix: () => gameSky?.params.atmosphereMix ?? 1,
+      /** Writes the PARAM, not just the uniform: `update()` re-applies
+       *  `P.atmosphereMix` every frame, so a uniform-only write would be undone
+       *  on the next tick. */
+      setAtmosphereMix: (x) => {
+        if (!gameSky) return;
+        gameSky.params.atmosphereMix = x;
+        gameSky.setAtmosphereMix(x);
+      },
       setGameSkyTime: (t) => gameSky?.setTimeOfDay(t),
       getChassisFit: () => CHASSIS_GLB,
       applyChassisFit: () => {
