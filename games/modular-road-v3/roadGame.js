@@ -1821,6 +1821,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
           const mats = Array.isArray(m.material) ? m.material : [m.material];
           for (const mat of mats) mat?.dispose?.();
         }
+        // An InstancedMesh also owns its instance buffer, which the geometry and
+        // material disposals above do not touch. Rebuilds are per edit, so a
+        // leak here would accumulate over an editing session rather than a frame.
+        if (m.isInstancedMesh) m.dispose();
       });
     }
     mirrorPropGroup.clear();
@@ -1834,14 +1838,103 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     mesh.matrixWorldNeedsUpdate = true;
     mesh.castShadow = false;
     mesh.receiveShadow = false;
-    mesh.frustumCulled = false;
+    // ── CULLED, unlike the mirrored RAIL ─────────────────────────────────
+    //
+    // The rail is one merged mesh spanning the whole circuit, so a frustum test
+    // on it can only ever answer "yes" and running it is waste. A gantry is a
+    // discrete object a few metres across, and there are as many mirrored
+    // copies as there are gantries: measured at +28 draws for two and +82 for
+    // twenty, three per copy, because this path builds one copy per instance.
+    //
+    // The main view does not have that problem — PropInstancer batches props,
+    // so its draw count is flat in prop count (79 either way). This pass has no
+    // such batching, which makes the frustum test the one lever available.
+    //
+    // MEASURED: twenty gantries behind the camera cost 99 draws against 161 in
+    // front — 62 saved, exactly the 62 mirrored meshes, all culled. It buys
+    // nothing when everything is genuinely ahead of you down a straight, which
+    // is correct rather than disappointing; it pays on a real circuit, where
+    // most of the track is behind or beside the camera.
+    //
+    // Safe under the Y-flip: culling transforms the geometry's bounding SPHERE
+    // by matrixWorld, and a mirrored sphere is still a sphere of the same
+    // radius — `Sphere.applyMatrix4` takes the max scale magnitude, so a
+    // negative determinant does not matter. `matrixAutoUpdate` is off and the
+    // world matrix is stamped once, which is fine because these are static.
+    mesh.frustumCulled = true;
     mesh.layers.set(PREMIRROR_LAYER);
     mirrorPropGroup.add(mesh);
   }
 
-  function addMirroredProp(inst) {
-    const make = inst.def?.make;
+  /**
+   * ONE COPY PER PROP TYPE, INSTANCED — not one per placement.
+   *
+   * This used to call `def.make()` for every instance, so twenty gantries meant
+   * twenty geometries, twenty material sets and, measured, 62 meshes at three
+   * draws apiece. The main view never had that problem because PropInstancer
+   * batches props there; its draw count is flat in prop count while this pass
+   * was linear. This is that same trick, applied to the mirror.
+   *
+   * Build the mirrored prop ONCE as a template, then draw each part as an
+   * InstancedMesh whose per-instance matrix is
+   *
+   *     instance.root.matrixWorld · flipY · partLocal
+   *
+   * — the same product the per-instance copies were baking into their own world
+   * matrices, just carried in the instance buffer instead of in the scene graph.
+   *
+   * Culling still works: `Frustum.intersectsObject` prefers an object's OWN
+   * `boundingSphere` when it has one, and InstancedMesh computes that from every
+   * instance matrix. So a batch spanning the whole track is tested against its
+   * true extent rather than against one gantry at the origin.
+   *
+   * Falls back to per-instance copies when a template contains an InstancedMesh
+   * of its own — nesting instancing inside instancing is not expressible, and a
+   * prop kit is free to use it internally.
+   */
+  function addMirroredProps(list) {
+    const make = list[0]?.def?.make;
     if (typeof make !== "function") return;
+    const template = make({ neonScale: MIRROR_NEON_SCALE, side: THREE.DoubleSide });
+    template.updateMatrixWorld(true);
+
+    const parts = [];
+    let nested = false;
+    template.traverse((o) => {
+      if (!o.isMesh) return;
+      if (o.isInstancedMesh || o.isBatchedMesh) { nested = true; return; }
+      parts.push({ geometry: o.geometry, material: o.material, local: o.matrixWorld.clone() });
+    });
+
+    if (nested || parts.length === 0) {
+      for (const inst of list) addMirroredPropCopy(inst, make);
+      return;
+    }
+
+    const world = new THREE.Matrix4();
+    for (const part of parts) {
+      const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
+      for (let k = 0; k < list.length; k++) {
+        list[k].root.updateMatrixWorld(true);
+        world.copy(list[k].root.matrixWorld).multiply(_mirrorFlipY).multiply(part.local);
+        im.setMatrixAt(k, world);
+      }
+      im.instanceMatrix.needsUpdate = true;
+      im.castShadow = false;
+      im.receiveShadow = false;
+      im.frustumCulled = true;
+      im.layers.set(PREMIRROR_LAYER);
+      // One geometry and one material per PART now, shared by every placement,
+      // so the dispose walk frees each exactly once.
+      im.userData.mirrorOwnsGeometry = true;
+      im.userData.mirrorOwnsMaterial = true;
+      mirrorPropGroup.add(im);
+    }
+  }
+
+  /** The old path: a whole mirrored copy for one placement. Kept for templates
+   *  that instance internally — see `addMirroredProps`. */
+  function addMirroredPropCopy(inst, make) {
     inst.root.updateMatrixWorld(true);
     const root = make({ neonScale: MIRROR_NEON_SCALE, side: THREE.DoubleSide });
     root.matrixAutoUpdate = false;
@@ -1852,7 +1945,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       if (!o.isMesh) return;
       o.castShadow = false;
       o.receiveShadow = false;
-      o.frustumCulled = false;
+      // Culled — see the note in `stampMirroredMesh`.
+      o.frustumCulled = true;
       o.userData.mirrorOwnsGeometry = true;
       o.userData.mirrorOwnsMaterial = true;
     });
@@ -1870,9 +1964,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       return;
     }
     scene.updateMatrixWorld(true);
+    // Grouped by prop id so each TYPE builds one template and one batch, rather
+    // than each placement building its own copy — see `addMirroredProps`.
+    const byId = new Map();
     for (const inst of _propsRef?.instances ?? []) {
-      if (PREMIRROR_PROP_IDS.has(inst.id)) addMirroredProp(inst);
+      if (!PREMIRROR_PROP_IDS.has(inst.id)) continue;
+      let list = byId.get(inst.id);
+      if (!list) byId.set(inst.id, list = []);
+      list.push(inst);
     }
+    for (const list of byId.values()) addMirroredProps(list);
     for (const p of builderRef?.pieces ?? []) {
       if (p.decorGateMesh) stampMirroredMesh(p.decorGateMesh, startGateBodyMaterialMirror);
       const glow = p.decorGlowMesh;
