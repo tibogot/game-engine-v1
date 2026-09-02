@@ -2174,7 +2174,7 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
-        <div class="section-header">Bloom</div>
+        <div class="section-header">Post FX — Bloom</div>
         <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Enabled</span>
@@ -2203,9 +2203,407 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-glow-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Threshold</span>
+            <div class="prop-value">
+              <input type="range" id="dv-bloom-thr" min="0" max="2" step="0.01" />
+              <span class="prop-num" id="dv-bloom-thr-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Smooth width</span>
+            <div class="prop-value">
+              <input type="range" id="dv-bloom-smooth" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-bloom-smooth-v"></span>
+            </div>
+          </div>
           <div class="dv-hint">
             v3 bloom is <b>selective</b> — only materials writing the emissive MRT
             buffer glow. Glow box / ring / boost pads opt in.
+          </div>
+        </div>
+      </div>
+
+      <!-- ── THE v3 EDITOR'S WORLD MENU, PORTED ───────────────────────────────
+           These edit the SAME engine state the editor's World tab does
+           (app.postFx.state and app.fog.state), so a value set here is the
+           value the editor would show. None of it is stored in the .v3proj —
+           lighting and post never were — so the game owns whatever it sets. -->
+      <div class="inspector-section">
+        <div class="section-header">Post FX — Pipeline</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Post FX</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-pfx" type="button" aria-label="Post FX">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">FXAA</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-pfx-fxaa" type="button" aria-label="FXAA">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Post FX</b> is the master switch — off, the renderer skips the whole
+            post pipeline and costs nothing. <b>FXAA</b> replaces MSAA, which does
+            not survive the post pipeline.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Post FX — Colour grade</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Grade &amp; polish</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-pfx-polish" type="button" aria-label="Colour polish">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            One switch for grading, vignette AND film grain — they share a pass,
+            so the two sections below do nothing while this is off.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-bright" min="-1" max="1" step="0.01" />
+              <span class="prop-num" id="dv-pfx-bright-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Contrast</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-contrast" min="0" max="2" step="0.01" />
+              <span class="prop-num" id="dv-pfx-contrast-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Saturation</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-sat" min="0" max="2" step="0.01" />
+              <span class="prop-num" id="dv-pfx-sat-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Temperature</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-temp" min="-1" max="1" step="0.01" />
+              <span class="prop-num" id="dv-pfx-temp-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Tint</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-tint" min="-1" max="1" step="0.01" />
+              <span class="prop-num" id="dv-pfx-tint-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Post FX — Vignette &amp; grain</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Vignette</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-vig" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-pfx-vig-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Vignette falloff</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-vigfall" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-pfx-vigfall-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Vignette colour</span>
+            <div class="prop-value">
+              <input type="color" id="dv-pfx-vigcol" />
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Grain</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-grain" min="0" max="0.3" step="0.005" />
+              <span class="prop-num" id="dv-pfx-grain-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Grain size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-grainsz" min="0.5" max="4" step="0.05" />
+              <span class="prop-num" id="dv-pfx-grainsz-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Post FX — Sharpen</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Sharpen (RCAS)</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-pfx-sharp" type="button" aria-label="Sharpen">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sharpness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-sharpness" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-pfx-sharpness-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Denoise</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-pfx-denoise" type="button" aria-label="Denoise">${CHECK_SVG}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Post FX — Chromatic aberration</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Enabled</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-pfx-ca" type="button" aria-label="Chromatic aberration">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Strength</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-ca-str" min="0" max="5" step="0.05" />
+              <span class="prop-num" id="dv-pfx-ca-str-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-ca-scale" min="1" max="1.5" step="0.005" />
+              <span class="prop-num" id="dv-pfx-ca-scale-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Post FX — Depth of field</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Enabled</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-pfx-dof" type="button" aria-label="Depth of field">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Focus distance</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-dof-dist" min="1" max="1000" step="0.5" />
+              <span class="prop-num" id="dv-pfx-dof-dist-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Focal length</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-dof-len" min="1" max="500" step="0.5" />
+              <span class="prop-num" id="dv-pfx-dof-len-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bokeh scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-dof-bokeh" min="0" max="20" step="0.1" />
+              <span class="prop-num" id="dv-pfx-dof-bokeh-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Focus is a fixed distance, not a follow — on a chase camera the car
+            sits at a near-constant distance, so one value holds for a whole lap.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Post FX — Ambient occlusion</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            n8ao. The first enable lazily compiles its shaders — expect a
+            <b>50–200 ms hitch once</b>, so switch it on in the pits, not mid-lap.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">SSAO</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-pfx-ssao" type="button" aria-label="SSAO">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Quality</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-pfx-ssao-q" type="button">Medium</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Radius</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-ssao-rad" min="0.1" max="64" step="0.1" />
+              <span class="prop-num" id="dv-pfx-ssao-rad-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Falloff</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-ssao-fall" min="0" max="5" step="0.05" />
+              <span class="prop-num" id="dv-pfx-ssao-fall-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Intensity</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pfx-ssao-int" min="0" max="10" step="0.1" />
+              <span class="prop-num" id="dv-pfx-ssao-int-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">AO colour</span>
+            <div class="prop-value">
+              <input type="color" id="dv-pfx-ssao-col" />
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Half-res</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-pfx-ssao-half" type="button" aria-label="Half res">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Depth-aware upsample</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-pfx-ssao-dau" type="button" aria-label="Depth aware upsampling">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Screen-space radius</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-pfx-ssao-ssr" type="button" aria-label="Screen space radius">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Display mode</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-pfx-ssao-disp" type="button">Combined</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Half-res</b> is 2–4× faster and wants depth-aware upsampling with it.
+            <b>Display mode</b> is a debug view — leave it on Combined.
+            Selective bloom already works; the MRT <i>diffuse/normal</i> attachments
+            still need their blend fix before AO is trusted over transparencies.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Fog — Distance</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            <b>This is aerial perspective</b> — far geometry taking the sky's
+            colour is most of what makes distance read as distance. Both fogs
+            ship <b>off</b>, so the track currently gets none of it.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Distance fog</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fog-d" type="button" aria-label="Distance fog">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Density</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fog-d-dens" min="0.0001" max="0.05" step="0.0001" />
+              <span class="prop-num" id="dv-fog-d-dens-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Match sky</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fog-d-match" type="button" aria-label="Match sky">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Away colour</span>
+            <div class="prop-value">
+              <input type="color" id="dv-fog-d-col" />
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun tint</span>
+            <div class="prop-value">
+              <input type="color" id="dv-fog-d-sun" />
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Tint focus</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fog-d-pow" min="0.5" max="8" step="0.1" />
+              <span class="prop-num" id="dv-fog-d-pow-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            With <b>Match sky</b> on, the away colour is driven by the sky instead
+            of the swatch — which is what keeps fog and sky agreeing as the hour
+            changes. The swatch only bites when it is off.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Fog — Height</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Height fog</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fog-h" type="button" aria-label="Height fog">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Density</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fog-h-dens" min="0.001" max="0.05" step="0.001" />
+              <span class="prop-num" id="dv-fog-h-dens-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Falloff</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fog-h-fall" min="0.005" max="0.2" step="0.005" />
+              <span class="prop-num" id="dv-fog-h-fall-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Base height</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fog-h-base" min="-60" max="500" step="1" />
+              <span class="prop-num" id="dv-fog-h-base-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Colour</span>
+            <div class="prop-value">
+              <input type="color" id="dv-fog-h-col" />
+            </div>
+          </div>
+          <div class="dv-hint">
+            A ground-hugging band, not a global haze — the track sits at build
+            height 40 m in sky mode, so <b>Base height</b> has to reach it before
+            any of this is visible from the car.
           </div>
         </div>
       </div>
@@ -2877,7 +3275,7 @@ export function createRoadDevPanel({ app, game, params }) {
   // Display text loses the prefix once nested (it is above them now) but the
   // FOLD KEY keeps the full original — otherwise a bare "Power" would be one
   // rename away from colliding with some other section's key in localStorage.
-  const GROUP_PREFIXES = ["Car", "Audio", "FX", "Clouds"];
+  const GROUP_PREFIXES = ["Car", "Audio", "FX", "Clouds", "Post FX", "Fog"];
   for (const prefix of GROUP_PREFIXES) {
     const sep = `${prefix} — `;
     const secs = [...root.querySelectorAll(".inspector-section")].filter((s) => {
@@ -2983,6 +3381,13 @@ export function createRoadDevPanel({ app, game, params }) {
     // `Sky` is defined ONCE, here — it used to also sit in the block above with a
     // different glyph, where the later key silently won.
     Sky: "🌌", Shape: "🌥️", Quality: "🎚️",
+    // The ported v3 WORLD menu.
+    "Post FX": "✨", Fog: "🌫️", Pipeline: "🧩",
+    "Colour grade": "🎨", "Vignette & grain": "🎞️", Sharpen: "🔪",
+    "Chromatic aberration": "🌈", "Depth of field": "📷",
+    "Ambient occlusion": "⚫", Distance: "🌁", Height: "🏞️",
+    // Explicit, or "Build (sky)" matches the Sky entry and wears its glyph.
+    "Build (sky)": "🏗️",
   };
   for (const hdr of root.querySelectorAll(".section-header")) {
     const key = hdr.dataset.foldKey || hdr.textContent.trim();
@@ -3180,6 +3585,50 @@ export function createRoadDevPanel({ app, game, params }) {
     el.addEventListener("input", () => {
       uColor.value.set(el.value).convertSRGBToLinear();
     });
+  }
+
+  /**
+   * Wire an `<input type=color>` to a PLAIN HEX STRING on a state object.
+   *
+   * Not `colorUniform`: that one owns a THREE.Color living in linear space and
+   * has to convert both ways. These are engine tool-state fields the editor
+   * writes as "#rrggbb" strings, so converting would double-apply the transfer
+   * function and wash every colour out.
+   */
+  function colorField(id, obj, key, onChange) {
+    const el = $(`#${id}`);
+    if (!el || !obj || obj[key] == null) {
+      el?.closest(".prop-row")?.setAttribute("hidden", "");
+      return;
+    }
+    el.value = obj[key];
+    el.addEventListener("input", () => {
+      obj[key] = el.value;
+      onChange?.(el.value);
+    });
+  }
+
+  /**
+   * An action-btn that cycles a set of values — the panel's stand-in for the
+   * editor's dropdown. `values` are what the engine wants; `labels` what to
+   * show. Cycling rather than a <select> keeps it the same one-line row shape
+   * as every other control here.
+   */
+  function cycleField(id, obj, key, values, labels, onChange) {
+    const el = $(`#${id}`);
+    if (!el || !obj) { el?.closest(".prop-row")?.setAttribute("hidden", ""); return; }
+    const paint = () => {
+      const i = Math.max(0, values.indexOf(obj[key]));
+      el.textContent = labels[i] ?? String(obj[key]);
+    };
+    paint();
+    el.addEventListener("click", () => {
+      const i = values.indexOf(obj[key]);
+      obj[key] = values[(i + 1) % values.length];
+      paint();
+      onChange?.(obj[key]);
+    });
+    return { refresh: paint };
   }
 
   /** Wire a .prop-toggle button. `initial` seeds the checked class. */
@@ -3864,15 +4313,115 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-rail-reflect", weather, "railReflect", (v) => v.toFixed(2),
     (v) => game.setRailReflect?.(v));
 
-  // ── Bloom ───────────────────────────────────────────────────────────────────
-  const bloom = { strength: 0.9, radius: 0.5 };
-  toggle("dv-bloom", true, (on) => app.postFx?.setBloom({ enabled: on }));
-  slider("dv-bloom-str", bloom, "strength", (v) => v.toFixed(2),
-    (v) => app.postFx?.setBloom({ strength: v }));
-  slider("dv-bloom-rad", bloom, "radius", (v) => v.toFixed(2),
-    (v) => app.postFx?.setBloom({ radius: v }));
+  // ── POST FX + FOG: the v3 editor's WORLD menu, ported ───────────────────────
+  //
+  // Bound STRAIGHT to `app.postFx.state` / `app.fog.state`, which is the same
+  // object the editor's World tab edits — so a slider here reads the engine's
+  // real value and the two can never disagree. The bloom rows used to bind to a
+  // LOCAL `{ strength: 0.9, radius: 0.5 }` instead, which meant they showed
+  // those two numbers whatever the engine actually had.
+  //
+  // `applyPostFxState` is not on the game's app handle (the editor gets it
+  // passed in separately), and only `setEnabled`/`setBloom` re-apply the whole
+  // pipeline. So the sync is `setEnabled` with the CURRENT value: a no-op on
+  // the state, a full re-apply of everything else.
+  const pfx = app.postFx?.state ?? null;
+  const fog = app.fog?.state ?? null;
+  const syncPostFx = () => app.postFx?.setEnabled(pfx?.enabled ?? true);
+
+  toggle("dv-pfx", pfx?.enabled !== false, (on) => app.postFx?.setEnabled(on));
+  toggle("dv-pfx-fxaa", pfx?.fxaa?.enabled ?? false, (on) => {
+    if (pfx?.fxaa) { pfx.fxaa.enabled = on; syncPostFx(); }
+  });
+
+  toggle("dv-bloom", pfx?.bloom?.enabled !== false,
+    (on) => app.postFx?.setBloom({ enabled: on }));
+  slider("dv-bloom-str", pfx?.bloom ?? null, "strength", (v) => v.toFixed(2), syncPostFx);
+  slider("dv-bloom-rad", pfx?.bloom ?? null, "radius", (v) => v.toFixed(2), syncPostFx);
+  slider("dv-bloom-thr", pfx?.bloom ?? null, "threshold", (v) => v.toFixed(2), syncPostFx);
+  slider("dv-bloom-smooth", pfx?.bloom ?? null, "smoothWidth", (v) => v.toFixed(2), syncPostFx);
   slider("dv-glow", glowPropParams, "intensity", (v) => v.toFixed(1),
     () => game.refreshGlowProps());
+
+  // Colour / vignette / grain all ride the one `polish` pass.
+  toggle("dv-pfx-polish", pfx?.polish?.enabled ?? false, (on) => {
+    if (pfx?.polish) { pfx.polish.enabled = on; syncPostFx(); }
+  });
+  const P = pfx?.polish ?? null;
+  slider("dv-pfx-bright", P, "brightness", (v) => v.toFixed(2), syncPostFx);
+  slider("dv-pfx-contrast", P, "contrast", (v) => v.toFixed(2), syncPostFx);
+  slider("dv-pfx-sat", P, "saturation", (v) => v.toFixed(2), syncPostFx);
+  slider("dv-pfx-temp", P, "temperature",
+    (v) => (v > 0 ? "warm " : v < 0 ? "cool " : "") + v.toFixed(2), syncPostFx);
+  slider("dv-pfx-tint", P, "tint", (v) => v.toFixed(2), syncPostFx);
+  slider("dv-pfx-vig", P, "vignetteStrength", (v) => v.toFixed(2), syncPostFx);
+  slider("dv-pfx-vigfall", P, "vignetteFalloff", (v) => v.toFixed(2), syncPostFx);
+  colorField("dv-pfx-vigcol", P, "vignetteColor", syncPostFx);
+  slider("dv-pfx-grain", P, "grainStrength", (v) => v.toFixed(3), syncPostFx);
+  slider("dv-pfx-grainsz", P, "grainSize", (v) => v.toFixed(2), syncPostFx);
+
+  toggle("dv-pfx-sharp", pfx?.sharpen?.enabled ?? false, (on) => {
+    if (pfx?.sharpen) { pfx.sharpen.enabled = on; syncPostFx(); }
+  });
+  slider("dv-pfx-sharpness", pfx?.sharpen ?? null, "sharpness", (v) => v.toFixed(2), syncPostFx);
+  toggle("dv-pfx-denoise", pfx?.sharpen?.denoise ?? false, (on) => {
+    if (pfx?.sharpen) { pfx.sharpen.denoise = on; syncPostFx(); }
+  });
+
+  toggle("dv-pfx-ca", pfx?.chromaticAberration?.enabled ?? false, (on) => {
+    if (pfx?.chromaticAberration) { pfx.chromaticAberration.enabled = on; syncPostFx(); }
+  });
+  slider("dv-pfx-ca-str", pfx?.chromaticAberration ?? null, "strength",
+    (v) => v.toFixed(2), syncPostFx);
+  slider("dv-pfx-ca-scale", pfx?.chromaticAberration ?? null, "scale",
+    (v) => v.toFixed(3), syncPostFx);
+
+  toggle("dv-pfx-dof", pfx?.dof?.enabled ?? false, (on) => {
+    if (pfx?.dof) { pfx.dof.enabled = on; syncPostFx(); }
+  });
+  slider("dv-pfx-dof-dist", pfx?.dof ?? null, "focusDistance", (v) => v.toFixed(0) + " m", syncPostFx);
+  slider("dv-pfx-dof-len", pfx?.dof ?? null, "focalLength", (v) => v.toFixed(0) + " mm", syncPostFx);
+  slider("dv-pfx-dof-bokeh", pfx?.dof ?? null, "bokehScale", (v) => v.toFixed(1), syncPostFx);
+
+  const SS = pfx?.ssao ?? null;
+  toggle("dv-pfx-ssao", SS?.enabled ?? false, (on) => {
+    if (SS) { SS.enabled = on; syncPostFx(); }
+  });
+  cycleField("dv-pfx-ssao-q", SS, "quality",
+    ["Performance", "Low", "Medium", "High", "Ultra"],
+    ["Performance", "Low", "Medium", "High", "Ultra"], syncPostFx);
+  slider("dv-pfx-ssao-rad", SS, "aoRadius", (v) => v.toFixed(1), syncPostFx);
+  slider("dv-pfx-ssao-fall", SS, "distanceFalloff", (v) => v.toFixed(2), syncPostFx);
+  slider("dv-pfx-ssao-int", SS, "intensity", (v) => v.toFixed(1), syncPostFx);
+  colorField("dv-pfx-ssao-col", SS, "color", syncPostFx);
+  toggle("dv-pfx-ssao-half", SS?.halfRes ?? false, (on) => { if (SS) { SS.halfRes = on; syncPostFx(); } });
+  toggle("dv-pfx-ssao-dau", SS?.depthAwareUpsampling ?? false,
+    (on) => { if (SS) { SS.depthAwareUpsampling = on; syncPostFx(); } });
+  toggle("dv-pfx-ssao-ssr", SS?.screenSpaceRadius ?? false,
+    (on) => { if (SS) { SS.screenSpaceRadius = on; syncPostFx(); } });
+  cycleField("dv-pfx-ssao-disp", SS, "displayMode",
+    ["Combined", "AO", "No AO", "Split", "Split AO"],
+    ["Combined", "AO only", "No AO", "Split", "Split AO"], syncPostFx);
+
+  // ── Fog ─────────────────────────────────────────────────────────────────────
+  // setDistance/setHeight Object.assign then sync, so passing {} re-syncs after
+  // a direct field write — same trick as syncPostFx above.
+  const syncFogD = () => app.fog?.setDistance({});
+  const syncFogH = () => app.fog?.setHeight({});
+  const FD = fog?.distance ?? null, FH = fog?.height ?? null;
+
+  toggle("dv-fog-d", FD?.enabled ?? false, (on) => app.fog?.setDistance({ enabled: on }));
+  slider("dv-fog-d-dens", FD, "density", (v) => v.toFixed(4), syncFogD);
+  toggle("dv-fog-d-match", FD?.matchSky ?? true, (on) => app.fog?.setDistance({ matchSky: on }));
+  colorField("dv-fog-d-col", FD, "color", syncFogD);
+  colorField("dv-fog-d-sun", FD, "sunTint", syncFogD);
+  slider("dv-fog-d-pow", FD, "tintPow", (v) => v.toFixed(1), syncFogD);
+
+  toggle("dv-fog-h", FH?.enabled ?? false, (on) => app.fog?.setHeight({ enabled: on }));
+  slider("dv-fog-h-dens", FH, "density", (v) => v.toFixed(3), syncFogH);
+  slider("dv-fog-h-fall", FH, "falloff", (v) => v.toFixed(3), syncFogH);
+  slider("dv-fog-h-base", FH, "height", (v) => v.toFixed(0) + " m", syncFogH);
+  colorField("dv-fog-h-col", FH, "color", syncFogH);
 
   // ── Audio ───────────────────────────────────────────────────────────────────
   const audio = game.audioState;
