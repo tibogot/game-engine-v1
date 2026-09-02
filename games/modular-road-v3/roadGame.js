@@ -765,7 +765,17 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * cloud code in it at all otherwise. Nobody pays for the tier they are not on.
    */
   const CLOUD_TIERS = ["volumetric", "painted", "off"];
-  let cloudTier = "volumetric";
+  /**
+   * THE BOOT TIER, and it is volumetric on purpose.
+   *
+   * The painted deck is a FALLBACK, not the shipping look — it is opt-in and stays
+   * completely unbuilt until someone asks for it: no CPU bake, no texture uploaded, and
+   * no cloud code compiled into the sky dome's shader (see buildGameSky, which only
+   * constructs it inside its own tier). "Disabled by default" here means genuinely
+   * absent, not merely invisible.
+   */
+  const DEFAULT_CLOUD_TIER = "volumetric";
+  let cloudTier = DEFAULT_CLOUD_TIER;
   /** Engine sky meshes we hid, with the visibility each had before we did. */
   let _engineSkyWas = null;
 

@@ -58,7 +58,11 @@ import {
 export const PAINTED_MAP_SIZE = 256;
 
 export const PAINTED_CLOUD_DEFAULTS = {
-  enabled: false,
+  // NO `enabled` FLAG HERE, deliberately. The cloud TIER owns whether this deck exists
+  // at all (see roadGame's setCloudTier): out of its tier the module is never
+  // constructed, so there is nothing to switch off — no bake, no texture, and no cloud
+  // code in the dome's shader. A local enabled flag would be a second, weaker source of
+  // truth that reads as if the deck were merely hidden while still costing fetches.
 
   // ── Shape ────────────────────────────────────────────────────────────────────────
   /** Metres the deck floats above the CAMERA. Not an absolute altitude: a flat layer has
