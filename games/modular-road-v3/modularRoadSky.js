@@ -461,8 +461,20 @@ export function createModularRoadSky({ params, atmosphere } = {}) {
     //
     // Crossfaded rather than switched so the authored look can still be dialled back in as
     // a grade when a scene wants a specific mood the physics will not give you.
+    //
+    // GATED BY DIRECTION: physical ABOVE the horizon only. Below it, the model is
+    // simulating the one thing this game never wants to see — the planet's own surface, a
+    // sunlit grey ball (groundAlbedo is deliberately colourless). The dome's floor here is
+    // never real ground: terrain, track or the void under a sky track stands in front of
+    // it, and what peeks through should be the AUTHORED nadir — the designed blue haze
+    // that made the old sky's horizon read well. So the crossfade collapses to the
+    // authored gradient over the few degrees below the horizon line: the physical sky
+    // keeps everything it wins at (real horizon band included), the authored floor keeps
+    // the one region it was always better at. The blend window sits just under 0 so the
+    // physical bright-horizon band itself is untouched.
     if (atmosphere) {
-      col.assign(mix(col, atmosphere.skyRadiance(dir), uAtmoMix));
+      const aboveness = smoothstep(float(-0.075), float(0.01), up);
+      col.assign(mix(col, atmosphere.skyRadiance(dir), uAtmoMix.mul(aboveness)));
     }
 
     const tHit = uCloudTop.sub(uCamY).div(min(up, float(-0.001)));
