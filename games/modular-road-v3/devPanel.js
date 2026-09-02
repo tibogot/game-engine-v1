@@ -2682,13 +2682,6 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-a-drift-v"></span>
             </div>
           </div>
-          <div class="prop-row">
-            <span class="prop-label">Nitro</span>
-            <div class="prop-value">
-              <input type="range" id="dv-a-nitro" min="0" max="2" step="0.05" />
-              <span class="prop-num" id="dv-a-nitro-v"></span>
-            </div>
-          </div>
           <div class="dv-hint">
             <b>Wind</b> and <b>Wheels</b> ship at 0 (inherited from v2's defaults)
             — raise them to hear those layers at all.
@@ -3593,22 +3586,101 @@ export function createRoadDevPanel({ app, game, params }) {
     });
   }
 
-  /** Wire a colour input to a TSL/THREE Color uniform stored in linear space. */
-  function colorUniform(id, uColor) {
-    const el = $(`#${id}`);
-    if (!el || !uColor?.value) return;
-    const toHex = () => `#${uColor.value.clone().convertLinearToSRGB().getHexString()}`;
-    el.value = toHex();
-    el.addEventListener("input", () => {
-      uColor.value.set(el.value).convertSRGBToLinear();
-    });
+  /* ── ROAD-LOOK CONTROLS BIND BY NAME, NOT BY OBJECT ────────────────────────
+   *
+   * The deck material is REPLACED, not edited, whenever wetness, anisotropy,
+   * grit or line relief crosses zero — `syncRoadMaterialFeatures` rebuilds it so
+   * the shader compiles only the features in use. The replacement carries a
+   * brand-new `uniform()` bag, so a control holding the old uniform object then
+   * writes into a material nobody renders. Two things went wrong at once: the
+   * knob stopped doing anything, and the next `applyRoadMaterial` re-synced the
+   * new deck from `roadLook`, so any edit made after the swap visibly snapped
+   * back.
+   *
+   * `game.roadUniforms` is a getter for exactly this reason, but reading it once
+   * into a local at bind time threw that away. These resolve it PER EVENT, so a
+   * control keeps working across any number of rebuilds.
+   *
+   * The listener is also attached exactly once. The old pass re-ran wholesale to
+   * "rebind" after the cheap-deck A/B and added another `input` handler every
+   * time, so after N toggles one drag wrote into N discarded materials.
+   */
+  const roadLookSyncs = [];
+  const roadUniform = (key) => game.roadUniforms?.[key];
+
+  /** Show or hide a control's row, mirroring `slider`'s missing-uniform rule. */
+  function setRowShown(el, shown) {
+    const row = el.closest(".prop-row");
+    if (!row) return;
+    if (shown) row.removeAttribute("hidden");
+    else row.setAttribute("hidden", "");
   }
+
+  /** A range input on a road-look uniform, resolved by name at event time. */
+  function roadSlider(id, key, fmt = (v) => v.toFixed(2)) {
+    const el = $(`#${id}`);
+    const out = $(`#${id}-v`);
+    if (!el) return;
+    const sync = () => {
+      const u = roadUniform(key);
+      // The cheap deck is a deliberate SUBSET of the look, so a missing uniform
+      // hides the row rather than leaving a dead control (see `slider`).
+      setRowShown(el, !!u);
+      if (!u) return;
+      el.value = u.value;
+      if (out) out.textContent = fmt(u.value);
+    };
+    el.addEventListener("input", () => {
+      const u = roadUniform(key);
+      if (!u) return;
+      const v = +el.value;
+      u.value = v;
+      if (out) out.textContent = fmt(v);
+    });
+    roadLookSyncs.push(sync);
+    sync();
+  }
+
+  /**
+   * A colour input on a road-look colour uniform, resolved by name.
+   *
+   * The uniform holds LINEAR; the picker speaks sRGB. `getHexString()` already
+   * runs linear→sRGB and `set("#rrggbb")` already runs sRGB→linear, so neither
+   * direction needs an explicit convert. Both used to carry one, mirroring the
+   * double conversion in the material module's `lin()` — the pair round-tripped,
+   * so the picker showed back exactly the hex you typed, which is why it never
+   * looked broken even though the colour reaching the shader was 5–10× too dark.
+   */
+  function roadColor(id, key) {
+    const el = $(`#${id}`);
+    if (!el) return;
+    const sync = () => {
+      const u = roadUniform(key);
+      setRowShown(el, !!u?.value);
+      if (!u?.value) return;
+      el.value = `#${u.value.getHexString()}`;
+    };
+    el.addEventListener("input", () => {
+      const u = roadUniform(key);
+      if (u?.value) u.value.set(el.value);
+    });
+    roadLookSyncs.push(sync);
+    sync();
+  }
+
+  /**
+   * Re-read every road-look control from the CURRENT material.
+   *
+   * Only display and row visibility — the write path already follows the swap on
+   * its own, so this never re-attaches a listener.
+   */
+  const refreshRoadLook = () => { for (const s of roadLookSyncs) s(); };
 
   /**
    * Wire an `<input type=color>` to a PLAIN HEX STRING on a state object.
    *
-   * Not `colorUniform`: that one owns a THREE.Color living in linear space and
-   * has to convert both ways. These are engine tool-state fields the editor
+   * Not `roadColor`: that one owns a THREE.Color living in linear space and the
+   * DOM speaks sRGB. These are engine tool-state fields the editor
    * writes as "#rrggbb" strings, so converting would double-apply the transfer
    * function and wash every colour out.
    */
@@ -4064,58 +4136,51 @@ export function createRoadDevPanel({ app, game, params }) {
   // Road-surface uniforms are TSL `uniform()` objects, so the slider / colour
   // helpers drive their `.value` directly — every change is live, no rebuild.
   // Colours live in linear space in the shader; the picker shows sRGB.
-  // WRAPPED so the cheap-deck A/B can re-run it. Swapping the deck builds a
-  // DIFFERENT material with a different uniform bag, and every slider below
-  // closes over the OLD one — rebinding is what makes the knobs follow the
-  // material, and what lets `slider` hide the rows the cheap deck has no
-  // uniform for. The body is left at its original indentation to keep the
-  // diff readable.
-  function bindRoadLook() {
-  const ru = game.roadUniforms;
-  if (ru) {
-    colorUniform("dv-road-dark", ru.asphaltDark);
-    colorUniform("dv-road-light", ru.asphaltLight);
-    colorUniform("dv-road-side", ru.sideColor);
-    colorUniform("dv-road-kerb", ru.railA);
-    slider("dv-road-bright", ru.deckBrightness, "value", (v) => `${v.toFixed(2)}×`);
-    slider("dv-road-grain", ru.grainScale, "value", (v) => v.toFixed(2));
-    slider("dv-road-agg", ru.aggScale, "value", (v) => `${v.toFixed(1)}/m`);
-    slider("dv-road-rvary", ru.roughVary, "value", (v) => v.toFixed(2));
-    slider("dv-road-polish", ru.wheelPolish, "value", (v) => v.toFixed(2));
-    slider("dv-road-wdark", ru.wheelDarken, "value", (v) => v.toFixed(2));
-    // The paint's SHADING half — plain look uniforms, so they poke live and ride
-    // ROAD_LOOK into the track save. Its RELIEF half is on the surface below.
-    slider("dv-road-linerough", ru.lineRough, "value", (v) => v.toFixed(2));
-    slider("dv-road-linewet", ru.lineWet, "value", (v) => v.toFixed(2));
-    slider("dv-road-linecoat", ru.lineCoat, "value", (v) => `${v.toFixed(2)}×`);
-    // Tar snakes. Plain uniforms — no build gate, because the whole field is a
-    // fract/abs/smoothstep on `surface.x`, which the deck has already computed.
-    // See the note on tarSnakeAmount: there is no noise here to compile out.
-    slider("dv-road-tarsnake", ru.tarSnakeAmount, "value", (v) => (v === 0 ? "off" : v.toFixed(2)));
-    slider("dv-road-tarsnakescale", ru.tarSnakeScale, "value", (v) => v.toFixed(1));
-    slider("dv-road-tarsnakewidth", ru.tarSnakeWidth, "value", (v) => v.toFixed(3));
-    slider("dv-road-tarsnakebreak", ru.tarSnakeBreak, "value", (v) => (v === 0 ? "continuous" : v.toFixed(2)));
-    slider("dv-road-tarsnakegloss", ru.tarSnakeGloss, "value", (v) => v.toFixed(2));
-    colorUniform("dv-road-tarsnakecol", ru.tarSnakeColor);
-    // HISTORICAL RUBBER — the marks that were already on the track before you
-    // drove it. These uniforms have existed and shipped ON (driftAmount 1.4)
-    // since the field was written; nothing had ever exposed them, so they were
-    // tunable in a look file and untunable in the game.
-    slider("dv-road-drift", ru.driftAmount, "value", (v) => (v === 0 ? "clean track" : v.toFixed(2)));
-    slider("dv-road-driftw", ru.driftWidth, "value", (v) => v.toFixed(2));
-    slider("dv-road-driftbias", ru.driftBias, "value", (v) => v.toFixed(2));
-    slider("dv-road-driftref", ru.driftCurveRef, "value",
-      (v) => `${v.toFixed(3)} · R${(1 / Math.max(v, 1e-4)).toFixed(0)}m`);
-    slider("dv-road-driftlines", ru.driftLines, "value", (v) => v.toFixed(0));
-    slider("dv-road-driftwander", ru.driftWander, "value", (v) => v.toFixed(1));
-    // Wavelength of the sideways drift, shown as the period in metres — the
-    // number that decides "driven line" vs "slalom". Low = long, straight runs.
-    slider("dv-road-driftwscale", ru.driftWanderScale, "value",
-      (v) => `${(1 / Math.max(v, 1e-4)).toFixed(0)} m`);
-    slider("dv-road-driftgloss", ru.driftGloss, "value", (v) => v.toFixed(2));
-  }
-  }
-  bindRoadLook();
+  // BOUND BY NAME, so they survive a material swap on their own — see
+  // `roadSlider`. This used to be a function the cheap-deck A/B re-ran to
+  // "rebind", which both stacked a duplicate listener per toggle and left every
+  // OTHER rebuild path (wet / anisotropy / grit / line relief crossing zero)
+  // with dead knobs, because nothing re-ran it there.
+  roadColor("dv-road-dark", "asphaltDark");
+  roadColor("dv-road-light", "asphaltLight");
+  roadColor("dv-road-side", "sideColor");
+  roadColor("dv-road-kerb", "railA");
+  roadSlider("dv-road-bright", "deckBrightness", (v) => `${v.toFixed(2)}×`);
+  roadSlider("dv-road-grain", "grainScale", (v) => v.toFixed(2));
+  roadSlider("dv-road-agg", "aggScale", (v) => `${v.toFixed(1)}/m`);
+  roadSlider("dv-road-rvary", "roughVary", (v) => v.toFixed(2));
+  roadSlider("dv-road-polish", "wheelPolish", (v) => v.toFixed(2));
+  roadSlider("dv-road-wdark", "wheelDarken", (v) => v.toFixed(2));
+  // The paint's SHADING half — plain look uniforms, so they poke live and ride
+  // ROAD_LOOK into the track save. Its RELIEF half is on the surface below.
+  roadSlider("dv-road-linerough", "lineRough", (v) => v.toFixed(2));
+  roadSlider("dv-road-linewet", "lineWet", (v) => v.toFixed(2));
+  roadSlider("dv-road-linecoat", "lineCoat", (v) => `${v.toFixed(2)}×`);
+  // Tar snakes. Plain uniforms — no build gate, because the whole field is a
+  // fract/abs/smoothstep on `surface.x`, which the deck has already computed.
+  // See the note on tarSnakeAmount: there is no noise here to compile out.
+  roadSlider("dv-road-tarsnake", "tarSnakeAmount", (v) => (v === 0 ? "off" : v.toFixed(2)));
+  roadSlider("dv-road-tarsnakescale", "tarSnakeScale", (v) => v.toFixed(1));
+  roadSlider("dv-road-tarsnakewidth", "tarSnakeWidth", (v) => v.toFixed(3));
+  roadSlider("dv-road-tarsnakebreak", "tarSnakeBreak", (v) => (v === 0 ? "continuous" : v.toFixed(2)));
+  roadSlider("dv-road-tarsnakegloss", "tarSnakeGloss", (v) => v.toFixed(2));
+  roadColor("dv-road-tarsnakecol", "tarSnakeColor");
+  // HISTORICAL RUBBER — the marks that were already on the track before you
+  // drove it. These uniforms have existed and shipped ON (driftAmount 1.4)
+  // since the field was written; nothing had ever exposed them, so they were
+  // tunable in a look file and untunable in the game.
+  roadSlider("dv-road-drift", "driftAmount", (v) => (v === 0 ? "clean track" : v.toFixed(2)));
+  roadSlider("dv-road-driftw", "driftWidth", (v) => v.toFixed(2));
+  roadSlider("dv-road-driftbias", "driftBias", (v) => v.toFixed(2));
+  roadSlider("dv-road-driftref", "driftCurveRef",
+    (v) => `${v.toFixed(3)} · R${(1 / Math.max(v, 1e-4)).toFixed(0)}m`);
+  roadSlider("dv-road-driftlines", "driftLines", (v) => v.toFixed(0));
+  roadSlider("dv-road-driftwander", "driftWander", (v) => v.toFixed(1));
+  // Wavelength of the sideways drift, shown as the period in metres — the
+  // number that decides "driven line" vs "slalom". Low = long, straight runs.
+  roadSlider("dv-road-driftwscale", "driftWanderScale",
+    (v) => `${(1 / Math.max(v, 1e-4)).toFixed(0)} m`);
+  roadSlider("dv-road-driftgloss", "driftGloss", (v) => v.toFixed(2));
   const surface = {
     bump: game.getBump?.() ?? 0.05,
     streak: game.getStreakSharp?.() ?? 0,
@@ -4182,7 +4247,9 @@ export function createRoadDevPanel({ app, game, params }) {
   // have hide themselves (see the `!obj` branch in `slider`).
   toggle("dv-road-cheap", game.getCheapRoad?.() ?? false, (on) => {
     game.setCheapRoad?.(on);
-    requestAnimationFrame(() => bindRoadLook?.());
+    // Re-read only. The writes already follow the new material by themselves;
+    // this is what re-hides the rows the cheap deck has no uniform for.
+    requestAnimationFrame(refreshRoadLook);
   });
   // Guardrails are a plain MeshStandardMaterial, so these drive it directly.
   const rm = game.railMaterial;
@@ -4260,13 +4327,11 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-wet-wheel", weather, "dryLine", (v) => v.toFixed(2), (v) => game.setWheelClear?.(v));
   // The dark rim at a puddle's edge — what gives standing water depth instead of
   // reading as a patch of gloss. Plain look uniforms, so they poke live.
-  {
-    const ru = game.roadMaterial?._roadUniforms;
-    if (ru?.waterlineDark) {
-      slider("dv-wet-waterline", ru.waterlineDark, "value", (v) => (v === 0 ? "off" : v.toFixed(2)));
-      slider("dv-wet-waterlinew", ru.waterlineSharp, "value", (v) => v.toFixed(1));
-    }
-  }
+  // Bound by name like the rest of the look. These two reached through
+  // `game.roadMaterial._roadUniforms` and sat OUTSIDE the old rebind pass, so
+  // they died on the first material swap and nothing ever revived them.
+  roadSlider("dv-wet-waterline", "waterlineDark", (v) => (v === 0 ? "off" : v.toFixed(2)));
+  roadSlider("dv-wet-waterlinew", "waterlineSharp", (v) => v.toFixed(1));
   toggle("dv-reflect", true, (on) => game.setReflection?.(on));
   // SEEDED FROM THE GAME, not from a literal. It was hard-coded `false` while
   // roadGame defaults it on, so the box read unchecked with the reflection
@@ -4468,7 +4533,6 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-a-wind", va, "windMul", pct);
   slider("dv-a-wheels", va, "wheelsMul", pct);
   slider("dv-a-drift", va, "driftBrakeMul", pct);
-  slider("dv-a-nitro", va, "nitroMul", pct);
   slider("dv-p-min", va, "enginePitchMin");
   slider("dv-p-max", va, "enginePitchMax");
 
@@ -4848,6 +4912,10 @@ export function createRoadDevPanel({ app, game, params }) {
   }
 
   function refresh() {
+    // The deck material can be REPLACED from outside the panel (the weather
+    // slider, a track load, the cheap-deck A/B), and the replacement carries
+    // different values — and, on the cheap deck, fewer uniforms.
+    refreshRoadLook();
     renderMode();
     renderLiveries();
     renderSpawnSrc();

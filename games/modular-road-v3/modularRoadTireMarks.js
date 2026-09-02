@@ -5,7 +5,7 @@ import { Fn, uniform, attribute, mix, texture, float } from "three/tsl";
 import { WHEEL } from "../../v3/play/modularRoadVehicle.js";
 
 function lin(hex) {
-  return new THREE.Color(hex).convertSRGBToLinear();
+  return new THREE.Color(hex);
 }
 
 /**
@@ -27,10 +27,10 @@ function lin(hex) {
  */
 const MARK_LOOK = {
   /** Dry: rubber laid on asphalt. The original flat-ribbon colour. */
-  rubber: 0x111111,
+  rubber: 0x010101,
   /** Wet: asphalt with the water pushed off it. Not dry-road bright — the road
    *  is still damp under the tyre, just no longer carrying a film. */
-  cleared: 0x8a919a,
+  cleared: 0x414852,
   /** How strongly a cleared line shows, relative to a rubber mark. Lower: a
    *  squeegeed strip is a subtle tonal break, not a black stripe. */
   clearedAlpha: 0.55,

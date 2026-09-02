@@ -262,9 +262,14 @@ console.log("\n=== ONE PLACEHOLDER, NOT 130 HAND-DRAWN SILHOUETTES ===");
   // it the rail is fourteen anonymous thumbnails. Centred, not a bottom band —
   // a band at the bottom reads as "this tile is called Tubes", which is exactly
   // what the piece tiles stopped doing.
+  // `[^{]*` before the brace so a GROUPED selector still matches. Hover and
+  // selected were merged into one rule (`.cat-btn.active .cat-btn-label,
+  // .cat-btn:hover .cat-btn-label { … }`) because a separate white bottom band
+  // used to flash during the hover dwell — the styling stayed correct and only
+  // this assertion broke, because it demanded `{` immediately after `.active`.
   check("the SELECTED category names itself across its thumbnail",
-    /\.cat-btn\.active \.cat-btn-label \{[^}]*inset: 0/.test(css)
-    && /\.cat-btn\.active \.cat-btn-label \{[^}]*justify-content: center/.test(css));
+    /\.cat-btn\.active \.cat-btn-label[^{]*\{[^}]*inset: 0/.test(css)
+    && /\.cat-btn\.active \.cat-btn-label[^{]*\{[^}]*justify-content: center/.test(css));
   check("...and an unselected one still does not",
     /\.cat-btn\.unbaked:not\(\.active\) \.cat-btn-label/.test(css),
     "the bake-failed caption must not fight the selected label for the same box");

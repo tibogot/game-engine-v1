@@ -318,6 +318,19 @@ export function buildAdTotemMesh({ params = {} } = {}) {
   return group;
 }
 
+/**
+ * Has this placement left the stock "YOUR AD HERE" placeholder?
+ *
+ * The instancer uses this to decide the DRAW PATH: a stock board shares one
+ * instanced poster draw with every other stock board, an authored one leaves
+ * that batch for a live mesh. `advert` is a data URL, or an ARRAY of them for a
+ * multi-face prism — an array of nulls is still unauthored, which is the state
+ * a prism sits in until someone uploads a face.
+ */
+export function isAdvertAuthored(advert) {
+  return Array.isArray(advert) ? advert.some(Boolean) : !!advert;
+}
+
 export function findAdPoster(root) {
   let found = null;
   root?.traverse((o) => {

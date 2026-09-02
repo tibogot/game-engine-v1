@@ -72,44 +72,44 @@ export function applyTimePreset(params, name) {
 
 /** Authored looks. Hex is sRGB; converted to linear on the way into the shader. */
 const LOOK_NIGHT = {
-  below:  { z: 0x0a1020, h: 0x3a5580, n: 0x243048 },
-  inside: { z: 0x141c28, h: 0x243040, n: 0x1c2430 },
-  above:  { z: 0x050810, h: 0x2a4068, n: 0x182030 },
-  sun: 0xffd8b0,
-  seaDark: 0x141c2c, seaBright: 0x3a5070,
-  twilight: 0x2a3a58, anti: 0x1a2848,
+  below:  { z: 0x010104, h: 0x0b1737, n: 0x040811 },
+  inside: { z: 0x020305, h: 0x04080d, n: 0x030408 },
+  above:  { z: 0x000101, h: 0x060d23, n: 0x020408 },
+  sun: 0xffaf6f,
+  seaDark: 0x020306, seaBright: 0x0b1429,
+  twilight: 0x060b19, anti: 0x030511,
 };
 const LOOK_DAWN = {
-  below:  { z: 0x1a2858, h: 0xffd0c8, n: 0x5a5468 },
-  inside: { z: 0xa898a0, h: 0xe0d0d0, n: 0xc8b8c0 },
-  above:  { z: 0x0c1838, h: 0xffd8d0, n: 0xffece8 },
-  sun: 0xffe0c8,
-  seaDark: 0x5a4860, seaBright: 0xffe8f0,
-  twilight: 0xffb8b0, anti: 0x3a5080,
+  below:  { z: 0x030519, h: 0xffa193, n: 0x1a1723 },
+  inside: { z: 0x64505a, h: 0xbea1a1, n: 0x937a86 },
+  above:  { z: 0x01020a, h: 0xffafa1, n: 0xffd6ce },
+  sun: 0xffbe93,
+  seaDark: 0x1a111e, seaBright: 0xffcede,
+  twilight: 0xff7a6f, anti: 0x0b1437,
 };
 const LOOK_DUSK = {
-  below:  { z: 0x141c42, h: 0xffb078, n: 0x3a3848 },
-  inside: { z: 0x7a6860, h: 0xd8b8a0, n: 0xb09080 },
-  above:  { z: 0x0a1028, h: 0xffc090, n: 0xffe0c0 },
-  sun: 0xff8a40,
-  seaDark: 0x4a3848, seaBright: 0xffd0a8,
-  twilight: 0xff8a40, anti: 0x3a4a78,
+  below:  { z: 0x02030e, h: 0xff6f30, n: 0x0b0a11 },
+  inside: { z: 0x32231e, h: 0xaf7a5a, n: 0x6f4737 },
+  above:  { z: 0x010105, h: 0xff8647, n: 0xffbe86 },
+  sun: 0xff410d,
+  seaDark: 0x110a11, seaBright: 0xffa164,
+  twilight: 0xff410d, anti: 0x0b1130,
 };
 const LOOK_GOLDEN = {
-  below:  { z: 0x3d6cb0, h: 0xffe0b8, n: 0x9a9888 },
-  inside: { z: 0xc4b8ac, h: 0xece0d4, n: 0xd8ccc0 },
-  above:  { z: 0x1a3a78, h: 0xffd4a8, n: 0xfff0dc },
-  sun: 0xffe8c0,
-  seaDark: 0x6a6058, seaBright: 0xfff4e8,
-  twilight: 0xffc090, anti: 0x4a6a98,
+  below:  { z: 0x0c266f, h: 0xffbe7a, n: 0x52503f },
+  inside: { z: 0x8d7a69, h: 0xd6bea8, n: 0xaf9a86 },
+  above:  { z: 0x030b30, h: 0xffa864, n: 0xffdeb7 },
+  sun: 0xffce86,
+  seaDark: 0x251e19, seaBright: 0xffe7ce,
+  twilight: 0xff8647, anti: 0x112550,
 };
 const LOOK_DAY = {
-  below:  { z: 0x1a4e9a, h: 0xd8e8f4, n: 0x7ea8c4 },
-  inside: { z: 0xb0becb, h: 0xd2dbe3, n: 0xc0cbd4 },
-  above:  { z: 0x0a2668, h: 0x8eb0d0, n: 0xeef2f6 },
-  sun: 0xfff1d6,
-  seaDark: 0x3a5878, seaBright: 0xf2f5f8,
-  twilight: 0xffe8d0, anti: 0x6a90c0,
+  below:  { z: 0x031352, h: 0xafcee7, n: 0x35648d },
+  inside: { z: 0x6f8398, h: 0xa4b5c4, n: 0x8698a8 },
+  above:  { z: 0x010523, h: 0x456fa1, n: 0xdae2eb },
+  sun: 0xffe0ab,
+  seaDark: 0x0b1930, seaBright: 0xe2e9ef,
+  twilight: 0xffcea1, anti: 0x254786,
 };
 
 function equatorialToDir(H, decl, lat, out) {
@@ -195,8 +195,17 @@ export function skyLookName(elDeg, timeOfDay = 12) {
 }
 
 const _lin = new THREE.Color();
+/**
+ * An authored sRGB hex into `out`, in working (linear) space.
+ *
+ * `Color.set(number)` already linearises — see the note on `lin()` in
+ * modularRoadMaterial.js. The `convertSRGBToLinear()` this used to chain ran
+ * the curve a second time and made the whole palette 5–10× darker than its
+ * hexes implied. The band hexes above were rebased when it was removed, so the
+ * sky renders as it did to within half an 8-bit code.
+ */
 function toLinearHex(hex, out) {
-  return out.set(hex).convertSRGBToLinear();
+  return out.set(hex);
 }
 
 const _acc = new THREE.Color();
@@ -216,8 +225,8 @@ const _zA = new THREE.Color(), _hA = new THREE.Color(), _nA = new THREE.Color();
 const _sunCol = new THREE.Color();
 const _seaDark = new THREE.Color(), _seaBright = new THREE.Color();
 const _twilight = new THREE.Color(), _anti = new THREE.Color();
-const _red = new THREE.Color(0xff4a12).convertSRGBToLinear();
-const _moonCol = new THREE.Color(0xdde6ff).convertSRGBToLinear();
+const _red = new THREE.Color(0xff1102);
+const _moonCol = new THREE.Color(0xb8caff);
 
 function twilightPair(dawnLook, duskLook, duskBias, key, band, out) {
   return mixTwilight(dawnLook[band][key], duskLook[band][key], duskBias, out);

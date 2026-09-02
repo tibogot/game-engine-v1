@@ -15,7 +15,7 @@ import {
   GATE_POST_HEIGHT,
 } from "./modularRoadPropPhysics.js";
 import { SCENERY_CATALOG, makeSceneryProp } from "./modularRoadScenery.js";
-import { setAdPosterImage, advertFileToDataUrl } from "./modularRoadAdBillboard.js";
+import { setAdPosterImage, advertFileToDataUrl, isAdvertAuthored } from "./modularRoadAdBillboard.js";
 import { setAdPrismImages, isAdPrism } from "./modularRoadAdPrism.js";
 import {
   applyLedDisplayContent,
@@ -274,7 +274,7 @@ export function hazardPadMat() {
   const stripe = smoothstep(float(0.5).sub(fw), float(0.5).add(fw), fract(t));
   const paint = mix(vec3(0.96, 0.78, 0.06), vec3(0.07, 0.07, 0.08), stripe);
   const deck = paint.mul(plate.mul(1.35).add(0.22));
-  const red = new THREE.Color(0xd0342c).convertSRGBToLinear();
+  const red = new THREE.Color(0xa10906);
   const cap = vec3(red.r, red.g, red.b);
   const z = attribute("aZone", "float");
   const isDeck = step(0.5, z).mul(oneMinus(step(1.5, z)));
@@ -1074,12 +1074,37 @@ function neonGateGroup(opts = {}) {
   hole.closePath();
   outline.holes.push(hole);
 
-  const geo = new THREE.ExtrudeGeometry(outline, {
+  // ── CHAMFERED EDGES ─────────────────────────────────────────────────────
+  // The razor-edged extrude read as a flat black cutout: on a 0x0a0c10 body
+  // the only thing that can draw the frame's shape is a specular highlight,
+  // and a 90° edge catches none. A ~5 cm chamfer band on every edge (outer
+  // silhouette AND the arch opening — Extrude bevels the holes too) gives
+  // light a surface at 45° to both faces, so the frame reads as machined
+  // metal instead of paper. NO bevelOffset compensation: the outline and the
+  // hole both run along y = −SINK at the bottom, and offsetting moves those
+  // two edges THROUGH each other (outline up, hole down) — the self-crossed
+  // ring came out as a filled plate. The frame simply grows by 5 cm in-plane,
+  // invisible on a 16 m span. Depth IS trimmed by 2·bev (the bevel adds it
+  // back along Z, and 10 cm of extra depth would read).
+  // ExtrudeGeometry is non-indexed → flat facet normals, which is exactly the
+  // split-normal shading a chamfer needs; nothing to weld.
+  // Measured in gate-edge-lab.html: whole gate 100 → 196 tris, same 1 draw.
+  const chamfer = opts.chamfer ?? true;
+  const bev = Math.min(0.05, D / 3);
+  const geo = new THREE.ExtrudeGeometry(outline, chamfer ? {
+    depth: D - 2 * bev,
+    bevelEnabled: true,
+    bevelThickness: bev,
+    bevelSize: bev,
+    bevelSegments: 2,
+    curveSegments: 1,
+  } : {
     depth: D,
     bevelEnabled: false,
     curveSegments: 1,
   });
-  geo.translate(0, 0, -D / 2);
+  // Beveled geometry spans [-bev, D - bev]; plain spans [0, D]. Both center to 0.
+  geo.translate(0, 0, chamfer ? bev - D / 2 : -D / 2);
 
   // Matte body — the neon is a separate stroke, not the whole frame.
   g.add(new THREE.Mesh(
@@ -2915,8 +2940,18 @@ export class PropManager {
    * `dataUrl` is a JPEG data URL already fitted to the poster.
    * Prism boards take `face` 0..2; a single-poster board ignores it.
    */
+  /**
+   * Author the selected advert surface.
+   *
+   * Uploading the first image, or clearing the last one, changes the DRAW PATH:
+   * a stock board shares one instanced poster draw with every other stock board,
+   * and an authored one leaves that batch for a live mesh. `onVariantChange` is
+   * the only hook that re-syncs the instancer (`onChange` does not), so without
+   * it an upload would not appear until the next placement forced a sync.
+   */
   setSelectedAdvert(dataUrl, face = 0) {
     if (!this.selected?.def?.advert) return false;
+    const wasAuthored = isAdvertAuthored(this.selected.advert);
     if ((this.selected.def.advertFaces ?? 1) > 1) {
       const n = this.selected.def.advertFaces;
       const prev = Array.isArray(this.selected.advert) ? this.selected.advert : [];
@@ -2929,7 +2964,11 @@ export class PropManager {
       setAdPosterImage(this.selected.root, this.selected.advert);
     }
     this.onChange?.();
-    this.onSelectionChange?.(this.selected);
+    if (wasAuthored !== isAdvertAuthored(this.selected.advert)) {
+      this.onVariantChange?.(this.selected);
+    } else {
+      this.onSelectionChange?.(this.selected);
+    }
     return true;
   }
 
@@ -3464,6 +3503,16 @@ export class PropManager {
       if (!isSharedGeometry(o.geometry)) o.geometry?.dispose?.();
       if (o.userData.adPoster && o.material) {
         if (o.material.map?.userData?.adOwned) o.material.map.dispose();
+        // THE PRISM KEEPS ITS UPLOADS IN `adMaps`, NOT IN `.map`.
+        //
+        // A three-sided prism samples three textures through TSL nodes, so it
+        // has no `material.map` at all — the line above walked straight past it
+        // and every uploaded face (up to three 1024x576) survived the delete.
+        // `setFaceMap` already disposes the one it replaces, so these are the
+        // live faces and nothing else can be holding them.
+        for (const tex of o.material.userData?.adMaps ?? []) {
+          if (tex?.userData?.adOwned) tex.dispose();
+        }
         o.material.dispose();
       }
       if (o.userData.ledFaceOwned && o.material) {

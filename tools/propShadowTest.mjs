@@ -21,6 +21,35 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 let fail = 0;
 const check = (n, c, d = "") => { console.log(`${c ? "PASS" : "FAIL"}  ${n}${d ? "  — " + d : ""}`); if (!c) fail++; };
 
+/* A DOM STUB, JUST ENOUGH FOR TextureLoader.
+ *
+ * Some obstacle templates now build a textured material — the hazard platform
+ * pulls the diamond-plate maps — and three's ImageLoader reaches straight for
+ * `document.createElementNS('…xhtml', 'img')`. In Node that threw and took the
+ * whole file down before a single assertion ran, which is why this test showed
+ * as failing with no FAIL line to explain it.
+ *
+ * The image never loads and never needs to: this file asserts castShadow /
+ * receiveShadow flags, which are set on the mesh regardless of whether pixels
+ * ever arrive. So the stub only has to be constructible and listenable.
+ */
+if (typeof globalThis.document === "undefined") {
+  const makeEl = () => ({
+    style: {},
+    addEventListener() {},
+    removeEventListener() {},
+    setAttribute() {},
+    removeAttribute() {},
+    getContext: () => null,
+    set src(_v) { /* never resolves — no load or error event is fired */ },
+    get src() { return ""; },
+  });
+  globalThis.document = {
+    createElementNS: () => makeEl(),
+    createElement: () => makeEl(),
+  };
+}
+
 register("./threeWebgpuHook.mjs", import.meta.url);
 const THREE = await import("three/webgpu");
 const { PropInstancer } = await import(

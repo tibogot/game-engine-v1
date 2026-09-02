@@ -47,7 +47,11 @@
  */
 
 export const TRACK_FORMAT = "modular-road-track";
-export const TRACK_VERSION = 2;
+/**
+ * v3 changes what a `roadLook` COLOUR NUMBER MEANS — see migrateV2toV3.
+ * Layout, tuning numbers and the sparse rule are untouched from v2.
+ */
+export const TRACK_VERSION = 3;
 
 /** Versions this build can read. Anything older is migrated up on load. */
 export const TRACK_MIN_VERSION = 1;
@@ -211,8 +215,74 @@ function migrateV1toV2(data, defaults) {
   return out;
 }
 
+/**
+ * The `roadLook` keys that held a COLOUR in v2.
+ *
+ * Deliberately a frozen copy of `ROAD_LOOK_COLORS` rather than an import. A
+ * migration describes the format AS IT WAS: if a colour key is added or renamed
+ * later, this step must keep converting exactly the v2 set, and it must not
+ * start converting a key that never had a v2-era value. Importing the live list
+ * would silently re-point this at a moving target — and it would also drag the
+ * whole TSL material module into a file that has no imports, which the headless
+ * tools in tools/ depend on.
+ */
+const V2_LOOK_COLORS = Object.freeze([
+  "asphaltDark", "asphaltLight", "lineColor", "railA", "railB",
+  "sideColor", "tubeInner", "tubeOuter", "neonColor", "panelColor",
+  "tarSnakeColor", "wetTint",
+]);
+
+/** three's sRGB→linear transfer function, inlined to keep this file import-free. */
+function srgbToLinear(c) {
+  return c < 0.04045
+    ? c * 0.0773993808
+    : Math.pow(c * 0.9478672986 + 0.0521327014, 2.4);
+}
+
+/**
+ * v2 → v3: colour numbers move into the space they were always rendered in.
+ *
+ * Up to v2 every authored colour went through the transfer function TWICE — the
+ * helpers called `convertSRGBToLinear()` on a Color that three had already moved
+ * into the working space. So a saved `asphaltDark` of 0x5c626a did not render as
+ * 0x5c626a; it rendered ~9.6× darker, at 0.011 linear. The save path mirrored the
+ * same double step on the way out, which is why the round trip looked correct and
+ * the bug survived: the panel always showed back the hex you typed.
+ *
+ * The helpers now convert ONCE and the built-in defaults were rebased to match,
+ * so the build renders exactly as before. A v2 file's colour numbers are the only
+ * thing left in the old space — read literally they would come back 5–10× too
+ * bright. This applies the extra conversion the loader no longer does.
+ *
+ * PRESERVES APPEARANCE, which is the bar a migration the user did not ask for has
+ * to clear. Re-encoding through 8 bits is lossy in principle, but rounding to the
+ * nearest code bounds the error at half a code value: measured across all 99
+ * literals rebased in the same change, the worst case was 0.4987 of 255.
+ */
+function migrateV2toV3(data) {
+  const out = { ...data, version: 3 };
+  const look = data.roadLook;
+  if (!look || typeof look !== "object") return out;
+
+  const next = { ...look };
+  for (const key of V2_LOOK_COLORS) {
+    const hex = look[key];
+    // Absent means "inherit the current default", which is already correct.
+    if (typeof hex !== "number" || !Number.isFinite(hex)) continue;
+    let rebased = 0;
+    for (let shift = 16; shift >= 0; shift -= 8) {
+      const ch = ((hex >> shift) & 255) / 255;
+      const v = Math.round(srgbToLinear(ch) * 255);
+      rebased |= Math.min(255, Math.max(0, v)) << shift;
+    }
+    next[key] = rebased >>> 0;
+  }
+  out.roadLook = next;
+  return out;
+}
+
 /** version → the function that turns it into the next version up. */
-const MIGRATIONS = { 1: migrateV1toV2 };
+const MIGRATIONS = { 1: migrateV1toV2, 2: migrateV2toV3 };
 
 /**
  * Bring a track file up to TRACK_VERSION, one step at a time.

@@ -34,6 +34,20 @@ import { mergeByMaterial, isSharedGeometry } from "./modularRoadBatching.js";
 import { enableMeshShadows } from "./modularRoadParkour.js";
 import { decalMaterial, decalGeometry } from "./modularRoadDecals.js";
 import { isLedDisplayUnique } from "./modularRoadLedDisplay.js";
+import { isAdvertAuthored } from "./modularRoadAdBillboard.js";
+
+/**
+ * Does this instance draw its unique face as a LIVE mesh rather than instanced?
+ *
+ * The rule is the same for both kinds of authored surface: while a placement
+ * still shows the STOCK content it shares one instanced draw with every other
+ * stock placement, and it leaves that batch the moment someone authors it.
+ */
+function hasAuthoredFace(inst) {
+  if (inst.def?.ledDisplay) return isLedDisplayUnique(inst.ledDisplay);
+  if (inst.def?.advert) return isAdvertAuthored(inst.advert);
+  return false;
+}
 
 /** Reused for "no tint" — three multiplies instanceColor in, so white is the
  *  identity and an unset entry would render black. */
@@ -46,10 +60,22 @@ const _ZERO = new THREE.Matrix4().set(0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0);
 /** Growth headroom so placing one more cone does not rebuild every buffer. */
 const SLACK = 8;
 
-/** Below this total height (metres) a prop counts as lying flat on the road and
- *  stops casting shadows — see the note in `_template`. Comfortably under a
- *  traffic cone (~0.7 m) and over any painted decal. */
-const FLAT_PROP_HEIGHT = 0.12;
+/**
+ * Below this total height (metres) a prop counts as lying flat on the road and
+ * stops casting shadows — see the note in `_template`.
+ *
+ * RAISED FROM 0.12, which missed the two props the rule most obviously wanted.
+ * Measured template heights across the whole catalogue: the boost pad and the
+ * launch pad are both 0.140 m, so they sat 2 cm the wrong side of the cutoff and
+ * cast a shadow from a slab lying ON the road — coplanar with the surface it
+ * falls on, which is precisely the "contributes nothing but a shadow-map draw"
+ * case described below. Each is two parts, drawn again per cascade.
+ *
+ * 0.2 is a real gap, not a shave: the next prop up the list is the tyre at
+ * 0.448 m, so nothing else changes behaviour. Still comfortably under a traffic
+ * cone (0.93 m measured) and over any painted decal (0 m).
+ */
+const FLAT_PROP_HEIGHT = 0.2;
 
 /**
  * The attribute set a part must have to join the shared plain material. Merging
@@ -128,7 +154,27 @@ function bakePlainAttrs(src, material) {
     ?? new THREE.Float32BufferAttribute(new Float32Array(pos.count * 3), 3));
   g.setAttribute("uv", src.getAttribute("uv")?.clone()
     ?? new THREE.Float32BufferAttribute(new Float32Array(pos.count * 2), 2));
-  if (src.getIndex()) g.setIndex(src.getIndex().clone());
+  /* ALWAYS INDEXED, even when the source is not.
+   *
+   * mergeGeometries refuses a batch unless the index is present on ALL of them
+   * or on NONE, and this copied it only where it already existed. `holewall`
+   * (4 parts) and `holewall_air` (5) mix the two, so their merge was refused and
+   * the instancer fell back to keeping every part separate — 4 and 5 draws per
+   * type instead of 1, plus the same again per shadow cascade. The refusal even
+   * logged "the normalisation missed something"; this was what it missed.
+   *
+   * Indexing the odd ones out rather than de-indexing everything: a generated
+   * 0..n-1 index is one small buffer, while `toNonIndexed()` would duplicate
+   * every shared vertex in the geometries that were already compact.
+   */
+  const srcIndex = src.getIndex();
+  if (srcIndex) {
+    g.setIndex(srcIndex.clone());
+  } else {
+    const seq = pos.count > 65535 ? new Uint32Array(pos.count) : new Uint16Array(pos.count);
+    for (let i = 0; i < pos.count; i++) seq[i] = i;
+    g.setIndex(new THREE.BufferAttribute(seq, 1));
+  }
 
   const n = pos.count;
   const col = new Float32Array(n * 3);
@@ -270,8 +316,12 @@ export class PropInstancer {
           // Marked by the prop's own builder — the container's shell and door
           // take a livery, its frame rails do not.
           tintable: !!o.userData.tintable,
-          // LED display face — instanced while chevron, live mesh when authored.
-          uniqueFace: !!o.userData.ledDisplayFace,
+          // A surface whose CONTENT can be authored per placement: instanced
+          // while it shows the stock chevron / "YOUR AD HERE" placeholder, a
+          // live mesh once someone uploads to it. The poster is safe from the
+          // plain-part merge because `posterMat` sets `m.map`, and
+          // `plainGroupKey` refuses anything carrying a texture.
+          uniqueFace: !!o.userData.ledDisplayFace || !!o.userData.adPoster,
         });
       });
       /**
@@ -338,7 +388,8 @@ export class PropInstancer {
     }
     const uniqueLed = !!inst.def?.ledDisplay && isLedDisplayUnique(inst.ledDisplay);
     const uniqueFlag = !!inst.flagImage || !!inst.def?.flagVerlet;
-    if (!uniqueLed && !uniqueFlag) {
+    const uniqueAd = !!inst.def?.advert && isAdvertAuthored(inst.advert);
+    if (!uniqueLed && !uniqueFlag && !uniqueAd) {
       inst.root.visible = false;
       return;
     }
@@ -346,7 +397,8 @@ export class PropInstancer {
     inst.root.traverse((o) => {
       if (!o.isMesh) return;
       const keep = (uniqueLed && o.userData.ledDisplayFace)
-        || (uniqueFlag && o.userData.flagClothUnique);
+        || (uniqueFlag && o.userData.flagClothUnique)
+        || (uniqueAd && o.userData.adPoster);
       o.visible = !!keep && !o.userData.noRender;
     });
   }
@@ -360,7 +412,7 @@ export class PropInstancer {
 
   /**
    * One InstancedMesh per part. `typeId` is what the mirror and stats key off
-   * (always the catalog id, even when `key` is `leddisplay::ledface`).
+   * (always the catalog id, even when `key` is `leddisplay::face`).
    */
   _ensureBatch(key, typeId, insts, parts) {
     if (!parts?.length || !insts.length) {
@@ -422,10 +474,10 @@ export class PropInstancer {
     // Drop batches for types that no longer have any props. Decal batches are
     // keyed `<id>::decal` and are never in `wanted`, so they are left to
     // _syncDecals — without this guard they would be torn down every sync.
-    // `::ledface` is the same shape: a satellite of a type still in `wanted`.
+    // `::face` is the same shape: a satellite of a type still in `wanted`.
     for (const [id, batch] of [...this._batches]) {
       if (batch.decal) continue;
-      const typeId = id.replace(/::ledface$/, "");
+      const typeId = id.replace(/::face$/, "");
       if (wanted.has(typeId)) continue;
       for (const m of batch.meshes) this.group.remove(m);
       this._batches.delete(id);
@@ -443,14 +495,16 @@ export class PropInstancer {
       const shared = parts.filter((p) => !p.uniqueFace);
       const faces = parts.filter((p) => p.uniqueFace);
       // Types with no unique-face parts keep the old path: every part in one
-      // batch. LED display splits: frames/legs for every placement, face only
-      // for the chevron ones.
+      // batch. The rest split — structure for EVERY placement, content face for
+      // only the ones still showing stock content. An ad board is the same shape
+      // as an LED display: the steel and the light bar are identical on all of
+      // them, and only the poster differs.
       if (!faces.length) {
         this._ensureBatch(id, id, insts, parts);
       } else {
         this._ensureBatch(id, id, insts, shared);
-        const chevron = insts.filter((i) => !isLedDisplayUnique(i.ledDisplay));
-        this._ensureBatch(`${id}::ledface`, id, chevron, faces);
+        const stock = insts.filter((i) => !hasAuthoredFace(i));
+        this._ensureBatch(`${id}::face`, id, stock, faces);
       }
     }
     this._syncDecals(wanted);
@@ -708,7 +762,7 @@ export class PropInstancer {
       for (const p of this._templates.get(id) ?? []) p.geometry.dispose();
       this._templates.delete(id);
       this._dropBatch(id);
-      this._dropBatch(`${id}::ledface`);
+      this._dropBatch(`${id}::face`);
     }
     this.sync();
   }

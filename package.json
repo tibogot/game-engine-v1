@@ -10,7 +10,9 @@
     "dev:surface": "vite --open /games/modular-road-v3/road-surface-lab.html",
     "dev:tube": "vite --open /games/modular-road-v3/tube-lab.html",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node tools/runAll.mjs --fast",
+    "test:all": "node tools/runAll.mjs"
   },
   "devDependencies": {
     "eslint": "^10.9.1",

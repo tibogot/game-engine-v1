@@ -2152,9 +2152,21 @@ export const SOLID = {
    * Splitting the two is what keeps the collider tight (shape still matters, no
    * floating) while making it impossible to step over.
    *
-   * Used by the deck resolver AND the solids BVH. A rounded start/finish nose
-   * is a thin wall hit head-on; without the band the leftover speed after the
-   * first scrape carried the hull through and the back face spat it out.
+   * WHAT IT ACTUALLY DOES, which is less than the paragraph above implies.
+   * NEITHER resolver applies it as a margin on the crossing test. Both ask the
+   * exact question — `closing * dt > distance - skin`, would this sample cross
+   * before the next substep — which needs no margin and is strictly tighter than
+   * one. The deck resolver used to band on distance instead, and that is what
+   * cancelled centripetal motion every substep and dropped the car out of a loop
+   * at 38 m of 51 m. The exact test is the fix for that and must NOT be widened
+   * back into a band.
+   *
+   * Its one live use is widening the solids QUERY radius:
+   * `queryR = max(insideReach, |v|·dt·sweepMargin)`. With insideReach 1.0 m, a
+   * 1/240 s substep and a 30 m/s top speed the sweep term reaches ~0.2 m, so the
+   * reach always wins and this changes nothing today. It only begins to matter
+   * above ~150 m/s, so treat it as a guard for a future faster vehicle rather
+   * than as a live knob.
    */
   sweepMargin: 1.6,
   /** Fraction of the overlap corrected per substep. <1 damps jitter when several
@@ -4293,6 +4305,32 @@ export class Vehicle {
       }
     }
     if (opts.dampVertical) body.vel.y *= 0.25;
+
+    /* A TELEPORT BREAKS SPATIAL CONTINUITY, so every bit of state that assumes
+     * "last frame's surface is related to this frame's" has to go.
+     *
+     * This used to reset the pose and nothing else, which left three things
+     * pointing at the wrong side of the portal:
+     *
+     *   TYRE CONTACT — `_hadGround` keeps the normal smoother easing from the
+     *   ENTRY deck's normal, and road hold differences two unrelated normals
+     *   across one substep. On a hold-tagged exit that is a fabricated angular
+     *   rate, clamped but still a kick, for as long as the smoother takes.
+     *
+     *   YAW ASSIST — `_holdHeading` is latched to the heading you had going IN,
+     *   so an airborne exit is steered back toward it at up to 2 rad/s.
+     *
+     *   STUCK DETECTOR — `STUCK.ignoreAfterTeleport` exists precisely for this
+     *   and was never armed here, so a portal that lands you against geometry
+     *   could trip the recovery nudge immediately.
+     *
+     * Speed and heading are deliberately NOT touched: preserving them is the
+     * whole point of a portal, unlike respawnAt which is a full stop.
+     */
+    for (const t of this.tires) t._clearContact();
+    this._holdHeading = null;
+    this._clearStuck();
+
     this._resetInterpolation();
   }
 
@@ -5894,11 +5932,11 @@ export class Vehicle {
     // wheel probes, and they cost nothing on a normal lap: upright, the top
     // corners sit ~0.6 m clear of the deck, far outside `skin` (0.05), so they
     // never register. Verified against the loop test — no change there.
-    // Anti-tunnel band, same split as the solids resolver: FORCE only inside
-    // `skin`, velocity clamp anywhere inside `band`. At 15 m/s a corner advances
-    // 0.0625 m per substep — already past the 0.05 m skin — which is exactly how
-    // an inverted car fell through the road.
-    const band = Math.max(skin, body.vel.length() * dt * SOLID.sweepMargin);
+    // NO PROXIMITY BAND HERE, ON PURPOSE. A `band` was computed on this line and
+    // never read: the exact crossing test further down superseded it. Leaving the
+    // dead line in made it look as though corners were clamped on DISTANCE, which
+    // is precisely the thing that dropped the car out of a loop — see the note on
+    // the `closing * dt > sd - skin` gate below.
     let approach = 0;
     let approachRoof = 0;
     this._solidApproachN.set(0, 0, 0);

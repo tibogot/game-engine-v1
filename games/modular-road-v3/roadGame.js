@@ -776,6 +776,30 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   const DEFAULT_CLOUD_TIER = "volumetric";
   let cloudTier = DEFAULT_CLOUD_TIER;
+
+  /**
+   * Does the TRACK want clouds — separately from what this machine will spend.
+   *
+   * The two were the same variable, and that quietly broke the rule three lines
+   * of comment above this one promise. `clouds.enabled` is the volumetric deck's
+   * switch, so it was answering two different questions at once:
+   *
+   *   LOADING a track wrote the track's `cloudsOn` straight onto the deck, which
+   *   turned the volumetric pass (and its worker bake and shader compile) back on
+   *   for someone who had chosen `painted` or `off`.
+   *
+   *   SAVING read the deck back, so a track saved on a laptop at `off` recorded
+   *   `cloudsOn: false` — the machine setting baked into track data, which is the
+   *   exact thing the tier is documented never to do.
+   *
+   * So the wish and the budget are now separate, and every path goes through
+   * `syncClouds`: the track owns `cloudsWanted`, the machine owns `cloudTier`,
+   * and the deck runs only when both agree.
+   */
+  let cloudsWanted = clouds.enabled;
+  function syncClouds() {
+    clouds.setEnabled(cloudsWanted && cloudTier === "volumetric");
+  }
   /** Engine sky meshes we hid, with the visibility each had before we did. */
   let _engineSkyWas = null;
 
@@ -865,14 +889,32 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const wasPainted = cloudTier === "painted";
     cloudTier = tier;
 
-    clouds.setEnabled(tier === "volumetric");
+    // Honours the track's wish as well as the new budget — switching TO
+    // volumetric must not force clouds onto a track that asked for none.
+    syncClouds();
 
     if (wasPainted !== (tier === "painted")) {
       const wasOn = gameSkyOn;
       if (wasOn) setGameSky(false);
+      // `gameSky.dispose()` frees the geometry and material but does NOT unparent
+      // the mesh, so every switch used to leave a dead dome in scene.children.
+      if (gameSky) scene.remove(gameSky.mesh);
       gameSky?.dispose();
       gameSky = null;
-      gameAtmo = null; // rebuilt with the dome; its LUTs are cheap to re-bake
+      // Rebuilt with the dome and its LUTs are cheap to re-bake — but it owns
+      // three render targets and three materials, so dropping the reference
+      // without disposing leaked all six per switch.
+      gameAtmo?.dispose();
+      gameAtmo = null;
+      // LEAVING the painted tier has to release the deck, not just stop drawing
+      // it. `buildGameSky` only constructs it when `gamePainted` is null, so a
+      // stale one got handed straight back to the dome — compiling the painted
+      // cloud fetches into a shader on a tier that is not paying for them, which
+      // is the one thing the tier split exists to prevent.
+      if (tier !== "painted" && gamePainted) {
+        gamePainted.dispose();
+        gamePainted = null;
+      }
       if (wasOn) setGameSky(true);
     }
     devPanel?.refresh?.();
@@ -3529,7 +3571,27 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // every copy to one image (and hide the live mesh that actually wears it).
   // The asphalt lot shares the live road material (wetness / puddles / look),
   // so it stays a real mesh; one 12-tri pad does not need a batch.
-  const propInstancer = new PropInstancer(scene, props, PROP_CATALOG, (id) => id !== "adboard" && id !== "adtotem" && id !== "adprism" && id !== "asphaltlot");
+  /* WHAT STILL CANNOT BE INSTANCED, and why each one is here.
+   *
+   * `adboard` and `adtotem` USED TO BE on this list because every placement can
+   * carry its own uploaded poster, and a texture cannot vary per instance. They
+   * are off it now: the instancer splits a type into structure + content face
+   * (the same split the LED display already used), so the steel and the light bar
+   * are one batch across every board and only an AUTHORED poster leaves for a
+   * live mesh. Twenty stock boards went from sixty draws to three.
+   *
+   * `adprism` keeps its exclusion for a different reason than the poster: its
+   * slats rotate on a per-material `uTime` driven from `onBeforeRender`, and it
+   * samples THREE face textures rather than one. Splitting it is possible but is
+   * not the same change.
+   *
+   * `asphaltlot` must never be instanced. It deliberately shares the LIVE ROAD
+   * MATERIAL (see setAsphaltLotMaterial) so wetness, ponding and every look knob
+   * track the deck instead of being a second shader — and that material reads
+   * world position, which instancing rewrites.
+   */
+  const propInstancer = new PropInstancer(scene, props, PROP_CATALOG,
+    (id) => id !== "adprism" && id !== "asphaltlot");
   _propInstancerRef = propInstancer;
   _propsRef = props;
   // Live glow tuning writes to the loose roots; the templates hold their own
@@ -4953,7 +5015,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   };
   function readTrackEnv(into = {}) {
     into.skyMode = !terrainOn;
-    into.cloudsOn = clouds.enabled;
+    // The WISH, not the deck. Reading `clouds.enabled` here wrote this
+    // machine's cloud tier into the track file. See `cloudsWanted`.
+    into.cloudsOn = cloudsWanted;
     for (const [k, p] of Object.entries(CLOUD_ENV_MAP)) into[k] = clouds.params[p];
     return into;
   }
@@ -4962,7 +5026,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const trackEnv = readTrackEnv({});
   function applyTrackEnv() {
     setTerrain(!trackEnv.skyMode);
-    clouds.setEnabled(!!trackEnv.cloudsOn);
+    cloudsWanted = !!trackEnv.cloudsOn;
+    syncClouds();
     for (const [k, p] of Object.entries(CLOUD_ENV_MAP)) {
       if (trackEnv[k] !== undefined) clouds.params[p] = trackEnv[k];
     }
@@ -6261,8 +6326,10 @@ ${e.message}`);
     },
     game: {
       /** Volumetric clouds. Off releases every buffer and runs no pass. */
-      setClouds: (on) => clouds.setEnabled(!!on),
-      getClouds: () => clouds.enabled,
+      setClouds: (on) => { cloudsWanted = !!on; syncClouds(); },
+      /** The track's wish, not the deck: the cloud TIER decides whether that
+       *  wish is currently affordable, and the two controls stay independent. */
+      getClouds: () => cloudsWanted,
       /** The live params object — `update()` pushes every field into its uniform
        *  each frame, so the panel can bind sliders straight to it. */
       cloudParams: clouds.params,
@@ -6725,8 +6792,7 @@ ${e.message}`);
 
       // FX are cosmetic, so they run once per FRAME on real dt (not per tick) —
       // they must not affect the deterministic outcome.
-      tireMarks.update(vehicle);
-      driftSmoke.updateFromVehicle(vehicle, camera, dt, keys);
+      tireMarks.update(vehicle); // ground-projected ribbons — no camera involved
       // Airflow drags the drops across the glass, and that is the whole speed
       // cue — parked, they fall straight. Only worth computing while the effect
       // is actually installed.
@@ -6734,7 +6800,8 @@ ${e.message}`);
         const spd = Math.hypot(vehicle.body.vel.x, vehicle.body.vel.z);
         rainUniforms.lean.value = THREE.MathUtils.smoothstep(spd, 2, 45) * rainLeanFromSpeed;
       }
-      sparks.updateFromVehicle(vehicle, camera, dt);
+      // driftSmoke and sparks used to run here. They are camera-dependent, and
+      // the camera has not moved yet this frame — see below the rig.
       // Render-rate, not the fixed step: the wave is purely visual and this only
       // advances a uniform — the flags themselves cost no CPU per frame.
       flags.update(dt);
@@ -6801,6 +6868,25 @@ ${e.message}`);
     // failure the chase rig's controls.update patch exists to prevent).
     if (debugCamActive()) debugCam.update(dt);
     else chase.update(dt);
+
+    /* CAMERA-DEPENDENT FX RUN AFTER THE RIG, DELIBERATELY.
+     *
+     * Both build their quads against `camera`: drift smoke billboards every puff,
+     * derives its streak axis from camera velocity and fades against the near
+     * plane; sparks billboard the same way. Run from inside the drive block above
+     * they saw LAST frame's camera, because the rig moves it here. At 40 m/s the
+     * chase boom travels ~0.7 m per frame, which is more than the 0.55 m near
+     * fade, so a puff spawned at the rear wheels could clip through the lens
+     * instead of dissolving.
+     *
+     * Safe to run last: they are cosmetic, nothing downstream reads them, and
+     * nothing here feeds the deterministic sim.
+     */
+    if (mode === "drive") {
+      driftSmoke.updateFromVehicle(vehicle, camera, dt, keys);
+      sparks.updateFromVehicle(vehicle, camera, dt);
+    }
+
     updateDebugReadout(dt);
 
     // Per-frame audio pump — drives every layer's gain/pitch from the car's
@@ -6952,8 +7038,8 @@ ${e.message}`);
     world: boot,
     /** Volumetric clouds on/off. OFF is free: every render target is released, no pass
      *  runs, and the noise bake never starts until the first enable. */
-    setClouds: (on) => clouds.setEnabled(!!on),
-    getClouds: () => clouds.enabled,
+    setClouds: (on) => { cloudsWanted = !!on; syncClouds(); },
+    getClouds: () => cloudsWanted,
     /** Cloud quality tier: "volumetric" | "painted" | "off". A machine setting — it
      *  never rides in a track save. See setCloudTier for why it rebuilds the sky. */
     setCloudTier,

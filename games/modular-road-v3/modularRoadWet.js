@@ -143,7 +143,7 @@ export const WET_DEFAULTS = {
   wetCoatRough: 0.10,
   /** Hue of the wet darkening. Near-neutral by default with a slight cool cast;
    *  push it warm for a sodium-lit street, cool for overcast. */
-  wetTint: 0xdfe6ef,
+  wetTint: 0xbccadc,
 
   // ── PONDING ───────────────────────────────────────────────────────────────
   //

@@ -192,8 +192,11 @@ console.log("\n=== THE LIVERY IS REACHABLE, NOT JUST IMPLEMENTED ===");
     && /onSelectionChange: \(\) => devPanel\?\.refresh\(\)/.test(game));
   check("...including on deselect", /if \(had\) this\.onSelectionChange\?\.\(null\);/.test(props));
   // Changing a livery has to reach the instance colour buffer.
+  // `\s*` after the brace: the handler grew to several statements (sync, rail
+  // reflection, panel refresh) and this demanded it stay on ONE line, so it
+   // failed on formatting while the wiring it checks was never touched.
   check("a livery change marks the instance colours dirty",
-    /props\.onVariantChange = \(\) => \{ propInstancer\.markColorsDirty\(\)/.test(game));
+    /props\.onVariantChange = \(\) => \{\s*propInstancer\.markColorsDirty\(\)/.test(game));
 }
 
 console.log("\n=== CONTAINERS STACK ONTO EACH OTHER ===");
@@ -251,8 +254,16 @@ console.log("\n=== THE DECAL IS A QUAD, NOT A SECOND MAP ===");
     /im\.setMatrixAt\(k\+\+, _ZERO\)/.test(instancer));
   check("...and the batch is keyed apart from the prop's own",
     /`\$\{id\}::decal`/.test(instancer));
+  // Two passes now, where this once asserted one combined condition:
+  // the type sweep SKIPS decal batches outright, and a second sweep drops a
+  // decal batch only when its parent type is gone. That is stricter than the
+  // old `batch.decal || wanted.has(id)`, which never reclaimed an orphaned
+  // decal batch at all — so the test was pinning the weaker behaviour.
   check("...so the type-cleanup pass does not tear it down every sync",
-    /if \(batch\.decal \|\| wanted\.has\(id\)\) continue;/.test(instancer));
+    /if \(batch\.decal\) continue;/.test(instancer));
+  check("...but an orphaned decal batch IS reclaimed",
+    /wanted\.has\(key\.replace\(\/::decal\$\/, ""\)\)/.test(instancer),
+    "a decal whose prop type is gone must not leak its meshes");
   check("a flat sticker does not cast a shadow", /im\.castShadow = false;/.test(instancer));
 
   // EVERY decal number derived from CONTAINER_SIZE. The height and patch size

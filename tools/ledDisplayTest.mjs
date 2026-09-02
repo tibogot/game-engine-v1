@@ -65,8 +65,8 @@ console.log("\n=== instancer: frames always, face only while chevron ===");
 
   const keys = [...instancer._batches.keys()];
   check("chevron boards instance the shared parts", keys.includes("leddisplay"));
-  check("...and a separate face batch", keys.includes("leddisplay::ledface"));
-  const faceBatch = instancer._batches.get("leddisplay::ledface");
+  check("...and a separate face batch", keys.includes("leddisplay::face"));
+  const faceBatch = instancer._batches.get("leddisplay::face");
   check("all three chevrons are in the face batch", faceBatch?.insts.length === 3);
 
   const authored = props.instances[0];
@@ -74,7 +74,7 @@ console.log("\n=== instancer: frames always, face only while chevron ===");
   applyLedDisplayContent(authored.root, authored.ledDisplay);
   instancer.sync();
 
-  const after = instancer._batches.get("leddisplay::ledface");
+  const after = instancer._batches.get("leddisplay::face");
   check("the authored board left the face batch", after?.insts.length === 2);
   check("...and the other two stayed", after?.insts.includes(props.instances[1])
     && after?.insts.includes(props.instances[2]));

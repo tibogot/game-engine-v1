@@ -228,13 +228,26 @@ console.log("\n=== WIRED INTO THE GAME ===");
   // one image. Match the PREDICATE rather than the old literal, so the check
   // still catches a slide back to "simulated props only" (the 648-draw editor)
   // without failing every time a documented exception is added.
-  const ctor = game.split("\n").find((l) => l.includes("new PropInstancer(")) ?? "";
+  // The WHOLE call, not one line: the predicate moved onto its own line when
+  // the held-back list shrank, and a single-line grab silently stopped seeing
+  // the argument it exists to check.
+  const ctor = /new PropInstancer\([\s\S]*?\);/.exec(game)?.[0] ?? "";
   check("the instancer is constructed at all", ctor.length > 0);
   check("every prop type is instanced, not just the simulated ones",
     !/sim|physic|dynamic|movable/i.test(ctor), ctor.trim().slice(0, 120));
-  check("...and the only props held back are the per-poster ad boards",
-    ["adboard", "adtotem", "adprism"].every((id) => ctor.includes(id))
-    || /\(\) => true/.test(ctor));
+  // ADBOARD AND ADTOTEM ARE INSTANCED NOW. They were held back because each
+  // placement can wear its own poster and a texture cannot vary per instance —
+  // solved by splitting structure from content face, so stock boards share one
+  // poster draw and only an authored one leaves for a live mesh.
+  //
+  // What is left is held back for reasons the split does not address: the prism
+  // animates its slats on a per-material uTime and samples three faces, and the
+  // asphalt lot deliberately shares the LIVE ROAD MATERIAL, which reads world
+  // position and would be rewritten by instancing.
+  check("...and the only props held back are the prism and the asphalt lot",
+    ["adprism", "asphaltlot"].every((id) => ctor.includes(id))
+    && !/"adboard"/.test(ctor) && !/"adtotem"/.test(ctor),
+    ctor.replace(/\s+/g, " ").slice(0, 140));
   check("...in BOTH modes, not on the drive-mode switch",
     /propInstancer\.setEnabled\(true\);/.test(game)
     && !/propInstancer\.setEnabled\(on\)/.test(game));

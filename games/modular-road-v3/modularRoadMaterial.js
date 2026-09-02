@@ -48,8 +48,26 @@ import {
   wetClearcoatNormal,
 } from "./modularRoadWet.js";
 
+/**
+ * An authored sRGB hex as a working-space (linear) Color.
+ *
+ * THIS USED TO CONVERT TWICE. `new THREE.Color(hex)` already runs the sRGB→
+ * linear transfer function — `setHex` defaults to SRGBColorSpace and calls
+ * `ColorManagement.toWorkingColorSpace`, and nothing in v3 disables colour
+ * management — so the extra `convertSRGBToLinear()` applied the curve a second
+ * time. Every colour in this file rendered 5–10× darker and more saturated
+ * than its hex implied (0x5c626a landed at 0.011 linear, not the 0.11 the
+ * comment below claimed), and the non-dominant channels were crushed hardest,
+ * so reds oversaturated as well as darkened.
+ *
+ * The hex literals were rebased in the same commit that removed the second
+ * conversion, so the rendered result did not move — every colour is within
+ * half an 8-bit code of what it was. They read darker now because that IS the
+ * colour that was rendering; the pretty hexes were never what you saw. Pick
+ * with any external colour picker and it will now match.
+ */
 function lin(hex) {
-  return new THREE.Color(hex).convertSRGBToLinear();
+  return new THREE.Color(hex);
 }
 
 /**
@@ -83,25 +101,31 @@ function resolveWetShadowNode(opts) {
  */
 export function createRoadMaterial(opts = {}) {
   const u = {
-    // ASPHALT ALBEDO. Kept intentionally above real-world asphalt (~0.04–0.12
-    // linear) so black tyres stay readable against the deck in-game. These land
-    // around ~0.11–0.22 linear — still reads as asphalt, just a mid-grey track
-    // rather than a near-black one. Use the panel's dark/light colour pickers
-    // to push warmer, cooler, or darker from here.
-    asphaltDark: uniform(lin(opts.asphaltDark ?? 0x5c626a)),
-    asphaltLight: uniform(lin(opts.asphaltLight ?? 0x8a919a)),
+    // ASPHALT ALBEDO. These land around 0.011–0.052 linear — DARKER than real
+    // asphalt (~0.04–0.12), not above it. The comment here used to claim
+    // ~0.11–0.22 and a "mid-grey track"; that was the intent, but `lin()`
+    // converted twice and delivered a near-black one. The double conversion is
+    // gone and these hexes are the rebased equivalents, so the deck looks
+    // exactly as it did — it just no longer lies about why.
+    //
+    // The light rig was tuned against this darkness (envIntensity 0.45,
+    // hemi 0.6, dir 2.6 in roadGame, against editor defaults of 0.2/0.4). If
+    // you want the mid-grey deck the old comment described, raise these two
+    // toward 0x5c626a / 0x8a919a and pull those intensities back down.
+    asphaltDark: uniform(lin(opts.asphaltDark ?? 0x1b1f25)),
+    asphaltLight: uniform(lin(opts.asphaltLight ?? 0x414852)),
     /** Final multiplier on the deck albedo — the one knob for "too dark / too
      *  bright" without touching the two colours. */
     deckBrightness: uniform(opts.deckBrightness ?? 1.0),
-    lineColor: uniform(lin(opts.lineColor ?? 0xf2f2f2)),
-    railA: uniform(lin(opts.railA ?? 0xd0342c)),
-    railB: uniform(lin(opts.railB ?? 0xf0f0f0)),
+    lineColor: uniform(lin(opts.lineColor ?? 0xe2e2e2)),
+    railA: uniform(lin(opts.railA ?? 0xa10906)),
+    railB: uniform(lin(opts.railB ?? 0xdedede)),
     /** 0 = kerbs painted solid railA (the default look); 1 = railA/railB hazard
      *  stripes. Turn pieces will opt into stripes later — keep the machinery. */
     railStriped: uniform(opts.railStriped ?? 0),
     /** Slab edge + underside. Defaults to the KERB colour, so a piece reads as
      *  one painted object from any angle instead of a red-topped grey slab. */
-    sideColor: uniform(lin(opts.sideColor ?? 0xd0342c)),
+    sideColor: uniform(lin(opts.sideColor ?? 0xa10906)),
     centerHalf: uniform(opts.centerHalf ?? 0.045), // half-width of centre line (lateral units)
     centerSoft: uniform(opts.centerSoft ?? 0.02),
     centerDash: uniform(opts.centerDash ?? 0.18), // dashes per meter along
@@ -297,7 +321,7 @@ export function createRoadMaterial(opts = {}) {
     tarSnakeAmount: uniform(opts.tarSnakeAmount ?? 0),
     /** Sealant colour. Near-black and slightly warm — fresh bitumen. Push it
      *  grey-brown for old, sun-bleached repairs. */
-    tarSnakeColor: uniform(lin(opts.tarSnakeColor ?? 0x141210)),
+    tarSnakeColor: uniform(lin(opts.tarSnakeColor ?? 0x020201)),
     /** Contours per unit of the macro field — this is the SPACING knob. Higher
      *  packs more cracks in; the field's own gradient does the rest, so the
      *  spacing varies naturally instead of being a grid. */
@@ -372,8 +396,8 @@ export function createRoadMaterial(opts = {}) {
     linesBloomIntensity: uniform(opts.linesBloomIntensity ?? 3.0),
     // Rideable tubes (aZone 3 = inner wall, 4 = outer shell) — their own look,
     // clearly not asphalt, plus emissive neon rings inside that bloom.
-    tubeInner: uniform(lin(opts.tubeInner ?? 0x24303c)), // dark blue-steel interior
-    tubeOuter: uniform(lin(opts.tubeOuter ?? 0xd9662a)), // hot-wheels orange shell
+    tubeInner: uniform(lin(opts.tubeInner ?? 0x04080c)), // dark blue-steel interior
+    tubeOuter: uniform(lin(opts.tubeOuter ?? 0xb12206)), // hot-wheels orange shell
     // Was cyan glow rings (0x35e0ff) + bloom. Parked: we may go back to a black
     // stripe that reuses this blue as the emissive. White paint for now.
     // neonColor: uniform(lin(opts.neonColor ?? 0x35e0ff)),
@@ -385,7 +409,7 @@ export function createRoadMaterial(opts = {}) {
     // own material, which is the whole reason it is cheap: the piece stays one
     // mesh on the shared road material, so it still instances with every other
     // road piece instead of adding a draw call per placement.
-    panelColor: uniform(lin(opts.panelColor ?? 0xf4f4f2)), // lacquered white
+    panelColor: uniform(lin(opts.panelColor ?? 0xe7e7e2)), // lacquered white
     panelRough: uniform(opts.panelRough ?? 0.09), // wet-looking, not mirror
     // ── WET ROAD ─────────────────────────────────────────────────────────
     // Declared unconditionally, even when `opts.wet` is off, so that a look
@@ -1399,7 +1423,7 @@ export function createRoadMaterial(opts = {}) {
  * heavier scene ever changes that arithmetic.
  */
 export const ROAD_GLASS = {
-  color: 0xeef7f7, // near-neutral; a saturated tint is what made it read plastic
+  color: 0xdaeded, // near-neutral; a saturated tint is what made it read plastic
   roughness: 0.02,
   ior: 1.5,
   thickness: 0.25, // how far light travels inside the pane — drives the tint depth
@@ -1544,8 +1568,8 @@ function tubeRingMask(u, along) {
  */
 export function createTubeMaterial(opts = {}) {
   const u = {
-    tubeInner: uniform(lin(opts.tubeInner ?? 0x24303c)),
-    tubeOuter: uniform(lin(opts.tubeOuter ?? 0xd9662a)),
+    tubeInner: uniform(lin(opts.tubeInner ?? 0x04080c)),
+    tubeOuter: uniform(lin(opts.tubeOuter ?? 0xb12206)),
     // neonColor: uniform(lin(opts.neonColor ?? 0x35e0ff)), // cyan glow + bloom
     neonColor: uniform(lin(opts.neonColor ?? 0xffffff)),
     neonIntensity: uniform(opts.neonIntensity ?? 3.0),
@@ -1630,14 +1654,14 @@ export function syncTubeUniforms(mat, p) {
  */
 export function createCheapAsphaltMaterial(opts = {}) {
   const u = {
-    asphaltDark: uniform(lin(opts.asphaltDark ?? 0x5c626a)),
-    asphaltLight: uniform(lin(opts.asphaltLight ?? 0x8a919a)),
+    asphaltDark: uniform(lin(opts.asphaltDark ?? 0x1b1f25)),
+    asphaltLight: uniform(lin(opts.asphaltLight ?? 0x414852)),
     deckBrightness: uniform(opts.deckBrightness ?? 1.0),
-    lineColor: uniform(lin(opts.lineColor ?? 0xf2f2f2)),
-    railA: uniform(lin(opts.railA ?? 0xd0342c)),
-    railB: uniform(lin(opts.railB ?? 0xf0f0f0)),
+    lineColor: uniform(lin(opts.lineColor ?? 0xe2e2e2)),
+    railA: uniform(lin(opts.railA ?? 0xa10906)),
+    railB: uniform(lin(opts.railB ?? 0xdedede)),
     railStriped: uniform(opts.railStriped ?? 0),
-    sideColor: uniform(lin(opts.sideColor ?? 0xd0342c)),
+    sideColor: uniform(lin(opts.sideColor ?? 0xa10906)),
     centerHalf: uniform(opts.centerHalf ?? 0.045),
     centerSoft: uniform(opts.centerSoft ?? 0.02),
     centerDash: uniform(opts.centerDash ?? 0.18),
@@ -1776,7 +1800,7 @@ export function syncCheapAsphaltUniforms(mat, p) {
  */
 export function createGuardrailMaterial(opts = {}) {
   return new THREE.MeshStandardMaterial({
-    color: lin(opts.color ?? 0xc9d2dc),
+    color: lin(opts.color ?? 0x95a4b7),
     roughness: opts.roughness ?? 0.20,
     metalness: opts.metalness ?? 0.5,
     side: THREE.DoubleSide,
@@ -1786,7 +1810,7 @@ export function createGuardrailMaterial(opts = {}) {
 /** Plain concrete shell material for tunnels (rendered double-sided). */
 export function createTunnelMaterial(opts = {}) {
   return new THREE.MeshStandardMaterial({
-    color: lin(opts.color ?? 0x5b6168),
+    color: lin(opts.color ?? 0x1b1e23),
     roughness: opts.roughness ?? 0.92,
     metalness: opts.metalness ?? 0.0,
     side: THREE.DoubleSide,
@@ -2065,13 +2089,14 @@ export function syncRoadUniforms(mat, p) {
 /**
  * Read the current look back out as a plain, JSON-safe object.
  *
- * The exact inverse of syncRoadUniforms, which matters more than it looks:
- * `lin()` runs the sRGB→linear transfer function on a Color that three has
- * ALREADY moved into the working colour space, so a hand-rolled "convert back"
- * that only undoes one of those steps would darken every colour a little on
- * each save→load cycle. `convertLinearToSRGB()` undoes `convertSRGBToLinear()`
- * and `getHex()` undoes the constructor, so the pair round-trips whatever
- * ColorManagement is set to.
+ * The exact inverse of syncRoadUniforms, which matters more than it looks: get
+ * it wrong and every colour drifts a little on each save→load cycle.
+ *
+ * `lin()` now converts ONCE (see its note), so the inverse is `getHex()` on its
+ * own — that already runs `fromWorkingColorSpace`, i.e. linear→sRGB. The extra
+ * `convertLinearToSRGB()` this used to carry was the mirror of the double
+ * conversion in `lin()`; the pair round-tripped, which is why the panel always
+ * showed back the hex you typed even though neither half was right.
  */
 export function readRoadLook(mat) {
   const u = mat?._roadUniforms;
@@ -2087,7 +2112,7 @@ export function readRoadLook(mat) {
   // save format means by an absent key.
   const out = {};
   for (const k of ROAD_LOOK_COLORS) {
-    if (u[k]) out[k] = _readColor.copy(u[k].value).convertLinearToSRGB().getHex();
+    if (u[k]) out[k] = _readColor.copy(u[k].value).getHex();
   }
   for (const k of ROAD_LOOK_NUMBERS) {
     if (u[k]) out[k] = u[k].value;

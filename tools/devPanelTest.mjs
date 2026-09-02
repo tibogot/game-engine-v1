@@ -100,7 +100,16 @@ console.log("\n=== WORLD-LIGHT SLIDERS COVER THE ACTUAL VALUES ===");
 
   // roadGame's startV3App({ light: {...} }) block wins over the engine default.
   const boot = /startV3App\(\{[\s\S]*?light:\s*\{([\s\S]*?)\}/.exec(game)?.[1] ?? "";
-  const tod = Number(/setTimeOfDay\(([\d.]+)\)/.exec(game)?.[1]);
+  /* The boot time of day moved behind a named constant — `setTimeOfDay(
+   * GAME_TIME_OF_DAY)` rather than an inline number — so scraping a literal out
+   * of the call started returning NaN. That single NaN failed TWO checks: this
+   * slider's range, and the "game sets its own lighting at boot" assertion
+   * below, which only tests `Number.isFinite(tod)`. Resolve the constant, and
+   * still accept an inline literal so either style works. */
+  const todArg = /setTimeOfDay\(\s*([A-Za-z_$][\w$]*|[\d.]+)\s*\)/.exec(game)?.[1] ?? "";
+  const tod = /^[\d.]+$/.test(todArg)
+    ? Number(todArg)
+    : Number(new RegExp(`(?:const|let|var)\\s+${todArg}\\s*=\\s*([\\d.]+)`).exec(game)?.[1]);
 
   const cases = [
     ["dv-tod", "time of day", tod],
@@ -130,14 +139,26 @@ console.log("\n=== WORLD-LIGHT SLIDERS COVER THE ACTUAL VALUES ===");
 
 console.log("\n=== EVERY WIRED CONTROL EXISTS IN THE MARKUP ===");
 {
-  // slider(id, obj, key, ...) — needs both the input and its "-v" readout.
-  const sliders = [...SRC.matchAll(/\bslider\(\s*"([\w-]+)"/g)].map((m) => m[1]);
+  // slider(id, obj, key, …) and roadSlider(id, uniformName, …) — both need the
+  // input AND its "-v" readout. `roadSlider` is counted here on purpose: the
+  // road-look controls moved onto it when they were rebound by NAME instead of
+  // by uniform object, and a regex that only knew `slider(` silently stopped
+  // checking two dozen ids the moment they were converted.
+  const sliders = [...SRC.matchAll(/\b(?:road)?[sS]lider\(\s*"([\w-]+)"/g)].map((m) => m[1]);
   const missing = sliders.filter((id) => !ids.has(id));
   const noReadout = sliders.filter((id) => ids.has(id) && !ids.has(`${id}-v`));
   console.log(`  ${sliders.length} sliders wired`);
   check("every slider() id exists in the markup", missing.length === 0, missing.join(", ") || "all present");
   check("every slider has its -v readout span", noReadout.length === 0,
     noReadout.join(", ") || "all present");
+
+  // Colour inputs: colorUniform(id, uniform) and roadColor(id, uniformName).
+  // No "-v" readout — the swatch itself is the readout.
+  const colors = [...SRC.matchAll(/\b(?:colorUniform|roadColor)\(\s*"([\w-]+)"/g)].map((m) => m[1]);
+  const cMissing = colors.filter((id) => !ids.has(id));
+  console.log(`  ${colors.length} colour inputs wired`);
+  check("every colour input id exists in the markup", cMissing.length === 0,
+    cMissing.join(", ") || "all present");
 
   // The negative lookbehind matters: `classList.toggle("collapsed", …)` is all
   // over this file and would otherwise be read as a control wired to an id
@@ -147,6 +168,32 @@ console.log("\n=== EVERY WIRED CONTROL EXISTS IN THE MARKUP ===");
   console.log(`  ${toggles.length} toggles wired`);
   check("every toggle() id exists in the markup", tMissing.length === 0,
     tMissing.join(", ") || "all present");
+
+  /* ROAD-LOOK CONTROLS MUST RESOLVE THEIR UNIFORM PER EVENT.
+   *
+   * The deck material is REPLACED whenever wetness, anisotropy, grit or line
+   * relief crosses zero, and the replacement carries a fresh uniform() bag. A
+   * control that captured the old uniform object writes into a material nobody
+   * renders: the knob goes dead and the next re-sync snaps the edit back.
+   * `game.roadUniforms` is a getter for exactly this reason, so reading it once
+   * into a local and handing the members out defeats it.
+   */
+  // Checked against CODE, not prose: the comments above these bindings quote the
+  // old snapshotting form to explain why it was wrong, and a raw search of the
+  // file would fail on the note documenting the fix.
+  const CODE = SRC
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  check("road-look controls do not snapshot the uniform bag",
+    !/const\s+ru\s*=\s*game\.roadUniforms/.test(CODE),
+    "`const ru = game.roadUniforms` captures one material's uniforms");
+  check("nothing reaches around the getter into the material",
+    !/game\.roadMaterial\??\.\s*_roadUniforms/.test(CODE),
+    "use game.roadUniforms (a getter) so the binding follows a rebuild");
+  // Every road control goes through the by-name helpers, which re-resolve on
+  // each event and attach their listener exactly once.
+  const byName = [...SRC.matchAll(/\broad(?:Slider|Color)\(\s*"([\w-]+)"/g)].length;
+  check("the road-look controls are bound by name", byName >= 25, `${byName} bound`);
 
   // Duplicate ids: querySelector takes the first, so the second control is dead.
   const all = [...SRC.matchAll(/id="([\w-]+)"/g)].map((m) => m[1]);

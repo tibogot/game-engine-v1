@@ -68,7 +68,6 @@ export const DEFAULT_VEHICLE_AUDIO_SETTINGS = {
   enginePitchEase: 10,
   engineFadeEaseUp: 18,
   windMul: 0,
-  nitroMul: 0.3,
   wheelsMul: 0,
   driftBrakeMul: 0.45,
   engineLoopStartMs: 0,
@@ -89,7 +88,6 @@ const DEFAULT_PATHS = {
   // was fixed with a `?url` import, which is the other valid answer here.
   engine: "/sounds/testengine2-loop.wav",
   wind: "/v2/static/sounds/vehicle/wind-speed.mp3",
-  nitro: "/v2/static/sounds/vehicle/nitro-activation.mp3",
   wheels: "/v2/static/sounds/vehicle/wheels-surface.mp3",
   driftBrake: "/v2/static/sounds/vehicle/brak_SOUND.ogg",
 };
@@ -474,7 +472,7 @@ function enginePitchFromSpeed(st, curSpeed, normalMax) {
 }
 
 /**
- * Register synth engine, wind, wheels, handbrake, and nitro layers on the vehicle bus.
+ * Register synth engine, wind, wheels and handbrake layers on the vehicle bus.
  *
  * @param {ReturnType<typeof createModularRoadAudioSystem>} audioSystem
  * @param {{
@@ -511,7 +509,6 @@ export function setupModularRoadVehicleAudio(audioSystem, ctx) {
       enginePitchEase: s.enginePitchEase ?? 10,
       engineFadeEaseUp: s.engineFadeEaseUp ?? 18,
       windMul: s.windMul ?? 0,
-      nitroMul: s.nitroMul ?? 0.3,
       wheelsMul: s.wheelsMul ?? 0,
       driftBrakeMul: s.driftBrakeMul ?? 0.45,
       engineLoopStartMs: s.engineLoopStartMs ?? 0,
@@ -599,39 +596,21 @@ export function setupModularRoadVehicleAudio(audioSystem, ctx) {
     }),
   );
 
-  const nitroItem = audioSystem.register({
-    bus: "vehicle",
-    src: paths.nitro,
-    loop: false,
-    autoplay: false,
-    volume: 0,
-    rate: 1,
-    pool: 4,
-    onPlaying: whenDriving((item) => {
-      const keys = getKeys();
-      const forward = keys.KeyW || keys.ArrowUp;
-      const backward = keys.KeyS || keys.ArrowDown;
-      const keyN = !!keys.KeyN;
-      const curSpeed = travelSpeed(vehicle.body);
-      const active = keyN && forward && !backward && curSpeed > 1;
-      const rising = active && item._nitroPrevActive !== true;
-      if (rising) {
-        item.volume = settings().nitroMul;
-        try {
-          item.howl.stop();
-        } catch (_) {
-          /* ignore */
-        }
-        item.howl.play();
-        forgetAudioParams(item); // new sound node — see forgetAudioParams
-      }
-      item._nitroPrevActive = active;
-    }),
-  });
-  nitroItem.howl.on("end", () => {
-    nitroItem.volume = 0;
-  });
-  registered.push(nitroItem);
+  /* NO NITRO LAYER - THERE IS NO NITRO.
+   *
+   * A layer used to sit here polling `keys.KeyN && (keys.KeyW || keys.ArrowUp)`
+   * every frame of every drive. Two separate things were wrong and together they
+   * made it silent forever: roadGame stores key codes LOWERCASED (`keys[code]`
+   * with `code = e.code.toLowerCase()`), so all four names read undefined; and
+   * `keyn` is the BUILD-mode "seed a new chain" shortcut, not a boost button.
+   * So it decoded an mp3, held a pool of four, and ran a per-frame callback for
+   * a mechanic this game does not have. Fixing only the casing would have been
+   * worse than leaving it: a boost whoosh with no boost behind it.
+   *
+   * If nitro ever becomes real, register it here driven by the VEHICLE's input
+   * the way the handbrake layer below reads `vehicle.input.handbrake`, rather
+   * than by scraping raw key names.
+   */
 
   const driftLoop = howlerLoopLayerOptions(st0, "driftBrake");
   registered.push(
@@ -646,7 +625,10 @@ export function setupModularRoadVehicleAudio(audioSystem, ctx) {
       volume: 0,
       onPlaying: whenDriving((item) => {
         const keys = getKeys();
-        const handbrake = !!keys.Space || !!vehicle.input?.handbrake;
+        // `keys.space` is LOWERCASE - roadGame lowercases every code, so this read
+        // `keys.Space` and was dead. It only worked because of the vehicle.input
+        // fallback beside it, which is the reliable half anyway.
+        const handbrake = !!keys.space || !!vehicle.input?.handbrake;
         const curSpeed = travelSpeed(vehicle.body);
         const drifting = isDrifting(vehicle);
         const speedGate = THREE.MathUtils.smoothstep(curSpeed, 2, 16);

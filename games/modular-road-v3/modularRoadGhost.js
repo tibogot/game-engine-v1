@@ -22,12 +22,28 @@ const _qa = new THREE.Quaternion();
 const _qb = new THREE.Quaternion();
 
 export class GhostTrack {
-  constructor({ sampleHz = 60 } = {}) {
+  constructor({ sampleHz = 60, maxSeconds = 300 } = {}) {
     this.dtSample = 1 / sampleHz;
+    /**
+     * A HARD CEILING ON ONE RECORDING, because nothing else ends it.
+     *
+     * `record()` only runs while the run clock is running, and that clock only
+     * stops on a finish or a respawn — so a player who crosses START and then
+     * just drives around records for as long as they keep driving. At 60 Hz and
+     * eight numbers a sample that is a plain JS array growing ~3.8 KB/s, for
+     * ever, with no upper bound at all.
+     *
+     * Five minutes is far past any real lap on an arcade track. Past it the
+     * recording STOPS and is marked spoiled, rather than being truncated:
+     * a half-recorded ghost would replay a car that stops dead mid-track, which
+     * is worse than having no ghost.
+     */
+    this.maxSamples = Math.max(2, Math.round(maxSeconds * sampleHz));
     // In-progress recording (plain arrays, cheap to push).
     this._recT = null;
     this._recP = null;
     this._recQ = null;
+    this._recOverflow = false;
     // Committed ghost (packed typed arrays) + playback cursor.
     this.times = null; // Float32Array(n)
     this.pos = null; // Float32Array(n*3)
@@ -47,12 +63,18 @@ export class GhostTrack {
     this._recT = [];
     this._recP = [];
     this._recQ = [];
+    this._recOverflow = false;
   }
 
   /** Sample the live car (call each frame while the lap clock runs). */
   record(lapT, pos, quat) {
-    if (!this._recT) return;
+    if (!this._recT || this._recOverflow) return;
     const n = this._recT.length;
+    if (n >= this.maxSamples) {
+      // Stop growing, and remember that this take is no longer a whole lap.
+      this._recOverflow = true;
+      return;
+    }
     if (n === 0 || lapT - this._recT[n - 1] >= this.dtSample) {
       this._recT.push(lapT);
       this._recP.push(pos.x, pos.y, pos.z);
@@ -71,6 +93,11 @@ export class GhostTrack {
 
   /** Promote the in-progress recording to the active ghost (on a new best lap). */
   commit() {
+    // An overflowed take is not a lap — see maxSamples.
+    if (this._recOverflow) {
+      this.discard();
+      return false;
+    }
     if (!this._recT || this._recT.length < 2) {
       this._recT = this._recP = this._recQ = null;
       return false;
@@ -86,6 +113,7 @@ export class GhostTrack {
   /** Throw away the in-progress recording (lap wasn't a record). */
   discard() {
     this._recT = this._recP = this._recQ = null;
+    this._recOverflow = false;
   }
 
   /** Drop the committed ghost too (e.g. on "clear record"). */

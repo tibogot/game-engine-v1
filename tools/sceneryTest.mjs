@@ -238,8 +238,22 @@ console.log("\n=== LED DISPLAY IS A NEW OBJECT, OLD BOARDS UNTOUCHED ===");
   const fb = meshesOf(b).find((m) => m.userData.ledDisplayFace);
   check("two default placements still share the LED face material", fa && fb && fa.material === fb.material);
   const game = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
-  check("ad boards stay out of the instancer",
-    /id !== "adboard" && id !== "adtotem" && id !== "adprism"/.test(game));
+  // Ad boards are INSTANCED now, split structure/poster the same way this very
+  // block checks the LED display is split. The prism stays out: it animates its
+  // slats on a per-material uTime and samples three faces at once.
+  check("ad boards are instanced, with only the prism held back",
+    !/id !== "adboard"/.test(game) && !/id !== "adtotem"/.test(game)
+    && /id !== "adprism"/.test(game));
+  const adBoard = makeSceneryProp("adboard");
+  const posters = [];
+  adBoard.traverse((o) => { if (o.userData?.adPoster) posters.push(o); });
+  check("the ad poster is tagged so the instancer can split it off", posters.length === 1);
+  const p1 = makeSceneryProp("adboard");
+  const p2 = makeSceneryProp("adboard");
+  const m1 = meshesOf(p1).find((m) => m.userData.adPoster);
+  const m2 = meshesOf(p2).find((m) => m.userData.adPoster);
+  check("two stock boards each own their poster material (authoring one is local)",
+    !!m1 && !!m2 && m1.material !== m2.material);
   check("LED display is NOT excluded from the instancer",
     !/id !== "leddisplay"/.test(game));
 }

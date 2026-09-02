@@ -230,8 +230,14 @@ const v1File = () => ({
   const res = IO.importTrack(v1File(), ctxFor(b, dest));
 
   check("a v1 file still loads", res.ok, res.error);
-  check("...and says so", res.migratedFrom === 1 && res.steps.join() === "v1→v2",
-    JSON.stringify(res.steps));
+  // Asserts the SHAPE of the chain, not one hard-coded pair: a v1 file has to
+  // start at v1, climb one version per step, and land on the current version.
+  // Spelling out "v1→v2" meant this failed the moment v3 was added, which is a
+  // test breaking on a correct change rather than catching a wrong one.
+  const wantSteps = [];
+  for (let v = 1; v < IO.TRACK_VERSION; v++) wantSteps.push(`v${v}→v${v + 1}`);
+  check("...and says so", res.migratedFrom === 1 && res.steps.join() === wantSteps.join(),
+    `${JSON.stringify(res.steps)} vs ${JSON.stringify(wantSteps)}`);
 
   // GEOMETRY IS PRESERVED. Everything the v1 file differed from today's
   // defaults on is still applied — that is the contract of a migration nobody
@@ -365,9 +371,20 @@ for (const name of ["rushline.json", "apex-parkour.json", "airjump.json"]) {
   if (realDefaults !== DEFAULTS) {
     const keysBefore = raw.pieces.reduce((n, p) => n + Object.keys(p.pp ?? {}).length, 0);
     const keysAfter = data.pieces.reduce((n, p) => n + Object.keys(p.pp ?? {}).length, 0);
-    check(`${name}: the per-piece snapshot is gone`, keysAfter < keysBefore / 3,
-      `${keysBefore} → ${keysAfter} params across ${raw.pieces.length} pieces, `
-      + `${(before / 1024).toFixed(0)} KB → ${(after / 1024).toFixed(0)} KB`);
+    const detail = `${keysBefore} → ${keysAfter} params across ${raw.pieces.length} pieces, `
+      + `${(before / 1024).toFixed(0)} KB → ${(after / 1024).toFixed(0)} KB`;
+
+    // SPARSIFYING IS THE v1→v2 STEP, so only a v1 file can shrink here. This
+    // asserted the shrink for every shipped track and so failed permanently on
+    // apex-parkour, which was re-saved at v2 and is therefore ALREADY sparse —
+    // the test was wrong, not the migration. A v2+ file must instead come
+    // through unchanged, which is the real contract for it.
+    if ((raw.version ?? 1) === 1) {
+      check(`${name}: v1 per-piece snapshot is gone`, keysAfter < keysBefore / 3, detail);
+    } else {
+      check(`${name}: already sparse at v${raw.version}, migration adds no bulk`,
+        keysAfter <= keysBefore, detail);
+    }
   }
 }
 

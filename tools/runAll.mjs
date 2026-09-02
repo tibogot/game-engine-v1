@@ -26,9 +26,46 @@ import { spawn } from "node:child_process";
 import { cpus } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * THE FIVE LONG VEHICLE SIMULATIONS, and the only reason a full run is minutes
+ * rather than seconds.
+ *
+ * Measured serially: gradeFollow 121.5 s, railTunnel 47.8 s, parkPipe 26.8 s,
+ * jumpDebug 23.0 s, roadHold 16.1 s — 235 s of a 318 s total, against ~0.6 s
+ * each for the other 112 suites. The pool is parallel, so the WALL clock is
+ * bounded by the single longest suite: these five set the floor by themselves.
+ *
+ * Each sweeps a BAND of speeds through a real physics sim, which is both why
+ * they are slow and why they are worth keeping — a bowl radius once shipped
+ * broken because one speed was sampled instead of a band. So they are SKIPPED,
+ * never trimmed: `--fast` drops them for the edit loop, and a full run keeps
+ * them for anything touching the vehicle or the collision BVH.
+ */
+const SLOW = new Set([
+  "gradeFollowTest.mjs",
+  "railTunnelTest.mjs",
+  "parkPipeTest.mjs",
+  "jumpDebugTrack.mjs",
+  "roadHoldTest.mjs",
+]);
+
+const FAST = process.argv.includes("--fast");
+
+// Only `*Test.mjs` / `*.run.mjs` are discovered, and that is what keeps the
+// GENERATORS out: buildParkourTrack.mjs rewrites apex-parkour.json and
+// replaySeed.mjs writes a seed file. Neither is a test and neither matches, so
+// the one way to run them by accident is a blanket `for f in tools/*.mjs` shell
+// loop. Use this runner instead of a loop.
 const files = readdirSync(HERE)
   .filter((f) => /Test(\.run)?\.mjs$/.test(f))
+  .filter((f) => !(FAST && SLOW.has(f)))
   .sort();
+
+if (FAST) {
+  console.log(`fast lane: skipping ${SLOW.size} long vehicle sims`);
+  console.log("run without --fast before committing, or after any vehicle / BVH change\n");
+}
 
 // Each worker is a node process that loads three and bakes BVHs, so this is
 // bounded by MEMORY, not by cores. 8 is ~1.5 GB of peak and already past the
@@ -95,5 +132,5 @@ for (const r of results) {
   if (r.err.trim()) console.log(r.err.trim().split("\n").slice(0, 12).join("\n"));
 }
 
-console.log(`\n${files.length - failed}/${files.length} suites green`);
+console.log(`\n${files.length - failed}/${files.length} suites green${FAST ? ` (fast lane, ${SLOW.size} long sims skipped)` : ``}`);
 process.exit(failed ? 1 : 0);

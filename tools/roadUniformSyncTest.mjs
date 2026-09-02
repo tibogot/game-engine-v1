@@ -140,20 +140,36 @@ check(
 /* ── the lab → game path ──────────────────────────────────────────────────
  * A look leaves the lab as JSON and comes back through syncRoadUniforms, so
  * readRoadLook must be the EXACT inverse or every save→load cycle shifts the
- * colours. `lin()` runs convertSRGBToLinear on a Color the constructor has
- * already moved into the working space, so undoing only one of those steps
- * looks correct and drifts.
+ * colours.
+ *
+ * IT USED TO BE THE EXACT INVERSE OF THE WRONG THING. `new THREE.Color(hex)`
+ * already runs sRGB→linear, so `lin()`'s extra convertSRGBToLinear() applied
+ * the curve twice and every colour rendered 5–10× too dark; readRoadLook
+ * mirrored it with convertLinearToSRGB().getHex(). The pair round-tripped, so
+ * this test passed and the panel showed back the hex you typed — which is
+ * exactly why the bug survived. Round-tripping is necessary, not sufficient.
+ *
+ * So the contract is now BOTH: convert exactly once in each direction, AND
+ * round-trip without drift. The literals were rebased when the second
+ * conversion was removed, so the render did not move (tools/lookRebaseTest.mjs).
  */
 console.log("\n— look round-trip —");
 const { Color, ColorManagement } = await import("three");
 
-const toLinear = (hex) => new Color(hex).convertSRGBToLinear();          // lin()
+const toLinear = (hex) => new Color(hex);                     // lin()
 const scratch = new Color();
-const toHex = (c) => scratch.copy(c).convertLinearToSRGB().getHex();     // readRoadLook()
+const toHex = (c) => scratch.copy(c).getHex();                // readRoadLook()
 
+// Matches the BODY, not the file: the note above `lin()` explains the old
+// double conversion and necessarily names it, so a bare "does the string
+// appear anywhere" test would fail on the comment that documents the fix.
 check(
-  /convertLinearToSRGB\(\)\.getHex\(\)/.test(src),
-  "readRoadLook inverts both the transfer function and the constructor",
+  /function lin\(hex\)\s*\{\s*return new THREE\.Color\(hex\);\s*\}/.test(src),
+  "lin() converts once — the Color constructor already linearises",
+);
+check(
+  !/convertLinearToSRGB\(\)\.getHex\(\)/.test(src) && /_readColor\.copy\(u\[k\]\.value\)\.getHex\(\)/.test(src),
+  "readRoadLook inverts it with getHex() alone",
 );
 
 for (const managed of [true, false]) {

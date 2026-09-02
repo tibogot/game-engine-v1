@@ -1413,7 +1413,15 @@ export class ModularRoadBuilder {
     const key = `${id}|${edges ? 1 : 0}|${JSON.stringify(pp)}`;
     let L = this._localXfCache.get(key);
     if (!L) {
-      L = buildPiece(id, _IDENTITY, pp, roadParams, guardrailParams, edges).connectorOut.clone();
+      // DECK-ONLY: this reads `connectorOut` and nothing else, so building the
+      // rails, the three collision proxies, the shell and the decor was pure
+      // waste on every cache miss — and the key includes the params by value,
+      // so every frame of a param slider drag is a miss. Measured in the kit:
+      // a straight is 2.72 ms full vs 0.03 ms deckOnly, a loop 10.11 vs 0.58.
+      // tools/deckOnlyTest.mjs asserts the two builds return an IDENTICAL
+      // connectorOut across the catalog, which is the whole contract here.
+      L = buildPiece(id, _IDENTITY, pp, roadParams, guardrailParams, edges,
+        { deckOnly: true }).connectorOut.clone();
       // Bounded: params change continuously while a slider is dragged, so this
       // would otherwise grow without limit over a session.
       if (this._localXfCache.size > 128) this._localXfCache.clear();

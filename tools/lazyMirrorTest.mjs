@@ -177,28 +177,65 @@ const conn = KIT.initialConnector();
   // Through loadTrackFile — a v2 track's per-piece params are sparse.
   const { rp, gp, pieces } = await loadTrackFile(ROOT, "games/modular-road-v3/rushline.json");
   let mirrorVerts = 0;
-  const t0 = performance.now();
+
+  /* INTERLEAVED MEDIANS, not one timed pass each.
+   *
+   * This took a single sample of each variant back to back and demanded the
+   * mirrorless build come in under 85% of the other. Standalone that is a wide
+   * margin (38 vs 52 ms, 27% cheaper), but the suite runs 8-way parallel and
+   * under that contention the pair drifted to 96 vs 112 — 86%, and a red run
+   * for a build that had not changed. A flaky test is worse than no test: it
+   * teaches you to ignore red.
+   *
+   * Alternating the two and comparing medians makes both variants share the same
+   * contention, so a busy machine slows the pair together instead of one of them.
+   */
+  const timeBuild = (mirror) => {
+    const t = performance.now();
+    for (const e of pieces) {
+      try {
+        KIT.buildPiece(e.id, new THREE.Matrix4().fromArray(e.connectorIn), e.pp, rp, gp,
+          e.edges ?? true, mirror ? { mirrorRail: true } : undefined);
+      } catch {}
+    }
+    return performance.now() - t;
+  };
+
+  // Vertex count once, outside the timing loop.
   for (const e of pieces) {
     try {
-      const b2 = KIT.buildPiece(e.id, new THREE.Matrix4().fromArray(e.connectorIn), e.pp, rp, gp,
+      const b = KIT.buildPiece(e.id, new THREE.Matrix4().fromArray(e.connectorIn), e.pp, rp, gp,
         e.edges ?? true, { mirrorRail: true });
-      if (b2.railMirrorGeometry) mirrorVerts += b2.railMirrorGeometry.getAttribute("position").count;
+      if (b.railMirrorGeometry) mirrorVerts += b.railMirrorGeometry.getAttribute("position").count;
     } catch {}
   }
-  const withMirror = performance.now() - t0;
-  const t1 = performance.now();
-  for (const e of pieces) {
-    try { KIT.buildPiece(e.id, new THREE.Matrix4().fromArray(e.connectorIn), e.pp, rp, gp, e.edges ?? true); }
-    catch {}
-  }
-  const withoutMirror = performance.now() - t1;
+
+  const withs = [], withouts = [];
+  for (let i = 0; i < 5; i++) { withs.push(timeBuild(true)); withouts.push(timeBuild(false)); }
+  const median = (a) => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
+  const withMirror = median(withs);
+  const withoutMirror = median(withouts);
   const bytes = (v) => ((v * (3 + 3 + 2) * 4) / 1024 / 1024).toFixed(2);
   console.log(`\n  rushline: mirrored rail is ${mirrorVerts} verts ≈ ${bytes(mirrorVerts)} MB`);
   console.log(`            full track build  with mirror ${withMirror.toFixed(0)} ms`);
   console.log(`                              without     ${withoutMirror.toFixed(0)} ms`);
+  /* THRESHOLD RECALIBRATED FROM 0.85 when the measurement was fixed, and the
+   * old number was the artefact rather than this one being a climbdown.
+   *
+   * A single back-to-back pair gave the WITH-mirror pass all of the JIT warmup
+   * and cold-cache cost, which inflated it to 52 ms against 38 and made the
+   * saving look like 27%. Median-of-five, interleaved, puts both variants on
+   * equal footing and the honest figure is ~15%. 0.95 keeps a real assertion —
+   * the mirror build must still cost measurably more — with enough room that
+   * parallel contention cannot flip it.
+   *
+   * The MEMORY saving above (38k verts, 1.16 MB) is the timing-independent half
+   * of this claim, and it is the one that cannot go flaky.
+   */
   check("a normal track build is measurably cheaper without it",
-    withoutMirror < withMirror * 0.85,
-    `${withoutMirror.toFixed(0)} vs ${withMirror.toFixed(0)} ms`);
+    withoutMirror < withMirror * 0.95,
+    `${withoutMirror.toFixed(0)} vs ${withMirror.toFixed(0)} ms `
+    + `(${((1 - withoutMirror / withMirror) * 100).toFixed(0)}% cheaper, medians of 5)`);
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nall good");
