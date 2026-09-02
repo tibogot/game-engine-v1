@@ -1938,6 +1938,37 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * rather than sharing the FrontSide original.
    */
   const PREMIRROR_PROP_IDS = new Set(["neonarm", "neongate"]);
+  /**
+   * PRE-MIRRORED FROM THE LIVE PLACEMENT, not from a fresh template.
+   *
+   * Ad boards and the prism are the brightest things beside a night track and
+   * they are all far too TALL for the planar puddle: the board's poster spans
+   * 3.15–7.65 m and the prism's 6.3–15.3 m, so a 3 m slab reflects the steel
+   * legs and none of the picture — the opposite of the reason to reflect them.
+   * That puts them on the pre-mirror path with the neon arms.
+   *
+   * They cannot go through `addMirroredProps`, though, and not because of cost:
+   *
+   *   • The poster is PER PLACEMENT (`uniquePoster`), and that path shares one
+   *     template material across every placement — so every mirrored board
+   *     would show the default poster instead of the uploaded one.
+   *   • The prism's slats rotate in the VERTEX SHADER off a shared `uTime`, and
+   *     the LED board's content lives on the placement's own material too.
+   *   • Scenery `make` ignores its arguments (`make: () => makeSceneryProp(id)`),
+   *     so the `side: DoubleSide` that path asks for never arrives anyway.
+   *
+   * So copy from the LIVE object and share both geometry and material. The
+   * reflection then shows this board's picture, and the prism's reflection
+   * turns with it, for free — one shared uniform drives both.
+   *
+   * Sharing a FrontSide material is safe under the flip: three's WebGPU
+   * pipeline already inverts the winding for a negative-determinant world
+   * matrix (`WebGPUPipelineUtils`: `if (determinant() < 0) flipSided = !flipSided`),
+   * so the mirrored copy faces the right way without a DoubleSide clone. That
+   * matters — cloning a node material here would mean rebuilding the poster
+   * and slat graphs by hand and re-pointing `uTime`.
+   */
+  const PREMIRROR_LIVE_PROP_IDS = new Set(["adboard", "adprism", "billboard"]);
   /** Stroke width vs the real neon. A wet-asphalt reflection is a blur, so
    *  a fatter stroke in the half-res target reads more like wet neon than a
    *  one-texel sparkle. */
@@ -1957,6 +1988,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   const PROP_MIRROR_DEPTH_TOL = 36;
   const _mirrorFlipY = new THREE.Matrix4().makeScale(1, -1, 1);
+  /** Scratch for addMirroredLivePropCopy — rebuilds are per edit, not per frame. */
+  const _mirrorInv = new THREE.Matrix4();
+  const _mirrorLocal = new THREE.Matrix4();
   const mirrorPropGroup = new THREE.Group();
   mirrorPropGroup.name = "MirroredProps";
   mirrorPropGroup.layers.set(PREMIRROR_LAYER);
@@ -1969,7 +2003,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let _roadLookRef = null;
 
   function hasPremirrorSources() {
-    if (_propsRef?.instances?.some((i) => PREMIRROR_PROP_IDS.has(i.id))) return true;
+    if (_propsRef?.instances?.some(
+      (i) => PREMIRROR_PROP_IDS.has(i.id) || PREMIRROR_LIVE_PROP_IDS.has(i.id),
+    )) return true;
     for (const p of builderRef?.pieces ?? []) {
       if (p.decorGateMesh) return true;
       const glow = p.decorGlowMesh;
@@ -2115,6 +2151,47 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
   }
 
+  /**
+   * Mirror one placement by copying the LIVE object — see PREMIRROR_LIVE_PROP_IDS.
+   *
+   * Owns NOTHING: geometry and material both still belong to the real prop, so
+   * neither `mirrorOwnsGeometry` nor `mirrorOwnsMaterial` is set and
+   * `disposeMirrorProps` leaves them alone. Freeing either here would take the
+   * poster (or the whole board) out of the main view on the next rebuild.
+   */
+  function addMirroredLivePropCopy(inst) {
+    inst.root.updateMatrixWorld(true);
+    const inv = _mirrorInv.copy(inst.root.matrixWorld).invert();
+    inst.root.traverse((o) => {
+      if (!o.isMesh) return;
+      // Mesh-local within the prop root, so the flip happens about the prop's
+      // own deck plane — the same product `addMirroredProps` builds.
+      const local = _mirrorLocal.copy(inv).multiply(o.matrixWorld);
+      let mesh;
+      if (o.isInstancedMesh) {
+        // Copied rather than skipped: dropping it would silently lose geometry
+        // from the reflection. Instance matrices are relative to the mesh, so
+        // they carry over unchanged and only the mesh transform is mirrored.
+        mesh = new THREE.InstancedMesh(o.geometry, o.material, o.count);
+        mesh.instanceMatrix.array.set(o.instanceMatrix.array);
+        mesh.instanceMatrix.needsUpdate = true;
+        if (o.instanceColor) {
+          mesh.instanceColor = o.instanceColor;
+        }
+      } else {
+        mesh = new THREE.Mesh(o.geometry, o.material);
+      }
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.copy(inst.root.matrixWorld).multiply(_mirrorFlipY).multiply(local);
+      mesh.matrixWorldNeedsUpdate = true;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.frustumCulled = true;
+      mesh.layers.set(PREMIRROR_LAYER);
+      mirrorPropGroup.add(mesh);
+    });
+  }
+
   /** The old path: a whole mirrored copy for one placement. Kept for templates
    *  that instance internally — see `addMirroredProps`. */
   function addMirroredPropCopy(inst, make) {
@@ -2151,6 +2228,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // than each placement building its own copy — see `addMirroredProps`.
     const byId = new Map();
     for (const inst of _propsRef?.instances ?? []) {
+      // Live copies first: these carry a per-placement poster or an animated
+      // material, so they must NOT be folded into a shared template batch.
+      if (PREMIRROR_LIVE_PROP_IDS.has(inst.id)) { addMirroredLivePropCopy(inst); continue; }
       if (!PREMIRROR_PROP_IDS.has(inst.id)) continue;
       let list = byId.get(inst.id);
       if (!list) byId.set(inst.id, list = []);
