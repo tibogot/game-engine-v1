@@ -2286,6 +2286,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const PLANAR_PROP_IDS = new Set([
     "cone", "barrel", "container",
     "hazardplatform", "ramp", "jumpkicker",
+    // Ad totem — the one ad prop short enough for the puddle. Its cabinet tops
+    // out at ~2.45 m (baseH + panelH + frame), inside the 3 m slab, so the WHOLE
+    // thing reflects rather than just the legs. The big board and the prism are
+    // 7.65 m and 15.3 m and are pre-mirrored instead — see PREMIRROR_LIVE_PROP_IDS.
+    "adtotem",
   ]);
   /** Late-bound for the same reason as `_mergedGroupRef`: the builder's
    *  onChange calls the membership pass during construction, before the
@@ -2319,10 +2324,30 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     _propInstancerRef?.group?.traverse((o) => {
       if (!o.isMesh && !o.isInstancedMesh) return;
       const id = o.userData.propId;
-      const want = (SCENERY_MAP.has(id) && sceneryInMirror) || PLANAR_PROP_IDS.has(id);
+      // A prop belongs to ONE mirror, never both. `billboard` is scenery, so the
+      // rule above already had it in the puddle; adding it to the pre-mirror set
+      // as well gave it TWO overlapping reflections — the planar one clipped at
+      // the slab, the pre-mirrored one whole.
+      const want = ((SCENERY_MAP.has(id) && sceneryInMirror) || PLANAR_PROP_IDS.has(id))
+        && !PREMIRROR_LIVE_PROP_IDS.has(id);
       if (want) o.layers.enable(REFLECT_LAYER);
       else o.layers.disable(REFLECT_LAYER);
     });
+    // PLANAR MEMBERSHIP FOR PROPS THE INSTANCER NEVER SEES.
+    //
+    // The walk above is keyed on `userData.propId`, which only exists on an
+    // instancer BATCH — so `PLANAR_PROP_IDS` silently did nothing for any prop
+    // held out of the instancer. Every `uniquePoster` ad prop is held out (their
+    // materials are per placement), the ad totem included, which is why adding
+    // its id to the set on its own changed nothing at all.
+    for (const inst of _propsRef?.instances ?? []) {
+      const want = PLANAR_PROP_IDS.has(inst.id) && !PREMIRROR_LIVE_PROP_IDS.has(inst.id);
+      inst.root?.traverse((o) => {
+        if (!o.isMesh && !o.isInstancedMesh) return;
+        if (want) o.layers.enable(REFLECT_LAYER);
+        else o.layers.disable(REFLECT_LAYER);
+      });
+    }
     // Authored LED display faces sit on the live prop tree, not the instancer,
     // so they would otherwise miss the puddle. Other live props stay off this
     // pass — ads already do, and this is scoped to the tagged face.
