@@ -145,6 +145,9 @@ import {
   DEFAULT_MIXER,
   DEFAULT_VEHICLE_AUDIO_SETTINGS,
 } from "./modularRoadVehicleAudio.js";
+// Same Howler instance the audio system plays through — needed to splice the
+// in-cloud lowpass into its master chain (see updateCloudMuffle).
+import { Howler } from "howler";
 import {
   exportTrack,
   importTrack,
@@ -3530,6 +3533,44 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     getKeys: () => keys,
   });
   const unlockAudio = () => audioSystem.unlock();
+
+  /* ── IN-CLOUD AUDIO MUFFLE ──────────────────────────────────────────────────
+   *
+   * Flying INTO a cloud should close over your ears the way a tunnel does — the
+   * visual system already sells the interior (whiteout, clear bubble), and this
+   * is the audio half: a lowpass spliced after Howler's master gain, swept by
+   * the CPU cloud density at the LISTENER (the camera — densityAt is the hook
+   * built for exactly this, ~2 volume samples per frame). Physically clouds
+   * barely attenuate sound; this is a feel effect, tuned like water/tunnel
+   * muffling in arcade racers.
+   *
+   * The graph is only touched the FIRST time muffling is actually needed, so a
+   * player who never enters a cloud keeps Howler's stock chain.
+   */
+  let _muffleAmt = 0;
+  let _muffleNode = null;
+  function updateCloudMuffle(dt) {
+    const actx = Howler?.ctx, mg = Howler?.masterGain;
+    if (!actx || !mg) return;
+    const p = camera.position;
+    const target = clouds.enabled && clouds.isReady
+      ? Math.min(1, clouds.densityAt(p.x, p.y, p.z) / 0.05)
+      : 0;
+    // ~0.3 s ease each way: entering a cloud closes in audibly but not as a cut.
+    _muffleAmt += (target - _muffleAmt) * Math.min(1, dt * 5);
+    if (!_muffleNode) {
+      if (_muffleAmt < 0.01) return;
+      _muffleNode = actx.createBiquadFilter();
+      _muffleNode.type = "lowpass";
+      _muffleNode.frequency.value = 18000;
+      mg.disconnect();
+      mg.connect(_muffleNode);
+      _muffleNode.connect(actx.destination);
+    }
+    // Log-space sweep, open (18 kHz ≈ bypass) → deep inside (900 Hz).
+    const f = 18000 * Math.pow(900 / 18000, Math.min(1, _muffleAmt));
+    _muffleNode.frequency.setTargetAtTime(f, actx.currentTime, 0.05);
+  }
   addEventListener("pointerdown", unlockAudio, { passive: true });
   addEventListener("keydown", unlockAudio, { passive: true });
 
@@ -4808,6 +4849,50 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // however it got there.
   const roadLook = readRoadLook(roadMaterial);
   _roadLookRef = roadLook;
+
+  /* ── PER-TRACK ENVIRONMENT (sky mode + the cloud deck) ────────────────────
+   *
+   * What lets ONE track be a cloud-dive track — terrain gone, deck dropped to
+   * ramp height so the car flies through it — while every other track keeps
+   * the game's sky. Same mirror pattern as `roadLook`: the live state is
+   * re-read at every save (however it was changed — dev panel, console, F-key),
+   * sparse-diffed against the BOOT values, and a load resolves the file over
+   * those same defaults — so a track that never touched the sky saves nothing
+   * and always follows the current build.
+   *
+   * `setTerrain` was documented as "a runtime mode, not track data" when it was
+   * only a viewing toggle; a track DESIGNED around the sky (pieces above cloud,
+   * nothing at ground level) is a different thing — the mode is part of the
+   * track's shape there, which is exactly what the sparse rule expresses: it is
+   * only written when it is a choice.
+   */
+  const CLOUD_ENV_MAP = {
+    cloudBase: "base",
+    cloudThickness: "thickness",
+    cloudCoverage: "coverage",
+    cloudCoverageSoft: "coverageSoft",
+    cloudTypeBias: "typeBias",
+    cloudTopMin: "cloudTopMin",
+    cloudWindDeg: "windDeg",
+    cloudWindSpeed: "windSpeed",
+    cloudShadowStrength: "shadowStrength",
+  };
+  function readTrackEnv(into = {}) {
+    into.skyMode = !terrainOn;
+    into.cloudsOn = clouds.enabled;
+    for (const [k, p] of Object.entries(CLOUD_ENV_MAP)) into[k] = clouds.params[p];
+    return into;
+  }
+  /** Boot-time baseline — the values a track inherits when it saved nothing. */
+  const TRACK_ENV_DEFAULTS = Object.freeze(readTrackEnv({}));
+  const trackEnv = readTrackEnv({});
+  function applyTrackEnv() {
+    setTerrain(!trackEnv.skyMode);
+    clouds.setEnabled(!!trackEnv.cloudsOn);
+    for (const [k, p] of Object.entries(CLOUD_ENV_MAP)) {
+      if (trackEnv[k] !== undefined) clouds.params[p] = trackEnv[k];
+    }
+  }
   /**
    * The pristine baselines a save is diffed against and a load resolves onto.
    *
@@ -4825,10 +4910,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     pieceParams: PIECE_PARAM_DEFAULTS,
     portalParams: DEFAULT_PORTAL_PARAMS,
     roadLook: roadLookDefaults(),
+    environment: TRACK_ENV_DEFAULTS,
   });
 
   const trackCtx = () => {
     Object.assign(roadLook, readRoadLook(roadMaterial));
+    readTrackEnv(trackEnv); // mirror, like roadLook: capture whatever is on screen
     return {
       builder,
       props,
@@ -4839,6 +4926,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       pieceParams,
       portalParams: portals.params,
       roadLook,
+      environment: trackEnv,
       defaults: trackDefaults(),
     };
   };
@@ -4967,6 +5055,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
     reportTrackLoad(res, "track");
     applyRoadLook();
+    applyTrackEnv();
     gameSpawn = data.spawn ?? null;
     const nameEl = document.getElementById("road-track-name");
     if (nameEl) nameEl.value = typeof data.name === "string" ? data.name : "";
@@ -5009,6 +5098,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         if (!out.ok) throw new Error(out.error);
         reportTrackLoad(out, idleLabel ?? btnId);
         applyRoadLook();
+        applyTrackEnv();
         gameSpawn = data.spawn ?? null;
         updateSpawnMarker();
         bakeCollision();
@@ -6637,6 +6727,7 @@ ${e.message}`);
     // just in drive mode) so layers fade out cleanly when the car is parked or
     // you switch back to build.
     audioSystem.update(dt);
+    updateCloudMuffle(dt);
 
     // The sun can be moved live from the v3 world panel, so re-check rather than
     // only sampling at boot. Throttled — this is a scene lookup, not per-frame work.

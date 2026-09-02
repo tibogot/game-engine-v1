@@ -155,7 +155,15 @@ function applyResolved(target, resolved) {
  * this format had was precisely a block being handled slightly differently from
  * its neighbours and nobody noticing for months.
  */
-const PARAM_BLOCKS = ["roadParams", "guardrailParams", "pieceParams", "portalParams", "roadLook"];
+/*
+ * `environment` is the per-track SKY: sky-mode (terrain hidden) and the cloud deck's
+ * shape/placement. Added so one track can be a cloud-dive track (deck at ramp height,
+ * terrain gone) while every other track inherits the game's defaults — the sparse rule
+ * means a track that never touched the sky saves nothing and follows the build. Old
+ * files simply lack the key (absent = inherit), old builds ignore it, so no version
+ * bump. Keys are FLAT (cloudBase, not clouds.base) because sparse() diffs shallowly.
+ */
+const PARAM_BLOCKS = ["roadParams", "guardrailParams", "pieceParams", "portalParams", "roadLook", "environment"];
 
 /**
  * v1 → v2: sparsify. Same track, far less of it.
@@ -298,9 +306,10 @@ export function exportTrack({
   pieceParams,
   portalParams,
   roadLook,
+  environment,
   defaults,
 }) {
-  const live = { roadParams, guardrailParams, pieceParams, portalParams, roadLook };
+  const live = { roadParams, guardrailParams, pieceParams, portalParams, roadLook, environment };
   const out = {
     format: TRACK_FORMAT,
     version: TRACK_VERSION,
