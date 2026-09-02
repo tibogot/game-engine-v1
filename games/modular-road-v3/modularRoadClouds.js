@@ -1195,7 +1195,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     const cloud = upsampleCloud(fuv);
     // Ground shadow first, cloud over the (darkened) scene second, shafts on top.
     const sceneCol = sceneTex.sample(fuv).rgb.mul(shadowFactor(fuv));
-    const shafts = shaftTex.sample(fuv).rgb.mul(uRayActive);
+    const shafts = sampleShafts(fuv).mul(uRayActive);
     return vec4(sceneCol.mul(cloud.a.oneMinus()).add(cloud.rgb).add(shafts), 1.0); // premultiplied over
   });
 
@@ -1219,7 +1219,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     const s = shadowFactor(fuv);
     // Shafts ride src.rgb: with the premultiplied-over blend they ADD light without
     // occluding anything behind them, which is exactly what scattered light does.
-    const shafts = shaftTex.sample(fuv).rgb.mul(uRayActive);
+    const shafts = sampleShafts(fuv).mul(uRayActive);
     return vec4(cloud.rgb.add(shafts), cloud.a.oneMinus().mul(s).oneMinus());
   });
 
@@ -1259,6 +1259,27 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     depthBuffer: false,
   });
   const shaftTex = texture(shaftRT.texture);
+  const uShaftTexel = uniform(new THREE.Vector2(1, 1));
+
+  /**
+   * Shaft fetch for the composites: a 4-tap diagonal tent over the quarter-res buffer.
+   *
+   * The march start is dithered per pixel (see shaftColorNode) to stop the taps slicing
+   * the glow into concentric rings — but with no temporal accumulation on this buffer the
+   * dither itself prints as a stationary woven pattern on broad gradients (user-reported).
+   * Rings and pattern are both spatial noise around the same mean, so a small blur is the
+   * correct resolve for both: shafts are inherently low-frequency, the tent costs 3 extra
+   * bilinear fetches, and after it the dither is exactly what it was meant to be — extra
+   * samples, not texture.
+   */
+  const sampleShafts = Fn(([fuv]) => {
+    const o = uShaftTexel;
+    return shaftTex.sample(fuv.add(vec2(o.x, o.y)))
+      .add(shaftTex.sample(fuv.add(vec2(o.x.negate(), o.y))))
+      .add(shaftTex.sample(fuv.add(vec2(o.x, o.y.negate()))))
+      .add(shaftTex.sample(fuv.add(vec2(o.x.negate(), o.y.negate()))))
+      .mul(0.25).rgb;
+  });
 
   const shaftColorNode = Fn(() => {
     const fuv = vec2(uv().x, uv().y.oneMinus());
@@ -1268,7 +1289,13 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     const dist = length(delta).max(1e-4);
     // March at most rayLength of the screen, ending at the sun if it is closer.
     const stepUv = delta.mul(min(float(1.0), uRayLen.div(dist))).div(uRaySteps.max(1.0));
-    const p = fuv.toVar();
+    // Dither the march start by up to one tap, or the 24 discrete taps slice the glow
+    // into concentric rings around the sun — the same shell-banding failure the view
+    // march had, in polar coordinates. Static IGN (no frame term): the shaft buffer has
+    // no temporal accumulation to average an animated dither, and a fixed fine pattern
+    // is invisible on gradients this soft at quarter res.
+    const jit = interleavedGradientNoise(screenCoordinate.xy);
+    const p = fuv.add(stepUv.mul(jit)).toVar();
     const skyDepth = uReversed.oneMinus();
     Loop(MAX_RAY_STEPS, ({ i }) => {
       If(float(i).greaterThanEqual(uRaySteps), () => Break());
@@ -1344,6 +1371,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
       uFullTexel.value.set(1 / fw, 1 / fh);
       uAspect.value = fw / fh;
       shaftRT.setSize(Math.max(1, fw >> 2), Math.max(1, fh >> 2));
+      uShaftTexel.value.set(1 / Math.max(1, fw >> 2), 1 / Math.max(1, fh >> 2));
       if (_ownsFrame) sceneRT.setSize(fw, fh);
     }
     const w = Math.max(1, Math.floor(fw * P.bufferScale));
