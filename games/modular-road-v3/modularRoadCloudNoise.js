@@ -322,18 +322,26 @@ export function bakeWeatherMap(seed = 2029) {
       const cov = perlinFbm(perlin, nx, ny, 0.13, 2, 4);
       const typ = perlinFbm(perlin, nx, ny, 0.61, 3, 3);
       const den = perlinFbm(perlin, nx, ny, 0.87, 4, 3);
+      // Push coverage toward a bimodal clear/cloudy split so gaps are genuinely open
+      // rather than uniformly hazy — smoothstep on the raw FBM flattens the midtones.
+      const covS = cov * cov * (3 - 2 * cov);
       // CLOUD-TOP HEIGHT — how much of the slab this cell's cloud fills.
       //
       // This is what turns a layer into clouds. Without it every cell spans the same
       // height range, so the deck can only ever read as a flat sheet however good the
       // erosion is: the eye reads "cloud" from silhouettes of DIFFERENT heights standing
-      // next to each other. Frequency 3 makes a cell a few hundred metres across — big
-      // enough that one cloud has a consistent height, small enough that its neighbour
-      // differs. Its own Z offset, so tall cells are not merely the thick ones.
-      const top = perlinFbm(perlin, nx, ny, 0.41, 3, 4);
-      // Push coverage toward a bimodal clear/cloudy split so gaps are genuinely open
-      // rather than uniformly hazy — smoothstep on the raw FBM flattens the midtones.
-      const covS = cov * cov * (3 - 2 * cov);
+      // next to each other.
+      //
+      // CORRELATED WITH COVERAGE, deliberately. The first version was independent noise,
+      // and an independent tall cell landing on a thin part of a mass extrudes a narrow
+      // stalk — the "chimney / mesa" towers that read as rock formations, not cloud.
+      // Real cumulus tower where the mass is FATTEST: convective depth grows with the
+      // moisture supply. Weighting the top field toward the coverage field puts the
+      // towers on the cores and tapers the skirts shallow, which is a cauliflower dome
+      // per mass; the residual noise term keeps two equally-fat masses from having
+      // identical ceilings. (normalizeChannel restores full range afterward.)
+      const topN = perlinFbm(perlin, nx, ny, 0.41, 3, 2);
+      const top = 0.4 * topN + 0.6 * covS;
       out[i++] = covS * 255;
       out[i++] = typ * 255;
       out[i++] = den * 255;

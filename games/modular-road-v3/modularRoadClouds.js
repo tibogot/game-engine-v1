@@ -204,6 +204,12 @@ export const CLOUD_DEFAULTS = {
   /** How fast the floor ramps in with optical depth to the sun. Higher = brighter sooner. */
   msFloorDepth: 0.55,
 
+  // ── Ground shadows ───────────────────────────────────────────────────────────────
+  /** Max darkening of geometry under dense cloud. 0 = off (skips all shadow work). */
+  shadowStrength: 0.5,
+  /** Cheap-density value that counts as a full shadow. Lower = harder, darker patches. */
+  shadowSoftness: 0.09,
+
   // ── Wind ─────────────────────────────────────────────────────────────────────────
   windDeg: 35,
   /** Metres per second the deck drifts. */
@@ -402,6 +408,13 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const uAerialColorSun = uniform(new THREE.Color(0xa8c0d4));
   const uAerialDensity = uniform(P.aerialDensity);
   const uAerialAmount = uniform(P.aerialAmount);
+
+  /** EFFECTIVE shadow strength — P.shadowStrength times a sun-elevation ramp, so shadows
+   *  die with the light instead of stamping moonlit ground at noon strength. */
+  const uShadowStrength = uniform(0);
+  const uShadowSoft = uniform(P.shadowSoftness);
+  /** Camera forward, for reconstructing world positions from view-Z depth. */
+  const uCamFwd = uniform(new THREE.Vector3(0, 0, -1));
 
   const uFrameJitter = uniform(0);
   /** 1 for a normal depth buffer, 0 for a reversed one. Both conventions appear in v3
@@ -907,6 +920,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const uHistoryClamp = uniform(P.historyClampStrength);
   const _prevCamPos = new THREE.Vector3();
   const _prevCamQuat = new THREE.Quaternion();
+  const _camFwd = new THREE.Vector3();
   let _camMotionInit = false;
 
   /**
@@ -968,7 +982,42 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
         .and(puv.y.greaterThan(0.0)).and(puv.y.lessThan(1.0));
 
       If(inBounds, () => {
-        const raw = histTex.sample(puv);
+        /*
+         * CATMULL-ROM HISTORY FETCH — the anti-mush.
+         *
+         * The accumulation loop re-samples its own output every frame, and under motion
+         * the reprojected uv almost never lands on a texel centre — so a BILINEAR fetch
+         * convolves the history with a small tent filter every single frame. Ten frames
+         * of that IS a Gaussian blur; it is why big nearby clouds read soft even though
+         * the march resolves them fine. Catmull-Rom's negative lobes undo the tent
+         * spreading instead of compounding it (the standard TAA fix — Karis, SIGGRAPH
+         * 2014). 5 bilinear taps instead of 1, in a half-res pass that runs once — cost
+         * is noise-level. The corner taps are dropped (weights ~1%) and the result is
+         * renormalised; any ringing overshoot is caught by the neighbourhood clamp
+         * right below, which this pass already had.
+         */
+        const samplePos = puv.mul(uCloudRes);
+        const texPos1 = floor(samplePos.sub(0.5)).add(0.5);
+        const f = samplePos.sub(texPos1);
+        const w0 = f.mul(f.mul(f.mul(-0.5).add(1.0)).add(-0.5));
+        const w1 = f.mul(f).mul(f.mul(1.5).sub(2.5)).add(1.0);
+        const w2 = f.mul(f.mul(f.mul(-1.5).add(2.0)).add(0.5));
+        const w3 = f.mul(f).mul(f.mul(0.5).sub(0.5));
+        const w12 = w1.add(w2);
+        const off12 = w2.div(w12);
+        const uv0 = texPos1.sub(1.0).mul(uCloudTexel);
+        const uv3 = texPos1.add(2.0).mul(uCloudTexel);
+        const uv12 = texPos1.add(off12).mul(uCloudTexel);
+        const raw = histTex.sample(vec2(uv12.x, uv0.y)).mul(w12.x.mul(w0.y))
+          .add(histTex.sample(vec2(uv0.x, uv12.y)).mul(w0.x.mul(w12.y)))
+          .add(histTex.sample(uv12).mul(w12.x.mul(w12.y)))
+          .add(histTex.sample(vec2(uv3.x, uv12.y)).mul(w3.x.mul(w12.y)))
+          .add(histTex.sample(vec2(uv12.x, uv3.y)).mul(w12.x.mul(w3.y)))
+          .div(
+            w12.x.mul(w0.y).add(w0.x.mul(w12.y)).add(w12.x.mul(w12.y))
+              .add(w3.x.mul(w12.y)).add(w12.x.mul(w3.y)),
+          )
+          .max(0.0);
         // Widen the box by uHistoryClamp: at 1 it is the exact neighbourhood min/max, at
         // 0 the bounds run away and history passes untouched.
         const slack = mx.sub(mn).mul(uHistoryClamp.reciprocal().sub(1.0).max(0.0));
@@ -1042,6 +1091,51 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   });
 
   /**
+   * CLOUD SHADOWS ON THE GROUND — the deck darkening the world under it, which is most
+   * of what makes a broken deck read as physically present while driving.
+   *
+   * Same construction as the editor deck's composite shadows: reconstruct this pixel's
+   * world position from scene depth, walk it up the sun ray to the slab's mid-plane, and
+   * read the CHEAP density there (weather + base shape, no erosion octaves — soft-edged
+   * dapples are what real cloud shadows look like anyway, and this runs at FULL res).
+   * The wind offset is inside sampleDensityCheap, so the shadows drift with the deck.
+   *
+   * Applied by ADJUSTING THE CLOUD'S ALPHA rather than by touching the scene colour:
+   * with the premultiplied-over blend, dst' = rgb + dst·(1−a), so writing
+   * a' = 1 − (1−a)·s multiplies the geometry behind by s for free — which is what lets
+   * the SAME code shade both the owns-the-frame path and the post-FX path, where the
+   * composite never owns the scene colour at all.
+   *
+   * Gated to real geometry (sky pixels keep their depth-clear value), to points below
+   * the slab top, and faded out with distance so far terrain does not sparkle.
+   */
+  const shadowFactor = Fn(([fuv]) => {
+    const s = float(1.0).toVar();
+    If(uShadowStrength.greaterThan(0.001), () => {
+      const d = depthTex.sample(fuv).r;
+      const skyDepth = uReversed.oneMinus();
+      If(abs(d.sub(skyDepth)).greaterThan(0.0001), () => {
+        // World position: view ray through this pixel scaled to the depth's view-Z.
+        const ndc = vec4(fuv.x.mul(2.0).sub(1.0), fuv.y.mul(2.0).sub(1.0), 0.5, 1.0);
+        const wpH = uInvViewProj.mul(ndc);
+        const dir = normalize(wpH.xyz.div(wpH.w).sub(uCamPos));
+        const dist = depthDist(d).div(dot(dir, uCamFwd).max(1e-3));
+        const wp = uCamPos.add(dir.mul(dist));
+
+        const midY = uBase.add(uThickness.mul(0.5));
+        const sunY = max(uSunDir.y, float(0.05));
+        const sp = wp.add(uSunDir.mul(midY.sub(wp.y).div(sunY)));
+        const cov = smoothstep(float(0.0), uShadowSoft, sampleDensityCheap(sp));
+
+        const belowMask = smoothstep(uBase.add(uThickness), uBase.add(uThickness.mul(0.6)), wp.y);
+        const nearMask = smoothstep(uMaxDist, uMaxDist.mul(0.55), dist);
+        s.assign(float(1.0).sub(cov.mul(uShadowStrength).mul(belowMask).mul(nearMask)));
+      });
+    });
+    return s;
+  });
+
+  /**
    * Depth-aware upsample. A flat blur of a half-res cloud buffer is fine for a ceiling
    * 2 km away, and produces a visible bright fringe around every near object once the deck
    * sits at gameplay altitude — the classic half-res halo, which would frame the car and
@@ -1056,7 +1150,8 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     // Render-target sampling is Y-flipped versus the canvas under WebGPU.
     const fuv = vec2(uv().x, uv().y.oneMinus());
     const cloud = upsampleCloud(fuv);
-    const sceneCol = sceneTex.sample(fuv).rgb;
+    // Ground shadow first, cloud over the (darkened) scene second.
+    const sceneCol = sceneTex.sample(fuv).rgb.mul(shadowFactor(fuv));
     return vec4(sceneCol.mul(cloud.a.oneMinus()).add(cloud.rgb), 1.0); // premultiplied over
   });
 
@@ -1073,7 +1168,12 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
    * colour we do not own. Same bilateral weights, so the anti-halo behaviour is identical.
    */
   const linearCompositeColor = Fn(() => {
-    return upsampleCloud(vec2(uv().x, uv().y.oneMinus()));
+    const fuv = vec2(uv().x, uv().y.oneMinus());
+    const cloud = upsampleCloud(fuv);
+    // Fold the ground shadow into alpha: dst' = rgb + dst·(1−a'), and
+    // a' = 1 − (1−a)·s multiplies the scene behind by s — see shadowFactor.
+    const s = shadowFactor(fuv);
+    return vec4(cloud.rgb, cloud.a.oneMinus().mul(s).oneMinus());
   });
 
   const linearCompositeMat = new THREE.MeshBasicNodeMaterial();
@@ -1240,6 +1340,13 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     const sunUp = uSunDir.value.y;
     uMsFloor.value = P.msFloor * THREE.MathUtils.smoothstep(sunUp, 0.02, 0.45);
     uMsFloorDepth.value = P.msFloorDepth;
+    // Ground shadows die with the sun too — a moon-lit deck should not stamp
+    // noon-strength shadow dapples on the track. Fades over the same low-sun window
+    // where the light itself goes dim, and 0 skips the whole shadow branch.
+    uShadowStrength.value = P.shadowStrength * THREE.MathUtils.smoothstep(sunUp, 0.04, 0.3);
+    uShadowSoft.value = P.shadowSoftness;
+    camera.getWorldDirection(_camFwd);
+    uCamFwd.value.copy(_camFwd);
     uSunIntensity.value = P.sunIntensity;
     uAmbientIntensity.value = P.ambientIntensity;
 

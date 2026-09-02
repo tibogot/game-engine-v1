@@ -1934,6 +1934,20 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-cld-msfloor-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Ground shadows</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-shadow" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-cld-shadow-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Shadow softness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-shadowsoft" min="0.02" max="0.25" step="0.005" />
+              <span class="prop-num" id="dv-cld-shadowsoft-v"></span>
+            </div>
+          </div>
           <div class="dv-hint">
             <b>Interior glow</b> is the multiple-scattering floor — the fraction of
             sun energy surviving as diffuse light deep inside a mass. At 0 you get
@@ -3545,6 +3559,8 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-cld-g", CP, "phaseG", (v) => v.toFixed(2));
   slider("dv-cld-powder", CP, "powder", (v) => v.toFixed(2));
   slider("dv-cld-msfloor", CP, "msFloor", (v) => v.toFixed(2));
+  slider("dv-cld-shadow", CP, "shadowStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));
+  slider("dv-cld-shadowsoft", CP, "shadowSoftness", (v) => v.toFixed(3));
   // Not a cloud-system param: the sky-colour mix is the GAME's wiring between
   // the sky model and the cloud lighting, so it lives on its own object.
   slider("dv-cld-tint", game.cloudLight ?? null, "skyTint",
