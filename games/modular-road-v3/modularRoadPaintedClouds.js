@@ -165,7 +165,17 @@ export function bakePaintedCloudMap(seed = 4177, size = PAINTED_MAP_SIZE) {
  * @param {object}  [opts.params] merged onto PAINTED_CLOUD_DEFAULTS
  */
 export function createPaintedClouds({ seed = 4177, params = {} } = {}) {
-  const P = { ...PAINTED_CLOUD_DEFAULTS, ...params };
+  /*
+   * THE CALLER'S OBJECT IS KEPT, not copied — filled in with any defaults it is
+   * missing. Identity matters because the deck is destroyed and rebuilt whenever the
+   * quality tier changes, and a dev-panel slider bound to a copy would go dead the
+   * first time you switched tiers and back (the same trap the road material's captured
+   * uniform bag fell into). Hand in an object and it stays the live one.
+   */
+  const P = params;
+  for (const k of Object.keys(PAINTED_CLOUD_DEFAULTS)) {
+    if (P[k] === undefined) P[k] = PAINTED_CLOUD_DEFAULTS[k];
+  }
 
   const map = new THREE.DataTexture(
     bakePaintedCloudMap(seed), PAINTED_MAP_SIZE, PAINTED_MAP_SIZE, THREE.RGBAFormat,

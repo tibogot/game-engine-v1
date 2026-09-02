@@ -1901,6 +1901,131 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Clouds — Painted deck</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            These are the <b>Painted</b> tier's own controls and only do anything in
+            that tier — every other slider in the CLOUDS group belongs to the
+            volumetric deck. <b>Steps</b> is the quality/cost dial: the deck is a
+            slab march, so cost scales with it almost linearly (18 ≈ 0.1 ms). Drop it
+            to 8-10 on a weak machine; below that the slab starts to band.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Coverage</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-cov" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-pc-cov-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Density</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-den" min="0.01" max="0.12" step="0.002" />
+              <span class="prop-num" id="dv-pc-den-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Erosion</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-erode" min="0" max="1.2" step="0.02" />
+              <span class="prop-num" id="dv-pc-erode-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Base altitude</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-alt" min="300" max="3000" step="25" />
+              <span class="prop-num" id="dv-pc-alt-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Thickness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-thick" min="200" max="2000" step="25" />
+              <span class="prop-num" id="dv-pc-thick-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cloud size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-tile" min="1500" max="9000" step="100" />
+              <span class="prop-num" id="dv-pc-tile-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Towering</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-topmin" min="0.05" max="1" step="0.01" />
+              <span class="prop-num" id="dv-pc-topmin-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Steps (cost)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-steps" min="6" max="24" step="1" />
+              <span class="prop-num" id="dv-pc-steps-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun strength</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-sun" min="0.5" max="4" step="0.05" />
+              <span class="prop-num" id="dv-pc-sun-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sky ambient</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-amb" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-pc-amb-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Base darkness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-basedark" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-pc-basedark-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Shadow depth</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-absorb" min="0" max="6" step="0.1" />
+              <span class="prop-num" id="dv-pc-absorb-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Silver lining</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-silver" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-pc-silver-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Aerial fade</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-aerial" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-pc-aerial-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wind speed</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-wind" min="0" max="40" step="0.5" />
+              <span class="prop-num" id="dv-pc-wind-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wind heading</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-winddeg" min="0" max="360" step="1" />
+              <span class="prop-num" id="dv-pc-winddeg-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Clouds — Lighting</div>
         <div class="section-body">
           <div class="prop-row">
@@ -4121,6 +4246,36 @@ export function createRoadDevPanel({ app, game, params }) {
     });
   }
   syncTierBtns();
+
+  /*
+   * PAINTED DECK. Bound to `game.paintedParams`, which roadGame creates at BOOT and
+   * hands to createPaintedClouds by reference — so these keep working across the sky
+   * rebuild that a tier switch performs, instead of pointing at a dead copy.
+   * `markPaintedTouched` stops re-entering the tier from stomping a coverage the user
+   * dialled in here with the volumetric deck's value.
+   */
+  const PP = game.paintedParams ?? null;
+  const pslider = (id, key, fmt) => {
+    const s = slider(id, PP, key, fmt);
+    document.getElementById(id)?.addEventListener("input", () => game.markPaintedTouched?.());
+    return s;
+  };
+  pslider("dv-pc-cov", "coverage", (v) => v.toFixed(2));
+  pslider("dv-pc-den", "densityMul", (v) => v.toFixed(3));
+  pslider("dv-pc-erode", "erode", (v) => v.toFixed(2));
+  pslider("dv-pc-alt", "altitude", (v) => v.toFixed(0) + " m");
+  pslider("dv-pc-thick", "thickness", (v) => v.toFixed(0) + " m");
+  pslider("dv-pc-tile", "tile", (v) => v.toFixed(0) + " m");
+  pslider("dv-pc-topmin", "topMin", (v) => v.toFixed(2));
+  pslider("dv-pc-steps", "steps", (v) => v.toFixed(0) + " steps");
+  pslider("dv-pc-sun", "sunStrength", (v) => v.toFixed(2));
+  pslider("dv-pc-amb", "ambient", (v) => v.toFixed(2));
+  pslider("dv-pc-basedark", "baseDark", (v) => v.toFixed(2));
+  pslider("dv-pc-absorb", "absorb", (v) => v.toFixed(1));
+  pslider("dv-pc-silver", "silver", (v) => v.toFixed(2));
+  pslider("dv-pc-aerial", "aerial", (v) => v.toFixed(2));
+  pslider("dv-pc-wind", "windSpeed", (v) => v.toFixed(1) + " m/s");
+  pslider("dv-pc-winddeg", "windDeg", (v) => v.toFixed(0) + "°");
 
   slider("dv-cld-rays", CP, "rayStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));
   slider("dv-cld-shadow", CP, "shadowStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));

@@ -179,7 +179,7 @@ import { ModularRoadFlags, FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
 import { createModularRoadSky, skyColorsAt, moonDirFromTime, SKY_DEFAULTS } from "./modularRoadSky.js";
-import { createPaintedClouds } from "./modularRoadPaintedClouds.js";
+import { createPaintedClouds, PAINTED_CLOUD_DEFAULTS } from "./modularRoadPaintedClouds.js";
 import { createSkyAtmosphere, sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
@@ -764,6 +764,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * only handed to the sky when its tier is selected, so the sky's shader has no
    * cloud code in it at all otherwise. Nobody pays for the tier they are not on.
    */
+  /**
+   * The painted deck's LIVE params, created at boot even though the deck is not.
+   *
+   * It is only an object — no bake, no texture, nothing the "off tier costs nothing"
+   * guarantee cares about — and having it exist from the start is what lets the dev
+   * panel bind sliders to it before the tier has ever been selected, and keep them
+   * working across the rebuild a tier switch performs (createPaintedClouds keeps the
+   * caller's object rather than copying it, precisely so this holds).
+   */
+  const paintedParams = { ...PAINTED_CLOUD_DEFAULTS };
+  /** Set once the user edits the painted deck, so re-entering the tier stops
+   *  overwriting their coverage with the volumetric deck's. */
+  let _paintedTouched = false;
+
   const CLOUD_TIERS = ["volumetric", "painted", "off"];
   /**
    * THE BOOT TIER, and it is volumetric on purpose.
@@ -821,15 +835,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // Painted deck only in its own tier — see CLOUD_TIERS. Handing `null` to the sky
     // leaves the cloud code out of the compiled shader entirely.
     if (cloudTier === "painted" && !gamePainted) {
-      gamePainted = createPaintedClouds({
-        params: {
-          // Seed the look from whatever the track asked the volumetric deck for, so
-          // switching tiers changes the COST, not the art direction.
-          coverage: THREE.MathUtils.clamp(clouds.params.coverage + 0.05, 0, 1),
-          windDeg: clouds.params.windDeg,
-          windSpeed: clouds.params.windSpeed,
-        },
-      });
+      // Seed the look from whatever the track asked the volumetric deck for, so
+      // switching tiers changes the COST, not the art direction — but only for keys
+      // the user has not already dialled in on the painted deck itself.
+      if (!_paintedTouched) {
+        paintedParams.coverage = THREE.MathUtils.clamp(clouds.params.coverage + 0.05, 0, 1);
+        paintedParams.windDeg = clouds.params.windDeg;
+        paintedParams.windSpeed = clouds.params.windSpeed;
+      }
+      gamePainted = createPaintedClouds({ params: paintedParams });
     }
     // The atmosphere is handed IN rather than added as a second dome, so the
     // physical sky replaces the authored gradient while keeping the stars, the
@@ -6449,8 +6463,9 @@ ${e.message}`);
       getCloudTier: () => cloudTier,
       setCloudTier,
       cloudTiers: CLOUD_TIERS,
-      /** Live painted-deck params, or null when that tier is not built. */
-      getPaintedParams: () => gamePainted?.params ?? null,
+      /** The painted deck's live params — always present, survives tier rebuilds. */
+      paintedParams,
+      markPaintedTouched: () => { _paintedTouched = true; },
 
       // ── Game-owned sky A/B (F8) ─────────────────────────────────────────
       getGameSky: () => gameSkyOn,
@@ -7044,8 +7059,8 @@ ${e.message}`);
      *  never rides in a track save. See setCloudTier for why it rebuilds the sky. */
     setCloudTier,
     getCloudTier: () => cloudTier,
-    /** Live painted-deck params (null unless that tier is built), for console tuning. */
-    paintedParams: () => gamePainted?.params ?? null,
+    /** The painted deck's live params, for console tuning. Always present. */
+    paintedParams: () => paintedParams,
     /** Sky mode — terrain hidden, not solid, and not paid for. A track saved in
      *  sky mode is just a track; this is a runtime mode, not track data. */
     setTerrain,
