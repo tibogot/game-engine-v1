@@ -55,7 +55,7 @@ import {
   positionWorld, cameraPosition, screenUV, screenCoordinate,
   cameraViewMatrix, cameraProjectionMatrix,
   normalize, dot, max, min, mix, smoothstep, pow, exp, abs, sign, clamp, sin, cos, floor,
-  saturate, interleavedGradientNoise,
+  length, saturate, interleavedGradientNoise,
 } from "three/tsl";
 import {
   BASE_TILE_M, DETAIL_TILE_M, NEAR_TILE_M, WEATHER_TILE_M,
@@ -70,6 +70,7 @@ export const CLOUD_LAYER = 19;
  *  ceilings; the runtime uniforms (`steps`, `lightSteps`) cut the loop short via Break. */
 const MAX_STEPS = 192;
 const MAX_LIGHT_STEPS = 6;
+const MAX_RAY_STEPS = 32;
 
 const INV_4PI = 1.0 / (4.0 * Math.PI);
 /** Per-channel extinction. Blue is scattered out of the beam least, so deep cores drift
@@ -203,6 +204,25 @@ export const CLOUD_DEFAULTS = {
   msFloor: 0.22,
   /** How fast the floor ramps in with optical depth to the sun. Higher = brighter sooner. */
   msFloorDepth: 0.55,
+
+  // ── God rays ─────────────────────────────────────────────────────────────────────
+  /** Sun shafts through the cloud gaps — screen-space radial accumulation. */
+  godRays: true,
+  /** Overall shaft brightness. 0 skips the pass entirely. */
+  rayStrength: 0.7,
+  /** Per-tap decay along the march — lower = shorter, punchier shafts. */
+  rayDecay: 0.97,
+  /** Taps per pixel (≤ MAX_RAY_STEPS). Quarter-res pass, so this is cheap. */
+  raySteps: 24,
+  /** March length toward the sun, as a fraction of the screen. */
+  rayLength: 0.7,
+  /**
+   * How tightly the shaft source hugs the sun (gaussian falloff in screen units).
+   * Higher = a smaller bright core feeding the rays. TUNED IN ANGER: at 8 the halo is so
+   * wide it washes the beam structure into a general glow; 18 keeps a compact core so the
+   * light/dark spokes the clouds carve actually read as rays.
+   */
+  rayTightness: 18,
 
   // ── Ground shadows ───────────────────────────────────────────────────────────────
   /** Max darkening of geometry under dense cloud. 0 = off (skips all shadow work). */
@@ -408,6 +428,18 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const uAerialColorSun = uniform(new THREE.Color(0xa8c0d4));
   const uAerialDensity = uniform(P.aerialDensity);
   const uAerialAmount = uniform(P.aerialAmount);
+
+  // God rays. uSunUV lives in the same FLIPPED uv space every post pass samples in
+  // (ndc*0.5+0.5 with no extra Y flip — the resolve pass proves that mapping). uRayActive
+  // folds together "sun in front", "near enough to the frame" and "above the horizon".
+  const uSunUV = uniform(new THREE.Vector2(0.5, 0.5));
+  const uRayActive = uniform(0);
+  const uRayStrength = uniform(P.rayStrength);
+  const uRayDecay = uniform(P.rayDecay);
+  const uRaySteps = uniform(P.raySteps);
+  const uRayLen = uniform(P.rayLength);
+  const uRayTight = uniform(P.rayTightness);
+  const uAspect = uniform(1);
 
   /** EFFECTIVE shadow strength — P.shadowStrength times a sun-elevation ramp, so shadows
    *  die with the light instead of stamping moonlit ground at noon strength. */
@@ -1150,9 +1182,10 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     // Render-target sampling is Y-flipped versus the canvas under WebGPU.
     const fuv = vec2(uv().x, uv().y.oneMinus());
     const cloud = upsampleCloud(fuv);
-    // Ground shadow first, cloud over the (darkened) scene second.
+    // Ground shadow first, cloud over the (darkened) scene second, shafts on top.
     const sceneCol = sceneTex.sample(fuv).rgb.mul(shadowFactor(fuv));
-    return vec4(sceneCol.mul(cloud.a.oneMinus()).add(cloud.rgb), 1.0); // premultiplied over
+    const shafts = shaftTex.sample(fuv).rgb.mul(uRayActive);
+    return vec4(sceneCol.mul(cloud.a.oneMinus()).add(cloud.rgb).add(shafts), 1.0); // premultiplied over
   });
 
   const compositeMat = new THREE.MeshBasicNodeMaterial();
@@ -1173,7 +1206,10 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     // Fold the ground shadow into alpha: dst' = rgb + dst·(1−a'), and
     // a' = 1 − (1−a)·s multiplies the scene behind by s — see shadowFactor.
     const s = shadowFactor(fuv);
-    return vec4(cloud.rgb, cloud.a.oneMinus().mul(s).oneMinus());
+    // Shafts ride src.rgb: with the premultiplied-over blend they ADD light without
+    // occluding anything behind them, which is exactly what scattered light does.
+    const shafts = shaftTex.sample(fuv).rgb.mul(uRayActive);
+    return vec4(cloud.rgb.add(shafts), cloud.a.oneMinus().mul(s).oneMinus());
   });
 
   const linearCompositeMat = new THREE.MeshBasicNodeMaterial();
@@ -1189,6 +1225,93 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   linearCompositeMat.blendDst = THREE.OneMinusSrcAlphaFactor;
   linearCompositeMat.blendSrcAlpha = THREE.OneFactor;
   linearCompositeMat.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
+
+  // ── God rays ───────────────────────────────────────────────────────────────────────
+  //
+  // Screen-space radial shafts (GPU Gems 3 "light scattering" construction): each pixel
+  // marches toward the sun's screen position accumulating a source term with per-tap
+  // decay. The source is computed on the fly — no extra mask pass:
+  //
+  //     sky visible (scene depth = clear value)
+  //   × cloud transmittance (1 − resolved cloud alpha — shafts stream through the GAPS
+  //     the deck actually has, and the temporal accumulation keeps them stable)
+  //   × a gaussian glow around the sun (the analytic stand-in for the sun's brightness,
+  //     since the post-FX path never owns a scene colour buffer to read it from)
+  //
+  // Quarter res: shafts are inherently low-frequency, and the bilinear upscale at
+  // composite time is exactly the blur they want anyway.
+  const shaftRT = new THREE.RenderTarget(1, 1, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    format: THREE.RGBAFormat,
+    type: THREE.HalfFloatType,
+    depthBuffer: false,
+  });
+  const shaftTex = texture(shaftRT.texture);
+
+  const shaftColorNode = Fn(() => {
+    const fuv = vec2(uv().x, uv().y.oneMinus());
+    const acc = float(0.0).toVar();
+    const decay = float(1.0).toVar();
+    const delta = uSunUV.sub(fuv);
+    const dist = length(delta).max(1e-4);
+    // March at most rayLength of the screen, ending at the sun if it is closer.
+    const stepUv = delta.mul(min(float(1.0), uRayLen.div(dist))).div(uRaySteps.max(1.0));
+    const p = fuv.toVar();
+    const skyDepth = uReversed.oneMinus();
+    Loop(MAX_RAY_STEPS, ({ i }) => {
+      If(float(i).greaterThanEqual(uRaySteps), () => Break());
+      p.addAssign(stepUv);
+      const inb = p.x.greaterThan(0.0).and(p.x.lessThan(1.0))
+        .and(p.y.greaterThan(0.0)).and(p.y.lessThan(1.0));
+      If(inb, () => {
+        const isSky = abs(depthTex.sample(p).r.sub(skyDepth)).lessThan(0.0001);
+        If(isSky, () => {
+          const off = p.sub(uSunUV).mul(vec2(uAspect, 1.0));
+          const glow = exp(dot(off, off).mul(uRayTight.negate()));
+          const trans = cloudTex.sample(p).a.oneMinus();
+          acc.addAssign(glow.mul(trans).mul(decay));
+        });
+      });
+      decay.mulAssign(uRayDecay);
+    });
+    const amount = acc.div(uRaySteps.max(1.0)).mul(uRayStrength).mul(uRayActive).mul(uFade);
+    return vec4(uSunColor.mul(uSunIntensity).mul(amount), 1.0);
+  });
+
+  const shaftMat = new THREE.MeshBasicNodeMaterial();
+  shaftMat.colorNode = shaftColorNode();
+  shaftMat.depthTest = false;
+  shaftMat.depthWrite = false;
+  shaftMat.fog = false;
+  shaftMat.toneMapped = false;
+  shaftMat.transparent = false;
+  shaftMat.blending = THREE.NoBlending;
+
+  /**
+   * Sun screen position + shaft activation, from the CURRENT frame's view-projection.
+   * Called by both render paths right after they build _viewProj. The sun is a direction,
+   * so it is projected as a point at infinity (w = 0 homogeneous input).
+   */
+  const _sunClip = new THREE.Vector4();
+  function updateSunScreen() {
+    const s = uSunDir.value;
+    _sunClip.set(s.x, s.y, s.z, 0).applyMatrix4(_viewProj);
+    if (!(P.godRays && P.rayStrength > 0) || _sunClip.w <= 1e-4) {
+      uRayActive.value = 0;
+      return;
+    }
+    const nx = _sunClip.x / _sunClip.w;
+    const ny = _sunClip.y / _sunClip.w;
+    uSunUV.value.set(nx * 0.5 + 0.5, ny * 0.5 + 0.5);
+    // Fade as the sun leaves the frame (shafts can stream in from just off-screen), and
+    // as it sinks — below the horizon the source is the sky's own dusk glow, not a disc.
+    const edge = Math.max(Math.abs(nx), Math.abs(ny));
+    // (three's smoothstep needs min < max, so invert rather than swap the edges.)
+    const offFade = 1 - THREE.MathUtils.smoothstep(edge, 1.1, 2.2);
+    const upFade = THREE.MathUtils.smoothstep(s.y, 0.01, 0.09);
+    uRayActive.value = offFade * upFade;
+  }
 
   // ── Frame ──────────────────────────────────────────────────────────────────────────
 
@@ -1208,6 +1331,8 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     if (fw !== fullW || fh !== fullH) {
       fullW = fw; fullH = fh;
       uFullTexel.value.set(1 / fw, 1 / fh);
+      uAspect.value = fw / fh;
+      shaftRT.setSize(Math.max(1, fw >> 2), Math.max(1, fh >> 2));
       if (_ownsFrame) sceneRT.setSize(fw, fh);
     }
     const w = Math.max(1, Math.floor(fw * P.bufferScale));
@@ -1238,6 +1363,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     cloudRT.setSize(1, 1);
     historyRT[0].setSize(1, 1);
     historyRT[1].setSize(1, 1);
+    shaftRT.setSize(1, 1);
     fullW = fullH = rtW = rtH = 0; // force ensureSize() to rebuild on re-enable
     uHasHistory.value = 0;
   }
@@ -1345,6 +1471,11 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     // where the light itself goes dim, and 0 skips the whole shadow branch.
     uShadowStrength.value = P.shadowStrength * THREE.MathUtils.smoothstep(sunUp, 0.04, 0.3);
     uShadowSoft.value = P.shadowSoftness;
+    uRayStrength.value = P.rayStrength;
+    uRayDecay.value = P.rayDecay;
+    uRaySteps.value = Math.min(P.raySteps, MAX_RAY_STEPS);
+    uRayLen.value = P.rayLength;
+    uRayTight.value = P.rayTightness;
     camera.getWorldDirection(_camFwd);
     uCamFwd.value.copy(_camFwd);
     uSunIntensity.value = P.sunIntensity;
@@ -1429,8 +1560,17 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     renderer.setRenderTarget(historyRT[write]);
     renderer.render(postScene, postCam);
 
-    // 4) Composite the resolved buffer to the canvas.
+    // 4) God rays from the resolved cloud gaps (skipped entirely when inactive —
+    //    the composite gates its add on uRayActive, so a stale buffer cannot show).
     cloudTex.value = historyRT[write].texture;
+    updateSunScreen();
+    if (uRayActive.value > 0) {
+      postQuad.material = shaftMat;
+      renderer.setRenderTarget(shaftRT);
+      renderer.render(postScene, postCam);
+    }
+
+    // 5) Composite the resolved buffer (+ shafts) to the canvas.
     postQuad.material = compositeMat;
     renderer.setRenderTarget(null);
     renderer.render(postScene, postCam);
@@ -1497,8 +1637,14 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     renderer.setRenderTarget(historyRT[write]);
     renderer.render(postScene, postCam);
 
-    // 3) Blend the resolved cloud over the pipeline's linear HDR buffer.
+    // 3) God rays, then blend the resolved cloud (+ shafts) over the pipeline's HDR.
     cloudTex.value = historyRT[write].texture;
+    updateSunScreen();
+    if (uRayActive.value > 0) {
+      postQuad.material = shaftMat;
+      renderer.setRenderTarget(shaftRT);
+      renderer.render(postScene, postCam);
+    }
     postQuad.material = linearCompositeMat;
     const prevAuto = renderer.autoClear;
     renderer.autoClear = false;
@@ -1524,6 +1670,8 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     cloudRT.dispose();
     historyRT[0].dispose();
     historyRT[1].dispose();
+    shaftRT.dispose();
+    shaftMat.dispose();
     resolveMat.dispose();
     baseTexture.dispose();
     detailTexture.dispose();

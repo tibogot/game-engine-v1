@@ -1935,6 +1935,13 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">God rays</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-rays" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-cld-rays-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Ground shadows</span>
             <div class="prop-value">
               <input type="range" id="dv-cld-shadow" min="0" max="1" step="0.01" />
@@ -3559,6 +3566,7 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-cld-g", CP, "phaseG", (v) => v.toFixed(2));
   slider("dv-cld-powder", CP, "powder", (v) => v.toFixed(2));
   slider("dv-cld-msfloor", CP, "msFloor", (v) => v.toFixed(2));
+  slider("dv-cld-rays", CP, "rayStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));
   slider("dv-cld-shadow", CP, "shadowStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));
   slider("dv-cld-shadowsoft", CP, "shadowSoftness", (v) => v.toFixed(3));
   // Not a cloud-system param: the sky-colour mix is the GAME's wiring between
