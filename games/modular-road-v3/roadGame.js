@@ -843,7 +843,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         paintedParams.windDeg = clouds.params.windDeg;
         paintedParams.windSpeed = clouds.params.windSpeed;
       }
-      gamePainted = createPaintedClouds({ params: paintedParams });
+      gamePainted = createPaintedClouds({ params: paintedParams, camera });
     }
     // The atmosphere is handed IN rather than added as a second dome, so the
     // physical sky replaces the authored gradient while keeping the stars, the
@@ -931,6 +931,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       }
       if (wasOn) setGameSky(true);
     }
+
+    /*
+     * WHICH SYSTEM OWNS THE CUSTOM-CLOUD SLOT.
+     *
+     * The engine gives a game ONE registered cloud system, and the two tiers want it
+     * for different reasons: the volumetric deck DRAWS its clouds through that slot,
+     * while the painted deck only wants the fullscreen pass it provides, to cast
+     * GROUND SHADOWS — its clouds are already in the sky dome. Registering per tier
+     * keeps both honest, and the off tier registers nothing at all so the frame takes
+     * its plain route with no custom pass in it.
+     */
+    app.clouds?.setSystem(
+      tier === "volumetric" ? clouds : tier === "painted" ? gamePainted : null,
+    );
     devPanel?.refresh?.();
   }
 

@@ -34,8 +34,8 @@
  */
 import * as THREE from "three/webgpu";
 import {
-  float, vec2, vec3, vec4, Fn, If, Loop, Break, uniform, texture,
-  normalize, dot, max, min, mix, smoothstep, pow, exp, saturate,
+  float, vec2, vec3, vec4, Fn, If, Loop, Break, uniform, texture, uv,
+  normalize, dot, max, min, mix, smoothstep, pow, exp, abs, saturate,
   screenCoordinate, interleavedGradientNoise,
 } from "three/tsl";
 import {
@@ -97,6 +97,15 @@ export const PAINTED_CLOUD_DEFAULTS = {
   aerial: 0.55,
   /** Below this `dir.y` the deck fades out — the slab crossing runs to infinity there. */
   horizonFade: 0.035,
+
+  // ── Ground shadows ───────────────────────────────────────────────────────────────
+  /** Max darkening of the world under a cloud. 0 turns the whole pass off — and with it
+   *  the custom-cloud render path, so the frame goes back to its plain route. */
+  shadowStrength: 0.5,
+  /** Edge softness of the shadow threshold, in shaped-density units. */
+  shadowSoftness: 0.35,
+  /** Metres beyond which shadows fade out, so far terrain does not sparkle. */
+  shadowFar: 5000,
 
   // ── Wind ─────────────────────────────────────────────────────────────────────────
   windDeg: 35,
@@ -164,7 +173,7 @@ export function bakePaintedCloudMap(seed = 4177, size = PAINTED_MAP_SIZE) {
  * @param {number}  [opts.seed]
  * @param {object}  [opts.params] merged onto PAINTED_CLOUD_DEFAULTS
  */
-export function createPaintedClouds({ seed = 4177, params = {} } = {}) {
+export function createPaintedClouds({ seed = 4177, params = {}, camera = null } = {}) {
   /*
    * THE CALLER'S OBJECT IS KEPT, not copied — filled in with any defaults it is
    * missing. Identity matters because the deck is destroyed and rebuilt whenever the
@@ -343,13 +352,162 @@ export function createPaintedClouds({ seed = 4177, params = {} } = {}) {
     return out;
   });
 
+  // ── GROUND SHADOWS ────────────────────────────────────────────────────────────
+  //
+  // The deck darkening the world beneath it, which is most of what makes clouds feel
+  // PRESENT while driving rather than painted on a backdrop.
+  //
+  // The volumetric tier gets this from its own composite pass. The painted deck has no
+  // pass at all — it lives inside the sky dome's fragment shader — so it borrows the
+  // engine's custom-cloud hook instead: `worldEnvironment` hands any registered cloud
+  // system the scene depth and lets it draw once after the solids pass. We use that slot
+  // for a single fullscreen quad that MULTIPLIES the frame by the shadow and nothing
+  // else; the clouds themselves are already in the sky.
+  //
+  // It is cheaper here than in the volumetric tier: the shadow caster is one 2D texture
+  // fetch, not a density march.
+  const uShadowStrength = uniform(P.shadowStrength);
+  const uShadowSoft = uniform(P.shadowSoftness);
+  const uShadowFar = uniform(P.shadowFar);
+  const uSunDirG = uniform(new THREE.Vector3(0.4, 0.8, 0.3).normalize());
+  const uInvViewProj = uniform(new THREE.Matrix4());
+  const uCamPos = uniform(new THREE.Vector3());
+  const uCamFwd = uniform(new THREE.Vector3(0, 0, -1));
+  const uCamNear = uniform(0.5);
+  const uCamFar = uniform(8192);
+  /** 1 for a reversed depth buffer. Every depth compare has to agree with it. */
+  const uReversed = uniform(0);
+
+  // Placeholder until setDepthSource binds the pipeline's real depth — only ever
+  // swapped by `.value`, so its size is irrelevant.
+  const _depthPlaceholder = new THREE.DepthTexture(1, 1);
+  const depthTex = texture(_depthPlaceholder);
+
+  const normDepth = Fn(([d]) => mix(d, d.oneMinus(), uReversed));
+  /** Depth to view-space distance. Denominator floored: at the far plane it is zero. */
+  const depthDist = Fn(([d]) => {
+    const z = normDepth(d);
+    return uCamNear.mul(uCamFar)
+      .div(uCamFar.sub(uCamNear).mul(z).sub(uCamFar).min(-1e-6))
+      .negate();
+  });
+
+  const shadowColor = Fn(() => {
+    // Render-target sampling is Y-flipped versus the canvas under WebGPU.
+    const fuv = vec2(uv().x, uv().y.oneMinus());
+    const sh = float(1.0).toVar();
+
+    const d = depthTex.sample(fuv).r;
+    const skyDepth = uReversed.oneMinus();
+    // Sky pixels hold the cleared far-plane depth. Gate on real geometry, or the shadow
+    // would darken the very sky that casts it — and the sky dome writes no depth, so
+    // this test is exactly "is there something solid here".
+    If(abs(d.sub(skyDepth)).greaterThan(0.0001), () => {
+      const ndc = vec4(fuv.x.mul(2.0).sub(1.0), fuv.y.mul(2.0).sub(1.0), 0.5, 1.0);
+      const wpH = uInvViewProj.mul(ndc);
+      const dirW = normalize(wpH.xyz.div(wpH.w).sub(uCamPos));
+      const dist = depthDist(d).div(dot(dirW, uCamFwd).max(1e-3));
+      const wp = uCamPos.add(dirW.mul(dist));
+
+      // Walk up the sun ray to the deck. SAME altitude convention as the sky march
+      // (relative to the camera) or the shadows drift away from the clouds casting
+      // them. Slightly below mid-slab: the denser lower half throws the shadow.
+      const deckY = uCamPos.y.add(uAltitude).add(uThickness.mul(0.35));
+      const tS = deckY.sub(wp.y).div(max(uSunDirG.y, 0.08));
+      const sxz = vec2(wp.x, wp.z).add(vec2(uSunDirG.x, uSunDirG.z).mul(tS));
+      const uvS = sxz.div(uTile).add(uWind);
+
+      // ONE fetch. The mass silhouette is what casts a shadow; billow detail is finer
+      // than a soft shadow edge would preserve anyway.
+      const m = mapTex.sample(uvS);
+      const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), m.a)));
+      const cov = smoothstep(float(0.0), uShadowSoft, remapUnit(m.r, covLocal.oneMinus()));
+
+      // Above the deck you cannot be shadowed by it — matters on a sky track.
+      const below = saturate(deckY.sub(wp.y).div(uThickness.max(1.0)));
+      const nearM = smoothstep(uShadowFar, uShadowFar.mul(0.55), dist);
+      // Die with the sun, like the volumetric deck's shadows: no noon-strength dapples
+      // stamped on the ground at dusk.
+      const sunUp = smoothstep(float(0.02), float(0.16), uSunDirG.y);
+      sh.assign(float(1.0).sub(cov.mul(uShadowStrength).mul(below).mul(nearM).mul(sunUp)));
+    });
+    return vec4(sh, sh, sh, 1.0);
+  });
+
+  const shadowMat = new THREE.MeshBasicNodeMaterial();
+  shadowMat.colorNode = shadowColor();
+  shadowMat.depthTest = false;
+  shadowMat.depthWrite = false;
+  shadowMat.fog = false;
+  shadowMat.toneMapped = false;
+  shadowMat.transparent = true;
+  // MULTIPLY: dst = src*0 + dst*src.rgb. Alpha is left alone.
+  shadowMat.blending = THREE.CustomBlending;
+  shadowMat.blendSrc = THREE.ZeroFactor;
+  shadowMat.blendDst = THREE.SrcColorFactor;
+  shadowMat.blendSrcAlpha = THREE.ZeroFactor;
+  shadowMat.blendDstAlpha = THREE.OneFactor;
+
+  const shadowScene = new THREE.Scene();
+  const shadowCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const shadowQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), shadowMat);
+  shadowScene.add(shadowQuad);
+
+  let _depthBound = false;
+  const _vp = new THREE.Matrix4();
+  const _fwd = new THREE.Vector3();
+
+  const shadowsOn = () => P.shadowStrength > 0.001;
+
+  /** Bind the pipeline's scene depth. Null = the owns-the-frame path, which we sit out. */
+  function setDepthSource(tex) {
+    _depthBound = !!tex;
+    if (tex) depthTex.value = tex;
+  }
+
+  function prepareFrame() { return shadowsOn() && _depthBound; }
+
+  /**
+   * The one fullscreen pass, run by PostFxPipeline right after the solids pass.
+   * Multiplies the linear HDR buffer by the cloud shadow; adds no colour of its own.
+   */
+  function compositeOntoLinearHDR(renderer, targetRT) {
+    if (!shadowsOn() || !_depthBound || !camera) return;
+    uShadowStrength.value = P.shadowStrength;
+    uShadowSoft.value = P.shadowSoftness;
+    uShadowFar.value = P.shadowFar;
+    uCamNear.value = camera.near;
+    uCamFar.value = camera.far;
+    uReversed.value = camera.reversedDepth ? 1 : 0;
+    _vp.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    uInvViewProj.value.copy(_vp).invert();
+    uCamPos.value.copy(camera.position);
+    camera.getWorldDirection(_fwd);
+    uCamFwd.value.copy(_fwd);
+
+    const prevAuto = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.setRenderTarget(targetRT);
+    renderer.render(shadowScene, shadowCam);
+    renderer.autoClear = prevAuto;
+  }
+
+  /**
+   * The no-post-FX path. Returning false hands the frame back to the normal renderer:
+   * without the pipeline there is no scene depth to read and no HDR target to multiply,
+   * so the painted deck simply goes without ground shadows there rather than
+   * manufacturing a depth buffer of its own — which is the expense this tier exists to
+   * avoid. The clouds themselves are unaffected; they live in the sky shader.
+   */
+  function renderFrame() { return false; }
+
   const _windAccum = new THREE.Vector2();
 
   /**
    * @param {number} dt seconds
    * @param {THREE.Vector3} [camPos] world camera position — anchors the deck
    */
-  function update(dt, camPos) {
+  function update(dt, camPos, sunDir) {
     const rad = THREE.MathUtils.degToRad(P.windDeg);
     // Metres, converted to map units on read, so the wind dial means the same thing here
     // as it does on the volumetric deck.
@@ -357,6 +515,7 @@ export function createPaintedClouds({ seed = 4177, params = {} } = {}) {
     _windAccum.y += Math.sin(rad) * P.windSpeed * dt;
     uWind.value.set(_windAccum.x / P.tile, _windAccum.y / P.tile);
     if (camPos) uCamXZ.value.set(camPos.x / P.tile, camPos.z / P.tile);
+    if (sunDir) uSunDirG.value.copy(sunDir).normalize();
 
     uAltitude.value = P.altitude;
     uThickness.value = P.thickness;
@@ -381,6 +540,19 @@ export function createPaintedClouds({ seed = 4177, params = {} } = {}) {
     map,
     shade,
     update,
-    dispose() { map.dispose(); },
+    // Custom-cloud contract (see worldEnvironment.setCustomCloudSystem). Registered only
+    // while the painted tier is live, and only to cast ground shadows — the deck itself
+    // is drawn by the sky dome, not here.
+    get enabled() { return shadowsOn(); },
+    setDepthSource,
+    prepareFrame,
+    compositeOntoLinearHDR,
+    renderFrame,
+    dispose() {
+      map.dispose();
+      shadowMat.dispose();
+      shadowQuad.geometry.dispose();
+      _depthPlaceholder.dispose?.();
+    },
   };
 }

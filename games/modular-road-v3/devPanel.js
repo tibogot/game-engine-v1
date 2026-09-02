@@ -2009,6 +2009,20 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Ground shadows</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-shadow" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-pc-shadow-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Shadow softness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-shadowsoft" min="0.05" max="1" step="0.01" />
+              <span class="prop-num" id="dv-pc-shadowsoft-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Wind speed</span>
             <div class="prop-value">
               <input type="range" id="dv-pc-wind" min="0" max="40" step="0.5" />
@@ -4274,6 +4288,8 @@ export function createRoadDevPanel({ app, game, params }) {
   pslider("dv-pc-absorb", "absorb", (v) => v.toFixed(1));
   pslider("dv-pc-silver", "silver", (v) => v.toFixed(2));
   pslider("dv-pc-aerial", "aerial", (v) => v.toFixed(2));
+  pslider("dv-pc-shadow", "shadowStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));
+  pslider("dv-pc-shadowsoft", "shadowSoftness", (v) => v.toFixed(2));
   pslider("dv-pc-wind", "windSpeed", (v) => v.toFixed(1) + " m/s");
   pslider("dv-pc-winddeg", "windDeg", (v) => v.toFixed(0) + "°");
 
