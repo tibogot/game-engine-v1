@@ -1,0 +1,664 @@
+{
+  "format": "modular-road-track",
+  "version": 2,
+  "savedAt": "2026-09-02T02:34:10.222Z",
+  "roadParams": {},
+  "guardrailParams": {},
+  "pieceParams": {
+    "straightLength": 32,
+    "curveRadius": 24,
+    "slopeLength": 30,
+    "slopeRise": -5,
+    "bankRampLength": 44,
+    "jumpLength": 26,
+    "jumpAngle": 30,
+    "qpRadius": 60
+  },
+  "portalParams": {},
+  "roadLook": {
+    "neonColor": 3531007,
+    "centerOn": 1,
+    "driftAmount": 1.4,
+    "driftLines": 20,
+    "driftWander": 2.5,
+    "wetAmount": 1,
+    "railDepthTol": 36
+  },
+  "environment": {
+    "skyMode": true,
+    "cloudBase": 55,
+    "cloudThickness": 450,
+    "cloudCoverage": 0.65,
+    "cloudDensityMul": 0.055
+  },
+  "pieces": [
+    {
+      "id": "start",
+      "chainId": 0,
+      "pp": {},
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        0,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -16,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -48,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -80,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -112,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -144,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -176,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -208,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -240,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -272,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -304,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -336,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -368,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -400,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -432,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -464,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -496,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -528,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -560,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -592,
+        1
+      ]
+    },
+    {
+      "id": "straight",
+      "chainId": 0,
+      "pp": {
+        "straightLength": 32
+      },
+      "connectorIn": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        90,
+        -624,
+        1
+      ]
+    }
+  ],
+  "props": [
+    {
+      "type": "neongate",
+      "position": [
+        0,
+        90,
+        -30
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "type": "neongate",
+      "position": [
+        0,
+        90,
+        -110
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "type": "neongate",
+      "position": [
+        0,
+        90,
+        -190
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "type": "neongate",
+      "position": [
+        0,
+        90,
+        -300
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "type": "neongate",
+      "position": [
+        0,
+        90,
+        -430
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    }
+  ],
+  "movers": [],
+  "portals": {
+    "pairs": [],
+    "pending": null,
+    "nextId": 1
+  },
+  "spawn": null,
+  "name": "wet-reflection-cloud-dive"
+}
