@@ -156,6 +156,10 @@ export const CLOUD_DEFAULTS = {
    * cloud detail — hopeless undersampling, and the source of the crosshatch speckle at
    * distant cloud edges. 28 m costs a measured +0.35 ms and is what makes the edges
    * actually clean; the jitter cap and the detail prefilter alone were not enough.
+   *
+   * (Since the entry jitter went back to a full step — see jitterMaxM — this is a pure
+   * cost/sharpness dial again: pushing it to 60 no longer bands the clouds into shells,
+   * it just resolves less far-field billow for ~-0.4 ms.)
    */
   maxStep: 28,
   /** Hard step-count budget (<= MAX_STEPS). */
@@ -163,16 +167,23 @@ export const CLOUD_DEFAULTS = {
   /** Empty-space steps are this multiple of the local step. */
   emptyStepMul: 3.0,
   /**
-   * Cap on the start-of-march dither, in METRES.
+   * Cap on the start-of-march dither, in METRES. At 60 it never binds — the entry jitter
+   * is a FULL local step, which is what actually prevents shell banding.
    *
-   * The entry point is jittered so a fixed step start does not band the slab into shells.
-   * Jittering by a FULL step ties the dither amplitude to `maxStep`, which is 60 m far
-   * away — so at a thin cloud edge, neighbouring pixels start up to 60 m apart and can
-   * disagree about whether they hit cloud at all. That is the visible crosshatch, and it
-   * is far too much for a ~10-frame temporal average to hide while the camera is moving.
-   * Capping it keeps the anti-banding benefit at a fraction of the noise.
+   * HISTORY, because this dial has been on both sides of a trade and the reasons matter:
+   * full-step jitter once caused crosshatch speckle at distant cloud edges, so it was
+   * capped at 7 m. But the speckle's ROOT CAUSE was detail frequencies the far march
+   * could never resolve — and `detailRange` later removed exactly those. The cap outlived
+   * its problem (same story as the upsample blur), and its only remaining effect was the
+   * thing the jitter exists to prevent: with 28–60 m steps dithered by at most 7 m, the
+   * density field gets sliced into coherent iso-surface shells — ugly topographic contour
+   * banding across every front-lit face, worst at grazing dusk light on the threshold
+   * model's steep-gradient cores. Full-step jitter erases the shells, the temporal
+   * accumulation averages the dither away, and (verified in motion at 25 m/s) the
+   * crosshatch does NOT come back. Lower this only if edge speckle is ever traced to the
+   * entry dither again — and check `detailRange` first if it is.
    */
-  jitterMaxM: 7.0,
+  jitterMaxM: 60.0,
   /** Furthest the march travels, metres. The world is 2 km across; past this the aerial
    *  term has faded the clouds into haze anyway. */
   maxDist: 6000,
