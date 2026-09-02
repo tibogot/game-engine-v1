@@ -2,60 +2,51 @@
  * PAINTED CLOUDS — the cheap tier, for machines that cannot afford the raymarch.
  *
  * ─────────────────────────────────────────────────────────────────────────────────────
- * WHY THIS EXISTS, AND WHY IT IS NOT THE ENGINE DOME'S CIRRUS.
+ * V2: A SLAB MARCH, NOT A STENCIL ON A PLANE. Why the first version looked wrong.
  *
- * `v3/render/sky/dayNightSky.js` already paints a 2D cirrus deck, and this deliberately
- * replaces it for the game's own sky rather than reusing it, for two measured reasons:
+ * v1 projected the view ray onto ONE plane, thresholded a 2D field there and shaded the
+ * result with a fake normal. It read as a painted ceiling, and no amount of shading was
+ * ever going to fix that, because three things the eye uses to identify cloud cannot
+ * exist on a single plane:
  *
- *   1. IT IS NOT ACTUALLY CHEAP. That deck evaluates a 5-octave 3D value-noise fbm TWICE
- *      per sky pixel — order 40 hash+lerp chains of pure ALU. On the weak integrated GPUs
- *      this tier exists to serve, ALU is exactly the scarce resource and texture units are
- *      the idle one. Here the whole field is BAKED ONCE into one tileable RGBA map and the
- *      shader does ~5 texture fetches. A fallback that costs as much as the thing it is
- *      falling back from is not a fallback.
+ *   • THICKNESS. A cloud seen from below-and-ahead shows its side. A plane shows its
+ *     face, always, everywhere — so the deck reads as wallpaper however good the noise.
+ *   • SELF-OCCLUSION. Real masses hide each other and pile up toward the horizon. On a
+ *     plane every cloud is exactly as visible as every other, which is why v1's sky
+ *     looked like a map of islands rather than weather.
+ *   • SOFT EDGES FROM DEPTH. A cloud edge is thin cloud you can see through, not an
+ *     alpha ramp. Thresholding a plane gives torn-paper outlines.
  *
- *   2. IT IS LIT AS A FLAT SHEET. Its brightness is `mix(0.82, 1.3, pow(dot(view,sun),2.5))`
- *      — a function of VIEW ANGLE ONLY. Every pixel of every cloud at the same screen
- *      position gets the same light regardless of the cloud's own shape, which is precisely
- *      what makes painted clouds read as painted: no form, no self-shadow, no volume. The
- *      eye reads a cloud as three-dimensional from the shading gradient ACROSS its own
- *      billows, and that information was never computed.
+ * So this marches a THIN SLAB instead: 12 steps between a base and a top altitude,
+ * integrating density with Beer-Lambert exactly as the volumetric deck does. That buys
+ * every one of the three above, and it is still nothing like the volumetric's cost —
+ * 12 steps against 160, a 2D map against three 3D volumes, no render targets, no
+ * temporal pass, no worker bake, and it lives inside the sky dome's own fragment shader
+ * so it adds no draw call at all.
  *
- * ─────────────────────────────────────────────────────────────────────────────────────
- * WHAT MAKES A FLAT LAYER READ AS VOLUME (the whole trick, in order of how much it buys):
- *
- *   • SELF-SHADOWING BY OFFSET SAMPLING. Step a few taps across the field TOWARD the sun
- *     and accumulate what you find as optical depth. A pixel with cloud between it and the
- *     sun goes dark; a pixel with clear field beside it stays lit. That single term turns
- *     a noise blob into a lumpy mass with a lit side and a shaded side — it is a real
- *     (if 2D) light march, not a fake. Everything else here is a refinement of it.
- *   • SHADOW LENGTH FROM SUN ELEVATION. The offset scales with 1/sin(elevation), so a low
- *     sun throws long shadows across the deck and the whole sky goes dramatic at dusk for
- *     free, because it is the same geometry the real thing uses.
- *   • DOMAIN WARP. Sampling the field through a low-frequency displacement turns round
- *     fbm blobs into sheared, curled masses. Noise looks like noise; warped noise looks
- *     like weather.
- *   • COVERAGE AS A THRESHOLD, NOT A MULTIPLIER — the same lesson the volumetric deck
- *     taught: multiplying caps a mass core at the dial value and the whole sky turns to
- *     translucent popcorn. Thresholding leaves cores solid and gaps genuinely open.
- *   • SILVER LINING gated on view/sun geometry, so thin edges blaze when you look toward
- *     the sun and stay neutral when it is behind you.
+ * The shape recipe is the volumetric deck's, ported down a dimension: Perlin-Worley
+ * masses, coverage as a THRESHOLD (never a multiplier — see modularRoadClouds.js),
+ * per-cell cloud TOPS so neighbours differ in height, and Worley billow erosion whose
+ * lookup shifts with altitude so a mass is not merely its own outline extruded.
  *
  * @see modularRoadClouds.js — the expensive tier this stands in for
  * @see modularRoadSky.js    — composites this last, so cloud occludes stars/moon/sun
  */
 import * as THREE from "three/webgpu";
 import {
-  float, vec2, vec3, vec4, Fn, uniform, texture,
-  normalize, dot, max, min, mix, smoothstep, pow, exp, abs, saturate,
+  float, vec2, vec3, vec4, Fn, If, Loop, Break, uniform, texture,
+  normalize, dot, max, min, mix, smoothstep, pow, exp, saturate,
+  screenCoordinate, interleavedGradientNoise,
 } from "three/tsl";
 import {
-  seededRandom, makePeriodicPerlin, perlinFbm, normalizeChannel,
+  seededRandom, makePeriodicPerlin, perlinFbm, makeWorley, normalizeChannel,
 } from "./modularRoadCloudNoise.js";
 
-/** Bake resolution. 256² tiles a few km, so one texel is ~15 m of sky — finer than the
- *  layer's own detail octave, and 256 KB of VRAM. */
+/** Bake resolution. 256² over a few km is ~15 m per texel — finer than the billow
+ *  octave the shader erodes with, and 256 KB of VRAM. */
 export const PAINTED_MAP_SIZE = 256;
+/** Compile-time ceiling on the march; `steps` cuts the loop short at runtime. */
+const MAX_STEPS = 24;
 
 export const PAINTED_CLOUD_DEFAULTS = {
   // NO `enabled` FLAG HERE, deliberately. The cloud TIER owns whether this deck exists
@@ -65,75 +56,61 @@ export const PAINTED_CLOUD_DEFAULTS = {
   // truth that reads as if the deck were merely hidden while still costing fetches.
 
   // ── Shape ────────────────────────────────────────────────────────────────────────
-  /** Metres the deck floats above the CAMERA. Not an absolute altitude: a flat layer has
-   *  no parallax to give away that it follows you, and pinning it to the camera keeps the
-   *  perspective sane whether you are on the ground or on a sky track at 300 m. */
-  altitude: 1500,
-  /**
-   * Metres one wrap of the map covers.
-   *
-   * TUNED AGAINST THE ALTITUDE, not independently: the pair sets the ANGULAR size of a
-   * cloud, which is the whole difference between "broken cumulus sky" and "smeared
-   * overcast". At 780 m / 5200 m the low-frequency field's ~1700 m masses sat so close
-   * overhead that two of them filled the view and the deck read as featureless stratus.
-   * 1500 m / 3200 m puts a mass at a few degrees across, so you see dozens with blue
-   * between them — which is what the coverage threshold was carving all along.
-   */
-  tile: 3200,
-  /** Fraction of sky covered. A THRESHOLD (see the header) — 0 clear, 1 overcast. */
-  coverage: 0.5,
-  /** Edge softness of the coverage threshold, in field units. */
-  softness: 0.13,
-  /** Master opacity of the deck. */
-  density: 1.0,
-  /** Mid/fine octave bite — carves the mass edges into billows. */
-  detail: 0.62,
-  /** Domain-warp strength, in map units. This is most of "looks like weather". */
-  warp: 0.22,
-  /** Anisotropy. 1 = cumulus mass, 3+ = stretched cirrus streaks. */
-  stretch: 1.0,
+  /** Metres to the BASE of the deck. */
+  altitude: 1150,
+  /** Metres from base to top. This is the slab the march crosses — it is what gives the
+   *  deck thickness, so it is a look control, not just a placement one. */
+  thickness: 850,
+  /** Metres one wrap of the map covers. Tuned WITH `altitude`: together they set a
+   *  cloud's angular size, which is the whole difference between broken cumulus and
+   *  smeared overcast. */
+  tile: 4300,
+  /** Fraction of sky covered. A THRESHOLD, so masses keep solid cores at any setting. */
+  coverage: 0.46,
+  /** Billow erosion strength — carves mass edges into cauliflower. */
+  erode: 0.68,
+  /** Extinction per metre at full shaped density. */
+  densityMul: 0.055,
+  /** Shortest cloud as a fraction of the slab. The spread between this and 1 IS the
+   *  towering-vs-flat look: at 1 every cell fills the slab and you get a sheet. */
+  topMin: 0.25,
+  /** March steps across the slab (≤ MAX_STEPS). */
+  steps: 18,
 
   // ── Lighting ─────────────────────────────────────────────────────────────────────
-  /** Metres of deck depth the shadow march pretends to cross. Longer = deeper shading. */
-  depth: 850,
-  /** Extinction along the (2D) light march. */
-  absorb: 1.7,
-  /**
-   * How steeply the coverage field is read as a HEIGHT field for the fake normal.
-   * This is the single dial that decides whether the deck looks like billowing cloud
-   * or like a printed sheet — it is what gives each mass a lit top and a shaded flank.
-   */
-  bump: 5.5,
-  /**
-   * Key-light gain. Cloud droplet albedo is ~0.9 and a sunlit top is far brighter than
-   * the sky beside it — at 1.0 the deck comes out a dull beige because it can never
-   * exceed the sun colour it is lit by, which is not what a cumulus top looks like.
-   * Above ~1.6 the tops clip toward white through the tone map, which is correct.
-   */
-  sunStrength: 1.9,
+  /** Extinction along the 2-tap horizontal shadow — mass shadowing mass. */
+  absorb: 2.2,
+  /** Metres the shadow tap reaches across the deck before the sun-elevation stretch. */
+  shadowReach: 900,
+  /** Brightness of a cloud BASE relative to its top. The vertical gradient is most of
+   *  what reads as volume once the silhouette is right. */
+  baseDark: 0.22,
+  /** Key-light gain. Droplet albedo is ~0.9 and a sunlit top is far brighter than the
+   *  sky beside it; at 1.0 the deck comes out beige because it can never exceed the sun
+   *  colour lighting it. */
+  sunStrength: 2.1,
   /** Sky ambient reaching the shaded side. 0 = black undersides. */
-  ambient: 0.75,
-  /** Silver-lining strength on thin edges when looking toward the sun. */
-  silver: 0.85,
-  /** How strongly the deck dissolves into the sky behind it toward the horizon. */
-  aerial: 0.8,
-  /** Below this `dir.y` the deck is faded out entirely (it would alias to mush). */
-  horizonFade: 0.06,
+  ambient: 0.55,
+  /** Silver lining on thin cloud when looking toward the sun. */
+  silver: 1.1,
+  /** How strongly distance dissolves the deck into the sky behind it. */
+  aerial: 0.55,
+  /** Below this `dir.y` the deck fades out — the slab crossing runs to infinity there. */
+  horizonFade: 0.035,
 
   // ── Wind ─────────────────────────────────────────────────────────────────────────
   windDeg: 35,
-  /** Metres per second. Matches the volumetric deck's units so switching tiers keeps
-   *  the same drift. */
+  /** Metres per second, same units as the volumetric deck so tiers drift alike. */
   windSpeed: 6.0,
 };
 
 /**
- * Bake the tileable cloud map. ~90 ms on this laptop at 256².
+ * Bake the tileable cloud map. ~120 ms at 256², lazily and only in this tier.
  *
- *   R  coverage   low-frequency mass field — what the threshold cuts
- *   G  detail     mid-frequency — erodes mass edges into billows
- *   B  fine       high-frequency — the last bite of texture near the camera
- *   A  warp       very low frequency — displaces the lookup (see `warp`)
+ *   R  coverage   Perlin-Worley mass field — what the coverage threshold cuts
+ *   G  cloud top  per-cell height fraction, CORRELATED with coverage
+ *   B  billow     Worley FBM — erodes mass edges into cauliflower
+ *   A  weather    very low frequency — makes whole regions cloudier or clearer
  *
  * Every channel is percentile-stretched, for the same load-bearing reason the volumetric
  * bake is: raw fbm occupies a narrow mid band, and a threshold against a 0.2-wide range
@@ -142,6 +119,10 @@ export const PAINTED_CLOUD_DEFAULTS = {
 export function bakePaintedCloudMap(seed = 4177, size = PAINTED_MAP_SIZE) {
   const rng = seededRandom(seed >>> 0);
   const perlin = makePeriodicPerlin(rng);
+  // Worley cell grids. Low frequencies build the masses, high ones erode them.
+  const w3 = makeWorley(3, rng), w6 = makeWorley(6, rng);
+  const w12 = makeWorley(12, rng), w24 = makeWorley(24, rng);
+
   const out = new Uint8Array(size * size * 4);
   let i = 0;
   for (let y = 0; y < size; y++) {
@@ -149,11 +130,29 @@ export function bakePaintedCloudMap(seed = 4177, size = PAINTED_MAP_SIZE) {
     const ny = y / size;
     for (let x = 0; x < size; x++) {
       const nx = x / size;
-      // One lattice, four independent fields by offsetting the sampling plane in Z.
-      out[i++] = perlinFbm(perlin, nx, ny, 0.13, 3, 5) * 255;
-      out[i++] = perlinFbm(perlin, nx, ny, 0.57, 9, 4) * 255;
-      out[i++] = perlinFbm(perlin, nx, ny, 0.91, 22, 3) * 255;
-      out[i++] = perlinFbm(perlin, nx, ny, 0.37, 2, 3) * 255;
+
+      // PERLIN-WORLEY. Plain Perlin gives smooth amoeba blobs — the "torn paper islands"
+      // v1's silhouettes were made of. Inflating it from below by inverted Worley
+      // connects it into rounded, lumpy masses, which is what a cumulus outline is.
+      const pf = perlinFbm(perlin, nx, ny, 0.13, 3, 5);
+      const wf = w3(nx, ny, 0.21) * 0.625 + w6(nx, ny, 0.21) * 0.25 + w12(nx, ny, 0.21) * 0.125;
+      const pw = wf + pf * (1 - wf);
+
+      // CLOUD TOP, correlated with coverage — the volumetric deck's lesson: independent
+      // top noise puts tall cells on thin mass edges and extrudes narrow chimneys, while
+      // real cumulus tower where the mass is fattest.
+      const tn = perlinFbm(perlin, nx, ny, 0.41, 2, 3);
+      const top = tn * 0.4 + pw * 0.6;
+
+      const billow = w6(nx, ny, 0.66) * 0.5 + w12(nx, ny, 0.66) * 0.35 + w24(nx, ny, 0.66) * 0.15;
+      // WEATHER: one wrap across the whole sky, so some regions are busy and others open.
+      // Without it every part of the sky is equally cloudy and the deck reads as a texture.
+      const weather = perlinFbm(perlin, nx, ny, 0.77, 1, 3);
+
+      out[i++] = pw * 255;
+      out[i++] = top * 255;
+      out[i++] = billow * 255;
+      out[i++] = weather * 255;
     }
   }
   for (let c = 0; c < 4; c++) normalizeChannel(out, 4, c);
@@ -173,149 +172,193 @@ export function createPaintedClouds({ seed = 4177, params = {} } = {}) {
   );
   map.wrapS = map.wrapT = THREE.RepeatWrapping;
   map.magFilter = THREE.LinearFilter;
-  // MIPMAPS ARE THE HORIZON ANTI-ALIASING. The plane projection compresses the whole
-  // remaining deck into the last few degrees above the horizon, so texel density there
-  // goes to infinity; without mips that band is a shimmering moiré that no amount of
-  // fading hides. With them the hardware picks the LOD per pixel for free.
+  // MIPMAPS ARE THE HORIZON ANTI-ALIASING. The slab crossing runs to tens of kilometres
+  // at grazing angles, so texel density there goes to infinity; without mips that band
+  // is a shimmering moiré that no amount of fading hides.
   map.minFilter = THREE.LinearMipmapLinearFilter;
   map.generateMipmaps = true;
   map.needsUpdate = true;
   const mapTex = texture(map);
 
   const uAltitude = uniform(P.altitude);
+  const uThickness = uniform(P.thickness);
   const uTile = uniform(P.tile);
   const uCoverage = uniform(P.coverage);
-  const uSoftness = uniform(P.softness);
-  const uDensity = uniform(P.density);
-  const uDetail = uniform(P.detail);
-  const uWarp = uniform(P.warp);
-  const uStretch = uniform(P.stretch);
-  const uDepth = uniform(P.depth);
+  const uErode = uniform(P.erode);
+  const uDensityMul = uniform(P.densityMul);
+  const uTopMin = uniform(P.topMin);
+  const uSteps = uniform(P.steps);
   const uAbsorb = uniform(P.absorb);
-  const uBump = uniform(P.bump);
+  const uShadowReach = uniform(P.shadowReach);
+  const uBaseDark = uniform(P.baseDark);
   const uSunStrength = uniform(P.sunStrength);
   const uAmbient = uniform(P.ambient);
   const uSilver = uniform(P.silver);
   const uAerial = uniform(P.aerial);
   const uHorizonFade = uniform(P.horizonFade);
   const uWind = uniform(new THREE.Vector2());
+  /** Camera XZ in map units, so the deck is anchored to the WORLD and drifts past you
+   *  as you drive instead of being glued to the camera. */
+  const uCamXZ = uniform(new THREE.Vector2());
 
-  /** Field lookup at a map position: returns the eroded, thresholded cloud amount. */
-  const fieldAt = Fn(([uv]) => {
-    const s = mapTex.sample(uv);
-    // Erosion REMAPS the mass rather than multiplying it, so the iso-surface itself
-    // moves and the silhouette gains billows instead of merely getting darker — the
-    // same reason the volumetric deck erodes this way.
-    const bite = s.g.mul(0.65).add(s.b.mul(0.35)).mul(uDetail);
-    const shaped = s.r.sub(bite.mul(0.5));
-    const bar = uCoverage.oneMinus();
-    return smoothstep(bar, bar.add(uSoftness), shaped);
-  });
+  /**
+   * remap(v, lo..1 → 0..1) with a GUARDED denominator.
+   *
+   * Not TSL's `remapClamp`: the coverage step is `remap(field, 1 - coverage, 1)`, so the
+   * divisor IS the coverage and in clear sky it is zero. 0/0 is NaN, NaN survives the
+   * clamp, and the sky goes black wherever there is no cloud. The volumetric deck lost a
+   * day to exactly this.
+   */
+  const remapUnit = Fn(([v, lo]) => saturate(v.sub(lo).div(float(1.0).sub(lo).max(1e-4))));
 
   /**
    * Shade the deck for one view ray.
    *
    * @param dir      normalised view direction
-   * @param bgCol    the sky colour already computed BEHIND the deck (for aerial fade)
+   * @param bgCol    sky colour already computed BEHIND the deck (for the aerial fade)
    * @param sunDir   normalised sun direction
-   * @param keyCol   the light colour (sun, or moon at night — the caller decides)
+   * @param keyCol   light colour (sun, or moon at night — the caller decides)
    * @param ambCol   sky ambient colour reaching the shaded side
    * @returns vec4(rgb, alpha) — straight alpha, to be mix()'d over the sky
    */
   const shade = Fn(([dir, bgCol, sunDir, keyCol, ambCol]) => {
     const out = vec4(0.0).toVar();
 
-    // Rays at or below the horizon never hit a deck that is above the camera. Fading
-    // rather than cutting: the projection compresses infinitely there, so the last few
-    // degrees are unresolvable however many mips we have.
     const y = dir.y;
-    const hMask = smoothstep(uHorizonFade, uHorizonFade.add(0.16), y);
+    // Rays at or below the horizon never reach a deck that is above the camera, and the
+    // slab crossing diverges there. Fade rather than cut: the last degrees are
+    // unresolvable however many mips we have.
+    const hMask = smoothstep(uHorizonFade, uHorizonFade.add(0.10), y);
 
-    // Plane projection: this is what makes a flat layer converge toward the horizon like
-    // a real deck instead of sitting on the dome like wallpaper.
-    const t = uAltitude.div(max(y, 0.001));
-    const world = vec2(dir.x, dir.z).mul(t);
-    const uv0 = vec2(world.x.div(uStretch), world.y).div(uTile).add(uWind).toVar();
+    If(hMask.greaterThan(0.001), () => {
+      const yy = max(y, uHorizonFade.mul(0.5));
+      const tBase = uAltitude.div(yy);
+      const tTop = uAltitude.add(uThickness).div(yy);
+      const dt = tTop.sub(tBase).div(uSteps.max(1.0)).toVar();
 
-    // DOMAIN WARP — noise looks like noise; warped noise looks like weather.
-    const w = mapTex.sample(uv0.mul(0.35)).a.sub(0.5);
-    const uv = uv0.add(vec2(w, w.mul(0.7)).mul(uWarp)).toVar();
+      // ── One horizontal shadow, at the slab mid-plane ────────────────────────────
+      // Mass-to-mass shadowing. Two taps toward the sun, stretched by 1/sin(elevation)
+      // because a low sun throws long shadows — CLAMPED to a quarter wrap, or at dusk
+      // the taps land more than a full texture wrap away, sample effectively at random,
+      // and every cloud in the sky shades identically (that bug shipped once already).
+      const tMid = uAltitude.add(uThickness.mul(0.5)).div(yy);
+      const uvMid = uCamXZ.add(vec2(dir.x, dir.z).mul(tMid).div(uTile)).add(uWind);
+      const sunXZ = normalize(vec3(sunDir.x, 1e-5, sunDir.z)).xz;
+      const reach = min(uShadowReach.div(max(sunDir.y, 0.15)).div(uTile), float(0.25));
+      const sTau = mapTex.sample(uvMid.add(sunXZ.mul(reach.mul(0.45)))).r.mul(0.55)
+        .add(mapTex.sample(uvMid.add(sunXZ.mul(reach))).r.mul(0.45));
+      const sunShadow = exp(sTau.mul(uAbsorb).negate()).toVar();
 
-    const c = fieldAt(uv).toVar();
+      // Silver lining: thin cloud between you and the sun blazes. Gated on geometry —
+      // applied unconditionally it just greys the deck (the volumetric powder term paid
+      // for that lesson).
+      const mu = saturate(dot(dir, sunDir));
+      const rim = pow(mu, float(8.0)).mul(uSilver);
 
-    // ── FAKE NORMAL FROM THE FIELD GRADIENT ───────────────────────────────────────
-    // Treat the coverage field as a HEIGHT field and difference it: where the mass thickens
-    // quickly the surface is steep, where it plateaus it faces up. Two extra taps buy
-    // a normal, and a normal buys N·L — which is what puts a bright top and a shaded
-    // flank on every individual billow. The shadow march below handles mass-to-mass
-    // occlusion; this handles the form of each mass, and the eye needs both.
-    const e = float(0.006);
-    const cx = fieldAt(uv.add(vec2(e, 0.0))).sub(c);
-    const cy = fieldAt(uv.add(vec2(0.0, e))).sub(c);
-    const n = normalize(vec3(cx.negate().mul(uBump), 1.0, cy.negate().mul(uBump)));
+      // Dither the entry by up to one step, or the slab bands into shells — the same
+      // failure the volumetric march has, and the same fix.
+      const jit = interleavedGradientNoise(screenCoordinate.xy);
+      const t = tBase.add(dt.mul(jit)).toVar();
+      const transmittance = float(1.0).toVar();
+      const scattered = vec3(0.0).toVar();
 
-    // ── SELF-SHADOW MARCH (mass shadowing mass) ───────────────────────────────────
-    // Step across the field toward the sun and accumulate what is in the way. The step
-    // grows as the sun sinks — 1/sin(elevation) is the real geometry of a long shadow —
-    // so dusk gets dramatic banks of light and shade for nothing.
-    const sunXZ = normalize(vec3(sunDir.x, 0.0, sunDir.z).add(vec3(1e-5, 0.0, 0.0)));
-    // CLAMPED, and the clamp is load-bearing rather than defensive. The 1/sin term runs
-    // away as the sun sets — at 11° it asks for 4.2 km of reach, which on a 3.2 km tile
-    // is more than one WRAP of the map, so the three taps land at effectively random
-    // places, tau averages to a constant and every cloud shades identically. That is
-    // exactly when the deck went flat orange at dusk. A quarter of a wrap is as far as
-    // the shadow can travel and still be sampling this cloud's own neighbourhood.
-    const reach = min(uDepth.div(max(sunDir.y, 0.12)).div(uTile), float(0.25));
-    const stepUv = vec2(sunXZ.x.div(uStretch), sunXZ.z).mul(reach);
-    const tau = fieldAt(uv.add(stepUv.mul(0.33))).mul(0.5)
-      .add(fieldAt(uv.add(stepUv.mul(0.66))).mul(0.3))
-      .add(fieldAt(uv.add(stepUv)).mul(0.2));
-    const shade = exp(tau.mul(uAbsorb).negate());
-    const ndl = saturate(dot(n, sunDir)).mul(0.85).add(0.15); // wrap: droplets scatter round
-    const light = ndl.mul(shade);
+      Loop(MAX_STEPS, ({ i }) => {
+        If(float(i).greaterThanEqual(uSteps), () => Break());
+        If(transmittance.lessThan(0.01), () => Break());
 
-    // SILVER LINING, gated on geometry: thin cloud between you and the sun blazes, and
-    // only then — applied unconditionally it just greys the whole deck (a lesson the
-    // volumetric powder term already paid for).
-    const mu = saturate(dot(dir, sunDir));
-    const rim = pow(mu, float(6.0)).mul(c.oneMinus()).mul(uSilver);
+        const h = y.mul(t).sub(uAltitude).div(uThickness); // 0 at base, 1 at top
+        const uv = uCamXZ.add(vec2(dir.x, dir.z).mul(t).div(uTile)).add(uWind);
+        const m = mapTex.sample(uv);
 
-    const lit = keyCol.mul(light.mul(uSunStrength).add(rim));
-    // Thin cloud passes more sky light than a thick core does.
-    const amb = ambCol.mul(uAmbient).mul(mix(float(1.0), float(0.55), c));
-    const col = lit.add(amb).toVar();
+        // Per-cell top: local height runs 0..1 inside THIS cell's own cloud, so a
+        // neighbour can be shallow while this one towers. Without it every cell spans
+        // the same band and the deck can only read as a sheet.
+        const top = mix(uTopMin, float(1.0), m.g);
+        const hL = h.div(top.max(0.05));
+        // Rounded profile: flat-ish base, domed top.
+        // A CUMULUS BASE IS SHARP AND FLAT — it is the condensation level, a
+        // thermodynamic boundary, not a fade. Ramping it over 22% of the cloud's height
+        // (as this did) rounds every mass into a lozenge and is a large part of why the
+        // deck read as fog. The top stays domed, which is the shape convection gives it.
+        const prof = smoothstep(0.0, 0.06, hL).mul(smoothstep(1.0, 0.55, hL));
 
-    // Aerial perspective: distant deck recedes into the sky BEHIND it, so the layer
-    // dissolves toward the horizon instead of holding full contrast to the edge.
-    const aerial = smoothstep(float(0.45), float(0.02), y).mul(uAerial);
-    col.assign(mix(col, bgCol, aerial));
+        // Weather makes whole regions cloudier — this is what stops the sky reading as
+        // one uniform texture repeated to the horizon.
+        const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), m.a)));
+        const shaped = remapUnit(m.r.mul(prof), covLocal.oneMinus()).toVar();
 
-    out.assign(vec4(col, c.mul(uDensity).mul(hMask)));
+        If(shaped.greaterThan(0.002), () => {
+          // BILLOW EROSION, and the lookup SHIFTS WITH HEIGHT. Sampling it at the same
+          // uv for every step would carve the identical bite at every altitude, i.e. the
+          // mass would be its own outline extruded — the exact tell v1 had. Offsetting
+          // by height makes the erosion twist as it rises, which is what reads as a
+          // three-dimensional billow.
+          // TWO OCTAVES, because one is a lumpy edge and two is cauliflower. The finer
+          // one carries most of the crispness the eye reads as "cloud" rather than
+          // "smoke"; both shift with height so the mass is not its own outline extruded.
+          const dUv = uv.mul(3.1).add(vec2(h.mul(0.35), h.mul(-0.27)));
+          const fUv = uv.mul(9.7).add(vec2(h.mul(-0.8), h.mul(0.6)));
+          const billow = mapTex.sample(dUv).b.mul(0.62).add(mapTex.sample(fUv).b.mul(0.38));
+          const bite = billow.mul(uErode).mul(mix(float(0.6), float(1.25), saturate(hL)));
+          const dens = remapUnit(shaped, bite).mul(uDensityMul).toVar();
+
+          If(dens.greaterThan(1e-5), () => {
+            // Vertical light gradient: tops catch the sun, bases sit in their own shadow.
+            // Cheap, and with the silhouette now correct it does most of the volume read.
+            const vert = mix(uBaseDark, float(1.0), saturate(hL));
+            const lit = keyCol.mul(uSunStrength).mul(sunShadow.mul(vert).add(rim.mul(vert)));
+            const amb = ambCol.mul(uAmbient).mul(mix(float(0.55), float(1.0), saturate(hL)));
+            const lum = lit.add(amb);
+
+            const stepT = exp(dens.mul(dt).negate());
+            scattered.addAssign(transmittance.mul(lum).mul(stepT.oneMinus()));
+            transmittance.mulAssign(stepT);
+          });
+        });
+        t.addAssign(dt);
+      });
+
+      const alpha = transmittance.oneMinus().mul(hMask).toVar();
+      // Premultiplied during integration, so divide back out to straight alpha for the
+      // caller's mix(). Guarded, or a fully clear pixel divides by zero.
+      const col = scattered.div(alpha.max(1e-4)).toVar();
+
+      // Aerial perspective: distant deck recedes into the sky BEHIND it, so it dissolves
+      // toward the horizon instead of holding full contrast to the edge.
+      const aerial = smoothstep(float(0.42), float(0.02), y).mul(uAerial);
+      col.assign(mix(col, bgCol, aerial));
+
+      out.assign(vec4(col, alpha));
+    });
     return out;
   });
 
   const _windAccum = new THREE.Vector2();
 
-  /** @param {number} dt seconds */
-  function update(dt) {
+  /**
+   * @param {number} dt seconds
+   * @param {THREE.Vector3} [camPos] world camera position — anchors the deck
+   */
+  function update(dt, camPos) {
     const rad = THREE.MathUtils.degToRad(P.windDeg);
-    // Metres, converted to map units on read — so the wind speed dial means the same
-    // thing here as it does on the volumetric deck.
+    // Metres, converted to map units on read, so the wind dial means the same thing here
+    // as it does on the volumetric deck.
     _windAccum.x += Math.cos(rad) * P.windSpeed * dt;
     _windAccum.y += Math.sin(rad) * P.windSpeed * dt;
     uWind.value.set(_windAccum.x / P.tile, _windAccum.y / P.tile);
+    if (camPos) uCamXZ.value.set(camPos.x / P.tile, camPos.z / P.tile);
 
     uAltitude.value = P.altitude;
+    uThickness.value = P.thickness;
     uTile.value = P.tile;
     uCoverage.value = P.coverage;
-    uSoftness.value = P.softness;
-    uDensity.value = P.density;
-    uDetail.value = P.detail;
-    uWarp.value = P.warp;
-    uStretch.value = P.stretch;
-    uDepth.value = P.depth;
+    uErode.value = P.erode;
+    uDensityMul.value = P.densityMul;
+    uTopMin.value = P.topMin;
+    uSteps.value = Math.min(P.steps, MAX_STEPS);
     uAbsorb.value = P.absorb;
-    uBump.value = P.bump;
+    uShadowReach.value = P.shadowReach;
+    uBaseDark.value = P.baseDark;
     uSunStrength.value = P.sunStrength;
     uAmbient.value = P.ambient;
     uSilver.value = P.silver;

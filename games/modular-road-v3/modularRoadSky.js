@@ -668,7 +668,7 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
     const look = evaluateSky(P);
     _lastLook = look;
     pushLook(y, look);
-    paintedClouds?.update(dt);
+    paintedClouds?.update(dt, cam?.position);
     P.sunElevation = look.sunElevation;
     P.sunAzimuth = look.sunAzimuth;
     return look;

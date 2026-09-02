@@ -1808,9 +1808,11 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="dv-hint">
             <b>Quality is a machine setting, not track data</b> — it never rides in a
             save. <b>Volumetric</b> is the raymarched deck you can fly through
-            (~1.3 ms). <b>Painted</b> is a baked cloud map projected on a plane with
-            a real 2-D self-shadow march — no buffers, no passes, ~0.1 ms — for
-            machines that cannot afford the raymarch. Switching rebuilds the sky
+            (~1.07 ms). <b>Painted</b> marches a thin slab (18 steps) through one
+            baked cloud map inside the sky dome's own shader — real thickness and
+            self-occlusion, but no render targets, no extra pass and no worker bake.
+            Measured <b>0.06-0.11 ms</b>, i.e. 10-17x cheaper, for machines that
+            cannot afford the raymarch. Switching rebuilds the sky
             (~0.7 s) because the painted deck is compiled in or out of the dome's
             shader rather than faded, so you never pay for the tier you are not on.
           </div>
