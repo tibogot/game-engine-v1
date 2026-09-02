@@ -18,7 +18,11 @@ import {
   sin, fract, floor, abs, length, step,
 } from "three/tsl";
 
+import { sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
+
 const SKY_RADIUS = 4000;
+/** Scratch for the painted deck's key-light integral — reused, allocates nothing. */
+const _keyRgb = [1, 1, 1];
 const DEG = Math.PI / 180;
 const OBLIQUITY = 23.44 * DEG;
 
@@ -330,8 +334,11 @@ export function skyColorsAt(camY, P = SKY_DEFAULTS) {
  * @param {object} [opts.params]
  * @param {object} [opts.atmosphere] optional `createSkyAtmosphere()` — when supplied, the
  *   authored gradient can be crossfaded to a physically-modelled sky (see setAtmosphereMix).
+ * @param {object} [opts.paintedClouds] optional `createPaintedClouds()` — the cheap cloud
+ *   tier. Handed in rather than built here for the same reason the atmosphere is: it
+ *   costs a bake, and a caller running the volumetric deck should never pay for it.
  */
-export function createModularRoadSky({ params, atmosphere } = {}) {
+export function createModularRoadSky({ params, atmosphere, paintedClouds } = {}) {
   const P = { ...SKY_DEFAULTS, ...params };
 
   const uCamY = uniform(40);
@@ -351,6 +358,8 @@ export function createModularRoadSky({ params, atmosphere } = {}) {
   const uMoonDiscBright = uniform(P.moonDiscBright);
   /** 0 = authored gradient, 1 = physical atmosphere. See setAtmosphereMix. */
   const uAtmoMix = uniform(0);
+  /** Sunlight reaching the painted deck — real transmittance, not the disc palette. */
+  const uCloudKey = uniform(new THREE.Color(1, 1, 1));
 
   const uZenithBelow = uniform(new THREE.Color());
   const uHorizonBelow = uniform(new THREE.Color());
@@ -525,6 +534,41 @@ export function createModularRoadSky({ params, atmosphere } = {}) {
     const glow = pow(mu, uSunGlowPow).mul(uSunGlowStrength);
     col.addAssign(uSunColor.mul(disc.add(glow)).mul(sunUpFade));
 
+    /*
+     * PAINTED CLOUD DECK — the cheap tier, composited LAST ON PURPOSE.
+     *
+     * Everything above (stars, moon, sun disc and glow) is sky BEHIND the deck, so the
+     * deck has to be able to cover it: an opaque cloud crossing the sun must hide the
+     * sun, and a thin one must let it burn through at its own alpha. Compositing before
+     * the sun instead would put the disc in front of the cloud — the classic giveaway.
+     *
+     * It also means the deck's aerial-perspective term gets the FULL sky colour behind
+     * this exact pixel to dissolve into, including the sun glow, which is what stops a
+     * far cloud sitting on top of a bright horizon like a sticker.
+     */
+    if (paintedClouds) {
+      /*
+       * THE KEY LIGHT IS REAL TRANSMITTANCE, NOT THE AUTHORED SUN COLOUR — the same trap
+       * the volumetric deck already fell into, and the same fix.
+       *
+       * `uSunColor` is authored for the SUN DISC and the horizon wash: at dusk it is
+       * `LOOK_DUSK.sun` = #ff8a40, a deep orange. On a disc that is right. Used as the
+       * LIGHT COLOUR for a whole cloud deck it paints every lit face flat neon orange,
+       * far more saturated than the sky behind it, and — because it saturates the
+       * channel — it also erases all the shading form the normal and shadow terms
+       * computed. Desaturating it was tried and only made a duller orange.
+       *
+       * `uCloudKey` is the sun's actual spectral transmittance to the deck's altitude
+       * (see pushLook), which is what the volumetric tier is lit by. Both tiers now
+       * agree about the colour of sunset by construction rather than by tuning.
+       */
+      const keyCol = uCloudKey.mul(sunUpFade)
+        .add(uMoonColor.mul(0.12).mul(smoothstep(-0.04, 0.08, uMoonDir.y)).mul(uNightF));
+      const ambCol = mix(horizon, zenith, float(0.55));
+      const deck = paintedClouds.shade(dir, col, uSunDir, keyCol, ambCol);
+      col.assign(mix(col, deck.rgb, deck.a));
+    }
+
     return vec4(col, 1.0);
   });
 
@@ -585,6 +629,22 @@ export function createModularRoadSky({ params, atmosphere } = {}) {
     uNightF.value = look.nightF;
     uTwilightF.value = look.twilightF;
     uStarBrightness.value = P.starBrightness;
+
+    /*
+     * The painted deck's key light: what the sun actually looks like after travelling
+     * through the atmosphere to the deck's altitude. Costs one CPU integral per look
+     * change (the clock is frozen by default, so effectively never), and it is the same
+     * function the volumetric tier's light colour comes from — which is the point.
+     */
+    if (paintedClouds) {
+      sunTransmittanceCPU(
+        THREE.MathUtils.clamp(look.sunDir.y, -1, 1),
+        paintedClouds.params.altitude,
+        undefined,
+        _keyRgb,
+      );
+      uCloudKey.value.setRGB(_keyRgb[0], _keyRgb[1], _keyRgb[2]);
+    }
   }
 
   function update(frame = {}) {
@@ -599,6 +659,7 @@ export function createModularRoadSky({ params, atmosphere } = {}) {
     const look = evaluateSky(P);
     _lastLook = look;
     pushLook(y, look);
+    paintedClouds?.update(dt);
     P.sunElevation = look.sunElevation;
     P.sunAzimuth = look.sunAzimuth;
     return look;

@@ -168,7 +168,7 @@ function worleyFbm(a, b, c) {
  * Percentile bounds rather than min/max so a handful of outlier voxels cannot squash the
  * rest of the distribution back into a narrow band.
  */
-function normalizeChannel(data, stride, offset, loPct = 0.005, hiPct = 0.995) {
+export function normalizeChannel(data, stride, offset, loPct = 0.005, hiPct = 0.995) {
   const n = Math.floor((data.length - offset + stride - 1) / stride);
   // Byte data — a 256-bin histogram IS the exact distribution, so no sort is needed.
   const hist = new Uint32Array(256);

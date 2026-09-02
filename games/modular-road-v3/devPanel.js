@@ -1798,6 +1798,23 @@ export function createRoadDevPanel({ app, game, params }) {
             framing: <b>~1.0 ms</b>, holding 60 fps.
           </div>
           <div class="prop-row">
+            <span class="prop-label">Quality</span>
+            <div class="prop-value" style="gap:4px">
+              <button class="action-btn dv-tier" data-tier="volumetric" type="button">Volumetric</button>
+              <button class="action-btn dv-tier" data-tier="painted" type="button">Painted</button>
+              <button class="action-btn dv-tier" data-tier="off" type="button">Off</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Quality is a machine setting, not track data</b> — it never rides in a
+            save. <b>Volumetric</b> is the raymarched deck you can fly through
+            (~1.3 ms). <b>Painted</b> is a baked cloud map projected on a plane with
+            a real 2-D self-shadow march — no buffers, no passes, ~0.1 ms — for
+            machines that cannot afford the raymarch. Switching rebuilds the sky
+            (~0.7 s) because the painted deck is compiled in or out of the dome's
+            shader rather than faded, so you never pay for the tier you are not on.
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Clouds</span>
             <div class="prop-value">
               <button class="prop-toggle" id="dv-clouds" type="button" aria-label="Volumetric clouds">${CHECK_SVG}</button>
@@ -4015,6 +4032,22 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-cld-g", CP, "phaseG", (v) => v.toFixed(2));
   slider("dv-cld-powder", CP, "powder", (v) => v.toFixed(2));
   slider("dv-cld-msfloor", CP, "msFloor", (v) => v.toFixed(2));
+  // Cloud quality tier. The buttons are a radio group: the active one is marked with
+  // the same primary style the palette uses, so "which tier am I on" is readable at a
+  // glance rather than inferred from whether clouds happen to be visible.
+  const tierBtns = [...root.querySelectorAll(".dv-tier")];
+  const syncTierBtns = () => {
+    const cur = game.getCloudTier?.() ?? "volumetric";
+    for (const b of tierBtns) b.classList.toggle("primary", b.dataset.tier === cur);
+  };
+  for (const b of tierBtns) {
+    b.addEventListener("click", () => {
+      game.setCloudTier?.(b.dataset.tier);
+      syncTierBtns();
+    });
+  }
+  syncTierBtns();
+
   slider("dv-cld-rays", CP, "rayStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));
   slider("dv-cld-shadow", CP, "shadowStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));
   slider("dv-cld-shadowsoft", CP, "shadowSoftness", (v) => v.toFixed(3));
@@ -4831,6 +4864,7 @@ export function createRoadDevPanel({ app, game, params }) {
     gapToggle.set(game.getGapPreview());
     // F8 flips the sky from outside the panel.
     gameSkyToggle.set(game.getGameSky?.() ?? false);
+    syncTierBtns();
     autoToggle.set(game.getAutoHeadlights?.() ?? true);
     // The wheel and chassis GLBs finish loading after the panel is built and
     // call refresh().

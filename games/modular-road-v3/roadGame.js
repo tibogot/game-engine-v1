@@ -179,6 +179,7 @@ import { ModularRoadFlags, FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
 import { createModularRoadSky, skyColorsAt, moonDirFromTime, SKY_DEFAULTS } from "./modularRoadSky.js";
+import { createPaintedClouds } from "./modularRoadPaintedClouds.js";
 import { createSkyAtmosphere, sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
@@ -746,7 +747,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   let gameSky = null;   // createModularRoadSky() — built lazily, see setGameSky
   let gameAtmo = null;  // createSkyAtmosphere()  — ditto
+  let gamePainted = null; // createPaintedClouds() — only in the "painted" tier
   let gameSkyOn = false;
+
+  /* ── CLOUD QUALITY TIER ────────────────────────────────────────────────────
+   *
+   * "volumetric" | "painted" | "off". This is a MACHINE setting, not track data,
+   * and that distinction is deliberate: a track says whether it WANTS clouds and
+   * what shape they are (see the environment block), the machine says how much
+   * it can afford to spend drawing them. So this never rides in a save — loading
+   * someone's cloud-dive track on a laptop gives you their sky at your budget,
+   * not their frame rate.
+   *
+   * The tiers are genuinely exclusive: the volumetric deck's zero-cost disable
+   * releases its buffers and never compiles its shaders, and the painted deck is
+   * only handed to the sky when its tier is selected, so the sky's shader has no
+   * cloud code in it at all otherwise. Nobody pays for the tier they are not on.
+   */
+  const CLOUD_TIERS = ["volumetric", "painted", "off"];
+  let cloudTier = "volumetric";
   /** Engine sky meshes we hid, with the visibility each had before we did. */
   let _engineSkyWas = null;
 
@@ -765,11 +784,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function buildGameSky() {
     if (gameSky) return;
     gameAtmo = createSkyAtmosphere({ renderer });
+    // Painted deck only in its own tier — see CLOUD_TIERS. Handing `null` to the sky
+    // leaves the cloud code out of the compiled shader entirely.
+    if (cloudTier === "painted" && !gamePainted) {
+      gamePainted = createPaintedClouds({
+        params: {
+          // Seed the look from whatever the track asked the volumetric deck for, so
+          // switching tiers changes the COST, not the art direction.
+          coverage: THREE.MathUtils.clamp(clouds.params.coverage + 0.05, 0, 1),
+          windDeg: clouds.params.windDeg,
+          windSpeed: clouds.params.windSpeed,
+        },
+      });
+    }
     // The atmosphere is handed IN rather than added as a second dome, so the
     // physical sky replaces the authored gradient while keeping the stars, the
     // moon and the cloud sea that live in the same shader.
     gameSky = createModularRoadSky({
       atmosphere: gameAtmo,
+      paintedClouds: gamePainted,
       params: {
         timeOfDay: GAME_TIME_OF_DAY,
         autoAdvance: false,
@@ -805,6 +838,34 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       for (const e of _engineSkyWas ?? []) e.mesh.visible = e.was;
       _engineSkyWas = null;
     }
+  }
+
+  /**
+   * Switch cloud tier.
+   *
+   * REBUILDS THE SKY when the painted deck comes or goes, because whether that deck
+   * exists is a SHADER difference, not a uniform — its texture fetches are either
+   * compiled into the dome or they are not. Keeping it compiled-in at zero opacity
+   * would make every sky pixel pay for the tier it is not using, which is the one
+   * thing a performance fallback must never do. A tier change is a deliberate, rare
+   * action and the rebuild is a ~0.7 s one-off, so it is the right trade.
+   */
+  function setCloudTier(tier) {
+    if (!CLOUD_TIERS.includes(tier) || tier === cloudTier) return;
+    const wasPainted = cloudTier === "painted";
+    cloudTier = tier;
+
+    clouds.setEnabled(tier === "volumetric");
+
+    if (wasPainted !== (tier === "painted")) {
+      const wasOn = gameSkyOn;
+      if (wasOn) setGameSky(false);
+      gameSky?.dispose();
+      gameSky = null;
+      gameAtmo = null; // rebuilt with the dome; its LUTs are cheap to re-bake
+      if (wasOn) setGameSky(true);
+    }
+    devPanel?.refresh?.();
   }
 
   function updateGameSky(dt) {
@@ -6307,6 +6368,13 @@ ${e.message}`);
         // two skies rather than two different hours.
         gameSky?.setTimeOfDay(t);
       },
+      // ── Cloud quality tier (machine setting, never track data) ──────────
+      getCloudTier: () => cloudTier,
+      setCloudTier,
+      cloudTiers: CLOUD_TIERS,
+      /** Live painted-deck params, or null when that tier is not built. */
+      getPaintedParams: () => gamePainted?.params ?? null,
+
       // ── Game-owned sky A/B (F8) ─────────────────────────────────────────
       getGameSky: () => gameSkyOn,
       setGameSky,
@@ -6876,6 +6944,12 @@ ${e.message}`);
      *  runs, and the noise bake never starts until the first enable. */
     setClouds: (on) => clouds.setEnabled(!!on),
     getClouds: () => clouds.enabled,
+    /** Cloud quality tier: "volumetric" | "painted" | "off". A machine setting — it
+     *  never rides in a track save. See setCloudTier for why it rebuilds the sky. */
+    setCloudTier,
+    getCloudTier: () => cloudTier,
+    /** Live painted-deck params (null unless that tier is built), for console tuning. */
+    paintedParams: () => gamePainted?.params ?? null,
     /** Sky mode — terrain hidden, not solid, and not paid for. A track saved in
      *  sky mode is just a track; this is a runtime mode, not track data. */
     setTerrain,
