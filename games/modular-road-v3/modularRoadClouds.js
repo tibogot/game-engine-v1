@@ -1289,28 +1289,39 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     const dist = length(delta).max(1e-4);
     // March at most rayLength of the screen, ending at the sun if it is closer.
     const stepUv = delta.mul(min(float(1.0), uRayLen.div(dist))).div(uRaySteps.max(1.0));
-    // Dither the march start by up to one tap, or the 24 discrete taps slice the glow
-    // into concentric rings around the sun — the same shell-banding failure the view
-    // march had, in polar coordinates. Static IGN (no frame term): the shaft buffer has
-    // no temporal accumulation to average an animated dither, and a fixed fine pattern
-    // is invisible on gradients this soft at quarter res.
+    // TWO SAMPLES PER TAP, HALF-TAP DITHER. Discrete taps slice the glow into concentric
+    // rings around the sun — the view march's shell banding in polar coordinates. A
+    // full-tap dither killed the rings but printed as a stationary weave (this buffer has
+    // no temporal accumulation to average it, and the tent filter at composite time
+    // could not fully hide a full tap of noise on mid-tone cloud faces — user caught it
+    // twice). Sampling the source at two half-tap points per step doubles the effective
+    // tap count, which halves both the ring pitch and the dither amplitude needed to
+    // decohere it; the residual half-tap noise is what the composite tent CAN erase.
+    const halfStep = stepUv.mul(0.5);
     const jit = interleavedGradientNoise(screenCoordinate.xy);
-    const p = fuv.add(stepUv.mul(jit)).toVar();
+    const p = fuv.add(halfStep.mul(jit)).toVar();
     const skyDepth = uReversed.oneMinus();
-    Loop(MAX_RAY_STEPS, ({ i }) => {
-      If(float(i).greaterThanEqual(uRaySteps), () => Break());
-      p.addAssign(stepUv);
-      const inb = p.x.greaterThan(0.0).and(p.x.lessThan(1.0))
-        .and(p.y.greaterThan(0.0)).and(p.y.lessThan(1.0));
+    const shaftSrc = Fn(([q]) => {
+      const s = float(0.0).toVar();
+      const inb = q.x.greaterThan(0.0).and(q.x.lessThan(1.0))
+        .and(q.y.greaterThan(0.0)).and(q.y.lessThan(1.0));
       If(inb, () => {
-        const isSky = abs(depthTex.sample(p).r.sub(skyDepth)).lessThan(0.0001);
+        const isSky = abs(depthTex.sample(q).r.sub(skyDepth)).lessThan(0.0001);
         If(isSky, () => {
-          const off = p.sub(uSunUV).mul(vec2(uAspect, 1.0));
+          const off = q.sub(uSunUV).mul(vec2(uAspect, 1.0));
           const glow = exp(dot(off, off).mul(uRayTight.negate()));
-          const trans = cloudTex.sample(p).a.oneMinus();
-          acc.addAssign(glow.mul(trans).mul(decay));
+          s.assign(glow.mul(cloudTex.sample(q).a.oneMinus()));
         });
       });
+      return s;
+    });
+    Loop(MAX_RAY_STEPS, ({ i }) => {
+      If(float(i).greaterThanEqual(uRaySteps), () => Break());
+      p.addAssign(halfStep);
+      const s0 = shaftSrc(p);
+      p.addAssign(halfStep);
+      const s1 = shaftSrc(p);
+      acc.addAssign(s0.add(s1).mul(0.5).mul(decay));
       decay.mulAssign(uRayDecay);
     });
     const amount = acc.div(uRaySteps.max(1.0)).mul(uRayStrength).mul(uRayActive).mul(uFade);
