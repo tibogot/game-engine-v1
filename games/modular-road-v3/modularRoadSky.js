@@ -462,19 +462,32 @@ export function createModularRoadSky({ params, atmosphere } = {}) {
     // Crossfaded rather than switched so the authored look can still be dialled back in as
     // a grade when a scene wants a specific mood the physics will not give you.
     //
-    // GATED BY DIRECTION: physical ABOVE the horizon only. Below it, the model is
-    // simulating the one thing this game never wants to see — the planet's own surface, a
-    // sunlit grey ball (groundAlbedo is deliberately colourless). The dome's floor here is
-    // never real ground: terrain, track or the void under a sky track stands in front of
-    // it, and what peeks through should be the AUTHORED nadir — the designed blue haze
-    // that made the old sky's horizon read well. So the crossfade collapses to the
-    // authored gradient over the few degrees below the horizon line: the physical sky
-    // keeps everything it wins at (real horizon band included), the authored floor keeps
-    // the one region it was always better at. The blend window sits just under 0 so the
-    // physical bright-horizon band itself is untouched.
+    // THE FLOOR IS THE HORIZON, DIMMED — never the model's own ground. Below the
+    // horizon the Hillaire model renders the planet's surface: a sunlit ball with a
+    // deliberately colourless albedo, i.e. a GREY floor, which is exactly what made the
+    // physical sky's horizon read worse than the old dome's. The old DayNightSkyDome
+    // never had a floor colour at all — it just multiplied the sky's own colour down
+    // (mix(1, 0.05, belowH²)), so the floor is the horizon blue itself deepening toward
+    // black, which is the rich "ocean mirror" look the old sky was loved for.
+    //
+    // Same recipe here, one better: downward rays sample the atmosphere AT the horizon
+    // (y clamped, azimuth kept), so the floor inherits the physical horizon's actual
+    // colour in that direction — warm on the sun's side of a sunset, cool opposite —
+    // then dims with depth on the old dome's curve. Above the horizon the clamp is a
+    // no-op and this is exactly skyRadiance(dir).
+    // HOW DEEP BLUE HAPPENS: the old dome's LUT marches below-horizon rays to the
+    // ground with NO albedo — a short path over black, which is a dark saturated blue
+    // that deepens with steepness. Our Hillaire LUT instead adds a sun-lit ground term
+    // (grey), and a first fix that mirrored the horizon band downward with a gentle dim
+    // stayed pale for the whole visible range. So the floor is built explicitly: the
+    // physical horizon colour AT the line (continuous, and warm on a sunset's sun side),
+    // deepening quickly into the authored zenith blue — bright band at 0°, rich navy by
+    // ~-25°, exactly the old floor's read with the physical sky's hue.
     if (atmosphere) {
-      const aboveness = smoothstep(float(-0.075), float(0.01), up);
-      col.assign(mix(col, atmosphere.skyRadiance(dir), uAtmoMix.mul(aboveness)));
+      const dirH = normalize(vec3(dir.x, max(up, float(0.015)), dir.z));
+      const depth = smoothstep(float(0.02), float(-0.45), up);
+      const phys = mix(atmosphere.skyRadiance(dirH), zenith.mul(0.35), depth);
+      col.assign(mix(col, phys, uAtmoMix));
     }
 
     const tHit = uCloudTop.sub(uCamY).div(min(up, float(-0.001)));
