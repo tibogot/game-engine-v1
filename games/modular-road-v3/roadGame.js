@@ -4870,6 +4870,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     cloudBase: "base",
     cloudThickness: "thickness",
     cloudCoverage: "coverage",
+    /** The in-cloud VISIBILITY knob — a dive track wants thinner medium (~0.06
+     *  reads as ~100 m visibility inside a mass) than the scenery default. */
+    cloudDensityMul: "densityMul",
     cloudCoverageSoft: "coverageSoft",
     cloudTypeBias: "typeBias",
     cloudTopMin: "cloudTopMin",
