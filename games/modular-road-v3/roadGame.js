@@ -175,8 +175,8 @@ import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
-import { createModularRoadSky, skyColorsAt, SKY_DEFAULTS } from "./modularRoadSky.js";
-import { createSkyAtmosphere } from "./modularRoadSkyAtmosphere.js";
+import { createModularRoadSky, skyColorsAt, moonDirFromTime, SKY_DEFAULTS } from "./modularRoadSky.js";
+import { createSkyAtmosphere, sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
 // imported assets — the source folder itself is not published.
@@ -499,8 +499,31 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
        *
        * Set here rather than in CLOUD_DEFAULTS so cloud-lab keeps its own tuning
        * ground and this stays the GAME's art direction.
+       *
+       * (Since coverage became a THRESHOLD on the weather field — see
+       * CLOUD_DEFAULTS.coverage — the dial means "fraction of sky covered"
+       * directly, and masses have solid white cores at any setting. 0.55 reads
+       * as a lively broken-cumulus sky with real blue between the masses.)
        */
-      coverage: 0.45,
+      coverage: 0.55,
+      /**
+       * Aerial fade halved from the module default: with the aerial TARGET now
+       * the bright horizon colour (see syncCloudSkyColours), full strength
+       * washed every cloud past ~2 km into a structureless fog wall. At 1e-4
+       * the mid-field keeps its shading and only the last kilometres melt into
+       * the horizon.
+       */
+      aerialDensity: 0.0001,
+      /** Slightly harder mass edges than the module default — crisper cumulus. */
+      coverageSoft: 0.12,
+      sunIntensity: 3.8,
+      /**
+       * Coarser empty-space skip than the module default (3). Measured here:
+       * -0.2 ms with the threshold coverage model, and visually identical —
+       * the model leaves the gaps honestly EMPTY, so skipping them faster no
+       * longer eats thin wisps the way it did when the whole sky was wisps.
+       */
+      emptyStepMul: 5,
     },
   });
   scene.add(clouds.mesh);
@@ -545,9 +568,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   const CLOUD_LIGHT = { skyTint: 0.6 };
   const _tintSun = new THREE.Color();
+  const _sunTransScratch = [0, 0, 0];
   const _tintZenith = new THREE.Color();
   const _tintHorizon = new THREE.Color();
   const _tintHaze = new THREE.Color();
+  const _tintHazeSun = new THREE.Color();
   const _tintGrey = new THREE.Color();
   const temperTint = (src, dst) => {
     dst.copy(src);
@@ -578,15 +603,100 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // THREE.Color in, THREE.Color out: `uSunColor.value.set(color)` copies and
     // does NOT re-apply the sRGB decode a hex string would have gone through,
     // and these are already working-space — so no double conversion.
-    _cloudFrame.sunColor = temperTint(look.sunColor, _tintSun);
+    /*
+     * SUN COLOUR = REAL TRANSMITTANCE, NOT THE SKY MODEL'S DISC COLOUR.
+     *
+     * `look.sunColor` is authored for the sun DISC: evaluateSky lerps it 85%
+     * toward #ff4a12 as the sun drops. On a disc that is right; used as the
+     * LIGHT on a whole cloud deck it floods every mass with one flat saturated
+     * salmon — worst at golden hour, where the multiple-scattering floor paints
+     * cloud interiors with pure sun colour. The physical answer is the same one
+     * the game sky itself uses: how much of each wavelength actually survives
+     * the slant path to the cloud's altitude. Warm white at noon, gold at 10°,
+     * ember at 2°, gone below the horizon — and cloud SHADING keeps its
+     * contrast, because only the direct terms carry the colour while ambient
+     * stays the sky's. Computed per clock change (this branch is key-cached),
+     * ~40 exp() calls, no GPU readback.
+     */
+    const elRad = THREE.MathUtils.degToRad(look.look.sunElevation);
+    const cloudMidAlt =
+      (clouds.params.base ?? 260) + (clouds.params.thickness ?? 620) * 0.5;
+    sunTransmittanceCPU(Math.sin(elRad), cloudMidAlt, undefined, _sunTransScratch);
+    _cloudFrame.sunColor = _tintSun.setRGB(
+      _sunTransScratch[0], _sunTransScratch[1], _sunTransScratch[2],
+    );
+    /*
+     * NIGHT: THE MOON IS THE LIGHT. The march has exactly one directional light,
+     * and with sun-only the deck went pitch black at night — no silvery tops, no
+     * lit edges, nothing for the eye to read the sky by. Once the sun is truly
+     * down its transmittance is zero, so the light slot is FREE: hand it the
+     * moon. Direction snaps rather than lerps (two directions cannot share one
+     * march), but the snap happens inside the window where BOTH colours are
+     * near-black, so nothing pops. Intensity is cinematic, not physical — the
+     * real sun:moon ratio (~1/400000) tone-maps to nothing, same dial as the
+     * atmosphere's moonIntensity.
+     */
+    _cloudUsingMoon = look.look.sunElevation < -5;
+    if (_cloudUsingMoon) {
+      moonDirFromTime(_cloudSkyParams, _cloudMoonDir);
+      const moonEl = Math.asin(THREE.MathUtils.clamp(_cloudMoonDir.y, -1, 1));
+      sunTransmittanceCPU(Math.sin(moonEl), cloudMidAlt, undefined, _sunTransScratch);
+      // Moonlight = sunlight off a grey rock, read blue by night vision (Purkinje).
+      // 0.25 is cinematic: through the transmittance, phase and density chain it puts a
+      // near-full moon's clouds at ~5% of their daytime brightness — clearly readable
+      // silver, nowhere near daylight. 0.055 (the first guess) was invisible.
+      const moonAmp = 0.25 * (look.look.moonIllum ?? 1);
+      _tintSun.setRGB(
+        _sunTransScratch[0] * 0.62 * moonAmp,
+        _sunTransScratch[1] * 0.72 * moonAmp,
+        _sunTransScratch[2] * 1.0 * moonAmp,
+      );
+    }
     _cloudFrame.skyZenith = temperTint(look.zenith, _tintZenith);
     _cloudFrame.skyHorizon = temperTint(look.horizon, _tintHorizon);
-    _cloudFrame.hazeColor = temperTint(look.haze, _tintHaze);
+    /*
+     * AT TWILIGHT, AMBIENT LEANS ON THE DOME, NOT THE HORIZON BAND. The cloud
+     * shader lights bases with `skyHorizon` and tops with `skyZenith`, which is
+     * right in daylight where the horizon is just paler blue. At dusk the
+     * authored horizon is a saturated orange BAND — a thin strip of sky — while
+     * the shadowed underside of a cloud sees mostly the (blue) dome above it.
+     * Feeding the band colour straight in painted every anti-solar cloud as a
+     * red-rock butte. Verified by elimination: killing the ms floor left the
+     * orange untouched — it was ambient all along.
+     */
+    const _twF = look.look.twilightF ?? 0;
+    _tintHorizon.lerp(_tintZenith, 0.55 * _twF);
+    /*
+     * AERIAL TARGET = THE HORIZON SKY, NOT THE NADIR HAZE, AND NOT TEMPERED.
+     *
+     * Distant clouds fade toward this colour, and they sit ON the horizon sky —
+     * so if the target is darker than that sky, every far cloud converges to a
+     * dirty grey-brown band pasted across a bright horizon. That is exactly
+     * what `look.haze` (the NADIR colour — what you see looking DOWN into the
+     * murk) was doing, and cloud-lab never showed it because the lab passes its
+     * own horizon colour here. Untempered because the temper exists to keep the
+     * sky model's saturated sun off the cloud LIGHTING; the aerial term is not
+     * lighting, it is the sky showing through, and it should match that sky.
+     */
+    _cloudFrame.hazeColor = _tintHaze.copy(look.horizon);
+    /*
+     * DIRECTIONAL at twilight: the sky model already evaluates a warm sunward
+     * wash (`twilight`) and a cool anti-solar limb (`anti`) for the dome — hand
+     * the same pair to the clouds' aerial term, weighted by how deep into
+     * twilight we are, so far clouds go bright gold toward the sun and stay
+     * dusky blue opposite it instead of one uniform cream. In full day
+     * twilightF is 0 and both targets collapse to the plain horizon.
+     */
+    const twF = look.look.twilightF ?? 0;
+    _cloudFrame.hazeSunColor = _tintHazeSun.copy(look.horizon).lerp(look.look.twilight, twF * 0.85);
+    _cloudFrame.hazeColor.lerp(look.look.anti, twF * 0.6);
     _cloudFrame.skyLook = look.look;
   }
 
   /** Drive the deck from the engine's live sun/sky so clouds match time of day. */
   const _cloudSun = new THREE.Vector3();
+  const _cloudMoonDir = new THREE.Vector3();
+  let _cloudUsingMoon = false;
   const _cloudFrame = {
     sunDir: _cloudSun,
     sunColor: 0xfff2dc,
@@ -605,6 +715,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       _cloudSun.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az));
     }
     if (s) syncCloudSkyColours(s, camera.position.y);
+    // At night the cloud light is the moon — see syncCloudSkyColours, which owns the
+    // decision (and the colour) because it is the key-cached path.
+    if (_cloudUsingMoon) _cloudSun.copy(_cloudMoonDir);
     clouds.update(dt, _cloudFrame);
   }
   app.addPreRenderHook?.(updateClouds);
@@ -701,6 +814,19 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     gameAtmo.update(look.sunDir, Math.max(0, camera.position.y), look.moonDir);
   }
   app.addPreRenderHook?.(updateGameSky);
+
+  /*
+   * BOOT ON THE GAME'S OWN SKY. It was built as an F8 A/B against the engine's
+   * and the A/B has an answer: the physical sky is both better-looking (real
+   * scattering instead of the dome's painted radial cirrus streaks — the single
+   * most obviously fake thing in the old frame) and measured ~0.47 ms CHEAPER
+   * (0.97 vs 1.44 ms with the sky filling the frame). F8 still switches back,
+   * so the comparison stays one keypress away. The one-off ~0.7 s LUT+shader
+   * build lands inside boot, where it is invisible, instead of on the first
+   * mid-game keypress. `scene.environment` still follows the engine sky's
+   * PMREM (see setGameSky) — switching the look does not relight the track.
+   */
+  setGameSky(true);
 
   // 3) ── THE TRACK ──────────────────────────────────────────────────────────
   onStatus("Building track…");
@@ -6663,6 +6789,17 @@ ${e.message}`);
     /** Cloud density at a world point (0 until the bake lands) — for HUD/audio rules. */
     cloudDensityAt: (x, y, z) => clouds.densityAt(x, y, z),
     cloudParams: clouds.params,
+    /** One clock for everything that cares: engine sky (drives the sun light and the
+     *  cloud colours) AND the game-owned sky dome. Setting only one of the two is how
+     *  you get a sunset deck under a midday sky. */
+    setTimeOfDay: (t) => {
+      app.sky?.setTimeOfDay(t);
+      gameSky?.setTimeOfDay(t);
+    },
+    getTimeOfDay: () => app.sky?.state?.timeOfDay ?? null,
+    /** Game-owned sky A/B (also on F8). */
+    setGameSky,
+    getGameSky: () => gameSkyOn,
     /** Surface look as plain JSON — the same object a track save carries and
      *  road-piece-lab.html exports. */
     /** What the mirror is allowed to see, and whether it runs at all. */

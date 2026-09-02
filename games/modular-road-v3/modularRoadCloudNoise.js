@@ -422,7 +422,12 @@ export function densityAtCPU(vols, P, wind, x, y, z, scratch = { b: [0, 0, 0, 0]
     vols.weather, WEATHER_SIZE,
     (x + wind.x * 0.35) / WEATHER_TILE_M, (z + wind.z * 0.35) / WEATHER_TILE_M, scratch.w,
   );
-  const cov = _clamp01((w[0] + P.coverageBias) * P.coverage);
+  // Coverage is a THRESHOLD on the weather channel, not a multiplier — must match
+  // sampleWeather() in modularRoadClouds.js (see CLOUD_DEFAULTS.coverage there for why).
+  const covSoft = P.coverageSoft ?? 0.16;
+  const covRaw = _clamp01(w[0] + P.coverageBias);
+  const covBar = (1 + covSoft) - P.coverage * (1 + 2 * covSoft);
+  const cov = _smoothstep(covBar - covSoft, covBar + covSoft, covRaw);
   const type = _clamp01(w[1] - 0.5 + P.typeBias);
   const denScale = _mix(0.55, 1.45, w[2]);
   // Per-cell cloud top — see the A channel in bakeWeatherMap. Local height is what gives

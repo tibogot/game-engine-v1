@@ -85,10 +85,31 @@ export const CLOUD_DEFAULTS = {
   base: 260,
   /** Deck thickness, world metres. */
   thickness: 620,
-  /** Global multiplier on the weather map's coverage channel. 0 = clear, 1 = as baked. */
+  /**
+   * Fraction of the sky that carries cloud, 0 = clear, 1 = overcast.
+   *
+   * A THRESHOLD on the weather field, not a multiplier. It used to scale the coverage
+   * channel (`cov = w.r * coverage`), which reads as the same dial but is structurally
+   * different: at 0.45 even the HEART of the biggest mass could never exceed 45% coverage,
+   * so the Nubis bar (`remap(base, 1 - cov, 1)`) sat at 0.55 minimum everywhere and only
+   * noise PEAKS survived — every cloud in the sky was a translucent grey wisp, and the
+   * deck read as popcorn. Real partly-cloudy skies are bimodal: coverage ≈ 1 INSIDE a
+   * mass, 0 between masses, and the dial should move the BOUNDARY. Thresholding the
+   * (full-range, percentile-normalized) weather channel does exactly that: interiors go
+   * solid white-cored, edges stay wispy over `coverageSoft`, and the gaps are honestly
+   * blue. The dial keeps its meaning — the channel is range-normalized, so coverage 0.45
+   * covers roughly 45% of the sky.
+   */
   coverage: 0.9,
-  /** Bias added to coverage before the multiplier — the "more/less cloud" dial. */
+  /** Bias added to the weather channel before the threshold — the "more/less cloud" dial. */
   coverageBias: 0.0,
+  /**
+   * Half-width of the coverage threshold, in weather-channel units. The wispy skirt of a
+   * mass: smaller = harder cloud edges against blue, larger = broader fading rims. The
+   * spatial width this maps to depends on the weather field's local gradient (~hundreds of
+   * metres at the default weather tile).
+   */
+  coverageSoft: 0.16,
   /** Overall density (extinction scale per metre). */
   densityMul: 0.16,
   /** Mid-frequency edge erosion strength. */
@@ -328,6 +349,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const uThickness = uniform(P.thickness);
   const uCoverage = uniform(P.coverage);
   const uCoverageBias = uniform(P.coverageBias);
+  const uCoverageSoft = uniform(P.coverageSoft);
   const uDensityMul = uniform(P.densityMul);
   const uErode = uniform(P.erode);
   const uNearErode = uniform(P.nearErode);
@@ -372,6 +394,12 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
 
   const uAerialEnabled = uniform(P.aerialEnabled ? 1 : 0);
   const uAerialColor = uniform(new THREE.Color(0xa8c0d4));
+  /** Haze colour on the SUN side of the sky. The atmosphere between us and a far cloud is
+   *  much brighter (and warmer) looking sunward than looking away — one direction-less
+   *  haze colour makes every sunset cloud converge to the same milky cream regardless of
+   *  where it stands. Defaults equal to uAerialColor so callers that never set it keep
+   *  the old behaviour. */
+  const uAerialColorSun = uniform(new THREE.Color(0xa8c0d4));
   const uAerialDensity = uniform(P.aerialDensity);
   const uAerialAmount = uniform(P.aerialAmount);
 
@@ -484,7 +512,13 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const sampleWeather = Fn(([p]) => {
     const wuv = p.xz.add(uWind.xz.mul(0.35)).div(WEATHER_TILE_M);
     const w = weatherTex.sample(wuv);
-    const cov = saturate(w.r.add(uCoverageBias).mul(uCoverage));
+    // Coverage is a THRESHOLD on the weather channel (see CLOUD_DEFAULTS.coverage): the
+    // bar sweeps [1+soft .. -soft] as the dial goes 0 → 1, so 0 is honestly clear (even
+    // the channel's peaks sit below the bar) and 1 is honestly overcast. Cells above the
+    // bar ramp to full coverage over 2·soft — solid interiors, wispy skirts.
+    const covRaw = saturate(w.r.add(uCoverageBias));
+    const bar = uCoverageSoft.add(1.0).sub(uCoverage.mul(uCoverageSoft.mul(2.0).add(1.0)));
+    const cov = smoothstep(bar.sub(uCoverageSoft), bar.add(uCoverageSoft), covRaw);
     const type = saturate(w.g.sub(0.5).add(uTypeBias));
     // How much of the slab this cell's cloud fills. Floored, or a cell would have no
     // cloud at all rather than a shallow one.
@@ -821,7 +855,13 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
       const fog = saturate(
         exp(meanDist.mul(uAerialDensity).negate()).oneMinus().mul(uAerialAmount),
       );
-      scattered.assign(mix(scattered, uAerialColor.mul(alpha), fog));
+      // Directional haze: a broad forward lobe (not the sharp sun glow — in-scattered
+      // haze light is diffuse) blends toward the sun-side colour, so a sunset's far
+      // clouds go warm-bright toward the sun and stay cool-dark opposite it, the way a
+      // real horizon does. mu = dot(view, sun) from the phase setup above.
+      const sunward = pow(saturate(mu.mul(0.5).add(0.5)), 3.0);
+      const hazeCol = mix(uAerialColor, uAerialColorSun, sunward);
+      scattered.assign(mix(scattered, hazeCol.mul(alpha), fog));
     });
 
     return vec4(scattered, alpha);
@@ -1132,7 +1172,9 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
 
   /**
    * @param {number} dt    seconds
-   * @param {object} frame { sunDir, sunColor, skyZenith, skyHorizon, hazeColor }
+   * @param {object} frame { sunDir, sunColor, skyZenith, skyHorizon, hazeColor,
+   *                         hazeSunColor } — hazeSunColor is the sun-side aerial target
+   *                         (defaults to hazeColor; see uAerialColorSun).
    */
   function update(dt, frame = {}) {
     // Tolerate `params.enabled` being flipped directly (the lab's sliders do this) — the
@@ -1158,6 +1200,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     uThickness.value = P.thickness;
     uCoverage.value = P.coverage;
     uCoverageBias.value = P.coverageBias;
+    uCoverageSoft.value = P.coverageSoft;
     uDensityMul.value = P.densityMul;
     uErode.value = P.erode;
     uNearErode.value = P.nearErode;
@@ -1187,7 +1230,15 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     uMsExtinction.value = P.msExtinction;
     uMsContribution.value = P.msContribution;
     uMsEccentricity.value = P.msEccentricity;
-    uMsFloor.value = P.msFloor;
+    // The multiple-scattering floor stands in for sunlight DIFFUSED through the mass, so
+    // it must die with the sun: at low elevations the slant path through the atmosphere
+    // has already eaten most of the light before it reaches the cloud, and a floor held
+    // at full strength paints every shadowed face with flat sun colour — at sunset that
+    // was a wall of glowing salmon where dark silhouettes belong. Ramped on sun height:
+    // full above ~27°, ~30% at 10° (golden hour keeps dark cores under gold rims), gone
+    // just below the horizon.
+    const sunUp = uSunDir.value.y;
+    uMsFloor.value = P.msFloor * THREE.MathUtils.smoothstep(sunUp, 0.02, 0.45);
     uMsFloorDepth.value = P.msFloorDepth;
     uSunIntensity.value = P.sunIntensity;
     uAmbientIntensity.value = P.ambientIntensity;
@@ -1219,6 +1270,10 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     if (frame.skyZenith) uSkyZenith.value.set(frame.skyZenith);
     if (frame.skyHorizon) uSkyHorizon.value.set(frame.skyHorizon);
     if (frame.hazeColor) uAerialColor.value.set(frame.hazeColor);
+    // Sun-side haze follows the plain haze unless the caller supplies its own — that keeps
+    // the lab (which passes one colour) exactly as it was.
+    if (frame.hazeSunColor) uAerialColorSun.value.set(frame.hazeSunColor);
+    else if (frame.hazeColor) uAerialColorSun.value.set(frame.hazeColor);
 
     _frame = (_frame + 1) % 64;
     uFrameJitter.value = _frame;

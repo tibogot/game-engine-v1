@@ -1791,9 +1791,11 @@ export function createRoadDevPanel({ app, game, params }) {
             Volumetric clouds you can fly through. Off costs nothing — no buffers,
             no passes. The first enable bakes noise in a worker (a few seconds, off
             the main thread), then the deck fades in.
-            <b>Coverage is the whole look</b>: 0.9 is a solid overcast sheet with no
-            sky left, 0.45 reads as separate cumulus. Measured cost with the sky in
-            a chase-camera framing: <b>0.87 ms</b>, holding 60 fps.
+            <b>Coverage is the fraction of sky covered</b> — a threshold on the
+            weather field, so masses keep solid white cores at any setting: 0.9
+            is honest overcast, 0.55 a lively broken-cumulus sky. Edge softness
+            is the wispy skirt around each mass. Measured cost in an editor sky
+            framing: <b>~1.0 ms</b>, holding 60 fps.
           </div>
           <div class="prop-row">
             <span class="prop-label">Clouds</span>
@@ -1813,6 +1815,13 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-cld-bias" min="-0.5" max="0.5" step="0.01" />
               <span class="prop-num" id="dv-cld-bias-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Edge softness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-covsoft" min="0.02" max="0.4" step="0.01" />
+              <span class="prop-num" id="dv-cld-covsoft-v"></span>
             </div>
           </div>
           <div class="prop-row">
@@ -3522,6 +3531,7 @@ export function createRoadDevPanel({ app, game, params }) {
   const CP = game.cloudParams ?? null;
   slider("dv-cld-cov", CP, "coverage", (v) => v.toFixed(2));
   slider("dv-cld-bias", CP, "coverageBias", (v) => (v > 0 ? "+" : "") + v.toFixed(2));
+  slider("dv-cld-covsoft", CP, "coverageSoft", (v) => v.toFixed(2));
   slider("dv-cld-base", CP, "base", (v) => v.toFixed(0) + " m");
   slider("dv-cld-thick", CP, "thickness", (v) => v.toFixed(0) + " m");
   slider("dv-cld-dens", CP, "densityMul", (v) => v.toFixed(3));

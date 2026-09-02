@@ -105,6 +105,48 @@ export const ATMOSPHERE_DEFAULTS = {
   aerialScale: 1.0,
 };
 
+/**
+ * Sun transmittance on the CPU — the same integral the transmittance LUT bakes, for the
+ * one ray other systems keep needing: "what colour is direct sunlight at altitude h right
+ * now". The cloud deck uses it as its light colour, which is what makes cloud lighting
+ * track the day for free: warm white at noon, gold at 10°, ember red at 2°, black once
+ * the sun is truly down — with no authored ramp to disagree with the sky.
+ *
+ * Deliberately NOT a readback of the GPU LUT: one 40-step integral on a colour that
+ * changes only when the clock does is nanoseconds, while a texture readback is an async
+ * GPU sync point. Mirrors rayleighAt/mieAt/ozoneAt above — keep them in step.
+ *
+ * @param {number} cosZenith  sun direction dot up (sin of elevation)
+ * @param {number} heightM    altitude above ground, metres
+ * @param {object} [P]        atmosphere params (ATMOSPHERE_DEFAULTS shape)
+ * @param {number[]} [out]    length-3 RGB transmittance, 0..1
+ */
+export function sunTransmittanceCPU(cosZenith, heightM, P = ATMOSPHERE_DEFAULTS, out = [0, 0, 0]) {
+  const r0 = RG + Math.max(1, heightM);
+  const mu = cosZenith;
+  // Ray-sphere: does the sun ray from r0 hit the ground before the atmosphere top?
+  const discG = r0 * r0 * (mu * mu - 1) + RG * RG;
+  if (mu < 0 && discG >= 0) { out[0] = out[1] = out[2] = 0; return out; }
+  const dTop = -r0 * mu + Math.sqrt(r0 * r0 * (mu * mu - 1) + RT * RT);
+  const step = dTop / TRANS_STEPS;
+  let tr = 0, tg = 0, tb = 0;
+  for (let i = 0; i < TRANS_STEPS; i++) {
+    const t = (i + 0.5) * step;
+    const r = Math.sqrt(r0 * r0 + t * t + 2 * r0 * t * mu);
+    const h = r - RG;
+    const ray = Math.exp(-h / P.rayleighH) * P.rayleighScale;
+    const mie = Math.exp(-h / P.mieH) * (P.mie + P.mieAbsorption) * P.mieScale;
+    const oz = Math.max(0, 1 - Math.abs(h - P.ozoneCentre) / P.ozoneWidth) * P.ozoneScale;
+    tr += (P.rayleigh[0] * ray + mie + P.ozone[0] * oz) * step;
+    tg += (P.rayleigh[1] * ray + mie + P.ozone[1] * oz) * step;
+    tb += (P.rayleigh[2] * ray + mie + P.ozone[2] * oz) * step;
+  }
+  out[0] = Math.exp(-tr);
+  out[1] = Math.exp(-tg);
+  out[2] = Math.exp(-tb);
+  return out;
+}
+
 /** March step counts. Only ever run inside a LUT bake, never per sky pixel. */
 const TRANS_STEPS = 40;
 const MS_SQRT_SAMPLES = 8;   // 8x8 = 64 directions on the sphere
