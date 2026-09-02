@@ -175,7 +175,7 @@ import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
-import { createModularRoadSky } from "./modularRoadSky.js";
+import { createModularRoadSky, skyColorsAt, SKY_DEFAULTS } from "./modularRoadSky.js";
 import { createSkyAtmosphere } from "./modularRoadSkyAtmosphere.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
@@ -506,6 +506,85 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   scene.add(clouds.mesh);
   app.clouds?.setSystem(clouds);
 
+  /* ── CLOUD LIGHTING vs TIME OF DAY ─────────────────────────────────────────
+   *
+   * The clouds used to be handed `sunColor`, `zenithDay` and `horizonDay` off
+   * the sky state, and the comment here claimed that drove them from "the
+   * engine's live sun/sky". It did not. Those three are AUTHORED PALETTE
+   * CONSTANTS — the clue is in the names — so they never changed. Measured
+   * across timeOfDay 10.5 / 17.6 / 19.2 / 21.0, i.e. sun elevation +61.7° down
+   * to −10.2° (below the horizon), all three came back byte-identical every
+   * time: #fff3d8 / #2a6bd8 / #bfe0ff. Only the sun DIRECTION varied. That is
+   * why the clouds stayed noon-white at every hour, including midnight.
+   *
+   * `skyColorsAt()` evaluates the real day/night look and returns exactly the
+   * four colours this frame wants, so the fix is to ask it instead. It is used
+   * whichever sky dome is showing — it is a colour model, not a renderer.
+   *
+   * RE-EVALUATED ONLY WHEN SOMETHING MOVED. `evaluateSky` allocates ~16 Colors
+   * per call, and time of day is FROZEN by default (`autoAdvance: false`), so
+   * calling it per frame would be ~1000 pointless allocations a second. The
+   * camera term only matters through the cloud-deck band weights, which do not
+   * change while you are driving a track 170 m under the deck — hence the
+   * coarse altitude bucket rather than an exact compare.
+   */
+  const _cloudSkyParams = { ...SKY_DEFAULTS };
+  /**
+   * HOW MUCH OF THE SKY'S COLOUR THE CLOUDS TAKE. 1 = exactly what the sky
+   * model says, 0 = neutral grey of the same brightness.
+   *
+   * Not 1 by default, because the sky's sun colour is authored for the SUN DISC
+   * and the horizon wash: `evaluateSky` lerps it 85% toward #ff4a12 as the sun
+   * nears the horizon. On a disc that is right. Used as the LIGHT COLOUR for a
+   * cloud deck it makes every cloud a single flat neon orange, far more
+   * saturated than the sky behind it — which reads as a bug even though each
+   * half is behaving as designed.
+   *
+   * Saturation only: the mix target is the colour's own luminance, so dawn
+   * stays as bright as it was and night stays as dark. Only the vividness moves.
+   */
+  const CLOUD_LIGHT = { skyTint: 0.6 };
+  const _tintSun = new THREE.Color();
+  const _tintZenith = new THREE.Color();
+  const _tintHorizon = new THREE.Color();
+  const _tintHaze = new THREE.Color();
+  const _tintGrey = new THREE.Color();
+  const temperTint = (src, dst) => {
+    dst.copy(src);
+    const t = CLOUD_LIGHT.skyTint;
+    if (t >= 1) return dst;
+    const l = src.r * 0.2126 + src.g * 0.7152 + src.b * 0.0722;
+    return dst.lerp(_tintGrey.setRGB(l, l, l), 1 - t);
+  };
+  let _cloudSkyKey = "";
+  function syncCloudSkyColours(s, camY) {
+    // Latitude / day-of-year / moon age as well as the hour: the look is driven
+    // by the sun's ELEVATION, and those are what place the sun in the sky.
+    const tod = s.timeOfDay ?? 12;
+    const lat = s.latitude ?? _cloudSkyParams.latitude;
+    const doy = s.dayOfYear ?? _cloudSkyParams.dayOfYear;
+    const age = s.moonAge ?? _cloudSkyParams.moonAge;
+    const band = Math.round(camY / 25);
+    // skyTint is in the key so dragging its slider re-evaluates — without it the
+    // cache would hold the old tint until the clock happened to move.
+    const key = `${tod.toFixed(3)}|${lat}|${doy}|${age}|${band}|${CLOUD_LIGHT.skyTint}`;
+    if (key === _cloudSkyKey) return;
+    _cloudSkyKey = key;
+    _cloudSkyParams.timeOfDay = tod;
+    _cloudSkyParams.latitude = lat;
+    _cloudSkyParams.dayOfYear = doy;
+    _cloudSkyParams.moonAge = age;
+    const look = skyColorsAt(camY, _cloudSkyParams);
+    // THREE.Color in, THREE.Color out: `uSunColor.value.set(color)` copies and
+    // does NOT re-apply the sRGB decode a hex string would have gone through,
+    // and these are already working-space — so no double conversion.
+    _cloudFrame.sunColor = temperTint(look.sunColor, _tintSun);
+    _cloudFrame.skyZenith = temperTint(look.zenith, _tintZenith);
+    _cloudFrame.skyHorizon = temperTint(look.horizon, _tintHorizon);
+    _cloudFrame.hazeColor = temperTint(look.haze, _tintHaze);
+    _cloudFrame.skyLook = look.look;
+  }
+
   /** Drive the deck from the engine's live sun/sky so clouds match time of day. */
   const _cloudSun = new THREE.Vector3();
   const _cloudFrame = {
@@ -525,12 +604,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       const az = THREE.MathUtils.degToRad(li.sunAzimuth ?? 60);
       _cloudSun.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az));
     }
-    if (s) {
-      _cloudFrame.sunColor = s.sunColor ?? 0xfff2dc;
-      _cloudFrame.skyZenith = s.zenithDay ?? 0x3f78c8;
-      _cloudFrame.skyHorizon = s.horizonDay ?? 0xc9dcef;
-      _cloudFrame.hazeColor = s.horizonDay ?? 0xc9dcef;
-    }
+    if (s) syncCloudSkyColours(s, camera.position.y);
     clouds.update(dt, _cloudFrame);
   }
   app.addPreRenderHook?.(updateClouds);
@@ -5902,6 +5976,8 @@ ${e.message}`);
       /** The live params object — `update()` pushes every field into its uniform
        *  each frame, so the panel can bind sliders straight to it. */
       cloudParams: clouds.params,
+      /** Game-side cloud lighting (how much of the sky's colour they take). */
+      cloudLight: CLOUD_LIGHT,
       /** Sky mode: terrain hidden, not solid, heights measured from y=0. */
       setTerrain,
       getTerrain: () => terrainOn,

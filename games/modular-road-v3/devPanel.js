@@ -1904,6 +1904,21 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Sky tint</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-tint" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-cld-tint-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            How much of the sky's colour the clouds take. 1 is exactly what the
+            sky model says — but that model reddens the sun 85% toward orange as
+            it sets, which is right for the sun DISC and far too strong as a
+            light on a whole cloud deck. This mixes toward the same brightness in
+            grey, so only the vividness changes: dawn stays as bright, night
+            stays as dark.
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Interior glow</span>
             <div class="prop-value">
               <input type="range" id="dv-cld-msfloor" min="0" max="0.6" step="0.01" />
@@ -3520,6 +3535,10 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-cld-g", CP, "phaseG", (v) => v.toFixed(2));
   slider("dv-cld-powder", CP, "powder", (v) => v.toFixed(2));
   slider("dv-cld-msfloor", CP, "msFloor", (v) => v.toFixed(2));
+  // Not a cloud-system param: the sky-colour mix is the GAME's wiring between
+  // the sky model and the cloud lighting, so it lives on its own object.
+  slider("dv-cld-tint", game.cloudLight ?? null, "skyTint",
+    (v) => (v <= 0 ? "neutral grey" : v >= 1 ? "full sky colour" : v.toFixed(2)));
   slider("dv-cld-buf", CP, "bufferScale",
     (v) => `${v.toFixed(2)}× · ${(v * v * 100).toFixed(0)}% of the pixels`);
   slider("dv-cld-steps", CP, "steps", (v) => v.toFixed(0));
