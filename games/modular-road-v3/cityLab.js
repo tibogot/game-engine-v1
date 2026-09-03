@@ -1,10 +1,23 @@
 // ============================================================================
 // CITY LAB — tuning and measurement harness for modularRoadCity.js.
 //
-// Standalone: no v3 engine, no terrain, no post-FX, no clouds. A gradient sky, a
-// sun, a deck stub and the city. Every number on screen is therefore THE CITY
-// and not somebody else's frame — the same reason cloudLab.js refuses to import
-// the engine.
+// Standalone: no v3 engine, no terrain, no post-FX, no clouds. A deck stub, the
+// city, and THE GAME'S OWN SKY.
+//
+// That last part is deliberate and it is a reversal. The lab started with a
+// cheap analytic gradient so that "every number on screen is the city" — which
+// is right for MEASUREMENT and wrong for JUDGEMENT. Under one directional light
+// and no environment map the city rendered as black silhouettes, and the
+// conclusion "it does not look as good as the three.js example" was really a
+// verdict on the lab's lighting: the facade's glass is metalness 0.55, and
+// metal with nothing to reflect is black.
+//
+// So the lab now imports `modularRoadSky.js` + `modularRoadSkyAtmosphere.js`
+// with the same parameters roadGame.js boots on, bakes a PMREM of that sky for
+// IBL, and applies its aerial perspective. The cheap gradient is still one
+// keypress away (F8) and the lighting is identical in both modes, so the
+// measurement discipline survives: F8 changes the backdrop's cost, never the
+// light the city is being judged under.
 //
 // ── WHAT THIS LAB IS FOR, SPECIFICALLY ───────────────────────────────────────
 //
@@ -33,17 +46,24 @@
 //   B  batched / instanced  — measured 1150 draws vs 34; BatchedMesh is NOT one
 //                             draw on WebGPU (no multi-draw in the spec)
 //   O  shadows off/on       — cheap here (+0.04 ms) only because just the L0
-//                             tier casts; that gate is the instanced backend'''s
+//                             tier casts; that gate is the instanced backend's
+//   F8 game sky / gradient  — what the sky itself costs, lighting held fixed
+//   U  aerial perspective   — depth in a cityscape is haze, not geometry
 //
 // GPU ms comes from timestamp queries the same way the cloud lab gets it:
 // `trackTimestamp` is a BACKEND CONSTRUCTION option, so it is passed to the
 // WebGPURenderer constructor and never set afterwards.
 // ============================================================================
 import * as THREE from "three/webgpu";
-import { Fn, vec3, vec4, uniform, positionWorld, normalize, smoothstep, mix, max, dot, pow } from "three/tsl";
+import {
+  Fn, vec3, vec4, uniform, positionWorld, cameraPosition, output,
+  normalize, smoothstep, mix, max, dot, pow,
+} from "three/tsl";
 import { createModularRoadCity, CITY_DEFAULTS } from "./modularRoadCity.js";
 import { FACADE_DEFAULTS } from "./modularRoadCityFacade.js";
 import { KIT_DEFAULTS } from "./modularRoadCityKit.js";
+import { createModularRoadSky, TIME_PRESETS, skyBandName } from "./modularRoadSky.js";
+import { createSkyAtmosphere } from "./modularRoadSkyAtmosphere.js";
 
 /** Default build altitude in the game's sky-stunt mode (roadGame.js). */
 const DECK_ALT = 40;
@@ -93,10 +113,42 @@ export async function startCityLab() {
   // in the game.
   const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 8192);
 
-  // ── Sky + sun ──────────────────────────────────────────────────────────────
-  // A plain analytic gradient. Nothing here should compete for GPU time; the
-  // real sky (modularRoadSky.js) is a separate, already-measured cost.
-  const sunElev = { deg: 14, azim: 205 };
+  // ── SKY: THE GAME'S OWN, NOT A LAB STAND-IN ────────────────────────────────
+  //
+  // The city was first judged under a cheap analytic gradient with one
+  // directional light and NO environment, and it read as black silhouettes.
+  // That was never the city's fault: the facade's glass is metalness 0.55 /
+  // roughness 0.12, and metal with nothing to reflect is black. It is exactly
+  // the finding the guardrail rebuild landed on — the biggest of its four
+  // causes was NO ENV. Judging a look under lighting the game will never show
+  // is how a lab produces confident, wrong answers.
+  //
+  // So this runs the same pair the game boots on (roadGame.js `buildGameSky`),
+  // with the two parameter traps that file documents:
+  //
+  //   atmosphereMix: 1  `uAtmoMix` is born at 0, which is the AUTHORED GRADIENT
+  //                     fallback — measured saturation 0.17 against the
+  //                     physical path's 0.45. Leave it and the "physical" sky
+  //                     is a dull blue and the comparison is worthless.
+  //   cloudSea: 0       the analytic "sea of clouds below the horizon" is a
+  //                     STAND-IN for clouds you do not have. It fires above
+  //                     ~480 m and drops a band of grey mottle under a city
+  //                     seen from altitude — i.e. over the skyline viewpoint.
+  //
+  // No cloud deck: the lab measures THE CITY, and clouds are a separate,
+  // already-measured ~1 ms. The cheap dome stays one keypress away (F8) as the
+  // measurement baseline, and it is only the SKY that swaps — lighting comes
+  // from `evaluateSky` in both modes, so F8 changes cost and backdrop, never
+  // the light the city is judged under.
+  const atmo = createSkyAtmosphere({ renderer });
+  const sky = createModularRoadSky({
+    atmosphere: atmo,
+    params: { timeOfDay: TIME_PRESETS.hero, autoAdvance: false, atmosphereMix: 1, cloudSea: 0 },
+  });
+  scene.add(sky.mesh);
+  const SKY = sky.params;
+
+  // The cheap gradient, kept as the measurement baseline. Hidden by default.
   const uSunDir = uniform(new THREE.Vector3());
   const uZenith = uniform(new THREE.Color(0x2c4f86));
   const uHorizon = uniform(new THREE.Color(0xd9a273));
@@ -116,7 +168,9 @@ export async function startCityLab() {
   })();
   const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(6000, 32, 16), skyMat);
   skyMesh.frustumCulled = false;
+  skyMesh.visible = false;
   scene.add(skyMesh);
+  let gameSkyOn = true;
 
   const sun = new THREE.DirectionalLight(0xffe6c4, 2.6);
   sun.castShadow = true;
@@ -138,20 +192,133 @@ export async function startCityLab() {
   const hemi = new THREE.HemisphereLight(0x9dbbe0, 0x3a3630, 0.9);
   scene.add(hemi);
 
-  const _sunDir = new THREE.Vector3();
-  function syncSun() {
-    const el = THREE.MathUtils.degToRad(sunElev.deg);
-    const az = THREE.MathUtils.degToRad(sunElev.azim);
-    _sunDir.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).normalize();
-    uSunDir.value.copy(_sunDir);
-    // Night follows the sun automatically — one control, not two that disagree.
-    const night = THREE.MathUtils.clamp(1 - (sunElev.deg + 4) / 16, 0, 1);
-    if (city) city.facade.nightAmount = night;
-    sun.intensity = 2.6 * THREE.MathUtils.clamp((sunElev.deg + 3) / 14, 0.02, 1);
-    hemi.intensity = THREE.MathUtils.lerp(0.16, 0.9, 1 - night);
-    const dusk = THREE.MathUtils.clamp(1 - night, 0, 1);
-    uZenith.value.setHex(0x2c4f86).multiplyScalar(0.18 + dusk * 0.82);
-    uHorizon.value.setHex(0xd9a273).multiplyScalar(0.12 + dusk * 0.88);
+  const _keyDir = new THREE.Vector3();
+
+  /**
+   * THE LIGHTING COMES FROM THE SKY, NOT FROM THE LAB.
+   *
+   * `evaluateSky` already returns `dirIntensity`, `hemiIntensity` and
+   * `exposure` across the whole day-night curve, plus the sun and moon colours
+   * it painted the dome with. The lab's previous rig was a hand-rolled
+   * `clamp((elevation + 3) / 14)` that agreed with none of it — which is how
+   * the city ended up being judged at an exposure the game never uses.
+   *
+   * Everything here is a READ of `look`. Nothing invents a number.
+   */
+  function applyLook(look) {
+    // Night keys off the MOON. `dirIntensity` already folds in `moonIllum` and
+    // the night weight, so this is a direction and colour swap, not a second
+    // intensity curve laid on top.
+    const night = look.nightF > 0.5;
+    _keyDir.copy(night ? look.moonDir : look.sunDir);
+    // Sun rig follows the camera: the shadow box is 260 m and the city is 2.4 km.
+    sun.position.copy(camera.position).addScaledVector(_keyDir, 600);
+    sun.target.position.set(camera.position.x, 0, camera.position.z);
+    sun.target.updateMatrixWorld();
+    sun.color.copy(night ? look.moonColor : look.sunColor);
+    sun.intensity = look.dirIntensity;
+    hemi.color.copy(look.horizonInside);
+    hemi.groundColor.copy(look.nadirInside);
+    hemi.intensity = look.hemiIntensity;
+    renderer.toneMappingExposure = look.exposure;
+    // The city's lit windows follow the same night factor the sky uses, so the
+    // windows come on exactly when the sky says it is night.
+    if (city) city.facade.nightAmount = look.nightF;
+    // Keep the cheap dome showing the same sun, so F8 swaps the BACKDROP only.
+    uSunDir.value.copy(look.sunDir);
+    uZenith.value.copy(look.zenithInside);
+    uHorizon.value.copy(look.horizonInside);
+  }
+
+  // ── AERIAL PERSPECTIVE ─────────────────────────────────────────────────────
+  //
+  // The single biggest look lever a SKYLINE has. Without it a tower 2 km out is
+  // the same colour as one 200 m away and the city reads as a flat cutout —
+  // depth in a cityscape is haze, not geometry.
+  //
+  // Applied as the SCENE FOG NODE so every material picks it up with no
+  // per-material edit. It also sidesteps the known WebGPU trap that bit the
+  // scenery: scene fog UNIFORMS are never refreshed on static geometry that
+  // never moves, and a city is the largest possible instance of that. The haze
+  // here comes from the sky-view LUT — a TEXTURE, re-baked when the sun moves —
+  // so it tracks time of day on geometry that never updates.
+  const aerialNode = Fn(() => {
+    const toCam = positionWorld.sub(cameraPosition);
+    return vec4(
+      atmo.applyAerialPerspective(output.rgb, toCam.normalize(), toCam.length()),
+      output.a,
+    );
+  })();
+  let aerialOn = true;
+  scene.fogNode = aerialNode;
+
+  // ── IBL ────────────────────────────────────────────────────────────────────
+  //
+  // Glass needs something to reflect. A PMREM of the sky itself, baked ONE CUBE
+  // FACE PER FRAME and convolved on the sixth, so a time-of-day change costs
+  // seven spread frames instead of one long hitch — and a frozen clock, which
+  // is the default, costs nothing at all.
+  //
+  // The bake renders the scene into a cube target, and `renderer.info` counts
+  // `frameCalls` ACROSS every render in a frame (it auto-resets once per frame,
+  // not once per render). So a bake frame inflates draw calls and triangles,
+  // and the stats readout below deliberately skips those frames rather than
+  // reporting a city that looks twice as expensive as it is.
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  let cubeRT = null, cubeCam = null, envRT = null;
+  let envFace = -1, envNeeds = true, lastEnvSnap = "", envBakedThisFrame = false;
+  const _skyHome = new THREE.Vector3();
+
+  function ensureEnvRig() {
+    if (cubeRT) return;
+    cubeRT = new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType });
+    cubeCam = new THREE.CubeCamera(0.1, 20000, cubeRT);
+    cubeCam.updateMatrixWorld(true);
+  }
+
+  function bakeEnvFace(face) {
+    ensureEnvRig();
+    // The env is the SKY, not the city. Parking the dome at the origin and
+    // hiding the world is what stops a tower two metres from the cube camera
+    // becoming the ambient colour of every tower in the city.
+    _skyHome.copy(sky.mesh.position);
+    sky.mesh.position.set(0, 0, 0);
+    sky.setSunDiscScale(0);            // a 1-pixel sun in a 128² face is fireflies
+    const hide = [city?.group, deck, skyMesh].filter(Boolean);
+    const vis = hide.map((o) => o.visible);
+    for (const o of hide) o.visible = false;
+
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(cubeRT, face);
+    renderer.render(scene, cubeCam.children[face]);
+    renderer.setRenderTarget(prev);
+
+    sky.setSunDiscScale(1);
+    sky.mesh.position.copy(_skyHome);
+    hide.forEach((o, i) => { o.visible = vis[i]; });
+    envBakedThisFrame = true;
+  }
+
+  function convolveEnv() {
+    try {
+      envRT = pmrem.fromCubemap(cubeRT.texture, envRT);
+      scene.environment = envRT.texture;
+      scene.environmentIntensity = 1.15;
+    } catch (err) {
+      console.warn("[CityLab] PMREM bake failed; IBL disabled.", err);
+    }
+  }
+
+  function tickEnvBake(look) {
+    const snap = `${SKY.timeOfDay.toFixed(2)}|${look.lookName}`;
+    if (snap !== lastEnvSnap) { lastEnvSnap = snap; envNeeds = true; }
+    if (envFace >= 0) {
+      bakeEnvFace(envFace);
+      envFace++;
+      if (envFace >= 6) { convolveEnv(); envFace = -1; envNeeds = false; }
+      return;
+    }
+    if (envNeeds) envFace = 0;
   }
 
   // ── Deck stub ──────────────────────────────────────────────────────────────
@@ -189,7 +356,6 @@ export async function startCityLab() {
     if (city) { scene.remove(city.group); city.dispose(); }
     city = createModularRoadCity({ seed, avoid });
     scene.add(city.group);
-    syncSun();
   }
   boot.textContent = "baking city…";
   makeCity(20260902);
@@ -249,6 +415,23 @@ export async function startCityLab() {
       syncBadges();
     }
     if (k === "o") { shadowsOn = !shadowsOn; city.setShadows(shadowsOn); syncBadges(); }
+    // F8 is the game's own sky A/B key — same finger, same question.
+    if (e.key === "F8") {
+      e.preventDefault();
+      gameSkyOn = !gameSkyOn;
+      sky.mesh.visible = gameSkyOn;
+      skyMesh.visible = !gameSkyOn;
+      syncBadges();
+    }
+    // Swapping the fog NODE recompiles every material that reads it, so this is
+    // a deliberate, rare A/B and not something to hold down. Worth the stall:
+    // aerial perspective is most of what makes a distant skyline read as far
+    // away rather than as a sticker.
+    if (k === "u") {
+      aerialOn = !aerialOn;
+      scene.fogNode = aerialOn ? aerialNode : null;
+      syncBadges();
+    }
     if (k === "h") {
       const h = document.getElementById("hud");
       h.style.display = h.style.display === "none" ? "" : "none";
@@ -411,26 +594,45 @@ export async function startCityLab() {
     }
   }
 
-  // Sun angle drives night, glass and the whole mood — its own row, not buried.
+  // TIME OF DAY is the only sun control, because it is the only one the game
+  // has. Elevation and azimuth sliders let you build a lighting setup that no
+  // time of day can actually produce, which is a good way to tune a facade for
+  // a sun the player will never stand under.
   {
     const host = document.getElementById("g-night");
-    for (const [key, lo, hi, step] of [["deg", -6, 80, 0.5], ["azim", 0, 360, 1]]) {
-      const row = document.createElement("div");
-      row.className = "row";
-      row.innerHTML = `<label>sun ${key === "deg" ? "elevation" : "azimuth"}</label>` +
-        `<input type="range" min="${lo}" max="${hi}" step="${step}"><span class="val"></span>`;
-      const input = row.querySelector("input");
-      const val = row.querySelector(".val");
-      input.value = sunElev[key];
-      val.textContent = fmt(sunElev[key]);
-      input.addEventListener("input", () => {
-        sunElev[key] = parseFloat(input.value);
-        val.textContent = fmt(sunElev[key]);
-        syncSun();
-        for (const r of readouts) r();
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<label>time of day</label>` +
+      `<input type="range" min="0" max="24" step="0.05"><span class="val"></span>`;
+    const input = row.querySelector("input");
+    const val = row.querySelector(".val");
+    const clock = (t) => {
+      const h = Math.floor(t) % 24, m = Math.round((t - Math.floor(t)) * 60) % 60;
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    };
+    const sync = () => { input.value = SKY.timeOfDay; val.textContent = clock(SKY.timeOfDay); };
+    input.addEventListener("input", () => {
+      SKY.timeOfDay = parseFloat(input.value);
+      val.textContent = clock(SKY.timeOfDay);
+    });
+    sync();
+    readouts.push(sync);
+    host.appendChild(row);
+
+    // The game's own presets, so a look tuned here is a look the game can ask
+    // for by name rather than a number somebody has to remember.
+    const btns = document.createElement("div");
+    btns.className = "btns";
+    for (const name of Object.keys(TIME_PRESETS)) {
+      const b = document.createElement("button");
+      b.textContent = name;
+      b.addEventListener("click", () => {
+        SKY.timeOfDay = TIME_PRESETS[name];
+        sync();
       });
-      host.appendChild(row);
+      btns.appendChild(b);
     }
+    host.appendChild(btns);
   }
 
   // Deck altitude — the DECK and CANYON viewpoints are only meaningful at the
@@ -491,13 +693,14 @@ export async function startCityLab() {
     badge("s-shadow", shadowsOn, "on", "off");
     badge("s-city", cityOn, "on", "OFF (A/B)");
     badge("s-drive", driving, "DRIVE-BY", "free-fly");
+    badge("s-sky", gameSkyOn, "game (physical)", "lab gradient");
+    badge("s-aerial", aerialOn, "on", "off");
     document.getElementById("s-count").textContent =
       `${city.stats.buildings} in ${city.stats.meshes} mesh${city.stats.meshes === 1 ? "" : "es"}`;
     document.getElementById("s-kit").textContent =
       `${city.stats.kit.count} × ~${city.stats.kit.avgTrisL0}/${city.stats.kit.avgTrisL1}/` +
       `${city.stats.kit.avgTrisL2} tris (${city.stats.kit.bakeMs.toFixed(0)} ms)`;
   }
-  syncSun();
   syncBadges();
 
   // ── Resize ─────────────────────────────────────────────────────────────────
@@ -514,10 +717,17 @@ export async function startCityLab() {
   const sTri = document.getElementById("s-tri");
   const sLod = document.getElementById("s-lod");
   const sLodMs = document.getElementById("s-lodms");
+  const sTime = document.getElementById("s-time");
   boot.textContent = "";
+
+  const clockStr = (t) => {
+    const h = Math.floor(t) % 24, m = Math.round((t - Math.floor(t)) * 60) % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  };
 
   let last = performance.now();
   let fpsAcc = 0, fpsN = 0, gpuAcc = 0, gpuN = 0, hudT = 0;
+  let lastCleanDraws = 0, lastCleanTris = 0;
 
   renderer.setAnimationLoop(() => {
     const now = performance.now();
@@ -527,22 +737,34 @@ export async function startCityLab() {
     if (driving) driveStep(dt);
     flyStep(dt);
 
-    // Sun follows the camera so the shadow cascade stays over the player. This
-    // is what the engine's cascades do; a fixed cascade over a 2.4 km city
-    // would have no resolution anywhere.
-    sun.target.position.set(camera.position.x, 0, camera.position.z);
-    sun.position.copy(sun.target.position).addScaledVector(_sunDir, 600);
-    sun.target.updateMatrixWorld();
+    // The sky owns the clock, the sun, the exposure and the night factor.
+    // `sky.update` also parks its own dome on the camera; the atmosphere
+    // re-bakes its LUTs only when the sun or the altitude actually moved, so a
+    // frozen time of day costs nothing per frame.
+    const look = sky.update({ camera, dt });
+    atmo.update(look.sunDir, Math.max(0, camera.position.y), look.moonDir);
+    applyLook(look);
 
     skyMesh.position.copy(camera.position);
     city.update(dt, camera);
+
+    // Before the main render, so a bake frame is identifiable and its inflated
+    // counts can be skipped rather than reported as the city's cost.
+    envBakedThisFrame = false;
+    tickEnvBake(look);
 
     renderer.render(scene, camera);
     if (hasTimestamps) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
 
     fpsAcc += 1 / Math.max(dt, 1e-4); fpsN++;
-    const g = renderer.info.render.timestamp;
-    if (g > 0) { gpuAcc += g; gpuN++; }
+    // An env-bake frame carries a second render's cost and counts. Averaging it
+    // in would blame the city for the IBL.
+    if (!envBakedThisFrame) {
+      const g = renderer.info.render.timestamp;
+      if (g > 0) { gpuAcc += g; gpuN++; }
+      lastCleanDraws = renderer.info.render.drawCalls;
+      lastCleanTris = renderer.info.render.triangles;
+    }
 
     hudT += dt;
     if (hudT > 0.25) {
@@ -554,8 +776,10 @@ export async function startCityLab() {
       sFps.className = fps < 50 ? "warn" : "good";
       sGpu.textContent = hasTimestamps ? `${gpu.toFixed(2)} ms` : "n/a";
       sGpu.className = gpu > 8 ? "warn" : gpu > 0 ? "good" : "";
-      sDraw.textContent = String(renderer.info.render.drawCalls);
-      sTri.textContent = `${(renderer.info.render.triangles / 1000).toFixed(0)}k`;
+      sDraw.textContent = String(lastCleanDraws);
+      sTri.textContent = `${(lastCleanTris / 1000).toFixed(0)}k`;
+      sTime.textContent = `${clockStr(SKY.timeOfDay)} · ${look.lookName} · ` +
+        `${skyBandName(camera.position.y, SKY)}${envFace >= 0 ? " · IBL…" : ""}`;
       const l = city.stats.lod;
       sLod.textContent = `${l[0]} / ${l[1]} / ${l[2]}`;
       sLodMs.textContent = `${city.stats.lastLodMs.toFixed(2)} ms`;
