@@ -98,6 +98,13 @@ export const PAINTED_CLOUD_DEFAULTS = {
   /** Shortest cloud as a fraction of the slab. The spread between this and 1 IS the
    *  towering-vs-flat look: at 1 every cell fills the slab and you get a sheet. */
   topMin: 0.25,
+  /**
+   * How tall a column is at the cloud's OUTLINE, as a fraction of its height at the
+   * core. This is what domes the deck instead of extruding it: at 1.0 every cloud is a
+   * flat-topped box (the old behaviour, and the marshmallow), and low values taper the
+   * rim to a wisp so the profile reads as cauliflower.
+   */
+  edgeTaper: 0.12,
   /** March steps across the slab (≤ MAX_STEPS). */
   steps: 18,
 
@@ -333,6 +340,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uLump = uniform(P.lumpiness);
   const uDensityMul = uniform(P.densityMul);
   const uTopMin = uniform(P.topMin);
+  const uEdgeTaper = uniform(P.edgeTaper);
   const uSteps = uniform(P.steps);
   const uAbsorb = uniform(P.absorb);
   const uShadowReach = uniform(P.shadowReach);
@@ -523,10 +531,39 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         const uv = uCamXZ.add(vec2(dir.x, dir.z).mul(t).div(uTile)).add(uWind);
         const m = mapTex.sample(uv);
 
+        /*
+         * ── THE MARSHMALLOW, AND WHY IT WAS A BOX ──────────────────────────────────
+         *
+         * The cell top used to come from `m.g` alone — a field with NO relationship to
+         * the mass field that decides where the cloud is. So a cloud was exactly as
+         * TALL at its rim as at its core: a 2D blob in plan, extruded straight up
+         * between a sharp flat base and a flat cap. That is a rounded box, and it is
+         * why the deck looked right from directly underneath (you only ever see the
+         * base) and looked like a row of marshmallows from a distance (you see the
+         * profile, and the profile is a rectangle).
+         *
+         * No amount of erosion or lump could fix it, because both perturb the OUTLINE
+         * IN PLAN and the box was in ELEVATION. That is why two passes at this missed.
+         *
+         * A CLOUD IS TALL WHERE IT IS THICK. Convection builds height where there is
+         * mass to lift, so the column height has to be a function of how deep into the
+         * cloud this column stands — full at the core, tapering to almost nothing at
+         * the edge. That single multiply turns the extrusion into a dome and gives the
+         * silhouette its cauliflower profile.
+         */
+        const massL = m.r.add(m.b.sub(0.5).mul(uLump));
+        // Weather makes whole regions cloudier — this is what stops the sky reading as
+        // one uniform texture repeated to the horizon.
+        const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), wLow)));
+        // How deep inside the cloud this column stands: 0 on the outline, 1 at the core.
+        // Thresholded WITHOUT the vertical profile, so it can drive the height without
+        // the height driving it back. Pure ALU — the fetch is already in hand.
+        const planMass = remapUnit(massL, covLocal.oneMinus()).toVar();
+
         // Per-cell top: local height runs 0..1 inside THIS cell's own cloud, so a
         // neighbour can be shallow while this one towers. Without it every cell spans
         // the same band and the deck can only read as a sheet.
-        const top = mix(uTopMin, float(1.0), m.g);
+        const top = mix(uTopMin, float(1.0), m.g).mul(mix(uEdgeTaper, float(1.0), planMass));
         const hL = h.div(top.max(0.05));
         // Rounded profile: flat-ish base, domed top.
         // A CUMULUS BASE IS SHARP AND FLAT — it is the condensation level, a
@@ -535,11 +572,9 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         // deck read as fog. The top stays domed, which is the shape convection gives it.
         const prof = smoothstep(0.0, 0.06, hL).mul(smoothstep(1.0, 0.55, hL));
 
-        // Weather makes whole regions cloudier — this is what stops the sky reading as
-        // one uniform texture repeated to the horizon.
-        const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), wLow)));
         /*
-         * LUMPY ISO-SURFACE, and this is what stops small clouds being marshmallows.
+         * LUMPY ISO-SURFACE — it breaks the outline IN PLAN, which is a different job
+         * from the taper above (that one shapes the ELEVATION). Both are needed.
          *
          * The threshold keeps only the top of the mass field, and an FBM peak is SMOOTH
          * by construction — every octave carries half the amplitude of the one below it,
@@ -552,7 +587,6 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
          * fetch already in hand — 180-700 m cells at the base frequency, which is
          * exactly cauliflower scale — so it costs no extra sample.
          */
-        const massL = m.r.add(m.b.sub(0.5).mul(uLump));
         const shaped = remapUnit(massL.mul(prof), covLocal.oneMinus()).toVar();
 
         If(shaped.greaterThan(0.002), () => {
@@ -1036,6 +1070,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uLump.value = P.lumpiness;
     uDensityMul.value = P.densityMul;
     uTopMin.value = P.topMin;
+    uEdgeTaper.value = P.edgeTaper;
     uSteps.value = Math.min(P.steps, MAX_STEPS);
     uAbsorb.value = P.absorb;
     uShadowReach.value = P.shadowReach;
