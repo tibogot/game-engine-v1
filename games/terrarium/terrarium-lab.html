@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Terrarium Lab — Glass, Light &amp; Substrate</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #05070a; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; left: 10px; z-index: 10; width: 288px;
+             max-height: calc(100vh - 20px); overflow-y: auto;
+             background: rgba(10,14,18,0.90); border: 1px solid #2a343c;
+             border-radius: 8px; padding: 12px 14px; }
+      #hud h1 { margin: 0 0 4px; font-size: 13px; letter-spacing: .04em;
+             text-transform: uppercase; color: #8fb8d8; }
+      #hud h2 { margin: 12px 0 6px; font-size: 11px; letter-spacing: .06em;
+             text-transform: uppercase; color: #6f8494;
+             border-top: 1px solid #232c34; padding-top: 9px; }
+      .row { display: flex; justify-content: space-between; gap: 12px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .sl { margin: 5px 0; }
+      .sl label { display: flex; justify-content: space-between; font-size: 11px; color: #a8b6c0; }
+      .sl label b { color: #e8f0f5; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .sl input { width: 100%; margin: 1px 0 0; accent-color: #4a9ae0; }
+      .btns { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0 2px; }
+      .btns button { flex: 1 1 60px; padding: 5px 3px; font-size: 11px; cursor: pointer;
+             background: #1a222a; color: #cfd8de; border: 1px solid #2f3b45; border-radius: 5px; }
+      .btns button.on { background: #2b6cb0; border-color: #4a9ae0; color: #fff; }
+      .note { margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a343c;
+             color: #8b99a4; font-size: 11px; }
+      #boot { position: fixed; inset: 0; display: flex; align-items: center;
+             justify-content: center; z-index: 50; color: #8fb8d8; font-size: 13px;
+             background: #05070a; padding: 24px; text-align: center; white-space: pre-wrap; }
+      #boot.err { color: #ff8c8c; }
+      #tip { position: fixed; bottom: 10px; left: 10px; z-index: 10; color: #6f8494;
+             font-size: 11px; background: rgba(10,14,18,0.8); padding: 6px 10px;
+             border-radius: 6px; border: 1px solid #232c34; }
+    </style>
+  </head>
+  <body>
+    <div id="boot">Starting…</div>
+
+    <div id="hud">
+      <h1>Terrarium Lab</h1>
+      <div class="row"><span>FPS</span><b id="s-fps">—</b></div>
+      <div class="row"><span>Draw calls</span><b id="s-draws">—</b></div>
+      <div class="row"><span>Triangles</span><b id="s-tris">—</b></div>
+
+      <h2>View</h2>
+      <div class="btns" id="views">
+        <button data-view="hero" class="on">Hero</button>
+        <button data-view="front">Front</button>
+        <button data-view="basking">Basking</button>
+        <button data-view="water">Water</button>
+        <button data-view="top">Top</button>
+      </div>
+
+      <h2>Environment</h2>
+      <div id="ui-env"></div>
+
+      <h2>Basking lamp</h2>
+      <div id="ui-lamp"></div>
+
+      <h2>Glass</h2>
+      <div id="ui-glass"></div>
+
+      <h2>Water &amp; substrate</h2>
+      <div id="ui-water"></div>
+
+      <h2>Dust</h2>
+      <div id="ui-dust"></div>
+
+      <h2>Render</h2>
+      <div id="ui-render"></div>
+
+      <div class="note">
+        Glass is Fresnel + reflection + grime, not volumetric transmission: at 6&nbsp;mm
+        a pane refracts almost nothing, and a backdrop-capture material would re-render
+        the whole scene behind glass that covers most of the screen.
+      </div>
+    </div>
+
+    <div id="tip">Drag to orbit · scroll to zoom · try Front and Water at a low angle</div>
+
+    <script type="module">
+      import { startTerrariumLab } from "./terrariumLab.js";
+      startTerrariumLab().catch((err) => {
+        const boot = document.getElementById("boot");
+        boot.style.display = "flex";
+        boot.classList.add("err");
+        boot.textContent = (err && err.stack) || String(err);
+        console.error(err);
+      });
+    </script>
+  </body>
+</html>
