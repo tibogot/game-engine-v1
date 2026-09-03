@@ -18,9 +18,17 @@
  *   3. A colour that was ALREADY correct (the gate/checkpoint glows never went
  *      through `lin()`) gets rebased by mistake and goes dark.
  *
- * Expectations are derived from git HEAD vs the working tree, never hand-typed:
- * a hand-typed table is how the first version of this test "failed" on five
- * correct values.
+ * Expectations are derived from a git BASELINE vs the working tree, never
+ * hand-typed: a hand-typed table is how the first version of this test "failed"
+ * on five correct values.
+ *
+ * THE BASELINE IS PINNED, and that pin is what keeps this test alive. It used to
+ * read `HEAD`, which works only while the rebase is sitting UNCOMMITTED in the
+ * working tree — the moment it was committed, HEAD and the tree became identical,
+ * nothing differed, and the "something actually changed" sentinel failed forever.
+ * The test was self-expiring: it could never pass again once the work it guards
+ * was saved. Pinning to the commit BEFORE the rebase means it keeps comparing the
+ * shipped literals against their pre-fix originals for as long as the file lives.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -62,10 +70,27 @@ const stripComments = (s) =>
 const readHexes = (text) =>
   (stripComments(text).match(HEX_G) ?? []).map((h) => parseInt(h, 16));
 
+/**
+ * The last commit BEFORE the colour-space fix landed (49f6bcd). Pinned, not
+ * `HEAD` — see the header. If history is ever rewritten this SHA must be moved
+ * with it; the test says so loudly rather than silently passing.
+ */
+const BASELINE = "e81eaa4";
+
+/**
+ * Colours deliberately changed AFTER the rebase — art choices, not migration
+ * failures. Keyed by the BASELINE value they replaced, so the same literal
+ * drifting to some third value still fails.
+ */
+const INTENTIONAL = new Map([
+  // Glass-road deck panel: lacquered white -> lacquered yellow.
+  [0xf4f4f2, 0xf1c40f],
+]);
+
 /** The file as it was before the colour fix. */
 function atHead(rel) {
   try {
-    return execFileSync("git", ["show", `HEAD:${rel}`], {
+    return execFileSync("git", ["show", `${BASELINE}:${rel}`], {
       cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
     });
   } catch {
@@ -74,7 +99,7 @@ function atHead(rel) {
 }
 
 // ── 1. Literals: every hex is unchanged, or exactly its rebase. ──────────────
-console.log("rebased literals (HEAD vs working tree)");
+console.log(`rebased literals (${BASELINE} vs working tree)`);
 
 const FILES = [
   `${GAME}/modularRoadMaterial.js`,
@@ -107,9 +132,9 @@ for (const rel of FILES) {
   for (let i = 0; i < before.length; i++) {
     if (before[i] === after[i]) continue;
     changed++;
-    if (after[i] !== rebase(before[i])) {
-      bad.push(`#${i} ${hex(before[i])} -> ${hex(after[i])}, expected ${hex(rebase(before[i]))}`);
-    }
+    if (after[i] === rebase(before[i])) continue;          // rebased correctly
+    if (INTENTIONAL.get(before[i]) === after[i]) continue; // a deliberate re-colour
+    bad.push(`#${i} ${hex(before[i])} -> ${hex(after[i])}, expected ${hex(rebase(before[i]))}`);
   }
   totalChanged += changed;
   check(
