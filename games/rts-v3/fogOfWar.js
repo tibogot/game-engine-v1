@@ -220,8 +220,24 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     const uInvProj = uniform(new THREE.Matrix4());
     const uCamWorld = uniform(new THREE.Matrix4());
     const uCamPos = uniform(new THREE.Vector3());
-    const uShroud = uniform(new THREE.Color(0x3a4248).convertSRGBToLinear());
-    const uUnexplored = uniform(new THREE.Color(0x06080c).convertSRGBToLinear());
+    /* CONVERTED ONCE. `new THREE.Color(hex)` already runs sRGB->linear — setHex
+     * defaults to SRGBColorSpace and calls toWorkingColorSpace, and nothing here
+     * disables colour management — so the `.convertSRGBToLinear()` these used to
+     * chain applied the curve a SECOND time and landed both about 12x darker
+     * than their hex.
+     *
+     * That mattered most for the shroud. 0x3a4248 is a deliberate blue-grey, the
+     * classic "explored but not currently visible" haze, and at 0.0034 linear it
+     * rendered as near-black instead — so shroud and unexplored looked like the
+     * same flat black and the distinction the two colours exist to draw was
+     * invisible. Unlike the modular-road fix, the literals are NOT rebased here:
+     * the authored intent is the point, and these are two easy numbers to taste.
+     *
+     * Shroud now reads ~0.042/0.055/0.066 linear rather than ~0.0034/0.0046/0.0056.
+     * If it is too light, lower the hex — do not re-add the second conversion.
+     */
+    const uShroud = uniform(new THREE.Color(0x3a4248));
+    const uUnexplored = uniform(new THREE.Color(0x06080c));
     const uDesat = float(0.55);
     const fowTexNode = texture(tex);
 
