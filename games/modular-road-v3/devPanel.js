@@ -1996,6 +1996,13 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label" title="How far cells stray from the shared condensation level. 0 = one ruled flat base across the whole sky.">Base spread</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-basevary" min="0" max="0.5" step="0.01" />
+              <span class="prop-num" id="dv-pc-basevary-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Steps (cost)</span>
             <div class="prop-value">
               <input type="range" id="dv-pc-steps" min="6" max="24" step="1" />
@@ -4506,6 +4513,7 @@ export function createRoadDevPanel({ app, game, params }) {
     (v) => (v >= 6371 ? v.toFixed(0) + " km (Earth)" : v.toFixed(0) + " km"));
   pslider("dv-pc-topmin", "topMin", (v) => v.toFixed(2));
   pslider("dv-pc-taper", "edgeTaper", (v) => (v > 0.95 ? "1.00 (boxes)" : v.toFixed(2)));
+  pslider("dv-pc-basevary", "baseVary", (v) => (v < 0.005 ? "0.00 (ruled)" : v.toFixed(2)));
   pslider("dv-pc-steps", "steps", (v) => v.toFixed(0) + " steps");
   pslider("dv-pc-sun", "sunStrength", (v) => v.toFixed(2));
   pslider("dv-pc-amb", "ambient", (v) => v.toFixed(2));

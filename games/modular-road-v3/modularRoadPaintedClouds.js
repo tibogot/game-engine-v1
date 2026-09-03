@@ -105,6 +105,13 @@ export const PAINTED_CLOUD_DEFAULTS = {
    * rim to a wisp so the profile reads as cauliflower.
    */
   edgeTaper: 0.12,
+  /**
+   * How much individual cells sit above or below the shared condensation level, as a
+   * fraction of deck thickness. 0 gives the ruled, perfectly flat base every cloud in
+   * the sky used to share. Keep it SMALL — a cumulus field really does line up along one
+   * height, and losing that reads as fog rather than as cumulus.
+   */
+  baseVary: 0.14,
   /** March steps across the slab (≤ MAX_STEPS). */
   steps: 18,
 
@@ -341,6 +348,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uDensityMul = uniform(P.densityMul);
   const uTopMin = uniform(P.topMin);
   const uEdgeTaper = uniform(P.edgeTaper);
+  const uBaseVary = uniform(P.baseVary);
   const uSteps = uniform(P.steps);
   const uAbsorb = uniform(P.absorb);
   const uShadowReach = uniform(P.shadowReach);
@@ -497,8 +505,20 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       const uvMid = uCamXZ.add(vec2(dir.x, dir.z).mul(tMid).div(uTile)).add(uWind);
       const sunXZ = normalize(vec3(sunDir.x, 1e-5, sunDir.z)).xz;
       const reach = min(uShadowReach.div(max(sunDir.y, 0.15)).div(uTile), float(0.25));
-      const sTau = mapTex.sample(uvMid.add(sunXZ.mul(reach.mul(0.45)))).r.mul(0.55)
-        .add(mapTex.sample(uvMid.add(sunXZ.mul(reach))).r.mul(0.45));
+      /*
+       * THE SHADOW HAS TO SEE THE SAME CLOUD THE MARCH DRAWS.
+       *
+       * These taps read the RAW mass field, but the visible cloud is that field
+       * perturbed by `lumpiness` before the coverage threshold (see below). So the
+       * shadow was a smooth blob laid over a lobed cloud: the lobes got no darker on
+       * their shaded flanks and the whole mass read flat and white, which is half of
+       * what "marshmallow" meant. Applying the same perturbation lines the two up, and
+       * `.b` already comes back in these very fetches — so it costs nothing at all.
+       */
+      const sA = mapTex.sample(uvMid.add(sunXZ.mul(reach.mul(0.45))));
+      const sB = mapTex.sample(uvMid.add(sunXZ.mul(reach)));
+      const sTau = sA.r.add(sA.b.sub(0.5).mul(uLump)).mul(0.55)
+        .add(sB.r.add(sB.b.sub(0.5).mul(uLump)).mul(0.45));
       const sunShadow = exp(sTau.mul(uAbsorb).negate()).toVar();
 
       // LARGE-SCALE WEATHER, sampled ONCE per ray at the slab mid-plane and at a low,
@@ -527,9 +547,30 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         // Height above the CURVED surface, not above a plane — otherwise the far field
         // would sit at the wrong place in the slab and the vertical profile would drift
         // out from under the clouds it is shaping.
-        const h = yy.mul(t).add(t.mul(t).mul(uInv2R)).sub(uAltitude).div(uThickness);
         const uv = uCamXZ.add(vec2(dir.x, dir.z).mul(t).div(uTile)).add(uWind);
         const m = mapTex.sample(uv);
+        /*
+         * A FLAT BASE IS RIGHT; A PERFECTLY FLAT ONE IS NOT.
+         *
+         * Height was measured from ONE global altitude, so every cloud in the sky was
+         * sliced off at exactly the same level — a razor-straight line running to the
+         * horizon, and the most synthetic thing left once the tops were domed.
+         *
+         * The physics is worth being careful about here, because the flatness is not a
+         * bug: a cumulus base IS the lifting condensation level, a thermodynamic
+         * boundary shared by the whole airmass, which is why a real cumulus field does
+         * line up along one height. But not to the metre — surface heating varies, so
+         * individual cells hang lower or ride higher by a hundred metres or so. So this
+         * is a SMALL per-cell offset, not a wavy base: enough to break the ruled line,
+         * not enough to lose the shared level that says "cumulus".
+         *
+         * Uses `m.a`, which at the base frequency is the one channel this march does not
+         * already read (`.a` is sampled elsewhere, but at the far coarser weather
+         * scale). Decorrelated from mass and from top, and free.
+         */
+        const baseOff = m.a.sub(0.5).mul(uBaseVary);
+        const h = yy.mul(t).add(t.mul(t).mul(uInv2R)).sub(uAltitude).div(uThickness)
+          .sub(baseOff);
 
         /*
          * ── THE MARSHMALLOW, AND WHY IT WAS A BOX ──────────────────────────────────
@@ -1071,6 +1112,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uDensityMul.value = P.densityMul;
     uTopMin.value = P.topMin;
     uEdgeTaper.value = P.edgeTaper;
+    uBaseVary.value = P.baseVary;
     uSteps.value = Math.min(P.steps, MAX_STEPS);
     uAbsorb.value = P.absorb;
     uShadowReach.value = P.shadowReach;
