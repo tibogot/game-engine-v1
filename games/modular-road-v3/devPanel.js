@@ -2323,6 +2323,31 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Sky weather</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            One preset moves clouds, haze and shadows <b>together</b>. A storm is not
+            just more coverage — it is a thicker deck, darker bases, a weaker sun,
+            denser haze and <i>softer</i> shadows, because a solid ceiling scatters
+            light instead of casting it. Presets crossfade over ~6&nbsp;s rather than
+            snapping, and the driver lets go of the values the moment a transition
+            settles, so these sliders keep working afterwards. Drives the
+            <b>painted</b> deck; the sun, the exposure and the rain are left alone.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Preset</span>
+            <div class="prop-value" style="gap:4px;flex-wrap:wrap">
+              <button class="action-btn dv-wx" data-wx="clear" type="button">Clear</button>
+              <button class="action-btn dv-wx" data-wx="fair" type="button">Fair</button>
+              <button class="action-btn dv-wx" data-wx="broken" type="button">Broken</button>
+              <button class="action-btn dv-wx" data-wx="overcast" type="button">Overcast</button>
+              <button class="action-btn dv-wx" data-wx="storm" type="button">Storm</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Weather</div>
         <div class="section-body">
           <div class="prop-row">
@@ -4413,6 +4438,7 @@ export function createRoadDevPanel({ app, game, params }) {
     b.addEventListener("click", () => {
       game.setCloudTier?.(b.dataset.tier);
       syncTierBtns();
+    syncWxBtns();
     });
   }
   syncTierBtns();
@@ -4426,6 +4452,21 @@ export function createRoadDevPanel({ app, game, params }) {
    */
   /* Aerial perspective — a live params object owned by roadGame, present in every
    * tier, so these bind exactly like the painted deck's. */
+  /* Sky weather presets. Buttons, not sliders: a preset is a choice, and the values
+   * behind it are only meaningful together (see modularRoadWeather.js). */
+  const wxBtns = [...root.querySelectorAll(".dv-wx")];
+  const syncWxBtns = () => {
+    const cur = game.getWeather?.() ?? "fair";
+    for (const b of wxBtns) b.classList.toggle("primary", b.dataset.wx === cur);
+  };
+  for (const b of wxBtns) {
+    b.addEventListener("click", () => {
+      game.setWeather?.(b.dataset.wx, 6);
+      syncWxBtns();
+    });
+  }
+  syncWxBtns();
+
   const AP = game.aerialParams ?? null;
   const aslider = (id, key, fmt) => slider(id, AP, key, fmt);
   aslider("dv-ap-density", "density", (v) => (v <= 0 ? "off" : v.toFixed(5)));

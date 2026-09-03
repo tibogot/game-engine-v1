@@ -181,6 +181,7 @@ import { createRoadDevPanel } from "./devPanel.js";
 import { createModularRoadSky, skyColorsAt, moonDirFromTime, SKY_DEFAULTS } from "./modularRoadSky.js";
 import { createPaintedClouds, PAINTED_CLOUD_DEFAULTS } from "./modularRoadPaintedClouds.js";
 import { createAerialPerspective } from "./modularRoadAerial.js";
+import { createWeather, WEATHER_NAMES } from "./modularRoadWeather.js";
 import { createSkyAtmosphere, sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
@@ -847,6 +848,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   const aerial = createAerialPerspective({ camera });
 
+  /**
+   * SKY WEATHER — one preset moving clouds, haze and shadows together. It drives the
+   * PAINTED deck (the default tier) and the aerial pass; see modularRoadWeather.js for
+   * why it deliberately leaves the sun, the exposure and the rain alone.
+   *
+   * `onWetness` is a hook, not a wiring: it reports the preset's wetness once a
+   * transition settles and does nothing with it, because the road-surface and rain
+   * systems are owned elsewhere. Connect it there when that work is ready.
+   */
+  const weather = createWeather({
+    painted: paintedParams,
+    aerial: aerial.params,
+    onWetness: (w) => { _weatherWetness = w; },
+  });
+  let _weatherWetness = 0;
+
   /** The cloud system the current tier wants in the slot, or null. */
   let _activeCloud = null;
 
@@ -1136,6 +1153,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   function updateGameSky(dt) {
+    // Ticked before the early-out: a weather crossfade must keep running even while
+    // the engine sky is showing (F8), or switching back would land mid-fade.
+    weather.update(dt);
     if (!gameSkyOn || !gameSky) return;
     const look = gameSky.update({ camera, dt });
     // The atmosphere wants the camera ALTITUDE as well as the sun: half the
@@ -6690,6 +6710,11 @@ ${e.message}`);
       paintedParams,
       /** Aerial-perspective params (see modularRoadAerial.js). */
       aerialParams: aerial.params,
+      // ── Sky weather ─────────────────────────────────────────────────────
+      weatherNames: WEATHER_NAMES,
+      getWeather: () => weather.name,
+      setWeather: (name, seconds) => weather.set(name, seconds),
+      getWeatherWetness: () => _weatherWetness,
       markPaintedTouched: () => { _paintedTouched = true; },
 
       // ── Game-owned sky A/B (F8) ─────────────────────────────────────────
@@ -7288,6 +7313,10 @@ ${e.message}`);
     paintedParams: () => paintedParams,
     /** Aerial-perspective params, for console tuning. */
     aerialParams: () => aerial.params,
+    /** Sky weather: setWeather("storm", 8). Crossfades; see modularRoadWeather.js. */
+    setWeather: (name, seconds) => weather.set(name, seconds),
+    getWeather: () => weather.name,
+    weatherNames: WEATHER_NAMES,
     /** Sky mode — terrain hidden, not solid, and not paid for. A track saved in
      *  sky mode is just a track; this is a runtime mode, not track data. */
     setTerrain,
