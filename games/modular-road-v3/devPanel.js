@@ -1891,6 +1891,20 @@ export function createRoadDevPanel({ app, game, params }) {
             spread between it and 1.0 IS the towering look.
           </div>
           <div class="prop-row">
+            <span class="prop-label">Interior glow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-msfloor" min="0" max="0.6" step="0.01" />
+              <span class="prop-num" id="dv-pc-msfloor-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Evolve</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-evolve" min="0" max="0.15" step="0.002" />
+              <span class="prop-num" id="dv-pc-evolve-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Wind speed</span>
             <div class="prop-value">
               <input type="range" id="dv-cld-wind" min="0" max="30" step="0.5" />
@@ -2056,6 +2070,13 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-pc-cirrusstretch" min="1" max="12" step="0.1" />
               <span class="prop-num" id="dv-pc-cirrusstretch-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cirrus swirl</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-cirrusswirl" min="0" max="2.5" step="0.05" />
+              <span class="prop-num" id="dv-pc-cirrusswirl-v"></span>
             </div>
           </div>
           <div class="prop-row">
@@ -4355,6 +4376,9 @@ export function createRoadDevPanel({ app, game, params }) {
   pslider("dv-pc-cirrussilver", "cirrusSilver", (v) => v.toFixed(2));
   pslider("dv-pc-shadow", "shadowStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));
   pslider("dv-pc-shadowsoft", "shadowSoftness", (v) => v.toFixed(2));
+  pslider("dv-pc-msfloor", "msFloor", (v) => v.toFixed(2));
+  pslider("dv-pc-evolve", "evolve", (v) => (v <= 0 ? "frozen" : v.toFixed(3)));
+  pslider("dv-pc-cirrusswirl", "cirrusSwirl", (v) => v.toFixed(2));
   pslider("dv-pc-wind", "windSpeed", (v) => v.toFixed(1) + " m/s");
   pslider("dv-pc-winddeg", "windDeg", (v) => v.toFixed(0) + "°");
 

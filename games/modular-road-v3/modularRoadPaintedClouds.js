@@ -67,6 +67,24 @@ export const PAINTED_CLOUD_DEFAULTS = {
   tile: 4300,
   /** Fraction of sky covered. A THRESHOLD, so masses keep solid cores at any setting. */
   coverage: 0.46,
+  /**
+   * Frequency of the large-scale WEATHER modulation, relative to the cloud tile — and
+   * the fix for the sky looking ruled into rows.
+   *
+   * The map wraps every `tile` metres, and the deck now runs to a 121 km horizon, so it
+   * repeats ~28 times across the view. The weather channel exists to make whole regions
+   * cloudier or clearer and so hide that, but it was being read from the SAME fetch at
+   * the SAME uv as the mass field — which means it repeated on exactly the same period
+   * and reinforced the grid instead of breaking it. Every tile got not just the same
+   * clouds but the same amount of cloud, and the eye locks onto that instantly as rows
+   * converging to a seam.
+   *
+   * Sampling it at a much lower, incommensurate frequency gives it a ~30 km period, so
+   * repeats of the mass field land under different coverage each time and stop reading
+   * as copies. (Real skies DO form cloud streets, so rows as such are fine — what is
+   * not fine is identical rows at a fixed spacing.)
+   */
+  weatherScale: 0.137,
   /** Billow erosion strength — carves mass edges into cauliflower. */
   erode: 0.68,
   /** Extinction per metre at full shaped density. */
@@ -89,6 +107,16 @@ export const PAINTED_CLOUD_DEFAULTS = {
    *  sky beside it; at 1.0 the deck comes out beige because it can never exceed the sun
    *  colour lighting it. */
   sunStrength: 2.1,
+  /**
+   * Multiple-scattering floor: the fraction of key light that survives where the
+   * horizontal shadow has killed the direct term.
+   *
+   * Droplet albedo is ~0.99, so light inside a cloud is not absorbed, it is DIFFUSED —
+   * radiance tends to a diffusion solution rather than to zero. Without a floor the
+   * shadowed cores go a dull flat grey, which is the single most common way rendered
+   * clouds look like smoke. The volumetric deck has the same term for the same reason.
+   */
+  msFloor: 0.18,
   /** Sky ambient reaching the shaded side. 0 = black undersides. */
   ambient: 0.55,
   /** Silver lining on thin cloud when looking toward the sun. */
@@ -127,7 +155,18 @@ export const PAINTED_CLOUD_DEFAULTS = {
    */
   cirrusStretch: 4.5,
   /** Cross-streak bend, so the filaments curve instead of running dead straight. */
-  cirrusWarp: 0.55,
+  cirrusWarp: 0.8,
+  /**
+   * How far the filament direction wanders off the wind, per region.
+   *
+   * WITHOUT THIS THE SKY IS RULED PAPER. Stretching the lookup along one fixed axis
+   * makes every filament in the sky share one orientation and one spacing, which reads
+   * as parallel scratches rather than cloud — the giveaway is that it looks *drawn*.
+   * Real cirrus follows the shear, but the shear itself curves and varies, so the fibres
+   * arrive in bundles that fan and cross. Rotating the sample axis by a low-frequency
+   * field buys exactly that for one extra fetch.
+   */
+  cirrusSwirl: 0.85,
   /** Forward-scatter gain. Ice is strongly forward-scattering: cirrus near the sun
    *  blazes silver-white, which is its most recognisable behaviour. */
   cirrusSilver: 1.8,
@@ -161,6 +200,15 @@ export const PAINTED_CLOUD_DEFAULTS = {
   windDeg: 35,
   /** Metres per second, same units as the volumetric deck so tiers drift alike. */
   windSpeed: 6.0,
+  /**
+   * How fast cloud SHAPE changes, independent of how fast it drifts.
+   *
+   * Wind alone slides a rigid pattern across the sky, and a rigid sky is a dead one —
+   * the eye reads translation-without-change as a moving texture. Drifting the erosion
+   * lookups through a third dimension instead makes the billows churn and dissolve in
+   * place, which is what convection actually does. Cheap: it is an offset, not a fetch.
+   */
+  evolve: 0.02,
 };
 
 /**
@@ -253,6 +301,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uThickness = uniform(P.thickness);
   const uTile = uniform(P.tile);
   const uCoverage = uniform(P.coverage);
+  const uWeatherScale = uniform(P.weatherScale);
   const uErode = uniform(P.erode);
   const uDensityMul = uniform(P.densityMul);
   const uTopMin = uniform(P.topMin);
@@ -275,6 +324,12 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uCirrusWarp = uniform(P.cirrusWarp);
   const uCirrusSilver = uniform(P.cirrusSilver);
   const uCirrusDrift = uniform(P.cirrusDrift);
+  const uCirrusSwirl = uniform(P.cirrusSwirl);
+  const uMsFloor = uniform(P.msFloor);
+  /** Seconds x evolve — the offset that churns the erosion lookups. */
+  const uEvolve = uniform(0);
+  /** Unit wind vector — cirrus aligns with the shear, not with world X. */
+  const uWindDir = uniform(new THREE.Vector2(1, 0));
   const uWind = uniform(new THREE.Vector2());
   /** Camera XZ in map units, so the deck is anchored to the WORLD and drifts past you
    *  as you drive instead of being glued to the camera. */
@@ -341,19 +396,38 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       const tC = tAt(uCirrusAlt);
       const wC = uCamXZ.add(vec2(dir.x, dir.z).mul(tC).div(uCirrusTile))
         .add(uWind.mul(uCirrusDrift));
-      // Stretch the lookup along one axis: cirrus is ice falling through wind shear, so
-      // it forms long parallel filaments, not blobs.
-      const suv = vec2(wC.x.div(uCirrusStretch), wC.y);
-      // Bend them, or they read as a printed hatch.
+      /*
+       * ORIENT THE FILAMENTS, THEN STRETCH ALONG THAT.
+       *
+       * Stretching along a fixed world axis gave every filament in the sky the same
+       * direction and spacing — ruled paper, not weather. The axis now starts from the
+       * WIND (cirrus is ice falling through shear, so that is where it should point)
+       * and is then rotated per region by a very low frequency field, so the fibres
+       * arrive in bundles that fan and cross the way real cirrus does.
+       *
+       * The rotation is built from a noise-derived unit vector rather than sin/cos of
+       * an angle: same result, no trig, and one fetch already on hand.
+       */
+      const rnd = mapTex.sample(wC.mul(0.11));
+      const axis = normalize(
+        vec2(rnd.r.sub(0.5), rnd.g.sub(0.5)).mul(uCirrusSwirl).add(uWindDir),
+      );
+      // Project onto the local axis and its perpendicular — a rotation into filament space.
+      const along = dot(wC, axis);
+      const across = dot(wC, vec2(axis.y.negate(), axis.x));
+      const suv = vec2(along.div(uCirrusStretch), across);
+      // Bend them, or even correctly-oriented fibres read as a printed hatch.
       const wv = mapTex.sample(suv.mul(0.31)).a.sub(0.5);
       const uvC = suv.add(vec2(wv.mul(0.12), wv.mul(uCirrusWarp)));
 
-      const c1 = mapTex.sample(uvC);
-      const c2 = mapTex.sample(uvC.mul(2.7).add(vec2(11.3, 4.1)));
+      const c1 = mapTex.sample(uvC.add(vec2(uEvolve.mul(0.35), 0.0)));
+      const c2 = mapTex.sample(uvC.mul(2.7).add(vec2(11.3, uEvolve.mul(-0.8).add(4.1))));
       // The BILLOW channel, not the mass channel: its higher frequency is what reads as
       // fibrous. The weather channel gates whole regions so the sheet has gaps.
       const fib = c1.b.mul(0.6).add(c2.b.mul(0.4));
-      const covC = saturate(uCirrusCoverage.mul(mix(float(0.4), float(1.5), c1.a)));
+      // Its own low-frequency gate, for the same reason the deck has one.
+      const wCir = mapTex.sample(uvC.mul(uWeatherScale.mul(0.6))).a;
+      const covC = saturate(uCirrusCoverage.mul(mix(float(0.4), float(1.5), wCir)));
       const shapedC = remapUnit(fib, covC.oneMinus());
 
       // Ice is strongly forward-scattering, so cirrus near the sun blazes and cirrus
@@ -390,6 +464,12 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       const sTau = mapTex.sample(uvMid.add(sunXZ.mul(reach.mul(0.45)))).r.mul(0.55)
         .add(mapTex.sample(uvMid.add(sunXZ.mul(reach))).r.mul(0.45));
       const sunShadow = exp(sTau.mul(uAbsorb).negate()).toVar();
+
+      // LARGE-SCALE WEATHER, sampled ONCE per ray at the slab mid-plane and at a low,
+      // incommensurate frequency (see weatherScale). Once per ray rather than per step
+      // because it is a kilometres-wide field: it barely changes across one slab
+      // crossing, so 18 fetches of it would buy nothing.
+      const wLow = mapTex.sample(uvMid.mul(uWeatherScale)).a.toVar();
 
       // Silver lining: thin cloud between you and the sun blazes. Gated on geometry —
       // applied unconditionally it just greys the deck (the volumetric powder term paid
@@ -429,7 +509,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
 
         // Weather makes whole regions cloudier — this is what stops the sky reading as
         // one uniform texture repeated to the horizon.
-        const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), m.a)));
+        const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), wLow)));
         const shaped = remapUnit(m.r.mul(prof), covLocal.oneMinus()).toVar();
 
         If(shaped.greaterThan(0.002), () => {
@@ -441,8 +521,11 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
           // TWO OCTAVES, because one is a lumpy edge and two is cauliflower. The finer
           // one carries most of the crispness the eye reads as "cloud" rather than
           // "smoke"; both shift with height so the mass is not its own outline extruded.
-          const dUv = uv.mul(3.1).add(vec2(h.mul(0.35), h.mul(-0.27)));
-          const fUv = uv.mul(9.7).add(vec2(h.mul(-0.8), h.mul(0.6)));
+          // The `uEvolve` offsets are what make the billows CHURN rather than merely
+          // slide past: each octave walks a different way through the field, so the
+          // shape dissolves and re-forms instead of translating rigidly.
+          const dUv = uv.mul(3.1).add(vec2(h.mul(0.35).add(uEvolve), h.mul(-0.27)));
+          const fUv = uv.mul(9.7).add(vec2(h.mul(-0.8), h.mul(0.6).sub(uEvolve.mul(1.7))));
           const billow = mapTex.sample(dUv).b.mul(0.62).add(mapTex.sample(fUv).b.mul(0.38));
           const bite = billow.mul(uErode).mul(mix(float(0.6), float(1.25), saturate(hL)));
           const dens = remapUnit(shaped, bite).mul(uDensityMul).toVar();
@@ -451,7 +534,12 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
             // Vertical light gradient: tops catch the sun, bases sit in their own shadow.
             // Cheap, and with the silhouette now correct it does most of the volume read.
             const vert = mix(uBaseDark, float(1.0), saturate(hL));
-            const lit = keyCol.mul(uSunStrength).mul(sunShadow.mul(vert).add(rim.mul(vert)));
+            // MULTIPLE-SCATTERING FLOOR — see msFloor. Lifts the shadow term so a core
+            // that the horizontal march says is fully occluded still glows, instead of
+            // flattening to grey. mix(floor, 1, shadow), written as an add to keep it
+            // one madd.
+            const shadeLifted = sunShadow.add(uMsFloor.mul(sunShadow.oneMinus()));
+            const lit = keyCol.mul(uSunStrength).mul(shadeLifted.mul(vert).add(rim.mul(vert)));
             const amb = ambCol.mul(uAmbient).mul(mix(float(0.55), float(1.0), saturate(hL)));
             const lum = lit.add(amb);
 
@@ -556,7 +644,10 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       // ONE fetch. The mass silhouette is what casts a shadow; billow detail is finer
       // than a soft shadow edge would preserve anyway.
       const m = mapTex.sample(uvS);
-      const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), m.a)));
+      // Same low-frequency weather as the deck, or the shadows would be cast by a
+      // differently-covered sky than the one overhead.
+      const wLowS = mapTex.sample(uvS.mul(uWeatherScale)).a;
+      const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), wLowS)));
       const cov = smoothstep(float(0.0), uShadowSoft, remapUnit(m.r, covLocal.oneMinus()));
 
       // Above the deck you cannot be shadowed by it — matters on a sky track.
@@ -643,7 +734,12 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
    * @param {number} dt seconds
    * @param {THREE.Vector3} [camPos] world camera position — anchors the deck
    */
+  let _evolveAccum = 0;
+
   function update(dt, camPos, sunDir) {
+    _evolveAccum += (dt || 0) * P.evolve;
+    uEvolve.value = _evolveAccum;
+    uMsFloor.value = P.msFloor;
     const rad = THREE.MathUtils.degToRad(P.windDeg);
     // Metres, converted to map units on read, so the wind dial means the same thing here
     // as it does on the volumetric deck.
@@ -657,6 +753,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uThickness.value = P.thickness;
     uTile.value = P.tile;
     uCoverage.value = P.coverage;
+    uWeatherScale.value = P.weatherScale;
     uErode.value = P.erode;
     uDensityMul.value = P.densityMul;
     uTopMin.value = P.topMin;
@@ -678,6 +775,8 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uCirrusWarp.value = P.cirrusWarp;
     uCirrusSilver.value = P.cirrusSilver;
     uCirrusDrift.value = P.cirrusDrift;
+    uCirrusSwirl.value = P.cirrusSwirl;
+    uWindDir.value.set(Math.cos(rad), Math.sin(rad));
   }
 
   return {
