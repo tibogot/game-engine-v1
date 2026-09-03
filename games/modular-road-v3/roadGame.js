@@ -185,6 +185,7 @@ import { createSkyAtmosphere, sunTransmittanceCPU } from "./modularRoadSkyAtmosp
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
 // imported assets — the source folder itself is not published.
 import auditTrackUrl from "./audittest.json?url";
+import loopbackTrackUrl from "./loopback-showcase.json?url";
 
 /** Cap on physics ticks per frame — a long stall must not queue a huge backlog. */
 const MAX_SIM_TICKS = 8;
@@ -700,6 +701,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   /** Drive the deck from the engine's live sun/sky so clouds match time of day. */
+  const _white = new THREE.Color(1, 1, 1);
   const _cloudSun = new THREE.Vector3();
   const _cloudMoonDir = new THREE.Vector3();
   let _cloudUsingMoon = false;
@@ -984,6 +986,97 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     devPanel?.refresh?.();
   }
 
+  /* ── THE WORLD IS LIT BY THE SKY IT IS UNDER ───────────────────────────────
+   *
+   * Measured before writing this: from noon (sun +61.7 deg) down to +1 deg, the
+   * applied key light was byte-identical at #fff5e0. The engine does handle the
+   * day/night SHAPE correctly — it fades the sun out near the horizon and swaps
+   * to a cool moon below it — but the sun's COLOUR is an authored constant, so
+   * a sunset only ever dimmed a noon-white lamp.
+   *
+   * That is the same bug the clouds had (lit by a frozen noon palette at every
+   * hour) one level up, and it is what breaks the illusion hardest: the sky and
+   * the clouds redden while the track and car stay neutral, so the car reads as
+   * pasted onto a photograph rather than standing in the light.
+   *
+   * `evaluateSky` already computes `dirIntensity`, `hemiIntensity` and
+   * `exposure` for exactly this, and they were being returned and thrown away.
+   * The colour comes from the real sun transmittance instead — the same
+   * function that lights the clouds — so the deck overhead and the deck under
+   * the wheels are lit by one sun by construction.
+   *
+   * COSTS NOTHING WHILE THE CLOCK IS FROZEN (the default): it is keyed on solar
+   * elevation, so it recomputes only when the sun actually moves. And when the
+   * sun moves the engine was already rebuilding its sun/sky on that same key —
+   * `sunElevation` is in its own change signature — so this adds no new work.
+   */
+  const SKY_LIGHT = {
+    enabled: true,
+    /** 0 = keep today's neutral lamp, 1 = full atmospheric reddening. */
+    warmth: 1.0,
+  };
+  /** Boot values, captured as the NOON REFERENCE so this cannot regress the
+   *  look that was hand-tuned at midday — everything is scaled to land on them
+   *  when the sun is high, and only the variation around that is new. */
+  const _lightRef = { dir: 2.6, hemi: 0.6, exposure: 1.0, captured: false };
+  const _sunLitRgb = [1, 1, 1];
+  const _skyKeyCol = new THREE.Color();
+  const _hemiSkyCol = new THREE.Color();
+  const _hemiGndCol = new THREE.Color();
+  let _skyLightKey = "";
+
+  function syncWorldLightToSky(look) {
+    if (!SKY_LIGHT.enabled || !app.light) return;
+    const Li = app.light.state;
+    if (!_lightRef.captured) {
+      _lightRef.dir = Li.dirIntensity ?? 2.6;
+      _lightRef.hemi = Li.hemiIntensity ?? 0.6;
+      _lightRef.exposure = Li.exposure ?? 1.0;
+      _lightRef.captured = true;
+    }
+    const el = look.sunElevation ?? 0;
+    const key = `${el.toFixed(2)}|${SKY_LIGHT.warmth}|${Math.round(camera.position.y / 50)}`;
+    if (key === _skyLightKey) return;
+    _skyLightKey = key;
+
+    /*
+     * KEY COLOUR = the sun's own transmittance, reduced to CHROMATICITY.
+     *
+     * The raw transmittance is nearly black at sunset — that is what makes it
+     * red — but the engine already owns the brightness (it multiplies by its
+     * own horizon fade). Feeding the full value would dim twice and lose the
+     * sunset entirely. Dividing by the max channel keeps the HUE and hands the
+     * magnitude back to the engine, which is the clean split.
+     */
+    sunTransmittanceCPU(Math.max(look.sunDir.y, -0.2), 0, undefined, _sunLitRgb);
+    const m = Math.max(_sunLitRgb[0], _sunLitRgb[1], _sunLitRgb[2], 1e-4);
+    _skyKeyCol.setRGB(_sunLitRgb[0] / m, _sunLitRgb[1] / m, _sunLitRgb[2] / m);
+    if (SKY_LIGHT.warmth < 1) _skyKeyCol.lerp(_white, 1 - SKY_LIGHT.warmth);
+
+    // Ambient from the sky itself: zenith overhead, haze underfoot.
+    const cols = gameSky.getColors(camera.position.y);
+    _hemiSkyCol.copy(cols.zenith);
+    _hemiGndCol.copy(cols.haze);
+
+    /*
+     * COLOUR SPACE, and this project has been bitten here before: the engine
+     * consumes these as authored sRGB HEX STRINGS (`sun.color.set(Li.dirColor)`
+     * decodes sRGB -> linear). Our values are already linear working space, so
+     * they must be ENCODED back to sRGB on the way out or they get decoded a
+     * second time and land 5-10x too dark. `getHexString(SRGBColorSpace)` is
+     * that encode.
+     */
+    const dayRef = 3.1, hemiDayRef = 0.62; // evaluateSky's own daylight values
+    app.light.set({
+      dirColor: "#" + _skyKeyCol.getHexString(THREE.SRGBColorSpace),
+      dirIntensity: (look.dirIntensity / dayRef) * _lightRef.dir,
+      hemiSkyColor: "#" + _hemiSkyCol.getHexString(THREE.SRGBColorSpace),
+      hemiGroundColor: "#" + _hemiGndCol.getHexString(THREE.SRGBColorSpace),
+      hemiIntensity: (look.hemiIntensity / hemiDayRef) * _lightRef.hemi,
+      exposure: look.exposure * _lightRef.exposure,
+    });
+  }
+
   function updateGameSky(dt) {
     if (!gameSkyOn || !gameSky) return;
     const look = gameSky.update({ camera, dt });
@@ -992,6 +1085,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // when the sun or the height actually moved, so a frozen time of day costs
     // nothing per frame.
     gameAtmo.update(look.sunDir, Math.max(0, camera.position.y), look.moonDir);
+    syncWorldLightToSky(look);
   }
   app.addPreRenderHook?.(updateGameSky);
 
@@ -5348,6 +5442,10 @@ ${e.message}`);
   // does not have. audittest.json is the current reference track and the one to
   // EDIT when a repro needs new geometry.
   loadPresetTrack("road-preset-audit", auditTrackUrl, "Load audit track");
+  // Out along the bottom, up and over the loop-back, and home along a deck ABOVE
+  // the road you arrived on. See tools/buildLoopbackTrack.mjs, which generates
+  // the track AND drives it before writing it.
+  loadPresetTrack("road-preset-loopback", loopbackTrackUrl, "Load loop-back showcase");
 
   const gamepad = createGamepadInput();
   /** Set by readControls() when the pad's respawn button goes down this frame. */
