@@ -21,8 +21,9 @@ import {
 import { sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
 
 const SKY_RADIUS = 4000;
-/** Scratch for the painted deck's key-light integral — reused, allocates nothing. */
+/** Scratch for the painted deck's key-light integrals — reused, allocates nothing. */
 const _keyRgb = [1, 1, 1];
+const _cirrusRgb = [1, 1, 1];
 const DEG = Math.PI / 180;
 const OBLIQUITY = 23.44 * DEG;
 
@@ -369,6 +370,10 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
   const uAtmoMix = uniform(0);
   /** Sunlight reaching the painted deck — real transmittance, not the disc palette. */
   const uCloudKey = uniform(new THREE.Color(1, 1, 1));
+  /** The same, at the CIRRUS altitude. Not a copy: 8 km up the sun still has a clear
+   *  line long after it has reddened for the deck below, which is precisely why high
+   *  cirrus keeps burning bright after sunset. */
+  const uCirrusKey = uniform(new THREE.Color(1, 1, 1));
 
   const uZenithBelow = uniform(new THREE.Color());
   const uHorizonBelow = uniform(new THREE.Color());
@@ -574,7 +579,9 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
       const keyCol = uCloudKey.mul(sunUpFade)
         .add(uMoonColor.mul(0.12).mul(smoothstep(-0.04, 0.08, uMoonDir.y)).mul(uNightF));
       const ambCol = mix(horizon, zenith, float(0.55));
-      const deck = paintedClouds.shade(dir, col, uSunDir, keyCol, ambCol);
+      const cirrusKey = uCirrusKey.mul(sunUpFade)
+        .add(uMoonColor.mul(0.12).mul(smoothstep(-0.04, 0.08, uMoonDir.y)).mul(uNightF));
+      const deck = paintedClouds.shade(dir, col, uSunDir, keyCol, ambCol, cirrusKey);
       col.assign(mix(col, deck.rgb, deck.a));
     }
 
@@ -646,13 +653,11 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
      * function the volumetric tier's light colour comes from — which is the point.
      */
     if (paintedClouds) {
-      sunTransmittanceCPU(
-        THREE.MathUtils.clamp(look.sunDir.y, -1, 1),
-        paintedClouds.params.altitude,
-        undefined,
-        _keyRgb,
-      );
+      const sy = THREE.MathUtils.clamp(look.sunDir.y, -1, 1);
+      sunTransmittanceCPU(sy, paintedClouds.params.altitude, undefined, _keyRgb);
       uCloudKey.value.setRGB(_keyRgb[0], _keyRgb[1], _keyRgb[2]);
+      sunTransmittanceCPU(sy, paintedClouds.params.cirrusAltitude, undefined, _cirrusRgb);
+      uCirrusKey.value.setRGB(_cirrusRgb[0], _cirrusRgb[1], _cirrusRgb[2]);
     }
   }
 

@@ -102,6 +102,38 @@ export const PAINTED_CLOUD_DEFAULTS = {
    * early to hide an infinite smear.
    */
   horizonFade: 0.004,
+  // ── High cirrus ──────────────────────────────────────────────────────────────────
+  /**
+   * Master opacity of the high cirrus sheet. 0 skips it entirely.
+   *
+   * A SECOND LAYER IS WHAT SELLS DEPTH. One deck, however good, gives the eye a single
+   * distance to lock onto and the sky reads as a ceiling; two layers at very different
+   * altitudes give it parallax and a size comparison, which is most of why a real sky
+   * feels deep. This one is also the cheap half of the pair.
+   */
+  cirrusAmount: 0.42,
+  /**
+   * Metres. Real cirrus lives at 6-12 km, far above the cumulus deck — and that gap is
+   * the point: it is what the eye measures depth against.
+   */
+  cirrusAltitude: 8000,
+  /** Metres one wrap covers. Big, because cirrus fields are. */
+  cirrusTile: 15000,
+  /** Fraction covered — a threshold, like the deck's. */
+  cirrusCoverage: 0.34,
+  /**
+   * Anisotropy. Cirrus is ice crystals falling through wind shear, so it comes in long
+   * parallel filaments rather than blobs; stretching the lookup is what makes streaks.
+   */
+  cirrusStretch: 4.5,
+  /** Cross-streak bend, so the filaments curve instead of running dead straight. */
+  cirrusWarp: 0.55,
+  /** Forward-scatter gain. Ice is strongly forward-scattering: cirrus near the sun
+   *  blazes silver-white, which is its most recognisable behaviour. */
+  cirrusSilver: 1.8,
+  /** Wind multiplier. High cloud runs with the jet stream — much faster than the deck. */
+  cirrusDrift: 2.4,
+
   /**
    * Planet radius in KILOMETRES — the whole reason the deck has a horizon.
    *
@@ -235,6 +267,14 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uHorizonFade = uniform(P.horizonFade);
   /** 1 / (2R) in metres — the only form the curvature maths actually needs. */
   const uInv2R = uniform(0.5 / (P.planetRadiusKm * 1000));
+  const uCirrusAmount = uniform(P.cirrusAmount);
+  const uCirrusAlt = uniform(P.cirrusAltitude);
+  const uCirrusTile = uniform(P.cirrusTile);
+  const uCirrusCoverage = uniform(P.cirrusCoverage);
+  const uCirrusStretch = uniform(P.cirrusStretch);
+  const uCirrusWarp = uniform(P.cirrusWarp);
+  const uCirrusSilver = uniform(P.cirrusSilver);
+  const uCirrusDrift = uniform(P.cirrusDrift);
   const uWind = uniform(new THREE.Vector2());
   /** Camera XZ in map units, so the deck is anchored to the WORLD and drifts past you
    *  as you drive instead of being glued to the camera. */
@@ -258,9 +298,12 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
    * @param sunDir   normalised sun direction
    * @param keyCol   light colour (sun, or moon at night — the caller decides)
    * @param ambCol   sky ambient colour reaching the shaded side
+   * @param cirrusKey light colour at the CIRRUS altitude — a separate colour on purpose,
+   *   see the cirrus block: 8 km up the sun is still clear of the horizon long after the
+   *   deck below has gone red, which is exactly why cirrus keeps burning at dusk.
    * @returns vec4(rgb, alpha) — straight alpha, to be mix()'d over the sky
    */
-  const shade = Fn(([dir, bgCol, sunDir, keyCol, ambCol]) => {
+  const shade = Fn(([dir, bgCol, sunDir, keyCol, ambCol, cirrusKey]) => {
     const out = vec4(0.0).toVar();
 
     const y = dir.y;
@@ -268,23 +311,69 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     // slab crossing diverges there. Fade rather than cut: the last degrees are
     // unresolvable however many mips we have.
     const hMask = smoothstep(uHorizonFade, uHorizonFade.add(0.035), y);
+    const yy = max(y, float(0.0));
+
+    /*
+     * CURVED LAYERS. Distance along the ray to altitude h over a planet of radius R,
+     * using the small-angle drop `alt(t) = y·t + t²/2R` (exact to millimetres here:
+     * the deck's horizon is ~121 km against R = 6371 km). Solving for t gives
+     *
+     *     t = R·(sqrt(y² + 2h/R) − y)
+     *
+     * which is written below in its CONJUGATE form, `2h / (sqrt(...) + y)`. That is
+     * not cosmetic: the direct form subtracts two nearly-equal numbers of order 1e6,
+     * and in float32 that cancellation throws away several kilometres of the answer
+     * at exactly the grazing angles this whole change exists to fix.
+     *
+     * Shared by both layers, so the cirrus gets its own (much further, ~340 km at
+     * 8 km altitude) horizon for free.
+     */
+    const tAt = Fn(([h]) => h.mul(2.0).div(sqrt(yy.mul(yy).add(h.mul(uInv2R).mul(4.0))).add(yy)));
+
+    // ── HIGH CIRRUS ───────────────────────────────────────────────────────────────
+    // A flat sheet, and here that is CORRECT rather than a compromise: cirrus is
+    // optically thin and always seen from far below, so it has no thickness to miss and
+    // nothing to self-occlude — the two things that made a plane wrong for the cumulus
+    // deck. One projection, two fetches, no march.
+    const cirCol = vec3(0.0).toVar();
+    const cirA = float(0.0).toVar();
+    If(uCirrusAmount.greaterThan(0.001).and(y.greaterThan(0.0)), () => {
+      const tC = tAt(uCirrusAlt);
+      const wC = uCamXZ.add(vec2(dir.x, dir.z).mul(tC).div(uCirrusTile))
+        .add(uWind.mul(uCirrusDrift));
+      // Stretch the lookup along one axis: cirrus is ice falling through wind shear, so
+      // it forms long parallel filaments, not blobs.
+      const suv = vec2(wC.x.div(uCirrusStretch), wC.y);
+      // Bend them, or they read as a printed hatch.
+      const wv = mapTex.sample(suv.mul(0.31)).a.sub(0.5);
+      const uvC = suv.add(vec2(wv.mul(0.12), wv.mul(uCirrusWarp)));
+
+      const c1 = mapTex.sample(uvC);
+      const c2 = mapTex.sample(uvC.mul(2.7).add(vec2(11.3, 4.1)));
+      // The BILLOW channel, not the mass channel: its higher frequency is what reads as
+      // fibrous. The weather channel gates whole regions so the sheet has gaps.
+      const fib = c1.b.mul(0.6).add(c2.b.mul(0.4));
+      const covC = saturate(uCirrusCoverage.mul(mix(float(0.4), float(1.5), c1.a)));
+      const shapedC = remapUnit(fib, covC.oneMinus());
+
+      // Ice is strongly forward-scattering, so cirrus near the sun blazes and cirrus
+      // away from it stays a pale wash. That contrast is its signature.
+      const muC = saturate(dot(dir, sunDir));
+      const fwd = pow(muC, float(3.0)).mul(uCirrusSilver);
+      const lit = cirrusKey.mul(float(0.85).add(fwd)).add(ambCol.mul(0.3));
+
+      // Its own horizon fade and aerial: much further away, so it dissolves sooner in
+      // angular terms even though it reaches further in metres.
+      const maskC = smoothstep(float(0.002), float(0.03), y);
+      const aerC = smoothstep(float(0.30), float(0.005), y).mul(uAerial);
+      cirCol.assign(mix(lit, bgCol, aerC));
+      cirA.assign(shapedC.mul(uCirrusAmount).mul(maskC));
+    });
+
+    const deckCol = vec3(0.0).toVar();
+    const deckA = float(0.0).toVar();
 
     If(hMask.greaterThan(0.001), () => {
-      const yy = max(y, float(0.0));
-
-      /*
-       * CURVED DECK. Distance along the ray to altitude h over a planet of radius R,
-       * using the small-angle drop `alt(t) = y·t + t²/2R` (exact to millimetres here:
-       * the deck's horizon is ~121 km against R = 6371 km). Solving for t gives
-       *
-       *     t = R·(sqrt(y² + 2h/R) − y)
-       *
-       * which is written below in its CONJUGATE form, `2h / (sqrt(...) + y)`. That is
-       * not cosmetic: the direct form subtracts two nearly-equal numbers of order 1e6,
-       * and in float32 that cancellation throws away several kilometres of the answer
-       * at exactly the grazing angles this whole change exists to fix.
-       */
-      const tAt = Fn(([h]) => h.mul(2.0).div(sqrt(yy.mul(yy).add(h.mul(uInv2R).mul(4.0))).add(yy)));
       const tBase = tAt(uAltitude).toVar();
       const tTop = tAt(uAltitude.add(uThickness)).toVar();
       const dt = tTop.sub(tBase).div(uSteps.max(1.0)).toVar();
@@ -384,8 +473,18 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       const aerial = smoothstep(float(0.42), float(0.02), y).mul(uAerial);
       col.assign(mix(col, bgCol, aerial));
 
-      out.assign(vec4(col, alpha));
+      deckCol.assign(col);
+      deckA.assign(alpha);
     });
+
+    // ── COMPOSITE: cirrus UNDER the deck ──────────────────────────────────────────
+    // The cumulus deck is 7 km closer, so it occludes the cirrus — getting this order
+    // wrong is what makes a two-layer sky look like a decal. Straight-alpha "over".
+    const behind = deckA.oneMinus();
+    const outA = deckA.add(cirA.mul(behind)).toVar();
+    const outCol = deckCol.mul(deckA).add(cirCol.mul(cirA).mul(behind))
+      .div(outA.max(1e-4));
+    out.assign(vec4(outCol, outA));
     return out;
   });
 
@@ -571,6 +670,14 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uAerial.value = P.aerial;
     uHorizonFade.value = P.horizonFade;
     uInv2R.value = 0.5 / Math.max(1e3, P.planetRadiusKm * 1000);
+    uCirrusAmount.value = P.cirrusAmount;
+    uCirrusAlt.value = P.cirrusAltitude;
+    uCirrusTile.value = P.cirrusTile;
+    uCirrusCoverage.value = P.cirrusCoverage;
+    uCirrusStretch.value = P.cirrusStretch;
+    uCirrusWarp.value = P.cirrusWarp;
+    uCirrusSilver.value = P.cirrusSilver;
+    uCirrusDrift.value = P.cirrusDrift;
   }
 
   return {

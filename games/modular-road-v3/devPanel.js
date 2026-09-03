@@ -2015,6 +2015,56 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-pc-aerial-v"></span>
             </div>
           </div>
+          <div class="dv-hint">
+            <b>High cirrus</b> is the second layer, and the depth cue: one deck
+            gives the eye a single distance and reads as a ceiling, two at very
+            different altitudes give it parallax. It is a flat sheet, which here
+            is correct rather than a compromise — cirrus is optically thin and
+            always seen from far below, so it has no thickness to miss. Two
+            fetches, no march.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cirrus amount</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-cirrus" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-pc-cirrus-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cirrus coverage</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-cirruscov" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-pc-cirruscov-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cirrus altitude</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-cirrusalt" min="3000" max="14000" step="250" />
+              <span class="prop-num" id="dv-pc-cirrusalt-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cirrus size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-cirrustile" min="4000" max="40000" step="500" />
+              <span class="prop-num" id="dv-pc-cirrustile-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cirrus streak</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-cirrusstretch" min="1" max="12" step="0.1" />
+              <span class="prop-num" id="dv-pc-cirrusstretch-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cirrus glow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-cirrussilver" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-pc-cirrussilver-v"></span>
+            </div>
+          </div>
           <div class="prop-row">
             <span class="prop-label">Ground shadows</span>
             <div class="prop-value">
@@ -4297,6 +4347,12 @@ export function createRoadDevPanel({ app, game, params }) {
   pslider("dv-pc-absorb", "absorb", (v) => v.toFixed(1));
   pslider("dv-pc-silver", "silver", (v) => v.toFixed(2));
   pslider("dv-pc-aerial", "aerial", (v) => v.toFixed(2));
+  pslider("dv-pc-cirrus", "cirrusAmount", (v) => (v <= 0 ? "off" : v.toFixed(2)));
+  pslider("dv-pc-cirruscov", "cirrusCoverage", (v) => v.toFixed(2));
+  pslider("dv-pc-cirrusalt", "cirrusAltitude", (v) => (v / 1000).toFixed(1) + " km");
+  pslider("dv-pc-cirrustile", "cirrusTile", (v) => (v / 1000).toFixed(1) + " km");
+  pslider("dv-pc-cirrusstretch", "cirrusStretch", (v) => v.toFixed(1) + "\u00d7");
+  pslider("dv-pc-cirrussilver", "cirrusSilver", (v) => v.toFixed(2));
   pslider("dv-pc-shadow", "shadowStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));
   pslider("dv-pc-shadowsoft", "shadowSoftness", (v) => v.toFixed(2));
   pslider("dv-pc-wind", "windSpeed", (v) => v.toFixed(1) + " m/s");
