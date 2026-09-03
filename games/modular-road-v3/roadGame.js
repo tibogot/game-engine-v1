@@ -866,6 +866,24 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
          * through it, and `update()` re-applies it from P every frame.
          */
         atmosphereMix: 1,
+        /*
+         * NO FAKE CLOUD SEA. The sky module can paint a "sea of clouds seen from
+         * above" below the horizon, and it is ON by default (0.55) — but it is a
+         * STAND-IN for clouds you do not have, and this game always has real ones.
+         * sky-lab already encodes exactly that rule (`cloudSea = clouds.enabled ? 0
+         * : SKY_DEFAULTS.cloudSea`); the game never got the memo.
+         *
+         * It was firing on `SKY_DEFAULTS.cloudBase + cloudThickness` = 480 m, a lab
+         * altitude unrelated to either real deck, so simply zooming the editor camera
+         * past 480 m dropped a band of mottled value-noise below the horizon that
+         * reads as choppy grey water — even with the cloud tier switched OFF, which
+         * is when the player has most explicitly asked for no clouds.
+         *
+         * There is no case left where it is right: the volumetric deck renders itself
+         * from above, the painted deck is camera-relative so you can never get above
+         * it, and "off" means off. The knob still exists for sky-lab.
+         */
+        cloudSea: 0,
       },
     });
     gameSky.mesh.visible = false;
