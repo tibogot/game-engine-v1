@@ -12,13 +12,14 @@
  */
 import * as THREE from "three/webgpu";
 import {
-  float, vec2, vec3, vec4, Fn, If, uniform,
+  float, vec2, vec3, vec4, Fn, If, uniform, texture,
   positionWorld, cameraPosition,
-  normalize, dot, max, min, mix, smoothstep, pow, exp,
-  sin, fract, floor, abs, length, step,
+  normalize, dot, cross, sqrt, max, min, mix, smoothstep, pow, exp,
+  sin, fract, floor, abs, length, step, saturate,
 } from "three/tsl";
 
 import { sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
+import { createMoonSurface } from "./modularRoadMoon.js";
 
 const SKY_RADIUS = 4000;
 /** Scratch for the painted deck's key-light integrals — reused, allocates nothing. */
@@ -44,7 +45,15 @@ export const SKY_DEFAULTS = {
   sunGlowPow: 9,
   sunGlowStrength: 0.48,
   sunDiscScale: 1,
+  /**
+   * Angular DIAMETER in degrees. The real Moon is 0.52 deg — this is deliberately
+   * ~3x oversized, the same cheat almost every game and film makes, because at true
+   * scale it is a dot and reads as a bug rather than as the Moon. Set 0.52 for
+   * astronomical honesty.
+   */
   moonSizeDeg: 1.7,
+  /** Light the Earth throws back onto the Moon's night side. */
+  moonEarthshine: 0.055,
   moonDiscBright: 3.2,
 
   horizonPow: 0.4,
@@ -366,6 +375,14 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
   const uSunDiscScale = uniform(P.sunDiscScale);
   const uMoonCos = uniform(Math.cos((P.moonSizeDeg * DEG) / 2));
   const uMoonDiscBright = uniform(P.moonDiscBright);
+  /** Baked near-side albedo — see modularRoadMoon.js. ~40 ms once, at sky construction. */
+  const moonSurface = createMoonSurface({ seed: P.moonSeed ?? 7919 });
+  const moonTex = texture(moonSurface.map);
+  /** Angular RADIUS in radians, for the disc-space projection. */
+  const uMoonRad = uniform((P.moonSizeDeg * DEG) / 2);
+  /** Faint light the Earth throws on the Moon's night side — the reason you can see the
+   *  whole disc inside a thin crescent. */
+  const uEarthshine = uniform(P.moonEarthshine ?? 0.055);
   /** 0 = authored gradient, 1 = physical atmosphere. See setAtmosphereMix. */
   const uAtmoMix = uniform(0);
   /** Sunlight reaching the painted deck — real transmittance, not the disc palette. */
@@ -529,16 +546,59 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
       col.addAssign(starField(dir).mul(uNightF).mul(aboveHorizon));
     });
 
+    /* ── THE MOON ────────────────────────────────────────────────────────────
+     *
+     * Projected into the moon's own DISC SPACE rather than shaded as a sphere in
+     * world space: the offset of the view ray from the moon centre, resolved on a
+     * basis built around it, IS the orthographic coordinate the near-side texture
+     * is baked in. So the surface lookup is one plain 2D fetch with no trig, and
+     * the same face always shows — which is what tidal locking means.
+     */
     const moonDot = dot(dir, uMoonDir);
     const moonUpFade = smoothstep(-0.05, 0.06, uMoonDir.y);
-    const moonDisc = smoothstep(uMoonCos, float(1.0), moonDot);
-    const moonN = normalize(uMoonDir.add(dir.sub(uMoonDir).mul(22.0)));
-    const moonLit = max(dot(moonN, uSunDir), float(0.04));
-    const moonGlow = pow(max(moonDot, float(0.0)), float(80.0)).mul(0.22);
-    col.addAssign(
-      uMoonColor.mul(moonDisc.mul(moonLit).mul(uMoonDiscBright).add(moonGlow))
-        .mul(moonUpFade).mul(uNightF.add(0.15)),
-    );
+    // Basis around the moon. The world up is only a reference for "which way is up
+    // on the disc"; it is orthogonalised away, and the near-degenerate case (moon
+    // at the zenith) is nudged rather than special-cased.
+    const mRight = normalize(cross(vec3(0.0, 1.0, 0.0).add(vec3(1e-4, 0.0, 0.0)), uMoonDir));
+    const mUp = cross(uMoonDir, mRight);
+    const mOff = dir.sub(uMoonDir.mul(moonDot));      // component across the line of sight
+    const du = dot(mOff, mRight).div(uMoonRad);
+    const dv = dot(mOff, mUp).div(uMoonRad);
+    const r2 = du.mul(du).add(dv.mul(dv));
+
+    const moonSurf = moonTex.sample(vec2(du.mul(0.5).add(0.5), dv.mul(0.5).add(0.5)));
+    // Height above the disc plane: the third component of the surface normal, which is
+    // also cos(e), the emission angle, for a viewer this far away.
+    const cosE = sqrt(saturate(r2.oneMinus()));
+    /*
+     * THE NORMAL POINTS BACK AT US, hence the MINUS. At the sub-observer point the
+     * Moon's surface faces the Earth, so its normal is -moonDir, not +moonDir. With the
+     * sign the other way cos(i) comes out negated and the phase is inverted: a full moon
+     * (sun behind the observer, sunDir . moonDir = -1) renders as a thin crescent, and a
+     * new moon renders full. The disc looked plausible enough on its own that the error
+     * only shows when you check the phase against the clock - it was in the shading this
+     * replaced, too.
+     */
+    const nrm = mRight.mul(du).add(mUp.mul(dv)).sub(uMoonDir.mul(cosE));
+    const cosI = dot(nrm, uSunDir);
+
+    /*
+     * LOMMEL-SEELIGER, not Lambert. Lunar regolith backscatters, so a full moon reads
+     * as a nearly FLAT bright disc rather than a ball shaded toward its rim — which is
+     * exactly what `dot(n, sun)` alone gets wrong, and the giveaway that a rendered
+     * moon is a sphere with a texture on it. The terminator on a crescent is sharp
+     * under either law; it is the full phase that separates them.
+     */
+    const lit = saturate(cosI);
+    const ls = lit.div(lit.add(cosE).max(1e-3));
+    // Earthshine fills the night side, so a thin crescent still shows the whole disc.
+    const shade = ls.mul(1.6).add(uEarthshine);
+
+    // Antialias the limb with the baked edge ramp; inside/outside needs no extra test.
+    const discMask = moonSurf.a.mul(step(r2, float(1.0)));
+    const moonBody = uMoonColor.mul(moonSurf.r).mul(shade).mul(uMoonDiscBright).mul(discMask);
+    const moonGlow = pow(max(moonDot, float(0.0)), float(80.0)).mul(0.22).mul(uMoonColor);
+    col.addAssign(moonBody.add(moonGlow).mul(moonUpFade).mul(uNightF.add(0.15)));
 
     const sunDot = dot(dir, uSunDir);
     const sunUpFade = smoothstep(-0.04, 0.08, uSunDir.y);
@@ -622,6 +682,8 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
     uSunGlowStrength.value = P.sunGlowStrength * (0.7 + 0.9 * look.twilightF);
     uSunDiscScale.value = P.sunDiscScale;
     uMoonCos.value = Math.cos((P.moonSizeDeg * DEG) / 2);
+    uMoonRad.value = (P.moonSizeDeg * DEG) / 2;
+    uEarthshine.value = P.moonEarthshine ?? 0.055;
     uMoonDiscBright.value = P.moonDiscBright;
     uAtmoMix.value = P.atmosphereMix ?? uAtmoMix.value;
     uZenithBelow.value.copy(look.zenithBelow);
@@ -691,6 +753,7 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
   function dispose() {
     mesh.geometry.dispose();
     material.dispose();
+    moonSurface.dispose();
   }
 
   return {

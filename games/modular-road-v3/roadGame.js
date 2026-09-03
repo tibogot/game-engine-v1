@@ -7313,6 +7313,9 @@ ${e.message}`);
     paintedParams: () => paintedParams,
     /** Aerial-perspective params, for console tuning. */
     aerialParams: () => aerial.params,
+    /** The game sky's live params (moon size, star brightness, glow...), for console
+     *  tuning. Null until the sky is built. */
+    skyParams: () => gameSky?.params ?? null,
     /** Sky weather: setWeather("storm", 8). Crossfades; see modularRoadWeather.js. */
     setWeather: (name, seconds) => weather.set(name, seconds),
     getWeather: () => weather.name,
