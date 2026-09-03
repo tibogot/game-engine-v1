@@ -4641,6 +4641,7 @@ const PIECE_TO_CATEGORY = {
   curve: "turns",
   scurve: "turns",
   jump: "ramps",
+  loopback: "ramps",
   dive: "ramps",
   gap: "ramps",
   landing: "ramps",
@@ -5384,6 +5385,31 @@ export const CATEGORY_PRESETS = {
       label: "Mega ramp",
       base: "jump",
       params: { jumpLength: 56, jumpAngle: 44 },
+    },
+    // ── LOOP-BACK ──────────────────────────────────────────────────────────
+    // Not a launcher. The car drives up and over a vertical U-turn and comes
+    // back the way it came, upside down, to land on a platform ABOVE the road
+    // it arrived on. Place the landing as its own chain, elevated and facing
+    // back — tools/buildLoopbackTrack.mjs does exactly that.
+    {
+      // Not plain "loopback": a tile id that equals a piece id shadows the
+      // piece in lookups, and verticalTubeTest forbids it.
+      id: "flip_ramp",
+      label: "Flip ramp",
+      // 34 m tall. Leaves the top 36 m up going BACKWARD, turns ~250° in the
+      // air, comes back 97 m over its own run-up. Lands roof-first unless you
+      // finish the rotation with the pitch keys — that is the trick.
+      base: "loopback",
+      params: { loopbackRadius: 14, loopbackAngle: 70, loopbackStraight: 5,
+        loopbackTopRadius: 11, loopbackExit: 118 },
+    },
+    {
+      id: "flip_ramp_s",
+      label: "Flip ramp S",
+      // The same thing at 23 m: same reversal, same ~250°, comes back 88 m.
+      base: "loopback",
+      params: { loopbackRadius: 11, loopbackAngle: 70, loopbackStraight: 3,
+        loopbackTopRadius: 9, loopbackExit: 116 },
     },
     {
       id: "dive_10",

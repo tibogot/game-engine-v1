@@ -475,6 +475,24 @@ export const TIRE = {
    * envelope. Raising past that needs collision work first, not just this number.
    */
   topSpeed: 50,
+  /**
+   * ENGINE DRIVE FADES OUT AS A ROAD-HELD SURFACE GOES VERTICAL.
+   *
+   * `accelForce` fades with speed and with nothing else, so on the loop-back
+   * — where road hold presses the tyres on at ~19 g and grip is effectively
+   * unlimited — full throttle drives the car UP THE WALL at close to its
+   * flat-road acceleration. MEASURED: enter the curl at 27 m/s, climb 34 m,
+   * leave the top at 28 m/s — it GAINED speed climbing a wall that energy says
+   * should have left it at 8. That is why the car then went 70 m into the sky
+   * instead of over and back down.
+   *
+   * Full drive up to `wallDriveFadeStart` degrees of slope (the steepest
+   * road-held piece in the kit is a 14 degree grade), none by `wallDriveFadeEnd`. Only on a
+   * road-hold contact: loops, park bowls and half tubes are not road-held and
+   * keep exactly the behaviour they have. Braking is untouched.
+   */
+  wallDriveFadeStart: 15,
+  wallDriveFadeEnd: 45,
   powerCurveExp: 2.0,
   brakeForce: 8000,
   reverseAccel: 2000,
@@ -1009,6 +1027,66 @@ export const TIRE = {
    * starts in ~0.08 s, i.e. as soon as you press.
    */
   airGroundLockout: 0.05,
+
+  // ── THE FLIP RAMP'S HALF-TURN ────────────────────────────────────────────
+  //
+  // MEASURED across every ramp shape in the kit — straight wedges, steep
+  // entries, curled lips, constant-radius quarter-pipes — the car ALWAYS
+  // launches nose-DOWN: the front wheels cross the lip a wheelbase before the
+  // rear and dump their share of the contact load. So no ramp geometry can send
+  // this car over backwards, and versions of this feature that tried to squeeze
+  // the rotation out of the shape produced either nothing or a tumble whose
+  // size depended on exactly how the tyres happened to let go.
+  //
+  // So the rotation is AUTHORED. Leaving a road-held surface nose-up, the car
+  // takes a fixed nose-up rate, eased in over `rampFlipBlend` and then left
+  // alone by the tumble damping for as long as it lasts. One smooth half-turn,
+  // the same every time, independent of speed and of how the lip behaved.
+  //
+  // GATED TWICE: a road-hold contact (FOLLOW_ROAD is the gentle road pieces
+  // plus the flip ramp — every stunt shape in the kit, loop and park bowl and
+  // half tube and jump, is outside it) and a nose pitched past
+  // `rampFlipMinNose`, which no road piece reaches (the steepest grade in the
+  // kit is 14 degrees).
+  // CONTINUE THE CURL'S OWN ROTATION — do not start a new one.
+  //
+  // Going over the top of the ramp the chassis is already turning, at the
+  // surface rate v/R. The lip then knocks that away in ~50 ms (the front wheels
+  // cross it a wheelbase before the rear and dump their load), so left alone the
+  // car leaves nearly straight and HANGS vertical. An earlier version answered
+  // that with a fixed turn applied at the launch, which fixed the amount but not
+  // the feel: the car hung, then a separate rotation started, and it read as two
+  // events instead of one movement.
+  //
+  // So the rate is READ BACK from just before the lip and simply continued. The
+  // car leaves rotating exactly as fast as the ramp had it rotating, and carries
+  // on into the air with no discontinuity — the inertia of the curve.
+  /** How far back to read that rate (s). The plateau is 0.10–0.20 s before the
+   *  wheels leave; the collapse is inside the last 0.05. */
+  rampFlipLookback: 0.15,
+  /** Floor and ceiling on the continued rate (rad/s), so a lip that misbehaves
+   *  cannot leave the car barely turning or spinning wildly. */
+  rampFlipMinRate: 0.9,
+  rampFlipMaxRate: 2.6,
+  /** Eases the turn OUT as the car approaches inverted: the rate is also capped
+   *  at `remaining × this`, so it arrives and settles instead of stopping dead.
+   *  THE TARGET IS AN ATTITUDE, not an amount — flat upside down — because that
+   *  is the thing the trick is for: the car ends there and the player rolls out
+   *  of it with W/X. A rotation that ran to a fixed angle instead would
+   *  overshoot or undershoot depending on how far over the ramp had already
+   *  taken the car. */
+  rampFlipEase: 1.8,
+  /** How hard the pitch axis is driven onto that rate (1/s). */
+  rampFlipGain: 6.0,
+  /** Minimum chassis-forward Y at the launch — how far the nose must be pitched
+   *  up. 0.45 is about 27 degrees. */
+  rampFlipMinNose: 0.45,
+  /** What `airSettle` becomes on the pitch axis while the flip is live. Not
+   *  zero — a car that hangs up on a rail must still stop tumbling. */
+  flipSettleScale: 0.08,
+  /** Rate (rad/s) below which the flip is over and pitch goes back to the
+   *  ordinary settle and the arc assist, so the LANDING behaves as before. */
+  flipReleaseRate: 0.5,
 
   // ── NOSE FOLLOWS THE ARC ────────────────────────────────────────────────
   // Left alone the chassis holds whatever attitude it launched with, because
@@ -3135,12 +3213,21 @@ class Tire {
     let Fx = 0;
     const carSpeed = body.vel.dot(this._fwd);
     const thr = TIRE.brakeReverseThreshold;
+    // See TIRE.wallDriveFadeStart: no engine up a wall. `hitNormal.y` is the
+    // cosine of the slope, so this is 1 on anything gentler than the start
+    // angle and 0 past the end angle. Road-held surfaces only.
+    let wallDrive = 1;
+    if (this.hitRoadHold) {
+      const c0 = Math.cos(TIRE.wallDriveFadeStart / 57.2958);
+      const c1 = Math.cos(TIRE.wallDriveFadeEnd / 57.2958);
+      wallDrive = Math.min(1, Math.max(0, (this.hitNormal.y - c1) / Math.max(1e-6, c0 - c1)));
+    }
     if (throttle > 0) {
       if (carSpeed < -thr) {
         Fx = TIRE.brakeForce;
       } else {
         const normSpeed = Math.min(1, Math.abs(carSpeed) / TIRE.topSpeed);
-        Fx = driveScale * TIRE.accelForce * Math.max(0, 1 - Math.pow(normSpeed, TIRE.powerCurveExp));
+        Fx = wallDrive * driveScale * TIRE.accelForce * Math.max(0, 1 - Math.pow(normSpeed, TIRE.powerCurveExp));
       }
     } else if (throttle < 0) {
       if (carSpeed > thr) {
@@ -4008,6 +4095,26 @@ export class Vehicle {
     this._steerFwd = new THREE.Vector3();
     /** Seconds since the last wheel contact — gates air control (airGroundLockout). */
     this._airTime = 0;
+    /** 1 while a rotation carried off a curl is live, else 0. See rampCarry*. */
+    this._flipHold = 0;
+    /** Seconds since the wheels last left the ground while the carry is still
+     *  allowed to fire. Infinity = "has not left any ground" (a fresh or
+     *  respawned car cannot carry anything). */
+    this._flipLatchT = Infinity;
+    /** Was the last thing under the wheels a road-hold surface? Only written on
+     *  contact, so at a launch it still describes the ramp just left. */
+    this._holdContact = false;
+    /** Radians of authored turn still owed to this flight. Counts down; at
+     *  zero the flip is over and the ordinary damping holds the attitude. */
+    this._flipRemaining = 0;
+    /** The rate that flip is being taken at (rad/s), read off the ramp. */
+    this._flipRate = 0;
+    /** Ring of the chassis' NOSE-UP pitch rate, one sample per substep while a
+     *  wheel is down: 96 samples is 0.4 s at 240 Hz. Read back at the launch so
+     *  the flight continues the rotation the ramp had, not the one the lip left. */
+    this._pitchHist = new Float32Array(96);
+    this._pitchHead = 0;
+    this._carryAxis = new THREE.Vector3();
     /**
      * Seconds since the car was last SUPPORTED by its tyres — gates the steering
      * rack's return to centre (airSteerCenterDelay).
@@ -4211,6 +4318,11 @@ export class Vehicle {
     if (quat) this.body.quat.copy(quat);
     this.body.angVel.set(0, 0, 0);
     this._airTime = 0;
+    this._flipHold = 0;
+    this._flipLatchT = Infinity;
+    this._holdContact = false;
+    this._flipRemaining = 0;
+    this._pitchHist.fill(0);
     this._airYawRateState = 0;
     this._yawAxisHeld = false;
     this._rackAirTime = 0;
@@ -5252,17 +5364,27 @@ export class Vehicle {
   _applyStabilizer(dt = FIXED_DT / this.SUBSTEPS) {
     const body = this.body;
     let grounded = 0;
+    let holdContact = false;
     this._stabN.set(0, 0, 0);
     for (const t of this.tires) {
       if (t.grounded) {
         grounded++;
         this._stabN.add(t.hitNormal);
+        if (t.hitRoadHold) holdContact = true;
       }
     }
     this._stabUp.set(0, 1, 0).applyQuaternion(body.quat);
 
     if (grounded > 0) {
       this._airTime = 0;
+      this._holdContact = holdContact;
+      // What the surface is doing to the chassis, every substep a wheel is down,
+      // so the launch can read back past the moment the lip ruins it.
+      this._carryAxis.set(1, 0, 0).applyQuaternion(body.quat);
+      this._pitchHist[this._pitchHead] = -body.angVel.dot(this._carryAxis);
+      this._pitchHead = (this._pitchHead + 1) % this._pitchHist.length;
+      this._flipHold = 0;
+      this._flipLatchT = 0;
       // Q/E is a rate control, not a flywheel. Its kinematic rate stops when a
       // wheel finds the landing, so the tyres never inherit stale spin momentum.
       this._airYawRateState = 0;
@@ -5325,6 +5447,42 @@ export class Vehicle {
       // A bounce is not a trick: time from the last CONTACT, not from zero
       // airborne time, so no bounce can ever re-arm control mid-landing.
       const armed = this._airTime >= TIRE.airGroundLockout;
+
+      // ── THE AUTHORED HALF-TURN ──────────────────────────────────────────
+      // Once, on the substep the wheels left: the stabilizer zeroes
+      // `_flipLatchT` on every grounded substep, so 0 here means exactly that.
+      if (this._flipLatchT === 0) {
+        this._flipLatchT = Infinity;
+        if (this._holdContact && TIRE.rampFlipMaxRate > 0
+          && this._airFwd.y > TIRE.rampFlipMinNose) {
+          // The rate the ramp had the car turning at, from before the lip.
+          const n = this._pitchHist.length;
+          const back = Math.min(n - 1, Math.max(1, Math.round(TIRE.rampFlipLookback / dt)));
+          const was = this._pitchHist[(this._pitchHead - back + n) % n];
+          this._flipRate = THREE.MathUtils.clamp(was, TIRE.rampFlipMinRate, TIRE.rampFlipMaxRate);
+          // …and how much of the turn is LEFT to do. The ramp has already taken
+          // the car most of the way over, so this is the remainder to flat
+          // upside down, measured from the attitude it actually left at.
+          const fromUpright = Math.acos(THREE.MathUtils.clamp(this._stabUp.y, -1, 1));
+          this._flipRemaining = Math.max(0, Math.PI - fromUpright);
+          // SET the rate here rather than converging on it below. The lip has
+          // just thrown the pitch the OTHER way — traced at −1.03 rad/s on the
+          // first airborne tick against the +1.07 the ramp had — so easing onto
+          // the target means visibly reversing through zero at exactly the
+          // moment the eye is on the car. Writing it makes the launch
+          // continuous: the car leaves turning at the rate it was already
+          // turning at. (`angVel · right` is positive NOSE-DOWN, hence the sign.)
+          const cur = -body.angVel.dot(this._airRight);
+          body.angVel.addScaledVector(this._airRight, cur - this._flipRate);
+          this._flipHold = 1;
+        }
+      }
+      // Live only while the rotation it protects is still there, so the last
+      // part of the flight — the landing — behaves exactly as it always has.
+      // Live for exactly as long as there is turn owed. The moment it runs out
+      // the ordinary settle takes the axis back and stops the rotation, which
+      // is what leaves the car sitting inverted for the player to roll out of.
+      const flipping = this._flipRemaining > 0;
       // PITCH IS ITS OWN INPUT, not the throttle.
       //
       // It used to be `-throttle`, and that was a design error: the throttle is
@@ -5387,8 +5545,29 @@ export class Vehicle {
       let aligning = false; // true when the arc assist is driving pitch, not the player
       let pitchTarget = inP * TIRE.airPitchRate;
       // Pitch uses its OWN response — see airPitchResponse.
-      let pitchGain = inP !== 0 ? TIRE.airPitchResponse : settle;
-      if (inP === 0 && TIRE.airTrajectoryAlign > 0) {
+      // While a carried flip is live the idle-axis damping drops to
+      // `flipSettleScale` — that is what lets the rotation live long enough to
+      // be a trick. The player still wins outright the moment they touch pitch.
+      let pitchGain = inP !== 0
+        ? TIRE.airPitchResponse
+        : (flipping ? settle * TIRE.flipSettleScale : settle);
+      // Spend the owed turn. `angVel · right` is positive NOSE-DOWN (see
+      // input.pitch), so a nose-up rate is the negative target. Capped by both
+      // the rate and what is LEFT, so it eases out rather than stopping dead —
+      // and any pitch input hands the axis to the player outright.
+      if (this._flipRemaining > 0) {
+        if (inP !== 0) {
+          this._flipRemaining = 0;
+        } else {
+          const want = Math.min(this._flipRate, this._flipRemaining * TIRE.rampFlipEase);
+          pitchTarget = -want;
+          pitchGain = TIRE.rampFlipGain;
+          this._flipRemaining = Math.max(0, this._flipRemaining - want * dt);
+        }
+      }
+      // …and the arc assist would spend the whole flight pulling the nose back
+      // to the trajectory, so it stands down too.
+      if (inP === 0 && !flipping && TIRE.airTrajectoryAlign > 0) {
         const v = body.vel;
         const horiz = Math.hypot(v.x, v.z);
         const curPitch = body.angVel.dot(this._airRight);
@@ -5598,14 +5777,16 @@ export class Vehicle {
         if (inR !== 0) {
           this._freeOmega.addScaledVector(this._airFwd, -this._freeOmega.dot(this._airFwd));
         }
-        if (inP !== 0 || aligning) {
+        // `flipping` counts as driven for the same reason `aligning` does: the
+        // explicit pitch term above already owns that axis at its own gain.
+        if (inP !== 0 || aligning || flipping) {
           this._freeOmega.addScaledVector(pitchAxis, -this._freeOmega.dot(pitchAxis));
         }
         // Cancel what the per-axis settling above already asked for on those same
         // free axes, so the two do not stack into double damping.
         for (const [unit, inertia, driven] of [
           [this._airFwd, Ir, inR !== 0],
-          [pitchAxis, Ip, inP !== 0 || aligning],
+          [pitchAxis, Ip, inP !== 0 || aligning || flipping],
         ]) {
           if (driven) continue;
           const c0 = body.angVel.dot(unit);

@@ -89,6 +89,16 @@ export const CHASE_CAM = {
   // no longer disturb the framing. ─────────────────────────────────────────────
   dist: 7.5,          // trail distance behind the car, along −boomF
   height: 3.2,        // offset along the ROAD's normal, +boomU
+  /** Multiplier on `height` while riding the loop-back wall and through its
+   *  flight. On a vertical wall the boom's up is OUT from the face, so more
+   *  of it puts the camera looking at the car's roof rather than up its
+   *  tail — the reference's first frame. */
+  wallHeightMul: 1.8,
+  /** Which way the camera swings round the car through a flip-ramp launch.
+   *  +1 goes round one side, -1 the other. It has to be explicit: both ends of
+   *  the pivot lie in the same vertical plane, so left to itself the azimuth
+   *  picks a side on rounding and the shot is not repeatable. */
+  flipPivotSide: -1,
   minSpeed: 3.0,      // below this the boom falls back to the car's facing
   headingLerp: 4.0,   // how fast the boom swings onto the travel direction
   /** How fast the boom's up tracks the road while GROUNDED. This is what keeps
@@ -208,6 +218,14 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
   if (camera.isPerspectiveCamera && params.fovBase == null) CAM.fovBase = camera.fov;
 
   const _boomF = new THREE.Vector3(0, 0, 1);  // boom forward (unit)
+  /** Loop-back: the horizontal direction the car entered the curl on, latched
+   *  for the climb, and how far through the camera's pivot we are (0 = the
+   *  car's own frame, 1 = level behind the return). See the pivot at the use
+   *  site. `_wallLatched` stays true into the flight, where the boom freezes. */
+  const _wallFwd = new THREE.Vector3(0, 0, -1);
+  const _wallSide = new THREE.Vector3(1, 0, 0);
+  let _wallLatched = false;
+  let _wallT = 0;
   const _boomU = new THREE.Vector3(0, 1, 0);  // boom up — the road's normal
   const _anchor = new THREE.Vector3();
   const _prevPos = new THREE.Vector3();
@@ -332,8 +350,77 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     if (speed > CAM.minSpeed && !reversing) _dirTgt.copy(v).multiplyScalar(1 / speed);
     else _dirTgt.copy(_carFwd);
 
+    // ── THE LOOP-BACK: RIDE THE CAR'S OWN FRAME UP THE WALL, THEN FREEZE ────
+    // Three reference frames from the game this copies, in order: on the wall
+    // the camera is out from the wall face looking at the ROOF, nose up the
+    // screen; at the top it is BELOW and behind the car, looking up at it
+    // against the sky; in the air it holds that, so the car flies away inverted
+    // with its underside and tail to the camera. All three are one rule: the
+    // boom is aligned to the car's own forward and up — the surface normal —
+    // the whole way up the curl (as the wall goes past vertical the car's "up"
+    // swings to point down and back, which is what carries the camera round
+    // underneath), and at the exit that orientation is simply held until the
+    // wheels touch. No levelling, no orbit, nothing computed from velocity:
+    // the earlier version of this did both and the camera was still moving
+    // on the way down to the deck, which is the one moment it must not.
+    //
+    // `_holdContact` is a road-held contact and grades top out at 14°, so the
+    // nose test picks out the loop-back and nothing else; `_flipHold` is the
+    // vehicle's own "carrying a curl's rotation" flag, 1 for exactly this
+    // flight. Ordinary jumps, loops and bowls frame as they always have.
+    const onWall = grounded && !!vehicle._holdContact && _carFwd.y > 0.5;
+    const flipAir = !grounded && (vehicle._flipHold ?? 0) > 0;
+    if (onWall) {
+      if (!_wallLatched) {
+        // The direction the car went IN, latched once: its horizontal part
+        // flips sign as the nose passes vertical and cannot be re-read after.
+        const h = Math.hypot(v.x, v.z);
+        if (h > 1) _wallFwd.set(v.x / h, 0, v.z / h);
+        else _wallFwd.copy(_boomF).setY(0).normalize();
+        _wallLatched = true;
+      }
+      // ONE PIVOT, DRIVEN BY THE NOSE, FINISHED BY THE TOP.
+      //
+      // Both ends of it are fixed by what the shot has to show:
+      //   t=0, nose 30°  — the boom is the CAR'S OWN frame, so on a wall that
+      //                    is out from the face looking down at the ROOF.
+      //   t=1, nose 110° — level, on the far side, behind the RETURN direction,
+      //                    so an inverted car reads as horizontal and upside
+      //                    down (its underside toward the camera).
+      // Between them the camera sweeps the side view. That is 180° of relative
+      // rotation, which is why locking the boom to the car's frame could never
+      // produce it: that keeps the same face of the car pointed at you forever.
+      // And it is spent on the CLIMB, so by the time the wheels leave the shot
+      // is composed and the flight holds it — the camera must not still be
+      // hunting on the way down to the deck.
+      const noseDeg = Math.atan2(_carFwd.y, _carFwd.dot(_wallFwd)) / D2R;
+      _wallT = THREE.MathUtils.clamp((noseDeg - 20) / 45, 0, 1);
+      // Swept round a chosen SIDE rather than blended straight through: both
+      // ends of the pivot lie in the vertical plane through the entry
+      // direction, so a plain blend has no side to prefer and the azimuth picks
+      // one on rounding. See CAM.flipPivotSide.
+      const th = _wallT * Math.PI;
+      _wallSide.crossVectors(_worldUp, _wallFwd).normalize().multiplyScalar(CAM.flipPivotSide);
+      _dirTgt.copy(_wallFwd).multiplyScalar(Math.cos(th)).addScaledVector(_wallSide, Math.sin(th));
+      if (_dirTgt.lengthSq() < 1e-6) _dirTgt.copy(_carFwd);
+      _dirTgt.normalize();
+    } else if (flipAir && _wallLatched) {
+      _dirTgt.copy(_boomF);    // FROZEN: the composed shot, held to touchdown
+    } else {
+      _wallLatched = false;
+      _wallT = 0;
+    }
+    const flipFlat = onWall || (flipAir && _wallLatched);
+
     // ── 2. BOOM UP — the road's normal while grounded, world up in the air. ──
-    _upTgt.copy(grounded ? _carUp : _worldUp);
+    // …except through the loop-back, where it pivots with the boom and is then
+    // frozen — see above.
+    if (onWall) {
+      _upTgt.copy(_carUp).multiplyScalar(1 - _wallT).addScaledVector(_worldUp, _wallT);
+      if (_upTgt.lengthSq() < 1e-6) _upTgt.copy(_worldUp);
+      _upTgt.normalize();
+    } else if (flipFlat) _upTgt.copy(_boomU);
+    else _upTgt.copy(grounded ? _carUp : _worldUp);
 
     if (!_init) {
       _boomF.copy(_dirTgt);
@@ -344,7 +431,8 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     }
 
     easeDir(_boomF, _dirTgt, snap ? 1 : 1 - Math.exp(-CAM.headingLerp * dt));
-    const upRate = grounded ? CAM.upLerp : (_air < CAM.airHold ? 0 : CAM.airUpLerp);
+    const upRate = flipFlat && !grounded ? 0
+      : grounded ? CAM.upLerp : (_air < CAM.airHold ? 0 : CAM.airUpLerp);
     if (upRate > 0) easeDir(_boomU, _upTgt, snap ? 1 : 1 - Math.exp(-upRate * dt));
 
     // Keep the boom a frame: `up` must stay perpendicular to the forward.
@@ -392,9 +480,13 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     // azimuth wraps the short way round a circle of constant latitude. The
     // horizon therefore always has at least cos(poleGuard) of horizontal content
     // to lock onto, which is why `camera.up` can be taken exactly level below.
+    // More "up" than usual through the loop-back: on a vertical wall the up is
+    // OUT from the wall face, and that is what turns "behind the car" into
+    // "looking at its roof" (reference frame 1).
+    const hMul = flipFlat ? 1 + (CAM.wallHeightMul - 1) * (1 - _wallT) : 1;
     _boom.set(0, 0, 0)
       .addScaledVector(_boomF, -CAM.dist)
-      .addScaledVector(_boomU, CAM.height);
+      .addScaledVector(_boomU, CAM.height * hMul);
 
     // ── SWING ROUND THE SIDE. ────────────────────────────────────────────────
     //

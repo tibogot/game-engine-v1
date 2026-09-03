@@ -157,6 +157,37 @@ export const pieceParams = {
   // proportion to the pieces around it.
   //
   // If topSpeed changes again, rescale this — the arc goes as v².
+  /**
+   * FLIP RAMP — a steep face that curls over the top, so the car comes back.
+   *
+   * THREE SEGMENTS, and the middle one is what stops it looking like a loop:
+   *   1. a gentle transition off the flat, radius `loopbackRadius`
+   *   2. a STRAIGHT face at `loopbackAngle` for `loopbackStraight` metres
+   *   3. a TIGHT curl over the top, radius `loopbackTopRadius`, to
+   *      `loopbackExit` — past vertical, which is what reverses the car.
+   *
+   * Past 90 degrees the car is being carried back the way it came, so it leaves
+   * the lip travelling BACKWARD and lands on a deck above the road it arrived
+   * on. That reversal is the piece. A single constant-radius arc does the same
+   * job and reads as a great sweeping loop of ROAD; keeping the curve at the
+   * END and the rest straight is what makes it a ramp.
+   *
+   * THE HALF-TURN ITSELF IS AUTHORED, not squeezed out of this shape — see
+   * TIRE.rampFlipTurn. Measured across every ramp profile in the kit, the car
+   * always launches NOSE-DOWN (the front wheels cross the lip a wheelbase
+   * before the rear and dump their load), so geometry alone cannot turn it
+   * over, and trying to make it produced tumbles instead of a trick.
+   */
+  loopbackRadius: 14, // gentle transition off the flat (m)
+  loopbackAngle: 70, // the straight face's angle (deg)
+  loopbackStraight: 5, // length of that straight face (m)
+  // 11, not 6: the curve at the end has to be the SMOOTHEST part of the ramp,
+  // not the sharpest. At R6 the top pulls ~8 g and reads as a kink — the car
+  // hits it rather than flowing through it. R11 is the same shape, taken
+  // gently, and it also sets the rotation the car leaves with (v/R), which is
+  // what the flight then continues.
+  loopbackTopRadius: 11, // curl over the top (m) — the curve at the end
+  loopbackExit: 118, // angle it finishes at (deg); past 90 sends the car back
   jumpLength: 18, // arc length of the ramp (m)
   jumpAngle: 12, // takeoff angle at the exit (deg)
   // Dive / down ramp (mirror of the jump — flat entry, exit pitched down).
@@ -3681,6 +3712,50 @@ function jumpPoints(pp) {
   return pts;
 }
 
+/**
+ * Loop-back ramp: a CONSTANT-radius curl taken past vertical, so the car comes
+ * off the top going the other way. See PIECE_DEFAULTS.loopbackRadius.
+ *
+ * Constant radius matters twice over. It is what lets the car hold the surface —
+ * a changing radius means a changing load, and the moment the demand spikes the
+ * tyres let go — and it is what makes `stepsFor` exactly right here, since for a
+ * constant-radius arc `arcLen / totalAngle` IS the true radius rather than an
+ * average that flatters a tight section.
+ */
+function loopbackPoints(pp) {
+  const R1 = Math.max(5, pp.loopbackRadius ?? 14);
+  const face = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.loopbackAngle ?? 72, 30, 85));
+  const straight = Math.max(0, pp.loopbackStraight ?? 6);
+  const R2 = Math.max(3, pp.loopbackTopRadius ?? 6);
+  const exit = THREE.MathUtils.degToRad(
+    THREE.MathUtils.clamp(pp.loopbackExit ?? 120, 0, 165));
+  const top = Math.max(0, exit - face);
+  const l1 = R1 * face;   // transition
+  const l2 = straight;    // straight face
+  const l3 = R2 * top;    // curl over the top
+  const L = l1 + l2 + l3;
+  // Stepped on the TIGHT end: the top curl is where the facets would show and
+  // where the car takes off, and `stepsFor` reasons about arcLen/angle, which
+  // for this profile is an average that flatters it.
+  const n = stepsFor(L, exit * Math.max(1, l1 / Math.max(1e-6, l3)), 16, pp);
+  const ds = L / n;
+  const cur = new V3(0, 0, 0);
+  const pts = [cur.clone()];
+  for (let i = 1; i <= n; i++) {
+    // Mid-step angle, so a coarse step does not consistently overshoot the
+    // height. The three-way pick IS the shape: ramp up through the transition,
+    // hold the face angle along the straight, then curl over the top.
+    const sMid = (i - 0.5) * ds;
+    const ph = sMid < l1 ? face * (sMid / l1)
+      : sMid < l1 + l2 ? face
+      : face + top * ((sMid - l1 - l2) / Math.max(1e-6, l3));
+    cur.y += Math.sin(ph) * ds;
+    cur.z += -Math.cos(ph) * ds;
+    pts.push(cur.clone());
+  }
+  return pts;
+}
+
 /** Dive ramp: vertical mirror of the jump — flat at the start, pitches DOWN to
  * diveAngle at the exit so the track crests an edge and keeps heading downhill. */
 function divePoints(pp) {
@@ -4875,6 +4950,15 @@ export const PIECE_CATALOG = [
     points: jumpPoints,
   },
   {
+    id: "loopback",
+    label: "Flip ramp",
+    hint: "Steep face that curls over — sends the car back, upside down",
+    // Hot orange: you commit to this one at 150 km/h and it does something no
+    // other piece does, so it has to be readable from a long way back.
+    swatch: "#ff5a1f",
+    points: loopbackPoints,
+  },
+  {
     id: "dive",
     label: "Dive / down ramp",
     hint: "Flat → pitched down (mirror of jump)",
@@ -5636,6 +5720,10 @@ export const FOLLOW_ROAD = new Set([
   "grade_in", "grade", "grade_out",
   // Climbing / banked road: a banked climb's crest is convex in the same way.
   "banked", "banked_climb", "bankswap", "banktilt", "bankin", "bankout",
+  // The loop-back is the most concave thing in the kit — at R11 and 45 m/s it
+  // asks for around 19 g — and without road hold the car skips off it partway
+  // up instead of being carried round, which is the entire piece.
+  "loopback",
 ]);
 
 /** Is this a piece the car should stick to rather than fly off? See FOLLOW_ROAD. */
