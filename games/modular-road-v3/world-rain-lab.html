@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>World Rain Lab — modular-road</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%; overflow: hidden; background: #070b12; color: #dce6f2;
+        font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;
+      }
+      canvas { display: block; }
+
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10; width: 292px;
+        padding: 12px 14px;
+        background: rgba(8, 13, 22, 0.86);
+        border: 1px solid rgba(150, 180, 220, 0.18);
+        border-radius: 10px;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+      }
+      #hud h1 {
+        margin: 0 0 2px; font-size: 11px; letter-spacing: 0.09em;
+        text-transform: uppercase; color: #7f93ad; font-weight: 700;
+      }
+      #hud .title { margin: 0 0 10px; font-size: 17px; font-weight: 650; color: #f2f6fb; }
+      .stats {
+        display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
+        padding: 8px 0; margin-bottom: 6px;
+        border-top: 1px solid rgba(150, 180, 220, 0.14);
+        border-bottom: 1px solid rgba(150, 180, 220, 0.14);
+        font-variant-numeric: tabular-nums;
+      }
+      .stats dt { color: #7f93ad; font-size: 11px; }
+      .stats dd { margin: 0; font-weight: 600; }
+      .note { font-size: 11px; color: #8fa4bd; margin: 8px 0 0; }
+      .note b { color: #cfe0f5; }
+      kbd {
+        font: 11px ui-monospace, monospace; background: rgba(120,160,210,.18);
+        border: 1px solid rgba(150,180,220,.25); border-radius: 4px; padding: 0 4px;
+      }
+      #err {
+        position: fixed; inset: 0; display: none; background: #0b1018; color: #ff9a9a;
+        z-index: 30; padding: 24px; white-space: pre-wrap;
+        font: 12px/1.5 ui-monospace, monospace; overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>modular-road</h1>
+      <p class="title">World Rain Lab</p>
+      <dl class="stats">
+        <dt>GPU render</dt><dd><span id="s-gpu">–</span></dd>
+        <dt>GPU compute</dt><dd><span id="s-compute">–</span></dd>
+        <dt>fps</dt><dd><span id="s-fps">–</span></dd>
+        <dt>drops</dt><dd><span id="s-count">–</span></dd>
+        <dt>draws</dt><dd><span id="s-draw">–</span></dd>
+      </dl>
+      <p class="note">
+        The course is the point: a <b>ground plane that ends</b>, an
+        <b>elevated deck</b>, an <b>overhang</b> and a <b>moving platform</b>.
+        Rain must stop on the deck, stay off the ground under the arch, fall
+        through the void past the plane's edge, and never leave a splash
+        hanging where the platform used to be.
+      </p>
+      <p class="note">
+        <kbd>C</kbd> collision map &nbsp; <kbd>V</kbd> camera &nbsp;
+        <kbd>Space</kbd> pause the car
+      </p>
+    </div>
+    <div id="err"></div>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "three/addons/libs/lil-gui.module.min.js";
+      import { texture, uv, uniform, mix, vec3 } from "three/tsl";
+      import {
+        createWorldRain,
+        markRainCollider,
+        WORLD_RAIN_DEFAULTS,
+      } from "./modularRoadWorldRain.js";
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => {
+        const el = $("err");
+        el.style.display = "block";
+        el.textContent = e?.stack || String(e);
+        console.error(e);
+      };
+
+      /* ===================================================================== *
+       * STATE                                                                 *
+       * ===================================================================== */
+
+      let renderer, scene, camera, controls, rain;
+      let dbgScene, dbgCam, dbgQuad;
+      let platform = null;
+      let carProxy = null;
+      let hasTimestamps = false;
+
+      const perf = { gpuSum: 0, gpuN: 0, cpuSum: 0, cpuN: 0, since: 0, frames: 0 };
+      const timer = new THREE.Timer();
+
+      const rig = {
+        /** m/s along the circuit. 30 is the game's topSpeed. */
+        speed: 26,
+        radius: 62,
+        drive: true,
+        camera: "orbit",
+        showCollisionMap: true,
+        /** Leans the rain into the direction of travel, as the game will. */
+        leanFromSpeed: 0.35,
+      };
+
+      const car = { pos: new THREE.Vector3(62, 1, 0), dir: new THREE.Vector3(0, 0, 1), t: 0 };
+      const _lean = new THREE.Vector2();
+
+      async function createTimingDevice() {
+        if (!navigator.gpu) return null;
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) return null;
+          return await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+        } catch (e) {
+          console.warn("[world-rain-lab] no timestamp device; GPU ms will read —", e);
+          return null;
+        }
+      }
+
+      /* ===================================================================== *
+       * COURSE                                                                *
+       * ===================================================================== */
+
+      /**
+       * Every collider is marked EXPLICITLY. That is the whole opt-in point:
+       * the sky, the car proxy and the rain itself are in this scene and none
+       * of them appear in the bake, because none of them asked to.
+       */
+      function buildCourse() {
+        const dark = new THREE.MeshStandardMaterial({ color: 0x2b3038, roughness: 0.95 });
+        const deckMat = new THREE.MeshStandardMaterial({ color: 0x3a4048, roughness: 0.8 });
+        const hotMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.7 });
+
+        // GROUND — deliberately FINITE, and only just larger than the default
+        // circuit. Past its edge (75 m) there is no floor at all, so winding
+        // the circuit radius up past 75 flies the car into the void: the case
+        // the alpha validity flag exists for, and the one sky mode makes
+        // permanent. Drops there must fall past and be caught by the recycle
+        // floor, not splash on an invisible plane at y = 0.
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(150, 150), dark);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(markRainCollider(ground));
+
+        // ELEVATED DECK — rain must land on THIS, not on the ground beneath it.
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(70, 1, 14), deckMat);
+        deck.position.set(0, 10, -34);
+        deck.castShadow = deck.receiveShadow = true;
+        scene.add(markRainCollider(deck));
+
+        // RAMP up to it, so the deck is not a floating slab.
+        const ramp = new THREE.Mesh(new THREE.BoxGeometry(30, 1, 14), deckMat);
+        ramp.position.set(-49, 5, -34);
+        ramp.rotation.z = -0.34;
+        ramp.castShadow = ramp.receiveShadow = true;
+        scene.add(markRainCollider(ramp));
+
+        // OVERHANG — a half pipe open downward, i.e. a roof. The ground under
+        // it must stay dry: the buffer holds the TOPMOST surface, so the arch
+        // is what the drops find.
+        //
+        // CylinderGeometry starts theta at +Z, NOT +X: a vertex is
+        // (r·sinθ, ±h/2, r·cosθ). So θ ∈ [0, π] is the half whose z sweeps +r
+        // to -r, and after rotation.z = π/2 (which sends +Y to -X, putting the
+        // axis along X) that half stands as y = r·sinθ ≥ 0 — a roof, open
+        // downward. Starting at -π/2 instead gives a "C" opening sideways,
+        // with nothing at all above the axis line; the readback caught it
+        // reporting the ground under the apex.
+        const arch = new THREE.Mesh(
+          new THREE.CylinderGeometry(13, 13, 34, 28, 1, true, 0, Math.PI),
+          new THREE.MeshStandardMaterial({ color: 0x353b45, roughness: 0.85, side: THREE.DoubleSide }),
+        );
+        arch.rotation.z = Math.PI / 2;
+        arch.position.set(38, 0, 26);
+        arch.castShadow = arch.receiveShadow = true;
+        scene.add(markRainCollider(arch));
+
+        // MOVING PLATFORM — slides in X. A splash left standing in the air
+        // after it passes is the bug the second texture read is there to catch.
+        platform = new THREE.Mesh(new THREE.BoxGeometry(16, 0.8, 16), hotMat);
+        platform.position.set(-30, 6, 30);
+        platform.castShadow = platform.receiveShadow = true;
+        scene.add(markRainCollider(platform));
+
+        // A few posts, so there is something with a small footprint to check
+        // the collision map's texel size against.
+        for (let i = 0; i < 6; i++) {
+          const post = new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), deckMat);
+          post.position.set(-60 + i * 14, 3.5, 62);
+          post.castShadow = true;
+          scene.add(markRainCollider(post));
+        }
+
+        // CAR PROXY — NOT a collider. Rain falls through it, which is correct:
+        // the car gets its own droplet treatment, it does not shelter the road.
+        carProxy = new THREE.Mesh(
+          new THREE.BoxGeometry(2, 1.1, 4.4),
+          new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.35, metalness: 0.1 }),
+        );
+        carProxy.castShadow = true;
+        scene.add(carProxy);
+      }
+
+      /* ===================================================================== *
+       * COLLISION MAP OVERLAY                                                 *
+       * ===================================================================== */
+
+      /**
+       * Step one of the plan, kept permanently: look at the buffer directly.
+       * Blue-to-white is height across the visible band; near-black is the
+       * alpha flag saying "no floor here". If this picture is wrong, nothing
+       * downstream can be right, and it is far easier to read here than it is
+       * to infer from where the splashes ended up.
+       */
+      const uDbgBase = uniform(0);
+      function buildDebugOverlay(rainSys) {
+        dbgScene = new THREE.Scene();
+        // Units of SCREEN HEIGHTS, origin bottom-left, so the overlay is placed
+        // by scaling a quad rather than by juggling viewport and scissor — one
+        // less pixel-ratio convention to get wrong, and it composites over the
+        // frame with nothing but autoClear off.
+        //
+        // near MUST NOT be 0 with the quad at z = 0: the plane would sit exactly
+        // on the near plane and clip away silently — depthTest:false does
+        // nothing about geometric clipping.
+        dbgCam = new THREE.OrthographicCamera(0, innerWidth / innerHeight, 1, 0, 0.01, 10);
+        dbgCam.position.z = 1;
+
+        const s = texture(rainSys.collisionTexture, uv());
+        // Height relative to the car, over a ±16 m band. A wider band and a
+        // gentler ramp made a 13 m arch and 0 m ground two shades of the same
+        // blue — the picture said "it works" whichever way it was wired, which
+        // is the one thing a debug view must never do.
+        const h = s.y.sub(uDbgBase).add(16).div(32).clamp();
+        // deep blue -> cyan -> yellow -> white, so equal heights are equal
+        // colours and a step in height is a step in hue.
+        const ramp = vec3(
+          h.sub(0.5).mul(2).clamp(),
+          h.mul(1.6).clamp(),
+          h.mul(-2).add(1).clamp().max(h.sub(0.75).mul(4).clamp()),
+        );
+
+        const mat = new THREE.MeshBasicNodeMaterial();
+        // s.w is 0 or 1, so mix() reads as the branch it is.
+        mat.colorNode = mix(vec3(0.03, 0.04, 0.07), ramp, s.w.clamp());
+        mat.toneMapped = false;
+        mat.fog = false;
+        mat.depthTest = false;
+        mat.depthWrite = false;
+
+        const g = new THREE.PlaneGeometry(1, 1);
+        g.translate(0.5, 0.5, 0);   // pivot bottom-left, so scale grows up-right
+        dbgQuad = new THREE.Mesh(g, mat);
+        dbgQuad.scale.set(0.26, 0.26, 1);
+        dbgQuad.position.set(0.02, 0.02, 0);
+        dbgScene.add(dbgQuad);
+      }
+
+      function drawDebugOverlay() {
+        if (!rig.showCollisionMap) return;
+        const prevAuto = renderer.autoClear;
+        renderer.autoClear = false;
+        renderer.render(dbgScene, dbgCam);
+        renderer.autoClear = prevAuto;
+      }
+
+      /* ===================================================================== *
+       * BOOT                                                                  *
+       * ===================================================================== */
+
+      async function init() {
+        const device = await createTimingDevice();
+        hasTimestamps = Boolean(device?.features?.has("timestamp-query"));
+
+        renderer = new THREE.WebGPURenderer({
+          antialias: true,
+          trackTimestamp: true,
+          ...(device ? { device } : {}),
+        });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        // Three render() calls per frame (bake, scene, overlay) and info.reset()
+        // runs on each one, so the default would report only the overlay's
+        // single draw. Reset once per frame instead and the count is the frame.
+        // (The timestamp is assigned, not accumulated, and already covers every
+        // pass since the last resolve — so it needs no help.)
+        renderer.info.autoReset = false;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0d1219);
+        scene.fog = new THREE.Fog(0x0d1219, 90, 320);
+
+        camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.5, 900);
+        camera.position.set(62, 44, 86);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.target.set(0, 6, 0);
+
+        scene.add(new THREE.HemisphereLight(0x8fa8c8, 0x20242c, 1.1));
+        const sun = new THREE.DirectionalLight(0xbfd2ea, 1.6);
+        sun.position.set(-40, 70, 40);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.camera.near = 1;
+        sun.shadow.camera.far = 260;
+        sun.shadow.camera.left = -110;
+        sun.shadow.camera.right = 110;
+        sun.shadow.camera.top = 110;
+        sun.shadow.camera.bottom = -110;
+        sun.shadow.bias = -0.0006;
+        sun.shadow.normalBias = 0.03;
+        scene.add(sun, sun.target);
+
+        buildCourse();
+
+        rain = createWorldRain({ scene, renderer });
+        buildDebugOverlay(rain);
+        buildGui();
+
+        addEventListener("resize", onResize);
+        addEventListener("keydown", onKey);
+
+        window.__rainLab = {
+          renderer, scene, camera, rain, rig, car, perf,
+          get dbgScene() { return dbgScene; },
+          get dbgCam() { return dbgCam; },
+          get dbgQuad() { return dbgQuad; },
+        };
+
+        renderer.setAnimationLoop(frame);
+      }
+
+      function onResize() {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+        if (dbgCam) {
+          dbgCam.right = innerWidth / innerHeight;
+          dbgCam.updateProjectionMatrix();
+        }
+      }
+
+      function onKey(e) {
+        const k = e.key.toLowerCase();
+        if (k === "c") rig.showCollisionMap = !rig.showCollisionMap;
+        else if (k === "v") rig.camera = rig.camera === "orbit" ? "chase" : "orbit";
+        else if (e.code === "Space") { rig.drive = !rig.drive; e.preventDefault(); }
+      }
+
+      /* ===================================================================== *
+       * GUI                                                                   *
+       * ===================================================================== */
+
+      function buildGui() {
+        const gui = new GUI({ title: "World Rain", width: 300 });
+        gui.domElement.style.cssText += ";position:fixed;top:12px;right:12px;z-index:11;";
+
+        const p = { ...WORLD_RAIN_DEFAULTS };
+
+        const c = gui.addFolder("Cost isolation");
+        c.add({ bake: true }, "bake").name("collision bake").onChange((v) => rain.setBakeEnabled(v));
+        c.add({ drops: true }, "drops").name("compute + drops").onChange((v) => rain.setDropsEnabled(v));
+        c.add({ splashes: true }, "splashes").onChange((v) => rain.setSplashesEnabled(v));
+        c.add(p, "count", 500, WORLD_RAIN_DEFAULTS.maxCount, 100)
+          .name("drop count").onFinishChange((v) => rain.setCount(v));
+        c.add(p, "frameSkip", 1, 6, 1).name("bake every N")
+          .onChange((v) => { rain.params.frameSkip = v; });
+        c.open();
+
+        const w = gui.addFolder("Window");
+        w.add(p, "area", 40, 200, 5).name("area (m)").onFinishChange((v) => rain.setArea(v));
+        w.add(p, "forwardOffset", 0, 60, 1).name("push ahead (m)")
+          .onChange((v) => { rain.params.forwardOffset = v; });
+        w.add(p, "depth", 40, 300, 10).name("camera depth").onFinishChange((v) => rain.setDepth(v));
+        w.add(p, "recycleDrop", 10, 200, 5).name("recycle below")
+          .onChange((v) => rain.setRecycle(v));
+
+        const f = gui.addFolder("Fall");
+        f.add(p, "spawnHeight", 5, 60, 1).onChange((v) => rain.setSpawnHeight(v));
+        f.add(p, "fallSpeed", 2, 40, 0.5).onChange((v) => rain.setFallSpeed(v));
+        f.add(p, "fallJitter", 0, 15, 0.5).onChange((v) => rain.setFallJitter(v));
+
+        const l = gui.addFolder("Look");
+        l.add(p, "dropWidth", 0.01, 0.3, 0.005)
+          .onChange((v) => rain.setDropSize(v, p.dropLength));
+        l.add(p, "dropLength", 0.2, 5, 0.1)
+          .onChange((v) => rain.setDropSize(p.dropWidth, v));
+        l.add(p, "dropOpacity", 0, 1, 0.01).onChange((v) => rain.setDropOpacity(v));
+        l.add(p, "nearFadeStart", 0, 8, 0.1).name("near fade in")
+          .onChange((v) => rain.setNearFade(v, p.nearFadeEnd));
+        l.add(p, "nearFadeEnd", 0.5, 20, 0.5).name("near fade out")
+          .onChange((v) => rain.setNearFade(p.nearFadeStart, v));
+        l.add(p, "edgeFadeStart", 0, 1, 0.01).name("window edge fade")
+          .onChange((v) => rain.setEdgeFade(v));
+        l.add(p, "splashSize", 0.1, 2, 0.05).onChange((v) => rain.setSplashSize(v));
+        l.add(p, "splashRate", 0.5, 10, 0.1).onChange((v) => rain.setSplashRate(v));
+        l.add(p, "splashOpacity", 0, 1, 0.01).onChange((v) => rain.setSplashOpacity(v));
+        l.add(p, "surfaceOffset", 0, 0.5, 0.01).onChange((v) => rain.setSurfaceOffset(v));
+
+        const r = gui.addFolder("Rig");
+        r.add(rig, "drive").name("car driving");
+        r.add(rig, "speed", 0, 40, 1).name("car m/s");
+        r.add(rig, "radius", 20, 110, 1).name("circuit radius");
+        r.add(rig, "leanFromSpeed", 0, 1, 0.05).name("rain lean");
+        r.add(rig, "showCollisionMap").name("collision map (C)").listen();
+        r.add(rig, "camera", ["orbit", "chase"]).name("camera (V)").listen();
+      }
+
+      /* ===================================================================== *
+       * FRAME                                                                 *
+       * ===================================================================== */
+
+      const _chaseTarget = new THREE.Vector3();
+      const _chasePos = new THREE.Vector3();
+
+      function updateCar(dt) {
+        if (rig.drive) car.t += (rig.speed / Math.max(1, rig.radius)) * dt;
+        const x = Math.cos(car.t) * rig.radius;
+        const z = Math.sin(car.t) * rig.radius;
+        car.pos.set(x, 1, z);
+        car.dir.set(-Math.sin(car.t), 0, Math.cos(car.t));
+        carProxy.position.copy(car.pos);
+        carProxy.lookAt(car.pos.x + car.dir.x, car.pos.y, car.pos.z + car.dir.z);
+
+        // What the game will do: airflow past the car blows the rain backwards.
+        const s = rig.drive ? rig.speed * rig.leanFromSpeed : 0;
+        _lean.set(-car.dir.x * s, -car.dir.z * s);
+        rain.setLean(_lean.x, _lean.y);
+      }
+
+      function updateCamera(dt) {
+        if (rig.camera === "chase") {
+          _chaseTarget.copy(car.pos).addScaledVector(car.dir, 10).setY(4);
+          _chasePos.copy(car.pos).addScaledVector(car.dir, -13).setY(6.5);
+          camera.position.lerp(_chasePos, Math.min(1, dt * 4));
+          camera.lookAt(_chaseTarget);
+        } else {
+          controls.update();
+        }
+      }
+
+      function frame() {
+        timer.update();
+        const dt = Math.min(0.05, timer.getDelta());
+        renderer.info.reset();
+
+        updateCar(dt);
+
+        // The moving platform: slow enough to watch a splash get orphaned.
+        if (platform) platform.position.x = -30 + Math.sin(performance.now() * 0.00035) * 26;
+
+        updateCamera(dt);
+
+        // Bake + compute. Must precede the main render: the drops drawn this
+        // frame are the ones the compute just moved.
+        rain.update(car.pos, car.dir);
+        uDbgBase.value = car.pos.y;
+
+        renderer.render(scene, camera);
+        drawDebugOverlay();
+
+        if (hasTimestamps) {
+          renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+          renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE);
+        }
+
+        const now = performance.now();
+        if (!perf.since) perf.since = now;
+        perf.frames++;
+        const ts = renderer.info.render.timestamp;
+        if (ts > 0) { perf.gpuSum += ts; perf.gpuN++; }
+        const cs = renderer.info.compute.timestamp;
+        if (cs > 0) { perf.cpuSum += cs; perf.cpuN++; }
+        if (now - perf.since >= 500) {
+          $("s-fps").textContent = ((perf.frames * 1000) / (now - perf.since)).toFixed(0);
+          $("s-gpu").textContent = perf.gpuN
+            ? `${(perf.gpuSum / perf.gpuN).toFixed(2)} ms` : "n/a";
+          $("s-compute").textContent = perf.cpuN
+            ? `${(perf.cpuSum / perf.cpuN).toFixed(3)} ms` : "n/a";
+          $("s-count").textContent = String(rain.getCount());
+          $("s-draw").textContent = String(renderer.info.render.drawCalls);
+          perf.frames = 0; perf.gpuSum = 0; perf.gpuN = 0;
+          perf.cpuSum = 0; perf.cpuN = 0; perf.since = now;
+        }
+      }
+
+      init().catch(showErr);
+    </script>
+  </body>
+</html>
