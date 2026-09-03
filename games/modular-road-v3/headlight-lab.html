@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Headlight Lab — modular-road</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%; overflow: hidden; background: #05070c; color: #dce6f2;
+        font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;
+      }
+      canvas { display: block; }
+
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10; width: 300px;
+        padding: 12px 14px;
+        background: rgba(8, 13, 22, 0.86);
+        border: 1px solid rgba(150, 180, 220, 0.18);
+        border-radius: 10px;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+      }
+      #hud h1 {
+        margin: 0 0 2px; font-size: 11px; letter-spacing: 0.09em;
+        text-transform: uppercase; color: #7f93ad; font-weight: 700;
+      }
+      #hud .title { margin: 0 0 10px; font-size: 17px; font-weight: 650; color: #f2f6fb; }
+      .stats {
+        display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
+        padding: 8px 0; margin-bottom: 6px;
+        border-top: 1px solid rgba(150, 180, 220, 0.14);
+        border-bottom: 1px solid rgba(150, 180, 220, 0.14);
+        font-variant-numeric: tabular-nums;
+      }
+      .stats dt { color: #7f93ad; font-size: 11px; }
+      .stats dd { margin: 0; font-weight: 600; }
+      .note { font-size: 11px; color: #8fa4bd; margin: 8px 0 0; }
+      .note b { color: #cfe0f5; }
+      kbd {
+        font: 11px ui-monospace, monospace; background: rgba(120,160,210,.18);
+        border: 1px solid rgba(150,180,220,.25); border-radius: 4px; padding: 0 4px;
+      }
+      #err {
+        position: fixed; inset: 0; display: none; background: #0b1018; color: #ff9a9a;
+        z-index: 30; padding: 24px; white-space: pre-wrap;
+        font: 12px/1.5 ui-monospace, monospace; overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>modular-road</h1>
+      <p class="title">Headlight Lab</p>
+      <dl class="stats">
+        <dt>GPU render</dt><dd><span id="s-gpu">–</span></dd>
+        <dt>fps</dt><dd><span id="s-fps">–</span></dd>
+        <dt>draws</dt><dd><span id="s-draw">–</span></dd>
+        <dt>beam cost</dt><dd><span id="s-beam">–</span></dd>
+      </dl>
+      <p class="note">
+        <b>The test is the orbit.</b> A cone card looks fine from one angle and
+        like a party hat from the next, so press <kbd>O</kbd> and watch the beam
+        go all the way round: brightest looking into it, clearly there broadside,
+        faintest from behind — and never switching off.
+      </p>
+      <p class="note">
+        Four layers stack here, and they are separable on purpose. Turn the beam
+        off and the <b>pool + glare</b> alone already read as "lights on". Turn
+        <b>lit rain</b> off and the beam loses most of its body — the particles
+        inside it are doing more work than the haze.
+      </p>
+      <p class="note">
+        Measured on this machine: both beams together cost <b>~0.67&nbsp;ms</b>
+        at 20 steps, ~1.0&nbsp;ms at 32 — and 16 looks the same as 32, so the
+        step slider is the first thing to spend or save on.
+      </p>
+      <p class="note">
+        <kbd>B</kbd> beam &nbsp; <kbd>G</kbd> glare &nbsp; <kbd>P</kbd> pool
+        &nbsp; <kbd>R</kbd> rain &nbsp; <kbd>L</kbd> lit rain &nbsp;
+        <kbd>O</kbd> auto-orbit &nbsp; <kbd>S</kbd> sweep
+      </p>
+    </div>
+    <div id="err"></div>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "three/addons/libs/lil-gui.module.min.js";
+      import { bloom } from "three/addons/tsl/display/BloomNode.js";
+      import {
+        Fn, abs, acesFilmicToneMapping, attribute, billboarding, cameraPosition,
+        float, fract, length, mix, oneMinus, smoothstep, texture, uniform, uv,
+        vec2, vec3,
+      } from "three/tsl";
+      import {
+        createHeadlightBeams,
+        coneAttenuation,
+        HEADLIGHT_BEAM_DEFAULTS,
+      } from "./modularRoadHeadlightBeam.js";
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => {
+        const el = $("err");
+        el.style.display = "block";
+        el.textContent = e?.stack || String(e);
+        console.error(e);
+      };
+
+      /* ===================================================================== *
+       * STATE                                                                 *
+       * ===================================================================== */
+
+      let renderer, scene, camera, controls;
+      let beams, car, wall;
+      let sceneRT, presentScene, presentCam;
+      let rainMesh;
+      let hasTimestamps = false;
+
+      const spots = [];
+      const mounts = [];
+
+      const perf = { gpuSum: 0, gpuN: 0, since: 0, frames: 0, beamOffMs: 0 };
+      const timer = new THREE.Timer();
+
+      const rig = {
+        beam: true,
+        glare: true,
+        pool: true,
+        rain: true,
+        rainLit: true,
+        autoOrbit: false,
+        compose: true,
+        orbitSpeed: 0.22,
+        sweep: true,
+        sweepAmount: 0.26,
+        wallDistance: 46,
+        exposure: 1.15,
+        bloomMix: 0.85,
+        /* Lamp mount, mirroring HEADLIGHTS in v3/play/modularRoadVehicle.js. A
+           gentler aim than the game's default (which drops 3.2 m over 16) so the
+           pool reaches far enough to have a beam over it worth looking at. */
+        lampSide: 0.62,
+        lampHeight: 0.62,
+        lampForward: 1.9,
+        aimForward: 24,
+        aimDrop: 1.7,
+        /* The real SpotLights — the POOL on the road. Separate from the beam on
+           purpose: this is the layer that does most of the "lights are on" work
+           from a chase camera, and it costs nothing extra. */
+        poolIntensity: 900,
+      };
+
+      const rain = {
+        count: 7000,
+        opacity: 0.42,
+        width: 0.035,
+        length: 1.5,
+        fall: 17,
+        wind: 0.16,
+        area: 90,
+        span: 46,
+        gain: 2.4,
+      };
+
+      /* Rain uniforms — declared up here because the beam's lamp uniforms get
+         wired straight into the drop shader below. */
+      const uRainTime = uniform(0);
+      const uRainCenter = uniform(new THREE.Vector3());
+      const uRainArea = uniform(rain.area);
+      const uRainSpan = uniform(rain.span);
+      const uRainFall = uniform(rain.fall);
+      const uRainWind = uniform(rain.wind);
+      const uRainOpacity = uniform(rain.opacity);
+      const uRainGain = uniform(rain.gain);
+      const uRainLit = uniform(1);
+      const uRainAmbient = uniform(new THREE.Color("#1b2635"));
+
+      const uExposure = uniform(rig.exposure);
+      const uBloomMix = uniform(rig.bloomMix);
+
+      async function createTimingDevice() {
+        if (!navigator.gpu) return null;
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) return null;
+          return await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+        } catch (e) {
+          console.warn("[headlight-lab] no timestamp device; GPU ms will read —", e);
+          return null;
+        }
+      }
+
+      /* ===================================================================== *
+       * COURSE                                                                *
+       * ===================================================================== *
+       * Everything here exists to give the beam something to argue with:
+       * a road to pool on, a wall to terminate against, pillars to pass, and a
+       * long empty run so the far fade is visible rather than clipped.
+       */
+
+      function buildCourse() {
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x0e1116, roughness: 0.96 });
+        const roadMat = new THREE.MeshStandardMaterial({ color: 0x1a1d22, roughness: 0.62 });
+        const paintMat = new THREE.MeshStandardMaterial({ color: 0xa8a8a0, roughness: 0.8 });
+        const propMat = new THREE.MeshStandardMaterial({ color: 0x2a2f37, roughness: 0.85 });
+
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(420, 420), groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.02;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        const road = new THREE.Mesh(new THREE.PlaneGeometry(15, 400), roadMat);
+        road.rotation.x = -Math.PI / 2;
+        road.position.set(0, 0, 120);
+        road.receiveShadow = true;
+        scene.add(road);
+
+        // Kerbs — a hard edge either side gives the pool a shape to end on, which
+        // is most of what makes a headlight pool read as a headlight pool.
+        for (const s of [-1, 1]) {
+          const kerb = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 400), paintMat);
+          kerb.position.set(s * 7.5, 0.09, 120);
+          kerb.receiveShadow = true;
+          scene.add(kerb);
+        }
+
+        // Centre dashes, instanced — one draw, and they are the clearest read on
+        // how far down the road the pool actually carries.
+        const dash = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(0.16, 0.02, 3), paintMat, 60,
+        );
+        const m = new THREE.Matrix4();
+        for (let i = 0; i < 60; i++) {
+          m.makeTranslation(0, 0.01, -20 + i * 7);
+          dash.setMatrixAt(i, m);
+        }
+        dash.instanceMatrix.needsUpdate = true;
+        dash.receiveShadow = true;
+        scene.add(dash);
+
+        // WALL — the depth clip test. Slide it in and out and the beam has to
+        // stop ON it, with no card-edge seam, from every camera angle.
+        wall = new THREE.Mesh(new THREE.BoxGeometry(22, 6, 0.6), propMat);
+        wall.position.set(0, 3, rig.wallDistance);
+        wall.castShadow = wall.receiveShadow = true;
+        scene.add(wall);
+
+        // Pillars standing IN the beam. Note they do not cut a dark slot through
+        // the haze: there is no shadowing in this pass, deliberately — see the
+        // header of modularRoadHeadlightBeam.js.
+        for (let i = 0; i < 8; i++) {
+          const post = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.22, 0.22, 5, 10), propMat,
+          );
+          post.position.set((i % 2 ? 1 : -1) * 9.2, 2.5, 6 + i * 9);
+          post.castShadow = true;
+          scene.add(post);
+        }
+      }
+
+      /**
+       * A stand-in for the chassis. The two lamp MOUNTS are the part that
+       * matters: plain Object3Ds, positioned at the lamp and `lookAt`-ed at the
+       * aim point, so +Z is down the beam. That is the exact contract the beam
+       * system wants, and the game already has the same mounts for its
+       * SpotLights — porting is a matter of hanging beams on those.
+       */
+      function buildCar() {
+        car = new THREE.Group();
+        car.position.set(0, 0, 0);
+        scene.add(car);
+
+        const bodyMat = new THREE.MeshStandardMaterial({
+          color: 0x9aa3ad, roughness: 0.35, metalness: 0.35,
+        });
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.62, 4.3), bodyMat);
+        body.position.set(0, 0.68, 0);
+        body.castShadow = true;
+        car.add(body);
+
+        const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.5, 2.1), bodyMat);
+        cabin.position.set(0, 1.2, -0.25);
+        cabin.castShadow = true;
+        car.add(cabin);
+
+        for (const s of [-1, 1]) {
+          const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.26, 14);
+          for (const z of [1.35, -1.35]) {
+            const w = new THREE.Mesh(wheelGeo, new THREE.MeshStandardMaterial({
+              color: 0x14161a, roughness: 0.9,
+            }));
+            w.rotation.z = Math.PI / 2;
+            w.position.set(s * 0.92, 0.36, z);
+            w.castShadow = true;
+            car.add(w);
+          }
+
+          const mount = new THREE.Object3D();
+          car.add(mount);
+          mounts.push({ mount, side: s });
+
+          // The pool. `castShadow` stays off exactly as HEADLIGHTS does — a
+          // shadowed spot per lamp is a real cost and the beam does not use it.
+          const spot = new THREE.SpotLight(
+            new THREE.Color(HEADLIGHT_BEAM_DEFAULTS.color),
+            rig.poolIntensity, 120, HEADLIGHT_BEAM_DEFAULTS.angle, 0.6, 2,
+          );
+          spot.castShadow = false;
+          const target = new THREE.Object3D();
+          car.add(spot, target);
+          spot.target = target;
+          spots.push({ spot, target, side: s });
+
+          // The lens itself. Bright enough to bloom on its own, so the glare
+          // sprite is sitting on top of something rather than floating.
+          const lens = new THREE.Mesh(
+            new THREE.BoxGeometry(0.26, 0.13, 0.05),
+            new THREE.MeshStandardMaterial({
+              color: 0xfff4dd,
+              emissive: new THREE.Color(HEADLIGHT_BEAM_DEFAULTS.color),
+              emissiveIntensity: 6,
+              roughness: 0.4,
+            }),
+          );
+          mount.add(lens);
+        }
+
+        placeLamps();
+      }
+
+      /** Re-seat the mounts, spots and targets from the rig sliders. */
+      function placeLamps() {
+        const { lampSide: sx, lampHeight: y, lampForward: z, aimForward, aimDrop } = rig;
+        // localToWorld reads matrixWorld, and a slider can fire before a render
+        // has refreshed it. (The car's own rotation cancels out of the result —
+        // target and mount are transformed by the same matrix — so this only has
+        // to be CURRENT, not identity.)
+        car.updateMatrixWorld(true);
+        for (let i = 0; i < mounts.length; i++) {
+          const { mount, side } = mounts[i];
+          mount.position.set(side * sx, y, z);
+          // lookAt works in WORLD space and the mount is a child of `car`, so
+          // aim in the car's frame and let the parent carry the rest.
+          mount.lookAt(
+            car.localToWorld(new THREE.Vector3(side * sx, y - aimDrop, z + aimForward)),
+          );
+
+          const s = spots[i];
+          s.spot.position.set(side * sx, y, z);
+          s.target.position.set(side * sx, y - aimDrop, z + aimForward);
+        }
+      }
+
+      /* ===================================================================== *
+       * RAIN — the layer that draws the beam for you                          *
+       * ===================================================================== *
+       * A drop inside the cone is lit, one outside is not, so the beam's volume
+       * emerges from the particles rather than from haze. It is correct from
+       * every angle by construction (it is just points being shaded), it costs
+       * one dot product per drop, and it ties the effect to the weather: no
+       * rain, no beam — which is what stops a permanently visible cone reading
+       * as a fog machine.
+       *
+       * Toggle `lit rain` to see how much of the reference look this is.
+       */
+
+      const _seedAttr = /*#__PURE__*/ attribute("iSeed", "vec4");
+
+      /**
+       * Where a drop is this frame, in world space. Toroidally wrapped around
+       * the follow centre with `fract` rather than `mod`: fract is guaranteed
+       * to land in [0,1) whatever the sign, so a car at negative Z does not
+       * fling half the field to the other side of the world.
+       */
+      function dropWorld() {
+        const s = _seedAttr;
+        const area = uRainArea;
+        const span = uRainSpan;
+        const speed = uRainFall.mul(float(0.75).add(s.w.mul(0.5)));
+        const prog = fract(s.z.add(uRainTime.mul(speed).div(span)));
+
+        const y = uRainCenter.y.add(span.mul(0.72)).sub(prog.mul(span));
+        const lean = prog.mul(uRainWind).mul(span);
+        const half = area.mul(0.5);
+
+        const wx = fract(s.x.mul(area).add(lean).sub(uRainCenter.x).div(area).add(0.5))
+          .mul(area).sub(half).add(uRainCenter.x);
+        const wz = fract(s.y.mul(area).sub(uRainCenter.z).div(area).add(0.5))
+          .mul(area).sub(half).add(uRainCenter.z);
+
+        return vec3(wx, y, wz);
+      }
+
+      function buildRain() {
+        const seeds = new Float32Array(rain.count * 4);
+        for (let i = 0; i < rain.count; i++) {
+          seeds[i * 4 + 0] = Math.random();
+          seeds[i * 4 + 1] = Math.random();
+          seeds[i * 4 + 2] = Math.random();
+          seeds[i * 4 + 3] = Math.random();
+        }
+
+        // Pivot at the BOTTOM, so a streak trails upward from the point the
+        // shader computes; size comes from mesh.scale, which billboarding()
+        // reads off the world matrix, so the sliders never rebuild geometry.
+        const geo = new THREE.PlaneGeometry(1, 1);
+        geo.translate(0, 0.5, 0);
+        geo.setAttribute("iSeed", new THREE.InstancedBufferAttribute(seeds, 4));
+        geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
+
+        const mat = new THREE.MeshBasicNodeMaterial();
+
+        mat.colorNode = Fn(() => {
+          const p = dropWorld().toVar();
+          const lit = uRainAmbient.toVar();
+          for (const lamp of beams.lamps) {
+            lit.addAssign(
+              beams.uniforms.color
+                .mul(coneAttenuation(p, lamp, beams.uniforms))
+                .mul(uRainGain),
+            );
+          }
+          return mix(uRainAmbient, lit, uRainLit);
+        })();
+
+        mat.opacityNode = Fn(() => {
+          const t = uv();
+          const across = oneMinus(abs(t.x.sub(0.5)).mul(2)).pow(2);
+          const along = smoothstep(float(0), float(0.18), t.y)
+            .mul(oneMinus(smoothstep(float(0.62), float(1), t.y)));
+
+          // Distance has to come from the drop's WORLD position: billboarding()
+          // replaces the vertex position wholesale, so positionView would
+          // describe where the quad WOULD have been, not where it is.
+          const toCam = length(dropWorld().sub(cameraPosition)).toVar();
+          const nearFade = smoothstep(float(0.7), float(4), toCam);
+          const farFade = oneMinus(
+            smoothstep(uRainArea.mul(0.34), uRainArea.mul(0.5), toCam),
+          );
+          return across.mul(along).mul(nearFade).mul(farFade).mul(uRainOpacity);
+        })();
+
+        mat.vertexNode = billboarding({ position: dropWorld() });
+        mat.transparent = true;
+        mat.depthWrite = false;
+        // Depth test ON: rain must be hidden by the wall and by the road, which
+        // is what stops the field looking like a decal over the whole frame.
+        mat.depthTest = true;
+        mat.side = THREE.DoubleSide;
+        mat.forceSinglePass = true;
+        mat.fog = false;
+        // Additive, so a lit drop GAINS over the night behind it instead of
+        // replacing it. It is also what makes the lit/unlit A/B legible.
+        mat.blending = THREE.AdditiveBlending;
+
+        rainMesh = new THREE.InstancedMesh(geo, mat, rain.count);
+        // IDENTITY, and it is not optional. InstancedMesh allocates
+        // `instanceMatrix` as ZEROS, and the node system folds instancing into
+        // `positionLocal` — which is what billboarding() reads. Left as
+        // allocated, every quad collapses to a point and the rain is invisible
+        // with no error anywhere. (Placement here comes from `iSeed`; the
+        // instance matrix is only along for the ride.)
+        const ident = new THREE.Matrix4();
+        for (let i = 0; i < rain.count; i++) rainMesh.setMatrixAt(i, ident);
+        rainMesh.instanceMatrix.needsUpdate = true;
+        rainMesh.scale.set(rain.width, rain.length, 1);
+        // Every instance is somewhere else, so the object's own bounds say
+        // nothing about where it draws.
+        rainMesh.frustumCulled = false;
+        rainMesh.renderOrder = 12;
+        scene.add(rainMesh);
+      }
+
+      /* ===================================================================== *
+       * COMPOSE — HDR target, bloom, ACES                                     *
+       * ===================================================================== *
+       * The reference look is more bloom than beam: the lens blobs and the
+       * upward bleed off the wet pool are most of what says "headlights". So
+       * the lab always renders through an HDR target and tone maps at the end,
+       * and `bloom` is a slider rather than a rebuild — otherwise every beam
+       * value tuned here would be wrong the moment it met the game's post.
+       *
+       * Tone mapping is applied HERE, explicitly, with renderer.toneMapping left
+       * at NoToneMapping. That keeps the render target linear no matter what the
+       * renderer would otherwise have done to it, which is the only way the
+       * bloom threshold means anything.
+       */
+      function buildCompose() {
+        sceneRT = new THREE.RenderTarget(1, 1, {
+          minFilter: THREE.LinearFilter,
+          magFilter: THREE.LinearFilter,
+          format: THREE.RGBAFormat,
+          type: THREE.HalfFloatType,
+          depthBuffer: true,
+          // NO MSAA, deliberately. The beam clips itself against the scene
+          // depth buffer via viewportDepthTexture(), and a multisampled depth
+          // attachment cannot be copied — so 4x here would buy slightly
+          // cleaner edges and lose the beam's occlusion, which is the whole
+          // effect. The `compose` toggle exists to prove that either way.
+          samples: 0,
+        });
+
+        // Render targets are Y-flipped relative to the canvas, so both the
+        // bloom input and the present sample have to flip back.
+        const flipped = vec2(uv().x, uv().y.oneMinus());
+        const sceneTex = texture(sceneRT.texture);
+        const bloomNode = bloom(texture(sceneRT.texture, flipped), 0.9, 0.75, 0.55);
+
+        const mat = new THREE.MeshBasicNodeMaterial();
+        mat.colorNode = Fn(() => {
+          const c = sceneTex.sample(flipped).rgb.add(bloomNode.rgb.mul(uBloomMix));
+          return acesFilmicToneMapping(c, uExposure);
+        })();
+        mat.toneMapped = false;
+        mat.depthTest = false;
+        mat.depthWrite = false;
+        mat.fog = false;
+
+        presentScene = new THREE.Scene();
+        presentCam = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0.01, 10);
+        presentCam.position.z = 1;
+        presentScene.add(new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat));
+      }
+
+      /* ===================================================================== *
+       * BOOT                                                                  *
+       * ===================================================================== */
+
+      async function init() {
+        const device = await createTimingDevice();
+        hasTimestamps = Boolean(device?.features?.has("timestamp-query"));
+
+        renderer = new THREE.WebGPURenderer({
+          antialias: true,
+          trackTimestamp: true,
+          ...(device ? { device } : {}),
+        });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        // See buildCompose: the present pass tone maps, nothing else does.
+        renderer.toneMapping = THREE.NoToneMapping;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        // Two render() calls per frame and info.reset() runs on each, so the
+        // default would report only the present quad's single draw.
+        renderer.info.autoReset = false;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x070a11);
+        scene.fog = new THREE.Fog(0x070a11, 60, 340);
+
+        camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.3, 700);
+        // Front three-quarter, which is where the beam has the most to say: far
+        // enough off-axis that the phase function is doing visible work, close
+        // enough to the barrel that it is bright.
+        camera.position.set(-21, 5.6, 28);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.target.set(0, 1.6, 15);
+
+        // Night, but not a black screen — the car and the road still have to
+        // read, or every beam value gets tuned against nothing and comes out
+        // twice as bright as it should be.
+        scene.add(new THREE.HemisphereLight(0x24344c, 0x05070a, 1.6));
+        const moon = new THREE.DirectionalLight(0x9db4d8, 1.4);
+        moon.position.set(-60, 90, -40);
+        moon.castShadow = true;
+        moon.shadow.mapSize.set(2048, 2048);
+        moon.shadow.camera.near = 1;
+        moon.shadow.camera.far = 320;
+        moon.shadow.camera.left = -80;
+        moon.shadow.camera.right = 80;
+        moon.shadow.camera.top = 80;
+        moon.shadow.camera.bottom = -80;
+        moon.shadow.bias = -0.0006;
+        moon.shadow.normalBias = 0.03;
+        scene.add(moon, moon.target);
+
+        buildCourse();
+        buildCar();
+
+        beams = createHeadlightBeams();
+        for (const { mount } of mounts) beams.attach(mount);
+        beams.applyParams();
+
+        buildRain();
+        buildCompose();
+        buildGui();
+        syncLayers();
+
+        addEventListener("resize", onResize);
+        addEventListener("keydown", onKey);
+        onResize();
+
+        window.__headlightLab = { renderer, scene, camera, beams, rig, rain, perf };
+
+        renderer.setAnimationLoop(frame);
+      }
+
+      function onResize() {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+        const s = new THREE.Vector2();
+        renderer.getDrawingBufferSize(s);
+        sceneRT?.setSize(Math.max(1, s.x | 0), Math.max(1, s.y | 0));
+      }
+
+      // Shortcuts match e.key (the PRINTED label), not e.code — this machine is
+      // AZERTY and e.code "KeyZ" is the W key.
+      function onKey(e) {
+        const k = e.key.toLowerCase();
+        if (k === "b") rig.beam = !rig.beam;
+        else if (k === "g") rig.glare = !rig.glare;
+        else if (k === "p") rig.pool = !rig.pool;
+        else if (k === "r") rig.rain = !rig.rain;
+        else if (k === "l") rig.rainLit = !rig.rainLit;
+        else if (k === "o") rig.autoOrbit = !rig.autoOrbit;
+        else if (k === "s") rig.sweep = !rig.sweep;
+        else if (k === "c") rig.compose = !rig.compose;
+        else return;
+        syncLayers();
+      }
+
+      function syncLayers() {
+        beams.setEnabled(rig.beam);
+        beams.params.glare = rig.glare;
+        beams.applyParams();
+        // Intensity, never `visible`: three hashes the scene's LIGHT SET into
+        // every shader's cache key, so hiding a light rebuilds every material in
+        // the world. See ref_light_visible_recompiles_world.
+        for (const s of spots) s.spot.intensity = rig.pool ? rig.poolIntensity : 0;
+        rainMesh.visible = rig.rain;
+        uRainLit.value = rig.rainLit ? 1 : 0;
+      }
+
+      /* ===================================================================== *
+       * GUI                                                                   *
+       * ===================================================================== */
+
+      function buildGui() {
+        const gui = new GUI({ title: "Headlights", width: 306 });
+        gui.domElement.style.cssText += ";position:fixed;top:12px;right:12px;z-index:11;max-height:94vh;overflow:auto;";
+
+        const p = beams.params;
+        const push = () => beams.applyParams();
+        const rebuild = () => { beams.applyParams(); beams.rebuildHull(); };
+
+        const l = gui.addFolder("Layers");
+        l.add(rig, "beam").name("beam (B)").listen().onChange(syncLayers);
+        l.add(rig, "glare").name("lens glare (G)").listen().onChange(syncLayers);
+        l.add(rig, "pool").name("road pool (P)").listen().onChange(syncLayers);
+        l.add(rig, "rain").name("rain (R)").listen().onChange(syncLayers);
+        l.add(rig, "rainLit").name("rain lit by beam (L)").listen().onChange(syncLayers);
+        l.open();
+
+        const b = gui.addFolder("Beam — the ones that matter");
+        b.add(p, "media", 0, 1, 0.01).name("stuff in the air").onChange(push);
+        b.add(p, "intensity", 0, 2, 0.01).onChange(push);
+        b.add(p, "phaseMix", 0, 1, 0.01).name("phase: flat → peaked").onChange(push);
+        b.add(p, "anisotropy", 0, 0.92, 0.01).name("forward bias (g)").onChange(push);
+        b.open();
+
+        const c = gui.addFolder("Beam — shape");
+        c.add(p, "angle", 0.08, 0.9, 0.01).name("half-angle (rad)").onChange(rebuild);
+        c.add(p, "range", 20, 160, 1).name("range (m)").onChange(rebuild);
+        c.add(p, "penumbra", 0, 0.98, 0.01).onChange(push);
+        c.add(p, "falloffRef", 2, 40, 0.5).name("half-falloff (m)").onChange(push);
+        c.add(p, "nearFade", 0, 6, 0.1).name("fade in (m)").onChange(push);
+        c.add(p, "rangeFade", 0.1, 1, 0.01).name("tip fade starts").onChange(push);
+        c.add(p, "hullSpread", 1, 2, 0.01).name("hull margin").onChange(rebuild);
+
+        const n = gui.addFolder("Beam — texture & cost");
+        n.add(p, "noise", 0, 1, 0.01).name("lumpiness").onChange(push);
+        n.add(p, "noiseScale", 0.005, 0.25, 0.005).onChange(push);
+        n.add(p, "noiseSpeed", 0, 2, 0.05).name("drift m/s");
+        n.add(p, "steps", 6, beams.maxSteps, 1).name("march steps").onChange(push);
+
+        const g = gui.addFolder("Glare");
+        g.add(p, "glareSize", 0.4, 6, 0.1).onChange(push);
+        g.add(p, "glareIntensity", 0, 5, 0.05).onChange(push);
+        g.add(p, "glareFalloff", 0.5, 8, 0.1).name("head-on falloff");
+
+        const a = gui.addFolder("Aim");
+        a.add(rig, "lampSide", 0, 1.2, 0.01).onChange(placeLamps);
+        a.add(rig, "lampHeight", 0.1, 1.5, 0.01).onChange(placeLamps);
+        a.add(rig, "lampForward", 0, 3, 0.05).onChange(placeLamps);
+        a.add(rig, "aimForward", 4, 60, 1).name("aim ahead (m)").onChange(placeLamps);
+        a.add(rig, "aimDrop", 0, 8, 0.05).name("aim drop (m)").onChange(placeLamps);
+        a.add(rig, "poolIntensity", 0, 3000, 25).name("pool cd").onChange(syncLayers);
+
+        const r = gui.addFolder("Rain");
+        r.add(rain, "opacity", 0, 1, 0.01).onChange((v) => { uRainOpacity.value = v; });
+        r.add(rain, "gain", 0, 8, 0.05).name("lit gain").onChange((v) => { uRainGain.value = v; });
+        r.add(rain, "fall", 2, 40, 0.5).name("fall m/s").onChange((v) => { uRainFall.value = v; });
+        r.add(rain, "wind", 0, 1, 0.01).name("lean").onChange((v) => { uRainWind.value = v; });
+        r.add(rain, "width", 0.005, 0.2, 0.005)
+          .onChange((v) => rainMesh.scale.setX(v));
+        r.add(rain, "length", 0.2, 5, 0.1)
+          .onChange((v) => rainMesh.scale.setY(v));
+
+        const s = gui.addFolder("Scene");
+        s.add(rig, "autoOrbit").name("auto-orbit (O)").listen();
+        s.add(rig, "orbitSpeed", 0.05, 1, 0.01).name("orbit rad/s");
+        s.add(rig, "sweep").name("nose sweep (S)").listen();
+        s.add(rig, "sweepAmount", 0, 0.8, 0.01).name("sweep rad");
+        s.add(rig, "wallDistance", 8, 140, 1).name("wall (m)")
+          .onChange((v) => { wall.position.z = v; });
+        s.add(rig, "exposure", 0.2, 3, 0.01).onChange((v) => { uExposure.value = v; });
+        s.add(rig, "bloomMix", 0, 2.5, 0.01).name("bloom").onChange((v) => { uBloomMix.value = v; });
+        s.add(rig, "compose").name("HDR + bloom (C)").listen();
+        s.open();
+      }
+
+      /* ===================================================================== *
+       * FRAME                                                                 *
+       * ===================================================================== */
+
+      let orbitPhase = 0.6;
+      let clock = 0;
+
+      function frame() {
+        timer.update();
+        const dt = Math.min(0.05, timer.getDelta());
+        clock += dt;
+        renderer.info.reset();
+
+        // Swing the nose, so the beam sweeps across the wall and the pillars.
+        // A beam that only ever looks right pointing straight down the road is
+        // not a beam, it is a decal.
+        car.rotation.y = rig.sweep ? Math.sin(clock * 0.45) * rig.sweepAmount : 0;
+
+        if (rig.autoOrbit) {
+          orbitPhase += dt * rig.orbitSpeed;
+          const rad = 17;
+          camera.position.set(
+            Math.sin(orbitPhase) * rad,
+            3.4 + Math.sin(orbitPhase * 0.7) * 1.6,
+            Math.cos(orbitPhase) * rad + 4,
+          );
+          camera.lookAt(0, 1.1, 6);
+          // Keep the orbit rig pointed at the same place, so letting go of O
+          // hands the camera over without a snap.
+          controls.target.set(0, 1.1, 6);
+        } else {
+          controls.update();
+        }
+
+        beams.update(dt, camera);
+
+        uRainTime.value = clock;
+        uRainCenter.value.set(camera.position.x, 0, camera.position.z);
+
+        if (rig.compose) {
+          renderer.setRenderTarget(sceneRT);
+          renderer.render(scene, camera);
+          renderer.setRenderTarget(null);
+          renderer.render(presentScene, presentCam);
+        } else {
+          // Straight to the canvas: no HDR target, no bloom, and no tone
+          // mapping (the renderer is left at NoToneMapping), so this looks
+          // blown out. It is a DIAGNOSTIC, not a second look — if the beam
+          // clips against the wall here but not through the composite, the
+          // depth grab is the thing that broke, not the beam.
+          renderer.render(scene, camera);
+        }
+
+        if (hasTimestamps) {
+          renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+        }
+
+        const now = performance.now();
+        if (!perf.since) perf.since = now;
+        perf.frames++;
+        const ts = renderer.info.render.timestamp;
+        if (ts > 0) { perf.gpuSum += ts; perf.gpuN++; }
+        if (now - perf.since >= 500) {
+          const gpu = perf.gpuN ? perf.gpuSum / perf.gpuN : 0;
+          $("s-fps").textContent = ((perf.frames * 1000) / (now - perf.since)).toFixed(0);
+          $("s-gpu").textContent = perf.gpuN ? `${gpu.toFixed(2)} ms` : "n/a";
+          $("s-draw").textContent = String(renderer.info.render.drawCalls);
+          // Not a counter — the difference between beam on and beam off. Toggle
+          // B and read it; a per-pass number would be quantised noise at this
+          // scale (see proj_modular_road_perf_reality).
+          if (!rig.beam) perf.beamOffMs = gpu;
+          $("s-beam").textContent = perf.beamOffMs
+            ? `${Math.max(0, gpu - perf.beamOffMs).toFixed(2)} ms (vs B off)`
+            : "toggle B to sample";
+          perf.frames = 0; perf.gpuSum = 0; perf.gpuN = 0; perf.since = now;
+        }
+      }
+
+      init().catch(showErr);
+    </script>
+  </body>
+</html>
