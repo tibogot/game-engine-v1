@@ -2003,6 +2003,13 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label" title="Short-range sun occlusion, sampled per march step: darkens a lobe's own shaded flank. 0 skips it and leaves only the per-ray shadow.">Self shadow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-selfsh" min="0" max="1.5" step="0.05" />
+              <span class="prop-num" id="dv-pc-selfsh-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Steps (cost)</span>
             <div class="prop-value">
               <input type="range" id="dv-pc-steps" min="6" max="24" step="1" />
@@ -4514,6 +4521,7 @@ export function createRoadDevPanel({ app, game, params }) {
   pslider("dv-pc-topmin", "topMin", (v) => v.toFixed(2));
   pslider("dv-pc-taper", "edgeTaper", (v) => (v > 0.95 ? "1.00 (boxes)" : v.toFixed(2)));
   pslider("dv-pc-basevary", "baseVary", (v) => (v < 0.005 ? "0.00 (ruled)" : v.toFixed(2)));
+  pslider("dv-pc-selfsh", "selfShadow", (v) => (v < 0.005 ? "0.00 (per-ray only)" : v.toFixed(2)));
   pslider("dv-pc-steps", "steps", (v) => v.toFixed(0) + " steps");
   pslider("dv-pc-sun", "sunStrength", (v) => v.toFixed(2));
   pslider("dv-pc-amb", "ambient", (v) => v.toFixed(2));

@@ -112,6 +112,13 @@ export const PAINTED_CLOUD_DEFAULTS = {
    * height, and losing that reads as fog rather than as cumulus.
    */
   baseVary: 0.14,
+  /**
+   * Strength of the SHORT-range sun occlusion sampled per march step, as a multiplier on
+   * absorb. This is what darkens a lobe's own shaded flank and lets neighbouring lobes
+   * shadow each other; the per-ray mid-plane tap keeps the long range. 0 disables the
+   * extra fetch entirely and restores the single per-ray shadow.
+   */
+  selfShadow: 0.55,
   /** March steps across the slab (≤ MAX_STEPS). */
   steps: 18,
 
@@ -349,6 +356,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uTopMin = uniform(P.topMin);
   const uEdgeTaper = uniform(P.edgeTaper);
   const uBaseVary = uniform(P.baseVary);
+  const uSelfShadow = uniform(P.selfShadow);
   const uSteps = uniform(P.steps);
   const uAbsorb = uniform(P.absorb);
   const uShadowReach = uniform(P.shadowReach);
@@ -668,11 +676,32 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
             // Vertical light gradient: tops catch the sun, bases sit in their own shadow.
             // Cheap, and with the silhouette now correct it does most of the volume read.
             const vert = mix(uBaseDark, float(1.0), saturate(hL));
+            /*
+             * LOCAL SELF-SHADOW — the one thing still missing from the modelling.
+             *
+             * `sunShadow` is sampled ONCE PER RAY, at the deck mid-plane, and reused for
+             * every step. That is the right call for the LONG reach — a neighbouring
+             * cloud a kilometre sunward barely moves across one slab crossing, and 18
+             * fetches of it would buy nothing. But it means a tall cloud gets identical
+             * sun occlusion at its base and at its top, so lobes never darken on their
+             * own shaded flanks and neighbouring lobes never shadow each other. The
+             * `vert` gradient below fakes the base/top part of that, and nothing faked
+             * the lobe-to-lobe part.
+             *
+             * So the reach is SPLIT: the per-ray tap keeps the long range, and one tap
+             * here — from THIS step's position, at a short reach — adds the local term.
+             * One fetch, and only on steps that already cleared the density test, so
+             * empty sky pays nothing.
+             */
+            const lTap = mapTex.sample(uv.add(sunXZ.mul(reach.mul(0.18))));
+            const lMass = lTap.r.add(lTap.b.sub(0.5).mul(uLump));
+            const selfSh = exp(lMass.mul(uAbsorb).mul(uSelfShadow).negate());
             // MULTIPLE-SCATTERING FLOOR — see msFloor. Lifts the shadow term so a core
             // that the horizontal march says is fully occluded still glows, instead of
             // flattening to grey. mix(floor, 1, shadow), written as an add to keep it
             // one madd.
-            const shadeLifted = sunShadow.add(uMsFloor.mul(sunShadow.oneMinus()));
+            const shTot = sunShadow.mul(selfSh);
+            const shadeLifted = shTot.add(uMsFloor.mul(shTot.oneMinus()));
             const lit = keyCol.mul(uSunStrength).mul(shadeLifted.mul(vert).add(rim.mul(vert)));
             const amb = ambCol.mul(uAmbient).mul(mix(float(0.55), float(1.0), saturate(hL)));
             const lum = lit.add(amb);
@@ -1113,6 +1142,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uTopMin.value = P.topMin;
     uEdgeTaper.value = P.edgeTaper;
     uBaseVary.value = P.baseVary;
+    uSelfShadow.value = P.selfShadow;
     uSteps.value = Math.min(P.steps, MAX_STEPS);
     uAbsorb.value = P.absorb;
     uShadowReach.value = P.shadowReach;
