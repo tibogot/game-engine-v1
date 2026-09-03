@@ -2467,6 +2467,69 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Clouds — Mid level</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            <b>Altocumulus</b> — the layer between the cumulus deck (~1.2 km) and the
+            cirrus (8 km). That gap used to be empty, so the sky read as two planes
+            with a void between them. A thin sheet like the cirrus, so one crossing
+            and no march: <b>three fetches</b>, and 0 amount removes them entirely.
+            It drifts at its own rate, which is where a moving camera gets its
+            parallax.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Amount</span>
+            <div class="prop-value">
+              <input type="range" id="dv-al-amt" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-al-amt-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Altitude</span>
+            <div class="prop-value">
+              <input type="range" id="dv-al-alt" min="1800" max="7000" step="50" />
+              <span class="prop-num" id="dv-al-alt-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Coverage</span>
+            <div class="prop-value">
+              <input type="range" id="dv-al-cov" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-al-cov-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cell size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-al-tile" min="800" max="6000" step="50" />
+              <span class="prop-num" id="dv-al-tile-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rolls</span>
+            <div class="prop-value">
+              <input type="range" id="dv-al-roll" min="1" max="8" step="0.1" />
+              <span class="prop-num" id="dv-al-roll-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Drift</span>
+            <div class="prop-value">
+              <input type="range" id="dv-al-drift" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-al-drift-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Silver lining</span>
+            <div class="prop-value">
+              <input type="range" id="dv-al-silver" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-al-silver-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Aerial perspective</div>
         <div class="section-body">
           <div class="dv-hint">
@@ -4773,6 +4836,13 @@ export function createRoadDevPanel({ app, game, params }) {
   pslider("dv-pc-planet", "planetRadiusKm",
     (v) => (v >= 6371 ? v.toFixed(0) + " km (Earth)" : v.toFixed(0) + " km"));
   pslider("dv-pc-topmin", "topMin", (v) => v.toFixed(2));
+  pslider("dv-al-amt", "altoAmount", (v) => (v < 0.005 ? "0.00 (off)" : v.toFixed(2)));
+  pslider("dv-al-alt", "altoAltitude", (v) => v.toFixed(0) + " m");
+  pslider("dv-al-cov", "altoCoverage", (v) => v.toFixed(2));
+  pslider("dv-al-tile", "altoTile", (v) => v.toFixed(0) + " m");
+  pslider("dv-al-roll", "altoRoll", (v) => (v < 1.05 ? "1.0 (round)" : v.toFixed(1) + "x"));
+  pslider("dv-al-drift", "altoDrift", (v) => v.toFixed(2));
+  pslider("dv-al-silver", "altoSilver", (v) => v.toFixed(2));
   pslider("dv-pc-sizevary", "sizeVary", (v) => (v < 0.005 ? "0.00 (one size)" : v.toFixed(2)));
   pslider("dv-pc-sizescale", "sizeScale", (v) => (4300 / (0.137 * v)).toFixed(0) + " m");
   pslider("dv-pc-taper", "edgeTaper", (v) => (v > 0.95 ? "1.00 (boxes)" : v.toFixed(2)));

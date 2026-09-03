@@ -178,6 +178,24 @@ export const PAINTED_CLOUD_DEFAULTS = {
    * altitudes give it parallax and a size comparison, which is most of why a real sky
    * feels deep. This one is also the cheap half of the pair.
    */
+  /**
+   * MID-LEVEL ALTOCUMULUS — the layer between the cumulus deck and the cirrus.
+   * 0 removes it (and its three fetches) entirely.
+   */
+  altoAmount: 0.38,
+  /** Metres. Real altocumulus sits 2-6 km; this wants to be clearly above the deck and
+   *  clearly below the cirrus, because the SEPARATION is the whole point. */
+  altoAltitude: 3800,
+  /** Metres per map wrap. Smaller than the deck's tile: these cloudlets are small. */
+  altoTile: 2600,
+  altoCoverage: 0.5,
+  /** Wind multiplier. Higher air moves faster, and the differing rates between layers
+   *  are what give a moving camera its parallax. */
+  altoDrift: 0.55,
+  /** How far the cells stretch along the wind into rolls. 1 = round cells. */
+  altoRoll: 2.4,
+  /** Forward scattering — droplets, so much gentler than the cirrus's ice. */
+  altoSilver: 0.5,
   cirrusAmount: 0.42,
   /**
    * Metres. Real cirrus lives at 6-12 km, far above the cumulus deck — and that gap is
@@ -383,6 +401,13 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   /** 1 / (2R) in metres — the only form the curvature maths actually needs. */
   const uInv2R = uniform(0.5 / (P.planetRadiusKm * 1000));
   const uCirrusAmount = uniform(P.cirrusAmount);
+  const uAltoAmount = uniform(P.altoAmount);
+  const uAltoAlt = uniform(P.altoAltitude);
+  const uAltoTile = uniform(P.altoTile);
+  const uAltoCoverage = uniform(P.altoCoverage);
+  const uAltoDrift = uniform(P.altoDrift);
+  const uAltoRoll = uniform(P.altoRoll);
+  const uAltoSilver = uniform(P.altoSilver);
   const uCirrusAlt = uniform(P.cirrusAltitude);
   const uCirrusTile = uniform(P.cirrusTile);
   const uCirrusCoverage = uniform(P.cirrusCoverage);
@@ -542,6 +567,68 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       const aerC = smoothstep(float(0.30), float(0.005), y).mul(uAerial);
       cirCol.assign(mix(lit, bgCol, aerC));
       cirA.assign(shapedC.mul(uCirrusAmount).mul(maskC));
+    });
+
+    /*
+     * ── MID-LEVEL ALTOCUMULUS ─────────────────────────────────────────────────────
+     *
+     * The sky had a cumulus deck at ~1.2 km and cirrus at 8 km and nothing between, so
+     * every frame read as two planes with a void in it. Depth in a real sky comes from
+     * layers at DIFFERENT heights sliding past each other at different rates, and one
+     * gap that wide is most of what was still missing once the deck's own shape was
+     * fixed.
+     *
+     * Altocumulus is the right cloud for the slot, and conveniently the cheapest kind to
+     * draw: it is a thin sheet, so — exactly like the cirrus above and unlike the deck
+     * below — it has no thickness to march and nothing to self-occlude. One crossing,
+     * three fetches, no loop.
+     *
+     * What makes it read as altocumulus rather than as more cirrus:
+     *  - CELLS, not fibres. It is a mackerel sky: discrete cloudlets with gaps. So this
+     *    samples the BILLOW channel, which is Worley, where the cirrus samples it for
+     *    high frequency and then smears it along a filament axis.
+     *  - ROLLS. The cells organise into bands across the shear, so they are stretched
+     *    along the wind — but only a little, where cirrus is stretched enormously.
+     */
+    const altCol = vec3(0.0).toVar();
+    const altA = float(0.0).toVar();
+    If(uAltoAmount.greaterThan(0.001).and(y.greaterThan(0.0)), () => {
+      const tA = tAt(uAltoAlt);
+      const wA = uCamXZ.add(vec2(dir.x, dir.z).mul(tA).div(uAltoTile))
+        .add(uWind.mul(uAltoDrift));
+      // Into roll space: along the wind, and across it.
+      const along = dot(wA, uWindDir);
+      const across = dot(wA, vec2(uWindDir.y.negate(), uWindDir.x));
+      const ruv = vec2(along.div(uAltoRoll.max(0.05)), across);
+
+      const c1 = mapTex.sample(ruv.add(vec2(uEvolve.mul(0.2), 0.0))).b;
+      const c2 = mapTex.sample(ruv.mul(2.3).add(vec2(7.7, uEvolve.mul(-0.4)))).b;
+      const cell = c1.mul(0.68).add(c2.mul(0.32));
+      // Its own regional gate, at a finer scale than the deck's — altocumulus arrives in
+      // patches with clear sky between, not as a wall to the horizon.
+      const wAlt = mapTex.sample(wA.mul(uWeatherScale.mul(1.7))).a;
+      const covA = saturate(uAltoCoverage.mul(mix(float(0.45), float(1.45), wAlt)));
+      const shapedA = remapUnit(cell, covA.oneMinus());
+
+      /*
+       * ITS OWN KEY COLOUR, interpolated by ALTITUDE. At 3.8 km the sun clears the
+       * horizon later than it does at the deck but sooner than at the cirrus, so the
+       * three layers must redden in that ORDER at dusk — deck first, then this, then the
+       * cirrus still burning above both. Picking either neighbour's colour collapses
+       * that, and it is the most legible thing a layered sky does all day.
+       */
+      const keyA = mix(keyCol, cirrusKey, saturate(uAltoAlt.div(uCirrusAlt.max(1.0))));
+      const muA = saturate(dot(dir, sunDir));
+      const fwdA = pow(muA, float(5.0)).mul(uAltoSilver);
+      // Cores brighter than edges. With no thickness to march, this gradient is the only
+      // thing standing between a mackerel sky and a field of printed dots.
+      const shapeLit = mix(float(0.72), float(1.0), saturate(shapedA.mul(1.6)));
+      const litA = keyA.mul(float(0.9).add(fwdA)).mul(shapeLit).add(ambCol.mul(0.35));
+
+      const maskA = smoothstep(float(0.004), float(0.045), y);
+      const aerA = smoothstep(float(0.34), float(0.005), y).mul(uAerial);
+      altCol.assign(mix(litA, bgCol, aerA));
+      altA.assign(shapedA.mul(uAltoAmount).mul(maskA));
     });
 
     const deckCol = vec3(0.0).toVar();
@@ -782,9 +869,13 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     // ── COMPOSITE: cirrus UNDER the deck ──────────────────────────────────────────
     // The cumulus deck is 7 km closer, so it occludes the cirrus — getting this order
     // wrong is what makes a two-layer sky look like a decal. Straight-alpha "over".
+    // Back to front by ALTITUDE: the cirrus is behind the mid layer, which is behind the
+    // deck. Getting this order wrong would let an 8 km sheet draw over a 1 km cumulus.
     const behind = deckA.oneMinus();
-    const outA = deckA.add(cirA.mul(behind)).toVar();
-    const outCol = deckCol.mul(deckA).add(cirCol.mul(cirA).mul(behind))
+    const midVis = altA.mul(behind);
+    const cirVis = cirA.mul(behind).mul(altA.oneMinus());
+    const outA = deckA.add(midVis).add(cirVis).toVar();
+    const outCol = deckCol.mul(deckA).add(altCol.mul(midVis)).add(cirCol.mul(cirVis))
       .div(outA.max(1e-4));
     out.assign(vec4(outCol, outA));
     return out;
@@ -1208,6 +1299,13 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uHorizonFade.value = P.horizonFade;
     uInv2R.value = 0.5 / Math.max(1e3, P.planetRadiusKm * 1000);
     uCirrusAmount.value = P.cirrusAmount;
+    uAltoAmount.value = P.altoAmount;
+    uAltoAlt.value = P.altoAltitude;
+    uAltoTile.value = P.altoTile;
+    uAltoCoverage.value = P.altoCoverage;
+    uAltoDrift.value = P.altoDrift;
+    uAltoRoll.value = P.altoRoll;
+    uAltoSilver.value = P.altoSilver;
     uCirrusAlt.value = P.cirrusAltitude;
     uCirrusTile.value = P.cirrusTile;
     uCirrusCoverage.value = P.cirrusCoverage;
