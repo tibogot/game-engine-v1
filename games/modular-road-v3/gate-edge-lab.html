@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gate Edge Lab — chamfer A/B</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #c8d0da; color: #1a2230;
+                   font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10;
+        min-width: 280px; max-width: 380px;
+        padding: 12px 14px;
+        background: rgba(10, 15, 24, 0.72);
+        border: 1px solid rgba(150, 180, 220, 0.18);
+        border-radius: 10px;
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+      }
+      #hud h1 { margin: 0 0 4px; font-size: 12px; letter-spacing: 0.08em;
+                text-transform: uppercase; color: #7f93ad; font-weight: 700; }
+      #hud .title { margin: 0 0 8px; font-size: 18px; font-weight: 650; color: #f2f6fb; }
+      #hud .meta { color: #9fb0c6; font-size: 12px; }
+      #hud .meta b { color: #f2f6fb; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #hud .old { color: #ff9d6b; }
+      #hud .new { color: #6fd3ff; }
+      #hud .keys { margin-top: 10px; padding-top: 8px;
+                   border-top: 1px solid rgba(150, 180, 220, 0.16);
+                   color: #7f93ad; font-size: 11px; line-height: 1.55; }
+      #hud .keys b { color: #cfe0f2; font-weight: 600; }
+      #err {
+        position: fixed; left: 12px; bottom: 12px; z-index: 20;
+        max-width: 560px; padding: 10px 12px; display: none;
+        background: rgba(60, 12, 12, 0.92); border: 1px solid #a44;
+        border-radius: 8px; color: #ffb0b0; white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Gate edge lab</h1>
+      <div class="title">Neon gate — hard edge vs chamfer</div>
+      <div class="meta">
+        <span class="old">LEFT</span> current (razor edges) · <b id="s-tris-old">—</b> tris<br />
+        <span class="new">RIGHT</span> chamfered 5 cm · <b id="s-tris-new">—</b> tris<br />
+        Both are still <b>1 draw</b> for the frame. Draws <b id="s-draws">—</b> · <b id="s-fps">—</b> fps
+      </div>
+      <div class="keys">
+        <b>R</b> wide view · <b>C</b> close-up on the posts · <b>G</b> glancing light view<br />
+        <b>Space</b> auto-orbit on/off · drag / wheel to look around<br />
+        The chamfer is `opts.chamfer` in neonGateGroup — game default is ON.
+      </div>
+    </div>
+    <div id="err"></div>
+
+    <script type="module">
+      /**
+       * CHAMFER A/B — the real catalog prop, twice.
+       *
+       * Both gates come from PROP_BY_ID.get("neongate").make(), so what you see
+       * is exactly what the game builds: left passes {chamfer:false} (the old
+       * razor-edge extrude), right the new default. Same material object graph,
+       * same neon, same lights — the only variable is the 5 cm bevel band.
+       */
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { PROP_BY_ID } from "./modularRoadProps.js";
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => {
+        const el = $("err");
+        el.style.display = "block";
+        el.textContent = e?.stack || String(e);
+        console.error(e);
+      };
+
+      let renderer, scene, camera, controls, sun;
+
+      /** Same tiny procedural sky/sun equirect as tube-lab — gives the 0.35
+       *  metalness body something to reflect, which is the whole show here. */
+      function buildStudioEnv() {
+        const W = 128, H = 64;
+        const data = new Uint16Array(W * H * 4);
+        const sunDir = new THREE.Vector3(28, 48, 20).normalize();
+        const d = new THREE.Vector3();
+        const half = THREE.DataUtils.toHalfFloat;
+        for (let y = 0; y < H; y++) {
+          const phi = ((y + 0.5) / H) * Math.PI;
+          for (let x = 0; x < W; x++) {
+            const theta = ((x + 0.5) / W) * Math.PI * 2;
+            const sp = Math.sin(phi);
+            d.set(sp * Math.cos(theta), Math.cos(phi), sp * Math.sin(theta));
+            let r, g, b;
+            if (d.y >= 0) {
+              const t = Math.pow(d.y, 0.55);
+              r = 0.56 * (1 - t) + 0.34 * t;
+              g = 0.61 * (1 - t) + 0.43 * t;
+              b = 0.69 * (1 - t) + 0.57 * t;
+            } else {
+              const t = Math.min(1, -d.y * 2.2);
+              r = 0.56 * (1 - t) + 0.36 * t;
+              g = 0.56 * (1 - t) + 0.33 * t;
+              b = 0.55 * (1 - t) + 0.28 * t;
+            }
+            const s = Math.max(0, d.dot(sunDir));
+            const sunAmt = Math.pow(s, 340) * 80 + Math.pow(s, 14) * 0.4;
+            const i = (y * W + x) * 4;
+            data[i] = half(r + sunAmt);
+            data[i + 1] = half(g + sunAmt * 0.96);
+            data[i + 2] = half(b + sunAmt * 0.86);
+            data[i + 3] = half(1);
+          }
+        }
+        const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.HalfFloatType);
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        tex.colorSpace = THREE.LinearSRGBColorSpace;
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
+        tex.needsUpdate = true;
+        return tex;
+      }
+
+      function makeLabel(text, color) {
+        const c = document.createElement("canvas");
+        c.width = 512; c.height = 128;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "rgba(10,15,24,0.78)";
+        ctx.beginPath();
+        ctx.roundRect(6, 14, 500, 100, 18);
+        ctx.fill();
+        ctx.font = "600 52px ui-sans-serif, system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = color;
+        ctx.fillText(text, 256, 66);
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+        s.scale.set(7, 1.75, 1);
+        return s;
+      }
+
+      function countTris(group) {
+        let n = 0;
+        group.traverse((o) => {
+          if (!o.isMesh) return;
+          const g = o.geometry;
+          n += (g.index ? g.index.count : g.attributes.position.count) / 3;
+        });
+        return Math.round(n);
+      }
+
+      function makeGate(opts, x, labelText, labelColor) {
+        const gate = PROP_BY_ID.get("neongate").make(opts);
+        gate.position.x = x;
+        gate.traverse((o) => {
+          if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+        });
+        const label = makeLabel(labelText, labelColor);
+        label.position.set(x, 10.6, 0);
+        scene.add(gate, label);
+        return gate;
+      }
+
+      function wideView() {
+        camera.position.set(-6, 7.5, 30);
+        controls.target.set(0, 4.4, 0);
+        controls.update();
+      }
+
+      /** Both left posts close together — the edge is the whole frame. */
+      function closeView() {
+        camera.position.set(-16.5, 2.2, 7.5);
+        controls.target.set(-2, 3.4, 0);
+        controls.update();
+      }
+
+      /** Near-parallel to the front faces: the pose where a hard edge dies. */
+      function glancingView() {
+        camera.position.set(-26, 5.2, 3.2);
+        controls.target.set(6, 5.2, -0.4);
+        controls.update();
+      }
+
+      const perf = { frames: 0, since: 0 };
+
+      async function init() {
+        renderer = new THREE.WebGPURenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setClearColor(0xb8c4d2);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.05;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xb8c4d2);
+        scene.environment = buildStudioEnv();
+
+        camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 400);
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.9;
+        controls.minDistance = 0.4;
+        controls.maxDistance = 140;
+
+        scene.add(new THREE.HemisphereLight(0xf0f5ff, 0xd2c4b0, 1.15));
+
+        sun = new THREE.DirectionalLight(0xfff6e8, 3.2);
+        sun.position.set(28, 48, 20);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.camera.near = 1;
+        sun.shadow.camera.far = 140;
+        sun.shadow.camera.left = -35; sun.shadow.camera.right = 35;
+        sun.shadow.camera.top = 35; sun.shadow.camera.bottom = -35;
+        sun.shadow.bias = -0.0004;
+        sun.shadow.normalBias = 0.04;
+        scene.add(sun);
+
+        const fill = new THREE.DirectionalLight(0xdde8ff, 1.35);
+        fill.position.set(-24, 18, -20);
+        scene.add(fill);
+        const rim = new THREE.DirectionalLight(0xffffff, 0.7);
+        rim.position.set(6, 16, 32);
+        scene.add(rim);
+
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(240, 240),
+          new THREE.MeshStandardMaterial({ color: 0x565c66, roughness: 0.92, metalness: 0 }),
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.02;
+        ground.receiveShadow = true;
+        scene.add(ground);
+        const grid = new THREE.GridHelper(120, 60, 0x8a96a8, 0x6d7684);
+        grid.position.y = 0.001;
+        scene.add(grid);
+
+        const oldGate = makeGate({ chamfer: false }, -10.5, "CURRENT — hard edges", "#ff9d6b");
+        const newGate = makeGate({ chamfer: true }, 10.5, "CHAMFERED — 5 cm", "#6fd3ff");
+        $("s-tris-old").textContent = countTris(oldGate).toLocaleString();
+        $("s-tris-new").textContent = countTris(newGate).toLocaleString();
+
+        wideView();
+
+        addEventListener("resize", () => {
+          camera.aspect = innerWidth / innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(innerWidth, innerHeight);
+        });
+        addEventListener("keydown", (e) => {
+          if (e.target?.matches?.("input, textarea")) return;
+          const k = e.key.toLowerCase();
+          if (k === "r") wideView();
+          if (k === "c") closeView();
+          if (k === "g") glancingView();
+          if (k === " ") { controls.autoRotate = !controls.autoRotate; e.preventDefault(); }
+        });
+
+        window.__gateLab = { renderer, scene, camera, controls, wideView, closeView, glancingView };
+        renderer.setAnimationLoop(frame);
+      }
+
+      function frame() {
+        controls.update();
+        renderer.render(scene, camera);
+        const now = performance.now();
+        if (!perf.since) perf.since = now;
+        perf.frames++;
+        if (now - perf.since >= 500) {
+          $("s-fps").textContent = ((perf.frames * 1000) / (now - perf.since)).toFixed(0);
+          $("s-draws").textContent = String(renderer.info.render.drawCalls);
+          perf.frames = 0; perf.since = now;
+        }
+      }
+
+      init().catch(showErr);
+    </script>
+  </body>
+</html>

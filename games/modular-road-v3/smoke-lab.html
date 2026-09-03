@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Drift Smoke Lab</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f16; color: #e6ecf5;
+                   font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10;
+        min-width: 250px; max-width: 330px;
+        padding: 12px 14px;
+        background: rgba(10, 15, 24, 0.72);
+        border: 1px solid rgba(150, 180, 220, 0.18);
+        border-radius: 10px;
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+      }
+      #hud h1 {
+        margin: 0 0 4px; font-size: 12px; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #7f93ad; font-weight: 700;
+      }
+      #hud .title { margin: 0 0 8px; font-size: 18px; font-weight: 650; color: #f2f6fb; }
+      #hud .meta { color: #9fb0c6; font-size: 12px; }
+      #hud .meta b { color: #f2f6fb; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #hud .keys {
+        margin-top: 10px; padding-top: 8px;
+        border-top: 1px solid rgba(150, 180, 220, 0.16);
+        color: #7f93ad; font-size: 11px; line-height: 1.55;
+      }
+      #hud .keys b { color: #cfe0f2; font-weight: 600; }
+      #err {
+        position: fixed; left: 12px; bottom: 12px; z-index: 20;
+        max-width: 560px; padding: 10px 12px; display: none;
+        background: rgba(60, 12, 12, 0.92); border: 1px solid #a44;
+        border-radius: 8px; color: #ffb0b0; white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Drift smoke lab</h1>
+      <div class="title" id="s-mode">—</div>
+      <div class="meta">
+        Puffs <b id="s-puffs">0</b> · Bank <b id="s-bank">0</b><br />
+        Sun <b id="s-sun">—</b> · View <b id="s-cam">—</b><br />
+        GPU <b id="s-gpu">—</b> · <b id="s-fps">—</b> fps
+      </div>
+      <div class="keys">
+        <b>M</b> emitter mode (donut / burnout / fly-by)<br />
+        <b>1–3</b> noon / backlit sunset / overcast<br />
+        <b>C</b> orbit / chase · <b>E</b> emit on/off<br />
+        <b>T</b> slow motion · <b>W</b> wet spray A/B<br />
+        <b>R</b> reset view · orbit: drag / wheel
+      </div>
+    </div>
+    <div id="err"></div>
+
+    <script type="module">
+      /**
+       * DRIFT SMOKE LOOK-DEV.
+       *
+       * The smoke SYSTEM is imported from the game file, not reimplemented —
+       * modularRoadDriftSmoke.js is the exact code road.html runs, so nothing
+       * tuned here can drift from what ships. What the lab replaces is the CAR:
+       * a virtual rig drives the emitter contact points, so the smoke can be
+       * judged without physics, a track, or a lap between tweaks.
+       *
+       * Why each fixture is here:
+       *
+       *   BACKLIGHT ON A KEY. The Henyey-Greenstein silver lining is the
+       *   strongest volume cue the shader has, and it only exists looking
+       *   TOWARD the sun. A lab that opens at noon and stays there never shows
+       *   it. Sun preset 2 puts the sun low and behind the plume from the
+       *   default chase view.
+       *
+       *   SLOW MOTION. Erosion, fade-in pop, and the puff→bank handoff all
+       *   happen inside two seconds. At 1× the eye reads the aggregate; at
+       *   0.15× it reads each particle's life, which is where the tells live.
+       *
+       *   A CHASE VIEW, matched to the game's boom (7.5 m back, 1.55 m up).
+       *   Smoke tuned from a free orbit is tuned at framings the player never
+       *   sees — same argument as the wet-road lab's grazing camera.
+       *
+       *   PROPS ON THE FLOOR. The soft-depth fade and the "puff behind the
+       *   guardrail" case need something to intersect. Two walls and a pillar
+       *   sit on the donut circle on purpose.
+       */
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "three/addons/libs/lil-gui.module.min.js";
+      import {
+        ModularRoadDriftSmoke,
+        DEFAULT_DRIFT_SMOKE_SETTINGS,
+      } from "./modularRoadDriftSmoke.js";
+      import { UpgradedDriftSmoke } from "./smokeLabUpgrades.js";
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => {
+        const el = $("err");
+        el.style.display = "block";
+        el.textContent = e?.stack || String(e);
+        console.error(e);
+      };
+
+      /* ===================================================================== *
+       * STATE                                                                 *
+       * ===================================================================== */
+
+      /**
+       * A deep copy, deliberately: the constructor default is the exported
+       * DEFAULT_DRIFT_SMOKE_SETTINGS object ITSELF, and a lab that mutates the
+       * module's default object would leak every slider into any other page
+       * that imports it during the same session.
+       */
+      const settings = structuredClone(DEFAULT_DRIFT_SMOKE_SETTINGS);
+
+      const MODES = ["donut", "burnout", "flyby"];
+      const rig = {
+        mode: "donut",
+        /** m/s along the path. Donut default ≈ a held second-gear drift. */
+        speed: 15,
+        radius: 12,
+        /** Visual yaw of the proxy car away from its velocity, degrees. Only
+         *  cosmetic — the emitter cares about velocity and contact points. */
+        driftYaw: 32,
+        intensity: 1.0,
+        emit: true,
+        /** 0 = dry smoke, 1 = full wet spray. Mirrors setWetness. */
+        wetness: 0,
+        timeScale: 1.0,
+      };
+
+      const CAMS = ["orbit", "chase"];
+      const cam = { mode: "orbit", distance: 7.5, height: 1.55, lookAhead: 9 };
+
+      /**
+       * THE AAA EXPERIMENTS — the candidate upgrades, each toggleable so the
+       * stock look is always one click away. `upgraded` swaps the whole smoke
+       * instance for the lab subclass (the shaders differ, so it is a rebuild,
+       * not a uniform); churn and the hemisphere colours ride on its uniforms;
+       * curl is CPU-side and works on either instance.
+       */
+      const exp = {
+        upgraded: true,
+        // Internal boil (shader). 0 = stock sliding window, exactly.
+        churn: 0.6,
+        churnRate: 0.7,
+        // Curl-noise turbulence (CPU). Spatially coherent, divergence-free
+        // vortices — the field is a function of POSITION, so neighbouring
+        // puffs swirl together and the plume rolls as a body, where the stock
+        // per-particle sin/cos wobble can only shiver each puff on its own.
+        curl: true,
+        curlStrength: 3.0,   // m/s² at field peak
+        curlScale: 0.35,     // cycles/m — features ~3 m across
+        curlSpeed: 0.8,      // field animation rate
+        curlHazeMul: 0.35,   // the bank gets a gentler dose
+        // How much of the stock wobble to keep alongside curl. Multiplies
+        // settings.turbulence at apply time rather than editing it, so the
+        // slider in Puffs keeps meaning what the game means by it.
+        wobbleKeep: 0.4,
+      };
+
+      /* ──────────────────────────────────────────────────────────────────── *
+       * CURL-NOISE FIELD                                                     *
+       *                                                                      *
+       * v = ∇×A with A three sums of sines — analytic, so exactly            *
+       * divergence-free (no clumping) and O(1) per sample. Two octaves.      *
+       * ~600 particles × 6 sin/cos pairs is dust on the frame budget.        *
+       * ──────────────────────────────────────────────────────────────────── */
+      const CURL_WAVES = (() => {
+        // Fixed seeds, so the field is identical run to run — tuning against
+        // a flow that re-rolls every reload is tuning against noise.
+        const rng = (() => { let s = 1234567; return () => {
+          s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff;
+        }; })();
+        const waves = [];
+        for (let octave = 0; octave < 2; octave++) {
+          const freq = octave === 0 ? 1 : 2.3;
+          const amp = octave === 0 ? 1 : 0.45;
+          for (let i = 0; i < 3; i++) {
+            const d = new THREE.Vector3(rng() - 0.5, (rng() - 0.5) * 0.6, rng() - 0.5)
+              .normalize().multiplyScalar(freq);
+            waves.push({ c: d, phase: rng() * Math.PI * 2, omega: 0.6 + rng() * 0.9, amp });
+          }
+        }
+        return waves;
+      })();
+      const _curl = new THREE.Vector3();
+
+      /** curl(A) at world point p, into out. Normalised to roughly unit peak. */
+      function curlAt(p, t, scale, out) {
+        // ∂ai/∂xj = c_ij · cos(ci·p·s + φ + ωt); assemble the curl from the
+        // three cosines directly.
+        const w = CURL_WAVES;
+        let g0x, g0y, g0z, g1x, g1y, g1z, g2x, g2y, g2z;
+        out.set(0, 0, 0);
+        for (let o = 0; o < w.length; o += 3) {
+          const a0 = w[o], a1 = w[o + 1], a2 = w[o + 2];
+          const k0 = a0.amp * Math.cos((a0.c.x * p.x + a0.c.y * p.y + a0.c.z * p.z) * scale + a0.phase + a0.omega * t);
+          const k1 = a1.amp * Math.cos((a1.c.x * p.x + a1.c.y * p.y + a1.c.z * p.z) * scale + a1.phase + a1.omega * t);
+          const k2 = a2.amp * Math.cos((a2.c.x * p.x + a2.c.y * p.y + a2.c.z * p.z) * scale + a2.phase + a2.omega * t);
+          g0x = a0.c.x * k0; g0y = a0.c.y * k0; g0z = a0.c.z * k0;
+          g1x = a1.c.x * k1; g1y = a1.c.y * k1; g1z = a1.c.z * k1;
+          g2x = a2.c.x * k2; g2y = a2.c.y * k2; g2z = a2.c.z * k2;
+          out.x += g2y - g1z;
+          out.y += g0z - g2x;
+          out.z += g1x - g0y;
+        }
+        // Wave vectors are unit·freq and amps sum ≈ 1.45, so this keeps the
+        // slider meaning "about this many m/s² at the swirl cores".
+        out.multiplyScalar(1 / 2.2);
+        return out;
+      }
+
+      let _curlTime = 0;
+
+      /**
+       * Accelerate every live particle along the field. BEFORE update(), so
+       * the class's own damp/integration applies to the result exactly as it
+       * does to its built-in turbulence — this is a preview of the same code
+       * running inside _stepPool once it ports.
+       */
+      function applyCurl(sdt) {
+        _curlTime += sdt * exp.curlSpeed;
+        const k = exp.curlStrength * sdt;
+        for (const p of smoke.particles) {
+          if (p.life <= 0) continue;
+          curlAt(p.position, _curlTime, exp.curlScale, _curl);
+          p.velocity.addScaledVector(_curl, k);
+        }
+        const kh = k * exp.curlHazeMul;
+        if (kh > 0) {
+          for (const p of smoke.hazeParticles) {
+            if (p.life <= 0) continue;
+            curlAt(p.position, _curlTime, exp.curlScale, _curl);
+            p.velocity.addScaledVector(_curl, kh);
+          }
+        }
+      }
+
+      /**
+       * Sun setups. Each drives the scene light, the backdrop and the smoke's
+       * own sun uniforms together — the smoke is unlit-material shaded by hand,
+       * so nothing syncs it except us (same contract as roadGame.js).
+       */
+      const SUNS = {
+        noon: {
+          label: "Noon",
+          dir: [0.35, 0.85, 0.25], color: 0xfff4e0, intensity: 2.5,
+          sky: 0x8fb0d4, horizon: 0xb8c8da, ground: 0x30343b,
+          hemi: 0.9, exposure: 1.0,
+          // Hemisphere ambient for the UPGRADED smoke: cool skylight from
+          // above, asphalt bounce from below.
+          ambSky: 0xcfe0f5, ambGround: 0x3a3d42,
+        },
+        sunset: {
+          label: "Backlit sunset",
+          // Low and roughly behind the donut from the opening view, so the
+          // plume sits between camera and sun — the HG lobe's home ground.
+          dir: [-0.85, 0.10, -0.45], color: 0xffa050, intensity: 2.2,
+          sky: 0x2a3352, horizon: 0xff9a4a, ground: 0x1c1a20,
+          hemi: 0.35, exposure: 1.05,
+          // A sunset SKY is warm near the horizon where the smoke lives —
+          // this is the environment-tint response the stock flat ambient
+          // cannot give.
+          ambSky: 0xe08a5a, ambGround: 0x241c20,
+        },
+        overcast: {
+          label: "Overcast",
+          dir: [0.2, 0.9, 0.1], color: 0xccd4e0, intensity: 1.2,
+          sky: 0x6a7484, horizon: 0x9aa4b2, ground: 0x272a30,
+          hemi: 1.3, exposure: 1.0,
+          ambSky: 0xb8c2ce, ambGround: 0x33373d,
+        },
+      };
+      const SUN_ORDER = ["noon", "sunset", "overcast"];
+      let sunName = "noon";
+
+      /* ===================================================================== *
+       * SCENE                                                                 *
+       * ===================================================================== */
+
+      let renderer, scene, camera, controls;
+      let sunLight, hemiLight, sunDisc;
+      let smoke = null;
+      let carRig = null;
+      let gui = null;
+      let hasTimestamps = false;
+
+      const perf = { gpuSum: 0, gpuN: 0, since: 0, fps: 0, frames: 0 };
+      const timer = new THREE.Timer();
+
+      /** Virtual car pose + wheel contacts, world space. */
+      const car = {
+        pos: new THREE.Vector3(12, 0, 0),
+        vel: new THREE.Vector3(0, 0, 15),
+        heading: new THREE.Vector3(0, 0, 1),
+        angle: 0,       // donut phase
+        flyT: -60,      // fly-by parameter
+      };
+      const _rear0 = new THREE.Vector3();
+      const _rear1 = new THREE.Vector3();
+      const _front0 = new THREE.Vector3();
+      const _front1 = new THREE.Vector3();
+      const _right = new THREE.Vector3();
+      const _fwd = new THREE.Vector3();
+      const _tmp = new THREE.Vector3();
+      /** Rear pair dry; all four in the wet, same as updateFromVehicle. */
+      const _rearPts = [_rear0, _rear1];
+      const _allPts = [_front0, _front1, _rear0, _rear1];
+
+      async function createTimingDevice() {
+        if (!navigator.gpu) return null;
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) return null;
+          return await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+        } catch (e) {
+          console.warn("[smoke-lab] no timestamp device; GPU ms will read —", e);
+          return null;
+        }
+      }
+
+      async function init() {
+        const device = await createTimingDevice();
+        hasTimestamps = Boolean(device?.features?.has("timestamp-query"));
+
+        renderer = new THREE.WebGPURenderer({
+          antialias: true,
+          trackTimestamp: true,
+          ...(device ? { device } : {}),
+        });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.5, 900);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 2;
+        controls.maxDistance = 140;
+
+        hemiLight = new THREE.HemisphereLight(0xffffff, 0x808080, 1);
+        scene.add(hemiLight);
+
+        sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.set(2048, 2048);
+        sunLight.shadow.camera.near = 1;
+        sunLight.shadow.camera.far = 220;
+        sunLight.shadow.camera.left = -45;
+        sunLight.shadow.camera.right = 45;
+        sunLight.shadow.camera.top = 45;
+        sunLight.shadow.camera.bottom = -45;
+        sunLight.shadow.bias = -0.0006;
+        sunLight.shadow.normalBias = 0.03;
+        scene.add(sunLight);
+        scene.add(sunLight.target);
+
+        // A visible sun. The whole point of the backlit preset is judging the
+        // silver lining against the bright thing causing it.
+        sunDisc = new THREE.Mesh(
+          new THREE.SphereGeometry(14, 24, 16),
+          new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }),
+        );
+        scene.add(sunDisc);
+
+        buildGround();
+        buildProps();
+        buildCarProxy();
+
+        buildSmoke();
+        applySun();
+        buildGui();
+        resetView();
+
+        addEventListener("resize", onResize);
+        addEventListener("keydown", onKey);
+
+        window.__smokeLab = { renderer, scene, camera, smoke, settings, rig, cam, perf, exp, buildSmoke };
+
+        renderer.setAnimationLoop(frame);
+      }
+
+      /**
+       * (Re)build the smoke instance. The stock/upgraded switch swaps whole
+       * shaders, so it is a rebuild — a few ms once, on a click, and the two
+       * looks are otherwise pixel-comparable because they share the settings
+       * object, the pool logic and the scene.
+       */
+      function buildSmoke() {
+        if (smoke) {
+          scene.remove(smoke.mesh);
+          smoke.geometry.dispose();
+          smoke.material.dispose();
+          smoke.sprayMaterial.dispose();
+          if (smoke.bankMesh) {
+            scene.remove(smoke.bankMesh);
+            smoke.bankMesh.geometry.dispose();
+            smoke.bankMesh.material.dispose();
+          }
+        }
+        smoke = exp.upgraded
+          ? new UpgradedDriftSmoke(scene, settings)
+          : new ModularRoadDriftSmoke(scene, settings);
+        if (window.__smokeLab) window.__smokeLab.smoke = smoke;
+        // The new instance boots with default sun/ambient uniforms.
+        if (sunLight) applySun();
+        updateHudMode();
+      }
+
+      /** Dark asphalt-ish floor. Big enough that the fly-by never leaves it. */
+      function buildGround() {
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(400, 400),
+          new THREE.MeshStandardMaterial({ color: 0x33363c, roughness: 0.95, metalness: 0 }),
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Painted donut ring so the eye has a ground reference through the
+        // plume — scale and drift of the bank are unreadable over a bare plane.
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(rig.radius - 1.4, rig.radius + 1.4, 96),
+          new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.98 }),
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.01;
+        ring.receiveShadow = true;
+        scene.add(ring);
+      }
+
+      /**
+       * Intersection fixtures: a low wall on the donut circle (soft depth fade,
+       * and the "centre behind the wall but near half in front" case that
+       * depthTest:false exists for), plus a pillar and a tall slab.
+       */
+      function buildProps() {
+        const mat = new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.8 });
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(9, 1.0, 0.5), mat);
+        wall.position.set(0, 0.5, rig.radius + 2.2);
+        wall.castShadow = wall.receiveShadow = true;
+        scene.add(wall);
+
+        const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 6, 12), mat);
+        pillar.position.set(-rig.radius - 2.5, 3, 0);
+        pillar.castShadow = pillar.receiveShadow = true;
+        scene.add(pillar);
+
+        const slab = new THREE.Mesh(new THREE.BoxGeometry(6, 4, 0.6), mat);
+        slab.position.set(rig.radius + 4, 2, -6);
+        slab.castShadow = slab.receiveShadow = true;
+        scene.add(slab);
+      }
+
+      /** A proxy car — box body + wheels. Purely a scale/position reference. */
+      function buildCarProxy() {
+        carRig = new THREE.Group();
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(1.9, 0.6, 4.3),
+          new THREE.MeshStandardMaterial({ color: 0x8a2230, roughness: 0.35, metalness: 0.4 }),
+        );
+        body.position.y = 0.62;
+        body.castShadow = true;
+        carRig.add(body);
+        const cabin = new THREE.Mesh(
+          new THREE.BoxGeometry(1.6, 0.46, 1.9),
+          new THREE.MeshStandardMaterial({ color: 0x14181f, roughness: 0.2 }),
+        );
+        cabin.position.set(0, 1.12, -0.2);
+        cabin.castShadow = true;
+        carRig.add(cabin);
+        const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.3, 14);
+        wheelGeo.rotateZ(Math.PI / 2);
+        const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111214, roughness: 0.9 });
+        for (const [x, z] of [[-0.82, 1.45], [0.82, 1.45], [-0.82, -1.45], [0.82, -1.45]]) {
+          const w = new THREE.Mesh(wheelGeo, wheelMat);
+          w.position.set(x, 0.34, z);
+          w.castShadow = true;
+          carRig.add(w);
+        }
+        scene.add(carRig);
+      }
+
+      /* ----------------------------------------------------------------- sun */
+
+      function applySun() {
+        const s = SUNS[sunName];
+        const dir = new THREE.Vector3(...s.dir).normalize();
+
+        sunLight.color.set(s.color);
+        sunLight.intensity = s.intensity;
+        sunLight.position.copy(dir).multiplyScalar(120);
+        sunLight.target.position.set(0, 0, 0);
+        sunLight.target.updateMatrixWorld();
+
+        hemiLight.color.set(s.sky);
+        hemiLight.groundColor.set(s.ground);
+        hemiLight.intensity = s.hemi;
+
+        scene.background = new THREE.Color(s.horizon);
+        scene.fog = new THREE.Fog(s.horizon, 120, 500);
+        renderer.toneMappingExposure = s.exposure;
+
+        sunDisc.position.copy(dir).multiplyScalar(600);
+        sunDisc.material.color.set(s.color);
+
+        // The smoke's OWN light rig — see the same calls in roadGame.js.
+        smoke.setSunDirection(dir);
+        smoke.setSunColor(new THREE.Color(s.color), s.intensity);
+        // Upgraded shading only: sky/ground ambient follows the time of day.
+        smoke.setAmbientColors?.(
+          new THREE.Color(s.ambSky ?? 0xffffff),
+          new THREE.Color(s.ambGround ?? 0xffffff),
+        );
+
+        $("s-sun").textContent = s.label;
+      }
+
+      /* ------------------------------------------------------------- the rig */
+
+      /**
+       * Advance the virtual car and feed the smoke. This substitutes for
+       * updateFromVehicle: contact points from the pose, velocity from the
+       * path, intensity from the slider — the parts a real drift computes from
+       * tyre slip are exactly the parts a look-dev lab wants pinned.
+       */
+      function updateRig(dt, sdt) {
+        const speed = rig.speed;
+
+        if (rig.mode === "donut") {
+          car.angle += (speed / Math.max(rig.radius, 1)) * sdt;
+          const a = car.angle;
+          car.pos.set(Math.cos(a) * rig.radius, 0, Math.sin(a) * rig.radius);
+          car.vel.set(-Math.sin(a), 0, Math.cos(a)).multiplyScalar(speed);
+          // Nose held INSIDE the circle by driftYaw — the classic held slide.
+          car.heading.copy(car.vel).normalize()
+            .applyAxisAngle(_tmp.set(0, 1, 0), THREE.MathUtils.degToRad(rig.driftYaw));
+        } else if (rig.mode === "burnout") {
+          car.pos.set(0, 0, 0);
+          // Stationary, wheels spinning: the throw direction comes from the
+          // "wheel speed", so hand the emitter the heading at full speed while
+          // the car itself stays put.
+          car.heading.set(0, 0, 1);
+          car.vel.copy(car.heading).multiplyScalar(speed);
+        } else { // flyby
+          car.flyT += speed * sdt;
+          if (car.flyT > 70) car.flyT = -70;
+          car.pos.set(car.flyT, 0, -3);
+          car.vel.set(1, 0, 0).multiplyScalar(speed);
+          car.heading.set(1, 0, 0);
+        }
+
+        // Pose the proxy.
+        carRig.position.copy(car.pos);
+        carRig.quaternion.setFromUnitVectors(_tmp.set(0, 0, 1), car.heading);
+
+        // Contact points off the pose. MARK_Y_OFFSET-ish lift, like the game.
+        _fwd.copy(car.heading);
+        _right.crossVectors(_fwd, _tmp.set(0, 1, 0)).negate().normalize();
+        const y = 0.05;
+        _rear0.copy(car.pos).addScaledVector(_fwd, -1.45).addScaledVector(_right, 0.82).setY(y);
+        _rear1.copy(car.pos).addScaledVector(_fwd, -1.45).addScaledVector(_right, -0.82).setY(y);
+        _front0.copy(car.pos).addScaledVector(_fwd, 1.45).addScaledVector(_right, 0.82).setY(y);
+        _front1.copy(car.pos).addScaledVector(_fwd, 1.45).addScaledVector(_right, -0.82).setY(y);
+
+        // Wetness plumbing that updateFromVehicle would otherwise own: the
+        // spray shutter is derived per frame, and the wet path emits from all
+        // four contacts.
+        smoke.setWetness(rig.wetness);
+        smoke._shutter = (settings.wetSpray?.streak ?? 1) * (1 / 25) * rig.wetness;
+        const pts = rig.wetness > 0 ? _allPts : _rearPts;
+
+        // ── The lab experiments, applied around the stock step ──────────────
+        // Curl first, so the class's own damping integrates it exactly the
+        // way it would integrate the ported version.
+        if (exp.curl) applyCurl(sdt);
+        // Churn dials ride on uniforms of the upgraded shader only.
+        smoke.setChurn?.(exp.churn, exp.churnRate);
+        // With curl on, most of the stock per-particle wobble is noise ON
+        // TOP of noise — scale it down for the step, restore after, so the
+        // Puffs slider keeps its game meaning.
+        const t0 = settings.turbulence;
+        const h0 = settings.haze.turbulence;
+        if (exp.curl) {
+          settings.turbulence = t0 * exp.wobbleKeep;
+          settings.haze.turbulence = h0 * exp.wobbleKeep;
+        }
+        // Burnout throws off spinning wheels while parked: pass wheel-speed
+        // velocity, not chassis velocity, so puffs still launch backwards.
+        smoke.update(sdt, pts, rig.emit, rig.intensity, car.vel.x, car.vel.z, camera);
+        settings.turbulence = t0;
+        settings.haze.turbulence = h0;
+      }
+
+      /* -------------------------------------------------------------- camera */
+
+      function resetView() {
+        if (cam.mode === "orbit") {
+          controls.target.set(0, 1.2, 0);
+          camera.position.set(rig.radius + 12, 6.5, rig.radius + 12);
+          controls.update();
+        }
+        $("s-cam").textContent = cam.mode;
+      }
+
+      function updateCamera() {
+        controls.enabled = cam.mode === "orbit";
+        if (cam.mode === "orbit") {
+          controls.update();
+          return;
+        }
+        // Chase: the game's boom numbers, so tells are judged at the shipping
+        // framing. Astern of the VELOCITY, like the real chase camera — during
+        // a drift the smoke fills the frame exactly as it does in the game.
+        _tmp.copy(car.vel).normalize();
+        camera.position.copy(car.pos)
+          .addScaledVector(_tmp, -cam.distance)
+          .add(new THREE.Vector3(0, cam.height, 0));
+        camera.up.set(0, 1, 0);
+        camera.lookAt(
+          car.pos.x + _tmp.x * cam.lookAhead,
+          0.7,
+          car.pos.z + _tmp.z * cam.lookAhead,
+        );
+      }
+
+      /* ------------------------------------------------------------------ io */
+
+      function exportSettings() {
+        // Experiments ride along under their own key so a tuned look and its
+        // upgrade dials travel as one file; import strips the key back out.
+        const payload = { ...settings, _labExperiments: { ...exp } };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "drift-smoke-settings.json";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      const settingsFileInput = (() => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".json,application/json";
+        input.hidden = true;
+        input.addEventListener("change", async () => {
+          const file = input.files?.[0];
+          input.value = "";
+          if (!file) return;
+          try {
+            const data = JSON.parse(await file.text());
+            const labExp = data._labExperiments;
+            delete data._labExperiments;
+            // Merge, not replace: the live object is captured by the smoke
+            // instance and by every GUI controller.
+            deepMerge(settings, data);
+            if (labExp) {
+              const wasUpgraded = exp.upgraded;
+              deepMerge(exp, labExp);
+              if (exp.upgraded !== wasUpgraded) buildSmoke();
+            }
+            refreshGui();
+          } catch (err) {
+            showErr(err);
+          }
+        });
+        document.body.appendChild(input);
+        return input;
+      })();
+
+      function deepMerge(dst, src) {
+        for (const k of Object.keys(src)) {
+          if (src[k] && typeof src[k] === "object" && dst[k] && typeof dst[k] === "object") {
+            deepMerge(dst[k], src[k]);
+          } else {
+            dst[k] = src[k];
+          }
+        }
+      }
+
+      /* ----------------------------------------------------------------- gui */
+
+      const refreshGui = () => gui?.controllersRecursive().forEach((c) => c.updateDisplay());
+
+      function buildGui() {
+        gui = new GUI({ title: "Drift smoke", width: 320 });
+
+        const fx = gui.addFolder("AAA experiments (lab-only)");
+        fx.add(exp, "upgraded").name("upgraded shading").onChange(buildSmoke).listen();
+        fx.add(exp, "churn", 0, 1, 0.01).name("churn (boil)");
+        fx.add(exp, "churnRate", 0, 2, 0.02).name("churn rate (Hz)");
+        fx.add(exp, "curl").name("curl turbulence");
+        fx.add(exp, "curlStrength", 0, 10, 0.1).name("curl strength");
+        fx.add(exp, "curlScale", 0.05, 1.5, 0.01).name("curl scale (1/m)");
+        fx.add(exp, "curlSpeed", 0, 3, 0.05).name("curl anim speed");
+        fx.add(exp, "curlHazeMul", 0, 1, 0.02).name("curl on bank ×");
+        fx.add(exp, "wobbleKeep", 0, 1, 0.02).name("keep stock wobble");
+
+        const fe = gui.addFolder("Emitter rig");
+        fe.add(rig, "mode", MODES).name("mode (M)").listen().onChange(updateHudMode);
+        fe.add(rig, "speed", 2, 40, 0.5).name("speed (m/s)");
+        fe.add(rig, "radius", 5, 30, 0.5).name("donut radius");
+        fe.add(rig, "driftYaw", 0, 60, 1).name("drift yaw (°)");
+        fe.add(rig, "intensity", 0, 1, 0.01).name("slip intensity");
+        fe.add(rig, "emit").name("emit (E)").listen();
+        fe.add(rig, "wetness", 0, 1, 0.01).name("wetness (W)").listen();
+        fe.add(rig, "timeScale", 0.05, 1, 0.01).name("time scale (T)").listen();
+
+        const fp = gui.addFolder("Puffs");
+        fp.add(settings, "emitRate", 10, 600, 5).name("emit rate /s");
+        fp.add(settings, "opacity", 0.02, 0.8, 0.005).name("opacity");
+        fp.add(settings, "sizeMin", 0.1, 2, 0.01).name("size min (m)");
+        fp.add(settings, "sizeMax", 0.1, 3, 0.01).name("size max (m)");
+        fp.add(settings, "sizeGrowth", 0, 8, 0.05).name("growth ×");
+        fp.add(settings, "lifeMin", 0.1, 4, 0.05).name("life min (s)");
+        fp.add(settings, "lifeMax", 0.1, 6, 0.05).name("life max (s)");
+        fp.add(settings, "fadeIn", 0, 0.5, 0.01).name("fade in");
+        fp.add(settings, "rise", 0, 3, 0.02).name("rise (m/s)");
+        fp.add(settings, "buoyancy", -2, 2, 0.02).name("buoyancy");
+        fp.add(settings, "turbulence", 0, 6, 0.05).name("turbulence");
+        fp.add(settings, "spread", 0, 2, 0.02).name("spread");
+        fp.add(settings, "drag", 0, 1, 0.01).name("speed drag");
+        fp.addColor(settings, "colorHot").name("colour hot");
+        fp.addColor(settings, "colorCool").name("colour cool");
+        fp.add(settings, "tintJitter", 0, 0.5, 0.01).name("tint jitter");
+
+        const fs = gui.addFolder("Shape / erosion");
+        fs.add(settings, "noiseScale", 0.3, 4, 0.02).name("noise scale");
+        fs.add(settings, "noiseDrift", 0, 1, 0.01).name("noise drift");
+        fs.add(settings, "erodeStart", 0, 0.6, 0.01).name("erode start");
+        fs.add(settings, "erodeEnd", 0.4, 2, 0.01).name("erode end");
+        fs.add(settings, "erodeSoft", 0.02, 1, 0.01).name("erode softness");
+        fs.add(settings, "worldNoiseMix", 0, 1, 0.01).name("world-noise mix");
+        fs.add(settings, "worldNoiseScale", 0.1, 3, 0.02).name("world scale");
+        fs.add(settings, "worldNoiseDrift", 0, 2, 0.02).name("world drift");
+        fs.add(settings, "softDepth", 0, 3, 0.02).name("soft depth (m)");
+
+        const fl = gui.addFolder("Lighting");
+        fl.add(settings, "sunTint", 0, 1, 0.01).name("lighting amount");
+        fl.add(settings, "ambient", 0, 1.5, 0.01).name("ambient");
+        fl.add(settings, "sunStrength", 0, 3, 0.02).name("sun strength");
+        fl.add(settings, "absorb", 0, 4, 0.02).name("self-shadow");
+        fl.add(settings, "scatter", 0, 4, 0.02).name("HG scatter");
+        fl.add(settings, "hgG", 0, 0.95, 0.01).name("HG anisotropy");
+
+        const fh = gui.addFolder("Lingering bank");
+        fh.add(settings.haze, "enabled").name("enabled");
+        fh.add(settings.haze, "emitRate", 0, 40, 0.5).name("emit rate /s");
+        fh.add(settings.haze, "opacity", 0.01, 0.3, 0.005).name("opacity");
+        fh.add(settings.haze, "lifeMin", 1, 20, 0.5).name("life min (s)");
+        fh.add(settings.haze, "lifeMax", 1, 30, 0.5).name("life max (s)");
+        fh.add(settings.haze, "sizeMin", 0.5, 6, 0.1).name("size min (m)");
+        fh.add(settings.haze, "sizeMax", 0.5, 8, 0.1).name("size max (m)");
+        fh.add(settings.haze, "sizeGrowth", 0, 6, 0.1).name("growth ×");
+        fh.add(settings.haze, "growthPower", 0.3, 1.2, 0.01).name("growth power");
+        fh.add(settings.haze, "fadeOutStart", 0, 0.9, 0.01).name("hold until");
+        fh.add(settings.haze, "rise", 0, 1.5, 0.02).name("rise");
+        fh.add(settings.haze, "buoyancy", -0.5, 1, 0.01).name("buoyancy");
+        fh.add(settings.haze, "spread", 0, 5, 0.05).name("spread");
+        fh.add(settings.haze, "turbulence", 0, 2, 0.02).name("turbulence");
+        fh.add(settings.haze, "erodeStart", 0, 0.6, 0.01).name("erode start");
+        fh.add(settings.haze, "erodeEnd", 0.4, 2, 0.01).name("erode end");
+        fh.add(settings.haze, "erodePower", 0.5, 5, 0.05).name("erode power");
+        fh.add(settings.haze, "worldScaleMul", 0.1, 1.5, 0.02).name("world scale ×");
+        fh.add(settings.haze, "worldMixMul", 0, 2.5, 0.05).name("world mix ×");
+        fh.addColor(settings.haze, "colorHot").name("colour hot");
+        fh.addColor(settings.haze, "colorCool").name("colour cool");
+
+        const fw = gui.addFolder("Wet spray");
+        fw.add(settings.wetSpray, "emitRate", 100, 2000, 10).name("emit rate /s");
+        fw.add(settings.wetSpray, "opacity", 0.02, 0.6, 0.005).name("opacity");
+        fw.add(settings.wetSpray, "sizeMin", 0.01, 0.2, 0.002).name("size min");
+        fw.add(settings.wetSpray, "sizeMax", 0.01, 0.4, 0.002).name("size max");
+        fw.add(settings.wetSpray, "lifeMin", 0.05, 1, 0.01).name("life min");
+        fw.add(settings.wetSpray, "lifeMax", 0.05, 2, 0.01).name("life max");
+        fw.add(settings.wetSpray, "rise", 0, 6, 0.05).name("rise");
+        fw.add(settings.wetSpray, "buoyancy", -10, 0, 0.1).name("gravity");
+        fw.add(settings.wetSpray, "drag", 0, 1, 0.01).name("speed carry");
+        fw.add(settings.wetSpray, "sideThrow", 0, 8, 0.1).name("side throw");
+        fw.add(settings.wetSpray, "streak", 0, 3, 0.05).name("streak (shutter ×)");
+
+        const fio = gui.addFolder("Settings I/O");
+        fio.add({ e: exportSettings }, "e").name("Export .json");
+        fio.add({ i: () => settingsFileInput.click() }, "i").name("Import .json");
+        fio.add({ r: () => {
+          deepMerge(settings, structuredClone(DEFAULT_DRIFT_SMOKE_SETTINGS));
+          refreshGui();
+        } }, "r").name("Reset to game defaults");
+
+        fw.close();
+        fio.close();
+      }
+
+      /* --------------------------------------------------------------- input */
+
+      function onKey(e) {
+        // Matched on e.key (the printed label), not e.code — AZERTY-safe.
+        const k = e.key.toLowerCase();
+        const n = Number(k);
+        if (Number.isInteger(n) && n >= 1 && n <= SUN_ORDER.length) {
+          sunName = SUN_ORDER[n - 1];
+          applySun();
+          return;
+        }
+        switch (k) {
+          case "m":
+            rig.mode = MODES[(MODES.indexOf(rig.mode) + 1) % MODES.length];
+            smoke.reset();
+            updateHudMode();
+            break;
+          case "c":
+            cam.mode = CAMS[(CAMS.indexOf(cam.mode) + 1) % CAMS.length];
+            resetView();
+            break;
+          case "e":
+            rig.emit = !rig.emit;
+            break;
+          case "t":
+            rig.timeScale = rig.timeScale < 1 ? 1 : 0.15;
+            break;
+          case "w":
+            rig.wetness = rig.wetness > 0 ? 0 : 1;
+            break;
+          case "r":
+            resetView();
+            break;
+          default:
+            break;
+        }
+      }
+
+      function onResize() {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      }
+
+      /* --------------------------------------------------------------- frame */
+
+      function updateHudMode() {
+        $("s-mode").textContent = `${rig.mode} · ${exp.upgraded ? "upgraded" : "stock"}`;
+      }
+
+      function frame() {
+        timer.update();
+        const dt = Math.min(0.05, timer.getDelta());
+        // Slow motion applies to the WORLD (car + smoke), never the camera —
+        // an orbit that also slows down just feels like a dropped frame rate.
+        const sdt = dt * rig.timeScale;
+
+        updateRig(dt, sdt);
+        updateCamera();
+        renderer.render(scene, camera);
+
+        if (hasTimestamps) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+
+        const now = performance.now();
+        if (!perf.since) { perf.since = now; updateHudMode(); }
+        perf.frames++;
+        const ts = renderer.info.render.timestamp;
+        if (ts > 0) { perf.gpuSum += ts; perf.gpuN++; }
+        if (now - perf.since >= 500) {
+          perf.fps = (perf.frames * 1000) / (now - perf.since);
+          $("s-fps").textContent = perf.fps.toFixed(0);
+          $("s-gpu").textContent = perf.gpuN
+            ? `${(perf.gpuSum / perf.gpuN).toFixed(2)} ms` : "n/a";
+          $("s-puffs").textContent = String(smoke.geometry.drawRange.count / 6);
+          $("s-bank").textContent = String(smoke.bankMesh?.count ?? 0);
+          perf.frames = 0;
+          perf.gpuSum = 0;
+          perf.gpuN = 0;
+          perf.since = now;
+        }
+      }
+
+      init().catch(showErr);
+    </script>
+  </body>
+</html>

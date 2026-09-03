@@ -4668,7 +4668,7 @@ export const PIECE_CATALOG = [
     id: "glass_road",
     label: "Glass road",
     hint: "Lacquer deck with a glazed window — drive over the void",
-    swatch: "#f0f0ee",
+    swatch: "#f1c40f",
     key: "",
     points: glassPoints,
     width: (pp) => pp.glassWidth,

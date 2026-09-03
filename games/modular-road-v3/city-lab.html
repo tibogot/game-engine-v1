@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>City Lab — modular-road skyline</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%; overflow: hidden; background: #0b1018; color: #dce6f2;
+        font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;
+      }
+      canvas { display: block; width: 100%; height: 100%; }
+
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10; width: 312px;
+        max-height: calc(100vh - 24px); overflow-y: auto;
+        padding: 12px 14px;
+        background: rgba(8, 13, 22, 0.82);
+        border: 1px solid rgba(150, 180, 220, 0.18);
+        border-radius: 10px;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+      }
+      #hud::-webkit-scrollbar { width: 8px; }
+      #hud::-webkit-scrollbar-thumb { background: rgba(150,180,220,0.25); border-radius: 4px; }
+      #hud h1 {
+        margin: 0 0 2px; font-size: 11px; letter-spacing: 0.09em;
+        text-transform: uppercase; color: #7f93ad; font-weight: 700;
+      }
+      #hud .title { margin: 0 0 10px; font-size: 17px; font-weight: 650; color: #f2f6fb; }
+
+      .stats {
+        display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
+        padding: 8px 0; margin-bottom: 6px;
+        border-top: 1px solid rgba(150,180,220,0.14);
+        border-bottom: 1px solid rgba(150,180,220,0.14);
+        font-variant-numeric: tabular-nums;
+      }
+      .stats dt { color: #7f93ad; font-size: 11px; }
+      .stats dd { margin: 0; color: #f2f6fb; font-size: 12px; font-weight: 600; }
+      .stats dd.warn { color: #ffb05c; }
+      .stats dd.good { color: #6ee7a8; }
+
+      .grp { margin-top: 10px; }
+      .grp > summary {
+        cursor: pointer; list-style: none; user-select: none;
+        font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+        color: #6fd3ff; font-weight: 700; padding: 4px 0;
+      }
+      .grp > summary::-webkit-details-marker { display: none; }
+      .grp > summary::before { content: "▸ "; color: #45607d; }
+      .grp[open] > summary::before { content: "▾ "; }
+
+      .row { display: grid; grid-template-columns: 104px 1fr 44px; gap: 6px;
+             align-items: center; margin: 3px 0; }
+      .row label { color: #9fb0c6; font-size: 11px; }
+      .row input[type=range] { width: 100%; height: 16px; accent-color: #6fd3ff; }
+      .row .val { color: #cfe0f2; font-size: 11px; text-align: right;
+                  font-variant-numeric: tabular-nums; }
+
+      .btns { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+      .btns button {
+        flex: 1 1 auto; padding: 5px 8px; font-size: 11px; font-weight: 600;
+        color: #cfe0f2; background: rgba(80, 120, 170, 0.22);
+        border: 1px solid rgba(150, 180, 220, 0.28); border-radius: 6px; cursor: pointer;
+      }
+      .btns button:hover { background: rgba(110, 160, 220, 0.35); color: #fff; }
+
+      .keys {
+        margin-top: 10px; padding-top: 8px;
+        border-top: 1px solid rgba(150, 180, 220, 0.16);
+        color: #7f93ad; font-size: 11px; line-height: 1.6;
+      }
+      .keys b { color: #cfe0f2; font-weight: 600; }
+      .keys .hint { color: #6fd3ff; }
+
+      #err {
+        position: fixed; left: 12px; bottom: 12px; z-index: 20;
+        max-width: 640px; padding: 10px 12px; display: none;
+        background: rgba(60, 12, 12, 0.94); border: 1px solid #a44;
+        border-radius: 8px; color: #ffb0b0; white-space: pre-wrap;
+        font: 11px/1.5 ui-monospace, monospace;
+      }
+      #boot {
+        position: fixed; inset: 0; z-index: 30; display: flex;
+        align-items: center; justify-content: center; pointer-events: none;
+        color: #6fd3ff; font-size: 14px; letter-spacing: 0.05em;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>City lab</h1>
+      <div class="title">Skyline for the sky track</div>
+
+      <dl class="stats">
+        <dt>FPS</dt><dd id="s-fps">–</dd>
+        <dt>GPU</dt><dd id="s-gpu">–</dd>
+        <dt>Draws</dt><dd id="s-draw">–</dd>
+        <dt>Triangles</dt><dd id="s-tri">–</dd>
+        <dt>Buildings</dt><dd id="s-count">–</dd>
+        <dt>LOD 0/1/2</dt><dd id="s-lod">–</dd>
+        <dt>LOD pass</dt><dd id="s-lodms">–</dd>
+        <dt>Kit</dt><dd id="s-kit">–</dd>
+        <dt>Backend</dt><dd id="s-backend">–</dd>
+        <dt>Shadows</dt><dd id="s-shadow">–</dd>
+        <dt>City</dt><dd id="s-city">–</dd>
+        <dt>Camera</dt><dd id="s-drive">–</dd>
+      </dl>
+
+      <div class="btns">
+        <button data-view="street">Street</button>
+        <button data-view="deck">Deck</button>
+        <button data-view="skyline">Skyline</button>
+        <button data-view="canyon">Canyon</button>
+      </div>
+
+      <details class="grp" open>
+        <summary>Facade</summary>
+        <div id="g-facade"></div>
+      </details>
+      <details class="grp">
+        <summary>Night &amp; sun</summary>
+        <div id="g-night"></div>
+      </details>
+      <details class="grp">
+        <summary>Anti-alias (the shimmer knobs)</summary>
+        <div id="g-aa"></div>
+      </details>
+      <details class="grp">
+        <summary>LOD &amp; deck</summary>
+        <div id="g-lod"></div>
+      </details>
+      <details class="grp">
+        <summary>Layout</summary>
+        <div id="g-layout"></div>
+      </details>
+      <details class="grp">
+        <summary>Kit (re-bakes geometry)</summary>
+        <div id="g-kit"></div>
+      </details>
+
+      <div class="btns">
+        <button id="b-seed">New seed</button>
+        <button id="b-copy">Copy params</button>
+      </div>
+
+      <div class="keys">
+        <b class="hint">G</b> drive-by at car speed — <b>judge the shimmer here</b><br />
+        <b>WASD</b> fly · <b>Q/E</b> down/up · <b>Shift</b> boost · <b>drag</b> look<br />
+        <b>1–4</b> street / deck / skyline / canyon<br />
+        <b>C</b> city on/off (A/B) · <b>B</b> backend · <b>O</b> shadows · <b>H</b> panel
+      </div>
+    </div>
+
+    <div id="boot">initialising WebGPU…</div>
+    <div id="err"></div>
+
+    <script type="module">
+      import { startCityLab } from "./cityLab.js";
+      // Exposed for automated inspection / screenshots — the CDP harness reads
+      // renderer.info off this to check what the backends actually cost.
+      startCityLab().then((lab) => { window.__lab = lab; }).catch((err) => {
+        console.error(err);
+        const el = document.getElementById("err");
+        el.style.display = "block";
+        el.textContent = `${err?.message ?? err}\n\n${err?.stack ?? ""}`;
+        document.getElementById("boot").textContent = "";
+      });
+    </script>
+  </body>
+</html>

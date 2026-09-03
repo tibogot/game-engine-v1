@@ -1,0 +1,568 @@
+// ============================================================================
+// CITY LAB — tuning and measurement harness for modularRoadCity.js.
+//
+// Standalone: no v3 engine, no terrain, no post-FX, no clouds. A gradient sky, a
+// sun, a deck stub and the city. Every number on screen is therefore THE CITY
+// and not somebody else's frame — the same reason cloudLab.js refuses to import
+// the engine.
+//
+// ── WHAT THIS LAB IS FOR, SPECIFICALLY ───────────────────────────────────────
+//
+// The thing that decides whether a procedural city works in THIS game is not a
+// screenshot. It is a wall of high-frequency window grids going past a camera
+// at 45 m/s, and the failure mode is shimmer, not slowness. So the lab's
+// headline feature is not a slider — it is DRIVE-BY (G), which flies the camera
+// down the corridor at car speed at deck altitude, on the exact sightline the
+// chase camera will have. Judge the facade there, in motion, before judging it
+// anywhere else.
+//
+// The four static viewpoints are the four cases that then have to hold:
+//
+//   1 STREET   ground level between towers — does the facade survive close up,
+//              and does the lobby band stop it reading as a stack of floors
+//   2 DECK     on the track at build altitude, towers at mid distance. THE
+//              gameplay eye. This is where the LOD0/LOD1 ring lands.
+//   3 SKYLINE  far and high — silhouette and aliasing, the backdrop case
+//   4 CANYON   between two towers at deck height, worst-case overdraw: tall
+//              near geometry filling the screen, which is where fragment cost
+//              actually lives
+//
+// ── MEASURE, DO NOT GUESS ────────────────────────────────────────────────────
+//
+//   C  city off/on          — the A/B delta is the only honest cost figure
+//   B  batched / instanced  — measured 1150 draws vs 34; BatchedMesh is NOT one
+//                             draw on WebGPU (no multi-draw in the spec)
+//   O  shadows off/on       — cheap here (+0.04 ms) only because just the L0
+//                             tier casts; that gate is the instanced backend'''s
+//
+// GPU ms comes from timestamp queries the same way the cloud lab gets it:
+// `trackTimestamp` is a BACKEND CONSTRUCTION option, so it is passed to the
+// WebGPURenderer constructor and never set afterwards.
+// ============================================================================
+import * as THREE from "three/webgpu";
+import { Fn, vec3, vec4, uniform, positionWorld, normalize, smoothstep, mix, max, dot, pow } from "three/tsl";
+import { createModularRoadCity, CITY_DEFAULTS } from "./modularRoadCity.js";
+import { FACADE_DEFAULTS } from "./modularRoadCityFacade.js";
+import { KIT_DEFAULTS } from "./modularRoadCityKit.js";
+
+/** Default build altitude in the game's sky-stunt mode (roadGame.js). */
+const DECK_ALT = 40;
+/** Roughly the speed the car actually travels at (modularRoadKit FOLLOW_HOLD). */
+const CAR_SPEED = 45;
+
+/**
+ * `flyStep` builds forward as (sin yaw·cos pitch, sin pitch, cos yaw·cos pitch),
+ * so a viewpoint that wants to LOOK AT the city centre from (x, z) needs
+ * yaw = atan2(-x, -z). Getting that backwards aims the camera away from the
+ * skyline and quietly turns the backdrop test into a shot of empty sky.
+ */
+const VIEWPOINTS = {
+  street:  { pos: [18, 6, 300],           yaw: Math.PI, pitch: 0.22 },
+  deck:    { pos: [0, DECK_ALT + 3, 420], yaw: Math.PI, pitch: -0.02 },
+  // Outside the built radius (1200 m), below the tallest crowns (~300 m), aimed
+  // at the middle — the city as a BACKDROP, which is the aliasing case.
+  skyline: { pos: [1500, 200, 1500],      yaw: Math.PI * 1.25, pitch: 0.02 },
+  canyon:  { pos: [0, DECK_ALT + 2, 120], yaw: Math.PI, pitch: 0.06 },
+};
+
+export async function startCityLab() {
+  const boot = document.getElementById("boot");
+
+  // ── Device ─────────────────────────────────────────────────────────────────
+  if (!navigator.gpu) throw new Error("WebGPU not available in this browser.");
+  const adapter = await navigator.gpu.requestAdapter({ featureLevel: "compatibility" });
+  if (!adapter) throw new Error("No WebGPU adapter.");
+  const device = await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+  const hasTimestamps = device.features.has("timestamp-query");
+
+  const renderer = new THREE.WebGPURenderer({
+    antialias: true, device, trackTimestamp: hasTimestamps,
+  });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+  await renderer.init();
+
+  const scene = new THREE.Scene();
+  // Far plane matches the engine's order of magnitude (v3/app/main.js uses
+  // WORLD_SIZE * 4 ≈ 8096) so the skyline view is not clipped here and visible
+  // in the game.
+  const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 8192);
+
+  // ── Sky + sun ──────────────────────────────────────────────────────────────
+  // A plain analytic gradient. Nothing here should compete for GPU time; the
+  // real sky (modularRoadSky.js) is a separate, already-measured cost.
+  const sunElev = { deg: 14, azim: 205 };
+  const uSunDir = uniform(new THREE.Vector3());
+  const uZenith = uniform(new THREE.Color(0x2c4f86));
+  const uHorizon = uniform(new THREE.Color(0xd9a273));
+
+  const skyMat = new THREE.MeshBasicNodeMaterial();
+  skyMat.side = THREE.BackSide;
+  skyMat.depthWrite = false;
+  skyMat.fog = false;
+  skyMat.colorNode = Fn(() => {
+    const dir = normalize(positionWorld);
+    const t = smoothstep(-0.08, 0.55, dir.y);
+    const col = mix(uHorizon, uZenith, t).toVar();
+    const mu = max(dot(dir, uSunDir), 0.0);
+    col.addAssign(vec3(1.0, 0.86, 0.66).mul(pow(mu, 800.0).mul(12.0)));
+    col.addAssign(vec3(1.0, 0.74, 0.5).mul(pow(mu, 10.0).mul(0.4)));
+    return vec4(col, 1.0);
+  })();
+  const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(6000, 32, 16), skyMat);
+  skyMesh.frustumCulled = false;
+  scene.add(skyMesh);
+
+  const sun = new THREE.DirectionalLight(0xffe6c4, 2.6);
+  sun.castShadow = true;
+  // A city is an enormous occluder. The shadow camera is deliberately SMALL and
+  // camera-following: a cascade sized to the whole skyline would spend all its
+  // resolution on towers nowhere near the road, which is the failure this lab
+  // is meant to make visible.
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.near = 1;
+  sun.shadow.camera.far = 900;
+  const SHADOW_RADIUS = 260;
+  sun.shadow.camera.left = -SHADOW_RADIUS;
+  sun.shadow.camera.right = SHADOW_RADIUS;
+  sun.shadow.camera.top = SHADOW_RADIUS;
+  sun.shadow.camera.bottom = -SHADOW_RADIUS;
+  sun.shadow.bias = -0.0006;
+  scene.add(sun, sun.target);
+
+  const hemi = new THREE.HemisphereLight(0x9dbbe0, 0x3a3630, 0.9);
+  scene.add(hemi);
+
+  const _sunDir = new THREE.Vector3();
+  function syncSun() {
+    const el = THREE.MathUtils.degToRad(sunElev.deg);
+    const az = THREE.MathUtils.degToRad(sunElev.azim);
+    _sunDir.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).normalize();
+    uSunDir.value.copy(_sunDir);
+    // Night follows the sun automatically — one control, not two that disagree.
+    const night = THREE.MathUtils.clamp(1 - (sunElev.deg + 4) / 16, 0, 1);
+    if (city) city.facade.nightAmount = night;
+    sun.intensity = 2.6 * THREE.MathUtils.clamp((sunElev.deg + 3) / 14, 0.02, 1);
+    hemi.intensity = THREE.MathUtils.lerp(0.16, 0.9, 1 - night);
+    const dusk = THREE.MathUtils.clamp(1 - night, 0, 1);
+    uZenith.value.setHex(0x2c4f86).multiplyScalar(0.18 + dusk * 0.82);
+    uHorizon.value.setHex(0xd9a273).multiplyScalar(0.12 + dusk * 0.88);
+  }
+
+  // ── Deck stub ──────────────────────────────────────────────────────────────
+  // A straight ribbon down the corridor the city keeps clear of. It is here for
+  // SCALE and for the sightline, not for looks — with nothing at deck altitude
+  // the DECK and CANYON viewpoints are just numbers.
+  const deck = new THREE.Group();
+  deck.name = "DeckStub";
+  {
+    const asphalt = new THREE.MeshStandardNodeMaterial({ color: 0x34343a, roughness: 0.85 });
+    const kerb = new THREE.MeshStandardNodeMaterial({
+      color: 0xf0e6d6, roughness: 0.5, emissive: 0x221703, emissiveIntensity: 0.3,
+    });
+    const LEN = 3200;
+    const d = new THREE.Mesh(new THREE.BoxGeometry(13, 0.5, LEN), asphalt);
+    d.receiveShadow = true;
+    const kl = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, LEN), kerb);
+    kl.position.set(-6.7, 0.4, 0);
+    const kr = kl.clone();
+    kr.position.x = 6.7;
+    deck.add(d, kl, kr);
+  }
+  scene.add(deck);
+
+  // ── City ───────────────────────────────────────────────────────────────────
+  // The corridor the city must keep clear of is the deck's centreline (x = 0),
+  // so `avoid` is just the distance to it. In the game this becomes the real
+  // track polyline.
+  const avoid = (x) => Math.abs(x);
+
+  let city = null;
+  let deckAlt = DECK_ALT;
+
+  function makeCity(seed) {
+    if (city) { scene.remove(city.group); city.dispose(); }
+    city = createModularRoadCity({ seed, avoid });
+    scene.add(city.group);
+    syncSun();
+  }
+  boot.textContent = "baking city…";
+  makeCity(20260902);
+  deck.position.y = deckAlt;
+
+  // ── Free-fly camera ────────────────────────────────────────────────────────
+  // Declared here, not down with the key handling: applyView() clears `driving`
+  // and runs during init, so a `let` further down would put it in the temporal
+  // dead zone and throw before the first frame.
+  let driving = false;
+  let cityOn = true;
+  let shadowsOn = false;
+
+  const cam = { yaw: Math.PI, pitch: 0, speed: 55 };
+  function applyView(name) {
+    const v = VIEWPOINTS[name];
+    if (!v) return;
+    driving = false;
+    camera.position.set(...v.pos);
+    if (name === "deck" || name === "canyon") camera.position.y = deckAlt + 3;
+    cam.yaw = v.yaw; cam.pitch = v.pitch;
+  }
+  applyView("deck");
+
+  let dragging = false, lastX = 0, lastY = 0;
+  renderer.domElement.addEventListener("pointerdown", (e) => {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    renderer.domElement.setPointerCapture(e.pointerId);
+  });
+  renderer.domElement.addEventListener("pointerup", (e) => {
+    dragging = false;
+    try { renderer.domElement.releasePointerCapture(e.pointerId); } catch {}
+  });
+  renderer.domElement.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    cam.yaw -= (e.clientX - lastX) * 0.0035;
+    cam.pitch = THREE.MathUtils.clamp(cam.pitch - (e.clientY - lastY) * 0.0035, -1.5, 1.5);
+    lastX = e.clientX; lastY = e.clientY;
+  });
+
+  // Movement on e.code (physical key) so WASD works on AZERTY; shortcuts on
+  // e.key, which is the printed label.
+  const held = new Set();
+
+  addEventListener("keydown", (e) => {
+    held.add(e.code);
+    const k = e.key.toLowerCase();
+    if (k === "1") applyView("street");
+    if (k === "2") applyView("deck");
+    if (k === "3") applyView("skyline");
+    if (k === "4") applyView("canyon");
+    if (k === "g") { driving = !driving; if (driving) startDrive(); syncBadges(); }
+    if (k === "c") { cityOn = !cityOn; city.setEnabled(cityOn); syncBadges(); }
+    if (k === "b") {
+      city.setBackend(city.params.backend === "batched" ? "instanced" : "batched");
+      city.setShadows(shadowsOn);
+      syncBadges();
+    }
+    if (k === "o") { shadowsOn = !shadowsOn; city.setShadows(shadowsOn); syncBadges(); }
+    if (k === "h") {
+      const h = document.getElementById("hud");
+      h.style.display = h.style.display === "none" ? "" : "none";
+    }
+  });
+  addEventListener("keyup", (e) => held.delete(e.code));
+  addEventListener("blur", () => held.clear());
+
+  const _fwd = new THREE.Vector3(), _right = new THREE.Vector3();
+  const _up = new THREE.Vector3(0, 1, 0);
+
+  function startDrive() {
+    camera.position.set(0, deckAlt + 2.4, 1500);
+    cam.yaw = Math.PI; cam.pitch = -0.01;
+  }
+
+  function driveStep(dt) {
+    // Straight down the corridor at car speed, with a slow lateral weave so the
+    // facades are never sampled at a fixed screen velocity — a constant slide
+    // hides shimmer that a real chase camera would show.
+    camera.position.z -= CAR_SPEED * dt;
+    camera.position.x = Math.sin(camera.position.z * 0.0016) * 3.2;
+    camera.position.y = deckAlt + 2.4;
+    cam.yaw = Math.PI + Math.sin(camera.position.z * 0.0016) * 0.05;
+    cam.pitch = -0.01;
+    if (camera.position.z < -1500) camera.position.z = 1500;
+  }
+
+  function flyStep(dt) {
+    _fwd.set(
+      Math.sin(cam.yaw) * Math.cos(cam.pitch),
+      Math.sin(cam.pitch),
+      Math.cos(cam.yaw) * Math.cos(cam.pitch),
+    ).normalize();
+    _right.crossVectors(_fwd, _up).normalize();
+    if (!driving) {
+      const boost = held.has("ShiftLeft") || held.has("ShiftRight") ? 6 : 1;
+      const v = cam.speed * boost * dt;
+      if (held.has("KeyW")) camera.position.addScaledVector(_fwd, v);
+      if (held.has("KeyS")) camera.position.addScaledVector(_fwd, -v);
+      if (held.has("KeyD")) camera.position.addScaledVector(_right, v);
+      if (held.has("KeyA")) camera.position.addScaledVector(_right, -v);
+      if (held.has("KeyE")) camera.position.y += v;
+      if (held.has("KeyQ")) camera.position.y -= v;
+    }
+    camera.lookAt(
+      camera.position.x + _fwd.x, camera.position.y + _fwd.y, camera.position.z + _fwd.z,
+    );
+  }
+
+  // ── Controls ───────────────────────────────────────────────────────────────
+  // Each spec row is [key, lo, hi, step]. The GROUP decides what a change costs:
+  //   live    — writes a uniform or a plain field, no rebuild
+  //   layout  — re-runs the lot layout and the backend (debounced)
+  //   kit     — re-bakes the archetype geometry too (debounced, the dearest)
+  const SPECS = {
+    "g-facade": ["live", FACADE_DEFAULTS, [
+      ["floorHeight", 2.6, 6, 0.05], ["colWidth", 1.4, 6, 0.05],
+      ["winW", 0.2, 0.95, 0.01], ["winH", 0.2, 0.95, 0.01],
+      ["lobbyHeight", 0, 18, 0.5],
+      ["glassRough", 0.02, 0.6, 0.01], ["glassMetal", 0, 1, 0.02],
+      ["wallRough", 0.3, 1, 0.02],
+      ["glassJitter", 0, 1, 0.02], ["paneGradient", 0, 1.5, 0.02],
+    ]],
+    "g-night": ["live", FACADE_DEFAULTS, [
+      ["litFraction", 0, 1, 0.01], ["darkFloors", 0, 0.8, 0.01],
+      ["emissiveBoost", 0, 8, 0.1], ["nightAmount", 0, 1, 0.01],
+    ]],
+    "g-aa": ["live", FACADE_DEFAULTS, [
+      ["lodSharp", 0.1, 2, 0.02], ["lodFlat", 0.01, 0.5, 0.01],
+    ]],
+    "g-lod": ["live", CITY_DEFAULTS, [
+      ["lod0Dist", 40, 800, 10], ["lod1Dist", 200, 3000, 25],
+      ["lodHysteresis", 0, 120, 5], ["lodInterval", 0, 2, 0.05],
+      ["lodMoveDist", 0, 60, 1],
+    ]],
+    "g-layout": ["layout", CITY_DEFAULTS, [
+      ["extent", 300, 2500, 50], ["lotSize", 18, 70, 1],
+      ["blockLots", 1, 8, 1], ["streetWidth", 8, 60, 1],
+      ["density", 0.2, 1, 0.02], ["downtownPower", 0.4, 6, 0.1],
+      ["heightNoise", 0, 1, 0.02],
+      ["scaleYMin", 0.4, 1.5, 0.02], ["scaleYMax", 0.6, 3, 0.02],
+      ["avoidRadius", 0, 200, 5],
+    ]],
+    "g-kit": ["kit", KIT_DEFAULTS, [
+      ["archetypes", 2, 40, 1],
+      ["minHeight", 8, 120, 2], ["maxHeight", 40, 500, 5],
+      ["minFootprint", 8, 40, 1], ["maxFootprint", 12, 60, 1],
+      ["setbackChance", 0, 1, 0.02], ["maxSetbacks", 0, 6, 1],
+      ["setbackDepth", 0, 0.4, 0.01], ["stringCourseEvery", 0, 30, 1],
+    ]],
+  };
+
+  const kitOverrides = {};
+  const readouts = [];
+  let rebuildTimer = 0;
+
+  function fmt(v) {
+    if (Math.abs(v) >= 100) return v.toFixed(0);
+    if (Math.abs(v) >= 1) return v.toFixed(2).replace(/\.?0+$/, "");
+    return v.toPrecision(2);
+  }
+
+  // Layout and kit changes cost tens of milliseconds each. Dragging a slider
+  // would otherwise stutter the whole page, so they coalesce.
+  function scheduleRebuild(kind) {
+    clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(() => {
+      boot.textContent = "rebuilding…";
+      requestAnimationFrame(() => {
+        if (kind === "kit") city.rebuildKit(kitOverrides);
+        else city.rebuild();
+        city.setShadows(shadowsOn);
+        city.setEnabled(cityOn);
+        boot.textContent = "";
+        syncBadges();
+      });
+    }, 180);
+  }
+
+  for (const [groupId, [kind, defaults, list]] of Object.entries(SPECS)) {
+    const host = document.getElementById(groupId);
+    for (const [key, lo, hi, step] of list) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML =
+        `<label>${key.replace(/([A-Z])/g, " $1").toLowerCase()}</label>` +
+        `<input type="range" min="${lo}" max="${hi}" step="${step}"><span class="val"></span>`;
+      const input = row.querySelector("input");
+      const val = row.querySelector(".val");
+
+      const get = () => {
+        if (kind === "kit") return kitOverrides[key] ?? defaults[key];
+        if (kind === "layout") return city.params[key];
+        // Facade params live behind the material's proxy; LOD params on the city.
+        return key in city.facade ? city.facade[key] : city.params[key];
+      };
+      const set = (v) => {
+        if (kind === "kit") { kitOverrides[key] = v; return; }
+        if (kind === "layout") {
+          city.params[key] = v;
+          // lotSize is SHARED — the facade hashes the same grid the layout
+          // builds on. Letting the two drift smears the per-building tint
+          // across neighbours, which looks like a shader bug and is not one.
+          if (key === "lotSize") city.facade.lotSize = v;
+          return;
+        }
+        if (key in city.facade) city.facade[key] = v; else city.params[key] = v;
+      };
+
+      input.value = get();
+      val.textContent = fmt(get());
+      input.addEventListener("input", () => {
+        set(parseFloat(input.value));
+        val.textContent = fmt(parseFloat(input.value));
+        if (kind !== "live") scheduleRebuild(kind);
+      });
+      readouts.push(() => { input.value = get(); val.textContent = fmt(get()); });
+      host.appendChild(row);
+    }
+  }
+
+  // Sun angle drives night, glass and the whole mood — its own row, not buried.
+  {
+    const host = document.getElementById("g-night");
+    for (const [key, lo, hi, step] of [["deg", -6, 80, 0.5], ["azim", 0, 360, 1]]) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = `<label>sun ${key === "deg" ? "elevation" : "azimuth"}</label>` +
+        `<input type="range" min="${lo}" max="${hi}" step="${step}"><span class="val"></span>`;
+      const input = row.querySelector("input");
+      const val = row.querySelector(".val");
+      input.value = sunElev[key];
+      val.textContent = fmt(sunElev[key]);
+      input.addEventListener("input", () => {
+        sunElev[key] = parseFloat(input.value);
+        val.textContent = fmt(sunElev[key]);
+        syncSun();
+        for (const r of readouts) r();
+      });
+      host.appendChild(row);
+    }
+  }
+
+  // Deck altitude — the DECK and CANYON viewpoints are only meaningful at the
+  // height the track is actually built at.
+  {
+    const host = document.getElementById("g-lod");
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<label>deck altitude</label>` +
+      `<input type="range" min="6" max="400" step="2"><span class="val"></span>`;
+    const input = row.querySelector("input");
+    const val = row.querySelector(".val");
+    input.value = deckAlt;
+    val.textContent = fmt(deckAlt);
+    input.addEventListener("input", () => {
+      deckAlt = parseFloat(input.value);
+      deck.position.y = deckAlt;
+      val.textContent = fmt(deckAlt);
+    });
+    host.appendChild(row);
+  }
+
+  for (const b of document.querySelectorAll("[data-view]")) {
+    b.addEventListener("click", () => { applyView(b.dataset.view); syncBadges(); });
+  }
+  document.getElementById("b-seed").addEventListener("click", () => {
+    city.setSeed((Math.random() * 0xffffffff) >>> 0);
+    city.setShadows(shadowsOn);
+    syncBadges();
+  });
+  document.getElementById("b-copy").addEventListener("click", async () => {
+    const out = { city: {}, facade: {}, kit: { ...kitOverrides } };
+    for (const k of Object.keys(CITY_DEFAULTS)) {
+      if (city.params[k] !== CITY_DEFAULTS[k]) out.city[k] = city.params[k];
+    }
+    for (const k of Object.keys(FACADE_DEFAULTS)) {
+      if (city.facade[k] !== FACADE_DEFAULTS[k]) out.facade[k] = city.facade[k];
+    }
+    const text = JSON.stringify(out, null, 2);
+    try { await navigator.clipboard.writeText(text); } catch {}
+    console.log("[CityLab] changed params:\n" + text);
+    const btn = document.getElementById("b-copy");
+    btn.textContent = "copied ✓";
+    setTimeout(() => { btn.textContent = "Copy params"; }, 1200);
+  });
+
+  // ── Badges ─────────────────────────────────────────────────────────────────
+  function badge(id, on, onText, offText) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = on ? onText : offText;
+    el.className = on ? "good" : "";
+  }
+  function syncBadges() {
+    // NOT labelled "1 draw": on WebGPU a BatchedMesh issues one draw per visible
+    // instance, which is the whole reason instanced is the default.
+    badge("s-backend", city.params.backend === "instanced", "instanced", "batched");
+    badge("s-shadow", shadowsOn, "on", "off");
+    badge("s-city", cityOn, "on", "OFF (A/B)");
+    badge("s-drive", driving, "DRIVE-BY", "free-fly");
+    document.getElementById("s-count").textContent =
+      `${city.stats.buildings} in ${city.stats.meshes} mesh${city.stats.meshes === 1 ? "" : "es"}`;
+    document.getElementById("s-kit").textContent =
+      `${city.stats.kit.count} × ~${city.stats.kit.avgTrisL0}/${city.stats.kit.avgTrisL1}/` +
+      `${city.stats.kit.avgTrisL2} tris (${city.stats.kit.bakeMs.toFixed(0)} ms)`;
+  }
+  syncSun();
+  syncBadges();
+
+  // ── Resize ─────────────────────────────────────────────────────────────────
+  addEventListener("resize", () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // ── Loop ───────────────────────────────────────────────────────────────────
+  const sGpu = document.getElementById("s-gpu");
+  const sFps = document.getElementById("s-fps");
+  const sDraw = document.getElementById("s-draw");
+  const sTri = document.getElementById("s-tri");
+  const sLod = document.getElementById("s-lod");
+  const sLodMs = document.getElementById("s-lodms");
+  boot.textContent = "";
+
+  let last = performance.now();
+  let fpsAcc = 0, fpsN = 0, gpuAcc = 0, gpuN = 0, hudT = 0;
+
+  renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+
+    if (driving) driveStep(dt);
+    flyStep(dt);
+
+    // Sun follows the camera so the shadow cascade stays over the player. This
+    // is what the engine's cascades do; a fixed cascade over a 2.4 km city
+    // would have no resolution anywhere.
+    sun.target.position.set(camera.position.x, 0, camera.position.z);
+    sun.position.copy(sun.target.position).addScaledVector(_sunDir, 600);
+    sun.target.updateMatrixWorld();
+
+    skyMesh.position.copy(camera.position);
+    city.update(dt, camera);
+
+    renderer.render(scene, camera);
+    if (hasTimestamps) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+
+    fpsAcc += 1 / Math.max(dt, 1e-4); fpsN++;
+    const g = renderer.info.render.timestamp;
+    if (g > 0) { gpuAcc += g; gpuN++; }
+
+    hudT += dt;
+    if (hudT > 0.25) {
+      hudT = 0;
+      const fps = fpsAcc / Math.max(fpsN, 1);
+      const gpu = gpuAcc / Math.max(gpuN, 1);
+      fpsAcc = fpsN = gpuAcc = gpuN = 0;
+      sFps.textContent = fps.toFixed(0);
+      sFps.className = fps < 50 ? "warn" : "good";
+      sGpu.textContent = hasTimestamps ? `${gpu.toFixed(2)} ms` : "n/a";
+      sGpu.className = gpu > 8 ? "warn" : gpu > 0 ? "good" : "";
+      sDraw.textContent = String(renderer.info.render.drawCalls);
+      sTri.textContent = `${(renderer.info.render.triangles / 1000).toFixed(0)}k`;
+      const l = city.stats.lod;
+      sLod.textContent = `${l[0]} / ${l[1]} / ${l[2]}`;
+      sLodMs.textContent = `${city.stats.lastLodMs.toFixed(2)} ms`;
+      sLodMs.className = city.stats.lastLodMs > 2 ? "warn" : "";
+    }
+  });
+
+  // Exposed for automated inspection / screenshots.
+  return { renderer, scene, camera, get city() { return city; } };
+}

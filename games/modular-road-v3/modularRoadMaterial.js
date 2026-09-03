@@ -409,7 +409,7 @@ export function createRoadMaterial(opts = {}) {
     // own material, which is the whole reason it is cheap: the piece stays one
     // mesh on the shared road material, so it still instances with every other
     // road piece instead of adding a draw call per placement.
-    panelColor: uniform(lin(opts.panelColor ?? 0xe7e7e2)), // lacquered white
+    panelColor: uniform(lin(opts.panelColor ?? 0xf1c40f)), // lacquered yellow
     panelRough: uniform(opts.panelRough ?? 0.09), // wet-looking, not mirror
     // ── WET ROAD ─────────────────────────────────────────────────────────
     // Declared unconditionally, even when `opts.wet` is off, so that a look
