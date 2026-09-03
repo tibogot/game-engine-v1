@@ -35,7 +35,7 @@
 import * as THREE from "three/webgpu";
 import {
   float, vec2, vec3, vec4, Fn, If, Loop, Break, uniform, texture, uv,
-  normalize, dot, max, min, mix, smoothstep, pow, exp, abs, saturate,
+  normalize, dot, max, min, mix, smoothstep, pow, exp, abs, sqrt, saturate,
   screenCoordinate, interleavedGradientNoise,
 } from "three/tsl";
 import {
@@ -95,8 +95,26 @@ export const PAINTED_CLOUD_DEFAULTS = {
   silver: 1.1,
   /** How strongly distance dissolves the deck into the sky behind it. */
   aerial: 0.55,
-  /** Below this `dir.y` the deck fades out — the slab crossing runs to infinity there. */
-  horizonFade: 0.035,
+  /**
+   * Below this `dir.y` the deck fades out. Small now that the deck CURVES: with a
+   * planet under it the slab crossing is finite even at dir.y = 0, so the deck can be
+   * followed almost all the way down to the true horizon instead of being cut off
+   * early to hide an infinite smear.
+   */
+  horizonFade: 0.004,
+  /**
+   * Planet radius in KILOMETRES — the whole reason the deck has a horizon.
+   *
+   * A flat slab is hit at `t = altitude / dir.y`, which runs to INFINITY as the ray
+   * levels out: the last few degrees above the horizon then contain the entire rest of
+   * the deck, smeared into a mushy band that never ends. That band was the weakest part
+   * of the look. On a sphere the same ray hits the shell at a finite distance —
+   * `sqrt(2·R·h)` at the horizon, about 121 km for a 1.15 km base on Earth — so the
+   * clouds bunch up, recede and STOP, which is what a real sky does.
+   *
+   * Lower it to exaggerate the curve for a stylised, small-planet look.
+   */
+  planetRadiusKm: 6371,
 
   // ── Ground shadows ───────────────────────────────────────────────────────────────
   /** Max darkening of the world under a cloud. 0 turns the whole pass off — and with it
@@ -215,6 +233,8 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uSilver = uniform(P.silver);
   const uAerial = uniform(P.aerial);
   const uHorizonFade = uniform(P.horizonFade);
+  /** 1 / (2R) in metres — the only form the curvature maths actually needs. */
+  const uInv2R = uniform(0.5 / (P.planetRadiusKm * 1000));
   const uWind = uniform(new THREE.Vector2());
   /** Camera XZ in map units, so the deck is anchored to the WORLD and drifts past you
    *  as you drive instead of being glued to the camera. */
@@ -247,12 +267,26 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     // Rays at or below the horizon never reach a deck that is above the camera, and the
     // slab crossing diverges there. Fade rather than cut: the last degrees are
     // unresolvable however many mips we have.
-    const hMask = smoothstep(uHorizonFade, uHorizonFade.add(0.10), y);
+    const hMask = smoothstep(uHorizonFade, uHorizonFade.add(0.035), y);
 
     If(hMask.greaterThan(0.001), () => {
-      const yy = max(y, uHorizonFade.mul(0.5));
-      const tBase = uAltitude.div(yy);
-      const tTop = uAltitude.add(uThickness).div(yy);
+      const yy = max(y, float(0.0));
+
+      /*
+       * CURVED DECK. Distance along the ray to altitude h over a planet of radius R,
+       * using the small-angle drop `alt(t) = y·t + t²/2R` (exact to millimetres here:
+       * the deck's horizon is ~121 km against R = 6371 km). Solving for t gives
+       *
+       *     t = R·(sqrt(y² + 2h/R) − y)
+       *
+       * which is written below in its CONJUGATE form, `2h / (sqrt(...) + y)`. That is
+       * not cosmetic: the direct form subtracts two nearly-equal numbers of order 1e6,
+       * and in float32 that cancellation throws away several kilometres of the answer
+       * at exactly the grazing angles this whole change exists to fix.
+       */
+      const tAt = Fn(([h]) => h.mul(2.0).div(sqrt(yy.mul(yy).add(h.mul(uInv2R).mul(4.0))).add(yy)));
+      const tBase = tAt(uAltitude).toVar();
+      const tTop = tAt(uAltitude.add(uThickness)).toVar();
       const dt = tTop.sub(tBase).div(uSteps.max(1.0)).toVar();
 
       // ── One horizontal shadow, at the slab mid-plane ────────────────────────────
@@ -260,7 +294,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       // because a low sun throws long shadows — CLAMPED to a quarter wrap, or at dusk
       // the taps land more than a full texture wrap away, sample effectively at random,
       // and every cloud in the sky shades identically (that bug shipped once already).
-      const tMid = uAltitude.add(uThickness.mul(0.5)).div(yy);
+      const tMid = tAt(uAltitude.add(uThickness.mul(0.5)));
       const uvMid = uCamXZ.add(vec2(dir.x, dir.z).mul(tMid).div(uTile)).add(uWind);
       const sunXZ = normalize(vec3(sunDir.x, 1e-5, sunDir.z)).xz;
       const reach = min(uShadowReach.div(max(sunDir.y, 0.15)).div(uTile), float(0.25));
@@ -285,7 +319,10 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         If(float(i).greaterThanEqual(uSteps), () => Break());
         If(transmittance.lessThan(0.01), () => Break());
 
-        const h = y.mul(t).sub(uAltitude).div(uThickness); // 0 at base, 1 at top
+        // Height above the CURVED surface, not above a plane — otherwise the far field
+        // would sit at the wrong place in the slab and the vertical profile would drift
+        // out from under the clouds it is shaping.
+        const h = yy.mul(t).add(t.mul(t).mul(uInv2R)).sub(uAltitude).div(uThickness);
         const uv = uCamXZ.add(vec2(dir.x, dir.z).mul(t).div(uTile)).add(uWind);
         const m = mapTex.sample(uv);
 
@@ -533,6 +570,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uSilver.value = P.silver;
     uAerial.value = P.aerial;
     uHorizonFade.value = P.horizonFade;
+    uInv2R.value = 0.5 / Math.max(1e3, P.planetRadiusKm * 1000);
   }
 
   return {

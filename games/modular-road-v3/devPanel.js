@@ -1872,6 +1872,13 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Planet radius</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-planet" min="200" max="12000" step="50" />
+              <span class="prop-num" id="dv-pc-planet-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Towering</span>
             <div class="prop-value">
               <input type="range" id="dv-cld-topmin" min="0" max="1" step="0.01" />
@@ -4280,6 +4287,8 @@ export function createRoadDevPanel({ app, game, params }) {
   pslider("dv-pc-alt", "altitude", (v) => v.toFixed(0) + " m");
   pslider("dv-pc-thick", "thickness", (v) => v.toFixed(0) + " m");
   pslider("dv-pc-tile", "tile", (v) => v.toFixed(0) + " m");
+  pslider("dv-pc-planet", "planetRadiusKm",
+    (v) => (v >= 6371 ? v.toFixed(0) + " km (Earth)" : v.toFixed(0) + " km"));
   pslider("dv-pc-topmin", "topMin", (v) => v.toFixed(2));
   pslider("dv-pc-steps", "steps", (v) => v.toFixed(0) + " steps");
   pslider("dv-pc-sun", "sunStrength", (v) => v.toFixed(2));
