@@ -47,6 +47,8 @@ import {
 export const PAINTED_MAP_SIZE = 256;
 /** Compile-time ceiling on the march; `steps` cuts the loop short at runtime. */
 const MAX_STEPS = 24;
+/** Compile-time ceiling on the god-ray march; `raySteps` cuts it short at runtime. */
+const MAX_RAY_STEPS = 24;
 
 export const PAINTED_CLOUD_DEFAULTS = {
   // NO `enabled` FLAG HERE, deliberately. The cloud TIER owns whether this deck exists
@@ -186,6 +188,27 @@ export const PAINTED_CLOUD_DEFAULTS = {
    * Lower it to exaggerate the curve for a stylised, small-planet look.
    */
   planetRadiusKm: 6371,
+
+  // ── God rays ─────────────────────────────────────────────────────────────────────
+  /**
+   * Sun shafts through the gaps in the deck. 0 skips the pass entirely.
+   *
+   * The volumetric tier gets these from its resolved cloud buffer's alpha. The painted
+   * deck has no such buffer — its clouds live in the sky dome's shader — so the march
+   * re-derives occlusion by sampling the cloud map ONCE along each tap's view ray. That
+   * is an approximation of the full slab march, and it is the right one: a shaft is a
+   * low-frequency wash, so it only needs to know roughly where the deck is solid.
+   */
+  rayStrength: 1.1,
+  /** Per-tap decay along the march — lower = shorter, punchier shafts. */
+  rayDecay: 0.975,
+  /** Taps per pixel (<= MAX_RAY_STEPS). Quarter-res pass, so these are cheap. */
+  raySteps: 16,
+  /** March length toward the sun, as a fraction of the screen. */
+  rayLength: 0.75,
+  /** How tightly the shaft source hugs the sun. Higher = a compact core, which is what
+   *  makes the beams read as beams instead of one broad halo. */
+  rayTightness: 18,
 
   // ── Ground shadows ───────────────────────────────────────────────────────────────
   /** Max darkening of the world under a cloud. 0 turns the whole pass off — and with it
@@ -576,6 +599,178 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     return out;
   });
 
+  // ── GOD RAYS ──────────────────────────────────────────────────────────────────
+  //
+  // Screen-space radial shafts, ported from the volumetric tier (which had three
+  // artifact fixes beaten out of it) with ONE thing changed: where occlusion comes
+  // from. That tier reads the alpha of its resolved cloud buffer; this tier has no
+  // cloud buffer at all, so each tap reconstructs its own view ray and samples the
+  // cloud map once at the deck's mid-plane. One fetch instead of a buffer read, and no
+  // render target is added for the clouds themselves — only the quarter-res shaft
+  // buffer, which is the one allocation this whole tier makes.
+  const uRayStrength = uniform(P.rayStrength);
+  const uRayDecay = uniform(P.rayDecay);
+  const uRaySteps = uniform(P.raySteps);
+  const uRayLen = uniform(P.rayLength);
+  const uRayTight = uniform(P.rayTightness);
+  const uAspect = uniform(1);
+  /** Sun position in the same flipped uv space the post passes sample in. */
+  const uSunUV = uniform(new THREE.Vector2(0.5, 0.5));
+  /** Folds together "in front of us", "near enough to the frame" and "above the
+   *  horizon" — and gates the composite too, so a stale buffer can never show. */
+  const uRayActive = uniform(0);
+
+  const shaftRT = new THREE.RenderTarget(1, 1, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    format: THREE.RGBAFormat,
+    type: THREE.HalfFloatType,
+    depthBuffer: false,
+  });
+  const shaftTex = texture(shaftRT.texture);
+  const uShaftTexel = uniform(new THREE.Vector2(1, 1));
+
+  const shaftColorNode = Fn(() => {
+    const fuv = vec2(uv().x, uv().y.oneMinus());
+    const acc = float(0.0).toVar();
+    const decay = float(1.0).toVar();
+    const delta = uSunUV.sub(fuv);
+    const dist = length(delta).max(1e-4);
+    // March at most rayLength of the screen, ending at the sun if it is closer.
+    const stepUv = delta.mul(min(float(1.0), uRayLen.div(dist))).div(uRaySteps.max(1.0));
+
+    /*
+     * TWO SAMPLES PER TAP, HALF-TAP DITHER — carried over from the volumetric tier,
+     * where all three of these were needed in sequence. Discrete taps slice the glow
+     * into concentric rings (the march's shell banding, in polar coordinates); a
+     * FULL-tap dither killed the rings but printed as a stationary weave, because this
+     * buffer has no temporal accumulation to average it; sampling twice per tap halves
+     * both the ring pitch and the dither amplitude, leaving a residual the composite
+     * tent filter can actually erase.
+     */
+    const halfStep = stepUv.mul(0.5);
+    const jit = interleavedGradientNoise(screenCoordinate.xy);
+    const p = fuv.add(halfStep.mul(jit)).toVar();
+    const skyDepth = uReversed.oneMinus();
+
+    const shaftSrc = Fn(([q]) => {
+      const out = float(0.0).toVar();
+      const inb = q.x.greaterThan(0.0).and(q.x.lessThan(1.0))
+        .and(q.y.greaterThan(0.0)).and(q.y.lessThan(1.0));
+      If(inb, () => {
+        // Only sky carries a shaft: geometry in the way blocks it, and the sky dome
+        // writes no depth, so this test is exactly "nothing solid here".
+        const isSky = abs(depthTex.sample(q).r.sub(skyDepth)).lessThan(0.0001);
+        If(isSky, () => {
+          const off = q.sub(uSunUV).mul(vec2(uAspect, 1.0));
+          const glow = exp(dot(off, off).mul(uRayTight.negate()));
+          If(glow.greaterThan(0.002), () => {
+            // Rebuild this tap's view ray and ask the cloud map, once, whether the deck
+            // is solid along it. Same curved distance as the main march (see `tAt`),
+            // inlined because that one closes over the shade pass's own `yy`.
+            const ndc = vec4(q.x.mul(2.0).sub(1.0), q.y.mul(2.0).sub(1.0), 0.5, 1.0);
+            const wpH = uInvViewProj.mul(ndc);
+            const dir = normalize(wpH.xyz.div(wpH.w).sub(uCamPos));
+            const yy = max(dir.y, float(1e-3));
+            const hMid = uAltitude.add(uThickness.mul(0.5));
+            const t = hMid.mul(2.0)
+              .div(sqrt(yy.mul(yy).add(hMid.mul(uInv2R).mul(4.0))).add(yy));
+            const cuv = uCamXZ.add(vec2(dir.x, dir.z).mul(t).div(uTile)).add(uWind);
+            const m = mapTex.sample(cuv);
+            const wLow = mapTex.sample(cuv.mul(uWeatherScale)).a;
+            const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), wLow)));
+            // EROSION IS IN THE MASK ON PURPOSE. With only the low-frequency mass field
+            // the occluder is far smoother than the cloud actually drawn, and smooth
+            // occluders make a smooth glow - the shafts came out as one wash instead of
+            // beams. Carving the same billow the deck is carved with is what gives the
+            // gaps hard enough edges to throw a ray.
+            const bite = mapTex.sample(cuv.mul(3.1)).b.mul(uErode);
+            const shaped = remapUnit(m.r, covLocal.oneMinus());
+            const trans = remapUnit(shaped, bite).oneMinus();
+            out.assign(glow.mul(trans));
+          });
+        });
+      });
+      return out;
+    });
+
+    Loop(MAX_RAY_STEPS, ({ i }) => {
+      If(float(i).greaterThanEqual(uRaySteps), () => Break());
+      p.addAssign(halfStep);
+      const s0 = shaftSrc(p);
+      p.addAssign(halfStep);
+      const s1 = shaftSrc(p);
+      acc.addAssign(s0.add(s1).mul(0.5).mul(decay));
+      decay.mulAssign(uRayDecay);
+    });
+
+    const amount = acc.div(uRaySteps.max(1.0)).mul(uRayStrength).mul(uRayActive);
+    return vec4(uShaftKey.mul(amount), 1.0);
+  });
+
+  const shaftMat = new THREE.MeshBasicNodeMaterial();
+  shaftMat.colorNode = shaftColorNode();
+  shaftMat.depthTest = false;
+  shaftMat.depthWrite = false;
+  shaftMat.fog = false;
+  shaftMat.toneMapped = false;
+  shaftMat.transparent = false;
+  shaftMat.blending = THREE.NoBlending;
+
+  /**
+   * Composite fetch: a 4-tap diagonal tent over the quarter-res buffer. Shafts are
+   * inherently low-frequency, so the blur costs nothing in detail and is what erases
+   * the residual half-tap dither (see the march).
+   */
+  const sampleShafts = Fn(([fuv]) => {
+    const o = uShaftTexel;
+    return shaftTex.sample(fuv.add(vec2(o.x, o.y)))
+      .add(shaftTex.sample(fuv.add(vec2(o.x.negate(), o.y))))
+      .add(shaftTex.sample(fuv.add(vec2(o.x, o.y.negate()))))
+      .add(shaftTex.sample(fuv.add(vec2(o.x.negate(), o.y.negate()))))
+      .mul(0.25).rgb;
+  });
+
+  const shaftAddColor = Fn(() =>
+    vec4(sampleShafts(vec2(uv().x, uv().y.oneMinus())).mul(uRayActive), 1.0));
+
+  const shaftAddMat = new THREE.MeshBasicNodeMaterial();
+  shaftAddMat.colorNode = shaftAddColor();
+  shaftAddMat.depthTest = false;
+  shaftAddMat.depthWrite = false;
+  shaftAddMat.fog = false;
+  shaftAddMat.toneMapped = false;
+  shaftAddMat.transparent = true;
+  // Scattered light ADDS; it never occludes what is behind it.
+  shaftAddMat.blending = THREE.AdditiveBlending;
+
+  const shaftScene = new THREE.Scene();
+  const shaftCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const shaftQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), shaftMat);
+  shaftScene.add(shaftQuad);
+
+  const _sunClip = new THREE.Vector4();
+  /**
+   * Sun screen position + activation, from the CURRENT frame's view-projection. The sun
+   * is a direction, so it projects as a point at infinity (w = 0 in).
+   */
+  function updateSunScreen(vp, sunDir) {
+    _sunClip.set(sunDir.x, sunDir.y, sunDir.z, 0).applyMatrix4(vp);
+    if (!(P.rayStrength > 0.001) || _sunClip.w <= 1e-4) {
+      uRayActive.value = 0;
+      return;
+    }
+    const nx = _sunClip.x / _sunClip.w;
+    const ny = _sunClip.y / _sunClip.w;
+    uSunUV.value.set(nx * 0.5 + 0.5, ny * 0.5 + 0.5);
+    // Shafts can stream in from just off-screen, so fade rather than cut; and die as the
+    // sun sinks, because below the horizon the source is the sky's own glow, not a disc.
+    const edge = Math.max(Math.abs(nx), Math.abs(ny));
+    const offFade = 1 - THREE.MathUtils.smoothstep(edge, 1.1, 2.2);
+    const upFade = THREE.MathUtils.smoothstep(sunDir.y, 0.01, 0.09);
+    uRayActive.value = offFade * upFade;
+  }
+
   // ── GROUND SHADOWS ────────────────────────────────────────────────────────────
   //
   // The deck darkening the world beneath it, which is most of what makes clouds feel
@@ -594,6 +789,8 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uShadowSoft = uniform(P.shadowSoftness);
   const uShadowFar = uniform(P.shadowFar);
   const uSunDirG = uniform(new THREE.Vector3(0.4, 0.8, 0.3).normalize());
+  /** Shaft tint — the sun's own transmitted colour, pushed from the sky. */
+  const uShaftKey = uniform(new THREE.Color(0xfff2dc));
   const uInvViewProj = uniform(new THREE.Matrix4());
   const uCamPos = uniform(new THREE.Vector3());
   const uCamFwd = uniform(new THREE.Vector3(0, 0, -1));
@@ -685,6 +882,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const _fwd = new THREE.Vector3();
 
   const shadowsOn = () => P.shadowStrength > 0.001;
+  const raysOn = () => P.rayStrength > 0.001;
 
   /** Bind the pipeline's scene depth. Null = the owns-the-frame path, which we sit out. */
   function setDepthSource(tex) {
@@ -692,17 +890,21 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     if (tex) depthTex.value = tex;
   }
 
-  function prepareFrame() { return shadowsOn() && _depthBound; }
+  function prepareFrame() { return (shadowsOn() || raysOn()) && _depthBound; }
 
   /**
    * The one fullscreen pass, run by PostFxPipeline right after the solids pass.
    * Multiplies the linear HDR buffer by the cloud shadow; adds no colour of its own.
    */
+  const _bufSize = new THREE.Vector2();
+
   function compositeOntoLinearHDR(renderer, targetRT) {
-    if (!shadowsOn() || !_depthBound || !camera) return;
-    uShadowStrength.value = P.shadowStrength;
-    uShadowSoft.value = P.shadowSoftness;
-    uShadowFar.value = P.shadowFar;
+    if (!_depthBound || !camera) return;
+    const wantShadow = shadowsOn();
+    const wantRays = raysOn();
+    if (!wantShadow && !wantRays) return;
+
+    // Camera state both passes need.
     uCamNear.value = camera.near;
     uCamFar.value = camera.far;
     uReversed.value = camera.reversedDepth ? 1 : 0;
@@ -714,8 +916,47 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
 
     const prevAuto = renderer.autoClear;
     renderer.autoClear = false;
-    renderer.setRenderTarget(targetRT);
-    renderer.render(shadowScene, shadowCam);
+
+    if (wantShadow) {
+      uShadowStrength.value = P.shadowStrength;
+      uShadowSoft.value = P.shadowSoftness;
+      uShadowFar.value = P.shadowFar;
+      renderer.setRenderTarget(targetRT);
+      renderer.render(shadowScene, shadowCam);
+    }
+
+    if (wantRays) {
+      uRayStrength.value = P.rayStrength;
+      uRayDecay.value = P.rayDecay;
+      uRaySteps.value = Math.min(P.raySteps, MAX_RAY_STEPS);
+      uRayLen.value = P.rayLength;
+      uRayTight.value = P.rayTightness;
+
+      renderer.getDrawingBufferSize(_bufSize);
+      const w = Math.max(1, Math.floor(_bufSize.x) >> 2);
+      const h = Math.max(1, Math.floor(_bufSize.y) >> 2);
+      if (w !== shaftRT.width || h !== shaftRT.height) {
+        shaftRT.setSize(w, h);
+        uShaftTexel.value.set(1 / w, 1 / h);
+      }
+      uAspect.value = Math.max(1e-3, _bufSize.x / Math.max(1, _bufSize.y));
+
+      // Skipped entirely when the sun cannot cast anything into this frame; the
+      // additive composite is gated on the same uniform, so a stale buffer cannot show.
+      updateSunScreen(_vp, uSunDirG.value);
+      if (uRayActive.value > 0) {
+        shaftQuad.material = shaftMat;
+        renderer.setRenderTarget(shaftRT);
+        renderer.clear();
+        renderer.render(shaftScene, shaftCam);
+
+        shaftQuad.material = shaftAddMat;
+        renderer.setRenderTarget(targetRT);
+        renderer.render(shaftScene, shaftCam);
+        shaftQuad.material = shaftMat;
+      }
+    }
+
     renderer.autoClear = prevAuto;
   }
 
@@ -736,7 +977,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
    */
   let _evolveAccum = 0;
 
-  function update(dt, camPos, sunDir) {
+  function update(dt, camPos, sunDir, keyCol) {
     _evolveAccum += (dt || 0) * P.evolve;
     uEvolve.value = _evolveAccum;
     uMsFloor.value = P.msFloor;
@@ -748,6 +989,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uWind.value.set(_windAccum.x / P.tile, _windAccum.y / P.tile);
     if (camPos) uCamXZ.value.set(camPos.x / P.tile, camPos.z / P.tile);
     if (sunDir) uSunDirG.value.copy(sunDir).normalize();
+    if (keyCol) uShaftKey.value.copy(keyCol);
 
     uAltitude.value = P.altitude;
     uThickness.value = P.thickness;
@@ -787,7 +1029,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     // Custom-cloud contract (see worldEnvironment.setCustomCloudSystem). Registered only
     // while the painted tier is live, and only to cast ground shadows — the deck itself
     // is drawn by the sky dome, not here.
-    get enabled() { return shadowsOn(); },
+    get enabled() { return shadowsOn() || raysOn(); },
     setDepthSource,
     prepareFrame,
     compositeOntoLinearHDR,
@@ -796,6 +1038,10 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       map.dispose();
       shadowMat.dispose();
       shadowQuad.geometry.dispose();
+      shaftMat.dispose();
+      shaftAddMat.dispose();
+      shaftQuad.geometry.dispose();
+      shaftRT.dispose();
       _depthPlaceholder.dispose?.();
     },
   };

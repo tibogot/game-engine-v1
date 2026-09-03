@@ -2088,6 +2088,34 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">God rays</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-rays" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-pc-rays-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Ray length</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-raylen" min="0.1" max="1" step="0.02" />
+              <span class="prop-num" id="dv-pc-raylen-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Ray tightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-raytight" min="4" max="40" step="0.5" />
+              <span class="prop-num" id="dv-pc-raytight-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Ray steps</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-raysteps" min="6" max="24" step="1" />
+              <span class="prop-num" id="dv-pc-raysteps-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Ground shadows</span>
             <div class="prop-value">
               <input type="range" id="dv-pc-shadow" min="0" max="1" step="0.02" />
@@ -4434,6 +4462,10 @@ export function createRoadDevPanel({ app, game, params }) {
   pslider("dv-pc-cirrustile", "cirrusTile", (v) => (v / 1000).toFixed(1) + " km");
   pslider("dv-pc-cirrusstretch", "cirrusStretch", (v) => v.toFixed(1) + "\u00d7");
   pslider("dv-pc-cirrussilver", "cirrusSilver", (v) => v.toFixed(2));
+  pslider("dv-pc-rays", "rayStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));
+  pslider("dv-pc-raylen", "rayLength", (v) => v.toFixed(2));
+  pslider("dv-pc-raytight", "rayTightness", (v) => v.toFixed(1));
+  pslider("dv-pc-raysteps", "raySteps", (v) => v.toFixed(0) + " steps");
   pslider("dv-pc-shadow", "shadowStrength", (v) => (v <= 0 ? "off" : v.toFixed(2)));
   pslider("dv-pc-shadowsoft", "shadowSoftness", (v) => v.toFixed(2));
   pslider("dv-pc-msfloor", "msFloor", (v) => v.toFixed(2));
