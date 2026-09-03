@@ -35,7 +35,7 @@
 import * as THREE from "three/webgpu";
 import {
   float, vec2, vec3, vec4, Fn, If, Loop, Break, uniform, texture, uv,
-  normalize, dot, max, min, mix, smoothstep, pow, exp, abs, sqrt, saturate,
+  normalize, dot, length, max, min, mix, smoothstep, pow, exp, abs, sqrt, saturate,
   screenCoordinate, interleavedGradientNoise,
 } from "three/tsl";
 import {
@@ -87,6 +87,18 @@ export const PAINTED_CLOUD_DEFAULTS = {
    * not fine is identical rows at a fixed spacing.)
    */
   weatherScale: 0.137,
+  /**
+   * Frequency of the regional SIZE field, as a multiple of weatherScale. 7 puts it near
+   * 4.5 km — several times a cloud, but many times smaller than the 31 km weather field,
+   * so a single view contains two or three regions of differing cloud size.
+   */
+  sizeScale: 7.0,
+  /**
+   * How strongly that field pushes coverage (and cell height) around. 0 restores the one
+   * uniform cloud size the deck used to have. Self-disabling at clear and at overcast —
+   * see `regional`.
+   */
+  sizeVary: 0.35,
   /** How hard the mid-scale billow perturbs the mass BEFORE the coverage threshold.
    *  This is the lobe-vs-blob dial: 0 gives smooth elliptical clouds however hard you
    *  erode them afterwards. See the note at its use site. */
@@ -350,6 +362,8 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uTile = uniform(P.tile);
   const uCoverage = uniform(P.coverage);
   const uWeatherScale = uniform(P.weatherScale);
+  const uSizeScale = uniform(P.sizeScale);
+  const uSizeVary = uniform(P.sizeVary);
   const uErode = uniform(P.erode);
   const uLump = uniform(P.lumpiness);
   const uDensityMul = uniform(P.densityMul);
@@ -396,6 +410,40 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
    * day to exactly this.
    */
   const remapUnit = Fn(([v, lo]) => saturate(v.sub(lo).div(float(1.0).sub(lo).max(1e-4))));
+
+  /*
+   * REGIONAL CHARACTER — how big the clouds are HERE, not just how many.
+   *
+   * Every cloud in frame used to come out the same size, and the reason is structural:
+   * apparent cloud size is set by WHERE the coverage threshold cuts the mass field, and
+   * coverage varied only with `weatherScale` — one wrap in 31 km. Across a 10-20 km view
+   * that is very nearly a constant, so the whole sky was cut at one level and produced
+   * one characteristic size. Real skies mix small fair-weather puffs with large merged
+   * masses, and that uniformity was the most artificial thing left.
+   *
+   * So the weather field gains a second, finer octave (`sizeScale` x weatherScale, about
+   * 4.5 km) which pushes coverage up and down region by region: where it is high the
+   * blobs merge into big masses, where it is low they break into small isolated ones.
+   *
+   * The deviation is scaled by `base * (1 - base)`, which VANISHES AT BOTH ENDS. That
+   * matters: a clear preset must stay clear and an overcast ceiling must stay solid — a
+   * plain multiply would punch holes in a storm, which is the one thing a storm must not
+   * have. Same self-disabling property as `edgeTaper`.
+   *
+   * Returns vec2(coverage, topScale) — a REAL vector type, because an `Fn` that returns
+   * an object silently collapses to a swizzle.
+   */
+  const regional = Fn(([ruv]) => {
+    const wLow = mapTex.sample(ruv.mul(uWeatherScale)).a;
+    const wMid = mapTex.sample(ruv.mul(uWeatherScale.mul(uSizeScale))).a;
+    const base = saturate(uCoverage.mul(mix(float(0.55), float(1.45), wLow)));
+    const dev = wMid.sub(0.5).mul(2.0).mul(uSizeVary).mul(base).mul(base.oneMinus());
+    // A wider cumulus is a taller one — convection roughly preserves the aspect, which
+    // is why the baked `top` channel is already correlated with mass. This carries that
+    // same relationship up to the regional scale, so a patch of big clouds also towers.
+    const topScale = float(1.0).add(wMid.sub(0.5).mul(uSizeVary).mul(0.9));
+    return vec2(saturate(base.add(dev)), topScale);
+  });
 
   /**
    * Shade the deck for one view ray.
@@ -529,11 +577,12 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         .add(sB.r.add(sB.b.sub(0.5).mul(uLump)).mul(0.45));
       const sunShadow = exp(sTau.mul(uAbsorb).negate()).toVar();
 
-      // LARGE-SCALE WEATHER, sampled ONCE per ray at the slab mid-plane and at a low,
-      // incommensurate frequency (see weatherScale). Once per ray rather than per step
-      // because it is a kilometres-wide field: it barely changes across one slab
-      // crossing, so 18 fetches of it would buy nothing.
-      const wLow = mapTex.sample(uvMid.mul(uWeatherScale)).a.toVar();
+      // LARGE-SCALE WEATHER AND REGIONAL SIZE, sampled ONCE per ray at the slab mid-plane
+      // and at low, incommensurate frequencies (see weatherScale / sizeScale). Once per
+      // ray rather than per step because both are kilometres-wide fields: they barely
+      // change across one slab crossing, so 18 fetches of them would buy nothing. This is
+      // why size variety costs 2 fetches per PIXEL rather than per step.
+      const reg = regional(uvMid).toVar();
 
       // Silver lining: thin cloud between you and the sun blazes. Gated on geometry —
       // applied unconditionally it just greys the deck (the volumetric powder term paid
@@ -601,9 +650,10 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
          * silhouette its cauliflower profile.
          */
         const massL = m.r.add(m.b.sub(0.5).mul(uLump));
-        // Weather makes whole regions cloudier — this is what stops the sky reading as
-        // one uniform texture repeated to the horizon.
-        const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), wLow)));
+        // Weather makes whole regions cloudier, and the finer octave makes them bigger or
+        // smaller — together this is what stops the sky reading as one uniform texture
+        // repeated to the horizon. See `regional`.
+        const covLocal = reg.x;
         // How deep inside the cloud this column stands: 0 on the outline, 1 at the core.
         // Thresholded WITHOUT the vertical profile, so it can drive the height without
         // the height driving it back. Pure ALU — the fetch is already in hand.
@@ -612,7 +662,8 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         // Per-cell top: local height runs 0..1 inside THIS cell's own cloud, so a
         // neighbour can be shallow while this one towers. Without it every cell spans
         // the same band and the deck can only read as a sheet.
-        const top = mix(uTopMin, float(1.0), m.g).mul(mix(uEdgeTaper, float(1.0), planMass));
+        const top = mix(uTopMin, float(1.0), m.g)
+          .mul(mix(uEdgeTaper, float(1.0), planMass)).mul(reg.y);
         const hL = h.div(top.max(0.05));
         // Rounded profile: flat-ish base, domed top.
         // A CUMULUS BASE IS SHARP AND FLAT — it is the condensation level, a
@@ -817,8 +868,10 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
               .div(sqrt(yy.mul(yy).add(hMid.mul(uInv2R).mul(4.0))).add(yy));
             const cuv = uCamXZ.add(vec2(dir.x, dir.z).mul(t).div(uTile)).add(uWind);
             const m = mapTex.sample(cuv);
-            const wLow = mapTex.sample(cuv.mul(uWeatherScale)).a;
-            const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), wLow)));
+            // Costs a second weather fetch per tap, and it is worth it: if the mask
+            // still thought a region held small clouds while the deck drew big merged
+            // ones, shafts would come streaming through solid cloud.
+            const covLocal = regional(cuv).x;
             // EROSION IS IN THE MASK ON PURPOSE. With only the low-frequency mass field
             // the occluder is far smoother than the cloud actually drawn, and smooth
             // occluders make a smooth glow - the shafts came out as one wash instead of
@@ -981,10 +1034,9 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       // ONE fetch. The mass silhouette is what casts a shadow; billow detail is finer
       // than a soft shadow edge would preserve anyway.
       const m = mapTex.sample(uvS);
-      // Same low-frequency weather as the deck, or the shadows would be cast by a
-      // differently-covered sky than the one overhead.
-      const wLowS = mapTex.sample(uvS.mul(uWeatherScale)).a;
-      const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), wLowS)));
+      // Same regional field as the deck, or the shadows would be cast by a
+      // differently-covered sky than the one overhead — with sizes to match.
+      const covLocal = regional(uvS).x;
       const cov = smoothstep(float(0.0), uShadowSoft, remapUnit(m.r, covLocal.oneMinus()));
 
       // Above the deck you cannot be shadowed by it — matters on a sky track.
@@ -1136,6 +1188,8 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uTile.value = P.tile;
     uCoverage.value = P.coverage;
     uWeatherScale.value = P.weatherScale;
+    uSizeScale.value = P.sizeScale;
+    uSizeVary.value = P.sizeVary;
     uErode.value = P.erode;
     uLump.value = P.lumpiness;
     uDensityMul.value = P.densityMul;

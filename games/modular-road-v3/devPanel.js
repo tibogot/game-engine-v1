@@ -1989,6 +1989,20 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label" title="How much cloud SIZE varies region to region. 0 = every cloud in the sky the same size.">Size spread</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-sizevary" min="0" max="0.8" step="0.01" />
+              <span class="prop-num" id="dv-pc-sizevary-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label" title="How big those regions are, as a multiple of the weather field's frequency. Higher = smaller, more frequent patches.">Size scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-sizescale" min="1" max="16" step="0.5" />
+              <span class="prop-num" id="dv-pc-sizescale-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label" title="Height at the cloud's edge vs its core. 1.0 = flat-topped boxes.">Edge taper</span>
             <div class="prop-value">
               <input type="range" id="dv-pc-taper" min="0.02" max="1" step="0.01" />
@@ -4519,6 +4533,8 @@ export function createRoadDevPanel({ app, game, params }) {
   pslider("dv-pc-planet", "planetRadiusKm",
     (v) => (v >= 6371 ? v.toFixed(0) + " km (Earth)" : v.toFixed(0) + " km"));
   pslider("dv-pc-topmin", "topMin", (v) => v.toFixed(2));
+  pslider("dv-pc-sizevary", "sizeVary", (v) => (v < 0.005 ? "0.00 (one size)" : v.toFixed(2)));
+  pslider("dv-pc-sizescale", "sizeScale", (v) => (4300 / (0.137 * v)).toFixed(0) + " m");
   pslider("dv-pc-taper", "edgeTaper", (v) => (v > 0.95 ? "1.00 (boxes)" : v.toFixed(2)));
   pslider("dv-pc-basevary", "baseVary", (v) => (v < 0.005 ? "0.00 (ruled)" : v.toFixed(2)));
   pslider("dv-pc-selfsh", "selfShadow", (v) => (v < 0.005 ? "0.00 (per-ray only)" : v.toFixed(2)));
