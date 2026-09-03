@@ -383,11 +383,6 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     Math.max(64, innerHeight),
   );
   window.addEventListener("resize", resizeReflection);
-  // The rain lens works in aspect-corrected screen space, so drops stay round
-  // rather than stretching with the viewport.
-  window.addEventListener("resize", () => {
-    uRainAspect.value = innerWidth / Math.max(1, innerHeight);
-  });
 
   /** Runtime switch. The material always carries the projection; this is what
    *  decides whether a mirror is rendered and sampled. */
@@ -438,6 +433,21 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   const rainUniforms = createRainLensUniforms();
   const uRainAspect = uniform(innerWidth / Math.max(1, innerHeight));
+  /*
+   * REGISTERED HERE, NOT BESIDE THE OTHER RESIZE LISTENERS.
+   *
+   * It used to be attached ~50 lines above this line, which put `uRainAspect` in the
+   * temporal dead zone: any resize arriving before module evaluation reached this
+   * declaration threw `Cannot access 'uRainAspect' before initialization`. That is not
+   * hypothetical — it fired twice during boot, so the very first sizing was lost and
+   * the drops stayed stretched until the next resize.
+   *
+   * A `const` is hoisted but not initialised, so a listener may only close over one
+   * once the declaration has actually run.
+   */
+  window.addEventListener("resize", () => {
+    uRainAspect.value = innerWidth / Math.max(1, innerHeight);
+  });
   /** How hard `lean` follows road speed. Airflow drags drops across the glass,
    *  and that is the cue that reads as "fast" — see `lean` in the lens. */
   let rainLeanFromSpeed = 0.9;
