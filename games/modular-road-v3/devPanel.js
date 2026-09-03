@@ -1947,6 +1947,13 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Lumpiness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-lump" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-pc-lump-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Erosion</span>
             <div class="prop-value">
               <input type="range" id="dv-pc-erode" min="0" max="1.2" step="0.02" />
@@ -4483,6 +4490,7 @@ export function createRoadDevPanel({ app, game, params }) {
   };
   pslider("dv-pc-cov", "coverage", (v) => v.toFixed(2));
   pslider("dv-pc-den", "densityMul", (v) => v.toFixed(3));
+  pslider("dv-pc-lump", "lumpiness", (v) => v.toFixed(2));
   pslider("dv-pc-erode", "erode", (v) => v.toFixed(2));
   pslider("dv-pc-alt", "altitude", (v) => v.toFixed(0) + " m");
   pslider("dv-pc-thick", "thickness", (v) => v.toFixed(0) + " m");

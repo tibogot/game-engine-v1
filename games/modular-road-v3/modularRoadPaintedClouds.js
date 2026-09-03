@@ -87,6 +87,10 @@ export const PAINTED_CLOUD_DEFAULTS = {
    * not fine is identical rows at a fixed spacing.)
    */
   weatherScale: 0.137,
+  /** How hard the mid-scale billow perturbs the mass BEFORE the coverage threshold.
+   *  This is the lobe-vs-blob dial: 0 gives smooth elliptical clouds however hard you
+   *  erode them afterwards. See the note at its use site. */
+  lumpiness: 0.4,
   /** Billow erosion strength — carves mass edges into cauliflower. */
   erode: 0.68,
   /** Extinction per metre at full shaped density. */
@@ -326,6 +330,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uCoverage = uniform(P.coverage);
   const uWeatherScale = uniform(P.weatherScale);
   const uErode = uniform(P.erode);
+  const uLump = uniform(P.lumpiness);
   const uDensityMul = uniform(P.densityMul);
   const uTopMin = uniform(P.topMin);
   const uSteps = uniform(P.steps);
@@ -533,7 +538,22 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         // Weather makes whole regions cloudier — this is what stops the sky reading as
         // one uniform texture repeated to the horizon.
         const covLocal = saturate(uCoverage.mul(mix(float(0.55), float(1.45), wLow)));
-        const shaped = remapUnit(m.r.mul(prof), covLocal.oneMinus()).toVar();
+        /*
+         * LUMPY ISO-SURFACE, and this is what stops small clouds being marshmallows.
+         *
+         * The threshold keeps only the top of the mass field, and an FBM peak is SMOOTH
+         * by construction — every octave carries half the amplitude of the one below it,
+         * so near a maximum the lowest frequency dominates and the outline is an
+         * ellipse. Eroding afterwards only nibbles that ellipse; it cannot make it
+         * lumpy, because by then the shape is already decided.
+         *
+         * Perturbing the mass BEFORE the threshold moves the iso-surface itself, so the
+         * outline breaks into lobes at any coverage. It uses the billow channel of the
+         * fetch already in hand — 180-700 m cells at the base frequency, which is
+         * exactly cauliflower scale — so it costs no extra sample.
+         */
+        const massL = m.r.add(m.b.sub(0.5).mul(uLump));
+        const shaped = remapUnit(massL.mul(prof), covLocal.oneMinus()).toVar();
 
         If(shaped.greaterThan(0.002), () => {
           // BILLOW EROSION, and the lookup SHIFTS WITH HEIGHT. Sampling it at the same
@@ -550,7 +570,23 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
           const dUv = uv.mul(3.1).add(vec2(h.mul(0.35).add(uEvolve), h.mul(-0.27)));
           const fUv = uv.mul(9.7).add(vec2(h.mul(-0.8), h.mul(0.6).sub(uEvolve.mul(1.7))));
           const billow = mapTex.sample(dUv).b.mul(0.62).add(mapTex.sample(fUv).b.mul(0.38));
-          const bite = billow.mul(uErode).mul(mix(float(0.6), float(1.25), saturate(hL)));
+          /*
+           * EDGE-WEIGHTED EROSION — the fix for clouds reading as marshmallows.
+           *
+           * The bite is subtracted AFTER the coverage threshold, so it removes an
+           * ABSOLUTE amount from a value that is already small wherever coverage is
+           * low. At `clear` settings almost nothing clears the bar, the bite then
+           * wipes most of what did, and what survives is simply wherever the billow
+           * happened to be weakest — a smooth rounded lump. Cores and rims were being
+           * eroded equally, so the outline never got carved at all.
+           *
+           * Weighting the bite by (1 - shaped) inverts that: the RIM, where the mass is
+           * thinnest, is eroded hardest and comes apart into cauliflower, while the
+           * core keeps enough of its density to stay solid. A third of the bite is left
+           * on the core so it still gains internal texture rather than going flat.
+           */
+          const biteRaw = billow.mul(uErode).mul(mix(float(0.6), float(1.25), saturate(hL)));
+          const bite = biteRaw.mul(mix(float(0.35), float(1.0), shaped.oneMinus()));
           const dens = remapUnit(shaped, bite).mul(uDensityMul).toVar();
 
           If(dens.greaterThan(1e-5), () => {
@@ -997,6 +1033,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uCoverage.value = P.coverage;
     uWeatherScale.value = P.weatherScale;
     uErode.value = P.erode;
+    uLump.value = P.lumpiness;
     uDensityMul.value = P.densityMul;
     uTopMin.value = P.topMin;
     uSteps.value = Math.min(P.steps, MAX_STEPS);
