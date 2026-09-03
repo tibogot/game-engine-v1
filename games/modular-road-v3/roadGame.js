@@ -139,6 +139,9 @@ import { RunTracker, formatRunTime } from "./modularRoadRun.js";
 import { GhostTrack, createGhostMesh } from "./modularRoadGhost.js";
 import { ModularRoadTireMarks } from "./modularRoadTireMarks.js";
 import { ModularRoadDriftSmoke, DEFAULT_DRIFT_SMOKE_SETTINGS } from "./modularRoadDriftSmoke.js";
+import { createHeadlightBeams } from "./modularRoadHeadlightBeam.js";
+import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
+import { createGpuStatsPanel } from "../../v3/render/gpuStatsPanel.js";
 import {
   createModularRoadAudioSystem,
   setupModularRoadVehicleAudio,
@@ -1190,6 +1193,89 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // moved. This is already key-cached on solar elevation, so it fires only when the
     // sun actually moves — and the bake itself is spread one cube face per frame.
     app.envSky?.invalidate();
+  }
+
+  /*
+   * LENS FLARE OCCLUSION.
+   *
+   * The engine's flare system has none of its own — its only gates are "sun in front of
+   * the camera", "sun above the horizon" and a screen-radius falloff, with every quad
+   * drawn depthTest:false. Over an empty sky that is fine; with a cloud deck overhead it
+   * is the classic bolted-on-flare tell, a full-strength halation burning through solid
+   * cumulus.
+   *
+   * It cannot answer this itself either. The deck is drawn INSIDE the sky dome's fragment
+   * shader and never exists as geometry, so a scene raycast finds nothing and a depth
+   * test sees empty sky. Only the code that owns the clouds can say — which is here.
+   *
+   * Eased rather than applied raw: a cloud edge crossing the sun should dim the flare
+   * over a moment, and at 60 fps a hard cut reads as a flicker, especially with the car
+   * moving. Asymmetric on purpose — hiding behind a cloud is quicker than coming back
+   * out, which is how a real occultation of a bright source looks through a lens.
+   */
+  let _flareOcc = 1;
+  let _flareInit = false;
+  const _flareSun = new THREE.Vector3();
+  /**
+   * The game owns the flare's look, because the values it would otherwise inherit are
+   * the EDITOR's — intensity 3, halation 3, ghosts 2 — which blow the whole frame to
+   * white. Tuned here for a chase camera: present when the sun swings into frame on a
+   * turn, never fighting the road for attention.
+   */
+  const LENS_FLARE_LOOK = {
+    // On by default: this is a racing game with a chase camera, and the effect is the
+    // point. Turn it off from the panel, or per-machine if it is not to taste.
+    enabled: true,
+    intensity: 1.7,
+    halationSize: 1.0,
+    halationColor: "#ffd9a8",
+    streakLength: 1.0,
+    streakOpacity: 0.7,
+    streakColor: "#b6d4ff",
+    ghostOpacity: 0.6,
+    ghostSpacing: 1.0,
+    dirtOpacity: 0.25,
+  };
+  /**
+   * The flare params with the game's look applied, or null before the engine has built
+   * it. Lazy rather than done at construction because worldEnvironment creates the flare
+   * during startV3App, so its state does not exist when this module is made — and lazy
+   * HERE rather than in the frame loop so the dev panel cannot read the editor's values
+   * by being built first.
+   */
+  function ensureFlareLook() {
+    const lp = app.lensFlare?.params?.();
+    if (!lp) return null;
+    if (!_flareInit) {
+      _flareInit = true;
+      Object.assign(lp, LENS_FLARE_LOOK);
+    }
+    return lp;
+  }
+
+  function updateLensFlare(dt) {
+    const lp = ensureFlareLook();
+    if (!lp?.enabled) return;
+    _flareSun.copy(_cloudSun);
+    let target = 1;
+    if (cloudsWanted && cloudTier === "painted" && gamePainted?.sunThrough) {
+      target = gamePainted.sunThrough(camera.position, _flareSun);
+    } else if (cloudsWanted && cloudTier === "volumetric" && clouds.enabled && clouds.isReady) {
+      // Volumetric already owns a CPU density field; sample it where the sun ray crosses
+      // the deck rather than porting a second silhouette.
+      const yy = Math.max(_flareSun.y, 1e-3);
+      const hMid = clouds.params.base + clouds.params.thickness * 0.5;
+      const t = hMid / yy;
+      const d = clouds.densityAt(
+        camera.position.x + _flareSun.x * t,
+        camera.position.y + _flareSun.y * t,
+        camera.position.z + _flareSun.z * t,
+      );
+      target = 1 - Math.min(1, d / 0.03);
+    }
+    const k = target < _flareOcc ? 9 : 3.5; // dims fast, recovers slowly
+    _flareOcc += (target - _flareOcc) * Math.min(1, dt * k);
+    app.lensFlare.setOcclusion(_flareOcc);
   }
 
   function updateGameSky(dt) {
@@ -4018,10 +4104,114 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let headlightsOn = false;
   const _sunDir = new THREE.Vector3();
 
+  /* ── VOLUMETRIC BEAMS ──────────────────────────────────────────────────────
+   *
+   * The light you can SEE IN THE AIR. This does NOT replace the SpotLights —
+   * they are the pool on the road and this system makes no pool at all — nor the
+   * emissive lenses. It is a third layer on top of both, and it only exists at
+   * night with something in the air.
+   *
+   * SHAPE IS DERIVED, NOT CONFIGURED. angle/range/penumbra/colour are copied
+   * from HEADLIGHTS every refresh so the haze and the pool can never disagree
+   * about where the lamp is pointing — two sets of cone constants drifting apart
+   * is exactly the bug this avoids. What the panel owns is the SCATTERING:
+   * how much is in the air, how bright, how forward-peaked, how many steps.
+   *
+   * COST: measured ~0.67 ms for both lamps at 20 steps (see the header of
+   * modularRoadHeadlightBeam.js for the full step/ms curve), plus 4 draws — two
+   * cones and two glare sprites. Both are switchable from the Lights panel
+   * precisely so that number can be re-measured here rather than trusted.
+   */
+  const headlightBeams = createHeadlightBeams({
+    decorate: (material, kind, colorNode) => {
+      // Only the GLARE blooms. The beam is a large, soft, already-additive area:
+      // pushed through selective bloom it stops being a beam and becomes a wash
+      // over the whole bonnet. The flare is a point highlight, which is what the
+      // bloom pyramid is actually good at.
+      if (kind === "glare") applyBloomMRT(material, colorNode);
+    },
+  });
+  for (const node of vehicle.headlampNodes) headlightBeams.attach(node);
+
+  let beamsWanted = true;
+  let beamGlareWanted = true;
+  /** Lazily built by the panel's GPU stats toggle; see the game handle. */
+  let gpuStatsPanel = null;
+  /** Last shape the rasterisation hull was built for — see syncHeadlightBeams. */
+  let beamHullKey = "";
+
+  /**
+   * Beams follow the headlight switch, so `H` turns all three layers on and off
+   * together and the panel toggles only decide which layers participate.
+   */
+  function syncHeadlightBeams() {
+    const B = headlightBeams.params;
+    B.angle = HEADLIGHTS.angle;
+    B.range = HEADLIGHTS.distance;
+    B.penumbra = HEADLIGHTS.penumbra;
+    B.color = HEADLIGHTS.color;
+    B.glare = beamGlareWanted && headlightsOn;
+    headlightBeams.applyParams();
+    // The hull is GEOMETRY, so rebuilding it allocates and disposes. This runs
+    // on every headlight toggle and every panel drag, and only three params can
+    // change its shape — so key on those rather than rebuilding a cone per
+    // slider event.
+    const key = `${B.angle}|${B.range}|${B.hullSpread}`;
+    if (key !== beamHullKey) {
+      beamHullKey = key;
+      headlightBeams.rebuildHull();
+    }
+    headlightBeams.setEnabled(beamsWanted && headlightsOn);
+  }
+
   function setHeadlights(on) {
     headlightsOn = !!on;
     vehicle.setHeadlights(headlightsOn);
+    syncHeadlightBeams();
   }
+
+  /**
+   * Beam + GPU-stats controls, spread into BOTH the dev panel's `game` object
+   * and the returned handle so `__roadGame` can drive them from the console.
+   * The params object is handed out by reference so sliders write straight into
+   * it (same contract as driftSmoke.settings) — nothing reads it per frame, so
+   * every write has to be followed by refreshHeadlightBeams.
+   */
+  const headlightBeamApi = {
+    setHeadlightBeams: (on) => { beamsWanted = !!on; syncHeadlightBeams(); },
+    getHeadlightBeams: () => beamsWanted,
+    setHeadlightGlare: (on) => { beamGlareWanted = !!on; syncHeadlightBeams(); },
+    getHeadlightGlare: () => beamGlareWanted,
+    getHeadlightBeamParams: () => headlightBeams.params,
+    getHeadlightBeamMaxSteps: () => headlightBeams.maxSteps,
+    refreshHeadlightBeams: () => syncHeadlightBeams(),
+
+    /**
+     * GPU stats panel — built on FIRST USE, not at boot. It reaches into the
+     * renderer's timestamp pool and costs screen space, so it is a diagnostic
+     * you switch on while chasing a frame-time question. See
+     * v3/render/gpuStatsPanel.js for why the stats-gl GPU row is not the number
+     * to believe (it publishes partial frames).
+     *
+     * Returns whether the panel is now up, so a caller can un-check its own
+     * toggle rather than claim a panel that never appeared.
+     */
+    setGpuStats: (on) => {
+      if (on && !gpuStatsPanel) {
+        try {
+          gpuStatsPanel = createGpuStatsPanel(renderer, { top: "96px", left: "8px" });
+        } catch (e) {
+          console.warn("[ModularRoad-v3] GPU stats unavailable", e);
+          return false;
+        }
+      } else if (!on && gpuStatsPanel) {
+        gpuStatsPanel.dispose();
+        gpuStatsPanel = null;
+      }
+      return !!gpuStatsPanel;
+    },
+    getGpuStats: () => !!gpuStatsPanel,
+  };
 
   /**
    * Sun height → lights. Hysteresis (on below 0.10, off above 0.16) so the lamps
@@ -6627,6 +6817,12 @@ ${e.message}`);
       /** The track's wish, not the deck: the cloud TIER decides whether that
        *  wish is currently affordable, and the two controls stay independent. */
       getClouds: () => cloudsWanted,
+      /** Lens flare params, with the GAME's look applied — see ensureFlareLook. The
+       *  params object itself lives in the engine's world state; the panel binds to it
+       *  by reference like every other live params bag here. */
+      lensFlareParams: () => ensureFlareLook(),
+      /** Live sun occlusion, 0..1, for a panel readout. */
+      lensFlareOcclusion: () => _flareOcc,
       /** The live params object — `update()` pushes every field into its uniform
        *  each frame, so the panel can bind sliders straight to it. */
       cloudParams: clouds.params,
@@ -6648,8 +6844,15 @@ ${e.message}`);
       getHeadlights: () => headlightsOn,
       setAutoHeadlights: (on) => { autoHeadlights = !!on; updateAutoHeadlights(); },
       getAutoHeadlights: () => autoHeadlights,
-      // Re-push HEADLIGHTS params onto the rig after a slider moves.
-      refreshLights: () => vehicle.applyHeadlightParams(),
+      // Re-push HEADLIGHTS params onto the rig after a slider moves. The beams
+      // derive their cone from the same constants, so they re-sync here too.
+      refreshLights: () => { vehicle.applyHeadlightParams(); syncHeadlightBeams(); },
+
+      // Volumetric beams + the GPU stats panel. Spread rather than written out
+      // twice: this object and the returned `handle` (window.__roadGame) already
+      // duplicate a lot of surface, and a diagnostic you can only reach from a
+      // panel toggle is half a diagnostic.
+      ...headlightBeamApi,
       // glowPropParams is shared by every placed glow prop; this pushes the new
       // values onto them (emissive is a live node, so bloom follows for free).
       refreshGlowProps: () => props.applyGlowParams(),
@@ -7192,6 +7395,18 @@ ${e.message}`);
       sparks.updateFromVehicle(vehicle, camera, dt);
     }
 
+    // Beams run in BUILD mode too — the car is on the plate with its lights on
+    // and the beams are children of the chassis, so skipping this outside drive
+    // would leave them pointing wherever the car last was. Camera-dependent
+    // (the glare's head-on falloff), so it belongs down here with the rest.
+    // Gated on `enabled` so the switched-off case costs one boolean.
+    // `|| glare` matters: the flare's head-on falloff is written by update(), so
+    // gating on the beam alone would freeze it at whatever it was when the beam
+    // was switched off — which is the state you are in while measuring the beam.
+    if (headlightsOn && (beamsWanted || beamGlareWanted)) {
+      headlightBeams.update(dt, camera);
+    }
+
     updateDebugReadout(dt);
 
     // Per-frame audio pump — drives every layer's gain/pitch from the car's
@@ -7200,6 +7415,7 @@ ${e.message}`);
     // you switch back to build.
     audioSystem.update(dt);
     updateCloudMuffle(dt);
+    updateLensFlare(dt);
 
     // The sun can be moved live from the v3 world panel, so re-check rather than
     // only sampling at boot. Throttled — this is a scene lookup, not per-frame work.
@@ -7333,6 +7549,7 @@ ${e.message}`);
     app,
     builder,
     vehicle,
+    ...headlightBeamApi,
     props,
     movers,
     portals,
@@ -7366,6 +7583,9 @@ ${e.message}`);
     getTerrain: () => terrainOn,
     /** Cloud density at a world point (0 until the bake lands) — for HUD/audio rules. */
     cloudDensityAt: (x, y, z) => clouds.densityAt(x, y, z),
+    lensFlareParams: () => ensureFlareLook(),
+    /** Live occlusion, 0..1 — read-only, for the panel readout. */
+    lensFlareOcclusion: () => _flareOcc,
     cloudParams: clouds.params,
     /** One clock for everything that cares: engine sky (drives the sun light and the
      *  cloud colours) AND the game-owned sky dome. Setting only one of the two is how

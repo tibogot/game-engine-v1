@@ -1140,6 +1140,12 @@ export async function createWorldEnvironment({
     sunDir,
     getEffectiveLightDir: () => _effectiveLightDir,
     setCustomCloudSystem,
+    /**
+     * The lens flare, so a game can own its look and — more importantly — tell it what
+     * is in front of the sun. See createLensFlareSystem's setOcclusion.
+     */
+    lensFlareParams: () => toolState.lensFlare,
+    setLensFlareOcclusion: (v) => lensFlare.setOcclusion(v),
     setCustomEnvSky,
     invalidateProcEnv,
     syncCsm,

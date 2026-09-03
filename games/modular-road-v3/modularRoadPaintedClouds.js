@@ -1219,11 +1219,77 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uWindDir.value.set(Math.cos(rad), Math.sin(rad));
   }
 
+  /*
+   * HOW MUCH SUN GETS THROUGH THE DECK — a CPU mirror of the shader's silhouette.
+   *
+   * The lens flare needs to know when the sun is behind a cloud, and it cannot ask the
+   * GPU: the deck is drawn inside the sky dome's fragment shader and never exists as
+   * geometry, so a raycast finds nothing and a depth test sees empty sky. The volumetric
+   * tier answers this with densityAtCPU; the painted tier had no equivalent, which is why
+   * the flare blazed straight through solid cloud.
+   *
+   * It only needs the SILHOUETTE, not the full march: where the sun ray crosses the deck,
+   * is there cloud there? So this reproduces the mass field, the regional coverage and
+   * the threshold — the three things that decide the outline — and skips the vertical
+   * profile, erosion and lighting, which decide how it looks rather than whether it is
+   * there. Four bilinear taps of the same baked array, once per frame.
+   */
+  const mapData = map.image.data;
+  function sampleMap(u, v, ch) {
+    // Bilinear, wrapping — matching RepeatWrapping + LinearFilter on the GPU.
+    const N = PAINTED_MAP_SIZE;
+    const fx = u * N - 0.5, fy = v * N - 0.5;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const tx = fx - x0, ty = fy - y0;
+    const wrap = (n) => ((n % N) + N) % N;
+    const x1 = wrap(x0 + 1), y1 = wrap(y0 + 1);
+    const xa = wrap(x0), ya = wrap(y0);
+    const at = (x, y) => mapData[(y * N + x) * 4 + ch] / 255;
+    return (at(xa, ya) * (1 - tx) + at(x1, ya) * tx) * (1 - ty)
+         + (at(xa, y1) * (1 - tx) + at(x1, y1) * tx) * ty;
+  }
+
+  /**
+   * Fraction of the sun that reaches `camPos` through the deck: 1 clear, 0 fully hidden.
+   * @param {{x:number,y:number,z:number}} camPos
+   * @param {{x:number,y:number,z:number}} sunDir normalised, pointing AT the sun
+   */
+  function sunThrough(camPos, sunDir) {
+    if (sunDir.y <= 0.005) return 1; // below the horizon: the flare's own fade owns this
+    // Same curved-earth slab crossing as the march (see `tAt`), at the mid-plane.
+    const yy = Math.max(sunDir.y, 1e-3);
+    const hMid = P.altitude + P.thickness * 0.5;
+    const inv2R = 0.5 / Math.max(1e3, P.planetRadiusKm * 1000);
+    const t = (hMid * 2) / (Math.sqrt(yy * yy + hMid * inv2R * 4) + yy);
+
+    const wx = _windAccum.x / P.tile, wy = _windAccum.y / P.tile;
+    const u = camPos.x / P.tile + (sunDir.x * t) / P.tile + wx;
+    const v = camPos.z / P.tile + (sunDir.z * t) / P.tile + wy;
+
+    // Regional coverage — the same two weather octaves the shader uses, or the mask
+    // would disagree with the sky about where the clouds even are.
+    const wLow = sampleMap(u * P.weatherScale, v * P.weatherScale, 3);
+    const wMid = sampleMap(u * P.weatherScale * P.sizeScale, v * P.weatherScale * P.sizeScale, 3);
+    const base = Math.min(1, Math.max(0, P.coverage * (0.55 + 0.9 * wLow)));
+    const cov = Math.min(1, Math.max(0, base + (wMid - 0.5) * 2 * P.sizeVary * base * (1 - base)));
+
+    const mass = sampleMap(u, v, 0);
+    const billow = sampleMap(u, v, 2);
+    const massL = mass + (billow - 0.5) * P.lumpiness;
+    const lo = 1 - cov;
+    const shaped = Math.min(1, Math.max(0, (massL - lo) / Math.max(1e-4, 1 - lo)));
+
+    // shaped is 0 at the outline and 1 in the core; the sun dims fast once it is behind
+    // anything at all, which is what a real occultation looks like.
+    return 1 - Math.min(1, shaped * 2.2);
+  }
+
   return {
     params: P,
     map,
     shade,
     update,
+    sunThrough,
     // Custom-cloud contract (see worldEnvironment.setCustomCloudSystem). Registered only
     // while the painted tier is live, and only to cast ground shadows — the deck itself
     // is drawn by the sky dome, not here.

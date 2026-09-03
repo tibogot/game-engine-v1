@@ -1751,6 +1751,157 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>  <!-- /Lights. THIS CLOSE WAS MISSING: without it Weather, Bloom, Audio and FX were children of Lights, so collapsing Lights hid all four. -->
 
       <div class="inspector-section">
+        <div class="section-header">Lights — visible beams</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Beams (in the air)</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-vb" type="button" aria-label="Volumetric beams">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lens glare</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-vb-glare" type="button" aria-label="Lens glare">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Cone spread</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-angle" min="0.1" max="1" step="0.01" />
+              <span class="prop-num" id="dv-vb-angle-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Aim reach</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-reach" min="4" max="60" step="0.5" />
+              <span class="prop-num" id="dv-vb-reach-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Aim drop</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-drop" min="0" max="8" step="0.05" />
+              <span class="prop-num" id="dv-vb-drop-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Throw</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-dist" min="20" max="180" step="1" />
+              <span class="prop-num" id="dv-vb-dist-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Stuff in the air</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-air" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-vb-air-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Beam brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-power" min="0" max="2" step="0.01" />
+              <span class="prop-num" id="dv-vb-power-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Flat → peaked</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-phase" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-vb-phase-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Forward bias</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-g" min="0" max="0.92" step="0.01" />
+              <span class="prop-num" id="dv-vb-g-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lumpiness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-noise" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-vb-noise-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">March steps</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-steps" min="6" max="48" step="1" />
+              <span class="prop-num" id="dv-vb-steps-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Glare size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-glare-size" min="0.3" max="6" step="0.1" />
+              <span class="prop-num" id="dv-vb-glare-size-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Glare power</span>
+            <div class="prop-value">
+              <input type="range" id="dv-vb-glare-i" min="0" max="5" step="0.05" />
+              <span class="prop-num" id="dv-vb-glare-i-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">GPU stats panel</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-gpustats" type="button" aria-label="GPU stats panel">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            A <b>SpotLight only lights surfaces</b> — nothing is computed for the
+            air between the lamp and the road, which is correct for a vacuum. You
+            see a real beam because the air has rain, mist or exhaust in it
+            scattering light sideways into your eye. This integrates that along
+            the view ray, so it is right from any camera angle rather than only
+            the one a flat cone card was tuned at.
+            <br><br>
+            <b>Nothing here replaces the SpotLights.</b> They are still the pool
+            on the tarmac; this only adds the haze above it, and the glare on the
+            lens. Cone shape and colour are copied from the headlights so the two
+            can never disagree.
+            <br><br>
+            <b>Stuff in the air</b> is the knob to drive from the weather. A beam
+            that is always visible reads as a fog machine; one that shows up in
+            rain and in your own tyre smoke reads as light.
+            <br><br>
+            <b>Flat → peaked</b> is the physics. Real fog scatters strongly
+            forward, so a beam is dazzling head-on and subtle from the kerb — but
+            at 1.0 it is <i>too</i> honest and vanishes broadside. Lower it until
+            the beam survives a camera orbit.
+            <br><br>
+            <b>Cost, measured in this game</b> (chase camera, both lamps, taken
+            by raising the pixel ratio until the frame is off the vsync ceiling
+            and scaling real frame time back — not from a counter):
+            <b>+1.06&nbsp;ms at 16 steps</b>, +1.23 at 20, +1.99 at 48.
+            <b>Draws go from 2 to 6</b> — two cones and two glare sprites — and
+            the DRAW panel in the stats overlay shows it as you toggle.
+            <br><br>
+            That is ~0.029&nbsp;ms per step on a <b>~0.6&nbsp;ms floor</b>, and
+            the floor is the interesting half: about 0.4&nbsp;ms of it is the
+            full-res depth-buffer copy the beam needs to clip itself against the
+            scene. So the step slider is worth less than it looks — 48→16 saves
+            ~0.9&nbsp;ms, 16→6 saves almost nothing — and the real optimisation
+            is sharing that one copy with the drift smoke, which keeps its own.
+            <br><br>
+            <b>Do not read the beam's cost off the GPU stats panel.</b> At a
+            vsync-locked 60&nbsp;fps it reports the frame as MORE expensive with
+            the beams off (3.8&nbsp;ms vs 1.3), because the idle wait lands on
+            whichever pass it lands on. The panel is right about draws, passes
+            and which pass dominates; for "what does this feature cost", raise
+            the pixel ratio until fps drops and compare real frame times.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Sky</div>
         <div class="section-body">
           <div class="dv-hint">
@@ -2359,6 +2510,65 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-ap-glowpow" min="1" max="24" step="0.5" />
               <span class="prop-num" id="dv-ap-glowpow-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Lens flare</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            A <b>lens</b> artifact, not an atmospheric one — it belongs to the camera,
+            so it draws over everything including the car. The engine's flare has no
+            occlusion of its own and cannot get any: the cloud deck is a shader inside
+            the sky dome and never exists as geometry, so a raycast finds nothing.
+            The game answers for it instead, from the same cloud field it draws.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Enabled</span>
+            <div class="prop-value"><input type="checkbox" id="dv-lf-on" /></div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Intensity</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-int" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-lf-int-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Halation size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-hal" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-lf-hal-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Streak length</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-streak" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-lf-streak-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Streak opacity</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-streako" min="0" max="1.5" step="0.05" />
+              <span class="prop-num" id="dv-lf-streako-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Ghosts</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-ghost" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-lf-ghost-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lens dirt</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-dirt" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-lf-dirt-v"></span>
             </div>
           </div>
         </div>
@@ -3737,6 +3947,10 @@ export function createRoadDevPanel({ app, game, params }) {
     // `Lights` is spelled out because the prefix match is `includes`, and
     // "Lights" does not contain "Lighting".
     Lights: "💡", Bloom: "🌟", "Prop livery": "🎨", "Grid snap": "📐",
+    // Keyed on the distinctive half, not the whole header: the lookup takes the
+    // LONGEST matching key, so "visible beams" beats the "Lights" it also
+    // contains and the two light sections get different glyphs.
+    "visible beams": "🔦",
     "Gap / jump": "🛫", Spawn: "📍", Race: "🏁", "Edit piece": "✏️",
     "Camera frame": "🖼️",
     // The Car block is eight consecutive sections. Left as one repeated 🚗 the
@@ -4492,6 +4706,32 @@ export function createRoadDevPanel({ app, game, params }) {
    * `markPaintedTouched` stops re-entering the tier from stomping a coverage the user
    * dialled in here with the volumetric deck's value.
    */
+  /* Lens flare — the params live in the ENGINE's world state (worldEnvironment owns
+   * the flare), reached through the game handle. Same bind-by-name slider helper as
+   * everything else here. */
+  /* The flare is built by worldEnvironment during startV3App, which can finish AFTER
+   * this panel — so binding eagerly silently skipped the whole section and left the
+   * toggle reading unchecked while the flare was on. Retry briefly instead. */
+  (function bindLensFlare(tries = 0) {
+    const LF = game.lensFlareParams?.();
+    if (!LF) {
+      if (tries < 40) setTimeout(() => bindLensFlare(tries + 1), 250);
+      return;
+    }
+    const lfOn = document.getElementById("dv-lf-on");
+    if (lfOn) {
+      lfOn.checked = !!LF.enabled;
+      lfOn.addEventListener("change", () => { LF.enabled = lfOn.checked; });
+    }
+    const lfs = (id, key, fmt) => slider(id, LF, key, fmt);
+    lfs("dv-lf-int", "intensity", (v) => v.toFixed(2));
+    lfs("dv-lf-hal", "halationSize", (v) => v.toFixed(2));
+    lfs("dv-lf-streak", "streakLength", (v) => v.toFixed(2));
+    lfs("dv-lf-streako", "streakOpacity", (v) => v.toFixed(2));
+    lfs("dv-lf-ghost", "ghostOpacity", (v) => v.toFixed(2));
+    lfs("dv-lf-dirt", "dirtOpacity", (v) => v.toFixed(2));
+  })();
+
   /* Aerial perspective — a live params object owned by roadGame, present in every
    * tier, so these bind exactly like the painted deck's. */
   /* Sky weather presets. Buttons, not sliders: a preset is a choice, and the values
@@ -4735,6 +4975,53 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-tail-brake", CHASSIS_GLB_LIGHTS, "brakeIntensity", (v) => v.toFixed(1));
   slider("dv-glb-lamp", CHASSIS_GLB_LIGHTS, "headlampIntensity", (v) => v.toFixed(2));
   slider("dv-beam", HEADLIGHTS, "intensity", (v) => v.toFixed(0), () => game.refreshLights());
+
+  // ── Visible beams (scattering in the air) ───────────────────────────────────
+  // These write into the beam system's OWN params object, handed out by
+  // reference, and every write needs the refresh — nothing reads it per frame.
+  // Same shape as the drift-smoke block: a live settings bag plus one push.
+  const beamParams = game.getHeadlightBeamParams?.() ?? null;
+  const pushBeams = () => game.refreshHeadlightBeams?.();
+  toggle("dv-vb", game.getHeadlightBeams?.() ?? true,
+    (on) => game.setHeadlightBeams?.(on));
+  toggle("dv-vb-glare", game.getHeadlightGlare?.() ?? true,
+    (on) => game.setHeadlightGlare?.(on));
+  // AIM AND SPREAD ARE HEADLIGHTS FIELDS, NOT BEAM FIELDS — deliberately. They
+  // shape the pool and the haze together, and refreshLights re-derives the
+  // beam's cone from them, so the two can never end up pointing different ways.
+  // They live in this section because they only became worth exposing once the
+  // beam made them visible: the shipped aim drops 3.2 m over 16, which is steep
+  // enough that most of the cone is under the tarmac and the beam reads as haze
+  // on the ground rather than a beam in the air. Flatten the drop or lengthen
+  // the reach and it becomes one.
+  const pushLights = () => game.refreshLights();
+  slider("dv-vb-angle", HEADLIGHTS, "angle",
+    (v) => `${(v * 180 / Math.PI).toFixed(0)}°`, pushLights);
+  slider("dv-vb-reach", HEADLIGHTS, "aimForward", (v) => `${v.toFixed(1)} m`, pushLights);
+  slider("dv-vb-drop", HEADLIGHTS, "aimDrop",
+    (v) => `${v.toFixed(2)} m · ${(Math.atan2(v, HEADLIGHTS.aimForward) * 180 / Math.PI).toFixed(1)}° down`,
+    pushLights);
+  slider("dv-vb-dist", HEADLIGHTS, "distance", (v) => `${v.toFixed(0)} m`, pushLights);
+  slider("dv-vb-air", beamParams, "media", (v) => v.toFixed(2), pushBeams);
+  slider("dv-vb-power", beamParams, "intensity", (v) => v.toFixed(2), pushBeams);
+  slider("dv-vb-phase", beamParams, "phaseMix", (v) => v.toFixed(2), pushBeams);
+  slider("dv-vb-g", beamParams, "anisotropy", (v) => v.toFixed(2), pushBeams);
+  slider("dv-vb-noise", beamParams, "noise", (v) => v.toFixed(2), pushBeams);
+  // Shown with the measured cost beside it, because that IS what this slider is.
+  // Measured in this game, chase camera, scaled off the vsync ceiling: a ~0.6 ms
+  // FLOOR (about 0.4 of which is the depth-buffer copy, which no step count can
+  // reach) plus ~0.029 ms per step. Hence "+" — the number is what the beam adds
+  // over having it switched off, not what the slider alone buys.
+  slider("dv-vb-steps", beamParams, "steps",
+    (v) => `${v.toFixed(0)}  ≈+${(0.59 + v * 0.029).toFixed(2)} ms`, pushBeams);
+  slider("dv-vb-glare-size", beamParams, "glareSize", (v) => v.toFixed(1), pushBeams);
+  slider("dv-vb-glare-i", beamParams, "glareIntensity", (v) => v.toFixed(2), pushBeams);
+  // Built on first switch-on. If the adapter has no timestamp-query the game
+  // returns false and the toggle snaps back rather than sitting there lying.
+  const gpuStatsToggle = toggle("dv-gpustats", game.getGpuStats?.() ?? false, (on) => {
+    const ok = game.setGpuStats?.(on);
+    if (on && ok === false) gpuStatsToggle.set(false);
+  });
 
   // ── Sky (game-owned, A/B against the engine's) ──────────────────────────────
   // The sky is built lazily on first switch-on, so `game.setAtmosphereMix` is a

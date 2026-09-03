@@ -6648,6 +6648,15 @@ export async function startV3App(opts = {}) {
        *  look moved (time of day, weather). */
       invalidate() { worldEnv?.invalidateProcEnv(); },
     },
+    // A game can own the LENS FLARE too. Its look is one thing; the important half is
+    // OCCLUSION — the flare system has none of its own, and the code that draws the
+    // occluders (clouds, terrain, a race track) is the only code that can answer cheaply.
+    lensFlare: {
+      /** Live params object — same shape as the editor World panel exposes. */
+      params() { return worldEnv?.lensFlareParams?.() ?? null; },
+      /** 0 = sun fully blocked, 1 = clear line of sight. Drive this per frame. */
+      setOcclusion(v) { worldEnv?.setLensFlareOcclusion?.(v); },
+    },
     // ── Shadow override ───────────────────────────────────────────────────────
     // CSM lives in worldToolState.csm and is NOT stored in .v3proj, so a game
     // can own it. Every shadow caster is re-drawn once per cascade per frame —

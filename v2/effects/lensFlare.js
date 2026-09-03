@@ -255,6 +255,8 @@ export function createLensFlareSystem({
     );
   }
 
+  /** 0 = sun fully blocked, 1 = clear line of sight. See setOcclusion. */
+  let occlusion = 1;
   const sunLocal = new THREE.Vector3();
   const camQuatInv = new THREE.Quaternion();
 
@@ -292,7 +294,19 @@ export function createLensFlareSystem({
     const screenVis = 1 - THREE.MathUtils.smoothstep(radius, 0.4, 2.0);
     const offFrameVis = 1 - THREE.MathUtils.smoothstep(radius, 0.0, 3.0);
 
-    const master = p.intensity * horizonVis;
+    /*
+     * OCCLUSION. This system has never had any: its only gates are "sun in front of
+     * camera", "sun above the horizon" and a screen-radius falloff, and every quad is
+     * depthTest:false. That is fine over an empty sky and badly wrong the moment
+     * anything stands between the camera and the sun — a flare blazing through a solid
+     * cloud is the classic tell that one was bolted on.
+     *
+     * Rather than raycast the scene from in here (which cannot see GPU-displaced terrain,
+     * instanced foliage, or a cloud deck that is a shader rather than geometry), the
+     * owner supplies the answer through setOcclusion(). Whoever draws the occluders is
+     * the only code that can cheaply say how much of the sun survives.
+     */
+    const master = p.intensity * horizonVis * occlusion;
     if (master < 0.001) {
       group.visible = false;
       return;
@@ -330,6 +344,15 @@ export function createLensFlareSystem({
     dirt.position.set(0, 0, Z);
     dirt.scale.set(halfW * 2, halfH * 2, 1);
     dirt.material.userData.uInt.value = master * screenVis * p.dirtOpacity * 0.9;
+
+    /*
+     * DO NOT DRAW WHAT CANNOT BE SEEN. Every quad here is alpha-blended with
+     * depthTest:false, and the dirt one is FULLSCREEN — so a flare at zero intensity
+     * still cost a fullscreen blend plus a screenful of overdraw from the halation.
+     * That is paid on every frame the sun is up, and with occlusion now driving the
+     * intensity to zero behind cloud it would have been paid most of the time.
+     */
+    for (const m of allQuads) m.visible = m.material.userData.uInt.value > 0.002;
   }
 
   function dispose() {
@@ -350,5 +373,17 @@ export function createLensFlareSystem({
     }
   }
 
-  return { group, update, dispose };
+  /**
+   * How much of the sun reaches the lens, 0..1. Called by whoever owns the occluders —
+   * clouds, terrain, the track — because only they can answer cheaply. Defaults to 1, so
+   * a caller that never sets it gets exactly the previous behaviour.
+   */
+  function setOcclusion(v) {
+    occlusion = Math.max(0, Math.min(1, v));
+  }
+
+  /** Every quad, for the zero-intensity cull in update(). */
+  const allQuads = [halation, streak, dirt, ...ghosts];
+
+  return { group, update, dispose, setOcclusion };
 }
