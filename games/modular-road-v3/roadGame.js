@@ -531,7 +531,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     },
   });
   scene.add(clouds.mesh);
-  app.clouds?.setSystem(clouds);
+  // Registration happens later, once the tier and the painted deck both exist — see
+  // syncCloudSystem(). Registering the volumetric system unconditionally here was
+  // correct only while volumetric was the boot tier.
 
   /* ── CLOUD LIGHTING vs TIME OF DAY ─────────────────────────────────────────
    *
@@ -780,15 +782,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   const CLOUD_TIERS = ["volumetric", "painted", "off"];
   /**
-   * THE BOOT TIER, and it is volumetric on purpose.
+   * THE BOOT TIER, and it is PAINTED — the fallback became the shipping look.
    *
-   * The painted deck is a FALLBACK, not the shipping look — it is opt-in and stays
-   * completely unbuilt until someone asks for it: no CPU bake, no texture uploaded, and
-   * no cloud code compiled into the sky dome's shader (see buildGameSky, which only
-   * constructs it inside its own tier). "Disabled by default" here means genuinely
-   * absent, not merely invisible.
+   * It was written as the cheap tier and stayed opt-in while it looked like one. It no
+   * longer does: it marches a slab so its clouds have real thickness and self-occlusion,
+   * it curves with the planet so the deck ends at a horizon instead of smearing, it
+   * casts ground shadows, and it carries a second cirrus layer for depth — at ~0.29 ms
+   * against the volumetric deck's ~1.07 ms.
+   *
+   * The volumetric tier is NOT retired: it is still the one you can fly a car through
+   * (the painted deck is camera-relative, so you can never get inside or above it), it
+   * is what the cloud-dive tracks are built around, and it is still being worked on.
+   * It is one click away in the CLOUDS panel and everything that drives it is untouched.
+   *
+   * The inverse of the old note now applies: whichever tier is NOT selected is
+   * genuinely absent, not merely hidden. Booting painted means the volumetric deck's
+   * worker bake never starts, because `syncClouds()` below runs before anything can
+   * call its `update()`.
    */
-  const DEFAULT_CLOUD_TIER = "volumetric";
+  const DEFAULT_CLOUD_TIER = "painted";
   let cloudTier = DEFAULT_CLOUD_TIER;
 
   /**
@@ -813,6 +825,24 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let cloudsWanted = clouds.enabled;
   function syncClouds() {
     clouds.setEnabled(cloudsWanted && cloudTier === "volumetric");
+  }
+
+  /**
+   * WHICH SYSTEM OWNS THE ENGINE'S CUSTOM-CLOUD SLOT.
+   *
+   * The engine gives a game ONE registered cloud system, and the two tiers want it for
+   * different reasons: the volumetric deck DRAWS its clouds through that slot, while the
+   * painted deck only wants the fullscreen pass it provides, to cast GROUND SHADOWS —
+   * its clouds are already in the sky dome. The off tier registers nothing at all, so
+   * the frame takes its plain route with no custom pass in it.
+   *
+   * One function rather than a line at each call site: boot and the tier switch have to
+   * agree, and they did not while the registration lived only inside `setCloudTier`.
+   */
+  function syncCloudSystem() {
+    app.clouds?.setSystem(
+      cloudTier === "volumetric" ? clouds : cloudTier === "painted" ? gamePainted : null,
+    );
   }
   /** Engine sky meshes we hid, with the visibility each had before we did. */
   let _engineSkyWas = null;
@@ -950,19 +980,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       if (wasOn) setGameSky(true);
     }
 
-    /*
-     * WHICH SYSTEM OWNS THE CUSTOM-CLOUD SLOT.
-     *
-     * The engine gives a game ONE registered cloud system, and the two tiers want it
-     * for different reasons: the volumetric deck DRAWS its clouds through that slot,
-     * while the painted deck only wants the fullscreen pass it provides, to cast
-     * GROUND SHADOWS — its clouds are already in the sky dome. Registering per tier
-     * keeps both honest, and the off tier registers nothing at all so the frame takes
-     * its plain route with no custom pass in it.
-     */
-    app.clouds?.setSystem(
-      tier === "volumetric" ? clouds : tier === "painted" ? gamePainted : null,
-    );
+    syncCloudSystem();
     devPanel?.refresh?.();
   }
 
@@ -989,6 +1007,23 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * PMREM (see setGameSky) — switching the look does not relight the track.
    */
   setGameSky(true);
+
+  /*
+   * MAKE THE BOOT STATE MATCH THE BOOT TIER.
+   *
+   * `clouds` is constructed `enabled: true` — that is the TRACK's wish ("this track
+   * wants clouds"), not the machine's budget. Nothing reconciled the two at boot,
+   * because `syncClouds()` only ran on a tier change, so booting on any tier other than
+   * volumetric would have left the raymarched deck running underneath the painted one:
+   * both drawn, both paid for. Running it once here is the whole fix, and it must come
+   * AFTER setGameSky so `gamePainted` exists for the slot registration.
+   *
+   * It also has to run before anything calls `clouds.update()`, which is what would
+   * kick off the volumetric noise bake — so on the painted tier that worker never
+   * starts and boot never pays for it.
+   */
+  syncClouds();
+  syncCloudSystem();
 
   // 3) ── THE TRACK ──────────────────────────────────────────────────────────
   onStatus("Building track…");
