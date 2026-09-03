@@ -180,6 +180,7 @@ import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
 import { createModularRoadSky, skyColorsAt, moonDirFromTime, SKY_DEFAULTS } from "./modularRoadSky.js";
 import { createPaintedClouds, PAINTED_CLOUD_DEFAULTS } from "./modularRoadPaintedClouds.js";
+import { createAerialPerspective } from "./modularRoadAerial.js";
 import { createSkyAtmosphere, sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
@@ -830,21 +831,59 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   /**
-   * WHICH SYSTEM OWNS THE ENGINE'S CUSTOM-CLOUD SLOT.
+   * AERIAL PERSPECTIVE — see modularRoadAerial.js. Owned here rather than by either
+   * cloud tier because it is ATMOSPHERE, not cloud: the air between you and the world
+   * is there whether the sky has clouds in it or not.
+   */
+  const aerial = createAerialPerspective({ camera });
+
+  /** The cloud system the current tier wants in the slot, or null. */
+  let _activeCloud = null;
+
+  /**
+   * WHAT OWNS THE ENGINE'S CUSTOM-CLOUD SLOT.
    *
-   * The engine gives a game ONE registered cloud system, and the two tiers want it for
-   * different reasons: the volumetric deck DRAWS its clouds through that slot, while the
-   * painted deck only wants the fullscreen pass it provides, to cast GROUND SHADOWS —
-   * its clouds are already in the sky dome. The off tier registers nothing at all, so
-   * the frame takes its plain route with no custom pass in it.
+   * The engine gives a game exactly ONE registered system, and three different things
+   * now want that slot's "here is the scene depth, draw once after the solids pass":
+   * the volumetric deck DRAWS its clouds through it, the painted deck uses it to cast
+   * GROUND SHADOWS (its clouds are already in the sky dome), and aerial perspective
+   * needs it in EVERY tier including off.
    *
+   * So the registered object is an adapter rather than a cloud system: it hands the
+   * depth to both, and composites air FIRST and cloud SECOND. That order is not
+   * arbitrary — the haze belongs to the geometry, and the deck sits in front of it, so
+   * fogging after the clouds were laid down would put air on top of the sky.
+   */
+  const cloudSlot = {
+    get enabled() { return aerial.enabled || !!_activeCloud?.enabled; },
+    setDepthSource(tex) {
+      aerial.setDepthSource(tex);
+      _activeCloud?.setDepthSource?.(tex);
+    },
+    prepareFrame(anchor, dtSec) {
+      const cloudReady = _activeCloud?.prepareFrame?.(anchor, dtSec) ?? false;
+      // Either one wanting to draw is enough to justify the split path; each guards
+      // itself inside its own composite.
+      return cloudReady || aerial.enabled;
+    },
+    compositeOntoLinearHDR(renderer, targetRT) {
+      aerial.composite(renderer, targetRT);
+      _activeCloud?.compositeOntoLinearHDR?.(renderer, targetRT);
+    },
+    // The owns-the-frame path (no post-FX) has no HDR target to composite into, so the
+    // air sits it out exactly as the ground shadows do, and the volumetric deck keeps
+    // its own standalone route.
+    renderFrame() { return _activeCloud?.renderFrame?.() ?? false; },
+  };
+
+  /**
    * One function rather than a line at each call site: boot and the tier switch have to
    * agree, and they did not while the registration lived only inside `setCloudTier`.
    */
   function syncCloudSystem() {
-    app.clouds?.setSystem(
-      cloudTier === "volumetric" ? clouds : cloudTier === "painted" ? gamePainted : null,
-    );
+    _activeCloud =
+      cloudTier === "volumetric" ? clouds : cloudTier === "painted" ? gamePainted : null;
+    app.clouds?.setSystem(cloudSlot);
   }
   /** Engine sky meshes we hid, with the visibility each had before we did. */
   let _engineSkyWas = null;
@@ -1067,6 +1106,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
      * that encode.
      */
     const dayRef = 3.1, hemiDayRef = 0.62; // evaluateSky's own daylight values
+    // The haze is tinted by the same sky and the same sun that light the world, so
+    // distance, ground and cloud cannot disagree about what colour the air is.
+    aerial.setSky({
+      sunDir: look.sunDir,
+      zenith: cols.zenith,
+      horizon: cols.horizon,
+      sunTint: _skyKeyCol,
+    });
+
     app.light.set({
       dirColor: "#" + _skyKeyCol.getHexString(THREE.SRGBColorSpace),
       dirIntensity: (look.dirIntensity / dayRef) * _lightRef.dir,
@@ -6630,6 +6678,8 @@ ${e.message}`);
       cloudTiers: CLOUD_TIERS,
       /** The painted deck's live params — always present, survives tier rebuilds. */
       paintedParams,
+      /** Aerial-perspective params (see modularRoadAerial.js). */
+      aerialParams: aerial.params,
       markPaintedTouched: () => { _paintedTouched = true; },
 
       // ── Game-owned sky A/B (F8) ─────────────────────────────────────────
@@ -7226,6 +7276,8 @@ ${e.message}`);
     getCloudTier: () => cloudTier,
     /** The painted deck's live params, for console tuning. Always present. */
     paintedParams: () => paintedParams,
+    /** Aerial-perspective params, for console tuning. */
+    aerialParams: () => aerial.params,
     /** Sky mode — terrain hidden, not solid, and not paid for. A track saved in
      *  sky mode is just a track; this is a runtime mode, not track data. */
     setTerrain,

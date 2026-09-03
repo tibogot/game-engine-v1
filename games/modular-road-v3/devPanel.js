@@ -2246,6 +2246,55 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Aerial perspective</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            The air between you and the world. Not fog: it blends distant geometry
+            toward <b>the colour of the sky in that direction</b> — pale at the
+            horizon, deeper overhead, blazing toward the sun — which is what reads
+            as distance rather than as weather. Runs in <b>every cloud tier</b>,
+            including off, because it is atmosphere and not cloud. Haze 0 disables
+            the pass entirely.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Haze</span>
+            <div class="prop-value">
+              <input type="range" id="dv-ap-density" min="0" max="0.0025" step="0.00005" />
+              <span class="prop-num" id="dv-ap-density-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Max haze</span>
+            <div class="prop-value">
+              <input type="range" id="dv-ap-max" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-ap-max-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Scale height</span>
+            <div class="prop-value">
+              <input type="range" id="dv-ap-scaleh" min="300" max="8000" step="100" />
+              <span class="prop-num" id="dv-ap-scaleh-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun glow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-ap-glow" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-ap-glow-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Glow tightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-ap-glowpow" min="1" max="24" step="0.5" />
+              <span class="prop-num" id="dv-ap-glowpow-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Weather</div>
         <div class="section-body">
           <div class="prop-row">
@@ -4347,6 +4396,16 @@ export function createRoadDevPanel({ app, game, params }) {
    * `markPaintedTouched` stops re-entering the tier from stomping a coverage the user
    * dialled in here with the volumetric deck's value.
    */
+  /* Aerial perspective — a live params object owned by roadGame, present in every
+   * tier, so these bind exactly like the painted deck's. */
+  const AP = game.aerialParams ?? null;
+  const aslider = (id, key, fmt) => slider(id, AP, key, fmt);
+  aslider("dv-ap-density", "density", (v) => (v <= 0 ? "off" : v.toFixed(5)));
+  aslider("dv-ap-max", "maxAmount", (v) => v.toFixed(2));
+  aslider("dv-ap-scaleh", "scaleHeight", (v) => (v / 1000).toFixed(1) + " km");
+  aslider("dv-ap-glow", "sunGlow", (v) => v.toFixed(2));
+  aslider("dv-ap-glowpow", "sunGlowPow", (v) => v.toFixed(1));
+
   const PP = game.paintedParams ?? null;
   const pslider = (id, key, fmt) => {
     const s = slider(id, PP, key, fmt);
