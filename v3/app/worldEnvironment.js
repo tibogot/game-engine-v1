@@ -519,6 +519,14 @@ export async function createWorldEnvironment({
   let _procCubeRT = null;
   let _procCubeCam = null;
   let _procEnvRT = null;
+  /**
+   * A game-owned sky to bake the IBL from, instead of the engine's dome.
+   *
+   * Same idea as setCustomCloudSystem: the game may be drawing its own sky, and the
+   * environment map has to come from the sky the player can SEE or the world reflects
+   * one sky while standing under another. Contract: `{ mesh, setSunDiscScale? }`.
+   */
+  let customEnvSky = null;
   let _procEnvFace = -1;
   let _procEnvIdle = 0;
   let _procEnvNeeds = false;
@@ -614,7 +622,13 @@ export async function createWorldEnvironment({
   function ensureProcEnvRig() {
     if (_procCubeRT) return;
     _procEnvScene = new THREE.Scene();
-    const domeClone = dayNightSky.mesh.clone();
+    // Clone whichever dome is actually being SHOWN. A game that registers its own sky
+    // (see setCustomEnvSky) would otherwise be lit and reflected by the engine's dome
+    // while a different sky is drawn on screen — two skies in one frame, which shows up
+    // first on wet and metallic surfaces.
+    const envSkyMesh = customEnvSky?.mesh ?? dayNightSky.mesh;
+    const domeClone = envSkyMesh.clone();
+    domeClone.visible = true;
     domeClone.position.set(0, 0, 0);
     _procEnvScene.add(domeClone);
     _procCubeRT = new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType });
@@ -629,16 +643,41 @@ export async function createWorldEnvironment({
     // Sun disc OUT of the IBL: its energy already reaches surfaces via the
     // directional light — capturing it in the env map counted it twice (lifted
     // ambient + a phantom specular sun). The aureole/glow stays in.
-    dayNightSky.setSunDiscScale?.(0);
+    const envSky = customEnvSky ?? dayNightSky;
+    envSky.setSunDiscScale?.(0);
     renderer.setRenderTarget(_procCubeRT, face);
     renderer.render(_procEnvScene, _procCubeCam.children[face]);
-    dayNightSky.setSunDiscScale?.(1);
+    envSky.setSunDiscScale?.(1);
     renderer.setRenderTarget(prev);
   }
 
   function convolveProcEnv() {
     _procEnvRT = pmremGenerator.fromCubemap(_procCubeRT.texture, _procEnvRT);
     scene.environment = _procEnvRT.texture;
+  }
+
+  /**
+   * Register (or clear with null) the sky the IBL is baked from. Tears the capture rig
+   * down so it is rebuilt around the new dome, and asks for an immediate re-bake —
+   * without that the world would keep reflecting the previous sky until something else
+   * happened to invalidate it.
+   */
+  function setCustomEnvSky(sky) {
+    customEnvSky = sky ?? null;
+    _procEnvScene = null;
+    if (_procCubeRT) { _procCubeRT.dispose(); _procCubeRT = null; }
+    _procCubeCam = null;
+    _procEnvFace = -1;
+    _procEnvIdle = 0;
+    _procEnvNeeds = true;
+  }
+
+  /**
+   * Ask for an IBL re-bake. The engine invalidates on its OWN sky's parameters, so a
+   * game driving a custom sky (time of day, weather) has to say when its look moved.
+   */
+  function invalidateProcEnv() {
+    _procEnvNeeds = true;
   }
 
   function disposeProcEnvRT() {
@@ -1101,6 +1140,8 @@ export async function createWorldEnvironment({
     sunDir,
     getEffectiveLightDir: () => _effectiveLightDir,
     setCustomCloudSystem,
+    setCustomEnvSky,
+    invalidateProcEnv,
     syncCsm,
     syncCsmFromToolState,
     setCsmEnabled,

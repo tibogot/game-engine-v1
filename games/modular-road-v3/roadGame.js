@@ -860,7 +860,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const weather = createWeather({
     painted: paintedParams,
     aerial: aerial.params,
-    onWetness: (w) => { _weatherWetness = w; },
+    onWetness: (w) => {
+      _weatherWetness = w;
+      // A settled weather change is a big move in what the sky looks like — overcast
+      // should flatten the world's ambient — and nothing else would tell the IBL.
+      app.envSky?.invalidate();
+    },
   });
   let _weatherWetness = 0;
 
@@ -997,10 +1002,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       _engineSkyWas = engineSkyMeshes().map((m) => ({ mesh: m, was: m.visible }));
       for (const e of _engineSkyWas) e.mesh.visible = false;
       gameSky.mesh.visible = true;
+      /*
+       * THE IBL HAS TO COME FROM THE SKY YOU CAN SEE.
+       *
+       * The engine bakes its environment map from a clone of ITS OWN dome, in an
+       * isolated scene. So with our sky showing, every reflective and PBR-ambient
+       * surface in the world was lit by a DIFFERENT sky from the one overhead — a
+       * different model, different scattering, its own painted cirrus. It shows up
+       * first and worst on the wet road, which is the whole point of that feature.
+       *
+       * Registering our dome makes the two the same sky by construction, and as a
+       * bonus the painted clouds now reach the lighting: an overcast preset really
+       * does flatten the ambient, because the thing being convolved is overcast.
+       */
+      app.envSky?.set({ mesh: gameSky.mesh, setSunDiscScale: gameSky.setSunDiscScale });
     } else {
       if (gameSky) gameSky.mesh.visible = false;
       for (const e of _engineSkyWas ?? []) e.mesh.visible = e.was;
       _engineSkyWas = null;
+      app.envSky?.set(null); // hand the environment back to the engine's dome
     }
   }
 
@@ -1084,7 +1104,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   /** Boot values, captured as the NOON REFERENCE so this cannot regress the
    *  look that was hand-tuned at midday — everything is scaled to land on them
    *  when the sun is high, and only the variation around that is new. */
-  const _lightRef = { dir: 2.6, hemi: 0.6, exposure: 1.0, captured: false };
+  const _lightRef = { dir: 2.6, hemi: 0.6, exposure: 1.0, env: 0.45, captured: false };
   const _sunLitRgb = [1, 1, 1];
   const _skyKeyCol = new THREE.Color();
   const _hemiSkyCol = new THREE.Color();
@@ -1098,6 +1118,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       _lightRef.dir = Li.dirIntensity ?? 2.6;
       _lightRef.hemi = Li.hemiIntensity ?? 0.6;
       _lightRef.exposure = Li.exposure ?? 1.0;
+      _lightRef.env = Li.envIntensity ?? 0.45;
       _lightRef.captured = true;
     }
     const el = look.sunElevation ?? 0;
@@ -1114,7 +1135,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
      * sunset entirely. Dividing by the max channel keeps the HUE and hands the
      * magnitude back to the engine, which is the clean split.
      */
-    sunTransmittanceCPU(Math.max(look.sunDir.y, -0.2), 0, undefined, _sunLitRgb);
+    /*
+     * FLOORED AT THE HORIZON, not below it. Sampling transmittance at a NEGATIVE sun
+     * elevation returns essentially zero through every channel, so the chromaticity
+     * divide produced BLACK — a key light with no colour at all. It happened to be
+     * harmless because the engine swaps to the moon below the horizon and never reads
+     * this value there, but it is one refactor away from a black sun at dusk. Clamping
+     * to y = 0 keeps the reddest VALID hue and lets the engine own the fade to nothing.
+     */
+    sunTransmittanceCPU(Math.max(look.sunDir.y, 0.0), 0, undefined, _sunLitRgb);
     const m = Math.max(_sunLitRgb[0], _sunLitRgb[1], _sunLitRgb[2], 1e-4);
     _skyKeyCol.setRGB(_sunLitRgb[0] / m, _sunLitRgb[1] / m, _sunLitRgb[2] / m);
     if (SKY_LIGHT.warmth < 1) _skyKeyCol.lerp(_white, 1 - SKY_LIGHT.warmth);
@@ -1149,7 +1178,18 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       hemiGroundColor: "#" + _hemiGndCol.getHexString(THREE.SRGBColorSpace),
       hemiIntensity: (look.hemiIntensity / hemiDayRef) * _lightRef.hemi,
       exposure: look.exposure * _lightRef.exposure,
+      /*
+       * The env map's CONTENT follows the sky once our dome is the one being baked,
+       * but its strength was a constant 0.45 at every hour — so reflections stayed at
+       * noon brightness at midnight. Scaled on the same daylight curve as the hemi,
+       * against the boot value, so noon is unchanged.
+       */
+      envIntensity: (look.hemiIntensity / hemiDayRef) * _lightRef.env,
     });
+    // The engine invalidates the IBL on ITS sky's parameters and has no idea ours
+    // moved. This is already key-cached on solar elevation, so it fires only when the
+    // sun actually moves — and the bake itself is spread one cube face per frame.
+    app.envSky?.invalidate();
   }
 
   function updateGameSky(dt) {

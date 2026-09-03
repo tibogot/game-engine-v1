@@ -6638,6 +6638,16 @@ export async function startV3App(opts = {}) {
     clouds: {
       setSystem(system) { worldEnv?.setCustomCloudSystem(system); },
     },
+    // A game can also own the SKY, in which case the IBL must be baked from that sky
+    // and not the engine's dome — otherwise the world reflects one sky while standing
+    // under another, which shows up first on wet and metallic surfaces. Contract:
+    // `{ mesh, setSunDiscScale? }`, or null to hand the environment back.
+    envSky: {
+      set(sky) { worldEnv?.setCustomEnvSky(sky); },
+      /** The engine invalidates on ITS sky's params; a custom sky says when its own
+       *  look moved (time of day, weather). */
+      invalidate() { worldEnv?.invalidateProcEnv(); },
+    },
     // ── Shadow override ───────────────────────────────────────────────────────
     // CSM lives in worldToolState.csm and is NOT stored in .v3proj, so a game
     // can own it. Every shadow caster is re-drawn once per cascade per frame —
