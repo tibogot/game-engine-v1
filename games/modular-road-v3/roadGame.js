@@ -187,6 +187,8 @@ import { createPaintedClouds, PAINTED_CLOUD_DEFAULTS } from "./modularRoadPainte
 import { createAerialPerspective } from "./modularRoadAerial.js";
 import { createWeather, WEATHER_NAMES } from "./modularRoadWeather.js";
 import { createSkyAtmosphere, sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
+import { createModularRoadCity, CITY_DEFAULTS } from "./modularRoadCity.js";
+import { WORLD_SIZE } from "../../v3/terrain/heightmapTexture.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
 // imported assets — the source folder itself is not published.
@@ -1161,6 +1163,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    *  when the sun is high, and only the variation around that is new. */
   const _lightRef = { dir: 2.6, hemi: 0.6, exposure: 1.0, env: 0.45, captured: false };
   const _sunLitRgb = [1, 1, 1];
+  /** Moonlight chromaticity — sunlight off grey rock, read blue by night vision
+   *  (Purkinje). Same tint the clouds use once the moon takes the light slot. */
+  const _moonKeyCol = new THREE.Color(0.62, 0.72, 1.0);
   const _skyKeyCol = new THREE.Color();
   const _hemiSkyCol = new THREE.Color();
   const _hemiGndCol = new THREE.Color();
@@ -1193,15 +1198,24 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     /*
      * FLOORED AT THE HORIZON, not below it. Sampling transmittance at a NEGATIVE sun
      * elevation returns essentially zero through every channel, so the chromaticity
-     * divide produced BLACK — a key light with no colour at all. It happened to be
-     * harmless because the engine swaps to the moon below the horizon and never reads
-     * this value there, but it is one refactor away from a black sun at dusk. Clamping
-     * to y = 0 keeps the reddest VALID hue and lets the engine own the fade to nothing.
+     * divide produced BLACK — a key light with no colour at all. Clamping to y = 0
+     * keeps the reddest VALID hue.
+     *
+     * AND THEN HANDED TO THE MOON. The first version stopped at the clamp, on the
+     * belief that the engine "never reads this value below the horizon". It does: the
+     * engine keeps the moon's INTENSITY and DIRECTION at night, but the COLOUR written
+     * here wins every frame — so the whole world was lit by a saturated sunset orange
+     * (#ff5502, measured at -21 deg) from dusk until dawn. Below the horizon the key
+     * light is the moon, so the chromaticity has to become moonlight; it blends across
+     * the first six degrees under the horizon, the same window in which the clouds
+     * swap their light source, so nothing pops.
      */
     sunTransmittanceCPU(Math.max(look.sunDir.y, 0.0), 0, undefined, _sunLitRgb);
     const m = Math.max(_sunLitRgb[0], _sunLitRgb[1], _sunLitRgb[2], 1e-4);
     _skyKeyCol.setRGB(_sunLitRgb[0] / m, _sunLitRgb[1] / m, _sunLitRgb[2] / m);
     if (SKY_LIGHT.warmth < 1) _skyKeyCol.lerp(_white, 1 - SKY_LIGHT.warmth);
+    const nightK = THREE.MathUtils.clamp(-look.sunDir.y / 0.1045, 0, 1); // 0 at horizon, 1 at -6 deg
+    if (nightK > 0) _skyKeyCol.lerp(_moonKeyCol, nightK);
 
     // Ambient from the sky itself: zenith overhead, haze underfoot.
     const cols = gameSky.getColors(camera.position.y);
@@ -1278,15 +1292,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // On by default: this is a racing game with a chase camera, and the effect is the
     // point. Turn it off from the panel, or per-machine if it is not to taste.
     enabled: true,
-    intensity: 1.7,
-    halationSize: 1.0,
+    intensity: 1.3,
+    halationSize: 0.55,
     halationColor: "#ffd9a8",
     streakLength: 1.0,
     streakOpacity: 0.7,
     streakColor: "#b6d4ff",
     ghostOpacity: 0.6,
     ghostSpacing: 1.0,
-    dirtOpacity: 0.25,
+    dirtOpacity: 0.3,
+    // Additions over the editor's schema (absent keys fall back inside the flare).
+    starburst: 0.9,
+    starburstSize: 0.9,
+    haloOpacity: 0.22,
+    haloSize: 0.55,
   };
   /**
    * The flare params with the game's look applied, or null before the engine has built
@@ -1344,6 +1363,155 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     syncWorldLightToSky(look);
   }
   app.addPreRenderHook?.(updateGameSky);
+
+  /* ── CITY ──────────────────────────────────────────────────────────────────
+   *
+   * The skyline the track is built AROUND. modularRoadCity.js owns the
+   * rendering story (instanced, ~34 draws, ~0.4 ms measured in city-lab under
+   * this same sky); this block is only the wiring, and it has five rules:
+   *
+   *   • LAZY. Nothing is baked or compiled until a track asks for a city.
+   *     Boot pays zero; the first enable pays the facade pipeline once.
+   *   • TRACK DATA, not a machine setting. On/off, seed and the layout knobs
+   *     ride in the track's sparse `environment` block as FLAT keys, exactly
+   *     like the clouds (sparse() diffs shallowly). A track that never asked
+   *     for a city saves nothing and follows the build.
+   *   • GROUND FOLLOWS THE TERRAIN SWITCH. Terrain on: every lot samples
+   *     `app.getWorldHeight` for its base, the city's own street plane is off
+   *     (it would z-fight and hide the terrain), and the layout is clamped
+   *     inside the terrain's edge — the sampler returns 0 past it, and a row
+   *     of towers dropping to y=0 there is a cliff. Terrain off: flat at y=0
+   *     with the street plane, which is the floor sky mode never had.
+   *   • THE TRACK CLEARS ITS OWN LOTS. Every piece's world box, grown by the
+   *     corridor radius, is stamped into the lot grid, and those lots stay
+   *     empty. Every OTHER lot rolls its own dice from (seed, cell), so placing
+   *     a piece moves nothing but the towers under it — that property is what
+   *     "build the track around the city" actually requires, and
+   *     tools/cityKitTest.mjs guards it. Re-stamped on the builder's settle
+   *     gate, debounced: a drag fires onChange every frame.
+   *   • NO COLLIDER. The car flies over it. Landable buildings are a prop for
+   *     later, with a box proxy, the way ramps attach a deck proxy today.
+   *
+   * Night follows the sky, not a slider: the game sky's own `nightF` when it
+   * is on, the engine sun's elevation through the same curve otherwise.
+   */
+  let city = null;
+  let cityWanted = false;
+  let citySeed = 20260902;
+  /** The layout knobs a track may pin. Everything else is CITY_DEFAULTS. */
+  const cityParams = {
+    extent: 1200, density: 0.86, downtownPower: 2.2, heightNoise: 0.55,
+    scaleYMax: 1.45, avoidRadius: 40, centerX: 0, centerZ: 0,
+  };
+  const CITY_LOT = CITY_DEFAULTS.lotSize;
+  const _corridorCells = new Set();
+  const _pieceBox = new THREE.Box3();
+  let _corridorTimer = 0;
+
+  function cityHeightSource() {
+    return terrainOn ? (x, z) => app.getWorldHeight(x, z) : null;
+  }
+
+  /** Stamp every piece's footprint, grown by the corridor radius, into lot cells. */
+  function rebuildCorridor() {
+    _corridorCells.clear();
+    const pad = cityParams.avoidRadius;
+    for (const p of builderRef?.pieces ?? []) {
+      const mesh = p.mesh;
+      if (!mesh?.geometry) continue;
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      // Piece meshes carry their WORLD transform in `matrix` — matrixAutoUpdate
+      // is off and the builder root sits at the origin (see _makeMesh).
+      _pieceBox.copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrix);
+      const cx0 = Math.floor((_pieceBox.min.x - pad) / CITY_LOT);
+      const cx1 = Math.floor((_pieceBox.max.x + pad) / CITY_LOT);
+      const cz0 = Math.floor((_pieceBox.min.z - pad) / CITY_LOT);
+      const cz1 = Math.floor((_pieceBox.max.z + pad) / CITY_LOT);
+      for (let cx = cx0; cx <= cx1; cx++) {
+        for (let cz = cz0; cz <= cz1; cz++) _corridorCells.add(cx * 100003 + cz);
+      }
+    }
+  }
+  /** The layout's keep-out query. -1 inside a stamped cell so it clears even
+   *  at avoidRadius 0; ∞ elsewhere. The radius itself was applied at stamp. */
+  function cityAvoid(x, z) {
+    const key = Math.floor(x / CITY_LOT) * 100003 + Math.floor(z / CITY_LOT);
+    return _corridorCells.has(key) ? -1 : Infinity;
+  }
+
+  function buildCity() {
+    if (city) return;
+    rebuildCorridor();
+    city = createModularRoadCity({
+      seed: citySeed,
+      params: {
+        ...cityParams,
+        bounds: terrainOn ? WORLD_SIZE / 2 : Infinity,
+        ground: !terrainOn,
+      },
+      avoid: cityAvoid,
+      heightAt: cityHeightSource(),
+    });
+    scene.add(city.group);
+  }
+
+  function syncCity() {
+    if (cityWanted) {
+      if (!city) buildCity();
+      city.setEnabled(true);
+    } else {
+      city?.setEnabled(false);
+    }
+    devPanel?.refresh?.();
+  }
+
+  /** Terrain switched: ground sampler, bounds and the street plane all change.
+   *  This is the one thing that makes the terrain toggle non-free — a full
+   *  relayout (~10–20 ms), because the slope cull changes the building SET. */
+  function rebaseCity() {
+    if (!city) return;
+    city.params.bounds = terrainOn ? WORLD_SIZE / 2 : Infinity;
+    city.params.ground = !terrainOn;
+    city.setHeightSource(cityHeightSource());
+  }
+
+  /** Track edited: re-stamp the corridor. Debounced — see the block comment. */
+  function refreshCityCorridor() {
+    if (!city) return;
+    clearTimeout(_corridorTimer);
+    _corridorTimer = setTimeout(() => {
+      rebuildCorridor();
+      city.setAvoid(cityAvoid);
+    }, 200);
+  }
+
+  /** Layout knobs or seed changed — from the panel or a track load. */
+  function applyCityParams() {
+    if (!city) return;
+    Object.assign(city.params, cityParams);
+    if (city.seed !== citySeed) city.setSeed(citySeed);
+    else city.rebuild();
+  }
+
+  function reseedCity() {
+    citySeed = (Math.random() * 0xffffffff) >>> 0;
+    applyCityParams();
+  }
+
+  function cityNight() {
+    const look = gameSkyOn ? gameSky?.getLook() : null;
+    if (look) return look.nightF;
+    // Same curve as skyLookWeights' night term, off the engine sun.
+    const el = app.light?.state?.sunElevation ?? 40;
+    return 1 - THREE.MathUtils.smoothstep(el, -8, 6);
+  }
+
+  function updateCity(dt) {
+    if (!city || !cityWanted) return;
+    city.facade.nightAmount = cityNight();
+    city.update(dt, camera);
+  }
+  app.addPreRenderHook?.(updateCity);
 
   /*
    * BOOT ON THE GAME'S OWN SKY. It was built as an F8 A/B against the engine's
@@ -1591,6 +1759,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         // The builder rebuilds its instanced layer on every change, so the
         // mirror would quietly lose the rails without this.
         applyRailReflectionMembers();
+        // The track clears the city lots under it. Debounced inside.
+        refreshCityCorridor();
       }
       // OUTSIDE the settle gate, unlike the two above. Posts are VISIBLE, so
       // holding them until pointer-up would leave every one of them standing
@@ -4503,6 +4673,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // The kill-floor RULE changed (world-absolute vs track-relative), so the
     // cached value is stale even though the track itself never moved.
     trackBottomY = null;
+    // The city stands on whatever the ground is now — see rebaseCity for why
+    // this is the one part of the switch that is not free.
+    rebaseCity();
     devPanel?.refresh();
   }
 
@@ -5560,12 +5733,26 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     cloudWindSpeed: "windSpeed",
     cloudShadowStrength: "shadowStrength",
   };
+  /** City keys — flat, for the same shallow-diff reason. See the CITY block. */
+  const CITY_ENV_MAP = {
+    cityExtent: "extent",
+    cityDensity: "density",
+    cityDowntown: "downtownPower",
+    cityHeightNoise: "heightNoise",
+    cityScaleYMax: "scaleYMax",
+    cityAvoidRadius: "avoidRadius",
+    cityCenterX: "centerX",
+    cityCenterZ: "centerZ",
+  };
   function readTrackEnv(into = {}) {
     into.skyMode = !terrainOn;
     // The WISH, not the deck. Reading `clouds.enabled` here wrote this
     // machine's cloud tier into the track file. See `cloudsWanted`.
     into.cloudsOn = cloudsWanted;
     for (const [k, p] of Object.entries(CLOUD_ENV_MAP)) into[k] = clouds.params[p];
+    into.cityOn = cityWanted;
+    into.citySeed = citySeed;
+    for (const [k, p] of Object.entries(CITY_ENV_MAP)) into[k] = cityParams[p];
     return into;
   }
   /** Boot-time baseline — the values a track inherits when it saved nothing. */
@@ -5578,6 +5765,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     for (const [k, p] of Object.entries(CLOUD_ENV_MAP)) {
       if (trackEnv[k] !== undefined) clouds.params[p] = trackEnv[k];
     }
+    // Params and seed BEFORE the sync, so a city built here is built right the
+    // first time; a city that already existed gets one relayout for them.
+    cityWanted = !!trackEnv.cityOn;
+    if (trackEnv.citySeed !== undefined) citySeed = trackEnv.citySeed >>> 0;
+    for (const [k, p] of Object.entries(CITY_ENV_MAP)) {
+      if (trackEnv[k] !== undefined) cityParams[p] = trackEnv[k];
+    }
+    const hadCity = !!city;
+    syncCity();
+    if (hadCity) applyCityParams();
   }
   /**
    * The pristine baselines a save is diffed against and a load resolves onto.
@@ -6881,6 +7078,11 @@ ${e.message}`);
       /** The track's wish, not the deck: the cloud TIER decides whether that
        *  wish is currently affordable, and the two controls stay independent. */
       getClouds: () => cloudsWanted,
+      /** The skyline. Track data — see the CITY block. */
+      setCity: (on) => { cityWanted = !!on; syncCity(); },
+      getCity: () => cityWanted,
+      reseedCity,
+      getCityStats: () => city?.stats ?? null,
       /** Lens flare params, with the GAME's look applied — see ensureFlareLook. The
        *  params object itself lives in the engine's world state; the panel binds to it
        *  by reference like every other live params bag here. */
@@ -7655,6 +7857,15 @@ ${e.message}`);
      *  runs, and the noise bake never starts until the first enable. */
     setClouds: (on) => { cloudsWanted = !!on; syncClouds(); },
     getClouds: () => cloudsWanted,
+    /** The skyline — track data, lazily built. `city()` is the live handle
+     *  (params, facade proxy, stats) for console tuning; `cityParams` is the
+     *  set a track may pin; `applyCityParams` relayouts after editing them. */
+    setCity: (on) => { cityWanted = !!on; syncCity(); },
+    getCity: () => cityWanted,
+    reseedCity,
+    city: () => city,
+    cityParams,
+    applyCityParams,
     /** Cloud quality tier: "volumetric" | "painted" | "off". A machine setting — it
      *  never rides in a track save. See setCloudTier for why it rebuilds the sky. */
     setCloudTier,

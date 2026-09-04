@@ -76,6 +76,20 @@ export function createRoadDevPanel({ app, game, params }) {
             reading the game's own frame time without the terrain's fixed ~2.5&nbsp;ms
             sitting on top of every measurement. Safe to flip while driving.
           </div>
+          <div class="prop-row">
+            <span class="prop-label">City</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-city" type="button" aria-label="City skyline">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <button class="action-btn" id="dv-city-reseed" type="button">Reseed city</button>
+          <div class="dv-hint">
+            A procedural skyline to build the track through. Saved <b>with the
+            track</b> (on/off, seed, layout), built the first time it is switched
+            on. It stands on the terrain when terrain is on, on its own street
+            plane in sky mode, and clears the lots under every piece you place —
+            nothing else moves when you edit. Measured ~0.4&nbsp;ms; no collision.
+          </div>
           <!-- The Clouds toggle used to live here, alone. It moved to its own
                CLOUDS group below, with the rest of the knobs it belongs to. -->
           <div class="dv-hint">
@@ -2209,6 +2223,20 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label" title="Filters the cloud noise to the march's sampling rate. 0 = raw, stippled edges; higher = smoother but softer erosion up close.">Edge filter</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-steplod" min="0" max="1.5" step="0.05" />
+              <span class="prop-num" id="dv-pc-steplod-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label" title="Offset on the analytic mip level. Negative = sharper and more speckled, positive = softer.">Mip bias</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-lodbias" min="-4" max="4" step="0.25" />
+              <span class="prop-num" id="dv-pc-lodbias-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label" title="Short-range sun occlusion, sampled per march step: darkens a lobe's own shaded flank. 0 skips it and leaves only the per-ray shadow.">Self shadow</span>
             <div class="prop-value">
               <input type="range" id="dv-pc-selfsh" min="0" max="1.5" step="0.05" />
@@ -2673,6 +2701,20 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-lf-dirt" min="0" max="1" step="0.05" />
               <span class="prop-num" id="dv-lf-dirt-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Starburst</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-star" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-lf-star-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Halo ring</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-halo" min="0" max="1.5" step="0.05" />
+              <span class="prop-num" id="dv-lf-halo-v"></span>
             </div>
           </div>
         </div>
@@ -4761,6 +4803,8 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-lines-edge", game.getEdgeLinesOn?.() ?? true, (on) => game.setEdgeLinesOn?.(on));
   toggle("dv-lines-bloom", game.getLinesBloom?.() ?? false, (on) => game.setLinesBloom?.(on));
   toggle("dv-terrain", game.getTerrain?.() ?? true, (on) => game.setTerrain?.(on));
+  const cityToggle = toggle("dv-city", game.getCity?.() ?? false, (on) => game.setCity?.(on));
+  $("#dv-city-reseed")?.addEventListener("click", () => game.reseedCity?.());
   toggle("dv-clouds", game.getClouds?.() ?? false, (on) => game.setClouds?.(on));
 
   // ── Clouds ──────────────────────────────────────────────────────────────────
@@ -4848,6 +4892,8 @@ export function createRoadDevPanel({ app, game, params }) {
     lfs("dv-lf-streako", "streakOpacity", (v) => v.toFixed(2));
     lfs("dv-lf-ghost", "ghostOpacity", (v) => v.toFixed(2));
     lfs("dv-lf-dirt", "dirtOpacity", (v) => v.toFixed(2));
+    lfs("dv-lf-star", "starburst", (v) => v.toFixed(2));
+    lfs("dv-lf-halo", "haloOpacity", (v) => v.toFixed(2));
   })();
 
   /* Aerial perspective — a live params object owned by roadGame, present in every
@@ -4902,6 +4948,8 @@ export function createRoadDevPanel({ app, game, params }) {
   pslider("dv-pc-sizescale", "sizeScale", (v) => (4300 / (0.137 * v)).toFixed(0) + " m");
   pslider("dv-pc-taper", "edgeTaper", (v) => (v > 0.95 ? "1.00 (boxes)" : v.toFixed(2)));
   pslider("dv-pc-basevary", "baseVary", (v) => (v < 0.005 ? "0.00 (ruled)" : v.toFixed(2)));
+  pslider("dv-pc-steplod", "stepLod", (v) => (v < 0.005 ? "0.00 (raw)" : v.toFixed(2)));
+  pslider("dv-pc-lodbias", "lodBias", (v) => (Math.abs(v) < 0.01 ? "0 (exact)" : (v > 0 ? "+" : "") + v.toFixed(2)));
   pslider("dv-pc-selfsh", "selfShadow", (v) => (v < 0.005 ? "0.00 (per-ray only)" : v.toFixed(2)));
   pslider("dv-pc-steps", "steps", (v) => v.toFixed(0) + " steps");
   pslider("dv-pc-sun", "sunStrength", (v) => v.toFixed(2));
@@ -5787,6 +5835,8 @@ export function createRoadDevPanel({ app, game, params }) {
     gapToggle.set(game.getGapPreview());
     // F8 flips the sky from outside the panel.
     gameSkyToggle.set(game.getGameSky?.() ?? false);
+    // A track load switches the city on or off behind the panel's back.
+    cityToggle.set(game.getCity?.() ?? false);
     syncTierBtns();
     autoToggle.set(game.getAutoHeadlights?.() ?? true);
     // The wheel and chassis GLBs finish loading after the panel is built and

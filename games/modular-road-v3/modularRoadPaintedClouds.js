@@ -35,8 +35,8 @@
 import * as THREE from "three/webgpu";
 import {
   float, vec2, vec3, vec4, Fn, If, Loop, Break, uniform, texture, uv,
-  normalize, dot, length, max, min, mix, smoothstep, pow, exp, abs, sqrt, saturate,
-  screenCoordinate, interleavedGradientNoise,
+  normalize, dot, length, max, min, mix, smoothstep, pow, exp, abs, sqrt, saturate, log2,
+  screenCoordinate, interleavedGradientNoise, screenSize, cameraProjectionMatrix,
 } from "three/tsl";
 import {
   seededRandom, makePeriodicPerlin, perlinFbm, makeWorley, normalizeChannel,
@@ -131,6 +131,17 @@ export const PAINTED_CLOUD_DEFAULTS = {
    * extra fetch entirely and restores the single per-ray shadow.
    */
   selfShadow: 0.55,
+  /**
+   * Offset on the analytic mip level the march samples at. 0 is the exact footprint;
+   * positive is softer (and cheaper to fetch), negative sharper and more speckled.
+   */
+  lodBias: 0.0,
+  /**
+   * Fraction of one march step treated as the smallest resolvable feature, driving a
+   * second mip floor. 0 disables it (raw, stippled edges); higher is smoother but eats
+   * the fine erosion up close.
+   */
+  stepLod: 0.35,
   /** March steps across the slab (≤ MAX_STEPS). */
   steps: 18,
 
@@ -301,6 +312,53 @@ export const PAINTED_CLOUD_DEFAULTS = {
  * bake is: raw fbm occupies a narrow mid band, and a threshold against a 0.2-wide range
  * either accepts everything or rejects everything, so the coverage dial does nothing.
  */
+/**
+ * BLUE NOISE for the march's entry dither — and why interleaved gradient noise had to go.
+ *
+ * The march jitters each ray's start by up to one step, or the slab quantises into
+ * shells. IGN is the usual choice because it is free, but it is NOT structureless: it is
+ * a gradient folded by fract(), and its residual is a lattice of diagonal lines a few
+ * pixels apart. With 18 steps and a sun-lit step contributing a lot of scattering, that
+ * lattice prints straight onto the cloud body as diagonal hatching — most visibly
+ * toward the sun, where per-step contrast is highest. The mip fixes cannot touch it;
+ * it is the dither pattern itself.
+ *
+ * Blue noise has no such structure: its energy sits at high frequency with no lines
+ * and no clumps, so the residual reads as fine grain the eye ignores. A proper
+ * void-and-cluster bake is expensive; high-pass-filtered white noise, renormalised, is
+ * a cheap approximation that is entirely good enough for a 64x64 tile. One fetch per
+ * pixel, once per ray.
+ */
+export const BLUE_NOISE_SIZE = 64;
+export function bakeBlueNoise(seed = 6079, N = BLUE_NOISE_SIZE) {
+  const rng = seededRandom(seed >>> 0);
+  const w = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) w[i] = rng();
+  // Subtract a wrapped 5x5 Gaussian blur: what is left is the high-frequency part.
+  const K = [1, 4, 6, 4, 1];
+  const tmp = new Float32Array(N * N);
+  const hp = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let a = 0;
+    for (let k = -2; k <= 2; k++) a += K[k + 2] * w[y * N + ((x + k + N) % N)];
+    tmp[y * N + x] = a / 16;
+  }
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let a = 0;
+    for (let k = -2; k <= 2; k++) a += K[k + 2] * tmp[((y + k + N) % N) * N + x];
+    hp[y * N + x] = w[y * N + x] - a / 16;
+  }
+  // Rank-normalise to a flat 0..1 histogram, so the jitter is uniform like IGN was.
+  const idx = Array.from({ length: N * N }, (_, i) => i).sort((a, b) => hp[a] - hp[b]);
+  const out = new Uint8Array(N * N * 4);
+  for (let r = 0; r < idx.length; r++) {
+    const v = Math.round((r + 0.5) / idx.length * 255);
+    const i = idx[r] * 4;
+    out[i] = v; out[i + 1] = v; out[i + 2] = v; out[i + 3] = 255;
+  }
+  return out;
+}
+
 export function bakePaintedCloudMap(seed = 4177, size = PAINTED_MAP_SIZE) {
   const rng = seededRandom(seed >>> 0);
   const perlin = makePeriodicPerlin(rng);
@@ -372,6 +430,17 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   // is a shimmering moiré that no amount of fading hides.
   map.minFilter = THREE.LinearMipmapLinearFilter;
   map.generateMipmaps = true;
+
+  const blueNoise = new THREE.DataTexture(
+    bakeBlueNoise(), BLUE_NOISE_SIZE, BLUE_NOISE_SIZE, THREE.RGBAFormat,
+  );
+  blueNoise.wrapS = blueNoise.wrapT = THREE.RepeatWrapping;
+  // NEAREST: it is a per-pixel lookup table, not an image. Bilinear would average
+  // neighbours and hand back the low frequencies the bake just removed.
+  blueNoise.minFilter = blueNoise.magFilter = THREE.NearestFilter;
+  blueNoise.generateMipmaps = false;
+  blueNoise.needsUpdate = true;
+  const blueTex = texture(blueNoise);
   map.needsUpdate = true;
   const mapTex = texture(map);
 
@@ -389,6 +458,8 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uEdgeTaper = uniform(P.edgeTaper);
   const uBaseVary = uniform(P.baseVary);
   const uSelfShadow = uniform(P.selfShadow);
+  const uLodBias = uniform(P.lodBias);
+  const uStepLod = uniform(P.stepLod);
   const uSteps = uniform(P.steps);
   const uAbsorb = uniform(P.absorb);
   const uShadowReach = uniform(P.shadowReach);
@@ -678,9 +749,51 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       const rim = pow(mu, float(8.0)).mul(uSilver);
 
       // Dither the entry by up to one step, or the slab bands into shells — the same
-      // failure the volumetric march has, and the same fix.
-      const jit = interleavedGradientNoise(screenCoordinate.xy);
+      // failure the volumetric march has, and the same fix. BLUE noise, not IGN: see
+      // bakeBlueNoise for why the gradient noise printed diagonal hatching on the deck.
+      const jit = blueTex.sample(screenCoordinate.xy.div(float(BLUE_NOISE_SIZE))).level(0.0).r;
       const t = tBase.add(dt.mul(jit)).toVar();
+
+      /*
+       * ANALYTIC MIP LEVEL — the fix for speckled, pixelated cloud edges.
+       *
+       * The map has mips, and "MIPMAPS ARE THE HORIZON ANTI-ALIASING" was written in
+       * good faith above. But mip selection normally comes from screen-space
+       * derivatives, and inside this march those are unreliable in exactly the place
+       * it matters: the loop breaks early once a ray is opaque, so at every cloud EDGE
+       * one pixel is still marching while its neighbour has stopped. Derivatives taken
+       * across that divergence are garbage, the sampler picks a garbage level, and the
+       * edge comes out as a crawl of stipple — worst toward the horizon, where the
+       * footprint per pixel is largest and level 0 aliases hardest.
+       *
+       * So the level is computed, not inferred. The footprint of one pixel on the map
+       * at distance t is  t * (pixel angle) * (texels per metre); pixel angle falls out
+       * of the projection matrix (P[1][1] = 1/tan(fov/2)) and the framebuffer height.
+       * The per-ray part is folded here; the per-step part is one log2 of t. The
+       * erosion octaves sit k times finer, so they take log2(k) levels more.
+       */
+      const lodK = log2(
+        float(2.0 * PAINTED_MAP_SIZE)
+          .div(cameraProjectionMatrix.element(1).element(1).mul(screenSize.y).mul(uTile)),
+      ).add(uLodBias);
+      /*
+       * STEP-RATE LOD — the other half of the edge fix, and the bigger half up close.
+       *
+       * The pixel footprint above says how fine the map CAN be resolved across the
+       * screen; it says nothing about along the ray. The finest erosion octave carries
+       * ~2 m features and the march samples it once every dt (~47 m at the zenith, far
+       * more at a grazing angle). Two neighbouring pixels then land on unrelated phases
+       * of that noise, and where the cloud is thin enough for one sample to matter —
+       * the edges — the silhouette breaks into per-pixel stipple. No pixel-space filter
+       * can fix sampling that is undersampled in DEPTH.
+       *
+       * So the noise is filtered to the rate it is sampled at: a second LOD floor from
+       * the step length, and the march takes the coarser of the two. `stepLod` is the
+       * fraction of a step treated as the resolvable feature size — Nyquist says 2, but
+       * that erases the near erosion entirely; 0.35 kills the stipple while keeping most
+       * of the cauliflower. Per ray, since dt is.
+       */
+      const lodStepK = log2(dt.mul(uStepLod).mul(float(PAINTED_MAP_SIZE)).div(uTile).max(1e-4));
       const transmittance = float(1.0).toVar();
       const scattered = vec3(0.0).toVar();
 
@@ -692,7 +805,8 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         // would sit at the wrong place in the slab and the vertical profile would drift
         // out from under the clouds it is shaping.
         const uv = uCamXZ.add(vec2(dir.x, dir.z).mul(t).div(uTile)).add(uWind);
-        const m = mapTex.sample(uv);
+        const lod = max(log2(t.max(1.0)).add(lodK), lodStepK);
+        const m = mapTex.sample(uv).level(lod);
         /*
          * A FLAT BASE IS RIGHT; A PERFECTLY FLAT ONE IS NOT.
          *
@@ -790,7 +904,9 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
           // shape dissolves and re-forms instead of translating rigidly.
           const dUv = uv.mul(3.1).add(vec2(h.mul(0.35).add(uEvolve), h.mul(-0.27)));
           const fUv = uv.mul(9.7).add(vec2(h.mul(-0.8), h.mul(0.6).sub(uEvolve.mul(1.7))));
-          const billow = mapTex.sample(dUv).b.mul(0.62).add(mapTex.sample(fUv).b.mul(0.38));
+          // log2(3.1) and log2(9.7): the octaves' own frequencies, in mip levels.
+          const billow = mapTex.sample(dUv).level(lod.add(1.632)).b.mul(0.62)
+            .add(mapTex.sample(fUv).level(lod.add(3.278)).b.mul(0.38));
           /*
            * EDGE-WEIGHTED EROSION — the fix for clouds reading as marshmallows.
            *
@@ -831,7 +947,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
              * One fetch, and only on steps that already cleared the density test, so
              * empty sky pays nothing.
              */
-            const lTap = mapTex.sample(uv.add(sunXZ.mul(reach.mul(0.18))));
+            const lTap = mapTex.sample(uv.add(sunXZ.mul(reach.mul(0.18)))).level(lod);
             const lMass = lTap.r.add(lTap.b.sub(0.5).mul(uLump));
             const selfSh = exp(lMass.mul(uAbsorb).mul(uSelfShadow).negate());
             // MULTIPLE-SCATTERING FLOOR — see msFloor. Lifts the shadow term so a core
@@ -1288,6 +1404,8 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uEdgeTaper.value = P.edgeTaper;
     uBaseVary.value = P.baseVary;
     uSelfShadow.value = P.selfShadow;
+    uLodBias.value = P.lodBias;
+    uStepLod.value = P.stepLod;
     uSteps.value = Math.min(P.steps, MAX_STEPS);
     uAbsorb.value = P.absorb;
     uShadowReach.value = P.shadowReach;
@@ -1398,6 +1516,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     renderFrame,
     dispose() {
       map.dispose();
+      blueNoise.dispose();
       shadowMat.dispose();
       shadowQuad.geometry.dispose();
       shaftMat.dispose();

@@ -4,7 +4,7 @@
  */
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
-import { mul, texture, uniform, uv } from "three/tsl";
+import { mul, texture, uniform, uv, vec2, vec3, dot, exp } from "three/tsl";
 
 function makeRadialTex(size, power, innerWhite) {
   const c = document.createElement("canvas");
@@ -34,21 +34,33 @@ function makeRadialTex(size, power, innerWhite) {
   return t;
 }
 
+/**
+ * ANAMORPHIC STREAK. The old one was a radial gradient stretched sideways, which reads
+ * as a smear. A real anamorphic flare has a razor-thin bright core with a much softer,
+ * wider skirt, and it is not uniform along its length — it breaks into fine bands where
+ * the lens coatings interfere. Both are baked here: two Gaussians of very different
+ * width, and a band-limited grain along x.
+ */
 function makeStreakTex(w, h) {
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
   const ctx = c.getContext("2d");
   const img = ctx.createImageData(w, h);
-  const hx = w * 0.5;
-  const hy = h * 0.5;
+  // Band-limited grain along the streak: a smoothed random walk, so the bands are a
+  // few pixels wide rather than per-pixel noise.
+  const bands = new Float32Array(w);
+  let v = 0.5;
+  for (let x = 0; x < w; x++) { v += (Math.random() - 0.5) * 0.35; v = Math.max(0.15, Math.min(1, v * 0.96 + 0.02)); bands[x] = v; }
   for (let y = 0; y < h; y++) {
+    const ny = (y + 0.5) / h * 2 - 1;
+    const core = Math.exp(-ny * ny * 42);
+    const skirt = Math.exp(-ny * ny * 5) * 0.28;
     for (let x = 0; x < w; x++) {
-      const u = (x - hx) / hx;
-      const v = (y - hy) / hy;
-      const fx = Math.pow(1 - Math.min(1, Math.abs(u)), 1.4);
-      const fy = Math.pow(1 - Math.min(1, Math.abs(v)), 3.5);
-      const a = Math.max(0, fx * fy);
+      const nx = (x + 0.5) / w * 2 - 1;
+      const len = Math.pow(Math.max(0, 1 - Math.abs(nx)), 1.35);
+      const grain = 0.62 + 0.38 * bands[x];
+      const a = Math.min(1, (core + skirt) * len * grain);
       const idx = (y * w + x) * 4;
       img.data[idx] = 255;
       img.data[idx + 1] = 255;
@@ -91,44 +103,133 @@ function makeHexTex(size) {
   return t;
 }
 
+/**
+ * STARBURST — diffraction spikes from the aperture blades. This is the single most
+ * recognisable "photographed sun" cue and the old flare had none of it. N thin spikes
+ * with a fast radial falloff, streaked with fine angular grain so they read as light
+ * rather than as drawn lines, over a small hot core.
+ */
+function makeStarburstTex(size, spikes = 8) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  const img = ctx.createImageData(size, size);
+  const half = size * 0.5;
+  // Angular grain, band-limited like the streak's.
+  const G = 720;
+  const grain = new Float32Array(G);
+  let v = 0.5;
+  for (let i = 0; i < G; i++) { v += (Math.random() - 0.5) * 0.5; v = Math.max(0.1, Math.min(1, v * 0.9 + 0.05)); grain[i] = v; }
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = (x + 0.5 - half) / half;
+      const dy = (y + 0.5 - half) / half;
+      const r = Math.min(1, Math.sqrt(dx * dx + dy * dy));
+      const th = Math.atan2(dy, dx);
+      const spike = Math.pow(Math.abs(Math.cos(th * spikes * 0.5)), 26);
+      const gi = ((th / (Math.PI * 2) + 0.5) * G) | 0;
+      const g = 0.55 + 0.45 * grain[Math.max(0, Math.min(G - 1, gi))];
+      const fall = Math.exp(-r * 5.2) * (1 - r);
+      const core = Math.exp(-r * r * 90) * 0.9;
+      const a = Math.min(1, spike * fall * g * 1.6 + core);
+      const idx = (y * size + x) * 4;
+      img.data[idx] = 255;
+      img.data[idx + 1] = 255;
+      img.data[idx + 2] = 255;
+      img.data[idx + 3] = Math.round(a * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.needsUpdate = true;
+  return t;
+}
+
+/** A hollow ring — bright rim, empty middle. Ghosts of this shape are what most people
+ *  picture when they picture a lens flare; the old set had only filled shapes. */
+function makeRingTex(size, inner = 0.78) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  const half = size * 0.5;
+  const g = ctx.createRadialGradient(half, half, 0, half, half, half);
+  g.addColorStop(0, "rgba(255,255,255,0)");
+  g.addColorStop(inner, "rgba(255,255,255,0)");
+  g.addColorStop(inner + (1 - inner) * 0.55, "rgba(255,255,255,1)");
+  g.addColorStop(inner + (1 - inner) * 0.85, "rgba(255,255,255,0.55)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.needsUpdate = true;
+  return t;
+}
+
+/**
+ * LENS DIRT, and why the old one read as "some small dots".
+ *
+ * The first version scattered 400 one-pixel points and 30 hairlines and lit the whole
+ * sheet uniformly. That is what dust on a SENSOR looks like, in focus, and it is not what
+ * anyone means by lens dirt. Dirt on the front element is far outside the focal plane, so
+ * every speck renders as a BOKEH DISC: a soft fill with a brighter rim, sized by the
+ * aperture rather than by the speck. Fewer of them, larger, softer, and no hard points.
+ *
+ * The other half of the look is not in this texture at all — see makeDirtMat: dirt is lit
+ * by the light SOURCE, so only the smudges near the sun should glow, fading out across
+ * the frame. A uniformly lit sheet is a screen overlay; a source-lit one is a lens.
+ */
 function makeDirtTex(size) {
   const c = document.createElement("canvas");
   c.width = c.height = size;
   const ctx = c.getContext("2d");
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, size, size);
-  for (let i = 0; i < 160; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    const rr = 6 + Math.random() * 60;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, rr);
-    const a = 0.05 + Math.random() * 0.22;
-    g.addColorStop(0, `rgba(255,255,255,${a})`);
+
+  // Out-of-focus specks: bokeh discs with a bright rim.
+  const disc = (x, y, r, a) => {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0.0, `rgba(255,255,255,${(a * 0.45).toFixed(3)})`);
+    g.addColorStop(0.72, `rgba(255,255,255,${(a * 0.6).toFixed(3)})`);
+    g.addColorStop(0.93, `rgba(255,255,255,${a.toFixed(3)})`);
+    g.addColorStop(1.0, "rgba(255,255,255,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  for (let i = 0; i < 46; i++) {
+    const r = 5 + Math.pow(Math.random(), 1.6) * 34;
+    disc(Math.random() * size, Math.random() * size, r, 0.10 + Math.random() * 0.22);
+  }
+  // A few large, very faint smudges — the fingerprint and haze layer.
+  for (let i = 0; i < 9; i++) {
+    const r = 45 + Math.random() * 110;
+    const x = Math.random() * size, y = Math.random() * size;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const a = 0.025 + Math.random() * 0.045;
+    g.addColorStop(0, `rgba(255,255,255,${a.toFixed(3)})`);
     g.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(x, y, rr, 0, Math.PI * 2);
+    ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
   }
-  for (let i = 0; i < 400; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    const rr = 0.6 + Math.random() * 1.6;
-    ctx.fillStyle = `rgba(255,255,255,${0.15 + Math.random() * 0.6})`;
-    ctx.beginPath();
-    ctx.arc(x, y, rr, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  for (let i = 0; i < 30; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    const len = 20 + Math.random() * 80;
+  // Soft, wide fibres — lint, not scratches.
+  for (let i = 0; i < 10; i++) {
+    const x = Math.random() * size, y = Math.random() * size;
+    const len = 30 + Math.random() * 90;
     const ang = Math.random() * Math.PI * 2;
-    ctx.strokeStyle = `rgba(255,255,255,${0.05 + Math.random() * 0.15})`;
-    ctx.lineWidth = 0.5 + Math.random() * 1.2;
+    ctx.strokeStyle = `rgba(255,255,255,${(0.03 + Math.random() * 0.06).toFixed(3)})`;
+    ctx.lineWidth = 3 + Math.random() * 5;
+    ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+    ctx.quadraticCurveTo(
+      x + Math.cos(ang + 0.6) * len * 0.5, y + Math.sin(ang + 0.6) * len * 0.5,
+      x + Math.cos(ang) * len, y + Math.sin(ang) * len,
+    );
     ctx.stroke();
   }
   const t = new THREE.CanvasTexture(c);
@@ -155,6 +256,68 @@ function makeFlareMat(tex, colorHex) {
   return m;
 }
 
+/**
+ * GHOSTS WITH CHROMATIC ABERRATION. A flare ghost is the source imaged through the wrong
+ * pair of lens surfaces, and glass focuses red and blue at different distances — so a
+ * real ghost's edge fringes red on one side and blue on the other. Three samples of the
+ * same shape at three radial scales; additive blend sums them straight into rgb. This is
+ * cheap (three fetches on a few small quads) and it is most of what separates a rendered
+ * flare from a photographed one.
+ */
+function makeGhostMat(tex, colorHex, ca = 0.055) {
+  const m = new MeshBasicNodeMaterial({
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+  });
+  const uCol = uniform(new THREE.Color(colorHex).convertSRGBToLinear());
+  const uInt = uniform(1.0);
+  const c = uv().sub(0.5);
+  const aR = texture(tex, c.mul(1.0 / (1.0 + ca)).add(0.5)).a;
+  const aG = texture(tex, uv()).a;
+  const aB = texture(tex, c.mul(1.0 / (1.0 - ca)).add(0.5)).a;
+  m.colorNode = vec3(aR, aG, aB).mul(uCol);
+  m.opacityNode = uInt;
+  m.fog = false;
+  m.userData = { uCol, uInt };
+  return m;
+}
+
+/**
+ * The dirt sheet's own material. Same additive setup as the other quads, plus a glow
+ * centred on the sun's SCREEN position: the specks nearest the source catch its light and
+ * the rest of the frame stays almost clean. That gradient is most of the difference
+ * between a lens and an overlay. Keeps `uCol`/`uInt` under the same names so the
+ * zero-intensity cull and the colour drive treat it like every other quad.
+ */
+function makeDirtMat(tex) {
+  const m = new MeshBasicNodeMaterial({
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+  });
+  const uCol = uniform(new THREE.Color(1, 1, 1));
+  const uInt = uniform(1.0);
+  const uSunUv = uniform(new THREE.Vector2(0.5, 0.5));
+  const uAspect = uniform(1.0);
+  /** Falloff rate of the glow, in aspect-corrected screen units. */
+  const uGlowK = uniform(5.5);
+  const sampled = texture(tex, uv());
+  const d = uv().sub(uSunUv).mul(vec2(uAspect, 1.0));
+  // exp(-k·d²): a broad soft pool around the source, with a small floor so the sheet
+  // never disappears entirely while the sun is in frame.
+  const glow = exp(dot(d, d).mul(uGlowK).negate()).mul(0.9).add(0.1);
+  m.colorNode = mul(sampled.rgb, uCol);
+  m.opacityNode = mul(sampled.a, uInt).mul(glow);
+  m.fog = false;
+  m.userData = { uCol, uInt, uSunUv, uAspect, uGlowK };
+  return m;
+}
+
 function swapFlareTexture(mesh, newTex, colorHex) {
   newTex.colorSpace = THREE.SRGBColorSpace;
   newTex.needsUpdate = true;
@@ -167,12 +330,15 @@ function swapFlareTexture(mesh, newTex, colorHex) {
 }
 
 const GHOST_DEFS = [
-  { t: 0.18, size: 0.1, color: "#ff8a66" },
-  { t: 0.34, size: 0.06, color: "#ffd980" },
-  { t: 0.5, size: 0.16, color: "#9ed4ff" },
-  { t: 0.72, size: 0.08, color: "#b298ff" },
-  { t: 1.1, size: 0.22, color: "#66d0ff" },
-  { t: 1.45, size: 0.05, color: "#fff2a8" },
+  // `t` is the position along the sun->centre axis (1 = mirrored through the centre).
+  // A mix of shapes is the point: an all-disc chain reads as a row of blobs.
+  { t: 0.18, size: 0.10, color: "#ff8a66", kind: "iris" },
+  { t: 0.34, size: 0.06, color: "#ffd980", kind: "disc" },
+  { t: 0.5,  size: 0.16, color: "#9ed4ff", kind: "ring" },
+  { t: 0.72, size: 0.08, color: "#b298ff", kind: "iris" },
+  { t: 0.9,  size: 0.22, color: "#a8d4ff", kind: "ring" },
+  { t: 1.1,  size: 0.22, color: "#66d0ff", kind: "disc" },
+  { t: 1.45, size: 0.05, color: "#fff2a8", kind: "iris" },
 ];
 
 /**
@@ -194,8 +360,14 @@ export function createLensFlareSystem({
   },
 }) {
   const halationTex = makeRadialTex(256, 2.0, true);
-  const ghostTex = makeHexTex(128);
-  const streakTex = makeStreakTex(512, 32);
+  const ghostTexByKind = {
+    iris: makeHexTex(128),
+    disc: makeRadialTex(128, 1.6, false),
+    ring: makeRingTex(128),
+  };
+  const streakTex = makeStreakTex(512, 48);
+  const starTex = makeStarburstTex(512, 8);
+  const haloTex = makeRingTex(256, 0.82);
   const dirtTex = makeDirtTex(512);
 
   const group = new THREE.Group();
@@ -216,7 +388,7 @@ export function createLensFlareSystem({
   group.add(streak);
 
   const ghosts = GHOST_DEFS.map((def) => {
-    const mat = makeFlareMat(ghostTex, def.color);
+    const mat = makeGhostMat(ghostTexByKind[def.kind] ?? ghostTexByKind.disc, def.color);
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
     mesh.renderOrder = 9998;
     mesh.frustumCulled = false;
@@ -225,7 +397,22 @@ export function createLensFlareSystem({
     return mesh;
   });
 
-  const dirtMat = makeFlareMat(dirtTex, "#ffffff");
+  // Diffraction spikes, sitting on the source.
+  const starMat = makeFlareMat(starTex, params0.halationColor);
+  const starburst = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), starMat);
+  starburst.renderOrder = 9998;
+  starburst.frustumCulled = false;
+  group.add(starburst);
+
+  // The big chromatic halo, also centred on the source — the wide ring a bright point
+  // throws through a coated lens. Chromatic like the ghosts, only more so.
+  const haloMat = makeGhostMat(haloTex, "#ffffff", 0.09);
+  const halo = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), haloMat);
+  halo.renderOrder = 9998;
+  halo.frustumCulled = false;
+  group.add(halo);
+
+  const dirtMat = makeDirtMat(dirtTex);
   const dirt = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), dirtMat);
   dirt.renderOrder = 9997;
   dirt.frustumCulled = false;
@@ -329,6 +516,17 @@ export function createLensFlareSystem({
     streak.material.userData.uInt.value = master * screenVis * p.streakOpacity;
     streak.material.userData.uCol.value.set(p.streakColor).convertSRGBToLinear();
 
+    starburst.position.set(sunWX, sunWY, Z);
+    const starS = (p.starburstSize ?? 0.9) * halfH * 2.0;
+    starburst.scale.set(starS, starS, 1);
+    starburst.material.userData.uInt.value = master * screenVis * (p.starburst ?? 0.55);
+    starburst.material.userData.uCol.value.set(p.halationColor).convertSRGBToLinear();
+
+    halo.position.set(sunWX, sunWY, Z);
+    const haloS = (p.haloSize ?? 0.55) * halfH * 2.0;
+    halo.scale.set(haloS, haloS, 1);
+    halo.material.userData.uInt.value = master * screenVis * (p.haloOpacity ?? 0.28);
+
     for (let i = 0; i < ghosts.length; i++) {
       const g = ghosts[i];
       const def = g.userData.def;
@@ -344,6 +542,12 @@ export function createLensFlareSystem({
     dirt.position.set(0, 0, Z);
     dirt.scale.set(halfW * 2, halfH * 2, 1);
     dirt.material.userData.uInt.value = master * screenVis * p.dirtOpacity * 0.9;
+    // The sheet's uv runs 0..1 across the view with +v up, so the sun's NDC maps
+    // straight onto it; aspect makes the glow round on screen rather than an ellipse.
+    dirt.material.userData.uSunUv.value.set(ndcX * 0.5 + 0.5, ndcY * 0.5 + 0.5);
+    dirt.material.userData.uAspect.value = camera.aspect;
+    // Dirt catches the SOURCE's colour, not white.
+    dirt.material.userData.uCol.value.set(p.halationColor).convertSRGBToLinear();
 
     /*
      * DO NOT DRAW WHAT CANNOT BE SEEN. Every quad here is alpha-blended with
@@ -358,9 +562,15 @@ export function createLensFlareSystem({
   function dispose() {
     scene.remove(group);
     halationTex.dispose();
-    ghostTex.dispose();
+    for (const t of Object.values(ghostTexByKind)) t.dispose();
     streakTex.dispose();
+    starTex.dispose();
+    haloTex.dispose();
     dirtTex.dispose();
+    starburst.geometry.dispose();
+    starburst.material.dispose();
+    halo.geometry.dispose();
+    halo.material.dispose();
     halation.geometry.dispose();
     streak.geometry.dispose();
     dirt.geometry.dispose();
@@ -383,7 +593,7 @@ export function createLensFlareSystem({
   }
 
   /** Every quad, for the zero-intensity cull in update(). */
-  const allQuads = [halation, streak, dirt, ...ghosts];
+  const allQuads = [halation, streak, starburst, halo, dirt, ...ghosts];
 
   return { group, update, dispose, setOcclusion };
 }
