@@ -51,14 +51,16 @@ import {
  * is not to bolt shadows on here — it is a froxel volume, where the cost is
  * fixed regardless of light count and the whole city gets beams at once.
  *
- * ── PORTING NOTE: MRT ────────────────────────────────────────────────────────
- * The beam is a TRANSPARENT surface, and r184 blends only the `output` MRT
- * attachment. Dropped into the game as-is it will ERASE the emissive buffer
- * behind it and kill selective bloom on anything it overlaps — including the
- * lamp lenses it sits directly in front of, which is the worst possible place
- * for that bug. See ref_mrt_attachment_blending. This lab renders with a plain
- * full-frame bloom, so the problem does not show up here; it will show up in
- * the game the moment this lands.
+ * ── MRT: CHECKED, AND FINE ───────────────────────────────────────────────────
+ * The beam is a TRANSPARENT surface and r184's MRTNode blends only the `output`
+ * attachment, which is the mechanism that lets a transparent quad erase the
+ * emissive buffer behind it. It does not bite here: the fix is already in place
+ * at the SCENE level (postFxPipeline's `_applySceneMRT` carries real coverage in
+ * emissive's `.a` and gives that attachment a blend mode), and road.html is on
+ * that path. A per-material check cannot see this — the blend state comes from
+ * the render context, never from a material's own `mrtNode` — so do not
+ * re-diagnose it from this file. `diffuseColor`/`normal` are still overwritten
+ * and will matter if SSAO is ever switched on.
  *
  * @see headlight-lab.html — the tuning harness (orbit right around the car)
  */
@@ -67,9 +69,18 @@ import {
 const MAX_STEPS = 48;
 
 /**
- * Scene depth grab. Module scope on principle: a ViewportTextureNode issues its
- * own full-res framebuffer copy per render, and both lamps want the same one.
- * (Same reasoning as the drift smoke's `_sceneDepthTex`.)
+ * Scene depth grab, shared by both lamps.
+ *
+ * Module scope is not a style choice here, it is the single biggest cost lever
+ * in the file: every ViewportDepthTextureNode instance runs its own
+ * `copyFramebufferToTexture` once per render, and that copy measures ~0.4 ms —
+ * more than half the beam's fixed cost, and more than the entire march below 16
+ * steps. One instance for two lamps rather than two.
+ *
+ * modularRoadDriftSmoke.js holds a SECOND one for the same buffer, so a drifting
+ * car pays for the copy twice. Merging them is the obvious next win; it is left
+ * alone for now because it is a change to a shipped effect for a saving that
+ * only appears while smoke is on screen.
  */
 const _sceneDepthTex = /*#__PURE__*/ viewportDepthTexture();
 
@@ -124,21 +135,42 @@ export const HEADLIGHT_BEAM_DEFAULTS = {
   /**
    * Samples along the visible chord. Capped at MAX_STEPS.
    *
-   * MEASURED, two lamps, 1920x900, front three-quarter with the beam filling a
-   * third of the frame (headlight-lab, GPU render timestamp, beam on minus beam
-   * off):
+   * ── MEASURED IN THE GAME, AND THE MARCH IS NOT THE BILL ───────────────────
    *
-   *   12 steps  0.28 ms      24 steps  0.76 ms
-   *   16 steps  0.56 ms      32 steps  1.00 ms
-   *   20 steps  0.67 ms      16 steps, lumpiness 0: 0.35 ms
+   * Both lamps, chase camera, the game's own 0.6 rad cone. Taken by raising the
+   * pixel ratio until the frame is off the vsync ceiling and scaling real frame
+   * time back by the pixel count — NOT from a counter (see
+   * v3/render/gpuStatsPanel.js for why, and the warning at the end of this
+   * block for how badly the counter lies about this particular effect):
    *
-   * Roughly linear, as a march should be. 16 and 32 are indistinguishable on
-   * screen — the entry jitter turns the step banding into a static dither and
-   * bloom then eats it — so 32 was paying double for nothing. 20 is the default
-   * for margin: a camera low and close to a lamp sees a much longer chord than
-   * the shot those numbers came from.
+   *   12 steps  0.94 ms      32 steps  1.59 ms
+   *   20 steps  1.23 ms      48 steps  1.99 ms
+   *
+   * That is a straight line of ~0.029 ms per step on top of a ~0.6 ms FLOOR,
+   * and the floor is the interesting half. Stubbing out the depth read alone
+   * took 1.31 ms down to 0.89 ms, so roughly 0.4 ms of it is the full-res depth
+   * framebuffer COPY that `viewportDepthTexture()` issues — a fixed per-frame
+   * cost that no amount of step tuning can reach.
+   *
+   * TWO CONSEQUENCES:
+   *  • The step slider is worth less than it looks. 48 → 12 saves ~1.0 ms;
+   *    12 → 6 saves almost nothing. 16 is the default because the lab showed
+   *    16 and 32 to be indistinguishable (the entry dither turns step banding
+   *    into a static pattern and bloom eats it), so anything above it is paying
+   *    for nothing visible.
+   *  • THE AVAILABLE WIN IS THE DEPTH GRAB, NOT THE MARCH. Every
+   *    ViewportDepthTextureNode instance runs its own `copyFramebufferToTexture`
+   *    once per render — modularRoadDriftSmoke.js has a second one — so while
+   *    the car is drifting the frame pays for two identical copies. One shared
+   *    grab between the two would be worth more than every step below 16.
+   *
+   * ── WHY THE LAB'S NUMBERS WERE LOWER ─────────────────────────────────────
+   * headlight-lab reported 0.67 ms at 20 steps. Two reasons, both real: the lab
+   * reads `renderer.info.render.timestamp`, which publishes partial frames, and
+   * its cone is 0.42 rad against the game's 0.6, which is most of the screen
+   * coverage. Believe these numbers, not those.
    */
-  steps: 20,
+  steps: 16,
 
   /* ── rasterisation hull ────────────────────────────────────────────────── */
   /**
@@ -229,8 +261,18 @@ function mediaLumps(p, u) {
  * SYSTEM
  * =========================================================================== */
 
+/**
+ * @param {object}   [opts]
+ * @param {object}   [opts.params]   overrides for HEADLIGHT_BEAM_DEFAULTS
+ * @param {Function} [opts.decorate] `(material, kind, colorNode) => void`, called
+ *   once per material at attach time with kind `"beam"` or `"glare"`. This is how
+ *   the game opts the glare into v3's SELECTIVE bloom without this file having to
+ *   know v3's post stack exists — the lab passes nothing and renders with a plain
+ *   full-frame bloom instead.
+ */
 export function createHeadlightBeams(opts = {}) {
   const params = { ...HEADLIGHT_BEAM_DEFAULTS, ...(opts.params || {}) };
+  const decorate = typeof opts.decorate === "function" ? opts.decorate : null;
 
   /** Shared by every lamp — only the apex and axis are per-lamp. */
   const u = {
@@ -408,7 +450,7 @@ export function createHeadlightBeams(opts = {}) {
    */
   function buildGlareMaterial(uGlare) {
     const mat = new THREE.SpriteNodeMaterial();
-    mat.colorNode = Fn(() => {
+    const flare = Fn(() => {
       const d = uv().sub(vec2(0.5)).toVar();
       const rad = length(d).mul(2);
       const core = pow(saturate(oneMinus(rad)), float(3.5));
@@ -418,10 +460,12 @@ export function createHeadlightBeams(opts = {}) {
         .mul(0.55);
       return u.color.mul(core.add(halo).add(streak)).mul(uGlare);
     })();
+    mat.colorNode = flare;
     mat.transparent = true;
     mat.depthWrite = false;
     mat.blending = THREE.AdditiveBlending;
     mat.fog = false;
+    decorate?.(mat, "glare", flare);
     return mat;
   }
 
@@ -443,7 +487,8 @@ export function createHeadlightBeams(opts = {}) {
     };
 
     const mat = new THREE.MeshBasicNodeMaterial();
-    mat.colorNode = buildBeamNode(lamp);
+    const scattered = buildBeamNode(lamp);
+    mat.colorNode = scattered;
     mat.transparent = true;
     mat.depthWrite = false;
     /**
@@ -457,6 +502,7 @@ export function createHeadlightBeams(opts = {}) {
     mat.side = THREE.BackSide;
     mat.blending = THREE.AdditiveBlending;
     mat.fog = false;
+    decorate?.(mat, "beam", scattered);
 
     lamp.mesh = new THREE.Mesh(hullGeo, mat);
     lamp.mesh.frustumCulled = true;

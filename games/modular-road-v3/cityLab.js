@@ -284,7 +284,7 @@ export async function startCityLab() {
     _skyHome.copy(sky.mesh.position);
     sky.mesh.position.set(0, 0, 0);
     sky.setSunDiscScale(0);            // a 1-pixel sun in a 128² face is fireflies
-    const hide = [city?.group, deck, skyMesh].filter(Boolean);
+    const hide = [city?.group, deck, skyMesh, hills].filter(Boolean);
     const vis = hide.map((o) => o.visible);
     for (const o of hide) o.visible = false;
 
@@ -361,6 +361,29 @@ export async function startCityLab() {
   makeCity(20260902);
   deck.position.y = deckAlt;
 
+  // ── Fake hills (T) ─────────────────────────────────────────────────────────
+  // A stand-in for the game's terrain: rolling ground plus one ridge steep
+  // enough to trip the slope cull. Same sampler contract as `groundBaseY` in
+  // roadGame.js — a plain (x, z) -> metres function.
+  const hillHeight = (x, z) =>
+    22 * Math.sin(x * 0.0021 + 0.4) * Math.cos(z * 0.0017)
+    + 9 * Math.sin((x + z) * 0.0047)
+    + 45 * Math.max(0, Math.sin(x * 0.0009 - 1.3)) * Math.max(0, Math.cos(z * 0.0011));
+  let hillsOn = false;
+  const hills = (() => {
+    const g = new THREE.PlaneGeometry(3400, 3400, 170, 170);
+    g.rotateX(-Math.PI / 2);
+    const pos = g.attributes.position;
+    for (let i = 0; i < pos.count; i++) pos.setY(i, hillHeight(pos.getX(i), pos.getZ(i)));
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, new THREE.MeshStandardNodeMaterial({ color: 0x4a5540, roughness: 0.95 }));
+    m.name = "FakeHills";
+    m.receiveShadow = true;
+    m.visible = false;
+    scene.add(m);
+    return m;
+  })();
+
   // ── Free-fly camera ────────────────────────────────────────────────────────
   // Declared here, not down with the key handling: applyView() clears `driving`
   // and runs during init, so a `let` further down would put it in the temporal
@@ -432,6 +455,18 @@ export async function startCityLab() {
       scene.fogNode = aerialOn ? aerialNode : null;
       syncBadges();
     }
+    // T: stand the city on FAKE HILLS. This is the game's terrain path — per-lot
+    // base from a height sampler, slope cull, lot texture — exercised without
+    // the engine, so a tower floating off a slope is found here, not in a
+    // .v3proj with a track already built through it.
+    if (k === "t") {
+      hillsOn = !hillsOn;
+      hills.visible = hillsOn;
+      city.setGround(!hillsOn);
+      city.setHeightSource(hillsOn ? hillHeight : null);
+      city.setShadows(shadowsOn);
+      syncBadges();
+    }
     if (k === "h") {
       const h = document.getElementById("hud");
       h.style.display = h.style.display === "none" ? "" : "none";
@@ -492,13 +527,19 @@ export async function startCityLab() {
       ["floorHeight", 2.6, 6, 0.05], ["colWidth", 1.4, 6, 0.05],
       ["winW", 0.2, 0.95, 0.01], ["winH", 0.2, 0.95, 0.01],
       ["lobbyHeight", 0, 18, 0.5],
+      ["interior", 0, 1, 0.02], ["roomDepth", 1.5, 9, 0.1], ["curtains", 0, 1, 0.02],
+      ["interiorMetal", 0, 0.6, 0.02],
       ["glassRough", 0.02, 0.6, 0.01], ["glassMetal", 0, 1, 0.02],
       ["wallRough", 0.3, 1, 0.02],
+      ["pierWidth", 0, 0.3, 0.01], ["pierRelief", 0, 0.5, 0.01], ["spandrel", 0, 0.6, 0.01],
+      ["recessAO", 0, 0.6, 0.01], ["baseGrime", 0, 0.8, 0.02],
+      ["brickW", 0.2, 1.5, 0.02], ["brickH", 0.1, 0.6, 0.01], ["mortar", 0, 0.3, 0.01], ["brickTint", 0, 0.5, 0.01],
       ["glassJitter", 0, 1, 0.02], ["paneGradient", 0, 1.5, 0.02],
     ]],
     "g-night": ["live", FACADE_DEFAULTS, [
       ["litFraction", 0, 1, 0.01], ["darkFloors", 0, 0.8, 0.01],
-      ["emissiveBoost", 0, 8, 0.1], ["nightAmount", 0, 1, 0.01],
+      ["emissiveBoost", 0, 8, 0.1], ["churnPeriod", 0, 240, 5],
+      ["crownFraction", 0, 1, 0.02], ["crownBoost", 0, 12, 0.2],
     ]],
     "g-aa": ["live", FACADE_DEFAULTS, [
       ["lodSharp", 0.1, 2, 0.02], ["lodFlat", 0.01, 0.5, 0.01],
@@ -510,11 +551,14 @@ export async function startCityLab() {
     ]],
     "g-layout": ["layout", CITY_DEFAULTS, [
       ["extent", 300, 2500, 50], ["lotSize", 18, 70, 1],
-      ["blockLots", 1, 8, 1], ["streetWidth", 8, 60, 1],
+      ["blockLots", 1, 8, 1], ["streetLots", 0, 3, 1],
       ["density", 0.2, 1, 0.02], ["downtownPower", 0.4, 6, 0.1],
       ["heightNoise", 0, 1, 0.02],
       ["scaleYMin", 0.4, 1.5, 0.02], ["scaleYMax", 0.6, 3, 0.02],
       ["avoidRadius", 0, 200, 5],
+      ["slopeLimit", 0.5, 30, 0.5], ["sinkBias", 0, 4, 0.1],
+      ["districtCore", 0.05, 0.9, 0.01], ["districtMid", 0.2, 1, 0.01], ["districtNoise", 0, 0.6, 0.01],
+      ["landmarkRadius", 0, 600, 10],
     ]],
     "g-kit": ["kit", KIT_DEFAULTS, [
       ["archetypes", 2, 40, 1],
@@ -695,6 +739,7 @@ export async function startCityLab() {
     badge("s-drive", driving, "DRIVE-BY", "free-fly");
     badge("s-sky", gameSkyOn, "game (physical)", "lab gradient");
     badge("s-aerial", aerialOn, "on", "off");
+    badge("s-ground", hillsOn, `hills · ${city.stats.culledSlope} culled`, "flat");
     document.getElementById("s-count").textContent =
       `${city.stats.buildings} in ${city.stats.meshes} mesh${city.stats.meshes === 1 ? "" : "es"}`;
     document.getElementById("s-kit").textContent =

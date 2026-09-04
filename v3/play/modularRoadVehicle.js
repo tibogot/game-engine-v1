@@ -2510,6 +2510,9 @@ const _invQuat = new THREE.Quaternion();
 /** Shared constants for composing instanced wheel matrices. */
 const _UNIT_SCALE = new THREE.Vector3(1, 1, 1);
 const _MIRROR_Y = new THREE.Matrix4().makeRotationY(Math.PI);
+/** Beam-mount aim (see _placeHeadlampNodes). +Z is the beam axis by contract. */
+const _BEAM_FORWARD = new THREE.Vector3(0, 0, 1);
+const _beamAim = new THREE.Vector3();
 
 function _syncComOffset() {
   _COM_OFFSET.set(CHASSIS.comX, CHASSIS.comY, CHASSIS.comZ);
@@ -3597,6 +3600,18 @@ export class Vehicle {
     this.headlights = [];
     this.headlightTargets = [];
     this.headlamps = []; // emissive lamp faces (bloom source)
+    /**
+     * Aim frames for whatever wants to hang off a lamp — today the volumetric
+     * beams (games/modular-road-v3/modularRoadHeadlightBeam.js, owned by
+     * roadGame). Empty Object3Ds at the lamp with +Z pointing down the beam.
+     *
+     * They live HERE rather than in the game because only this class knows
+     * where a lamp actually is: the mount comes from the GLB's own
+     * HEADLIGHT_LENS nodes when a model is loaded and from the tuned constants
+     * when it is not, and applyHeadlightParams re-derives that on every chassis
+     * swap. A game-side copy would be wrong on the box and stale after a swap.
+     */
+    this.headlampNodes = [];
     const H = HEADLIGHTS;
     this._lampGeo = this._lampGeo ?? new THREE.BoxGeometry(1, 1, 1);
     for (const s of [-1, 1]) {
@@ -3635,6 +3650,42 @@ export class Vehicle {
       lamp.visible = H.enabled;
       this.chassisMesh.add(lamp);
       this.headlamps.push(lamp);
+
+      const node = new THREE.Object3D();
+      this.chassisMesh.add(node);
+      this.headlampNodes.push(node);
+    }
+    // Position and orientation come from the same place the SpotLights get
+    // theirs, so nothing can drift out of sync.
+    this._placeHeadlampNodes();
+  }
+
+  /**
+   * Point the beam mounts down the same axis the SpotLights are aimed along.
+   *
+   * The rotation is built with setFromUnitVectors on a LOCAL direction rather
+   * than with lookAt: lookAt reads matrixWorld, and this runs from
+   * applyHeadlightParams, which a panel slider can fire on a frame where the
+   * chassis matrix has not been updated yet. The aim is a purely local fact
+   * (drop over reach) so it never needed world space in the first place.
+   */
+  _placeHeadlampNodes() {
+    const H = HEADLIGHTS;
+    const mounts = this._chassisStyle === "glb" ? this._headlampMounts : null;
+    _beamAim.set(0, -H.aimDrop, H.aimForward);
+    // A zero aim vector (both constants at 0) would normalise to NaN and take
+    // the quaternion — and every beam hanging off it — with it.
+    if (_beamAim.lengthSq() < 1e-12) _beamAim.set(0, 0, 1);
+    _beamAim.normalize();
+    for (let i = 0; i < this.headlampNodes.length; i++) {
+      const s = i === 0 ? -1 : 1;
+      const node = this.headlampNodes[i];
+      node.position.set(
+        mounts ? mounts[i].x : s * H.side,
+        mounts ? mounts[i].y : H.height,
+        mounts ? mounts[i].z : H.forward,
+      );
+      node.quaternion.setFromUnitVectors(_BEAM_FORWARD, _beamAim);
     }
   }
 
@@ -3722,6 +3773,7 @@ export class Vehicle {
       m.material.emissiveIntensity = H.lampEmissive;
       m.position.set(s * H.side, H.height, H.forward + 0.02);
     }
+    this._placeHeadlampNodes();
     // Intensity and lamp visibility are owned by the switch, so that moving the
     // beam slider with the lights OFF stores the new value without lighting them.
     this._syncHeadlightSwitch();

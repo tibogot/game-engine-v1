@@ -22,23 +22,24 @@
 //
 // Every facade detail that could be geometry is a shader instead
 // (modularRoadCityFacade.js), so geometry here only has to carry SILHOUETTE:
-// setbacks, ledges, crowns, masts. A full-detail tower lands around 150–250
-// triangles. A 1500-building city is therefore well under a million triangles
-// even before LOD, which for a car game passing at 30 m/s is nothing — the
-// cost that actually matters is fragment, and that is bought back with the LOD
-// tiers below.
+// setbacks, podiums, ledges, crowns, masts. A full-detail tower lands around
+// 60–250 triangles. A 2400-building city is therefore well under a million
+// triangles even before LOD, which for a car game passing at 45 m/s is nothing
+// — measured, the workload is not triangle-bound at all (the instanced backend
+// submits 2.3× the triangles of the batched one and is still faster).
 //
 // ── LOD TIERS ────────────────────────────────────────────────────────────────
 //
 //   L0  full — tiers, setback ledges, string courses, crown, roof clutter
-//   L1  tiers + crown box only. Same silhouette from 150 m, ~40% of the tris,
-//       and (more importantly) far fewer shadow-map triangles.
-//   L2  one box of the whole envelope. Beyond ~800 m a tower IS a box; the
-//       facade shader has already dissolved to a flat tint by then, so there is
-//       nothing left for the geometry to say.
+//   L1  tiers + roof furniture. Same ROOFLINE exactly, fewer facade ledges.
+//   L2  one box of the massing envelope (mast excluded). Beyond ~800 m a
+//       tower IS a box; the facade shader has already dissolved to a flat tint
+//       by then, so there is nothing left for the geometry to say.
 //
-// All three share the archetype's footprint and total height exactly, so a tier
-// swap never pops the silhouette — only the detail on it.
+// L0 and L1 share their roofline to the float, because the L0->L1 swap happens
+// at ~220 m where a changing roofline is plainly visible. L2 is the massing
+// height WITHOUT the mast: a 0.5 m needle scaled up into a full-width box would
+// make every distant tower read 20 m too tall.
 //
 // ── ATTRIBUTE NORMALISATION ──────────────────────────────────────────────────
 //
@@ -65,20 +66,27 @@ export function mulberry32(seed) {
 export const KIT_DEFAULTS = {
   /** How many distinct towers to bake. More = less repetition, more pipeline
    *  state on the instanced backend (one InstancedMesh per archetype per tier).
-   *  On the batched backend it costs nothing but vertex buffer space. */
-  archetypes: 14,
+   *  Measured at 14: 34 draws for a whole city. 18 is still nothing. */
+  archetypes: 18,
   /** Footprint range, metres. Kept BELOW the lot size so buildings are inset —
    *  the facade's per-building hash is the lot cell, and a tower that spilled
    *  into its neighbour's lot would change tint halfway up. */
   minFootprint: 16,
-  maxFootprint: 27,
-  /** Height range, metres. The instance Y-scale spreads it further at runtime. */
+  maxFootprint: 28,
+  /** Height range, metres. The instance Y-scale spreads it further at runtime.
+   *  `tall = rnd()²` keeps most of the set mid-rise, so a high ceiling buys a
+   *  few real towers downtown rather than a wall — and a sky track at 40 m
+   *  wants something to fly BETWEEN. */
   minHeight: 24,
-  maxHeight: 210,
+  maxHeight: 300,
   /** Chance a tower steps in as it rises, and how hard. */
   setbackChance: 0.62,
   maxSetbacks: 3,
   setbackDepth: 0.16,
+  /** Chance of a PODIUM: a wide low base with a narrower tower on it. The
+   *  commonest tall-building form there is, and the one that reads best from
+   *  a road at its foot — the podium is what you drive past. */
+  podiumChance: 0.32,
   /** A ledge slab at every setback, and a thin band every N storeys. */
   ledgeOverhang: 0.55,
   stringCourseEvery: 9,
@@ -86,6 +94,10 @@ export const KIT_DEFAULTS = {
   /** Roof furniture — mechanical penthouse, water tank, mast. */
   crownChance: 0.8,
   mastChance: 0.45,
+  /** LANDMARKS: extra archetypes forced well above the ceiling, so the skyline
+   *  has a shape you recognise. The layout places them only near downtown. */
+  landmarks: 3,
+  landmarkHeight: 1.6,   // × maxHeight, upper end
 };
 
 /**
@@ -105,9 +117,8 @@ function box(w, h, d, y, x = 0, z = 0) {
  *
  * @param {() => number} rnd seeded RNG
  * @param {object} K kit params
- * @returns {{ lods: THREE.BufferGeometry[], height: number, footprint: number, tris: number[] }}
  */
-function buildArchetype(rnd, K) {
+function buildArchetype(rnd, K, forceH = null) {
   const w0 = K.minFootprint + rnd() * (K.maxFootprint - K.minFootprint);
   // Slabs (a wide, shallow footprint) read very differently from square towers
   // and are what stop a skyline looking like a bundle of pencils.
@@ -117,14 +128,26 @@ function buildArchetype(rnd, K) {
   // Height distribution skewed low — a real skyline is mostly mid-rise with a
   // few towers. A flat distribution gives you a wall, not a skyline.
   const tall = rnd() * rnd();
-  const H = K.minHeight + tall * (K.maxHeight - K.minHeight);
+  const H = forceH ?? (K.minHeight + tall * (K.maxHeight - K.minHeight));
 
+  const podium = H > 60 && rnd() < K.podiumChance;
   const nSet = rnd() < K.setbackChance ? 1 + Math.floor(rnd() * K.maxSetbacks) : 0;
 
   // ── Tier stack ─────────────────────────────────────────────────────────────
   // Each tier is a box from `y` up to the next setback, narrower than the last.
   const tiers = [];
   let y = 0, w = w0, d = d0;
+
+  if (podium) {
+    // Three to five storeys of full-footprint base, then a tower on roughly
+    // half the footprint. The step is big and low — the opposite of a setback.
+    const ph = K.floorHeight * (3 + Math.floor(rnd() * 3));
+    tiers.push({ y: 0, h: ph, w: w0, d: d0 });
+    y = ph;
+    w = w0 * (0.5 + rnd() * 0.18);
+    d = d0 * (0.5 + rnd() * 0.18);
+  }
+
   for (let i = 0; i <= nSet; i++) {
     // Setbacks bunch toward the top: the first tier carries most of the height.
     const remaining = H - y;
@@ -145,7 +168,7 @@ function buildArchetype(rnd, K) {
     mid.push(g.clone());
   }
 
-  // ── Setback ledges (L0 only) ───────────────────────────────────────────────
+  // ── Setback / podium ledges (L0 only) ──────────────────────────────────────
   // A thin slab overhanging each step. Without them a setback is a bare notch
   // and the tower reads as a stack of boxes, which is exactly what it is.
   for (let i = 1; i < tiers.length; i++) {
@@ -174,10 +197,11 @@ function buildArchetype(rnd, K) {
   const top = tiers[tiers.length - 1];
   const topY = top.y + top.h;
   // The massing envelope — tiers plus the mechanical penthouse. This, and NOT
-  // the mast, is what L2's single box has to match: a 0.5 m needle scaled up
-  // into a full-width box would make every distant tower read 20 m too tall.
+  // the mast, is what L2's single box has to match.
   let massTop = topY;
   let spireTop = topY;
+  /** Height of the mast tip, or null — where an aviation beacon goes. */
+  let mastTop = null;
 
   if (rnd() < K.crownChance) {
     const cw = top.w * (0.4 + rnd() * 0.28);
@@ -204,6 +228,7 @@ function buildArchetype(rnd, K) {
       full.push(box(0.5, mh, 0.5, massTop));
       mid.push(box(0.5, mh, 0.5, massTop));
       spireTop = Math.max(spireTop, massTop + mh);
+      mastTop = massTop + mh;
     }
   }
 
@@ -229,9 +254,15 @@ function buildArchetype(rnd, K) {
     lods: [l0, l1, l2],
     /** Full height including the mast — what the skyline reads. */
     height: spireTop,
-    /** Massing height, mast excluded — what L2's box is. */
+    /** Massing height, mast excluded — what L2's box is, and what the facade's
+     *  lot texture carries as the building top (crown lights sit under it). */
     massHeight: massTop,
     footprint: Math.max(w0, d0),
+    /** Footprint per axis — the signs need the face they hang on. */
+    width: w0,
+    depth: d0,
+    mastTop,
+    landmark: forceH != null,
     tris,
   };
 }
@@ -251,6 +282,11 @@ export function buildCityKit({ seed = 1337, params = {} } = {}) {
 
   const archetypes = [];
   for (let i = 0; i < K.archetypes; i++) archetypes.push(buildArchetype(rnd, K));
+  // Landmarks: forced heights above the ceiling. They sort to the END, and the
+  // layout keeps them out of the ordinary height pick (see `normalCount`).
+  for (let i = 0; i < K.landmarks; i++) {
+    archetypes.push(buildArchetype(rnd, K, K.maxHeight * (1.2 + rnd() * (K.landmarkHeight - 1.2))));
+  }
 
   // Sorted by height so the layout can pick "a tall one" / "a short one" by
   // index without re-scanning, which is what gives the downtown falloff its
@@ -260,6 +296,7 @@ export function buildCityKit({ seed = 1337, params = {} } = {}) {
   const totalTris = archetypes.reduce((s, a) => s + a.tris[0], 0);
   const stats = {
     count: archetypes.length,
+    landmarks: K.landmarks,
     bakeMs: performance.now() - t0,
     trisL0: totalTris,
     avgTrisL0: Math.round(totalTris / archetypes.length),
