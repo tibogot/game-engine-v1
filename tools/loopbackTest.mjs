@@ -156,9 +156,12 @@ const row = (label, r) => console.log(
 
 if (SWEEP) {
   console.log("=== SWEEP ===");
-  for (const topR of [7, 9, 11, 14]) {
+  // The exit angle is the pacing knob: it decides how much of the car's speed
+  // goes UP rather than BACK, and therefore the hang time — without touching
+  // the run-up. See the note on loopbackExit in the kit.
+  for (const exit of [118, 128, 135, 142]) {
     for (const v of [26, 32, 38]) {
-      row(`topR${topR} @${v}`, run({ speed: v, over: { loopbackTopRadius: topR } }));
+      row(`exit ${exit}° @${v}`, run({ speed: v, over: { loopbackExit: exit } }));
     }
   }
   process.exit(0);

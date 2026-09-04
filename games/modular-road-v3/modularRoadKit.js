@@ -187,7 +187,18 @@ export const pieceParams = {
   // gently, and it also sets the rotation the car leaves with (v/R), which is
   // what the flight then continues.
   loopbackTopRadius: 11, // curl over the top (m) — the curve at the end
-  loopbackExit: 118, // angle it finishes at (deg); past 90 sends the car back
+  // THE PACING KNOB. It decides how much of the car's speed leaves as UP rather
+  // than BACK, so it sets the hang time WITHOUT touching the run-up — which is
+  // the lever you want, because height goes as v-squared and slowing the car to
+  // shorten a jump makes the whole lap feel slow. MEASURED at 26/32/38 m/s:
+  //     118 deg -> air 6.0-6.7 s, peak 49-61 m, back 50-76 m, inverted at 0.55 s
+  //     128     -> air 5.3-6.2,   peak 44-54,   back 60-91,   inverted at 0.47
+  //     135     -> air 5.0-5.7,   peak 41-48,   back 64-95,   inverted at 0.37
+  //     142     -> air 4.6-5.3,   peak 38-43,   back 65-95,   but the turn goes
+  //                ragged (73 deg at one speed, 129 at the next)
+  // Past ~150 the car stops leaving the ramp cleanly at all, and past ~170 it
+  // never leaves. 135 is the most it can be pushed while the flip stays even.
+  loopbackExit: 135, // angle it finishes at (deg); past 90 sends the car back
   jumpLength: 18, // arc length of the ramp (m)
   jumpAngle: 12, // takeoff angle at the exit (deg)
   // Dive / down ramp (mirror of the jump — flat entry, exit pitched down).

@@ -5401,7 +5401,7 @@ export const CATEGORY_PRESETS = {
       // finish the rotation with the pitch keys — that is the trick.
       base: "loopback",
       params: { loopbackRadius: 14, loopbackAngle: 70, loopbackStraight: 5,
-        loopbackTopRadius: 11, loopbackExit: 118 },
+        loopbackTopRadius: 11, loopbackExit: 135 },
     },
     {
       id: "flip_ramp_s",
@@ -5409,7 +5409,7 @@ export const CATEGORY_PRESETS = {
       // The same thing at 23 m: same reversal, same ~250°, comes back 88 m.
       base: "loopback",
       params: { loopbackRadius: 11, loopbackAngle: 70, loopbackStraight: 3,
-        loopbackTopRadius: 9, loopbackExit: 116 },
+        loopbackTopRadius: 9, loopbackExit: 132 },
     },
     {
       id: "dive_10",
