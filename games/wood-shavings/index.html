@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Copeaux — l'atelier</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%; overflow: hidden; background: #120c08; color: #f5ede2;
+        font: 15px/1.5 "Inter", ui-sans-serif, system-ui, sans-serif;
+        cursor: crosshair;
+      }
+      canvas { display: block; width: 100%; height: 100%; }
+
+      /* Lens vignette + a warm bloom in the upper-left, where the window light falls. */
+      #vignette {
+        position: fixed; inset: 0; pointer-events: none; z-index: 2;
+        background:
+          linear-gradient(100deg, rgba(22, 11, 4, 0.66) 0%, rgba(22, 11, 4, 0.42) 28%, rgba(22, 11, 4, 0) 58%),
+          radial-gradient(120% 90% at 18% 8%, rgba(255, 214, 160, 0.14), transparent 55%),
+          radial-gradient(140% 120% at 50% 50%, transparent 55%, rgba(8, 4, 2, 0.62) 100%);
+      }
+      /* Faint film grain, so the highlights never look plastic. */
+      #grain {
+        position: fixed; inset: -50%; pointer-events: none; z-index: 3; opacity: 0.045;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+        animation: grain 0.6s steps(3) infinite;
+      }
+      @keyframes grain {
+        0% { transform: translate(0, 0); } 33% { transform: translate(-3%, 2%); }
+        66% { transform: translate(2%, -3%); } 100% { transform: translate(0, 0); }
+      }
+
+      #hero {
+        position: fixed; inset: 0; z-index: 4; pointer-events: none;
+        display: grid; grid-template-rows: 1fr auto 1fr; padding: clamp(24px, 5vw, 72px);
+      }
+      #hero header { display: flex; justify-content: space-between; align-items: center; font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(245, 237, 226, 0.7); }
+      #hero header .brand { font-family: "Cormorant Garamond", serif; font-size: 20px; letter-spacing: 0.04em; text-transform: none; color: #f5ede2; }
+      #hero nav a { pointer-events: auto; color: inherit; text-decoration: none; margin-left: 28px; opacity: 0.8; }
+      #hero nav a:hover { opacity: 1; }
+
+      #hero main { max-width: 760px; }
+      #hero .kicker { font-size: 12px; letter-spacing: 0.26em; text-transform: uppercase; color: rgba(255, 210, 150, 0.9); margin: 0 0 18px; }
+      #hero h1 {
+        font-family: "Cormorant Garamond", serif; font-weight: 400; margin: 0;
+        font-size: clamp(56px, 9vw, 132px); line-height: 0.92; letter-spacing: -0.01em;
+        text-shadow: 0 2px 30px rgba(20, 8, 0, 0.55), 0 1px 2px rgba(20, 8, 0, 0.6);
+      }
+      #hero h1 em { font-style: italic; color: #f7d9a8; }
+      #hero p.lede { font-weight: 300; font-size: clamp(15px, 1.5vw, 19px); max-width: 520px; margin: 26px 0 0; color: rgba(245, 237, 226, 0.86); text-shadow: 0 1px 12px rgba(20, 8, 0, 0.7); }
+      #hero .cta { pointer-events: auto; display: inline-flex; align-items: center; gap: 12px; margin-top: 36px; padding: 14px 26px; border: 1px solid rgba(247, 217, 168, 0.55); border-radius: 999px; color: #f5ede2; text-decoration: none; font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase; backdrop-filter: blur(6px); background: rgba(30, 16, 8, 0.28); transition: background 0.25s, border-color 0.25s; }
+      #hero .cta:hover { background: rgba(247, 217, 168, 0.16); border-color: #f7d9a8; }
+      #hero .cta svg { width: 16px; height: 16px; }
+
+      #hero footer { display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; color: rgba(245, 237, 226, 0.6); letter-spacing: 0.06em; }
+      #hero footer .hint { display: flex; align-items: center; gap: 10px; }
+      #hero footer .hint i { display: inline-block; width: 26px; height: 1px; background: rgba(245, 237, 226, 0.5); }
+      #fps { font-variant-numeric: tabular-nums; opacity: 0.6; }
+
+      #loading {
+        position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: #120c08;
+        font-family: "Cormorant Garamond", serif; font-size: 22px; letter-spacing: 0.08em; color: rgba(245, 237, 226, 0.8);
+        transition: opacity 0.9s ease;
+      }
+      #loading.done { opacity: 0; pointer-events: none; }
+      #loading .err { font-family: "Inter", sans-serif; font-size: 14px; color: #f0a880; max-width: 520px; text-align: center; padding: 0 24px; }
+
+      @media (max-width: 640px) {
+        #hero nav { display: none; }
+        #hero footer span:last-child { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="vignette"></div>
+    <div id="grain"></div>
+
+    <div id="hero">
+      <header>
+        <span class="brand">Maison Ferrand</span>
+        <nav><a href="#">Atelier</a><a href="#">Pièces</a><a href="#">Contact</a></nav>
+      </header>
+      <main>
+        <p class="kicker">Ébénisterie · depuis 1962</p>
+        <h1>Le bois<br />se <em>travaille</em><br />à la main.</h1>
+        <p class="lede">Chêne, noyer, frêne. Chaque pièce sort de l'atelier rabotée, ajustée et cirée par les mêmes mains, du premier copeau au dernier coup de chiffon.</p>
+        <a class="cta" href="#">
+          Découvrir l'atelier
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+        </a>
+      </main>
+      <footer>
+        <span class="hint"><i></i>Déplacez la souris pour souffler les copeaux · cliquez pour un coup de souffle</span>
+        <span id="fps"></span>
+      </footer>
+    </div>
+
+    <div id="loading"><span>L'atelier se prépare…</span></div>
+
+    <script type="module">
+      import { startWoodShavings } from "./woodShavings.js";
+      const loading = document.getElementById("loading");
+      const fps = document.getElementById("fps");
+      try {
+        const app = await startWoodShavings({
+          onStats: ({ fps: f }) => { fps.textContent = `${f.toFixed(0)} fps`; },
+        });
+        window.__shavings = app;
+        requestAnimationFrame(() => requestAnimationFrame(() => loading.classList.add("done")));
+      } catch (err) {
+        console.error(err);
+        loading.innerHTML = `<div class="err">Cette page a besoin de WebGPU (Chrome, Edge ou Safari récents).<br><br>${err.message}</div>`;
+      }
+    </script>
+  </body>
+</html>
