@@ -498,8 +498,6 @@ const K_MAX = 0.9;
  * 2.3× the sphere radius, the particle is already invisible.
  */
 const K_FADE_START = 0.6;
-/** Centre distance (m) at which a puff is fully gone — comfortably outside the
- *  0.5 m near plane — and at which it is back to full strength. */
 /**
  * Base shutter, seconds — the exposure a spray streak represents.
  *
@@ -510,6 +508,22 @@ const K_FADE_START = 0.6;
  * droplet stays a dot rather than smearing into a scratch.
  */
 const BASE_SHUTTER = 1 / 25;
+/**
+ * Ceiling on a streak's half-length, as a tangent — so `depth * this` is the
+ * cap in world units, and it means the same fraction of the frame at every
+ * distance. At 0.25 against this camera's ~50° vertical field, a streak can run
+ * about half the frame height end to end; past that a droplet is not motion
+ * blur any more, it is a scratch on the lens.
+ *
+ * A backstop, not a look dial. The thing it backstops is the 1/z in the streak
+ * axis (see `_stepPool`), which is a projection derivative and therefore
+ * unbounded as a particle approaches the plane of the lens.
+ */
+const STREAK_MAX_SWEEP = 0.25;
+/** Near-plane guard, in DEPTH along the view axis — not radial distance. Fully
+ *  gone at OUT, back to full strength at IN, both comfortably outside the 0.5 m
+ *  near plane. Depth is the measure because that is what the near plane cuts
+ *  on; see the guard in `_stepPool`. */
 const NEAR_FADE_OUT = 0.55;
 const NEAR_FADE_IN = 1.2;
 /**
@@ -899,6 +913,10 @@ export class ModularRoadDriftSmoke {
      *  `_stepPool` for the same reason `_smokeTint` is — it is already in hand
      *  up there, and `_writeParticle` needs it to size the quad exactly. */
     this._camDist = 1;
+    /** The same particle's DEPTH along the view axis. Not interchangeable with
+     *  `_camDist` — see the near-plane guard in `_stepPool`. Bounds the streak
+     *  to a sane sweep of the frame. */
+    this._camDepth = 1;
     /** Master visibility. Both meshes also hide themselves when empty, so this
      *  is ANDed in rather than written straight to `mesh.visible`. */
     this._visible = true;
@@ -1810,6 +1828,14 @@ export class ModularRoadDriftSmoke {
       // cuts it. Everything near-camera used to be unhandled, and the chase rig
       // flies through the plume continuously at speed.
       const camDist = _camPos.distanceTo(p.position);
+      // DEPTH, signed, along the view axis — negative behind the lens. This is
+      // what the near plane actually cuts on, and it is not the same thing as
+      // `camDist`: a droplet level with the lens but 2 m to one side is 2 m away
+      // and yet completely past the near plane. Measuring the guard radially let
+      // those through at full opacity, which is what the streak path then turned
+      // into screen-crossing beams (see the depth term in the axis block below).
+      _toPart.subVectors(p.position, _camPos);
+      const camDepth = _toPart.dot(_smokeFwd);
       let fade;
       if (isBank) {
         // Relative to the sphere's OWN radius — see BANK_FADE_*. An absolute
@@ -1822,14 +1848,16 @@ export class ModularRoadDriftSmoke {
         );
       } else {
         // Two terms, whichever is smaller. The first retires a puff before its
-        // quad would have to blow up past K_MAX; the second is the near-plane
-        // guard, and it works on the CENTRE distance because that is where the
-        // billboard's plane actually sits.
+        // quad would have to blow up past K_MAX — that one is RADIAL, because
+        // the quad's size is set by how far the sphere is, in any direction.
+        // The second is the near-plane guard, and it is on the DEPTH, because
+        // the billboard's plane sits at the centre and the near plane slices it
+        // at a fixed depth however far off-axis that centre has drifted.
         const k = radius / Math.max(camDist, 1e-4);
         fade = Math.min(
           THREE.MathUtils.clamp((K_MAX - k) / (K_MAX - K_FADE_START), 0, 1),
           THREE.MathUtils.clamp(
-            (camDist - NEAR_FADE_OUT) / (NEAR_FADE_IN - NEAR_FADE_OUT),
+            (camDepth - NEAR_FADE_OUT) / (NEAR_FADE_IN - NEAR_FADE_OUT),
             0,
             1,
           ),
@@ -1839,6 +1867,7 @@ export class ModularRoadDriftSmoke {
       // The particle stays alive and comes back as the camera pulls away.
       if (fade <= 0) continue;
       this._camDist = camDist;
+      this._camDepth = camDepth;
 
       // ── THE STREAK AXIS: APPARENT MOTION, NOT WORLD MOTION ────────────────
       //
@@ -1863,10 +1892,23 @@ export class ModularRoadDriftSmoke {
       // spray, and it is non-zero precisely where the world-space axis dies.
       //
       // V is relative to the CAMERA, which is travelling with the car.
+      //
+      // NOTE the 1/z. This expression is a PROJECTION derivative, so it only
+      // means anything IN FRONT of the lens, and it diverges as z → 0. That is
+      // not a rounding concern, it was the whole failure mode: `z` used to be
+      // `max(depth, 0.05)`, so a droplet level with the lens or behind it —
+      // which the radial near-fade happily drew at full opacity — got its
+      // perspective term multiplied by up to 20, giving a streak a couple of
+      // HUNDRED times its own radius, aimed radially away from the view axis.
+      // A plume of those is a set of beams converging on the vanishing point,
+      // which is the cross that appeared over the car in the wet.
+      //
+      // The depth-based near fade above is the fix: it takes those particles to
+      // zero before they get here, so `z` is now a genuine depth of at least
+      // NEAR_FADE_OUT and the 1/z has nothing left to blow up on.
       if (!isBank) {
         _relVel.copy(p.velocity).sub(_camVel);
-        _toPart.subVectors(p.position, _camPos);
-        const z = Math.max(_toPart.dot(_smokeFwd), 0.05);
+        const z = Math.max(camDepth, NEAR_FADE_OUT);
         const vf = _relVel.dot(_smokeFwd) / z;
         this._streakX = _relVel.dot(_smokeRight) - _toPart.dot(_smokeRight) * vf;
         this._streakY = _relVel.dot(_smokeUp) - _toPart.dot(_smokeUp) * vf;
@@ -2060,6 +2102,15 @@ export class ModularRoadDriftSmoke {
         // Floored at `half` so a nearly-stationary droplet stays a dot rather
         // than collapsing to a sliver.
         halfLong = Math.max(half, half + sLen * this._shutter * 0.5);
+        // And CEILINGED as a sweep of the frame, not as a length in metres.
+        // Motion blur that runs much past a quarter of the frame stops reading
+        // as blur and starts reading as a line drawn on the lens, and the
+        // ceiling has to scale with depth to mean the same thing near and far —
+        // hence depth × a tangent rather than a constant. This is a backstop:
+        // with the near-plane fade honest, ordinary spray never reaches it.
+        // Never below `half`, so the cap can only shorten a streak, never
+        // pinch a big close particle into a sliver narrower than it is wide.
+        halfLong = Math.max(half, Math.min(halfLong, this._camDepth * STREAK_MAX_SWEEP));
       }
     }
     const posOffset = index * FLOATS_PER_PARTICLE;
