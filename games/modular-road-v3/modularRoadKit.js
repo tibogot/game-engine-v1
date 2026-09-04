@@ -4967,6 +4967,8 @@ export const PIECE_CATALOG = [
     // Hot orange: you commit to this one at 150 km/h and it does something no
     // other piece does, so it has to be readable from a long way back.
     swatch: "#ff5a1f",
+    // Wears its own deck material (see flipRampMat) rather than asphalt.
+    flipRamp: true,
     points: loopbackPoints,
   },
   {

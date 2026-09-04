@@ -87,6 +87,29 @@ const INTENTIONAL = new Map([
   [0xf4f4f2, 0xf1c40f],
 ]);
 
+/**
+ * Colours ADDED since the baseline, which have nothing to do with the
+ * migration — new art, not a rebased literal.
+ *
+ * They have to be declared because the pairing below is POSITIONAL: a literal
+ * inserted anywhere shifts every one after it, the counts stop matching, and
+ * the whole file bails out with "cannot pair positionally". Left as-is that
+ * makes this guard a tripwire on every new colour in five core files, and the
+ * tempting fix — matching as a multiset, or only comparing a common prefix — is
+ * the wrong one, because it quietly stops catching a literal that was moved or
+ * removed.
+ *
+ * So additions are ALLOWED but never SILENT: declare the value here, one entry
+ * per occurrence, and the pairing goes back to being exact. Nobody can slip a
+ * double-converted colour in by adding it rather than editing one.
+ */
+const ADDED = [
+  // Flip-ramp deck: hot orange face, dark red flanks. Both go through
+  // THREE.Color once, like every other colour in that file.
+  0xf4501a,
+  0x6e1b09,
+];
+
 /** The file as it was before the colour fix. */
 function atHead(rel) {
   try {
@@ -118,11 +141,29 @@ for (const rel of FILES) {
   const before = readHexes(head);
   const after = readHexes(now);
 
-  if (before.length !== after.length) {
+  // Take the declared additions out before pairing — one occurrence each, so a
+  // value that is BOTH declared and genuinely present twice still pairs.
+  const extra = [...ADDED];
+  const pairable = after.filter((v) => {
+    const at = extra.indexOf(v);
+    if (at === -1) return true;
+    extra.splice(at, 1);
+    return false;
+  });
+  if (extra.length && after.length !== before.length) {
+    check(
+      `${path.basename(rel)}: every declared addition is present`,
+      false,
+      `still expecting ${extra.map(hex).join(", ")} — remove them from ADDED if they are gone`,
+    );
+  }
+
+  if (before.length !== pairable.length) {
     check(
       `${path.basename(rel)}: hex count stable`,
       false,
-      `HEAD ${before.length}, now ${after.length} — cannot pair positionally`
+      `HEAD ${before.length}, now ${pairable.length} after declared additions`
+      + ` — cannot pair positionally; declare new colours in ADDED`
     );
     continue;
   }
@@ -130,11 +171,11 @@ for (const rel of FILES) {
   const bad = [];
   let changed = 0;
   for (let i = 0; i < before.length; i++) {
-    if (before[i] === after[i]) continue;
+    if (before[i] === pairable[i]) continue;
     changed++;
-    if (after[i] === rebase(before[i])) continue;          // rebased correctly
-    if (INTENTIONAL.get(before[i]) === after[i]) continue; // a deliberate re-colour
-    bad.push(`#${i} ${hex(before[i])} -> ${hex(after[i])}, expected ${hex(rebase(before[i]))}`);
+    if (pairable[i] === rebase(before[i])) continue;          // rebased correctly
+    if (INTENTIONAL.get(before[i]) === pairable[i]) continue; // a deliberate re-colour
+    bad.push(`#${i} ${hex(before[i])} -> ${hex(pairable[i])}, expected ${hex(rebase(before[i]))}`);
   }
   totalChanged += changed;
   check(

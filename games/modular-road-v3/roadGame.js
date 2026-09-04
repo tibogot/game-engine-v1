@@ -128,7 +128,7 @@ import {
 } from "./modularRoadThumbnailCache.js";
 import {
   PropManager, PROP_CATALOG, PROP_BY_ID, glowPropParams, SURFACE_SNAP, SURFACE_SNAP_MODES, DECAL_URL,
-  preloadDiamondPlate, hazardPadMat, setAsphaltLotMaterial,
+  preloadDiamondPlate, hazardPadMat, flipRampMat, setAsphaltLotMaterial,
 } from "./modularRoadProps.js";
 import {
   MoverPropManager, MOVER_CATALOG, MOVER_BY_ID, preloadWindmillModel,
@@ -1518,6 +1518,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // + neon), FrontSide. Weather rebuilds the ROAD material; this one stays.
   const tubeMaterial = createTubeMaterial();
   const hazardPadMaterial = hazardPadMat();
+  const flipRampMaterial = flipRampMat();
   // One pane material for every glass road on the track — it reflects
   // `scene.environment` (the live sky PMREM), so all of them stay in step with
   // the time of day for free.
@@ -1564,6 +1565,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     glassMaterial,
     tubeMaterial,
     hazardPadMaterial,
+    flipRampMaterial,
     camera,
     domElement: renderer.domElement,
     orbit: controls,
@@ -1820,6 +1822,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     checkpointGlow: createCheckpointGlowMaterialForThumb(),
     tube: tubeMaterial,
     hazardPad: hazardPadMaterial,
+    flipRamp: flipRampMaterial,
     // NOT the live pane material. Transmission composites against a copy of
     // the backdrop, and a thumbnail is rendered into a bare RT with no
     // backdrop to copy — the pane comes out black, so the tile advertises a
@@ -3825,9 +3828,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   _mergedGroupRef = mergedGroup;
 
   const MERGE_ROLES = [
-    { pick: (p) => (p.mesh?.material === tubeMaterial || p.mesh?.material === hazardPadMaterial ? null : p.mesh), mat: () => roadMaterial, cast: true },
+    { pick: (p) => (p.mesh?.material === tubeMaterial || p.mesh?.material === hazardPadMaterial
+      || p.mesh?.material === flipRampMaterial ? null : p.mesh), mat: () => roadMaterial, cast: true },
     { pick: (p) => (p.mesh?.material === tubeMaterial ? p.mesh : null), mat: () => tubeMaterial, cast: true },
     { pick: (p) => (p.mesh?.material === hazardPadMaterial ? p.mesh : null), mat: () => hazardPadMaterial, cast: true },
+    // Its OWN batch, and excluded from the road batch above. Merging is keyed on
+    // material identity, so a piece with a new material that is not given a role
+    // is silently merged into the asphalt one and loses its colour in drive mode.
+    { pick: (p) => (p.mesh?.material === flipRampMaterial ? p.mesh : null), mat: () => flipRampMaterial, cast: true },
     { pick: (p) => p.railMesh, mat: () => railMaterial, cast: true },
     { pick: (p) => (p.shellMesh?.userData.vault ? null : p.shellMesh), mat: () => shellMaterial, cast: true },
     { pick: (p) => (p.shellMesh?.userData.vault ? p.shellMesh : null), mat: () => vaultShellMaterial, cast: true },

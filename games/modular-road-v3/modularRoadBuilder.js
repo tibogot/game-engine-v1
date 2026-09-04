@@ -302,6 +302,7 @@ export class ModularRoadBuilder {
     glassMaterial = null,
     tubeMaterial = null,
     hazardPadMaterial = null,
+    flipRampMaterial = null,
     camera = null,
     domElement = null,
     orbit = null,
@@ -322,6 +323,7 @@ export class ModularRoadBuilder {
     this.glassMaterial = glassMaterial;
     this.tubeMaterial = tubeMaterial;
     this.hazardPadMaterial = hazardPadMaterial;
+    this.flipRampMaterial = flipRampMaterial;
     this.orbit = orbit;
     this.isBuildMode = isBuildMode;
     this.onChange = onChange;
@@ -2957,6 +2959,7 @@ export class ModularRoadBuilder {
     if (PIECE_BY_ID.get(id)?.noMesh) return this.gapMaterial;
     if (this._isTubePiece(id) && this.tubeMaterial) return this.tubeMaterial;
     if (PIECE_BY_ID.get(id)?.hazardPad && this.hazardPadMaterial) return this.hazardPadMaterial;
+    if (PIECE_BY_ID.get(id)?.flipRamp && this.flipRampMaterial) return this.flipRampMaterial;
     return this.material;
   }
 

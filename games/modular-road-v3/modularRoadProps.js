@@ -287,6 +287,36 @@ export function hazardPadMat() {
   return m;
 }
 
+/**
+ * FLIP RAMP DECK — solid hot orange, so the one piece that does something no
+ * other piece does is readable from a long way back.
+ *
+ * You commit to this ramp early and at speed, and it is the only thing in the
+ * kit that will turn the car over, so it cannot look like road. Flat and
+ * saturated rather than textured, which is how the reference reads: the ramp is
+ * a bright plane, the track around it is dark asphalt.
+ *
+ * Zoned off `aZone` exactly like `hazardPadMat`: 1 is the deck you drive, and
+ * everything else — flanks, underside, kerbs — takes the darker red, so the
+ * ramp reads as a solid object rather than a floating orange sheet.
+ */
+export function flipRampMat() {
+  const m = new THREE.MeshStandardNodeMaterial({ roughness: 1, metalness: 0 });
+  // Through THREE.Color, not raw literals: the repo linearises once, in the
+  // colour constructor. See the colour-space note in the repo's history.
+  const face = new THREE.Color(0xf4501a);
+  const flank = new THREE.Color(0x6e1b09);
+  const z = attribute("aZone", "float");
+  const isDeck = step(0.5, z).mul(oneMinus(step(1.5, z)));
+  // Darker at the foot, brightest at the lip. A 20 m face in one flat wash
+  // reads as a decal; the gradient gives it height at the speed you see it.
+  const rise = smoothstep(float(0), float(22), positionLocal.y);
+  const deck = vec3(face.r, face.g, face.b).mul(mix(float(0.68), float(1.0), rise));
+  m.colorNode = mix(vec3(flank.r, flank.g, flank.b), deck, isDeck);
+  m.roughnessNode = mix(float(0.95), float(0.82), isDeck);
+  return m;
+}
+
 function addPlateUvs(geo, tile = 6) {
   if (geo.getAttribute("uv")) return;
   const p = geo.getAttribute("position");
