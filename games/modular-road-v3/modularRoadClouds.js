@@ -55,12 +55,12 @@ import {
   positionWorld, cameraPosition, screenUV, screenCoordinate,
   cameraViewMatrix, cameraProjectionMatrix,
   normalize, dot, max, min, mix, smoothstep, pow, exp, abs, sign, clamp, sin, cos, floor,
-  length, saturate, fract,
+  length, saturate, fract, sqrt, cross, select,
 } from "three/tsl";
 import {
   BASE_TILE_M, DETAIL_TILE_M, NEAR_TILE_M, WEATHER_TILE_M,
   BASE_SIZE, DETAIL_SIZE, NEAR_SIZE, WEATHER_SIZE, BLUE_NOISE_SIZE, bakeBlueNoise,
-  densityAtCPU,
+  densityAtCPU, SOLID_BASE_SIZE, SOLID_WEATHER_SIZE, solidDensityAtCPU,
 } from "./modularRoadCloudNoise.js";
 
 /** Layer the cloud dome lives on, so the main scene pass skips it and we march it alone. */
@@ -170,6 +170,26 @@ export const CLOUD_DEFAULTS = {
    * it just resolves less far-field billow for ~-0.4 ms.)
    */
   maxStep: 28,
+  /**
+   * Fewest samples the march must take across the slab's own thickness.
+   *
+   * `maxStep` alone is a step ceiling in METRES, which silently means something different
+   * for every deck. It was set to 28 against a 620 m deck — 22 samples through the slab,
+   * which is fine. Raise the deck to a thin high layer (420 m at 1500 m, the shape real
+   * fair-weather cumulus has) and the same 28 m ceiling now buys only 15 samples through
+   * it, most of them wasted on the jittered entry and exit. That is what the speckle on a
+   * high thin deck is: not noise to be filtered, but density that was never sampled.
+   *
+   * This caps the step at `thickness / slabSamples` as well, so the schedule adapts to the
+   * deck instead of to a number that was true once. It can only ever LOWER the step, so it
+   * cannot make anything coarser than it already was — and at the game's own 620 m deck
+   * 620/22 = 28.2 m, i.e. it is a no-op there by construction. Set 0 to disable.
+   *
+   * (This is the same problem the reference renderer solves with a per-step optical-depth
+   * cap. That is the better answer — it spends steps where the cloud actually is, not
+   * uniformly across the slab — and is the next thing to try if this is not enough.)
+   */
+  slabSamples: 22,
   /** Hard step-count budget (<= MAX_STEPS). */
   steps: 160,
   /** Empty-space steps are this multiple of the local step. */
@@ -290,6 +310,59 @@ export const CLOUD_DEFAULTS = {
    *  (raw march, visibly dithered), 0.9 = a ~10-frame running average. Neighbourhood
    *  clamping keeps this from ghosting. */
   historyBlend: 0.9,
+
+  // ── THE "SOLID" MODEL — a second density model and march, chosen at construction ──
+  /**
+   * "nubis" (the default, everything above) or "solid". Not switchable at runtime: the
+   * two models compile to different shaders and the volumes they need differ. See the
+   * SOLID block in createModularRoadClouds for what the model is and where it comes from.
+   * The game never sets this; the skypro lab does.
+   */
+  model: "nubis",
+  /** Extinction per metre INSIDE the solid (occupancy is ~binary, so this is the whole
+   *  density story: 0.048 makes a mass opaque within ~100 m). */
+  solidDensity: 0.048,
+  /** Shifts the whole top field: the cloud exists where `h < top + coverage - 1`, so 1 is
+   *  everything the weather map draws and 0.5 is roughly half the sky. */
+  solidCoverage: 0.5,
+  /** Added to the baked weather-map height, for live tuning without a re-bake. */
+  solidWeatherBias: 0.0,
+  /** Metres one wrap of the weather (cloud-top) map covers. */
+  solidWeatherScale: 40000,
+  /** Metres one wrap of the base-shape volume covers. */
+  solidBaseScale: 8000,
+  /** Erosion reads the SAME volume at this multiple of baseScale. */
+  solidErosionMul: 0.5,
+  solidBaseStrength: 1.0,
+  /** Erosion strength at the cloud base and at its top (blended by height inside the mass). */
+  solidErodeBase: 1.0,
+  solidErodePeak: 1.0,
+  /** Half-width of the soft edge, in shell-height units; shrinks with altitude by `falloff^km`. */
+  solidEdgeSoft: 0.05,
+  solidEdgeFalloff: 1.0,
+  /** Base march step, metres. The step inside cloud is set by solidMaxOD, not by this.
+   *  (The reference's class default is 150; its shipped quality presets go down to 25.
+   *  50 is what the skypro lab preset uses — see DECKS.skypro there for the tuning.) */
+  solidStep: 50,
+  /** Radians of step growth per metre of distance (a cone), so the far field stays bounded. */
+  solidConeAngle: 0.003,
+  /** Optical depth one step may integrate; inside a mass the step shrinks to honour it. */
+  solidMaxOD: 0.5,
+  /** First light-march segment, metres. The six taps grow 1.5x each, so the cone reaches
+   *  ~17x this toward the sun. NOT 400 (the reference's class default): the origin's own
+   *  segment is assumed full of cloud, so at 400 it is optical depth 19 by itself and no
+   *  lit surface ever receives sun — the deck goes uniformly grey. Measured. */
+  solidLightStep: 30,
+  /** Off-axis spread of the light taps, as a fraction of their distance. */
+  solidLightSpread: 0.05,
+  /** Once a ray has accumulated this much alpha, the light march drops erosion (cheaper). */
+  solidFullLightAlpha: 0.3,
+  solidAlbedo: 0.9,
+  /** Dual-lobe HG eccentricities (forward, back), scaled 1 / 0.5 / 0.25 per scatter octave. */
+  solidPhaseFwd: 0.8,
+  solidPhaseBack: 0.2,
+  /** Ground bounce albedo lighting the undersides (scaled by sun elevation). */
+  solidGroundBounce: 0.18,
 };
 
 /**
@@ -343,6 +416,23 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   weatherTexture.wrapS = weatherTexture.wrapT = THREE.RepeatWrapping;
   weatherTexture.needsUpdate = true;
 
+  // The solid model's two textures — only allocated (and only baked) in that model.
+  const solidOn = P.model === "solid";
+  const solidBaseTexture = solidOn ? makeVolume(SOLID_BASE_SIZE) : null;
+  const solidWeatherTexture = solidOn
+    ? new THREE.DataTexture(
+      new Uint8Array(SOLID_WEATHER_SIZE * SOLID_WEATHER_SIZE * 4),
+      SOLID_WEATHER_SIZE, SOLID_WEATHER_SIZE, THREE.RGBAFormat,
+    )
+    : null;
+  if (solidWeatherTexture) {
+    solidWeatherTexture.minFilter = solidWeatherTexture.magFilter = THREE.LinearFilter;
+    solidWeatherTexture.wrapS = solidWeatherTexture.wrapT = THREE.RepeatWrapping;
+    solidWeatherTexture.needsUpdate = true;
+  }
+  const solidBaseTex = solidOn ? texture3D(solidBaseTexture, null, 0) : null;
+  const solidWeatherTex = solidOn ? texture(solidWeatherTexture) : null;
+
   const baseTex = texture3D(baseTexture, null, 0);
   const detailTex = texture3D(detailTexture, null, 0);
   const nearTex = texture3D(nearTexture, null, 0);
@@ -368,13 +458,17 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   function startBake() {
     if (_bakeStarted) return readyPromise;
     _bakeStarted = true;
-    bakeInWorker(seed, (w) => { _worker = w; })
+    bakeInWorker(seed, (w) => { _worker = w; }, solidOn)
       .then((res) => {
         // Copy INTO the existing buffers — never reassign `.image`. See makeVolume().
         refill(baseTexture, res.base);
         refill(detailTexture, res.detail);
         refill(nearTexture, res.near);
         refill(weatherTexture, res.weather);
+        if (solidOn && res.solidBase) {
+          refill(solidBaseTexture, res.solidBase);
+          refill(solidWeatherTexture, res.solidWeather);
+        }
         _bakeMs = res.ms;
         _ready = true;
         _worker = null;
@@ -987,8 +1081,299 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     return vec4(scattered, alpha);
   });
 
+  /*
+   * ══════════════════════════════════════════════════════════════════════════════════
+   * THE "SOLID" MODEL (`params.model === "solid"`) — a cloud is a SOLID, not a density.
+   *
+   * Written 2026-09-05 for the skypro lab, after reading how the reference renderer
+   * (threejsskypro.com) actually builds its clouds. The chunky, crisp cumulus it shows is
+   * not a better noise or a longer march of the Nubis field above; it is a different
+   * model of what a cloud IS, and every part of the look follows from that:
+   *
+   *   • OCCUPANCY, NOT DENSITY. A 2D weather map is the cloud-TOP HEIGHT in shell units
+   *     (a wide-range Perlin FBM, not a coverage mask). A 3D Worley-FBM adds a per-point
+   *     bump to that top. The cloud occupies every height below `top` and above the
+   *     shell base, with a soft edge only `edgeSoft` wide — inside it is 1, outside 0.
+   *     Extinction is then one constant (`solidDensity`), so a mass is opaque within
+   *     ~100 m and edges are sharp by construction. No coverage threshold sweeping a
+   *     soft field, which is where the Nubis model's "airbrushed" fringes come from.
+   *   • EROSION CARVES BOTH SURFACES. The same volume read at half scale lowers the top
+   *     AND lifts the base by the same amount — cauliflower on top, ragged undersides.
+   *   • THE MARCH RESOLVES THE SURFACE. Coarse steps (4x base) test the UNERODED bound;
+   *     on a hit the ray steps back one coarse stride and goes fine. Inside cloud the
+   *     step is set by a per-step OPTICAL DEPTH cap: with σ = 0.048/m and a cap of 0.5
+   *     that is ~10 m, floored at 15% of the base step (22 m), which is why the edge is
+   *     crisp; once the ray has accumulated optical depth 1..3 the step opens to 3x base
+   *     because nothing behind it is visible anyway. The step also grows with distance
+   *     as a cone (`coneAngle` rad/m). Four empty fine steps return the ray to coarse.
+   *   • THE LIGHT MARCH IS LONG. Six taps at 1.5x-growing distances reach ~17x the
+   *     first segment (6.8 km at 400 m), fanned off-axis by `lightSpread` on a golden-
+   *     angle spiral, so one mass shadows the next and the undersides of a whole deck
+   *     go blue-grey. The Nubis path's cone stops at a few hundred metres.
+   *   • MULTI-OCTAVE SCATTER, Wrenninge-style, with FIXED octave weights: e^-τ·ph0 +
+   *     0.5·e^-τ/2·ph1 + 0.25·e^-τ/4·ph2, phases a 50/50 dual-lobe HG at (0.8, -0.2)
+   *     with eccentricity halved per octave. Plus powder `1 - e^-2d` and a sky ambient
+   *     that mixes zenith/horizon by √h with a ground bounce under the base.
+   *   • ENERGY-CONSERVING INTEGRATION (Frostbite): S = (L - L·T_step)/σ per step.
+   *
+   * Everything downstream (half-res buffer, temporal history, depth-aware upsample, god
+   * rays, ground shadows, the published `field`) is shared with the Nubis path. The
+   * model is a construction-time switch because the two need different volumes and
+   * compile to different shaders; the game never turns it on.
+   *
+   * This is our own implementation of that model from its description and its numbers.
+   * No code was taken from the reference.
+   * ══════════════════════════════════════════════════════════════════════════════════
+   */
+  const SOLID_LIGHT_TAPS = 6;
+  const uSDensity = uniform(P.solidDensity);
+  const uSCoverage = uniform(P.solidCoverage);
+  const uSWeatherBias = uniform(P.solidWeatherBias);
+  const uSWeatherScale = uniform(P.solidWeatherScale);
+  const uSBaseScale = uniform(P.solidBaseScale);
+  const uSErosionMul = uniform(P.solidErosionMul);
+  const uSBaseStrength = uniform(P.solidBaseStrength);
+  const uSErodeBase = uniform(P.solidErodeBase);
+  const uSErodePeak = uniform(P.solidErodePeak);
+  const uSEdgeSoft = uniform(P.solidEdgeSoft);
+  const uSEdgeFalloff = uniform(P.solidEdgeFalloff);
+  const uSStep = uniform(P.solidStep);
+  const uSConeAngle = uniform(P.solidConeAngle);
+  const uSMaxOD = uniform(P.solidMaxOD);
+  const uSLightStep = uniform(P.solidLightStep);
+  const uSLightSpread = uniform(P.solidLightSpread);
+  const uSFullLightAlpha = uniform(P.solidFullLightAlpha);
+  const uSAlbedo = uniform(P.solidAlbedo);
+  const uSPhaseFwd = uniform(P.solidPhaseFwd);
+  const uSPhaseBack = uniform(P.solidPhaseBack);
+  const uSGroundBounce = uniform(P.solidGroundBounce);
+
+  /** Shell height: 0 at the base, 1 at the top. Flat slab (curvature is <20 m at 14 km). */
+  const solidH = Fn(([p]) => p.y.sub(uBase).div(uThickness));
+  /** Cloud-top height from the weather map, in shell units. */
+  const solidTop = Fn(([p]) =>
+    solidWeatherTex.sample(p.xz.add(uWind.xz).div(uSWeatherScale)).r.add(uSWeatherBias));
+  /** Base-shape bump: the three Worley-FBM channels at falling weights. */
+  const solidBaseK = Fn(([p]) => {
+    const q = solidBaseTex.sample(p.add(uWind).div(uSBaseScale));
+    return q.r.mul(0.7).add(q.g.mul(0.41)).add(q.b.mul(0.23)).mul(uSBaseStrength);
+  });
+  /** Soft-edge half width at this height (in shell units), shrinking with altitude. */
+  const solidSoft = Fn(([h]) => {
+    const km = max(h, 0.0).mul(uThickness).mul(0.001);
+    return uSEdgeSoft.div(pow(uSEdgeFalloff.max(0.001), km)).max(1e-4);
+  });
+  /** The top surface a weather height and a bump make, after the coverage shift. */
+  const solidTopOf = Fn(([wr, k]) => wr.add(uSCoverage.sub(1.0)).add(k.mul(uSCoverage)));
+  /** Occupancy: below `top`, above `lift`, both with the soft edge. */
+  const solidOcc = Fn(([h, top, lift]) => {
+    const ie = solidSoft(h);
+    return smoothstep(ie.negate(), ie, top.sub(h)).mul(smoothstep(ie.negate(), ie, h.sub(lift)));
+  });
+  /** UNERODED occupancy — a conservative bound, used by the coarse search and the cheap
+   *  light march. One 2D + one 3D fetch. */
+  const solidConservative = Fn(([p]) => {
+    const h = solidH(p);
+    const out = float(0.0).toVar();
+    If(h.greaterThan(-0.5).and(h.lessThan(1.5)), () => {
+      out.assign(solidOcc(h, solidTopOf(solidTop(p), solidBaseK(p)), float(0.0)));
+    });
+    return out;
+  });
+  /** Eroded occupancy — what is drawn. One extra 3D fetch. */
+  const solidFull = Fn(([p]) => {
+    const h = solidH(p);
+    const out = float(0.0).toVar();
+    If(h.greaterThan(-0.5).and(h.lessThan(1.5)), () => {
+      const wr = solidTop(p);
+      const k = solidBaseK(p);
+      const top0 = solidTopOf(wr, k);
+      // Where inside the mass we are, for blending the base/peak erosion strengths.
+      const z = saturate(h.div(top0.max(0.001)));
+      const e = solidBaseTex.sample(p.add(uWind).div(uSBaseScale.mul(uSErosionMul))).oneMinus();
+      const eMag = e.r.mul(0.113).add(e.g.mul(0.04)).add(e.b.mul(0.02))
+        .mul(mix(uSErodeBase, uSErodePeak, z));
+      out.assign(solidOcc(h, solidTopOf(wr, k.sub(eMag)), eMag.mul(uSCoverage)));
+    });
+    return out;
+  });
+  /** Published field for the shadow map / env probe: occupancy in extinction per metre. */
+  const solidFieldDensity = Fn(([p]) => solidConservative(p).mul(uSDensity));
+  const solidFieldDensityW = Fn(([p, wm]) => solidConservative(p).mul(uSDensity).add(wm.x.mul(0.0)));
+
+  /** Optical depth toward the sun: the origin's own segment plus five spiral cone taps. */
+  const solidLightTau = Fn(([p, d0, cheap]) => {
+    const sd = uSunDir;
+    const seed = select(abs(sd.y).greaterThan(0.99), vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0));
+    const tan = normalize(cross(seed, sd));
+    const bit = cross(sd, tan);
+    const tau = d0.mul(uSLightStep).toVar();
+    for (let r = 1; r < SOLID_LIGHT_TAPS; r++) {
+      const o = Math.pow(1.5, r);
+      const c = (o - 1) / 0.5 + o * 0.5; // start of this segment + half its length
+      const ang = r * 2.399963;          // golden angle
+      const rad = Math.sqrt((r + 0.5) / SOLID_LIGHT_TAPS);
+      const dist = uSLightStep.mul(c);
+      const off = sd.mul(dist).add(
+        tan.mul(Math.cos(ang) * rad).add(bit.mul(Math.sin(ang) * rad)).mul(uSLightSpread).mul(dist),
+      );
+      const q = p.add(off);
+      const dq = float(0.0).toVar();
+      If(cheap.greaterThan(0.5), () => { dq.assign(solidConservative(q)); })
+        .Else(() => { dq.assign(solidFull(q)); });
+      tau.addAssign(dq.mul(uSLightStep.mul(o)));
+    }
+    return tau.mul(uSDensity);
+  });
+  /** 50/50 dual-lobe HG at (fwd, -back), eccentricities scaled by `k` per octave. */
+  const solidPhase = Fn(([mu, k]) =>
+    HG(uSPhaseFwd.mul(k), mu).mul(0.5).add(HG(uSPhaseBack.negate().mul(k), mu).mul(0.5)));
+  /** Sky ambient by height plus a ground bounce under the base. */
+  const solidAmbient = Fn(([h]) => {
+    const r = mix(uSkyZenith, uSkyHorizon, 0.35);
+    const o = mix(r, uSkyZenith, sqrt(saturate(h)));
+    // Ground radiance = albedo x sun irradiance / pi (sunIntensity is an irradiance in this
+    // model: it lands around 10 for the sun-to-sky ratio of a clear day).
+    const ground = uSunColor.mul(uSunIntensity).mul(saturate(uSunDir.y)).mul(uSGroundBounce)
+      .mul(1.0 / Math.PI).mul(saturate(h.oneMinus()));
+    return o.add(ground).mul(uAmbientIntensity);
+  });
+
+  const solidColorNode = Fn(() => {
+    const rayDir = normalize(positionWorld.sub(cameraPosition)).toVar();
+    const ro = cameraPosition;
+
+    // Slab entry / exit and the conservative scene-depth clamp: same as the Nubis path.
+    const sy = sign(rayDir.y).add(1e-6);
+    const ry = max(abs(rayDir.y), float(1e-5)).mul(sy);
+    const invY = float(1.0).div(ry);
+    const t1 = uBase.sub(ro.y).mul(invY);
+    const t2 = uBase.add(uThickness).sub(ro.y).mul(invY);
+    const tNear = min(t1, t2).max(0.0).toVar();
+    const tFar = max(t1, t2).min(uMaxDist).toVar();
+    const ft = uFullTexel;
+    const q0 = depthTex.sample(screenUV.add(vec2(ft.x.mul(-0.5), ft.y.mul(-0.5)))).r;
+    const q1 = depthTex.sample(screenUV.add(vec2(ft.x.mul(0.5), ft.y.mul(-0.5)))).r;
+    const q2 = depthTex.sample(screenUV.add(vec2(ft.x.mul(-0.5), ft.y.mul(0.5)))).r;
+    const q3 = depthTex.sample(screenUV.add(vec2(ft.x.mul(0.5), ft.y.mul(0.5)))).r;
+    const rawDepth = mix(
+      min(min(q0, q1), min(q2, q3)), max(max(q0, q1), max(q2, q3)), uReversed,
+    ).toVar();
+    const skyDepth = uReversed.oneMinus();
+    const hasGeo = abs(rawDepth.sub(skyDepth)).greaterThan(0.0001);
+    If(hasGeo, () => {
+      const c0 = cameraProjectionMatrix.mul(cameraViewMatrix.mul(vec4(ro, 1.0)));
+      const cd = cameraProjectionMatrix.mul(cameraViewMatrix.mul(vec4(rayDir, 0.0)));
+      const tHit = rawDepth.mul(c0.w).sub(c0.z).div(cd.z.sub(rawDepth.mul(cd.w)));
+      If(tHit.greaterThan(0.0), () => { tFar.assign(min(tFar, tHit)); });
+    });
+    const valid = tFar.greaterThan(tNear).and(tFar.greaterThan(0.0));
+
+    const mu = dot(rayDir, uSunDir);
+    const ph0 = solidPhase(mu, float(1.0));
+    const ph1 = solidPhase(mu, float(0.5));
+    const ph2 = solidPhase(mu, float(0.25));
+
+    const transmittance = vec3(1.0).toVar();
+    const scattered = vec3(0.0).toVar();
+    const distAcc = float(0.0).toVar();
+    const wAcc = float(0.0).toVar();
+
+    If(valid, () => {
+      const bn = blueTex.sample(screenCoordinate.xy.div(float(BLUE_NOISE_SIZE))).level(0.0).r;
+      const jit = fract(bn.add(uFrameJitter.mul(0.6180339887)));
+      const fineAt = (tt) => max(uSStep, uSConeAngle.mul(tt));
+      const t = tNear.add(jit.mul(fineAt(tNear))).toVar();
+      const stepSize = uSStep.mul(4.0).toVar();
+      const coarse = float(1.0).toVar();
+      const emptyRun = float(0.0).toVar();
+      const odAcc = float(0.0).toVar();
+
+      Loop(MAX_STEPS, ({ i }) => {
+        If(float(i).greaterThanEqual(uSteps), () => Break());
+        If(t.greaterThan(tFar), () => Break());
+        If(transmittance.r.lessThan(0.001), () => {
+          transmittance.assign(vec3(0.0));
+          Break();
+        });
+        const eff = fineAt(t).toVar();
+        const large = eff.mul(4.0);
+        const p = ro.add(rayDir.mul(t)).toVar();
+
+        If(coarse.greaterThan(0.5), () => {
+          // Coarse: test the uneroded bound first, the eroded shape only if it passes.
+          const hit = float(0.0).toVar();
+          If(solidConservative(p).greaterThan(0.0), () => { hit.assign(solidFull(p)); });
+          If(hit.greaterThan(0.0), () => {
+            // Step back one coarse stride so the surface is entered at the fine rate.
+            t.assign(t.sub(large).max(tNear));
+            coarse.assign(0.0);
+            emptyRun.assign(0.0);
+            stepSize.assign(eff);
+          }).Else(() => {
+            stepSize.assign(large);
+          });
+        }).Else(() => {
+          const d = solidFull(p).toVar();
+          If(d.greaterThan(0.0), () => {
+            emptyRun.assign(0.0);
+            const sigma = d.mul(uSDensity);
+            // Optical-depth-capped step, opening up once the ray is deep inside.
+            const zStep = clamp(uSMaxOD.div(sigma.max(1e-6)), eff.mul(0.15), eff);
+            const deep = smoothstep(1.0, 3.0, odAcc);
+            const step = mix(zStep, eff.mul(3.0), deep).toVar();
+            stepSize.assign(step);
+
+            const scat = sigma.mul(uSAlbedo);
+            const powder = mix(float(1.0), exp(d.mul(-2.0)).oneMinus(), uPowder);
+            const cheap = select(
+              transmittance.r.oneMinus().greaterThanEqual(uSFullLightAlpha), float(1.0), float(0.0),
+            );
+            const tau = solidLightTau(p, d, cheap);
+            const e = exp(tau.mul(-0.25));
+            const e2 = e.mul(e);
+            const e4 = e2.mul(e2);
+            const ms = e4.mul(ph0).add(e2.mul(0.5).mul(ph1)).add(e.mul(0.25).mul(ph2));
+            const sun = uSunColor.mul(uSunIntensity).mul(ms).mul(powder);
+            const lum = sun.add(solidAmbient(solidH(p))).mul(scat);
+
+            const stepT = exp(sigma.mul(step).negate());
+            const S = lum.sub(lum.mul(stepT)).div(sigma.max(1e-7));
+            scattered.addAssign(transmittance.mul(S));
+            const vis = transmittance.r.mul(stepT.oneMinus());
+            distAcc.addAssign(vis.mul(t));
+            wAcc.addAssign(vis);
+            transmittance.mulAssign(stepT);
+            odAcc.addAssign(sigma.mul(step));
+          }).Else(() => {
+            emptyRun.addAssign(1.0);
+            stepSize.assign(eff);
+            If(emptyRun.greaterThanEqual(4.0), () => {
+              coarse.assign(1.0);
+              stepSize.assign(large);
+            });
+          });
+        });
+        t.addAssign(stepSize);
+      });
+    });
+
+    const alpha = transmittance.r.oneMinus().mul(uFade);
+    scattered.mulAssign(uFade);
+    If(uAerialEnabled.greaterThan(0.5), () => {
+      const meanDist = distAcc.div(wAcc.max(1e-4));
+      const fog = saturate(
+        exp(meanDist.mul(uAerialDensity).negate()).oneMinus().mul(uAerialAmount),
+      );
+      const sunward = pow(saturate(mu.mul(0.5).add(0.5)), 3.0);
+      const hazeCol = mix(uAerialColor, uAerialColorSun, sunward);
+      scattered.assign(mix(scattered, hazeCol.mul(alpha), fog));
+    });
+    return vec4(scattered, alpha);
+  });
+
   const material = new THREE.MeshBasicNodeMaterial();
-  material.colorNode = cloudColorNode();
+  material.colorNode = solidOn ? solidColorNode() : cloudColorNode();
   material.side = THREE.BackSide;
   material.transparent = true;
   material.premultipliedAlpha = true; // `scattered` is already transmittance-weighted
@@ -1559,7 +1944,13 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
 
     uMinStep.value = P.minStep;
     uStepGrowth.value = P.stepGrowth;
-    uMaxStep.value = P.maxStep;
+    // The step ceiling is the TIGHTER of the metre cap and the slab-relative one, so a
+    // thin deck automatically gets enough samples across it. Floored at `minStep` so a
+    // pathologically thin slab cannot drive the step below the near-field rate (and cannot
+    // invert the clamp bounds in the shader).
+    uMaxStep.value = P.slabSamples > 0
+      ? Math.min(P.maxStep, Math.max(P.minStep, P.thickness / P.slabSamples))
+      : P.maxStep;
     uSteps.value = Math.min(P.steps, MAX_STEPS);
     uEmptyStepMul.value = P.emptyStepMul;
     uJitterMaxM.value = P.jitterMaxM;
@@ -1599,6 +1990,30 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     uCamFwd.value.copy(_camFwd);
     uSunIntensity.value = P.sunIntensity;
     uAmbientIntensity.value = P.ambientIntensity;
+
+    if (solidOn) {
+      uSDensity.value = P.solidDensity;
+      uSCoverage.value = P.solidCoverage;
+      uSWeatherBias.value = P.solidWeatherBias;
+      uSWeatherScale.value = P.solidWeatherScale;
+      uSBaseScale.value = P.solidBaseScale;
+      uSErosionMul.value = P.solidErosionMul;
+      uSBaseStrength.value = P.solidBaseStrength;
+      uSErodeBase.value = P.solidErodeBase;
+      uSErodePeak.value = P.solidErodePeak;
+      uSEdgeSoft.value = P.solidEdgeSoft;
+      uSEdgeFalloff.value = P.solidEdgeFalloff;
+      uSStep.value = P.solidStep;
+      uSConeAngle.value = P.solidConeAngle;
+      uSMaxOD.value = P.solidMaxOD;
+      uSLightStep.value = P.solidLightStep;
+      uSLightSpread.value = P.solidLightSpread;
+      uSFullLightAlpha.value = P.solidFullLightAlpha;
+      uSAlbedo.value = P.solidAlbedo;
+      uSPhaseFwd.value = P.solidPhaseFwd;
+      uSPhaseBack.value = P.solidPhaseBack;
+      uSGroundBounce.value = P.solidGroundBounce;
+    }
 
     uAerialEnabled.value = P.aerialEnabled ? 1 : 0;
     uAerialDensity.value = P.aerialDensity;
@@ -1796,6 +2211,8 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     detailTexture.dispose();
     nearTexture.dispose();
     weatherTexture.dispose();
+    solidBaseTexture?.dispose();
+    solidWeatherTexture?.dispose();
   }
 
   return {
@@ -1821,6 +2238,12 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
      */
     densityAt(x, y, z) {
       if (!_ready) return 0;
+      if (solidOn) {
+        return solidDensityAtCPU(
+          { solidBase: solidBaseTexture.image.data, solidWeather: solidWeatherTexture.image.data },
+          P, _windAccum, x, y, z, _cpuScratch,
+        );
+      }
       return densityAtCPU(
         { base: baseTexture.image.data, detail: detailTexture.image.data,
           weather: weatherTexture.image.data },
@@ -1835,13 +2258,40 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     get isReady() { return _ready; },
     get bakeMs() { return _bakeMs; },
     CLOUD_LAYER,
+    /**
+     * THE DENSITY FIELD AS TSL, for passes that are not the view march.
+     *
+     * A cloud shadow map and a sky-with-clouds environment probe both need to ask "how
+     * much cloud is along this ray" from their own shaders. The alternative — each of them
+     * re-deriving the recipe — is the failure mode that guarantees drift: the moment the
+     * erosion or the coverage threshold changes here, the shadows stop matching the clouds
+     * that cast them, and nothing errors. So the recipe is published rather than copied,
+     * and there is exactly one place that decides what a cloud is.
+     *
+     * `sampleDensityCheap` (base shape, no erosion octaves) is the right sample for both
+     * consumers: it is what the light march already uses, and neither a 512-texel shadow
+     * map nor a 128-texel probe can resolve detail frequencies anyway.
+     *
+     * The uniforms come with it because a consumer that hard-codes the slab bounds is the
+     * same drift bug wearing a different hat.
+     */
+    field: {
+      // In the solid model every consumer gets the solid occupancy (in extinction/m), so
+      // the shadow map and the environment probe follow the same clouds as the view.
+      sampleDensity: solidOn ? solidFieldDensity : sampleDensity,
+      sampleDensityCheap: solidOn ? solidFieldDensity : sampleDensityCheap,
+      sampleDensityCheapW: solidOn ? solidFieldDensityW : sampleDensityCheapW,
+      sampleWeather,
+      uBase, uThickness, uDensityMul, uWind, uSunDir, uSunColor,
+      uSkyZenith, uSkyHorizon, uLightAbsorb, uMaxDist, uFade,
+    },
     /** Internal buffers — exposed for the lab's pixel probes, not for game code. */
     _debug: { sceneRT, cloudRT, material, compositeMat },
   };
 }
 
 /** Spawn the bake worker and resolve with the four buffers. */
-function bakeInWorker(seed, onSpawn) {
+function bakeInWorker(seed, onSpawn, solid = false) {
   return new Promise((resolve, reject) => {
     let worker;
     try {
@@ -1864,6 +2314,6 @@ function bakeInWorker(seed, onSpawn) {
       worker.terminate();
       reject(new Error(e.message || "worker error"));
     };
-    worker.postMessage({ seed });
+    worker.postMessage({ seed, solid });
   });
 }

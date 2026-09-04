@@ -523,12 +523,115 @@ export function densityAtCPU(vols, P, wind, x, y, z, scratch = { b: [0, 0, 0, 0]
   return shaped * P.densityMul * denScale;
 }
 
-/** Bake everything. Slow (~3 s) — call it from the worker, not the main thread. */
-export function bakeAll(seed = 137) {
-  return {
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * THE "SOLID" MODEL'S NOISE — for modularRoadClouds' `model: "solid"` path.
+ *
+ * A different recipe from the Nubis bakes above, on purpose: that model does not sample
+ * a soft density, it builds a SOLID with a height-field top and an eroded base, so its
+ * volume is three Worley-FBM sets at octave-spaced frequencies (one per channel) and its
+ * weather map is a wide-range Perlin FBM that IS the cloud-top height, not a coverage
+ * mask. Both are written from the model's description in modularRoadClouds.js; see the
+ * SOLID block there for how the channels are combined.
+ *
+ * Sizes: 64³ over 8 km is a 125 m voxel, and the erosion lookup reads the same volume
+ * at half that scale. No mip chain: at that voxel size the pixel footprint does not
+ * reach one voxel inside 100 km, so a mip would never be selected anyway.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+export const SOLID_BASE_SIZE = 64;
+export const SOLID_WEATHER_SIZE = 512;
+/** Weather-map profile: main mass and detail FBM plus the baked coverage bias. */
+export const SOLID_WEATHER_PROFILE = {
+  mainFreq: 5, mainOctaves: 6, mainAmp: 3.0,
+  detailFreq: 7, detailOctaves: 6, detailStrength: 0.5,
+  coverage: 0.55,
+};
+
+/** RGBA: three inverted-Worley FBMs at cells (4,8,16), (8,16,32), (16,32,64). */
+export function bakeSolidBaseVolume(seed = 137, S = SOLID_BASE_SIZE) {
+  const rng = seededRandom(seed >>> 0);
+  const w = [4, 8, 16, 32, 64].map((f) => makeWorley(f, rng));
+  const out = new Uint8Array(S * S * S * 4);
+  let i = 0;
+  for (let z = 0; z < S; z++) {
+    const nz = z / S;
+    for (let y = 0; y < S; y++) {
+      const ny = y / S;
+      for (let x = 0; x < S; x++) {
+        const nx = x / S;
+        const v0 = w[0](nx, ny, nz), v1 = w[1](nx, ny, nz), v2 = w[2](nx, ny, nz);
+        const v3 = w[3](nx, ny, nz), v4 = w[4](nx, ny, nz);
+        out[i++] = worleyFbm(v0, v1, v2) * 255;
+        out[i++] = worleyFbm(v1, v2, v3) * 255;
+        out[i++] = worleyFbm(v2, v3, v4) * 255;
+        out[i++] = 255;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * R = cloud-top height in shell units: main FBM stretched by `mainAmp` about 0.5 (so the
+ * field spans the whole 0..1 range instead of a narrow mid band), plus a signed detail
+ * FBM, plus the baked coverage bias. Tileable, like everything else here.
+ */
+export function bakeSolidWeatherMap(seed = 2029, S = SOLID_WEATHER_SIZE, prof = SOLID_WEATHER_PROFILE) {
+  const pA = makePeriodicPerlin(seededRandom(seed >>> 0));
+  const pB = makePeriodicPerlin(seededRandom((seed ^ 0x9e3779b9) >>> 0));
+  const out = new Uint8Array(S * S * 4);
+  let i = 0;
+  for (let y = 0; y < S; y++) {
+    const ny = y / S;
+    for (let x = 0; x < S; x++) {
+      const nx = x / S;
+      const m = perlinFbm(pA, nx, ny, 0.37, prof.mainFreq, prof.mainOctaves);
+      const d = perlinFbm(pB, nx, ny, 0.71, prof.detailFreq, prof.detailOctaves);
+      const main = _clamp01((m - 0.5) * prof.mainAmp + 0.5);
+      const det = (d * 2 - 1) * prof.detailStrength;
+      const v = _clamp01(main + det + prof.coverage - 0.5) * 255;
+      out[i++] = v; out[i++] = v; out[i++] = v; out[i++] = 255;
+    }
+  }
+  return out;
+}
+
+/** CPU twin of the solid model's CONSERVATIVE occupancy (no erosion), in extinction/m. */
+export function solidDensityAtCPU(vols, P, wind, x, y, z, scratch = { b: [0, 0, 0, 0], w: [0, 0, 0, 0] }) {
+  const h = (y - P.base) / P.thickness;
+  if (h <= -0.5 || h >= 1.5) return 0;
+  const w = sampleMap2D(
+    vols.solidWeather, SOLID_WEATHER_SIZE,
+    (x + wind.x) / P.solidWeatherScale, (z + wind.z) / P.solidWeatherScale, scratch.w,
+  );
+  const b = sampleVolume3D(
+    vols.solidBase, SOLID_BASE_SIZE,
+    (x + wind.x) / P.solidBaseScale, (y + wind.y) / P.solidBaseScale, (z + wind.z) / P.solidBaseScale,
+    scratch.b,
+  );
+  const k = (b[0] * 0.7 + b[1] * 0.41 + b[2] * 0.23) * P.solidBaseStrength;
+  const top = w[0] + P.solidWeatherBias + (P.solidCoverage - 1) + k * P.solidCoverage;
+  const km = Math.max(h, 0) * P.thickness * 0.001;
+  const ie = Math.max(1e-4, P.solidEdgeSoft / Math.pow(Math.max(P.solidEdgeFalloff, 0.001), km));
+  return _smoothstep(-ie, ie, top - h) * _smoothstep(-ie, ie, h) * P.solidDensity;
+}
+
+/**
+ * Bake everything. Slow (~3 s) — call it from the worker, not the main thread.
+ * `opts.solid` adds the solid model's two textures (~1 s more); off by default so the
+ * game's boot bake is unchanged.
+ */
+export function bakeAll(seed = 137, opts = {}) {
+  const out = {
     base: bakeBaseVolume(seed),
     detail: bakeDetailVolume(seed ^ 0x5f3a),
     near: bakeNearVolume(seed ^ 0x1d7b),
     weather: bakeWeatherMap(seed ^ 0x77e1),
   };
+  if (opts.solid) {
+    out.solidBase = bakeSolidBaseVolume(seed ^ 0x2c1f);
+    out.solidWeather = bakeSolidWeatherMap(seed ^ 0x6b91);
+  }
+  return out;
 }

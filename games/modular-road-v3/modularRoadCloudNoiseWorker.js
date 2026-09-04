@@ -12,14 +12,13 @@
 import { bakeAll } from "./modularRoadCloudNoise.js";
 
 self.onmessage = (e) => {
-  const { seed = 137, jobId = 0 } = e.data ?? {};
+  const { seed = 137, jobId = 0, solid = false } = e.data ?? {};
   const t0 = performance.now();
   try {
-    const v = bakeAll(seed);
-    self.postMessage(
-      { ok: true, jobId, ms: performance.now() - t0, ...v },
-      [v.base.buffer, v.detail.buffer, v.near.buffer, v.weather.buffer],
-    );
+    const v = bakeAll(seed, { solid });
+    const transfer = [v.base.buffer, v.detail.buffer, v.near.buffer, v.weather.buffer];
+    if (v.solidBase) transfer.push(v.solidBase.buffer, v.solidWeather.buffer);
+    self.postMessage({ ok: true, jobId, ms: performance.now() - t0, ...v }, transfer);
   } catch (err) {
     self.postMessage({ ok: false, jobId, error: String(err?.stack ?? err) });
   }

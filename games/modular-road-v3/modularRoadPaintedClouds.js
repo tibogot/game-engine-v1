@@ -35,7 +35,7 @@
 import * as THREE from "three/webgpu";
 import {
   float, vec2, vec3, vec4, Fn, If, Loop, Break, uniform, texture, uv,
-  normalize, dot, length, max, min, mix, smoothstep, pow, exp, abs, sqrt, saturate, log2, fract,
+  normalize, dot, length, max, min, mix, smoothstep, pow, exp, abs, sqrt, saturate, log2, fract, select,
   screenCoordinate, interleavedGradientNoise, screenSize, cameraProjectionMatrix,
 } from "three/tsl";
 import {
@@ -127,10 +127,30 @@ export const PAINTED_CLOUD_DEFAULTS = {
   /**
    * Strength of the SHORT-range sun occlusion sampled per march step, as a multiplier on
    * absorb. This is what darkens a lobe's own shaded flank and lets neighbouring lobes
-   * shadow each other; the per-ray mid-plane tap keeps the long range. 0 disables the
-   * extra fetch entirely and restores the single per-ray shadow.
+   * shadow each other; the per-ray mid-plane taps keep the long range. 0 removes its
+   * effect (the tap itself is one fetch per step and stays; it measured as free).
+   * 0.7 read as a grey deck — the whole body dimmed, not just the flanks — so it sits
+   * lower and the flank term carries the modelling instead.
    */
-  selfShadow: 0.55,
+  selfShadow: 0.45,
+  /** Metres the per-step occlusion tap reaches toward the sun. About a lobe: shorter
+   *  and it only darkens the pixel's own surface, longer and it becomes the long-range
+   *  shadow the mid-plane taps already provide. */
+  selfReach: 160,
+  /**
+   * How much the column top's NORMAL drives the key light, 0..1. At 0 the deck is lit by
+   * height alone (tops bright, bases dark, every flank the same); at 1 a flank turned
+   * away from the sun goes fully to the wrapped-lambert floor. This is what turns a
+   * flat white mass into lobes with a lit side and a shaded side.
+   */
+  flank: 0.75,
+  /**
+   * Gain on the eroded density before extinction. 1 is the raw remap, which rises
+   * linearly from the bite and so leaves a wide translucent fringe on every edge — the
+   * "soft airbrushed" look. Above 1 the fringe collapses toward the silhouette and the
+   * cauliflower reads crisp; too high and edges alias against the step length.
+   */
+  edgeHard: 2.4,
   /**
    * Offset on the analytic mip level the march samples at. 0 is the exact footprint;
    * positive is softer (and cheaper to fetch), negative sharper and more speckled.
@@ -168,7 +188,7 @@ export const PAINTED_CLOUD_DEFAULTS = {
   /** Key-light gain. Droplet albedo is ~0.9 and a sunlit top is far brighter than the
    *  sky beside it; at 1.0 the deck comes out beige because it can never exceed the sun
    *  colour lighting it. */
-  sunStrength: 2.1,
+  sunStrength: 2.5,
   /**
    * Multiple-scattering floor: the fraction of key light that survives where the
    * horizontal shadow has killed the direct term.
@@ -178,7 +198,7 @@ export const PAINTED_CLOUD_DEFAULTS = {
    * shadowed cores go a dull flat grey, which is the single most common way rendered
    * clouds look like smoke. The volumetric deck has the same term for the same reason.
    */
-  msFloor: 0.18,
+  msFloor: 0.25,
   /** Sky ambient reaching the shaded side. 0 = black undersides. */
   ambient: 0.55,
   /** Silver lining on thin cloud when looking toward the sun. */
@@ -413,6 +433,9 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uEdgeTaper = uniform(P.edgeTaper);
   const uBaseVary = uniform(P.baseVary);
   const uSelfShadow = uniform(P.selfShadow);
+  const uSelfReach = uniform(P.selfReach);
+  const uFlank = uniform(P.flank);
+  const uEdgeHard = uniform(P.edgeHard);
   const uLodBias = uniform(P.lodBias);
   /** Diagnostic split view of the deck's terms; see debugView. */
   const uDebug = uniform(P.debugView ?? 0);
@@ -462,7 +485,10 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
    * clamp, and the sky goes black wherever there is no cloud. The volumetric deck lost a
    * day to exactly this.
    */
-  const remapUnit = Fn(([v, lo]) => saturate(v.sub(lo).div(float(1.0).sub(lo).max(1e-4))));
+  // `v` is clamped to 1 first: the lumped mass can exceed 1, and at coverage 0 (lo = 1)
+  // that excess over the guarded divisor blew up to full density — stepped ghost
+  // columns standing in an otherwise clear sky.
+  const remapUnit = Fn(([v, lo]) => saturate(min(v, 1.0).sub(lo).div(float(1.0).sub(lo).max(1e-4))));
 
   /*
    * REGIONAL CHARACTER — how big the clouds are HERE, not just how many.
@@ -857,7 +883,8 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         sX.addAssign(fX.sub(fine).mul(bumpK));
         sZ.addAssign(fZ.sub(fine).mul(bumpK));
         const nTop = normalize(vec3(sX.negate(), 1.0, sZ.negate()));
-        const ndl = saturate(dot(nTop, sunDir).mul(0.6).add(0.4));
+        // Wrapped lambert on the column-top normal; `flank` says how much of it counts.
+        const ndl = saturate(dot(nTop, sunDir).mul(0.5).add(0.5));
 
         /*
          * ══════════════════════════════════════════════════════════════════════════
@@ -873,18 +900,40 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
          * is the old one. Neighbouring pixels start from continuous points and
          * integrate near-identical chords, and the clouds are clouds again.
          *
-         * Eight sub-steps from the entry, capped in metres: at this density the core
-         * is opaque within the first hundred metres or so, and a chord longer than the
-         * deck is thick adds nothing.
+         * WHY THE CHORD CANNOT BE CAPPED IN METRES — the hollow clouds. The search
+         * finds where the ray enters the UNERODED column bound, and that bound is far
+         * larger than the eroded cloud inside it: at the rim the erosion octaves eat
+         * most of the column, so the first hundreds of metres past the entry are clear
+         * air. Eight fixed sub-steps capped at 1.6 search steps (~85 m at the zenith,
+         * ~190 m at grazing angles) ran out inside that clear air, and the pixel came
+         * back nearly transparent although solid cloud lay a little further along the
+         * same ray. That printed as a thin bright rim around a see-through body — cores
+         * you could see the sky through — and it was worst exactly where the taper and
+         * the erosion are strongest. The debug view shows the mechanism plainly: alpha
+         * is a small white core inside a wide black halo of "hit, integrated nothing".
+         * Fewer search steps (a longer chord) or a higher density both filled the
+         * clouds in, which is how the cause was pinned before anything was changed.
+         *
+         * So the march runs until it is DONE, not for a fixed distance: it stops when
+         * the ray is opaque, when it leaves the top of the slab, or at the step budget.
+         * The stride is half a search step on contact and lengthens through clear air
+         * (up to three search steps), so the budget is spent cheaply where there is
+         * nothing and the dense part is still integrated at twice the search
+         * resolution. Neighbouring pixels still start from continuous entries and take
+         * the same stride decisions, so nothing grains.
          * ══════════════════════════════════════════════════════════════════════════
          */
-        const SUB = 8;
-        const ds = min(dt.mul(1.6), uThickness.mul(1.4)).div(SUB);
-        const lodSubK = log2(ds.mul(uStepLod).mul(float(PAINTED_MAP_SIZE)).div(uTile).max(1e-4));
+        const SUB = 16;
+        const ds0 = dt.mul(0.5).toVar();
+        const lodSubK = log2(ds0.mul(uStepLod).mul(float(PAINTED_MAP_SIZE)).div(uTile).max(1e-4));
         const transmittance = float(1.0).toVar();
         const scattered = vec3(0.0).toVar();
-        const ts = hitT.add(ds.mul(0.5)).toVar();
+        const ds = ds0.toVar();
+        const ts = hitT.add(ds0.mul(0.5)).toVar();
         Loop(SUB, () => {
+          // Opaque, or out through the top of the slab (the tallest cell reaches ~1.2
+          // once baseVary and the regional height scale are in): nothing left to add.
+          If(transmittance.lessThan(0.02).or(hAt(ts).greaterThan(1.25)), () => Break());
           const uv = uvAt(ts);
           // The density is integrated at the SUB-step, so its mip floor comes from ds, not
           // from the search step; and the erosion octaves are clamped off the tiny mips,
@@ -911,12 +960,31 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
             .add(mapTex.sample(fUv2).level(lod.add(3.278).min(4.0)).b.mul(0.38));
           const biteRaw = billow.mul(uErode).mul(mix(float(0.6), float(1.25), saturate(hL)));
           const bite = biteRaw.mul(mix(float(0.35), float(1.0), shaped.oneMinus()));
-          const dens = remapUnit(shaped, bite).mul(uDensityMul);
+          const dens = saturate(remapUnit(shaped, bite).mul(uEdgeHard)).mul(uDensityMul);
+
+          /*
+           * SHORT-RANGE SUN OCCLUSION, one tap per step: the uneroded shaped density a
+           * lobe's length toward the sun, at the height the sun ray reaches there. This
+           * is what darkens a lobe's own shaded side and lets neighbouring lobes shadow
+           * each other; the per-ray mid-plane taps only carry the long range, and with
+           * nothing local every mass came out one flat white. Lifted by the same
+           * multiple-scattering floor as the long shadow, for the same reason.
+           */
+          const sS = mapTex.sample(uv.add(vec2(sunDir.x, sunDir.z).mul(uSelfReach).div(uTile))).level(lod);
+          const hS = hAt(ts).add(sunDir.y.mul(uSelfReach).div(uThickness)).sub(sS.a.sub(0.5).mul(uBaseVary));
+          const massS = sS.r.add(sS.b.sub(0.5).mul(uLump));
+          const planS = remapUnit(massS, reg.x.oneMinus());
+          const topS = mix(uTopMin, float(1.0), sS.g).mul(mix(uEdgeTaper, float(1.0), planS)).mul(reg.y);
+          const hLS = hS.div(topS.max(0.05));
+          const profS = smoothstep(0.0, 0.06, hLS).mul(smoothstep(1.0, 0.55, hLS));
+          const shapedS = remapUnit(massS.mul(profS), reg.x.oneMinus());
+          const occ = exp(shapedS.mul(uSelfShadow).mul(-3.0));
+          const occLifted = occ.add(uMsFloor.mul(occ.oneMinus()));
 
           // Vertical light gradient: tops catch the sun, bases sit in their own shadow;
-          // the surface normal folds in at part weight for the flank modelling.
+          // the surface normal folds in at `flank` weight for the lobe modelling.
           const vertG = mix(uBaseDark, float(1.0), saturate(hL));
-          const sunTerm = shadeLifted.mul(vertG).mul(float(0.6).add(ndl.mul(0.4)));
+          const sunTerm = shadeLifted.mul(occLifted).mul(vertG).mul(mix(float(1.0), ndl, uFlank));
           const lit = keyCol.mul(uSunStrength).mul(sunTerm.add(rim.mul(vertG)));
           const amb = ambCol.mul(uAmbient).mul(mix(float(0.55), float(1.0), saturate(hL)));
           const lum = lit.add(amb);
@@ -924,6 +992,9 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
           scattered.addAssign(transmittance.mul(lum).mul(stepT.oneMinus()));
           transmittance.mulAssign(stepT);
           ts.addAssign(ds);
+          // Empty-space skipping: lengthen the stride through clear air, and snap back
+          // to the fine stride the moment there is density to resolve.
+          ds.assign(select(dens.greaterThan(1e-6), ds0, min(ds.mul(1.6), ds0.mul(6.0))));
         });
 
         const alpha = transmittance.oneMinus().mul(hMask).toVar();
@@ -1370,6 +1441,9 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uEdgeTaper.value = P.edgeTaper;
     uBaseVary.value = P.baseVary;
     uSelfShadow.value = P.selfShadow;
+    uSelfReach.value = P.selfReach;
+    uFlank.value = P.flank;
+    uEdgeHard.value = P.edgeHard;
     uLodBias.value = P.lodBias;
     uDebug.value = P.debugView ?? 0;
     uStepLod.value = P.stepLod;
@@ -1458,7 +1532,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
 
     const mass = sampleMap(u, v, 0);
     const billow = sampleMap(u, v, 2);
-    const massL = mass + (billow - 0.5) * P.lumpiness;
+    const massL = Math.min(1, mass + (billow - 0.5) * P.lumpiness);
     const lo = 1 - cov;
     const shaped = Math.min(1, Math.max(0, (massL - lo) / Math.max(1e-4, 1 - lo)));
 

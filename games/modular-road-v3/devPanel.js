@@ -2272,6 +2272,34 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Flank shading</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-flank" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-pc-flank-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lobe self-shadow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-selfsh" min="0" max="1.5" step="0.05" />
+              <span class="prop-num" id="dv-pc-selfsh-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Self-shadow reach</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-selfreach" min="40" max="500" step="10" />
+              <span class="prop-num" id="dv-pc-selfreach-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Edge hardness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-edgehard" min="0.5" max="4" step="0.1" />
+              <span class="prop-num" id="dv-pc-edgehard-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Shadow depth</span>
             <div class="prop-value">
               <input type="range" id="dv-pc-absorb" min="0" max="6" step="0.1" />
@@ -4955,6 +4983,10 @@ export function createRoadDevPanel({ app, game, params }) {
   pslider("dv-pc-sun", "sunStrength", (v) => v.toFixed(2));
   pslider("dv-pc-amb", "ambient", (v) => v.toFixed(2));
   pslider("dv-pc-basedark", "baseDark", (v) => v.toFixed(2));
+  pslider("dv-pc-flank", "flank", (v) => (v < 0.005 ? "0.00 (height only)" : v.toFixed(2)));
+  pslider("dv-pc-selfsh", "selfShadow", (v) => (v < 0.005 ? "0.00 (off)" : v.toFixed(2)));
+  pslider("dv-pc-selfreach", "selfReach", (v) => v.toFixed(0) + " m");
+  pslider("dv-pc-edgehard", "edgeHard", (v) => (Math.abs(v - 1) < 0.01 ? "1.0 (raw)" : v.toFixed(1)));
   pslider("dv-pc-absorb", "absorb", (v) => v.toFixed(1));
   pslider("dv-pc-silver", "silver", (v) => v.toFixed(2));
   pslider("dv-pc-aerial", "aerial", (v) => v.toFixed(2));
