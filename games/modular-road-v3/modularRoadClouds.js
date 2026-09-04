@@ -55,11 +55,11 @@ import {
   positionWorld, cameraPosition, screenUV, screenCoordinate,
   cameraViewMatrix, cameraProjectionMatrix,
   normalize, dot, max, min, mix, smoothstep, pow, exp, abs, sign, clamp, sin, cos, floor,
-  length, saturate, interleavedGradientNoise,
+  length, saturate, fract,
 } from "three/tsl";
 import {
   BASE_TILE_M, DETAIL_TILE_M, NEAR_TILE_M, WEATHER_TILE_M,
-  BASE_SIZE, DETAIL_SIZE, NEAR_SIZE, WEATHER_SIZE,
+  BASE_SIZE, DETAIL_SIZE, NEAR_SIZE, WEATHER_SIZE, BLUE_NOISE_SIZE, bakeBlueNoise,
   densityAtCPU,
 } from "./modularRoadCloudNoise.js";
 
@@ -138,6 +138,14 @@ export const CLOUD_DEFAULTS = {
   /** Shortest cloud, as a fraction of `thickness`. The spread between this and 1.0 IS the
    *  towering-vs-flat look: at 1.0 every cloud fills the slab and you get a sheet. */
   cloudTopMin: 0.18,
+  /**
+   * Height at a cloud's OUTLINE as a fraction of its height at the core — the taper that
+   * follows the coverage THRESHOLD rather than the raw field (see sampleWeather). 1.0
+   * restores the previous behaviour, where turning coverage down left small clouds
+   * standing at mid-range heights. Less aggressive than the painted deck's 0.12 because
+   * the weather bake already carries 60% of this correlation.
+   */
+  edgeTaper: 0.35,
   /** Shifts every cell's top up or down. -0.5 = all shallow, +0.5 = all full height. */
   cloudTopBias: 0.0,
   /** Metres over which density ramps up from the camera. Keeps a readable bubble around
@@ -318,6 +326,16 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const baseTexture = makeVolume(BASE_SIZE);
   const detailTexture = makeVolume(DETAIL_SIZE);
   const nearTexture = makeVolume(NEAR_SIZE);
+  const blueNoiseTexture = new THREE.DataTexture(
+    bakeBlueNoise(), BLUE_NOISE_SIZE, BLUE_NOISE_SIZE, THREE.RGBAFormat,
+  );
+  blueNoiseTexture.wrapS = blueNoiseTexture.wrapT = THREE.RepeatWrapping;
+  // NEAREST: a per-pixel lookup table, not an image. Bilinear would average neighbours
+  // and hand back exactly the low frequencies the bake removed.
+  blueNoiseTexture.minFilter = blueNoiseTexture.magFilter = THREE.NearestFilter;
+  blueNoiseTexture.generateMipmaps = false;
+  blueNoiseTexture.needsUpdate = true;
+
   const weatherTexture = new THREE.DataTexture(
     new Uint8Array(WEATHER_SIZE * WEATHER_SIZE * 4), WEATHER_SIZE, WEATHER_SIZE, THREE.RGBAFormat,
   );
@@ -329,6 +347,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const detailTex = texture3D(detailTexture, null, 0);
   const nearTex = texture3D(nearTexture, null, 0);
   const weatherTex = texture(weatherTexture);
+  const blueTex = texture(blueNoiseTexture);
 
   let _ready = false;
   let _bakeMs = 0;
@@ -394,6 +413,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const uDetailRange = uniform(P.detailRange);
   const uTypeBias = uniform(P.typeBias);
   const uCloudTopMin = uniform(P.cloudTopMin);
+  const uEdgeTaper = uniform(P.edgeTaper);
   const uCloudTopBias = uniform(P.cloudTopBias);
   const uClearRadius = uniform(P.clearRadius);
   const uClearFloor = uniform(P.clearFloor);
@@ -576,9 +596,28 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     const bar = uCoverageSoft.add(1.0).sub(uCoverage.mul(uCoverageSoft.mul(2.0).add(1.0)));
     const cov = smoothstep(bar.sub(uCoverageSoft), bar.add(uCoverageSoft), covRaw);
     const type = saturate(w.g.sub(0.5).add(uTypeBias));
-    // How much of the slab this cell's cloud fills. Floored, or a cell would have no
-    // cloud at all rather than a shallow one.
-    const top = mix(uCloudTopMin, float(1.0), saturate(w.a.add(uCloudTopBias)));
+    /*
+     * HOW TALL THIS CELL'S CLOUD IS — and the taper the bake alone cannot do.
+     *
+     * The weather bake already correlates the top field with coverage (see
+     * bakeWeatherMap: `0.4*topN + 0.6*covS`), for the right reason — cumulus tower where
+     * the mass is fattest, and an independent top field extrudes chimneys off thin
+     * mass. But it correlates against the RAW coverage field, and the cloud's actual
+     * outline is cut by a THRESHOLD that moves with the coverage dial. So the bake's
+     * taper cannot follow the dial: turn coverage down and the outline shrinks inward
+     * while the top field stays where it was, leaving small clouds with mid-range
+     * heights — mesas at low coverage, which is precisely the tell the painted deck had.
+     *
+     * The depth signal is `cov` ITSELF — the thresholded coverage, which is already 0 at
+     * the outline the threshold cuts and 1 in the core, and already computed. Measured
+     * against the alternative (distance past the bar, normalised to 1): that one tapers
+     * CORES as hard as skirts, because the coverage channel rarely approaches 1, so it
+     * read as a uniform 35% height cut rather than an edge taper. `cov` is the same
+     * quantity painted uses for its planMass, and it is free.
+     */
+    // Floored, or a cell would have no cloud at all rather than a shallow one.
+    const top = mix(uCloudTopMin, float(1.0), saturate(w.a.add(uCloudTopBias)))
+      .mul(mix(uEdgeTaper, float(1.0), cov));
     return vec4(cov, type, mix(float(0.55), float(1.45), w.b), top);
   });
 
@@ -658,11 +697,10 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
    * density full erosion would have taken out, so optical depth toward the sun stays
    * calibrated against the view march instead of reading systematically too dark.
    */
-  const sampleDensityCheap = Fn(([p]) => {
+  const sampleDensityCheapW = Fn(([p, wm]) => {
     const h = p.y.sub(uBase).div(uThickness);
     const result = float(0.0).toVar();
     If(h.greaterThan(0.0).and(h.lessThan(1.0)), () => {
-      const wm = sampleWeather(p);
       // Must match sampleDensity's local height or self-shadowing fights the shape.
       const grad = heightProfile(h.div(wm.w.max(0.05)), wm.y);
       const b4 = baseTex.sample(p.add(uWind).div(BASE_TILE_M));
@@ -673,6 +711,9 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     });
     return result;
   });
+
+  /** Same, fetching its own weather — for callers that have none in hand. */
+  const sampleDensityCheap = Fn(([p]) => sampleDensityCheapW(p, sampleWeather(p)));
 
   // ── Scattering ─────────────────────────────────────────────────────────────────────
 
@@ -700,7 +741,17 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
    * only need to be fixed and non-collinear, and a trig pair is cheaper than a uniform
    * array binding.
    */
-  const lightMarch = Fn(([p]) => {
+  const lightMarch = Fn(([p, wm]) => {
+    /*
+     * ONE WEATHER FETCH FOR THE WHOLE CONE, handed in by the caller.
+     *
+     * This loop is the hottest thing in the module — it runs on every DENSE step — and
+     * each tap was re-reading the 2D weather map. It did not need to: the cone reaches
+     * `lightConeLength` (90 m), while the weather map wraps over 6 km with its finest
+     * octave around 375 m, so the field is essentially constant across the whole cone.
+     * Six fetches were buying a difference too small to see. The 3D base fetch still
+     * happens per tap — that IS the shape the shadow is made of, and it varies fast.
+     */
     const tau = float(0.0).toVar();
     const unit = uLightConeLength.div(32.0);
     Loop(MAX_LIGHT_STEPS, ({ i }) => {
@@ -710,7 +761,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
       const off = vec3(
         sin(fi.mul(12.9898)), cos(fi.mul(7.3313)), sin(fi.mul(4.1234).add(1.7)),
       ).mul(0.32).mul(dist);
-      tau.addAssign(sampleDensityCheap(p.add(uSunDir.mul(dist)).add(off)).mul(dist));
+      tau.addAssign(sampleDensityCheapW(p.add(uSunDir.mul(dist)).add(off), wm).mul(dist));
     });
     return tau;
   });
@@ -785,10 +836,22 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     const wAcc = float(0.0).toVar();
 
     If(valid, () => {
-      // Dither the entry by up to one step so the slab edge does not band. Interleaved
-      // gradient noise beats a hash(sin(dot)) at the same cost, and offsetting it per
-      // frame lets the residual average out instead of sitting as a fixed pattern.
-      const jit = interleavedGradientNoise(screenCoordinate.xy.add(uFrameJitter.mul(5.588238)));
+      /*
+       * Dither the entry by up to one step so the slab edge does not band. BLUE NOISE,
+       * not interleaved gradient noise: IGN is a gradient folded by fract(), and its
+       * residual is a lattice of diagonal lines a few pixels apart. That matters MORE
+       * here, not less, despite the temporal accumulation — a neighbourhood clamp
+       * preserves structured error, so a lattice survives the average as a fixed
+       * pattern (which is exactly what the historyClamp notes above describe as
+       * "the same stipple in the same places"), while structureless noise converges
+       * away. Painted learned this the hard way; see bakeBlueNoise.
+       *
+       * Animated by the golden ratio rather than by shifting the tile: adding
+       * frame·φ to the VALUE keeps each frame's spectrum blue while decorrelating
+       * across frames, which is what lets the history actually average it out.
+       */
+      const bn = blueTex.sample(screenCoordinate.xy.div(float(BLUE_NOISE_SIZE))).level(0.0).r;
+      const jit = fract(bn.add(uFrameJitter.mul(0.6180339887)));
       const travel = tNear.toVar();
       /** 1 while the previous sample was empty and advanced at the coarse rate. */
       const wasCoarse = float(0.0).toVar();
@@ -829,7 +892,8 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
             // Owe fine steps across the span we just rewound (+1 for margin).
             fineHold.assign(uEmptyStepMul);
           }).Else(() => {
-            const tauL = lightMarch(p);
+            // One weather read here replaces the six the cone used to do.
+            const tauL = lightMarch(p, sampleWeather(p));
             // Powder: thin cloud facing the sun is darker than a naive Beer integral says,
             // because light has not had room to scatter forward into the eye yet.
             // POWDER, gated on sun/view geometry. The dark-edge effect is real only when
@@ -1298,7 +1362,11 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     // tap count, which halves both the ring pitch and the dither amplitude needed to
     // decohere it; the residual half-tap noise is what the composite tent CAN erase.
     const halfStep = stepUv.mul(0.5);
-    const jit = interleavedGradientNoise(screenCoordinate.xy);
+    // BLUE noise, and NOT animated. The weave this comment describes is IGN's own
+    // diagonal lattice; a structureless residual is what the composite tent can actually
+    // erase. Static because this buffer has no temporal accumulation to average an
+    // animated pattern — offsetting it per frame would only turn the weave into shimmer.
+    const jit = blueTex.sample(screenCoordinate.xy.div(float(BLUE_NOISE_SIZE))).level(0.0).r;
     const p = fuv.add(halfStep.mul(jit)).toVar();
     const skyDepth = uReversed.oneMinus();
     const shaftSrc = Fn(([q]) => {
@@ -1484,6 +1552,7 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     uDetailRange.value = P.detailRange;
     uTypeBias.value = P.typeBias;
     uCloudTopMin.value = P.cloudTopMin;
+    uEdgeTaper.value = P.edgeTaper;
     uCloudTopBias.value = P.cloudTopBias;
     uClearRadius.value = P.clearRadius;
     uClearFloor.value = P.clearFloor;

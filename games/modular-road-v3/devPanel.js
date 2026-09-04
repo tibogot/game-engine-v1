@@ -2092,6 +2092,13 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-cld-topmin-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label" title="Height at a cloud's outline vs its core. The weather bake correlates top with the RAW coverage, so without this the taper does not follow the coverage dial and small clouds keep mid-range heights. 1.0 = off.">Edge taper</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cld-taper" min="0.05" max="1" step="0.01" />
+              <span class="prop-num" id="dv-cld-taper-v"></span>
+            </div>
+          </div>
           <div class="dv-hint">
             <b>Towering</b> is the shortest cloud as a fraction of the slab. At 1.0
             every cell fills the full thickness and you get a flat sheet — the
@@ -4816,6 +4823,7 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-cld-type", CP, "typeBias",
     (v) => (v < 0.4 ? "stratus " : v > 0.6 ? "cumulus " : "") + v.toFixed(2));
   slider("dv-cld-topmin", CP, "cloudTopMin", (v) => v.toFixed(2));
+  slider("dv-cld-taper", CP, "edgeTaper", (v) => (v > 0.97 ? "1.00 (off)" : v.toFixed(2)));
   slider("dv-cld-wind", CP, "windSpeed", (v) => v.toFixed(1) + " m/s");
   slider("dv-cld-winddeg", CP, "windDeg", (v) => v.toFixed(0) + "°");
   slider("dv-cld-sun", CP, "sunIntensity", (v) => v.toFixed(1));

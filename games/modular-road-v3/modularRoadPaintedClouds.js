@@ -324,53 +324,6 @@ export const PAINTED_CLOUD_DEFAULTS = {
  * bake is: raw fbm occupies a narrow mid band, and a threshold against a 0.2-wide range
  * either accepts everything or rejects everything, so the coverage dial does nothing.
  */
-/**
- * BLUE NOISE for the march's entry dither — and why interleaved gradient noise had to go.
- *
- * The march jitters each ray's start by up to one step, or the slab quantises into
- * shells. IGN is the usual choice because it is free, but it is NOT structureless: it is
- * a gradient folded by fract(), and its residual is a lattice of diagonal lines a few
- * pixels apart. With 18 steps and a sun-lit step contributing a lot of scattering, that
- * lattice prints straight onto the cloud body as diagonal hatching — most visibly
- * toward the sun, where per-step contrast is highest. The mip fixes cannot touch it;
- * it is the dither pattern itself.
- *
- * Blue noise has no such structure: its energy sits at high frequency with no lines
- * and no clumps, so the residual reads as fine grain the eye ignores. A proper
- * void-and-cluster bake is expensive; high-pass-filtered white noise, renormalised, is
- * a cheap approximation that is entirely good enough for a 64x64 tile. One fetch per
- * pixel, once per ray.
- */
-export const BLUE_NOISE_SIZE = 64;
-export function bakeBlueNoise(seed = 6079, N = BLUE_NOISE_SIZE) {
-  const rng = seededRandom(seed >>> 0);
-  const w = new Float32Array(N * N);
-  for (let i = 0; i < N * N; i++) w[i] = rng();
-  // Subtract a wrapped 5x5 Gaussian blur: what is left is the high-frequency part.
-  const K = [1, 4, 6, 4, 1];
-  const tmp = new Float32Array(N * N);
-  const hp = new Float32Array(N * N);
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    let a = 0;
-    for (let k = -2; k <= 2; k++) a += K[k + 2] * w[y * N + ((x + k + N) % N)];
-    tmp[y * N + x] = a / 16;
-  }
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    let a = 0;
-    for (let k = -2; k <= 2; k++) a += K[k + 2] * tmp[((y + k + N) % N) * N + x];
-    hp[y * N + x] = w[y * N + x] - a / 16;
-  }
-  // Rank-normalise to a flat 0..1 histogram, so the jitter is uniform like IGN was.
-  const idx = Array.from({ length: N * N }, (_, i) => i).sort((a, b) => hp[a] - hp[b]);
-  const out = new Uint8Array(N * N * 4);
-  for (let r = 0; r < idx.length; r++) {
-    const v = Math.round((r + 0.5) / idx.length * 255);
-    const i = idx[r] * 4;
-    out[i] = v; out[i + 1] = v; out[i + 2] = v; out[i + 3] = 255;
-  }
-  return out;
-}
-
 export function bakePaintedCloudMap(seed = 4177, size = PAINTED_MAP_SIZE) {
   const rng = seededRandom(seed >>> 0);
   const perlin = makePeriodicPerlin(rng);
