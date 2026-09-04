@@ -447,6 +447,10 @@ export function createRoadMaterial(opts = {}) {
     rippleSpeed: uniform(opts.rippleSpeed ?? WET_DEFAULTS.rippleSpeed),
     rippleStretch: uniform(opts.rippleStretch ?? WET_DEFAULTS.rippleStretch),
     rippleDamp: uniform(opts.rippleDamp ?? WET_DEFAULTS.rippleDamp),
+    impactAmount: uniform(opts.impactAmount ?? WET_DEFAULTS.impactAmount),
+    impactAmp: uniform(opts.impactAmp ?? WET_DEFAULTS.impactAmp),
+    impactScale: uniform(opts.impactScale ?? WET_DEFAULTS.impactScale),
+    impactSpeed: uniform(opts.impactSpeed ?? WET_DEFAULTS.impactSpeed),
     reflectStrength: uniform(opts.reflectStrength ?? WET_DEFAULTS.reflectStrength),
     reflectFresnel: uniform(opts.reflectFresnel ?? WET_DEFAULTS.reflectFresnel),
     reflectDistort: uniform(opts.reflectDistort ?? WET_DEFAULTS.reflectDistort),
@@ -478,6 +482,17 @@ export function createRoadMaterial(opts = {}) {
    * starting is a rare event and a dry frame is the common one.
    */
   const wetOn = Boolean(opts.wet);
+
+  /**
+   * RAINDROP IMPACT RINGS — a THIRD build-time feature, for the same reason as
+   * the other two: nine cells of trig per wet fragment is not a cost a track
+   * should pay to multiply by an `impactAmount` of zero. Off means absent from
+   * the graph. `impactAmount` is the fade within a build, for rain easing off.
+   *
+   * Only meaningful with `wet` — the rings live on standing water, and there is
+   * no water at all without it.
+   */
+  const impactsOn = wetOn && Boolean(opts.rainImpacts);
 
   /**
    * ANISOTROPY IS THE SECOND REASON TO BE PHYSICAL, and it is not optional.
@@ -756,7 +771,7 @@ export function createRoadMaterial(opts = {}) {
    * clearcoat nodes below. Same discipline as `surface` and `driftField`: one
    * node instance shared five ways emits one evaluation per fragment.
    */
-  const wet = wetOn ? createWetShading(u, surface.z) : null;
+  const wet = wetOn ? createWetShading(u, surface.z, { impacts: impactsOn }) : null;
 
   /**
    * HOW FAR THE WATER SURFACE PUSHES A REFLECTION AROUND, in UV. One node,
@@ -1344,6 +1359,11 @@ export function createRoadMaterial(opts = {}) {
    */
   mat._roadWet = wetOn;
   mat._roadAniso = anisoOn;
+  // ASK THE MATERIAL WHAT IT IS — the same contract as the two above. There is
+  // no class or node that betrays whether the rings were built in, so without
+  // this `syncRoadMaterialFeatures` could never agree with its own intent and
+  // would rebuild (and re-merge the whole track) on every call.
+  mat._roadImpacts = impactsOn;
   mat._roadUniforms = u;
   // PRISTINE LOOK BASELINE — captured on the first material this session, at the
   // one instant it is guaranteed untouched: the uniforms exist, and no caller

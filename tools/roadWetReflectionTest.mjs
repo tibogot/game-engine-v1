@@ -101,9 +101,21 @@ console.log("\n=== THE SOURCE OF TRUTH IS STILL EXPORTED ===");
   const wetSrc = readFileSync(join(GAME, "modularRoadWet.js"), "utf8");
   check("modularRoadWet still owns wetRippleNormal",
     /export function wetRippleNormal/.test(wetSrc));
-  check("createWetShading builds coatNormalPacked from it",
-    /coatNormalPacked:\s*wetRippleNormal\(u\)/.test(wetSrc),
+  // There are now TWO height fields on the water — the paver break-up and the
+  // raindrop impact rings — and the whole point is that they are summed as
+  // SLOPES and packed ONCE. Packing each and blending would normalise twice,
+  // and would hand the clearcoat and the two mirrors different wobbles, which
+  // is this file's entire subject.
+  check("coatNormalPacked is a single packed slope",
+    /coatNormalPacked:\s*packSlope\(slope\)/.test(wetSrc),
     "one evaluation, shared by the clearcoat and both mirrors");
+  const packs = (wetSrc.match(/packSlope\(/g) || []).length;
+  // Its definition, wetRippleNormal's use, and createWetShading's — three
+  // mentions. A fourth means somebody packed a second normal.
+  check("packSlope appears exactly three times", packs === 3, `${packs} found`);
+  check("both slope fields feed that one pack",
+    /wetBreakupSlope\(u\)[\s\S]{0,200}wetImpactSlope\(u\)/.test(wetSrc),
+    "rings must join the shared field, not become a second normal");
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nall good");

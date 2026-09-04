@@ -498,6 +498,17 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * are the expensive part and paying them twice is worse than keeping them.
    */
   let worldRain = null;
+  /**
+   * Whether the deck is allowed to build its raindrop impact rings.
+   *
+   * A QUALITY setting, not a look one: the rings are nine cells of trig on the
+   * largest surface on screen, so this is the knob to reach for on a weak GPU
+   * that still wants rain. It is also the only way to measure them — the cost
+   * is in evaluating the field, so no uniform can turn it off.
+   *
+   * Never in a track save; a machine setting, like the cloud tier.
+   */
+  let roadImpactsAllowed = true;
   const _rainFocus = new THREE.Vector3();
   const _rainFwd = new THREE.Vector3();
 
@@ -541,6 +552,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     applyRainLens();
     if (rainEnabled) ensureWorldRain().setEnabled(true);
     else worldRain?.setEnabled(false);
+    // The road's impact rings are a BUILD-time feature keyed on this switch, so
+    // rain starting or stopping is one of the events that can change what the
+    // deck material is. Cheap when it changes nothing: the sync compares intent
+    // against the material and returns without rebuilding.
+    syncRoadMaterialFeatures();
   }
 
   /* ── VOLUMETRIC CLOUDS ─────────────────────────────────────────────────────
@@ -3203,11 +3219,19 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // so "off" has to mean absent, not zero.
     const wantAniso = (roadLook.anisotropy ?? 0) > 0;
     const hasAniso = roadMaterial._roadAniso === true;
+    // Impact rings are the FOURTH build-time feature, and the only one driven
+    // by something other than the look: they follow the RAIN switch, because
+    // rings are what a road does while it is being rained on. A wet road with
+    // the rain stopped keeps its puddles and loses its rings, which is exactly
+    // the difference between "it is raining" and "it rained".
+    const wantImpacts = wantWet && rainEnabled && roadImpactsAllowed;
+    const hasImpacts = roadMaterial._roadImpacts === true;
     if (wantWet === isWet && wantPreMirror === hasPreMirror && !v2Rebuild
-      && wantAniso === hasAniso) return;
+      && wantAniso === hasAniso && wantImpacts === hasImpacts) return;
     applyRoadMaterial(makeRoadMaterial({
       ...roadLook,
       wet: wantWet,
+      rainImpacts: wantImpacts,
       shadowLight: sceneShadowLight(),
       reflectionTexture: wantWet ? carReflection.texture : null,
       mirrorTexture: wantPreMirror ? carReflection.mirrorTexture : null,
@@ -7667,6 +7691,10 @@ ${e.message}`);
      *  costs the shader compiles and later ones cost nothing. */
     setRain: setRainEnabled,
     getRain: () => rainEnabled,
+    /** Raindrop impact rings on the wet deck — a machine setting. Rebuilds the
+     *  road material, so it is a click, not a per-frame knob. */
+    setRoadImpacts: (on) => { roadImpactsAllowed = !!on; syncRoadMaterialFeatures(); },
+    getRoadImpacts: () => roadImpactsAllowed,
     /** The world-rain system once it exists, for console tuning: every knob in
      *  WORLD_RAIN_DEFAULTS has a setter on it. Null until rain is first on. */
     worldRain: () => worldRain,
