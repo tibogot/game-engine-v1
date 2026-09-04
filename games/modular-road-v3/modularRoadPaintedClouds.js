@@ -814,54 +814,27 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
        *    cauliflower comes from. Only the coarser octave here — it is fetched every
        *    search step; the fine one is paid once, at the hit.
        */
+      /*
+       * THE COLUMN is only the SEARCH's shape: an UNERODED, conservative bound on where
+       * cloud can be — flat base at hBot, top at the tapered cell height. It exists to
+       * find the entry deterministically; it is NOT what gets shaded. One fetch.
+       */
       const column = Fn(([uv, lod]) => {
         const m = mapTex.sample(uv).level(lod);
         const hBot = m.a.sub(0.5).mul(uBaseVary);
         const massL = m.r.add(m.b.sub(0.5).mul(uLump));
-        /*
-         * DILATE WITH THE MIP. Averaging the mass field to a coarse mip and then
-         * thresholding it does not make a far cloud softer — it makes it SMALLER and
-         * just as sharp, which is why a cloud narrower than a search step was still
-         * being landed on by some rows of rays and jumped by the next. Lowering the
-         * threshold as the mip coarsens turns that same averaged blob into a wider,
-         * lower, softer one: a bump a step cannot miss. The far field is where this
-         * acts, and the far field is hazy anyway.
-         */
-        const dil = saturate(lod.sub(0.5).mul(0.07));
-        const planMass = remapUnit(massL, reg.x.oneMinus().sub(dil).max(0.0));
-        // Outside the coverage threshold there is NO column — without this gate the
-        // taper would leave a 3% skin of cloud over the entire sky.
+        const planMass = remapUnit(massL, reg.x.oneMinus());
         const present = smoothstep(0.0, 0.03, planMass);
         const top = mix(uTopMin, float(1.0), m.g)
           .mul(mix(uEdgeTaper, float(1.0), planMass)).mul(reg.y).mul(present);
-        // The erosion fetch only where a column exists. Empty sky is most of the sky,
-        // and paying a second fetch per step there doubled the cost of the search.
-        const height = top.toVar();
-        If(present.greaterThan(0.001), () => {
-          const dUv = uv.mul(3.1).add(vec2(top.mul(0.35).add(uEvolve), top.mul(-0.27)));
-          const bil = mapTex.sample(dUv).level(lod.add(1.632)).b;
-          const bite = bil.mul(uErode).mul(mix(float(0.35), float(1.0), planMass.oneMinus())).mul(0.95);
-          height.assign(top.mul(bite.oneMinus().max(0.0)));
-        });
-        return vec4(hBot, hBot.add(height), planMass, height);
+        return vec4(hBot, hBot.add(top), planMass, top);
       });
 
-      /*
-       * ── The search: the first STEP whose segment can cross the solid ─────────────
-       *
-       * Not "is this sample inside" — "does the ray between this sample and the next
-       * pass through the column". The difference is the far deck's terracing. Rays in
-       * one screen row share their sample heights exactly; a low distant cloud is a
-       * hundred metres tall while the ray rises fifty per step at that angle, so which
-       * rows have a sample land inside it is a matter of luck, and the luck changes
-       * every few rows. A point test cannot see a cloud between its samples. The
-       * segment test can: the ray's height runs from h(t) to h(t+dt) over the step,
-       * and the column at the step's midpoint spans hBot..hTop, so the two intervals
-       * overlap or they do not — continuously in the ray. The plan-view side of the
-       * same problem is handled by sampling the height field at the step's own
-       * footprint (the step-rate LOD floor), so a cloud narrower than a step becomes a
-       * low bump rather than something to jump over.
-       */
+      // ── The search: the first STEP whose segment can cross the column ───────────
+      // Segments, not points: rays in one screen row share their sample heights, and a
+      // point test misses a low distant cloud between samples for some rows and not
+      // others — row-aligned terraces. Gated on the column having height, or the
+      // interval test passes wherever a ray crosses the base level.
       const t = tStart.toVar();
       const lo = float(-1.0).toVar();
       const hi = float(-1.0).toVar();
@@ -870,9 +843,6 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         If(float(i).greaterThanEqual(nSteps), () => Break());
         const tB = t.add(dt);
         const c = column(uvAt(t.add(tB).mul(0.5)), lodAt(tB));
-        // Gated on the column having HEIGHT: with hTop == hBot the interval test still
-        // passes wherever the ray crosses the base level, which every ray does once —
-        // the first version of this hit the whole sky.
         const ov = min(min(hAt(tB).sub(c.x), c.y.sub(hAt(t))), c.w.sub(0.002));
         If(ov.greaterThan(0.0), () => {
           lo.assign(t);
@@ -884,9 +854,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       });
 
       If(hitT.greaterThan(0.0), () => {
-        // Refine by halving the segment with the same test — four times puts the entry
-        // within dt/16, and because it is the same test the search used, the refined
-        // point always lies inside the bracket the search found.
+        // Refine by halving the segment with the same test: the entry to within dt/16.
         Loop(4, () => {
           const mid = lo.add(hi).mul(0.5);
           const cL = column(uvAt(lo.add(mid).mul(0.5)), lodAt(mid));
@@ -897,36 +865,25 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
             lo.assign(mid);
           });
         });
-        hitT.assign(lo.add(hi).mul(0.5));
+        hitT.assign(lo);   // the start of the entry sub-segment: begin the march OUTSIDE
 
         const uvH = uvAt(hitT);
         const lodH = lodAt(hitT);
-        const c0 = column(uvH, lodH);
 
-        /*
-         * CLOUD-ON-CLOUD SHADOW, cast onto the HIT. Two taps sunward from the point the
-         * ray actually struck. The old deck took these at the ray's mid-plane crossing,
-         * which for a far cloud at a grazing angle is kilometres beyond the cloud: the
-         * shadow then belonged to somewhere else, and worse, it varied in SCREEN space
-         * (the mid-plane uv slides with the ray) — diagonal stripes of the mass texture
-         * printed across distant clouds. At the hit, it is the cloud's own shadow and
-         * moves with the cloud. The taps see the same lumpy mass the surface is built
-         * from, so lobes darken on their shaded flanks.
-         */
+        // Cloud-on-cloud shadow, cast onto the HIT (at the mid-plane it belonged to
+        // somewhere kilometres away and slid with the ray, printing stripes).
         const sA = mapTex.sample(uvH.add(sunXZ.mul(reach.mul(0.45)))).level(lodH);
         const sB = mapTex.sample(uvH.add(sunXZ.mul(reach))).level(lodH);
         const sTau = sA.r.add(sA.b.sub(0.5).mul(uLump)).mul(0.55)
           .add(sB.r.add(sB.b.sub(0.5).mul(uLump)).mul(0.45));
         const sunShadow = exp(sTau.mul(uAbsorb).negate());
-        const hH = hAt(hitT);
-        const hBot = c0.x, hTop = c0.y, planMass = c0.z, height = c0.w;
+        const shadeLifted = sunShadow.add(uMsFloor.mul(sunShadow.oneMinus()));
 
         /*
-         * THE NORMAL — from the top surface, NOT at the search's mip. A bilinear height
-         * field has a gradient that is constant across each texel and jumps at texel
-         * edges, so a normal taken at the search mip facets the deck into terraces, and
-         * the step-rate floor makes that mip coarse at grazing angles. The normal wants
-         * the SCREEN footprint's mip, one level softer, with a two-texel stencil.
+         * A NORMAL from the column top, for the flank modelling the volume never had.
+         * Taken at the screen footprint's mip one level softer with a two-texel stencil
+         * (a bilinear height field's gradient is constant per texel — at the search mip
+         * it facets), with the fine erosion octave folded in as a bump at its own scale.
          */
         const lodN = log2(hitT.max(1.0)).add(lodK).add(1.0).max(0.0);
         const cN = column(uvH, lodN);
@@ -935,82 +892,80 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         const cZ = column(uvH.add(vec2(0.0, eps)), lodN);
         const sX = cX.y.sub(cN.y).mul(uThickness).div(eps.mul(uTile)).toVar();
         const sZ = cZ.y.sub(cN.y).mul(uThickness).div(eps.mul(uTile)).toVar();
-
-        // The fine erosion octave: the carve, the micro-contrast, and a BUMP on the
-        // normal at its own scale — the cauliflower, now that there is no volume to
-        // erode. Shifted by height so it is not the outline extruded.
+        const hH = hAt(hitT);
         const fUv = uvH.mul(9.7).add(vec2(hH.mul(-0.8), hH.mul(0.6).sub(uEvolve.mul(1.7))));
         const lodF = lodN.add(3.278);
         const epsF = float(2.0 / PAINTED_MAP_SIZE).mul(pow(float(2.0), lodF));
         const fine = mapTex.sample(fUv).level(lodF).b;
         const fX = mapTex.sample(fUv.add(vec2(epsF, 0.0))).level(lodF).b;
         const fZ = mapTex.sample(fUv.add(vec2(0.0, epsF))).level(lodF).b;
-        const bumpAmp = uErode.mul(0.09).mul(saturate(planMass.mul(3.0)));
+        const bumpAmp = uErode.mul(0.09).mul(saturate(cN.z.mul(3.0)));
         const bumpK = bumpAmp.mul(uThickness).div(epsF.div(9.7).mul(uTile));
         sX.addAssign(fX.sub(fine).mul(bumpK));
         sZ.addAssign(fZ.sub(fine).mul(bumpK));
         const nTop = normalize(vec3(sX.negate(), 1.0, sZ.negate()));
-        // Wrapped N.L from the top surface: cloud scatters, so the terminator is soft.
-        // This is the flank modelling a volume never had.
         const ndl = saturate(dot(nTop, sunDir).mul(0.6).add(0.4));
 
-        // Cores are solid; rims come apart on the fine octave. This is the edge-weighted
-        // erosion from the volume days, applied to the density instead of the shape.
-        const carve = saturate(mix(fine.mul(uErode).mul(1.8).oneMinus(), float(1.0), saturate(planMass.mul(1.8))));
-        const micro = mix(float(0.82), float(1.12), fine);
-
         /*
-         * ── THE SHORT MARCH FROM THE SURFACE ─────────────────────────────────────────
+         * ══════════════════════════════════════════════════════════════════════════
+         * THE MARCH FROM THE ENTRY — the volume deck's own integrand, unchanged.
          *
-         * A shell shaded once reads as a cut-out: a base cannot see the sun by N.L, yet
-         * a real base IS lit — by light scattered through the body above it — and a rim
-         * is translucent because it is thin, not because it was drawn faintly. Both are
-         * VOLUME properties. So the volume comes back, in the one form that cannot
-         * grain: a few FIXED sub-steps that start at the refined entry point. The old
-         * march grained because each pixel's start was random; this one's start is a
-         * continuous function of the pixel, so neighbours integrate near-identical
-         * chords and the result is smooth. Six steps is plenty — at this density a
-         * cloud is opaque within about one search step, and thin rims exit the solid
-         * early, which is exactly what makes them translucent.
+         * This is the synthesis the surface pass should have been from the start.
+         * The grain came from the old march's RANDOM start; the fluffiness came from
+         * its DENSITY — a soft field shaped by the vertical profile and eaten by two
+         * erosion octaves, edge-weighted so rims come apart and cores stay solid.
+         * The surface version kept the first fix and threw the second away, replacing
+         * that density with a hard inside/outside test, which is why it read as
+         * plaster. So: the entry is deterministic (the search above) and the density
+         * is the old one. Neighbouring pixels start from continuous points and
+         * integrate near-identical chords, and the clouds are clouds again.
+         *
+         * Eight sub-steps from the entry, capped in metres: at this density the core
+         * is opaque within the first hundred metres or so, and a chord longer than the
+         * deck is thick adds nothing.
+         * ══════════════════════════════════════════════════════════════════════════
          */
-        const SUB = 6;
-        /*
-         * The sub-march's reach is capped in METRES. Tied to dt alone it stretched to
-         * hundreds of metres per sub-step at grazing angles, where dt is huge — and a
-         * chord longer than the deck is thick adds nothing, the cloud is opaque by then.
-         */
-        const ds = min(dt.mul(1.25), uThickness.mul(1.2)).div(SUB);
-        const shadeLifted = sunShadow.add(uMsFloor.mul(sunShadow.oneMinus()));
+        const SUB = 8;
+        const ds = min(dt.mul(1.6), uThickness.mul(1.4)).div(SUB);
+        const lodSubK = log2(ds.mul(uStepLod).mul(float(PAINTED_MAP_SIZE)).div(uTile).max(1e-4));
         const transmittance = float(1.0).toVar();
         const scattered = vec3(0.0).toVar();
         const ts = hitT.add(ds.mul(0.5)).toVar();
-        const fPrevS = float(0.0).toVar();
         Loop(SUB, () => {
-          const cs = column(uvAt(ts), lodAt(ts));
-          const hs = hAt(ts);
-          /*
-           * TRAPEZOIDAL MEMBERSHIP, and this was the horizontal terracing on the far
-           * deck. A hard in/out per sub-step quantises the chord to sixths: a distant
-           * cloud entered through its flank at a grazing angle is only a few sub-steps
-           * wide, so its opacity took one of six values, and which one depended on the
-           * ray's height — bands, row-aligned. Widening the membership by how much the
-           * inside-ness CHANGES per sub-step turns the hard cut at the exit into the
-           * linear ramp a trapezoid rule would give, and the bands go with it.
-           */
-          const fS = min(hs.sub(cs.x), cs.y.sub(hs));
-          const wS = max(float(0.015), fS.sub(fPrevS).abs().mul(0.5));
-          const inside = smoothstep(wS.negate(), wS, fS);
-          fPrevS.assign(fS);
-          const dens = inside.mul(carve).mul(uDensityMul);
-          // Height inside the column: bases sit in their own shadow, tops catch the sun.
-          const hL = saturate(hs.sub(cs.x).div(cs.w.max(0.02)));
-          const vertG = mix(uBaseDark, float(1.0), hL);
-          // The sun term is the volume's (lifted shadow x vertical gradient), with the
-          // surface normal folded in at part weight for the flank modelling — full
-          // weight would put the base back in the dark it cannot physically be in.
-          const sunTerm = shadeLifted.mul(vertG).mul(float(0.6).add(ndl.mul(0.4))).mul(micro);
+          const uv = uvAt(ts);
+          // The density is integrated at the SUB-step, so its mip floor comes from ds, not
+          // from the search step; and the erosion octaves are clamped off the tiny mips,
+          // where a magnified 4x4 level sampled along a height-shifted offset prints as
+          // horizontal striations through the body.
+          const lod = max(log2(ts.max(1.0)).add(lodK), lodSubK);
+          const m = mapTex.sample(uv).level(lod);
+          const hBot = m.a.sub(0.5).mul(uBaseVary);
+          const h = hAt(ts).sub(hBot);
+          const massL = m.r.add(m.b.sub(0.5).mul(uLump));
+          const planMass = remapUnit(massL, reg.x.oneMinus());
+          const top = mix(uTopMin, float(1.0), m.g)
+            .mul(mix(uEdgeTaper, float(1.0), planMass)).mul(reg.y);
+          const hL = h.div(top.max(0.05));
+          // A cumulus base is SHARP (the condensation level); the top is domed.
+          const prof = smoothstep(0.0, 0.06, hL).mul(smoothstep(1.0, 0.55, hL));
+          const shaped = remapUnit(massL.mul(prof), reg.x.oneMinus());
+
+          // Two erosion octaves, shifting with height so the mass is not its own outline
+          // extruded; churned by uEvolve. Edge-weighted: rims erode, cores survive.
+          const dUv = uv.mul(3.1).add(vec2(h.mul(0.35).add(uEvolve), h.mul(-0.27)));
+          const fUv2 = uv.mul(9.7).add(vec2(h.mul(-0.8), h.mul(0.6).sub(uEvolve.mul(1.7))));
+          const billow = mapTex.sample(dUv).level(lod.add(1.632).min(4.0)).b.mul(0.62)
+            .add(mapTex.sample(fUv2).level(lod.add(3.278).min(4.0)).b.mul(0.38));
+          const biteRaw = billow.mul(uErode).mul(mix(float(0.6), float(1.25), saturate(hL)));
+          const bite = biteRaw.mul(mix(float(0.35), float(1.0), shaped.oneMinus()));
+          const dens = remapUnit(shaped, bite).mul(uDensityMul);
+
+          // Vertical light gradient: tops catch the sun, bases sit in their own shadow;
+          // the surface normal folds in at part weight for the flank modelling.
+          const vertG = mix(uBaseDark, float(1.0), saturate(hL));
+          const sunTerm = shadeLifted.mul(vertG).mul(float(0.6).add(ndl.mul(0.4)));
           const lit = keyCol.mul(uSunStrength).mul(sunTerm.add(rim.mul(vertG)));
-          const amb = ambCol.mul(uAmbient).mul(mix(float(0.55), float(1.0), hL));
+          const amb = ambCol.mul(uAmbient).mul(mix(float(0.55), float(1.0), saturate(hL)));
           const lum = lit.add(amb);
           const stepT = exp(dens.mul(ds).negate());
           scattered.addAssign(transmittance.mul(lum).mul(stepT.oneMinus()));
