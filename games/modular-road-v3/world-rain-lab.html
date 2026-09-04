@@ -397,7 +397,11 @@
           .onChange((v) => rain.setRecycle(v));
 
         const f = gui.addFolder("Fall");
-        f.add(p, "spawnHeight", 5, 60, 1).onChange((v) => rain.setSpawnHeight(v));
+        // Floor matches the module's own clamp (cameraHeight + clearance).
+        // A slider that ranged below it would silently do nothing down there,
+        // which is a worse control than no control.
+        f.add(p, "spawnHeight", p.cameraHeight + 6, 90, 1)
+          .onChange((v) => rain.setSpawnHeight(v));
         f.add(p, "fallSpeed", 2, 40, 0.5).onChange((v) => rain.setFallSpeed(v));
         f.add(p, "fallJitter", 0, 15, 0.5).onChange((v) => rain.setFallJitter(v));
 
