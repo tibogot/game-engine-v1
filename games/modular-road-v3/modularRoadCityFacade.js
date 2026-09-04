@@ -157,9 +157,11 @@ export const FACADE_DEFAULTS = {
   emissiveBoost: 2.6,
   /** Fraction of storeys that are wholly dark (vacant floors). Cheap realism. */
   darkFloors: 0.22,
-  /** Window churn: a window changes state roughly every `churnPeriod` seconds,
-   *  each on its own phase. 0 disables. */
-  churnPeriod: 45,
+  /** Window churn. `churnFraction` of windows are on a timer at all; the rest
+   *  never change. A real city changes a few rooms an hour, not all of them
+   *  every minute — see the note at the lit-window block. */
+  churnPeriod: 420,
+  churnFraction: 0.10,
 
   /** Crown lights: a lit band under the roofline of some towers at night. */
   crownFraction: 0.45,
@@ -354,18 +356,31 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
       return out;
     })();
 
-    // ── Lit windows + churn ──────────────────────────────────────────────────
+    // ── Lit windows ──────────────────────────────────────────────────────────
     // Per-building bias so some towers are dark and some work late; per-floor
-    // vacancy; per-window state that slowly flips on its own phase.
+    // vacancy; and a window state that is MOSTLY FIXED.
+    //
+    // People do not flick their lights on and off every minute. The first
+    // version reseeded EVERY window on a shared clock, so the whole city
+    // twinkled like a screensaver — the single most artificial thing about it.
+    // Now a window's state comes from a hash that never changes, and only
+    // `churnFraction` of them (a tenth) are on a timer at all, at
+    // `churnPeriod` seconds — long enough that you notice a room has changed
+    // rather than watching it change.
     const bldgLit = u.litFraction.mul(bh3.mul(1.1).add(0.45));
     const floorLit = step(u.darkFloors, hash31(vec3(lot, floorIdx.mul(0.37))));
     const winKey = colIdx.add(floorIdx.mul(31.7)).toVar();   // read inside the room branch
+    // The permanent state of this window.
+    const steadyHash = hash31(vec3(lot.mul(3.1), winKey.mul(1.7)));
+    // Is this one of the few that ever changes?
+    const isChurner = step(hash31(vec3(lot.mul(5.7), winKey.mul(0.93))), u.churnFraction);
     const churnPhase = hash31(vec3(lot.mul(2.3), winKey.mul(0.61)));
     const epoch = floor(uTime.div(u.churnPeriod.max(1.0)).add(churnPhase));
-    const winHash = hash31(vec3(lot.mul(3.1), winKey.add(epoch.mul(7.13))));
+    const churnHash = hash31(vec3(lot.mul(3.1), winKey.add(epoch.mul(7.13))));
+    const winHash = mix(steadyHash, churnHash, isChurner);
     const litHard = step(winHash, bldgLit).mul(floorLit);
     const lit = mix(bldgLit, litHard, sharp).toVar();
-    const litColor = mix(u.litWarm, u.litCool, step(0.62, bh2));
+    const litColor = mix(u.litWarm, u.litCool, step(0.62, bh2)).toVar();
 
     // ── Crown lights ─────────────────────────────────────────────────────────
     const hasCrown = step(bh3, u.crownFraction).mul(float(1.0).sub(select(isIndustrial, float(1.0), float(0.0))));
@@ -387,12 +402,26 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     // And only NEAR panes: `interiorAmt` is zero once the window grid has
     // dissolved, and the whole solve sits behind a WGSL `If` on it — a uniform
     // `interior = 0` therefore actually removes the cost, and far pixels never
-    // pay for rooms they cannot resolve. `litColor` is materialised first
-    // because the branch reads it (see the masonry note).
+    // pay for rooms they cannot resolve.
+    //
+    // THE BRANCH CONTAINS THE RAY MARCH AND NOTHING ELSE — no `lit`, no
+    // `litColor`, no `nightAmount`. A `.toVar()` emits its declaration at its
+    // FIRST USE during codegen, so a top-level var whose first use is inside
+    // this `If` gets declared in the branch's scope; the emissive slot then
+    // reads a name that does not exist there and every lit window in the city
+    // goes black — which is exactly what happened, and only with
+    // `interior = 0`, because with rooms on the diffuse path hid it. The
+    // masonry note says "materialise before the first branch"; keeping ALL
+    // lighting outside the branch is the version of that rule you cannot get
+    // wrong. The per-window hashes come out too: they are two sin-fract hashes
+    // and the curtain decision needs no ray at all.
     const interiorAmt = u.interior.mul(sharp).mul(select(isLobby, float(0.0), float(1.0))).toVar();
-    const litColorV = litColor.toVar();
+    const roomHash = hash31(vec3(lot.mul(1.3), winKey.mul(0.37))).toVar();
+    const roomHash2 = hash31(vec3(lot.mul(0.7), winKey.mul(1.91))).toVar();
+    const hasCurtain = step(float(1.0).sub(u.curtains), roomHash2).toVar();
     const interiorRoom = Fn(() => {
-      // xyz = pane colour, w = night-lit room brightness (for the emissive).
+      // xyz = room ALBEDO (unlit), w = the ceiling fixture mask. Both are pure
+      // geometry and hashes; the lighting is applied by the caller.
       const out = vec4(0.0).toVar();
       If(interiorAmt.greaterThan(0.001), () => {
         const V = normalize(positionWorld.sub(cameraPosition));
@@ -416,9 +445,6 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
         const hitFloor = tHit.equal(tVertP).and(rv.lessThan(0.0));
         const hitCeil = tHit.equal(tVertP).and(rv.greaterThan(0.0));
 
-        const roomHash = hash31(vec3(lot.mul(1.3), winKey.mul(0.37)));
-        const roomHash2 = hash31(vec3(lot.mul(0.7), winKey.mul(1.91)));
-        const hasCurtain = step(float(1.0).sub(u.curtains), roomHash2);
         // Room palette: a warm off-white wall, tinted per room; darker floor;
         // ceiling with a bright fixture near the middle when lit.
         const wallTint = vec3(0.86, 0.80, 0.72).mul(float(0.75).add(roomHash.mul(0.4)));
@@ -436,23 +462,27 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
           select(hitCeil, ceilCol.mul(float(0.7).add(fixture.mul(0.6))),
             select(furniture, vec3(0.14, 0.12, 0.13),
               select(picture, pictureCol, wallTint)))).mul(depthShade);
-        // Unlit room by day: dim ambient from the window. Lit at night: the
-        // warm/cool key, fixture blazing.
-        // Faint by day: through real glass in sunlight you see the sky, not
-        // the sofa. The room only reads once its own lights are on.
-        const dayRoom = roomBase.mul(0.11).mul(float(1.0).sub(u.nightAmount.mul(0.85)));
-        const nightRoom = roomBase.mul(litColorV).mul(u.nightAmount).mul(lit).mul(float(0.9).add(fixture.mul(1.6)));
-        const curtainCol = vec3(0.62, 0.56, 0.5).mul(float(0.7).add(roomHash.mul(0.5)));
-        const curtainLit = u.nightAmount.mul(lit);
-        const col = mix(dayRoom.add(nightRoom), curtainCol.mul(float(0.35).add(curtainLit.mul(0.9))), hasCurtain);
-        // Emissive share: the lit room, or a soft curtain glow.
-        const glow = mix(nightRoom, litColorV.mul(curtainLit).mul(0.35), hasCurtain);
-        out.assign(vec4(col, max(glow.r, max(glow.g, glow.b))));
+        out.assign(vec4(roomBase, fixture));
       });
       return out;
     })();
-    const interiorCol = interiorRoom.xyz;
-    const interiorGlowLevel = interiorRoom.w;
+    // ── Room lighting, OUTSIDE the branch ────────────────────────────────────
+    // Faint by day: through real glass in sunlight you see the sky, not the
+    // sofa. The room only reads once its own lights are on.
+    const roomAlbedo = interiorRoom.xyz;
+    const roomFixture = interiorRoom.w;
+    const litNight = u.nightAmount.mul(lit).toVar();
+    const dayRoom = roomAlbedo.mul(0.11).mul(float(1.0).sub(u.nightAmount.mul(0.85)));
+    const nightRoom = roomAlbedo.mul(litColor).mul(litNight)
+      .mul(float(0.9).add(roomFixture.mul(1.6))).toVar();
+    const curtainCol = vec3(0.62, 0.56, 0.5).mul(float(0.7).add(roomHash.mul(0.5)));
+    const interiorCol = mix(
+      dayRoom.add(nightRoom),
+      curtainCol.mul(float(0.35).add(litNight.mul(0.9))),
+      hasCurtain,
+    );
+    // What the pane contributes to BLOOM: the lit room, or a soft curtain glow.
+    const interiorGlow = mix(nightRoom, litColor.mul(litNight).mul(0.35), hasCurtain);
 
     // ── Glass shading ────────────────────────────────────────────────────────
     const paneJit = hash31(vec3(lot.mul(1.7), colIdx.mul(7.3).add(floorIdx)))
@@ -494,12 +524,12 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     // Emissive: window glow (flat, far) OR the lit room itself (near) — the
     // room already carries `lit` and `nightAmount`, so blend the two by the
     // same amount to avoid double-counting.
-    const flatGlow = litColorV.mul(lit).mul(u.nightAmount).mul(u.emissiveBoost);
+    const flatGlow = litColor.mul(litNight).mul(u.emissiveBoost);
     // A lit room is already its own light in the DIFFUSE term; the emissive
     // here is only the bloom contribution, scaled by the room's own brightness
     // level and tinted by the pane. At 0.55× it saturated every near window to
     // a flat tan square and the room detail vanished under it.
-    const roomGlow = interiorCol.mul(interiorGlowLevel).mul(u.emissiveBoost.mul(0.22));
+    const roomGlow = interiorGlow.mul(u.emissiveBoost.mul(0.22));
     const windowGlow = mix(flatGlow, roomGlow, interiorAmt).mul(win);
     const emissive = select(isRoof, vec3(0.0), windowGlow.add(crownColor.mul(crown)));
 

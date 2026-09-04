@@ -282,9 +282,15 @@ console.log("\n── LOOK PASS ──");
   check("ordinary lots never pick a landmark archetype", c.buildings.filter((b) => !b.landmark).every((b) => b.arch < normals.length));
   check("all three districts exist and the core is glass", c.stats.districts.every((n) => n > 0) && c.buildings.filter((b) => b.r < 120).every((b) => b.district === 0), c.stats.districts.join("/"));
   check("beacons: one per masted building", c.stats.beacons === c.buildings.filter((b) => kit.archetypes[b.arch].mastTop != null).length && c.stats.beacons > 0, `${c.stats.beacons}`);
-  check("signs placed: banners, bands, screens", c.stats.signs.banners > 0 && c.stats.signs.bands > 0 && c.stats.signs.screens > 0, JSON.stringify(c.stats.signs));
-  let extra = 0; c.group.traverse((o) => { if (o.isInstancedMesh && /CityBanners|CityScreens|CityBands|CityBeacons/.test(o.name)) extra++; });
-  check("signs + beacons are exactly four instanced meshes (four draws)", extra === 4, `${extra}`);
+  const sg = c.stats.signs;
+  check("every sign kind is placed", sg.banners > 0 && sg.bands > 0 && sg.screens > 0 && sg.texts > 0 && sg.neon > 0 && sg.mega > 0, JSON.stringify(sg));
+  // Mega boards ride the SCREEN mesh, so adding them must not add a draw.
+  check("mega billboards share the screen mesh", sg.mega > 0 && sg.screens >= sg.mega);
+  // Every neon frame is 4 tubes, so neon must exceed 4x the mega count.
+  check("each mega board is framed in neon", sg.neon >= sg.mega * 4, `${sg.neon} tubes for ${sg.mega} boards`);
+  let extra = 0; const names = [];
+  c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Banners|Screens|Bands|Texts|Neon|Beacons)$/.test(o.name)) { extra++; names.push(o.name); } });
+  check("signs + beacons are exactly six instanced meshes (six draws)", extra === 6, names.sort().join(","));
   const before = JSON.stringify(c.stats.signs);
   c.rebuild();
   check("signs are deterministic across a rebuild", JSON.stringify(c.stats.signs) === before);

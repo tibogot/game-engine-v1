@@ -833,5 +833,29 @@ export async function startCityLab() {
   });
 
   // Exposed for automated inspection / screenshots.
-  return { renderer, scene, camera, get city() { return city; } };
+  //
+  // `aim` exists because the fly camera owns its orientation: `flyStep` calls
+  // `camera.lookAt` from `cam.yaw`/`cam.pitch` every frame, so anything that
+  // sets `camera.quaternion` from outside is overwritten before it is drawn.
+  // Driving the same two angles is the only way to point this camera without
+  // fighting the loop.
+  return {
+    renderer, scene, camera,
+    get city() { return city; },
+    get sky() { return sky; },
+    /** Place the eye and look at a point. Stops drive-by so it does not walk off. */
+    aim(px, py, pz, tx, ty, tz) {
+      driving = false;
+      camera.position.set(px, py, pz);
+      const dx = tx - px, dy = ty - py, dz = tz - pz;
+      cam.yaw = Math.atan2(dx, dz);
+      cam.pitch = Math.atan2(dy, Math.hypot(dx, dz));
+    },
+    /** Time of day, in hours — the same clock the presets write. */
+    setTimeOfDay(t) { SKY.timeOfDay = ((t % 24) + 24) % 24; },
+    setHudVisible(on) {
+      const h = document.getElementById("hud");
+      if (h) h.style.display = on ? "" : "none";
+    },
+  };
 }
