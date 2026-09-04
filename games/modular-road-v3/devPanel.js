@@ -1936,6 +1936,47 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Sky — Night</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            The <b>Milky Way</b> is a baked band in galactic coordinates — one fetch,
+            no per-pixel noise, since its structure is large and static. It also
+            crowds the stars along itself: unresolved starlight is what the band IS,
+            so a uniform starfield with a glowing stripe behind it reads as a painted
+            backdrop. Both are gated to night and cost nothing by day.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Milky Way</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-milky" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-sk-milky-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Star brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-stars" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-sk-stars-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Moon size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-moon" min="0.5" max="6" step="0.05" />
+              <span class="prop-num" id="dv-sk-moon-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Earthshine</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-earth" min="0" max="0.3" step="0.005" />
+              <span class="prop-num" id="dv-sk-earth-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Clouds — Shape</div>
         <div class="section-body">
           <div class="dv-hint">
@@ -4769,6 +4810,20 @@ export function createRoadDevPanel({ app, game, params }) {
    * `markPaintedTouched` stops re-entering the tier from stomping a coverage the user
    * dialled in here with the volumetric deck's value.
    */
+  /* Sky night controls. Like the flare below, the sky is built during startV3App and
+   * may not exist when this panel is constructed, so bind on a retry. */
+  (function bindSkyNight(tries = 0) {
+    const SK = game.skyParams?.();
+    if (!SK) {
+      if (tries < 40) setTimeout(() => bindSkyNight(tries + 1), 250);
+      return;
+    }
+    slider("dv-sk-milky", SK, "milkyWay", (v) => (v < 0.005 ? "0.00 (off)" : v.toFixed(2)));
+    slider("dv-sk-stars", SK, "starBrightness", (v) => v.toFixed(2));
+    slider("dv-sk-moon", SK, "moonSizeDeg", (v) => v.toFixed(2) + " deg");
+    slider("dv-sk-earth", SK, "moonEarthshine", (v) => v.toFixed(3));
+  })();
+
   /* Lens flare — the params live in the ENGINE's world state (worldEnvironment owns
    * the flare), reached through the game handle. Same bind-by-name slider helper as
    * everything else here. */

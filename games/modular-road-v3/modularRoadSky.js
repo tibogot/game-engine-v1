@@ -15,11 +15,12 @@ import {
   float, vec2, vec3, vec4, Fn, If, uniform, texture,
   positionWorld, cameraPosition,
   normalize, dot, cross, sqrt, max, min, mix, smoothstep, pow, exp,
-  sin, fract, floor, abs, length, step, saturate,
+  sin, fract, floor, abs, length, step, saturate, atan,
 } from "three/tsl";
 
 import { sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
 import { createMoonSurface } from "./modularRoadMoon.js";
+import { createMilkyWay, galacticBasis, BAND_SIN } from "./modularRoadMilkyWay.js";
 
 const SKY_RADIUS = 4000;
 /** Scratch for the painted deck's key-light integrals — reused, allocates nothing. */
@@ -63,6 +64,8 @@ export const SKY_DEFAULTS = {
   cloudSeaScale: 0.0035,
   zenithDepth: 1,
   starBrightness: 1,
+  /** Brightness of the galactic band. 0 removes it (the fetch stays, gated by night). */
+  milkyWay: 0.85,
 };
 
 /** Clock times that hit the four looks at lat 45 / day 172. */
@@ -414,6 +417,17 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
   const uNightF = uniform(0);
   const uTwilightF = uniform(0);
   const uStarBrightness = uniform(P.starBrightness);
+  /** Baked galactic band — see modularRoadMilkyWay.js. One fetch, no per-pixel noise. */
+  const milkyWay = createMilkyWay({ seed: P.milkyWaySeed ?? 20287 });
+  const milkyTex = texture(milkyWay.map);
+  const _gal = galacticBasis();
+  const uGalPole = uniform(_gal.pole);
+  const uGalX = uniform(_gal.gx);
+  const uGalY = uniform(_gal.gy);
+  const uMilkyWay = uniform(P.milkyWay);
+  /** sin(latitude) -> texture row. The strip covers +/-BAND_SIN, so this is its inverse
+   *  span; outside it the clamp lands on rows the bake already faded to zero. */
+  const uGalScale = uniform(0.5 / BAND_SIN);
 
   const hash12 = (p) =>
     fract(sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453));
@@ -439,11 +453,30 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
   });
 
   const starField = Fn(([dir]) => {
+    /*
+     * THE GALACTIC BAND.
+     *
+     * Sampled in galactic coordinates: latitude is one dot product against the pole,
+     * longitude one atan of the two in-plane components. That is the whole projection —
+     * the structure itself was baked (see modularRoadMilkyWay.js), so what happens here
+     * per pixel is a projection and a fetch, not noise.
+     *
+     * It lives inside starField rather than beside it because both want the same night
+     * gate, and because the band has to drive the STAR DENSITY as well as the glow: the
+     * Milky Way is unresolved starlight, so resolved stars must crowd along it too. A
+     * uniform starfield with a glowing stripe behind it reads as a painted backdrop.
+     */
+    const gb = dot(dir, uGalPole);
+    const gl = atan(dot(dir, uGalY), dot(dir, uGalX)).mul(0.15915494).add(0.5);
+    const mw = milkyTex.sample(vec2(gl, saturate(gb.mul(uGalScale).add(0.5))));
+    const mwGlow = mw.r.mul(uMilkyWay);
+
     const sp = dir.mul(240.0);
     const cell = floor(sp);
     const f = fract(sp).sub(0.5);
     const rnd = hash33(cell);
-    const present = step(0.86, rnd.x);
+    // Lower the bar for a cell to hold a star where the band is thick.
+    const present = step(float(0.86).sub(mw.g.mul(uMilkyWay).mul(0.14)), rnd.x);
     const off = hash33(cell.add(vec3(1.7, 9.2, 3.3))).sub(0.5).mul(0.65);
     const d = length(f.sub(off));
     const size = mix(float(0.03), float(0.09), rnd.z.mul(rnd.z));
@@ -451,7 +484,16 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
     const mag = mix(float(0.45), float(1.8), rnd.y.mul(rnd.y));
     const tw = sin(uTime.mul(2.4).add(rnd.y.mul(6.2831))).mul(0.28).add(0.72);
     const col = mix(vec3(0.65, 0.78, 1.0), vec3(1.0, 0.88, 0.7), rnd.z.mul(rnd.z));
-    return col.mul(present.mul(core).mul(mag).mul(tw).mul(uStarBrightness).mul(4.2));
+    const stars = col.mul(present.mul(core).mul(mag).mul(tw).mul(uStarBrightness).mul(4.2));
+    /*
+     * The glow is faintly BLUE-WHITE, not grey. Integrated starlight is dominated by
+     * hot main-sequence stars, and the dust that makes the rift also reddens what shows
+     * through it — so a neutral band looks like fog and a slightly cool one looks like
+     * a galaxy. Kept dim on purpose: it should be something the eye finds after a
+     * moment, the way it is outdoors, not a feature competing with the moon.
+     */
+    const mwCol = vec3(0.62, 0.70, 0.95).mul(mwGlow.mul(0.5));
+    return stars.add(mwCol);
   });
 
   const skyColorNode = Fn(() => {
@@ -707,6 +749,7 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
     uNightF.value = look.nightF;
     uTwilightF.value = look.twilightF;
     uStarBrightness.value = P.starBrightness;
+    uMilkyWay.value = P.milkyWay;
 
     /*
      * The painted deck's key light: what the sun actually looks like after travelling
@@ -754,6 +797,7 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
     mesh.geometry.dispose();
     material.dispose();
     moonSurface.dispose();
+    milkyWay.dispose();
   }
 
   return {

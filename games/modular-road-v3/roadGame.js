@@ -100,6 +100,7 @@ import { screenUV, uniform, vec2, vec4 } from "three/tsl";
 import {
   createRainLensUniforms, rainLensColor, RAIN_LENS_NUMBERS, RAIN_LENS_DEFAULTS,
 } from "./modularRoadRainLens.js";
+import { createWorldRain, markRainCollider } from "./modularRoadWorldRain.js";
 import {
   createRoadSurfaceV2,
   SURFACE_V2_DEFAULTS,
@@ -484,11 +485,62 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     });
   }
 
+  /* ── RAIN IN THE WORLD ─────────────────────────────────────────────────────
+   *
+   * The lens above says "it is raining" and the wet road says "it has rained".
+   * This is the part in between: drops that fall, and splash on whatever the
+   * deck actually is at that point — see modularRoadWorldRain.js.
+   *
+   * BUILT ON FIRST USE, like the clouds and for the same reason. It allocates
+   * four storage buffers, a 512² fp32 target and three pipelines, and a dry
+   * track must not pay for any of it. `worldRain` stays null until the weather
+   * is first turned up, and after that it is only hidden, because the compiles
+   * are the expensive part and paying them twice is worse than keeping them.
+   */
+  let worldRain = null;
+  const _rainFocus = new THREE.Vector3();
+  const _rainFwd = new THREE.Vector3();
+
+  function ensureWorldRain() {
+    if (worldRain) return worldRain;
+    worldRain = createWorldRain({ scene, renderer });
+    // Tag whatever already exists. Everything built LATER is tagged by
+    // syncRainColliders being called from the same places that re-apply the
+    // mirror membership — see the note there.
+    syncRainColliders();
+    return worldRain;
+  }
+
+  /**
+   * What rain is allowed to land on: THE MERGED TRACK, and nothing else.
+   *
+   * Not `builder.root`. Rain runs in drive mode only — the same call
+   * driftSmoke and sparks make — and the merged group is what actually draws
+   * there. Tagging the builder's pieces as well would mean re-tagging after
+   * every placement, delete and undo, because `rebuildAll` replaces them
+   * wholesale; that is a lot of churn to keep rain falling on a track nobody
+   * is driving on yet.
+   *
+   * Props are out too. They are instanced, most of them are thin things rain
+   * would fall past anyway, and each one is another draw in a bake that runs
+   * every frame.
+   *
+   * MUST BE RE-RUN AFTER EVERY MERGE. New meshes are born untagged; miss this
+   * and the failure reads as "rain falls through the deck", which sends you
+   * looking at the collision buffer instead of at a forgotten re-tag.
+   */
+  function syncRainColliders() {
+    if (!worldRain || !_mergedGroupRef) return;
+    markRainCollider(_mergedGroupRef);
+  }
+
   function setRainEnabled(on) {
     const next = !!on;
     if (next === rainEnabled) return;
     rainEnabled = next;
     applyRainLens();
+    if (rainEnabled) ensureWorldRain().setEnabled(true);
+    else worldRain?.setEnabled(false);
   }
 
   /* ── VOLUMETRIC CLOUDS ─────────────────────────────────────────────────────
@@ -3937,6 +3989,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // live track — 32 rail meshes on the reflect layer, all hidden; 8 visible,
     // none on the layer.
     applyRailReflectionMembers();
+    // ...and for exactly the same reason, what rain lands on. New meshes are
+    // born untagged, so a rebuilt track would quietly stop stopping rain and
+    // the drops would fall through the deck onto whatever is below it.
+    syncRainColliders();
   }
 
   // ── INSTANCED PROPS ────────────────────────────────────────────────────────
@@ -6820,6 +6876,9 @@ ${e.message}`);
       /** Lens flare params, with the GAME's look applied — see ensureFlareLook. The
        *  params object itself lives in the engine's world state; the panel binds to it
        *  by reference like every other live params bag here. */
+      /** The game sky's live params (stars, Milky Way, moon). Same by-reference
+       *  contract as the cloud bags — update() pushes each field into its uniform. */
+      skyParams: () => gameSky?.params ?? null,
       lensFlareParams: () => ensureFlareLook(),
       /** Live sun occlusion, 0..1, for a panel readout. */
       lensFlareOcclusion: () => _flareOcc,
@@ -7395,6 +7454,32 @@ ${e.message}`);
       sparks.updateFromVehicle(vehicle, camera, dt);
     }
 
+    /* WORLD RAIN — drive mode only, and after the rig for the same reason as
+     * the two above: the drops fade against the camera, so reading a stale rig
+     * would drag the whole field a frame behind at speed.
+     *
+     * The bake re-renders the collider layer, so it has to see this frame's
+     * poses — which the propInstancer update above has just written. Running
+     * it earlier would land splashes where the platforms used to be.
+     */
+    if (worldRain) {
+      // Set every frame rather than only on the mode switch: a field that is
+      // still VISIBLE while it has stopped being UPDATED is 4000 drops hanging
+      // motionless in the air, which is a worse bug than no rain at all.
+      const rainRunning = rainEnabled && mode === "drive";
+      worldRain.setEnabled(rainRunning);
+      if (rainRunning) {
+        _rainFocus.copy(vehicle.body.pos);
+        _rainFwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat);
+        // Airflow drags the rain back past the car, the same cue the lens gets
+        // from `lean`. Off ROAD speed, not total, so a fall does not blow the
+        // rain sideways.
+        const rainSpeed = vehicle.body.vel.dot(_rainFwd);
+        worldRain.setLean(-_rainFwd.x * rainSpeed * 0.35, -_rainFwd.z * rainSpeed * 0.35);
+        worldRain.update(_rainFocus, _rainFwd);
+      }
+    }
+
     // Beams run in BUILD mode too — the car is on the plate with its lights on
     // and the beams are children of the chassis, so skipping this outside drive
     // would leave them pointing wherever the car last was. Camera-dependent
@@ -7577,6 +7662,14 @@ ${e.message}`);
     setWeather: (name, seconds) => weather.set(name, seconds),
     getWeather: () => weather.name,
     weatherNames: WEATHER_NAMES,
+    /** RAIN — the lens AND the falling drops, one switch. The world rain is
+     *  built on the first `true` and only hidden afterwards, so the first call
+     *  costs the shader compiles and later ones cost nothing. */
+    setRain: setRainEnabled,
+    getRain: () => rainEnabled,
+    /** The world-rain system once it exists, for console tuning: every knob in
+     *  WORLD_RAIN_DEFAULTS has a setter on it. Null until rain is first on. */
+    worldRain: () => worldRain,
     /** Sky mode — terrain hidden, not solid, and not paid for. A track saved in
      *  sky mode is just a track; this is a runtime mode, not track data. */
     setTerrain,
