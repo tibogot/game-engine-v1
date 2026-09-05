@@ -194,6 +194,7 @@ import { WORLD_SIZE } from "../../v3/terrain/heightmapTexture.js";
 // imported assets — the source folder itself is not published.
 import auditTrackUrl from "./audittest.json?url";
 import loopbackTrackUrl from "./loopback-showcase.json?url";
+import bowlTrackUrl from "./bowl-showcase.json?url";
 
 /** Cap on physics ticks per frame — a long stall must not queue a huge backlog. */
 const MAX_SIM_TICKS = 8;
@@ -6015,6 +6016,7 @@ ${e.message}`);
   // the road you arrived on. See tools/buildLoopbackTrack.mjs, which generates
   // the track AND drives it before writing it.
   loadPresetTrack("road-preset-loopback", loopbackTrackUrl, "Load loop-back showcase");
+  loadPresetTrack("road-preset-bowl", bowlTrackUrl, "Load park bowl showcase");
 
   const gamepad = createGamepadInput();
   /** Set by readControls() when the pad's respawn button goes down this frame. */

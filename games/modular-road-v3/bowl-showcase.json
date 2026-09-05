@@ -1,0 +1,309 @@
+{
+ "format": "modular-road-track",
+ "version": 3,
+ "savedAt": "2026-09-05T01:21:39.076Z",
+ "roadParams": {},
+ "guardrailParams": {},
+ "pieceParams": {},
+ "portalParams": {},
+ "roadLook": {},
+ "environment": {},
+ "pieces": [
+  {
+   "id": "start",
+   "chainId": 0,
+   "pp": {},
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    70,
+    0,
+    1
+   ]
+  },
+  {
+   "id": "straight",
+   "chainId": 0,
+   "pp": {
+    "straightLength": 32
+   },
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    70,
+    -16,
+    1
+   ]
+  },
+  {
+   "id": "straight",
+   "chainId": 0,
+   "pp": {
+    "straightLength": 32
+   },
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    70,
+    -48,
+    1
+   ]
+  },
+  {
+   "id": "straight",
+   "chainId": 0,
+   "pp": {
+    "straightLength": 32
+   },
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    70,
+    -80,
+    1
+   ]
+  },
+  {
+   "id": "quarterpipe",
+   "chainId": 0,
+   "pp": {
+    "qpRadius": 40
+   },
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    70,
+    -112,
+    1
+   ]
+  },
+  {
+   "id": "finish",
+   "chainId": 0,
+   "pp": {},
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    6.123233995736766e-17,
+    1,
+    0,
+    0,
+    -1,
+    6.123233995736766e-17,
+    0,
+    0,
+    110,
+    -152,
+    1
+   ]
+  },
+  {
+   "id": "start",
+   "chainId": 1,
+   "pp": {},
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    90,
+    70,
+    0,
+    1
+   ]
+  },
+  {
+   "id": "straight",
+   "chainId": 1,
+   "pp": {
+    "straightLength": 32
+   },
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    90,
+    70,
+    -16,
+    1
+   ]
+  },
+  {
+   "id": "straight",
+   "chainId": 1,
+   "pp": {
+    "straightLength": 32
+   },
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    90,
+    70,
+    -48,
+    1
+   ]
+  },
+  {
+   "id": "straight",
+   "chainId": 1,
+   "pp": {
+    "straightLength": 32
+   },
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    90,
+    70,
+    -80,
+    1
+   ]
+  },
+  {
+   "id": "quarterpipe",
+   "chainId": 1,
+   "pp": {
+    "qpRadius": 60
+   },
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    90,
+    70,
+    -112,
+    1
+   ]
+  },
+  {
+   "id": "finish",
+   "chainId": 1,
+   "pp": {},
+   "connectorIn": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    6.123233995736766e-17,
+    1,
+    0,
+    0,
+    -1,
+    6.123233995736766e-17,
+    0,
+    90,
+    130,
+    -172,
+    1
+   ]
+  }
+ ],
+ "props": [],
+ "movers": [],
+ "portals": [],
+ "spawn": null
+}
