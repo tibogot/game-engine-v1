@@ -34,7 +34,7 @@
  */
 import * as THREE from "three/webgpu";
 import {
-  float, vec2, vec3, vec4, Fn, If, Loop, Break, uniform, texture, uv,
+  float, vec2, vec3, vec4, Fn, If, Loop, Break, uniform, texture, texture3D, uv,
   normalize, dot, length, max, min, mix, smoothstep, pow, exp, abs, sqrt, saturate, log2, fract, select,
   screenCoordinate, interleavedGradientNoise, screenSize, cameraProjectionMatrix,
 } from "three/tsl";
@@ -132,7 +132,7 @@ export const PAINTED_CLOUD_DEFAULTS = {
    * 0.7 read as a grey deck — the whole body dimmed, not just the flanks — so it sits
    * lower and the flank term carries the modelling instead.
    */
-  selfShadow: 0.45,
+  selfShadow: 0.6,
   /** Metres the per-step occlusion tap reaches toward the sun. About a lobe: shorter
    *  and it only darkens the pixel's own surface, longer and it becomes the long-range
    *  shadow the mid-plane taps already provide. */
@@ -188,7 +188,25 @@ export const PAINTED_CLOUD_DEFAULTS = {
   /** Key-light gain. Droplet albedo is ~0.9 and a sunlit top is far brighter than the
    *  sky beside it; at 1.0 the deck comes out beige because it can never exceed the sun
    *  colour lighting it. */
-  sunStrength: 2.5,
+  /*
+   * AN IRRADIANCE, since the 2026-09-05 light model: the phases carry their 1/4π and the
+   * ambient is the sky's own radiance, so the sun has to sit at the physical ratio above
+   * the sky (~880 W/m² of direct sun against ~40 W/m²/sr of sky, i.e. ~20x). The old 2.5
+   * belonged to a formula with no phase function. See the LIGHT MODEL note in the march.
+   */
+  sunStrength: 15,
+  /** Powder: thin front-lit cloud is darker than Beer says (no room to scatter forward
+   *  yet). Gated on sun-behind-viewer geometry, like the volumetric deck. */
+  powder: 0.4,
+  /** Ground albedo lighting the undersides, as a fraction of the sun irradiance / π. */
+  groundBounce: 0.12,
+  /** Dual-lobe Henyey-Greenstein eccentricities (forward, back); each scatter octave
+   *  halves them. `silver` scales the forward lobe. */
+  phaseFwd: 0.8,
+  phaseBack: 0.2,
+  /** Metres one wrap of the 3D erosion volume covers (32 voxels → ~10 m). This is the
+   *  fine cauliflower octave; it replaces a height-shifted 2D lookup near the camera. */
+  erosionScale: 320,
   /**
    * Multiple-scattering floor: the fraction of key light that survives where the
    * horizontal shadow has killed the direct term.
@@ -199,12 +217,33 @@ export const PAINTED_CLOUD_DEFAULTS = {
    * clouds look like smoke. The volumetric deck has the same term for the same reason.
    */
   msFloor: 0.25,
-  /** Sky ambient reaching the shaded side. 0 = black undersides. */
-  ambient: 0.55,
+  /** Sky ambient reaching the shaded side. 0 = black undersides. Sits well below 1 on
+   *  purpose: the ambient is now the sky's own radiance, and at 0.55 the fill outweighed
+   *  the key and the deck went flat blue-grey (measured 2026-09-05; 0.35 holds form). */
+  ambient: 0.35,
   /** Silver lining on thin cloud when looking toward the sun. */
   silver: 1.1,
   /** How strongly distance dissolves the deck into the sky behind it. */
+  /**
+   * Ceiling on how far distance can dissolve a cloud into the sky behind it. Reached
+   * asymptotically; `aerialDensity` sets how fast.
+   */
   aerial: 0.55,
+  /**
+   * Extinction per metre for that dissolve — the air between you and the cloud.
+   *
+   * This USED TO BE A PROXY: the fade was `smoothstep(0.42, 0.02, dir.y)`, i.e. driven by
+   * how low in the sky a ray pointed rather than by how far it actually travelled. That is
+   * right on average and wrong in every specific case. A cloud overhead got NO fade even at
+   * five kilometres, a cloud just above the horizon got the full fade even when it was
+   * close, and moving the deck's altitude or tile size changed the real distances without
+   * changing the fade at all. Distance is already known at every one of these sites — the
+   * slab crossing for the thin layers, the hit for the deck — so the honest form is just
+   * Beer extinction over it, and it costs one exp.
+   *
+   * 8e-5 puts a cloud 3 km out at ~20% dissolved and one near the 121 km horizon at ~100%.
+   */
+  aerialDensity: 0.00008,
   /**
    * Below this `dir.y` the deck fades out. Small now that the deck CURVES: with a
    * planet under it the slab crossing is finite even at dir.y = 0, so the deck can be
@@ -396,6 +435,37 @@ export function bakePaintedCloudMap(seed = 4177, size = PAINTED_MAP_SIZE) {
   return out;
 }
 
+/** 32³ inverted-Worley FBM (cells 3/6/12) — the deck's fine 3D erosion octave. */
+const EROSION_SIZE = 32;
+function bakeErosionVolume(seed = 0x3c5d, S = EROSION_SIZE) {
+  const rng = seededRandom(seed >>> 0);
+  const w3 = makeWorley(3, rng), w6 = makeWorley(6, rng), w12 = makeWorley(12, rng);
+  const data = new Uint8Array(S * S * S * 4);
+  let i = 0;
+  for (let z = 0; z < S; z++) {
+    const nz = z / S;
+    for (let y = 0; y < S; y++) {
+      const ny = y / S;
+      for (let x = 0; x < S; x++) {
+        const nx = x / S;
+        const a = w3(nx, ny, nz), b = w6(nx, ny, nz), c = w12(nx, ny, nz);
+        data[i++] = (a * 0.625 + b * 0.25 + c * 0.125) * 255;
+        data[i++] = b * 255;
+        data[i++] = c * 255;
+        data[i++] = 255;
+      }
+    }
+  }
+  for (let ch = 0; ch < 3; ch++) normalizeChannel(data, 4, ch);
+  const t = new THREE.Data3DTexture(data, S, S, S);
+  t.format = THREE.RGBAFormat;
+  t.type = THREE.UnsignedByteType;
+  t.minFilter = t.magFilter = THREE.LinearFilter;
+  t.wrapS = t.wrapT = t.wrapR = THREE.RepeatWrapping;
+  t.needsUpdate = true;
+  return t;
+}
+
 /**
  * @param {object}  [opts]
  * @param {number}  [opts.seed]
@@ -456,7 +526,28 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   const uSunStrength = uniform(P.sunStrength);
   const uAmbient = uniform(P.ambient);
   const uSilver = uniform(P.silver);
+  const uPowder = uniform(P.powder);
+  const uGroundBounce = uniform(P.groundBounce);
+  const uPhaseFwd = uniform(P.phaseFwd);
+  const uPhaseBack = uniform(P.phaseBack);
+  const uErosionScale = uniform(P.erosionScale);
+  /** World-space base altitude (camera y + altitude), for the published field. */
+  const uBaseWorld = uniform(0);
+  /** 3D Worley-FBM erosion volume — the one true-3D thing in this deck, and the reason
+   *  near lobes no longer read as an outline extruded and sheared. Baked synchronously:
+   *  32³ x 3 octaves is ~30 ms. */
+  const erosionVolume = bakeErosionVolume(seed ^ 0x3c5d);
+  const erosionTex = texture3D(erosionVolume, null, 0);
+
+  const INV_4PI = 1.0 / (4.0 * Math.PI);
+  const HG = Fn(([g, m]) => {
+    const g2 = g.mul(g);
+    return float(1.0).sub(g2)
+      .div(pow(float(1.0).add(g2).sub(g.mul(m).mul(2.0)).max(1e-4), 1.5))
+      .mul(INV_4PI);
+  });
   const uAerial = uniform(P.aerial);
+  const uAerialDensity = uniform(P.aerialDensity);
   const uHorizonFade = uniform(P.horizonFade);
   /** 1 / (2R) in metres — the only form the curvature maths actually needs. */
   const uInv2R = uniform(0.5 / (P.planetRadiusKm * 1000));
@@ -497,7 +588,39 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   // `v` is clamped to 1 first: the lumped mass can exceed 1, and at coverage 0 (lo = 1)
   // that excess over the guarded divisor blew up to full density — stepped ghost
   // columns standing in an otherwise clear sky.
+  /** Set by the sky before it builds its shader: returns {zenith, sun, anti} sky-radiance
+   *  nodes, evaluated where the deck needs them. See modularRoadSky. */
+  let ambientProvider = null;
+  const setAmbientProvider = (fn) => { ambientProvider = fn; };
+
+  /**
+   * How much the air between here and `dist` metres has dissolved what is out there.
+   * Beer extinction, capped by `aerial`. One exp, no fetches — the same curve the terrain's
+   * own aerial perspective uses, so a cloud and the hill under it agree about the air.
+   */
+  const aerialAt = Fn(([dist]) =>
+    saturate(exp(dist.mul(uAerialDensity).negate()).oneMinus().mul(uAerial)));
+
   const remapUnit = Fn(([v, lo]) => saturate(min(v, 1.0).sub(lo).div(float(1.0).sub(lo).max(1e-4))));
+
+  // ── Published field (world-space, for the environment probe) ─────────────────────
+  const fieldWeather = Fn(([p]) => {
+    const r = regional(p.xz.div(uTile).add(uWind));
+    return vec4(r.x, r.y, 0.0, 0.0);
+  });
+  const fieldDensityW = Fn(([p, wm]) => {
+    const fuv = p.xz.div(uTile).add(uWind);
+    const m = mapTex.sample(fuv);
+    const hBot = m.a.sub(0.5).mul(uBaseVary);
+    const h = p.y.sub(uBaseWorld).div(uThickness).sub(hBot);
+    const massL = m.r.add(m.b.sub(0.5).mul(uLump));
+    const planMass = remapUnit(massL, wm.x.oneMinus());
+    const top = mix(uTopMin, float(1.0), m.g).mul(mix(uEdgeTaper, float(1.0), planMass)).mul(wm.y);
+    const hL = h.div(top.max(0.05));
+    const prof = smoothstep(0.0, 0.06, hL).mul(smoothstep(1.0, 0.55, hL));
+    // Mean erosion taken out, as the volumetric deck's cheap sample does.
+    return remapUnit(massL.mul(prof), wm.x.oneMinus()).mul(uDensityMul).mul(uErode.mul(0.5).oneMinus());
+  });
 
   /*
    * REGIONAL CHARACTER — how big the clouds are HERE, not just how many.
@@ -627,7 +750,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       // Its own horizon fade and aerial: much further away, so it dissolves sooner in
       // angular terms even though it reaches further in metres.
       const maskC = smoothstep(float(0.002), float(0.03), y);
-      const aerC = smoothstep(float(0.30), float(0.005), y).mul(uAerial);
+      const aerC = aerialAt(tC);
       cirCol.assign(mix(lit, bgCol, aerC));
       cirA.assign(shapedC.mul(uCirrusAmount).mul(maskC));
     });
@@ -689,7 +812,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       const litA = keyA.mul(float(0.9).add(fwdA)).mul(shapeLit).add(ambCol.mul(0.35));
 
       const maskA = smoothstep(float(0.004), float(0.045), y);
-      const aerA = smoothstep(float(0.34), float(0.005), y).mul(uAerial);
+      const aerA = aerialAt(tA);
       altCol.assign(mix(litA, bgCol, aerA));
       altA.assign(shapedA.mul(uAltoAmount).mul(maskA));
     });
@@ -744,6 +867,9 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
        * pay for it. `steps` stays the floor the zenith uses.
        */
       const crossing = tTop.sub(tStart);
+      // Step no longer than a tenth of the slab (was 0.14): at grazing angles that is
+      // the difference between an 85 m and a 119 m step against masses a few hundred
+      // metres tall, and the search is one fetch per step, so it is cheap headroom.
       const nSteps = min(float(MAX_STEPS), max(uSteps, crossing.div(uThickness.mul(0.14)).ceil())).toVar();
       const dt = crossing.div(nSteps.max(1.0)).toVar();
 
@@ -762,8 +888,21 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       const reg = regional(uvMid).toVar();
 
       // Silver lining: thin cloud between you and the sun blazes. Gated on geometry.
-      const mu = saturate(dot(dir, sunDir));
-      const rim = pow(mu, float(8.0)).mul(uSilver);
+      /*
+       * PHASE FUNCTIONS, per pixel: a 50/50 dual-lobe Henyey-Greenstein (forward lobe
+       * scaled by `silver`), at full, half and quarter eccentricity for the three scatter
+       * octaves. The forward lobe IS the silver lining; the old pow(mu, 8) rim is gone.
+       */
+      const mu = dot(dir, sunDir);
+      const phaseAt = (k) => HG(uPhaseFwd.mul(k), mu).mul(0.5).mul(uSilver)
+        .add(HG(uPhaseBack.negate().mul(k), mu).mul(0.5));
+      // toVar: these are used inside the sub-march loop, and an un-cached TSL expression is
+      // re-evaluated at every use site — six HG lobes per STEP, not per pixel.
+      const ph0 = phaseAt(1.0).toVar();
+      const ph1 = phaseAt(0.5).toVar();
+      const ph2 = phaseAt(0.25).toVar();
+      // Ground radiance under the deck: albedo x sun irradiance / π, with the sun's height.
+      const groundLum = keyCol.mul(uSunStrength).mul(saturate(sunDir.y)).mul(uGroundBounce).mul(INV_4PI * 4.0).toVar();
 
       /*
        * ANALYTIC MIP LEVEL. Mip selection normally comes from screen-space derivatives,
@@ -823,34 +962,53 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
       // point test misses a low distant cloud between samples for some rows and not
       // others — row-aligned terraces. Gated on the column having height, or the
       // interval test passes wherever a ray crosses the base level.
+      /*
+       * CONSERVATIVE SEGMENT TEST — the silhouette notches. The test used to read the
+       * column ONCE, at the segment's midpoint. Seen from the side at a grazing angle,
+       * a tall narrow mass is a vertical wall in this bound, and whether a segment's
+       * single midpoint lands inside that wall flips from one screen row to the next:
+       * the outline came out notched in horizontal steps one search step tall (the
+       * debug view's alpha panel shows the sawtooth plainly; it survived every change
+       * to the integrator because it is decided before the integrator runs). Testing
+       * the segment against the UNION of the column at both its ends makes a hit
+       * monotone in how close the ray passes — and costs nothing: the end sample is
+       * carried into the next step as its start, so it is still one fetch per step.
+       */
+      const segOverlap = (cA, cB, t0, t1) => min(
+        min(hAt(t1).sub(min(cA.x, cB.x)), max(cA.y, cB.y).sub(hAt(t0))),
+        max(cA.w, cB.w).sub(0.002),
+      );
       const t = tStart.toVar();
       const lo = float(-1.0).toVar();
       const hi = float(-1.0).toVar();
       const hitT = float(-1.0).toVar();
+      const cA = column(uvAt(tStart), lodAt(tStart)).toVar();
+      const cLo = vec4(0.0).toVar();
       Loop(MAX_STEPS, ({ i }) => {
         If(float(i).greaterThanEqual(nSteps), () => Break());
         const tB = t.add(dt);
-        const c = column(uvAt(t.add(tB).mul(0.5)), lodAt(tB));
-        const ov = min(min(hAt(tB).sub(c.x), c.y.sub(hAt(t))), c.w.sub(0.002));
-        If(ov.greaterThan(0.0), () => {
+        const cB = column(uvAt(tB), lodAt(tB)).toVar();
+        If(segOverlap(cA, cB, t, tB).greaterThan(0.0), () => {
           lo.assign(t);
           hi.assign(tB);
           hitT.assign(t.add(tB).mul(0.5));
+          cLo.assign(cA);
           Break();
         });
+        cA.assign(cB);
         t.assign(tB);
       });
 
       If(hitT.greaterThan(0.0), () => {
-        // Refine by halving the segment with the same test: the entry to within dt/16.
-        Loop(4, () => {
+        // Refine by halving the segment with the same test: the entry to within dt/64.
+        Loop(6, () => {
           const mid = lo.add(hi).mul(0.5);
-          const cL = column(uvAt(lo.add(mid).mul(0.5)), lodAt(mid));
-          const ovL = min(min(hAt(mid).sub(cL.x), cL.y.sub(hAt(lo))), cL.w.sub(0.002));
-          If(ovL.greaterThan(0.0), () => {
+          const cM = column(uvAt(mid), lodAt(mid)).toVar();
+          If(segOverlap(cLo, cM, lo, mid).greaterThan(0.0), () => {
             hi.assign(mid);
           }).Else(() => {
             lo.assign(mid);
+            cLo.assign(cM);
           });
         });
         hitT.assign(lo);   // the start of the entry sub-segment: begin the march OUTSIDE
@@ -862,8 +1020,9 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         // somewhere kilometres away and slid with the ray, printing stripes).
         const sA = mapTex.sample(uvH.add(sunXZ.mul(reach.mul(0.45)))).level(lodH);
         const sB = mapTex.sample(uvH.add(sunXZ.mul(reach))).level(lodH);
+        // toVar, or both taps are re-fetched at every sub-step that reads sTau.
         const sTau = sA.r.add(sA.b.sub(0.5).mul(uLump)).mul(0.55)
-          .add(sB.r.add(sB.b.sub(0.5).mul(uLump)).mul(0.45));
+          .add(sB.r.add(sB.b.sub(0.5).mul(uLump)).mul(0.45)).toVar();
         const sunShadow = exp(sTau.mul(uAbsorb).negate());
         const shadeLifted = sunShadow.add(uMsFloor.mul(sunShadow.oneMinus()));
 
@@ -893,7 +1052,14 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         sZ.addAssign(fZ.sub(fine).mul(bumpK));
         const nTop = normalize(vec3(sX.negate(), 1.0, sZ.negate()));
         // Wrapped lambert on the column-top normal; `flank` says how much of it counts.
-        const ndl = saturate(dot(nTop, sunDir).mul(0.5).add(0.5));
+        const ndl = saturate(dot(nTop, sunDir).mul(0.5).add(0.5)).toVar();
+        // Which horizon this flank faces: the sun side takes the warm sky, the far side
+        // the cool one. This is what gives a sunset cloud a lit side AND a blue-grey side.
+        const sw = saturate(dot(vec2(nTop.x, nTop.z), sunXZ).mul(2.5).add(0.5));
+        // Built HERE, inside the hit branch, so only cloud pixels pay for the sky taps.
+        const ambNodes = ambientProvider ? ambientProvider() : { zenith: ambCol, sun: ambCol, anti: ambCol };
+        const ambZenith = vec3(ambNodes.zenith).toVar();
+        const ambHoriz = mix(ambNodes.anti, ambNodes.sun, sw).toVar();
 
         /*
          * ══════════════════════════════════════════════════════════════════════════
@@ -932,17 +1098,45 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
          * the same stride decisions, so nothing grains.
          * ══════════════════════════════════════════════════════════════════════════
          */
-        const SUB = 16;
+        const SUB = 24; // rewinds spend a step or two; opaque rays still break early
         const ds0 = dt.mul(0.5).toVar();
         const lodSubK = log2(ds0.mul(uStepLod).mul(float(PAINTED_MAP_SIZE)).div(uTile).max(1e-4));
         const transmittance = float(1.0).toVar();
         const scattered = vec3(0.0).toVar();
+        // Previous sample, for the trapezoid: the march starts OUTSIDE the cloud.
+        const dPrev = float(0.0).toVar();
+        const lumPrev = vec3(0.0).toVar();
         const ds = ds0.toVar();
         const ts = hitT.add(ds0.mul(0.5)).toVar();
         Loop(SUB, () => {
           // Opaque, or out through the top of the slab (the tallest cell reaches ~1.2
           // once baseVary and the regional height scale are in): nothing left to add.
-          If(transmittance.lessThan(0.02).or(hAt(ts).greaterThan(1.25)), () => Break());
+          /*
+           * AN OPAQUE RAY IS OPAQUE — and this is why STARS SHOWED THROUGH THICK CLOUD.
+           *
+           * The march gives up once the ray has almost nothing left to collect, at 2%
+           * transmittance. Leaving it there hands the composite an alpha of 0.98, so 2%
+           * of whatever is BEHIND the deck still comes through. For a sky gradient that
+           * is invisible. For a star it is not: a star is a point of several units of
+           * radiance against a night sky near zero, so two percent of it is still a
+           * clearly visible dot — sitting in the middle of a cloud that ought to be
+           * kilometres of water. The thicker the cloud the worse it looked, because
+           * thick cloud is exactly where the march quits early.
+           *
+           * A real cumulus at this density has an optical depth in the hundreds; its
+           * true transmittance is not 0.02, it is effectively zero. So when the march
+           * stops for that reason it says so, and the pixel goes fully opaque. (This is
+           * also what the volumetric deck and the reference renderer both do at their
+           * early-exit — the alpha is the whole point of stopping.)
+           *
+           * Leaving the slab through the top is a DIFFERENT reason to stop: there the
+           * ray really has finished and whatever transmittance it has left is honest.
+           */
+          If(transmittance.lessThan(0.02), () => {
+            transmittance.assign(0.0);
+            Break();
+          });
+          If(hAt(ts).greaterThan(1.25), () => Break());
           const uv = uvAt(ts);
           // The density is integrated at the SUB-step, so its mip floor comes from ds, not
           // from the search step; and the erosion octaves are clamped off the tiny mips,
@@ -961,57 +1155,174 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
           const prof = smoothstep(0.0, 0.06, hL).mul(smoothstep(1.0, 0.55, hL));
           const shaped = remapUnit(massL.mul(prof), reg.x.oneMinus());
 
-          // Two erosion octaves, shifting with height so the mass is not its own outline
-          // extruded; churned by uEvolve. Edge-weighted: rims erode, cores survive.
-          const dUv = uv.mul(3.1).add(vec2(h.mul(0.35).add(uEvolve), h.mul(-0.27)));
-          const fUv2 = uv.mul(9.7).add(vec2(h.mul(-0.8), h.mul(0.6).sub(uEvolve.mul(1.7))));
-          const billow = mapTex.sample(dUv).level(lod.add(1.632).min(4.0)).b.mul(0.62)
-            .add(mapTex.sample(fUv2).level(lod.add(3.278).min(4.0)).b.mul(0.38));
-          const biteRaw = billow.mul(uErode).mul(mix(float(0.6), float(1.25), saturate(hL)));
-          const bite = biteRaw.mul(mix(float(0.35), float(1.0), shaped.oneMinus()));
-          const dens = saturate(remapUnit(shaped, bite).mul(uEdgeHard)).mul(uDensityMul);
+          /*
+           * ══════════════════════════════════════════════════════════════════════════
+           * EVERYTHING BELOW IS GATED ON THERE BEING CLOUD HERE.
+           *
+           * The march spends most of its steps in clear air: the stride lengthens through
+           * the void the erosion carves at a rim, and a landing stride is rewound rather
+           * than integrated. Those steps used to run the WHOLE body anyway — two erosion
+           * fetches, the sun-occlusion fetch, three scatter octaves, the ambient — and
+           * throw the answer away. On a sky filling the frame that was measured at 2.4 ms
+           * of the deck's cost at native resolution.
+           *
+           * So: erosion only where the shaped mass is above the noise floor, and the light
+           * model only on a step that is actually going to be integrated. An empty step is
+           * now one texture fetch and some arithmetic.
+           *
+           * (`dens` and `lum` must be declared OUTSIDE the branches: a TSL value created
+           * inside an `If` does not exist after it.)
+           * ══════════════════════════════════════════════════════════════════════════
+           */
+          const dens = float(0.0).toVar();
+          If(shaped.greaterThan(0.001), () => {
+            // Two erosion octaves, shifting with height so the mass is not its own outline
+            // extruded; churned by uEvolve. Edge-weighted: rims erode, cores survive.
+            const dUv = uv.mul(3.1).add(vec2(h.mul(0.35).add(uEvolve), h.mul(-0.27)));
+            const fUv2 = uv.mul(9.7).add(vec2(h.mul(-0.8), h.mul(0.6).sub(uEvolve.mul(1.7))));
+            /*
+             * THE FINE OCTAVE IS 3D NEAR THE CAMERA. A 2D lookup shifted with height can
+             * only shear one outline through the body; a real cauliflower lobe differs
+             * with height. One volume fetch at the sample's world position (x, z from the
+             * map uv, y from the slab height) gives that. It fades to the 2D octave with
+             * the mip level: the volume has no mips, and at a distance where a sub-step
+             * spans several voxels it would only add shimmer that the 2D octave's mip chain
+             * already filters away.
+             */
+            const p3 = vec3(uv.x.mul(uTile), h.mul(uThickness).add(uEvolve.mul(140.0)), uv.y.mul(uTile))
+              .div(uErosionScale);
+            const near3 = smoothstep(2.5, 0.5, lod);
+            // One fetch, not two, except in the crossfade band: the 3D volume near, the 2D
+            // octave far. A volume sample is eight taps, so this branch is worth having.
+            const fine = float(0.0).toVar();
+            If(near3.greaterThan(0.999), () => {
+              fine.assign(erosionTex.sample(p3).level(0.0).r);
+            }).ElseIf(near3.lessThan(0.001), () => {
+              fine.assign(mapTex.sample(fUv2).level(lod.add(3.278).min(4.0)).b);
+            }).Else(() => {
+              fine.assign(mix(
+                mapTex.sample(fUv2).level(lod.add(3.278).min(4.0)).b, erosionTex.sample(p3).level(0.0).r, near3,
+              ));
+            });
+            const billow = mapTex.sample(dUv).level(lod.add(1.632).min(4.0)).b.mul(0.62)
+              .add(fine.mul(0.38));
+            const biteRaw = billow.mul(uErode).mul(mix(float(0.6), float(1.25), saturate(hL)));
+            const bite = biteRaw.mul(mix(float(0.35), float(1.0), shaped.oneMinus()));
+            dens.assign(saturate(remapUnit(shaped, bite).mul(uEdgeHard)).mul(uDensityMul));
+          });
 
           /*
-           * SHORT-RANGE SUN OCCLUSION, one tap per step: the uneroded shaped density a
-           * lobe's length toward the sun, at the height the sun ray reaches there. This
-           * is what darkens a lobe's own shaded side and lets neighbouring lobes shadow
-           * each other; the per-ray mid-plane taps only carry the long range, and with
-           * nothing local every mass came out one flat white. Lifted by the same
-           * multiple-scattering floor as the long shadow, for the same reason.
+           * REWIND, OR THE DECK TERRACES. The stride lengthens through the clear air the
+           * erosion carves at the rim; when a long stride LANDS in cloud, the boundary is
+           * somewhere inside the stride just taken, and integrating the whole stride from
+           * this one sample credits the pixel with up to 4 fine steps of density at once.
+           * Neighbouring rays land after different numbers of skips, so that credit jumps
+           * between them in discrete amounts — horizontal terraces up every tall mass at
+           * low coverage (measured: erode 0, which makes the bound exact so nothing is ever
+           * skipped, removed them; sharper mips did not). So a landing stride is not
+           * integrated: the ray steps back to the start of that stride plus one fine
+           * step and resumes at the fine rate, exactly like the volumetric deck's step-back.
            */
-          const sS = mapTex.sample(uv.add(vec2(sunDir.x, sunDir.z).mul(uSelfReach).div(uTile))).level(lod);
-          const hS = hAt(ts).add(sunDir.y.mul(uSelfReach).div(uThickness)).sub(sS.a.sub(0.5).mul(uBaseVary));
-          const massS = sS.r.add(sS.b.sub(0.5).mul(uLump));
-          const planS = remapUnit(massS, reg.x.oneMinus());
-          const topS = mix(uTopMin, float(1.0), sS.g).mul(mix(uEdgeTaper, float(1.0), planS)).mul(reg.y);
-          const hLS = hS.div(topS.max(0.05));
-          const profS = smoothstep(0.0, 0.06, hLS).mul(smoothstep(1.0, 0.55, hLS));
-          const shapedS = remapUnit(massS.mul(profS), reg.x.oneMinus());
-          const occ = exp(shapedS.mul(uSelfShadow).mul(-3.0));
-          const occLifted = occ.add(uMsFloor.mul(occ.oneMinus()));
-
-          // Vertical light gradient: tops catch the sun, bases sit in their own shadow;
-          // the surface normal folds in at `flank` weight for the lobe modelling.
-          const vertG = mix(uBaseDark, float(1.0), saturate(hL));
-          const sunTerm = shadeLifted.mul(occLifted).mul(vertG).mul(mix(float(1.0), ndl, uFlank));
-          const lit = keyCol.mul(uSunStrength).mul(sunTerm.add(rim.mul(vertG)));
-          const amb = ambCol.mul(uAmbient).mul(mix(float(0.55), float(1.0), saturate(hL)));
-          const lum = lit.add(amb);
-          const stepT = exp(dens.mul(ds).negate());
-          scattered.addAssign(transmittance.mul(lum).mul(stepT.oneMinus()));
-          transmittance.mulAssign(stepT);
-          ts.addAssign(ds);
-          // Empty-space skipping: lengthen the stride through clear air, and snap back
-          // to the fine stride the moment there is density to resolve.
-          ds.assign(select(dens.greaterThan(1e-6), ds0, min(ds.mul(1.6), ds0.mul(6.0))));
+          const landed = dens.greaterThan(1e-6).and(ds.greaterThan(ds0.mul(1.01)));
+          If(landed, () => {
+            ts.assign(ts.sub(ds).add(ds0));
+            ds.assign(ds0);
+          }).Else(() => {
+            const lum = vec3(0.0).toVar();
+            If(dens.greaterThan(1e-6), () => {
+              /*
+               * SHORT-RANGE SUN OCCLUSION, one tap: the uneroded shaped density a lobe's
+               * length toward the sun, at the height the sun ray reaches there. This is
+               * what darkens a lobe's own shaded side and lets neighbouring lobes shadow
+               * each other; the per-ray mid-plane taps only carry the long range, and with
+               * nothing local every mass came out one flat white.
+               */
+              const sS = mapTex.sample(uv.add(vec2(sunDir.x, sunDir.z).mul(uSelfReach).div(uTile))).level(lod);
+              const hS = hAt(ts).add(sunDir.y.mul(uSelfReach).div(uThickness)).sub(sS.a.sub(0.5).mul(uBaseVary));
+              const massS = sS.r.add(sS.b.sub(0.5).mul(uLump));
+              const planS = remapUnit(massS, reg.x.oneMinus());
+              const topS = mix(uTopMin, float(1.0), sS.g).mul(mix(uEdgeTaper, float(1.0), planS)).mul(reg.y);
+              const hLS = hS.div(topS.max(0.05));
+              const profS = smoothstep(0.0, 0.06, hLS).mul(smoothstep(1.0, 0.55, hLS));
+              const shapedS = remapUnit(massS.mul(profS), reg.x.oneMinus());
+              /*
+               * ════════════════════════════════════════════════════════════════════════
+               * THE LIGHT MODEL (2026-09-05) — the same physics the volumetric tiers use,
+               * fed by the two cheap occlusion estimates this deck already had.
+               *
+               * Before this the sun term was a vertical gradient times a normal times an
+               * occlusion, with a pow(mu, 8) "silver" bolted on: no phase function, no
+               * multiple scattering, one flat ambient colour. It tuned to "white" but never
+               * to cumulus, because what makes a lit crown read as cloud is the RATIO — a
+               * forward-scatter peak against the sun, a diffusion-lifted body, and
+               * undersides lit by sky and ground alone.
+               *
+               *   • Optical depth toward the sun: this lobe tap (short range) plus the
+               *     per-ray mid-plane taps (long range), summed.
+               *   • Three Wrenninge scatter octaves at fixed weights 1 / 0.5 / 0.25 and
+               *     extinction e^-τ / e^-τ/2 / e^-τ/4, each with its own phase (eccentricity
+               *     halved per octave) — the dual-lobe HG above.
+               *   • A diffusion floor (isotropic, sun-coloured) where the octaves have died.
+               *   • Powder, gated front-lit; the vertical gradient and the flank normal keep
+               *     their roles as the cheap stand-ins for the light march this deck lacks.
+               *   • Ambient BY DIRECTION: zenith sky on the crown, the sun-side or anti-sun
+               *     horizon on the flank (see `sw`), ground bounce under the base. This is
+               *     the term that makes dusk a lit side and a blue-grey side instead of one
+               *     salmon mass.
+               * ════════════════════════════════════════════════════════════════════════
+               */
+              const tauSun = shapedS.mul(uSelfShadow).mul(3.0).add(sTau.mul(uAbsorb));
+              const eS = exp(tauSun.mul(-0.25));
+              const eS2 = eS.mul(eS);
+              const eS4 = eS2.mul(eS2);
+              const ms = eS4.mul(ph0).add(eS2.mul(0.5).mul(ph1)).add(eS.mul(0.25).mul(ph2));
+              const floorTerm = uMsFloor.mul(INV_4PI).mul(eS4.oneMinus());
+              const hC = saturate(hL);
+              const vertG = mix(uBaseDark, float(1.0), hC);
+              const flankMix = mix(float(1.0), ndl, uFlank);
+              const powder = mix(
+                float(1.0), exp(dens.div(uDensityMul.max(1e-4)).mul(-2.0)).oneMinus(),
+                uPowder.mul(saturate(mu.negate())),
+              );
+              const sunTerm = ms.mul(flankMix).add(floorTerm).mul(vertG).mul(powder);
+              const lit = keyCol.mul(uSunStrength).mul(sunTerm);
+              const skyAmb = mix(mix(ambZenith, ambHoriz, 0.5), ambZenith, sqrt(hC));
+              const amb = skyAmb.add(groundLum.mul(hC.oneMinus())).mul(uAmbient);
+              lum.assign(lit.add(amb));
+            });
+            /*
+             * TRAPEZOID, NOT ZERO-ORDER HOLD — the finer striations. Point-sampling the
+             * density and holding it over the whole step turns every boundary the erosion
+             * carves inside the body into a step function of WHERE it falls between two
+             * samples; across a cloud that phase cycles once per step of height, and the
+             * accumulated alpha prints it as fine horizontal contours. (Measured: they
+             * survived zeroing the erosion's height shift, so they were never the texture.)
+             * Integrating the density as LINEAR between successive samples makes the
+             * integral continuous in the boundary position — the same trick as the
+             * volumetric deck's dither, without the grain. Colour is density-weighted, so
+             * an empty step's `lum` of zero carries no weight and is free to be skipped.
+             */
+            const dAvg = dPrev.add(dens).mul(0.5);
+            const lumAvg = dPrev.mul(lumPrev).add(dens.mul(lum)).div(dAvg.mul(2.0).max(1e-6));
+            const stepT = exp(dAvg.mul(ds).negate());
+            scattered.addAssign(transmittance.mul(lumAvg).mul(stepT.oneMinus()));
+            transmittance.mulAssign(stepT);
+            dPrev.assign(dens);
+            lumPrev.assign(lum);
+            ts.addAssign(ds);
+            // Empty-space skipping: lengthen the stride through clear air (capped at two
+            // search steps so a rewind wastes little), snap back on density.
+            ds.assign(select(dens.greaterThan(1e-6), ds0, min(ds.mul(1.6), ds0.mul(4.0))));
+          });
         });
+
 
         const alpha = transmittance.oneMinus().mul(hMask).toVar();
         // Premultiplied during integration; back to straight alpha for the composite.
         const col = scattered.div(alpha.max(1e-4)).toVar();
 
         // Aerial perspective: distant deck recedes into the sky BEHIND it.
-        const aerial = smoothstep(float(0.42), float(0.02), y).mul(uAerial);
+        const aerial = aerialAt(hitT);
         col.assign(mix(col, bgCol, aerial));
 
         deckCol.assign(col);
@@ -1463,7 +1774,14 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     uSunStrength.value = P.sunStrength;
     uAmbient.value = P.ambient;
     uSilver.value = P.silver;
+    uPowder.value = P.powder;
+    uGroundBounce.value = P.groundBounce;
+    uPhaseFwd.value = P.phaseFwd;
+    uPhaseBack.value = P.phaseBack;
+    uErosionScale.value = P.erosionScale;
+    uBaseWorld.value = (camPos?.y ?? 0) + P.altitude;
     uAerial.value = P.aerial;
+    uAerialDensity.value = P.aerialDensity;
     uHorizonFade.value = P.horizonFade;
     uInv2R.value = 0.5 / Math.max(1e3, P.planetRadiusKm * 1000);
     uCirrusAmount.value = P.cirrusAmount;
@@ -1554,8 +1872,23 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     params: P,
     map,
     shade,
+    setAmbientProvider,
     update,
     sunThrough,
+    /**
+     * THE DENSITY FIELD AS TSL, for the sky-with-clouds environment probe (and anything
+     * else that wants to ask "how much cloud is here" from its own shader). The same
+     * contract the volumetric deck publishes: weather at a world point, cheap density
+     * given that weather, and the slab bounds as uniforms — so the probe cannot drift
+     * from the deck it lights the world with.
+     */
+    field: {
+      sampleWeather: fieldWeather,
+      sampleDensityCheapW: fieldDensityW,
+      sampleDensityCheap: Fn(([p]) => fieldDensityW(p, fieldWeather(p))),
+      uBase: uBaseWorld,
+      uThickness,
+    },
     // Custom-cloud contract (see worldEnvironment.setCustomCloudSystem). Registered only
     // while the painted tier is live, and only to cast ground shadows — the deck itself
     // is drawn by the sky dome, not here.
@@ -1566,6 +1899,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     renderFrame,
     dispose() {
       map.dispose();
+      erosionVolume.dispose();
       shadowMat.dispose();
       shadowQuad.geometry.dispose();
       shaftMat.dispose();
