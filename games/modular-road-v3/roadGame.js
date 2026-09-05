@@ -7434,6 +7434,10 @@ ${e.message}`);
       setDriftSmokeEnabled: (on) => driftSmoke.setSmokeEnabled(on),
       setWetSprayEnabled: (on) => driftSmoke.setSprayEnabled(on),
       cameraParams: chase.params,
+      // The BUILDER itself, for the panel controls that edit geometry rather
+      // than a uniform — the flip ramp's shape has to rewrite placed pieces
+      // and rebuild them, which no getter/setter pair can stand in for.
+      builder,
       audioState,
       vehicleAudioSettings,
       // Build

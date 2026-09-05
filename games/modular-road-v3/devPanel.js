@@ -12,6 +12,7 @@
 // now (Mode section) until a dedicated menu exists.
 import * as THREE from "three";
 import { formatRunTime } from "./modularRoadRun.js";
+import { PIECE_PARAM_DEFAULTS } from "./modularRoadKit.js";
 
 const CHECK_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
@@ -1081,6 +1082,170 @@ export function createRoadDevPanel({ app, game, params }) {
             <b>Ceiling</b> caps the assist in car weights; geometry needing more
             still launches, which is what keeps <i>Hill Jump</i> a jump. Ceiling 0
             gives the old car back.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Flip ramp — shape</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Entry radius</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-r1" min="6" max="40" step="0.5" />
+              <span class="prop-num" id="dv-fr-r1-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Face angle</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-face" min="40" max="85" step="1" />
+              <span class="prop-num" id="dv-fr-face-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Face length</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-len" min="0" max="24" step="0.5" />
+              <span class="prop-num" id="dv-fr-len-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Top radius</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-r2" min="4" max="32" step="0.5" />
+              <span class="prop-num" id="dv-fr-r2-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Exit angle</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-exit" min="95" max="165" step="1" />
+              <span class="prop-num" id="dv-fr-exit-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Easement</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-ease" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-fr-ease-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Live — every flip ramp already placed is rebuilt as you drag, and the
+            next one you place inherits it.<br /><br />
+            <b>Exit angle</b> is the pacing knob. Past 90° the car is sent back
+            the way it came, and the further past, the more of its speed goes
+            BACK rather than UP — so this is what to reach for when the hang time
+            is wrong, not the run-up. <b>Face length</b> is also the CAMERA's
+            knob: the nose angle does not change along a straight face and the
+            pivot dwells wherever the nose stops, so a longer face is a longer
+            hold on the side view. <b>Easement</b> rounds the curvature into and
+            out of each corner (0 = the plain three-segment shape).
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Flip ramp — the turn</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Slowest turn</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-minrate" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-fr-minrate-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Fastest turn</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-maxrate" min="0" max="6" step="0.05" />
+              <span class="prop-num" id="dv-fr-maxrate-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Ease onto stop</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-easerate" min="0.2" max="6" step="0.1" />
+              <span class="prop-num" id="dv-fr-easerate-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Hold authority</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-gain" min="0" max="20" step="0.5" />
+              <span class="prop-num" id="dv-fr-gain-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Nose needed</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-minnose" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-fr-minnose-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            The half-turn the ramp writes into the car as the wheels leave. It
+            targets an ATTITUDE — flat upside down — rather than an amount, which
+            is what stops it becoming a multi-flip.<br /><br />
+            <b>Slowest / fastest turn</b> clamp the rate carried off the lip;
+            <b>Ease onto stop</b> is how sharply it slows as it arrives inverted.
+            <b>Fastest turn</b> at 0 switches the whole thing off and leaves the
+            ramp's bare shape, which is the honest A/B. <b>Nose needed</b> is how
+            far up the car must point at the lip for any of it to arm — it is
+            what keeps ordinary jumps ordinary.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Flip ramp — the shot</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Sweep starts</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-pivfrom" min="5" max="45" step="1" />
+              <span class="prop-num" id="dv-fr-pivfrom-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Side view at</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-pivside" min="30" max="110" step="1" />
+              <span class="prop-num" id="dv-fr-pivside-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sweep ends</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-pivto" min="50" max="130" step="1" />
+              <span class="prop-num" id="dv-fr-pivto-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sweep speed</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-pivrate" min="0.4" max="3" step="0.05" />
+              <span class="prop-num" id="dv-fr-pivrate-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Follow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fr-headlerp" min="4" max="40" step="1" />
+              <span class="prop-num" id="dv-fr-headlerp-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            The camera's single 180° pivot around the car — roof, then side, then
+            underside — spent entirely on the CLIMB, so the shot is composed
+            before the wheels leave and frozen through the flight.<br /><br />
+            <b>Side view at</b> wants to match the ramp's face angle: the nose
+            angle is constant along a straight face, so hinging the halfway point
+            there parks the dwell exactly on the side view. <b>Sweep ends</b> must
+            stay under the angle the nose actually reaches — about 85°, not the
+            lip's 135°, because the car comes off the curl before then. A target
+            it never reaches is a pivot that never finishes.
           </div>
         </div>
       </div>
@@ -4712,6 +4877,75 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-hold-corr", ROAD_HOLD, "correctRate",
     (v) => (v > 0 ? `${(1000 / v).toFixed(0)} ms` : "off"));
   slider("dv-hold-g", ROAD_HOLD, "maxG", (v) => (v ? `${v.toFixed(1)}g` : "off"));
+  // ── THE FLIP RAMP ────────────────────────────────────────────────────────
+  // Three groups, because the trick is three things that have to agree: the
+  // ramp's SHAPE, the TURN the vehicle writes at the launch, and the camera's
+  // SHOT. Tuning any one of them by editing a file and reloading is most of why
+  // getting the shot right took as long as it did.
+  //
+  // The turn and the shot are live objects, so those bind straight through.
+  // The shape is geometry and has to be rebuilt — see applyFlipShape.
+  const FLIP_SHAPE_KEYS = ["flipRampRadius", "flipRampAngle", "flipRampFace",
+    "flipRampTopRadius", "flipRampExit", "flipRampEase"];
+  /** A staging object the sliders bind to; writes fan out on change. */
+  const flipShape = {};
+  {
+    // Seed from a placed ramp if there is one, else from whatever the builder
+    // would place next, so the controls are never blank.
+    const b = game.builder;
+    // …and fall back to the kit's own defaults. The panel is built before any
+    // track is loaded, so on a cold start there is no placed ramp AND no
+    // builder to ask — and a slider seeded from undefined does not render
+    // blank, it throws in its own formatter and takes the whole boot with it.
+    const src = b?.pieces?.find((p) => p.id === "flip_ramp")?.pp ?? b?.activeParams ?? {};
+    for (const k of FLIP_SHAPE_KEYS) flipShape[k] = src[k] ?? PIECE_PARAM_DEFAULTS[k];
+  }
+  function applyFlipShape() {
+    const b = game.builder;
+    if (!b) return;
+    let touched = 0;
+    for (const p of b.pieces) {
+      if (p.id !== "flip_ramp") continue;
+      // REPLACED, not mutated. `rebuildAll` compares `pp` BY REFERENCE to decide
+      // whether a piece still needs remeshing — "a piece's params are cloned
+      // once at placement and never mutated afterwards" — so editing the object
+      // in place leaves the reference equal, the shape is judged unchanged, and
+      // the old geometry is kept. The values move and nothing on screen does.
+      // A fresh object is also what keeps a `pp` shared with another piece (the
+      // builder hands out `activeParams` by reference) from being dragged along.
+      p.pp = { ...p.pp, ...flipShape };
+      touched++;
+    }
+    if (b.activeParams) b.activeParams = { ...b.activeParams, ...flipShape };
+    if (touched) b.rebuildAll({ reuse: true });
+  }
+  const shape = (id, key, fmt) => slider(id, flipShape, key, fmt, applyFlipShape);
+  shape("dv-fr-r1", "flipRampRadius", (v) => `${v.toFixed(1)} m`);
+  shape("dv-fr-face", "flipRampAngle", (v) => `${v.toFixed(0)}°`);
+  shape("dv-fr-len", "flipRampFace", (v) => `${v.toFixed(1)} m`);
+  shape("dv-fr-r2", "flipRampTopRadius", (v) => `${v.toFixed(1)} m`);
+  shape("dv-fr-exit", "flipRampExit",
+    (v) => `${v.toFixed(0)}°${v > 90 ? "" : " — no reversal"}`);
+  shape("dv-fr-ease", "flipRampEase", (v) => (v <= 0 ? "plain corners" : v.toFixed(2)));
+
+  slider("dv-fr-minrate", TIRE, "rampFlipMinRate", (v) => `${v.toFixed(2)} rad/s`);
+  slider("dv-fr-maxrate", TIRE, "rampFlipMaxRate",
+    (v) => (v <= 0 ? "off — shape only" : `${v.toFixed(2)} rad/s`));
+  slider("dv-fr-easerate", TIRE, "rampFlipEase", (v) => v.toFixed(1));
+  slider("dv-fr-gain", TIRE, "rampFlipGain", (v) => v.toFixed(1));
+  slider("dv-fr-minnose", TIRE, "rampFlipMinNose",
+    (v) => `${(Math.asin(Math.min(1, v)) * 180 / Math.PI).toFixed(0)}° nose`);
+
+  // The rig copies CHASE_CAM once at construction, so these have to write to the
+  // LIVE copy the game handed out — editing the module's constants would look
+  // like it worked and change nothing.
+  const camP = game.cameraParams ?? null;
+  slider("dv-fr-pivfrom", camP, "pivotFromDeg", (v) => `${v.toFixed(0)}°`);
+  slider("dv-fr-pivside", camP, "pivotSideDeg", (v) => `${v.toFixed(0)}°`);
+  slider("dv-fr-pivto", camP, "pivotToDeg", (v) => `${v.toFixed(0)}°`);
+  slider("dv-fr-pivrate", camP, "pivotRate", (v) => `${(180 * v).toFixed(0)}°/s max`);
+  slider("dv-fr-headlerp", camP, "flipHeadingLerp", (v) => `${(1000 / v).toFixed(0)} ms`);
+
   const holdBtn = $("#dv-hold-on");
   const syncHold = () => {
     holdBtn.textContent = ROAD_HOLD.enabled ? "On" : "Off";
