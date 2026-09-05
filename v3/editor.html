@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./styles/editor.css" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
   </head>
-  <body data-stochastic-ui="custom">
+  <body>
     <div id="app">
       <!-- Toolbar -->
       <div id="toolbar">
@@ -963,12 +963,6 @@
                 Texture Library
               </div>
               <div class="section-body" id="texlib-body">
-                <div class="prop-row">
-                  <span class="prop-label" title="Randomizes texture tiling so repeats aren't visible. Costs 2 extra albedo taps per painted layer. Toggling reloads the editor.">No-tile blending</span>
-                  <div class="prop-value">
-                    <input type="checkbox" id="ck-stochastic" />
-                  </div>
-                </div>
                 <!-- Slot tabs (L1-L7) -->
                 <div class="texlib-slot-tabs" id="texlib-tabs">
                   <button class="texlib-tab active" data-slot="0">L1</button>

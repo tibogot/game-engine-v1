@@ -3640,22 +3640,6 @@ export function createRoadDevPanel({ app, game, params }) {
         </div>
       </div>
 
-      <!-- Not an FX control at all: this is the TERRAIN texture's stochastic
-           tiling (the terrain_stochastic key; reloads the page). It has always lived
-           in FX. Left here rather than moved to World so no one's muscle memory
-           breaks, but named so the filter finds it. -->
-      <div class="inspector-section">
-        <div class="section-header">FX — Terrain texture</div>
-        <div class="section-body">
-          <div class="prop-row">
-            <span class="prop-label">Stochastic tiling</span>
-            <div class="prop-value">
-              <button class="action-btn" id="dv-stoch" type="button">Off</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div class="inspector-section">
         <div class="section-header">FX — Sparks</div>
         <div class="section-body">
@@ -5717,30 +5701,6 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-smoke", true, (on) => game.setDriftSmokeEnabled(on));
   // Smoke look.  is driven directly and lifeMin follows at 45% of it —
   // two independent life sliders is a fiddly way to say "longer plume".
-  // Stochastic terrain tiling — OPT-IN, off unless the key is exactly "true".
-  //
-  // MUST MATCH stochasticTex.js's own test (`=== "true"`), which is the source
-  // of truth: it is read once at module load and decides whether the extra taps
-  // are compiled into the shader at all. This used to read `!== "false"`, the
-  // old default, so with the key unset the button claimed "On" while the shader
-  // had been built with it OFF — a toggle that lied about the state it toggles.
-  //
-  // The label no longer quotes ~5ms: measured on this project it is 0.13 ms
-  // (4.98 vs 4.85 ms). It is off because it is unused, not because it is dear.
-  //
-  // Flipping RELOADS the page, since the graph is built at load — hence a
-  // button rather than a switch that would appear to do nothing.
-  const stochBtn = $("#dv-stoch");
-  if (stochBtn) {
-    const stochOn = () => localStorage.getItem("terrain_stochastic") === "true";
-    stochBtn.textContent = stochOn() ? "On" : "Off";
-    stochBtn.classList.toggle("primary", stochOn());
-    stochBtn.title = "Hides terrain texture repetition (~0.13 ms). Reloads the page.";
-    stochBtn.addEventListener("click", () => {
-      localStorage.setItem("terrain_stochastic", stochOn() ? "false" : "true");
-      location.reload();
-    });
-  }
 
   // ── World light ─────────────────────────────────────────────────────────────
   // Lighting is not stored in the .v3proj, so these edit LIVE engine state that

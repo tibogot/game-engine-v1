@@ -5,7 +5,6 @@ import Stats from "stats-gl";
 import { texture, uniform, float, mix, positionWorld, vec2, vec3, length, smoothstep, mx_noise_float } from "three/tsl";
 import { createHeightmapTexture, saveTerrainConfig, legacySplatSize, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
-import { STOCHASTIC_ENABLED, toggleStochastic } from "../../v2/core/legacy/stochasticTex.js";
 import { createTerrainLOD, LOD_LEVELS } from "../terrain/terrainLOD.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import {
@@ -3498,12 +3497,6 @@ export async function startV3App(opts = {}) {
   // Fill / Clear buttons
   pbtnFill.addEventListener("click", () => { paintSys.fillWithActiveLayer(); });
   pbtnClear.addEventListener("click", () => { paintSys.clearAll(); });
-
-  // Stochastic (no-tile) sampling toggle — lives in the Paint panel now; the
-  // shared module's floating button is suppressed via <body data-stochastic-ui>.
-  const ckStochastic = document.getElementById("ck-stochastic");
-  ckStochastic.checked = STOCHASTIC_ENABLED;
-  ckStochastic.addEventListener("change", () => toggleStochastic());
 
   // ── Snow panel controls ────────────────────────────────────────────────────
   {

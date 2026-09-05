@@ -28,7 +28,6 @@
  * land inside one branch and be read (stale) from another.
  */
 import * as THREE from "three";
-import { stochasticSampleArray } from "../../v2/core/legacy/stochasticTex.js";
 import {
   Fn, If, float, int, struct, vec2, vec3,
   texture, mix, max, clamp, sqrt, uniform, step, normalize,
@@ -120,7 +119,7 @@ export function createSplatOverlay(
   const layerOrms    = [];
   for (let i = 0; i < NUM_LAYERS; i++) {
     const uv = positionWorld.xz.mul(invWS).mul(layerSlots[i].uUVScale);
-    layerAlbedos.push(stochasticSampleArray(albedoArrNode, uv, int(i)));
+    layerAlbedos.push(albedoArrNode.sample(uv).depth(int(i)));
     layerOrms.push(ormArrNode.sample(uv).depth(int(i)));
   }
 

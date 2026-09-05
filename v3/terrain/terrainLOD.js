@@ -554,9 +554,9 @@ export function createTerrainLOD(
    * height change, so the surface visibly ripples — and because the textures are
    * world-anchored (positionWorld.xz) while the geometry moves underneath them,
    * it reads as the texture crawling across the rock. Reported as "the terrain
-   * texture really morphs", and mistaken for the stochastic-tiling artefact,
-   * which swims the same way for an unrelated reason (its camera-distance
-   * crossfade).
+   * texture really morphs", and first misdiagnosed as a texture-SAMPLING bug —
+   * a swimming surface and a swimming sample look identical on screen. If it
+   * ever comes back, suspect the geometry before the shader.
    *
    * Snapping fixes it because a jump of exactly one grid step puts every vertex
    * where its neighbour just was, so the sampled surface is IDENTICAL before and
