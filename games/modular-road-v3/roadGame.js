@@ -101,7 +101,11 @@ import { screenUV, uniform, vec2, vec4 } from "three/tsl";
 import {
   createRainLensUniforms, rainLensColor, RAIN_LENS_NUMBERS, RAIN_LENS_DEFAULTS,
 } from "./modularRoadRainLens.js";
-import { createWorldRain, markRainCollider } from "./modularRoadWorldRain.js";
+import {
+  createWorldRain, markRainCollider, WORLD_RAIN_DEFAULTS,
+} from "./modularRoadWorldRain.js";
+import { createLightning } from "./modularRoadLightning.js";
+import { createBolt, makeBoltPath } from "./modularRoadBolt.js";
 import {
   createRoadSurfaceV2,
   SURFACE_V2_DEFAULTS,
@@ -168,8 +172,9 @@ import { createSegmentDash } from "./segmentDash.js";
 import { createDriftScore, DRIFT_SCORE } from "./driftScore.js";
 import { loadWheelModel } from "./wheelModel.js";
 import {
-  loadChassisModel, CHASSIS_GLB, applyChassisGlbTransform, resetChassisGlbFit, chassisGlbMounts,
-  bakeGhostCarGeometry,
+  loadChassisModel, CHASSIS_GLB, CHASSIS_GLB_URL, applyChassisGlbTransform,
+  resetChassisGlbFit, chassisGlbMounts, bakeGhostCarGeometry,
+  createCarRainUniforms, CAR_RAIN,
 } from "./chassisModel.js";
 import { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } from "./modularRoadSparks.js";
 import { PropPhysics, PROP_PHYSICS, PHYSICS_PROP_TYPES } from "./modularRoadPropPhysics.js";
@@ -934,21 +939,189 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * PAINTED deck (the default tier) and the aerial pass; see modularRoadWeather.js for
    * why it deliberately leaves the sun, the exposure and the rain alone.
    *
-   * `onWetness` is a hook, not a wiring: it reports the preset's wetness once a
-   * transition settles and does nothing with it, because the road-surface and rain
-   * systems are owned elsewhere. Connect it there when that work is ready.
+   * `onWetness` is the SETTLE event, not the wiring — it fires once, when the sky has
+   * stopped moving, and its job is to refresh the IBL (a thing that must not happen per
+   * frame). The per-frame wiring is `applyWeatherToSurface` below, which reads the live
+   * crossfaded `weather.wetness` / `weather.rain`.
    */
   const weather = createWeather({
     painted: paintedParams,
     aerial: aerial.params,
     onWetness: (w) => {
       _weatherWetness = w;
+      // ONE MORE APPLY, at the settle. `applyWeatherToSurface` runs only while a
+      // transition is in flight so that it lets go of the sliders afterwards —
+      // but that meant the FINAL state was never applied, because the settle
+      // happens inside this update and clears `transitioning` before the wiring
+      // is reached. A zero-second change (`setWeather("storm", 0)`) therefore
+      // moved the sky and left the road bone dry.
+      //
+      // It also makes the end state exact: the last in-flight frame lands on
+      // 0.999-something, and this puts it on the preset's actual number.
+      _weatherSettleApply = true;
       // A settled weather change is a big move in what the sky looks like — overcast
       // should flatten the world's ambient — and nothing else would tell the IBL.
       app.envSky?.invalidate();
     },
   });
   let _weatherWetness = 0;
+  /** Set at the settle, consumed by the next `applyWeatherToSurface`. See onWetness. */
+  let _weatherSettleApply = false;
+
+  /**
+   * WEATHER → THE ROAD AND THE RAIN. The wiring that was a TODO for a month.
+   *
+   * ── ONLY WHILE IT IS MOVING ──────────────────────────────────────────────────
+   *
+   * This runs during a transition and then STOPS, which is the same discipline
+   * modularRoadWeather already applies to the sky params and for the same reason: a
+   * controller that keeps writing every frame silently fights every slider in the dev
+   * panel. Drag "wetness" after a storm has settled and it stays where you put it.
+   *
+   * The consequence is that the crossfade DURATION is the drying time — `setWeather
+   * ("fair", 40)` is a road drying out over forty seconds. That is a better knob than a
+   * hidden decay rate, because it is the one the caller already has.
+   *
+   * ── RAIN IS EDGE-TRIGGERED, WETNESS IS CONTINUOUS ────────────────────────────
+   *
+   * `setRainEnabled` is expensive at the edges — it builds the world-rain system on the
+   * first true and rebuilds the road material either way (the impact rings are a
+   * build-time feature). So it is called with a THRESHOLD, and it early-outs when the
+   * answer has not changed. Everything else here is a uniform poke and can run per frame.
+   *
+   * The soft ramp comes from the uniforms instead: the lens master, the impact-ring
+   * master and the world drops all fade with `weather.rain`, so rain arrives and leaves
+   * gradually even though the switch itself is binary.
+   */
+  /**
+   * Where on the weather's rain curve the sky actually opens, and it is NOT near zero.
+   *
+   * Wetness and rain ride the same crossfade, so a threshold at 0.02 makes them
+   * simultaneous — and simultaneous is backwards. Measured that way, leaving a storm dried
+   * the road to 0.026 while it was still raining. A storm should GATHER before it rains
+   * and stop raining before the road dries, and one number buys both: at 0.35 the clouds
+   * build for the first ~40% of the fade, and on the way out the rain stops with ~40% of
+   * the drying still to come.
+   */
+  /**
+   * LIGHTNING. Renders nothing — see modularRoadLightning.js. It is a clock that
+   * produces one number, and `syncWorldLightToSky` adds that number to lights the
+   * scene already has. Nothing is ever created or destroyed for a strike, because
+   * changing the scene's light SET rebuilds every material in the world.
+   *
+   * Its `amount` follows the weather's rain on the same curve as everything else,
+   * so a storm rolling in starts flashing as it arrives rather than being a
+   * separate switch — which is the whole reason the weather wiring came first.
+   */
+  const lightning = createLightning();
+  /**
+   * THE WEATHER FX SWITCHBOARD — one flag per thing this game can add to a
+   * storm, all defaulting on.
+   *
+   * These are DEBUG and QUALITY switches, not look settings: they never ride a
+   * track save, and each one is written so that OFF genuinely costs nothing
+   * rather than multiplying a finished result by zero. Where a feature could
+   * only be made free by leaving it out of the shader, it is a build-time flag
+   * and says so; where a WGSL branch was enough, it is a branch.
+   *
+   *   lightning    the clock. Off = no strikes, so the world flash, the cloud
+   *                glow and the bolt are all inert by construction.
+   *   cloudFlash   the deck lighting from inside. Behind a real `If` in
+   *                modularRoadPaintedClouds — off is one compare per cloud pixel.
+   *   bolt         the visible channel. Off = a hidden mesh, which draws nothing.
+   *   carRain      beads on the paint. Behind an `If` in chassisModel — off is
+   *                one compare per bodywork pixel.
+   *   weatherDrive whether a weather preset is allowed to move the road and the
+   *                rain at all. Off leaves every surface exactly where it is,
+   *                which is what you want while tuning one of them by hand.
+   */
+  const weatherFx = {
+    lightning: true,
+    cloudFlash: true,
+    bolt: true,
+    carRain: true,
+    weatherDrive: true,
+  };
+  /** How much of a full storm's rain reads as an electrical storm. Below 1 so
+   *  heavy rain is not automatically a thunderstorm — most of them are not. */
+  const LIGHTNING_IN_STORM = 0.85;
+  /**
+   * How hard a full flash pushes the world's ambient, as a multiple of the
+   * hemisphere light's current intensity. The flash is AMBIENT, not directional:
+   * the light comes from the whole sky at once through cloud, which is why a
+   * strike flattens shadows for a frame instead of casting new ones.
+   */
+  const LIGHTNING_HEMI_GAIN = 9.0;
+  /** ...and a smaller push on the key light, so surfaces facing the sky pick up
+   *  a little more than the ones facing away. Purely for shape. */
+  const LIGHTNING_DIR_GAIN = 2.0;
+  /** Lightning is a blue-white arc, far colder than any sky this game has. */
+  const _boltCol = new THREE.Color(0.82, 0.88, 1.0);
+  /** The last clap to arrive, kept only so the queue drains and a HUD can read it. */
+  let _lastThunder = null;
+  /**
+   * How hard a full flash lights the cloud deck. Well above the world gain: the deck
+   * is the medium the strike is INSIDE, so it is the brightest thing in the frame,
+   * and it is also the only part of the effect the player can look straight at.
+   */
+  const LIGHTNING_CLOUD_GAIN = 2.4;
+  /** So the deck is cleared exactly once when a strike ends, not every frame. */
+  let _cloudFlashOn = false;
+
+  /**
+   * THE VISIBLE CHANNEL — built on the first strike that earns one, then reused.
+   *
+   * MOST STRIKES GET NO BOLT, and that is the realism rather than a saving. The
+   * majority of real strikes are cloud-to-cloud with the channel buried inside
+   * the deck; what you see is the cloud lighting up, which is already handled.
+   * Drawing a channel for every flash would look like a fireworks display.
+   *
+   * So a bolt appears only when the strike is close enough for one to be
+   * plausible AND a roll goes its way. Everything else is a flash and a glow.
+   */
+  const BOLT_MAX_DISTANCE = 2600;
+  const BOLT_CHANCE = 0.55;
+  /** Where the channel starts, metres above the strike point — inside the deck. */
+  const BOLT_TOP = 900;
+  let bolt = null;
+  let _boltPeak = 1;
+  /** The strike this channel was built for; a new one means regenerate. */
+  let _boltAt = -1;
+  const _boltFrom = new THREE.Vector3();
+  const _boltTo = new THREE.Vector3();
+
+  const RAIN_ON_AT = 0.35;
+  function applyWeatherToSurface() {
+    // Lightning is driven by the weather's SETTLED state as much as its
+    // transition, so unlike the rest of this function it is set before the
+    // early-out — a storm that has finished arriving must keep striking.
+    lightning.setAmount(weatherFx.lightning ? weather.rain * LIGHTNING_IN_STORM : 0);
+    if (!weatherFx.weatherDrive) return;
+    if (!weather.transitioning && !_weatherSettleApply) return;
+    _weatherSettleApply = false;
+
+    setRoadWet(weather.wetness);
+
+    const r = weather.rain;
+    const on = r > RAIN_ON_AT;
+    setRainEnabled(on);
+    // Remapped so the visible intensity starts at ZERO the instant the switch flips.
+    // Feeding `r` straight in would pop every drop on screen in at 35% opacity.
+    const fall = on ? Math.min(1, (r - RAIN_ON_AT) / (1 - RAIN_ON_AT)) : 0;
+    if (rainUniforms.amount) rainUniforms.amount.value = fall;
+    // The rings' own fade-within-a-build. Guarded because the uniform only exists on a
+    // material that was built wet.
+    const ring = roadMaterial?._roadUniforms?.impactAmount;
+    if (ring) ring.value = fall;
+    worldRain?.setDropOpacity(WORLD_RAIN_DEFAULTS.dropOpacity * fall);
+    worldRain?.setSplashOpacity(WORLD_RAIN_DEFAULTS.splashOpacity * fall);
+    // BEADS ON THE PAINT, on the WET curve rather than the falling-rain one:
+    // a car does not dry the instant the rain stops, and water still standing
+    // on the bodywork is most of what says it has been raining.
+    if (carRainUniforms.amount) {
+      carRainUniforms.amount.value = weatherFx.carRain ? weather.wetness : 0;
+    }
+  }
 
   /** The cloud system the current tier wants in the slot, or null. */
   let _activeCloud = null;
@@ -1203,6 +1376,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let _smokeNightK = 1;
   let _smokeNightFromSky = false;
   let _skyLightKey = "";
+  /** The sky's answer, cached so the flash can be added to it every frame
+   *  without re-running the solar-elevation-keyed computation above it. */
+  let _skyLitBase = null;
+  const _litKeyCol = new THREE.Color();
+  const _litSkyCol = new THREE.Color();
+  const _litGndCol = new THREE.Color();
 
   function syncWorldLightToSky(look) {
     if (!SKY_LIGHT.enabled || !app.light) return;
@@ -1277,11 +1456,24 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       sunTint: _skyKeyCol,
     });
 
-    app.light.set({
-      dirColor: "#" + _skyKeyCol.getHexString(THREE.SRGBColorSpace),
+    /*
+     * THE BASE LIGHTING IS CACHED, NOT APPLIED DIRECTLY.
+     *
+     * Everything above this line is expensive and keyed on solar elevation, so
+     * with a frozen clock — the default — it runs ONCE and this function then
+     * early-outs forever. That is exactly right for the sky and exactly wrong
+     * for lightning, which has to change the world's light several times a
+     * second. The first attempt added the flash here and it never fired once,
+     * because the function it was written into had already returned.
+     *
+     * So the sky's answer is stored, and `applyWorldLight` — which is only a
+     * few colour lerps and one `app.light.set` — is what runs every frame.
+     */
+    _skyLitBase = {
+      dirColor: _skyKeyCol.clone(),
       dirIntensity: (look.dirIntensity / dayRef) * _lightRef.dir,
-      hemiSkyColor: "#" + _hemiSkyCol.getHexString(THREE.SRGBColorSpace),
-      hemiGroundColor: "#" + _hemiGndCol.getHexString(THREE.SRGBColorSpace),
+      hemiSkyColor: _hemiSkyCol.clone(),
+      hemiGroundColor: _hemiGndCol.clone(),
       hemiIntensity: (look.hemiIntensity / hemiDayRef) * _lightRef.hemi,
       exposure: look.exposure * _lightRef.exposure,
       /*
@@ -1300,11 +1492,76 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
        * against the boot value, so noon is unchanged.
        */
       envIntensity: (look.hemiIntensity / hemiDayRef) * _lightRef.env,
-    });
+    };
+    applyWorldLight();
     // The engine invalidates the IBL on ITS sky's parameters and has no idea ours
     // moved. This is already key-cached on solar elevation, so it fires only when the
     // sun actually moves — and the bake itself is spread one cube face per frame.
+    //
+    // Deliberately NOT in applyWorldLight: a lightning flash must never rebake the
+    // environment. It lasts a quarter of a second and the IBL would still be
+    // catching up long after it had gone.
     app.envSky?.invalidate();
+  }
+
+  /**
+   * Apply the cached sky lighting, plus whatever the lightning is doing.
+   *
+   * Runs EVERY frame — it is a few colour lerps and one `app.light.set`, which
+   * writes intensities and colours on lights that already exist. Nothing is
+   * created, nothing is destroyed, and the scene's light SET never changes:
+   * three hashes that set into every material's shader cache key, so adding a
+   * light for a strike would rebuild every material in the world at the one
+   * moment the frame must not hitch.
+   *
+   * The flash is ADDITIVE on the sky's own numbers, so it works at any hour: at
+   * midnight it is the only light there is, and at noon under a storm deck it is
+   * a bright wash over an already-lit world. Colours LERP toward the bolt rather
+   * than replacing it, so a half flash is half as cold.
+   */
+  function applyWorldLight() {
+    const b = _skyLitBase;
+    if (!b || !app.light) return;
+    const flash = lightning.flash;
+
+    _litKeyCol.copy(b.dirColor);
+    _litSkyCol.copy(b.hemiSkyColor);
+    _litGndCol.copy(b.hemiGroundColor);
+    let dirI = b.dirIntensity;
+    let hemiI = b.hemiIntensity;
+    if (flash > 0) {
+      hemiI += flash * LIGHTNING_HEMI_GAIN * _lightRef.hemi;
+      dirI += flash * LIGHTNING_DIR_GAIN * _lightRef.dir;
+      const k = Math.min(1, flash * 1.4);
+      _litKeyCol.lerp(_boltCol, k);
+      _litSkyCol.lerp(_boltCol, k);
+      _litGndCol.lerp(_boltCol, k * 0.6);
+    }
+
+    app.light.set({
+      dirColor: "#" + _litKeyCol.getHexString(THREE.SRGBColorSpace),
+      dirIntensity: dirI,
+      hemiSkyColor: "#" + _litSkyCol.getHexString(THREE.SRGBColorSpace),
+      hemiGroundColor: "#" + _litGndCol.getHexString(THREE.SRGBColorSpace),
+      hemiIntensity: hemiI,
+      exposure: b.exposure,
+      moonIntensity: b.moonIntensity,
+      envIntensity: b.envIntensity,
+    });
+  }
+
+  /**
+   * The per-frame half of the above. Skipped entirely while nothing is flashing,
+   * so a dry track pays one comparison — but it must run once MORE after the
+   * flash reaches zero, or the world would stay lit by the last frame of the
+   * strike until the sun next moved.
+   */
+  let _flashApplied = 0;
+  function applyLightningFlash() {
+    const f = lightning.flash;
+    if (f === 0 && _flashApplied === 0) return;
+    applyWorldLight();
+    _flashApplied = f;
   }
 
   /*
@@ -1412,6 +1669,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // Ticked before the early-out: a weather crossfade must keep running even while
     // the engine sky is showing (F8), or switching back would land mid-fade.
     weather.update(dt);
+    applyWeatherToSurface();
     if (!gameSkyOn || !gameSky) return;
     const look = gameSky.update({ camera, dt });
     // The atmosphere wants the camera ALTITUDE as well as the sun: half the
@@ -1419,7 +1677,84 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // when the sun or the height actually moved, so a frozen time of day costs
     // nothing per frame.
     gameAtmo.update(look.sunDir, Math.max(0, camera.position.y), look.moonDir);
+    /*
+     * Ticked HERE, after the early-out, so the clock and the flash cannot
+     * disagree: `syncWorldLightToSky` is the only thing that applies the flash,
+     * and it is the next line. On the engine sky (F8) neither runs, so lightning
+     * is a game-sky feature — which is fine, because so is the weather it
+     * belongs to.
+     */
+    lightning.update(dt);
+    /*
+     * THE DECK LIGHTS UP FROM INSIDE. Most strikes are cloud-to-cloud and the channel
+     * is never visible — what you actually see is the cloud itself glowing, so this is
+     * the part that reads as lightning rather than as the world being switched on.
+     *
+     * Positioned at the last strike's own bearing and distance from the car, so the
+     * glow is a patch of sky rather than the whole deck blinking. Only the painted
+     * tier has it; the volumetric deck is a different shape model and would need its
+     * own term.
+     */
+    if (gamePainted?.setLightningFlash) {
+      const st = lightning.lastStrike;
+      const f = weatherFx.cloudFlash ? lightning.flash : 0;
+      if (f > 0 && st) {
+        gamePainted.setLightningFlash(
+          f * LIGHTNING_CLOUD_GAIN,
+          camera.position.x + st.offsetX,
+          camera.position.z + st.offsetZ,
+          Math.max(600, st.distance * 0.7),
+        );
+      } else if (_cloudFlashOn) {
+        gamePainted.setLightningFlash(0);
+      }
+      _cloudFlashOn = f > 0;
+    }
+
+    /*
+     * THE CHANNEL. Regenerated only when a NEW strike starts — `lastStrike.at`
+     * changes exactly once per strike — never per frame. Between strikes this
+     * block is one comparison and a `visible = false`.
+     */
+    const st2 = lightning.lastStrike;
+    if (st2 && st2.at !== _boltAt) {
+      _boltAt = st2.at;
+      const wants = weatherFx.bolt
+        && st2.distance < BOLT_MAX_DISTANCE && Math.random() < BOLT_CHANCE;
+      if (wants) {
+        if (!bolt) bolt = createBolt(scene);
+        const gx = camera.position.x + st2.offsetX;
+        const gz = camera.position.z + st2.offsetZ;
+        // Ground end at the terrain if there is any. `groundBaseY` is the
+        // AUTHORING sampler — it returns 0 rather than NaN in sky mode, which is
+        // what this wants; the physics sampler's NaN would put the channel's
+        // foot at an undefined height and drop the whole mesh out of the frame.
+        const gy = terrainOn ? groundBaseY(gx, gz) : camera.position.y - 40;
+        _boltFrom.set(gx, gy + BOLT_TOP, gz);
+        _boltTo.set(gx, gy, gz);
+        bolt.show(makeBoltPath(_boltFrom, _boltTo));
+        _boltPeak = Math.max(0.05, st2.peak);
+      } else if (bolt) {
+        bolt.hide();
+      }
+    }
+    if (bolt?.visible) {
+      // Rides the same envelope as the flash, normalised by the strike's own
+      // peak so a distant, dim strike still shows a full-strength channel for
+      // the instant it exists — a bolt is not dimmer far away, it is smaller.
+      const k = lightning.flash / _boltPeak;
+      if (k <= 0.02) bolt.hide();
+      else bolt.setFade(Math.min(1, k));
+    }
+    // Drained every frame whether or not anything listens, so a storm cannot
+    // accumulate an unbounded queue of claps that were never collected. There is
+    // no thunder yet: it wants broadband noise and the audio system has only
+    // tone cues, so a beep would be worse than the silence.
+    _lastThunder = lightning.takeThunder() ?? _lastThunder;
     syncWorldLightToSky(look);
+    // ...and then the flash, on top of whatever that cached. Separate because
+    // the sky's half is keyed on solar elevation and skips almost every frame.
+    applyLightningFlash();
     // Rods take over as the sun goes; the shift's own per-pixel weight decides WHERE.
     app.postFx?.setPurkinje({ amount: look.nightF });
   }
@@ -3646,7 +3981,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let chassisLampsLocal = null;
   /** Shared car glyph (spawn marker, spawn brush, lap ghost). Not the live car. */
   let spawnGhostGeo = null;
-  loadChassisModel(renderer)
+  /**
+   * The car's beaded-water uniforms, made ONCE and handed to the chassis at
+   * load. Rain drives `amount`; everything else is the bead character.
+   *
+   * Built unconditionally, unlike the road's wet material, and the reason is
+   * the cost of being wrong: the chassis is a background GLB load, so building
+   * the paint dry and rebuilding it when the weather turns would mean a second
+   * fetch and a visible pop of the car's material mid-drive. One extra bead
+   * field on the paint shader, multiplied by an `amount` of 0, is the cheaper
+   * mistake — and `amount` 0 means the drops contribute exactly nothing.
+   */
+  const carRainUniforms = createCarRainUniforms();
+
+  loadChassisModel(renderer, CHASSIS_GLB_URL, { rainUniforms: carRainUniforms })
     .then((m) => {
       const { object, brakeLights, headlampLenses } = m;
       chassisGlbObject = object;
@@ -8024,6 +8372,47 @@ ${e.message}`);
     /** The world-rain system once it exists, for console tuning: every knob in
      *  WORLD_RAIN_DEFAULTS has a setter on it. Null until rain is first on. */
     worldRain: () => worldRain,
+    /**
+     * LIGHTNING. Its `amount` is driven by the weather, so setting it by hand is
+     * only useful for tuning — but `strikeNow()` fires one immediately, which is
+     * the difference between judging a change now and watching the sky for forty
+     * seconds hoping one lands while you are looking.
+     */
+    lightning,
+    strikeNow: (distance) => lightning.strike(distance),
+    getThunder: () => _lastThunder,
+    /** The painted deck instance, for console tuning and for asserting that a strike
+     *  actually reached its uniforms. Null unless the painted tier is live. */
+    paintedClouds: () => gamePainted,
+    /** The car's beaded-water uniforms — `amount` follows the weather's wetness;
+     *  the rest is bead character. See CAR_RAIN in chassisModel. */
+    carRain: () => carRainUniforms,
+    /**
+     * EVERY WEATHER EXTRA, ON ONE SWITCHBOARD. Read it, or set a flag and the
+     * change takes effect on the next frame. Machine/debug settings — never
+     * saved with a track.
+     *
+     * `setWeatherFx("carRain", false)` and friends; `weatherFx()` to read the
+     * current state. Each flag's OFF path is a real skip, not a multiply by
+     * zero — see the declaration for which mechanism each one uses.
+     */
+    weatherFx: () => ({ ...weatherFx }),
+    setWeatherFx: (key, on) => {
+      if (!(key in weatherFx)) return false;
+      weatherFx[key] = !!on;
+      // The two that leave state behind have to be told, or a strike frozen at
+      // the moment of switching off would stay on the deck / in the sky.
+      if (key === "cloudFlash" && !on) gamePainted?.setLightningFlash?.(0);
+      if (key === "bolt" && !on) bolt?.hide();
+      if (key === "carRain" && !on && carRainUniforms.amount) {
+        carRainUniforms.amount.value = 0;
+      }
+      return true;
+    },
+    /** The bolt mesh, once a strike has earned one. `show(makeBoltPath(a, b))`
+     *  draws an arbitrary channel, which is the only way to inspect one without
+     *  waiting for a strike to happen to land in frame. */
+    boltSystem: () => bolt,
     /** Sky mode — terrain hidden, not solid, and not paid for. A track saved in
      *  sky mode is just a track; this is a runtime mode, not track data. */
     setTerrain,

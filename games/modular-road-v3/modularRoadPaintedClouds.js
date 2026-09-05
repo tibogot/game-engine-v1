@@ -573,6 +573,25 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   /** Unit wind vector — cirrus aligns with the shear, not with world X. */
   const uWindDir = uniform(new THREE.Vector2(1, 0));
   const uWind = uniform(new THREE.Vector2());
+
+  /*
+   * ── LIGHTNING, LIT FROM INSIDE THE DECK ────────────────────────────────────────
+   *
+   * Its own uniforms rather than a push on `ambient` / `msFloor`, and that is not
+   * fastidiousness. The weather system CROSSFADES those params and snapshots them
+   * when a transition starts (modularRoadWeather's `snapshot`), so a strike landing
+   * mid-transition would be captured as the value the sky was fading FROM and burned
+   * into the deck permanently. A separate channel cannot corrupt anything.
+   *
+   * `uFlashUV` is a strike position in the same space `uvMid` lives in — world XZ
+   * divided by the tile — so the falloff is one subtract and a dot on a quantity the
+   * march already computed, and no world-space reconstruction is needed.
+   */
+  const uFlash = uniform(0);
+  const uFlashCol = uniform(new THREE.Color(0.82, 0.88, 1.0));
+  const uFlashUV = uniform(new THREE.Vector2());
+  /** 1/r² in tile units, so the falloff is `exp(-d²·k)`. */
+  const uFlashFalloff = uniform(1.0);
   /** Camera XZ in map units, so the deck is anchored to the WORLD and drifts past you
    *  as you drive instead of being glued to the camera. */
   const uCamXZ = uniform(new THREE.Vector2());
@@ -1325,6 +1344,47 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         const aerial = aerialAt(hitT);
         col.assign(mix(col, bgCol, aerial));
 
+        /*
+         * THE STRIKE, and it goes AFTER the haze rather than before it.
+         *
+         * Before felt right — a distant flash should recede like the cloud carrying
+         * it — and measured, it was useless. From a chase camera you see the deck near
+         * the HORIZON, where storm-density aerial is ~95%, so the mix erased the flash
+         * almost entirely: at a realistic strength nothing visible happened, and it took
+         * driving the term to 25 to see the sky move at all.
+         *
+         * It is also not what a strike does. The flash lights the AIR between you and
+         * the cloud as well as the cloud itself, so the haze is not a filter over it —
+         * the haze glows too. Modelling that properly belongs in the aerial pass; until
+         * then, not attenuating twice is much closer than attenuating twice.
+         *
+         * Distance still dims it, through `uFlashFalloff`: the falloff is radial around
+         * the strike, so a storm on the horizon is faint because it is FAR, which is the
+         * honest reason, rather than because the haze ate it.
+         *
+         * Gated by the deck's alpha at composite time, so the flash exists only where
+         * there is cloud to light — dense core bright, thin fringe faint. `uWind` comes
+         * back off `uvMid` because the deck scrolls and the strike does not; leave it in
+         * and the glow drifts across the sky with the weather.
+         */
+        /*
+         * BEHIND A REAL `If`, not a multiply by zero.
+         *
+         * `uFlash` is 0 for all but a fraction of a second every half minute, and
+         * an `exp` of a `dot` on every cloud pixel of every frame to multiply the
+         * answer by nothing is exactly the trap this project has already written
+         * down: a uniform toggle saves nothing until the work sits inside a WGSL
+         * branch. Gated, a storm with the lightning switched off costs one scalar
+         * compare per cloud pixel.
+         */
+        const flashAdd = vec3(0.0).toVar();
+        If(uFlash.greaterThan(0.0001), () => {
+          const fd = uvMid.sub(uWind).sub(uFlashUV);
+          const fw = exp(dot(fd, fd).mul(uFlashFalloff).negate());
+          flashAdd.assign(uFlashCol.mul(uFlash.mul(fw)));
+        });
+        col.addAssign(flashAdd);
+
         deckCol.assign(col);
         deckA.assign(alpha);
 
@@ -1875,6 +1935,26 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
     setAmbientProvider,
     update,
     sunThrough,
+    /**
+     * Light the deck from inside for one strike.
+     *
+     * @param {number} amount   0..1 flash, straight off the lightning clock
+     * @param {number} [worldX] where it struck; the deck lights up around it
+     * @param {number} [worldZ]
+     * @param {number} [radius] metres to 1/e of the glow
+     *
+     * Uniform pokes only — nothing here rebuilds or reallocates, so it is safe to
+     * call every frame of a strike. See the note on `uFlash` for why the flash has
+     * its own channel instead of pushing `ambient`.
+     */
+    setLightningFlash(amount, worldX = 0, worldZ = 0, radius = 2000) {
+      uFlash.value = Math.max(0, amount);
+      // Into the march's own space: world XZ over the tile size.
+      uFlashUV.value.set(worldX / P.tile, worldZ / P.tile);
+      const rTiles = Math.max(1e-3, radius / P.tile);
+      uFlashFalloff.value = 1 / (rTiles * rTiles);
+    },
+    setLightningColor(c) { uFlashCol.value.copy(c); },
     /**
      * THE DENSITY FIELD AS TSL, for the sky-with-clouds environment probe (and anything
      * else that wants to ask "how much cloud is here" from its own shader). The same

@@ -28,8 +28,11 @@
  *   • the sun's colour, intensity and the exposure — those follow the SKY (time of day)
  *     and are already driven from real transmittance; weather has no business
  *     overriding the hour.
- *   • rain. There is a hook (`onWetness`) and nothing else, because the rain system is
- *     under active development elsewhere and this must not reach into it.
+ *   • the road and the rain. It still does not reach into them — but it no longer only
+ *     hands over one number at the end. It CARRIES `wetness` and `rain` on the same
+ *     crossfade as the sky and exposes them as live getters, and roadGame reads them
+ *     while a transition is running. The direction of the dependency is unchanged, which
+ *     is the whole reason this module can be tested and reasoned about on its own.
  *   • the volumetric tier's own params — it has a different shape model and different
  *     units. Weather drives the painted deck, which is the default tier.
  */
@@ -39,8 +42,13 @@
  * deck already had, so a preset is a statement about the fields it actually cares about
  * rather than a full snapshot that would freeze every unrelated tweak you have made.
  *
- * `wetness` is advisory only — it is handed to `onWetness` for whoever owns the road
- * surface and the rain, and never applied here.
+ * `wetness` and `rain` are advisory only — this module never applies them. It carries
+ * them, crossfades them with everything else, and exposes them; the road and the rain
+ * systems are owned by roadGame and read them.
+ *
+ * THEY ARE TWO NUMBERS AND NOT ONE, because a road does not dry when the rain stops.
+ * `overcast` is nearly half wet with no rain falling at all — it rained an hour ago —
+ * and that gap between the two is most of what makes weather read as having a past.
  */
 export const WEATHER_PRESETS = {
   clear: {
@@ -53,6 +61,7 @@ export const WEATHER_PRESETS = {
     },
     aerial: { density: 0.00022, maxAmount: 0.8 },
     wetness: 0,
+    rain: 0,
   },
   fair: {
     label: "Fair",
@@ -64,6 +73,7 @@ export const WEATHER_PRESETS = {
     },
     aerial: { density: 0.00035, maxAmount: 0.88 },
     wetness: 0,
+    rain: 0,
   },
   broken: {
     label: "Broken",
@@ -75,6 +85,7 @@ export const WEATHER_PRESETS = {
     },
     aerial: { density: 0.00048, maxAmount: 0.9 },
     wetness: 0.1,
+    rain: 0,
   },
   overcast: {
     label: "Overcast",
@@ -91,7 +102,9 @@ export const WEATHER_PRESETS = {
       shadowStrength: 0.16, rayStrength: 0.2,
     },
     aerial: { density: 0.00085, maxAmount: 0.93 },
+    // Wet with no rain falling: it rained an hour ago and the road has not dried.
     wetness: 0.45,
+    rain: 0,
   },
   storm: {
     label: "Storm",
@@ -103,6 +116,7 @@ export const WEATHER_PRESETS = {
     },
     aerial: { density: 0.0014, maxAmount: 0.95 },
     wetness: 1,
+    rain: 1,
   },
 };
 
@@ -128,6 +142,20 @@ export function createWeather({ painted, aerial, onWetness } = {}) {
   let elapsed = 0;
   let duration = 0;
 
+  /**
+   * The live, crossfaded surface state — read every frame by whoever owns the road.
+   *
+   * These are tracked HERE rather than snapshotted from the caller like the painted
+   * params are, because this module is the only thing that knows them: the road's
+   * `wetAmount` is not the same number (a player can drag it), and there is nothing at
+   * all on the other side to read `rain` back from. So weather owns the pair, and the
+   * initial values are the starting preset's.
+   */
+  let wetNow = WEATHER_PRESETS[current].wetness ?? 0;
+  let rainNow = WEATHER_PRESETS[current].rain ?? 0;
+  let fromWet = wetNow;
+  let fromRain = rainNow;
+
   function snapshot() {
     const p = {};
     const a = {};
@@ -149,6 +177,10 @@ export function createWeather({ painted, aerial, onWetness } = {}) {
     current = name;
     target = preset;
     from = snapshot();
+    // Same reason as `snapshot()`: a transition interrupted halfway has to start from
+    // where the surface actually IS, not from the preset it was nominally heading for.
+    fromWet = wetNow;
+    fromRain = rainNow;
     duration = Math.max(0, seconds);
     elapsed = 0;
     if (duration === 0) apply(1);
@@ -169,6 +201,11 @@ export function createWeather({ painted, aerial, onWetness } = {}) {
         aerial[k] = a === undefined ? v : lerp(a, v, e);
       }
     }
+    // Carried on the SAME curve as the sky. `onWetness` used to be the only word this
+    // module said about the road, and it fired once, at the end — so the sky eased over
+    // six seconds and the road went from dry to soaked in a single frame when it landed.
+    wetNow = lerp(fromWet, target.wetness ?? 0, e);
+    rainNow = lerp(fromRain, target.rain ?? 0, e);
   }
 
   /** @param {number} dt seconds */
@@ -194,6 +231,15 @@ export function createWeather({ painted, aerial, onWetness } = {}) {
     get transitioning() { return !!target; },
     /** 0..1 through the current transition, 1 when settled. */
     get progress() { return target ? Math.min(1, elapsed / Math.max(1e-6, duration)) : 1; },
+    /**
+     * Live 0..1 surface state, crossfaded with the sky. READ, do not write.
+     *
+     * `onWetness` still exists and still fires once, at the settle — it is the "the sky
+     * has finished moving, refresh the IBL" event, and that must NOT happen per frame.
+     * These are the per-frame values, and they are two different jobs.
+     */
+    get wetness() { return wetNow; },
+    get rain() { return rainNow; },
     names: WEATHER_NAMES,
     presets: WEATHER_PRESETS,
   };

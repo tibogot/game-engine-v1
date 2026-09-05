@@ -38,7 +38,10 @@ import * as THREE from "three";
 import {
   materialEmissive, uniform, positionLocal, smoothstep, oneMinus, vec3, float,
   normalLocal, normalize, transformNormalToView, mx_noise_float,
+  uv, vec2, time, mix, saturate, normalMap, positionWorld, cameraPosition, length,
+  If, Fn,
 } from "three/tsl";
+import { beadField, createRainLensUniforms } from "./modularRoadRainLens.js";
 import {
   getSharedGltfLoader,
   initGlbLoaderRenderer,
@@ -420,7 +423,157 @@ function makeTailHousingMaterial(src) {
  * directly is both the cheaper and the more faithful model. A height-and-
  * gradient version would need three extra taps to say the same thing.
  */
-function makePaintMaterial(src) {
+/* ── RAIN ON THE BODYWORK ──────────────────────────────────────────────────
+ *
+ * The car was the last dry thing in a storm. Rain fell past it, landed on the
+ * road beside it and beaded on the lens in front of it, and the paint stayed at
+ * showroom clearcoat — on the one object that fills a third of a chase frame.
+ *
+ * ── IT IS THE COAT'S NORMAL, NOT THE PAINT'S ─────────────────────────────────
+ *
+ * Water sits ON the lacquer, so it perturbs the CLEARCOAT normal and leaves the
+ * basecoat alone. That is both the physics and the convenient answer: this file
+ * already spends `normalNode` on orange peel, and the note above it explains
+ * why that one has to be built in object space. A tangent-space drop normal
+ * cannot be added to an object-space one without a frame to convert between
+ * them, and `clearcoatNormalNode` is free, is what the road already uses for
+ * exactly this, and is where the water actually is.
+ *
+ * ── ONE DROP FIELD, TWO SURFACES ─────────────────────────────────────────────
+ *
+ * `beadField` is the rain lens's own beads, imported rather than reimplemented.
+ * A second drop model would look like a different kind of weather on the glass
+ * and on the bonnet the first time either was tuned. It gets its OWN uniform
+ * bag, so the car can be denser or finer than the lens without the two
+ * disagreeing about what a raindrop is.
+ */
+export const CAR_RAIN = {
+  /**
+   * Beads per UV unit on the body, and how much of a cell one fills.
+   *
+   * Judged against the chase camera, which is where this is always seen: at 26
+   * and 0.30 — a straight guess at "finer than the lens" — the beads were under
+   * a pixel on a car ~270 px wide and the paint read as unchanged. 18 and 0.45
+   * is the point at which they show as beading rather than as noise.
+   */
+  density: 18,
+  size: 0.45,
+  /** How hard the beads push the coat normal. Still small — a bead is a
+   *  millimetre proud of a panel, not a dent in it. */
+  normalStrength: 0.8,
+  /** Coat roughness under a bead. Standing water is a mirror; the lacquer is
+   *  already smooth, so this only has to beat `clearcoatRoughness`. */
+  wetCoatRough: 0.03,
+  /** Metres at which the beads are full strength, and where they are gone.
+   *  Past the far one a drop is well under a pixel and all it can do is alias. */
+  fadeNear: 20,
+  fadeFar: 32,
+};
+
+/**
+ * The beaded-coat nodes, or null when the car is dry.
+ *
+ * Returned as a pair rather than applied, because the caller owns the material
+ * and this has no business knowing which of the two normals it is competing for.
+ */
+/**
+ * The car's own drop uniforms. Same field as the lens, its own tuning — and its
+ * own `amount`, so the game can fade beads off the paint (they dry, or the car
+ * is under cover) without touching the drops on the screen.
+ */
+export function createCarRainUniforms() {
+  return createRainLensUniforms({
+    beadDensity: CAR_RAIN.density,
+    beadSize: CAR_RAIN.size,
+    amount: 0,
+  });
+}
+
+function carRainCoat(u) {
+  // The body's own UV, so the beads are welded to the panel and do not swim
+  // when the car moves — the same requirement the orange peel note describes,
+  // met here by construction rather than by a space conversion.
+  //
+  // Handed raw: `beadField` multiplies by `u.beadDensity` itself, and scaling
+  // the coordinate here as well would square the density and leave the size
+  // uniform describing a grid that no longer exists.
+  /*
+   * DISTANCE FADE, and it is not only an optimisation. Beads this size are
+   * sub-pixel past thirty metres, and a sub-pixel normal perturbation does not
+   * read as water, it reads as sparkle crawling over the bodywork. The chase
+   * camera sits at ~8 m, so the car is inside the full-strength band whenever
+   * the player can actually see it.
+   *
+   * Computed OUTSIDE the branch below: it is two instructions, and a value that
+   * is read after a branch has to be materialised before it or it reads garbage
+   * — the rule this project already learned from the terrain's gates.
+   */
+  const dist = length(positionWorld.sub(cameraPosition));
+  const fade = oneMinus(saturate(
+    dist.sub(CAR_RAIN.fadeNear).div(CAR_RAIN.fadeFar - CAR_RAIN.fadeNear),
+  ));
+
+  /*
+   * THE WHOLE FIELD IS BEHIND AN `If`, and that is the difference between a
+   * switch and a decoration. Multiplying the beads by an `amount` of zero still
+   * pays for every hash, every cell lookup and the cap normal on every pixel of
+   * the bodywork, every frame, forever — a dry car would carry the full cost of
+   * rain it does not have. Gated, dry paint costs one scalar compare.
+   */
+  /*
+   * WRAPPED IN AN `Fn`, AND RETURNING A vec3 RATHER THAN THE PAIR IT WANTS TO.
+   *
+   * Two of this project's recorded TSL traps meet here. `If` needs an Fn stack
+   * to attach its branch to, and this is a plain JS builder called at material
+   * construction — without the wrapper it throws `Cannot read properties of
+   * null (reading 'If')`, which surfaces as the chassis silently failing to load
+   * and the car falling back to the blue primitive. And an `Fn` that returns an
+   * OBJECT collapses to a swizzle, so the coverage and the normal are packed
+   * into one vec3 and unpacked by the caller instead.
+   */
+  const gated = Fn(() => {
+    const cover = float(0).toVar();
+    const n = vec2(0, 0).toVar();
+    If(u.amount.greaterThan(0.001).and(fade.greaterThan(0.001)), () => {
+      // The body's own UV, so the beads are welded to the panel and do not swim
+      // when the car moves — the same requirement the orange peel note
+      // describes, met here by construction rather than a space conversion.
+      //
+      // Handed raw: `beadField` multiplies by `u.beadDensity` itself, and
+      // scaling the coordinate here as well would square the density and leave
+      // the size uniform describing a grid that no longer exists.
+      const drop = beadField(uv(), u, float(1), time);
+      cover.assign(drop.cover);
+      n.assign(drop.nxy);
+    });
+    return vec3(cover, n.x, n.y);
+  })();
+
+  const cover = gated.x;
+  const nxy = vec2(gated.y, gated.z);
+  const gain = cover.mul(fade).mul(u.amount);
+
+  // `nxy` is the cap's normal xy and is only meaningful INSIDE the drop, so it
+  // is gated by coverage before packing — outside a bead its magnitude is
+  // greater than one and packing it unmasked tilts the whole panel.
+  const packed = vec3(nxy.mul(cover), float(1)).normalize().mul(0.5).add(0.5);
+
+  return {
+    normal: normalMap(packed, vec2(
+      gain.mul(CAR_RAIN.normalStrength), gain.mul(CAR_RAIN.normalStrength),
+    )),
+    /** Blend the authored coat roughness toward standing water where a bead is. */
+    roughness: mix(float(CHASSIS_GLB.clearcoatRoughness), float(CAR_RAIN.wetCoatRough), gain),
+  };
+}
+
+/**
+ * @param {object} [opts]
+ * @param {object} [opts.rainUniforms] a rain-lens uniform bag. Present = the
+ *   paint is built WITH the bead layer; absent = absent from the graph, which
+ *   is what keeps a dry track paying nothing for weather it does not have.
+ */
+function makePaintMaterial(src, opts = {}) {
   const mat = new THREE.MeshPhysicalNodeMaterial({
     name: src.name || "carPaint",
     map: src.map ?? null,
@@ -442,6 +595,12 @@ function makePaintMaterial(src) {
       mx_noise_float(p.add(vec3(51.9, 63.2, 8.5))),
     ).mul(amt * 0.02);
     mat.normalNode = transformNormalToView(normalize(normalLocal.add(jitter)));
+  }
+
+  if (opts.rainUniforms) {
+    const coat = carRainCoat(opts.rainUniforms);
+    mat.clearcoatNormalNode = coat.normal;
+    mat.clearcoatRoughnessNode = coat.roughness;
   }
   return mat;
 }
@@ -498,7 +657,15 @@ function makeLightMaterial(src, { name, emissive, color, opacity, transparent = 
  *   casterCount: number,
  * }>}
  */
-export async function loadChassisModel(renderer, url = CHASSIS_GLB_URL) {
+/**
+ * @param {object} [opts]
+ * @param {object} [opts.rainUniforms] a rain-lens uniform bag (see CAR_RAIN).
+ *   Handing one in builds the paint WITH beaded water; leaving it out keeps the
+ *   drop field out of the shader entirely. It is therefore a LOAD-TIME choice —
+ *   the game reloads the chassis when the weather first turns wet, the same
+ *   trade the road makes for its own wet build.
+ */
+export async function loadChassisModel(renderer, url = CHASSIS_GLB_URL, opts = {}) {
   initGlbLoaderRenderer(renderer);
   const gltf = await getSharedGltfLoader().loadAsync(url);
 
@@ -580,7 +747,7 @@ export async function loadChassisModel(renderer, url = CHASSIS_GLB_URL) {
     }
 
     if (CHASSIS_GLB.paint && RE_PAINT.test(tag)) {
-      o.material = makePaintMaterial(o.material);
+      o.material = makePaintMaterial(o.material, { rainUniforms: opts.rainUniforms });
       continue;
     }
 
